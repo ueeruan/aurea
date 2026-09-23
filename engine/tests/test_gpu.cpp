@@ -4541,3 +4541,408 @@ AUREA_TEST(Gpu, ParticularParamsAnimateAndSurviveSaveReopen) {
     AUREA_CHECK_NEAR(q[static_cast<usize>(ParticleParam::Collision)], static_cast<f64>(ParticleCollision::Sphere), 1e-6);
     std::remove(path.c_str());
 }
+
+// -----------------------------------------------------------------------------
+// Partículas no espaço da cena (8.2, frente C): cena 3D com profundidade,
+// câmera, Null 3D, espaço mundo/local, emissão no nascimento, desfoque por
+// tempo, seek e salvar/reabrir.
+// -----------------------------------------------------------------------------
+namespace {
+
+Composition* current_comp(Engine& e) { return e.project()->timeline().composition(e.project()->timeline().current()); }
+
+/// Partícula de medida: ponto parado no centro, sem forças, quadrado opaco
+/// branco de tamanho fixo — a caixa acesa mede posição e tamanho.
+u64 measuring_particles(Engine& e, f32 size, f32 rate, f32 life) {
+    auto r = e.add_particles(0);
+    AUREA_CHECK(r.ok());
+    if (!r.ok()) return 0;
+    Layer* l = current_comp(e)->layer(LayerId::unpack(*r));
+    ParticleData& p = l->particles;
+    p.emitterType = static_cast<u32>(ParticleEmitter::Point);
+    p.emitterSize = Vec2{0, 0};
+    p.emitterOffset = Vec2{0, 0};
+    p.rate = rate; p.burst = 0; p.lifetime = life; p.lifeRandom = 0;
+    p.speed = 0; p.speedRandom = 0; p.spread = 0; p.direction = 0;
+    p.gravity = Vec3{0, 0, 0}; p.wind = Vec3{0, 0, 0}; p.drag = 0;
+    p.turbulence = 0; p.vortex = 0; p.attractor = 0; p.inheritVelocity = 0;
+    p.trailLength = 0; p.auxCount = 0; p.collision = 0;
+    p.startSize = size; p.endSize = size;
+    p.startOpacity = 1; p.endOpacity = 1;
+    p.startColor = Vec4{1, 1, 1, 1}; p.endColor = Vec4{1, 1, 1, 1};
+    p.particleType = static_cast<u32>(ParticleShape::Square);
+    p.softness = 0; p.rotation = 0; p.rotationRandom = 0; p.spin = 0;
+    p.sizeRandom = 0; p.opacityRandom = 0; p.colorRandom = 0;
+    p.blendMode = 0;
+    p.maxParticles = 20000;
+    return *r;
+}
+
+/// Câmera ativa na posição (px do mundo), olhando para +Z.
+u64 add_test_camera(Engine& e, Vec3 pos, f32 fovDeg) {
+    Composition* comp = current_comp(e);
+    const LayerId cid = comp->add_layer(LayerKind::Camera, "camera de teste");
+    Layer* c = comp->layer(cid);
+    c->start = FrameIndex{0};
+    c->end = comp->duration();
+    c->transform.anchor = Vec3{0, 0, 0};
+    c->transform.position = pos;
+    c->camera.fov = fovDeg;
+    c->camera.active = true;
+    return cid.pack();
+}
+
+/// A câmera padrão de uma composição de 180 px de altura: z = −216, FOV 45,24°.
+constexpr f32 kDefaultFov180 = 45.2397f;
+
+f32 box_cx(const Box8& b) { return 0.5f * static_cast<f32>(b.x0 + b.x1); }
+
+u32 count_where(const Image8& img, u32 x0, u32 y0, u32 x1, u32 y1, bool (*pred)(const u8*)) {
+    u32 n = 0;
+    for (u32 y = y0; y <= y1 && y < img.height; ++y)
+        for (u32 x = x0; x <= x1 && x < img.width; ++x) n += pred(img.at(x, y)) ? 1u : 0u;
+    return n;
+}
+bool is_white(const u8* p) { return p[0] > 200 && p[1] > 200 && p[2] > 200; }
+bool is_lit(const u8* p) { return p[0] > 8 || p[1] > 8 || p[2] > 8; }
+
+void particle_key(Engine& e, u64 pid, ParticleParam p, i64 f, f32 v) {
+    Command c;
+    c.type = CommandType::KeyframeInsert;
+    c.keyframe.track.layer = LayerId::unpack(pid);
+    c.keyframe.track.property = TrackProperty::ParticleParam;
+    c.keyframe.track.effectIndex = kInvalidIndex;
+    c.keyframe.track.effectParamIndex = static_cast<u32>(p);
+    c.keyframe.time = FrameIndex{f};
+    c.keyframe.value = v;
+    AUREA_CHECK(e.apply_command(c).ok());
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, Particles3DAreHiddenBehindPlanesAndModelsAndShownInFront) {
+    AUREA_REQUIRE_GPU();
+    // Partículas 3D brancas cobrindo o quadro, com um oclusor opaco ACIMA na
+    // pilha: atrás dele em profundidade = escondidas; na frente = visíveis.
+    auto run = [&](f32 partZ, bool model) {
+        Scene3DRig rig(320, 180);
+        const u64 pid = measuring_particles(rig.e, 10.0f, 4000.0f, 5.0f);
+        if (model) {
+            ModelImport mi;
+            mi.path = write_triangle_gltf(true, 1.0f, 0.0f, 0.0f);
+            AUREA_CHECK(rig.e.import_model(mi).ok());
+        } else {
+            auto s = rig.e.add_shape(0);
+            AUREA_CHECK(s.ok());
+            if (!s.ok()) return 0u;
+            Layer* sh = current_comp(rig.e)->layer(LayerId::unpack(*s));
+            sh->shape.shapeType = 0;
+            sh->shape.bounds = Rect{0, 0, 120, 120};
+            sh->shape.cornerRadius = 0;
+            sh->shape.strokeWidth = 0;
+            sh->shape.filled = true;
+            sh->shape.fillColor = Vec4{0, 0.3f, 1, 1};
+            sh->transform.anchor = Vec3{60, 60, 0};
+            sh->transform.position = Vec3{160, 90, 0};
+            sh->transform.scale = Vec3{1, 1, 1};
+            sh->threeD = true;
+        }
+        Layer* pl = current_comp(rig.e)->layer(LayerId::unpack(pid));
+        pl->threeD = true;
+        pl->particles.emitterType = static_cast<u32>(ParticleEmitter::Box);
+        pl->particles.emitterSize = Vec2{320, 180};
+        pl->transform.position.z = partZ;
+        seek_frame(rig.e, 30);
+        const Image8 img = rig.capture(320);
+        return count_where(img, 157, 87, 163, 93, is_white);   // 49 px no meio do oclusor
+    };
+    const u32 behindPlane = run(100.0f, false), frontPlane = run(-100.0f, false);
+    const u32 behindModel = run(100.0f, true), frontModel = run(-100.0f, true);
+    std::printf("    particulas 3D (px brancos no centro, de 49): plano atras %u / frente %u; modelo atras %u / frente %u\n",
+                behindPlane, frontPlane, behindModel, frontModel);
+    AUREA_CHECK_EQ(behindPlane, 0u);
+    AUREA_CHECK(frontPlane > 30u);
+    AUREA_CHECK_EQ(behindModel, 0u);
+    AUREA_CHECK(frontModel > 30u);
+}
+
+AUREA_TEST(Gpu, Particles3DFollowTheCamera) {
+    AUREA_REQUIRE_GPU();
+    // Um bloco de partículas de 20 px no centro, visto pela câmera: longe =
+    // menor, FOV fechado = maior, girar = sai do centro, câmera animada = muda
+    // entre quadros.
+    Scene3DRig rig(320, 180);
+    const u64 pid = measuring_particles(rig.e, 20.0f, 30.0f, 5.0f);
+    const u64 cid = add_test_camera(rig.e, Vec3{160, 90, -216}, kDefaultFov180);
+    current_comp(rig.e)->layer(LayerId::unpack(pid))->threeD = true;
+    auto cam = [&]() { return current_comp(rig.e)->layer(LayerId::unpack(cid)); };
+    seek_frame(rig.e, 20);
+    const Box8 base = lit_box(rig.capture(320));
+    cam()->transform.position.z = -432.0f;
+    const Box8 far = lit_box(rig.capture(320));
+    cam()->transform.position.z = -216.0f;
+    cam()->camera.fov = 2.0f * std::atan(0.5f * std::tan(kDefaultFov180 * 0.5f * kDeg2Rad)) / kDeg2Rad;   // zoom 2x
+    const Box8 narrow = lit_box(rig.capture(320));
+    cam()->camera.fov = kDefaultFov180;
+    cam()->transform.rotation = Vec3{0, 15, 0};
+    const Box8 turned = lit_box(rig.capture(320));
+    cam()->transform.rotation = Vec3{0, 0, 0};
+    Track& pz = cam()->tracks.get_or_create(TrackProperty::PositionZ);
+    pz.set(FrameIndex{0}, -216.0f);
+    pz.set(FrameIndex{60}, -432.0f);
+    seek_frame(rig.e, 0);
+    const Box8 a0 = lit_box(rig.capture(320));
+    seek_frame(rig.e, 60);
+    const Box8 a60 = lit_box(rig.capture(320));
+    std::printf("    camera: base %ux%u em x %.1f; longe %u; zoom 2x %u; girada Y15 x %.1f; animada q0 %u -> q60 %u\n",
+                base.w(), base.h(), box_cx(base), far.w(), narrow.w(), box_cx(turned), a0.w(), a60.w());
+    AUREA_CHECK(base.w() >= 19 && base.w() <= 22);
+    AUREA_CHECK(std::fabs(box_cx(base) - 160.0f) < 2.0f);
+    AUREA_CHECK(far.w() >= 9 && far.w() <= 12);
+    AUREA_CHECK(narrow.w() >= 39 && narrow.w() <= 43);
+    AUREA_CHECK(std::fabs(box_cx(turned) - 160.0f) > 30.0f);
+    AUREA_CHECK(a0.w() >= 19 && a0.w() <= 22);
+    AUREA_CHECK(a60.w() >= 9 && a60.w() <= 12);
+}
+
+AUREA_TEST(Gpu, ParticlesChildOfAnimated3DNullFollowIt) {
+    AUREA_REQUIRE_GPU();
+    // Filha de um Null 3D que anda em X e se afasta em Z: o emissor vai junto
+    // (posição na tela e tamanho pela perspectiva).
+    Scene3DRig rig(320, 180);
+    const u64 pid = measuring_particles(rig.e, 20.0f, 30.0f, 5.0f);
+    auto n = rig.e.add_null(true);
+    AUREA_CHECK(n.ok());
+    if (!n.ok()) return;
+    set_parent(rig.e, pid, *n);
+    Layer* nl = current_comp(rig.e)->layer(LayerId::unpack(*n));
+    Track& px = nl->tracks.get_or_create(TrackProperty::PositionX);
+    Track& pz = nl->tracks.get_or_create(TrackProperty::PositionZ);
+    px.set(FrameIndex{0}, 100.0f);
+    px.set(FrameIndex{30}, 220.0f);
+    pz.set(FrameIndex{0}, 0.0f);
+    pz.set(FrameIndex{30}, 216.0f);
+    seek_frame(rig.e, 0);
+    const Box8 b0 = lit_box(rig.capture(320));
+    seek_frame(rig.e, 30);
+    const Box8 b30 = lit_box(rig.capture(320));
+    std::printf("    filha do Null 3D: q0 x %.1f larg %u; q30 x %.1f larg %u\n", box_cx(b0), b0.w(), box_cx(b30), b30.w());
+    // q0: x 100, 20 px. q30: x 220 a 2x a distância = 160 + 60/2 = 190, 10 px.
+    AUREA_CHECK(std::fabs(box_cx(b0) - 100.0f) < 3.0f);
+    AUREA_CHECK(b0.w() >= 19 && b0.w() <= 22);
+    AUREA_CHECK(std::fabs(box_cx(b30) - 190.0f) < 3.0f);
+    AUREA_CHECK(b30.w() >= 9 && b30.w() <= 12);
+}
+
+AUREA_TEST(Gpu, ParticlesWorldSpaceStayWhereBornLocalSpaceIsDragged) {
+    AUREA_REQUIRE_GPU();
+    // A camada anda de x 60 a 260 em 2 s. Local: todas as vivas andam com
+    // ela (um bloco só). Mundo: cada uma fica onde nasceu (um rastro).
+    auto run = [&](bool world, bool threeD) {
+        Scene3DRig rig(320, 180);
+        const u64 pid = measuring_particles(rig.e, 6.0f, 30.0f, 3.0f);
+        Layer* l = current_comp(rig.e)->layer(LayerId::unpack(pid));
+        l->threeD = threeD;
+        l->particles.emitterSpace = world ? 1u : 0u;
+        Track& px = l->tracks.get_or_create(TrackProperty::PositionX);
+        px.set(FrameIndex{0}, 60.0f);
+        px.set(FrameIndex{60}, 260.0f);
+        seek_frame(rig.e, 60);
+        return lit_box(rig.capture(320));
+    };
+    const Box8 local2 = run(false, false), world2 = run(true, false);
+    const Box8 local3 = run(false, true), world3 = run(true, true);
+    std::printf("    espaco local/mundo: 2D %u / %u px (x %.1f / %.1f); 3D %u / %u px\n", local2.w(), world2.w(),
+                box_cx(local2), box_cx(world2), local3.w(), world3.w());
+    AUREA_CHECK(local2.w() <= 8 && std::fabs(box_cx(local2) - 260.0f) < 2.0f);
+    AUREA_CHECK(world2.w() >= 190 && world2.x1 >= 258 && world2.x0 <= 63);
+    AUREA_CHECK(local3.w() <= 8);
+    AUREA_CHECK(world3.w() >= 190);
+}
+
+AUREA_TEST(Gpu, ParticlesAnimatedEmissionKeepsBornParticles) {
+    AUREA_REQUIRE_GPU();
+    // Jato para a direita a 60 px/s. Em 1 s a direção vira para a esquerda
+    // (ou a taxa vai a zero): quem nasceu antes continua EXATAMENTE onde
+    // estaria sem o keyframe; só quem nasce depois muda.
+    enum Mode { Still, Direction, Rate };
+    auto run = [&](Mode mode) {
+        Scene3DRig rig(320, 180);
+        const u64 pid = measuring_particles(rig.e, 6.0f, 20.0f, 3.0f);
+        current_comp(rig.e)->layer(LayerId::unpack(pid))->particles.speed = 60.0f;
+        if (mode == Direction) {
+            particle_key(rig.e, pid, ParticleParam::Direction, 30, 0.0f);
+            particle_key(rig.e, pid, ParticleParam::Direction, 31, 180.0f);
+        }
+        if (mode == Rate) {
+            particle_key(rig.e, pid, ParticleParam::Rate, 30, 20.0f);
+            particle_key(rig.e, pid, ParticleParam::Rate, 31, 0.0f);
+        }
+        seek_frame(rig.e, 60);
+        return rig.capture(320);
+    };
+    const Image8 still = run(Still), dir = run(Direction), rate = run(Rate);
+    // Nascidas antes de 1 s estão em x 220..280 (as de depois, em 160..220).
+    auto regionDiff = [&](const Image8& a, const Image8& b) {
+        u32 w = 0;
+        for (u32 y = 80; y <= 100; ++y)
+            for (u32 x = 226; x <= 274; ++x)
+                for (int c = 0; c < 3; ++c) w = std::max<u32>(w, static_cast<u32>(std::abs(a.at(x, y)[c] - b.at(x, y)[c])));
+        return w;
+    };
+    const u32 dDir = regionDiff(still, dir), dRate = regionDiff(still, rate);
+    const u32 oldLit = count_where(still, 226, 80, 274, 100, is_lit);
+    const u32 leftDir = count_where(dir, 100, 80, 154, 100, is_lit), leftStill = count_where(still, 100, 80, 154, 100, is_lit);
+    const u32 newRate = count_where(rate, 166, 80, 214, 100, is_lit), newStill = count_where(still, 166, 80, 214, 100, is_lit);
+    std::printf("    emissao animada: nascidas antes (%u px acesos) dif direcao %u, taxa %u; esquerda %u (parado %u); "
+                "novas com taxa 0: %u (parado %u)\n", oldLit, dDir, dRate, leftDir, leftStill, newRate, newStill);
+    AUREA_CHECK(oldLit > 50u);
+    AUREA_CHECK_EQ(dDir, 0u);
+    AUREA_CHECK_EQ(dRate, 0u);
+    AUREA_CHECK(leftDir > 50u && leftStill == 0u);
+    AUREA_CHECK(newRate == 0u && newStill > 50u);
+}
+
+AUREA_TEST(Gpu, ParticlesMotionBlurSpreadsAlongMotionAndExportMatchesFullPreview) {
+    AUREA_REQUIRE_GPU();
+    // Uma partícula a 600 px/s para a direita. Com o desfoque (180°), ela
+    // vira um traço de ~10 px NA DIREÇÃO do movimento; a altura não muda.
+    auto run = [&](bool threeD, bool blur) {
+        Scene3DRig rig(320, 180);
+        const u64 pid = measuring_particles(rig.e, 4.0f, 0.1f, 5.0f);
+        Layer* l = current_comp(rig.e)->layer(LayerId::unpack(pid));
+        l->threeD = threeD;
+        l->particles.speed = 600.0f;
+        l->particles.emitterOffset = Vec2{-140.0f, 0.0f};
+        if (blur) AUREA_CHECK(rig.e.set_motion_blur(pid, true));
+        seek_frame(rig.e, 10);
+        return lit_box(rig.capture(320));
+    };
+    const Box8 s2 = run(false, false), b2 = run(false, true), s3 = run(true, false), b3 = run(true, true);
+    std::printf("    desfoque: 2D %ux%u em x %.1f -> %ux%u; 3D %ux%u -> %ux%u\n", s2.w(), s2.h(), box_cx(s2), b2.w(), b2.h(),
+                s3.w(), s3.h(), b3.w(), b3.h());
+    AUREA_CHECK(std::fabs(box_cx(s2) - 220.0f) < 2.0f);
+    AUREA_CHECK(b2.w() >= s2.w() + 6 && b2.w() <= s2.w() + 12);
+    AUREA_CHECK(b2.h() + 1 >= s2.h() && b2.h() <= s2.h() + 1);
+    AUREA_CHECK(b3.w() >= s3.w() + 6 && b3.w() <= s3.w() + 12);
+    AUREA_CHECK(b3.h() + 1 >= s3.h() && b3.h() <= s3.h() + 1);
+
+    // Export (qualidade final) = prévia com as mesmas amostras e qualidade cheia.
+    auto frames = [&](bool threeD, f32& worst, f32& lit) {
+        Scene sc(320, 180);
+        const LayerId id = sc.comp->add_layer(LayerKind::ParticleSystem, "particulas");
+        Layer* l = sc.comp->layer(id);
+        l->transform.anchor = Vec3{160, 90, 0};
+        l->transform.position = Vec3{160, 90, 0};
+        l->threeD = threeD;
+        l->motionBlur = true;
+        ParticleData& p = l->particles;
+        p = ParticleData{};
+        p.emitterType = static_cast<u32>(ParticleEmitter::Point);
+        p.rate = 30; p.lifetime = 2; p.lifeRandom = 0; p.speed = 300; p.spread = 40; p.direction = 0;
+        p.gravity = Vec3{0, -200, 0}; p.trailLength = 0;
+        p.emitterOffset = Vec2{-100, 0};
+        p.particleType = static_cast<u32>(ParticleShape::Circle);
+        MotionBlurSettings& mb = sc.comp->motion_blur();
+        mb.enabled = true;
+        mb.samples = 16;
+        mb.previewSamples = 16;
+        const FloatImage prev = sc.render(FrameIndex{20}, 1, false);
+        const FloatImage fin = sc.render(FrameIndex{20}, 1, true);
+        worst = 0.0f;
+        for (usize i = 0; i < prev.px.size() && i < fin.px.size(); ++i) worst = std::max(worst, std::fabs(prev.px[i] - fin.px[i]));
+        lit = 0.0f;
+        for (usize i = 0; i < fin.px.size(); i += 4) lit += (fin.px[i] + fin.px[i + 1] + fin.px[i + 2]) > 0.05f ? 1.0f : 0.0f;
+    };
+    f32 w2 = 0, w3 = 0, lit2 = 0, lit3 = 0;
+    frames(false, w2, lit2);
+    frames(true, w3, lit3);
+    std::printf("    export x previa cheia: 2D dif %.6f (%.0f px), 3D dif %.6f (%.0f px)\n", w2, lit2, w3, lit3);
+    AUREA_CHECK(lit2 > 100.0f && lit3 > 100.0f);
+    AUREA_CHECK(w2 <= 1e-3f);
+    AUREA_CHECK(w3 <= 1e-3f);
+}
+
+namespace {
+/// Cena com tudo ligado: câmera animada, Null 3D animado com as partículas
+/// filhas (3D, espaço mundo, taxa e velocidade animadas, desfoque), um modelo
+/// e um plano.
+void build_everything_on(Engine& e) {
+    const u64 pid = measuring_particles(e, 6.0f, 60.0f, 2.0f);
+    ModelImport mi;
+    mi.path = write_triangle_gltf(true, 1.0f, 0.0f, 0.0f);
+    AUREA_CHECK(e.import_model(mi).ok());
+    auto s = e.add_shape(0);
+    auto n = e.add_null(true);
+    AUREA_CHECK(s.ok() && n.ok());
+    if (!s.ok() || !n.ok()) return;
+    const u64 cid = add_test_camera(e, Vec3{160, 90, -216}, kDefaultFov180);
+    set_parent(e, pid, *n);
+    Composition* comp = current_comp(e);
+    Layer* sh = comp->layer(LayerId::unpack(*s));
+    sh->shape.fillColor = Vec4{0, 0.3f, 1, 1};
+    sh->transform.position = Vec3{230, 60, 40};
+    sh->threeD = true;
+    Layer* nl = comp->layer(LayerId::unpack(*n));
+    Track& nx = nl->tracks.get_or_create(TrackProperty::PositionX);
+    nx.set(FrameIndex{0}, 90.0f);
+    nx.set(FrameIndex{120}, 230.0f);
+    Track& nry = nl->tracks.get_or_create(TrackProperty::RotationY);
+    nry.set(FrameIndex{0}, 0.0f);
+    nry.set(FrameIndex{120}, 40.0f);
+    Layer* cl = comp->layer(LayerId::unpack(cid));
+    Track& cz = cl->tracks.get_or_create(TrackProperty::PositionZ);
+    cz.set(FrameIndex{0}, -216.0f);
+    cz.set(FrameIndex{150}, -300.0f);
+    Layer* pl = comp->layer(LayerId::unpack(pid));
+    pl->threeD = true;
+    pl->particles.emitterSpace = 1;
+    pl->particles.speed = 120.0f;
+    pl->particles.spread = 90.0f;
+    pl->particles.direction = -90.0f;
+    pl->particles.gravity = Vec3{0, -200, 50};
+    pl->particles.emitterType = static_cast<u32>(ParticleEmitter::Sphere);
+    pl->particles.emitterRadius = 20.0f;
+    particle_key(e, pid, ParticleParam::Rate, 0, 20.0f);
+    particle_key(e, pid, ParticleParam::Rate, 90, 120.0f);
+    particle_key(e, pid, ParticleParam::Speed, 0, 60.0f);
+    particle_key(e, pid, ParticleParam::Speed, 90, 220.0f);
+    AUREA_CHECK(e.set_motion_blur(pid, true));
+}
+} // namespace
+
+AUREA_TEST(Gpu, ParticlesSceneSeekRoundTripIsExactWithEverythingOn) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    build_everything_on(rig.e);
+    seek_frame(rig.e, 40);
+    const Image8 a = rig.capture(320);
+    seek_frame(rig.e, 150);
+    (void)rig.capture(320);
+    seek_frame(rig.e, 3);
+    (void)rig.capture(320);
+    seek_frame(rig.e, 40);
+    const Image8 b = rig.capture(320);
+    const u32 worst = max_diff(a, b);
+    std::printf("    cena com tudo ligado: cobertura %.4f; ida e volta diferenca %u\n", coverage(a), worst);
+    AUREA_CHECK(coverage(a) > 0.01f);
+    AUREA_CHECK_EQ(worst, 0u);
+}
+
+AUREA_TEST(Gpu, ParticlesSceneSurvivesSaveReopen) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    build_everything_on(rig.e);
+    seek_frame(rig.e, 70);
+    const Image8 before = rig.capture(320);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_particulas_cena.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seek_frame(rig.e, 70);
+    const Image8 after = rig.capture(320);
+    const u32 worst = max_diff(before, after);
+    std::printf("    cena de particulas salva e reaberta: diferenca %u (cobertura %.4f)\n", worst, coverage(before));
+    AUREA_CHECK(coverage(before) > 0.01f);
+    AUREA_CHECK_EQ(worst, 0u);
+    std::remove(path.c_str());
+}

@@ -314,11 +314,13 @@ vec3 shape_offset(float type, inout uint s) {
 }
 
 /// Onde a partícula nasce (px da camada; z = profundidade). Camada, texto,
-/// caminho e malha leem os pontos da fonte; as formas, a conta de cima.
-vec3 emit_start(float type, inout uint s) {
+/// caminho e malha leem os pontos da fonte (já absolutos); as formas, a conta
+/// de cima em volta de `origin` — o centro do emissor NO NASCIMENTO (ps_emit),
+/// somado uma vez só.
+vec3 emit_start(float type, vec2 origin, inout uint s) {
     vec3 q;
     if (type > 5.5 && emit_from_source(s, q)) return q;
-    return vec3(p.origin.xy, 0.0) + shape_offset(type, s);
+    return vec3(origin, 0.0) + shape_offset(type, s);
 }
 
 /// O que é FIXO numa partícula (sai do nascimento) — a trajetória inteira é
@@ -580,8 +582,8 @@ void main() {
         const float spd0 = em.speed * (1.0 + (rnd(s) - 0.5) * 2.0 * p.emission.y);
         // O emissor estendido manda sobre a forma simples: e dele que saem os
         // pontos de nascimento (imagem, texto, forma, mascara, modelo).
-        const vec3 st = emit_start(p.emitShape.x, s);
-        const vec2 start = em.origin + st.xy;
+        const vec3 st = emit_start(p.emitShape.x, em.origin, s);
+        const vec2 start = st.xy;
         const vec2 cone0 = ps_cone(em.spread, primaryIdx, k);
         const vec2 v0 = spd0 * cone0.x * vec2(cos(ang0), sin(ang0)) + em.motion * p.emission.z;
         const vec2 acc = vec2(p.force.x, p.force.y) + p.physics.yz;
@@ -613,10 +615,10 @@ void main() {
     // ---- Nascimento ----------------------------------------------------------
     const float ang = em.dir + (rnd(s) - 0.5) * em.spread;
     const float spd = em.speed * (1.0 + (rnd(s) - 0.5) * 2.0 * p.emission.y);
-    const vec3 st = emit_start(p.emitShape.x, s);
+    const vec3 st = emit_start(p.emitShape.x, em.origin, s);
     const vec2 cone = ps_cone(em.spread, primaryIdx, k);
     Particle P;
-    P.start = em.origin + st.xy;
+    P.start = st.xy;
     P.z = st.z;
     P.ctr = em.origin;
     P.v0 = spd * cone.x * vec2(cos(ang), sin(ang)) + em.motion * p.emission.z;

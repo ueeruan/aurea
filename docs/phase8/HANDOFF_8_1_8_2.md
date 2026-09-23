@@ -31,3 +31,11 @@ Master em `8da7427`: keyframes nos parâmetros do Particular e contrato v21
 
 - **8.1 FECHADA (1511a94): só pt-BR + inglês.** Ajustes > Idioma = Sistema / Português / English; APK só com `pt`/`en` (`androidResources.localeFilters`); sistema em outro idioma abre em inglês e LTR. Catálogos es/ru/hi/id/ar ficam no repositório para uma fase futura — não editar agora. Restam 328 literais visíveis em tabelas de rótulo (TransformPanel, VectorPanel, TextAnimSection, PresetsPanel, DeviceReport…): próximo passo quando voltar a idiomas.
 - **8.2:** B e C mergeados (1dd76a7, 05b2ab6). Ligação em andamento em duas worktrees novas: B2 (Renderer ← `particles::build_frame`, textura/malha, API/JNI/painel, testes, benchmark) e C2 (`ParticleScene.cpp`: histórico, mundo/local, cena 3D com depth, motion blur, testes). Merge: B2 → C2, resolvendo o ponto de desenho uma vez; suíte inteira só no fim.
+
+## FECHAMENTO 8.2 (2026-09-23)
+
+Master = `14c6db8` (merge de B2 sobre C2). Suíte inteira: **592 testes, 0 falhas**; `assembleDebug` x86_64 ok; APK debug instalado e testado no emulador em projeto novo (Aurea Particular criado, painel lê os 70 parâmetros, anima no play, camada 3D em perspectiva, 0 crash).
+
+Entregue: emissores Camada/Texto/Caminho/Malha (100% dos pixels dentro da fonte), partícula de Textura e de Malha instanciada, gradiente de cor e curvas ao longo da vida, aleatórios, colisão Esfera/Caixa (dentro do volume 12,5% → 0%), aux por probabilidade, rastro com largura/opacidade, espaço Mundo/Local com histórico de nascimento, cena 3D com depth (atrás 0/49 px, na frente 49/49), câmera, Null 3D, motion blur por subamostra de tempo (export = prévia cheia, dif 0), keyframes, presets, salvar/reabrir (dif 0). Benchmark host RTX 3050: 1M partículas = 4,08 ms GPU (seção no PHASE_8_REPORT.md).
+
+Limitações declaradas: partícula de malha com luz simplificada (não PBR da cena); blur em modo normal soma subamostras; taxa animada usa o máximo dos keyframes da camada; editor de curva/gradiente é por pontos simples; Metal/iOS não testado (sem Mac).

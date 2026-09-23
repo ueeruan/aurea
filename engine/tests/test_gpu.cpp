@@ -5447,27 +5447,56 @@ AUREA_TEST(Gpu, ParticularBenchmark) {
     AUREA_REQUIRE_GPU();
     const char* on = std::getenv("AUREA_BENCH");
     if (!on || on[0] != '1') { std::printf("(AUREA_BENCH=1 para rodar) "); return; }
+    // Três montagens com a MESMA contagem viva:
+    //   base   — caixa 1800x1000, disco 4 px, sem dados extras (o shader não lê o buffer);
+    //   extras — a mesma caixa + gradiente, curva de opacidade, curva de tamanho
+    //            PLANA (1) e variação de cor: mesmo preenchimento, custo do buffer;
+    //   texto  — as mesmas curvas emitindo dos pixels de um texto (oculto).
+    // GPU = timestamps do quadro inteiro (passe das partículas + composição +
+    // saída), mediana de 7 depois de 1 de aquecimento.
     const u32 counts[6] = {10000, 50000, 100000, 250000, 500000, 1000000};
-    std::printf("\n    1920x1080, 1 camada, disco 4 px aditivo; GPU = timestamps do quadro (mediana de 7), host\n");
-    std::printf("    %-9s %-12s %-12s %-14s %-14s %-12s\n", "N", "GPU ms base", "GPU ms extras", "GPU MB base", "GPU MB extras",
-                "extras CPU KB");
+    auto measure = [](Engine& e, u32& slots, f64& mb) {
+        std::vector<f32> samples;
+        for (int i = 0; i < 8; ++i) {
+            std::vector<u8> rgba;
+            u32 w = 0, h = 0;
+            AUREA_CHECK(e.capture_frame_rgba(1920, rgba, w, h).ok());
+            const Engine::OffscreenMeasure m = e.last_offscreen_measure();
+            if (i > 0 && m.gpuMeasured) samples.push_back(m.gpuMs);
+            slots = m.particles;
+            mb = static_cast<f64>(m.gpuUsedBytes) / (1024.0 * 1024.0);
+        }
+        std::sort(samples.begin(), samples.end());
+        return samples.empty() ? -1.0f : samples[samples.size() / 2];
+    };
+    {
+        Scene3DRig rig(1920, 1080);
+        rig.e.set_offscreen_timers(true);
+        u32 slots = 0;
+        f64 mb = 0;
+        const f32 ms = measure(rig.e, slots, mb);
+        std::printf("\n    quadro 1920x1080 sem particulas: GPU %.3f ms, alocador da GPU %.1f MB\n", ms, mb);
+    }
+    std::printf("    %-8s %-9s %-9s %-9s %-9s %-10s %-11s %-11s\n", "N", "slots", "base ms", "extras ms", "texto ms", "GPU MB",
+                "extras GPU KB", "extras CPU KB");
     for (u32 n : counts) {
-        f32 ms[2]{};
-        f64 mb[2]{};
-        u64 cpuKb = 0;
-        for (int extras = 0; extras < 2; ++extras) {
+        f32 ms[3]{};
+        u32 slots = 0;
+        f64 mb = 0;
+        u64 gpuKb = 0, cpuKb = 0;
+        for (int cfg = 0; cfg < 3; ++cfg) {
             Scene3DRig rig(1920, 1080);
             rig.e.set_offscreen_timers(true);
             u64 text = 0;
-            if (extras) {
+            if (cfg == 2) {
                 if (auto t = rig.e.add_text("AUREA"); t.ok()) text = *t;
-                else if (auto s = rig.e.add_shape(4); s.ok()) text = *s;
+                else if (auto sh = rig.e.add_shape(4); sh.ok()) text = *sh;
                 if (text) particular_layer(rig.e, text)->visible = false;
             }
             particular_seek(rig.e, 0);
             auto id = rig.e.add_particles(2);
             if (!id.ok()) { AUREA_CHECK(false); return; }
-            // N vivas: vida 2 s, taxa N/2 por segundo; medido depois de 2 s.
+            // N vivas: vida 2 s, taxa N/2 por segundo; medido em 2,5 s.
             particular_set(rig.e, *id, ParticleParam::MaxParticles, static_cast<f32>(n));
             particular_set(rig.e, *id, ParticleParam::Lifetime, 2.0f);
             particular_set(rig.e, *id, ParticleParam::LifeRandom, 0.0f);
@@ -5478,31 +5507,29 @@ AUREA_TEST(Gpu, ParticularBenchmark) {
             particular_set(rig.e, *id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Box));
             particular_set(rig.e, *id, ParticleParam::EmitterWidth, 1800.0f);
             particular_set(rig.e, *id, ParticleParam::EmitterHeight, 1000.0f);
-            if (extras) {
-                // Fonte de texto + gradiente + curvas + aleatórios (o buffer extra inteiro).
-                particular_set(rig.e, *id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Layer));
-                if (text) (void)rig.e.set_particle_source(*id, text);
+            if (cfg > 0) {
                 const f32 stops[8] = {0, 0.3f, 0.6f, 1, 1, 1, 0.5f, 0.1f};
-                const f32 size[6] = {0, 0.2f, 0.3f, 1.2f, 1, 0};
+                const f32 size[4] = {0, 1, 1, 1};
+                const f32 op[6] = {0, 0.2f, 0.3f, 1, 1, 0.1f};
                 (void)rig.e.set_particle_life_curves(*id, 0, stops, 2);
-                (void)rig.e.set_particle_life_curves(*id, 1, size, 3);
-                particular_set(rig.e, *id, ParticleParam::SizeRandom, 0.3f);
+                (void)rig.e.set_particle_life_curves(*id, 1, size, 2);
+                (void)rig.e.set_particle_life_curves(*id, 2, op, 3);
                 particular_set(rig.e, *id, ParticleParam::ColorRandom, 0.3f);
             }
-            particular_seek(rig.e, 75);
-            std::vector<f32> samples;
-            for (int i = 0; i < 8; ++i) {
-                (void)rig.capture(1920);
-                const Engine::OffscreenMeasure m = rig.e.last_offscreen_measure();
-                if (i > 0 && m.gpuMeasured) samples.push_back(m.gpuMs);   // o 1º aquece pipelines/caches
-                mb[extras] = static_cast<f64>(m.gpuUsedBytes) / (1024.0 * 1024.0);
+            if (cfg == 2) {
+                particular_set(rig.e, *id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Layer));
+                if (text) (void)rig.e.set_particle_source(*id, text);
             }
-            std::sort(samples.begin(), samples.end());
-            ms[extras] = samples.empty() ? -1.0f : samples[samples.size() / 2];
-            if (extras) cpuKb = rig.e.renderer().heavy_stats().particleExtraCpuBytes / 1024;
-            if (samples.empty()) std::printf("    (sem timestamps de GPU neste backend)\n");
+            particular_seek(rig.e, 75);
+            u32 sl = 0;
+            ms[cfg] = measure(rig.e, sl, mb);
+            if (cfg == 0) slots = sl;
+            if (cfg == 2) {
+                gpuKb = rig.e.renderer().heavy_stats().particleExtraGpuBytes / 1024;
+                cpuKb = rig.e.renderer().heavy_stats().particleExtraCpuBytes / 1024;
+            }
         }
-        std::printf("    %-9u %-12.3f %-12.3f %-14.1f %-14.1f %-12llu\n", n, ms[0], ms[1], mb[0], mb[1],
-                    static_cast<unsigned long long>(cpuKb));
+        std::printf("    %-8u %-9u %-9.3f %-9.3f %-9.3f %-10.1f %-11llu %-11llu\n", n, slots, ms[0], ms[1], ms[2], mb,
+                    static_cast<unsigned long long>(gpuKb), static_cast<unsigned long long>(cpuKb));
     }
 }

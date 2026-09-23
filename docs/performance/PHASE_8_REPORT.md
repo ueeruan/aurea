@@ -1305,3 +1305,53 @@ Restos conhecidos (não resolvidos nesta fase):
   AUTO. Teste `PausedReducedPreviewRefinesOnce` (AUTO em 1/8 → 1 refino, nenhum depois).
 - **Prévia do Brilho profundo** estourava 83% do card na foto clara (valores de
   demonstração da 7.3 feitos para a cartela escura) → 28%.
+
+## 8.2 — Aurea Particular: benchmark
+
+**Máquina: host de desenvolvimento, NVIDIA GeForce RTX 3050 (driver 616.92),
+Windows 11, backend Vulkan. NÃO é celular** — os números servem para comparar
+montagens entre si e acompanhar regressão; a medida em aparelho fica para a
+rodada no emulador/aparelho.
+
+Como medir: `AUREA_BENCH=1 build/host/tests/Release/aurea_tests.exe ParticularBenchmark`
+(opt-in; sem a variável o teste só avisa). Composição 1920×1080, uma camada de
+partículas, disco de 4 px, mistura aditiva, `N` partículas VIVAS (vida 2 s,
+taxa N/2 por segundo, medido em 2,5 s). GPU = timestamps do motor
+(`set_offscreen_timers` → `last_offscreen_measure().gpuMs`), quadro inteiro
+(passe das partículas + composição + saída), mediana de 7 capturas depois de 1
+de aquecimento. "slots" = instâncias desenhadas (`OffscreenMeasure::particles`).
+
+Três montagens com a mesma contagem viva:
+
+- **base** — caixa 1800×1000, sem dados extras (o shader nem lê o buffer);
+- **extras** — a mesma caixa + gradiente de cor, curva de opacidade, curva de
+  tamanho plana (mesmo preenchimento) e variação de cor: o custo de ler o
+  storage buffer (binding 15) por vértice;
+- **texto** — as mesmas curvas emitindo dos pixels de um texto oculto (pontos
+  de emissão no buffer). Partículas concentradas no texto se sobrepõem mais e
+  o quadro fica MAIS barato que a caixa — não é o custo do emissor, é o
+  preenchimento que muda.
+
+| N vivas | slots | base (ms GPU) | extras (ms GPU) | texto (ms GPU) | alocador GPU (MB) | buffer extra GPU (KB) | pontos na CPU (KB) |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 000 | 10 000 | 0,136 | 0,138 | 0,117 | 50,6 | 100 | 98 |
+| 50 000 | 50 000 | 0,331 | 0,343 | 0,250 | 50,6 | 100 | 98 |
+| 100 000 | 100 000 | 0,574 | 0,586 | 0,424 | 50,6 | 100 | 98 |
+| 250 000 | 250 000 | 1,193 | 1,197 | 0,947 | 50,6 | 100 | 98 |
+| 500 000 | 500 000 | 2,148 | 2,162 | 1,816 | 50,6 | 100 | 98 |
+| 1 000 000 | 1 000 000 | 4,078 | 4,118 | 3,557 | 50,6 | 100 | 98 |
+
+Leitura:
+
+- O custo cresce linear com N (~4 ns por partícula viva no RTX 3050); 1 milhão
+  cabe em 4,1 ms de GPU a 1080p.
+- Os dados extras custam ~1% (0,04 ms em 1 M): o cabeçalho é pequeno e igual
+  para todas as partículas.
+- **Memória não depende de N**: a simulação é analítica, não existe buffer de
+  partículas. O alocador fica em 50,6 MB com 10 K ou 1 M (33,6 MB num quadro
+  sem partículas; a diferença são os alvos de 1080p da camada e da
+  composição). O buffer extra da camada é 4 cabeçalhos + os pontos da fonte
+  (~100 KB para um texto); a cópia na CPU (cache por conteúdo) ~98 KB.
+- Tetos: 65 536 pontos de emissão por fonte (1 MB); malha da partícula até
+  12 000 triângulos (LOD/amostra acima disso). O custo da malha instanciada é
+  triângulos × partículas e não foi medido aqui (depende do modelo).

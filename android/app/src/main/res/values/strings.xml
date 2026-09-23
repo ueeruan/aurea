@@ -946,6 +946,69 @@
     <string name="particular_trail_opacity">Opacidade da cauda</string>
     <string name="particular_remove">Remover</string>
     <string name="particular_msg_source_invalid">Essa camada não serve para isso.</string>
+
+    <!-- Nome humano de cada efeito (Fase 9.3). O motor publica o nome em
+         português (efeito fora desta tabela cai nele); aqui ele vira o idioma do
+         app. A chave e o nome da constante de `effect_keys` em snake_case
+         (kBrightnessContrast -> fx_name_brightness_contrast). -->
+    <string name="fx_name_transform">Transformar</string>
+    <string name="fx_name_exposure">Exposição</string>
+    <string name="fx_name_brightness_contrast">Brilho e contraste</string>
+    <string name="fx_name_saturation">Saturação</string>
+    <string name="fx_name_tint">Tingir</string>
+    <string name="fx_name_color_matrix">Misturar canais</string>
+    <string name="fx_name_levels">Níveis</string>
+    <string name="fx_name_curves">Curvas</string>
+    <string name="fx_name_gaussian_blur">Desfoque</string>
+    <string name="fx_name_sharpen">Nitidez</string>
+    <string name="fx_name_glow">Brilho</string>
+    <string name="fx_name_motion_tile">Mosaico</string>
+    <string name="fx_name_luma_key">Recorte por brilho</string>
+    <string name="fx_name_chroma_key">Recorte por cor</string>
+    <string name="fx_name_echo_trail">Eco e rastro</string>
+    <string name="fx_name_invert">Inverter</string>
+    <string name="fx_name_colorama">Colorama</string>
+    <string name="fx_name_unsharp">Máscara de nitidez</string>
+    <string name="fx_name_lens_blur">Desfoque de lente</string>
+    <string name="fx_name_deep_glow">Brilho profundo</string>
+    <string name="fx_name_rays">Raios de luz</string>
+    <string name="fx_name_light_sweep">Faixa de luz</string>
+    <string name="fx_name_shake">Tremor</string>
+    <string name="fx_name_turbulence">Turbulência</string>
+    <string name="fx_name_wave_warp">Onda</string>
+    <string name="fx_name_warp">Lente</string>
+    <string name="fx_name_ripple_dissolve">Ondulação que dissolve</string>
+    <string name="fx_name_scanlines">Varredura</string>
+    <string name="fx_name_grain">Grão</string>
+    <string name="fx_name_halftone">Meio-tom</string>
+    <string name="fx_name_minimax">Minimax</string>
+    <string name="fx_name_pixel_sort">Ordenar pixels</string>
+    <string name="fx_name_film_damage">Dano de filme</string>
+    <string name="fx_name_jpeg_damage">Dano de JPEG</string>
+    <string name="fx_name_holo_matrix">HoloMatrix</string>
+    <string name="fx_name_glitchify">Glitchify</string>
+    <string name="fx_name_vhs">VHS</string>
+    <string name="fx_name_uni_vhs">VHS Fita</string>
+    <string name="fx_name_signal">Sinal</string>
+    <string name="fx_name_cross_glitch">Glitch em cruz</string>
+    <string name="fx_name_posterize_time">Posterizar tempo</string>
+    <string name="fx_name_time_warp_rgb">RGB no tempo</string>
+    <string name="fx_name_slider_control">Controle deslizante</string>
+    <string name="fx_name_angle_control">Controle de ângulo</string>
+    <string name="fx_name_checkbox_control">Caixa de seleção</string>
+    <string name="fx_name_color_control">Controle de cor</string>
+    <string name="fx_name_point_control">Controle de ponto</string>
+
+    <!-- Rotulos do Meio-tom no idioma do app (Fase 9.3). -->
+    <string name="fx_passo_grade">Passo da grade</string>
+    <string name="fx_centro_x">Centro X</string>
+    <string name="fx_centro_y">Centro Y</string>
+    <string name="fx_raio_maximo">Raio máximo</string>
+    <string name="fx_angulo_canal_1">Ângulo do canal 1</string>
+    <string name="fx_angulo_canal_2">Ângulo do canal 2</string>
+    <string name="fx_angulo_canal_3">Ângulo do canal 3</string>
+    <string name="fx_angulo_canal_4">Ângulo do canal 4</string>
+
     <string name="fx_alargar_cor">Alargar a cor</string>
     <string name="fx_aleatoriedade">Aleatoriedade</string>
     <string name="fx_altura">Altura</string>
@@ -1040,7 +1103,6 @@
     <string name="fx_desc_time_posterize">Trava a taxa de quadros: a imagem passa a andar em passos, como animação desenhada.</string>
     <string name="fx_desc_time_warp_rgb">Cada canal de cor vem de um instante diferente: o vermelho do quadro de trás, o azul do da frente.</string>
     <string name="fx_desc_transform">Move, gira, escala e muda a opacidade da camada sem perder qualidade.</string>
-    <string name="fx_desfoque">Desfoque</string>
     <string name="fx_deslocamento">Deslocamento</string>
     <string name="fx_deslocamento_x">Deslocamento X</string>
     <string name="fx_deslocamento_y">Deslocamento Y</string>
@@ -1109,10 +1171,8 @@
     <string name="fx_matrix_rr">Vermelho do vermelho</string>
     <string name="fx_mistura">Mistura</string>
     <string name="fx_mistura_cor">Mistura da cor</string>
-    <string name="fx_misturar_canais">Misturar canais</string>
     <string name="fx_modo">Modo</string>
     <string name="fx_monocromatico">Monocromático</string>
-    <string name="fx_mosaico">Mosaico</string>
     <string name="fx_multiplicar">Multiplicar</string>
     <string name="fx_onda_quadrada">Onda quadrada</string>
     <string name="fx_ondulacao">Ondulação</string>
@@ -1141,8 +1201,6 @@
     <string name="fx_raio">Raio</string>
     <string name="fx_raio_halo">Raio do halo</string>
     <string name="fx_raio_nucleo">Raio do núcleo</string>
-    <string name="fx_recorte_brilho">Recorte por brilho</string>
-    <string name="fx_recorte_cor">Recorte por cor</string>
     <string name="fx_relevo">Relevo</string>
     <string name="fx_remover">Remover</string>
     <string name="fx_riscos">Riscos</string>

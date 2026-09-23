@@ -72,6 +72,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.transform",
         EffectHuman(
+            name = R.string.fx_name_transform,
             keywords = "transform mover posicao escala girar rotacao opacidade",
             principal = listOf(1, 2, 3, 4),
             params = mapOf(
@@ -83,6 +84,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.color.exposure",
         EffectHuman(
+            name = R.string.fx_name_exposure,
             keywords = "exposure luz clarear escurecer",
             principal = listOf(0),
             params = mapOf(
@@ -94,15 +96,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     )
     put(
         "aurea.color.brightness_contrast",
-        EffectHuman(keywords = "brightness contrast clarear", params = mapOf(0 to ParamHuman(decimals = 0), 1 to ParamHuman(decimals = 0))),
+        EffectHuman(name = R.string.fx_name_brightness_contrast, keywords = "brightness contrast clarear", params = mapOf(0 to ParamHuman(decimals = 0), 1 to ParamHuman(decimals = 0))),
     )
     put(
         "aurea.color.saturation",
-        EffectHuman(keywords = "saturation cor viva preto e branco desbotar", params = mapOf(0 to ParamHuman(decimals = 0))),
+        EffectHuman(name = R.string.fx_name_saturation, keywords = "saturation cor viva preto e branco desbotar", params = mapOf(0 to ParamHuman(decimals = 0))),
     )
     put(
         "aurea.color.tint",
         EffectHuman(
+            name = R.string.fx_name_tint,
             keywords = "tint colorir duotone",
             params = mapOf(0 to ParamHuman(label = R.string.fx_cor_sombras), 1 to ParamHuman(label = R.string.fx_cor_luzes)),
         ),
@@ -110,7 +113,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.color.matrix",
         EffectHuman(
-            name = R.string.fx_misturar_canais,
+            name = R.string.fx_name_color_matrix,
             keywords = "matriz de cor channel mixer rgb canais",
             principal = listOf(0, 5, 10),
             params = (0 until 12).associateWith { i ->
@@ -123,6 +126,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.color.levels",
         EffectHuman(
+            name = R.string.fx_name_levels,
             keywords = "levels niveis preto branco",
             principal = listOf(0, 1, 2),
             params = mapOf(
@@ -134,11 +138,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
-    put("aurea.color.curves", EffectHuman(keywords = "curves curva tons"))
+    put("aurea.color.curves", EffectHuman(name = R.string.fx_name_curves, keywords = "curves curva tons"))
     put(
         "aurea.blur.gaussian",
         EffectHuman(
-            name = R.string.fx_desfoque,
+            name = R.string.fx_name_gaussian_blur,
             keywords = "blur gaussian gaussiano borrar embacar",
             principal = listOf(0, 1),
             params = mapOf(
@@ -148,10 +152,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
-    put("aurea.blur.sharpen", EffectHuman(keywords = "sharpen nitidez realcar detalhe"))
+    put("aurea.blur.sharpen", EffectHuman(name = R.string.fx_name_sharpen, keywords = "sharpen nitidez realcar detalhe"))
     put(
         "aurea.light.glow",
         EffectHuman(
+            name = R.string.fx_name_glow,
             keywords = "glow brilho luz neon",
             principal = listOf(2, 1, 0, 3),
             params = mapOf(
@@ -163,7 +168,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.stylize.motion_tile",
         EffectHuman(
-            name = R.string.fx_mosaico,
+            name = R.string.fx_name_motion_tile,
             keywords = "motion tile azulejos repetir ladrilho",
             principal = listOf(1, 2, 5, 7),
             params = mapOf(
@@ -182,7 +187,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.key.luma",
         EffectHuman(
-            name = R.string.fx_recorte_brilho,
+            name = R.string.fx_name_luma_key,
             keywords = "chave de luma luma key remover preto branco",
             params = mapOf(0 to ParamHuman(label = R.string.fx_remover), 1 to ParamHuman(label = R.string.fx_limite)),
         ),
@@ -190,7 +195,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.key.chroma",
         EffectHuman(
-            name = R.string.fx_recorte_cor,
+            name = R.string.fx_name_chroma_key,
             keywords = "chave de croma chroma key fundo verde green screen remover cor",
             principal = listOf(0, 1, 2),
             params = mapOf(0 to ParamHuman(label = R.string.fx_cor_remover), 3 to ParamHuman(label = R.string.fx_limpar_contorno)),
@@ -199,6 +204,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.time.echo",
         EffectHuman(
+            name = R.string.fx_name_echo_trail,
             keywords = "echo eco rastro trail copias",
             principal = listOf(0, 1, 2),
             params = mapOf(
@@ -211,10 +217,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // --- Fase 7.3: o pacote novo ---------------------------------------------
     // Os parâmetros principais vêm primeiro (o resto vai para "Avançado"), e o
     // sufixo/casas são os que fazem o número fazer sentido na tela.
-    put("aurea.color.invert", EffectHuman(keywords = "inverter negativo inverter cor"))
+    put("aurea.color.invert", EffectHuman(name = R.string.fx_name_invert, keywords = "inverter negativo inverter cor"))
     put(
         "aurea.stylize.scanlines",
         EffectHuman(
+            name = R.string.fx_name_scanlines,
             keywords = "scanline varredura crt tv tubo linha",
             principal = listOf(0, 1, 3, 4),
             params = mapOf(
@@ -229,6 +236,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.stylize.grain",
         EffectHuman(
+            name = R.string.fx_name_grain,
             keywords = "grain grao filme ruido textura analogico",
             principal = listOf(0, 1, 2, 4, 7),
             params = mapOf(
@@ -246,10 +254,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.stylize.halftone",
         EffectHuman(
-            keywords = "halftone meio tom reticula pontos impressao jornal pontilhado",
-            principal = listOf(0, 1, 2, 5, 7),
+            name = R.string.fx_name_halftone,
+            keywords = "halftone meio tom reticula pontos impressao jornal pontilhado cmyk angulos",
+            // Os principais são os do Color Halftone do AE: o raio máximo e os
+            // quatro ângulos das retículas. O resto (passo, contraste, suavidade,
+            // padrão…) fica em "Avançado".
+            principal = listOf(12, 13, 14, 15, 16),
             params = mapOf(
-                0 to ParamHuman(label = R.string.fx_tamanho_ponto, suffix = "px", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_passo_grade, suffix = "px", decimals = 0),
                 1 to ParamHuman(label = R.string.fx_contraste, decimals = 0),
                 2 to ParamHuman(label = R.string.fx_angulo, suffix = "°", decimals = 0),
                 3 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
@@ -258,12 +270,20 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 6 to ParamHuman(label = R.string.fx_grades_separadas),
                 7 to ParamHuman(label = R.string.fx_fundo_claro, decimals = 0),
                 8 to ParamHuman(label = R.string.fx_ganho_ponto, decimals = 0),
+                10 to ParamHuman(label = R.string.fx_centro_x, suffix = "px", decimals = 0),
+                11 to ParamHuman(label = R.string.fx_centro_y, suffix = "px", decimals = 0),
+                12 to ParamHuman(label = R.string.fx_raio_maximo, suffix = "px", decimals = 1),
+                13 to ParamHuman(label = R.string.fx_angulo_canal_1, suffix = "°", decimals = 0),
+                14 to ParamHuman(label = R.string.fx_angulo_canal_2, suffix = "°", decimals = 0),
+                15 to ParamHuman(label = R.string.fx_angulo_canal_3, suffix = "°", decimals = 0),
+                16 to ParamHuman(label = R.string.fx_angulo_canal_4, suffix = "°", decimals = 0),
             ),
         ),
     )
     put(
         "aurea.stylize.minimax",
         EffectHuman(
+            name = R.string.fx_name_minimax,
             keywords = "minimax dilatar erodir morfologia matte afinar engrossar",
             principal = listOf(1, 0, 4, 3),
             params = mapOf(
@@ -278,6 +298,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.blur.unsharp",
         EffectHuman(
+            name = R.string.fx_name_unsharp,
             keywords = "unsharp mascara de nitidez sharpen afiar detalhe",
             principal = listOf(0, 1, 2),
             params = mapOf(
@@ -291,6 +312,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.blur.lens",
         EffectHuman(
+            name = R.string.fx_name_lens_blur,
             keywords = "lens blur desfoque de lente bokeh iris",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
@@ -306,6 +328,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.distort.shake",
         EffectHuman(
+            name = R.string.fx_name_shake,
             keywords = "shake tremor camera balancar vibrar tremer",
             principal = listOf(0, 1, 2, 4, 5),
             params = mapOf(
@@ -322,6 +345,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.distort.turbulence",
         EffectHuman(
+            name = R.string.fx_name_turbulence,
             keywords = "turbulencia displacement deslocamento ruido organico fumaca",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
@@ -339,6 +363,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.distort.wave_warp",
         EffectHuman(
+            name = R.string.fx_name_wave_warp,
             keywords = "wave warp onda ondular senoide agua",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
@@ -356,6 +381,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.distort.warp",
         EffectHuman(
+            name = R.string.fx_name_warp,
             keywords = "warp lente distorcer empurrar puxar torcer esfera canto bulge pinch twist",
             principal = listOf(0, 1, 2, 3),
             params = mapOf(
@@ -372,6 +398,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.distort.ripple_dissolve",
         EffectHuman(
+            name = R.string.fx_name_ripple_dissolve,
             keywords = "ripple dissolve ondulacao dissolver transicao circular agua",
             principal = listOf(0, 1, 2, 3),
             params = mapOf(
@@ -389,6 +416,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.light.deep_glow",
         EffectHuman(
+            name = R.string.fx_name_deep_glow,
             keywords = "deep glow brilho profundo halo neon luz bloom",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
@@ -408,6 +436,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.light.rays",
         EffectHuman(
+            name = R.string.fx_name_rays,
             keywords = "rays raios de luz god rays sol volumetrico spread",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
@@ -425,6 +454,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.light.sweep",
         EffectHuman(
+            name = R.string.fx_name_light_sweep,
             keywords = "light sweep faixa de luz brilho varredura reflexo",
             principal = listOf(0, 1, 2, 4, 5),
             params = mapOf(
@@ -442,6 +472,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.color.colorama",
         EffectHuman(
+            name = R.string.fx_name_colorama,
             keywords = "colorama remapeamento de cor arco-iris psicodelico mapa de cor",
             principal = listOf(0, 1, 2, 4, 5),
             params = mapOf(
@@ -460,6 +491,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.stylize.pixel_sort",
         EffectHuman(
+            name = R.string.fx_name_pixel_sort,
             keywords = "pixel sort ordenar pixels derreter listras glitch sort",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
@@ -478,6 +510,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.stylize.film_damage",
         EffectHuman(
+            name = R.string.fx_name_film_damage,
             keywords = "film damage dano de filme poeira riscos arranhao projetor pelicula",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
@@ -497,6 +530,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.stylize.jpeg_damage",
         EffectHuman(
+            name = R.string.fx_name_jpeg_damage,
             keywords = "jpeg damage dano compressao artefato bloco qualidade",
             principal = listOf(0, 1, 2, 3),
             params = mapOf(
@@ -514,6 +548,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.stylize.holomatrix",
         EffectHuman(
+            name = R.string.fx_name_holo_matrix,
             keywords = "holo matrix holograma projecao grade tecnologica scanner",
             principal = listOf(0, 1, 3, 4, 6),
             params = mapOf(
@@ -533,6 +568,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.glitch.glitchify",
         EffectHuman(
+            name = R.string.fx_name_glitchify,
             keywords = "glitchify glitch defeito digital rasgo bloco corrupcao",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
@@ -551,6 +587,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.glitch.vhs",
         EffectHuman(
+            name = R.string.fx_name_vhs,
             keywords = "vhs fita cassette videocassete tracking dropouts analogico videotape",
             principal = listOf(0, 1, 2, 3, 4, 5, 6),
             params = mapOf(
@@ -571,6 +608,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.glitch.uni_vhs",
         EffectHuman(
+            name = R.string.fx_name_uni_vhs,
             keywords = "vhs fita estilizado anos 80 retro neon chroma warp",
             principal = listOf(0, 1, 2, 3, 6),
             params = mapOf(
@@ -589,6 +627,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.glitch.signal",
         EffectHuman(
+            name = R.string.fx_name_signal,
             keywords = "signal sinal interferencia transmissao banda sincronia chiado",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
@@ -607,6 +646,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.glitch.cross",
         EffectHuman(
+            name = R.string.fx_name_cross_glitch,
             keywords = "cross glitch cruz transicao varredura rasgo",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
@@ -625,6 +665,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.time.posterize",
         EffectHuman(
+            name = R.string.fx_name_posterize_time,
             keywords = "posterize time posterizar tempo taxa quadros stop motion animacao",
             principal = listOf(0, 1),
             params = mapOf(
@@ -636,6 +677,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.time.warp_rgb",
         EffectHuman(
+            name = R.string.fx_name_time_warp_rgb,
             keywords = "rgb no tempo time warp separar canais atrasar cor chromatic",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
@@ -648,11 +690,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
-    put("aurea.control.slider", EffectHuman(keywords = "expressao slider controle", params = mapOf(0 to ParamHuman(decimals = 1))))
-    put("aurea.control.angle", EffectHuman(keywords = "expressao angulo controle"))
-    put("aurea.control.checkbox", EffectHuman(keywords = "expressao caixa controle"))
-    put("aurea.control.color", EffectHuman(keywords = "expressao cor controle"))
-    put("aurea.control.point", EffectHuman(keywords = "expressao ponto controle"))
+    put("aurea.control.slider", EffectHuman(name = R.string.fx_name_slider_control, keywords = "expressao slider controle", params = mapOf(0 to ParamHuman(decimals = 1))))
+    put("aurea.control.angle", EffectHuman(name = R.string.fx_name_angle_control, keywords = "expressao angulo controle"))
+    put("aurea.control.checkbox", EffectHuman(name = R.string.fx_name_checkbox_control, keywords = "expressao caixa controle"))
+    put("aurea.control.color", EffectHuman(name = R.string.fx_name_color_control, keywords = "expressao cor controle"))
+    put("aurea.control.point", EffectHuman(name = R.string.fx_name_point_control, keywords = "expressao ponto controle"))
 }
 
 /**

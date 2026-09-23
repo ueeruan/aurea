@@ -151,11 +151,24 @@ public:
 };
 
 // -----------------------------------------------------------------------------
-// Meio-tom
+// Meio-tom — a geometria do COLOR HALFTONE do After Effects (Fase 9.3)
 // -----------------------------------------------------------------------------
 class Halftone final : public Effect {
 public:
-    enum : u32 { kCell = 0, kContrast, kAngle, kSoftness, kChannelAngle, kPattern, kSeparate, kPaper, kGain, kColor };
+    // Os dez primeiros são os da Fase 7.3: o projeto salvo guarda os valores POR
+    // POSIÇÃO, então os parâmetros novos só podem entrar no FIM da lista.
+    enum : u32 {
+        kCell = 0, kContrast, kAngle, kSoftness, kChannelAngle, kPattern, kSeparate, kPaper, kGain, kColor,
+        kCenterX, kCenterY, kMaxRadius, kAngle1, kAngle2, kAngle3, kAngle4,
+    };
+
+    /// Os padrões do Color Halftone: o raio máximo e os quatro ângulos das
+    /// retículas (1 = ciano, 2 = magenta, 3 = amarelo, 4 = preto).
+    static constexpr f32 kAeMaxRadius = 5.0f;
+    static constexpr f32 kAeAngle1 = 108.0f;
+    static constexpr f32 kAeAngle2 = 162.0f;
+    static constexpr f32 kAeAngle3 = 90.0f;
+    static constexpr f32 kAeAngle4 = 45.0f;
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kHalftone, "Meio-tom", "Estilizar", EffectClass::Neighborhood};
@@ -163,40 +176,83 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         static const char* const kPatterns[] = {"Ponto", "Linha", "Losango"};
-        p.add_float("cell", "Tamanho do ponto", 8.0f, 2.0f, 60.0f, kParamAnimatable | kParamPixels, "px");
+        // O passo da grade é 2 × raio máximo no padrão: é a relação do AE, em
+        // que o raio máximo é a MEIA-célula e os pontos chegam a se tocar.
+        p.add_float("cell", "Passo da grade", 2.0f * kAeMaxRadius, 2.0f, 60.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("contrast", "Contraste", 30.0f, -100.0f, 200.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_angle("angle", "Ângulo da grade", 15.0f);
+        // Legado: ângulo base, somado ao de cada canal. No padrão é 0 para que
+        // os ângulos por canal valham exatamente os do AE.
+        p.add_angle("angle", "Ângulo da grade", 0.0f);
         p.add_float("softness", "Suavidade da borda", 30.0f, 1.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_angle("channel_angle", "Rotação por canal", 30.0f);
+        // Legado: escalona o ângulo por canal (0, +x, +2x…). No padrão é 0.
+        p.add_angle("channel_angle", "Rotação por canal", 0.0f);
         p.add_enum("pattern", "Padrão", kPatterns, 3, 0);
         p.add_bool("separate_channels", "Grades separadas por canal", true);
         p.add_float("paper", "Fundo claro", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("dot_gain", "Ganho do ponto", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_color("tint", "Cor do papel", Vec4{1, 1, 1, 1});
+        // --- Fase 9.3: o que faltava do Color Halftone ---
+        // 0 num eixo = o centro da composição naquele eixo (o padrão do AE).
+        p.add_float("center_x", "Centro X", 0.0f, -100000.0f, 100000.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("center_y", "Centro Y", 0.0f, -100000.0f, 100000.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("max_radius", "Raio máximo", kAeMaxRadius, 0.0f, 200.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_angle("angle_1", "Ângulo do canal 1", kAeAngle1);
+        p.add_angle("angle_2", "Ângulo do canal 2", kAeAngle2);
+        p.add_angle("angle_3", "Ângulo do canal 3", kAeAngle3);
+        p.add_angle("angle_4", "Ângulo do canal 4", kAeAngle4);
     }
     bool is_identity(const EffectEval&) const noexcept override { return false; }
     f32 input_margin(const EffectEval& e) const noexcept override { return std::max(2.0f, e.f(kCell)); }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
-        v[kCell] = ParamValue::scalar(7.0f);
+        // Uma grade mais graúda que a do padrão: é o que a cartela de 320×200
+        // mostra de longe. O par passo = 2 × raio continua o do AE.
+        v[kMaxRadius] = ParamValue::scalar(7.0f);
+        v[kCell] = ParamValue::scalar(14.0f);
         v[kContrast] = ParamValue::scalar(45.0f);
         return true;
     }
+
+    /// O centro da retícula em pixels da LAYER. `center_x`/`center_y` são em
+    /// pixels da COMPOSIÇÃO (como no AE) e 0 num eixo significa "o centro da
+    /// composição naquele eixo" — é o padrão de fábrica.
+    static Vec2 center_px(const EffectEval& e) noexcept {
+        Vec2 c{e.f(kCenterX), e.f(kCenterY)};
+        const LayerPlacement* pl = e.placement;
+        if (!pl) return c;
+        if (c.x == 0.0f) c.x = static_cast<f32>(pl->compWidth) * 0.5f;
+        if (c.y == 0.0f) c.y = static_cast<f32>(pl->compHeight) * 0.5f;
+        // composição → layer: inverte a parte 2D afim de `compFromLayer`.
+        const Mat4& m = pl->compFromLayer;
+        const f32 a = m.col[0].x, b = m.col[0].y, cc = m.col[1].x, d = m.col[1].y;
+        const f32 det = a * d - b * cc;
+        if (std::fabs(det) < 1e-12f) return c;   // matriz degenerada: layer e comp no mesmo plano
+        const f32 X = c.x - m.col[3].x, Y = c.y - m.col[3].y;
+        return Vec2{(d * X - cc * Y) / det, (-b * X + a * Y) / det};
+    }
+
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         // O ponto lê o centro da célula, que pode cair fora da região: a
         // margem de uma célula inteira garante que a última fileira de pontos
         // não fique com a cor errada.
-        const Rect region = spread_region(input.region, e.f(kCell) * 4.0f, e.f(kCell) * 4.0f, e.placement, margin);
+        const f32 cell = std::max(2.0f, e.f(kCell));
+        const Rect region = spread_region(input.region, cell * 4.0f, cell * 4.0f, e.placement, margin);
         u32 w = 0, h = 0;
         ctx.region_size(region, input.texel_scale_x(), w, h);
+        // Texels por pixel de layer NESTA região — é o que faz o mesmo número
+        // de pixels valer no preview reduzido e no export.
+        const f32 sx = region.w > 0.0f ? static_cast<f32>(w) / region.w : 1.0f;
+        const f32 sy = region.h > 0.0f ? static_cast<f32>(h) / region.h : 1.0f;
+        const Vec2 center = center_px(e);
+
         EffectUniforms u;
         u.uvMap = EffectBuildContext::uv_map(region, input.region);
-        // A célula é medida em pixels da SAÍDA: a textura pode estar reduzida.
-        u.texel = Vec4{region.w > 0.0f ? 1.0f / region.w : 0.0f, region.h > 0.0f ? 1.0f / region.h : 0.0f,
-                       input.texel_scale_x(), input.texel_scale_y()};
-        u.p0 = Vec4{e.f(kCell) * input.texel_scale_x(), e.f(kContrast) / 100.0f, e.f(kAngle), e.f(kSoftness) / 100.0f};
-        u.p1 = Vec4{e.f(kChannelAngle), static_cast<f32>(e.e(kPattern)), e.b(kSeparate) ? 1.0f : 0.0f, 0.0f};
-        u.p2 = Vec4{e.f(kPaper) / 100.0f, e.f(kGain) / 50.0f, 0.0f, 0.0f};
+        u.texel = Vec4{w > 0 ? 1.0f / static_cast<f32>(w) : 0.0f, h > 0 ? 1.0f / static_cast<f32>(h) : 0.0f, sx, sy};
+        u.p0 = Vec4{cell * sx, e.f(kContrast) / 100.0f, e.f(kAngle), e.f(kSoftness) / 100.0f};
+        u.p1 = Vec4{e.f(kChannelAngle), static_cast<f32>(e.e(kPattern)), e.b(kSeparate) ? 1.0f : 0.0f,
+                    e.f(kMaxRadius) * sx};
+        u.p2 = Vec4{e.f(kPaper) / 100.0f, e.f(kGain) / 50.0f, (center.x - region.x) * sx, (center.y - region.y) * sy};
+        u.p3 = Vec4{e.f(kAngle1), e.f(kAngle2), e.f(kAngle3), e.f(kAngle4)};
         u.color = e.color(kColor);
         out = LayerImage{ctx.texture("meio-tom", w, h), region, w, h};
         if (ctx.fullscreen_pass("meio-tom", PassStage::Effects, out.texture, ShaderId::effects_halftone_frag,

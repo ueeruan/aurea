@@ -5771,3 +5771,183 @@ AUREA_TEST(Gpu, ParticularBenchmark) {
                     static_cast<unsigned long long>(gpuKb), static_cast<unsigned long long>(cpuKb));
     }
 }
+
+// =============================================================================
+// =============================================================================
+// O Meio-tom tem de bater com o COLOR HALFTONE do After Effects (Fase 9.3): a
+// grade é quadrada em pixels da imagem, girada pelo ângulo do canal, com passo
+// de 2 × Max Radius, e o raio do ponto vai de Max Radius (canal com luz 0) a
+// zero (canal com luz 1).
+//
+// Três imagens CHAPADAS fazem a prova, uma por canal de saída. Na quarta tinta
+// (o preto, que o AE tem e o Aurea mapeia em max(R,G,B)) as três dão 255, então
+// ela não põe tinta nenhuma em cima da medida. Em cada imagem um canal fica com
+// luz 0 (tinta CHEIA: o ponto chega ao Max Radius e encosta no vizinho), outro
+// com luz ~0,50 (MEIO raio) e o terceiro com luz 1 (SEM tinta):
+//     R=  0 G=128 B=255 -> canal 1 cheio · canal 2 meio  · canal 3 vazio
+//     R=128 G=255 B=  0 -> canal 1 meio  · canal 2 vazio · canal 3 cheio
+//     R=255 G=  0 B=128 -> canal 1 vazio · canal 2 cheio · canal 3 meio
+//
+// O RAIO é medido pela MASSA de tinta (a média de 1 − saída, que é a própria
+// cobertura já anti-serrilhada): raio = passo × raiz(massa/pi). Isso vale também
+// para o ponto cheio, que encosta no vizinho e viraria uma mancha só.
+// =============================================================================
+AUREA_TEST(Gpu, HalftoneMatchesAfterEffectsColorHalftone) {
+    AUREA_REQUIRE_GPU();
+    constexpr u32 kW = 320, kH = 320;
+    // 16 px de borda fora da medida: ali o centro de célula pode cair fora da
+    // camada (o quadro acabou) e o ponto sai preto — não é o que se mede aqui.
+    constexpr u32 kBorda = 16;
+
+    struct Prova { u8 r, g, b; int cheio, meio; const char* nome; };
+    const Prova provas[3] = {
+        {0, 128, 255, 0, 1, "R=0 G=128 B=255"},
+        {128, 255, 0, 2, 0, "R=128 G=255 B=0"},
+        {255, 0, 128, 1, 2, "R=255 G=0 B=128"},
+    };
+    // Os padrões do AE: raio máximo 5 px (a meia-célula) e os ângulos 1..3.
+    // Numa grade quadrada o ângulo só vale o quarto de volta (108 graus = 18).
+    const f32 kAeMaxRadius = 5.0f;
+    const f32 kAeAngulo[3] = {108.0f, 162.0f, 90.0f};
+
+    // A tinta de um canal é 1 − o que ele mostra: a saída é 1 − cobertura, e a
+    // leitura volta do LINEAR para o sRGB, que é onde a tinta foi definida.
+    auto tinta = [&](const FloatImage& img, u32 x, u32 y, int ch) {
+        return 1.0f - srgb_encode(img.at(x, y)[ch]);
+    };
+    // As manchas de tinta de um canal, contadas com 4-vizinhos (o limiar é a
+    // metade da tinta). Serve para o PASSO e o ÂNGULO da grade — para o ponto
+    // cheio, que encosta no vizinho, quem mede o raio é a massa.
+    struct Dot { f32 x, y; };
+    auto manchas = [&](const FloatImage& img, int ch) {
+        std::vector<Dot> out;
+        std::vector<u8> seen(static_cast<usize>(kW) * kH, 0);
+        std::vector<u32> pilha;
+        for (u32 y = 0; y < kH; ++y) {
+            for (u32 x = 0; x < kW; ++x) {
+                const u32 i = y * kW + x;
+                if (seen[i] || tinta(img, x, y, ch) < 0.5f) continue;
+                f64 sx = 0, sy = 0;
+                u32 n = 0;
+                pilha.clear();
+                pilha.push_back(i);
+                seen[i] = 1;
+                while (!pilha.empty()) {
+                    const u32 p = pilha.back();
+                    pilha.pop_back();
+                    const u32 cx = p % kW, cy = p / kW;
+                    sx += cx;
+                    sy += cy;
+                    ++n;
+                    const u32 nb[4] = {cx ? p - 1 : p, cx + 1 < kW ? p + 1 : p, cy ? p - kW : p,
+                                       cy + 1 < kH ? p + kW : p};
+                    for (u32 k = 0; k < 4; ++k) {
+                        if (nb[k] == p || seen[nb[k]]) continue;
+                        if (tinta(img, nb[k] % kW, nb[k] / kW, ch) < 0.5f) continue;
+                        seen[nb[k]] = 1;
+                        pilha.push_back(nb[k]);
+                    }
+                }
+                const f32 cx = static_cast<f32>(sx / n), cy = static_cast<f32>(sy / n);
+                // Mancha cortada na borda mente no centro: só as inteiras contam.
+                if (cx < 14.0f || cy < 14.0f || cx > kW - 14.0f || cy > kH - 14.0f) continue;
+                out.push_back(Dot{cx, cy});
+            }
+        }
+        return out;
+    };
+    auto mediana = [](std::vector<f32> v) {
+        if (v.empty()) return 0.0f;
+        std::sort(v.begin(), v.end());
+        return v[v.size() / 2];
+    };
+    // Passo e ângulo da grade: a média das QUATRO distâncias menores (no ideal
+    // são todas o passo, e a média cancela a quantização do centro da mancha) e
+    // o quarto de volta do ângulo do vizinho mais próximo.
+    auto grade = [&](const std::vector<Dot>& d, f32& passo, f32& angulo) {
+        std::vector<f32> ps;
+        f64 c4 = 0, s4 = 0;
+        for (usize i = 0; i < d.size(); ++i) {
+            std::vector<f32> ds;
+            for (usize j = 0; j < d.size(); ++j) {
+                if (i == j) continue;
+                const f32 dx = d[j].x - d[i].x, dy = d[j].y - d[i].y;
+                ds.push_back(std::sqrt(dx * dx + dy * dy));
+            }
+            if (ds.size() < 4) continue;
+            std::sort(ds.begin(), ds.end());
+            ps.push_back((ds[0] + ds[1] + ds[2] + ds[3]) * 0.25f);
+        }
+        passo = mediana(ps);
+        angulo = 0.0f;
+        if (!ps.empty()) {
+            for (usize i = 0; i < d.size(); ++i) {
+                f32 melhor = 1e30f;
+                usize quem = d.size();
+                for (usize j = 0; j < d.size(); ++j) {
+                    if (i == j) continue;
+                    const f32 dx = d[j].x - d[i].x, dy = d[j].y - d[i].y;
+                    const f32 dist = std::sqrt(dx * dx + dy * dy);
+                    if (dist < melhor) { melhor = dist; quem = j; }
+                }
+                if (quem == d.size()) continue;
+                const f64 t = std::atan2(static_cast<f64>(d[quem].y - d[i].y), static_cast<f64>(d[quem].x - d[i].x));
+                c4 += std::cos(4.0 * t);
+                s4 += std::sin(4.0 * t);
+            }
+            f64 g = std::atan2(s4, c4) / 4.0 * 180.0 / static_cast<f64>(aurea::kPi);
+            if (g < 0.0) g += 90.0;   // o quarto de volta da grade quadrada
+            angulo = static_cast<f32>(g);
+        }
+    };
+
+    std::printf("\n    meio-tom (padroes do AE: passo 2 x 5 = 10,00 px; raio 5,00 no canal de luz 0"
+                " e 2,49 no de luz 0,50)\n");
+    for (const Prova& p : provas) {
+        Scene s(kW, kH);
+        const LayerId id = s.image(uniform_image(kW, kH, p.r, p.g, p.b), kW * 0.5f, kH * 0.5f);
+        s.add_effect(id, effect_keys::kHalftone);   // tudo no padrão de fábrica
+        const FloatImage img = s.render(FrameIndex{12});
+
+        const int vazio = 3 - p.cheio - p.meio;
+        f64 massaCheio = 0, massaMeio = 0, massaVazio = 0;
+        f32 vazioMin = 1.0f;
+        for (u32 y = kBorda; y < kH - kBorda; ++y) {
+            for (u32 x = kBorda; x < kW - kBorda; ++x) {
+                massaCheio += tinta(img, x, y, p.cheio);
+                massaMeio += tinta(img, x, y, p.meio);
+                massaVazio += tinta(img, x, y, vazio);
+                vazioMin = std::min(vazioMin, srgb_encode(img.at(x, y)[vazio]));
+            }
+        }
+        const f64 n = static_cast<f64>(kW - 2 * kBorda) * (kH - 2 * kBorda);
+        const f32 tCheio = static_cast<f32>(massaCheio / n);
+        const f32 tMeio = static_cast<f32>(massaMeio / n);
+        const f32 tVazio = static_cast<f32>(massaVazio / n);
+
+        f32 passo = 0, angulo = 0;
+        const auto d = manchas(img, p.meio);
+        grade(d, passo, angulo);
+        const f32 rMeio = passo * std::sqrt(std::max(tMeio, 0.0f) / static_cast<f32>(aurea::kPi));
+        const f32 rCheio = passo * std::sqrt(std::max(tCheio, 0.0f) / static_cast<f32>(aurea::kPi));
+        const f32 esperado = std::fmod(kAeAngulo[p.meio], 90.0f);
+
+        std::printf("      %-16s meio (canal %d): passo %5.2f px  raio %4.2f px  angulo %5.1f graus (AE %.0f)"
+                    "  | cheio (canal %d): raio %4.2f px  | vazio (canal %d): tinta %.4f luz minima %.3f\n",
+                    p.nome, p.meio + 1, static_cast<double>(passo), static_cast<double>(rMeio),
+                    static_cast<double>(angulo), static_cast<double>(esperado), p.cheio + 1,
+                    static_cast<double>(rCheio), vazio + 1, static_cast<double>(tVazio),
+                    static_cast<double>(vazioMin));
+
+        AUREA_CHECK(!d.empty());
+        AUREA_CHECK_NEAR(passo, 2.0 * kAeMaxRadius, 0.25);   // a célula é 2 × Max Radius
+        // A tolerância cobre a BORDA SUAVE (o "Suavidade da borda" de 30%, que
+        // é um controle a mais do Aurea): ela engrossa o ponto pequeno e é
+        // cortada pelas quinas da célula no ponto cheio, uns 3% para cada lado.
+        AUREA_CHECK_NEAR(rMeio, 0.5 * kAeMaxRadius, 0.15);   // luz 0,50 -> meio raio
+        AUREA_CHECK_NEAR(rCheio, kAeMaxRadius, 0.15);        // luz 0 -> o Max Radius
+        AUREA_CHECK_NEAR(angulo, esperado, 2.0);             // o ângulo é o do canal
+        AUREA_CHECK(tVazio < 0.005f);
+        AUREA_CHECK(vazioMin > 0.99f);
+    }
+}

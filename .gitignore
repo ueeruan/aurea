@@ -87,3 +87,6 @@ xcuserdata/
 Thumbs.db
 desktop.ini
 engine/tests/data/gltf/
+
+# APKs gerados para entrega (o binario nao vive no git)
+entrega/

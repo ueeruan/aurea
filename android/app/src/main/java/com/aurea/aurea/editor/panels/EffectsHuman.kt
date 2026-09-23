@@ -690,6 +690,22 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
+    put(
+        "aurea.time.remap",
+        EffectHuman(
+            name = R.string.fx_name_time_remap,
+            // O parâmetro Tempo É a curva de remapeamento da camada: a mesma que
+            // o gráfico do painel de velocidade edita. O "Manter o tom do áudio"
+            // do AE não existe aqui porque o motor não faz time-stretch — um
+            // interruptor que não faz nada seria pior que a linha que falta.
+            keywords = "remapear tempo time remap curva velocidade camera lenta rampa",
+            principal = listOf(0, 1),
+            params = mapOf(
+                0 to ParamHuman(label = R.string.fx_tempo, suffix = "s", decimals = 2),
+                1 to ParamHuman(label = R.string.fx_interpolacao_do_tempo),
+            ),
+        ),
+    )
     put("aurea.control.slider", EffectHuman(name = R.string.fx_name_slider_control, keywords = "expressao slider controle", params = mapOf(0 to ParamHuman(decimals = 1))))
     put("aurea.control.angle", EffectHuman(name = R.string.fx_name_angle_control, keywords = "expressao angulo controle"))
     put("aurea.control.checkbox", EffectHuman(name = R.string.fx_name_checkbox_control, keywords = "expressao caixa controle"))

@@ -23,6 +23,39 @@
 namespace aurea {
 
 namespace {
+
+/// O efeito é o Remapear tempo? (ele não desenha: quem age é a curva da camada)
+[[nodiscard]] bool is_time_remap_type(EffectTypeId t) noexcept {
+    return t == effect_type_id(effect_keys::kTimeRemap);
+}
+
+/// Liga a curva de remapeamento SEM passar pelo histórico — quem chama já está
+/// dentro de uma mutação. Mesma curva que o painel de velocidade cria.
+void enable_time_remap_curve(Layer& l) noexcept {
+    if (l.timeRemapEnabled) return;
+    if (l.timeRemap.keys.empty()) {
+        const f64 s0 = l.source_frame(l.start), s1 = l.source_frame(l.end);
+        l.timeRemap.property = TrackProperty::TimeRemap;
+        l.timeRemap.set(l.local_time(l.start), static_cast<f32>(s0));
+        l.timeRemap.set(l.local_time(l.end), static_cast<f32>(s1));
+    }
+    l.timeRemapEnabled = true;
+}
+
+/// Grava o tempo (segundos da FONTE) na curva, no instante local: atualiza a
+/// chave que já existe ali ou cria uma. É o "mexer no valor" do efeito.
+void write_time_remap(Layer& l, FrameIndex local, f32 sourceFrames, Interpolation interp) noexcept {
+    const u32 at = l.timeRemap.find_exact(local);
+    if (at == kInvalidIndex) l.timeRemap.set(local, sourceFrames, interp);
+    else {
+        l.timeRemap.keys[at].value = sourceFrames;
+        l.timeRemap.keys[at].interp = interp;
+    }
+}
+
+} // namespace
+
+namespace {
 constexpr u32 kCameraTrackerVersion = 1;
 
 struct CameraTrackResult {
@@ -1231,9 +1264,16 @@ Result<u64> Engine::add_text(const char* content) noexcept {
     l->text.size = std::round(0.12f * static_cast<f32>(std::min(comp->width(), comp->height())));
     l->text.color = Vec4{1, 1, 1, 1};
     l->text.alignment = 1;
-    const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+    // O cursor pode estar DEPOIS do fim da composição (a timeline não trava
+    // mais no fim): a camada nasce onde ele está e a duração acompanha, senão
+    // ela nasceria fora do projeto e não apareceria.
+    const i64 t = std::max<i64>(0, playback_.current().value);
     l->start = FrameIndex{t};
     l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    if (l->end.value > comp->duration().value) {
+        comp->set_duration(l->end);
+        playback_.configure(comp->fps(), comp->duration());
+    }
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     recenter_text(*l);
     project_->mark_dirty();
@@ -1331,9 +1371,16 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     l->threeD = threeD;
-    const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+    // O cursor pode estar DEPOIS do fim da composição (a timeline não trava
+    // mais no fim): a camada nasce onde ele está e a duração acompanha, senão
+    // ela nasceria fora do projeto e não apareceria.
+    const i64 t = std::max<i64>(0, playback_.current().value);
     l->start = FrameIndex{t};
     l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    if (l->end.value > comp->duration().value) {
+        comp->set_duration(l->end);
+        playback_.configure(comp->fps(), comp->duration());
+    }
     l->transform.anchor = Vec3{50.0f, 50.0f, 0.0f};   // caixa virtual de 100 px (alças no palco)
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     project_->mark_dirty();
@@ -2382,9 +2429,16 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     particle_preset(l->particles, preset, w, h);
     if (preset == 9) logo_burst_from_text(*comp, lid, l->particles);
     l->particles.seed = lid.index * 7919u + 1u;
-    const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+    // O cursor pode estar DEPOIS do fim da composição (a timeline não trava
+    // mais no fim): a camada nasce onde ele está e a duração acompanha, senão
+    // ela nasceria fora do projeto e não apareceria.
+    const i64 t = std::max<i64>(0, playback_.current().value);
     l->start = FrameIndex{t};
     l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    if (l->end.value > comp->duration().value) {
+        comp->set_duration(l->end);
+        playback_.configure(comp->fps(), comp->duration());
+    }
     l->transform.anchor = Vec3{w * 0.5f, h * 0.5f, 0};
     l->transform.position = Vec3{w * 0.5f, h * 0.5f, 0};
     project_->mark_dirty();
@@ -4082,9 +4136,16 @@ Result<u64> Engine::add_shape(u32 preset) noexcept {
     sh.innerRadius = pr.inner;
     sh.fillColor = Vec4{1.0f, 1.0f, 1.0f, 1.0f};
     sh.filled = true;
-    const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
+    // O cursor pode estar DEPOIS do fim da composição (a timeline não trava
+    // mais no fim): a camada nasce onde ele está e a duração acompanha, senão
+    // ela nasceria fora do projeto e não apareceria.
+    const i64 t = std::max<i64>(0, playback_.current().value);
     l->start = FrameIndex{t};
     l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    if (l->end.value > comp->duration().value) {
+        comp->set_duration(l->end);
+        playback_.configure(comp->fps(), comp->duration());
+    }
     l->transform.anchor = Vec3{sh.bounds.w * 0.5f, sh.bounds.h * 0.5f, 0.0f};
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     project_->mark_dirty();
@@ -6214,6 +6275,20 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
             const Track* t = l->tracks.find(TrackProperty::EffectParam, inst->id, param_track_key(i, c));
             if (t && !t->keys.empty()) row.animated = 1;
         }
+        // Remapear tempo: "Tempo" e "Interpolação do tempo" leem a CURVA da
+        // camada, não um parâmetro guardado — é o mesmo dado do gráfico.
+        if (is_time_remap_type(inst->type)) {
+            const f64 compFps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+            if (i == 0) {
+                const f32 base = static_cast<f32>(l->source_frame(playback_.current()));
+                const f32 frames = l->timeRemapEnabled ? l->timeRemap.value_or(local, base) : base;
+                row.value[0] = static_cast<f32>(frames / compFps);   // segundos da fonte
+                row.animated = l->timeRemap.keys.size() > 1 ? 1u : 0u;
+            } else if (i == 1) {
+                const u32 at = l->timeRemap.find_exact(local);
+                row.value[0] = at != kInvalidIndex && l->timeRemap.keys[at].interp == Interpolation::Hold ? 2.0f : 0.0f;
+            }
+        }
         out[written++] = row;
     }
     return written;
@@ -7400,6 +7475,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             } else {
                 l->effects.push_back(std::move(e));
             }
+            // Remapear tempo é declarativo: quem age é a curva da camada. Pôr o
+            // efeito liga a curva (a rampa equivalente ao tempo de agora), como
+            // ligar o remapeamento no painel de velocidade.
+            if (is_time_remap_type(type)) enable_time_remap_curve(*l);
             return OkStatus;
         }
         case CommandType::EffectRemove: {
@@ -7408,6 +7487,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const u32 idx = l->effect_index(cmd.effect_ref.effect);
             if (idx == kInvalidIndex) return Errc::NotFound;
             const u32 id = l->effects[idx].id;
+            const bool era_remap = is_time_remap_type(l->effects[idx].type);
             l->effects.erase(l->effects.begin() + idx);
             // Os keyframes do efeito saem junto: órfãos ficariam no arquivo e
             // voltariam a animar um efeito novo que reusasse o id.
@@ -7415,6 +7495,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 Track& tr = l->tracks.at(t);
                 if (tr.property == TrackProperty::EffectParam && tr.effectIndex == id) tr.clear();
             }
+            // Tirar o Remapear tempo desliga a curva — mas ela FICA guardada,
+            // igual a desligar o remapeamento pelo painel de velocidade.
+            if (era_remap) l->timeRemapEnabled = false;
             return OkStatus;
         }
         case CommandType::EffectReorder: {
@@ -7443,6 +7526,33 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!e) return Errc::NotFound;
             const u32 p = cmd.effect_param.paramIndex;
             if (p >= e->params.size()) return Errc::OutOfRange;
+            // Remapear tempo: "Tempo" e "Interpolação do tempo" SÃO a curva da
+            // camada (o mesmo dado que o gráfico do painel de velocidade edita),
+            // em segundos da fonte como no After Effects.
+            if (is_time_remap_type(e->type)) {
+                const f64 compFps = comp && comp->fps() > 0.0 ? comp->fps() : 30.0;
+                const FrameIndex local = l->local_time(playback_.current());
+                enable_time_remap_curve(*l);
+                const u32 at = l->timeRemap.find_exact(local);
+                if (p == 0) {
+                    // "Tempo" em segundos da fonte; a curva guarda quadros.
+                    const f32 frames = static_cast<f32>(cmd.effect_param.value * compFps);
+                    // A chave nova nasce linear; a que já existe mantém a sua.
+                    const Interpolation interp = at == kInvalidIndex ? Interpolation::Linear : l->timeRemap.keys[at].interp;
+                    write_time_remap(*l, local, frames, interp);
+                    e->params[0].constant.v[0] = cmd.effect_param.value;
+                    return OkStatus;
+                }
+                if (p == 1) {
+                    // Modos do AE: 0 Linear, 1 Suave, 2 Segurar.
+                    if (at != kInvalidIndex) {
+                        l->timeRemap.keys[at].interp =
+                            cmd.effect_param.value >= 1.5f ? Interpolation::Hold : Interpolation::Linear;
+                    }
+                    e->params[1].constant.v[0] = cmd.effect_param.value;
+                    return OkStatus;
+                }
+            }
             e->params[p].constant.v[0] = cmd.effect_param.value;
             return OkStatus;
         }
@@ -7481,7 +7591,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const i64 frames = std::max<i64>(1, static_cast<i64>(std::llround(span / s)));
             l->speed = s;
             l->end = FrameIndex{l->start.value + frames};
-            if (l->end.value > comp->duration().value) comp->set_duration(l->end);
+            if (l->end.value > comp->duration().value) {
+        comp->set_duration(l->end);
+        playback_.configure(comp->fps(), comp->duration());
+    }
             playback_.configure(comp->fps(), comp->duration());
             return OkStatus;
         }

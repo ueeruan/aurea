@@ -52,9 +52,12 @@ i64 PlaybackController::frame_to_ns(FrameIndex f) const noexcept { return tick_a
 FrameIndex PlaybackController::ns_to_frame(i64 ns) const noexcept { return frame_at(TickNs{ns}, fps_); }
 
 FrameIndex PlaybackController::clamp_frame(FrameIndex f) const noexcept {
-    if (f.value < 0) return FrameIndex{0};
-    if (f.value > duration_.value - 1) return FrameIndex{duration_.value - 1};
-    return f;
+    // Só o piso. O cursor PODE ficar depois do fim da composição: a duração diz
+    // até onde o conteúdo roda, não até onde a timeline existe. Prender o
+    // cursor ao último quadro travava a timeline inteira no fim do projeto (o
+    // scrub, o passo, o zoom e o arrasto param todos aqui) — era o "trava em
+    // 09 segundo". Quem toca continua parando no fim (ver `update`).
+    return FrameIndex{f.value < 0 ? 0 : f.value};
 }
 
 void PlaybackController::play(u64 nowNs) noexcept {

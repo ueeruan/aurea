@@ -1576,4 +1576,7 @@ to edit the curve.</string>
     <string name="pn_t3d_receive_shadow">Receive shadow</string>
     <string name="pn_t3d_on">On</string>
     <string name="pn_t3d_off">Off</string>
+    <string name="fx_name_time_remap">Time Remap</string>
+    <string name="fx_tempo">Time</string>
+    <string name="fx_interpolacao_do_tempo">Time Interpolation</string>
 </resources>

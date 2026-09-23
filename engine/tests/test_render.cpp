@@ -510,7 +510,9 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     //   luz e cor 5 (brilho profundo, raios, faixa de luz, desfoque de lente, colorama)
     //   glitch e dano 9 (glitchify, VHS, VHS fita, sinal, cruz, holomatrix, filme, JPEG, ordenar pixels)
     //   tempo 2 (posterizar tempo, RGB no tempo)
-    AUREA_CHECK_EQ(before, static_cast<u32>(47));
+    // + remapear tempo (9.3): o remapeamento da camada com o nome e a cara do
+    //   After Effects, no navegador de efeitos ao lado do Posterizar tempo.
+    AUREA_CHECK_EQ(before, static_cast<u32>(48));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

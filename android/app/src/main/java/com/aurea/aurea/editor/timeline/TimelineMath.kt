@@ -31,9 +31,16 @@ internal object TimeAxis {
     fun frameAt(x: Float, view: Double, pxPerFrame: Float, centerX: Float): Double =
         view + (x - centerX) / pxPerFrame
 
-    /** A vista não sai da composição: o motor não tem playhead antes de 0 nem depois do fim. */
+    /**
+     * A vista não vai para antes do zero, mas PODE passar do fim da composição
+     * — o motor também deixa o cursor lá. Prender a vista ao último quadro
+     * travava a timeline inteira no fim do projeto (arrastar e ampliar paravam
+     * junto com o cursor), que era o "trava em 09 segundo" do relato.
+     * O teto fica em `durationFrames` para não rolar para o vazio sem fim; a
+     * duração ainda é o que delimita o conteúdo, e é ela que a régua desenha.
+     */
     fun clampView(view: Double, durationFrames: Int): Double =
-        view.coerceIn(0.0, max(0, durationFrames - 1).toDouble())
+        view.coerceIn(0.0, max(0, durationFrames).toDouble())
 }
 
 /** Zoom em dp por segundo. */

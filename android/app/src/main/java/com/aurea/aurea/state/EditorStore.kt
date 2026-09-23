@@ -1785,7 +1785,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return (frame / fps * 1_000_000_000.0).toLong()
     }
 
-    private fun clampFrame(frame: Int) = frame.coerceIn(0, max(0, project.durationFrames - 1))
+    /**
+     * O cursor só tem PISO. Ele pode ficar depois do fim da composição: a
+     * duração diz até onde o conteúdo roda, não até onde a timeline existe.
+     * Prender ao último quadro travava a timeline inteira no fim do projeto
+     * (scrub, passo e zoom usam este clamp) — era o "trava em 09 segundo".
+     */
+    private fun clampFrame(frame: Int) = max(0, frame)
 
     fun play() = send { play() }
     fun pause() = send { pause() }

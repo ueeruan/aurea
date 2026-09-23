@@ -3,6 +3,10 @@
 
 #include "aurea/timeline/Timeline.hpp"
 #include "aurea/timeline/Composition.hpp"
+#include "aurea/playback/Playback.hpp"
+#include "aurea/Engine.hpp"
+#include "aurea/bridge/BridgePods.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 
 using namespace aurea;
 
@@ -356,4 +360,145 @@ AUREA_TEST(Composition, RetimeKeepsSecondsNotFrames) {
     AUREA_CHECK_EQ(d->keys.size(), static_cast<size_t>(2));
     AUREA_CHECK_EQ(d->keys[1].time.value, static_cast<i64>(1));
     AUREA_CHECK(c.layer(id)->end.value > c.layer(id)->start.value);
+}
+
+// -----------------------------------------------------------------------------
+// O cursor passa do fim
+// -----------------------------------------------------------------------------
+
+AUREA_TEST(Timeline, PlayheadGoesPastTheEndOfTheComposition) {
+    // A duração diz até onde o CONTEÚDO roda, não até onde a timeline existe.
+    // Prender o cursor ao último quadro travava a timeline inteira no fim do
+    // projeto: o scrub, o passo e o zoom param todos no mesmo clamp.
+    PlaybackController p;
+    p.configure(30.0, FrameIndex{294});   // 9 s 24 q — o projeto do relato
+    AUREA_CHECK_EQ(p.current().value, static_cast<i64>(0));
+
+    p.seek(FrameIndex{600}, 1000);
+    std::printf("\n    duracao 294: cursor pedido 600 -> %lld\n", static_cast<long long>(p.current().value));
+    AUREA_CHECK_EQ(p.current().value, static_cast<i64>(600));
+
+    p.begin_scrub(2000);
+    p.scrub(FrameIndex{400}, 3000);
+    AUREA_CHECK_EQ(p.current().value, static_cast<i64>(400));
+    p.end_scrub(4000);
+
+    // O passo também anda para depois do fim…
+    p.seek(FrameIndex{292}, 5000);
+    p.step(10, 6000);
+    AUREA_CHECK_EQ(p.current().value, static_cast<i64>(302));
+
+    // …e o cursor nunca vai para antes do zero.
+    p.seek(FrameIndex{-50}, 7000);
+    AUREA_CHECK_EQ(p.current().value, static_cast<i64>(0));
+
+    // TOCAR continua parando no fim da composição: é o fim do conteúdo.
+    p.seek(FrameIndex{290}, 8000);
+    p.play(8000);
+    const FrameIndex fim = p.update(8000 + static_cast<u64>(tick_at(FrameIndex{10}, 30.0).value));
+    std::printf("    tocando alem do fim: parou em %lld (ultimo quadro 293)\n", static_cast<long long>(fim.value));
+    AUREA_CHECK_EQ(fim.value, static_cast<i64>(293));
+}
+
+// -----------------------------------------------------------------------------
+// Remapear tempo como EFEITO
+// -----------------------------------------------------------------------------
+
+AUREA_TEST(Timeline, TimeRemapIsAnEffectOverTheLayerCurve) {
+    // "Remapear tempo" entra no navegador de efeitos, ao lado do Posterizar
+    // tempo, mas NÃO guarda um segundo remapeamento: o parâmetro "Tempo" É a
+    // curva da camada (a mesma que o gráfico do painel de velocidade edita).
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+
+    std::vector<u8> px(64 * 64 * 4, 255);
+    const Result<u64> vid = e.import_image(px.data(), 64, 64, "quadro.png", nullptr);
+    AUREA_CHECK(vid.ok());
+    if (!vid.ok()) return;
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*vid));
+    l->end = FrameIndex{300};
+
+    AUREA_CHECK(!l->timeRemapEnabled);
+    AUREA_CHECK(l->timeRemap.keys.empty());
+
+    // Pôr o efeito liga a curva (a rampa equivalente ao tempo de agora).
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(*vid);
+    add.effect_add.effectType = effect_type_id(effect_keys::kTimeRemap);
+    AUREA_CHECK(e.apply_command(add).ok());
+    AUREA_CHECK(l->timeRemapEnabled);
+    AUREA_CHECK(l->timeRemap.keys.size() == 2);
+    const u32 effectId = l->effects.back().id;
+
+    // "Tempo" em segundos da fonte: gravar no cabeçote grava na curva.
+    Command seg;
+    seg.type = CommandType::PlaybackSeek;
+    seg.seek.time = tick_at(FrameIndex{60}, 30.0);
+    AUREA_CHECK(e.apply_command(seg).ok());
+
+    Command set;
+    set.type = CommandType::EffectSetParam;
+    set.effect_param.layer = LayerId::unpack(*vid);
+    set.effect_param.effect = EffectId{effectId, 0};
+    set.effect_param.paramIndex = 0;
+    set.effect_param.value = 1.0f;   // 1 segundo da fonte = 30 quadros
+    AUREA_CHECK(e.apply_command(set).ok());
+    const i64 local60 = 60;
+    const u32 at = l->timeRemap.find_exact(FrameIndex{local60});
+    AUREA_CHECK(at != kInvalidIndex);
+    std::printf("\n    curva: %zu chaves; no quadro 60 a fonte esta em %.1f quadros (pedido 30)\n",
+                l->timeRemap.keys.size(), static_cast<double>(l->timeRemap.keys[at].value));
+    AUREA_CHECK(std::fabs(l->timeRemap.keys[at].value - 30.0f) < 0.01f);
+
+    // Ler o parâmetro devolve o MESMO valor, em segundos, e marcado animado.
+    bridge::EffectParamRow rows[8]{};
+    char blob[512]{};
+    const u32 n = e.query_effect_params(*vid, effectId, rows, 8, blob, sizeof(blob));
+    AUREA_CHECK(n >= 2);
+    AUREA_CHECK(rows[0].index == 0);
+    std::printf("    parametro Tempo no quadro 60: %.2f s (animado %u); interpolacao %.0f\n",
+                static_cast<double>(rows[0].value[0]), rows[0].animated, static_cast<double>(rows[1].value[0]));
+    AUREA_CHECK(std::fabs(rows[0].value[0] - 1.0f) < 0.02f);
+    AUREA_CHECK(rows[0].animated == 1u);
+
+    // Segurar o quadro: modo 2 do AE vira Hold na chave do cabeçote.
+    Command hold;
+    hold.type = CommandType::EffectSetParam;
+    hold.effect_param.layer = LayerId::unpack(*vid);
+    hold.effect_param.effect = EffectId{effectId, 0};
+    hold.effect_param.paramIndex = 1;
+    hold.effect_param.value = 2.0f;
+    AUREA_CHECK(e.apply_command(hold).ok());
+    AUREA_CHECK(l->timeRemap.keys[l->timeRemap.find_exact(FrameIndex{local60})].interp == Interpolation::Hold);
+    AUREA_CHECK(e.query_effect_params(*vid, effectId, rows, 8, blob, sizeof(blob)) >= 2);
+    AUREA_CHECK(std::fabs(rows[1].value[0] - 2.0f) < 0.01f);
+
+    // Salvar e reabrir: a curva volta com o efeito.
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_remap_efeito.aurea";
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    Composition* comp2 = e.project()->timeline().composition(e.project()->timeline().current());
+    Layer* l2 = comp2->layer(LayerId::unpack(*vid));
+    AUREA_CHECK(l2 != nullptr);
+    if (l2) {
+        AUREA_CHECK(l2->timeRemapEnabled);
+        AUREA_CHECK(l2->timeRemap.find_exact(FrameIndex{local60}) != kInvalidIndex);
+        AUREA_CHECK(std::fabs(l2->timeRemap.keys[l2->timeRemap.find_exact(FrameIndex{local60})].value - 30.0f) < 0.01f);
+    }
+
+    // Tirar o efeito desliga a curva — mas a curva FICA guardada.
+    Command del;
+    del.type = CommandType::EffectRemove;
+    del.effect_ref.layer = LayerId::unpack(*vid);
+    del.effect_ref.effect = EffectId{effectId, 0};
+    AUREA_CHECK(e.apply_command(del).ok());
+    AUREA_CHECK(l2 && !l2->timeRemapEnabled);
+    AUREA_CHECK(l2 && !l2->timeRemap.keys.empty());
+    std::remove(path.c_str());
 }

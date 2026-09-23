@@ -1611,4 +1611,7 @@
     <string name="pn_t3d_receive_shadow">Recebe sombra</string>
     <string name="pn_t3d_on">Ligar</string>
     <string name="pn_t3d_off">Desligar</string>
+    <string name="fx_name_time_remap">Remapear tempo</string>
+    <string name="fx_tempo">Tempo</string>
+    <string name="fx_interpolacao_do_tempo">Interpolação do tempo</string>
 </resources>

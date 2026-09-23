@@ -83,9 +83,59 @@ public:
 
 } // namespace
 
+// -----------------------------------------------------------------------------
+// Remapear tempo
+//
+// O MESMO remapeamento do painel de velocidade (a curva `Layer::timeRemap`),
+// com o nome e a cara do After Effects: aparece no navegador de efeitos, ao
+// lado do Posterizar tempo, com as linhas dele.
+//
+// O parâmetro "Tempo" **É** a curva — não uma cópia. Ler devolve o quadro da
+// fonte que toca no cabeçote; gravar grava na chave daquele instante (criando-a
+// se não houver). Assim o efeito aceita keyframe como qualquer outro, o gráfico
+// do painel de velocidade edita o mesmo dado, e não existe um segundo
+// remapeamento para dessincronizar do primeiro.
+//
+// Ele não desenha na cadeia de pixels (`is_identity`): quem age é o Temporal
+// Engine, que já resolve "qual quadro da fonte toca neste instante" com o cache
+// de quadros e o desfoque de movimento. Fazer um segundo caminho aqui dentro
+// seria duplicar o difícil.
+//
+// NÃO tem "Manter o tom do áudio": o motor não faz time-stretch (o áudio
+// acompanha a velocidade por reamostragem, o tom sobe junto). Um interruptor
+// que não faz nada seria pior que a linha que falta.
+// -----------------------------------------------------------------------------
+class TimeRemapEffect final : public Effect {
+public:
+    enum : u32 { kTime = 0, kInterpolation };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kTimeRemap, "Remapear tempo", "Tempo", EffectClass::Temporal};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        // Os três modos do After Effects, na ordem dele.
+        static const char* const kInterp[] = {"Linear", "Suave", "Segurar"};
+        // O teto é o da fonte inteira (o motor prende no último quadro dela).
+        p.add_float("time", "Tempo", 0.0f, 0.0f, 86400.0f, kParamAnimatable, "s");
+        p.add_enum("interpolation", "Interpolação do tempo", kInterp, 3, 0);
+    }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+
+    /// O modo do AE (0 Linear, 1 Suave, 2 Segurar) na interpolação do motor.
+    [[nodiscard]] static Interpolation interp_of(u32 mode) noexcept {
+        return mode == 2 ? Interpolation::Hold : Interpolation::Linear;
+    }
+    [[nodiscard]] static u32 mode_of(Interpolation i) noexcept {
+        return i == Interpolation::Hold ? 2u : 0u;
+    }
+};
+
 void register_temporal_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<PosterizeTime>());
     (void)r.add(std::make_unique<TimeWarpRgb>());
+    (void)r.add(std::make_unique<TimeRemapEffect>());
 }
+
 
 } // namespace aurea::builtin

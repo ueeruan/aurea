@@ -1,0 +1,1746 @@
+{
+ "faltando": [
+  "fx_alargar_cor",
+  "fx_aleatoriedade",
+  "fx_altura",
+  "fx_altura_banda",
+  "fx_altura_faixa",
+  "fx_altura_linha",
+  "fx_altura_onda",
+  "fx_altura_perda",
+  "fx_altura_total",
+  "fx_amostras",
+  "fx_amplitude_x",
+  "fx_amplitude_y",
+  "fx_anelamento",
+  "fx_angulo",
+  "fx_animado",
+  "fx_azul_582d",
+  "fx_balanco_porta",
+  "fx_bandas_perdidas",
+  "fx_blocos",
+  "fx_blocos_corrompidos",
+  "fx_blocos_verticais",
+  "fx_bordas",
+  "fx_borrado_luma",
+  "fx_brilho",
+  "fx_brilho_bordas",
+  "fx_brilho_sujo",
+  "fx_calor_queimado",
+  "fx_canal",
+  "fx_celulas_grade",
+  "fx_centro",
+  "fx_ciclos",
+  "fx_comparar",
+  "fx_compensacao",
+  "fx_complexidade",
+  "fx_comprimento",
+  "fx_comprimento_onda",
+  "fx_comprimento_risco",
+  "fx_contraste",
+  "fx_cor_brilho",
+  "fx_cor_luzes",
+  "fx_cor_remover",
+  "fx_cor_sombras",
+  "fx_corrupcao_cor",
+  "fx_dano_cor",
+  "fx_decaimento",
+  "fx_degradacao_cor",
+  "fx_deriva",
+  "fx_desc_blur_gaussian",
+  "fx_desc_blur_lens",
+  "fx_desc_blur_sharpen",
+  "fx_desc_blur_unsharp",
+  "fx_desc_color_brightness_contrast",
+  "fx_desc_color_colorama",
+  "fx_desc_color_curves",
+  "fx_desc_color_exposure",
+  "fx_desc_color_invert",
+  "fx_desc_color_levels",
+  "fx_desc_color_matrix",
+  "fx_desc_color_saturation",
+  "fx_desc_color_tint",
+  "fx_desc_control_angle",
+  "fx_desc_control_checkbox",
+  "fx_desc_control_color",
+  "fx_desc_control_point",
+  "fx_desc_control_slider",
+  "fx_desc_distort_ripple_dissolve",
+  "fx_desc_distort_shake",
+  "fx_desc_distort_turbulence",
+  "fx_desc_distort_warp",
+  "fx_desc_distort_wave_warp",
+  "fx_desc_glitch_cross",
+  "fx_desc_glitch_glitchify",
+  "fx_desc_glitch_signal",
+  "fx_desc_glitch_uni_vhs",
+  "fx_desc_glitch_vhs",
+  "fx_desc_key_chroma",
+  "fx_desc_key_luma",
+  "fx_desc_light_deep_glow",
+  "fx_desc_light_glow",
+  "fx_desc_light_rays",
+  "fx_desc_light_sweep",
+  "fx_desc_stylize_film_damage",
+  "fx_desc_stylize_grain",
+  "fx_desc_stylize_halftone",
+  "fx_desc_stylize_holomatrix",
+  "fx_desc_stylize_jpeg_damage",
+  "fx_desc_stylize_minimax",
+  "fx_desc_stylize_motion_tile",
+  "fx_desc_stylize_pixel_sort",
+  "fx_desc_stylize_scanlines",
+  "fx_desc_time_echo",
+  "fx_desc_time_posterize",
+  "fx_desc_time_warp_rgb",
+  "fx_desc_transform",
+  "fx_desfoque",
+  "fx_deslocamento",
+  "fx_deslocamento_x",
+  "fx_deslocamento_y",
+  "fx_deslocar_horizontal",
+  "fx_desvanecer",
+  "fx_direcao",
+  "fx_distorcer_imagem_junto",
+  "fx_eixos_separados",
+  "fx_emenda",
+  "fx_entrada",
+  "fx_espelhar",
+  "fx_esticar_bordas",
+  "fx_estouro",
+  "fx_evolucao",
+  "fx_faixa_horizontal",
+  "fx_faixa_tom",
+  "fx_faixa_vertical",
+  "fx_fase",
+  "fx_fora_dentro",
+  "fx_forca_halo",
+  "fx_forca_nucleo",
+  "fx_forma",
+  "fx_frequencia",
+  "fx_frequencia_ondulacao",
+  "fx_fundo_aceso",
+  "fx_fundo_claro",
+  "fx_ganho",
+  "fx_ganho_luzes",
+  "fx_ganho_ponto",
+  "fx_girar_cor",
+  "fx_girar_deslocamento",
+  "fx_grade",
+  "fx_grades_separadas",
+  "fx_grao_cor",
+  "fx_guardar_cor_fonte",
+  "fx_halo_tela",
+  "fx_instabilidade",
+  "fx_intensidade",
+  "fx_interferencia",
+  "fx_intervalo",
+  "fx_inverter_arco_iris",
+  "fx_lados_iris",
+  "fx_largura",
+  "fx_largura_faixa",
+  "fx_largura_onda",
+  "fx_largura_total",
+  "fx_largura_varredura",
+  "fx_limiar",
+  "fx_limiar_alto",
+  "fx_limiar_baixo",
+  "fx_limite",
+  "fx_limpar_contorno",
+  "fx_luz_esfera",
+  "fx_luzes",
+  "fx_matrix_bb",
+  "fx_matrix_bg",
+  "fx_matrix_bo",
+  "fx_matrix_br",
+  "fx_matrix_gb",
+  "fx_matrix_gg",
+  "fx_matrix_go",
+  "fx_matrix_gr",
+  "fx_matrix_rb",
+  "fx_matrix_rg",
+  "fx_matrix_ro",
+  "fx_matrix_rr",
+  "fx_mistura",
+  "fx_mistura_cor",
+  "fx_misturar_canais",
+  "fx_modo",
+  "fx_monocromatico",
+  "fx_mosaico",
+  "fx_multiplicar",
+  "fx_onda_quadrada",
+  "fx_ondulacao",
+  "fx_operacao",
+  "fx_ordenar",
+  "fx_padrao",
+  "fx_passo",
+  "fx_perdas_fita",
+  "fx_perder_sincronia",
+  "fx_peso_croma",
+  "fx_picos",
+  "fx_piscar",
+  "fx_pivo",
+  "fx_poeira",
+  "fx_ponto_branco",
+  "fx_ponto_luz",
+  "fx_ponto_preto",
+  "fx_posicao",
+  "fx_posicao_varredura",
+  "fx_prender_nas_pontas",
+  "fx_preservar_sombras",
+  "fx_progresso",
+  "fx_quadros_segundo",
+  "fx_qualidade",
+  "fx_queimado",
+  "fx_raio",
+  "fx_raio_halo",
+  "fx_raio_nucleo",
+  "fx_recorte_brilho",
+  "fx_recorte_cor",
+  "fx_relevo",
+  "fx_remover",
+  "fx_riscos",
+  "fx_rolagem",
+  "fx_rotacao",
+  "fx_rotacao_canal",
+  "fx_rotacao_iris",
+  "fx_rugosidade",
+  "fx_ruido",
+  "fx_ruido_fundo",
+  "fx_ruido_sinal",
+  "fx_sangramento",
+  "fx_saturacao",
+  "fx_segurar_quadro",
+  "fx_sentido_inverso",
+  "fx_separacao_cor",
+  "fx_separacao_rgb",
+  "fx_separar_cores",
+  "fx_so_brilho",
+  "fx_so_onde_imagem_clara",
+  "fx_sombras",
+  "fx_suavidade",
+  "fx_suavidade_borda",
+  "fx_suavizacao",
+  "fx_suavizar_bloco",
+  "fx_tamanho_bloco",
+  "fx_tamanho_grao",
+  "fx_tamanho_poeira",
+  "fx_tamanho_ponto",
+  "fx_tamanho_ruido",
+  "fx_tons_medios",
+  "fx_travar_nas_bordas",
+  "fx_travar_quadro",
+  "fx_unidade",
+  "fx_varredura",
+  "fx_varredura_cabecote",
+  "fx_velocidade",
+  "fx_velocidade_instabilidade",
+  "fx_velocidade_onda",
+  "fx_velocidade_varredura",
+  "fx_verde_14e6",
+  "fx_vermelho_c031",
+  "fx_vinheta",
+  "pn_back_to_layer_tools",
+  "pn_blend_add",
+  "pn_blend_cat_contrast",
+  "pn_blend_color",
+  "pn_blend_color_burn",
+  "pn_blend_color_dodge",
+  "pn_blend_darken",
+  "pn_blend_difference",
+  "pn_blend_exclusion",
+  "pn_blend_hard_light",
+  "pn_blend_help",
+  "pn_blend_hue",
+  "pn_blend_lighten",
+  "pn_blend_luminosity",
+  "pn_blend_multiply",
+  "pn_blend_overlay",
+  "pn_blend_saturation",
+  "pn_blend_screen",
+  "pn_blend_soft_light",
+  "pn_blend_subtract",
+  "pn_caption",
+  "pn_caption_break_pauses",
+  "pn_caption_chars_per_line",
+  "pn_caption_create",
+  "pn_caption_delete_word",
+  "pn_caption_grouped",
+  "pn_caption_highlight_word",
+  "pn_caption_lang_auto",
+  "pn_caption_lines",
+  "pn_caption_one_per_word",
+  "pn_caption_pos_bottom",
+  "pn_caption_pos_middle",
+  "pn_caption_pos_top",
+  "pn_caption_redo",
+  "pn_caption_remove_fillers",
+  "pn_caption_remove_n",
+  "pn_caption_screen_height",
+  "pn_caption_style_classic",
+  "pn_caption_style_highlight",
+  "pn_caption_style_neon",
+  "pn_caption_uppercase",
+  "pn_caption_words_per_caption",
+  "pn_curve_family_bezier",
+  "pn_curve_segment",
+  "pn_curve_symmetric",
+  "pn_depth",
+  "pn_ease_bezier_custom",
+  "pn_ease_hold",
+  "pn_ease_in",
+  "pn_ease_in_out",
+  "pn_ease_out",
+  "pn_env_light_hint",
+  "pn_env_rotate_light",
+  "pn_expr_error_at",
+  "pn_karaoke",
+  "pn_mask_n",
+  "pn_mask_n_open",
+  "pn_mask_pick_layer_below",
+  "pn_ok",
+  "pn_pop",
+  "pn_preset_n",
+  "pn_size_large_short",
+  "pn_size_medium_short",
+  "pn_size_small_short",
+  "pn_text3d_placeholder",
+  "pn_text3d_title",
+  "pn_textpreset_appear",
+  "pn_textpreset_bounce",
+  "pn_textpreset_elastic",
+  "pn_textpreset_slide",
+  "pn_textpreset_typewriter",
+  "pn_textpreset_wave",
+  "pn_textpreset_word_highlight",
+  "pn_transform_title_tab",
+  "sh_add_captions_need_speech",
+  "sh_add_detect_beats",
+  "sh_add_group_selection",
+  "sh_add_marker_at_playhead",
+  "sh_add_model_3d",
+  "sh_add_model_3d_hint",
+  "sh_add_null",
+  "sh_add_null_3d",
+  "sh_add_pick_layers_to_group",
+  "sh_add_speech_captions",
+  "sh_add_tab_3d",
+  "sh_add_tab_audio",
+  "sh_add_tab_draw",
+  "sh_add_tab_element",
+  "sh_add_tab_media",
+  "sh_add_tab_shape",
+  "sh_add_tab_text",
+  "sh_add_tab_vector",
+  "sh_add_text_3d",
+  "sh_add_video_sound",
+  "sh_aspect_ratio_desc",
+  "sh_bg_black",
+  "sh_bg_white",
+  "sh_device_exports_up_to",
+  "sh_diag_3d",
+  "sh_diag_audio",
+  "sh_diag_blur",
+  "sh_diag_cache",
+  "sh_diag_cpu",
+  "sh_diag_decode",
+  "sh_diag_dropped",
+  "sh_diag_fps",
+  "sh_diag_gpu_memory",
+  "sh_diag_gpu_no_timestamp",
+  "sh_diag_gpu_timers",
+  "sh_diag_heavy",
+  "sh_diag_hit_rate",
+  "sh_diag_low_memory",
+  "sh_diag_output",
+  "sh_diag_pacing",
+  "sh_diag_particles",
+  "sh_diag_passes",
+  "sh_diag_ram",
+  "sh_diag_scale",
+  "sh_diag_seeks",
+  "sh_diag_system_free",
+  "sh_diag_textures",
+  "sh_diag_thermal_critical",
+  "sh_diag_thermal_emergency",
+  "sh_diag_thermal_normal",
+  "sh_diag_thermal_serious",
+  "sh_diag_thermal_unknown",
+  "sh_diag_thermal_warm",
+  "sh_diag_ui_slow",
+  "sh_dock_captions",
+  "sh_dock_color_fill",
+  "sh_dock_edit_shape",
+  "sh_dock_edit_text",
+  "sh_dock_edit_vector",
+  "sh_dock_effects",
+  "sh_dock_environment",
+  "sh_dock_mask",
+  "sh_dock_opacity_blend",
+  "sh_dock_particles",
+  "sh_dock_presets",
+  "sh_dock_transform",
+  "sh_export_above_device",
+  "sh_export_fps_from_project",
+  "sh_export_progress",
+  "sh_layer_locked_unlock_to_move",
+  "sh_layers_locked_unlock_to_edit",
+  "sh_menu_cut_after",
+  "sh_menu_freeze_frame",
+  "sh_menu_media",
+  "sh_menu_no_layer_matches",
+  "sh_menu_search_layers",
+  "sh_menu_selection",
+  "sh_menu_shutter",
+  "sh_menu_speed_remap",
+  "sh_menu_volume",
+  "sh_pick_two_unlocked_layers",
+  "sh_playhead_into_layer",
+  "sh_shape_arrow",
+  "sh_shape_capsule",
+  "sh_shape_circle",
+  "sh_shape_cross",
+  "sh_shape_flower",
+  "sh_shape_right_triangle",
+  "sh_shape_ring",
+  "sh_shape_rounded",
+  "sh_shape_slice",
+  "sh_shape_square",
+  "sh_shape_triangle",
+  "sh_tap_inside_video"
+ ],
+ "pendentes": [
+  "pn_back_to_layer_tools",
+  "pn_caption_lang_auto",
+  "pn_curve_symmetric",
+  "pn_mask_n",
+  "pn_mask_n_open",
+  "pn_mask_pick_layer_below",
+  "pn_preset_n",
+  "pn_textpreset_appear",
+  "pn_textpreset_bounce",
+  "pn_textpreset_elastic",
+  "pn_textpreset_slide",
+  "pn_textpreset_typewriter",
+  "pn_textpreset_wave",
+  "pn_textpreset_word_highlight",
+  "sh_add_captions_need_speech",
+  "sh_add_pick_layers_to_group",
+  "sh_aspect_ratio_desc",
+  "sh_device_exports_up_to",
+  "sh_diag_3d",
+  "sh_diag_blur",
+  "sh_diag_cache",
+  "sh_diag_cpu",
+  "sh_diag_decode",
+  "sh_diag_fps",
+  "sh_diag_gpu_memory",
+  "sh_diag_heavy",
+  "sh_diag_hit_rate",
+  "sh_diag_low_memory",
+  "sh_diag_output",
+  "sh_diag_pacing",
+  "sh_diag_passes",
+  "sh_diag_ram",
+  "sh_diag_scale",
+  "sh_diag_system_free",
+  "sh_diag_ui_slow",
+  "sh_export_fps_from_project",
+  "sh_layer_locked_unlock_to_move",
+  "sh_shape_ring",
+  "sh_tap_inside_video"
+ ],
+ "usos": {
+  "fx_alargar_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:555"
+  ],
+  "fx_aleatoriedade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:466"
+  ],
+  "fx_altura": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:169"
+  ],
+  "fx_altura_banda": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:595"
+  ],
+  "fx_altura_faixa": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:536"
+  ],
+  "fx_altura_linha": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:218"
+  ],
+  "fx_altura_onda": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:342"
+  ],
+  "fx_altura_perda": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:563"
+  ],
+  "fx_altura_total": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:171"
+  ],
+  "fx_amostras": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:416"
+  ],
+  "fx_amplitude_x": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:309"
+  ],
+  "fx_amplitude_y": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:310"
+  ],
+  "fx_anelamento": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:502"
+  ],
+  "fx_angulo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:251",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:432"
+  ],
+  "fx_animado": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:238"
+  ],
+  "fx_azul_582d": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:641"
+  ],
+  "fx_balanco_porta": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:484"
+  ],
+  "fx_bandas_perdidas": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:592"
+  ],
+  "fx_blocos": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:501"
+  ],
+  "fx_blocos_corrompidos": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:507"
+  ],
+  "fx_blocos_verticais": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:543"
+  ],
+  "fx_bordas": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:331",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:348",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:363"
+  ],
+  "fx_borrado_luma": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:554"
+  ],
+  "fx_brilho": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:448"
+  ],
+  "fx_brilho_bordas": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:520"
+  ],
+  "fx_brilho_sujo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:576"
+  ],
+  "fx_calor_queimado": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:490"
+  ],
+  "fx_canal": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:221"
+  ],
+  "fx_celulas_grade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:519"
+  ],
+  "fx_centro": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:167",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:362",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:379"
+  ],
+  "fx_ciclos": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:446"
+  ],
+  "fx_comparar": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:271"
+  ],
+  "fx_compensacao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:87"
+  ],
+  "fx_complexidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:327"
+  ],
+  "fx_comprimento": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:412",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:465"
+  ],
+  "fx_comprimento_onda": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:377"
+  ],
+  "fx_comprimento_risco": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:489"
+  ],
+  "fx_contraste": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:220",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:250"
+  ],
+  "fx_cor_brilho": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:397"
+  ],
+  "fx_cor_luzes": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:104"
+  ],
+  "fx_cor_remover": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:193"
+  ],
+  "fx_cor_sombras": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:104"
+  ],
+  "fx_corrupcao_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:544"
+  ],
+  "fx_dano_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:503"
+  ],
+  "fx_decaimento": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:414"
+  ],
+  "fx_degradacao_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:560"
+  ],
+  "fx_deriva": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:594"
+  ],
+  "fx_desc_blur_gaussian": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:93"
+  ],
+  "fx_desc_blur_lens": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:111"
+  ],
+  "fx_desc_blur_sharpen": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:94"
+  ],
+  "fx_desc_blur_unsharp": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:109"
+  ],
+  "fx_desc_color_brightness_contrast": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:87"
+  ],
+  "fx_desc_color_colorama": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:108"
+  ],
+  "fx_desc_color_curves": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:92"
+  ],
+  "fx_desc_color_exposure": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:86"
+  ],
+  "fx_desc_color_invert": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:107"
+  ],
+  "fx_desc_color_levels": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:91"
+  ],
+  "fx_desc_color_matrix": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:90"
+  ],
+  "fx_desc_color_saturation": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:88"
+  ],
+  "fx_desc_color_tint": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:89"
+  ],
+  "fx_desc_control_angle": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:152"
+  ],
+  "fx_desc_control_checkbox": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:153"
+  ],
+  "fx_desc_control_color": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:154"
+  ],
+  "fx_desc_control_point": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:155"
+  ],
+  "fx_desc_control_slider": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:151"
+  ],
+  "fx_desc_distort_ripple_dissolve": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:127"
+  ],
+  "fx_desc_distort_shake": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:120"
+  ],
+  "fx_desc_distort_turbulence": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:124"
+  ],
+  "fx_desc_distort_warp": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:126"
+  ],
+  "fx_desc_distort_wave_warp": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:125"
+  ],
+  "fx_desc_glitch_cross": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:140"
+  ],
+  "fx_desc_glitch_glitchify": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:136"
+  ],
+  "fx_desc_glitch_signal": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:139"
+  ],
+  "fx_desc_glitch_uni_vhs": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:138"
+  ],
+  "fx_desc_glitch_vhs": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:137"
+  ],
+  "fx_desc_key_chroma": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:104"
+  ],
+  "fx_desc_key_luma": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:103"
+  ],
+  "fx_desc_light_deep_glow": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:114"
+  ],
+  "fx_desc_light_glow": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:95"
+  ],
+  "fx_desc_light_rays": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:115"
+  ],
+  "fx_desc_light_sweep": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:116"
+  ],
+  "fx_desc_stylize_film_damage": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:133"
+  ],
+  "fx_desc_stylize_grain": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:129"
+  ],
+  "fx_desc_stylize_halftone": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:130"
+  ],
+  "fx_desc_stylize_holomatrix": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:135"
+  ],
+  "fx_desc_stylize_jpeg_damage": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:134"
+  ],
+  "fx_desc_stylize_minimax": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:131"
+  ],
+  "fx_desc_stylize_motion_tile": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:99"
+  ],
+  "fx_desc_stylize_pixel_sort": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:132"
+  ],
+  "fx_desc_stylize_scanlines": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:128"
+  ],
+  "fx_desc_time_echo": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:105"
+  ],
+  "fx_desc_time_posterize": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:142"
+  ],
+  "fx_desc_time_warp_rgb": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:147"
+  ],
+  "fx_desc_transform": [
+   "com/aurea/aurea/effects/EffectCatalogMeta.kt:85"
+  ],
+  "fx_desfoque": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:138"
+  ],
+  "fx_deslocamento": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:174",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:537",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:593",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:612"
+  ],
+  "fx_deslocamento_x": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:329"
+  ],
+  "fx_deslocamento_y": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:330"
+  ],
+  "fx_deslocar_horizontal": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:175"
+  ],
+  "fx_desvanecer": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:203"
+  ],
+  "fx_direcao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:143",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:346",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:467"
+  ],
+  "fx_distorcer_imagem_junto": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:381"
+  ],
+  "fx_eixos_separados": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:312"
+  ],
+  "fx_emenda": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:486"
+  ],
+  "fx_entrada": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:449"
+  ],
+  "fx_espelhar": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:172"
+  ],
+  "fx_esticar_bordas": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:144",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:173"
+  ],
+  "fx_estouro": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:401"
+  ],
+  "fx_evolucao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:328"
+  ],
+  "fx_faixa_horizontal": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:618"
+  ],
+  "fx_faixa_tom": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:470"
+  ],
+  "fx_faixa_vertical": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:617"
+  ],
+  "fx_fase": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:345",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:445"
+  ],
+  "fx_fora_dentro": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:382"
+  ],
+  "fx_forca_halo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:396"
+  ],
+  "fx_forca_nucleo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:395"
+  ],
+  "fx_forma": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:269"
+  ],
+  "fx_frequencia": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:311",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:540",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:597",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:615"
+  ],
+  "fx_frequencia_ondulacao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:582"
+  ],
+  "fx_fundo_aceso": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:525"
+  ],
+  "fx_fundo_claro": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:256"
+  ],
+  "fx_ganho": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:453"
+  ],
+  "fx_ganho_luzes": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:295"
+  ],
+  "fx_ganho_ponto": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:257"
+  ],
+  "fx_girar_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:418"
+  ],
+  "fx_girar_deslocamento": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:332"
+  ],
+  "fx_grade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:518"
+  ],
+  "fx_grades_separadas": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:255"
+  ],
+  "fx_grao_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:234"
+  ],
+  "fx_guardar_cor_fonte": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:417"
+  ],
+  "fx_halo_tela": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:399"
+  ],
+  "fx_instabilidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:556"
+  ],
+  "fx_intensidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:142",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:232",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:270",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:281",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:325",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:360",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:411",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:430",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:643"
+  ],
+  "fx_interferencia": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:523"
+  ],
+  "fx_intervalo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:202"
+  ],
+  "fx_inverter_arco_iris": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:451"
+  ],
+  "fx_lados_iris": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:296"
+  ],
+  "fx_largura": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:168",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:429"
+  ],
+  "fx_largura_faixa": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:611"
+  ],
+  "fx_largura_onda": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:343"
+  ],
+  "fx_largura_total": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:170"
+  ],
+  "fx_largura_varredura": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:522"
+  ],
+  "fx_limiar": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:283"
+  ],
+  "fx_limiar_alto": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:464"
+  ],
+  "fx_limiar_baixo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:463"
+  ],
+  "fx_limite": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:155",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:184",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:392",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:413"
+  ],
+  "fx_limpar_contorno": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:193"
+  ],
+  "fx_luz_esfera": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:365"
+  ],
+  "fx_luzes": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:237"
+  ],
+  "fx_matrix_bb": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:64"
+  ],
+  "fx_matrix_bg": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:64"
+  ],
+  "fx_matrix_bo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:64"
+  ],
+  "fx_matrix_br": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:64"
+  ],
+  "fx_matrix_gb": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:63"
+  ],
+  "fx_matrix_gg": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:63"
+  ],
+  "fx_matrix_go": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:63"
+  ],
+  "fx_matrix_gr": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:63"
+  ],
+  "fx_matrix_rb": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:62"
+  ],
+  "fx_matrix_rg": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:62"
+  ],
+  "fx_matrix_ro": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:62"
+  ],
+  "fx_matrix_rr": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:62"
+  ],
+  "fx_mistura": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:284",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:299",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:315",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:364",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:450",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:487",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:506",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:526",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:542",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:564",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:581",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:598",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:616"
+  ],
+  "fx_mistura_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:517"
+  ],
+  "fx_misturar_canais": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:110"
+  ],
+  "fx_modo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:359"
+  ],
+  "fx_monocromatico": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:239"
+  ],
+  "fx_mosaico": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:163"
+  ],
+  "fx_multiplicar": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:434"
+  ],
+  "fx_onda_quadrada": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:347"
+  ],
+  "fx_ondulacao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:376",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:575"
+  ],
+  "fx_operacao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:268"
+  ],
+  "fx_ordenar": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:469"
+  ],
+  "fx_padrao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:254"
+  ],
+  "fx_passo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:471"
+  ],
+  "fx_perdas_fita": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:557"
+  ],
+  "fx_perder_sincronia": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:599"
+  ],
+  "fx_peso_croma": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:452"
+  ],
+  "fx_picos": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:538"
+  ],
+  "fx_piscar": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:483"
+  ],
+  "fx_pivo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:75"
+  ],
+  "fx_poeira": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:481"
+  ],
+  "fx_ponto_branco": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:127"
+  ],
+  "fx_ponto_luz": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:415"
+  ],
+  "fx_ponto_preto": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:126"
+  ],
+  "fx_posicao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:428"
+  ],
+  "fx_posicao_varredura": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:521"
+  ],
+  "fx_prender_nas_pontas": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:644"
+  ],
+  "fx_preservar_sombras": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:398"
+  ],
+  "fx_progresso": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:375",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:610"
+  ],
+  "fx_quadros_segundo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:628"
+  ],
+  "fx_qualidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:298",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:500"
+  ],
+  "fx_queimado": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:485"
+  ],
+  "fx_raio": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:267",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:282",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:294",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:361"
+  ],
+  "fx_raio_halo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:394"
+  ],
+  "fx_raio_nucleo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:393"
+  ],
+  "fx_recorte_brilho": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:182"
+  ],
+  "fx_recorte_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:190"
+  ],
+  "fx_relevo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:433"
+  ],
+  "fx_remover": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:184"
+  ],
+  "fx_riscos": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:482"
+  ],
+  "fx_rolagem": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:222"
+  ],
+  "fx_rotacao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:313"
+  ],
+  "fx_rotacao_canal": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:253"
+  ],
+  "fx_rotacao_iris": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:297"
+  ],
+  "fx_rugosidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:235"
+  ],
+  "fx_ruido": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:559",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:579"
+  ],
+  "fx_ruido_fundo": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:613"
+  ],
+  "fx_ruido_sinal": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:596"
+  ],
+  "fx_sangramento": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:561"
+  ],
+  "fx_saturacao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:447",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:580"
+  ],
+  "fx_segurar_quadro": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:629"
+  ],
+  "fx_sentido_inverso": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:468"
+  ],
+  "fx_separacao_cor": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:600"
+  ],
+  "fx_separacao_rgb": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:539",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:574",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:614"
+  ],
+  "fx_separar_cores": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:204"
+  ],
+  "fx_so_brilho": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:400"
+  ],
+  "fx_so_onde_imagem_clara": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:435"
+  ],
+  "fx_sombras": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:236"
+  ],
+  "fx_suavidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:219",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:252"
+  ],
+  "fx_suavidade_borda": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:378",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:431"
+  ],
+  "fx_suavizacao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:314"
+  ],
+  "fx_suavizar_bloco": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:505"
+  ],
+  "fx_tamanho_bloco": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:504"
+  ],
+  "fx_tamanho_grao": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:233"
+  ],
+  "fx_tamanho_poeira": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:488"
+  ],
+  "fx_tamanho_ponto": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:249"
+  ],
+  "fx_tamanho_ruido": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:326"
+  ],
+  "fx_tons_medios": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:88",
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:128"
+  ],
+  "fx_travar_nas_bordas": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:349"
+  ],
+  "fx_travar_quadro": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:541"
+  ],
+  "fx_unidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:642"
+  ],
+  "fx_varredura": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:578"
+  ],
+  "fx_varredura_cabecote": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:558"
+  ],
+  "fx_velocidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:344"
+  ],
+  "fx_velocidade_instabilidade": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:562"
+  ],
+  "fx_velocidade_onda": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:380"
+  ],
+  "fx_velocidade_varredura": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:524"
+  ],
+  "fx_verde_14e6": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:640"
+  ],
+  "fx_vermelho_c031": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:639"
+  ],
+  "fx_vinheta": [
+   "com/aurea/aurea/editor/panels/EffectsHuman.kt:577"
+  ],
+  "pn_back_to_layer_tools": [
+   "com/aurea/aurea/editor/panels/PanelChrome.kt:97"
+  ],
+  "pn_blend_add": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:85"
+  ],
+  "pn_blend_cat_contrast": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:89"
+  ],
+  "pn_blend_color": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:103",
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:106"
+  ],
+  "pn_blend_color_burn": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:78"
+  ],
+  "pn_blend_color_dodge": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:85"
+  ],
+  "pn_blend_darken": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:75",
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:77"
+  ],
+  "pn_blend_difference": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:96",
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:98"
+  ],
+  "pn_blend_exclusion": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:98"
+  ],
+  "pn_blend_hard_light": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:92"
+  ],
+  "pn_blend_help": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:257"
+  ],
+  "pn_blend_hue": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:105"
+  ],
+  "pn_blend_lighten": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:82",
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:84"
+  ],
+  "pn_blend_luminosity": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:106"
+  ],
+  "pn_blend_multiply": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:77"
+  ],
+  "pn_blend_overlay": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:91"
+  ],
+  "pn_blend_saturation": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:105"
+  ],
+  "pn_blend_screen": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:84"
+  ],
+  "pn_blend_soft_light": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:91"
+  ],
+  "pn_blend_subtract": [
+   "com/aurea/aurea/editor/panels/AppearancePanel.kt:99"
+  ],
+  "pn_caption": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:100",
+   "com/aurea/aurea/presets/PresetLibrary.kt:20"
+  ],
+  "pn_caption_break_pauses": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:118"
+  ],
+  "pn_caption_chars_per_line": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:105"
+  ],
+  "pn_caption_create": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:122"
+  ],
+  "pn_caption_delete_word": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:192"
+  ],
+  "pn_caption_grouped": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:101"
+  ],
+  "pn_caption_highlight_word": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:116"
+  ],
+  "pn_caption_lang_auto": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:90"
+  ],
+  "pn_caption_lines": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:107"
+  ],
+  "pn_caption_one_per_word": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:101"
+  ],
+  "pn_caption_pos_bottom": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:112"
+  ],
+  "pn_caption_pos_middle": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:112"
+  ],
+  "pn_caption_pos_top": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:112"
+  ],
+  "pn_caption_redo": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:122"
+  ],
+  "pn_caption_remove_fillers": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:119"
+  ],
+  "pn_caption_remove_n": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:123"
+  ],
+  "pn_caption_screen_height": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:110"
+  ],
+  "pn_caption_style_classic": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:50"
+  ],
+  "pn_caption_style_highlight": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:50"
+  ],
+  "pn_caption_style_neon": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:51"
+  ],
+  "pn_caption_uppercase": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:117"
+  ],
+  "pn_caption_words_per_caption": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:103"
+  ],
+  "pn_curve_family_bezier": [
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:163"
+  ],
+  "pn_curve_segment": [
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:348"
+  ],
+  "pn_curve_symmetric": [
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:302"
+  ],
+  "pn_depth": [
+   "com/aurea/aurea/editor/panels/Element3DPanel.kt:138"
+  ],
+  "pn_ease_bezier_custom": [
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:184"
+  ],
+  "pn_ease_hold": [
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:172",
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:173"
+  ],
+  "pn_ease_in": [
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:166",
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:181"
+  ],
+  "pn_ease_in_out": [
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:168",
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:183"
+  ],
+  "pn_ease_out": [
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:167",
+   "com/aurea/aurea/editor/panels/CurvePanel.kt:182"
+  ],
+  "pn_env_light_hint": [
+   "com/aurea/aurea/editor/panels/Element3DPanel.kt:102"
+  ],
+  "pn_env_rotate_light": [
+   "com/aurea/aurea/editor/panels/Element3DPanel.kt:99"
+  ],
+  "pn_expr_error_at": [
+   "com/aurea/aurea/editor/panels/ExpressionSheet.kt:138"
+  ],
+  "pn_karaoke": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:51",
+   "com/aurea/aurea/presets/BuiltinPresets.kt:16"
+  ],
+  "pn_mask_n": [
+   "com/aurea/aurea/editor/panels/MaskPanel.kt:97"
+  ],
+  "pn_mask_n_open": [
+   "com/aurea/aurea/editor/panels/MaskPanel.kt:97"
+  ],
+  "pn_mask_pick_layer_below": [
+   "com/aurea/aurea/editor/panels/MaskPanel.kt:233"
+  ],
+  "pn_ok": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:191"
+  ],
+  "pn_pop": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:51",
+   "com/aurea/aurea/presets/BuiltinPresets.kt:15"
+  ],
+  "pn_preset_n": [
+   "com/aurea/aurea/presets/BuiltinPresets.kt:55"
+  ],
+  "pn_size_large_short": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:115"
+  ],
+  "pn_size_medium_short": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:115"
+  ],
+  "pn_size_small_short": [
+   "com/aurea/aurea/editor/panels/CaptionsPanel.kt:115"
+  ],
+  "pn_text3d_placeholder": [
+   "com/aurea/aurea/editor/panels/Element3DPanel.kt:135"
+  ],
+  "pn_text3d_title": [
+   "com/aurea/aurea/editor/panels/Element3DPanel.kt:120"
+  ],
+  "pn_textpreset_appear": [
+   "com/aurea/aurea/presets/BuiltinPresets.kt:16"
+  ],
+  "pn_textpreset_bounce": [
+   "com/aurea/aurea/presets/BuiltinPresets.kt:15"
+  ],
+  "pn_textpreset_elastic": [
+   "com/aurea/aurea/presets/BuiltinPresets.kt:17"
+  ],
+  "pn_textpreset_slide": [
+   "com/aurea/aurea/presets/BuiltinPresets.kt:15"
+  ],
+  "pn_textpreset_typewriter": [
+   "com/aurea/aurea/presets/BuiltinPresets.kt:17"
+  ],
+  "pn_textpreset_wave": [
+   "com/aurea/aurea/presets/BuiltinPresets.kt:17"
+  ],
+  "pn_textpreset_word_highlight": [
+   "com/aurea/aurea/presets/BuiltinPresets.kt:16"
+  ],
+  "pn_transform_title_tab": [
+   "com/aurea/aurea/editor/panels/Panels.kt:99"
+  ],
+  "sh_add_captions_need_speech": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:453"
+  ],
+  "sh_add_detect_beats": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:435"
+  ],
+  "sh_add_group_selection": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:485"
+  ],
+  "sh_add_marker_at_playhead": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:439"
+  ],
+  "sh_add_model_3d": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:509"
+  ],
+  "sh_add_model_3d_hint": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:515"
+  ],
+  "sh_add_null": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:478"
+  ],
+  "sh_add_null_3d": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:513"
+  ],
+  "sh_add_pick_layers_to_group": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:475"
+  ],
+  "sh_add_speech_captions": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:459"
+  ],
+  "sh_add_tab_3d": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:79"
+  ],
+  "sh_add_tab_audio": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:76",
+   "com/aurea/aurea/editor/BottomArea.kt:109"
+  ],
+  "sh_add_tab_draw": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:80"
+  ],
+  "sh_add_tab_element": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:78"
+  ],
+  "sh_add_tab_media": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:75"
+  ],
+  "sh_add_tab_shape": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:74"
+  ],
+  "sh_add_tab_text": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:77",
+   "com/aurea/aurea/editor/AddLayerPanel.kt:456"
+  ],
+  "sh_add_tab_vector": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:81"
+  ],
+  "sh_add_text_3d": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:512"
+  ],
+  "sh_add_video_sound": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:432"
+  ],
+  "sh_aspect_ratio_desc": [
+   "com/aurea/aurea/editor/ProjectSettingsSheet.kt:247"
+  ],
+  "sh_bg_black": [
+   "com/aurea/aurea/editor/ProjectSettingsSheet.kt:65"
+  ],
+  "sh_bg_white": [
+   "com/aurea/aurea/editor/ProjectSettingsSheet.kt:65"
+  ],
+  "sh_device_exports_up_to": [
+   "com/aurea/aurea/editor/ProjectSettingsSheet.kt:236"
+  ],
+  "sh_diag_3d": [
+   "com/aurea/aurea/editor/Stage.kt:1284"
+  ],
+  "sh_diag_audio": [
+   "com/aurea/aurea/editor/Stage.kt:1288"
+  ],
+  "sh_diag_blur": [
+   "com/aurea/aurea/editor/Stage.kt:1257"
+  ],
+  "sh_diag_cache": [
+   "com/aurea/aurea/editor/Stage.kt:1268"
+  ],
+  "sh_diag_cpu": [
+   "com/aurea/aurea/editor/Stage.kt:1254"
+  ],
+  "sh_diag_decode": [
+   "com/aurea/aurea/editor/Stage.kt:1256"
+  ],
+  "sh_diag_dropped": [
+   "com/aurea/aurea/editor/Stage.kt:1259"
+  ],
+  "sh_diag_fps": [
+   "com/aurea/aurea/editor/Stage.kt:1247"
+  ],
+  "sh_diag_gpu_memory": [
+   "com/aurea/aurea/editor/Stage.kt:1279"
+  ],
+  "sh_diag_gpu_no_timestamp": [
+   "com/aurea/aurea/editor/Stage.kt:1296"
+  ],
+  "sh_diag_gpu_timers": [
+   "com/aurea/aurea/editor/Stage.kt:1296"
+  ],
+  "sh_diag_heavy": [
+   "com/aurea/aurea/editor/Stage.kt:1266"
+  ],
+  "sh_diag_hit_rate": [
+   "com/aurea/aurea/editor/Stage.kt:1270"
+  ],
+  "sh_diag_low_memory": [
+   "com/aurea/aurea/editor/Stage.kt:1276"
+  ],
+  "sh_diag_output": [
+   "com/aurea/aurea/editor/Stage.kt:1258"
+  ],
+  "sh_diag_pacing": [
+   "com/aurea/aurea/editor/Stage.kt:1251"
+  ],
+  "sh_diag_particles": [
+   "com/aurea/aurea/editor/Stage.kt:1286"
+  ],
+  "sh_diag_passes": [
+   "com/aurea/aurea/editor/Stage.kt:1281"
+  ],
+  "sh_diag_ram": [
+   "com/aurea/aurea/editor/Stage.kt:1273"
+  ],
+  "sh_diag_scale": [
+   "com/aurea/aurea/editor/Stage.kt:1262"
+  ],
+  "sh_diag_seeks": [
+   "com/aurea/aurea/editor/Stage.kt:1292"
+  ],
+  "sh_diag_system_free": [
+   "com/aurea/aurea/editor/Stage.kt:1275"
+  ],
+  "sh_diag_textures": [
+   "com/aurea/aurea/editor/Stage.kt:1290"
+  ],
+  "sh_diag_thermal_critical": [
+   "com/aurea/aurea/editor/Stage.kt:1224"
+  ],
+  "sh_diag_thermal_emergency": [
+   "com/aurea/aurea/editor/Stage.kt:1225"
+  ],
+  "sh_diag_thermal_normal": [
+   "com/aurea/aurea/editor/Stage.kt:1221"
+  ],
+  "sh_diag_thermal_serious": [
+   "com/aurea/aurea/editor/Stage.kt:1223"
+  ],
+  "sh_diag_thermal_unknown": [
+   "com/aurea/aurea/editor/Stage.kt:1226"
+  ],
+  "sh_diag_thermal_warm": [
+   "com/aurea/aurea/editor/Stage.kt:1222"
+  ],
+  "sh_diag_ui_slow": [
+   "com/aurea/aurea/editor/Stage.kt:1248"
+  ],
+  "sh_dock_captions": [
+   "com/aurea/aurea/editor/BottomArea.kt:115"
+  ],
+  "sh_dock_color_fill": [
+   "com/aurea/aurea/editor/BottomArea.kt:104"
+  ],
+  "sh_dock_edit_shape": [
+   "com/aurea/aurea/editor/BottomArea.kt:105"
+  ],
+  "sh_dock_edit_text": [
+   "com/aurea/aurea/editor/BottomArea.kt:107"
+  ],
+  "sh_dock_edit_vector": [
+   "com/aurea/aurea/editor/BottomArea.kt:106"
+  ],
+  "sh_dock_effects": [
+   "com/aurea/aurea/editor/BottomArea.kt:117"
+  ],
+  "sh_dock_environment": [
+   "com/aurea/aurea/editor/BottomArea.kt:112"
+  ],
+  "sh_dock_mask": [
+   "com/aurea/aurea/editor/BottomArea.kt:113"
+  ],
+  "sh_dock_opacity_blend": [
+   "com/aurea/aurea/editor/BottomArea.kt:111"
+  ],
+  "sh_dock_particles": [
+   "com/aurea/aurea/editor/BottomArea.kt:108"
+  ],
+  "sh_dock_presets": [
+   "com/aurea/aurea/editor/BottomArea.kt:116"
+  ],
+  "sh_dock_transform": [
+   "com/aurea/aurea/editor/BottomArea.kt:110"
+  ],
+  "sh_export_above_device": [
+   "com/aurea/aurea/editor/ExportScreen.kt:212"
+  ],
+  "sh_export_fps_from_project": [
+   "com/aurea/aurea/editor/ExportScreen.kt:219"
+  ],
+  "sh_export_progress": [
+   "com/aurea/aurea/editor/ExportScreen.kt:324"
+  ],
+  "sh_layer_locked_unlock_to_move": [
+   "com/aurea/aurea/editor/Stage.kt:809"
+  ],
+  "sh_layers_locked_unlock_to_edit": [
+   "com/aurea/aurea/editor/BottomArea.kt:412"
+  ],
+  "sh_menu_cut_after": [
+   "com/aurea/aurea/editor/Menus.kt:382"
+  ],
+  "sh_menu_freeze_frame": [
+   "com/aurea/aurea/editor/Menus.kt:195"
+  ],
+  "sh_menu_media": [
+   "com/aurea/aurea/editor/Menus.kt:155"
+  ],
+  "sh_menu_no_layer_matches": [
+   "com/aurea/aurea/editor/Menus.kt:277"
+  ],
+  "sh_menu_search_layers": [
+   "com/aurea/aurea/editor/Menus.kt:258"
+  ],
+  "sh_menu_selection": [
+   "com/aurea/aurea/editor/Menus.kt:328"
+  ],
+  "sh_menu_shutter": [
+   "com/aurea/aurea/editor/Menus.kt:351"
+  ],
+  "sh_menu_speed_remap": [
+   "com/aurea/aurea/editor/Menus.kt:192"
+  ],
+  "sh_menu_volume": [
+   "com/aurea/aurea/editor/Menus.kt:165"
+  ],
+  "sh_pick_two_unlocked_layers": [
+   "com/aurea/aurea/editor/BottomArea.kt:439"
+  ],
+  "sh_playhead_into_layer": [
+   "com/aurea/aurea/editor/BottomArea.kt:260"
+  ],
+  "sh_shape_arrow": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:251"
+  ],
+  "sh_shape_capsule": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:249"
+  ],
+  "sh_shape_circle": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:248"
+  ],
+  "sh_shape_cross": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:250"
+  ],
+  "sh_shape_flower": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:251"
+  ],
+  "sh_shape_right_triangle": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:249"
+  ],
+  "sh_shape_ring": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:251"
+  ],
+  "sh_shape_rounded": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:248"
+  ],
+  "sh_shape_slice": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:251"
+  ],
+  "sh_shape_square": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:248"
+  ],
+  "sh_shape_triangle": [
+   "com/aurea/aurea/editor/AddLayerPanel.kt:249"
+  ],
+  "sh_tap_inside_video": [
+   "com/aurea/aurea/editor/Stage.kt:668"
+  ]
+ }
+}

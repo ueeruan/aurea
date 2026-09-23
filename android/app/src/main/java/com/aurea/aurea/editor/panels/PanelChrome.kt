@@ -94,6 +94,7 @@ internal class PanelEnv(
  */
 @Composable
 internal fun PanelHeader(title: String, onBack: () -> Unit) {
+    val backDesc = stringResource(R.string.pn_back_to_layer_tools)
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.Border))
         Row(
@@ -106,7 +107,7 @@ internal fun PanelHeader(title: String, onBack: () -> Unit) {
             Box(
                 Modifier
                     .size(48.dp, 44.dp)
-                    .semantics { contentDescription = "Voltar às ferramentas da camada" }
+                    .semantics { contentDescription = backDesc }
                     .tocavel(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {

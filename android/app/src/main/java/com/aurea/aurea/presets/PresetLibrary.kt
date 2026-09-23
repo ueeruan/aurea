@@ -2,21 +2,23 @@ package com.aurea.aurea.presets
 
 import android.app.Application
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.aurea.aurea.R
 import java.io.File
 
 /**
  * Tipos de preset (o `kind` do JSON do motor, `presets::PresetKind`). O
  * número é o do motor; `dir` é a pasta em filesDir/presets/.
  */
-enum class PresetKind(val id: Int, val dir: String, val label: String) {
-    Effects(0, "efeitos", "Efeitos"),
-    Text(1, "texto", "Texto"),
-    Animation(2, "animacao", "Animação"),
-    Caption(3, "legenda", "Legenda"),
-    Curve(4, "curva", "Curva"),
+enum class PresetKind(val id: Int, val dir: String, @StringRes val label: Int) {
+    Effects(0, "efeitos", R.string.panel_efeitos),
+    Text(1, "texto", R.string.panel_texto),
+    Animation(2, "animacao", R.string.panel_animacao),
+    Caption(3, "legenda", R.string.pn_caption),
+    Curve(4, "curva", R.string.panel_curva),
 }
 
 /**
@@ -42,7 +44,7 @@ data class PresetEntry(
 class PresetLibrary(private val app: Application) {
     private val prefs = app.getSharedPreferences("presets", Context.MODE_PRIVATE)
     private val root = File(app.filesDir, "presets")
-    private val builtins = BuiltinPresets(app.assets)
+    private val builtins = BuiltinPresets(app)
 
     var user by mutableStateOf<Map<PresetKind, List<PresetEntry>>>(emptyMap())
         private set

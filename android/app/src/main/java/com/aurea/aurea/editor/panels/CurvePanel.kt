@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.alpha
@@ -144,9 +145,10 @@ internal fun cubicBezier(x1: Float, y1: Float, x2: Float, y2: Float, x: Float): 
 }
 
 /** Um preset de uma família: nome [A] e o easing do motor. */
-private class CurvePreset(val name: String, val ease: Ease, val entry: com.aurea.aurea.presets.PresetEntry? = null)
+/** [name] nulo = preset salvo (o nome dele está em [entry]). */
+private class CurvePreset(@StringRes val name: Int?, val ease: Ease, val entry: com.aurea.aurea.presets.PresetEntry? = null)
 
-private class CurveFamily(val name: String, val glyph: Char, val presets: List<CurvePreset>)
+private class CurveFamily(@StringRes val name: Int, val glyph: Char, val presets: List<CurvePreset>)
 
 private fun bez(x1: Float, y1: Float, x2: Float, y2: Float) = Ease(Interp.BEZIER, x1, y1, x2, y2)
 
@@ -158,27 +160,28 @@ private fun bez(x1: Float, y1: Float, x2: Float, y2: Float) = Ease(Interp.BEZIER
  */
 private val Families = listOf(
     CurveFamily(
-        "Bézier", CupertinoGlyph.Scribble,
+        R.string.pn_curve_family_bezier, CupertinoGlyph.Scribble,
         listOf(
-            CurvePreset("Linear", Ease(Interp.LINEAR, 0f, 0f, 1f, 1f)),
-            CurvePreset("Suave na entrada", bez(0.42f, 0f, 1f, 1f)),
-            CurvePreset("Suave na saída", bez(0f, 0f, 0.58f, 1f)),
-            CurvePreset("Suave nas duas pontas", bez(0.42f, 0f, 0.58f, 1f)),
+            CurvePreset(R.string.panel_linear, Ease(Interp.LINEAR, 0f, 0f, 1f, 1f)),
+            CurvePreset(R.string.pn_ease_in, bez(0.42f, 0f, 1f, 1f)),
+            CurvePreset(R.string.pn_ease_out, bez(0f, 0f, 0.58f, 1f)),
+            CurvePreset(R.string.pn_ease_in_out, bez(0.42f, 0f, 0.58f, 1f)),
         ),
     ),
     CurveFamily(
-        "Manter", CupertinoGlyph.ChartBarAltFill,
-        listOf(CurvePreset("Manter", Ease(Interp.HOLD, 0f, 0f, 1f, 1f))),
+        R.string.pn_ease_hold, CupertinoGlyph.ChartBarAltFill,
+        listOf(CurvePreset(R.string.pn_ease_hold, Ease(Interp.HOLD, 0f, 0f, 1f, 1f))),
     ),
 )
 
-private fun nameOf(e: Ease): String {
-    for (f in Families) for (p in f.presets) if (e.same(p.ease)) return p.name
+@StringRes
+private fun nameOf(e: Ease): Int {
+    for (f in Families) for (p in f.presets) if (e.same(p.ease) && p.name != null) return p.name
     return when (e.interp) {
-        Interp.EASE_IN -> "Suave na entrada"
-        Interp.EASE_OUT -> "Suave na saída"
-        Interp.EASE_IN_OUT -> "Suave nas duas pontas"
-        else -> "Bézier (personalizada)"
+        Interp.EASE_IN -> R.string.pn_ease_in
+        Interp.EASE_OUT -> R.string.pn_ease_out
+        Interp.EASE_IN_OUT -> R.string.pn_ease_in_out
+        else -> R.string.pn_ease_bezier_custom
     }
 }
 
@@ -296,6 +299,7 @@ internal fun CurvePanel(env: PanelEnv) {
         store.detail?.let { d -> store.seek(d.timelineFrame(a.time + (b.time - a.time) / 2)) }
     }
 
+    val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
     Row(Modifier.fillMaxSize()) {
         // Trilho esquerdo: voltar · inverter · menu.
         Column(Modifier.width(44.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -307,7 +311,7 @@ internal fun CurvePanel(env: PanelEnv) {
             Box(
                 Modifier.size(44.dp).tocavel {
                     val inv = ease.inverted()
-                    if (inv == null) store.showToast("Esta curva é igual nos dois sentidos")
+                    if (inv == null) store.showToast(symmetricMsg)
                     else {
                         store.beginGesture("inverter curva")
                         applyEase(store, layer, start, inv)
@@ -341,7 +345,7 @@ internal fun CurvePanel(env: PanelEnv) {
                 val track = (store.keyframes[layer] ?: emptyList()).track(start)
                 val n = track.indexOfFirst { it.time == start.time }
                 Text(
-                    if (inside) nameOf(ease) else "Trecho ${n + 1} → ${n + 2}",
+                    if (inside) stringResource(nameOf(ease)) else stringResource(R.string.pn_curve_segment, n + 1, n + 2),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -355,7 +359,7 @@ internal fun CurvePanel(env: PanelEnv) {
         }
         // Presets de curva (nativos + os salvos): a aba ★ das famílias.
         val saved = remember(store.presets.user) { store.presets.entries(com.aurea.aurea.presets.PresetKind.Curve).mapNotNull { entry ->
-            store.curveOfPreset(entry)?.let { v -> CurvePreset(entry.name, Ease(v[0].toInt(), v[1], v[2], v[3], v[4]), entry) }
+            store.curveOfPreset(entry)?.let { v -> CurvePreset(null, Ease(v[0].toInt(), v[1], v[2], v[3], v[4]), entry) }
         } }
         CurveFamilies(
             current = ease,
@@ -372,7 +376,7 @@ internal fun CurvePanel(env: PanelEnv) {
     if (savePrompt) {
         AureaNamePrompt(
             title = stringResource(R.string.panel_salvar_curva_como_preset),
-            initial = nameOf(ease),
+            initial = stringResource(nameOf(ease)),
             onConfirm = { name ->
                 // A interpolação vai como está (nomeada, reta, manter ou bézier com as alças).
                 val h = ease.handles()
@@ -556,7 +560,7 @@ private fun DrawScope.drawGrid(y0: Float, y1: Float) {
 @Composable
 private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (CurvePreset) -> Unit) {
     // As famílias fixas + a aba ★ dos presets de curva (nativos e salvos).
-    val families = Families + CurveFamily(stringResource(R.string.panel_presets), CupertinoGlyph.Star, saved)
+    val families = Families + CurveFamily(R.string.panel_presets, CupertinoGlyph.Star, saved)
     var tab by rememberSaveable { mutableIntStateOf(familyOf(current)) }
     val family = families[tab.coerceIn(0, families.lastIndex)]
     Row(Modifier.width(132.dp).fillMaxHeight()) {
@@ -583,7 +587,8 @@ private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (Curv
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             families.forEachIndexed { i, f ->
-                Box(Modifier.size(34.dp, 34.dp).semantics { contentDescription = f.name }.tocavel(shrink = 1f) { tab = i }, contentAlignment = Alignment.Center) {
+                val familyName = stringResource(f.name)
+                Box(Modifier.size(34.dp, 34.dp).semantics { contentDescription = familyName }.tocavel(shrink = 1f) { tab = i }, contentAlignment = Alignment.Center) {
                     CupertinoIcon(f.glyph, 17.dp, if (i == tab) AureaColors.Accent else AureaColors.Muted)
                 }
             }

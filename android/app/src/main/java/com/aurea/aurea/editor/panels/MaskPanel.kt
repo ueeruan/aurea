@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.text.TextStyle
@@ -93,7 +94,7 @@ private fun MasksTab(env: PanelEnv, state: EditorStore.MaskState?, m: EditorStor
     }
     ChipRow {
         masks.forEachIndexed { i, mk ->
-            KitChip("Máscara ${i + 1}" + if (!mk.closed) stringResource(R.string.panel_aberta) else "", m?.id == mk.id) {
+            KitChip(if (mk.closed) stringResource(R.string.pn_mask_n, i + 1) else stringResource(R.string.pn_mask_n_open, i + 1), m?.id == mk.id) {
                 store.maskEdit = mk.id
                 store.maskDrawing = !mk.closed
                 store.maskPoint = -1
@@ -142,7 +143,7 @@ private fun MaskSteps(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean) 
             if (drawing) {
                 KitHint(stringResource(R.string.panel_toque_palco_pontos_arraste_curvar_toque))
                 Spacer(Modifier.height(8.dp))
-                ActionCard(stringResource(R.string.panel_fechar_caminho), "${m.count} ponto(s) até agora") { store.closeMaskPath() }
+                ActionCard(stringResource(R.string.panel_fechar_caminho), pluralStringResource(R.plurals.pn_mask_points_so_far, m.count, m.count)) { store.closeMaskPath() }
             } else {
                 KitHint(stringResource(R.string.panel_arraste_pontos_palco_toque_num_ponto))
                 val look = when {
@@ -152,7 +153,7 @@ private fun MaskSteps(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean) 
                 }
                 PropertyCustomRow(stringResource(R.string.panel_caminho), selected = true, onSelect = {}, keyframe = look) {
                     Text(
-                        if (m.keyCount == 0) stringResource(R.string.panel_parado_toque_trilho_animar) else "${m.keyCount} keyframe(s) — editar no cabeçote grava ali",
+                        if (m.keyCount == 0) stringResource(R.string.panel_parado_toque_trilho_animar) else pluralStringResource(R.plurals.pn_keyframes_edit_at_playhead, m.keyCount, m.keyCount),
                         style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
                     )
                 }
@@ -229,6 +230,7 @@ private fun TrackMatteTab(store: EditorStore) {
     val me = rows.firstOrNull { it.id == self }
     val candidates = rows.filter { it.id != self && it.kind != LayerType.Audio.kind && it.kind != LayerType.Camera.kind && it.kind != LayerType.Light.kind }
     KitTitle(stringResource(R.string.panel_1_recortar_pelo))
+    val pickBelowMsg = stringResource(R.string.pn_mask_pick_layer_below)
     val modes = listOf(0 to stringResource(R.string.panel_nao_recortar), 1 to stringResource(R.string.panel_pela_forma), 2 to stringResource(R.string.panel_pela_forma_invertido), 3 to stringResource(R.string.panel_pelo_brilho), 4 to stringResource(R.string.panel_pelo_brilho_invertido))
     ChoiceChips(modes.map { it.second }, modes.indexOfFirst { it.first == mode }, onSelect = { i ->
         val value = modes[i].first
@@ -238,7 +240,7 @@ private fun TrackMatteTab(store: EditorStore) {
             // Sem camada escolhida: a logo acima na pilha (AE).
             val target = if (matte != 0L) matte
             else candidates.filter { me != null && it.zIndex > me.zIndex }.minByOrNull { it.zIndex }?.id ?: 0L
-            if (target == 0L) store.showToast("Escolha a camada abaixo") else store.setTrackMatte(target, value)
+            if (target == 0L) store.showToast(pickBelowMsg) else store.setTrackMatte(target, value)
         }
     })
     KitTitle(stringResource(R.string.panel_2_qual_camada_recorta))

@@ -247,7 +247,7 @@ private fun SavePresetDialog(store: EditorStore, kind: PresetKind, onDismiss: ()
     var anim by remember { mutableStateOf(true) }
     val exists = name.isNotBlank() && store.presets.exists(kind, name)
     AureaAlert(
-        title = "Salvar preset de ${kind.label.lowercase()}",
+        title = stringResource(R.string.pn_save_preset_of, stringResource(kind.label).lowercase()),
         message = when (kind) {
             PresetKind.Caption -> stringResource(R.string.panel_guarda_opcoes_atuais_legenda)
             PresetKind.Curve -> stringResource(R.string.panel_guarda_curva_keyframe_escolhido)
@@ -367,7 +367,7 @@ private fun PresetCard(
             modifier = Modifier.height(30.dp),
             style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.W600)),
         )
-        if (showKind) Text(e.kind.label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.Muted)))
+        if (showKind) Text(stringResource(e.kind.label), maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.Muted)))
     }
 }
 

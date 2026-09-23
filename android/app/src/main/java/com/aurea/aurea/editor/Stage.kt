@@ -21,8 +21,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.app.Application
+import android.content.res.Resources
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -105,6 +109,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
 private fun VectorToolBanner(store: EditorStore, modifier: Modifier) {
     val tool = store.vectorTool
     if (tool == 0) return
+    val finishLabel = stringResource(R.string.editor_concluir_desenho)
     Row(
         modifier
             .clip(RoundedCornerShape(10.dp))
@@ -130,7 +135,7 @@ private fun VectorToolBanner(store: EditorStore, modifier: Modifier) {
         Box(
             Modifier
                 .heightIn(min = 36.dp)
-                .semantics { contentDescription = "Concluir desenho" }
+                .semantics { contentDescription = finishLabel }
                 .tocavel(haptic = true) { store.chooseVectorTool(0) }
                 .padding(horizontal = 4.dp),
             contentAlignment = Alignment.Center,
@@ -162,6 +167,7 @@ private fun LockBanner(store: EditorStore, modifier: Modifier) {
         }
     }
     val id = lockedId ?: return
+    val unlockLabel = stringResource(R.string.editor_desbloquear)
     Row(
         modifier
             .clip(RoundedCornerShape(10.dp))
@@ -183,7 +189,7 @@ private fun LockBanner(store: EditorStore, modifier: Modifier) {
         Box(
             Modifier
                 .heightIn(min = 36.dp)
-                .semantics { contentDescription = "Desbloquear" }
+                .semantics { contentDescription = unlockLabel }
                 .tocavel(haptic = true) { store.setLayerLocked(id, false) }
                 .padding(horizontal = 4.dp),
             contentAlignment = Alignment.Center,
@@ -659,7 +665,7 @@ private suspend fun PointerInputScope.stageGestures(
                         store.finishPointPick(u * LayerGeometry.width(d), v * LayerGeometry.height(d))
                     } else {
                         store.pickCursor = null
-                        store.showToast("Toque dentro do vídeo")
+                        store.showToast(AppText.get(store.getApplication<Application>(), R.string.sh_tap_inside_video))
                     }
                 }
             }
@@ -800,7 +806,7 @@ private fun startDrag(store: EditorStore, edit: StageEdit, target: Int, handle: 
                 row == null || d == null || d.id != layer -> MODE_IDLE
                 row.locked -> {
                     // Recusa, e diz por quê (uma vez por gesto).
-                    store.showToast("Camada bloqueada: desbloqueie para mover")
+                    store.showToast(AppText.get(store.getApplication<Application>(), R.string.sh_layer_locked_unlock_to_move))
                     MODE_IDLE
                 }
                 else -> {
@@ -1160,12 +1166,13 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
         "FULL" -> "Full"
         else -> l
     }
+    val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
     Box(modifier) {
         Box(
             Modifier
                 .clip(RoundedCornerShape(6.dp))
                 .background(ShellColors.ResolutionChip)
-                .semantics { contentDescription = "Resolução da prévia · segure para o diagnóstico" }
+                .semantics { contentDescription = chipDescription }
                 .tocavel(haptic = true, onLongClick = { store.toggleHud() }) { open = true }
                 .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
@@ -1192,7 +1199,8 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
 @Composable
 private fun PerfHud(store: EditorStore, modifier: Modifier) {
     if (!store.hudVisible) return
-    val text = hudText(store.perf, store.uiFps, store.appMemory)
+    val res = LocalContext.current.resources
+    val text = hudText(res, store.perf, store.uiFps, store.appMemory)
     Box(
         modifier
             .clip(RoundedCornerShape(8.dp))
@@ -1208,21 +1216,24 @@ private fun PerfHud(store: EditorStore, modifier: Modifier) {
 }
 
 /** Nome do nível térmico do motor (`ThermalState::Level`). */
-private fun thermalName(level: Int) = when (level) {
-    0 -> "normal"
-    1 -> "morno"
-    2 -> "sério"
-    3 -> "crítico"
-    4 -> "emergência"
-    else -> "desconhecido"
-}
+private fun thermalName(res: Resources, level: Int) = res.getString(
+    when (level) {
+        0 -> R.string.sh_diag_thermal_normal
+        1 -> R.string.sh_diag_thermal_warm
+        2 -> R.string.sh_diag_thermal_serious
+        3 -> R.string.sh_diag_thermal_critical
+        4 -> R.string.sh_diag_thermal_emergency
+        else -> R.string.sh_diag_thermal_unknown
+    },
+)
 
 /**
  * Texto da HUD (Fase 8A, §3). Só aparece o que foi MEDIDO: GPU sem timestamp
  * sai "—", ritmo só depois de tocar, áudio só com a saída aberta, 3D e
  * partículas só com cena/emissor no quadro. Nada estimado para parecer bonito.
+ * Uma linha = um recurso de formato; as siglas (fps, ms, MB, GPU) ficam latinas.
  */
-private fun hudText(p: PerfStats, uiFps: Float, m: EditorStore.AppMemory): String {
+private fun hudText(res: Resources, p: PerfStats, uiFps: Float, m: EditorStore.AppMemory): String {
     fun f1(v: Float) = String.format(Locale.ROOT, "%.1f", v)
     fun mb(b: Long) = (b / (1024 * 1024)).toString()
     fun gpu(v: Float) = if (p.gpuTimers) f1(v) else "—"
@@ -1230,66 +1241,59 @@ private fun hudText(p: PerfStats, uiFps: Float, m: EditorStore.AppMemory): Strin
         val total = hits + misses
         return if (total == 0) "—" else "${hits * 100 / total}% ($hits/$total)"
     }
+    fun line(id: Int, vararg args: Any): String = res.getString(id, *args)
     val scale = if (p.renderScaleDen <= 1 && p.renderScaleNum <= 1) "1/1" else "${p.renderScaleNum}/${p.renderScaleDen}"
     return buildString {
-        append("prévia ").append(f1(p.previewFps)).append(" fps · UI ").append(f1(uiFps)).append(" fps")
-        if (m.uiSlowFrames > 0) append(" (").append(m.uiSlowFrames).append(" lentos, pior ").append(f1(m.uiWorstFrameMs)).append(" ms)")
+        append(line(R.string.sh_diag_fps, f1(p.previewFps), f1(uiFps)))
+        if (m.uiSlowFrames > 0) append(' ').append(line(R.string.sh_diag_ui_slow, m.uiSlowFrames, f1(m.uiWorstFrameMs)))
         append('\n')
         if (p.pacingSamples > 0) {
-            append("ritmo p50 ").append(f1(p.pacingP50Ms)).append(" · p95 ").append(f1(p.pacingP95Ms))
-                .append(" · p99 ").append(f1(p.pacingP99Ms)).append(" · σ ").append(f1(p.pacingStdMs))
-                .append(" ms (").append(p.pacingSamples).append(")\n")
+            append(line(R.string.sh_diag_pacing, f1(p.pacingP50Ms), f1(p.pacingP95Ms), f1(p.pacingP99Ms), f1(p.pacingStdMs), p.pacingSamples))
+                .append('\n')
         }
-        append("cpu ").append(f1(p.cpuFrameMs)).append(" (prep ").append(f1(p.cpuPrepareMs))
-            .append(" · grav ").append(f1(p.cpuRecordMs)).append(") · gpu ").append(gpu(p.gpuFrameMs))
-            .append(" · orçamento ").append(f1(p.frameBudgetMs)).append(" ms\n")
-        append("decode ").append(f1(p.decodeMs)).append(" · cor ").append(gpu(p.colorConvMs))
-            .append(" · efeitos ").append(gpu(p.effectsMs)).append('\n')
-        append("blur ").append(gpu(p.blurMs)).append(" · glow ").append(gpu(p.glowMs))
-            .append(" · comp ").append(gpu(p.compositeMs)).append('\n')
-        append("saída ").append(gpu(p.outputMs)).append(" · present ").append(f1(p.presentMs))
-            .append(" · acquire ").append(f1(p.acquireMs)).append('\n')
-        append("descartes ").append(p.droppedFrames).append(" (recentes ").append(p.droppedRecent)
-            .append(") · seek ").append(f1(p.lastSeekMs)).append(" ms\n")
-        append("escala ").append(scale).append(if (p.renderAuto) " auto" else "")
-            .append(" · ").append(p.previewWidth).append('×').append(p.previewHeight)
-            .append(" · térmico ").append(thermalName(p.thermal))
-        if (p.heavyScale < 1f) append(" (caros ×").append(String.format(Locale.ROOT, "%.2f", p.heavyScale)).append(')')
+        append(line(R.string.sh_diag_cpu, f1(p.cpuFrameMs), f1(p.cpuPrepareMs), f1(p.cpuRecordMs), gpu(p.gpuFrameMs), f1(p.frameBudgetMs)))
+            .append('\n')
+        append(line(R.string.sh_diag_decode, f1(p.decodeMs), gpu(p.colorConvMs), gpu(p.effectsMs))).append('\n')
+        append(line(R.string.sh_diag_blur, gpu(p.blurMs), gpu(p.glowMs), gpu(p.compositeMs))).append('\n')
+        append(line(R.string.sh_diag_output, gpu(p.outputMs), f1(p.presentMs), f1(p.acquireMs))).append('\n')
+        append(line(R.string.sh_diag_dropped, p.droppedFrames, p.droppedRecent, f1(p.lastSeekMs))).append('\n')
+        append(
+            line(
+                R.string.sh_diag_scale, scale, if (p.renderAuto) " auto" else "",
+                p.previewWidth, p.previewHeight, thermalName(res, p.thermal),
+            ),
+        )
+        if (p.heavyScale < 1f) append(' ').append(line(R.string.sh_diag_heavy, String.format(Locale.ROOT, "%.2f", p.heavyScale)))
         append('\n')
-        append("cache decode ").append(p.decodedCacheFrames).append(" quadros · ").append(mb(p.decodedCacheBytes)).append(" MB\n")
+        append(line(R.string.sh_diag_cache, p.decodedCacheFrames, mb(p.decodedCacheBytes))).append('\n')
         if (p.flowCacheHits + p.flowCacheMisses + p.maskCacheHits + p.maskCacheMisses > 0) {
-            append("acerto flow ").append(rate(p.flowCacheHits, p.flowCacheMisses))
-                .append(" · máscara ").append(rate(p.maskCacheHits, p.maskCacheMisses)).append('\n')
+            append(line(R.string.sh_diag_hit_rate, rate(p.flowCacheHits, p.flowCacheMisses), rate(p.maskCacheHits, p.maskCacheMisses)))
+                .append('\n')
         }
-        append("RAM motor ").append(mb(p.ramBytes)).append('/').append(p.memoryBudgetMB).append(" MB · nativo ")
-            .append(mb(m.nativeHeapBytes)).append(" · Java ").append(mb(m.javaHeapBytes)).append(" MB\n")
+        append(line(R.string.sh_diag_ram, mb(p.ramBytes), p.memoryBudgetMB, mb(m.nativeHeapBytes), mb(m.javaHeapBytes))).append('\n')
         if (m.systemTotalBytes > 0) {
-            append("sistema livre ").append(mb(m.systemAvailBytes)).append('/').append(mb(m.systemTotalBytes)).append(" MB")
-                .append(if (m.lowMemory) " · MEMÓRIA BAIXA" else "").append('\n')
+            append(line(R.string.sh_diag_system_free, mb(m.systemAvailBytes), mb(m.systemTotalBytes)))
+            if (m.lowMemory) append(" · ").append(line(R.string.sh_diag_low_memory))
+            append('\n')
         }
-        append("GPU ").append(mb(p.gpuMemoryBytes)).append(" MB usada · ").append(mb(p.gpuReservedBytes))
-            .append(" reservada · ").append(p.gpuAllocations).append(" alocações · transit. ")
-            .append(mb(p.transientBytes)).append(" MB\n")
-        append("passes ").append(p.passesExecuted).append(" (+").append(p.passesCulled).append(" cortados)")
-            .append(" · draws ").append(p.drawCalls).append(" · camadas ").append(p.layersRendered)
-            .append(" · efeitos ").append(p.activeEffects).append('\n')
+        append(line(R.string.sh_diag_gpu_memory, mb(p.gpuMemoryBytes), mb(p.gpuReservedBytes), p.gpuAllocations, mb(p.transientBytes)))
+            .append('\n')
+        append(line(R.string.sh_diag_passes, p.passesExecuted, p.passesCulled, p.drawCalls, p.layersRendered, p.activeEffects))
+            .append('\n')
         if (p.draws3D > 0 || p.triangles3D > 0) {
-            append("3D draws ").append(p.draws3D).append(" · triângulos ").append(p.triangles3D)
-                .append(" · fora do frustum ").append(p.culled3D).append(" · residente ").append(mb(p.scene3dBytes)).append(" MB\n")
+            append(line(R.string.sh_diag_3d, p.draws3D, p.triangles3D, p.culled3D, mb(p.scene3dBytes))).append('\n')
         }
-        if (p.particles > 0) append("partículas ").append(p.particles).append('\n')
+        if (p.particles > 0) append(line(R.string.sh_diag_particles, p.particles)).append('\n')
         if (p.audioOutputOpen) {
-            append("áudio fila ").append(p.audioQueuedMs).append(" ms · saída ").append(p.audioOutputMs)
-                .append(" ms · underruns ").append(p.audioUnderruns).append(" · sem bloco ").append(p.audioMissingBlocks).append('\n')
+            append(line(R.string.sh_diag_audio, p.audioQueuedMs, p.audioOutputMs, p.audioUnderruns, p.audioMissingBlocks)).append('\n')
         }
-        append("texturas ").append(p.physicalTextures).append(" fís · ").append(p.aliasedTextures)
-            .append(" alias · pipelines ").append(p.pipelinesTotal).append(" (+").append(p.pipelineCompilesLive).append(")\n")
-        append("seeks ").append(p.seeks).append(" · coalescidos ").append(p.coalesced)
-            .append(" · atrasados ").append(p.staleFrames).append('\n')
+        append(line(R.string.sh_diag_textures, p.physicalTextures, p.aliasedTextures, p.pipelinesTotal, p.pipelineCompilesLive))
+            .append('\n')
+        append(line(R.string.sh_diag_seeks, p.seeks, p.coalesced, p.staleFrames)).append('\n')
         append("decoder ").append(p.decoder.ifEmpty { "—" }).append(if (p.hardwareDecoder) " (HW)" else "")
             .append(if (p.zeroCopy) " · zero-copy" else "").append('\n')
-        append("GPU ").append(p.gpuName.ifEmpty { "—" })
-            .append(if (p.gpuTimers) " · timers" else " · sem timestamp")
+        val gpuName = p.gpuName.ifEmpty { "—" }
+        append(line(if (p.gpuTimers) R.string.sh_diag_gpu_timers else R.string.sh_diag_gpu_no_timestamp, gpuName))
     }
 }
 

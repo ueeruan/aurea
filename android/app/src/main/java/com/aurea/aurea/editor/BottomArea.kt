@@ -31,8 +31,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.app.Application
+import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
@@ -97,21 +100,21 @@ private data class DockLayer(
  * As fichas da grade: ícone grande + nome curto, cada uma abre UM painel que
  * existe de verdade. Ficha sem painel não entra (nada de "em breve").
  */
-private enum class DockSection(val glyph: Char, val label: String, val panel: EditorPanel) {
-    ColorFill(CupertinoGlyph.Paintbrush, "Cor e preenchimento", EditorPanel.Shape),
-    EditShape(ShellGlyph.SliderHorizontalBelowRectangle, "Editar forma", EditorPanel.Shape),
-    EditVector(CupertinoGlyph.PencilOutline, "Editar vetor", EditorPanel.Vector),
-    EditText(CupertinoGlyph.Textformat, "Editar texto", EditorPanel.Text),
-    Particles(CupertinoGlyph.Sparkles, "Partículas", EditorPanel.Particles),
-    Audio(CupertinoGlyph.Speaker2, "Áudio", EditorPanel.Audio),
-    Move(CupertinoGlyph.Move, "Transformar", EditorPanel.Transform),
-    Blend(CupertinoGlyph.CircleLefthalfFill, "Opacidade e mistura", EditorPanel.Appearance),
-    Environment(CupertinoGlyph.Lightbulb, "Ambiente", EditorPanel.Element3D),
-    Mask(CupertinoGlyph.PencilOutline, "Máscara", EditorPanel.Mask),
-    Track(ShellGlyph.Viewfinder, "Rastreio", EditorPanel.Tracking),
-    Captions(CupertinoGlyph.CaptionsBubble, "Legendas", EditorPanel.Captions),
-    Presets(CupertinoGlyph.WandStars, "Presets", EditorPanel.Presets),
-    Effects(CupertinoGlyph.Sparkles, "Efeitos", EditorPanel.Effects),
+private enum class DockSection(val glyph: Char, @StringRes val label: Int, val panel: EditorPanel) {
+    ColorFill(CupertinoGlyph.Paintbrush, R.string.sh_dock_color_fill, EditorPanel.Shape),
+    EditShape(ShellGlyph.SliderHorizontalBelowRectangle, R.string.sh_dock_edit_shape, EditorPanel.Shape),
+    EditVector(CupertinoGlyph.PencilOutline, R.string.sh_dock_edit_vector, EditorPanel.Vector),
+    EditText(CupertinoGlyph.Textformat, R.string.sh_dock_edit_text, EditorPanel.Text),
+    Particles(CupertinoGlyph.Sparkles, R.string.sh_dock_particles, EditorPanel.Particles),
+    Audio(CupertinoGlyph.Speaker2, R.string.sh_add_tab_audio, EditorPanel.Audio),
+    Move(CupertinoGlyph.Move, R.string.sh_dock_transform, EditorPanel.Transform),
+    Blend(CupertinoGlyph.CircleLefthalfFill, R.string.sh_dock_opacity_blend, EditorPanel.Appearance),
+    Environment(CupertinoGlyph.Lightbulb, R.string.sh_dock_environment, EditorPanel.Element3D),
+    Mask(CupertinoGlyph.PencilOutline, R.string.sh_dock_mask, EditorPanel.Mask),
+    Track(ShellGlyph.Viewfinder, R.string.editor_rastreio, EditorPanel.Tracking),
+    Captions(CupertinoGlyph.CaptionsBubble, R.string.sh_dock_captions, EditorPanel.Captions),
+    Presets(CupertinoGlyph.WandStars, R.string.sh_dock_presets, EditorPanel.Presets),
+    Effects(CupertinoGlyph.Sparkles, R.string.sh_dock_effects, EditorPanel.Effects),
 }
 
 /**
@@ -253,8 +256,8 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
 private inline fun timeEdit(store: EditorStore, l: DockLayer, action: () -> Unit) {
     val t = store.playhead
     when {
-        l.locked -> store.showToast("Camada bloqueada: desbloqueie para editar")
-        t <= l.start || t >= l.end -> store.showToast("Leve o cabeçote para dentro da camada")
+        l.locked -> store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar)
+        t <= l.start || t >= l.end -> store.toastRes(R.string.sh_playhead_into_layer)
         else -> {
             if (store.playing) store.pause()
             action()
@@ -300,13 +303,14 @@ private fun RowScope.DockTool(
 @Composable
 private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -> Unit) {
     val small = height < 72f
+    val label = stringResource(section.label)
     Column(
         Modifier
             .weight(1f)
             .height(height.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(ShellColors.DockTile)
-            .semantics { contentDescription = section.label }
+            .semantics { contentDescription = label }
             .tocavel(haptic = true, onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -318,7 +322,7 @@ private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -
         else CupertinoIcon(section.glyph, iconSize, ShellColors.DockTileContent)
         Spacer(Modifier.height(if (small) 4.dp else 7.dp))
         Text(
-            section.label,
+            label,
             textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -351,6 +355,7 @@ private fun DockVector(icon: ImageVector, size: androidx.compose.ui.unit.Dp) {
 @Composable
 internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER") ui: EditorUi) {
     val count by remember { derivedStateOf { store.selection.size } }
+    val intoLayers = stringResource(R.string.editor_leve_cabecote_dentro_camadas)
     Column(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
         Spacer(Modifier.height(4.dp))
         Row(
@@ -365,7 +370,7 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
                     if (store.playing) store.pause()
                     store.splitAtPlayhead(store.layers.filter { it.id in store.selection && !it.locked }.map { it.id })
                 } else {
-                    store.showToast("Leve o cabeçote para dentro das camadas")
+                    store.showToast(intoLayers)
                 }
             }
             BatchTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote)) { batchTrim(store, start = false) }
@@ -403,8 +408,10 @@ private fun batchTrim(store: EditorStore, start: Boolean) {
     val targets = rows.filter { !it.locked && t > it.startFrame && t < it.endFrame }
     if (targets.isEmpty()) {
         store.showToast(
-            if (rows.isNotEmpty() && rows.all { it.locked }) "Camadas bloqueadas: desbloqueie para editar"
-            else "Leve o cabeçote para dentro das camadas",
+            store.appText(
+                if (rows.isNotEmpty() && rows.all { it.locked }) R.string.sh_layers_locked_unlock_to_edit
+                else R.string.editor_leve_cabecote_dentro_camadas,
+            ),
         )
         return
     }
@@ -416,6 +423,11 @@ private fun batchTrim(store: EditorStore, start: Boolean) {
 
 private enum class TimeAlign { Start, Cascade, End }
 
+/** Toast fora do Compose: no idioma escolhido no app (ver [AppText]). */
+private fun EditorStore.appText(@StringRes id: Int): String = AppText.get(getApplication<Application>(), id)
+
+private fun EditorStore.toastRes(@StringRes id: Int) = showToast(appText(id))
+
 /**
  * Arruma as escolhidas no TEMPO, sem mudar a duração de nenhuma: inícios
  * juntos, fins juntos ou em escada (na ordem da timeline, de cima para baixo;
@@ -424,7 +436,7 @@ private enum class TimeAlign { Start, Cascade, End }
 private fun timeAlign(store: EditorStore, mode: TimeAlign) {
     val rows = store.layers.filter { it.id in store.selection && !it.locked }
     if (rows.size < 2) {
-        store.showToast("Escolha ao menos duas camadas desbloqueadas")
+        store.toastRes(R.string.sh_pick_two_unlocked_layers)
         return
     }
     if (store.playing) store.pause()

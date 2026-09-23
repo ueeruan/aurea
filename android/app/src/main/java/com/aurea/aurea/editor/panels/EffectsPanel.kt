@@ -136,8 +136,8 @@ private fun axisLabel(label: String, component: Int): String {
 private fun EditorStore.typeOf(effectId: Int): Int = effects.firstOrNull { it.effectId == effectId }?.typeId ?: 0
 
 /** Rótulo humano da linha (com eixo quando é ponto). */
-private fun rowLabel(d: ParamDisplay, s: ParamSlot, component: Int): String =
-    if (s.type == ParamType.POINT2D || s.type == ParamType.POINT3D) axisLabel(d.label, component) else d.label
+private fun rowLabel(label: String, s: ParamSlot, component: Int): String =
+    if (s.type == ParamType.POINT2D || s.type == ParamType.POINT3D) axisLabel(label, component) else label
 
 /** Um toque longo no rótulo pede o menu do parâmetro. */
 @Immutable
@@ -254,6 +254,12 @@ internal fun EffectsPanel(env: PanelEnv) {
             selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false
         }
     }
+    // O rótulo do parâmetro escolhido, no idioma do app: a folha de expressão
+    // abre com ele no título.
+    val railParamLabel: String = selected?.let { k ->
+        store.paramOf(k.effectId, k.param)?.let { p -> paramDisplay(store.typeOf(k.effectId), ParamSlot.of(p)).label() }
+    } ?: ""
+
     val railExpr by remember(store) {
         derivedStateOf { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.expressionLook(paramKeys(k.effectId, ParamSlot.of(it))) } } ?: ExpressionLook.None }
     }
@@ -298,7 +304,7 @@ internal fun EffectsPanel(env: PanelEnv) {
                 },
                 expression = railExpr,
                 onExpression = if (railAnimatable) {
-                    { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { openParamExpression(store, k.effectId, ParamSlot.of(it)) } } }
+                    { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { p -> openParamExpression(store, k.effectId, ParamSlot.of(p), railParamLabel) } } }
                 } else {
                     null
                 },
@@ -395,7 +401,10 @@ internal fun EffectsPanel(env: PanelEnv) {
             message = if (p != null && d != null) "Padrão: ${defaultText(p, slot, d)}" else null,
             actions = buildList {
                 add(SheetAction(stringResource(R.string.panel_redefinir), enabled = p != null) { resetParam(store, t.effectId, t.param) })
-                if (slot?.animatable == true) add(SheetAction(stringResource(R.string.panel_expressao_3c65)) { openParamExpression(store, t.effectId, slot) })
+                if (slot?.animatable == true) {
+                    val slotLabel = paramDisplay(store.typeOf(t.effectId), slot).label()
+                    add(SheetAction(stringResource(R.string.panel_expressao_3c65)) { openParamExpression(store, t.effectId, slot, slotLabel) })
+                }
             },
             onDismiss = { paramMenu = null },
         )
@@ -574,18 +583,19 @@ private fun ParamRows(
     onParamMenu: (ParamMenuTarget) -> Unit,
 ) {
     val d = remember(typeId, s) { paramDisplay(typeId, s) }
-    val menu = { onParamMenu(ParamMenuTarget(id, s.index, d.label)) }
+    val label = d.label()
+    val menu = { onParamMenu(ParamMenuTarget(id, s.index, label)) }
     when (s.type) {
         ParamType.FLOAT, ParamType.INT, ParamType.ANGLE ->
-            EffectNumberRow(env, id, s, d, 0, d.label, selected == ParamKey(id, s.index, 0), onSelect, menu)
+            EffectNumberRow(env, id, s, d, 0, label, selected == ParamKey(id, s.index, 0), onSelect, menu)
         ParamType.POINT2D, ParamType.POINT3D -> repeat(s.components) { c ->
-            EffectNumberRow(env, id, s, d, c, rowLabel(d, s, c), selected == ParamKey(id, s.index, c), onSelect, menu)
+            EffectNumberRow(env, id, s, d, c, rowLabel(label, s, c), selected == ParamKey(id, s.index, c), onSelect, menu)
         }
-        ParamType.BOOL -> EffectToggleRow(env, id, s, d.label, selected?.param == s.index, onSelect, menu)
-        ParamType.ENUM -> EffectChoiceRow(env, id, s, d.label, selected?.param == s.index, onSelect, menu)
-        ParamType.COLOR -> EffectColorRow(env, id, s, d.label, selected?.param == s.index, onSelect, menu)
+        ParamType.BOOL -> EffectToggleRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
+        ParamType.ENUM -> EffectChoiceRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
+        ParamType.COLOR -> EffectColorRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         // Curva/degradê/referência: o motor tem, o app ainda não edita — sem botão falso.
-        else -> PropertyCustomRow(label = d.label, selected = false, onSelect = {}) {
+        else -> PropertyCustomRow(label = label, selected = false, onSelect = {}) {
             Text(
                 stringResource(R.string.panel_ainda_nao_editavel_app),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
@@ -609,10 +619,10 @@ internal fun paramKeys(effectId: Int, s: ParamSlot): List<TrackKey> =
     List(ParamType.componentCount(s.type).coerceAtLeast(1)) { c -> TrackKey(TrackProperty.EFFECT_PARAM, effectId, s.index * 4 + c) }
 
 /** Editor de expressão do parâmetro inteiro (ponto/cor: a expressão é vetorial), na unidade humana. */
-internal fun openParamExpression(store: EditorStore, effectId: Int, s: ParamSlot) {
+internal fun openParamExpression(store: EditorStore, effectId: Int, s: ParamSlot, label: String) {
     if (!s.animatable) return
     val d = paramDisplay(store.typeOf(effectId), s)
-    store.openExpression(d.label, paramKeys(effectId, s), d.scale, d.suffix)
+    store.openExpression(label, paramKeys(effectId, s), d.scale, d.suffix)
 }
 
 @Composable

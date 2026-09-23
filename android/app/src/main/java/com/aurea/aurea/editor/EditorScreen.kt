@@ -262,12 +262,13 @@ fun EditorScreen(store: EditorStore) {
                 }
                 // A.01: o círculo "Voltar ao editor" no canto (a HEAD perdeu — bug 1).
                 if (ui.fullscreen) {
+                    val backLabel = stringResource(R.string.editor_voltar_editor)
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
                             .padding(10.dp)
                             .size(40.dp)
-                            .semantics { contentDescription = "Voltar ao editor" }
+                            .semantics { contentDescription = backLabel }
                             .background(ShellColors.FloatingDark, CircleShape)
                             .tocavel { ui.fullscreen = false },
                         contentAlignment = Alignment.Center,
@@ -442,13 +443,14 @@ private fun ColumnScope.SheetBody(content: @Composable () -> Unit) {
 /** O "+" da A.01: 52 dp, fundo #1E2130, anel 2,2 `acao`, sombra 45 %. */
 @Composable
 private fun AddFab(onClick: () -> Unit, modifier: Modifier) {
+    val label = stringResource(R.string.editor_adicionar_camada)
     Box(
         modifier
             .size(ShellDims.Fab)
             .shadow(6.dp, CircleShape, ambientColor = ShellColors.FabShadow, spotColor = ShellColors.FabShadow)
             .background(ShellColors.Fab, CircleShape)
             .border(2.2.dp, AureaColors.Action, CircleShape)
-            .semantics { contentDescription = "Adicionar camada" }
+            .semantics { contentDescription = label }
             .tocavel(haptic = true, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

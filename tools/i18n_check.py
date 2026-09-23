@@ -3,8 +3,8 @@
 Para cada arquivo `values/strings*.xml`:
   - o XML abre (o aapt2 recusa o arquivo inteiro por um `&` solto);
   - apóstrofo sem `\\'` e aspas sem `\\"` (o aapt2 recusa ou APAGA o caractere);
-  - toda chave traduzível do padrão existe nos 6 idiomas, e nenhum idioma tem
-    chave que o padrão não tem;
+  - toda chave traduzível do padrão existe no INGLÊS (o par obrigatório desta
+    fase), e nenhum idioma tem chave que o padrão não tem;
   - os argumentos de formato (`%1$s`, `%d`...) são OS MESMOS em todos — um `%s`
     a mais no árabe é crash na hora de formatar, não texto errado;
   - `plurals` existe nos 7, com `other` sempre.
@@ -18,7 +18,12 @@ import sys
 import xml.etree.ElementTree as ET
 
 RES = "android/app/src/main/res"
+# Escopo de 8.1: pt-BR (base) + ingles. Os outros cinco idiomas continuam nos
+# catalogos, mas SEM as chaves novas desta fase — o que falta cai no pt-BR pelo
+# fallback do Android. Eles sao conferidos como PARCIAIS: nao podem ter chave
+# que o padrao nao tem nem placeholder diferente, mas nao precisam de todas.
 LANGS = ["en", "es", "ru", "hi", "id", "ar"]
+OBRIGATORIOS = ["en"]
 FMT = re.compile(r"%(\d+\$)?[-#+ 0,(]*\d*(\.\d+)?[sdfxXeEgGc%]")
 
 
@@ -91,6 +96,10 @@ def main():
                 errors.append(f"{path}: chave que o padrao nao tem: {k}")
             for k in sorted(want):
                 if k not in l_str:
+                    # Idioma fora do par obrigatorio desta fase: a chave nova
+                    # ainda nao foi traduzida, cai no pt-BR. Nao e erro.
+                    if lang not in OBRIGATORIOS:
+                        continue
                     # Unidade pura ("%1$d px") pode faltar de proposito: cai no padrao.
                     if re.fullmatch(r"[\s%0-9$sdf.,:·+\-−×]*(px|fps|ms|MB|GB|s|x|%%)?\s*", b_str[k] or ""):
                         continue
@@ -99,6 +108,8 @@ def main():
                     errors.append(f"{path}: {k}: argumentos {args_of(l_str[k])} != {args_of(b_str[k])}")
             for k, forms in b_pl.items():
                 if k not in l_pl:
+                    if lang not in OBRIGATORIOS:
+                        continue
                     errors.append(f"{path}: falta plurals {k}")
                     continue
                 if "other" not in l_pl[k]:

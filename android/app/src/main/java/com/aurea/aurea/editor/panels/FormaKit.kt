@@ -147,11 +147,12 @@ internal fun HumanRow(
 /** O ↺ da linha: 34 dp de toque; reserva o lugar mesmo apagado (a régua não pula). */
 @Composable
 internal fun ResetButton(visible: Boolean, onClick: () -> Unit) {
+    val desc = stringResource(R.string.panel_voltar_padrao)
     Box(
         Modifier
             .size(34.dp, 44.dp)
             .alpha(if (visible) 1f else 0f)
-            .semantics { contentDescription = "Voltar ao padrão" }
+            .semantics { contentDescription = desc }
             .then(if (visible) Modifier.tocavel(shrink = 1f, onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {

@@ -82,8 +82,9 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         onDismiss()
         block()
     }
+    val lockedMsg = stringResource(R.string.editor_camada_bloqueada_desbloqueie_editar)
     fun timeAct(block: () -> Unit): () -> Unit = act {
-        if (row.locked) store.showToast("Camada bloqueada: desbloqueie para editar") else block()
+        if (row.locked) store.showToast(lockedMsg) else block()
     }
 
     ShellMenuSheet(onDismiss) {
@@ -151,7 +152,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             }
         }
         if (type == LayerType.Video || type == LayerType.Audio) {
-            MenuSection("Mídia")
+            MenuSection(stringResource(R.string.sh_menu_media))
             if (type == LayerType.Video) {
                 MenuItemRow(
                     CupertinoGlyph.MusicNote2,
@@ -161,7 +162,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
                 )
             }
             if (type == LayerType.Audio || type == LayerType.Video) {
-                MenuItemRow(CupertinoGlyph.Speaker2, "Volume", act { openPanel(store, ui, EditorPanel.Audio) })
+                MenuItemRow(CupertinoGlyph.Speaker2, stringResource(R.string.sh_menu_volume), act { openPanel(store, ui, EditorPanel.Audio) })
             }
         }
 
@@ -188,10 +189,10 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         MenuItemRow(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), if (inside) timeAct { store.splitAtPlayhead(listOf(id)) } else null)
         MenuItemRow(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), if (inside) timeAct { store.trimEnd(id, t) } else null)
         if (type == LayerType.Video || type == LayerType.Audio) {
-            MenuItemRow(CupertinoGlyph.Speedometer, "Velocidade e remapear o tempo", act { openPanel(store, ui, EditorPanel.Speed) })
+            MenuItemRow(CupertinoGlyph.Speedometer, stringResource(R.string.sh_menu_speed_remap), act { openPanel(store, ui, EditorPanel.Speed) })
         }
         if (type == LayerType.Video) {
-            MenuItemRow(ShellGlyph.Snow, "Congelar quadro", if (inside) act { store.freezeFrame(id) } else null)
+            MenuItemRow(ShellGlyph.Snow, stringResource(R.string.sh_menu_freeze_frame), if (inside) act { store.freezeFrame(id) } else null)
             MenuSection(stringResource(R.string.editor_rastreio))
             MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_rastrear_ponto), act { store.select(id); store.beginPointPick(false) },
                 detail = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras))
@@ -254,7 +255,7 @@ internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
     val focus = remember { FocusRequester() }
     val hits = remember(query, store.layers) { store.searchLayers(query) }
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.7f) {
-        MenuSection("Buscar camadas")
+        MenuSection(stringResource(R.string.sh_menu_search_layers))
         Box(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                 .heightIn(min = 40.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
@@ -273,7 +274,7 @@ internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
         LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
         if (query.isNotBlank() && hits.isEmpty()) {
             Text(
-                "Nenhuma camada com \"${query.trim()}\"",
+                stringResource(R.string.sh_menu_no_layer_matches, query.trim()),
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
@@ -324,7 +325,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         block()
     }
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
-        MenuSection("Seleção")
+        MenuSection(stringResource(R.string.sh_menu_selection))
         MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
         MenuItemRow(CupertinoGlyph.Square, stringResource(R.string.editor_limpar_selecao), act { store.clearSelection() })
         MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.editor_buscar_camadas), if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
@@ -347,7 +348,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             val shutter = store.shutterAngle.roundToInt()
             MenuItemRow(
                 CupertinoGlyph.CircleLefthalfFill,
-                "Obturador: $shutter°",
+                stringResource(R.string.sh_menu_shutter, shutter),
                 {
                     val next = ShutterOptions.firstOrNull { it > shutter } ?: ShutterOptions.first()
                     store.changeShutterAngle(next.toFloat())
@@ -378,7 +379,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             ShellGlyph.ScissorsAlt,
             stringResource(R.string.editor_aparar_projeto_cabecote),
             if (store.playhead > 0) act { store.trimProjectAtPlayhead() } else null,
-            detail = "Corta tudo o que passa de $now",
+            detail = stringResource(R.string.sh_menu_cut_after, now),
         )
 
         MenuSection(stringResource(R.string.editor_marcas_ritmo))

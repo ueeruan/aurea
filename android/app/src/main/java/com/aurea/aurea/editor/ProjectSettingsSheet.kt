@@ -21,8 +21,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.app.Application
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
@@ -60,7 +62,7 @@ private val Resolutions = listOf(480 to "480p (SD)", 720 to "720p (HD)", 1080 to
 private val FpsOptions = listOf(24, 25, 30, 50, 60)
 
 /** Cores de fundo de um toque; "Outra cor…" abre o seletor. */
-private val Backgrounds = listOf("Preto" to floatArrayOf(0f, 0f, 0f), "Branco" to floatArrayOf(1f, 1f, 1f))
+private val Backgrounds = listOf(R.string.sh_bg_black to floatArrayOf(0f, 0f, 0f), R.string.sh_bg_white to floatArrayOf(1f, 1f, 1f))
 
 /**
  * A folha da engrenagem: proporção (16:9 · 9:16 · 4:5 · 1:1 · 4:3 · ✎ livre),
@@ -81,7 +83,10 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
     val shortSide = min(w, h)
     val fpsValue = comp?.fps ?: p.fps.toDouble()
     val bg = comp?.background ?: listOf(0f, 0f, 0f, 1f)
-    val bgName = Backgrounds.firstOrNull { (_, c) -> (0..2).all { abs(c[it] - bg[it]) < 0.01f } }?.first ?: stringResource(R.string.editor_personalizada)
+    val bgName = Backgrounds.firstOrNull { (_, c) -> (0..2).all { abs(c[it] - bg[it]) < 0.01f } }?.first
+        ?.let { stringResource(it) } ?: stringResource(R.string.editor_personalizada)
+    val widthLabel = stringResource(R.string.editor_largura)
+    val heightLabel = stringResource(R.string.editor_altura)
 
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var pickingBackground by remember { mutableStateOf(false) }
@@ -108,12 +113,13 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
                     if (comp != null && preset != label) applyAspect(store, comp, ratio, shortSide)
                 }
             }
+            val freeLabel = stringResource(R.string.editor_tamanho_livre)
             Box(
                 Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (free) AureaColors.Accent else AureaColors.Chip)
-                    .semantics { contentDescription = "Tamanho livre" }
+                    .semantics { contentDescription = freeLabel }
                     .tocavel(haptic = true) { free = true },
                 contentAlignment = Alignment.Center,
             ) {
@@ -125,13 +131,13 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
             SettingLine(stringResource(R.string.editor_tamanho)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SizeBox("$w", Modifier.weight(1f)) {
-                        keypad = KeypadRequest("Largura", w.toFloat(), "px", 16f, 8192f, 0) { v ->
+                        keypad = KeypadRequest(widthLabel, w.toFloat(), "px", 16f, 8192f, 0) { v ->
                             setSize(store, comp, v.roundToInt(), h)
                         }
                     }
                     Text("×", modifier = Modifier.padding(horizontal = 10.dp), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
                     SizeBox("$h", Modifier.weight(1f)) {
-                        keypad = KeypadRequest("Altura", h.toFloat(), "px", 16f, 8192f, 0) { v ->
+                        keypad = KeypadRequest(heightLabel, h.toFloat(), "px", 16f, 8192f, 0) { v ->
                             setSize(store, comp, w, v.roundToInt())
                         }
                     }
@@ -151,7 +157,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
                         val c = comp ?: return@PopupItem
                         val (nw, nh) = sizeFor(short, if (aspect > 0f) aspect else 16f / 9f)
                         if (c.fits(nw, nh)) store.setCompositionSize(nw, nh)
-                        else store.showToast("Este aparelho exporta até ${c.capLong} × ${c.capShort}")
+                        else store.showToast(capMessage(store, c))
                     }
                 },
             )
@@ -179,7 +185,8 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
                 open = menu == "bg",
                 onOpen = { menu = "bg" },
                 onDismiss = { menu = null },
-                items = Backgrounds.map { (name, c) ->
+                items = Backgrounds.map { (res, c) ->
+                    val name = stringResource(res)
                     PopupItem(name, name == bgName) { store.setCompositionBackground(c[0], c[1], c[2], 1f) }
                 } + PopupItem(stringResource(R.string.editor_outra_cor), bgName == stringResource(R.string.editor_personalizada)) { if (comp != null) pickingBackground = true },
             )
@@ -221,8 +228,12 @@ private fun setSize(store: EditorStore, c: CompositionSettings, width: Int, heig
     val nw = even(width.toFloat())
     val nh = even(height.toFloat())
     if (c.fits(nw, nh)) store.setCompositionSize(nw, nh)
-    else store.showToast("Este aparelho exporta até ${c.capLong} × ${c.capShort}")
+    else store.showToast(capMessage(store, c))
 }
+
+/** O teto do aparelho, no idioma escolhido no app (fora do Compose). */
+private fun capMessage(store: EditorStore, c: CompositionSettings): String =
+    AppText.get(store.getApplication<Application>(), R.string.sh_device_exports_up_to, c.capLong, c.capShort)
 
 /** Tamanho par com lado menor `short` na proporção `ratio` (largura / altura). */
 private fun sizeFor(short: Int, ratio: Float): Pair<Int, Int> =
@@ -233,6 +244,7 @@ private fun even(v: Float): Int = max(2, (v / 2f).roundToInt() * 2)
 /** Caixinha no formato da proporção (lado maior 44), rótulo dentro. */
 @Composable
 private fun AspectBox(label: String, ratio: Float, on: Boolean, onClick: () -> Unit) {
+    val description = stringResource(R.string.sh_aspect_ratio_desc, label)
     val long = 44f
     val bw = if (ratio >= 1f) long else long * ratio.coerceAtLeast(0.5f) + 6f
     val bh = if (ratio >= 1f) long / ratio + 6f else long
@@ -241,7 +253,7 @@ private fun AspectBox(label: String, ratio: Float, on: Boolean, onClick: () -> U
             .size(bw.dp, bh.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(if (on) AureaColors.Accent else AureaColors.Chip)
-            .semantics { contentDescription = "Proporção $label" }
+            .semantics { contentDescription = description }
             .tocavel(haptic = true, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

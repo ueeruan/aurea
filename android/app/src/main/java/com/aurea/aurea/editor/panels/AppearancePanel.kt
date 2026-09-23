@@ -31,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
@@ -57,9 +58,9 @@ import com.aurea.aurea.ui.theme.tocavel
  * Um modo de mescla [A] (`ModoDeMescla`): rótulo, o `aurea::BlendMode` (nulo =
  * modo que o motor não tem) e o modo do Compose para a miniatura.
  */
-private class BlendChoice(val label: String, val engine: Int?, val preview: BlendMode)
+private class BlendChoice(@StringRes val label: Int, val engine: Int?, val preview: BlendMode)
 
-private class BlendCategory(val name: String, val modes: List<BlendChoice>)
+private class BlendCategory(@StringRes val name: Int, val modes: List<BlendChoice>)
 
 /**
  * AS SETE CATEGORIAS DA MESCLAGEM [A] (`categoriasDeMescla`, v1.1.1). Os números
@@ -69,40 +70,40 @@ private class BlendCategory(val name: String, val modes: List<BlendChoice>)
  * Luminosity 17.
  */
 private val BlendCategories = listOf(
-    BlendCategory("Normal", listOf(BlendChoice("Normal", 0, BlendMode.SrcOver))),
+    BlendCategory(R.string.panel_normal, listOf(BlendChoice(R.string.panel_normal, 0, BlendMode.SrcOver))),
     BlendCategory(
-        "Escurecer",
+        R.string.pn_blend_darken,
         listOf(
-            BlendChoice("Escurecer", 6, BlendMode.Darken), BlendChoice("Multiplicar", 3, BlendMode.Multiply),
-            BlendChoice("Queimar cor", 9, BlendMode.ColorBurn),
+            BlendChoice(R.string.pn_blend_darken, 6, BlendMode.Darken), BlendChoice(R.string.pn_blend_multiply, 3, BlendMode.Multiply),
+            BlendChoice(R.string.pn_blend_color_burn, 9, BlendMode.ColorBurn),
         ),
     ),
     BlendCategory(
-        "Clarear",
+        R.string.pn_blend_lighten,
         listOf(
-            BlendChoice("Clarear", 7, BlendMode.Lighten), BlendChoice("Tela", 4, BlendMode.Screen),
-            BlendChoice("Subexpor cor", 8, BlendMode.ColorDodge), BlendChoice("Adicionar", 1, BlendMode.Plus),
+            BlendChoice(R.string.pn_blend_lighten, 7, BlendMode.Lighten), BlendChoice(R.string.pn_blend_screen, 4, BlendMode.Screen),
+            BlendChoice(R.string.pn_blend_color_dodge, 8, BlendMode.ColorDodge), BlendChoice(R.string.pn_blend_add, 1, BlendMode.Plus),
         ),
     ),
     BlendCategory(
-        "Contraste",
+        R.string.pn_blend_cat_contrast,
         listOf(
-            BlendChoice("Sobrepor", 5, BlendMode.Overlay), BlendChoice("Luz suave", 11, BlendMode.Softlight),
-            BlendChoice("Luz forte", 10, BlendMode.Hardlight),
+            BlendChoice(R.string.pn_blend_overlay, 5, BlendMode.Overlay), BlendChoice(R.string.pn_blend_soft_light, 11, BlendMode.Softlight),
+            BlendChoice(R.string.pn_blend_hard_light, 10, BlendMode.Hardlight),
         ),
     ),
     BlendCategory(
-        "Diferença",
+        R.string.pn_blend_difference,
         listOf(
-            BlendChoice("Diferença", 12, BlendMode.Difference), BlendChoice("Exclusão", 13, BlendMode.Exclusion),
-            BlendChoice("Subtrair", 2, BlendMode.SrcOver),
+            BlendChoice(R.string.pn_blend_difference, 12, BlendMode.Difference), BlendChoice(R.string.pn_blend_exclusion, 13, BlendMode.Exclusion),
+            BlendChoice(R.string.pn_blend_subtract, 2, BlendMode.SrcOver),
         ),
     ),
     BlendCategory(
-        "Cor",
+        R.string.pn_blend_color,
         listOf(
-            BlendChoice("Matiz", 14, BlendMode.Hue), BlendChoice("Saturação", 15, BlendMode.Saturation),
-            BlendChoice("Cor", 16, BlendMode.Color), BlendChoice("Luminosidade", 17, BlendMode.Luminosity),
+            BlendChoice(R.string.pn_blend_hue, 14, BlendMode.Hue), BlendChoice(R.string.pn_blend_saturation, 15, BlendMode.Saturation),
+            BlendChoice(R.string.pn_blend_color, 16, BlendMode.Color), BlendChoice(R.string.pn_blend_luminosity, 17, BlendMode.Luminosity),
         ),
     ),
 )
@@ -126,6 +127,7 @@ internal fun AppearancePanel(env: PanelEnv) {
     val look by remember(store) { derivedStateOf { transformLook(store.detail, intArrayOf(TrackProperty.OPACITY)) } }
     val curveReady by remember(store) { derivedStateOf { store.primaryKeys().transformTrack(TrackProperty.OPACITY).size >= 2 } }
     val exprLook by remember(store) { derivedStateOf { store.expressionLook(OpacityKeys) } }
+    val opacityTitle = stringResource(R.string.panel_opacidade)
 
     Row(Modifier.fillMaxSize()) {
         LeftRail(
@@ -148,7 +150,7 @@ internal fun AppearancePanel(env: PanelEnv) {
                 null
             },
             expression = exprLook,
-            onExpression = if (tab == 0) ({ store.openExpression("Opacidade", OpacityKeys, 100f, "%") }) else null,
+            onExpression = if (tab == 0) ({ store.openExpression(opacityTitle, OpacityKeys, 100f, "%") }) else null,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ParamTabs(
@@ -224,11 +226,11 @@ private fun BlendTab(env: PanelEnv) {
                     ) {
                         CupertinoIcon(if (isOpen) CupertinoGlyph.ChevronDown else CupertinoGlyph.ChevronRight, 13.dp, AureaColors.Muted)
                         Spacer(Modifier.width(8.dp))
-                        Text(cat.name, style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.W600)))
+                        Text(stringResource(cat.name), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.W600)))
                         Spacer(Modifier.weight(1f))
                         val on = cat.modes.firstOrNull { it.engine == mode }
                         if (on != null) {
-                            Text(on.label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
+                            Text(stringResource(on.label), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
                             Spacer(Modifier.width(6.dp))
                             CupertinoIcon(CupertinoGlyph.CheckmarkCircleFill, 16.dp, AureaColors.Accent)
                         }
@@ -252,7 +254,7 @@ private fun BlendTab(env: PanelEnv) {
         }
         item(key = "ajuda") {
             Text(
-                "A mistura combina esta camada com as camadas abaixo. Branco em Clarear cobre a imagem; em Escurecer deixa a imagem aparecer. Ajuste também a opacidade para reduzir a intensidade.",
+                stringResource(R.string.pn_blend_help),
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 4.dp),
@@ -283,7 +285,7 @@ private fun BlendChip(m: BlendChoice, lit: Boolean, onClick: () -> Unit) {
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            m.label,
+            stringResource(m.label),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 4.dp),

@@ -135,9 +135,9 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
             val status = when {
                 refused -> stringResource(R.string.panel_motor_recusou_esta_propriedade) to AureaColors.Danger
                 shownError != null -> {
-                    val where = if (shownError.line > 0) "Linha ${shownError.line}, coluna ${shownError.column}: " else ""
+                    val msg = if (shownError.line > 0) stringResource(R.string.pn_expr_error_at, shownError.line, shownError.column, shownError.message) else shownError.message
                     val tail = if (!dirty && applied && syntax.ok) stringResource(R.string.panel_usando_valor_keyframes) else ""
-                    (where + shownError.message + tail) to AureaColors.Danger
+                    (msg + tail) to AureaColors.Danger
                 }
                 dirty -> (if (field.text.isBlank()) stringResource(R.string.panel_aplicar_sem_texto_remove_expressao) else stringResource(R.string.panel_sintaxe_ok_toque_aplicar)) to AureaColors.Muted
                 applied && info?.enabled == false -> stringResource(R.string.panel_desligada_propriedade_usa_keyframes) to AureaColors.Muted

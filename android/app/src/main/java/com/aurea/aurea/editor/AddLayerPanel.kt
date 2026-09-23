@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
@@ -69,15 +70,15 @@ import kotlin.math.sin
  * foram distribuídos aqui: SVG em Vetor, legendas em Texto, ajuste/agrupar em
  * Elemento, marca e batidas em Áudio. `Shape` continua o 1º (padrão do `openAdd`).
  */
-internal enum class AddTab(val label: String, val glyph: Char) {
-    Shape("Forma", ShellGlyph.SquareOnCircle),
-    Media("Mídia", CupertinoGlyph.PhotoOnRectangle),
-    Audio("Áudio", CupertinoGlyph.MusicNote2),
-    Text("Texto", CupertinoGlyph.Textformat),
-    Element("Elemento", ShellGlyph.CircleGridHex),
-    Model3D("3D", CupertinoGlyph.Cube),
-    Draw("Desenho", ShellGlyph.Scribble),
-    Vector("Vetor", CupertinoGlyph.PencilOutline),
+internal enum class AddTab(@StringRes val label: Int, val glyph: Char) {
+    Shape(R.string.sh_add_tab_shape, ShellGlyph.SquareOnCircle),
+    Media(R.string.sh_add_tab_media, CupertinoGlyph.PhotoOnRectangle),
+    Audio(R.string.sh_add_tab_audio, CupertinoGlyph.MusicNote2),
+    Text(R.string.sh_add_tab_text, CupertinoGlyph.Textformat),
+    Element(R.string.sh_add_tab_element, ShellGlyph.CircleGridHex),
+    Model3D(R.string.sh_add_tab_3d, CupertinoGlyph.Cube),
+    Draw(R.string.sh_add_tab_draw, ShellGlyph.Scribble),
+    Vector(R.string.sh_add_tab_vector, CupertinoGlyph.PencilOutline),
 }
 
 /**
@@ -131,6 +132,7 @@ private fun AddCategories(ui: EditorUi, close: () -> Unit) {
         ) {
             AddTab.entries.forEach { tab ->
                 val on = ui.addTab == tab
+                val tabLabel = stringResource(tab.label)
                 val color = if (on) AureaColors.Accent else AureaColors.Text
                 Column(
                     Modifier
@@ -139,7 +141,7 @@ private fun AddCategories(ui: EditorUi, close: () -> Unit) {
                         .padding(horizontal = 2.dp, vertical = 5.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(if (on) AureaColors.Chip else Color.Transparent)
-                        .semantics { contentDescription = tab.label }
+                        .semantics { contentDescription = tabLabel }
                         .tocavel(shrink = 1f) { ui.addTab = tab },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
@@ -147,7 +149,7 @@ private fun AddCategories(ui: EditorUi, close: () -> Unit) {
                     CupertinoIcon(tab.glyph, 24.dp, color)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        tab.label,
+                        tabLabel,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, fontWeight = FontWeight.W600, color = color)),
@@ -243,9 +245,10 @@ private fun RowScope.AddCard(item: AddItem) {
  * (hexágono repetido) e o 13 (quase igual ao arredondado) — nada em dobro.
  */
 private val SHAPES = listOf(
-    0 to "Círculo", 10 to "Quadrado", 1 to "Arredondado", 12 to "Cápsula", 4 to "Triângulo",
-    14 to "Triângulo reto", 6 to "Polígono", 11 to "Estrela", 2 to "Cruz", 3 to "Anel",
-    5 to "Fatia", 7 to "Flor", 8 to "Seta",
+    0 to R.string.sh_shape_circle, 10 to R.string.sh_shape_square, 1 to R.string.sh_shape_rounded,
+    12 to R.string.sh_shape_capsule, 4 to R.string.sh_shape_triangle, 14 to R.string.sh_shape_right_triangle,
+    6 to R.string.editor_poligono, 11 to R.string.editor_estrela, 2 to R.string.sh_shape_cross,
+    3 to R.string.sh_shape_ring, 5 to R.string.sh_shape_slice, 7 to R.string.sh_shape_flower, 8 to R.string.sh_shape_arrow,
 )
 
 /** Tocar põe a forma no centro da cena, já escolhida (e fecha o adicionar). */
@@ -268,7 +271,7 @@ private fun ShapesTab(store: EditorStore, close: () -> Unit) {
                         if (shape == null) {
                             Spacer(Modifier.weight(1f))
                         } else {
-                            ShapeTile(shape.first, shape.second) {
+                            ShapeTile(shape.first, stringResource(shape.second)) {
                                 store.addShape(shape.first)
                                 close()
                             }
@@ -426,14 +429,14 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
     CardGrid(
         listOf(
             AddItem(stringResource(R.string.editor_musica_ou_som), CupertinoGlyph.MusicNote, AureaColors.Accent) { files.launch(arrayOf("audio/*")) },
-            AddItem("Som de um vídeo", CupertinoGlyph.Film) {
+            AddItem(stringResource(R.string.sh_add_video_sound), CupertinoGlyph.Film) {
                 videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
             },
-            AddItem("Detectar batidas", ShellGlyph.Metronome) {
+            AddItem(stringResource(R.string.sh_add_detect_beats), ShellGlyph.Metronome) {
                 close()
                 store.detectBeats()
             },
-            AddItem("Marca no cabeçote", CupertinoGlyph.Bookmark) {
+            AddItem(stringResource(R.string.sh_add_marker_at_playhead), CupertinoGlyph.Bookmark) {
                 close()
                 store.toggleMarker()
             },
@@ -447,18 +450,19 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
 
 @Composable
 private fun TextTab(store: EditorStore, ui: EditorUi) {
+    val needsSpeech = stringResource(R.string.sh_add_captions_need_speech)
     CardGrid(
         listOf(
-            AddItem("Texto", CupertinoGlyph.Textformat, AureaColors.Accent) {
+            AddItem(stringResource(R.string.sh_add_tab_text), CupertinoGlyph.Textformat, AureaColors.Accent) {
                 if (store.addText() >= 0) openPanel(store, ui, EditorPanel.Text)
             },
-            AddItem("Legendas da fala", CupertinoGlyph.CaptionsBubble) {
+            AddItem(stringResource(R.string.sh_add_speech_captions), CupertinoGlyph.CaptionsBubble) {
                 // Legendas saem da fala de um vídeo/áudio: abre o painel dele.
                 val kind = store.detail?.kind
                 if (kind == LayerType.Video.kind || kind == LayerType.Audio.kind) {
                     openPanel(store, ui, EditorPanel.Captions)
                 } else {
-                    store.showToast("Selecione um vídeo ou áudio com fala para gerar legendas")
+                    store.showToast(needsSpeech)
                 }
             },
         ),
@@ -468,18 +472,19 @@ private fun TextTab(store: EditorStore, ui: EditorUi) {
 /** Peças que não são mídia nem desenho: nulo, partículas (3 receitas), ajuste e grupo. */
 @Composable
 private fun ElementTab(store: EditorStore, close: () -> Unit) {
+    val pickToGroup = stringResource(R.string.sh_add_pick_layers_to_group)
     CardGrid(
         listOf(
-            AddItem("Nulo", draw = { drawNullIcon() }) { store.addNull(false); close() },
+            AddItem(stringResource(R.string.sh_add_null), draw = { drawNullIcon() }) { store.addNull(false); close() },
             // UM sistema, nao tres. Faiscas/Neve/Poeira de luz viraram preset
             // do mesmo motor — listar os tres aqui prometia tres motores.
             AddItem(stringResource(R.string.particular_title), CupertinoGlyph.Sparkles, ShellColors.Text3D) {
                 close(); store.addParticles(0)
             },
-            AddItem("Camada de ajuste", CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
-            AddItem("Agrupar seleção", CupertinoGlyph.Folder) {
+            AddItem(stringResource(R.string.editor_camada_ajuste), CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
+            AddItem(stringResource(R.string.sh_add_group_selection), CupertinoGlyph.Folder) {
                 if (store.selection.isEmpty()) {
-                    store.showToast("Selecione as camadas a agrupar")
+                    store.showToast(pickToGroup)
                 } else {
                     close()
                     store.precompose()
@@ -501,13 +506,13 @@ private fun Model3DTab(store: EditorStore, close: () -> Unit) {
     }
     CardGrid(
         listOf(
-            AddItem("Modelo 3D", CupertinoGlyph.Cube, AureaColors.Accent) {
+            AddItem(stringResource(R.string.sh_add_model_3d), CupertinoGlyph.Cube, AureaColors.Accent) {
                 picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "application/octet-stream", "*/*"))
             },
-            AddItem("Texto 3D", ShellGlyph.TextformatAlt, ShellColors.Text3D) { store.addText3D(); close() },
-            AddItem("Nulo 3D", draw = { drawNullIcon() }) { store.addNull(true); close() },
+            AddItem(stringResource(R.string.sh_add_text_3d), ShellGlyph.TextformatAlt, ShellColors.Text3D) { store.addText3D(); close() },
+            AddItem(stringResource(R.string.sh_add_null_3d), draw = { drawNullIcon() }) { store.addNull(true); close() },
         ),
-        hint = "Modelo 3D: arquivos .glb, .gltf, .fbx ou .obj",
+        hint = stringResource(R.string.sh_add_model_3d_hint),
     )
 }
 

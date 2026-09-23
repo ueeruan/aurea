@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
@@ -44,8 +45,13 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
 
-private val CaptionStyles = listOf("Clássico", "Caixa", "Destaque", "Neon", "Karaokê", "Pop")
-private val Languages = listOf(null to "Automático", "pt" to "Português", "en" to "English", "es" to "Español")
+// O índice é o `style` salvo nas opções da legenda; o rótulo sai do idioma do app.
+private val CaptionStyles = listOf(
+    R.string.pn_caption_style_classic, R.string.panel_caixa, R.string.pn_caption_style_highlight,
+    R.string.pn_caption_style_neon, R.string.pn_karaoke, R.string.pn_pop,
+)
+// Nome do idioma da fala no próprio idioma (endônimo); nulo = "Automático", traduzido.
+private val Languages = listOf<Pair<String?, String?>>(null to null, "pt" to "Português", "en" to "English", "es" to "Español")
 
 /**
  * LEGENDAS da camada de vídeo/áudio: gerar (Groq, com a chave dos Ajustes) ou
@@ -81,7 +87,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
                     Note(stringResource(R.string.panel_sem_chave_servico_transcricao_use_arquivo), AureaColors.Muted)
                 }
                 Label(stringResource(R.string.panel_idioma_fala))
-                Chips(Languages.map { it.second }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
+                Chips(Languages.map { it.second ?: stringResource(R.string.pn_caption_lang_auto) }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Action(if (cap.words.isEmpty()) stringResource(R.string.panel_gerar_legendas) else stringResource(R.string.panel_transcrever_novo), primary = true, enabled = cap.hasGroqKey && cap.busy == null) {
                         cap.transcribe(language)
@@ -89,34 +95,40 @@ internal fun CaptionsPanel(env: PanelEnv) {
                     Action(stringResource(R.string.panel_importar_legenda_srt), enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
                 }
 
-                Label("Estilo")
-                Chips(CaptionStyles, s.style) { i -> set { it.copy(style = i) } }
-                Label("Legenda")
-                Chips(listOf("Agrupadas", "Uma por palavra"), s.mode) { i -> set { it.copy(mode = i) } }
+                Label(stringResource(R.string.panel_estilo))
+                Chips(CaptionStyles.map { stringResource(it) }, s.style) { i -> set { it.copy(style = i) } }
+                Label(stringResource(R.string.pn_caption))
+                Chips(listOf(stringResource(R.string.pn_caption_grouped), stringResource(R.string.pn_caption_one_per_word)), s.mode) { i -> set { it.copy(mode = i) } }
                 if (s.mode == 0) {
-                    Label("Palavras por legenda")
+                    Label(stringResource(R.string.pn_caption_words_per_caption))
                     Chips((1..6).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
-                    Label("Letras por linha")
+                    Label(stringResource(R.string.pn_caption_chars_per_line))
                     Chips(listOf("12", "18", "24", "32"), listOf(12, 18, 24, 32).indexOf(s.maxChars)) { i -> set { it.copy(maxChars = listOf(12, 18, 24, 32)[i]) } }
-                    Label("Linhas")
+                    Label(stringResource(R.string.pn_caption_lines))
                     Chips(listOf("1", "2", "3"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
                 }
-                Label("Altura na tela")
+                Label(stringResource(R.string.pn_caption_screen_height))
                 val ys = listOf(0.2f, 0.5f, 0.78f)
-                Chips(listOf("Alto", "Meio", "Baixo"), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
-                Label("Tamanho")
+                Chips(listOf(stringResource(R.string.pn_caption_pos_top), stringResource(R.string.pn_caption_pos_middle), stringResource(R.string.pn_caption_pos_bottom)), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
+                Label(stringResource(R.string.panel_tamanho))
                 val sizes = listOf(0.045f, 0.065f, 0.09f)
-                Chips(listOf("P", "M", "G"), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
-                Toggle("Destacar a palavra falada", s.highlight) { v -> set { it.copy(highlight = v) } }
-                Toggle("MAIÚSCULAS", s.uppercase) { v -> set { it.copy(uppercase = v) } }
-                Toggle("Quebrar nas pausas", s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
-                Toggle("Tirar vícios (hum, ahn, tipo…)", s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
+                Chips(listOf(stringResource(R.string.pn_size_small_short), stringResource(R.string.pn_size_medium_short), stringResource(R.string.pn_size_large_short)), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
+                Toggle(stringResource(R.string.pn_caption_highlight_word), s.highlight) { v -> set { it.copy(highlight = v) } }
+                Toggle(stringResource(R.string.pn_caption_uppercase), s.uppercase) { v -> set { it.copy(uppercase = v) } }
+                Toggle(stringResource(R.string.pn_caption_break_pauses), s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
+                Toggle(stringResource(R.string.pn_caption_remove_fillers), s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
 
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Action(if (cap.captionCount > 0) "Refazer legendas" else "Criar legendas", primary = true, enabled = words.isNotEmpty() && cap.busy == null) { cap.generate() }
-                    if (cap.captionCount > 0) Action("Remover (${cap.captionCount})", enabled = cap.busy == null) { cap.removeAll() }
+                    Action(if (cap.captionCount > 0) stringResource(R.string.pn_caption_redo) else stringResource(R.string.pn_caption_create), primary = true, enabled = words.isNotEmpty() && cap.busy == null) { cap.generate() }
+                    if (cap.captionCount > 0) Action(stringResource(R.string.pn_caption_remove_n, cap.captionCount), enabled = cap.busy == null) { cap.removeAll() }
                 }
-                if (words.isNotEmpty()) Label("Texto da fala${cap.source?.let { " · $it" } ?: ""} — toque para corrigir (${words.size} palavras)")
+                if (words.isNotEmpty()) {
+                    val src = cap.source
+                    Label(
+                        if (src != null) pluralStringResource(R.plurals.pn_caption_transcript_source, words.size, src, words.size)
+                        else pluralStringResource(R.plurals.pn_caption_transcript, words.size, words.size),
+                    )
+                }
             }
         }
 
@@ -176,8 +188,8 @@ private fun WordEditor(initial: String, time: String, onDone: (String) -> Unit) 
             BasicTextField(text, onValueChange = { text = it }, singleLine = true, cursorBrush = SolidColor(AureaColors.Accent),
                 textStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)), modifier = Modifier.fillMaxWidth())
         }
-        Action("OK", primary = true) { onDone(text) }
-        Action("Apagar palavra") { onDone("") }
+        Action(stringResource(R.string.pn_ok), primary = true) { onDone(text) }
+        Action(stringResource(R.string.pn_caption_delete_word)) { onDone("") }
     }
 }
 

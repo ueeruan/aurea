@@ -1,5 +1,8 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import com.aurea.aurea.engine.ParamType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import kotlin.math.abs
@@ -29,7 +32,7 @@ internal fun effectTypeId(key: String): Int {
  * = regra padrão.
  */
 internal class ParamHuman(
-    val label: String? = null,
+    @androidx.annotation.StringRes val label: Int? = null,
     val scale: Float? = null,
     val suffix: String? = null,
     val decimals: Int? = null,
@@ -41,7 +44,7 @@ internal class ParamHuman(
  * Nulo = regra padrão ([DEFAULT_PRINCIPAL]).
  */
 internal class EffectHuman(
-    val name: String? = null,
+    @androidx.annotation.StringRes val name: Int? = null,
     val keywords: String = "",
     val principal: List<Int>? = null,
     val params: Map<Int, ParamHuman> = emptyMap(),
@@ -53,8 +56,16 @@ private const val SHOW_ALL_UP_TO = 6
 
 private val Percent0 = ParamHuman(scale = 100f, suffix = "%", decimals = 0)
 
-private val MatrixRows = listOf("Vermelho", "Verde", "Azul")
-private val MatrixCols = listOf("do vermelho", "do verde", "do azul", "extra")
+/**
+ * As 12 células da matriz (linha = canal de saída, coluna = de onde vem). Uma
+ * frase por célula, e não "linha + coluna": "Vermelho do verde" não se monta
+ * por concatenação em russo nem em árabe.
+ */
+private val MatrixLabels = listOf(
+    R.string.fx_matrix_rr, R.string.fx_matrix_rg, R.string.fx_matrix_rb, R.string.fx_matrix_ro,
+    R.string.fx_matrix_gr, R.string.fx_matrix_gg, R.string.fx_matrix_gb, R.string.fx_matrix_go,
+    R.string.fx_matrix_br, R.string.fx_matrix_bg, R.string.fx_matrix_bb, R.string.fx_matrix_bo,
+)
 
 private val Table: Map<Int, EffectHuman> = buildMap {
     fun put(key: String, e: EffectHuman) = put(effectTypeId(key), e)
@@ -64,7 +75,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "transform mover posicao escala girar rotacao opacidade",
             principal = listOf(1, 2, 3, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Pivô"),
+                0 to ParamHuman(label = R.string.fx_pivo),
                 2 to ParamHuman(suffix = "%", decimals = 0),
             ),
         ),
@@ -76,8 +87,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             principal = listOf(0),
             params = mapOf(
                 0 to ParamHuman(suffix = "", decimals = 2),
-                1 to ParamHuman(label = "Compensação", scale = 100f, suffix = "%", decimals = 0),
-                2 to ParamHuman(label = "Tons médios", decimals = 2),
+                1 to ParamHuman(label = R.string.fx_compensacao, scale = 100f, suffix = "%", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_tons_medios, decimals = 2),
             ),
         ),
     )
@@ -93,23 +104,19 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.color.tint",
         EffectHuman(
             keywords = "tint colorir duotone",
-            params = mapOf(0 to ParamHuman(label = "Cor das sombras"), 1 to ParamHuman(label = "Cor das luzes")),
+            params = mapOf(0 to ParamHuman(label = R.string.fx_cor_sombras), 1 to ParamHuman(label = R.string.fx_cor_luzes)),
         ),
     )
     put(
         "aurea.color.matrix",
         EffectHuman(
-            name = "Misturar canais",
+            name = R.string.fx_misturar_canais,
             keywords = "matriz de cor channel mixer rgb canais",
             principal = listOf(0, 5, 10),
             params = (0 until 12).associateWith { i ->
-                val row = i / 4
-                val col = i % 4
-                when {
-                    col == 3 -> ParamHuman(label = "${MatrixRows[row]} ${MatrixCols[col]}", scale = 100f, suffix = "%", decimals = 0)
-                    col == row -> ParamHuman(label = MatrixRows[row], suffix = "x", decimals = 2)
-                    else -> ParamHuman(label = "${MatrixRows[row]} ${MatrixCols[col]}", suffix = "x", decimals = 2)
-                }
+                // Coluna 3 é o deslocamento (%); as outras, o ganho (×).
+                if (i % 4 == 3) ParamHuman(label = MatrixLabels[i], scale = 100f, suffix = "%", decimals = 0)
+                else ParamHuman(label = MatrixLabels[i], suffix = "x", decimals = 2)
             },
         ),
     )
@@ -119,9 +126,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "levels niveis preto branco",
             principal = listOf(0, 1, 2),
             params = mapOf(
-                0 to ParamHuman(label = "Ponto preto", decimals = 0),
-                1 to ParamHuman(label = "Ponto branco", decimals = 0),
-                2 to ParamHuman(label = "Tons médios", decimals = 2),
+                0 to ParamHuman(label = R.string.fx_ponto_preto, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_ponto_branco, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_tons_medios, decimals = 2),
                 3 to ParamHuman(decimals = 0),
                 4 to ParamHuman(decimals = 0),
             ),
@@ -131,13 +138,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.blur.gaussian",
         EffectHuman(
-            name = "Desfoque",
+            name = R.string.fx_desfoque,
             keywords = "blur gaussian gaussiano borrar embacar",
             principal = listOf(0, 1),
             params = mapOf(
-                0 to ParamHuman(label = "Intensidade"),
-                1 to ParamHuman(label = "Direção"),
-                2 to ParamHuman(label = "Esticar bordas"),
+                0 to ParamHuman(label = R.string.fx_intensidade),
+                1 to ParamHuman(label = R.string.fx_direcao),
+                2 to ParamHuman(label = R.string.fx_esticar_bordas),
             ),
         ),
     )
@@ -148,7 +155,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "glow brilho luz neon",
             principal = listOf(2, 1, 0, 3),
             params = mapOf(
-                0 to ParamHuman(label = "Limite"),
+                0 to ParamHuman(label = R.string.fx_limite),
                 2 to ParamHuman(suffix = "x", decimals = 1),
             ),
         ),
@@ -156,37 +163,37 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.stylize.motion_tile",
         EffectHuman(
-            name = "Mosaico",
+            name = R.string.fx_mosaico,
             keywords = "motion tile azulejos repetir ladrilho",
             principal = listOf(1, 2, 5, 7),
             params = mapOf(
-                0 to ParamHuman(label = "Centro"),
-                1 to ParamHuman(label = "Largura"),
-                2 to ParamHuman(label = "Altura"),
-                3 to ParamHuman(label = "Largura total"),
-                4 to ParamHuman(label = "Altura total"),
-                5 to ParamHuman(label = "Espelhar"),
-                6 to ParamHuman(label = "Esticar bordas"),
-                7 to ParamHuman(label = "Deslocamento"),
-                8 to ParamHuman(label = "Deslocar na horizontal"),
+                0 to ParamHuman(label = R.string.fx_centro),
+                1 to ParamHuman(label = R.string.fx_largura),
+                2 to ParamHuman(label = R.string.fx_altura),
+                3 to ParamHuman(label = R.string.fx_largura_total),
+                4 to ParamHuman(label = R.string.fx_altura_total),
+                5 to ParamHuman(label = R.string.fx_espelhar),
+                6 to ParamHuman(label = R.string.fx_esticar_bordas),
+                7 to ParamHuman(label = R.string.fx_deslocamento),
+                8 to ParamHuman(label = R.string.fx_deslocar_horizontal),
             ),
         ),
     )
     put(
         "aurea.key.luma",
         EffectHuman(
-            name = "Recorte por brilho",
+            name = R.string.fx_recorte_brilho,
             keywords = "chave de luma luma key remover preto branco",
-            params = mapOf(0 to ParamHuman(label = "Remover"), 1 to ParamHuman(label = "Limite")),
+            params = mapOf(0 to ParamHuman(label = R.string.fx_remover), 1 to ParamHuman(label = R.string.fx_limite)),
         ),
     )
     put(
         "aurea.key.chroma",
         EffectHuman(
-            name = "Recorte por cor",
+            name = R.string.fx_recorte_cor,
             keywords = "chave de croma chroma key fundo verde green screen remover cor",
             principal = listOf(0, 1, 2),
-            params = mapOf(0 to ParamHuman(label = "Cor a remover"), 3 to ParamHuman(label = "Limpar contorno")),
+            params = mapOf(0 to ParamHuman(label = R.string.fx_cor_remover), 3 to ParamHuman(label = R.string.fx_limpar_contorno)),
         ),
     )
     put(
@@ -195,9 +202,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "echo eco rastro trail copias",
             principal = listOf(0, 1, 2),
             params = mapOf(
-                1 to ParamHuman(label = "Intervalo", suffix = "quadros", decimals = 1),
-                2 to ParamHuman(label = "Desvanecer"),
-                3 to ParamHuman(label = "Separar cores", suffix = "quadros", decimals = 1),
+                1 to ParamHuman(label = R.string.fx_intervalo, suffix = "quadros", decimals = 1),
+                2 to ParamHuman(label = R.string.fx_desvanecer),
+                3 to ParamHuman(label = R.string.fx_separar_cores, suffix = "quadros", decimals = 1),
             ),
         ),
     )
@@ -211,11 +218,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "scanline varredura crt tv tubo linha",
             principal = listOf(0, 1, 3, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Altura da linha", suffix = "px", decimals = 1),
-                3 to ParamHuman(label = "Suavidade", decimals = 0),
-                4 to ParamHuman(label = "Contraste", decimals = 0),
-                6 to ParamHuman(label = "Canal"),
-                8 to ParamHuman(label = "Rolagem", suffix = "px", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_altura_linha, suffix = "px", decimals = 1),
+                3 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_contraste, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_canal),
+                8 to ParamHuman(label = R.string.fx_rolagem, suffix = "px", decimals = 0),
             ),
         ),
     )
@@ -225,14 +232,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "grain grao filme ruido textura analogico",
             principal = listOf(0, 1, 2, 4, 7),
             params = mapOf(
-                0 to ParamHuman(label = "Intensidade", decimals = 0),
-                1 to ParamHuman(label = "Tamanho do grão", suffix = "px", decimals = 1),
-                2 to ParamHuman(label = "Grão de cor", decimals = 0),
-                3 to ParamHuman(label = "Rugosidade", suffix = "x", decimals = 2),
-                4 to ParamHuman(label = "Sombras", decimals = 0),
-                5 to ParamHuman(label = "Luzes", decimals = 0),
-                7 to ParamHuman(label = "Animado"),
-                8 to ParamHuman(label = "Monocromático"),
+                0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_tamanho_grao, suffix = "px", decimals = 1),
+                2 to ParamHuman(label = R.string.fx_grao_cor, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_rugosidade, suffix = "x", decimals = 2),
+                4 to ParamHuman(label = R.string.fx_sombras, decimals = 0),
+                5 to ParamHuman(label = R.string.fx_luzes, decimals = 0),
+                7 to ParamHuman(label = R.string.fx_animado),
+                8 to ParamHuman(label = R.string.fx_monocromatico),
             ),
         ),
     )
@@ -242,15 +249,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "halftone meio tom reticula pontos impressao jornal pontilhado",
             principal = listOf(0, 1, 2, 5, 7),
             params = mapOf(
-                0 to ParamHuman(label = "Tamanho do ponto", suffix = "px", decimals = 0),
-                1 to ParamHuman(label = "Contraste", decimals = 0),
-                2 to ParamHuman(label = "Ângulo", suffix = "°", decimals = 0),
-                3 to ParamHuman(label = "Suavidade", decimals = 0),
-                4 to ParamHuman(label = "Rotação por canal", suffix = "°", decimals = 0),
-                5 to ParamHuman(label = "Padrão"),
-                6 to ParamHuman(label = "Grades separadas"),
-                7 to ParamHuman(label = "Fundo claro", decimals = 0),
-                8 to ParamHuman(label = "Ganho do ponto", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_tamanho_ponto, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_contraste, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_angulo, suffix = "°", decimals = 0),
+                3 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_rotacao_canal, suffix = "°", decimals = 0),
+                5 to ParamHuman(label = R.string.fx_padrao),
+                6 to ParamHuman(label = R.string.fx_grades_separadas),
+                7 to ParamHuman(label = R.string.fx_fundo_claro, decimals = 0),
+                8 to ParamHuman(label = R.string.fx_ganho_ponto, decimals = 0),
             ),
         ),
     )
@@ -260,11 +267,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "minimax dilatar erodir morfologia matte afinar engrossar",
             principal = listOf(1, 0, 4, 3),
             params = mapOf(
-                0 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
-                1 to ParamHuman(label = "Operação"),
-                2 to ParamHuman(label = "Forma"),
-                3 to ParamHuman(label = "Intensidade", decimals = 0),
-                4 to ParamHuman(label = "Comparar por"),
+                0 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_operacao),
+                2 to ParamHuman(label = R.string.fx_forma),
+                3 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_comparar),
             ),
         ),
     )
@@ -274,10 +281,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "unsharp mascara de nitidez sharpen afiar detalhe",
             principal = listOf(0, 1, 2),
             params = mapOf(
-                0 to ParamHuman(label = "Intensidade", decimals = 0),
-                1 to ParamHuman(label = "Raio", suffix = "px", decimals = 1),
-                2 to ParamHuman(label = "Limiar", decimals = 0),
-                4 to ParamHuman(label = "Mistura", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 1),
+                2 to ParamHuman(label = R.string.fx_limiar, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
             ),
         ),
     )
@@ -287,12 +294,12 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "lens blur desfoque de lente bokeh iris",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
-                1 to ParamHuman(label = "Ganho das luzes", decimals = 0),
-                2 to ParamHuman(label = "Lados da íris", decimals = 0),
-                3 to ParamHuman(label = "Rotação da íris", suffix = "°", decimals = 0),
-                4 to ParamHuman(label = "Qualidade", decimals = 0),
-                7 to ParamHuman(label = "Mistura", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_ganho_luzes, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_lados_iris, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_rotacao_iris, suffix = "°", decimals = 0),
+                4 to ParamHuman(label = R.string.fx_qualidade, decimals = 0),
+                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
             ),
         ),
     )
@@ -302,13 +309,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "shake tremor camera balancar vibrar tremer",
             principal = listOf(0, 1, 2, 4, 5),
             params = mapOf(
-                0 to ParamHuman(label = "Amplitude X", suffix = "px", decimals = 0),
-                1 to ParamHuman(label = "Amplitude Y", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Frequência", suffix = "x", decimals = 2),
-                4 to ParamHuman(label = "Eixos separados"),
-                5 to ParamHuman(label = "Rotação", suffix = "°", decimals = 0),
-                6 to ParamHuman(label = "Suavização", decimals = 0),
-                7 to ParamHuman(label = "Mistura", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_amplitude_x, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_amplitude_y, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_frequencia, suffix = "x", decimals = 2),
+                4 to ParamHuman(label = R.string.fx_eixos_separados),
+                5 to ParamHuman(label = R.string.fx_rotacao, suffix = "°", decimals = 0),
+                6 to ParamHuman(label = R.string.fx_suavizacao, decimals = 0),
+                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
             ),
         ),
     )
@@ -318,14 +325,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "turbulencia displacement deslocamento ruido organico fumaca",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Intensidade", suffix = "px", decimals = 0),
-                1 to ParamHuman(label = "Tamanho do ruído", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Complexidade", suffix = "oitavas", decimals = 0),
-                3 to ParamHuman(label = "Evolução", suffix = "px/q", decimals = 1),
-                4 to ParamHuman(label = "Deslocamento X", suffix = "px", decimals = 0),
-                5 to ParamHuman(label = "Deslocamento Y", suffix = "px", decimals = 0),
-                8 to ParamHuman(label = "Bordas"),
-                10 to ParamHuman(label = "Girar o deslocamento", suffix = "°", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_intensidade, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_tamanho_ruido, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_complexidade, suffix = "oitavas", decimals = 0),
+                3 to ParamHuman(label = R.string.fx_evolucao, suffix = "px/q", decimals = 1),
+                4 to ParamHuman(label = R.string.fx_deslocamento_x, suffix = "px", decimals = 0),
+                5 to ParamHuman(label = R.string.fx_deslocamento_y, suffix = "px", decimals = 0),
+                8 to ParamHuman(label = R.string.fx_bordas),
+                10 to ParamHuman(label = R.string.fx_girar_deslocamento, suffix = "°", decimals = 0),
             ),
         ),
     )
@@ -335,14 +342,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "wave warp onda ondular senoide agua",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Altura da onda", suffix = "px", decimals = 0),
-                1 to ParamHuman(label = "Largura de onda", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Velocidade", suffix = "px/q", decimals = 0),
-                3 to ParamHuman(label = "Fase", suffix = "°", decimals = 0),
-                4 to ParamHuman(label = "Direção"),
-                5 to ParamHuman(label = "Onda quadrada"),
-                6 to ParamHuman(label = "Bordas"),
-                7 to ParamHuman(label = "Travar nas bordas"),
+                0 to ParamHuman(label = R.string.fx_altura_onda, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_largura_onda, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_velocidade, suffix = "px/q", decimals = 0),
+                3 to ParamHuman(label = R.string.fx_fase, suffix = "°", decimals = 0),
+                4 to ParamHuman(label = R.string.fx_direcao),
+                5 to ParamHuman(label = R.string.fx_onda_quadrada),
+                6 to ParamHuman(label = R.string.fx_bordas),
+                7 to ParamHuman(label = R.string.fx_travar_nas_bordas),
             ),
         ),
     )
@@ -352,13 +359,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "warp lente distorcer empurrar puxar torcer esfera canto bulge pinch twist",
             principal = listOf(0, 1, 2, 3),
             params = mapOf(
-                0 to ParamHuman(label = "Modo"),
-                1 to ParamHuman(label = "Intensidade", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Raio", suffix = "px", decimals = 0),
-                3 to ParamHuman(label = "Centro"),
-                4 to ParamHuman(label = "Bordas"),
-                5 to ParamHuman(label = "Mistura", decimals = 0),
-                6 to ParamHuman(label = "Luz da esfera", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_modo),
+                1 to ParamHuman(label = R.string.fx_intensidade, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 0),
+                3 to ParamHuman(label = R.string.fx_centro),
+                4 to ParamHuman(label = R.string.fx_bordas),
+                5 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_luz_esfera, decimals = 0),
             ),
         ),
     )
@@ -368,14 +375,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "ripple dissolve ondulacao dissolver transicao circular agua",
             principal = listOf(0, 1, 2, 3),
             params = mapOf(
-                0 to ParamHuman(label = "Progresso", decimals = 0),
-                1 to ParamHuman(label = "Ondulação", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Comprimento da onda", suffix = "px", decimals = 0),
-                3 to ParamHuman(label = "Suavidade da borda", decimals = 0),
-                4 to ParamHuman(label = "Centro"),
-                5 to ParamHuman(label = "Velocidade da onda", suffix = "x", decimals = 2),
-                7 to ParamHuman(label = "Distorcer a imagem junto"),
-                8 to ParamHuman(label = "De fora para dentro"),
+                0 to ParamHuman(label = R.string.fx_progresso, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_ondulacao, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_comprimento_onda, suffix = "px", decimals = 0),
+                3 to ParamHuman(label = R.string.fx_suavidade_borda, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_centro),
+                5 to ParamHuman(label = R.string.fx_velocidade_onda, suffix = "x", decimals = 2),
+                7 to ParamHuman(label = R.string.fx_distorcer_imagem_junto),
+                8 to ParamHuman(label = R.string.fx_fora_dentro),
             ),
         ),
     )
@@ -385,16 +392,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "deep glow brilho profundo halo neon luz bloom",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Limite", decimals = 0),
-                1 to ParamHuman(label = "Raio do núcleo", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Raio do halo", suffix = "px", decimals = 0),
-                3 to ParamHuman(label = "Força do núcleo", suffix = "x", decimals = 2),
-                4 to ParamHuman(label = "Força do halo", suffix = "x", decimals = 2),
-                5 to ParamHuman(label = "Cor do brilho"),
-                6 to ParamHuman(label = "Preservar as sombras"),
-                7 to ParamHuman(label = "Halo em tela"),
-                10 to ParamHuman(label = "Só o brilho"),
-                11 to ParamHuman(label = "Estouro", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_limite, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_raio_nucleo, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_raio_halo, suffix = "px", decimals = 0),
+                3 to ParamHuman(label = R.string.fx_forca_nucleo, suffix = "x", decimals = 2),
+                4 to ParamHuman(label = R.string.fx_forca_halo, suffix = "x", decimals = 2),
+                5 to ParamHuman(label = R.string.fx_cor_brilho),
+                6 to ParamHuman(label = R.string.fx_preservar_sombras),
+                7 to ParamHuman(label = R.string.fx_halo_tela),
+                10 to ParamHuman(label = R.string.fx_so_brilho),
+                11 to ParamHuman(label = R.string.fx_estouro, decimals = 0),
             ),
         ),
     )
@@ -404,14 +411,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "rays raios de luz god rays sol volumetrico spread",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Intensidade", suffix = "x", decimals = 2),
-                1 to ParamHuman(label = "Comprimento", decimals = 0),
-                2 to ParamHuman(label = "Limite", decimals = 0),
-                3 to ParamHuman(label = "Decaimento", decimals = 0),
-                4 to ParamHuman(label = "Ponto de luz"),
-                5 to ParamHuman(label = "Amostras", decimals = 0),
-                7 to ParamHuman(label = "Guardar a cor da fonte"),
-                8 to ParamHuman(label = "Girar a cor", suffix = "°", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_intensidade, suffix = "x", decimals = 2),
+                1 to ParamHuman(label = R.string.fx_comprimento, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_limite, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_decaimento, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_ponto_luz),
+                5 to ParamHuman(label = R.string.fx_amostras, decimals = 0),
+                7 to ParamHuman(label = R.string.fx_guardar_cor_fonte),
+                8 to ParamHuman(label = R.string.fx_girar_cor, suffix = "°", decimals = 0),
             ),
         ),
     )
@@ -421,14 +428,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "light sweep faixa de luz brilho varredura reflexo",
             principal = listOf(0, 1, 2, 4, 5),
             params = mapOf(
-                0 to ParamHuman(label = "Posição", decimals = 0),
-                1 to ParamHuman(label = "Largura", decimals = 0),
-                2 to ParamHuman(label = "Intensidade", suffix = "x", decimals = 2),
-                3 to ParamHuman(label = "Suavidade da borda", decimals = 0),
-                4 to ParamHuman(label = "Ângulo", suffix = "°", decimals = 0),
-                5 to ParamHuman(label = "Relevo", decimals = 0),
-                6 to ParamHuman(label = "Multiplicar"),
-                7 to ParamHuman(label = "Só onde a imagem é clara"),
+                0 to ParamHuman(label = R.string.fx_posicao, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_largura, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_intensidade, suffix = "x", decimals = 2),
+                3 to ParamHuman(label = R.string.fx_suavidade_borda, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_angulo, suffix = "°", decimals = 0),
+                5 to ParamHuman(label = R.string.fx_relevo, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_multiplicar),
+                7 to ParamHuman(label = R.string.fx_so_onde_imagem_clara),
             ),
         ),
     )
@@ -438,15 +445,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "colorama remapeamento de cor arco-iris psicodelico mapa de cor",
             principal = listOf(0, 1, 2, 4, 5),
             params = mapOf(
-                0 to ParamHuman(label = "Fase", suffix = "voltas", decimals = 2),
-                1 to ParamHuman(label = "Ciclos", suffix = "x", decimals = 2),
-                2 to ParamHuman(label = "Saturação", decimals = 0),
-                3 to ParamHuman(label = "Brilho", decimals = 0),
-                4 to ParamHuman(label = "Entrada"),
-                5 to ParamHuman(label = "Mistura", decimals = 0),
-                6 to ParamHuman(label = "Inverter o arco-íris"),
-                7 to ParamHuman(label = "Peso do croma", decimals = 0),
-                9 to ParamHuman(label = "Ganho", suffix = "x", decimals = 2),
+                0 to ParamHuman(label = R.string.fx_fase, suffix = "voltas", decimals = 2),
+                1 to ParamHuman(label = R.string.fx_ciclos, suffix = "x", decimals = 2),
+                2 to ParamHuman(label = R.string.fx_saturacao, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_brilho, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_entrada),
+                5 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_inverter_arco_iris),
+                7 to ParamHuman(label = R.string.fx_peso_croma, decimals = 0),
+                9 to ParamHuman(label = R.string.fx_ganho, suffix = "x", decimals = 2),
             ),
         ),
     )
@@ -456,15 +463,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "pixel sort ordenar pixels derreter listras glitch sort",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Limiar baixo", decimals = 0),
-                1 to ParamHuman(label = "Limiar alto", decimals = 0),
-                2 to ParamHuman(label = "Comprimento", decimals = 0),
-                3 to ParamHuman(label = "Aleatoriedade", decimals = 0),
-                4 to ParamHuman(label = "Direção"),
-                5 to ParamHuman(label = "Sentido inverso"),
-                6 to ParamHuman(label = "Ordenar por"),
-                8 to ParamHuman(label = "Por faixa de tom"),
-                9 to ParamHuman(label = "Passo", suffix = "px", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_limiar_baixo, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_limiar_alto, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_comprimento, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_aleatoriedade, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_direcao),
+                5 to ParamHuman(label = R.string.fx_sentido_inverso),
+                6 to ParamHuman(label = R.string.fx_ordenar),
+                8 to ParamHuman(label = R.string.fx_faixa_tom),
+                9 to ParamHuman(label = R.string.fx_passo, suffix = "px", decimals = 0),
             ),
         ),
     )
@@ -474,16 +481,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "film damage dano de filme poeira riscos arranhao projetor pelicula",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Poeira", decimals = 0),
-                1 to ParamHuman(label = "Riscos", decimals = 0),
-                2 to ParamHuman(label = "Piscar", decimals = 0),
-                3 to ParamHuman(label = "Balanço de porta", suffix = "px", decimals = 1),
-                4 to ParamHuman(label = "Queimado", decimals = 0),
-                5 to ParamHuman(label = "Emenda"),
-                7 to ParamHuman(label = "Mistura", decimals = 0),
-                8 to ParamHuman(label = "Tamanho da poeira", suffix = "px", decimals = 1),
-                9 to ParamHuman(label = "Comprimento do risco", decimals = 0),
-                11 to ParamHuman(label = "Calor do queimado", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_poeira, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_riscos, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_piscar, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_balanco_porta, suffix = "px", decimals = 1),
+                4 to ParamHuman(label = R.string.fx_queimado, decimals = 0),
+                5 to ParamHuman(label = R.string.fx_emenda),
+                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                8 to ParamHuman(label = R.string.fx_tamanho_poeira, suffix = "px", decimals = 1),
+                9 to ParamHuman(label = R.string.fx_comprimento_risco, decimals = 0),
+                11 to ParamHuman(label = R.string.fx_calor_queimado, decimals = 0),
             ),
         ),
     )
@@ -493,14 +500,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "jpeg damage dano compressao artefato bloco qualidade",
             principal = listOf(0, 1, 2, 3),
             params = mapOf(
-                0 to ParamHuman(label = "Qualidade", decimals = 0),
-                1 to ParamHuman(label = "Blocos", decimals = 0),
-                2 to ParamHuman(label = "Anelamento", decimals = 0),
-                3 to ParamHuman(label = "Dano de cor", decimals = 0),
-                4 to ParamHuman(label = "Tamanho do bloco", suffix = "px", decimals = 0),
-                5 to ParamHuman(label = "Suavizar o bloco", decimals = 0),
-                7 to ParamHuman(label = "Mistura", decimals = 0),
-                8 to ParamHuman(label = "Blocos corrompidos", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_qualidade, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_blocos, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_anelamento, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_dano_cor, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_tamanho_bloco, suffix = "px", decimals = 0),
+                5 to ParamHuman(label = R.string.fx_suavizar_bloco, decimals = 0),
+                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                8 to ParamHuman(label = R.string.fx_blocos_corrompidos, decimals = 0),
             ),
         ),
     )
@@ -510,16 +517,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "holo matrix holograma projecao grade tecnologica scanner",
             principal = listOf(0, 1, 3, 4, 6),
             params = mapOf(
-                0 to ParamHuman(label = "Mistura da cor", decimals = 0),
-                1 to ParamHuman(label = "Grade", decimals = 0),
-                2 to ParamHuman(label = "Células da grade", decimals = 0),
-                3 to ParamHuman(label = "Brilho das bordas", decimals = 0),
-                4 to ParamHuman(label = "Posição da varredura", decimals = 0),
-                5 to ParamHuman(label = "Largura da varredura", decimals = 0),
-                6 to ParamHuman(label = "Interferência", decimals = 0),
-                7 to ParamHuman(label = "Velocidade da varredura", suffix = "x", decimals = 2),
-                9 to ParamHuman(label = "Fundo aceso", decimals = 0),
-                11 to ParamHuman(label = "Mistura", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_mistura_cor, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_grade, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_celulas_grade, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_brilho_bordas, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_posicao_varredura, decimals = 0),
+                5 to ParamHuman(label = R.string.fx_largura_varredura, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_interferencia, decimals = 0),
+                7 to ParamHuman(label = R.string.fx_velocidade_varredura, suffix = "x", decimals = 2),
+                9 to ParamHuman(label = R.string.fx_fundo_aceso, decimals = 0),
+                11 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
             ),
         ),
     )
@@ -529,15 +536,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "glitchify glitch defeito digital rasgo bloco corrupcao",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Altura da faixa", suffix = "px", decimals = 0),
-                1 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Picos", decimals = 0),
-                3 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
-                4 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
-                6 to ParamHuman(label = "Travar o quadro"),
-                7 to ParamHuman(label = "Mistura", decimals = 0),
-                8 to ParamHuman(label = "Blocos verticais"),
-                9 to ParamHuman(label = "Corrupção de cor", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_altura_faixa, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_deslocamento, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_picos, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_separacao_rgb, suffix = "px", decimals = 0),
+                4 to ParamHuman(label = R.string.fx_frequencia, suffix = "quadros", decimals = 1),
+                6 to ParamHuman(label = R.string.fx_travar_quadro),
+                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                8 to ParamHuman(label = R.string.fx_blocos_verticais),
+                9 to ParamHuman(label = R.string.fx_corrupcao_cor, decimals = 0),
             ),
         ),
     )
@@ -547,17 +554,17 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "vhs fita cassette videocassete tracking dropouts analogico videotape",
             principal = listOf(0, 1, 2, 3, 4, 5, 6),
             params = mapOf(
-                0 to ParamHuman(label = "Borrado da luma", suffix = "px", decimals = 1),
-                1 to ParamHuman(label = "Alargar a cor", suffix = "px", decimals = 1),
-                2 to ParamHuman(label = "Instabilidade", suffix = "px", decimals = 0),
-                3 to ParamHuman(label = "Perdas de fita", decimals = 0),
-                4 to ParamHuman(label = "Varredura de cabeçote", decimals = 0),
-                5 to ParamHuman(label = "Ruído", decimals = 0),
-                6 to ParamHuman(label = "Degradação de cor", decimals = 0),
-                7 to ParamHuman(label = "Sangramento", decimals = 0),
-                10 to ParamHuman(label = "Velocidade da instabilidade", suffix = "x", decimals = 2),
-                11 to ParamHuman(label = "Altura da perda", suffix = "px", decimals = 1),
-                12 to ParamHuman(label = "Mistura", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_borrado_luma, suffix = "px", decimals = 1),
+                1 to ParamHuman(label = R.string.fx_alargar_cor, suffix = "px", decimals = 1),
+                2 to ParamHuman(label = R.string.fx_instabilidade, suffix = "px", decimals = 0),
+                3 to ParamHuman(label = R.string.fx_perdas_fita, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_varredura_cabecote, decimals = 0),
+                5 to ParamHuman(label = R.string.fx_ruido, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_degradacao_cor, decimals = 0),
+                7 to ParamHuman(label = R.string.fx_sangramento, decimals = 0),
+                10 to ParamHuman(label = R.string.fx_velocidade_instabilidade, suffix = "x", decimals = 2),
+                11 to ParamHuman(label = R.string.fx_altura_perda, suffix = "px", decimals = 1),
+                12 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
             ),
         ),
     )
@@ -567,15 +574,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "vhs fita estilizado anos 80 retro neon chroma warp",
             principal = listOf(0, 1, 2, 3, 6),
             params = mapOf(
-                0 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
-                1 to ParamHuman(label = "Ondulação", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Brilho sujo", decimals = 0),
-                3 to ParamHuman(label = "Vinheta", decimals = 0),
-                4 to ParamHuman(label = "Varredura", decimals = 0),
-                5 to ParamHuman(label = "Ruído", decimals = 0),
-                6 to ParamHuman(label = "Saturação", decimals = 0),
-                7 to ParamHuman(label = "Mistura", decimals = 0),
-                9 to ParamHuman(label = "Frequência da ondulação", suffix = "x", decimals = 1),
+                0 to ParamHuman(label = R.string.fx_separacao_rgb, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_ondulacao, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_brilho_sujo, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_vinheta, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_varredura, decimals = 0),
+                5 to ParamHuman(label = R.string.fx_ruido, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_saturacao, decimals = 0),
+                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                9 to ParamHuman(label = R.string.fx_frequencia_ondulacao, suffix = "x", decimals = 1),
             ),
         ),
     )
@@ -585,15 +592,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "signal sinal interferencia transmissao banda sincronia chiado",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Bandas perdidas", decimals = 0),
-                1 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
-                2 to ParamHuman(label = "Deriva", suffix = "px/q", decimals = 2),
-                3 to ParamHuman(label = "Altura da banda", suffix = "px", decimals = 0),
-                4 to ParamHuman(label = "Ruído de sinal", decimals = 0),
-                6 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
-                7 to ParamHuman(label = "Mistura", decimals = 0),
-                8 to ParamHuman(label = "Perder a sincronia"),
-                9 to ParamHuman(label = "Separação de cor", suffix = "px", decimals = 0),
+                0 to ParamHuman(label = R.string.fx_bandas_perdidas, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_deslocamento, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_deriva, suffix = "px/q", decimals = 2),
+                3 to ParamHuman(label = R.string.fx_altura_banda, suffix = "px", decimals = 0),
+                4 to ParamHuman(label = R.string.fx_ruido_sinal, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_frequencia, suffix = "quadros", decimals = 1),
+                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                8 to ParamHuman(label = R.string.fx_perder_sincronia),
+                9 to ParamHuman(label = R.string.fx_separacao_cor, suffix = "px", decimals = 0),
             ),
         ),
     )
@@ -603,15 +610,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "cross glitch cruz transicao varredura rasgo",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Progresso", decimals = 0),
-                1 to ParamHuman(label = "Largura da faixa", decimals = 0),
-                2 to ParamHuman(label = "Deslocamento", suffix = "px", decimals = 0),
-                3 to ParamHuman(label = "Ruído de fundo", decimals = 0),
-                4 to ParamHuman(label = "Separação RGB", suffix = "px", decimals = 0),
-                6 to ParamHuman(label = "Frequência", suffix = "quadros", decimals = 1),
-                7 to ParamHuman(label = "Mistura", decimals = 0),
-                8 to ParamHuman(label = "Faixa vertical"),
-                9 to ParamHuman(label = "Faixa horizontal"),
+                0 to ParamHuman(label = R.string.fx_progresso, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_largura_faixa, decimals = 0),
+                2 to ParamHuman(label = R.string.fx_deslocamento, suffix = "px", decimals = 0),
+                3 to ParamHuman(label = R.string.fx_ruido_fundo, decimals = 0),
+                4 to ParamHuman(label = R.string.fx_separacao_rgb, suffix = "px", decimals = 0),
+                6 to ParamHuman(label = R.string.fx_frequencia, suffix = "quadros", decimals = 1),
+                7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                8 to ParamHuman(label = R.string.fx_faixa_vertical),
+                9 to ParamHuman(label = R.string.fx_faixa_horizontal),
             ),
         ),
     )
@@ -621,8 +628,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "posterize time posterizar tempo taxa quadros stop motion animacao",
             principal = listOf(0, 1),
             params = mapOf(
-                0 to ParamHuman(label = "Quadros por segundo", suffix = "fps", decimals = 1),
-                1 to ParamHuman(label = "Segurar o quadro"),
+                0 to ParamHuman(label = R.string.fx_quadros_segundo, suffix = "fps", decimals = 1),
+                1 to ParamHuman(label = R.string.fx_segurar_quadro),
             ),
         ),
     )
@@ -632,12 +639,12 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             keywords = "rgb no tempo time warp separar canais atrasar cor chromatic",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
-                0 to ParamHuman(label = "Vermelho", suffix = "quadros", decimals = 1),
-                1 to ParamHuman(label = "Verde", suffix = "quadros", decimals = 1),
-                2 to ParamHuman(label = "Azul", suffix = "quadros", decimals = 1),
-                3 to ParamHuman(label = "Unidade"),
-                4 to ParamHuman(label = "Intensidade", decimals = 0),
-                5 to ParamHuman(label = "Prender nas pontas"),
+                0 to ParamHuman(label = R.string.fx_vermelho_c031, suffix = "quadros", decimals = 1),
+                1 to ParamHuman(label = R.string.fx_verde_14e6, suffix = "quadros", decimals = 1),
+                2 to ParamHuman(label = R.string.fx_azul_582d, suffix = "quadros", decimals = 1),
+                3 to ParamHuman(label = R.string.fx_unidade),
+                4 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+                5 to ParamHuman(label = R.string.fx_prender_nas_pontas),
             ),
         ),
     )
@@ -648,10 +655,18 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.control.point", EffectHuman(keywords = "expressao ponto controle"))
 }
 
-/** Nome exibido: o da tabela, senão o do motor. */
-internal fun effectDisplayName(typeId: Int, engineName: String): String = Table[typeId]?.name ?: engineName
+/**
+ * Nome exibido: o da tabela (traduzido), senão o do motor.
+ *
+ * @Composable porque o nome da tabela é recurso: a busca indexa o nome NO
+ * IDIOMA do app, então quem monta o índice também precisa disto aqui dentro.
+ */
+@Composable
+internal fun effectDisplayName(typeId: Int, engineName: String): String =
+    Table[typeId]?.name?.let { stringResource(it) } ?: engineName
 
 /** Texto onde a busca procura: nome humano, nome do motor, categoria e sinônimos. */
+@Composable
 internal fun effectSearchText(typeId: Int, engineName: String, category: String): String =
     normalizeSearch(listOf(effectDisplayName(typeId, engineName), engineName, category, Table[typeId]?.keywords.orEmpty()).joinToString(" "))
 
@@ -669,13 +684,35 @@ internal fun categoryGlyph(category: String): Char = when (normalizeSearch(categ
 }
 
 /**
+ * A posição do efeito na ordem em que a TABELA o declara (o `buildMap` guarda a
+ * ordem de inserção). Serve para ordenar a lista sem depender do idioma: pelo
+ * nome traduzido, a lista se reordenaria ao trocar de língua.
+ */
+private val effectTableOrder: Map<Int, Int> by lazy { Table.keys.withIndex().associate { (i, k) -> k to i } }
+
+/** Ordem declarada do efeito; fora da tabela vai para o fim. */
+internal fun effectNameRank(typeId: Int): Int = effectTableOrder[typeId] ?: Int.MAX_VALUE
+
+/**
  * A exibição resolvida de um parâmetro. O motor guarda na unidade dele; a linha
  * mostra `motor × scale` com [suffix] e [decimals] fixos (a caixa não "dança").
  */
-internal data class ParamDisplay(val label: String, val scale: Float, val suffix: String, val decimals: Int) {
+internal data class ParamDisplay(
+    /** Rótulo da tabela humana, quando existe (o do motor é o reserva). */
+    @androidx.annotation.StringRes val labelRes: Int?,
+    /** Rótulo que o MOTOR publica — nome técnico, não traduzido. */
+    val engineLabel: String,
+    val scale: Float,
+    val suffix: String,
+    val decimals: Int,
+) {
     fun toDisplay(engine: Float) = engine * scale
     fun toEngine(display: Float) = if (scale != 0f) display / scale else display
 }
+
+/** O rótulo da linha, no idioma do app. */
+@Composable
+internal fun ParamDisplay.label(): String = labelRes?.let { stringResource(it) } ?: engineLabel
 
 /**
  * Regra padrão das unidades humanas:
@@ -710,7 +747,8 @@ internal fun paramDisplay(typeId: Int, s: ParamSlot): ParamDisplay {
         }
     }
     return ParamDisplay(
-        label = h?.label ?: s.label,
+        labelRes = h?.label,
+        engineLabel = s.label,
         scale = h?.scale ?: scale,
         suffix = h?.suffix ?: suffix,
         decimals = h?.decimals ?: decimals,

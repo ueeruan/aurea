@@ -95,11 +95,11 @@ internal fun Element3DPanel(env: PanelEnv) {
             }
         }
         Spacer(Modifier.height(10.dp))
-        EnvRuler(store, "Intensidade", 0.01f, 0f, 20f, e[1], "${(e[1] * 100).roundToInt()}%") { store.setEnvironment(it, store.environment[2]) }
-        EnvRuler(store, "Girar a luz", 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
+        EnvRuler(store, 1, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, e[1], "${(e[1] * 100).roundToInt()}%") { store.setEnvironment(it, store.environment[2]) }
+        EnvRuler(store, 2, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
         Spacer(Modifier.height(8.dp))
         Text(
-            "A luz do ambiente ilumina e reflete em todos os objetos 3D do projeto.",
+            stringResource(R.string.pn_env_light_hint),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
         )
     }
@@ -117,7 +117,7 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
     val store = env.store
     var draft by remember(store.primary) { mutableStateOf(info.content) }
     LaunchedEffect(info.content) { if (info.content != draft && !store.textEditing) draft = info.content }
-    SectionTitle("Texto 3D")
+    SectionTitle(stringResource(R.string.pn_text3d_title))
     Box(
         Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -132,10 +132,10 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
             cursorBrush = SolidColor(AureaColors.Accent),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (draft.isEmpty()) Text("Digite o texto", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+        if (draft.isEmpty()) Text(stringResource(R.string.pn_text3d_placeholder), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
     }
     Spacer(Modifier.height(6.dp))
-    PropertyCustomRow("Profundidade", selected = false, onSelect = {}) {
+    PropertyCustomRow(stringResource(R.string.pn_depth), selected = false, onSelect = {}) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {
                 TickRuler(
@@ -159,9 +159,9 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
         }
     }
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Alinhamento", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(0 to "EsquerdastringResource(R.string.panel_1_to)CentrostringResource(R.string.panel_2_to)Direita").forEach { (a, label) ->
+            listOf(0 to stringResource(R.string.panel_esquerda), 1 to stringResource(R.string.panel_centro), 2 to stringResource(R.string.panel_direita)).forEach { (a, label) ->
                 Chip(label, on = info.alignment == a) { store.text3d?.let { store.setText3D(it.copy(alignment = a)) } }
             }
         }
@@ -182,6 +182,7 @@ private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
 @Composable
 private fun EnvRuler(
     store: com.aurea.aurea.state.EditorStore,
+    index: Int, // 1 = intensidade, 2 = girar a luz (posição em `environment`)
     label: String,
     unitsPerDp: Float,
     min: Float,
@@ -190,7 +191,6 @@ private fun EnvRuler(
     text: String,
     onValue: (Float) -> Unit,
 ) {
-    val index = if (label == "Intensidade") 1 else 2  // 2 = "Girar a luz"
     PropertyCustomRow(label, selected = false, onSelect = {}) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {

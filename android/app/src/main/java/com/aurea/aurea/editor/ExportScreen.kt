@@ -209,15 +209,17 @@ private fun Options(
     }
     if (blocked.isNotEmpty()) {
         Text(
-            device?.exportLimitReason() ?: "${blocked.joinToString()}: acima do que este aparelho exporta.",
+            device?.exportLimitReason() ?: stringResource(R.string.sh_export_above_device, blocked.joinToString()),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
             modifier = Modifier.padding(top = 6.dp),
         )
     }
     Section(stringResource(R.string.editor_quadros_segundo))
-    Chips(fpsOptions.map { if (it == 0.0) "Do projeto (${fmt(compFps)})" else fmt(it) },
-          if (options.fps == 0.0) "Do projeto (${fmt(compFps)})" else fmt(options.fps)) { label ->
-        onChange(options.copy(fps = if (label.startsWith("Do projeto")) 0.0 else label.replace(',', '.').toDouble()))
+    // A ficha "do projeto" é achada pelo texto inteiro (traduzido), não pelo começo.
+    val fromProject = stringResource(R.string.sh_export_fps_from_project, fmt(compFps))
+    Chips(fpsOptions.map { if (it == 0.0) fromProject else fmt(it) },
+          if (options.fps == 0.0) fromProject else fmt(options.fps)) { label ->
+        onChange(options.copy(fps = if (label == fromProject) 0.0 else label.replace(',', '.').toDouble()))
     }
     Section(stringResource(R.string.editor_formato))
     val hevcOk = device?.hevcExportAvailable ?: true
@@ -232,13 +234,14 @@ private fun Options(
         modifier = Modifier.padding(top = 6.dp),
     )
     Section(stringResource(R.string.editor_qualidade))
-    Chips(listOf(stringResource(R.string.editor_padrao), stringResource(R.string.editor_alta)), if (options.highQuality) stringResource(R.string.editor_alta) else stringResource(R.string.editor_padrao)) {
-        onChange(options.copy(highQuality = it == "Alta"))
+    val high = stringResource(R.string.editor_alta)
+    Chips(listOf(stringResource(R.string.editor_padrao), high), if (options.highQuality) high else stringResource(R.string.editor_padrao)) {
+        onChange(options.copy(highQuality = it == high))
     }
     Spacer(Modifier.height(18.dp))
-    SummaryRow("Vídeo", "$w × $h · ${fmt(fps)} fps · ${if (options.hevc) "HEVC" else "H.264"}")
+    SummaryRow(stringResource(R.string.editor_video), "$w × $h · ${fmt(fps)} fps · ${if (options.hevc) "HEVC" else "H.264"}")
     SummaryRow(stringResource(R.string.editor_duracao), fmtTime(seconds))
-    SummaryRow(stringResource(R.string.editor_tamanho_estimado), if (sizeMb >= 1000) "${fmt(sizeMb / 1000.0)} GB" else "${sizeMb.roundToInt()} MB")
+    SummaryRow(stringResource(R.string.editor_tamanho_estimado), if (sizeMb >= 1000) stringResource(R.string.unit_gigabyte, fmt(sizeMb / 1000.0)) else stringResource(R.string.unit_megabyte, sizeMb.roundToInt()))
     SummaryRow(stringResource(R.string.editor_cor), stringResource(R.string.editor_sdr_bt_709))
 }
 
@@ -318,7 +321,7 @@ private fun Progress(fraction: Float, done: Int, total: Int, fps: Float, eta: In
         Spacer(Modifier.height(12.dp))
         if (!publishing) {
             Text(
-                "Quadro $done de $total · ${fmt(fps.toDouble())} q/s · falta ${fmtTime(eta.toDouble())}",
+                stringResource(R.string.sh_export_progress, done, total, fmt(fps.toDouble()), fmtTime(eta.toDouble())),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted, fontFeatureSettings = "tnum")),
                 textAlign = TextAlign.Center,
             )
@@ -353,6 +356,7 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
     val exporter = store.exporter
     val st = exporter.state
     val context = LocalContext.current
+    val noViewer = stringResource(R.string.editor_nenhum_app_abre_video)
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
         when (st.phase) {
             ExportPhase.Running -> WideButton(stringResource(R.string.editor_cancelar), filled = false) { exporter.cancel() }
@@ -361,7 +365,7 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
                 Box(Modifier.weight(1f)) {
                     WideButton(stringResource(R.string.editor_abrir), filled = false) {
                         exporter.viewIntent()?.let { runCatching { context.startActivity(it) }.onFailure { e ->
-                            if (e is ActivityNotFoundException) store.showToast("Nenhum app abre vídeo") } }
+                            if (e is ActivityNotFoundException) store.showToast(noViewer) } }
                     }
                 }
                 Box(Modifier.weight(1f)) {

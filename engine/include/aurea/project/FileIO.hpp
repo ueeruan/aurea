@@ -22,10 +22,19 @@
 
 #include "aurea/core/Result.hpp"
 
+#include <cstdio>
 #include <string>
 #include <vector>
 
 namespace aurea::fileio {
+
+/// `fopen` com caminho UTF-8 em toda plataforma. No Android/iOS o `char*` já
+/// é UTF-8 e isto é o `fopen` de sempre; no Windows o `fopen` estreito lê o
+/// caminho como ANSI (código de página do sistema) e um nome em árabe, hindi,
+/// russo ou com emoji simplesmente não abre — lá vai por `_wfopen` (UTF-16).
+[[nodiscard]] std::FILE* open_file(const std::string& path, const char* mode) noexcept;
+/// `remove` com caminho UTF-8 (mesma regra do `open_file`). true = apagou.
+bool remove_file(const std::string& path) noexcept;
 
 struct AtomicWriteOptions {
     bool fsync = true;         ///< fsync no arquivo e (POSIX) na pasta depois do rename

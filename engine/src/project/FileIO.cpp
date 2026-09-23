@@ -28,6 +28,43 @@
 namespace aurea::fileio {
 namespace {
 
+#if defined(_WIN32)
+/// UTF-8 → UTF-16: o que as APIs "W" do Windows entendem.
+std::wstring widen(const std::string& s) {
+    if (s.empty()) return {};
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    std::wstring w(static_cast<usize>(n > 0 ? n : 0), L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
+    return w;
+}
+#endif
+
+} // namespace
+
+std::FILE* open_file(const std::string& path, const char* mode) noexcept {
+    if (path.empty() || !mode) return nullptr;
+#if defined(_WIN32)
+    const std::wstring wp = widen(path);
+    const std::wstring wm = widen(mode);
+    if (wp.empty()) return nullptr;   // conversão falhou: nada de cair no ANSI por engano
+    return _wfopen(wp.c_str(), wm.c_str());
+#else
+    return std::fopen(path.c_str(), mode);
+#endif
+}
+
+bool remove_file(const std::string& path) noexcept {
+    if (path.empty()) return false;
+#if defined(_WIN32)
+    const std::wstring wp = widen(path);
+    return !wp.empty() && _wremove(wp.c_str()) == 0;
+#else
+    return std::remove(path.c_str()) == 0;
+#endif
+}
+
+namespace {
+
 // --- Injeção de falha ----------------------------------------------------------
 std::mutex        g_faultMutex;
 FaultInjection    g_fault;
@@ -77,10 +114,11 @@ int sync_file(std::FILE* f) noexcept {
 
 /// Escreve o temporário por completo. 0 = ok; senão o errno da falha.
 int write_temp(const std::string& tmp, const void* data, usize size, bool doSync) noexcept {
-    std::FILE* f = std::fopen(tmp.c_str(), "wb");
+    errno = 0;
+    std::FILE* f = open_file(tmp, "wb");
     if (f && take_fault(Fault::OpenFails, tmp)) {
         std::fclose(f);
-        std::remove(tmp.c_str());
+        remove_file(tmp);
         f = nullptr;
         errno = EACCES;
     }
@@ -103,19 +141,11 @@ int write_temp(const std::string& tmp, const void* data, usize size, bool doSync
     if (!err && take_fault(Fault::FlushFails, tmp)) err = ENOSPC;
     if (!err && doSync && sync_file(f) != 0) err = errno ? errno : EIO;
     if (std::fclose(f) != 0 && !err) err = errno ? errno : EIO;
-    if (err) std::remove(tmp.c_str());
+    if (err) remove_file(tmp);
     return err;
 }
 
-#if defined(_WIN32)
-std::wstring widen(const std::string& s) {
-    if (s.empty()) return {};
-    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    std::wstring w(static_cast<usize>(n > 0 ? n : 0), L'\0');
-    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
-    return w;
-}
-#else
+#if !defined(_WIN32)
 void sync_parent_dir(const std::string& path) noexcept {
     // O rename só é durável depois que a pasta foi para o disco. Melhor
     // esforço: uma pasta que não abre não invalida a gravação já feita.
@@ -178,7 +208,7 @@ bool replace_with(const std::string& tmp, const std::string& path, bool keepBack
 
 bool exists(const std::string& path) noexcept {
     if (path.empty()) return false;
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    std::FILE* f = open_file(path, "rb");
     if (!f) return false;
     std::fclose(f);
     return true;
@@ -186,7 +216,7 @@ bool exists(const std::string& path) noexcept {
 
 bool read_all(const std::string& path, std::vector<u8>& out, usize maxBytes) noexcept {
     out.clear();
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    std::FILE* f = open_file(path, "rb");
     if (!f) return false;
     if (std::fseek(f, 0, SEEK_END) != 0) { std::fclose(f); return false; }
     const long size = std::ftell(f);

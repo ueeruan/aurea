@@ -1,0 +1,85 @@
+# Textos de efeito do lado Kotlin (EffectsHuman, EffectCatalogMeta, telas de efeito).
+# chave<TAB>texto pt-BR. Rotulo curto repetido reusa a chave do catalogo do motor.
+fx_pivo	Pivô
+fx_compensacao	Compensação
+fx_tons_medios	Tons médios
+fx_cor_sombras	Cor das sombras
+fx_cor_luzes	Cor das luzes
+fx_misturar_canais	Misturar canais
+fx_ponto_preto	Ponto preto
+fx_ponto_branco	Ponto branco
+fx_mosaico	Mosaico
+fx_altura	Altura
+fx_largura_total	Largura total
+fx_altura_total	Altura total
+fx_espelhar	Espelhar
+fx_deslocar_horizontal	Deslocar na horizontal
+fx_recorte_brilho	Recorte por brilho
+fx_remover	Remover
+fx_recorte_cor	Recorte por cor
+fx_cor_remover	Cor a remover
+fx_limpar_contorno	Limpar contorno
+fx_intervalo	Intervalo
+fx_desvanecer	Desvanecer
+fx_separar_cores	Separar cores
+fx_animado	Animado
+fx_grades_separadas	Grades separadas
+fx_desc_transform	Move, gira, escala e muda a opacidade da camada sem perder qualidade.
+fx_desc_color_exposure	Clareia ou escurece como a exposição de uma câmera: multiplica a luz sem estourar a cor.
+fx_desc_color_brightness_contrast	Sobe o brilho e abre ou fecha o contraste em volta do cinza médio.
+fx_desc_color_saturation	Deixa a cor mais viva ou leva tudo para o preto e branco.
+fx_desc_color_tint	Pinta as sombras de uma cor e as luzes de outra — o duotone do cinema.
+fx_desc_color_matrix	Mistura os canais R, G e B entre si: troca, soma e cruza cores.
+fx_desc_color_levels	Define onde começa o preto, onde termina o branco e onde fica o meio.
+fx_desc_color_curves	A curva de tom: controle fino de luz e de cada canal de cor.
+fx_desc_blur_gaussian	Desfoque suave e ajustável, com direção — dá para desfocar só num eixo.
+fx_desc_blur_sharpen	Realça os detalhes e as bordas sem inventar textura.
+fx_desc_light_glow	Espalha a luz das partes claras: o brilho que sai da tela.
+fx_desc_stylize_motion_tile	Repete a imagem em mosaico até cobrir o quadro, com espelho e fase opcionais.
+fx_desc_key_luma	Remove o preto (ou o branco) da camada e deixa o resto aparecer.
+fx_desc_key_chroma	Tira o fundo verde ou azul e limpa o derramamento da cor na borda.
+fx_desc_time_echo	Deixa rastro: cópias da própria imagem atrasadas no tempo, com desvanecimento.
+fx_desc_color_invert	O negativo: cada cor vira o seu contrário, como um filme revelado errado.
+fx_desc_color_colorama	Remapeia a cor: a luz de cada pixel vira uma posição num arco-íris que gira.
+fx_desc_blur_unsharp	Máscara de nitidez de verdade: original + ganho × (original − borrado), com limiar para não amplificar o grão.
+fx_desc_blur_lens	Desfoque de lente: um disco de amostras com o formato da íris, e as luzes pesam mais — é o bokeh, não um borrão.
+fx_desc_light_deep_glow	Brilho em dois halos, um apertado e um largo, com cor própria: o núcleo estoura e o ambiente preenche.
+fx_desc_light_rays	Raios de luz que saem de um ponto: a clareira das partes claras se espalha em linha reta.
+fx_desc_light_sweep	Uma lâmina de luz atravessa a imagem. Com relevo, ela acende só onde a superfície está virada para ela.
+fx_desc_distort_shake	Tremor determinístico: a camada treme igual toda vez que você reabre o projeto, com frequência e eixos separados.
+fx_desc_distort_turbulence	Um campo de ruído empurra cada pixel. O campo evolui com o tempo — fumaça, calor, água.
+fx_desc_distort_wave_warp	Uma onda atravessa a imagem, horizontal, vertical ou na diagonal, e pode ser travada nas bordas.
+fx_desc_distort_warp	Lente: empurrar, puxar, torcer, esfera e canto, com raio e ponto próprios.
+fx_desc_distort_ripple_dissolve	A imagem some em círculos que crescem do centro com a borda ondulando. Anime o progresso para virar transição.
+fx_desc_stylize_scanlines	Varredura de tela: a linha escurece o que está atrás dela, com altura, suavidade e canal próprios.
+fx_desc_stylize_grain	Grão de filme: cristal do tamanho que você quiser, luma e croma separados, mais forte nas sombras.
+fx_desc_stylize_halftone	Meio-tom: a imagem vira pontos, com a grade girada por canal para as três retículas não brigarem.
+fx_desc_stylize_minimax	Dilata ou erode o que estiver claro: engrossa ou afina um recorte e limpa um pixel de borda.
+fx_desc_stylize_pixel_sort	Ordena os pixels de cada linha pela luz: a imagem derrete em riscos.
+fx_desc_stylize_film_damage	Filme danificado: poeira, riscos, piscar, balanço de porta, queimado e emenda — cada um com o seu controle.
+fx_desc_stylize_jpeg_damage	Dano de JPEG: os blocos, o anelamento das bordas e a cor em meia resolução. Qualidade escala os três.
+fx_desc_stylize_holomatrix	Holograma: a imagem vira projeção, com grade técnica, varredura e interferência.
+fx_desc_glitch_glitchify	Glitch digital: a imagem se parte em blocos que deslizam, os canais se separam e blocos inteiros saem do lugar.
+fx_desc_glitch_vhs	VHS de verdade: borrão, croma alargada, instabilidade de tracking, perdas de fita, varredura e degradação de cor.
+fx_desc_glitch_uni_vhs	O VHS estilizado: separação RGB grande, ondulação, brilho sujo e vinheta — o vocabulário da fita a serviço do visual.
+fx_desc_glitch_signal	Sinal de transmissão: bandas que se perdem, sincronia que escorrega e deriva constante.
+fx_desc_glitch_cross	Duas faixas, uma vertical e uma horizontal, varrem a imagem lendo do lugar errado. Anime o progresso para virar transição.
+fx_desc_time_posterize	Trava a taxa de quadros: a imagem passa a andar em passos, como animação desenhada.
+fx_desc_time_warp_rgb	Cada canal de cor vem de um instante diferente: o vermelho do quadro de trás, o azul do da frente.
+fx_desc_control_slider	Um valor de 0 a 100 que você liga na expressão de outro parâmetro.
+fx_desc_control_angle	Um ângulo que você liga na expressão de outro parâmetro.
+fx_desc_control_checkbox	Um liga/desliga que você liga na expressão de outro parâmetro.
+fx_desc_control_color	Uma cor que você liga na expressão de outro parâmetro.
+fx_desc_control_point	Um ponto X/Y que você liga na expressão de outro parâmetro.
+fx_matrix_rr	Vermelho
+fx_matrix_rg	Vermelho do verde
+fx_matrix_rb	Vermelho do azul
+fx_matrix_ro	Vermelho extra
+fx_matrix_gr	Verde do vermelho
+fx_matrix_gg	Verde
+fx_matrix_gb	Verde do azul
+fx_matrix_go	Verde extra
+fx_matrix_br	Azul do vermelho
+fx_matrix_bg	Azul do verde
+fx_matrix_bb	Azul
+fx_matrix_bo	Azul extra

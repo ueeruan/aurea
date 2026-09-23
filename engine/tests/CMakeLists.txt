@@ -40,6 +40,7 @@ add_executable(aurea_tests
     test_device.cpp
     test_startup.cpp
     test_heavy.cpp
+    test_i18n.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

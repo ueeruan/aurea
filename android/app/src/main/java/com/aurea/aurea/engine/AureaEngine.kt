@@ -372,6 +372,14 @@ class AureaEngine private constructor() {
     fun setEnvironment(intensity: Float, rotation: Float): Boolean = nativeSetEnvironment(nativeHandle, intensity, rotation)
     fun queryEnvironment(out: FloatArray): Boolean = nativeQueryEnvironment(nativeHandle, out)
 
+    /** Ambiente PRÓPRIO de um objeto 3D (v22). `source` 0 = do projeto, 1 = dele. */
+    fun setObjectEnvironment(layer: Long, source: Int, hdri: Long, intensity: Float, rotation: Float, exposure: Float): Boolean =
+        nativeSetObjectEnvironment(nativeHandle, layer, source, hdri, intensity, rotation, exposure)
+
+    /** {fonte, asset, intensidade, giro, exposição}. */
+    fun queryObjectEnvironment(layer: Long, out: FloatArray): Boolean =
+        nativeQueryObjectEnvironment(nativeHandle, layer, out)
+
     // Pré-composição.
     fun precompose(ids: LongArray): Long = nativePrecompose(nativeHandle, ids)
     fun openPrecomp(layer: Long): Boolean = nativeOpenPrecomp(nativeHandle, layer)
@@ -743,6 +751,8 @@ class AureaEngine private constructor() {
     private external fun nativeClearHdri(handle: Long): Boolean
     private external fun nativeSetEnvironment(handle: Long, intensity: Float, rotation: Float): Boolean
     private external fun nativeQueryEnvironment(handle: Long, out: FloatArray): Boolean
+    private external fun nativeSetObjectEnvironment(handle: Long, layer: Long, source: Int, hdri: Long, intensity: Float, rotation: Float, exposure: Float): Boolean
+    private external fun nativeQueryObjectEnvironment(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeOpenPrecomp(handle: Long, layer: Long): Boolean
     private external fun nativeClosePrecomp(handle: Long): Boolean
     private external fun nativePrecompDepth(handle: Long): Int

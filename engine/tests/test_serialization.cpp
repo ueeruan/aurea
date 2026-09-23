@@ -6,6 +6,7 @@
 #include "TestFramework.hpp"
 
 #include "aurea/project/Serialization.hpp"
+#include "aurea/Engine.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/command/CommandQueue.hpp"
 
@@ -727,4 +728,64 @@ AUREA_TEST(Serialization, LegacyParticleProjectsComeBackAsBoxEmitters) {
     q.emitterType = static_cast<u32>(ParticleEmitter::Mesh);
     migrate_legacy_particles(q, 21);
     AUREA_CHECK_EQ(q.emitterType, static_cast<u32>(ParticleEmitter::Mesh));
+}
+
+AUREA_TEST(Serialization, ObjectEnvironmentIsIndependentAndSurvivesReopen) {
+    // Ambiente por objeto (v22): cada modelo 3D tem o SEU ambiente. Mexer num
+    // não pode mexer no outro nem no do projeto — era o que o dono via
+    // ("coloco HDRI no objeto A e o B muda").
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const LayerId a = comp->add_layer(LayerKind::Model3D, "A");
+    const LayerId b = comp->add_layer(LayerKind::Model3D, "B");
+    comp->layer(a)->threeD = true;
+    comp->layer(b)->threeD = true;
+
+    // A com ambiente próprio; B e o projeto ficam como estavam.
+    AUREA_CHECK(e.set_object_environment(a.pack(), 1, 4242, 2.5f, 45.0f, 1.5f));
+    f32 va[5]{}, vb[5]{}, proj[3]{};
+    AUREA_CHECK(e.query_object_environment(a.pack(), va));
+    AUREA_CHECK(e.query_object_environment(b.pack(), vb));
+    AUREA_CHECK(e.query_environment(proj));
+    AUREA_CHECK(va[0] == 1.0f && va[1] == 4242.0f && va[2] == 2.5f);
+    AUREA_CHECK(vb[0] == 0.0f && vb[1] == 0.0f);          // B: do projeto
+    AUREA_CHECK(proj[1] == 1.0f && proj[2] == 0.0f);      // o do projeto intacto
+
+    // Mexer no ambiente do PROJETO não muda o estado do objeto.
+    AUREA_CHECK(e.set_environment_params(3.0f, 90.0f));
+    AUREA_CHECK(e.query_object_environment(a.pack(), va));
+    AUREA_CHECK(va[2] == 2.5f && va[3] == 45.0f);
+
+    // Salvar e reabrir: o ambiente de cada objeto volta igual.
+    const std::string path = temp_path("ambiente_por_objeto");
+    std::remove(path.c_str());
+    std::string err;
+    AUREA_CHECK_MSG(ProjectSerializer::save(*e.project(), path, SaveOptions{}, &err).ok(), err.c_str());
+    Project reopened;
+    AUREA_CHECK(ProjectSerializer::load(reopened, path, LoadOptions{}, nullptr, &err).ok());
+    const Composition* c2 = reopened.timeline().composition(reopened.timeline().current());
+    const Layer* la = nullptr;
+    const Layer* lb = nullptr;
+    for (usize i = 0; i < c2->order().size(); ++i) {
+        const Layer* l = c2->layer(c2->order().at(i));
+        if (l && l->name == "A") la = l;
+        if (l && l->name == "B") lb = l;
+    }
+    AUREA_CHECK(la && lb);
+    std::printf("    reaberto: A fonte %u hdri %llu int %.2f giro %.1f exp %.2f | B fonte %u\n",
+                la->environmentSource, static_cast<unsigned long long>(la->environmentAsset),
+                static_cast<f64>(la->environmentIntensity), static_cast<f64>(la->environmentRotation),
+                static_cast<f64>(la->environmentExposure), lb->environmentSource);
+    AUREA_CHECK(la->environmentSource == 1u && la->environmentAsset == 4242u);
+    AUREA_CHECK(std::fabs(la->environmentIntensity - 2.5f) < 1e-4f);
+    AUREA_CHECK(std::fabs(la->environmentRotation - 45.0f) < 1e-4f);
+    AUREA_CHECK(std::fabs(la->environmentExposure - 1.5f) < 1e-4f);
+    AUREA_CHECK(lb->environmentSource == 0u && lb->environmentAsset == 0u);
+    e.shutdown();
+    std::remove(path.c_str());
 }

@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
+import com.aurea.aurea.state.EditorStore
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -102,6 +103,50 @@ internal fun Element3DPanel(env: PanelEnv) {
             stringResource(R.string.pn_env_light_hint),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
         )
+        ObjectEnvironmentSection(store)
+    }
+}
+
+/**
+ * AMBIENTE DO OBJETO (v22): este modelo pode ter a luz dele, sem mexer na dos
+ * outros. Sem ambiente próprio, vale o do projeto — o de cima.
+ */
+@Composable
+private fun ObjectEnvironmentSection(store: EditorStore) {
+    val oe by remember(store) { derivedStateOf { store.objectEnvironment } }
+    var pick by remember { mutableStateOf(false) }
+    val escolher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) store.importObjectHdri(uri)
+    }
+    if (oe == null) return
+    val proprio = oe!![0] >= 0.5f
+    Spacer(Modifier.height(16.dp))
+    SectionTitle(stringResource(R.string.panel_ambiente_do_objeto))
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Chip(stringResource(R.string.panel_do_projeto), on = !proprio) { store.setObjectEnvironment(0) }
+        Chip(stringResource(R.string.panel_proprio), on = proprio) {
+            store.setObjectEnvironment(1)
+            if (oe!![1] <= 0f) escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
+        }
+    }
+    if (proprio) {
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Chip(
+                if (oe!![1] > 0f) stringResource(R.string.panel_trocar_imagem) else stringResource(R.string.panel_usar_imagem_ambiente_hdr),
+                on = oe!![1] > 0f,
+            ) { escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*")) }
+        }
+        Spacer(Modifier.height(10.dp))
+        EnvRuler(store, 2, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, oe!![2], "${(oe!![2] * 100).roundToInt()}%") {
+            store.setObjectEnvironment(1, intensity = it)
+        }
+        EnvRuler(store, 3, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, oe!![3], "${oe!![3].roundToInt()}°") {
+            store.setObjectEnvironment(1, rotation = it)
+        }
+        EnvRuler(store, 4, stringResource(R.string.panel_exposicao), 0.01f, 0.05f, 20f, oe!![4], "${(oe!![4] * 100).roundToInt()}%") {
+            store.setObjectEnvironment(1, exposure = it)
+        }
     }
 }
 

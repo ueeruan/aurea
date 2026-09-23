@@ -1521,4 +1521,9 @@
     <string name="msg_gaps_removed">Espaços vazios removidos (%1$s s)</string>
     <string name="msg_model_import_failed">Não deu para importar o modelo: %1$s</string>
     <string name="msg_cache_cleared">Cache limpo: %1$s MB</string>
+    <string name="panel_ambiente_do_objeto">Ambiente do objeto</string>
+    <string name="panel_do_projeto">Do projeto</string>
+    <string name="panel_proprio">Próprio</string>
+    <string name="panel_trocar_imagem">Trocar imagem</string>
+    <string name="panel_exposicao">Exposição</string>
 </resources>

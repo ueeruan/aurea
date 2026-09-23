@@ -649,6 +649,13 @@ void write_layer(ByteWriter& w, const Layer& l) {
     for (u32 i = 0; i < pp.sizeCurveCount; ++i) { w.f32v(pp.sizeCurve[i].x); w.f32v(pp.sizeCurve[i].y); }
     w.u32v(pp.opacityCurveCount);
     for (u32 i = 0; i < pp.opacityCurveCount; ++i) { w.f32v(pp.opacityCurve[i].x); w.f32v(pp.opacityCurve[i].y); }
+    // v22: ambiente por objeto (a luz que o objeto usa é dele, não do projeto).
+    w.u32v(l.environmentSource);
+    w.u64v(l.environmentAsset);
+    w.f32v(l.environmentIntensity);
+    w.f32v(l.environmentExposure);
+    w.f32v(l.environmentRotation);
+    w.boolv(l.environmentBackground);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -662,7 +669,9 @@ void write_layer(ByteWriter& w, const Layer& l) {
 /// v20: Aurea Particular (emissor, fisica, rastro, aux e colisao).
 /// v21: Aurea Particular completo (espaço, emissor de camada/texto/caminho/malha,
 ///      textura/malha, colisão esfera/caixa, curvas ao longo da vida).
-constexpr u32 kTimelineSectionVersion = 21;
+/// v22: ambiente por objeto 3D (Scene ou Custom, com HDRI, intensidade,
+///      exposição e rotação próprios).
+constexpr u32 kTimelineSectionVersion = 22;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -1016,6 +1025,14 @@ void read_layer(ByteReader& r, Layer& l) {
         for (u32 i = 0; i < pp.sizeCurveCount && r.good(); ++i) { pp.sizeCurve[i].x = r.f32v(); pp.sizeCurve[i].y = r.f32v(); }
         pp.opacityCurveCount = stops();
         for (u32 i = 0; i < pp.opacityCurveCount && r.good(); ++i) { pp.opacityCurve[i].x = r.f32v(); pp.opacityCurve[i].y = r.f32v(); }
+    }
+    if (g_readingTimelineVersion >= 22) {
+        l.environmentSource = r.u32v();
+        l.environmentAsset = r.u64v();
+        l.environmentIntensity = r.f32v();
+        l.environmentExposure = r.f32v();
+        l.environmentRotation = r.f32v();
+        l.environmentBackground = r.boolv();
     }
 }
 

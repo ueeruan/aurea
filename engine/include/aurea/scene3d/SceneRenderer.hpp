@@ -19,6 +19,9 @@
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/scene3d/Environment.hpp"
+
+#include <utility>
+#include <vector>
 #include "aurea/scene3d/SceneAsset.hpp"
 
 #include <algorithm>
@@ -84,7 +87,18 @@ struct SceneLight {
     bool castShadows = false;
 };
 
-/// Uma layer de modelo no frame.
+/// O ambiente (luz de imagem) de uma cena — ou de UM objeto, quando ele tem o
+/// seu (v22). Nulo = estúdio neutro.
+struct SceneEnvironment {
+    u64  hdriKey = 0;
+    std::shared_ptr<const HdriPixels> hdri;
+    f32  intensity = 1.0f;
+    f32  exposure = 1.0f;
+    f32  rotation = 0.0f;              ///< radianos em torno do eixo vertical
+    Vec3 sky{0.80f, 0.85f, 0.95f};
+    Vec3 ground{0.30f, 0.28f, 0.26f};
+};
+
 struct SceneInstance {
     /// Dono compartilhado: apagar a layer no meio do frame não invalida o
     /// asset que o render ainda está desenhando.
@@ -98,6 +112,12 @@ struct SceneInstance {
     bool castShadows = true;
     u64  layerKey = 0;                 ///< camada de origem (sub-quadros do desfoque)
     bool motionBlur = false;           ///< a camada pede desfoque de movimento
+    /// Ambiente PRÓPRIO deste objeto (v22). `ownEnvironment` falso = usa o do
+    /// grupo. O estado é do objeto; os mapas na GPU são compartilhados por
+    /// asset (a chave é o HDRI), então dois objetos com o mesmo HDRI custam um
+    /// upload só.
+    bool ownEnvironment = false;
+    SceneEnvironment environment;
 };
 
 struct SceneCamera {
@@ -105,17 +125,6 @@ struct SceneCamera {
     Vec3 position{0, 0, 0};
     f32  fovY = 0.785f;                ///< radianos
     f32  nearZ = 1.0f;                 ///< px
-};
-
-struct SceneEnvironment {
-    /// HDRI do projeto (chave = asset); nulo = estúdio neutro.
-    u64  hdriKey = 0;
-    std::shared_ptr<const HdriPixels> hdri;
-    f32  intensity = 1.0f;
-    f32  exposure = 1.0f;
-    f32  rotation = 0.0f;              ///< radianos em torno do eixo vertical
-    Vec3 sky{0.80f, 0.85f, 0.95f};
-    Vec3 ground{0.30f, 0.28f, 0.26f};
 };
 
 /// Tudo que um grupo 3D precisa para um frame. Montado no prepare (com o
@@ -221,9 +230,20 @@ public:
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;
 
+        /// Conjunto de mapas JÁ subidos, por chave de HDRI — o cache que faz dois
+    /// objetos com o mesmo ambiente custarem um upload só.
+    struct EnvSet {
+        TextureHandle irradiance{}, prefiltered{}, brdf{};
+        u32 mips = 0;
+        u64 lastFrame = 0;
+    };
     /// Troca o ambiente (IBL). Sem chamada, o primeiro grupo 3D usa o estúdio
     /// neutro padrão.
     [[nodiscard]] Status set_environment(const EnvironmentMaps& maps) noexcept;
+    [[nodiscard]] Status upload_environment(const EnvironmentMaps& maps, EnvSet& out) noexcept;
+    /// Devolve (subindo se preciso) o conjunto daquele ambiente. Nulo = sem
+    /// como (usa o do grupo).
+    [[nodiscard]] const EnvSet* environment_set(const SceneEnvironment& env, u64 frameNumber) noexcept;
     [[nodiscard]] bool has_environment() const noexcept { return irradiance_.valid(); }
     /// Export e captura usam a qualidade final: esperam o ambiente (ou o geram
     /// agora). O preview não chama — segue sem travar.
@@ -299,6 +319,11 @@ private:
     void request_environment(const SceneEnvironment& env) noexcept;
     SamplerHandle cubeSampler_{};
     void release_environment() noexcept;
+    /// Conjuntos por HDRI: um upload por asset, compartilhado pelos objetos.
+    /// Teto pequeno — cada conjunto é um cubemap com mips.
+    static constexpr usize kMaxEnvSets = 4;
+    std::vector<std::pair<u64, EnvSet>> envSets_;
+    usize envSetFrame_ = 0;
     SceneStats stats_{};
 };
 

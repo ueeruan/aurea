@@ -937,6 +937,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        refreshObjectEnvironment()
         refreshParticleLinks(id)
         timeRemap = if (id != null && detail?.timeRemap == true) {
             val out = FloatArray(5 + 7 * 64)
@@ -2073,6 +2074,60 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setEnvironment(intensity: Float, rotation: Float) {
         engine.setEnvironment(intensity, rotation)
         refreshNow()
+    }
+
+    // --- Ambiente por objeto (v22) --------------------------------------------------------
+    /** {fonte, asset, intensidade, giro, exposição} do objeto escolhido. */
+    var objectEnvironment by mutableStateOf<FloatArray?>(null)
+        private set
+
+    fun refreshObjectEnvironment() {
+        val id = primary
+        val out = FloatArray(5)
+        objectEnvironment = if (id != null && engine.queryObjectEnvironment(id, out)) out else null
+    }
+
+    /** HDRI só para o objeto escolhido: o mesmo arquivo, o mesmo asset (a GPU
+     *  compartilha o mapa); o que muda é de quem é o estado. */
+    fun importObjectHdri(uri: Uri) {
+        val id = primary ?: return
+        val name = displayName(uri) ?: "ambiente.hdr"
+        if (!name.lowercase().endsWith(".hdr")) {
+            errorMessage = appText(R.string.msg_use_um_hdri_hdr_radiance)
+            return
+        }
+        busyMessage = "Carregando o HDRI…"
+        viewModelScope.launch {
+            val asset = withContext(Dispatchers.IO) {
+                val file = copyModelToSandbox(uri, "hdr") ?: return@withContext -1_000L
+                engine.importHdri(file.absolutePath)
+            }
+            busyMessage = null
+            if (asset < 0) {
+                errorMessage = if (asset == -1_000L) appText(R.string.msg_hdri_unreadable_file)
+                               else appText(R.string.msg_hdri_unreadable_error, -asset)
+            } else {
+                engine.setObjectEnvironment(id, 1, asset, 1f, 0f, 1f)
+                refreshNow()
+                refreshObjectEnvironment()
+            }
+        }
+    }
+
+    /** `source` 0 = ambiente do projeto, 1 = o próprio deste objeto. */
+    fun setObjectEnvironment(source: Int, hdri: Long? = null, intensity: Float? = null,
+                             rotation: Float? = null, exposure: Float? = null) {
+        val id = primary ?: return
+        val cur = objectEnvironment
+        engine.setObjectEnvironment(
+            id, source,
+            hdri ?: (cur?.get(1)?.toLong() ?: 0L),
+            intensity ?: (cur?.get(2) ?: 1f),
+            rotation ?: (cur?.get(3) ?: 0f),
+            exposure ?: (cur?.get(4) ?: 1f),
+        )
+        refreshNow()
+        refreshObjectEnvironment()
     }
 
     // --- Pré-composição (grupo) ----------------------------------------------------------

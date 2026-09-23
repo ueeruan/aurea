@@ -367,13 +367,19 @@ Status SceneRenderer::initialize(GPUBackend& gpu, ShaderLibrary& shaders) noexce
 
 void SceneRenderer::release_environment() noexcept {
     if (!gpu_) return;
+    for (auto& kv : envSets_) {
+        for (TextureHandle* t : {&kv.second.irradiance, &kv.second.prefiltered, &kv.second.brdf}) {
+            if (t->valid()) gpu_->destroy_texture(*t);
+        }
+    }
+    envSets_.clear();
     for (TextureHandle* t : {&irradiance_, &prefiltered_, &iblLut_}) {
         if (t->valid()) gpu_->destroy_texture(*t);
         *t = TextureHandle{};
     }
 }
 
-Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
+Status SceneRenderer::upload_environment(const EnvironmentMaps& maps, EnvSet& out) noexcept {
     if (!gpu_) return Errc::InvalidState;
     auto cube = [&](const CubeData& c, const char* name, TextureHandle& out) -> Status {
         TextureDesc d;
@@ -421,23 +427,64 @@ Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
         return Status{Errc::OutOfDeviceMemory, "LUT da BRDF"};
     }
     lut = *l;
+    out.irradiance = irr;
+    out.prefiltered = pre;
+    out.brdf = lut;
+    out.mips = maps.prefiltered.mips;
+    return OkStatus;
+}
+
+Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
+    EnvSet novo;
+    const Status s = upload_environment(maps, novo);
+    if (!s.ok()) return s;
     release_environment();
-    irradiance_ = irr;
-    prefiltered_ = pre;
-    iblLut_ = lut;
-    prefilteredMips_ = maps.prefiltered.mips;
+    irradiance_ = novo.irradiance;
+    prefiltered_ = novo.prefiltered;
+    iblLut_ = novo.brdf;
+    prefilteredMips_ = novo.mips;
     return OkStatus;
 }
 
 namespace {
+/// Constrói os mapas de um ambiente (fora da thread de render).
 EnvironmentMaps build_for(const SceneEnvironment& env) {
     if (env.hdri && env.hdri->width > 0 && !env.hdri->rgb.empty()) {
         return build_environment_from_equirect(env.hdri->rgb.data(), env.hdri->width, env.hdri->height);
     }
     return build_studio_environment();
 }
-u64 key_of(const SceneEnvironment& env) { return env.hdri ? env.hdriKey : 0ull; }
+/// A chave do ambiente na GPU: o HDRI (0 = estúdio neutro do projeto).
+u64 key_of(const SceneEnvironment& env) noexcept { return env.hdri ? env.hdriKey : 0ull; }
 } // namespace
+
+const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironment& env, u64 frameNumber) noexcept {
+    if (!gpu_) return nullptr;
+    const u64 key = key_of(env);
+    for (auto& kv : envSets_) {
+        if (kv.first == key) {
+            kv.second.lastFrame = frameNumber;
+            return &kv.second;
+        }
+    }
+    // Teto atingido: sai o mais antigo (os objetos que o usavam voltam ao
+    // ambiente do grupo naquele quadro; o próximo pedido sobe de novo).
+    if (envSets_.size() >= kMaxEnvSets) {
+        usize pior = 0;
+        for (usize i = 1; i < envSets_.size(); ++i) {
+            if (envSets_[i].second.lastFrame < envSets_[pior].second.lastFrame) pior = i;
+        }
+        for (TextureHandle* t : {&envSets_[pior].second.irradiance, &envSets_[pior].second.prefiltered, &envSets_[pior].second.brdf}) {
+            if (t->valid()) gpu_->destroy_texture(*t);
+        }
+        envSets_.erase(envSets_.begin() + static_cast<ptrdiff_t>(pior));
+    }
+    EnvSet novo;
+    if (!upload_environment(build_for(env), novo).ok()) return nullptr;
+    novo.lastFrame = frameNumber;
+    envSets_.emplace_back(key, novo);
+    return &envSets_.back().second;
+}
 
 void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     if (!gpu_) return;
@@ -666,6 +713,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     }
 
     // --- Lista de desenho ------------------------------------------------------
+    struct EnvSlot {
+        u64 key;
+        const SceneBlock* block;
+        TextureHandle irradiance{}, prefiltered{}, brdf{};
+        u64 sampler = 0;
+    };
+
     struct Draw {
         const GpuModel* model;
         const GpuPrimitive* prim;
@@ -680,6 +734,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         usize morphPos, morphShade;
         u32 firstIndex, indexCount;   ///< o nível de detalhe escolhido
         u32 instanceCount;            ///< > 1 = instanciado (instBase no SSBO)
+        const EnvSlot* env = nullptr; ///< ambiente deste objeto (v22)
     };
     // Nível de detalhe pelo tamanho na tela: diâmetro projetado da caixa.
     const f32 pxPerUnit = static_cast<f32>(height) * 0.5f / std::tan(frame.camera.fovY * 0.5f);
@@ -716,14 +771,53 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         first = p.lodFirst[level];
         count = p.lodCount[level];
     };
-    std::vector<Draw> opaque, blended;
-    std::unordered_map<const GpuMaterial*, const SceneBlock*> blocks;
+    // Ambiente por objeto (v22): cada ambiente distinto usado no quadro tem o
+    // seu cabeçalho (parâmetros) e o seu conjunto de mapas na GPU. Sem nenhum
+    // objeto com ambiente próprio, é só o do grupo — o caminho de sempre.
+    std::vector<EnvSlot> envSlots;
+    envSlots.reserve(kMaxEnvSets + 1);   // sem realocar: os Draws guardam o ponteiro
+    envSlots.push_back(EnvSlot{envKey_, &header, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
+                               ibl ? iblLut_ : brdfLut_, 0});
+    auto env_of = [&](const SceneInstance& inst) -> const EnvSlot* {
+        if (!inst.ownEnvironment) return &envSlots[0];
+        const u64 k = key_of(inst.environment);
+        for (const EnvSlot& e : envSlots) {
+            if (e.key == k) return &e;
+        }
+        const EnvSet* set = environment_set(inst.environment, frameNumber);
+        if (!set) return &envSlots[0];   // sem como subir: cai no do grupo
+        auto* b = static_cast<SceneBlock*>(arena.alloc(sizeof(SceneBlock), 16));
+        if (!b) return &envSlots[0];
+        *b = header;
+        b->cameraPos.w = inst.environment.exposure;
+        b->envParams = Vec4{inst.environment.intensity, 1.0f, static_cast<f32>(set->mips), inst.environment.rotation};
+        b->skyColor = Vec4{inst.environment.sky, 1.0f};
+        b->groundColor = Vec4{inst.environment.ground, 1.0f};
+        envSlots.push_back(EnvSlot{k, b, set->irradiance, set->prefiltered, set->brdf, 0});
+        return &envSlots.back();
+    };
 
-    auto block_for = [&](const GpuMaterial* gm) -> const SceneBlock* {
-        if (auto it = blocks.find(gm); it != blocks.end()) return it->second;
+    std::vector<Draw> opaque, blended;
+    // Chave = (material, ambiente): dois objetos com o mesmo material e
+    // ambientes diferentes NÃO podem dividir o mesmo bloco.
+    std::vector<std::pair<std::pair<const GpuMaterial*, u64>, const SceneBlock*>> blocks;
+
+    auto block_for = [&](const GpuMaterial* gm, const EnvSlot* env) -> const SceneBlock* {
+        const u64 ek = env->key;
+        for (const auto& kv : blocks) {
+            if (kv.first.first == gm && kv.first.second == ek) return kv.second;
+        }
         auto* b = static_cast<SceneBlock*>(arena.alloc(sizeof(SceneBlock), 16));
         if (!b) return nullptr;
         *b = header;
+        if (env->block != &header) {
+            // Parâmetros do ambiente deste objeto; o material sobrescreve o
+            // resto logo abaixo.
+            b->cameraPos.w = env->block->cameraPos.w;
+            b->envParams = env->block->envParams;
+            b->skyColor = env->block->skyColor;
+            b->groundColor = env->block->groundColor;
+        }
         const Material& m = gm->factors;
         b->baseColor = m.baseColor;
         b->emissive = Vec4{m.emissive * m.emissiveStrength, 0.0f};
@@ -744,7 +838,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 b->texMask1[0] = has;
             }
         }
-        blocks.emplace(gm, b);
+        blocks.emplace_back(std::make_pair(gm, ek), b);
         return b;
     };
 
@@ -1028,13 +1122,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 const PipelineKey key = key_for(mat->factors.alphaMode, mat->factors.doubleSided, skinDraw);
                 auto pipe = shaders_->pipeline(key);
                 if (!pipe.ok()) continue;
-                const SceneBlock* blk = block_for(mat);
+                const EnvSlot* env = env_of(inst);
+                const SceneBlock* blk = block_for(mat, env);
                 if (!blk) continue;
                 Draw d{};
                 d.model = gm;
                 d.prim = &p;
                 d.material = mat;
                 d.block = blk;
+                d.env = env;
                 d.push.model = world;
                 normal_matrix(world, d.push.normalCol);
                 d.skinned = skinDraw;
@@ -1245,11 +1341,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         PipelineHandle planePipe;
         SceneParticleDraw* parts;
         u32 partCount;
+        EnvSlot sceneEnv;             ///< o ambiente do grupo (d.env nulo)
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
           shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe,
-          partList, partList ? particleCount : 0u};
+          partList, partList ? particleCount : 0u, envSlots[0]};
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
     const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
@@ -1258,6 +1355,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         PipelineHandle bound{};
         const GpuModel* boundModel = nullptr;
         const GpuMaterial* boundMat = nullptr;
+        const EnvSlot* boundEnv = nullptr;
         auto drawPlanes = [&]() {
             if (!cap.planeCount) return;
             c.bind_pipeline(cap.planePipe);
@@ -1280,18 +1378,22 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 bound = d.pipeline;
                 boundMat = nullptr;
             }
-            if (d.material != boundMat) {
+            if (d.material != boundMat || d.env != boundEnv) {
                 const TextureHandle fallback[5] = {cap.white, cap.white, cap.flatNormal, cap.white, cap.white};
                 for (u32 k = 0; k < 5; ++k) {
                     const bool has = d.material->tex[k].valid();
                     c.bind_texture(k, has ? d.material->tex[k] : fallback[k],
                                    has && d.material->samp[k].valid() ? d.material->samp[k] : SamplerHandle{cap.linearSampler});
                 }
-                c.bind_texture(5, cap.irradiance, cap.cubeSampler);
-                c.bind_texture(6, cap.prefiltered, cap.cubeSampler);
-                c.bind_texture(7, cap.brdf, SamplerHandle{cap.clampSampler});
+                // O ambiente é o DESTE objeto (v22): sem ambiente próprio é o do
+                // grupo, como sempre foi.
+                const EnvSlot* e = d.env ? d.env : &cap.sceneEnv;
+                c.bind_texture(5, e->irradiance, cap.cubeSampler);
+                c.bind_texture(6, e->prefiltered, cap.cubeSampler);
+                c.bind_texture(7, e->brdf, SamplerHandle{cap.clampSampler});
                 c.bind_texture(8, cap.shadow.valid() ? pc.texture(cap.shadow) : cap.white, SamplerHandle{cap.nearestSampler});
                 boundMat = d.material;
+                boundEnv = d.env;
             }
             if (d.skinned) c.bind_storage_buffer(cap.joints);
             if (d.morph) {

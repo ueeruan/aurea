@@ -3251,6 +3251,38 @@ bool Engine::query_environment(f32* out) noexcept {
     return true;
 }
 
+bool Engine::set_object_environment(u64 layerId, u32 source, u64 hdriAsset, f32 intensity, f32 rotationDeg,
+                                    f32 exposure) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    // Só objeto que vive no 3D tem ambiente próprio.
+    if (!l || !(l->threeD || l->kind == LayerKind::Model3D)) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "ambiente do objeto");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->environmentSource = std::min<u32>(source, 1u);
+    l->environmentAsset = hdriAsset;
+    l->environmentIntensity = std::clamp(intensity, 0.0f, 20.0f);
+    l->environmentRotation = std::fmod(rotationDeg, 360.0f);
+    l->environmentExposure = std::clamp(exposure, 0.05f, 20.0f);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_object_environment(u64 layerId, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out) return false;
+    out[0] = static_cast<f32>(l->environmentSource);
+    out[1] = static_cast<f32>(l->environmentAsset);
+    out[2] = l->environmentIntensity;
+    out[3] = l->environmentRotation;
+    out[4] = l->environmentExposure;
+    return true;
+}
+
 // =============================================================================
 // Pré-composição
 // =============================================================================

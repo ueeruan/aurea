@@ -906,6 +906,23 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryEnvironment)(JNIEnv* env, jclass, jlong h
     return JNI_TRUE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetObjectEnvironment)(JNIEnv*, jclass, jlong handle, jlong layer, jint source,
+                                                        jlong hdri, jfloat intensity, jfloat rotation, jfloat exposure) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_object_environment(static_cast<u64>(layer), static_cast<u32>(source),
+                                                 static_cast<u64>(hdri), intensity, rotation, exposure)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeQueryObjectEnvironment)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 5) return JNI_FALSE;
+    f32 v[5];
+    if (!c->engine.query_object_environment(static_cast<u64>(layer), v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 5, v);
+    return JNI_TRUE;
+}
+
 /// Desagrupar: nulo = feito; senão o motivo da recusa (frase para a UI).
 AUREA_JNI jstring AUREA_FN(nativeUngroupPrecomp)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);

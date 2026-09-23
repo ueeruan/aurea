@@ -685,6 +685,15 @@ public:
     /// {tem HDRI (0/1), intensidade, giro}.
     bool query_environment(f32* out3) noexcept;
 
+    /// Ambiente POR OBJETO (v22): um modelo 3D escolhe entre o ambiente do
+    /// projeto (0) e o dele (1), com HDRI, intensidade, giro e exposição
+    /// próprios. O estado é deste objeto — mexer aqui não toca nos outros.
+    /// `hdriAsset` = 0 volta ao estúdio neutro daquele objeto.
+    bool set_object_environment(u64 layerId, u32 source, u64 hdriAsset, f32 intensity, f32 rotationDeg,
+                                f32 exposure) noexcept;
+    /// {fonte, asset, intensidade, giro, exposição}.
+    bool query_object_environment(u64 layerId, f32* out5) noexcept;
+
     // --- Pré-composição ----------------------------------------------------------
     /// Move as camadas para uma composição nova (mesmo tamanho, taxa e
     /// duração; fundo transparente) e põe no lugar UMA camada que a mostra, na

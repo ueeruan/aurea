@@ -902,6 +902,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     modelLookup_ ? modelLookup_(modelCtx_, l->model.scene) : nullptr;
                 if (!asset) continue;   // asset ausente: a layer não desenha (a UI mostra "modelo ausente")
                 scene3d::SceneInstance inst;
+                fill_object_environment(*l, inst);
                 // Matriz 3D para qualquer pai (num pai 2D comum ela é a mesma
                 // da 2D): o mesmo mundo que world_3d e o parentesco usam.
                 place_model(comp, *l, *asset, static_cast<f64>(time.value), inst);
@@ -1826,6 +1827,23 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
 // =============================================================================
 // Fase 2 — render (sem lock)
 // =============================================================================
+// Ambiente POR OBJETO (v22): o objeto escolhe entre o do projeto e o dele. O
+// estado é do objeto; os mapas na GPU são compartilhados por HDRI (ver
+// SceneRenderer::environment_set).
+void Renderer::fill_object_environment(const Layer& l, scene3d::SceneInstance& inst) noexcept {
+    if (l.environmentSource != static_cast<u32>(Layer::EnvironmentSource::Custom)) return;
+    scene3d::SceneEnvironment e;
+    e.intensity = std::max(0.0f, l.environmentIntensity);
+    e.exposure = std::max(0.01f, l.environmentExposure);
+    e.rotation = l.environmentRotation * kDeg2Rad;
+    const AssetId hdri = AssetId::unpack(l.environmentAsset);
+    if (hdri.valid() && hdriLookup_) {
+        e.hdri = hdriLookup_(hdriCtx_, hdri);
+        e.hdriKey = hdri.pack();
+    }
+    inst.environment = std::move(e);
+    inst.ownEnvironment = true;
+}
 void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
     // Todos os snapshots (pré-composições incluídas) num buffer só do quadro.
     usize total = 0;

@@ -1486,4 +1486,9 @@ to edit the curve.</string>
     <string name="msg_gaps_removed">Gaps removed (%1$s s)</string>
     <string name="msg_model_import_failed">Couldn\'t import the model: %1$s</string>
     <string name="msg_cache_cleared">Cache cleared: %1$s MB</string>
+    <string name="panel_ambiente_do_objeto">Object environment</string>
+    <string name="panel_do_projeto">From the project</string>
+    <string name="panel_proprio">Own</string>
+    <string name="panel_trocar_imagem">Change image</string>
+    <string name="panel_exposicao">Exposure</string>
 </resources>

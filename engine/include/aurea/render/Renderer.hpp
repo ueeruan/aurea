@@ -355,6 +355,9 @@ public:
     void set_model_lookup(ModelLookup fn, void* ctx) noexcept { modelLookup_ = fn; modelCtx_ = ctx; }
     using HdriLookup = std::shared_ptr<const scene3d::HdriPixels> (*)(void* ctx, AssetId id);
     void set_hdri_lookup(HdriLookup fn, void* ctx) noexcept { hdriLookup_ = fn; hdriCtx_ = ctx; }
+    /// Resolve o ambiente PRÓPRIO de uma camada 3D para a instância (v22):
+    /// sem `Custom`, a instância fica com o ambiente do grupo.
+    void fill_object_environment(const Layer& l, scene3d::SceneInstance& inst) noexcept;
     [[nodiscard]] const scene3d::SceneStats& scene_stats() const noexcept { return scene3d_.stats(); }
     [[nodiscard]] u64 scene_resident_bytes() const noexcept { return scene3d_.resident_bytes(); }
     /// Contadores dos sistemas pesados (texto, vetor, máscara, flow, partículas, 3D).

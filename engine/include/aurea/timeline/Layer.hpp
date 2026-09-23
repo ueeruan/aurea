@@ -444,6 +444,7 @@ struct ParticleData {
     Vec2 sizeCurve[kMaxLifeStops]{};
     u32  opacityCurveCount = 0;
     Vec2 opacityCurve[kMaxLifeStops]{};
+
 };
 
 struct CompositionRef {
@@ -619,6 +620,20 @@ struct Layer {
 
     [[nodiscard]] u32 alloc_effect_id() noexcept { return nextEffectId++; }
     [[nodiscard]] u32 alloc_mask_id() noexcept { return nextMaskId++; }
+
+    // --- Ambiente por objeto (v22, Fase 9) -------------------------------------
+    //
+    // Cada objeto 3D escolhe de ONDE vem a luz do ambiente: a do projeto
+    // (`EnvironmentSource::Scene`) ou a PRÓPRIA (`Custom`). O estado é deste
+    // objeto; os MAPAS na GPU são compartilhados por asset — dois objetos com o
+    // mesmo HDRI usam a mesma textura, e mudar um não mexe no outro.
+    enum class EnvironmentSource : u32 { Scene = 0, Custom = 1 };
+    u32  environmentSource = static_cast<u32>(EnvironmentSource::Scene);
+    u64  environmentAsset = 0;                ///< AssetId (pack) do HDRI deste objeto
+    f32  environmentIntensity = 1.0f;
+    f32  environmentExposure = 1.0f;
+    f32  environmentRotation = 0.0f;          ///< graus
+    bool environmentBackground = false;       ///< mostra o HDRI como fundo deste objeto
 };
 
 /// Os parâmetros da camada de partículas com os keyframes aplicados.

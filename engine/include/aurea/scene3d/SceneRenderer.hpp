@@ -165,6 +165,13 @@ struct SceneParticleDraw {
     BufferHandle history{};           ///< binding 16 (AUREA_DATA1)
     BufferHandle quad{};              ///< 6 índices u16
     u32 instances = 0;
+    // Aurea Particular 8.2 (render/ParticleExtras): dados extras no binding 15
+    // (AUREA_DATA), imagem da partícula de textura e a malha instanciada
+    // (`meshVertices` > 0: desenho não indexado, vértice = vértice da malha).
+    BufferHandle extras{};
+    TextureHandle texture{};
+    u64 sampler = 0;
+    u32 meshVertices = 0;
 };
 
 /// Contas do QUADRO inteiro (todas as cenas e subquadros de desfoque): o

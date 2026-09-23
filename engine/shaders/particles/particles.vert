@@ -313,16 +313,14 @@ vec3 shape_offset(float type, inout uint s) {
     return vec3((vec2(rnd(s), rnd(s)) - 0.5) * vec2(w, h), 0.0);   // fonte ainda sem pontos: caixa
 }
 
-/// Onde a partícula nasce, RELATIVO à origem do emissor (z = profundidade):
-/// quem chama soma a origem do nascimento (`em.origin`, que pode vir do
-/// histórico). Camada, texto, caminho e malha leem os pontos da fonte — que
-/// estão em px ABSOLUTOS da camada, então saem menos a origem de agora; as
-/// formas, a conta de cima. (No merge B+C a origem entrava duas vezes: o
-/// emissor ia parar em 2× o centro e metade das partículas saía da tela.)
-vec3 emit_start(float type, inout uint s) {
+/// Onde a partícula nasce (px da camada; z = profundidade). Camada, texto,
+/// caminho e malha leem os pontos da fonte (já absolutos); as formas, a conta
+/// de cima em volta de `origin` — o centro do emissor NO NASCIMENTO (ps_emit),
+/// somado uma vez só.
+vec3 emit_start(float type, vec2 origin, inout uint s) {
     vec3 q;
-    if (type > 5.5 && emit_from_source(s, q)) return q - vec3(p.origin.xy, 0.0);
-    return shape_offset(type, s);
+    if (type > 5.5 && emit_from_source(s, q)) return q;
+    return vec3(origin, 0.0) + shape_offset(type, s);
 }
 
 /// O que é FIXO numa partícula (sai do nascimento) — a trajetória inteira é
@@ -493,6 +491,19 @@ void emit_vertex(vec2 pos, float z, float size, float rot, vec4 colPremul, vec2 
         v_color = vec4(colPremul.rgb * mc.rgb, colPremul.a) * mc.a;
         v_local = vec2(0.0);
         v_shape = 5.0;
+        if (ps_has(PS_3D)) {
+            // Cena 3D: o centro vai ao mundo pelo histórico (como o billboard)
+            // e a malha fica de frente para a câmera, com o Z dela no eixo de
+            // visão — volume de verdade contra os modelos (o passe escreve depth).
+            v_color *= pc.mode.w;
+            vec4 r0, r1, r2;
+            const vec3 cw = ps_out_point(vec3(pos, z), birth, grav, r0, r1, r2);
+            const float sc = length(vec3(r0.x, r1.x, r2.x));
+            const vec3 fwd = normalize(cross(pc.camRight.xyz, pc.camDown.xyz));
+            gl_Position = pc.clipFromLayer
+                        * vec4(cw + (pc.camRight.xyz * local.x + pc.camDown.xyz * local.y + fwd * local.z) * sc, 1.0);
+            return;
+        }
         // A saída passa pelo MESMO ps_place do quad (o vértice da malha é o
         // "canto"): 2D de sempre, espaço mundo e desfoque valem para a malha.
         ps_place(vec3(pos, z), local.xy, birth, grav);
@@ -592,8 +603,8 @@ void main() {
         const float spd0 = em.speed * (1.0 + (rnd(s) - 0.5) * 2.0 * p.emission.y);
         // O emissor estendido manda sobre a forma simples: e dele que saem os
         // pontos de nascimento (imagem, texto, forma, mascara, modelo).
-        const vec3 st = emit_start(p.emitShape.x, s);
-        const vec2 start = em.origin + st.xy;
+        const vec3 st = emit_start(p.emitShape.x, em.origin, s);
+        const vec2 start = st.xy;
         const vec2 cone0 = ps_cone(em.spread, primaryIdx, k);
         const vec2 v0 = spd0 * cone0.x * vec2(cos(ang0), sin(ang0)) + em.motion * p.emission.z;
         const vec2 acc = vec2(p.force.x, p.force.y) + p.physics.yz;
@@ -625,10 +636,10 @@ void main() {
     // ---- Nascimento ----------------------------------------------------------
     const float ang = em.dir + (rnd(s) - 0.5) * em.spread;
     const float spd = em.speed * (1.0 + (rnd(s) - 0.5) * 2.0 * p.emission.y);
-    const vec3 st = emit_start(p.emitShape.x, s);
+    const vec3 st = emit_start(p.emitShape.x, em.origin, s);
     const vec2 cone = ps_cone(em.spread, primaryIdx, k);
     Particle P;
-    P.start = em.origin + st.xy;
+    P.start = st.xy;
     P.z = st.z;
     P.ctr = em.origin;
     P.v0 = spd * cone.x * vec2(cos(ang), sin(ang)) + em.motion * p.emission.z;

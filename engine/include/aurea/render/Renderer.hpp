@@ -544,6 +544,13 @@ private:
     /// deslocamento de tempo do (sub)quadro `frame`. Memória da arena.
     [[nodiscard]] u32 scene_particle_draws(const scene3d::SceneFrame& group, const scene3d::SceneFrame& frame,
                                            scene3d::SceneParticleDraw*& out) noexcept;
+    /// Monta `rl.particle` e o bloco do histórico em `out.particleData`
+    /// (render/ParticleScene.cpp). Sem cena 3D, espaço mundo, emissão animada
+    /// nem desfoque: flags = 0 e nada muda no 2D de sempre.
+    void prepare_particle_space(const Composition& comp, const Layer& l, FrameIndex local, const RenderSettings& settings,
+                                bool in3d, RenderLayer& rl, FrameSnapshot& out) const noexcept;
+    /// O quad indexado das partículas (6 índices u16), criado uma vez.
+    [[nodiscard]] bool particle_quad_ready() noexcept;
     /// Malha vetorial por camada: refeita só quando a chave (grupos avaliados +
     /// densidade) muda — camada parada não retriangula a cada quadro.
     struct VectorCacheEntry { u64 key = 0; u64 lastFrame = 0; std::vector<Vec4> verts, paints; Vec2 min{}, max{}; };
@@ -587,6 +594,8 @@ private:
         u32 meshVertices = 0;
     };
     [[nodiscard]] ParticleExtrasBind particle_extras_bind(const LayerSource& src, u64 frameNumber) noexcept;
+    /// Escreve o bloco 19 (extras) do bloco de parâmetros a partir do bind.
+    static void particle_extras_params(const ParticleExtrasBind& b, Vec4* params) noexcept;
     /// Orçamento do cache do optical flow (texturas residentes, todas as camadas).
     u64 flowCacheBudget_ = 48ull << 20;
     void trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept;
@@ -628,6 +637,7 @@ private:
     u32 warmedForProject_ = 0;
     u32 framesRendered_ = 0;
     u64 frameNumber_ = 0;
+    u64 renderFrameNumber_ = 0;   ///< quadro do backend em render() (buffers extras do Particular)
     bool lastZeroCopy_ = false;
 };
 

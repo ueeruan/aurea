@@ -495,6 +495,9 @@ void Renderer::shutdown() noexcept {
         if (vecBuf_[i].valid()) backend_->destroy_buffer(vecBuf_[i]);
         vecBuf_[i] = BufferHandle{};
         vecCap_[i] = 0;
+        if (particleBuf_[i].valid()) backend_->destroy_buffer(particleBuf_[i]);
+        particleBuf_[i] = BufferHandle{};
+        particleCap_[i] = 0;
     }
     vectorCache_.clear();
     scene3d_.shutdown();
@@ -511,9 +514,11 @@ void Renderer::forget_device() noexcept {
         glyphBuf_[i] = BufferHandle{}; glyphCap_[i] = 0;
         maskBuf_[i] = BufferHandle{}; maskCap_[i] = 0;
         vecBuf_[i] = BufferHandle{}; vecCap_[i] = 0;
+        particleBuf_[i] = BufferHandle{}; particleCap_[i] = 0;
     }
     maskCache_.clear();
     vecFrameBuf_ = BufferHandle{};
+    particleFrameBuf_ = BufferHandle{};
     framesInFlight_.clear();
     planar_.clear();
     flowCache_.clear();
@@ -626,6 +631,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.glyphs.clear();
     out.maskData.clear();
     out.vec.clear();
+    out.particleData.clear();
     // Malhas vetoriais de camadas que saíram de cena há tempo: fora do cache.
     if (prepareDepth_ == 0 && vectorCache_.size() > 32) {
         for (auto it = vectorCache_.begin(); it != vectorCache_.end();) {
@@ -1436,6 +1442,18 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             rl.temporal.clear();
         }
 
+        // Partículas (8.2, ParticleScene.cpp): cena 3D, espaço mundo, emissão no
+        // nascimento e desfoque por tempo. No espaço da composição a textura
+        // já sai no lugar (composição ← camada = identidade).
+        if (rl.source.kind == LayerSource::Kind::Particles) {
+            prepare_particle_space(comp, *l, local, settings, inScene3d, rl, out);
+            if (rl.particle.compSpace) {
+                m = Mat4::identity();
+                rl.compFromLayer = m;
+                rl.texelScale = texel_scale_for(previewFactor);
+            }
+        }
+
         // Plano de efeitos ANTES do decode: é ele que diz se a camada pode
         // alcançar a tela (Fase 8C §19–22).
         if (out.plans.size() <= used) out.plans.emplace_back();
@@ -1641,8 +1659,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Camada 2D no espaço 3D: entra na cena (profundidade de verdade com os
         // modelos e as outras camadas 3D vizinhas na pilha). Com desfoque/eco
         // ou modo de mistura ela continua na composição, como antes.
+        // Partículas 3D entram no grupo como billboards (ParticleScene), não
+        // como plano.
+        const bool particles = rl.source.kind == LayerSource::Kind::Particles;
         const bool asPlane = inScene3d && rl.blurMatrices.empty() && rl.temporal.empty() && rl.blend == BlendMode::Normal
-                          && rl.source.kind != LayerSource::Kind::Particles && !out.plans[used].hasFold
+                          && (!particles || rl.particle.inScene) && !out.plans[used].hasFold
                           && rl.matteMode == MatteMode::None && !rl.matteOnly;
         if (asPlane) {
             if (!groupOpen || out.scenes.empty()) {
@@ -1664,8 +1685,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 out.plans[used] = std::move(planeFx);
                 groupOpen = true;
             }
-            rl.planeGroup = static_cast<i32>(out.scenes.size() - 1);
-            out.scenes.back().planeLayers.push_back(used);
+            if (particles) {
+                out.scenes.back().particleLayers.push_back(used);
+            } else {
+                rl.planeGroup = static_cast<i32>(out.scenes.size() - 1);
+                out.scenes.back().planeLayers.push_back(used);
+            }
         } else {
             groupOpen = false;
         }
@@ -1700,12 +1725,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             f.blurFrames.clear();
             bool any = false;
             for (const scene3d::SceneInstance& in : f.instances) any |= in.motionBlur;
+            // Partículas com desfoque: andam no obturador mesmo com tudo parado.
+            bool particleBlur = false;
+            for (u32 pi : f.particleLayers) particleBlur |= pi < out.layers.size() && out.layers[pi].particle.blur;
+            any |= particleBlur;
             if (!any) continue;
-            bool moves = false;
+            bool moves = particleBlur;
             f.blurFrames.resize(k);
             for (u32 s = 0; s < k; ++s) {
                 const f64 ts = static_cast<f64>(time.value) + ((static_cast<f64>(s) + 0.5) / static_cast<f64>(k) - 0.5) * open;
                 scene3d::SceneFrame& sf = f.blurFrames[s];
+                sf.subFrame = ts - static_cast<f64>(time.value);
                 sf.camera = camera_for_frac(comp, ts, out.compWidth, out.compHeight);
                 sf.lights = f.lights;
                 sf.environment = f.environment;
@@ -2169,8 +2199,12 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 r->heavyStats_.lastShadowMapSize = st.shadowMapSize;
             }
         } sink{this};
+        // Partículas 3D do grupo (8.2): billboards no passe da cena, com a
+        // câmera de cada (sub)quadro.
+        scene3d::SceneParticleDraw* parts = nullptr;
         if (group.blurFrames.empty()) {
-            if (!scene3d_.build(graph_, arena_, group, compTargetW_, compTargetH_, frameNumber, tex, planes)) return false;
+            const u32 np = scene_particle_draws(group, group, parts);
+            if (!scene3d_.build(graph_, arena_, group, compTargetW_, compTargetH_, frameNumber, tex, planes, parts, np)) return false;
         } else {
             // Desfoque: K cenas no obturador, média aditiva (peso 1/K, cor
             // pré-multiplicada) num alvo do tamanho da composição.
@@ -2178,7 +2212,9 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             FGTexture* frames = arena_.alloc_array<FGTexture>(k);
             u32 built = 0;
             for (u32 s = 0; s < k; ++s) {
-                if (scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, frames[built], planes)) ++built;
+                const u32 np = scene_particle_draws(group, group.blurFrames[s], parts);
+                if (scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, frames[built], planes,
+                                   parts, np)) ++built;
             }
             auto pAdd = shaders_.pipeline(PipelineKey::graphics(
                 ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
@@ -2505,14 +2541,20 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         }
         case LayerSource::Kind::Particles: {
             out.texture = graph_.create_texture("layer-particulas", d);
+            // Desfoque (8.2): K subamostras de tempo somadas com peso 1/K.
+            const u32 nsub = layer.particle.flags ? std::max<u32>(1u, static_cast<u32>(layer.particle.subs.size())) : 1u;
+            if (layer.particle.flags && !particleFrameBuf_.valid()) return false;
             // 8.2: dados extras da camada (binding AUREA_DATA) — ver particle_extras_bind.
             const ParticleExtrasBind px = particle_extras_bind(layer.source, frameNumber);
             PipelineKey pkey = PipelineKey::graphics(
                 ShaderId::particles_particles_vert, ShaderId::particles_particles_frag, kWorkFormat, true,
-                layer.source.particleAdditive ? BlendMode::Add : BlendMode::Normal);
-            if (px.mesh) {
-                // Partícula de MALHA: profundidade de verdade entre as malhas
-                // (teste e escrita, Z reverso, limpa em 0) num alvo próprio.
+                layer.source.particleAdditive || nsub > 1 ? BlendMode::Add : BlendMode::Normal);
+            // Partícula de MALHA: profundidade de verdade entre as malhas (teste
+            // e escrita, Z reverso, limpa em 0) num alvo próprio. Com desfoque
+            // (subamostras somadas no mesmo passe) a profundidade de uma
+            // subamostra taparia a seguinte: aí vale só a soma, sem depth.
+            const bool meshDepth = px.mesh && nsub == 1;
+            if (meshDepth) {
                 pkey.hasDepth = true;
                 pkey.depthTest = true;
                 pkey.depthWrite = true;
@@ -2541,39 +2583,38 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             // como uniformes (20 vec4 = 320 B, acima do limite garantido de
             // push constant que e 128 B).
             // Push de 112 B (ParticleScene.hpp): sem bits de modo = o 2D de sempre.
-            ParticlePush push;
-            push.clip = clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height));
+            ParticlePush* pushes = arena_.alloc_array<ParticlePush>(nsub);
+            if (!pushes) return false;
+            for (u32 s = 0; s < nsub; ++s) pushes[s] = particle_push(layer, s, 1.0f / static_cast<f32>(nsub));
             struct Cap {
-                PipelineHandle p; ParticlePush clip; Vec4 params[LayerSource::kParticleBlocks];
-                u32 slots; u32 meshVerts; BufferHandle quad;
-                BufferHandle extras; TextureHandle tex; u64 sampler;   // 8.2 (a captura cabe em 512 B)
-            } cap{*pipe, push, {}, layer.source.particleSlots, px.mesh ? px.meshVertices : 0u, particleQuad_,
-                  px.buffer, px.texture, shaders_.sampler(CommonSampler::LinearClamp).id};
+                PipelineHandle p; ParticlePush* clip; Vec4 params[LayerSource::kParticleBlocks];
+                u32 slots; BufferHandle quad; u32 subs; BufferHandle history;
+                u32 meshVerts; BufferHandle extras; TextureHandle tex; u64 sampler;   // 8.2 extras
+            } cap{*pipe, pushes, {}, layer.source.particleSlots, particleQuad_, nsub,
+                  layer.particle.flags ? particleFrameBuf_ : BufferHandle{},
+                  px.mesh ? px.meshVertices : 0u, px.buffer, px.texture, shaders_.sampler(CommonSampler::LinearClamp).id};
             for (u32 i = 0; i < LayerSource::kParticleBlocks; ++i) cap.params[i] = layer.source.particleBlock[i];
-            // extras: slots do fluxo (já), 1º vec4 do cabeçalho, dados prontos, passe de malha.
-            cap.params[19].y = static_cast<f32>(px.headerBase);
-            cap.params[19].z = px.on ? 1.0f : 0.0f;
-            cap.params[19].w = px.mesh ? 1.0f : 0.0f;
+            particle_extras_params(px, cap.params);
             heavyStats_.lastParticleSlots += layer.source.particleSlots;
             ++heavyStats_.lastParticleLayers;
             auto draw = [cap](PassContext& pc) {
                 pc.cmds.bind_pipeline(cap.p);
                 pc.cmds.set_uniforms(cap.params, sizeof(cap.params));
-                pc.cmds.push_constants(&cap.clip, sizeof(cap.clip));
+                if (cap.history.valid()) pc.cmds.bind_storage_buffer_at(1, cap.history);
                 // O binding do storage buffer sobrevive entre passes: liga sempre
                 // (inválido = o nulo do backend; o shader não lê sem extras.z).
                 pc.cmds.bind_storage_buffer(cap.extras);
                 if (cap.tex.valid()) pc.cmds.bind_texture(0, cap.tex, SamplerHandle{cap.sampler});
-                if (cap.meshVerts) {
+                if (!cap.meshVerts) pc.cmds.bind_index_buffer(cap.quad, 0, IndexType::U16);
+                for (u32 s = 0; s < cap.subs; ++s) {
+                    pc.cmds.push_constants(&cap.clip[s], sizeof(ParticlePush));
                     // Malha instanciada: gl_VertexIndex = vértice da malha,
                     // instância = partícula (a mesma conta do quad).
-                    pc.cmds.draw(cap.meshVerts, cap.slots, 0);
-                    return;
+                    if (cap.meshVerts) pc.cmds.draw(cap.meshVerts, cap.slots, 0);
+                    else pc.cmds.draw_indexed(6, cap.slots, 0, 0, 0);
                 }
-                pc.cmds.bind_index_buffer(cap.quad, 0, IndexType::U16);
-                pc.cmds.draw_indexed(6, cap.slots, 0, 0, 0);
             };
-            if (px.mesh) {
+            if (meshDepth) {
                 TextureDesc dd = d;
                 dd.format = SurfaceFormat::Depth32F;
                 dd.sampled = false;
@@ -2656,6 +2697,13 @@ void Renderer::prepare_particle_extras(const Composition& comp, const Layer& lay
     }
     heavyStats_.particleExtraCpuBytes = particleStatics_.resident_bytes();
     src.particleExtras = std::move(fd);
+}
+
+void Renderer::particle_extras_params(const ParticleExtrasBind& b, Vec4* params) noexcept {
+    // extras (bloco 19): slots do fluxo (já), 1º vec4 do cabeçalho, dados prontos, passe de malha.
+    params[19].y = static_cast<f32>(b.headerBase);
+    params[19].z = b.on ? 1.0f : 0.0f;
+    params[19].w = b.mesh ? 1.0f : 0.0f;
 }
 
 Renderer::ParticleExtrasBind Renderer::particle_extras_bind(const LayerSource& src, u64 frameNumber) noexcept {
@@ -2974,7 +3022,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
     }
     for (u32 i = 0; i < snap.layers.size(); ++i) {
         const RenderLayer& layer = snap.layers[i];
-        if (layer.planeGroup >= 0 || layer.matteOnly) continue;   // na cena 3D / só recorta
+        if (layer.planeGroup >= 0 || layer.matteOnly || layer.particle.inScene) continue;   // na cena 3D / só recorta
         CompositeDraw draw;
         if (layer.source.kind == LayerSource::Kind::Adjustment) {
             // Camada de ajuste: montada na composição, sobre o fundo acumulado.
@@ -3293,6 +3341,8 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     upload_glyphs(snap);
     upload_masks(snap);
     upload_vectors(snap);
+    upload_particle_history(snap);
+    renderFrameNumber_ = fb.frameNumber;   // o relógio dos buffers extras das partículas (2D e cena)
     compose_layers(snap, comp, compDesc, fb.frameNumber, draws_, 0);
     // A raiz de novo (as pré-composições trocaram o estado em curso).
     currentScenes_ = &snap.scenes;

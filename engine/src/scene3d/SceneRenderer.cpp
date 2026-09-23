@@ -1328,7 +1328,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             c.bind_pipeline(d.pipeline);
             c.set_uniforms(d.uniforms, d.uniformBytes);
             c.bind_storage_buffer_at(1, d.history);
+            c.bind_storage_buffer(d.extras);   // 8.2: inválido = nulo (o shader não lê sem extras.z)
+            if (d.texture.valid()) c.bind_texture(0, d.texture, SamplerHandle{d.sampler});
             c.push_constants(d.push, d.pushBytes);
+            if (d.meshVertices) {
+                c.draw(d.meshVertices, d.instances, 0);
+                continue;
+            }
             c.bind_index_buffer(d.quad, 0, IndexType::U16);
             c.draw_indexed(6, d.instances, 0, 0, 0);
         }

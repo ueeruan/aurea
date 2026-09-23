@@ -72,6 +72,9 @@ struct ParticleSpace {
     /// A textura da camada já está no espaço da COMPOSIÇÃO (compFromLayer =
     /// identidade): espaço mundo/desfoque no 2D e o 3D fora da cena.
     bool compSpace = false;
+    /// Desenhada DENTRO do passe da cena 3D (billboards com profundidade):
+    /// o grupo a lista em SceneFrame::particleLayers e a composição a pula.
+    bool inScene = false;
     /// Desfoque de movimento por subamostras de tempo (`subs` > 1).
     bool blur = false;
     f32  fps = 30.0f;

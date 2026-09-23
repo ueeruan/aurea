@@ -539,6 +539,13 @@ private:
     /// deslocamento de tempo do (sub)quadro `frame`. Memória da arena.
     [[nodiscard]] u32 scene_particle_draws(const scene3d::SceneFrame& group, const scene3d::SceneFrame& frame,
                                            scene3d::SceneParticleDraw*& out) noexcept;
+    /// Monta `rl.particle` e o bloco do histórico em `out.particleData`
+    /// (render/ParticleScene.cpp). Sem cena 3D, espaço mundo, emissão animada
+    /// nem desfoque: flags = 0 e nada muda no 2D de sempre.
+    void prepare_particle_space(const Composition& comp, const Layer& l, FrameIndex local, const RenderSettings& settings,
+                                bool in3d, RenderLayer& rl, FrameSnapshot& out) const noexcept;
+    /// O quad indexado das partículas (6 índices u16), criado uma vez.
+    [[nodiscard]] bool particle_quad_ready() noexcept;
     /// Malha vetorial por camada: refeita só quando a chave (grupos avaliados +
     /// densidade) muda — camada parada não retriangula a cada quadro.
     struct VectorCacheEntry { u64 key = 0; u64 lastFrame = 0; std::vector<Vec4> verts, paints; Vec2 min{}, max{}; };

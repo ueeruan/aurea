@@ -72,7 +72,7 @@ internal fun EffectsBrowser(store: EditorStore, onDismiss: () -> Unit) {
     val catalog = store.catalog
     val categories = remember(catalog) { effectCategories(catalog) }
     val sorted = remember(catalog, categories) { arrangeCatalog(catalog, categories) }
-    val haystack = remember(catalog) { catalogHaystack(catalog) }
+    val haystack = catalogHaystack(catalog)   // já memoizado por idioma lá dentro
     // Os recentes que a lista mostra são os de ANTES desta sessão: aplicar um
     // efeito não reordena a lista debaixo do dedo de quem tocou.
     val recents = remember(prefs.recents) { prefs.recents }

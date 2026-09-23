@@ -7,6 +7,11 @@ import com.aurea.aurea.editor.panels.normalizeSearch
 import com.aurea.aurea.engine.EffectCatalogEntry
 import com.aurea.aurea.engine.ParamType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
+import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 
 // =============================================================================
 //  O QUE O MOTOR NÃO CONTA SOBRE UM EFEITO (Fase 7.3 §12, §62, §68).
@@ -47,16 +52,21 @@ fun effectCost(effectClass: Int): Int = when (effectClass) {
     else -> 1   // PerPixel: funde com os vizinhos
 }
 
-/** Onde o efeito funciona (Fase 7.3 §62). */
-enum class EffectTarget(val label: String) {
-    Imagem("Imagem"),
-    Video("Vídeo"),
-    Texto("Texto"),
-    Vetor("Vetor"),
-    Forma("Forma"),
-    Cena3D("Cena 3D"),
-    PreComposicao("Pré-composição"),
-    Ajuste("Camada de ajuste"),
+/**
+ * Onde o efeito funciona (Fase 7.3 §62).
+ *
+ * [label] é ID de recurso: o rótulo muda de idioma, o NOME do enum não — é ele
+ * que está no código e que casa com a tabela de cada efeito.
+ */
+enum class EffectTarget(@StringRes val label: Int) {
+    Imagem(R.string.target_image),
+    Video(R.string.target_video),
+    Texto(R.string.target_text),
+    Vetor(R.string.target_vector),
+    Forma(R.string.target_shape),
+    Cena3D(R.string.target_3d),
+    PreComposicao(R.string.target_precomp),
+    Ajuste(R.string.target_adjust),
 }
 
 /**
@@ -157,17 +167,63 @@ class EffectMeta(
     val keywords: String = "",
 )
 
-/** A descrição de gente. Efeito sem ficha não fica mudo: diz o que ele é. */
+/**
+ * A descrição de gente. Efeito sem ficha não fica mudo: diz o que ele é.
+ *
+ * @Composable porque a frase padrão é texto de interface — e ela leva a
+ * CATEGORIA dentro, que é rótulo traduzido, não o nome que o motor publica.
+ */
+@Composable
 fun effectDescription(typeId: Int, category: String): String =
-    Table[typeId]?.description ?: "Efeito de $category. Os parâmetros estão no painel do efeito."
+    Table[typeId]?.description ?: stringResource(R.string.effect_default_description, effectCategoryLabel(category))
 
 /** Onde ele funciona. Fora da tabela, em todo lugar (é o que o motor faz). */
 fun effectTargets(typeId: Int): List<EffectTarget> = Table[typeId]?.targets ?: AllTargets
 
 /** A linha curta de compatibilidade: "Vídeo, imagem e pré-composição". */
+@Composable
 fun effectCompatibilityLine(typeId: Int): String = when (val t = effectTargets(typeId)) {
-    AllTargets -> "Funciona em qualquer camada"
-    else -> t.joinToString(", ") { it.label }
+    AllTargets -> stringResource(R.string.effect_any_layer)
+    else -> t.map { stringResource(it.label) }.joinToString(", ")
+}
+
+/**
+ * A linha de custo do cartão: "Desfoque · pesado para o celular".
+ *
+ * Sem custo acima do normal é só a categoria — a frase inteira existe porque a
+ * montagem com `·` e a palavra "para o celular" são texto de interface.
+ */
+@Composable
+fun effectCostLine(category: String, cost: Int): String {
+    val label = effectCategoryLabel(category)
+    return if (cost > 1) stringResource(R.string.effect_cost_heavy, label) else label
+}
+
+/**
+ * O RÓTULO de uma categoria, no idioma do app.
+ *
+ * A categoria em si é IDENTIDADE do motor (a string "Distorcer" viaja no
+ * catálogo e no `.aurea`): o que muda é só o que o usuário lê. Categoria que a
+ * UI ainda não conhece cai no próprio nome — melhor um rótulo em português do
+ * que um espaço vazio.
+ */
+@Composable
+fun effectCategoryLabel(category: String): String = when (normalizeSearch(category)) {
+    "distorcer" -> stringResource(R.string.cat_distort)
+    "glitch" -> stringResource(R.string.cat_glitch)
+    "estilizar" -> stringResource(R.string.cat_stylize)
+    "cor" -> stringResource(R.string.cat_colour)
+    "luz", "glow e luz" -> stringResource(R.string.cat_light)
+    "desfoque" -> stringResource(R.string.cat_blur)
+    "ruido" -> stringResource(R.string.cat_noise)
+    "nitidez" -> stringResource(R.string.cat_sharpen)
+    "tempo" -> stringResource(R.string.cat_time)
+    "transicao" -> stringResource(R.string.cat_transition)
+    "recorte" -> stringResource(R.string.cat_cutout)
+    "gerar" -> stringResource(R.string.cat_generate)
+    "utilitario" -> stringResource(R.string.cat_utility)
+    "controles de expressao" -> stringResource(R.string.cat_expr)
+    else -> category
 }
 
 /** Categorias do catálogo, na ordem do navegador. */
@@ -207,7 +263,8 @@ fun categoryGlyph(category: String): Char = when (normalizeSearch(category)) {
  * sinônimos do painel e a descrição. "vhs" acha o VHS pelo nome; "analogico"
  * acha pela descrição.
  */
-fun catalogSearchText(entry: EffectCatalogEntry): String = normalizeSearch(
+@Composable
+private fun catalogSearchText(entry: EffectCatalogEntry): String = normalizeSearch(
     listOf(
         effectSearchText(entry.typeId, entry.name, entry.category),
         effectDescription(entry.typeId, entry.category),
@@ -249,6 +306,29 @@ fun filterCatalog(
     }
 }
 
-/** Índice de busca do catálogo inteiro (uma passada, memoizado por quem chama). */
-fun catalogHaystack(catalog: List<EffectCatalogEntry>): Map<Int, String> =
-    catalog.associate { it.typeId to catalogSearchText(it) }
+/**
+ * Índice de busca do catálogo inteiro.
+ *
+ * O texto indexado é LOCALIZADO (nome humano e descrição vêm do catálogo do
+ * idioma), então isto precisa de contexto composable — e o `remember` é
+ * chaveado no IDIOMA: trocar de idioma reindexa a busca, senão "blur" não
+ * acharia nada depois de mudar para inglês.
+ *
+ * A parte cara (`normalizeSearch`, que passa regex em cada descrição) fica
+ * DENTRO do `remember`; a montagem das frases, que `stringResource` obriga a
+ * fazer fora, é só concatenação.
+ */
+@Composable
+fun catalogHaystack(catalog: List<EffectCatalogEntry>): Map<Int, String> {
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val parts = catalog.associate { e ->
+        e.typeId to listOf(
+            effectDisplayName(e.typeId, e.name),
+            e.name,
+            e.category,
+            Table[e.typeId]?.keywords.orEmpty(),
+            effectDescription(e.typeId, e.category),
+        ).joinToString(" ")
+    }
+    return remember(catalog, locale) { parts.mapValues { (_, text) -> normalizeSearch(text) } }
+}

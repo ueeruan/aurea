@@ -804,4 +804,29 @@
     <string name="panel_x_largura">x · largura</string>
     <string name="panel_y_altura">y · altura</string>
 
+    <string name="cat_distort">Distorcer</string>
+    <string name="cat_glitch">Glitch</string>
+    <string name="cat_stylize">Estilizar</string>
+    <string name="cat_colour">Cor</string>
+    <string name="cat_light">Luz</string>
+    <string name="cat_blur">Desfoque</string>
+    <string name="cat_noise">Ruído</string>
+    <string name="cat_sharpen">Nitidez</string>
+    <string name="cat_time">Tempo</string>
+    <string name="cat_transition">Transição</string>
+    <string name="cat_cutout">Recorte</string>
+    <string name="cat_generate">Gerar</string>
+    <string name="cat_utility">Utilitário</string>
+    <string name="cat_expr">Controles de expressão</string>
+    <string name="target_image">Imagem</string>
+    <string name="target_video">Vídeo</string>
+    <string name="target_text">Texto</string>
+    <string name="target_vector">Vetor</string>
+    <string name="target_shape">Forma</string>
+    <string name="target_3d">Cena 3D</string>
+    <string name="target_precomp">Pré-composição</string>
+    <string name="target_adjust">Camada de ajuste</string>
+    <string name="effect_default_description">Efeito de %1$s. Os parâmetros estão no painel do efeito.</string>
+    <string name="effect_any_layer">Funciona em qualquer camada</string>
+    <string name="effect_cost_heavy">%1$s · pesado para o celular</string>
 </resources>

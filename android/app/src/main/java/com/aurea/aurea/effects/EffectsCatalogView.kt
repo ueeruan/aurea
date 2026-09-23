@@ -129,7 +129,7 @@ fun EffectCatalogTile(
         }
         Spacer(Modifier.height(6.dp))
         Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = AureaType.CardTitle)
-        Text(entry.category, maxLines = 1, overflow = TextOverflow.Ellipsis, style = AureaType.CardSpec)
+        Text(effectCategoryLabel(entry.category), maxLines = 1, overflow = TextOverflow.Ellipsis, style = AureaType.CardSpec)
     }
 }
 
@@ -271,7 +271,7 @@ fun EffectsCatalogGrid(
                         }
                         categories.forEach { c ->
                             val on = filter == EffectFilter.Category(c)
-                            EffectFilterChip(c, on) { onFilter(if (on) EffectFilter.All else EffectFilter.Category(c)) }
+                            EffectFilterChip(effectCategoryLabel(c), on) { onFilter(if (on) EffectFilter.All else EffectFilter.Category(c)) }
                         }
                     }
                 }
@@ -345,7 +345,7 @@ fun EffectDetailSheet(
                     Column(Modifier.weight(1f)) {
                         Text(name, style = AureaType.of(22f, FontWeight.W700, -0.4f))
                         Spacer(Modifier.height(2.dp))
-                        Text(if (cost > 1) "${entry.category} · ${costLabel(cost).lowercase()} para o celular" else entry.category, style = AureaType.CardSpec)
+                        Text(effectCostLine(entry.category, cost), style = AureaType.CardSpec)
                     }
                     Box(
                         Modifier

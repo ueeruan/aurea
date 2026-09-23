@@ -12,6 +12,12 @@ namespace aurea {
 // Utilidades de Effect.hpp
 // =============================================================================
 Rect visible_layer_rect(const LayerPlacement& pl) noexcept {
+    // Camada na CENA 3D: a matriz 2D da composição não diz onde ela aparece (o
+    // plano dela vive no mundo, sob a câmera), então não há retângulo visível a
+    // calcular. Vazio = "não corte por visibilidade" — quem chama já trata
+    // assim, e era o corte que encolhia a região para 1x1 e fazia a camada
+    // desaparecer atrás do efeito (Motion Tile, Meio-tom, brilhos...).
+    if (pl.inScene3d) return Rect{0, 0, 0, 0};
     // Parte 2D afim de comp←layer: x' = a x + c y + tx ; y' = b x + d y + ty.
     const Mat4& m = pl.compFromLayer;
     const f32 a = m.col[0].x, b = m.col[0].y;

@@ -720,7 +720,10 @@ std::shared_ptr<const StaticData> StaticCache::find(u64 key, u64 frameNumber) no
 void StaticCache::put(std::shared_ptr<const StaticData> data, u64 frameNumber) noexcept {
     if (!data) return;
     ++builds_;
-    entries_[data->key] = Entry{std::move(data), frameNumber};
+    // A chave ANTES do move: em `m[data->key] = Entry{std::move(data)}` o lado
+    // direito roda primeiro (C++17) e `data->key` lia um ponteiro já vazio.
+    const u64 key = data->key;
+    entries_[key] = Entry{std::move(data), frameNumber};
 }
 
 void StaticCache::collect(u64 frameNumber, u64 age) noexcept {

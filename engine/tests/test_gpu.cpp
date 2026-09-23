@@ -29,6 +29,7 @@
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/render/ParticleExtras.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -4945,4 +4946,563 @@ AUREA_TEST(Gpu, ParticlesSceneSurvivesSaveReopen) {
     AUREA_CHECK(coverage(before) > 0.01f);
     AUREA_CHECK_EQ(worst, 0u);
     std::remove(path.c_str());
+}
+
+// =============================================================================
+// Aurea Particular 8.2 (B2): fonte de emissão, textura, malha, curvas, colisão
+// esfera/caixa — ligados no render (render/ParticleExtras).
+// =============================================================================
+namespace {
+
+Layer* particular_layer(Engine& e, u64 id) {
+    Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    return c ? c->layer(LayerId::unpack(id)) : nullptr;
+}
+
+void particular_seek(Engine& e, i64 f) {
+    Command c;
+    c.type = CommandType::PlaybackSeek;
+    c.seek.time = tick_at(FrameIndex{f}, 30.0);
+    AUREA_CHECK(e.apply_command(c).ok());
+}
+
+void particular_set(Engine& e, u64 id, ParticleParam p, f32 v) {
+    AUREA_CHECK(e.set_particle_param(id, static_cast<u32>(p), v));
+}
+
+/// Partículas PARADAS para medir onde nascem: sem velocidade, forças, rastro
+/// nem aux; disco pequeno de borda dura, vida longa, taxa alta.
+u64 particular_still(Engine& e, f32 rate = 3000.0f, f32 size = 3.0f) {
+    particular_seek(e, 0);
+    auto id = e.add_particles(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return 0;
+    using PP = ParticleParam;
+    for (PP p : {PP::Speed, PP::GravityX, PP::GravityY, PP::Drag, PP::WindX, PP::WindY, PP::Turbulence, PP::Vortex,
+                 PP::Attractor, PP::TrailLength, PP::AuxCount, PP::LifeRandom, PP::ParticleType, PP::Softness,
+                 PP::Rotation, PP::RotationRandom, PP::Spin}) {
+        particular_set(e, *id, p, 0.0f);
+    }
+    particular_set(e, *id, PP::StartSize, size);
+    particular_set(e, *id, PP::EndSize, size);
+    particular_set(e, *id, PP::StartOpacity, 1.0f);
+    particular_set(e, *id, PP::EndOpacity, 1.0f);
+    particular_set(e, *id, PP::Lifetime, 20.0f);
+    particular_set(e, *id, PP::Rate, rate);
+    particular_set(e, *id, PP::MaxParticles, 100000.0f);
+    return *id;
+}
+
+/// Fração dos pixels acesos que caem dentro de `b` (com folga `pad`).
+f32 lit_inside(const Image8& img, const Box8& b, i32 pad) {
+    u32 in = 0, all = 0;
+    for (u32 y = 0; y < img.height; ++y) {
+        for (u32 x = 0; x < img.width; ++x) {
+            const u8* p = img.at(x, y);
+            if (p[0] <= 8 && p[1] <= 8 && p[2] <= 8) continue;
+            ++all;
+            const i32 xi = static_cast<i32>(x), yi = static_cast<i32>(y);
+            if (xi >= static_cast<i32>(b.x0) - pad && xi <= static_cast<i32>(b.x1) + pad && yi >= static_cast<i32>(b.y0) - pad
+                && yi <= static_cast<i32>(b.y1) + pad) ++in;
+        }
+    }
+    return all ? static_cast<f32>(in) / static_cast<f32>(all) : 0.0f;
+}
+
+/// Soma dos canais nos pixels acesos (média de cor das partículas).
+Vec3 lit_mean(const Image8& img) {
+    f64 r = 0, g = 0, b = 0;
+    u32 n = 0;
+    for (u32 y = 0; y < img.height; ++y) {
+        for (u32 x = 0; x < img.width; ++x) {
+            const u8* p = img.at(x, y);
+            if (p[0] <= 8 && p[1] <= 8 && p[2] <= 8) continue;
+            r += p[0]; g += p[1]; b += p[2]; ++n;
+        }
+    }
+    const f64 k = n ? 1.0 / n : 0.0;
+    return Vec3{static_cast<f32>(r * k), static_cast<f32>(g * k), static_cast<f32>(b * k)};
+}
+
+/// Triângulo glTF de teste importado; devolve a camada (0 = falhou).
+u64 particular_triangle(Engine& e) {
+    ModelImport mi;
+    mi.path = write_triangle_gltf(true, 1.0f, 0.0f, 0.0f);
+    auto r = e.import_model(mi);
+    AUREA_CHECK(r.ok());
+    return r.ok() ? *r : 0;
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, ParticularStaticCacheKeepsTheKey) {
+    // StaticCache::put lia `data->key` DEPOIS do move (lado direito da
+    // atribuição roda primeiro): qualquer fonte de emissão derrubava o render.
+    particles::StaticCache cache;
+    auto d = std::make_shared<particles::StaticData>();
+    d->key = 42;
+    d->points.push_back(Vec4{1, 2, 0, 0});
+    cache.put(d, 1);
+    const auto back = cache.find(42, 2);
+    AUREA_CHECK(back && back->points.size() == 1);
+    AUREA_CHECK_EQ(cache.builds(), 1u);
+}
+
+AUREA_TEST(Gpu, ParticularEmitsFromTextImageAndShapeLayers) {
+    AUREA_REQUIRE_GPU();
+    // (a) Emissor de camada/texto: as partículas nascem SÓ onde a fonte tem
+    // pixel. A fonte fica fora do centro (onde a caixa do emissor acenderia).
+    const char* names[3] = {"texto", "imagem", "forma"};
+    for (int kind = 0; kind < 3; ++kind) {
+        Scene3DRig rig(320, 180);
+        auto make = [&]() -> Result<u64> {
+            if (kind == 0) return rig.e.add_text("AUREA");
+            if (kind == 2) return rig.e.add_shape(10);
+            // Metade esquerda opaca, direita transparente: a borda do alfa decide.
+            std::vector<u8> px(80 * 80 * 4, 0);
+            for (u32 y = 0; y < 80; ++y) for (u32 x = 0; x < 40; ++x) {
+                u8* q = &px[(y * 80 + x) * 4];
+                q[0] = q[1] = q[2] = q[3] = 255;
+            }
+            return rig.e.import_image(px.data(), 80, 80, "meia");
+        };
+        const Result<u64> src = make();
+        if (!src.ok()) {
+            std::printf("    %s: fonte indisponivel no host, pulado\n", names[kind]);
+            AUREA_CHECK(kind == 0);
+            continue;
+        }
+        Layer* sl = particular_layer(rig.e, *src);
+        AUREA_CHECK(sl != nullptr);
+        if (!sl) continue;
+        sl->transform.position.x = 90.0f;
+        particular_seek(rig.e, 30);
+        const Box8 srcBox = lit_box(rig.capture(320));
+        sl->visible = false;
+        const u64 id = particular_still(rig.e);
+        particular_set(rig.e, id, ParticleParam::EmitterType,
+                       static_cast<f32>(kind == 0 ? ParticleEmitter::Text : ParticleEmitter::Layer));
+        particular_seek(rig.e, 30);
+        const f32 before = lit_inside(rig.capture(320), srcBox, 3);   // sem fonte: a caixa do emissor
+        AUREA_CHECK(rig.e.set_particle_source(id, *src));
+        const Image8 img = rig.capture(320);
+        const f32 in = lit_inside(img, srcBox, 3);
+        std::printf("    %s: caixa da fonte %ux%u em x %u..%u; dentro dela: sem fonte %.3f -> com fonte %.3f (cobertura %.4f)\n",
+                    names[kind], srcBox.w(), srcBox.h(), srcBox.x0, srcBox.x1, before, in, coverage(img));
+        AUREA_CHECK(coverage(img) > 0.002f);
+        AUREA_CHECK(in > 0.97f);
+        AUREA_CHECK(before < 0.5f);
+    }
+}
+
+AUREA_TEST(Gpu, ParticularEmitsAlongAMaskPath) {
+    AUREA_REQUIRE_GPU();
+    // (b) Emissor de caminho: a 1ª máscara da camada. Nasce NA linha — o
+    // miolo do losango fica escuro.
+    Scene3DRig rig(320, 180);
+    auto src = rig.e.add_shape(10);
+    AUREA_CHECK(src.ok());
+    if (!src.ok()) return;
+    Layer* sl = particular_layer(rig.e, *src);
+    const f32 w = sl->shape.bounds.w, h = sl->shape.bounds.h;
+    const f32 cx = w * 0.5f, cy = h * 0.5f, r = std::min(w, h) * 0.4f;
+    const f32 pts[4 * 6] = {cx - r, cy, 0, 0, 0, 0, cx, cy - r, 0, 0, 0, 0, cx + r, cy, 0, 0, 0, 0, cx, cy + r, 0, 0, 0, 0};
+    AUREA_CHECK(rig.e.add_mask(*src, pts, 4, true) >= 0);
+    particular_seek(rig.e, 30);
+    const Box8 pathBox = lit_box(rig.capture(320));
+    sl->visible = false;
+    const u64 id = particular_still(rig.e, 3000.0f, 2.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Path));
+    AUREA_CHECK(rig.e.set_particle_source(id, *src));
+    particular_seek(rig.e, 30);
+    const Image8 img = rig.capture(320);
+    // Miolo: o quadrado central com 40% do losango (longe da linha).
+    const u32 mx = (pathBox.x0 + pathBox.x1) / 2, my = (pathBox.y0 + pathBox.y1) / 2, q = pathBox.w() / 5;
+    Box8 core;
+    core.x0 = mx - q / 2; core.x1 = mx + q / 2; core.y0 = my - q / 2; core.y1 = my + q / 2;
+    const f32 in = lit_inside(img, pathBox, 3), mid = lit_inside(img, core, 0);
+    std::printf("    caminho: losango %ux%u; dentro %.3f, no miolo %.4f (cobertura %.4f)\n", pathBox.w(), pathBox.h(), in, mid,
+                coverage(img));
+    AUREA_CHECK(coverage(img) > 0.001f);
+    AUREA_CHECK(in > 0.97f);
+    AUREA_CHECK(mid < 0.01f);
+}
+
+AUREA_TEST(Gpu, ParticularEmitsFromA3DModel) {
+    AUREA_REQUIRE_GPU();
+    // (c) Emissor de malha: a superfície do modelo (triângulo glTF de teste,
+    // gerado aqui — não há modelo em tests/data), projetada pela câmera.
+    Scene3DRig rig(320, 180);
+    const u64 model = particular_triangle(rig.e);
+    if (!model) return;
+    particular_seek(rig.e, 30);
+    const Box8 triBox = lit_box(rig.capture(320));
+    Layer* ml = particular_layer(rig.e, model);
+    AUREA_CHECK(ml && ml->kind == LayerKind::Model3D);
+    if (!ml) return;
+    ml->visible = false;
+    const u64 id = particular_still(rig.e);
+    particular_set(rig.e, id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Mesh));
+    AUREA_CHECK(rig.e.set_particle_source(id, model));
+    particular_seek(rig.e, 30);
+    const Image8 img = rig.capture(320);
+    const f32 in = lit_inside(img, triBox, 3);
+    // Superfície de um triângulo: o canto de cima da caixa (fora dele) fica escuro.
+    Box8 corner;
+    corner.x0 = triBox.x0; corner.x1 = triBox.x0 + triBox.w() / 5; corner.y0 = triBox.y0; corner.y1 = triBox.y0 + triBox.h() / 5;
+    const f32 inCorner = lit_inside(img, corner, 0);
+    std::printf("    malha: triangulo %ux%u; dentro %.3f, canto fora do triangulo %.4f (cobertura %.4f)\n", triBox.w(), triBox.h(),
+                in, inCorner, coverage(img));
+    AUREA_CHECK(coverage(img) > 0.002f);
+    AUREA_CHECK(in > 0.95f);
+    AUREA_CHECK(inCorner < 0.02f);
+}
+
+AUREA_TEST(Gpu, ParticularTextureParticleDrawsTheImage) {
+    AUREA_REQUIRE_GPU();
+    // (d) Partícula de textura: a imagem (verde) tingida pela cor da
+    // partícula (laranja claro) sai verde; o disco sai laranja.
+    Scene3DRig rig(320, 180);
+    std::vector<u8> px(32 * 32 * 4);
+    for (usize i = 0; i < px.size(); i += 4) { px[i] = 0; px[i + 1] = 255; px[i + 2] = 0; px[i + 3] = 255; }
+    auto img = rig.e.import_image(px.data(), 32, 32, "verde");
+    AUREA_CHECK(img.ok());
+    if (!img.ok()) return;
+    particular_layer(rig.e, *img)->visible = false;
+    const u64 id = particular_still(rig.e, 200.0f, 14.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Box));
+    particular_set(rig.e, id, ParticleParam::EmitterWidth, 260.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterHeight, 140.0f);
+    particular_seek(rig.e, 30);
+    const Vec3 disc = lit_mean(rig.capture(320));
+    particular_set(rig.e, id, ParticleParam::ParticleType, static_cast<f32>(ParticleShape::Texture));
+    AUREA_CHECK(rig.e.set_particle_texture(id, *img));
+    const Image8 shot = rig.capture(320);
+    const Vec3 tex = lit_mean(shot);
+    // Quadrado cheio (a imagem é opaca): cobre mais que o disco do mesmo tamanho.
+    std::printf("    textura: disco rgb %.0f %.0f %.0f -> textura %.0f %.0f %.0f (cobertura %.4f)\n", disc.x, disc.y, disc.z, tex.x,
+                tex.y, tex.z, coverage(shot));
+    AUREA_CHECK(disc.x > disc.z * 1.5f);
+    AUREA_CHECK(tex.y > tex.x * 4.0f && tex.y > tex.z * 4.0f);
+    AUREA_CHECK(coverage(shot) > 0.01f);
+}
+
+AUREA_TEST(Gpu, ParticularMeshParticleDraws) {
+    AUREA_REQUIRE_GPU();
+    // (e) Partícula de malha: o triângulo instanciado em cada partícula, com
+    // profundidade; a luz simplificada muda o sombreado.
+    Scene3DRig rig(320, 180);
+    const u64 model = particular_triangle(rig.e);
+    if (!model) return;
+    particular_layer(rig.e, model)->visible = false;
+    const u64 id = particular_still(rig.e, 150.0f, 24.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Box));
+    particular_set(rig.e, id, ParticleParam::EmitterWidth, 260.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterHeight, 140.0f);
+    particular_set(rig.e, id, ParticleParam::RotationRandom, 180.0f);
+    particular_seek(rig.e, 30);
+    const Image8 disc = rig.capture(320);
+    particular_set(rig.e, id, ParticleParam::ParticleType, static_cast<f32>(ParticleShape::Mesh));
+    AUREA_CHECK(rig.e.set_particle_mesh(id, model));
+    const Image8 lit = rig.capture(320);
+    particular_set(rig.e, id, ParticleParam::MeshLit, 0.0f);
+    const Image8 flat = rig.capture(320);
+    const Vec3 m = lit_mean(flat);
+    std::printf("    malha: cobertura disco %.4f -> malha %.4f; iluminada x chapada diferenca %u; rgb chapada %.0f %.0f %.0f\n",
+                coverage(disc), coverage(lit), max_diff(lit, flat), m.x, m.y, m.z);
+    AUREA_CHECK(coverage(lit) > 0.005f);
+    AUREA_CHECK(max_diff(disc, lit) > 8);
+    AUREA_CHECK(max_diff(lit, flat) > 8);
+    AUREA_CHECK(m.x > m.y * 2.0f && m.x > m.z * 2.0f);   // o vermelho do material
+}
+
+AUREA_TEST(Gpu, ParticularColorGradientChangesColorOverLife) {
+    AUREA_REQUIRE_GPU();
+    // (f) Gradiente de cor ao longo da vida: azul → vermelho. Todas nascem
+    // juntas (estouro), então a idade é a mesma em todas.
+    Scene3DRig rig(320, 180);
+    const u64 id = particular_still(rig.e, 0.0f, 3.0f);
+    particular_set(rig.e, id, ParticleParam::Burst, 3000.0f);
+    particular_set(rig.e, id, ParticleParam::Lifetime, 2.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Box));
+    particular_set(rig.e, id, ParticleParam::EmitterWidth, 240.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterHeight, 120.0f);
+    const f32 stops[8] = {0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f};
+    AUREA_CHECK(rig.e.set_particle_life_curves(id, 0, stops, 2));
+    particular_seek(rig.e, 3);
+    const Vec3 early = lit_mean(rig.capture(320));
+    particular_seek(rig.e, 54);
+    const Vec3 late = lit_mean(rig.capture(320));
+    std::printf("    gradiente: q3 rgb %.0f %.0f %.0f -> q54 rgb %.0f %.0f %.0f\n", early.x, early.y, early.z, late.x, late.y, late.z);
+    AUREA_CHECK(early.z > early.x * 3.0f);
+    // u = 0,9: 90% vermelho LINEAR (sRGB ~243 x 89) — o fim do gradiente manda.
+    AUREA_CHECK(late.x > late.z * 2.0f);
+    // Sem paradas volta ao início → fim de sempre (laranja nos dois instantes).
+    AUREA_CHECK(rig.e.set_particle_life_curves(id, 0, nullptr, 0));
+    const Vec3 plain = lit_mean(rig.capture(320));
+    AUREA_CHECK(plain.x > plain.z * 1.5f);
+}
+
+AUREA_TEST(Gpu, ParticularSphereAndBoxCollisionKeepParticlesOutside) {
+    AUREA_REQUIRE_GPU();
+    // (g) Colisão esfera/caixa: nenhuma partícula termina DENTRO do volume
+    // (quem nasce dentro vai para a superfície; quem chega, quica).
+    const f32 cx = 160.0f, cy = 90.0f;
+    auto inside_sphere = [&](const Image8& img, f32 rad) {
+        u32 in = 0, all = 0;
+        for (u32 y = 0; y < img.height; ++y) for (u32 x = 0; x < img.width; ++x) {
+            const u8* p = img.at(x, y);
+            if (p[0] <= 8 && p[1] <= 8 && p[2] <= 8) continue;
+            ++all;
+            const f32 dx = static_cast<f32>(x) + 0.5f - cx, dy = static_cast<f32>(y) + 0.5f - cy;
+            if (dx * dx + dy * dy < rad * rad) ++in;
+        }
+        return all ? static_cast<f32>(in) / static_cast<f32>(all) : 0.0f;
+    };
+    auto inside_box = [&](const Image8& img, f32 hx, f32 hy) {
+        u32 in = 0, all = 0;
+        for (u32 y = 0; y < img.height; ++y) for (u32 x = 0; x < img.width; ++x) {
+            const u8* p = img.at(x, y);
+            if (p[0] <= 8 && p[1] <= 8 && p[2] <= 8) continue;
+            ++all;
+            const f32 dx = static_cast<f32>(x) + 0.5f - cx, dy = static_cast<f32>(y) + 0.5f - cy;
+            if (std::fabs(dx) < hx && std::fabs(dy) < hy) ++in;
+        }
+        return all ? static_cast<f32>(in) / static_cast<f32>(all) : 0.0f;
+    };
+    Scene3DRig rig(320, 180);
+    const u64 id = particular_still(rig.e, 3000.0f, 3.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Box));
+    particular_set(rig.e, id, ParticleParam::EmitterWidth, 240.0f);
+    particular_set(rig.e, id, ParticleParam::EmitterHeight, 140.0f);
+    particular_set(rig.e, id, ParticleParam::Speed, 30.0f);
+    particular_set(rig.e, id, ParticleParam::Spread, 360.0f);
+    particular_seek(rig.e, 30);
+    const Image8 free = rig.capture(320);
+    const f32 s0 = inside_sphere(free, 37.0f), b0 = inside_box(free, 47.0f, 27.0f);
+    particular_set(rig.e, id, ParticleParam::Collision, static_cast<f32>(ParticleCollision::Sphere));
+    particular_set(rig.e, id, ParticleParam::CollisionRadius, 40.0f);
+    particular_set(rig.e, id, ParticleParam::CollisionY, 0.0f);
+    const Image8 sph = rig.capture(320);
+    const f32 s1 = inside_sphere(sph, 37.0f);
+    particular_set(rig.e, id, ParticleParam::Collision, static_cast<f32>(ParticleCollision::Box));
+    particular_set(rig.e, id, ParticleParam::CollisionWidth, 100.0f);
+    particular_set(rig.e, id, ParticleParam::CollisionHeight, 60.0f);
+    particular_set(rig.e, id, ParticleParam::CollisionDepth, 200.0f);
+    const Image8 box = rig.capture(320);
+    const f32 b1 = inside_box(box, 47.0f, 27.0f);
+    std::printf("    colisao: dentro da esfera %.4f -> %.4f; dentro da caixa %.4f -> %.4f (cobertura %.4f / %.4f)\n", s0, s1, b0, b1,
+                coverage(sph), coverage(box));
+    AUREA_CHECK(s0 > 0.05f && b0 > 0.05f);
+    AUREA_CHECK(s1 < 0.002f);
+    AUREA_CHECK(b1 < 0.002f);
+    AUREA_CHECK(coverage(sph) > 0.01f && coverage(box) > 0.01f);
+}
+
+AUREA_TEST(Gpu, ParticularSeekRoundTripIsExactWithEverythingOn) {
+    AUREA_REQUIRE_GPU();
+    // (h) Tudo ligado (fonte de texto/forma, curvas, gradiente, aleatórios,
+    // colisão esfera, rastro, aux com chance) — e, na 2ª volta, a partícula
+    // de malha emitindo do modelo: seek ida e volta = o mesmo quadro.
+    for (int variant = 0; variant < 2; ++variant) {
+        Scene3DRig rig(320, 180);
+        auto id = rig.e.add_particles(5);
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return;
+        u64 src = 0;
+        if (variant == 0) {
+            auto t = rig.e.add_text("AUREA");
+            src = t.ok() ? *t : 0;
+            if (!src) { auto s = rig.e.add_shape(4); src = s.ok() ? *s : 0; }
+            AUREA_CHECK(src != 0);
+            if (!src) return;
+            particular_set(rig.e, *id, ParticleParam::EmitterType,
+                           static_cast<f32>(particular_layer(rig.e, src)->kind == LayerKind::Text ? ParticleEmitter::Text
+                                                                                                  : ParticleEmitter::Layer));
+            particular_set(rig.e, *id, ParticleParam::TrailLength, 0.05f);
+            particular_set(rig.e, *id, ParticleParam::TrailWidth, 2.0f);
+            particular_set(rig.e, *id, ParticleParam::TrailOpacity, 0.3f);
+        } else {
+            src = particular_triangle(rig.e);
+            particular_set(rig.e, *id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Mesh));
+            particular_set(rig.e, *id, ParticleParam::ParticleType, static_cast<f32>(ParticleShape::Mesh));
+            AUREA_CHECK(rig.e.set_particle_mesh(*id, src));
+            particular_set(rig.e, *id, ParticleParam::StartSize, 18.0f);
+        }
+        AUREA_CHECK(rig.e.set_particle_source(*id, src));
+        const f32 stops[12] = {0, 1, 1, 1, 0.5f, 1, 0.5f, 0, 1, 0.2f, 0.2f, 1};
+        const f32 size[6] = {0, 0.2f, 0.3f, 1.5f, 1, 0};
+        const f32 op[4] = {0, 1, 1, 0};
+        AUREA_CHECK(rig.e.set_particle_life_curves(*id, 0, stops, 3));
+        AUREA_CHECK(rig.e.set_particle_life_curves(*id, 1, size, 3));
+        AUREA_CHECK(rig.e.set_particle_life_curves(*id, 2, op, 2));
+        particular_set(rig.e, *id, ParticleParam::SizeRandom, 0.5f);
+        particular_set(rig.e, *id, ParticleParam::OpacityRandom, 0.5f);
+        particular_set(rig.e, *id, ParticleParam::ColorRandom, 0.5f);
+        particular_set(rig.e, *id, ParticleParam::AuxProbability, 0.5f);
+        particular_set(rig.e, *id, ParticleParam::Collision, static_cast<f32>(ParticleCollision::Sphere));
+        particular_set(rig.e, *id, ParticleParam::CollisionRadius, 30.0f);
+        particular_seek(rig.e, 40);
+        const Image8 a = rig.capture(320);
+        particular_seek(rig.e, 200);
+        (void)rig.capture(320);
+        particular_seek(rig.e, 7);
+        (void)rig.capture(320);
+        particular_seek(rig.e, 40);
+        const Image8 b = rig.capture(320);
+        std::printf("    %s: cobertura %.4f; ida e volta diferenca %u\n", variant == 0 ? "fonte+curvas+colisao" : "malha do modelo",
+                    coverage(a), max_diff(a, b));
+        AUREA_CHECK(coverage(a) > 0.002f);
+        AUREA_CHECK_EQ(max_diff(a, b), 0u);
+    }
+}
+
+AUREA_TEST(Gpu, ParticularSourcesTextureMeshAndCurvesSurviveSaveReopen) {
+    AUREA_REQUIRE_GPU();
+    // (i) Fonte, textura, malha e curvas voltam do arquivo (ids das camadas e
+    // o asset da imagem), e o quadro reaberto é o mesmo.
+    Scene3DRig rig(320, 180);
+    u64 textId = 0;
+    if (auto t = rig.e.add_text("AUREA"); t.ok()) textId = *t;
+    else if (auto s = rig.e.add_shape(4); s.ok()) textId = *s;
+    const u64 model = particular_triangle(rig.e);
+    std::vector<u8> px(16 * 16 * 4, 255);
+    auto img = rig.e.import_image(px.data(), 16, 16, "branca");
+    AUREA_CHECK(img.ok() && model != 0 && textId != 0);
+    if (!textId || !img.ok() || !model) return;
+    const u64* text = &textId;
+    particular_layer(rig.e, *text)->visible = false;
+    particular_layer(rig.e, model)->visible = false;
+    particular_layer(rig.e, *img)->visible = false;
+    particular_seek(rig.e, 0);
+    auto id = rig.e.add_particles(2);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    particular_set(rig.e, *id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Layer));
+    AUREA_CHECK(rig.e.set_particle_source(*id, *text));
+    AUREA_CHECK(rig.e.set_particle_texture(*id, *img));
+    AUREA_CHECK(rig.e.set_particle_mesh(*id, model));
+    particular_set(rig.e, *id, ParticleParam::ParticleType, static_cast<f32>(ParticleShape::Mesh));
+    particular_set(rig.e, *id, ParticleParam::StartSize, 16.0f);
+    const f32 stops[8] = {0, 0.2f, 0.4f, 1, 1, 1, 0.8f, 0.1f};
+    const f32 size[4] = {0, 0.3f, 1, 1.2f};
+    AUREA_CHECK(rig.e.set_particle_life_curves(*id, 0, stops, 2));
+    AUREA_CHECK(rig.e.set_particle_life_curves(*id, 1, size, 2));
+    u64 links[4]{};
+    AUREA_CHECK(rig.e.query_particle_links(*id, links));
+    AUREA_CHECK(links[0] == *text && links[1] == *img && links[2] == model && links[3] != 0);
+    particular_seek(rig.e, 45);
+    const Image8 before = rig.capture(320);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_particular_b2.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    u64 again[4]{};
+    AUREA_CHECK(rig.e.query_particle_links(*id, again));
+    f32 c0[32]{}, c1[32]{};
+    const u32 n0 = rig.e.query_particle_curve(*id, 0, c0, 32), n1 = rig.e.query_particle_curve(*id, 1, c1, 32);
+    particular_seek(rig.e, 45);
+    Image8 after = rig.capture(320);
+    // O modelo reabre pelo caminho do arquivo; se ainda estiver carregando,
+    // um quadro depois ele está.
+    if (max_diff(before, after) != 0) after = rig.capture(320);
+    std::printf("    salvo e reaberto: ligacoes %s, curvas %u/%u pontos, diferenca %u (cobertura %.4f)\n",
+                (again[0] == links[0] && again[1] == links[1] && again[2] == links[2] && again[3] == links[3]) ? "iguais" : "DIFERENTES",
+                n0, n1, max_diff(before, after), coverage(before));
+    AUREA_CHECK(again[0] == links[0] && again[2] == links[2] && again[3] == links[3]);
+    AUREA_CHECK_EQ(n0, 2u);
+    AUREA_CHECK_EQ(n1, 2u);
+    AUREA_CHECK_NEAR(c0[2], 0.4, 1e-6);
+    AUREA_CHECK_NEAR(c1[3], 1.2, 1e-6);
+    AUREA_CHECK(coverage(before) > 0.002f);
+    AUREA_CHECK_EQ(max_diff(before, after), 0u);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Gpu, ParticularLogoBurstUsesTheTextLayer) {
+    AUREA_REQUIRE_GPU();
+    // Preset "Explosão de logo": com texto na composição, emite dos glifos.
+    Scene3DRig rig(320, 180);
+    auto text = rig.e.add_text("LOGO");
+    if (!text.ok()) { std::printf("    sem fonte no host: pulado\n"); return; }
+    auto id = rig.e.add_particles(9);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    u64 links[4]{};
+    f32 q[static_cast<usize>(ParticleParam::Count)]{};
+    AUREA_CHECK(rig.e.query_particle_links(*id, links));
+    AUREA_CHECK(rig.e.query_particles(*id, q));
+    AUREA_CHECK_EQ(links[0], *text);
+    AUREA_CHECK_NEAR(q[static_cast<usize>(ParticleParam::EmitterType)], static_cast<f64>(ParticleEmitter::Text), 1e-6);
+    // Sem texto: o ponto de antes.
+    Scene3DRig bare(320, 180);
+    auto id2 = bare.e.add_particles(9);
+    AUREA_CHECK(id2.ok() && bare.e.query_particles(*id2, q));
+    AUREA_CHECK_NEAR(q[static_cast<usize>(ParticleParam::EmitterType)], static_cast<f64>(ParticleEmitter::Point), 1e-6);
+}
+
+// =============================================================================
+// Benchmark do Particular (opt-in: AUREA_BENCH=1). Host, não celular.
+// =============================================================================
+AUREA_TEST(Gpu, ParticularBenchmark) {
+    AUREA_REQUIRE_GPU();
+    const char* on = std::getenv("AUREA_BENCH");
+    if (!on || on[0] != '1') { std::printf("(AUREA_BENCH=1 para rodar) "); return; }
+    const u32 counts[6] = {10000, 50000, 100000, 250000, 500000, 1000000};
+    std::printf("\n    1920x1080, 1 camada, disco 4 px aditivo; GPU = timestamps do quadro (mediana de 7), host\n");
+    std::printf("    %-9s %-12s %-12s %-14s %-14s %-12s\n", "N", "GPU ms base", "GPU ms extras", "GPU MB base", "GPU MB extras",
+                "extras CPU KB");
+    for (u32 n : counts) {
+        f32 ms[2]{};
+        f64 mb[2]{};
+        u64 cpuKb = 0;
+        for (int extras = 0; extras < 2; ++extras) {
+            Scene3DRig rig(1920, 1080);
+            rig.e.set_offscreen_timers(true);
+            u64 text = 0;
+            if (extras) {
+                if (auto t = rig.e.add_text("AUREA"); t.ok()) text = *t;
+                else if (auto s = rig.e.add_shape(4); s.ok()) text = *s;
+                if (text) particular_layer(rig.e, text)->visible = false;
+            }
+            particular_seek(rig.e, 0);
+            auto id = rig.e.add_particles(2);
+            if (!id.ok()) { AUREA_CHECK(false); return; }
+            // N vivas: vida 2 s, taxa N/2 por segundo; medido depois de 2 s.
+            particular_set(rig.e, *id, ParticleParam::MaxParticles, static_cast<f32>(n));
+            particular_set(rig.e, *id, ParticleParam::Lifetime, 2.0f);
+            particular_set(rig.e, *id, ParticleParam::LifeRandom, 0.0f);
+            particular_set(rig.e, *id, ParticleParam::Rate, static_cast<f32>(n) / 2.0f);
+            particular_set(rig.e, *id, ParticleParam::StartSize, 4.0f);
+            particular_set(rig.e, *id, ParticleParam::EndSize, 4.0f);
+            particular_set(rig.e, *id, ParticleParam::AuxCount, 0.0f);
+            particular_set(rig.e, *id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Box));
+            particular_set(rig.e, *id, ParticleParam::EmitterWidth, 1800.0f);
+            particular_set(rig.e, *id, ParticleParam::EmitterHeight, 1000.0f);
+            if (extras) {
+                // Fonte de texto + gradiente + curvas + aleatórios (o buffer extra inteiro).
+                particular_set(rig.e, *id, ParticleParam::EmitterType, static_cast<f32>(ParticleEmitter::Layer));
+                if (text) (void)rig.e.set_particle_source(*id, text);
+                const f32 stops[8] = {0, 0.3f, 0.6f, 1, 1, 1, 0.5f, 0.1f};
+                const f32 size[6] = {0, 0.2f, 0.3f, 1.2f, 1, 0};
+                (void)rig.e.set_particle_life_curves(*id, 0, stops, 2);
+                (void)rig.e.set_particle_life_curves(*id, 1, size, 3);
+                particular_set(rig.e, *id, ParticleParam::SizeRandom, 0.3f);
+                particular_set(rig.e, *id, ParticleParam::ColorRandom, 0.3f);
+            }
+            particular_seek(rig.e, 75);
+            std::vector<f32> samples;
+            for (int i = 0; i < 8; ++i) {
+                (void)rig.capture(1920);
+                const Engine::OffscreenMeasure m = rig.e.last_offscreen_measure();
+                if (i > 0 && m.gpuMeasured) samples.push_back(m.gpuMs);   // o 1º aquece pipelines/caches
+                mb[extras] = static_cast<f64>(m.gpuUsedBytes) / (1024.0 * 1024.0);
+            }
+            std::sort(samples.begin(), samples.end());
+            ms[extras] = samples.empty() ? -1.0f : samples[samples.size() / 2];
+            if (extras) cpuKb = rig.e.renderer().heavy_stats().particleExtraCpuBytes / 1024;
+            if (samples.empty()) std::printf("    (sem timestamps de GPU neste backend)\n");
+        }
+        std::printf("    %-9u %-12.3f %-12.3f %-14.1f %-14.1f %-12llu\n", n, ms[0], ms[1], mb[0], mb[1],
+                    static_cast<unsigned long long>(cpuKb));
+    }
 }

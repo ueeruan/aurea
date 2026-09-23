@@ -169,6 +169,7 @@ public:
     }
     void bind_storage_image(u32, TextureHandle) noexcept override {}
     void bind_storage_buffer(BufferHandle) noexcept override {}
+    void bind_storage_buffer_at(u32, BufferHandle) noexcept override {}
     void set_uniforms(const void*, u32) noexcept override {}
     void push_constants(const void*, u32) noexcept override {}
     void set_viewport(f32, f32, f32, f32) noexcept override {}

@@ -129,7 +129,7 @@ VkDescriptorSet Backend::allocate_set(FrameContext& frame, VkDescriptorSetLayout
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512 * binding::kTextureSlots},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 512},
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 512 * binding::kStorageImageSlots},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 512},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 512 * binding::kStorageBufferSlots},
         };
         VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pi.maxSets = 512;
@@ -156,6 +156,7 @@ void CommandListImpl::bind_frame(Backend* backend, FrameContext* frame, VkComman
     for (TexBinding& t : textures_) t = TexBinding{};
     for (u64& s : storageImages_) s = 0;
     storageBuffer_ = 0;
+    storageBuffer1_ = 0;
     uniformBuffer_ = VK_NULL_HANDLE;
     uniformOffset_ = uniformSize_ = 0;
     lastSet_ = VK_NULL_HANDLE;
@@ -273,6 +274,13 @@ void CommandListImpl::bind_storage_buffer(BufferHandle buffer) noexcept {
     dirty_ = true;
 }
 
+void CommandListImpl::bind_storage_buffer_at(u32 slot, BufferHandle buffer) noexcept {
+    if (slot == 0) storageBuffer_ = buffer.id;
+    else if (slot == 1) storageBuffer1_ = buffer.id;
+    else return;
+    dirty_ = true;
+}
+
 void CommandListImpl::set_uniforms(const void* data, u32 bytes) noexcept {
     if (!frame_ || !data || bytes == 0) return;
     VkBuffer buf = VK_NULL_HANDLE;
@@ -317,6 +325,7 @@ bool CommandListImpl::flush_descriptors() noexcept {
     VkDescriptorImageInfo storage[binding::kStorageImageSlots]{};
     VkDescriptorBufferInfo ubo{};
     VkDescriptorBufferInfo ssbo{};
+    VkDescriptorBufferInfo ssbo1{};
     VkWriteDescriptorSet writes[binding::kBindingCount]{};
     u32 n = 0;
 
@@ -373,6 +382,18 @@ bool CommandListImpl::flush_descriptors() noexcept {
     writes[n].descriptorCount = 1;
     writes[n].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writes[n].pBufferInfo = &ssbo;
+    ++n;
+
+    Buffer* sb1 = storageBuffer1_ ? backend_->buffer(storageBuffer1_) : nullptr;
+    ssbo1.buffer = sb1 ? sb1->buffer : backend_->dummy_buffer().buffer;
+    ssbo1.offset = 0;
+    ssbo1.range = VK_WHOLE_SIZE;
+    writes[n] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    writes[n].dstSet = set;
+    writes[n].dstBinding = binding::kStorageBuffer1;
+    writes[n].descriptorCount = 1;
+    writes[n].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[n].pBufferInfo = &ssbo1;
     ++n;
 
     vkUpdateDescriptorSets(backend_->device(), n, writes, 0, nullptr);

@@ -331,6 +331,14 @@ Mat4 comp_view_projection(const Composition& comp, FrameIndex time) noexcept {
 Mat4 layer_world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept { return world_3d(comp, l, time); }
 bool wants_layer_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept { return wants_3d(comp, l, time); }
 
+// Partículas (8.2, ParticleScene.cpp): as MESMAS contas de mundo e câmera,
+// num instante fracionário da timeline.
+Mat4 particle_world_3d_at(const Composition& comp, const Layer& l, f64 time) noexcept { return world_3d_frac(comp, l, time); }
+Mat4 particle_world_2d_at(const Composition& comp, const Layer& l, f64 time) noexcept { return world_2d_frac(comp, l, time); }
+scene3d::SceneCamera particle_camera_at(const Composition& comp, f64 time, u32 w, u32 h) noexcept {
+    return camera_for_frac(comp, time, w, h);
+}
+
 Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time, bool* perspective) noexcept {
     const bool is3d = wants_3d(comp, l, time);
     if (perspective) *perspective = is3d;
@@ -2513,11 +2521,13 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             // O push constant leva a matriz e os slots; os PARAMETROS vao
             // como uniformes (20 vec4 = 320 B, acima do limite garantido de
             // push constant que e 128 B).
+            // Push de 112 B (ParticleScene.hpp): sem bits de modo = o 2D de sempre.
+            ParticlePush push;
+            push.clip = clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height));
             struct Cap {
-                PipelineHandle p; Mat4 clip; Vec4 params[LayerSource::kParticleBlocks];
+                PipelineHandle p; ParticlePush clip; Vec4 params[LayerSource::kParticleBlocks];
                 u32 slots; BufferHandle quad;
-            } cap{*pipe, clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)),
-                  {}, layer.source.particleSlots, particleQuad_};
+            } cap{*pipe, push, {}, layer.source.particleSlots, particleQuad_};
             for (u32 i = 0; i < LayerSource::kParticleBlocks; ++i) cap.params[i] = layer.source.particleBlock[i];
             heavyStats_.lastParticleSlots += layer.source.particleSlots;
             ++heavyStats_.lastParticleLayers;

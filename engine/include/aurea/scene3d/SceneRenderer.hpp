@@ -143,6 +143,28 @@ struct SceneFrame {
     std::vector<SceneFrame> blurFrames;
     /// Índices (no snapshot) das camadas 2D que vivem nesta cena.
     std::vector<u32> planeLayers;
+    /// Índices (no snapshot) das camadas de partículas desenhadas DENTRO desta
+    /// cena (billboards com teste de profundidade). Só no quadro base; os
+    /// subquadros do desfoque usam a lista dele.
+    std::vector<u32> particleLayers;
+    /// Subquadro do desfoque: deslocamento em quadros do instante do quadro
+    /// (0 no quadro base).
+    f64 subFrame = 0.0;
+};
+
+/// Desenho instanciado translúcido no passe da cena (partículas 3D, 8.2):
+/// testa a profundidade de modelos e planos e NÃO escreve nela — partícula
+/// aditiva não depende de ordem; a normal é desenhada na ordem das instâncias
+/// (sem ordenar por profundidade: aproximação documentada em ParticleScene).
+struct SceneParticleDraw {
+    PipelineHandle pipeline{};
+    const void* uniforms = nullptr;   ///< memória do quadro (arena do Renderer)
+    u32 uniformBytes = 0;
+    u8  push[128]{};
+    u32 pushBytes = 0;
+    BufferHandle history{};           ///< binding 16 (AUREA_DATA1)
+    BufferHandle quad{};              ///< 6 índices u16
+    u32 instances = 0;
 };
 
 /// Contas do QUADRO inteiro (todas as cenas e subquadros de desfoque): o
@@ -185,7 +207,8 @@ public:
     /// Monta os passes do grupo: cor (RGBA16F, limpa transparente) e
     /// profundidade (transitória). `outColor` recebe a textura a compor.
     [[nodiscard]] bool build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
-                             u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes = nullptr) noexcept;
+                             u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes = nullptr,
+                             const SceneParticleDraw* particles = nullptr, u32 particleCount = 0) noexcept;
     [[nodiscard]] PipelineKey plane_key() const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.

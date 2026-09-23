@@ -611,7 +611,8 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
 }
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
-                          u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes) noexcept {
+                          u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes,
+                          const SceneParticleDraw* particles, u32 particleCount) noexcept {
     if (frameNumber != statsFrame_) {
         stats_ = SceneStats{};
         statsFrame_ = frameNumber;
@@ -1214,6 +1215,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             std::sort(planeList, planeList + planeCount, [](const ScenePlane& a, const ScenePlane& b) { return a.viewDepth > b.viewDepth; });
         }
     }
+    // Partículas 3D (8.2): por último, com o depth de tudo o que é sólido.
+    SceneParticleDraw* partList = nullptr;
+    if (particles && particleCount) {
+        partList = arena.alloc_array<SceneParticleDraw>(particleCount);
+        if (!partList) return false;
+        for (u32 i = 0; i < particleCount; ++i) partList[i] = particles[i];
+    }
     const u32 opaqueCount = static_cast<u32>(opaque.size());
     for (usize i = 0; i < opaque.size(); ++i) list[i] = opaque[i];
     for (usize i = 0; i < blended.size(); ++i) list[opaque.size() + i] = blended[i];
@@ -1235,10 +1243,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         u32 planeCount;
         u32 opaqueCount;
         PipelineHandle planePipe;
+        SceneParticleDraw* parts;
+        u32 partCount;
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
-          shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe};
+          shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe,
+          partList, partList ? particleCount : 0u};
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
     const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
@@ -1311,6 +1322,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             c.draw_indexed(d.indexCount, std::max(1u, d.instanceCount), d.firstIndex, d.prim->vertexOffset, 0);
         }
         if (cap.opaqueCount >= cap.count) drawPlanes();
+        // Partículas: testam o depth de modelos e planos, não escrevem nele.
+        for (u32 k = 0; k < cap.partCount; ++k) {
+            const SceneParticleDraw& d = cap.parts[k];
+            c.bind_pipeline(d.pipeline);
+            c.set_uniforms(d.uniforms, d.uniformBytes);
+            c.bind_storage_buffer_at(1, d.history);
+            c.push_constants(d.push, d.pushBytes);
+            c.bind_index_buffer(d.quad, 0, IndexType::U16);
+            c.draw_indexed(6, d.instances, 0, 0, 0);
+        }
     });
     if (shadowTex.valid()) graph.read(pbrPass, shadowTex);
     for (u32 k = 0; k < planeCount; ++k) graph.read(pbrPass, planeList[k].texture);

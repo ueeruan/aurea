@@ -1147,10 +1147,12 @@ AUREA_JNI jboolean AUREA_FN(nativeSetParticleParam)(JNIEnv*, jclass, jlong handl
 
 AUREA_JNI jboolean AUREA_FN(nativeQueryParticles)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
-    if (!c || !out || env->GetArrayLength(out) < 8) return JNI_FALSE;
-    f32 v[8];
+    // Um slot por ParticleParam: o tamanho e o contrato, nao um numero solto.
+    constexpr jsize kSlots = static_cast<jsize>(ParticleParam::Count);
+    if (!c || !out || env->GetArrayLength(out) < kSlots) return JNI_FALSE;
+    f32 v[kSlots];
     if (!c->engine.query_particles(static_cast<u64>(layer), v)) return JNI_FALSE;
-    env->SetFloatArrayRegion(out, 0, 8, v);
+    env->SetFloatArrayRegion(out, 0, kSlots, v);
     return JNI_TRUE;
 }
 

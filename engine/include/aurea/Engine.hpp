@@ -569,7 +569,8 @@ public:
     /// inicial, 6 tamanho final, 7 direção.
     bool set_particle_param(u64 layerId, u32 param, f32 value) noexcept;
     /// Os 8 parâmetros acima em `out`.
-    bool query_particles(u64 layerId, f32* out8) noexcept;
+    /// Um valor por ParticleParam, na ordem do enum (`ParticleParam::Count` no total).
+    bool query_particles(u64 layerId, f32* out) noexcept;
 
     /// Desfoque de movimento da camada (liga também o da composição).
     bool set_motion_blur(u64 layerId, bool on) noexcept;

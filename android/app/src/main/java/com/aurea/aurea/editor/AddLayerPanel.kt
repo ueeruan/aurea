@@ -471,9 +471,11 @@ private fun ElementTab(store: EditorStore, close: () -> Unit) {
     CardGrid(
         listOf(
             AddItem("Nulo", draw = { drawNullIcon() }) { store.addNull(false); close() },
-            AddItem("Faíscas", CupertinoGlyph.Sparkles, ShellColors.Text3D) { store.addParticles(0); close() },
-            AddItem("Neve", ShellGlyph.Snow, ShellColors.Camera3D) { store.addParticles(1); close() },
-            AddItem("Poeira de luz", CupertinoGlyph.Lightbulb, ShellColors.Text3D) { store.addParticles(2); close() },
+            // UM sistema, nao tres. Faiscas/Neve/Poeira de luz viraram preset
+            // do mesmo motor — listar os tres aqui prometia tres motores.
+            AddItem(stringResource(R.string.particular_title), CupertinoGlyph.Sparkles, ShellColors.Text3D) {
+                close(); store.addParticles(0)
+            },
             AddItem("Camada de ajuste", CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
             AddItem("Agrupar seleção", CupertinoGlyph.Folder) {
                 if (store.selection.isEmpty()) {

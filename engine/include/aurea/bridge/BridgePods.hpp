@@ -460,12 +460,15 @@ struct EffectParamRow {
     u32 enumOffset      = 0;    // +72  rótulos separados por '|'
     u32 enumLength      = 0;    // +76
     u32 animated        = 0;    // +80  tem keyframe
-    u32 reserved[3]{};          // +84
+    u32 idOffset        = 0;    // +84  id estável do parâmetro ("blurriness"):
+    u32 idLength        = 0;    // +88  a UI traduz o rótulo por ele (Fase 8.1)
+    u32 reserved        = 0;    // +92
 };
 static_assert(sizeof(EffectParamRow) == 96, "EffectParamRow e contrato de ABI");
 static_assert(offsetof(EffectParamRow, value) == 24);
 static_assert(offsetof(EffectParamRow, labelOffset) == 56);
 static_assert(offsetof(EffectParamRow, animated) == 80);
+static_assert(offsetof(EffectParamRow, idOffset) == 84);
 
 // -----------------------------------------------------------------------------
 // Trava final: tudo que atravessa a fronteira precisa ser copiável byte a byte.

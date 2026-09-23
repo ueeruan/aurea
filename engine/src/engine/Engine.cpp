@@ -5964,6 +5964,9 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
             }
             row.enumLength = cursor - row.enumOffset;
         }
+        // O id por último: se o blob encher, perde-se só a chave de tradução
+        // (a UI cai no rótulo do motor), nunca o rótulo.
+        (void)put_string(blob, blobCapacity, cursor, spec.id, row.idOffset, row.idLength);
         const u32 comps = component_count(spec.type);
         for (u32 c = 0; c < comps; ++c) {
             const Track* t = l->tracks.find(TrackProperty::EffectParam, inst->id, param_track_key(i, c));
@@ -6006,6 +6009,7 @@ u32 Engine::query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capa
             }
             row.enumLength = cursor - row.enumOffset;
         }
+        (void)put_string(blob, blobCapacity, cursor, spec.id, row.idOffset, row.idLength);
         out[written++] = row;
     }
     return written;

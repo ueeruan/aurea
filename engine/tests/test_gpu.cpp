@@ -1478,8 +1478,22 @@ AUREA_TEST(Gpu, PrecomposeChildOfOutsideParentStaysInPlace) {
 AUREA_TEST(Gpu, ParticlesAreDeterministicAndSeekable) {
     AUREA_REQUIRE_GPU();
     Scene3DRig rig(320, 180);
-    auto id = rig.e.add_particles(0);   // faíscas
+    auto id = rig.e.add_particles(0);   // faiscas
     AUREA_CHECK(id.ok());
+    // A acumulacao e medida por CONTAGEM, nao por area: com o tamanho fixo em
+    // 1,5 px cada particula cobre o mesmo tanto em qualquer instante, e a
+    // cobertura passa a ser proporcional ao numero de particulas vivas.
+    //
+    // Antes isto era medido com a arte padrao (que encolhe de 10 para 2 px ao
+    // longo da vida): a area caia 25x enquanto a contagem subia 10x, e o
+    // limiar de 3x media a razao entre as duas coisas — nao a acumulacao. O
+    // teste passava por coincidencia com aquela arte, e quebrava a cada ajuste
+    // de aparencia sem que nada de errado tivesse acontecido.
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::StartSize), 1.5f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::EndSize), 1.5f));
+    // Rastro tambem desligado: o comprimento dele nao depende do tamanho e
+    // encurta com a idade, o que confundiria contagem com arte de novo.
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::TrailLength), 0.0f));
     auto seekTo = [&](i64 f) {
         Command c;
         c.type = CommandType::PlaybackSeek;
@@ -1505,6 +1519,69 @@ AUREA_TEST(Gpu, ParticlesAreDeterministicAndSeekable) {
     AUREA_CHECK(worst == 0);
     // Jato para cima com gravidade: mais alto que largo.
     AUREA_CHECK(box.h() > box.w() / 2);
+}
+
+AUREA_TEST(Gpu, ParticularPresetsAllDrawAndDifferFromEachOther) {
+    AUREA_REQUIRE_GPU();
+    // Os dez presets precisam DESENHAR e precisam ser DIFERENTES entre si. Um
+    // preset que nao desenha e um botao falso; dois presets iguais sao um
+    // preset a menos do que a lista promete.
+    std::vector<Image8> shots;
+    for (u32 preset = 0; preset < 10; ++preset) {
+        Scene3DRig rig(320, 180);
+        auto id = rig.e.add_particles(preset);
+        if (!id.ok()) { AUREA_CHECK(false); return; }
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{45}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+        const Image8 img = rig.capture(320);
+        const f32 cov = coverage(img);
+        std::printf("    preset %u: cobertura %.4f\n", preset, cov);
+        AUREA_CHECK(cov > 0.001f);
+        shots.push_back(img);
+    }
+    for (usize i = 0; i < shots.size(); ++i) {
+        for (usize j = i + 1; j < shots.size(); ++j) {
+            u32 worst = 0;
+            for (usize k = 0; k < shots[i].rgba.size() && k < shots[j].rgba.size(); ++k)
+                worst = std::max<u32>(worst, static_cast<u32>(std::abs(shots[i].rgba[k] - shots[j].rgba[k])));
+            AUREA_CHECK(worst > 8);
+        }
+    }
+}
+
+AUREA_TEST(Gpu, ParticularIsDeterministicWithAuxTurbulenceAndCollision) {
+    AUREA_REQUIRE_GPU();
+    // Tudo o que o Particular acrescentou e FECHADO: com aux, turbulencia,
+    // vortice e colisao ligados, seek repetido tem de dar o MESMO quadro — e
+    // sem passar por nenhum estado acumulado entre quadros.
+    Scene3DRig rig(320, 180);
+    auto id = rig.e.add_particles(5);   // brasas: ja traz aux e turbulencia
+    AUREA_CHECK(id.ok());
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::Vortex), 120.0f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::AuxCount), 4.0f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::Collision),
+                                         static_cast<f32>(ParticleCollision::Plane)));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::CollisionY), 60.0f));
+    auto seekTo = [&](i64 f) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{f}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    seekTo(40);
+    const Image8 a = rig.capture(320);
+    seekTo(200);           // longe daqui: se houvesse estado, ele teria mudado
+    (void)rig.capture(320);
+    seekTo(40);
+    const Image8 b = rig.capture(320);
+    u32 worst = 0;
+    for (usize i = 0; i < a.rgba.size() && i < b.rgba.size(); ++i)
+        worst = std::max<u32>(worst, static_cast<u32>(std::abs(a.rgba[i] - b.rgba[i])));
+    std::printf("    particular completo: ida e volta diferenca %u\n", worst);
+    AUREA_CHECK(worst == 0);
+    AUREA_CHECK(coverage(a) > 0.002f);
 }
 
 AUREA_TEST(Gpu, TransitionsFadeAndSlideAtTheEdges) {

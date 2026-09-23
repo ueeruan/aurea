@@ -2203,31 +2203,130 @@ bool Engine::set_transition(u64 layerId, bool out, u32 type, u32 frames) noexcep
 }
 
 namespace {
+
+/// Os presets do AUREA PARTICULAR.
+///
+/// Os tres primeiros sao os nomes que o app tinha como SISTEMAS SEPARADOS
+/// (Faiscas, Neve, Poeira de luz): viraram preset do mesmo sistema, que e o que
+/// eles sempre foram por dentro. Os outros sete sao do sistema novo.
+///
+/// Um preset e so um ponto de partida — todos os parametros continuam
+/// editaveis depois, e nenhum deles cria um motor proprio.
 void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
     p = ParticleData{};
     switch (preset) {
-        case 1:   // neve: cai devagar, de toda a largura do topo
+        case 1:   // Neve: cai devagar, de toda a largura do topo
             p.rate = 40; p.lifetime = 9; p.speed = 70; p.spread = 25; p.gravity = Vec3{0, 0, 0};
             p.startSize = 9; p.endSize = 9; p.startOpacity = 0.9f; p.endOpacity = 0.5f;
             p.startColor = Vec4{1, 1, 1, 1}; p.endColor = Vec4{0.85f, 0.92f, 1, 1};
             p.direction = 90; p.blendMode = 0;
+            p.emitterType = static_cast<u32>(ParticleEmitter::Box);
             p.emitterSize = Vec2{w, 10}; p.emitterOffset = Vec2{0, -h * 0.5f - 10};
+            p.wind = Vec3{18, 0, 0};   // deriva lateral: neve nao cai reta
+            p.particleType = static_cast<u32>(ParticleShape::Soft);
             break;
-        case 2:   // poeira de luz: sobe devagar, grande e suave
+        case 2:   // Poeira de luz: sobe devagar, grande e suave
             p.rate = 12; p.lifetime = 6; p.speed = 25; p.spread = 360; p.gravity = Vec3{0, 0, 0};
             p.startSize = 26; p.endSize = 44; p.startOpacity = 0.55f; p.endOpacity = 0;
             p.startColor = Vec4{1, 0.92f, 0.75f, 1}; p.endColor = Vec4{1, 0.8f, 0.55f, 1};
             p.direction = -90; p.blendMode = 1;
+            p.emitterType = static_cast<u32>(ParticleEmitter::Box);
             p.emitterSize = Vec2{w, h};
+            p.turbulence = 12; p.turbulenceScale = 0.6f;
+            p.particleType = static_cast<u32>(ParticleShape::Soft);
+            p.softness = 0.8f;
             break;
-        default:  // faíscas: jato para cima com gravidade
+        case 3:   // Chuva: rapida, fina, com rastro
+            p.rate = 420; p.lifetime = 1.1f; p.speed = 1400; p.spread = 3; p.direction = 92;
+            p.gravity = Vec3{0, -600, 0}; p.startSize = 2; p.endSize = 2;
+            p.startOpacity = 0.75f; p.endOpacity = 0.25f;
+            p.startColor = Vec4{0.72f, 0.82f, 1, 1}; p.endColor = Vec4{0.6f, 0.75f, 1, 1};
+            p.emitterType = static_cast<u32>(ParticleEmitter::Box);
+            p.emitterSize = Vec2{w, 8}; p.emitterOffset = Vec2{0, -h * 0.5f - 8};
+            p.particleType = static_cast<u32>(ParticleShape::Streak);
+            p.trailLength = 0.045f; p.maxParticles = 24000;
+            break;
+        case 4:   // Vaga-lumes: poucos, lentos, piscando pela vida
+            p.rate = 9; p.lifetime = 7; p.speed = 34; p.spread = 360; p.gravity = Vec3{0, 0, 0};
+            p.startSize = 7; p.endSize = 3; p.startOpacity = 0.9f; p.endOpacity = 0.15f;
+            p.startColor = Vec4{1, 0.95f, 0.45f, 1}; p.endColor = Vec4{0.75f, 1, 0.4f, 1};
+            p.direction = -90; p.blendMode = 1;
+            p.emitterType = static_cast<u32>(ParticleEmitter::Box);
+            p.emitterSize = Vec2{w, h};
+            p.turbulence = 26; p.turbulenceScale = 0.45f;
+            p.attractor = -4;   // afasta devagar do centro
+            p.particleType = static_cast<u32>(ParticleShape::Soft);
+            p.softness = 0.9f;
+            break;
+        case 5:   // Brasas: sobem, esfriam e apagam
+            p.rate = 90; p.lifetime = 2.6f; p.speed = 210; p.spread = 40; p.direction = -92;
+            p.gravity = Vec3{0, -60, 0}; p.startSize = 8; p.endSize = 2;
+            p.startOpacity = 1; p.endOpacity = 0;
+            p.startColor = Vec4{1, 0.78f, 0.30f, 1}; p.endColor = Vec4{0.85f, 0.18f, 0.05f, 1};
+            p.emitterType = static_cast<u32>(ParticleEmitter::Sphere);
+            p.emitterRadius = 26; p.emitterOffset = Vec2{0, h * 0.30f};
+            p.turbulence = 40; p.turbulenceScale = 1.4f;
+            p.rotationRandom = 180; p.spin = 90;
+            p.auxCount = 2; p.auxAt = 0.45f; p.auxLife = 0.55f; p.auxSpeed = 130;
+            p.auxSize = 3; p.auxSpread = 200; p.auxColor = Vec4{1, 0.55f, 0.15f, 1};
+            break;
+        case 6:   // Confete: estoura e cai girando, quicando no chao
+            p.rate = 0; p.burst = 220; p.lifetime = 3.4f; p.speed = 620; p.spread = 360;
+            p.direction = -90; p.gravity = Vec3{0, -900, 0}; p.drag = 0.9f;
+            p.startSize = 13; p.endSize = 13; p.startOpacity = 1; p.endOpacity = 0.9f;
+            p.startColor = Vec4{1, 0.30f, 0.45f, 1}; p.endColor = Vec4{0.35f, 0.75f, 1, 1};
+            p.emitterType = static_cast<u32>(ParticleEmitter::Point);
+            p.emitterOffset = Vec2{0, -h * 0.12f};
+            p.particleType = static_cast<u32>(ParticleShape::Square);
+            p.rotationRandom = 180; p.spin = 420;
+            p.collision = static_cast<u32>(ParticleCollision::Plane);
+            p.collisionY = h * 0.45f; p.collisionBounce = 0.25f;
+            break;
+        case 7:   // Campo de estrelas: pontos distantes, quase parados
+            p.rate = 60; p.lifetime = 13; p.speed = 4; p.spread = 360; p.gravity = Vec3{0, 0, 0};
+            p.startSize = 3; p.endSize = 2; p.startOpacity = 0.55f; p.endOpacity = 0.9f;
+            p.startColor = Vec4{0.85f, 0.9f, 1, 1}; p.endColor = Vec4{1, 1, 1, 1};
+            p.emitterType = static_cast<u32>(ParticleEmitter::Box);
+            p.emitterSize = Vec2{w, h};
+            p.particleType = static_cast<u32>(ParticleShape::Soft);
+            p.softness = 0.7f;
+            break;
+        case 8:   // Poeira magica: espiral fechada subindo
+            p.rate = 70; p.lifetime = 4.2f; p.speed = 120; p.spread = 20; p.direction = -90;
+            p.gravity = Vec3{0, 0, 0}; p.drag = 0.5f;
+            p.startSize = 10; p.endSize = 1; p.startOpacity = 0.95f; p.endOpacity = 0;
+            p.startColor = Vec4{0.75f, 0.55f, 1, 1}; p.endColor = Vec4{0.35f, 0.85f, 1, 1};
+            p.emitterType = static_cast<u32>(ParticleEmitter::Disc);
+            p.emitterRadius = 60;
+            p.vortex = 220; p.attractor = 6;
+            p.turbulence = 20; p.turbulenceScale = 1.1f;
+            p.auxCount = 3; p.auxAt = 0.3f; p.auxLife = 0.7f; p.auxSpeed = 60;
+            p.auxSize = 4; p.auxSpread = 360; p.auxColor = Vec4{0.8f, 0.6f, 1, 1};
+            break;
+        case 9:   // Explosao de logo: estoura para fora segurando o rastro
+            p.rate = 0; p.burst = 320; p.lifetime = 1.8f; p.speed = 420; p.spread = 360;
+            p.direction = -90; p.gravity = Vec3{0, 0, 0}; p.drag = 3.2f;
+            p.startSize = 9; p.endSize = 1; p.startOpacity = 1; p.endOpacity = 0;
+            p.startColor = Vec4{1, 0.85f, 0.4f, 1}; p.endColor = Vec4{1, 0.25f, 0.1f, 1};
+            p.emitterType = static_cast<u32>(ParticleEmitter::Point);
+            p.particleType = static_cast<u32>(ParticleShape::Streak);
+            p.trailLength = 0.09f; p.trailTaper = 1;
+            p.auxCount = 2; p.auxAt = 0.5f; p.auxLife = 0.4f; p.auxSpeed = 200;
+            p.auxSize = 3; p.auxSpread = 360; p.auxColor = Vec4{1, 0.6f, 0.2f, 1};
+            break;
+        default:  // 0 — Faiscas: jato para cima com gravidade
             p.rate = 120; p.lifetime = 1.3f; p.speed = 480; p.spread = 50; p.gravity = Vec3{0, -900, 0};
             p.startSize = 10; p.endSize = 2; p.startOpacity = 1; p.endOpacity = 0;
             p.direction = -90; p.blendMode = 1;
+            p.emitterType = static_cast<u32>(ParticleEmitter::Box);
             p.emitterSize = Vec2{24, 24};
+            p.particleType = static_cast<u32>(ParticleShape::Streak);
+            p.trailLength = 0.06f;
+            p.turbulence = 30; p.turbulenceScale = 1.2f;
             break;
     }
 }
+
 } // namespace
 
 Result<u64> Engine::add_particles(u32 preset) noexcept {
@@ -2236,8 +2335,10 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     history_.before_mutation(*comp, project_->timeline().current(), "adicionar particulas");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    const char* names[] = {"Faíscas", "Neve", "Poeira de luz"};
-    const LayerId lid = comp->add_layer(LayerKind::ParticleSystem, names[std::min<u32>(preset, 2u)]);
+    // UM sistema, UM nome. Os tres nomes antigos viraram preset: criar uma
+    // camada chamada "Neve" sugeria um motor de neve, e nao existe motor de
+    // neve — e o Particular com os parametros da neve.
+    const LayerId lid = comp->add_layer(LayerKind::ParticleSystem, "Aurea Particular");
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
@@ -2272,21 +2373,93 @@ bool Engine::set_particle_param(u64 layerId, u32 param, f32 v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::ParticleSystem || param > 8) return false;
+    if (!l || l->kind != LayerKind::ParticleSystem || param >= static_cast<u32>(ParticleParam::Count)) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "particulas");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     ParticleData& p = l->particles;
-    switch (param) {
-        case 0: p.rate = std::clamp(v, 0.1f, 1000000.0f); break;
-        case 1: p.lifetime = std::clamp(v, 0.05f, 30.0f); break;
-        case 2: p.speed = std::clamp(v, 0.0f, 5000.0f); break;
-        case 3: p.spread = std::clamp(v, 0.0f, 360.0f); break;
-        case 4: p.gravity.y = std::clamp(v, -5000.0f, 5000.0f); break;
-        case 5: p.startSize = std::clamp(v, 0.0f, 500.0f); break;
-        case 6: p.endSize = std::clamp(v, 0.0f, 500.0f); break;
-        case 7: p.direction = v; break;
-        case 8: p.maxParticles = static_cast<u32>(std::clamp(v, 1.0f, 1000000.0f)); break;
-        default: break;
+    // O INDICE e contrato com a UI (ver ParticleParam em Layer.hpp): nao
+    // reordene sem renumerar os dois lados. Cada faixa de clamp existe para um
+    // valor absurdo nao virar NaN no shader — que nao desenha nada e nao diz
+    // por que.
+    switch (static_cast<ParticleParam>(param)) {
+        // --- Emissor ---------------------------------------------------------
+        case ParticleParam::EmitterType:
+            p.emitterType = static_cast<u32>(std::clamp(v, 0.0f, static_cast<f32>(ParticleEmitter::Count) - 1.0f));
+            break;
+        case ParticleParam::EmitterWidth:  p.emitterSize.x = std::clamp(v, 0.0f, 20000.0f); break;
+        case ParticleParam::EmitterHeight: p.emitterSize.y = std::clamp(v, 0.0f, 20000.0f); break;
+        case ParticleParam::EmitterRadius: p.emitterRadius = std::clamp(v, 0.0f, 20000.0f); break;
+        case ParticleParam::EmitterRotation: p.emitterRotation = v; break;
+        case ParticleParam::EmitterDepth: p.emitterDepth = std::clamp(v, 0.0f, 20000.0f); break;
+        case ParticleParam::GridX: p.gridX = static_cast<u32>(std::clamp(v, 1.0f, 64.0f)); break;
+        case ParticleParam::GridY: p.gridY = static_cast<u32>(std::clamp(v, 1.0f, 64.0f)); break;
+        case ParticleParam::EmitFill: p.emitFill = v >= 0.5f; break;
+        case ParticleParam::EmitterOffsetX: p.emitterOffset.x = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::EmitterOffsetY: p.emitterOffset.y = std::clamp(v, -20000.0f, 20000.0f); break;
+
+        // --- Emissao ---------------------------------------------------------
+        case ParticleParam::Rate: p.rate = std::clamp(v, 0.0f, 1000000.0f); break;
+        case ParticleParam::Burst: p.burst = static_cast<u32>(std::clamp(v, 0.0f, 1000000.0f)); break;
+        case ParticleParam::Lifetime: p.lifetime = std::clamp(v, 0.05f, 120.0f); break;
+        case ParticleParam::LifeRandom: p.lifeRandom = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::Speed: p.speed = std::clamp(v, 0.0f, 20000.0f); break;
+        case ParticleParam::SpeedRandom: p.speedRandom = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::Direction: p.direction = v; break;
+        case ParticleParam::Spread: p.spread = std::clamp(v, 0.0f, 360.0f); break;
+        case ParticleParam::InheritVelocity: p.inheritVelocity = std::clamp(v, 0.0f, 4.0f); break;
+        case ParticleParam::Seed: p.seed = static_cast<u32>(std::clamp(v, 0.0f, 1000000.0f)); break;
+
+        // --- Particula -------------------------------------------------------
+        case ParticleParam::ParticleType:
+            p.particleType = static_cast<u32>(std::clamp(v, 0.0f, static_cast<f32>(ParticleShape::Count) - 1.0f));
+            break;
+        case ParticleParam::Softness: p.softness = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::Rotation: p.rotation = v; break;
+        case ParticleParam::RotationRandom: p.rotationRandom = std::clamp(v, 0.0f, 360.0f); break;
+        case ParticleParam::Spin: p.spin = std::clamp(v, -3600.0f, 3600.0f); break;
+
+        // --- Ao longo da vida ------------------------------------------------
+        case ParticleParam::StartSize: p.startSize = std::clamp(v, 0.0f, 4000.0f); break;
+        case ParticleParam::EndSize: p.endSize = std::clamp(v, 0.0f, 4000.0f); break;
+        case ParticleParam::StartOpacity: p.startOpacity = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::EndOpacity: p.endOpacity = std::clamp(v, 0.0f, 1.0f); break;
+
+        // --- Fisica ----------------------------------------------------------
+        case ParticleParam::GravityX: p.gravity.x = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::GravityY: p.gravity.y = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::GravityZ: p.gravity.z = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::Drag: p.drag = std::clamp(v, 0.0f, 20.0f); break;
+        case ParticleParam::WindX: p.wind.x = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::WindY: p.wind.y = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::Turbulence: p.turbulence = std::clamp(v, 0.0f, 5000.0f); break;
+        case ParticleParam::TurbulenceScale: p.turbulenceScale = std::clamp(v, 0.05f, 20.0f); break;
+        case ParticleParam::TurbulenceSpeed: p.turbulenceSpeed = std::clamp(v, 0.0f, 20.0f); break;
+        case ParticleParam::Vortex: p.vortex = std::clamp(v, -3600.0f, 3600.0f); break;
+        case ParticleParam::Attractor: p.attractor = std::clamp(v, -200.0f, 200.0f); break;
+
+        // --- Rastro ----------------------------------------------------------
+        case ParticleParam::TrailLength: p.trailLength = std::clamp(v, 0.0f, 2.0f); break;
+        case ParticleParam::TrailTaper: p.trailTaper = std::clamp(v, 0.0f, 1.0f); break;
+
+        // --- Aux -------------------------------------------------------------
+        case ParticleParam::AuxCount: p.auxCount = static_cast<u32>(std::clamp(v, 0.0f, 16.0f)); break;
+        case ParticleParam::AuxAt: p.auxAt = std::clamp(v, 0.0f, 0.99f); break;
+        case ParticleParam::AuxLife: p.auxLife = std::clamp(v, 0.05f, 20.0f); break;
+        case ParticleParam::AuxSpeed: p.auxSpeed = std::clamp(v, 0.0f, 10000.0f); break;
+        case ParticleParam::AuxSize: p.auxSize = std::clamp(v, 0.0f, 500.0f); break;
+        case ParticleParam::AuxSpread: p.auxSpread = std::clamp(v, 0.0f, 360.0f); break;
+
+        // --- Colisao ---------------------------------------------------------
+        case ParticleParam::Collision:
+            p.collision = static_cast<u32>(std::clamp(v, 0.0f, static_cast<f32>(ParticleCollision::Count) - 1.0f));
+            break;
+        case ParticleParam::CollisionY: p.collisionY = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::CollisionBounce: p.collisionBounce = std::clamp(v, 0.0f, 1.0f); break;
+
+        // --- Render ----------------------------------------------------------
+        case ParticleParam::BlendMode: p.blendMode = static_cast<u32>(std::clamp(v, 0.0f, 1.0f)); break;
+        case ParticleParam::MaxParticles: p.maxParticles = static_cast<u32>(std::clamp(v, 1.0f, 1000000.0f)); break;
+        default: return false;
     }
     project_->mark_dirty();
     request_render();

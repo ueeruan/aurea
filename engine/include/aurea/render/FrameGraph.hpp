@@ -89,7 +89,11 @@ struct PassContext {
     [[nodiscard]] const TextureDesc& desc(FGTexture t) const noexcept;
 };
 
-using PassFn = InplaceFunction<void(PassContext&), 256>;
+/// Capacidade 512: o bloco de parâmetros do Aurea Particular são 20 vec4
+/// (320 B) mais a matriz e os identificadores do passe, e isso não cabe nos
+/// 256 anteriores. O `static_assert` do InplaceFunction é quem avisa quando
+/// um passe cresce demais — foi ele que pegou este caso.
+using PassFn = InplaceFunction<void(PassContext&), 512>;
 
 // -----------------------------------------------------------------------------
 // Pool de texturas transitórias. Sobrevive entre frames.

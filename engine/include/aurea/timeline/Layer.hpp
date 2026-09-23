@@ -269,25 +269,141 @@ struct Model3DData {
     i32     forcedLod = -1;
 };
 
+/// Forma do emissor (Aurea Particular). Todas amostradas em forma fechada no
+/// shader: nenhuma precisa de malha, de textura ou de estado de simulação.
+enum class ParticleEmitter : u32 {
+    Point = 0,    ///< um ponto (o centro do emissor)
+    Box,          ///< caixa: largura × altura × profundidade
+    Sphere,       ///< esfera oca; `emitFill` enche o volume
+    Disc,         ///< disco no plano XY
+    Line,         ///< segmento orientado por `emitterRotation`
+    Grid,         ///< grade `gridX` × `gridY` de pontos
+    Count,
+};
+
+/// Como a partícula é desenhada.
+enum class ParticleShape : u32 {
+    Circle = 0,   ///< disco macio
+    Square,       ///< quadrado
+    Streak,       ///< esticada no sentido da velocidade (rastro de faísca)
+    Soft,         ///< brilho radial bem suave (poeira, luz)
+    Count,
+};
+
+/// O que a partícula faz ao encontrar o plano de colisão.
+enum class ParticleCollision : u32 {
+    None = 0,
+    Plane,        ///< plano horizontal em `collisionY`
+    Count,
+};
+
+/// Os parâmetros que a UI pode escrever, um a um.
+///
+/// O NÚMERO É CONTRATO com o Kotlin e com os presets salvos: reordenar a lista
+/// sem renumerar os dois lados faz um projeto antigo escrever no parâmetro
+/// errado, em silêncio. Por isso cada valor está escrito à mão.
+enum class ParticleParam : u32 {
+    // Emissor
+    EmitterType = 0, EmitterWidth, EmitterHeight, EmitterRadius, EmitterRotation,
+    EmitterDepth, GridX, GridY, EmitFill, EmitterOffsetX, EmitterOffsetY,
+    // Emissão
+    Rate, Burst, Lifetime, LifeRandom, Speed, SpeedRandom, Direction, Spread,
+    InheritVelocity, Seed,
+    // Partícula
+    ParticleType, Softness, Rotation, RotationRandom, Spin,
+    // Ao longo da vida
+    StartSize, EndSize, StartOpacity, EndOpacity,
+    // Física
+    GravityX, GravityY, GravityZ, Drag, WindX, WindY,
+    Turbulence, TurbulenceScale, TurbulenceSpeed, Vortex, Attractor,
+    // Rastro
+    TrailLength, TrailTaper,
+    // Aux
+    AuxCount, AuxAt, AuxLife, AuxSpeed, AuxSize, AuxSpread,
+    // Colisão
+    Collision, CollisionY, CollisionBounce,
+    // Render
+    BlendMode, MaxParticles,
+    Count,
+};
+
+/// Sistema de partículas (Aurea Particular).
+///
+/// A SIMULAÇÃO É ANALÍTICA: posição, velocidade, tamanho, cor e opacidade saem
+/// de uma conta fechada sobre (semente, slot, geração, tempo). Nada de estado
+/// por partícula na GPU. As consequências são as que o dono exigiu:
+/// determinístico (prévia = export), seek instantâneo em qualquer ponto e
+/// nenhum checkpoint para guardar — não existe estado para reconstruir.
+///
+/// As forças que entram têm forma fechada: gravidade e vento integram direto;
+/// o arrasto é exponencial; o vórtice é uma rotação; o atrator é uma mola; e a
+/// turbulência é a SOMA DE SENOIDES de três eixos, que é fechada e dá o visual
+/// de campo contínuo sem precisar integrar ruído.
 struct ParticleData {
-    u32  emitterType = 0;
-    f32  rate = 100.0f;
-    f32  lifetime = 2.0f;
-    Vec3 gravity{0.0f, -980.0f, 0.0f};
+    // --- Emissor -------------------------------------------------------------
+    u32  emitterType = 0;                     ///< ParticleEmitter
+    Vec2 emitterSize{20.0f, 20.0f};           ///< largura × altura (px)
+    Vec2 emitterOffset{0.0f, 0.0f};           ///< do centro da camada (px)
+    f32  emitterRadius = 40.0f;               ///< esfera e disco
+    f32  emitterRotation = 0.0f;              ///< graus (linha e disco)
+    f32  emitterDepth = 0.0f;                 ///< espessura em Z (caixa)
+    u32  gridX = 4, gridY = 4;
+    bool emitFill = false;                    ///< esfera cheia em vez de casca
+
+    // --- Emissão -------------------------------------------------------------
+    f32  rate = 100.0f;                       ///< partículas por segundo
+    u32  burst = 0;                           ///< extras no primeiro instante
+    f32  lifetime = 2.0f;                     ///< segundos
+    f32  lifeRandom = 0.25f;                  ///< ±fração da vida
+    f32  speed = 200.0f;                      ///< px/s
+    f32  speedRandom = 0.3f;                  ///< ±fração da velocidade
+    f32  direction = -90.0f;                  ///< graus; −90 = para cima
+    f32  spread = 45.0f;                      ///< graus, abertura do cone
+    f32  inheritVelocity = 0.0f;              ///< 0..1 da velocidade da camada
+    u32  seed = 1;
+
+    // --- Partícula -----------------------------------------------------------
+    u32  particleType = 0;                    ///< ParticleShape
+    f32  softness = 0.7f;                     ///< 0 = borda dura, 1 = bem macia (0,7 = a borda de antes deste controle existir)
+    f32  rotation = 0.0f;                     ///< graus
+    f32  rotationRandom = 0.0f;               ///< ±graus
+    f32  spin = 0.0f;                         ///< graus/s ao longo da vida
+
+    // --- Ao longo da vida ----------------------------------------------------
     f32  startSize = 20.0f, endSize = 0.0f;
     f32  startOpacity = 1.0f, endOpacity = 0.0f;
-    f32  speed = 200.0f;
-    f32  spread = 45.0f;
-    u32  maxParticles = 10000;
-    u32  blendMode = 1;          ///< aditivo por padrão
-    bool collideEnvironment = false;
-    // v7: aparência e emissor (partículas analíticas na GPU)
     Vec4 startColor{1.0f, 0.85f, 0.45f, 1.0f};   ///< sRGB, reta
     Vec4 endColor{1.0f, 0.35f, 0.10f, 1.0f};
-    f32  direction = -90.0f;     ///< graus; −90 = para cima (y da tela para baixo)
-    u32  seed = 1;
-    Vec2 emitterSize{20.0f, 20.0f};
-    Vec2 emitterOffset{0.0f, 0.0f};   ///< do centro da camada (px)
+
+    // --- Física --------------------------------------------------------------
+    Vec3 gravity{0.0f, -980.0f, 0.0f};
+    f32  drag = 0.0f;                         ///< 1/s; 0 = sem arrasto
+    Vec3 wind{0.0f, 0.0f, 0.0f};              ///< px/s²
+    f32  turbulence = 0.0f;                   ///< px/s² de amplitude
+    f32  turbulenceScale = 1.0f;              ///< 1 = uma ondulação por 200 px
+    f32  turbulenceSpeed = 1.0f;              ///< multiplica o tempo
+    f32  vortex = 0.0f;                       ///< graus/s em torno do emissor
+    f32  attractor = 0.0f;                    ///< mola para o emissor; <0 = repulsor
+
+    // --- Rastro --------------------------------------------------------------
+    f32  trailLength = 0.0f;                  ///< segundos de rastro (Streak)
+    f32  trailTaper = 1.0f;                   ///< 0 = largura constante
+
+    // --- Aux (partículas secundárias) ---------------------------------------
+    u32  auxCount = 0;                        ///< 0 = desligado
+    f32  auxAt = 0.6f;                        ///< fração da vida em que nascem
+    f32  auxLife = 0.5f, auxSpeed = 120.0f, auxSize = 4.0f, auxSpread = 180.0f;
+    Vec4 auxColor{1.0f, 0.7f, 0.3f, 1.0f};
+
+    // --- Colisão -------------------------------------------------------------
+    u32  collision = 0;                       ///< ParticleCollision
+    f32  collisionY = 0.0f;                   ///< plano em Y (px da camada)
+    f32  collisionBounce = 0.4f;              ///< 0 = gruda, 1 = quica igual
+
+    // --- Render --------------------------------------------------------------
+    u32  maxParticles = 10000;
+    u32  blendMode = 1;                       ///< aditivo por padrão
+    bool collideEnvironment = false;
 };
 
 struct CompositionRef {

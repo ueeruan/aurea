@@ -1121,12 +1121,18 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // Preview: a fração do bloco de qualidade (8E); export = todas.
                 const u32 cap = std::max<u32>(1u, static_cast<u32>(static_cast<f64>(pd.maxParticles)
                                                                     * std::clamp(resolve_heavy(settings).particles, 0.05f, 1.0f)));
-                const u32 slots = std::min<u32>(cap,
-                                                static_cast<u32>(std::ceil(rate * life * 1.25f)) + 1u);
+                // Uma primaria vive `life`; com o estouro, `burst` nascem no
+                // instante zero. O aux multiplica as instancias (cada primaria
+                // gera `auxCount` secundarias), e o teto de particulas manda.
+                const u32 auxMul = 1u + std::min<u32>(pd.auxCount, 16u);
+                const u32 flowSlots = std::min<u32>(cap / auxMul,
+                                                   static_cast<u32>(std::ceil(rate * life * 1.25f)) + 1u);
+                const u32 slots = std::min<u32>(cap / auxMul, flowSlots + pd.burst);
                 auto lin = [](Vec4 c) { return Vec4{srgb_to_linear(c.x), srgb_to_linear(c.y), srgb_to_linear(c.z), c.w}; };
                 rl.source.kind = LayerSource::Kind::Particles;
                 rl.source.width = comp.width();
                 rl.source.height = comp.height();
+                // Bloco 0..6: o que ja existia (taxa, vida, forcas, cor, origem).
                 rl.source.particleBlock[0] = Vec4{rate, life, pd.speed, pd.spread * kDeg2Rad};
                 // Gravidade do modelo: y para CIMA (−980 = cai); a tela tem y para baixo.
                 rl.source.particleBlock[1] = Vec4{pd.gravity.x, -pd.gravity.y, pd.startSize, pd.endSize};
@@ -1135,7 +1141,44 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.particleBlock[4] = lin(pd.startColor);
                 rl.source.particleBlock[5] = lin(pd.endColor);
                 rl.source.particleBlock[6] = Vec4{lw * 0.5f + pd.emitterOffset.x, lh * 0.5f + pd.emitterOffset.y, 0, 0};
-                rl.source.particleSlots = slots;
+                // Bloco 8..: Aurea Particular.
+                rl.source.particleBlock[7] = Vec4{static_cast<f32>(pd.emitterType), pd.emitterRadius,
+                                                  pd.emitterRotation * kDeg2Rad, pd.emitterDepth};
+                rl.source.particleBlock[8] = Vec4{static_cast<f32>(pd.gridX), static_cast<f32>(pd.gridY),
+                                                  pd.emitFill ? 1.0f : 0.0f, static_cast<f32>(pd.burst)};
+                rl.source.particleBlock[9] = Vec4{pd.lifeRandom, pd.speedRandom, pd.inheritVelocity,
+                                                  static_cast<f32>(pd.particleType)};
+                rl.source.particleBlock[10] = Vec4{pd.softness, pd.rotation * kDeg2Rad,
+                                                   pd.rotationRandom * kDeg2Rad, pd.spin * kDeg2Rad};
+                rl.source.particleBlock[11] = Vec4{pd.drag, pd.wind.x, -pd.wind.y, pd.turbulence};
+                rl.source.particleBlock[12] = Vec4{pd.turbulenceScale, pd.turbulenceSpeed,
+                                                   pd.vortex * kDeg2Rad, pd.attractor};
+                rl.source.particleBlock[13] = Vec4{pd.trailLength, pd.trailTaper,
+                                                   static_cast<f32>(pd.auxCount), pd.auxAt};
+                rl.source.particleBlock[14] = Vec4{pd.auxLife, pd.auxSpeed, pd.auxSize, pd.auxSpread * kDeg2Rad};
+                rl.source.particleBlock[15] = Vec4{static_cast<f32>(pd.collision), pd.collisionY,
+                                                   pd.collisionBounce, 0.0f};
+                rl.source.particleBlock[16] = lin(pd.auxColor);
+                // "Velocity from motion": a velocidade da CAMADA no instante,
+                // em px/s — o shader soma uma fracao dela a velocidade inicial.
+                {
+                    // A posicao da camada sai do MESMO `tracks` que o resto do
+                    // renderizador le (nao do campo estatico do Transform): com
+                    // keyframe, o campo nao acompanha.
+                    const FrameIndex next{local.value + 1};
+                    const f32 x0 = l->tracks.sample_or(TrackProperty::PositionX, local, l->transform.position.x);
+                    const f32 y0 = l->tracks.sample_or(TrackProperty::PositionY, local, l->transform.position.y);
+                    const f32 x1 = l->tracks.sample_or(TrackProperty::PositionX, next, l->transform.position.x);
+                    const f32 y1 = l->tracks.sample_or(TrackProperty::PositionY, next, l->transform.position.y);
+                    const f32 dt = static_cast<f32>(1.0 / std::max(1.0, fps));
+                    rl.source.particleBlock[17] = Vec4{(x1 - x0) / dt, -(y1 - y0) / dt, 0, 0};
+                }
+                rl.source.particleBlock[18] = Vec4{lw / std::max(1.0f, lh), static_cast<f32>(flowSlots), 0, 0};
+                // Quantas instancias sao FLUXO continuo; o resto e estouro.
+                rl.source.particleBlock[19] = Vec4{static_cast<f32>(flowSlots), 0, 0, 0};
+                // O estouro entra alem das slots do fluxo continuo: com taxa 0
+                // (so estouro) `slots` seria 1 e o burst nao teria onde caber.
+                rl.source.particleSlots = std::min<u32>(cap, slots + pd.burst);
                 rl.source.particleAdditive = pd.blendMode == 1;
                 break;
             }
@@ -2465,17 +2508,21 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 }
                 particleQuad_ = *b;
             }
+            // O push constant leva a matriz e os slots; os PARAMETROS vao
+            // como uniformes (20 vec4 = 320 B, acima do limite garantido de
+            // push constant que e 128 B).
             struct Cap {
-                PipelineHandle p; Mat4 clip; Vec4 block[7]; u32 slots; BufferHandle quad;
-            } cap{*pipe, clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)), {},
-                  layer.source.particleSlots, particleQuad_};
-            for (int i = 0; i < 7; ++i) cap.block[i] = layer.source.particleBlock[i];
+                PipelineHandle p; Mat4 clip; Vec4 params[LayerSource::kParticleBlocks];
+                u32 slots; BufferHandle quad;
+            } cap{*pipe, clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)),
+                  {}, layer.source.particleSlots, particleQuad_};
+            for (u32 i = 0; i < LayerSource::kParticleBlocks; ++i) cap.params[i] = layer.source.particleBlock[i];
             heavyStats_.lastParticleSlots += layer.source.particleSlots;
             ++heavyStats_.lastParticleLayers;
             graph_.add_raster_pass("particulas", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0},
                                    [cap](PassContext& pc) {
                 pc.cmds.bind_pipeline(cap.p);
-                pc.cmds.set_uniforms(cap.block, sizeof(cap.block));
+                pc.cmds.set_uniforms(cap.params, sizeof(cap.params));
                 pc.cmds.push_constants(&cap.clip, sizeof(cap.clip));
                 pc.cmds.bind_index_buffer(cap.quad, 0, IndexType::U16);
                 pc.cmds.draw_indexed(6, cap.slots, 0, 0, 0);

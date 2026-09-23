@@ -585,6 +585,45 @@ void write_layer(ByteWriter& w, const Layer& l) {
         w.boolv(l.text.pathPerpendicular);
         w.boolv(l.text.pathReverse);
     }
+    // v20: Aurea Particular. O sistema de particulas deixou de ser uma taxonomia
+    // de tres presets fixos e virou UM sistema parametrizavel — emissor, fisica,
+    // rastro, aux e colisao. Os tres nomes antigos (Faiscas/Neve/Poeira de luz)
+    // continuam existindo como PRESET, nao como sistema separado.
+    w.u32v(l.particles.emitterType);
+    w.f32v(l.particles.emitterRadius);
+    w.f32v(l.particles.emitterRotation);
+    w.f32v(l.particles.emitterDepth);
+    w.u32v(l.particles.gridX);
+    w.u32v(l.particles.gridY);
+    w.boolv(l.particles.emitFill);
+    w.u32v(l.particles.burst);
+    w.f32v(l.particles.lifeRandom);
+    w.f32v(l.particles.speedRandom);
+    w.f32v(l.particles.inheritVelocity);
+    w.u32v(l.particles.particleType);
+    w.f32v(l.particles.softness);
+    w.f32v(l.particles.rotation);
+    w.f32v(l.particles.rotationRandom);
+    w.f32v(l.particles.spin);
+    w.f32v(l.particles.drag);
+    w.vec3(l.particles.wind);
+    w.f32v(l.particles.turbulence);
+    w.f32v(l.particles.turbulenceScale);
+    w.f32v(l.particles.turbulenceSpeed);
+    w.f32v(l.particles.vortex);
+    w.f32v(l.particles.attractor);
+    w.f32v(l.particles.trailLength);
+    w.f32v(l.particles.trailTaper);
+    w.u32v(l.particles.auxCount);
+    w.f32v(l.particles.auxAt);
+    w.f32v(l.particles.auxLife);
+    w.f32v(l.particles.auxSpeed);
+    w.f32v(l.particles.auxSize);
+    w.f32v(l.particles.auxSpread);
+    w.vec4(l.particles.auxColor);
+    w.u32v(l.particles.collision);
+    w.f32v(l.particles.collisionY);
+    w.f32v(l.particles.collisionBounce);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -595,7 +634,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
 /// v17: track matte (camada + modo) e keyframes do caminho das máscaras.
 /// v18: expressões por trilha (fonte + ligada), no fim de cada layer.
 /// v19: camada vetorial (VectorData) e texto no caminho, no fim da camada.
-constexpr u32 kTimelineSectionVersion = 19;
+/// v20: Aurea Particular (emissor, fisica, rastro, aux e colisao).
+constexpr u32 kTimelineSectionVersion = 20;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -884,6 +924,43 @@ void read_layer(ByteReader& r, Layer& l) {
         l.text.pathOffset = r.f32v();
         l.text.pathPerpendicular = r.boolv();
         l.text.pathReverse = r.boolv();
+    }
+    if (g_readingTimelineVersion >= 20) {
+        l.particles.emitterType = r.u32v();
+        l.particles.emitterRadius = r.f32v();
+        l.particles.emitterRotation = r.f32v();
+        l.particles.emitterDepth = r.f32v();
+        l.particles.gridX = r.u32v();
+        l.particles.gridY = r.u32v();
+        l.particles.emitFill = r.boolv();
+        l.particles.burst = r.u32v();
+        l.particles.lifeRandom = r.f32v();
+        l.particles.speedRandom = r.f32v();
+        l.particles.inheritVelocity = r.f32v();
+        l.particles.particleType = r.u32v();
+        l.particles.softness = r.f32v();
+        l.particles.rotation = r.f32v();
+        l.particles.rotationRandom = r.f32v();
+        l.particles.spin = r.f32v();
+        l.particles.drag = r.f32v();
+        l.particles.wind = r.vec3();
+        l.particles.turbulence = r.f32v();
+        l.particles.turbulenceScale = r.f32v();
+        l.particles.turbulenceSpeed = r.f32v();
+        l.particles.vortex = r.f32v();
+        l.particles.attractor = r.f32v();
+        l.particles.trailLength = r.f32v();
+        l.particles.trailTaper = r.f32v();
+        l.particles.auxCount = r.u32v();
+        l.particles.auxAt = r.f32v();
+        l.particles.auxLife = r.f32v();
+        l.particles.auxSpeed = r.f32v();
+        l.particles.auxSize = r.f32v();
+        l.particles.auxSpread = r.f32v();
+        l.particles.auxColor = r.vec4();
+        l.particles.collision = r.u32v();
+        l.particles.collisionY = r.f32v();
+        l.particles.collisionBounce = r.f32v();
     }
 }
 

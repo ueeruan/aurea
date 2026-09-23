@@ -128,9 +128,13 @@ struct LayerSource {
     u32      glyphSets = 1;
     Vec4     textPersp{0, 0, 0, 0};   ///< cx, cy da layer, distância focal (px) para o 3D por caractere
 
-    // Partículas: o bloco de parâmetros do shader (7 vec4), nº de slots, blend.
-    Vec4     particleBlock[7]{};
-    u32      particleSlots = 0;
+    // Partículas (Aurea Particular): o bloco de parâmetros do shader, nº de
+    // instâncias e blend. O bloco cresceu de 7 para 20 vec4 quando o sistema
+    // deixou de ser três presets fixos e virou sistema parametrizável —
+    // emissor, física, rastro, aux e colisão precisam caber.
+    static constexpr u32 kParticleBlocks = 20;
+    Vec4     particleBlock[kParticleBlocks]{};
+    u32      particleSlots = 0;      ///< primárias (o aux multiplica por 1+n)
     bool     particleAdditive = true;
 
     // Forma vetorial (SDF): tipo, canto, pontas, raio interno, preenchida,

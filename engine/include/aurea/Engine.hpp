@@ -364,6 +364,9 @@ public:
     bool set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, usize count, bool continuing) noexcept;
     /// Liga/desliga o keyframe de forma no cabeçote (morph).
     bool toggle_vector_path_key(u64 layerId, u32 group, u32 path) noexcept;
+    /// Marca o keyframe do caminho aqui — com keyframe no cabeçote, REGRAVA o
+    /// valor avaliado em vez de apagá-lo (ver `ensure_shape_param_key`).
+    bool ensure_vector_path_key(u64 layerId, u32 group, u32 path) noexcept;
     /// Grupo novo com um caminho (VectorPathKind; Free = sem pontos). Índice ou −1.
     i32 add_vector_group(u64 layerId, u32 pathKind) noexcept;
     bool remove_vector_group(u64 layerId, u32 group) noexcept;
@@ -379,6 +382,9 @@ public:
     /// Valor (VectorParam): com keyframes, grava no cabeçote.
     bool set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool continuing) noexcept;
     bool toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept;
+    /// Marca o keyframe do parâmetro aqui — com keyframe no cabeçote, REGRAVA o
+    /// valor avaliado em vez de apagá-lo (ver `ensure_shape_param_key`).
+    bool ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept;
 
     /// Forma (SDF): os mesmos parâmetros de `ShapeSetParam` (1 raio, 2 lados,
     /// 3 raio interno, 4 contorno, 5 largura, 6 altura), agora ANIMÁVEIS.
@@ -389,6 +395,14 @@ public:
     u32 query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept;
     bool set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept;
     bool toggle_shape_param_key(u64 layerId, u32 param) noexcept;
+    /// Marca o keyframe do parâmetro aqui — e, se já houver um, REGRAVA com o
+    /// valor avaliado no cabeçote em vez de apagá-lo.
+    ///
+    /// É o que o losango do painel usa: depois de editar um valor num quadro que
+    /// já tinha keyframe, "criar keyframe" apagava justamente o valor recém
+    /// editado e a forma voltava para o estado anterior. Quem quer tirar o
+    /// keyframe usa o menu do keyframe na timeline (que apaga de verdade).
+    bool ensure_shape_param_key(u64 layerId, u32 param) noexcept;
     /// Desenho à mão livre: pontos do dedo (x,y em px da composição) viram um
     /// caminho suave (ajuste de Schneider, `error` px). `layerId` = 0 cria uma
     /// camada vetorial nova; senão entra como grupo novo nela. Devolve a camada.
@@ -538,6 +552,9 @@ public:
     bool set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 feather, f32 expansion, f32 opacity) noexcept;
     /// Liga/desliga o key do caminho no cabeçote (`keyed` = ficou com key).
     bool toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyed = nullptr) noexcept;
+    /// Marca o keyframe do caminho da máscara aqui — com keyframe no cabeçote,
+    /// REGRAVA a forma avaliada em vez de apagá-la (ver `ensure_shape_param_key`).
+    bool ensure_mask_path_key(u64 layerId, u32 maskId, bool* keyed = nullptr) noexcept;
     /// Máscaras no cabeçote: [0..5] composição ← camada (a b c d tx ty), [6] nº
     /// de máscaras; por máscara kMaskHeaderFloats floats (id, modo, invertida,
     /// feather, expansão, opacidade, fechada, nº de pontos, nº de keys, key no

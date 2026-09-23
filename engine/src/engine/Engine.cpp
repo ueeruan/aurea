@@ -1609,6 +1609,27 @@ bool Engine::set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 
     return true;
 }
 
+bool Engine::ensure_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe da mascara");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const i64 local = l->local_time(playback_.current()).value;
+    // Com keyframe aqui, regrava a forma AVALIADA — nunca apaga (ver
+    // `ensure_shape_param_key`).
+    std::vector<MaskPoint> shape;
+    mask::evaluate_path(*m, static_cast<f64>(local), shape);
+    put_path_key(*m, local, shape);
+    m->cacheKey = 0;
+    if (keyedOut) *keyedOut = true;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 bool Engine::toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;

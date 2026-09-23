@@ -1019,7 +1019,9 @@ AUREA_JNI jboolean AUREA_FN(nativeSetMaskProps)(JNIEnv*, jclass, jlong handle, j
 AUREA_JNI jint AUREA_FN(nativeToggleMaskPathKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask) {
     NativeContext* c = ctx_of(handle);
     bool keyed = false;
-    if (!c || mask < 0 || !c->engine.toggle_mask_path_key(static_cast<u64>(layer), static_cast<u32>(mask), &keyed)) return -1;
+    // "Marcar keyframe" do painel da máscara: regrava a forma do instante se já
+    // houver keyframe aqui (apagar é pelo menu do keyframe, na timeline).
+    if (!c || mask < 0 || !c->engine.ensure_mask_path_key(static_cast<u64>(layer), static_cast<u32>(mask), &keyed)) return -1;
     return keyed ? 1 : 0;
 }
 
@@ -2049,7 +2051,7 @@ AUREA_JNI jboolean AUREA_FN(nativeSetVectorPath)(JNIEnv* env, jclass, jlong hand
 
 AUREA_JNI jboolean AUREA_FN(nativeToggleVectorPathKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint path) {
     NativeContext* c = ctx_of(handle);
-    return c && group >= 0 && path >= 0 && c->engine.toggle_vector_path_key(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path))
+    return c && group >= 0 && path >= 0 && c->engine.ensure_vector_path_key(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(path))
                ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -2099,7 +2101,9 @@ AUREA_JNI jboolean AUREA_FN(nativeSetVectorParam)(JNIEnv*, jclass, jlong handle,
 
 AUREA_JNI jboolean AUREA_FN(nativeToggleVectorParamKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint group, jint param) {
     NativeContext* c = ctx_of(handle);
-    return c && group >= 0 && param >= 0 && c->engine.toggle_vector_param_key(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(param))
+    // "Marcar keyframe" no painel: com keyframe no cabeçote REGRAVA o valor
+    // avaliado. Apagar continua no menu do keyframe, na timeline.
+    return c && group >= 0 && param >= 0 && c->engine.ensure_vector_param_key(static_cast<u64>(layer), static_cast<u32>(group), static_cast<u32>(param))
                ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -2119,7 +2123,8 @@ AUREA_JNI jboolean AUREA_FN(nativeSetShapeParamAnim)(JNIEnv*, jclass, jlong hand
 
 AUREA_JNI jboolean AUREA_FN(nativeToggleShapeParamKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint param) {
     NativeContext* c = ctx_of(handle);
-    return c && param >= 0 && c->engine.toggle_shape_param_key(static_cast<u64>(layer), static_cast<u32>(param)) ? JNI_TRUE : JNI_FALSE;
+    // Idem: marcar keyframe da forma regrava o valor do instante, nunca apaga.
+    return c && param >= 0 && c->engine.ensure_shape_param_key(static_cast<u64>(layer), static_cast<u32>(param)) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jlong AUREA_FN(nativeAddFreehandPath)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray xy, jfloat error) {

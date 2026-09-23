@@ -29,6 +29,7 @@ add_executable(aurea_tests
     test_text.cpp
     test_presets.cpp
     test_expr.cpp
+    test_keyframe_shape.cpp
     test_vector.cpp
     test_vector_gpu.cpp
     test_export.cpp

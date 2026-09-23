@@ -11,6 +11,8 @@
 
 #include "aurea/vector/Vector.hpp"
 
+#include <cstdio>
+
 #include <algorithm>
 #include <cmath>
 
@@ -159,6 +161,32 @@ bool Engine::set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, u
             k.path = std::move(b);
             p.keys.insert(std::upper_bound(p.keys.begin(), p.keys.end(), local, [](i64 f, const PathKey& x) { return f < x.frame; }), std::move(k));
         }
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::ensure_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = vector_layer(comp, layerId);
+    if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe de forma");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    VectorPath& p = l->shape.vector.groups[group].paths[path];
+    if (p.kind != VectorPathKind::Free) vector::make_editable(p);
+    const i64 local = l->local_time(playback_.current()).value;
+    PathKey nk;
+    nk.frame = local;
+    nk.path = vector::path_at(p, static_cast<f64>(local));
+    auto it = std::find_if(p.keys.begin(), p.keys.end(), [&](const PathKey& k) { return k.frame == local; });
+    if (it != p.keys.end()) {
+        *it = std::move(nk);   // já havia keyframe aqui: regrava o valor do instante
+    } else {
+        p.keys.insert(std::upper_bound(p.keys.begin(), p.keys.end(), local,
+                                       [](i64 f, const PathKey& x) { return f < x.frame; }),
+                      std::move(nk));
     }
     project_->mark_dirty();
     request_render();
@@ -318,6 +346,24 @@ bool Engine::set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool
     return true;
 }
 
+bool Engine::ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = vector_layer(comp, layerId);
+    if (!l || group >= l->shape.vector.groups.size() || param >= kVecParamCount) return false;
+    f32* r = vector::param_ref(l->shape.vector.groups[group], param);
+    if (!r) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe vetorial");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const FrameIndex local = l->local_time(playback_.current());
+    Track& tr = l->tracks.get_or_create(TrackProperty::VectorParam, group, param);
+    const f32 atual = tr.keys.empty() ? *r : tr.sample(local);
+    (void)tr.set(local, vector::clamp_param(param, atual), Interpolation::Bezier);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 bool Engine::toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -416,6 +462,27 @@ bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing)
         if (param == 5) l->transform.anchor.x = value * 0.5f;
         if (param == 6) l->transform.anchor.y = value * 0.5f;
     }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = sdf_shape_layer(comp, layerId);
+    if (!l || param == 0 || param >= kShapeParamCount) return false;
+    f32* r = shape_param_ref(l->shape, param);
+    if (!r) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe da forma");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const FrameIndex local = l->local_time(playback_.current());
+    Track& tr = l->tracks.get_or_create(TrackProperty::ShapeParam, 0, param);
+    // COM keyframe aqui: regrava o valor AVALIADO (não apaga). É o que o
+    // losango do painel faz — "criar keyframe" nunca pode devolver a forma ao
+    // estado anterior só porque o quadro já tinha um.
+    const f32 atual = tr.keys.empty() ? *r : tr.sample(local);
+    (void)tr.set(local, clamp_shape_param(param, atual), Interpolation::Bezier);
     project_->mark_dirty();
     request_render();
     return true;

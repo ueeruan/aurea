@@ -1639,6 +1639,137 @@ AUREA_TEST(Gpu, ParticularParamKeyframesDriveTheRender) {
     AUREA_CHECK(shownLate > shownEarly * 3.0f);
 }
 
+// -----------------------------------------------------------------------------
+// Efeito + 3D
+// -----------------------------------------------------------------------------
+
+namespace {
+
+/// Um quadrado claro no meio da composição — a camada que tem de aparecer.
+LayerId lit_square(Scene3DRig& rig, f32 size = 90.0f) {
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    const LayerId id = comp->add_layer(LayerKind::Shape, "quadrado");
+    Layer* l = comp->layer(id);
+    l->shape.shapeType = 0;   // retângulo SDF
+    l->shape.bounds = Rect{0.0f, 0.0f, size, size};
+    l->shape.cornerRadius = 8.0f;
+    l->shape.fillColor = Vec4{1.0f, 1.0f, 1.0f, 1.0f};
+    l->shape.filled = true;
+    l->transform.anchor = Vec3{size * 0.5f, size * 0.5f, 0.0f};
+    l->transform.position = Vec3{160.0f, 90.0f, 0.0f};
+    l->end = FrameIndex{120};
+    return id;
+}
+
+void push_effect(Scene3DRig& rig, LayerId id, const char* key) {
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(id);
+    EffectInstance inst;
+    inst.id = l->alloc_effect_id();
+    inst.type = effect_type_id(key);
+    initialize_instance(inst, *gpu().effects.params(inst.type));
+    // Um raio de verdade: com o padrão (0) o desfoque é identidade e nem chega
+    // a montar passes — o teste passaria sem exercitar nada.
+    if (key && (std::strstr(key, "blur") || std::strstr(key, "glow")) && !inst.params.empty()) {
+        inst.params[0].constant.v[0] = 12.0f;
+    }
+    l->effects.push_back(std::move(inst));
+}
+
+/// Que tipo de camada entra no teste.
+enum class Camada { Forma, Imagem, Texto };
+
+/// Cria a camada do teste na composição atual.
+LayerId camada(Scene3DRig& rig, Camada tipo) {
+    if (tipo == Camada::Forma) return lit_square(rig);
+    if (tipo == Camada::Texto) {
+        auto id = rig.e.add_text("Aurea");
+        AUREA_CHECK(id.ok());
+        Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        Layer* l = comp->layer(LayerId::unpack(*id));
+        l->transform.position = Vec3{160.0f, 90.0f, 0.0f};
+        l->end = FrameIndex{120};
+        return LayerId::unpack(*id);
+    }
+    // Imagem: um quadrado claro 60×60 importado.
+    std::vector<u8> px(60 * 60 * 4, 255);
+    auto id = rig.e.import_image(px.data(), 60, 60, "quadrado.png", nullptr);
+    AUREA_CHECK(id.ok());
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*id));
+    l->transform.position = Vec3{160.0f, 90.0f, 0.0f};
+    l->end = FrameIndex{120};
+    return LayerId::unpack(*id);
+}
+
+/// Pixels acesos da camada, com/sem efeito e com/sem 3D.
+u32 lit_square_px(Camada tipo, bool threeD, const char* key, u32 howMany = 1) {
+    Scene3DRig rig(320, 180);
+    const LayerId id = camada(rig, tipo);
+    for (u32 i = 0; key && i < howMany; ++i) push_effect(rig, id, key);
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    comp->layer(id)->threeD = threeD;
+    Command c;
+    c.type = CommandType::PlaybackSeek;
+    c.seek.time = tick_at(FrameIndex{10}, 30.0);
+    AUREA_CHECK(rig.e.apply_command(c).ok());
+    const Box8 box = lit_box(rig.capture(320));
+    return box.w() * box.h();
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, EffectOnA3DLayerStillDraws) {
+    AUREA_REQUIRE_GPU();
+    // O caso relatado: camada -> efeito -> ligar 3D -> a camada some.
+    // Forma, imagem e texto, cada um com e sem 3D, com o mesmo desfoque.
+    for (Camada tipo : {Camada::Forma, Camada::Imagem, Camada::Texto}) {
+        const u32 semEfeito2D = lit_square_px(tipo, false, nullptr);
+        const u32 semEfeito3D = lit_square_px(tipo, true, nullptr);
+        const u32 comEfeito2D = lit_square_px(tipo, false, effect_keys::kGaussianBlur);
+        const u32 comEfeito3D = lit_square_px(tipo, true, effect_keys::kGaussianBlur);
+        std::printf("    camada %d: 2D %u, 3D %u, 2D+efeito %u, 3D+efeito %u\n",
+                    static_cast<int>(tipo), semEfeito2D, semEfeito3D, comEfeito2D, comEfeito3D);
+        AUREA_CHECK(semEfeito2D > 500u);
+        AUREA_CHECK(semEfeito3D > 500u);
+        AUREA_CHECK(comEfeito2D > 500u);
+        AUREA_CHECK(comEfeito3D > 500u);
+    }
+}
+
+AUREA_TEST(Gpu, SeveralEffectsKeepThe3DLayerVisible) {
+    AUREA_REQUIRE_GPU();
+    // Cada família de efeito passa por um caminho diferente no grafo (um passe
+    // só, brilho com passe extra, nitidez com dois alvos). Todos têm de
+    // entregar a textura da camada para a superfície 3D.
+    struct Caso { const char* key; const char* nome; };
+    const Caso casos[] = {
+        {effect_keys::kExposure, "exposicao"},
+        {effect_keys::kSaturation, "saturacao"},
+        {effect_keys::kGaussianBlur, "desfoque"},
+        {effect_keys::kSharpen, "nitidez"},
+        {effect_keys::kGlow, "brilho"},
+        {effect_keys::kDeepGlow, "brilho profundo"},
+    };
+    for (const Caso& c : casos) {
+        const u32 sem = lit_square_px(Camada::Forma, false, c.key);
+        const u32 com = lit_square_px(Camada::Forma, true, c.key);
+        std::printf("    %-16s 2D %u; 3D %u\n", c.nome, sem, com);
+        AUREA_CHECK(sem > 500u);
+        AUREA_CHECK(com > 500u);
+    }
+}
+
+AUREA_TEST(Gpu, EffectStackOnA3DLayerStillDraws) {
+    AUREA_REQUIRE_GPU();
+    // Dois efeitos + 3D: o empilhamento não pode cortar a textura da camada.
+    const u32 um = lit_square_px(Camada::Forma, true, effect_keys::kGaussianBlur, 1);
+    const u32 dois = lit_square_px(Camada::Forma, true, effect_keys::kGaussianBlur, 2);
+    std::printf("    pilha + 3D: um efeito %u; dois %u\n", um, dois);
+    AUREA_CHECK(um > 1000u);
+    AUREA_CHECK(dois > 1000u);
+}
+
 AUREA_TEST(Gpu, TransitionsFadeAndSlideAtTheEdges) {
     AUREA_REQUIRE_GPU();
     Scene3DRig rig(320, 180);

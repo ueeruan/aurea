@@ -1464,6 +1464,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             placement.compHeight = out.compHeight;
             placement.layerWidth = rl.source.width;
             placement.layerHeight = rl.source.height;
+            // Vai para a cena 3D (plano no mundo): o corte pela área visível da
+            // composição não se aplica — ver LayerPlacement::inScene3d.
+            placement.inScene3d = inScene3d;
             EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used]);
         }
         // FORA DA TELA: a caixa da camada (com o Transform dobrado) não toca a

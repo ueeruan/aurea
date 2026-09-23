@@ -87,6 +87,12 @@ struct LayerPlacement {
     u32  compHeight = 0;
     u32  layerWidth = 0;    ///< tamanho natural da layer (resolução cheia)
     u32  layerHeight = 0;
+    /// A camada é desenhada DENTRO da cena 3D (um plano no mundo), não na
+    /// composição. Aí a matriz `compFromLayer` não diz onde ela aparece: o
+    /// corte pela área visível da composição não vale, e usá-lo encolhia a
+    /// região que o efeito devolve — o brilho (que depende dela) saía 1x1 e a
+    /// camada 3D sumia.
+    bool inScene3d = false;
 };
 
 /// Retângulo, em pixels da layer, que o quadro inteiro da composição cobre

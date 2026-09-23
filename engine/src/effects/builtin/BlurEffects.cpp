@@ -67,7 +67,10 @@ void gaussian_pairs(f32 sigma, BlurUniforms& u) noexcept {
 Rect spread_region(const Rect& input, f32 extendX, f32 extendY, const LayerPlacement* placement,
                    f32 margin) noexcept {
     Rect r{input.x - extendX, input.y - extendY, input.w + 2.0f * extendX, input.h + 2.0f * extendY};
-    if (placement && placement->compWidth && placement->compHeight) {
+    // Camada na cena 3D: a posição dela é o plano no mundo, não a matriz 2D da
+    // composição — cortar por ela encolheria a região para 1x1 e a camada
+    // desapareceria atrás do efeito.
+    if (placement && !placement->inScene3d && placement->compWidth && placement->compHeight) {
         Rect vis = visible_layer_rect(*placement);
         if (vis.w > 0.0f && vis.h > 0.0f) {
             vis = Rect{vis.x - margin, vis.y - margin, vis.w + 2.0f * margin, vis.h + 2.0f * margin};

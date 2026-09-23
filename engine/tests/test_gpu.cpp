@@ -4430,3 +4430,60 @@ AUREA_TEST(Gpu, EffectsDoNotStretchTheLayerEdgeOutward) {
     }
     if (verbose) std::printf("\n");
 }
+
+// Keyframe em parâmetro do Aurea Particular: o valor do instante chega à UI e
+// ao desenho; e o projeto v21 (campos novos + trilha) volta igual do disco.
+AUREA_TEST(Gpu, ParticularParamsAnimateAndSurviveSaveReopen) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto id = rig.e.add_particles(0);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto key = [&](ParticleParam p, i64 f, f32 v) {
+        Command c;
+        c.type = CommandType::KeyframeInsert;
+        c.keyframe.track.layer = LayerId::unpack(*id);
+        c.keyframe.track.property = TrackProperty::ParticleParam;
+        c.keyframe.track.effectIndex = kInvalidIndex;
+        c.keyframe.track.effectParamIndex = static_cast<u32>(p);
+        c.keyframe.time = FrameIndex{f};
+        c.keyframe.value = v;
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    auto seekTo = [&](i64 f) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{f}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    key(ParticleParam::StartSize, 0, 2.0f);
+    key(ParticleParam::StartSize, 60, 40.0f);
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::ColorRandom), 0.5f));
+    AUREA_CHECK(rig.e.set_particle_param(*id, static_cast<u32>(ParticleParam::Collision),
+                                         static_cast<f32>(ParticleCollision::Sphere)));
+    std::vector<f32> q(static_cast<usize>(ParticleParam::Count));
+    seekTo(30);
+    AUREA_CHECK(rig.e.query_particles(*id, q.data()));
+    const f32 mid = q[static_cast<usize>(ParticleParam::StartSize)];
+    const Image8 small = rig.capture(320);
+    seekTo(60);
+    const Image8 big = rig.capture(320);
+    std::printf("    tamanho animado: quadro 30 = %.2f; cobertura 30 %.4f -> 60 %.4f\n", mid, coverage(small), coverage(big));
+    AUREA_CHECK_NEAR(mid, 21.0, 0.5);
+    AUREA_CHECK(coverage(big) > coverage(small));
+
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_particular.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seekTo(60);
+    const Image8 again = rig.capture(320);
+    AUREA_CHECK(rig.e.query_particles(*id, q.data()));
+    u32 worst = 0;
+    for (usize i = 0; i < big.rgba.size() && i < again.rgba.size(); ++i)
+        worst = std::max<u32>(worst, static_cast<u32>(std::abs(big.rgba[i] - again.rgba[i])));
+    std::printf("    salvo e reaberto: diferenca %u\n", worst);
+    AUREA_CHECK(worst == 0);
+    AUREA_CHECK_NEAR(q[static_cast<usize>(ParticleParam::ColorRandom)], 0.5, 1e-6);
+    AUREA_CHECK_NEAR(q[static_cast<usize>(ParticleParam::Collision)], static_cast<f64>(ParticleCollision::Sphere), 1e-6);
+    std::remove(path.c_str());
+}

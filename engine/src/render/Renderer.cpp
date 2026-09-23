@@ -1113,7 +1113,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             case LayerKind::ParticleSystem: {
                 // Partículas analíticas: o shader resolve tudo a partir do
                 // tempo local — aqui só o bloco de parâmetros.
-                const ParticleData& pd = l->particles;
+                // Os keyframes de ParticleParam ja entraram: sem trilha, o valor
+                // parado do campo.
+                const ParticleData pd = sampled_particles(*l, local);
                 const f32 lw = static_cast<f32>(comp.width()), lh = static_cast<f32>(comp.height());
                 const f32 tsec = static_cast<f32>(static_cast<f64>(local.value) / fps);
                 const f32 rate = std::clamp(pd.rate, 0.1f, 1000000.0f);   // o shader analítico aceita milhões

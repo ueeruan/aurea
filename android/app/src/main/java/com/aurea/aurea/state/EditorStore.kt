@@ -2387,11 +2387,49 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    /** Com keyframe, o valor vai para o keyframe do playhead (como nos efeitos). */
     fun setParticleParam(param: Int, value: Float) {
         val id = primary ?: return
-        engine.setParticleParam(id, param, value)
+        val d = detail ?: return
+        if (particleKeyed(id, param)) {
+            send { insertKeyframe(id, TrackProperty.PARTICLE_PARAM, NO_EFFECT, param, d.localPlayhead, value) }
+        } else {
+            engine.setParticleParam(id, param, value)
+        }
         refreshDetail()
     }
+
+    /** Losango de keyframe de um parâmetro do Aurea Particular. */
+    fun toggleParticleKeyframe(param: Int) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val here = (keyframes[id] ?: emptyList()).filter {
+            it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param && it.time == d.localPlayhead
+        }
+        group(if (here.isNotEmpty()) "remover keyframe" else "adicionar keyframe") {
+            if (here.isNotEmpty()) {
+                here.forEach { deleteKeyframe(id, it.property, it.effectIndex, it.paramIndex, it.time) }
+            } else {
+                insertKeyframe(id, TrackProperty.PARTICLE_PARAM, NO_EFFECT, param, d.localPlayhead,
+                    particles?.getOrNull(param) ?: 0f)
+            }
+        }
+    }
+
+    /** Keyframe neste instante exatamente (para o losango cheio). */
+    fun particleKeyHere(param: Int): Boolean {
+        val id = primary ?: return false
+        val d = detail ?: return false
+        return (keyframes[id] ?: emptyList()).any {
+            it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param && it.time == d.localPlayhead
+        }
+    }
+
+    /** A trilha do parâmetro existe (animado em algum lugar da timeline). */
+    fun particleKeyed(id: Long, param: Int): Boolean =
+        (keyframes[id] ?: emptyList()).any {
+            it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param
+        }
 
     // --- Remapeamento de tempo -----------------------------------------------------------
     /** Rampa pronta (0 linear, 1 suave, 2 herói, 3 acelerar, 4 desacelerar); −1 = sem rampa. */

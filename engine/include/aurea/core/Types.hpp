@@ -199,6 +199,7 @@ enum class TrackProperty : u16 {
     TextAnimParam,     ///< parâmetro de animador de texto (effectIndex = animador, paramIndex = TextAnimParam)
     VectorParam,       ///< parâmetro de grupo vetorial (effectIndex = grupo, paramIndex = VectorParam)
     ShapeParam,        ///< parâmetro da forma (paramIndex = o mesmo de ShapeSetParam: 1 raio, 2 lados, 3 raio interno, 4 contorno, 5 largura, 6 altura)
+    ParticleParam,     ///< parâmetro do Aurea Particular (paramIndex = ParticleParam)
     _Count,
 };
 

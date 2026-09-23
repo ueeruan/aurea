@@ -624,6 +624,31 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.u32v(l.particles.collision);
     w.f32v(l.particles.collisionY);
     w.f32v(l.particles.collisionBounce);
+    // v21: Aurea Particular completo (espaço, fonte do emissor, textura/malha,
+    // aleatórios, colisão esfera/caixa, curvas ao longo da vida).
+    const ParticleData& pp = l.particles;
+    w.u32v(pp.emitterSpace);
+    w.u32v(pp.emitFrom);
+    w.u64v(pp.emitterSource);
+    w.u64v(pp.textureAsset);
+    w.u64v(pp.meshSource);
+    w.f32v(pp.auxProbability);
+    w.f32v(pp.trailWidth);
+    w.f32v(pp.trailOpacity);
+    w.f32v(pp.sizeRandom);
+    w.f32v(pp.opacityRandom);
+    w.f32v(pp.colorRandom);
+    w.vec3(pp.collisionCenter);
+    w.f32v(pp.collisionRadius);
+    w.vec3(pp.collisionBox);
+    w.f32v(pp.meshScale);
+    w.boolv(pp.meshLit);
+    w.u32v(pp.colorStopCount);
+    for (u32 i = 0; i < pp.colorStopCount; ++i) w.vec4(pp.colorStops[i]);
+    w.u32v(pp.sizeCurveCount);
+    for (u32 i = 0; i < pp.sizeCurveCount; ++i) { w.f32v(pp.sizeCurve[i].x); w.f32v(pp.sizeCurve[i].y); }
+    w.u32v(pp.opacityCurveCount);
+    for (u32 i = 0; i < pp.opacityCurveCount; ++i) { w.f32v(pp.opacityCurve[i].x); w.f32v(pp.opacityCurve[i].y); }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -635,7 +660,9 @@ void write_layer(ByteWriter& w, const Layer& l) {
 /// v18: expressões por trilha (fonte + ligada), no fim de cada layer.
 /// v19: camada vetorial (VectorData) e texto no caminho, no fim da camada.
 /// v20: Aurea Particular (emissor, fisica, rastro, aux e colisao).
-constexpr u32 kTimelineSectionVersion = 20;
+/// v21: Aurea Particular completo (espaço, emissor de camada/texto/caminho/malha,
+///      textura/malha, colisão esfera/caixa, curvas ao longo da vida).
+constexpr u32 kTimelineSectionVersion = 21;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -961,6 +988,32 @@ void read_layer(ByteReader& r, Layer& l) {
         l.particles.collision = r.u32v();
         l.particles.collisionY = r.f32v();
         l.particles.collisionBounce = r.f32v();
+    }
+    if (g_readingTimelineVersion >= 21) {
+        ParticleData& pp = l.particles;
+        pp.emitterSpace = r.u32v();
+        pp.emitFrom = r.u32v();
+        pp.emitterSource = r.u64v();
+        pp.textureAsset = r.u64v();
+        pp.meshSource = r.u64v();
+        pp.auxProbability = r.f32v();
+        pp.trailWidth = r.f32v();
+        pp.trailOpacity = r.f32v();
+        pp.sizeRandom = r.f32v();
+        pp.opacityRandom = r.f32v();
+        pp.colorRandom = r.f32v();
+        pp.collisionCenter = r.vec3();
+        pp.collisionRadius = r.f32v();
+        pp.collisionBox = r.vec3();
+        pp.meshScale = r.f32v();
+        pp.meshLit = r.boolv();
+        auto stops = [&]() { return std::min<u32>(r.u32v(), ParticleData::kMaxLifeStops); };
+        pp.colorStopCount = stops();
+        for (u32 i = 0; i < pp.colorStopCount && r.good(); ++i) pp.colorStops[i] = r.vec4();
+        pp.sizeCurveCount = stops();
+        for (u32 i = 0; i < pp.sizeCurveCount && r.good(); ++i) { pp.sizeCurve[i].x = r.f32v(); pp.sizeCurve[i].y = r.f32v(); }
+        pp.opacityCurveCount = stops();
+        for (u32 i = 0; i < pp.opacityCurveCount && r.good(); ++i) { pp.opacityCurve[i].x = r.f32v(); pp.opacityCurve[i].y = r.f32v(); }
     }
 }
 

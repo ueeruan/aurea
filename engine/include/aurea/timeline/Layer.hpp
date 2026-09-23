@@ -278,6 +278,11 @@ enum class ParticleEmitter : u32 {
     Disc,         ///< disco no plano XY
     Line,         ///< segmento orientado por `emitterRotation`
     Grid,         ///< grade `gridX` × `gridY` de pontos
+    // 8.2 — emissores a partir de outra coisa da cena (`emitterSource`):
+    Layer,        ///< pixels opacos de uma camada (superfície ou borda, `emitFrom`)
+    Text,         ///< os glifos de uma camada de texto
+    Path,         ///< o caminho da 1ª máscara (ou do vetor) de uma camada
+    Mesh,         ///< vértices / superfície / arestas de um modelo 3D
     Count,
 };
 
@@ -287,6 +292,8 @@ enum class ParticleShape : u32 {
     Square,       ///< quadrado
     Streak,       ///< esticada no sentido da velocidade (rastro de faísca)
     Soft,         ///< brilho radial bem suave (poeira, luz)
+    Texture,      ///< imagem do projeto (`textureAsset`)
+    Mesh,         ///< malha 3D instanciada (`meshSource`)
     Count,
 };
 
@@ -294,6 +301,8 @@ enum class ParticleShape : u32 {
 enum class ParticleCollision : u32 {
     None = 0,
     Plane,        ///< plano horizontal em `collisionY`
+    Sphere,       ///< esfera em `collisionCenter`, raio `collisionRadius` (quica por fora)
+    Box,          ///< caixa em `collisionCenter`, tamanho `collisionBox` (quica por fora)
     Count,
 };
 
@@ -324,6 +333,11 @@ enum class ParticleParam : u32 {
     Collision, CollisionY, CollisionBounce,
     // Render
     BlendMode, MaxParticles,
+    // 8.2 (v21) — só no fim: o número é contrato.
+    EmitterSpace, EmitFrom, AuxProbability, TrailWidth, TrailOpacity,
+    SizeRandom, OpacityRandom, ColorRandom,
+    CollisionX, CollisionZ, CollisionRadius, CollisionWidth, CollisionHeight, CollisionDepth,
+    MeshScale, MeshLit,
     Count,
 };
 
@@ -404,6 +418,32 @@ struct ParticleData {
     u32  maxParticles = 10000;
     u32  blendMode = 1;                       ///< aditivo por padrão
     bool collideEnvironment = false;
+
+    // --- 8.2 (v21) -------------------------------------------------------------
+    u32  emitterSpace = 0;                    ///< 0 = local (anda com a camada), 1 = mundo (fica onde nasceu)
+    u32  emitFrom = 1;                        ///< camada/malha: 0 vértices, 1 superfície, 2 bordas/arestas
+    u64  emitterSource = 0;                   ///< LayerId (pack) da camada que emite (Layer/Text/Path/Mesh)
+    u64  textureAsset = 0;                    ///< AssetId (pack) da imagem da partícula (Texture)
+    u64  meshSource = 0;                      ///< LayerId (pack) da camada de modelo 3D (partícula Mesh)
+    f32  auxProbability = 1.0f;               ///< 0..1: chance de cada primária gerar o aux
+    f32  trailWidth = 1.0f;                   ///< × tamanho da partícula
+    f32  trailOpacity = 1.0f;
+    f32  sizeRandom = 0.0f, opacityRandom = 0.0f, colorRandom = 0.0f;   ///< ±fração, por partícula
+    Vec3 collisionCenter{0.0f, 0.0f, 0.0f};   ///< esfera/caixa (px, a partir do centro do emissor)
+    f32  collisionRadius = 100.0f;
+    Vec3 collisionBox{200.0f, 200.0f, 200.0f};
+    f32  meshScale = 1.0f;
+    bool meshLit = true;                      ///< partícula de malha com PBR/luzes da cena
+
+    /// Ao longo da vida (0 pontos = as pontas início/fim de cima). Cor: (posição
+    /// 0..1, r, g, b) sRGB reta; tamanho e opacidade: (posição 0..1, multiplicador).
+    static constexpr u32 kMaxLifeStops = 8;
+    u32  colorStopCount = 0;
+    Vec4 colorStops[kMaxLifeStops]{};
+    u32  sizeCurveCount = 0;
+    Vec2 sizeCurve[kMaxLifeStops]{};
+    u32  opacityCurveCount = 0;
+    Vec2 opacityCurve[kMaxLifeStops]{};
 };
 
 struct CompositionRef {
@@ -414,6 +454,7 @@ struct CompositionRef {
 /// Etiquetas de cor: 0 = nenhuma + as 12 cores da paleta da UI (4 bits nas
 /// flags da linha da timeline).
 inline constexpr u8 kLayerLabelCount = 13;
+
 
 struct Layer {
     LayerKind kind = LayerKind::Unknown;
@@ -579,5 +620,92 @@ struct Layer {
     [[nodiscard]] u32 alloc_effect_id() noexcept { return nextEffectId++; }
     [[nodiscard]] u32 alloc_mask_id() noexcept { return nextMaskId++; }
 };
+
+/// Os parâmetros da camada de partículas com os keyframes aplicados.
+///
+/// Cada `ParticleParam` pode ter a própria trilha (`TrackProperty::ParticleParam`,
+/// `paramIndex` = o valor do enum). Sem trilha, vale o campo parado — por isso a
+/// cópia sai igual à de antes deste controle existir.
+[[nodiscard]] inline ParticleData sampled_particles(const Layer& l, FrameIndex local) noexcept {
+    ParticleData pd = l.particles;
+    auto sample = [&](ParticleParam p, f32 fallback) {
+        if (!l.tracks.find(TrackProperty::ParticleParam, kInvalidIndex, static_cast<u32>(p))) return fallback;
+        return l.tracks.sample_or(TrackProperty::ParticleParam, local, fallback, kInvalidIndex, static_cast<u32>(p));
+    };
+    auto count = [&](ParticleParam p, u32 fallback) {
+        return static_cast<u32>(std::max(0.0f, std::round(sample(p, static_cast<f32>(fallback)))));
+    };
+    pd.emitterType = count(ParticleParam::EmitterType, pd.emitterType);
+    pd.emitterSize.x = sample(ParticleParam::EmitterWidth, pd.emitterSize.x);
+    pd.emitterSize.y = sample(ParticleParam::EmitterHeight, pd.emitterSize.y);
+    pd.emitterRadius = sample(ParticleParam::EmitterRadius, pd.emitterRadius);
+    pd.emitterRotation = sample(ParticleParam::EmitterRotation, pd.emitterRotation);
+    pd.emitterDepth = sample(ParticleParam::EmitterDepth, pd.emitterDepth);
+    pd.gridX = count(ParticleParam::GridX, pd.gridX);
+    pd.gridY = count(ParticleParam::GridY, pd.gridY);
+    pd.emitFill = sample(ParticleParam::EmitFill, pd.emitFill ? 1.0f : 0.0f) > 0.5f;
+    pd.emitterOffset.x = sample(ParticleParam::EmitterOffsetX, pd.emitterOffset.x);
+    pd.emitterOffset.y = sample(ParticleParam::EmitterOffsetY, pd.emitterOffset.y);
+    pd.rate = sample(ParticleParam::Rate, pd.rate);
+    pd.burst = count(ParticleParam::Burst, pd.burst);
+    pd.lifetime = sample(ParticleParam::Lifetime, pd.lifetime);
+    pd.lifeRandom = sample(ParticleParam::LifeRandom, pd.lifeRandom);
+    pd.speed = sample(ParticleParam::Speed, pd.speed);
+    pd.speedRandom = sample(ParticleParam::SpeedRandom, pd.speedRandom);
+    pd.direction = sample(ParticleParam::Direction, pd.direction);
+    pd.spread = sample(ParticleParam::Spread, pd.spread);
+    pd.inheritVelocity = sample(ParticleParam::InheritVelocity, pd.inheritVelocity);
+    pd.seed = count(ParticleParam::Seed, pd.seed);
+    pd.particleType = count(ParticleParam::ParticleType, pd.particleType);
+    pd.softness = sample(ParticleParam::Softness, pd.softness);
+    pd.rotation = sample(ParticleParam::Rotation, pd.rotation);
+    pd.rotationRandom = sample(ParticleParam::RotationRandom, pd.rotationRandom);
+    pd.spin = sample(ParticleParam::Spin, pd.spin);
+    pd.startSize = sample(ParticleParam::StartSize, pd.startSize);
+    pd.endSize = sample(ParticleParam::EndSize, pd.endSize);
+    pd.startOpacity = sample(ParticleParam::StartOpacity, pd.startOpacity);
+    pd.endOpacity = sample(ParticleParam::EndOpacity, pd.endOpacity);
+    pd.gravity.x = sample(ParticleParam::GravityX, pd.gravity.x);
+    pd.gravity.y = sample(ParticleParam::GravityY, pd.gravity.y);
+    pd.gravity.z = sample(ParticleParam::GravityZ, pd.gravity.z);
+    pd.drag = sample(ParticleParam::Drag, pd.drag);
+    pd.wind.x = sample(ParticleParam::WindX, pd.wind.x);
+    pd.wind.y = sample(ParticleParam::WindY, pd.wind.y);
+    pd.turbulence = sample(ParticleParam::Turbulence, pd.turbulence);
+    pd.turbulenceScale = sample(ParticleParam::TurbulenceScale, pd.turbulenceScale);
+    pd.turbulenceSpeed = sample(ParticleParam::TurbulenceSpeed, pd.turbulenceSpeed);
+    pd.vortex = sample(ParticleParam::Vortex, pd.vortex);
+    pd.attractor = sample(ParticleParam::Attractor, pd.attractor);
+    pd.trailLength = sample(ParticleParam::TrailLength, pd.trailLength);
+    pd.trailTaper = sample(ParticleParam::TrailTaper, pd.trailTaper);
+    pd.auxCount = std::min<u32>(count(ParticleParam::AuxCount, pd.auxCount), 16u);
+    pd.auxAt = sample(ParticleParam::AuxAt, pd.auxAt);
+    pd.auxLife = sample(ParticleParam::AuxLife, pd.auxLife);
+    pd.auxSpeed = sample(ParticleParam::AuxSpeed, pd.auxSpeed);
+    pd.auxSize = sample(ParticleParam::AuxSize, pd.auxSize);
+    pd.auxSpread = sample(ParticleParam::AuxSpread, pd.auxSpread);
+    pd.collision = count(ParticleParam::Collision, pd.collision);
+    pd.collisionY = sample(ParticleParam::CollisionY, pd.collisionY);
+    pd.collisionBounce = sample(ParticleParam::CollisionBounce, pd.collisionBounce);
+    pd.blendMode = count(ParticleParam::BlendMode, pd.blendMode);
+    pd.maxParticles = std::max<u32>(1u, count(ParticleParam::MaxParticles, pd.maxParticles));
+    pd.emitterSpace = count(ParticleParam::EmitterSpace, pd.emitterSpace);
+    pd.emitFrom = count(ParticleParam::EmitFrom, pd.emitFrom);
+    pd.auxProbability = sample(ParticleParam::AuxProbability, pd.auxProbability);
+    pd.trailWidth = sample(ParticleParam::TrailWidth, pd.trailWidth);
+    pd.trailOpacity = sample(ParticleParam::TrailOpacity, pd.trailOpacity);
+    pd.sizeRandom = sample(ParticleParam::SizeRandom, pd.sizeRandom);
+    pd.opacityRandom = sample(ParticleParam::OpacityRandom, pd.opacityRandom);
+    pd.colorRandom = sample(ParticleParam::ColorRandom, pd.colorRandom);
+    pd.collisionCenter.x = sample(ParticleParam::CollisionX, pd.collisionCenter.x);
+    pd.collisionCenter.z = sample(ParticleParam::CollisionZ, pd.collisionCenter.z);
+    pd.collisionRadius = sample(ParticleParam::CollisionRadius, pd.collisionRadius);
+    pd.collisionBox.x = sample(ParticleParam::CollisionWidth, pd.collisionBox.x);
+    pd.collisionBox.y = sample(ParticleParam::CollisionHeight, pd.collisionBox.y);
+    pd.collisionBox.z = sample(ParticleParam::CollisionDepth, pd.collisionBox.z);
+    pd.meshScale = sample(ParticleParam::MeshScale, pd.meshScale);
+    pd.meshLit = sample(ParticleParam::MeshLit, pd.meshLit ? 1.0f : 0.0f) > 0.5f;
+    return pd;
+}
 
 } // namespace aurea

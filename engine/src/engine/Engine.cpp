@@ -2459,6 +2459,24 @@ bool Engine::set_particle_param(u64 layerId, u32 param, f32 v) noexcept {
         // --- Render ----------------------------------------------------------
         case ParticleParam::BlendMode: p.blendMode = static_cast<u32>(std::clamp(v, 0.0f, 1.0f)); break;
         case ParticleParam::MaxParticles: p.maxParticles = static_cast<u32>(std::clamp(v, 1.0f, 1000000.0f)); break;
+
+        // --- 8.2 (v21) -------------------------------------------------------
+        case ParticleParam::EmitterSpace: p.emitterSpace = v >= 0.5f ? 1u : 0u; break;
+        case ParticleParam::EmitFrom: p.emitFrom = static_cast<u32>(std::clamp(v, 0.0f, 2.0f)); break;
+        case ParticleParam::AuxProbability: p.auxProbability = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::TrailWidth: p.trailWidth = std::clamp(v, 0.0f, 8.0f); break;
+        case ParticleParam::TrailOpacity: p.trailOpacity = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::SizeRandom: p.sizeRandom = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::OpacityRandom: p.opacityRandom = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::ColorRandom: p.colorRandom = std::clamp(v, 0.0f, 1.0f); break;
+        case ParticleParam::CollisionX: p.collisionCenter.x = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::CollisionZ: p.collisionCenter.z = std::clamp(v, -20000.0f, 20000.0f); break;
+        case ParticleParam::CollisionRadius: p.collisionRadius = std::clamp(v, 0.0f, 20000.0f); break;
+        case ParticleParam::CollisionWidth: p.collisionBox.x = std::clamp(v, 0.0f, 40000.0f); break;
+        case ParticleParam::CollisionHeight: p.collisionBox.y = std::clamp(v, 0.0f, 40000.0f); break;
+        case ParticleParam::CollisionDepth: p.collisionBox.z = std::clamp(v, 0.0f, 40000.0f); break;
+        case ParticleParam::MeshScale: p.meshScale = std::clamp(v, 0.001f, 1000.0f); break;
+        case ParticleParam::MeshLit: p.meshLit = v >= 0.5f; break;
         default: return false;
     }
     project_->mark_dirty();
@@ -2473,7 +2491,9 @@ bool Engine::query_particles(u64 layerId, f32* out) noexcept {
     if (!l || l->kind != LayerKind::ParticleSystem || !out) return false;
     // UM valor por ParticleParam, na MESMA ordem do enum: a UI le pelo indice,
     // entao a ordem aqui e o outro lado do contrato de `set_particle_param`.
-    const ParticleData& p = l->particles;
+    // Com keyframe, sai o valor do instante: o controle da UI mostra o que a
+    // previa esta desenhando.
+    const ParticleData p = sampled_particles(*l, l->local_time(playback_.current()));
     out[0]  = static_cast<f32>(p.emitterType);
     out[1]  = p.emitterSize.x;
     out[2]  = p.emitterSize.y;
@@ -2528,6 +2548,23 @@ bool Engine::query_particles(u64 layerId, f32* out) noexcept {
     out[51] = p.collisionBounce;
     out[52] = static_cast<f32>(p.blendMode);
     out[53] = static_cast<f32>(p.maxParticles);
+    out[54] = static_cast<f32>(p.emitterSpace);
+    out[55] = static_cast<f32>(p.emitFrom);
+    out[56] = p.auxProbability;
+    out[57] = p.trailWidth;
+    out[58] = p.trailOpacity;
+    out[59] = p.sizeRandom;
+    out[60] = p.opacityRandom;
+    out[61] = p.colorRandom;
+    out[62] = p.collisionCenter.x;
+    out[63] = p.collisionCenter.z;
+    out[64] = p.collisionRadius;
+    out[65] = p.collisionBox.x;
+    out[66] = p.collisionBox.y;
+    out[67] = p.collisionBox.z;
+    out[68] = p.meshScale;
+    out[69] = p.meshLit ? 1.0f : 0.0f;
+    static_assert(static_cast<u32>(ParticleParam::Count) == 70, "query_particles: um valor por ParticleParam");
     return true;
 }
 

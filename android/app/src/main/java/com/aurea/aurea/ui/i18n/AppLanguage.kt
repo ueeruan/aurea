@@ -20,12 +20,10 @@ import java.util.Locale
 enum class AppLanguage(val tag: String?, val display: String) {
     SYSTEM(null, ""),          // rótulo vem do catálogo (settings_language_system)
     PT_BR("pt-BR", "Português"),
-    EN("en", "English"),
-    ES("es", "Español"),
-    RU("ru", "Русский"),
-    HI("hi", "हिन्दी"),
-    ID("id", "Bahasa Indonesia"),
-    AR("ar", "العربية");
+    EN("en", "English");
+    // es, ru, hi, id e ar: catálogos parciais guardados em res/values-*, fora
+    // do APK por enquanto (androidResources.localeFilters). Voltam numa fase
+    // própria de idiomas.
 
     companion object {
         private const val PREFS = "aurea.settings"
@@ -59,7 +57,14 @@ enum class AppLanguage(val tag: String?, val display: String) {
          */
         fun wrap(base: Context): Context {
             val chosen = current(base)
-            val tag = chosen.tag ?: return base
+            // Sistema: português segue o sistema; QUALQUER outro idioma cai no
+            // inglês — e em LTR. Sem isso, um aparelho em árabe abriria com os
+            // textos em português (o padrão) e o layout espelhado em RTL.
+            val tag = chosen.tag ?: run {
+                val sys = base.resources.configuration.locales[0]
+                if (sys.language == "pt" || sys.language == "en") return base
+                "en"
+            }
             val locale = Locale.forLanguageTag(tag)
             Locale.setDefault(locale)
             val config = Configuration(base.resources.configuration).apply {

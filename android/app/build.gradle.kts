@@ -162,6 +162,9 @@ android {
         // A identidade da marca é referenciada por nome de recurso em vários
         // pontos; o encolhimento por nome de arquivo quebraria a splash.
         noCompress += listOf("aurea")
+        // Fase 8.1: por enquanto só pt-BR (padrão) e inglês. Os catálogos
+        // parciais dos outros idiomas ficam no repositório, fora do APK.
+        localeFilters += listOf("en", "pt")
     }
 
     lint {

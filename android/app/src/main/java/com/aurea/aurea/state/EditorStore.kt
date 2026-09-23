@@ -1,6 +1,9 @@
 package com.aurea.aurea.state
 
 import android.app.Application
+import com.aurea.aurea.ui.i18n.AppText
+import com.aurea.aurea.R
+import androidx.annotation.StringRes
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
@@ -131,6 +134,13 @@ private const val ERRC_STORAGE_FULL = 28
 
 private const val TAG = "AureaStore"
 
+/** O Application, para o texto do catálogo fora do Compose (mensagens do motor). */
+private lateinit var storeApp: Application
+
+/** Texto do catálogo no idioma do app (AppText respeita a escolha em Ajustes). */
+private fun appText(@StringRes id: Int, vararg args: Any): String =
+    if (args.isEmpty()) AppText.get(storeApp, id) else AppText.get(storeApp, id, *args)
+
 /**
  * Mensagem para humanos de um `aurea::Errc` (core/Result.hpp; os números têm
  * static_assert lá). Os códigos padronizados da Fase 8 (§115) — GPU sem
@@ -138,26 +148,26 @@ private const val TAG = "AureaStore"
  * dizem o que aconteceu e o que fazer; nenhum mostra só "erro 28".
  */
 fun humanError(code: Int): String = when (code) {
-    0 -> "Concluído."
-    3 -> "Arquivo não encontrado."
-    6, 24 -> "Recurso não suportado neste aparelho."
-    8, 9 -> "Memória insuficiente. Feche outros apps e tente de novo."
-    10 -> "Erro ao ler ou gravar o arquivo."
-    11, 13 -> "O arquivo está danificado."
-    12 -> "Este projeto foi salvo por uma versão mais nova do Aurea. Atualize o app para abri-lo."
-    14 -> "Não foi possível decodificar a mídia (DECODER_FAILED)."
-    15 -> "Falha ao codificar o vídeo."
-    16 -> "Codec de vídeo não suportado por este aparelho."
-    17 -> "Formato de arquivo não suportado."
-    18 -> "A mídia original não está mais no aparelho."
-    19 -> "A GPU foi reiniciada. Tente de novo."
-    20 -> "Memória de vídeo (GPU) insuficiente. Baixe a qualidade do preview ou feche outros apps."
-    25 -> "Cancelado."
-    28 -> "Sem espaço no aparelho. Libere espaço e tente de novo — o que já estava salvo continua intacto."
-    29 -> "O arquivo de mídia está danificado ou incompleto."
-    30 -> "O projeto está danificado e não há cópia válida para recuperar."
-    31 -> "Este aparelho não tem codificador para essa configuração de exportação."
-    else -> "Erro inesperado (código $code)."
+    0 -> appText(R.string.msg_concluido)
+    3 -> appText(R.string.msg_arquivo_nao_encontrado)
+    6, 24 -> appText(R.string.msg_recurso_nao_suportado_neste_aparelho)
+    8, 9 -> appText(R.string.msg_memoria_insuficiente_feche_outros_apps_e)
+    10 -> appText(R.string.msg_erro_ao_ler_ou_gravar_o)
+    11, 13 -> appText(R.string.msg_o_arquivo_esta_danificado)
+    12 -> appText(R.string.msg_este_projeto_foi_salvo_por_uma)
+    14 -> appText(R.string.msg_nao_foi_possivel_decodificar_a_midia)
+    15 -> appText(R.string.msg_falha_ao_codificar_o_video)
+    16 -> appText(R.string.msg_codec_de_video_nao_suportado_por)
+    17 -> appText(R.string.msg_formato_de_arquivo_nao_suportado)
+    18 -> appText(R.string.msg_a_midia_original_nao_esta_mais)
+    19 -> appText(R.string.msg_a_gpu_foi_reiniciada_tente_de)
+    20 -> appText(R.string.msg_memoria_de_video_gpu_insuficiente_baixe)
+    25 -> appText(R.string.msg_cancelado)
+    28 -> appText(R.string.msg_sem_espaco_no_aparelho_libere_espaco)
+    29 -> appText(R.string.msg_o_arquivo_de_midia_esta_danificado)
+    30 -> appText(R.string.msg_o_projeto_esta_danificado_e_nao)
+    31 -> appText(R.string.msg_este_aparelho_nao_tem_codificador_para)
+    else -> appText(R.string.msg_erro_inesperado_codigo, code)
 }
 
 /** Grava texto atomicamente: temporário → sync → rename (o sidecar nunca fica pela metade). */
@@ -184,6 +194,7 @@ private const val MASK_HEADER = 12
 const val VECTOR_SHAPE_TYPE = 11
 
 class EditorStore(app: Application) : AndroidViewModel(app) {
+    init { storeApp = app }
 
     private val engine = AureaEngine.create(app)
 
@@ -418,7 +429,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         effectPreviews = EffectPreviewStore(dirs.cache, installStamp(), ::renderEffectPreview)
                         startStatusLoop()
                     } else {
-                        errorMessage = "Não foi possível iniciar o motor gráfico (Vulkan) neste aparelho."
+                        errorMessage = appText(R.string.msg_nao_foi_possivel_iniciar_o_motor)
                     }
                 }
             }
@@ -480,7 +491,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Esquece a sondagem guardada: a próxima abertura mede o aparelho de novo. */
     fun remeasureDevice() {
         com.aurea.aurea.engine.DeviceProfile.forget(getApplication())
-        showToast("O aparelho será medido de novo na próxima vez que o Aurea abrir")
+        showToast(appText(R.string.msg_o_aparelho_sera_medido_de_novo))
     }
 
     private data class Dirs(val cache: File, val projects: File, val thumbs: File)
@@ -506,7 +517,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 return
             }
             if (!engine.attachSurface(surface, width, height)) {
-                errorMessage = "O preview não conseguiu usar a superfície de vídeo."
+                errorMessage = appText(R.string.msg_o_preview_nao_conseguiu_usar_a)
             }
         }
     }
@@ -828,7 +839,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             autosaving = false
             if (code != 0) {
                 autosaveRetryAfterNs = System.nanoTime() + AUTOSAVE_RETRY_NS
-                if (code != lastAutosaveError) errorMessage = "Salvamento automático falhou: ${humanError(code)}"
+                if (code != lastAutosaveError) errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code))
             } else {
                 autosaveRetryAfterNs = 0L
             }
@@ -1040,7 +1051,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun addVectorLayer(preset: Int): Long {
         val id = engine.addVectorLayer(preset)
         if (id < 0) {
-            errorMessage = "Não foi possível criar a camada vetorial (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camada, -id)
             return -1
         }
         refreshNow()
@@ -1152,7 +1163,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val target = if (freehandLayer != 0L && layers.any { it.id == freehandLayer }) freehandLayer else 0L
         val id = engine.addFreehandPath(target, xy, 1.5f)
         if (id < 0) {
-            errorMessage = "Não foi possível criar o desenho (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_desenho, -id)
             return
         }
         freehandLayer = id
@@ -1167,13 +1178,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 runCatching { getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
             }
             if (bytes == null || bytes.isEmpty()) {
-                errorMessage = "Não foi possível ler o SVG."
+                errorMessage = appText(R.string.msg_nao_foi_possivel_ler_o_svg)
                 return@launch
             }
             val name = displayName(uri)?.substringBeforeLast('.') ?: "SVG"
             val id = engine.importSvg(bytes, name)
             if (id < 0) {
-                errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) "SVG sem formas suportadas." else "Não foi possível importar o SVG (erro ${-id})."
+                errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) appText(R.string.msg_svg_sem_formas_suportadas) else appText(R.string.msg_nao_foi_possivel_importar_o_svg, -id)
                 return@launch
             }
             refreshNow()
@@ -1185,7 +1196,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setTextPath(pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean) {
         val id = primary ?: return
         if (!engine.setTextPath(id, pathLayer, offset, perpendicular, reverse)) {
-            showToast("A guia precisa ser uma camada vetorial")
+            showToast(appText(R.string.msg_a_guia_precisa_ser_uma_camada))
         }
         refreshNow()
     }
@@ -1197,7 +1208,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun addText3D(): Long {
         val id = engine.addText3d("Texto", 0.25f, 1, 1f, 1f, 1f)
         if (id < 0) {
-            errorMessage = "Não foi possível criar o texto 3D (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_texto, -id)
             return -1
         }
         refreshNow()
@@ -1444,28 +1455,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun addAdjustmentLayer() {
         val id = engine.addNull(false)
         if (id < 0) {
-            errorMessage = "Não foi possível criar a camada de ajuste (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camada_2, -id)
             return
         }
         engine.setLayerAdjustment(id, true)
         renameLayer(id, "Camada de ajuste")
         refreshNow()
         select(id)
-        showToast("Camada de ajuste: adicione efeitos nela")
+        showToast(appText(R.string.msg_camada_de_ajuste_adicione_efeitos_nela))
     }
 
     /** Camada de ajuste: os efeitos dela passam a valer para tudo o que está abaixo. */
     fun setLayerAdjustment(layer: Long, on: Boolean) {
         if (!engine.setLayerAdjustment(layer, on)) return
         refreshNow()
-        showToast(if (on) "Camada de ajuste: os efeitos valem para as camadas abaixo" else "Camada de ajuste desligada")
+        showToast(if (on) appText(R.string.msg_camada_de_ajuste_os_efeitos_valem) else appText(R.string.msg_camada_de_ajuste_desligada))
     }
 
     /** Guia: aparece aqui no editor e fica fora do vídeo exportado. */
     fun setLayerGuide(layer: Long, on: Boolean) {
         if (!engine.setLayerGuide(layer, on)) return
         refreshNow()
-        showToast(if (on) "Guia: aparece no editor, não sai no export" else "Guia desligada: a camada volta ao export")
+        showToast(if (on) appText(R.string.msg_guia_aparece_no_editor_nao_sai) else appText(R.string.msg_guia_desligada_a_camada_volta_ao))
     }
 
     /** Etiqueta de cor (0 = nenhuma, 1..12 = paleta da casca). */
@@ -1880,7 +1891,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val id = withContext(Dispatchers.IO) { engine.importVideo(uri.toString(), name) }
             busyMessage = null
             if (id < 0) {
-                errorMessage = "Não foi possível importar o vídeo. ${humanError((-id).toInt())}"
+                errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video, humanError((-id).toInt()))
                 return@launch
             }
             refreshNow()
@@ -1918,12 +1929,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = layer ?: return
         val created = engine.extractAudio(id)
         if (created < 0) {
-            errorMessage = "Este vídeo não tem som para extrair."
+            errorMessage = appText(R.string.msg_este_video_nao_tem_som_para)
             return
         }
         refreshNow()
         select(created)
-        showToast("Áudio extraído · o vídeo ficou mudo")
+        showToast(appText(R.string.msg_audio_extraido_o_video_ficou_mudo))
     }
 
     /** Waveform de uma camada (ver `Engine::query_waveform`). 0 = sem som / motor não pronto. */
@@ -1940,7 +1951,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun addText(): Long {
         val id = engine.addText("Texto")
         if (id < 0) {
-            errorMessage = "Não foi possível criar o texto (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_texto_2, -id)
             return -1
         }
         refreshNow()
@@ -2036,7 +2047,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun importHdri(uri: Uri) {
         val name = displayName(uri) ?: "ambiente.hdr"
         if (!name.lowercase().endsWith(".hdr")) {
-            errorMessage = "Use um HDRI .hdr (Radiance)."
+            errorMessage = appText(R.string.msg_use_um_hdri_hdr_radiance)
             return
         }
         busyMessage = "Carregando o HDRI…"
@@ -2046,8 +2057,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 engine.importHdri(file.absolutePath)
             }
             busyMessage = null
-            if (id < 0) errorMessage = "Não deu para ler esse HDRI (${if (id == -1_000L) "arquivo" else "erro ${-id}"})."
-            else showToast("HDRI aplicado aos modelos 3D")
+            if (id < 0) errorMessage = if (id == -1_000L) appText(R.string.msg_hdri_unreadable_file) else appText(R.string.msg_hdri_unreadable_error, -id)
+            else showToast(appText(R.string.msg_hdri_aplicado_aos_modelos_3d))
             refreshNow()
         }
     }
@@ -2074,24 +2085,24 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (ids.isEmpty()) return
         val id = engine.precompose(ids.toLongArray())
         if (id < 0) {
-            errorMessage = "Não foi possível agrupar (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_agrupar_erro, -id)
             return
         }
         refreshNow()
         select(id)
-        showToast("Agrupado · toque em Editar o grupo para mexer dentro")
+        showToast(appText(R.string.msg_agrupado_toque_em_editar_o_grupo))
     }
 
     /** "Desagrupar": as camadas voltam para cá, no mesmo lugar e tempo da tela. */
     fun ungroupPrecomp(layer: Long) {
         val why = engine.ungroupPrecomp(layer)
         if (why != null) {
-            errorMessage = "Não dá para desagrupar: $why (o resultado mudaria)."
+            errorMessage = appText(R.string.msg_nao_da_para_desagrupar_o_resultado, why)
             return
         }
         selection = LinkedHashSet()
         refreshNow()
-        showToast("Desagrupado")
+        showToast(appText(R.string.msg_desagrupado))
     }
 
     fun openPrecomp(layer: Long) {
@@ -2117,11 +2128,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun beginPointPick(stabilize: Boolean) {
         val row = layers.firstOrNull { it.id == primary }
         if (row == null || row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
-            showToast("Escolha uma camada de vídeo")
+            showToast(appText(R.string.msg_escolha_uma_camada_de_video))
             return
         }
         pointPick = stabilize
-        showToast("Toque no ponto a seguir (um detalhe com contraste)")
+        showToast(appText(R.string.msg_toque_no_ponto_a_seguir_um))
     }
 
     /** Mira do rastreio de ponto (px da composição): segue o dedo; no rastreio, fica no ponto. */
@@ -2136,7 +2147,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         pointPick = null
         if (tracking) { pickCursor = null; return }
         tracking = true
-        showToast(if (stabilize) "Estabilizando…" else "Rastreando o ponto…")
+        showToast(if (stabilize) appText(R.string.msg_estabilizando) else appText(R.string.msg_rastreando_o_ponto))
         lifecycleThread.execute {
             val tracked = IntArray(1)
             val r = synchronized(lifecycleLock) { if (ready) engine.trackPoint(id, x, y, stabilize, tracked) else -1L }
@@ -2145,9 +2156,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 pickCursor = null
                 refreshNow()
                 when {
-                    r >= 0 && !stabilize -> { select(r); showToast("Rastreio: ${tracked[0]} quadros · o Nulo segue o ponto") }
-                    r >= 0 -> showToast("Estabilizado em ${tracked[0]} quadros")
-                    else -> showToast("Não deu para seguir este ponto (${tracked[0]} quadros). Tente um detalhe com mais contraste.")
+                    r >= 0 && !stabilize -> { select(r); showToast(appText(R.string.msg_rastreio_quadros_o_nulo_segue_o, tracked[0])) }
+                    r >= 0 -> showToast(appText(R.string.msg_estabilizado_em_quadros, tracked[0]))
+                    else -> showToast(appText(R.string.msg_nao_deu_para_seguir_este_ponto, tracked[0]))
                 }
             }
         }
@@ -2258,12 +2269,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun startMaskDrawing() {
         val id = primary ?: return
         val mid = engine.addMask(id, null, 0, false)
-        if (mid < 0) { showToast("Esta camada não aceita mais máscaras"); return }
+        if (mid < 0) { showToast(appText(R.string.msg_esta_camada_nao_aceita_mais_mascaras)); return }
         refreshNow()
         maskEdit = mid
         maskDrawing = true
         maskPoint = -1
-        showToast("Toque no palco para pôr pontos · arraste para curvar · toque no 1º ponto para fechar")
+        showToast(appText(R.string.msg_toque_no_palco_para_por_pontos))
     }
 
     /** Máscara pronta (0 retângulo, 1 elipse) em 70 % da camada, centrada. */
@@ -2288,7 +2299,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 cx, cy + ry, kx, 0f, -kx, 0f, cx - rx, cy, 0f, ky, 0f, -ky)
         }
         val mid = engine.addMask(id, pts, 4, true)
-        if (mid < 0) { showToast("Esta camada não aceita mais máscaras"); return }
+        if (mid < 0) { showToast(appText(R.string.msg_esta_camada_nao_aceita_mais_mascaras)); return }
         refreshNow()
         maskEdit = mid
         maskDrawing = false
@@ -2308,7 +2319,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun closeMaskPath() {
         val mid = maskEdit ?: return
         val m = masks?.find(mid) ?: return
-        if (m.count < 3) { showToast("Ponha pelo menos 3 pontos"); return }
+        if (m.count < 3) { showToast(appText(R.string.msg_ponha_pelo_menos_3_pontos)); return }
         setMaskPoints(mid, m.points, true, true)
         maskDrawing = false
         refreshNow()
@@ -2331,8 +2342,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleMaskKey(mask: Int) {
         val id = primary ?: return
         when (engine.toggleMaskPathKey(id, mask)) {
-            1 -> showToast("Keyframe do caminho no cabeçote")
-            0 -> showToast("Keyframe do caminho removido")
+            1 -> showToast(appText(R.string.msg_keyframe_do_caminho_no_cabecote))
+            0 -> showToast(appText(R.string.msg_keyframe_do_caminho_removido))
         }
         refreshNow()
     }
@@ -2342,26 +2353,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         val row = layers.firstOrNull { it.id == id }
         if (row == null || row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
-            showToast("O rastreio de máscara precisa de uma camada de vídeo")
+            showToast(appText(R.string.msg_o_rastreio_de_mascara_precisa_de))
             return
         }
         if (maskTracking || tracking) return
         maskTracking = true
-        showToast("Rastreando a máscara…")
+        showToast(appText(R.string.msg_rastreando_a_mascara))
         lifecycleThread.execute {
             val r = synchronized(lifecycleLock) { if (ready) engine.trackMask(id, mask, mode) else -1 }
             trackHandler.post {
                 maskTracking = false
                 refreshNow()
-                if (r >= 0) showToast("Máscara rastreada em $r quadros")
-                else showToast("Não deu para seguir a máscara. Ponha-a sobre um detalhe com contraste.")
+                if (r >= 0) showToast(appText(R.string.msg_mascara_rastreada_em_quadros, r))
+                else showToast(appText(R.string.msg_nao_deu_para_seguir_a_mascara))
             }
         }
     }
 
     fun setTrackMatte(matte: Long, mode: Int) {
         val id = primary ?: return
-        if (!engine.setTrackMatte(id, matte, mode)) showToast("Escolha outra camada como matte")
+        if (!engine.setTrackMatte(id, matte, mode)) showToast(appText(R.string.msg_escolha_outra_camada_como_matte))
         refreshNow()
     }
 
@@ -2373,7 +2384,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun addParticles(preset: Int = 0): Long {
         val id = engine.addParticles(preset)
         if (id < 0) {
-            errorMessage = "Não foi possível criar as partículas (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_as_particulas, -id)
             return -1
         }
         refreshNow()
@@ -2448,7 +2459,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setLayerMotionBlur(layer: Long, on: Boolean) {
         engine.setMotionBlur(layer, on)
         refreshNow()
-        showToast(if (on) "Desfoque de movimento ligado" else "Desfoque de movimento desligado")
+        showToast(if (on) appText(R.string.msg_desfoque_de_movimento_ligado) else appText(R.string.msg_desfoque_de_movimento_desligado))
     }
 
     // --- Rastreio de câmera 3D ------------------------------------------------------------
@@ -2472,7 +2483,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun startCameraTrack(mode: Int) {
         val id = primary ?: return
         if (!engine.startCameraTrack(id, mode)) {
-            errorMessage = "Não foi possível analisar esta camada (precisa ser um vídeo com pelo menos 10 quadros)."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_analisar_esta_camada)
             return
         }
         cameraTrackPoll?.cancel()
@@ -2511,12 +2522,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun applyCameraTrack() {
         val id = engine.applyCameraTrack()
         if (id < 0) {
-            errorMessage = "Não foi possível criar a câmera (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camera, -id)
             return
         }
         refreshNow()
         select(id)
-        showToast("Câmera rastreada criada · ligue modelos 3D ao Nulo da cena")
+        showToast(appText(R.string.msg_camera_rastreada_criada_ligue_modelos_3d))
     }
 
     /** Curva de tempo da camada principal (ver `query_time_remap`); nulo = desligada. */
@@ -2548,7 +2559,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun remapRemove(index: Int): Boolean {
         val id = primary ?: return false
         val ok = engine.removeTimeRemapKey(id, index)
-        if (!ok) showToast("A curva precisa de pelo menos dois pontos")
+        if (!ok) showToast(appText(R.string.msg_a_curva_precisa_de_pelo_menos))
         refreshNow()
         return ok
     }
@@ -2640,22 +2651,22 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (json == null) {
             showToast(
                 when (kind) {
-                    com.aurea.aurea.presets.PresetKind.Effects -> "Esta camada não tem efeitos"
-                    com.aurea.aurea.presets.PresetKind.Text -> "Só camada de texto tem estilo de texto"
-                    com.aurea.aurea.presets.PresetKind.Animation -> "Esta camada não tem keyframes de movimento"
-                    com.aurea.aurea.presets.PresetKind.Curve -> "Toque num keyframe (com o seguinte) da timeline primeiro"
-                    else -> "Nada para salvar"
+                    com.aurea.aurea.presets.PresetKind.Effects -> appText(R.string.msg_esta_camada_nao_tem_efeitos)
+                    com.aurea.aurea.presets.PresetKind.Text -> appText(R.string.msg_so_camada_de_texto_tem_estilo)
+                    com.aurea.aurea.presets.PresetKind.Animation -> appText(R.string.msg_esta_camada_nao_tem_keyframes_de)
+                    com.aurea.aurea.presets.PresetKind.Curve -> appText(R.string.msg_toque_num_keyframe_com_o_seguinte)
+                    else -> appText(R.string.msg_nada_para_salvar)
                 },
             )
             return false
         }
         val e = presets.save(kind, name, json)
-        showToast(if (e != null) "Preset \"${e.name}\" salvo" else "Não foi possível salvar o preset")
+        showToast(if (e != null) appText(R.string.msg_preset_salvo, e.name) else appText(R.string.msg_nao_foi_possivel_salvar_o_preset))
         return e != null
     }
 
     fun deletePreset(e: com.aurea.aurea.presets.PresetEntry) {
-        showToast(if (presets.delete(e)) "Preset \"${e.name}\" apagado" else "Não foi possível apagar")
+        showToast(if (presets.delete(e)) appText(R.string.msg_preset_apagado, e.name) else appText(R.string.msg_nao_foi_possivel_apagar))
     }
 
     /**
@@ -2670,7 +2681,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             com.aurea.aurea.presets.PresetKind.Caption -> {
                 val v = presets.jsonOf(e)?.let { engine.parseCaptionPreset(it) }
                 if (v == null || v.size < 15) {
-                    showToast("Preset de legenda inválido")
+                    showToast(appText(R.string.msg_preset_de_legenda_invalido))
                     return false
                 }
                 captions.settings = com.aurea.aurea.captions.CaptionSettings(
@@ -2681,9 +2692,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val id = primary
                 if (id != null && captions.layer == id && captions.captionCount > 0 && captions.words.isNotEmpty()) {
                     captions.generate()
-                    showToast("Legendas refeitas com \"${e.name}\"")
+                    showToast(appText(R.string.msg_legendas_refeitas_com, e.name))
                 } else {
-                    showToast("Estilo de legenda \"${e.name}\" escolhido")
+                    showToast(appText(R.string.msg_estilo_de_legenda_escolhido, e.name))
                 }
             }
             else -> {
@@ -2691,12 +2702,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val native = e.textPreset
                 if (native != null) {
                     if (!engine.applyTextPreset(id, native)) {
-                        showToast("Animação de texto só vale para camada de texto")
+                        showToast(appText(R.string.msg_animacao_de_texto_so_vale_para))
                         return false
                     }
                 } else {
                     val json = presets.jsonOf(e) ?: run {
-                        showToast("Arquivo do preset não encontrado")
+                        showToast(appText(R.string.msg_arquivo_do_preset_nao_encontrado))
                         return false
                     }
                     var duration = 0L
@@ -2708,13 +2719,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                     val err = engine.applyPreset(id, json, duration)
                     if (err != null) {
-                        showToast("Preset não aplicado: $err")
+                        showToast(appText(R.string.msg_preset_nao_aplicado, err))
                         return false
                     }
                 }
                 refreshNow()
                 refreshDetail()
-                showToast("\"${e.name}\" aplicado")
+                showToast(appText(R.string.msg_aplicado, e.name))
             }
         }
         presets.markUsed(e)
@@ -2874,7 +2885,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val name = displayName(uri) ?: "fonte.ttf"
         val ext = name.substringAfterLast('.', "ttf").lowercase()
         if (ext != "ttf" && ext != "otf") {
-            errorMessage = "Use uma fonte TTF ou OTF."
+            errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf)
             return
         }
         viewModelScope.launch {
@@ -2884,12 +2895,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             val item = line?.let { parseFont(it) }
             if (item == null) {
-                errorMessage = "Não deu para ler essa fonte."
+                errorMessage = appText(R.string.msg_nao_deu_para_ler_essa_fonte)
                 return@launch
             }
             fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
             applyTextFont(item)
-            showToast("Fonte ${item.family} importada")
+            showToast(appText(R.string.msg_fonte_importada, item.family))
         }
     }
 
@@ -2929,7 +2940,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setVectorBlur(layer: Long, on: Boolean) {
         engine.setVectorBlur(layer, if (on) 1f else 0f)
         refreshNow()
-        showToast(if (on) "Desfoque do movimento do vídeo ligado" else "Desfoque do movimento do vídeo desligado")
+        showToast(if (on) appText(R.string.msg_desfoque_do_movimento_do_video_ligado) else appText(R.string.msg_desfoque_do_movimento_do_video_desligado))
     }
 
     fun setCompositionMotionBlur(on: Boolean) {
@@ -2953,7 +2964,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (ids.isEmpty()) return
         val n = engine.copyLayers(ids.toLongArray())
         afterClipboard()
-        showToast(if (n == 1) "Camada copiada" else "$n camadas copiadas")
+        showToast(if (n == 1) appText(R.string.msg_camada_copiada) else appText(R.string.msg_camadas_copiadas, n))
     }
 
     fun pasteLayers() {
@@ -2964,16 +2975,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
         showToast(
             when {
-                n <= 0 -> "Nada para colar (a mídia não existe neste projeto)"
-                n == 1 -> "Camada colada no cabeçote"
-                else -> "$n camadas coladas no cabeçote"
+                n <= 0 -> appText(R.string.msg_nada_para_colar_a_midia_nao)
+                n == 1 -> appText(R.string.msg_camada_colada_no_cabecote)
+                else -> appText(R.string.msg_camadas_coladas_no_cabecote, n)
             },
         )
     }
 
     fun copyStyle() {
         val id = primary ?: return
-        if (engine.copyStyle(id)) showToast("Estilo copiado")
+        if (engine.copyStyle(id)) showToast(appText(R.string.msg_estilo_copiado))
         afterClipboard()
     }
 
@@ -2981,35 +2992,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (ids.isEmpty()) return
         val n = engine.pasteStyle(ids.toLongArray())
         refreshNow()
-        if (n > 0) showToast("Estilo colado")
+        if (n > 0) showToast(appText(R.string.msg_estilo_colado))
     }
 
     fun copyEffects() {
         val id = primary ?: return
         val n = engine.copyEffects(id)
         afterClipboard()
-        showToast(if (n > 0) "$n efeito(s) copiado(s)" else "Esta camada não tem efeitos")
+        showToast(if (n > 0) appText(R.string.msg_efeito_s_copiado_s, n) else appText(R.string.msg_esta_camada_nao_tem_efeitos))
     }
 
     fun pasteEffects(ids: Collection<Long> = selection) {
         if (ids.isEmpty()) return
         val n = engine.pasteEffects(ids.toLongArray())
         refreshNow()
-        if (n > 0) showToast("Efeitos colados")
+        if (n > 0) showToast(appText(R.string.msg_efeitos_colados))
     }
 
     fun copyKeyframes() {
         val id = primary ?: return
         val n = engine.copyKeyframes(id, playhead.toLong())
         afterClipboard()
-        showToast(if (n > 0) "$n keyframe(s) copiado(s)" else "Nenhum keyframe no cabeçote")
+        showToast(if (n > 0) appText(R.string.msg_keyframe_s_copiado_s, n) else appText(R.string.msg_nenhum_keyframe_no_cabecote))
     }
 
     fun pasteKeyframes(ids: Collection<Long> = selection) {
         if (ids.isEmpty()) return
         val n = engine.pasteKeyframes(ids.toLongArray(), playhead.toLong())
         refreshNow()
-        showToast(if (n > 0) "$n keyframe(s) colado(s) no cabeçote" else "Nenhuma propriedade compatível")
+        showToast(if (n > 0) appText(R.string.msg_keyframe_s_colado_s_no_cabecote, n) else appText(R.string.msg_nenhuma_propriedade_compativel))
     }
 
     // --- Modo Edição (timeline magnética) -------------------------------------------
@@ -3020,20 +3031,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleEditMode() {
         engine.setEditMode(!editMode)
         refreshNow()
-        showToast(if (editMode) "Modo Edição: a timeline fecha os espaços sozinha" else "Modo Composição: camadas livres no tempo")
+        showToast(if (editMode) appText(R.string.msg_modo_edicao_a_timeline_fecha_os) else appText(R.string.msg_modo_composicao_camadas_livres_no_tempo))
     }
 
     fun removeGaps() {
         val removed = engine.removeGaps()
         refreshNow()
         val fps = project.fps.takeIf { it > 0f } ?: 30f
-        showToast(if (removed > 0) "Espaços vazios removidos (${"%.1f".format(removed / fps)} s)" else "Não há espaços vazios")
+        showToast(if (removed > 0) appText(R.string.msg_gaps_removed, "%.1f".format(removed / fps)) else appText(R.string.msg_nao_ha_espacos_vazios))
     }
 
     fun trimProjectAtPlayhead() {
         if (engine.trimComposition(playhead.toLong())) {
             refreshNow()
-            showToast("Projeto aparado no cabeçote")
+            showToast(appText(R.string.msg_projeto_aparado_no_cabecote))
         }
     }
 
@@ -3099,7 +3110,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val f = clampFrame(frame)
         val on = engine.toggleMarker(f.toLong())
         refreshNow()
-        showToast(if (on) "Marca adicionada" else "Marca removida")
+        showToast(if (on) appText(R.string.msg_marca_adicionada) else appText(R.string.msg_marca_removida))
     }
 
     var detectingBeats by mutableStateOf(false)
@@ -3114,12 +3125,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary
         val row = layers.firstOrNull { it.id == id }
         if (id == null || row == null || (row.kind != com.aurea.aurea.ui.theme.LayerType.Audio.kind && row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind)) {
-            showToast("Escolha uma camada de áudio ou vídeo com som")
+            showToast(appText(R.string.msg_escolha_uma_camada_de_audio_ou))
             return
         }
         if (detectingBeats) return
         detectingBeats = true
-        showToast("Detectando batidas…")
+        showToast(appText(R.string.msg_detectando_batidas))
         lifecycleThread.execute {
             val bpm = DoubleArray(1)
             val n = synchronized(lifecycleLock) { if (ready) engine.detectBeats(id, bpm) else -1L }
@@ -3127,9 +3138,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 detectingBeats = false
                 refreshNow()
                 when {
-                    n > 0 -> showToast("$n batidas · ${bpm[0].roundToInt()} BPM")
-                    n == 0L -> showToast("Nenhuma batida clara neste som")
-                    else -> showToast("Não foi possível analisar o som (erro ${-n})")
+                    n > 0 -> showToast(appText(R.string.msg_batidas_bpm, n, bpm[0].roundToInt()))
+                    n == 0L -> showToast(appText(R.string.msg_nenhuma_batida_clara_neste_som))
+                    else -> showToast(appText(R.string.msg_nao_foi_possivel_analisar_o_som, -n))
                 }
             }
         }
@@ -3139,7 +3150,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun addNull(threeD: Boolean) {
         val id = engine.addNull(threeD)
         if (id < 0) {
-            errorMessage = "Não foi possível criar o nulo (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_nulo, -id)
             return
         }
         refreshNow()
@@ -3163,7 +3174,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         children.forEach { c -> send { setLayerParent(c, parent) } }
         endGesture()
         refreshNow()
-        if (parent != 0L) showToast("${children.size} camada(s) seguindo o pai escolhido")
+        if (parent != 0L) showToast(appText(R.string.msg_camada_s_seguindo_o_pai_escolhido, children.size))
     }
 
     /** Pais possíveis para todas: nenhuma das escolhidas nem descendente delas. */
@@ -3200,7 +3211,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun addShape(preset: Int) {
         val id = engine.addShape(preset)
         if (id < 0) {
-            errorMessage = "Não foi possível criar a forma (erro ${-id})."
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_forma, -id)
             return
         }
         refreshNow()
@@ -3264,12 +3275,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val fps = project.fps.takeIf { it > 0f } ?: 30f
         val created = engine.freezeFrame(id, playhead, (fps * 3f).toInt())
         if (created < 0) {
-            errorMessage = "Posicione o cabeçote sobre o vídeo para congelar o quadro."
+            errorMessage = appText(R.string.msg_posicione_o_cabecote_sobre_o_video)
             return
         }
         refreshNow()
         select(created)
-        showToast("Quadro congelado por 3 s")
+        showToast(appText(R.string.msg_quadro_congelado_por_3_s))
     }
 
     // --- Som da camada principal ---------------------------------------------
@@ -3345,7 +3356,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val name = displayName(uri) ?: "Modelo 3D"
         val ext = name.substringAfterLast('.', "").lowercase()
         if (ext !in setOf("glb", "gltf", "fbx", "obj")) {
-            errorMessage = "Esse arquivo não é um modelo 3D suportado (.glb, .gltf, .fbx ou .obj)."
+            errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
             return
         }
         busyMessage = "Importando modelo 3D…"
@@ -3355,12 +3366,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     kotlinx.coroutines.delay(150)
                     val p = engine.importModelProgress()
                     val phase = when (p / 1000) {
-                        1 -> "Lendo o arquivo"
-                        2 -> "Geometria"
-                        3 -> "Texturas"
-                        4 -> "Otimizando"
-                        5, 6 -> "Preparando"
-                        else -> "Importando"
+                        1 -> appText(R.string.msg_lendo_o_arquivo)
+                        2 -> appText(R.string.msg_geometria)
+                        3 -> appText(R.string.msg_texturas)
+                        4 -> appText(R.string.msg_otimizando)
+                        5, 6 -> appText(R.string.msg_preparando)
+                        else -> appText(R.string.msg_importando)
                     }
                     busyMessage = "$phase… ${(p % 1000) / 10}%"
                 }
@@ -3373,13 +3384,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             poll.cancel()
             busyMessage = null
             when {
-                id == -1_000L -> errorMessage = "Não consegui ler esse arquivo."
-                id < 0 -> errorMessage = "Não deu para importar o modelo: ${detail[0]?.trim()?.ifBlank { null } ?: humanError((-id).toInt())}"
+                id == -1_000L -> errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                id < 0 -> errorMessage = appText(R.string.msg_model_import_failed, detail[0]?.trim()?.ifBlank { null } ?: humanError((-id).toInt()))
                 else -> {
                     refreshNow()
                     select(id)
                     val warnings = detail[0]?.lines()?.filter { it.isNotBlank() }.orEmpty()
-                    if (warnings.isNotEmpty()) showToast("Modelo importado · ${warnings.size} aviso(s): ${warnings.first()}")
+                    if (warnings.isNotEmpty()) showToast(appText(R.string.msg_modelo_importado_aviso_s, warnings.size, warnings.first()))
                 }
             }
         }
@@ -3429,7 +3440,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             busyMessage = null
             if (id < 0) {
-                errorMessage = "Não foi possível importar a imagem."
+                errorMessage = appText(R.string.msg_nao_foi_possivel_importar_a_imagem)
                 return@launch
             }
             refreshNow()
@@ -3461,7 +3472,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val ok = withContext(Dispatchers.Default) { engine.newProject(width, height, fps, title) }
             if (!ok) {
-                errorMessage = "Não foi possível criar o projeto."
+                errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_projeto)
                 return@launch
             }
             val path = File(directories().projects, "${uniqueName(title)}.aurea").absolutePath
@@ -3475,7 +3486,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val code = withContext(Dispatchers.Default) { engine.loadProject(path) }
             if (code != 0) {
                 Log.w(TAG, "abrir projeto falhou: codigo $code")
-                errorMessage = "Não foi possível abrir o projeto. ${humanError(code)}"
+                errorMessage = appText(R.string.msg_nao_foi_possivel_abrir_o_projeto, humanError(code))
                 return@launch
             }
             val meta = readMeta(File(path))
@@ -3511,7 +3522,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val path = project.path ?: return
         viewModelScope.launch {
             val code = withContext(Dispatchers.IO) { saveBlocking(path) }
-            if (code != 0) errorMessage = "Não foi possível salvar. ${humanError(code)}"
+            if (code != 0) errorMessage = appText(R.string.msg_nao_foi_possivel_salvar, humanError(code))
             onDone?.invoke()
         }
     }
@@ -3579,7 +3590,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Sai do editor: salva (se mudou) e volta à Home. */
     fun closeProject() {
         if (exporter.busy) {
-            showToast("Aguarde a exportação terminar")
+            showToast(appText(R.string.msg_aguarde_a_exportacao_terminar))
             return
         }
         val path = project.path
@@ -3627,7 +3638,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 writeTextAtomic(metaFile, j.put("title", clean).toString())
             } catch (e: java.io.IOException) {
                 Log.w(TAG, "renomear projeto: sidecar nao gravado: ${e.message}")
-                withContext(Dispatchers.Main) { errorMessage = "Não foi possível renomear. ${humanError(ERRC_IO)}" }
+                withContext(Dispatchers.Main) { errorMessage = appText(R.string.msg_nao_foi_possivel_renomear, humanError(ERRC_IO)) }
             }
             withContext(Dispatchers.Main) { refreshProjects() }
         }
@@ -3680,7 +3691,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 dst.delete()
                 File(dst.absolutePath + META_SUFFIX).delete()
                 val code = if (e.message?.contains("ENOSPC") == true) ERRC_STORAGE_FULL else ERRC_IO
-                withContext(Dispatchers.Main) { errorMessage = "Não foi possível duplicar. ${humanError(code)}" }
+                withContext(Dispatchers.Main) { errorMessage = appText(R.string.msg_nao_foi_possivel_duplicar, humanError(code)) }
             }
             withContext(Dispatchers.Main) { refreshProjects() }
         }
@@ -3767,7 +3778,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         var freed = 0L
         for (k in storage.scan(exporter.busy)) freed += clearStorage(k.id)
         freed += clearStorage(MEMORY)
-        main.post { showToast("Cache limpo: ${"%.1f".format(freed / (1024.0 * 1024.0))} MB") }
+        main.post { showToast(appText(R.string.msg_cache_cleared, "%.1f".format(freed / (1024.0 * 1024.0)))) }
         return freed
     }
 

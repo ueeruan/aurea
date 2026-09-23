@@ -184,7 +184,7 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                 TileRow(
                     leading = { CupertinoIcon(CupertinoGlyph.PersonCropCircle, 21.dp, AureaColors.Accent) },
                     title = stringResource(R.string.settings_creator),
-                    subtitle = "Ruanzitwo  ·  @ofruanzitwo  ·  TikTok @ruanzitwo",
+                    subtitle = stringResource(R.string.home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo),
                 )
             }
             Spacer(Modifier.height(AureaDims.S4))

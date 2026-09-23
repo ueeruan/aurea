@@ -31,6 +31,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
@@ -65,7 +67,7 @@ internal fun Modifier.drawTopHairline(): Modifier =
 internal fun StageHint() {
     Box(Modifier.fillMaxSize().background(AureaColors.EditorPanel), contentAlignment = Alignment.Center) {
         Text(
-            "Toque num objeto na tela para editar.",
+            stringResource(R.string.editor_toque_num_objeto_tela_editar),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, color = AureaColors.Muted)),
@@ -200,27 +202,27 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             ) {
                 // Velocidade: só quem tem tempo de mídia (o painel é de vídeo e áudio).
                 if (type == LayerType.Video || type == LayerType.Audio) {
-                    DockTool(CupertinoGlyph.Speedometer, "Velocidade", 21) { openPanel(store, ui, EditorPanel.Speed) }
+                    DockTool(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 21) { openPanel(store, ui, EditorPanel.Speed) }
                 }
                 // As portas do grupo: entrar e desagrupar.
                 if (type == LayerType.Group) {
-                    DockTool(CupertinoGlyph.ArrowDownRightSquare, "Entrar no grupo", 20) { store.openPrecomp(l.id) }
-                    DockTool(ShellGlyph.SquareSplit2x2, "Desagrupar", 20) { store.ungroupPrecomp(l.id) }
+                    DockTool(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), 20) { store.openPrecomp(l.id) }
+                    DockTool(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), 20) { store.ungroupPrecomp(l.id) }
                 }
-                DockTool(CupertinoGlyph.ArrowRightToLine, "Aparar o início no cabeçote", 19) {
+                DockTool(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote), 19) {
                     timeEdit(store, l) { store.trimStart(l.id, store.playhead) }
                 }
-                DockTool(CupertinoGlyph.Scissors, "Dividir no cabeçote", 19) {
+                DockTool(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), 19) {
                     timeEdit(store, l) { store.splitAtPlayhead(listOf(l.id)) }
                 }
-                DockTool(CupertinoGlyph.ArrowLeftToLine, "Aparar o fim no cabeçote", 19) {
+                DockTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), 19) {
                     timeEdit(store, l) { store.trimEnd(l.id, store.playhead) }
                 }
                 // Mudo: toque liga/desliga; segurar abre o volume.
                 if (l.hasAudio) {
                     DockTool(
                         if (l.muted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2,
-                        if (l.muted) "Som desligado · toque para ligar, segure para o volume" else "Desligar o som · segure para o volume",
+                        if (l.muted) stringResource(R.string.editor_som_desligado_toque_ligar_segure_volume) else stringResource(R.string.editor_desligar_som_segure_volume),
                         20,
                         tint = if (l.muted) AureaColors.Accent else AureaColors.Text,
                         onLongClick = { openPanel(store, ui, EditorPanel.Audio) },
@@ -355,8 +357,8 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
             Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BatchTool(CupertinoGlyph.ArrowRightToLine, "Aparar o início no cabeçote") { batchTrim(store, start = true) }
-            BatchTool(CupertinoGlyph.Scissors, "Dividir no cabeçote") {
+            BatchTool(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote)) { batchTrim(store, start = true) }
+            BatchTool(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote)) {
                 val t = store.playhead
                 val covered = store.layers.any { it.id in store.selection && !it.locked && t > it.startFrame && t < it.endFrame }
                 if (covered) {
@@ -366,28 +368,28 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
                     store.showToast("Leve o cabeçote para dentro das camadas")
                 }
             }
-            BatchTool(CupertinoGlyph.ArrowLeftToLine, "Aparar o fim no cabeçote") { batchTrim(store, start = false) }
+            BatchTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote)) { batchTrim(store, start = false) }
             Box(Modifier.width(1.dp).height(24.dp).background(AureaColors.Border))
-            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignLeft, "Alinhar os inícios") { timeAlign(store, TimeAlign.Start) }
-            BatchTool(Icons.Rounded.Stairs, "Em escada: uma começa quando a de cima termina") { timeAlign(store, TimeAlign.Cascade) }
-            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignRight, "Alinhar os fins") { timeAlign(store, TimeAlign.End) }
+            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignLeft, stringResource(R.string.editor_alinhar_inicios)) { timeAlign(store, TimeAlign.Start) }
+            BatchTool(Icons.Rounded.Stairs, stringResource(R.string.editor_escada_comeca_quando_cima_termina)) { timeAlign(store, TimeAlign.Cascade) }
+            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignRight, stringResource(R.string.editor_alinhar_fins)) { timeAlign(store, TimeAlign.End) }
         }
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BatchTool(CupertinoGlyph.ArrowLeftToLine, "Alinhar à esquerda da tela", 18) { LayerOps.align(store, store.selection, LayerOps.Edge.Left) }
-            BatchTool(CupertinoGlyph.ArrowLeftRight, "Centralizar na horizontal", 18) { LayerOps.align(store, store.selection, LayerOps.Edge.CenterH) }
-            BatchTool(CupertinoGlyph.ArrowRightToLine, "Alinhar à direita da tela", 18) { LayerOps.align(store, store.selection, LayerOps.Edge.Right) }
-            BatchTool(CupertinoGlyph.ArrowUpToLine, "Alinhar ao topo da tela", 18) { LayerOps.align(store, store.selection, LayerOps.Edge.Top) }
-            BatchTool(CupertinoGlyph.ArrowUpArrowDown, "Centralizar na vertical", 18) { LayerOps.align(store, store.selection, LayerOps.Edge.CenterV) }
-            BatchTool(CupertinoGlyph.ArrowDownToLine, "Alinhar à base da tela", 18) { LayerOps.align(store, store.selection, LayerOps.Edge.Bottom) }
+            BatchTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_alinhar_esquerda_tela), 18) { LayerOps.align(store, store.selection, LayerOps.Edge.Left) }
+            BatchTool(CupertinoGlyph.ArrowLeftRight, stringResource(R.string.editor_centralizar_horizontal), 18) { LayerOps.align(store, store.selection, LayerOps.Edge.CenterH) }
+            BatchTool(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_alinhar_direita_tela), 18) { LayerOps.align(store, store.selection, LayerOps.Edge.Right) }
+            BatchTool(CupertinoGlyph.ArrowUpToLine, stringResource(R.string.editor_alinhar_topo_tela), 18) { LayerOps.align(store, store.selection, LayerOps.Edge.Top) }
+            BatchTool(CupertinoGlyph.ArrowUpArrowDown, stringResource(R.string.editor_centralizar_vertical), 18) { LayerOps.align(store, store.selection, LayerOps.Edge.CenterV) }
+            BatchTool(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_alinhar_base_tela), 18) { LayerOps.align(store, store.selection, LayerOps.Edge.Bottom) }
             val three = count >= 3
-            BatchTool(CupertinoGlyph.ArrowLeftRightSquare, "Distribuir na horizontal (vãos iguais)", 18, enabled = three) {
+            BatchTool(CupertinoGlyph.ArrowLeftRightSquare, stringResource(R.string.editor_distribuir_horizontal_vaos_iguais), 18, enabled = three) {
                 LayerOps.distribute(store, store.selection, horizontal = true)
             }
-            BatchTool(CupertinoGlyph.ArrowUpDownSquare, "Distribuir na vertical (vãos iguais)", 18, enabled = three) {
+            BatchTool(CupertinoGlyph.ArrowUpDownSquare, stringResource(R.string.editor_distribuir_vertical_vaos_iguais), 18, enabled = three) {
                 LayerOps.distribute(store, store.selection, horizontal = false)
             }
         }

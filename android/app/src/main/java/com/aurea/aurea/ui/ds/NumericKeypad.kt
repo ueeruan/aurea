@@ -19,6 +19,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -147,7 +149,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
     )
     fun fmt(v: Float) = comUnidade(numeroPtBr(v, request.decimals), request.unit)
     val hint = when {
-        text.isNotEmpty() && result == null -> "Conta incompleta"
+        text.isNotEmpty() && result == null -> stringResource(R.string.ds_conta_incompleta)
         result != null && clamped != null && clamped.toDouble() != result -> "Fica em ${fmt(clamped)}"
         result != null && !selectedAll && ValueExpression.hasOperation(text) -> "= ${fmt(result.toFloat())}"
         else -> ""
@@ -270,7 +272,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                         .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("Cancelar", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp)))
+                    Text(stringResource(R.string.ds_cancelar), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp)))
                 }
                 Spacer(Modifier.width(10.dp))
                 val ok = clamped != null

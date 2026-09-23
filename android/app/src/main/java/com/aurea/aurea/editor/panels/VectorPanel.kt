@@ -21,6 +21,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -68,7 +70,7 @@ internal fun VectorPanel(env: PanelEnv) {
     val store = env.store
     val doc = store.vectorDoc
     if (doc == null) {
-        PanelNotice("Escolha uma camada vetorial.", Modifier.padding(horizontal = 18.dp))
+        PanelNotice(stringResource(R.string.panel_escolha_camada_vetorial), Modifier.padding(horizontal = 18.dp))
         return
     }
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -103,7 +105,7 @@ internal fun VectorPanel(env: PanelEnv) {
             ScrollTabs(VECTOR_TABS, tab, onSelect = { tab = it; sel = SEL_NONE })
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 4.dp, end = 10.dp, bottom = 16.dp)) {
                 if (g == null) {
-                    KitHint("Esta camada ainda não tem grupos. Adicione um caminho acima.")
+                    KitHint(stringResource(R.string.panel_esta_camada_ainda_nao_tem_grupos))
                     return@Column
                 }
                 val s = Sel(sel) { sel = it }
@@ -116,7 +118,7 @@ internal fun VectorPanel(env: PanelEnv) {
                     5 -> OperatorsTab(env, g, s)
                     else -> {
                         Spacer(Modifier.height(8.dp))
-                        ActionCard("Abrir efeitos da camada", "Desfoque, brilho, cor e os outros efeitos aplicados a este vetor.") {
+                        ActionCard(stringResource(R.string.panel_abrir_efeitos_camada), stringResource(R.string.panel_desfoque_brilho_cor_outros_efeitos_aplicados)) {
                             env.onOpenPanel(EditorPanel.Effects)
                         }
                     }
@@ -158,7 +160,7 @@ private fun PathPicker(store: EditorStore) {
                 }
             }
         }
-        KitChip(if (adding) "Fechar" else "+ Adicionar", adding) { adding = !adding }
+        KitChip(if (adding) stringResource(R.string.panel_fechar) else stringResource(R.string.panel_adicionar), adding) { adding = !adding }
     }
     if (adding) {
         ChipRow {
@@ -197,20 +199,20 @@ private fun ShapeTab(env: PanelEnv, s: Sel) {
     }
     Spacer(Modifier.height(4.dp))
     Row(Modifier.fillMaxWidth().padding(start = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        ToolTile("Selecionar", editing && active == PointTool.SELECT, icon = { drawSelectIcon(it) }) { choose(PointTool.SELECT) }
-        ToolTile("Adicionar ponto", editing && active == PointTool.ADD, icon = { drawNodeIcon(it, plus = true) }) { choose(PointTool.ADD) }
-        ToolTile("Remover ponto", editing && active == PointTool.REMOVE, enabled = !free || n > 0, icon = { drawNodeIcon(it, plus = false) }) { choose(PointTool.REMOVE) }
-        ToolTile("Canto / Suave", editing && active == PointTool.CORNER, enabled = !free || n > 1, icon = { drawCornerIcon(it) }) { choose(PointTool.CORNER) }
+        ToolTile(stringResource(R.string.panel_selecionar), editing && active == PointTool.SELECT, icon = { drawSelectIcon(it) }) { choose(PointTool.SELECT) }
+        ToolTile(stringResource(R.string.panel_adicionar_ponto), editing && active == PointTool.ADD, icon = { drawNodeIcon(it, plus = true) }) { choose(PointTool.ADD) }
+        ToolTile(stringResource(R.string.panel_remover_ponto), editing && active == PointTool.REMOVE, enabled = !free || n > 0, icon = { drawNodeIcon(it, plus = false) }) { choose(PointTool.REMOVE) }
+        ToolTile(stringResource(R.string.panel_canto_suave), editing && active == PointTool.CORNER, enabled = !free || n > 1, icon = { drawCornerIcon(it) }) { choose(PointTool.CORNER) }
         val closed = at?.path?.closed == true
-        ToolTile(if (closed) "Abrir caminho" else "Fechar caminho", false, enabled = free && n >= 2, icon = { drawCloseIcon(it, closed) }) {
+        ToolTile(if (closed) stringResource(R.string.panel_abrir_caminho) else stringResource(R.string.panel_fechar_caminho), false, enabled = free && n >= 2, icon = { drawCloseIcon(it, closed) }) {
             VectorPathOps.toggleClosed(store)
         }
     }
     Spacer(Modifier.height(6.dp))
     if (!editing) {
-        KitHint(if (free) "Escolha uma ferramenta e toque no palco para editar os pontos." else "As ferramentas de pontos transformam a forma pronta em caminho livre.")
+        KitHint(if (free) stringResource(R.string.panel_escolha_ferramenta_toque_palco_editar_pontos) else stringResource(R.string.panel_ferramentas_pontos_transformam_forma_pronta_caminho))
     } else {
-        KitHint("Editando pontos no palco. Toque em Concluir (no palco) ao terminar.")
+        KitHint(stringResource(R.string.panel_editando_pontos_palco_toque_concluir_palco))
     }
     if (free) {
         val look = when {
@@ -218,36 +220,36 @@ private fun ShapeTab(env: PanelEnv, s: Sel) {
             at?.animated == true -> KeyframeLook.Animated
             else -> KeyframeLook.None
         }
-        PropertyCustomRow("Forma animada", selected = s.value == SEL_SHAPE, onSelect = { s.set(SEL_SHAPE) }, keyframe = look) {
+        PropertyCustomRow(stringResource(R.string.panel_forma_animada), selected = s.value == SEL_SHAPE, onSelect = { s.set(SEL_SHAPE) }, keyframe = look) {
             Text(
-                if (path.keys.isEmpty()) "Parada — toque no ◇ do trilho para animar" else "${path.keys.size} keyframes — editar no cabeçote grava ali",
+                if (path.keys.isEmpty()) stringResource(R.string.panel_parada_toque_trilho_animar) else "${path.keys.size} keyframes — editar no cabeçote grava ali",
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
             )
         }
     } else {
         if (path.kind == 1 || path.kind == 2) {
-            PathDimRow(env, "Largura", { it.w }, { p, x -> p.w = x }, 1f, 1f, 20000f, "px", 200f)
-            PathDimRow(env, "Altura", { it.h }, { p, x -> p.h = x }, 1f, 1f, 20000f, "px", 200f)
-            if (path.kind == 1) PathDimRow(env, "Raio", { it.roundness }, { p, x -> p.roundness = x }, 0.5f, 0f, 10000f, "px", 0f)
+            PathDimRow(env, stringResource(R.string.panel_largura), { it.w }, { p, x -> p.w = x }, 1f, 1f, 20000f, "px", 200f)
+            PathDimRow(env, stringResource(R.string.panel_altura), { it.h }, { p, x -> p.h = x }, 1f, 1f, 20000f, "px", 200f)
+            if (path.kind == 1) PathDimRow(env, stringResource(R.string.panel_raio), { it.roundness }, { p, x -> p.roundness = x }, 0.5f, 0f, 10000f, "px", 0f)
         } else {
-            PathDimRow(env, if (path.kind == 3) "Lados" else "Pontas", { it.points }, { p, x -> p.points = kotlin.math.round(x) }, 0.06f, 3f, 100f, "", 5f)
-            PathDimRow(env, if (path.kind == 3) "Raio" else "Raio externo", { it.outerRadius }, { p, x -> p.outerRadius = x }, 1f, 1f, 20000f, "px", 100f)
-            if (path.kind == 4) PathDimRow(env, "Raio interno", { it.innerRadius }, { p, x -> p.innerRadius = x }, 1f, 1f, 20000f, "px", 50f)
+            PathDimRow(env, if (path.kind == 3) stringResource(R.string.panel_lados) else stringResource(R.string.panel_pontas), { it.points }, { p, x -> p.points = kotlin.math.round(x) }, 0.06f, 3f, 100f, "", 5f)
+            PathDimRow(env, if (path.kind == 3) stringResource(R.string.panel_raio) else stringResource(R.string.panel_raio_externo), { it.outerRadius }, { p, x -> p.outerRadius = x }, 1f, 1f, 20000f, "px", 100f)
+            if (path.kind == 4) PathDimRow(env, stringResource(R.string.panel_raio_interno), { it.innerRadius }, { p, x -> p.innerRadius = x }, 1f, 1f, 20000f, "px", 50f)
         }
     }
     AdvancedSection(adv, { adv = !adv }) {
         if (!free && path.kind >= 3) {
-            PathDimRow(env, "Arredondar pontas", { it.outerRoundness }, { p, x -> p.outerRoundness = x }, 0.5f, -200f, 200f, "%", 0f)
-            PathDimRow(env, "Giro", { it.rotation }, { p, x -> p.rotation = x }, 0.5f, -3600f, 3600f, "°", 0f)
+            PathDimRow(env, stringResource(R.string.panel_arredondar_pontas), { it.outerRoundness }, { p, x -> p.outerRoundness = x }, 0.5f, -200f, 200f, "%", 0f)
+            PathDimRow(env, stringResource(R.string.panel_giro), { it.rotation }, { p, x -> p.rotation = x }, 0.5f, -3600f, 3600f, "°", 0f)
         }
-        ToggleLine("Inverter direção do caminho", path.reversed) { on ->
+        ToggleLine(stringResource(R.string.panel_inverter_direcao_caminho), path.reversed) { on ->
             store.editVectorGroup { gr -> gr.paths.getOrNull(store.vectorPath)?.reversed = on }
         }
         if (!free) {
-            ActionCard("Converter em caminho livre", "Mantém a forma e libera os pontos.") { store.makeVectorPathEditable() }
+            ActionCard(stringResource(R.string.panel_converter_caminho_livre), stringResource(R.string.panel_mantem_forma_libera_pontos)) { store.makeVectorPathEditable() }
             Spacer(Modifier.height(6.dp))
         }
-        KitTitle("Novo grupo (com preenchimento e borda próprios)")
+        KitTitle(stringResource(R.string.panel_novo_grupo_preenchimento_borda_proprios))
         ChipRow {
             PATH_KINDS.forEachIndexed { k, name ->
                 KitChip("+ $name", false) {
@@ -258,7 +260,7 @@ private fun ShapeTab(env: PanelEnv, s: Sel) {
         }
         Spacer(Modifier.height(6.dp))
         if (g.paths.size > 1) {
-            ActionCard("Apagar este caminho", null, danger = true) { store.removeVectorPath(store.vectorPath) }
+            ActionCard(stringResource(R.string.panel_apagar_este_caminho), null, danger = true) { store.removeVectorPath(store.vectorPath) }
             Spacer(Modifier.height(6.dp))
         }
         if ((store.vectorDoc?.groups?.size ?: 0) > 1) {
@@ -275,13 +277,13 @@ private fun ShapeTab(env: PanelEnv, s: Sel) {
 private fun FillTab(env: PanelEnv, g: VGroup, s: Sel) {
     val store = env.store
     var adv by remember { mutableStateOf(false) }
-    ToggleLine("Preencher", g.fillOn) { on -> store.editVectorGroup { it.fillOn = on } }
+    ToggleLine(stringResource(R.string.panel_preencher), g.fillOn) { on -> store.editVectorGroup { it.fillOn = on } }
     if (!g.fillOn) return
-    PaintEditor(env, g.fill, "preenchimento") { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.fill) } }
-    ParamRow(env, s, "Opacidade", VParam.FILL_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
+    PaintEditor(env, g.fill, stringResource(R.string.panel_preenchimento_6e8f)) { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.fill) } }
+    ParamRow(env, s, stringResource(R.string.panel_opacidade), VParam.FILL_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
     AdvancedSection(adv, { adv = !adv }) {
-        KitTitle("Onde os caminhos se cruzam")
-        ChoiceChips(listOf("Preencher tudo", "Alternar (deixa furos)"), g.fillRule, onSelect = { r -> store.editVectorGroup { it.fillRule = r } })
+        KitTitle(stringResource(R.string.panel_onde_caminhos_cruzam))
+        ChoiceChips(listOf(stringResource(R.string.panel_preencher_tudo), stringResource(R.string.panel_alternar_deixa_furos)), g.fillRule, onSelect = { r -> store.editVectorGroup { it.fillRule = r } })
         PaintAdvanced(env, g.fill) { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.fill) } }
     }
 }
@@ -290,17 +292,17 @@ private fun FillTab(env: PanelEnv, g: VGroup, s: Sel) {
 private fun StrokeTab(env: PanelEnv, g: VGroup, s: Sel) {
     val store = env.store
     var adv by remember { mutableStateOf(false) }
-    ToggleLine("Borda", g.strokeOn) { on -> store.editVectorGroup { it.strokeOn = on } }
+    ToggleLine(stringResource(R.string.panel_borda), g.strokeOn) { on -> store.editVectorGroup { it.strokeOn = on } }
     if (!g.strokeOn) return
     PaintEditor(env, g.stroke, "borda") { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.stroke) } }
-    ParamRow(env, s, "Largura", VParam.STROKE_WIDTH, 0.2f, 0f, 2000f, "px", 1, 6f)
-    ParamRow(env, s, "Opacidade", VParam.STROKE_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
+    ParamRow(env, s, stringResource(R.string.panel_largura), VParam.STROKE_WIDTH, 0.2f, 0f, 2000f, "px", 1, 6f)
+    ParamRow(env, s, stringResource(R.string.panel_opacidade), VParam.STROKE_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
     AdvancedSection(adv, { adv = !adv }) {
-        KitTitle("Pontas")
-        ChoiceChips(listOf("Retas", "Redondas", "Quadradas"), g.cap, onSelect = { c -> store.editVectorGroup { it.cap = c } })
-        KitTitle("Cantos")
-        ChoiceChips(listOf("Vivos", "Redondos", "Chanfrados"), g.join, onSelect = { j -> store.editVectorGroup { it.join = j } })
-        if (g.join == 0) GroupRow(env, "Limite do canto", { it.miter }, { gr, x -> gr.miter = x }, 0.05f, 1f, 100f, "", 1, 4f)
+        KitTitle(stringResource(R.string.panel_pontas))
+        ChoiceChips(listOf(stringResource(R.string.panel_retas), stringResource(R.string.panel_redondas), stringResource(R.string.panel_quadradas)), g.cap, onSelect = { c -> store.editVectorGroup { it.cap = c } })
+        KitTitle(stringResource(R.string.panel_cantos))
+        ChoiceChips(listOf(stringResource(R.string.panel_vivos), stringResource(R.string.panel_redondos), stringResource(R.string.panel_chanfrados)), g.join, onSelect = { j -> store.editVectorGroup { it.join = j } })
+        if (g.join == 0) GroupRow(env, stringResource(R.string.panel_limite_canto), { it.miter }, { gr, x -> gr.miter = x }, 0.05f, 1f, 100f, "", 1, 4f)
         PaintAdvanced(env, g.stroke) { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.stroke) } }
     }
 }
@@ -319,7 +321,7 @@ private fun PaintEditor(env: PanelEnv, paint: VPaint, what: String, edit: (Pair<
             p.stops += VStop(1f, 0f, 0f, 0f, 1f)
         }
     }
-    ChoiceChips(listOf("Cor sólida", "Degradê reto", "Degradê redondo"), paint.type, onSelect = { t ->
+    ChoiceChips(listOf(stringResource(R.string.panel_cor_solida), stringResource(R.string.panel_degrade_reto), stringResource(R.string.panel_degrade_redondo)), paint.type, onSelect = { t ->
         edit(false to { p: VPaint ->
             p.type = t
             if (t != 0) ensureStops(p)
@@ -342,7 +344,7 @@ private fun PaintEditor(env: PanelEnv, paint: VPaint, what: String, edit: (Pair<
         }
     } else {
         paint.stops.forEachIndexed { i, st ->
-            ColorLine(if (i == 0) "Cor inicial" else if (i == paint.stops.size - 1) "Cor final" else "Cor ${i + 1}", Color(st.r, st.g, st.b)) {
+            ColorLine(if (i == 0) stringResource(R.string.panel_cor_inicial) else if (i == paint.stops.size - 1) stringResource(R.string.panel_cor_final) else "Cor ${i + 1}", Color(st.r, st.g, st.b)) {
                 val live = BooleanArray(1)
                 env.openColor(ColorRequest(floatArrayOf(st.r, st.g, st.b, st.a),
                     onChange = { r, g, b, a ->
@@ -360,14 +362,14 @@ private fun PaintAdvanced(env: PanelEnv, paint: VPaint, edit: (Pair<Boolean, (VP
     if (paint.type == 0) return
     KitTitle("Degradê")
     ChipRow {
-        if (paint.stops.size < 8) KitChip("+ cor no meio", false) {
+        if (paint.stops.size < 8) KitChip(stringResource(R.string.panel_cor_meio), false) {
             edit(false to { p: VPaint ->
                 val a = p.stops[p.stops.size - 2]
                 val b = p.stops.last()
                 p.stops.add(p.stops.size - 1, VStop((a.pos + b.pos) / 2, (a.r + b.r) / 2, (a.g + b.g) / 2, (a.b + b.b) / 2, (a.a + b.a) / 2))
             })
         }
-        if (paint.stops.size > 2) KitChip("− cor do meio", false) { edit(false to { p: VPaint -> p.stops.removeAt(p.stops.size - 2) }) }
+        if (paint.stops.size > 2) KitChip(stringResource(R.string.panel_cor_meio_dd59), false) { edit(false to { p: VPaint -> p.stops.removeAt(p.stops.size - 2) }) }
     }
     PaintRow(env, paint, if (paint.type == 1) "Início X" else "Centro X", { it.sx }, { p, v -> p.sx = v }, -100f, edit)
     PaintRow(env, paint, if (paint.type == 1) "Início Y" else "Centro Y", { it.sy }, { p, v -> p.sy = v }, 0f, edit)
@@ -403,30 +405,30 @@ private fun PaintRow(
 private fun PathOpsTab(env: PanelEnv, g: VGroup, s: Sel) {
     val store = env.store
     var adv by remember { mutableStateOf(false) }
-    ToggleLine("Aparar (desenhar só um trecho)", g.trimOn) { on -> store.editVectorGroup { it.trimOn = on } }
+    ToggleLine(stringResource(R.string.panel_aparar_desenhar_so_trecho), g.trimOn) { on -> store.editVectorGroup { it.trimOn = on } }
     if (g.trimOn) {
-        ParamRow(env, s, "Início", VParam.TRIM_START, 0.3f, 0f, 100f, "%", 0, 0f)
-        ParamRow(env, s, "Fim", VParam.TRIM_END, 0.3f, 0f, 100f, "%", 0, 100f)
+        ParamRow(env, s, stringResource(R.string.panel_inicio), VParam.TRIM_START, 0.3f, 0f, 100f, "%", 0, 0f)
+        ParamRow(env, s, stringResource(R.string.panel_fim), VParam.TRIM_END, 0.3f, 0f, 100f, "%", 0, 100f)
     }
-    ToggleLine("Tracejado", g.dashes.isNotEmpty()) { on ->
+    ToggleLine(stringResource(R.string.panel_tracejado), g.dashes.isNotEmpty()) { on ->
         store.editVectorGroup { gr ->
             gr.dashes.clear()
             if (on) { gr.dashes += 24f; gr.dashes += 12f; gr.strokeOn = true }
         }
     }
     if (g.dashes.size >= 2) {
-        if (!g.strokeOn) KitHint("O tracejado aparece na borda: ligue a Borda.")
-        GroupRow(env, "Traço", { it.dashes.getOrElse(0) { 0f } }, { gr, x -> if (gr.dashes.size >= 2) gr.dashes[0] = x }, 0.3f, 0f, 5000f, "px", 0, 24f)
-        GroupRow(env, "Espaço", { it.dashes.getOrElse(1) { 0f } }, { gr, x -> if (gr.dashes.size >= 2) gr.dashes[1] = x }, 0.3f, 0f, 5000f, "px", 0, 12f)
+        if (!g.strokeOn) KitHint(stringResource(R.string.panel_tracejado_aparece_borda_ligue_borda))
+        GroupRow(env, stringResource(R.string.panel_traco), { it.dashes.getOrElse(0) { 0f } }, { gr, x -> if (gr.dashes.size >= 2) gr.dashes[0] = x }, 0.3f, 0f, 5000f, "px", 0, 24f)
+        GroupRow(env, stringResource(R.string.panel_espaco), { it.dashes.getOrElse(1) { 0f } }, { gr, x -> if (gr.dashes.size >= 2) gr.dashes[1] = x }, 0.3f, 0f, 5000f, "px", 0, 12f)
     }
     if (g.trimOn || g.dashes.size >= 2) {
         AdvancedSection(adv, { adv = !adv }) {
             if (g.trimOn) {
-                ParamRow(env, s, "Deslocar trecho", VParam.TRIM_OFFSET, 0.5f, -100000f, 100000f, "%", 0, 0f)
-                KitTitle("Com vários caminhos")
-                ChoiceChips(listOf("Cada um sozinho", "Um depois do outro"), g.trimMode, onSelect = { m -> store.editVectorGroup { it.trimMode = m } })
+                ParamRow(env, s, stringResource(R.string.panel_deslocar_trecho), VParam.TRIM_OFFSET, 0.5f, -100000f, 100000f, "%", 0, 0f)
+                KitTitle(stringResource(R.string.panel_varios_caminhos))
+                ChoiceChips(listOf(stringResource(R.string.panel_cada_sozinho), stringResource(R.string.panel_depois_outro)), g.trimMode, onSelect = { m -> store.editVectorGroup { it.trimMode = m } })
             }
-            if (g.dashes.size >= 2) ParamRow(env, s, "Deslocar traços", VParam.DASH_OFFSET, 0.5f, -100000f, 100000f, "px", 0, 0f)
+            if (g.dashes.size >= 2) ParamRow(env, s, stringResource(R.string.panel_deslocar_tracos), VParam.DASH_OFFSET, 0.5f, -100000f, 100000f, "px", 0, 0f)
         }
     }
 }
@@ -435,14 +437,14 @@ private fun PathOpsTab(env: PanelEnv, g: VGroup, s: Sel) {
 private fun TransformTab(env: PanelEnv, g: VGroup, s: Sel) {
     val store = env.store
     var adv by remember { mutableStateOf(false) }
-    KitHint("Move só este grupo dentro da camada.")
-    ParamRow(env, s, "Posição X", VParam.POS_X, 0.5f, -100000f, 100000f, "px", 0, 0f)
-    ParamRow(env, s, "Posição Y", VParam.POS_Y, 0.5f, -100000f, 100000f, "px", 0, 0f)
-    ParamRow(env, s, "Rotação", VParam.ROTATION, 0.5f, -3600f, 3600f, "°", 0, 0f)
-    ParamRow(env, s, "Escala", VParam.SCALE, 0.3f, -10000f, 10000f, "%", 0, 100f)
-    ParamRow(env, s, "Opacidade", VParam.OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
+    KitHint(stringResource(R.string.panel_move_so_este_grupo_dentro_camada))
+    ParamRow(env, s, stringResource(R.string.panel_posicao_x), VParam.POS_X, 0.5f, -100000f, 100000f, "px", 0, 0f)
+    ParamRow(env, s, stringResource(R.string.panel_posicao_y), VParam.POS_Y, 0.5f, -100000f, 100000f, "px", 0, 0f)
+    ParamRow(env, s, stringResource(R.string.panel_rotacao), VParam.ROTATION, 0.5f, -3600f, 3600f, "°", 0, 0f)
+    ParamRow(env, s, stringResource(R.string.panel_escala), VParam.SCALE, 0.3f, -10000f, 10000f, "%", 0, 100f)
+    ParamRow(env, s, stringResource(R.string.panel_opacidade), VParam.OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
     AdvancedSection(adv, { adv = !adv }) {
-        ToggleLine("Grupo visível", g.visible) { on -> store.editVectorGroup { it.visible = on } }
+        ToggleLine(stringResource(R.string.panel_grupo_visivel), g.visible) { on -> store.editVectorGroup { it.visible = on } }
     }
 }
 
@@ -450,22 +452,22 @@ private fun TransformTab(env: PanelEnv, g: VGroup, s: Sel) {
 private fun OperatorsTab(env: PanelEnv, g: VGroup, s: Sel) {
     val store = env.store
     var adv by remember { mutableStateOf(false) }
-    KitTitle("Juntar caminhos do grupo")
-    ChoiceChips(listOf("Não juntar", "Unir", "Subtrair", "Interseção", "Excluir sobreposição"), g.merge, onSelect = { m -> store.editVectorGroup { it.merge = m } })
-    if (g.paths.size < 2) KitHint("Juntar precisa de 2 caminhos no grupo: use + Adicionar em cima.")
-    ToggleLine("Repetir (cópias)", g.repOn) { on -> store.editVectorGroup { it.repOn = on } }
+    KitTitle(stringResource(R.string.panel_juntar_caminhos_grupo))
+    ChoiceChips(listOf(stringResource(R.string.panel_nao_juntar), stringResource(R.string.panel_unir), stringResource(R.string.panel_subtrair), stringResource(R.string.panel_intersecao), stringResource(R.string.panel_excluir_sobreposicao)), g.merge, onSelect = { m -> store.editVectorGroup { it.merge = m } })
+    if (g.paths.size < 2) KitHint(stringResource(R.string.panel_juntar_precisa_2_caminhos_grupo_use))
+    ToggleLine(stringResource(R.string.panel_repetir_copias), g.repOn) { on -> store.editVectorGroup { it.repOn = on } }
     if (!g.repOn) return
-    ParamRow(env, s, "Cópias", VParam.REP_COPIES, 0.05f, 0f, 500f, "", 0, 3f)
-    ParamRow(env, s, "Distância X", VParam.REP_POS_X, 0.5f, -100000f, 100000f, "px", 0, 120f)
-    ParamRow(env, s, "Distância Y", VParam.REP_POS_Y, 0.5f, -100000f, 100000f, "px", 0, 0f)
-    ParamRow(env, s, "Rotação", VParam.REP_ROTATION, 0.5f, -3600f, 3600f, "°", 0, 0f)
+    ParamRow(env, s, stringResource(R.string.panel_copias), VParam.REP_COPIES, 0.05f, 0f, 500f, "", 0, 3f)
+    ParamRow(env, s, stringResource(R.string.panel_distancia_x), VParam.REP_POS_X, 0.5f, -100000f, 100000f, "px", 0, 120f)
+    ParamRow(env, s, stringResource(R.string.panel_distancia_y), VParam.REP_POS_Y, 0.5f, -100000f, 100000f, "px", 0, 0f)
+    ParamRow(env, s, stringResource(R.string.panel_rotacao), VParam.REP_ROTATION, 0.5f, -3600f, 3600f, "°", 0, 0f)
     AdvancedSection(adv, { adv = !adv }) {
-        ParamRow(env, s, "Escala", VParam.REP_SCALE, 0.3f, -10000f, 10000f, "%", 0, 100f)
-        ParamRow(env, s, "Deslocamento", VParam.REP_OFFSET, 0.05f, -500f, 500f, "", 1, 0f)
-        ParamRow(env, s, "Opacidade inicial", VParam.REP_START_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
-        ParamRow(env, s, "Opacidade final", VParam.REP_END_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
-        KitTitle("Ordem das cópias")
-        ChoiceChips(listOf("Cópias embaixo", "Cópias por cima"), g.repAbove, onSelect = { a -> store.editVectorGroup { it.repAbove = a } })
+        ParamRow(env, s, stringResource(R.string.panel_escala), VParam.REP_SCALE, 0.3f, -10000f, 10000f, "%", 0, 100f)
+        ParamRow(env, s, stringResource(R.string.panel_deslocamento), VParam.REP_OFFSET, 0.05f, -500f, 500f, "", 1, 0f)
+        ParamRow(env, s, stringResource(R.string.panel_opacidade_inicial), VParam.REP_START_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
+        ParamRow(env, s, stringResource(R.string.panel_opacidade_final), VParam.REP_END_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
+        KitTitle(stringResource(R.string.panel_ordem_copias))
+        ChoiceChips(listOf(stringResource(R.string.panel_copias_embaixo), stringResource(R.string.panel_copias_cima)), g.repAbove, onSelect = { a -> store.editVectorGroup { it.repAbove = a } })
     }
 }
 

@@ -28,6 +28,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -205,7 +207,7 @@ internal fun AdvancedSection(open: Boolean, onToggle: () -> Unit, content: @Comp
         Modifier.fillMaxWidth().height(44.dp).tocavel(shrink = 1f, onClick = onToggle),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Avançado", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Muted)))
+        Text(stringResource(R.string.panel_avancado), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Muted)))
         Spacer(Modifier.width(6.dp))
         CupertinoIcon(if (open) CupertinoGlyph.ChevronUp else CupertinoGlyph.ChevronDown, 12.dp, AureaColors.Muted)
         Spacer(Modifier.weight(1f))

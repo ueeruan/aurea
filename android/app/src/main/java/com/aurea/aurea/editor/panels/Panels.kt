@@ -16,6 +16,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.ColorPickerSheet
 import com.aurea.aurea.ui.ds.KeypadRequest
@@ -95,22 +97,22 @@ fun PanelContent(
 
     val title = when (panel) {
         EditorPanel.Transform -> "Transformar · ${transformTab.title}"
-        EditorPanel.Effects -> "Efeitos"
-        EditorPanel.Curve -> "Easing curve"
-        EditorPanel.Appearance -> "Mistura e opacidade"
-        EditorPanel.Speed -> "Tempo e velocidade"
-        EditorPanel.Audio -> "Som"
-        EditorPanel.Shape -> "Cor e preenchimento"
-        EditorPanel.Text -> "Texto"
-        EditorPanel.Font -> "Fonte"
-        EditorPanel.Particles -> "Partículas"
-        EditorPanel.Tracking -> "Rastreio"
-        EditorPanel.Element3D -> "Material e ambiente"
-        EditorPanel.Captions -> "Legendas"
-        EditorPanel.Presets -> "Presets"
-        EditorPanel.Mask -> "Máscara e recorte"
-        EditorPanel.Vector -> "Vetor"
-        EditorPanel.ShapeEdit -> "Editar forma"
+        EditorPanel.Effects -> stringResource(R.string.panel_efeitos)
+        EditorPanel.Curve -> stringResource(R.string.panel_easing_curve)
+        EditorPanel.Appearance -> stringResource(R.string.panel_mistura_opacidade)
+        EditorPanel.Speed -> stringResource(R.string.panel_tempo_velocidade)
+        EditorPanel.Audio -> stringResource(R.string.panel_som)
+        EditorPanel.Shape -> stringResource(R.string.panel_cor_preenchimento)
+        EditorPanel.Text -> stringResource(R.string.panel_texto)
+        EditorPanel.Font -> stringResource(R.string.panel_fonte)
+        EditorPanel.Particles -> stringResource(R.string.panel_particulas)
+        EditorPanel.Tracking -> stringResource(R.string.panel_rastreio)
+        EditorPanel.Element3D -> stringResource(R.string.panel_material_ambiente)
+        EditorPanel.Captions -> stringResource(R.string.panel_legendas)
+        EditorPanel.Presets -> stringResource(R.string.panel_presets)
+        EditorPanel.Mask -> stringResource(R.string.panel_mascara_recorte)
+        EditorPanel.Vector -> stringResource(R.string.panel_vetor)
+        EditorPanel.ShapeEdit -> stringResource(R.string.panel_editar_forma)
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {

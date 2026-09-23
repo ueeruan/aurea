@@ -27,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -111,12 +113,12 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
         Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Expressão", style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
+                    Text(stringResource(R.string.panel_expressao), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
                     Text(target.label, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
                 }
                 if (applied) {
                     Text(
-                        if (info?.enabled == true) "Ligada" else "Desligada",
+                        if (info?.enabled == true) stringResource(R.string.panel_ligada) else stringResource(R.string.panel_desligada),
                         style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
                     )
                     Spacer(Modifier.width(8.dp))
@@ -131,16 +133,16 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
             Spacer(Modifier.height(8.dp))
             // Linha de estado: erro (com linha e coluna) ou o resultado no cabeçote.
             val status = when {
-                refused -> "O motor recusou esta propriedade." to AureaColors.Danger
+                refused -> stringResource(R.string.panel_motor_recusou_esta_propriedade) to AureaColors.Danger
                 shownError != null -> {
                     val where = if (shownError.line > 0) "Linha ${shownError.line}, coluna ${shownError.column}: " else ""
-                    val tail = if (!dirty && applied && syntax.ok) " — usando o valor dos keyframes" else ""
+                    val tail = if (!dirty && applied && syntax.ok) stringResource(R.string.panel_usando_valor_keyframes) else ""
                     (where + shownError.message + tail) to AureaColors.Danger
                 }
-                dirty -> (if (field.text.isBlank()) "Aplicar sem texto remove a expressão." else "Sintaxe ok · toque em Aplicar") to AureaColors.Muted
-                applied && info?.enabled == false -> "Desligada: a propriedade usa os keyframes." to AureaColors.Muted
-                applied -> "Resultado agora: " + values.joinToString(" · ") { numeroPtBr(it, 2) + target.unit } to AureaColors.Keyframe
-                else -> "Escreva uma expressão ou toque num atalho." to AureaColors.Muted
+                dirty -> (if (field.text.isBlank()) stringResource(R.string.panel_aplicar_sem_texto_remove_expressao) else stringResource(R.string.panel_sintaxe_ok_toque_aplicar)) to AureaColors.Muted
+                applied && info?.enabled == false -> stringResource(R.string.panel_desligada_propriedade_usa_keyframes) to AureaColors.Muted
+                applied -> stringResource(R.string.panel_resultado_agora) + values.joinToString(" · ") { numeroPtBr(it, 2) + target.unit } to AureaColors.Keyframe
+                else -> stringResource(R.string.panel_escreva_expressao_ou_toque_num_atalho) to AureaColors.Muted
             }
             Text(status.first, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = status.second)))
             Spacer(Modifier.height(10.dp))
@@ -166,14 +168,14 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (applied) {
-                    SheetButton("Remover", AureaColors.Danger, Modifier.weight(1f)) {
+                    SheetButton(stringResource(R.string.panel_remover), AureaColors.Danger, Modifier.weight(1f)) {
                         refused = store.applyExpression(target, "") == null
                         field = TextFieldValue("")
                         reread()
                     }
                 }
-                SheetButton("Fechar", AureaColors.Text, Modifier.weight(1f)) { store.closeExpression() }
-                SheetButton("Aplicar", AureaColors.Accent, Modifier.weight(1f), enabled = dirty) {
+                SheetButton(stringResource(R.string.panel_fechar), AureaColors.Text, Modifier.weight(1f)) { store.closeExpression() }
+                SheetButton(stringResource(R.string.panel_aplicar), AureaColors.Accent, Modifier.weight(1f), enabled = dirty) {
                     val d = store.applyExpression(target, field.text)
                     refused = d == null
                     if (d != null) syntax = d

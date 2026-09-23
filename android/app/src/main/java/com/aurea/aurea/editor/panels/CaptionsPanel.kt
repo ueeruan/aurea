@@ -29,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -76,15 +78,15 @@ internal fun CaptionsPanel(env: PanelEnv) {
                 cap.busy?.let { Note(it, AureaColors.Accent) }
                 cap.error?.let { Note(it, AureaColors.Danger) }
                 if (!cap.hasGroqKey) {
-                    Note("Sem a chave do serviço de transcrição: use um arquivo de legenda (.srt), ou coloque a chave em Ajustes › Legendas. O áudio só sai do aparelho quando você toca em Gerar legendas.", AureaColors.Muted)
+                    Note(stringResource(R.string.panel_sem_chave_servico_transcricao_use_arquivo), AureaColors.Muted)
                 }
-                Label("Idioma da fala")
+                Label(stringResource(R.string.panel_idioma_fala))
                 Chips(Languages.map { it.second }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Action(if (cap.words.isEmpty()) "Gerar legendas" else "Transcrever de novo", primary = true, enabled = cap.hasGroqKey && cap.busy == null) {
+                    Action(if (cap.words.isEmpty()) stringResource(R.string.panel_gerar_legendas) else stringResource(R.string.panel_transcrever_novo), primary = true, enabled = cap.hasGroqKey && cap.busy == null) {
                         cap.transcribe(language)
                     }
-                    Action("Importar legenda (.srt)", enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
+                    Action(stringResource(R.string.panel_importar_legenda_srt), enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
                 }
 
                 Label("Estilo")

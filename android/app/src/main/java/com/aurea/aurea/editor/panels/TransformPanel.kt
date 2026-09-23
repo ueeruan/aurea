@@ -43,6 +43,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -198,16 +200,16 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
 
     if (menu) {
         AureaActionSheet(
-            title = "Transformar",
+            title = stringResource(R.string.panel_transformar),
             actions = buildList {
-                add(SheetAction("Keyframe anterior") { store.pause(); store.stepToKeyframe(-1) })
-                add(SheetAction("Próximo keyframe") { store.pause(); store.stepToKeyframe(1) })
-                if (tab != TransformTab.Desfoque) add(SheetAction("Voltar ao padrão") { resetTab(env, tab, axis) })
-                if (canKey) add(SheetAction(if (exprLook == com.aurea.aurea.engine.ExpressionLook.None) "Adicionar expressão" else "Editar expressão") {
+                add(SheetAction(stringResource(R.string.panel_keyframe_anterior)) { store.pause(); store.stepToKeyframe(-1) })
+                add(SheetAction(stringResource(R.string.panel_proximo_keyframe)) { store.pause(); store.stepToKeyframe(1) })
+                if (tab != TransformTab.Desfoque) add(SheetAction(stringResource(R.string.panel_voltar_padrao)) { resetTab(env, tab, axis) })
+                if (canKey) add(SheetAction(if (exprLook == com.aurea.aurea.engine.ExpressionLook.None) stringResource(R.string.panel_adicionar_expressao) else stringResource(R.string.panel_editar_expressao)) {
                     store.openExpression(exprTitle, exprKeys, exprScale, exprUnit)
                 })
                 if (!uses3D(store.detail)) {
-                    add(SheetAction(if (threeDOpen.value) "Esconder X/Y/Z (3D)" else "Mostrar X/Y/Z (3D)") { threeDOpen.value = !threeDOpen.value })
+                    add(SheetAction(if (threeDOpen.value) stringResource(R.string.panel_esconder_x_y_z_3d) else stringResource(R.string.panel_mostrar_x_y_z_3d)) { threeDOpen.value = !threeDOpen.value })
                 }
             },
             onDismiss = { menu = false },
@@ -248,7 +250,7 @@ private fun Open3DRow(onOpen: () -> Unit) {
                 .tocavel(onClick = onOpen)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
         ) {
-            Text("Girar em 3D (X e Y)", style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+            Text(stringResource(R.string.panel_girar_3d_x_y), style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
         }
     }
 }
@@ -301,7 +303,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
     Column(
         Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp),
     ) {
-        BlurToggleRow("Desfoque de movimento", "Borra a camada na direção em que ela se move.", on) { v ->
+        BlurToggleRow(stringResource(R.string.panel_desfoque_movimento), stringResource(R.string.panel_borra_camada_direcao_ela_move), on) { v ->
             if (v) {
                 if (!store.compMotionBlur) store.setCompositionMotionBlur(true)
                 if (!d.motionBlur) store.setLayerMotionBlur(d.id, true)
@@ -311,7 +313,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
         }
         if (on) {
             com.aurea.aurea.ui.ds.PropertyRow(
-                label = "Intensidade",
+                label = stringResource(R.string.panel_intensidade),
                 value = strength,
                 unitsPerDp = 0.5f,
                 min = 0f,
@@ -327,14 +329,14 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
                 },
             )
             Text(
-                "A intensidade vale para todas as camadas com desfoque neste projeto.",
+                stringResource(R.string.panel_intensidade_vale_todas_camadas_desfoque_neste),
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
             )
         }
         if (d.kind == LayerType.Video.kind) {
             Spacer(Modifier.height(8.dp))
-            BlurToggleRow("Desfoque do movimento do vídeo", "Borra o que se mexe dentro do vídeo.", d.vectorBlur) { store.setVectorBlur(d.id, it) }
+            BlurToggleRow(stringResource(R.string.panel_desfoque_movimento_video), stringResource(R.string.panel_borra_mexe_dentro_video), d.vectorBlur) { store.setVectorBlur(d.id, it) }
         }
     }
 }
@@ -411,7 +413,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("Centro", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = Color.White)))
+                    Text(stringResource(R.string.panel_centro), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = Color.White)))
                 }
             } else if (depth) {
                 // z: o toque ESCOLHE a profundidade para o arrasto; segurar digita.
@@ -435,10 +437,10 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
         Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) { fields() }
     }
     val hint = when {
-        pivot -> "Deslize o ponto de giro · o botão Centro devolve o zero"
-        zMode -> "Deslize para ajustar a profundidade · toque em Z para voltar a X/Y"
-        depth -> "Deslize para mover · toque em Z para profundidade"
-        else -> "Deslize para mover a camada"
+        pivot -> stringResource(R.string.panel_deslize_ponto_giro_botao_centro_devolve)
+        zMode -> stringResource(R.string.panel_deslize_ajustar_profundidade_toque_z_voltar)
+        depth -> stringResource(R.string.panel_deslize_mover_toque_z_profundidade)
+        else -> stringResource(R.string.panel_deslize_mover_camada)
     }
     val zNow by rememberUpdatedState(zMode)
     Box(
@@ -709,7 +711,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
     }
 
     Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        ValueBox("${numeroPtBr(sx, 1)}%", width = 61.dp, label = "Largura", onTap = {
+        ValueBox("${numeroPtBr(sx, 1)}%", width = 61.dp, label = stringResource(R.string.panel_largura), onTap = {
             env.openKeypad(KeypadRequest("Largura", sx, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(false, it, sx, sy) })
         })
         Box(
@@ -721,9 +723,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
                 .tocavel(shrink = 1f) { locked = !locked },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(if (locked) Icons.Rounded.Link else Icons.Rounded.LinkOff, contentDescription = if (locked) "Soltar largura e altura" else "Travar largura e altura", tint = Color.White, modifier = Modifier.size(16.dp))
+            Icon(if (locked) Icons.Rounded.Link else Icons.Rounded.LinkOff, contentDescription = if (locked) stringResource(R.string.panel_soltar_largura_altura) else stringResource(R.string.panel_travar_largura_altura), tint = Color.White, modifier = Modifier.size(16.dp))
         }
-        ValueBox("${numeroPtBr(sy, 1)}%", width = 61.dp, label = "Altura", color = Color.White, onTap = {
+        ValueBox("${numeroPtBr(sy, 1)}%", width = 61.dp, label = stringResource(R.string.panel_altura), color = Color.White, onTap = {
             env.openKeypad(KeypadRequest("Altura", sy, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(true, it, sx, sy) })
         })
     }
@@ -802,7 +804,7 @@ private fun MediaFitChips(env: PanelEnv) {
     }
     val f = fit ?: return
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-        listOf("Preencher" to f.first, "Ajustar" to f.second).forEachIndexed { i, (label, scale) ->
+        listOf(stringResource(R.string.panel_preencher) to f.first, stringResource(R.string.panel_ajustar) to f.second).forEachIndexed { i, (label, scale) ->
             val on = f.third == i
             Box(
                 Modifier

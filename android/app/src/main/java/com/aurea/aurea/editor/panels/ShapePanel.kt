@@ -17,6 +17,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -49,9 +51,9 @@ internal fun ShapePanel(env: PanelEnv) {
     val stroke = rgba8(detail.shapeStroke)
     val filled = fill.alpha > 0f
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 8.dp, end = 12.dp, bottom = 24.dp)) {
-        KitTitle("Preenchimento")
+        KitTitle(stringResource(R.string.panel_preenchimento))
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Preencher", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)))
+            Text(stringResource(R.string.panel_preencher), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)))
             ColorWell(fill.copy(alpha = 1f)) {
                 store.beginGesture("cor da forma")
                 env.openColor(ColorRequest(floatArrayOf(fill.red, fill.green, fill.blue, if (filled) fill.alpha else 1f),
@@ -63,15 +65,15 @@ internal fun ShapePanel(env: PanelEnv) {
                 store.setShapeFill(fill.red, fill.green, fill.blue, if (on) 1f else 0f)
             })
         }
-        KitTitle("Contorno")
-        ColorLine("Cor do contorno", stroke.copy(alpha = 1f)) {
+        KitTitle(stringResource(R.string.panel_contorno))
+        ColorLine(stringResource(R.string.panel_cor_contorno), stroke.copy(alpha = 1f)) {
             store.beginGesture("cor do contorno")
             env.openColor(ColorRequest(floatArrayOf(stroke.red, stroke.green, stroke.blue, if (stroke.alpha > 0f) stroke.alpha else 1f),
                 onChange = { r, g, b, a -> store.setShapeStroke(r, g, b, a) },
                 onDone = { store.endGesture() }))
         }
         HumanRow(
-            env, "Largura", detail.shapeStrokeWidth, 0.2f, 0f, 500f, "px", 0, 0f,
+            env, stringResource(R.string.panel_largura), detail.shapeStrokeWidth, 0.2f, 0f, 500f, "px", 0, 0f,
             onStart = { store.beginGesture("contorno") },
             onValue = { store.setShapeParam(4, it) },
             onEnd = { store.endGesture() },
@@ -84,7 +86,7 @@ internal fun ShapePanel(env: PanelEnv) {
             },
         )
         if (detail.shapeStrokeWidth > 0f && stroke.alpha <= 0f) {
-            KitHint("O contorno está sem cor: escolha uma cor acima para ele aparecer.")
+            KitHint(stringResource(R.string.panel_contorno_esta_sem_cor_escolha_cor))
         }
     }
 }

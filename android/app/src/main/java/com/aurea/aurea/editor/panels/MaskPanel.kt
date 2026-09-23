@@ -20,6 +20,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,7 +71,7 @@ internal fun MaskPanel(env: PanelEnv) {
             onCurve = null,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            ParamTabs(listOf("Máscaras", "Recorte por outra camada"), top, onSelect = { top = it })
+            ParamTabs(listOf(stringResource(R.string.panel_mascaras), stringResource(R.string.panel_recorte_outra_camada)), top, onSelect = { top = it })
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 4.dp, end = 10.dp, bottom = 16.dp)) {
                 if (top == 0) MasksTab(env, st, m, drawing) else TrackMatteTab(store)
             }
@@ -84,21 +86,21 @@ private fun MasksTab(env: PanelEnv, state: EditorStore.MaskState?, m: EditorStor
     val masks = state?.masks.orEmpty()
     if (masks.isEmpty()) {
         Spacer(Modifier.height(6.dp))
-        KitHint("Uma máscara mostra só uma parte da camada. Escolha como começar:")
+        KitHint(stringResource(R.string.panel_mascara_mostra_so_parte_camada_escolha))
         Spacer(Modifier.height(8.dp))
         AddChoices(store)
         return
     }
     ChipRow {
         masks.forEachIndexed { i, mk ->
-            KitChip("Máscara ${i + 1}" + if (!mk.closed) " (aberta)" else "", m?.id == mk.id) {
+            KitChip("Máscara ${i + 1}" + if (!mk.closed) stringResource(R.string.panel_aberta) else "", m?.id == mk.id) {
                 store.maskEdit = mk.id
                 store.maskDrawing = !mk.closed
                 store.maskPoint = -1
                 adding = false
             }
         }
-        KitChip(if (adding) "Fechar" else "+ Adicionar máscara", adding) { adding = !adding }
+        KitChip(if (adding) stringResource(R.string.panel_fechar) else stringResource(R.string.panel_adicionar_mascara), adding) { adding = !adding }
     }
     if (adding) {
         Spacer(Modifier.height(4.dp))
@@ -107,7 +109,7 @@ private fun MasksTab(env: PanelEnv, state: EditorStore.MaskState?, m: EditorStor
     }
     if (m == null) {
         Spacer(Modifier.height(6.dp))
-        KitHint("Escolha uma máscara acima para editar no palco.")
+        KitHint(stringResource(R.string.panel_escolha_mascara_acima_editar_palco))
         return
     }
     MaskSteps(env, m, drawing)
@@ -116,11 +118,11 @@ private fun MasksTab(env: PanelEnv, state: EditorStore.MaskState?, m: EditorStor
 /** As três maneiras de começar uma máscara (cartões grandes). */
 @Composable
 private fun AddChoices(store: EditorStore, done: () -> Unit = {}) {
-    ActionCard("Desenhar à mão", "Toque no palco para pôr pontos; arraste ao pôr para curvar.") { store.startMaskDrawing(); done() }
+    ActionCard(stringResource(R.string.panel_desenhar_mao), stringResource(R.string.panel_toque_palco_pontos_arraste_curvar)) { store.startMaskDrawing(); done() }
     Spacer(Modifier.height(6.dp))
-    ActionCard("Retângulo", "Um retângulo no meio da camada, pronto para ajustar.") { store.addMaskPreset(0); done() }
+    ActionCard(stringResource(R.string.panel_retangulo), stringResource(R.string.panel_retangulo_meio_camada_pronto_ajustar)) { store.addMaskPreset(0); done() }
     Spacer(Modifier.height(6.dp))
-    ActionCard("Elipse", "Uma elipse no meio da camada, pronta para ajustar.") { store.addMaskPreset(1); done() }
+    ActionCard(stringResource(R.string.panel_elipse), stringResource(R.string.panel_elipse_meio_camada_pronta_ajustar)) { store.addMaskPreset(1); done() }
 }
 
 /** Os passos da máscara escolhida, na ordem de uso. */
@@ -129,8 +131,8 @@ private fun MaskSteps(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean) 
     val store = env.store
     val isVideo = store.layers.firstOrNull { it.id == store.primary }?.kind == LayerType.Video.kind
     val steps = buildList {
-        add("1 Caminho"); add("2 Modo"); add("3 Borda")
-        if (isVideo) add("4 Rastrear")
+        add(stringResource(R.string.panel_1_caminho)); add(stringResource(R.string.panel_2_modo)); add(stringResource(R.string.panel_3_borda))
+        if (isVideo) add(stringResource(R.string.panel_4_rastrear))
     }
     var step by rememberSaveable { mutableIntStateOf(0) }
     if (step >= steps.size) step = 0
@@ -138,50 +140,50 @@ private fun MaskSteps(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean) 
     when (step) {
         0 -> {
             if (drawing) {
-                KitHint("Toque no palco para pôr pontos; arraste ao pôr para curvar. Toque no 1º ponto (ou em Fechar caminho) para fechar — a máscara só recorta fechada.")
+                KitHint(stringResource(R.string.panel_toque_palco_pontos_arraste_curvar_toque))
                 Spacer(Modifier.height(8.dp))
-                ActionCard("Fechar caminho", "${m.count} ponto(s) até agora") { store.closeMaskPath() }
+                ActionCard(stringResource(R.string.panel_fechar_caminho), "${m.count} ponto(s) até agora") { store.closeMaskPath() }
             } else {
-                KitHint("Arraste os pontos no palco; toque num ponto para ver as alças de curva.")
+                KitHint(stringResource(R.string.panel_arraste_pontos_palco_toque_num_ponto))
                 val look = when {
                     m.keyHere -> KeyframeLook.KeyHere
                     m.keyCount > 0 -> KeyframeLook.Animated
                     else -> KeyframeLook.None
                 }
-                PropertyCustomRow("Caminho", selected = true, onSelect = {}, keyframe = look) {
+                PropertyCustomRow(stringResource(R.string.panel_caminho), selected = true, onSelect = {}, keyframe = look) {
                     Text(
-                        if (m.keyCount == 0) "Parado — toque no ◇ do trilho para animar" else "${m.keyCount} keyframe(s) — editar no cabeçote grava ali",
+                        if (m.keyCount == 0) stringResource(R.string.panel_parado_toque_trilho_animar) else "${m.keyCount} keyframe(s) — editar no cabeçote grava ali",
                         style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
                     )
                 }
             }
             Spacer(Modifier.height(10.dp))
-            ActionCard("Apagar máscara", null, danger = true) { store.deleteMask(m.id) }
+            ActionCard(stringResource(R.string.panel_apagar_mascara), null, danger = true) { store.deleteMask(m.id) }
         }
         1 -> {
-            KitTitle("Como esta máscara combina com as outras")
-            val modes = listOf(0 to "Somar", 1 to "Subtrair", 2 to "Interseção", 3 to "Diferença", 4 to "Desligada")
+            KitTitle(stringResource(R.string.panel_como_esta_mascara_combina_outras))
+            val modes = listOf(0 to stringResource(R.string.panel_somar), 1 to stringResource(R.string.panel_subtrair), 2 to stringResource(R.string.panel_intersecao), 3 to stringResource(R.string.panel_diferenca), 4 to stringResource(R.string.panel_desligada))
             ChoiceChips(modes.map { it.second }, modes.indexOfFirst { it.first == m.op }, onSelect = { i ->
                 store.setMaskProps(m.id, modes[i].first, m.inverted, m.feather, m.expansion, m.opacity)
             })
-            ToggleLine("Inverter (mostrar o lado de fora)", m.inverted) { on ->
+            ToggleLine(stringResource(R.string.panel_inverter_mostrar_lado_fora), m.inverted) { on ->
                 store.setMaskProps(m.id, m.op, on, m.feather, m.expansion, m.opacity)
             }
         }
         2 -> {
-            MaskRow(env, "Suavizar", m.id, 0, m.feather, 0.5f, 0f, 500f, "px", 0f)
-            MaskRow(env, "Expandir", m.id, 1, m.expansion, 0.5f, -500f, 500f, "px", 0f)
-            MaskRow(env, "Opacidade", m.id, 2, m.opacity * 100f, 0.5f, 0f, 100f, "%", 100f)
+            MaskRow(env, stringResource(R.string.panel_suavizar), m.id, 0, m.feather, 0.5f, 0f, 500f, "px", 0f)
+            MaskRow(env, stringResource(R.string.panel_expandir), m.id, 1, m.expansion, 0.5f, -500f, 500f, "px", 0f)
+            MaskRow(env, stringResource(R.string.panel_opacidade), m.id, 2, m.opacity * 100f, 0.5f, 0f, 100f, "%", 100f)
         }
         else -> {
             if (store.maskTracking) {
-                KitHint("Rastreando…")
+                KitHint(stringResource(R.string.panel_rastreando))
             } else {
-                KitHint("A máscara segue o que está embaixo dela, do cabeçote até o fim do clipe.")
+                KitHint(stringResource(R.string.panel_mascara_segue_esta_embaixo_dela_cabecote))
                 Spacer(Modifier.height(8.dp))
-                ActionCard("Seguir posição", "Para objetos que só andam pela tela.") { store.trackMask(m.id, 0) }
+                ActionCard(stringResource(R.string.panel_seguir_posicao), stringResource(R.string.panel_objetos_so_andam_pela_tela)) { store.trackMask(m.id, 0) }
                 Spacer(Modifier.height(6.dp))
-                ActionCard("Seguir posição, tamanho e giro", "Para objetos que se aproximam ou giram.") { store.trackMask(m.id, 1) }
+                ActionCard(stringResource(R.string.panel_seguir_posicao_tamanho_giro), stringResource(R.string.panel_objetos_aproximam_ou_giram)) { store.trackMask(m.id, 1) }
             }
         }
     }
@@ -226,8 +228,8 @@ private fun TrackMatteTab(store: EditorStore) {
     val rows = store.layers
     val me = rows.firstOrNull { it.id == self }
     val candidates = rows.filter { it.id != self && it.kind != LayerType.Audio.kind && it.kind != LayerType.Camera.kind && it.kind != LayerType.Light.kind }
-    KitTitle("1. Recortar pelo quê")
-    val modes = listOf(0 to "Não recortar", 1 to "Pela forma", 2 to "Pela forma, invertido", 3 to "Pelo brilho", 4 to "Pelo brilho, invertido")
+    KitTitle(stringResource(R.string.panel_1_recortar_pelo))
+    val modes = listOf(0 to stringResource(R.string.panel_nao_recortar), 1 to stringResource(R.string.panel_pela_forma), 2 to stringResource(R.string.panel_pela_forma_invertido), 3 to stringResource(R.string.panel_pelo_brilho), 4 to stringResource(R.string.panel_pelo_brilho_invertido))
     ChoiceChips(modes.map { it.second }, modes.indexOfFirst { it.first == mode }, onSelect = { i ->
         val value = modes[i].first
         if (value == 0) {
@@ -239,9 +241,9 @@ private fun TrackMatteTab(store: EditorStore) {
             if (target == 0L) store.showToast("Escolha a camada abaixo") else store.setTrackMatte(target, value)
         }
     })
-    KitTitle("2. Qual camada recorta")
+    KitTitle(stringResource(R.string.panel_2_qual_camada_recorta))
     if (candidates.isEmpty()) {
-        KitHint("Não há outra camada que possa recortar esta.")
+        KitHint(stringResource(R.string.panel_nao_ha_outra_camada_possa_recortar))
     } else {
         ChipRow {
             candidates.forEach { r ->
@@ -250,5 +252,5 @@ private fun TrackMatteTab(store: EditorStore) {
         }
     }
     Spacer(Modifier.height(4.dp))
-    KitHint(if (matte != 0L) "A camada escolhida recorta esta e some da tela." else "Pela forma: aparece onde a outra camada existe. Pelo brilho: onde ela é clara.")
+    KitHint(if (matte != 0L) stringResource(R.string.panel_camada_escolhida_recorta_esta_some_tela) else stringResource(R.string.panel_pela_forma_aparece_onde_outra_camada))
 }

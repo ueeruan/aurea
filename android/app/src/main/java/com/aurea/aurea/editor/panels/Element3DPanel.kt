@@ -30,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -66,11 +68,11 @@ internal fun Element3DPanel(env: PanelEnv) {
     val t3 by remember(store) { derivedStateOf { store.text3d } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
         t3?.let { Text3DSection(env, it) }
-        SectionTitle("Material")
+        SectionTitle(stringResource(R.string.panel_material))
         val info = t3
         if (info != null) {
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Cor", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                Text(stringResource(R.string.panel_cor), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
                 ColorWell(Color(info.color[0], info.color[1], info.color[2])) {
                     store.beginGesture("cor do texto 3D")
                     env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
@@ -80,15 +82,15 @@ internal fun Element3DPanel(env: PanelEnv) {
             }
         } else {
             Text(
-                "Cor, brilho metálico e rugosidade vêm do arquivo do modelo (glTF, FBX).",
+                stringResource(R.string.panel_cor_brilho_metalico_rugosidade_vem_arquivo),
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
         }
         Spacer(Modifier.height(16.dp))
-        SectionTitle("Luz do ambiente")
+        SectionTitle(stringResource(R.string.panel_luz_ambiente))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip("Estúdio neutro", on = e[0] < 0.5f) { store.clearHdri() }
-            Chip(if (e[0] >= 0.5f) "Imagem de ambiente ✓" else "Usar imagem de ambiente (.hdr)", on = e[0] >= 0.5f) {
+            Chip(stringResource(R.string.panel_estudio_neutro), on = e[0] < 0.5f) { store.clearHdri() }
+            Chip(if (e[0] >= 0.5f) stringResource(R.string.panel_imagem_ambiente) else stringResource(R.string.panel_usar_imagem_ambiente_hdr), on = e[0] >= 0.5f) {
                 pick.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
             }
         }
@@ -159,7 +161,7 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("Alinhamento", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(0 to "Esquerda", 1 to "Centro", 2 to "Direita").forEach { (a, label) ->
+            listOf(0 to "EsquerdastringResource(R.string.panel_1_to)CentrostringResource(R.string.panel_2_to)Direita").forEach { (a, label) ->
                 Chip(label, on = info.alignment == a) { store.text3d?.let { store.setText3D(it.copy(alignment = a)) } }
             }
         }

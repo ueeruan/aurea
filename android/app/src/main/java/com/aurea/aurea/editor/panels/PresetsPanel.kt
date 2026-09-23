@@ -36,6 +36,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -131,7 +133,7 @@ internal fun PresetsPanel(env: PanelEnv) {
             CupertinoIcon(CupertinoGlyph.Search, 15.dp, AureaColors.Muted)
             Spacer(Modifier.width(8.dp))
             Box(Modifier.weight(1f)) {
-                if (query.isEmpty()) Text("Buscar preset", style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, color = AureaColors.Muted)))
+                if (query.isEmpty()) Text(stringResource(R.string.panel_buscar_preset), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, color = AureaColors.Muted)))
                 BasicTextField(
                     query,
                     onValueChange = { query = it },
@@ -156,7 +158,7 @@ internal fun PresetsPanel(env: PanelEnv) {
         }
         if (tab == PresetTab.Animation) {
             Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Durar até o fim da camada", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                Text(stringResource(R.string.panel_durar_ate_fim_camada), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
                 AureaToggle(checked = stretch, onCheckedChange = { stretch = it })
             }
         }
@@ -165,8 +167,8 @@ internal fun PresetsPanel(env: PanelEnv) {
                 Text(
                     when {
                         q.isNotEmpty() -> "Nenhum preset com \"$q\"."
-                        tab == PresetTab.Favorites -> "Toque na ☆ de um preset para guardar aqui."
-                        else -> "Os últimos 10 presets aplicados aparecem aqui."
+                        tab == PresetTab.Favorites -> stringResource(R.string.panel_toque_preset_guardar_aqui)
+                        else -> stringResource(R.string.panel_ultimos_10_presets_aplicados_aparecem_aqui)
                     },
                     textAlign = TextAlign.Center,
                     style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
@@ -200,8 +202,8 @@ internal fun PresetsPanel(env: PanelEnv) {
     deleting?.let { e ->
         AureaAlert(
             title = "Apagar \"${e.name}\"?",
-            message = "O preset sai deste aparelho.",
-            confirmLabel = "Apagar",
+            message = stringResource(R.string.panel_preset_sai_deste_aparelho),
+            confirmLabel = stringResource(R.string.panel_apagar),
             destructive = true,
             onConfirm = { store.deletePreset(e) },
             onDismiss = { deleting = null },
@@ -247,13 +249,13 @@ private fun SavePresetDialog(store: EditorStore, kind: PresetKind, onDismiss: ()
     AureaAlert(
         title = "Salvar preset de ${kind.label.lowercase()}",
         message = when (kind) {
-            PresetKind.Caption -> "Guarda as opções atuais da legenda."
-            PresetKind.Curve -> "Guarda a curva do keyframe escolhido."
-            PresetKind.Animation -> "Guarda os keyframes de movimento da camada."
-            PresetKind.Effects -> "Guarda os efeitos da camada com os keyframes."
-            PresetKind.Text -> "Guarda o estilo e/ou a animação do texto."
+            PresetKind.Caption -> stringResource(R.string.panel_guarda_opcoes_atuais_legenda)
+            PresetKind.Curve -> stringResource(R.string.panel_guarda_curva_keyframe_escolhido)
+            PresetKind.Animation -> stringResource(R.string.panel_guarda_keyframes_movimento_camada)
+            PresetKind.Effects -> stringResource(R.string.panel_guarda_efeitos_camada_keyframes)
+            PresetKind.Text -> stringResource(R.string.panel_guarda_estilo_ou_animacao_texto)
         },
-        confirmLabel = "Salvar",
+        confirmLabel = stringResource(R.string.panel_salvar),
         onConfirm = {
             val n = name.trim()
             if (n.isEmpty()) {
@@ -289,14 +291,14 @@ private fun SavePresetDialog(store: EditorStore, kind: PresetKind, onDismiss: ()
                     .background(androidx.compose.ui.graphics.Color(0xFF1C1C1E))
                     .padding(horizontal = 8.dp, vertical = 7.dp),
             )
-            if (exists) Text("Já existe: será substituído.", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Danger)))
+            if (exists) Text(stringResource(R.string.panel_ja_existe_sera_substituido), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Danger)))
             if (kind == PresetKind.Text) {
                 Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Estilo", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                    Text(stringResource(R.string.panel_estilo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
                     AureaToggle(checked = style, onCheckedChange = { style = it })
                 }
                 Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Animação", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                    Text(stringResource(R.string.panel_animacao), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
                     AureaToggle(checked = anim, onCheckedChange = { anim = it })
                 }
             }
@@ -386,7 +388,7 @@ private fun SaveCard(onClick: () -> Unit) {
         }
         Spacer(Modifier.height(5.dp))
         Text(
-            "Salvar o desta camada",
+            stringResource(R.string.panel_salvar_desta_camada),
             maxLines = 2,
             textAlign = TextAlign.Center,
             modifier = Modifier.height(30.dp),
@@ -419,7 +421,7 @@ private fun PresetPreview(store: EditorStore, e: PresetEntry, modifier: Modifier
             GlyphPreview(effectGlyph(keys.firstOrNull()), modifier, badge = if (keys.size > 1) "${keys.size} efeitos" else null)
         }
         PresetKind.Text -> Box(modifier, contentAlignment = Alignment.Center) {
-            Text("Aa", style = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)))
+            Text(stringResource(R.string.panel_aa), style = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)))
         }
     }
 }
@@ -549,7 +551,7 @@ private fun CurvePreview(ease: Ease, modifier: Modifier) {
 /** A linha da legenda com as opções do preset: palavras por vez, maiúsculas, destaque, altura e tamanho. */
 @Composable
 private fun CaptionPreview(c: JSONObject?, modifier: Modifier) {
-    val words = listOf("Sua", "legenda", "aparece", "assim", "aqui", "hoje")
+    val words = listOf(stringResource(R.string.panel_sua), "legenda", "aparece", "assim", "aqui", "hoje")
     val one = (c?.optInt("mode", 0) ?: 0) == 1
     val n = if (one) 1 else (c?.optInt("maxWords", 4) ?: 4).coerceIn(1, 4)
     val upper = c?.optBoolean("uppercase", false) ?: false

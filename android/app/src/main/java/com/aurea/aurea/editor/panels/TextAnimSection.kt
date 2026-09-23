@@ -21,6 +21,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -93,7 +95,7 @@ internal fun TextAnimSection(env: PanelEnv) {
     val store = env.store
     val list by remember(store) { derivedStateOf { store.textAnimators } }
     Spacer(Modifier.height(10.dp))
-    Text("Animação", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+    Text(stringResource(R.string.panel_animacao), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).height(44.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -103,7 +105,7 @@ internal fun TextAnimSection(env: PanelEnv) {
     }
     list.forEachIndexed { index, v -> AnimatorCard(env, index, v) }
     Spacer(Modifier.height(4.dp))
-    AnimChip("+ Adicionar animação", false) { store.addTextAnimator(1 shl 3) }
+    AnimChip(stringResource(R.string.panel_adicionar_animacao), false) { store.addTextAnimator(1 shl 3) }
 }
 
 @Composable
@@ -115,23 +117,23 @@ private fun AnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
         Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Animação ${index + 1}", modifier = Modifier.weight(1f),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
-            AnimChip("Remover", false) { store.removeTextAnimator(index) }
+            AnimChip(stringResource(R.string.panel_remover), false) { store.removeTextAnimator(index) }
             Spacer(Modifier.width(8.dp))
             AureaToggle(checked = v[0] > 0.5f, onCheckedChange = { store.setTextAnimatorValues(index, mapOf(0 to if (it) 1f else 0f)) })
         }
-        ChipRow("Anima cada", listOf("Letra", "Palavra", "Linha"), v[2].toInt()) { store.setTextAnimatorValues(index, mapOf(2 to it.toFloat())) }
-        ChipRow("Escolhe", listOf("Em ordem", "Sorteado"), v[3].toInt()) { store.setTextAnimatorValues(index, mapOf(3 to it.toFloat())) }
+        ChipRow(stringResource(R.string.panel_anima_cada), listOf(stringResource(R.string.panel_letra), stringResource(R.string.panel_palavra), stringResource(R.string.panel_linha)), v[2].toInt()) { store.setTextAnimatorValues(index, mapOf(2 to it.toFloat())) }
+        ChipRow(stringResource(R.string.panel_escolhe), listOf(stringResource(R.string.panel_ordem), stringResource(R.string.panel_sorteado)), v[3].toInt()) { store.setTextAnimatorValues(index, mapOf(3 to it.toFloat())) }
         if (v[3] < 0.5f) {
-            ChipRow("Passagem", listOf("Seco", "Sobe", "Desce", "Triângulo", "Redondo", "Suave"), v[4].toInt()) {
+            ChipRow(stringResource(R.string.panel_passagem), listOf(stringResource(R.string.panel_seco), stringResource(R.string.panel_sobe), stringResource(R.string.panel_desce), stringResource(R.string.panel_triangulo), stringResource(R.string.panel_redondo), stringResource(R.string.panel_suave)), v[4].toInt()) {
                 store.setTextAnimatorValues(index, mapOf(4 to it.toFloat()))
             }
             Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Ordem aleatória", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp)))
+                Text(stringResource(R.string.panel_ordem_aleatoria), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp)))
                 AureaToggle(checked = v[5] > 0.5f, onCheckedChange = { store.setTextAnimatorValues(index, mapOf(5 to if (it) 1f else 0f)) })
             }
             SelectorParams.forEach { p -> AnimRuler(store, index, p, v) }
         } else {
-            AnimRuler(store, index, AnimParam(25, 13, "Trocas por segundo", "", 0.05f, 0f, 60f), v)
+            AnimRuler(store, index, AnimParam(25, 13, stringResource(R.string.panel_trocas_segundo), "", 0.05f, 0f, 60f), v)
             AnimRuler(store, index, SelectorParams[3], v)
         }
         AnimProps.forEach { p ->

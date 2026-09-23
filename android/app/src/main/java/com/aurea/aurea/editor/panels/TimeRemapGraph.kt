@@ -22,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -173,7 +175,7 @@ internal fun TimeRemapGraph(store: EditorStore) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             val speed = q[4]
             val label = when {
-                kotlin.math.abs(speed) < 0.005f -> "Congelado no cabeçote"
+                kotlin.math.abs(speed) < 0.005f -> stringResource(R.string.panel_congelado_cabecote)
                 speed < 0f -> "Velocidade no cabeçote: ${"%.2f".format(-speed)}× ao contrário"
                 else -> "Velocidade no cabeçote: ${"%.2f".format(speed)}×"
             }
@@ -184,7 +186,7 @@ internal fun TimeRemapGraph(store: EditorStore) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Ponto ${selected + 1}", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
                 val cur = keys[selected][2].toInt()
-                listOf(Interp.LINEAR to "Linear", Interp.EASE_IN_OUT to "Suave", Interp.HOLD to "Congelar").forEach { (m, text) ->
+                listOf(Interp.LINEAR to stringResource(R.string.panel_linear), Interp.EASE_IN_OUT to stringResource(R.string.panel_suave), Interp.HOLD to stringResource(R.string.panel_congelar)).forEach { (m, text) ->
                     val on = cur == m
                     Box(
                         Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
@@ -197,7 +199,7 @@ internal fun TimeRemapGraph(store: EditorStore) {
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "Toque na curva para criar um ponto, arraste para mudar o tempo, segure para apagar.",
+            stringResource(R.string.panel_toque_curva_criar_ponto_arraste_mudar),
             style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
         )
     }

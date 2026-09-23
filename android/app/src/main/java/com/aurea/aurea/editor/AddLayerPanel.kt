@@ -30,6 +30,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -122,7 +124,7 @@ private fun AddCategories(ui: EditorUi, close: () -> Unit) {
         if (i > 3) scroll.scrollTo(((i - 3) * itemPx).toInt())
     }
     Row(Modifier.fillMaxWidth().height(68.dp), verticalAlignment = Alignment.CenterVertically) {
-        ChromeButton(CupertinoGlyph.Xmark, "Fechar adicionar", onClick = close, size = 20.dp, width = 44.dp, height = 68.dp)
+        ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar_adicionar), onClick = close, size = 20.dp, width = 44.dp, height = 68.dp)
         Row(
             Modifier.weight(1f).fillMaxHeight().horizontalScroll(scroll).padding(end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -389,13 +391,13 @@ private fun MediaTab(store: EditorStore, close: () -> Unit) {
     }
     CardGrid(
         listOf(
-            AddItem("Galeria", CupertinoGlyph.PhotoOnRectangle, AureaColors.Accent) {
+            AddItem(stringResource(R.string.editor_galeria), CupertinoGlyph.PhotoOnRectangle, AureaColors.Accent) {
                 picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             },
-            AddItem("Foto", CupertinoGlyph.Photo) {
+            AddItem(stringResource(R.string.editor_foto), CupertinoGlyph.Photo) {
                 picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
-            AddItem("Vídeo", CupertinoGlyph.Videocam) {
+            AddItem(stringResource(R.string.editor_video), CupertinoGlyph.Videocam) {
                 picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
             },
         ),
@@ -423,7 +425,7 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
     }
     CardGrid(
         listOf(
-            AddItem("Música ou som", CupertinoGlyph.MusicNote, AureaColors.Accent) { files.launch(arrayOf("audio/*")) },
+            AddItem(stringResource(R.string.editor_musica_ou_som), CupertinoGlyph.MusicNote, AureaColors.Accent) { files.launch(arrayOf("audio/*")) },
             AddItem("Som de um vídeo", CupertinoGlyph.Film) {
                 videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
             },
@@ -525,13 +527,13 @@ private fun DrawScope.drawNullIcon() {
 private fun DrawTab(store: EditorStore, ui: EditorUi) {
     CardGrid(
         listOf(
-            AddItem("Mão livre", ShellGlyph.Scribble, AureaColors.Accent) {
+            AddItem(stringResource(R.string.editor_mao_livre), ShellGlyph.Scribble, AureaColors.Accent) {
                 if (store.playing) store.pause()
                 ui.adding = false
                 store.chooseVectorTool(2)
             },
         ),
-        hint = "Desenhe com o dedo direto no palco. Cada traço vira um caminho que dá para editar e animar.",
+        hint = stringResource(R.string.editor_desenhe_dedo_direto_palco_cada_traco),
     )
 }
 
@@ -553,14 +555,14 @@ private fun VectorTab(store: EditorStore, ui: EditorUi) {
     }
     CardGrid(
         listOf(
-            AddItem("Desenhar com pontos", draw = { drawVectorIcon(0) }) { start(0) },
-            AddItem("Retângulo", draw = { drawVectorIcon(1) }) { start(1) },
-            AddItem("Elipse", draw = { drawVectorIcon(2) }) { start(2) },
-            AddItem("Polígono", draw = { drawVectorIcon(3) }) { start(3) },
-            AddItem("Estrela", draw = { drawVectorIcon(4) }) { start(4) },
-            AddItem("Importar SVG", CupertinoGlyph.DocText) { svgPicker.launch(arrayOf("image/svg+xml")) },
+            AddItem(stringResource(R.string.editor_desenhar_pontos), draw = { drawVectorIcon(0) }) { start(0) },
+            AddItem(stringResource(R.string.editor_retangulo), draw = { drawVectorIcon(1) }) { start(1) },
+            AddItem(stringResource(R.string.editor_elipse), draw = { drawVectorIcon(2) }) { start(2) },
+            AddItem(stringResource(R.string.editor_poligono), draw = { drawVectorIcon(3) }) { start(3) },
+            AddItem(stringResource(R.string.editor_estrela), draw = { drawVectorIcon(4) }) { start(4) },
+            AddItem(stringResource(R.string.editor_importar_svg), CupertinoGlyph.DocText) { svgPicker.launch(arrayOf("image/svg+xml")) },
         ),
-        hint = "Vetor = contorno com pontos que você arrasta, curva e anima.",
+        hint = stringResource(R.string.editor_vetor_contorno_pontos_voce_arrasta_curva),
     )
 }
 

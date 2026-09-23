@@ -29,6 +29,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -164,7 +166,7 @@ fun ColorPickerSheet(
     AureaAdjustSheet(onDismiss = onDone) { sheet ->
         Column(Modifier.padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Cor", style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
+                Text(stringResource(R.string.ds_cor), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
                 Spacer(Modifier.width(12.dp))
                 Row(
                     Modifier
@@ -180,7 +182,7 @@ fun ColorPickerSheet(
                 }
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "Pronto",
+                    stringResource(R.string.ds_pronto),
                     modifier = Modifier.tocavel { sheet.dismiss() }.padding(vertical = 6.dp, horizontal = 4.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)),
                 )
@@ -262,7 +264,7 @@ fun ColorPickerSheet(
                 )
             }
             Spacer(Modifier.height(12.dp))
-            Text("Rápidas", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+            Text(stringResource(R.string.ds_rapidas), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             Spacer(Modifier.height(8.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 QuickColors.forEach { q ->

@@ -1,0 +1,629 @@
+key	pt	uses	files
+ds_1_ajuste	1 ajuste	1	1
+ds_arrastar_reordenar	Arrastar para reordenar	1	1
+ds_avancado	Avançado	1	1
+ds_cancelar	Cancelar	1	1
+ds_conta_incompleta	Conta incompleta	1	1
+ds_cor	Cor	1	1
+ds_pronto	Pronto	1	1
+ds_rapidas	Rápidas	1	1
+editor_2f_fps	%.2f fps	1	1
+editor_abrir	Abrir	1	1
+editor_adicionar_camada	Adicionar camada	1	1
+editor_adicionar_toque_linha_ou_vazio_arraste	Adicionar: toque na linha ou no vazio; arraste para curvar	1	1
+editor_agrupar	Agrupar	1	1
+editor_agrupar_camadas_escolhidas	Agrupar as camadas escolhidas	1	1
+editor_alguma_camada_solo_previa_som_so	Com alguma camada em solo, a prévia e o som só tocam as que estão	1	1
+editor_alinhar_base_tela	Alinhar à base da tela	1	1
+editor_alinhar_direita_tela	Alinhar à direita da tela	1	1
+editor_alinhar_esquerda_tela	Alinhar à esquerda da tela	1	1
+editor_alinhar_fins	Alinhar os fins	1	1
+editor_alinhar_inicios	Alinhar os inícios	1	1
+editor_alinhar_topo_tela	Alinhar ao topo da tela	1	1
+editor_alta	Alta	3	1
+editor_altura	Altura	1	1
+editor_aparar_empurra_camadas_seguintes_excluir_fecha	Aparar empurra as camadas seguintes e excluir fecha o espaço	1	1
+editor_aparar_fim_cabecote	Aparar o fim no cabeçote	3	2
+editor_aparar_inicio_cabecote	Aparar o início no cabeçote	3	2
+editor_aparar_projeto_cabecote	Aparar o projeto no cabeçote	1	1
+editor_aparece_aqui_editor_fica_fora_video	Aparece aqui no editor e fica fora do vídeo exportado	1	1
+editor_bloquear_camada	Bloquear camada	1	1
+editor_borra_direcao_movimento_obturador_nas_configuracoes	Borra na direção do movimento (obturador nas configurações do projeto)	1	1
+editor_borra_mexe_dentro_video_pelos_vetores	Borra o que se mexe dentro do vídeo (pelos vetores de movimento)	1	1
+editor_buscar_camadas	Buscar camadas…	1	1
+editor_camada	Camada	2	1
+editor_camada_ajuste	Camada de ajuste	1	1
+editor_camada_bloqueada	Camada bloqueada	1	1
+editor_camada_bloqueada_desbloqueie_editar	Camada bloqueada: desbloqueie para editar	1	1
+editor_camadas_desfoque_movimento_so_borram_isto	As camadas com desfoque de movimento só borram com isto ligado	1	1
+editor_cancelar	Cancelar	1	1
+editor_cancelar_selecao	Cancelar seleção	1	1
+editor_canto_suave_toque_ponto_alternar	Canto/Suave: toque no ponto para alternar	1	1
+editor_centralizar_horizontal	Centralizar na horizontal	1	1
+editor_centralizar_vertical	Centralizar na vertical	1	1
+editor_colar_camada_cabecote	Colar camada no cabeçote	2	2
+editor_colar_efeitos	Colar efeitos	1	1
+editor_colar_estilo	Colar estilo	2	2
+editor_colar_keyframes_cabecote	Colar keyframes no cabeçote	1	1
+editor_compartilhar	Compartilhar	1	1
+editor_concluir	Concluir	1	1
+editor_concluir_desenho	Concluir desenho	1	1
+editor_converter_grupo	Converter em grupo	1	1
+editor_copiar_camada	Copiar camada	2	2
+editor_copiar_colar	Copiar e colar	2	1
+editor_copiar_efeitos	Copiar efeitos	1	1
+editor_copiar_estilo	Copiar estilo	2	2
+editor_copiar_keyframes_cabecote	Copiar keyframes do cabeçote	1	1
+editor_cor	Cor	1	1
+editor_cria_nulo_segue_ponto_ligue_outras	Cria um Nulo que segue o ponto — ligue outras camadas a ele	1	1
+editor_desagrupar	Desagrupar	3	3
+editor_desbloquear	Desbloquear	2	1
+editor_desbloquear_camada	Desbloquear camada	1	1
+editor_desenhar_pontos	Desenhar com pontos	1	1
+editor_desenhe_dedo_direto_palco_cada_traco	Desenhe com o dedo direto no palco. Cada traço vira um caminho que dá para editar e animar.	1	1
+editor_desfazer	Desfazer	1	1
+editor_desfoque_movimento	Desfoque de movimento	1	1
+editor_desfoque_movimento_composicao	Desfoque de movimento da composição	1	1
+editor_desfoque_movimento_video	Desfoque do movimento do vídeo	1	1
+editor_desligar_som_segure_volume	Desligar o som · segure para o volume	1	1
+editor_detectar_batidas_camada_escolhida	Detectar batidas da camada escolhida	1	1
+editor_diagnostico_tela	Diagnóstico na tela	1	1
+editor_distribuir_horizontal_vaos_iguais	Distribuir na horizontal (vãos iguais)	1	1
+editor_distribuir_vertical_vaos_iguais	Distribuir na vertical (vãos iguais)	1	1
+editor_dividir_cabecote	Dividir no cabeçote	3	2
+editor_duplicar	Duplicar	1	1
+editor_duplicar_camada	Duplicar camada	1	1
+editor_duracao	Duração	1	1
+editor_edicao	Edição	1	1
+editor_editando_grupo	Editando o grupo	1	1
+editor_editar_grupo	Editar o grupo	1	1
+editor_efeitos_desta_camada_valem_todas_baixo	Os efeitos desta camada valem para todas as de baixo	1	1
+editor_elipse	Elipse	1	1
+editor_else	 else 	1	1
+editor_entrar_grupo	Entrar no grupo	1	1
+editor_enviar_tras	Enviar para trás	1	1
+editor_escada_comeca_quando_cima_termina	Em escada: uma começa quando a de cima termina	1	1
+editor_escala	Escala	1	1
+editor_estabilizar_pelo_ponto	Estabilizar pelo ponto	1	1
+editor_estilo_efeitos	Estilo e efeitos	1	1
+editor_estrela	Estrela	1	1
+editor_etiqueta	Etiqueta	1	1
+editor_excluir_camada	Excluir camada	2	2
+editor_excluir_selecao	Excluir seleção	1	1
+editor_exportar	Exportar	3	2
+editor_extrair_audio	Extrair o áudio	1	1
+editor_fechar	Fechar	1	1
+editor_fechar_adicionar	Fechar adicionar	1	1
+editor_formato	Formato	1	1
+editor_foto	Foto	1	1
+editor_fundo_composicao	fundo da composição	1	1
+editor_galeria	Galeria	1	1
+editor_grupo	Grupo	1	1
+editor_guia_nao_exporta	Guia (não exporta)	1	1
+editor_h_264_abre_qualquer_aparelho_rede	H.264: abre em qualquer aparelho e rede social.	1	1
+editor_hevc_arquivo_menor_mesma_qualidade_alguns	HEVC: arquivo menor, mesma qualidade. Alguns aparelhos antigos não reproduzem.	1	1
+editor_importar_svg	Importar SVG	1	1
+editor_ir	Ir	1	1
+editor_ir_proxima_marca	Ir para a próxima marca	1	1
+editor_ir_tempo	Ir para o tempo	2	2
+editor_keyframe_anterior_segure_inicio	Keyframe anterior · segure para o início	1	1
+editor_keyframes	Keyframes	1	1
+editor_largura	Largura	1	1
+editor_leve_cabecote_dentro_camadas	Leve o cabeçote para dentro das camadas	1	1
+editor_limpar_selecao	Limpar seleção	2	2
+editor_mais	Mais	2	1
+editor_mais_acoes_camada	Mais ações da camada	1	1
+editor_mais_linha_tempo	Mais da linha do tempo	1	1
+editor_mantenha_aurea_aberto_ate_terminar	Mantenha o Aurea aberto até terminar.	1	1
+editor_mao_livre	Mão livre	1	1
+editor_mao_livre_desenhe_dedo	Mão livre: desenhe com o dedo	1	1
+editor_marcar_ou_desmarcar_este_instante	Marcar (ou desmarcar) este instante	1	1
+editor_marcas_ritmo	Marcas e ritmo	1	1
+editor_mesclagem_opacidade_efeitos_cores	Mesclagem, opacidade, efeitos e cores	1	1
+editor_mostrar_camada	Mostrar camada	1	1
+editor_move_video_ponto_ficar_parado_tela	Move o vídeo para o ponto ficar parado na tela	1	1
+editor_movimento	Movimento	1	1
+editor_musica_ou_som	Música ou som	1	1
+editor_nao_aceita_movimento_corte_nem_edicao	Não aceita movimento, corte nem edição	1	1
+editor_nenhum	Nenhum	1	1
+editor_nenhum_app_abre_video	Nenhum app abre vídeo	1	1
+editor_nenhuma_outra_camada_seguir_crie_nulo	Nenhuma outra camada para seguir. Crie um Nulo em Adicionar › Objeto.	1	1
+editor_nome_camada	Nome da camada	1	1
+editor_nome_ou_texto_camada	Nome ou texto da camada	1	1
+editor_ocultar_camada	Ocultar camada	1	1
+editor_outra_cor	Outra cor…	1	1
+editor_padrao	Padrão	2	1
+editor_pausar	Pausar	2	2
+editor_personalizada	Personalizada	2	1
+editor_plano_fundo	Plano de fundo	1	1
+editor_poligono	Polígono	1	1
+editor_previa	Prévia	1	1
+editor_projeto	Do projeto	1	1
+editor_projeto_cbe9	Projeto	3	3
+editor_projetos	Projetos	1	1
+editor_proximo_keyframe_segure_fim	Próximo keyframe · segure para o fim	1	1
+editor_quadro_atras_segure_inicio	Um quadro atrás · segure para o início	1	1
+editor_quadro_frente_segure_fim	Um quadro à frente · segure para o fim	1	1
+editor_quadros_segundo	Quadros por segundo	2	2
+editor_quadros_segundo_tempos_gpu_memoria_decodificador	Quadros por segundo, tempos da GPU, memória e o decodificador	1	1
+editor_qualidade	Qualidade	1	1
+editor_rastrear_ponto	Rastrear um ponto	1	1
+editor_rastreio	Rastreio	1	1
+editor_refazer	Refazer	1	1
+editor_remover_espacos_vazios	Remover espaços vazios	1	1
+editor_remover_toque_ponto_apagar	Remover: toque no ponto para apagar	1	1
+editor_renomear	Renomear	1	1
+editor_repeticao_ligada_segure_desligar	Repetição ligada · segure para desligar	1	1
+editor_reproducao_loop	Reprodução em loop	1	1
+editor_reproducao_previa	Reprodução e prévia	1	1
+editor_reproduzir	Reproduzir	1	1
+editor_reproduzir_segure_repetir	Reproduzir · segure para repetir	1	1
+editor_resolucao	Resolução	2	2
+editor_resolucao_previa_segure_diagnostico	Resolução da prévia · segure para o diagnóstico	1	1
+editor_retangulo	Retângulo	1	1
+editor_rotacao	Rotação	1	1
+editor_sair_tela_cheia	Sair da tela cheia	2	2
+editor_salvando	Salvando…	1	1
+editor_salvando_galeria	Salvando na galeria…	1	1
+editor_sdr_bt_709	SDR · BT.709	1	1
+editor_segundos_ou_mm_ss_ms	segundos, ou mm:ss.ms	1	1
+editor_selecionar_arraste_pontos_alcas	Selecionar: arraste pontos e alças	1	1
+editor_selecionar_todas_camadas	Selecionar todas as camadas	2	2
+editor_selecione_menos_duas_camadas	Selecione ao menos duas camadas	1	1
+editor_solo	Solo	1	1
+editor_som_desligado_toque_ligar_segure_volume	Som desligado · toque para ligar, segure para o volume	1	1
+editor_som_vira_camada_propria_video_fica	O som vira uma camada própria e o vídeo fica mudo	1	1
+editor_tamanho	Tamanho	1	1
+editor_tamanho_estimado	Tamanho estimado	1	1
+editor_tamanho_livre	Tamanho livre	1	1
+editor_tela_cheia	Tela cheia	2	2
+editor_tempo	Tempo	1	1
+editor_timeline_magnetica_modo_edicao	Timeline magnética (modo Edição)	1	1
+editor_toque_num_objeto_tela_editar	Toque num objeto na tela para editar.	1	1
+editor_toque_trocar_90_180_270_360	Toque para trocar (90°, 180°, 270°, 360°): maior = rastro mais longo	1	1
+editor_trazer_frente	Trazer para a frente	1	1
+editor_velocidade	Velocidade	1	1
+editor_vetor_contorno_pontos_voce_arrasta_curva	Vetor = contorno com pontos que você arrasta, curva e anima.	1	1
+editor_video	Vídeo	2	2
+editor_video_pronto	Vídeo pronto	1	1
+editor_vinculada_outra_camada_trocar	Vinculada a outra camada · trocar	1	1
+editor_vincular_escolhidas_camada	Vincular as escolhidas a uma camada	1	1
+editor_vincular_outra_camada	Vincular a outra camada	1	1
+editor_volta_aceitar_movimento_edicao	Volta a aceitar movimento e edição	1	1
+editor_voltar_composicao_principal	Voltar para a composição principal	1	1
+editor_voltar_editor	Voltar ao editor	1	1
+editor_voltar_tirar_selecao	Voltar (tirar a seleção)	1	1
+effect_abra_projeto_aplicar_este_efeito	Abra um projeto para aplicar este efeito.	1	1
+effect_adicionar_selecao	Adicionar à seleção	1	1
+effect_buscar_glitch_vhs_desfoque_cor	Buscar: \"glitch\", \"vhs\", \"desfoque\", \"cor\"…	1	1
+effect_favoritos	★ Favoritos	1	1
+effect_nos_favoritos	Pôr nos favoritos	2	1
+effect_recentes	Recentes	1	1
+effect_tirar_favoritos	Tirar dos favoritos	2	1
+effect_todos	Todos	1	1
+home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo	Ruanzitwo  ·  @ofruanzitwo  ·  TikTok @ruanzitwo	1	1
+home_ver_todos	Ver todos	1	1
+panel_1_caminho	1 Caminho	1	1
+panel_1_recortar_pelo	1. Recortar pelo quê	1	1
+panel_1_to	, 1 to 	1	1
+panel_2_modo	2 Modo	1	1
+panel_2_qual_camada_recorta	2. Qual camada recorta	1	1
+panel_2_to	, 2 to 	1	1
+panel_3_borda	3 Borda	1	1
+panel_4_rastrear	4 Rastrear	1	1
+panel_aa	Aa	1	1
+panel_aberta	 (aberta)	1	1
+panel_abertura	Abertura	1	1
+panel_abrir_caminho	Abrir caminho	1	1
+panel_abrir_efeitos_camada	Abrir efeitos da camada	1	1
+panel_acelerar	Acelerar	1	1
+panel_acelerar_desacelerar_tempo	Acelerar e desacelerar no tempo	1	1
+panel_acha_movimento_camera_video_roda_segundo	Acha o movimento da câmera do vídeo (roda em segundo plano).	1	1
+panel_adicionar	+ Adicionar	1	1
+panel_adicionar_animacao	+ Adicionar animação	1	1
+panel_adicionar_efeito	Adicionar efeito	2	1
+panel_adicionar_expressao	Adicionar expressão	2	2
+panel_adicionar_mascara	+ Adicionar máscara	1	1
+panel_adicionar_ponto	Adicionar ponto	1	1
+panel_ainda_nao_editavel_app	Ainda não editável no app	1	1
+panel_ajustar	Ajustar	1	1
+panel_alinhamento	Alinhamento	1	1
+panel_alta_qualidade	Alta qualidade	1	1
+panel_alternar_deixa_furos	Alternar (deixa furos)	1	1
+panel_altura	Altura	4	3
+panel_altura_caixa	Altura da caixa	1	1
+panel_altura_caixa_0cec	altura da caixa	1	1
+panel_analisar_camera	Analisar câmera	1	1
+panel_analisar_novo	Analisar de novo	1	1
+panel_analise_cancelada	Análise cancelada.	1	1
+panel_analise_guardada	 (análise guardada)	1	1
+panel_analise_projeto_nao_muda	Para a análise; o projeto não muda.	1	1
+panel_anima_cada	Anima cada	1	1
+panel_animacao	Animação	2	2
+panel_animador_texto	animador de texto	1	1
+panel_apagar	Apagar	1	1
+panel_apagar_este_caminho	Apagar este caminho	1	1
+panel_apagar_mascara	Apagar máscara	1	1
+panel_apagar_preset	Apagar preset	1	1
+panel_aparar_desenhar_so_trecho	Aparar (desenhar só um trecho)	1	1
+panel_aplicar	Aplicar	1	1
+panel_aplicar_sem_texto_remove_expressao	Aplicar sem texto remove a expressão.	1	1
+panel_aplicar_todos_segmentos	Aplicar em todos os segmentos	1	1
+panel_arraste_alcas_palco_mudar_tamanho	Arraste as alças no palco para mudar o tamanho	1	1
+panel_arraste_pontos_palco_toque_num_ponto	Arraste os pontos no palco; toque num ponto para ver as alças de curva.	1	1
+panel_arredondar_pontas	Arredondar pontas	1	1
+panel_avancado	Avançado	1	1
+panel_borda	Borda	1	1
+panel_borra_camada_direcao_ela_move	Borra a camada na direção em que ela se move.	1	1
+panel_borra_mexe_dentro_video	Borra o que se mexe dentro do vídeo.	1	1
+panel_buscar_fonte	Buscar fonte	1	1
+panel_buscar_preset	Buscar preset	1	1
+panel_cada_sozinho	Cada um sozinho	1	1
+panel_caixa	Caixa	1	1
+panel_camada_escolhida_recorta_esta_some_tela	A camada escolhida recorta esta e some da tela.	1	1
+panel_camera_3d	Câmera 3D	1	1
+panel_camera_so_gira_lugar_sem_profundidade	A câmera só gira no lugar — sem profundidade	1	1
+panel_caminho	Caminho	1	1
+panel_cancelar	Cancelar	2	2
+panel_canto_suave	Canto / Suave	1	1
+panel_cantos	Cantos	1	1
+panel_cantos_arredondados	Cantos arredondados	1	1
+panel_centro	Centro	2	2
+panel_chanfrados	Chanfrados	1	1
+panel_colar_curva	Colar curva	1	1
+panel_colar_curva_e26b	colar curva	1	1
+panel_colar_efeitos	Colar efeitos	1	1
+panel_como_esta_mascara_combina_outras	Como esta máscara combina com as outras	1	1
+panel_congelado_cabecote	Congelado no cabeçote	1	1
+panel_congelar	Congelar	1	1
+panel_contorno	Contorno	2	2
+panel_contorno_esta_sem_cor_escolha_cor	O contorno está sem cor: escolha uma cor acima para ele aparecer.	1	1
+panel_contorno_texto	contorno do texto	1	1
+panel_converter_caminho_livre	Converter em caminho livre	1	1
+panel_copiar_curva	Copiar curva	1	1
+panel_copiar_efeitos	Copiar efeitos	1	1
+panel_copias	Cópias	1	1
+panel_copias_cima	Cópias por cima	1	1
+panel_copias_embaixo	Cópias embaixo	1	1
+panel_cor	Cor	3	2
+panel_cor_brilho_metalico_rugosidade_vem_arquivo	Cor, brilho metálico e rugosidade vêm do arquivo do modelo (glTF, FBX).	1	1
+panel_cor_contorno	Cor do contorno	2	2
+panel_cor_contorno_bb27	cor do contorno	1	1
+panel_cor_contorno_texto	cor do contorno do texto	1	1
+panel_cor_final	Cor final	1	1
+panel_cor_forma	cor da forma	1	1
+panel_cor_fundo_texto	cor do fundo do texto	1	1
+panel_cor_inicial	Cor inicial	1	1
+panel_cor_meio	+ cor no meio	1	1
+panel_cor_meio_dd59	− cor do meio	1	1
+panel_cor_preenchimento	Cor e preenchimento	1	1
+panel_cor_solida	Cor sólida	1	1
+panel_cor_sombra_texto	cor da sombra do texto	1	1
+panel_cor_texto	cor do texto	1	1
+panel_cor_texto_3d	cor do texto 3D	1	1
+panel_cria_camera_3d_animada_ponto_guia	Cria a câmera 3D animada e um ponto guia no chão da cena.	1	1
+panel_cria_ponto_guia_segue_objeto_ligue	Cria um ponto guia que segue o objeto — ligue textos e formas a ele.	1	1
+panel_criar_camera	Criar câmera	1	1
+panel_crie_camada_vetorial_desenho_vetorial_servir	Crie uma camada vetorial (Desenho vetorial) para servir de guia.	1	1
+panel_crie_pelo_menos_2_keyframes_npara	Crie pelo menos 2 keyframes\npara editar a curva.	1	1
+panel_curva	Curva	1	1
+panel_curva_todos	curva em todos	1	1
+panel_degrade_redondo	Degradê redondo	1	1
+panel_degrade_reto	Degradê reto	1	1
+panel_depois_outro	Um depois do outro	1	1
+panel_desacelerar	Desacelerar	1	1
+panel_desce	Desce	1	1
+panel_desenhar_mao	Desenhar à mão	1	1
+panel_desfoque	Desfoque	1	1
+panel_desfoque_brilho_cor_outros_efeitos_aplicados	Desfoque, brilho, cor e os outros efeitos aplicados a este vetor.	1	1
+panel_desfoque_movimento	Desfoque de movimento	1	1
+panel_desfoque_movimento_video	Desfoque do movimento do vídeo	1	1
+panel_desfoque_sombra	desfoque da sombra	1	1
+panel_desligada	Desligada	2	2
+panel_desligada_propriedade_usa_keyframes	Desligada: a propriedade usa os keyframes.	1	1
+panel_desligar_efeito	Desligar efeito	1	1
+panel_desligar_efeitos	desligar efeitos	1	1
+panel_desligar_todos	Desligar todos	1	1
+panel_deslize_ajustar_profundidade_toque_z_voltar	Deslize para ajustar a profundidade · toque em Z para voltar a X/Y	1	1
+panel_deslize_mover_camada	Deslize para mover a camada	1	1
+panel_deslize_mover_toque_z_profundidade	Deslize para mover · toque em Z para profundidade	1	1
+panel_deslize_ponto_giro_botao_centro_devolve	Deslize o ponto de giro · o botão Centro devolve o zero	1	1
+panel_deslocamento	Deslocamento	1	1
+panel_deslocar_tracos	Deslocar traços	1	1
+panel_deslocar_trecho	Deslocar trecho	1	1
+panel_diferenca	Diferença	1	1
+panel_digite_texto	Digite o texto	1	1
+panel_direcao	Direção	1	1
+panel_direita	Direita	1	1
+panel_distancia_x	Distância X	2	2
+panel_distancia_y	Distância Y	2	2
+panel_duracao_cada	Duração de cada uma	1	1
+panel_durar_ate_fim_camada	Durar até o fim da camada	1	1
+panel_easing_curve	Easing curve	1	1
+panel_editando_pontos_palco_toque_concluir_palco	Editando pontos no palco. Toque em Concluir (no palco) ao terminar.	1	1
+panel_editar_curva_propriedade	Editar curva da propriedade	1	1
+panel_editar_expressao	Editar expressão	2	2
+panel_editar_forma	Editar forma	1	1
+panel_efeito_removido	Efeito removido	1	1
+panel_efeitos	Efeitos	2	2
+panel_efeitos_camada	Efeitos da camada	1	1
+panel_elipse	Elipse	1	1
+panel_elipse_meio_camada_pronta_ajustar	Uma elipse no meio da camada, pronta para ajustar.	1	1
+panel_encolher_caber	Encolher para caber	1	1
+panel_entrada_suave	Entrada suave	1	1
+panel_entrada_suave_1fd1	entrada suave	1	1
+panel_equilibrado	Equilibrado	1	1
+panel_escala	Escala	2	1
+panel_escolha_camada_abaixo	Escolha a camada abaixo	1	1
+panel_escolha_camada_vetorial	Escolha uma camada vetorial.	1	1
+panel_escolha_estilo_ou_animacao	Escolha estilo e/ou animação	1	1
+panel_escolha_ferramenta_toque_palco_editar_pontos	Escolha uma ferramenta e toque no palco para editar os pontos.	1	1
+panel_escolha_forma_editar_silhueta	Escolha uma forma para editar a silhueta.	1	1
+panel_escolha_mascara_acima_editar_palco	Escolha uma máscara acima para editar no palco.	1	1
+panel_escolhe	Escolhe	1	1
+panel_esconder_x_y_z_3d	Esconder X/Y/Z (3D)	1	1
+panel_escreva_expressao_ou_toque_num_atalho	Escreva uma expressão ou toque num atalho.	1	1
+panel_espaco	Espaço	1	1
+panel_espessura	Espessura	2	1
+panel_esquerda	Esquerda	1	1
+panel_esquerda_direita	Esquerda e direita	1	1
+panel_esta_camada_ainda_nao_tem_grupos	Esta camada ainda não tem grupos. Adicione um caminho acima.	1	1
+panel_esta_camada_nao_tem_audio	Esta camada não tem áudio.	1	1
+panel_esta_camada_vetorial_edite_caminhos_painel	Esta camada é vetorial: edite os caminhos no painel Vetor.	1	1
+panel_esta_curva_igual_nos_dois_sentidos	Esta curva é igual nos dois sentidos	1	1
+panel_estabilizar_pelo_ponto	Estabilizar pelo ponto	1	1
+panel_este_efeito_nao_tem_ajustes	Este efeito não tem ajustes.	1	1
+panel_este_efeito_saiu_aurea_nao_desenha	Este efeito saiu do Aurea e não desenha mais nada. Ele ficou guardado aqui para você decidir — o resto da camada está intacto.	1	1
+panel_este_efeito_saiu_catalogo_ele_nao	Este efeito saiu do catálogo. Ele não desenha mais; apague pelo ⋯.	1	1
+panel_este_trecho_quadro_parado_apare_bordas	Este trecho é um quadro parado. Apare as bordas na timeline para mudar quanto tempo ele fica na tela.	1	1
+panel_este_video_nao_tem_trilha_som	Este vídeo não tem trilha de som.	1	1
+panel_estilo	Estilo	1	1
+panel_estudio_neutro	Estúdio neutro	1	1
+panel_excluir_sobreposicao	Excluir sobreposição	1	1
+panel_expandir	Expandir	1	1
+panel_expressao	Expressão	1	1
+panel_expressao_3c65	Expressão…	1	1
+panel_extrair_audio_camada	Extrair o áudio para uma camada	1	1
+panel_faiscas	Faíscas	1	1
+panel_favoritar	Favoritar	1	1
+panel_fechar	Fechar	3	3
+panel_fechar_caminho	Fechar caminho	2	2
+panel_ferramentas_pontos_transformam_forma_pronta_caminho	As ferramentas de pontos transformam a forma pronta em caminho livre.	1	1
+panel_fim	Fim	1	1
+panel_fonte	Fonte	2	2
+panel_forma_animada	Forma animada	1	1
+panel_forma_anterior	Forma anterior	1	1
+panel_fundo	Fundo	1	1
+panel_gerar_legendas	Gerar legendas	1	1
+panel_girar_3d_x_y	Girar em 3D (X e Y)	1	1
+panel_giro	Giro	1	1
+panel_gravidade	Gravidade	1	1
+panel_grupo_visivel	Grupo visível	1	1
+panel_guarda_curva_keyframe_escolhido	Guarda a curva do keyframe escolhido.	1	1
+panel_guarda_efeitos_camada_keyframes	Guarda os efeitos da camada com os keyframes.	1	1
+panel_guarda_estilo_ou_animacao_texto	Guarda o estilo e/ou a animação do texto.	1	1
+panel_guarda_keyframes_movimento_camada	Guarda os keyframes de movimento da camada.	1	1
+panel_guarda_opcoes_atuais_legenda	Guarda as opções atuais da legenda.	1	1
+panel_idioma_fala	Idioma da fala	1	1
+panel_imagem_ambiente	Imagem de ambiente ✓	1	1
+panel_importar	Importar	1	1
+panel_importar_legenda_srt	Importar legenda (.srt)	1	1
+panel_inicio	Início	1	1
+panel_inicio_camada_fica_lugar_fim_acompanha	O início da camada fica no lugar; o fim acompanha a nova velocidade.	1	1
+panel_intensidade	Intensidade	1	1
+panel_intensidade_camada_ajuste	Intensidade da camada de ajuste	1	1
+panel_intensidade_desfoque	Intensidade do desfoque	1	1
+panel_intensidade_desfoque_eef9	intensidade do desfoque	1	1
+panel_intensidade_vale_todas_camadas_desfoque_neste	A intensidade vale para todas as camadas com desfoque neste projeto.	1	1
+panel_intersecao	Interseção	2	2
+panel_inverter_curva	inverter curva	1	1
+panel_inverter_direcao_caminho	Inverter direção do caminho	1	1
+panel_inverter_mostrar_lado_fora	Inverter (mostrar o lado de fora)	1	1
+panel_inverter_sentido	Inverter sentido	1	1
+panel_ja_existe_sera_substituido	Já existe: será substituído.	1	1
+panel_juntar_caminhos_grupo	Juntar caminhos do grupo	1	1
+panel_juntar_precisa_2_caminhos_grupo_use	Juntar precisa de 2 caminhos no grupo: use + Adicionar em cima.	1	1
+panel_keyframe_anterior	Keyframe anterior	1	1
+panel_lados	Lados	2	2
+panel_largura	Largura	6	4
+panel_largura_caixa	Largura da caixa	1	1
+panel_largura_caixa_4a83	largura da caixa	1	1
+panel_largura_contorno	Largura do contorno	1	1
+panel_legendas	Legendas	1	1
+panel_lento_meio	Lento no meio	1	1
+panel_letra	Letra	1	1
+panel_ligada	Ligada	1	1
+panel_ligar_efeito	Ligar efeito	1	1
+panel_ligar_efeitos	ligar efeitos	1	1
+panel_ligar_todos	Ligar todos	1	1
+panel_limite_canto	Limite do canto	1	1
+panel_limpar_busca	Limpar busca	1	1
+panel_linear	Linear	1	1
+panel_linha	Linha	1	1
+panel_linha_reta	Linha reta	1	1
+panel_livre	Livre	1	1
+panel_losango_trilho_grava_keyframe_linha_acesa	O losango do trilho grava um keyframe da linha acesa no cabeçote.	1	1
+panel_luz_ambiente	Luz do ambiente	1	1
+panel_maior	Maior	1	1
+panel_mais_opcoes_efeitos	Mais opções dos efeitos	1	1
+panel_mantem_forma_libera_pontos	Mantém a forma e libera os pontos.	1	1
+panel_manter	Manter	1	1
+panel_manter_proporcao	Manter proporção	1	1
+panel_marcar_keyframe_aqui	Marcar keyframe aqui	1	1
+panel_margem_fundo	Margem do fundo	1	1
+panel_margem_fundo_276c	margem do fundo	1	1
+panel_margem_inicial	Margem inicial	1	1
+panel_margem_texto_caminho	margem do texto no caminho	1	1
+panel_mascara_mostra_so_parte_camada_escolha	Uma máscara mostra só uma parte da camada. Escolha como começar:	1	1
+panel_mascara_recorte	Máscara e recorte	2	2
+panel_mascara_segue_esta_embaixo_dela_cabecote	A máscara segue o que está embaixo dela, do cabeçote até o fim do clipe.	1	1
+panel_mascaras	Máscaras	1	1
+panel_material	Material	1	1
+panel_material_ambiente	Material e ambiente	1	1
+panel_mistura	Mistura	1	1
+panel_mistura_opacidade	Mistura e opacidade	1	1
+panel_misturar	Misturar	1	1
+panel_modo_escolhido_acima	Com o modo escolhido acima.	1	1
+panel_mostrar_x_y_z_3d	Mostrar X/Y/Z (3D)	1	1
+panel_motor_recusou_esta_propriedade	O motor recusou esta propriedade.	1	1
+panel_move_so_este_grupo_dentro_camada	Move só este grupo dentro da camada.	1	1
+panel_move_video_ponto_ficar_parado_tela	Move o vídeo para o ponto ficar parado na tela.	1	1
+panel_mover_baixo	Mover para baixo	1	1
+panel_mover_cima	Mover para cima	1	1
+panel_mover_pivo	mover pivô	1	1
+panel_mover_ponto_curva_tempo	mover ponto da curva de tempo	1	1
+panel_movimento_camera_encontrado	Movimento da câmera encontrado	1	1
+panel_movimento_suave	Movimento suave	1	1
+panel_mudo	Mudo	1	1
+panel_nao_ha_outra_camada_possa_recortar	Não há outra camada que possa recortar esta.	1	1
+panel_nao_juntar	Não juntar	1	1
+panel_nao_recortar	Não recortar	1	1
+panel_negrito	Negrito	1	1
+panel_neve	Neve	1	1
+panel_nome_preset	Dê um nome ao preset	1	1
+panel_normal	Normal	1	1
+panel_novo_grupo_preenchimento_borda_proprios	Novo grupo (com preenchimento e borda próprios)	1	1
+panel_objetos_aproximam_ou_giram	Para objetos que se aproximam ou giram.	1	1
+panel_objetos_so_andam_pela_tela	Para objetos que só andam pela tela.	1	1
+panel_onde_caminhos_cruzam	Onde os caminhos se cruzam	1	1
+panel_opacidade	Opacidade	9	4
+panel_opacidade_final	Opacidade final	1	1
+panel_opacidade_inicial	Opacidade inicial	1	1
+panel_ordem	Em ordem	1	1
+panel_ordem_aleatoria	Ordem aleatória	1	1
+panel_ordem_copias	Ordem das cópias	1	1
+panel_overshoot	Overshoot	1	1
+panel_overshoot_9678	Overshoot ✓	1	1
+panel_padrao_aparelho	Padrão do aparelho	2	2
+panel_palavra	Palavra	1	1
+panel_parada_toque_trilho_animar	Parada — toque no ◇ do trilho para animar	1	1
+panel_parado_toque_trilho_animar	Parado — toque no ◇ do trilho para animar	1	1
+panel_paragrafo	Parágrafo	1	1
+panel_particulas	Partículas	1	1
+panel_particulas_segundo	Partículas por segundo	1	1
+panel_passagem	Passagem	1	1
+panel_passar_tras_frente	Passar de trás para frente	1	1
+panel_pela_forma	Pela forma	1	1
+panel_pela_forma_aparece_onde_outra_camada	Pela forma: aparece onde a outra camada existe. Pelo brilho: onde ela é clara.	1	1
+panel_pela_forma_invertido	Pela forma, invertido	1	1
+panel_pelo_brilho	Pelo brilho	1	1
+panel_pelo_brilho_invertido	Pelo brilho, invertido	1	1
+panel_perpendicular_caminho	Perpendicular ao caminho	1	1
+panel_petalas	Pétalas	1	1
+panel_pivo_x	Pivô em X	1	1
+panel_pivo_y	Pivô em Y	1	1
+panel_poeira_luz	Poeira de luz	1	1
+panel_pontas	Pontas	3	2
+panel_posicao_x	Posição X	2	2
+panel_posicao_y	Posição Y	2	2
+panel_preencher	Preencher	3	3
+panel_preencher_tudo	Preencher tudo	1	1
+panel_preenchimento	Preenchimento	1	1
+panel_preenchimento_6e8f	preenchimento	1	1
+panel_preset_sai_deste_aparelho	O preset sai deste aparelho.	1	1
+panel_presets	Presets	2	2
+panel_profundidade_z	Profundidade Z	1	1
+panel_proxima_forma	Próxima forma	1	1
+panel_proximo_keyframe	Próximo keyframe	1	1
+panel_quadradas	Quadradas	1	1
+panel_quadros_camera_lenta	Quadros na câmera lenta	1	1
+panel_raio	Raio	3	2
+panel_raio_externo	Raio externo	1	1
+panel_raio_fundo	raio do fundo	1	1
+panel_raio_interno	Raio interno	2	2
+panel_raio_interno_75cf	raio interno	1	1
+panel_rampa_ligada_som_video_seguem_mesma	Com a rampa ligada, som e vídeo seguem a mesma mudança de velocidade.	1	1
+panel_rapido	Rápido	1	1
+panel_rastreando	Rastreando…	1	1
+panel_rastrear_ponto	Rastrear um ponto	1	1
+panel_rastreio	Rastreio	1	1
+panel_recorte_outra_camada	Recorte por outra camada	1	1
+panel_redefinir	Redefinir	1	1
+panel_redefinir_efeito	Redefinir efeito	1	1
+panel_redondas	Redondas	1	1
+panel_redondo	Redondo	1	1
+panel_redondos	Redondos	1	1
+panel_reforco	Reforço	1	1
+panel_remover	Remover	2	2
+panel_remover_efeito	Remover efeito	2	1
+panel_remover_ponto	Remover ponto	1	1
+panel_repetir_copias	Repetir (cópias)	1	1
+panel_repetir_quadro	Repetir quadro	1	1
+panel_resultado_agora	Resultado agora: 	1	1
+panel_retangulo	Retângulo	1	1
+panel_retangulo_meio_camada_pronto_ajustar	Um retângulo no meio da camada, pronto para ajustar.	1	1
+panel_retas	Retas	1	1
+panel_rotacao	Rotação	2	1
+panel_saida_suave	Saída suave	1	1
+panel_saida_suave_9ac9	saída suave	1	1
+panel_salvar	Salvar	1	1
+panel_salvar_camada_como_preset	Salvar o da camada como preset	1	1
+panel_salvar_curva_como_preset	Salvar curva como preset	2	1
+panel_salvar_desta_camada	Salvar o desta camada	1	1
+panel_seco	Seco	1	1
+panel_seguir_posicao	Seguir posição	1	1
+panel_seguir_posicao_tamanho_giro	Seguir posição, tamanho e giro	1	1
+panel_selecionar	Selecionar	1	1
+panel_selecione_camada_particulas	Selecione uma camada de partículas.	1	1
+panel_selecione_camada_texto	Selecione uma camada de texto.	1	1
+panel_sem_chave_servico_transcricao_use_arquivo	Sem a chave do serviço de transcrição: use um arquivo de legenda (.srt), ou coloque a chave em Ajustes › Legendas. O áudio só sai do aparelho quando você toca em Gerar legendas.	1	1
+panel_sem_rampa	Sem rampa	1	1
+panel_sintaxe_ok_toque_aplicar	Sintaxe ok · toque em Aplicar	1	1
+panel_sobe	Sobe	1	1
+panel_solo	Solo	1	1
+panel_soltar_largura_altura	Soltar largura e altura	1	1
+panel_soltar_proporcao	Soltar proporção	1	1
+panel_som	Som	2	2
+panel_somar	Somar	1	1
+panel_sombra	Sombra	1	1
+panel_sombra_x	sombra x	1	1
+panel_sombra_y	sombra y	1	1
+panel_sorteado	Sorteado	1	1
+panel_sua	Sua	1	1
+panel_suave	Suave	3	3
+panel_suavizar	Suavizar	1	1
+panel_subtrair	Subtrair	2	2
+panel_tamanho	Tamanho	2	2
+panel_tamanho_final	Tamanho final	1	1
+panel_tamanho_fixo	Tamanho fixo	1	1
+panel_tamanho_forma	tamanho da forma	2	1
+panel_tamanho_inicial	Tamanho inicial	1	1
+panel_tamanho_texto	tamanho do texto	1	1
+panel_tempo_velocidade	Tempo e velocidade	1	1
+panel_texto	Texto	1	1
+panel_texto_caminho	Texto no caminho	1	1
+panel_tirar_favoritos	Tirar dos favoritos	1	1
+panel_tirar_keyframe_daqui	Tirar o keyframe daqui	1	1
+panel_toque_curva_criar_ponto_arraste_mudar	Toque na curva para criar um ponto, arraste para mudar o tempo, segure para apagar.	1	1
+panel_toque_num_detalhe_contraste_canto_luz	Toque num detalhe com contraste (canto, luz, marca). Depois de escolher, o rastreio roda sozinho.	1	1
+panel_toque_num_keyframe_timeline_npara_editar	Toque num keyframe da timeline\npara editar a curva.	1	1
+panel_toque_palco_pontos_arraste_curvar	Toque no palco para pôr pontos; arraste ao pôr para curvar.	1	1
+panel_toque_palco_pontos_arraste_curvar_toque	Toque no palco para pôr pontos; arraste ao pôr para curvar. Toque no 1º ponto (ou em Fechar caminho) para fechar — a máscara só recorta fechada.	1	1
+panel_toque_preset_guardar_aqui	Toque na ☆ de um preset para guardar aqui.	1	1
+panel_tracejado	Tracejado	1	1
+panel_tracejado_aparece_borda_ligue_borda	O tracejado aparece na borda: ligue a Borda.	1	1
+panel_traco	Traço	1	1
+panel_transcrever_novo	Transcrever de novo	1	1
+panel_transformar	Transformar	1	1
+panel_travar_largura_altura	Travar largura e altura	1	1
+panel_trecho_escolhido	Trecho escolhido	1	1
+panel_triangulo	Triângulo	1	1
+panel_trocar_forma	trocar forma	1	1
+panel_trocas_segundo	Trocas por segundo	1	1
+panel_ultimos_10_presets_aplicados_aparecem_aqui	Os últimos 10 presets aplicados aparecem aqui.	1	1
+panel_unir	Unir	1	1
+panel_usando_valor_keyframes	 — usando o valor dos keyframes	1	1
+panel_usar_imagem_ambiente_hdr	Usar imagem de ambiente (.hdr)	1	1
+panel_varios_caminhos	Com vários caminhos	1	1
+panel_velocidade	Velocidade	1	1
+panel_velocidade_vale_video_audio_nas_outras	A velocidade vale para vídeo e áudio. Nas outras camadas, aproxime ou afaste os keyframes para animar mais rápido ou mais devagar.	1	1
+panel_vetor	Vetor	2	2
+panel_vivos	Vivos	1	1
+panel_voltar	Voltar	1	1
+panel_voltar_ferramentas	Voltar às ferramentas	2	2
+panel_voltar_ferramentas_camada	Voltar às ferramentas da camada	1	1
+panel_voltar_padrao	Voltar ao padrão	2	2
+panel_volume	Volume	2	1
+panel_volume_sobe_desce_forma_natural_sem	O volume sobe e desce de forma natural, sem buraco no meio do som.	1	1
+panel_x_largura	x · largura	1	1
+panel_y_altura	y · altura	1	1

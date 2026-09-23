@@ -36,6 +36,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -251,13 +253,13 @@ internal fun CurvePanel(env: PanelEnv) {
     if (seg == null) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                if (store.selectedKeyframe == null) "Toque num keyframe da timeline\npara editar a curva." else "Crie pelo menos 2 keyframes\npara editar a curva.",
+                if (store.selectedKeyframe == null) stringResource(R.string.panel_toque_num_keyframe_timeline_npara_editar) else stringResource(R.string.panel_crie_pelo_menos_2_keyframes_npara),
                 textAlign = TextAlign.Center,
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "Voltar",
+                stringResource(R.string.panel_voltar),
                 modifier = Modifier.tocavel { back() }.padding(horizontal = 16.dp, vertical = 8.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Accent)),
             )
@@ -369,7 +371,7 @@ internal fun CurvePanel(env: PanelEnv) {
 
     if (savePrompt) {
         AureaNamePrompt(
-            title = "Salvar curva como preset",
+            title = stringResource(R.string.panel_salvar_curva_como_preset),
             initial = nameOf(ease),
             onConfirm = { name ->
                 // A interpolação vai como está (nomeada, reta, manter ou bézier com as alças).
@@ -382,24 +384,24 @@ internal fun CurvePanel(env: PanelEnv) {
 
     if (menu) {
         AureaActionSheet(
-            title = "Curva",
+            title = stringResource(R.string.panel_curva),
             actions = listOf(
-                SheetAction("Copiar curva") { CurveClipboard.ease = ease },
-                SheetAction("Salvar curva como preset") { savePrompt = true },
-                SheetAction("Colar curva", enabled = CurveClipboard.ease != null) {
+                SheetAction(stringResource(R.string.panel_copiar_curva)) { CurveClipboard.ease = ease },
+                SheetAction(stringResource(R.string.panel_salvar_curva_como_preset)) { savePrompt = true },
+                SheetAction(stringResource(R.string.panel_colar_curva), enabled = CurveClipboard.ease != null) {
                     CurveClipboard.ease?.let {
                         store.beginGesture("colar curva")
                         applyEase(store, layer, start, it)
                         store.endGesture()
                     }
                 },
-                SheetAction("Aplicar em todos os segmentos") {
+                SheetAction(stringResource(R.string.panel_aplicar_todos_segmentos)) {
                     val track = (store.keyframes[layer] ?: emptyList()).track(start)
                     store.beginGesture("curva em todos")
                     track.dropLast(1).forEach { applyEase(store, layer, it, ease) }
                     store.endGesture()
                 },
-                SheetAction(if (overshoot) "Overshoot ✓" else "Overshoot") { overshoot = !overshoot },
+                SheetAction(if (overshoot) stringResource(R.string.panel_overshoot_9678) else stringResource(R.string.panel_overshoot)) { overshoot = !overshoot },
             ),
             onDismiss = { menu = false },
         )
@@ -554,7 +556,7 @@ private fun DrawScope.drawGrid(y0: Float, y1: Float) {
 @Composable
 private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (CurvePreset) -> Unit) {
     // As famílias fixas + a aba ★ dos presets de curva (nativos e salvos).
-    val families = Families + CurveFamily("Presets", CupertinoGlyph.Star, saved)
+    val families = Families + CurveFamily(stringResource(R.string.panel_presets), CupertinoGlyph.Star, saved)
     var tab by rememberSaveable { mutableIntStateOf(familyOf(current)) }
     val family = families[tab.coerceIn(0, families.lastIndex)]
     Row(Modifier.width(132.dp).fillMaxHeight()) {

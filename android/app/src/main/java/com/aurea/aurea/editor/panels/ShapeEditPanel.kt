@@ -34,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -109,11 +111,11 @@ internal fun ShapeEditPanel(env: PanelEnv) {
     val d by remember(store) { derivedStateOf { store.detail } }
     val detail = d ?: return
     if (detail.kind != com.aurea.aurea.ui.theme.LayerType.Shape.kind) {
-        PanelNotice("Escolha uma forma para editar a silhueta.", Modifier.padding(horizontal = 18.dp))
+        PanelNotice(stringResource(R.string.panel_escolha_forma_editar_silhueta), Modifier.padding(horizontal = 18.dp))
         return
     }
     if (store.isVectorLayer) {
-        PanelNotice("Esta camada é vetorial: edite os caminhos no painel Vetor.", Modifier.padding(horizontal = 18.dp))
+        PanelNotice(stringResource(R.string.panel_esta_camada_vetorial_edite_caminhos_painel), Modifier.padding(horizontal = 18.dp))
         return
     }
     val type = detail.shapeTypePoints and 0xFFFF
@@ -157,21 +159,21 @@ internal fun ShapeEditPanel(env: PanelEnv) {
             val w = detail.sourceWidth.toFloat()
             val h = detail.sourceHeight.toFloat()
             when (type) {
-                0 -> ShapeRow(env, 1, "Raio", detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
-                3, 4, 8 -> ShapeRow(env, 2, when (type) { 3 -> "Lados"; 8 -> "Pétalas"; else -> "Pontas" }, points.toFloat(), 0.06f, 3f, 64f, "", 0, 5f, "pontas") {
+                0 -> ShapeRow(env, 1, stringResource(R.string.panel_raio), detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
+                3, 4, 8 -> ShapeRow(env, 2, when (type) { 3 -> stringResource(R.string.panel_lados); 8 -> stringResource(R.string.panel_petalas); else -> stringResource(R.string.panel_pontas) }, points.toFloat(), 0.06f, 3f, 64f, "", 0, 5f, "pontas") {
                     store.setShapeParam(2, it.roundToInt().toFloat())
                 }
             }
             when (type) {
-                4 -> ShapeRow(env, 3, "Raio interno", detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "raio interno") { store.setShapeParam(3, it / 100f) }
-                5 -> ShapeRow(env, 3, "Espessura", detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, it / 100f) }
+                4 -> ShapeRow(env, 3, stringResource(R.string.panel_raio_interno), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, stringResource(R.string.panel_raio_interno_75cf)) { store.setShapeParam(3, it / 100f) }
+                5 -> ShapeRow(env, 3, stringResource(R.string.panel_espessura), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, it / 100f) }
                 // Anel: o motor guarda o FURO; a pessoa pensa na espessura do aro.
-                6 -> ShapeRow(env, 3, "Espessura", (1f - detail.shapeInner) * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, 1f - it / 100f) }
+                6 -> ShapeRow(env, 3, stringResource(R.string.panel_espessura), (1f - detail.shapeInner) * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, 1f - it / 100f) }
             }
             Spacer(Modifier.height(6.dp))
             KitHint(
-                "Arraste as alças no palco para mudar o tamanho" + (if (type == 0) "; a alça azul arredonda os cantos. " else ". ") +
-                    "O losango do trilho grava um keyframe da linha acesa no cabeçote.",
+                stringResource(R.string.panel_arraste_alcas_palco_mudar_tamanho) + (if (type == 0) "; a alça azul arredonda os cantos. " else ". ") +
+                    stringResource(R.string.panel_losango_trilho_grava_keyframe_linha_acesa),
             )
         }
     }
@@ -252,7 +254,7 @@ private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
     }
     val startW = remember { FloatArray(2) }
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
-        PropertyLabelChip("Tamanho", selected = true)
+        PropertyLabelChip(stringResource(R.string.panel_tamanho), selected = true)
         Spacer(Modifier.width(6.dp))
         TickRuler(
             value = { if (dragging) live else cur },
@@ -291,7 +293,7 @@ private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
             ValueBox(
                 numeroPtBr(v, 0),
                 width = 58.dp,
-                label = if (a == 0) "x · largura" else "y · altura",
+                label = if (a == 0) stringResource(R.string.panel_x_largura) else stringResource(R.string.panel_y_altura),
                 color = if (a == axis) AureaColors.Accent else Color.White,
                 onTap = {
                     if (axis != a) {

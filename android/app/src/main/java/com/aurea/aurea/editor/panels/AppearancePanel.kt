@@ -31,6 +31,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -150,7 +152,7 @@ internal fun AppearancePanel(env: PanelEnv) {
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ParamTabs(
-                labels = listOf("Opacidade", "Mistura", "Máscara e recorte"),
+                labels = listOf(stringResource(R.string.panel_opacidade), stringResource(R.string.panel_mistura), stringResource(R.string.panel_mascara_recorte)),
                 selected = tab,
                 animated = { it == 0 && look != KeyframeLook.None },
                 onSelect = { i ->

@@ -21,6 +21,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -112,12 +114,12 @@ private fun VectorToolBanner(store: EditorStore, modifier: Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            if (tool == 2) "Mão livre: desenhe com o dedo"
+            if (tool == 2) stringResource(R.string.editor_mao_livre_desenhe_dedo)
             else when (PointTool.effective(VectorStageState.pointTool, store.vectorPathAt?.path?.v?.size ?: 0)) {
-                PointTool.ADD -> "Adicionar: toque na linha ou no vazio; arraste para curvar"
-                PointTool.REMOVE -> "Remover: toque no ponto para apagar"
-                PointTool.CORNER -> "Canto/Suave: toque no ponto para alternar"
-                else -> "Selecionar: arraste pontos e alças"
+                PointTool.ADD -> stringResource(R.string.editor_adicionar_toque_linha_ou_vazio_arraste)
+                PointTool.REMOVE -> stringResource(R.string.editor_remover_toque_ponto_apagar)
+                PointTool.CORNER -> stringResource(R.string.editor_canto_suave_toque_ponto_alternar)
+                else -> stringResource(R.string.editor_selecionar_arraste_pontos_alcas)
             },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -134,7 +136,7 @@ private fun VectorToolBanner(store: EditorStore, modifier: Modifier) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                "Concluir",
+                stringResource(R.string.editor_concluir),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W700, color = AureaColors.OnAccent)),
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
@@ -171,7 +173,7 @@ private fun LockBanner(store: EditorStore, modifier: Modifier) {
         CupertinoIcon(CupertinoGlyph.LockFill, 13.dp, AureaColors.Accent)
         Spacer(Modifier.width(7.dp))
         Text(
-            "Camada bloqueada",
+            stringResource(R.string.editor_camada_bloqueada),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600)),
@@ -187,7 +189,7 @@ private fun LockBanner(store: EditorStore, modifier: Modifier) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                "Desbloquear",
+                stringResource(R.string.editor_desbloquear),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W700, color = AureaColors.OnAccent)),
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))

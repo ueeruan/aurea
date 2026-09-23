@@ -17,6 +17,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -52,9 +54,9 @@ internal fun TextPathSection(env: PanelEnv) {
             store.queryDetail(row.id)?.let { (it.shapeTypePoints and 0xFFFF) == VECTOR_SHAPE_TYPE } == true
     }
     Spacer(Modifier.height(6.dp))
-    Text("Texto no caminho", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+    Text(stringResource(R.string.panel_texto_caminho), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
     if (candidates.isEmpty() && guide == 0L) {
-        Text("Crie uma camada vetorial (Desenho vetorial) para servir de guia.",
+        Text(stringResource(R.string.panel_crie_camada_vetorial_desenho_vetorial_servir),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)), modifier = Modifier.padding(vertical = 8.dp))
         return
     }
@@ -63,12 +65,12 @@ internal fun TextPathSection(env: PanelEnv) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        PathChip("Linha reta", guide == 0L) { store.setTextPath(0L, offset, perpendicular, reverse) }
-        candidates.forEach { row -> PathChip(row.name.ifEmpty { "Vetor" }, guide == row.id) { store.setTextPath(row.id, offset, perpendicular, reverse) } }
+        PathChip(stringResource(R.string.panel_linha_reta), guide == 0L) { store.setTextPath(0L, offset, perpendicular, reverse) }
+        candidates.forEach { row -> PathChip(row.name.ifEmpty { stringResource(R.string.panel_vetor) }, guide == row.id) { store.setTextPath(row.id, offset, perpendicular, reverse) } }
     }
     if (guide == 0L) return
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Margem inicial", modifier = Modifier.width(110.dp), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Text(stringResource(R.string.panel_margem_inicial), modifier = Modifier.width(110.dp), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
         Box(Modifier.weight(1f).height(40.dp)) {
             val value = { store.textPath?.let { java.lang.Float.intBitsToFloat(it[1].toInt()) } ?: offset }
             TickRuler(
@@ -91,11 +93,11 @@ internal fun TextPathSection(env: PanelEnv) {
         ValueBox("${offset.roundToInt()} px", onTap = null)
     }
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Perpendicular ao caminho", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Text(stringResource(R.string.panel_perpendicular_caminho), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
         AureaToggle(checked = perpendicular, onCheckedChange = { on -> store.setTextPath(guide, offset, on, reverse) })
     }
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Inverter sentido", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Text(stringResource(R.string.panel_inverter_sentido), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
         AureaToggle(checked = reverse, onCheckedChange = { on -> store.setTextPath(guide, offset, perpendicular, on) })
     }
 }

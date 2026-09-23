@@ -22,6 +22,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
@@ -45,13 +47,13 @@ internal fun ParticlesPanel(env: PanelEnv) {
     val store = env.store
     val v by remember(store) { derivedStateOf { store.particles } }
     val p = v ?: run {
-        Text("Selecione uma camada de partículas.", modifier = Modifier.padding(18.dp),
+        Text(stringResource(R.string.panel_selecione_camada_particulas), modifier = Modifier.padding(18.dp),
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
         return
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(0 to "Faíscas", 1 to "Neve", 2 to "Poeira de luz").forEach { (preset, label) ->
+            listOf(0 to stringResource(R.string.panel_faiscas), 1 to stringResource(R.string.panel_neve), 2 to stringResource(R.string.panel_poeira_luz)).forEach { (preset, label) ->
                 Box(
                     Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
                         .tocavel(onClick = { store.applyParticlePreset(preset) }).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -61,14 +63,14 @@ internal fun ParticlesPanel(env: PanelEnv) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        ParticleRuler(store, "Partículas por segundo", 0, p[0], "${p[0].roundToInt()}", 1f, 0.1f, 2000f)
-        ParticleRuler(store, "Duração de cada uma", 1, p[1], "${com.aurea.aurea.ui.ds.numeroPtBr(p[1], 1)} s", 0.02f, 0.05f, 30f)
-        ParticleRuler(store, "Velocidade", 2, p[2], "${p[2].roundToInt()} px/s", 4f, 0f, 5000f)
-        ParticleRuler(store, "Abertura", 3, p[3], "${p[3].roundToInt()}°", 1f, 0f, 360f)
-        ParticleRuler(store, "Direção", 7, p[7], "${p[7].roundToInt()}°", 1f, -360f, 360f)
-        ParticleRuler(store, "Gravidade", 4, p[4], "${(-p[4]).roundToInt()} px/s²", 8f, -5000f, 5000f)
-        ParticleRuler(store, "Tamanho inicial", 5, p[5], "${p[5].roundToInt()} px", 0.5f, 0f, 500f)
-        ParticleRuler(store, "Tamanho final", 6, p[6], "${p[6].roundToInt()} px", 0.5f, 0f, 500f)
+        ParticleRuler(store, stringResource(R.string.panel_particulas_segundo), 0, p[0], "${p[0].roundToInt()}", 1f, 0.1f, 2000f)
+        ParticleRuler(store, stringResource(R.string.panel_duracao_cada), 1, p[1], "${com.aurea.aurea.ui.ds.numeroPtBr(p[1], 1)} s", 0.02f, 0.05f, 30f)
+        ParticleRuler(store, stringResource(R.string.panel_velocidade), 2, p[2], "${p[2].roundToInt()} px/s", 4f, 0f, 5000f)
+        ParticleRuler(store, stringResource(R.string.panel_abertura), 3, p[3], "${p[3].roundToInt()}°", 1f, 0f, 360f)
+        ParticleRuler(store, stringResource(R.string.panel_direcao), 7, p[7], "${p[7].roundToInt()}°", 1f, -360f, 360f)
+        ParticleRuler(store, stringResource(R.string.panel_gravidade), 4, p[4], "${(-p[4]).roundToInt()} px/s²", 8f, -5000f, 5000f)
+        ParticleRuler(store, stringResource(R.string.panel_tamanho_inicial), 5, p[5], "${p[5].roundToInt()} px", 0.5f, 0f, 500f)
+        ParticleRuler(store, stringResource(R.string.panel_tamanho_final), 6, p[6], "${p[6].roundToInt()} px", 0.5f, 0f, 500f)
     }
 }
 

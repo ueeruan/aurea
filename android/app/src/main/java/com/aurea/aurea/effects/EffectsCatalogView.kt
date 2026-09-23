@@ -34,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -167,7 +169,7 @@ fun EffectSearchField(value: String, onChange: (String) -> Unit, modifier: Modif
         Spacer(Modifier.width(6.dp))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (value.isEmpty()) {
-                Text("Buscar: \"glitch\", \"vhs\", \"desfoque\", \"cor\"…", style = AureaType.of(14f, color = AureaColors.Muted), maxLines = 1)
+                Text(stringResource(R.string.effect_buscar_glitch_vhs_desfoque_cor), style = AureaType.of(14f, color = AureaColors.Muted), maxLines = 1)
             }
             BasicTextField(
                 value = value,
@@ -258,13 +260,13 @@ fun EffectsCatalogGrid(
             if (!searching) {
                 item(key = "fichas", span = { GridItemSpan(cols) }) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                        EffectFilterChip("Todos", filter == EffectFilter.All) { onFilter(EffectFilter.All) }
+                        EffectFilterChip(stringResource(R.string.effect_todos), filter == EffectFilter.All) { onFilter(EffectFilter.All) }
                         if (recents.any { id -> catalog.any { it.typeId == id } }) {
-                            EffectFilterChip("Recentes", filter == EffectFilter.Recent) {
+                            EffectFilterChip(stringResource(R.string.effect_recentes), filter == EffectFilter.Recent) {
                                 onFilter(if (filter == EffectFilter.Recent) EffectFilter.All else EffectFilter.Recent)
                             }
                         }
-                        EffectFilterChip("★ Favoritos", filter == EffectFilter.Favorite) {
+                        EffectFilterChip(stringResource(R.string.effect_favoritos), filter == EffectFilter.Favorite) {
                             onFilter(if (filter == EffectFilter.Favorite) EffectFilter.All else EffectFilter.Favorite)
                         }
                         categories.forEach { c ->
@@ -390,14 +392,14 @@ fun EffectDetailSheet(
                             .tocavel(shrink = 1f, onClick = onApply),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("Adicionar à seleção", style = AureaType.Button)
+                        Text(stringResource(R.string.effect_adicionar_selecao), style = AureaType.Button)
                     }
                 }
             } else {
                 item(key = "acao-catalogo") {
                     Spacer(Modifier.height(AureaDims.S5))
                     Text(
-                        "Abra um projeto para aplicar este efeito.",
+                        stringResource(R.string.effect_abra_projeto_aplicar_este_efeito),
                         style = AureaType.CardSpec,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),

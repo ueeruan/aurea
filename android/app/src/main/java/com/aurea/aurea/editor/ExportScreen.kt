@@ -36,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -140,7 +142,7 @@ private fun ExportTopBar(canClose: Boolean, onClose: () -> Unit) {
         ) {
             CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, if (canClose) AureaColors.Text else AureaColors.Disabled)
         }
-        Text("Exportar", style = AureaType.TitleMedium, modifier = Modifier.padding(start = 4.dp))
+        Text(stringResource(R.string.editor_exportar), style = AureaType.TitleMedium, modifier = Modifier.padding(start = 4.dp))
     }
 }
 
@@ -163,7 +165,7 @@ private fun PreviewCard(bmp: Bitmap?, w: Int, h: Int) {
             contentAlignment = Alignment.Center,
         ) {
             if (bmp != null) {
-                Image(bmp.asImageBitmap(), contentDescription = "Prévia", contentScale = ContentScale.Fit,
+                Image(bmp.asImageBitmap(), contentDescription = stringResource(R.string.editor_previa), contentScale = ContentScale.Fit,
                       modifier = Modifier.fillMaxSize())
             } else {
                 CupertinoIcon(CupertinoGlyph.Film, 34.dp, AureaColors.Muted)
@@ -201,7 +203,7 @@ private fun Options(
     val mbps = store.exporter.estimatedMbps(w, h, fps, options)
     val sizeMb = mbps * seconds / 8.0
 
-    Section("Resolução")
+    Section(stringResource(R.string.editor_resolucao))
     Chips(Resolutions.map { it.second }, available.firstOrNull { it.first == options.shortSide }?.second, blocked) { label ->
         onChange(options.copy(shortSide = available.first { it.second == label }.first))
     }
@@ -212,32 +214,32 @@ private fun Options(
             modifier = Modifier.padding(top = 6.dp),
         )
     }
-    Section("Quadros por segundo")
+    Section(stringResource(R.string.editor_quadros_segundo))
     Chips(fpsOptions.map { if (it == 0.0) "Do projeto (${fmt(compFps)})" else fmt(it) },
           if (options.fps == 0.0) "Do projeto (${fmt(compFps)})" else fmt(options.fps)) { label ->
         onChange(options.copy(fps = if (label.startsWith("Do projeto")) 0.0 else label.replace(',', '.').toDouble()))
     }
-    Section("Formato")
+    Section(stringResource(R.string.editor_formato))
     val hevcOk = device?.hevcExportAvailable ?: true
     Chips(listOf("H.264", "HEVC"), if (options.hevc) "HEVC" else "H.264", if (hevcOk) emptySet() else setOf("HEVC")) {
         onChange(options.copy(hevc = it == "HEVC"))
     }
     Text(
         if (!hevcOk) device?.hevcExportReason() ?: ""
-        else if (options.hevc) "HEVC: arquivo menor, mesma qualidade. Alguns aparelhos antigos não reproduzem."
-        else "H.264: abre em qualquer aparelho e rede social.",
+        else if (options.hevc) stringResource(R.string.editor_hevc_arquivo_menor_mesma_qualidade_alguns)
+        else stringResource(R.string.editor_h_264_abre_qualquer_aparelho_rede),
         style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
         modifier = Modifier.padding(top = 6.dp),
     )
-    Section("Qualidade")
-    Chips(listOf("Padrão", "Alta"), if (options.highQuality) "Alta" else "Padrão") {
+    Section(stringResource(R.string.editor_qualidade))
+    Chips(listOf(stringResource(R.string.editor_padrao), stringResource(R.string.editor_alta)), if (options.highQuality) stringResource(R.string.editor_alta) else stringResource(R.string.editor_padrao)) {
         onChange(options.copy(highQuality = it == "Alta"))
     }
     Spacer(Modifier.height(18.dp))
     SummaryRow("Vídeo", "$w × $h · ${fmt(fps)} fps · ${if (options.hevc) "HEVC" else "H.264"}")
-    SummaryRow("Duração", fmtTime(seconds))
-    SummaryRow("Tamanho estimado", if (sizeMb >= 1000) "${fmt(sizeMb / 1000.0)} GB" else "${sizeMb.roundToInt()} MB")
-    SummaryRow("Cor", "SDR · BT.709")
+    SummaryRow(stringResource(R.string.editor_duracao), fmtTime(seconds))
+    SummaryRow(stringResource(R.string.editor_tamanho_estimado), if (sizeMb >= 1000) "${fmt(sizeMb / 1000.0)} GB" else "${sizeMb.roundToInt()} MB")
+    SummaryRow(stringResource(R.string.editor_cor), stringResource(R.string.editor_sdr_bt_709))
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -301,7 +303,7 @@ private fun Progress(fraction: Float, done: Int, total: Int, fps: Float, eta: In
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(12.dp))
         Text(
-            if (publishing) "Salvando na galeria…" else "${(fraction * 100).roundToInt()}%",
+            if (publishing) stringResource(R.string.editor_salvando_galeria) else "${(fraction * 100).roundToInt()}%",
             style = AureaType.HeadlineLarge,
         )
         Spacer(Modifier.height(14.dp))
@@ -322,7 +324,7 @@ private fun Progress(fraction: Float, done: Int, total: Int, fps: Float, eta: In
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Mantenha o Aurea aberto até terminar.",
+                stringResource(R.string.editor_mantenha_aurea_aberto_ate_terminar),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
             // Encoder de software ou aparelho quente: dito, não escondido.
@@ -340,7 +342,7 @@ private fun Done(message: String) {
         Spacer(Modifier.height(8.dp))
         CupertinoIcon(CupertinoGlyph.CheckmarkCircleFill, 44.dp, AureaColors.Success)
         Spacer(Modifier.height(10.dp))
-        Text("Vídeo pronto", style = AureaType.TitleLarge)
+        Text(stringResource(R.string.editor_video_pronto), style = AureaType.TitleLarge)
         Spacer(Modifier.height(6.dp))
         Text(message, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)), textAlign = TextAlign.Center)
     }
@@ -353,20 +355,20 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
         when (st.phase) {
-            ExportPhase.Running -> WideButton("Cancelar", filled = false) { exporter.cancel() }
-            ExportPhase.Publishing -> WideButton("Salvando…", filled = false, enabled = false) {}
+            ExportPhase.Running -> WideButton(stringResource(R.string.editor_cancelar), filled = false) { exporter.cancel() }
+            ExportPhase.Publishing -> WideButton(stringResource(R.string.editor_salvando), filled = false, enabled = false) {}
             ExportPhase.Done -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.weight(1f)) {
-                    WideButton("Abrir", filled = false) {
+                    WideButton(stringResource(R.string.editor_abrir), filled = false) {
                         exporter.viewIntent()?.let { runCatching { context.startActivity(it) }.onFailure { e ->
                             if (e is ActivityNotFoundException) store.showToast("Nenhum app abre vídeo") } }
                     }
                 }
                 Box(Modifier.weight(1f)) {
-                    WideButton("Compartilhar", filled = true) { exporter.shareIntent()?.let { context.startActivity(it) } }
+                    WideButton(stringResource(R.string.editor_compartilhar), filled = true) { exporter.shareIntent()?.let { context.startActivity(it) } }
                 }
             }
-            else -> WideButton("Exportar", filled = true) {
+            else -> WideButton(stringResource(R.string.editor_exportar), filled = true) {
                 exporter.start(store.project.title, compW, compH, compFps, options)
             }
         }

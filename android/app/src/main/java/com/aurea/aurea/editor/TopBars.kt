@@ -47,6 +47,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -108,7 +110,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             .padding(end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChromeButton(CupertinoGlyph.ChevronLeft, "Voltar (tirar a seleção)", onClick = { shellBack(store, ui) }, width = 44.dp)
+        ChromeButton(CupertinoGlyph.ChevronLeft, stringResource(R.string.editor_voltar_tirar_selecao), onClick = { shellBack(store, ui) }, width = 44.dp)
         if (h == null) return@Row
         Box(Modifier.weight(1f)) {
             InlineName(
@@ -122,7 +124,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
         Box {
             ChromeButton(
                 if (h.parent != 0L) CupertinoGlyph.LinkCircleFill else CupertinoGlyph.Link,
-                if (h.parent != 0L) "Vinculada a outra camada · trocar" else "Vincular a outra camada",
+                if (h.parent != 0L) stringResource(R.string.editor_vinculada_outra_camada_trocar) else stringResource(R.string.editor_vincular_outra_camada),
                 onClick = {
                     if (store.playing) store.pause()
                     linking = true
@@ -133,8 +135,8 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             )
             if (linking) LinkMenu(store, listOf(h.id)) { linking = false }
         }
-        ChromeButton(CupertinoGlyph.Trash, "Excluir camada", onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp, width = 44.dp)
-        ChromeVectorButton(Icons.Filled.MoreHoriz, "Mais ações da camada", onClick = { openSheet(store, ui, ShellSheet.LayerMenu) }, size = 22.dp, width = 44.dp)
+        ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp, width = 44.dp)
+        ChromeVectorButton(Icons.Filled.MoreHoriz, stringResource(R.string.editor_mais_acoes_camada), onClick = { openSheet(store, ui, ShellSheet.LayerMenu) }, size = 22.dp, width = 44.dp)
     }
 }
 
@@ -180,7 +182,7 @@ internal fun LinkMenu(store: EditorStore, ids: List<Long>, onDismiss: () -> Unit
                         CupertinoIcon(ShellGlyph.Nosign, 22.dp, AureaColors.Text)
                     }
                 },
-                label = "Nenhum",
+                label = stringResource(R.string.editor_nenhum),
                 bold = true,
                 on = current == 0L,
                 background = AureaColors.Chip,
@@ -195,7 +197,7 @@ internal fun LinkMenu(store: EditorStore, ids: List<Long>, onDismiss: () -> Unit
             }
             if (candidates.isEmpty()) {
                 Text(
-                    "Nenhuma outra camada para seguir. Crie um Nulo em Adicionar › Objeto.",
+                    stringResource(R.string.editor_nenhuma_outra_camada_seguir_crie_nulo),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, lineHeight = 17.sp, color = AureaColors.Muted)),
                 )
@@ -309,16 +311,16 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
         val nested by remember { derivedStateOf { store.precompDepth > 0 } }
         if (nested) {
             // Dentro de um grupo: ‹ volta para a composição de cima.
-            ChromeButton(CupertinoGlyph.ChevronLeft, "Voltar para a composição principal", onClick = { store.closePrecomp() }, width = 44.dp)
+            ChromeButton(CupertinoGlyph.ChevronLeft, stringResource(R.string.editor_voltar_composicao_principal), onClick = { store.closePrecomp() }, width = 44.dp)
             Column(Modifier.weight(1f)) {
-                Text("Editando o grupo", style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Accent)))
+                Text(stringResource(R.string.editor_editando_grupo), style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Accent)))
                 Text(store.compositionName, maxLines = 1, style = TitleStyle)
             }
         } else {
             // A porta com a seta (Icons.logout espelhado): sair do projeto.
             ChromeVectorButton(
                 Icons.AutoMirrored.Filled.Logout,
-                "Projetos",
+                stringResource(R.string.editor_projetos),
                 onClick = { shellBack(store, ui) },
                 size = 20.dp,
                 width = 44.dp,
@@ -336,11 +338,11 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
             }
         }
         ProjectClock(store) { openSheet(store, ui, ShellSheet.GoToTime) }
-        ChromeVectorButton(Icons.Filled.MoreVert, "Mais da linha do tempo", onClick = { openSheet(store, ui, ShellSheet.TimelineMenu) })
-        ChromeButton(CupertinoGlyph.GearAltFill, "Projeto", onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) }, size = 19.dp)
+        ChromeVectorButton(Icons.Filled.MoreVert, stringResource(R.string.editor_mais_linha_tempo), onClick = { openSheet(store, ui, ShellSheet.TimelineMenu) })
+        ChromeButton(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_projeto_cbe9), onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) }, size = 19.dp)
         // Exportar em destaque: a A.01 pintava em `acao` (#245D8C), 2,6:1
         // sobre o cromo (bug 27).
-        ChromeButton(CupertinoGlyph.SquareArrowUp, "Exportar", onClick = {
+        ChromeButton(CupertinoGlyph.SquareArrowUp, stringResource(R.string.editor_exportar), onClick = {
             if (store.playing) store.pause()
             ui.exporting = true
         }, tint = AureaColors.Accent)
@@ -448,32 +450,32 @@ internal fun BatchTopBar(store: EditorStore) {
             .padding(end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChromeButton(CupertinoGlyph.Xmark, "Cancelar seleção", onClick = { store.clearSelection() }, size = 18.dp, width = 44.dp, tint = ink)
+        ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_cancelar_selecao), onClick = { store.clearSelection() }, size = 18.dp, width = 44.dp, tint = ink)
         Text(
-            if (count >= 2) "$count camadas selecionadas" else "Selecione ao menos duas camadas",
+            if (count >= 2) "$count camadas selecionadas" else stringResource(R.string.editor_selecione_menos_duas_camadas),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = ink)),
             modifier = Modifier.weight(1f),
         )
         Box {
-            ChromeButton(CupertinoGlyph.Link, "Vincular as escolhidas a uma camada", onClick = {
+            ChromeButton(CupertinoGlyph.Link, stringResource(R.string.editor_vincular_escolhidas_camada), onClick = {
                 if (store.playing) store.pause()
                 linking = true
             }, size = 19.dp, tint = ink)
             if (linking) LinkMenu(store, store.selection.toList()) { linking = false }
         }
-        ChromeButton(ShellGlyph.FolderBadgePlus, "Agrupar", onClick = { store.precompose() }, size = 19.dp, tint = ink)
+        ChromeButton(ShellGlyph.FolderBadgePlus, stringResource(R.string.editor_agrupar), onClick = { store.precompose() }, size = 19.dp, tint = ink)
         if (groups.isNotEmpty()) {
-            ChromeButton(ShellGlyph.SquareSplit2x2, "Desagrupar", onClick = {
+            ChromeButton(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), onClick = {
                 val ids = groups
                 ids.forEach { store.ungroupPrecomp(it) }
             }, size = 19.dp, tint = ink)
         }
-        ChromeButton(CupertinoGlyph.Trash, "Excluir seleção", onClick = { LayerOps.delete(store, store.selection) }, size = 19.dp, tint = ink)
+        ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_selecao), onClick = { LayerOps.delete(store, store.selection) }, size = 19.dp, tint = ink)
         ChromeButton(
             if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
-            if (store.playing) "Pausar" else "Reproduzir",
+            if (store.playing) stringResource(R.string.editor_pausar) else stringResource(R.string.editor_reproduzir),
             onClick = { store.togglePlayback() },
             size = 20.dp,
             tint = ink,

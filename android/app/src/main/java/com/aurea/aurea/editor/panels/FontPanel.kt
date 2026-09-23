@@ -31,6 +31,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -95,7 +97,7 @@ internal fun FontPanel(env: PanelEnv) {
                     cursorBrush = SolidColor(AureaColors.Accent),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (query.isEmpty()) Text("Buscar fonte", style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
+                if (query.isEmpty()) Text(stringResource(R.string.panel_buscar_fonte), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
             }
             Spacer(Modifier.padding(4.dp))
             Box(
@@ -103,7 +105,7 @@ internal fun FontPanel(env: PanelEnv) {
                     .tocavel(onClick = { pick.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream", "*/*")) })
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
-                Text("Importar", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)))
+                Text(stringResource(R.string.panel_importar), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)))
             }
         }
         // Peso e itálico da família escolhida.
@@ -131,7 +133,7 @@ internal fun FontPanel(env: PanelEnv) {
         Spacer(Modifier.height(6.dp))
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             item {
-                FontRow("Padrão do aparelho", null, curFamily.isEmpty()) { store.applyTextFont(null) }
+                FontRow(stringResource(R.string.panel_padrao_aparelho), null, curFamily.isEmpty()) { store.applyTextFont(null) }
             }
             items(families, key = { it.first }) { (family, list) ->
                 // A regular da família (peso mais perto de 400, sem itálico).

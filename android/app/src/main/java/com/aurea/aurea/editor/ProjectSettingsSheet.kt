@@ -21,6 +21,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
@@ -79,7 +81,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
     val shortSide = min(w, h)
     val fpsValue = comp?.fps ?: p.fps.toDouble()
     val bg = comp?.background ?: listOf(0f, 0f, 0f, 1f)
-    val bgName = Backgrounds.firstOrNull { (_, c) -> (0..2).all { abs(c[it] - bg[it]) < 0.01f } }?.first ?: "Personalizada"
+    val bgName = Backgrounds.firstOrNull { (_, c) -> (0..2).all { abs(c[it] - bg[it]) < 0.01f } }?.first ?: stringResource(R.string.editor_personalizada)
 
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var pickingBackground by remember { mutableStateOf(false) }
@@ -87,9 +89,9 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
 
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.7f, scrim = ShellColors.SettingsScrim, handle = ShellColors.SheetHandle) {
         Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            ChromeButton(CupertinoGlyph.Xmark, "Fechar", onClick = onDismiss, size = 20.dp, width = 44.dp)
+            ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar), onClick = onDismiss, size = 20.dp, width = 44.dp)
             Text(
-                "Projeto",
+                stringResource(R.string.editor_projeto_cbe9),
                 style = AureaType.Base.merge(TextStyle(fontSize = 16.sp, fontWeight = FontWeight.W700)),
             )
         }
@@ -120,7 +122,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
         }
 
         if (free && comp != null) {
-            SettingLine("Tamanho") {
+            SettingLine(stringResource(R.string.editor_tamanho)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SizeBox("$w", Modifier.weight(1f)) {
                         keypad = KeypadRequest("Largura", w.toFloat(), "px", 16f, 8192f, 0) { v ->
@@ -138,7 +140,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
             }
         }
 
-        SettingLine("Resolução") {
+        SettingLine(stringResource(R.string.editor_resolucao)) {
             Dropdown(
                 Resolutions.firstOrNull { it.first == shortSide }?.second ?: "${shortSide}p",
                 open = menu == "res",
@@ -155,10 +157,10 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
             )
         }
 
-        SettingLine("Quadros por segundo") {
+        SettingLine(stringResource(R.string.editor_quadros_segundo)) {
             val rounded = fpsValue.roundToInt()
             val label = if (abs(fpsValue - rounded) < 0.01) "$rounded fps"
-            else String.format(Locale.ROOT, "%.2f fps", fpsValue).replace('.', ',')
+            else String.format(Locale.ROOT, stringResource(R.string.editor_2f_fps), fpsValue).replace('.', ',')
             Dropdown(
                 label,
                 open = menu == "fps",
@@ -170,7 +172,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
             )
         }
 
-        SettingLine("Plano de fundo") {
+        SettingLine(stringResource(R.string.editor_plano_fundo)) {
             Dropdown(
                 bgName,
                 swatch = Color(bg[0], bg[1], bg[2]),
@@ -179,7 +181,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
                 onDismiss = { menu = null },
                 items = Backgrounds.map { (name, c) ->
                     PopupItem(name, name == bgName) { store.setCompositionBackground(c[0], c[1], c[2], 1f) }
-                } + PopupItem("Outra cor…", bgName == "Personalizada") { if (comp != null) pickingBackground = true },
+                } + PopupItem(stringResource(R.string.editor_outra_cor), bgName == stringResource(R.string.editor_personalizada)) { if (comp != null) pickingBackground = true },
             )
         }
         Spacer(Modifier.height(16.dp))

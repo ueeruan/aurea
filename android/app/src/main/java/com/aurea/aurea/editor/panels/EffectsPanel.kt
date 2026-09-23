@@ -38,6 +38,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -339,14 +341,14 @@ internal fun EffectsPanel(env: PanelEnv) {
     if (railMenu) {
         val anyOn = effects.any { it.enabled }
         AureaActionSheet(
-            title = "Efeitos da camada",
+            title = stringResource(R.string.panel_efeitos_camada),
             actions = buildList {
-                add(SheetAction("Adicionar efeito") { env.onOpenEffectsBrowser() })
-                if (effects.isNotEmpty()) add(SheetAction("Copiar efeitos") { store.copyEffects() })
-                if (store.clipboard and 4 != 0) add(SheetAction("Colar efeitos") { store.pasteEffects() })
+                add(SheetAction(stringResource(R.string.panel_adicionar_efeito)) { env.onOpenEffectsBrowser() })
+                if (effects.isNotEmpty()) add(SheetAction(stringResource(R.string.panel_copiar_efeitos)) { store.copyEffects() })
+                if (store.clipboard and 4 != 0) add(SheetAction(stringResource(R.string.panel_colar_efeitos)) { store.pasteEffects() })
                 if (effects.isNotEmpty()) {
                     add(
-                        SheetAction(if (anyOn) "Desligar todos" else "Ligar todos") {
+                        SheetAction(if (anyOn) stringResource(R.string.panel_desligar_todos) else stringResource(R.string.panel_ligar_todos)) {
                             store.beginGesture(if (anyOn) "desligar efeitos" else "ligar efeitos")
                             try {
                                 effects.forEach { if (it.enabled == anyOn) store.setEffectEnabled(it.effectId, !anyOn) }
@@ -365,21 +367,21 @@ internal fun EffectsPanel(env: PanelEnv) {
         val index = effects.indexOfFirst { it.effectId == e.effectId }
         val actions = if (!e.known) {
             // Efeito que saiu do catálogo: só entender e tirar (A.01).
-            listOf(SheetAction("Remover efeito", destructive = true) { store.removeEffect(e.effectId) })
+            listOf(SheetAction(stringResource(R.string.panel_remover_efeito), destructive = true) { store.removeEffect(e.effectId) })
         } else {
             buildList {
-                add(SheetAction(if (e.enabled) "Desligar efeito" else "Ligar efeito") { store.setEffectEnabled(e.effectId, !e.enabled) })
-                add(SheetAction("Redefinir efeito") { resetEffect(env, e.effectId) })
-                if (index > 0) add(SheetAction("Mover para cima") { store.reorderEffect(e.effectId, index - 1) })
-                if (index in 0 until effects.lastIndex) add(SheetAction("Mover para baixo") { store.reorderEffect(e.effectId, index + 1) })
-                add(SheetAction("Remover efeito", destructive = true) { store.removeEffect(e.effectId) })
+                add(SheetAction(if (e.enabled) stringResource(R.string.panel_desligar_efeito) else stringResource(R.string.panel_ligar_efeito)) { store.setEffectEnabled(e.effectId, !e.enabled) })
+                add(SheetAction(stringResource(R.string.panel_redefinir_efeito)) { resetEffect(env, e.effectId) })
+                if (index > 0) add(SheetAction(stringResource(R.string.panel_mover_cima)) { store.reorderEffect(e.effectId, index - 1) })
+                if (index in 0 until effects.lastIndex) add(SheetAction(stringResource(R.string.panel_mover_baixo)) { store.reorderEffect(e.effectId, index + 1) })
+                add(SheetAction(stringResource(R.string.panel_remover_efeito), destructive = true) { store.removeEffect(e.effectId) })
             }
         }
         AureaActionSheet(
-            title = if (e.known) effectDisplayName(e.typeId, e.name) else "Efeito removido",
-            message = if (e.known) null else "Este efeito saiu do Aurea e não desenha mais nada. Ele ficou guardado aqui para você decidir — o resto da camada está intacto.",
+            title = if (e.known) effectDisplayName(e.typeId, e.name) else stringResource(R.string.panel_efeito_removido),
+            message = if (e.known) null else stringResource(R.string.panel_este_efeito_saiu_aurea_nao_desenha),
             actions = actions,
-            cancelLabel = if (e.known) "Cancelar" else "Manter",
+            cancelLabel = if (e.known) stringResource(R.string.panel_cancelar) else stringResource(R.string.panel_manter),
             onDismiss = { menuFor = null },
         )
     }
@@ -392,8 +394,8 @@ internal fun EffectsPanel(env: PanelEnv) {
             title = t.label,
             message = if (p != null && d != null) "Padrão: ${defaultText(p, slot, d)}" else null,
             actions = buildList {
-                add(SheetAction("Redefinir", enabled = p != null) { resetParam(store, t.effectId, t.param) })
-                if (slot?.animatable == true) add(SheetAction("Expressão…") { openParamExpression(store, t.effectId, slot) })
+                add(SheetAction(stringResource(R.string.panel_redefinir), enabled = p != null) { resetParam(store, t.effectId, t.param) })
+                if (slot?.animatable == true) add(SheetAction(stringResource(R.string.panel_expressao_3c65)) { openParamExpression(store, t.effectId, slot) })
             },
             onDismiss = { paramMenu = null },
         )
@@ -543,12 +545,12 @@ private fun EffectCardItem(
             derivedStateOf { store.effectParams[id]?.map { ParamSlot.of(it) } ?: emptyList() }
         }
         if (!effect.known) {
-            PanelNotice("Este efeito saiu do catálogo. Ele não desenha mais; apague pelo ⋯.")
+            PanelNotice(stringResource(R.string.panel_este_efeito_saiu_catalogo_ele_nao))
             return@EffectStackCard
         }
         val visible = slots.filter { !it.hidden }
         if (visible.isEmpty()) {
-            PanelNotice("Este efeito não tem ajustes.")
+            PanelNotice(stringResource(R.string.panel_este_efeito_nao_tem_ajustes))
             return@EffectStackCard
         }
         val (main, rest) = remember(visible, effect.typeId) { splitPrincipal(effect.typeId, visible) }
@@ -585,7 +587,7 @@ private fun ParamRows(
         // Curva/degradê/referência: o motor tem, o app ainda não edita — sem botão falso.
         else -> PropertyCustomRow(label = d.label, selected = false, onSelect = {}) {
             Text(
-                "Ainda não editável no app",
+                stringResource(R.string.panel_ainda_nao_editavel_app),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
         }
@@ -798,7 +800,7 @@ private fun EffectsFooter(env: PanelEnv, kind: Int) {
         ) {
             CupertinoIcon(CupertinoGlyph.Plus, 17.dp, AureaColors.Accent)
             Spacer(Modifier.width(8.dp))
-            Text("Adicionar efeito", style = AureaType.Base.merge(TextStyle(fontSize = 16.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
+            Text(stringResource(R.string.panel_adicionar_efeito), style = AureaType.Base.merge(TextStyle(fontSize = 16.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
         }
     }
 }
@@ -818,7 +820,7 @@ private fun AdjustmentIntensity(env: PanelEnv) {
             .padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 4.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Intensidade da camada de ajuste", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+            Text(stringResource(R.string.panel_intensidade_camada_ajuste), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             Box(
                 Modifier.size(44.dp).tocavel { store.toggleTransformKeyframe(intArrayOf(TrackProperty.OPACITY)) },
                 contentAlignment = Alignment.Center,
@@ -845,7 +847,7 @@ internal fun OpacityRow(env: PanelEnv, opacity: Float, selected: Boolean, keyfra
     PropertyRow(
         expression = exprLook,
         onExpression = { store.openExpression("Opacidade", OpacityKeys, 100f, "%") },
-        label = "Opacidade",
+        label = stringResource(R.string.panel_opacidade),
         value = opacity,
         unitsPerDp = 0.35f,
         min = 0f,

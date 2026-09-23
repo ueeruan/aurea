@@ -26,6 +26,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -85,67 +87,67 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
     }
 
     ShellMenuSheet(onDismiss) {
-        MenuSection("Camada")
+        MenuSection(stringResource(R.string.editor_camada))
         // Bloqueada não se renomeia: o cadeado fecha a edição inteira.
-        MenuItemRow(CupertinoGlyph.Pencil, "Renomear", if (row.locked) null else act { ui.sheet = ShellSheet.RenameLayer })
+        MenuItemRow(CupertinoGlyph.Pencil, stringResource(R.string.editor_renomear), if (row.locked) null else act { ui.sheet = ShellSheet.RenameLayer })
         // O cadeado não fecha a folha: o rótulo troca na hora.
         MenuItemRow(
             if (row.locked) ShellGlyph.LockOpenFill else CupertinoGlyph.LockFill,
-            if (row.locked) "Desbloquear camada" else "Bloquear camada",
+            if (row.locked) stringResource(R.string.editor_desbloquear_camada) else stringResource(R.string.editor_bloquear_camada),
             { store.setLayerLocked(id, !row.locked) },
-            detail = if (row.locked) "Volta a aceitar movimento e edição" else "Não aceita movimento, corte nem edição",
+            detail = if (row.locked) stringResource(R.string.editor_volta_aceitar_movimento_edicao) else stringResource(R.string.editor_nao_aceita_movimento_corte_nem_edicao),
         )
         MenuItemRow(
             if (row.visible) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye,
-            if (row.visible) "Ocultar camada" else "Mostrar camada",
+            if (row.visible) stringResource(R.string.editor_ocultar_camada) else stringResource(R.string.editor_mostrar_camada),
             { store.setLayerVisible(id, !row.visible) },
         )
         // Solo, ajuste e guia não fecham a folha: o visto troca na hora.
         MenuItemRow(
             CupertinoGlyph.Speaker2,
-            "Solo",
+            stringResource(R.string.editor_solo),
             { store.setLayerSolo(id, !row.solo) },
             checked = row.solo,
-            detail = "Com alguma camada em solo, a prévia e o som só tocam as que estão",
+            detail = stringResource(R.string.editor_alguma_camada_solo_previa_som_so),
         )
         if (visual) {
             MenuItemRow(
                 CupertinoGlyph.SliderHorizontal3,
-                "Camada de ajuste",
+                stringResource(R.string.editor_camada_ajuste),
                 { store.setLayerAdjustment(id, !row.adjustment) },
                 checked = row.adjustment,
-                detail = "Os efeitos desta camada valem para todas as de baixo",
+                detail = stringResource(R.string.editor_efeitos_desta_camada_valem_todas_baixo),
             )
             MenuItemRow(
                 CupertinoGlyph.Grid,
-                "Guia (não exporta)",
+                stringResource(R.string.editor_guia_nao_exporta),
                 { store.setLayerGuide(id, !row.guide) },
                 checked = row.guide,
-                detail = "Aparece aqui no editor e fica fora do vídeo exportado",
+                detail = stringResource(R.string.editor_aparece_aqui_editor_fica_fora_video),
             )
         }
-        MenuItemRow(CupertinoGlyph.PlusSquareOnSquare, "Duplicar", act { store.duplicateLayers(listOf(id)) })
-        MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar camada", act { store.copyLayers(listOf(id)) })
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar camada no cabeçote", if (store.clipboard and 1 != 0) act { store.pasteLayers() } else null)
-        MenuItemRow(CupertinoGlyph.Paintbrush, "Copiar estilo", act { store.select(id); store.copyStyle() })
-        MenuItemRow(ShellGlyph.PaintbrushFill, "Colar estilo", if (store.clipboard and 2 != 0) act { store.pasteStyle(listOf(id)) } else null)
-        MenuItemRow(CupertinoGlyph.ArrowUpToLine, "Trazer para a frente", if (index > 0) act { store.reorderLayer(id, index - 1) } else null)
+        MenuItemRow(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar), act { store.duplicateLayers(listOf(id)) })
+        MenuItemRow(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_camada), act { store.copyLayers(listOf(id)) })
+        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_camada_cabecote), if (store.clipboard and 1 != 0) act { store.pasteLayers() } else null)
+        MenuItemRow(CupertinoGlyph.Paintbrush, stringResource(R.string.editor_copiar_estilo), act { store.select(id); store.copyStyle() })
+        MenuItemRow(ShellGlyph.PaintbrushFill, stringResource(R.string.editor_colar_estilo), if (store.clipboard and 2 != 0) act { store.pasteStyle(listOf(id)) } else null)
+        MenuItemRow(CupertinoGlyph.ArrowUpToLine, stringResource(R.string.editor_trazer_frente), if (index > 0) act { store.reorderLayer(id, index - 1) } else null)
         MenuItemRow(
             CupertinoGlyph.ArrowDownToLine,
-            "Enviar para trás",
+            stringResource(R.string.editor_enviar_tras),
             if (index < store.layers.size - 1) act { store.reorderLayer(id, index + 1) } else null,
         )
 
-        MenuSection("Etiqueta")
+        MenuSection(stringResource(R.string.editor_etiqueta))
         LabelRow(row.label) { store.setLayerLabel(id, it) }
 
         if (visual) {
-            MenuSection("Grupo")
+            MenuSection(stringResource(R.string.editor_grupo))
             if (type != LayerType.Group) {
-                MenuItemRow(CupertinoGlyph.RectangleStack, "Converter em grupo", act { store.precompose(listOf(id)) })
+                MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_converter_grupo), act { store.precompose(listOf(id)) })
             } else {
-                MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, "Editar o grupo", act { store.openPrecomp(id) })
-                MenuItemRow(ShellGlyph.SquareSplit2x2, "Desagrupar", act { store.ungroupPrecomp(id) })
+                MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_editar_grupo), act { store.openPrecomp(id) })
+                MenuItemRow(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), act { store.ungroupPrecomp(id) })
             }
         }
         if (type == LayerType.Video || type == LayerType.Audio) {
@@ -153,9 +155,9 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             if (type == LayerType.Video) {
                 MenuItemRow(
                     CupertinoGlyph.MusicNote2,
-                    "Extrair o áudio",
+                    stringResource(R.string.editor_extrair_audio),
                     act { store.extractAudio(id) },
-                    detail = "O som vira uma camada própria e o vídeo fica mudo",
+                    detail = stringResource(R.string.editor_som_vira_camada_propria_video_fica),
                 )
             }
             if (type == LayerType.Audio || type == LayerType.Video) {
@@ -163,42 +165,42 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             }
         }
 
-        MenuSection("Movimento")
+        MenuSection(stringResource(R.string.editor_movimento))
         MenuItemRow(
             CupertinoGlyph.Speedometer,
-            "Desfoque de movimento",
+            stringResource(R.string.editor_desfoque_movimento),
             act { store.setLayerMotionBlur(id, !(store.detail?.motionBlur ?: false)) },
             checked = store.detail?.motionBlur == true,
-            detail = "Borra na direção do movimento (obturador nas configurações do projeto)",
+            detail = stringResource(R.string.editor_borra_direcao_movimento_obturador_nas_configuracoes),
         )
         if (type == LayerType.Video) {
             MenuItemRow(
                 CupertinoGlyph.Speedometer,
-                "Desfoque do movimento do vídeo",
+                stringResource(R.string.editor_desfoque_movimento_video),
                 act { store.setVectorBlur(id, !(store.detail?.vectorBlur ?: false)) },
                 checked = store.detail?.vectorBlur == true,
-                detail = "Borra o que se mexe dentro do vídeo (pelos vetores de movimento)",
+                detail = stringResource(R.string.editor_borra_mexe_dentro_video_pelos_vetores),
             )
         }
 
-        MenuSection("Tempo")
-        MenuItemRow(CupertinoGlyph.ArrowRightToLine, "Aparar o início no cabeçote", if (inside) timeAct { store.trimStart(id, t) } else null)
-        MenuItemRow(CupertinoGlyph.Scissors, "Dividir no cabeçote", if (inside) timeAct { store.splitAtPlayhead(listOf(id)) } else null)
-        MenuItemRow(CupertinoGlyph.ArrowLeftToLine, "Aparar o fim no cabeçote", if (inside) timeAct { store.trimEnd(id, t) } else null)
+        MenuSection(stringResource(R.string.editor_tempo))
+        MenuItemRow(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote), if (inside) timeAct { store.trimStart(id, t) } else null)
+        MenuItemRow(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), if (inside) timeAct { store.splitAtPlayhead(listOf(id)) } else null)
+        MenuItemRow(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), if (inside) timeAct { store.trimEnd(id, t) } else null)
         if (type == LayerType.Video || type == LayerType.Audio) {
             MenuItemRow(CupertinoGlyph.Speedometer, "Velocidade e remapear o tempo", act { openPanel(store, ui, EditorPanel.Speed) })
         }
         if (type == LayerType.Video) {
             MenuItemRow(ShellGlyph.Snow, "Congelar quadro", if (inside) act { store.freezeFrame(id) } else null)
-            MenuSection("Rastreio")
-            MenuItemRow(ShellGlyph.Viewfinder, "Rastrear um ponto", act { store.select(id); store.beginPointPick(false) },
-                detail = "Cria um Nulo que segue o ponto — ligue outras camadas a ele")
-            MenuItemRow(ShellGlyph.Viewfinder, "Estabilizar pelo ponto", act { store.select(id); store.beginPointPick(true) },
-                detail = "Move o vídeo para o ponto ficar parado na tela")
+            MenuSection(stringResource(R.string.editor_rastreio))
+            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_rastrear_ponto), act { store.select(id); store.beginPointPick(false) },
+                detail = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras))
+            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_estabilizar_pelo_ponto), act { store.select(id); store.beginPointPick(true) },
+                detail = stringResource(R.string.editor_move_video_ponto_ficar_parado_tela))
         }
 
-        MenuSection("Mais")
-        MenuItemRow(CupertinoGlyph.Trash, "Excluir camada", act { LayerOps.delete(store, listOf(id)) }, danger = true)
+        MenuSection(stringResource(R.string.editor_mais))
+        MenuItemRow(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), act { LayerOps.delete(store, listOf(id)) }, danger = true)
     }
 }
 
@@ -266,7 +268,7 @@ internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
                 cursorBrush = SolidColor(AureaColors.Accent),
                 modifier = Modifier.fillMaxWidth().focusRequester(focus),
             )
-            if (query.isEmpty()) Text("Nome ou texto da camada", style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
+            if (query.isEmpty()) Text(stringResource(R.string.editor_nome_ou_texto_camada), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
         }
         LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
         if (query.isNotBlank() && hits.isEmpty()) {
@@ -289,7 +291,7 @@ internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
                 Box(Modifier.size(10.dp).background(dot, CircleShape))
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    row.name.ifBlank { "Camada" },
+                    row.name.ifBlank { stringResource(R.string.editor_camada) },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = if (row.selected) AureaColors.Accent else AureaColors.Text)),
@@ -323,23 +325,23 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
     }
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
         MenuSection("Seleção")
-        MenuItemRow(CupertinoGlyph.CheckmarkSquare, "Selecionar todas as camadas", if (count >= 2) act { store.selectAll() } else null)
-        MenuItemRow(CupertinoGlyph.Square, "Limpar seleção", act { store.clearSelection() })
-        MenuItemRow(CupertinoGlyph.Search, "Buscar camadas…", if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
+        MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
+        MenuItemRow(CupertinoGlyph.Square, stringResource(R.string.editor_limpar_selecao), act { store.clearSelection() })
+        MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.editor_buscar_camadas), if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
 
-        MenuSection("Reprodução e prévia")
-        MenuItemRow(CupertinoGlyph.Repeat, "Reprodução em loop", act { store.setLoop(!store.looping) }, checked = store.looping)
+        MenuSection(stringResource(R.string.editor_reproducao_previa))
+        MenuItemRow(CupertinoGlyph.Repeat, stringResource(R.string.editor_reproducao_loop), act { store.setLoop(!store.looping) }, checked = store.looping)
         MenuItemRow(
             CupertinoGlyph.Fullscreen,
-            if (ui.fullscreen) "Sair da tela cheia" else "Tela cheia",
+            if (ui.fullscreen) stringResource(R.string.editor_sair_tela_cheia) else stringResource(R.string.editor_tela_cheia),
             act { ui.fullscreen = !ui.fullscreen },
         )
         MenuItemRow(
             CupertinoGlyph.Speedometer,
-            "Desfoque de movimento da composição",
+            stringResource(R.string.editor_desfoque_movimento_composicao),
             { store.setCompositionMotionBlur(!store.compMotionBlur) },
             checked = store.compMotionBlur,
-            detail = "As camadas com desfoque de movimento só borram com isto ligado",
+            detail = stringResource(R.string.editor_camadas_desfoque_movimento_so_borram_isto),
         )
         if (store.compMotionBlur) {
             val shutter = store.shutterAngle.roundToInt()
@@ -350,43 +352,43 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
                     val next = ShutterOptions.firstOrNull { it > shutter } ?: ShutterOptions.first()
                     store.changeShutterAngle(next.toFloat())
                 },
-                detail = "Toque para trocar (90°, 180°, 270°, 360°): maior = rastro mais longo",
+                detail = stringResource(R.string.editor_toque_trocar_90_180_270_360),
             )
         }
         MenuItemRow(
             ShellGlyph.WaveformPathEcg,
-            "Diagnóstico na tela",
+            stringResource(R.string.editor_diagnostico_tela),
             { store.toggleHud() },
             checked = store.hudVisible,
-            detail = "Quadros por segundo, tempos da GPU, memória e o decodificador",
+            detail = stringResource(R.string.editor_quadros_segundo_tempos_gpu_memoria_decodificador),
         )
 
-        MenuSection("Edição")
+        MenuSection(stringResource(R.string.editor_edicao))
         MenuItemRow(
             CupertinoGlyph.Link,
-            "Timeline magnética (modo Edição)",
+            stringResource(R.string.editor_timeline_magnetica_modo_edicao),
             act { store.toggleEditMode() },
             checked = store.editMode,
-            detail = "Aparar empurra as camadas seguintes e excluir fecha o espaço",
+            detail = stringResource(R.string.editor_aparar_empurra_camadas_seguintes_excluir_fecha),
         )
-        MenuItemRow(ShellGlyph.ScissorsAlt, "Remover espaços vazios", act { store.removeGaps() })
+        MenuItemRow(ShellGlyph.ScissorsAlt, stringResource(R.string.editor_remover_espacos_vazios), act { store.removeGaps() })
 
-        MenuSection("Projeto")
+        MenuSection(stringResource(R.string.editor_projeto_cbe9))
         MenuItemRow(
             ShellGlyph.ScissorsAlt,
-            "Aparar o projeto no cabeçote",
+            stringResource(R.string.editor_aparar_projeto_cabecote),
             if (store.playhead > 0) act { store.trimProjectAtPlayhead() } else null,
             detail = "Corta tudo o que passa de $now",
         )
 
-        MenuSection("Marcas e ritmo")
-        MenuItemRow(CupertinoGlyph.Bookmark, "Marcar (ou desmarcar) este instante", act { store.toggleMarker() })
-        MenuItemRow(ShellGlyph.BookmarkSolid, "Ir para a próxima marca", if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
-        MenuItemRow(CupertinoGlyph.MusicNote2, "Detectar batidas da camada escolhida", act { store.detectBeats() })
+        MenuSection(stringResource(R.string.editor_marcas_ritmo))
+        MenuItemRow(CupertinoGlyph.Bookmark, stringResource(R.string.editor_marcar_ou_desmarcar_este_instante), act { store.toggleMarker() })
+        MenuItemRow(ShellGlyph.BookmarkSolid, stringResource(R.string.editor_ir_proxima_marca), if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
+        MenuItemRow(CupertinoGlyph.MusicNote2, stringResource(R.string.editor_detectar_batidas_camada_escolhida), act { store.detectBeats() })
 
-        MenuSection("Mais")
+        MenuSection(stringResource(R.string.editor_mais))
         MenuItemRow(
-            CupertinoGlyph.RectangleStack, "Agrupar as camadas escolhidas",
+            CupertinoGlyph.RectangleStack, stringResource(R.string.editor_agrupar_camadas_escolhidas),
             if (store.selection.isNotEmpty()) act { store.precompose() } else null,
         )
     }

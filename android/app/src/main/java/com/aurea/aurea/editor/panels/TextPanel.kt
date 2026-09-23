@@ -26,6 +26,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -57,7 +59,7 @@ internal fun TextPanel(env: PanelEnv) {
     val store = env.store
     val t by remember(store) { derivedStateOf { store.textDetail } }
     val td = t ?: run {
-        Text("Selecione uma camada de texto.", modifier = Modifier.padding(18.dp),
+        Text(stringResource(R.string.panel_selecione_camada_texto), modifier = Modifier.padding(18.dp),
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
         return
     }
@@ -84,23 +86,23 @@ internal fun TextPanel(env: PanelEnv) {
                 cursorBrush = SolidColor(AureaColors.Accent),
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (draft.isEmpty()) Text("Digite o texto", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+            if (draft.isEmpty()) Text(stringResource(R.string.panel_digite_texto), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
         }
         // Trecho selecionado no campo: estilo próprio (rich text).
         val sel = field.selection
         if (!sel.collapsed) {
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Trecho escolhido", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
-                SpanChip("Cor") {
+                Text(stringResource(R.string.panel_trecho_escolhido), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+                SpanChip(stringResource(R.string.panel_cor)) {
                     val a = sel.min
                     val b = sel.max
                     env.openColor(ColorRequest(td.color.copyOf(), onChange = { r, g, bl, _ -> store.setTextSpan(a, b, floatArrayOf(r, g, bl), 0, 1f) },
                         onDone = {}))
                 }
-                SpanChip("Negrito") { store.setTextSpan(sel.min, sel.max, null, 700, 1f) }
-                SpanChip("Maior") { store.setTextSpan(sel.min, sel.max, null, 0, 1.35f) }
-                SpanChip("Normal") { store.clearTextSpans(sel.min, sel.max) }
+                SpanChip(stringResource(R.string.panel_negrito)) { store.setTextSpan(sel.min, sel.max, null, 700, 1f) }
+                SpanChip(stringResource(R.string.panel_maior)) { store.setTextSpan(sel.min, sel.max, null, 0, 1.35f) }
+                SpanChip(stringResource(R.string.panel_normal)) { store.clearTextSpans(sel.min, sel.max) }
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -109,18 +111,18 @@ internal fun TextPanel(env: PanelEnv) {
             Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).tocavel(onClick = { env.onOpenPanel(EditorPanel.Font) }),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Fonte", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Text(stringResource(R.string.panel_fonte), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             Text(
-                font?.family?.ifEmpty { null } ?: "Padrão do aparelho",
+                font?.family?.ifEmpty { null } ?: stringResource(R.string.panel_padrao_aparelho),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)),
             )
             Text("  ›", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
         }
-        TextRuler(store, "Tamanho", { store.textDetail?.size ?: 72f }, "${td.size.roundToInt()} px", 0.5f, 4f, 1000f, "tamanho do texto") {
+        TextRuler(store, stringResource(R.string.panel_tamanho), { store.textDetail?.size ?: 72f }, "${td.size.roundToInt()} px", 0.5f, 4f, 1000f, stringResource(R.string.panel_tamanho_texto)) {
             store.setTextSize(it)
         }
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Cor", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Text(stringResource(R.string.panel_cor), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             ColorWell(Color(td.color[0], td.color[1], td.color[2])) {
                 store.beginGesture("cor do texto")
                 env.openColor(ColorRequest(td.color.copyOf(), onChange = { r, g, b, a -> store.setTextColor(r, g, b, a) },
@@ -128,9 +130,9 @@ internal fun TextPanel(env: PanelEnv) {
             }
         }
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Alinhamento", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0 to "Esquerda", 1 to "Centro", 2 to "Direita").forEach { (a, label) ->
+                listOf(0 to stringResource(R.string.panel_esquerda), 1 to stringResource(R.string.panel_centro), 2 to stringResource(R.string.panel_direita)).forEach { (a, label) ->
                     val on = td.alignment == a
                     Box(
                         Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
@@ -142,17 +144,17 @@ internal fun TextPanel(env: PanelEnv) {
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text("Contorno", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+        Text(stringResource(R.string.panel_contorno), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Cor do contorno", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Text(stringResource(R.string.panel_cor_contorno), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             ColorWell(Color(td.strokeColor[0], td.strokeColor[1], td.strokeColor[2])) {
                 store.beginGesture("cor do contorno do texto")
                 env.openColor(ColorRequest(td.strokeColor.copyOf(), onChange = { r, g, b, a -> store.setTextStrokeColor(r, g, b, a) },
                     onDone = { store.endGesture() }))
             }
         }
-        TextRuler(store, "Largura do contorno", { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
-            0.1f, 0f, 60f, "contorno do texto") { store.setTextStrokeWidth(it) }
+        TextRuler(store, stringResource(R.string.panel_largura_contorno), { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
+            0.1f, 0f, 60f, stringResource(R.string.panel_contorno_texto)) { store.setTextStrokeWidth(it) }
         TextStyleSections(env)
         TextPathSection(env)
         TextAnimSection(env)
@@ -175,9 +177,9 @@ private fun TextStyleSections(env: PanelEnv) {
     val st by remember(store) { derivedStateOf { store.textStyle } }
     val v = st ?: return
     Spacer(Modifier.height(6.dp))
-    Text("Caixa", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+    Text(stringResource(R.string.panel_caixa), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(0 to "Livre", 1 to "Parágrafo", 2 to "Tamanho fixo", 3 to "Encolher para caber").forEach { (m, label) ->
+        listOf(0 to stringResource(R.string.panel_livre), 1 to stringResource(R.string.panel_paragrafo), 2 to stringResource(R.string.panel_tamanho_fixo), 3 to stringResource(R.string.panel_encolher_caber)).forEach { (m, label) ->
             val on = v[0].toInt() == m
             Box(
                 Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
@@ -188,18 +190,18 @@ private fun TextStyleSections(env: PanelEnv) {
         }
     }
     if (v[0] >= 1f) {
-        TextRuler(store, "Largura da caixa", { store.textStyle?.get(1) ?: 800f }, "${v[1].roundToInt()} px", 2f, 10f, 20000f, "largura da caixa") {
+        TextRuler(store, stringResource(R.string.panel_largura_caixa), { store.textStyle?.get(1) ?: 800f }, "${v[1].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_largura_caixa_4a83)) {
             store.setTextStyleValue(1, it)
         }
         if (v[0] >= 2f) {
-            TextRuler(store, "Altura da caixa", { store.textStyle?.get(2) ?: 200f }, "${v[2].roundToInt()} px", 2f, 10f, 20000f, "altura da caixa") {
+            TextRuler(store, stringResource(R.string.panel_altura_caixa), { store.textStyle?.get(2) ?: 200f }, "${v[2].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_altura_caixa_0cec)) {
                 store.setTextStyleValue(2, it)
             }
         }
     }
     Spacer(Modifier.height(6.dp))
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Fundo", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
+        Text(stringResource(R.string.panel_fundo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
         if (v[3] > 0.5f) {
             ColorWell(Color(v[4], v[5], v[6])) {
                 store.beginGesture("cor do fundo do texto")
@@ -211,15 +213,15 @@ private fun TextStyleSections(env: PanelEnv) {
         AureaToggle(checked = v[3] > 0.5f, onCheckedChange = { store.setTextStyleValue(3, if (it) 1f else 0f) })
     }
     if (v[3] > 0.5f) {
-        TextRuler(store, "Margem do fundo", { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, "margem do fundo") {
+        TextRuler(store, stringResource(R.string.panel_margem_fundo), { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_margem_fundo_276c)) {
             store.setTextStyleValue(8, it)
         }
-        TextRuler(store, "Cantos arredondados", { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, "raio do fundo") {
+        TextRuler(store, stringResource(R.string.panel_cantos_arredondados), { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_raio_fundo)) {
             store.setTextStyleValue(9, it)
         }
     }
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Sombra", modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
+        Text(stringResource(R.string.panel_sombra), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
         if (v[10] > 0.5f) {
             ColorWell(Color(v[11], v[12], v[13])) {
                 store.beginGesture("cor da sombra do texto")
@@ -231,9 +233,9 @@ private fun TextStyleSections(env: PanelEnv) {
         AureaToggle(checked = v[10] > 0.5f, onCheckedChange = { store.setTextStyleValue(10, if (it) 1f else 0f) })
     }
     if (v[10] > 0.5f) {
-        TextRuler(store, "Distância X", { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, "sombra x") { store.setTextStyleValue(15, it) }
-        TextRuler(store, "Distância Y", { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, "sombra y") { store.setTextStyleValue(16, it) }
-        TextRuler(store, "Desfoque", { store.textStyle?.get(17) ?: 6f }, "${v[17].roundToInt()} px", 0.1f, 0f, 200f, "desfoque da sombra") { store.setTextStyleValue(17, it) }
+        TextRuler(store, stringResource(R.string.panel_distancia_x), { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_x)) { store.setTextStyleValue(15, it) }
+        TextRuler(store, stringResource(R.string.panel_distancia_y), { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_y)) { store.setTextStyleValue(16, it) }
+        TextRuler(store, stringResource(R.string.panel_desfoque), { store.textStyle?.get(17) ?: 6f }, "${v[17].roundToInt()} px", 0.1f, 0f, 200f, stringResource(R.string.panel_desfoque_sombra)) { store.setTextStyleValue(17, it) }
     }
 }
 

@@ -24,6 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -73,12 +75,12 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
             derivedStateOf { store.primary?.let { !store.keyframes[it].isNullOrEmpty() } ?: false }
         }
         Row(Modifier.fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
-            ChromeButton(CupertinoGlyph.ArrowUturnLeft, "Desfazer", onClick = if (canUndo) ({ store.undo() }) else null, width = side, height = ShellDims.Transport)
-            ChromeButton(CupertinoGlyph.ArrowUturnRight, "Refazer", onClick = if (canRedo) ({ store.redo() }) else null, width = side, height = ShellDims.Transport)
+            ChromeButton(CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer), onClick = if (canUndo) ({ store.undo() }) else null, width = side, height = ShellDims.Transport)
+            ChromeButton(CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer), onClick = if (canRedo) ({ store.redo() }) else null, width = side, height = ShellDims.Transport)
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 ChromeButton(
                     CupertinoGlyph.BackwardEnd,
-                    if (hasMarks) "Keyframe anterior · segure para o início" else "Um quadro atrás · segure para o início",
+                    if (hasMarks) stringResource(R.string.editor_keyframe_anterior_segure_inicio) else stringResource(R.string.editor_quadro_atras_segure_inicio),
                     onClick = { if (!store.stepToKeyframe(-1)) store.step(-1) },
                     height = ShellDims.Transport,
                     onLongClick = { store.seek(0) },
@@ -86,16 +88,16 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
                 PlayButton(store)
                 ChromeButton(
                     CupertinoGlyph.ForwardEnd,
-                    if (hasMarks) "Próximo keyframe · segure para o fim" else "Um quadro à frente · segure para o fim",
+                    if (hasMarks) stringResource(R.string.editor_proximo_keyframe_segure_fim) else stringResource(R.string.editor_quadro_frente_segure_fim),
                     onClick = { if (!store.stepToKeyframe(1)) store.step(1) },
                     height = ShellDims.Transport,
                     onLongClick = { store.seek(store.project.durationFrames) },
                 )
             }
-            ChromeButton(CupertinoGlyph.DocOnClipboard, "Copiar e colar", onClick = { openSheet(store, ui, ShellSheet.CopyPaste) }, width = side, height = ShellDims.Transport)
+            ChromeButton(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), onClick = { openSheet(store, ui, ShellSheet.CopyPaste) }, width = side, height = ShellDims.Transport)
             ChromeButton(
                 if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen,
-                if (ui.fullscreen) "Sair da tela cheia" else "Tela cheia",
+                if (ui.fullscreen) stringResource(R.string.editor_sair_tela_cheia) else stringResource(R.string.editor_tela_cheia),
                 onClick = { ui.fullscreen = !ui.fullscreen },
                 width = side,
                 height = ShellDims.Transport,
@@ -117,9 +119,9 @@ private fun PlayButton(store: EditorStore) {
         ChromeButton(
             if (playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
             when {
-                loop -> "Repetição ligada · segure para desligar"
-                playing -> "Pausar"
-                else -> "Reproduzir · segure para repetir"
+                loop -> stringResource(R.string.editor_repeticao_ligada_segure_desligar)
+                playing -> stringResource(R.string.editor_pausar)
+                else -> stringResource(R.string.editor_reproduzir_segure_repetir)
             },
             onClick = { store.togglePlayback() },
             size = 26.dp,
@@ -157,8 +159,8 @@ private fun InfoBar(store: EditorStore) {
         if (d == null) return@Row
         InfoPair("X", d.position[0].roundToInt().toString())
         InfoPair("Y", d.position[1].roundToInt().toString())
-        InfoPair("Escala", "${(d.scale[0] * 100f).roundToInt()}%")
-        InfoPair("Rotação", "${"%.1f".format(java.util.Locale.ROOT, d.rotation[2]).replace('.', ',')}°")
+        InfoPair(stringResource(R.string.editor_escala), "${(d.scale[0] * 100f).roundToInt()}%")
+        InfoPair(stringResource(R.string.editor_rotacao), "${"%.1f".format(java.util.Locale.ROOT, d.rotation[2]).replace('.', ',')}°")
     }
 }
 
@@ -267,27 +269,27 @@ internal fun CopyPasteSheet(store: EditorStore, onDismiss: () -> Unit) {
         block()
     }
     ShellMenuSheet(onDismiss) {
-        MenuSection("Copiar e colar")
+        MenuSection(stringResource(R.string.editor_copiar_colar))
         val clip = store.clipboard
-        MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar camada", if (primary != null) act { store.copyLayers() } else null)
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar camada no cabeçote", if (clip and 1 != 0) act { store.pasteLayers() } else null)
+        MenuItemRow(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_camada), if (primary != null) act { store.copyLayers() } else null)
+        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_camada_cabecote), if (clip and 1 != 0) act { store.pasteLayers() } else null)
         MenuItemRow(
             CupertinoGlyph.PlusSquareOnSquare,
-            "Duplicar camada",
+            stringResource(R.string.editor_duplicar_camada),
             if (primary != null) act { store.duplicateLayers(listOf(primary)) } else null,
         )
-        MenuItemRow(CupertinoGlyph.CheckmarkSquare, "Selecionar todas as camadas", if (count >= 2) act { store.selectAll() } else null)
-        MenuItemRow(CupertinoGlyph.Square, "Limpar seleção", act { store.clearSelection() })
-        MenuSection("Estilo e efeitos")
-        MenuItemRow(CupertinoGlyph.Paintbrush, "Copiar estilo", if (primary != null) act { store.copyStyle() } else null)
+        MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
+        MenuItemRow(CupertinoGlyph.Square, stringResource(R.string.editor_limpar_selecao), act { store.clearSelection() })
+        MenuSection(stringResource(R.string.editor_estilo_efeitos))
+        MenuItemRow(CupertinoGlyph.Paintbrush, stringResource(R.string.editor_copiar_estilo), if (primary != null) act { store.copyStyle() } else null)
         MenuItemRow(
-            ShellGlyph.PaintbrushFill, "Colar estilo", if (primary != null && clip and 2 != 0) act { store.pasteStyle() } else null,
-            detail = "Mesclagem, opacidade, efeitos e cores",
+            ShellGlyph.PaintbrushFill, stringResource(R.string.editor_colar_estilo), if (primary != null && clip and 2 != 0) act { store.pasteStyle() } else null,
+            detail = stringResource(R.string.editor_mesclagem_opacidade_efeitos_cores),
         )
-        MenuItemRow(CupertinoGlyph.Sparkles, "Copiar efeitos", if (primary != null) act { store.copyEffects() } else null)
-        MenuItemRow(CupertinoGlyph.WandStars, "Colar efeitos", if (primary != null && clip and 4 != 0) act { store.pasteEffects() } else null)
-        MenuSection("Keyframes")
-        MenuItemRow(CupertinoGlyph.DocOnDoc, "Copiar keyframes do cabeçote", if (primary != null) act { store.copyKeyframes() } else null)
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, "Colar keyframes no cabeçote", if (primary != null && clip and 8 != 0) act { store.pasteKeyframes() } else null)
+        MenuItemRow(CupertinoGlyph.Sparkles, stringResource(R.string.editor_copiar_efeitos), if (primary != null) act { store.copyEffects() } else null)
+        MenuItemRow(CupertinoGlyph.WandStars, stringResource(R.string.editor_colar_efeitos), if (primary != null && clip and 4 != 0) act { store.pasteEffects() } else null)
+        MenuSection(stringResource(R.string.editor_keyframes))
+        MenuItemRow(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_keyframes_cabecote), if (primary != null) act { store.copyKeyframes() } else null)
+        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_keyframes_cabecote), if (primary != null && clip and 8 != 0) act { store.pasteKeyframes() } else null)
     }
 }

@@ -53,6 +53,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
@@ -500,7 +502,7 @@ private fun ShellSheets(store: EditorStore, ui: EditorUi) {
                 LaunchedEffect(Unit) { ui.sheet = null }
             } else {
                 AureaNamePrompt(
-                    title = "Nome da camada",
+                    title = stringResource(R.string.editor_nome_camada),
                     initial = name,
                     onConfirm = { store.renameLayer(id, it) },
                     onDismiss = dismiss,

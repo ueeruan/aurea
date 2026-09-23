@@ -40,6 +40,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
@@ -384,8 +386,8 @@ internal fun GoToTimeDialog(initialSeconds: String, fps: Float, onSeek: (Int) ->
     LaunchedEffect(Unit) { focus.requestFocus() }
     val confirm = { ShellTime.parseToFrame(text, fps)?.let(onSeek); Unit }
     AureaAlert(
-        title = "Ir para o tempo",
-        confirmLabel = "Ir",
+        title = stringResource(R.string.editor_ir_tempo),
+        confirmLabel = stringResource(R.string.editor_ir),
         onConfirm = confirm,
         onDismiss = onDismiss,
         extra = {
@@ -398,7 +400,7 @@ internal fun GoToTimeDialog(initialSeconds: String, fps: Float, onSeek: (Int) ->
                     .padding(horizontal = 8.dp, vertical = 7.dp),
             ) {
                 if (text.isEmpty()) {
-                    Text("segundos, ou mm:ss.ms", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+                    Text(stringResource(R.string.editor_segundos_ou_mm_ss_ms), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
                 }
                 BasicTextField(
                     value = text,

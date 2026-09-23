@@ -22,6 +22,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -39,18 +41,18 @@ import com.aurea.aurea.ui.theme.tocavel
 internal fun TrackingPanel(env: PanelEnv) {
     val store = env.store
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
-        Action("Rastrear um ponto", "Cria um ponto guia que segue o objeto — ligue textos e formas a ele.") {
+        Action(stringResource(R.string.panel_rastrear_ponto), stringResource(R.string.panel_cria_ponto_guia_segue_objeto_ligue)) {
             env.onClose()
             store.beginPointPick(false)
         }
         Spacer(Modifier.height(10.dp))
-        Action("Estabilizar pelo ponto", "Move o vídeo para o ponto ficar parado na tela.") {
+        Action(stringResource(R.string.panel_estabilizar_pelo_ponto), stringResource(R.string.panel_move_video_ponto_ficar_parado_tela)) {
             env.onClose()
             store.beginPointPick(true)
         }
         Spacer(Modifier.height(12.dp))
         Text(
-            "Toque num detalhe com contraste (canto, luz, marca). Depois de escolher, o rastreio roda sozinho.",
+            stringResource(R.string.panel_toque_num_detalhe_contraste_canto_luz),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
         )
         Spacer(Modifier.height(18.dp))
@@ -68,10 +70,10 @@ private fun CameraTrackSection(env: PanelEnv) {
     val store = env.store
     val st by remember(store) { derivedStateOf { store.cameraTrack } }
     var mode by remember { mutableIntStateOf(1) }
-    Text("Câmera 3D", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+    Text(stringResource(R.string.panel_camera_3d), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
     Spacer(Modifier.height(6.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(0 to "Rápido", 1 to "Equilibrado", 2 to "Alta qualidade").forEach { (m, label) ->
+        listOf(0 to stringResource(R.string.panel_rapido), 1 to stringResource(R.string.panel_equilibrado), 2 to stringResource(R.string.panel_alta_qualidade)).forEach { (m, label) ->
             val on = mode == m
             Box(
                 Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
@@ -91,30 +93,30 @@ private fun CameraTrackSection(env: PanelEnv) {
                 Box(Modifier.fillMaxWidth(s.progress.coerceIn(0f, 1f)).fillMaxHeight().background(AureaColors.Accent))
             }
             Spacer(Modifier.height(8.dp))
-            Action("Cancelar", "Para a análise; o projeto não muda.") { store.cancelCameraTrack() }
+            Action(stringResource(R.string.panel_cancelar), stringResource(R.string.panel_analise_projeto_nao_muda)) { store.cancelCameraTrack() }
         }
         s != null && s.state == 2 -> {
-            val kind = if (s.rotationOnly) "A câmera só gira no lugar — sem profundidade" else "Movimento da câmera encontrado"
-            Text(kind + if (s.cached) " (análise guardada)" else "", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600)))
+            val kind = if (s.rotationOnly) stringResource(R.string.panel_camera_so_gira_lugar_sem_profundidade) else stringResource(R.string.panel_movimento_camera_encontrado)
+            Text(kind + if (s.cached) stringResource(R.string.panel_analise_guardada) else "", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600)))
             Spacer(Modifier.height(4.dp))
             Text(
                 "${s.solved} de ${s.frames} quadros · precisão ${(s.confidence * 100).toInt()}% · abertura da lente ${kotlin.math.round(s.fovDeg).toInt()}°",
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
             Spacer(Modifier.height(8.dp))
-            Action("Criar câmera", "Cria a câmera 3D animada e um ponto guia no chão da cena.") { store.applyCameraTrack() }
+            Action(stringResource(R.string.panel_criar_camera), stringResource(R.string.panel_cria_camera_3d_animada_ponto_guia)) { store.applyCameraTrack() }
             Spacer(Modifier.height(8.dp))
-            Action("Analisar de novo", "Com o modo escolhido acima.") { store.startCameraTrack(mode) }
+            Action(stringResource(R.string.panel_analisar_novo), stringResource(R.string.panel_modo_escolhido_acima)) { store.startCameraTrack(mode) }
         }
         else -> {
             if (s != null && (s.state == 3 || s.state == 4)) {
                 Text(
-                    if (s.state == 4) "Análise cancelada." else "Não deu para resolver: ${s.message}",
+                    if (s.state == 4) stringResource(R.string.panel_analise_cancelada) else "Não deu para resolver: ${s.message}",
                     style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
                 )
                 Spacer(Modifier.height(8.dp))
             }
-            Action("Analisar câmera", "Acha o movimento da câmera do vídeo (roda em segundo plano).") { store.startCameraTrack(mode) }
+            Action(stringResource(R.string.panel_analisar_camera), stringResource(R.string.panel_acha_movimento_camera_video_roda_segundo)) { store.startCameraTrack(mode) }
         }
     }
 }

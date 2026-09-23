@@ -23,6 +23,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -92,7 +94,7 @@ internal fun EffectsBrowser(store: EditorStore, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.padding(horizontal = 2.dp))
                 Text(
-                    "Efeitos",
+                    stringResource(R.string.panel_efeitos),
                     style = AureaType.Base.merge(TextStyle(fontSize = 18.sp, fontWeight = FontWeight.W700)),
                     modifier = Modifier.weight(1f),
                 )

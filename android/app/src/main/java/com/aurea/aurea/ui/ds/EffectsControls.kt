@@ -20,6 +20,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -148,7 +150,7 @@ fun AdvancedToggle(open: Boolean, count: Int, onToggle: () -> Unit, modifier: Mo
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Avançado",
+            stringResource(R.string.ds_avancado),
             style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)),
         )
         Spacer(Modifier.width(6.dp))
@@ -156,7 +158,7 @@ fun AdvancedToggle(open: Boolean, count: Int, onToggle: () -> Unit, modifier: Mo
         Spacer(Modifier.weight(1f))
         if (!open) {
             Text(
-                if (count == 1) "1 ajuste" else "$count ajustes",
+                if (count == 1) stringResource(R.string.ds_1_ajuste) else "$count ajustes",
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
             )
         }

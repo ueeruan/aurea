@@ -27,6 +27,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -140,18 +142,18 @@ internal fun LeftRail(
     onExpression: (() -> Unit)? = null,
 ) {
     Column(modifier.width(46.dp).fillMaxHeight()) {
-        RailCell(onBack, "Voltar às ferramentas") {
+        RailCell(onBack, stringResource(R.string.panel_voltar_ferramentas)) {
             Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp))
         }
-        RailCell(onKeyframe, if (keyframeLook == KeyframeLook.KeyHere) "Tirar o keyframe daqui" else "Marcar keyframe aqui") {
+        RailCell(onKeyframe, if (keyframeLook == KeyframeLook.KeyHere) stringResource(R.string.panel_tirar_keyframe_daqui) else stringResource(R.string.panel_marcar_keyframe_aqui)) {
             KeyframeDiamondIcon(keyframeLook, enabled = onKeyframe != null)
         }
-        RailCell(onCurve, "Editar curva da propriedade") {
+        RailCell(onCurve, stringResource(R.string.panel_editar_curva_propriedade)) {
             CurveRailIcon(enabled = onCurve != null, animated = curveAnimated)
         }
         if (onExpression != null) {
             // "=": o editor de expressão da propriedade (acende quando há uma).
-            RailCell(onExpression, if (expression == ExpressionLook.None) "Adicionar expressão" else "Editar expressão") {
+            RailCell(onExpression, if (expression == ExpressionLook.None) stringResource(R.string.panel_adicionar_expressao) else stringResource(R.string.panel_editar_expressao)) {
                 androidx.compose.material3.Text(
                     "=",
                     style = com.aurea.aurea.ui.theme.AureaType.Base.merge(

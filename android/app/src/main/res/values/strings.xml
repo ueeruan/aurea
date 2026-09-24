@@ -1657,4 +1657,12 @@
     <string name="ai_sim">sim</string>
     <string name="ai_nao">não</string>
     <string name="ai_salvar_galeria">Salvar na galeria</string>
+    <string name="ai_preparando_geracao">Preparando geração…</string>
+    <string name="ai_anuncio_indisponivel">Não foi possível carregar o anúncio agora. Verifique a conexão e tente de novo.</string>
+    <string name="ai_gerando_seu_video">Gerando seu vídeo…</string>
+    <string name="ai_video_finalizando">Seu vídeo está sendo finalizado…</string>
+    <string name="ai_video_pronto_titulo">Vídeo pronto</string>
+    <string name="ai_video_pronto_assista">Seu vídeo está pronto. Assista ao anúncio para liberar.</string>
+    <string name="ai_assista_completo">Assista ao anúncio completo para liberar seu vídeo.</string>
+    <string name="ai_assistir_e_liberar">Assistir e liberar vídeo</string>
 </resources>

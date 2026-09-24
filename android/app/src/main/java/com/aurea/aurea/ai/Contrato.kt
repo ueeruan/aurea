@@ -233,23 +233,6 @@ fun explicarErro(codigo: String?): String = when (codigo) {
 }
 
 // ---------------------------------------------------------------------------
-// Anúncio
-// ---------------------------------------------------------------------------
-
-/**
- * Quantos anúncios a duração pede.
- *
- * É regra de produto, não do servidor: 5 s custa uma A100 por menos tempo que
- * 15 s, então a duração maior pede mais anúncio. Fica aqui, num lugar só, para
- * a tela e a futura cobrança não divergirem.
- */
-fun anunciosPara(duracaoSegundos: Int): Int = when {
-    duracaoSegundos <= 5 -> 1
-    duracaoSegundos <= 10 -> 2
-    else -> 3
-}
-
-// ---------------------------------------------------------------------------
 // O que o app manda
 // ---------------------------------------------------------------------------
 

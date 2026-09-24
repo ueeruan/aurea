@@ -8,4 +8,5 @@
     <string name="admob_app_id" translatable="false">ca-app-pub-3940256099942544~3347511713</string>
     <string name="admob_app_open_unit" translatable="false">ca-app-pub-3940256099942544/9257395921</string>
     <string name="admob_export_interstitial_unit" translatable="false">ca-app-pub-3940256099942544/1033173712</string>
+    <string name="admob_ai_rewarded_unit" translatable="false">ca-app-pub-3940256099942544/5224354917</string>
 </resources>

@@ -25,6 +25,9 @@ class AureaAdsManagerTest {
         var appOpenFalhou: ((String) -> Unit)? = null
         var interCarregado: (() -> Unit)? = null
         var interFalhou: ((String) -> Unit)? = null
+        var rewardedCarregado: (() -> Unit)? = null
+        var rewardedFalhou: ((String) -> Unit)? = null
+        var recompensar: (() -> Unit)? = null
         var tem = mutableSetOf<AdKind>()
         var mostrados = mutableListOf<AdKind>()
         var abrir: (() -> Unit)? = null
@@ -43,10 +46,15 @@ class AureaAdsManagerTest {
             if (lancarNoLoad) throw RuntimeException("sem rede")
             interCarregado = { tem += AdKind.ExportInterstitial; aoCarregar() }; interFalhou = aoFalhar
         }
-        override fun show(kind: AdKind, host: Any, aoAbrir: () -> Unit, aoFechar: () -> Unit, aoFalhar: (String) -> Unit): Boolean {
+        override fun loadRewarded(unitId: String, aoCarregar: () -> Unit, aoFalhar: (String) -> Unit) {
+            if (lancarNoLoad) throw RuntimeException("sem rede")
+            rewardedCarregado = { tem += AdKind.AiRewarded; aoCarregar() }; rewardedFalhou = aoFalhar
+        }
+        override fun show(kind: AdKind, host: Any, aoAbrir: () -> Unit, aoFechar: () -> Unit, aoFalhar: (String) -> Unit,
+                          aoRecompensar: () -> Unit): Boolean {
             if (lancarNoShow) throw RuntimeException("show explodiu")
             if (kind !in tem) return false
-            mostrados += kind; abrir = aoAbrir; fechar = aoFechar; falharShow = aoFalhar
+            mostrados += kind; abrir = aoAbrir; fechar = aoFechar; falharShow = aoFalhar; recompensar = aoRecompensar
             return true
         }
         override fun release(kind: AdKind) { tem -= kind }
@@ -75,7 +83,7 @@ class AureaAdsManagerTest {
     private fun iniciar(aberturasAntes: Long = 0) {
         store.putLong("launches", aberturasAntes)
         AureaAdsManager.initialize(host, falso, AdsFrequencyController(store),
-            AdsIds(AdsConfig.TEST_APP_OPEN, AdsConfig.TEST_INTERSTITIAL))
+            AdsIds(AdsConfig.TEST_APP_OPEN, AdsConfig.TEST_INTERSTITIAL, AdsConfig.TEST_REWARDED))
         AureaAdsManager.attach(host)
     }
 
@@ -279,6 +287,66 @@ class AureaAdsManagerTest {
         assertTrue(f2.exportBlock(200L) != null)
     }
 
+    // -- Rewarded da IA ---------------------------------------------------------
+
+    private fun rewardedPronto() {
+        var carregou = false
+        AureaAdsManager.preloadRewarded(aoCarregar = { carregou = true })
+        falso.rewardedCarregado!!()
+        assertTrue(carregou)
+        assertTrue(AureaAdsManager.rewardedReady())
+    }
+
+    @Test
+    fun `rewarded - so onUserEarnedReward concede, fechar nao`() {
+        iniciar(aberturasAntes = 0)                     // vale até na 1a abertura (pedido pelo usuário)
+        rewardedPronto()
+        var abriu = false; var ganhou = false; var fechouGanhando: Boolean? = null
+        assertTrue(AureaAdsManager.showRewarded({ abriu = true }, { ganhou = true }, { fechouGanhando = it }, {}))
+        falso.abrir!!()
+        assertTrue(abriu)
+        assertFalse("abrir não é recompensa", ganhou)
+        falso.fechar!!()
+        assertFalse("fechar não é recompensa", ganhou)
+        assertEquals(false, fechouGanhando)
+        assertFalse("consumido", AureaAdsManager.rewardedReady())
+    }
+
+    @Test
+    fun `rewarded - recompensa pelo callback oficial, uma vez`() {
+        iniciar(aberturasAntes = 3)
+        rewardedPronto()
+        var recompensas = 0; var fechouGanhando: Boolean? = null
+        AureaAdsManager.showRewarded({}, { recompensas++ }, { fechouGanhando = it }, {})
+        falso.abrir!!(); falso.recompensar!!(); falso.recompensar!!(); falso.fechar!!()
+        assertEquals(1, recompensas)
+        assertEquals(true, fechouGanhando)
+        assertTrue(logs.any { "Reward earned" in it })
+    }
+
+    @Test
+    fun `rewarded indisponivel devolve false e avisa`() {
+        iniciar(aberturasAntes = 3)
+        var falha: String? = null
+        assertFalse(AureaAdsManager.showRewarded({}, {}, {}, { falha = it }))
+        assertTrue(falha != null)
+        // Sem rede: quem espera o carregamento recebe a falha.
+        var erroCarga: String? = null
+        AureaAdsManager.preloadRewarded(aoFalhar = { erroCarga = it })
+        falso.rewardedFalhou!!("load 2: network error")
+        assertEquals("load 2: network error", erroCarga)
+    }
+
+    @Test
+    fun `rewarded nao entra na frequencia de exportacao nem e bloqueado por ela`() {
+        iniciar(aberturasAntes = 3)
+        falso.interCarregado!!()
+        AureaAdsManager.showExportInterstitialIfAvailable {}
+        falso.abrir!!(); falso.fechar!!()
+        rewardedPronto()
+        assertTrue("pedido pelo usuário: sem cap", AureaAdsManager.showRewarded({}, {}, {}, {}))
+    }
+
     // -- IDs -------------------------------------------------------------------
 
     @Test
@@ -286,10 +354,11 @@ class AureaAdsManagerTest {
         val debug = File("src/debug/res/values/ads_config.xml").readText()
         val ids = Regex("""<string name="(admob_[a-z_]+)"[^>]*>([^<]*)</string>""").findAll(debug)
             .associate { it.groupValues[1] to it.groupValues[2].trim() }
-        assertEquals(setOf("admob_app_id", "admob_app_open_unit", "admob_export_interstitial_unit"), ids.keys)
+        assertEquals(setOf("admob_app_id", "admob_app_open_unit", "admob_export_interstitial_unit", "admob_ai_rewarded_unit"), ids.keys)
         ids.forEach { (k, v) -> assertTrue("$k = $v não é ID de teste", AdsConfig.isTestId(v)) }
         assertEquals(AdsConfig.TEST_APP_OPEN, ids["admob_app_open_unit"])
         assertEquals(AdsConfig.TEST_INTERSTITIAL, ids["admob_export_interstitial_unit"])
+        assertEquals("ca-app-pub-3940256099942544/5224354917", ids["admob_ai_rewarded_unit"])
         // Nenhum ID real espalhado no código: só AdsConfig conhece os de teste.
         val codigo = File("src/main/java").walkTopDown().filter { it.isFile && it.extension == "kt" }
             .filter { "ca-app-pub-" in it.readText() }.map { it.name }.toSet()

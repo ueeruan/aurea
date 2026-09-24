@@ -14,9 +14,10 @@ import com.aurea.aurea.R
  *
  * O App ID (`admob_app_id`) vai no manifesto pelo mesmo recurso.
  */
-data class AdsIds(val appOpen: String, val interstitial: String) {
+data class AdsIds(val appOpen: String, val interstitial: String, val aiRewarded: String = "") {
     val appOpenEnabled: Boolean get() = appOpen.isNotBlank()
     val interstitialEnabled: Boolean get() = interstitial.isNotBlank()
+    val aiRewardedEnabled: Boolean get() = aiRewarded.isNotBlank()
 }
 
 object AdsConfig {
@@ -25,10 +26,12 @@ object AdsConfig {
     const val TEST_APP_ID = "ca-app-pub-3940256099942544~3347511713"
     const val TEST_APP_OPEN = "ca-app-pub-3940256099942544/9257395921"
     const val TEST_INTERSTITIAL = "ca-app-pub-3940256099942544/1033173712"
+    const val TEST_REWARDED = "ca-app-pub-3940256099942544/5224354917"
 
     fun ids(context: Context): AdsIds = AdsIds(
         appOpen = context.getString(R.string.admob_app_open_unit).trim(),
         interstitial = context.getString(R.string.admob_export_interstitial_unit).trim(),
+        aiRewarded = context.getString(R.string.admob_ai_rewarded_unit).trim(),
     )
 
     /** `true` se o ID é de teste (vale para app, App Open e interstitial). */
@@ -55,6 +58,8 @@ data class AdsPolicy(
     val appOpenMaxAgeMs: Long = 4 * 60 * 60_000L,
     /** Validade de um interstitial carregado. */
     val interstitialMaxAgeMs: Long = 60 * 60_000L,
+    /** Validade de um rewarded carregado. */
+    val rewardedMaxAgeMs: Long = 60 * 60_000L,
     /** Se o SDK não confirmar que o anúncio abriu neste prazo, o fluxo segue. */
     val showStartTimeoutMs: Long = 5_000L,
     /** Teto absoluto de espera por um anúncio aberto: depois disso o fluxo segue de qualquer jeito. */

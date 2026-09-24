@@ -74,12 +74,6 @@ class DiscoveryTest {
         assertEquals(5L, recuo(10))
     }
 
-    @Test
-    fun `duracao maior pede mais anuncio`() {
-        assertEquals(1, anunciosPara(5))
-        assertEquals(2, anunciosPara(10))
-        assertEquals(3, anunciosPara(15))
-    }
 
     @Test
     fun `so online e gerando deixam gerar`() {

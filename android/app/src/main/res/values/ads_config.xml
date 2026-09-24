@@ -9,4 +9,6 @@
     <string name="admob_app_id" translatable="false">ca-app-pub-3940256099942544~3347511713</string>
     <string name="admob_app_open_unit" translatable="false"></string>
     <string name="admob_export_interstitial_unit" translatable="false"></string>
+    <!-- Rewarded da geração de vídeo por IA (AI Video). -->
+    <string name="admob_ai_rewarded_unit" translatable="false"></string>
 </resources>

@@ -46,9 +46,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.aurea.aurea.R
 import com.aurea.aurea.ai.AureaAiEstado
-import com.aurea.aurea.ai.GateDeAnuncio
+import com.aurea.aurea.ai.SessaoStatus
 import com.aurea.aurea.ai.Pedido
-import com.aurea.aurea.ai.anunciosPara
 import com.aurea.aurea.ai.formarDuracao
 import com.aurea.aurea.ai.lerImagemParaEnvio
 import com.aurea.aurea.ai.podeGerar
@@ -91,7 +90,11 @@ internal fun AiVideoPanel(env: PanelEnv) {
 
     // Abriu o painel, o app já sai atrás do servidor. Não há nada a confirmar
     // antes: nem endereço, nem token, nem botão de conectar.
-    LaunchedEffect(Unit) { ai.conectar() }
+    LaunchedEffect(Unit) {
+        ai.conectar()
+        // O Rewarded carrega já ao entrar: no toque em "Gerar" ele está pronto.
+        ai.prepararAnuncio()
+    }
 
     // Ajusta a escolha quando as capacidades chegam (ou mudam de servidor).
     LaunchedEffect(caps) {
@@ -208,10 +211,7 @@ internal fun AiVideoPanel(env: PanelEnv) {
             Column {
                 if (caps.duracoes.isNotEmpty()) {
                     Rotulo(stringResource(R.string.ai_duracao))
-                    // "5s · 1 anúncio": o preço aparece junto da escolha, não
-                    // depois de o usuário já ter decidido.
-                    val anuncio = stringResource(R.string.ai_anuncio_curto)
-                    Faixa(caps.duracoes.map { "${it}s · ${anunciosPara(it)} $anuncio" },
+                    Faixa(caps.duracoes.map { "${it}s" },
                         duracao, habilitado = ai.job?.rodando != true) { duracao = it }
                 }
                 if (caps.aspectos.isNotEmpty()) {
@@ -238,17 +238,16 @@ internal fun AiVideoPanel(env: PanelEnv) {
 
         item(key = "gerar") {
             val rodando = ai.job?.rodando == true
-            val pode = !rodando && !ai.anunciando && prompt.isNotBlank() &&
+            val pode = !rodando && !ai.anunciando && !ai.sessaoOcupada && prompt.isNotBlank() &&
                 (modo != "image_to_video" || assetId != null)
             Column {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Botao(
-                        if (GateDeAnuncio.atual.disponivel) stringResource(R.string.ai_assistir_e_gerar)
-                        else stringResource(R.string.ai_gerar),
+                        stringResource(R.string.ai_assistir_e_gerar),
                         primario = true, ativo = pode,
                     ) {
-                        ai.gerarComAnuncio(
+                        ai.gerarComRecompensa(
                             Pedido(
                                 modo = modo,
                                 prompt = prompt.trim(),
@@ -272,8 +271,42 @@ internal fun AiVideoPanel(env: PanelEnv) {
             }
         }
 
+        // --- direito ao vídeo (Rewarded) -------------------------------------
+        ai.sessao?.let { s ->
+            item(key = "recompensa") {
+                Column {
+                    when (s.status) {
+                        SessaoStatus.Preparando ->
+                            Nota(stringResource(R.string.ai_preparando_geracao), AureaColors.Muted)
+                        SessaoStatus.AnuncioIndisponivel -> {
+                            Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
+                            Botao(stringResource(R.string.ai_procurar_de_novo)) { ai.tentarGerarDeNovo() }
+                        }
+                        SessaoStatus.AnuncioNaTela, SessaoStatus.Gerando -> when {
+                            s.rewardEarned -> Nota(stringResource(R.string.ai_video_finalizando), AureaColors.Accent)
+                            s.adClosedEarly -> Nota(stringResource(R.string.ai_assista_completo), AureaColors.Muted)
+                            else -> Nota(stringResource(R.string.ai_gerando_seu_video), AureaColors.Muted)
+                        }
+                        SessaoStatus.Bloqueado -> {
+                            Spacer(Modifier.height(10.dp))
+                            Text(stringResource(R.string.ai_video_pronto_titulo), style = AureaType.Base.merge(
+                                TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
+                            Nota(
+                                stringResource(if (s.adClosedEarly) R.string.ai_assista_completo else R.string.ai_video_pronto_assista),
+                                AureaColors.Muted,
+                            )
+                            if (s.adError != null) Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
+                            Botao(stringResource(R.string.ai_assistir_e_liberar), primario = true,
+                                ativo = !ai.anunciando) { ai.liberarComAnuncio() }
+                        }
+                        SessaoStatus.Liberado, SessaoStatus.Falhou -> Unit
+                    }
+                }
+            }
+        }
+
         // --- progresso ------------------------------------------------------
-        ai.job?.let { j ->
+        ai.job?.takeIf { ai.sessao?.status != SessaoStatus.Bloqueado }?.let { j ->
             item(key = "progresso") {
                 Column {
                     Spacer(Modifier.height(10.dp))

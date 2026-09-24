@@ -20,7 +20,7 @@ class MemoryAdsStore : AdsStore {
     override fun putLong(key: String, value: Long) { m[key] = value }
 }
 
-enum class AdKind { AppOpen, ExportInterstitial }
+enum class AdKind { AppOpen, ExportInterstitial, AiRewarded }
 
 /**
  * Quem decide SE um anúncio pode aparecer — nunca COMO. Persistente: o
@@ -59,6 +59,7 @@ class AdsFrequencyController(
         store.putLong(K_LAST_FULLSCREEN, now)
         when (kind) {
             AdKind.AppOpen -> store.putLong(K_LAST_APP_OPEN, now)
+            AdKind.AiRewarded -> Unit   // pedido pelo usuário: só conta como "tela cheia recente"
             AdKind.ExportInterstitial -> {
                 // Guarda os últimos instantes (até 8) para a janela deslizante.
                 val lista = (exportShows() + now).takeLast(8)

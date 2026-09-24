@@ -14,8 +14,14 @@ interface AdsBackend {
     fun initialize(host: Any, aoTerminar: (podePedir: Boolean) -> Unit)
     fun loadAppOpen(unitId: String, aoCarregar: () -> Unit, aoFalhar: (String) -> Unit)
     fun loadInterstitial(unitId: String, aoCarregar: () -> Unit, aoFalhar: (String) -> Unit)
-    /** Mostra o que está carregado. `false` = não havia o que mostrar. */
-    fun show(kind: AdKind, host: Any, aoAbrir: () -> Unit, aoFechar: () -> Unit, aoFalhar: (String) -> Unit): Boolean
+    fun loadRewarded(unitId: String, aoCarregar: () -> Unit, aoFalhar: (String) -> Unit)
+    /**
+     * Mostra o que está carregado. `false` = não havia o que mostrar.
+     * `aoRecompensar` é o callback OFICIAL de recompensa do SDK
+     * (onUserEarnedReward) — só o Rewarded chama; fechar nunca chama.
+     */
+    fun show(kind: AdKind, host: Any, aoAbrir: () -> Unit, aoFechar: () -> Unit, aoFalhar: (String) -> Unit,
+             aoRecompensar: () -> Unit): Boolean
     /** Solta o anúncio carregado (vencido ou já usado). */
     fun release(kind: AdKind)
 }
@@ -212,7 +218,8 @@ object AureaAdsManager {
                     log("[AUREA ADS] $nome shown")
                 },
                 aoFechar = { acabar(null) },
-                aoFalhar = { e -> acabar(e) })
+                aoFalhar = { e -> acabar(e) },
+                aoRecompensar = {})
         } catch (t: Throwable) {
             acabar(t.message ?: t.javaClass.simpleName); return
         }
@@ -234,6 +241,7 @@ object AureaAdsManager {
         when (kind) {
             AdKind.AppOpen -> appOpenPronto = 0L
             AdKind.ExportInterstitial -> interstitialPronto = 0L
+            AdKind.AiRewarded -> rewardedPronto = 0L
         }
         backend?.release(kind)
     }
@@ -252,12 +260,163 @@ object AureaAdsManager {
         return true
     }
 
+    // -- Rewarded da geração por IA ---------------------------------------------
+
+    private var rewardedPronto = 0L
+    private var carregandoRewarded = false
+    private val esperandoRewarded = ArrayList<Pair<() -> Unit, (String) -> Unit>>()
+
+    /** Há um Rewarded carregado e dentro da validade, pronto para aparecer agora. */
+    fun rewardedReady(): Boolean = podePedir && rewardedValido()
+
+    /**
+     * Carrega o Rewarded da IA (ao entrar na tela AI Video, e depois de consumido).
+     * `aoCarregar`/`aoFalhar` avisam quem está esperando por ELE ("Preparando geração...").
+     * Cada um é chamado no máximo uma vez.
+     */
+    fun preloadRewarded(aoCarregar: (() -> Unit)? = null, aoFalhar: ((String) -> Unit)? = null) {
+        val respondido = AtomicBoolean(false)
+        val ok = { if (respondido.compareAndSet(false, true)) aoCarregar?.invoke() }
+        val falha = { e: String -> if (respondido.compareAndSet(false, true)) aoFalhar?.invoke(e) }
+        var encaminhado = false
+        seguro {
+            if (rewardedValido()) { encaminhado = true; ok(); return@seguro }
+            val b = backend
+            val motivo = when {
+                b == null -> "anúncios não iniciados"
+                !podePedir -> "sem consentimento/SDK"
+                !ids.aiRewardedEnabled -> "sem ID de rewarded"
+                else -> null
+            }
+            if (motivo != null) { encaminhado = true; falha(motivo); return@seguro }
+            esperandoRewarded += ({ ok(); Unit } to { e: String -> falha(e); Unit })
+            encaminhado = true
+            if (carregandoRewarded) return@seguro
+            carregandoRewarded = true
+            b!!.loadRewarded(ids.aiRewarded, aoCarregar = {
+                carregandoRewarded = false
+                rewardedPronto = agora()
+                log("[AUREA ADS] Rewarded loaded")
+                avisarEspera(null)
+            }, aoFalhar = { e ->
+                carregandoRewarded = false
+                onAdFailed(AdKind.AiRewarded, e)
+                avisarEspera(e)
+            })
+        }
+        if (!encaminhado) falha("erro ao preparar o anúncio")
+    }
+
+    private fun avisarEspera(erro: String?) {
+        val lista = ArrayList(esperandoRewarded)
+        esperandoRewarded.clear()
+        lista.forEach { (ok, falha) -> seguro { if (erro == null) ok() else falha(erro) } }
+    }
+
+    /**
+     * Mostra o Rewarded. A RECOMPENSA só existe por `aoRecompensa`, que vem do
+     * callback oficial do SDK (onUserEarnedReward). `aoFechar(ganhou)` é só o
+     * aviso de que a tela fechou — nunca concede nada. Devolve `false` (e chama
+     * `aoFalhar`) se não havia anúncio para mostrar.
+     */
+    fun showRewarded(
+        aoAbrir: () -> Unit,
+        aoRecompensa: () -> Unit,
+        aoFechar: (ganhou: Boolean) -> Unit,
+        aoFalhar: (String) -> Unit,
+    ): Boolean {
+        var mostrou = false
+        var motivo: String? = "erro ao mostrar o anúncio"
+        seguro {
+            val b = backend
+            val f = frequency
+            val host = hostAtual?.get()
+            motivo = when {
+                b == null || f == null -> "anúncios não iniciados"
+                host == null -> "tela não visível"
+                !podePedir -> "sem consentimento/SDK"
+                telaCheiaAberta -> "outro anúncio na tela"
+                !rewardedValido() -> "rewarded não carregado"
+                else -> null
+            }
+            if (motivo != null) return@seguro
+            val abriu = AtomicBoolean(false)
+            val ganhou = AtomicBoolean(false)
+            val fechou = AtomicBoolean(false)
+            val fecharUmaVez = { erro: String? ->
+                if (fechou.compareAndSet(false, true)) {
+                    telaCheiaAberta = false
+                    if (erro == null) {
+                        onAdDismissed(AdKind.AiRewarded)
+                        seguro { aoFechar(ganhou.get()) }
+                    } else {
+                        onAdFailed(AdKind.AiRewarded, erro)
+                        seguro { if (abriu.get()) aoFechar(ganhou.get()) else aoFalhar(erro) }
+                    }
+                }
+            }
+            telaCheiaAberta = true
+            val tentou = try {
+                b!!.show(AdKind.AiRewarded, host!!,
+                    aoAbrir = {
+                        if (abriu.compareAndSet(false, true)) {
+                            f!!.recordShown(AdKind.AiRewarded, agora())
+                            log("[AUREA ADS] Rewarded shown")
+                            seguro { aoAbrir() }
+                        }
+                    },
+                    aoFechar = { fecharUmaVez(null) },
+                    aoFalhar = { e -> fecharUmaVez(e) },
+                    aoRecompensar = {
+                        if (ganhou.compareAndSet(false, true)) {
+                            log("[AUREA ADS] Reward earned")
+                            seguro { aoRecompensa() }
+                        }
+                    })
+            } catch (t: Throwable) {
+                motivo = t.message ?: t.javaClass.simpleName
+                false
+            }
+            consumir(AdKind.AiRewarded)
+            if (!tentou) {
+                telaCheiaAberta = false
+                if (motivo == null) motivo = "sem anúncio para mostrar"
+                return@seguro
+            }
+            mostrou = true
+            try {
+                agendar(f!!.policy.showStartTimeoutMs) {
+                    if (!abriu.get()) fecharUmaVez("não abriu em ${f.policy.showStartTimeoutMs} ms")
+                }
+            } catch (_: Throwable) {
+            }
+        }
+        if (!mostrou) {
+            log("[AUREA ADS] Ad unavailable - continuing normally (Rewarded: $motivo)")
+            aoFalhar(motivo ?: "anúncio indisponível")
+        }
+        return mostrou
+    }
+
+    private fun rewardedValido(): Boolean {
+        val f = frequency ?: return false
+        if (rewardedPronto == 0L) return false
+        if (agora() - rewardedPronto > f.policy.rewardedMaxAgeMs) { consumir(AdKind.AiRewarded); return false }
+        return true
+    }
+
+    private fun nomeDe(kind: AdKind) = when (kind) {
+        AdKind.AppOpen -> "AppOpen"
+        AdKind.ExportInterstitial -> "Interstitial"
+        AdKind.AiRewarded -> "Rewarded"
+    }
+
     fun onAdDismissed(kind: AdKind) = seguro {
-        log("[AUREA ADS] ${if (kind == AdKind.AppOpen) "AppOpen" else "Interstitial"} dismissed")
+        log("[AUREA ADS] ${nomeDe(kind)} dismissed")
     }
 
     fun onAdFailed(kind: AdKind, erro: String) = seguro {
-        log("[AUREA ADS] Ad error: ${if (kind == AdKind.AppOpen) "AppOpen" else "Interstitial"}: $erro")
+        log("[AUREA ADS] Ad error: ${nomeDe(kind)}: $erro")
     }
 
     /** Nenhuma falha de publicidade sai daqui. */
@@ -274,7 +433,8 @@ object AureaAdsManager {
     internal fun resetForTest() {
         backend = null; frequency = null; ids = AdsIds("", "")
         iniciado = false; podePedir = false
-        appOpenPronto = 0L; interstitialPronto = 0L
+        appOpenPronto = 0L; interstitialPronto = 0L; rewardedPronto = 0L
+        carregandoRewarded = false; esperandoRewarded.clear()
         carregandoAppOpen = false; carregandoInterstitial = false
         telaCheiaAberta = false; aberturaFriaResolvida = false; foiParaFundoEm = 0L
         hostAtual = null

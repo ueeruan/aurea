@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.aurea.aurea.ads.AureaAdsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job as CoroutineJob
@@ -67,9 +68,66 @@ class AureaAiState(
     var erro by mutableStateOf("")
         private set
 
-    /** `true` enquanto o anúncio está na tela, antes da geração começar. */
+    /** `true` enquanto o Rewarded está na tela. */
     var anunciando by mutableStateOf(false)
         private set
+
+    /**
+     * A geração DESTA tela (a última pedida): anúncio, H3 e liberação juntos.
+     * Vive no estado (ViewModel), não na tela: sair e voltar, girar ou ir para
+     * o fundo não perde nada.
+     */
+    var sessao by mutableStateOf<AiGenerationSession?>(null)
+        private set
+    private var sessaoAtualId: String? = null
+
+    /** Uma geração em andamento (preparando anúncio, anúncio na tela ou H3 gerando). */
+    val sessaoOcupada: Boolean
+        get() = sessao?.status.let {
+            it == SessaoStatus.Preparando || it == SessaoStatus.AnuncioNaTela || it == SessaoStatus.Gerando
+        }
+
+    /** O Rewarded da IA pelo AureaAdsManager (a tela nunca fala com o SDK). */
+    private val anuncios = object : RewardedAds {
+        override fun pronto(): Boolean = AureaAdsManager.rewardedReady()
+        override fun carregar(aoCarregar: () -> Unit, aoFalhar: (String) -> Unit) =
+            AureaAdsManager.preloadRewarded(aoCarregar, aoFalhar)
+        override fun mostrar(aoAbrir: () -> Unit, aoRecompensa: () -> Unit, aoFechar: () -> Unit,
+                             aoFalhar: (String) -> Unit): Boolean {
+            // O contrato do RewardedAds: `false` = nenhum callback. O manager avisa a
+            // falha antes de devolver `false`; essa primeira não é repassada.
+            var devolveu = false
+            val mostrou = AureaAdsManager.showRewarded(
+                aoAbrir = { anunciando = true; aoAbrir() },
+                aoRecompensa = aoRecompensa,
+                aoFechar = { _ ->
+                    anunciando = false
+                    aoFechar()
+                    // O próximo já fica a caminho (para "Assistir e liberar" ou a próxima geração).
+                    AureaAdsManager.preloadRewarded()
+                },
+                aoFalhar = { e -> anunciando = false; if (devolveu) aoFalhar(e) },
+            )
+            devolveu = true
+            return mostrou
+        }
+    }
+
+    private var fimDaGeracao: ((File?, String?) -> Unit)? = null
+
+    private val recompensa = AiRewardFlow(
+        ads = anuncios,
+        iniciarGeracao = { s, aoPromptId, aoTerminar ->
+            fimDaGeracao = aoTerminar
+            gerar(s.pedido, aoPromptId) { arquivo, e -> fimDaGeracao = null; aoTerminar(arquivo, e) }
+        },
+        aoMudar = { s ->
+            if (s.generationId == sessaoAtualId) {
+                sessao = s
+                if (s.status == SessaoStatus.Liberado) liberar(s)
+            }
+        },
+    )
 
     /** Último arquivo baixado, pronto para reproduzir, salvar e ir para a timeline. */
     var ultimoArquivo by mutableStateOf<File?>(null)
@@ -173,25 +231,54 @@ class AureaAiState(
 
     // -- gerar -------------------------------------------------------------
 
-    /** O caminho do botão: anúncio antes, depois a geração. */
-    fun gerarComAnuncio(pedido: Pedido, gate: GateDeAnuncio = GateDeAnuncio.atual) {
-        if (job?.rodando == true) return
-        if (!gate.disponivel) { gerar(pedido); return }
+    /** Ao entrar na tela AI Video: o Rewarded já começa a carregar. */
+    fun prepararAnuncio() = AureaAdsManager.preloadRewarded()
+
+    /**
+     * O botão "Gerar": Rewarded primeiro; o H3 começa quando o anúncio aparece
+     * e roda em paralelo; o vídeo só é entregue com a recompensa (AiRewardFlow).
+     */
+    fun gerarComRecompensa(pedido: Pedido) {
+        if (comfy == null) { erro = "Sem conexão com o servidor"; return }
+        if (job?.rodando == true || sessaoOcupada) return
         erro = ""
-        anunciando = true
-        gate.exibir(anunciosPara(pedido.duracao)) { assistido ->
-            anunciando = false
-            if (assistido) gerar(pedido) else erro = "O anúncio não foi assistido até o fim"
-        }
+        mensagem = ""
+        ultimoArquivo = null
+        val id = java.util.UUID.randomUUID().toString()
+        sessaoAtualId = id
+        recompensa.gerar(pedido, id)
+    }
+
+    /** "Assistir e liberar vídeo": outro anúncio para a MESMA geração — não gera de novo. */
+    fun liberarComAnuncio() {
+        val id = sessaoAtualId ?: return
+        recompensa.liberarComAnuncio(id)
+    }
+
+    /** "Tentar de novo" quando não houve anúncio (a geração não tinha começado). */
+    fun tentarGerarDeNovo() {
+        val id = sessaoAtualId ?: return
+        recompensa.tentarDeNovo(id)
+    }
+
+    /** Recompensa + vídeo: agora sim o resultado aparece para o usuário. */
+    private fun liberar(s: AiGenerationSession) {
+        val arquivo = s.result ?: return
+        job?.let { j -> if (j.status == "completed") historico = listOf(j) + historico.filter { it.id != j.id } }
+        ultimoArquivo = arquivo
+        val (w, h) = H3Workflow.dimensoes(s.pedido.aspecto, s.pedido.resolucao)
+        ultimoTitulo = "AI ${w}×$h"
+        aoMudar()
     }
 
     /**
-     * Enviando → Na fila → Gerando → Finalizando → Concluído. Cada estado é o
-     * que o ComfyUI disse (fila e histórico); nada de progresso inventado.
+     * A geração REAL no H3 (não mexer): Enviando → Na fila → Gerando →
+     * Finalizando → Concluído, cada estado como o ComfyUI disse. O vídeo baixado
+     * NÃO é entregue aqui: vai para `aoTerminar`, e quem decide a entrega é a
+     * recompensa. Roda no escopo do estado: o anúncio na frente não pausa nada.
      */
-    fun gerar(pedido: Pedido) {
-        val c = comfy ?: run { erro = "Sem conexão com o servidor"; return }
-        if (job?.rodando == true) return
+    private fun gerar(pedido: Pedido, aoPromptId: (String) -> Unit, aoTerminar: (File?, String?) -> Unit) {
+        val c = comfy ?: run { erro = "Sem conexão com o servidor"; aoTerminar(null, erro); return }
 
         erro = ""
         mensagem = ""
@@ -213,6 +300,7 @@ class AureaAiState(
                 }
                 val promptId = withContext(Dispatchers.IO) { c.enviarPrompt(workflow) }
                 Log.i(TAG, "[AureaAI] POST /prompt → prompt_id $promptId (${w}x$h, ${H3Workflow.quadros(pedido.duracao)} quadros)")
+                aoPromptId(promptId)
                 job = etapa("queued", "Na fila").copy(id = promptId)
 
                 // Polling do /history (não depende do WebSocket do frontend).
@@ -258,23 +346,23 @@ class AureaAiState(
                         baixando = false
                     }
                     Log.i(TAG, "[AureaAI] /view → ${arquivo.length()} bytes")
-                    ultimoArquivo = arquivo
-                    ultimoTitulo = "AI ${w}×$h"
                     val pronto = etapa("completed", "Concluído", res = res).copy(id = promptId)
                     job = pronto
-                    historico = listOf(pronto) + historico.filter { it.id != promptId }
                     estado = AureaAiEstado.Connected
-                    aoMudar()
+                    aoTerminar(arquivo, null)
                     return@launch
                 }
             } catch (e: ComfyErro) {
                 Log.w(TAG, "[AureaAI] erro: ${e.paraTela()}")
                 falhar(e.paraTela())
+                aoTerminar(null, e.paraTela())
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "[AureaAI] erro: $e")
-                falhar(e.message ?: e.javaClass.simpleName)
+                val texto = e.message ?: e.javaClass.simpleName
+                falhar(texto)
+                aoTerminar(null, texto)
             }
         }
     }
@@ -288,6 +376,8 @@ class AureaAiState(
             job = job?.copy(status = "cancelled", etapa = "Cancelado")
             estado = AureaAiEstado.Connected
             mensagem = "Cancelado"
+            // A sessão termina sem vídeo (nada a liberar).
+            fimDaGeracao?.let { fimDaGeracao = null; it(null, "Cancelado") }
         }
     }
 

@@ -12,6 +12,8 @@ import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.appopen.AppOpenAd
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
+import com.google.android.gms.ads.rewarded.RewardedAd
+import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import com.google.android.ump.ConsentInformation
 import com.google.android.ump.ConsentRequestParameters
 import com.google.android.ump.UserMessagingPlatform
@@ -35,6 +37,7 @@ class GoogleAdsBackend(context: Context) : AdsBackend {
     private val main = Handler(Looper.getMainLooper())
     private var appOpen: AppOpenAd? = null
     private var interstitial: InterstitialAd? = null
+    private var rewarded: RewardedAd? = null
 
     override fun initialize(host: Any, aoTerminar: (podePedir: Boolean) -> Unit) {
         val activity = host as? Activity ?: run { aoTerminar(false); return }
@@ -81,7 +84,15 @@ class GoogleAdsBackend(context: Context) : AdsBackend {
         })
     }
 
-    override fun show(kind: AdKind, host: Any, aoAbrir: () -> Unit, aoFechar: () -> Unit, aoFalhar: (String) -> Unit): Boolean {
+    override fun loadRewarded(unitId: String, aoCarregar: () -> Unit, aoFalhar: (String) -> Unit) {
+        RewardedAd.load(app, unitId, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
+            override fun onAdLoaded(ad: RewardedAd) { rewarded = ad; aoCarregar() }
+            override fun onAdFailedToLoad(e: LoadAdError) { rewarded = null; aoFalhar("load ${e.code}: ${e.message}") }
+        })
+    }
+
+    override fun show(kind: AdKind, host: Any, aoAbrir: () -> Unit, aoFechar: () -> Unit, aoFalhar: (String) -> Unit,
+                      aoRecompensar: () -> Unit): Boolean {
         val activity = host as? Activity ?: return false
         if (activity.isFinishing || activity.isDestroyed) return false
         val cb = object : FullScreenContentCallback() {
@@ -92,6 +103,12 @@ class GoogleAdsBackend(context: Context) : AdsBackend {
         return when (kind) {
             AdKind.AppOpen -> appOpen?.let { it.fullScreenContentCallback = cb; it.show(activity); true } ?: false
             AdKind.ExportInterstitial -> interstitial?.let { it.fullScreenContentCallback = cb; it.show(activity); true } ?: false
+            // A recompensa vem SÓ do OnUserEarnedRewardListener (onUserEarnedReward) do SDK.
+            AdKind.AiRewarded -> rewarded?.let { ad ->
+                ad.fullScreenContentCallback = cb
+                ad.show(activity) { _ -> aoRecompensar() }
+                true
+            } ?: false
         }
     }
 
@@ -99,6 +116,7 @@ class GoogleAdsBackend(context: Context) : AdsBackend {
         when (kind) {
             AdKind.AppOpen -> appOpen = null
             AdKind.ExportInterstitial -> interstitial = null
+            AdKind.AiRewarded -> rewarded = null
         }
     }
 

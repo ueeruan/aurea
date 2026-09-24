@@ -18,7 +18,7 @@ workers_dev = true
 # O documento é um punhado de chaves: um namespace simples resolve.
 [[kv_namespaces]]
 binding = "AUREA_KV"
-id = "COLE_AQUI_O_ID_DO_NAMESPACE"
+id = "df8d88aef8db4746935268a0d4371233"
 
 # O segredo NÃO fica neste arquivo: vai por `wrangler secret put`.
 # O app não conhece segredo nenhum — ele só LÊ o documento.

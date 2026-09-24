@@ -39,6 +39,10 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
+# A Cloudflare do Worker responde 403 (erro 1010) para o User-Agent
+# padrao do urllib. Um UA proprio resolve — e e o mesmo que o app manda.
+UA = "Aurea-Discovery/1.0 (+https://aurea.app)"
+
 WORKER = "https://aurea-ai-discovery.aureaapp.workers.dev"
 CAMINHO_PUBLICAR = "/publicar"
 
@@ -70,7 +74,8 @@ def esperar_system_stats(endpoint: str) -> bool:
     url = endpoint.rstrip("/") + "/system_stats"
     for i in range(TENTATIVAS_SAUDE):
         try:
-            with urllib.request.urlopen(url, timeout=20) as r:
+            pedido = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(pedido, timeout=20) as r:
                 if r.status == 200:
                     corpo = json.loads(r.read().decode("utf-8", "replace"))
                     if isinstance(corpo, dict) and "system" in corpo:
@@ -116,7 +121,8 @@ def publicar(endpoint: str, *, gpu: str = "", modelo: str = "MiniMax-H3",
 
     pedido = urllib.request.Request(
         WORKER + CAMINHO_PUBLICAR, data=corpo, method="POST",
-        headers={"content-type": "application/json", "authorization": f"Bearer {segredo}"},
+        headers={"content-type": "application/json", "user-agent": UA,
+                 "authorization": f"Bearer {segredo}"},
     )
     try:
         with urllib.request.urlopen(pedido, timeout=30) as r:
@@ -138,7 +144,8 @@ def marcar_offline(segredo: str | None = None) -> bool:
     corpo = json.dumps({"endpoint": "", "online": False}).encode("utf-8")
     pedido = urllib.request.Request(
         WORKER + CAMINHO_PUBLICAR, data=corpo, method="POST",
-        headers={"content-type": "application/json", "authorization": f"Bearer {segredo}"},
+        headers={"content-type": "application/json", "user-agent": UA,
+                 "authorization": f"Bearer {segredo}"},
     )
     try:
         with urllib.request.urlopen(pedido, timeout=20) as r:

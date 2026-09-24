@@ -165,6 +165,8 @@ class ComfyCliente(val base: String) {
             conn.readTimeout = timeoutMs
             conn.useCaches = false
             conn.setRequestProperty("Accept", "*/*")
+            // A Cloudflare do Worker recusa o UA padrao com 403 (1010).
+            conn.setRequestProperty("User-Agent", "Aurea/2.0 (Android)")
             if (corpo != null) {
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", tipoConteudo)

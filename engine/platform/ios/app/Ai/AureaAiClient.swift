@@ -16,6 +16,10 @@ import Foundation
 /// novo: quem conta o endereço novo é o discovery, não o binário.
 enum AureaAiConfig {
     static let discoveryURL = "https://aurea-ai-discovery.aureaapp.workers.dev/server"
+
+    /// O mesmo User-Agent em tudo que fala com o Worker. Sem ele a Cloudflare
+    /// responde 403 (erro 1010) — o UA padrao e tratado como bot.
+    static let agent = "Aurea/2.0 (iOS)"
     /// Workflow do MiniMax H3 no formato de API do ComfyUI (cópia de android/.../assets/ai/).
     static let workflowResource = "minimax_h3_api"
 }
@@ -247,6 +251,8 @@ final class ComfyClient {
         var r = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         r.httpMethod = method
         r.setValue("*/*", forHTTPHeaderField: "Accept")
+        // A Cloudflare do Worker recusa o UA padrao com 403 (1010).
+        r.setValue(AureaAiConfig.agent, forHTTPHeaderField: "User-Agent")
         if let body {
             r.httpBody = body
             r.setValue(contentType, forHTTPHeaderField: "Content-Type")
@@ -332,6 +338,7 @@ final class ComfyClient {
         var r = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         r.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        r.setValue(AureaAiConfig.agent, forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: r) else { return (0, nil) }
         let http = (response as? HTTPURLResponse)?.statusCode ?? 0
         return (http, (200...299).contains(http) && !data.isEmpty ? AiDiscovery.parse(data) : nil)

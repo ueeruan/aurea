@@ -184,6 +184,8 @@ class AureaAiCliente(
                 conn.useCaches = false
                 conn.setRequestProperty("Accept", "application/json")
                 conn.setRequestProperty("Cache-Control", "no-cache")
+                // Sem UA proprio a Cloudflare do Worker devolve 403 (1010).
+                conn.setRequestProperty("User-Agent", AGENTE)
                 val http = conn.responseCode
                 val texto = if (http in 200..299) conn.inputStream.use { String(it.readBytes(), Charsets.UTF_8) } else ""
                 LeituraDiscovery(http, if (texto.isEmpty()) null else Discovery.ler(texto))
@@ -193,6 +195,9 @@ class AureaAiCliente(
                 conn.disconnect()
             }
         }
+
+        /** O mesmo User-Agent em tudo que fala com o Worker. */
+        const val AGENTE = "Aurea/2.0 (Android)"
 
         /** `GET {endpoint}/system_stats`: o HTTP da resposta (0 = sem resposta). */
         fun saudeDoEndpoint(endpoint: String): Int {
@@ -206,6 +211,7 @@ class AureaAiCliente(
                 conn.readTimeout = 10_000
                 conn.useCaches = false
                 conn.setRequestProperty("Accept", "application/json")
+                conn.setRequestProperty("User-Agent", AGENTE)
                 val http = conn.responseCode
                 runCatching { (if (http in 200..299) conn.inputStream else conn.errorStream)?.use { it.readBytes() } }
                 http

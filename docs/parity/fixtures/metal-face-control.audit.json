@@ -1,0 +1,71 @@
+{
+  "sha256": "04c552885fd1e0624ca58d27009c76088fe062e962a2e8a5b5dc3d134ebb7d47",
+  "bytes": 2537,
+  "source": "metal-face-control.gltf",
+  "description": "fixture de paridade",
+  "doubleSided": true,
+  "embeddedBufferBytes": 84,
+  "expected": "Both red left and green right visible",
+  "materials": [
+    "unlit pure red front left",
+    "unlit pure green back right"
+  ],
+  "meshes": 1,
+  "origin": "Synthetic numerical glTF created locally for the real Metal culling probe. Not extracted from user media.",
+  "primitives": 2,
+  "runtimeValidation": "Pending native iOS CI; this audit validates fixture structure only.",
+  "triangles": [
+    {
+      "material": 0,
+      "positions": [
+        [
+          -1.0,
+          -0.5,
+          0.0
+        ],
+        [
+          -0.20000000298023224,
+          -0.5,
+          0.0
+        ],
+        [
+          -0.6000000238418579,
+          0.5,
+          0.0
+        ]
+      ],
+      "indices": [
+        0,
+        1,
+        2
+      ],
+      "normalZSign": 1
+    },
+    {
+      "material": 1,
+      "positions": [
+        [
+          0.20000000298023224,
+          -0.5,
+          0.0
+        ],
+        [
+          1.0,
+          -0.5,
+          0.0
+        ],
+        [
+          0.6000000238418579,
+          0.5,
+          0.0
+        ]
+      ],
+      "indices": [
+        0,
+        2,
+        1
+      ],
+      "normalZSign": -1
+    }
+  ]
+}

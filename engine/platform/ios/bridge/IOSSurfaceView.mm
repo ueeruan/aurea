@@ -168,9 +168,9 @@
 - (void)startDisplayLink {
     if (_link) return;
     if (self.isPaused) return;
-    // `displayLinkWithTarget:` (iOS 15+) já nasce ligado à tela certa e é
-    // invalidado junto com a view.
-    _link = [self displayLinkWithTarget:self selector:@selector(onTick:)];
+    // O display link é criado pela classe CADisplayLink e invalidado
+    // explicitamente em stopDisplayLink quando a view sai da tela.
+    _link = [CADisplayLink displayLinkWithTarget:self selector:@selector(onTick:)];
     // `common` e não `default`: durante um arrasto o runloop entra em
     // tracking e um link no modo default ficaria parado — o preview congelaria
     // justamente enquanto a pessoa mexe.

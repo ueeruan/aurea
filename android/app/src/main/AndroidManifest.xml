@@ -27,11 +27,11 @@
          declarada sem recurso que a use é promessa falsa na loja. -->
 
     <!-- O motor precisa de Vulkan. Sem `required`, o app instala em aparelhos
-         sem Vulkan 1.1 e o preview nunca sobe — melhor recusar na loja do que
+         sem Vulkan 1.0 e o preview nunca sobe — melhor recusar na loja do que
          instalar e não funcionar. -->
     <uses-feature
         android:name="android.hardware.vulkan.version"
-        android:version="0x401000"
+        android:version="0x400000"
         android:required="true"/>
 
     <application

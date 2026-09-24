@@ -9,7 +9,7 @@ import Foundation
 
 /// A ÚNICA configuração de endereço da Aurea AI (a MESMA do Android).
 enum AureaAiConfig {
-    static let baseURL = "https://alias-carriers-association-infants.trycloudflare.com"
+    static let baseURL = "https://calculators-here-reasons-rice.trycloudflare.com"
     static let discoveryURL = "https://aurea-ai-discovery.aureaapp.workers.dev/server"
     /// Workflow do MiniMax H3 no formato de API do ComfyUI (cópia de android/.../assets/ai/).
     static let workflowResource = "minimax_h3_api"

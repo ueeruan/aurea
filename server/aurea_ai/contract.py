@@ -261,6 +261,15 @@ class DiscoveryDoc(BaseModel):
     capabilities: list[str] = ["text_to_video", "image_to_video", "audio"]
     updatedAt: int = Field(default_factory=lambda: int(time.time()))
 
+    # Token de CLIENTE, publicado de proposito.
+    #
+    # O app nao pede nada digitado a ninguem: ele le o discovery e autentica
+    # com o que estiver aqui. Por isso este token e separado do administrativo
+    # — `AUREA_ADMIN_TOKEN` nunca aparece no documento, e este so da acesso a
+    # geracao. Como o documento e publico, trocar o token de cliente e trocar
+    # `AUREA_SERVER_TOKENS` no Colab: o app pega o novo na batida seguinte.
+    appToken: str = ""
+
     def valido(self, janela_s: int = 90) -> bool:
         if self.service != "aurea-h3" or self.version != 1:
             return False

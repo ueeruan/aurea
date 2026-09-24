@@ -1,0 +1,72 @@
+{
+  "captured": "2026-09-23",
+  "platform": "Android",
+  "avd": "am2test",
+  "os": "Android 14 / API 34",
+  "resolution": [
+    1080,
+    2400
+  ],
+  "package": "com.aurea.aurea",
+  "versionCode": 2103,
+  "versionName": "2.0.0-beta2",
+  "apk": "entrega/aurea-beta2-2103-arm64-v8a.apk",
+  "apkSHA256": "c5620f9e45c985fc4bacfde926373ccfa5c7a552454bcef40d0cd5b085afecc5",
+  "locale": "en (system); mixed labels are present in the actual APK",
+  "project": "Project 1; created in release installation for parity captures; square + Glow",
+  "iosComparison": "Run35916264387: 18 captured states and four native gestures passed; export crashed, 3D color and selection differ, particles blank at wrong playhead. These issues are being corrected; full parity not approved.",
+  "screenshots": {
+    "01-home.png": "5ab6c69be808a6e0511525e71eeb60865775f185cb5531243db1067845d1bd94",
+    "02-new-project.png": "78f0876b82b5e99b5fe6e3deb77fdc02907a1ac40145db81b35d52abb7f4e39b",
+    "03-editor-empty.png": "b59b0b9f855962baee2dab43f7d15cab02ad64651d3a086cc4fc56bf93bdb774",
+    "04-add-layer.png": "dd4a9c8fe65d35c0e704353f37b565f9ab2268baf06c558b3d4f421033311944",
+    "05-layer-dock.png": "8873a6b786829864230380327e7893bbdcb75dd1c20770d2f628b2ab0646e067",
+    "06-transform.png": "2c435e99df92cb4f66a91cbabe516d7654321eec8f318e049932fc18f5812dca",
+    "07-effects.png": "52ea6ad71d7727a0647a79756f98a37e886033a35ef82349618e28ab378dc4ec",
+    "08-effect-browser.png": "ae2954d4c57a6a2152225615c6e12aea8214f8100776efcb28e0fda94da83189",
+    "09-glow-detail.png": "020c8045054158d0b8f6ee707364318bace0ad35acd3c9874b05fbff643ab0d3",
+    "10-glow-applied.png": "ca37e5311c7dcf5f33f3071917778c194ac6df1f9ce5855c5368c2eb7847406f",
+    "11-export.png": "2ccd82156bd3d505af757e8e8c34aac22a020dd7d686c88efead74bdbf2c1664",
+    "12-project-settings.png": "b77ee1578788d2e728e2db65e09c7a5dec37145b8debc21b3a5db20bcd7b5ee3",
+    "13-text3d-panel.png": "d6b751efde0c778173d9461a48c264ca23633b9a036a94c7078e139122924c74",
+    "14-text3d-fonts.png": "3dd2d5a391b73ffe65cecd848c5dd54be7a716a41f892675fea611bebc8b1aff",
+    "15-text3d-materials.png": "bdf7290995d3019722ecd73200f955689ac90fbbdf64bf4ec67946c11b02cea7",
+    "16-presets.png": "2378d1400fb6d6cecb2a9863779a0d451ac5866e9fa6f31c718b1c6791d8bf8f",
+    "17-shape-edit.png": "647f5107e58943aa75b7b46be6f6f524db0abcb9cdc1df2951f8128213f847b6",
+    "18-appearance.png": "0548501951da5b7103be36992bc9d5852fd3ba63f03cd7e8b4122ee837304f13",
+    "19-mask.png": "ac9875331847ab2ff161d7097dc4b7e9be5218388362190ffeace20d48497bf4",
+    "20-ios-roundtrip.png": "a87582998289736826b6b9b045c4a142c253df12ee0862adf243568bc71fca94",
+    "21-ios-roundtrip-rotation.png": "7bb78e27645e1dced1e57e9ca0153051be9d500c6bf5feaae614f05ef7e9473f",
+    "22-complex-text3d.png": "fc1d2e1dc208b257aa56500d1a1d4204dd91340a1e7140ce4a1c7055f46286b0",
+    "23-complex-particular.png": "554ef21fa1c6aed6b3086f560281d2a78095a7fc383d922b790cbbb710ecb0e9",
+    "24-complex-preview-playing.png": "614e7086257aa22d0d45d8f649d4b17091be2255c4d5045b5b0879bb40f78a34",
+    "25-ios-roundtrip-fixed-rotation.png": "87ff652d507cd879b56aa7aa4ae8aa053992905581059cfbc2707213220a411d",
+    "26-ios-roundtrip-fixed-opacity.png": "35b9da29da74fc6c6199141e0e50602de83da545d4a5c92d16abe417f6f28871",
+    "27-precomp-layer-dock.png": "dcb1423b6989c4e61663b2a32fb78858c3224753f8161b922d5b9641778ec96c",
+    "28-precomp-inside.png": "4bcac47a9e734e8cce530e540c7b724343e8c0e536477a194c38770dad79b093",
+    "29-hdri-project-before.png": "14aea740edc31d873f825da5c11d5edd43ca0b4eea68a5bdfc8bc6d9606a1ddc",
+    "30-hdri-imported.png": "9c0d92da99084b339774c102bc16254a0074931d8ef95d8062bed378bde3dee0"
+  },
+  "fixture": {
+    "path": "docs/parity/fixtures/android-2103-square-glow.aurea",
+    "sha256": "d036e049b90a340b0d3ab3a3a6d3b64968865b66fa4f6e58a1ad345124ef0393"
+  },
+  "densityDpi": 420,
+  "complexFixture": {
+    "path": "docs/parity/fixtures/android-2103-complex.aurea",
+    "sha256": "b71c99a9909722bbf0f758d8a0d788f882409e81de10ee8fab37d1c64daed876",
+    "externalMediaAssets": 0
+  },
+  "precompFixture": {
+    "path": "docs/parity/fixtures/android-2103-precomp.aurea",
+    "sha256": "00ff61677d518b912e334adaa027e2bf966c4a918ff3ce69a9eec3a535256971",
+    "audit": "docs/parity/fixtures/android-2103-precomp.audit.json",
+    "externalMediaAssets": 0
+  },
+  "hdriFixture": {
+    "path": "docs/parity/fixtures/android-2103-hdri.aurea",
+    "sha256": "5308691bb27a838eeb1d0507ef67b5225b89882caf46bfc4a00f9ecf1e32d60f",
+    "audit": "docs/parity/fixtures/android-2103-hdri.audit.json",
+    "externalMediaAssets": 1
+  }
+}

@@ -63,8 +63,7 @@ public:
     void set_memory(MemoryManager* memory) noexcept;
     [[nodiscard]] VideoSourceFactory* factory() const noexcept { return factory_; }
 
-    /// Fonte da layer. Abre na primeira vez (a abertura é síncrona e custa
-    /// alguns ms: acontece no primeiro frame em que a layer aparece).
+    /// Fonte da layer. Abre fora da thread de render; nula enquanto abre.
     [[nodiscard]] VideoSource* source_for(LayerId layer, AssetId assetId, const Asset& asset,
                                           u64 frameNumber);
 
@@ -96,10 +95,17 @@ public:
     [[nodiscard]] Stats stats() const;
 
 private:
+    struct Opening {
+        std::unique_ptr<VideoDecoderBackend> decoder;
+        std::atomic<bool> ready{false};
+        std::thread worker;
+        ~Opening() { if (worker.joinable()) worker.join(); }
+    };
     struct Entry {
         LayerId layer{};
         AssetId asset{};
         std::unique_ptr<VideoSource> source;
+        std::unique_ptr<Opening> opening;
         u64 lastUsedFrame = 0;
         bool failed = false;
     };

@@ -145,6 +145,9 @@ class AureaEngine private constructor() {
         codecs: IntArray? = null,
     ): Boolean = nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug, probe, codecs)
 
+    fun startupError(): String = nativeStartupError(nativeHandle)
+    private external fun nativeStartupError(handle: Long): String
+
     /**
      * O que o motor decidiu para ESTE aparelho, já em números.
      *
@@ -306,6 +309,17 @@ class AureaEngine private constructor() {
     /** Composição atual: devolve o id (0 = nenhuma); `out` = [w, h, fps, duração, r, g, b, a]. */
     fun queryComposition(out: DoubleArray): Long = nativeQueryComposition(nativeHandle, out)
 
+    /**
+     * Medida do último quadro renderizado FORA da tela — é o que a captura de
+     * quadro usa. Fora do editor não há prévia viva e o `PerfPOD` fica zerado,
+     * mas a captura renderiza de verdade: este é o número que sobra, e é ele que
+     * diz se o tempo foi para a CPU, para o decoder ou para a GPU.
+     */
+    fun readOffscreenMeasure(out: DoubleArray): Boolean = nativeReadOffscreenMeasure(nativeHandle, out)
+
+    /// Liga as timestamp queries do render fora da tela (só a medição usa).
+    fun setOffscreenTimers(on: Boolean) = nativeOffscreenTimers(nativeHandle, on)
+
     /** RGBA8 da miniatura em `out`; 0 = ainda na fila (ver `thumbnailGeneration`). */
     fun queryThumbnail(layer: Long, frame: Int, height: Int, out: ByteBuffer, outWidth: IntArray): Int =
         nativeQueryThumbnail(nativeHandle, layer, frame, height, out, outWidth)
@@ -423,9 +437,10 @@ class AureaEngine private constructor() {
     fun addParticles(preset: Int): Long = nativeAddParticles(nativeHandle, preset)
 
     // Texto 3D.
-    fun addText3d(content: String, fields: FloatArray): Long = nativeAddText3d(nativeHandle, content, fields)
-    fun setText3d(layer: Long, content: String, fields: FloatArray): Boolean =
-        nativeSetText3d(nativeHandle, layer, content, fields)
+    fun addText3d(content: String, fields: FloatArray, fontPath: String = ""): Long = nativeAddText3d(nativeHandle, content, fields, fontPath)
+    fun setText3d(layer: Long, content: String, fields: FloatArray, fontPath: String = ""): Boolean =
+        nativeSetText3d(nativeHandle, layer, content, fields, fontPath)
+    fun queryText3dFont(layer: Long): String = nativeQueryText3dFont(nativeHandle, layer) ?: ""
     fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
 
     /** Sombras do objeto 3D: projeta / recebe. */
@@ -653,6 +668,8 @@ class AureaEngine private constructor() {
     ): Int
     private external fun nativeQueryLayerDetail(handle: Long, layer: Long, out: ByteBuffer): Boolean
     private external fun nativeQueryComposition(handle: Long, out: DoubleArray): Long
+    private external fun nativeReadOffscreenMeasure(handle: Long, out: DoubleArray): Boolean
+    private external fun nativeOffscreenTimers(handle: Long, on: Boolean): Boolean
     private external fun nativeQueryThumbnail(
         handle: Long, layer: Long, frame: Int, height: Int, out: ByteBuffer, outWidth: IntArray,
     ): Int
@@ -720,8 +737,9 @@ class AureaEngine private constructor() {
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
-    private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray): Long
-    private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray): Boolean
+    private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
+    private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray, fontPath: String): Boolean
+    private external fun nativeQueryText3dFont(handle: Long, layer: Long): String?
     private external fun nativeQueryText3d(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeSetModelShadows(handle: Long, layer: Long, cast: Boolean, receive: Boolean): Boolean
     private external fun nativeQueryModelShadows(handle: Long, layer: Long, out: FloatArray): Boolean

@@ -27,8 +27,10 @@
 #import "AureaBridge.h"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -41,6 +43,7 @@ using aurea::LayerId;
 using aurea::f32;
 using aurea::f64;
 using aurea::i64;
+using aurea::u8;
 using aurea::u32;
 using aurea::u64;
 using aurea::usize;
@@ -224,6 +227,7 @@ NSDictionary<NSString*, id>* keyframe_row_dict(const aurea::bridge::KeyframeRow&
     return @{
         AureaKeyframeProperty:      @(k.property),
         AureaKeyframeEffectIndex:   @(k.effectIndex),
+        @"paramIndex":             @(k.paramIndex),
         AureaKeyframeTime:          @(k.time),
         AureaKeyframeValue:         @(k.value),
         AureaKeyframeInterpolation: @(k.interpolation),
@@ -258,6 +262,7 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     float value[4]{p.value[0], p.value[1], p.value[2], p.value[3]};
     float def[4]{p.defaultValue[0], p.defaultValue[1], p.defaultValue[2], p.defaultValue[3]};
     return @{
+        @"flags":             @(p.flags),
         AureaParamIndex:      @(p.index),
         AureaParamType:       @(p.type),
         AureaParamLabel:      slice(blob, p.labelOffset, p.labelLength),
@@ -281,6 +286,9 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     NSString* _cacheDirectory;
     NSString* _documentsDirectory;
     NSString* _lastImportError;
+#if DEBUG
+    NSDictionary<NSString*, id>* _lastCaptureDiagnostics;
+#endif
 }
 
 - (instancetype)initWithCacheDirectory:(NSString*)cacheDirectory
@@ -447,6 +455,76 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     aurea::bridge::TelemetryPOD t;
     e->fill_telemetry(t);
     return @{
+        @"decoder": to_ns(std::string(p.decoder)), @"gpuName": to_ns(std::string(p.gpuName)),
+        @"gpuAllocations": @(p.gpuAllocations),
+        @"gpuReservedBytes": @(p.gpuReservedBytes),
+        @"scene3dBytes": @(p.scene3dBytes),
+        @"memoryBudgetMB": @(p.memoryBudgetMB),
+        @"heavyScale": @(p.heavyScale),
+        @"audioOutputOpen": @(p.audioOutputOpen),
+        @"audioMissingBlocks": @(p.audioMissingBlocks),
+        @"audioUnderruns": @(p.audioUnderruns),
+        @"audioOutputMs": @(p.audioOutputMs),
+        @"audioQueuedMs": @(p.audioQueuedMs),
+        @"maskCacheMisses": @(p.maskCacheMisses),
+        @"maskCacheHits": @(p.maskCacheHits),
+        @"flowCacheMisses": @(p.flowCacheMisses),
+        @"flowCacheHits": @(p.flowCacheHits),
+        @"activeEffects": @(p.activeEffects),
+        @"particles": @(p.particles),
+        @"culled3D": @(p.culled3D),
+        @"triangles3D": @(p.triangles3D),
+        @"draws3D": @(p.draws3D),
+        @"drawCalls": @(p.drawCalls),
+        @"cpuRecordMs": @(p.cpuRecordMs),
+        @"cpuPrepareMs": @(p.cpuPrepareMs),
+        @"pacingSamples": @(p.pacingSamples),
+        @"pacingStdMs": @(p.pacingStdMs),
+        @"pacingP99Ms": @(p.pacingP99Ms),
+        @"pacingP95Ms": @(p.pacingP95Ms),
+        @"pacingP50Ms": @(p.pacingP50Ms),
+        @"thermal": @(p.thermal),
+        @"layersRendered": @(p.layersRendered),
+        @"staleFrames": @(p.staleFrames),
+        @"coalesced": @(p.coalesced),
+        @"seeks": @(p.seeks),
+        @"gpuTimers": @(p.gpuTimers),
+        @"hardwareDecoder": @(p.hardwareDecoder),
+        @"zeroCopy": @(p.zeroCopy),
+        @"pipelinesTotal": @(p.pipelinesTotal),
+        @"pipelineCompilesLive": @(p.pipelineCompilesLive),
+        @"aliasedTextures": @(p.aliasedTextures),
+        @"physicalTextures": @(p.physicalTextures),
+        @"transientTextures": @(p.transientTextures),
+        @"texturesCreated": @(p.texturesCreated),
+        @"passesCulled": @(p.passesCulled),
+        @"passesExecuted": @(p.passesExecuted),
+        @"transientBytes": @(p.transientBytes),
+        @"gpuMemoryBytes": @(p.gpuMemoryBytes),
+        @"ramBytes": @(p.ramBytes),
+        @"decodedCacheBytes": @(p.decodedCacheBytes),
+        @"decodedCacheFrames": @(p.decodedCacheFrames),
+        @"previewHeight": @(p.previewHeight),
+        @"previewWidth": @(p.previewWidth),
+        @"renderAuto": @(p.renderAuto),
+        @"renderScaleDen": @(p.renderScaleDen),
+        @"renderScaleNum": @(p.renderScaleNum),
+        @"droppedRecent": @(p.droppedRecent),
+        @"droppedFrames": @(p.droppedFrames),
+        @"frameBudgetMs": @(p.frameBudgetMs),
+        @"lastSeekMs": @(p.lastSeekMs),
+        @"acquireMs": @(p.acquireMs),
+        @"presentMs": @(p.presentMs),
+        @"outputMs": @(p.outputMs),
+        @"compositeMs": @(p.compositeMs),
+        @"glowMs": @(p.glowMs),
+        @"blurMs": @(p.blurMs),
+        @"effectsMs": @(p.effectsMs),
+        @"colorConvMs": @(p.colorConvMs),
+        @"decodeMs": @(p.decodeMs),
+        @"gpuFrameMs": @(p.gpuFrameMs),
+        @"cpuFrameMs": @(p.cpuFrameMs),
+        @"previewFps": @(p.previewFps),
         AureaPerfPreviewFps:     @(p.previewFps),
         AureaPerfCpuMs:          @(p.cpuFrameMs),
         AureaPerfGpuMs:          @(p.gpuFrameMs),
@@ -465,6 +543,30 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         AureaPerfGpuName:        to_ns(p.gpuName),
     };
 }
+
+#if DEBUG
+- (NSDictionary<NSString*, id>*)renderDiagnostics {
+    auto* e = self.engine;
+    if (!e) return @{ @"engineRunning": @NO, @"capture": _lastCaptureDiagnostics ?: @{} };
+    const aurea::EngineStatus status = e->read_status();
+    const aurea::EngineTelemetry telemetry = e->read_telemetry();
+    return @{
+        @"engineRunning": @(self.running), @"hasSurface": @(self.hasSurface),
+        @"state": @(static_cast<int32_t>(status.state)),
+        @"lastError": @(static_cast<int32_t>(status.lastError)),
+        @"lastErrorName": to_ns(std::string(aurea::to_string(status.lastError))),
+        @"lastErrorDetail": to_ns(status.lastErrorDetail),
+        @"frameIndex": @(telemetry.frame.frameIndex),
+        @"shaderCount": @(telemetry.shaderCount),
+        @"pipelineCount": @(telemetry.pipelineCount),
+        @"shaderFailures": @(telemetry.shaderFailures),
+        @"passesExecuted": @(telemetry.frame.passesExecuted),
+        @"drawCalls": @(telemetry.frame.drawCalls),
+        @"layersRendered": @(telemetry.frame.layersRendered),
+        @"capture": _lastCaptureDiagnostics ?: @{}, @"perf": [self perf]
+    };
+}
+#endif
 
 - (NSDictionary<NSString*, NSNumber*>*)deviceReport {
     auto* e = self.engine;
@@ -538,6 +640,7 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 }
 
 - (BOOL)saveProject:(NSString*)path {
+    [self flush];
     auto* e = self.engine;
     return e && e->save_project(to_std(path).c_str()).ok() ? YES : NO;
 }
@@ -631,8 +734,16 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 }
 
 - (void)seekToFrame:(int64_t)frame {
+    auto* e = self.engine;
+    u64 id = 0;
+    u32 width = 0, height = 0;
+    f64 fps = 0;
+    i64 duration = 0;
+    f32 background[4]{};
+    if (!e || !e->query_composition(id, width, height, fps, duration, background)) return;
     if (auto* c = _batch.add(CommandType::PlaybackSeek)) {
-        c->seek.time = aurea::TickNs{frame};
+        // The command contract uses nanoseconds; the native UI exposes frames.
+        c->seek.time = aurea::tick_at(aurea::FrameIndex{frame}, fps);
     }
     [self flush];
 }
@@ -650,8 +761,15 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 }
 
 - (void)scrubToFrame:(int64_t)frame {
+    auto* e = self.engine;
+    u64 id = 0;
+    u32 width = 0, height = 0;
+    f64 fps = 0;
+    i64 duration = 0;
+    f32 background[4]{};
+    if (!e || !e->query_composition(id, width, height, fps, duration, background)) return;
     if (auto* c = _batch.add(CommandType::PlaybackScrub)) {
-        c->seek.time = aurea::TickNs{frame};
+        c->seek.time = aurea::tick_at(aurea::FrameIndex{frame}, fps);
     }
     [self flush];
 }
@@ -1079,6 +1197,145 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 // =============================================================================
 // Texto / forma / 3D
 // =============================================================================
+namespace {
+NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font) {
+    return @{ @"family": [NSString stringWithUTF8String:font.family.c_str()] ?: @"",
+              @"style": [NSString stringWithUTF8String:font.style.c_str()] ?: @"",
+              @"weight": @(font.weight), @"italic": @(font.italic),
+              @"path": [NSString stringWithUTF8String:font.path.c_str()] ?: @"" };
+}
+}
+
+- (NSArray<NSDictionary<NSString*, id>*>*)availableFonts {
+    NSMutableArray* result = [NSMutableArray array];
+    if (auto* e = self.engine) for (const auto& font : e->list_fonts()) [result addObject:font_dictionary(font)];
+    return result;
+}
+
+- (NSDictionary<NSString*, id>*)importFontAtPath:(NSString*)path {
+    auto* e = self.engine;
+    if (!e) return nil;
+    auto result = e->import_font(path.UTF8String);
+    return result.ok() ? font_dictionary(*result) : nil;
+}
+
+- (NSDictionary<NSString*, id>*)text3DForLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return nil;
+    aurea::scene3d::Text3DSpec spec;
+    if (!e->query_text3d(static_cast<aurea::u64>(layerId), spec)) return nil;
+    return @{ @"content": [NSString stringWithUTF8String:spec.content.c_str()] ?: @"",
+              @"fontPath": [NSString stringWithUTF8String:spec.fontPath.c_str()] ?: @"",
+              @"depth": @(spec.depth), @"animation": @(spec.animation),
+              @"animationDuration": @(spec.animationDuration), @"animationStagger": @(spec.animationStagger),
+              @"animationAmount": @(spec.animationAmount), @"metallic": @(spec.metallic),
+              @"roughness": @(spec.roughness), @"alignment": @(spec.alignment), @"bevel": @(spec.bevel), @"bevelWidth": @(spec.bevelWidth), @"bevelDepth": @(spec.bevelDepth), @"bevelSegments": @(spec.bevelSegments), @"bevelRoundness": @(spec.bevelRoundness), @"regionMaterials": @(spec.regionMaterials), @"specular": @(spec.specular), @"emissiveStrength": @(spec.emissiveStrength), @"sideMetallic": @(spec.side.metallic), @"sideRoughness": @(spec.side.roughness), @"bevelMetallic": @(spec.bevelMat.metallic), @"bevelRoughness": @(spec.bevelMat.roughness), @"color": @[@(spec.color.x), @(spec.color.y), @(spec.color.z), @(spec.color.w)], @"sideColor": @[@(spec.side.color.x), @(spec.side.color.y), @(spec.side.color.z), @(spec.side.color.w)], @"bevelColor": @[@(spec.bevelMat.color.x), @(spec.bevelMat.color.y), @(spec.bevelMat.color.z), @(spec.bevelMat.color.w)], @"emissive": @[@(spec.emissive.x), @(spec.emissive.y), @(spec.emissive.z), @1] };
+}
+
+- (BOOL)setText3DForLayer:(long long)layerId property:(NSString*)property stringValue:(NSString*)stringValue numberValue:(float)numberValue {
+    auto* e = self.engine;
+    if (!e) return NO;
+    aurea::scene3d::Text3DSpec spec;
+    if (!e->query_text3d(static_cast<aurea::u64>(layerId), spec)) return NO;
+    if ([property isEqualToString:@"content"]) spec.content = stringValue.UTF8String ?: "";
+    else if ([property isEqualToString:@"fontPath"]) spec.fontPath = stringValue.UTF8String ?: "";
+    else if ([property isEqualToString:@"depth"]) spec.depth = numberValue;
+    else if ([property isEqualToString:@"animation"]) spec.animation = static_cast<aurea::u32>(numberValue);
+    else if ([property isEqualToString:@"animationDuration"]) spec.animationDuration = numberValue;
+    else if ([property isEqualToString:@"animationStagger"]) spec.animationStagger = numberValue;
+    else if ([property isEqualToString:@"animationAmount"]) spec.animationAmount = numberValue;
+    else if ([property isEqualToString:@"metallic"]) spec.metallic = numberValue;
+    else if ([property isEqualToString:@"roughness"]) spec.roughness = numberValue;
+    else if ([property isEqualToString:@"alignment"]) spec.alignment = static_cast<aurea::u32>(std::max(0.f, numberValue));
+    else if ([property isEqualToString:@"bevel"]) spec.bevel = numberValue > 0.5f;
+    else if ([property isEqualToString:@"bevelWidth"]) spec.bevelWidth = numberValue;
+    else if ([property isEqualToString:@"bevelDepth"]) spec.bevelDepth = numberValue;
+    else if ([property isEqualToString:@"bevelSegments"]) spec.bevelSegments = static_cast<aurea::u32>(std::max(0.f, numberValue));
+    else if ([property isEqualToString:@"bevelRoundness"]) spec.bevelRoundness = numberValue;
+    else if ([property isEqualToString:@"regionMaterials"]) spec.regionMaterials = numberValue > 0.5f;
+    else if ([property isEqualToString:@"specular"]) spec.specular = numberValue;
+    else if ([property isEqualToString:@"emissiveStrength"]) spec.emissiveStrength = numberValue;
+    else if ([property isEqualToString:@"sideMetallic"]) spec.side.metallic = numberValue;
+    else if ([property isEqualToString:@"sideRoughness"]) spec.side.roughness = numberValue;
+    else if ([property isEqualToString:@"bevelMetallic"]) spec.bevelMat.metallic = numberValue;
+    else if ([property isEqualToString:@"bevelRoughness"]) spec.bevelMat.roughness = numberValue;
+    else return NO;
+    return e->set_text3d(static_cast<aurea::u64>(layerId), spec).ok();
+}
+
+- (BOOL)setText3DColor:(long long)layerId region:(uint32_t)region values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine; aurea::scene3d::Text3DSpec spec;
+    if (!e || values.count != 4 || !e->query_text3d(layerId, spec)) return NO;
+    aurea::Vec4 color{values[0].floatValue, values[1].floatValue, values[2].floatValue, values[3].floatValue};
+    if (region == 0) spec.color = color;
+    else if (region == 1) spec.side.color = color;
+    else if (region == 2) spec.bevelMat.color = color;
+    else if (region == 3) spec.emissive = {color.x, color.y, color.z};
+    else return NO;
+    return e->set_text3d(layerId, spec).ok();
+}
+- (BOOL)applyText3DPreset:(long long)layerId preset:(uint32_t)preset {
+    auto* e = self.engine; aurea::scene3d::Text3DSpec spec;
+    if (!e || preset > 5 || !e->query_text3d(layerId, spec)) return NO;
+    // Mesmas seis receitas de Text3DPreset em EditorStore.kt.
+    spec.specular = 1; spec.emissive = {0,0,0}; spec.emissiveStrength = 1;
+    switch (preset) {
+        case 0: spec.bevel = true; spec.regionMaterials = false; spec.color = {.95f,.96f,.98f,1}; spec.metallic = 1; spec.roughness = .05f; break;
+        case 1: spec.bevel = true; spec.regionMaterials = false; spec.color = {1,.77f,.34f,1}; spec.metallic = 1; spec.roughness = .18f; break;
+        case 2: spec.color = {.78f,.79f,.8f,1}; spec.metallic = 1; spec.roughness = .45f; break;
+        case 3: spec.color = {.9f,.1f,.12f,1}; spec.metallic = 0; spec.roughness = .08f; break;
+        case 4: spec.color = {.85f,.85f,.86f,1}; spec.metallic = 0; spec.roughness = .92f; spec.specular = .15f; break;
+        case 5: spec.color = {.1f,1,.85f,1}; spec.metallic = 0; spec.roughness = .35f; spec.emissive = {.1f,1,.85f}; spec.emissiveStrength = 3.5f; break;
+    }
+    return e->set_text3d(layerId, spec).ok();
+}
+- (NSArray<NSNumber*>*)modelShadows:(long long)layerId {
+    auto* e = self.engine; float v[2]{}; if (!e || !e->query_model_shadows(layerId, v)) return @[]; return @[@(v[0]), @(v[1])];
+}
+- (BOOL)setModelShadows:(long long)layerId cast:(BOOL)cast receive:(BOOL)receive {
+    auto* e = self.engine; return e && e->set_model_shadows(layerId, cast, receive);
+}
+- (int64_t)removeGaps { auto* e = self.engine; return e ? e->remove_gaps() : 0; }
+- (BOOL)trimComposition:(int64_t)frame { auto* e = self.engine; return e && e->trim_composition(frame); }
+
+- (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    const auto result = e->detect_beats(static_cast<aurea::u64>(layerId), bpm);
+    return result.ok() ? static_cast<long long>(*result) : -static_cast<long long>(result.status().code());
+}
+
+- (NSArray<NSNumber*>*)motionBlurSettings {
+    auto* e = self.engine; bool on = false; float shutter = 180; if (!e || !e->query_motion_blur(on, shutter)) return @[]; return @[@(on), @(shutter)];
+}
+- (void)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter {
+    if (auto* e = self.engine) { (void)e->set_composition_motion_blur(enabled); (void)e->set_shutter_angle(shutter); }
+}
+
+- (NSDictionary<NSString*, id>*)textForLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return nil;
+    aurea::TextData t;
+    if (!e->query_text(static_cast<aurea::u64>(layerId), t)) return nil;
+    return @{
+        @"content": [NSString stringWithUTF8String:t.content.c_str()] ?: @"",
+        @"size": @(t.size),
+        @"fontFamily": [NSString stringWithUTF8String:t.fontFamily.c_str()] ?: @"",
+        @"fontWeight": @(t.fontWeight),
+        @"fontItalic": @(t.fontItalic),
+        @"alignment": @(t.alignment),
+        @"strokeWidth": @(t.strokeWidth),
+        @"color": @[@(t.color.x), @(t.color.y), @(t.color.z), @(t.color.w)],
+        @"strokeColor": @[@(t.strokeColor.x), @(t.strokeColor.y), @(t.strokeColor.z), @(t.strokeColor.w)],
+    };
+}
+
+- (BOOL)setTextFontForLayer:(long long)layerId family:(NSString*)family weight:(uint32_t)weight italic:(BOOL)italic path:(NSString*)path {
+    auto* e = self.engine;
+    return e && e->set_text_font(static_cast<aurea::u64>(layerId),
+                                 family.UTF8String ?: "", weight, italic != NO, path.UTF8String ?: "");
+}
+
 - (void)setText:(long long)layerId content:(NSString*)content {
     if (auto* c = _batch.add(CommandType::TextSetContent)) {
         c->layer_ref.layer = layer_of(layerId);
@@ -1219,8 +1476,9 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     auto* e = self.engine;
     if (!e) return @[];
     f32 v[5]{};
-    if (!e->query_object_environment(static_cast<aurea::u64>(layerId), v)) return @[];
-    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4])];
+    u64 asset = 0;
+    if (!e->query_object_environment(static_cast<aurea::u64>(layerId), v, &asset)) return @[];
+    return @[@(v[0]), @(asset), @(v[2]), @(v[3]), @(v[4])];
 }
 
 // =============================================================================
@@ -1343,6 +1601,12 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     return static_cast<long long>(*r);
 }
 
+- (long long)importObjectHDRI:(NSString*)path layer:(long long)layer {
+    auto* e = self.engine; if (!e) return -1;
+    const auto result = e->import_hdri(path.UTF8String, layer);
+    if (!result.ok()) { _lastImportError = to_ns(std::string(result.status().message())); return -1; }
+    _lastImportError = @""; return static_cast<long long>(*result);
+}
 - (long long)importHdri:(NSString*)path {
     auto* e = self.engine;
     if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
@@ -1494,6 +1758,10 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         AureaDetailKind:           @(d.kind),
         AureaDetailStartFrame:     @(d.startFrame),
         AureaDetailEndFrame:       @(d.endFrame),
+        @"offsetFrames":          @(d.offsetFrames),
+        @"sourceFrames":          @(d.sourceFrames),
+        @"audioFadeIn":           @(d.audioFadeIn),
+        @"audioFadeOut":          @(d.audioFadeOut),
         AureaDetailPosition:       floats_to_array(d.position, 3),
         AureaDetailScale:          floats_to_array(d.scale, 3),
         AureaDetailRotation:       floats_to_array(d.rotation, 3),
@@ -1514,6 +1782,7 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         AureaDetailAudioFlags:     @(d.audioFlags),
         AureaDetailSpeed:          @(d.speed),
         AureaDetailTimeFlags:      @(d.timeFlags),
+        @"shapeTypePoints":        @(d.shapeTypePoints),
         AureaDetailShape:          @[@(d.shapeTypePoints), @(d.shapeFill), @(d.shapeStroke),
                                      @(d.shapeStrokeWidth), @(d.shapeCorner), @(d.shapeInner)],
         AureaDetailCorners:        floats_to_array(d.corners, 8),
@@ -1562,6 +1831,7 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     NSMutableArray<NSDictionary<NSString*, id>*>* out = [NSMutableArray arrayWithCapacity:written];
     for (u32 i = 0; i < written; ++i) {
         [out addObject:@{
+            @"effectClass":        @(rows[i].effectClass),
             AureaEffectTypeId:     @(rows[i].typeId),
             AureaEffectName:       slice(blob, rows[i].nameOffset, rows[i].nameLength),
             AureaEffectCategory:   slice(blob, rows[i].categoryOffset, rows[i].categoryLength),
@@ -1720,6 +1990,454 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     }
     [self flush];
 }
+- (void)setText:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a {
+    if (auto* c = _batch.add(CommandType::TextSetStrokeColor)) {
+        c->text_color.layer = layer_of(layerId);
+        c->text_color.r = r; c->text_color.g = g; c->text_color.b = b; c->text_color.a = a;
+    }
+}
+
+- (void)setLayer:(long long)layerId audioSolo:(BOOL)solo {
+    if (auto* c = _batch.add(CommandType::AudioSetSolo)) {
+        c->audio_flag.layer = layer_of(layerId);
+        c->audio_flag.flag = solo != NO;
+    }
+    [self flush];
+}
+
+- (NSArray<NSNumber*>*)shapeParams:(long long)layerId {
+    auto* e = self.engine;
+    float values[aurea::Engine::kShapeParamFloats]{};
+    if (!e || !e->query_shape_params(layerId, values, aurea::Engine::kShapeParamFloats)) return @[];
+    return floats_to_array(values, aurea::Engine::kShapeParamFloats);
+}
+- (NSArray<NSNumber*>*)particleParams:(long long)layerId {
+    auto* e = self.engine;
+    constexpr auto count = static_cast<aurea::u32>(aurea::ParticleParam::Count);
+    float v[count]{};
+    if (!e || !e->query_particles(layerId, v)) return @[];
+    return floats_to_array(v, count);
+}
+- (BOOL)setParticle:(long long)layerId param:(uint32_t)param value:(float)value {
+    auto* e = self.engine; return e && e->set_particle_param(layerId, param, value);
+}
+- (BOOL)applyParticlePreset:(long long)layerId preset:(uint32_t)preset {
+    auto* e = self.engine; return e && e->apply_particle_preset(layerId, preset);
+}
+- (NSArray<NSNumber*>*)particleLinks:(long long)layerId {
+    auto* e = self.engine; aurea::u64 v[4]{};
+    if (!e || !e->query_particle_links(layerId, v)) return @[];
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3])];
+}
+- (BOOL)setParticleLink:(long long)layerId kind:(uint32_t)kind target:(long long)target {
+    auto* e = self.engine;
+    if (!e) return NO;
+    if (kind == 0) return e->set_particle_source(layerId, target);
+    if (kind == 1) return e->set_particle_texture(layerId, target);
+    if (kind == 2) return e->set_particle_mesh(layerId, target);
+    return NO;
+}
+- (NSArray<NSNumber*>*)particleCurve:(long long)layerId kind:(uint32_t)kind {
+    auto* e = self.engine; float v[32]{};
+    if (!e || kind > 2) return @[];
+    const auto count = e->query_particle_curve(layerId, kind, v, 32);
+    return floats_to_array(v, std::min<aurea::u32>(count, 8) * (kind == 0 ? 4 : 2));
+}
+- (BOOL)setParticleCurve:(long long)layerId kind:(uint32_t)kind values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine; float v[32]{};
+    const auto stride = kind == 0 ? 4 : 2;
+    if (!e || kind > 2 || values.count > 32 || values.count % stride != 0) return NO;
+    for (NSUInteger n = 0; n < values.count; ++n) v[n] = values[n].floatValue;
+    return e->set_particle_life_curves(layerId, kind, v, static_cast<aurea::u32>(values.count / stride));
+}
+- (void)keyParameter:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time value:(float)value {
+    if (auto* c = _batch.add(CommandType::KeyframeInsert)) {
+        c->keyframe.track.layer = layer_of(layerId);
+        c->keyframe.track.property = static_cast<aurea::TrackProperty>(property);
+        c->keyframe.track.effectIndex = effect; c->keyframe.track.effectParamIndex = param;
+        c->keyframe.time = aurea::FrameIndex{time}; c->keyframe.value = value;
+    }
+    [self flush];
+}
+- (NSString*)savePreset:(long long)layerId kind:(uint32_t)kind name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e || kind > 2) return @"";
+    const auto json = e->save_preset(layerId, static_cast<aurea::presets::PresetKind>(kind), to_std(name));
+    return [NSString stringWithUTF8String:json.c_str()] ?: @"";
+}
+- (NSString*)savePreset:(long long)layerId kind:(uint32_t)kind name:(NSString*)name parts:(uint32_t)parts {
+    auto* e = self.engine; if (!e || kind > 2) return @"";
+    const auto json = e->save_preset(layerId, static_cast<aurea::presets::PresetKind>(kind), to_std(name), parts);
+    return to_ns(json);
+}
+- (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration {
+    auto* e = self.engine;
+    if (!e) return @"Motor indisponível";
+    std::string error;
+    if (e->apply_preset(layerId, to_std(json), duration, &error)) return @"";
+    return [NSString stringWithUTF8String:error.c_str()] ?: @"Preset inválido";
+}
+- (NSArray<NSNumber*>*)parseCaptionPreset:(NSString*)json {
+    aurea::presets::Preset p;
+    if (!aurea::presets::parse(to_std(json), p) || p.kind != aurea::presets::PresetKind::Caption) return @[];
+    const auto& o = p.caption;
+    return @[@(o.mode), @(o.maxWords), @(o.maxChars), @(o.maxLines), @(o.style), @(o.highlight), @(o.uppercase), @(o.breakOnPause), @(p.removeFillers), @(o.pauseSec), @(o.posY), @(o.sizeFrac), @(o.highlightColor.x), @(o.highlightColor.y), @(o.highlightColor.z)];
+}
+- (NSString*)makeCaptionPreset:(NSString*)name options:(NSDictionary<NSString*, NSNumber*>*)options {
+    aurea::text::CaptionOptions o;
+    auto number = [&](NSString* key, float fallback) { NSNumber* n = options[key]; return n && std::isfinite(n.floatValue) ? n.floatValue : fallback; };
+    o.mode = static_cast<uint32_t>(std::clamp(number(@"mode", 0), 0.f, 1.f));
+    o.maxWords = static_cast<uint32_t>(std::clamp(number(@"maxWords", 4), 1.f, 20.f));
+    o.maxChars = static_cast<uint32_t>(std::clamp(number(@"maxChars", 18), 4.f, 80.f));
+    o.maxLines = static_cast<uint32_t>(std::clamp(number(@"maxLines", 2), 1.f, 5.f));
+    o.style = static_cast<uint32_t>(std::clamp(number(@"style", 2), 0.f, static_cast<float>(aurea::text::kCaptionStyleCount - 1)));
+    o.highlight = number(@"highlight", 1) != 0; o.uppercase = number(@"uppercase", 0) != 0;
+    o.breakOnPause = number(@"breakOnPause", 1) != 0;
+    o.pauseSec = std::clamp(number(@"pauseSec", 0.6f), 0.05f, 5.f);
+    o.posY = std::clamp(number(@"posY", 0.78f), 0.1f, 0.9f);
+    o.sizeFrac = std::clamp(number(@"sizeFrac", 0.065f), 0.01f, 0.3f);
+    o.highlightColor = {std::clamp(number(@"highlightR", 1), 0.f, 1.f), std::clamp(number(@"highlightG", 0.83f), 0.f, 1.f), std::clamp(number(@"highlightB", 0), 0.f, 1.f), 1.f};
+    return to_ns(aurea::presets::make_caption_preset(to_std(name), o, number(@"removeFillers", 1) != 0));
+}
+- (NSArray<NSNumber*>*)parseCurvePreset:(NSString*)json {
+    aurea::presets::Preset p;
+    if (!aurea::presets::parse(to_std(json), p) || p.kind != aurea::presets::PresetKind::Curve) return @[];
+    return @[@(static_cast<uint32_t>(p.curveInterp)), @(p.x1), @(p.y1), @(p.x2), @(p.y2)];
+}
+- (NSString*)makeCurvePreset:(NSString*)name interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles {
+    if (handles.count != 4) return @"";
+    for (NSNumber* n in handles) if (!std::isfinite(n.floatValue)) return @"";
+    const auto interp = static_cast<aurea::Interpolation>(std::min<uint32_t>(interpolation, static_cast<uint32_t>(aurea::Interpolation::CustomCurve)));
+    return to_ns(aurea::presets::make_curve_preset(to_std(name), interp, std::clamp(handles[0].floatValue, 0.f, 1.f), std::clamp(handles[1].floatValue, -2.f, 3.f), std::clamp(handles[2].floatValue, 0.f, 1.f), std::clamp(handles[3].floatValue, -2.f, 3.f)));
+}
+- (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    auto result = e->track_point(layerId, x, y, stabilize);
+    return result.ok() ? @"" : @"Não foi possível rastrear esse ponto. Escolha um detalhe visível no vídeo.";
+}
+- (NSDictionary<NSString*, id>*)cameraTrackingStatus {
+    auto* e = self.engine; if (!e) return @{};
+    const auto s = e->camera_track_status();
+    return @{@"state": @(s.state), @"progress": @(s.progress), @"frames": @(s.frames), @"solved": @(s.framesSolved),
+             @"confidence": @(s.confidence), @"error": @(s.rmsError), @"rotationOnly": @(s.rotationOnly),
+             @"cached": @(s.cached), @"fovDeg": @(s.fovDeg),
+             @"message": [NSString stringWithUTF8String:s.message.c_str()] ?: @""};
+}
+- (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length {
+    float points[8]{}; auto* e = self.engine;
+    return e && e->query_gizmo(layerId, length, points) ? floats_to_array(points, 8) : @[];
+}
+- (NSArray<NSNumber*>*)gizmoMoveLocal:(long long)layerId axis:(uint32_t)axis amount:(float)amount {
+    float xyz[3]{}; auto* e = self.engine;
+    return e && e->gizmo_move_local(layerId, axis, amount, xyz) ? floats_to_array(xyz, 3) : @[];
+}
+- (void)cancelCameraTracking { if (auto* e = self.engine) e->cancel_camera_track(); }
+- (NSString*)applyCameraTracking {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    return e->apply_camera_track().ok() ? @"" : @"A análise ainda não produziu uma câmera válida.";
+}
+- (NSString*)trackMask:(long long)layerId mask:(uint32_t)mask mode:(uint32_t)mode {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    return e->track_mask(layerId, mask, mode).ok() ? @"" : @"A máscara não encontrou detalhes suficientes para seguir.";
+}
+- (NSString*)layerMediaPath:(long long)layerId {
+    auto* e = self.engine; if (!e) return @"";
+    const auto p = e->layer_media_path(layerId); return [NSString stringWithUTF8String:p.c_str()] ?: @"";
+}
+- (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt {
+    NSMutableArray* out = [NSMutableArray array];
+    for (const auto& word : aurea::text::parse_srt(to_std(srt))) {
+        [out addObject:@{@"word": [NSString stringWithUTF8String:word.text.c_str()] ?: @"", @"start": @(word.start), @"end": @(word.end)}];
+    }
+    return out;
+}
+- (BOOL)isFillerWord:(NSString*)word { return aurea::text::is_filler_word(to_std(word)); }
+- (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    std::vector<aurea::text::CaptionWord> parsed;
+    for (NSDictionary* item in words) {
+        NSString* word = item[@"word"];
+        const auto start = [item[@"start"] doubleValue], end = [item[@"end"] doubleValue];
+        if (![word isKindOfClass:[NSString class]] || !std::isfinite(start) || !std::isfinite(end) || end <= start) continue;
+        parsed.push_back({to_std(word), start, end});
+    }
+    aurea::text::CaptionOptions o;
+    o.mode = [options[@"mode"] unsignedIntValue]; o.style = [options[@"style"] unsignedIntValue];
+    o.maxWords = options[@"maxWords"] ? [options[@"maxWords"] unsignedIntValue] : 4;
+    o.maxChars = options[@"maxChars"] ? [options[@"maxChars"] unsignedIntValue] : 18;
+    o.maxLines = options[@"maxLines"] ? [options[@"maxLines"] unsignedIntValue] : 2;
+    o.highlight = [options[@"highlight"] boolValue]; o.uppercase = [options[@"uppercase"] boolValue];
+    o.breakOnPause = options[@"breakOnPause"] ? [options[@"breakOnPause"] boolValue] : true;
+    o.pauseSec = options[@"pauseSec"] ? std::clamp([options[@"pauseSec"] floatValue], 0.05f, 5.f) : 0.6f;
+    o.highlightColor = {options[@"highlightR"] ? [options[@"highlightR"] floatValue] : 1.f,
+                        options[@"highlightG"] ? [options[@"highlightG"] floatValue] : 0.83f,
+                        options[@"highlightB"] ? [options[@"highlightB"] floatValue] : 0.f, 1.f};
+    o.posY = options[@"posY"] ? [options[@"posY"] floatValue] : 0.78f;
+    o.sizeFrac = options[@"sizeFrac"] ? [options[@"sizeFrac"] floatValue] : 0.065f;
+    if ([options[@"removeFillers"] boolValue]) parsed = aurea::text::remove_filler_words(parsed);
+    return e->create_captions(layerId, parsed, o).ok() ? @"" : @"Não foi possível gerar legendas. Confira os tempos e o áudio da camada.";
+}
+- (uint32_t)captionCount:(long long)layerId { auto* e = self.engine; return e ? e->caption_count(layerId) : 0; }
+- (void)removeCaptions:(long long)layerId { if (auto* e = self.engine) (void)e->remove_captions(layerId); }
+- (NSArray<NSNumber*>*)trackCurve:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param from:(int32_t)from to:(int32_t)to {
+    auto* e = self.engine; float v[160]{};
+    const auto n = e ? e->query_track_curve(layerId, property, effect, param, from, to, v, 160) : 0;
+    return floats_to_array(v, n);
+}
+- (NSArray<NSNumber*>*)trackEasing:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time {
+    auto* e = self.engine; float v[4]{};
+    if (!e || !e->query_keyframe_easing(layerId, property, effect, param, time, v)) return @[];
+    return floats_to_array(v, 4);
+}
+- (void)editTrackKey:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time action:(uint32_t)action value:(float)value targetTime:(int32_t)targetTime interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles {
+    if (property >= static_cast<u32>(aurea::TrackProperty::_Count) || action > 3) return;
+    aurea::TrackRef track{}; track.layer = layer_of(layerId); track.property = static_cast<aurea::TrackProperty>(property);
+    track.effectIndex = effect; track.effectParamIndex = param;
+    const auto type = action == 0 ? CommandType::KeyframeSetValue : action == 1 ? CommandType::KeyframeDelete : action == 2 ? CommandType::KeyframeMove : CommandType::KeyframeSetInterpolation;
+    if (auto* c = _batch.add(type)) {
+        if (action < 2) { c->keyframe.track = track; c->keyframe.time = aurea::FrameIndex{time}; c->keyframe.value = value; }
+        else if (action == 2) { c->keyframe_move.track = track; c->keyframe_move.fromTime = aurea::FrameIndex{time}; c->keyframe_move.toTime = aurea::FrameIndex{targetTime}; }
+        else {
+            c->keyframe_interp.track = track; c->keyframe_interp.time = aurea::FrameIndex{time};
+            c->keyframe_interp.interp = static_cast<aurea::Interpolation>(interpolation);
+            if (handles.count == 4) { c->keyframe_interp.bx1 = handles[0].floatValue; c->keyframe_interp.by1 = handles[1].floatValue; c->keyframe_interp.bx2 = handles[2].floatValue; c->keyframe_interp.by2 = handles[3].floatValue; }
+        }
+    }
+    [self flush];
+}
+- (NSDictionary<NSString*, id>*)expression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param {
+    auto* e = self.engine; aurea::Engine::ExpressionInfo info;
+    if (!e || !e->query_expression(layerId, property, effect, param, info)) return @{};
+    return @{@"exists": @(info.exists), @"enabled": @(info.enabled), @"source": to_ns(info.source), @"error": to_ns(info.error.message), @"line": @(info.error.line), @"column": @(info.error.column), @"value": @(info.value)};
+}
+- (NSString*)setExpression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param source:(NSString*)source {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    aurea::expr::Diagnostic d; const auto result = e->set_expression(layerId, property, effect, param, source.UTF8String, &d);
+    return d.ok ? (result.ok() ? @"" : to_ns(std::string(result.message()))) : [NSString stringWithFormat:@"%u:%u — %@", d.line, d.column, to_ns(d.message)];
+}
+- (void)enableExpression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param enabled:(BOOL)enabled {
+    if (auto* e = self.engine) (void)e->set_expression_enabled(layerId, property, effect, param, enabled);
+}
+- (NSDictionary<NSString*, id>*)setExpressions:(long long)layerId tracks:(NSArray<NSNumber*>*)tracks source:(NSString*)source {
+    auto* e = self.engine;
+    if (!e || tracks.count == 0 || tracks.count > 48 || tracks.count % 3) return @{@"accepted": @NO, @"ok": @NO, @"message": @"Trilha inválida", @"line": @0, @"column": @0};
+    std::vector<aurea::u32> keys; keys.reserve(tracks.count);
+    for (NSNumber* n in tracks) keys.push_back(n.unsignedIntValue);
+    aurea::expr::Diagnostic diagnostic;
+    const auto result = e->set_expressions(layerId, keys.data(), static_cast<aurea::u32>(keys.size() / 3), source.UTF8String, &diagnostic);
+    return @{@"accepted": @(result.ok()), @"ok": @(result.ok() && diagnostic.ok), @"message": result.ok() ? to_ns(diagnostic.message) : to_ns(std::string(result.message())), @"line": @(diagnostic.line), @"column": @(diagnostic.column)};
+}
+- (BOOL)enableExpressions:(long long)layerId tracks:(NSArray<NSNumber*>*)tracks enabled:(BOOL)enabled {
+    auto* e = self.engine;
+    if (!e || tracks.count == 0 || tracks.count > 48 || tracks.count % 3) return NO;
+    std::vector<aurea::u32> keys; keys.reserve(tracks.count);
+    for (NSNumber* n in tracks) keys.push_back(n.unsignedIntValue);
+    return e->set_expressions_enabled(layerId, keys.data(), static_cast<aurea::u32>(keys.size() / 3), enabled);
+}
+- (NSDictionary<NSString*, id>*)checkExpressionSyntax:(NSString*)source {
+    const auto diagnostic = aurea::expr::check_syntax(to_std(source));
+    return @{@"accepted": @YES, @"ok": @(diagnostic.ok), @"message": to_ns(diagnostic.message), @"line": @(diagnostic.line), @"column": @(diagnostic.column)};
+}
+- (NSArray<NSNumber*>*)timeRemap:(long long)layerId {
+    auto* e = self.engine; if (!e) return @[];
+    float header[5]{}; if (e->query_time_remap(layerId, header, 5) < 5) return @[];
+    const auto capacity = 5 + std::min<u32>(static_cast<u32>(header[0]), 100000) * 7;
+    std::vector<float> v(capacity); const auto n = e->query_time_remap(layerId, v.data(), capacity);
+    return floats_to_array(v.data(), n);
+}
+- (int32_t)editTimeRemap:(long long)layerId index:(int32_t)index time:(int64_t)time value:(float)value interpolation:(int32_t)interpolation {
+    auto* e = self.engine; return e ? e->edit_time_remap_key(layerId, index, time, value, interpolation) : -1;
+}
+- (void)removeTimeRemap:(long long)layerId index:(uint32_t)index { if (auto* e = self.engine) (void)e->remove_time_remap_key(layerId, index); }
+- (long long)addVector:(uint32_t)preset {
+    auto* e = self.engine; if (!e) return -1; const auto r = e->add_vector_layer(preset); return r.ok() ? static_cast<long long>(*r) : -1;
+}
+- (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId {
+    auto* e = self.engine; std::vector<float> data; std::string names; aurea::VectorData doc;
+    if (!e || !e->vector_document(layerId, data, names) || !aurea::vector::decode_document(data.data(), data.size(), names, doc)) return @[];
+    NSMutableArray* groups = [NSMutableArray array];
+    auto paint = [](const aurea::VectorPaint& p) -> NSDictionary* {
+        NSMutableArray* stops = [NSMutableArray array];
+        for (const auto& s : p.stops) [stops addObject:@[@(s.pos), @(s.color.x), @(s.color.y), @(s.color.z), @(s.color.w)]];
+        return @{@"type": @(p.type), @"color": @[@(p.color.x), @(p.color.y), @(p.color.z), @(p.color.w)], @"points": @[@(p.start.x), @(p.start.y), @(p.end.x), @(p.end.y)], @"stops": stops};
+    };
+    for (u32 index = 0; index < doc.groups.size(); ++index) {
+        const auto& g = doc.groups[index];
+        float params[aurea::Engine::kVectorParamFloats]{};
+        (void)e->query_vector_params(layerId, index, params, aurea::Engine::kVectorParamFloats);
+        NSMutableArray* paths = [NSMutableArray array];
+        NSMutableArray* pathKeyCounts = [NSMutableArray array];
+        for (const auto& p : g.paths) [pathKeyCounts addObject:@(p.keys.size())];
+        for (const auto& p : g.paths) [paths addObject:@[@(static_cast<u32>(p.kind)), @(p.reversed), @(p.center.x), @(p.center.y), @(p.size.x), @(p.size.y), @(p.roundness), @(p.points), @(p.outerRadius), @(p.innerRadius), @(p.outerRoundness), @(p.innerRoundness), @(p.rotation)]];
+        [groups addObject:@{@"id": @(index), @"name": to_ns(g.name), @"visible": @(g.visible), @"merge": @(g.merge), @"params": floats_to_array(params, aurea::Engine::kVectorParamFloats), @"pathKeyCounts": pathKeyCounts,
+            @"fillEnabled": @(g.fill.enabled), @"fillRule": @(g.fill.rule), @"fill": paint(g.fill.paint),
+            @"strokeEnabled": @(g.stroke.enabled), @"stroke": paint(g.stroke.paint), @"cap": @(g.stroke.cap), @"join": @(g.stroke.join), @"miter": @(g.stroke.miterLimit), @"dashes": floats_to_array(g.stroke.dashes.data(), static_cast<u32>(g.stroke.dashes.size())),
+            @"trimEnabled": @(g.trim.enabled), @"trimMode": @(g.trim.mode), @"repeatEnabled": @(g.repeater.enabled), @"repeatAbove": @(g.repeater.above), @"repeatAnchor": @[@(g.repeater.anchor.x), @(g.repeater.anchor.y)], @"anchor": @[@(g.anchor.x), @(g.anchor.y)], @"paths": paths}];
+    }
+    return groups;
+}
+- (BOOL)editVectorGroup:(long long)layerId group:(uint32_t)group field:(uint32_t)field values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine; std::vector<float> data; std::string names; aurea::VectorData doc;
+    if (!e || !e->vector_document(layerId, data, names) || !aurea::vector::decode_document(data.data(), data.size(), names, doc) || group >= doc.groups.size()) return NO;
+    std::vector<float> v; for (NSNumber* n in values) { if (!std::isfinite(n.floatValue)) return NO; v.push_back(n.floatValue); }
+    if (v.empty() && field != 16) return NO;
+    auto& g = doc.groups[group];
+    auto color = [&]() { return aurea::Vec4{v[0], v[1], v[2], v[3]}; };
+    auto stops = [&](aurea::VectorPaint& p) { p.stops.clear(); for (usize n = 0; n + 4 < v.size(); n += 5) p.stops.push_back({v[n], {v[n+1], v[n+2], v[n+3], v[n+4]}}); };
+    switch (field) {
+        case 0: g.visible = v[0] > .5f; break;
+        case 1: g.merge = static_cast<u8>(std::clamp(v[0], 0.f, 4.f)); break;
+        case 2: g.fill.enabled = v[0] > .5f; break;
+        case 3: g.fill.rule = v[0] > .5f; break;
+        case 4: g.fill.paint.type = static_cast<u8>(std::clamp(v[0], 0.f, 2.f)); break;
+        case 5: if (v.size() != 4) return NO; g.fill.paint.color = color(); break;
+        case 6: if (v.size() != 4) return NO; g.fill.paint.start = {v[0],v[1]}; g.fill.paint.end = {v[2],v[3]}; break;
+        case 7: if (v.size() % 5 || v.size() > 40) return NO; stops(g.fill.paint); break;
+        case 8: g.stroke.enabled = v[0] > .5f; break;
+        case 9: g.stroke.paint.type = static_cast<u8>(std::clamp(v[0], 0.f, 2.f)); break;
+        case 10: if (v.size() != 4) return NO; g.stroke.paint.color = color(); break;
+        case 11: if (v.size() != 4) return NO; g.stroke.paint.start = {v[0],v[1]}; g.stroke.paint.end = {v[2],v[3]}; break;
+        case 12: if (v.size() % 5 || v.size() > 40) return NO; stops(g.stroke.paint); break;
+        case 13: g.stroke.cap = static_cast<u8>(std::clamp(v[0], 0.f, 2.f)); break;
+        case 14: g.stroke.join = static_cast<u8>(std::clamp(v[0], 0.f, 2.f)); break;
+        case 15: g.stroke.miterLimit = std::max(1.f, v[0]); break;
+        case 16: g.stroke.dashes = v; break;
+        case 17: g.trim.enabled = v[0] > .5f; break;
+        case 18: g.trim.mode = v[0] > .5f; break;
+        case 19: g.repeater.enabled = v[0] > .5f; break;
+        case 20: g.repeater.above = v[0] > .5f; break;
+        case 21: if (v.size() != 2) return NO; g.repeater.anchor = {v[0],v[1]}; break;
+        case 22: if (v.size() != 2) return NO; g.anchor = {v[0],v[1]}; break;
+        case 23: {
+            if (v.size() != 14 || v[0] < 0 || v[0] >= g.paths.size()) return NO;
+            auto& p = g.paths[static_cast<u32>(v[0])]; p.reversed = v[2] > .5f;
+            p.center = {v[3],v[4]}; p.size = {v[5],v[6]}; p.roundness = v[7]; p.points = v[8];
+            p.outerRadius = v[9]; p.innerRadius = v[10]; p.outerRoundness = v[11]; p.innerRoundness = v[12]; p.rotation = v[13]; break;
+        }
+        default: return NO;
+    }
+    aurea::vector::encode_document(doc, data, names);
+    return e->set_vector_document(layerId, data.data(), data.size(), names, false);
+}
+- (BOOL)renameVectorGroup:(long long)layerId group:(uint32_t)group name:(NSString*)name {
+    auto* e = self.engine; std::vector<float> data; std::string names; aurea::VectorData doc;
+    if (!e || !e->vector_document(layerId, data, names) || !aurea::vector::decode_document(data.data(), data.size(), names, doc) || group >= doc.groups.size()) return NO;
+    doc.groups[group].name = to_std(name); aurea::vector::encode_document(doc, data, names);
+    return e->set_vector_document(layerId, data.data(), data.size(), names, false);
+}
+- (int32_t)addVectorGroup:(long long)layerId kind:(uint32_t)kind { auto* e = self.engine; return e ? e->add_vector_group(layerId, kind) : -1; }
+- (BOOL)removeVectorGroup:(long long)layerId group:(uint32_t)group { auto* e = self.engine; return e && e->remove_vector_group(layerId, group); }
+- (int32_t)addVectorPath:(long long)layerId group:(uint32_t)group kind:(uint32_t)kind { auto* e = self.engine; return e ? e->add_vector_path(layerId, group, kind, nullptr, 0) : -1; }
+- (BOOL)removeVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->remove_vector_path(layerId, group, path); }
+- (NSArray<NSNumber*>*)vectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path {
+    auto* e = self.engine; std::vector<float> v; if (!e || !e->vector_path_at(layerId, group, path, v)) return @[]; return floats_to_array(v.data(), static_cast<u32>(v.size()));
+}
+- (BOOL)setVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path values:(NSArray<NSNumber*>*)values continuing:(BOOL)continuing {
+    auto* e = self.engine; std::vector<float> v; for (NSNumber* n in values) v.push_back(n.floatValue);
+    return e && e->set_vector_path(layerId, group, path, v.data(), v.size(), continuing);
+}
+- (BOOL)keyVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->ensure_vector_path_key(layerId, group, path); }
+- (BOOL)makeVectorPathEditable:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->make_vector_path_editable(layerId, group, path); }
+- (BOOL)toggleVectorPathKey:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->toggle_vector_path_key(layerId, group, path); }
+- (BOOL)setVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param value:(float)value { auto* e = self.engine; return e && e->set_vector_param(layerId, group, param, value, false); }
+- (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param { auto* e = self.engine; return e && e->ensure_vector_param_key(layerId, group, param); }
+- (BOOL)toggleVectorParamKey:(long long)layerId group:(uint32_t)group param:(uint32_t)param { auto* e = self.engine; return e && e->toggle_vector_param_key(layerId, group, param); }
+- (long long)addFreehand:(long long)layerId points:(NSArray<NSNumber*>*)points error:(float)error {
+    auto* e = self.engine; if (!e || points.count % 2) return -1; std::vector<float> v; for (NSNumber* n in points) v.push_back(n.floatValue);
+    const auto result = e->add_freehand_path(layerId, v.data(), v.size(), error); return result.ok() ? static_cast<long long>(*result) : -1;
+}
+- (long long)importSVG:(NSString*)text name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r = e->import_svg(to_std(text), name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -1; }
+- (NSArray<NSNumber*>*)textPath:(long long)layerId {
+    auto* e = self.engine; u64 target = 0; float offset = 0; bool perpendicular = false, reverse = false;
+    if (!e || !e->query_text_path(layerId, target, offset, perpendicular, reverse)) return @[];
+    return @[@(target), @(offset), @(perpendicular), @(reverse)];
+}
+- (BOOL)setTextPath:(long long)layerId target:(long long)target offset:(float)offset perpendicular:(BOOL)perpendicular reversed:(BOOL)reversed { auto* e = self.engine; return e && e->set_text_path(layerId, target, offset, perpendicular, reversed); }
+- (BOOL)setTextSpan:(long long)layerId start:(uint32_t)start end:(uint32_t)end color:(NSArray<NSNumber*>*)color weight:(uint32_t)weight scale:(float)scale {
+    auto* e = self.engine; aurea::Vec4 c{1,1,1,1}; if (color.count == 4) c = {color[0].floatValue, color[1].floatValue, color[2].floatValue, color[3].floatValue};
+    return e && e->set_text_span(layerId, start, end, color.count == 4, c, weight, scale);
+}
+- (BOOL)clearTextSpans:(long long)layerId start:(uint32_t)start end:(uint32_t)end { auto* e = self.engine; return e && e->clear_text_spans(layerId, start, end); }
+- (NSArray<NSNumber*>*)keyframeEasing:(long long)layerId property:(uint32_t)property frame:(int32_t)frame {
+    auto* e = self.engine; float v[4]{};
+    if (!e || !e->query_keyframe_easing(layerId, property, aurea::kInvalidIndex, 0, frame, v)) return @[];
+    return floats_to_array(v, 4);
+}
+- (BOOL)editShape:(long long)layerId param:(uint32_t)param value:(float)value continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && e->set_shape_param(layerId, param, value, continuing);
+}
+- (BOOL)keyShape:(long long)layerId param:(uint32_t)param {
+    auto* e = self.engine;
+    return e && e->ensure_shape_param_key(layerId, param);
+}
+- (NSArray<NSNumber*>*)trackMatte:(long long)layerId {
+    auto* e = self.engine;
+    aurea::u64 matte = 0; aurea::u32 mode = 0;
+    if (!e || !e->query_track_matte(layerId, matte, mode)) return @[];
+    return @[@(matte), @(mode)];
+}
+- (NSArray<NSNumber*>*)maskData:(long long)layerId {
+    auto* e = self.engine; if (!e) return @[];
+    std::vector<float> values(4096);
+    auto size = e->query_masks(layerId, values.data(), static_cast<aurea::u32>(values.size()));
+    if (size > values.size()) { values.resize(size); size = e->query_masks(layerId, values.data(), static_cast<aurea::u32>(values.size())); }
+    return floats_to_array(values.data(), std::min<size_t>(size, values.size()));
+}
+- (int32_t)addMask:(long long)layerId points:(NSArray<NSNumber*>*)points closed:(BOOL)closed {
+    auto* e = self.engine;
+    if (!e || points.count % 6 || points.count > 24576) return -1;
+    std::vector<float> v; v.reserve(points.count);
+    for (NSNumber* n in points) v.push_back(n.floatValue);
+    return e->add_mask(layerId, v.data(), static_cast<aurea::u32>(v.size() / 6), closed);
+}
+- (BOOL)removeMask:(long long)layerId mask:(uint32_t)mask {
+    auto* e = self.engine; return e && e->remove_mask(layerId, mask);
+}
+- (BOOL)setMaskPath:(long long)layerId mask:(uint32_t)mask points:(NSArray<NSNumber*>*)points closed:(BOOL)closed undo:(BOOL)undo {
+    auto* e = self.engine;
+    if (!e || points.count % 6 || points.count > 24576) return NO;
+    std::vector<float> v; v.reserve(points.count);
+    for (NSNumber* n in points) v.push_back(n.floatValue);
+    return e->set_mask_path(layerId, mask, v.data(), static_cast<aurea::u32>(v.size() / 6), closed, undo);
+}
+- (BOOL)setMaskProps:(long long)layerId mask:(uint32_t)mask operation:(uint32_t)operation inverted:(BOOL)inverted feather:(float)feather expansion:(float)expansion opacity:(float)opacity {
+    auto* e = self.engine; return e && e->set_mask_props(layerId, mask, operation, inverted, feather, expansion, opacity);
+}
+- (BOOL)keyMask:(long long)layerId mask:(uint32_t)mask {
+    auto* e = self.engine; return e && e->ensure_mask_path_key(layerId, mask);
+}
+- (BOOL)toggleMaskKey:(long long)layerId mask:(uint32_t)mask {
+    auto* e = self.engine; return e && e->toggle_mask_path_key(layerId, mask);
+}
+- (NSArray<NSNumber*>*)textAnimators:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    std::vector<float> values(40 * 64);
+    // The core returns the animator COUNT, not the number of floats.
+    const auto count = e->query_text_animators(layerId, values.data(), static_cast<aurea::u32>(values.size()));
+    return floats_to_array(values.data(), std::min<size_t>(count, 64) * 40);
+}
+- (BOOL)setTextAnimator:(long long)layerId index:(uint32_t)index values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine;
+    if (!e || values.count != 40) return NO;
+    float raw[40];
+    for (NSUInteger i = 0; i < 40; ++i) raw[i] = values[i].floatValue;
+    return e->set_text_animator(layerId, index, raw);
+}
+- (NSArray<NSNumber*>*)textStyle:(long long)layerId {
+    auto* e = self.engine;
+    float values[18]{};
+    if (!e || !e->query_text_style(layerId, values)) return @[];
+    return floats_to_array(values, 18);
+}
+- (BOOL)setTextStyle:(long long)layerId values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine;
+    if (!e || values.count != 18) return NO;
+    float raw[18];
+    for (NSUInteger i = 0; i < 18; ++i) raw[i] = values[i].floatValue;
+    return e->set_text_style(layerId, raw);
+}
 
 - (void)setLayer:(long long)layerId fadeIn:(int32_t)frames {
     if (auto* c = _batch.add(CommandType::AudioSetFadeIn)) {
@@ -1844,9 +2562,13 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
                       height:(uint32_t)height outWidth:(uint32_t*)outWidth {
     auto* e = self.engine;
     if (!e || height == 0) return nil;
-    // O pior caso é 16:9 na altura pedida; a consulta devolve 0 enquanto a
-    // miniatura não está pronta (o status avisa quando chega).
-    const usize capacity = static_cast<usize>(height) * height * 4;
+    if (height > 512) return nil;
+    aurea::bridge::LayerDetailPOD detail{};
+    if (!e->query_layer_detail(layerId, detail) || detail.sourceHeight == 0) return nil;
+    // A largura segue a mídia, inclusive vídeos horizontais e panoramas.
+    const auto widthHint = std::max<usize>(1, static_cast<usize>(std::ceil(static_cast<double>(height) * detail.sourceWidth / detail.sourceHeight)));
+    const usize capacity = widthHint * height * 4;
+    if (capacity > 64 * 1024 * 1024) return nil;
     std::vector<u8> pixels(capacity);
     u32 width = 0;
     const u32 bytes = e->query_thumbnail(static_cast<aurea::u64>(layerId), frame, height,
@@ -1858,10 +2580,21 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 
 - (NSData*)captureFrame:(uint32_t)maxDim outWidth:(uint32_t*)outWidth outHeight:(uint32_t*)outHeight {
     auto* e = self.engine;
+#if DEBUG
+    _lastCaptureDiagnostics = @{ @"attempted": @YES, @"ok": @NO,
+        @"detail": e ? @"dimensao de captura invalida" : @"motor indisponivel" };
+#endif
     if (!e || maxDim == 0) return nil;
     std::vector<u8> rgba;
     u32 w = 0, h = 0;
-    if (!e->capture_frame_rgba(maxDim, rgba, w, h).ok() || rgba.empty()) return nil;
+    const aurea::Status result = e->capture_frame_rgba(maxDim, rgba, w, h);
+#if DEBUG
+    _lastCaptureDiagnostics = @{ @"attempted": @YES, @"ok": @(result.ok() && !rgba.empty()),
+        @"status": @(static_cast<int32_t>(result.code())),
+        @"message": to_ns(std::string(result.message())), @"detail": to_ns(std::string(result.detail())),
+        @"width": @(w), @"height": @(h), @"bytes": @(rgba.size()) };
+#endif
+    if (!result.ok() || rgba.empty()) return nil;
     if (outWidth) *outWidth = w;
     if (outHeight) *outHeight = h;
     return [NSData dataWithBytes:rgba.data() length:rgba.size()];

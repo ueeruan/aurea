@@ -188,10 +188,10 @@ typedef NS_OPTIONS(uint32_t, AureaExportFlag) {
 
 /// Códigos de codec de saída (ExportCodec).
 typedef NS_ENUM(uint16_t, AureaExportCodec) {
-    AureaExportCodecH264 = 0,
-    AureaExportCodecHEVC = 1,
-    AureaExportCodecAV1 = 2,
-    AureaExportCodecProRes = 3,
+    AureaExportCodecH264 NS_SWIFT_NAME(h264) = 0,
+    AureaExportCodecHEVC NS_SWIFT_NAME(hevc) = 1,
+    AureaExportCodecAV1 NS_SWIFT_NAME(av1) = 2,
+    AureaExportCodecProRes NS_SWIFT_NAME(proRes) = 3,
 };
 
 /// Propriedade animável (TrackProperty) — as que a bridge expõe.
@@ -276,6 +276,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)readStatus:(AureaStatus*)out NS_SWIFT_NAME(readStatus(_:));
 /// Painel DEV: medido, nunca estimado (chaves AureaPerf*).
 - (NSDictionary<NSString*, id>*)perf;
+#if DEBUG
+/// Read-only native render/capture diagnostics for parity CI, absent in Release.
+- (NSDictionary<NSString*, id>*)renderDiagnostics;
+#endif
 /// O que o motor decidiu para ESTE aparelho (chaves do DeviceReport do Android).
 - (NSDictionary<NSString*, NSNumber*>*)deviceReport;
 /// Export em andamento (chaves AureaExport*).
@@ -347,21 +351,21 @@ NS_SWIFT_NAME(AureaEngine)
                   rotation:(simd_float3)rotation
                     anchor:(simd_float3)anchor
                    opacity:(float)opacity;
-- (void)setPositionForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z;
-- (void)setScaleForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z;
-- (void)setRotationForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z;
-- (void)setAnchorForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z;
-- (void)setOpacityForLayer:(long long)layerId value:(float)value;
-- (void)setSkewForLayer:(long long)layerId x:(float)x y:(float)y;
+- (void)setPositionForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z NS_SWIFT_NAME(setPosition(forLayer:x:y:z:));
+- (void)setScaleForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z NS_SWIFT_NAME(setScale(forLayer:x:y:z:));
+- (void)setRotationForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z NS_SWIFT_NAME(setRotation(forLayer:x:y:z:));
+- (void)setAnchorForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z NS_SWIFT_NAME(setAnchor(forLayer:x:y:z:));
+- (void)setOpacityForLayer:(long long)layerId value:(float)value NS_SWIFT_NAME(setOpacity(forLayer:value:));
+- (void)setSkewForLayer:(long long)layerId x:(float)x y:(float)y NS_SWIFT_NAME(setSkew(forLayer:x:y:));
 
 // --- Keyframes --------------------------------------------------------------
 - (void)insertKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value;
-- (void)deleteKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time;
+- (void)deleteKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time NS_SWIFT_NAME(deleteKeyframe(forLayer:property:time:));
 - (void)moveKeyframeForLayer:(long long)layerId property:(uint32_t)property from:(int32_t)from to:(int32_t)to;
-- (void)setKeyframeValueForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value;
+- (void)setKeyframeValueForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value NS_SWIFT_NAME(setKeyframeValue(forLayer:property:time:value:));
 - (void)setKeyframeInterpolationForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time
                             interpolation:(uint32_t)interpolation
-                                      bx1:(float)bx1 by1:(float)by1 bx2:(float)bx2 by2:(float)by2;
+                                      bx1:(float)bx1 by1:(float)by1 bx2:(float)bx2 by2:(float)by2 NS_SWIFT_NAME(setKeyframeInterpolation(forLayer:property:time:interpolation:bx1:by1:bx2:by2:));
 /// Parâmetro de efeito animável (o TrackRef completo).
 - (void)insertKeyframeForLayer:(long long)layerId effectIndex:(uint32_t)effectIndex
                      paramIndex:(uint32_t)paramIndex time:(int32_t)time value:(float)value;
@@ -388,9 +392,16 @@ NS_SWIFT_NAME(AureaEngine)
 @property (nonatomic, readonly) uint32_t clipboardState;
 
 // --- Texto / forma / 3D -----------------------------------------------------
+- (nullable NSDictionary<NSString*, id>*)textForLayer:(long long)layerId NS_SWIFT_NAME(text(forLayer:));
+- (BOOL)setTextFontForLayer:(long long)layerId family:(NSString*)family weight:(uint32_t)weight italic:(BOOL)italic path:(NSString*)path NS_SWIFT_NAME(setTextFont(forLayer:family:weight:italic:path:));
+- (NSArray<NSDictionary<NSString*, id>*>*)availableFonts;
+- (nullable NSDictionary<NSString*, id>*)importFontAtPath:(NSString*)path;
+- (nullable NSDictionary<NSString*, id>*)text3DForLayer:(long long)layerId NS_SWIFT_NAME(text3D(forLayer:));
+- (BOOL)setText3DForLayer:(long long)layerId property:(NSString*)property stringValue:(nullable NSString*)stringValue numberValue:(float)numberValue NS_SWIFT_NAME(setText3D(forLayer:property:stringValue:numberValue:));
 - (void)setText:(long long)layerId content:(NSString*)content;
 - (void)setText:(long long)layerId size:(float)size;
 - (void)setText:(long long)layerId colorR:(float)r g:(float)g b:(float)b a:(float)a;
+- (void)setText:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)setText:(long long)layerId alignment:(uint32_t)alignment;
 - (void)setText:(long long)layerId strokeWidth:(float)width;
 - (void)addTextAnimator:(long long)layerId props:(uint32_t)props;
@@ -415,7 +426,7 @@ NS_SWIFT_NAME(AureaEngine)
 /// Ambiente POR OBJETO (v22): `source` 0 = o do projeto, 1 = o dele;
 /// `hdri` 0 volta ao estudio neutro daquele objeto.
 - (BOOL)setObjectEnvironmentForLayer:(long long)layerId source:(uint32_t)source hdri:(long long)hdri
-                           intensity:(float)intensity rotation:(float)rotation exposure:(float)exposure;
+                           intensity:(float)intensity rotation:(float)rotation exposure:(float)exposure NS_SWIFT_NAME(setObjectEnvironment(forLayer:source:hdri:intensity:rotation:exposure:));
 /// {fonte, asset, intensidade, giro, exposicao}.
 - (NSArray<NSNumber*>*)objectEnvironmentForLayer:(long long)layerId;
 
@@ -430,6 +441,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setLayer:(long long)layerId audioVolume:(float)volume;
 - (void)setLayer:(long long)layerId audioPan:(float)pan;
 - (void)setLayer:(long long)layerId audioMuted:(BOOL)muted;
+- (void)setLayer:(long long)layerId audioSolo:(BOOL)solo;
 - (void)setLayer:(long long)layerId fadeIn:(int32_t)frames;
 - (void)setLayer:(long long)layerId fadeOut:(int32_t)frames;
 - (void)setLayer:(long long)layerId speed:(float)speed;
@@ -455,6 +467,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)importImageFile:(NSString*)path name:(NSString*)name;
 - (long long)importModel:(NSString*)path name:(NSString*)name;
 - (long long)importHdri:(NSString*)path;
+- (long long)importObjectHDRI:(NSString*)path layer:(long long)layer;
 - (void)clearHdri;
 - (long long)addShape:(uint32_t)preset;
 - (long long)addText:(nullable NSString*)content;
@@ -474,6 +487,93 @@ NS_SWIFT_NAME(AureaEngine)
 /// `layerId` + `keys`.
 - (NSArray<NSDictionary<NSString*, id>*>*)allKeyframes;
 - (nullable NSDictionary<NSString*, id>*)layerDetail:(long long)layerId;
+- (NSArray<NSNumber*>*)shapeParams:(long long)layerId;
+- (NSArray<NSNumber*>*)keyframeEasing:(long long)layerId property:(uint32_t)property frame:(int32_t)frame;
+- (BOOL)editShape:(long long)layerId param:(uint32_t)param value:(float)value continuing:(BOOL)continuing;
+- (BOOL)keyShape:(long long)layerId param:(uint32_t)param;
+- (NSArray<NSNumber*>*)trackMatte:(long long)layerId;
+- (NSArray<NSNumber*>*)maskData:(long long)layerId;
+- (int32_t)addMask:(long long)layerId points:(NSArray<NSNumber*>*)points closed:(BOOL)closed;
+- (BOOL)removeMask:(long long)layerId mask:(uint32_t)mask;
+- (BOOL)setMaskPath:(long long)layerId mask:(uint32_t)mask points:(NSArray<NSNumber*>*)points closed:(BOOL)closed undo:(BOOL)undo;
+- (BOOL)setMaskProps:(long long)layerId mask:(uint32_t)mask operation:(uint32_t)operation inverted:(BOOL)inverted feather:(float)feather expansion:(float)expansion opacity:(float)opacity;
+- (BOOL)keyMask:(long long)layerId mask:(uint32_t)mask;
+- (BOOL)toggleMaskKey:(long long)layerId mask:(uint32_t)mask NS_SWIFT_NAME(toggleMaskKey(_:mask:));
+- (NSArray<NSNumber*>*)textAnimators:(long long)layerId;
+- (BOOL)setTextAnimator:(long long)layerId index:(uint32_t)index values:(NSArray<NSNumber*>*)values;
+- (NSArray<NSNumber*>*)textStyle:(long long)layerId;
+- (BOOL)setTextStyle:(long long)layerId values:(NSArray<NSNumber*>*)values;
+- (NSArray<NSNumber*>*)particleParams:(long long)layerId;
+- (BOOL)setParticle:(long long)layerId param:(uint32_t)param value:(float)value;
+- (BOOL)applyParticlePreset:(long long)layerId preset:(uint32_t)preset;
+- (NSArray<NSNumber*>*)particleLinks:(long long)layerId;
+- (BOOL)setParticleLink:(long long)layerId kind:(uint32_t)kind target:(long long)target;
+- (NSArray<NSNumber*>*)particleCurve:(long long)layerId kind:(uint32_t)kind;
+- (BOOL)setParticleCurve:(long long)layerId kind:(uint32_t)kind values:(NSArray<NSNumber*>*)values;
+- (void)keyParameter:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time value:(float)value;
+- (NSString*)savePreset:(long long)layerId kind:(uint32_t)kind name:(NSString*)name;
+- (NSString*)savePreset:(long long)layerId kind:(uint32_t)kind name:(NSString*)name parts:(uint32_t)parts NS_SWIFT_NAME(savePreset(_:kind:name:parts:));
+- (NSArray<NSNumber*>*)parseCaptionPreset:(NSString*)json NS_SWIFT_NAME(parseCaptionPreset(_:));
+- (NSString*)makeCaptionPreset:(NSString*)name options:(NSDictionary<NSString*, NSNumber*>*)options NS_SWIFT_NAME(makeCaptionPreset(_:options:));
+- (NSArray<NSNumber*>*)parseCurvePreset:(NSString*)json NS_SWIFT_NAME(parseCurvePreset(_:));
+- (NSString*)makeCurvePreset:(NSString*)name interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles NS_SWIFT_NAME(makeCurvePreset(_:interpolation:handles:));
+- (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration;
+- (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize;
+- (NSDictionary<NSString*, id>*)cameraTrackingStatus;
+- (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length NS_SWIFT_NAME(gizmo(_:length:));
+- (NSArray<NSNumber*>*)gizmoMoveLocal:(long long)layerId axis:(uint32_t)axis amount:(float)amount NS_SWIFT_NAME(gizmoMoveLocal(_:axis:amount:));
+- (void)cancelCameraTracking;
+- (NSString*)applyCameraTracking;
+- (NSString*)trackMask:(long long)layerId mask:(uint32_t)mask mode:(uint32_t)mode;
+- (NSString*)layerMediaPath:(long long)layerId;
+- (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt;
+- (BOOL)isFillerWord:(NSString*)word NS_SWIFT_NAME(isFillerWord(_:));
+- (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options;
+- (uint32_t)captionCount:(long long)layerId;
+- (void)removeCaptions:(long long)layerId;
+- (NSArray<NSNumber*>*)trackCurve:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param from:(int32_t)from to:(int32_t)to;
+- (NSArray<NSNumber*>*)trackEasing:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time;
+- (void)editTrackKey:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time action:(uint32_t)action value:(float)value targetTime:(int32_t)targetTime interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles;
+- (NSDictionary<NSString*, id>*)expression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param;
+- (NSString*)setExpression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param source:(NSString*)source;
+- (void)enableExpression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param enabled:(BOOL)enabled;
+- (NSDictionary<NSString*, id>*)setExpressions:(long long)layerId tracks:(NSArray<NSNumber*>*)tracks source:(NSString*)source NS_SWIFT_NAME(setExpressions(_:tracks:source:));
+- (BOOL)enableExpressions:(long long)layerId tracks:(NSArray<NSNumber*>*)tracks enabled:(BOOL)enabled NS_SWIFT_NAME(enableExpressions(_:tracks:enabled:));
+- (NSDictionary<NSString*, id>*)checkExpressionSyntax:(NSString*)source NS_SWIFT_NAME(checkExpressionSyntax(_:));
+- (NSArray<NSNumber*>*)timeRemap:(long long)layerId;
+- (int32_t)editTimeRemap:(long long)layerId index:(int32_t)index time:(int64_t)time value:(float)value interpolation:(int32_t)interpolation;
+- (void)removeTimeRemap:(long long)layerId index:(uint32_t)index;
+- (long long)addVector:(uint32_t)preset;
+- (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;
+- (BOOL)editVectorGroup:(long long)layerId group:(uint32_t)group field:(uint32_t)field values:(NSArray<NSNumber*>*)values;
+- (BOOL)renameVectorGroup:(long long)layerId group:(uint32_t)group name:(NSString*)name;
+- (int32_t)addVectorGroup:(long long)layerId kind:(uint32_t)kind;
+- (BOOL)removeVectorGroup:(long long)layerId group:(uint32_t)group;
+- (int32_t)addVectorPath:(long long)layerId group:(uint32_t)group kind:(uint32_t)kind;
+- (BOOL)removeVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path;
+- (NSArray<NSNumber*>*)vectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path;
+- (BOOL)setVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path values:(NSArray<NSNumber*>*)values continuing:(BOOL)continuing;
+- (BOOL)keyVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path;
+- (BOOL)makeVectorPathEditable:(long long)layerId group:(uint32_t)group path:(uint32_t)path NS_SWIFT_NAME(makeVectorPathEditable(_:group:path:));
+- (BOOL)toggleVectorPathKey:(long long)layerId group:(uint32_t)group path:(uint32_t)path NS_SWIFT_NAME(toggleVectorPathKey(_:group:path:));
+- (BOOL)setVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param value:(float)value;
+- (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param;
+- (BOOL)toggleVectorParamKey:(long long)layerId group:(uint32_t)group param:(uint32_t)param NS_SWIFT_NAME(toggleVectorParamKey(_:group:param:));
+- (long long)addFreehand:(long long)layerId points:(NSArray<NSNumber*>*)points error:(float)error;
+- (long long)importSVG:(NSString*)text name:(NSString*)name;
+- (NSArray<NSNumber*>*)textPath:(long long)layerId;
+- (BOOL)setTextPath:(long long)layerId target:(long long)target offset:(float)offset perpendicular:(BOOL)perpendicular reversed:(BOOL)reversed;
+- (BOOL)setTextSpan:(long long)layerId start:(uint32_t)start end:(uint32_t)end color:(NSArray<NSNumber*>*)color weight:(uint32_t)weight scale:(float)scale;
+- (BOOL)clearTextSpans:(long long)layerId start:(uint32_t)start end:(uint32_t)end;
+- (BOOL)setText3DColor:(long long)layerId region:(uint32_t)region values:(NSArray<NSNumber*>*)values;
+- (BOOL)applyText3DPreset:(long long)layerId preset:(uint32_t)preset;
+- (NSArray<NSNumber*>*)modelShadows:(long long)layerId;
+- (BOOL)setModelShadows:(long long)layerId cast:(BOOL)cast receive:(BOOL)receive;
+- (int64_t)removeGaps;
+- (BOOL)trimComposition:(int64_t)frame;
+- (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));
+- (NSArray<NSNumber*>*)motionBlurSettings;
+- (void)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter;
 - (nullable NSDictionary<NSString*, id>*)composition;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectCatalog;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectsForLayer:(long long)layerId;
@@ -498,7 +598,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setTransitionForLayer:(long long)layerId out:(BOOL)out type:(uint32_t)type frames:(uint32_t)frames;
 - (void)setTrackMatteForLayer:(long long)layerId matte:(long long)matteLayerId mode:(uint32_t)mode;
 - (void)setFrameBlendForLayer:(long long)layerId mode:(uint32_t)mode;
-- (void)setVectorBlurForLayer:(long long)layerId amount:(float)amount;
+- (void)setVectorBlurForLayer:(long long)layerId amount:(float)amount NS_SWIFT_NAME(setVectorBlur(forLayer:amount:));
 - (void)toggleMarker:(int64_t)frame;
 - (NSArray<NSNumber*>*)markers;   ///< tripletas (frame, cor, tipo)
 

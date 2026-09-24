@@ -1,305 +1,769 @@
-// =============================================================================
-//  Aurea / platform / ios / app / TimelineView.swift
-//
-//  A timeline: régua de tempo, linhas de camada, playhead e os keyframes.
-//
-//  DESENHADA COM `Canvas`, não com N subviews: uma composição de 40 camadas com
-//  centenas de keyframes viraria 400 views e o SwiftUI engasgaria num arrasto —
-//  o mesmo motivo pelo qual o Android desenha a timeline com um `Canvas` do
-//  Compose (`TimelinePainter.kt`).
-//
-//  SNAPSHOT: o `Canvas` recebe um `TimelineSnapshot` de VALORES, montado antes
-//  do desenho. O desenho não toca no modelo (nem no motor) — o que a timeline
-//  mostra é a leitura de um instante, e a próxima revisão do motor produz um
-//  snapshot novo. Isso também é o que mantém o desenho barato: nenhuma consulta
-//  ao motor acontece dentro do `Canvas`.
-//
-//  O QUE VEM DO MOTOR: as linhas (`Engine::query_layers`), os keyframes
-//  (`query_all_keyframes`) e o instante (`fill_status`). O Swift não guarda
-//  cópia do modelo: relê quando `modelRevision` muda.
-// =============================================================================
+// Direct port of Android TimelinePainter, TimelineHit and TimelineController.
+// The core remains the only owner of layers, animation tracks and media.
 import SwiftUI
+import UIKit
+import Combine
 
-/// Tudo que o desenho precisa, em valores. Imutável.
-struct TimelineSnapshot: Equatable {
-    struct Row: Equatable {
-        var id: Int64
-        var name: String
-        var kind: UInt32
-        var start: Int32
-        var end: Int32
-        var visible: Bool
-        var locked: Bool
-        var threeD: Bool
-        var selected: Bool
-        var keys: [Int32]      ///< keyframes de transform, tempo LOCAL da camada
-    }
-
-    var rows: [Row] = []
-    var playhead: Int64 = 0
-    var duration: Int64 = 0
-    var fps: Double = 30
-    var pointsPerFrame: CGFloat = 8
-    var origin: Int64 = 0
-}
-
+@MainActor
 struct TimelineView: View {
     @EnvironmentObject private var model: AureaModel
+    @State private var pps = Zoom.defaultPPS
+    @State private var scrollY: CGFloat = 0
+    @State private var heldView: Double?
+    @State private var gesture: Interaction?
+    @State private var pinchPPS = Zoom.defaultPPS
+    @State private var pinchFrame = 0.0
+    @State private var pinching = false
+    @State private var guide = Snap.none
+    @State private var selectedKey: (layer: Int64, frame: Int32)?
+    @State private var reorderSource = -1
+    @State private var reorderTarget = -1
+    @State private var scrollVelocity: CGFloat = 0
+    @State private var lastPointer = CGPoint.zero
+    @State private var thumbnails: [Int64: [MediaTile]] = [:]
+    @State private var waves: [Int64: TimelineWaveStrip.Entry] = [:]
+    @State private var markers: [Marker] = []
+    @State private var rowCache = TimelineRowCache()
+    @State private var thumbCache = TimelineThumbStrip()
+    @State private var waveCache = TimelineWaveStrip(capacity: 2048)
+    private let m = TimelineMetrics()
+    private let pulse = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 
-    /// Escala horizontal: pontos por quadro. O zoom é do app (a régua é
-    /// desenhada, não rolada), como no Android.
-    @State private var pointsPerFrame: CGFloat = 8
-    @State private var origin: Int64 = 0
-    @State private var scrubbing = false
-    @State private var zoomBase: CGFloat = 8
-
-    private let rulerHeight: CGFloat = 22
-    private let rowHeight: CGFloat = 28
-
-    // =========================================================================
-    // O snapshot do instante
-    // =========================================================================
-    private var snapshot: TimelineSnapshot {
-        var snap = TimelineSnapshot()
-        snap.rows = model.layers.map { layer in
-            let keys = (model.keyframes[layer.id] ?? [])
-                .filter { $0.effectIndex == 0xFFFF_FFFF }   // keyframe de efeito vive no painel
-                .map(\.time)
-            return TimelineSnapshot.Row(id: layer.id, name: layer.name, kind: layer.kind,
-                                        start: layer.startFrame, end: layer.endFrame,
-                                        visible: layer.visible, locked: layer.locked,
-                                        threeD: layer.threeD, selected: model.selection.contains(layer.id),
-                                        keys: keys)
-        }
-        snap.playhead = model.status.playhead
-        snap.duration = model.compositionDuration
-        snap.fps = model.compositionFps
-        snap.pointsPerFrame = pointsPerFrame
-        snap.origin = origin
-        return snap
+    private struct MediaTile { var localFrame: Double; var width: CGFloat; var image: UIImage }
+    private struct Marker { var frame: Int32; var packedColor: UInt32; var kind: UInt32 }
+    private enum Mode { case scrub, scroll, move, trimStart, trimEnd, key, reorder, hold, blocked }
+    private struct Interaction {
+        var mode: Mode
+        var start: CGPoint
+        var view: Double
+        var scroll: CGFloat
+        var row: TimelineRow?
+        var hit: TimelineHit
+        var selection: [LayerItem]
+        var snapTargets: [Int32]
+        var keyIndex: Int = -1
+        var keyFrame: Int32 = 0
+        var keyLimits: (lo: Int32, hi: Int32) = (0, 0)
+        var sentDelta: Int32 = 0
+        var undoOpen = false
+    }
+    private var compact: Bool { model.sheetContent == .panel }
+    private var fps: Float { TimeAxis.safeFps(Float(model.compositionFps)) }
+    private var ppf: CGFloat { TimeAxis.pxPerFrame(pps: pps, density: 1, fps: fps) }
+    private var viewFrame: Double { heldView ?? Double(model.status.playhead) }
+    private var rows: [TimelineRow] {
+        let all = rowCache.build(model.layers, model.keyframes)
+        return compact ? all.filter { $0.id == model.primarySelection } : all
+    }
+    private func x(_ frame: Double, width: CGFloat) -> CGFloat {
+        TimeAxis.xOf(frame: frame, view: viewFrame, pxPerFrame: ppf, centerX: width / 2)
+    }
+    private func frame(_ x: CGFloat, width: CGFloat) -> Double {
+        TimeAxis.frameAt(x: x, view: viewFrame, pxPerFrame: ppf, centerX: width / 2)
+    }
+    private func maxScroll(_ height: CGFloat) -> CGFloat {
+        compact ? 0 : max(0, CGFloat(rows.count) * m.row + m.bottomPad - (height - m.rowsTop))
     }
 
-    func x(forFrame frame: Int64, _ snap: TimelineSnapshot) -> CGFloat {
-        CGFloat(frame - snap.origin) * snap.pointsPerFrame
-    }
-
-    func frame(forX px: CGFloat, _ snap: TimelineSnapshot) -> Int64 {
-        snap.origin + Int64((px / snap.pointsPerFrame).rounded(.down))
-    }
-
-    // =========================================================================
     var body: some View {
         GeometryReader { geometry in
-            let snap = snapshot
-            ZStack(alignment: .topLeading) {
-                AureaColors.stage
-                rulerCanvas(snap)
-                    .frame(height: rulerHeight)
-                layerCanvas(snap)
-                    .frame(height: max(0, geometry.size.height - rulerHeight))
-                    .offset(y: rulerHeight)
-                playheadCanvas(snap)
-                    .frame(height: geometry.size.height)
-                    .allowsHitTesting(false)
+            let size = geometry.size
+            Canvas { context, canvasSize in
+                drawRows(&context, size: canvasSize)
+                drawRuler(&context, size: canvasSize)
+                let tint = compact ? AureaColors.danger : AureaColors.playhead
+                context.fill(Path(CGRect(x: canvasSize.width / 2 - m.playhead / 2, y: 0, width: m.playhead, height: canvasSize.height)), with: .color(tint))
+                if compact {
+                    context.fill(Path(roundedRect: CGRect(x: canvasSize.width / 2 - m.knob / 2, y: 0, width: m.knob, height: m.knob), cornerRadius: m.knobRadius), with: .color(tint))
+                }
             }
-            .contentShape(Rectangle())
-            .gesture(scrubGesture(snap))
-            .simultaneousGesture(selectGesture(snap))
-            .simultaneousGesture(zoomGesture)
+            .background(AureaColors.stage)
+            .overlay {
+                TimelineGestureSurface(
+                    tap: { tap($0, width: size.width) },
+                    pan: { state, start, point, velocity in pan(state, start: start, point: point, velocity: velocity, size: size) },
+                    hold: { state, start, point in hold(state, start: start, point: point, size: size) },
+                    pinch: { state, scale, focus in pinch(state, scale: scale, focus: focus, width: size.width) }
+                )
+            }
+            .onAppear {
+                let seconds = CGFloat(model.compositionDuration) / CGFloat(fps)
+                if seconds >= Zoom.autoFitMinSeconds { pps = Zoom.autoFit(availableDp: size.width - 32, seconds: seconds) }
+                refreshMedia(size: size)
+            }
+            .onChange(of: model.status.thumbnailGeneration) { _ in refreshMedia(size: size) }
+            .onChange(of: model.status.playhead) { _ in refreshMedia(size: size) }
+            .onChange(of: model.status.modelRevision) { _ in refreshMedia(size: size) }
+            .onChange(of: scrollY) { _ in refreshMedia(size: size) }
+            .onChange(of: pps) { _ in refreshMedia(size: size) }
+            .onChange(of: heldView) { _ in refreshMedia(size: size) }
+            .onChange(of: size) { _ in scrollY = min(scrollY, maxScroll(size.height)); refreshMedia(size: size) }
+            .onChange(of: model.primarySelection) { _ in revealSelection(size: size); refreshMedia(size: size) }
+            .onChange(of: model.curveSelectedTime) { time in
+                if let time, let id = model.primarySelection, let row = rows.first(where: { $0.id == id }) {
+                    selectedKey = (id, Keyframes.toTimeline(time, row.start, row.offset))
+                }
+            }
+            .onChange(of: compact) { _ in scrollY = 0; refreshMedia(size: size) }
+            .onReceive(pulse) { _ in tick(size: size) }
+            .onDisappear { finish(cancelled: true); finishPinch() }
             .clipped()
-        }
-        .background(AureaColors.stage)
-        .overlay(alignment: .top) {
-            Rectangle().fill(AureaColors.hairline).frame(height: AureaDims.hairline)
         }
     }
 
-    // =========================================================================
-    // Régua
-    // =========================================================================
-    private func rulerCanvas(_ snap: TimelineSnapshot) -> some View {
-        Canvas { context, size in
-            let fps = max(1.0, snap.fps)
-            // Um risco por segundo quando cabe; senão, um a cada N segundos — a
-            // régua nunca vira um borrão (a mesma regra do painter do Android).
-            let pixelsPerSecond = snap.pointsPerFrame * CGFloat(fps)
-            guard pixelsPerSecond > 0 else { return }
-            var stepSeconds: Double = 1
-            while pixelsPerSecond * CGFloat(stepSeconds) < 44 { stepSeconds *= 2 }
-            let totalSeconds = Double(max(1, snap.duration)) / fps
-            var second: Double = 0
-            while second <= totalSeconds {
-                let px = CGFloat(Int64(second * fps) - snap.origin) * snap.pointsPerFrame
-                if px >= -40 && px <= size.width + 40 {
-                    context.fill(Path(CGRect(x: px, y: size.height * 0.45, width: 1,
-                                             height: size.height * 0.55)),
-                                 with: .color(AureaColors.tickMajor))
-                    context.draw(Text(Self.label(seconds: second))
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(AureaColors.tickMajor),
-                                 at: CGPoint(x: px + 3, y: size.height * 0.28), anchor: .leading)
-                    if pixelsPerSecond * CGFloat(stepSeconds) > 120 {
-                        for tenth in 1..<10 {
-                            let sub = second + stepSeconds * Double(tenth) / 10.0
-                            let subX = CGFloat(Int64(sub * fps) - snap.origin) * snap.pointsPerFrame
-                            if subX >= 0 && subX <= size.width {
-                                context.fill(Path(CGRect(x: subX, y: size.height * 0.72,
-                                                         width: 1, height: size.height * 0.28)),
-                                             with: .color(AureaColors.tickMinor))
-                            }
+    // MARK: Android painter
+    private func drawRuler(_ context: inout GraphicsContext, size: CGSize) {
+        context.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: m.rowsTop)), with: .color(AureaColors.stage))
+        let steps = RulerSteps.of(pps: pps, fps: fps)
+        let t0 = frame(0, width: size.width) / Double(fps)
+        let t1 = frame(size.width, width: size.width) / Double(fps)
+        var major = Path(), minor = Path()
+        if t1 >= 0 {
+            let first = max(0, Int(floor(max(0, t0) / steps.majorSeconds)))
+            let last = max(first, Int(ceil(t1 / steps.majorSeconds)))
+            for k in first...last {
+                let seconds = Double(k) * steps.majorSeconds
+                let px = x(seconds * Double(fps), width: size.width)
+                major.move(to: CGPoint(x: px, y: m.tickMajorTop)); major.addLine(to: CGPoint(x: px, y: m.tickBottom))
+                if !steps.frameMinors && steps.subdivisions > 1 {
+                    for j in 1..<steps.subdivisions {
+                        let sx = x((seconds + Double(j) * steps.majorSeconds / Double(steps.subdivisions)) * Double(fps), width: size.width)
+                        if sx >= -1 && sx <= size.width + 1 {
+                            minor.move(to: CGPoint(x: sx, y: m.tickMinorTop)); minor.addLine(to: CGPoint(x: sx, y: m.tickBottom))
                         }
                     }
                 }
-                second += stepSeconds
+                if steps.labels {
+                    let label = Text(Timecode.rulerLabel(timelineFrame(seconds))).font(.aurea(size: 9, weight: .medium)).monospacedDigit().foregroundColor(AureaTimeline.tickMajor)
+                    let resolved = context.resolve(label)
+                    let lw = resolved.measure(in: CGSize(width: 120, height: 20)).width
+                    let lx = px + m.tickLabelGap
+                    if lx + lw <= size.width / 2 - m.timecodeZoneHalf || lx >= size.width / 2 + m.timecodeZoneHalf {
+                        context.draw(resolved, at: CGPoint(x: lx, y: 0), anchor: .topLeading)
+                    }
+                }
+            }
+            if steps.frameMinors {
+                let firstFrame = max(0, Int64(ceil(t0 * Double(fps))))
+                let lastFrame = Int64(floor(t1 * Double(fps)))
+                if lastFrame >= firstFrame {
+                    for f in firstFrame...lastFrame {
+                        let sec = Double(f) / Double(fps)
+                        if abs(sec - (sec / steps.majorSeconds).rounded() * steps.majorSeconds) * Double(fps) >= 0.5 {
+                            let px = x(Double(f), width: size.width)
+                            minor.move(to: CGPoint(x: px, y: m.tickMinorTop)); minor.addLine(to: CGPoint(x: px, y: m.tickBottom))
+                        }
+                    }
+                }
+            }
+        }
+        context.stroke(minor, with: .color(AureaTimeline.tickMinor), lineWidth: m.tickMinorWidth)
+        context.stroke(major, with: .color(AureaTimeline.tickMajor), lineWidth: m.tickMajorWidth)
+        for marker in markers {
+            let px = x(Double(marker.frame), width: size.width), half = m.tickBottom * 0.28
+            guard px >= -half && px <= size.width + half else { continue }
+            let s = marker.kind == 1 ? half * 0.7 : half
+            let color = Color(.sRGB, red: Double(marker.packedColor & 255) / 255,
+                              green: Double((marker.packedColor >> 8) & 255) / 255,
+                              blue: Double((marker.packedColor >> 16) & 255) / 255, opacity: 1)
+            var path = Path(); path.move(to: CGPoint(x: px - s, y: 0)); path.addLine(to: CGPoint(x: px + s, y: 0))
+            path.addLine(to: CGPoint(x: px, y: s * 1.4)); path.closeSubpath()
+            context.fill(path, with: .color(color))
+            var line = Path(); line.move(to: CGPoint(x: px, y: s * 1.4)); line.addLine(to: CGPoint(x: px, y: m.tickBottom))
+            context.stroke(line, with: .color(color), lineWidth: marker.kind == 1 ? 1 : 1.5)
+        }
+        let clock = Text(Timecode.format(Int32(clamping: model.status.playhead), fps)).font(.aurea(size: 13, weight: .bold)).monospacedDigit().tracking(0.5).foregroundColor(.white)
+        // Android anchors the text baseline at 21 dp, above the 28.2 dp underline.
+        let resolvedClock = context.resolve(clock)
+        let clockSize = resolvedClock.measure(in: CGSize(width: size.width, height: m.rowsTop))
+        context.draw(resolvedClock, at: CGPoint(x: size.width / 2, y: m.timecodeBaseline - resolvedClock.firstBaseline(in: clockSize)), anchor: .top)
+        context.fill(Path(CGRect(x: size.width / 2 - m.underlineWidth / 2, y: m.underlineTop, width: m.underlineWidth, height: m.underlineHeight)), with: .color(.white))
+    }
+
+    private func drawRows(_ context: inout GraphicsContext, size: CGSize) {
+        var c = context
+        c.clip(to: Path(CGRect(x: 0, y: m.rowsTop, width: size.width, height: max(0, size.height - m.rowsTop))))
+        let visibleRows = rows
+        for (index, row) in visibleRows.enumerated() {
+            let top = m.rowsTop + CGFloat(index) * m.row - (compact ? 0 : scrollY)
+            if top + m.row < m.rowsTop || top > size.height { continue }
+            drawRow(&c, row: row, top: top, width: size.width)
+        }
+        if reorderSource >= 0 {
+            let top = m.rowsTop + CGFloat(reorderSource) * m.row - scrollY
+            c.fill(Path(CGRect(x: 0, y: top, width: size.width, height: m.row)), with: .color(AureaColors.accent.opacity(0.14)))
+            let y = Reorder.dropLineY(source: reorderSource, target: reorderTarget, rowsTop: m.rowsTop, scroll: scrollY, rowHeight: m.row)
+            if y.isFinite {
+                c.fill(Path(CGRect(x: 0, y: y - m.reorderLine / 2, width: size.width, height: m.reorderLine)), with: .color(AureaColors.accent))
+                c.fill(Path(ellipseIn: CGRect(x: m.pillLeft - m.reorderDot, y: y - m.reorderDot, width: m.reorderDot * 2, height: m.reorderDot * 2)), with: .color(AureaColors.accent))
+            }
+        }
+        let shade = Gradient(stops: [.init(color: AureaColors.stage, location: 0), .init(color: AureaColors.stage.opacity(0.95), location: 0.78), .init(color: AureaColors.stage.opacity(0), location: 1)])
+        c.fill(Path(CGRect(x: 0, y: m.rowsTop, width: m.headerColumn, height: max(0, size.height - m.rowsTop))), with: .linearGradient(shade, startPoint: .zero, endPoint: CGPoint(x: m.headerColumn, y: 0)))
+        for (index, row) in visibleRows.enumerated() {
+            let cy = m.rowsTop + CGFloat(index) * m.row - (compact ? 0 : scrollY) + m.row / 2
+            guard cy + m.row / 2 >= m.rowsTop && cy - m.row / 2 <= size.height else { continue }
+            c.fill(Path(roundedRect: CGRect(x: m.pillLeft, y: cy - m.pillHeight / 2, width: m.pillWidth, height: m.pillHeight), cornerRadius: m.pillRadius), with: .color(AureaTimeline.headerPill))
+            glyph(&c, row.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: m.eyeGlyph, tint: .white.opacity(0.7), x: m.eyeCenterX, y: cy)
+            c.fill(Path(roundedRect: CGRect(x: m.swatchLeft, y: cy - m.swatch / 2, width: m.swatch, height: m.swatch), cornerRadius: m.swatchRadius), with: .color(AureaTimeline.swatch))
+            if row.locked {
+                glyph(&c, CupertinoGlyph.LockFill, size: 11, tint: AureaTimeline.swatchGlyph, x: m.swatchLeft + m.swatch / 2, y: cy)
+            } else if model.selection.count >= 2 && model.selection.contains(row.id) {
+                glyph(&c, CupertinoGlyph.CheckmarkAlt, size: 13, tint: AureaTimeline.swatchGlyph, x: m.swatchLeft + m.swatch / 2, y: cy)
+            }
+        }
+        if guide != Snap.none {
+            let gx = x(Double(guide), width: size.width)
+            if gx >= m.headerColumn && gx <= size.width {
+                c.fill(Path(CGRect(x: gx - m.guide / 2, y: m.rowsTop, width: m.guide, height: size.height - m.rowsTop)), with: .color(AureaColors.accent))
             }
         }
     }
 
-    static func label(seconds: Double) -> String {
-        let total = Int(seconds)
-        return String(format: "%d:%02d", total / 60, total % 60)
+    private func drawRow(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, width: CGFloat) {
+        let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
+        let selected = model.selection.contains(row.id)
+        if x1 >= -m.barRadius && x0 <= width + m.barRadius {
+            let left = max(x0, -m.barRadius * 2), right = min(x1, width + m.barRadius * 2)
+            let rect = CGRect(x: left, y: top, width: right - left, height: m.bar)
+            let shape = Path(roundedRect: rect, cornerRadius: m.barRadius)
+            var bar = context; bar.clip(to: shape)
+            // Channel-wise sRGB interpolation, matching TimelinePainter.lerpSrgb.
+            let amount: CGFloat = !row.visible ? 0.22 : selected ? 0.66 : 0.46
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            UIColor(row.type.color).getRed(&r, green: &g, blue: &b, alpha: &a)
+            let fill = Color(.sRGB, red: Double(21.0 / 255 + (r - 21.0 / 255) * amount), green: Double(28.0 / 255 + (g - 28.0 / 255) * amount), blue: Double(36.0 / 255 + (b - 36.0 / 255) * amount), opacity: 1)
+            bar.fill(shape, with: .color(fill))
+            if let tiles = thumbnails[row.id], !tiles.isEmpty {
+                for tile in tiles {
+                    let px = x(Double(row.start) - Double(row.offset) + tile.localFrame, width: width)
+                    bar.draw(Image(uiImage: tile.image), in: CGRect(x: px, y: top, width: tile.width, height: m.bar))
+                }
+                let shade = Gradient(stops: [.init(color: .black.opacity(0.62), location: 0), .init(color: .black.opacity(0.22), location: 0.45)])
+                bar.fill(shape, with: .linearGradient(shade, startPoint: CGPoint(x: x0, y: top), endPoint: CGPoint(x: x1, y: top)))
+            }
+            bar.fill(Path(CGRect(x: left, y: top + m.trackTop, width: right - left, height: m.track)), with: .color(.black.opacity(0.22)))
+            drawWave(&bar, row: row, top: top, x0: x0, x1: x1, width: width)
+            let stripe = row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count ? AureaColors.labelPalette[Int(row.label) - 1] : row.type.color
+            bar.fill(Path(CGRect(x: x0, y: top, width: m.stripe, height: m.bar)), with: .color(stripe.opacity(row.visible ? 1 : 0.5)))
+            var light = Path(); light.move(to: CGPoint(x: max(x0 + m.stripe, left), y: top + m.lightLine / 2)); light.addLine(to: CGPoint(x: right, y: top + m.lightLine / 2))
+            bar.stroke(light, with: .color(.white.opacity(selected ? 0.24 : 0.1)), lineWidth: m.lightLine)
+            drawContent(&bar, row: row, top: top, x0: x0, x1: x1, width: width)
+            if selected {
+                let stroke = model.selection.count >= 2 ? m.multiStroke : m.selStroke
+                context.stroke(Path(roundedRect: rect.insetBy(dx: stroke / 2, dy: stroke / 2), cornerRadius: m.barRadius - stroke / 2), with: .color(.white), lineWidth: stroke)
+            }
+            if !compact && model.selection.count == 1 && selected && !row.locked {
+                if x0 >= m.headerColumn { drawHandle(&context, left: x0 - m.trimInsetStart, top: top) }
+                if x1 <= width { drawHandle(&context, left: x1 - m.trimInsetEnd, top: top) }
+            }
+        }
+        drawKeys(&context, row: row, top: top, width: width)
     }
 
-    // =========================================================================
-    // Camadas e keyframes
-    // =========================================================================
-    private func layerCanvas(_ snap: TimelineSnapshot) -> some View {
-        Canvas { context, size in
-            for (index, layer) in snap.rows.enumerated() {
-                let y = CGFloat(index) * rowHeight
-                if y > size.height { break }
-                context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: rowHeight - 1)),
-                             with: .color(layer.selected ? AureaColors.accentDim.opacity(0.55)
-                                                         : AureaColors.surface.opacity(0.35)))
-                if layer.selected {
-                    context.stroke(Path(CGRect(x: 0.5, y: y + 0.5, width: size.width - 1,
-                                               height: rowHeight - 2)),
-                                   with: .color(AureaColors.accent), lineWidth: 1)
-                }
+    private func drawContent(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat) {
+        let barWidth = x1 - x0
+        let cl = TimelineHit.contentLeft(m, x0, x1), cr = TimelineHit.contentRight(m, x0, x1, width)
+        guard cr > cl else { return }
+        let cy = top + m.trackTop / 2
+        var px = cl
+        if compact { glyph(&context, CupertinoGlyph.ChevronLeft, size: m.arrowGlyph, tint: .white.opacity(0.7), x: px + m.arrowSlot / 2, y: cy); px += m.arrowSlot }
+        if barWidth > m.iconMinBar {
+            glyph(&context, row.type.glyph, size: m.typeIcon, tint: .white.opacity(row.visible ? 0.85 : 0.45), x: px + m.typeIcon / 2, y: cy)
+            px += m.typeIcon + m.iconGap
+        }
+        if row.locked {
+            glyph(&context, CupertinoGlyph.LockFill, size: m.lockIcon, tint: .white, x: px + m.lockIcon / 2, y: cy)
+            px += m.lockIcon + (barWidth > m.lockGapMinBar ? m.lockGap : 0)
+        }
+        let menuRight = x1 - (barWidth < m.narrowBar ? m.padRNarrow : m.padR)
+        let right = compact ? cr - m.arrowSlot : barWidth > m.menuMinBar ? min(cr, menuRight - m.menuGlyph) : cr
+        let rhombusWidth = row.animated && barWidth > m.rhombusMinBar ? m.rhombusGap + m.rhombusIcon : 0
+        let avail = right - rhombusWidth - px
+        if barWidth > m.nameMinBar && !row.name.isEmpty && avail > 8 {
+            let name = fittedName(row.name, width: floor(avail / 12) * 12)
+            let resolved = context.resolve(Text(name).font(.aurea(size: 12, weight: .semibold)).tracking(-0.1).foregroundColor(.white))
+            context.draw(resolved, at: CGPoint(x: px, y: cy), anchor: .leading)
+            px += resolved.measure(in: CGSize(width: avail, height: m.trackTop)).width
+        }
+        if rhombusWidth > 0 && px + rhombusWidth <= right + 1 {
+            glyph(&context, CupertinoGlyph.Rhombus, size: m.rhombusIcon, tint: .white, x: px + m.rhombusGap + m.rhombusIcon / 2, y: cy)
+        }
+        if compact {
+            glyph(&context, CupertinoGlyph.ChevronRight, size: m.arrowGlyph, tint: .white.opacity(0.7), x: cr - m.arrowSlot / 2, y: cy)
+        } else if barWidth > m.menuMinBar && menuRight <= width + m.menuGlyph {
+            glyph(&context, CupertinoGlyph.LineHorizontal3, size: m.menuGlyph, tint: .white.opacity(0.7), x: menuRight - m.menuGlyph / 2, y: cy)
+        }
+    }
 
-                let startX = CGFloat(Int64(layer.start) - snap.origin) * snap.pointsPerFrame
-                let endX = CGFloat(Int64(layer.end) - snap.origin) * snap.pointsPerFrame
-                let clip = CGRect(x: startX, y: y + 4, width: max(2, endX - startX), height: rowHeight - 10)
-                let base = layer.threeD ? AureaColors.keyframe : Self.color(forKind: layer.kind)
-                context.fill(Path(roundedRect: clip, cornerRadius: 4),
-                             with: .color(base.opacity(layer.visible ? 0.75 : 0.28)))
-                if layer.locked {
-                    context.draw(Text(Image(systemName: "lock.fill"))
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(AureaColors.text),
-                                 at: CGPoint(x: clip.minX + 8, y: clip.midY))
-                }
-                if clip.width > 40 {
-                    context.draw(Text(layer.name.isEmpty ? Self.kindName(layer.kind) : layer.name)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(AureaColors.text),
-                                 at: CGPoint(x: clip.minX + 6, y: clip.midY), anchor: .leading)
-                }
+    private func drawHandle(_ context: inout GraphicsContext, left: CGFloat, top: CGFloat) {
+        context.fill(Path(roundedRect: CGRect(x: left, y: top + m.trimTop, width: m.trimWidth, height: m.bar - m.trimTop * 2), cornerRadius: m.trimRadius), with: .color(AureaTimeline.trimHandle))
+        context.fill(Path(CGRect(x: left + (m.trimWidth - m.gripWidth) / 2, y: top + (m.bar - m.gripHeight) / 2, width: m.gripWidth, height: m.gripHeight)), with: .color(.black.opacity(0.38)))
+    }
 
-                // Keyframes de transform: um losango por marca, no tempo LOCAL.
-                for key in layer.keys {
-                    let localX = CGFloat(Int64(key) + Int64(layer.start) - snap.origin) * snap.pointsPerFrame
-                    guard localX > clip.minX - 6, localX < clip.maxX + 6 else { continue }
-                    var diamond = Path()
-                    diamond.move(to: CGPoint(x: localX, y: clip.midY - 4))
-                    diamond.addLine(to: CGPoint(x: localX + 4, y: clip.midY))
-                    diamond.addLine(to: CGPoint(x: localX, y: clip.midY + 4))
-                    diamond.addLine(to: CGPoint(x: localX - 4, y: clip.midY))
-                    diamond.closeSubpath()
-                    let onPlayhead = Int64(key) + Int64(layer.start) == snap.playhead
-                    context.fill(diamond, with: .color(onPlayhead ? AureaColors.keyframeOn
-                                                                  : AureaColors.keyframe))
+    private func drawKeys(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, width: CGFloat) {
+        guard !row.instants.isEmpty else { return }
+        var groups = [Int32](repeating: 0, count: 2 * Int((width + 2 * m.keyTouchHalf) / m.keyMergeGap) + 8)
+        let count = Keyframes.visibleGroups(row.instants, view: viewFrame, pxPerFrame: ppf, centerX: width / 2, width: width, margin: m.keyTouchHalf, mergeGap: m.keyMergeGap, out: &groups)
+        let cy = top + (compact ? m.diamondCyCompact : m.diamondCyNormal)
+        let chosen = selectedKey?.layer == row.id ? selectedKey?.frame ?? Snap.none : Snap.none
+        for group in 0..<count {
+            let i = Int(groups[group * 2]), j = Int(groups[group * 2 + 1])
+            let px = x(Double(row.instants[i]), width: width)
+            let on = Keyframes.groupHas(row.instants, i, j, chosen)
+            let fill = on ? AureaTimeline.keyframeOn : Color.white.opacity(0.9)
+            if i == j {
+                let dragging = gesture?.mode == .key && gesture?.row?.id == row.id && gesture?.keyFrame == row.instants[i]
+                let side = m.diamond * (dragging ? m.keyDragScale : 1)
+                var diamond = context; diamond.translateBy(x: px, y: cy); diamond.rotate(by: .degrees(45))
+                let glow = side / 2 * 1.3
+                diamond.fill(Path(roundedRect: CGRect(x: -glow, y: -glow, width: glow * 2, height: glow * 2), cornerRadius: m.diamondRadius * 1.5), with: .color(on ? AureaTimeline.keyframeOn.opacity(0.35) : .black.opacity(0.3)))
+                diamond.fill(Path(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side), cornerRadius: m.diamondRadius), with: .color(fill))
+                diamond.stroke(Path(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side).insetBy(dx: m.diamondStroke / 2, dy: m.diamondStroke / 2), cornerRadius: m.diamondRadius), with: .color(.black.opacity(0.85)), lineWidth: m.diamondStroke)
+                if dragging {
+                    let text = context.resolve(Text(Timecode.format(row.instants[i], fps)).font(.aurea(size: 10, weight: .bold)).monospacedDigit().foregroundColor(.white))
+                    let measured = text.measure(in: CGSize(width: 180, height: 20))
+                    let rect = CGRect(x: px - measured.width / 2 - m.balloonPadH, y: cy - side * 1.4142135 / 2 - m.balloonGap - measured.height - m.balloonPadV * 2, width: measured.width + m.balloonPadH * 2, height: measured.height + m.balloonPadV * 2)
+                    context.fill(Path(roundedRect: rect, cornerRadius: m.balloonRadius), with: .color(.black.opacity(0.82)))
+                    context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY))
                 }
+            } else {
+                let lastX = x(Double(row.instants[j]), width: width), pillWidth = max(lastX - px, m.keyPillMinWidth)
+                let rect = CGRect(x: (px + lastX - pillWidth) / 2, y: cy - m.keyPillHeight / 2, width: pillWidth, height: m.keyPillHeight)
+                context.fill(Path(roundedRect: rect, cornerRadius: m.keyPillHeight / 2), with: .color(fill))
+                context.stroke(Path(roundedRect: rect.insetBy(dx: m.diamondStroke / 2, dy: m.diamondStroke / 2), cornerRadius: m.keyPillHeight / 2), with: .color(.black.opacity(0.85)), lineWidth: m.diamondStroke)
             }
         }
     }
 
-    static func color(forKind kind: UInt32) -> Color {
-        switch kind {
-        case 1: return AureaColors.accent        // vídeo
-        case 2: return AureaColors.success       // imagem
-        case 3: return AureaColors.warning       // áudio
-        case 4: return AureaColors.keyframe      // texto
-        case 5: return Color(hex: 0x9E9E9E)      // forma
-        default: return AureaColors.subtle
+    private func drawWave(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat) {
+        guard let wave = waves[row.id] else { return }
+        let left = max(x0 + m.stripe, 0), right = min(x1, width)
+        guard right > left else { return }
+        let audio = row.type == .audio
+        let areaTop = top + m.trackTop * (audio ? 0.62 : 0.8), bottom = top + m.bar - m.lightLine
+        let mid = (areaTop + bottom) / 2, half = (bottom - areaTop) / 2
+        let first = WaveGrid.bucketAt(frame(left, width: width), wave.fpb), last = WaveGrid.bucketAt(frame(right, width: width), wave.fpb)
+        var path = Path()
+        if last >= first {
+            for bucket in first...last {
+                let amplitude = CGFloat(wave.at(bucket)) / 255 * half
+                let px = x((Double(bucket) + 0.5) * wave.fpb, width: width)
+                guard amplitude >= 0.5 && px >= left && px <= right else { continue }
+                path.move(to: CGPoint(x: px, y: mid - amplitude)); path.addLine(to: CGPoint(x: px, y: mid + amplitude))
+            }
         }
+        context.stroke(path, with: .color(.white.opacity(Double(audio ? 170 : 150) / 255)), lineWidth: max(1, CGFloat(wave.fpb) * ppf * 0.72))
     }
 
-    static func kindName(_ kind: UInt32) -> String {
-        switch kind {
-        case 1: return AureaText.t("editor_video")
-        case 2: return AureaText.t("editor_foto")
-        case 3: return AureaText.t("editor_musica_ou_som")
-        case 4: return "Texto"
-        case 5: return "Forma"
-        case 6: return "Nulo"
-        default: return "Camada"
+    private func glyph(_ context: inout GraphicsContext, _ glyph: Character, size: CGFloat, tint: Color, x: CGFloat, y: CGFloat) {
+        context.draw(Text(String(glyph)).font(CupertinoFont.font(size)).foregroundColor(tint), at: CGPoint(x: x, y: y))
+    }
+    private func fittedName(_ name: String, width: CGFloat) -> String {
+        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 12, weight: .semibold), .kern: -0.1]
+        if (name as NSString).size(withAttributes: attributes).width <= width { return name }
+        let letters = Array(name)
+        var lo = 0, hi = letters.count
+        while lo < hi {
+            let n = (lo + hi + 1) / 2
+            if ((String(letters.prefix(n)) + "…") as NSString).size(withAttributes: attributes).width <= width { lo = n } else { hi = n - 1 }
         }
+        return String(letters.prefix(lo)) + "…"
     }
 
-    // =========================================================================
-    // Playhead
-    // =========================================================================
-    private func playheadCanvas(_ snap: TimelineSnapshot) -> some View {
-        Canvas { context, size in
-            let px = CGFloat(snap.playhead - snap.origin) * snap.pointsPerFrame
-            guard px >= -1 && px <= size.width + 1 else { return }
-            context.fill(Path(CGRect(x: px - 0.5, y: 0, width: 1, height: size.height)),
-                         with: .color(AureaColors.playhead))
-            context.fill(Path(ellipseIn: CGRect(x: px - 4, y: 0, width: 8, height: 8)),
-                         with: .color(AureaColors.playhead))
-        }
-    }
-
-    // =========================================================================
-    // Gestos: arrastar o playhead (scrub), tocar uma linha escolhe a camada,
-    // pinça dá zoom na régua.
-    // =========================================================================
-    private func scrubGesture(_ snap: TimelineSnapshot) -> some Gesture {
-        DragGesture(minimumDistance: 2)
-            .onChanged { value in
-                if !scrubbing {
-                    scrubbing = true
-                    // O motor sabe que o dedo encostou: ele coalesce os pedidos
-                    // de seek (um por instante, não uma fila — ver VideoSource).
-                    model.engine.run { $0.scrubBegin() }
+    private func refreshMedia(size: CGSize) {
+        guard size.width > 0 && size.height > 0 else { return }
+        thumbCache.beginFrame(6)
+        let first = max(0, Int(scrollY / m.row))
+        let visible = rows.dropFirst(first).prefix(Int(size.height / m.row) + 2)
+        var next: [Int64: [MediaTile]] = [:], nextWaves: [Int64: TimelineWaveStrip.Entry] = [:]
+        for row in visible {
+            let x0 = x(Double(row.start), width: size.width), x1 = max(x(Double(row.end), width: size.width), x0 + m.barMinWidth)
+            let left = max(x0, 0), right = min(x1, size.width)
+            guard right > left else { continue }
+            if row.hasThumbs {
+                let tileWidth = m.bar * thumbCache.aspect(row.id)
+                let origin = x(Double(row.start) - Double(row.offset), width: size.width)
+                let start = max(0, Int(floor((left - origin) / tileWidth))), end = Int(floor((right - origin) / tileWidth))
+                var tiles: [MediaTile] = []
+                if end >= start {
+                    for index in start...end {
+                        let local = Double(CGFloat(index) * tileWidth / ppf)
+                        let bucket = row.type == .image ? -1 : Thumbs.bucketOf(local, fps)
+                        let request = row.type == .image ? row.start : Keyframes.toTimeline(Thumbs.requestLocalFrame(bucket, fps), row.start, row.offset)
+                        if let image = thumbCache.get(model, layer: row.id, bucket: bucket, timelineFrame: request, heightPx: Int(m.bar), generation: model.status.thumbnailGeneration) {
+                            tiles.append(MediaTile(localFrame: local, width: tileWidth, image: image))
+                        }
+                    }
                 }
-                let clamped = max(0, min(frame(forX: value.location.x, snap), snap.duration))
-                model.engine.run { $0.scrub(toFrame: clamped) }
-                // Otimismo LOCAL: o playhead acompanha o dedo sem esperar o
-                // tique do status (o valor real volta no próximo `fill_status`).
-                model.optimisticPlayhead(clamped)
+                next[row.id] = tiles
             }
-            .onEnded { _ in
-                if scrubbing {
-                    scrubbing = false
-                    model.engine.run { $0.scrubEnd() }
+            if row.type == .audio || row.type == .video {
+                let fpb = WaveGrid.framesPerBucket(targetPx: 1.5, pxPerFrame: ppf)
+                let firstBucket = WaveGrid.bucketAt(frame(max(x0 + m.stripe, 0), width: size.width), fpb), lastBucket = WaveGrid.bucketAt(frame(right, width: size.width), fpb)
+                nextWaves[row.id] = waveCache.get(model, layer: row.id, generation: model.status.modelRevision &+ model.status.thumbnailGeneration, fpb: fpb, first: firstBucket, last: lastBucket)
+            }
+        }
+        thumbnails = next; waves = nextWaves
+        let values = model.engine.markers()
+        markers = stride(from: 0, to: values.count - values.count % 3, by: 3).map { Marker(frame: values[$0].int32Value, packedColor: values[$0 + 1].uint32Value, kind: values[$0 + 2].uint32Value) }
+    }
+
+    // MARK: Android controller and hit priorities
+    private func hit(_ point: CGPoint, width: CGFloat) -> (TimelineRow?, TimelineHit) {
+        if point.y < m.rowsTop { return (nil, TimelineHit(kind: .ruler)) }
+        let index = Int(floor((point.y - m.rowsTop + (compact ? 0 : scrollY)) / m.row))
+        let current = rows
+        guard current.indices.contains(index) else { return (nil, TimelineHit(kind: .none)) }
+        let row = current[index]
+        let y = point.y - m.rowsTop - CGFloat(index) * m.row + (compact ? 0 : scrollY)
+        let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
+        let handles = !compact && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
+        return (row, TimelineHit.test(m, point: CGPoint(x: point.x, y: y), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: row.instants, view: viewFrame, ppf: ppf))
+    }
+    private func tap(_ point: CGPoint, width: CGFloat) {
+        scrollVelocity = 0
+        let (row, touched) = hit(point, width: width)
+        switch touched.kind {
+        case .ruler:
+            let target = max(0, timelineFrame(frame(point.x, width: width)))
+            model.seek(toFrame: Int64(target)); model.toggleMarkerAt(Int64(target))
+            UISelectionFeedbackGenerator().selectionChanged()
+        case .none:
+            selectedKey = nil; model.editorBackFromTimeline()
+        case .eye:
+            guard let row else { return }
+            model.engine.setLayer(row.id, visible: !row.visible); model.refreshModel(force: true)
+        case .previous, .next:
+            guard let selected = model.primarySelection, let index = model.layers.firstIndex(where: { $0.id == selected }) else { return }
+            let neighbor = index + (touched.kind == .previous ? 1 : -1)
+            if model.layers.indices.contains(neighbor) { model.select(layerId: model.layers[neighbor].id, additive: false) }
+        case .key:
+            guard let row, row.keysAt.indices.contains(touched.key) else { return }
+            pause(); model.select(layerId: row.id, additive: false)
+            let key = row.keysAt[touched.key][0]
+            selectedKey = (row.id, row.instants[touched.key])
+            model.seek(toFrame: Int64(row.instants[touched.key]))
+            model.openCurve(property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time)
+        default:
+            guard let row else { return }
+            if compact { selectedKey = nil; model.editorBackFromTimeline() }
+            else { pause(); selectedKey = nil; model.select(layerId: row.id, additive: model.selection.count >= 2) }
+        }
+    }
+
+    private func pause() { if model.status.playing != 0 { model.playPause() } }
+    private func targets(excluding: Set<Int64>, own: TimelineRow?, edges: Bool, keys: Bool) -> [Int32] {
+        var result = [Int32(0)] + markers.map(\.frame)
+        if !compact {
+            for row in rows where !excluding.contains(row.id) { result += [row.start, row.end] + row.instants }
+        }
+        if let own {
+            if edges { result += [own.start, own.end] }
+            if keys { result += own.instants }
+        }
+        return Snap.sortedDistinct(result)
+    }
+    private func begin(_ mode: Mode, start: CGPoint, width: CGFloat) {
+        scrollVelocity = 0
+        let (row, touched) = hit(start, width: width)
+        var selected = model.layers.filter { model.selection.contains($0.id) }
+        if mode == .move, let row, !selected.contains(where: { $0.id == row.id }), let item = model.layers.first(where: { $0.id == row.id }) { selected = [item] }
+        var next = Interaction(mode: mode, start: start, view: viewFrame, scroll: scrollY, row: row, hit: touched, selection: selected, snapTargets: [])
+        let excluded = Set(mode == .move ? selected.map(\.id) : row.map { [$0.id] } ?? [])
+        next.snapTargets = targets(excluding: excluded, own: row, edges: mode == .key, keys: mode == .trimStart || mode == .trimEnd)
+        if mode == .move && selected.contains(where: \.locked) || (mode == .key || mode == .trimStart || mode == .trimEnd || mode == .reorder) && row?.locked == true {
+            next.mode = .blocked
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        }
+        if next.mode == .key, let row, row.instants.indices.contains(touched.key) {
+            next.keyIndex = touched.key; next.keyFrame = row.instants[touched.key]
+            next.keyLimits = Keyframes.dragLimits(row.instants, touched.key, start: row.start, end: row.end)
+            selectedKey = (row.id, next.keyFrame)
+            model.select(layerId: row.id, additive: false)
+        }
+        if next.mode == .reorder, let row {
+            reorderSource = rows.firstIndex(where: { $0.id == row.id }) ?? -1; reorderTarget = reorderSource
+        }
+        if next.mode != .hold && next.mode != .blocked && next.mode != .scroll { pause() }
+        if next.mode == .scrub {
+            heldView = next.view; model.engine.run { $0.scrubBegin() }
+        }
+        gesture = next
+    }
+
+    private func pan(_ state: UIGestureRecognizer.State, start: CGPoint, point: CGPoint, velocity: CGPoint, size: CGSize) {
+        guard !pinching else { return }
+        if state == .began {
+            let (row, touched) = hit(start, width: size.width)
+            let horizontal = abs(point.x - start.x) >= abs(point.y - start.y)
+            let mode: Mode
+            if horizontal && touched.kind == .key { mode = .key }
+            else if horizontal && touched.kind == .trimStart { mode = .trimStart }
+            else if horizontal && touched.kind == .trimEnd { mode = .trimEnd }
+            else if horizontal && !compact && touched.kind == .body && row.map({ model.selection.contains($0.id) }) == true { mode = .move }
+            else { mode = horizontal || compact ? .scrub : .scroll }
+            begin(mode, start: start, width: size.width)
+        }
+        if state == .began || state == .changed { lastPointer = point; update(point, size: size) }
+        if state == .ended {
+            let wasScroll = gesture?.mode == .scroll
+            finish(cancelled: false)
+            if wasScroll && abs(velocity.y) >= m.flingMin { scrollVelocity = -velocity.y }
+        } else if state == .cancelled || state == .failed { finish(cancelled: true) }
+    }
+
+    private func hold(_ state: UIGestureRecognizer.State, start: CGPoint, point: CGPoint, size: CGSize) {
+        guard !pinching else { return }
+        if state == .began {
+            begin(.hold, start: start, width: size.width)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+        if state == .changed, let g = gesture, g.mode == .hold {
+            let dx = point.x - start.x, dy = point.y - start.y
+            if hypot(dx, dy) >= m.axisSlop {
+                let horizontal = abs(dx) > abs(dy)
+                let mode: Mode
+                if g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal || compact ? .scrub : .scroll }
+                else if g.hit.kind == .key { mode = horizontal ? .key : .blocked }
+                else if g.hit.kind == .header { mode = !horizontal && !compact ? .reorder : .blocked }
+                else { mode = horizontal || compact ? .move : .reorder }
+                if mode == .move, let row = g.row, !model.selection.contains(row.id) {
+                    model.select(layerId: row.id, additive: model.selection.count >= 2)
+                }
+                begin(mode, start: start, width: size.width)
+            }
+        }
+        if state == .began || state == .changed { lastPointer = point; update(point, size: size) }
+        if state == .ended {
+            if let g = gesture, g.mode == .hold, let row = g.row {
+                if g.hit.kind == .header {
+                    model.engine.setLayer(row.id, locked: !row.locked); model.refreshModel(force: true)
+                } else if g.hit.kind == .key { tap(start, width: size.width) }
+                else if !compact && g.hit.kind != .eye && g.hit.kind != .none {
+                    if model.selection.isEmpty { model.select(layerId: row.id, additive: false) }
+                    else if !(model.selection.count == 1 && model.selection.contains(row.id)) { model.select(layerId: row.id, additive: true) }
                 }
             }
+            finish(cancelled: false)
+        } else if state == .cancelled || state == .failed { finish(cancelled: true) }
     }
 
-    /// Tocar uma linha escolhe a camada. A camada é a que está NAQUELE y — a
-    /// timeline desenha a frente em cima, a mesma ordem de `query_layers`.
-    private func selectGesture(_ snap: TimelineSnapshot) -> some Gesture {
-        SpatialTapGesture()
-            .onEnded { value in
-                let y = value.location.y - rulerHeight
-                guard y >= 0 else { return }
-                let index = Int(y / rowHeight)
-                guard index >= 0 && index < model.layers.count else { return }
-                model.select(layerId: model.layers[index].id, additive: false)
+    private func update(_ point: CGPoint, size: CGSize) {
+        guard var g = gesture else { return }
+        let delta = frame(point.x, width: size.width) - TimeAxis.frameAt(x: g.start.x, view: g.view, pxPerFrame: ppf, centerX: size.width / 2)
+        switch g.mode {
+        case .scrub:
+            let desired = g.view - Double((point.x - g.start.x) / ppf)
+            holdView(desired)
+        case .scroll:
+            scrollY = min(maxScroll(size.height), max(0, g.scroll - (point.y - g.start.y)))
+        case .reorder:
+            reorderTarget = Reorder.targetIndex(y: point.y, rowsTop: m.rowsTop, scroll: scrollY, rowHeight: m.row, count: rows.count)
+        case .move:
+            guard let row = g.row, let earliest = g.selection.map(\.startFrame).min(), let latest = g.selection.map(\.endFrame).max() else { return }
+            let desired = timelineFrame(Double(row.start) + delta)
+            let snapped = model.snapping ? Snap.span(g.snapTargets, start: desired, length: row.end - row.start, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : (start: desired, guide: Snap.none)
+            let change = Int32(clamping: max(-Int64(earliest), min(Int64(Int32.max) - Int64(latest), Int64(snapped.start) - Int64(row.start))))
+            guide = Int64(row.start) + Int64(change) == Int64(snapped.start) ? snapped.guide : Snap.none
+            if change != g.sentDelta {
+                openUndo(&g)
+                for item in g.selection {
+                    model.engine.setLayer(item.id, startFrame: item.startFrame + change, endFrame: item.endFrame + change, offsetFrames: item.offsetFrames, setOffset: false)
+                }
+                g.sentDelta = change; model.refreshModel(force: true)
             }
+        case .trimStart, .trimEnd:
+            guard let row = g.row else { return }
+            let origin = g.mode == .trimStart ? row.start : row.end
+            let desired = Double(origin) + delta
+            let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : Snap.none
+            let target = max(0, snapped == Snap.none ? timelineFrame(desired) : snapped)
+            let change = Int32(clamping: Int64(target) - Int64(origin))
+            if change != g.sentDelta {
+                openUndo(&g)
+                if g.mode == .trimStart {
+                    if model.editMode, let current = model.layers.first(where: { $0.id == row.id }) {
+                        model.trimStart(row.id, at: Int64(current.startFrame) + Int64(change) - Int64(g.sentDelta))
+                    } else { model.trimStart(row.id, at: Int64(target)) }
+                } else { model.trimEnd(row.id, at: Int64(target)) }
+                g.sentDelta = change
+            }
+            guide = snapped
+        case .key:
+            guard let row = g.row, row.instants.indices.contains(g.keyIndex) else { return }
+            let desired = Double(row.instants[g.keyIndex]) + delta
+            let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapKey / ppf)) : Snap.none
+            let target = min(g.keyLimits.hi, max(g.keyLimits.lo, snapped == Snap.none ? timelineFrame(desired) : snapped))
+            if target != g.keyFrame {
+                openUndo(&g)
+                let source = row.toLocal(g.keyFrame), destination = row.toLocal(target)
+                // The mark represents an instant across ALL animation tracks.
+                for key in row.keysAt[g.keyIndex] {
+                    model.engine.editTrackKey(row.id, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: source, action: 2, value: key.value, targetTime: destination, interpolation: key.interpolation, handles: [])
+                }
+                g.keyFrame = target; selectedKey = (row.id, target)
+                model.curveSelectedTime = destination
+                model.refreshModel(force: true)
+            }
+            guide = snapped == target ? snapped : Snap.none
+        case .hold, .blocked: break
+        }
+        gesture = g
+    }
+    private func openUndo(_ g: inout Interaction) {
+        if !g.undoOpen { model.engine.run { $0.beginUndoGroup() }; g.undoOpen = true }
+    }
+    private func holdView(_ desired: Double) {
+        let target = TimeAxis.clampView(desired, durationFrames: Int32(clamping: model.compositionDuration))
+        heldView = target
+        let frame = Int64(timelineFrame(target))
+        model.engine.run { $0.scrub(toFrame: frame) }; model.optimisticPlayhead(frame)
+    }
+    private func finish(cancelled: Bool) {
+        guard let g = gesture else { return }
+        if g.mode == .reorder && !cancelled, let row = g.row, reorderTarget >= 0 && reorderTarget != reorderSource {
+            model.engine.run { $0.beginUndoGroup() }; model.reorderLayer(row.id, displayIndex: reorderTarget); model.engine.run { $0.endUndoGroup() }
+        }
+        if g.mode == .scrub { model.engine.run { $0.scrubEnd() } }
+        if g.undoOpen { model.engine.run { $0.endUndoGroup() } }
+        gesture = nil; heldView = nil; guide = Snap.none; reorderSource = -1; reorderTarget = -1
     }
 
-    /// Pinça: zoom na régua. O zoom é do DESENHO (pontos por quadro), não do
-    /// motor: mudar a escala da timeline não custa nada ao preview.
-    private var zoomGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { scale in
-                pointsPerFrame = min(max(zoomBase * scale, 0.5), 60)
+    private func pinch(_ state: UIGestureRecognizer.State, scale: CGFloat, focus: CGPoint, width: CGFloat) {
+        if state == .began {
+            finish(cancelled: true); scrollVelocity = 0; pause(); pinching = true
+            pinchPPS = pps; pinchFrame = frame(focus.x, width: width)
+            model.engine.run { $0.scrubBegin() }
+        }
+        if state == .began || state == .changed {
+            pps = Zoom.clamp(pinchPPS * scale)
+            holdView(Zoom.anchoredView(focusFrame: pinchFrame, focusX: focus.x, centerX: width / 2, pxPerFrame: ppf))
+        }
+        if state == .ended || state == .cancelled || state == .failed { finishPinch() }
+    }
+    private func finishPinch() {
+        if pinching { model.engine.run { $0.scrubEnd() }; pinching = false; heldView = nil }
+    }
+    private func tick(size: CGSize) {
+        if let g = gesture {
+            if g.mode == .move || g.mode == .key || g.mode == .trimStart || g.mode == .trimEnd {
+                let direction = AutoScroll.direction(pos: lastPointer.x, from: g.start.x, low: m.headerColumn + m.autoEdge, high: size.width - m.autoEdge, intent: m.autoIntent)
+                if direction != 0 {
+                    // Auto-scroll moves the presentation window; the editing gesture
+                    // reapplies its absolute target and the core remains authoritative.
+                    let target = TimeAxis.clampView(viewFrame + Double(direction) * Double(m.autoSpeed / 60 / ppf), durationFrames: Int32(clamping: model.compositionDuration))
+                    heldView = target; model.seek(toFrame: Int64(timelineFrame(target)))
+                    update(lastPointer, size: size)
+                }
+            } else if g.mode == .reorder {
+                let direction = AutoScroll.direction(pos: lastPointer.y, from: g.start.y, low: m.rowsTop + m.autoEdge, high: size.height - m.autoEdge, intent: m.autoIntent)
+                if direction != 0 { scrollY = min(maxScroll(size.height), max(0, scrollY + CGFloat(direction) * m.autoSpeed / 60)); update(lastPointer, size: size) }
             }
-            .onEnded { _ in
-                zoomBase = pointsPerFrame
+        } else if abs(scrollVelocity) > 1 {
+            let next = min(maxScroll(size.height), max(0, scrollY + scrollVelocity / 60))
+            if next == scrollY { scrollVelocity = 0 } else { scrollY = next; scrollVelocity *= 0.94 }
+        }
+        if thumbCache.starved { refreshMedia(size: size) }
+    }
+    private func revealSelection(size: CGSize) {
+        guard !compact, gesture == nil, let id = model.primarySelection, let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        let top = CGFloat(index) * m.row, bottom = top + m.row
+        let visibleHeight = max(0, size.height - m.rowsTop)
+        if top < scrollY { scrollY = top }
+        else if bottom > scrollY + visibleHeight { scrollY = min(maxScroll(size.height), max(0, bottom - visibleHeight)) }
+    }
+}
+
+/// The same priority and geometry as Android RowHit; drawing and hit testing
+/// share TimelineMetrics so a handle cannot be grabbed beneath the header.
+private struct TimelineHit {
+    enum Kind { case none, ruler, eye, header, key, trimStart, trimEnd, previous, next, body }
+    var kind: Kind
+    var key = -1
+    static func contentLeft(_ m: TimelineMetrics, _ x0: CGFloat, _ x1: CGFloat) -> CGFloat {
+        max(x0, m.headerColumn) + (x1 - x0 < m.narrowBar ? m.padLNarrow : m.padL)
+    }
+    static func contentRight(_ m: TimelineMetrics, _ x0: CGFloat, _ x1: CGFloat, _ width: CGFloat) -> CGFloat {
+        min(x1, width) - (x1 - x0 < m.narrowBar ? m.padRNarrow : m.padR)
+    }
+    static func test(_ m: TimelineMetrics, point: CGPoint, width: CGFloat, x0: CGFloat, x1: CGFloat, handles: Bool, compact: Bool, instants: [Int32], view: Double, ppf: CGFloat) -> TimelineHit {
+        let x = point.x, y = point.y
+        guard y >= 0 && y < m.row else { return TimelineHit(kind: .none) }
+        if x < m.headerColumn { return TimelineHit(kind: x < m.eyeHitRight ? .eye : .header) }
+        var key = -1, keyX: CGFloat = 0
+        if y >= m.keyTouchTop && !instants.isEmpty {
+            let i = Keyframes.nearestIndex(instants, TimeAxis.frameAt(x: x, view: view, pxPerFrame: ppf, centerX: width / 2))
+            let px = TimeAxis.xOf(frame: Double(instants[i]), view: view, pxPerFrame: ppf, centerX: width / 2)
+            if abs(px - x) <= m.keyTouchHalf { key = i; keyX = px }
+        }
+        let over = y < m.bodyHitBottom, mid = (x0 + x1) / 2
+        let start = handles && over && x0 >= m.headerColumn && x >= x0 - m.trimInsetStart - m.trimTouchOut && x < min(x0 - m.trimInsetStart + m.trimWidth, mid)
+        let end = handles && over && x1 <= width && x > max(x1 - m.trimInsetEnd, mid) && x <= x1 - m.trimInsetEnd + m.trimWidth + m.trimTouchOut
+        if key >= 0 && ((!start && !end) || (abs(keyX - x) <= m.keyGlyphHalf && x >= x0 && x <= x1)) { return TimelineHit(kind: .key, key: key) }
+        if start { return TimelineHit(kind: .trimStart) }
+        if end { return TimelineHit(kind: .trimEnd) }
+        if over && x >= x0 && x <= x1 {
+            if compact {
+                let cl = contentLeft(m, x0, x1), cr = contentRight(m, x0, x1, width)
+                if x >= cl - m.arrowTouchPad && x <= cl + m.arrowSlot + m.arrowTouchPad { return TimelineHit(kind: .previous) }
+                if x >= cr - m.arrowSlot - m.arrowTouchPad && x <= cr + m.arrowTouchPad { return TimelineHit(kind: .next) }
             }
+            return TimelineHit(kind: .body)
+        }
+        return TimelineHit(kind: .none)
+    }
+}
+
+/// UIKit only arbitrates touch ownership. All coordinates remain in the same
+/// point space as Canvas; it neither stores nor edits the project.
+@MainActor
+private struct TimelineGestureSurface: UIViewRepresentable {
+    var tap: (CGPoint) -> Void
+    var pan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGPoint) -> Void
+    var hold: (UIGestureRecognizer.State, CGPoint, CGPoint) -> Void
+    var pinch: (UIGestureRecognizer.State, CGFloat, CGPoint) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(); view.backgroundColor = .clear; view.isMultipleTouchEnabled = true
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["AUREA_UI_TEST_PROBE"] == "1" {
+            view.isAccessibilityElement = true
+            view.accessibilityIdentifier = "aurea.parity.timeline"
+            view.accessibilityLabel = "Aurea timeline gesture surface"
+        }
+        #endif
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped(_:)))
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.panned(_:)))
+        pan.maximumNumberOfTouches = 1
+        let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.held(_:)))
+        hold.minimumPressDuration = 0.5; hold.allowableMovement = 8
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinched(_:)))
+        pan.require(toFail: hold); tap.require(toFail: pan); tap.require(toFail: hold)
+        let recognizers: [UIGestureRecognizer] = [tap, pan, hold, pinch]
+        for recognizer in recognizers { recognizer.delegate = context.coordinator; view.addGestureRecognizer(recognizer) }
+        return view
+    }
+    func updateUIView(_ uiView: UIView, context: Context) { context.coordinator.parent = self }
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: TimelineGestureSurface
+        private var holdStart = CGPoint.zero
+        init(_ parent: TimelineGestureSurface) { self.parent = parent }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            gestureRecognizer is UIPinchGestureRecognizer || otherGestureRecognizer is UIPinchGestureRecognizer
+        }
+        @objc func tapped(_ sender: UITapGestureRecognizer) {
+            if sender.state == .ended { parent.tap(sender.location(in: sender.view)) }
+        }
+        @objc func panned(_ sender: UIPanGestureRecognizer) {
+            let point = sender.location(in: sender.view), translation = sender.translation(in: sender.view)
+            parent.pan(sender.state, CGPoint(x: point.x - translation.x, y: point.y - translation.y), point, sender.velocity(in: sender.view))
+        }
+        @objc func held(_ sender: UILongPressGestureRecognizer) {
+            let point = sender.location(in: sender.view)
+            if sender.state == .began { holdStart = point }
+            parent.hold(sender.state, holdStart, point)
+        }
+        @objc func pinched(_ sender: UIPinchGestureRecognizer) { parent.pinch(sender.state, sender.scale, sender.location(in: sender.view)) }
     }
 }

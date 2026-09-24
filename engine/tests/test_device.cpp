@@ -148,7 +148,7 @@ AUREA_TEST(Battery, ThumbnailDecodersCloseWhenIdle) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     AUREA_CHECK(svc.video(7, a, 3'000'000, 24, img));
-    AUREA_CHECK_EQ(factory.opened, 2u);
+    AUREA_CHECK_EQ(factory.opened.load(), 2u);
     svc.stop();
 }
 

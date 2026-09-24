@@ -1,10 +1,11 @@
 # Gera engine/platform/ios/app/AureaStrings.swift a partir do catalogo do
 # Android (values/ = pt-BR, values-en/ = ingles). As chaves usadas sao as MESMAS.
 import io
+from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 
-ROOT = r"C:\Users\SnyX\Documents\Projetos - Claude\Aureabeta"
+ROOT = str(Path(__file__).resolve().parent.parent)
 PT = ROOT + r"\android\app\src\main\res\values\strings.xml"
 EN = ROOT + r"\android\app\src\main\res\values-en\strings.xml"
 OUT = ROOT + r"\engine\platform\ios\app\AureaStrings.swift"
@@ -17,6 +18,7 @@ KEYS = [
     "home_tab_start", "home_tab_projects", "home_tab_settings",
     "home_title_start", "home_title_projects", "home_search_projects", "home_search_hint",
     "home_new_project", "home_no_projects", "home_no_projects_hint", "home_no_results",
+    "home_sort_title", "home_ver_todos", "greeting_morning", "greeting_afternoon", "greeting_evening",
     "home_sort_recent", "home_sort_name", "home_sort_longest", "home_sort_created", "home_sort_size",
     "home_project_count", "home_continue", "home_continue_action", "home_import_media",
     "home_empty_hint", "home_selected_count", "home_select_all", "home_clear_selection",
@@ -75,7 +77,10 @@ KEYS = [
     "unit_megabyte", "unit_gigabyte",
     # novo projeto (o mesmo catalogo do ProjectSpec.kt)
     "aspect_hint_tv", "aspect_hint_reels", "aspect_hint_feed", "aspect_hint_instagram",
-    "aspect_hint_classic", "editor_nome_camada",
+    "aspect_hint_classic", "aspect_free", "aspect_free_hint",
+    "new_project_title", "new_project_free", "new_project_width", "new_project_height",
+    "new_project_name", "new_project_name_hint", "new_project_untitled", "new_project_create",
+    "editor_nome_camada",
     # ajustes / aparelho
     "settings_group_language", "settings_language", "settings_language_system",
     "settings_group_device", "settings_device_auto", "settings_device_auto_note",
@@ -87,6 +92,7 @@ KEYS = [
     "settings_resolution", "settings_fps", "panel_este_efeito_saiu_catalogo_ele_nao",
     "panel_cor_brilho_metalico_rugosidade_vem_arquivo",
 ]
+KEYS = list(dict.fromkeys(KEYS))
 
 
 def load(path):
@@ -127,7 +133,7 @@ def to_swift_format(text):
     le so 32 bits do registrador. `%` solto continua `%`.
     """
     def fix(m):
-        idx = m.group(1) or ""
+        idx = (m.group(1) + "$") if m.group(1) else ""
         kind = m.group(2)
         if kind == "s":
             return "%" + idx + "@"
@@ -139,87 +145,65 @@ def to_swift_format(text):
 
 
 pt = load(PT)
-en = load(EN)
-
-missing_pt = [k for k in KEYS if k not in pt]
-if missing_pt:
-    raise SystemExit("chaves ausentes no values/ (pt): " + ", ".join(missing_pt))
-
-lines = []
-lines.append("// =============================================================================")
-lines.append("//  Aurea / platform / ios / app / AureaStrings.swift")
-lines.append("//")
-lines.append("//  GERADO de android/app/src/main/res/values/strings.xml (pt-BR) e")
-lines.append("//  values-en/strings.xml (ingles) por tools/_ios_strings.py — nao editar a mao")
-lines.append("//  sem trazer a mesma mudanca para o catalogo do Android.")
-lines.append("//")
-lines.append("//  As CHAVES SAO AS MESMAS do Android (`home_tab_projects`, `editor_desfazer`...).")
-lines.append("//  Isso e deliberado: um texto novo entra nos dois sistemas pelo mesmo nome,")
-linecount = len(KEYS)
-lines.append("//  e o catalogo continua sendo um so (o do Android e a fonte).")
-lines.append("//")
-lines.append("//  O Android tem SETE idiomas (values/ = pt-BR + ar, en, es, hi, id, ru). Esta")
-lines.append("//  entrega traz pt-BR e ingles — os outros cinco saem do mesmo XML, pela mesma")
-lines.append("//  extracao, quando o dono quiser (ver README).")
-lines.append("//")
-lines.append("//  Formato: o catalogo usa o printf do Android (%1$s, %2$d); aqui os")
-lines.append("//  especificadores foram convertidos para os do Foundation (%1$@, %2$ld).")
-lines.append("// =============================================================================")
-lines.append("import Foundation")
-lines.append("")
-lines.append("/// Um idioma do app. O que o dono escolhe nos Ajustes; o padrao segue o sistema.")
-lines.append("enum AureaLanguage: String, CaseIterable, Identifiable {")
-lines.append("    case pt = \"pt-BR\"")
-lines.append("    case en = \"en\"")
-lines.append("")
-lines.append("    var id: String { rawValue }")
-lines.append("")
-lines.append("    /// Rotulo do seletor. Nome do idioma NO idioma — nao traduzido.")
-lines.append("    var label: String {")
-lines.append("        switch self {")
-lines.append("        case .pt: return \"Português (Brasil)\"")
-lines.append("        case .en: return \"English\"")
-lines.append("        }")
-lines.append("    }")
-lines.append("")
-lines.append("    /// Idioma do sistema quando ele e um dos que temos; senao pt-BR (o idioma")
-lines.append("    /// em que o app foi escrito, e o mesmo padrao do Android).")
-lines.append("    static var systemDefault: AureaLanguage {")
-lines.append("        for code in Locale.preferredLanguages {")
-lines.append("            if code.hasPrefix(\"en\") { return .en }")
-lines.append("            if code.hasPrefix(\"pt\") { return .pt }")
-lines.append("        }")
-lines.append("        return .pt")
-lines.append("    }")
-lines.append("}")
-lines.append("")
-lines.append("/// O catalogo. `t()` traduz; chave desconhecida devolve a propria chave, o que")
-lines.append("/// aparece na tela em vez de um texto vazio — um furo de traducao fica visivel.")
-lines.append("enum AureaText {")
-lines.append("    /// Idioma em vigor. O modelo observa e redesenha quando muda.")
-lines.append("    static var language: AureaLanguage = .systemDefault")
-lines.append("")
-lines.append("    static func t(_ key: String) -> String {")
-lines.append("        let table = language == .en ? en : pt")
-lines.append("        return table[key] ?? pt[key] ?? key")
-lines.append("    }")
-lines.append("")
-lines.append("    static func t(_ key: String, _ args: CVarArg...) -> String {")
-lines.append("        String(format: t(key), arguments: args)")
-lines.append("    }")
-lines.append("")
-lines.append("    private static let pt: [String: String] = [")
-for k in KEYS:
-    lines.append("        \"%s\": %s," % (k, swift_literal(pt[k])))
-lines.append("    ]")
-lines.append("")
-lines.append("    private static let en: [String: String] = [")
-for k in KEYS:
-    value = en.get(k, pt[k])
-    lines.append("        \"%s\": %s," % (k, swift_literal(value)))
-lines.append("    ]")
-lines.append("}")
-lines.append("")
-
-io.open(OUT, "w", encoding="utf-8", newline="\n").write("\n".join(lines))
-print("AureaStrings.swift: %d chaves (%d sem traducao en -> cai no pt)" % (linecount, sum(1 for k in KEYS if k not in en)))
+KEYS = sorted(pt)
+languages = [('pt', 'pt-BR', 'Português (Brasil)', 'values'), ('en', 'en', 'English', 'values-en'),
+             ('es', 'es', 'Español', 'values-es'), ('ru', 'ru', 'Русский', 'values-ru'),
+             ('hi', 'hi', 'हिन्दी', 'values-hi'), ('ar', 'ar', 'العربية', 'values-ar'),
+             ('id', 'id', 'Bahasa Indonesia', 'values-in')]
+lines = ['// Generated from the seven official Android catalogs by tools/_ios_strings.py.',
+         '// Do not edit this file; edit the corresponding Android resource.', 'import Foundation', '',
+         'enum AureaLanguage: String, CaseIterable, Identifiable {', '    case system = "system"']
+for code, raw, label, folder in languages:
+    lines.append(f'    case {code} = "{raw}"')
+lines += ['    var id: String { rawValue }', '    var label: String {', '        switch self {',
+          '        case .system: return AureaText.t("settings_language_system")']
+for code, raw, label, folder in languages:
+    lines.append(f'        case .{code}: return {swift_literal(label)}')
+lines += ['        }', '    }', '    static var systemDefault: AureaLanguage { .system }',
+          '    var resolved: AureaLanguage {', '        guard self == .system else { return self }',
+          '        for language in Locale.preferredLanguages {']
+for code, raw, label, folder in languages:
+    lines.append(f'            if language.hasPrefix("{code}") {{ return .{code} }}')
+lines += ['            if language.hasPrefix("in") { return .id }', '        }', '        return .pt', '    }', '}', '',
+          'enum AureaText {', '    static var language: AureaLanguage = .system',
+          '    static func t(_ key: String) -> String {', '        let table: [String: String]',
+          '        switch language.resolved {']
+for code, raw, label, folder in languages:
+    lines.append(f'        case .{code}: table = {code}')
+lines += ['        case .system: table = pt', '        }', '        return table[key] ?? pt[key] ?? key', '    }',
+          '    static func t(_ key: String, _ args: CVarArg...) -> String {',
+          '        String(format: t(key), arguments: args)', '    }']
+lines += ['    static func plural(_ key: String, _ count: Int, _ args: CVarArg...) -> String {',
+          '        let lang = language.resolved', '        let n = abs(count)', '        let quantity: String',
+          '        switch lang {',
+          '        case .ar:',
+          '            quantity = n == 0 ? "zero" : n == 1 ? "one" : n == 2 ? "two" : (3...10).contains(n % 100) ? "few" : (11...99).contains(n % 100) ? "many" : "other"',
+          '        case .ru:',
+          '            quantity = n % 10 == 1 && n % 100 != 11 ? "one" : (2...4).contains(n % 10) && !(12...14).contains(n % 100) ? "few" : n % 10 == 0 || (5...9).contains(n % 10) || (11...14).contains(n % 100) ? "many" : "other"',
+          '        case .pt, .hi: quantity = n <= 1 ? "one" : "other"',
+          '        case .id: quantity = "other"',
+          '        default: quantity = n == 1 ? "one" : "other"', '        }',
+          '        let forms = plurals[lang.rawValue]?[key] ?? plurals["pt-BR"]?[key] ?? [:]',
+          '        let format = forms[quantity] ?? forms["other"] ?? key',
+          '        return String(format: format, arguments: args.isEmpty ? [count] : args)', '    }']
+plurals = {}
+for code, raw, label, folder in languages:
+    path = Path(ROOT) / 'android/app/src/main/res' / folder / 'strings.xml'
+    if not path.exists() and code == 'id':
+        path = Path(ROOT) / 'android/app/src/main/res/values-id/strings.xml'
+    table = load(path)
+    plurals[raw] = {node.get('name'): {item.get('quantity'): to_swift_format(''.join(item.itertext()).replace("\\'", "'").replace('\\"', '"').replace('\\n', '\n')) for item in node.findall('item')} for node in ET.parse(path).getroot().findall('plurals')}
+    lines.append(f'    private static let {code}: [String: String] = [')
+    for key in KEYS:
+        lines.append('        "%s": %s,' % (key, swift_literal(to_swift_format(table.get(key, pt[key])))))
+    lines.append('    ]')
+lines.append('    private static let plurals: [String: [String: [String: String]]] = [')
+for language, table in plurals.items():
+    lines.append(f'        {swift_literal(language)}: [')
+    for key, forms in table.items():
+        lines.append('            ' + swift_literal(key) + ': [' + ', '.join(swift_literal(q) + ': ' + swift_literal(v) for q, v in forms.items()) + '],')
+    lines.append('        ],')
+lines.append('    ]')
+lines += ['}', '']
+io.open(OUT, 'w', encoding='utf-8', newline='\n').write('\n'.join(lines))
+print(f'AureaStrings.swift: {len(KEYS)} keys, seven Android catalogs plus system language')

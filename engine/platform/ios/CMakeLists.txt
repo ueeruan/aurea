@@ -148,6 +148,7 @@ endif()
 add_library(aurea_ios STATIC
     bridge/AureaBridge.mm
     bridge/AureaEngine.mm
+    bridge/AureaJSON.mm
     bridge/IOSSurfaceView.mm
     bridge/IOSVideoDecoder.mm
     bridge/IOSAudio.mm
@@ -169,6 +170,7 @@ target_compile_options(aurea_ios PRIVATE
 )
 
 target_link_libraries(aurea_ios PUBLIC aurea_core)
+target_compile_definitions(aurea_ios PRIVATE "$<$<CONFIG:Debug>:DEBUG=1>")
 if(AUREA_GPU_METAL)
     target_link_libraries(aurea_ios PUBLIC aurea_metal)
     target_compile_definitions(aurea_ios PUBLIC AUREA_GPU_METAL=1)

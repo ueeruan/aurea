@@ -18,6 +18,9 @@
 //  toa (e arrastaria o usuário para uma UI que engasga).
 // =============================================================================
 import Foundation
+import AVFoundation
+import Photos
+import ImageIO
 import Metal
 import UIKit
 
@@ -30,6 +33,8 @@ struct LayerItem: Identifiable, Equatable {
     var name: String
     var startFrame: Int32
     var endFrame: Int32
+    var offsetFrames: Int32
+    var parentIndex: Int32
     var opacity: Float
     var effectCount: UInt32
     var maskCount: UInt32
@@ -50,11 +55,25 @@ struct LayerItem: Identifiable, Equatable {
 
 struct KeyframeItem: Identifiable, Equatable {
     var property: UInt32
+    var paramIndex: UInt32
     var effectIndex: UInt32
     var time: Int32
     var value: Float
     var interpolation: UInt32
-    var id: String { "\(property)-\(effectIndex)-\(time)" }
+    var id: String { "\(property)-\(effectIndex)-\(paramIndex)-\(time)" }
+}
+
+struct MaskItem: Identifiable {
+    var id: UInt32
+    var operation: UInt32
+    var inverted: Bool
+    var feather: Float
+    var expansion: Float
+    var opacity: Float
+    var closed: Bool
+    var keyed: Bool
+    var points: [Float]
+    var keyCount: Int = 0
 }
 
 struct EffectItem: Identifiable, Equatable {
@@ -68,6 +87,7 @@ struct EffectItem: Identifiable, Equatable {
 }
 
 struct EffectParamItem: Identifiable, Equatable {
+    var flags: UInt32 = 0
     var index: UInt32
     var type: UInt32
     var label: String
@@ -85,6 +105,7 @@ struct EffectParamItem: Identifiable, Equatable {
 }
 
 struct EffectCatalogItem: Identifiable, Equatable {
+    var effectClass: UInt32 = 0
     var typeId: UInt32
     var name: String
     var category: String
@@ -153,6 +174,7 @@ final class AureaModel: ObservableObject {
 
     // --- Ponte e estado do motor -------------------------------------------
     let engine: AureaEngine
+    lazy var effectPreviews = EffectPreviewStore(engine: engine)
     /// O dispositivo Metal. É o MESMO que a view do preview usa: um layer de
     /// outro dispositivo recusa drawables.
     let device: MTLDevice?
@@ -169,6 +191,7 @@ final class AureaModel: ObservableObject {
     @Published var panel: PanelKind = .none
     @Published var showAddLayer = false
     @Published var showExport = false
+    @Published var showProjectSettings = false
     @Published var showSettings = false
     /// A folha de geração atual (a doca de painéis, o painel aberto ou o
     /// "adicionar camada").
@@ -178,10 +201,11 @@ final class AureaModel: ObservableObject {
     /// ladrilho aberto é que decide a fração da folha.
     var sheetContent: SheetContent {
         if showAddLayer { return .adding }
-        switch panel {
-        case .none, .dock: return .dock
-        default: return .panel
-        }
+        // O painel da Aurea AI CRIA a camada: abre sem nada selecionado (igual ao Android).
+        if panel == .aiVideo { return .panel }
+        if selection.isEmpty { return .none }
+        if selection.count > 1 { return .batch }
+        return panel == .none || panel == .dock ? .dock : .panel
     }
 
     // --- Projeto ------------------------------------------------------------
@@ -192,6 +216,32 @@ final class AureaModel: ObservableObject {
     @Published var searchQuery = ""
     @Published var sort: ProjectSort = .recent
     @Published private(set) var openingProject = false
+    @Published private(set) var importingMedia = false
+    @Published private(set) var operationMessage = "Importando mídia…"
+    @Published var pointPick: Bool?
+    @Published var curveEffect: UInt32 = UInt32.max
+    @Published var curveParam: UInt32 = 0
+    @Published var curveSelectedTime: Int32?
+    @Published var captionOptions: [String: NSNumber] = [:]
+    @Published var vectorGroup: UInt32 = 0
+    @Published var vectorPath: UInt32 = 0
+    @Published var vectorFreehand = false
+    @Published var vectorPointTool = 0
+    @Published var shapeSizeLinked = false
+    @Published var shapeSelectedParam = 5
+    @Published var liveNoticePopup: LiveNoticePopupRequest?
+    @Published var vectorEditingPoints = false
+    @Published var snapping = true
+    @Published var freehandPoints: [Float] = []
+    @Published var actionSheet: ActionSheetRequest?
+    @Published var numericKeypad: KeypadRequest?
+    @Published var colorSheet: ColorSheetRequest?
+    @Published var expressionSheet: ExpressionRequest?
+    @Published var namePrompt: NamePromptRequest?
+    @Published var text3DFontSheet: Text3DFontRequest?
+    @Published var presetDialog: PresetDialogRequest?
+    @Published var curveReturnPanel: PanelKind = .none
+    @Published var stageManipulating = false
     @Published var toast: String?
 
     // --- Modelo em memória (o que a timeline e os painéis desenham) ---------
@@ -204,11 +254,32 @@ final class AureaModel: ObservableObject {
     @Published private(set) var effectParams: [EffectParamItem] = []
     /// Detalhe da camada escolhida (transform avaliado no playhead).
     @Published private(set) var detail: [String: Any] = [:]
+    @Published private(set) var masks: [MaskItem] = []
+    @Published private(set) var maskAffine: [Float] = [1, 0, 0, 1, 0, 0]
+    @Published var selectedMask: UInt32?
+    @Published var maskDrawing = false
+    @Published var selectedMaskPoint: Int?
 
     // --- Export -------------------------------------------------------------
     @Published var exportOptions = ExportOptions()
     @Published private(set) var exportProgress: [String: Any] = [:]
     @Published private(set) var exporting = false
+    @Published private(set) var exportedURL: URL?
+    @Published private(set) var exportMessage: String?
+    @Published private(set) var exportCancelled = false
+    @Published private(set) var exportPublishing = false
+    @Published private(set) var exportSavedToPhotos = false
+    func openExport() {
+        if !exporting { exportedURL = nil; exportMessage = nil; exportCancelled = false; exportProgress = [:] }
+        showExport = true
+    }
+
+    func openCurve(property: UInt32, effect: UInt32 = UInt32.max, param: UInt32 = 0, time: Int32? = nil) {
+        if panel != .curve { curveReturnPanel = panel }
+        curveProperty = property; curveEffect = effect; curveParam = param; curveSelectedTime = time; openPanel(.curve)
+    }
+    private var pendingExportURL: URL?
+    private let mediaQueue = DispatchQueue(label: "com.aurea.media-import", qos: .userInitiated)
 
     // --- Ajustes ------------------------------------------------------------
     @Published var language: AureaLanguage = .systemDefault {
@@ -217,7 +288,8 @@ final class AureaModel: ObservableObject {
     @Published var showPerf = false
 
     enum Screen { case home, editor }
-    enum PanelKind { case none, dock, transform, effects, layer3D, exportPanel }
+    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo }
+    @Published var curveProperty: UInt32 = 0
     enum ProjectSort: String, CaseIterable, Identifiable {
         case recent, name, longest, size
         var id: String { rawValue }
@@ -235,6 +307,7 @@ final class AureaModel: ObservableObject {
     private var memoryWarningObserver: NSObjectProtocol?
     private var lastRevision: UInt32 = 0
     private var lastThumbGeneration: UInt32 = 0
+    private var lastEnginePlayhead: Int64 = .min
     private var lastLayerSignature: String = ""
 
     // =========================================================================
@@ -255,6 +328,295 @@ final class AureaModel: ObservableObject {
 
     /// Sobe o motor. Chamado quando a janela aparece (e de novo ao voltar do
     /// segundo plano, se por algum motivo ele não estiver de pé).
+#if DEBUG
+    private var parityPrepared = false
+    /// CI only: create an actual core project and open the requested UI state.
+    /// Release IPAs do not contain this entry point or fixture setup.
+    func prepareParityCapture() {
+        guard !parityPrepared, let scene = ProcessInfo.processInfo.environment["AUREA_PARITY_SCENE"] else { return }
+        parityPrepared = true
+        Task { @MainActor in
+            language = .en
+            var reopenedEditedProject = false
+            var exportProbe: [String: Any] = [:]
+            var precompProbe: [String: Any] = [:]
+            var particleProbe: [String: Any] = [:]
+            var faceProbe: [String: Any] = [:]
+            var homeScrollProbe: [String: Any] = [:]
+            var hdriProbe: [String: Any] = [:]
+            if scene == "home-scroll", started {
+                homeScrollProbe = prepareParityHomeScroll()
+            } else if scene == "android-hdri", started {
+                hdriProbe = prepareParityHDRI()
+            } else if scene == "export-render", started {
+                exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
+                refreshModel(force: true); enterEditor()
+                if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
+            } else if ["metal-face-culling", "metal-face-control"].contains(scene), started {
+                faceProbe = prepareParityFaces(scene: scene)
+            } else if ["android-precomp", "android-precomp-inside"].contains(scene), started {
+                let url = AureaPaths.documents.appendingPathComponent("android-precomp.aurea")
+                if engine.loadProject(url.path) {
+                    projectURL = url; projectName = "Parity Precomp"; refreshModel(force: true); enterEditor()
+                    precompProbe = ["loaded": true, "rootLayers": engine.layers()]
+                    if let id = layers.first(where: { $0.kind == 12 })?.id {
+                        select(layerId: id, additive: false); panel = .dock
+                        // Save the root state before navigating into the real
+                        // nested composition, so the exported fixture opens at root.
+                        _ = saveProject(writeThumbnail: true)
+                        if scene == "android-precomp-inside" {
+                            openGroup(id); panel = .none
+                            precompProbe["entered"] = engine.precompDepth == 1
+                        }
+                    }
+                }
+            } else if ["android-complex-3d", "android-complex-particles"].contains(scene), started {
+                let url = AureaPaths.documents.appendingPathComponent("android-complex.aurea")
+                if engine.loadProject(url.path) {
+                    projectURL = url; projectName = "Parity Complex"; refreshModel(force: true); enterEditor()
+                    seek(toFrame: 36)
+                    let kind: UInt32 = scene == "android-complex-3d" ? 10 : 11
+                    if let id = layers.first(where: { $0.kind == kind })?.id {
+                        select(layerId: id, additive: false); panel = kind == 10 ? .layer3D : .particles
+                        if kind == 11 { particleProbe = captureParityParticles(layerId: id, scene: scene) }
+                    }
+                    _ = saveProject(writeThumbnail: true)
+                }
+            } else if ["android-project", "android-edited"].contains(scene), started {
+                let url = AureaPaths.documents.appendingPathComponent("android-reference.aurea")
+                if engine.loadProject(url.path) {
+                    projectURL = url; projectName = "Project 1"; refreshModel(force: true); enterEditor()
+                    if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
+                    if scene == "android-edited" { editTransform(8, value: 15); editTransform(12, value: 0.75) }
+                    _ = saveProject(writeThumbnail: true)
+                    if scene == "android-edited" {
+                        reopenedEditedProject = engine.loadProject(url.path)
+                        refreshModel(force: true)
+                        if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
+                    }
+                }
+            } else if scene != "home", started {
+                _ = newProject(width: 1920, height: 1080, fps: 30, title: "Project 1")
+                if scene != "editor-empty" {
+                    switch scene {
+                    case "text-2d": addText(); panel = .text
+                    case "text-3d": addText3D(content: "Texto", depth: 0.25); panel = .layer3D
+                    case "vector": addVector(1); panel = .vector
+                    default: addShape(1)
+                    }
+                    if scene == "transform" { panel = .transform }
+                    if scene == "effects" { panel = .effects }
+                    if scene == "export" { openExport() }
+                    if scene == "project-settings" { clearSelection(); showProjectSettings = true }
+                    if scene == "shape-edit" { panel = .shapeEdit }
+                    if scene == "appearance" { panel = .appearance }
+                    if scene == "presets" { panel = .presets }
+                    if scene == "mask" { addMask(1); panel = .mask }
+                }
+                _ = saveProject(writeThumbnail: true)
+            }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            var frameWidth: UInt32 = 0, frameHeight: UInt32 = 0
+            if started, !["home", "home-scroll"].contains(scene), let pixels = engine.captureFrame(480, outWidth: &frameWidth, outHeight: &frameHeight),
+               let preview = UIImage.fromRGBA(pixels, width: Int(frameWidth), height: Int(frameHeight))?.pngData() {
+                try? preview.write(to: AureaPaths.documents.appendingPathComponent(scene + "-core.png"))
+            }
+            refreshStatus()
+            if primarySelection != nil { refreshSelectedLayer() }
+            let report: [String: Any] = ["scene": scene, "coreStarted": started,
+                "coreError": startError ?? "", "layerCount": layers.count,
+                "width": compositionWidth, "height": compositionHeight, "fps": compositionFps,
+                "duration": compositionDuration, "layers": engine.layers(), "effects": effects.map { ["id": $0.effectId, "name": $0.name] },
+                "project": projectURL?.lastPathComponent ?? "", "device": deviceSummary,
+                "frameWidth": frameWidth, "frameHeight": frameHeight, "detail": detail,
+                "renderDiagnostics": engine.renderDiagnostics(),
+                "playhead": status.playhead, "particleProbe": particleProbe,
+                "exportProbe": exportProbe,
+                "faceProbe": faceProbe,
+                "homeScrollProbe": homeScrollProbe,
+                "hdriProbe": hdriProbe,
+                "precompProbe": precompProbe, "precompDepth": engine.precompDepth,
+                "reopenedEditedProject": reopenedEditedProject,
+                "uiTestRunID": ProcessInfo.processInfo.environment["AUREA_UI_TEST_RUN_ID"] ?? ""]
+            if let data = AureaJSONData(report, true) {
+                try? data.write(to: AureaPaths.documents.appendingPathComponent("parity-ready.json"))
+            }
+        }
+    }
+
+    /// The environment must come from the original Android project. Never
+    /// import/reassign its HDR here: that would hide a broken asset resolver.
+    private func prepareParityHDRI() -> [String: Any] {
+        let original = AureaPaths.documents.appendingPathComponent("android-hdri.aurea")
+        let roundtrip = AureaPaths.documents.appendingPathComponent("android-hdri-roundtrip.aurea")
+        let originalBytes = try? Data(contentsOf: original)
+        var probe: [String: Any] = ["fixture": original.lastPathComponent,
+            "roundtripFile": roundtrip.lastPathComponent, "loaded": false,
+            "saved": false, "reopened": false, "frames": [[String: Any]]()]
+        guard engine.loadProject(original.path) else { return probe }
+        probe["loaded"] = true
+        projectURL = original; projectName = "Parity HDRI"
+        refreshModel(force: true); enterEditor()
+        var frames: [[String: Any]] = []
+        func prepareFrame() {
+            engine.run { core in core.pause(); core.seek(toFrame: 0) }
+            if let id = layers.first(where: { $0.kind == 10 })?.id {
+                select(layerId: id, additive: false); panel = .layer3D
+            }
+        }
+        func capture(_ phase: String) {
+            var width: UInt32 = 0, height: UInt32 = 0
+            var row: [String: Any] = ["phase": phase, "environment": engine.environment(),
+                "layers": engine.layers(), "loadNotice": engine.lastLoadNotice,
+                "missingAssets": engine.lastLoadMissingAssets]
+            if let id = primarySelection { row["objectEnvironment"] = engine.objectEnvironment(forLayer: id) }
+            if let bytes = engine.captureFrame(480, outWidth: &width, outHeight: &height),
+               let png = UIImage.fromRGBA(bytes, width: Int(width), height: Int(height))?.pngData() {
+                let name = "android-hdri-\(phase).png"
+                do { try png.write(to: AureaPaths.documents.appendingPathComponent(name)); row["file"] = name }
+                catch { row["error"] = error.localizedDescription }
+            }
+            var actual = AureaStatus()
+            row["statusRead"] = engine.readStatus(&actual)
+            row["actualFrame"] = actual.playhead
+            row["width"] = width; row["height"] = height
+            frames.append(row)
+        }
+        prepareFrame(); capture("loaded")
+        // Save to a new path: retain the approved Android input byte-for-byte.
+        let saved = engine.saveProject(roundtrip.path)
+        probe["saved"] = saved
+        if saved, engine.loadProject(roundtrip.path) {
+            probe["reopened"] = true
+            projectURL = roundtrip; refreshModel(force: true)
+            prepareFrame(); capture("reopened")
+        }
+        probe["originalUnchanged"] = originalBytes != nil && originalBytes == (try? Data(contentsOf: original))
+        probe["frames"] = frames
+        refreshStatus()
+        return probe
+    }
+
+    /// Actual core projects and rendered JPEGs; no UI-only cards or fake covers.
+    private func prepareParityHomeScroll() -> [String: Any] {
+        let colors: [[Float]] = [
+            [1, 0.1, 0.15], [0.05, 0.4, 1], [0.1, 0.9, 0.25], [0.9, 0.1, 1],
+            [1, 0.6, 0.05], [0.05, 0.8, 0.9], [0.75, 0.15, 0.05], [0.3, 0.1, 1],
+            [0.1, 0.65, 0.4], [1, 0.15, 0.6], [0.7, 0.75, 0.05], [0.1, 0.4, 0.95],
+        ]
+        var rows: [[String: Any]] = []
+        for (index, color) in colors.enumerated() {
+            let title = String(format: "Parity Glass %02d", index + 1)
+            guard newProject(width: 1920, height: 1080, fps: 30, title: title),
+                  let url = projectURL else { break }
+            addShape(index.isMultiple(of: 2) ? 1 : 2)
+            let id = (composition["id"] as? NSNumber)?.uint64Value ?? 0
+            let linear = AureaColorSpace.displayToEngine(color[0] * 0.75, color[1] * 0.75, color[2] * 0.75, 1)
+            mutate { $0.setComposition(id, backgroundR: linear[0], g: linear[1], b: linear[2], a: 1) }
+            editTransform(8, value: Float(index * 11))
+            let saved = saveProject(writeThumbnail: true)
+            writeHomeProjectMeta(url: url, title: title, width: 1920, height: 1080,
+                                 fps: 30, durationFrames: Int(compositionDuration))
+            let thumbnail = AureaPaths.thumbs.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".jpg")
+            rows.append(["file": url.lastPathComponent, "saved": saved,
+                         "thumbnail": thumbnail.lastPathComponent,
+                         "hasThumbnail": FileManager.default.fileExists(atPath: thumbnail.path)])
+        }
+        clearSelection(); panel = .none; screen = .home; refreshProjectList()
+        return ["projects": rows, "count": rows.count]
+    }
+
+    /// Real glTF import and Metal render; the host independently counts red and
+    /// green pixels. The double-sided control proves both triangles imported.
+    private func prepareParityFaces(scene: String) -> [String: Any] {
+        let file = scene + ".gltf"
+        var probe: [String: Any] = ["fixture": file,
+            "doubleSided": scene == "metal-face-control", "imported": false, "saved": false]
+        guard newProject(width: 1920, height: 1080, fps: 30, title: scene) else {
+            probe["error"] = "Cannot create the front-face probe project"
+            return probe
+        }
+        let url = AureaPaths.documents.appendingPathComponent(file)
+        let id = engine.importModel(url.path, name: "Front red / back green")
+        guard id >= 0 else {
+            probe["error"] = engine.lastImportError
+            return probe
+        }
+        probe["imported"] = true
+        probe["layerID"] = id
+        refreshModel(force: true)
+        select(layerId: id, additive: false)
+        panel = .layer3D
+        engine.run { core in core.pause(); core.seek(toFrame: 0) }
+        // Saving drains queued state before capture; no timer stands in for
+        // import completion or a GPU result. captureFrame performs the render.
+        probe["saved"] = saveProject(writeThumbnail: false)
+        return probe
+    }
+
+    /// Render the imported Android Snow layer alone, so the 3D text beneath it
+    /// cannot make a broken particle pass look successful. Every capture drains
+    /// the real command queue and renders the requested frame through the core.
+    private func captureParityParticles(layerId: Int64, scene: String) -> [String: Any] {
+        let originalLayers = layers
+        let originalParameters = engine.particleParams(layerId)
+        engine.run { core in
+            core.pause()
+            for layer in originalLayers { core.setLayer(layer.id, visible: layer.id == layerId) }
+        }
+        defer {
+            engine.run { core in
+                for layer in originalLayers { core.setLayer(layer.id, visible: layer.visible) }
+                core.seek(toFrame: 36)
+            }
+        }
+        var frames: [[String: Any]] = []
+        var rgba: [Int64: [UInt8]] = [:]
+        func capture(_ requested: Int64, mode: String) {
+            var width: UInt32 = 0, height: UInt32 = 0
+            var row: [String: Any] = ["requestedFrame": requested, "mode": mode]
+            if let data = engine.captureFrame(480, outWidth: &width, outHeight: &height),
+               let image = UIImage.fromRGBA(data, width: Int(width), height: Int(height))?.pngData() {
+                let file = "\(scene)-isolated-\(requested).png"
+                do {
+                    try image.write(to: AureaPaths.documents.appendingPathComponent(file))
+                    row["file"] = file
+                    rgba[requested] = [UInt8](data)
+                } catch { row["error"] = error.localizedDescription }
+            }
+            var actual = AureaStatus()
+            row["statusRead"] = engine.readStatus(&actual)
+            row["actualFrame"] = actual.playhead
+            row["localFrame"] = engine.layerDetail(layerId)?["localPlayhead"] ?? -1
+            row["width"] = width; row["height"] = height
+            row["visibleLayerIDs"] = engine.layers().filter { ($0["visible"] as? Bool) == true }
+                .compactMap { $0["id"] as? NSNumber }
+            frames.append(row)
+        }
+        for frame in [Int64(0), 36, 72] {
+            seek(toFrame: frame)
+            capture(frame, mode: "seek")
+        }
+        engine.run { core in core.scrubBegin(); core.scrub(toFrame: 59) }
+        capture(59, mode: "scrub")
+        engine.run { $0.scrubEnd() }
+        func changedPixels(_ first: Int64, _ second: Int64) -> Int {
+            guard let a = rgba[first], let b = rgba[second], a.count == b.count else { return -1 }
+            var changed = 0
+            for offset in stride(from: 0, to: a.count, by: 4) {
+                if (0..<3).contains(where: { abs(Int(a[offset + $0]) - Int(b[offset + $0])) > 8 }) {
+                    changed += 1
+                }
+            }
+            return changed
+        }
+        return ["layerID": layerId, "parameters": originalParameters,
+                "parametersUnchanged": originalParameters == engine.particleParams(layerId),
+                "frames": frames, "changedFromZero": changedPixels(0, 36),
+                "changedBetweenTimes": changedPixels(36, 72)]
+    }
+#endif
+
     func start() {
         guard !started else { return }
         var error: NSString?
@@ -329,6 +691,8 @@ final class AureaModel: ObservableObject {
         guard started else { return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
+        let playheadChanged = out.playhead != lastEnginePlayhead
+        lastEnginePlayhead = out.playhead
         // Só publica quando algo que a UI MOSTRA mudou: publicar a 5 Hz sem
         // filtrar redesenha a árvore inteira por nada (a FPS do painel DEV
         // muda sempre, e é para isso que existe o `showPerf`).
@@ -338,6 +702,8 @@ final class AureaModel: ObservableObject {
         if out.modelRevision != lastRevision {
             lastRevision = out.modelRevision
             refreshModel(force: true)
+        } else if playheadChanged && primarySelection != nil {
+            refreshSelectedLayer()
         }
         if out.thumbnailGeneration != lastThumbGeneration {
             lastThumbGeneration = out.thumbnailGeneration
@@ -348,6 +714,8 @@ final class AureaModel: ObservableObject {
     private func statusEquals(_ other: AureaStatus) -> Bool {
         let a = status
         return a.playhead == other.playhead
+            && a.modelRevision == other.modelRevision
+            && a.thumbnailGeneration == other.thumbnailGeneration
             && a.duration == other.duration
             && a.playing == other.playing
             && a.layerCount == other.layerCount
@@ -374,6 +742,8 @@ final class AureaModel: ObservableObject {
                       name: row["name"] as? String ?? "",
                       startFrame: (row["startFrame"] as? NSNumber)?.int32Value ?? 0,
                       endFrame: (row["endFrame"] as? NSNumber)?.int32Value ?? 0,
+                      offsetFrames: (row["offsetFrames"] as? NSNumber)?.int32Value ?? 0,
+                      parentIndex: (row["parentIndex"] as? NSNumber)?.int32Value ?? -1,
                       opacity: (row["opacity"] as? NSNumber)?.floatValue ?? 1,
                       effectCount: (row["effectCount"] as? NSNumber)?.uint32Value ?? 0,
                       maskCount: (row["maskCount"] as? NSNumber)?.uint32Value ?? 0,
@@ -398,6 +768,7 @@ final class AureaModel: ObservableObject {
                   let keys = entry["keys"] as? [[String: Any]] else { continue }
             byLayer[layerId] = keys.map { key in
                 KeyframeItem(property: (key["property"] as? NSNumber)?.uint32Value ?? 0,
+                             paramIndex: (key["paramIndex"] as? NSNumber)?.uint32Value ?? 0,
                              effectIndex: (key["effectIndex"] as? NSNumber)?.uint32Value ?? 0,
                              time: (key["time"] as? NSNumber)?.int32Value ?? 0,
                              value: (key["value"] as? NSNumber)?.floatValue ?? 0,
@@ -408,7 +779,7 @@ final class AureaModel: ObservableObject {
         composition = engine.composition() ?? [:]
         dirty = status.dirty != 0
         effectCatalog = engine.effectCatalog().map { row in
-            EffectCatalogItem(typeId: (row["typeId"] as? NSNumber)?.uint32Value ?? 0,
+            EffectCatalogItem(effectClass: (row["effectClass"] as? NSNumber)?.uint32Value ?? 0, typeId: (row["typeId"] as? NSNumber)?.uint32Value ?? 0,
                               name: row["name"] as? String ?? "",
                               category: row["category"] as? String ?? "",
                               paramCount: (row["paramCount"] as? NSNumber)?.uint32Value ?? 0)
@@ -433,6 +804,7 @@ final class AureaModel: ObservableObject {
                        known: row["known"] as? Bool ?? true)
         }
         detail = engine.layerDetail(layerId) ?? [:]
+        if panel == .mask || panel == .vector { refreshMasks() }
         if let effectId = selectedEffectId {
             loadParams(layerId: layerId, effectId: effectId)
         }
@@ -443,7 +815,7 @@ final class AureaModel: ObservableObject {
         effectParams = engine.effectParams(forLayer: layerId, effectId: effectId).map { row in
             let value = (row["value"] as? [NSNumber])?.map(\.floatValue) ?? [0, 0, 0, 0]
             let def = (row["defaultValue"] as? [NSNumber])?.map(\.floatValue) ?? [0, 0, 0, 0]
-            return EffectParamItem(index: (row["index"] as? NSNumber)?.uint32Value ?? 0,
+            return EffectParamItem(flags: (row["flags"] as? NSNumber)?.uint32Value ?? 0, index: (row["index"] as? NSNumber)?.uint32Value ?? 0,
                                    type: (row["type"] as? NSNumber)?.uint32Value ?? 0,
                                    label: row["label"] as? String ?? "",
                                    unit: row["unit"] as? String ?? "",
@@ -484,7 +856,10 @@ final class AureaModel: ObservableObject {
     func redo() { engine.run { $0.redo() }; syncAfterEdit() }
 
     func playPause() { engine.run { $0.togglePlayback() }; status.playing = status.playing == 0 ? 1 : 0 }
-    func seek(toFrame frame: Int64) { engine.run { $0.seek(toFrame: frame) }; status.playhead = frame }
+    func seek(toFrame frame: Int64) {
+        engine.run { $0.seek(toFrame: frame) }; status.playhead = frame
+        if primarySelection != nil { refreshSelectedLayer() }
+    }
     func step(_ frames: Int32) { engine.run { $0.stepFrames(frames) } }
     func setLoop(_ on: Bool) { engine.run { $0.setLoop(on) } }
     func setSpeed(_ speed: Float) { engine.run { $0.setPlaybackSpeed(speed) } }
@@ -498,6 +873,7 @@ final class AureaModel: ObservableObject {
     func optimisticPlayhead(_ frame: Int64) {
         guard status.playhead != frame else { return }
         status.playhead = frame
+        if primarySelection != nil { refreshSelectedLayer() }
     }
     /// Redesenha e reapresenta mesmo sem mudança no modelo: a janela voltou a
     /// aparecer, ou o palco mudou de tamanho (tela cheia).
@@ -514,7 +890,7 @@ final class AureaModel: ObservableObject {
     /// de desfazer, como qualquer outra edição.
     func groupSelection() {
         guard !selection.isEmpty else { return }
-        let ids = selection.map { NSNumber(value: $0) }
+        let ids = layers.filter { selection.contains($0.id) }.map { NSNumber(value: $0.id) }
         let created = engine.precomposeLayers(ids, name: nil)
         if created < 0 {
             toast = "nao deu para agrupar"
@@ -539,7 +915,8 @@ final class AureaModel: ObservableObject {
         projectName = newName
     }
 
-    func select(layerId: Int64, additive: Bool) {
+    func select(layerId: Int64, additive: Bool = false) {
+        if primarySelection != layerId { selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; pointPick = nil; freehandPoints = []; panel = .none }
         if additive {
             var next = selection
             if next.contains(layerId) { next.remove(layerId) } else { next.insert(layerId) }
@@ -550,13 +927,144 @@ final class AureaModel: ObservableObject {
             selection = [layerId]
         }
         selectedEffectId = nil
+        if selection.count != 1 { panel = .none }
         refreshSelectedLayer()
     }
 
     func clearSelection() {
+        selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; masks = []
         engine.run { $0.clearSelection() }
         selection = []
+        panel = .none
         selectedEffectId = nil
+        refreshSelectedLayer()
+    }
+
+    func openAddLayer() {
+        if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
+        panel = .none
+        showAddLayer = true
+    }
+
+    func openPanel(_ target: PanelKind) {
+        if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
+        showAddLayer = false
+        panel = target
+        if target == .mask { refreshMasks() }
+        if target == .vector { vectorGroup = 0; vectorPath = 0; vectorFreehand = false; vectorPointTool = 0; vectorEditingPoints = false; refreshMasks() }
+    }
+
+    func refreshMasks() {
+        guard let id = primarySelection else { masks = []; return }
+        if panel == .vector {
+            let data = engine.vectorPath(id, group: vectorGroup, path: vectorPath).map(\.floatValue)
+            guard data.count >= 9, data[8] >= 0, Int(data[8]) * 6 + 9 == data.count else { masks = []; return }
+            maskAffine = Array(data.prefix(6))
+            masks = [MaskItem(id: 0, operation: 0, inverted: false, feather: 0, expansion: 0, opacity: 1, closed: data[7] > 0.5, keyed: Int(data[6]) & 4 != 0, points: Array(data.dropFirst(9)))]
+            selectedMask = 0
+            return
+        }
+        let data = engine.maskData(id).map(\.floatValue)
+        guard data.count >= 7 else { masks = []; return }
+        maskAffine = Array(data.prefix(6))
+        var next: [MaskItem] = [], offset = 7
+        for _ in 0..<Int(data[6]) {
+            guard offset + 12 <= data.count else { break }
+            let h = Array(data[offset..<(offset + 12)]), count = Int(data[offset + 7]) * 6
+            offset += 12
+            guard count >= 0, offset + count <= data.count else { break }
+            next.append(MaskItem(id: UInt32(h[0]), operation: UInt32(h[1]), inverted: h[2] > 0.5,
+                                 feather: h[3], expansion: h[4], opacity: h[5], closed: h[6] > 0.5, keyed: h[9] > 0.5,
+                                 points: Array(data[offset..<(offset + count)]), keyCount: Int(h[8])))
+            offset += count
+        }
+        masks = next
+        if let selectedMask, !next.contains(where: { $0.id == selectedMask }) { self.selectedMask = nil; maskDrawing = false; selectedMaskPoint = nil }
+    }
+
+    var editingMask: MaskItem? { masks.first { $0.id == selectedMask } }
+
+    func setMaskPoints(_ points: [Float], closed: Bool, undo: Bool = true) {
+        guard let id = primarySelection, let mask = selectedMask else { return }
+        if panel == .vector {
+            let values = [closed ? Float(1) : 0, Float(points.count / 6)] + points
+            _ = engine.setVectorPath(id, group: vectorGroup, path: vectorPath, values: values.map { NSNumber(value: $0) }, continuing: !undo)
+            refreshMasks(); return
+        }
+        _ = engine.setMaskPath(id, mask: mask, points: points.map { NSNumber(value: $0) }, closed: closed, undo: undo)
+        refreshMasks()
+    }
+
+    func addMask(_ shape: Int) {
+        guard let id = primarySelection else { return }
+        let source = (detail["sourceSize"] as? [NSNumber] ?? []).map(\.floatValue)
+        let w = max(1, source.first ?? Float(compositionWidth)), h = max(1, source.count > 1 ? source[1] : Float(compositionHeight))
+        let cx = w / 2, cy = h / 2, rx = w * 0.35, ry = h * 0.35
+        let points: [Float]
+        if shape == 0 { points = [cx-rx, cy-ry, 0,0,0,0, cx+rx, cy-ry, 0,0,0,0, cx+rx, cy+ry, 0,0,0,0, cx-rx, cy+ry, 0,0,0,0] }
+        else if shape == 1 {
+            let kx = rx * 0.5523, ky = ry * 0.5523
+            points = [cx,cy-ry,-kx,0,kx,0, cx+rx,cy,0,-ky,0,ky, cx,cy+ry,kx,0,-kx,0, cx-rx,cy,0,ky,0,-ky]
+        } else { points = [] }
+        let mask = engine.addMask(id, points: points.map { NSNumber(value: $0) }, closed: shape != 2)
+        guard mask >= 0 else { toast = "Não foi possível adicionar a máscara"; return }
+        refreshModel(force: true); refreshMasks(); selectedMask = UInt32(mask); maskDrawing = shape == 2; selectedMaskPoint = nil
+    }
+
+    /// Same back order as EditorScreen.shellBack on Android.
+    func editorBack() {
+        if showAddLayer { showAddLayer = false }
+        else if fullscreen { fullscreen = false }
+        else if panel != .none && panel != .dock { panel = .none }
+        else if !selection.isEmpty { clearSelection() }
+        else if engine.precompDepth > 0 { _ = engine.closePrecomp(); refreshModel(force: true) }
+        else { closeProject() }
+    }
+
+    func editorBackFromTimeline() {
+        if panel != .none && panel != .dock { panel = .none }
+        else { clearSelection() }
+    }
+
+    var localPlayhead: Int32 {
+        if let n = detail["localPlayhead"] as? NSNumber { return n.int32Value }
+        guard let layer = selectedLayer else { return Int32(clamping: status.playhead) }
+        return Int32(clamping: status.playhead - Int64(layer.startFrame) + Int64(layer.offsetFrames))
+    }
+
+    func keyProperty(_ property: UInt32, value: Float) {
+        guard let id = primarySelection else { return }
+        mutate { $0.insertKeyframe(forLayer: id, property: property, time: localPlayhead, value: value) }
+        refreshModel(force: true)
+    }
+
+    /// A property with a track is edited at the playhead, as on Android.
+    /// Writing only its base transform would be hidden by the existing track.
+    func editTransform(_ property: UInt32, value: Float) {
+        guard let id = primarySelection, value.isFinite, !(selectedLayer?.locked ?? false) else { return }
+        let mask = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        if property < 32 && mask & (1 << property) != 0 {
+            keyProperty(property, value: value)
+            return
+        }
+        func vector(_ key: String) -> [Float] { (detail[key] as? [NSNumber] ?? []).map(\.floatValue) }
+        mutate { engine in
+            if property == 12 { engine.setOpacity(forLayer: id, value: value) }
+            else if property >= 13 && property <= 14 {
+                var v = vector("skew"); guard v.count >= 2 else { return }
+                v[Int(property - 13)] = value; engine.setSkew(forLayer: id, x: v[0], y: v[1])
+            } else if property < 12 {
+                let group = Int(property / 3), axis = Int(property % 3)
+                var v = vector(["position", "scale", "rotation", "anchor"][group]); guard v.count >= 3 else { return }
+                v[axis] = value
+                switch group {
+                case 0: engine.setPosition(forLayer: id, x: v[0], y: v[1], z: v[2])
+                case 1: engine.setScale(forLayer: id, x: v[0], y: v[1], z: v[2])
+                case 2: engine.setRotation(forLayer: id, x: v[0], y: v[1], z: v[2])
+                default: engine.setAnchor(forLayer: id, x: v[0], y: v[1], z: v[2])
+                }
+            }
+        }
         refreshSelectedLayer()
     }
 
@@ -595,26 +1103,42 @@ final class AureaModel: ObservableObject {
 
     /// Cria um projeto e entra no editor. Mesma regra do Android: a resolução é
     /// o LADO MENOR (1080p em 9:16 = 1080×1920).
-    func newProject(ratio: Double, shortSide: UInt32, fps: Double, title: String) {
+    @discardableResult
+    func newProject(ratio: Double, shortSide: UInt32, fps: Double, title: String) -> Bool {
         let width: UInt32 = ratio >= 1 ? UInt32((Double(shortSide) * ratio).rounded()) : shortSide
         let height: UInt32 = ratio >= 1 ? shortSide : UInt32((Double(shortSide) / ratio).rounded())
-        let name = title.isEmpty ? "Aurea" : title
+        return newProject(width: width, height: height, fps: fps, title: title)
+    }
+
+    @discardableResult
+    func newProject(width: UInt32, height: UInt32, fps: Double, title: String) -> Bool {
+        guard started else {
+            toast = startError ?? "o motor ainda não está pronto"
+            return false
+        }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmed.isEmpty ? "Projeto \(projects.count + 1)" : trimmed
         guard engine.newProjectWidth(width, height: height, fps: fps, title: name) else {
             toast = "não foi possível criar o projeto"
-            return
+            return false
         }
         let url = uniqueProjectURL(name)
+        guard engine.saveProject(url.path) else {
+            toast = "não foi possível salvar o projeto"
+            return false
+        }
         projectURL = url
         projectName = name
-        _ = engine.saveProject(url.path)
         refreshProjectList()
+        refreshModel(force: true)
         enterEditor()
+        return true
     }
 
     func open(_ project: ProjectFile) {
         openingProject = true
         defer { openingProject = false }
-        guard engine.loadProject(project.path) else {
+        guard engine.loadProject(project.url.path) else {
             toast = "não foi possível abrir o projeto"
             return
         }
@@ -678,10 +1202,12 @@ final class AureaModel: ObservableObject {
     }
 
     private func uniqueProjectURL(_ name: String) -> URL {
-        var url = AureaPaths.documents.appendingPathComponent(name + ".aurea")
+        let invalid = CharacterSet(charactersIn: "/\\:").union(.controlCharacters)
+        let safe = name.components(separatedBy: invalid).joined(separator: "-")
+        var url = AureaPaths.documents.appendingPathComponent(safe + ".aurea")
         var counter = 1
         while FileManager.default.fileExists(atPath: url.path) {
-            url = AureaPaths.documents.appendingPathComponent("\(name) \(counter).aurea")
+            url = AureaPaths.documents.appendingPathComponent("\(safe) \(counter).aurea")
             counter += 1
         }
         return url
@@ -711,49 +1237,210 @@ final class AureaModel: ObservableObject {
     // =========================================================================
     // Importação
     // =========================================================================
+    /// Atalho da Home: primeiro cria a composição na proporção da mídia e só
+    /// depois a importa. O importador do editor pressupõe um projeto aberto.
+    func createFromMedia(url: URL, kind: ImportKind) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        Task { @MainActor in
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            var mediaWidth: CGFloat = 0
+            var mediaHeight: CGFloat = 0
+            switch kind {
+            case .video:
+                let asset = AVURLAsset(url: url)
+                if let track = try? await asset.loadTracks(withMediaType: .video).first,
+                   let size = try? await track.load(.naturalSize),
+                   let transform = try? await track.load(.preferredTransform) {
+                    let oriented = size.applying(transform)
+                    mediaWidth = abs(oriented.width)
+                    mediaHeight = abs(oriented.height)
+                }
+            case .image:
+                if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+                    mediaWidth = CGFloat((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? 0)
+                    mediaHeight = CGFloat((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? 0)
+                }
+            default: break
+            }
+            let ratio = mediaWidth > 0 && mediaHeight > 0
+                ? min(5.0, max(0.2, Double(mediaWidth / mediaHeight))) : 9.0 / 16.0
+            let width = UInt32((ratio >= 1 ? 1080.0 * ratio : 1080.0).rounded()) & ~UInt32(1)
+            let height = UInt32((ratio >= 1 ? 1080.0 : 1080.0 / ratio).rounded()) & ~UInt32(1)
+            let name = url.deletingPathExtension().lastPathComponent
+            guard newProject(width: width, height: height, fps: 30, title: name) else { return }
+            importMedia(url: url, kind: kind)
+            _ = saveProject(writeThumbnail: false)
+        }
+    }
+
     /// Copia o arquivo escolhido para o sandbox (Media/) e importa. O motor
     /// guarda o caminho RELATIVO a Documents — é o que faz o mesmo .aurea
     /// abrir no Android e no iOS.
-    func importMedia(url: URL, kind: ImportKind) {
+    func importMedia(url: URL, kind: ImportKind, objectHDRI: Int64? = nil) {
+        guard !importingMedia else { return }
+        operationMessage = "Importando mídia…"
+        importingMedia = true
+        if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
         let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
-        do {
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
-            }
-            try FileManager.default.copyItem(at: url, to: destination)
-        } catch {
-            toast = "não deu para copiar o arquivo"
-            return
-        }
         let name = url.deletingPathExtension().lastPathComponent
-        var result: Int64 = -1
-        switch kind {
-        case .video: result = engine.importVideo(destination.path, name: name)
-        case .audio: result = engine.importAudio(destination.path, name: name)
-        case .image: result = engine.importImageFile(destination.path, name: name)
-        case .model: result = engine.importModel(destination.path, name: name)
-        case .hdri: result = engine.importHdri(destination.path)
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            var result: Int64 = -1
+            var failure = ""
+            do {
+                try FileManager.default.copyItem(at: url, to: destination)
+                switch kind {
+                case .video: result = importer.importVideo(destination.path, name: name)
+                case .audio: result = importer.importAudio(destination.path, name: name)
+                case .image: result = importer.importImageFile(destination.path, name: name)
+                case .model: result = importer.importModel(destination.path, name: name)
+                case .hdri:
+                    if let objectHDRI { result = importer.importObjectHDRI(destination.path, layer: objectHDRI) }
+                    else { result = importer.importHdri(destination.path) }
+                }
+                if result < 0 {
+                    failure = importer.lastImportError
+                    if failure.isEmpty { failure = "Importação falhou (\(-result))" }
+                    try? FileManager.default.removeItem(at: destination)
+                }
+            } catch { failure = "Não deu para copiar o arquivo: \(error.localizedDescription)" }
+            let importedId = result, importFailure = failure
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if !importFailure.isEmpty { self.toast = importFailure; return }
+                if kind == .hdri { self.toast = "Ambiente importado" }
+                else { self.engine.selectLayers([NSNumber(value: importedId)]); self.selection = [importedId] }
+                self.refreshModel(force: true)
+                _ = self.saveProject(writeThumbnail: false)
+            }
         }
-        if result < 0 {
-            let why = engine.lastImportError
-            // O motor devolve −Errc e o motivo em texto. Nunca um "importado"
-            // com a tela preta (é a regra do import_model no Engine.hpp).
-            toast = why.isEmpty ? "importação falhou (\(-result))" : why
-            try? FileManager.default.removeItem(at: destination)
-            return
-        }
-        if kind == .hdri {
-            toast = "ambiente importado"
-        } else {
-            engine.selectLayers([NSNumber(value: result)])
-            selection = [result]
-        }
-        syncAfterEdit()
     }
 
     enum ImportKind { case video, audio, image, model, hdri }
+
+    func performMediaOperation(_ message: String, operation: @escaping (AureaEngine) -> String) {
+        guard !importingMedia else { return }
+        importingMedia = true; operationMessage = message
+        if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
+        let native = engine
+        mediaQueue.async { [weak self] in
+            let error = operation(native)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                self.refreshModel(force: true)
+                if !error.isEmpty { self.toast = error }
+                else { _ = self.saveProject(writeThumbnail: false) }
+            }
+        }
+    }
+
+    func beginPointPick(stabilize: Bool) {
+        guard let layer = selectedLayer, layer.kind == 1, !layer.locked else { return }
+        engine.run { $0.pause(); $0.seek(toFrame: Int64(layer.startFrame)) }
+        refreshStatus(); refreshSelectedLayer()
+        pointPick = stabilize; panel = .none
+    }
+
+    func finishPointPick(_ point: CGPoint) {
+        guard let stabilize = pointPick, let id = primarySelection else { return }
+        let a = engine.maskData(id).prefix(6).map(\.floatValue)
+        guard a.count == 6 else { return }
+        let det = a[0] * a[3] - a[1] * a[2]
+        guard abs(det) > 0.000001 else { return }
+        let x = Float(point.x) - a[4], y = Float(point.y) - a[5]
+        let localX = (a[3] * x - a[2] * y) / det, localY = (-a[1] * x + a[0] * y) / det
+        pointPick = nil
+        performMediaOperation(stabilize ? "Estabilizando…" : "Rastreando o ponto…") {
+            $0.trackPoint(id, x: localX, y: localY, stabilize: stabilize)
+        }
+    }
+
+    func removeGaps() {
+        let removed = engine.removeGaps()
+        refreshModel(force: true)
+        let fps = max(1, (composition["fps"] as? NSNumber)?.doubleValue ?? 30)
+        toast = removed > 0 ? AureaText.t("msg_gaps_removed", String(format: "%.1f", Double(removed) / fps))
+            : AureaText.t("msg_nao_ha_espacos_vazios")
+    }
+    func trimProjectAtPlayhead() {
+        if engine.trimComposition(status.playhead) {
+            refreshModel(force: true)
+            toast = AureaText.t("msg_projeto_aparado_no_cabecote")
+        }
+    }
+
+    func addAdjustmentLayer() {
+        guard started else { return }
+        engine.run { $0.beginUndoGroup() }
+        let id = engine.addNull(false)
+        if id >= 0 {
+            engine.setLayer(id, adjustment: true)
+            engine.setLayer(id, name: AureaText.t("editor_camada_ajuste"))
+        }
+        engine.run { $0.endUndoGroup() }
+        guard id >= 0 else { toast = AureaText.t("msg_nao_foi_possivel_criar_a_camada_2", -id); return }
+        showAddLayer = false
+        syncAfterEdit(); select(layerId: id, additive: false)
+        toast = AureaText.t("msg_camada_de_ajuste_adicione_efeitos_nela")
+    }
+
+    func importSvg(url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            toast = AureaText.t("msg_nao_foi_possivel_importar_svg"); return
+        }
+        let id = engine.importSVG(text, name: url.deletingPathExtension().lastPathComponent)
+        guard id >= 0 else { toast = AureaText.t("msg_nao_foi_possivel_importar_svg"); return }
+        showAddLayer = false
+        syncAfterEdit(); select(layerId: id, additive: false)
+    }
+
+    func detectBeats() {
+        guard !importingMedia, let layer = selectedLayer, layer.kind == 1 || layer.kind == 3 else {
+            toast = AureaText.t("msg_escolha_uma_camada_de_audio_ou"); return
+        }
+        importingMedia = true; operationMessage = AureaText.t("msg_detectando_batidas")
+        if status.playing != 0 { playPause() }
+        let native = engine
+        mediaQueue.async { [weak self] in
+            var bpm: Double = 0
+            let count = native.detectBeats(forLayer: layer.id, bpm: &bpm)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                self.refreshModel(force: true); self.refreshMarkers()
+                if count > 0 {
+                    self.toast = AureaText.t("msg_batidas_bpm", count, Int(bpm.rounded()))
+                    _ = self.saveProject(writeThumbnail: false)
+                } else {
+                    self.toast = count == 0 ? AureaText.t("msg_nenhuma_batida_clara_neste_som")
+                        : AureaText.t("msg_nao_foi_possivel_analisar_o_som", -count)
+                }
+            }
+        }
+    }
+
+    func clearHomeCaches() {
+        HomeThumbCache.shared.clear()
+        let freed = engine.trimMemory(80)
+        Task {
+            let disk = await effectPreviews.clear()
+            toast = AureaText.t("msg_cache_cleared", String(format: "%.1f", Double(freed + disk) / (1024 * 1024)))
+        }
+    }
+
+    func analyseDeviceAgain() {
+        // iOS probes on every engine start; there is no persisted Android DeviceProfile to invalidate.
+        deviceReport = engine.deviceReport()
+        deviceSummary = engine.deviceSummary
+        toast = AureaText.t("settings_device_analysed")
+    }
 
     func addShape(_ preset: UInt32) {
         let id = engine.addShape(preset)
@@ -767,6 +1454,23 @@ final class AureaModel: ObservableObject {
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
         showAddLayer = false
         syncAfterEdit()
+    }
+
+    func addVector(_ preset: UInt32, freehand: Bool = false) {
+        let id = engine.addVector(preset)
+        guard id >= 0 else { toast = "Não foi possível criar o vetor"; return }
+        selection = [id]; engine.selectLayers([NSNumber(value: id)]); showAddLayer = false
+        syncAfterEdit(); openPanel(.vector); maskDrawing = preset == 0; vectorFreehand = freehand
+    }
+
+    func finishFreehand() {
+        guard let id = primarySelection, freehandPoints.count >= 4 else { freehandPoints = []; return }
+        let added = engine.addFreehand(id, points: freehandPoints.map { NSNumber(value: $0) }, error: 2)
+        freehandPoints = []
+        if added >= 0 {
+            vectorGroup = UInt32(max(0, engine.vectorGroups(id).count - 1)); vectorPath = 0
+            refreshModel(force: true); refreshMasks()
+        } else { toast = "Não foi possível adicionar o desenho" }
     }
 
     func addNull(threeD: Bool) {
@@ -795,6 +1499,8 @@ final class AureaModel: ObservableObject {
     // =========================================================================
     func startExport() {
         guard !exporting else { return }
+        exportedURL = nil
+        exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         let name = (projectName.isEmpty ? "Aurea" : projectName) + ".mp4"
         var url = AureaPaths.documents.appendingPathComponent(name)
         var counter = 1
@@ -809,16 +1515,19 @@ final class AureaModel: ObservableObject {
                                     bitrateMbps: exportOptions.bitrateMbps,
                                     audioBitrateKbps: exportOptions.audioBitrateKbps)
         guard ok else {
-            toast = "o export não pôde começar"
+            exportMessage = "o export não pôde começar"
+            toast = exportMessage
             return
         }
         exporting = true
+        pendingExportURL = url
         startExportPolling()
     }
 
     func cancelExport() {
+        guard exporting && !exportPublishing else { return }
+        exportCancelled = true
         engine.cancelExport()
-        exporting = false
     }
 
     private var exportTimer: Timer?
@@ -834,16 +1543,52 @@ final class AureaModel: ObservableObject {
                 if !running && finished {
                     self.exportTimer?.invalidate()
                     self.exportTimer = nil
-                    self.exporting = false
                     let result = (self.exportProgress["result"] as? NSNumber)?.intValue ?? 0
-                    self.toast = result == 0 ? AureaText.t("editor_video_pronto") : "o export falhou"
-                    // Ponto seguro: o render acabou e o vídeo já está salvo. Não segura nada.
-                    if result == 0 { AureaAdsManager.shared.showExportInterstitialIfAvailable {} }
+                    self.exportedURL = result == 0 ? self.pendingExportURL : nil
+                    self.pendingExportURL = nil
+                    if let url = self.exportedURL {
+                        self.exportCancelled = false
+                        self.publishExportToPhotos(url)
+                    } else {
+                        self.exporting = false
+                        if !self.exportCancelled {
+                            let message = self.exportProgress["message"] as? String ?? ""
+                            self.exportMessage = message.isEmpty ? "o export falhou" : message
+                            self.toast = self.exportMessage
+                        }
+                    }
                 }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         exportTimer = timer
+    }
+
+    /// MediaStore's iOS counterpart: request add-only access after a real export.
+    /// The Documents copy remains available for share/open even when Photos is denied.
+    private func publishExportToPhotos(_ url: URL) {
+        exportPublishing = true
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
+            guard status == .authorized || status == .limited else {
+                Task { @MainActor in
+                    self?.exportPublishing = false; self?.exporting = false
+                    self?.exportMessage = "Vídeo salvo no Aurea. Permita adicionar ao Fotos para salvar na galeria."
+                    self?.toast = AureaText.t("editor_video_pronto")
+                    // Ponto seguro: o render acabou e o vídeo já está salvo. Não segura nada.
+                    AureaAdsManager.shared.showExportInterstitialIfAvailable {}
+                }
+                return
+            }
+            PHPhotoLibrary.shared().performChanges({ PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url) }) { saved, error in
+                Task { @MainActor in
+                    self?.exportSavedToPhotos = saved
+                    self?.exportPublishing = false; self?.exporting = false
+                    self?.exportMessage = saved ? nil : (error?.localizedDescription ?? "Não foi possível adicionar o vídeo ao Fotos.")
+                    self?.toast = AureaText.t("editor_video_pronto")
+                    AureaAdsManager.shared.showExportInterstitialIfAvailable {}
+                }
+            }
+        }
     }
 
     // =========================================================================
@@ -862,6 +1607,333 @@ final class AureaModel: ObservableObject {
     var compositionDuration: Int64 { (composition["duration"] as? NSNumber)?.int64Value ?? 0 }
     var compositionWidth: UInt32 { (composition["width"] as? NSNumber)?.uint32Value ?? 1920 }
     var compositionHeight: UInt32 { (composition["height"] as? NSNumber)?.uint32Value ?? 1080 }
+
+    // =========================================================================
+    // --- casca do editor (SESSÃO B) ---
+    //
+    // O que o palco, as barras, o transporte e os menus precisam e a sessão
+    // ainda não tinha: o MESMO recorte do `EditorStore` do Android. Nada aqui
+    // guarda cópia do projeto — tudo é comando do motor (`aurea::Command`) ou
+    // estado de APRESENTAÇÃO que o status do motor não carrega (o loop, o HUD,
+    // o modo Edição, o obturador), exatamente como o store do Android.
+    // =========================================================================
+
+    /// Reprodução em loop: o status do motor não traz esse flag, então a sessão
+    /// guarda o último pedido — é o que a casca pinta no play e marca no menu.
+    @Published private(set) var looping = false
+    /// HUD de desempenho na tela (DEV).
+    @Published private(set) var hudVisible = false
+    /// Modo Edição (timeline magnética).
+    @Published private(set) var editMode = false
+    /// Marcas do projeto (só os quadros; o motor guarda cor e tipo).
+    @Published private(set) var markerFrames: [Int64] = []
+
+    func setLooping(_ on: Bool) {
+        guard looping != on else { return }
+        looping = on
+        engine.run { $0.setLoop(on) }
+    }
+
+    func toggleHud() { hudVisible.toggle() }
+
+    func toggleMarkerAt(_ frame: Int64) {
+        _ = engine.toggleMarker(frame)
+        refreshModel(force: true)
+        refreshMarkers()
+    }
+
+    func refreshMarkers() {
+        let all = engine.markers()
+        var frames: [Int64] = []
+        var index = 0
+        while index < all.count {
+            frames.append(all[index].int64Value)
+            index += 3
+        }
+        markerFrames = frames
+    }
+
+    func seekToNextMarker() {
+        let frames = markerFrames
+        guard !frames.isEmpty else { return }
+        let next = frames.first { $0 > status.playhead } ?? frames[0]
+        seek(toFrame: next)
+    }
+
+    // --- Obturador / desfoque de movimento da composição ---------------------
+    /// {ligado, obturador em graus} — o mesmo par do `motion_blur_settings`.
+    private var motionBlur: (on: Bool, shutter: Float) {
+        let values = engine.motionBlurSettings()
+        return (values.count > 0 && values[0].floatValue != 0, values.count > 1 ? values[1].floatValue : 180)
+    }
+
+    var compMotionBlur: Bool { motionBlur.on }
+    var shutterAngle: Float { motionBlur.shutter }
+
+    func setCompositionMotionBlur(_ on: Bool) {
+        engine.run { $0.setMotionBlurSettings(on, shutter: shutterAngle) }
+        refreshModel(force: true)
+    }
+
+    func changeShutterAngle(_ degrees: Float) {
+        engine.run { $0.setMotionBlurSettings(compMotionBlur, shutter: degrees) }
+        refreshModel(force: true)
+    }
+
+    // --- Modo Edição ---------------------------------------------------------
+    func toggleEditMode() {
+        editMode.toggle()
+        engine.run { $0.setEditMode(editMode) }
+        refreshModel(force: true)
+    }
+
+    // --- Camadas: leitura e tempo -------------------------------------------
+    /// O detalhe de QUALQUER camada no cabeçote (transform avaliado, tamanho da
+    /// mídia) — o `queryDetail` do store, usado pelo palco e pelos menus.
+    func queryDetail(_ layerId: Int64) -> [String: Any]? { engine.layerDetail(layerId) }
+
+    /// Camada vetorial: forma cujo tipo é o caminho editável (VECTOR_SHAPE_TYPE).
+    var isVectorLayer: Bool {
+        guard let kind = detail["kind"] as? NSNumber,
+              let shape = detail["shapeTypePoints"] as? NSNumber else { return false }
+        return kind.uint32Value == 5 && (shape.uint32Value & 0xFFFF) == 11
+    }
+
+    /// Vai ao keyframe anterior/seguinte da camada principal (A.01: |◀ ▶|).
+    func stepToKeyframe(_ direction: Int) -> Bool {
+        guard let id = primarySelection, let d = engine.layerDetail(id),
+              let start = (d["startFrame"] as? NSNumber)?.int64Value,
+              let offset = (d["offsetFrames"] as? NSNumber)?.int64Value else { return false }
+        let times = Set((keyframes[id] ?? []).map { Int64($0.time) + start - offset }).sorted()
+        let now = status.playhead
+        let target = direction > 0 ? times.first { $0 > now } : times.last { $0 < now }
+        guard let target else { return false }
+        seek(toFrame: target)
+        return true
+    }
+
+    /// Reordena na vertical: `displayIndex` é a posição na timeline (0 = topo).
+    func reorderLayer(_ layerId: Int64, displayIndex: Int) {
+        let count = layers.count
+        guard count > 0, let index = layers.firstIndex(where: { $0.id == layerId }) else { return }
+        let clamped = min(max(displayIndex, 0), count - 1)
+        guard clamped != index else { return }
+        engine.run { $0.setLayerOrder(layerId, newIndex: UInt32(count - 1 - clamped)) }
+        refreshModel(force: true)
+    }
+
+    /// Move camadas no tempo (o conteúdo anda junto). Um passo de desfazer.
+    func moveLayers(_ ids: [Int64], deltaFrames: Int) {
+        guard deltaFrames != 0 else { return }
+        let rows = layers.filter { ids.contains($0.id) }
+        guard let minStart = rows.map({ Int($0.startFrame) }).min() else { return }
+        let delta = max(deltaFrames, -minStart)
+        guard delta != 0 else { return }
+        mutate { engine in
+            for row in rows {
+                engine.setLayer(row.id, startFrame: Int32(Int(row.startFrame) + delta),
+                                endFrame: Int32(Int(row.endFrame) + delta),
+                                offsetFrames: row.offsetFrames, setOffset: false)
+            }
+        }
+        refreshModel(force: true)
+    }
+
+    /// Divide as camadas escolhidas no cabeçote (as que o cobrem).
+    func splitAtPlayhead(_ ids: [Int64]) {
+        let frame = Int32(clamping: status.playhead)
+        let targets = layers.filter { ids.contains($0.id) && frame > $0.startFrame && frame < $0.endFrame }
+        guard !targets.isEmpty else { return }
+        mutate { engine in for row in targets { engine.splitLayer(row.id, atFrame: frame) } }
+        refreshModel(force: true)
+    }
+
+    /// Trim do INÍCIO para `frame`: o conteúdo fica parado e só a borda anda.
+    func trimStart(_ layerId: Int64, at frame: Int64) {
+        guard layers.first(where: { $0.id == layerId })?.locked == false else { return }
+        guard let d = engine.layerDetail(layerId),
+              let end = (d["endFrame"] as? NSNumber)?.int32Value,
+              let start = (d["startFrame"] as? NSNumber)?.int32Value,
+              let offset = (d["offsetFrames"] as? NSNumber)?.int32Value,
+              let source = (d["sourceFrames"] as? NSNumber)?.int32Value else { return }
+        var newStart = Int(min(Int32(clamping: frame), end - 1))
+        var newOffset = Int(offset) + (newStart - Int(start))
+        if source > 0 && newOffset < 0 {
+            newStart -= newOffset
+            newOffset = 0
+        }
+        newStart = max(0, newStart)
+        guard newStart != Int(start) else { return }
+        engine.run { $0.setLayer(layerId, startFrame: Int32(newStart), endFrame: end, offsetFrames: Int32(newOffset), setOffset: true) }
+        refreshModel(force: true)
+    }
+
+    /// Trim do FIM para `frame`. O vídeo não passa do fim da mídia.
+    func trimEnd(_ layerId: Int64, at frame: Int64) {
+        guard layers.first(where: { $0.id == layerId })?.locked == false else { return }
+        guard let d = engine.layerDetail(layerId),
+              let end = (d["endFrame"] as? NSNumber)?.int32Value,
+              let start = (d["startFrame"] as? NSNumber)?.int32Value,
+              let offset = (d["offsetFrames"] as? NSNumber)?.int32Value,
+              let source = (d["sourceFrames"] as? NSNumber)?.int32Value else { return }
+        var newEnd = max(Int32(clamping: frame), start + 1)
+        if source > 0 { newEnd = min(newEnd, start - offset + source) }
+        guard newEnd != end else { return }
+        engine.run { $0.setLayer(layerId, startFrame: start, endFrame: newEnd, offsetFrames: offset, setOffset: false) }
+        refreshModel(force: true)
+    }
+
+    // --- Parentesco ----------------------------------------------------------
+    /// Liga (ou solta, `parent` = 0) o pai. O motor compensa: a camada fica
+    /// onde está na tela e passa a seguir o pai dali em diante.
+    func setParent(_ layerId: Int64, parent: Int64) {
+        engine.run { $0.setLayer(layerId, parent: parent) }
+        refreshModel(force: true)
+    }
+
+    /// Vários filhos para o mesmo pai (0 = soltar), num passo de desfazer.
+    func setParentMany(_ ids: [Int64], parent: Int64) {
+        let children = ids.filter { id in
+            id != parent && (parent == 0 || parentCandidatesForAll([id]).contains { $0.id == parent })
+        }
+        guard !children.isEmpty else { return }
+        beginGesture(parent == 0 ? "soltar camadas" : "vincular camadas")
+        mutate { engine in for id in children { engine.setLayer(id, parent: parent) } }
+        endGesture()
+        refreshModel(force: true)
+    }
+
+    /// Pais possíveis para TODAS as escolhidas: nenhuma delas nem descendente.
+    func parentCandidatesForAll(_ ids: [Int64]) -> [LayerItem] {
+        guard !ids.isEmpty else { return [] }
+        var allowed: Set<Int64>?
+        for id in ids {
+            let candidates = Set(parentCandidates(Set([id])).map(\.id))
+            allowed = allowed.map { $0.intersection(candidates) } ?? candidates
+        }
+        let ok = (allowed ?? []).subtracting(ids)
+        return layers.filter { ok.contains($0.id) }
+    }
+
+    /// Pais possíveis de uma escolha (o mesmo ciclo do `parentCandidates`).
+    func parentCandidates(_ ids: Set<Int64>) -> [LayerItem] {
+        layers.filter { candidate in
+            var current = candidate
+            var visited = Set<Int64>()
+            while visited.insert(current.id).inserted {
+                if ids.contains(current.id) { return false }
+                let parent = (engine.layerDetail(current.id)?["parentId"] as? NSNumber)?.int64Value ?? 0
+                guard let next = layers.first(where: { $0.id == parent }) else { return true }
+                current = next
+            }
+            return false
+        }
+    }
+
+    // --- Grupo ---------------------------------------------------------------
+    func openGroup(_ layerId: Int64) {
+        guard engine.openPrecomp(layerId) else { return }
+        selection = []
+        refreshModel(force: true)
+    }
+
+    func selectAll() {
+        let ids = layers.map { NSNumber(value: $0.id) }
+        guard !ids.isEmpty else { return }
+        engine.run { $0.selectLayers(ids) }
+        selection = Set(layers.map(\.id))
+        refreshSelectedLayer()
+    }
+
+    // --- Gestos e transform do palco ----------------------------------------
+    /// Um gesto contínuo (arrasto, alça, pinça) = UM passo de desfazer. Abra no
+    /// começo e feche no fim; tudo que for enviado no meio desfaz junto.
+    func beginGesture(_ label: String) {
+        engine.run { $0.beginUndoGroup() }
+    }
+
+    func endGesture() {
+        engine.run { $0.endUndoGroup() }
+        refreshModel(force: true)
+    }
+
+    /// Muda UMA propriedade de transform, com semântica de keyframe: animada
+    /// cria/atualiza o keyframe no cabeçote, senão muda o valor fixo. Rotação
+    /// X/Y/Z têm UM keyframe só (os três eixos no mesmo instante).
+    func setTransform(_ property: UInt32, value: Float, layer: Int64) {
+        guard value.isFinite, let d = engine.layerDetail(layer) else { return }
+        let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
+        let position = StageGeom.floats(d["position"])
+        let scale = StageGeom.floats(d["scale"])
+        let rotation = StageGeom.floats(d["rotation"])
+        let anchor = StageGeom.floats(d["anchor"])
+        func component(_ values: [Float], _ index: Int) -> Float { values.count > index ? values[index] : 0 }
+        if property >= 6 && property <= 8 && (animated & (1 << 6 | 1 << 7 | 1 << 8)) != 0 {
+            mutate { engine in
+                for axis in 0..<3 {
+                    engine.insertKeyframe(forLayer: layer, property: UInt32(6 + axis), time: local,
+                                          value: axis == Int(property) - 6 ? value : component(rotation, axis))
+                }
+            }
+        } else if property < 32 && animated & (1 << property) != 0 {
+            mutate { engine in engine.insertKeyframe(forLayer: layer, property: property, time: local, value: value) }
+        } else {
+            mutate { engine in
+                switch property {
+                case 0: engine.setPosition(forLayer: layer, x: value, y: component(position, 1), z: component(position, 2))
+                case 1: engine.setPosition(forLayer: layer, x: component(position, 0), y: value, z: component(position, 2))
+                case 2: engine.setPosition(forLayer: layer, x: component(position, 0), y: component(position, 1), z: value)
+                case 3: engine.setScale(forLayer: layer, x: value, y: component(scale, 1), z: component(scale, 2))
+                case 4: engine.setScale(forLayer: layer, x: component(scale, 0), y: value, z: component(scale, 2))
+                case 5: engine.setScale(forLayer: layer, x: component(scale, 0), y: component(scale, 1), z: value)
+                case 6: engine.setRotation(forLayer: layer, x: value, y: component(rotation, 1), z: component(rotation, 2))
+                case 7: engine.setRotation(forLayer: layer, x: component(rotation, 0), y: value, z: component(rotation, 2))
+                case 8: engine.setRotation(forLayer: layer, x: component(rotation, 0), y: component(rotation, 1), z: value)
+                case 9: engine.setAnchor(forLayer: layer, x: value, y: component(anchor, 1), z: component(anchor, 2))
+                case 10: engine.setAnchor(forLayer: layer, x: component(anchor, 0), y: value, z: component(anchor, 2))
+                case 12: engine.setOpacity(forLayer: layer, value: value)
+                default: break
+                }
+            }
+        }
+        refreshSelectedLayer()
+    }
+
+    /// Duas propriedades de uma vez (o arrasto da camada no palco: X e Y).
+    func setTransform2(_ pa: UInt32, _ va: Float, _ pb: UInt32, _ vb: Float, layer: Int64) {
+        guard va.isFinite, vb.isFinite, let d = engine.layerDetail(layer) else { return }
+        let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
+        let position = StageGeom.floats(d["position"])
+        let scale = StageGeom.floats(d["scale"])
+        func component(_ values: [Float], _ index: Int) -> Float { values.count > index ? values[index] : 0 }
+        let isAnimated = (pa < 32 && animated & (1 << pa) != 0) || (pb < 32 && animated & (1 << pb) != 0)
+        mutate { engine in
+            if isAnimated {
+                engine.insertKeyframe(forLayer: layer, property: pa, time: local, value: va)
+                engine.insertKeyframe(forLayer: layer, property: pb, time: local, value: vb)
+            } else if pa == 0 && pb == 1 {
+                engine.setPosition(forLayer: layer, x: va, y: vb, z: component(position, 2))
+            } else if pa == 3 && pb == 4 {
+                engine.setScale(forLayer: layer, x: va, y: vb, z: component(scale, 2))
+            } else if pa == 9 && pb == 10 {
+                engine.setAnchor(forLayer: layer, x: va, y: vb, z: 0)
+            }
+        }
+        refreshSelectedLayer()
+    }
+
+    /// Leva o palco ao ponto pedido (usado pela mira do rastreio).
+    func maskCompPoint(_ point: CGPoint) -> (Float, Float)? {
+        guard let id = primarySelection else { return nil }
+        let a = engine.maskData(id).prefix(6).map(\.floatValue)
+        guard a.count == 6 else { return nil }
+        let det = a[0] * a[3] - a[1] * a[2]
+        guard abs(det) > 0.000001 else { return nil }
+        let x = Float(point.x) - a[4], y = Float(point.y) - a[5]
+        return ((a[3] * x - a[2] * y) / det, (-a[1] * x + a[0] * y) / det)
+    }
 }
 
 // =============================================================================

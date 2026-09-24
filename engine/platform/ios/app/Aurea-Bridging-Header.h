@@ -10,3 +10,4 @@
 //  app inteiro com erros de tipo que não dizem isso.
 // =============================================================================
 #import "AureaEngine.h"
+#import "AureaJSON.h"

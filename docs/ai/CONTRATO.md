@@ -50,7 +50,8 @@ variável de ambiente no Colab). O token **não** entra no APK nem no IPA.
   "gpu": "NVIDIA A100-SXM4-80GB",
   "model": "MiniMax-H3",
   "capabilities": ["text_to_video", "image_to_video", "audio"],
-  "updatedAt": 1750000000
+  "updatedAt": 1750000000,
+  "appToken": "<token de cliente>"
 }
 ```
 
@@ -67,19 +68,34 @@ janela. Documento inválido é o mesmo que ausente.
 
 ## 2. Autenticação
 
-Dois tokens, propósitos diferentes:
+Três tokens, propósitos diferentes:
 
 | token | onde vive | para quê |
 |---|---|---|
 | `AUREA_DISCOVERY_TOKEN` | Colab (env) | escrever o documento de discovery |
-| `AUREA_SERVER_TOKEN` | Colab (env) **e** app | usar a API de geração |
-| `AUREA_ADMIN_TOKEN` | Colab (env) | cancelar job de outro, mexer na fila |
+| `AUREA_SERVER_TOKEN(S)` | Colab (env) → publicado no discovery | usar a API de geração |
+| `AUREA_ADMIN_TOKEN` | Colab (env), **só** | cancelar job de outro, mexer na fila |
 
-O app guarda `AUREA_SERVER_TOKEN` no armazenamento cifrado que já existe
-(`CaptionsState.setGroqKey` usa o mesmo). Nenhum desses tokens é suficiente para
-escrever no discovery, e o de discovery não serve para gerar.
+**O usuário não digita token nenhum.** O token de cliente sai no documento de
+discovery, no campo `appToken`, e o app autentica com o que leu de lá. É isso
+que faz o app abrir já conectado — sem campo, sem botão de conectar, sem nada
+guardado no aparelho.
 
-Todas as chamadas do app levam `Authorization: Bearer <AUREA_SERVER_TOKEN>`.
+O `AUREA_ADMIN_TOKEN` **nunca** entra no documento: o documento é público, e o
+administrativo cancela job dos outros. Publicar um e não o outro é o que separa
+"usar" de "administrar".
+
+Consequência assumida: o token de cliente é público, porque o documento é
+público. Ele só dá acesso à geração, e trocá-lo é trocar `AUREA_SERVER_TOKENS`
+no Colab — o app pega o novo na batida seguinte, sem atualização do aplicativo.
+Se um dia for preciso esconder também o token de cliente, o caminho é publicar
+um token de vida curta que o próprio servidor rotaciona.
+
+Com `AUREA_SERVER_TOKENS` (lista, um por tester) cada aparelho tem identidade
+própria: o histórico de um não aparece no outro, e perder um aparelho é revogar
+um token só. Com `AUREA_SERVER_TOKEN` (um só) todos compartilham a identidade.
+
+Todas as chamadas do app levam `Authorization: Bearer <appToken do discovery>`.
 
 ---
 

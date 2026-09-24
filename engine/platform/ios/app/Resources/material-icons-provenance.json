@@ -1,0 +1,78 @@
+{
+  "version": "1.7.8",
+  "license": "Apache-2.0",
+  "icons": {
+    "automirrored.filled.KeyboardArrowRight": {
+      "sourceSHA256": "24f366dc6093cff1caf827368b9f54075a2d31165503bf0fdf21c37808798d8f",
+      "asset": "Material-automirrored-filled-KeyboardArrowRight"
+    },
+    "automirrored.filled.Logout": {
+      "sourceSHA256": "39ab6fd22d6b7ed4e92cb60df3d15362f89c34b5b0f78ac6b58aa56307ad480d",
+      "asset": "Material-automirrored-filled-Logout"
+    },
+    "automirrored.rounded.FormatAlignLeft": {
+      "sourceSHA256": "775675a33e8034fce80c80bd51eb2c8c5585eb590034268ef68e2c3abba89189",
+      "asset": "Material-automirrored-rounded-FormatAlignLeft"
+    },
+    "automirrored.rounded.FormatAlignRight": {
+      "sourceSHA256": "2c841aec6e15bfb376b2b30373c4fe2692f42c6d831f0228c23023c577c7d5a5",
+      "asset": "Material-automirrored-rounded-FormatAlignRight"
+    },
+    "automirrored.rounded.RotateRight": {
+      "sourceSHA256": "59de4f38ef8e671b7e5df126eab17e78ebb99080ef26405a833b5bdd631afb12",
+      "asset": "Material-automirrored-rounded-RotateRight"
+    },
+    "filled.Add": {
+      "sourceSHA256": "a478e15440a14db9fd1b68d115d3e657953419b88ba6ff03a60d3a1b0dd276d0",
+      "asset": "Material-filled-Add"
+    },
+    "filled.ChevronLeft": {
+      "sourceSHA256": "eb7949f1b502a4eecfe3048d6bed1d00d3fb4454e6cb65a41592752c4662d81c",
+      "asset": "Material-filled-ChevronLeft"
+    },
+    "filled.MoreHoriz": {
+      "sourceSHA256": "147d5df80e64616ae6302b7205febcd19603280cc16d6cd94f3d8df4747f62d2",
+      "asset": "Material-filled-MoreHoriz"
+    },
+    "filled.MoreVert": {
+      "sourceSHA256": "efdc6f22fc7e79879fefb9658796ce4bc7bf1a4ef7775a21a242b039bb91fc67",
+      "asset": "Material-filled-MoreVert"
+    },
+    "rounded.AspectRatio": {
+      "sourceSHA256": "489900083a92397af6d83520f7c4db61938f814cc66c2898689773c9f18dd285",
+      "asset": "Material-rounded-AspectRatio"
+    },
+    "rounded.BlurOn": {
+      "sourceSHA256": "433f2eb424ff0c070f37221e9c764e158668d19503e360abd5d0573cf4990cae",
+      "asset": "Material-rounded-BlurOn"
+    },
+    "rounded.ChevronLeft": {
+      "sourceSHA256": "aff5923809a09064917e2a95cd8dad974f2d01d3f3c6e2bbc93dc2ba20a071f2",
+      "asset": "Material-rounded-ChevronLeft"
+    },
+    "rounded.FilterCenterFocus": {
+      "sourceSHA256": "9a57dd6329c134c027e4aa5baa485c310e41ae9a13597df515f146f5abf0392e",
+      "asset": "Material-rounded-FilterCenterFocus"
+    },
+    "rounded.Link": {
+      "sourceSHA256": "e1fca805b46688a33be90c240dc4eea6ec3b323416964f50ce52123f078d16cf",
+      "asset": "Material-rounded-Link"
+    },
+    "rounded.LinkOff": {
+      "sourceSHA256": "a9f855d48a1e6eb525e8d2cdcdb2e90402fe4f5691c4de8abfeb3781c8f47390",
+      "asset": "Material-rounded-LinkOff"
+    },
+    "rounded.Opacity": {
+      "sourceSHA256": "14dd91e92fe68ebb12e98bbe8245ac90e460a993531f4d825217ae3b9c90a179",
+      "asset": "Material-rounded-Opacity"
+    },
+    "rounded.OpenWith": {
+      "sourceSHA256": "ceedad8017716d08917038519a43796648315bc3e25547752ebaaa85499f706f",
+      "asset": "Material-rounded-OpenWith"
+    },
+    "rounded.Stairs": {
+      "sourceSHA256": "88583dbfbbba54d9d2125843a4c52c7b4683b1c33606e4addbc407b07c4c327c",
+      "asset": "Material-rounded-Stairs"
+    }
+  }
+}

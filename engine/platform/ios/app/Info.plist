@@ -34,11 +34,17 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0-beta1</string>
-    <!-- 2102 é o MESMO número do versionCode do Android: um aparelho de cada
-         sistema conta a mesma história sobre qual versão está instalada. -->
+    <string>2.0.0</string>
+    <!-- Build iOS do porte do editor Android atual. -->
     <key>CFBundleVersion</key>
-    <string>2102</string>
+    <string>2107</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Salvar o vídeo exportado pelo Aurea na sua galeria.</string>
+    <key>UIAppFonts</key>
+    <array>
+        <string>CupertinoIcons.ttf</string>
+        <string>Fonts/Roboto-Regular.ttf</string>
+    </array>
     <key>LSRequiresIPhoneOS</key>
     <true/>
 

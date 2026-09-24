@@ -172,6 +172,39 @@ def test_documento_inclui_o_que_o_app_mostra():
     assert "text_to_video" in corpo["capabilities"]
 
 
+def test_o_token_do_app_vai_no_documento():
+    """E o que dispensa o usuario de digitar token no aparelho."""
+    assert _doc(appToken="tok-do-app").como_dict()["appToken"] == "tok-do-app"
+
+
+def test_o_token_administrativo_nunca_vai_no_documento():
+    """O documento e publico: o unico token que pode estar nele e o de cliente."""
+    campos = set(_doc(appToken="tok-do-app").como_dict())
+    assert "adminToken" not in campos
+    assert "token" not in campos
+    assert "discoveryToken" not in campos
+
+
+def test_o_batedor_publica_o_token_de_cliente():
+    from aurea_ai.config import Config
+    from aurea_ai.discovery import Batedor
+
+    cfg = Config(server_tokens=("tok-do-app", "tok-do-outro"))
+    b = Batedor(cfg, "https://algo.trycloudflare.com", "A100", ["text_to_video"])
+    assert b.documento(online=True).appToken == "tok-do-app"
+    # Offline tambem leva o token: quando o Colab voltar, o app ja autentica
+    # sem esperar uma segunda batida.
+    assert b.documento(online=False).appToken == "tok-do-app"
+
+
+def test_sem_token_de_cliente_o_documento_sai_vazio():
+    from aurea_ai.config import Config
+    from aurea_ai.discovery import Batedor
+
+    b = Batedor(Config(server_tokens=()), "https://algo.trycloudflare.com", "A100", [])
+    assert b.documento(online=True).appToken == ""
+
+
 # ---------------------------------------------------------------------------
 # Modelos
 # ---------------------------------------------------------------------------

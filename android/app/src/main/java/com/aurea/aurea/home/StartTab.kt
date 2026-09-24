@@ -152,7 +152,7 @@ internal fun StartTab(
             if (arranged.isNotEmpty()) {
                 item(key = "recentes") {
                     SectionHeader(
-                        if (filtering) plural(R.string.home_project_count, arranged.size) else stringResource(R.string.home_sort_recent),
+                        if (filtering) plural(R.plurals.home_project_count, arranged.size) else stringResource(R.string.home_sort_recent),
                         actionLabel = if (!filtering && all.size > visible.size + (if (hero != null) 1 else 0)) stringResource(R.string.home_ver_todos) else null,
                         onAction = { onSelectTab(HomeViewModel.PROJECTS_TAB) },
                     )

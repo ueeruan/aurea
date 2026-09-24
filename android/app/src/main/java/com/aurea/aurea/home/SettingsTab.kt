@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.pm.PackageInfoCompat
 import com.aurea.aurea.R
+import com.aurea.aurea.diagnostics.StressSheet
 import com.aurea.aurea.engine.DeviceProfile
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaActionSheet
@@ -87,10 +88,14 @@ private fun readVersion(context: Context): AppVersion = try {
 internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyListState, bottomBar: Dp) {
     var keyDialog by remember { mutableStateOf(false) }
     var languageSheet by remember { mutableStateOf(false) }
+    var stressSheet by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val version = remember { readVersion(context) }
     var taps by remember { mutableIntStateOf(0) }
     if (keyDialog) GroqKeyDialog(store, onDismiss = { keyDialog = false })
+    if (stressSheet) {
+        StressSheet(store, version.name to version.build, onDismiss = { stressSheet = false })
+    }
     if (languageSheet) {
         LanguageSheet(
             current = AppLanguage.current(context),
@@ -168,6 +173,12 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                 TapRow(stringResource(R.string.settings_clear_recents), stringResource(R.string.settings_clear_recents_note)) {
                     store.effectPrefs.clearRecents()
                     store.showToast(context.getString(R.string.settings_recents_cleared))
+                }
+                GroupDivider()
+                // O teste de estresse fica aqui, sem esconderijo: quem está com o
+                // app travando precisa achar isso sozinho e mandar o relatório.
+                TapRow(stringResource(R.string.settings_stress), stringResource(R.string.settings_stress_note)) {
+                    stressSheet = true
                 }
             }
         }

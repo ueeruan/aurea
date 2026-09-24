@@ -786,8 +786,11 @@ AUREA_TEST(Perf8C, HiddenTransparentAndOffscreenLayersCostNothing) {
                              DecodeMode::Playback, 1.0f, snap);
         for (RenderLayer& l : snap.layers) l.source.frame.reset();
     }
-    std::printf("    5 videos: %u decoders abertos, %u podada(s) fora da tela\n", s.factory->opened, snap.culledLayers);
-    AUREA_CHECK_EQ(s.factory->opened, 2u);   // a visível e a com blur perto da borda
+    // A abertura não bloqueia prepare; aguarda os dois workers, com limite.
+    for (int i = 0; i < 2000 && s.factory->opened.load() < 2; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::printf("    5 videos: %u decoders abertos, %u podada(s) fora da tela\n", s.factory->opened.load(), snap.culledLayers);
+    AUREA_CHECK_EQ(s.factory->opened.load(), 2u);   // a visível e a com blur perto da borda
     AUREA_CHECK_EQ(snap.culledLayers, 1u);
 }
 

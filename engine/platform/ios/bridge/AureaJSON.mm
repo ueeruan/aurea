@@ -3,7 +3,7 @@
 //
 //  Ver o cabeçalho: por que existe e o crash que o motivou.
 //
-//  A varredura (`describe`) é o que dá valor a isto. `isValidJSONObject:`
+//  A varredura (`scan`) é o que dá valor a isto. `isValidJSONObject:`
 //  responde "não" e para aí; num relatório de paridade com dezenas de campos
 //  isso não se depura. Aqui o log sai com o CAMINHO e o TIPO:
 //
@@ -12,12 +12,18 @@
 //  Tipos aceitos (os mesmos de `NSJSONSerialization`): NSString, NSNumber,
 //  NSArray, NSDictionary, NSNull. `NSNumber` ainda precisa ser FINITO — NaN e
 //  infinito são NSNumber de verdade e mesmo assim fazem a API levantar, que é o
-//  caso mais traiçoeiro dos três.
+//  caso mais traiçoeiro dos três. Por isso a varredura roda SEMPRE, e não só
+//  quando `isValidJSONObject:` diz que não: há versão de Foundation em que ele
+//  responde "sim" para NaN e a exceção vem depois.
+//
+//  `static_cast<NSNumber*>(x)` NÃO compila dentro de uma mensagem ObjC
+//  (`[static_cast<NSNumber*>x objCType]` dá "expected '(' after 'static_cast'",
+//  foi o que quebrou os dois jobs do run 35929352896). Cast de C serve, ou —
+//  como aqui — uma variável local do tipo certo, que é o que se lê melhor.
 // =============================================================================
 #import "AureaJSON.h"
 
 #include <cmath>
-#include <string>
 
 namespace {
 
@@ -26,8 +32,9 @@ NSString* type_name(id value) {
     if ([value isKindOfClass:[NSNumber class]]) {
         // Um NSNumber guarda o tipo de origem: `objCType` distingue um BOOL de
         // um char, e um double de um CGFloat (que no iOS arm64 é double).
-        const char* t = [static_cast<NSNumber*>value objCType];
-        if (t && t[0] == 'c') return @"BOOL";
+        NSNumber* number = (NSNumber*)value;
+        const char* t = number.objCType;
+        if (t && (t[0] == 'c' || t[0] == 'B')) return @"BOOL";
         if (t && t[0] == 'f') return @"Float";
         return @"Double";
     }
@@ -40,14 +47,15 @@ NSString* scan(id value, NSString* path, NSUInteger depth) {
     if (value == nil || value == (id)[NSNull null]) return nil;
     if ([value isKindOfClass:[NSString class]]) return nil;
     if ([value isKindOfClass:[NSNumber class]]) {
-        const double d = [static_cast<NSNumber*>value doubleValue];
+        NSNumber* number = (NSNumber*)value;
+        const double d = number.doubleValue;
         if (!std::isfinite(d)) {
             return [NSString stringWithFormat:@"%@: %@ nao finito (%g)", path, type_name(value), d];
         }
         return nil;
     }
     if ([value isKindOfClass:[NSArray class]]) {
-        NSArray* array = value;
+        NSArray* array = (NSArray*)value;
         for (NSUInteger i = 0; i < array.count; ++i) {
             NSString* sub = [NSString stringWithFormat:@"%@[%lu]", path, (unsigned long)i];
             if (NSString* why = scan(array[i], sub, depth + 1)) return why;
@@ -55,7 +63,7 @@ NSString* scan(id value, NSString* path, NSUInteger depth) {
         return nil;
     }
     if ([value isKindOfClass:[NSDictionary class]]) {
-        NSDictionary* dict = value;
+        NSDictionary* dict = (NSDictionary*)value;
         for (id key in dict) {
             // Chave tem de ser String: um dicionário com chave de outro tipo é
             // aceito por `isValidJSONObject:` e levanta na hora de escrever.
@@ -68,33 +76,39 @@ NSString* scan(id value, NSString* path, NSUInteger depth) {
         }
         return nil;
     }
-    // Ponte para Foundation existe? `NSNumber`/`NSString` já foram tratados; o
-    // que sobra é um tipo Swift sem ponte (o `__SwiftValue` do crash).
-    if ([value respondsToSelector:@selector(objCType)]) return nil;
+    // O `__SwiftValue` do crash cai aqui: não é nenhum dos cinco tipos, e
+    // `NSStringFromClass` devolve o nome que aparece na exceção original.
     return [NSString stringWithFormat:@"%@: %@ (nao e um tipo JSON)", path, type_name(value)];
+}
+
+/// O serializer só aceita Array ou Dictionary no topo (não pedimos
+/// `NSJSONWritingFragmentsAllowed`). Uma raiz de outro tipo também levanta.
+NSString* describe_root(id object) {
+    if (object == nil) return @"objeto nulo";
+    if ([object isKindOfClass:[NSArray class]] || [object isKindOfClass:[NSDictionary class]]) {
+        return scan(object, @"", 0);
+    }
+    return [NSString stringWithFormat:@"raiz e %@, tem de ser Array ou Dictionary",
+            type_name(object)];
 }
 
 } // namespace
 
 NSString* AureaJSONDescribeFailure(id object) {
-    if (![NSJSONSerialization isValidJSONObject:object]) {
-        return scan(object, @"", 0) ?: @"objeto nao e JSON valido";
-    }
-    return nil;
+    return describe_root(object);
 }
 
 NSData* AureaJSONData(id object, BOOL pretty) {
     if (object == nil) return nil;
     // A varredura cobre as TRÊS causas que fazem a API levantar em vez de
     // devolver erro: valor não finito, chave que não é String e tipo sem ponte
-    // para Foundation (`__SwiftValue`). O `isValidJSONObject:` logo abaixo é a
-    // mesma pergunta que o serializador faz, com a mesma travessia — então o
-    // caminho que levanta já não chega até aqui.
+    // para Foundation (`__SwiftValue`). Roda sempre, sem consultar
+    // `isValidJSONObject:` antes — ver o comentário do topo do arquivo.
     //
     // Não há @try/@catch de propósito: este alvo compila com `-fno-exceptions`,
     // e um `@try` aqui dependeria de a flag de exceções de ObjC sobreviver a
     // ela. Trocar um crash raro por um build que não compila seria pior.
-    if (NSString* why = AureaJSONDescribeFailure(object)) {
+    if (NSString* why = describe_root(object)) {
         NSLog(@"[AureaJSON] objeto invalido em %@", why);
         return nil;
     }

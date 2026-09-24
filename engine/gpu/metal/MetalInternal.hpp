@@ -13,8 +13,8 @@
 //    HostRing       anel linear de `MTLBuffer` com memória compartilhada
 //                   (unified): uniforms e staging do frame, sem alocação por
 //                   draw. Cresce com um bloco extra no frame em que não coube.
-//    FrameContext   um por frame em voo: command buffer, valor do evento que o
-//                   fence espera, anéis, buffer de timestamps e fila de
+//    FrameContext   um por frame em voo: command buffer, conclusão que o fence
+//                   espera, anéis, buffer de timestamps e fila de
 //                   destruição adiada.
 //    CommandListImpl  tradução de `CommandList`: escolhe o encoder
 //                   (render/compute/blit), mantém o espelho das amarrações e o
@@ -35,6 +35,7 @@
 #import <CoreVideo/CoreVideo.h>
 #import <Foundation/Foundation.h>
 #include <dispatch/dispatch.h>
+#include <TargetConditionals.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
@@ -50,6 +51,11 @@ namespace aurea::mtl {
 // Conversões e utilidades (MetalCommon.mm)
 // =============================================================================
 [[nodiscard]] Status check_ns(NSError* err, const char* what) noexcept;
+/// O bloco retém apenas o semáforo; não acessa um Impl/FrameContext destruído.
+[[nodiscard]] dispatch_semaphore_t command_buffer_completion(id<MTLCommandBuffer> buffer) noexcept;
+/// UINT64_MAX espera sem limite; o timeout nunca significa conclusão da GPU.
+[[nodiscard]] Status wait_command_buffer(id<MTLCommandBuffer> buffer, dispatch_semaphore_t completion,
+                                         u64 timeoutNs, const char* what) noexcept;
 [[nodiscard]] MTLPixelFormat to_mtl(SurfaceFormat f) noexcept;
 [[nodiscard]] SurfaceFormat from_mtl(MTLPixelFormat f) noexcept;
 [[nodiscard]] MTLVertexFormat to_mtl(VertexFormat f) noexcept;
@@ -184,7 +190,7 @@ public:
     void shutdown() noexcept;
     void reset() noexcept;
     /// Reserva `size` bytes alinhados. Devolve buffer, deslocamento e ponteiro.
-    [[nodiscard]] bool allocate(usize size, usize align, id<MTLBuffer>& outBuffer, u32& outOffset,
+    [[nodiscard]] bool allocate(usize size, usize align, id<MTLBuffer> __strong& outBuffer, u32& outOffset,
                                 void*& outPtr) noexcept;
     [[nodiscard]] usize used() const noexcept { return used_; }
 
@@ -207,19 +213,18 @@ struct DeferredRelease {
     void* ctx = nullptr;
 };
 
+struct PendingSubmission {
+    id<MTLCommandBuffer> cmd = nil;
+    dispatch_semaphore_t completion = nil;
+};
+
 struct FrameContext {
     id<MTLCommandBuffer>    cmd = nil;
-    /// Valor que este frame sinaliza no `MTLSharedEvent` compartilhado do
-    /// backend. É o fence por frame: `waitUntilSignaledValue:timeoutMS:` espera
-    /// o frame N sem parar a fila inteira (o `VkFence` por frame do Vulkan).
-    u64                     signalValue = 0;
+    /// Fence de conclusão do CB, inclusive quando a execução falha. A fila
+    /// adiada continua rodando somente na thread de render após a espera.
+    dispatch_semaphore_t    completion = nil;
     u64                     frameNumber = 0;
     bool                    submitted = false;
-    /// Se ESTE frame já usou o fence do backend. Quem decide se a GPU terminou é
-    /// `MTLSharedEvent.signaledValue` (o `VkFence` do Vulkan) — não há handler de
-    /// conclusão mexendo em estado: a fila adiada roda na thread de render, no
-    /// begin_frame que recicla o contexto, a mesma semântica de thread do Vulkan.
-    bool                    waitsOnEvent = false;
 
     HostRing                uniforms;
     HostRing                staging;
@@ -353,10 +358,9 @@ struct Impl {
 
     id<MTLDevice>       device = nil;
     id<MTLCommandQueue> queue = nil;
-    /// Fence por frame (o `VkFence` do Vulkan). `waitUntilSignaledValue:` aceita
-    /// tempo limite e não consome nada: `wait_frame` é seguro de qualquer thread.
-    id<MTLSharedEvent>  event = nil;
-    u64                 eventValue = 0;
+    /// Upload/leitura que atingiu timeout: shutdown precisa esperar antes de
+    /// liberar também os recursos externos (CoreVideo) fora do ARC do Metal.
+    std::vector<PendingSubmission> pendingImmediate;
 
     CVMetalTextureCacheRef textureCache = nullptr;
 
@@ -395,7 +399,7 @@ struct Impl {
     CommandListImpl commands;
 
     // Superfície (CAMetalLayer)
-    id<CAMetalLayer>    layer = nil;
+    CAMetalLayer*       layer = nil;
     id<CAMetalDrawable> drawable = nil;
     SurfaceDesc         surfaceDesc{};
     u64                 drawableHandles[3]{};   ///< handles das texturas de drawable
@@ -432,6 +436,7 @@ struct Impl {
     void run_deferred(FrameContext& f) noexcept;
     void collect_timings(FrameContext& f) noexcept;
     void wait_frame_gpu(FrameContext& f) noexcept;
+    void wait_immediate_gpu() noexcept;
     FrameContext* deferral_target() noexcept;
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
     void destroy_texture_now(Texture& t) noexcept;

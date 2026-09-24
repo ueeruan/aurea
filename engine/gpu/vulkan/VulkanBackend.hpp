@@ -465,6 +465,7 @@ private:
     bool hasForeignQueue_ = false;
     bool hasYcbcr_ = false;
     u32 apiVersion_ = 0;
+    u32 instanceApiVersion_ = VK_API_VERSION_1_0;
 
     MemoryAllocator allocator_;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;

@@ -374,8 +374,8 @@ public:
         return d;
     }
 
-    SyntheticDecoder* last = nullptr;
-    u32 opened = 0;
+    std::atomic<SyntheticDecoder*> last{nullptr};
+    std::atomic<u32> opened{0};
 
 private:
     SyntheticConfig cfg_;

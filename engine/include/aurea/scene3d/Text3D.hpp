@@ -43,6 +43,11 @@ struct Text3DMaterial {
 
 struct Text3DSpec {
     std::string content = "Texto";
+    std::string fontPath;
+    u32 animation = 0;                  ///< 0 parado, 1 onda, 2 giro X, 3 giro Y, 4 giro Z
+    f32 animationDuration = 2.0f;
+    f32 animationStagger = 0.12f;
+    f32 animationAmount = 0.3f;          ///< onda: alturas de letra; giro: voltas
     f32  depth = 0.25f;                   ///< profundidade, em "alturas de letra" (1 = o tamanho da fonte)
     u32  alignment = 1;                   ///< 0 esquerda, 1 centro, 2 direita
 
@@ -91,6 +96,7 @@ inline constexpr const char* kText3DScheme = "aurea-text3d:";
 
 [[nodiscard]] std::string encode_text3d(const Text3DSpec& spec);
 [[nodiscard]] bool decode_text3d(const std::string& source, Text3DSpec& out);
+[[nodiscard]] std::shared_ptr<const text::Font> text3d_font(const Text3DSpec& spec);
 
 /// Triangula um polígono com furos (anel 0 = borda, demais = furos; qualquer
 /// orientação). Índices sobre os pontos concatenados na ordem dos anéis.

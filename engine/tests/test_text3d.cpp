@@ -9,6 +9,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/text/Text.hpp"
+#include "aurea/scene3d/Animation.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -17,6 +18,55 @@
 
 using namespace aurea;
 using namespace aurea::scene3d;
+
+AUREA_TEST(Text3D, FontAndLetterAnimationSurviveRecipeRoundTrip) {
+    Text3DSpec spec;
+    spec.content = "A;t=B\nC";
+    spec.fontPath = "docs:fontes/fonte;especial.otf";
+    spec.animation = 3;
+    spec.animationDuration = 3.5f;
+    spec.animationStagger = .2f;
+    spec.animationAmount = .45f;
+    Text3DSpec read;
+    AUREA_CHECK(decode_text3d(encode_text3d(spec), read));
+    AUREA_CHECK_EQ(read.content, spec.content);
+    AUREA_CHECK_EQ(read.fontPath, spec.fontPath);
+    AUREA_CHECK_EQ(read.animation, spec.animation);
+    AUREA_CHECK_NEAR(read.animationDuration, spec.animationDuration, .0001);
+    AUREA_CHECK_NEAR(read.animationStagger, spec.animationStagger, .0001);
+    AUREA_CHECK_NEAR(read.animationAmount, spec.animationAmount, .0001);
+    // A missing font on another device falls back to the default.
+    AUREA_CHECK(text3d_font(read) != nullptr);
+}
+
+AUREA_TEST(Text3D, LettersKeepLayoutAndAnimateIndependentlyWithoutRetessellation) {
+    const auto font = text::default_font();
+    AUREA_CHECK(font != nullptr);
+    if (!font) return;
+    Text3DSpec spec;
+    spec.content = "Ai O"; // dot of i belongs to the same glyph; space has no mesh
+    auto still = build_text3d(*font, spec);
+    AUREA_CHECK(still.ok());
+    for (u32 mode = 1; mode <= 4; ++mode) {
+        spec.animation = mode;
+        auto result = build_text3d(*font, spec);
+        AUREA_CHECK(result.ok());
+        if (!result.ok() || !still.ok()) continue;
+        const auto& asset = *result.asset;
+        AUREA_CHECK_EQ(asset.nodes.size(), usize{3});
+        AUREA_CHECK_EQ(asset.animations.size(), usize{1});
+        AUREA_CHECK_NEAR(asset.bounds.min.x, still.asset->bounds.min.x, 1e-4);
+        AUREA_CHECK_NEAR(asset.bounds.max.x, still.asset->bounds.max.x, 1e-4);
+        Pose a, b, again;
+        evaluate_pose(asset, 0, 0.f, a);
+        evaluate_pose(asset, 0, .5f, b);
+        evaluate_pose(asset, 0, 0.f, again);
+        const Vec3 probe{.1f, .2f, .3f};
+        AUREA_CHECK((a.nodeWorld[0].transform_point(probe) - b.nodeWorld[0].transform_point(probe)).length() > .01f);
+        AUREA_CHECK((a.nodeWorld[0].transform_point(probe) - again.nodeWorld[0].transform_point(probe)).length() < 1e-6f);
+        AUREA_CHECK_EQ(asset.animations[0].channels.size(), asset.nodes.size());
+    }
+}
 
 namespace {
 

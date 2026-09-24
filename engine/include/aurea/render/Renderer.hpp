@@ -359,6 +359,7 @@ public:
     /// sem `Custom`, a instância fica com o ambiente do grupo.
     void fill_object_environment(const Layer& l, scene3d::SceneInstance& inst) noexcept;
     [[nodiscard]] const scene3d::SceneStats& scene_stats() const noexcept { return scene3d_.stats(); }
+    [[nodiscard]] bool environment_pending() const noexcept { return scene3d_.environment_pending(); }
     [[nodiscard]] u64 scene_resident_bytes() const noexcept { return scene3d_.resident_bytes(); }
     /// Contadores dos sistemas pesados (texto, vetor, máscara, flow, partículas, 3D).
     [[nodiscard]] const HeavyStats& heavy_stats() const noexcept { return heavyStats_; }

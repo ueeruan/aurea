@@ -31,7 +31,6 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
-#import <IOSurface/IOSurface.h>
 #import <ImageIO/ImageIO.h>
 #import <VideoToolbox/VideoToolbox.h>
 
@@ -155,18 +154,18 @@ NSDictionary* pixel_attributes(u32 width, u32 height, bool tenBit, bool fullRang
 class IOSDecodedFrame final : public DecodedFrame {
 public:
     ~IOSDecodedFrame() override {
+        if (pixel && cpuLocked) CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
         if (pixel) CFRelease(pixel);
     }
     CVPixelBufferRef pixel = nullptr;
+    bool cpuLocked = false;
+    std::vector<u8> rgba;
 };
 
-/// Handle estável do buffer do decoder: o mesmo IOSurface volta a cada N
-/// quadros, e é por ele que o backend cacheia a importação como textura.
+/// Identidade do CVPixelBuffer retido pelo frame e pela textura importada.
+/// O cache Metal usa esse mesmo objeto; sua retenção impede reuso prematuro.
 u64 buffer_identity(CVPixelBufferRef pixel) {
-    IOSurfaceRef surface = CVPixelBufferGetIOSurface(pixel);
-    if (!surface) return 0;
-    const IOSurfaceID id = IOSurfaceGetID(surface);
-    return (u64)id << 8;
+    return static_cast<u64>(reinterpret_cast<uintptr_t>(pixel));
 }
 
 } // namespace
@@ -442,7 +441,7 @@ Status VideoToolboxDecoder::push_compressed(CMSampleBufferRef sample, i64 delive
     const bool tenBit = (type == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
                          || type == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange);
     switch (type) {
-        case kCVPixelFormatType_32BGRA:                  frame->format = PixelFormat::BGRA8; break;
+        case kCVPixelFormatType_32BGRA:                  frame->format = PixelFormat::RGBA8; break;
         case kCVPixelFormatType_32RGBA:                  frame->format = PixelFormat::RGBA8; break;
         case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
         case kCVPixelFormatType_420YpCbCr10BiPlanarFullRange:
@@ -460,7 +459,36 @@ Status VideoToolboxDecoder::push_compressed(CMSampleBufferRef sample, i64 delive
     // ZERO-COPY: o ponteiro do buffer vai para o backend importar como textura.
     // Quando o backend não importa CVPixelBuffer, o frame sai sem ele e o
     // renderer cai no caminho de planos (a CPU lê os planos do mesmo buffer).
-    frame->hardwareBuffer = zeroCopy_ ? (void*)frame->pixel : nullptr;
+    frame->hardwareBuffer = zeroCopy_ && rgbBuffer ? (void*)frame->pixel : nullptr;
+    if (!frame->hardwareBuffer) {
+        if (CVPixelBufferLockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) {
+            delete frame;
+            return Status{Errc::DecodeFailed, "CVPixelBufferLockBaseAddress"};
+        }
+        frame->cpuLocked = true;
+        const size_t count = CVPixelBufferGetPlaneCount(pixel);
+        frame->planeCount = count ? static_cast<u32>(std::min<size_t>(count, 3)) : 1;
+        for (u32 i = 0; i < frame->planeCount; ++i) {
+            frame->planes[i] = static_cast<const u8*>(count ? CVPixelBufferGetBaseAddressOfPlane(pixel, i)
+                                                         : CVPixelBufferGetBaseAddress(pixel));
+            frame->strides[i] = static_cast<u32>(count ? CVPixelBufferGetBytesPerRowOfPlane(pixel, i)
+                                                      : CVPixelBufferGetBytesPerRow(pixel));
+        }
+    }
+    if (!frame->hardwareBuffer && type == kCVPixelFormatType_32BGRA) {
+        // The shared CPU upload/thumbnail path consumes RGBA, not BGRA.
+        frame->rgba.resize(static_cast<usize>(frame->width) * frame->height * 4);
+        for (u32 y = 0; y < frame->height; ++y) {
+            const u8* src = frame->planes[0] + static_cast<usize>(y) * frame->strides[0];
+            u8* dst = frame->rgba.data() + static_cast<usize>(y) * frame->width * 4;
+            for (u32 x = 0; x < frame->width; ++x) {
+                dst[x*4] = src[x*4+2]; dst[x*4+1] = src[x*4+1];
+                dst[x*4+2] = src[x*4]; dst[x*4+3] = src[x*4+3];
+            }
+        }
+        frame->planes[0] = frame->rgba.data();
+        frame->strides[0] = frame->width * 4;
+    }
     frame->bufferId = buffer_identity(pixel);
     // `adopt` TOMA a referencia inicial do frame recem-criado (refs_ = 1):
     // somar outra aqui vazaria o quadro.
@@ -698,14 +726,14 @@ public:
     [[nodiscard]] std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset,
                                                                  MediaPriority priority) override {
         @autoreleasepool {
-            if (asset.path.empty()) return nullptr;
-            NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:asset.path.c_str()]];
+            if (asset.sourcePath.empty()) return nullptr;
+            NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:asset.sourcePath.c_str()]];
             if (!url) return nullptr;
             AVURLAsset* av = [AVURLAsset URLAssetWithURL:url options:nil];
             NSArray<AVAssetTrack*>* tracks = [av tracksWithMediaType:AVMediaTypeVideo];
             if (tracks.count == 0) return nullptr;
             return std::unique_ptr<VideoDecoderBackend>(
-                new (std::nothrow) VideoToolboxDecoder(av, tracks.firstObject, priority, zeroCopy_.load()));
+                new (std::nothrow) VideoToolboxDecoder(av, tracks.firstObject, priority, priority != MediaPriority::Thumbnail && zeroCopy_.load()));
         }
     }
 
@@ -748,7 +776,14 @@ private:
 - (void)abort;
 /// Chamado pela thread do encoder (callback C do VideoToolbox). Declarado aqui
 /// porque o `@implementation` nao basta para o emissor da mensagem.
-- (void)onEncoded:(CMSampleBufferRef)sample;
+- (void)onEncoded:(CMSampleBufferRef)sample status:(OSStatus)status flags:(VTEncodeInfoFlags)flags;
+- (void)drainInput:(BOOL)video;
+- (void)finishInputIfDrained:(BOOL)video;
+- (void)failLocked:(NSError*)error message:(NSString*)message;
+- (BOOL)healthyLocked;
+- (BOOL)waitForCapacity:(BOOL)video;
+- (BOOL)startSessionIfNeeded:(int64_t)ptsUs;
+- (BOOL)startWriterIfPossible;
 @property (nonatomic, readonly, copy) NSString* encoderName;
 @property (nonatomic, readonly) BOOL hardwareEncoder;
 @end
@@ -759,9 +794,18 @@ private:
     AVAssetWriterInput* _audioInput;
     VTCompressionSessionRef _session;
     CVPixelBufferPoolRef _pool;
-    dispatch_semaphore_t _drain;
-    NSLock* _lock;
+    dispatch_queue_t _writerQueue;
+    NSCondition* _state;
+    NSMutableArray* _videoSamples;
+    NSMutableArray* _audioSamples;
+    NSError* _firstError;
+    BOOL _cancelled;
+    BOOL _finishing;
+    BOOL _videoFinished;
+    BOOL _audioFinished;
     BOOL _startedSession;
+    BOOL _sessionTimeSet;
+    int64_t _sessionStartUs;
     int64_t _frameDurationUs;
     uint32_t _width;
     uint32_t _height;
@@ -770,13 +814,17 @@ private:
     BOOL _hasAudio;
     NSUInteger _pendingVideo;
     NSUInteger _pendingAudio;
+    NSUInteger _submittedVideo;
+    NSUInteger _appendedVideo;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _lock = [[NSLock alloc] init];
-        _drain = dispatch_semaphore_create(0);
+        _state = [[NSCondition alloc] init];
+        _writerQueue = dispatch_queue_create("com.aurea.export.writer", DISPATCH_QUEUE_SERIAL);
+        _videoSamples = [[NSMutableArray alloc] init];
+        _audioSamples = [[NSMutableArray alloc] init];
         _encoderName = @"VideoToolbox";
     }
     return self;
@@ -790,33 +838,167 @@ private:
 static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus status, VTEncodeInfoFlags infoFlags,
                                  CMSampleBufferRef sample) {
     (void)sourceRefCon;
-    (void)infoFlags;
     AureaExportHost* host = (__bridge AureaExportHost*)refcon;
-    if (status != noErr || sample == nullptr) {
-        [host onEncoded:nil];
-        return;
-    }
-    [host onEncoded:sample];
+    [host onEncoded:sample status:status flags:infoFlags];
 }
 
-/// Chamado pela thread do encoder. O append é serializado; a amostra é
-/// repassada ao AVAssetWriter do jeito que saiu do VideoToolbox.
-- (void)onEncoded:(CMSampleBufferRef)sample {
-    [_lock lock];
-    @try {
-        if (_videoInput && _videoInput.readyForMoreMediaData && sample) {
-            if (![_videoInput appendSampleBuffer:sample]) {
-                AUREA_LOG_WARN("export: append de video recusado (%s)",
-                               _writer.error.localizedDescription.UTF8String);
-            }
-        }
-    } @finally {
-        [_lock unlock];
+/// Caller holds _state. The first failure is terminal; no dropped frame can
+/// later be reported as a successful export.
+- (void)failLocked:(NSError*)error message:(NSString*)message {
+    if (!_firstError) {
+        _firstError = error ?: [NSError errorWithDomain:@"aurea.export" code:2
+            userInfo:@{NSLocalizedDescriptionKey: message ?: @"falha na exportacao"}];
+        AUREA_LOG_ERROR("export: %s", _firstError.localizedDescription.UTF8String);
     }
-    [_lock lock];
-    if (_pendingVideo > 0) --_pendingVideo;
-    [_lock unlock];
-    dispatch_semaphore_signal(_drain);
+    [_state broadcast];
+}
+
+- (BOOL)healthyLocked {
+    if (_writer.status == AVAssetWriterStatusFailed || _writer.status == AVAssetWriterStatusCancelled)
+        [self failLocked:_writer.error message:@"o gravador foi interrompido"];
+    return !_cancelled && !_firstError;
+}
+
+/// This callback may run synchronously inside EncodeFrame/CompleteFrames.
+/// Retain the sample and return immediately: waiting here could prevent the
+/// same producer from supplying the audio needed by the writer's interleaver.
+- (void)onEncoded:(CMSampleBufferRef)sample status:(OSStatus)status flags:(VTEncodeInfoFlags)flags {
+    [_state lock];
+    if (_cancelled || _firstError) {
+        if (_pendingVideo) --_pendingVideo;
+    } else if (status != noErr || !sample || (flags & kVTEncodeInfo_FrameDropped)) {
+        NSError* error = status == noErr ? nil : [NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil];
+        [self failLocked:error message:@"VideoToolbox perdeu ou recusou um quadro"];
+        if (_pendingVideo) --_pendingVideo;
+    } else {
+        // NSMutableArray retains the CF sample beyond the callback's lifetime.
+        [_videoSamples addObject:(__bridge id)sample];
+    }
+    [_state broadcast];
+    [_state unlock];
+    dispatch_async(_writerQueue, ^{ [self drainInput:YES]; });
+}
+
+/// Only the serial writer queue appends or closes inputs. FIFO order preserves
+/// VideoToolbox's compressed decode order, including reordered B frames.
+- (void)drainInput:(BOOL)video {
+    if (![self startWriterIfPossible]) return;
+    AVAssetWriterInput* input = video ? _videoInput : _audioInput;
+    while (input.readyForMoreMediaData) {
+        [_state lock];
+        NSMutableArray* samples = video ? _videoSamples : _audioSamples;
+        if (![self healthyLocked]) { [_state unlock]; return; }
+        if (samples.count == 0) { [_state unlock]; break; }
+        CMSampleBufferRef sample = (__bridge CMSampleBufferRef)samples.firstObject;
+        CFRetain(sample);
+        [samples removeObjectAtIndex:0];
+        [_state unlock];
+
+        const BOOL appended = [input appendSampleBuffer:sample];
+        CFRelease(sample);
+        [_state lock];
+        if (!appended) [self failLocked:_writer.error message:@"o gravador recusou uma amostra"];
+        if (video) {
+            if (_pendingVideo) --_pendingVideo;
+            if (appended) ++_appendedVideo;
+        } else if (_pendingAudio) --_pendingAudio;
+        [_state broadcast];
+        [_state unlock];
+        if (!appended) return;
+    }
+    [_state lock];
+    (void)[self healthyLocked];
+    [_state unlock];
+    [self finishInputIfDrained:video];
+}
+
+/// MP4 passthrough requires the encoder's actual source format (including its
+/// H.264/HEVC configuration). It is first available in a VT output sample.
+/// Runs only on _writerQueue; audio remains retained until video supplies it.
+- (BOOL)startWriterIfPossible {
+    if (_startedSession) return YES;
+    [_state lock];
+    if (![self healthyLocked] || _videoSamples.count == 0) { [_state unlock]; return NO; }
+    CMSampleBufferRef first = (__bridge CMSampleBufferRef)_videoSamples.firstObject;
+    CFRetain(first);
+    [_state unlock];
+    CMFormatDescriptionRef format = CMSampleBufferGetFormatDescription(first);
+    if (format) {
+        _videoInput = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo
+            outputSettings:nil sourceFormatHint:format];
+        _videoInput.expectsMediaDataInRealTime = NO;
+    }
+    CFRelease(first);
+    if (!_videoInput || ![_writer canAddInput:_videoInput]) {
+        [_state lock];
+        [self failLocked:_writer.error message:@"o MP4 recusou o formato do video codificado"];
+        [_state unlock];
+        return NO;
+    }
+    [_writer addInput:_videoInput];
+    if (![_writer startWriting]) {
+        [_state lock];
+        [self failLocked:_writer.error message:@"o gravador nao iniciou o MP4"];
+        [_state unlock];
+        return NO;
+    }
+    [_writer startSessionAtSourceTime:CMTimeMake(_sessionStartUs, 1'000'000)];
+    _startedSession = YES;
+    __weak AureaExportHost* weakSelf = self;
+    [_videoInput requestMediaDataWhenReadyOnQueue:_writerQueue usingBlock:^{ [weakSelf drainInput:YES]; }];
+    if (_audioInput)
+        [_audioInput requestMediaDataWhenReadyOnQueue:_writerQueue usingBlock:^{ [weakSelf drainInput:NO]; }];
+    return YES;
+}
+
+/// Signal each track's EOS as soon as its own queue drains. Waiting until both
+/// tracks drain before marking either can stall the writer's A/V interleaver.
+- (void)finishInputIfDrained:(BOOL)video {
+    [_state lock];
+    const BOOL done = _finishing && [self healthyLocked] && (video ? _pendingVideo : _pendingAudio) == 0;
+    [_state unlock];
+    if (!done) return;
+    if (video && !_videoFinished) { [_videoInput markAsFinished]; _videoFinished = YES; }
+    if (!video && _audioInput && !_audioFinished) { [_audioInput markAsFinished]; _audioFinished = YES; }
+}
+
+/// Backpressure belongs to the producer, never the VT callback or writer queue.
+/// Cap retained work and use a bounded wait, so a failed/stalled writer cannot
+/// trap the core's encoder thread during cancellation/shutdown.
+- (BOOL)waitForCapacity:(BOOL)video {
+    const NSUInteger capacity = video ? 64 : 256;
+    [_state lock];
+    BOOL healthy = [self healthyLocked];
+    const BOOL full = (video ? _pendingVideo : _pendingAudio) >= capacity;
+    [_state unlock];
+    if (!healthy) return NO;
+    if (full && _session) {
+        // Force delayed encoder frames out before waiting for writer credits.
+        // Audio can fill first at low FPS; its writer also needs those frames
+        // to start/interleave, and the core uses one producer for both tracks.
+        // No lock or writer-queue task is held; callbacks only enqueue.
+        const OSStatus status = VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
+        if (status != noErr) {
+            [_state lock];
+            [self failLocked:[NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil]
+                     message:@"VideoToolbox nao concluiu os quadros pendentes"];
+            [_state unlock];
+            return NO;
+        }
+    }
+    const double deadline = NSProcessInfo.processInfo.systemUptime + 5.0;
+    [_state lock];
+    while ([self healthyLocked] && (video ? _pendingVideo : _pendingAudio) >= capacity) {
+        const double remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+        if (remaining <= 0) {
+            [self failLocked:nil message:@"o gravador nao liberou espaco em 5 segundos"];
+            break;
+        }
+        [_state waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:std::min(remaining, 0.1)]];
+    }
+    healthy = [self healthyLocked];
+    [_state unlock];
+    return healthy;
 }
 
 - (BOOL)openURL:(NSURL*)url
@@ -836,15 +1018,8 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         _writer = [AVAssetWriter assetWriterWithURL:url fileType:AVFileTypeMPEG4 error:error];
         if (!_writer) return NO;
 
-        // Input de vídeo PASSTHROUGH: quem codifica é o VTCompressionSession; o
-        // writer multiplexa. O `sourceFormatHint` é obrigatório nesse modo.
-        _videoInput = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:nil];
-        _videoInput.expectsMediaDataInRealTime = NO;
-        if (![_writer canAddInput:_videoInput]) {
-            if (error) *error = [NSError errorWithDomain:@"aurea.export" code:1 userInfo:nil];
-            return NO;
-        }
-        [_writer addInput:_videoInput];
+        // The passthrough video input is added on the first VT output sample,
+        // when its mandatory MP4 sourceFormatHint is available.
 
         if (_hasAudio) {
             // O ÁUDIO o AVAssetWriter codifica (AAC-LC), a partir do PCM que o
@@ -859,14 +1034,21 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             _audioInput = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeAudio
                                                         outputSettings:audioSettings];
             _audioInput.expectsMediaDataInRealTime = NO;
-            if ([_writer canAddInput:_audioInput]) [_writer addInput:_audioInput];
-            else _hasAudio = NO;
+            if (![_writer canAddInput:_audioInput]) {
+                if (error) *error = [NSError errorWithDomain:@"aurea.export" code:3
+                    userInfo:@{NSLocalizedDescriptionKey: @"o gravador recusou a trilha AAC"}];
+                return NO;
+            }
+            [_writer addInput:_audioInput];
         }
 
         // VTCompressionSession: o encoder de vídeo de verdade.
-        NSDictionary* encoderSpec = @{
-            (id)kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: @YES,
-        };
+        NSDictionary* encoderSpec = nil;
+        if (@available(iOS 17.4, *)) {
+            encoderSpec = @{
+                (id)kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: @YES,
+            };
+        }
         NSDictionary* compressionProps = @{
             (id)kVTCompressionPropertyKey_RealTime: @NO,
             (id)kVTCompressionPropertyKey_AllowFrameReordering: @YES,
@@ -880,20 +1062,29 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         const OSStatus status = VTCompressionSessionCreate(
             kCFAllocatorDefault, (int32_t)_width, (int32_t)_height,
             video.codec == ExportCodec::HEVC ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264,
-            (__bridge CFDictionaryRef)encoderSpec, (__bridge CFDictionaryRef)compressionProps,
+            (__bridge CFDictionaryRef)encoderSpec, nullptr,
             nullptr, aurea_encoder_output, (__bridge void*)self, &session);
         if (status != noErr || !session) {
             if (error) *error = [NSError errorWithDomain:@"aurea.export" code:(NSInteger)status userInfo:nil];
             return NO;
         }
         _session = session;
-        CFBooleanRef hardware = nullptr;
-        if (VTSessionCopyProperty(session, kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder,
-                                  kCFAllocatorDefault, &hardware) == noErr && hardware) {
-            _hardwareEncoder = CFBooleanGetValue(hardware) ? YES : NO;
-            CFRelease(hardware);
+        const OSStatus propertyStatus = VTSessionSetProperties(session, (__bridge CFDictionaryRef)compressionProps);
+        if (propertyStatus != noErr) {
+            if (error) *error = [NSError errorWithDomain:@"aurea.export" code:(NSInteger)propertyStatus userInfo:nil];
+            return NO;
         }
-        _encoderName = _hardwareEncoder ? @"VideoToolbox (hardware)" : @"VideoToolbox (software)";
+        _hardwareEncoder = NO;
+        _encoderName = @"VideoToolbox";
+        if (@available(iOS 17.4, *)) {
+            CFBooleanRef hardware = nullptr;
+            if (VTSessionCopyProperty(session, kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder,
+                                      kCFAllocatorDefault, &hardware) == noErr && hardware) {
+                _hardwareEncoder = CFBooleanGetValue(hardware) ? YES : NO;
+                CFRelease(hardware);
+                _encoderName = _hardwareEncoder ? @"VideoToolbox (hardware)" : @"VideoToolbox (software)";
+            }
+        }
         // Etiqueta de cor no bitstream: sem ela player e galeria chutam, e um
         // vídeo de celular vira BT.601 lavado (é o mesmo cuidado do Android).
         CFStringRef primaries = kCVImageBufferColorPrimaries_ITU_R_709_2;
@@ -918,20 +1109,24 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             _pool = pool;
         }
 
-        if (![_writer startWriting]) {
-            if (error) *error = _writer.error;
-            return NO;
-        }
         return YES;
     }
 }
 
-/// O AVAssetWriter só aceita amostras depois de `startSessionAtSourceTime`.
-/// O instante vem do primeiro quadro (o motor manda pts em µs desde o zero).
-- (void)startSessionIfNeeded:(int64_t)ptsUs {
-    if (_startedSession) return;
-    _startedSession = YES;
-    [_writer startSessionAtSourceTime:CMTimeMake(ptsUs, 1'000'000)];
+/// Remember the first source PTS before submitting to VT. The writer/session
+/// starts later, using the first compressed frame's format description.
+- (BOOL)startSessionIfNeeded:(int64_t)ptsUs {
+    __block BOOL healthy = NO;
+    dispatch_sync(_writerQueue, ^{
+        [_state lock];
+        healthy = [self healthyLocked];
+        [_state unlock];
+        if (healthy && !_sessionTimeSet) {
+            _sessionStartUs = ptsUs;
+            _sessionTimeSet = YES;
+        }
+    });
+    return healthy;
 }
 
 - (BOOL)writeVideoY:(const uint8_t*)y yStride:(uint32_t)yStride
@@ -939,7 +1134,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
               ptsUs:(int64_t)ptsUs {
     @autoreleasepool {
         if (!_session || !_pool) return NO;
-        [self startSessionIfNeeded:ptsUs];
+        if (![self startSessionIfNeeded:ptsUs] || ![self waitForCapacity:YES]) return NO;
         CVPixelBufferRef pixel = nullptr;
         if (CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, _pool, &pixel) != kCVReturnSuccess
             || !pixel) {
@@ -967,25 +1162,31 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 
         const CMTime pts = CMTimeMake(ptsUs, 1'000'000);
         const CMTime duration = CMTimeMake(_frameDurationUs, 1'000'000);
-        [_lock lock];
+        [_state lock];
+        if (![self healthyLocked]) { [_state unlock]; CVPixelBufferRelease(pixel); return NO; }
         ++_pendingVideo;   // o `finish` espera estes sairem antes de fechar
-        [_lock unlock];
+        ++_submittedVideo;
+        [_state unlock];
+        VTEncodeInfoFlags flags = 0;
         const OSStatus status = VTCompressionSessionEncodeFrame(_session, pixel, pts, duration, nullptr,
-                                                                nullptr, nullptr);
-        if (status != noErr) {
-            [_lock lock];
+                                                                nullptr, &flags);
+        [_state lock];
+        if (status != noErr || (flags & kVTEncodeInfo_FrameDropped)) {
+            NSError* error = status == noErr ? nil : [NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil];
+            [self failLocked:error message:@"VideoToolbox recusou ou perdeu um quadro"];
             if (_pendingVideo > 0) --_pendingVideo;
-            [_lock unlock];
         }
+        const BOOL healthy = [self healthyLocked];
+        [_state unlock];
         CVPixelBufferRelease(pixel);
-        return status == noErr;
+        return healthy;
     }
 }
 
 - (BOOL)writeAudio:(const int16_t*)pcm frames:(uint32_t)frames ptsUs:(int64_t)ptsUs {
     @autoreleasepool {
         if (!_hasAudio || !_audioInput) return YES;   // vídeo sem som: não é erro
-        [self startSessionIfNeeded:ptsUs];
+        if (![self startSessionIfNeeded:ptsUs] || ![self waitForCapacity:NO]) return NO;
 
         // O formato e o que o sink declarou no `open` (o motor sempre manda
         // 48 kHz estereo, mas o numero vem do contrato, nao de um literal).
@@ -1012,62 +1213,115 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             CFRelease(format);
             return NO;
         }
-        CMBlockBufferReplaceDataBytes(pcm, block, 0, bytes);
+        if (CMBlockBufferReplaceDataBytes(pcm, block, 0, bytes) != kCMBlockBufferNoErr) {
+            CFRelease(block);
+            CFRelease(format);
+            return NO;
+        }
         CMSampleTimingInfo timing{};
         timing.presentationTimeStamp = CMTimeMake(ptsUs, 1'000'000);
-        timing.duration = CMTimeMake(frames, (int32_t)rate);
+        timing.duration = CMTimeMake(1, (int32_t)rate);
         timing.decodeTimeStamp = kCMTimeInvalid;
         CMSampleBufferRef sample = nullptr;
-        const OSStatus status = CMSampleBufferCreateReady(kCFAllocatorDefault, block, format, 1, 1,
-                                                          &timing, 0, nullptr, &sample);
+        // One PCM sample is one interleaved frame, not the entire audio chunk.
+        const size_t sampleBytes = asbd.mBytesPerFrame;
+        const OSStatus status = CMSampleBufferCreateReady(kCFAllocatorDefault, block, format, frames, 1,
+                                                          &timing, 1, &sampleBytes, &sample);
         CFRelease(block);
         CFRelease(format);
         if (status != noErr || !sample) return NO;
-        BOOL ok = YES;
-        [_lock lock];
-        @try {
-            if (_audioInput.readyForMoreMediaData) {
-                ok = [_audioInput appendSampleBuffer:sample];
-            } else {
-                ok = NO;
-            }
-        } @finally {
-            [_lock unlock];
+        [_state lock];
+        const BOOL healthy = [self healthyLocked];
+        if (healthy) {
+            [_audioSamples addObject:(__bridge id)sample];
+            ++_pendingAudio;
         }
+        [_state unlock];
         CFRelease(sample);
-        return ok;
+        if (healthy) dispatch_async(_writerQueue, ^{ [self drainInput:NO]; });
+        return healthy;
     }
 }
 
 - (BOOL)finish {
     @autoreleasepool {
         if (_session) {
-            // Fecha o encoder e espera o que estava em voo: sem isto os últimos
-            // quadros ficariam de fora do arquivo.
-            VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
-            const int maxFrames = 256;
-            for (int i = 0; i < maxFrames; ++i) {
-                if (_pendingVideo == 0) break;
-                dispatch_semaphore_wait(_drain, dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC));
+            const OSStatus status = VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
+            if (status != noErr) {
+                [_state lock];
+                [self failLocked:[NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil]
+                         message:@"VideoToolbox nao finalizou os quadros"];
+                [_state unlock];
             }
         }
-        if (_videoInput) [_videoInput markAsFinished];
-        if (_audioInput) [_audioInput markAsFinished];
+        [_state lock];
+        _finishing = YES;
+        [_state unlock];
+        dispatch_async(_writerQueue, ^{ [self drainInput:YES]; [self drainInput:NO]; });
+        const double deadline = NSProcessInfo.processInfo.systemUptime + 30.0;
+        [_state lock];
+        while ([self healthyLocked] && (_pendingVideo || _pendingAudio)) {
+            const double remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+            if (remaining <= 0) {
+                [self failLocked:nil message:@"o gravador nao recebeu todas as amostras em 30 segundos"];
+                break;
+            }
+            [_state waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:std::min(remaining, 0.1)]];
+        }
+        if (!_firstError && _submittedVideo != _appendedVideo)
+            [self failLocked:nil message:@"o numero de quadros gravados difere dos quadros enviados"];
+        const BOOL healthy = [self healthyLocked];
+        [_state unlock];
+        if (!healthy) { [self abort]; return NO; }
+
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
-        __block BOOL ok = NO;
-        [_writer finishWritingWithCompletionHandler:^{
-            ok = _writer.status == AVAssetWriterStatusCompleted;
-            dispatch_semaphore_signal(done);
-        }];
-        dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 60ull * NSEC_PER_SEC));
-        return ok;
+        dispatch_sync(_writerQueue, ^{
+            if (!_startedSession) {
+                [_state lock];
+                [self failLocked:nil message:@"nenhum quadro iniciou a sessao MP4"];
+                [_state unlock];
+                dispatch_semaphore_signal(done);
+                return;
+            }
+            [self finishInputIfDrained:YES];
+            [self finishInputIfDrained:NO];
+            [_writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(done); }];
+        });
+        const long waited = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 60ull * NSEC_PER_SEC));
+        if (waited != 0 || _writer.status != AVAssetWriterStatusCompleted) {
+            [_state lock];
+            [self failLocked:_writer.error message:waited ? @"tempo esgotado ao finalizar o MP4" : @"o MP4 nao foi finalizado"];
+            [_state unlock];
+            [self abort];
+            return NO;
+        }
+        return YES;
     }
 }
 
 - (void)abort {
     @autoreleasepool {
-        if (_session) VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
-        if (_writer && _writer.status == AVAssetWriterStatusWriting) [_writer cancelWriting];
+        [_state lock];
+        _cancelled = YES;
+        [_state broadcast];
+        [_state unlock];
+        // Complete/invalidate outside every lock and outside the writer queue.
+        // Callbacks see cancellation, release their credit, and never wait.
+        if (_session) {
+            (void)VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
+            VTCompressionSessionInvalidate(_session);
+            CFRelease(_session);
+            _session = nullptr;
+        }
+        dispatch_sync(_writerQueue, ^{
+            if (_writer && _writer.status == AVAssetWriterStatusWriting) [_writer cancelWriting];
+            [_state lock];
+            [_videoSamples removeAllObjects];
+            [_audioSamples removeAllObjects];
+            _pendingVideo = _pendingAudio = 0;
+            [_state broadcast];
+            [_state unlock];
+        });
         NSURL* url = _writer.outputURL;
         if (url) [NSFileManager.defaultManager removeItemAtURL:url error:nil];
     }
@@ -1360,6 +1614,13 @@ bool ios_load_image(const char* sourcePath, ImagePixels& out, void* ctx) {
 }
 
 const char* ios_default_font_path() {
+    // Identical Roboto file to the Android reference emulator (Apache-2.0).
+    // Keep the storage alive: the core receives a const char* during startup.
+    static const std::string sharedFont = [] {
+        NSString* path = [[NSBundle mainBundle] pathForResource:@"Roboto-Regular" ofType:@"ttf" inDirectory:@"Fonts"];
+        return path ? std::string(path.UTF8String) : std::string();
+    }();
+    if (!sharedFont.empty() && access(sharedFont.c_str(), R_OK) == 0) return sharedFont.c_str();
     // A fonte do sistema do iOS mora em /System/Library/Fonts. O FontManager do
     // núcleo já varre essa pasta; passar o caminho explícito quando ele existe
     // evita a varredura inteira na primeira abertura.

@@ -677,7 +677,7 @@ public:
     // --- Ambiente 3D (HDRI) ------------------------------------------------------
     /// HDRI Radiance (.hdr) do arquivo local: ilumina e reflete nos modelos 3D
     /// da composição atual. Devolve o asset.
-    [[nodiscard]] Result<u64> import_hdri(const char* path) noexcept;
+    [[nodiscard]] Result<u64> import_hdri(const char* path, u64 objectLayer = 0) noexcept;
     /// Volta ao estúdio neutro.
     bool clear_hdri() noexcept;
     /// Intensidade (≥ 0) e giro (graus) do ambiente.
@@ -692,7 +692,7 @@ public:
     bool set_object_environment(u64 layerId, u32 source, u64 hdriAsset, f32 intensity, f32 rotationDeg,
                                 f32 exposure) noexcept;
     /// {fonte, asset, intensidade, giro, exposição}.
-    bool query_object_environment(u64 layerId, f32* out5) noexcept;
+    bool query_object_environment(u64 layerId, f32* out5, u64* outAsset = nullptr) noexcept;
 
     /// Sombras de um objeto 3D (modelo importado ou texto 3D): se ele projeta
     /// (`cast`) e se recebe (`receive`) a sombra dos outros.
@@ -921,6 +921,10 @@ private:
 public:
     u32 query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,
                     f32* outValues, u32 sampleCount) noexcept;
+    u32 query_track_curve(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
+                          i32 startFrame, i32 endFrame, f32* outValues, u32 sampleCount) noexcept;
+    bool query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
+                               i32 frame, f32* out4) noexcept;
     /// Waveform da camada: `count` baldes a partir do frame `startFrame` da
     /// timeline (fracionário), `framesPerBucket` frames cada; valor u8 com
     /// compansão raiz (ver audio::WaveformCache). Devolve os baldes escritos,

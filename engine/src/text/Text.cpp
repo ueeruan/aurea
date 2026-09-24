@@ -507,12 +507,14 @@ TextExtent measure(const Font& font, const TextData& t) {
     return TextExtent{std::max(1.0f, std::ceil(p.width)), std::max(1.0f, std::ceil(p.height))};
 }
 
-bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours) {
+bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours, i32 glyphIndex) {
     Placed p;
     place(font.impl(), t, 1.0f, p);
     const int steps = std::clamp(static_cast<int>(std::max(1.0f, t.size) / 8.0f), 4, 16);
     contours.clear();
+    i32 placedIndex = 0;
     for (const Glyph& gl : p.glyphs) {
+        if (glyphIndex >= 0 && placedIndex++ != glyphIndex) continue;
         stbtt_vertex* v = nullptr;
         const int n = stbtt_GetGlyphShape(&gl.font->info, gl.id, &v);
         const f32 fs = gl.fs;

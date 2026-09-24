@@ -134,6 +134,7 @@ void VideoSource::thread_main() noexcept {
                                                                        : ThreadPriority::Decode);
     const i64 half = frameUs_ / 2;
     const i64 durationUs = backend_->info().durationUs;
+    u64 prefetchAttemptGen = 0;
 
     for (;;) {
         DecodeRequest req;
@@ -143,7 +144,11 @@ void VideoSource::thread_main() noexcept {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             auto prefetch_pending = [&] {
-                if (request_.mode != DecodeMode::Playback || suspended_) return false;
+                // A janela pode não caber no orçamento ou ter lacunas (VFR).
+                // Uma tentativa por pedido: nunca repetir seek/decode sem o
+                // playhead avançar só porque o cache despejou o prefetch.
+                if (request_.mode != DecodeMode::Playback || suspended_
+                    || requestGen_ == prefetchAttemptGen) return false;
                 if (request_.direction < 0) {
                     // Reverso: reabastece quando sobra menos de um frame atrás
                     // do playhead (uma tentativa por alvo).
@@ -169,6 +174,7 @@ void VideoSource::thread_main() noexcept {
             req = request_;
             gen = requestGen_;
             handledGen_ = gen;
+            prefetchAttemptGen = gen;
             requestNs = requestTimeNs_;
         }
 
@@ -262,6 +268,7 @@ void VideoSource::thread_main() noexcept {
                     req = nr;
                     gen = requestGen_;
                     handledGen_ = gen;
+                    prefetchAttemptGen = gen;
                     requestNs = requestTimeNs_;
                     if (nr.mode == DecodeMode::Scrub) { need = nr.targetUs; limit = std::min(limit, need); }
                 } else if (requestGen_ != gen) {
@@ -277,6 +284,7 @@ void VideoSource::thread_main() noexcept {
                     req = nr;
                     gen = requestGen_;
                     handledGen_ = gen;
+                    prefetchAttemptGen = gen;
                     requestNs = requestTimeNs_;
                     need = nr.targetUs;
                     limit = (nr.mode == DecodeMode::Playback)

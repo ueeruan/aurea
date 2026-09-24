@@ -1,0 +1,144 @@
+name: Build native IPA (unsigned)
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/native-beta2-ipa']
+    paths: ['engine/**', '.github/workflows/build-ipa.yml']
+concurrency:
+  group: native-ipa-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/build/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate native integration and shared Android resources
+        run: |
+          python3 engine/platform/ios/verify/check_pbxproj.py
+          python3 engine/platform/ios/verify/check_api_swift.py
+          python3 tools/_ios_check.py tipos
+          python3 engine/platform/ios/verify/check_shared_assets.py
+          python3 engine/platform/ios/verify/check_effect_contract.py
+      - name: Install shader tools
+        run: brew install cmake ninja shaderc ccache
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/ccache
+          key: ios-cxx-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: ios-cxx-${{ runner.os }}-
+      - name: Build Metal shader translator
+        run: |
+          cmake -S engine/tools/metal-shaders -B build/metal-tools -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/metal-tools --parallel 3
+          echo "AUREA_METAL_COMPILER=$GITHUB_WORKSPACE/build/metal-tools/aurea-metal-compiler" >> "$GITHUB_ENV"
+      - name: Compile native iOS app
+        run: |
+          set -o pipefail
+          xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee build-ios.log
+      - name: Validate compiled app with Foundation
+        run: swift engine/platform/ios/verify/check_bundle.swift build/ios/Build/Products/Release-iphoneos/Aurea.app
+      - name: Validate shaders with Apple Metal compiler
+        run: |
+          set -o pipefail
+          python3 engine/tools/metal-shaders/verify_msl.py engine/platform/ios/build/core/aurea-engine/generated/shaders 2>&1 | tee build-metal.log
+      - name: Package IPA for sideloading
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/ios/Build/Products/Release-iphoneos/Aurea.app build/ipa/Payload/
+          cd build/ipa
+          zip -qr aurea-beta2-unsigned.ipa Payload
+      - name: Validate packaged IPA
+        run: python3 engine/platform/ios/verify/check_ipa.py build/ipa/aurea-beta2-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurea-ipa
+          path: build/ipa/*.ipa
+          if-no-files-found: error
+      - name: Save build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-diagnostics
+          path: |
+            build-ios.log
+            build-metal.log
+          if-no-files-found: ignore
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: build/ccache
+          key: ios-cxx-${{ runner.os }}-${{ github.run_id }}
+  simulator-parity:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/build/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install cmake ninja shaderc ccache
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/ccache
+          key: ios-simulator-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: ios-simulator-${{ runner.os }}-
+      - name: Build simulator shader translator
+        run: |
+          cmake -S engine/tools/metal-shaders -B build/metal-tools -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/metal-tools --parallel 3
+          echo "AUREA_METAL_COMPILER=$GITHUB_WORKSPACE/build/metal-tools/aurea-metal-compiler" >> "$GITHUB_ENV"
+      - name: Compile simulator application
+        id: compile_simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
+            -configuration Debug -sdk iphonesimulator ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/simulator \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee build-simulator.log
+      - name: Capture actual iOS UI and core fixture projects
+        run: python3 engine/platform/ios/verify/capture_simulator.py build/simulator/Build/Products/Debug-iphonesimulator/Aurea.app build/ios-parity
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-parity-screenshots
+          path: |
+            build/ios-parity/
+            build-simulator.log
+          if-no-files-found: ignore
+      - name: Run native preview gestures and undo tests
+        if: always() && steps.compile_simulator.outcome == 'success'
+        run: |
+          set -o pipefail
+          SIMULATOR_UDID=$(python3 -c 'import json; print(json.load(open("build/ios-parity/manifest.json"))["device"]["udid"])')
+          xcodebuild test -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea-Gestures \
+            -configuration Debug -sdk iphonesimulator ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath build/simulator -parallel-testing-enabled NO \
+            -only-testing:AureaUITests/AureaStageGestureUITests \
+            -resultBundlePath build/ios-gesture-tests.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee build-gesture-tests.log
+      - name: Save native gesture test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-gesture-tests
+          path: |
+            build/ios-gesture-tests.xcresult/
+            build-gesture-tests.log
+          if-no-files-found: ignore
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: build/ccache
+          key: ios-simulator-${{ runner.os }}-${{ github.run_id }}

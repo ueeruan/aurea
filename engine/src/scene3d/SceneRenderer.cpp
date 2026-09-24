@@ -377,6 +377,13 @@ void SceneRenderer::release_environment() noexcept {
         if (t->valid()) gpu_->destroy_texture(*t);
         *t = TextureHandle{};
     }
+    // As texturas foram embora, então o que o renderer ACHA que está na GPU
+    // também tem de ser esquecido — senão `request_environment` compara a
+    // chave nova com uma antiga ainda "montada", não gera nada, e a cena fica
+    // sem ambiente nenhum. `envCube_` é o céu analítico e cai junto.
+    envKey_ = pendingKey_ = ~0ull;
+    envRequested_ = false;
+    if (envCube_.valid()) { gpu_->destroy_texture(envCube_); envCube_ = TextureHandle{}; }
 }
 
 Status SceneRenderer::upload_environment(const EnvironmentMaps& maps, EnvSet& out) noexcept {
@@ -587,6 +594,13 @@ void SceneRenderer::release_all() noexcept {
         if (e.model && gpu_) e.model->release(*gpu_);
     }
     models_.clear();
+    // O AMBIENTE também é do projeto, não do aparelho. Este cache é indexado
+    // pelo id do asset do HDRI (`key_of`), e dois projetos REAPROVEITAM os
+    // mesmos ids: o slot 1 de um projeto não é o slot 1 do seguinte. Sem
+    // soltar aqui, abrir um projeto novo continuava desenhando com o HDRI do
+    // anterior — era o que o teste Gpu.HdriLightsTheModelAndSurvivesReopen
+    // pegava (o verde ficava vermelho).
+    release_environment();
 }
 
 u64 SceneRenderer::resident_bytes() const noexcept {

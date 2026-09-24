@@ -103,7 +103,7 @@ def main():
     known_isa = {"PBXBuildFile", "PBXFileReference", "PBXFrameworksBuildPhase", "PBXGroup",
                  "PBXNativeTarget", "PBXProject", "PBXResourcesBuildPhase",
                  "PBXShellScriptBuildPhase", "PBXSourcesBuildPhase", "XCBuildConfiguration",
-                 "XCConfigurationList",
+                 "XCConfigurationList", "PBXContainerItemProxy", "PBXTargetDependency",
                  "XCRemoteSwiftPackageReference", "XCSwiftPackageProductDependency"}
     for isa in set(re.findall(r"isa = (\w+);", text)):
         if isa not in known_isa:
@@ -196,9 +196,12 @@ def main():
         for name in swift_files:
             if ("/* " + name + " in Sources */") not in listed:
                 fail("%s nao entra na fase de Sources" % name)
+        cmake = read(os.path.join(IOS, "CMakeLists.txt"))
         for name in objcxx_files:
-            if ("/* " + name + " in Sources */") not in listed:
-                fail("%s nao entra na fase de Sources" % name)
+            if ("/* " + name + " in Sources */") in listed:
+                fail("%s duplicado: deve ser compilado somente por aurea_ios" % name)
+            if "bridge/" + name not in cmake:
+                fail("%s nao entra na biblioteca aurea_ios" % name)
 
     # --- 7. bundle id ---------------------------------------------------------
     bundle = re.search(r"PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);", text)
@@ -223,7 +226,7 @@ def main():
     print("CFBundleDisplayName: %s" % (display_name.group(1) if display_name else "?"))
     print("UILaunchScreen presente: %s" % ("sim" if launch_screen else "NAO"))
     print("UIRequiredDeviceCapabilities: %s" % (metal_cap.group(1) if metal_cap else "?"))
-    print("fase de Sources: %d .swift + %d .mm" % (len(swift_files), len(objcxx_files)))
+    print("compilacao: %d .swift no Xcode + %d .mm na biblioteca CMake" % (len(swift_files), len(objcxx_files)))
     if bridging:
         header_path = os.path.join(IOS, bridging.group(1))
         print("bridging header: %s (%s)" % (bridging.group(1),

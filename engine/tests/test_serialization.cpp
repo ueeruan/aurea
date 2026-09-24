@@ -789,3 +789,188 @@ AUREA_TEST(Serialization, ObjectEnvironmentIsIndependentAndSurvivesReopen) {
     e.shutdown();
     std::remove(path.c_str());
 }
+
+// -----------------------------------------------------------------------------
+// O projeto INTEIRO: o formato é um só, e nada se perde
+// -----------------------------------------------------------------------------
+
+namespace {
+
+std::vector<u8> ler_arquivo(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return {};
+    std::fseek(f, 0, SEEK_END);
+    const long n = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::vector<u8> bytes(n > 0 ? static_cast<usize>(n) : 0);
+    if (!bytes.empty()) {
+        const usize lidos = std::fread(bytes.data(), 1, bytes.size(), f);
+        bytes.resize(lidos);
+    }
+    std::fclose(f);
+    return bytes;
+}
+
+/// Quantos de cada coisa o projeto tem. Serve para o teste não ser vazio: se a
+/// releitura devolvesse um projeto limpo, os bytes bateriam e a contagem não.
+struct Censo {
+    u32 camadas = 0, efeitos = 0, keyframes = 0, mascaras = 0, trilhas = 0;
+    u32 assets = 0, composicoes = 0, texto = 0, forma = 0, modelo3d = 0, precomp = 0;
+};
+
+Censo censo(Engine& e) {
+    Censo c;
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    if (comp) {
+        comp->layers().for_each([&](LayerId, const Layer& l) {
+            ++c.camadas;
+            if (l.kind == LayerKind::Text) ++c.texto;
+            if (l.kind == LayerKind::Shape) ++c.forma;
+            if (l.kind == LayerKind::Model3D) ++c.modelo3d;
+            if (l.kind == LayerKind::Composition) ++c.precomp;
+            c.efeitos += static_cast<u32>(l.effects.size());
+            c.mascaras += static_cast<u32>(l.masks.size());
+            c.trilhas += l.tracks.size();
+            for (u32 t = 0; t < l.tracks.size(); ++t) c.keyframes += static_cast<u32>(l.tracks.at(t).keys.size());
+            c.keyframes += static_cast<u32>(l.timeRemap.keys.size());
+        });
+    }
+    c.assets = e.project()->asset_count();
+    c.composicoes = e.project()->timeline().composition_count();
+    return c;
+}
+
+} // namespace
+
+AUREA_TEST(Serialization, WholeProjectWithEveryFeatureIsByteStable) {
+    // O formato `.aurea` é UM SÓ: o Android e o iOS escrevem e leem por este
+    // mesmo código (a ponte do iOS chama `new_project`/`save_project`/
+    // `load_project`, e a serialização não tem um ramo por plataforma). O que
+    // este teste prova é a outra metade da promessa do dono — que um projeto
+    // com TUDO dentro volta idêntico:
+    //
+    //   salvar → abrir → serializar de novo dá BYTES IGUAIS.
+    // A segunda gravação usa o serializador para preservar modifiedUnixMs:
+    // Engine::save_project atualiza legitimamente esse campo a cada gravação.
+    //
+    // Comparar byte a byte cobre cada campo que o formato grava, inclusive os
+    // que alguém esquecer de conferir num teste por campo. E o censo ao lado
+    // garante que o teste não está comparando dois projetos vazios.
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, "Projeto completo").ok());
+
+    // Imagem
+    std::vector<u8> px(32 * 32 * 4, 200);
+    const Result<u64> img = e.import_image(px.data(), 32, 32, "quadrado.png", nullptr);
+    AUREA_CHECK(img.ok());
+    // Forma, texto, nulo 3D, particular e texto 3D
+    const Result<u64> forma = e.add_shape(0);
+    AUREA_CHECK(forma.ok());
+    const Result<u64> texto = e.add_text("Aurea");
+    AUREA_CHECK(texto.ok());
+    const Result<u64> nulo = e.add_null(true);
+    AUREA_CHECK(nulo.ok());
+    const Result<u64> part = e.add_particles(0);
+    AUREA_CHECK(part.ok());
+    scene3d::Text3DSpec t3;
+    t3.content = "AUREA";
+    t3.bevel = true;
+    t3.bevelWidth = 0.03f;
+    t3.bevelSegments = 3;
+    t3.regionMaterials = true;
+    t3.bevelMat.metallic = 1.0f;
+    const Result<u64> t3d = e.add_text3d(t3);
+    AUREA_CHECK(t3d.ok());
+
+    // Máscara, efeito com keyframes, ambiente por objeto, sombras, remap.
+    AUREA_CHECK(e.add_mask(*forma, nullptr, 0, true) >= 0);
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(*texto);
+    add.effect_add.effectType = effect_type_id(effect_keys::kGaussianBlur);
+    AUREA_CHECK(e.apply_command(add).ok());
+    // O id do efeito é do núcleo (alloc_effect_id) — não um número escolhido.
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const u32 idEfeito = comp->layer(LayerId::unpack(*texto))->effects.back().id;
+    Command set;
+    set.type = CommandType::EffectSetParam;
+    set.effect_param.layer = LayerId::unpack(*texto);
+    set.effect_param.effect = EffectId{idEfeito, 0};
+    set.effect_param.paramIndex = 0;
+    set.effect_param.value = 12.5f;
+    AUREA_CHECK(e.apply_command(set).ok());
+
+    auto key = [&](Result<u64> camada, TrackProperty p, FrameIndex t, f32 v) {
+        if (!camada.ok()) return;
+        Command k;
+        k.type = CommandType::KeyframeInsert;
+        k.keyframe.track.layer = LayerId::unpack(*camada);
+        k.keyframe.track.property = p;
+        k.keyframe.track.effectIndex = kInvalidIndex;
+        k.keyframe.track.effectParamIndex = 0;
+        k.keyframe.time = t;
+        k.keyframe.value = v;
+        AUREA_CHECK(e.apply_command(k).ok());
+    };
+    key(*forma, TrackProperty::PositionX, FrameIndex{0}, 40.0f);
+    key(*forma, TrackProperty::PositionX, FrameIndex{40}, 260.0f);
+    key(*forma, TrackProperty::RotationZ, FrameIndex{0}, 0.0f);
+    key(*forma, TrackProperty::RotationZ, FrameIndex{40}, 90.0f);
+    key(*texto, TrackProperty::Opacity, FrameIndex{0}, 1.0f);
+    key(*texto, TrackProperty::Opacity, FrameIndex{30}, 0.2f);
+
+    if (t3d.ok()) {
+        AUREA_CHECK(e.set_object_environment(*t3d, 1, 0, 2.0f, 45.0f, 1.2f));
+        AUREA_CHECK(e.set_model_shadows(*t3d, false, true));
+    }
+    AUREA_CHECK(e.set_time_remap(*texto, true));
+    AUREA_CHECK(e.edit_time_remap_key(*texto, -1, 20, 10.0f, 0) >= 0);
+
+    const Censo antes = censo(e);
+    std::printf("\n    projeto completo: %u camadas, %u efeitos, %u keyframes, %u trilhas, %u mascaras, %u assets\n",
+                antes.camadas, antes.efeitos, antes.keyframes, antes.trilhas, antes.mascaras, antes.assets);
+    AUREA_CHECK(antes.camadas >= 6);
+    AUREA_CHECK(antes.efeitos >= 1);
+    AUREA_CHECK(antes.keyframes >= 5);
+    AUREA_CHECK(antes.mascaras >= 1);
+
+    const std::string a = temp_path("completo_a");
+    const std::string b = temp_path("completo_b");
+    std::remove(a.c_str());
+    std::remove(b.c_str());
+    AUREA_CHECK(e.save_project(a.c_str()).ok());
+    const std::vector<u8> bytesA = ler_arquivo(a);
+    AUREA_CHECK(!bytesA.empty());
+
+    AUREA_CHECK(e.load_project(a.c_str()).ok());
+    const Censo depois = censo(e);
+    AUREA_CHECK(depois.camadas == antes.camadas);
+    AUREA_CHECK(depois.efeitos == antes.efeitos);
+    AUREA_CHECK(depois.keyframes == antes.keyframes);
+    AUREA_CHECK(depois.trilhas == antes.trilhas);
+    AUREA_CHECK(depois.mascaras == antes.mascaras);
+    AUREA_CHECK(depois.assets == antes.assets);
+    AUREA_CHECK(depois.composicoes == antes.composicoes);
+
+    AUREA_CHECK(ProjectSerializer::save(*e.project(), b, SaveOptions{}).ok());
+    const std::vector<u8> bytesB = ler_arquivo(b);
+    AUREA_CHECK(bytesB.size() == bytesA.size());
+    usize iguais = 0;
+    for (usize i = 0; i < bytesA.size() && i < bytesB.size(); ++i) iguais += bytesA[i] == bytesB[i];
+    std::printf("    ida e volta: %zu bytes, %zu iguais\n", bytesA.size(), iguais);
+    if (iguais != bytesA.size()) {
+        for (usize i = 0, shown = 0; i < bytesA.size() && i < bytesB.size() && shown < 16; ++i) {
+            if (bytesA[i] == bytesB[i]) continue;
+            std::printf("    byte %zu: %02x -> %02x\n", i, bytesA[i], bytesB[i]);
+            ++shown;
+        }
+    }
+    AUREA_CHECK(iguais == bytesA.size());
+
+    std::remove(a.c_str());
+    std::remove(b.c_str());
+}

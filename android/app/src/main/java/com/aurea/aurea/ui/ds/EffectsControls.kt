@@ -158,7 +158,7 @@ fun AdvancedToggle(open: Boolean, count: Int, onToggle: () -> Unit, modifier: Mo
         Spacer(Modifier.weight(1f))
         if (!open) {
             Text(
-                if (count == 1) stringResource(R.string.ds_1_ajuste) else "$count ajustes",
+                if (count == 1) stringResource(R.string.ds_1_ajuste) else stringResource(R.string.ds_adjustment_count, count),
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
             )
         }

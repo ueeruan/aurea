@@ -19,10 +19,10 @@
 //      começa ou quando o draw/dispatch acontece — o mesmo desenho do
 //      `flush_descriptors` do Vulkan, sem conjunto de descritores.
 //
-//   3. O FENCE É UM `MTLSharedEvent`. Valor monotônico por frame; o
-//      `begin_frame` espera o valor do contexto que vai reciclar (o `VkFence`
-//      por frame), e o `wait_frame` do contrato espera o valor do frame pedido,
-//      com tempo limite e sem consumir nada.
+//   3. O FENCE É A CONCLUSÃO DO COMMAND BUFFER. `begin_frame` espera o
+//      contexto que vai reciclar (o `VkFence` por frame), e `wait_frame`
+//      espera o frame pedido com tempo limite. O estado terminal também
+//      preserva o erro real da GPU, que um evento pode nunca sinalizar.
 // =============================================================================
 #include "MetalInternal.hpp"
 
@@ -100,6 +100,7 @@ void CommandListImpl::end_current() noexcept {
     if (ended) {
         // Estado de encoder não sobrevive à troca: o espelho volta a valer.
         pipelineDirty_ = true;
+        pushDirty_ = true;
         texturesDirty_ = 0xFFFFu;
         storageDirty_ = true;
         dirty_ = kDirtyAll;
@@ -205,6 +206,7 @@ void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
             if (depth) depth->lastUsedFrame = used;
         }
         pipelineDirty_ = true;
+        pushDirty_ = true;
         texturesDirty_ = 0xFFFFu;
         storageDirty_ = true;
         dirty_ = kDirtyAll;
@@ -431,8 +433,7 @@ void CommandListImpl::apply_bindings() noexcept {
     }
 
     if (render_ && (dirty_ & kDirtyIndex)) {
-        const Buffer* buffer = indexBuffer_ ? d.buffers.get(indexBuffer_) : nullptr;
-        if (buffer) [render_ setIndexBuffer:buffer->buffer offset:indexOffset_ type:indexType_];
+        // Metal recebe o buffer de índices diretamente em drawIndexedPrimitives.
         dirty_ &= ~kDirtyIndex;
     }
 
@@ -443,7 +444,8 @@ void CommandListImpl::apply_bindings() noexcept {
         dirty_ &= ~kDirtyViewport;
     }
     if (render_ && (dirty_ & kDirtyScissor)) {
-        [render_ setScissorRect:MTLScissorRect{scissor_[0], scissor_[1],
+        [render_ setScissorRect:MTLScissorRect{static_cast<NSUInteger>(std::max(0, scissor_[0])),
+                                               static_cast<NSUInteger>(std::max(0, scissor_[1])),
                                                static_cast<NSUInteger>(std::max(0, scissor_[2])),
                                                static_cast<NSUInteger>(std::max(0, scissor_[3]))}];
         dirty_ &= ~kDirtyScissor;
@@ -452,7 +454,7 @@ void CommandListImpl::apply_bindings() noexcept {
 
 bool CommandListImpl::prepare_draw() noexcept {
     if (!render_ || !pipeline_ || pipeline_->isCompute) return false;
-    if (pipelineDirty_) apply_pipeline_state();
+    if (pipelineDirty_ || pushDirty_) apply_pipeline_state();
     apply_bindings();
     return true;
 }
@@ -506,7 +508,7 @@ void CommandListImpl::draw_indexed(u32 indexCount, u32 instanceCount, u32 firstI
 void CommandListImpl::dispatch(u32 x, u32 y, u32 z) noexcept {
     if (!impl_ || !pipeline_ || !pipeline_->isCompute) return;
     if (!compute_encoder()) return;
-    if (pipelineDirty_) apply_pipeline_state();
+    if (pipelineDirty_ || pushDirty_) apply_pipeline_state();
     apply_bindings();
     if (!compute_ || !pipeline_->compute) return;
     const u32 tx = std::max(1u, pipeline_->threadgroup[0]);
@@ -546,7 +548,6 @@ void CommandListImpl::copy_texture_to_buffer(TextureHandle src, BufferHandle dst
     id<MTLBlitCommandEncoder> blit = blit_encoder();
     if (!blit) return;
     const u32 rowBytes = s->desc.width * s->desc.bytes_per_pixel();
-    const usize total = static_cast<usize>(rowBytes) * s->desc.height;
     [blit copyFromTexture:s->texture
               sourceSlice:0
               sourceLevel:0
@@ -555,10 +556,12 @@ void CommandListImpl::copy_texture_to_buffer(TextureHandle src, BufferHandle dst
                  toBuffer:b->buffer
         destinationOffset:0
    destinationBytesPerRow:rowBytes
- destinationBytesPerImage:total];
+ destinationBytesPerImage:0];
     // A CPU lê o buffer depois do fence (export): no Mac Intel a escrita da GPU
     // precisa ser sincronizada para o domínio do host.
+#if TARGET_OS_OSX
     if (b->managed) [blit synchronizeResource:b->buffer];
+#endif
 }
 
 // =============================================================================
@@ -649,11 +652,9 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     if (f.submitted) {
         // O fence do frame que vai ser reciclado. 2 s: passou disso, a GPU está
         // travada e o frame é pulado em vez de travar o app para sempre.
-        if (![event waitUntilSignaledValue:f.signalValue timeoutMS:2000]) {
-            return Status{Errc::Timeout, "GPU atrasada: frame pulado"};
-        }
+        const Status status = wait_command_buffer(f.cmd, f.completion, 2'000'000'000ull, "reciclar frame");
+        if (!status.ok()) return status;
         f.submitted = false;
-        f.waitsOnEvent = false;
         collect_timings(f);
         run_deferred(f);
         if (frameNumber % 120 == 0) reclaim_stale_imports();
@@ -671,6 +672,8 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     }
     if (!f.cmd) return Status{Errc::InvalidState, "sem command buffer"};
     f.cmd.label = @"frame";
+    f.completion = command_buffer_completion(f.cmd);
+    if (!f.completion) return Status{Errc::OutOfMemory, "sem fence de command buffer"};
 
     current = &f;
     commands.bind_frame(self, &f);
@@ -718,16 +721,13 @@ Status Backend::end_frame() noexcept {
         d.sample_counter(1);
         d.commands.finish_encoders();   // nenhum encoder pode ficar aberto no commit
 
-        f.signalValue = ++d.eventValue;
-        [f.cmd encodeSignalEvent:d.event value:f.signalValue];
         if (d.drawableAcquired && d.drawable) [f.cmd presentDrawable:d.drawable];
         [f.cmd commit];
 
         d.current = nullptr;
-        d.commands.bind_frame(self, nullptr);
+        d.commands.bind_frame(this, nullptr);
         d.frameCursor = (d.frameCursor + 1) % d.framesInFlight;
         f.submitted = true;
-        f.waitsOnEvent = true;
         d.lastSubmitted = &f;
         d.drawableAcquired = false;
         // As texturas externas lidas neste frame não precisam de barreira de

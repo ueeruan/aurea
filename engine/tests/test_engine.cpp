@@ -8,12 +8,15 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/project/FileIO.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <tuple>
+#include <filesystem>
+#include <chrono>
 
 using namespace aurea;
 
@@ -61,6 +64,210 @@ AUREA_TEST(Engine, NewProjectCreatesComposition) {
     AUREA_CHECK_EQ(c->width(), static_cast<u32>(1920));
     AUREA_CHECK_EQ(c->height(), static_cast<u32>(1080));
     AUREA_CHECK_NEAR(c->fps(), 60.0, 1e-9);
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, KeyframeEasingQueryKeepsTrackAddressAndLocalTime) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    const auto added = e.add_shape(0);
+    AUREA_CHECK(added.ok());
+    const auto layer = LayerId::unpack(*added);
+    Command insert;
+    insert.type = CommandType::KeyframeInsert;
+    insert.keyframe.track = TrackRef{layer, TrackProperty::ShapeParam, kInvalidIndex, 5};
+    insert.keyframe.time = FrameIndex{18};
+    insert.keyframe.value = 320;
+    AUREA_CHECK(e.apply_command(insert).ok());
+    Command easing;
+    easing.type = CommandType::KeyframeSetInterpolation;
+    easing.keyframe_interp.track = insert.keyframe.track;
+    easing.keyframe_interp.time = FrameIndex{18};
+    easing.keyframe_interp.interp = Interpolation::Bezier;
+    easing.keyframe_interp.bx1 = 0.2f; easing.keyframe_interp.by1 = -0.3f;
+    easing.keyframe_interp.bx2 = 0.8f; easing.keyframe_interp.by2 = 1.4f;
+    AUREA_CHECK(e.apply_command(easing).ok());
+    float values[4]{};
+    AUREA_CHECK(e.query_keyframe_easing(*added, static_cast<u32>(TrackProperty::ShapeParam), kInvalidIndex, 5, 18, values));
+    AUREA_CHECK_NEAR(values[0], 0.2f, 0.0001f);
+    AUREA_CHECK_NEAR(values[1], -0.3f, 0.0001f);
+    AUREA_CHECK_NEAR(values[2], 0.8f, 0.0001f);
+    AUREA_CHECK_NEAR(values[3], 1.4f, 0.0001f);
+    AUREA_CHECK(!e.query_keyframe_easing(*added, static_cast<u32>(TrackProperty::ShapeParam), kInvalidIndex, 4, 18, values));
+    AUREA_CHECK(!e.query_keyframe_easing(*added, static_cast<u32>(TrackProperty::ShapeParam), kInvalidIndex, 5, 19, values));
+    AUREA_CHECK(!e.query_keyframe_easing(*added, 999, kInvalidIndex, 5, 18, values));
+    AUREA_CHECK(!e.query_keyframe_easing(*added, 0, kInvalidIndex, 0, 18, nullptr));
+    insert.keyframe.time = FrameIndex{48}; insert.keyframe.value = 640;
+    AUREA_CHECK(e.apply_command(insert).ok());
+    float samples[3]{};
+    AUREA_CHECK_EQ(e.query_track_curve(*added, static_cast<u32>(TrackProperty::ShapeParam), kInvalidIndex, 5, 18, 48, samples, 3), 3u);
+    AUREA_CHECK_NEAR(samples[0], 320, 0.001f);
+    AUREA_CHECK_NEAR(samples[2], 640, 0.001f);
+    AUREA_CHECK_EQ(e.query_track_curve(*added, static_cast<u32>(TrackProperty::ShapeParam), kInvalidIndex, 4, 18, 48, samples, 3), 0u);
+    AUREA_CHECK_EQ(e.query_track_curve(*added, 999, kInvalidIndex, 5, 18, 48, samples, 3), 0u);
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, ObjectHdriImportPreservesSceneAndAssetIdentity) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, nullptr).ok());
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const auto object = comp->add_layer(LayerKind::Model3D, "objeto");
+    const auto path = (std::filesystem::temp_directory_path() / ("aurea_object_hdri_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".hdr")).string();
+    FILE* file = std::fopen(path.c_str(), "wb");
+    AUREA_CHECK(file != nullptr);
+    const char header[] = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 2\n";
+    std::fwrite(header, 1, sizeof(header) - 1, file);
+    const u8 pixel[4] = {128, 64, 32, 129};
+    for (int n = 0; n < 4; ++n) std::fwrite(pixel, 1, 4, file);
+    std::fclose(file);
+    const auto scene = e.import_hdri(path.c_str());
+    const auto own = e.import_hdri(path.c_str(), object.pack());
+    std::remove(path.c_str());
+    AUREA_CHECK(scene.ok()); AUREA_CHECK(own.ok());
+    AUREA_CHECK_EQ(comp->environment().hdri.pack(), *scene);
+    f32 values[5]{}; u64 asset = 0;
+    AUREA_CHECK(e.query_object_environment(object.pack(), values, &asset));
+    AUREA_CHECK_EQ(asset, *own); AUREA_CHECK_EQ(values[0], 1.f);
+    const u64 precise = (1ull << 40) | 123456789ull;
+    AUREA_CHECK(e.set_object_environment(object.pack(), 1, precise, 1, 0, 1));
+    AUREA_CHECK(e.query_object_environment(object.pack(), values, &asset));
+    AUREA_CHECK_EQ(asset, precise);
+    e.shutdown();
+}
+
+namespace {
+struct HdriPathFixture {
+    std::filesystem::path root;
+    bool owns = false;
+    HdriPathFixture() {
+        const auto temporary = std::filesystem::temp_directory_path();
+        root = temporary / ("aurea_hdri_portability_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::error_code error;
+        owns = std::filesystem::create_directory(root, error);
+    }
+    ~HdriPathFixture() {
+        // Delete only the unique directory this fixture actually created.
+        std::error_code error;
+        if (owns && root.is_absolute() && root.parent_path() == std::filesystem::temp_directory_path(error)
+            && root.filename().string().rfind("aurea_hdri_portability_", 0) == 0)
+            std::filesystem::remove_all(root, error);
+    }
+    static std::string utf8(const std::filesystem::path& path) {
+        const auto s = path.generic_u8string();
+        return {reinterpret_cast<const char*>(s.data()), s.size()};
+    }
+    static bool write(const std::filesystem::path& path) {
+        std::error_code error;
+        std::filesystem::create_directories(path.parent_path(), error);
+        if (error) return false;
+        FILE* f = fileio::open_file(utf8(path), "wb");
+        if (!f) return false;
+        const char header[] = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 2\n";
+        const u8 pixel[4] = {128, 32, 16, 129};
+        bool ok = std::fwrite(header, 1, sizeof(header) - 1, f) == sizeof(header) - 1;
+        for (int n = 0; n < 4; ++n) ok = std::fwrite(pixel, 1, 4, f) == 4 && ok;
+        return std::fclose(f) == 0 && ok;
+    }
+};
+} // namespace
+
+AUREA_TEST(Engine, HdriInternalPathSurvivesSaveAndRelocatedDocuments) {
+    HdriPathFixture fixture;
+    AUREA_CHECK(fixture.owns);
+    const auto oldDocs = fixture.root / "old" / "Documents";
+    const auto newDocs = fixture.root / "new" / "Documents";
+    const auto media = oldDocs / "modelos" / "environment.hdr";
+    const auto companion = newDocs / "modelos" / "environment.hdr";
+    AUREA_CHECK(HdriPathFixture::write(media));
+    AUREA_CHECK(HdriPathFixture::write(companion));
+    const auto projectPath = HdriPathFixture::utf8(fixture.root / "portable.aurea");
+    u64 assetId = 0;
+    {
+        Engine e;
+        auto config = headless_config(); config.documentsDirectory = HdriPathFixture::utf8(oldDocs);
+        AUREA_CHECK(e.initialize(config).ok());
+        AUREA_CHECK(e.new_project(320, 180, 30, "portable HDRI").ok());
+        const auto imported = e.import_hdri(HdriPathFixture::utf8(media).c_str());
+        AUREA_CHECK(imported.ok());
+        assetId = *imported;
+        const Asset* asset = e.project()->asset(AssetId::unpack(assetId));
+        AUREA_CHECK(asset && asset->sourcePath == "docs:modelos/environment.hdr");
+        AUREA_CHECK(e.save_project(projectPath.c_str()).ok());
+        e.shutdown();
+    }
+    std::error_code error;
+    AUREA_CHECK(std::filesystem::remove(media, error)); // old sandbox is unavailable
+    {
+        Engine e;
+        auto config = headless_config(); config.documentsDirectory = HdriPathFixture::utf8(newDocs);
+        AUREA_CHECK(e.initialize(config).ok());
+        AUREA_CHECK(e.load_project(projectPath.c_str()).ok());
+        const Asset* asset = e.project()->asset(AssetId::unpack(assetId));
+        AUREA_CHECK(asset && asset->sourcePath == "docs:modelos/environment.hdr");
+        const auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        AUREA_CHECK_EQ(comp->environment().hdri.pack(), assetId);
+        // The real Radiance decoder consumes the saved reference through the
+        // same resolver as hdri_lookup; no private API or fake media loader.
+        const std::string savedPath = asset->sourcePath;
+        AUREA_CHECK(e.import_hdri(savedPath.c_str()).ok());
+        AUREA_CHECK(e.save_project(projectPath.c_str()).ok());
+        AUREA_CHECK(e.load_project(projectPath.c_str()).ok());
+        e.shutdown();
+    }
+}
+
+AUREA_TEST(Engine, HdriLegacyAndroidPathResolvesOnlyExistingContainedCompanion) {
+    HdriPathFixture fixture;
+    AUREA_CHECK(fixture.owns);
+    const auto docs = fixture.root / "Documents";
+    AUREA_CHECK(HdriPathFixture::write(docs / "modelos" / "environment.hdr"));
+    AUREA_CHECK(HdriPathFixture::write(fixture.root / "outside.hdr"));
+    AUREA_CHECK(HdriPathFixture::write(fixture.root / "Documents-other" / "external.hdr"));
+    Engine e;
+    auto config = headless_config(); config.documentsDirectory = HdriPathFixture::utf8(docs);
+    AUREA_CHECK(e.initialize(config).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, "legacy HDRI").ok());
+    const char* legacy = "/data/user/0/com.aurea.aurea/files/modelos/environment.hdr";
+    auto imported = e.import_hdri(legacy);
+    AUREA_CHECK(imported.ok());
+    AUREA_CHECK(e.project()->asset(AssetId::unpack(*imported))->sourcePath == "docs:modelos/environment.hdr");
+    AUREA_CHECK(e.import_hdri("/data/data/com.aurea.aurea/files/modelos/environment.hdr").ok());
+    // Simulate the original serialized Android reference, without rewriting
+    // an external golden fixture. Loading preserves it until a new import.
+    e.project()->asset(AssetId::unpack(*imported))->sourcePath = legacy;
+    const auto path = HdriPathFixture::utf8(fixture.root / "legacy.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    const auto stored = e.project()->asset(AssetId::unpack(*imported))->sourcePath;
+    AUREA_CHECK_EQ(stored, std::string(legacy));
+    AUREA_CHECK(e.import_hdri(stored.c_str()).ok());
+    for (const char* invalid : {
+        "/data/user/0/com.aurea.aurea/files/modelos/missing.hdr",
+        "/data/user/0/com.other.application/files/modelos/environment.hdr",
+        "/data/user/0/com.aurea.aurea.evil/files/modelos/environment.hdr",
+        "/data/user/0/com.aurea.aurea/files/../outside.hdr",
+        "/data/user/0/com.aurea.aurea/files/..\\outside.hdr",
+        "docs:../outside.hdr", "docs:..\\outside.hdr",
+        "docs:/modelos/environment.hdr", "docs:C:/outside.hdr",
+        "docs:modelos/environment.hdr:stream"}) {
+        AUREA_CHECK(!e.import_hdri(invalid).ok());
+    }
+    AUREA_CHECK(e.import_hdri("docs:modelos\\environment.hdr").ok());
+    const auto outside = HdriPathFixture::utf8(fixture.root / "Documents-other" / "external.hdr");
+    const auto external = e.import_hdri(outside.c_str());
+    AUREA_CHECK(external.ok());
+    AUREA_CHECK_EQ(e.project()->asset(AssetId::unpack(*external))->sourcePath, outside);
+    std::error_code error;
+    std::filesystem::create_symlink(fixture.root / "outside.hdr", docs / "escape.hdr", error);
+    if (!error) {
+        AUREA_CHECK(!e.import_hdri("docs:escape.hdr").ok());
+        AUREA_CHECK(!e.import_hdri("/data/user/0/com.aurea.aurea/files/escape.hdr").ok());
+    } else {
+        std::printf("    symlink containment not exercised: host denied symlink creation\n");
+    }
     e.shutdown();
 }
 
@@ -116,6 +323,56 @@ AUREA_TEST(Engine, SubmitCommandsAcceptsPartialBatch) {
     AUREA_CHECK(accepted <= static_cast<u32>(flood.size()));
     AUREA_CHECK(accepted > 0);
     e.shutdown();
+}
+
+AUREA_TEST(Engine, SaveAppliesQueuedEditsBeforeSnapshotWithoutRendering) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1920, 1080, 30.0, "Queued save").ok());
+    const auto added = e.add_shape(0);
+    AUREA_CHECK(added.ok());
+    if (!added.ok()) { e.shutdown(); return; }
+    const auto path = (std::filesystem::temp_directory_path() /
+        ("aurea_queued_save_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".aurea")).string();
+
+    // Both bridges submit to this queue. Saving immediately after an edit
+    // must include it even when no preview frame or thumbnail has run.
+    for (u32 pass = 0; pass < 2; ++pass) {
+        const f32 rotation = pass == 0 ? 15.0f : 30.0f;
+        const f32 opacity = pass == 0 ? 0.75f : 0.5f;
+        Command edits[2];
+        edits[0].type = CommandType::LayerSetRotation;
+        edits[0].rotation.layer = LayerId::unpack(*added);
+        edits[0].rotation.rx = 0; edits[0].rotation.ry = 0; edits[0].rotation.rz = rotation;
+        edits[1].type = CommandType::LayerSetOpacity;
+        edits[1].opacity.layer = LayerId::unpack(*added);
+        edits[1].opacity.opacity = opacity;
+        AUREA_CHECK_EQ(e.submit_commands(edits, 2), 2u);
+        AUREA_CHECK_EQ(e.commands().available(), 2u);
+        AUREA_CHECK((pass == 0 ? e.save_project(path.c_str()) : e.save_project()).ok());
+        AUREA_CHECK_EQ(e.commands().available(), 0u);
+
+        // A separate engine ensures queued in-memory edits cannot disguise
+        // a stale file when it is reopened (including the pathless overload).
+        Engine reopened;
+        AUREA_CHECK(reopened.initialize(headless_config()).ok());
+        AUREA_CHECK(reopened.load_project(path.c_str()).ok());
+        const Composition* comp = reopened.project()->timeline().composition(reopened.project()->timeline().current());
+        AUREA_CHECK(comp != nullptr);
+        if (comp) {
+            AUREA_CHECK_EQ(comp->layers().count(), 1u);
+            const Layer* layer = comp->order().size() ? comp->layer(comp->order().at(0)) : nullptr;
+            AUREA_CHECK(layer != nullptr);
+            if (layer) {
+                AUREA_CHECK_NEAR(layer->transform.rotation.z, rotation, 0.0001f);
+                AUREA_CHECK_NEAR(layer->transform.opacity, opacity, 0.0001f);
+            }
+        }
+        reopened.shutdown();
+    }
+    e.shutdown();
+    std::remove(path.c_str());
+    std::remove((path + ".bak").c_str());
 }
 
 AUREA_TEST(Engine, AddLayerViaCommandThenQueryRows) {

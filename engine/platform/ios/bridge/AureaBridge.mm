@@ -18,6 +18,8 @@
 #include <os/log.h>
 
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <new>
 
 #if defined(AUREA_GPU_METAL)
@@ -46,6 +48,16 @@ void ios_log_sink(LogLevel level, const char* message, void*) {
         case LogLevel::Fatal: type = OS_LOG_TYPE_FAULT;   break;
     }
     os_log_with_type(g_log, type, "%{public}s", message ? message : "");
+#if DEBUG
+    // simctl launch --console captures process streams, not unified logging.
+    // Keep CI's real renderer errors beside each parity scene without changing
+    // normal device logging or including this diagnostics path in Release.
+    static const bool parityConsole = std::getenv("AUREA_PARITY_SCENE") != nullptr;
+    if (parityConsole) {
+        std::fprintf(stderr, "%s\n", message ? message : "");
+        std::fflush(stderr);
+    }
+#endif
 }
 
 /// Instala o sink UMA vez. O motor fala por aqui em qualquer aparelho; sem
@@ -142,7 +154,9 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     // ponteiro — só o consulta para calibrar o zero-copy.
     config.backend = backend;
     config.backendConfig.enableValidation = debug;
-    config.backendConfig.enableGpuTimers = true;
+    // Opcional para o editor. Contadores de blit podem abortar no driver de
+    // alguns iPhones ao abrir o primeiro frame; não arriscar a sessão por FPS.
+    config.backendConfig.enableGpuTimers = false;
     config.cacheDirectory = cache_;
     config.documentsDirectory = documents_;
     config.displayRefreshRate = displayRefreshRate > 0.0f ? displayRefreshRate : 60.0f;
@@ -167,10 +181,34 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
         return s;
     }
 
+    // Engine owns (and may destroy) the backend when initialization fails.
+    backend = engine_->gpu();
+    if (!backend) {
+        const auto status = engine_->read_status();
+        lastError_ = std::string(to_string(status.lastError)) + ": " + status.lastErrorDetail;
+        engine_->shutdown();
+        engine_.reset();
+        return Status{status.lastError == Errc::Ok ? Errc::NotSupported : status.lastError, lastError_.c_str()};
+    }
+
+    // ShaderLibrary prewarms the essential editor pipelines during initialize,
+    // but Renderer permits individual failures. An iOS host must not advertise
+    // a working preview after those failures: it would only show the clear color.
+    const EngineTelemetry startup = engine_->read_telemetry();
+    if (startup.shaderFailures != 0 || startup.pipelineCount == 0) {
+        lastError_ = "pipelines essenciais Metal indisponiveis ("
+            + std::to_string(startup.shaderFailures) + " falhas, "
+            + std::to_string(startup.pipelineCount) + " pipelines criados)";
+        AUREA_LOG_ERROR("%s", lastError_.c_str());
+        engine_->shutdown();
+        engine_.reset();
+        return Status{Errc::PipelineCompileFailed, lastError_.c_str()};
+    }
+
     // Zero-copy onde a GPU importa o CVPixelBuffer do decoder como textura
     // Metal. No iOS não há o quirk do emulador do Android: ou o backend importa
     // o buffer IOSurface, ou os planos veem pela CPU.
-    const bool zeroCopy = backend && backend->capabilities().zero_copy_video();
+    const bool zeroCopy = backend && backend->capabilities().externalMemoryHardwareBuffer;
     if (mediaControl_) mediaControl_->set_zero_copy(zeroCopy);
     AUREA_LOG_INFO("video: %s", zeroCopy ? "zero-copy (CVPixelBuffer/IOSurface)" : "planos pela CPU");
 

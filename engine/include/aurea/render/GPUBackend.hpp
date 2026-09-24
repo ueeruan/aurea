@@ -414,6 +414,8 @@ struct BackendConfig {
     u32 framesInFlight = 3;
     /// Liga as timestamp queries por passe (painel DEV).
     bool enableGpuTimers = true;
+    /// Restringe ao núcleo Vulkan 1.0 (diagnóstico/compatibilidade).
+    bool conservativeVulkan = false;
 };
 
 /// Um tempo de GPU medido de um frame já concluído.

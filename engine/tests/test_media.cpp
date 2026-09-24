@@ -40,6 +40,61 @@ void wait_until(auto&& predicate, u32 timeoutMs = 3000) {
 
 } // namespace
 
+AUREA_TEST(VideoSource, TightCacheDoesNotDecodeAndSeekForever) {
+    SyntheticConfig cfg;
+    auto decoder = std::make_unique<SyntheticDecoder>(cfg);
+    auto* raw = decoder.get();
+    VideoSource source(std::move(decoder), MediaPriority::Preview);
+    DecodedFrameCache::Config budget;
+    budget.maxFrames = 1;
+    source.cache().configure(budget);
+    source.start();
+    source.request({raw->pts_of(30), DecodeMode::Playback, 1, 1.f});
+    AUREA_CHECK(source.wait_for(raw->pts_of(30), 3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    AUREA_CHECK(raw->seeks.load() <= 1);
+    AUREA_CHECK(raw->delivered.load() <= 5);
+    source.request({raw->pts_of(31), DecodeMode::Playback, 1, 1.f});
+    AUREA_CHECK(source.wait_for(raw->pts_of(31), 3000));
+    source.stop();
+}
+
+AUREA_TEST(DecodedFrameCache, KeepsDisplayFrameWhenSingleFrameExceedsBudget) {
+    DecodedFrameCache cache;
+    DecodedFrameCache::Config cfg;
+    cfg.maxBytes = 1;
+    cache.configure(cfg);
+    (void)cache.insert(frame_at(0));
+    AUREA_CHECK(cache.contains(0, 0));
+}
+
+AUREA_TEST(MediaManager, CodecStartupDoesNotBlockRenderOrStatus) {
+    struct SlowFactory : VideoSourceFactory {
+        std::atomic<bool> release{false};
+        std::atomic<bool> entered{false};
+        bool probe(const char*, MediaProbe&) override { return false; }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+            entered.store(true);
+            while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return std::make_unique<SyntheticDecoder>(SyntheticConfig{});
+        }
+    } factory;
+    MediaManager manager;
+    manager.set_factory(&factory);
+    Asset asset;
+    const auto start = std::chrono::steady_clock::now();
+    auto* source = manager.source_for(LayerId{0, 1}, AssetId{0, 1}, asset, 1);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    AUREA_CHECK(source == nullptr);
+    AUREA_CHECK(elapsed < std::chrono::milliseconds(100));
+    wait_until([&] { return factory.entered.load(); });
+    (void)manager.stats(); // Must remain accessible while opening is blocked.
+    factory.release.store(true);
+    wait_until([&] { source = manager.source_for(LayerId{0, 1}, AssetId{0, 1}, asset, 2); return source != nullptr; });
+    AUREA_CHECK(source != nullptr);
+    manager.close_all();
+}
+
 // =============================================================================
 // DecodedFrameCache
 // =============================================================================
@@ -414,6 +469,6 @@ AUREA_TEST(Thumbnail, ServiceDecodesAsyncAndCaches) {
     AUREA_CHECK(img.width > 0);
     // Mesmo balde de 250 ms: vem do cache, sem abrir decoder novo.
     AUREA_CHECK(svc.video(7, a, 1'100'000, 24, img));
-    AUREA_CHECK_EQ(factory.opened, 1u);
+    AUREA_CHECK_EQ(factory.opened.load(), 1u);
     svc.stop();
 }

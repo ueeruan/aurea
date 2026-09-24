@@ -283,7 +283,7 @@ internal fun ProjectListBar(
             return@Row
         }
         if (!searching) {
-            Text(plural(R.string.home_project_count, count), style = AureaType.ListCount, modifier = Modifier.weight(1f))
+            Text(plural(R.plurals.home_project_count, count), style = AureaType.ListCount, modifier = Modifier.weight(1f))
             BarButton(CupertinoGlyph.Search, stringResource(R.string.common_search), onOpenSearch)
         } else {
             SearchField(query, onQuery, onClearSearch, Modifier.weight(1f))

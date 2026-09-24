@@ -1620,6 +1620,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (!rl.source.frame) {
                 // Ainda nada decodificado (primeiro frame a caminho): a layer
                 // fica de fora deste frame; o callback da fonte acorda o render.
+                if (!src) ++out.missingVideoFrames;
                 continue;
             }
         }

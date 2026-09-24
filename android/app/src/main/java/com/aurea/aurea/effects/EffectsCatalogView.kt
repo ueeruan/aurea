@@ -299,11 +299,12 @@ fun EffectsCatalogGrid(
     }
 }
 
+@Composable
 private fun emptyMessage(filter: EffectFilter, searching: Boolean): String = when {
-    searching -> "Nada encontrado. Tente \"glitch\", \"vhs\", \"desfoque\" ou \"cor\"."
-    filter == EffectFilter.Favorite -> "Nenhum favorito ainda. Toque na estrela de um efeito."
-    filter == EffectFilter.Recent -> "Os efeitos que você usar aparecem aqui."
-    else -> "Nenhum efeito nesta categoria."
+    searching -> stringResource(R.string.effect_empty_search)
+    filter == EffectFilter.Favorite -> stringResource(R.string.effect_empty_favorites)
+    filter == EffectFilter.Recent -> stringResource(R.string.effect_empty_recents)
+    else -> stringResource(R.string.effect_empty_category)
 }
 
 /**
@@ -369,7 +370,7 @@ fun EffectDetailSheet(
             }
             if (specs.isNotEmpty()) {
                 item(key = "titulo-params") {
-                    Text("PARÂMETROS", style = AureaType.Section)
+                    Text(stringResource(R.string.effect_parameters), style = AureaType.Section)
                     Spacer(Modifier.height(AureaDims.S2))
                 }
                 items(specs.size) { i ->
@@ -411,16 +412,18 @@ fun EffectDetailSheet(
 }
 
 /** Peso do efeito no celular, em palavra (o número relativo fica interno). */
+@Composable
 private fun costLabel(cost: Int): String = when {
-    cost >= 3 -> "Pesado"
-    cost == 2 -> "Médio"
-    else -> "Leve"
+    cost >= 3 -> stringResource(R.string.effect_cost_high)
+    cost == 2 -> stringResource(R.string.effect_cost_medium)
+    else -> stringResource(R.string.effect_cost_low)
 }
 
 /**
  * O que o controle faz, em linguagem de edição: "Empurrar, Puxar, Torcer…",
  * "0 a 100 %", "Cor", "Liga/desliga", "Um ponto na tela".
  */
+@Composable
 private fun paramSummary(p: com.aurea.aurea.engine.EffectParam): String {
     if (p.enumLabels.isNotEmpty()) {
         val shown = p.enumLabels.take(3).joinToString(", ")
@@ -428,8 +431,8 @@ private fun paramSummary(p: com.aurea.aurea.engine.EffectParam): String {
     }
     return when (p.type) {
         com.aurea.aurea.engine.ParamType.COLOR -> "Cor"
-        com.aurea.aurea.engine.ParamType.BOOL -> "Liga/desliga"
-        com.aurea.aurea.engine.ParamType.POINT2D -> "Um ponto na tela"
+        com.aurea.aurea.engine.ParamType.BOOL -> stringResource(R.string.effect_param_bool)
+        com.aurea.aurea.engine.ParamType.POINT2D -> stringResource(R.string.effect_param_point)
         else -> {
             val unit = if (p.unit.isNotEmpty()) " ${p.unit}" else ""
             if (p.min.isFinite() && p.max.isFinite() && p.max > p.min) "${trimNumber(p.min)} a ${trimNumber(p.max)}$unit" else unit.trim()

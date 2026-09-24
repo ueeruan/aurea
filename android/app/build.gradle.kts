@@ -53,12 +53,24 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        // versionCode 2102: o Aurea oficial instalado é 2101. Um número maior é
+        // versionCode 2103: correções de vídeo, Vulkan e texto 3D. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2102
-        versionName = "2.0.0-beta1"
+        versionCode = 2103
+        versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // O app carrega a LOCALIZAÇÃO do documento de discovery, não um
+        // endereço de servidor. O endereço mora no documento e muda sozinho
+        // quando o Colab reinicia — é o que evita ter que colar URL no app.
+        buildConfigField(
+            "String", "AUREA_DISCOVERY_REPO",
+            "\"${project.findProperty("aureaDiscoveryRepo") ?: "ueeruan/aurea"}\"",
+        )
+        buildConfigField(
+            "String", "AUREA_DISCOVERY_BRANCH",
+            "\"${project.findProperty("aureaDiscoveryBranch") ?: "main"}\"",
+        )
 
         if (aureaAbi != null) {
             ndk { abiFilters += aureaAbi }
@@ -144,6 +156,10 @@ android {
     buildFeatures {
         compose = true
         prefab = false
+        // O app carrega a localizacao do DOCUMENTO de discovery, nao um
+        // endereco de servidor. O endereco mora no documento e muda sozinho
+        // quando o Colab reinicia.
+        buildConfig = true
     }
 
     packaging {

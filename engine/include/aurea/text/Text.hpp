@@ -76,7 +76,7 @@ struct TextRaster {
 /// layout (linhas, alinhamento, entrelinha, espaçamento) da rasterização.
 /// Cada contorno é fechado implicitamente (o último ponto liga no primeiro).
 /// É a base do texto 3D extrudado.
-[[nodiscard]] bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours);
+[[nodiscard]] bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours, i32 glyphIndex = -1);
 
 /// Um glifo depois do shaping (HarfBuzz): índice na fonte, caractere de
 /// origem (cluster, na linha), posição na linha de base (px da layer) e se

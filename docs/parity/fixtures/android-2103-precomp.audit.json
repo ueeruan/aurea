@@ -1,0 +1,59 @@
+{
+  "sha256": "00ff61677d518b912e334adaa027e2bf966c4a918ff3ce69a9eec3a535256971",
+  "bytes": 2957,
+  "source": "android-2103-precomp.aurea",
+  "description": "fixture de paridade",
+  "assets": 0,
+  "compositions": 2,
+  "durationFrames": 300,
+  "fps": 30.0,
+  "height": 1080,
+  "innerComposition": {
+    "id": 4294967297,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30.0,
+    "durationFrames": 300,
+    "layerCount": 1,
+    "layerId": 4294967296,
+    "layerKind": 5,
+    "layerName": "Quadrado"
+  },
+  "limitations": [
+    "No HDRI or external media imported.",
+    "Not yet opened or visually verified on iOS."
+  ],
+  "origin": "Synthetic Parity Precomp created entirely through approved Android APK2103 UI on emulator-5554. One Square was grouped with Element > Group selection. Entered group, captured inner timeline, returned to main composition and Home before extracting.",
+  "playheadFrame": 0,
+  "rootComposition": {
+    "id": 4294967296,
+    "layerCount": 1,
+    "layerId": 8589934592,
+    "layerKind": 12,
+    "layerName": "Pré-composição 1",
+    "nestedCompositionId": 4294967297
+  },
+  "screenshots": {
+    "27-precomp-layer-dock.png": "dcb1423b6989c4e61663b2a32fb78858c3224753f8161b922d5b9641778ec96c",
+    "28-precomp-inside.png": "4bcac47a9e734e8cce530e540c7b724343e8c0e536477a194c38770dad79b093"
+  },
+  "sections": {
+    "1": {
+      "version": 1,
+      "bytes": 154,
+      "crc32": "8b783bc4"
+    },
+    "2": {
+      "version": 22,
+      "bytes": 2615,
+      "crc32": "bb2b5880"
+    },
+    "4": {
+      "version": 1,
+      "bytes": 4,
+      "crc32": "2144df1c"
+    }
+  },
+  "title": "Parity Precomp",
+  "width": 1920
+}

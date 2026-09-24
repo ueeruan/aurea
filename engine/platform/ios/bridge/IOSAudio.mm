@@ -331,13 +331,11 @@ public:
             if (!host || !host.engine) return false;
             AVAudioEngine* engine = host.engine;
             AVAudioTime* nodeTime = engine.outputNode.lastRenderTime;
-            if (!nodeTime) return false;
-            AVAudioTime* player = [engine.outputNode playerTimeForNodeTime:nodeTime];
-            if (!player || !player.isSampleTimeValid) return false;
+            if (!nodeTime || !nodeTime.isSampleTimeValid) return false;
             const double rate = [host outputSampleRate];
             const double mix = (double)audio::kMixRate;
-            frames = rate > 0.0 ? (i64)llround((double)player.sampleTime * mix / rate)
-                                : (i64)player.sampleTime;
+            frames = rate > 0.0 ? (i64)llround((double)nodeTime.sampleTime * mix / rate)
+                                : (i64)nodeTime.sampleTime;
             return frames >= 0;
         }
     }
@@ -349,7 +347,7 @@ public:
             const double rate = [host outputSampleRate];
             double seconds = 0.0;
             if (host.engine) seconds += host.engine.outputNode.presentationLatency;
-            const double io = AVAudioSession.sharedInstance.ioBufferDuration;
+            const double io = AVAudioSession.sharedInstance.IOBufferDuration;
             if (io > 0.0) seconds += io;
             if (seconds <= 0.0) {
                 // Estimativa do buffer padrão quando o sistema não informa:

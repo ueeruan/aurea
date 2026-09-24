@@ -137,6 +137,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Miniaturas ------------------------------------------------------------------
     internal val thumbnails = HomeThumbnails(app.resources)
+    internal val notices = LiveNotices(app)
 
     // --- Ações que esperam o motor -------------------------------------------------
     /**

@@ -138,8 +138,9 @@ bool load_image(const char* source, ImagePixels& out, void*) {
 // -----------------------------------------------------------------------------
 struct NativeContext {
     android::AAudioOutput audioOut;    ///< antes do motor: o motor fecha a saída no shutdown
-    Engine engine;
     android::MediaCodecFactory media;
+    Engine engine;                    ///< morre antes da fábrica usada pelos workers
+    std::string startupError;
     std::mutex surfaceMutex;
     ANativeWindow* window = nullptr;   ///< referência adquirida; devolvida no detach
     bool initialized = false;
@@ -318,6 +319,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     NativeContext* c = ctx_of(handle);
     if (!c) return JNI_FALSE;
     if (c->initialized) return JNI_TRUE;
+    c->startupError.clear();
 
     PlatformInfo info;
     bool hasInfo = false;
@@ -357,11 +359,14 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.enableTelemetry = true;
 
     if (const Status s = c->engine.initialize(config); !s.ok()) {
+        c->startupError = std::string(s.message()) + ": " + std::string(s.detail());
         AUREA_LOG_ERROR("falha ao inicializar: %s", s.message().data());
         return JNI_FALSE;
     }
     GPUBackend* gpu = c->engine.gpu();
     if (!gpu) {
+        const auto status = c->engine.read_status();
+        c->startupError = std::string(to_string(status.lastError)) + ": " + status.lastErrorDetail;
         AUREA_LOG_ERROR("sem GPU utilizavel: o preview nao tem como desenhar");
         c->engine.shutdown();
         return JNI_FALSE;
@@ -397,6 +402,11 @@ AUREA_JNI void AUREA_FN(nativeSuspend)(JNIEnv*, jclass, jlong handle) {
 
 AUREA_JNI void AUREA_FN(nativeInvalidate)(JNIEnv*, jclass, jlong handle) {
     if (NativeContext* c = ctx_of(handle)) c->engine.invalidate();
+}
+
+AUREA_JNI jstring AUREA_FN(nativeStartupError)(JNIEnv* env, jclass, jlong handle) {
+    auto* c = ctx_of(handle);
+    return env->NewStringUTF(c ? c->startupError.c_str() : "nativeCreate failed");
 }
 
 AUREA_JNI void AUREA_FN(nativeResume)(JNIEnv*, jclass, jlong handle) {
@@ -610,6 +620,37 @@ AUREA_JNI jint AUREA_FN(nativeQueryEffectSpecs)(JNIEnv* env, jclass, jlong handl
 }
 
 /// Composição atual: devolve o id; `out` = [largura, altura, fps, duração, r, g, b, a].
+/// Medida do ÚLTIMO render fora da tela (o que a captura de quadro usa).
+///
+/// Existe porque fora do editor não há prévia viva e o `PerfPOD` sai todo zero —
+/// mas a captura RENDERIZA de verdade, e é este o número que sobra. É ele que
+/// separa "a CPU está presa" (`prepareMs`, `recordMs`) de "estamos esperando o
+/// decoder" (`mediaWaitMs`) de "estamos esperando a GPU" (`gpuWaitMs`, `gpuMs`).
+AUREA_JNI jboolean AUREA_FN(nativeReadOffscreenMeasure)(JNIEnv* env, jclass, jlong handle, jdoubleArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 20) return JNI_FALSE;
+    const auto m = c->engine.last_offscreen_measure();
+    const jdouble v[20] = {
+        m.prepareMs, m.mediaWaitMs, static_cast<jdouble>(m.mediaAttempts), m.recordMs, m.submitMs,
+        m.gpuWaitMs, m.gpuMs, m.gpuMeasured ? 1.0 : 0.0, static_cast<jdouble>(m.gpuPasses),
+        static_cast<jdouble>(m.passesExecuted), static_cast<jdouble>(m.passesCulled),
+        static_cast<jdouble>(m.drawCalls), static_cast<jdouble>(m.layersRendered),
+        static_cast<jdouble>(m.draws3D), static_cast<jdouble>(m.triangles3D),
+        static_cast<jdouble>(m.culled3D), static_cast<jdouble>(m.particles),
+        static_cast<jdouble>(m.activeEffects), static_cast<jdouble>(m.transientBytes),
+        static_cast<jdouble>(m.gpuUsedBytes)};
+    env->SetDoubleArrayRegion(out, 0, 20, v);
+    return JNI_TRUE;
+}
+
+/// Liga as timestamp queries do render fora da tela (só a medição usa).
+AUREA_JNI jboolean AUREA_FN(nativeOffscreenTimers)(JNIEnv*, jclass, jlong handle, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    c->engine.set_offscreen_timers(on == JNI_TRUE);
+    return JNI_TRUE;
+}
+
 AUREA_JNI jlong AUREA_FN(nativeQueryComposition)(JNIEnv* env, jclass, jlong handle, jdoubleArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out || env->GetArrayLength(out) < 8) return 0;
@@ -1108,7 +1149,7 @@ AUREA_JNI jboolean AUREA_FN(nativeSetTransition)(JNIEnv*, jclass, jlong handle, 
 namespace {
 /// Receita do texto 3D, campo a campo. O Kotlin manda e recebe os números num
 /// FloatArray só: a ordem é o contrato entre os dois lados (kText3DFields).
-constexpr jint kText3DFields = 29;
+constexpr jint kText3DFields = 33;
 
 void write_text3d(const aurea::scene3d::Text3DSpec& s, f32* v) {
     v[0] = s.depth;
@@ -1127,6 +1168,8 @@ void write_text3d(const aurea::scene3d::Text3DSpec& s, f32* v) {
     v[22] = s.side.metallic; v[23] = s.side.roughness;
     v[24] = s.bevelMat.color.x; v[25] = s.bevelMat.color.y; v[26] = s.bevelMat.color.z;
     v[27] = s.bevelMat.metallic; v[28] = s.bevelMat.roughness;
+    v[29] = static_cast<f32>(s.animation); v[30] = s.animationDuration;
+    v[31] = s.animationStagger; v[32] = s.animationAmount;
 }
 
 bool read_text3d(JNIEnv* env, jstring content, jfloatArray p, aurea::scene3d::Text3DSpec& s) {
@@ -1152,25 +1195,31 @@ bool read_text3d(JNIEnv* env, jstring content, jfloatArray p, aurea::scene3d::Te
     s.side.metallic = v[22]; s.side.roughness = v[23];
     s.bevelMat.color = Vec4{v[24], v[25], v[26], 1.0f};
     s.bevelMat.metallic = v[27]; s.bevelMat.roughness = v[28];
+    s.animation = static_cast<u32>(std::clamp(v[29], 0.f, 4.f));
+    s.animationDuration = std::clamp(v[30], .2f, 30.f);
+    s.animationStagger = std::clamp(v[31], 0.f, 1.f);
+    s.animationAmount = std::clamp(v[32], 0.f, 2.f);
     return true;
 }
 } // namespace
 
-AUREA_JNI jlong AUREA_FN(nativeAddText3d)(JNIEnv* env, jclass, jlong handle, jstring content, jfloatArray p) {
+AUREA_JNI jlong AUREA_FN(nativeAddText3d)(JNIEnv* env, jclass, jlong handle, jstring content, jfloatArray p, jstring fontPath) {
     NativeContext* c = ctx_of(handle);
     if (!c || !content) return -static_cast<jlong>(Errc::InvalidState);
     aurea::scene3d::Text3DSpec s;
     if (!read_text3d(env, content, p, s)) return -static_cast<jlong>(Errc::InvalidArgument);
+    if (fontPath) { const char* v = env->GetStringUTFChars(fontPath, nullptr); if (v) { s.fontPath = v; env->ReleaseStringUTFChars(fontPath, v); } }
     const Result<u64> res = c->engine.add_text3d(s);
     if (!res.ok()) return -static_cast<jlong>(res.status().code());
     return static_cast<jlong>(*res);
 }
 
-AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring content, jfloatArray p) {
+AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring content, jfloatArray p, jstring fontPath) {
     NativeContext* c = ctx_of(handle);
     if (!c || !content) return JNI_FALSE;
     aurea::scene3d::Text3DSpec s;
     if (!read_text3d(env, content, p, s)) return JNI_FALSE;
+    if (fontPath) { const char* v = env->GetStringUTFChars(fontPath, nullptr); if (v) { s.fontPath = v; env->ReleaseStringUTFChars(fontPath, v); } }
     return c->engine.set_text3d(static_cast<u64>(layer), s).ok() ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -1188,6 +1237,13 @@ AUREA_JNI jstring AUREA_FN(nativeQueryText3d)(JNIEnv* env, jclass, jlong handle,
 }
 
 /// Sombras do objeto 3D: projeta / recebe.
+AUREA_JNI jstring AUREA_FN(nativeQueryText3dFont)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    aurea::scene3d::Text3DSpec s;
+    if (!c || !c->engine.query_text3d(static_cast<u64>(layer), s)) return nullptr;
+    return env->NewStringUTF(s.fontPath.c_str());
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetModelShadows)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean cast, jboolean receive) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_model_shadows(static_cast<u64>(layer), cast == JNI_TRUE, receive == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;

@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 
 namespace aurea {
 
@@ -274,9 +275,11 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         startup_.gpuMs = ms_since(tGpu);
         const u64 tRenderer = monotonic_ns();
         if (!gs.ok()) {
+            set_last_error(gs, "inicializar GPU");
             AUREA_LOG_ERROR("backend grafico nao inicializou: %s", gs.message().data());
             gpu_.reset();
         } else if (const Status r = renderer_.initialize(*gpu_, effectRegistry_); !r.ok()) {
+            set_last_error(r, "inicializar renderer");
             AUREA_LOG_ERROR("renderer nao inicializou: %s", r.message().data());
             gpu_->shutdown();
             gpu_.reset();
@@ -394,6 +397,7 @@ void Engine::shutdown() noexcept {
         project_.reset();
         images_.clear();
         models_.clear();
+        hdris_.clear();
     }
     state_ = EngineState::Uninitialized;
 }
@@ -627,6 +631,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
     project_ = std::make_unique<Project>(std::move(*result));
     images_.clear();
     models_.clear();
+    hdris_.clear();
     history_.clear();
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     selection_.clear();
@@ -796,6 +801,7 @@ Status Engine::load_project(const char* path) noexcept {
         migrate_echo_to_effect();
         images_.clear();
         models_.clear();
+        hdris_.clear();
         history_.clear();
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
         selection_.clear();
@@ -871,7 +877,7 @@ Status Engine::load_project(const char* path) noexcept {
             o.maxTextureSize = model_texture_cap();
             // Texto 3D: a origem é a receita; a malha é gerada de novo.
             scene3d::Text3DSpec spec;
-            const auto font = scene3d::decode_text3d(src, spec) ? text::default_font() : nullptr;
+            const auto font = scene3d::decode_text3d(src, spec) ? scene3d::text3d_font(spec) : nullptr;
             scene3d::ImportResult r = font ? scene3d::build_text3d(*font, spec)
                                            : scene3d::import_scene_file(resolve_asset_path(src), o);
             if (!r.ok()) {
@@ -908,6 +914,11 @@ Status Engine::save_project(const char* path) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         if (!project_) return Errc::InvalidState;
+        // A UI pode salvar logo depois de submit_commands, antes do próximo
+        // frame (inclusive sem GPU ou em segundo plano). O snapshot precisa
+        // incluir essa edição. O mesmo lock serializa os consumidores da
+        // fila no render e aqui; não há renderização nem espera pela GPU.
+        drain_commands_locked();
         project_->metadata().modifiedUnixMs = wall_clock_ms();
         if (const Status s = ProjectSerializer::encode(*project_, options, bytes); !s.ok()) {
             set_last_error(s, "salvar projeto");
@@ -3246,24 +3257,31 @@ std::shared_ptr<const scene3d::HdriPixels> Engine::hdri_lookup(void* selfPtr, As
     return px;
 }
 
-Result<u64> Engine::import_hdri(const char* path) noexcept {
+Result<u64> Engine::import_hdri(const char* path, u64 objectLayer) noexcept {
     if (!path || !*path) return Status{Errc::InvalidArgument, "sem arquivo"};
-    std::shared_ptr<scene3d::HdriPixels> px = read_hdri_file(path);
+    const std::string resolved = resolve_asset_path(path);
+    std::shared_ptr<scene3d::HdriPixels> px = read_hdri_file(resolved);
     if (!px) return Status{Errc::UnsupportedFormat, "HDRI nao lido (use .hdr Radiance)"};
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
-    history_.before_mutation(*comp, project_->timeline().current(), "hdri");
+    Layer* object = objectLayer ? comp->layer(LayerId::unpack(objectLayer)) : nullptr;
+    if (objectLayer && (!object || !(object->threeD || object->kind == LayerKind::Model3D)))
+        return Status{Errc::InvalidArgument, "objeto 3D nao encontrado"};
+    history_.before_mutation(*comp, project_->timeline().current(), object ? "hdri do objeto" : "hdri");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     Asset asset;
     asset.kind = AssetKind::Environment;
     std::string name = path;
     if (const usize s = name.find_last_of("/\\"); s != std::string::npos) name = name.substr(s + 1);
     asset.name = name;
-    asset.sourcePath = path;
+    asset.sourcePath = store_asset_path(resolved);
     const AssetId id = project_->add_asset(std::move(asset));
     hdris_[id.pack()] = px;
-    comp->environment().hdri = id;
+    if (object) {
+        object->environmentSource = 1; object->environmentAsset = id.pack();
+        object->environmentIntensity = 1; object->environmentRotation = 0; object->environmentExposure = 1;
+    } else { comp->environment().hdri = id; }
     project_->mark_dirty();
     request_render();
     AUREA_LOG_INFO("hdri: %ux%u", px->width, px->height);
@@ -3324,13 +3342,14 @@ bool Engine::set_object_environment(u64 layerId, u32 source, u64 hdriAsset, f32 
     return true;
 }
 
-bool Engine::query_object_environment(u64 layerId, f32* out) noexcept {
+bool Engine::query_object_environment(u64 layerId, f32* out, u64* outAsset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     const Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !out) return false;
     out[0] = static_cast<f32>(l->environmentSource);
     out[1] = static_cast<f32>(l->environmentAsset);
+    if (outAsset) *outAsset = l->environmentAsset;
     out[2] = l->environmentIntensity;
     out[3] = l->environmentRotation;
     out[4] = l->environmentExposure;
@@ -4195,13 +4214,58 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
 // -----------------------------------------------------------------------------
 // Modelos 3D
 // -----------------------------------------------------------------------------
+namespace {
+
+std::string asset_path_utf8(const std::filesystem::path& path) {
+    const auto utf8 = path.generic_u8string();
+    return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
+}
+
+// A docs: suffix is a portable relative path, never an absolute path/drive,
+// alternate data stream, or a traversal. Accept old Windows separators too.
+std::string safe_asset_relative(std::string relative) {
+    if (relative.empty() || relative.find('\0') != std::string::npos || relative.find(':') != std::string::npos) return {};
+    std::replace(relative.begin(), relative.end(), '\\', '/');
+    usize first = 0;
+    while (first <= relative.size()) {
+        const usize slash = relative.find('/', first);
+        const usize end = slash == std::string::npos ? relative.size() : slash;
+        const std::string part = relative.substr(first, end - first);
+        if (part.empty() || part == "." || part == "..") return {};
+        if (slash == std::string::npos) break;
+        first = slash + 1;
+    }
+    return relative;
+}
+
+// Canonical containment also rejects an otherwise valid suffix whose symlink
+// leaves Documents. error_code overloads keep missing media a normal failure.
+std::string document_asset_path(const std::string& docs, const std::string& relative, bool mustExist) {
+    if (docs.empty() || relative.empty()) return {};
+    namespace fs = std::filesystem;
+    std::error_code error;
+    const fs::path base = fs::weakly_canonical(fs::u8path(docs), error);
+    if (error || base.empty()) return {};
+    const fs::path candidate = fs::weakly_canonical(base / fs::u8path(relative), error);
+    if (error || candidate.empty()) return {};
+    if (safe_asset_relative(asset_path_utf8(candidate.lexically_relative(base))).empty()) return {};
+    if (mustExist && (!fs::is_regular_file(candidate, error) || error)) return {};
+    return asset_path_utf8(candidate);
+}
+
+} // namespace
+
 std::string Engine::store_asset_path(const std::string& absolute) const {
     const std::string& docs = config_.documentsDirectory;
-    if (!docs.empty() && absolute.size() > docs.size() && absolute.compare(0, docs.size(), docs) == 0) {
-        usize start = docs.size();
-        while (start < absolute.size() && (absolute[start] == '/' || absolute[start] == '\\')) ++start;
-        return "docs:" + absolute.substr(start);
-    }
+    if (docs.empty() || absolute.empty()) return absolute;
+    namespace fs = std::filesystem;
+    std::error_code error;
+    const fs::path base = fs::weakly_canonical(fs::u8path(docs), error);
+    if (error || base.empty()) return absolute;
+    const fs::path candidate = fs::weakly_canonical(fs::u8path(absolute), error);
+    if (error || candidate.empty()) return absolute;
+    const std::string relative = safe_asset_relative(asset_path_utf8(candidate.lexically_relative(base)));
+    if (!relative.empty()) return "docs:" + relative;
     return absolute;
 }
 
@@ -4238,9 +4302,22 @@ void Engine::sync_audio_locked(const Composition& comp) noexcept {
 
 std::string Engine::resolve_asset_path(const std::string& stored) const {
     if (stored.rfind("docs:", 0) == 0) {
-        std::string base = config_.documentsDirectory;
-        if (!base.empty() && base.back() != '/' && base.back() != '\\') base += '/';
-        return base + stored.substr(5);
+        return document_asset_path(config_.documentsDirectory, safe_asset_relative(stored.substr(5)), false);
+    }
+    // Old Android HDRI imports stored the application's private files path.
+    // Rebase only these exact package prefixes, with an existing companion;
+    // unknown packages and external/media-provider paths retain their meaning.
+    constexpr const char* legacyRoots[] = {
+        "/data/user/0/com.aurea.aurea/files/", "/data/data/com.aurea.aurea/files/"
+    };
+    for (const char* prefix : legacyRoots) {
+        if (stored.rfind(prefix, 0) != 0) continue;
+        const std::string relative = safe_asset_relative(stored.substr(std::strlen(prefix)));
+        if (relative.empty()) return {};
+        if (config_.documentsDirectory.empty()) return stored;
+        // No companion (or a symlink leaving Documents) stays missing; never
+        // fall back to a different application's container or a basename scan.
+        return document_asset_path(config_.documentsDirectory, relative, true);
     }
     return stored;
 }
@@ -4946,7 +5023,7 @@ std::string Engine::text_font(u64 layerId) noexcept {
 }
 
 Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
-    const auto font = text::default_font();
+    const auto font = scene3d::text3d_font(spec);
     if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
     scene3d::ImportResult r = scene3d::build_text3d(*font, spec);
     if (!r.ok()) return Status{Errc::InvalidArgument, "texto sem letras visiveis"};
@@ -4963,7 +5040,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     l->threeD = true;
     l->model.scene = assetId;
-    l->model.animationClip = -1;
+    l->model.animationClip = spec.animation ? 0 : -1;
     // Letra com ~25 % da altura da composição; texto longo encolhe para caber
     // em 80 % da largura.
     const Vec3 ext = scene->bounds.extent();
@@ -4978,7 +5055,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
 }
 
 Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept {
-    const auto font = text::default_font();
+    const auto font = scene3d::text3d_font(spec);
     if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
     scene3d::ImportResult r = scene3d::build_text3d(*font, spec);
     if (!r.ok()) return Status{Errc::InvalidArgument, "texto sem letras visiveis"};
@@ -4996,6 +5073,7 @@ Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept
     const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
     models_[assetId.pack()] = scene;
     l->model.scene = assetId;
+    l->model.animationClip = spec.animation ? 0 : -1;
     l->model.pivot = scene->bounds.center();
     project_->mark_dirty();
     request_render();
@@ -5245,9 +5323,11 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     // O refino não entra na média do AUTO: é um quadro avulso em outra
     // resolução, não o ritmo do preview.
     if (!refineNow_) (void)adapt().update(stats, caps_.thermal());
-    refinePending_ = !playing && !refineNow_
-        && (rs.previewDenominator > adapt().still_denominator(caps_.thermal())
-            || adapt().state().heavyLevel > adapt().still_heavy_level(caps_.thermal()));
+    // A luz de ambiente termina em segundo plano. Mesmo parado, precisamos
+    // apresentar outro quadro para que metais recebam os reflexos prontos.
+    refinePending_ = !playing && ((!snapshot_.scenes.empty() && renderer_.environment_pending())
+        || (!refineNow_ && (rs.previewDenominator > adapt().still_denominator(caps_.thermal())
+            || adapt().state().heavyLevel > adapt().still_heavy_level(caps_.thermal()))));
     media_.collect(frameCounter_);
     if (frameCounter_ % 120 == 0) (void)memory_.balance();
     update_perf(stats, timings, snapshot_, frameStart);
@@ -6168,17 +6248,39 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     return true;
 }
 
+bool Engine::query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
+                                   i32 frame, f32* out4) noexcept {
+    if (!out4 || property >= static_cast<u32>(TrackProperty::_Count)) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = current_composition();
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    const Track* track = layer ? (property == static_cast<u32>(TrackProperty::TimeRemap) ? &layer->timeRemap :
+        layer->tracks.find(static_cast<TrackProperty>(property), effectIndex, paramIndex)) : nullptr;
+    if (!track) return false;
+    const u32 index = track->find_exact(FrameIndex{frame});
+    if (index == kInvalidIndex) return false;
+    const auto& key = track->keys[index];
+    out4[0] = key.bx1; out4[1] = key.by1; out4[2] = key.bx2; out4[3] = key.by2;
+    return true;
+}
+
 u32 Engine::query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,
                         f32* outValues, u32 sampleCount) noexcept {
-    if (!outValues || sampleCount == 0 || endFrame <= startFrame) return 0;
+    return query_track_curve(layerId, property, kInvalidIndex, 0, startFrame, endFrame, outValues, sampleCount);
+}
+
+u32 Engine::query_track_curve(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
+                              i32 startFrame, i32 endFrame, f32* outValues, u32 sampleCount) noexcept {
+    if (!outValues || sampleCount == 0 || endFrame <= startFrame || property >= static_cast<u32>(TrackProperty::_Count)) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = current_composition();
     if (!comp) return 0;
     Layer* l = comp->layer(LayerId::unpack(layerId));
     if (!l) return 0;
-    const Track* track = l->tracks.find(static_cast<TrackProperty>(property));
+    const Track* track = property == static_cast<u32>(TrackProperty::TimeRemap) ? &l->timeRemap :
+        l->tracks.find(static_cast<TrackProperty>(property), effectIndex, paramIndex);
     if (!track) return 0;
-    const f64 step = static_cast<f64>(endFrame - startFrame) / static_cast<f64>(sampleCount > 1 ? sampleCount - 1 : 1);
+    const f64 step = (static_cast<f64>(endFrame) - startFrame) / static_cast<f64>(sampleCount > 1 ? sampleCount - 1 : 1);
     for (u32 i = 0; i < sampleCount; ++i) {
         outValues[i] = track->sample_keys(FrameIndex{static_cast<i64>(static_cast<f64>(startFrame) + step * i)});
     }

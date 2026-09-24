@@ -96,6 +96,7 @@ fun HomeScreen(store: EditorStore) {
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
     ) {
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(AureaColors.SystemBarVeil))
+        LiveNoticeBanners(vm.notices)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             Box(Modifier.fillMaxSize().backdropSource(shellBackdrop)) {
                 when (vm.tab) {

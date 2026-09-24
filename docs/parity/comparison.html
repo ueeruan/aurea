@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aurea — revisão visual Android / iOS</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0d1117; --panel:#151c25; --line:#2b3746; --ink:#eef3f8; --muted:#aebdca; --blue:#80c4eb; --amber:#ffd080; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 system-ui,sans-serif; }
+    a { color:var(--blue); text-underline-offset:3px; }
+    main { max-width:1080px; margin:auto; padding:40px 24px 64px; }
+    h1 { margin:8px 0 14px; font-size:clamp(26px,4vw,40px); letter-spacing:-.035em; line-height:1.2; }
+    h2 { margin:0 0 10px; font-size:23px; letter-spacing:-.015em; }
+    h3 { margin:0 0 8px; font-size:16px; }
+    p { margin:8px 0 14px; }
+    .eyebrow { color:var(--blue); font-size:12px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; }
+    .muted { color:var(--muted); }
+    .notice { border:1px solid #6b5330; border-left:4px solid var(--amber); background:#211d17; padding:18px 20px; margin:22px 0; }
+    .notice strong { color:var(--amber); }
+    .specs { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; margin:20px 0; }
+    .spec { padding:16px 18px; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+    .spec b { display:block; }
+    nav { display:flex; flex-wrap:wrap; gap:8px; margin:22px 0 32px; }
+    nav a { border:1px solid var(--line); border-radius:6px; padding:5px 10px; text-decoration:none; }
+    nav a:hover, nav a:focus-visible { background:#213449; border-color:var(--blue); }
+    section { scroll-margin-top:20px; margin:0 0 42px; padding-top:24px; border-top:1px solid var(--line); }
+    .pair { display:flex; align-items:flex-start; gap:20px; overflow-x:auto; padding:8px 0 12px; }
+    figure { width:393px; min-width:393px; margin:0; }
+    figcaption { font-size:13px; color:var(--muted); min-height:58px; margin-bottom:10px; }
+    figcaption b { display:block; color:var(--ink); font-size:15px; }
+    /* The only image normalization is width. No crop, safe-area removal,
+       height forcing, recoloring, generated pixels, or viewport alignment. */
+    .capture { display:block; width:393px; height:auto; }
+    .note { max-width:880px; color:var(--muted); }
+    .finding { border-left:3px solid var(--amber); padding-left:14px; }
+    .review { border:1px solid var(--line); background:var(--panel); padding:20px; border-radius:8px; margin:22px 0 30px; }
+    .review p:last-child { margin-bottom:0; }
+    .tag { display:inline-block; margin-bottom:8px; padding:2px 8px; border:1px solid #72562a; color:var(--amber); border-radius:4px; font-size:12px; }
+    details { margin:12px 0; }
+    summary { cursor:pointer; color:var(--blue); }
+    footer { color:var(--muted); border-top:1px solid var(--line); padding-top:20px; font-size:13px; }
+    code { overflow-wrap:anywhere; font-size:.9em; }
+    @media (max-width:700px) { main { padding:24px 16px 40px; } .pair { gap:14px; } }
+    @media print { :root { color-scheme:light; } body { background:white; color:black; } main { padding:0; } section { break-before:page; } nav { display:none; } .pair { overflow:visible; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Aurea · evidência local</div>
+  <h1>Android original × iOS em revisão</h1>
+  <p class="muted">Capturas reais do Android 2103 e do build iOS 35916264387. Esta página organiza a revisão; não certifica paridade visual ou funcional.</p>
+  <div class="notice">
+    <strong>Capturas anteriores às correções desta revisão.</strong>
+    <p>O texto 3D aparece cinza no iOS e suas alças estão deslocadas. A cena Particular foi capturada no quadro 0 mesmo após solicitar o quadro 36. A correção de seek/scrub e o novo teste de partículas isoladas ainda precisam de evidência de uma nova execução. Nenhuma imagem abaixo foi substituída por uma simulação do resultado esperado.</p>
+  </div>
+  <div class="specs">
+    <div class="spec"><b>Android 2103</b>1080 × 2400 px · densidade 420 dpi<br><span class="muted">2,625 px/dp · aproximadamente 411,4 × 914,3 dp</span><br><a href="android-2103/manifest.json">Manifesto Android</a></div>
+    <div class="spec"><b>iOS · execução 35916264387</b>1179 × 2556 px · escala @3<br><span class="muted">393 × 852 pt · iPhone 16 / simulador</span><br><a href="../../build/ios-parity/35916264387/manifest.json">Manifesto iOS</a></div>
+  </div>
+  <p class="note">Cada imagem tem exatamente <b>393 px de largura CSS</b>, com altura proporcional: Android 873,3 px; iOS 852 px. As barras do sistema, áreas seguras e proporções permanecem intactas. Essa apresentação reduz o Android a aproximadamente 95,5% de sua largura lógica; diferenças pequenas de texto e espaçamento precisam ser conferidas em dp/pt e no código, não apenas pela sobreposição. Em uma janela estreita, role o par horizontalmente.</p>
+  <div class="review">
+    <h2>Três painéis revistos</h2>
+    <p><b>Texto 3D:</b> no mesmo projeto complexo importado, o Android exibe texto claro com a caixa de seleção ao redor. No iOS o texto é cinza, e os pontos e o controle de rotação ficam no canto superior esquerdo do palco; o gizmo de eixos continua no centro. São divergências visíveis além dos diferentes insets.</p>
+    <p><b>Particular:</b> “Box” aparece azul claro com texto escuro no Android e azul escuro com texto claro no iOS. Os botões de presets também aparecem em peso maior no iOS. A ausência de neve nas duas capturas estáticas no tempo zero não prova uma falha do renderer; a execução iOS, porém, não atingiu o quadro solicitado. O PNG do motor é idêntico ao da cena 3D e só contém o texto.</p>
+    <p><b>Exportação:</b> o resumo “1920 × 1080 · 30 fps · H.264” cabe em uma linha no Android; no iOS quebra e a linha do codec fica parcialmente coberta pelo rodapé. A largura lógica menor pode contribuir e requer revisão do layout. A disponibilidade de 1440p/4K e o aviso de limite dependem do aparelho. O quadrado com Glow e a forma arredondada pertencem a fixtures diferentes.</p>
+  </div>
+  <nav aria-label="Ir para uma comparação" id="navigation"></nav>
+  <div id="comparisons"></div>
+  <footer>
+    <p>Somente arquivos locais existentes. As imagens iOS são artefatos em <code>build/ios-parity/35916264387/</code>; esse diretório deve permanecer junto do repositório para os links funcionarem. Clique em uma captura para abrir o PNG original. Não há recursos remotos, upload, pixels gerados nem correção de imagem nesta página.</p>
+    <p>Estados de undo/redo, nomes de camada, Glow, raio da forma, idioma parcial e seleção podem diferir entre fixtures. Capturas estáticas não verificam gestos, reprodução, áudio ou exportação concluída.</p>
+  </footer>
+</main>
+<script>
+  const pairs = [
+    {id:'home', title:'Home', android:'01-home.png', ios:'home.png', note:'Lista vazia, banner e aba Home em ambos. Horário e áreas do sistema são próprios de cada captura. O efeito de fundo durante a rolagem não é verificável neste estado vazio.'},
+    {id:'editor', title:'Editor vazio', android:'03-editor-empty.png', ios:'editor-empty.png', note:'Editor sem camadas. Compare barras, palco e linha do tempo; os espaços disponíveis diferem pelas dimensões lógicas e áreas seguras.'},
+    {id:'dock', title:'Opções da camada', android:'05-layer-dock.png', ios:'layer-dock.png', note:'Painel de opções de uma forma selecionada. Os projetos e os históricos de edição não são os mesmos.'},
+    {id:'transform', title:'Transform', android:'06-transform.png', ios:'transform.png', note:'Painel de transformação de uma forma. O Android usa o quadrado original; o iOS usa a fixture com forma arredondada. Valores e renderização do objeto não devem ser tratados como igualdade de estado.'},
+    {id:'effects', title:'Effects', android:'07-effects.png', ios:'effects.png', note:'Painel de efeitos antes de adicionar o efeito. Há uma comparação adicional do projeto Android com Glow abaixo.'},
+    {id:'glow', title:'Glow · projeto Android importado', android:'10-glow-applied.png', ios:'android-project.png', note:'O iOS abre o arquivo Android de referência com sua camada e Glow. Use este par para inspecionar a restauração do projeto, em vez de comparar com a forma padrão sem efeito.'},
+    {id:'shape', title:'Shape · edição da forma', android:'17-shape-edit.png', ios:'shape-edit.png', note:'O Android mostra Radius 0 px e o iOS 58 px: estados de forma distintos. A captura iOS já contém as legendas x · width / y · height. Compare a organização dos controles, sem confundir o botão de reset ou o contorno da forma com erro de paridade.'},
+    {id:'appearance', title:'Appearance', android:'18-appearance.png', ios:'appearance.png', note:'Painel de aparência de uma forma. O Glow e a geometria da camada variam entre as fixtures; a escala e os insets da tela também permanecem diferentes.'},
+    {id:'mask', title:'Mask', android:'19-mask.png', ios:'mask.png', note:'Painel de máscara. O contorno no palco depende dos pontos e da geometria da camada de cada fixture. A comparação estática não comprova edição dos vértices nem keyframes.'},
+    {id:'presets', title:'Presets', android:'16-presets.png', ios:'presets.png', note:'Lista de presets da camada. Sem afirmar igualdade do conteúdo do projeto ou do histórico de animação.'},
+    {id:'text3d', title:'Texto 3D · projeto complexo Android', android:'22-complex-text3d.png', ios:'android-complex-3d.png', pending:true, note:'Mesmo arquivo Android de texto 3D + Particular. Pendências visíveis: texto cinza no iOS; pontos e controle de rotação deslocados para o canto superior esquerdo. A caixa deveria acompanhar o texto. O quadro solicitado pelo teste iOS não foi atingido nesta execução.', core:'android-complex-3d-core.png'},
+    {id:'particles', title:'Particular · painel e tempo', android:'23-complex-particular.png', ios:'android-complex-particles.png', pending:true, note:'Ambas as capturas mostram 00:00:00. No iOS a preparação solicitava o quadro 36, mas o JSON registra localPlayhead 0. O teste antigo aceitava pixels do texto 3D e não comprovava as partículas. O botão Box também difere em cores e os presets em peso tipográfico.', core:'android-complex-particles-core.png'},
+    {id:'particles-playing', title:'Particular · referência Android em reprodução', android:'24-complex-preview-playing.png', ios:'android-complex-particles.png', pending:true, note:'Estados deliberadamente diferentes: o Android está em reprodução; o iOS é a mesma captura parada no tempo zero. Este par expõe a evidência que falta, sem simular um quadro iOS futuro. A nova prova precisa mostrar partículas isoladas em tempos conhecidos.'},
+    {id:'export', title:'Exportação', android:'11-export.png', ios:'export.png', note:'Revisão do painel, não de um MP4 concluído. No iOS, o resumo de vídeo quebra a linha do codec e fica parcialmente coberto pelo rodapé. Resoluções disponíveis e avisos dependem da capacidade reportada pelo aparelho; Glow e raio da forma são diferentes nas fixtures.'},
+    {id:'settings', title:'Configurações do projeto', android:'12-project-settings.png', ios:'project-settings.png', note:'Configurações da composição. Preserve as diferenças de viewport ao comparar altura das linhas, campos e rodapé.'}
+  ];
+  const nav = document.getElementById('navigation');
+  const content = document.getElementById('comparisons');
+  const androidRoot = 'android-2103/';
+  const iosRoot = '../../build/ios-parity/35916264387/';
+  function element(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+  for (const pair of pairs) {
+    const shortcut = element('a', pair.title); shortcut.href = '#' + pair.id; nav.append(shortcut);
+    const section = element('section'); section.id = pair.id;
+    if (pair.pending) section.append(element('span', 'Pendente de nova evidência', 'tag'));
+    section.append(element('h2', pair.title));
+    section.append(element('p', pair.note, 'note' + (pair.pending ? ' finding' : '')));
+    const row = element('div', '', 'pair');
+    for (const [label, root, file, dimensions] of [
+      ['Android 2103', androidRoot, pair.android, '1080 × 2400 px'],
+      ['iOS 35916264387', iosRoot, pair.ios, '1179 × 2556 px']
+    ]) {
+      const figure = element('figure');
+      const caption = element('figcaption');
+      caption.append(element('b', label), document.createTextNode(file + ' · ' + dimensions));
+      const link = element('a'); link.href = root + file; link.title = 'Abrir PNG original';
+      const image = element('img', '', 'capture'); image.src = root + file;
+      image.alt = pair.title + ' — captura real ' + label;
+      image.loading = 'lazy'; image.decoding = 'async';
+      image.width = 393;
+      link.append(image); figure.append(caption, link); row.append(figure);
+    }
+    section.append(row);
+    const evidence = element('p', '', 'note');
+    const report = element('a', 'Estado real iOS (JSON)'); report.href = iosRoot + pair.ios.replace('.png', '.json'); evidence.append(report);
+    if (pair.core) {
+      evidence.append(document.createTextNode(' · '));
+      const core = element('a', 'PNG direto do motor'); core.href = iosRoot + pair.core; evidence.append(core);
+    }
+    section.append(evidence); content.append(section);
+  }
+</script>
+</body>
+</html>

@@ -124,7 +124,7 @@ void DecodedFrameCache::evict_locked() noexcept {
     // insere devolve os próprios piores — mas nunca o último frame: a tela
     // precisa de algo para mostrar.
     while (!frames_.empty()
-           && (frames_.size() > config_.maxFrames || stats_.bytes > config_.maxBytes
+           && (frames_.size() > config_.maxFrames || (frames_.size() > 1 && stats_.bytes > config_.maxBytes)
                || (frames_.size() > 1 && over_shared_budget_locked()))) {
         erase_locked(worst_locked());
     }

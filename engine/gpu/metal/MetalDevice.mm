@@ -3,7 +3,7 @@
 //  ciclo de vida.
 //
 //  O device é um só (iOS tem uma GPU), a fila é uma só, e cada frame em voo tem
-//  o seu command buffer com um `MTLSharedEvent` no fim — o fence por frame do
+//  o seu command buffer com um fence de conclusão — o fence por frame do
 //  Vulkan, com a mesma semântica: espera o frame N sem parar a fila inteira, e
 //  aceita tempo limite (é o que o export usa para ler o quadro N enquanto a GPU
 //  já trabalha no N+1).
@@ -32,15 +32,13 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
         d.device = d.requestedDevice ? (__bridge id<MTLDevice>)d.requestedDevice
                                      : MTLCreateSystemDefaultDevice();
         if (!d.device) return Status{Errc::NotSupported, "nenhum dispositivo Metal"};
+        AUREA_LOG_INFO("metal: iniciando GPU=%s, descricao=%s, simulator=%d",
+                       d.device.name.UTF8String ?: "", d.device.description.UTF8String ?: "",
+                       TARGET_OS_SIMULATOR ? 1 : 0);
 
         d.queue = [d.device newCommandQueue];
         if (!d.queue) return Status{Errc::NotSupported, "sem fila Metal"};
         d.queue.label = @"aurea";
-
-        d.event = [d.device newSharedEvent];
-        if (!d.event) return Status{Errc::NotSupported, "sem MTLSharedEvent"};
-        d.event.signaledValue = 0;
-        d.eventValue = 0;
 
         // Zero-copy de vídeo: o cache embrulha o IOSurface do CVPixelBuffer numa
         // MTLTexture. Sem ele, o vídeo externo simplesmente não existe — e os
@@ -81,6 +79,7 @@ void Backend::shutdown() noexcept {
         for (u32 i = 0; i < 3; ++i) {
             if (d.frames[i].submitted) d.wait_frame_gpu(d.frames[i]);
         }
+        d.wait_immediate_gpu();
         d.current = nullptr;
         d.lastSubmitted = nullptr;
         for (u32 i = 0; i < 3; ++i) d.run_deferred(d.frames[i]);
@@ -124,7 +123,6 @@ void Backend::shutdown() noexcept {
                 CFRelease(d.textureCache);
                 d.textureCache = nullptr;
             }
-            d.event = nil;
             d.queue = nil;
             d.device = nil;
         }
@@ -220,24 +218,14 @@ void Impl::fill_capabilities() noexcept {
     // --- Timestamps -----------------------------------------------------------
     // Amostrar contadores exige um ponto de amostragem: este backend amostra num
     // encoder de blit (é assim que se mede ENTRE passes, sem mexer no estado de
-    // nenhum encoder de render). O ponto pedido é o de blit; os outros valem
-    // como alternativa, porque o que o motor quer é o tempo por passe.
+    // nenhum encoder de render). Stage/draw NÃO são alternativas: aceitar um
+    // desses pontos e amostrar pelo blit causa assert no driver Metal.
     counterSampling = false;
     // Contadores são do iOS 14 / macOS 10.15 em diante. Abaixo disso o motor
     // simplesmente não mede — e `caps.timestampQueries` diz isso.
     if (@available(iOS 14.0, macOS 10.15, *)) {
-        const MTLCounterSamplingPoint points[3] = {
-            MTLCounterSamplingPointAtBlitBoundary,
-            MTLCounterSamplingPointAtStageBoundary,
-            MTLCounterSamplingPointAtDrawBoundary,
-        };
-        for (MTLCounterSamplingPoint p : points) {
-            if ([dev supportsCounterSampling:p]) {
-                counterSampling = true;
-                counterPoint = p;
-                break;
-            }
-        }
+        counterSampling = [dev supportsCounterSampling:MTLCounterSamplingPointAtBlitBoundary];
+        counterPoint = MTLCounterSamplingPointAtBlitBoundary;
         for (id<MTLCounterSet> set in dev.counterSets) {
             if ([set.name isEqualToString:MTLCommonCounterSetTimestamp]) {
                 timestampSet = set;
@@ -254,8 +242,8 @@ void Impl::fill_capabilities() noexcept {
         AUREA_LOG_WARN("metal: sem amostragem de timestamps — o painel DEV fica sem tempos de GPU");
     }
 
-    caps.samplerYcbcrConversion = true;   // o sampler converte YCbCr (matriz do formato)
-    caps.externalMemoryHardwareBuffer = true;   // CVPixelBuffer/IOSurface como textura
+    caps.samplerYcbcrConversion = false;  // YUV usa os shaders de planos; zero-copy BGRA é direto
+    caps.externalMemoryHardwareBuffer = textureCache != nullptr;   // CVPixelBuffer/IOSurface como textura
     caps.queueFamilyForeign = false;      // não existe fila estrangeira no Metal
     caps.externalSemaphoreFd = false;
     caps.validationEnabled = false;
@@ -344,8 +332,8 @@ void Impl::destroy_frames() noexcept {
         f.timerStack.clear();
         f.deferred.clear();
         f.cmd = nil;
+        f.completion = nil;
         f.submitted = false;
-        f.waitsOnEvent = false;
         f.frameNumber = 0;
     }
 }
@@ -416,12 +404,13 @@ Status Impl::submit_immediate(void (*record)(Impl&, id<MTLCommandBuffer>, void*)
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         if (!cb) return Status{Errc::InvalidState, "sem command buffer"};
         cb.label = @"imediato";
+        dispatch_semaphore_t completion = command_buffer_completion(cb);
+        if (!completion) return Status{Errc::OutOfMemory, "sem fence de command buffer"};
         record(*this, cb, ctx);
-        const u64 value = ++eventValue;
-        [cb encodeSignalEvent:event value:value];
         [cb commit];
-        if (![event waitUntilSignaledValue:value timeoutMS:5000]) return Status{Errc::Timeout, "submissao imediata"};
-        return check_ns(cb.error, "submissao imediata");
+        const Status status = wait_command_buffer(cb, completion, 5'000'000'000ull, "submissao imediata");
+        if (status.code() == Errc::Timeout) pendingImmediate.push_back(PendingSubmission{cb, completion});
+        return status;
     }
 }
 
@@ -440,10 +429,19 @@ void Impl::run_deferred(FrameContext& f) noexcept {
 }
 
 void Impl::wait_frame_gpu(FrameContext& f) noexcept {
-    if (!f.submitted || !f.waitsOnEvent) return;
+    if (!f.submitted) return;
     // Sem tempo limite aqui: quem chama já decidiu esperar (o `wait_frame` do
-    // contrato é quem aceita tempo limite).
-    (void)[event waitUntilSignaledValue:f.signalValue timeoutMS:2000];
+    // contrato é quem aceita tempo limite). Destruir/reciclar após um timeout
+    // liberava IOSurfaces e sobrescrevia os anéis enquanto a GPU ainda os lia.
+    const Status status = wait_command_buffer(f.cmd, f.completion, UINT64_MAX, "aguardar GPU ociosa");
+    if (status.code() == Errc::DeviceLost) deviceLost = true;
+}
+
+void Impl::wait_immediate_gpu() noexcept {
+    for (const PendingSubmission& pending : pendingImmediate) {
+        (void)wait_command_buffer(pending.cmd, pending.completion, UINT64_MAX, "aguardar submissao imediata");
+    }
+    pendingImmediate.clear();
 }
 
 FrameContext* Impl::deferral_target() noexcept {
@@ -456,9 +454,9 @@ void Backend::defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept {
     if (!fn) return;
     Impl& d = *impl_;
     FrameContext* f = d.deferral_target();
-    if (!f || d.deviceLost) {
-        // Nenhum trabalho de GPU pendente (ou o dispositivo morreu e nada mais
-        // vai executar): liberar agora é seguro.
+    if (!f) {
+        // Nenhum trabalho de GPU pendente: liberar agora é seguro. Um erro de
+        // dispositivo não dispensa esperar outros CBs ainda em voo.
         fn(ctx);
         return;
     }
@@ -474,10 +472,10 @@ void Backend::wait_idle() noexcept {
             if (&f == d.current || !f.submitted) continue;
             d.wait_frame_gpu(f);
             f.submitted = false;
-            f.waitsOnEvent = false;
             d.collect_timings(f);
             d.run_deferred(f);
         }
+        d.wait_immediate_gpu();
     }
 }
 
@@ -492,16 +490,12 @@ Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
     if (d.deviceLost) return Status{Errc::DeviceLost, "dispositivo perdido"};
     for (u32 i = 0; i < d.framesInFlight; ++i) {
         FrameContext& f = d.frames[i];
-        if (&f == d.current || !f.submitted || !f.waitsOnEvent || f.frameNumber != frameNumber) continue;
+        if (&f == d.current || !f.submitted || f.frameNumber != frameNumber) continue;
         // Só espera: coletar tempos e rodar a fila adiada continua com o
         // begin_frame que reciclar este contexto (uma thread só mexe nisso).
-        const u64 ms = timeoutNs / 1'000'000ull;
-        if (![d.event waitUntilSignaledValue:f.signalValue timeoutMS:ms]) {
-            return Status{Errc::Timeout, "GPU atrasada"};
-        }
-        return OkStatus;
+        return wait_command_buffer(f.cmd, f.completion, timeoutNs, "aguardar frame");
     }
-    // Frame já reciclado = concluído (o begin_frame esperou o evento dele).
+    // Frame já reciclado = concluído (o begin_frame esperou seu command buffer).
     return OkStatus;
 }
 
@@ -600,6 +594,7 @@ struct CacheFileHeader {
     u64  deviceHash;     ///< nome da GPU + memória unificada
     u64  payloadBytes;
     u64  checksum;
+    u64  reservedTail;
 };
 static_assert(sizeof(CacheFileHeader) == 64, "cabecalho do cache com tamanho fixo");
 

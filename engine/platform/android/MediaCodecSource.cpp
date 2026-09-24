@@ -293,12 +293,13 @@ const char* software_decoder_for(const char* mime) {
 // -----------------------------------------------------------------------------
 class MediaCodecDecoder final : public VideoDecoderBackend {
 public:
-    MediaCodecDecoder(SourceFd fd, bool zeroCopy) : fd_(std::move(fd)), zeroCopy_(zeroCopy) {}
+    MediaCodecDecoder(SourceFd fd, bool zeroCopy, bool thumbnail)
+        : fd_(std::move(fd)), zeroCopy_(zeroCopy), thumbnail_(thumbnail) {}
     ~MediaCodecDecoder() override { destroy_codec(); }
 
     Status open() {
         if (const Status s = create_codec(); !s.ok()) return s;
-        scan_keyframes();
+        if (!thumbnail_) scan_keyframes();
         return OkStatus;
     }
 
@@ -435,7 +436,7 @@ private:
         // A rotação do container é aplicada no shader. Deixá-la no formato faria
         // o codec marcar o buffer com uma transformação que o AImage não expõe.
         AMediaFormat_setInt32(format, kKeyRotation, 0);
-        AMediaFormat_setInt32(format, kKeyPriority, 0);   // tempo real
+        AMediaFormat_setInt32(format, kKeyPriority, thumbnail_ ? 1 : 0);
 
         Status result = OkStatus;
         codec_ = AMediaCodec_createDecoderByType(mime);
@@ -489,7 +490,9 @@ private:
     /// quando andar para a frente é mais barato que um seek.
     void scan_keyframes() {
         i64 first = -1, gap = 0;
+        const u64 deadline = monotonic_ns() + 50'000'000ull;
         for (int i = 0; i < 1200; ++i) {
+            if (monotonic_ns() >= deadline) break;
             const i64 t = AMediaExtractor_getSampleTime(ex_);
             if (t < 0) break;
             if (AMediaExtractor_getSampleFlags(ex_) & AMEDIAEXTRACTOR_SAMPLE_FLAG_SYNC) {
@@ -691,6 +694,7 @@ private:
 
     SourceFd fd_;
     bool zeroCopy_ = true;
+    bool thumbnail_ = false;
     AMediaExtractor* ex_ = nullptr;
     AMediaCodec* codec_ = nullptr;
     i32 track_ = -1;
@@ -923,7 +927,7 @@ std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& 
         return nullptr;
     }
     const bool zeroCopy = priority != MediaPriority::Thumbnail && zeroCopy_.load();
-    auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy);
+    auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy, priority == MediaPriority::Thumbnail);
     if (const Status s = decoder->open(); !s.ok()) {
         AUREA_LOG_ERROR("decoder nao abriu: %s", s.message().data());
         return nullptr;

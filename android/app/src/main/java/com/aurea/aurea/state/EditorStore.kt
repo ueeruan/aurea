@@ -147,27 +147,33 @@ private fun appText(@StringRes id: Int, vararg args: Any): String =
  * memória, decoder, encoder, mídia/projeto corrompido, armazenamento cheio —
  * dizem o que aconteceu e o que fazer; nenhum mostra só "erro 28".
  */
-fun humanError(code: Int): String = when (code) {
-    0 -> appText(R.string.msg_concluido)
-    3 -> appText(R.string.msg_arquivo_nao_encontrado)
-    6, 24 -> appText(R.string.msg_recurso_nao_suportado_neste_aparelho)
-    8, 9 -> appText(R.string.msg_memoria_insuficiente_feche_outros_apps_e)
-    10 -> appText(R.string.msg_erro_ao_ler_ou_gravar_o)
-    11, 13 -> appText(R.string.msg_o_arquivo_esta_danificado)
-    12 -> appText(R.string.msg_este_projeto_foi_salvo_por_uma)
-    14 -> appText(R.string.msg_nao_foi_possivel_decodificar_a_midia)
-    15 -> appText(R.string.msg_falha_ao_codificar_o_video)
-    16 -> appText(R.string.msg_codec_de_video_nao_suportado_por)
-    17 -> appText(R.string.msg_formato_de_arquivo_nao_suportado)
-    18 -> appText(R.string.msg_a_midia_original_nao_esta_mais)
-    19 -> appText(R.string.msg_a_gpu_foi_reiniciada_tente_de)
-    20 -> appText(R.string.msg_memoria_de_video_gpu_insuficiente_baixe)
-    25 -> appText(R.string.msg_cancelado)
-    28 -> appText(R.string.msg_sem_espaco_no_aparelho_libere_espaco)
-    29 -> appText(R.string.msg_o_arquivo_de_midia_esta_danificado)
-    30 -> appText(R.string.msg_o_projeto_esta_danificado_e_nao)
-    31 -> appText(R.string.msg_este_aparelho_nao_tem_codificador_para)
-    else -> appText(R.string.msg_erro_inesperado_codigo, code)
+@StringRes
+internal fun humanErrorResource(code: Int): Int = when (code) {
+    0 -> R.string.msg_concluido
+    3 -> R.string.msg_arquivo_nao_encontrado
+    6, 24 -> R.string.msg_recurso_nao_suportado_neste_aparelho
+    8, 9 -> R.string.msg_memoria_insuficiente_feche_outros_apps_e
+    10 -> R.string.msg_erro_ao_ler_ou_gravar_o
+    11, 13 -> R.string.msg_o_arquivo_esta_danificado
+    12 -> R.string.msg_este_projeto_foi_salvo_por_uma
+    14 -> R.string.msg_nao_foi_possivel_decodificar_a_midia
+    15 -> R.string.msg_falha_ao_codificar_o_video
+    16 -> R.string.msg_codec_de_video_nao_suportado_por
+    17 -> R.string.msg_formato_de_arquivo_nao_suportado
+    18 -> R.string.msg_a_midia_original_nao_esta_mais
+    19 -> R.string.msg_a_gpu_foi_reiniciada_tente_de
+    20 -> R.string.msg_memoria_de_video_gpu_insuficiente_baixe
+    25 -> R.string.msg_cancelado
+    28 -> R.string.msg_sem_espaco_no_aparelho_libere_espaco
+    29 -> R.string.msg_o_arquivo_de_midia_esta_danificado
+    30 -> R.string.msg_o_projeto_esta_danificado_e_nao
+    31 -> R.string.msg_este_aparelho_nao_tem_codificador_para
+    else -> R.string.msg_erro_inesperado_codigo
+}
+
+fun humanError(code: Int): String {
+    val resource = humanErrorResource(code)
+    return if (resource == R.string.msg_erro_inesperado_codigo) appText(resource, code) else appText(resource)
 }
 
 /** Grava texto atomicamente: temporário → sync → rename (o sidecar nunca fica pela metade). */
@@ -252,6 +258,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
     val exporter = Exporter(app, engine, viewModelScope)
+
+    /**
+     * O motor cru, só para o teste de estresse. Ele captura quadro por quadro e
+     * exporta o próprio vídeo de amostra — coisas que o resto do app não faz por
+     * aqui. Fora da bateria de diagnóstico ninguém deve usar isto.
+     */
+    internal val engineForStress get() = engine
+
+    /**
+     * Cria projeto SEM levar a UI para o editor.
+     *
+     * `newProject` termina em `enterEditor()`. Chamado de dentro da folha de
+     * Ajustes — que foi onde o teste de estresse ficou — ele trocava de tela,
+     * destruía a folha e, com ela, o `launch` que estava rodando a bateria. O
+     * tester via o app pular para um projeto vazio e o teste "não rodar".
+     */
+    internal fun newProjectHeadless(width: Int, height: Int, fps: Float, title: String): Boolean {
+        if (!engine.newProject(width, height, fps, title)) return false
+        val path = File(directories().projects, "${uniqueName(title)}.aurea").absolutePath
+        main.post { project = ProjectState(title = title, path = path, width = width, height = height, fps = fps) }
+        return true
+    }
+
+    /** Reabre sem navegar; par do [newProjectHeadless] para devolver o estado. */
+    internal fun openProjectHeadless(path: String): Boolean {
+        if (engine.loadProject(path) != 0) return false
+        main.post { project = ProjectState(title = File(path).nameWithoutExtension, path = path) }
+        return true
+    }
     private val batch = CommandBatch(engine)
     private val main = Handler(Looper.getMainLooper())
 
@@ -475,7 +510,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         effectPreviews = EffectPreviewStore(dirs.cache, installStamp(), ::renderEffectPreview)
                         startStatusLoop()
                     } else {
-                        errorMessage = appText(R.string.msg_nao_foi_possivel_iniciar_o_motor)
+                        errorMessage = appText(R.string.msg_nao_foi_possivel_iniciar_o_motor) +
+                            "\n\n${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}" +
+                            "\n${engine.startupError()}"
                     }
                 }
             }
@@ -994,7 +1031,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         text3d = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
             val f = FloatArray(Text3DInfo.FIELDS)
-            engine.queryText3d(id, f)?.let { novo -> Text3DInfo.of(novo, f).takeIf { !it.sameAs(text3d) } ?: text3d }
+            engine.queryText3d(id, f)?.let { novo -> Text3DInfo.of(novo, f, engine.queryText3dFont(id)).takeIf { !it.sameAs(text3d) } ?: text3d }
         } else {
             null
         }
@@ -1300,7 +1337,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun pushText3D(id: Long, info: Text3DInfo) {
         if (info.content.isBlank()) return
-        engine.setText3d(id, info.content, info.toFields())
+        engine.setText3d(id, info.content, info.toFields(), info.fontPath)
         refreshNow()
     }
 
@@ -3057,7 +3094,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** TTF/OTF do seletor do sistema: copiado para o projeto, registrado e aplicado. */
-    fun importFont(uri: Uri) {
+    fun importFont(uri: Uri, forText3d: Boolean = false) {
+        val targetLayer = primary
         val name = displayName(uri) ?: "fonte.ttf"
         val ext = name.substringAfterLast('.', "ttf").lowercase()
         if (ext != "ttf" && ext != "otf") {
@@ -3075,7 +3113,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
-            applyTextFont(item)
+            if (primary == targetLayer) {
+                if (forText3d) text3d?.let { setText3D(it.copy(fontPath = item.path)) }
+                else applyTextFont(item)
+            }
             showToast(appText(R.string.msg_fonte_importada, item.family))
         }
     }
@@ -4064,6 +4105,11 @@ data class Text3DInfo(
     val bevelColor: FloatArray = floatArrayOf(1f, 1f, 1f, 1f),
     val bevelMetallic: Float = 0f,
     val bevelRoughness: Float = 0.35f,
+    val fontPath: String = "",
+    val animation: Int = 0,
+    val animationDuration: Float = 2f,
+    val animationStagger: Float = .12f,
+    val animationAmount: Float = .3f,
 ) {
     fun toFields(): FloatArray = floatArrayOf(
         depth, alignment.toFloat(), color[0], color[1], color[2],
@@ -4073,10 +4119,13 @@ data class Text3DInfo(
         if (regionMaterials) 1f else 0f,
         sideColor[0], sideColor[1], sideColor[2], sideMetallic, sideRoughness,
         bevelColor[0], bevelColor[1], bevelColor[2], bevelMetallic, bevelRoughness,
+        animation.toFloat(), animationDuration, animationStagger, animationAmount,
     )
 
     fun sameAs(o: Text3DInfo?): Boolean =
         o != null && content == o.content && alignment == o.alignment &&
+            fontPath == o.fontPath && animation == o.animation && animationDuration == o.animationDuration &&
+            animationStagger == o.animationStagger && animationAmount == o.animationAmount &&
             depth == o.depth && bevel == o.bevel && bevelWidth == o.bevelWidth &&
             bevelDepth == o.bevelDepth && bevelSegments == o.bevelSegments &&
             bevelRoundness == o.bevelRoundness && metallic == o.metallic &&
@@ -4088,9 +4137,9 @@ data class Text3DInfo(
             sideColor.contentEquals(o.sideColor) && bevelColor.contentEquals(o.bevelColor)
 
     companion object {
-        const val FIELDS = 29
+        const val FIELDS = 33
 
-        fun of(content: String, f: FloatArray): Text3DInfo = Text3DInfo(
+        fun of(content: String, f: FloatArray, fontPath: String = ""): Text3DInfo = Text3DInfo(
             content = content,
             depth = f[0],
             alignment = f[1].toInt(),
@@ -4108,6 +4157,8 @@ data class Text3DInfo(
             sideMetallic = f[22], sideRoughness = f[23],
             bevelColor = floatArrayOf(f[24], f[25], f[26], 1f),
             bevelMetallic = f[27], bevelRoughness = f[28],
+            fontPath = fontPath, animation = f[29].toInt(), animationDuration = f[30],
+            animationStagger = f[31], animationAmount = f[32],
         )
     }
 }
@@ -4122,9 +4173,9 @@ enum class Text3DPreset(val labelRes: Int) {
     Neon(R.string.pn_t3d_preset_neon);
 
     fun apply(i: Text3DInfo): Text3DInfo = when (this) {
-        Chrome -> i.copy(color = floatArrayOf(0.95f, 0.96f, 0.98f, 1f), metallic = 1f, roughness = 0.05f,
+        Chrome -> i.copy(bevel = true, regionMaterials = false, color = floatArrayOf(0.95f, 0.96f, 0.98f, 1f), metallic = 1f, roughness = 0.05f,
             specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
-        Gold -> i.copy(color = floatArrayOf(1f, 0.77f, 0.34f, 1f), metallic = 1f, roughness = 0.18f,
+        Gold -> i.copy(bevel = true, regionMaterials = false, color = floatArrayOf(1f, 0.77f, 0.34f, 1f), metallic = 1f, roughness = 0.18f,
             specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
         Brushed -> i.copy(color = floatArrayOf(0.78f, 0.79f, 0.8f, 1f), metallic = 1f, roughness = 0.45f,
             specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)

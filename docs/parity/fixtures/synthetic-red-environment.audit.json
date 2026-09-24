@@ -1,0 +1,19 @@
+{
+  "sha256": "c77edd5121b2eb0f814b9a8766d9c3b626ef1b3972f7224fc4f1ffc282cba308",
+  "bytes": 8239,
+  "source": "synthetic-red-environment.hdr",
+  "description": "fixture de paridade",
+  "bottomLinearRGB": [
+    0.6,
+    0.05,
+    0.03
+  ],
+  "height": 32,
+  "origin": "Generated mathematically from the existing Gpu.HdriLightsTheModelAndSurvivesReopen test; no user image or external content",
+  "topLinearRGB": [
+    4,
+    0.3,
+    0.2
+  ],
+  "width": 64
+}

@@ -73,18 +73,26 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
         if (desc.width > d.caps.maxTexture2D || desc.height > d.caps.maxTexture2D) {
             return Status{Errc::OutOfRange, "textura maior que o limite do aparelho"};
         }
+        if (desc.cube && (desc.width != desc.height || desc.layers != 6 || desc.depth != 1)) {
+            return Status{Errc::InvalidArgument, "cubemap precisa de seis faces quadradas"};
+        }
 
         Texture t;
         t.desc = desc;
         t.format = to_mtl(desc.format);
         t.state = ResourceState::Undefined;
+        if (t.format == MTLPixelFormatInvalid) {
+            return Status{Errc::UnsupportedFormat, "formato de textura indisponivel"};
+        }
 
         MTLTextureDescriptor* td = [[MTLTextureDescriptor alloc] init];
         td.pixelFormat = t.format;
         td.width = desc.width;
         td.height = desc.height;
         td.mipmapLevelCount = std::max(1u, desc.mipLevels);
-        td.arrayLength = desc.cube ? 6u : std::max(1u, desc.layers);
+        // Metal conta cubos, não faces, em arrayLength. Um MTLTextureTypeCube
+        // tem arrayLength=1 e seis slices (0...5) para upload e amostragem.
+        td.arrayLength = desc.cube ? 1u : std::max(1u, desc.layers);
         // O motor é 1 amostra em todo alvo (o AA do preview é resolução, não
         // MSAA): declarado e não usado. Um dia que entre, entra aqui.
         td.sampleCount = 1;
@@ -197,7 +205,11 @@ Result<BufferHandle> Backend::create_buffer(const BufferDesc& desc) noexcept {
 #endif
                 break;
         }
+#if TARGET_OS_OSX
         b.managed = (options == MTLResourceStorageModeManaged);
+#else
+        b.managed = false;
+#endif
         b.hostVisible = (options != MTLResourceStorageModePrivate);
         b.buffer = [d.device newBufferWithLength:desc.bytes options:options];
         if (!b.buffer) return Status{Errc::OutOfDeviceMemory, "sem memoria para buffer"};
@@ -236,7 +248,9 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
         if (offset + bytes > b->desc.bytes) return Errc::OutOfRange;
         if (b->hostVisible) {
             std::memcpy(static_cast<u8*>(b->buffer.contents) + offset, data, bytes);
+#if TARGET_OS_OSX
             if (b->managed) [b->buffer didModifyRange:NSMakeRange(offset, bytes)];
+#endif
             return OkStatus;
         }
         // Buffer só de GPU: staging + blit, síncrono (não é caminho de frame).
@@ -255,7 +269,9 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
         Buffer* s = d.buffers.get(staging->id);
         if (!s) return Errc::InvalidState;
         std::memcpy(s->buffer.contents, data, bytes);
+#if TARGET_OS_OSX
         if (s->managed) [s->buffer didModifyRange:NSMakeRange(0, bytes)];
+#endif
         id<MTLBuffer> source = s->buffer;
         struct Ctx { id<MTLBuffer> src; id<MTLBuffer> dst; usize offset; usize size; }
             ctx{source, target, offset, bytes};
@@ -284,7 +300,9 @@ void Backend::unmap_buffer(BufferHandle buffer) noexcept {
     Buffer* b = d.buffers.get(buffer.id);
     if (!b || !b->managed) return;
     // `Managed` no Mac Intel: sem isto a escrita da CPU não chega à GPU.
+#if TARGET_OS_OSX
     [b->buffer didModifyRange:NSMakeRange(0, b->desc.bytes)];
+#endif
 }
 
 // =============================================================================
@@ -387,8 +405,10 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
         s.stage = desc.stage;
         NSError* err = nil;
         if (metallib) {
+            // O blob esta embutido no executavel e permanece valido durante toda
+            // a vida do processo; libdispatch nao deve liberar essa memoria.
             dispatch_data_t data = dispatch_data_create(bytes + headerBytes, payloadBytes, nil,
-                                                        DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+                                                        ^{});
             if (!data) return Status{Errc::OutOfMemory, "dispatch_data do metallib"};
             s.library = [d.device newLibraryWithData:data error:&err];
         } else {
@@ -650,12 +670,14 @@ Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPer
         // dedicado). Uma função só evita duas versões da mesma conta.
         const auto copy = [](id<MTLCommandBuffer> cb, void* p) {
             auto* c = static_cast<Ctx*>(p);
+#if TARGET_OS_OSX
             if (c->managed) [c->src didModifyRange:NSMakeRange(0, c->total)];
+#endif
             id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
             [blit copyFromBuffer:c->src
                     sourceOffset:c->sourceOffset
                 sourceBytesPerRow:c->rowBytes
-              sourceBytesPerImage:c->total
+              sourceBytesPerImage:0
                        sourceSize:MTLSizeMake(c->w, c->h, 1)
                         toTexture:c->dst
                  destinationSlice:0
@@ -715,12 +737,14 @@ Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPer
         ctx.managed = s->managed;
         const Status st = d.submit_immediate([](Impl&, id<MTLCommandBuffer> cb, void* p) {
             auto* c = static_cast<Ctx*>(p);
+#if TARGET_OS_OSX
             if (c->managed) [c->src didModifyRange:NSMakeRange(0, c->total)];
+#endif
             id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
             [blit copyFromBuffer:c->src
                     sourceOffset:0
                 sourceBytesPerRow:c->rowBytes
-              sourceBytesPerImage:c->total
+              sourceBytesPerImage:0
                        sourceSize:MTLSizeMake(c->w, c->h, 1)
                         toTexture:c->dst
                  destinationSlice:0
@@ -767,7 +791,9 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
         Buffer* s = d.buffers.get(staging->id);
         if (!s) return Errc::InvalidState;
         std::memcpy(s->buffer.contents, data, expected);
+#if TARGET_OS_OSX
         if (s->managed) [s->buffer didModifyRange:NSMakeRange(0, expected)];
+#endif
 
         struct Ctx { id<MTLTexture> dst; id<MTLBuffer> src; u32 mip, layer, w, h, rowBytes; usize total; }
             ctx{texture, s->buffer, mipLevel, layer, w, h, rowBytes, expected};
@@ -777,7 +803,7 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
             [blit copyFromBuffer:c->src
                     sourceOffset:0
                 sourceBytesPerRow:c->rowBytes
-              sourceBytesPerImage:c->total
+              sourceBytesPerImage:0
                        sourceSize:MTLSizeMake(c->w, c->h, 1)
                         toTexture:c->dst
                  destinationSlice:c->layer
@@ -856,8 +882,10 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
                          toBuffer:c->dst
                 destinationOffset:0
            destinationBytesPerRow:c->rowBytes
-         destinationBytesPerImage:c->total];
+         destinationBytesPerImage:0];
+#if TARGET_OS_OSX
             if (c->managed) [blit synchronizeResource:c->dst];
+#endif
             [blit endEncoding];
         }, &ctx);
         if (st.ok()) {
@@ -891,22 +919,6 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
 // `sampling.w > 0.5` (`s.rgb`) é exatamente o certo para esta amostra, e aplicar
 // a matriz ali seria convertê-la duas vezes.
 // =============================================================================
-namespace {
-
-bool is_ycbcr_format(MTLPixelFormat f) noexcept {
-    switch (f) {
-        case MTLPixelFormat420YpCbCr8BiPlanarVideoRange:
-        case MTLPixelFormat420YpCbCr8BiPlanarFullRange:
-        case MTLPixelFormat420YpCbCr10BiPlanarVideoRange:
-        case MTLPixelFormat420YpCbCr10BiPlanarFullRange:
-            return true;
-        default:
-            return false;
-    }
-}
-
-} // namespace
-
 Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& img) noexcept {
     @autoreleasepool {
         Impl& d = *impl_;
@@ -943,20 +955,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
 
         const OSType cvFormat = CVPixelBufferGetPixelFormatType(pixelBuffer);
         MTLPixelFormat pixelFormat = MTLPixelFormatInvalid;
-        const bool fullRange = img.fullRange;
         switch (cvFormat) {
-            case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
-                pixelFormat = MTLPixelFormat420YpCbCr8BiPlanarVideoRange;
-                break;
-            case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
-                pixelFormat = MTLPixelFormat420YpCbCr8BiPlanarFullRange;
-                break;
-            case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
-                pixelFormat = MTLPixelFormat420YpCbCr10BiPlanarVideoRange;
-                break;
-            case kCVPixelFormatType_420YpCbCr10BiPlanarFullRange:
-                pixelFormat = MTLPixelFormat420YpCbCr10BiPlanarFullRange;
-                break;
             case kCVPixelFormatType_32BGRA:
                 pixelFormat = MTLPixelFormatBGRA8Unorm;
                 break;
@@ -967,20 +966,10 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
                 // 3 planos (I420), 4:2:2, ARGB/ABGR: o motor lê UMA textura, e
                 // esses formatos não cabem numa textura só. Falha honesta, com o
                 // caminho apontado — em vez de amostrar o canal errado.
-                AUREA_LOG_WARN("metal: CVPixelBuffer 0x%08x nao cabe numa textura (pedir 420v/420f/x420 ou 32BGRA)",
+                AUREA_LOG_WARN("metal: CVPixelBuffer 0x%08x nao cabe numa textura (pedir 32BGRA ou usar planos YUV)",
                                static_cast<unsigned>(cvFormat));
                 return Status{Errc::UnsupportedFormat, "formato de CVPixelBuffer nao suportado"};
         }
-        // O formato do CVPixelBuffer diz a faixa REAL da memória (o decoder
-        // entregou assim); o metadado do arquivo não muda o que está gravado.
-        // Divergência vira aviso, não conversão errada.
-        const bool bufferFullRange = cvFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-                                  || cvFormat == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange;
-        if (is_ycbcr_format(pixelFormat) && bufferFullRange != fullRange) {
-            AUREA_LOG_WARN("metal: faixa do arquivo (%d) difere da do buffer (%d); vale a do buffer",
-                           fullRange ? 1 : 0, bufferFullRange ? 1 : 0);
-        }
-
         const size_t width = CVPixelBufferGetWidth(pixelBuffer);
         const size_t height = CVPixelBufferGetHeight(pixelBuffer);
         if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "buffer sem tamanho"};
@@ -1003,8 +992,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         t.format = pixelFormat;
         t.ownsTexture = false;          // a textura é do cache, não nossa
         t.external = true;
-        // A amostra sai em RGB: ou o formato YCbCr já converteu, ou o buffer já
-        // era RGB (BGRA/RGBA). O shader do motor só decodifica curva e primárias.
+        // O buffer é BGRA/RGBA. O shader decodifica curva e primárias.
         t.externalRgb = true;
         t.colorKey = colorKey;
         t.cvTexture = cvTexture;
@@ -1015,7 +1003,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         t.pixelBuffer = pixelBuffer;
         t.desc.width = static_cast<u32>(width);
         t.desc.height = static_cast<u32>(height);
-        t.desc.format = is_ycbcr_format(pixelFormat) ? SurfaceFormat::RGBA8 : from_mtl(pixelFormat);
+        t.desc.format = from_mtl(pixelFormat);
         t.desc.sampled = true;
         t.desc.renderTarget = false;
         t.desc.storage = false;

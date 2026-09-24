@@ -10,6 +10,7 @@
 #include "aurea/scene3d/Text3D.hpp"
 
 #include "aurea/text/Text.hpp"
+#include "aurea/text/FontManager.hpp"
 #include "aurea/timeline/Layer.hpp"
 
 #include <algorithm>
@@ -101,7 +102,13 @@ std::string encode_text3d(const Text3DSpec& s) {
     } else {
         out += "rg=0;";
     }
-    return out + "t=" + s.content;
+    out += "font=";
+    constexpr char hex[] = "0123456789abcdef";
+    for (unsigned char c : s.fontPath) { out += hex[c >> 4]; out += hex[c & 15]; }
+    char anim[128];
+    std::snprintf(anim, sizeof(anim), ";anim=%u/%.4f/%.4f/%.4f;", s.animation,
+        double(s.animationDuration), double(s.animationStagger), double(s.animationAmount));
+    return out + anim + "t=" + s.content;
 }
 
 bool decode_text3d(const std::string& src, Text3DSpec& out) {
@@ -117,7 +124,22 @@ bool decode_text3d(const std::string& src, Text3DSpec& out) {
         usize j = head.find(';', i);
         if (j == std::string::npos) j = head.size();
         const std::string kv = head.substr(i, j - i);
-        if (kv.rfind("d=", 0) == 0) s.depth = std::strtof(kv.c_str() + 2, nullptr);
+        if (kv.rfind("font=", 0) == 0) {
+            auto digit = [](char c) -> int { if (c >= '0' && c <= '9') return c - '0'; if (c >= 'a' && c <= 'f') return c - 'a' + 10; return -1; };
+            for (usize k = 5; k + 1 < kv.size(); k += 2) {
+                int a = digit(kv[k]), b = digit(kv[k + 1]);
+                if (a < 0 || b < 0 || (a == 0 && b == 0)) { s.fontPath.clear(); break; }
+                s.fontPath += static_cast<char>((a << 4) | b);
+            }
+        } else if (kv.rfind("anim=", 0) == 0) {
+            unsigned mode = 0; float duration = 2, stagger = .12f, amount = .3f;
+            if (std::sscanf(kv.c_str() + 5, "%u/%f/%f/%f", &mode, &duration, &stagger, &amount) == 4) {
+                s.animation = std::min(mode, 4u);
+                s.animationDuration = std::isfinite(duration) ? std::clamp(duration, .2f, 30.f) : 2.f;
+                s.animationStagger = std::isfinite(stagger) ? std::clamp(stagger, 0.f, 1.f) : .12f;
+                s.animationAmount = std::isfinite(amount) ? std::clamp(amount, 0.f, 2.f) : .3f;
+            }
+        } else if (kv.rfind("d=", 0) == 0) s.depth = std::strtof(kv.c_str() + 2, nullptr);
         else if (kv.rfind("a=", 0) == 0) s.alignment = static_cast<u32>(std::strtoul(kv.c_str() + 2, nullptr, 10));
         else if (kv.rfind("c=", 0) == 0 && kv.size() == 10) {
             const unsigned long c = std::strtoul(kv.c_str() + 2, nullptr, 16);
@@ -166,6 +188,12 @@ bool decode_text3d(const std::string& src, Text3DSpec& out) {
     s.bevelSegments = std::clamp(s.bevelSegments, 1u, 8u);
     out = std::move(s);
     return true;
+}
+
+std::shared_ptr<const text::Font> text3d_font(const Text3DSpec& spec) {
+    TextData t;
+    t.fontPath = spec.fontPath;
+    return text::FontManager::instance().font_for(t);
 }
 
 // -----------------------------------------------------------------------------
@@ -843,13 +871,13 @@ bool emit_group(TextMesh& out, const GroupInput& in, usize outer, f32 zf, f32 zb
 constexpr f32 kBevelLimit = 0.6f;
 
 /// Gera a geometria. `detail` sai preenchido quando não há malha.
-std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Text3DSpec& spec, std::string& detail) {
+std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Text3DSpec& spec, std::string& detail, i32 glyphIndex = -1) {
     TextData td;
     td.content = spec.content;
     td.size = 100.0f;                 // contorno medido a 100 px e levado a 1 = altura da fonte
     td.alignment = spec.alignment;
     std::vector<std::vector<Vec2>> raw;
-    if (!text::outline(font, td, raw)) {
+    if (!text::outline(font, td, raw, glyphIndex)) {
         detail = "texto sem letras visiveis";
         return nullptr;
     }
@@ -967,6 +995,7 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
 // porque o painel reenvia a receita a cada arrasto.
 struct GeomAsset {
     std::vector<Primitive> primitives;
+    std::vector<std::shared_ptr<const GeomAsset>> letters;
     Aabb bounds;        ///< caixa da malha (o `Engine` usa para enquadrar a layer)
     Aabb assetBounds;   ///< caixa da cena, já com o nó — é a que o asset expõe
 };
@@ -987,7 +1016,7 @@ std::string geom_key(const text::Font& font, const Text3DSpec& s) {
                   static_cast<double>(s.depth), s.bevel ? 1u : 0u, static_cast<double>(s.bevelWidth),
                   static_cast<double>(s.bevelDepth), s.bevelSegments, static_cast<double>(s.bevelRoundness),
                   s.regionMaterials ? 1u : 0u, s.content.size());
-    return std::string(buf) + "|" + s.content;
+    return std::string(buf) + (s.animation ? "|animated|" : "|static|") + s.content;
 }
 
 void append_chunk(Primitive& p, const Chunk& c) {
@@ -1000,8 +1029,8 @@ void append_chunk(Primitive& p, const Chunk& c) {
 }
 
 /// Malha + otimização: o que o cache guarda. Devolve nulo com `detail` cheio.
-std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3DSpec& spec, std::string& detail) {
-    std::shared_ptr<const TextMesh> mesh = build_text_mesh(font, spec, detail);
+std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3DSpec& spec, std::string& detail, i32 glyphIndex = -1) {
+    std::shared_ptr<const TextMesh> mesh = build_text_mesh(font, spec, detail, glyphIndex);
     if (!mesh) return nullptr;
 
     auto asset = std::make_unique<SceneAsset>();
@@ -1061,6 +1090,15 @@ std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3D
     geom->primitives = std::move(fin.asset->meshes[0].primitives);
     geom->bounds = fin.asset->meshes[0].bounds;
     geom->assetBounds = fin.asset->bounds;
+    if (spec.animation && glyphIndex < 0) {
+        TextData td; td.content = spec.content; td.size = 100; td.alignment = spec.alignment;
+        std::vector<text::ShapedGlyph> glyphs;
+        text::shaped_glyphs(font, td, glyphs);
+        for (usize i = 0; i < glyphs.size(); ++i) {
+            std::string unused;
+            if (auto letter = build_geom(font, spec, unused, static_cast<i32>(i))) geom->letters.push_back(std::move(letter));
+        }
+    }
     return geom;
 }
 
@@ -1125,6 +1163,44 @@ ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
     asset->nodes.push_back(node);
     asset->roots.push_back(0);
 
+    if (spec.animation && !geom->letters.empty()) {
+        asset->meshes.clear(); asset->nodes.clear(); asset->roots.clear();
+        Animation anim; anim.name = "Letras";
+        anim.duration = std::clamp(spec.animationDuration, .2f, 30.f);
+        for (usize i = 0; i < geom->letters.size(); ++i) {
+            const auto& letter = *geom->letters[i];
+            const Vec3 pivot = letter.bounds.center();
+            Mesh mesh; mesh.name = "Letra " + std::to_string(i + 1); mesh.primitives = letter.primitives;
+            for (auto& prim : mesh.primitives) {
+                prim.bounds = Aabb{};
+                for (auto& v : prim.positions) { v = v - pivot; prim.bounds.add(v); }
+                mesh.bounds.add(prim.bounds);
+            }
+            asset->meshes.push_back(std::move(mesh));
+            Node n; n.mesh = static_cast<i32>(i); n.translation = pivot;
+            asset->nodes.push_back(n); asset->roots.push_back(static_cast<i32>(i));
+            AnimSampler sampler;
+            sampler.components = spec.animation == 1 ? 3 : 4;
+            // Fixed keys, sampled by the existing timeline pose evaluator. No
+            // tessellation or mesh upload during playback, including scrubbing.
+            for (u32 k = 0; k <= 64; ++k) {
+                const f32 t = anim.duration * static_cast<f32>(k) / 64.f;
+                const f32 phase = 6.283185307f * (t / anim.duration - static_cast<f32>(i) * spec.animationStagger);
+                const f32 amount = std::sin(phase) * std::clamp(spec.animationAmount, 0.f, 2.f);
+                sampler.times.push_back(t);
+                if (spec.animation == 1) {
+                    sampler.values.insert(sampler.values.end(), {pivot.x, pivot.y + amount, pivot.z});
+                } else {
+                    Vec3 axis = spec.animation == 2 ? Vec3{1,0,0} : spec.animation == 3 ? Vec3{0,1,0} : Vec3{0,0,1};
+                    const Quat q = Quat::from_axis_angle(axis, amount * 6.283185307f);
+                    sampler.values.insert(sampler.values.end(), {q.x, q.y, q.z, q.w});
+                }
+            }
+            anim.channels.push_back({static_cast<i32>(i), spec.animation == 1 ? AnimPath::Translation : AnimPath::Rotation, static_cast<u32>(anim.samplers.size())});
+            anim.samplers.push_back(std::move(sampler));
+        }
+        asset->animations.push_back(std::move(anim));
+    }
     res.error = ImportError::None;
     res.asset = std::move(asset);
     return res;

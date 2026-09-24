@@ -24,6 +24,18 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     for (Entry& e : entries_) {
         if (e.layer == layer && e.asset == assetId) {
             e.lastUsedFrame = frameNumber;
+            if (e.opening && e.opening->ready.load(std::memory_order_acquire)) {
+                auto backend = std::move(e.opening->decoder);
+                e.opening.reset();
+                if (!backend) e.failed = true;
+                else {
+                    e.source = std::make_unique<VideoSource>(std::move(backend), MediaPriority::Preview);
+                    e.source->cache().attach(memory_);
+                    e.source->set_ready_callback(readyFn_, readyCtx_);
+                    e.source->start();
+                    if (suspended_) e.source->suspend();
+                }
+            }
             return e.failed ? nullptr : e.source.get();
         }
     }
@@ -33,32 +45,27 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     e.layer = layer;
     e.asset = assetId;
     e.lastUsedFrame = frameNumber;
-    std::unique_ptr<VideoDecoderBackend> backend = factory_->open_video(asset, MediaPriority::Preview);
-    if (!backend) {
-        // Guarda a falha: sem isso, o motor tentaria abrir o arquivo de novo a
-        // cada frame, e cada tentativa custa uma sondagem do container.
-        AUREA_LOG_ERROR("nao foi possivel abrir o video '%s'", asset.name.c_str());
-        e.failed = true;
-        entries_.push_back(std::move(e));
-        return nullptr;
-    }
-    e.source = std::make_unique<VideoSource>(std::move(backend), MediaPriority::Preview);
-    e.source->cache().attach(memory_);
-    e.source->set_ready_callback(readyFn_, readyCtx_);
-    e.source->start();
-    if (suspended_) e.source->suspend();
-    VideoSource* raw = e.source.get();
+    e.opening = std::make_unique<Opening>();
+    auto* pending = e.opening.get();
+    auto* factory = factory_;
+    auto ready = readyFn_;
+    auto* context = readyCtx_;
+    pending->worker = std::thread([pending, factory, asset, ready, context] {
+        pending->decoder = factory->open_video(asset, MediaPriority::Preview);
+        pending->ready.store(true, std::memory_order_release);
+        if (ready) ready(context);
+    });
     entries_.push_back(std::move(e));
-    return raw;
+    return nullptr;
 }
 
 void MediaManager::collect(u64 frameNumber, u32 idleFrames) {
-    std::vector<std::unique_ptr<VideoSource>> closing;
+    std::vector<Entry> closing;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (usize i = 0; i < entries_.size();) {
             if (frameNumber > entries_[i].lastUsedFrame + idleFrames) {
-                closing.push_back(std::move(entries_[i].source));
+                closing.push_back(std::move(entries_[i]));
                 entries_[i] = std::move(entries_.back());
                 entries_.pop_back();
                 continue;
@@ -72,12 +79,12 @@ void MediaManager::collect(u64 frameNumber, u32 idleFrames) {
 }
 
 void MediaManager::close_layer(LayerId layer) {
-    std::vector<std::unique_ptr<VideoSource>> closing;
+    std::vector<Entry> closing;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (usize i = 0; i < entries_.size();) {
             if (entries_[i].layer == layer) {
-                closing.push_back(std::move(entries_[i].source));
+                closing.push_back(std::move(entries_[i]));
                 entries_[i] = std::move(entries_.back());
                 entries_.pop_back();
                 continue;

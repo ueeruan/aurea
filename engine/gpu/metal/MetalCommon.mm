@@ -10,6 +10,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <new>
 
 namespace aurea::mtl {
@@ -26,10 +27,63 @@ Status check_ns(NSError* err, const char* what) noexcept {
     if (code == (NSInteger)MTLCommandBufferErrorOutOfMemory) {
         return Status{Errc::OutOfDeviceMemory, what};
     }
+#if TARGET_OS_OSX
     if (code == (NSInteger)MTLCommandBufferErrorDeviceRemoved) {
         return Status{Errc::DeviceLost, what};
     }
+#endif
     return Status{Errc::InvalidState, what};
+}
+
+dispatch_semaphore_t command_buffer_completion(id<MTLCommandBuffer> buffer) noexcept {
+    if (!buffer) return nil;
+    dispatch_semaphore_t completion = dispatch_semaphore_create(0);
+    if (!completion) return nil;
+    // O command buffer retém seus recursos até terminar, mesmo se quem o
+    // submeteu atingir o timeout. O handler só retém o semáforo por valor.
+    [buffer addCompletedHandler:^(id<MTLCommandBuffer> finished) {
+        if (finished.status == MTLCommandBufferStatusError) {
+            NSError* error = finished.error;
+            AUREA_LOG_ERROR("metal: CB '%s' terminou status=%ld, GPU=%s, domain=%s code=%ld: %s",
+                            finished.label.UTF8String ?: "", static_cast<long>(finished.status),
+                            finished.commandQueue.device.name.UTF8String ?: "",
+                            error.domain.UTF8String ?: "", static_cast<long>(error.code),
+                            error.localizedDescription.UTF8String ?: "erro Metal sem descricao");
+        }
+        dispatch_semaphore_signal(completion);
+    }];
+    return completion;
+}
+
+Status wait_command_buffer(id<MTLCommandBuffer> buffer, dispatch_semaphore_t completion,
+                           u64 timeoutNs, const char* what) noexcept {
+    if (!buffer || !completion) return Status{Errc::InvalidState, "sem fence de command buffer"};
+    MTLCommandBufferStatus state = buffer.status;
+    if (state != MTLCommandBufferStatusCompleted && state != MTLCommandBufferStatusError) {
+        const dispatch_time_t deadline = timeoutNs == std::numeric_limits<u64>::max()
+            ? DISPATCH_TIME_FOREVER
+            : dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(
+                std::min<u64>(timeoutNs, static_cast<u64>(std::numeric_limits<int64_t>::max()))));
+        if (dispatch_semaphore_wait(completion, deadline) == 0) {
+            // Fence observável por mais de um waiter, inclusive wait_frame no
+            // export e reciclagem no render; a conclusão não pode ser consumida.
+            dispatch_semaphore_signal(completion);
+        }
+        state = buffer.status;
+    }
+    if (state == MTLCommandBufferStatusError) {
+        if (buffer.error) return check_ns(buffer.error, what);
+        AUREA_LOG_ERROR("metal: %s: command buffer falhou sem NSError", what);
+        return Status{Errc::InvalidState, what};
+    }
+    if (state != MTLCommandBufferStatusCompleted) {
+        AUREA_LOG_ERROR("metal: %s: timeout, CB '%s' status=%ld, GPU=%s, erro=%s", what,
+                        buffer.label.UTF8String ?: "", static_cast<long>(state),
+                        buffer.commandQueue.device.name.UTF8String ?: "",
+                        buffer.error.localizedDescription.UTF8String ?: "nenhum");
+        return Status{Errc::Timeout, what};
+    }
+    return OkStatus;
 }
 
 // =============================================================================
@@ -54,10 +108,14 @@ MTLPixelFormat to_mtl(SurfaceFormat f) noexcept {
         case SurfaceFormat::Depth24:  return MTLPixelFormatDepth32Float;
         case SurfaceFormat::Depth32F: return MTLPixelFormatDepth32Float;
         case SurfaceFormat::RGBA8_sRGB: return MTLPixelFormatRGBA8Unorm_sRGB;
-        case SurfaceFormat::BC7:        return MTLPixelFormatBC7_RGBAUnorm;
-        case SurfaceFormat::BC7_sRGB:   return MTLPixelFormatBC7_RGBAUnorm_sRGB;
-        case SurfaceFormat::ETC2_RGBA8: return MTLPixelFormatETC2_RGBA8Unorm;
-        case SurfaceFormat::ETC2_RGBA8_sRGB: return MTLPixelFormatETC2_RGBA8Unorm_sRGB;
+        case SurfaceFormat::BC7:
+            if (@available(iOS 16.4, *)) return MTLPixelFormatBC7_RGBAUnorm;
+            return MTLPixelFormatInvalid;
+        case SurfaceFormat::BC7_sRGB:
+            if (@available(iOS 16.4, *)) return MTLPixelFormatBC7_RGBAUnorm_sRGB;
+            return MTLPixelFormatInvalid;
+        case SurfaceFormat::ETC2_RGBA8: return MTLPixelFormatEAC_RGBA8;
+        case SurfaceFormat::ETC2_RGBA8_sRGB: return MTLPixelFormatEAC_RGBA8_sRGB;
         case SurfaceFormat::ASTC4x4:    return MTLPixelFormatASTC_4x4_LDR;
         case SurfaceFormat::ASTC4x4_sRGB: return MTLPixelFormatASTC_4x4_sRGB;
     }
@@ -75,7 +133,7 @@ SurfaceFormat from_mtl(MTLPixelFormat f) noexcept {
 bool is_compressed_format(MTLPixelFormat f) noexcept {
     switch (f) {
         case MTLPixelFormatBC7_RGBAUnorm: case MTLPixelFormatBC7_RGBAUnorm_sRGB:
-        case MTLPixelFormatETC2_RGBA8Unorm: case MTLPixelFormatETC2_RGBA8Unorm_sRGB:
+        case MTLPixelFormatEAC_RGBA8: case MTLPixelFormatEAC_RGBA8_sRGB:
         case MTLPixelFormatASTC_4x4_LDR: case MTLPixelFormatASTC_4x4_sRGB:
             return true;
         default:
@@ -204,7 +262,7 @@ void HostRing::reset() noexcept {
     used_ = 0;
 }
 
-bool HostRing::allocate(usize size, usize align, id<MTLBuffer>& outBuffer, u32& outOffset,
+bool HostRing::allocate(usize size, usize align, id<MTLBuffer> __strong& outBuffer, u32& outOffset,
                         void*& outPtr) noexcept {
     if (chunks_.empty()) return false;
     Chunk* c = &chunks_.back();

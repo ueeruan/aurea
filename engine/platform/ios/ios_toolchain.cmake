@@ -45,7 +45,7 @@ endif()
 # a navegação da Home usa `NavigationStack`, também 16. O backend Metal sozinho
 # caberia em 14 (MTLBinaryArchive); a UI não. Documentado no README.
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "16.0" CACHE STRING "Piso de iOS do Aurea")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "16.3" CACHE STRING "Piso de iOS do Aurea")
 endif()
 
 # Só bibliotecas do SDK: nada do host vaza para dentro do app.

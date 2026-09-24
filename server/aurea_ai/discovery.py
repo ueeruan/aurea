@@ -119,10 +119,19 @@ class Batedor:
         self.ultimo_erro: str = ""
         self.batidas = 0
 
+    def documento(self, online: bool) -> DiscoveryDoc:
+        """O que vai para o repositorio — o app le exatamente isto."""
+        return DiscoveryDoc(
+            endpoint=self.endpoint, online=online, gpu=self.gpu,
+            capabilities=self.capacidades, updatedAt=int(time.time()),
+            appToken=self.cfg.app_token)
+
     def iniciar(self) -> None:
         if not self.publicador.configurado():
             log.warning("discovery nao configurado: o app nao vai encontrar este servidor sozinho")
             return
+        if not self.cfg.app_token:
+            log.warning("AUREA_SERVER_TOKENS vazio: o app vai achar o servidor e nao vai conseguir autenticar")
         self._tarefa = asyncio.create_task(self._laco(), name="heartbeat")
 
     async def parar(self) -> None:
@@ -138,9 +147,7 @@ class Batedor:
         if not self.publicador.configurado():
             return
         try:
-            await self.publicador.publicar(DiscoveryDoc(
-                endpoint=self.endpoint, online=False, gpu=self.gpu,
-                capabilities=self.capacidades, updatedAt=int(time.time())))
+            await self.publicador.publicar(self.documento(online=False))
         except Exception as e:  # noqa: BLE001
             log.warning("nao consegui marcar offline: %s", e)
 
@@ -148,9 +155,7 @@ class Batedor:
         intervalo = max(10, self.cfg.heartbeat_seconds)
         while not self._parar:
             try:
-                await self.publicador.publicar(DiscoveryDoc(
-                    endpoint=self.endpoint, online=True, gpu=self.gpu,
-                    capabilities=self.capacidades, updatedAt=int(time.time())))
+                await self.publicador.publicar(self.documento(online=True))
                 self.batidas += 1
                 self.ultimo_erro = ""
                 log.info("discovery publicado (%d): %s", self.batidas, self.endpoint)

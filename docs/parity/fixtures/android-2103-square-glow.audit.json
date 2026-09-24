@@ -1,0 +1,31 @@
+{
+  "sha256": "d036e049b90a340b0d3ab3a3a6d3b64968865b66fa4f6e58a1ad345124ef0393",
+  "bytes": 1802,
+  "source": "android-2103-square-glow.aurea",
+  "description": "",
+  "author": "",
+  "compositions": 1,
+  "durationFrames": 300,
+  "fps": 30.0,
+  "height": 1080,
+  "layerKind": "Shape",
+  "layers": 1,
+  "mediaAssets": 0,
+  "origin": "Synthetic Project 1 created by Codex in the approved Android APK for parity capture",
+  "printableFields": [
+    "UREA",
+    "2.0.0",
+    "Project 1",
+    "Composicao principal",
+    "Quadrado",
+    "Texto",
+    "zD333@",
+    "Y?ff",
+    "333?",
+    "?333?",
+    "fff?",
+    "333@"
+  ],
+  "title": "Project 1",
+  "width": 1920
+}

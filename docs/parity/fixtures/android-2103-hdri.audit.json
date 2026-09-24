@@ -1,0 +1,46 @@
+{
+  "sha256": "5308691bb27a838eeb1d0507ef67b5225b89882caf46bfc4a00f9ecf1e32d60f",
+  "bytes": 3386,
+  "source": "android-2103-hdri.aurea",
+  "description": "",
+  "assetKinds": [
+    "procedural Text3D",
+    "Environment"
+  ],
+  "assets": 2,
+  "author": "",
+  "companionFixture": "synthetic-red-environment.hdr",
+  "companionSHA256": "c77edd5121b2eb0f814b9a8766d9c3b626ef1b3972f7224fc4f1ffc282cba308",
+  "displayTitle": "Parity HDRI",
+  "environmentStoredPath": "/data/user/0/com.aurea.aurea/files/modelos/a1e4ccc9f99ab1353dbe939065eb18a5028ac661.hdr",
+  "externalMediaAssets": 1,
+  "externalMediaProvenance": "Purely synthetic HDR generated from existing test mathematics; byte-identical after Android import",
+  "limitations": [
+    "Native iOS opening not yet verified",
+    "This existing Aurea format references external media; the HDR file must accompany the project."
+  ],
+  "origin": "Created through APK2103 UI: duplicate synthetic Parity Complex, rename displayed project to Parity HDRI, use environment image, pick generated HDR, return Home to save. Android stores UI rename in sidecar; original core title remains Parity Complex. Original Android bytes unchanged.",
+  "requiredCompanionRelativePath": "modelos/a1e4ccc9f99ab1353dbe939065eb18a5028ac661.hdr",
+  "screenshots": {
+    "29-hdri-project-before.png": "14aea740edc31d873f825da5c11d5edd43ca0b4eea68a5bdfc8bc6d9606a1ddc",
+    "30-hdri-imported.png": "9c0d92da99084b339774c102bc16254a0074931d8ef95d8062bed378bde3dee0"
+  },
+  "sections": {
+    "1": {
+      "revision": 1,
+      "bytes": 154,
+      "crc32": "c7b31ef0"
+    },
+    "2": {
+      "revision": 22,
+      "bytes": 2380,
+      "crc32": "158171bd"
+    },
+    "4": {
+      "revision": 1,
+      "bytes": 668,
+      "crc32": "908fc896"
+    }
+  },
+  "title": "Parity Complex"
+}

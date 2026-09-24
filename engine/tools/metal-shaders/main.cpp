@@ -19,6 +19,11 @@ int main(int argc, char** argv) {
         const char* entry = stage == spv::ExecutionModelVertex ? "vs_main"
                           : stage == spv::ExecutionModelFragment ? "fs_main" : "cs_main";
         compiler.rename_entry_point("main", entry, stage);
+        auto common = compiler.get_common_options();
+        // The engine's projection and full-screen triangle use Vulkan NDC:
+        // y=-1 is the top edge. Metal's viewport places y=+1 at the top.
+        common.vertex.flip_vert_y = true;
+        compiler.set_common_options(common);
         spirv_cross::CompilerMSL::Options options;
         options.platform = spirv_cross::CompilerMSL::Options::iOS;
         options.set_msl_version(2, 1);

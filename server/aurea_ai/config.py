@@ -45,6 +45,12 @@ class Config:
     discovery_token: str = field(default_factory=lambda: os.environ.get("AUREA_DISCOVERY_TOKEN", ""))
 
     # --- discovery ---
+    # Token de cliente que vai no documento de discovery. O app le de la e
+    # autentica sozinho: ninguem digita token nenhum no aparelho.
+    @property
+    def app_token(self) -> str:
+        return self.server_tokens[0] if self.server_tokens else ""
+
     discovery_repo: str = field(default_factory=lambda: os.environ.get("AUREA_DISCOVERY_REPO", ""))
     discovery_branch: str = field(default_factory=lambda: os.environ.get("AUREA_DISCOVERY_BRANCH", "main"))
     discovery_path: str = "discovery/aurea-h3.json"

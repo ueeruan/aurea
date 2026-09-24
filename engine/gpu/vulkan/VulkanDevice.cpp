@@ -142,11 +142,10 @@ void Backend::shutdown() noexcept {
 Status Backend::create_instance(bool validation) noexcept {
     u32 version = VK_API_VERSION_1_0;
     if (vkEnumerateInstanceVersion) vkEnumerateInstanceVersion(&version);
-    if (version < VK_API_VERSION_1_1) {
-        // YCbCr (zero-copy de vídeo), memória externa e maintenance1 são do
-        // 1.1. Sem eles o pipeline de vídeo do Aurea não existe.
-        return Status{Errc::UnsupportedFeature, "Vulkan 1.1 necessario"};
-    }
+    // Vulkan 1.0 continua renderizando e decodificando via planos YUV.
+    // Zero-copy é uma capacidade opcional, não um requisito para abrir o app.
+    instanceApiVersion_ = config_.conservativeVulkan ? VK_API_VERSION_1_0
+        : std::min(version, u32{VK_API_VERSION_1_1});
 
     u32 count = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
@@ -189,7 +188,7 @@ Status Backend::create_instance(bool validation) noexcept {
     app.applicationVersion = VK_MAKE_VERSION(2, 0, 0);
     app.pEngineName = "Aurea Engine";
     app.engineVersion = VK_MAKE_VERSION(2, 0, 0);
-    app.apiVersion = VK_API_VERSION_1_1;
+    app.apiVersion = instanceApiVersion_;
 
     VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     info.pApplicationInfo = &app;
@@ -222,12 +221,12 @@ Status Backend::pick_device() noexcept {
     vkEnumeratePhysicalDevices(instance_, &count, devices.data());
 
     // Preferência: discreta > integrada > outras, sempre com fila gráfica+compute
-    // e Vulkan 1.1. No celular só há uma; no host de testes, pega a dedicada.
+    // e Vulkan 1.0+. No celular só há uma; no host de testes, pega a dedicada.
     i32 bestScore = -1;
     for (VkPhysicalDevice d : devices) {
         VkPhysicalDeviceProperties p{};
         vkGetPhysicalDeviceProperties(d, &p);
-        if (p.apiVersion < VK_API_VERSION_1_1) continue;
+        if (p.apiVersion < VK_API_VERSION_1_0) continue;
         u32 qc = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(d, &qc, nullptr);
         std::vector<VkQueueFamilyProperties> qs(qc);
@@ -248,10 +247,10 @@ Status Backend::pick_device() noexcept {
             bestScore = score;
             physical_ = d;
             graphicsFamily_ = family;
-            apiVersion_ = p.apiVersion;
+            apiVersion_ = std::min(p.apiVersion, instanceApiVersion_);
         }
     }
-    if (!physical_) return Status{Errc::NotSupported, "nenhuma GPU com Vulkan 1.1 e fila grafica"};
+    if (!physical_) return Status{Errc::NotSupported, "nenhuma GPU Vulkan com fila grafica e compute"};
     return OkStatus;
 }
 
@@ -269,7 +268,9 @@ Status Backend::create_device() noexcept {
     // Zero-copy: o AHardwareBuffer do MediaCodec vira VkImage. Precisa das
     // duas extensões — memória externa de AHB e posse vinda de fila
     // estrangeira (o decoder não é uma fila Vulkan).
-    if (has_extension(exts, VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME)) {
+    if (apiVersion_ >= VK_API_VERSION_1_1 &&
+        has_extension(exts, VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME) &&
+        has_extension(exts, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME)) {
         enabled.push_back(VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME);
         hasAhb_ = true;
         if (has_extension(exts, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME)) {
@@ -281,8 +282,12 @@ Status Backend::create_device() noexcept {
 
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES};
     VkPhysicalDeviceFeatures2 features2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    features2.pNext = &ycbcr;
-    vkGetPhysicalDeviceFeatures2(physical_, &features2);
+    if (apiVersion_ >= VK_API_VERSION_1_1 && vkGetPhysicalDeviceFeatures2) {
+        features2.pNext = &ycbcr;
+        vkGetPhysicalDeviceFeatures2(physical_, &features2);
+    } else {
+        vkGetPhysicalDeviceFeatures(physical_, &features2.features);
+    }
     hasYcbcr_ = ycbcr.samplerYcbcrConversion == VK_TRUE;
 
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrEnable{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES};
@@ -305,12 +310,30 @@ Status Backend::create_device() noexcept {
     q.pQueuePriorities = &priority;
 
     VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-    info.pNext = &enable;
+    info.pNext = apiVersion_ >= VK_API_VERSION_1_1 ? &enable : nullptr;
+    info.pEnabledFeatures = info.pNext ? nullptr : &enable.features;
     info.queueCreateInfoCount = 1;
     info.pQueueCreateInfos = &q;
     info.enabledExtensionCount = static_cast<u32>(enabled.size());
     info.ppEnabledExtensionNames = enabled.data();
-    if (const Status s = check(vkCreateDevice(physical_, &info, nullptr, &device_), "vkCreateDevice"); !s.ok()) return s;
+    VkResult created = vkCreateDevice(physical_, &info, nullptr, &device_);
+    if (created != VK_SUCCESS && (hasAhb_ || hasYcbcr_)) {
+        // Some mobile drivers advertise external video features but reject
+        // device creation with them. Keep Vulkan and use the YUV upload path.
+        AUREA_LOG_WARN("Vulkan: tentando dispositivo sem extensoes de video");
+        enabled.erase(std::remove_if(enabled.begin(), enabled.end(), [](const char* e) {
+            return std::strcmp(e, "VK_ANDROID_external_memory_android_hardware_buffer") == 0
+                || std::strcmp(e, "VK_EXT_queue_family_foreign") == 0;
+        }), enabled.end());
+        hasAhb_ = hasForeignQueue_ = hasYcbcr_ = false;
+        info.pNext = nullptr;
+        info.pEnabledFeatures = &enable.features;
+        info.enabledExtensionCount = static_cast<u32>(enabled.size());
+        info.ppEnabledExtensionNames = enabled.data();
+        device_ = VK_NULL_HANDLE;
+        created = vkCreateDevice(physical_, &info, nullptr, &device_);
+    }
+    if (const Status s = check(created, "vkCreateDevice"); !s.ok()) return s;
     load_device(device_);
     vkGetDeviceQueue(device_, graphicsFamily_, 0, &queue_);
 
@@ -325,12 +348,13 @@ void Backend::fill_capabilities() noexcept {
     VkPhysicalDeviceFeatures f{};
     vkGetPhysicalDeviceFeatures(physical_, &f);
 
-    VkPhysicalDeviceShaderFloat16Int8Features f16{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
     VkPhysicalDevice16BitStorageFeatures s16{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
-    f16.pNext = &s16;
     VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    f2.pNext = &f16;
-    vkGetPhysicalDeviceFeatures2(physical_, &f2);
+    // Do not chain Vulkan 1.2 feature structs into a 1.0/1.1 driver.
+    if (apiVersion_ >= VK_API_VERSION_1_1 && vkGetPhysicalDeviceFeatures2) {
+        f2.pNext = &s16;
+        vkGetPhysicalDeviceFeatures2(physical_, &f2);
+    }
 
     caps_.apiName = "Vulkan";
     caps_.apiMajor = VK_VERSION_MAJOR(p.apiVersion);
@@ -349,7 +373,7 @@ void Backend::fill_capabilities() noexcept {
         case VK_PHYSICAL_DEVICE_TYPE_CPU:            caps_.deviceType = GpuDeviceType::Cpu; break;
         default: break;
     }
-    caps_.fp16Arithmetic = f16.shaderFloat16 == VK_TRUE;
+    caps_.fp16Arithmetic = false; // shaderFloat16 não foi habilitado no dispositivo
     caps_.int16Arithmetic = f.shaderInt16 == VK_TRUE;
     caps_.fp16Storage = s16.storageBuffer16BitAccess == VK_TRUE;
 

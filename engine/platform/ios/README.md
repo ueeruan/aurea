@@ -49,30 +49,33 @@ e por isso o app compila sem o passo manual.
 **Simulador:** `-DAUREA_IOS_SIMULATOR=ON` (o script do Xcode já passa quando o
 destino é o simulador).
 
-## O que falta para compilar hoje
+## Shaders e compilação contínua
 
-1. **Os shaders MSL.** O backend Metal (`engine/gpu/metal/`) consome um blob
-   **MSL** (`msl_glue.md`: cabeçalho `AUREAMSL` de 32 bytes + texto ou
-   `.metallib`), e não SPIR-V. O motor embute SPIR-V hoje, então falta a
-   tradução no build — que vive em `engine/cmake/AureaShaders.cmake` (fora deste
-   diretório: o iOS consome o motor, não o altera). O ponto de extensão daqui é
-   `-DAUREA_METAL_SHADERS=ON` + `-DAUREA_SPIRV_CROSS=<binário>` +
-   `-DAUREA_METAL_SHADER_SCRIPT=<script cmake>`: o script recebe
-   `AUREA_METAL_SPV_DIR` (os `.spv` já gerados), `AUREA_METAL_OUT_DIR` e o
-   binário, e o formato do blob que ele precisa produzir está no `msl_glue.md`.
-   Sem esse passo o app sobe, o preview não abre pipeline — e o log diz por quê.
-2. **Assinatura (signing)** — `CODE_SIGN_IDENTITY` e o time estão VAZIOS de
-   propósito: quem assina é o dono, com a conta dele, no Xcode
-   (Targets › Aurea › Signing & Capabilities). O `Aurea.entitlements` também
-   está vazio: o app não usa nenhuma capability.
-3. **`glslc`** no PATH/`-DAUREA_GLSLC` (ver acima) — o motor compila GLSL →
-   SPIR-V no build. O `spirv-cross` entra no item 1.
-4. **Uma linha no `engine/CMakeLists.txt`**, se o integrador quiser o backend
-   Metal no build do motor: `add_subdirectory(gpu/metal)` (é o que o contrato do
-   backend pede). Este CMakeLists se vira sem ela — ele adiciona o diretório se
-   o alvo `aurea_metal` ainda não existir, e não cria de novo se já existir.
-5. Nada além disso. Não há dependência de terceiro para instalar: o único
-   "pacote" que o núcleo usa está em `engine/third_party/` (já no repositório).
+O workflow `.github/workflows/build-ipa.yml` compila no macOS com Xcode e
+empacota `aurea-beta2-unsigned.ipa` como artefato `aurea-ipa`. É o mesmo fluxo
+sem assinatura do projeto antigo: o instalador de sideload assina o IPA.
+O workflow não publica no TestFlight.
+
+Os shaders são compilados por `glslc` e traduzidos para Metal pela ferramenta
+`engine/tools/metal-shaders`, com SPIRV-Cross fixado em um commit. Ela preserva
+os bindings do motor, push constants no buffer 30 e os tamanhos dos grupos de
+compute no cabeçalho AUREAMSL. O CMake embute esses blobs no lugar do SPIR-V.
+
+Para compilar localmente num Mac:
+
+```bash
+brew install cmake ninja shaderc ccache
+cmake -S engine/tools/metal-shaders -B build/metal-tools -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/metal-tools --parallel 3
+export AUREA_METAL_COMPILER="$PWD/build/metal-tools/aurea-metal-compiler"
+xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
+  -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+  -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO build
+```
+
+A biblioteca `aurea_ios` compila a ponte ObjC++ pelo CMake; o target do Xcode
+compila somente as telas Swift. Não compilar a ponte duas vezes. A assinatura
+para distribuição oficial exige configurar a conta Apple no Xcode.
 
 ## O que foi ligado ao núcleo (nenhum caminho paralelo)
 
@@ -92,13 +95,11 @@ destino é o simulador).
 vazio (IOSurface sem propriedades) e vai para `import_external_image` como
 `ExternalImageDesc::nativeHandle`. Nenhum plano passa pela CPU.
 
-**BGRA e não NV12, no conteúdo de 8 bits:** o backend amostra
-`MTLPixelFormat420YpCbCr8BiPlanar*`, mas a conversão embutida nesse formato usa
-sempre a matriz BT.601 — vídeo BT.709 (o padrão de celular) sairia com a cor
-deslocada. Pedindo `kCVPixelFormatType_32BGRA`, quem converte é o VideoToolbox,
-com a matriz DO ARQUIVO, e o backend importa BGRA direto (`MetalResources.mm`).
-Continua zero-copy e a cor fica exata. O 10 bits (PQ/HLG) segue em YCbCr
-biplanar `x420`, para não jogar fora a profundidade.
+**Vídeo de 8 bits:** o VideoToolbox entrega BGRA; o backend importa esse buffer
+como textura Metal sem cópia. **10 bits (PQ/HLG):** o buffer P010 é bloqueado
+para leitura durante a vida do frame e seus dois planos passam pelos shaders
+YUV do motor. Metal público não oferece um formato único de textura NV12/P010
+com conversão implícita; não usamos identificadores inexistentes de formato.
 
 **Áudio:** não há mixer novo. O `AudioEngine` do núcleo (o mesmo que o export
 usa) produz os quadros e o `AVAudioSourceNode` só os entrega ao hardware.
@@ -107,7 +108,7 @@ usa) produz os quadros e o `AVAudioSourceNode` só os entrega ao hardware.
 
 `com.aurea.aurea` — o MESMO `applicationId` de `android/app/build.gradle.kts`,
 conferido automaticamente por `verify/check_scope.py`. `CFBundleDisplayName` =
-Aurea; `CFBundleVersion` = 2102 (o `versionCode` do Android).
+Aurea; `CFBundleVersion` = 2105 (revisão iOS do porte do editor atual).
 
 **Permissões:** nenhuma. O Android não pede `CAMERA` nem `RECORD_AUDIO` (não há
 captura no editor) e a mídia entra pelo seletor do sistema, que no iOS não pede
@@ -115,26 +116,31 @@ permissão — por isso NÃO há `NSMicrophoneUsageDescription` nem
 `NSPhotoLibraryUsageDescription`. Declarar permissão sem uso é promessa falsa
 (o mesmo critério que tirou as permissões do manifest).
 
-## Piso de iOS: 16.0
+## Piso de iOS: 16.3
+
+A biblioteca C++ do sistema disponibiliza `std::to_chars` de ponto flutuante a partir do iOS 16.3.
 
 O backend Metal caberia em 14 (`MTLBinaryArchive` é iOS 14). A UI não: as folhas
 contextuais do editor usam `presentationDetents` e a navegação usa
 `NavigationStack`, ambos iOS 16. Trocar o piso custaria reescrever os painéis.
 
-## O que ainda NÃO tem tela no iOS
+## Estado do porte do editor atual
 
-A ponte já expõe as operações (elas existem no motor e estão na `AureaEngine.h`),
-mas as telas abaixo ainda não foram escritas em SwiftUI. A prioridade desta
-entrega foi Home, editor, preview, timeline, transporte, efeitos, transform,
-3D e export:
+A interface usa a organização e as operações do Android desta árvore:
+Home/projetos, dock/FAB, timeline com miniaturas e waveform, transformações,
+efeitos, aparência, velocidade/áudio, formas, texto e animadores, texto em
+caminho, 3D e HDRI por objeto, máscaras e rastreamento, vetores/desenho livre,
+partículas, legendas, presets, curvas/expressões e exportação.
 
-texto (conteúdo/fonte/estilo/animadores), máscaras e track matte, legendas,
-Aurea Particular (painel), presets, expressões, vetorial/forma (edição de
-pontos), rastreio de ponto e de máscara, câmera 3D, velocidade/áudio por
-camada, marcas e batidas, curvas e o painel DEV de performance.
+Os controles chamam o motor C++ compartilhado; os arquivos continuam sendo
+`.aurea`. A importação faz cópia/decodificação fora da thread principal.
+Legendas Groq exigem chave própria e envio explícito pelo botão de gerar;
+as transcrições ficam em cache local, e a chave no Keychain do aparelho.
 
-Cada uma é uma tela SwiftUI que chama os métodos que já estão na ponte — nenhum
-trabalho de C++ é necessário para elas.
+O registro de compilação, testes e limitações está em
+[`docs/ios-parity.md`](../../../docs/ios-parity.md). Xcode aprovado não comprova
+paridade completa nem funcionamento de todas as operações no aparelho.
+Os diálogos e seletores nativos do iOS mantêm diferenças de apresentação.
 
 ## Idiomas
 
@@ -148,15 +154,6 @@ pode ser trocado em Ajustes.
 Os textos do painel "Este aparelho" (números do `DeviceReport`) são literais em
 português — igual ao Android, que os monta em `DeviceReport.kt` fora do catálogo.
 
-## Shaders MSL
-
-Ver o item 1 de "O que falta". O contrato do blob que o backend consome está em
-`engine/gpu/metal/msl_glue.md` (magic `AUREAMSL`, versão, `threadgroup` para
-compute, entradas `vs_main`/`fs_main`/`cs_main` e os índices de recurso que o
-SPIRV-Cross precisa fixar). Ligar `AUREA_METAL_SHADERS` sem o script ou sem o
-`spirv-cross` falha no CONFIGURE, com a mensagem dizendo o que falta — nunca um
-build pela metade.
-
 ## Auditorias (rodam no Windows, não precisam de Mac)
 
 ```bash
@@ -166,7 +163,6 @@ python engine/platform/ios/verify/check_api_swift.py  # model.* / engine.* / cha
 python engine/platform/ios/verify/check_scope.py      # imports, escopo, bundle id
 ```
 
-Resultado desta entrega: **298/298 símbolos**, **19/19 arquivos referenciados no
-pbxproj**, **0 problemas** nas quatro. As auditorias foram validadas ao
-contrário: injetar um método inventado ou um arquivo inexistente faz cada uma
-delas falhar.
+As auditorias de símbolos, Swift/ponte, referências do Xcode e escopo devem
+ser executadas com a árvore atual. O registro de resultados está em
+`docs/ios-parity.md`.

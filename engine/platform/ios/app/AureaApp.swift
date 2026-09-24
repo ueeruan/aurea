@@ -17,8 +17,14 @@ struct AureaApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
+                .environment(\.layoutDirection, model.language.resolved == .ar ? .rightToLeft : .leftToRight)
                 .preferredColorScheme(.dark)   // o Aurea é escuro em todas as telas
-                .onAppear { model.start() }
+                .onAppear {
+                    model.start()
+#if DEBUG
+                    model.prepareParityCapture()
+#endif
+                }
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active { AureaAds.start() }   // anúncios: uma vez (o manager ignora as repetidas)

@@ -125,8 +125,9 @@ struct Gpu {
     bool ok = false;
     std::unordered_map<u64, TextureHandle> targets;
 
-    Gpu() {
+    explicit Gpu(bool conservative = false) {
         BackendConfig cfg;
+        cfg.conservativeVulkan = conservative;
         cfg.enableValidation = true;   // com a camada instalada, erros de uso aparecem no log
         cfg.framesInFlight = 2;
         if (!backend.initialize(cfg).ok()) return;
@@ -370,6 +371,33 @@ void check_golden(const char* name, const FloatImage& img) {
 // =============================================================================
 // Backend
 // =============================================================================
+AUREA_TEST(Gpu, Vulkan10CompatibilityRendersPixels) {
+    Gpu legacy(true);
+    AUREA_CHECK(legacy.ok);
+    if (!legacy.ok) return;
+    AUREA_CHECK(!legacy.backend.capabilities().zero_copy_video());
+    auto project = Project::create_new(32, 32, 30, "compatibility");
+    AUREA_CHECK(project.ok());
+    if (!project.ok()) return;
+    auto* comp = project->timeline().composition(project->timeline().root());
+    comp->set_background(Color{1, 0, 0, 1});
+    RenderSettings rs;
+    rs.dither = false;
+    FrameSnapshot snap;
+    legacy.renderer.prepare(*comp, *project, FrameIndex{0}, nullptr, nullptr, nullptr,
+                            rs, 1, 0, DecodeMode::Still, 1, snap);
+    OffscreenTarget target{legacy.target(32, 32), 32, 32};
+    FrameStats stats;
+    RenderTimings timings;
+    AUREA_CHECK(legacy.renderer.render(snap, rs, &target, stats, timings).ok());
+    legacy.backend.wait_idle();
+    std::vector<u16> pixels(32 * 32 * 4);
+    AUREA_CHECK(legacy.backend.read_texture(target.texture, pixels.data(), 32 * 8).ok());
+    AUREA_CHECK(std::abs(half_to_float(pixels[0]) - 1.0f) < 0.005f);
+    AUREA_CHECK(std::abs(half_to_float(pixels[1])) < 0.005f);
+    AUREA_CHECK(std::abs(half_to_float(pixels[3]) - 1.0f) < 0.005f);
+}
+
 AUREA_TEST(Gpu, BackendReportsRealCapabilities) {
     AUREA_REQUIRE_GPU();
     const GPUCapabilities& c = gpu().backend.capabilities();
@@ -868,7 +896,7 @@ AUREA_TEST(Gpu, EngineImportsSeeksAndScrubsARealVideoPipeline) {
     AUREA_CHECK_EQ(e.submit_commands(batch, 14), static_cast<u32>(14));
     AUREA_CHECK_NEAR(shown_code(), frame_gray_code(160 + 11 * 3), 0.5);
     // Os alvos intermediários não custaram um seek cada.
-    AUREA_CHECK(factory.last && factory.last->seeks.load() <= 3);
+    AUREA_CHECK(factory.last.load() && factory.last.load()->seeks.load() <= 3);
 
     // Efeito aplicado pela fronteira de comandos (como a UI faz).
     Command add;
@@ -1074,6 +1102,77 @@ AUREA_TEST(Gpu, Scene3DSkinnedModelAnimatesOnTheTimelineClock) {
     AUREA_CHECK(back <= 2);
     (void)write_png("scene3d_fox_t0.png", a);
     (void)write_png("scene3d_fox_t12.png", b);
+}
+
+/// As letras do texto 3D precisam se mexer com o relógio da timeline. O teste de
+/// unidade (`LettersKeepLayoutAndAnimateIndependentlyWithoutRetessellation`) só
+/// prova que a pose do ASSET muda com o tempo — ele não passa pela camada, pelo
+/// clipe escolhido nem pelo renderizador. Era aí que o beta tester via a animação
+/// "não funcionar": dados certos, quadro parado.
+AUREA_TEST(Gpu, Text3DLettersFollowTheTimelineClock) {
+    AUREA_REQUIRE_GPU();
+    auto seek = [](Scene3DRig& rig, i64 frame) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = TickNs{frame * 1'000'000'000LL / 30};
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    auto diff_de = [](const Image8& a, const Image8& b) {
+        u64 n = 0;
+        for (usize i = 0; i < a.rgba.size() && i < b.rgba.size(); ++i) {
+            n += static_cast<u64>(std::abs(a.rgba[i] - b.rgba[i]) > 24);
+        }
+        return n;
+    };
+
+    // Mesma montagem do `Text3DRendersEditsUndoesAndSurvivesReopen`, que já
+    // passa: 320x180, "AUREA", laranja. Aqui só entra a variável TEMPO.
+    auto laranja = [](const Image8& img) {
+        u32 n = 0;
+        u8 pico = 0;
+        for (usize i = 0; i < img.rgba.size(); i += 4) {
+            pico = std::max(pico, img.rgba[i]);
+            if (img.rgba[i] > 90 && img.rgba[i] > img.rgba[i + 1] + 30 && img.rgba[i + 1] > img.rgba[i + 2] + 10) ++n;
+        }
+        return std::pair<u32, u8>{n, pico};
+    };
+
+    for (u32 mode = 0; mode <= 4; ++mode) {
+        Scene3DRig rig(320, 180);
+        scene3d::Text3DSpec spec;
+        spec.content = "AUREA";
+        spec.color = Vec4{1.0f, .45f, 0.0f, 1.0f};
+        spec.animation = mode;
+        spec.animationDuration = .5f;   // onda inteira em 0,5 s: o pico cai no quadro 4
+        spec.animationStagger = 0.f;
+        spec.animationAmount = .3f;
+        const Result<u64> id = rig.e.add_text3d(spec);
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) continue;
+
+        seek(rig, 0);
+        const Image8 a = rig.capture(320);
+        seek(rig, 4);
+        const Image8 b = rig.capture(320);
+        seek(rig, 0);
+        const Image8 a2 = rig.capture(320);
+
+        const auto [na, pico] = laranja(a);
+        const u64 mudou = diff_de(a, b);
+        const u64 voltou = diff_de(a, a2);
+        std::printf("    modo %u: laranja=%u pico=%u  mudaram=%llu  voltou=%llu\n", mode, na,
+                    static_cast<unsigned>(pico), static_cast<unsigned long long>(mudou),
+                    static_cast<unsigned long long>(voltou));
+        AUREA_CHECK_MSG(na > 200, "texto tem de aparecer");
+        // Modo 0 é "parado": o quadro NÃO pode mudar com o tempo.
+        if (mode == 0) {
+            AUREA_CHECK(mudou == 0);
+        } else {
+            AUREA_CHECK_MSG(mudou > 200, "letra animada ficou parada no quadro");
+        }
+        // Voltar ao quadro 0 tem de devolver exatamente o mesmo quadro.
+        AUREA_CHECK(voltou <= 2);
+    }
 }
 
 AUREA_TEST(Gpu, Scene3DMorphTargetsFollowTheAnimation) {
@@ -2016,12 +2115,48 @@ AUREA_TEST(Gpu, HdriLightsTheModelAndSurvivesReopen) {
     const f64 back = tint(rig.capture(320));
     std::printf("    reaberto: %.3f\n", back);
     AUREA_CHECK(std::fabs(back - red) < 0.05 * red);
+    // Two projects reuse the same AssetId slots. A cached HDRI belongs to its
+    // project, so reopening red after green must decode red again (and vice
+    // versa), rather than returning the previous project's cached pixels.
+    const std::string greenHdr = write_test_hdr(Vec3{0.2f, 4.0f, 0.3f}, Vec3{0.03f, 0.6f, 0.05f}, "_green");
+    const std::string greenProject = path + ".green.aurea";
+    AUREA_CHECK(rig.e.new_project(320, 180, 30.0, "green HDRI").ok());
+    AUREA_CHECK(rig.e.import_model(mi).ok());
+    const auto greenId = rig.e.import_hdri(greenHdr.c_str());
+    AUREA_CHECK(greenId.ok());
+    if (!greenId.ok() || !id.ok()) return;
+    AUREA_CHECK_EQ(*greenId, *id);
+    const f64 green = tint(rig.capture(320));
+    AUREA_CHECK(green < studio * 0.8);
+    AUREA_CHECK(rig.e.save_project(greenProject.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    const f64 redAgain = tint(rig.capture(320));
+    AUREA_CHECK(std::fabs(redAgain - red) < 0.05 * red);
+    AUREA_CHECK(rig.e.load_project(greenProject.c_str()).ok());
+    const f64 greenAgain = tint(rig.capture(320));
+    AUREA_CHECK(std::fabs(greenAgain - green) < 0.05 * green);
+    std::printf("    same asset id, different projects: red %.3f / green %.3f / red %.3f / green %.3f\n",
+                red, green, redAgain, greenAgain);
+    // A failed lookup is cached too. Restore the companion file and reopen
+    // the project: it must leave the neutral studio and resolve the HDRI.
+    const std::string hiddenGreen = greenHdr + ".missing";
+    AUREA_CHECK(std::rename(greenHdr.c_str(), hiddenGreen.c_str()) == 0);
+    AUREA_CHECK(rig.e.load_project(greenProject.c_str()).ok());
+    const f64 missing = tint(rig.capture(320));
+    AUREA_CHECK(std::fabs(missing - studio) < 0.05 * studio);
+    AUREA_CHECK(std::rename(hiddenGreen.c_str(), greenHdr.c_str()) == 0);
+    AUREA_CHECK(rig.e.load_project(greenProject.c_str()).ok());
+    const f64 restored = tint(rig.capture(320));
+    AUREA_CHECK(std::fabs(restored - green) < 0.05 * green);
+    std::printf("    restored companion after cached miss: %.3f -> %.3f\n", missing, restored);
     // Voltar ao estúdio.
     AUREA_CHECK(rig.e.clear_hdri());
     const f64 again = tint(rig.capture(320));
     AUREA_CHECK(std::fabs(again - studio) < 0.05 * studio);
     std::remove(path.c_str());
     std::remove(hdr.c_str());
+    std::remove(greenProject.c_str());
+    std::remove(greenHdr.c_str());
 }
 
 namespace {

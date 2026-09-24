@@ -27,7 +27,7 @@ Status Backend::attach_surface(const SurfaceDesc& desc) noexcept {
         if (!d.initialized) return Status{Errc::InvalidState, "backend nao inicializado"};
         if (!desc.nativeWindow) return Status{Errc::InvalidArgument, "janela nula"};
 
-        id<CAMetalLayer> layer = (__bridge id<CAMetalLayer>)desc.nativeWindow;
+        CAMetalLayer* layer = (__bridge CAMetalLayer*)desc.nativeWindow;
         if (![layer isKindOfClass:[CAMetalLayer class]]) {
             return Status{Errc::InvalidArgument, "nativeWindow nao e CAMetalLayer"};
         }
@@ -44,7 +44,9 @@ Status Backend::attach_surface(const SurfaceDesc& desc) noexcept {
         // Três drawables: um a mais que os frames em voo, para a apresentação do
         // frame N não segurar a aquisição do N+1.
         layer.maximumDrawableCount = 3;
+#if TARGET_OS_OSX
         layer.displaySyncEnabled = desc.vsync ? YES : NO;
+#endif
         layer.allowsNextDrawableTimeout = YES;
         if (desc.width > 0 && desc.height > 0) {
             layer.drawableSize = CGSizeMake(static_cast<CGFloat>(desc.width), static_cast<CGFloat>(desc.height));

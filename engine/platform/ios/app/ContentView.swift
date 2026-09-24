@@ -10,6 +10,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AureaModel
+    @State private var pageWidth = UIScreen.main.bounds.width
 
     var body: some View {
         ZStack {
@@ -18,10 +19,18 @@ struct ContentView: View {
             switch model.screen {
             case .home:
                 HomeView()
-                    .transition(.opacity)
+                    .transition(.offset(x: -pageWidth / 3)).zIndex(0)
             case .editor:
                 EditorView()
-                    .transition(.opacity)
+                    .transition(.offset(x: pageWidth)).zIndex(1)
+            }
+
+            if model.importingMedia {
+                Color(hex: 0x17191D).opacity(221.0 / 255.0).ignoresSafeArea().contentShape(Rectangle()).onTapGesture {}
+                VStack(spacing: 12) {
+                    AureaActivityIndicator()
+                    Text(model.operationMessage).font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+                }
             }
 
             // O motor não subiu: a UI DIZ (nunca uma tela que parece pronta e
@@ -47,25 +56,63 @@ struct ContentView: View {
                 VStack {
                     Spacer()
                     Text(toast)
-                        .font(AureaType.label)
+                        .font(.aurea(size: 13))
                         .foregroundStyle(AureaColors.text)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
-                        .background(AureaColors.chip.opacity(0.96), in: Capsule())
-                        .overlay(Capsule().stroke(AureaColors.border, lineWidth: 1))
-                        .padding(.bottom, 90)
+                        .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 96)
                         .onTapGesture { model.toast = nil }
                 }
                 .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: model.screen)
+        .overlay {
+            if let request = model.liveNoticePopup { LiveNoticePopup(request: request) }
+            if model.showProjectSettings { ProjectSettingsPanel(onDismiss: { model.showProjectSettings = false }) }
+            if let request = model.actionSheet { AureaActionSheet(title: request.title, actions: request.actions) { model.actionSheet = nil } }
+            if let request = model.colorSheet { ColorPickerSheet(request: request) { model.colorSheet = nil; request.onDone() }.id(request.id) }
+            if let request = model.expressionSheet { ExpressionSheet(request: request) { model.expressionSheet = nil }.id(request.id) }
+            if let request = model.text3DFontSheet { T3DFontSheet(request: request) { model.text3DFontSheet = nil }.id(request.id) }
+            if let request = model.numericKeypad { NumericKeypadSheet(request: request) { model.numericKeypad = nil }.id(request.id) }
+            if let request = model.namePrompt { AureaNamePrompt(title: request.title, initial: request.initial, onConfirm: request.onConfirm, onDismiss: { model.namePrompt = nil }).id(request.id) }
+            if let request = model.presetDialog { PresetDialog(request: request) { model.presetDialog = nil }.id(request.id) }
+        }
+        .background {
+            GeometryReader { geometry in
+                Color.clear.onAppear { pageWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { pageWidth = $0 }
+            }
+        }
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.5), value: model.screen)
         .onChange(of: model.toast) { value in
             guard value != nil else { return }
             // O aviso some sozinho, como o do Android. Tocar nele também fecha.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) {
                 if model.toast == value { model.toast = nil }
             }
+        }
+    }
+}
+
+/// ChromeKit.kt's twelve spoke indicator, one discrete revolution per second.
+struct AureaActivityIndicator: View {
+    var size: CGFloat = 22
+    var body: some View {
+        SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { timeline in
+            Canvas { context, bounds in
+                let step = Int(timeline.date.timeIntervalSinceReferenceDate * 12) % 12
+                let radius = min(bounds.width, bounds.height) / 2, width = radius * 0.18
+                for index in 0..<12 {
+                    let angle = Double((index + step) * 30 - 90) * .pi / 180
+                    let x = CGFloat(cos(angle)), y = CGFloat(sin(angle))
+                    var line = Path()
+                    line.move(to: CGPoint(x: bounds.width / 2 + x * radius * 0.5, y: bounds.height / 2 + y * radius * 0.5))
+                    line.addLine(to: CGPoint(x: bounds.width / 2 + x * (radius - width / 2), y: bounds.height / 2 + y * (radius - width / 2)))
+                    context.stroke(line, with: .color(AureaColors.text.opacity(0.25 + 0.75 * Double(index) / 11)), style: StrokeStyle(lineWidth: width, lineCap: .round))
+                }
+            }.frame(width: size, height: size)
         }
     }
 }

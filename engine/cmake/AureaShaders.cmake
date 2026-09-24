@@ -77,6 +77,12 @@ function(aurea_find_glslc out_var)
         endif()
     endforeach()
 
+    find_program(_path_glslc glslc)
+    if(_path_glslc)
+        set(${out_var} "${_path_glslc}" PARENT_SCOPE)
+        return()
+    endif()
+
     message(FATAL_ERROR
         "glslc nao encontrado. Os shaders do Aurea sao compilados no build.\n"
         "Defina -DAUREA_GLSLC=<caminho>, VULKAN_SDK, ou android/local.properties com ndk.dir.")
@@ -108,11 +114,11 @@ function(aurea_compile_shaders out_sources out_include_dir)
         file(MAKE_DIRECTORY "${_out_dir}")
 
         # -O: o otimizador do SPIR-V roda no build, não no driver do aparelho.
-        # vulkan1.1: o piso do Aurea (Android 9+ com Vulkan 1.1 é a base dos
-        # aparelhos que decodificam por hardware com AHardwareBuffer).
+        # SPIR-V 1.0 works on both Vulkan 1.0 and newer drivers. Zero-copy
+        # video remains enabled separately when Vulkan 1.1 supports it.
         add_custom_command(
             OUTPUT "${_out}"
-            COMMAND "${_glslc}" --target-env=vulkan1.1 -O -Werror
+            COMMAND "${_glslc}" --target-env=vulkan1.0 -O -Werror
                     -I "${_src_root}" -o "${_out}" "${_s}"
             DEPENDS "${_s}" ${_includes}
             COMMENT "glslc ${_rel}"
@@ -165,14 +171,69 @@ const ShaderBlob& shader_blob(ShaderId id) noexcept;
 ")
     configure_file("${_hdr_tmp}" "${_inc_dir}/aurea/shaders/ShaderIds.hpp" COPYONLY)
 
+    set(_embed_list ${_spv_list})
+    if(AUREA_METAL_SHADERS)
+        if(NOT EXISTS "${AUREA_METAL_COMPILER}")
+            message(FATAL_ERROR "Build engine/tools/metal-shaders for the HOST and set AUREA_METAL_COMPILER")
+        endif()
+        find_program(_xcrun xcrun REQUIRED)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        string(TOLOWER "${CMAKE_OSX_SYSROOT}" _metal_sysroot)
+        set(_metal_minimum "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        if(AUREA_IOS_SIMULATOR OR _metal_sysroot MATCHES "iphonesimulator")
+            set(_metal_sdk iphonesimulator)
+            set(_metal_standard ios-metal2.1)
+            if(NOT _metal_minimum)
+                set(_metal_minimum 16.3)
+            endif()
+            set(_metal_minimum_flag "-miphonesimulator-version-min=${_metal_minimum}")
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR _metal_sysroot MATCHES "iphoneos")
+            set(_metal_sdk iphoneos)
+            set(_metal_standard ios-metal2.1)
+            if(NOT _metal_minimum)
+                set(_metal_minimum 16.3)
+            endif()
+            set(_metal_minimum_flag "-mios-version-min=${_metal_minimum}")
+        else()
+            set(_metal_sdk macosx)
+            set(_metal_standard macos-metal2.1)
+            if(NOT _metal_minimum)
+                set(_metal_minimum 11.0)
+            endif()
+            set(_metal_minimum_flag "-mmacos-version-min=${_metal_minimum}")
+        endif()
+        message(STATUS "Aurea Metal shaders: SDK ${_metal_sdk}, ${_metal_minimum_flag}")
+        set(_embed_list "")
+        foreach(_spv IN LISTS _spv_list)
+            set(_raw "${_spv}.mslraw")
+            set(_air "${_spv}.air")
+            set(_metallib "${_spv}.metallib")
+            set(_msl "${_spv}.mslblob")
+            add_custom_command(OUTPUT "${_msl}"
+                BYPRODUCTS "${_raw}" "${_raw}.metal" "${_air}" "${_metallib}"
+                COMMAND "${AUREA_METAL_COMPILER}" "${_spv}" "${_raw}"
+                COMMAND "${_xcrun}" --sdk "${_metal_sdk}" metal -c "-std=${_metal_standard}"
+                        "${_metal_minimum_flag}"
+                        "${_raw}.metal" -o "${_air}"
+                COMMAND "${_xcrun}" --sdk "${_metal_sdk}" metallib "${_air}" -o "${_metallib}"
+                COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/metal-shaders/pack_metallib.py"
+                        "${_raw}" "${_metallib}" "${_msl}"
+                DEPENDS "${_spv}" "${AUREA_METAL_COMPILER}"
+                        "${PROJECT_SOURCE_DIR}/tools/metal-shaders/pack_metallib.py"
+                COMMENT "SPIR-V -> Metal precompilado: ${_spv}"
+                VERBATIM)
+            list(APPEND _embed_list "${_msl}")
+        endforeach()
+    endif()
+
     set(_blob_cpp "${_gen_dir}/ShaderBlobs.cpp")
     add_custom_command(
         OUTPUT "${_blob_cpp}"
         COMMAND ${CMAKE_COMMAND}
-                "-DSPV_FILES=${_spv_list}"
+                "-DSPV_FILES=${_embed_list}"
                 "-DOUT_CPP=${_blob_cpp}"
                 -P "${PROJECT_SOURCE_DIR}/cmake/embed_shaders.cmake"
-        DEPENDS ${_spv_list} "${PROJECT_SOURCE_DIR}/cmake/embed_shaders.cmake"
+        DEPENDS ${_embed_list} "${PROJECT_SOURCE_DIR}/cmake/embed_shaders.cmake"
         COMMENT "Embutindo ${_count} shaders SPIR-V"
         VERBATIM)
 

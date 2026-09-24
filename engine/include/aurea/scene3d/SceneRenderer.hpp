@@ -245,6 +245,7 @@ public:
     /// como (usa o do grupo).
     [[nodiscard]] const EnvSet* environment_set(const SceneEnvironment& env, u64 frameNumber) noexcept;
     [[nodiscard]] bool has_environment() const noexcept { return irradiance_.valid(); }
+    [[nodiscard]] bool environment_pending() const noexcept { return pendingEnv_.valid(); }
     /// Export e captura usam a qualidade final: esperam o ambiente (ou o geram
     /// agora). O preview não chama — segue sem travar.
     void finish_environment(const SceneEnvironment& env) noexcept;

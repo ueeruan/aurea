@@ -99,7 +99,7 @@ internal fun EffectsBrowser(store: EditorStore, onDismiss: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "${catalog.size} efeitos",
+                    stringResource(R.string.effect_count, catalog.size),
                     style = AureaType.CardSpec,
                     modifier = Modifier.padding(end = AureaDims.S3),
                 )

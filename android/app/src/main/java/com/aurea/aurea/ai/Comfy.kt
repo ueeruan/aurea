@@ -24,7 +24,7 @@ import kotlin.math.sqrt
  * app tenta o endpoint que o discovery publicar.
  */
 object AureaAiConfig {
-    const val BASE_URL = "https://alias-carriers-association-infants.trycloudflare.com"
+    const val BASE_URL = "https://calculators-here-reasons-rice.trycloudflare.com"
     const val DISCOVERY_URL = "https://aurea-ai-discovery.aureaapp.workers.dev/server"
 
     /** Workflow do MiniMax H3 no formato de API do ComfyUI (assets/ai/). */

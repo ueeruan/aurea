@@ -1,0 +1,55 @@
+{
+  "sha256": "b71c99a9909722bbf0f758d8a0d788f882409e81de10ee8fab37d1c64daed876",
+  "bytes": 3076,
+  "source": "android-2103-complex.aurea",
+  "description": "",
+  "assets": 1,
+  "author": "",
+  "compositions": 1,
+  "durationFrames": 300,
+  "externalMediaAssets": 0,
+  "fps": 30.0,
+  "generatedAsset": "aurea-text3d:v2; default built-in font, text Texto, depth0.25, alignment Centre, animation Still",
+  "height": 1080,
+  "layerKinds": [
+    "Model3D (procedural Text3D)",
+    "Particles"
+  ],
+  "layers": 2,
+  "limitations": [
+    "No pre-composition was created; prioritized the Text3D+Particular fixture for the next native CI run.",
+    "No HDRI or external media imported.",
+    "Fixture has not yet been opened or visually verified on iOS."
+  ],
+  "observations": [
+    "Capture24 shows rendered Texto3D and snow particles at00:01:06.",
+    "No existing project was edited. New project remains saved in Android Home."
+  ],
+  "origin": "Synthetic Parity Complex created entirely through the approved Android APK2103 UI on emulator-5554; saved by returning to Home before extraction.",
+  "particlePreset": "Snow (built-in), box emitter1920x10",
+  "playheadFrame": 36,
+  "screenshots": {
+    "22-complex-text3d.png": "fc1d2e1dc208b257aa56500d1a1d4204dd91340a1e7140ce4a1c7055f46286b0",
+    "23-complex-particular.png": "554ef21fa1c6aed6b3086f560281d2a78095a7fc383d922b790cbbb710ecb0e9",
+    "24-complex-preview-playing.png": "614e7086257aa22d0d45d8f649d4b17091be2255c4d5045b5b0879bb40f78a34"
+  },
+  "sections": {
+    "1": {
+      "version": 1,
+      "bytes": 154,
+      "crc32": "f3825082"
+    },
+    "2": {
+      "version": 22,
+      "bytes": 2380,
+      "crc32": "21a3aa0b"
+    },
+    "4": {
+      "version": 1,
+      "bytes": 358,
+      "crc32": "ad080696"
+    }
+  },
+  "title": "Parity Complex",
+  "width": 1920
+}

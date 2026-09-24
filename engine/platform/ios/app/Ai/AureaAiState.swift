@@ -124,8 +124,8 @@ final class AureaAiState: ObservableObject {
     /// Ao entrar na tela AI Video: o Rewarded já começa a carregar.
     func prepareAd() { AureaAdsManager.shared.preloadRewarded() }
 
-    /// "Gerar": o H3 começa quando o anúncio aparece e roda em paralelo; o vídeo
-    /// só é entregue com a recompensa (AiRewardFlow).
+    /// "Gerar": o H3 é enviado na hora (um job só) e o Rewarded aparece em
+    /// paralelo; o vídeo só é entregue com a recompensa (AiRewardFlow).
     func generateWithReward(_ request: AiRequest) {
         guard comfy != nil else { error = "Sem conexão com o servidor"; return }
         if job?.running == true || sessionBusy { return }   // um clique = uma geração

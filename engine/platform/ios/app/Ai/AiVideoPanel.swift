@@ -187,6 +187,8 @@ struct AiVideoPanel: View {
                 if s.rewardEarned { note(AureaText.t("ai_video_finalizando"), AureaColors.accent) }
                 else if s.adClosedEarly { note(AureaText.t("ai_assista_completo"), AureaColors.muted) }
                 else { note(AureaText.t("ai_gerando_seu_video"), AureaColors.muted) }
+                // Sem anúncio agora: o H3 segue; o vídeo espera o "Assistir e liberar".
+                if s.adError != nil && !s.rewardEarned { note(AureaText.t("ai_anuncio_indisponivel"), AureaColors.danger) }
             case .locked:
                 VStack(alignment: .leading, spacing: 0) {
                     Text(AureaText.t("ai_video_pronto_titulo")).font(.aurea(size: 15, weight: .semibold))

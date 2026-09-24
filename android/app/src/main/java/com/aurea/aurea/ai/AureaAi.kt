@@ -235,8 +235,8 @@ class AureaAiState(
     fun prepararAnuncio() = AureaAdsManager.preloadRewarded()
 
     /**
-     * O botão "Gerar": Rewarded primeiro; o H3 começa quando o anúncio aparece
-     * e roda em paralelo; o vídeo só é entregue com a recompensa (AiRewardFlow).
+     * O botão "Gerar": o H3 é enviado na hora (um job só) e o Rewarded aparece em
+     * paralelo; o vídeo só é entregue com a recompensa (AiRewardFlow).
      */
     fun gerarComRecompensa(pedido: Pedido) {
         if (comfy == null) { erro = "Sem conexão com o servidor"; return }

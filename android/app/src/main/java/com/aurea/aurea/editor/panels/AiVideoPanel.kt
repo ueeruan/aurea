@@ -282,10 +282,14 @@ internal fun AiVideoPanel(env: PanelEnv) {
                             Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
                             Botao(stringResource(R.string.ai_procurar_de_novo)) { ai.tentarGerarDeNovo() }
                         }
-                        SessaoStatus.AnuncioNaTela, SessaoStatus.Gerando -> when {
-                            s.rewardEarned -> Nota(stringResource(R.string.ai_video_finalizando), AureaColors.Accent)
-                            s.adClosedEarly -> Nota(stringResource(R.string.ai_assista_completo), AureaColors.Muted)
-                            else -> Nota(stringResource(R.string.ai_gerando_seu_video), AureaColors.Muted)
+                        SessaoStatus.AnuncioNaTela, SessaoStatus.Gerando -> {
+                            when {
+                                s.rewardEarned -> Nota(stringResource(R.string.ai_video_finalizando), AureaColors.Accent)
+                                s.adClosedEarly -> Nota(stringResource(R.string.ai_assista_completo), AureaColors.Muted)
+                                else -> Nota(stringResource(R.string.ai_gerando_seu_video), AureaColors.Muted)
+                            }
+                            // Sem anúncio agora: o H3 segue; o vídeo espera o "Assistir e liberar".
+                            if (s.adError != null && !s.rewardEarned) Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
                         }
                         SessaoStatus.Bloqueado -> {
                             Spacer(Modifier.height(10.dp))

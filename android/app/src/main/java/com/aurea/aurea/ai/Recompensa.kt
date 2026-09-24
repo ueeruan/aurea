@@ -63,8 +63,8 @@ data class AiGenerationSession(
 /**
  * A camada de "direito ao vídeo" POR CIMA da geração: não sabe nada de H3 nem
  * de AdMob. Regras:
- *  - a geração só começa quando o anúncio for EFETIVAMENTE apresentado (nunca
- *    antes de haver anúncio: não se gasta A100 sem anúncio para mostrar);
+ *  - a geração é enviada ao H3 NO TOQUE em "Gerar" (um job só) e o Rewarded
+ *    aparece em paralelo: o H3 trabalha enquanto o anúncio roda;
  *  - a recompensa só vem de `aoRecompensa` (onUserEarnedReward) — fechar ou
  *    abrir o anúncio não conta, tempo não conta;
  *  - o vídeo só é entregue com `generationCompleted && rewardEarned`;
@@ -93,12 +93,15 @@ class AiRewardFlow(
         return s
     }
 
-    /** Toque em "Gerar". Devolve a sessão nova. */
+    /** Toque em "Gerar": o H3 começa JÁ (uma vez só) e o Rewarded vem em paralelo. */
     fun gerar(pedido: Pedido, id: String = novoId()): AiGenerationSession {
         require(id !in sessoes) { "sessão repetida" }
-        val s = por(AiGenerationSession(id, pedido))
-        prepararEApresentar(s.generationId, liberar = false)
-        return sessoes.getValue(s.generationId)
+        val s = por(AiGenerationSession(id, pedido, generationStarted = true, status = SessaoStatus.Gerando))
+        iniciarGeracao(s,
+            { pid -> sessoes[id]?.let { por(it.copy(promptId = pid)) } },
+            { arquivo, erro -> terminou(id, arquivo, erro) })
+        prepararEApresentar(id, liberar = false)
+        return sessoes.getValue(id)
     }
 
     /** "Tentar de novo" de uma sessão que ficou sem anúncio (a geração não tinha começado). */
@@ -122,7 +125,7 @@ class AiRewardFlow(
 
     private fun prepararEApresentar(id: String, liberar: Boolean) {
         if (ads.pronto()) { apresentar(id, liberar); return }
-        sessoes[id]?.let { if (!liberar) por(it.copy(status = SessaoStatus.Preparando)) }
+        sessoes[id]?.let { if (!liberar && !it.generationStarted) por(it.copy(status = SessaoStatus.Preparando)) }
         ads.carregar(
             aoCarregar = { apresentar(id, liberar) },
             aoFalhar = { e -> semAnuncio(id, liberar, e) },
@@ -142,15 +145,8 @@ class AiRewardFlow(
         val mostrou = ads.mostrar(
             aoAbrir = {
                 val s = sessoes[id] ?: return@mostrar
-                if (!liberar && !s.generationStarted) {
-                    // O anúncio ESTÁ na tela: agora sim o H3 começa, em paralelo.
-                    por(s.copy(generationStarted = true, status = SessaoStatus.AnuncioNaTela))
-                    iniciarGeracao(sessoes.getValue(id),
-                        { pid -> sessoes[id]?.let { por(it.copy(promptId = pid)) } },
-                        { arquivo, erro -> terminou(id, arquivo, erro) })
-                } else if (!s.generationCompleted) {
-                    por(s.copy(status = SessaoStatus.AnuncioNaTela))
-                }
+                // O H3 já está gerando por baixo; o anúncio só muda o que a tela diz.
+                if (!s.generationCompleted && s.erro == null) por(s.copy(status = SessaoStatus.AnuncioNaTela))
             },
             aoRecompensa = {
                 val s = sessoes[id] ?: return@mostrar

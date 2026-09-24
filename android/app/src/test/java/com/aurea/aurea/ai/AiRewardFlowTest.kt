@@ -140,19 +140,22 @@ class AiRewardFlowTest {
 
     // 8
     @Test
-    fun `sem Rewarded a geracao nao comeca`() {
+    fun `o H3 comeca no toque, antes do anuncio, e sem anuncio o video fica bloqueado`() {
         val id = flow.gerar(pedido).generationId
-        assertEquals("\"Preparando geração...\"", SessaoStatus.Preparando, s(id).status)
-        assertTrue(h3.chamadas.isEmpty())
-        // AdMob indisponível: erro amigável, nada gerado, dá para tentar de novo.
-        ad.esperando.toList().forEach { it.second("load 2: network error") }
-        assertEquals(SessaoStatus.AnuncioIndisponivel, s(id).status)
-        assertTrue(h3.chamadas.isEmpty())
-        flow.tentarDeNovo(id)
+        assertEquals("H3 enviado no toque em Gerar", listOf(id), h3.chamadas)
+        assertEquals(SessaoStatus.Gerando, s(id).status)
+        // Rewarded indisponível: a geração segue; o erro fica registrado.
+        ad.esperando.toList().forEach { it.second("levelplay 509: Mediation No fill") }
+        assertEquals(SessaoStatus.Gerando, s(id).status)
+        assertEquals("levelplay 509: Mediation No fill", s(id).adError)
+        h3.fins.getValue(id)(video, null)
+        assertEquals("sem recompensa não libera", SessaoStatus.Bloqueado, s(id).status)
+        // "Assistir e liberar": o MESMO vídeo, sem job novo.
+        flow.liberarComAnuncio(id)
         ad.chegou()
-        assertTrue("só gera com o anúncio NA TELA", h3.chamadas.isEmpty())
-        ad.abrir!!()
-        assertEquals(listOf(id), h3.chamadas)
+        ad.abrir!!(); ad.recompensa!!(); ad.fechar!!()
+        assertEquals(SessaoStatus.Liberado, s(id).status)
+        assertEquals("um job só", 1, h3.chamadas.size)
     }
 
     // 9

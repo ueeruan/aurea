@@ -2,7 +2,8 @@
 //  Aurea iOS — o "direito ao vídeo" por cima da geração. Porte fiel de
 //  android/.../ai/Recompensa.kt (AiRewardFlow). Não sabe nada de H3 nem de SDK.
 //
-//   - a geração só começa quando o anúncio for EFETIVAMENTE apresentado;
+//   - a geração é enviada ao H3 NO TOQUE em "Gerar" (um job só) e o Rewarded
+//     aparece em paralelo: o H3 trabalha enquanto o anúncio roda;
 //   - a recompensa só vem de `reward` (callback oficial do SDK) — abrir, fechar
 //     ou tempo não contam;
 //   - o vídeo só é entregue com `generationCompleted && rewardEarned`;
@@ -80,11 +81,19 @@ final class AiRewardFlow {
         return s
     }
 
-    /// Toque em "Gerar".
+    /// Toque em "Gerar": o H3 começa JÁ (uma vez só) e o Rewarded vem em paralelo.
     @discardableResult
     func generate(_ request: AiRequest, id: String = UUID().uuidString) -> AiGenerationSession? {
         guard sessions[id] == nil else { return nil }
-        put(AiGenerationSession(generationId: id, request: request))
+        var s = AiGenerationSession(generationId: id, request: request)
+        s.generationStarted = true; s.status = .generating
+        let started = put(s)
+        startGeneration(started,
+            { [weak self] pid in
+                guard let self, var s = self.sessions[id] else { return }
+                s.promptId = pid; self.put(s)
+            },
+            { [weak self] file, error in self?.finished(id, file, error) })
         prepareAndPresent(id, unlock: false)
         return sessions[id]
     }
@@ -105,7 +114,7 @@ final class AiRewardFlow {
 
     private func prepareAndPresent(_ id: String, unlock: Bool) {
         if ads.ready() { present(id, unlock: unlock); return }
-        if !unlock, var s = sessions[id] { s.status = .preparing; put(s) }
+        if !unlock, var s = sessions[id], !s.generationStarted { s.status = .preparing; put(s) }
         ads.load(loaded: { [weak self] in self?.present(id, unlock: unlock) },
                  failed: { [weak self] e in self?.noAd(id, unlock: unlock, e) })
     }
@@ -124,19 +133,8 @@ final class AiRewardFlow {
         let shown = ads.show(
             opened: { [weak self] in
                 guard let self, var s = self.sessions[id] else { return }
-                if !unlock && !s.generationStarted {
-                    // O anúncio ESTÁ na tela: agora sim o H3 começa, em paralelo.
-                    s.generationStarted = true; s.status = .adShowing
-                    let started = self.put(s)
-                    self.startGeneration(started,
-                        { [weak self] pid in
-                            guard let self, var s = self.sessions[id] else { return }
-                            s.promptId = pid; self.put(s)
-                        },
-                        { [weak self] file, error in self?.finished(id, file, error) })
-                } else if !s.generationCompleted {
-                    s.status = .adShowing; self.put(s)
-                }
+                // O H3 já está gerando por baixo; o anúncio só muda o que a tela diz.
+                if !s.generationCompleted && s.error == nil { s.status = .adShowing; self.put(s) }
             },
             reward: { [weak self] in
                 guard let self, var s = self.sessions[id] else { return }

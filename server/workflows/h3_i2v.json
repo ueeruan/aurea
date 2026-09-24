@@ -1,0 +1,159 @@
+{
+  "_aurea": {
+    "descricao": "MiniMax H3 — imagem para video (com audio)",
+    "models": [
+      "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "minimax_h3_video_vae_int8_convrot.safetensors",
+      "minimax_h3_audio_vae_fp32.safetensors",
+      "minimax_h3_turbo_lora.safetensors"
+    ],
+    "inputs": {
+      "prompt": "6.text",
+      "negative": "7.text",
+      "imagem": "8.image",
+      "seed": "11.seed",
+      "largura": "11.width",
+      "altura": "11.height",
+      "frames": "11.length",
+      "fps": "15.fps",
+      "steps": "11.steps",
+      "cfg": "11.cfg",
+      "turbo": "11.lora_strength",
+      "prefixo": "16.filename_prefix"
+    },
+    "nota": "Mesma ressalva do h3_t2v.json: confira os nomes de classe com scripts/verificar_workflow.py. O campo 'imagem' recebe o nome do arquivo JA enviado ao ComfyUI pelo servidor — o cliente nunca escolhe nome nem caminho."
+  },
+
+  "1": {
+    "class_type": "UNETLoader",
+    "_meta": { "title": "H3 DiT" },
+    "inputs": {
+      "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+
+  "2": {
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "Texto Qwen3-VL 32B" },
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax_h3",
+      "device": "default"
+    }
+  },
+
+  "3": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "VAE de video" },
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+    }
+  },
+
+  "4": {
+    "class_type": "VAELoader",
+    "_meta": { "title": "VAE de audio" },
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    }
+  },
+
+  "5": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": { "title": "LoRA Turbo" },
+    "inputs": {
+      "model": ["1", 0],
+      "lora_name": "minimax_h3_turbo_lora.safetensors",
+      "strength_model": 1.0
+    }
+  },
+
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Prompt" },
+    "inputs": {
+      "clip": ["2", 0],
+      "text": ""
+    }
+  },
+
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Prompt negativo" },
+    "inputs": {
+      "clip": ["2", 0],
+      "text": ""
+    }
+  },
+
+  "8": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Imagem de partida" },
+    "inputs": {
+      "image": "",
+      "upload": "image"
+    }
+  },
+
+  "11": {
+    "class_type": "MiniMaxH3Sampler",
+    "_meta": { "title": "Amostragem (video + audio juntos)" },
+    "inputs": {
+      "model": ["5", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "image": ["8", 0],
+      "video_vae": ["3", 0],
+      "audio_vae": ["4", 0],
+      "seed": 0,
+      "width": 1344,
+      "height": 768,
+      "length": 120,
+      "steps": 8,
+      "cfg": 1.0,
+      "lora_strength": 1.0,
+      "audio": true
+    }
+  },
+
+  "13": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "Decodifica video" },
+    "inputs": {
+      "samples": ["11", 0],
+      "vae": ["3", 0]
+    }
+  },
+
+  "14": {
+    "class_type": "MiniMaxH3AudioDecode",
+    "_meta": { "title": "Decodifica audio" },
+    "inputs": {
+      "samples": ["11", 1],
+      "audio_vae": ["4", 0]
+    }
+  },
+
+  "15": {
+    "class_type": "CreateVideo",
+    "_meta": { "title": "Monta o video" },
+    "inputs": {
+      "images": ["13", 0],
+      "audio": ["14", 0],
+      "fps": 24
+    }
+  },
+
+  "16": {
+    "class_type": "SaveVideo",
+    "_meta": { "title": "Grava o MP4" },
+    "inputs": {
+      "video": ["15", 0],
+      "filename_prefix": "aurea/h3_i2v",
+      "format": "mp4",
+      "codec": "h264"
+    }
+  }
+}

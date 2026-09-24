@@ -15,7 +15,6 @@ import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import com.google.android.ump.ConsentInformation
-import com.google.android.ump.ConsentRequestParameters
 import com.google.android.ump.UserMessagingPlatform
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -43,31 +42,17 @@ class GoogleAdsBackend(context: Context) : AdsBackend {
         val activity = host as? Activity ?: run { aoTerminar(false); return }
         val uma = AtomicBoolean(false)
         val terminar = { ok: Boolean -> if (uma.compareAndSet(false, true)) main.post { aoTerminar(ok) } }
-        val consent: ConsentInformation = UserMessagingPlatform.getConsentInformation(app)
-        val sdkIniciado = AtomicBoolean(false)
-        val iniciarSdk = {
-            if (!consent.canRequestAds()) {
-                terminar(false)
-            } else if (sdkIniciado.compareAndSet(false, true)) {
-                // O initialize do SDK é pesado: fora da main (o app abre sem esperar por ele).
-                Thread({
-                    try {
-                        MobileAds.initialize(app) { terminar(true) }
-                    } catch (t: Throwable) {
-                        terminar(false)
-                    }
-                }, "aurea-ads-init").start()
-            }
+        UmpConsent.pedir(activity) { podePedir ->
+            if (!podePedir) { terminar(false); return@pedir }
+            // O initialize do SDK é pesado: fora da main (o app abre sem esperar por ele).
+            Thread({
+                try {
+                    MobileAds.initialize(app) { terminar(true) }
+                } catch (t: Throwable) {
+                    terminar(false)
+                }
+            }, "aurea-ads-init").start()
         }
-        consent.requestConsentInfoUpdate(activity, ConsentRequestParameters.Builder().build(), {
-            // Mostra o formulário oficial SÓ se a região/usuário exigir; senão volta direto.
-            UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) { _ -> iniciarSdk() }
-        }, { _ ->
-            // Falhou atualizar (offline): segue com o que já estava decidido antes.
-            iniciarSdk()
-        })
-        // Sessões anteriores já decidiram: pode inicializar em paralelo (recomendação do Google).
-        if (consent.canRequestAds()) iniciarSdk()
     }
 
     override fun loadAppOpen(unitId: String, aoCarregar: () -> Unit, aoFalhar: (String) -> Unit) {

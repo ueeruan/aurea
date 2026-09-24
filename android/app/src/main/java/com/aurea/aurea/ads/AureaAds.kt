@@ -19,9 +19,20 @@ object AureaAds {
             val debug = (activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
             AureaAdsManager.log = if (debug) { m -> Log.i("AureaAds", m) } else { _ -> }
             AureaAdsManager.agendar = { ms, bloco -> main.postDelayed({ bloco() }, ms) }
+            // UM provedor por vez: o outro nem é criado (nada carrega nem aparece por ele).
+            val backend: AdsBackend = when (AdsConfig.provider(activity)) {
+                AdsConfig.Provider.LevelPlay -> LevelPlayAdsBackend(
+                    activity, AdsConfig.levelPlayAppKey(activity), debug,
+                    // DEBUG: `adb shell am start ... --ez levelplay_test_suite true` abre a
+                    // Test Suite oficial do LevelPlay depois do init (nenhuma UI nova).
+                    abrirTestSuite = debug && activity.intent?.getBooleanExtra("levelplay_test_suite", false) == true,
+                )
+                AdsConfig.Provider.AdMob -> GoogleAdsBackend(activity)
+            }
+            AureaAdsManager.log("[AUREA ADS] provedor: ${AdsConfig.provider(activity)}")
             AureaAdsManager.initialize(
                 host = activity,
-                backend = GoogleAdsBackend(activity),
+                backend = backend,
                 frequency = AdsFrequencyController(PrefsAdsStore(activity)),
                 ids = AdsConfig.ids(activity),
             )

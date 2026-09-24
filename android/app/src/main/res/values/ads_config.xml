@@ -11,4 +11,15 @@
     <string name="admob_export_interstitial_unit" translatable="false"></string>
     <!-- Rewarded da geração de vídeo por IA (AI Video). -->
     <string name="admob_ai_rewarded_unit" translatable="false"></string>
+
+    <!--
+      Provedor ATIVO no Android: "levelplay" ou "admob". UM de cada vez — nunca
+      dois sistemas mostrando anúncio. Com LevelPlay, o AdMob direto fica
+      desligado (e pode voltar depois como rede mediada pelo LevelPlay).
+    -->
+    <string name="ads_provider" translatable="false">levelplay</string>
+    <!-- Unity LevelPlay: app e unidades reais. App Open não existe no LevelPlay. -->
+    <string name="levelplay_app_key" translatable="false">284eaf4d5</string>
+    <string name="levelplay_ai_rewarded_unit" translatable="false">h0ur81vem0v39pal</string>
+    <string name="levelplay_export_interstitial_unit" translatable="false">drges8f0kfm9986g</string>
 </resources>

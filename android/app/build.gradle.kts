@@ -194,6 +194,12 @@ dependencies {
     // `ads` do app importa isto (GoogleAdsBackend).
     implementation(libs.play.services.ads)
     implementation(libs.ump)
+    // Unity LevelPlay (mediação) — o provedor ATIVO no Android. O AdMob acima
+    // fica para entrar depois como rede mediada pelo LevelPlay; o UMP segue
+    // sendo o consentimento (TCF) que o LevelPlay e as redes leem.
+    implementation(libs.levelplay)
+    implementation(libs.levelplay.unityads.adapter)
+    implementation(libs.unity.ads)
     testImplementation(libs.junit)
     // Nos testes de JVM o `org.json` do android.jar é só um esqueleto que
     // lança "Stub!": sem isto, qualquer teste que leia um JSON do contrato

@@ -28,11 +28,28 @@ object AdsConfig {
     const val TEST_INTERSTITIAL = "ca-app-pub-3940256099942544/1033173712"
     const val TEST_REWARDED = "ca-app-pub-3940256099942544/5224354917"
 
-    fun ids(context: Context): AdsIds = AdsIds(
-        appOpen = context.getString(R.string.admob_app_open_unit).trim(),
-        interstitial = context.getString(R.string.admob_export_interstitial_unit).trim(),
-        aiRewarded = context.getString(R.string.admob_ai_rewarded_unit).trim(),
-    )
+    /** Qual SDK mostra anúncio no Android (um só por vez). */
+    enum class Provider { AdMob, LevelPlay }
+
+    fun provider(context: Context): Provider =
+        if (context.getString(R.string.ads_provider).trim().equals("admob", ignoreCase = true)) Provider.AdMob
+        else Provider.LevelPlay
+
+    fun ids(context: Context): AdsIds = when (provider(context)) {
+        Provider.AdMob -> AdsIds(
+            appOpen = context.getString(R.string.admob_app_open_unit).trim(),
+            interstitial = context.getString(R.string.admob_export_interstitial_unit).trim(),
+            aiRewarded = context.getString(R.string.admob_ai_rewarded_unit).trim(),
+        )
+        // LevelPlay: sem App Open (o formato não existe lá).
+        Provider.LevelPlay -> AdsIds(
+            appOpen = "",
+            interstitial = context.getString(R.string.levelplay_export_interstitial_unit).trim(),
+            aiRewarded = context.getString(R.string.levelplay_ai_rewarded_unit).trim(),
+        )
+    }
+
+    fun levelPlayAppKey(context: Context): String = context.getString(R.string.levelplay_app_key).trim()
 
     /** `true` se o ID é de teste (vale para app, App Open e interstitial). */
     fun isTestId(id: String): Boolean = id.startsWith(TEST_PUBLISHER)

@@ -347,6 +347,27 @@ class AureaAdsManagerTest {
         assertTrue("pedido pelo usuário: sem cap", AureaAdsManager.showRewarded({}, {}, {}, {}))
     }
 
+    // -- Provedor ---------------------------------------------------------------
+
+    @Test
+    fun `um provedor so - LevelPlay ativo com as unidades reais e sem App Open`() {
+        val main = File("src/main/res/values/ads_config.xml").readText()
+        fun valor(nome: String) = Regex("""<string name="$nome"[^>]*>([^<]*)</string>""").find(main)!!.groupValues[1].trim()
+        assertEquals("levelplay", valor("ads_provider"))
+        assertEquals("284eaf4d5", valor("levelplay_app_key"))
+        assertEquals("h0ur81vem0v39pal", valor("levelplay_ai_rewarded_unit"))
+        assertEquals("drges8f0kfm9986g", valor("levelplay_export_interstitial_unit"))
+        // O backend do LevelPlay nunca oferece App Open.
+        val lp = File("src/main/java/com/aurea/aurea/ads/AdsConfig.kt").readText()
+        assertTrue(Regex("""Provider\.LevelPlay -> AdsIds\(\s*appOpen = "",""").containsMatchIn(lp))
+        // O SDK do LevelPlay só é importado pelo backend dele; o do AdMob só pelo dele.
+        val arquivos = File("src/main/java").walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+        assertEquals(setOf("LevelPlayAdsBackend.kt"),
+            arquivos.filter { "import com.unity3d.mediation" in it.readText() }.map { it.name }.toSet())
+        assertEquals(setOf("GoogleAdsBackend.kt"),
+            arquivos.filter { "import com.google.android.gms.ads" in it.readText() }.map { it.name }.toSet())
+    }
+
     // -- IDs -------------------------------------------------------------------
 
     @Test

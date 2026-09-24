@@ -7,6 +7,9 @@
 [versions]
 playServicesAds = "25.5.0"
 ump = "4.0.0"
+levelplay = "9.6.0"
+levelplayUnityAdapter = "5.13.0"
+unityAds = "4.20.1"
 json = "20250517"
 agp = "9.1.0"
 # Versão do compilador de Compose. Com o AGP 9 o Kotlin é embutido, mas o
@@ -22,6 +25,9 @@ junit = "4.13.2"
 [libraries]
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 ump = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "ump" }
+levelplay = { group = "com.unity3d.ads-mediation", name = "mediation-sdk", version.ref = "levelplay" }
+levelplay-unityads-adapter = { group = "com.unity3d.ads-mediation", name = "unityads-adapter", version.ref = "levelplayUnityAdapter" }
+unity-ads = { group = "com.unity3d.ads", name = "unity-ads", version.ref = "unityAds" }
 json = { group = "org.json", name = "json", version.ref = "json" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }

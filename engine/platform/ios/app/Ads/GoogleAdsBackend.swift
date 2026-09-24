@@ -1,6 +1,7 @@
 // =============================================================================
 //  Aurea iOS — o AdMob (Google Mobile Ads SDK 12.x) + consentimento oficial (UMP).
-//  Só este arquivo importa o SDK. NÃO COMPILADO AQUI (sem Mac) — ver README.md.
+//  Só este arquivo importa o SDK. DESLIGADO: o provedor ativo no iOS é o
+//  LevelPlay (fica fora do alvo do Xcode; volta depois como rede mediada).
 // =============================================================================
 import UIKit
 import GoogleMobileAds
@@ -41,11 +42,14 @@ final class GoogleAdsBackend: NSObject, AdsBackend, FullScreenContentDelegate {
             InterstitialAd.load(with: unitId, request: Request()) { [weak self] ad, error in
                 if let ad { self?.interstitial = ad; loaded() } else { failed("load: \(error?.localizedDescription ?? "?")") }
             }
+        case .aiRewarded:
+            failed("rewarded só pelo LevelPlay")
         }
     }
 
     func show(_ kind: AdKind, from host: AnyObject, opened: @escaping () -> Void,
-              dismissed: @escaping () -> Void, failed: @escaping (String) -> Void) -> Bool {
+              dismissed: @escaping () -> Void, failed: @escaping (String) -> Void,
+              rewarded: @escaping () -> Void) -> Bool {
         guard let vc = host as? UIViewController else { return false }
         switch kind {
         case .appOpen:
@@ -58,12 +62,18 @@ final class GoogleAdsBackend: NSObject, AdsBackend, FullScreenContentDelegate {
             callbacks[ObjectIdentifier(ad)] = (opened, dismissed, failed)
             ad.fullScreenContentDelegate = self
             ad.present(from: vc)
+        case .aiRewarded:
+            return false
         }
         return true
     }
 
     func release(_ kind: AdKind) {
-        if kind == .appOpen { appOpen = nil } else { interstitial = nil }
+        switch kind {
+        case .appOpen: appOpen = nil
+        case .exportInterstitial: interstitial = nil
+        case .aiRewarded: break
+        }
     }
 
     // MARK: FullScreenContentDelegate

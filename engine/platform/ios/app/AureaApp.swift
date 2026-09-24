@@ -21,6 +21,7 @@ struct AureaApp: App {
                 .onAppear { model.start() }
         }
         .onChange(of: scenePhase) { phase in
+            if phase == .active { AureaAds.start() }   // anúncios: uma vez (o manager ignora as repetidas)
             // O motor tem uma thread de render e decoders de hardware: em
             // segundo plano ele PAUSA e devolve os decoders ao sistema. O
             // projeto fica intacto (é o `Engine::suspend`).

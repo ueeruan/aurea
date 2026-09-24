@@ -1,28 +1,46 @@
-# Anúncios no iOS (AdMob) — preparado, ainda não ligado
+# Anúncios no iOS (Unity LevelPlay)
 
-Mesma arquitetura do Android (`android/app/src/main/java/com/aurea/aurea/ads/`):
+A arquitetura é a mesma do Android (`android/app/src/main/java/com/aurea/aurea/ads/`), com os IDs do iOS.
 
-- `AdsPolicy` e `AdsFrequencyController` guardam os números de frequência e a persistência (UserDefaults, domínio `aurea.ads`).
-- `AureaAdsManager` decide quando um anúncio pode aparecer e garante que `continuar` seja chamado exatamente uma vez.
-- `GoogleAdsBackend` é o único lugar que importa o SDK (GoogleMobileAds 12.x e UMP).
+| Arquivo | O que faz |
+|---|---|
+| `AureaAdsManager.swift` | `AdsPolicy`, `AdsFrequencyController` e o manager. O manager decide quando um anúncio pode aparecer e garante que `continuar` seja chamado exatamente uma vez. |
+| `LevelPlayAdsBackend.swift` | O provedor ativo e o ÚNICO arquivo que importa o LevelPlay (`import IronSource`). |
+| `UmpConsent.swift` | Consentimento pelo UMP do Google (TCF), lido pelo LevelPlay e pelas redes. |
+| `AureaAds.swift` | Liga o manager ao app: `AureaApp`, quando a cena fica ativa. |
+| `GoogleAdsBackend.swift` | AdMob direto. Está desligado e fica fora do alvo do Xcode; pode voltar como rede mediada. |
 
-**Não foi compilado nem testado**: não há Mac neste ambiente. Os arquivos também não entraram no `Aurea.xcodeproj` nem no `Info.plist`, porque os dois têm alterações pendentes de outra sessão.
+## IDs do iOS
 
-## Para ligar (num Mac)
+Nunca usar os do Android.
 
-1. Adicionar os pacotes pelo Swift Package Manager:
-   - `https://github.com/googleads/swift-package-manager-google-mobile-ads`, que já traz o UMP.
-2. Colocar `Ads/*.swift` no alvo do app.
-3. No `Info.plist`:
-   - `GADApplicationIdentifier`: em DEBUG, o App ID de teste do Google, `ca-app-pub-3940256099942544~1458002511`; em release, o real.
-   - `SKAdNetworkItems`: a lista do Google.
-   - `AureaAdAppOpenUnit` e `AureaAdInterstitialUnit`: os IDs reais, usados só em release. Vazio = aquele formato não pede anúncio.
-4. No app:
-   - Na abertura:
-     - `AureaAdsManager.shared.initialize(from: rootVC, backend: GoogleAdsBackend(), frequency: AdsFrequencyController(), ids: .current)`.
-     - Quando o motor ficar pronto: `onAppLoaded(host:working:)`.
-   - Lifecycle da cena:
-     - `sceneDidEnterBackground` → `onBackground()`.
-     - `sceneWillEnterForeground` → `onForeground(host:working:)`.
-     - Chamar `attach(_:)` e `detach(_:)` com o view controller visível.
-   - Exportação: ao terminar, com o vídeo já salvo, chamar `showExportInterstitialIfAvailable { mostrarResultado() }`.
+- App Key do LevelPlay: `284ec147d`
+- Rewarded do AI Video: `mgykirb9g392nodz`
+- Interstitial da exportação: `a26boa5s3ws0el0v`
+- Unity Ads (Game ID `800380103`, placements `BP_Rewarded_iOS` e `BP_Interstitial_iOS`): configurados no painel do LevelPlay. O app não usa esses valores.
+
+## Pacotes SPM
+
+Estão no `Aurea.xcodeproj`, com versão exata:
+
+- `LevelPlay-Swift-Package` 9.6.0, produto `UnityMediationSDK`
+- `LevelPlay-UnityAds-Adapter-Swift-Package` 5.12.0, produto `UnityAdsAdapter`, que traz o Unity Ads 4.20.1
+- `swift-package-manager-google-user-messaging-platform` 3.1.0, produto `GoogleUserMessagingPlatform`
+
+O `-ObjC` em `OTHER_LDFLAGS` é exigido pelo LevelPlay.
+
+## Info.plist
+
+- `SKAdNetworkItems`: ironSource e a lista oficial da Unity.
+- `NSAdvertisingAttributionReportEndpoint`.
+- `NSAppTransportSecurity`.
+- `GADApplicationIdentifier`: o App ID de TESTE, que o UMP exige.
+
+## Fluxos
+
+- **Exportação:** quando o vídeo já está salvo, o `AureaModel` chama `showExportInterstitialIfAvailable {}`. Isso não segura o render nem a exportação.
+- **AI Video:** use `preloadRewarded` e `showRewarded(opened:reward:closed:failed:)`.
+  - Só `reward` libera o vídeo; ele vem do `didRewardAd` do SDK.
+  - `closed(earned)` nunca libera.
+  - O iOS ainda NÃO tem a tela AI Video nem o cliente do H3; quando tiver, o fluxo segue o `AiRewardFlow` do Android (`ai/Recompensa.kt`).
+- **Test Suite (DEBUG):** rode com o argumento de launch `-levelplay_test_suite`.

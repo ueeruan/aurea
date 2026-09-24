@@ -40,6 +40,13 @@
 		AE0000000000000000000057 /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000024 /* UniformTypeIdentifiers.framework */; };
 		AE0000000000000000000058 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000025 /* Foundation.framework */; };
 		AE0000000000000000000059 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000026 /* UIKit.framework */; };
+		AD0000000000000000000011 /* AureaAdsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000001 /* AureaAdsManager.swift */; };
+		AD0000000000000000000012 /* LevelPlayAdsBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000002 /* LevelPlayAdsBackend.swift */; };
+		AD0000000000000000000013 /* UmpConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000003 /* UmpConsent.swift */; };
+		AD0000000000000000000014 /* AureaAds.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000004 /* AureaAds.swift */; };
+		AD0000000000000000000041 /* UnityMediationSDK in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000031 /* UnityMediationSDK */; };
+		AD0000000000000000000042 /* UnityAdsAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000032 /* UnityAdsAdapter */; };
+		AD0000000000000000000043 /* GoogleUserMessagingPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000033 /* GoogleUserMessagingPlatform */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -82,6 +89,10 @@
 		AE0000000000000000000024 /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 		AE0000000000000000000025 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		AE0000000000000000000026 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		AD0000000000000000000001 /* AureaAdsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAdsManager.swift; path = Ads/AureaAdsManager.swift; sourceTree = "<group>"; };
+		AD0000000000000000000002 /* LevelPlayAdsBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LevelPlayAdsBackend.swift; path = Ads/LevelPlayAdsBackend.swift; sourceTree = "<group>"; };
+		AD0000000000000000000003 /* UmpConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UmpConsent.swift; path = Ads/UmpConsent.swift; sourceTree = "<group>"; };
+		AD0000000000000000000004 /* AureaAds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAds.swift; path = Ads/AureaAds.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -103,6 +114,9 @@
 				AE0000000000000000000057 /* UniformTypeIdentifiers.framework in Frameworks */,
 				AE0000000000000000000058 /* Foundation.framework in Frameworks */,
 				AE0000000000000000000059 /* UIKit.framework in Frameworks */,
+				AD0000000000000000000041 /* UnityMediationSDK in Frameworks */,
+				AD0000000000000000000042 /* UnityAdsAdapter in Frameworks */,
+				AD0000000000000000000043 /* GoogleUserMessagingPlatform in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -133,6 +147,10 @@
 				AE0000000000000000000009 /* TransformView.swift */,
 				AE000000000000000000000A /* Panel3DView.swift */,
 				AE000000000000000000000B /* ExportView.swift */,
+				AD0000000000000000000001 /* AureaAdsManager.swift */,
+				AD0000000000000000000002 /* LevelPlayAdsBackend.swift */,
+				AD0000000000000000000003 /* UmpConsent.swift */,
+				AD0000000000000000000004 /* AureaAds.swift */,
 				AE000000000000000000000C /* Theme.swift */,
 				AE000000000000000000000D /* AureaModel.swift */,
 				AE000000000000000000000E /* AureaStrings.swift */,
@@ -203,6 +221,11 @@
 			dependencies = (
 			);
 			name = Aurea;
+			packageProductDependencies = (
+				AD0000000000000000000031 /* UnityMediationSDK */,
+				AD0000000000000000000032 /* UnityAdsAdapter */,
+				AD0000000000000000000033 /* GoogleUserMessagingPlatform */,
+			);
 			productName = Aurea;
 			productReference = AE000000000000000000002C /* Aurea.app */;
 			productType = "com.apple.product-type.application";
@@ -232,6 +255,11 @@
 				Base,
 			);
 			mainGroup = AE0000000000000000000027;
+			packageReferences = (
+				AD0000000000000000000021 /* XCRemoteSwiftPackageReference "LevelPlay-Swift-Package" */,
+				AD0000000000000000000022 /* XCRemoteSwiftPackageReference "LevelPlay-UnityAds-Adapter-Swift-Package" */,
+				AD0000000000000000000023 /* XCRemoteSwiftPackageReference "swift-package-manager-google-user-messaging-platform" */,
+			);
 			productRefGroup = AE000000000000000000002B /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -288,6 +316,10 @@
 				AE0000000000000000000041 /* TransformView.swift in Sources */,
 				AE0000000000000000000042 /* Panel3DView.swift in Sources */,
 				AE0000000000000000000043 /* ExportView.swift in Sources */,
+				AD0000000000000000000011 /* AureaAdsManager.swift in Sources */,
+				AD0000000000000000000012 /* LevelPlayAdsBackend.swift in Sources */,
+				AD0000000000000000000013 /* UmpConsent.swift in Sources */,
+				AD0000000000000000000014 /* AureaAds.swift in Sources */,
 				AE0000000000000000000044 /* Theme.swift in Sources */,
 				AE0000000000000000000045 /* AureaModel.swift in Sources */,
 				AE0000000000000000000046 /* AureaStrings.swift in Sources */,
@@ -385,6 +417,7 @@
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
+					"-ObjC",
 					"-laurea_ios",
 					"-laurea_metal",
 					"-laurea_core",
@@ -430,6 +463,7 @@
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
+					"-ObjC",
 					"-laurea_ios",
 					"-laurea_metal",
 					"-laurea_core",
@@ -465,6 +499,51 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AD0000000000000000000021 /* XCRemoteSwiftPackageReference "LevelPlay-Swift-Package" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ironsource-mobile/LevelPlay-Swift-Package";
+			requirement = {
+				kind = exactVersion;
+				version = 9.6.0;
+			};
+		};
+		AD0000000000000000000022 /* XCRemoteSwiftPackageReference "LevelPlay-UnityAds-Adapter-Swift-Package" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ironsource-mobile/LevelPlay-UnityAds-Adapter-Swift-Package";
+			requirement = {
+				kind = exactVersion;
+				version = 5.12.0;
+			};
+		};
+		AD0000000000000000000023 /* XCRemoteSwiftPackageReference "swift-package-manager-google-user-messaging-platform" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-user-messaging-platform";
+			requirement = {
+				kind = exactVersion;
+				version = 3.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AD0000000000000000000031 /* UnityMediationSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AD0000000000000000000021 /* XCRemoteSwiftPackageReference "LevelPlay-Swift-Package" */;
+			productName = UnityMediationSDK;
+		};
+		AD0000000000000000000032 /* UnityAdsAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AD0000000000000000000022 /* XCRemoteSwiftPackageReference "LevelPlay-UnityAds-Adapter-Swift-Package" */;
+			productName = UnityAdsAdapter;
+		};
+		AD0000000000000000000033 /* GoogleUserMessagingPlatform */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AD0000000000000000000023 /* XCRemoteSwiftPackageReference "swift-package-manager-google-user-messaging-platform" */;
+			productName = GoogleUserMessagingPlatform;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = AE000000000000000000002E /* Project object */;
 }

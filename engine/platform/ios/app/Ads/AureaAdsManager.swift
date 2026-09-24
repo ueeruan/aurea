@@ -1,35 +1,24 @@
 // =============================================================================
-//  Aurea iOS — anúncios (AdMob). Mesma arquitetura do Android
+//  Aurea iOS — anúncios. Mesma arquitetura do Android
 //  (android/app/src/main/java/com/aurea/aurea/ads/): política e frequência
-//  aqui, o SDK só no GoogleAdsBackend. REGRA: anúncio nunca quebra nem segura
-//  função do Aurea — todo "mostrar" chama `continuar` exatamente uma vez.
-//
-//  NÃO COMPILADO AQUI (sem Mac). Ligação pendente — ver Ads/README.md.
+//  aqui, o SDK só no backend (LevelPlayAdsBackend). REGRA: anúncio nunca quebra
+//  nem segura função do Aurea — todo "mostrar" chama `continuar` exatamente uma vez.
 // =============================================================================
 import Foundation
 
-enum AdKind { case appOpen, exportInterstitial }
+enum AdKind { case appOpen, exportInterstitial, aiRewarded }
 
-/// Os IDs, por configuração de build. DEBUG = SÓ os de teste oficiais do Google.
+/// Os IDs do iOS. NUNCA os do Android (cada plataforma tem app e unidades próprias).
 struct AdsIds {
     let appOpen: String
     let interstitial: String
+    let aiRewarded: String
 
-    static let testPublisher = "ca-app-pub-3940256099942544"
-
-    static var current: AdsIds {
-        #if DEBUG
-        // IDs de TESTE do Google para iOS.
-        return AdsIds(appOpen: "ca-app-pub-3940256099942544/5575463023",
-                      interstitial: "ca-app-pub-3940256099942544/4411468910")
-        #else
-        // Release: IDs reais vêm do Info.plist (AureaAdAppOpenUnit / AureaAdInterstitialUnit).
-        // Vazio = aquele formato não pede anúncio.
-        let info = Bundle.main.infoDictionary ?? [:]
-        return AdsIds(appOpen: (info["AureaAdAppOpenUnit"] as? String) ?? "",
-                      interstitial: (info["AureaAdInterstitialUnit"] as? String) ?? "")
-        #endif
-    }
+    /// Unity LevelPlay (iOS). App Open não existe no LevelPlay.
+    static let levelPlayAppKey = "284ec147d"
+    static let current = AdsIds(appOpen: "",
+                                interstitial: "a26boa5s3ws0el0v",
+                                aiRewarded: "mgykirb9g392nodz")
 }
 
 /// Todos os números de frequência num lugar só (os mesmos do Android).
@@ -42,6 +31,7 @@ struct AdsPolicy {
     var exportWindow: TimeInterval = 30 * 60
     var appOpenMaxAge: TimeInterval = 4 * 3600
     var interstitialMaxAge: TimeInterval = 3600
+    var rewardedMaxAge: TimeInterval = 3600
     var showStartTimeout: TimeInterval = 5
     var showHardCap: TimeInterval = 180
 }
@@ -77,6 +67,7 @@ final class AdsFrequencyController {
         d.set(now, forKey: "last_fullscreen")
         switch kind {
         case .appOpen: d.set(now, forKey: "last_app_open")
+        case .aiRewarded: break   // pedido pelo usuário: só conta como "tela cheia recente"
         case .exportInterstitial:
             let shows = ((d.array(forKey: "export_at") as? [TimeInterval]) ?? []) + [now]
             d.set(Array(shows.suffix(8)), forKey: "export_at")
@@ -84,12 +75,14 @@ final class AdsFrequencyController {
     }
 }
 
-/// O que o manager precisa de um provedor (o GoogleAdsBackend; falso nos testes).
+/// O que o manager precisa de um provedor (o LevelPlayAdsBackend; falso nos testes).
 protocol AdsBackend: AnyObject {
     func initialize(from host: AnyObject, done: @escaping (_ canRequestAds: Bool) -> Void)
     func load(_ kind: AdKind, unitId: String, loaded: @escaping () -> Void, failed: @escaping (String) -> Void)
+    /// `rewarded` só vem do callback OFICIAL de recompensa do SDK; `dismissed` nunca recompensa.
     func show(_ kind: AdKind, from host: AnyObject, opened: @escaping () -> Void,
-              dismissed: @escaping () -> Void, failed: @escaping (String) -> Void) -> Bool
+              dismissed: @escaping () -> Void, failed: @escaping (String) -> Void,
+              rewarded: @escaping () -> Void) -> Bool
     func release(_ kind: AdKind)
 }
 
@@ -99,11 +92,13 @@ final class AureaAdsManager {
 
     private var backend: AdsBackend?
     private var frequency: AdsFrequencyController?
-    private var ids = AdsIds(appOpen: "", interstitial: "")
+    private var ids = AdsIds(appOpen: "", interstitial: "", aiRewarded: "")
     private var canRequest = false
     private var appOpenAt: TimeInterval = 0
     private var interstitialAt: TimeInterval = 0
+    private var rewardedAt: TimeInterval = 0
     private var loading: Set<String> = []
+    private var rewardedWaiting: [(ok: () -> Void, fail: (String) -> Void)] = []
     private var fullscreenOpen = false
     private var coldStartResolved = false
     private var backgroundAt: TimeInterval = 0
@@ -119,14 +114,16 @@ final class AureaAdsManager {
     func initialize(from host: AnyObject, backend: AdsBackend, frequency: AdsFrequencyController, ids: AdsIds) {
         guard self.backend == nil else { return }
         self.backend = backend; self.frequency = frequency; self.ids = ids
+        self.host = host
         frequency.registerLaunch()
         backend.initialize(from: host) { [weak self] ok in
             guard let self else { return }
             self.canRequest = ok
-            self.log("[AUREA ADS] SDK initialized")
+            self.log("[AUREA ADS] SDK initialized (consentimento permite anúncios: \(ok))")
             if ok {
                 if !frequency.isFirstUse { self.preloadAppOpen() }
                 self.preloadExportInterstitial()
+                self.preloadRewarded()
             }
         }
     }
@@ -154,15 +151,23 @@ final class AureaAdsManager {
 
     private func isValid(_ kind: AdKind) -> Bool {
         guard let f = frequency else { return false }
-        let at = kind == .appOpen ? appOpenAt : interstitialAt
-        let maxAge = kind == .appOpen ? f.policy.appOpenMaxAge : f.policy.interstitialMaxAge
+        let at: TimeInterval, maxAge: TimeInterval
+        switch kind {
+        case .appOpen: at = appOpenAt; maxAge = f.policy.appOpenMaxAge
+        case .exportInterstitial: at = interstitialAt; maxAge = f.policy.interstitialMaxAge
+        case .aiRewarded: at = rewardedAt; maxAge = f.policy.rewardedMaxAge
+        }
         if at == 0 { return false }
         if now() - at > maxAge { consume(kind); return false }
         return true
     }
 
     private func consume(_ kind: AdKind) {
-        if kind == .appOpen { appOpenAt = 0 } else { interstitialAt = 0 }
+        switch kind {
+        case .appOpen: appOpenAt = 0
+        case .exportInterstitial: interstitialAt = 0
+        case .aiRewarded: rewardedAt = 0
+        }
         backend?.release(kind)
     }
 
@@ -198,6 +203,8 @@ final class AureaAdsManager {
             : !isValid(.exportInterstitial) ? "interstitial não carregado" : f.exportBlock(now: now())
         if let block { unavailable("Interstitial", block); next(); return }
         present(.exportInterstitial, b, f, h, next)
+        // Consumido: já pede o próximo (o load é assíncrono e não segura nada).
+        preloadExportInterstitial()
     }
 
     private func present(_ kind: AdKind, _ b: AdsBackend, _ f: AdsFrequencyController, _ h: AnyObject, _ next: @escaping () -> Void) {
@@ -215,11 +222,100 @@ final class AureaAdsManager {
             opened = true
             f.recordShown(kind, now: self?.now() ?? 0)
             self?.log("[AUREA ADS] \(name) shown")
-        }, dismissed: { finish(nil) }, failed: { finish($0) })
+        }, dismissed: { finish(nil) }, failed: { finish($0) }, rewarded: {})
         consume(kind)
         if !tried { finish("sem anúncio para mostrar"); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + f.policy.showStartTimeout) { if !opened { finish("não abriu") } }
         DispatchQueue.main.asyncAfter(deadline: .now() + f.policy.showHardCap) { finish("sem aviso de fechamento") }
+    }
+
+    // MARK: Rewarded da geração por IA (AI Video)
+
+    /// Há um Rewarded carregado e dentro da validade, pronto para aparecer agora.
+    func rewardedReady() -> Bool { canRequest && isValid(.aiRewarded) }
+
+    /// Carrega o Rewarded (na abertura e depois de consumido). `loaded`/`failed`:
+    /// no máximo um dos dois, uma vez.
+    func preloadRewarded(loaded: (() -> Void)? = nil, failed: ((String) -> Void)? = nil) {
+        var answered = false
+        let ok = { if !answered { answered = true; loaded?() } }
+        let fail = { (e: String) in if !answered { answered = true; failed?(e) } }
+        if isValid(.aiRewarded) { ok(); return }
+        guard let b = backend else { fail("anúncios não iniciados"); return }
+        guard canRequest else { fail("sem consentimento/SDK"); return }
+        guard !ids.aiRewarded.isEmpty else { fail("sem ID de rewarded"); return }
+        rewardedWaiting.append((ok, fail))
+        guard !loading.contains("rw") else { return }
+        loading.insert("rw")
+        b.load(.aiRewarded, unitId: ids.aiRewarded, loaded: { [weak self] in
+            guard let self else { return }
+            self.loading.remove("rw")
+            self.rewardedAt = self.now()
+            self.log("[AUREA ADS] Rewarded loaded")
+            self.notifyRewardedWaiting(nil)
+        }, failed: { [weak self] e in
+            guard let self else { return }
+            self.loading.remove("rw")
+            self.onAdFailed(.aiRewarded, e)
+            self.notifyRewardedWaiting(e)
+        })
+    }
+
+    private func notifyRewardedWaiting(_ error: String?) {
+        let list = rewardedWaiting
+        rewardedWaiting.removeAll()
+        list.forEach { error == nil ? $0.ok() : $0.fail(error!) }
+    }
+
+    /// Mostra o Rewarded. A RECOMPENSA só existe por `reward`, que vem do callback
+    /// oficial do SDK (didRewardAd). `closed(earned)` é só o aviso de que a tela
+    /// fechou — nunca concede nada. Devolve `false` (e chama `failed`) se não havia
+    /// anúncio para mostrar.
+    @discardableResult
+    func showRewarded(opened: @escaping () -> Void, reward: @escaping () -> Void,
+                      closed: @escaping (_ earned: Bool) -> Void, failed: @escaping (String) -> Void) -> Bool {
+        let reason: String? = backend == nil || frequency == nil ? "anúncios não iniciados"
+            : host == nil ? "tela não visível" : !canRequest ? "sem consentimento/SDK"
+            : fullscreenOpen ? "outro anúncio na tela" : !isValid(.aiRewarded) ? "rewarded não carregado" : nil
+        guard reason == nil, let b = backend, let f = frequency, let h = host else {
+            unavailable("Rewarded", reason ?? "?"); failed(reason ?? "anúncio indisponível"); return false
+        }
+        var didOpen = false, earned = false, finished = false
+        let finish: (String?) -> Void = { [weak self] err in
+            guard !finished else { return }
+            finished = true
+            self?.fullscreenOpen = false
+            if let err {
+                self?.onAdFailed(.aiRewarded, err)
+                if didOpen { closed(earned) } else { failed(err) }
+            } else {
+                self?.log("[AUREA ADS] Rewarded dismissed")
+                closed(earned)
+            }
+            self?.preloadRewarded()   // consumido: já pede o próximo
+        }
+        fullscreenOpen = true
+        let tried = b.show(.aiRewarded, from: h, opened: { [weak self] in
+            guard !didOpen else { return }
+            didOpen = true
+            f.recordShown(.aiRewarded, now: self?.now() ?? 0)
+            self?.log("[AUREA ADS] Rewarded shown")
+            opened()
+        }, dismissed: { finish(nil) }, failed: { finish($0) }, rewarded: { [weak self] in
+            guard !earned else { return }
+            earned = true
+            self?.log("[AUREA ADS] Reward earned")
+            reward()
+        })
+        consume(.aiRewarded)
+        if !tried {
+            fullscreenOpen = false
+            unavailable("Rewarded", "sem anúncio para mostrar"); failed("sem anúncio para mostrar")
+            preloadRewarded()
+            return false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + f.policy.showStartTimeout) { if !didOpen { finish("não abriu") } }
+        return true
     }
 
     private func unavailable(_ what: String, _ why: String) {
@@ -227,6 +323,12 @@ final class AureaAdsManager {
     }
 
     func onAdFailed(_ kind: AdKind, _ error: String) {
-        log("[AUREA ADS] Ad error: \(kind == .appOpen ? "AppOpen" : "Interstitial"): \(error)")
+        let name: String
+        switch kind {
+        case .appOpen: name = "AppOpen"
+        case .exportInterstitial: name = "Interstitial"
+        case .aiRewarded: name = "Rewarded"
+        }
+        log("[AUREA ADS] Ad error: \(name): \(error)")
     }
 }

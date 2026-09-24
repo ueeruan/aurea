@@ -837,6 +837,8 @@ final class AureaModel: ObservableObject {
                     self.exporting = false
                     let result = (self.exportProgress["result"] as? NSNumber)?.intValue ?? 0
                     self.toast = result == 0 ? AureaText.t("editor_video_pronto") : "o export falhou"
+                    // Ponto seguro: o render acabou e o vídeo já está salvo. Não segura nada.
+                    if result == 0 { AureaAdsManager.shared.showExportInterstitialIfAvailable {} }
                 }
             }
         }

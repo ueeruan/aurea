@@ -103,7 +103,8 @@ def main():
     known_isa = {"PBXBuildFile", "PBXFileReference", "PBXFrameworksBuildPhase", "PBXGroup",
                  "PBXNativeTarget", "PBXProject", "PBXResourcesBuildPhase",
                  "PBXShellScriptBuildPhase", "PBXSourcesBuildPhase", "XCBuildConfiguration",
-                 "XCConfigurationList"}
+                 "XCConfigurationList",
+                 "XCRemoteSwiftPackageReference", "XCSwiftPackageProductDependency"}
     for isa in set(re.findall(r"isa = (\w+);", text)):
         if isa not in known_isa:
             fail("isa desconhecido: " + isa)
@@ -146,6 +147,9 @@ def main():
             continue
         ref = re.search(r"fileRef = ([0-9A-F]{24})", body)
         if not ref:
+            # Produto de pacote Swift (SPM): não é arquivo no disco.
+            if re.search(r"productRef = [0-9A-F]{24}", body):
+                continue
             fail("PBXBuildFile sem fileRef: " + comment)
             continue
         if ref.group(1) not in file_refs:

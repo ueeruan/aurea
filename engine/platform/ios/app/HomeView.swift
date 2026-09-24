@@ -318,7 +318,12 @@ struct HomeView: View {
         pendingProject = nil
         let created = model.newProject(width: draft.width, height: draft.height,
                                        fps: draft.fps, title: draft.title)
-        guard created, let url = model.projectURL else { return }
+        guard created, let url = model.projectURL else {
+            // Antes daqui saia calado: o usuario tocava, nada acontecia, e nao
+            // havia nem projeto nem explicacao.
+            if (model.toast ?? "").isEmpty { model.toast = "não foi possível criar o projeto" }
+            return
+        }
         // A capa e a ficha nascem com o projeto (o Android grava as duas no
         // mesmo save) — sem elas o cartão ficaria na moldura do formato.
         _ = model.saveProject(writeThumbnail: true)

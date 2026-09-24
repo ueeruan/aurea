@@ -150,7 +150,17 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             block()
             return
         }
-        viewModelScope.launch { if (awaitEngine(store)) block() }
+        viewModelScope.launch {
+            if (awaitEngine(store)) {
+                block()
+                return@launch
+            }
+            // Antes daqui o toque simplesmente DESAPARECIA: sem projeto, sem
+            // aviso, sem nada. Num aparelho de verdade o motor frio passa dos
+            // 15 s com facilidade, e era isso que os usuarios relatavam como
+            // "tento criar e nao cria".
+            store.showToast(getApplication<Application>().getString(R.string.engine_not_ready))
+        }
     }
 
     private suspend fun awaitEngine(store: EditorStore): Boolean =
@@ -236,7 +246,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         private const val KEY_RESOLUTION = "settings.defaultResolution"
         private const val KEY_FPS = "settings.defaultFps"
         private const val KEY_DEV = "dev.escondido"
-        private const val ENGINE_WAIT_MS = 15_000L
+        // 15 s nao bastavam no aparelho frio (compilar shader e abrir o cache
+        // levam mais que isso na primeira vez). 90 s cobre a primeira abertura
+        // sem transformar uma falha real em espera eterna.
+        private const val ENGINE_WAIT_MS = 90_000L
     }
 }
 

@@ -1676,4 +1676,5 @@ to edit the curve.</string>
     <string name="ai_video_pronto_assista">Your video is ready. Watch the ad to unlock it.</string>
     <string name="ai_assista_completo">Watch the full ad to unlock your video.</string>
     <string name="ai_assistir_e_liberar">Watch and unlock video</string>
+    <string name="engine_not_ready">The engine is still starting. Try again in a moment.</string>
 </resources>

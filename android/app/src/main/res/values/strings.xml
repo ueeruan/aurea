@@ -1708,4 +1708,5 @@
     <string name="ai_video_pronto_assista">Seu vídeo está pronto. Assista ao anúncio para liberar.</string>
     <string name="ai_assista_completo">Assista ao anúncio completo para liberar seu vídeo.</string>
     <string name="ai_assistir_e_liberar">Assistir e liberar vídeo</string>
+    <string name="engine_not_ready">O motor ainda está preparando. Tente de novo em instantes.</string>
 </resources>

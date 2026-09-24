@@ -21,5 +21,5 @@
     <!-- Unity LevelPlay: app e unidades reais. App Open não existe no LevelPlay. -->
     <string name="levelplay_app_key" translatable="false">284eaf4d5</string>
     <string name="levelplay_ai_rewarded_unit" translatable="false">h0ur81vem0v39pal</string>
-    <string name="levelplay_export_interstitial_unit" translatable="false">drges8f0kfm9986g</string>
+    <string name="levelplay_export_interstitial_unit" translatable="false">ah6wbmh7d0091af8</string>
 </resources>

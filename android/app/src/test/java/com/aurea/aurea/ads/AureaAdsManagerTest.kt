@@ -356,7 +356,7 @@ class AureaAdsManagerTest {
         assertEquals("levelplay", valor("ads_provider"))
         assertEquals("284eaf4d5", valor("levelplay_app_key"))
         assertEquals("h0ur81vem0v39pal", valor("levelplay_ai_rewarded_unit"))
-        assertEquals("drges8f0kfm9986g", valor("levelplay_export_interstitial_unit"))
+        assertEquals("ah6wbmh7d0091af8", valor("levelplay_export_interstitial_unit"))
         // O backend do LevelPlay nunca oferece App Open.
         val lp = File("src/main/java/com/aurea/aurea/ads/AdsConfig.kt").readText()
         assertTrue(Regex("""Provider\.LevelPlay -> AdsIds\(\s*appOpen = "",""").containsMatchIn(lp))

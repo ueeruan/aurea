@@ -42,5 +42,5 @@ O `-ObjC` em `OTHER_LDFLAGS` é exigido pelo LevelPlay.
 - **AI Video:** use `preloadRewarded` e `showRewarded(opened:reward:closed:failed:)`.
   - Só `reward` libera o vídeo; ele vem do `didRewardAd` do SDK.
   - `closed(earned)` nunca libera.
-  - O iOS ainda NÃO tem a tela AI Video nem o cliente do H3; quando tiver, o fluxo segue o `AiRewardFlow` do Android (`ai/Recompensa.kt`).
+  - A tela AI Video está em `app/Ai/` (`AiVideoPanel`, `AureaAiState`, `AiRewardFlow`), porte do Android.
 - **Test Suite (DEBUG):** rode com o argumento de launch `-levelplay_test_suite`.

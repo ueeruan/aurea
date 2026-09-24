@@ -47,6 +47,11 @@
 		AD0000000000000000000041 /* UnityMediationSDK in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000031 /* UnityMediationSDK */; };
 		AD0000000000000000000042 /* UnityAdsAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000032 /* UnityAdsAdapter */; };
 		AD0000000000000000000043 /* GoogleUserMessagingPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000033 /* GoogleUserMessagingPlatform */; };
+		AD0000000000000000000061 /* AureaAiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000051 /* AureaAiClient.swift */; };
+		AD0000000000000000000062 /* AiRewardFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000052 /* AiRewardFlow.swift */; };
+		AD0000000000000000000063 /* AureaAiState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000053 /* AureaAiState.swift */; };
+		AD0000000000000000000064 /* AiVideoPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000054 /* AiVideoPanel.swift */; };
+		AD0000000000000000000065 /* minimax_h3_api.json in Resources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000055 /* minimax_h3_api.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -93,6 +98,11 @@
 		AD0000000000000000000002 /* LevelPlayAdsBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LevelPlayAdsBackend.swift; path = Ads/LevelPlayAdsBackend.swift; sourceTree = "<group>"; };
 		AD0000000000000000000003 /* UmpConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UmpConsent.swift; path = Ads/UmpConsent.swift; sourceTree = "<group>"; };
 		AD0000000000000000000004 /* AureaAds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAds.swift; path = Ads/AureaAds.swift; sourceTree = "<group>"; };
+		AD0000000000000000000051 /* AureaAiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAiClient.swift; path = Ai/AureaAiClient.swift; sourceTree = "<group>"; };
+		AD0000000000000000000052 /* AiRewardFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AiRewardFlow.swift; path = Ai/AiRewardFlow.swift; sourceTree = "<group>"; };
+		AD0000000000000000000053 /* AureaAiState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAiState.swift; path = Ai/AureaAiState.swift; sourceTree = "<group>"; };
+		AD0000000000000000000054 /* AiVideoPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AiVideoPanel.swift; path = Ai/AiVideoPanel.swift; sourceTree = "<group>"; };
+		AD0000000000000000000055 /* minimax_h3_api.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = minimax_h3_api.json; path = Resources/ai/minimax_h3_api.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -151,6 +161,11 @@
 				AD0000000000000000000002 /* LevelPlayAdsBackend.swift */,
 				AD0000000000000000000003 /* UmpConsent.swift */,
 				AD0000000000000000000004 /* AureaAds.swift */,
+				AD0000000000000000000051 /* AureaAiClient.swift */,
+				AD0000000000000000000052 /* AiRewardFlow.swift */,
+				AD0000000000000000000053 /* AureaAiState.swift */,
+				AD0000000000000000000054 /* AiVideoPanel.swift */,
+				AD0000000000000000000055 /* minimax_h3_api.json */,
 				AE000000000000000000000C /* Theme.swift */,
 				AE000000000000000000000D /* AureaModel.swift */,
 				AE000000000000000000000E /* AureaStrings.swift */,
@@ -274,6 +289,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AD0000000000000000000065 /* minimax_h3_api.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -320,6 +336,10 @@
 				AD0000000000000000000012 /* LevelPlayAdsBackend.swift in Sources */,
 				AD0000000000000000000013 /* UmpConsent.swift in Sources */,
 				AD0000000000000000000014 /* AureaAds.swift in Sources */,
+				AD0000000000000000000061 /* AureaAiClient.swift in Sources */,
+				AD0000000000000000000062 /* AiRewardFlow.swift in Sources */,
+				AD0000000000000000000063 /* AureaAiState.swift in Sources */,
+				AD0000000000000000000064 /* AiVideoPanel.swift in Sources */,
 				AE0000000000000000000044 /* Theme.swift in Sources */,
 				AE0000000000000000000045 /* AureaModel.swift in Sources */,
 				AE0000000000000000000046 /* AureaStrings.swift in Sources */,

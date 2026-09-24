@@ -18,6 +18,14 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+      # O IronSource (LevelPlay 9.6.0) vem compilado com Swift 6.2: so linka com o
+      # Xcode 26 (no 16.4 faltam isIsolatingCurrentContext e swift_coroFrameAlloc).
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then echo "Xcode 26 nao instalado no runner"; ls -d /Applications/Xcode*.app; exit 1; fi
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
       - name: Validate native integration and shared Android resources
         run: |
           python3 engine/platform/ios/verify/check_pbxproj.py
@@ -85,6 +93,14 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+      # O IronSource (LevelPlay 9.6.0) vem compilado com Swift 6.2: so linka com o
+      # Xcode 26 (no 16.4 faltam isIsolatingCurrentContext e swift_coroFrameAlloc).
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then echo "Xcode 26 nao instalado no runner"; ls -d /Applications/Xcode*.app; exit 1; fi
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
       - run: brew install cmake ninja shaderc ccache
       - uses: actions/cache/restore@v4
         with:

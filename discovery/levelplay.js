@@ -48,14 +48,54 @@ export async function conferirCallback(params, chaves, { md5 = md5Hex } = {}) {
   const lista = (Array.isArray(chaves) ? chaves : [chaves]).filter(Boolean);
   if (!lista.length) return { ok: false, erro: "chave_nao_configurada" };
   const userId = params.get("userid") ?? params.get("userId") ?? params.get("USER_ID") ?? "";
+  // Com Dynamic User ID o LevelPlay manda o [USER_ID] (o do init, vazio no
+  // Aurea) E o dinâmico num parâmetro próprio — medido no primeiro callback
+  // real: `userid=&...&dynamicUserId=<ticket>`. O ticket é o dinâmico.
+  const dinamico = params.get("dynamicUserId") ?? params.get("dynamicuserid") ?? "";
+  const ticket = dinamico || userId;
   const eventId = params.get("eventId") ?? params.get("eventid") ?? "";
   const rewards = params.get("rewards") ?? "";
   const timestamp = params.get("timestamp") ?? "";
   const assinatura = (params.get("signature") ?? "").toLowerCase();
-  if (!userId || !eventId || !timestamp || !assinatura) return { ok: false, erro: "parametros_faltando", eventId };
+  if (!ticket || !eventId || !timestamp || !assinatura) return { ok: false, erro: "parametros_faltando", eventId };
+  // A documentação assina com o [USER_ID]; com o dinâmico, confere as duas
+  // leituras — o que vale é a assinatura bater com a NOSSA chave.
+  const ids = [...new Set([userId, dinamico].filter((v) => v !== null))];
   for (let i = 0; i < lista.length; i++) {
-    const esperada = await md5(timestamp + eventId + userId + rewards + lista[i]);
-    if (iguaisEmTempoConstante(assinatura, esperada)) return { ok: true, userId, eventId, rewards, chave: i };
+    for (const id of ids) {
+      const esperada = await md5(timestamp + eventId + id + rewards + lista[i]);
+      if (iguaisEmTempoConstante(assinatura, esperada)) return { ok: true, userId: ticket, eventId, rewards, chave: i, assinadoCom: id === dinamico ? "dinamico" : "userid" };
+    }
   }
-  return { ok: false, erro: "assinatura_invalida", eventId };
+  return { ok: false, erro: "assinatura_invalida", eventId, diagnostico: await diagnosticar(params, lista, md5) };
+}
+
+/**
+ * Só quando a assinatura NÃO bate: testa as leituras plausíveis da fórmula e
+ * diz qual bateu (nunca a chave). Serve para achar a diferença entre a
+ * documentação e o que o LevelPlay manda de verdade.
+ */
+async function diagnosticar(params, chaves, md5) {
+  const g = (k) => params.get(k) ?? "";
+  const ts = g("timestamp"), ev = g("eventId"), rw = g("rewards"), uid = g("userid"), dyn = g("dynamicUserId");
+  const sig = g("signature").toLowerCase();
+  const variantes = {
+    "ts+ev+uid+rw+k": (k) => ts + ev + uid + rw + k,
+    "ts+ev+dyn+rw+k": (k) => ts + ev + dyn + rw + k,
+    "ts+ev+rw+k": (k) => ts + ev + rw + k,
+    "ev+ts+uid+rw+k": (k) => ev + ts + uid + rw + k,
+    "ev+ts+dyn+rw+k": (k) => ev + ts + dyn + rw + k,
+    "ts+ev+uid+dyn+rw+k": (k) => ts + ev + uid + dyn + rw + k,
+    "ts+ev+dyn+uid+rw+k": (k) => ts + ev + dyn + uid + rw + k,
+  };
+  const achados = [];
+  for (let i = 0; i < chaves.length; i++) {
+    for (const [trim, k] of [["", chaves[i]], ["trim", chaves[i].trim()]]) {
+      for (const [nome, f] of Object.entries(variantes)) {
+        if ((await md5(f(k))) === sig) achados.push(`chave${i}${trim ? "(" + trim + ")" : ""}:${nome}`);
+      }
+    }
+  }
+  const tamanhos = chaves.map((k) => `${k.length}${k !== k.trim() ? "*" : ""}`).join(",");
+  return `bateu=[${achados.join(" ")}] tamanhos_das_chaves=[${tamanhos}] uidVazio=${uid === ""} sigLen=${sig.length}`;
 }

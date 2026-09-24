@@ -273,7 +273,10 @@ final class AureaAiState: ObservableObject {
         } catch let e as VideoFailure {
             Self.log("falha = \(e.code)")
             status = .connected
-            finish(nil, e.code, e.transient || e.code.hasPrefix("download") || e.code == "tempo_esgotado")
+            // `recompensa_pendente`: o anúncio FOI assistido; só a confirmação do
+            // provedor ainda não chegou — repetir não pede outro anúncio.
+            finish(nil, e.code, e.transient || e.code.hasPrefix("download") || e.code == "tempo_esgotado"
+                   || e.code == "recompensa_pendente")
         } catch {
             status = .connected
             finish(nil, "geracao_falhou", true)

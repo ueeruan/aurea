@@ -185,11 +185,11 @@ export async function rotaDeVideo(req, env, ctx, url) {
     }
     const r = await conferirCallback(url.searchParams, chavesDoLevelPlay(env));
     if (!r.ok) {
-      console.warn(`[ai-video] callback levelplay recusado: ${r.erro}`);
+      console.warn(`[ai-video] callback levelplay recusado: ${r.erro}${r.diagnostico ? " " + r.diagnostico : ""}`);
       return new Response(`erro:${r.erro}`, { status: r.erro === "chave_nao_configurada" ? 503 : 400 });
     }
     const res = await cofre.registrarRecompensa({ ticketId: r.userId, eventId: r.eventId, agora });
-    console.log(`[ai-video] recompensa S2S valida (${r.chave === 0 ? "android" : r.chave === 1 ? "ios" : "chave " + r.chave})${res.ignorado ? "" : " -> ticket liberado"}`);
+    console.log(`[ai-video] recompensa S2S valida (chave ${r.chave}, assinada com ${r.assinadoCom})${res.ignorado ? " ignorada: " + res.ignorado : res.repetido ? " repetida (evento ja usado)" : " -> ticket liberado"}`);
     if (res.ignorado) console.warn(`[ai-video] recompensa ignorada: ${res.ignorado}`);
     return new Response(`${r.eventId}:OK`, { status: 200, headers: { "content-type": "text/plain" } });
   }

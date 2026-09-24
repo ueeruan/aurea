@@ -397,7 +397,10 @@ class AureaAiState(
             Log.w(TAG, "[AUREA AI] falha = ${e.codigo}")
             estado = AureaAiEstado.Connected
             // Técnica (rede, provedor fora, download) = a recompensa segue valendo.
-            val repetir = e.transitorio || e.codigo.startsWith("download") || e.codigo == "tempo_esgotado"
+            // `recompensa_pendente`: o anúncio FOI assistido; só a confirmação do
+            // provedor ainda não chegou ao servidor — repetir não pede outro anúncio.
+            val repetir = e.transitorio || e.codigo.startsWith("download") || e.codigo == "tempo_esgotado" ||
+                e.codigo == "recompensa_pendente"
             aoTerminar(null, e.codigo, repetir)
         } catch (e: Exception) {
             Log.w(TAG, "[AUREA AI] falha = $e")

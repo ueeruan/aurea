@@ -1620,6 +1620,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Puxa a camada INTEIRA para o cabeçote: o clipe anda, a duração não muda
+     * e o conteúdo anda junto (o deslocamento interno fica, como no arrasto do
+     * corpo do clipe). É o "trazer para o cabeçote" que faltava na fileira
+     * rápida — aparar come a borda, dividir corta em dois, isto só move.
+     */
+    fun moveToPlayhead(layer: Long) {
+        val d = detailOf(layer) ?: return
+        val start = max(0, playhead)
+        if (start == d.startFrame) return
+        send { setLayerTimeRange(layer, start, start + (d.endFrame - d.startFrame)) }
+        refreshNow()
+    }
+
+    /**
      * Arrasto de clipes na timeline: início/fim ABSOLUTOS de cada camada (o
      * gesto os calcula do estado no começo dele). Idempotente — não depende de
      * a releitura do modelo já ter chegado (fase 8D).

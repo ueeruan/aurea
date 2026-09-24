@@ -96,6 +96,27 @@ AUREA_TEST(Edit, EditModeTrimStartKeepsThePlaceAndPullsTheRest) {
     AUREA_CHECK(r.at(r.c, 48, 78));
 }
 
+// "Puxar para o cabeçote" (o botão da fileira rápida, Android e iOS): o clipe
+// INTEIRO anda até o cabeçote. A duração não muda e o conteúdo anda junto — o
+// offset interno fica, que é o mesmo que o arrasto do corpo do clipe faz. É este
+// payload que o `moveToPlayhead` emite (início e fim, sem `setOffset`).
+AUREA_TEST(Edit, PullToPlayheadKeepsDurationAndContentOffset) {
+    EditRig r;
+    r.e.set_edit_mode(true);
+    r.range(r.b, 42, 60, 12);                          // aparou 12 do começo
+    AUREA_CHECK(r.at(r.b, 30, 48));
+    AUREA_CHECK_EQ(r.L(r.b)->offset.value, 12);
+    const i64 dur = r.L(r.b)->end.value - r.L(r.b)->start.value;
+    const i64 head = 100;
+    r.range(r.b, head, head + dur);                    // sem setOffset
+    AUREA_CHECK(r.at(r.b, head, head + dur));
+    AUREA_CHECK_EQ(r.L(r.b)->offset.value, 12);        // conteúdo andou junto
+    AUREA_CHECK(r.at(r.a, 0, 30));                     // e ninguém mais andou
+    AUREA_CHECK(r.at(r.c, 48, 78));
+    r.undo();
+    AUREA_CHECK(r.at(r.b, 30, 48));
+}
+
 AUREA_TEST(Edit, RippleDeleteClosesOnlyTheHoleItMade) {
     EditRig r;
     // D cobre parte do trecho de B: onde D está não há buraco.

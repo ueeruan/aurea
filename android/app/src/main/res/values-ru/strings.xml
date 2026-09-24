@@ -168,6 +168,7 @@
     <string name="editor_aparar_fim_cabecote">Обрезать конец по курсору</string>
     <string name="editor_aparar_inicio_cabecote">Обрезать начало по курсору</string>
     <string name="editor_aparar_projeto_cabecote">Обрезать проект по курсору</string>
+    <string name="editor_puxar_cabecote">Перетащить слой к курсору</string>
     <string name="editor_aparece_aqui_editor_fica_fora_video">Видно здесь, в редакторе, и не попадает в экспортируемое видео</string>
     <string name="editor_bloquear_camada">Заблокировать слой</string>
     <string name="editor_borra_direcao_movimento_obturador_nas_configuracoes">Размывает по направлению движения (выдержка в настройках проекта)</string>

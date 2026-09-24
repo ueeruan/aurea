@@ -180,6 +180,7 @@
     <string name="editor_aparar_fim_cabecote">قص النهاية عند المؤشّر</string>
     <string name="editor_aparar_inicio_cabecote">قص البداية عند المؤشّر</string>
     <string name="editor_aparar_projeto_cabecote">قص المشروع عند المؤشّر</string>
+    <string name="editor_puxar_cabecote">اسحب الطبقة إلى المؤشّر</string>
     <string name="editor_aparece_aqui_editor_fica_fora_video">يظهر هنا في المحرّر ولا يدخل في الفيديو المُصدَّر</string>
     <string name="editor_bloquear_camada">قفل الطبقة</string>
     <string name="editor_borra_direcao_movimento_obturador_nas_configuracoes">يضبّب في اتجاه الحركة (الغالق في إعدادات المشروع)</string>

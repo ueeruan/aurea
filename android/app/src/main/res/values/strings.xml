@@ -202,6 +202,7 @@
     <string name="editor_aparar_fim_cabecote">Aparar o fim no cabeçote</string>
     <string name="editor_aparar_inicio_cabecote">Aparar o início no cabeçote</string>
     <string name="editor_aparar_projeto_cabecote">Aparar o projeto no cabeçote</string>
+    <string name="editor_puxar_cabecote">Puxar a camada para o cabeçote</string>
     <string name="editor_aparece_aqui_editor_fica_fora_video">Aparece aqui no editor e fica fora do vídeo exportado</string>
     <string name="editor_bloquear_camada">Bloquear camada</string>
     <string name="editor_borra_direcao_movimento_obturador_nas_configuracoes">Borra na direção do movimento (obturador nas configurações do projeto)</string>

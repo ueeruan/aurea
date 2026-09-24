@@ -1768,6 +1768,22 @@ final class AureaModel: ObservableObject {
         refreshModel(force: true)
     }
 
+    /// Puxa a camada INTEIRA para o cabeçote: o clipe anda, a duração não muda e
+    /// o conteúdo anda junto (o deslocamento interno fica). É o "trazer para o
+    /// cabeçote" da fileira rápida — aparar come a borda, dividir corta em dois,
+    /// isto só move (e é justamente para quem está FORA do cabeçote).
+    func moveToPlayhead(_ layerId: Int64) {
+        guard let row = layers.first(where: { $0.id == layerId }), !row.locked else { return }
+        let start = Int(row.startFrame), end = Int(row.endFrame)
+        let target = max(0, Int(status.playhead))
+        guard target != start else { return }
+        engine.run {
+            $0.setLayer(layerId, startFrame: Int32(target), endFrame: Int32(target + (end - start)),
+                        offsetFrames: row.offsetFrames, setOffset: false)
+        }
+        refreshModel(force: true)
+    }
+
     /// Trim do FIM para `frame`. O vídeo não passa do fim da mídia.
     func trimEnd(_ layerId: Int64, at frame: Int64) {
         guard layers.first(where: { $0.id == layerId })?.locked == false else { return }

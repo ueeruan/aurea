@@ -601,6 +601,15 @@ private struct DockView: View {
                         quickAction(CupertinoGlyph.ArrowRightToLine, "editor_aparar_inicio_cabecote") { timeEdit(layer) { model.trimStart(layer.id, at: model.status.playhead) } }
                         quickAction(CupertinoGlyph.Scissors, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
                         quickAction(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote") { timeEdit(layer) { model.trimEnd(layer.id, at: model.status.playhead) } }
+                        // Puxar para o cabeçote: o clipe inteiro anda até o
+                        // cabeçote, a duração não muda. Sem o `timeEdit` (que
+                        // exige o cabeçote DENTRO da camada) — é para quem está
+                        // fora dele.
+                        quickAction(CupertinoGlyph.ArrowDownToLine, "editor_puxar_cabecote") {
+                            guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
+                            pause()
+                            model.moveToPlayhead(layer.id)
+                        }
                         if hasAudio {
                             quickAction(muted ? CupertinoGlyph.SpeakerSlash : CupertinoGlyph.Speaker2,
                                         muted ? "editor_som_desligado_toque_ligar_segure_volume" : "editor_desligar_som_segure_volume",

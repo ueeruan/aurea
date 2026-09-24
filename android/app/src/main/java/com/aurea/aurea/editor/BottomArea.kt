@@ -221,6 +221,16 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                 DockTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), 19) {
                     timeEdit(store, l) { store.trimEnd(l.id, store.playhead) }
                 }
+                // Puxar para o cabeçote: o clipe inteiro anda até o cabeçote, a
+                // duração não muda. Não usa o `timeEdit` (que exige o cabeçote
+                // DENTRO da camada) — é justamente para quem está fora dele.
+                DockTool(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_puxar_cabecote), 19) {
+                    if (l.locked) store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar)
+                    else {
+                        if (store.playing) store.pause()
+                        store.moveToPlayhead(l.id)
+                    }
+                }
                 // Mudo: toque liga/desliga; segurar abre o volume.
                 if (l.hasAudio) {
                     DockTool(

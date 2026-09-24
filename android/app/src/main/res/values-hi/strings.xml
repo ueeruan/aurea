@@ -166,6 +166,7 @@
     <string name="editor_aparar_fim_cabecote">प्लेहेड पर अंत ट्रिम करें</string>
     <string name="editor_aparar_inicio_cabecote">प्लेहेड पर शुरुआत ट्रिम करें</string>
     <string name="editor_aparar_projeto_cabecote">प्लेहेड पर प्रोजेक्ट ट्रिम करें</string>
+    <string name="editor_puxar_cabecote">लेयर को प्लेहेड तक खींचें</string>
     <string name="editor_aparece_aqui_editor_fica_fora_video">एडिटर में यहाँ दिखता है और एक्सपोर्ट हुए वीडियो से बाहर रहता है</string>
     <string name="editor_bloquear_camada">लेयर लॉक करें</string>
     <string name="editor_borra_direcao_movimento_obturador_nas_configuracoes">गति की दिशा में धुंधला करें (प्रोजेक्ट सेटिंग्स में शटर)</string>

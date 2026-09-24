@@ -166,6 +166,7 @@
     <string name="editor_aparar_fim_cabecote">Recortar el final en el cabezal</string>
     <string name="editor_aparar_inicio_cabecote">Recortar el inicio en el cabezal</string>
     <string name="editor_aparar_projeto_cabecote">Recortar el proyecto en el cabezal</string>
+    <string name="editor_puxar_cabecote">Traer la capa al cabezal</string>
     <string name="editor_aparece_aqui_editor_fica_fora_video">Aparece aquí en el editor y queda fuera del vídeo exportado</string>
     <string name="editor_bloquear_camada">Bloquear capa</string>
     <string name="editor_borra_direcao_movimento_obturador_nas_configuracoes">Desenfoca en la dirección del movimiento (obturador en los ajustes del proyecto)</string>

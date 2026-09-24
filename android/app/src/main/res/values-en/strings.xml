@@ -166,6 +166,7 @@
     <string name="editor_aparar_fim_cabecote">Trim the end at the playhead</string>
     <string name="editor_aparar_inicio_cabecote">Trim the start at the playhead</string>
     <string name="editor_aparar_projeto_cabecote">Trim the project at the playhead</string>
+    <string name="editor_puxar_cabecote">Pull the layer to the playhead</string>
     <string name="editor_aparece_aqui_editor_fica_fora_video">Shows here in the editor and stays out of the exported video</string>
     <string name="editor_bloquear_camada">Lock layer</string>
     <string name="editor_borra_direcao_movimento_obturador_nas_configuracoes">Blurs along the motion (shutter in the project settings)</string>

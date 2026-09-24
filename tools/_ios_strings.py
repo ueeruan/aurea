@@ -42,7 +42,7 @@ KEYS = [
     "editor_copiar_estilo", "editor_colar_estilo", "editor_copiar_keyframes_cabecote",
     "editor_colar_keyframes_cabecote", "editor_dividir_cabecote", "editor_mais_acoes_camada",
     "editor_mesclagem_opacidade_efeitos_cores", "editor_estilo_efeitos", "editor_keyframes",
-    "editor_aparar_inicio_cabecote", "editor_aparar_fim_cabecote",
+    "editor_aparar_inicio_cabecote", "editor_aparar_fim_cabecote", "editor_puxar_cabecote",
     "editor_alinhar_esquerda_tela", "editor_alinhar_direita_tela", "editor_alinhar_topo_tela",
     "editor_alinhar_base_tela", "editor_centralizar_horizontal", "editor_centralizar_vertical",
     "editor_distribuir_horizontal_vaos_iguais", "editor_distribuir_vertical_vaos_iguais",

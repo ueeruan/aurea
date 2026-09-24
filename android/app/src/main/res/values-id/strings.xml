@@ -165,6 +165,7 @@
     <string name="editor_aparar_fim_cabecote">Pangkas akhir di kepala playback</string>
     <string name="editor_aparar_inicio_cabecote">Pangkas awal di kepala playback</string>
     <string name="editor_aparar_projeto_cabecote">Pangkas proyek di kepala playback</string>
+    <string name="editor_puxar_cabecote">Tarik lapisan ke kepala playback</string>
     <string name="editor_aparece_aqui_editor_fica_fora_video">Muncul di sini di editor dan tidak ikut ke video hasil ekspor</string>
     <string name="editor_bloquear_camada">Kunci lapisan</string>
     <string name="editor_borra_direcao_movimento_obturador_nas_configuracoes">Kabur mengikuti arah gerak (shutter di pengaturan proyek)</string>

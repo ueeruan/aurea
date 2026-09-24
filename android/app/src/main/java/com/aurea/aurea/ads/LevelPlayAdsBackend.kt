@@ -125,6 +125,11 @@ class LevelPlayAdsBackend(
         }
     }
 
+    /** Dynamic User ID: chega no callback S2S como [USER_ID] (precisa vir ANTES do show). */
+    override fun setRewardUserId(id: String) {
+        runCatching { LevelPlay.setDynamicUserId(id) }
+    }
+
     /** O objeto do LevelPlay é reaproveitado (carregar de novo depois de mostrar); só os callbacks saem. */
     override fun release(kind: AdKind) {
         when (kind) {

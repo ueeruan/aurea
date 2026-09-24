@@ -867,4 +867,9 @@ para editar la curva.</string>
     <string name="particular_emitter_rotation">Rotación del emisor</string>
     <string name="particular_deterministic_note">La simulación es cerrada: la vista previa y la exportación dan siempre el mismo fotograma, y saltar en el tiempo es instantáneo.</string>
     <string name="particular_title">Aurea Particular</string>
+    <string name="ai_aviso_online">Aurea IA en línea. Los anuncios mantienen la infraestructura funcionando, y tú no pagas nada.</string>
+    <string name="ai_assista_para_gerar">Mira el anuncio completo para generar tu video.</string>
+    <string name="ai_assistir_e_gerar_de_novo">Ver y generar</string>
+    <string name="ai_tentar_sem_anuncio">Reintentar (sin anuncio)</string>
+    <string name="ai_gerar_de_novo">Generar de nuevo</string>
 </resources>

@@ -1277,7 +1277,8 @@ final class AureaModel: ObservableObject {
     /// Copia o arquivo escolhido para o sandbox (Media/) e importa. O motor
     /// guarda o caminho RELATIVO a Documents — é o que faz o mesmo .aurea
     /// abrir no Android e no iOS.
-    func importMedia(url: URL, kind: ImportKind, objectHDRI: Int64? = nil) {
+    /// `atPlayhead`: o clipe entra no cabeçote (o vídeo gerado pela IA), não no zero.
+    func importMedia(url: URL, kind: ImportKind, objectHDRI: Int64? = nil, atPlayhead: Bool = false) {
         guard !importingMedia else { return }
         operationMessage = "Importando mídia…"
         importingMedia = true
@@ -1315,6 +1316,7 @@ final class AureaModel: ObservableObject {
                 if kind == .hdri { self.toast = "Ambiente importado" }
                 else { self.engine.selectLayers([NSNumber(value: importedId)]); self.selection = [importedId] }
                 self.refreshModel(force: true)
+                if atPlayhead && kind != .hdri { self.moveToPlayhead(importedId) }
                 _ = self.saveProject(writeThumbnail: false)
             }
         }

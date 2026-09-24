@@ -1,13 +1,22 @@
 // =============================================================================
-//  Aurea iOS — o estado da Aurea AI no aparelho: acha o ComfyUI, gera,
-//  acompanha, baixa e só entrega com a recompensa. Porte de
+//  Aurea iOS — o estado da Aurea AI no aparelho: fala com o BACKEND do Aurea
+//  (que fala com a 8Scale), gera, acompanha, baixa e entrega. Porte de
 //  android/.../ai/AureaAi.kt (AureaAiState).
 //
+//  O app não conhece a 8Scale nem a chave dela: conhece só
+//  `VideoGenerationProvider` — hoje o `AureaBackendVideoProvider`.
+//
 //  Um só por app (`shared`): fechar o painel, girar ou ir para o fundo não perde
-//  a geração — o mesmo papel do estado no EditorStore do Android.
+//  a geração.
 // =============================================================================
 import Foundation
+import AVFoundation
 import Photos
+
+/// Quanto esperar o callback ASSINADO do anúncio chegar ao servidor.
+private let rewardWaitSeconds: TimeInterval = 90
+/// Uma geração que não termina neste tempo é dada como perdida (a 8Scale leva ~30 s).
+private let jobMaxSeconds: TimeInterval = 15 * 60
 
 @MainActor
 final class AureaAiState: ObservableObject {
@@ -19,51 +28,68 @@ final class AureaAiState: ObservableObject {
     @Published private(set) var gpu = ""
     @Published private(set) var modelName = ""
     @Published private(set) var message = ""
+    @Published private(set) var promptMax = 800
     @Published private(set) var job: AiJob?
     @Published private(set) var history: [AiJob] = []
     @Published private(set) var downloading = false
     @Published private(set) var error = ""
-    /// `true` enquanto o Rewarded está na tela.
     @Published private(set) var showingAd = false
-    /// A geração DESTA tela (a última pedida): anúncio, H3 e liberação juntos.
     @Published private(set) var session: AiGenerationSession?
-    /// Último arquivo liberado: pronto para tocar, salvar e ir para a timeline.
     @Published private(set) var lastFile: URL?
     @Published private(set) var lastTitle = ""
 
+    private let provider: VideoGenerationProvider = AureaBackendVideoProvider()
     private var currentSessionId: String?
-    private var comfy: ComfyClient?
     private var watchTask: Task<Void, Never>?
     private var generationTask: Task<Void, Never>?
-    private var finishGeneration: ((URL?, String?) -> Void)?
     private var attempt = 0
+    private var resumed = false
+
     private lazy var flow = AiRewardFlow(
         ads: ManagerRewardedAds(state: self),
-        startGeneration: { [weak self] s, onPromptId, onFinish in
+        requestTicket: { [weak self] s, onTicket, onFail in
             guard let self else { return }
-            self.finishGeneration = onFinish
-            self.generate(s.request, onPromptId: onPromptId) { [weak self] file, e in
-                self?.finishGeneration = nil
-                onFinish(file, e)
+            Task { @MainActor in
+                do {
+                    let t = try await self.provider.ticket(s.request)
+                    Self.log("ticket = ok")
+                    onTicket(t)
+                } catch let e as VideoFailure {
+                    Self.log("ticket recusado: \(e.code)")
+                    onFail(e.code)
+                } catch {
+                    onFail("sem_conexao")
+                }
+            }
+        },
+        bindAd: { ticket in AureaAdsManager.shared.setRewardUserId(ticket) },
+        startGeneration: { [weak self] s, onJob, onFinish in
+            guard let self else { return }
+            self.generationTask?.cancel()
+            self.generationTask = Task { @MainActor [weak self] in
+                await self?.generateAndFollow(s, onJob: onJob, finish: onFinish)
             }
         },
         onChange: { [weak self] s in
-            // Grava SEMPRE, e antes de tudo: o processo pode morrer no instante
-            // seguinte (é o que o anúncio costuma provocar).
+            // Grava SEMPRE, e antes de tudo: o anúncio costuma matar o processo.
             GuardaDaSessao.shared.write(s)
             guard let self, s.generationId == self.currentSessionId else { return }
             self.session = s
-            if s.status == .unlocked { self.unlock(s) }
+            switch s.status {
+            case .unlocked: self.unlock(s)
+            case .failed:
+                self.error = explainVideoFailure(s.error)
+                if var j = self.job { j.status = "failed"; j.stage = "Falhou"; self.job = j }
+            default: break
+            }
         })
 
-    /// Uma geração em andamento (preparando anúncio, anúncio na tela ou H3 gerando).
+    /// Uma geração em andamento: o "Gerar" fica travado (um toque = uma geração).
     var sessionBusy: Bool {
         guard let st = session?.status else { return false }
         return st == .preparing || st == .adShowing || st == .generating
     }
 
-    /// `fileprivate` e não `private`: o bridge do Rewarded, no mesmo arquivo,
-    /// também registra (é onde a recompensa nasce).
     fileprivate static let log = { (m: String) in
         #if DEBUG
         print("[AUREA AI] " + m)
@@ -72,309 +98,227 @@ final class AureaAiState: ObservableObject {
 
     // -- conexão -------------------------------------------------------------
 
-    /// Procura o servidor na hora e continua de olho. "Tentar de novo" começa do zero.
+    /// Lê a configuração do backend (o que ele deixa pedir) e fica de olho.
     func connect() {
         watchTask?.cancel()
         attempt = 0
-        comfy = nil
         watchTask = Task { [weak self] in await self?.search() }
     }
 
     private func search() async {
         while !Task.isCancelled {
-            if attempt == 0 && comfy == nil { status = .checking; message = "Procurando o servidor" }
-            let final = await tryConnect()
-            // Durante a geração o selo fica "Online"; o laço só não pode derrubar o job.
-            status = final == .connected && job?.running == true ? .generating : final
-            let wait: UInt64
-            if final == .connected { attempt = 0; wait = aiWatchSeconds } else { wait = aiBackoff(attempt); attempt += 1 }
-            try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
-        }
-    }
-
-    /// Online só com `GET {endpoint}/system_stats` → 200 + JSON válido.
-    ///
-    /// A ordem importa: o **discovery** manda. Ele é um endereço fixo que nunca
-    /// muda; o que muda é o `endpoint` que ele publica. Depois que o Colab
-    /// publica, trocar de túnel não pede IPA nem APK novo.
-    private func tryConnect() async -> AureaAiStatus {
-        Self.log("discovery = \(AureaAiConfig.discoveryURL)")
-        let read = await ComfyClient.readDiscovery()
-
-        var candidates: [String] = []
-        if let d = read.doc {
-            Self.log("discovery = HTTP \(read.http), online=\(d.online) endpoint=\(d.endpoint) updatedAt=\(d.updatedAt)")
-            if d.isValid { candidates.append(d.endpoint) }
-        } else {
-            Self.log("discovery = HTTP \(read.http), sem documento")
-        }
-        for base in candidates {
-            Self.log("endpoint = \(base)")
-            let c = ComfyClient(base: base)
-            let (http, ok) = await c.isOnline()
-            Self.log("system_stats = HTTP \(http), json \(ok ? "ok" : "inválido")")
-            if ok {
-                if comfy?.base != base { comfy = c }
-                modelName = read.doc.flatMap { $0.model.isEmpty ? nil : $0.model } ?? "MiniMax H3"
-                gpu = read.doc?.gpu ?? ""
-                let modes = read.doc?.capabilities ?? []
-                capabilities = .fromDiscovery(modes.isEmpty ? ["text_to_video", "image_to_video"] : modes)
-                message = ""
-                resumeIfNeeded()
-                return .connected
+            if attempt == 0 && !status.canGenerate { status = .checking }
+            do {
+                let cfg = try await provider.config()
+                attempt = 0
+                modelName = cfg.model
+                promptMax = cfg.promptMax
+                capabilities = AiCapabilities(modes: cfg.modes, durations: cfg.durations, aspects: cfg.aspects,
+                                              resolutions: cfg.resolutions, fps: [16], audio: false, queue: 0)
+                if cfg.enabled {
+                    if message == explainVideoFailure("sem_conexao") || message == explainVideoFailure("ia_desligada") { message = "" }
+                    status = session?.status == .generating ? .generating : .connected
+                    resumeIfNeeded()
+                } else {
+                    status = .disconnected
+                    message = explainVideoFailure("ia_desligada")
+                }
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                status = attempt == 0 ? .reconnecting : .disconnected
+                message = explainVideoFailure("sem_conexao")
+                let wait = aiBackoff(attempt)
+                attempt += 1
+                try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
             }
         }
-        comfy = nil
-        // Discovery dizendo offline e nenhum endereço de pé: OFFLINE. Senão, ainda subindo.
-        return read.doc?.online == false ? .disconnected : .reconnecting
     }
 
     // -- retomar depois do anúncio ------------------------------------------
 
-    /// Retoma a geração gravada, se houver uma.
-    ///
-    /// É o caminho de volta do Rewarded: o anúncio traz a Activity para trás (e
-    /// às vezes o sistema mata o processo). A sessão gravada diz qual
-    /// `prompt_id` acompanhar e por qual endereço — e retomar NUNCA manda outro
-    /// `POST /prompt`, senão o mesmo vídeo seria gerado duas vezes.
+    /// A sessão gravada volta: com job, o acompanhamento continua (GET, nunca
+    /// outro POST pago); sem job mas com recompensa, o ticket — idempotente no
+    /// servidor — devolve o mesmo job ou gera o que ainda não tinha sido gerado.
     private func resumeIfNeeded() {
-        guard !sessionBusy, let saved = GuardaDaSessao.shared.read() else { return }
+        guard !resumed else { return }
+        resumed = true
+        guard let saved = GuardaDaSessao.shared.read(), generationTask == nil else { return }
         currentSessionId = saved.generationId
-        session = flow.resume(saved)
-
-        if saved.generationCompleted, let file = saved.result {
-            Self.log("release = retomando sessão já concluída (recompensa=\(saved.rewardEarned))")
-            if saved.rewardEarned { unlock(saved) } else { lastFile = file }
-            return
-        }
-        guard let pid = saved.promptId, !pid.isEmpty else {
-            if !saved.generationStarted { GuardaDaSessao.shared.clear() }
-            return
-        }
-        guard let base = saved.endpointUsado ?? comfy?.base else { return }
-        Self.log("history = retomando prompt_id \(pid) em \(base)")
-        follow(ComfyClient(base: base), promptId: pid, request: saved.request, w: 0, h: 0)
-    }
-
-    /// Acompanha um `prompt_id` já existente até o fim (retomada, sem novo POST).
-    private func follow(_ c: ComfyClient, promptId: String, request: AiRequest, w: Int, h: Int) {
-        let (wd, ht) = H3Workflow.dimensions(aspect: request.aspect, resolution: request.resolution)
-        let ww = w > 0 ? w : wd
-        let hh = h > 0 ? h : ht
-        let start = Date()
-        func etapa(_ st: String, _ text: String, queue: Int = 0, result: AiResult? = nil) -> AiJob {
-            AiJob(id: promptId, status: st, progress: 0, stage: text, queuePosition: queue,
-                  seconds: Date().timeIntervalSince(start), error: nil, result: result)
-        }
-        generationTask = Task { [weak self] in
-            guard let self else { return }
-            var failures = 0
-            do {
-                while !Task.isCancelled {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                    let record: [String: Any]?
-                    do {
-                        record = try await c.history(promptId); failures = 0
-                    } catch let e as ComfyError {
-                        failures += 1
-                        if failures >= 15 { throw e }
-                        self.status = .reconnecting
-                        continue
-                    }
-                    self.status = .generating
-                    Self.log("history = \(promptId) → \(record == nil ? "ainda não terminou" : "terminou")")
-                    guard let record else { continue }
-                    if let e = ComfyClient.error(inHistory: record) {
-                        throw ComfyError(http: 200, code: "execution_error", detail: e)
-                    }
-                    guard let video = ComfyClient.videos(inHistory: record).first else {
-                        Self.log("output = /history sem saída de vídeo ainda")
-                        failures += 1
-                        if failures >= 5 {
-                            throw ComfyError(http: 200, code: "sem_video",
-                                             detail: "o /history terminou sem saída de vídeo")
-                        }
-                        continue
-                    }
-                    Self.log("output = \(video.subfolder)/\(video.name)")
-                    let res = AiResult(videoURL: "\(c.base)/view?filename=\(video.name)",
-                                       durationSeconds: Double(H3Workflow.frames(request.duration)) / Double(request.fps),
-                                       width: ww, height: hh, fps: request.fps, hasAudio: true)
-                    self.job = etapa("finishing", "Finalizando", result: res)
-                    self.downloading = true
-                    defer { self.downloading = false }
-                    Self.log("download = \(c.base)/view?filename=\(video.name)")
-                    let file = try await c.download(video, to: Self.folder.appendingPathComponent("\(promptId).mp4"))
-                    let bytes = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
-                    Self.log("download_bytes = \(bytes)")
-                    self.job = etapa("completed", "Concluído", result: res)
-                    self.status = .connected
-                    if let f = self.finishGeneration { self.finishGeneration = nil; f(file, nil) }
-                    return
-                }
-            } catch is CancellationError {
-                return
-            } catch let e as ComfyError {
-                Self.log("error = \(e.forScreen)")
-                self.fail(e.forScreen)
-                if let f = self.finishGeneration { self.finishGeneration = nil; f(nil, e.forScreen) }
-            } catch {
-                let text = error.localizedDescription
-                Self.log("error = \(text)")
-                self.fail(text)
-                if let f = self.finishGeneration { self.finishGeneration = nil; f(nil, text) }
+        if saved.generationCompleted, saved.result != nil {
+            flow.resume(saved)
+        } else if saved.generationStarted, saved.ticket != nil {
+            flow.resume(saved)
+            generationTask = Task { @MainActor [weak self] in
+                await self?.generateAndFollow(saved, onJob: { _ in }, finish: { [weak self] file, e, retry in
+                    guard let self else { return }
+                    var s = self.session ?? saved
+                    if let file, e == nil { s.generationCompleted = true; s.result = file }
+                    else { s.error = e ?? "geracao_falhou"; s.status = .failed; s.canRetryWithoutAd = retry && s.rewardEarned }
+                    self.flow.resume(s)
+                })
             }
+        } else if !saved.generationStarted && (saved.status == .preparing || saved.status == .adShowing) {
+            // O processo morreu com o anúncio na tela: nada foi gerado.
+            var s = saved; s.status = .noReward; s.adClosedEarly = true
+            flow.resume(s)
+        } else {
+            flow.resume(saved)
         }
     }
 
     // -- gerar -------------------------------------------------------------
 
-    /// Ao entrar na tela AI Video: o Rewarded já começa a carregar.
     func prepareAd() { AureaAdsManager.shared.preloadRewarded() }
 
-    /// "Gerar": o H3 é enviado na hora (um job só) e o Rewarded aparece em
-    /// paralelo; o vídeo só é entregue com a recompensa (AiRewardFlow).
+    /// "Gerar": ticket → anúncio → (recompensa) → geração real.
     func generateWithReward(_ request: AiRequest) {
-        guard comfy != nil else { error = "Sem conexão com o servidor"; return }
-        if job?.running == true || sessionBusy { return }   // um clique = uma geração
-        error = ""; message = ""; lastFile = nil
+        guard status.canGenerate, !sessionBusy else { return }
+        error = ""; message = ""; lastFile = nil; job = nil
         let id = UUID().uuidString
         currentSessionId = id
-        // O endereço que aceitar o POST fica CONGELADO nesta sessão: se o túnel
-        // cair no meio, esta geração continua sendo acompanhada por ele.
-        Self.log("POST /prompt = enviando (endpoint \(comfy?.base ?? "?"))")
-        flow.generate(request, id: id, endpoint: comfy?.base)
+        flow.generate(request, id: id)
     }
 
-    /// "Assistir e liberar vídeo": outro anúncio para a MESMA geração — não gera de novo.
-    func unlockWithAd() { if let id = currentSessionId { flow.unlockWithAd(id) } }
+    /// "Assistir de novo": o anúncio não veio ou fechou cedo. Nada gerado ainda.
+    func unlockWithAd() { if let id = currentSessionId { flow.watchAgain(id) } }
+    func retryGeneration() { unlockWithAd() }
 
-    /// "Tentar de novo" depois de o H3 falhar.
-    ///
-    /// A sessão que falhou não serve mais — não existe prompt_id para retomar. O
-    /// que se aproveita é o pedido: começa uma geração NOVA, com um POST novo e
-    /// um prompt_id novo. É o único caso em que repetir o POST é certo.
+    /// Depois de uma falha: técnica com recompensa valendo → mesmo ticket, sem
+    /// anúncio; senão uma geração nova com o MESMO pedido (o prompt não se perde).
     func retryAfterFailure() {
         guard let s = session, s.status == .failed else { return }
+        error = ""
+        if s.canRetryWithoutAd { flow.retryWithoutAd(s.generationId); return }
         session = nil
         currentSessionId = nil
         GuardaDaSessao.shared.clear()
         job = nil
-        error = ""
         generateWithReward(s.request)
     }
 
-    /// "Tentar de novo" quando não houve anúncio (a geração não tinha começado).
-    func retryGeneration() { if let id = currentSessionId { flow.retry(id) } }
-
     fileprivate func setShowingAd(_ on: Bool) { showingAd = on }
+
+    /// A geração real: pede o job (esperando o callback assinado do anúncio
+    /// chegar), acompanha o estado REAL e baixa. Sem porcentagem inventada.
+    private func generateAndFollow(_ s: AiGenerationSession, onJob: @escaping (String) -> Void,
+                                   finish: @escaping AiRewardFlow.Finish) async {
+        defer { generationTask = nil }
+        guard let ticket = s.ticket else { finish(nil, "ticket_invalido", false); return }
+        let start = Date()
+        func step(_ st: String, _ text: String, id: String = "", result: AiResult? = nil) -> AiJob {
+            AiJob(id: id, status: st, progress: 0, stage: text, queuePosition: 0,
+                  seconds: Date().timeIntervalSince(start), error: nil, result: result)
+        }
+        status = .generating
+        do {
+            var jobId = s.jobId
+            if jobId == nil {
+                job = step("sending", "Enviando…")
+                while jobId == nil {
+                    do {
+                        jobId = try await provider.generate(ticket: ticket)
+                    } catch let e as VideoFailure where (e.code == "recompensa_pendente" || e.code == "em_andamento")
+                        && Date().timeIntervalSince(start) < rewardWaitSeconds {
+                        // O callback do LevelPlay ainda não chegou ao servidor.
+                        try await Task.sleep(nanoseconds: 2_000_000_000)
+                    }
+                }
+                Self.log("job = \(jobId!)")
+                onJob(jobId!)
+            }
+            let id = jobId!
+            var failures = 0
+            while true {
+                try Task.checkCancellation()
+                let j: AiVideoJob
+                do {
+                    j = try await provider.status(id); failures = 0
+                } catch let e as VideoFailure where e.transient {
+                    failures += 1
+                    if failures >= 30 { throw e }
+                    status = .reconnecting
+                    try await Task.sleep(nanoseconds: 3_000_000_000)
+                    continue
+                }
+                status = .generating
+                let stage: String
+                switch j.status {
+                case "queued": stage = "Enviando…"
+                case "generating": stage = "Gerando vídeo…"
+                case "completed": stage = "Finalizando…"
+                default: stage = j.stage
+                }
+                job = AiJob(id: j.id, status: j.status, progress: 0, stage: stage, queuePosition: 0,
+                            seconds: j.seconds, error: j.error, result: nil)
+                if j.finished {
+                    guard j.status == "completed", j.readyToDownload else {
+                        status = .connected
+                        finish(nil, j.error ?? "geracao_falhou", j.retryWithoutAd)
+                        return
+                    }
+                    break
+                }
+                if Date().timeIntervalSince(start) > jobMaxSeconds { throw VideoFailure("tempo_esgotado") }
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+            downloading = true
+            defer { downloading = false }
+            let file = try await provider.download(id, to: Self.folder.appendingPathComponent("\(id).mp4"))
+            guard let meta = await Self.metadata(file) else { throw VideoFailure("resultado_nao_e_video") }
+            job = step("completed", "Concluído", id: id, result: meta)
+            status = .connected
+            finish(file, nil, false)
+        } catch is CancellationError {
+            return
+        } catch let e as VideoFailure {
+            Self.log("falha = \(e.code)")
+            status = .connected
+            finish(nil, e.code, e.transient || e.code.hasPrefix("download") || e.code == "tempo_esgotado")
+        } catch {
+            status = .connected
+            finish(nil, "geracao_falhou", true)
+        }
+    }
+
+    /// Duração, tamanho e fps REAIS do arquivo baixado. Nulo = não é vídeo legível.
+    private static func metadata(_ url: URL) async -> AiResult? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let duration = try? await asset.load(.duration),
+              let size = try? await track.load(.naturalSize),
+              let fps = try? await track.load(.nominalFrameRate) else { return nil }
+        let seconds = CMTimeGetSeconds(duration)
+        guard seconds > 0, size.width > 0, size.height > 0 else { return nil }
+        let audio = ((try? await asset.loadTracks(withMediaType: .audio)) ?? []).isEmpty == false
+        return AiResult(videoURL: "", durationSeconds: seconds, width: Int(abs(size.width)),
+                        height: Int(abs(size.height)), fps: Int(fps.rounded()), hasAudio: audio)
+    }
+
+    /// Só enquanto está na fila: depois que começa, a geração vai até o fim.
+    func cancel() {
+        guard let id = session?.jobId else { return }
+        Task { [weak self] in
+            do { try await self?.provider.cancel(id) }
+            catch { self?.message = "A geração já começou e vai até o fim." }
+        }
+    }
 
     private func unlock(_ s: AiGenerationSession) {
         guard let file = s.result else { return }
-        Self.log("release = geração concluída=\(s.generationCompleted) recompensa=\(s.rewardEarned) → vídeo liberado")
+        Self.log("vídeo entregue")
         GuardaDaSessao.shared.clear()
-        if let j = job, j.status == "completed" { history = [j] + history.filter { $0.id != j.id } }
+        if let j = job { history = [j] + history.filter { $0.id != j.id } }
         lastFile = file
-        let (w, h) = H3Workflow.dimensions(aspect: s.request.aspect, resolution: s.request.resolution)
-        lastTitle = "AI \(w)×\(h)"
+        lastTitle = "Aurea AI"
     }
 
-    /// A geração REAL no H3: Enviando → Na fila → Gerando → Finalizando →
-    /// Concluído. O vídeo NÃO é entregue aqui: vai para `finish`, e quem decide a
-    /// entrega é a recompensa. O anúncio na frente não pausa nada.
-    private func generate(_ request: AiRequest, onPromptId: @escaping (String) -> Void,
-                          finish: @escaping (URL?, String?) -> Void) {
-        guard let c = comfy else { error = "Sem conexão com o servidor"; finish(nil, error); return }
-        error = ""; message = ""; lastFile = nil
-        status = .generating
-        let (w, h) = H3Workflow.dimensions(aspect: request.aspect, resolution: request.resolution)
-        let start = Date()
-        func step(_ st: String, _ text: String, id: String = "", queue: Int = 0, result: AiResult? = nil) -> AiJob {
-            AiJob(id: id, status: st, progress: 0, stage: text, queuePosition: queue,
-                  seconds: Date().timeIntervalSince(start), error: nil, result: result)
-        }
-        job = step("sending", "Enviando")
-        generationTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let workflow = try H3Workflow.build(request, image: request.mode == "image_to_video" ? request.imageRef : nil)
-                let promptId = try await c.submitPrompt(workflow)
-                Self.log("POST /prompt → prompt_id \(promptId) (\(w)x\(h), \(H3Workflow.frames(request.duration)) quadros)")
-                onPromptId(promptId)
-                self.job = step("queued", "Na fila", id: promptId)
-                var failures = 0
-                while !Task.isCancelled {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                    let record: [String: Any]?
-                    do {
-                        record = try await c.history(promptId); failures = 0
-                    } catch let e as ComfyError {
-                        failures += 1
-                        if failures >= 15 { throw e }
-                        self.status = .reconnecting
-                        continue
-                    }
-                    self.status = .generating
-                    guard let record else {
-                        // Ainda não terminou: a fila diz se está rodando ou esperando.
-                        // Os rótulos têm que estar também no valor de reserva: sem
-                        // eles o `??` achata o tipo para (Bool, Int) e o `q.running`
-                        // deixa de existir.
-                        let q = (try? await c.queueSituation(promptId)) ?? (running: false, position: 0)
-                        self.job = q.running ? step("running", "Gerando", id: promptId)
-                                             : step("queued", "Na fila", id: promptId, queue: q.position)
-                        continue
-                    }
-                    if let e = ComfyClient.error(inHistory: record) { throw ComfyError(http: 200, code: "execution_error", detail: e) }
-                    guard let video = ComfyClient.videos(inHistory: record).first else {
-                        throw ComfyError(http: 200, code: "sem_video", detail: "o /history terminou sem saída de vídeo")
-                    }
-                    let res = AiResult(videoURL: "\(c.base)/view?filename=\(video.name)",
-                                       durationSeconds: Double(H3Workflow.frames(request.duration)) / Double(request.fps),
-                                       width: w, height: h, fps: request.fps, hasAudio: true)
-                    self.job = step("finishing", "Finalizando", id: promptId, result: res)
-                    self.downloading = true
-                    defer { self.downloading = false }
-                    let file = try await c.download(video, to: Self.folder.appendingPathComponent("\(promptId).mp4"))
-                    Self.log("/view → \(file.path)")
-                    self.job = step("completed", "Concluído", id: promptId, result: res)
-                    self.status = .connected
-                    finish(file, nil)
-                    return
-                }
-            } catch is CancellationError {
-                return
-            } catch let e as ComfyError {
-                Self.log("erro: \(e.forScreen)")
-                self.fail(e.forScreen); finish(nil, e.forScreen)
-            } catch {
-                let text = error.localizedDescription
-                self.fail(text); finish(nil, text)
-            }
-        }
-    }
-
-    func cancel() {
-        guard let c = comfy else { return }
-        let id = job?.id ?? ""
-        generationTask?.cancel()
-        Task { [weak self] in
-            if !id.isEmpty { await c.cancel(id) }
-            guard let self else { return }
-            if var j = self.job { j.status = "cancelled"; j.stage = "Cancelado"; self.job = j }
-            self.status = .connected
-            self.message = "Cancelado"
-            // A sessão termina sem vídeo (nada a liberar).
-            if let f = self.finishGeneration { self.finishGeneration = nil; f(nil, "Cancelado") }
-        }
-    }
-
-    /// Só depois de o arquivo existir: a camada aponta para ele.
+    /// Pelo importador de sempre (copia para a mídia do projeto, sonda, cria a
+    /// camada e salva), no cabeçote.
     func addToTimeline(_ model: AureaModel) {
         guard let file = lastFile else { return }
         let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
         guard size > 0 else { error = "O arquivo baixado está vazio"; return }
-        model.importMedia(url: file, kind: .video)
+        model.importMedia(url: file, kind: .video, atPlayhead: true)
     }
 
     /// Copia o vídeo para a galeria (Fotos).
@@ -401,28 +345,19 @@ final class AureaAiState: ObservableObject {
         job = item
         if item.status == "completed" {
             let f = Self.folder.appendingPathComponent("\(item.id).mp4")
-            if FileManager.default.fileExists(atPath: f.path) { lastFile = f; lastTitle = "AI" }
+            if FileManager.default.fileExists(atPath: f.path) { lastFile = f; lastTitle = "Aurea AI" }
         }
     }
 
-    /// Sobe a imagem de partida (`/upload/image`) e devolve a referência do LoadImage.
+    /// Sobe a imagem de partida (I2V) para o backend; devolve o id que o pedido cita.
     func uploadImage(_ bytes: Data, type: String) async -> String? {
-        guard let c = comfy else { return nil }
         do {
-            let ref = try await c.uploadImage(bytes, type: type)
-            Self.log("/upload/image → \(ref)")
-            return ref
-        } catch let e as ComfyError {
-            error = e.forScreen; return nil
+            return try await provider.uploadImage(bytes, type: type)
+        } catch let e as VideoFailure {
+            error = explainVideoFailure(e.code); return nil
         } catch {
-            self.error = error.localizedDescription; return nil
+            self.error = explainVideoFailure("sem_conexao"); return nil
         }
-    }
-
-    private func fail(_ text: String) {
-        error = text
-        if var j = job { j.status = "failed"; j.stage = "Falhou"; j.error = text; job = j }
-        status = comfy != nil ? .connected : .reconnecting
     }
 
     private static var folder: URL {
@@ -445,19 +380,17 @@ private final class ManagerRewardedAds: RewardedAds {
 
     func show(opened: @escaping () -> Void, reward: @escaping () -> Void,
               closed: @escaping () -> Void, failed: @escaping (String) -> Void) -> Bool {
-        // Contrato do RewardedAds: `false` = nenhum callback. O manager avisa a
-        // falha antes de devolver `false`; essa primeira não é repassada.
         var returned = false
         let shown = AureaAdsManager.shared.showRewarded(
             opened: { [weak self] in self?.state?.setShowingAd(true); opened() },
-            // A recompensa vem SÓ daqui (onUserEarnedReward do SDK).
+            // A recompensa vem SÓ daqui (callback oficial do SDK).
             reward: { AureaAiState.log("reward = recebida"); reward() },
             closed: { [weak self] _ in
-                AureaAiState.log("reward = anúncio fechado")
                 self?.state?.setShowingAd(false); closed()
+                AureaAdsManager.shared.preloadRewarded()
             },
             failed: { [weak self] e in
-                AureaAiState.log("error = anúncio: \(e)")
+                AureaAiState.log("anúncio: \(e)")
                 self?.state?.setShowingAd(false); if returned { failed(e) }
             })
         returned = true

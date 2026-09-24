@@ -421,3 +421,243 @@ enum H3Workflow {
         return g
     }
 }
+
+// MARK: - Backend do Aurea (8Scale por trás)
+
+/// A geração de vídeo pelo BACKEND do Aurea (Cloudflare Worker), que fala com a
+/// 8Scale. O app nunca fala com a 8Scale e nunca vê a chave dela.
+enum AureaVideoBackend {
+    /// `https://aurea-ai-discovery.aureaapp.workers.dev/api/ai/video`
+    static let base: String = {
+        let d = AureaAiConfig.discoveryURL
+        let raiz = d.hasSuffix("/server") ? String(d.dropLast("/server".count)) : d
+        return raiz + "/api/ai/video"
+    }()
+}
+
+/// O que o backend oferece hoje (monta a tela).
+struct AiVideoConfig {
+    let enabled: Bool
+    let model: String
+    let modes: [String]
+    let durations: [Int]
+    let aspects: [String]
+    let resolutions: [String]
+    let promptMax: Int
+}
+
+/// Estado de um job. `status` ∈ queued | generating | completed | failed | cancelled.
+struct AiVideoJob {
+    let id: String
+    let status: String
+    let stage: String
+    let seconds: Double
+    let error: String?
+    let retryWithoutAd: Bool
+    let readyToDownload: Bool
+    var finished: Bool { status == "completed" || status == "failed" || status == "cancelled" }
+}
+
+/// Falha com o código curto do backend.
+struct VideoFailure: Error {
+    let code: String
+    let http: Int
+    init(_ code: String, http: Int = 0) { self.code = code; self.http = http }
+    var transient: Bool {
+        http == 0 || http >= 500 || ["provedor_ocupado", "provedor_indisponivel", "provedor_timeout",
+                                     "sem_conexao", "tempo_esgotado"].contains(code)
+    }
+}
+
+/// O provedor do ponto de vista do APP (a tela só conhece isto).
+protocol VideoGenerationProvider {
+    func config() async throws -> AiVideoConfig
+    func uploadImage(_ data: Data, type: String) async throws -> String
+    func ticket(_ r: AiRequest) async throws -> String
+    func generate(ticket: String) async throws -> String
+    func status(_ jobId: String) async throws -> AiVideoJob
+    func cancel(_ jobId: String) async throws
+    func download(_ jobId: String, to destination: URL) async throws -> URL
+}
+
+/// Identidade aleatória do aparelho, só para os limites do servidor.
+enum AiDeviceId {
+    static var value: String {
+        let k = "aurea_ai_video_aparelho"
+        if let v = UserDefaults.standard.string(forKey: k) { return v }
+        let n = UUID().uuidString
+        UserDefaults.standard.set(n, forKey: k)
+        return n
+    }
+}
+
+final class AureaBackendVideoProvider: VideoGenerationProvider {
+    private let base: String
+    private let device: String
+    private let session: URLSession
+
+    init(base: String = AureaVideoBackend.base, device: String = AiDeviceId.value) {
+        self.base = base
+        self.device = device
+        let c = URLSessionConfiguration.ephemeral
+        c.timeoutIntervalForRequest = 30
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        session = URLSession(configuration: c)
+    }
+
+    func config() async throws -> AiVideoConfig {
+        let o = try await request("GET", "/config")
+        func list(_ k: String) -> [String] { (o[k] as? [Any] ?? []).map { "\($0)" } }
+        return AiVideoConfig(enabled: o["enabled"] as? Bool ?? false,
+                             model: o["model"] as? String ?? "",
+                             modes: list("modes"),
+                             durations: (o["durations"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
+                             aspects: list("aspectRatios"),
+                             resolutions: list("resolutions"),
+                             promptMax: (o["promptMaxChars"] as? NSNumber)?.intValue ?? 800)
+    }
+
+    func uploadImage(_ data: Data, type: String) async throws -> String {
+        let o = try await request("POST", "/images", body: data, contentType: type)
+        guard let id = o["imageId"] as? String, !id.isEmpty else { throw VideoFailure("resposta_invalida") }
+        return id
+    }
+
+    func ticket(_ r: AiRequest) async throws -> String {
+        var b: [String: Any] = ["mode": r.mode, "prompt": r.prompt, "negativePrompt": r.negativePrompt,
+                                "duration": r.duration, "aspectRatio": r.aspect, "resolution": r.resolution]
+        if let img = r.imageRef { b["imageId"] = img }
+        let o = try await request("POST", "/tickets", body: try JSONSerialization.data(withJSONObject: b))
+        guard let t = o["ticket"] as? String, !t.isEmpty else { throw VideoFailure("resposta_invalida") }
+        return t
+    }
+
+    func generate(ticket: String) async throws -> String {
+        let body = try JSONSerialization.data(withJSONObject: ["ticket": ticket])
+        let o = try await request("POST", "/generate", body: body)
+        guard let j = o["jobId"] as? String, !j.isEmpty else { throw VideoFailure("resposta_invalida") }
+        return j
+    }
+
+    func status(_ jobId: String) async throws -> AiVideoJob {
+        let o = try await request("GET", "/jobs/\(enc(jobId))")
+        return AiVideoJob(id: o["jobId"] as? String ?? jobId,
+                          status: o["status"] as? String ?? "queued",
+                          stage: o["stage"] as? String ?? "",
+                          seconds: (o["elapsedSeconds"] as? NSNumber)?.doubleValue ?? 0,
+                          error: o["error"] as? String,
+                          retryWithoutAd: o["retryWithoutAd"] as? Bool ?? false,
+                          readyToDownload: o["result"] is [String: Any])
+    }
+
+    func cancel(_ jobId: String) async throws {
+        _ = try await request("POST", "/jobs/\(enc(jobId))/cancel", body: Data())
+    }
+
+    /// Baixa para um temporário e só troca de nome se for MP4 de verdade (`ftyp`).
+    func download(_ jobId: String, to destination: URL) async throws -> URL {
+        var req = URLRequest(url: URL(string: base + "/jobs/\(enc(jobId))/video")!)
+        req.timeoutInterval = 300
+        headers(&req)
+        let tmp: URL
+        let resp: URLResponse
+        do {
+            (tmp, resp) = try await session.download(for: req)
+        } catch {
+            throw VideoFailure((error as? URLError)?.code == .timedOut ? "tempo_esgotado" : "download_interrompido")
+        }
+        let http = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(http) else {
+            let data = (try? Data(contentsOf: tmp)) ?? Data()
+            throw failure(http, data)
+        }
+        let expected = resp.expectedContentLength
+        let size = (try? FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? NSNumber)?.int64Value ?? 0
+        if expected > 0 && size != expected { throw VideoFailure("download_interrompido") }
+        guard Self.isMp4(tmp) else { throw VideoFailure("resultado_nao_e_video") }
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: tmp, to: destination)
+        return destination
+    }
+
+    static func isMp4(_ url: URL) -> Bool {
+        guard let h = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? h.close() }
+        guard let d = try? h.read(upToCount: 8), d.count == 8 else { return false }
+        return d[4] == 0x66 && d[5] == 0x74 && d[6] == 0x79 && d[7] == 0x70   // "ftyp"
+    }
+
+    // -- transporte --------------------------------------------------------
+
+    private func enc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? s }
+
+    private func headers(_ r: inout URLRequest) {
+        r.setValue("application/json, video/mp4", forHTTPHeaderField: "Accept")
+        // Sem UA próprio a Cloudflare do Worker devolve 403 (1010).
+        r.setValue(AureaAiConfig.agent, forHTTPHeaderField: "User-Agent")
+        r.setValue(device, forHTTPHeaderField: "x-aurea-device")
+    }
+
+    private func request(_ method: String, _ path: String, body: Data? = nil,
+                         contentType: String = "application/json") async throws -> [String: Any] {
+        var req = URLRequest(url: URL(string: base + path)!)
+        req.httpMethod = method
+        headers(&req)
+        if let body { req.httpBody = body; req.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch {
+            let code = (error as? URLError)?.code
+            throw VideoFailure(code == .timedOut ? "tempo_esgotado" : "sem_conexao")
+        }
+        let http = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(http) else { throw failure(http, data) }
+        if data.isEmpty { return [:] }
+        guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw VideoFailure("resposta_invalida")
+        }
+        return o
+    }
+
+    private func failure(_ http: Int, _ data: Data) -> VideoFailure {
+        let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let code = (o?["error"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "erro_\(http)"
+        return VideoFailure(code, http: http)
+    }
+}
+
+/// Código do backend → frase para quem usa. O prompt nunca se perde por causa disso.
+func explainVideoFailure(_ code: String?) -> String {
+    guard let code else { return "Não foi possível gerar o vídeo." }
+    switch code {
+    case "sem_conexao": return "Sem internet. Confira a conexão e tente de novo."
+    case "tempo_esgotado", "provedor_timeout": return "O servidor demorou para responder. Tente de novo."
+    case "provedor_indisponivel", "provedor_erro", "resposta_invalida":
+        return "O serviço de geração está indisponível agora. Tente de novo em instantes."
+    case "provedor_ocupado", "servidor_ocupado": return "Muita gente gerando agora. Tente de novo em alguns minutos."
+    case "provedor_auth", "provedor_nao_configurado", "saldo_insuficiente", "modelo_indisponivel",
+         "ia_nao_configurada", "recompensa_nao_configurada":
+        return "A geração por IA está em manutenção. Tente mais tarde."
+    case "ia_desligada": return "A geração por IA está pausada no momento."
+    case "orcamento_diario", "limite_global_diario": return "O limite de gerações de hoje foi atingido. Volte amanhã."
+    case "limite_diario": return "Você atingiu o limite de gerações de hoje. Volte amanhã."
+    case "muitos_pedidos": return "Muitos pedidos seguidos. Espere um pouco e tente de novo."
+    case "job_em_andamento", "em_andamento": return "Já existe uma geração sua em andamento."
+    case "conteudo_bloqueado": return "Esse pedido foi bloqueado pela política de conteúdo. Mude o texto e tente de novo."
+    case "pedido_recusado": return "O pedido foi recusado pelo modelo. Mude o texto e tente de novo."
+    case "prompt_vazio": return "Escreva o que você quer ver no vídeo."
+    case "prompt_longo": return "O texto está longo demais."
+    case "geracao_falhou": return "A geração falhou do lado do servidor."
+    case "resultado_invalido", "resultado_nao_e_video": return "O servidor devolveu um arquivo que não é vídeo."
+    case "resultado_expirado": return "O vídeo expirou no servidor (fica guardado 24 h)."
+    case "download_interrompido", "download_falhou": return "O download foi interrompido. Toque para baixar de novo."
+    case "recompensa_pendente": return "O anúncio ainda não foi confirmado. Tente de novo em instantes."
+    case "ticket_expirado", "ticket_invalido", "ticket_usado": return "Este pedido expirou. Toque em gerar de novo."
+    case "imagem_expirada", "imagem_invalida", "imagem_grande": return "Escolha a imagem de novo (PNG, JPEG ou WebP, até 8 MB)."
+    case "cancelado": return "Geração cancelada."
+    default: return "Não foi possível gerar o vídeo (\(code))."
+    }
+}

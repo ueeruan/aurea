@@ -112,6 +112,11 @@ final class LevelPlayAdsBackend: NSObject, AdsBackend {
     }
 
     /// O objeto do LevelPlay é reaproveitado (carregar de novo depois de mostrar); só os callbacks saem.
+    /// Dynamic User ID: chega no callback S2S como [USER_ID] (precisa vir ANTES do show).
+    func setRewardUserId(_ id: String) {
+        _ = LevelPlay.setDynamicUserId(id)
+    }
+
     func release(_ kind: AdKind) {
         switch kind {
         case .exportInterstitial: interLoad = nil

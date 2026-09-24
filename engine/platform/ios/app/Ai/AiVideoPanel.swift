@@ -40,6 +40,7 @@ struct AiVideoPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     statusLabel
+                    if ai.status.canGenerate { note(AureaText.t("ai_aviso_online"), AureaColors.accent) }
                     if !ai.error.isEmpty { note(ai.error, AureaColors.danger) }
                     if !ai.message.isEmpty && ai.status.canGenerate { note(ai.message, AureaColors.muted) }
                     if ai.status.canGenerate { form } else { offline }
@@ -133,12 +134,7 @@ struct AiVideoPanel: View {
                 label(AureaText.t("ai_qualidade"))
                 strip(caps.resolutions.map(resolutionName), selected: resolution, enabled: !running) { resolution = $0 }
             }
-            if caps.audio { toggle(AureaText.t("ai_com_audio"), $audio, enabled: !running) }
             toggle(AureaText.t("ai_avancado"), $advanced)
-            if advanced {
-                toggle(AureaText.t("ai_turbo"), $turbo, enabled: !running)
-                note(AureaText.t("ai_turbo_nota"), AureaColors.subtle)
-            }
 
             generateRow
             rewardState
@@ -164,12 +160,11 @@ struct AiVideoPanel: View {
     private func generate() {
         ai.generateWithReward(AiRequest(
             mode: mode,
-            prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
+            prompt: String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(ai.promptMax)),
             negativePrompt: negative.trimmingCharacters(in: .whitespacesAndNewlines),
             duration: caps.durations.indices.contains(duration) ? caps.durations[duration] : 5,
             aspect: caps.aspects.indices.contains(aspect) ? caps.aspects[aspect] : "16:9",
-            resolution: caps.resolutions.indices.contains(resolution) ? caps.resolutions[resolution] : "standard",
-            fps: caps.fps.first ?? 24, audio: audio, turbo: turbo,
+            resolution: caps.resolutions.indices.contains(resolution) ? caps.resolutions[resolution] : (caps.resolutions.first ?? "480p"),
             imageRef: mode == "image_to_video" ? imageRef : nil))
     }
 
@@ -183,28 +178,24 @@ struct AiVideoPanel: View {
             case .adUnavailable:
                 note(AureaText.t("ai_anuncio_indisponivel"), AureaColors.danger)
                 button(AureaText.t("ai_procurar_de_novo")) { ai.retryGeneration() }
-            case .adShowing, .generating:
-                if s.rewardEarned { note(AureaText.t("ai_video_finalizando"), AureaColors.accent) }
-                else if s.adClosedEarly { note(AureaText.t("ai_assista_completo"), AureaColors.muted) }
-                else { note(AureaText.t("ai_gerando_seu_video"), AureaColors.muted) }
-                // Sem anúncio agora: o H3 segue; o vídeo espera o "Assistir e liberar".
-                if s.adError != nil && !s.rewardEarned { note(AureaText.t("ai_anuncio_indisponivel"), AureaColors.danger) }
-            case .locked:
+            case .adShowing:
+                note(AureaText.t("ai_assista_para_gerar"), AureaColors.muted)
+            case .noReward:
+                // Nada foi gerado: o pedido espera um anúncio completo.
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(AureaText.t("ai_video_pronto_titulo")).font(.aurea(size: 15, weight: .semibold))
-                        .foregroundStyle(AureaColors.accent).padding(.top, 10)
-                    note(AureaText.t(s.adClosedEarly ? "ai_assista_completo" : "ai_video_pronto_assista"), AureaColors.muted)
-                    if s.adError != nil { note(AureaText.t("ai_anuncio_indisponivel"), AureaColors.danger) }
-                    button(AureaText.t("ai_assistir_e_liberar"), primary: true, active: !ai.showingAd) { ai.unlockWithAd() }
+                    note(AureaText.t("ai_assista_para_gerar"), AureaColors.muted)
+                    button(AureaText.t("ai_assistir_e_gerar_de_novo"), primary: true, active: !ai.showingAd) { ai.unlockWithAd() }
                 }
+            case .generating:
+                note(AureaText.t("ai_gerando_seu_video"), AureaColors.muted)
             case .failed:
-                // O POST /prompt falhou (node_errors, 400, servidor fora).
-                // Antes isto não dizia nada e a tela ficava calada.
                 VStack(alignment: .leading, spacing: 0) {
                     Text(AureaText.t("ai_falhou_titulo")).font(.aurea(size: 15, weight: .semibold))
                         .foregroundStyle(AureaColors.danger).padding(.top, 10)
-                    note(s.error ?? AureaText.t("ai_falhou_corpo"), AureaColors.muted)
-                    button(AureaText.t("ai_procurar_de_novo"), primary: true, active: !ai.showingAd) { ai.retryAfterFailure() }
+                    note(explainVideoFailure(s.error), AureaColors.muted)
+                    // Falha técnica depois da recompensa: tenta de novo SEM outro anúncio.
+                    button(AureaText.t(s.canRetryWithoutAd ? "ai_tentar_sem_anuncio" : "ai_gerar_de_novo"),
+                           primary: true, active: !ai.showingAd && !ai.sessionBusy) { ai.retryAfterFailure() }
                 }
             case .unlocked:
                 EmptyView()
@@ -215,10 +206,10 @@ struct AiVideoPanel: View {
     // MARK: progresso e resultado
 
     @ViewBuilder private var progress: some View {
-        if let j = ai.job, ai.session?.status != .locked {
+        if let j = ai.job, ai.session?.status != .failed {
             VStack(alignment: .leading, spacing: 4) {
                 let line = j.status == "queued" && j.queuePosition > 0 ? AureaText.t("ai_na_fila", j.queuePosition)
-                    : j.status == "queued" ? AureaText.t("ai_proximo_da_fila") : (j.stage.isEmpty ? j.status : j.stage)
+                    : (j.stage.isEmpty ? j.status : j.stage)
                 Text(line).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.accent)
                 // O ComfyUI não dá porcentagem pelo /history: a barra só aparece com progresso real.
                 if j.progress > 0 {

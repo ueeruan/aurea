@@ -252,6 +252,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             refreshNow()
+            // O importador põe o clipe no zero; o gerado entra onde o usuário
+            // está (a operação de sempre de "puxar para o cabeçote").
+            moveToPlayhead(id)
             select(id)
         }
     }

@@ -1710,4 +1710,9 @@
     <string name="ai_assista_completo">Assista ao anúncio completo para liberar seu vídeo.</string>
     <string name="ai_assistir_e_liberar">Assistir e liberar vídeo</string>
     <string name="engine_not_ready">O motor ainda está preparando. Tente de novo em instantes.</string>
+    <string name="ai_aviso_online">Aurea IA online. Para manter a infraestrutura no ar, os anúncios são essenciais — e você não paga nada.</string>
+    <string name="ai_assista_para_gerar">Assista ao anúncio completo para gerar seu vídeo.</string>
+    <string name="ai_assistir_e_gerar_de_novo">Assistir e gerar</string>
+    <string name="ai_tentar_sem_anuncio">Tentar de novo (sem anúncio)</string>
+    <string name="ai_gerar_de_novo">Gerar de novo</string>
 </resources>

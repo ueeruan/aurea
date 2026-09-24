@@ -24,6 +24,11 @@ interface AdsBackend {
              aoRecompensar: () -> Unit): Boolean
     /** Solta o anúncio carregado (vencido ou já usado). */
     fun release(kind: AdKind)
+    /**
+     * Quem será recompensado pelo PRÓXIMO Rewarded, para a verificação
+     * server-side (LevelPlay: Dynamic User ID, que volta no callback assinado).
+     */
+    fun setRewardUserId(id: String) {}
 }
 
 /**
@@ -268,6 +273,15 @@ object AureaAdsManager {
 
     /** Há um Rewarded carregado e dentro da validade, pronto para aparecer agora. */
     fun rewardedReady(): Boolean = podePedir && rewardedValido()
+
+    /**
+     * Amarra o próximo Rewarded a um id do servidor (o ticket da geração). O
+     * callback server-to-server do provedor devolve esse id ASSINADO — é ele,
+     * e não o callback do app, que libera a geração paga.
+     */
+    fun definirUsuarioDaRecompensa(id: String) {
+        seguro { backend?.setRewardUserId(id) }
+    }
 
     /**
      * Carrega o Rewarded da IA (ao entrar na tela AI Video, e depois de consumido).

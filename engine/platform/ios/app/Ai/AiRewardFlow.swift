@@ -1,14 +1,17 @@
 // =============================================================================
-//  Aurea iOS — o "direito ao vídeo" por cima da geração. Porte fiel de
-//  android/.../ai/Recompensa.kt (AiRewardFlow). Não sabe nada de H3 nem de SDK.
+//  Aurea iOS — a geração PAGA e o Rewarded. Porte fiel de
+//  android/.../ai/Recompensa.kt (AiRewardFlow). Não sabe nada de SDK nem de
+//  provedor.
 //
-//   - a geração é enviada ao H3 NO TOQUE em "Gerar" (um job só) e o Rewarded
-//     aparece em paralelo: o H3 trabalha enquanto o anúncio roda;
-//   - a recompensa só vem de `reward` (callback oficial do SDK) — abrir, fechar
-//     ou tempo não contam;
-//   - o vídeo só é entregue com `generationCompleted && rewardEarned`;
-//   - fechar cedo não cancela, não apaga e não gera de novo: o resultado fica
-//     bloqueado até um novo anúncio recompensar.
+//  Ordem:  ticket no servidor → Rewarded (ticket como Dynamic User ID)
+//          → recompensa → geração real → vídeo.
+//   - nada é gerado antes da recompensa (o provedor cobra por geração);
+//   - a recompensa só vem de `reward` (callback oficial do SDK); o servidor
+//     ainda confere o callback ASSINADO do LevelPlay antes de gerar;
+//   - uma recompensa inicia UMA geração;
+//   - erro técnico depois da recompensa não pede outro anúncio: o mesmo ticket
+//     gera de novo quando o usuário tocar em "Tentar de novo";
+//   - fechar o anúncio cedo não gera nada e não perde o pedido.
 //  Tudo na main thread.
 // =============================================================================
 import Foundation
@@ -25,59 +28,64 @@ protocol RewardedAds {
 
 /// `String`: a sessão é gravada em disco pelo nome do caso (GuardaDaSessao).
 enum AiSessionStatus: String {
-    /// Esperando um Rewarded carregar. A geração NÃO começou.
+    /// Pedindo o ticket e/ou esperando o Rewarded carregar. Nada foi gerado.
     case preparing
-    /// Não deu para ter anúncio. A geração NÃO começou; dá para tentar de novo.
+    /// Não deu para ter anúncio. Nada foi gerado; dá para tentar de novo.
     case adUnavailable
-    /// Anúncio na tela; o H3 já está gerando por baixo.
+    /// Anúncio na tela. A geração ainda NÃO começou.
     case adShowing
-    /// H3 gerando; o anúncio já fechou.
+    /// O anúncio fechou sem recompensa. Nada foi gerado; o pedido espera outro anúncio.
+    case noReward
+    /// Recompensa confirmada: a geração real está rodando no servidor.
     case generating
-    /// Vídeo pronto e ainda bloqueado: falta a recompensa.
-    case locked
-    /// Vídeo pronto e liberado.
+    /// Vídeo pronto, baixado e validado.
     case unlocked
-    /// O H3 falhou: não há vídeo para liberar.
+    /// Não há vídeo. `canRetryWithoutAd` diz se tentar de novo pede anúncio.
     case failed
 }
 
-/// UMA geração, com id próprio: a recompensa de uma nunca libera outra.
+/// UMA geração, com o próprio ticket: a recompensa de um anúncio vale só para ela.
 struct AiGenerationSession: Equatable {
     let generationId: String
     let request: AiRequest
-    var promptId: String?
+    var ticket: String?
+    /// O job aceito pelo servidor. Existindo, retomar é só ACOMPANHAR.
+    var jobId: String?
     var rewardEarned = false
     var generationCompleted = false
     var result: URL?
     var status: AiSessionStatus = .preparing
-    /// O H3 já foi chamado para esta sessão (uma vez só, nunca de novo).
     var generationStarted = false
-    /// O usuário fechou o anúncio antes da recompensa.
     var adClosedEarly = false
+    /// Código curto do erro (ver `explainVideoFailure`).
     var error: String?
     var adError: String?
-    /// O endereço que ACEITOU o `POST /prompt` desta sessão. Fica congelado:
-    /// uma geração já começada continua sendo acompanhada por ele até terminar,
-    /// mesmo que o túnel mude no meio. Só uma geração NOVA consulta o
-    /// discovery de novo.
-    var endpointUsed: String?
+    /// Falha técnica com a recompensa ainda valendo: o mesmo ticket, sem anúncio.
+    var canRetryWithoutAd = false
 
-    /// A ÚNICA regra de liberação.
     var unlocked: Bool { generationCompleted && rewardEarned && result != nil && error == nil }
 }
 
 @MainActor
 final class AiRewardFlow {
+    typealias Finish = (_ file: URL?, _ error: String?, _ retryWithoutAd: Bool) -> Void
+
     private let ads: RewardedAds
-    private let startGeneration: (AiGenerationSession, @escaping (String) -> Void, @escaping (URL?, String?) -> Void) -> Void
+    private let requestTicket: (AiGenerationSession, @escaping (String) -> Void, @escaping (String) -> Void) -> Void
+    private let bindAd: (String) -> Void
+    private let startGeneration: (AiGenerationSession, @escaping (String) -> Void, @escaping Finish) -> Void
     private let onChange: (AiGenerationSession) -> Void
     private(set) var sessions: [String: AiGenerationSession] = [:]
 
     init(ads: RewardedAds,
-         startGeneration: @escaping (AiGenerationSession, _ onPromptId: @escaping (String) -> Void,
-                                     _ onFinish: @escaping (URL?, String?) -> Void) -> Void,
+         requestTicket: @escaping (AiGenerationSession, _ onTicket: @escaping (String) -> Void,
+                                   _ onFail: @escaping (String) -> Void) -> Void,
+         bindAd: @escaping (String) -> Void,
+         startGeneration: @escaping (AiGenerationSession, _ onJob: @escaping (String) -> Void,
+                                     _ onFinish: @escaping Finish) -> Void,
          onChange: @escaping (AiGenerationSession) -> Void) {
-        self.ads = ads; self.startGeneration = startGeneration; self.onChange = onChange
+        self.ads = ads; self.requestTicket = requestTicket; self.bindAd = bindAd
+        self.startGeneration = startGeneration; self.onChange = onChange
     }
 
     @discardableResult
@@ -87,83 +95,105 @@ final class AiRewardFlow {
         return s
     }
 
-    /// Toque em "Gerar": o H3 começa JÁ (uma vez só) e o Rewarded vem em paralelo.
+    /// Toque em "Gerar": ticket → anúncio. A geração só começa na recompensa.
     @discardableResult
-    func generate(_ request: AiRequest, id: String = UUID().uuidString,
-                  endpoint: String? = nil) -> AiGenerationSession? {
+    func generate(_ request: AiRequest, id: String = UUID().uuidString) -> AiGenerationSession? {
         guard sessions[id] == nil else { return nil }
-        var s = AiGenerationSession(generationId: id, request: request)
-        s.generationStarted = true; s.status = .generating
-        s.endpointUsed = endpoint
-        let started = put(s)
-        startGeneration(started,
-            { [weak self] pid in
-                guard let self, var s = self.sessions[id] else { return }
-                s.promptId = pid; self.put(s)
+        put(AiGenerationSession(generationId: id, request: request))
+        requestTicket(sessions[id]!,
+            { [weak self] ticket in
+                guard let self, var s = self.sessions[id], s.ticket == nil else { return }
+                s.ticket = ticket
+                self.put(s)
+                self.bindAd(ticket)
+                self.prepareAndPresent(id)
             },
-            { [weak self] file, error in self?.finished(id, file, error) })
-        prepareAndPresent(id, unlock: false)
+            { [weak self] code in
+                // Sem ticket (limite, IA desligada, rede): nenhum anúncio, nada gerado.
+                guard let self, var s = self.sessions[id] else { return }
+                s.status = .failed; s.error = code; s.canRetryWithoutAd = false
+                self.put(s)
+            })
         return sessions[id]
     }
 
-    /// "Tentar de novo" de uma sessão que ficou sem anúncio (a geração não tinha começado).
-    func retry(_ id: String) {
-        guard let s = sessions[id], !s.generationStarted, s.status == .adUnavailable else { return }
-        var n = s; n.status = .preparing; n.adError = nil
-        put(n)
-        prepareAndPresent(id, unlock: false)
+    /// Põe de volta uma sessão gravada. Não pede ticket, não mostra anúncio e não gera.
+    @discardableResult
+    func resume(_ s: AiGenerationSession) -> AiGenerationSession {
+        sessions[s.generationId] = s
+        return evaluate(s)
     }
 
-    /// "Assistir e liberar vídeo": outro Rewarded para a MESMA sessão. Não gera de novo.
-    func unlockWithAd(_ id: String) {
-        guard let s = sessions[id], !s.rewardEarned, s.error == nil else { return }
-        prepareAndPresent(id, unlock: true)
+    /// "Assistir de novo": o anúncio não veio ou fechou cedo. Mesmo ticket, mesmo pedido.
+    func watchAgain(_ id: String) {
+        guard var s = sessions[id], !s.generationStarted, !s.rewardEarned,
+              s.status == .adUnavailable || s.status == .noReward, let ticket = s.ticket else { return }
+        s.status = .preparing; s.adError = nil; s.adClosedEarly = false
+        put(s)
+        bindAd(ticket)
+        prepareAndPresent(id)
     }
 
-    private func prepareAndPresent(_ id: String, unlock: Bool) {
-        if ads.ready() { present(id, unlock: unlock); return }
-        if !unlock, var s = sessions[id], !s.generationStarted { s.status = .preparing; put(s) }
-        ads.load(loaded: { [weak self] in self?.present(id, unlock: unlock) },
-                 failed: { [weak self] e in self?.noAd(id, unlock: unlock, e) })
+    /// "Tentar de novo" depois de erro técnico: mesmo ticket, SEM anúncio.
+    func retryWithoutAd(_ id: String) {
+        guard var s = sessions[id], s.status == .failed, s.canRetryWithoutAd, s.rewardEarned, s.ticket != nil else { return }
+        s.jobId = nil; s.error = nil; s.canRetryWithoutAd = false; s.generationStarted = false
+        start(s)
     }
 
-    private func noAd(_ id: String, unlock: Bool, _ e: String) {
-        guard var s = sessions[id] else { return }
-        // Sem anúncio: a geração não começa; na liberação, o vídeo segue como estava.
-        if !unlock && !s.generationStarted { s.status = .adUnavailable }
-        s.adError = e
+    private func prepareAndPresent(_ id: String) {
+        if ads.ready() { present(id); return }
+        ads.load(loaded: { [weak self] in self?.present(id) },
+                 failed: { [weak self] e in self?.noAd(id, e) })
+    }
+
+    private func noAd(_ id: String, _ e: String) {
+        guard var s = sessions[id], !s.rewardEarned, !s.generationStarted else { return }
+        s.status = .adUnavailable; s.adError = e
         put(s)
     }
 
-    private func present(_ id: String, unlock: Bool) {
-        guard var current = sessions[id] else { return }
-        if current.adError != nil { current.adError = nil; put(current) }
+    private func present(_ id: String) {
+        guard sessions[id] != nil else { return }
         let shown = ads.show(
             opened: { [weak self] in
-                guard let self, var s = self.sessions[id] else { return }
-                // O H3 já está gerando por baixo; o anúncio só muda o que a tela diz.
-                if !s.generationCompleted && s.error == nil { s.status = .adShowing; self.put(s) }
+                guard let self, var s = self.sessions[id], !s.rewardEarned else { return }
+                s.status = .adShowing; s.adError = nil
+                self.put(s)
             },
             reward: { [weak self] in
-                guard let self, var s = self.sessions[id] else { return }
+                // Um anúncio, uma geração: recompensa repetida não gera de novo.
+                guard let self, var s = self.sessions[id], !s.rewardEarned, !s.generationStarted else { return }
                 s.rewardEarned = true
-                self.evaluate(s)
+                self.start(s)
             },
             closed: { [weak self] in
-                guard let self, var s = self.sessions[id] else { return }
-                if !s.rewardEarned { s.adClosedEarly = true }
-                self.evaluate(s)
+                guard let self, var s = self.sessions[id], !s.rewardEarned else { return }
+                s.status = .noReward; s.adClosedEarly = true
+                self.put(s)
             },
-            failed: { [weak self] e in self?.noAd(id, unlock: unlock, e) })
-        // `false` = não havia anúncio (e nenhum callback é chamado).
-        if !shown { noAd(id, unlock: unlock, "anúncio indisponível") }
+            failed: { [weak self] e in self?.noAd(id, e) })
+        if !shown { noAd(id, "anúncio indisponível") }
     }
 
-    private func finished(_ id: String, _ file: URL?, _ error: String?) {
+    private func start(_ base: AiGenerationSession) {
+        var s = base
+        s.generationStarted = true; s.status = .generating; s.error = nil
+        put(s)
+        let id = s.generationId
+        startGeneration(s,
+            { [weak self] job in
+                guard let self, var c = self.sessions[id] else { return }
+                c.jobId = job; self.put(c)
+            },
+            { [weak self] file, error, retry in self?.finished(id, file, error, retry) })
+    }
+
+    private func finished(_ id: String, _ file: URL?, _ error: String?, _ retry: Bool) {
         guard var s = sessions[id] else { return }
         guard error == nil, let file else {
-            // Erro do H3: nada é liberado — não existe resultado.
-            s.generationCompleted = false; s.result = nil; s.error = error ?? "sem vídeo"; s.status = .failed
+            s.generationCompleted = false; s.result = nil; s.error = error ?? "geracao_falhou"
+            s.status = .failed; s.canRetryWithoutAd = retry && s.rewardEarned
             put(s)
             return
         }
@@ -171,26 +201,13 @@ final class AiRewardFlow {
         evaluate(s)
     }
 
-    /// Recalcula o status a partir dos DOIS estados independentes.
-    /// Põe de volta uma sessão que já existia (gravada em disco).
-    ///
-    /// Não chama `startGeneration`: o `POST /prompt` desta sessão já foi feito
-    /// — repetir geraria um segundo job e cobraria a A100 duas vezes pelo mesmo
-    /// vídeo. Quem retoma o acompanhamento pelo `prompt_id` é o `AureaAiState`.
-    ///
-    /// Também NÃO mostra anúncio na volta: o usuário acabou de sair de um. O
-    /// anúncio só volta quando ele tocar em "Assistir e liberar".
-    func resume(_ s: AiGenerationSession) -> AiGenerationSession {
-        return put(s)
-    }
-
-    private func evaluate(_ s: AiGenerationSession) {
+    @discardableResult
+    private func evaluate(_ s: AiGenerationSession) -> AiGenerationSession {
         var n = s
         if n.error != nil { n.status = .failed }
         else if n.unlocked { n.status = .unlocked }
-        else if n.generationCompleted { n.status = .locked }
-        else if n.status == .adShowing && !n.rewardEarned && !n.adClosedEarly { n.status = .adShowing }
-        else { n.status = .generating }
-        put(n)
+        else if n.generationStarted { n.status = .generating }
+        else if n.adClosedEarly { n.status = .noReward }
+        return put(n)
     }
 }

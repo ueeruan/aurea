@@ -13,7 +13,12 @@
 //  variável de ambiente) e aqui (como secret do Worker).
 // =============================================================================
 
+import { rotaDeVideo } from "./ai_video.js";
+
+export { CofreDeVideo } from "./cofre.js";
+
 const CHAVE = "atual";
+
 
 /** O documento que o app lê. Sem nada publicado, é offline — nunca um palpite. */
 function offline() {
@@ -41,8 +46,12 @@ function segredoConfere(recebido, esperado) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
+
+    // Geração de vídeo paga (8Scale): tudo sob /api/ai/video.
+    const video = await rotaDeVideo(req, env, ctx, url);
+    if (video) return video;
     const rota = url.pathname.replace(/\/+$/, "") || "/server";
 
     if (rota === "/server" && (req.method === "GET" || req.method === "HEAD")) {

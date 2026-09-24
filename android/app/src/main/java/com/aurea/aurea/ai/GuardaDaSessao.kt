@@ -11,16 +11,16 @@ import java.io.File
  *
  * Existe por causa do Rewarded: abrir um anúncio traz a Activity para trás e,
  * num aparelho de verdade com pouca memória, o sistema chega a matar o
- * processo. Sem isto, o `prompt_id` ia embora com o processo e o H3 terminava
- * sozinho do outro lado — o usuário ficava em "Gerando..." para sempre.
+ * processo. Sem isto, o job ia embora com o processo e a geração terminava
+ * sozinha no servidor — o usuário ficava em "Gerando..." para sempre.
  *
- * O que é gravado é o mínimo para RETOMAR a MESMA geração: o id, o prompt_id, o
- * endereço que a aceitou, e o que já foi conquistado (geração concluída,
- * recompensa). Nada de segredo: `prompt_id` e endereço não abrem nada sozinhos.
+ * O que é gravado é o mínimo para RETOMAR a MESMA geração: o id, o ticket, o
+ * job, e o que já foi conquistado (recompensa, geração concluída). Nada de
+ * segredo: ticket e job só valem com o id deste aparelho.
  *
- * Regra que não muda: retomar NUNCA manda outro `POST /prompt`. Ou a geração é
- * acompanhada pelo prompt_id que já existe, ou não é acompanhada — repetir o
- * POST geraria um segundo job e cobraria a A100 duas vezes pelo mesmo vídeo.
+ * Regra que não muda: retomar NUNCA pede outra geração. Com job, só se
+ * ACOMPANHA; sem job, o ticket (que é idempotente no servidor) devolve o
+ * mesmo job — gerar duas vezes seria pagar duas vezes pelo mesmo vídeo.
  */
 class GuardaDaSessao(app: Application) {
 
@@ -31,8 +31,9 @@ class GuardaDaSessao(app: Application) {
     fun gravar(s: AiGenerationSession) {
         val o = JSONObject().apply {
             put("generationId", s.generationId)
-            put("promptId", s.promptId)
-            put("endpointUsado", s.endpointUsado)
+            put("ticket", s.ticket)
+            put("jobId", s.jobId)
+            put("podeRepetirSemAnuncio", s.podeRepetirSemAnuncio)
             put("generationCompleted", s.generationCompleted)
             put("rewardEarned", s.rewardEarned)
             put("generationStarted", s.generationStarted)
@@ -72,7 +73,8 @@ class GuardaDaSessao(app: Application) {
             val arquivo = caminho?.let { File(it) }
             val status = runCatching { SessaoStatus.valueOf(o.getString("status")) }
                 .getOrDefault(SessaoStatus.Gerando)
-            if (status == SessaoStatus.Liberado || status == SessaoStatus.Falhou) {
+            val repetivel = o.optBoolean("podeRepetirSemAnuncio")
+            if (status == SessaoStatus.Liberado || (status == SessaoStatus.Falhou && !repetivel)) {
                 // Já terminou da última vez: não há o que retomar.
                 limpar()
                 return null
@@ -92,8 +94,9 @@ class GuardaDaSessao(app: Application) {
                     turbo = p.optBoolean("turbo", true),
                     assetId = p.optString("assetId").ifBlank { null },
                 ),
-                promptId = o.optString("promptId").ifBlank { null },
-                endpointUsado = o.optString("endpointUsado").ifBlank { null },
+                ticket = o.optString("ticket").ifBlank { null },
+                jobId = o.optString("jobId").ifBlank { null },
+                podeRepetirSemAnuncio = repetivel,
                 generationCompleted = o.optBoolean("generationCompleted"),
                 rewardEarned = o.optBoolean("rewardEarned"),
                 generationStarted = o.optBoolean("generationStarted"),

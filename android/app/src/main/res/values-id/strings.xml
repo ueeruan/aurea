@@ -866,4 +866,9 @@ untuk mengedit kurvanya.</string>
     <string name="particular_emitter_rotation">Rotasi pemancar</string>
     <string name="particular_deterministic_note">Simulasinya tertutup: pratinjau dan ekspor selalu memberi frame yang sama, dan melompat di waktu itu instan.</string>
     <string name="particular_title">Aurea Particular</string>
+    <string name="ai_aviso_online">Aurea AI online. Ads keep the infrastructure running — and you pay nothing.</string>
+    <string name="ai_assista_para_gerar">Watch the full ad to generate your video.</string>
+    <string name="ai_assistir_e_gerar_de_novo">Watch and generate</string>
+    <string name="ai_tentar_sem_anuncio">Try again (no ad)</string>
+    <string name="ai_gerar_de_novo">Generate again</string>
 </resources>

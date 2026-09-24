@@ -23,13 +23,18 @@ import java.io.File
 
 private const val TAG = "AureaAI"
 
+/** Quanto esperar o callback ASSINADO do anúncio chegar ao servidor antes de desistir. */
+private const val ESPERA_DA_RECOMPENSA_MS = 90_000L
+
+/** Uma geração que não termina neste tempo é dada como perdida (a 8Scale leva ~30 s). */
+private const val TEMPO_MAXIMO_DO_JOB_MS = 15 * 60_000L
+
 /**
- * Estado da Aurea AI no aparelho: acha o ComfyUI, gera, acompanha, baixa.
+ * Estado da Aurea AI no aparelho: fala com o BACKEND do Aurea (que fala com a
+ * 8Scale), gera, acompanha, baixa e entrega.
  *
- * Fala DIRETO com a API do ComfyUI (ver [ComfyCliente]): `/system_stats` para
- * saber se está no ar, `POST /prompt` com o workflow do MiniMax H3, `/history`
- * para acompanhar, `/view` para baixar, `/upload/image` para o I2V. O endereço
- * sai do discovery, e só dele: não há endereço compilado no APK.
+ * O app não conhece a 8Scale nem a chave dela. Conhece só
+ * [VideoGenerationProvider] — hoje o [AureaBackendVideoProvider].
  *
  * Mesma forma do `CaptionsState`: Compose state por fora, corrotina por dentro,
  * e nada de bloquear a thread da interface.
@@ -37,8 +42,9 @@ private const val TAG = "AureaAI"
 class AureaAiState(
     private val app: Application,
     private val escopo: CoroutineScope,
-    /** Chamado quando o vídeo baixado deve entrar na timeline. */
+    /** Chamado quando o vídeo baixado deve entrar na timeline (o importador de sempre). */
     private val aoAdicionarNaTimeline: (arquivo: File, titulo: String) -> Unit,
+    private val provedor: VideoGenerationProvider = AureaBackendVideoProvider(IdDoAparelho.de(app)),
     private val aoMudar: () -> Unit = {},
 ) {
     // -- o que a tela observa ---------------------------------------------
@@ -46,43 +52,36 @@ class AureaAiState(
         private set
     var capacidades by mutableStateOf(Capacidades.VAZIO)
         private set
+    /** Sem GPU a mostrar: quem gera é o provedor do backend. */
     var gpu by mutableStateOf("")
         private set
-    /** Nome do modelo (ex.: "MiniMax H3"). */
     var modelo by mutableStateOf("")
         private set
     var mensagem by mutableStateOf("")
         private set
+    var promptMax by mutableStateOf(800)
+        private set
 
     var job by mutableStateOf<Job?>(null)
         private set
-    /** Posição na fila do ComfyUI quando o job ainda não começou. */
     var posicaoNaFila by mutableStateOf(0)
         private set
-
-    /** O ComfyUI não guarda "meus vídeos" por usuário: o histórico é desta sessão. */
     var historico by mutableStateOf<List<Job>>(emptyList())
         private set
-
     var baixando by mutableStateOf(false)
         private set
     var erro by mutableStateOf("")
         private set
-
     /** `true` enquanto o Rewarded está na tela. */
     var anunciando by mutableStateOf(false)
         private set
 
-    /**
-     * A geração DESTA tela (a última pedida): anúncio, H3 e liberação juntos.
-     * Vive no estado (ViewModel), não na tela: sair e voltar, girar ou ir para
-     * o fundo não perde nada.
-     */
+    /** A geração DESTA tela: ticket, anúncio, job e entrega juntos. */
     var sessao by mutableStateOf<AiGenerationSession?>(null)
         private set
     private var sessaoAtualId: String? = null
 
-    /** Uma geração em andamento (preparando anúncio, anúncio na tela ou H3 gerando). */
+    /** Uma geração em andamento: botão "Gerar" travado (nada de dois pedidos por um toque). */
     val sessaoOcupada: Boolean
         get() = sessao?.status.let {
             it == SessaoStatus.Preparando || it == SessaoStatus.AnuncioNaTela || it == SessaoStatus.Gerando
@@ -95,449 +94,338 @@ class AureaAiState(
             AureaAdsManager.preloadRewarded(aoCarregar, aoFalhar)
         override fun mostrar(aoAbrir: () -> Unit, aoRecompensa: () -> Unit, aoFechar: () -> Unit,
                              aoFalhar: (String) -> Unit): Boolean {
-            // O contrato do RewardedAds: `false` = nenhum callback. O manager avisa a
-            // falha antes de devolver `false`; essa primeira não é repassada.
             var devolveu = false
             val mostrou = AureaAdsManager.showRewarded(
                 aoAbrir = { anunciando = true; aoAbrir() },
                 aoRecompensa = {
-                    // A recompensa vem SÓ daqui (onUserEarnedReward do SDK).
                     Log.i(TAG, "[AUREA AI] reward = recebida")
                     aoRecompensa()
                 },
                 aoFechar = { _ ->
                     anunciando = false
-                    Log.i(TAG, "[AUREA AI] reward = anúncio fechado")
                     aoFechar()
-                    // O próximo já fica a caminho (para "Assistir e liberar" ou a próxima geração).
                     AureaAdsManager.preloadRewarded()
                 },
-                aoFalhar = { e -> anunciando = false; Log.w(TAG, "[AUREA AI] error = anúncio: $e"); if (devolveu) aoFalhar(e) },
+                aoFalhar = { e -> anunciando = false; Log.w(TAG, "[AUREA AI] anúncio: $e"); if (devolveu) aoFalhar(e) },
             )
             devolveu = true
             return mostrou
         }
     }
 
-    private var fimDaGeracao: ((File?, String?) -> Unit)? = null
-
-    /** A sessão em disco: é o que sobrevive ao anúncio e à morte do processo. */
     private val guarda = GuardaDaSessao(app)
 
+    private val recompensa = AiRewardFlow(
+        ads = anuncios,
+        pedirTicket = { s, aoTicket, aoFalhar ->
+            escopo.launch {
+                try {
+                    val t = withContext(Dispatchers.IO) { provedor.ticket(s.pedido) }
+                    Log.i(TAG, "[AUREA AI] ticket = ok")
+                    aoTicket(t)
+                } catch (e: FalhaDeVideo) {
+                    Log.w(TAG, "[AUREA AI] ticket recusado: ${e.codigo}")
+                    aoFalhar(e.codigo)
+                }
+            }
+        },
+        amarrarAnuncio = { ticket -> AureaAdsManager.definirUsuarioDaRecompensa(ticket) },
+        iniciarGeracao = { s, aoJob, aoTerminar ->
+            acompanhando?.cancel()
+            acompanhando = escopo.launch { gerarEAcompanhar(s, aoJob, aoTerminar) }
+        },
+        aoMudar = { s ->
+            // Grava SEMPRE, antes de tudo: o anúncio costuma matar o processo.
+            guarda.gravar(s)
+            if (s.generationId == sessaoAtualId) {
+                sessao = s
+                when (s.status) {
+                    SessaoStatus.Liberado -> liberar(s)
+                    SessaoStatus.Falhou -> { erro = explicarFalhaDeVideo(s.erro); job = job?.copy(status = "failed", etapa = "Falhou") }
+                    else -> Unit
+                }
+            }
+        },
+    )
+
     init {
-        // Se o processo morreu no meio (o anúncio é o que costuma provocar
-        // isso), a tela volta mostrando a geração que ficou. O acompanhamento
-        // em si começa quando o servidor responder — `retomarSePreciso`.
         guarda.ler()?.let { g ->
-            Log.i(TAG, "[AUREA AI] history = sessão anterior encontrada (prompt_id ${g.promptId}, concluída=${g.generationCompleted})")
+            Log.i(TAG, "[AUREA AI] sessão anterior encontrada (job ${g.jobId}, concluída=${g.generationCompleted})")
             sessaoAtualId = g.generationId
             sessao = g
         }
     }
 
-    private val recompensa = AiRewardFlow(
-        ads = anuncios,
-        iniciarGeracao = { s, aoPromptId, aoTerminar ->
-            fimDaGeracao = aoTerminar
-            gerar(s.pedido, aoPromptId) { arquivo, e -> fimDaGeracao = null; aoTerminar(arquivo, e) }
-        },
-        aoMudar = { s ->
-            // Grava SEMPRE, e antes de qualquer coisa: o processo pode morrer no
-            // instante seguinte (é o que o anúncio costuma provocar).
-            guarda.gravar(s)
-            if (s.generationId == sessaoAtualId) {
-                sessao = s
-                if (s.status == SessaoStatus.Liberado) liberar(s)
-            }
-        },
-    )
-
-    /** Último arquivo baixado, pronto para reproduzir, salvar e ir para a timeline. */
     var ultimoArquivo by mutableStateOf<File?>(null)
         private set
     var ultimoTitulo by mutableStateOf("")
         private set
 
-    private var comfy: ComfyCliente? = null
     private var laco: CoroutineJob? = null
     private var acompanhando: CoroutineJob? = null
     private var tentativa = 0
 
-    val conectado: Boolean
-        get() = estado.podeGerar()
+    val conectado: Boolean get() = estado.podeGerar()
 
     // -- conexão -------------------------------------------------------------
 
-    /**
-     * Procura o servidor na hora e continua de olho enquanto a tela existir.
-     * "Tentar de novo" chama de novo: começa do zero, sem reaproveitar endereço.
-     */
+    /** Lê a configuração do backend (o que ele deixa pedir) e fica de olho. */
     fun conectar() {
         laco?.cancel()
         tentativa = 0
-        comfy = null
         laco = escopo.launch { procurar() }
     }
 
     fun desconectar() {
         laco?.cancel(); laco = null
-        acompanhando?.cancel(); acompanhando = null
-        comfy = null
         estado = AureaAiEstado.Disconnected
         capacidades = Capacidades.VAZIO
-        gpu = ""
-        modelo = ""
-        job = null
     }
 
     private suspend fun procurar() {
         while (escopo.isActive) {
-            if (tentativa == 0 && comfy == null) {
-                estado = AureaAiEstado.Checking
-                mensagem = "Procurando o servidor"
+            if (tentativa == 0 && !estado.podeGerar()) estado = AureaAiEstado.Checking
+            val cfg = try {
+                withContext(Dispatchers.IO) { provedor.config() }
+            } catch (e: FalhaDeVideo) {
+                Log.w(TAG, "[AUREA AI] config: ${e.codigo}")
+                null
             }
-            val final = withContext(Dispatchers.IO) { tentarConectar() }
-            // Durante a geração o selo fica "Online"; o laço só não pode derrubar o job.
-            estado = if (final == AureaAiEstado.Connected && job?.rodando == true) AureaAiEstado.Generating else final
-            if (final == AureaAiEstado.Connected) {
-                tentativa = 0
-                delay(VIGIA_SEGUNDOS * 1000)
-            } else {
-                // Na hora (ao abrir), depois 2 s, depois a cada 5 s.
+            if (cfg == null) {
+                estado = if (tentativa == 0) AureaAiEstado.Reconnecting else AureaAiEstado.Disconnected
+                mensagem = explicarFalhaDeVideo("sem_conexao")
                 delay(recuo(tentativa) * 1000)
                 tentativa++
+                continue
             }
-        }
-    }
-
-    /**
-     * Online só com `GET {endpoint}/system_stats` → 200 + JSON válido.
-     *
-     * A ordem importa: o **discovery** manda. Ele é um endereço fixo que nunca
-     * muda; o que muda é o `endpoint` que ele publica. Depois que o Colab
-     * publica, trocar de túnel não pede APK nem IPA novo.
-     *
-     * Não há segunda opção compilada: sem discovery não há endereço. É de
-     * propósito — endereço compilado é endereço que envelhece dentro do
-     * binário e obriga a um APK novo a cada reinício do Colab.
-     */
-    private fun tentarConectar(): AureaAiEstado {
-        Log.i(TAG, "[AUREA AI] discovery = ${AureaAiConfig.DISCOVERY_URL}")
-        val leitura = AureaAiCliente.lerDiscovery()
-        Log.i(TAG, "[AUREA AI] discovery = HTTP ${leitura.http}, ${leitura.doc?.let { "online=${it.online} endpoint=${it.endpoint} updatedAt=${it.updatedAt}" } ?: "sem documento"}")
-
-        val doc = leitura.doc
-        val candidatos = listOfNotNull(
-            doc?.takeIf { it.valido() }?.endpoint?.trimEnd('/')?.takeIf { it.isNotBlank() },
-        )
-
-        for (base in candidatos) {
-            Log.i(TAG, "[AUREA AI] endpoint = $base")
-            val c = ComfyCliente(base)
-            val (http, jsonOk) = c.estaOnline()
-            Log.i(TAG, "[AUREA AI] system_stats = HTTP $http, json ${if (jsonOk) "ok" else "inválido"}")
-            if (jsonOk) {
-                if (comfy?.base != base) comfy = c
-                modelo = doc?.modelo?.ifBlank { null } ?: "MiniMax H3"
-                gpu = doc?.gpu.orEmpty()
-                capacidades = Capacidades.doDiscovery(
-                    doc?.capacidades?.ifEmpty { null } ?: listOf("text_to_video", "image_to_video"),
-                )
-                mensagem = ""
+            tentativa = 0
+            modelo = cfg.modelo
+            promptMax = cfg.promptMax
+            capacidades = Capacidades(
+                modos = cfg.modos, duracoes = cfg.duracoes, aspectos = cfg.aspectos,
+                resolucoes = cfg.resolucoes, fps = listOf(16), audio = false,
+                jobsSimultaneos = 1, fila = 0,
+            )
+            if (cfg.ligado) {
+                if (mensagem == explicarFalhaDeVideo("sem_conexao") || mensagem == explicarFalhaDeVideo("ia_desligada")) mensagem = ""
+                estado = if (sessao?.status == SessaoStatus.Gerando) AureaAiEstado.Generating else AureaAiEstado.Connected
                 retomarSePreciso()
-                return AureaAiEstado.Connected
+            } else {
+                estado = AureaAiEstado.Disconnected
+                mensagem = explicarFalhaDeVideo("ia_desligada")
             }
+            delay(60_000)
         }
-        comfy = null
-        // Discovery dizendo offline e nenhum endereço de pé: OFFLINE. Senão, ainda subindo.
-        val final = if (doc?.online == false) AureaAiEstado.Disconnected else AureaAiEstado.Reconnecting
-        return final
     }
 
     // -- retomar depois do anúncio ------------------------------------------
 
     /**
-     * Retoma a geração que ficou gravada, se houver uma.
-     *
-     * É o caminho de volta do Rewarded: o anúncio trouxe a Activity para trás (e
-     * às vezes o sistema matou o processo). A sessão gravada diz qual
-     * `prompt_id` acompanhar e por qual endereço — e retomar NUNCA manda outro
-     * `POST /prompt`, senão o mesmo vídeo seria gerado duas vezes na A100.
+     * A sessão gravada volta: com job, o acompanhamento continua (GET, nunca
+     * outro POST pago); sem job mas com recompensa, o ticket — idempotente no
+     * servidor — devolve o mesmo job ou gera o que ainda não tinha sido gerado.
      */
     private fun retomarSePreciso() {
-        if (sessaoOcupada) return
+        // Uma vez por abertura: dali em diante a sessão viva é a da tela.
+        if (retomou) return
+        retomou = true
         val gravada = guarda.ler() ?: return
-
-        // A geração já tinha terminado e o arquivo está aqui: só falta a recompensa.
-        if (gravada.generationCompleted && gravada.result != null) {
-            Log.i(TAG, "[AUREA AI] release = retomando sessão já concluída (recompensa=${gravada.rewardEarned})")
-            sessaoAtualId = gravada.generationId
-            recompensa.retomar(gravada)
-            return
-        }
-
-        val promptId = gravada.promptId
-        if (promptId.isNullOrBlank()) {
-            // Nunca chegou a haver prompt: a sessão não tem o que retomar.
-            if (!gravada.generationStarted) { guarda.limpar(); return }
-            guarda.limpar()
-            return
-        }
-
-        Log.i(TAG, "[AUREA AI] history = retomando prompt_id $promptId em ${gravada.endpointUsado}")
+        if (acompanhando?.isActive == true) return
         sessaoAtualId = gravada.generationId
-        recompensa.retomar(gravada)
-        val base = gravada.endpointUsado ?: comfy?.base ?: return
-        val c = ComfyCliente(base)
-        acompanhando = escopo.launch { acompanhar(c, promptId, gravada.pedido) }
-    }
-
-    /** Acompanha um `prompt_id` já existente até o fim (retomada, sem novo POST). */
-    private suspend fun acompanhar(c: ComfyCliente, promptId: String, pedido: Pedido) {
-        val (w, h) = H3Workflow.dimensoes(pedido.aspecto, pedido.resolucao)
-        val inicio = System.currentTimeMillis()
-        fun etapa(status: String, texto: String, fila: Int = 0, res: Resultado? = null) = Job(
-            id = promptId, status = status, progresso = 0.0, etapa = texto,
-            posicaoNaFila = fila, segundos = (System.currentTimeMillis() - inicio) / 1000.0,
-            erro = null, resultado = res,
-        )
-        var falhas = 0
-        try {
-            // `coroutineContext.isActive` e não `isActive`: aqui não há receptor
-            // de CoroutineScope (esta função é suspend, não um `launch`).
-            while (coroutineContext.isActive) {
-                delay(2000)
-                val registro = try {
-                    withContext(Dispatchers.IO) { c.historico(promptId) }.also { falhas = 0 }
-                } catch (e: ComfyErro) {
-                    if (++falhas >= 15) throw e
-                    estado = AureaAiEstado.Reconnecting
-                    continue
+        when {
+            gravada.generationCompleted && gravada.result != null -> recompensa.retomar(gravada)
+            gravada.generationStarted && gravada.ticket != null -> {
+                recompensa.retomar(gravada)
+                acompanhando = escopo.launch {
+                    gerarEAcompanhar(gravada, { }, { arquivo, e, repetir ->
+                        // A sessão foi retomada: o fim volta pelo fluxo normal.
+                        val atual = sessao ?: gravada
+                        val fim = if (e != null || arquivo == null)
+                            atual.copy(erro = e ?: "geracao_falhou", status = SessaoStatus.Falhou,
+                                podeRepetirSemAnuncio = repetir && atual.rewardEarned)
+                        else atual.copy(generationCompleted = true, result = arquivo)
+                        recompensa.retomar(fim)
+                    })
                 }
-                estado = AureaAiEstado.Generating
-                Log.i(TAG, "[AUREA AI] history = $promptId → ${if (registro == null) "ainda não terminou" else "terminou"}")
-
-                if (registro == null) {
-                    val (rodando, pos) = runCatching { withContext(Dispatchers.IO) { c.situacaoNaFila(promptId) } }
-                        .getOrDefault(false to 0)
-                    job = if (rodando) etapa("running", "Gerando") else etapa("queued", "Na fila", pos)
-                    posicaoNaFila = pos
-                    continue
-                }
-
-                ComfyCliente.erroDoHistorico(registro)?.let { throw ComfyErro(200, "execution_error", it) }
-                val video = ComfyCliente.videosDoHistorico(registro).firstOrNull()
-                    ?: throw ComfyErro(200, "sem_video", "o /history terminou sem saída de vídeo")
-                Log.i(TAG, "[AUREA AI] output = ${video.subpasta}/${video.nome}")
-                entregar(c, video, promptId, pedido, w, h)
-                return
             }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            val texto = (e as? ComfyErro)?.paraTela() ?: (e.message ?: e.javaClass.simpleName)
-            Log.w(TAG, "[AUREA AI] error = $texto")
-            falhar(texto)
-            fimDaGeracao?.let { fimDaGeracao = null; it(null, texto) }
+            // O processo morreu com o anúncio na tela (ou antes dele): nada foi
+            // gerado. A tela oferece assistir de novo, sem travar o "Gerar".
+            !gravada.generationStarted &&
+                (gravada.status == SessaoStatus.Preparando || gravada.status == SessaoStatus.AnuncioNaTela) ->
+                recompensa.retomar(gravada.copy(status = SessaoStatus.SemRecompensa, adClosedEarly = true))
+            else -> recompensa.retomar(gravada)
         }
     }
 
-    /** Baixa o `/view` e entrega ao fluxo da recompensa (que decide a liberação). */
-    private suspend fun entregar(
-        c: ComfyCliente, video: ComfyArquivo, promptId: String, pedido: Pedido, w: Int, h: Int,
-    ) {
-        val res = Resultado(
-            videoUrl = "${c.base}/view?filename=${video.nome}", miniaturaUrl = "",
-            duracaoSegundos = H3Workflow.quadros(pedido.duracao) / pedido.fps.toDouble(),
-            largura = w, altura = h, fps = pedido.fps, comAudio = true,
-        )
-        job = Job(promptId, "finishing", 0.0, "Finalizando", 0, 0.0, null, res)
-        baixando = true
-        val arquivo = try {
-            Log.i(TAG, "[AUREA AI] download = ${c.base}/view?filename=${video.nome}")
-            withContext(Dispatchers.IO) {
-                c.baixar(video, File(File(app.filesDir, "aurea-ai"), "$promptId.mp4"))
-            }
-        } finally {
-            baixando = false
-        }
-        Log.i(TAG, "[AUREA AI] download_bytes = ${arquivo.length()}")
-        job = Job(promptId, "completed", 0.0, "Concluído", 0, 0.0, null, res)
-        estado = AureaAiEstado.Connected
-        fimDaGeracao?.let { fimDaGeracao = null; it(arquivo, null) }
-    }
+    private var retomou = false
 
     // -- gerar -------------------------------------------------------------
 
-    /** Ao entrar na tela AI Video: o Rewarded já começa a carregar. */
     fun prepararAnuncio() = AureaAdsManager.preloadRewarded()
 
-    /**
-     * O botão "Gerar": o H3 é enviado na hora (um job só) e o Rewarded aparece em
-     * paralelo; o vídeo só é entregue com a recompensa (AiRewardFlow).
-     */
+    /** O botão "Gerar": ticket → anúncio → (recompensa) → geração real. */
     fun gerarComRecompensa(pedido: Pedido) {
-        val c = comfy ?: run { erro = "Sem conexão com o servidor"; return }
-        if (job?.rodando == true || sessaoOcupada) return
+        if (!estado.podeGerar() || sessaoOcupada) return
         erro = ""
         mensagem = ""
         ultimoArquivo = null
+        job = null
         val id = java.util.UUID.randomUUID().toString()
         sessaoAtualId = id
-        // O endereço que aceitar o POST fica CONGELADO nesta sessão: se o túnel
-        // cair no meio, esta geração continua sendo acompanhada por ele.
-        Log.i(TAG, "[AUREA AI] POST /prompt = enviando (endpoint ${c.base})")
-        recompensa.gerar(pedido, id, endpoint = c.base)
+        recompensa.gerar(pedido, id)
     }
 
-    /** "Assistir e liberar vídeo": outro anúncio para a MESMA geração — não gera de novo. */
+    /** "Assistir de novo": o anúncio não veio ou fechou cedo. Mesmo pedido, nada gerado ainda. */
     fun liberarComAnuncio() {
         val id = sessaoAtualId ?: return
-        recompensa.liberarComAnuncio(id)
+        recompensa.assistirDeNovo(id)
     }
 
+    fun tentarGerarDeNovo() = liberarComAnuncio()
+
     /**
-     * "Tentar de novo" depois de o H3 falhar.
-     *
-     * A sessão que falhou não serve mais — não existe prompt_id para retomar. O
-     * que se aproveita é o pedido: começa uma geração NOVA, com um POST novo e
-     * um prompt_id novo. É o único caso em que repetir o POST é certo.
+     * "Tentar de novo" depois de uma falha. Erro técnico com a recompensa ainda
+     * valendo: o mesmo ticket, sem anúncio. Senão, uma geração nova (com anúncio),
+     * reaproveitando o pedido — o prompt nunca se perde.
      */
     fun tentarDeNovoAposFalha() {
         val s = sessao ?: return
         if (s.status != SessaoStatus.Falhou) return
+        erro = ""
+        if (s.podeRepetirSemAnuncio) {
+            recompensa.repetirSemAnuncio(s.generationId)
+            return
+        }
         sessao = null
         sessaoAtualId = null
         guarda.limpar()
         job = null
-        erro = ""
         gerarComRecompensa(s.pedido)
     }
 
-    /** "Tentar de novo" quando não houve anúncio (a geração não tinha começado). */
-    fun tentarGerarDeNovo() {
-        val id = sessaoAtualId ?: return
-        recompensa.tentarDeNovo(id)
+    /**
+     * A geração real: pede o job (esperando o callback assinado do anúncio
+     * chegar ao servidor), acompanha o estado REAL e baixa o arquivo. Sem
+     * porcentagem inventada: a 8Scale não dá progresso, então só etapas.
+     */
+    private suspend fun gerarEAcompanhar(
+        s: AiGenerationSession,
+        aoJob: (String) -> Unit,
+        aoTerminar: (File?, String?, Boolean) -> Unit,
+    ) {
+        val ticket = s.ticket ?: run { aoTerminar(null, "ticket_invalido", false); return }
+        val inicio = System.currentTimeMillis()
+        fun etapa(status: String, texto: String) = Job(
+            id = job?.id.orEmpty(), status = status, progresso = 0.0, etapa = texto,
+            posicaoNaFila = 0, segundos = (System.currentTimeMillis() - inicio) / 1000.0,
+            erro = null, resultado = null,
+        )
+        estado = AureaAiEstado.Generating
+        try {
+            // 1) O job. `recompensa_pendente` = o callback do LevelPlay ainda não
+            //    chegou ao servidor: espera, sem mostrar outro anúncio.
+            var jobId = s.jobId
+            if (jobId == null) {
+                job = etapa("sending", "Enviando…")
+                while (jobId == null) {
+                    jobId = try {
+                        withContext(Dispatchers.IO) { provedor.gerar(ticket) }
+                    } catch (e: FalhaDeVideo) {
+                        val esperando = e.codigo == "recompensa_pendente" || e.codigo == "em_andamento"
+                        if (esperando && System.currentTimeMillis() - inicio < ESPERA_DA_RECOMPENSA_MS) {
+                            delay(2000); null
+                        } else throw e
+                    }
+                }
+                Log.i(TAG, "[AUREA AI] job = $jobId")
+                aoJob(jobId)
+            }
+
+            // 2) Acompanhar o estado real.
+            var falhas = 0
+            while (coroutineContext.isActive) {
+                val j = try {
+                    withContext(Dispatchers.IO) { provedor.status(jobId) }.also { falhas = 0 }
+                } catch (e: FalhaDeVideo) {
+                    // Consulta que falha não muda o job: tenta de novo (rede some e volta).
+                    if (!e.transitorio || ++falhas >= 30) throw e
+                    estado = AureaAiEstado.Reconnecting
+                    delay(3000)
+                    continue
+                }
+                estado = AureaAiEstado.Generating
+                job = Job(
+                    id = j.id, status = j.status, progresso = 0.0,
+                    etapa = when (j.status) {
+                        "queued" -> "Enviando…"
+                        "generating" -> "Gerando vídeo…"
+                        "completed" -> "Finalizando…"
+                        else -> j.etapa
+                    },
+                    posicaoNaFila = 0, segundos = j.segundos, erro = j.erro, resultado = null,
+                )
+                if (j.terminado) {
+                    if (j.status != "completed" || !j.prontoParaBaixar) {
+                        estado = AureaAiEstado.Connected
+                        aoTerminar(null, j.erro ?: "geracao_falhou", j.repetirSemAnuncio)
+                        return
+                    }
+                    break
+                }
+                if (System.currentTimeMillis() - inicio > TEMPO_MAXIMO_DO_JOB_MS) throw FalhaDeVideo("tempo_esgotado")
+                delay(2000)
+            }
+
+            // 3) Baixar (arquivo temporário → valida MP4 → nome final).
+            baixando = true
+            val arquivo = try {
+                withContext(Dispatchers.IO) {
+                    provedor.baixar(jobId, File(File(app.filesDir, "aurea-ai"), "$jobId.mp4"))
+                }
+            } finally {
+                baixando = false
+            }
+            Log.i(TAG, "[AUREA AI] download = ${arquivo.length()} bytes")
+            val meta = withContext(Dispatchers.IO) { metadataDoVideo(arquivo) }
+                ?: throw FalhaDeVideo("resultado_nao_e_video")
+            job = job?.copy(status = "completed", etapa = "Concluído", resultado = meta)
+            estado = AureaAiEstado.Connected
+            aoTerminar(arquivo, null, false)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: FalhaDeVideo) {
+            Log.w(TAG, "[AUREA AI] falha = ${e.codigo}")
+            estado = AureaAiEstado.Connected
+            // Técnica (rede, provedor fora, download) = a recompensa segue valendo.
+            val repetir = e.transitorio || e.codigo.startsWith("download") || e.codigo == "tempo_esgotado"
+            aoTerminar(null, e.codigo, repetir)
+        } catch (e: Exception) {
+            Log.w(TAG, "[AUREA AI] falha = $e")
+            estado = AureaAiEstado.Connected
+            aoTerminar(null, "geracao_falhou", true)
+        }
     }
 
-    /** Recompensa + vídeo: agora sim o resultado aparece para o usuário. */
+    /** Só enquanto está na fila: depois que a geração começa, ela vai até o fim. */
+    fun cancelar() {
+        val id = sessao?.jobId ?: return
+        escopo.launch {
+            val ok = runCatching { withContext(Dispatchers.IO) { provedor.cancelar(id) } }.isSuccess
+            if (!ok) mensagem = "A geração já começou e vai até o fim."
+        }
+    }
+
     private fun liberar(s: AiGenerationSession) {
         val arquivo = s.result ?: return
-        Log.i(TAG, "[AUREA AI] release = geração concluída=${s.generationCompleted} recompensa=${s.rewardEarned} → vídeo liberado (${arquivo.length()} bytes)")
-        job?.let { j -> if (j.status == "completed") historico = listOf(j) + historico.filter { it.id != j.id } }
+        Log.i(TAG, "[AUREA AI] vídeo entregue (${arquivo.length()} bytes)")
+        job?.let { j -> historico = listOf(j) + historico.filter { it.id != j.id } }
         ultimoArquivo = arquivo
-        val (w, h) = H3Workflow.dimensoes(s.pedido.aspecto, s.pedido.resolucao)
-        ultimoTitulo = "AI ${w}×$h"
-        // Liberado é o fim da linha: não há mais o que retomar.
+        ultimoTitulo = "Aurea AI"
         guarda.limpar()
         aoMudar()
     }
 
-    /**
-     * A geração REAL no H3 (não mexer): Enviando → Na fila → Gerando →
-     * Finalizando → Concluído, cada estado como o ComfyUI disse. O vídeo baixado
-     * NÃO é entregue aqui: vai para `aoTerminar`, e quem decide a entrega é a
-     * recompensa. Roda no escopo do estado: o anúncio na frente não pausa nada.
-     */
-    private fun gerar(pedido: Pedido, aoPromptId: (String) -> Unit, aoTerminar: (File?, String?) -> Unit) {
-        val c = comfy ?: run { erro = "Sem conexão com o servidor"; aoTerminar(null, erro); return }
-
-        erro = ""
-        mensagem = ""
-        ultimoArquivo = null
-        estado = AureaAiEstado.Generating
-        val (w, h) = H3Workflow.dimensoes(pedido.aspecto, pedido.resolucao)
-        val inicio = System.currentTimeMillis()
-        fun etapa(status: String, texto: String, fila: Int = 0, res: Resultado? = null) = Job(
-            id = job?.id.orEmpty(), status = status, progresso = 0.0, etapa = texto,
-            posicaoNaFila = fila, segundos = (System.currentTimeMillis() - inicio) / 1000.0,
-            erro = null, resultado = res,
-        )
-        job = etapa("sending", "Enviando")
-
-        acompanhando = escopo.launch {
-            try {
-                val workflow = withContext(Dispatchers.IO) {
-                    H3Workflow.montar(app, pedido, pedido.assetId)
-                }
-                val promptId = withContext(Dispatchers.IO) { c.enviarPrompt(workflow) }
-                Log.i(TAG, "[AUREA AI] prompt_id = $promptId (${w}x$h, ${H3Workflow.quadros(pedido.duracao)} quadros, ${c.base})")
-                aoPromptId(promptId)
-                job = etapa("queued", "Na fila").copy(id = promptId)
-
-                // Polling do /history (não depende do WebSocket do frontend).
-                var falhas = 0
-                while (isActive) {
-                    delay(2000)
-                    val registro = try {
-                        withContext(Dispatchers.IO) { c.historico(promptId) }.also { falhas = 0 }
-                    } catch (e: ComfyErro) {
-                        if (++falhas >= 15) throw e
-                        estado = AureaAiEstado.Reconnecting
-                        continue
-                    }
-                    estado = AureaAiEstado.Generating
-                    Log.i(TAG, "[AUREA AI] history = $promptId → ${if (registro == null) "ainda não terminou" else "terminou"}")
-
-                    if (registro == null) {
-                        // Ainda não terminou: a fila diz se está rodando ou esperando.
-                        val (rodando, pos) = runCatching { withContext(Dispatchers.IO) { c.situacaoNaFila(promptId) } }
-                            .getOrDefault(false to 0)
-                        job = if (rodando) etapa("running", "Gerando").copy(id = promptId)
-                        else etapa("queued", "Na fila", pos).copy(id = promptId)
-                        posicaoNaFila = pos
-                        continue
-                    }
-
-                    // O registro já pode aparecer no /history com erro (o ComfyUI
-                    // põe o que falhou lá). Sem isto, o app ficaria em "Gerando..."
-                    // para sempre olhando um job que já morreu.
-                    ComfyCliente.erroDoHistorico(registro)?.let { throw ComfyErro(200, "execution_error", it) }
-
-                    val video = ComfyCliente.videosDoHistorico(registro).firstOrNull()
-                    if (video == null) {
-                        // Terminou sem saída de vídeo: ou ainda está escrevendo o
-                        // arquivo, ou o nó de saída não produziu nada. Espera a
-                        // próxima volta antes de acusar erro.
-                        Log.w(TAG, "[AUREA AI] output = /history sem saída de vídeo ainda")
-                        if (++falhas >= 5) throw ComfyErro(200, "sem_video", "o /history terminou sem saída de vídeo")
-                        continue
-                    }
-                    Log.i(TAG, "[AUREA AI] output = ${video.subpasta}/${video.nome}")
-
-                    entregar(c, video, promptId, pedido, w, h)
-                    return@launch
-                }
-            } catch (e: ComfyErro) {
-                Log.w(TAG, "[AUREA AI] error = ${e.paraTela()}")
-                falhar(e.paraTela())
-                aoTerminar(null, e.paraTela())
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "[AUREA AI] error = $e")
-                val texto = e.message ?: e.javaClass.simpleName
-                falhar(texto)
-                aoTerminar(null, texto)
-            }
-        }
-    }
-
-    fun cancelar() {
-        val c = comfy ?: return
-        val id = job?.id?.takeIf { it.isNotBlank() }
-        escopo.launch {
-            acompanhando?.cancel()
-            if (id != null) runCatching { withContext(Dispatchers.IO) { c.cancelar(id) } }
-            job = job?.copy(status = "cancelled", etapa = "Cancelado")
-            estado = AureaAiEstado.Connected
-            mensagem = "Cancelado"
-            // A sessão termina sem vídeo (nada a liberar).
-            fimDaGeracao?.let { fimDaGeracao = null; it(null, "Cancelado") }
-        }
-    }
-
-    /** Só depois de o arquivo existir: a camada aponta para ele. */
+    /** O arquivo já foi validado como MP4; quem sonda e cria a camada é o importador do motor. */
     fun adicionarNaTimeline() {
         val arquivo = ultimoArquivo ?: return
         if (!arquivo.isFile || arquivo.length() == 0L) {
@@ -582,43 +470,26 @@ class AureaAiState(
         return "Salvo em ${dst.absolutePath}"
     }
 
-    fun atualizarHistorico() = Unit
+    fun atualizarHistorico() = conectar()
 
     /** Reabre um vídeo desta sessão. */
     fun tocar(item: Job) {
         job = item
         if (item.status == "completed") {
             val f = File(File(app.filesDir, "aurea-ai"), "${item.id}.mp4")
-            if (f.isFile) { ultimoArquivo = f; ultimoTitulo = "AI" }
+            if (f.isFile) { ultimoArquivo = f; ultimoTitulo = "Aurea AI" }
         }
     }
 
-    /**
-     * Sobe a imagem de partida para o ComfyUI (`/upload/image`) e devolve a
-     * referência que o LoadImage do workflow vai usar.
-     */
-    suspend fun enviarImagem(bytes: ByteArray, tipo: String): String? {
-        val c = comfy ?: return null
-        return try {
-            withContext(Dispatchers.IO) { c.subirImagem(bytes, tipo) }.also {
-                Log.i(TAG, "[AureaAI] /upload/image → $it")
-            }
-        } catch (e: ComfyErro) {
-            erro = e.paraTela()
-            null
-        } catch (e: Exception) {
-            erro = e.message ?: "não consegui enviar a imagem"
-            null
-        }
+    /** Sobe a imagem de partida (I2V) para o backend; devolve o id que o pedido cita. */
+    suspend fun enviarImagem(bytes: ByteArray, tipo: String): String? = try {
+        withContext(Dispatchers.IO) { provedor.enviarImagem(bytes, tipo) }
+    } catch (e: FalhaDeVideo) {
+        erro = explicarFalhaDeVideo(e.codigo)
+        null
     }
 
     fun limparErro() { erro = ""; mensagem = "" }
-
-    private fun falhar(texto: String) {
-        erro = texto
-        job = job?.copy(status = "failed", etapa = "Falhou", erro = texto)
-        estado = if (comfy != null) AureaAiEstado.Connected else AureaAiEstado.Reconnecting
-    }
 
     fun limparTudo() {
         escopo.launch { acompanhando?.cancel() }
@@ -630,16 +501,42 @@ class AureaAiState(
     }
 }
 
+/**
+ * Duração, tamanho e fps REAIS do arquivo baixado, lidos pelo decodificador do
+ * aparelho. Nulo = o aparelho não consegue ler como vídeo (não entra na timeline).
+ */
+fun metadataDoVideo(arquivo: File): Resultado? {
+    val r = android.media.MediaMetadataRetriever()
+    return try {
+        r.setDataSource(arquivo.absolutePath)
+        fun chave(k: Int) = r.extractMetadata(k)
+        val ms = chave(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: return null
+        val w = chave(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: return null
+        val h = chave(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: return null
+        if (ms <= 0 || w <= 0 || h <= 0) return null
+        val quadros = if (Build.VERSION.SDK_INT >= 28)
+            chave(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)?.toIntOrNull() else null
+        val fps = if (quadros != null && quadros > 0) Math.round(quadros * 1000.0 / ms).toInt() else 0
+        Resultado(
+            videoUrl = "", miniaturaUrl = "", duracaoSegundos = ms / 1000.0,
+            largura = w, altura = h, fps = fps,
+            comAudio = chave(android.media.MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes",
+        )
+    } catch (_: Exception) {
+        null
+    } finally {
+        runCatching { r.release() }
+    }
+}
+
 fun formarDuracao(segundos: Double): String {
     val total = segundos.toInt()
     return "%d:%02d".format(total / 60, total % 60)
 }
 
 /**
- * Extrai a imagem de partida para o modo imagem-para-vídeo.
- *
- * Devolve os bytes já prontos para subir. Só PNG/JPEG/WebP passam: o servidor
- * recusa o resto, e recusar aqui evita gastar a rede à toa.
+ * Extrai a imagem de partida para o modo imagem-para-vídeo. Só PNG/JPEG/WebP
+ * até 8 MB passam: o servidor recusa o resto, e recusar aqui poupa a rede.
  */
 suspend fun lerImagemParaEnvio(app: Application, uri: Uri): Pair<ByteArray, String>? =
     withContext(Dispatchers.IO) {
@@ -647,7 +544,7 @@ suspend fun lerImagemParaEnvio(app: Application, uri: Uri): Pair<ByteArray, Stri
         if (tipo !in setOf("image/png", "image/jpeg", "image/webp")) return@withContext null
         val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: return@withContext null
-        if (bytes.size > 12 * 1024 * 1024) return@withContext null
+        if (bytes.size > 8 * 1024 * 1024) return@withContext null
         bytes to tipo
     }
 

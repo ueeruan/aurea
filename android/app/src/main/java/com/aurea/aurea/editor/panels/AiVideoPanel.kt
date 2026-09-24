@@ -48,6 +48,7 @@ import com.aurea.aurea.R
 import com.aurea.aurea.ai.AureaAiEstado
 import com.aurea.aurea.ai.SessaoStatus
 import com.aurea.aurea.ai.Pedido
+import com.aurea.aurea.ai.explicarFalhaDeVideo
 import com.aurea.aurea.ai.formarDuracao
 import com.aurea.aurea.ai.lerImagemParaEnvio
 import com.aurea.aurea.ai.podeGerar
@@ -133,6 +134,7 @@ internal fun AiVideoPanel(env: PanelEnv) {
         item(key = "estado") {
             Column {
                 Etiqueta(ai.estado, ai.modelo, ai.gpu)
+                if (ai.estado.podeGerar()) Nota(stringResource(R.string.ai_aviso_online), AureaColors.Accent)
                 ai.erro.takeIf { it.isNotBlank() }?.let { Nota(it, AureaColors.Danger) }
                 ai.mensagem.takeIf { it.isNotBlank() && ai.estado.podeGerar() }?.let { Nota(it, AureaColors.Muted) }
             }
@@ -198,7 +200,7 @@ internal fun AiVideoPanel(env: PanelEnv) {
         item(key = "prompt") {
             Column {
                 Rotulo(stringResource(R.string.ai_prompt))
-                Campo(prompt, stringResource(R.string.ai_prompt_dica), altura = 88.dp) { prompt = it }
+                Campo(prompt, stringResource(R.string.ai_prompt_dica), altura = 88.dp) { prompt = it.take(ai.promptMax) }
                 Spacer(Modifier.height(4.dp))
                 if (avancado) {
                     Rotulo(stringResource(R.string.ai_prompt_negativo))
@@ -228,11 +230,6 @@ internal fun AiVideoPanel(env: PanelEnv) {
                         habilitado = ai.job?.rodando != true) { audio = it }
                 }
                 Interruptor(stringResource(R.string.ai_avancado), avancado) { avancado = it }
-                if (avancado) {
-                    Interruptor(stringResource(R.string.ai_turbo), turbo,
-                        habilitado = ai.job?.rodando != true) { turbo = it }
-                    Nota(stringResource(R.string.ai_turbo_nota), AureaColors.Subtle)
-                }
             }
         }
 
@@ -254,7 +251,7 @@ internal fun AiVideoPanel(env: PanelEnv) {
                                 promptNegativo = negativo.trim(),
                                 duracao = caps.duracoes.getOrElse(duracao) { 5 },
                                 aspecto = caps.aspectos.getOrElse(aspecto) { "16:9" },
-                                resolucao = caps.resolucoes.getOrElse(resolucao) { "standard" },
+                                resolucao = caps.resolucoes.getOrElse(resolucao) { caps.resolucoes.firstOrNull() ?: "480p" },
                                 fps = caps.fps.firstOrNull() ?: 24,
                                 audio = audio,
                                 turbo = turbo,
@@ -282,38 +279,27 @@ internal fun AiVideoPanel(env: PanelEnv) {
                             Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
                             Botao(stringResource(R.string.ai_procurar_de_novo)) { ai.tentarGerarDeNovo() }
                         }
-                        SessaoStatus.AnuncioNaTela, SessaoStatus.Gerando -> {
-                            when {
-                                s.rewardEarned -> Nota(stringResource(R.string.ai_video_finalizando), AureaColors.Accent)
-                                s.adClosedEarly -> Nota(stringResource(R.string.ai_assista_completo), AureaColors.Muted)
-                                else -> Nota(stringResource(R.string.ai_gerando_seu_video), AureaColors.Muted)
-                            }
-                            // Sem anúncio agora: o H3 segue; o vídeo espera o "Assistir e liberar".
-                            if (s.adError != null && !s.rewardEarned) Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
-                        }
-                        SessaoStatus.Bloqueado -> {
-                            Spacer(Modifier.height(10.dp))
-                            Text(stringResource(R.string.ai_video_pronto_titulo), style = AureaType.Base.merge(
-                                TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
-                            Nota(
-                                stringResource(if (s.adClosedEarly) R.string.ai_assista_completo else R.string.ai_video_pronto_assista),
-                                AureaColors.Muted,
-                            )
-                            if (s.adError != null) Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
-                            Botao(stringResource(R.string.ai_assistir_e_liberar), primario = true,
+                        SessaoStatus.AnuncioNaTela ->
+                            Nota(stringResource(R.string.ai_assista_para_gerar), AureaColors.Muted)
+                        SessaoStatus.SemRecompensa -> {
+                            // Nada foi gerado: o pedido espera um anúncio completo.
+                            Nota(stringResource(R.string.ai_assista_para_gerar), AureaColors.Muted)
+                            Botao(stringResource(R.string.ai_assistir_e_gerar_de_novo), primario = true,
                                 ativo = !ai.anunciando) { ai.liberarComAnuncio() }
                         }
+                        SessaoStatus.Gerando ->
+                            Nota(stringResource(R.string.ai_gerando_seu_video), AureaColors.Muted)
                         SessaoStatus.Falhou -> {
-                            // O POST /prompt falhou (node_errors, 400, servidor
-                            // fora). Antes isto não dizia nada e a tela ficava
-                            // calada; agora diz o que houve e oferece recomeçar.
                             Spacer(Modifier.height(10.dp))
                             Text(stringResource(R.string.ai_falhou_titulo), style = AureaType.Base.merge(
                                 TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Danger)))
-                            Nota(s.erro ?: stringResource(R.string.ai_falhou_corpo), AureaColors.Muted)
+                            Nota(explicarFalhaDeVideo(s.erro), AureaColors.Muted)
                             Spacer(Modifier.height(6.dp))
-                            Botao(stringResource(R.string.ai_procurar_de_novo), primario = true,
-                                ativo = !ai.anunciando) { ai.tentarDeNovoAposFalha() }
+                            // Falha técnica depois da recompensa: tenta de novo SEM outro anúncio.
+                            Botao(
+                                stringResource(if (s.podeRepetirSemAnuncio) R.string.ai_tentar_sem_anuncio else R.string.ai_gerar_de_novo),
+                                primario = true, ativo = !ai.anunciando && !ai.sessaoOcupada,
+                            ) { ai.tentarDeNovoAposFalha() }
                         }
                         SessaoStatus.Liberado -> Unit
                     }
@@ -322,14 +308,13 @@ internal fun AiVideoPanel(env: PanelEnv) {
         }
 
         // --- progresso ------------------------------------------------------
-        ai.job?.takeIf { ai.sessao?.status != SessaoStatus.Bloqueado }?.let { j ->
+        ai.job?.takeIf { ai.sessao?.status != SessaoStatus.Falhou }?.let { j ->
             item(key = "progresso") {
                 Column {
                     Spacer(Modifier.height(10.dp))
                     val linha = when {
                         j.status == "queued" && j.posicaoNaFila > 0 ->
                             stringResource(R.string.ai_na_fila, j.posicaoNaFila)
-                        j.status == "queued" -> stringResource(R.string.ai_proximo_da_fila)
                         else -> j.etapa.ifBlank { j.status }
                     }
                     Text(linha, style = AureaType.Base.merge(

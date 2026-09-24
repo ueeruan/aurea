@@ -1678,4 +1678,9 @@ to edit the curve.</string>
     <string name="ai_assista_completo">Watch the full ad to unlock your video.</string>
     <string name="ai_assistir_e_liberar">Watch and unlock video</string>
     <string name="engine_not_ready">The engine is still starting. Try again in a moment.</string>
+    <string name="ai_aviso_online">Aurea AI online. Ads keep the infrastructure running — and you pay nothing.</string>
+    <string name="ai_assista_para_gerar">Watch the full ad to generate your video.</string>
+    <string name="ai_assistir_e_gerar_de_novo">Watch and generate</string>
+    <string name="ai_tentar_sem_anuncio">Try again (no ad)</string>
+    <string name="ai_gerar_de_novo">Generate again</string>
 </resources>

@@ -84,6 +84,13 @@ protocol AdsBackend: AnyObject {
               dismissed: @escaping () -> Void, failed: @escaping (String) -> Void,
               rewarded: @escaping () -> Void) -> Bool
     func release(_ kind: AdKind)
+    /// Quem será recompensado pelo PRÓXIMO Rewarded (verificação server-side:
+    /// no LevelPlay, o Dynamic User ID que volta no callback assinado).
+    func setRewardUserId(_ id: String)
+}
+
+extension AdsBackend {
+    func setRewardUserId(_ id: String) {}
 }
 
 /// Nenhuma tela conhece o SDK: elas falam com este objeto. Tudo na main thread.
@@ -233,6 +240,10 @@ final class AureaAdsManager {
 
     /// Há um Rewarded carregado e dentro da validade, pronto para aparecer agora.
     func rewardedReady() -> Bool { canRequest && isValid(.aiRewarded) }
+
+    /// Amarra o próximo Rewarded ao ticket da geração: o callback server-to-server
+    /// do provedor devolve esse id ASSINADO, e é ele que libera a geração paga.
+    func setRewardUserId(_ id: String) { backend?.setRewardUserId(id) }
 
     /// Carrega o Rewarded (na abertura e depois de consumido). `loaded`/`failed`:
     /// no máximo um dos dois, uma vez.

@@ -19,74 +19,82 @@ interface RewardedAds {
 
 /** Em que ponto uma geração está, do ponto de vista de quem usa. */
 enum class SessaoStatus {
-    /** Esperando um Rewarded carregar. A geração NÃO começou. */
+    /** Pedindo o ticket ao servidor e/ou esperando o Rewarded carregar. Nada foi gerado. */
     Preparando,
-    /** Não deu para ter anúncio (rede, AdMob). A geração NÃO começou; dá para tentar de novo. */
+    /** Não deu para ter anúncio (rede, SDK). Nada foi gerado; dá para tentar de novo. */
     AnuncioIndisponivel,
-    /** Anúncio na tela; o H3 já está gerando por baixo. */
+    /** Anúncio na tela. A geração ainda NÃO começou (ela é paga: só depois da recompensa). */
     AnuncioNaTela,
-    /** H3 gerando; o anúncio já fechou. */
+    /** O anúncio fechou sem recompensa. Nada foi gerado; o mesmo pedido espera outro anúncio. */
+    SemRecompensa,
+    /** Recompensa confirmada: a geração real está rodando no servidor. */
     Gerando,
-    /** Vídeo pronto e ainda bloqueado: falta a recompensa. */
-    Bloqueado,
-    /** Vídeo pronto e liberado. */
+    /** Vídeo pronto, baixado e validado. */
     Liberado,
-    /** O H3 falhou: não há vídeo para liberar. */
+    /** Não há vídeo. [AiGenerationSession.podeRepetirSemAnuncio] diz se tentar de novo pede anúncio. */
     Falhou,
 }
 
 /**
- * UMA geração. Cada uma tem o próprio id: a recompensa do anúncio de uma nunca
- * libera outra. Imutável — cada mudança vira uma cópia nova.
+ * UMA geração. Cada uma tem o próprio ticket no servidor: a recompensa de um
+ * anúncio vale para esta geração e para nenhuma outra. Imutável.
  */
 data class AiGenerationSession(
     val generationId: String,
     val pedido: Pedido,
-    val promptId: String? = null,
+    /** O ticket do servidor (amarrado ao anúncio pelo Dynamic User ID). */
+    val ticket: String? = null,
+    /** O job aceito pelo servidor. Existindo, retomar é só ACOMPANHAR — nunca gerar de novo. */
+    val jobId: String? = null,
     val rewardEarned: Boolean = false,
     val generationCompleted: Boolean = false,
     val result: File? = null,
     val status: SessaoStatus = SessaoStatus.Preparando,
-    /** O H3 já foi chamado para esta sessão (uma vez só, nunca de novo). */
+    /** A geração paga já foi pedida para este ticket. */
     val generationStarted: Boolean = false,
-    /** O usuário fechou o anúncio antes da recompensa. */
     val adClosedEarly: Boolean = false,
-    /** Erro do H3 (não há vídeo). */
+    /** Código curto do erro (ver `explicarFalhaDeVideo`). */
     val erro: String? = null,
-    /** Por que não houve anúncio da última vez (a tela explica e oferece tentar de novo). */
     val adError: String? = null,
     /**
-     * O endereço que ACEITOU o `POST /prompt` desta sessão.
-     *
-     * Fica congelado: uma geração já começada continua sendo acompanhada e
-     * baixada por este endereço até terminar, mesmo que o túnel mude no meio.
-     * Só uma geração NOVA consulta o discovery de novo.
+     * A falha foi técnica e a recompensa continua valendo: "Tentar de novo" usa
+     * o MESMO ticket, sem mostrar outro anúncio.
      */
-    val endpointUsado: String? = null,
+    val podeRepetirSemAnuncio: Boolean = false,
 ) {
-    /** A ÚNICA regra de liberação. */
     val liberado: Boolean get() = generationCompleted && rewardEarned && result != null && erro == null
 }
 
 /**
- * A camada de "direito ao vídeo" POR CIMA da geração: não sabe nada de H3 nem
- * de AdMob. Regras:
- *  - a geração é enviada ao H3 NO TOQUE em "Gerar" (um job só) e o Rewarded
- *    aparece em paralelo: o H3 trabalha enquanto o anúncio roda;
- *  - a recompensa só vem de `aoRecompensa` (onUserEarnedReward) — fechar ou
- *    abrir o anúncio não conta, tempo não conta;
- *  - o vídeo só é entregue com `generationCompleted && rewardEarned`;
- *  - fechar o anúncio cedo não cancela a geração, não apaga o resultado e não
- *    gera de novo: o resultado fica bloqueado até um novo anúncio recompensar.
+ * A ordem de uma geração PAGA:
+ *   ticket no servidor → Rewarded (com o ticket como Dynamic User ID)
+ *   → recompensa → geração real → vídeo.
  *
- * Tudo roda na thread principal (os callbacks do AdMob e do estado já vêm nela).
+ * Regras:
+ *  - nada é gerado antes da recompensa (o provedor cobra por geração);
+ *  - a recompensa só vem de `aoRecompensa` (callback oficial do SDK); o
+ *    servidor ainda confere o callback ASSINADO do LevelPlay antes de gerar;
+ *  - uma recompensa inicia UMA geração: duplo toque, callback repetido ou volta
+ *    do fundo não geram de novo;
+ *  - erro técnico depois da recompensa não pede outro anúncio: o mesmo ticket
+ *    gera de novo quando o usuário tocar em "Tentar de novo";
+ *  - fechar o anúncio cedo não gera nada e não perde o pedido.
+ *
+ * Tudo roda na thread principal.
  */
 class AiRewardFlow(
     private val ads: RewardedAds,
-    /** Começa a geração REAL desta sessão. Chama `aoTerminar` uma vez: arquivo, ou erro. */
-    private val iniciarGeracao: (sessao: AiGenerationSession, aoPromptId: (String) -> Unit,
-                                 aoTerminar: (arquivo: File?, erro: String?) -> Unit) -> Unit,
-    /** Toda mudança de uma sessão (para a tela). */
+    /** Pede o ticket ao servidor (valida o pedido ANTES do anúncio). */
+    private val pedirTicket: (sessao: AiGenerationSession, aoTicket: (String) -> Unit, aoFalhar: (String) -> Unit) -> Unit,
+    /** Amarra o próximo Rewarded ao ticket (LevelPlay.setDynamicUserId). */
+    private val amarrarAnuncio: (ticket: String) -> Unit,
+    /**
+     * Gera de verdade com o ticket já recompensado. Chama `aoJob` quando o
+     * servidor aceitar e `aoTerminar` uma vez: arquivo, ou código de erro (com
+     * `repetirSemAnuncio` quando a recompensa continua valendo).
+     */
+    private val iniciarGeracao: (sessao: AiGenerationSession, aoJob: (String) -> Unit,
+                                 aoTerminar: (arquivo: File?, erro: String?, repetirSemAnuncio: Boolean) -> Unit) -> Unit,
     private val aoMudar: (AiGenerationSession) -> Unit,
     private val novoId: () -> String = { UUID.randomUUID().toString() },
 ) {
@@ -101,110 +109,113 @@ class AiRewardFlow(
         return s
     }
 
-    /** Toque em "Gerar": o H3 começa JÁ (uma vez só) e o Rewarded vem em paralelo. */
-    fun gerar(pedido: Pedido, id: String = novoId(), endpoint: String? = null): AiGenerationSession {
+    /** Toque em "Gerar": ticket → anúncio. A geração só começa na recompensa. */
+    fun gerar(pedido: Pedido, id: String = novoId()): AiGenerationSession {
         require(id !in sessoes) { "sessão repetida" }
-        val s = por(AiGenerationSession(
-            id, pedido, generationStarted = true, status = SessaoStatus.Gerando, endpointUsado = endpoint,
-        ))
-        iniciarGeracao(s,
-            { pid -> sessoes[id]?.let { por(it.copy(promptId = pid)) } },
-            { arquivo, erro -> terminou(id, arquivo, erro) })
-        prepararEApresentar(id, liberar = false)
+        por(AiGenerationSession(id, pedido, status = SessaoStatus.Preparando))
+        pedirTicket(sessoes.getValue(id),
+            { ticket ->
+                val s = sessoes[id]
+                if (s != null && s.ticket == null) {
+                    por(s.copy(ticket = ticket))
+                    amarrarAnuncio(ticket)
+                    prepararEApresentar(id)
+                }
+            },
+            { codigo ->
+                // Sem ticket (limite, IA desligada, rede): nenhum anúncio, nada gerado.
+                sessoes[id]?.let { por(it.copy(status = SessaoStatus.Falhou, erro = codigo, podeRepetirSemAnuncio = false)) }
+            })
         return sessoes.getValue(id)
     }
 
     /**
-     * Põe de volta uma sessão que já existia (gravada em disco).
-     *
-     * Não chama [iniciarGeracao]: o `POST /prompt` desta sessão já foi feito —
-     * repetir geraria um segundo job e cobraria a A100 duas vezes pelo mesmo
-     * vídeo. Quem retoma o acompanhamento pelo `prompt_id` é o [AureaAiState].
-     *
-     * Também NÃO mostra anúncio na volta: o usuário acabou de sair de um. O
-     * anúncio só volta a aparecer quando ele tocar em "Assistir e liberar".
+     * Põe de volta uma sessão gravada em disco. Não pede ticket, não mostra
+     * anúncio e não gera: quem retoma o ACOMPANHAMENTO do job é o estado.
      */
     fun retomar(s: AiGenerationSession): AiGenerationSession {
         sessoes[s.generationId] = s
         return avaliar(s)
     }
 
-    /** "Tentar de novo" de uma sessão que ficou sem anúncio (a geração não tinha começado). */
-    fun tentarDeNovo(id: String) {
+    /** "Assistir de novo": anúncio que não veio ou fechou cedo. O mesmo ticket, o mesmo pedido. */
+    fun assistirDeNovo(id: String) {
         val s = sessoes[id] ?: return
-        if (s.generationStarted || s.status != SessaoStatus.AnuncioIndisponivel) return
-        por(s.copy(status = SessaoStatus.Preparando, adError = null))
-        prepararEApresentar(id, liberar = false)
+        if (s.generationStarted || s.rewardEarned) return
+        if (s.status != SessaoStatus.AnuncioIndisponivel && s.status != SessaoStatus.SemRecompensa) return
+        val ticket = s.ticket ?: return
+        por(s.copy(status = SessaoStatus.Preparando, adError = null, adClosedEarly = false))
+        amarrarAnuncio(ticket)
+        prepararEApresentar(id)
     }
 
-    /**
-     * "Assistir e liberar vídeo": outro Rewarded para a MESMA sessão. Não gera
-     * de novo — a recompensa só destrava o resultado que já existe (ou que está
-     * para existir).
-     */
-    fun liberarComAnuncio(id: String) {
+    /** "Tentar de novo" depois de erro técnico: mesmo ticket, SEM anúncio. */
+    fun repetirSemAnuncio(id: String) {
         val s = sessoes[id] ?: return
-        if (s.rewardEarned || s.erro != null) return
-        prepararEApresentar(id, liberar = true)
+        if (s.status != SessaoStatus.Falhou || !s.podeRepetirSemAnuncio || !s.rewardEarned || s.ticket == null) return
+        iniciar(s.copy(jobId = null, erro = null, podeRepetirSemAnuncio = false, generationStarted = false))
     }
 
-    private fun prepararEApresentar(id: String, liberar: Boolean) {
-        if (ads.pronto()) { apresentar(id, liberar); return }
-        sessoes[id]?.let { if (!liberar && !it.generationStarted) por(it.copy(status = SessaoStatus.Preparando)) }
+    private fun prepararEApresentar(id: String) {
+        if (ads.pronto()) { apresentar(id); return }
         ads.carregar(
-            aoCarregar = { apresentar(id, liberar) },
-            aoFalhar = { e -> semAnuncio(id, liberar, e) },
+            aoCarregar = { apresentar(id) },
+            aoFalhar = { e -> semAnuncio(id, e) },
         )
     }
 
-    private fun semAnuncio(id: String, liberar: Boolean, e: String) {
+    private fun semAnuncio(id: String, e: String) {
         val s = sessoes[id] ?: return
-        // Sem anúncio: a geração não começa; na liberação, o vídeo segue como estava.
-        if (!liberar && !s.generationStarted) por(s.copy(status = SessaoStatus.AnuncioIndisponivel, adError = e))
-        else por(s.copy(adError = e))
+        if (s.rewardEarned || s.generationStarted) return
+        por(s.copy(status = SessaoStatus.AnuncioIndisponivel, adError = e))
     }
 
-    private fun apresentar(id: String, liberar: Boolean) {
+    private fun apresentar(id: String) {
         if (sessoes[id] == null) return
-        sessoes[id]?.let { if (it.adError != null) por(it.copy(adError = null)) }
         val mostrou = ads.mostrar(
             aoAbrir = {
-                val s = sessoes[id] ?: return@mostrar
-                // O H3 já está gerando por baixo; o anúncio só muda o que a tela diz.
-                if (!s.generationCompleted && s.erro == null) por(s.copy(status = SessaoStatus.AnuncioNaTela))
+                val s = sessoes[id]
+                if (s != null && !s.rewardEarned) por(s.copy(status = SessaoStatus.AnuncioNaTela, adError = null))
             },
             aoRecompensa = {
-                val s = sessoes[id] ?: return@mostrar
-                avaliar(s.copy(rewardEarned = true))
+                val s = sessoes[id]
+                // Um anúncio, uma geração: recompensa repetida não gera de novo.
+                if (s != null && !s.rewardEarned && !s.generationStarted) iniciar(s.copy(rewardEarned = true))
             },
             aoFechar = {
-                val s = sessoes[id] ?: return@mostrar
-                avaliar(if (s.rewardEarned) s else s.copy(adClosedEarly = true))
+                val s = sessoes[id]
+                if (s != null && !s.rewardEarned) por(s.copy(status = SessaoStatus.SemRecompensa, adClosedEarly = true))
             },
-            aoFalhar = { e -> semAnuncio(id, liberar, e) },
+            aoFalhar = { e -> semAnuncio(id, e) },
         )
-        // `false` = não havia anúncio (e nenhum callback é chamado).
-        if (!mostrou) semAnuncio(id, liberar, "anúncio indisponível")
+        if (!mostrou) semAnuncio(id, "anúncio indisponível")
     }
 
-    private fun terminou(id: String, arquivo: File?, erro: String?) {
+    private fun iniciar(base: AiGenerationSession) {
+        val s = por(base.copy(generationStarted = true, status = SessaoStatus.Gerando, erro = null))
+        val id = s.generationId
+        iniciarGeracao(s,
+            { job -> sessoes[id]?.let { por(it.copy(jobId = job)) } },
+            { arquivo, erro, repetir -> terminou(id, arquivo, erro, repetir) })
+    }
+
+    private fun terminou(id: String, arquivo: File?, erro: String?, repetirSemAnuncio: Boolean) {
         val s = sessoes[id] ?: return
         if (erro != null || arquivo == null) {
-            // Erro do H3: nada é liberado — não existe resultado.
-            por(s.copy(generationCompleted = false, result = null, erro = erro ?: "sem vídeo", status = SessaoStatus.Falhou))
+            por(s.copy(generationCompleted = false, result = null, erro = erro ?: "geracao_falhou",
+                status = SessaoStatus.Falhou, podeRepetirSemAnuncio = repetirSemAnuncio && s.rewardEarned))
             return
         }
         avaliar(s.copy(generationCompleted = true, result = arquivo))
     }
 
-    /** Recalcula o status a partir dos DOIS estados independentes. */
     private fun avaliar(s: AiGenerationSession): AiGenerationSession {
         val status = when {
             s.erro != null -> SessaoStatus.Falhou
             s.liberado -> SessaoStatus.Liberado
-            s.generationCompleted -> SessaoStatus.Bloqueado
-            s.status == SessaoStatus.AnuncioNaTela && !s.rewardEarned && !s.adClosedEarly -> SessaoStatus.AnuncioNaTela
-            else -> SessaoStatus.Gerando
+            s.generationStarted -> SessaoStatus.Gerando
+            s.adClosedEarly -> SessaoStatus.SemRecompensa
+            else -> s.status
         }
         return por(s.copy(status = status))
     }

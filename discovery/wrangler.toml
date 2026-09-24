@@ -22,3 +22,45 @@ id = "df8d88aef8db4746935268a0d4371233"
 
 # O segredo NÃO fica neste arquivo: vai por `wrangler secret put`.
 # O app não conhece segredo nenhum — ele só LÊ o documento.
+
+# -----------------------------------------------------------------------------
+# Geração de vídeo por IA (8Scale) — rotas em /api/ai/video (ai_video.js)
+#
+# Secrets (NUNCA neste arquivo; `npx wrangler secret put <NOME>`):
+#   EIGHTSCALE_API_KEY          a chave da 8Scale (só o Worker a conhece)
+#   LEVELPLAY_S2S_PRIVATE_KEY   a "private key" do server-to-server callback do LevelPlay
+#   AI_VIDEO_ADMIN_TOKEN        token de administração (/admin/status e teste sem anúncio)
+# -----------------------------------------------------------------------------
+
+# O livro-caixa: um Durable Object serializa as reservas (teto de gasto sem corrida).
+[[durable_objects.bindings]]
+name = "COFRE_DE_VIDEO"
+class_name = "CofreDeVideo"
+
+[[migrations]]
+tag = "v1-cofre-de-video"
+new_sqlite_classes = ["CofreDeVideo"]
+
+[vars]
+# Kill switch: "false" = nenhuma chamada paga chega à 8Scale.
+AI_VIDEO_ENABLED = "true"
+# Teto de gasto do dia (UTC). Atingido, nenhuma geração nova entra.
+AI_VIDEO_MAX_DAILY_COST_USD = "5"
+# Custo ESTIMADO por job, usado para o teto acima. Trocar pelo preço real da
+# 8Scale para 480p/5 s (sem este valor, a geração fica desligada).
+AI_VIDEO_COST_PER_JOB_USD = "0.50"
+# A recompensa só vale pelo callback ASSINADO do LevelPlay.
+AI_VIDEO_REQUIRE_REWARD_SSV = "true"
+AI_VIDEO_I2V_ENABLED = "true"
+# O que o app pode pedir (qualquer outro valor é recusado aqui).
+AI_VIDEO_RESOLUTIONS = "480p"
+AI_VIDEO_DURATIONS = "5"
+AI_VIDEO_ASPECTS = "16:9,9:16"
+AI_VIDEO_MAX_PROMPT_CHARS = "800"
+# Limites.
+AI_VIDEO_DEVICE_DAILY_LIMIT = "5"
+AI_VIDEO_IP_DAILY_LIMIT = "10"
+AI_VIDEO_GLOBAL_DAILY_LIMIT = "60"
+AI_VIDEO_DEVICE_CONCURRENT = "1"
+AI_VIDEO_GLOBAL_CONCURRENT = "6"
+AI_VIDEO_TICKETS_PER_HOUR = "12"

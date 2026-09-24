@@ -9,6 +9,13 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.snapshotFlow
+import androidx.lifecycle.lifecycleScope
+import com.aurea.aurea.ads.AureaAds
+import com.aurea.aurea.ads.AureaAdsManager
+import com.aurea.aurea.state.Screen
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.AureaApp
 import com.aurea.aurea.ui.i18n.AppLanguage
@@ -43,15 +50,42 @@ class MainActivity : ComponentActivity() {
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent { AureaApp(store) }
+
+        // Anúncios: consentimento + SDK fora do caminho do app (nada aqui espera).
+        AureaAds.initialize(this)
+        if (savedInstanceState == null) {
+            // Abertura fria: o App Open só tem chance no instante em que o Aurea
+            // termina de carregar. Se o anúncio não estiver pronto nessa hora, a
+            // Home segue e ele não aparece depois.
+            lifecycleScope.launch {
+                snapshotFlow { store.engineReady }.first { it }
+                AureaAdsManager.onAppLoaded(this@MainActivity, trabalhando())
+            }
+        }
     }
+
+    /** No editor ou exportando: nenhum App Open. */
+    private fun trabalhando(): Boolean = store.screen == Screen.Editor || store.exporter.busy
 
     override fun onStart() {
         super.onStart()
         store.onEnterForeground()
+        AureaAdsManager.onForeground(this, trabalhando())
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AureaAdsManager.attach(this)
+    }
+
+    override fun onPause() {
+        AureaAdsManager.detach(this)
+        super.onPause()
     }
 
     override fun onStop() {
         store.onEnterBackground()
+        AureaAdsManager.onBackground()
         super.onStop()
     }
 

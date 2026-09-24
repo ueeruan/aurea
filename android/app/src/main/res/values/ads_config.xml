@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AdMob — RELEASE. Os IDs REAIS do Aurea entram SÓ aqui (e em nenhum outro lugar).
+  Vazio = aquele formato não pede anúncio. O App ID precisa existir sempre (o SDK
+  confere na abertura): até o real ser configurado, fica o App ID de teste do Google,
+  e como os IDs de bloco estão vazios nenhum anúncio é pedido no release.
+-->
+<resources>
+    <string name="admob_app_id" translatable="false">ca-app-pub-3940256099942544~3347511713</string>
+    <string name="admob_app_open_unit" translatable="false"></string>
+    <string name="admob_export_interstitial_unit" translatable="false"></string>
+</resources>

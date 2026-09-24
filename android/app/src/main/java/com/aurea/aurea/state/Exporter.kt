@@ -146,6 +146,8 @@ class Exporter internal constructor(
     /** Volta ao estado inicial (tela reaberta ou fechada). */
     fun reset() {
         if (!busy) state = ExportUiState()
+        // Momento ocioso (fora do render): prepara o anúncio da próxima exportação.
+        com.aurea.aurea.ads.AureaAdsManager.preloadExportInterstitial()
     }
 
     fun shareIntent(): Intent? {
@@ -169,9 +171,15 @@ class Exporter internal constructor(
         state = state.copy(phase = ExportPhase.Publishing)
         val result = withContext(Dispatchers.IO) { runCatching { copyToGallery(file) } }
         file.delete()
-        state = result.fold(
-            onSuccess = { (uri, label) -> state.copy(phase = ExportPhase.Done, outputUri = uri, message = label) },
-            onFailure = { state.copy(phase = ExportPhase.Failed, message = "O vídeo foi gerado, mas não consegui salvar na galeria.") },
+        result.fold(
+            onSuccess = { (uri, label) ->
+                val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri, message = label)
+                // Ponto seguro: o render ACABOU e o vídeo já está na galeria. Se houver
+                // anúncio (e a frequência deixar), ele aparece antes do resultado; sem
+                // anúncio, offline ou com erro, o resultado aparece na hora.
+                com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { state = pronto }
+            },
+            onFailure = { state = state.copy(phase = ExportPhase.Failed, message = "O vídeo foi gerado, mas não consegui salvar na galeria.") },
         )
     }
 

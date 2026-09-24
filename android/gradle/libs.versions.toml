@@ -5,6 +5,8 @@
 #  atualização, e a divergência aparece como um erro de link no meio do build.
 # =============================================================================
 [versions]
+playServicesAds = "25.5.0"
+ump = "4.0.0"
 json = "20250517"
 agp = "9.1.0"
 # Versão do compilador de Compose. Com o AGP 9 o Kotlin é embutido, mas o
@@ -18,6 +20,8 @@ coroutines = "1.10.2"
 junit = "4.13.2"
 
 [libraries]
+play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
+ump = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "ump" }
 json = { group = "org.json", name = "json", version.ref = "json" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }

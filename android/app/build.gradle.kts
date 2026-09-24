@@ -190,6 +190,10 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 
+    // Anúncios (AdMob) + consentimento oficial do Google (UMP). Só o pacote
+    // `ads` do app importa isto (GoogleAdsBackend).
+    implementation(libs.play.services.ads)
+    implementation(libs.ump)
     testImplementation(libs.junit)
     // Nos testes de JVM o `org.json` do android.jar é só um esqueleto que
     // lança "Stub!": sem isto, qualquer teste que leia um JSON do contrato

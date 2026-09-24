@@ -101,6 +101,16 @@ public:
     }
 
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
+        // Listras diagonais nascem AQUI. Se o quadro chega com menos bytes por
+        // linha do que a largura, cada linha e escrita com o passo errado e a
+        // imagem desliza — e antes isso era aceito calado, virando video
+        // listrado sem nenhum aviso. Falhar alto e melhor que exportar lixo.
+        if (yStride < video_.width) {
+            return Status{Errc::InvalidState, "quadro com passo de linha menor que a largura"};
+        }
+        if (uv != nullptr && uvStride < video_.width) {
+            return Status{Errc::InvalidState, "quadro com passo de croma menor que a largura"};
+        }
         const u64 deadline = monotonic_ns() + 5'000'000'000ull;
         ssize_t idx = -1;
         while ((idx = AMediaCodec_dequeueInputBuffer(video__.codec, 2000)) < 0) {
@@ -287,6 +297,8 @@ private:
         sliceHeight_ = video_.height;
         if (auto fn = get_input_format_fn()) {
             if (AMediaFormat* in = fn(video__.codec)) {
+                // Registrado sempre: e o primeiro dado que se olha quando um
+                // export sai errado.
                 i32 v = 0;
                 if (AMediaFormat_getInt32(in, "stride", &v) && v >= static_cast<i32>(video_.width)) stride_ = static_cast<u32>(v);
                 if (AMediaFormat_getInt32(in, "slice-height", &v) && v >= static_cast<i32>(video_.height)) {
@@ -294,7 +306,16 @@ private:
                 }
                 AMediaFormat_delete(in);
             }
+        } else {
+            // API < 28: nao da para perguntar o passo ao encoder. A suposicao de
+            // que passo == largura vale na maioria dos aparelhos dessa epoca,
+            // mas nao em todos — e onde nao vale, o video sai listrado. Fica no
+            // log para nao ser um misterio sem pista.
+            AUREA_LOG_WARN("export: aparelho sem AMediaCodec_getInputFormat (API < 28); assumindo passo de "
+                           "entrada %u e fatia %u iguais a largura/altura", stride_, sliceHeight_);
         }
+        AUREA_LOG_INFO("export: passo de entrada %u, fatia %u (largura %u, altura %u)",
+                       stride_, sliceHeight_, video_.width, video_.height);
         if (AMediaCodec_start(video__.codec) != AMEDIA_OK) return fail(Errc::IoError, "encoder de video nao iniciou");
         AUREA_LOG_INFO("export: %s %s (%s) %ux%u @%.2f %u bps, entrada %s stride %u fatia %u", mime,
                        info_.name[0] ? info_.name : "?",

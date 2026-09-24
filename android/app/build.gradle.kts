@@ -191,4 +191,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    // Nos testes de JVM o `org.json` do android.jar é só um esqueleto que
+    // lança "Stub!": sem isto, qualquer teste que leia um JSON do contrato
+    // falharia por motivo que não tem nada a ver com o código testado.
+    testImplementation(libs.json)
 }

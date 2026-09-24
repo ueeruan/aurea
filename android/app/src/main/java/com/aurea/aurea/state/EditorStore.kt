@@ -204,6 +204,52 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     val captions by lazy { com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() } }
 
+    /**
+     * Aurea AI (Fase 9.4): geracao remota de video.
+     *
+     * Nao mexe em timeline nem no motor de render: o unico ponto de contato com
+     * o editor e `importarGerado`, que faz o mesmo que importar um video do
+     * aparelho — cria uma camada. O resto (gerar, acompanhar, baixar) vive no
+     * proprio estado.
+     */
+    val aureaAi by lazy {
+        com.aurea.aurea.ai.AureaAiState(
+            app, viewModelScope,
+            aoAdicionarNaTimeline = ::importarGerado,
+        ) { refreshNow() }
+    }
+
+    /**
+     * Poe o video gerado na timeline.
+     *
+     * O arquivo ja esta dentro do app (`filesDir/aurea-ai`), entao nao ha Uri
+     * de outro app a autorizar — ao contrario de `importVideo`, que precisa
+     * pedir permissao persistente ao provedor. Pelo mesmo motivo o caminho vai
+     * como caminho absoluto: o motor le o arquivo direto.
+     */
+    private fun importarGerado(arquivo: java.io.File, titulo: String) {
+        if (!arquivo.isFile() || arquivo.length() == 0L) {
+            // 3 = Errc::NotFound (core/Result.hpp); o arquivo sumiu entre o
+            // download e o toque, ou veio vazio.
+            errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video, humanError(3))
+            return
+        }
+        busyMessage = "Importando vídeo gerado…"
+        viewModelScope.launch {
+            val id = withContext(Dispatchers.IO) {
+                engine.importVideo(arquivo.absolutePath, titulo)
+            }
+            busyMessage = null
+            if (id < 0) {
+                errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video,
+                    humanError((-id).toInt()))
+                return@launch
+            }
+            refreshNow()
+            select(id)
+        }
+    }
+
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
     val exporter = Exporter(app, engine, viewModelScope)
     private val batch = CommandBatch(engine)

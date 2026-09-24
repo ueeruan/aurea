@@ -95,7 +95,7 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (ui.addTab) {
                 AddTab.Shape -> ShapesTab(store, close)
-                AddTab.Media -> MediaTab(store, close)
+                AddTab.Media -> MediaTab(store, ui, close)
                 AddTab.Audio -> AudioTab(store, close)
                 AddTab.Text -> TextTab(store, ui)
                 AddTab.Element -> ElementTab(store, close)
@@ -383,7 +383,7 @@ private fun DrawScope.drawShapePreset(preset: Int) {
  * `importVideo`, imagem para `importImage`, pelo tipo MIME.
  */
 @Composable
-private fun MediaTab(store: EditorStore, close: () -> Unit) {
+private fun MediaTab(store: EditorStore, ui: EditorUi, close: () -> Unit) {
     val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri != null) {
@@ -402,6 +402,11 @@ private fun MediaTab(store: EditorStore, close: () -> Unit) {
             },
             AddItem(stringResource(R.string.editor_video), CupertinoGlyph.Videocam) {
                 picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+            },
+            // Aurea AI: o video nao vem do aparelho, vem de um servidor. Entra
+            // aqui porque, para quem usa, e mais um jeito de conseguir um video.
+            AddItem(stringResource(R.string.sh_add_ai_video), CupertinoGlyph.WandStars) {
+                openPanel(store, ui, EditorPanel.AiVideo)
             },
         ),
     )

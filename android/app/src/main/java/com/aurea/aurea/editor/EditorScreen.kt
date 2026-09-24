@@ -216,6 +216,10 @@ fun EditorScreen(store: EditorStore) {
 
     val content = when {
         ui.adding -> SheetContent.Adding
+        // O painel da Aurea AI CRIA a camada: abrir sem nada selecionado é o
+        // caso normal do projeto novo, então ele não passa pelo portão do
+        // `selectionSize == 1` que vale para os painéis que EDITAM a camada.
+        ui.panel == EditorPanel.AiVideo -> SheetContent.Panel
         ui.panel != null && selectionSize == 1 -> SheetContent.Panel
         selectionSize >= 2 -> SheetContent.Batch
         selectionSize == 1 -> SheetContent.Dock

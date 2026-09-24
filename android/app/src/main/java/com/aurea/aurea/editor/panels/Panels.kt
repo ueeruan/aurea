@@ -49,6 +49,7 @@ enum class EditorPanel {
     Mask,          // máscaras (roto) e track matte
     Vector,        // camada vetorial: caminhos, tinta, contorno, aparar, repetidor
     ShapeEdit,     // Frente D (7.2): editar forma — tamanho, raio, pontas; alças no palco
+    AiVideo,       // Aurea AI: gerar vídeo remoto (MiniMax H3) e trazer para a timeline
 }
 
 /**
@@ -113,12 +114,18 @@ fun PanelContent(
         EditorPanel.Mask -> stringResource(R.string.panel_mascara_recorte)
         EditorPanel.Vector -> stringResource(R.string.panel_vetor)
         EditorPanel.ShapeEdit -> stringResource(R.string.panel_editar_forma)
+        EditorPanel.AiVideo -> stringResource(R.string.panel_ai_video)
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
         PanelHeader(title, onBack = onClose)
         Box(Modifier.fillMaxWidth().weight(1f)) {
-            if (hasLayer) {
+            // O painel da Aurea AI gera um video e o poe na timeline: nao ha
+            // camada escolhida para ele consultar, entao fica FORA do
+            // `hasLayer` — abrir sem nada selecionado e o caso normal.
+            if (panel == EditorPanel.AiVideo) {
+                AiVideoPanel(env)
+            } else if (hasLayer) {
                 when (panel) {
                     EditorPanel.Transform -> TransformPanel(env, transformTab, onTab = { transformTab = it })
                     EditorPanel.Effects -> EffectsPanel(env)

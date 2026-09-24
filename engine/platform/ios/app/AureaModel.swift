@@ -169,6 +169,25 @@ enum AureaPaths {
 // =============================================================================
 // A sessão
 // =============================================================================
+/// O cabeçote para a TIMELINE, a cada quadro da tela durante a reprodução.
+///
+/// O `status` do motor é lido a 5 Hz (`statusTimer`): publicar a árvore inteira
+/// a 60 Hz redesenharia tudo por nada. Mas a timeline anda com o cabeçote — a
+/// 5 Hz ela rolava aos saltos durante o play. Este relógio é um objeto à parte,
+/// observado só pela timeline (e o timecode dela); um CADisplayLink o atualiza
+/// enquanto o motor está reproduzindo e para sozinho na pausa.
+@MainActor
+final class PlayheadClock: ObservableObject {
+    @Published fileprivate(set) var frame: Int64 = 0
+}
+
+@MainActor
+private final class DisplayLinkProxy: NSObject {
+    let tick: () -> Void
+    init(_ tick: @escaping () -> Void) { self.tick = tick }
+    @objc func step(_ link: CADisplayLink) { tick() }
+}
+
 @MainActor
 final class AureaModel: ObservableObject {
 
@@ -304,6 +323,8 @@ final class AureaModel: ObservableObject {
     }
 
     private var statusTimer: Timer?
+    let playheadClock = PlayheadClock()
+    private var playheadLink: CADisplayLink?
     private var memoryWarningObserver: NSObjectProtocol?
     private var lastRevision: UInt32 = 0
     private var lastThumbGeneration: UInt32 = 0
@@ -671,6 +692,7 @@ final class AureaModel: ObservableObject {
         }
         statusTimer?.invalidate()
         statusTimer = nil
+        followPlayback(false)
         engine.stop()
         started = false
     }
@@ -693,6 +715,8 @@ final class AureaModel: ObservableObject {
         guard engine.readStatus(&out) else { return }
         let playheadChanged = out.playhead != lastEnginePlayhead
         lastEnginePlayhead = out.playhead
+        if playheadClock.frame != out.playhead { playheadClock.frame = out.playhead }
+        followPlayback(out.playing != 0)
         // Só publica quando algo que a UI MOSTRA mudou: publicar a 5 Hz sem
         // filtrar redesenha a árvore inteira por nada (a FPS do painel DEV
         // muda sempre, e é para isso que existe o `showPerf`).
@@ -855,9 +879,41 @@ final class AureaModel: ObservableObject {
     func undo() { engine.run { $0.undo() }; syncAfterEdit() }
     func redo() { engine.run { $0.redo() }; syncAfterEdit() }
 
-    func playPause() { engine.run { $0.togglePlayback() }; status.playing = status.playing == 0 ? 1 : 0 }
+    func playPause() {
+        engine.run { $0.togglePlayback() }
+        status.playing = status.playing == 0 ? 1 : 0
+        followPlayback(status.playing != 0)
+    }
+
+    /// Liga/desliga o relógio da timeline (um CADisplayLink só enquanto toca).
+    private func followPlayback(_ playing: Bool) {
+        if playing {
+            guard playheadLink == nil else { return }
+            let link = CADisplayLink(target: DisplayLinkProxy { [weak self] in self?.playheadTick() },
+                                     selector: #selector(DisplayLinkProxy.step(_:)))
+            link.add(to: .main, forMode: .common)
+            playheadLink = link
+        } else {
+            playheadLink?.invalidate()
+            playheadLink = nil
+        }
+    }
+
+    /// Um quadro da tela: só o cabeçote do motor vai para a timeline.
+    private func playheadTick() {
+        guard started else { followPlayback(false); return }
+        var out = AureaStatus()
+        guard engine.readStatus(&out) else { return }
+        if playheadClock.frame != out.playhead { playheadClock.frame = out.playhead }
+        if out.playing == 0 {
+            followPlayback(false)
+            refreshStatus()
+        }
+    }
+
     func seek(toFrame frame: Int64) {
         engine.run { $0.seek(toFrame: frame) }; status.playhead = frame
+        playheadClock.frame = frame
         if primarySelection != nil { refreshSelectedLayer() }
     }
     func step(_ frames: Int32) { engine.run { $0.stepFrames(frames) } }
@@ -873,6 +929,7 @@ final class AureaModel: ObservableObject {
     func optimisticPlayhead(_ frame: Int64) {
         guard status.playhead != frame else { return }
         status.playhead = frame
+        playheadClock.frame = frame
         if primarySelection != nil { refreshSelectedLayer() }
     }
     /// Redesenha e reapresenta mesmo sem mudança no modelo: a janela voltou a

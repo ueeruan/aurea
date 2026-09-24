@@ -445,7 +445,17 @@ Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
     EnvSet novo;
     const Status s = upload_environment(maps, novo);
     if (!s.ok()) return s;
-    release_environment();
+    // Troca SÓ os mapas do grupo. Não é `release_environment()`: ela esquece
+    // também a chave e o pedido pendente (e os ambientes por objeto) — com a
+    // chave zerada, quem chamou gravava `envKey_ = pendingKey_ = ~0`, o
+    // próximo quadro não reconhecia o ambiente que acabou de subir e pedia
+    // outro: o IBL era refeito em laço durante o preview (texto/modelo 3D
+    // piscando entre a luz do HDRI e a do estúdio, e CPU esquentando).
+    for (TextureHandle* t : {&irradiance_, &prefiltered_, &iblLut_}) {
+        if (t->valid()) gpu_->destroy_texture(*t);
+        *t = TextureHandle{};
+    }
+    ++envUploads_;
     irradiance_ = novo.irradiance;
     prefiltered_ = novo.prefiltered;
     iblLut_ = novo.brdf;

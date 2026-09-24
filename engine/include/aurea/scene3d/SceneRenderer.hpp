@@ -251,6 +251,12 @@ public:
     void finish_environment(const SceneEnvironment& env) noexcept;
     /// Ambiente atual (0 = estúdio; ~0 = nenhum ainda).
     [[nodiscard]] u64 environment_key() const noexcept { return envKey_; }
+    /// Pede o ambiente do quadro: gera fora da thread de render e troca quando
+    /// ficar pronto (o anterior continua valendo até lá). Pedir de novo o que
+    /// já está na GPU não gera nada.
+    void request_environment(const SceneEnvironment& env) noexcept;
+    /// Quantas vezes um ambiente do grupo subiu para a GPU (desde o início).
+    [[nodiscard]] u64 environment_uploads() const noexcept { return envUploads_; }
 
     [[nodiscard]] const SceneStats& stats() const noexcept { return stats_; }
     /// Qualidade do preview (HeavyQuality): mapa de sombra (512..2048), filtro
@@ -315,9 +321,7 @@ private:
     bool envRequested_ = false;
     u64 envKey_ = ~0ull;       ///< o que está na GPU
     u64 pendingKey_ = ~0ull;   ///< o que está sendo gerado
-    /// Pede o ambiente do quadro: gera fora da thread de render e troca quando
-    /// ficar pronto (o anterior continua valendo até lá).
-    void request_environment(const SceneEnvironment& env) noexcept;
+    u64 envUploads_ = 0;
     SamplerHandle cubeSampler_{};
     void release_environment() noexcept;
     /// Conjuntos por HDRI: um upload por asset, compartilhado pelos objetos.

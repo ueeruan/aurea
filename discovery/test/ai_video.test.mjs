@@ -86,3 +86,13 @@ test("callback do LevelPlay: assinatura da documentacao", async () => {
   const semAssinatura = new URLSearchParams(p);
   assert.equal((await conferirCallback(semAssinatura, chave, { md5 })).erro, "parametros_faltando");
 });
+
+test("callback do LevelPlay: vale a chave do Android OU a do iOS", async () => {
+  const p = { userid: "T1", rewards: "1", eventId: "ev9", timestamp: "202609241800" };
+  const sigIos = await md5(p.timestamp + p.eventId + p.userid + p.rewards + "090000");
+  const q = new URLSearchParams({ ...p, signature: sigIos });
+  const r = await conferirCallback(q, ["888888", "090000"], { md5 });
+  assert.equal(r.ok, true);
+  assert.equal(r.chave, 1);
+  assert.equal((await conferirCallback(q, ["888888"], { md5 })).erro, "assinatura_invalida");
+});

@@ -17,6 +17,7 @@ struct AureaApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(model.playheadClock)
                 .environment(\.layoutDirection, model.language.resolved == .ar ? .rightToLeft : .leftToRight)
                 .preferredColorScheme(.dark)   // o Aurea é escuro em todas as telas
                 .onAppear {

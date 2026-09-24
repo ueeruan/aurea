@@ -118,5 +118,5 @@ struct AureaActivityIndicator: View {
 }
 
 #Preview {
-    ContentView().environmentObject(AureaModel())
+    { let m = AureaModel(); return ContentView().environmentObject(m).environmentObject(m.playheadClock) }()
 }

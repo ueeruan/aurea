@@ -7,6 +7,8 @@ import Combine
 @MainActor
 struct TimelineView: View {
     @EnvironmentObject private var model: AureaModel
+    /// O cabeçote a cada quadro da tela durante o play (ver `PlayheadClock`).
+    @EnvironmentObject private var clock: PlayheadClock
     @State private var pps = Zoom.defaultPPS
     @State private var scrollY: CGFloat = 0
     @State private var heldView: Double?
@@ -50,7 +52,7 @@ struct TimelineView: View {
     private var compact: Bool { model.sheetContent == .panel }
     private var fps: Float { TimeAxis.safeFps(Float(model.compositionFps)) }
     private var ppf: CGFloat { TimeAxis.pxPerFrame(pps: pps, density: 1, fps: fps) }
-    private var viewFrame: Double { heldView ?? Double(model.status.playhead) }
+    private var viewFrame: Double { heldView ?? Double(clock.frame) }
     private var rows: [TimelineRow] {
         let all = rowCache.build(model.layers, model.keyframes)
         return compact ? all.filter { $0.id == model.primarySelection } : all
@@ -172,7 +174,7 @@ struct TimelineView: View {
             var line = Path(); line.move(to: CGPoint(x: px, y: s * 1.4)); line.addLine(to: CGPoint(x: px, y: m.tickBottom))
             context.stroke(line, with: .color(color), lineWidth: marker.kind == 1 ? 1 : 1.5)
         }
-        let clock = Text(Timecode.format(Int32(clamping: model.status.playhead), fps)).font(.aurea(size: 13, weight: .bold)).monospacedDigit().tracking(0.5).foregroundColor(.white)
+        let clock = Text(Timecode.format(Int32(clamping: self.clock.frame), fps)).font(.aurea(size: 13, weight: .bold)).monospacedDigit().tracking(0.5).foregroundColor(.white)
         // Android anchors the text baseline at 21 dp, above the 28.2 dp underline.
         let resolvedClock = context.resolve(clock)
         let clockSize = resolvedClock.measure(in: CGSize(width: size.width, height: m.rowsTop))

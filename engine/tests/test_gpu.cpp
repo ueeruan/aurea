@@ -6540,3 +6540,80 @@ AUREA_TEST(Gpu, HalftoneMatchesAfterEffectsColorHalftone) {
         AUREA_CHECK(vazioMin > 0.99f);
     }
 }
+
+// -----------------------------------------------------------------------------
+// Texto 3D piscando no preview (relato do beta): parado o texto sai com a cor
+// do material; em reprodução, com a qualidade pesada reduzida pelo AUTO, a face
+// da frente escurecia em quadros soltos. Mede a MESMA cena em qualidade cheia e
+// na reduzida que o preview usa sob carga: a aparência do objeto não pode mudar.
+// -----------------------------------------------------------------------------
+AUREA_TEST(Gpu, Text3DKeepsItsShadingWhenPreviewQualityDrops) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    scene3d::Text3DSpec spec;
+    spec.content = "Texto";
+    spec.color = Vec4{1.0f, 0.35f, 0.3f, 1.0f};
+    AUREA_CHECK(rig.e.add_text3d(spec).ok());
+
+    TextureDesc d;
+    d.width = 320;
+    d.height = 180;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *rig.e.gpu()->create_texture(d);
+    std::vector<u16> half(320 * 180 * 4);
+    // Média do vermelho e do verde nos pixels do texto (os que não são fundo).
+    auto medir = [&](f32& r, f32& g, u32& n) {
+        AUREA_CHECK(rig.e.render_offscreen(target, 320, 180, true).ok());
+        AUREA_CHECK(rig.e.gpu()->read_texture(target, half.data(), 320 * 8).ok());
+        f64 sr = 0, sg = 0;
+        n = 0;
+        for (usize i = 0; i < half.size(); i += 4) {
+            const f32 R = half_to_float(half[i]), G = half_to_float(half[i + 1]), B = half_to_float(half[i + 2]);
+            if (R + G + B < 0.03f) continue;
+            sr += R; sg += G; ++n;
+        }
+        r = n ? static_cast<f32>(sr / n) : 0.0f;
+        g = n ? static_cast<f32>(sg / n) : 0.0f;
+    };
+    f32 r0, g0, r1, g1;
+    u32 n0, n1;
+    medir(r0, g0, n0);
+    const f32 cheio = rig.e.preview_heavy_scale();
+    rig.e.set_thermal(static_cast<u32>(ThermalState::Level::Critical), true);
+    medir(r1, g1, n1);
+    const f32 reduzido = rig.e.preview_heavy_scale();
+    std::printf("    escala %.2f: vermelho %.4f verde %.4f (%u px) | escala %.2f: vermelho %.4f verde %.4f (%u px)\n",
+                static_cast<double>(cheio), static_cast<double>(r0), static_cast<double>(g0), n0,
+                static_cast<double>(reduzido), static_cast<double>(r1), static_cast<double>(g1), n1);
+    AUREA_CHECK(reduzido < cheio);
+    AUREA_CHECK(n0 > 500);
+    // O objeto é o mesmo: cobertura e cor média praticamente iguais.
+    AUREA_CHECK(std::abs(static_cast<i64>(n0) - static_cast<i64>(n1)) < static_cast<i64>(n0 / 20));
+    AUREA_CHECK_NEAR(r1, r0, 0.05f * std::max(r0, 0.01f));
+    AUREA_CHECK_NEAR(g1, g0, 0.05f * std::max(g0, 0.01f) + 0.002f);
+    rig.e.gpu()->destroy_texture(target);
+}
+
+// O ambiente (IBL) do preview é gerado UMA vez. Antes, trocar os mapas zerava a
+// chave do ambiente e o preview pedia o mesmo ambiente de novo a cada quadro:
+// o IBL era refeito em laço (texto/modelo 3D piscando entre a luz do HDRI e a
+// do estúdio durante a reprodução, e a CPU esquentando).
+AUREA_TEST(Gpu, PreviewEnvironmentIsBuiltOnceNotInALoop) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    scene3d::SceneRenderer& sr = rig.e.renderer().scene_renderer();
+    scene3d::SceneEnvironment estudio;   // sem HDRI: chave 0
+    const u64 antes = sr.environment_uploads();
+    // Como o preview faz: um pedido por quadro, por 2 s de "reprodução".
+    for (int q = 0; q < 400; ++q) {
+        sr.request_environment(estudio);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const u64 subidas = sr.environment_uploads() - antes;
+    std::printf("    ambiente: chave %llx, %llu subida(s) em 400 quadros\n",
+                static_cast<unsigned long long>(sr.environment_key()), static_cast<unsigned long long>(subidas));
+    AUREA_CHECK_EQ(sr.environment_key(), 0ull);
+    AUREA_CHECK(subidas <= 1u);
+}

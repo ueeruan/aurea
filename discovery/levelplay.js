@@ -31,20 +31,31 @@ function iguaisEmTempoConstante(a, b) {
 }
 
 /**
- * Lê e confere um callback. `params` é o URLSearchParams da requisição (que já
- * decodifica o userId, como a assinatura exige).
- *
- * @returns {Promise<{ok: boolean, erro?: string, userId?: string, eventId?: string, rewards?: string}>}
+ * IPs de onde o LevelPlay (ironSource) faz o callback, pela documentação
+ * oficial ("Server-to-server callback event handlers").
  */
-export async function conferirCallback(params, chavePrivada, { md5 = md5Hex } = {}) {
-  if (!chavePrivada) return { ok: false, erro: "chave_nao_configurada" };
+export const IPS_DO_LEVELPLAY = Object.freeze([
+  "79.125.5.179", "79.125.26.193", "79.125.117.130", "176.34.224.39", "176.34.224.41", "176.34.224.49",
+  "34.194.180.125", "34.196.56.165", "34.196.251.81", "34.196.253.23", "54.88.253.218", "54.209.185.78",
+]);
+
+/**
+ * Confere com QUALQUER uma das chaves (Android e iOS são apps separados no
+ * LevelPlay, cada um com a sua). `params` é o URLSearchParams da requisição,
+ * que já decodifica o userId, como a assinatura exige.
+ */
+export async function conferirCallback(params, chaves, { md5 = md5Hex } = {}) {
+  const lista = (Array.isArray(chaves) ? chaves : [chaves]).filter(Boolean);
+  if (!lista.length) return { ok: false, erro: "chave_nao_configurada" };
   const userId = params.get("userid") ?? params.get("userId") ?? params.get("USER_ID") ?? "";
   const eventId = params.get("eventId") ?? params.get("eventid") ?? "";
   const rewards = params.get("rewards") ?? "";
   const timestamp = params.get("timestamp") ?? "";
   const assinatura = (params.get("signature") ?? "").toLowerCase();
   if (!userId || !eventId || !timestamp || !assinatura) return { ok: false, erro: "parametros_faltando", eventId };
-  const esperada = await md5(timestamp + eventId + userId + rewards + chavePrivada);
-  if (!iguaisEmTempoConstante(assinatura, esperada)) return { ok: false, erro: "assinatura_invalida", eventId };
-  return { ok: true, userId, eventId, rewards };
+  for (let i = 0; i < lista.length; i++) {
+    const esperada = await md5(timestamp + eventId + userId + rewards + lista[i]);
+    if (iguaisEmTempoConstante(assinatura, esperada)) return { ok: true, userId, eventId, rewards, chave: i };
+  }
+  return { ok: false, erro: "assinatura_invalida", eventId };
 }

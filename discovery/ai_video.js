@@ -17,7 +17,7 @@
 // =============================================================================
 
 import { EightScaleVideoProvider, ErroDoProvedor } from "./provedores.js";
-import { conferirCallback } from "./levelplay.js";
+import { conferirCallback, IPS_DO_LEVELPLAY } from "./levelplay.js";
 
 const PREFIXO = "/api/ai/video";
 const APARELHO = /^[A-Za-z0-9-]{16,64}$/;
@@ -144,6 +144,12 @@ export function saidaAceitavel(url) {
   return true;
 }
 
+/** As chaves do callback S2S (Android e iOS; a antiga, única, também vale). */
+export function chavesDoLevelPlay(env) {
+  return [env.LEVELPLAY_S2S_PRIVATE_KEY_ANDROID, env.LEVELPLAY_S2S_PRIVATE_KEY_IOS, env.LEVELPLAY_S2S_PRIVATE_KEY]
+    .filter((k) => typeof k === "string" && k.length > 0);
+}
+
 export async function rotaDeVideo(req, env, ctx, url) {
   const rota = url.pathname.replace(/\/+$/, "");
   if (!rota.startsWith(PREFIXO)) return null;
@@ -171,12 +177,19 @@ export async function rotaDeVideo(req, env, ctx, url) {
 
   // Callback do LevelPlay: é o LevelPlay que chama, não o app.
   if (sub === "/reward/levelplay" && req.method === "GET") {
-    const r = await conferirCallback(url.searchParams, env.LEVELPLAY_S2S_PRIVATE_KEY);
+    // Só os servidores do LevelPlay (lista da documentação). Desligável por var,
+    // caso eles mudem de IP: aí a assinatura continua sendo a barreira.
+    if (String(env.AI_VIDEO_LEVELPLAY_IP_CHECK ?? "true") !== "false" && !IPS_DO_LEVELPLAY.includes(ip)) {
+      console.warn(`[ai-video] callback levelplay de IP fora da lista: ${ip}`);
+      return new Response("erro:ip", { status: 403 });
+    }
+    const r = await conferirCallback(url.searchParams, chavesDoLevelPlay(env));
     if (!r.ok) {
       console.warn(`[ai-video] callback levelplay recusado: ${r.erro}`);
       return new Response(`erro:${r.erro}`, { status: r.erro === "chave_nao_configurada" ? 503 : 400 });
     }
     const res = await cofre.registrarRecompensa({ ticketId: r.userId, eventId: r.eventId, agora });
+    console.log(`[ai-video] recompensa S2S valida (${r.chave === 0 ? "android" : r.chave === 1 ? "ios" : "chave " + r.chave})${res.ignorado ? "" : " -> ticket liberado"}`);
     if (res.ignorado) console.warn(`[ai-video] recompensa ignorada: ${res.ignorado}`);
     return new Response(`${r.eventId}:OK`, { status: 200, headers: { "content-type": "text/plain" } });
   }
@@ -234,7 +247,7 @@ export async function rotaDeVideo(req, env, ctx, url) {
     // Kill switch: com a IA desligada, NENHUM POST pago chega à 8Scale.
     if (!cfg.ligado) return erro("ia_desligada", 503);
     if (!Number.isFinite(cfg.custoPorJobUsd)) return erro("ia_nao_configurada", 503, "AI_VIDEO_COST_PER_JOB_USD");
-    if (cfg.exigirRecompensa && !env.LEVELPLAY_S2S_PRIVATE_KEY && !admin) return erro("recompensa_nao_configurada", 503);
+    if (cfg.exigirRecompensa && chavesDoLevelPlay(env).length === 0 && !admin) return erro("recompensa_nao_configurada", 503);
     let corpo;
     try { corpo = await req.json(); } catch { return erro("json_invalido", 400); }
     const ticketId = String(corpo?.ticket ?? "");

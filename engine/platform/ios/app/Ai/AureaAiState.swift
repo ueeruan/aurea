@@ -48,6 +48,9 @@ final class AureaAiState: ObservableObject {
             }
         },
         onChange: { [weak self] s in
+            // Grava SEMPRE, e antes de tudo: o processo pode morrer no instante
+            // seguinte (é o que o anúncio costuma provocar).
+            GuardaDaSessao.shared.write(s)
             guard let self, s.generationId == self.currentSessionId else { return }
             self.session = s
             if s.status == .unlocked { self.unlock(s) }
@@ -59,7 +62,9 @@ final class AureaAiState: ObservableObject {
         return st == .preparing || st == .adShowing || st == .generating
     }
 
-    private static let log = { (m: String) in
+    /// `fileprivate` e não `private`: o bridge do Rewarded, no mesmo arquivo,
+    /// também registra (é onde a recompensa nasce).
+    fileprivate static let log = { (m: String) in
         #if DEBUG
         print("[AureaAI] " + m)
         #endif
@@ -87,20 +92,30 @@ final class AureaAiState: ObservableObject {
         }
     }
 
-    /// Online só com `GET {base}/system_stats` → 200 + JSON válido. Tenta a
-    /// BASE URL; se ela não responder, o endpoint do discovery.
+    /// Online só com `GET {endpoint}/system_stats` → 200 + JSON válido.
+    ///
+    /// A ordem importa: o **discovery** manda. Ele é um endereço fixo que nunca
+    /// muda; o que muda é o `endpoint` que ele publica. Depois que o Colab
+    /// publica, trocar de túnel não pede IPA nem APK novo.
     private func tryConnect() async -> AureaAiStatus {
-        var candidates = [AureaAiConfig.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))]
+        Self.log("DISCOVERY = \(AureaAiConfig.discoveryURL)")
         let read = await ComfyClient.readDiscovery()
-        Self.log("Discovery HTTP: \(read.http)")
+
+        var candidates: [String] = []
         if let d = read.doc {
-            Self.log("online: \(d.online) endpoint: \(d.endpoint)")
-            if d.isValid && !candidates.contains(d.endpoint) { candidates.append(d.endpoint) }
+            Self.log("DISCOVERY = HTTP \(read.http), online=\(d.online) endpoint=\(d.endpoint) updatedAt=\(d.updatedAt)")
+            if d.isValid { candidates.append(d.endpoint) }
+        } else {
+            Self.log("DISCOVERY = HTTP \(read.http), sem documento")
         }
+        let bootstrap = AureaAiConfig.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if !candidates.contains(bootstrap) { candidates.append(bootstrap) }
+
         for base in candidates {
+            Self.log("ENDPOINT = \(base)")
             let c = ComfyClient(base: base)
             let (http, ok) = await c.isOnline()
-            Self.log("health HTTP: \(http) (\(base)/system_stats, json \(ok ? "ok" : "inválido"))")
+            Self.log("ENDPOINT = /system_stats HTTP \(http), json \(ok ? "ok" : "inválido")")
             if ok {
                 if comfy?.base != base { comfy = c }
                 modelName = read.doc.flatMap { $0.model.isEmpty ? nil : $0.model } ?? "MiniMax H3"
@@ -108,15 +123,111 @@ final class AureaAiState: ObservableObject {
                 let modes = read.doc?.capabilities ?? []
                 capabilities = .fromDiscovery(modes.isEmpty ? ["text_to_video", "image_to_video"] : modes)
                 message = ""
-                Self.log("final state: ONLINE (\(base))")
+                resumeIfNeeded()
                 return .connected
             }
         }
         comfy = nil
         // Discovery dizendo offline e nenhum endereço de pé: OFFLINE. Senão, ainda subindo.
-        let final: AureaAiStatus = read.doc?.online == false ? .disconnected : .reconnecting
-        Self.log("final state: \(final == .disconnected ? "OFFLINE" : "RECONNECTING")")
-        return final
+        return read.doc?.online == false ? .disconnected : .reconnecting
+    }
+
+    // -- retomar depois do anúncio ------------------------------------------
+
+    /// Retoma a geração gravada, se houver uma.
+    ///
+    /// É o caminho de volta do Rewarded: o anúncio traz a Activity para trás (e
+    /// às vezes o sistema mata o processo). A sessão gravada diz qual
+    /// `prompt_id` acompanhar e por qual endereço — e retomar NUNCA manda outro
+    /// `POST /prompt`, senão o mesmo vídeo seria gerado duas vezes.
+    private func resumeIfNeeded() {
+        guard !sessionBusy, let saved = GuardaDaSessao.shared.read() else { return }
+        currentSessionId = saved.generationId
+        session = flow.resume(saved)
+
+        if saved.generationCompleted, let file = saved.result {
+            Self.log("RELEASE = retomando sessão já concluída (recompensa=\(saved.rewardEarned))")
+            if saved.rewardEarned { unlock(saved) } else { lastFile = file }
+            return
+        }
+        guard let pid = saved.promptId, !pid.isEmpty else {
+            if !saved.generationStarted { GuardaDaSessao.shared.clear() }
+            return
+        }
+        guard let base = saved.endpointUsado ?? comfy?.base else { return }
+        Self.log("POLL_HISTORY = retomando prompt_id \(pid) em \(base)")
+        follow(ComfyClient(base: base), promptId: pid, request: saved.request, w: 0, h: 0)
+    }
+
+    /// Acompanha um `prompt_id` já existente até o fim (retomada, sem novo POST).
+    private func follow(_ c: ComfyClient, promptId: String, request: AiRequest, w: Int, h: Int) {
+        let (wd, ht) = H3Workflow.dimensions(aspect: request.aspect, resolution: request.resolution)
+        let ww = w > 0 ? w : wd
+        let hh = h > 0 ? h : ht
+        let start = Date()
+        func etapa(_ st: String, _ text: String, queue: Int = 0, result: AiResult? = nil) -> AiJob {
+            AiJob(id: promptId, status: st, progress: 0, stage: text, queuePosition: queue,
+                  seconds: Date().timeIntervalSince(start), error: nil, result: result)
+        }
+        generationTask = Task { [weak self] in
+            guard let self else { return }
+            var failures = 0
+            do {
+                while !Task.isCancelled {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    let record: [String: Any]?
+                    do {
+                        record = try await c.history(promptId); failures = 0
+                    } catch let e as ComfyError {
+                        failures += 1
+                        if failures >= 15 { throw e }
+                        self.status = .reconnecting
+                        continue
+                    }
+                    self.status = .generating
+                    Self.log("POLL_HISTORY = \(promptId) → \(record == nil ? "ainda não terminou" : "terminou")")
+                    guard let record else { continue }
+                    if let e = ComfyClient.error(inHistory: record) {
+                        throw ComfyError(http: 200, code: "execution_error", detail: e)
+                    }
+                    guard let video = ComfyClient.videos(inHistory: record).first else {
+                        Self.log("OUTPUT = /history sem saída de vídeo ainda")
+                        failures += 1
+                        if failures >= 5 {
+                            throw ComfyError(http: 200, code: "sem_video",
+                                             detail: "o /history terminou sem saída de vídeo")
+                        }
+                        continue
+                    }
+                    Self.log("OUTPUT = \(video.subfolder)/\(video.name)")
+                    let res = AiResult(videoURL: "\(c.base)/view?filename=\(video.name)",
+                                       durationSeconds: Double(H3Workflow.frames(request.duration)) / Double(request.fps),
+                                       width: ww, height: hh, fps: request.fps, hasAudio: true)
+                    self.job = etapa("finishing", "Finalizando", result: res)
+                    self.downloading = true
+                    defer { self.downloading = false }
+                    Self.log("DOWNLOAD = \(c.base)/view?filename=\(video.name)")
+                    let file = try await c.download(video, to: Self.folder.appendingPathComponent("\(promptId).mp4"))
+                    let bytes = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
+                    Self.log("DOWNLOADED_BYTES = \(bytes)")
+                    self.job = etapa("completed", "Concluído", result: res)
+                    self.status = .connected
+                    if let f = self.finishGeneration { self.finishGeneration = nil; f(file, nil) }
+                    return
+                }
+            } catch is CancellationError {
+                return
+            } catch let e as ComfyError {
+                Self.log("ERROR = \(e.forScreen)")
+                self.fail(e.forScreen)
+                if let f = self.finishGeneration { self.finishGeneration = nil; f(nil, e.forScreen) }
+            } catch {
+                let text = error.localizedDescription
+                Self.log("ERROR = \(text)")
+                self.fail(text)
+                if let f = self.finishGeneration { self.finishGeneration = nil; f(nil, text) }
+            }
+        }
     }
 
     // -- gerar -------------------------------------------------------------
@@ -132,7 +243,10 @@ final class AureaAiState: ObservableObject {
         error = ""; message = ""; lastFile = nil
         let id = UUID().uuidString
         currentSessionId = id
-        flow.generate(request, id: id)
+        // O endereço que aceitar o POST fica CONGELADO nesta sessão: se o túnel
+        // cair no meio, esta geração continua sendo acompanhada por ele.
+        Self.log("POST /prompt = enviando (endpoint \(comfy?.base ?? "?"))")
+        flow.generate(request, id: id, endpoint: comfy?.base)
     }
 
     /// "Assistir e liberar vídeo": outro anúncio para a MESMA geração — não gera de novo.
@@ -145,6 +259,8 @@ final class AureaAiState: ObservableObject {
 
     private func unlock(_ s: AiGenerationSession) {
         guard let file = s.result else { return }
+        Self.log("RELEASE = geração concluída=\(s.generationCompleted) recompensa=\(s.rewardEarned) → vídeo liberado")
+        GuardaDaSessao.shared.clear()
         if let j = job, j.status == "completed" { history = [j] + history.filter { $0.id != j.id } }
         lastFile = file
         let (w, h) = H3Workflow.dimensions(aspect: s.request.aspect, resolution: s.request.resolution)
@@ -322,9 +438,16 @@ private final class ManagerRewardedAds: RewardedAds {
         var returned = false
         let shown = AureaAdsManager.shared.showRewarded(
             opened: { [weak self] in self?.state?.setShowingAd(true); opened() },
-            reward: reward,
-            closed: { [weak self] _ in self?.state?.setShowingAd(false); closed() },
-            failed: { [weak self] e in self?.state?.setShowingAd(false); if returned { failed(e) } })
+            // A recompensa vem SÓ daqui (onUserEarnedReward do SDK).
+            reward: { AureaAiState.log("REWARD = recebida"); reward() },
+            closed: { [weak self] _ in
+                AureaAiState.log("REWARD = anúncio fechado")
+                self?.state?.setShowingAd(false); closed()
+            },
+            failed: { [weak self] e in
+                AureaAiState.log("ERROR = anúncio: \(e)")
+                self?.state?.setShowingAd(false); if returned { failed(e) }
+            })
         returned = true
         return shown
     }

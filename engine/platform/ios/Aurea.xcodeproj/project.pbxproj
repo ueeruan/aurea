@@ -74,6 +74,7 @@
 		AD0000000000000000000043 /* GoogleUserMessagingPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000033 /* GoogleUserMessagingPlatform */; };
 		AD0000000000000000000061 /* AureaAiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000051 /* AureaAiClient.swift */; };
 		AD0000000000000000000062 /* AiRewardFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000052 /* AiRewardFlow.swift */; };
+		AD000000000000000000051 /* GuardaDaSessao.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD000000000000000000050 /* GuardaDaSessao.swift */; };
 		AD0000000000000000000063 /* AureaAiState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000053 /* AureaAiState.swift */; };
 		AD0000000000000000000064 /* AiVideoPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000054 /* AiVideoPanel.swift */; };
 		AD0000000000000000000065 /* minimax_h3_api.json in Resources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000055 /* minimax_h3_api.json */; };
@@ -161,6 +162,7 @@
 		AD0000000000000000000004 /* AureaAds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAds.swift; path = Ads/AureaAds.swift; sourceTree = "<group>"; };
 		AD0000000000000000000051 /* AureaAiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAiClient.swift; path = Ai/AureaAiClient.swift; sourceTree = "<group>"; };
 		AD0000000000000000000052 /* AiRewardFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AiRewardFlow.swift; path = Ai/AiRewardFlow.swift; sourceTree = "<group>"; };
+		AD000000000000000000050 /* GuardaDaSessao.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GuardaDaSessao.swift; path = Ai/GuardaDaSessao.swift; sourceTree = "<group>"; };
 		AD0000000000000000000053 /* AureaAiState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AureaAiState.swift; path = Ai/AureaAiState.swift; sourceTree = "<group>"; };
 		AD0000000000000000000054 /* AiVideoPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AiVideoPanel.swift; path = Ai/AiVideoPanel.swift; sourceTree = "<group>"; };
 		AD0000000000000000000055 /* minimax_h3_api.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = minimax_h3_api.json; path = Resources/ai/minimax_h3_api.json; sourceTree = "<group>"; };
@@ -241,6 +243,7 @@
 				AD0000000000000000000004 /* AureaAds.swift */,
 				AD0000000000000000000051 /* AureaAiClient.swift */,
 				AD0000000000000000000052 /* AiRewardFlow.swift */,
+				AD000000000000000000050 /* GuardaDaSessao.swift */,
 				AD0000000000000000000053 /* AureaAiState.swift */,
 				AD0000000000000000000054 /* AiVideoPanel.swift */,
 				AD0000000000000000000055 /* minimax_h3_api.json */,
@@ -490,6 +493,7 @@
 				AD0000000000000000000014 /* AureaAds.swift in Sources */,
 				AD0000000000000000000061 /* AureaAiClient.swift in Sources */,
 				AD0000000000000000000062 /* AiRewardFlow.swift in Sources */,
+				AD000000000000000000051 /* GuardaDaSessao.swift in Sources */,
 				AD0000000000000000000063 /* AureaAiState.swift in Sources */,
 				AD0000000000000000000064 /* AiVideoPanel.swift in Sources */,
 				AE0000000000000000000044 /* Theme.swift in Sources */,

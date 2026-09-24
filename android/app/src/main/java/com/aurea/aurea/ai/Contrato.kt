@@ -87,6 +87,8 @@ data class Discovery(
     val gpu: String,
     val capacidades: List<String>,
     val appToken: String = "",
+    /** Quando o Colab publicou isto, em segundos. 0 = o documento não trouxe. */
+    val updatedAt: Long = 0L,
 ) {
     /** Endereço utilizável: online e HTTPS (nada de http solto nem vazio). */
     fun valido(): Boolean = online && endpoint.startsWith("https://")
@@ -102,6 +104,7 @@ data class Discovery(
                 gpu = o.optString("gpu"),
                 capacidades = o.optJSONArray("capabilities").strings(),
                 appToken = o.optString("appToken").trim(),
+                updatedAt = o.optLong("updatedAt", 0L),
             )
         } catch (_: Exception) {
             null

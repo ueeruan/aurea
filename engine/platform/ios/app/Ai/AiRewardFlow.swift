@@ -23,7 +23,8 @@ protocol RewardedAds {
               closed: @escaping () -> Void, failed: @escaping (String) -> Void) -> Bool
 }
 
-enum AiSessionStatus {
+/// `String`: a sessão é gravada em disco pelo nome do caso (GuardaDaSessao).
+enum AiSessionStatus: String {
     /// Esperando um Rewarded carregar. A geração NÃO começou.
     case preparing
     /// Não deu para ter anúncio. A geração NÃO começou; dá para tentar de novo.
@@ -55,6 +56,11 @@ struct AiGenerationSession: Equatable {
     var adClosedEarly = false
     var error: String?
     var adError: String?
+    /// O endereço que ACEITOU o `POST /prompt` desta sessão. Fica congelado:
+    /// uma geração já começada continua sendo acompanhada por ele até terminar,
+    /// mesmo que o túnel mude no meio. Só uma geração NOVA consulta o
+    /// discovery de novo.
+    var endpointUsed: String?
 
     /// A ÚNICA regra de liberação.
     var unlocked: Bool { generationCompleted && rewardEarned && result != nil && error == nil }
@@ -83,10 +89,12 @@ final class AiRewardFlow {
 
     /// Toque em "Gerar": o H3 começa JÁ (uma vez só) e o Rewarded vem em paralelo.
     @discardableResult
-    func generate(_ request: AiRequest, id: String = UUID().uuidString) -> AiGenerationSession? {
+    func generate(_ request: AiRequest, id: String = UUID().uuidString,
+                  endpoint: String? = nil) -> AiGenerationSession? {
         guard sessions[id] == nil else { return nil }
         var s = AiGenerationSession(generationId: id, request: request)
         s.generationStarted = true; s.status = .generating
+        s.endpointUsed = endpoint
         let started = put(s)
         startGeneration(started,
             { [weak self] pid in
@@ -164,6 +172,18 @@ final class AiRewardFlow {
     }
 
     /// Recalcula o status a partir dos DOIS estados independentes.
+    /// Põe de volta uma sessão que já existia (gravada em disco).
+    ///
+    /// Não chama `startGeneration`: o `POST /prompt` desta sessão já foi feito
+    /// — repetir geraria um segundo job e cobraria a A100 duas vezes pelo mesmo
+    /// vídeo. Quem retoma o acompanhamento pelo `prompt_id` é o `AureaAiState`.
+    ///
+    /// Também NÃO mostra anúncio na volta: o usuário acabou de sair de um. O
+    /// anúncio só volta quando ele tocar em "Assistir e liberar".
+    func resume(_ s: AiGenerationSession) -> AiGenerationSession {
+        return put(s)
+    }
+
     private func evaluate(_ s: AiGenerationSession) {
         var n = s
         if n.error != nil { n.status = .failed }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import java.io.File
 
 private const val TAG = "AureaAI"
@@ -99,14 +100,19 @@ class AureaAiState(
             var devolveu = false
             val mostrou = AureaAdsManager.showRewarded(
                 aoAbrir = { anunciando = true; aoAbrir() },
-                aoRecompensa = aoRecompensa,
+                aoRecompensa = {
+                    // A recompensa vem SÓ daqui (onUserEarnedReward do SDK).
+                    Log.i(TAG, "[AUREA AI] REWARD = recebida")
+                    aoRecompensa()
+                },
                 aoFechar = { _ ->
                     anunciando = false
+                    Log.i(TAG, "[AUREA AI] REWARD = anúncio fechado")
                     aoFechar()
                     // O próximo já fica a caminho (para "Assistir e liberar" ou a próxima geração).
                     AureaAdsManager.preloadRewarded()
                 },
-                aoFalhar = { e -> anunciando = false; if (devolveu) aoFalhar(e) },
+                aoFalhar = { e -> anunciando = false; Log.w(TAG, "[AUREA AI] ERROR = anúncio: $e"); if (devolveu) aoFalhar(e) },
             )
             devolveu = true
             return mostrou
@@ -115,6 +121,20 @@ class AureaAiState(
 
     private var fimDaGeracao: ((File?, String?) -> Unit)? = null
 
+    /** A sessão em disco: é o que sobrevive ao anúncio e à morte do processo. */
+    private val guarda = GuardaDaSessao(app)
+
+    init {
+        // Se o processo morreu no meio (o anúncio é o que costuma provocar
+        // isso), a tela volta mostrando a geração que ficou. O acompanhamento
+        // em si começa quando o servidor responder — `retomarSePreciso`.
+        guarda.ler()?.let { g ->
+            Log.i(TAG, "[AUREA AI] POLL_HISTORY = sessão anterior encontrada (prompt_id ${g.promptId}, concluída=${g.generationCompleted})")
+            sessaoAtualId = g.generationId
+            sessao = g
+        }
+    }
+
     private val recompensa = AiRewardFlow(
         ads = anuncios,
         iniciarGeracao = { s, aoPromptId, aoTerminar ->
@@ -122,6 +142,9 @@ class AureaAiState(
             gerar(s.pedido, aoPromptId) { arquivo, e -> fimDaGeracao = null; aoTerminar(arquivo, e) }
         },
         aoMudar = { s ->
+            // Grava SEMPRE, e antes de qualquer coisa: o processo pode morrer no
+            // instante seguinte (é o que o anúncio costuma provocar).
+            guarda.gravar(s)
             if (s.generationId == sessaoAtualId) {
                 sessao = s
                 if (s.status == SessaoStatus.Liberado) liberar(s)
@@ -188,28 +211,33 @@ class AureaAiState(
     }
 
     /**
-     * Online só com `GET {base}/system_stats` → 200 + JSON válido. Tenta a
-     * [AureaAiConfig.BASE_URL]; se ela não responder, o endpoint do discovery.
+     * Online só com `GET {endpoint}/system_stats` → 200 + JSON válido.
+     *
+     * A ordem importa: o **discovery** manda. Ele é um endereço fixo que nunca
+     * muda; o que muda é o `endpoint` que ele publica. Depois que o Colab
+     * publica, trocar de túnel não pede APK nem IPA novo.
+     *
+     * A [AureaAiConfig.BASE_URL] é só a muda de arranque: entra quando o
+     * discovery ainda não publicou nada, para o app não ficar sem nenhum
+     * endereço. Nunca tem prioridade sobre o que o discovery diz.
      */
     private fun tentarConectar(): AureaAiEstado {
-        val candidatos = ArrayList<String>()
-        candidatos += AureaAiConfig.BASE_URL.trimEnd('/')
-
-        var doc: Discovery? = null
-        Log.i(TAG, "[AureaAI] Discovery request")
+        Log.i(TAG, "[AUREA AI] DISCOVERY = ${AureaAiConfig.DISCOVERY_URL}")
         val leitura = AureaAiCliente.lerDiscovery()
-        Log.i(TAG, "[AureaAI] Discovery HTTP: ${leitura.http}")
-        leitura.doc?.let { d ->
-            doc = d
-            Log.i(TAG, "[AureaAI] online: ${d.online}")
-            Log.i(TAG, "[AureaAI] endpoint: ${d.endpoint}")
-            if (d.valido() && d.endpoint !in candidatos) candidatos += d.endpoint
-        }
+        Log.i(TAG, "[AUREA AI] DISCOVERY = HTTP ${leitura.http}, ${leitura.doc?.let { "online=${it.online} endpoint=${it.endpoint} updatedAt=${it.updatedAt}" } ?: "sem documento"}")
+
+        val doc = leitura.doc
+        val doDiscovery = doc?.takeIf { it.valido() }?.endpoint?.trimEnd('/')
+
+        val candidatos = ArrayList<String>()
+        if (!doDiscovery.isNullOrBlank()) candidatos += doDiscovery
+        if (AureaAiConfig.BASE_URL.trimEnd('/') !in candidatos) candidatos += AureaAiConfig.BASE_URL.trimEnd('/')
 
         for (base in candidatos) {
+            Log.i(TAG, "[AUREA AI] ENDPOINT = $base")
             val c = ComfyCliente(base)
             val (http, jsonOk) = c.estaOnline()
-            Log.i(TAG, "[AureaAI] health HTTP: $http ($base/system_stats, json ${if (jsonOk) "ok" else "inválido"})")
+            Log.i(TAG, "[AUREA AI] ENDPOINT = /system_stats HTTP $http, json ${if (jsonOk) "ok" else "inválido"}")
             if (jsonOk) {
                 if (comfy?.base != base) comfy = c
                 modelo = doc?.modelo?.ifBlank { null } ?: "MiniMax H3"
@@ -218,15 +246,127 @@ class AureaAiState(
                     doc?.capacidades?.ifEmpty { null } ?: listOf("text_to_video", "image_to_video"),
                 )
                 mensagem = ""
-                Log.i(TAG, "[AureaAI] final state: ONLINE ($base)")
+                retomarSePreciso()
                 return AureaAiEstado.Connected
             }
         }
         comfy = null
         // Discovery dizendo offline e nenhum endereço de pé: OFFLINE. Senão, ainda subindo.
         val final = if (doc?.online == false) AureaAiEstado.Disconnected else AureaAiEstado.Reconnecting
-        Log.i(TAG, "[AureaAI] final state: ${if (final == AureaAiEstado.Disconnected) "OFFLINE" else "RECONNECTING"}")
         return final
+    }
+
+    // -- retomar depois do anúncio ------------------------------------------
+
+    /**
+     * Retoma a geração que ficou gravada, se houver uma.
+     *
+     * É o caminho de volta do Rewarded: o anúncio trouxe a Activity para trás (e
+     * às vezes o sistema matou o processo). A sessão gravada diz qual
+     * `prompt_id` acompanhar e por qual endereço — e retomar NUNCA manda outro
+     * `POST /prompt`, senão o mesmo vídeo seria gerado duas vezes na A100.
+     */
+    private fun retomarSePreciso() {
+        if (sessaoOcupada) return
+        val gravada = guarda.ler() ?: return
+
+        // A geração já tinha terminado e o arquivo está aqui: só falta a recompensa.
+        if (gravada.generationCompleted && gravada.result != null) {
+            Log.i(TAG, "[AUREA AI] RELEASE = retomando sessão já concluída (recompensa=${gravada.rewardEarned})")
+            sessaoAtualId = gravada.generationId
+            recompensa.retomar(gravada)
+            return
+        }
+
+        val promptId = gravada.promptId
+        if (promptId.isNullOrBlank()) {
+            // Nunca chegou a haver prompt: a sessão não tem o que retomar.
+            if (!gravada.generationStarted) { guarda.limpar(); return }
+            guarda.limpar()
+            return
+        }
+
+        Log.i(TAG, "[AUREA AI] POLL_HISTORY = retomando prompt_id $promptId em ${gravada.endpointUsado}")
+        sessaoAtualId = gravada.generationId
+        recompensa.retomar(gravada)
+        val base = gravada.endpointUsado ?: comfy?.base ?: return
+        val c = ComfyCliente(base)
+        acompanhando = escopo.launch { acompanhar(c, promptId, gravada.pedido) }
+    }
+
+    /** Acompanha um `prompt_id` já existente até o fim (retomada, sem novo POST). */
+    private suspend fun acompanhar(c: ComfyCliente, promptId: String, pedido: Pedido) {
+        val (w, h) = H3Workflow.dimensoes(pedido.aspecto, pedido.resolucao)
+        val inicio = System.currentTimeMillis()
+        fun etapa(status: String, texto: String, fila: Int = 0, res: Resultado? = null) = Job(
+            id = promptId, status = status, progresso = 0.0, etapa = texto,
+            posicaoNaFila = fila, segundos = (System.currentTimeMillis() - inicio) / 1000.0,
+            erro = null, resultado = res,
+        )
+        var falhas = 0
+        try {
+            // `coroutineContext.isActive` e não `isActive`: aqui não há receptor
+            // de CoroutineScope (esta função é suspend, não um `launch`).
+            while (coroutineContext.isActive) {
+                delay(2000)
+                val registro = try {
+                    withContext(Dispatchers.IO) { c.historico(promptId) }.also { falhas = 0 }
+                } catch (e: ComfyErro) {
+                    if (++falhas >= 15) throw e
+                    estado = AureaAiEstado.Reconnecting
+                    continue
+                }
+                estado = AureaAiEstado.Generating
+                Log.i(TAG, "[AUREA AI] POLL_HISTORY = $promptId → ${if (registro == null) "ainda não terminou" else "terminou"}")
+
+                if (registro == null) {
+                    val (rodando, pos) = runCatching { withContext(Dispatchers.IO) { c.situacaoNaFila(promptId) } }
+                        .getOrDefault(false to 0)
+                    job = if (rodando) etapa("running", "Gerando") else etapa("queued", "Na fila", pos)
+                    posicaoNaFila = pos
+                    continue
+                }
+
+                ComfyCliente.erroDoHistorico(registro)?.let { throw ComfyErro(200, "execution_error", it) }
+                val video = ComfyCliente.videosDoHistorico(registro).firstOrNull()
+                    ?: throw ComfyErro(200, "sem_video", "o /history terminou sem saída de vídeo")
+                Log.i(TAG, "[AUREA AI] OUTPUT = ${video.subpasta}/${video.nome}")
+                entregar(c, video, promptId, pedido, w, h)
+                return
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val texto = (e as? ComfyErro)?.paraTela() ?: (e.message ?: e.javaClass.simpleName)
+            Log.w(TAG, "[AUREA AI] ERROR = $texto")
+            falhar(texto)
+            fimDaGeracao?.let { fimDaGeracao = null; it(null, texto) }
+        }
+    }
+
+    /** Baixa o `/view` e entrega ao fluxo da recompensa (que decide a liberação). */
+    private suspend fun entregar(
+        c: ComfyCliente, video: ComfyArquivo, promptId: String, pedido: Pedido, w: Int, h: Int,
+    ) {
+        val res = Resultado(
+            videoUrl = "${c.base}/view?filename=${video.nome}", miniaturaUrl = "",
+            duracaoSegundos = H3Workflow.quadros(pedido.duracao) / pedido.fps.toDouble(),
+            largura = w, altura = h, fps = pedido.fps, comAudio = true,
+        )
+        job = Job(promptId, "finishing", 0.0, "Finalizando", 0, 0.0, null, res)
+        baixando = true
+        val arquivo = try {
+            Log.i(TAG, "[AUREA AI] DOWNLOAD = ${c.base}/view?filename=${video.nome}")
+            withContext(Dispatchers.IO) {
+                c.baixar(video, File(File(app.filesDir, "aurea-ai"), "$promptId.mp4"))
+            }
+        } finally {
+            baixando = false
+        }
+        Log.i(TAG, "[AUREA AI] DOWNLOADED_BYTES = ${arquivo.length()}")
+        job = Job(promptId, "completed", 0.0, "Concluído", 0, 0.0, null, res)
+        estado = AureaAiEstado.Connected
+        fimDaGeracao?.let { fimDaGeracao = null; it(arquivo, null) }
     }
 
     // -- gerar -------------------------------------------------------------
@@ -239,14 +379,17 @@ class AureaAiState(
      * paralelo; o vídeo só é entregue com a recompensa (AiRewardFlow).
      */
     fun gerarComRecompensa(pedido: Pedido) {
-        if (comfy == null) { erro = "Sem conexão com o servidor"; return }
+        val c = comfy ?: run { erro = "Sem conexão com o servidor"; return }
         if (job?.rodando == true || sessaoOcupada) return
         erro = ""
         mensagem = ""
         ultimoArquivo = null
         val id = java.util.UUID.randomUUID().toString()
         sessaoAtualId = id
-        recompensa.gerar(pedido, id)
+        // O endereço que aceitar o POST fica CONGELADO nesta sessão: se o túnel
+        // cair no meio, esta geração continua sendo acompanhada por ele.
+        Log.i(TAG, "[AUREA AI] POST /prompt = enviando (endpoint ${c.base})")
+        recompensa.gerar(pedido, id, endpoint = c.base)
     }
 
     /** "Assistir e liberar vídeo": outro anúncio para a MESMA geração — não gera de novo. */
@@ -264,10 +407,13 @@ class AureaAiState(
     /** Recompensa + vídeo: agora sim o resultado aparece para o usuário. */
     private fun liberar(s: AiGenerationSession) {
         val arquivo = s.result ?: return
+        Log.i(TAG, "[AUREA AI] RELEASE = geração concluída=${s.generationCompleted} recompensa=${s.rewardEarned} → vídeo liberado (${arquivo.length()} bytes)")
         job?.let { j -> if (j.status == "completed") historico = listOf(j) + historico.filter { it.id != j.id } }
         ultimoArquivo = arquivo
         val (w, h) = H3Workflow.dimensoes(s.pedido.aspecto, s.pedido.resolucao)
         ultimoTitulo = "AI ${w}×$h"
+        // Liberado é o fim da linha: não há mais o que retomar.
+        guarda.limpar()
         aoMudar()
     }
 
@@ -299,7 +445,7 @@ class AureaAiState(
                     H3Workflow.montar(app, pedido, pedido.assetId)
                 }
                 val promptId = withContext(Dispatchers.IO) { c.enviarPrompt(workflow) }
-                Log.i(TAG, "[AureaAI] POST /prompt → prompt_id $promptId (${w}x$h, ${H3Workflow.quadros(pedido.duracao)} quadros)")
+                Log.i(TAG, "[AUREA AI] PROMPT_ID = $promptId (${w}x$h, ${H3Workflow.quadros(pedido.duracao)} quadros, ${c.base})")
                 aoPromptId(promptId)
                 job = etapa("queued", "Na fila").copy(id = promptId)
 
@@ -315,6 +461,7 @@ class AureaAiState(
                         continue
                     }
                     estado = AureaAiEstado.Generating
+                    Log.i(TAG, "[AUREA AI] POLL_HISTORY = $promptId → ${if (registro == null) "ainda não terminou" else "terminou"}")
 
                     if (registro == null) {
                         // Ainda não terminou: a fila diz se está rodando ou esperando.
@@ -326,40 +473,33 @@ class AureaAiState(
                         continue
                     }
 
+                    // O registro já pode aparecer no /history com erro (o ComfyUI
+                    // põe o que falhou lá). Sem isto, o app ficaria em "Gerando..."
+                    // para sempre olhando um job que já morreu.
                     ComfyCliente.erroDoHistorico(registro)?.let { throw ComfyErro(200, "execution_error", it) }
-                    val video = ComfyCliente.videosDoHistorico(registro).firstOrNull()
-                        ?: throw ComfyErro(200, "sem_video", "o /history terminou sem saída de vídeo")
-                    Log.i(TAG, "[AureaAI] /history concluído → ${video.subpasta}/${video.nome}")
 
-                    val res = Resultado(
-                        videoUrl = "${c.base}/view?filename=${video.nome}", miniaturaUrl = "",
-                        duracaoSegundos = H3Workflow.quadros(pedido.duracao) / pedido.fps.toDouble(),
-                        largura = w, altura = h, fps = pedido.fps, comAudio = true,
-                    )
-                    job = etapa("finishing", "Finalizando", res = res).copy(id = promptId)
-                    baixando = true
-                    val arquivo = try {
-                        withContext(Dispatchers.IO) {
-                            c.baixar(video, File(File(app.filesDir, "aurea-ai"), "$promptId.mp4"))
-                        }
-                    } finally {
-                        baixando = false
+                    val video = ComfyCliente.videosDoHistorico(registro).firstOrNull()
+                    if (video == null) {
+                        // Terminou sem saída de vídeo: ou ainda está escrevendo o
+                        // arquivo, ou o nó de saída não produziu nada. Espera a
+                        // próxima volta antes de acusar erro.
+                        Log.w(TAG, "[AUREA AI] OUTPUT = /history sem saída de vídeo ainda")
+                        if (++falhas >= 5) throw ComfyErro(200, "sem_video", "o /history terminou sem saída de vídeo")
+                        continue
                     }
-                    Log.i(TAG, "[AureaAI] /view → ${arquivo.length()} bytes")
-                    val pronto = etapa("completed", "Concluído", res = res).copy(id = promptId)
-                    job = pronto
-                    estado = AureaAiEstado.Connected
-                    aoTerminar(arquivo, null)
+                    Log.i(TAG, "[AUREA AI] OUTPUT = ${video.subpasta}/${video.nome}")
+
+                    entregar(c, video, promptId, pedido, w, h)
                     return@launch
                 }
             } catch (e: ComfyErro) {
-                Log.w(TAG, "[AureaAI] erro: ${e.paraTela()}")
+                Log.w(TAG, "[AUREA AI] ERROR = ${e.paraTela()}")
                 falhar(e.paraTela())
                 aoTerminar(null, e.paraTela())
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "[AureaAI] erro: $e")
+                Log.w(TAG, "[AUREA AI] ERROR = $e")
                 val texto = e.message ?: e.javaClass.simpleName
                 falhar(texto)
                 aoTerminar(null, texto)

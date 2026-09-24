@@ -8,8 +8,15 @@
 import Foundation
 
 /// A ÚNICA configuração de endereço da Aurea AI (a MESMA do Android).
+///
+/// O endereço do servidor NÃO é compilado: ele vem do `discoveryURL`, um
+/// endereço fixo. Quando o Colab reinicia e o túnel ganha outro nome, o Colab
+/// publica o novo no discovery e o app passa a usar esse — sem IPA novo.
+///
+/// `baseURL` é só a muda de arranque, para o app não ficar sem nenhum endereço
+/// enquanto o discovery não publicou. Nunca tem prioridade sobre ele.
 enum AureaAiConfig {
-    static let baseURL = "https://calculators-here-reasons-rice.trycloudflare.com"
+    static let baseURL = "https://cooked-upload-measured-indices.trycloudflare.com"
     static let discoveryURL = "https://aurea-ai-discovery.aureaapp.workers.dev/server"
     /// Workflow do MiniMax H3 no formato de API do ComfyUI (cópia de android/.../assets/ai/).
     static let workflowResource = "minimax_h3_api"
@@ -43,6 +50,8 @@ struct AiDiscovery {
     let model: String
     let gpu: String
     let capabilities: [String]
+    /// Quando o Colab publicou isto, em segundos. 0 = o documento não trouxe.
+    let updatedAt: Int
     var isValid: Bool { online && endpoint.hasPrefix("https://") }
 
     static func parse(_ data: Data) -> AiDiscovery? {
@@ -51,7 +60,8 @@ struct AiDiscovery {
         while endpoint.hasSuffix("/") { endpoint.removeLast() }
         return AiDiscovery(endpoint: endpoint, online: o["online"] as? Bool ?? false,
                            model: o["model"] as? String ?? "", gpu: o["gpu"] as? String ?? "",
-                           capabilities: (o["capabilities"] as? [String] ?? []).filter { !$0.isEmpty })
+                           capabilities: (o["capabilities"] as? [String] ?? []).filter { !$0.isEmpty },
+                           updatedAt: o["updatedAt"] as? Int ?? 0)
     }
 }
 

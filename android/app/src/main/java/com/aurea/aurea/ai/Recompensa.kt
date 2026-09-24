@@ -55,6 +55,14 @@ data class AiGenerationSession(
     val erro: String? = null,
     /** Por que não houve anúncio da última vez (a tela explica e oferece tentar de novo). */
     val adError: String? = null,
+    /**
+     * O endereço que ACEITOU o `POST /prompt` desta sessão.
+     *
+     * Fica congelado: uma geração já começada continua sendo acompanhada e
+     * baixada por este endereço até terminar, mesmo que o túnel mude no meio.
+     * Só uma geração NOVA consulta o discovery de novo.
+     */
+    val endpointUsado: String? = null,
 ) {
     /** A ÚNICA regra de liberação. */
     val liberado: Boolean get() = generationCompleted && rewardEarned && result != null && erro == null
@@ -94,14 +102,31 @@ class AiRewardFlow(
     }
 
     /** Toque em "Gerar": o H3 começa JÁ (uma vez só) e o Rewarded vem em paralelo. */
-    fun gerar(pedido: Pedido, id: String = novoId()): AiGenerationSession {
+    fun gerar(pedido: Pedido, id: String = novoId(), endpoint: String? = null): AiGenerationSession {
         require(id !in sessoes) { "sessão repetida" }
-        val s = por(AiGenerationSession(id, pedido, generationStarted = true, status = SessaoStatus.Gerando))
+        val s = por(AiGenerationSession(
+            id, pedido, generationStarted = true, status = SessaoStatus.Gerando, endpointUsado = endpoint,
+        ))
         iniciarGeracao(s,
             { pid -> sessoes[id]?.let { por(it.copy(promptId = pid)) } },
             { arquivo, erro -> terminou(id, arquivo, erro) })
         prepararEApresentar(id, liberar = false)
         return sessoes.getValue(id)
+    }
+
+    /**
+     * Põe de volta uma sessão que já existia (gravada em disco).
+     *
+     * Não chama [iniciarGeracao]: o `POST /prompt` desta sessão já foi feito —
+     * repetir geraria um segundo job e cobraria a A100 duas vezes pelo mesmo
+     * vídeo. Quem retoma o acompanhamento pelo `prompt_id` é o [AureaAiState].
+     *
+     * Também NÃO mostra anúncio na volta: o usuário acabou de sair de um. O
+     * anúncio só volta a aparecer quando ele tocar em "Assistir e liberar".
+     */
+    fun retomar(s: AiGenerationSession): AiGenerationSession {
+        sessoes[s.generationId] = s
+        return avaliar(s)
     }
 
     /** "Tentar de novo" de uma sessão que ficou sem anúncio (a geração não tinha começado). */
@@ -173,7 +198,7 @@ class AiRewardFlow(
     }
 
     /** Recalcula o status a partir dos DOIS estados independentes. */
-    private fun avaliar(s: AiGenerationSession) {
+    private fun avaliar(s: AiGenerationSession): AiGenerationSession {
         val status = when {
             s.erro != null -> SessaoStatus.Falhou
             s.liberado -> SessaoStatus.Liberado
@@ -181,6 +206,6 @@ class AiRewardFlow(
             s.status == SessaoStatus.AnuncioNaTela && !s.rewardEarned && !s.adClosedEarly -> SessaoStatus.AnuncioNaTela
             else -> SessaoStatus.Gerando
         }
-        por(s.copy(status = status))
+        return por(s.copy(status = status))
     }
 }

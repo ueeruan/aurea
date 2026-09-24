@@ -18,13 +18,23 @@ import kotlin.math.sqrt
 /**
  * A ÚNICA configuração de endereço da Aurea AI.
  *
- * O túnel trycloudflare muda a cada sessão do servidor: para apontar para outro
- * servidor, troque só [BASE_URL] — nada mais no app conhece endereço. O
- * discovery ([DISCOVERY_URL]) é a segunda opção: se a BASE URL não responder, o
- * app tenta o endpoint que o discovery publicar.
+ * O endereço do servidor NÃO é compilado: ele vem do discovery
+ * ([DISCOVERY_URL], um endereço fixo que nunca muda). Quando o Colab reinicia e
+ * o túnel ganha outro nome, o Colab publica o novo no discovery e o app passa a
+ * usar esse — sem APK novo e sem IPA novo.
+ *
+ * [BASE_URL] é só a MUDA de arranque: serve para o app não ficar sem nenhum
+ * endereço quando o discovery ainda não publicou. É a primeira coisa a sumir
+ * quando o Colab estiver publicando sozinho.
  */
 object AureaAiConfig {
-    const val BASE_URL = "https://calculators-here-reasons-rice.trycloudflare.com"
+    /**
+     * Endereço de arranque/diagnóstico. NÃO é a fonte da verdade: quem manda é
+     * o discovery. Se o Colab publicar, o endpoint de lá tem prioridade.
+     */
+    const val BASE_URL = "https://cooked-upload-measured-indices.trycloudflare.com"
+
+    /** Endereço FIXO do discovery. Este nunca muda — é o que dispensa recompilar. */
     const val DISCOVERY_URL = "https://aurea-ai-discovery.aureaapp.workers.dev/server"
 
     /** Workflow do MiniMax H3 no formato de API do ComfyUI (assets/ai/). */

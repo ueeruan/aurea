@@ -1,0 +1,24 @@
+# aurea-ai-discovery — o endereço fixo do discovery.
+#
+# Publicar:
+#   cd discovery
+#   npx wrangler kv namespace create AUREA_KV      # copie o id para o bloco abaixo
+#   npx wrangler secret put AUREA_DISCOVERY_SECRET # o segredo que o Colab vai usar
+#   npx wrangler deploy
+#
+# O nome `aurea-ai-discovery` e a conta `aureaapp` são os que já estão no ar —
+# o endereço final precisa continuar sendo
+# `https://aurea-ai-discovery.aureaapp.workers.dev/server`, que é o que está
+# compilado no app (é a ÚNICA coisa que não muda).
+name = "aurea-ai-discovery"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+# O documento é um punhado de chaves: um namespace simples resolve.
+[[kv_namespaces]]
+binding = "AUREA_KV"
+id = "COLE_AQUI_O_ID_DO_NAMESPACE"
+
+# O segredo NÃO fica neste arquivo: vai por `wrangler secret put`.
+# O app não conhece segredo nenhum — ele só LÊ o documento.

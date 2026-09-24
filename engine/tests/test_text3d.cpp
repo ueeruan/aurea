@@ -8,6 +8,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/text/FontManager.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/scene3d/Animation.hpp"
 
@@ -658,4 +659,122 @@ AUREA_TEST(Text3D, MandatoryGlyphsBuildClosedMeshesWithTheirHoles) {
             }
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+// Cache de geometria: a chave é a FONTE, não o endereço do objeto.
+//
+// O cache é global e guarda até 8 malhas. Com o ENDEREÇO do `Font` na chave
+// (era `%p`), o alocador reaproveitar o endereço de uma fonte liberada para
+// outra fonte fazia o cache devolver a malha da fonte ANTERIOR: o texto
+// reaberto saía com a geometria de outra fonte. Estes dois testes prendem a
+// propriedade que impede isso: a chave é função dos BYTES da fonte, e o cache
+// nunca mistura duas fontes.
+// -----------------------------------------------------------------------------
+AUREA_TEST(Text3D, GeometryKeyComesFromTheFontBytesNotTheObjectAddress) {
+    std::vector<text::FontEntry> fontes = text::FontManager::instance().list();
+    AUREA_CHECK(fontes.size() >= 2u);
+    if (fontes.size() < 2u) return;
+    std::string pathA = fontes[0].path, pathB;
+    for (const text::FontEntry& e : fontes) {
+        if (e.family != fontes[0].family) { pathB = e.path; break; }
+    }
+    AUREA_CHECK(!pathB.empty());
+    if (pathB.empty()) return;
+
+    // Duas CARGA do MESMO arquivo: objetos diferentes (endereços diferentes).
+    auto ca = text::Font::load(pathA);
+    auto cb = text::Font::load(pathA);
+    auto outra = text::Font::load(pathB);
+    AUREA_CHECK(ca && cb && outra);
+    if (!ca || !cb || !outra) return;
+    AUREA_CHECK(static_cast<const void*>(ca.get()) != static_cast<const void*>(cb.get()));
+    AUREA_CHECK_EQ(ca->content_id(), cb->content_id());
+
+    Text3DSpec spec;
+    spec.content = "Texto";
+    spec.depth = 0.25f;
+    // A MESMA fonte em dois objetos: MESMA chave (com o endereço, eram duas).
+    AUREA_CHECK_EQ(text3d_geometry_key(*ca, spec), text3d_geometry_key(*cb, spec));
+    // Fontes diferentes: chaves diferentes.
+    AUREA_CHECK(text3d_geometry_key(*ca, spec) != text3d_geometry_key(*outra, spec));
+    // Conteúdo diferente: chave diferente.
+    Text3DSpec outro_texto = spec;
+    outro_texto.content = "Outro";
+    AUREA_CHECK(text3d_geometry_key(*ca, spec) != text3d_geometry_key(*ca, outro_texto));
+}
+
+// Reproduz o CICLO REAL: a fonte do projeto anterior morre, outra fonte entra
+// e o alocador pode devolver o MESMO endereço. Com o endereço na chave, o
+// cache servia a malha da fonte MORTA para a fonte nova — é o texto que
+// "vira outra coisa" ao reabrir. Manter as duas fontes vivas (como um teste
+// ingênuo faria) nunca colide de endereço e não prova nada.
+//
+// A prova não depende de o alocador reaproveitar o endereço: compara-se a
+// malha suspeita com uma referência da MESMA fonte sob uma chave
+// garantidamente nova. `regionMaterials` entra na chave e só troca o número de
+// primitivas — nenhum vértice sai do lugar —, então contagem e caixa têm de
+// bater. Se o cache tiver servido outra fonte, não batem.
+AUREA_TEST(Text3D, MeshCacheNeverServesAnotherFont) {
+    std::vector<text::FontEntry> fontes = text::FontManager::instance().list();
+    if (fontes.size() < 2u) return;
+    std::string pathA = fontes[0].path, pathB;
+    for (const text::FontEntry& e : fontes) {
+        if (e.family != fontes[0].family) { pathB = e.path; break; }
+    }
+    if (pathB.empty()) return;
+
+    const auto vertices = [](const ImportResult& r) {
+        usize n = 0;
+        for (const Mesh& m : r.asset->meshes) {
+            for (const Primitive& prim : m.primitives) n += prim.positions.size();
+        }
+        return n;
+    };
+
+    Text3DSpec spec;
+    spec.content = "AUREA";
+    spec.depth = 0.3f;
+
+    // 1) A fonte A constrói e MORRE — a entrada dela fica no cache global.
+    usize vertsA = 0;
+    f32 larguraA = 0;
+    {
+        auto fa = text::Font::load(pathA);
+        AUREA_CHECK(!!fa);
+        if (!fa) return;
+        ImportResult a = build_text3d(*fa, spec);
+        AUREA_CHECK(a.ok());
+        if (!a.ok()) return;
+        vertsA = vertices(a);
+        larguraA = a.asset->bounds.max.x - a.asset->bounds.min.x;
+    }
+
+    // 2) A fonte B entra no lugar que sobrou. Se o alocador devolver o MESMO
+    //    endereço de A, o código antigo servia a malha de A para B — e é isso
+    //    que o teste não deixa passar. O reaproveitamento não é forçável de
+    //    forma portátil, então a chave (teste acima) é o que prende o defeito;
+    //    aqui fica o invariante de ponta a ponta, que nunca falha à toa.
+    auto fb = text::Font::load(pathB);
+    AUREA_CHECK(!!fb);
+    if (!fb) return;
+    ImportResult b = build_text3d(*fb, spec);
+    AUREA_CHECK(b.ok());
+    if (!b.ok()) return;
+
+    // 3) Referência da B por uma chave nova (mesma geometria, outra chave).
+    Text3DSpec ref = spec;
+    ref.regionMaterials = !spec.regionMaterials;
+    ImportResult bref = build_text3d(*fb, ref);
+    AUREA_CHECK(bref.ok());
+    if (!bref.ok()) return;
+
+    // As duas fontes precisam desenhar diferente, senão o teste não prova nada.
+    const f32 larguraB = bref.asset->bounds.max.x - bref.asset->bounds.min.x;
+    if (vertices(bref) == vertsA && std::fabs(larguraB - larguraA) < 1e-6f) return;
+
+    AUREA_CHECK_EQ(vertices(b), vertices(bref));
+    AUREA_CHECK_NEAR(b.asset->bounds.min.x, bref.asset->bounds.min.x, 1e-6f);
+    AUREA_CHECK_NEAR(b.asset->bounds.max.x, bref.asset->bounds.max.x, 1e-6f);
+    AUREA_CHECK_NEAR(b.asset->bounds.max.y, bref.asset->bounds.max.y, 1e-6f);
 }

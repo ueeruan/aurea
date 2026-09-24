@@ -98,6 +98,11 @@ inline constexpr const char* kText3DScheme = "aurea-text3d:";
 [[nodiscard]] bool decode_text3d(const std::string& source, Text3DSpec& out);
 [[nodiscard]] std::shared_ptr<const text::Font> text3d_font(const Text3DSpec& spec);
 
+/// Chave do cache de geometria (fonte + parâmetros + conteúdo). Exposta para o
+/// teste que prende a propriedade que interessa: ela NÃO pode mudar quando o
+/// objeto `Font` muda de endereço, nem ser a mesma para fontes diferentes.
+[[nodiscard]] std::string text3d_geometry_key(const text::Font& font, const Text3DSpec& spec);
+
 /// Triangula um polígono com furos (anel 0 = borda, demais = furos; qualquer
 /// orientação). Índices sobre os pontos concatenados na ordem dos anéis.
 /// Falso se sobrar área sem triângulo (polígono degenerado).

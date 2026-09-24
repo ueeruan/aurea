@@ -41,10 +41,16 @@ public:
     [[nodiscard]] const Impl& impl() const noexcept { return *impl_; }
     /// Bytes do arquivo em RAM (a fonte fica inteira na memória enquanto viva).
     [[nodiscard]] usize memory_bytes() const noexcept;
+    /// Identidade ESTÁVEL dos BYTES da fonte (FNV-1a, calculada uma vez na
+    /// carga). É o que se usa como chave de cache de geometria: o endereço do
+    /// objeto não serve — o alocador reaproveita o endereço de uma fonte
+    /// liberada para outra fonte, e o cache devolveria a malha da fonte errada.
+    [[nodiscard]] u64 content_id() const noexcept { return contentId_; }
 
 private:
     Font() = default;
     std::unique_ptr<Impl> impl_;
+    u64 contentId_ = 0;
 };
 
 /// Fonte padrão do aparelho (Roboto no Android, Segoe/Arial no Windows,

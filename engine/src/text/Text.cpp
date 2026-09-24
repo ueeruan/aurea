@@ -87,6 +87,14 @@ std::shared_ptr<const Font> Font::load(const std::string& path) {
     hb_font_set_scale(impl->hb, static_cast<int>(upem), static_cast<int>(upem));
     auto font = std::shared_ptr<Font>(new Font());
     font->impl_ = std::move(impl);
+    // Identidade pelos BYTES (uma passada na carga): o cache de geometria não
+    // pode depender do endereço do objeto, que o alocador reaproveita.
+    u64 h = 1469598103934665603ull;
+    for (u8 byte : font->impl_->data) {
+        h ^= byte;
+        h *= 1099511628211ull;
+    }
+    font->contentId_ = h ? h : 1ull;
     return font;
 }
 

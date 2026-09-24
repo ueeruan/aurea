@@ -1010,12 +1010,20 @@ std::unordered_map<std::string, std::shared_ptr<const GeomAsset>>& geom_cache() 
     return c;
 }
 
+/// Chave do cache de geometria: FONTE (pelos bytes) + parâmetros + conteúdo.
+///
+/// A fonte entra pelo `content_id` e NÃO pelo endereço do objeto: o alocador
+/// reaproveita o endereço de uma fonte já liberada (rotação do catálogo de
+/// fontes, reabrir projeto com outra fonte padrão), e com o endereço na chave o
+/// cache devolveria a malha da fonte ANTERIOR — o texto reaberto sairia com a
+/// geometria de outra fonte, que é o "meu texto 3D virou outra coisa".
 std::string geom_key(const text::Font& font, const Text3DSpec& s) {
     char buf[192];
-    std::snprintf(buf, sizeof(buf), "%p|%u|%.5f|%u|%.5f|%.5f|%u|%.4f|%u|%zu", static_cast<const void*>(&font), s.alignment,
-                  static_cast<double>(s.depth), s.bevel ? 1u : 0u, static_cast<double>(s.bevelWidth),
-                  static_cast<double>(s.bevelDepth), s.bevelSegments, static_cast<double>(s.bevelRoundness),
-                  s.regionMaterials ? 1u : 0u, s.content.size());
+    std::snprintf(buf, sizeof(buf), "%016llx|%u|%.5f|%u|%.5f|%.5f|%u|%.4f|%u|%zu",
+                  static_cast<unsigned long long>(font.content_id()), s.alignment, static_cast<double>(s.depth),
+                  s.bevel ? 1u : 0u, static_cast<double>(s.bevelWidth), static_cast<double>(s.bevelDepth),
+                  s.bevelSegments, static_cast<double>(s.bevelRoundness), s.regionMaterials ? 1u : 0u,
+                  s.content.size());
     return std::string(buf) + (s.animation ? "|animated|" : "|static|") + s.content;
 }
 
@@ -1117,6 +1125,8 @@ Material make_material(const char* name, const Text3DMaterial& m) {
 }
 
 } // namespace
+
+std::string text3d_geometry_key(const text::Font& font, const Text3DSpec& spec) { return geom_key(font, spec); }
 
 ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
     ImportResult res;

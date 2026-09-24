@@ -68,13 +68,37 @@ interface VideoGenerationProvider {
     /** Gera com o ticket (idempotente: o mesmo ticket devolve o mesmo job). */
     fun gerar(ticket: String): String
     fun status(jobId: String): JobDeVideo
+    /** Gerações de hoje deste aparelho (o servidor conta). */
+    fun cota(): CotaDeVideo
     fun cancelar(jobId: String)
     fun baixar(jobId: String, destino: File): File
 }
 
-/** Identidade do aparelho para os limites do servidor: aleatória, sem dado pessoal. */
+/**
+ * Identidade do aparelho para o limite diário da IA (prevenção de abuso).
+ *
+ * O App Set ID do Google Play services: feito para isto (não é de anúncio, não
+ * é IMEI, serial nem MAC), sobrevive a reinstalar o app e é zerado pelo
+ * sistema. Sai daqui como está, mas o servidor não o guarda: guarda só o HMAC
+ * dele com um segredo do servidor. Sem Play services (raro), um id aleatório
+ * do app. BLOQUEANTE (espera o Play services): chamar fora da thread da UI.
+ */
 object IdDoAparelho {
+    @Volatile private var cache: String? = null
+
     fun de(context: Context): String {
+        cache?.let { return it }
+        val id = runCatching {
+            com.google.android.gms.tasks.Tasks.await(
+                com.google.android.gms.appset.AppSet.getClient(context).appSetIdInfo,
+                5, java.util.concurrent.TimeUnit.SECONDS,
+            ).id
+        }.getOrNull()?.takeIf { it.length in 16..64 } ?: reserva(context)
+        cache = id
+        return id
+    }
+
+    private fun reserva(context: Context): String {
         val prefs = context.getSharedPreferences("aurea_ai_video", Context.MODE_PRIVATE)
         prefs.getString("aparelho", null)?.let { return it }
         val novo = UUID.randomUUID().toString()
@@ -83,8 +107,14 @@ object IdDoAparelho {
     }
 }
 
+/** A cota do dia, contada no SERVIDOR (o app só mostra). */
+data class CotaDeVideo(val usadas: Int, val limite: Int, val restantes: Int) {
+    val esgotada: Boolean get() = limite > 0 && restantes <= 0
+}
+
 class AureaBackendVideoProvider(
-    private val aparelho: String,
+    /** Lido na hora do pedido (na thread de rede): o App Set ID chega assíncrono. */
+    private val aparelho: () -> String,
     private val base: String = AureaVideoBackend.BASE,
 ) : VideoGenerationProvider {
 
@@ -137,6 +167,11 @@ class AureaBackendVideoProvider(
             repetirSemAnuncio = o.optBoolean("retryWithoutAd", false),
             prontoParaBaixar = o.optJSONObject("result") != null,
         )
+    }
+
+    override fun cota(): CotaDeVideo {
+        val q = pedir("GET", "/quota").json().optJSONObject("quota") ?: throw FalhaDeVideo("resposta_invalida")
+        return CotaDeVideo(q.optInt("used"), q.optInt("limit"), q.optInt("remaining"))
     }
 
     override fun cancelar(jobId: String) {
@@ -199,7 +234,8 @@ class AureaBackendVideoProvider(
             setRequestProperty("Accept", "application/json, video/mp4")
             // Sem UA próprio a Cloudflare do Worker devolve 403 (1010).
             setRequestProperty("User-Agent", AureaAiCliente.AGENTE)
-            setRequestProperty("x-aurea-device", aparelho)
+            setRequestProperty("x-aurea-device", aparelho())
+            setRequestProperty("x-aurea-platform", "android")
         }
 
     private fun pedir(
@@ -269,7 +305,7 @@ fun explicarFalhaDeVideo(codigo: String?): String = when (codigo) {
     "ia_nao_configurada", "recompensa_nao_configurada" -> "A geração por IA está em manutenção. Tente mais tarde."
     "ia_desligada" -> "A geração por IA está pausada no momento."
     "orcamento_diario", "limite_global_diario" -> "O limite de gerações de hoje foi atingido. Volte amanhã."
-    "limite_diario" -> "Você atingiu o limite de gerações de hoje. Volte amanhã."
+    "limite_diario" -> "Você usou suas 5 gerações de IA de hoje. Volte amanhã para gerar mais."
     "muitos_pedidos" -> "Muitos pedidos seguidos. Espere um pouco e tente de novo."
     "job_em_andamento", "em_andamento" -> "Já existe uma geração sua em andamento."
     "conteudo_bloqueado" -> "Esse pedido foi bloqueado pela política de conteúdo. Mude o texto e tente de novo."

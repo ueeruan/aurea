@@ -29,6 +29,16 @@ final class AureaAiState: ObservableObject {
     @Published private(set) var modelName = ""
     @Published private(set) var message = ""
     @Published private(set) var promptMax = 800
+    /// "Gerações de hoje: 3/5" — o número é do servidor. Nulo = ainda não leu.
+    @Published private(set) var quota: AiVideoQuota?
+
+    /// Relê a cota no servidor (depois de abrir, de gerar e de falhar).
+    func refreshQuota() {
+        Task { [weak self] in
+            guard let self else { return }
+            if let q = try? await self.provider.quota() { self.quota = q }
+        }
+    }
     @Published private(set) var job: AiJob?
     @Published private(set) var history: [AiJob] = []
     @Published private(set) var downloading = false
@@ -75,6 +85,7 @@ final class AureaAiState: ObservableObject {
             GuardaDaSessao.shared.write(s)
             guard let self, s.generationId == self.currentSessionId else { return }
             self.session = s
+            if s.status == .unlocked || s.status == .failed || s.status == .generating { self.refreshQuota() }
             switch s.status {
             case .unlocked: self.unlock(s)
             case .failed:
@@ -118,6 +129,7 @@ final class AureaAiState: ObservableObject {
                 if cfg.enabled {
                     if message == explainVideoFailure("sem_conexao") || message == explainVideoFailure("ia_desligada") { message = "" }
                     status = session?.status == .generating ? .generating : .connected
+                    if let q = try? await provider.quota() { quota = q }
                     resumeIfNeeded()
                 } else {
                     status = .disconnected
@@ -173,6 +185,8 @@ final class AureaAiState: ObservableObject {
     /// "Gerar": ticket → anúncio → (recompensa) → geração real.
     func generateWithReward(_ request: AiRequest) {
         guard status.canGenerate, !sessionBusy else { return }
+        // O servidor recusaria de qualquer jeito; aqui só evita o anúncio à toa.
+        if quota?.exhausted == true { error = explainVideoFailure("limite_diario"); return }
         error = ""; message = ""; lastFile = nil; job = nil
         let id = UUID().uuidString
         currentSessionId = id

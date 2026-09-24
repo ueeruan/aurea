@@ -7,6 +7,7 @@
 [versions]
 playServicesAds = "25.5.0"
 ump = "4.0.0"
+appset = "16.1.0"
 levelplay = "9.6.0"
 levelplayUnityAdapter = "5.13.0"
 unityAds = "4.20.1"
@@ -25,6 +26,8 @@ json = "20250517"
 [libraries]
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 ump = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "ump" }
+# App Set ID: identidade do aparelho para o limite diario da IA (prevencao de abuso).
+appset = { group = "com.google.android.gms", name = "play-services-appset", version.ref = "appset" }
 levelplay = { group = "com.unity3d.ads-mediation", name = "mediation-sdk", version.ref = "levelplay" }
 levelplay-unityads-adapter = { group = "com.unity3d.ads-mediation", name = "unityads-adapter", version.ref = "levelplayUnityAdapter" }
 unity-ads = { group = "com.unity3d.ads", name = "unity-ads", version.ref = "unityAds" }

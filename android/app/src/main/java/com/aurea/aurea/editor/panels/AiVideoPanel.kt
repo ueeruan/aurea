@@ -135,6 +135,11 @@ internal fun AiVideoPanel(env: PanelEnv) {
             Column {
                 Etiqueta(ai.estado, ai.modelo, ai.gpu)
                 if (ai.estado.podeGerar()) Nota(stringResource(R.string.ai_aviso_online), AureaColors.Accent)
+                // A cota é do SERVIDOR: o app só mostra (e só bloqueia o anúncio à toa).
+                ai.cota?.takeIf { ai.estado.podeGerar() && it.limite > 0 }?.let { c ->
+                    if (c.esgotada) Nota(stringResource(R.string.ai_limite_atingido, c.limite), AureaColors.Warning)
+                    else Nota(stringResource(R.string.ai_geracoes_hoje, c.usadas, c.limite), AureaColors.Subtle)
+                }
                 ai.erro.takeIf { it.isNotBlank() }?.let { Nota(it, AureaColors.Danger) }
                 ai.mensagem.takeIf { it.isNotBlank() && ai.estado.podeGerar() }?.let { Nota(it, AureaColors.Muted) }
             }
@@ -235,7 +240,7 @@ internal fun AiVideoPanel(env: PanelEnv) {
 
         item(key = "gerar") {
             val rodando = ai.job?.rodando == true
-            val pode = !rodando && !ai.anunciando && !ai.sessaoOcupada && prompt.isNotBlank() &&
+            val pode = !rodando && !ai.anunciando && !ai.sessaoOcupada && prompt.isNotBlank() && ai.cota?.esgotada != true &&
                 (modo != "image_to_video" || assetId != null)
             Column {
                 Spacer(Modifier.height(8.dp))

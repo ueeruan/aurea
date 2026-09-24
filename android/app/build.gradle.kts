@@ -210,6 +210,7 @@ dependencies {
     // `ads` do app importa isto (GoogleAdsBackend).
     implementation(libs.play.services.ads)
     implementation(libs.ump)
+    implementation(libs.appset)
     // Unity LevelPlay (mediação) — o provedor ATIVO no Android. O AdMob acima
     // fica para entrar depois como rede mediada pelo LevelPlay; o UMP segue
     // sendo o consentimento (TCF) que o LevelPlay e as redes leem.

@@ -32,6 +32,8 @@ export class CofreDeVideo extends DurableObject {
     const chave = `dia:${hoje(agora)}`;
     const d = (await this.ctx.storage.get(chave)) ?? {
       gastoUsd: 0, jobs: 0, porAparelho: {}, porIp: {}, tickets: {},
+      // Recompensas S2S válidas que liberaram um ticket, por aparelho (auditoria).
+      eventosPorAparelho: {},
     };
     return { chave, d };
   }
@@ -89,6 +91,10 @@ export class CofreDeVideo extends DurableObject {
     t.estado = "recompensado";
     t.eventId = eventId;
     await this.ctx.storage.put(`ticket:${ticketId}`, t);
+    const { chave, d } = await this._dia(agora);
+    d.eventosPorAparelho = d.eventosPorAparelho ?? {};
+    d.eventosPorAparelho[t.aparelho] = (d.eventosPorAparelho[t.aparelho] ?? 0) + 1;
+    await this.ctx.storage.put(chave, d);
     return { ok: true };
   }
 
@@ -146,6 +152,7 @@ export class CofreDeVideo extends DurableObject {
     await this.ctx.storage.put(`job:${jobId}`, {
       jobId, requestId, modelo, ticketId, aparelho: t.aparelho,
       custoUsd: t.reserva?.custoUsd ?? 0, criado: agora, estado: "IN_QUEUE",
+      diaDaReserva: t.reserva?.dia ?? hoje(agora), ipDaReserva: t.reserva?.ip ?? "", reembolsado: false,
       saida: null, execucaoMs: null, erro: null, fim: null,
     });
     const ativos = await this._ativos(agora);
@@ -191,6 +198,18 @@ export class CofreDeVideo extends DurableObject {
       const ativos = (await this._ativos(agora)).filter((a) => a.jobId !== jobId);
       await this.ctx.storage.put("ativos", ativos);
       if (estado === "FAILED" || estado === "CANCELLED") {
+        // Sem vídeo válido: a geração do USUÁRIO volta (idempotente — uma vez
+        // por job). O gasto global fica: a 8Scale pode ter cobrado.
+        if (!j.reembolsado) {
+          const chaveDia = `dia:${j.diaDaReserva ?? hoje(agora)}`;
+          const d = await this.ctx.storage.get(chaveDia);
+          if (d) {
+            d.porAparelho[j.aparelho] = Math.max(0, (d.porAparelho[j.aparelho] ?? 1) - 1);
+            if (j.ipDaReserva) d.porIp[j.ipDaReserva] = Math.max(0, (d.porIp[j.ipDaReserva] ?? 1) - 1);
+            await this.ctx.storage.put(chaveDia, d);
+          }
+          j.reembolsado = true;
+        }
         const t = await this.ctx.storage.get(`ticket:${j.ticketId}`);
         if (t && t.reenvioGratis) {
           t.reenvioGratis = false;
@@ -204,6 +223,14 @@ export class CofreDeVideo extends DurableObject {
     }
     await this.ctx.storage.put(`job:${jobId}`, j);
     return j;
+  }
+
+  /** Cota do aparelho HOJE (UTC): o que o app mostra como "Gerações de hoje". */
+  async cota({ aparelho, limites, agora }) {
+    const { d } = await this._dia(agora);
+    const limite = limites.jobsPorAparelhoPorDia;
+    const usadas = Math.min(limite, d.porAparelho[aparelho] ?? 0);
+    return { used: usadas, limit: limite, remaining: Math.max(0, limite - usadas) };
   }
 
   async painel({ agora }) {

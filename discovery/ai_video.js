@@ -31,7 +31,21 @@ function json(corpo, status = 200, extra = {}) {
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...extra },
   });
 }
-const erro = (codigo, status, detalhe = "") => json({ error: codigo, detail: detalhe }, status);
+const erro = (codigo, status, detalhe = "", extra = {}) => json({ error: codigo, detail: detalhe, ...extra }, status);
+
+const PLATAFORMAS = new Set(["android", "ios"]);
+
+/**
+ * Identidade PSEUDÔNIMA do aparelho: HMAC-SHA256(AI_DEVICE_HMAC_SECRET,
+ * plataforma + ":" + id). O id bruto (App Set ID no Android, IDFV no iOS) só
+ * atravessa esta função: nada o grava, nada o registra no log. Sem o segredo
+ * do servidor, a chave não volta ao id nem é comparável entre serviços.
+ */
+export async function chaveDoAparelho(segredo, plataforma, idBruto) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(segredo), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(`${plataforma}:${idBruto}`)));
+  return "d_" + btoa(String.fromCharCode(...mac)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
 function idAleatorio() {
   const b = new Uint8Array(18);
@@ -209,8 +223,17 @@ export async function rotaDeVideo(req, env, ctx, url) {
   }
 
   // --- o app ------------------------------------------------------------------
-  const aparelho = req.headers.get("x-aurea-device") ?? "";
-  if (!APARELHO.test(aparelho)) return erro("aparelho_invalido", 400, "x-aurea-device");
+  const idBruto = req.headers.get("x-aurea-device") ?? "";
+  if (!APARELHO.test(idBruto)) return erro("aparelho_invalido", 400, "x-aurea-device");
+  const plataforma = String(req.headers.get("x-aurea-platform") ?? "").toLowerCase();
+  if (!PLATAFORMAS.has(plataforma)) return erro("plataforma_invalida", 400, "x-aurea-platform");
+  // Sem o segredo, nenhuma rota do app anda: não existe identidade sem ele.
+  if (!env.AI_DEVICE_HMAC_SECRET) return erro("ia_nao_configurada", 503, "AI_DEVICE_HMAC_SECRET");
+  const aparelho = await chaveDoAparelho(env.AI_DEVICE_HMAC_SECRET, plataforma, idBruto);
+  const cota = () => cofre.cota({ aparelho, limites: cfg.limites, agora: Date.now() });
+
+  // "Gerações de hoje: 3/5" — contado no servidor, nunca no app.
+  if (sub === "/quota" && req.method === "GET") return json({ quota: await cota() });
 
   if (sub === "/images" && req.method === "POST") {
     if (!cfg.ligado) return erro("ia_desligada", 503);
@@ -239,8 +262,8 @@ export async function rotaDeVideo(req, env, ctx, url) {
     }
     const id = idAleatorio();
     const r = await cofre.emitirTicket({ id, aparelho, ip, pedido: v.pedido, limites: cfg.limites, agora });
-    if (!r.ok) return erro(r.erro, r.erro === "muitos_pedidos" ? 429 : 429);
-    return json({ ticket: id, expiresAt: r.expira, requiresReward: cfg.exigirRecompensa && !admin });
+    if (!r.ok) return erro(r.erro, 429, "", { quota: await cota() });
+    return json({ ticket: id, expiresAt: r.expira, requiresReward: cfg.exigirRecompensa && !admin, quota: await cota() });
   }
 
   if (sub === "/generate" && req.method === "POST") {
@@ -260,11 +283,11 @@ export async function rotaDeVideo(req, env, ctx, url) {
       limites: cfg.limites,
       agora,
     });
-    if (reserva.jaExiste) return json({ jobId: reserva.jobId, status: "queued", repeated: true }, 202);
+    if (reserva.jaExiste) return json({ jobId: reserva.jobId, status: "queued", repeated: true, quota: await cota() }, 202);
     if (!reserva.ok) {
       const http = { recompensa_pendente: 409, em_andamento: 409, ticket_usado: 409, orcamento_diario: 429 }[reserva.erro]
         ?? (reserva.erro.startsWith("limite") || reserva.erro.endsWith("ocupado") || reserva.erro === "job_em_andamento" ? 429 : 400);
-      return erro(reserva.erro, http);
+      return erro(reserva.erro, http, "", { quota: await cota() });
     }
 
     const p = reserva.pedido;
@@ -277,7 +300,7 @@ export async function rotaDeVideo(req, env, ctx, url) {
       const jobId = idAleatorio();
       await cofre.confirmar({ ticketId, jobId, requestId: enviado.requestId, modelo: enviado.modelo, agora: Date.now() });
       console.log(`[ai-video] job ${jobId} aceito (${enviado.modelo}, ${p.resolution}, ${p.duration}s)`);
-      return json({ jobId, status: "queued" }, 202);
+      return json({ jobId, status: "queued", quota: await cota() }, 202);
     } catch (e) {
       // Não aceito = não cobrado: a reserva volta e o ticket segue valendo.
       await cofre.liberar({ ticketId, agora: Date.now() });
@@ -285,7 +308,7 @@ export async function rotaDeVideo(req, env, ctx, url) {
       console.warn(`[ai-video] envio recusado: ${pe.codigo} (${pe.http}) ${pe.detalhe}`);
       const http = pe.codigo === "pedido_recusado" || pe.codigo === "conteudo_bloqueado" ? 422
         : pe.codigo === "provedor_ocupado" ? 429 : 502;
-      return erro(pe.codigo, http);
+      return erro(pe.codigo, http, "", { quota: await cota() });
     }
   }
 
@@ -316,7 +339,7 @@ export async function rotaDeVideo(req, env, ctx, url) {
           return erro(pe.codigo, pe.http >= 500 || pe.http === 0 ? 502 : pe.http);
         }
       }
-      return json(paraApp(j, j.reenvioDisponivel));
+      return json({ ...paraApp(j, j.reenvioDisponivel), quota: j.fim ? await cota() : undefined });
     }
 
     if (rj[2] === "/cancel" && req.method === "POST") {

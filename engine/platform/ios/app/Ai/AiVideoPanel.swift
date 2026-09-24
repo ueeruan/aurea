@@ -41,6 +41,11 @@ struct AiVideoPanel: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     statusLabel
                     if ai.status.canGenerate { note(AureaText.t("ai_aviso_online"), AureaColors.accent) }
+                    // A cota é do SERVIDOR: o app só mostra (e só evita o anúncio à toa).
+                    if ai.status.canGenerate, let q = ai.quota, q.limit > 0 {
+                        if q.exhausted { note(AureaText.t("ai_limite_atingido", q.limit), AureaColors.warning) }
+                        else { note(AureaText.t("ai_geracoes_hoje", q.used, q.limit), AureaColors.subtle) }
+                    }
                     if !ai.error.isEmpty { note(ai.error, AureaColors.danger) }
                     if !ai.message.isEmpty && ai.status.canGenerate { note(ai.message, AureaColors.muted) }
                     if ai.status.canGenerate { form } else { offline }
@@ -146,7 +151,7 @@ struct AiVideoPanel: View {
     }
 
     private var generateRow: some View {
-        let canGo = !running && !ai.showingAd && !ai.sessionBusy && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let canGo = !running && !ai.showingAd && !ai.sessionBusy && ai.quota?.exhausted != true && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (mode != "image_to_video" || imageRef != nil)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {

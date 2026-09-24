@@ -44,7 +44,7 @@ class AureaAiState(
     private val escopo: CoroutineScope,
     /** Chamado quando o vídeo baixado deve entrar na timeline (o importador de sempre). */
     private val aoAdicionarNaTimeline: (arquivo: File, titulo: String) -> Unit,
-    private val provedor: VideoGenerationProvider = AureaBackendVideoProvider(IdDoAparelho.de(app)),
+    private val provedor: VideoGenerationProvider = AureaBackendVideoProvider({ IdDoAparelho.de(app) }),
     private val aoMudar: () -> Unit = {},
 ) {
     // -- o que a tela observa ---------------------------------------------
@@ -61,6 +61,16 @@ class AureaAiState(
         private set
     var promptMax by mutableStateOf(800)
         private set
+    /** "Gerações de hoje: 3/5" — o número é do servidor. Nulo = ainda não leu. */
+    var cota by mutableStateOf<CotaDeVideo?>(null)
+        private set
+
+    /** Relê a cota no servidor (depois de abrir, de gerar e de falhar). */
+    fun atualizarCota() {
+        escopo.launch {
+            runCatching { withContext(Dispatchers.IO) { provedor.cota() } }.onSuccess { cota = it }
+        }
+    }
 
     var job by mutableStateOf<Job?>(null)
         private set
@@ -139,6 +149,7 @@ class AureaAiState(
             guarda.gravar(s)
             if (s.generationId == sessaoAtualId) {
                 sessao = s
+                if (s.status == SessaoStatus.Liberado || s.status == SessaoStatus.Falhou || s.status == SessaoStatus.Gerando) atualizarCota()
                 when (s.status) {
                     SessaoStatus.Liberado -> liberar(s)
                     SessaoStatus.Falhou -> { erro = explicarFalhaDeVideo(s.erro); job = job?.copy(status = "failed", etapa = "Falhou") }
@@ -209,6 +220,7 @@ class AureaAiState(
             if (cfg.ligado) {
                 if (mensagem == explicarFalhaDeVideo("sem_conexao") || mensagem == explicarFalhaDeVideo("ia_desligada")) mensagem = ""
                 estado = if (sessao?.status == SessaoStatus.Gerando) AureaAiEstado.Generating else AureaAiEstado.Connected
+                runCatching { withContext(Dispatchers.IO) { provedor.cota() } }.onSuccess { cota = it }
                 retomarSePreciso()
             } else {
                 estado = AureaAiEstado.Disconnected
@@ -266,6 +278,8 @@ class AureaAiState(
     /** O botão "Gerar": ticket → anúncio → (recompensa) → geração real. */
     fun gerarComRecompensa(pedido: Pedido) {
         if (!estado.podeGerar() || sessaoOcupada) return
+        // O servidor recusaria de qualquer jeito; aqui só evita o anúncio à toa.
+        if (cota?.esgotada == true) { erro = explicarFalhaDeVideo("limite_diario"); return }
         erro = ""
         mensagem = ""
         ultimoArquivo = null

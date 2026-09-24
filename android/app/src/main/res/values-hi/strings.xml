@@ -872,4 +872,6 @@
     <string name="ai_assistir_e_gerar_de_novo">Watch and generate</string>
     <string name="ai_tentar_sem_anuncio">Try again (no ad)</string>
     <string name="ai_gerar_de_novo">Generate again</string>
+    <string name="ai_geracoes_hoje">Today\'s generations: %1$d/%2$d</string>
+    <string name="ai_limite_atingido">You\'ve used your %1$d AI generations for today. Come back tomorrow to generate more.</string>
 </resources>

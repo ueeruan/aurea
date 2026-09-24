@@ -6,6 +6,7 @@
 //  `/queue`, `/upload/image`, `/view`, `/interrupt`. Nada de `/generate`/`/v1`.
 // =============================================================================
 import Foundation
+import UIKit
 
 /// A ÚNICA configuração de endereço da Aurea AI (a MESMA do Android).
 ///
@@ -476,19 +477,33 @@ protocol VideoGenerationProvider {
     func ticket(_ r: AiRequest) async throws -> String
     func generate(ticket: String) async throws -> String
     func status(_ jobId: String) async throws -> AiVideoJob
+    /// Gerações de hoje deste aparelho (o servidor conta).
+    func quota() async throws -> AiVideoQuota
     func cancel(_ jobId: String) async throws
     func download(_ jobId: String, to destination: URL) async throws -> URL
 }
 
-/// Identidade aleatória do aparelho, só para os limites do servidor.
+/// Identidade do aparelho para o limite diário da IA (prevenção de abuso): o
+/// identifierForVendor (IDFV). Não é de anúncio, não pede ATT e não rastreia
+/// entre empresas. Sai daqui como está, mas o servidor não o guarda: guarda só
+/// o HMAC dele com um segredo do servidor. Sem IDFV (raro), um id do app.
 enum AiDeviceId {
     static var value: String {
+        if let v = UIDevice.current.identifierForVendor?.uuidString { return v }
         let k = "aurea_ai_video_aparelho"
         if let v = UserDefaults.standard.string(forKey: k) { return v }
         let n = UUID().uuidString
         UserDefaults.standard.set(n, forKey: k)
         return n
     }
+}
+
+/// A cota do dia, contada no SERVIDOR (o app só mostra).
+struct AiVideoQuota: Equatable {
+    let used: Int
+    let limit: Int
+    let remaining: Int
+    var exhausted: Bool { limit > 0 && remaining <= 0 }
 }
 
 final class AureaBackendVideoProvider: VideoGenerationProvider {
@@ -550,6 +565,13 @@ final class AureaBackendVideoProvider: VideoGenerationProvider {
                           readyToDownload: o["result"] is [String: Any])
     }
 
+    func quota() async throws -> AiVideoQuota {
+        let o = try await request("GET", "/quota")
+        guard let q = o["quota"] as? [String: Any] else { throw VideoFailure("resposta_invalida") }
+        func n(_ k: String) -> Int { (q[k] as? NSNumber)?.intValue ?? 0 }
+        return AiVideoQuota(used: n("used"), limit: n("limit"), remaining: n("remaining"))
+    }
+
     func cancel(_ jobId: String) async throws {
         _ = try await request("POST", "/jobs/\(enc(jobId))/cancel", body: Data())
     }
@@ -597,6 +619,7 @@ final class AureaBackendVideoProvider: VideoGenerationProvider {
         // Sem UA próprio a Cloudflare do Worker devolve 403 (1010).
         r.setValue(AureaAiConfig.agent, forHTTPHeaderField: "User-Agent")
         r.setValue(device, forHTTPHeaderField: "x-aurea-device")
+        r.setValue("ios", forHTTPHeaderField: "x-aurea-platform")
     }
 
     private func request(_ method: String, _ path: String, body: Data? = nil,
@@ -643,7 +666,7 @@ func explainVideoFailure(_ code: String?) -> String {
         return "A geração por IA está em manutenção. Tente mais tarde."
     case "ia_desligada": return "A geração por IA está pausada no momento."
     case "orcamento_diario", "limite_global_diario": return "O limite de gerações de hoje foi atingido. Volte amanhã."
-    case "limite_diario": return "Você atingiu o limite de gerações de hoje. Volte amanhã."
+    case "limite_diario": return "Você usou suas 5 gerações de IA de hoje. Volte amanhã para gerar mais."
     case "muitos_pedidos": return "Muitos pedidos seguidos. Espere um pouco e tente de novo."
     case "job_em_andamento", "em_andamento": return "Já existe uma geração sua em andamento."
     case "conteudo_bloqueado": return "Esse pedido foi bloqueado pela política de conteúdo. Mude o texto e tente de novo."

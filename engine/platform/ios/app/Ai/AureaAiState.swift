@@ -189,7 +189,10 @@ final class AureaAiState: ObservableObject {
                     self.status = .generating
                     guard let record else {
                         // Ainda não terminou: a fila diz se está rodando ou esperando.
-                        let q = (try? await c.queueSituation(promptId)) ?? (false, 0)
+                        // Os rótulos têm que estar também no valor de reserva: sem
+                        // eles o `??` achata o tipo para (Bool, Int) e o `q.running`
+                        // deixa de existir.
+                        let q = (try? await c.queueSituation(promptId)) ?? (running: false, position: 0)
                         self.job = q.running ? step("running", "Gerando", id: promptId)
                                              : step("queued", "Na fila", id: promptId, queue: q.position)
                         continue

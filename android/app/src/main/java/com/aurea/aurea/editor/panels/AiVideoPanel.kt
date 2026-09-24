@@ -303,7 +303,19 @@ internal fun AiVideoPanel(env: PanelEnv) {
                             Botao(stringResource(R.string.ai_assistir_e_liberar), primario = true,
                                 ativo = !ai.anunciando) { ai.liberarComAnuncio() }
                         }
-                        SessaoStatus.Liberado, SessaoStatus.Falhou -> Unit
+                        SessaoStatus.Falhou -> {
+                            // O POST /prompt falhou (node_errors, 400, servidor
+                            // fora). Antes isto não dizia nada e a tela ficava
+                            // calada; agora diz o que houve e oferece recomeçar.
+                            Spacer(Modifier.height(10.dp))
+                            Text(stringResource(R.string.ai_falhou_titulo), style = AureaType.Base.merge(
+                                TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Danger)))
+                            Nota(s.erro ?: stringResource(R.string.ai_falhou_corpo), AureaColors.Muted)
+                            Spacer(Modifier.height(6.dp))
+                            Botao(stringResource(R.string.ai_procurar_de_novo), primario = true,
+                                ativo = !ai.anunciando) { ai.tentarDeNovoAposFalha() }
+                        }
+                        SessaoStatus.Liberado -> Unit
                     }
                 }
             }

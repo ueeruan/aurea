@@ -66,7 +66,7 @@ final class AureaAiState: ObservableObject {
     /// também registra (é onde a recompensa nasce).
     fileprivate static let log = { (m: String) in
         #if DEBUG
-        print("[AureaAI] " + m)
+        print("[AUREA AI] " + m)
         #endif
     }
 
@@ -98,24 +98,21 @@ final class AureaAiState: ObservableObject {
     /// muda; o que muda é o `endpoint` que ele publica. Depois que o Colab
     /// publica, trocar de túnel não pede IPA nem APK novo.
     private func tryConnect() async -> AureaAiStatus {
-        Self.log("DISCOVERY = \(AureaAiConfig.discoveryURL)")
+        Self.log("discovery = \(AureaAiConfig.discoveryURL)")
         let read = await ComfyClient.readDiscovery()
 
         var candidates: [String] = []
         if let d = read.doc {
-            Self.log("DISCOVERY = HTTP \(read.http), online=\(d.online) endpoint=\(d.endpoint) updatedAt=\(d.updatedAt)")
+            Self.log("discovery = HTTP \(read.http), online=\(d.online) endpoint=\(d.endpoint) updatedAt=\(d.updatedAt)")
             if d.isValid { candidates.append(d.endpoint) }
         } else {
-            Self.log("DISCOVERY = HTTP \(read.http), sem documento")
+            Self.log("discovery = HTTP \(read.http), sem documento")
         }
-        let bootstrap = AureaAiConfig.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if !candidates.contains(bootstrap) { candidates.append(bootstrap) }
-
         for base in candidates {
-            Self.log("ENDPOINT = \(base)")
+            Self.log("endpoint = \(base)")
             let c = ComfyClient(base: base)
             let (http, ok) = await c.isOnline()
-            Self.log("ENDPOINT = /system_stats HTTP \(http), json \(ok ? "ok" : "inválido")")
+            Self.log("system_stats = HTTP \(http), json \(ok ? "ok" : "inválido")")
             if ok {
                 if comfy?.base != base { comfy = c }
                 modelName = read.doc.flatMap { $0.model.isEmpty ? nil : $0.model } ?? "MiniMax H3"
@@ -146,7 +143,7 @@ final class AureaAiState: ObservableObject {
         session = flow.resume(saved)
 
         if saved.generationCompleted, let file = saved.result {
-            Self.log("RELEASE = retomando sessão já concluída (recompensa=\(saved.rewardEarned))")
+            Self.log("release = retomando sessão já concluída (recompensa=\(saved.rewardEarned))")
             if saved.rewardEarned { unlock(saved) } else { lastFile = file }
             return
         }
@@ -155,7 +152,7 @@ final class AureaAiState: ObservableObject {
             return
         }
         guard let base = saved.endpointUsado ?? comfy?.base else { return }
-        Self.log("POLL_HISTORY = retomando prompt_id \(pid) em \(base)")
+        Self.log("history = retomando prompt_id \(pid) em \(base)")
         follow(ComfyClient(base: base), promptId: pid, request: saved.request, w: 0, h: 0)
     }
 
@@ -185,13 +182,13 @@ final class AureaAiState: ObservableObject {
                         continue
                     }
                     self.status = .generating
-                    Self.log("POLL_HISTORY = \(promptId) → \(record == nil ? "ainda não terminou" : "terminou")")
+                    Self.log("history = \(promptId) → \(record == nil ? "ainda não terminou" : "terminou")")
                     guard let record else { continue }
                     if let e = ComfyClient.error(inHistory: record) {
                         throw ComfyError(http: 200, code: "execution_error", detail: e)
                     }
                     guard let video = ComfyClient.videos(inHistory: record).first else {
-                        Self.log("OUTPUT = /history sem saída de vídeo ainda")
+                        Self.log("output = /history sem saída de vídeo ainda")
                         failures += 1
                         if failures >= 5 {
                             throw ComfyError(http: 200, code: "sem_video",
@@ -199,17 +196,17 @@ final class AureaAiState: ObservableObject {
                         }
                         continue
                     }
-                    Self.log("OUTPUT = \(video.subfolder)/\(video.name)")
+                    Self.log("output = \(video.subfolder)/\(video.name)")
                     let res = AiResult(videoURL: "\(c.base)/view?filename=\(video.name)",
                                        durationSeconds: Double(H3Workflow.frames(request.duration)) / Double(request.fps),
                                        width: ww, height: hh, fps: request.fps, hasAudio: true)
                     self.job = etapa("finishing", "Finalizando", result: res)
                     self.downloading = true
                     defer { self.downloading = false }
-                    Self.log("DOWNLOAD = \(c.base)/view?filename=\(video.name)")
+                    Self.log("download = \(c.base)/view?filename=\(video.name)")
                     let file = try await c.download(video, to: Self.folder.appendingPathComponent("\(promptId).mp4"))
                     let bytes = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
-                    Self.log("DOWNLOADED_BYTES = \(bytes)")
+                    Self.log("download_bytes = \(bytes)")
                     self.job = etapa("completed", "Concluído", result: res)
                     self.status = .connected
                     if let f = self.finishGeneration { self.finishGeneration = nil; f(file, nil) }
@@ -218,12 +215,12 @@ final class AureaAiState: ObservableObject {
             } catch is CancellationError {
                 return
             } catch let e as ComfyError {
-                Self.log("ERROR = \(e.forScreen)")
+                Self.log("error = \(e.forScreen)")
                 self.fail(e.forScreen)
                 if let f = self.finishGeneration { self.finishGeneration = nil; f(nil, e.forScreen) }
             } catch {
                 let text = error.localizedDescription
-                Self.log("ERROR = \(text)")
+                Self.log("error = \(text)")
                 self.fail(text)
                 if let f = self.finishGeneration { self.finishGeneration = nil; f(nil, text) }
             }
@@ -252,6 +249,21 @@ final class AureaAiState: ObservableObject {
     /// "Assistir e liberar vídeo": outro anúncio para a MESMA geração — não gera de novo.
     func unlockWithAd() { if let id = currentSessionId { flow.unlockWithAd(id) } }
 
+    /// "Tentar de novo" depois de o H3 falhar.
+    ///
+    /// A sessão que falhou não serve mais — não existe prompt_id para retomar. O
+    /// que se aproveita é o pedido: começa uma geração NOVA, com um POST novo e
+    /// um prompt_id novo. É o único caso em que repetir o POST é certo.
+    func retryAfterFailure() {
+        guard let s = session, s.status == .failed else { return }
+        session = nil
+        currentSessionId = nil
+        GuardaDaSessao.shared.clear()
+        job = nil
+        error = ""
+        generateWithReward(s.request)
+    }
+
     /// "Tentar de novo" quando não houve anúncio (a geração não tinha começado).
     func retryGeneration() { if let id = currentSessionId { flow.retry(id) } }
 
@@ -259,7 +271,7 @@ final class AureaAiState: ObservableObject {
 
     private func unlock(_ s: AiGenerationSession) {
         guard let file = s.result else { return }
-        Self.log("RELEASE = geração concluída=\(s.generationCompleted) recompensa=\(s.rewardEarned) → vídeo liberado")
+        Self.log("release = geração concluída=\(s.generationCompleted) recompensa=\(s.rewardEarned) → vídeo liberado")
         GuardaDaSessao.shared.clear()
         if let j = job, j.status == "completed" { history = [j] + history.filter { $0.id != j.id } }
         lastFile = file
@@ -439,13 +451,13 @@ private final class ManagerRewardedAds: RewardedAds {
         let shown = AureaAdsManager.shared.showRewarded(
             opened: { [weak self] in self?.state?.setShowingAd(true); opened() },
             // A recompensa vem SÓ daqui (onUserEarnedReward do SDK).
-            reward: { AureaAiState.log("REWARD = recebida"); reward() },
+            reward: { AureaAiState.log("reward = recebida"); reward() },
             closed: { [weak self] _ in
-                AureaAiState.log("REWARD = anúncio fechado")
+                AureaAiState.log("reward = anúncio fechado")
                 self?.state?.setShowingAd(false); closed()
             },
             failed: { [weak self] e in
-                AureaAiState.log("ERROR = anúncio: \(e)")
+                AureaAiState.log("error = anúncio: \(e)")
                 self?.state?.setShowingAd(false); if returned { failed(e) }
             })
         returned = true

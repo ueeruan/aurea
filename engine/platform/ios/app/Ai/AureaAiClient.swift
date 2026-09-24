@@ -9,14 +9,12 @@ import Foundation
 
 /// A ÚNICA configuração de endereço da Aurea AI (a MESMA do Android).
 ///
-/// O endereço do servidor NÃO é compilado: ele vem do `discoveryURL`, um
-/// endereço fixo. Quando o Colab reinicia e o túnel ganha outro nome, o Colab
-/// publica o novo no discovery e o app passa a usar esse — sem IPA novo.
+/// Não há endereço de servidor compilado. Nenhum. O app conhece só o endereço
+/// FIXO do discovery (`discoveryURL`) e de lá recebe o `endpoint` do momento.
 ///
-/// `baseURL` é só a muda de arranque, para o app não ficar sem nenhum endereço
-/// enquanto o discovery não publicou. Nunca tem prioridade sobre ele.
+/// É isso que faz o túnel do Colab poder mudar de nome sem IPA novo e sem APK
+/// novo: quem conta o endereço novo é o discovery, não o binário.
 enum AureaAiConfig {
-    static let baseURL = "https://cooked-upload-measured-indices.trycloudflare.com"
     static let discoveryURL = "https://aurea-ai-discovery.aureaapp.workers.dev/server"
     /// Workflow do MiniMax H3 no formato de API do ComfyUI (cópia de android/.../assets/ai/).
     static let workflowResource = "minimax_h3_api"

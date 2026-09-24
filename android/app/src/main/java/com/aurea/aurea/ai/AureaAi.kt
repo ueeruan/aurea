@@ -29,7 +29,7 @@ private const val TAG = "AureaAI"
  * Fala DIRETO com a API do ComfyUI (ver [ComfyCliente]): `/system_stats` para
  * saber se está no ar, `POST /prompt` com o workflow do MiniMax H3, `/history`
  * para acompanhar, `/view` para baixar, `/upload/image` para o I2V. O endereço
- * sai de [AureaAiConfig.BASE_URL] (e, se ela não responder, do discovery).
+ * sai do discovery, e só dele: não há endereço compilado no APK.
  *
  * Mesma forma do `CaptionsState`: Compose state por fora, corrotina por dentro,
  * e nada de bloquear a thread da interface.
@@ -102,17 +102,17 @@ class AureaAiState(
                 aoAbrir = { anunciando = true; aoAbrir() },
                 aoRecompensa = {
                     // A recompensa vem SÓ daqui (onUserEarnedReward do SDK).
-                    Log.i(TAG, "[AUREA AI] REWARD = recebida")
+                    Log.i(TAG, "[AUREA AI] reward = recebida")
                     aoRecompensa()
                 },
                 aoFechar = { _ ->
                     anunciando = false
-                    Log.i(TAG, "[AUREA AI] REWARD = anúncio fechado")
+                    Log.i(TAG, "[AUREA AI] reward = anúncio fechado")
                     aoFechar()
                     // O próximo já fica a caminho (para "Assistir e liberar" ou a próxima geração).
                     AureaAdsManager.preloadRewarded()
                 },
-                aoFalhar = { e -> anunciando = false; Log.w(TAG, "[AUREA AI] ERROR = anúncio: $e"); if (devolveu) aoFalhar(e) },
+                aoFalhar = { e -> anunciando = false; Log.w(TAG, "[AUREA AI] error = anúncio: $e"); if (devolveu) aoFalhar(e) },
             )
             devolveu = true
             return mostrou
@@ -129,7 +129,7 @@ class AureaAiState(
         // isso), a tela volta mostrando a geração que ficou. O acompanhamento
         // em si começa quando o servidor responder — `retomarSePreciso`.
         guarda.ler()?.let { g ->
-            Log.i(TAG, "[AUREA AI] POLL_HISTORY = sessão anterior encontrada (prompt_id ${g.promptId}, concluída=${g.generationCompleted})")
+            Log.i(TAG, "[AUREA AI] history = sessão anterior encontrada (prompt_id ${g.promptId}, concluída=${g.generationCompleted})")
             sessaoAtualId = g.generationId
             sessao = g
         }
@@ -217,27 +217,25 @@ class AureaAiState(
      * muda; o que muda é o `endpoint` que ele publica. Depois que o Colab
      * publica, trocar de túnel não pede APK nem IPA novo.
      *
-     * A [AureaAiConfig.BASE_URL] é só a muda de arranque: entra quando o
-     * discovery ainda não publicou nada, para o app não ficar sem nenhum
-     * endereço. Nunca tem prioridade sobre o que o discovery diz.
+     * Não há segunda opção compilada: sem discovery não há endereço. É de
+     * propósito — endereço compilado é endereço que envelhece dentro do
+     * binário e obriga a um APK novo a cada reinício do Colab.
      */
     private fun tentarConectar(): AureaAiEstado {
-        Log.i(TAG, "[AUREA AI] DISCOVERY = ${AureaAiConfig.DISCOVERY_URL}")
+        Log.i(TAG, "[AUREA AI] discovery = ${AureaAiConfig.DISCOVERY_URL}")
         val leitura = AureaAiCliente.lerDiscovery()
-        Log.i(TAG, "[AUREA AI] DISCOVERY = HTTP ${leitura.http}, ${leitura.doc?.let { "online=${it.online} endpoint=${it.endpoint} updatedAt=${it.updatedAt}" } ?: "sem documento"}")
+        Log.i(TAG, "[AUREA AI] discovery = HTTP ${leitura.http}, ${leitura.doc?.let { "online=${it.online} endpoint=${it.endpoint} updatedAt=${it.updatedAt}" } ?: "sem documento"}")
 
         val doc = leitura.doc
-        val doDiscovery = doc?.takeIf { it.valido() }?.endpoint?.trimEnd('/')
-
-        val candidatos = ArrayList<String>()
-        if (!doDiscovery.isNullOrBlank()) candidatos += doDiscovery
-        if (AureaAiConfig.BASE_URL.trimEnd('/') !in candidatos) candidatos += AureaAiConfig.BASE_URL.trimEnd('/')
+        val candidatos = listOfNotNull(
+            doc?.takeIf { it.valido() }?.endpoint?.trimEnd('/')?.takeIf { it.isNotBlank() },
+        )
 
         for (base in candidatos) {
-            Log.i(TAG, "[AUREA AI] ENDPOINT = $base")
+            Log.i(TAG, "[AUREA AI] endpoint = $base")
             val c = ComfyCliente(base)
             val (http, jsonOk) = c.estaOnline()
-            Log.i(TAG, "[AUREA AI] ENDPOINT = /system_stats HTTP $http, json ${if (jsonOk) "ok" else "inválido"}")
+            Log.i(TAG, "[AUREA AI] system_stats = HTTP $http, json ${if (jsonOk) "ok" else "inválido"}")
             if (jsonOk) {
                 if (comfy?.base != base) comfy = c
                 modelo = doc?.modelo?.ifBlank { null } ?: "MiniMax H3"
@@ -272,7 +270,7 @@ class AureaAiState(
 
         // A geração já tinha terminado e o arquivo está aqui: só falta a recompensa.
         if (gravada.generationCompleted && gravada.result != null) {
-            Log.i(TAG, "[AUREA AI] RELEASE = retomando sessão já concluída (recompensa=${gravada.rewardEarned})")
+            Log.i(TAG, "[AUREA AI] release = retomando sessão já concluída (recompensa=${gravada.rewardEarned})")
             sessaoAtualId = gravada.generationId
             recompensa.retomar(gravada)
             return
@@ -286,7 +284,7 @@ class AureaAiState(
             return
         }
 
-        Log.i(TAG, "[AUREA AI] POLL_HISTORY = retomando prompt_id $promptId em ${gravada.endpointUsado}")
+        Log.i(TAG, "[AUREA AI] history = retomando prompt_id $promptId em ${gravada.endpointUsado}")
         sessaoAtualId = gravada.generationId
         recompensa.retomar(gravada)
         val base = gravada.endpointUsado ?: comfy?.base ?: return
@@ -317,7 +315,7 @@ class AureaAiState(
                     continue
                 }
                 estado = AureaAiEstado.Generating
-                Log.i(TAG, "[AUREA AI] POLL_HISTORY = $promptId → ${if (registro == null) "ainda não terminou" else "terminou"}")
+                Log.i(TAG, "[AUREA AI] history = $promptId → ${if (registro == null) "ainda não terminou" else "terminou"}")
 
                 if (registro == null) {
                     val (rodando, pos) = runCatching { withContext(Dispatchers.IO) { c.situacaoNaFila(promptId) } }
@@ -330,7 +328,7 @@ class AureaAiState(
                 ComfyCliente.erroDoHistorico(registro)?.let { throw ComfyErro(200, "execution_error", it) }
                 val video = ComfyCliente.videosDoHistorico(registro).firstOrNull()
                     ?: throw ComfyErro(200, "sem_video", "o /history terminou sem saída de vídeo")
-                Log.i(TAG, "[AUREA AI] OUTPUT = ${video.subpasta}/${video.nome}")
+                Log.i(TAG, "[AUREA AI] output = ${video.subpasta}/${video.nome}")
                 entregar(c, video, promptId, pedido, w, h)
                 return
             }
@@ -338,7 +336,7 @@ class AureaAiState(
             throw e
         } catch (e: Exception) {
             val texto = (e as? ComfyErro)?.paraTela() ?: (e.message ?: e.javaClass.simpleName)
-            Log.w(TAG, "[AUREA AI] ERROR = $texto")
+            Log.w(TAG, "[AUREA AI] error = $texto")
             falhar(texto)
             fimDaGeracao?.let { fimDaGeracao = null; it(null, texto) }
         }
@@ -356,14 +354,14 @@ class AureaAiState(
         job = Job(promptId, "finishing", 0.0, "Finalizando", 0, 0.0, null, res)
         baixando = true
         val arquivo = try {
-            Log.i(TAG, "[AUREA AI] DOWNLOAD = ${c.base}/view?filename=${video.nome}")
+            Log.i(TAG, "[AUREA AI] download = ${c.base}/view?filename=${video.nome}")
             withContext(Dispatchers.IO) {
                 c.baixar(video, File(File(app.filesDir, "aurea-ai"), "$promptId.mp4"))
             }
         } finally {
             baixando = false
         }
-        Log.i(TAG, "[AUREA AI] DOWNLOADED_BYTES = ${arquivo.length()}")
+        Log.i(TAG, "[AUREA AI] download_bytes = ${arquivo.length()}")
         job = Job(promptId, "completed", 0.0, "Concluído", 0, 0.0, null, res)
         estado = AureaAiEstado.Connected
         fimDaGeracao?.let { fimDaGeracao = null; it(arquivo, null) }
@@ -398,6 +396,24 @@ class AureaAiState(
         recompensa.liberarComAnuncio(id)
     }
 
+    /**
+     * "Tentar de novo" depois de o H3 falhar.
+     *
+     * A sessão que falhou não serve mais — não existe prompt_id para retomar. O
+     * que se aproveita é o pedido: começa uma geração NOVA, com um POST novo e
+     * um prompt_id novo. É o único caso em que repetir o POST é certo.
+     */
+    fun tentarDeNovoAposFalha() {
+        val s = sessao ?: return
+        if (s.status != SessaoStatus.Falhou) return
+        sessao = null
+        sessaoAtualId = null
+        guarda.limpar()
+        job = null
+        erro = ""
+        gerarComRecompensa(s.pedido)
+    }
+
     /** "Tentar de novo" quando não houve anúncio (a geração não tinha começado). */
     fun tentarGerarDeNovo() {
         val id = sessaoAtualId ?: return
@@ -407,7 +423,7 @@ class AureaAiState(
     /** Recompensa + vídeo: agora sim o resultado aparece para o usuário. */
     private fun liberar(s: AiGenerationSession) {
         val arquivo = s.result ?: return
-        Log.i(TAG, "[AUREA AI] RELEASE = geração concluída=${s.generationCompleted} recompensa=${s.rewardEarned} → vídeo liberado (${arquivo.length()} bytes)")
+        Log.i(TAG, "[AUREA AI] release = geração concluída=${s.generationCompleted} recompensa=${s.rewardEarned} → vídeo liberado (${arquivo.length()} bytes)")
         job?.let { j -> if (j.status == "completed") historico = listOf(j) + historico.filter { it.id != j.id } }
         ultimoArquivo = arquivo
         val (w, h) = H3Workflow.dimensoes(s.pedido.aspecto, s.pedido.resolucao)
@@ -445,7 +461,7 @@ class AureaAiState(
                     H3Workflow.montar(app, pedido, pedido.assetId)
                 }
                 val promptId = withContext(Dispatchers.IO) { c.enviarPrompt(workflow) }
-                Log.i(TAG, "[AUREA AI] PROMPT_ID = $promptId (${w}x$h, ${H3Workflow.quadros(pedido.duracao)} quadros, ${c.base})")
+                Log.i(TAG, "[AUREA AI] prompt_id = $promptId (${w}x$h, ${H3Workflow.quadros(pedido.duracao)} quadros, ${c.base})")
                 aoPromptId(promptId)
                 job = etapa("queued", "Na fila").copy(id = promptId)
 
@@ -461,7 +477,7 @@ class AureaAiState(
                         continue
                     }
                     estado = AureaAiEstado.Generating
-                    Log.i(TAG, "[AUREA AI] POLL_HISTORY = $promptId → ${if (registro == null) "ainda não terminou" else "terminou"}")
+                    Log.i(TAG, "[AUREA AI] history = $promptId → ${if (registro == null) "ainda não terminou" else "terminou"}")
 
                     if (registro == null) {
                         // Ainda não terminou: a fila diz se está rodando ou esperando.
@@ -483,23 +499,23 @@ class AureaAiState(
                         // Terminou sem saída de vídeo: ou ainda está escrevendo o
                         // arquivo, ou o nó de saída não produziu nada. Espera a
                         // próxima volta antes de acusar erro.
-                        Log.w(TAG, "[AUREA AI] OUTPUT = /history sem saída de vídeo ainda")
+                        Log.w(TAG, "[AUREA AI] output = /history sem saída de vídeo ainda")
                         if (++falhas >= 5) throw ComfyErro(200, "sem_video", "o /history terminou sem saída de vídeo")
                         continue
                     }
-                    Log.i(TAG, "[AUREA AI] OUTPUT = ${video.subpasta}/${video.nome}")
+                    Log.i(TAG, "[AUREA AI] output = ${video.subpasta}/${video.nome}")
 
                     entregar(c, video, promptId, pedido, w, h)
                     return@launch
                 }
             } catch (e: ComfyErro) {
-                Log.w(TAG, "[AUREA AI] ERROR = ${e.paraTela()}")
+                Log.w(TAG, "[AUREA AI] error = ${e.paraTela()}")
                 falhar(e.paraTela())
                 aoTerminar(null, e.paraTela())
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "[AUREA AI] ERROR = $e")
+                Log.w(TAG, "[AUREA AI] error = $e")
                 val texto = e.message ?: e.javaClass.simpleName
                 falhar(texto)
                 aoTerminar(null, texto)

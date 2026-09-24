@@ -18,22 +18,13 @@ import kotlin.math.sqrt
 /**
  * A ÚNICA configuração de endereço da Aurea AI.
  *
- * O endereço do servidor NÃO é compilado: ele vem do discovery
- * ([DISCOVERY_URL], um endereço fixo que nunca muda). Quando o Colab reinicia e
- * o túnel ganha outro nome, o Colab publica o novo no discovery e o app passa a
- * usar esse — sem APK novo e sem IPA novo.
+ * Não há endereço de servidor compilado. Nenhum. O app conhece só o endereço
+ * FIXO do discovery ([DISCOVERY_URL]) e de lá recebe o `endpoint` do momento.
  *
- * [BASE_URL] é só a MUDA de arranque: serve para o app não ficar sem nenhum
- * endereço quando o discovery ainda não publicou. É a primeira coisa a sumir
- * quando o Colab estiver publicando sozinho.
+ * É isso que faz o túnel do Colab poder mudar de nome sem APK novo e sem IPA
+ * novo: quem conta o endereço novo é o discovery, não o binário.
  */
 object AureaAiConfig {
-    /**
-     * Endereço de arranque/diagnóstico. NÃO é a fonte da verdade: quem manda é
-     * o discovery. Se o Colab publicar, o endpoint de lá tem prioridade.
-     */
-    const val BASE_URL = "https://cooked-upload-measured-indices.trycloudflare.com"
-
     /** Endereço FIXO do discovery. Este nunca muda — é o que dispensa recompilar. */
     const val DISCOVERY_URL = "https://aurea-ai-discovery.aureaapp.workers.dev/server"
 

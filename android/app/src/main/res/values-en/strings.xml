@@ -1633,6 +1633,8 @@ to edit the curve.</string>
     <string name="ai_anuncio_curto">ad</string>
     <string name="ai_anuncio_em_curso">Watch the ad to generate.</string>
     <string name="ai_assistir_e_gerar">Watch Ad &amp; Generate</string>
+    <string name="ai_falhou_titulo">Could not generate</string>
+    <string name="ai_falhou_corpo">The server refused the request.</string>
     <string name="ai_imagem_de_partida">Starting image</string>
     <string name="ai_escolher_imagem">Choose image</string>
     <string name="ai_trocar_imagem">Change image</string>

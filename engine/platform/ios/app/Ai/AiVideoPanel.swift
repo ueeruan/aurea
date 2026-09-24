@@ -197,7 +197,16 @@ struct AiVideoPanel: View {
                     if s.adError != nil { note(AureaText.t("ai_anuncio_indisponivel"), AureaColors.danger) }
                     button(AureaText.t("ai_assistir_e_liberar"), primary: true, active: !ai.showingAd) { ai.unlockWithAd() }
                 }
-            case .unlocked, .failed:
+            case .failed:
+                // O POST /prompt falhou (node_errors, 400, servidor fora).
+                // Antes isto não dizia nada e a tela ficava calada.
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(AureaText.t("ai_falhou_titulo")).font(.aurea(size: 15, weight: .semibold))
+                        .foregroundStyle(AureaColors.danger).padding(.top, 10)
+                    note(s.error ?? AureaText.t("ai_falhou_corpo"), AureaColors.muted)
+                    button(AureaText.t("ai_procurar_de_novo"), primary: true, active: !ai.showingAd) { ai.retryAfterFailure() }
+                }
+            case .unlocked:
                 EmptyView()
             }
         }

@@ -1665,6 +1665,8 @@
     <string name="ai_anuncio_curto">anúncio</string>
     <string name="ai_anuncio_em_curso">Assista ao anúncio para gerar.</string>
     <string name="ai_assistir_e_gerar">Assistir e gerar</string>
+    <string name="ai_falhou_titulo">Não deu para gerar</string>
+    <string name="ai_falhou_corpo">O servidor recusou o pedido.</string>
     <string name="ai_imagem_de_partida">Imagem de partida</string>
     <string name="ai_escolher_imagem">Escolher imagem</string>
     <string name="ai_trocar_imagem">Trocar imagem</string>

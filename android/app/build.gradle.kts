@@ -53,9 +53,9 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        // versionCode 2103: correções de vídeo, Vulkan e texto 3D. Um número maior é
+        // versionCode 2108: IA real pela 8Scale, limite diário, 3D sem piscar. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2103
+        versionCode = 2108
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

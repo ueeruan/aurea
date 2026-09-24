@@ -24,6 +24,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectGraph.hpp"
+#include "aurea/media/YuvLayout.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/MaskRaster.hpp"
@@ -2646,6 +2647,459 @@ AUREA_TEST(Gpu, ExportMixesTheTimelineAudioSampleExact) {
     AUREA_CHECK(silent.e.start_export(s, "nao-usado.mp4").ok());
     AUREA_CHECK(wait_export(silent.e));
     AUREA_CHECK(!silent.cap.hasAudio && silent.cap.pcm.empty());
+}
+
+namespace {
+
+/// Uma linha por camada com o TIPO e os dados que a distinguem — comparar o
+/// vetor antes e depois de reabrir é comparar o projeto inteiro. Se um campo
+/// sai do lugar no streaming (escrita e leitura fora de sincronia), a linha
+/// muda ou o `kind` deixa de bater: é assim que um Texto 3D "vira partícula".
+std::vector<std::string> dump_layers(Engine& e) {
+    std::vector<std::string> out;
+    const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    if (!c) return out;
+    char buf[768];
+    for (u32 i = 0; i < c->order().size(); ++i) {
+        const Layer* l = c->layer(c->order().at(i));
+        if (!l) continue;
+        std::string recipe;
+        if (const Asset* a = e.project()->asset(l->model.scene)) {
+            scene3d::Text3DSpec spec;
+            if (scene3d::decode_text3d(a->sourcePath, spec)) recipe = spec.content;
+        }
+        std::snprintf(buf, sizeof(buf),
+                      "kind=%u name=%s start=%lld end=%lld offset=%lld opacity=%.9g fx=%zu masks=%zu src=%llu "
+                      "texto=%s prate=%.9g pmax=%u pemit=%u malha=%llu unidade=%.9g pivo=%.9g,%.9g,%.9g receita=%s",
+                      static_cast<unsigned>(l->kind), l->name.c_str(), static_cast<long long>(l->start.value),
+                      static_cast<long long>(l->end.value), static_cast<long long>(l->offset.value),
+                      static_cast<double>(l->transform.opacity), l->effects.size(), l->masks.size(),
+                      static_cast<unsigned long long>(l->source.pack()), l->text.content.c_str(),
+                      static_cast<double>(l->particles.rate), l->particles.maxParticles, l->particles.emitterType,
+                      static_cast<unsigned long long>(l->model.scene.pack()), static_cast<double>(l->model.unitScale),
+                      static_cast<double>(l->model.pivot.x), static_cast<double>(l->model.pivot.y),
+                      static_cast<double>(l->model.pivot.z), recipe.c_str());
+        out.push_back(buf);
+    }
+    return out;
+}
+
+/// Um spec de texto 3D com TUDO mexido: um campo esquecido na receita (ou mal
+/// lido) aparece como diferença de malha, de material ou de pixels no reabrir.
+scene3d::Text3DSpec spec_texto3d_cheio() {
+    scene3d::Text3DSpec s;
+    s.content = "AUREA";
+    s.animation = 2;
+    s.animationDuration = 3.25f;
+    s.animationStagger = 0.21f;
+    s.animationAmount = 0.47f;
+    s.depth = 0.42f;
+    s.alignment = 2;
+    s.color = Vec4{0.91f, 0.23f, 0.64f, 1.0f};
+    s.metallic = 0.37f;
+    s.roughness = 0.61f;
+    s.specular = 0.82f;
+    s.occlusion = 0.55f;
+    s.emissive = Vec3{0.11f, 0.72f, 0.33f};
+    s.emissiveStrength = 2.5f;
+    s.bevel = true;
+    s.bevelWidth = 0.037f;
+    s.bevelDepth = 0.021f;
+    s.bevelSegments = 5;
+    s.bevelRoundness = 0.34f;
+    s.regionMaterials = true;
+    s.side.color = Vec4{0.13f, 0.17f, 0.19f, 1.0f};
+    s.side.metallic = 0.9f;
+    s.side.roughness = 0.2f;
+    s.bevelMat.color = Vec4{0.95f, 0.95f, 0.97f, 1.0f};
+    s.bevelMat.metallic = 1.0f;
+    s.bevelMat.roughness = 0.05f;
+    return s;
+}
+
+void confere_spec3d(const scene3d::Text3DSpec& a, const scene3d::Text3DSpec& b) {
+    AUREA_CHECK_EQ(b.content, a.content);
+    AUREA_CHECK_EQ(b.animation, a.animation);
+    AUREA_CHECK_NEAR(b.animationDuration, a.animationDuration, 1e-4);
+    AUREA_CHECK_NEAR(b.animationStagger, a.animationStagger, 1e-4);
+    AUREA_CHECK_NEAR(b.animationAmount, a.animationAmount, 1e-4);
+    AUREA_CHECK_NEAR(b.depth, a.depth, 1e-4);
+    AUREA_CHECK_EQ(b.alignment, a.alignment);
+    // As cores vão em hex de 8 bits: o passo é 1/255, então a tolerância é a
+    // quantização (e não menor que ela).
+    AUREA_CHECK_NEAR(b.color.x, a.color.x, 1e-2);
+    AUREA_CHECK_NEAR(b.color.y, a.color.y, 1e-2);
+    AUREA_CHECK_NEAR(b.color.z, a.color.z, 1e-2);
+    AUREA_CHECK_NEAR(b.metallic, a.metallic, 1e-3);
+    AUREA_CHECK_NEAR(b.roughness, a.roughness, 1e-3);
+    AUREA_CHECK_NEAR(b.specular, a.specular, 1e-3);
+    AUREA_CHECK_NEAR(b.occlusion, a.occlusion, 1e-3);
+    AUREA_CHECK_NEAR(b.emissive.x, a.emissive.x, 1e-2);
+    AUREA_CHECK_NEAR(b.emissive.y, a.emissive.y, 1e-2);
+    AUREA_CHECK_NEAR(b.emissiveStrength, a.emissiveStrength, 1e-2);
+    AUREA_CHECK_EQ(b.bevel, a.bevel);
+    AUREA_CHECK_NEAR(b.bevelWidth, a.bevelWidth, 1e-4);
+    AUREA_CHECK_NEAR(b.bevelDepth, a.bevelDepth, 1e-4);
+    AUREA_CHECK_EQ(b.bevelSegments, a.bevelSegments);
+    AUREA_CHECK_NEAR(b.bevelRoundness, a.bevelRoundness, 1e-3);
+    AUREA_CHECK_EQ(b.regionMaterials, a.regionMaterials);
+    AUREA_CHECK_NEAR(b.side.color.x, a.side.color.x, 1e-3);
+    AUREA_CHECK_NEAR(b.side.metallic, a.side.metallic, 1e-3);
+    AUREA_CHECK_NEAR(b.bevelMat.color.x, a.bevelMat.color.x, 1e-3);
+    AUREA_CHECK_NEAR(b.bevelMat.metallic, a.bevelMat.metallic, 1e-3);
+    AUREA_CHECK_NEAR(b.bevelMat.roughness, a.bevelMat.roughness, 1e-3);
+}
+
+/// Monta o projeto do teste: os CINCO tipos de camada juntos, de propósito —
+/// um desalinhamento no streaming de uma contamina as seguintes.
+void build_every_kind(Engine& e) {
+    VideoImport vi;
+    vi.sourcePath = "sintetico";
+    vi.displayName = "clipe";
+    AUREA_CHECK(e.import_video(vi).ok());
+
+    AUREA_CHECK(e.add_text("Legenda 2D").ok());
+
+    ModelImport mi;
+    mi.path = gltf_data("Box.glb");
+    if (file_exists(mi.path)) {
+        AUREA_CHECK(e.import_model(mi).ok());
+    }
+
+    AUREA_CHECK(e.add_particles(0).ok());
+
+    AUREA_CHECK(e.add_text3d(spec_texto3d_cheio()).ok());
+}
+
+} // namespace
+
+// Diagnóstico: abre um .aurea QUALQUER (AUREA_DUMP=<caminho>) pelo leitor de
+// verdade e imprime o tipo e os dados de cada camada. É o que a UI mostra ao
+// reabrir — serve para olhar o arquivo de quem reclamou sem adivinhar.
+AUREA_TEST(Persistence, DumpAnyProjectFromEnv) {
+    const char* p = std::getenv("AUREA_DUMP");
+    if (!p || !*p) { std::printf("(AUREA_DUMP nao definido) "); return; }
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.disableAutosave = true;
+    ec.workerCount = 1;
+    AUREA_CHECK(e.initialize(ec).ok());
+    const Status s = e.load_project(p);
+    std::printf("\n    %s: %s", p, s.ok() ? "abriu" : s.message().data());
+    if (!s.ok()) return;
+    for (const std::string& row : dump_layers(e)) std::printf("\n    %s", row.c_str());
+    std::printf("\n    avisos de carga: notice=%u midias ausentes=%u", e.last_load_notice(), e.last_load_missing_assets());
+    // O quadro que a UI mostraria: é aqui que "o texto 3D virou partícula"
+    // aparece (ou não) sem depender de nenhum aparelho.
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    if (e.capture_frame_rgba(480, rgba, w, h).ok() && w && h) {
+        Image8 img;
+        img.width = w;
+        img.height = h;
+        img.rgba = std::move(rgba);
+        const std::string out = "dump_quadro.png";
+        (void)write_png(out.c_str(), img);
+        u32 acesos = 0, cor = 0;
+        for (u32 y = 0; y < h; ++y) {
+            for (u32 x = 0; x < w; ++x) {
+                const u8* px = img.at(x, y);
+                if (px[0] > 8 || px[1] > 8 || px[2] > 8) ++acesos;
+                if (std::abs(static_cast<int>(px[0]) - static_cast<int>(px[1])) > 24
+                    || std::abs(static_cast<int>(px[1]) - static_cast<int>(px[2])) > 24) {
+                    ++cor;
+                }
+            }
+        }
+        std::printf("\n    quadro %ux%u: %u px com algo (%.2f%%), %u com cor forte -> %s", w, h, acesos,
+                    100.0 * acesos / static_cast<double>(w * h), cor, out.c_str());
+    }
+    std::printf("\n");
+}
+
+AUREA_TEST(Persistence, EveryLayerKindSurvivesSaveDestroyReopen) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_tipos.aurea";
+    SyntheticConfig cfg;
+    cfg.width = 64;
+    cfg.height = 36;
+    cfg.audioRate = 44100;
+    cfg.audioSeconds = 1.0;
+
+    std::vector<std::string> original;
+    // Ciclo 0 monta e salva; os seguintes abrem do DISCO, conferem, salvam de
+    // novo. Três ciclos pegam também o que só aparece na segunda passagem
+    // (ids de asset reciclados, ordem de registro, cache velho).
+    for (u32 ciclo = 0; ciclo < 3; ++ciclo) {
+        SyntheticFactory factory(cfg);
+        std::vector<std::string> rows;
+        {
+            Engine e;
+            EngineConfig ec;
+            ec.backend = new vk::Backend();
+            ec.backendConfig.enableValidation = false;
+            ec.mediaFactory = &factory;
+            ec.disableAutosave = true;
+            ec.workerCount = 2;
+            AUREA_CHECK(e.initialize(ec).ok());
+            if (ciclo == 0) {
+                AUREA_CHECK(e.new_project(64, 36, 30.0, nullptr).ok());
+                build_every_kind(e);
+            } else {
+                AUREA_CHECK(e.load_project(path.c_str()).ok());
+            }
+            rows = dump_layers(e);
+            AUREA_CHECK_EQ(rows.size(), static_cast<usize>(5));
+            if (ciclo == 0) {
+                // O Texto 3D tem de existir AQUI como Model3D com receita — se
+                // ele já sai errado da criação, o resto do teste não prova nada.
+                u32 model = 0, particle = 0, text2d = 0, video = 0, receita = 0;
+                const bool tem_caixa = file_exists(gltf_data("Box.glb"));
+                for (const std::string& r : rows) {
+                    if (r.rfind("kind=10 ", 0) == 0) {
+                        ++model;
+                        if (r.find("receita=AUREA") != std::string::npos) ++receita;
+                    }
+
+                    if (r.rfind("kind=11 ", 0) == 0) ++particle;
+                    if (r.rfind("kind=4 ", 0) == 0) { ++text2d; AUREA_CHECK(r.find("texto=Legenda 2D") != std::string::npos); }
+                    if (r.rfind("kind=1 ", 0) == 0) ++video;
+                }
+                AUREA_CHECK_EQ(model, tem_caixa ? 2u : 1u);   // Texto 3D (+ modelo importado)
+                AUREA_CHECK_EQ(receita, 1u);
+                AUREA_CHECK_EQ(particle, 1u);
+                AUREA_CHECK_EQ(text2d, 1u);
+                AUREA_CHECK_EQ(video, 1u);
+                original = rows;
+            } else {
+                AUREA_CHECK_EQ(rows.size(), original.size());
+                for (usize i = 0; i < rows.size() && i < original.size(); ++i) {
+                    // A linha inteira: tipo, nome, tempos, opacidade, contagens,
+                    // texto, partícula, asset de malha, escala/pivô e receita.
+                    AUREA_CHECK_EQ(rows[i], original[i]);
+                }
+            }
+            AUREA_CHECK(e.save_project(path.c_str()).ok());
+        }
+        // O motor (e o backend) MORRERAM no fim do escopo: o ciclo seguinte não
+        // herda nem cache de asset nem handle de GPU.
+        AUREA_CHECK(file_exists(path));
+    }
+    std::remove(path.c_str());
+}
+
+// O ciclo REAL do texto 3D do usuário: monta, salva em disco, MATA o motor
+// (backend e caches junto), abre de novo e confere o que voltou. O que se
+// compara é a receita CAMPO A CAMPO (não só o conteúdo), o tipo da camada e o
+// quadro renderizado — malha ou material reconstruídos diferentes aparecem como
+// pixel diferente, e o tipo diferente aparece como kind diferente.
+AUREA_TEST(Persistence, Text3DRecipeSurvivesReopenAndRedrawsTheSame) {
+    AUREA_REQUIRE_GPU();
+    const scene3d::Text3DSpec spec = spec_texto3d_cheio();
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_receita.aurea";
+
+    Image8 primeiro;
+    for (u32 ciclo = 0; ciclo < 3; ++ciclo) {
+        Scene3DRig rig(320, 180);   // motor NOVO a cada volta
+        if (ciclo == 0) {
+            AUREA_CHECK(rig.e.add_text3d(spec).ok());
+        } else {
+            AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+        }
+        const Composition* c = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        const Layer* l = nullptr;
+        for (u32 i = 0; i < c->order().size(); ++i) {
+            const Layer* cand = c->layer(c->order().at(i));
+            if (cand && cand->name == "Texto 3D") l = cand;
+        }
+        AUREA_CHECK(l != nullptr);
+        if (!l) return;
+        // O tipo NÃO pode virar outro: partícula (11), modelo (10 continua),
+        // nem nada. Era este o sintoma dos usuários.
+        AUREA_CHECK(l->kind == LayerKind::Model3D);
+        AUREA_CHECK(rig.e.project()->timeline().composition(rig.e.project()->timeline().current())->layers().count() == 1u);
+        const Asset* a = rig.e.project()->asset(l->model.scene);
+        AUREA_CHECK(a != nullptr);
+        if (!a) return;
+        AUREA_CHECK(a->kind == AssetKind::Model3D);
+        scene3d::Text3DSpec do_arquivo;
+        AUREA_CHECK(scene3d::decode_text3d(a->sourcePath, do_arquivo));
+        confere_spec3d(spec, do_arquivo);   // receita COMPLETA, campo a campo
+        // Enquadramento do import: escala de unidade e pivô na layer.
+        AUREA_CHECK(l->model.unitScale > 0.0f);
+        const Image8 agora = rig.capture(320);
+        if (ciclo == 0) {
+            primeiro = agora;
+        } else {
+            // A imagem é o juiz: mesma malha, mesmo material, mesma cor.
+            AUREA_CHECK(max_diff(primeiro, agora) <= 3);
+        }
+        AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    }
+    std::remove(path.c_str());
+}
+
+namespace {
+
+/// O que o sink de passo alinhado coletou (dono: o teste).
+struct PaddedResult {
+    std::vector<u8> luma;      ///< o quadro lido como o codec lê
+    std::vector<i64> pts;
+    u32 quadros = 0;
+    u32 stride = 1152;
+    bool folgaLimpa = true;    ///< a folga do alinhamento ficou intacta
+    bool fonteOk = true;       ///< o motor entregou o quadro com passo = largura
+    const char* erro = "";
+};
+
+/// Sink que se comporta como o MediaCodec: o quadro que chega do motor tem
+/// passo = largura, e o "buffer do encoder" tem passo 1152 (alinhamento de 128,
+/// o caso de 1080). Escreve pelo MESMO plano que o sink do Android usa e lê de
+/// volta como o codec leria — é o caminho inteiro: GPU → plano → arquivo.
+class PaddedStrideSink final : public ExportSink {
+public:
+    explicit PaddedStrideSink(PaddedResult* out) : out_(out) {}
+    Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig*) noexcept override {
+        w_ = v.width;
+        h_ = v.height;
+        return OkStatus;
+    }
+    Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
+        // O motor entrega passo = largura (as duas texturas têm essa largura).
+        if (yStride != w_ || uvStride != w_) {
+            out_->fonteOk = false;
+            return Status{Errc::InvalidState, "o motor mudou o passo da fonte"};
+        }
+        media::YuvInputLayout in;
+        in.width = w_;
+        in.height = h_;
+        in.stride = out_->stride;
+        in.sliceHeight = h_;
+        in.chroma = media::ChromaLayout::SemiPlanar;
+        in.capacity = static_cast<std::size_t>(out_->stride) * h_ * 3 / 2;
+        const char* why = nullptr;
+        media::YuvCopyPlan plan;
+        if (!media::plan_yuv_copy(in, plan, &why)) {
+            out_->erro = why ? why : "plano invalido";
+            return Status{Errc::InvalidState, out_->erro};
+        }
+        std::vector<u8> buffer(plan.totalBytes, 0xCD);   // encheção: a folga tem de sobrar
+        for (u32 r = 0; r < plan.yRows; ++r) {
+            std::memcpy(buffer.data() + plan.yOffset + static_cast<usize>(r) * plan.yPitch,
+                        y + static_cast<usize>(r) * yStride, plan.yRowBytes);
+        }
+        for (u32 r = 0; r < plan.cRows; ++r) {
+            std::memcpy(buffer.data() + plan.cOffset + static_cast<usize>(r) * plan.cPitch,
+                        uv + static_cast<usize>(r) * uvStride, plan.cRowBytes);
+        }
+        // Como o codec lê: linha r do plano de luma em r·stride, `width` úteis.
+        std::vector<u8> lido(static_cast<usize>(w_) * h_);
+        for (u32 r = 0; r < h_; ++r) {
+            std::memcpy(lido.data() + static_cast<usize>(r) * w_, buffer.data() + static_cast<usize>(r) * out_->stride, w_);
+        }
+        // A folga do alinhamento tem de continuar intacta: é a prova de que nada
+        // foi escrito fora da largura (era onde o deslize aparecia).
+        for (u32 r = 0; r < h_ && out_->folgaLimpa; ++r) {
+            const u8* folga = buffer.data() + static_cast<usize>(r) * out_->stride + w_;
+            for (u32 x = 0; x < out_->stride - w_; ++x) {
+                if (folga[x] != 0xCD) { out_->folgaLimpa = false; break; }
+            }
+        }
+        out_->luma = std::move(lido);
+        out_->pts.push_back(ptsUs);
+        ++out_->quadros;
+        return OkStatus;
+    }
+    Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
+    Status finish() noexcept override { return OkStatus; }
+    void abort() noexcept override {}
+
+private:
+    PaddedResult* out_;
+    u32 w_ = 0, h_ = 0;
+};
+
+std::unique_ptr<ExportSink> make_padded_sink(void* user) {
+    return std::unique_ptr<ExportSink>(new PaddedStrideSink(static_cast<PaddedResult*>(user)));
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, ExportAt1080WithPaddedStrideHasNoRowShift) {
+    AUREA_REQUIRE_GPU();
+    // Retrato 1080x1920 com passo 1152 (o caso do print), paisagem 1920x1080 com
+    // passo 2048 e um 1080x1080 com 1152. Nos três o buffer do "encoder" é
+    // maior que a imagem, que é onde o deslize de linha aparecia.
+    const struct { u32 w, h, stride; } casos[] = {{1080, 1920, 1152}, {1920, 1080, 2048}, {1080, 1080, 1152}};
+    for (const auto& caso : casos) {
+        const u32 w = caso.w, h = caso.h;
+        SyntheticConfig cfg;
+        cfg.width = w;
+        cfg.height = h;
+        cfg.pattern = SyntheticPattern::Quadrants;   // borda vertical no meio
+        PaddedResult sink;
+        sink.stride = caso.stride;
+        Engine e;
+        EngineConfig ec;
+        ec.backend = new vk::Backend();
+        ec.backendConfig.enableValidation = false;
+        ec.mediaFactory = new SyntheticFactory(cfg);
+        ec.exportSinkFactory = &make_padded_sink;
+        ec.exportSinkContext = &sink;
+        ec.disableAutosave = true;
+        ec.workerCount = 2;
+        AUREA_CHECK(e.initialize(ec).ok());
+        AUREA_CHECK(e.new_project(w, h, 30.0, nullptr).ok());
+        VideoImport vi;
+        vi.sourcePath = "sintetico";
+        vi.displayName = "quadrantes";
+        AUREA_CHECK(e.import_video(vi).ok());
+        set_duration(e, 3);
+
+        ExportSettings s;
+        s.height = std::min(w, h);   // lado menor = 1080
+        s.fps = 0.0;
+        s.dither = false;
+        const Status st = e.start_export(s, "nao-usado.mp4");
+        if (!st.ok()) std::printf("    start_export falhou: %s\n", st.message().data());
+        AUREA_CHECK(st.ok());
+        AUREA_CHECK(wait_export(e, 120000));
+        const Engine::ExportProgress p = e.export_progress();
+        AUREA_CHECK_EQ(p.result, Errc::Ok);
+        AUREA_CHECK_EQ(sink.quadros, 3u);
+        AUREA_CHECK_EQ(std::strlen(sink.erro), static_cast<usize>(0));
+        AUREA_CHECK(sink.fonteOk);
+        // Timestamps exatos a 30 fps e a folga do alinhamento intacta.
+        for (usize i = 0; i < sink.pts.size(); ++i) {
+            AUREA_CHECK_EQ(sink.pts[i], static_cast<i64>(std::llround(static_cast<f64>(i) * 1e6 / 30.0)));
+        }
+        AUREA_CHECK(sink.folgaLimpa);
+        // O quadro lido como o codec lê: a borda vertical dos quadrantes tem de
+        // estar na MESMA coluna em TODAS as linhas. Se cada linha deslizasse
+        // 72 bytes (o passo errado), a borda viraria uma diagonal e a coluna
+        // mudaria ~16 px a cada linha.
+        const std::vector<u8>& L = sink.luma;
+        AUREA_CHECK_EQ(L.size(), static_cast<usize>(w) * h);
+        u32 colunaMin = w, colunaMax = 0;
+        for (u32 r = 0; r < h; r += 7) {   // amostra as linhas: 1080/1920 linhas
+            const u8* row = L.data() + static_cast<usize>(r) * w;
+            u32 borda = w;
+            for (u32 x = 1; x < w; ++x) {
+                const int d = std::abs(static_cast<int>(row[x]) - static_cast<int>(row[x - 1]));
+                if (d > 60) { borda = x; break; }
+            }
+            colunaMin = std::min(colunaMin, borda);
+            colunaMax = std::max(colunaMax, borda);
+        }
+        // A borda anda no máximo 2 px (amostragem/compressão de croma), não 72.
+        AUREA_CHECK(colunaMax - colunaMin <= 2);
+        AUREA_CHECK_MSG(colunaMin >= w / 2 - 4 && colunaMin <= w / 2 + 4, "borda vertical fora do meio");
+        std::printf("    %ux%u passo %u: borda vertical entre %u e %u (meio = %u)\n", w, h, caso.stride, colunaMin,
+                    colunaMax, w / 2);
+        e.shutdown();
+    }
 }
 
 AUREA_TEST(Gpu, ExportAtDoubleFpsRepeatsEachCompositionFrame) {

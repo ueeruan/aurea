@@ -5,7 +5,9 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/media/YuvLayout.hpp"
 
+#include <media/NdkImage.h>
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaFormat.h>
 #include <media/NdkMediaMuxer.h>
@@ -28,11 +30,19 @@ constexpr i32 kColorFormatI420 = 19;
 constexpr i32 kColorFormatNv12 = 21;
 constexpr i32 kColorFormatFlexible = 0x7F420888;
 
-// AMediaCodec_getInputFormat é API 28; o minSdk é 26. Sem ela, stride =
-// largura e fatia = altura (o que os encoders dessa época fazem).
+// AMediaCodec_getInputFormat é API 28; o minSdk é 26.
 using GetInputFormatFn = AMediaFormat* (*)(AMediaCodec*);
 GetInputFormatFn get_input_format_fn() {
     static GetInputFormatFn fn = reinterpret_cast<GetInputFormatFn>(dlsym(RTLD_DEFAULT, "AMediaCodec_getInputFormat"));
+    return fn;
+}
+
+// AMediaCodec_getInputImage é API 21 — está em todo aparelho que o Aurea roda.
+// É a ÚNICA fonte que diz o passo REAL do buffer de entrada (rowStride e
+// pixelStride por plano), então é ela que decide NV12 x I420 e o passo.
+using GetInputImageFn = media_status_t (*)(AMediaCodec*, size_t, AImage**);
+GetInputImageFn get_input_image_fn() {
+    static GetInputImageFn fn = reinterpret_cast<GetInputImageFn>(dlsym(RTLD_DEFAULT, "AMediaCodec_getInputImage"));
     return fn;
 }
 
@@ -101,15 +111,14 @@ public:
     }
 
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
-        // Listras diagonais nascem AQUI. Se o quadro chega com menos bytes por
-        // linha do que a largura, cada linha e escrita com o passo errado e a
-        // imagem desliza — e antes isso era aceito calado, virando video
-        // listrado sem nenhum aviso. Falhar alto e melhor que exportar lixo.
-        if (yStride < video_.width) {
+        // Listras diagonais nascem AQUI. O quadro chegava com passo = largura e
+        // era escrito no buffer do encoder com ESSE passo: se o encoder pede
+        // linhas de 1152 bytes para uma imagem de 1080, sobram 72 bytes por
+        // linha e a imagem desliza — listra diagonal. O plano abaixo usa o
+        // passo REAL do encoder (Image API → getInputFormat → capacidade do
+        // buffer) e recusa o que não dá para escrever com segurança.
+        if (yStride < video_.width || (uv != nullptr && uvStride < video_.width)) {
             return Status{Errc::InvalidState, "quadro com passo de linha menor que a largura"};
-        }
-        if (uv != nullptr && uvStride < video_.width) {
-            return Status{Errc::InvalidState, "quadro com passo de croma menor que a largura"};
         }
         const u64 deadline = monotonic_ns() + 5'000'000'000ull;
         ssize_t idx = -1;
@@ -119,39 +128,40 @@ public:
         }
         size_t cap = 0;
         u8* dst = AMediaCodec_getInputBuffer(video__.codec, static_cast<size_t>(idx), &cap);
-        const u32 w = video_.width, h = video_.height;
-        const usize ySize = static_cast<usize>(stride_) * sliceHeight_;
-        const usize need = colorFormat_ == kColorFormatNv12
-                         ? ySize + static_cast<usize>(stride_) * (h / 2)
-                         : ySize + 2 * static_cast<usize>(stride_ / 2) * (sliceHeight_ / 2);
-        if (!dst || cap < need) {
+        if (!dst) return Status{Errc::InvalidState, "encoder nao entregou buffer de entrada"};
+        if (!layoutReady_ && !resolve_layout(static_cast<std::size_t>(idx), cap)) {
+            return Status{Errc::InvalidState, layoutWhy_};
+        }
+        const media::YuvCopyPlan& p = plan_;
+        if (!p.valid() || cap < p.totalBytes) {
             return Status{Errc::InvalidState, "buffer do encoder menor que o quadro"};
         }
-        for (u32 r = 0; r < h; ++r) {
-            std::memcpy(dst + static_cast<usize>(r) * stride_, y + static_cast<usize>(r) * yStride, w);
+        for (u32 r = 0; r < p.yRows; ++r) {
+            std::memcpy(dst + p.yOffset + static_cast<usize>(r) * p.yPitch,
+                        y + static_cast<usize>(r) * yStride, p.yRowBytes);
         }
-        if (colorFormat_ == kColorFormatNv12) {
-            u8* c = dst + ySize;
-            for (u32 r = 0; r < h / 2; ++r) {
-                std::memcpy(c + static_cast<usize>(r) * stride_, uv + static_cast<usize>(r) * uvStride, w);
+        if (p.cSecondOffset == 0) {
+            // NV12: a croma da fonte já vem intercalada (U,V por amostra 2×2).
+            for (u32 r = 0; r < p.cRows; ++r) {
+                std::memcpy(dst + p.cOffset + static_cast<usize>(r) * p.cPitch,
+                            uv + static_cast<usize>(r) * uvStride, p.cRowBytes);
             }
         } else {
-            // I420: separa o CbCr intercalado em dois planos.
-            const u32 cs = stride_ / 2;
-            u8* cb = dst + ySize;
-            u8* cr = cb + static_cast<usize>(cs) * (sliceHeight_ / 2);
-            for (u32 r = 0; r < h / 2; ++r) {
+            // I420: separa o CbCr intercalado em dois planos de meia largura.
+            u8* cb = dst + p.cOffset;
+            u8* cr = cb + p.cSecondOffset;
+            for (u32 r = 0; r < p.cRows; ++r) {
                 const u8* src = uv + static_cast<usize>(r) * uvStride;
-                u8* ob = cb + static_cast<usize>(r) * cs;
-                u8* orr = cr + static_cast<usize>(r) * cs;
-                for (u32 x = 0; x < w / 2; ++x) {
+                u8* ob = cb + static_cast<usize>(r) * p.cPitch;
+                u8* orr = cr + static_cast<usize>(r) * p.cSecondPitch;
+                for (u32 x = 0; x < p.cRowBytes; ++x) {
                     ob[x] = src[2 * x];
                     orr[x] = src[2 * x + 1];
                 }
             }
         }
-        const media_status_t ms =
-            AMediaCodec_queueInputBuffer(video__.codec, static_cast<size_t>(idx), 0, need, static_cast<u64>(ptsUs), 0);
+        const media_status_t ms = AMediaCodec_queueInputBuffer(video__.codec, static_cast<size_t>(idx), 0,
+                                                               p.totalBytes, static_cast<u64>(ptsUs), 0);
         if (ms != AMEDIA_OK) return Status{Errc::IoError, "encoder recusou o quadro"};
         lastVideoPts_ = ptsUs;
         return drain(video__, false);
@@ -214,6 +224,106 @@ public:
     void abort() noexcept override { release(true); }
 
 private:
+    /// Descobre o layout REAL do buffer de entrada, na ordem de confiança:
+    /// `AMediaCodec_getInputImage` (API 21, dá rowStride/pixelStride por plano),
+    /// `AMediaCodec_getInputFormat` (API 28, dá passo/fatia/formato) e, por
+    /// último, a capacidade do buffer — nunca a suposição de que o passo é a
+    /// largura. O que foi usado vai para o log: é o primeiro dado quando um
+    /// export sai errado.
+    bool resolve_layout(std::size_t idx, size_t capacity) noexcept {
+        media::YuvInputLayout in;
+        in.width = video_.width;
+        in.height = video_.height;
+        in.stride = 0;
+        in.sliceHeight = 0;
+        in.chroma = colorFormat_ == kColorFormatNv12 ? media::ChromaLayout::SemiPlanar : media::ChromaLayout::Planar;
+        in.capacity = capacity;
+
+        const char* fonte = "capacidade do buffer";
+        bool achou = false;
+        bool viaImage = false;
+        // 1) Image API: o passo e o entrelaçamento verdadeiros.
+        if (GetInputImageFn fn = get_input_image_fn()) {
+            AImage* img = nullptr;
+            if (fn(video__.codec, idx, &img) == AMEDIA_OK && img) {
+                int32_t n = 0;
+                if (AImage_getNumberOfPlanes(img, &n) == AMEDIA_OK && n >= 1) {
+                    int32_t yRow = 0, yPix = 0;
+                    if (AImage_getPlaneRowStride(img, 0, &yRow) == AMEDIA_OK
+                        && AImage_getPlanePixelStride(img, 0, &yPix) == AMEDIA_OK && yRow > 0) {
+                        in.stride = static_cast<u32>(yRow);
+                        in.sliceHeight = video_.height;   // a Image API não expõe fatia; o passo é o que desloca
+                        if (n >= 3) {
+                            int32_t uPix = 0;
+                            if (AImage_getPlanePixelStride(img, 1, &uPix) == AMEDIA_OK) {
+                                // U com passo de 2 bytes = U,V intercalados (NV12);
+                                // passo 1 = dois planos separados (I420).
+                                in.chroma = uPix >= 2 ? media::ChromaLayout::SemiPlanar : media::ChromaLayout::Planar;
+                            }
+                        }
+                        achou = true;
+                        viaImage = true;
+                        fonte = "Image API";
+                    }
+                }
+                AImage_delete(img);
+            }
+        }
+        // 2) Formato de entrada (API 28): completa o que a Image API não deu
+        //    (fatia e formato de cor) e serve de fonte quando ela não existe.
+        if (auto fn = get_input_format_fn()) {
+            if (AMediaFormat* fmt = fn(video__.codec)) {
+                i32 v = 0;
+                if (AMediaFormat_getInt32(fmt, "stride", &v) && v >= static_cast<i32>(video_.width)) {
+                    // O passo da Image API é o do buffer de verdade: só cai para
+                    // o do formato quando ela não respondeu.
+                    if (!viaImage) {
+                        in.stride = static_cast<u32>(v);
+                        achou = true;
+                        fonte = "getInputFormat";
+                    }
+                }
+                if (AMediaFormat_getInt32(fmt, "slice-height", &v) && v >= static_cast<i32>(video_.height)) {
+                    in.sliceHeight = static_cast<u32>(v);
+                }
+                if (AMediaFormat_getInt32(fmt, "color-format", &v)) {
+                    if (v == kColorFormatNv12) in.chroma = media::ChromaLayout::SemiPlanar;
+                    else if (v == kColorFormatI420) in.chroma = media::ChromaLayout::Planar;
+                }
+                AMediaFormat_delete(fmt);
+            }
+        }
+        // 3) Último recurso (Android < 8.1): deduz o passo da capacidade do
+        //    buffer que o codec entregou — e recusa se não der para deduzir.
+        if (!achou) {
+            u32 s = 0, fatia = 0;
+            if (media::stride_from_capacity(video_.width, video_.height, in.chroma, capacity, 128, s, fatia)) {
+                in.stride = s;
+                in.sliceHeight = fatia;
+                achou = true;
+            } else {
+                layoutWhy_ = "nao consegui descobrir o passo do encoder de video";
+                AUREA_LOG_ERROR("export: %s (buffer %zu bytes, %ux%u) — export recusado em vez de sair listrado",
+                                layoutWhy_, capacity, video_.width, video_.height);
+                return false;
+            }
+        }
+        in.fromCodec = true;
+        const char* why = nullptr;
+        if (!plan_yuv_copy(in, plan_, &why)) {
+            layoutWhy_ = why ? why : "layout do encoder invalido";
+            AUREA_LOG_ERROR("export: %s (passo %u, fatia %u, %ux%u, %s)", layoutWhy_, in.stride, in.sliceHeight,
+                            video_.width, video_.height,
+                            in.chroma == media::ChromaLayout::SemiPlanar ? "NV12" : "I420");
+            return false;
+        }
+        layoutReady_ = true;
+        AUREA_LOG_INFO("export: entrada %s passo %u fatia %u (%ux%u), quadro %zu bytes [fonte: %s]",
+                       in.chroma == media::ChromaLayout::SemiPlanar ? "NV12" : "I420", in.stride, in.sliceHeight,
+                       video_.width, video_.height, plan_.totalBytes, fonte);
+        return true;
+    }
+
     /// Configura o codec com a MESMA receita (resolução, taxa, GOP, cor) nos
     /// formatos de entrada que o motor sabe entregar. Nada de baixar resolução
     /// ou taxa para "caber": se não aceita, quem chama decide o que fazer.
@@ -293,36 +403,17 @@ private:
             }
         }
         if (!configured) return fail(Errc::NotSupported, "encoder nao aceita essa resolucao/formato");
-        stride_ = video_.width;
-        sliceHeight_ = video_.height;
-        if (auto fn = get_input_format_fn()) {
-            if (AMediaFormat* in = fn(video__.codec)) {
-                // Registrado sempre: e o primeiro dado que se olha quando um
-                // export sai errado.
-                i32 v = 0;
-                if (AMediaFormat_getInt32(in, "stride", &v) && v >= static_cast<i32>(video_.width)) stride_ = static_cast<u32>(v);
-                if (AMediaFormat_getInt32(in, "slice-height", &v) && v >= static_cast<i32>(video_.height)) {
-                    sliceHeight_ = static_cast<u32>(v);
-                }
-                AMediaFormat_delete(in);
-            }
-        } else {
-            // API < 28: nao da para perguntar o passo ao encoder. A suposicao de
-            // que passo == largura vale na maioria dos aparelhos dessa epoca,
-            // mas nao em todos — e onde nao vale, o video sai listrado. Fica no
-            // log para nao ser um misterio sem pista.
-            AUREA_LOG_WARN("export: aparelho sem AMediaCodec_getInputFormat (API < 28); assumindo passo de "
-                           "entrada %u e fatia %u iguais a largura/altura", stride_, sliceHeight_);
-        }
-        AUREA_LOG_INFO("export: passo de entrada %u, fatia %u (largura %u, altura %u)",
-                       stride_, sliceHeight_, video_.width, video_.height);
+        // O passo/fatia REAIS do buffer de entrada sao descobertos no primeiro
+        // quadro (resolve_layout): so depois do start o formato de entrada e o
+        // buffer tem o tamanho de verdade, e o passo nunca e suposto igual a
+        // largura.
         if (AMediaCodec_start(video__.codec) != AMEDIA_OK) return fail(Errc::IoError, "encoder de video nao iniciou");
-        AUREA_LOG_INFO("export: %s %s (%s) %ux%u @%.2f %u bps, entrada %s stride %u fatia %u", mime,
+        AUREA_LOG_INFO("export: %s %s (%s) %ux%u @%.2f %u bps, formato pedido %s", mime,
                        info_.name[0] ? info_.name : "?",
                        info_.acceleration == Acceleration::Hardware ? "hardware"
                        : info_.acceleration == Acceleration::Software ? "SOFTWARE" : "aceleracao desconhecida",
                        video_.width, video_.height, video_.fps, video_.bitrateBps,
-                       colorFormat_ == kColorFormatNv12 ? "NV12" : "I420", stride_, sliceHeight_);
+                       colorFormat_ == kColorFormatNv12 ? "NV12" : "I420");
         return OkStatus;
     }
 
@@ -471,8 +562,10 @@ private:
     Track audio__{};
     EncoderInfo info_{};
     i32 colorFormat_ = kColorFormatNv12;
-    u32 stride_ = 0;
-    u32 sliceHeight_ = 0;
+    /// Layout REAL do buffer de entrada (descoberto no primeiro quadro).
+    media::YuvCopyPlan plan_{};
+    bool layoutReady_ = false;
+    const char* layoutWhy_ = "";
     i64 lastVideoPts_ = 0;
     i64 lastAudioPts_ = 0;
     std::vector<Pending> pending_;

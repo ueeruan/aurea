@@ -102,6 +102,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/TemporalEffects.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
+    src/media/YuvLayout.cpp
     src/media/VideoSource.cpp
     src/media/MediaManager.cpp
     src/media/ThumbnailService.cpp

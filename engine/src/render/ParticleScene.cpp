@@ -228,7 +228,7 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
         rl.source.particleBlock[3].w = static_cast<f32>(slots);
         rl.source.particleBlock[18].y = static_cast<f32>(flowSlots);
         rl.source.particleBlock[19].x = static_cast<f32>(flowSlots);
-        rl.source.particleSlots = std::min<u32>(cap, slots + pd.burst);
+        rl.source.particleSlots = std::min<u32>(cap, slots * auxMul);
     }
 
     // --- Subamostras do desenho ------------------------------------------------

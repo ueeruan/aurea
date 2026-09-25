@@ -53,6 +53,7 @@ void main() {
     vec4 local = vec4(a_position, 1.0);
     vec3 n = a_normal;
     vec3 t = a_tangent.xyz;
+    float tangentSign = a_tangent.w;
 #ifdef SKINNED
     // Deslocamento da skin desta instância no SSBO do frame (normalCol0.w).
     uint base = uint(pc.normalCol0.w + 0.5);
@@ -62,6 +63,7 @@ void main() {
     mat3 s3 = mat3(skin);
     n = s3 * n;
     t = s3 * t;
+    tangentSign *= determinant(s3) < 0.0 ? -1.0 : 1.0;
 #endif
     mat4 model = pc.model;
     mat3 nm = mat3(pc.normalCol0.xyz, pc.normalCol1.xyz, pc.normalCol2.xyz);
@@ -75,7 +77,10 @@ void main() {
     vec4 world = model * local;
     v_world = world.xyz;
     v_normal = nm * n;
-    v_tangent = vec4(mat3(model) * t, a_tangent.w);
+    // A reflection reverses the tangent basis even when front-face culling
+    // is corrected. Keep normal-map green/bitangent direction consistent.
+    tangentSign *= determinant(mat3(model)) < 0.0 ? -1.0 : 1.0;
+    v_tangent = vec4(mat3(model) * t, tangentSign);
     v_uv0 = a_uv0;
     v_uv1 = a_uv1;
     v_color = a_color;

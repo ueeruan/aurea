@@ -306,6 +306,11 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     media_.set_factory(config.mediaFactory);
     media_.set_memory(&memory_);
     media_.set_ready_callback(&Engine::on_frame_ready, this);
+    media_.proxies().configure(config.mediaFactory, config.exportSinkFactory, config.exportSinkContext,
+        config.cacheDirectory.empty() ? std::string{} : config.cacheDirectory + "/preview-proxies", 512ull << 20,
+        [](const std::string& path, void* context) { return static_cast<Engine*>(context)->resolve_asset_path(path); }, this);
+    media_.proxies().set_policy(caps_.policy().preferProxyAboveShortSide, caps_.policy().backgroundPauseMs);
+    media_.proxies().set_pause_reason(PreviewProxyService::Thermal, caps_.thermal().severe());
     // Som: cache de blocos na verba de áudio; com saída, o áudio passa a ser o
     // relógio mestre do playback.
     audio_.initialize(config.mediaFactory, config.audioOutput, memory_.budget(MemoryClass::Audio));
@@ -374,6 +379,7 @@ void Engine::shutdown() noexcept {
     join_camera_track();
     text::FontManager::instance().set_path_resolver(nullptr);
     stop_render_thread();
+    media_.proxies().stop();
     thumbs_.stop();
     thumbs_.clear();
     thumbs_.attach(nullptr);
@@ -425,6 +431,8 @@ Status Engine::suspend() noexcept {
     // Decoders de hardware são recurso do SISTEMA: segurar em segundo plano
     // faz outro app (ou o próprio Aurea ao voltar) falhar ao abrir um codec.
     media_.suspend_all();
+    media_.proxies().set_pause_reason(PreviewProxyService::Background, true);
+    media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_) {
@@ -476,6 +484,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
 Status Engine::resume() noexcept {
     if (state_ != EngineState::Suspended) return Status{Errc::InvalidState, "motor nao esta suspenso"};
     media_.resume_all();
+    media_.proxies().set_pause_reason(PreviewProxyService::Background, false);
     state_ = EngineState::Ready;
     invalidate();
     return OkStatus;
@@ -629,6 +638,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
 
     media_.close_all();
     thumbs_.clear();
+    media_.proxies().clear();
     if (waveforms_) waveforms_->clear();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
@@ -796,6 +806,7 @@ Status Engine::load_project(const char* path) noexcept {
 
     media_.close_all();
     thumbs_.clear();
+    media_.proxies().clear();
     if (waveforms_) waveforms_->clear();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
@@ -4722,6 +4733,22 @@ i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
     TextAnimator a;
     a.name = "Animador " + std::to_string(l->text.animators.size() + 1);
     a.props = props & 0x7FFu;
+    const u32 index = static_cast<u32>(l->text.animators.size());
+    // The default "Add animation" action must create motion, rather than an
+    // opacity=100 animator without keys (which can never change the image).
+    if (a.props == kTextPropOpacity) {
+        a.opacity = 0;
+        a.selector.shape = 0;
+        const i64 at = l->contains_time(playback_.current()) ? playback_.current().value : l->start.value;
+        const i64 begin = std::min(at, std::max(l->start.value, l->end.value - 2));
+        const i64 remaining = std::max<i64>(1, l->end.value - 1 - begin);
+        const i64 duration = std::min(remaining, std::max<i64>(1, static_cast<i64>(std::lround(comp->fps()))));
+        const FrameIndex local = l->local_time(FrameIndex{begin});
+        Track& selector = l->tracks.get_or_create(TrackProperty::TextAnimParam, index, text::kSelStart);
+        if (begin > l->start.value) (void)selector.set(FrameIndex{local.value - 1}, 100.0f, Interpolation::Hold);
+        (void)selector.set(local, 0.0f, Interpolation::EaseInOut);
+        (void)selector.set(FrameIndex{local.value + duration}, 100.0f, Interpolation::Linear);
+    }
     l->text.animators.push_back(a);
     project_->mark_dirty();
     request_render();
@@ -4970,11 +4997,22 @@ bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
     history_.before_mutation(*comp, project_->timeline().current(), "preset de texto");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const f64 fps = comp->fps();
-    const i64 s = l->local_time(l->start).value;
-    const i64 len = std::max<i64>(2, l->end.value - l->start.value);
+    const i64 at = l->contains_time(playback_.current()) ? playback_.current().value : l->start.value;
+    const i64 begin = std::min(at, std::max(l->start.value, l->end.value - 3));
+    const i64 s = l->local_time(FrameIndex{begin}).value;
+    const i64 len = std::max<i64>(2, l->end.value - begin);
     // A entrada leva ~1 s (no máximo metade da camada).
     const i64 d = std::clamp<i64>(static_cast<i64>(std::lround(fps)), 2, std::max<i64>(2, len / 2));
     const bool ok = text::apply_text_preset(preset, l->text, l->tracks, s, d, fps);
+    if (ok && begin > l->start.value) {
+        // Applying at the playhead must not retroactively hide or transform
+        // the text before the requested animation starts.
+        for (u32 i = 0; i < l->text.animators.size(); ++i) {
+            Track& amount = l->tracks.get_or_create(TrackProperty::TextAnimParam, i, text::kSelAmount);
+            (void)amount.set(l->local_time(l->start), 0.0f, Interpolation::Hold);
+            (void)amount.set(FrameIndex{s}, 100.0f, Interpolation::Hold);
+        }
+    }
     project_->mark_dirty();
     request_render();
     return ok;
@@ -5334,7 +5372,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         sync_audio_locked(*comp);
         project_->timeline().set_playhead(t);
         playing = playback_.playing();
-        playingHint_ = playing;
+        if (playingHint_.exchange(playing) != playing) media_.proxies().set_pause_reason(PreviewProxyService::Playback, playing);
 
         if (!gpu_ || !renderer_.ready()) return OkStatus;   // sem GPU: só o modelo avança
         if (gpu_->is_device_lost()) {
@@ -5440,6 +5478,8 @@ void Engine::set_thermal(u32 level, bool throttling) noexcept {
     // não lê nada disto (§37).
     const DevicePolicy p = caps_.policy();
     thumbs_.set_pacing_ms(p.backgroundPauseMs);
+    media_.proxies().set_policy(p.preferProxyAboveShortSide, p.backgroundPauseMs);
+    media_.proxies().set_pause_reason(PreviewProxyService::Thermal, t.severe());
     if (p.thermal != before) {
         AUREA_LOG_INFO("termico: %s -> %s (preview x%.2f, fundo %u ms)", thermal_tier_name(before),
                        thermal_tier_name(p.thermal), static_cast<double>(p.heavyScale), p.backgroundPauseMs);
@@ -6613,6 +6653,12 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         return Status{Errc::NotSupported, "resolucao acima do limite de textura da GPU"};
     }
 
+    struct ProxyExportPause {
+        PreviewProxyService& service;
+        bool started = false;
+        ~ProxyExportPause() { if (!started) service.set_pause_reason(PreviewProxyService::Export, false); }
+    } proxyPause{media_.proxies()};
+    media_.proxies().set_pause_reason(PreviewProxyService::Export, true);
     ctx->sink = config_.exportSinkFactory(config_.exportSinkContext);
     if (!ctx->sink) return Status{Errc::NotSupported, "encoder indisponivel"};
 
@@ -6741,6 +6787,8 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     }
     exportCtx_ = std::move(ctx);
     exportActive_.store(true, std::memory_order_release);
+    media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
+    proxyPause.started = true;
     exportCtx_->thread = std::thread([this] { export_thread_main(); });
     return OkStatus;
 }
@@ -6976,6 +7024,7 @@ void Engine::export_thread_main() noexcept {
         AUREA_LOG_ERROR("export falhou: %s", result.message().data());
     }
     exportActive_.store(false, std::memory_order_release);
+    media_.proxies().set_pause_reason(PreviewProxyService::Export, false);
     forceRender_ = true;
     request_render();
 }
@@ -7228,7 +7277,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
     // O PlaybackController é a fonte da verdade; a timeline espelha o estado
     // para quem a consulta (serialização, estado da UI).
     auto sync_timeline = [&] {
-        playingHint_ = playback_.playing();
+        const bool playing = playback_.playing();
+        if (playingHint_.exchange(playing) != playing) media_.proxies().set_pause_reason(PreviewProxyService::Playback, playing);
         if (playback_.playing()) timeline.play();
         else timeline.pause();
         timeline.set_playhead(playback_.current());

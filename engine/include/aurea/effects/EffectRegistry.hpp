@@ -68,6 +68,7 @@ namespace effect_keys {
     inline constexpr const char* kUnsharp            = "aurea.blur.unsharp";
     inline constexpr const char* kLensBlur           = "aurea.blur.lens";
     // Luz
+    inline constexpr const char* kHalation           = "aurea.light.halation";
     inline constexpr const char* kDeepGlow           = "aurea.light.deep_glow";
     inline constexpr const char* kRays               = "aurea.light.rays";
     inline constexpr const char* kLightSweep         = "aurea.light.sweep";

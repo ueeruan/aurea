@@ -178,7 +178,7 @@ u64 buffer_identity(CVPixelBufferRef pixel) {
 // =============================================================================
 class AVFoundationVideoDecoder final : public VideoDecoderBackend {
 public:
-    AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack* track, bool zeroCopy) noexcept;
+    AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack* track, bool zeroCopy, bool cpuYuv = false) noexcept;
     ~AVFoundationVideoDecoder() override;
 
     [[nodiscard]] const VideoStreamInfo& info() const noexcept override { return info_; }
@@ -209,6 +209,7 @@ private:
     i64 positionUs_ = 0;         ///< onde o decoder parou (para o resume)
     i64 seekTargetUs_ = -1;      ///< alvo do último seek (retoma aqui)
     bool zeroCopy_ = true;
+    bool cpuYuv_ = false;
     bool suspended_ = false;
     bool tenBit_ = false;
     bool fullRange_ = false;
@@ -217,8 +218,8 @@ private:
 };
 
 AVFoundationVideoDecoder::AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack* track,
-                                                  bool zeroCopy) noexcept
-    : asset_(asset), track_(track), zeroCopy_(zeroCopy) {
+                                                  bool zeroCopy, bool cpuYuv) noexcept
+    : asset_(asset), track_(track), zeroCopy_(zeroCopy), cpuYuv_(cpuYuv) {
     @autoreleasepool {
         const CGSize size = track_.naturalSize;
         info_.codedWidth = (u32)llround(size.width);
@@ -306,6 +307,11 @@ bool AVFoundationVideoDecoder::start_reader(i64 fromUs) noexcept {
         // The previous compressed path returned decode-order PTS and overwrote
         // delayed VideoToolbox callbacks in a single slot.
         NSDictionary* outputSettings = pixel_attributes(info_.codedWidth, info_.codedHeight, tenBit_, fullRange_);
+        if (cpuYuv_ && !tenBit_) {
+            NSMutableDictionary* yuv = [outputSettings mutableCopy];
+            yuv[(id)kCVPixelBufferPixelFormatTypeKey] = @(fullRange_ ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
+            outputSettings = yuv;
+        }
         AVAssetReaderTrackOutput* output =
             [[AVAssetReaderTrackOutput alloc] initWithTrack:track_ outputSettings:outputSettings];
         if (!output) return false;
@@ -669,7 +675,7 @@ public:
             NSArray<AVAssetTrack*>* tracks = [av tracksWithMediaType:AVMediaTypeVideo];
             if (tracks.count == 0) return nullptr;
             return std::unique_ptr<VideoDecoderBackend>(
-                new (std::nothrow) AVFoundationVideoDecoder(av, tracks.firstObject, priority != MediaPriority::Thumbnail && zeroCopy_.load()));
+                new (std::nothrow) AVFoundationVideoDecoder(av, tracks.firstObject, priority != MediaPriority::Thumbnail && zeroCopy_.load(), priority == MediaPriority::Thumbnail));
         }
     }
 
@@ -846,7 +852,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
           error:(NSError**)error;
 - (BOOL)writeVideoY:(const uint8_t*)y yStride:(uint32_t)yStride
                  uv:(const uint8_t*)uv uvStride:(uint32_t)uvStride
-              ptsUs:(int64_t)ptsUs;
+              ptsUs:(int64_t)ptsUs durationUs:(int64_t)durationUs;
 - (BOOL)writeAudio:(const int16_t*)pcm frames:(uint32_t)frames ptsUs:(int64_t)ptsUs;
 - (BOOL)finish;
 - (void)abort;
@@ -1166,6 +1172,14 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         CFStringRef primaries = kCVImageBufferColorPrimaries_ITU_R_709_2;
         CFStringRef transfer = kCVImageBufferTransferFunction_ITU_R_709_2;
         CFStringRef matrix = kCVImageBufferYCbCrMatrix_ITU_R_709_2;
+        if (video.color.primaries == 9) primaries = kCVImageBufferColorPrimaries_ITU_R_2020;
+        else if (video.color.primaries == 12) primaries = kCVImageBufferColorPrimaries_P3_D65;
+        else if (video.color.primaries == 6) primaries = kCVImageBufferColorPrimaries_SMPTE_C;
+        if (video.color.transfer == 16) transfer = kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ;
+        else if (video.color.transfer == 18) transfer = kCVImageBufferTransferFunction_ITU_R_2100_HLG;
+        else if (video.color.transfer == 8) transfer = kCVImageBufferTransferFunction_Linear;
+        if (video.color.matrix == 9) matrix = kCVImageBufferYCbCrMatrix_ITU_R_2020;
+        else if (video.color.matrix == 6) matrix = kCVImageBufferYCbCrMatrix_ITU_R_601_4;
         VTSessionSetProperty(session, kVTCompressionPropertyKey_ColorPrimaries, primaries);
         VTSessionSetProperty(session, kVTCompressionPropertyKey_TransferFunction, transfer);
         VTSessionSetProperty(session, kVTCompressionPropertyKey_YCbCrMatrix, matrix);
@@ -1173,7 +1187,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         // Pool de buffers NV12 do adaptador: reusa memória entre quadros (sem
         // pool, seriam 30 alocações por segundo de 3 MB cada).
         NSDictionary* poolAttributes = @{
-            (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange),
+            (id)kCVPixelBufferPixelFormatTypeKey: @(video.color.fullRange ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange),
             (id)kCVPixelBufferWidthKey: @(_width),
             (id)kCVPixelBufferHeightKey: @(_height),
             (id)kCVPixelBufferMetalCompatibilityKey: @YES,
@@ -1207,7 +1221,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 
 - (BOOL)writeVideoY:(const uint8_t*)y yStride:(uint32_t)yStride
                  uv:(const uint8_t*)uv uvStride:(uint32_t)uvStride
-              ptsUs:(int64_t)ptsUs {
+              ptsUs:(int64_t)ptsUs durationUs:(int64_t)durationUs {
     @autoreleasepool {
         if (!_session || !_pool) return NO;
         if (![self startSessionIfNeeded:ptsUs] || ![self waitForCapacity:YES]) return NO;
@@ -1237,7 +1251,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         CVPixelBufferUnlockBaseAddress(pixel, 0);
 
         const CMTime pts = CMTimeMake(ptsUs, 1'000'000);
-        const CMTime duration = CMTimeMake(_frameDurationUs, 1'000'000);
+        const CMTime duration = CMTimeMake(durationUs > 0 ? durationUs : _frameDurationUs, 1'000'000);
         [_state lock];
         if (![self healthyLocked]) { [_state unlock]; CVPixelBufferRelease(pixel); return NO; }
         ++_pendingVideo;   // o `finish` espera estes sairem antes de fechar
@@ -1433,10 +1447,14 @@ public:
     }
 
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
+        return write_video_timed(y, yStride, uv, uvStride, ptsUs, 0);
+    }
+
+    Status write_video_timed(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs, i64 durationUs) noexcept override {
         @autoreleasepool {
             AureaExportHost* host = host_ref();
             if (!host || !y || !uv) return Status{Errc::InvalidState, "export nao aberto"};
-            if (![host writeVideoY:y yStride:yStride uv:uv uvStride:uvStride ptsUs:ptsUs]) {
+            if (![host writeVideoY:y yStride:yStride uv:uv uvStride:uvStride ptsUs:ptsUs durationUs:durationUs]) {
                 return Status{Errc::EncodeFailed, "o encoder recusou o quadro"};
             }
             return OkStatus;

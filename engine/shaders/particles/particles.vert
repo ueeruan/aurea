@@ -553,7 +553,9 @@ void main() {
     const float flowSlots = p.shapeAux.y;
     const bool isBurst = primaryIdx >= flowSlots;
     const float first = isBurst ? 0.0 : primaryIdx / rate;
-    const float period = p.area.w / rate;
+    // Burst slots fire once at t=0; they are not part of the repeating flow
+    // schedule. Including them creates long emission gaps after the burst.
+    const float period = max(flowSlots, 1.0) / rate;
     // Longe da tela = não desenha (sem ramificar o rasterizador).
     gl_Position = vec4(4.0, 4.0, 0.0, 1.0);
     v_local = vec2(0.0);

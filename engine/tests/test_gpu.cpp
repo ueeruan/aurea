@@ -3888,6 +3888,17 @@ AUREA_TEST(Gpu, VectorBlurSmearsFootageMotionAndFlowIsCached) {
     AUREA_CHECK(by <= sy + 2);                  // nada na vertical
     AUREA_CHECK(bx2 == bx);
     AUREA_CHECK(h1 > h0);
+    // A frozen remap must remain sharp with vector blur enabled. The stored
+    // clip speed is still 1, but the actual source shutter travels nowhere.
+    AUREA_CHECK(e.set_time_remap(*layer, true));
+    AUREA_CHECK(e.edit_time_remap_key(*layer, 0, 0, 50.0f, static_cast<i32>(Interpolation::Linear)) == 0);
+    AUREA_CHECK(e.edit_time_remap_key(*layer, 1, 299, 50.0f, static_cast<i32>(Interpolation::Linear)) == 1);
+    u32 frozenX = 0, frozenY = 0;
+    measure(50, frozenX, frozenY);
+    const auto frozenPixels = half;
+    AUREA_CHECK(e.set_vector_blur(*layer, 0.0f));
+    measure(50, frozenX, frozenY);
+    AUREA_CHECK(frozenPixels == half);
     e.gpu()->destroy_texture(target);
     e.shutdown();
 }
@@ -5609,6 +5620,38 @@ AUREA_TEST(Gpu, Particles3DAreHiddenBehindPlanesAndModelsAndShownInFront) {
     AUREA_CHECK(frontModel > 30u);
 }
 
+AUREA_TEST(Gpu, ParticleBurstDoesNotInterruptContinuousEmission) {
+    AUREA_REQUIRE_GPU();
+    for (bool animated : {false, true}) {
+        Scene3DRig rig(320, 180);
+        const u64 id = measuring_particles(rig.e, 8, 10, 1);
+        auto emitter = [&]() { return current_comp(rig.e)->layer(LayerId::unpack(id)); };
+        emitter()->particles.speed = 60;
+        if (animated) {
+            particle_key(rig.e, id, ParticleParam::Speed, 0, 60);
+            particle_key(rig.e, id, ParticleParam::Speed, 45, 80);
+        }
+        seek_frame(rig.e, 90);
+        const Image8 continuous = rig.capture(320);
+        AUREA_CHECK(coverage(continuous) > 0.002f);
+        emitter()->particles.burst = 100;
+        // Burst died at 1s; at 3s adding it must not change continuous
+        // particle birth times or leave a multi-second emission gap.
+        const Image8 afterBurst = rig.capture(320);
+        AUREA_CHECK(max_diff(continuous, afterBurst) <= 2);
+        seek_frame(rig.e, 45);
+        (void)rig.capture(320);
+        seek_frame(rig.e, 90);
+        AUREA_CHECK(max_diff(continuous, rig.capture(320)) <= 2);
+        const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_particles_burst_flow.aurea";
+        AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+        AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+        seek_frame(rig.e, 90);
+        AUREA_CHECK(max_diff(continuous, rig.capture(320)) <= 2);
+        std::remove(path.c_str());
+    }
+}
+
 AUREA_TEST(Gpu, Particles3DFollowTheCamera) {
     AUREA_REQUIRE_GPU();
     // Um bloco de partículas de 20 px no centro, visto pela câmera: longe =
@@ -5646,6 +5689,182 @@ AUREA_TEST(Gpu, Particles3DFollowTheCamera) {
     AUREA_CHECK(std::fabs(box_cx(turned) - 160.0f) > 30.0f);
     AUREA_CHECK(a0.w() >= 19 && a0.w() <= 22);
     AUREA_CHECK(a60.w() >= 9 && a60.w() <= 12);
+}
+
+AUREA_TEST(Gpu, Scene3DMorphShadowsMatchDeformedGeometry) {
+    AUREA_REQUIRE_GPU();
+    auto capture = [&](bool morph, bool shadows, bool large) {
+        Scene3DRig rig(320, 180);
+        ModelImport mi;
+        mi.path = std::string(AUREA_TEST_DATA_DIR) + "/morph-shadow" + (large ? "-large" : "") + (morph ? ".gltf" : "-reference.gltf");
+        const auto id = rig.e.import_model(mi);
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return Image8{};
+        Layer* layer = current_comp(rig.e)->layer(LayerId::unpack(*id));
+        layer->model.animationClip = morph ? 0 : -1;
+        layer->model.castShadows = shadows;
+        layer->model.unitScale = 60;
+        layer->model.pivot = Vec3{0, 0, 0};
+        if (large) {
+            // Caster leaves the camera/frustum's rest bounds, but its nearly
+            // vertical light still projects a visible shadow onto the floor.
+            auto* comp = current_comp(rig.e);
+            const auto light = comp->add_layer(LayerKind::Light, "morph shadow light");
+            auto* l = comp->layer(light);
+            l->start = FrameIndex{0}; l->end = comp->duration();
+            l->light.kind = LightKind::Directional;
+            l->light.intensity = 3;
+            l->light.castShadows = true;
+            l->transform.rotation.y = 2.862405f;
+        }
+        seek_frame(rig.e, 15); // Morph is 0.5 * delta X=0.6, matching reference X=0.3.
+        return rig.capture(320);
+    };
+    for (bool large : {false, true}) {
+    const Image8 actual = capture(true, true, large);
+    const Image8 expected = capture(false, true, large);
+    const Image8 unshadowed = capture(false, false, large);
+    AUREA_CHECK_EQ(actual.rgba.size(), expected.rgba.size());
+    AUREA_CHECK_EQ(actual.rgba.size(), unshadowed.rgba.size());
+    if (actual.rgba.empty() || actual.rgba.size() != expected.rgba.size() || actual.rgba.size() != unshadowed.rgba.size()) return;
+    u32 darkPixels = 0;
+    f64 error = 0;
+    for (usize i = 0; i < actual.rgba.size(); i += 4) {
+        if (int(unshadowed.rgba[i]) - int(expected.rgba[i]) > 8) ++darkPixels;
+        for (usize c = 0; c < 3; ++c) error += std::abs(actual.rgba[i + c] - expected.rgba[i + c]);
+    }
+    error /= actual.rgba.size() / 4 * 3;
+    std::printf("    morph shadow large=%d: %u visible shadow pixels, deformed/reference mean error %.4f\n", large, darkPixels, error);
+    AUREA_CHECK(darkPixels > 20);
+    AUREA_CHECK(error < 0.1);
+    }
+}
+
+AUREA_TEST(Gpu, Scene3DMirroredNormalMapMatchesBakedReflection) {
+    AUREA_REQUIRE_GPU();
+    auto capture = [&](bool baked) {
+        Scene3DRig rig(320, 180);
+        ModelImport mi;
+        mi.path = std::string(AUREA_TEST_DATA_DIR) + (baked ? "/mirrored-normal-reference.gltf" : "/mirrored-normal.gltf");
+        const auto id = rig.e.import_model(mi);
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return Image8{};
+        auto* layer = current_comp(rig.e)->layer(LayerId::unpack(*id));
+        layer->model.castShadows = false;
+        if (!baked) layer->transform.scale.y = -1;
+        return rig.capture(320);
+    };
+    const Image8 reflected = capture(false), baked = capture(true);
+    AUREA_CHECK(coverage(reflected) > 0.1f);
+    AUREA_CHECK_EQ(reflected.rgba.size(), baked.rgba.size());
+    if (reflected.rgba.size() != baked.rgba.size() || reflected.rgba.empty()) return;
+    f64 error = 0;
+    for (usize i = 0; i < reflected.rgba.size(); ++i) error += std::abs(reflected.rgba[i] - baked.rgba[i]);
+    error /= reflected.rgba.size();
+    std::printf("    mirrored normal map/reference mean error %.4f\n", error);
+    AUREA_CHECK(error < 0.1);
+}
+
+AUREA_TEST(Gpu, Scene3DMirroredTransformsPreserveAuthoredFrontFaces) {
+    AUREA_REQUIRE_GPU();
+    for (bool facing : {true, false}) {
+        Scene3DRig rig(320, 180);
+        ModelImport mi;
+        mi.path = write_triangle_gltf(facing, 1, 0, 0);
+        const auto imported = rig.e.import_model(mi);
+        const auto parentId = rig.e.add_null(false);
+        AUREA_CHECK(imported.ok() && parentId.ok());
+        if (!imported.ok() || !parentId.ok()) continue;
+        auto layer = [&](u64 id) { return current_comp(rig.e)->layer(LayerId::unpack(id)); };
+        auto check = [&](const Image8& img) {
+            const f32 cov = coverage(img);
+            if (facing) AUREA_CHECK(cov > 0.03f);
+            else AUREA_CHECK_NEAR(cov, 0.0f, 1e-6f);
+        };
+        check(rig.capture(320));
+        layer(*imported)->transform.scale.y = -1;
+        const Image8 mirrored = rig.capture(320);
+        check(mirrored);
+        const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_mirrored_model.aurea";
+        AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+        AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+        AUREA_CHECK(max_diff(mirrored, rig.capture(320)) <= 2);
+        std::remove(path.c_str());
+        // Move the reflection to the parent, then reflect both (positive
+        // determinant). All three retain the original front/back semantics.
+        layer(*imported)->parent = LayerId::unpack(*parentId);
+        layer(*imported)->transform.scale.y = 1;
+        layer(*parentId)->transform.position = Vec3{0, 180, 0};
+        layer(*parentId)->transform.anchor = Vec3{0, 0, 0};
+        layer(*parentId)->transform.scale = Vec3{1, -1, 1};
+        check(rig.capture(320));
+        layer(*imported)->transform.scale.y = -1;
+        check(rig.capture(320));
+    }
+}
+
+AUREA_TEST(Gpu, CameraParentScaleCannotShearAnimatedView) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto shapeId = rig.e.add_shape(0);
+    AUREA_CHECK(shapeId.ok());
+    if (!shapeId.ok()) return;
+    const u64 parented = add_test_camera(rig.e, Vec3{0, 0, 0}, kDefaultFov180);
+    const u64 reference = add_test_camera(rig.e, Vec3{160, 90, -216}, kDefaultFov180);
+    auto nullId = rig.e.add_null(false);
+    AUREA_CHECK(nullId.ok());
+    if (!nullId.ok()) return;
+    auto layer = [&](u64 id) { return current_comp(rig.e)->layer(LayerId::unpack(id)); };
+    Layer* shape = layer(*shapeId);
+    shape->threeD = true;
+    shape->shape.bounds = Rect{0, 0, 100, 50};
+    shape->shape.cornerRadius = 0;
+    shape->shape.strokeWidth = 0;
+    shape->shape.filled = true;
+    shape->shape.fillColor = Vec4{0.2f, 0.6f, 1, 1};
+    shape->transform.position = Vec3{160, 90, 0};
+    shape->transform.anchor = Vec3{50, 25, 0};
+    shape->transform.scale = Vec3{1, 1, 1};
+    Layer* parent = layer(*nullId);
+    parent->threeD = true;
+    parent->transform.position = Vec3{160, 90, -216};
+    parent->transform.anchor = Vec3{0, 0, 0};
+    parent->transform.scale = Vec3{2, 1, 1};
+    layer(parented)->parent = LayerId::unpack(*nullId);
+    auto& roll = layer(parented)->tracks.get_or_create(TrackProperty::RotationZ);
+    roll.set(FrameIndex{0}, 0);
+    roll.set(FrameIndex{60}, 90);
+    Image8 saved;
+    for (i64 frame : {i64{0}, i64{30}, i64{60}, i64{15}, i64{30}}) {
+        seek_frame(rig.e, frame);
+        layer(reference)->camera.active = false;
+        layer(parented)->camera.active = true;
+        const Image8 actual = rig.capture(320);
+        AUREA_CHECK(coverage(actual) > 0.04f);
+        const f32 angle = layer(parented)->tracks.find(TrackProperty::RotationZ)->value_or(FrameIndex{frame}, 0) * kDeg2Rad;
+        // The parent's nonuniform scale changes the transformed up vector,
+        // but a rigid camera still has perpendicular right/up/forward axes.
+        layer(reference)->transform.rotation.z = std::atan2(2 * std::sin(angle), std::cos(angle)) / kDeg2Rad;
+        layer(reference)->camera.active = true;
+        layer(parented)->camera.active = false;
+        const Image8 expected = rig.capture(320);
+        f64 error = 0;
+        AUREA_CHECK_EQ(actual.rgba.size(), expected.rgba.size());
+        for (usize i = 0; i < actual.rgba.size() && i < expected.rgba.size(); ++i)
+            error += std::abs(actual.rgba[i] - expected.rgba[i]);
+        error /= std::max<usize>(1, actual.rgba.size());
+        std::printf("    camera parent scale frame %lld: rendered mean error %.4f\n", static_cast<long long>(frame), error);
+        AUREA_CHECK(error < 0.15);
+        saved = actual;
+    }
+    layer(reference)->camera.active = false;
+    layer(parented)->camera.active = true;
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_camera_parent_scale.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seek_frame(rig.e, 30);
+    AUREA_CHECK(max_diff(saved, rig.capture(320)) <= 2);
+    std::remove(path.c_str());
 }
 
 AUREA_TEST(Gpu, ParticlesChildOfAnimated3DNullFollowIt) {
@@ -6731,4 +6950,136 @@ AUREA_TEST(Gpu, PreviewEnvironmentIsBuiltOnceNotInALoop) {
                 static_cast<unsigned long long>(sr.environment_key()), static_cast<unsigned long long>(subidas));
     AUREA_CHECK_EQ(sr.environment_key(), 0ull);
     AUREA_CHECK(subidas <= 1u);
+}
+
+AUREA_TEST(Gpu, HalationAddsWarmEdgesWithoutTintingHighlightCenter) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 128);
+    ImagePixels pixels = uniform_image(128, 128, 0, 0, 0);
+    for (u32 y = 40; y < 88; ++y) for (u32 x = 40; x < 88; ++x) {
+        u8* p = &pixels.rgba[(static_cast<usize>(y) * 128 + x) * 4];
+        p[0] = p[1] = p[2] = 255;
+    }
+    const LayerId id = s.image(pixels, 64, 64);
+    s.add_effect(id, effect_keys::kHalation);
+    const FloatImage preview = s.render();
+    const Vec4 halo = preview.v(91, 64);
+    AUREA_CHECK(halo.x > 0.01f);
+    AUREA_CHECK(halo.x > halo.y * 5.0f);
+    AUREA_CHECK(halo.y > halo.z * 2.0f);
+    AUREA_CHECK(near4(preview.v(64, 64), Vec4{1, 1, 1, 1}, 0.003f));
+    AUREA_CHECK(preview.v(120, 64).x < 0.001f);
+    for (f32 value : preview.px) AUREA_CHECK(std::isfinite(value));
+    const FloatImage finalFrame = s.render(FrameIndex{0}, 1, true);
+    for (usize i = 0; i < preview.px.size(); ++i) AUREA_CHECK_NEAR(preview.px[i], finalFrame.px[i], 0.001f);
+}
+
+AUREA_TEST(Gpu, HalationKeepsDarkImagesAndZeroStrengthUnchanged) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    const LayerId id = s.image(uniform_image(64, 64, 60, 40, 20), 32, 32);
+    const FloatImage before = s.render();
+    EffectInstance& effect = s.add_effect(id, effect_keys::kHalation);
+    const FloatImage dark = s.render();
+    for (usize i = 0; i < before.px.size(); ++i) AUREA_CHECK_NEAR(before.px[i], dark.px[i], 0.001f);
+    effect.params[0].constant.v[0] = 0.0f;
+    effect.params[2].constant.v[0] = 0.0f;
+    const FloatImage disabled = s.render();
+    for (usize i = 0; i < before.px.size(); ++i) AUREA_CHECK_NEAR(before.px[i], disabled.px[i], 0.001f);
+}
+
+AUREA_TEST(Gpu, HalationAnimationSurvivesSaveReopenAndReverseSeek) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(128, 128);
+    const auto shape = rig.e.add_shape(0);
+    AUREA_CHECK(shape.ok());
+    if (!shape.ok()) return;
+    Layer* layer = current_comp(rig.e)->layer(LayerId::unpack(*shape));
+    layer->shape.bounds = Rect{0, 0, 48, 48};
+    layer->shape.fillColor = Vec4{1, 1, 1, 1};
+    layer->transform.anchor = Vec3{24, 24, 0};
+    layer->transform.position = Vec3{64, 64, 0};
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(*shape);
+    add.effect_add.effectType = effect_type_id(effect_keys::kHalation);
+    add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(rig.e.apply_command(add).ok());
+    const u32 effectId = layer->effects[0].id;
+    for (i64 frame : {0LL, 30LL}) {
+        Command key;
+        key.type = CommandType::KeyframeInsert;
+        key.keyframe.track.layer = LayerId::unpack(*shape);
+        key.keyframe.track.property = TrackProperty::EffectParam;
+        key.keyframe.track.effectIndex = effectId;
+        key.keyframe.track.effectParamIndex = param_track_key(2, 0);
+        key.keyframe.time = FrameIndex{frame};
+        key.keyframe.value = frame == 0 ? 0.0f : 200.0f;
+        AUREA_CHECK(rig.e.apply_command(key).ok());
+    }
+    auto capture = [&](i64 frame) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(seek).ok());
+        return rig.capture(128);
+    };
+    const Image8 end = capture(30), start = capture(0), middle = capture(15);
+    AUREA_CHECK(max_diff(end, start) > 8);
+    AUREA_CHECK(max_diff(middle, start) > 4);
+    AUREA_CHECK(max_diff(end, capture(30)) == 0);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_halation_roundtrip.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    AUREA_CHECK(max_diff(middle, capture(15)) == 0);
+    AUREA_CHECK(max_diff(end, capture(30)) == 0);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Gpu, AddTextAnimationCreatesVisibleMotionAtPlayhead) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    auto id = rig.e.add_text("Animacao Aurea");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto seek = [&](i64 frame) {
+        Command c; c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    const f32 full = coverage(rig.capture(640));
+    AUREA_CHECK(full > 0.001f);
+    seek(60);
+    AUREA_CHECK_EQ(rig.e.add_text_animator(*id, kTextPropOpacity), 0);
+    const f32 beginning = coverage(rig.capture(640));
+    seek(75);
+    const Image8 middle = rig.capture(640);
+    const f32 half = coverage(middle);
+    seek(90);
+    const f32 end = coverage(rig.capture(640));
+    seek(59);
+    const f32 previous = coverage(rig.capture(640));
+    std::printf("    new text animation: coverage full %.5f, before %.5f, start %.5f, middle %.5f, end %.5f\n", full, previous, beginning, half, end);
+    AUREA_CHECK(beginning < full * 0.05f);
+    AUREA_CHECK(half > full * 0.2f && half < full * 0.8f);
+    AUREA_CHECK(std::fabs(end - full) < full * 0.03f);
+    AUREA_CHECK(std::fabs(previous - full) < full * 0.03f);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_text_animation_creation.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seek(75);
+    AUREA_CHECK(max_diff(middle, rig.capture(640)) <= 3);
+    seek(120);
+    AUREA_CHECK(rig.e.apply_text_preset(*id, 8));
+    const f32 presetStart = coverage(rig.capture(640));
+    seek(135);
+    const f32 presetMid = coverage(rig.capture(640));
+    seek(150);
+    const f32 presetEnd = coverage(rig.capture(640));
+    AUREA_CHECK(presetStart < full * 0.05f);
+    AUREA_CHECK(presetMid > full * 0.2f && presetMid < full * 0.8f);
+    AUREA_CHECK(std::fabs(presetEnd - full) < full * 0.03f);
+    seek(119);
+    AUREA_CHECK(std::fabs(coverage(rig.capture(640)) - full) < full * 0.03f);
+    std::remove(path.c_str());
 }

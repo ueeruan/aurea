@@ -672,8 +672,14 @@ PipelineKey SceneRenderer::plane_key() const noexcept {
 void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     for (AlphaMode mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
         for (bool twoSided : {false, true}) {
-            out.push_back(key_for(mode, twoSided, false));
-            out.push_back(key_for(mode, twoSided, true));
+            for (bool skinned : {false, true}) {
+                auto key = key_for(mode, twoSided, skinned);
+                out.push_back(key);
+                if (!twoSided) {
+                    key.frontFaceCCW = false;
+                    out.push_back(key);
+                }
+            }
         }
     }
     out.push_back(shadow_key(false));
@@ -911,119 +917,6 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
     }
 
-    // --- Sombra da luz principal ------------------------------------------------
-    // Ortográfica ao longo da luz, ajustada à caixa dos modelos do grupo (com
-    // folga: a pose animada sai da caixa de repouso).
-    struct ShadowDraw {
-        const GpuModel* model;
-        const GpuPrimitive* prim;
-        MeshPush push;   // model = luz ← local; normalCol[0].x = início das juntas
-        PipelineHandle pipeline;
-        bool skinned;
-        u32 instanceCount;
-    };
-    std::vector<ShadowDraw> shadowDraws;
-    Mat4 shadowMatrix = Mat4::identity();
-    i32 shadowLight = -1;
-    for (u32 i = 0; i < frame.lights.size() && i < 4; ++i) {
-        if (frame.lights[i].castShadows && frame.lights[i].kind == LightKindGpu::Directional) {
-            shadowLight = static_cast<i32>(i);
-            break;
-        }
-    }
-    if (shadowLight >= 0) {
-        Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
-        bool any = false;
-        for (const SceneInstance& inst : frame.instances) {
-            if (!inst.asset) continue;
-            const Aabb& b = inst.asset->bounds;
-            for (int c = 0; c < 8; ++c) {
-                const Vec3 pt{(c & 1) ? b.max.x : b.min.x, (c & 2) ? b.max.y : b.min.y, (c & 4) ? b.max.z : b.min.z};
-                const Vec3 w = inst.world.transform_point(pt);
-                lo = Vec3{std::min(lo.x, w.x), std::min(lo.y, w.y), std::min(lo.z, w.z)};
-                hi = Vec3{std::max(hi.x, w.x), std::max(hi.y, w.y), std::max(hi.z, w.z)};
-                any = true;
-            }
-        }
-        if (any) {
-            const Vec3 center = (lo + hi) * 0.5f;
-            const f32 radius = std::max(1.0f, (hi - lo).length() * 0.5f * 1.25f);
-            const Vec3 fwd = frame.lights[static_cast<usize>(shadowLight)].direction.normalized();
-            const Vec3 upRef = std::fabs(fwd.y) > 0.95f ? Vec3{1, 0, 0} : Vec3{0, -1, 0};
-            const Vec3 right = upRef.cross(fwd).normalized();
-            const Vec3 up = fwd.cross(right);
-            const Vec3 eye = center - fwd * (radius * 2.0f);
-            Mat4 view;
-            view.col[0] = Vec4{right.x, up.x, fwd.x, 0};
-            view.col[1] = Vec4{right.y, up.y, fwd.y, 0};
-            view.col[2] = Vec4{right.z, up.z, fwd.z, 0};
-            view.col[3] = Vec4{-right.dot(eye), -up.dot(eye), -fwd.dot(eye), 1};
-            // Ortográfica: x,y em ±radius → [−1, 1]; z em [radius, 3·radius] → [0, 1].
-            Mat4 ortho;
-            ortho.col[0] = Vec4{1.0f / radius, 0, 0, 0};
-            ortho.col[1] = Vec4{0, 1.0f / radius, 0, 0};
-            ortho.col[2] = Vec4{0, 0, 1.0f / (radius * 2.0f), 0};
-            ortho.col[3] = Vec4{0, 0, -radius / (radius * 2.0f), 1};
-            const Mat4 lightViewProj = ortho * view;
-            // NDC → uv do mapa (o Y do Vulkan já desce com o v da textura).
-            Mat4 toUv;
-            toUv.col[0] = Vec4{0.5f, 0, 0, 0};
-            toUv.col[1] = Vec4{0, 0.5f, 0, 0};
-            toUv.col[3] = Vec4{0.5f, 0.5f, 0, 1};
-            shadowMatrix = toUv * lightViewProj;
-            for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
-                const SceneInstance& inst = frame.instances[instIndex];
-                if (!inst.asset || !inst.castShadows) continue;
-                const GpuModel* gm = model(inst.assetKey, *inst.asset);
-                if (!gm) continue;
-                const std::vector<Node>& nodes = inst.asset->nodes;
-                for (usize n = 0; n < nodes.size(); ++n) {
-                    const i32 mi = nodes[n].mesh;
-                    if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
-                    const i32 skinIndex = nodes[n].skin;
-                    const bool skinnedNode = joints.valid() && skinIndex >= 0
-                                           && skinIndex < static_cast<i32>(inst.skinJointOffset.size()) && gm->skin.valid();
-                    const Mat4 world = skinnedNode ? inst.world
-                                                   : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
-                    for (const GpuPrimitive& p : gm->meshes[mi]) {
-                        const GpuMaterial* mat = p.material >= 0 && p.material < static_cast<i32>(gm->materials.size())
-                                               ? &gm->materials[p.material] : &gm->defaultMaterial;
-                        if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
-                        const bool sk = skinnedNode && p.skinned;
-                        auto pipe = shaders_->pipeline(shadow_key(sk));
-                        if (!pipe.ok()) continue;
-                        ShadowDraw sd{};
-                        sd.model = gm;
-                        sd.prim = &p;
-                        sd.push.model = lightViewProj * world;
-                        sd.push.normalCol[0].x = sk ? static_cast<f32>(instJointBase[instIndex]
-                                                                        + inst.skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
-                        sd.pipeline = *pipe;
-                        sd.skinned = sk;
-                        sd.instanceCount = 1;
-                        shadowDraws.push_back(sd);
-                    }
-                }
-            }
-        }
-    }
-    const bool shadowsOn = !shadowDraws.empty();
-    header.shadowMatrix = shadowMatrix;
-    // x: 0 = sem sombra; 1 = PCF 6×6 (export), 2 = 2×2 bilinear, 3 = uma amostra (preview, 8E).
-    const f32 filterCode = shadowFilter_ >= 2 ? 1.0f : (shadowFilter_ == 1 ? 2.0f : 3.0f);
-    header.shadowParams = Vec4{shadowsOn ? filterCode : 0.0f, 1.0f / static_cast<f32>(shadowSize_), 0.0015f,
-                               static_cast<f32>(shadowLight)};
-    FGTexture shadowTex{};
-    if (shadowsOn) {
-        TextureDesc sd;
-        sd.width = sd.height = shadowSize_;
-        sd.format = SurfaceFormat::Depth32F;
-        sd.sampled = true;
-        sd.renderTarget = true;
-        shadowTex = graph.create_texture("3d-sombra", sd);
-        stats_.shadowMapSize = std::max(stats_.shadowMapSize, shadowSize_);
-    }
-
     // --- Morph (blend shapes): deformação na CPU, um bloco por primitiva -------
     // (instância, nó, primitiva) → deslocamento no buffer do quadro. Só entra
     // quem tem alvo E peso ≠ 0; o resto desenha direto da malha na GPU.
@@ -1032,6 +925,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         const Primitive* src;
         const std::vector<f32>* weights;
         usize posOffset, shadeOffset;
+        Aabb bounds;
     };
     std::vector<MorphJob> morphJobs;
     BufferHandle morphBuf{};
@@ -1078,7 +972,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             void* ptr = nullptr;
             if (morphBuf_[slot].valid() && gpu_->map_buffer(morphBuf_[slot], ptr).ok() && ptr) {
                 u8* base = static_cast<u8*>(ptr);
-                for (const MorphJob& j : morphJobs) {
+                for (MorphJob& j : morphJobs) {
                     const Primitive& p = *j.src;
                     auto* pos = reinterpret_cast<Vec3*>(base + j.posOffset);
                     auto* sh = reinterpret_cast<ShadingVertex*>(base + j.shadeOffset);
@@ -1095,6 +989,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                             if (v < mt.normals.size()) N = N + mt.normals[v] * wt;
                         }
                         pos[v] = P;
+                        j.bounds.add(P);
                         ShadingVertex s{};
                         const Vec3 nn = N.normalized();
                         s.normal[0] = nn.x; s.normal[1] = nn.y; s.normal[2] = nn.z;
@@ -1120,6 +1015,144 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         return nullptr;
     };
 
+
+    // --- Sombra da luz principal ------------------------------------------------
+    // Ortográfica ao longo da luz, ajustada à caixa dos modelos do grupo (com
+    // folga: a pose animada sai da caixa de repouso).
+    struct ShadowDraw {
+        const GpuModel* model;
+        const GpuPrimitive* prim;
+        MeshPush push;   // model = luz ← local; normalCol[0].x = início das juntas
+        PipelineHandle pipeline;
+        bool skinned;
+        bool morph;
+        usize morphPos;
+        u32 instanceCount;
+    };
+    std::vector<ShadowDraw> shadowDraws;
+    Mat4 shadowMatrix = Mat4::identity();
+    i32 shadowLight = -1;
+    for (u32 i = 0; i < frame.lights.size() && i < 4; ++i) {
+        if (frame.lights[i].castShadows && frame.lights[i].kind == LightKindGpu::Directional) {
+            shadowLight = static_cast<i32>(i);
+            break;
+        }
+    }
+    if (shadowLight >= 0) {
+        Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+        bool any = false;
+        for (const SceneInstance& inst : frame.instances) {
+            if (!inst.asset) continue;
+            const Aabb& b = inst.asset->bounds;
+            for (int c = 0; c < 8; ++c) {
+                const Vec3 pt{(c & 1) ? b.max.x : b.min.x, (c & 2) ? b.max.y : b.min.y, (c & 4) ? b.max.z : b.min.z};
+                const Vec3 w = inst.world.transform_point(pt);
+                lo = Vec3{std::min(lo.x, w.x), std::min(lo.y, w.y), std::min(lo.z, w.z)};
+                hi = Vec3{std::max(hi.x, w.x), std::max(hi.y, w.y), std::max(hi.z, w.z)};
+                any = true;
+            }
+        }
+        // Animated morphs can extend far beyond the imported rest bounds.
+        // Bounds were accumulated in the existing deformation pass; fitting
+        // costs only eight transformed corners per active primitive.
+        for (const MorphJob& job : morphJobs) {
+            if (!job.bounds.valid()) continue;
+            const SceneInstance& inst = frame.instances[job.inst];
+            const Mat4 world = inst.world * (job.node < inst.nodeWorld.size() ? inst.nodeWorld[job.node] : Mat4::identity());
+            for (int c = 0; c < 8; ++c) {
+                const Vec3 p{(c & 1) ? job.bounds.max.x : job.bounds.min.x,
+                             (c & 2) ? job.bounds.max.y : job.bounds.min.y,
+                             (c & 4) ? job.bounds.max.z : job.bounds.min.z};
+                const Vec3 w = world.transform_point(p);
+                lo = Vec3{std::min(lo.x, w.x), std::min(lo.y, w.y), std::min(lo.z, w.z)};
+                hi = Vec3{std::max(hi.x, w.x), std::max(hi.y, w.y), std::max(hi.z, w.z)};
+                any = true;
+            }
+        }
+        if (any) {
+            const Vec3 center = (lo + hi) * 0.5f;
+            const f32 radius = std::max(1.0f, (hi - lo).length() * 0.5f * 1.25f);
+            const Vec3 fwd = frame.lights[static_cast<usize>(shadowLight)].direction.normalized();
+            const Vec3 upRef = std::fabs(fwd.y) > 0.95f ? Vec3{1, 0, 0} : Vec3{0, -1, 0};
+            const Vec3 right = upRef.cross(fwd).normalized();
+            const Vec3 up = fwd.cross(right);
+            const Vec3 eye = center - fwd * (radius * 2.0f);
+            Mat4 view;
+            view.col[0] = Vec4{right.x, up.x, fwd.x, 0};
+            view.col[1] = Vec4{right.y, up.y, fwd.y, 0};
+            view.col[2] = Vec4{right.z, up.z, fwd.z, 0};
+            view.col[3] = Vec4{-right.dot(eye), -up.dot(eye), -fwd.dot(eye), 1};
+            // Ortográfica: x,y em ±radius → [−1, 1]; z em [radius, 3·radius] → [0, 1].
+            Mat4 ortho;
+            ortho.col[0] = Vec4{1.0f / radius, 0, 0, 0};
+            ortho.col[1] = Vec4{0, 1.0f / radius, 0, 0};
+            ortho.col[2] = Vec4{0, 0, 1.0f / (radius * 2.0f), 0};
+            ortho.col[3] = Vec4{0, 0, -radius / (radius * 2.0f), 1};
+            const Mat4 lightViewProj = ortho * view;
+            // NDC → uv do mapa (o Y do Vulkan já desce com o v da textura).
+            Mat4 toUv;
+            toUv.col[0] = Vec4{0.5f, 0, 0, 0};
+            toUv.col[1] = Vec4{0, 0.5f, 0, 0};
+            toUv.col[3] = Vec4{0.5f, 0.5f, 0, 1};
+            shadowMatrix = toUv * lightViewProj;
+            for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
+                const SceneInstance& inst = frame.instances[instIndex];
+                if (!inst.asset || !inst.castShadows) continue;
+                const GpuModel* gm = model(inst.assetKey, *inst.asset);
+                if (!gm) continue;
+                const std::vector<Node>& nodes = inst.asset->nodes;
+                for (usize n = 0; n < nodes.size(); ++n) {
+                    const i32 mi = nodes[n].mesh;
+                    if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
+                    const i32 skinIndex = nodes[n].skin;
+                    const bool skinnedNode = joints.valid() && skinIndex >= 0
+                                           && skinIndex < static_cast<i32>(inst.skinJointOffset.size()) && gm->skin.valid();
+                    const Mat4 world = skinnedNode ? inst.world
+                                                   : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
+                    for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
+                        const GpuPrimitive& p = gm->meshes[mi][primIndex];
+                        const MorphJob* mj = morph_for(instIndex, n, primIndex);
+                        const GpuMaterial* mat = p.material >= 0 && p.material < static_cast<i32>(gm->materials.size())
+                                               ? &gm->materials[p.material] : &gm->defaultMaterial;
+                        if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
+                        const bool sk = skinnedNode && p.skinned;
+                        auto pipe = shaders_->pipeline(shadow_key(sk));
+                        if (!pipe.ok()) continue;
+                        ShadowDraw sd{};
+                        sd.model = gm;
+                        sd.prim = &p;
+                        sd.push.model = lightViewProj * world;
+                        sd.push.normalCol[0].x = sk ? static_cast<f32>(instJointBase[instIndex]
+                                                                        + inst.skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
+                        sd.pipeline = *pipe;
+                        sd.skinned = sk;
+                        sd.morph = mj != nullptr;
+                        sd.morphPos = mj ? mj->posOffset : 0;
+                        sd.instanceCount = 1;
+                        shadowDraws.push_back(sd);
+                    }
+                }
+            }
+        }
+    }
+    const bool shadowsOn = !shadowDraws.empty();
+    header.shadowMatrix = shadowMatrix;
+    // x: 0 = sem sombra; 1 = PCF 6×6 (export), 2 = 2×2 bilinear, 3 = uma amostra (preview, 8E).
+    const f32 filterCode = shadowFilter_ >= 2 ? 1.0f : (shadowFilter_ == 1 ? 2.0f : 3.0f);
+    header.shadowParams = Vec4{shadowsOn ? filterCode : 0.0f, 1.0f / static_cast<f32>(shadowSize_), 0.0015f,
+                               static_cast<f32>(shadowLight)};
+    FGTexture shadowTex{};
+    if (shadowsOn) {
+        TextureDesc sd;
+        sd.width = sd.height = shadowSize_;
+        sd.format = SurfaceFormat::Depth32F;
+        sd.sampled = true;
+        sd.renderTarget = true;
+        shadowTex = graph.create_texture("3d-sombra", sd);
+        stats_.shadowMapSize = std::max(stats_.shadowMapSize, shadowSize_);
+    }
+
+
     for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
         const SceneInstance& inst = frame.instances[instIndex];
         if (!inst.asset) continue;
@@ -1140,6 +1173,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                            : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
             const Mat4 clipFromLocal = viewProj * world;
             const Mat4 viewFromLocal = frame.camera.view * world;
+            const Vec3 worldX{world.col[0].x, world.col[0].y, world.col[0].z};
+            const Vec3 worldY{world.col[1].x, world.col[1].y, world.col[1].z};
+            const Vec3 worldZ{world.col[2].x, world.col[2].y, world.col[2].z};
+            const bool mirrored = worldX.dot(worldY.cross(worldZ)) < 0.0f;
             for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
                 const GpuPrimitive& p = gm->meshes[mi][primIndex];
                 const MorphJob* mj = morph_for(instIndex, n, primIndex);
@@ -1151,7 +1188,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 const GpuMaterial* mat = p.material >= 0 && p.material < static_cast<i32>(gm->materials.size())
                                        ? &gm->materials[p.material] : &gm->defaultMaterial;
                 const bool skinDraw = skinnedNode && p.skinned;
-                const PipelineKey key = key_for(mat->factors.alphaMode, mat->factors.doubleSided, skinDraw);
+                PipelineKey key = key_for(mat->factors.alphaMode, mat->factors.doubleSided, skinDraw);
+                // A reflected node/parent reverses winding without changing
+                // which authored surface is its front face.
+                if (mirrored && !mat->factors.doubleSided) key.frontFaceCCW = false;
                 auto pipe = shaders_->pipeline(key);
                 if (!pipe.ok()) continue;
                 const EnvSlot* env = env_of(inst);
@@ -1248,7 +1288,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         std::vector<ShadowDraw> smerged;
         for (u32 i = 0; i < shadowDraws.size(); ++i) {
             const ShadowDraw& d = shadowDraws[i];
-            if (d.skinned || !instancing_) { smerged.push_back(d); smembers.emplace_back(); continue; }
+            if (d.skinned || d.morph || !instancing_) { smerged.push_back(d); smembers.emplace_back(); continue; }
             u64 h = 0xCBF29CE484222325ull;
             h = mix(h, reinterpret_cast<uintptr_t>(d.model));
             h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
@@ -1303,7 +1343,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             u32 count;
             BufferHandle joints;
             BufferHandle inst;
-        } scap{sl, n, joints, instBuf};
+            BufferHandle morph;
+        } scap{sl, n, joints, instBuf, morphBuf};
         graph.add_raster_pass_depth("3d-sombra", PassStage::Scene3D, FGTexture{}, LoadOp::DontCare, Vec4{}, shadowTex,
                                     LoadOp::Clear, true, 1.0f, [scap](PassContext& pc) {
             CommandList& c = pc.cmds;
@@ -1316,11 +1357,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 if (d.skinned) c.bind_storage_buffer(scap.joints);
                 else if (d.instanceCount > 1) c.bind_storage_buffer(scap.inst);
-                c.bind_vertex_buffer(0, d.model->positions, 0);
-                if (d.skinned) c.bind_vertex_buffer(2, d.model->skin, 0);
+                c.bind_vertex_buffer(0, d.morph ? scap.morph : d.model->positions, d.morph ? d.morphPos : 0);
+                if (d.skinned) c.bind_vertex_buffer(2, d.model->skin, d.morph ? static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex) : 0);
                 c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
                 c.push_constants(&d.push, sizeof(MeshPush));
-                c.draw_indexed(d.prim->indexCount, std::max(1u, d.instanceCount), d.prim->firstIndex, d.prim->vertexOffset, 0);
+                c.draw_indexed(d.prim->indexCount, std::max(1u, d.instanceCount), d.prim->firstIndex, d.morph ? 0 : d.prim->vertexOffset, 0);
             }
         });
     }

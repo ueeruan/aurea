@@ -574,7 +574,7 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     //   tempo 2 (posterizar tempo, RGB no tempo)
     // + remapear tempo (9.3): o remapeamento da camada com o nome e a cara do
     //   After Effects, no navegador de efeitos ao lado do Posterizar tempo.
-    AUREA_CHECK_EQ(before, static_cast<u32>(48));
+    AUREA_CHECK_EQ(before, static_cast<u32>(49)); // includes the shared Halation effect
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

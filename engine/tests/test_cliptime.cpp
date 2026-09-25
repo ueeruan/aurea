@@ -502,3 +502,20 @@ AUREA_TEST(ClipTime, MaskTrackerMovesThePathWithTheSquare) {
         AUREA_CHECK(worstSize < 0.75);
     }
 }
+
+AUREA_TEST(ClipTime, VectorShutterUsesRemappedSourceTravel) {
+    TimeRig r(cfg_with_audio());
+    auto* l = r.L();
+    AUREA_CHECK_NEAR(l->source_shutter_travel(50.0, 0.5), 0.5, 1e-9);
+    l->speed = 2.0f;
+    AUREA_CHECK_NEAR(l->source_shutter_travel(50.0, 0.5), 1.0, 1e-9);
+    l->reversed = true;
+    AUREA_CHECK_NEAR(l->source_shutter_travel(50.0, 0.5), 1.0, 1e-9);
+    AUREA_CHECK(r.e.set_time_remap(r.layer.pack(), true));
+    AUREA_CHECK(r.e.edit_time_remap_key(r.layer.pack(), 0, 0, 100.0f, static_cast<i32>(Interpolation::Linear)) == 0);
+    AUREA_CHECK(r.e.edit_time_remap_key(r.layer.pack(), 1, 100, 0.0f, static_cast<i32>(Interpolation::Linear)) == 1);
+    AUREA_CHECK_NEAR(l->source_shutter_travel(50.0, 0.5), 0.5, 1e-5);
+    AUREA_CHECK(r.e.edit_time_remap_key(r.layer.pack(), 1, 100, 100.0f, static_cast<i32>(Interpolation::Linear)) == 1);
+    AUREA_CHECK_NEAR(l->source_shutter_travel(50.0, 0.5), 0.0, 1e-9);
+    AUREA_CHECK_NEAR(l->source_shutter_travel(50.0, 0.0), 0.0, 1e-9);
+}

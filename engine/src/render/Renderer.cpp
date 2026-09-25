@@ -288,9 +288,19 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
         if (l->kind != LayerKind::Camera || !l->camera.active) continue;
         const f64 local = timeF - static_cast<f64>(l->start.value) + static_cast<f64>(l->offset.value);
         const Mat4 wm = world_3d_frac(comp, *l, timeF);
-        const Vec3 x = Vec3{wm.col[0].x, wm.col[0].y, wm.col[0].z}.normalized();
-        const Vec3 y = Vec3{wm.col[1].x, wm.col[1].y, wm.col[1].z}.normalized();
-        const Vec3 z = Vec3{wm.col[2].x, wm.col[2].y, wm.col[2].z}.normalized();
+        const Vec3 right{wm.col[0].x, wm.col[0].y, wm.col[0].z};
+        const Vec3 up{wm.col[1].x, wm.col[1].y, wm.col[1].z};
+        Vec3 z = Vec3{wm.col[2].x, wm.col[2].y, wm.col[2].z}.normalized();
+        // Parent scale followed by child rotation can shear the world basis.
+        // A camera keeps its transformed forward/up directions, but its view
+        // must be rigid: independently normalizing the axes still distorts it.
+        if (z.length_sq() < kEpsilon) z = right.cross(up).normalized();
+        if (z.length_sq() < kEpsilon) z = Vec3{0, 0, 1};
+        Vec3 x = up.cross(z).normalized();
+        if (x.length_sq() < kEpsilon) x = (right - z * right.dot(z)).normalized();
+        if (x.length_sq() < kEpsilon)
+            x = (std::fabs(z.y) < 0.9f ? Vec3{0, 1, 0} : Vec3{1, 0, 0}).cross(z).normalized();
+        const Vec3 y = z.cross(x).normalized();
         const Vec3 t{wm.col[3].x, wm.col[3].y, wm.col[3].z};
         Mat4 v;
         v.col[0] = Vec4{x.x, y.x, z.x, 0};
@@ -1200,7 +1210,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.particleBlock[19] = Vec4{static_cast<f32>(flowSlots), 0, 0, 0};
                 // O estouro entra alem das slots do fluxo continuo: com taxa 0
                 // (so estouro) `slots` seria 1 e o burst nao teria onde caber.
-                rl.source.particleSlots = std::min<u32>(cap, slots + pd.burst);
+                rl.source.particleSlots = std::min<u32>(cap, slots * auxMul);
                 rl.source.particleAdditive = pd.blendMode == 1;
                 // 8.2: fonte de emissão, textura, malha, curvas... (isolado).
                 prepare_particle_extras(comp, *l, pd, layerTime, imageLookup, imageCtx, frameNumber, rid, rl.source);
@@ -1506,14 +1516,18 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Vídeo: pede o frame e pega o melhor disponível AGORA (nunca espera).
         if (rl.source.kind == LayerSource::Kind::Video && media) {
             const Asset* asset = project.asset(l->source);
-            VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber);
+            VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber, settings.finalQuality);
             if (src) {
                 const VideoStreamInfo streamInfo = src->info();
                 i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(layerTime) * 1e6 / fps));
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
                 i64 nextUs = -1;
                 f32 blendT = 0.0f;
-                const bool wantVector = l->vectorBlur > 0.0f && comp.motion_blur().shutterAngle > 0.0f;
+                const f64 shutterTravel = l->vectorBlur > 0.0f
+                    ? l->source_shutter_travel(static_cast<f64>(layerTime.value),
+                        static_cast<f64>(comp.motion_blur().shutterAngle) / 360.0)
+                    : 0.0;
+                const bool wantVector = l->vectorBlur > 0.0f && shutterTravel > 1e-8;
                 if (streamInfo.preciseFrameTiming && (l->frameBlend >= 1 || wantVector)) {
                     bool currentReady = false;
                     const FrameRef current = src->frame_for(mediaUs, &currentReady);
@@ -1584,10 +1598,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         // Aparelho em estado crítico: o preview mistura em vez de
                         // calcular o movimento de pixels (o export mantém o modo).
                         rl.source.blendMode = (l->frameBlend == 2 && !settings.finalQuality && settings.heavyScale <= 0.25f) ? 1 : l->frameBlend;
-                        // Desfoque vetorial: o fluxo cobre um quadro da FONTE;
-                        // o obturador da composição dá a fração (× velocidade).
-                        rl.source.vectorBlur = wantVector
-                            ? std::clamp(l->vectorBlur, 0.0f, 2.0f) * comp.motion_blur().shutterAngle / 360.0f * std::max(0.0f, std::fabs(l->speed))
+                        // Flow spans this actual source pair, not one timeline
+                        // frame. Normalize the remapped shutter by its PTS span
+                        // so VFR, different frame rates, ramps and freezes agree.
+                        const i64 pairUs = rl.source.frameB->ptsUs - rl.source.frame->ptsUs;
+                        rl.source.vectorBlur = wantVector && pairUs > 0 && fps > 0.0
+                            ? static_cast<f32>(std::clamp(l->vectorBlur, 0.0f, 2.0f) * shutterTravel * 1e6 / (fps * pairUs))
                             : 0.0f;
                     } else {
                         exact = false;   // falta um dos dois: o export espera; o preview mostra o que tem

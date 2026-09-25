@@ -63,6 +63,13 @@ public:
     /// buffer livre — é o que segura o ritmo do export.
     [[nodiscard]] virtual Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride,
                                              i64 ptsUs) noexcept = 0;
+    /// Exact source presentation duration for VFR proxy generation. Containers
+    /// driven by PTS derive intermediate durations; VT also accepts them explicitly.
+    [[nodiscard]] virtual Status write_video_timed(const u8* y, u32 yStride, const u8* uv, u32 uvStride,
+                                                  i64 ptsUs, i64 durationUs) noexcept {
+        (void)durationUs;
+        return write_video(y, yStride, uv, uvStride, ptsUs);
+    }
 
     /// PCM 16 bits intercalado, `frames` amostras por canal.
     [[nodiscard]] virtual Status write_audio(const i16* interleaved, u32 frames, i64 ptsUs) noexcept = 0;

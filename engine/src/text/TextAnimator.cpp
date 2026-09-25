@@ -339,8 +339,20 @@ bool apply_text_preset(u32 id, TextData& t, TrackSet& tr, i64 s, i64 d, f64 fps)
             TextAnimator a = reveal(0, 0, kTextPropOpacity);
             a.opacity = 0;
             const u32 i = push(a, "Typewriter");
-            const u32 n = std::max<u32>(1, static_cast<u32>(t.content.size()));
-            for (u32 c = 0; c <= n; ++c) key(tr, i, kSelStart, s + d * c / n, 100.0f * static_cast<f32>(c) / static_cast<f32>(n), Interpolation::Hold);
+            // Use the same UTF-8 code-point units as text layout.
+            u32 count = 0;
+            for (usize byte = 0; byte < t.content.size(); ++count) {
+                const u8 lead = static_cast<u8>(t.content[byte]);
+                usize width = 1;
+                if ((lead >> 5) == 0x6 && byte + 1 < t.content.size()) width = 2;
+                else if ((lead >> 4) == 0xE && byte + 2 < t.content.size()) width = 3;
+                else if ((lead >> 3) == 0x1E && byte + 3 < t.content.size()) width = 4;
+                byte += width;
+            }
+            const u32 n = std::max<u32>(1, count);
+            // Round up so grouped reveals never overwrite the hidden first frame.
+            for (u32 c = 0; c <= n; ++c) key(tr, i, kSelStart, s + (d * c + n - 1) / n,
+                100.0f * static_cast<f32>(c) / static_cast<f32>(n), Interpolation::Hold);
             break;
         }
         case 9: {   // Wave: ondinha que passa pelas letras, em ciclos de 1 s

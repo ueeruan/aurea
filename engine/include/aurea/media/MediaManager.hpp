@@ -16,6 +16,7 @@
 #include "aurea/audio/Audio.hpp"
 #include "aurea/core/Handle.hpp"
 #include "aurea/media/VideoSource.hpp"
+#include "aurea/media/PreviewProxy.hpp"
 #include "aurea/project/Asset.hpp"
 
 #include <memory>
@@ -43,6 +44,9 @@ public:
     /// Lê os metadados do arquivo (sem decodificar). Chamado na importação,
     /// fora do lock do modelo — pode levar alguns ms.
     [[nodiscard]] virtual bool probe(const char* sourcePath, MediaProbe& out) = 0;
+    /// Stable source version for disk caches, queried only on a background
+    /// worker. Empty means session-only caching (e.g. a cloud-provider stream).
+    [[nodiscard]] virtual std::string cache_identity(const char* sourcePath);
     /// Abre um decoder para o asset. `nullptr` quando o arquivo não abre.
     [[nodiscard]] virtual std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset,
                                                                           MediaPriority priority) = 0;
@@ -64,10 +68,11 @@ public:
     /// cache dela à categoria DecodedFrames, compartilhada entre as fontes.
     void set_memory(MemoryManager* memory) noexcept;
     [[nodiscard]] VideoSourceFactory* factory() const noexcept { return factory_; }
+    PreviewProxyService& proxies() noexcept { return proxies_; }
 
     /// Fonte da layer. Abre fora da thread de render; nula enquanto abre.
     [[nodiscard]] VideoSource* source_for(LayerId layer, AssetId assetId, const Asset& asset,
-                                          u64 frameNumber);
+                                          u64 frameNumber, bool finalQuality = false);
 
     /// Retira fontes ociosas; a fila de encerramento fecha codecs fora do render.
     void collect(u64 frameNumber, u32 idleFrames = 180);
@@ -108,6 +113,7 @@ private:
     struct Entry {
         LayerId layer{};
         AssetId asset{};
+        std::string path;
         std::unique_ptr<VideoSource> source;
         std::unique_ptr<Opening> opening;
         u64 lastUsedFrame = 0;
@@ -121,6 +127,7 @@ private:
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
     bool suspended_ = false;
+    PreviewProxyService proxies_;
 
     // One retirement worker: a slow platform codec shutdown must not join on
     // the render/UI thread. close_all drains it before factories/callbacks die.

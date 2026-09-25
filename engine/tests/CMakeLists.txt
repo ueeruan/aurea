@@ -19,6 +19,7 @@ add_executable(aurea_tests
     test_serialization.cpp
     test_engine.cpp
     test_media.cpp
+    test_proxy.cpp
     test_yuv_layout.cpp
     test_gpu.cpp
     test_scene3d.cpp

@@ -341,9 +341,9 @@ private:
             AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_COLOR_FORMAT, cf);
             AMediaFormat_setInt32(f, "bitrate-mode", 1);   // VBR
             // Etiqueta de cor: BT.709, faixa limitada, SDR (MediaFormat.COLOR_*).
-            AMediaFormat_setInt32(f, "color-standard", 1);
+            AMediaFormat_setInt32(f, "color-standard", video_.color.matrix == 9 ? 6 : video_.color.matrix == 6 ? 4 : 1);
             AMediaFormat_setInt32(f, "color-range", video_.color.fullRange ? 1 : 2);
-            AMediaFormat_setInt32(f, "color-transfer", 3);
+            AMediaFormat_setInt32(f, "color-transfer", video_.color.transfer == 16 ? 6 : video_.color.transfer == 18 ? 7 : video_.color.transfer == 8 ? 1 : 3);
             const media_status_t ms = AMediaCodec_configure(codec, f, nullptr, nullptr,
                                                             AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
             AMediaFormat_delete(f);

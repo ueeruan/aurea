@@ -106,6 +106,7 @@ set(AUREA_CORE_SOURCES
     src/media/VideoSource.cpp
     src/media/MediaManager.cpp
     src/media/ThumbnailService.cpp
+    src/media/PreviewProxy.cpp
     src/audio/AudioCore.cpp
     src/audio/AudioBlockCache.cpp
     src/audio/AudioMixer.cpp

@@ -180,6 +180,79 @@ public:
     }
 };
 
+// Film-style warm highlight bleed: positive blurred highlight energy minus
+// its local source. Uniform bright interiors stay neutral; dark-side edges
+// receive a warm halo instead of a second broad bloom layer.
+class Halation final : public Effect {
+public:
+    enum : u32 { kThreshold, kRadius, kAmount, kSoftness, kEdges, kTint, kOnlyHalo };
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kHalation, "Halation de filme", "Luz", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("threshold", "Limite das luzes", 60.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("radius", "Raio", 18.0f, 0.0f, 300.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("amount", "Intensidade", 100.0f, 0.0f, 400.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("softness", "Suavidade do limite", 10.0f, 0.0f, 50.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("edges", "Preservar núcleo", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_color("tint", "Cor do halo", Vec4{1.0f, 0.08f, 0.015f, 1.0f});
+        p.add_bool("only_halo", "Só o halo", false);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return !e.b(kOnlyHalo) && e.f(kAmount) <= 1e-4f;
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override { return std::max(0.0f, e.f(kRadius)); }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        for (ShaderId id : {ShaderId::effects_halation_extract_frag, ShaderId::effects_gaussian_blur_frag,
+                            ShaderId::effects_downsample_frag, ShaderId::effects_halation_combine_frag}) {
+            out.push_back(PipelineKey::fullscreen(id, work));
+        }
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        const f32 radius = std::max(0.0f, e.f(kRadius));
+        const Rect region = spread_region(input.region, radius, radius, e.placement, margin);
+        const u32 reduction = reduction_for(radius * input.texel_scale_x(), 24.0f);
+        u32 bw = 0, bh = 0;
+        ctx.region_size(region, input.texel_scale_x() / static_cast<f32>(reduction), bw, bh);
+        LayerImage mask{ctx.texture("halation-highlights", bw, bh), region, bw, bh};
+        EffectUniforms extract;
+        extract.uvMap = EffectBuildContext::uv_map(region, input.region);
+        extract.p0 = Vec4{e.f(kThreshold) / 100.0f, e.f(kSoftness) / 100.0f, 0, 0};
+        if (ctx.fullscreen_pass("halation-highlights", PassStage::Effects, mask.texture,
+            ShaderId::effects_halation_extract_frag,
+            {PassTexture{input.texture, {}, CommonSampler::LinearBorder}}, &extract, sizeof(extract)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        LayerImage blurred = mask;
+        if (radius > 0.0f) {
+            BlurRequest request;
+            request.sigmaX = request.sigmaY = radius / 3.0f;
+            request.repeatEdges = false;
+            request.outRegion = region;
+            request.label = "halation-diffusion";
+            if (const Status status = build_gaussian(ctx, mask, request, blurred); !status.ok()) return status;
+        }
+        u32 w = 0, h = 0;
+        ctx.region_size(region, input.texel_scale_x(), w, h);
+        out = LayerImage{ctx.texture("halation", w, h), region, w, h};
+        EffectUniforms combine;
+        combine.uvMap = EffectBuildContext::uv_map(region, input.region);
+        combine.p0 = Vec4{e.f(kAmount) / 100.0f, e.f(kEdges) / 100.0f, e.b(kOnlyHalo) ? 1.0f : 0.0f, 0};
+        combine.p1 = EffectBuildContext::uv_map(region, mask.region);
+        combine.p2 = EffectBuildContext::uv_map(region, blurred.region);
+        combine.color = e.color(kTint);
+        if (ctx.fullscreen_pass("halation", PassStage::Effects, out.texture, ShaderId::effects_halation_combine_frag,
+            {PassTexture{input.texture, {}, CommonSampler::LinearBorder},
+             PassTexture{mask.texture, {}, CommonSampler::LinearBorder},
+             PassTexture{blurred.texture, {}, CommonSampler::LinearBorder}}, &combine, sizeof(combine)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        return OkStatus;
+    }
+};
+
 // -----------------------------------------------------------------------------
 // Raios
 // -----------------------------------------------------------------------------
@@ -391,6 +464,7 @@ public:
 
 void register_light_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<DeepGlow>());
+    (void)r.add(std::make_unique<Halation>());
     (void)r.add(std::make_unique<Rays>());
     (void)r.add(std::make_unique<LightSweep>());
     (void)r.add(std::make_unique<LensBlur>());

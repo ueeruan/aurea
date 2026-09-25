@@ -2,10 +2,26 @@
 #include "aurea/core/Log.hpp"
 
 #include <cstring>
+#include <filesystem>
+#include <chrono>
 
 namespace aurea {
 
+std::string VideoSourceFactory::cache_identity(const char* sourcePath) {
+    if (!sourcePath || !*sourcePath) return {};
+    if (std::strncmp(sourcePath, "file://", 7) == 0) sourcePath += 7;
+    std::error_code error;
+    const auto path = std::filesystem::u8path(sourcePath);
+    const auto size = std::filesystem::file_size(path, error);
+    if (error) return {};
+    const auto time = std::filesystem::last_write_time(path, error);
+    if (error) return {};
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(time.time_since_epoch()).count();
+    return std::to_string(size) + ':' + std::to_string(static_cast<i64>(ns));
+}
+
 MediaManager::~MediaManager() {
+    proxies_.stop();
     close_all();
     {
         std::lock_guard<std::mutex> lock(retireMutex_);
@@ -79,8 +95,21 @@ void MediaManager::set_memory(MemoryManager* memory) noexcept {
 }
 
 VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asset& asset,
-                                      u64 frameNumber) {
+                                      u64 frameNumber, bool finalQuality) {
+    auto proxy = finalQuality ? std::shared_ptr<const PreviewProxy>{} : proxies_.request(asset);
+    Asset decodeAsset = asset;
+    if (proxy) {
+        decodeAsset.sourcePath = proxy->path;
+        decodeAsset.video.width = proxy->width; decodeAsset.video.height = proxy->height;
+        decodeAsset.profile.bitDepth = 8;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
+    for (usize i = 0; i < entries_.size();) {
+        if (entries_[i].layer == layer && (entries_[i].asset != assetId || entries_[i].path != decodeAsset.sourcePath)) {
+            retire_locked(std::move(entries_[i]));
+            entries_[i] = std::move(entries_.back()); entries_.pop_back();
+        } else ++i;
+    }
     for (Entry& e : entries_) {
         if (e.layer == layer && e.asset == assetId) {
             e.lastUsedFrame = frameNumber;
@@ -111,14 +140,19 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     Entry e;
     e.layer = layer;
     e.asset = assetId;
+    e.path = decodeAsset.sourcePath;
     e.lastUsedFrame = frameNumber;
     e.opening = std::make_unique<Opening>();
     auto* pending = e.opening.get();
     auto* factory = factory_;
     auto ready = readyFn_;
     auto* context = readyCtx_;
-    pending->worker = std::thread([pending, factory, asset, ready, context] {
-        pending->decoder = factory->open_video(asset, MediaPriority::Preview);
+    pending->worker = std::thread([pending, factory, asset, decodeAsset, proxy, ready, context] {
+        pending->decoder = factory->open_video(decodeAsset, MediaPriority::Preview);
+        if (proxy) {
+            pending->decoder = proxy_decoder(std::move(pending->decoder), proxy);
+            if (!pending->decoder) pending->decoder = factory->open_video(asset, MediaPriority::Preview);
+        }
         pending->ready.store(true, std::memory_order_release);
         if (ready) ready(context);
     });

@@ -591,6 +591,18 @@ struct Layer {
         return static_cast<f64>(offset.value) + elapsed * static_cast<f64>(speed);
     }
 
+    /// Source distance traversed during a centered shutter, in composition
+    /// frames. Sampling both halves preserves motion at a direction reversal;
+    /// a frozen remap produces zero regardless of the clip's stored speed.
+    [[nodiscard]] f64 source_shutter_travel(f64 timelineTime, f64 shutterFrames) const noexcept {
+        if (!std::isfinite(timelineTime) || !std::isfinite(shutterFrames) || shutterFrames <= 0.0) return 0.0;
+        const f64 center = source_frame_f(timelineTime);
+        const f64 before = source_frame_f(timelineTime - shutterFrames * 0.5);
+        const f64 after = source_frame_f(timelineTime + shutterFrames * 0.5);
+        const f64 travel = std::fabs(center - before) + std::fabs(after - center);
+        return std::isfinite(travel) ? travel : 0.0;
+    }
+
     /// Tempo dentro da layer (0 = primeiro frame dela).
     [[nodiscard]] FrameIndex local_time(FrameIndex timelineTime) const noexcept {
         return FrameIndex{timelineTime.value - start.value + offset.value};

@@ -322,3 +322,26 @@ AUREA_TEST(Text, PresetsAreDataAndCharOffsetRolls) {
     // A→B, z→a (volta), 9→0, espaço e pontuação ficam.
     AUREA_CHECK_EQ(text::apply_char_offset(t, tr, 0, 30.0), std::string("Ba0 !"));
 }
+
+AUREA_TEST(Text, TypewriterUsesUnicodeCharactersAndKeepsInitialFrameHidden) {
+    auto check = [](const std::string& content, u32 count, i64 duration) {
+        TextData t; t.content = content;
+        TrackSet tracks;
+        AUREA_CHECK(text::apply_text_preset(8, t, tracks, 10, duration, 30.0));
+        std::vector<text::GlyphUnits> units(count);
+        for (u32 c = 0; c < count; ++c) units[c].charIndex = c;
+        std::vector<text::GlyphAnim> output;
+        const i64 frames[] = {duration, 0, duration / 2, 0, duration};
+        for (i64 frame : frames) {
+            text::evaluate_text_animators(t, tracks, 10 + frame, 30.0, units, count, 1, 1, output);
+            u32 visible = 0;
+            for (const auto& glyph : output) {
+                AUREA_CHECK(glyph.opacity < 0.0001f || glyph.opacity > 0.9999f);
+                visible += glyph.opacity > 0.5f;
+            }
+            AUREA_CHECK_EQ(visible, static_cast<u32>(frame * count / duration));
+        }
+    };
+    check("A\xC3\xA9\xE4\xB8\xAD\xF0\x9F\x98\x80", 4, 12);
+    check("abcdefghij", 10, 2);
+}

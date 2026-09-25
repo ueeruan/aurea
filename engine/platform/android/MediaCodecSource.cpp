@@ -969,6 +969,16 @@ private:
 // =============================================================================
 // Fábrica
 // =============================================================================
+std::string MediaCodecFactory::cache_identity(const char* sourcePath) {
+    SourceFd fd;
+    if (!open_source(sourcePath, opener_, openerCtx_, fd)) return {};
+    struct stat st{};
+    if (::fstat(fd.fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) return {};
+    return std::to_string(static_cast<i64>(st.st_dev)) + ':' + std::to_string(static_cast<i64>(st.st_ino)) + ':' +
+        std::to_string(static_cast<i64>(st.st_size)) + ':' + std::to_string(static_cast<i64>(st.st_mtim.tv_sec)) + ':' +
+        std::to_string(static_cast<i64>(st.st_mtim.tv_nsec)) + ':' + std::to_string(fd.offset) + ':' + std::to_string(fd.length);
+}
+
 bool MediaCodecFactory::probe(const char* sourcePath, MediaProbe& out) {
     SourceFd fd;
     if (!open_source(sourcePath, opener_, openerCtx_, fd)) {

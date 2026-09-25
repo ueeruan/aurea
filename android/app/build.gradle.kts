@@ -90,6 +90,7 @@ android {
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+                    "-DAUREA_GPU_GLES=ON",
                 )
             }
         }

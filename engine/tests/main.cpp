@@ -2,12 +2,13 @@
 #include "aurea/core/Log.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 
 int main(int argc, char** argv) {
     // Silencia o log do motor durante os testes: os avisos esperados (efeito
     // desconhecido, orçamento excedido) são parte do que está sendo testado e
     // poluiriam a saída. O teste verifica o COMPORTAMENTO, não o log.
-    ::aurea::set_min_log_level(::aurea::LogLevel::Fatal);
+    ::aurea::set_min_log_level(std::getenv("AUREA_TEST_VERBOSE") ? ::aurea::LogLevel::Info : ::aurea::LogLevel::Fatal);
     // Sem buffer: se um teste derrubar o processo, a última linha na saída é
     // a do teste que caiu (com buffer, ficaria para trás e apontaria o errado).
     std::setvbuf(stdout, nullptr, _IONBF, 0);

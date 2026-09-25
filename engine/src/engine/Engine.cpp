@@ -190,7 +190,7 @@ GpuCapabilities device_gpu_from(const GPUCapabilities& g) noexcept {
     p.driverVersion = g.driverInfo;
     p.vendorId      = g.vendorId;
     p.deviceId      = g.deviceId;
-    // Vulkan e Metal obrigam a existir estágio de compute; OpenGL ES não.
+    // ES exposes compute starting at 3.1; older ES versions do not.
     p.vulkan        = g.apiName == "Vulkan";
     p.metal         = g.apiName == "Metal";
     p.openGLES      = g.apiName == "OpenGL ES";
@@ -199,7 +199,8 @@ GpuCapabilities device_gpu_from(const GPUCapabilities& g) noexcept {
 
     p.maxTextureSize            = g.maxTexture2D;
     p.maxComputeWorkgroupSize   = g.maxComputeWorkGroupInvocations;
-    p.supportsCompute           = p.vulkan || p.metal;
+    p.supportsCompute           = p.vulkan || p.metal ||
+        (p.openGLES && (g.apiMajor > 3 || (g.apiMajor == 3 && g.apiMinor >= 1)));
 
     p.supportsFloat16           = g.fp16Arithmetic;
     p.supportsFloat16Storage    = g.fp16Storage;
@@ -281,6 +282,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         } else if (const Status r = renderer_.initialize(*gpu_, effectRegistry_); !r.ok()) {
             set_last_error(r, "inicializar renderer");
             AUREA_LOG_ERROR("renderer nao inicializou: %s", r.message().data());
+            renderer_.shutdown();
             gpu_->shutdown();
             gpu_.reset();
         } else {

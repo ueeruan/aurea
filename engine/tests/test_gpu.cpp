@@ -20,7 +20,12 @@
 
 #include "ImageIO.hpp"
 #include "SyntheticVideo.hpp"
+#if defined(AUREA_TEST_GLES)
+#include "GlesBackend.hpp"
+namespace aurea { namespace vk = gles; }
+#else
 #include "VulkanBackend.hpp"
+#endif
 
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectGraph.hpp"
@@ -131,7 +136,12 @@ struct Gpu {
         cfg.conservativeVulkan = conservative;
         cfg.enableValidation = true;   // com a camada instalada, erros de uso aparecem no log
         cfg.framesInFlight = 2;
-        if (!backend.initialize(cfg).ok()) return;
+        const Status initialized = backend.initialize(cfg);
+        if (!initialized.ok()) {
+            std::printf("backend initialization failed: %s (%.*s) ", to_string(initialized.code()).data(),
+                        static_cast<int>(initialized.detail().size()), initialized.detail().data());
+            return;
+        }
         register_builtin_effects(effects);
         ok = renderer.initialize(backend, effects).ok();
     }
@@ -402,11 +412,18 @@ AUREA_TEST(Gpu, Vulkan10CompatibilityRendersPixels) {
 AUREA_TEST(Gpu, BackendReportsRealCapabilities) {
     AUREA_REQUIRE_GPU();
     const GPUCapabilities& c = gpu().backend.capabilities();
+#if defined(AUREA_TEST_GLES)
+    AUREA_CHECK(c.apiMajor >= 3 && (c.apiMajor > 3 || c.apiMinor >= 1));
+#else
     AUREA_CHECK(c.apiMajor == 1 && c.apiMinor >= 1);
+#endif
     AUREA_CHECK(!c.deviceName.empty());
     AUREA_CHECK(c.maxTexture2D >= 4096);
     AUREA_CHECK(c.rgba16fRenderable && c.rgba16fFilterable);
+#if !defined(AUREA_TEST_GLES)
+    // Vulkan exposes heap sizes; core OpenGL ES does not.
     AUREA_CHECK(!c.heaps.empty());
+#endif
     AUREA_CHECK(gpu().renderer.pipelines_prewarmed() >= 15);
     std::printf("(%s) ", c.summary().c_str());
 }

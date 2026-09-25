@@ -396,6 +396,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     echoType_ = effects.find_key(effect_keys::kEchoTrail);
     rgbTimeType_ = effects.find_key(effect_keys::kTimeWarpRgb);
     if (const Status s = shaders_.initialize(backend); !s.ok()) {
+        shaders_.shutdown();
         backend_ = nullptr;
         return s;
     }

@@ -19,7 +19,12 @@
 #if defined(AUREA_TEST_VULKAN)
 
 #include "SyntheticVideo.hpp"
+#if defined(AUREA_TEST_GLES)
+#include "GlesBackend.hpp"
+namespace aurea { namespace vk = gles; }
+#else
 #include "VulkanBackend.hpp"
+#endif
 
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectRegistry.hpp"

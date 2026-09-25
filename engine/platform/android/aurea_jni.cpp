@@ -23,6 +23,9 @@
 #include "MediaCodecExport.hpp"
 #include "MediaCodecSource.hpp"
 #include "VulkanBackend.hpp"
+#if defined(AUREA_GPU_GLES)
+#include "GlesBackend.hpp"
+#endif
 
 #include "aurea/Engine.hpp"
 #include "aurea/bridge/BridgePods.hpp"
@@ -343,7 +346,18 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     }
 
     EngineConfig config;
+#if defined(AUREA_GPU_GLES)
+    // A debug-only override exercises the real fallback through the app's UI,
+    // decoder, surface lifecycle and MediaCodec export, without changing release preferences.
+    char selectedBackend[PROP_VALUE_MAX]{};
+    if (debug == JNI_TRUE) __system_property_get("debug.aurea.gpu", selectedBackend);
+    const bool forceGles = std::strcmp(selectedBackend, "gles") == 0;
+    config.backend = forceGles ? static_cast<GPUBackend*>(new (std::nothrow) gles::Backend())
+                               : static_cast<GPUBackend*>(new (std::nothrow) vk::Backend());
+#else
     config.backend = new (std::nothrow) vk::Backend();
+#endif
+    if (!config.backend) { c->startupError = "Sem memoria para inicializar a GPU"; return JNI_FALSE; }
     config.backendConfig.enableValidation = debug == JNI_TRUE;
     config.backendConfig.enableGpuTimers = true;
     config.cacheDirectory = to_string(env, cacheDir);
@@ -364,6 +378,26 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
         return JNI_FALSE;
     }
     GPUBackend* gpu = c->engine.gpu();
+#if defined(AUREA_GPU_GLES)
+    if (!gpu && !forceGles) {
+        const auto failed = c->engine.read_status();
+        const std::string vulkanError = std::string(to_string(failed.lastError)) + ": " + failed.lastErrorDetail;
+        AUREA_LOG_WARN("Vulkan indisponivel (%s); tentando OpenGL ES 3.1", vulkanError.c_str());
+        c->engine.shutdown();
+        config.backend = new (std::nothrow) gles::Backend();
+        if (!config.backend) { c->startupError = "Sem memoria para inicializar OpenGL ES"; return JNI_FALSE; }
+        const Status fallback = c->engine.initialize(config);
+        gpu = c->engine.gpu();
+        if (!fallback.ok() || !gpu) {
+            const auto failedGles = c->engine.read_status();
+            c->startupError = "Vulkan: " + vulkanError + "; OpenGL ES: " +
+                (fallback.ok() ? std::string(to_string(failedGles.lastError)) + ": " + failedGles.lastErrorDetail
+                               : std::string(fallback.message()) + ": " + std::string(fallback.detail()));
+            c->engine.shutdown();
+            return JNI_FALSE;
+        }
+    }
+#endif
     if (!gpu) {
         const auto status = c->engine.read_status();
         c->startupError = std::string(to_string(status.lastError)) + ": " + status.lastErrorDetail;

@@ -1545,8 +1545,12 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
         n->start = l->start;
         n->end = l->end;
         n->transform.anchor = Vec3{50, 50, 0};
-        Track& px = n->tracks.get_or_create(TrackProperty::PositionX);
-        Track& py = n->tracks.get_or_create(TrackProperty::PositionY);
+        // Finish insertions before retaining references: another track may
+        // grow the vector (especially after undo/copy of a compact TrackSet).
+        (void)n->tracks.get_or_create(TrackProperty::PositionX);
+        (void)n->tracks.get_or_create(TrackProperty::PositionY);
+        Track& px = *n->tracks.find(TrackProperty::PositionX);
+        Track& py = *n->tracks.find(TrackProperty::PositionY);
         for (usize i = 0; i < track.size(); ++i) {
             const FrameIndex f{start + static_cast<i64>(i)};
             const Vec4 w = layer_world_matrix(*comp, *l, f) * Vec4{track[i].x, track[i].y, 0, 1};
@@ -1566,8 +1570,12 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
     const f32 kx = l->transform.scale.x, ky = l->transform.scale.y;
     Track base_x = l->tracks.find(TrackProperty::PositionX) ? *l->tracks.find(TrackProperty::PositionX) : Track{};
     Track base_y = l->tracks.find(TrackProperty::PositionY) ? *l->tracks.find(TrackProperty::PositionY) : Track{};
-    Track& px = l->tracks.get_or_create(TrackProperty::PositionX);
-    Track& py = l->tracks.get_or_create(TrackProperty::PositionY);
+    // Finish insertions before retaining references: another track may
+    // grow the vector (especially after undo/copy of a compact TrackSet).
+    (void)l->tracks.get_or_create(TrackProperty::PositionX);
+    (void)l->tracks.get_or_create(TrackProperty::PositionY);
+    Track& px = *l->tracks.find(TrackProperty::PositionX);
+    Track& py = *l->tracks.find(TrackProperty::PositionY);
     for (usize i = 0; i < track.size(); ++i) {
         const FrameIndex f{start + static_cast<i64>(i)};
         const FrameIndex local = l->local_time(f);
@@ -2142,12 +2150,16 @@ Result<u64> Engine::apply_camera_track() noexcept {
     cam->camera.nearPlane = std::max(1.0f, dist * 0.01f);
     cam->transform.anchor = Vec3{0, 0, 0};
     cam->transform.scale = Vec3{1, 1, 1};
-    Track& px = cam->tracks.get_or_create(TrackProperty::PositionX);
-    Track& py = cam->tracks.get_or_create(TrackProperty::PositionY);
-    Track& pz = cam->tracks.get_or_create(TrackProperty::PositionZ);
-    Track& rx = cam->tracks.get_or_create(TrackProperty::RotationX);
-    Track& ry = cam->tracks.get_or_create(TrackProperty::RotationY);
-    Track& rz = cam->tracks.get_or_create(TrackProperty::RotationZ);
+    for (TrackProperty property : {TrackProperty::PositionX, TrackProperty::PositionY, TrackProperty::PositionZ,
+                                   TrackProperty::RotationX, TrackProperty::RotationY, TrackProperty::RotationZ}) {
+        (void)cam->tracks.get_or_create(property);
+    }
+    Track& px = *cam->tracks.find(TrackProperty::PositionX);
+    Track& py = *cam->tracks.find(TrackProperty::PositionY);
+    Track& pz = *cam->tracks.find(TrackProperty::PositionZ);
+    Track& rx = *cam->tracks.find(TrackProperty::RotationX);
+    Track& ry = *cam->tracks.find(TrackProperty::RotationY);
+    Track& rz = *cam->tracks.find(TrackProperty::RotationZ);
     Vec3 prevE{0, 0, 0};
     bool havePrev = false;
     for (u32 i = 0; i < s.poses.size(); ++i) {
@@ -7367,11 +7379,16 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 // animados: todas as trilhas de posição recebem o vetor inteiro,
                 // com a curva da chave de origem.
                 const bool useZ = now3d || std::any_of(posKeys.begin(), posKeys.end(), [](const PosKey& q) { return std::fabs(q.p.z) > 1e-4f; });
-                Track& X = l->tracks.get_or_create(TrackProperty::PositionX);
-                Track& Y = l->tracks.get_or_create(TrackProperty::PositionY);
+                (void)l->tracks.get_or_create(TrackProperty::PositionX);
+                (void)l->tracks.get_or_create(TrackProperty::PositionY);
+                if (useZ) (void)l->tracks.get_or_create(TrackProperty::PositionZ);
+                // Adding Y or Z may reallocate every track. Acquire references
+                // only after all required properties exist.
+                Track& X = *l->tracks.find(TrackProperty::PositionX);
+                Track& Y = *l->tracks.find(TrackProperty::PositionY);
+                Track* Z = useZ ? l->tracks.find(TrackProperty::PositionZ) : nullptr;
                 X.clear();
                 Y.clear();
-                Track* Z = useZ ? &l->tracks.get_or_create(TrackProperty::PositionZ) : nullptr;
                 if (Z) Z->clear();
                 for (const PosKey& q : posKeys) {
                     auto put = [&](Track& tr, f32 v) {

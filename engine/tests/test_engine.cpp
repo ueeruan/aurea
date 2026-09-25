@@ -1389,3 +1389,60 @@ AUREA_TEST(Engine, EffectSpecsCoverTheWholeCatalog) {
     AUREA_CHECK_EQ(withParams, count);
     e.shutdown();
 }
+
+AUREA_TEST(Engine, ParentingAnimated3DLayerSurvivesTrackStorageGrowth) {
+    for (const u32 initialTracks : {1u, 15u, 16u}) {
+        Engine e;
+        AUREA_CHECK(e.initialize(headless_config()).ok());
+        AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+        const auto parentId = e.add_null(true);
+        const auto childId = e.add_null(true);
+        AUREA_CHECK(parentId.ok() && childId.ok());
+        Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        Layer* parent = comp->layer(LayerId::unpack(*parentId));
+        Layer* child = comp->layer(LayerId::unpack(*childId));
+        parent->transform.position = Vec3{300, 200, 70};
+        parent->transform.rotation.z = 30;
+        parent->transform.scale = Vec3{2, 2, 2};
+        parent->transform.anchor = Vec3{0, 0, 0};
+        child->transform.position = Vec3{500, 400, 90};
+        child->transform.anchor = Vec3{0, 0, 0};
+        Track& x = child->tracks.get_or_create(TrackProperty::PositionX);
+        x.set(FrameIndex{0}, 500.0f);
+        x.set(FrameIndex{30}, 800.0f);
+        for (u32 i = 1; i < initialTracks; ++i) {
+            child->tracks.set_static(TrackProperty::EffectParam, static_cast<f32>(i), i, 0);
+        }
+        if (initialTracks == 1) {
+            // History copies need not retain the default 16-track spare capacity.
+            TrackSet copied = child->tracks;
+            child->tracks = std::move(copied);
+        }
+        Vec4 expected[31];
+        for (i64 frame = 0; frame <= 30; ++frame) {
+            expected[frame] = layer_world_3d(*comp, *child, FrameIndex{frame}) * Vec4{0, 0, 0, 1};
+        }
+        Command command;
+        command.type = CommandType::LayerSetParent;
+        command.layer_parent.layer = LayerId::unpack(*childId);
+        command.layer_parent.parent = LayerId::unpack(*parentId);
+        AUREA_CHECK(e.apply_command(command).ok());
+        AUREA_CHECK_EQ(child->tracks.size(), initialTracks + 2);
+        for (const TrackProperty property : {TrackProperty::PositionX, TrackProperty::PositionY, TrackProperty::PositionZ}) {
+            const Track* track = child->tracks.find(property);
+            AUREA_CHECK(track != nullptr);
+            AUREA_CHECK_EQ(track->keys.size(), static_cast<usize>(2));
+        }
+        for (i64 frame = 30; frame >= 0; --frame) {
+            const Vec4 actual = layer_world_3d(*comp, *child, FrameIndex{frame}) * Vec4{0, 0, 0, 1};
+            AUREA_CHECK_NEAR(actual.x, expected[frame].x, 0.002f);
+            AUREA_CHECK_NEAR(actual.y, expected[frame].y, 0.002f);
+            AUREA_CHECK_NEAR(actual.z, expected[frame].z, 0.002f);
+        }
+        for (u32 i = 1; i < initialTracks; ++i) {
+            AUREA_CHECK_NEAR(child->tracks.find(TrackProperty::EffectParam, i, 0)->staticValue,
+                             static_cast<f32>(i), 1e-6);
+        }
+        e.shutdown();
+    }
+}

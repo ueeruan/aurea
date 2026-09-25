@@ -5,6 +5,7 @@
 #include "aurea/core/Time.hpp"
 #include "aurea/expr/Expression.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -208,18 +209,25 @@ void read_track(ByteReader& r, Track& t) {
         k.easingPreset = r.u16v();
         t.keys.push_back(k);
     }
-    // Reordena por segurança: um arquivo corrompido com keyframes fora de ordem
-    // faria a busca binária devolver lixo. O custo de ordenar na leitura é
-    // irrelevante comparado a abrir com animação errada.
-    for (usize i = 1; i < t.keys.size(); ++i) {
-        Keyframe key = t.keys[i];
-        usize j = i;
-        while (j > 0 && t.keys[j - 1].time.value > key.time.value) {
-            t.keys[j] = t.keys[j - 1];
-            --j;
-        }
-        t.keys[j] = key;
+    // Projetos antigos podem trazer tempos repetidos ou fora de ordem.
+    // O último registro vence, como na importação de presets: preservamos o
+    // keyframe completo (valor, curva e tangentes), não só o valor visível.
+    // Evita o caso em que find_exact edita uma duplicata e sample lê outra.
+    const auto byTime = [](const Keyframe& a, const Keyframe& b) { return a.time < b.time; };
+    if (!std::is_sorted(t.keys.begin(), t.keys.end(), byTime)) {
+        std::stable_sort(t.keys.begin(), t.keys.end(), byTime);
     }
+    usize countUnique = 0;
+    for (usize i = 0; i < t.keys.size(); ++i) {
+        if (countUnique > 0 && t.keys[countUnique - 1].time == t.keys[i].time) {
+            t.keys[countUnique - 1] = t.keys[i];
+        } else {
+            if (countUnique != i) t.keys[countUnique] = t.keys[i];
+            ++countUnique;
+        }
+    }
+    t.keys.resize(countUnique);
+    t.lastIndex = 0;
 }
 
 // Efeito no formato da API nova: o tipo é o id estável (hash da chave), e cada

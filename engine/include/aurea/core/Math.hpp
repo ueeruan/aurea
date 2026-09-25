@@ -379,41 +379,42 @@ struct Color {
 // Interpolação de curva — núcleo do avaliador de keyframes.
 // -----------------------------------------------------------------------------
 
-/// Bezier cúbico na forma de cubic-bezier(x1,y1,x2,y2) da UI (igual ao CSS e
-/// igual ao gráfico do Alight Motion). Resolve x→t por Newton com fallback
-/// para bisseção: Newton converge em 2–3 iterações no caso comum e a bisseção
-/// garante que uma curva mal formada (x1/x2 fora de [0,1]) ainda resolva.
+/// Bezier cúbico na forma de cubic-bezier(x1,y1,x2,y2) da UI.
+/// Newton limitado ao intervalo da raiz, com bisseção quando a tangente é
+/// horizontal ou o passo sair do intervalo. A convergência é medida no
+/// parâmetro, não só em x: uma tangente horizontal pode ter erro mínimo em x
+/// e ainda estar longe do valor animado correto.
 [[nodiscard]] inline f32 cubic_bezier(f32 x1, f32 y1, f32 x2, f32 y2, f32 x) noexcept {
     if (x <= 0.0f) return 0.0f;
     if (x >= 1.0f) return 1.0f;
 
-    auto sample = [&](f32 t, f32 a1, f32 a2) noexcept {
-        const f32 mt = 1.0f - t;
-        return 3.0f*mt*mt*t*a1 + 3.0f*mt*t*t*a2 + t*t*t;
+    auto sample = [](f64 t, f64 a1, f64 a2) noexcept {
+        const f64 mt = 1.0 - t;
+        return 3.0*mt*mt*t*a1 + 3.0*mt*t*t*a2 + t*t*t;
     };
-    auto slope = [&](f32 t, f32 a1, f32 a2) noexcept {
-        const f32 mt = 1.0f - t;
-        return 3.0f*mt*mt*a1 + 6.0f*mt*t*(a2 - a1) + 3.0f*t*t*(1.0f - a2);
+    auto slope = [](f64 t, f64 a1, f64 a2) noexcept {
+        const f64 mt = 1.0 - t;
+        return 3.0*mt*mt*a1 + 6.0*mt*t*(a2 - a1) + 3.0*t*t*(1.0 - a2);
     };
 
-    f32 t = x;
-    for (int i = 0; i < 4; ++i) {
-        const f32 err = sample(t, x1, x2) - x;
-        if (std::abs(err) < 1e-5f) return sample(t, y1, y2);
-        const f32 d = slope(t, x1, x2);
-        if (std::abs(d) < 1e-6f) break;
-        t -= err / d;
+    f64 lo = 0.0, hi = 1.0, t = x;
+    for (int i = 0; i < 28; ++i) {
+        const f64 err = sample(t, x1, x2) - static_cast<f64>(x);
+        if (err == 0.0) break;
+        if (err < 0.0) lo = t; else hi = t;
+        const f64 d = slope(t, x1, x2);
+        f64 next = (lo + hi) * 0.5;
+        if (std::abs(d) > 1e-12) {
+            const f64 newton = t - err / d;
+            if (newton > lo && newton < hi) next = newton;
+        }
+        if (std::abs(next - t) < 1e-9) {
+            t = next;
+            break;
+        }
+        t = next;
     }
-
-    f32 lo = 0.0f, hi = 1.0f;
-    t = x;
-    for (int i = 0; i < 16; ++i) {
-        const f32 v = sample(t, x1, x2);
-        if (std::abs(v - x) < 1e-5f) break;
-        if (v < x) lo = t; else hi = t;
-        t = (lo + hi) * 0.5f;
-    }
-    return sample(t, y1, y2);
+    return static_cast<f32>(sample(t, y1, y2));
 }
 
 /// Easing nomeado. `t` já vem normalizado em [0,1] (progresso entre dois

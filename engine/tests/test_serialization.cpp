@@ -974,3 +974,85 @@ AUREA_TEST(Serialization, WholeProjectWithEveryFeatureIsByteStable) {
     std::remove(a.c_str());
     std::remove(b.c_str());
 }
+
+AUREA_TEST(Serialization, DuplicateKeyframesKeepLastRecordAndRemainEditable) {
+    const std::string path = temp_path("duplicate_keys");
+    Project original = make_project();
+    Composition* comp = original.timeline().composition(original.timeline().root());
+    const LayerId layer = comp->add_layer(LayerKind::Null, "Legacy animation");
+    Track& track = comp->layer(layer)->tracks.get_or_create(TrackProperty::PositionX);
+    // Emulate a legacy/imported track. Presets already use last-record-wins.
+    track.keys = {
+        Keyframe{FrameIndex{40}, 40.0f}, Keyframe{FrameIndex{20}, -100.0f},
+        Keyframe{FrameIndex{0}, -50.0f}, Keyframe{FrameIndex{20}, -200.0f},
+        Keyframe{FrameIndex{0}, 0.0f}, Keyframe{FrameIndex{20}, 20.0f, Interpolation::Bezier}
+    };
+    track.keys.back().bx1 = 0.2f;
+    track.keys.back().by1 = -0.5f;
+    track.keys.back().bx2 = 0.8f;
+    track.keys.back().by2 = 1.5f;
+    track.keys.back().tangentIn = 7.0f;
+    track.keys.back().tangentOut = -9.0f;
+    track.keys.back().easingPreset = 23;
+    std::string error;
+    AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}, &error).ok());
+    Project loaded;
+    AUREA_CHECK(ProjectSerializer::load(loaded, path, LoadOptions{}, nullptr, &error).ok());
+    comp = loaded.timeline().composition(loaded.timeline().root());
+    Track* editable = comp->layer(comp->order().at(0))->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(editable != nullptr);
+    AUREA_CHECK_EQ(editable->keys.size(), static_cast<usize>(3));
+    AUREA_CHECK_EQ(editable->find_exact(FrameIndex{20}), static_cast<u32>(1));
+    AUREA_CHECK_EQ(editable->keys[1].interp, Interpolation::Bezier);
+    AUREA_CHECK_NEAR(editable->keys[1].by1, -0.5f, 1e-6);
+    AUREA_CHECK_NEAR(editable->keys[1].by2, 1.5f, 1e-6);
+    AUREA_CHECK_NEAR(editable->keys[1].tangentIn, 7.0f, 1e-6);
+    AUREA_CHECK_NEAR(editable->keys[1].tangentOut, -9.0f, 1e-6);
+    AUREA_CHECK_EQ(editable->keys[1].easingPreset, static_cast<u16>(23));
+    AUREA_CHECK_NEAR(editable->sample(FrameIndex{40}), 40.0f, 1e-6);
+    AUREA_CHECK_NEAR(editable->sample(FrameIndex{0}), 0.0f, 1e-6);
+    AUREA_CHECK_NEAR(editable->sample(FrameIndex{20}), 20.0f, 1e-6);
+    editable->set(FrameIndex{20}, 75.0f);
+    (void)editable->sample(FrameIndex{39}); // Change cached interval before seeking backwards.
+    AUREA_CHECK_NEAR(editable->sample(FrameIndex{20}), 75.0f, 1e-6);
+    AUREA_CHECK_EQ(editable->move(FrameIndex{20}, FrameIndex{10}), static_cast<u32>(1));
+    AUREA_CHECK_EQ(editable->find_exact(FrameIndex{20}), kInvalidIndex);
+    AUREA_CHECK_NEAR(editable->sample(FrameIndex{10}), 75.0f, 1e-6);
+    const Track expected = *editable;
+    AUREA_CHECK(ProjectSerializer::save(loaded, path, SaveOptions{}, &error).ok());
+    Project reopened;
+    AUREA_CHECK(ProjectSerializer::load(reopened, path, LoadOptions{}, nullptr, &error).ok());
+    comp = reopened.timeline().composition(reopened.timeline().root());
+    const Track* actual = comp->layer(comp->order().at(0))->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(actual != nullptr);
+    AUREA_CHECK_EQ(actual->keys.size(), expected.keys.size());
+    for (i64 i = 0; i < 61; ++i) {
+        const FrameIndex frame{(i * 43) % 61 - 10};
+        AUREA_CHECK_NEAR(actual->sample(frame), expected.sample(frame), 1e-6);
+    }
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Serialization, LargeReverseOrderedTrackLoadsInSortedOrder) {
+    const std::string path = temp_path("reverse_keys");
+    Project original = make_project();
+    Composition* comp = original.timeline().composition(original.timeline().root());
+    const LayerId layer = comp->add_layer(LayerKind::Null, "Imported tracking");
+    Track& track = comp->layer(layer)->tracks.get_or_create(TrackProperty::PositionX);
+    constexpr i64 count = 32768;
+    track.keys.reserve(count);
+    for (i64 i = count; i > 0; --i) track.keys.push_back(Keyframe{FrameIndex{i}, static_cast<f32>(i)});
+    std::string error;
+    AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}, &error).ok());
+    Project loaded;
+    AUREA_CHECK(ProjectSerializer::load(loaded, path, LoadOptions{}, nullptr, &error).ok());
+    comp = loaded.timeline().composition(loaded.timeline().root());
+    const Track* actual = comp->layer(comp->order().at(0))->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(actual != nullptr);
+    AUREA_CHECK_EQ(actual->keys.size(), static_cast<usize>(count));
+    for (i64 i = 0; i < count; ++i) {
+        AUREA_CHECK_EQ(actual->keys[static_cast<usize>(i)].time.value, i + 1);
+        AUREA_CHECK_NEAR(actual->keys[static_cast<usize>(i)].value, static_cast<f32>(i + 1), 1e-6);
+    }
+    std::remove(path.c_str());
+}

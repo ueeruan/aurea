@@ -319,6 +319,7 @@ class AureaEngine private constructor() {
 
     /** Composição atual: devolve o id (0 = nenhuma); `out` = [w, h, fps, duração, r, g, b, a]. */
     fun queryComposition(out: DoubleArray): Long = nativeQueryComposition(nativeHandle, out)
+    fun frameTimeNs(frame: Long): Long = nativeFrameTimeNs(nativeHandle, frame)
 
     /**
      * Medida do último quadro renderizado FORA da tela — é o que a captura de
@@ -686,6 +687,7 @@ class AureaEngine private constructor() {
     ): Int
     private external fun nativeQueryLayerDetail(handle: Long, layer: Long, out: ByteBuffer): Boolean
     private external fun nativeQueryComposition(handle: Long, out: DoubleArray): Long
+    private external fun nativeFrameTimeNs(handle: Long, frame: Long): Long
     private external fun nativeReadOffscreenMeasure(handle: Long, out: DoubleArray): Boolean
     private external fun nativeOffscreenTimers(handle: Long, on: Boolean): Boolean
     private external fun nativeQueryThumbnail(

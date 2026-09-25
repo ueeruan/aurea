@@ -1906,10 +1906,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Reprodução ------------------------------------------------------------
-    private fun frameToNs(frame: Int): Long {
-        val fps = if (project.fps > 0f) project.fps.toDouble() else 30.0
-        return (frame / fps * 1_000_000_000.0).toLong()
-    }
+    // Native composition FPS stays double; tick_at guarantees the same frame on return.
+    private fun frameToNs(frame: Int): Long = engine.frameTimeNs(frame.toLong())
 
     /**
      * O cursor só tem PISO. Ele pode ficar depois do fim da composição: a

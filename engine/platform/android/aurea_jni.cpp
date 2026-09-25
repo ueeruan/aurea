@@ -709,6 +709,19 @@ AUREA_JNI jboolean AUREA_FN(nativeOffscreenTimers)(JNIEnv*, jclass, jlong handle
     return JNI_TRUE;
 }
 
+// Use the authoritative double FPS and the shared frame round-trip correction.
+AUREA_JNI jlong AUREA_FN(nativeFrameTimeNs)(JNIEnv*, jclass, jlong handle, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    u64 id = 0;
+    u32 w = 0, h = 0;
+    f64 fps = 0.0;
+    i64 duration = 0;
+    f32 background[4]{};
+    if (!c->engine.query_composition(id, w, h, fps, duration, background)) return 0;
+    return static_cast<jlong>(tick_at(FrameIndex{static_cast<i64>(frame)}, fps).value);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeQueryComposition)(JNIEnv* env, jclass, jlong handle, jdoubleArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out || env->GetArrayLength(out) < 8) return 0;

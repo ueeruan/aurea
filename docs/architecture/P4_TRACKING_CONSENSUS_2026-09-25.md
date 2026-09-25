@@ -9,6 +9,15 @@ and confidence use that actual consensus rather than a peak per-frame count.
 Tripod RANSAC now checks cancellation inside its loop, matching the translating
 camera path's cancellation behavior.
 
+The moving-foreground regression also exposed incorrect camera model selection:
+foreground motion could make pure rotation appear to have translation through
+an otherwise degenerate essential matrix. The solver now compares accumulated
+rotation against entire tracks, requiring majority background consensus. It
+refines the rotation model's focal length beyond coarse search bins; otherwise
+the FOV error accumulated at image edges and rejected valid background points.
+Short adjacent-frame rotation fits alone cannot select the tripod model, since
+they also approximate a slowly travelling camera.
+
 Track presence now requires both coordinates to be finite. Malformed track row
 lengths and zero-sized images are rejected before solver indexing/algebra.
 

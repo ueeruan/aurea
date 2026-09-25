@@ -26,9 +26,10 @@ internal class RowModel(
     val instants: IntArray,
     /** Keyframes de cada instante (todas as trilhas que têm marca ali), paralelo a [instants]. */
     val keysAt: Array<List<KeyframeRow>>,
+    val track: TimelineTrack? = null,
 ) {
     /** Vídeo e imagem têm miniatura no motor; o resto é só a cor. */
-    val hasThumbs: Boolean get() = type == LayerType.Video || type == LayerType.Image
+    val hasThumbs: Boolean get() = track == null && (type == LayerType.Video || type == LayerType.Image)
 
     fun toLocal(timelineFrame: Int) = Keyframes.toLocal(timelineFrame, start, offset)
 }
@@ -126,4 +127,40 @@ private fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name)
         instants = times.toIntArray(),
         keysAt = groups.toTypedArray(),
     )
+}
+
+/** A real engine track, or a property section (property -1) without synthetic keys. */
+internal data class TimelineTrack(val property: Int, val effect: Int = -1, val param: Int = 0)
+internal fun expandedRows(base: List<RowModel>, expanded: Long?, keys: Map<Long, List<KeyframeRow>>, effects: List<Pair<Int, String>>): List<RowModel> {
+    if (expanded == null) return base
+    return base.flatMap { row ->
+        if (row.id != expanded) listOf(row) else {
+            val all = keys[row.id].orEmpty()
+            val tracks = all.groupBy { TimelineTrack(it.property, it.effectIndex, it.paramIndex) }
+            val lanes = arrayListOf(row)
+            fun lane(track: TimelineTrack, name: String, values: List<KeyframeRow> = emptyList()) {
+                val groups = values.groupBy { it.time }.toSortedMap()
+                lanes += RowModel(row.id, row.type, row.start, row.end, row.offset, row.visible, row.locked,
+                    values.isNotEmpty(), "  $name", row.label,
+                    groups.keys.map { Keyframes.toTimeline(it, row.start, row.offset) }.toIntArray(), groups.values.toTypedArray(), track)
+            }
+            lane(TimelineTrack(-1), "Transform")
+            effects.forEach { (id, name) -> lane(TimelineTrack(31, id, -1), name) }
+            tracks.entries.sortedWith(compareBy({ it.key.property }, { it.key.effect }, { it.key.param })).forEach { (track, values) ->
+                val names = listOf("Position X", "Position Y", "Position Z", "Scale X", "Scale Y", "Scale Z", "Rotation X", "Rotation Y", "Rotation Z", "Anchor X", "Anchor Y", "Anchor Z", "Opacity", "Skew X", "Skew Y")
+                val name = names.getOrNull(track.property) ?: when (track.property) {
+                    30 -> "Time remap"
+                    31 -> (effects.firstOrNull { it.first == track.effect }?.second ?: "Effect") + " · ${track.param + 1}"
+                    32 -> "Audio · ${track.param + 1}"
+                    33 -> "Text animation ${track.effect + 1} · ${track.param + 1}"
+                    34 -> "Vector · ${track.param + 1}"
+                    35 -> "Shape · ${track.param + 1}"
+                    36 -> "Particles · ${track.param + 1}"
+                    else -> "3D · ${track.property}"
+                }
+                lane(track, name, values)
+            }
+            lanes
+        }
+    }
 }

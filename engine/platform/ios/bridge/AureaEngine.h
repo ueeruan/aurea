@@ -411,11 +411,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setText:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)setText:(long long)layerId alignment:(uint32_t)alignment;
 - (void)setText:(long long)layerId strokeWidth:(float)width;
-- (void)addTextAnimator:(long long)layerId props:(uint32_t)props;
+- (NSInteger)addTextAnimator:(long long)layerId props:(uint32_t)props;
 - (void)removeTextAnimator:(long long)layerId index:(uint32_t)index;
 - (void)setTextAnimParam:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value;
 - (void)toggleTextAnimKey:(long long)layerId index:(uint32_t)index param:(uint32_t)param;
-- (void)applyTextPreset:(long long)layerId preset:(uint32_t)preset;
+- (BOOL)applyTextPreset:(long long)layerId preset:(uint32_t)preset;
 - (void)setShape:(long long)layerId param:(uint32_t)param value:(float)value;
 - (void)setShape:(long long)layerId fillR:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)setShape:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a;

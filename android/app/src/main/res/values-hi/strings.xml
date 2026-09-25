@@ -874,4 +874,6 @@
     <string name="ai_gerar_de_novo">Generate again</string>
     <string name="ai_geracoes_hoje">Today\'s generations: %1$d/%2$d</string>
     <string name="ai_limite_atingido">You\'ve used your %1$d AI generations for today. Come back tomorrow to generate more.</string>
+    <string name="editor_marca_anterior_segure_inicio">पिछला मार्कर; शुरुआत में जाने के लिए दबाए रखें</string>
+    <string name="editor_proxima_marca_segure_fim">अगला मार्कर; अंत में जाने के लिए दबाए रखें</string>
 </resources>

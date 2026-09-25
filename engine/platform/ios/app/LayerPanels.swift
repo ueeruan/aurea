@@ -1588,6 +1588,7 @@ struct TextAnimationPanel: View {
 struct TextAnimationSection: View {
     @EnvironmentObject private var model: AureaModel
     @State private var animators: [[Float]] = []
+    @State private var animationError = false
     private var id: Int64 { model.primarySelection ?? 0 }
     private let presets = ["Pop", "Pulo", "Deslizar", "Escala", "Surgir", "Desfoque", "Destaque palavra", "Karaokê", "Máquina de escrever", "Onda", "Elástico"]
     private func load() {
@@ -1601,14 +1602,25 @@ struct TextAnimationSection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(presets.enumerated()), id: \.offset) { n, title in
-                        NativePanelChip(title) { model.engine.applyTextPreset(id, preset: UInt32(n)); refresh() }
+                        NativePanelChip(title) {
+                            animationError = !model.engine.applyTextPreset(id, preset: UInt32(n))
+                            refresh()
+                        }
                     }
                 }.frame(height: 44)
             }
             ForEach(animators.indices, id: \.self) { index in NativeTextAnimatorCard(index: UInt32(index), values: animators[index]).padding(.top, 8) }
-            NativePanelChip(AureaText.t("panel_adicionar_animacao")) { model.engine.addTextAnimator(id, props: 8); refresh() }.padding(.top, 4)
+            NativePanelChip(AureaText.t("panel_adicionar_animacao")) {
+                animationError = model.engine.addTextAnimator(id, props: 8) < 0
+                refresh()
+            }.padding(.top, 4)
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
+            .alert("Animação de texto", isPresented: $animationError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Não foi possível criar a animação. Selecione uma camada de texto e verifique o limite de 64 animadores por camada.")
+            }
     }
 }
 

@@ -146,8 +146,8 @@ struct TransportView: View {
                 ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), width: side, height: 46, enabled: model.status.canUndo != 0) { model.undo() }
                 ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), width: side, height: 46, enabled: model.status.canRedo != 0) { model.redo() }
                 HStack(spacing: 0) {
-                    ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("editor_keyframe_anterior_segure_inicio"), height: 46,
-                                   onLongPress: { model.seek(toFrame: 0) }, action: { if !model.stepToKeyframe(-1) { model.step(-1) } })
+                    ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t(model.markerFrames.isEmpty ? "editor_keyframe_anterior_segure_inicio" : "editor_marca_anterior_segure_inicio"), height: 46,
+                                   onLongPress: { model.seek(toFrame: 0) }, action: { model.stepTransport(-1) })
                     ZStack(alignment: .bottomTrailing) {
                         ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
                                        description: AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" : (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")),
@@ -155,8 +155,8 @@ struct TransportView: View {
                                        onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
                         if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 8).padding(.bottom, 8).allowsHitTesting(false) }
                     }
-                    ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("editor_proximo_keyframe_segure_fim"), height: 46,
-                                   onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { if !model.stepToKeyframe(1) { model.step(1) } })
+                    ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t(model.markerFrames.isEmpty ? "editor_proximo_keyframe_segure_fim" : "editor_proxima_marca_segure_fim"), height: 46,
+                                   onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { model.stepTransport(1) })
                 }.frame(maxWidth: .infinity)
                 ShellBarButton(glyph: CupertinoGlyph.DocOnClipboard, description: AureaText.t("editor_copiar_colar"), width: side, height: 46) { if model.status.playing != 0 { model.playPause() }; shell.sheet = .copyPaste }
                 ShellBarButton(glyph: model.fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen,

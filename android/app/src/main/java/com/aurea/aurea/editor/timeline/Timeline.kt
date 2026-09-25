@@ -46,6 +46,7 @@ fun Timeline(
     compact: Boolean,
     onEmptyTap: () -> Unit,
     modifier: Modifier = Modifier,
+    onTrackTap: (layer: Long, property: Int, effect: Int) -> Unit = { _, _, _ -> },
     onKeyframeTap: (layer: Long, key: KeyframeRow) -> Unit = { _, _ -> },
 ) {
     val density = LocalDensity.current
@@ -62,6 +63,7 @@ fun Timeline(
         controller.metrics = metrics
         controller.onEmptyTap = onEmptyTap
         controller.onKeyframeTap = onKeyframeTap
+        controller.onTrackTap = onTrackTap
         controller.haptics = haptics
         state.compact = compact
     }

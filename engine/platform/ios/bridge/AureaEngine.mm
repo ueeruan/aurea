@@ -1379,8 +1379,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     }
 }
 
-- (void)addTextAnimator:(long long)layerId props:(uint32_t)props {
-    if (auto* e = self.engine) (void)e->add_text_animator(static_cast<aurea::u64>(layerId), props);
+- (NSInteger)addTextAnimator:(long long)layerId props:(uint32_t)props {
+    if (auto* e = self.engine) return e->add_text_animator(static_cast<aurea::u64>(layerId), props);
+    return -1;
 }
 
 - (void)removeTextAnimator:(long long)layerId index:(uint32_t)index {
@@ -1399,8 +1400,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     }
 }
 
-- (void)applyTextPreset:(long long)layerId preset:(uint32_t)preset {
-    if (auto* e = self.engine) (void)e->apply_text_preset(static_cast<aurea::u64>(layerId), preset);
+- (BOOL)applyTextPreset:(long long)layerId preset:(uint32_t)preset {
+    if (auto* e = self.engine) return e->apply_text_preset(static_cast<aurea::u64>(layerId), preset);
+    return NO;
 }
 
 - (void)setShape:(long long)layerId param:(uint32_t)param value:(float)value {

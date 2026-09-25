@@ -1723,4 +1723,6 @@
     <string name="ai_gerar_de_novo">Gerar de novo</string>
     <string name="ai_geracoes_hoje">Gerações de hoje: %1$d/%2$d</string>
     <string name="ai_limite_atingido">Você usou suas %1$d gerações de IA de hoje. Volte amanhã para gerar mais.</string>
+    <string name="editor_marca_anterior_segure_inicio">Marca anterior; segure para ir ao início</string>
+    <string name="editor_proxima_marca_segure_fim">Próxima marca; segure para ir ao fim</string>
 </resources>

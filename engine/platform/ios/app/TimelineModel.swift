@@ -225,9 +225,10 @@ struct TimelineRow {
     let instants: [Int32]
     /// Keyframes de cada instante (todas as trilhas que têm marca ali), paralelo a `instants`.
     let keysAt: [[KeyframeItem]]
+    var track: TimelineTrack? = nil
 
     /// Vídeo e imagem têm miniatura no motor; o resto é só a cor.
-    var hasThumbs: Bool { type == .video || type == .image }
+    var hasThumbs: Bool { track == nil && (type == .video || type == .image) }
 
     func toLocal(_ timelineFrame: Int32) -> Int32 {
         Keyframes.toLocal(timelineFrame, start, offset)
@@ -284,6 +285,19 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
                 visible == l.visible && locked == l.locked && animated == l.animated &&
                 name == l.name && row.label == l.label
         }
+    }
+
+    private var expandedRevision: UInt32 = .max
+    private var expandedID: Int64?
+    private var expandedEffects: [EffectItem] = []
+    private var expandedResult: [TimelineRow] = []
+
+    func expanded(_ base: [TimelineRow], id: Int64?, revision: UInt32, keys: [Int64: [KeyframeItem]], effects: () -> [EffectItem]) -> [TimelineRow] {
+        guard id != nil else { return base }
+        if expandedID == id && expandedRevision == revision { return expandedResult }
+        expandedID = id; expandedRevision = revision; expandedEffects = effects()
+        expandedResult = expandedTimelineRows(base, expanded: id, keys: keys, effects: expandedEffects)
+        return expandedResult
     }
 
     private var byId: [Int64: Cached] = [:]
@@ -459,5 +473,52 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
         }
         entries[layer] = e
         return e.count > 0 ? e : nil
+    }
+}
+
+struct TimelineTrack: Hashable {
+    let property: Int
+    var effect: UInt32 = .max
+    var param: UInt32 = 0
+}
+func expandedTimelineRows(_ base: [TimelineRow], expanded: Int64?, keys: [Int64: [KeyframeItem]], effects: [EffectItem]) -> [TimelineRow] {
+    guard let expanded else { return base }
+    return base.flatMap { row -> [TimelineRow] in
+        guard row.id == expanded else { return [row] }
+        var lanes = [row]
+        func lane(_ track: TimelineTrack, _ name: String, _ values: [KeyframeItem] = []) {
+            let groups = Dictionary(grouping: values, by: { $0.time })
+            let times = groups.keys.sorted()
+            lanes.append(TimelineRow(id: row.id, type: row.type, start: row.start, end: row.end, offset: row.offset,
+                visible: row.visible, locked: row.locked, animated: !values.isEmpty, name: "  " + name, label: row.label,
+                instants: times.map { Keyframes.toTimeline($0, row.start, row.offset) }, keysAt: times.map { groups[$0]! }, track: track))
+        }
+        lane(TimelineTrack(property: -1), AureaText.t("panel_transformar"))
+        for effect in effects { lane(TimelineTrack(property: 31, effect: effect.effectId, param: .max), effect.name) }
+        let tracks = Dictionary(grouping: keys[row.id] ?? [], by: { TimelineTrack(property: Int($0.property), effect: $0.effectIndex, param: $0.paramIndex) })
+        let ordered = tracks.keys.sorted {
+            if $0.property != $1.property { return $0.property < $1.property }
+            if $0.effect != $1.effect { return $0.effect < $1.effect }
+            return $0.param < $1.param
+        }
+        let names = ["Position X", "Position Y", "Position Z", "Scale X", "Scale Y", "Scale Z", "Rotation X", "Rotation Y", "Rotation Z", "Anchor X", "Anchor Y", "Anchor Z", "Opacity", "Skew X", "Skew Y"]
+        for track in ordered {
+            let name: String
+            if names.indices.contains(track.property) { name = names[track.property] }
+            else {
+                switch track.property {
+                case 30: name = "Time remap"
+                case 31: name = (effects.first { $0.effectId == track.effect }?.name ?? "Effect") + " · \(UInt64(track.param) + 1)"
+                case 32: name = "Audio · \(UInt64(track.param) + 1)"
+                case 33: name = "Text animation \(UInt64(track.effect) + 1) · \(UInt64(track.param) + 1)"
+                case 34: name = "Vector · \(UInt64(track.param) + 1)"
+                case 35: name = "Shape · \(UInt64(track.param) + 1)"
+                case 36: name = "Particles · \(UInt64(track.param) + 1)"
+                default: name = "3D · \(track.property)"
+                }
+            }
+            lane(track, name, tracks[track] ?? [])
+        }
+        return lanes
     }
 }

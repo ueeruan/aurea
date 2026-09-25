@@ -385,6 +385,19 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier) {
         },
         modifier = modifier.clipToBounds(),
         onKeyframeTap = { layer, key -> onKeyframeTapped(store, ui, layer, key) },
+        onTrackTap = { layer, property, _ ->
+            if (store.primary != layer) store.select(layer)
+            openPanel(store, ui, when (property) {
+                30 -> EditorPanel.Speed
+                31 -> EditorPanel.Effects
+                32 -> EditorPanel.Audio
+                33 -> EditorPanel.Text
+                34 -> EditorPanel.Vector
+                35 -> EditorPanel.Shape
+                36 -> EditorPanel.Particles
+                else -> EditorPanel.Transform
+            })
+        },
     )
 }
 

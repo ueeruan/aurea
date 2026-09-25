@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedback
@@ -53,11 +54,25 @@ internal class TimelineController(
     var metrics = TimelineMetrics(1f)
     var onEmptyTap: () -> Unit = {}
     var onKeyframeTap: (Long, KeyframeRow) -> Unit = { _, _ -> }
+    var onTrackTap: (Long, Int, Int) -> Unit = { _, _, _ -> }
+    val expandedLayer = mutableStateOf<Long?>(null)
     var haptics: HapticFeedback? = null
 
     /** Linhas derivadas do que o store leu; refeitas só as que mudaram (fase 8D). */
     private val rowCache = RowCache()
-    val rows = derivedStateOf { rowCache.build(store.layers, store.keyframes) }
+    private var expandedBase: List<RowModel>? = null
+    private var expandedRevision = -1
+    private var expandedId: Long? = null
+    private var expandedResult: List<RowModel> = emptyList()
+    val rows = derivedStateOf {
+        val base = rowCache.build(store.layers, store.keyframes)
+        val id = expandedLayer.value?.takeUnless { state.compact }
+        val revision = store.curveRevision
+        if (id == null) base else if (expandedBase === base && expandedId == id && expandedRevision == revision) expandedResult else {
+            expandedBase = base; expandedId = id; expandedRevision = revision
+            expandedRows(base, id, store.keyframes, store.timelineEffects(id)).also { expandedResult = it }
+        }
+    }
     // Seleção como LongArray ordenado: `Set<Long>.contains` encaixotaria o id a cada linha pintada.
     private val selectedIds = derivedStateOf { store.selection.toLongArray().also { it.sort() } }
     private val primaryId = derivedStateOf { store.primary ?: NO_ID }
@@ -198,12 +213,13 @@ internal class TimelineController(
         val top = m.rowsTop + i * m.row - scroll
         val x0 = xOf(r.start)
         val x1 = max(xOf(r.end), x0 + m.barMinWidth)
-        val handles = !state.compact && selectionSize() == 1 && isSelected(r.id) && !r.locked
+        val handles = r.track == null && !state.compact && selectionSize() == 1 && isSelected(r.id) && !r.locked
         hit.kind = RowHit.hit(
             m, p.x, p.y - top, state.width.toFloat(), x0, x1, handles, state.compact,
             keysEnabled = !multi(), instants = r.instants,
             view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,
         )
+        if (r.track != null && (hit.kind == HitKind.HEADER || hit.kind == HitKind.HEADER_EYE)) hit.kind = HitKind.BODY
         hit.row = r
         hit.rowIndex = i
         hit.keyIndex = hitOut[0]
@@ -337,7 +353,15 @@ internal class TimelineController(
                 store.selectNeighbor(-1)
             }
             HitKind.KEYFRAME -> if (r != null) keyframeTap(r, hit.keyIndex)
-            HitKind.HEADER, HitKind.BODY, HitKind.TRIM_START, HitKind.TRIM_END -> if (r != null) selectTap(r)
+            HitKind.HEADER -> if (r != null) {
+                if (!state.compact) {
+                    tick()
+                    expandedLayer.value = if (expandedLayer.value == r.id) null else r.id
+                } else selectTap(r)
+            }
+            HitKind.BODY, HitKind.TRIM_START, HitKind.TRIM_END -> if (r != null) {
+                if (r.track != null) onTrackTap(r.id, r.track.property, r.track.effect) else selectTap(r)
+            }
         }
     }
 
@@ -372,7 +396,7 @@ internal class TimelineController(
     private suspend fun AwaitPointerEventScope.longPress(hit: Hit, down: PointerInputChange, tracker: VelocityTracker) {
         val r = hit.row
         val kind = hit.kind
-        if (r == null || kind == HitKind.NONE || kind == HitKind.RULER || kind == HitKind.HEADER_EYE) {
+        if ((r?.track != null && kind != HitKind.KEYFRAME) || r == null || kind == HitKind.NONE || kind == HitKind.RULER || kind == HitKind.HEADER_EYE) {
             // Sem ação de toque longo aqui: o gesto segue como arrasto (scrub/rolagem).
             val slop = viewConfiguration.touchSlop
             while (true) {
@@ -453,7 +477,7 @@ internal class TimelineController(
             r != null && horizontal && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
             // Clipe escolhido anda no tempo; o não escolhido não se arrasta (o arrasto é scrub).
             // No compacto a barra ocupa a timeline: arrastar nela é scrub, mover é por toque longo (A.01).
-            r != null && horizontal && !state.compact && isSelected(r.id) && hit.kind == HitKind.BODY -> moveDrag(r, down)
+            r != null && r.track == null && horizontal && !state.compact && isSelected(r.id) && hit.kind == HitKind.BODY -> moveDrag(r, down)
             horizontal -> scrub(down.id, slopAt, tracker)
             !state.compact -> scroll(down.id, slopAt, tracker)
             else -> consumeUntilUp()
@@ -670,7 +694,7 @@ internal class TimelineController(
         val target = state.reorderTarget
         if (released && target >= 0 && target != index) {
             openUndo("reordenar")
-            store.reorderLayer(r.id, target)
+            store.reorderLayer(r.id, store.layers.indexOfFirst { it.id == rows.value.getOrNull(target)?.id }.coerceAtLeast(0))
             closeUndo()
             light()
         }

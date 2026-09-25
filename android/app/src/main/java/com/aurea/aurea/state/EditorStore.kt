@@ -1385,6 +1385,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         List(max(0, n)) { EffectParam.read(specRows, it, specBlob) }
     }
 
+    /** Read-only timeline expansion snapshot; does not select the layer or open its dock. */
+    fun timelineEffects(layerId: Long): List<Pair<Int, String>> {
+        val n = engine.queryLayerEffects(layerId, rowBuffer, 64, textBlob)
+        return List(max(0, n)) { LayerEffect.read(rowBuffer, it, textBlob).let { e -> e.effectId to e.name } }
+    }
+
     private fun refreshEffects() {
         val id = primary
         if (id == null) {
@@ -1946,6 +1952,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun step(frames: Int) = send { step(frames) }
+
+    /** Composition markers take precedence even when there is no next marker. */
+    fun stepTransport(direction: Int) {
+        val target = markerNavigationTarget(markers.frames, playhead, direction)
+        if (target != null) {
+            if (target != playhead) seek(target)
+        } else if (!stepToKeyframe(direction)) step(direction)
+    }
+
 
     /** Vai ao keyframe anterior/seguinte da camada principal (A.01: |◀ ▶|). */
     fun stepToKeyframe(direction: Int): Boolean {
@@ -2858,7 +2873,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun applyTextPreset(preset: Int) {
         val id = primary ?: return
-        engine.applyTextPreset(id, preset)
+        if (!engine.applyTextPreset(id, preset)) {
+            showToast(appText(R.string.msg_animacao_de_texto_so_vale_para))
+            return
+        }
+        refreshNow()
         refreshDetail()
     }
 
@@ -2984,7 +3003,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun addTextAnimator(props: Int) {
         val id = primary ?: return
-        engine.addTextAnimator(id, props)
+        if (engine.addTextAnimator(id, props) < 0) {
+            showToast("Não foi possível adicionar a animação de texto.")
+            return
+        }
+        refreshNow()
         refreshDetail()
     }
 

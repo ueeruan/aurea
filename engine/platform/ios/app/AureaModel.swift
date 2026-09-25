@@ -1844,6 +1844,16 @@ final class AureaModel: ObservableObject {
     }
 
     /// Vai ao keyframe anterior/seguinte da camada principal (A.01: |◀ ▶|).
+    func stepTransport(_ direction: Int) {
+        if !markerFrames.isEmpty {
+            let now = status.playhead
+            let target = direction > 0
+                ? markerFrames.filter { $0 > now }.min()
+                : markerFrames.filter { $0 < now }.max()
+            if let target { seek(toFrame: target) }
+        } else if !stepToKeyframe(direction) { step(direction) }
+    }
+
     func stepToKeyframe(_ direction: Int) -> Bool {
         guard let id = primarySelection, let d = engine.layerDetail(id),
               let start = (d["startFrame"] as? NSNumber)?.int64Value,

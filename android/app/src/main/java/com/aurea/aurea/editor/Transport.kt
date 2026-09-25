@@ -70,7 +70,7 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
         val side = ((maxWidth.value - 132f) / 6f).coerceIn(30f, 40f).dp
         val canUndo by remember { derivedStateOf { store.project.canUndo } }
         val canRedo by remember { derivedStateOf { store.project.canRedo } }
-        // |◀ ▶| andam por KEYFRAME quando a camada escolhida tem marcas.
+        // Composition markers precede layer keyframes.
         val hasMarks by remember {
             derivedStateOf { store.primary?.let { !store.keyframes[it].isNullOrEmpty() } ?: false }
         }
@@ -80,16 +80,16 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 ChromeButton(
                     CupertinoGlyph.BackwardEnd,
-                    if (hasMarks) stringResource(R.string.editor_keyframe_anterior_segure_inicio) else stringResource(R.string.editor_quadro_atras_segure_inicio),
-                    onClick = { if (!store.stepToKeyframe(-1)) store.step(-1) },
+                    if (store.markers.frames.isNotEmpty()) stringResource(R.string.editor_marca_anterior_segure_inicio) else if (hasMarks) stringResource(R.string.editor_keyframe_anterior_segure_inicio) else stringResource(R.string.editor_quadro_atras_segure_inicio),
+                    onClick = { store.stepTransport(-1) },
                     height = ShellDims.Transport,
                     onLongClick = { store.seek(0) },
                 )
                 PlayButton(store)
                 ChromeButton(
                     CupertinoGlyph.ForwardEnd,
-                    if (hasMarks) stringResource(R.string.editor_proximo_keyframe_segure_fim) else stringResource(R.string.editor_quadro_frente_segure_fim),
-                    onClick = { if (!store.stepToKeyframe(1)) store.step(1) },
+                    if (store.markers.frames.isNotEmpty()) stringResource(R.string.editor_proxima_marca_segure_fim) else if (hasMarks) stringResource(R.string.editor_proximo_keyframe_segure_fim) else stringResource(R.string.editor_quadro_frente_segure_fim),
+                    onClick = { store.stepTransport(1) },
                     height = ShellDims.Transport,
                     onLongClick = { store.seek(store.project.durationFrames) },
                 )

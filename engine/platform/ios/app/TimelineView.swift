@@ -78,6 +78,7 @@ struct TimelineView: View {
     @State private var thumbnails: [Int64: [MediaTile]] = [:]
     @State private var waves: [Int64: TimelineWaveStrip.Entry] = [:]
     @State private var markers: [Marker] = []
+    @State private var expandedLayer: Int64?
     @State private var rowCache = TimelineRowCache()
     @State private var thumbCache = TimelineThumbStrip()
     @State private var waveCache = TimelineWaveStrip(capacity: 2048)
@@ -108,7 +109,17 @@ struct TimelineView: View {
     private var viewFrame: Double { heldView ?? Double(clock.frame) }
     private var rows: [TimelineRow] {
         let all = rowCache.build(model.layers, model.keyframes)
-        return compact ? all.filter { $0.id == model.primarySelection } : all
+        return compact ? all.filter { $0.id == model.primarySelection } : rowCache.expanded(all, id: expandedLayer, revision: model.status.modelRevision, keys: model.keyframes, effects: {
+            guard let id = expandedLayer else { return [] }
+            return model.engine.effects(forLayer: id).map { row in
+                EffectItem(effectId: (row["effectId"] as? NSNumber)?.uint32Value ?? 0,
+                    typeId: (row["typeId"] as? NSNumber)?.uint32Value ?? 0,
+                    name: row["name"] as? String ?? "",
+                    enabled: row["enabled"] as? Bool ?? true,
+                    paramCount: (row["paramCount"] as? NSNumber)?.uint32Value ?? 0,
+                    known: row["known"] as? Bool ?? true)
+            }
+        })
     }
     private func x(_ frame: Double, width: CGFloat) -> CGFloat {
         TimeAxis.xOf(frame: frame, view: viewFrame, pxPerFrame: ppf, centerX: width / 2)
@@ -258,6 +269,10 @@ struct TimelineView: View {
         for (index, row) in visibleRows.enumerated() {
             let cy = m.rowsTop + CGFloat(index) * m.row - (compact ? 0 : scrollY) + m.row / 2
             guard cy + m.row / 2 >= m.rowsTop && cy - m.row / 2 <= size.height else { continue }
+            if row.track != nil {
+                glyph(&c, CupertinoGlyph.ChevronRight, size: 10, tint: .white.opacity(0.6), x: m.swatchLeft + m.swatch / 2, y: cy)
+                continue
+            }
             c.fill(Path(roundedRect: CGRect(x: m.pillLeft, y: cy - m.pillHeight / 2, width: m.pillWidth, height: m.pillHeight), cornerRadius: m.pillRadius), with: .color(AureaTimeline.headerPill))
             glyph(&c, row.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: m.eyeGlyph, tint: .white.opacity(0.7), x: m.eyeCenterX, y: cy)
             c.fill(Path(roundedRect: CGRect(x: m.swatchLeft, y: cy - m.swatch / 2, width: m.swatch, height: m.swatch), cornerRadius: m.swatchRadius), with: .color(AureaTimeline.swatch))
@@ -265,6 +280,8 @@ struct TimelineView: View {
                 glyph(&c, CupertinoGlyph.LockFill, size: 11, tint: AureaTimeline.swatchGlyph, x: m.swatchLeft + m.swatch / 2, y: cy)
             } else if model.selection.count >= 2 && model.selection.contains(row.id) {
                 glyph(&c, CupertinoGlyph.CheckmarkAlt, size: 13, tint: AureaTimeline.swatchGlyph, x: m.swatchLeft + m.swatch / 2, y: cy)
+            } else {
+                glyph(&c, expandedLayer == row.id ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 11, tint: AureaTimeline.swatchGlyph, x: m.swatchLeft + m.swatch / 2, y: cy)
             }
         }
         if guide != Snap.none {
@@ -289,7 +306,7 @@ struct TimelineView: View {
             UIColor(row.type.color).getRed(&r, green: &g, blue: &b, alpha: &a)
             let fill = Color(.sRGB, red: Double(21.0 / 255 + (r - 21.0 / 255) * amount), green: Double(28.0 / 255 + (g - 28.0 / 255) * amount), blue: Double(36.0 / 255 + (b - 36.0 / 255) * amount), opacity: 1)
             bar.fill(shape, with: .color(fill))
-            if let tiles = thumbnails[row.id], !tiles.isEmpty {
+            if row.track == nil, let tiles = thumbnails[row.id], !tiles.isEmpty {
                 for tile in tiles {
                     let px = x(Double(row.start) - Double(row.offset) + tile.localFrame, width: width)
                     bar.draw(Image(uiImage: tile.image), in: CGRect(x: px, y: top, width: tile.width, height: m.bar))
@@ -298,7 +315,7 @@ struct TimelineView: View {
                 bar.fill(shape, with: .linearGradient(shade, startPoint: CGPoint(x: x0, y: top), endPoint: CGPoint(x: x1, y: top)))
             }
             bar.fill(Path(CGRect(x: left, y: top + m.trackTop, width: right - left, height: m.track)), with: .color(.black.opacity(0.22)))
-            drawWave(&bar, row: row, top: top, x0: x0, x1: x1, width: width)
+            if row.track == nil { drawWave(&bar, row: row, top: top, x0: x0, x1: x1, width: width) }
             let stripe = row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count ? AureaColors.labelPalette[Int(row.label) - 1] : row.type.color
             bar.fill(Path(CGRect(x: x0, y: top, width: m.stripe, height: m.bar)), with: .color(stripe.opacity(row.visible ? 1 : 0.5)))
             var light = Path(); light.move(to: CGPoint(x: max(x0 + m.stripe, left), y: top + m.lightLine / 2)); light.addLine(to: CGPoint(x: right, y: top + m.lightLine / 2))
@@ -308,7 +325,7 @@ struct TimelineView: View {
                 let stroke = model.selection.count >= 2 ? m.multiStroke : m.selStroke
                 context.stroke(Path(roundedRect: rect.insetBy(dx: stroke / 2, dy: stroke / 2), cornerRadius: m.barRadius - stroke / 2), with: .color(.white), lineWidth: stroke)
             }
-            if !compact && model.selection.count == 1 && selected && !row.locked {
+            if row.track == nil && !compact && model.selection.count == 1 && selected && !row.locked {
                 if x0 >= m.headerColumn { drawHandle(&context, left: x0 - m.trimInsetStart, top: top) }
                 if x1 <= width { drawHandle(&context, left: x1 - m.trimInsetEnd, top: top) }
             }
@@ -432,7 +449,7 @@ struct TimelineView: View {
         let first = max(0, Int(scrollY / m.row))
         let visible = rows.dropFirst(first).prefix(Int(size.height / m.row) + 2)
         var next: [Int64: [MediaTile]] = [:], nextWaves: [Int64: TimelineWaveStrip.Entry] = [:]
-        for row in visible {
+        for row in visible where row.track == nil {
             let x0 = x(Double(row.start), width: size.width), x1 = max(x(Double(row.end), width: size.width), x0 + m.barMinWidth)
             let left = max(x0, 0), right = min(x1, size.width)
             guard right > left else { continue }
@@ -473,8 +490,10 @@ struct TimelineView: View {
         let row = current[index]
         let y = point.y - m.rowsTop - CGFloat(index) * m.row + (compact ? 0 : scrollY)
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
-        let handles = !compact && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
-        return (row, TimelineHit.test(m, point: CGPoint(x: point.x, y: y), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: row.instants, view: viewFrame, ppf: ppf))
+        let handles = row.track == nil && !compact && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
+        var result = TimelineHit.test(m, point: CGPoint(x: point.x, y: y), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: row.instants, view: viewFrame, ppf: ppf)
+        if row.track != nil && (result.kind == .header || result.kind == .eye) { result = TimelineHit(kind: .body) }
+        return (row, result)
     }
     private func tap(_ point: CGPoint, width: CGFloat) {
         scrollVelocity = 0
@@ -502,6 +521,27 @@ struct TimelineView: View {
             model.openCurve(property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time)
         default:
             guard let row else { return }
+            if let track = row.track {
+                model.select(layerId: row.id, additive: false)
+                switch track.property {
+                case 30: model.openPanel(.speed)
+                case 31:
+                    model.openPanel(.effects)
+                    model.loadParams(layerId: row.id, effectId: track.effect)
+                case 32: model.openPanel(.audio)
+                case 33: model.openPanel(.textAnimation)
+                case 34: model.openPanel(.vector)
+                case 35: model.openPanel(.shape)
+                case 36: model.openPanel(.particles)
+                default: model.openPanel(.transform)
+                }
+                return
+            }
+            if touched.kind == .header && !compact {
+                expandedLayer = expandedLayer == row.id ? nil : row.id
+                UISelectionFeedbackGenerator().selectionChanged()
+                return
+            }
             if compact { selectedKey = nil; model.editorBackFromTimeline() }
             else { pause(); selectedKey = nil; model.select(layerId: row.id, additive: model.selection.count >= 2) }
         }
@@ -556,7 +596,7 @@ struct TimelineView: View {
             if horizontal && touched.kind == .key { mode = .key }
             else if horizontal && touched.kind == .trimStart { mode = .trimStart }
             else if horizontal && touched.kind == .trimEnd { mode = .trimEnd }
-            else if horizontal && !compact && touched.kind == .body && row.map({ model.selection.contains($0.id) }) == true { mode = .move }
+            else if horizontal && !compact && touched.kind == .body && row.map({ $0.track == nil && model.selection.contains($0.id) }) == true { mode = .move }
             else { mode = horizontal || compact ? .scrub : .scroll }
             begin(mode, start: start, width: size.width)
         }
@@ -579,7 +619,7 @@ struct TimelineView: View {
             if hypot(dx, dy) >= m.axisSlop {
                 let horizontal = abs(dx) > abs(dy)
                 let mode: Mode
-                if g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal || compact ? .scrub : .scroll }
+                if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal || compact ? .scrub : .scroll }
                 else if g.hit.kind == .key { mode = horizontal ? .key : .blocked }
                 else if g.hit.kind == .header { mode = !horizontal && !compact ? .reorder : .blocked }
                 else { mode = horizontal || compact ? .move : .reorder }
@@ -592,7 +632,9 @@ struct TimelineView: View {
         if state == .began || state == .changed { lastPointer = point; update(point, size: size) }
         if state == .ended {
             if let g = gesture, g.mode == .hold, let row = g.row {
-                if g.hit.kind == .header {
+                if g.row?.track != nil {
+                    tap(start, width: size.width)
+                } else if g.hit.kind == .header {
                     model.engine.setLayer(row.id, locked: !row.locked); model.refreshModel(force: true)
                 } else if g.hit.kind == .key { tap(start, width: size.width) }
                 else if !compact && g.hit.kind != .eye && g.hit.kind != .none {
@@ -678,7 +720,7 @@ struct TimelineView: View {
     private func finish(cancelled: Bool) {
         guard let g = gesture else { return }
         if g.mode == .reorder && !cancelled, let row = g.row, reorderTarget >= 0 && reorderTarget != reorderSource {
-            model.engine.run { $0.beginUndoGroup() }; model.reorderLayer(row.id, displayIndex: reorderTarget); model.engine.run { $0.endUndoGroup() }
+            model.engine.run { $0.beginUndoGroup() }; model.reorderLayer(row.id, displayIndex: model.layers.firstIndex { $0.id == rows[reorderTarget].id } ?? 0); model.engine.run { $0.endUndoGroup() }
         }
         if g.mode == .scrub { model.engine.run { $0.scrubEnd() } }
         if g.undoOpen { model.engine.run { $0.endUndoGroup() } }

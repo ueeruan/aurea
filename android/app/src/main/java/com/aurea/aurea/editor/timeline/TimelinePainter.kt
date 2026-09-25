@@ -211,7 +211,7 @@ internal class TimelinePainter(
             val top = m.rowsTop + i * m.row - scroll
             val selected = c.isSelected(r.id)
             val handles = !compact && selCount == 1 && selected && !r.locked
-            val selFrame = if (selKey != null && selKey.first == r.id) Keyframes.toTimeline(selKey.second.time, r.start, r.offset) else Snap.NONE
+            val selFrame = if (selKey != null && selKey.first == r.id && (r.track == null || r.track == TimelineTrack(selKey.second.property, selKey.second.effectIndex, selKey.second.paramIndex))) Keyframes.toTimeline(selKey.second.time, r.start, r.offset) else Snap.NONE
             val dragFrame = if (st.dragKeyLayer == r.id) st.dragKeyFrame else Snap.NONE
             drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation)
         }
@@ -233,7 +233,7 @@ internal class TimelinePainter(
         for (i in first..last) {
             val r = c.rowAt(rows, i) ?: continue
             val cy = m.rowsTop + i * m.row - scroll + m.row / 2f
-            drawHeaderPill(r, cy, multi && c.isSelected(r.id))
+            drawHeaderPill(r, cy, multi && c.isSelected(r.id), c.expandedLayer.value == r.id)
         }
 
         // Fio do ímã.
@@ -275,7 +275,7 @@ internal class TimelinePainter(
             }
             // Trilho dos losangos, a faixa da cor do tipo e o fio de luz no alto.
             drawRect(TRACK_SHADE, Offset(left, top + m.trackTop), Size(right - left, m.track))
-            if (r.type == LayerType.Audio || r.type == LayerType.Video) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx)
+            if (r.track == null && (r.type == LayerType.Audio || r.type == LayerType.Video)) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx)
             // A faixa da ponta: a cor da etiqueta, quando a camada tem uma; senão a do tipo.
             val stripe = ShellColors.LabelPalette.getOrNull(r.label - 1) ?: r.type.color
             drawRect(if (r.visible) stripe else stripe.copy(alpha = 0.5f), Offset(x0, top), Size(m.stripe, m.bar))
@@ -299,7 +299,7 @@ internal class TimelinePainter(
                     style = if (multi) multiStroke else selStroke,
                 )
             }
-            if (handles) {
+            if (handles && r.track == null) {
                 if (RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - m.trimInsetStart, top)
                 if (RowHit.endHandleVisible(x1, w)) drawTrimHandle(x1 - m.trimInsetEnd, top)
             }
@@ -541,7 +541,11 @@ internal class TimelinePainter(
     }
 
     /** Pílula 58×28 da A.01: olho + quadradinho (cadeado se travada, visto se no lote). */
-    private fun DrawScope.drawHeaderPill(r: RowModel, cy: Float, inBatch: Boolean) {
+    private fun DrawScope.drawHeaderPill(r: RowModel, cy: Float, inBatch: Boolean, expanded: Boolean) {
+        if (r.track != null) {
+            drawGlyph(CupertinoGlyph.ChevronRight, 10f, EYE_TINT, m.swatchLeft + m.swatch / 2f, cy)
+            return
+        }
         drawRoundRect(
             AureaTimeline.HeaderPill,
             Offset(m.pillLeft, cy - m.pillHeight / 2f),
@@ -559,6 +563,7 @@ internal class TimelinePainter(
         when {
             r.locked -> drawGlyph(CupertinoGlyph.LockFill, 11f, AureaTimeline.SwatchGlyph, sx, cy)
             inBatch -> drawGlyph(CupertinoGlyph.CheckmarkAlt, 13f, AureaTimeline.SwatchGlyph, sx, cy)
+            else -> drawGlyph(if (expanded) CupertinoGlyph.ChevronDown else CupertinoGlyph.ChevronRight, 11f, AureaTimeline.SwatchGlyph, sx, cy)
         }
     }
 

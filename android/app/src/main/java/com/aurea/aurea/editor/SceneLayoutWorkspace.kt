@@ -1,6 +1,8 @@
 package com.aurea.aurea.editor
 
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -10,6 +12,8 @@ import androidx.compose.ui.window.Dialog
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.editor.panels.PanelContent
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Modifier
@@ -91,17 +95,45 @@ private fun SceneNumberField(value: Float, label: String, identity: String, onEd
     key(identity) {
         var draft by remember { mutableStateOf(TextFieldValue(value.toString())) }
         var focused by remember { mutableStateOf(false) }
+        var pointerDown by remember { mutableStateOf(false) }
+        var selectOnFocus by remember { mutableStateOf(false) }
         LaunchedEffect(value, focused) {
             if (!focused) draft = TextFieldValue(value.toString())
         }
+        LaunchedEffect(focused, pointerDown, selectOnFocus) {
+            if (focused && !pointerDown && selectOnFocus) {
+                // Also covers keyboard/accessibility focus. Let Foundation finish
+                // positioning the caret before applying the initial selection.
+                withFrameNanos { }
+                if (focused && !pointerDown && selectOnFocus) {
+                    draft = draft.copy(selection = TextRange(0, draft.text.length))
+                    selectOnFocus = false
+                }
+            }
+        }
         OutlinedTextField(draft, { next ->
+            if (next.text != draft.text) selectOnFocus = false
             draft = next
             next.text.toFloatOrNull()?.takeIf { it.isFinite() }?.let(onEdit)
         }, label = { Text(label) }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = modifier.onFocusChanged { state ->
-                if (state.isFocused && !focused) draft = draft.copy(selection = TextRange(0, draft.text.length))
-                focused = state.isFocused
-            })
+            modifier = modifier
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        pointerDown = true
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Final)
+                        } while (event.changes.any { it.pressed })
+                        // Observe, never consume: later taps, selection handles and
+                        // long presses retain the text field's normal behavior.
+                        pointerDown = false
+                    }
+                }
+                .onFocusChanged { state ->
+                    if (state.isFocused && !focused) selectOnFocus = true
+                    if (!state.isFocused) selectOnFocus = false
+                    focused = state.isFocused
+                })
     }
 }

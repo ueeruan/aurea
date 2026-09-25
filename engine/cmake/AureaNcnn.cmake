@@ -4,6 +4,10 @@ set(NCNN_VULKAN OFF CACHE BOOL "" FORCE)
 set(NCNN_OPENMP OFF CACHE BOOL "" FORCE)
 set(NCNN_INT8 OFF CACHE BOOL "" FORCE)
 set(NCNN_DISABLE_EXCEPTION OFF CACHE BOOL "" FORCE)
+# ncnn publishes -fno-rtti to its consumers when enabled. That would silently
+# remove RTTI from aurea_core while ObjC++/other bridge targets still require
+# typeinfo for its public polymorphic interfaces (e.g. VideoSourceFactory).
+set(NCNN_DISABLE_RTTI OFF CACHE BOOL "" FORCE)
 set(NCNN_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(NCNN_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(NCNN_BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)

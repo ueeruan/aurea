@@ -133,3 +133,17 @@ Existing curve IDs remain unchanged. One additional JVM regression covers the
 new thumbnail semantics. Static iOS API checks passed after this change; the
 latest reference layout and family controls await consolidated compile/runtime
 QA. Do not treat the earlier full-screen screenshot as proof of this new layout.
+
+### Reference layout: Android runtime acceptance
+
+The parent tested the installed APK and confirmed both white handles move the
+real curve. The lower-handle edit survived save/reopen. Evidence:
+`engine/build/android-p0/graph-reference-handle-drag.png` (before the final
+header/guide polish) and `engine/build/android-p0/graph-upper-handle-drag.png`
+(final layout). Bounce, Elastic and four-step presets apply their actual curves;
+undo after Steps restores Elastic, recorded in `graph-bounce-applied.png`,
+`graph-elastic-applied.png`, `graph-steps-applied.png` and `graph-undo-steps.png`
+in the same directory. The footer now names these families and Hold instead of
+calling them cubic Bezier; the reference title remains for Bezier editing.
+This caption adjustment awaits the next consolidated build. These observations
+are Android emulator validation, not native iOS touch or physical-device proof.

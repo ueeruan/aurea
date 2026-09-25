@@ -32,3 +32,21 @@ Validation:
 
 No Android/iOS bridge or font-catalog filtering changed. Actual Samsung device
 retesting remains pending; the original selected font is retained in the project.
+
+
+## Android emulator preview verification
+
+The final Android app selected `/system/fonts/NotoSansGujarati-Regular.ttf`
+through the real font picker. The Latin caption renders legibly, without missing
+character squares, in `engine/build/android-p0/font-gujarati-visible.png`.
+The same TTF was pulled from the emulator; `check_font_cmap.py` inspected its
+format 4/12 cmap tables and confirmed T, e, x, t and o all map to glyph 0.
+Consequently this preview exercises actual fallback from a selected font that
+cannot draw the caption, rather than a Gujarati font that happens to contain
+Latin glyphs.
+
+This is an Android emulator result, not validation on a physical Samsung device.
+Native save/reload and export with this selected font remain pending, as does
+native iOS verification. The shared host regression and Android preview evidence
+above cover different parts of the path and should not be substituted for those
+remaining checks.

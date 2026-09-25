@@ -141,3 +141,31 @@ had the same risk. Both workspace XYZ and light fields now preserve a String
 external numeric values after focus is released. Android selects the entire
 value on first focus. Native retyping verification is pending with the parent;
 Swift compile/UI verification remains CI-dependent.
+
+
+## Native scene follow-up: exact draft and remaining transition defects
+
+With explicit select-all followed by `1100`, Android preserves the exact draft
+without inserting decimal zeros. `engine/build/android-p0/scene-coordinate-1100.png`
+shows the Text3D object and camera frustum; the text is also visible in the main
+preview. The earlier invisible saved object at X=11000 was offscreen after the
+numeric input defect; it is not evidence that default Text3D rendering failed.
+
+First-focus selection was still broken in that APK: tapping X and typing `960`
+into `11000.0` produced `11000960.0`. Foundation's first-tap caret placement can
+overwrite selection applied directly in `onFocusChanged`. The subsequent patch
+observes pointer events without consuming them and applies initial select-all
+after the triggering release, preserving later taps/caret edits. It also cancels
+pending selection when actual text changes. The shared helper covers light and
+XYZ fields. This patch still requires the parent's fresh-APK validation.
+
+Scene controls also persisted after returning to Timeline: both
+`scene-exit-final.png` and `scene-exit-stable.png` (about 15 seconds later) show
+clipped orbit controls; the latter XML retains live numeric fields at
+Y=2230..2340 alongside the main editor. This is a persistent composition defect,
+not a transient screenshot or only an unclipped stage overlay. The pending fix
+scopes movable preview identity to scene-editor mode, disposing the old scene
+subtree at that transition instead of extracting its AndroidView while removing
+the surrounding Column. Normal narrow/wide/fullscreen surface reuse remains.
+Existing surface lifecycle callbacks handle detach/rebind. Fresh-APK verification
+must establish that no orphan controls remain and the new preview still renders.

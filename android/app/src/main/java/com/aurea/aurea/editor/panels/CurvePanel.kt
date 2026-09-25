@@ -354,7 +354,10 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                 val track = (store.keyframes[layer] ?: emptyList()).track(start)
                 val n = track.indexOfFirst { it.time == start.time }
                 Text(
-                    if (graphMode == 0) "Cubic Bezier Easing" else stringResource(if (graphMode == 1) R.string.particular_curve_value else R.string.panel_velocidade),
+                    if (graphMode == 0) {
+                        if (ease.interp == Interp.HOLD || ease.interp in Interp.BOUNCE..Interp.STEPS) stringResource(nameOf(ease))
+                        else "Cubic Bezier Easing"
+                    } else stringResource(if (graphMode == 1) R.string.particular_curve_value else R.string.panel_velocidade),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),

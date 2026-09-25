@@ -85,6 +85,7 @@ struct CurveEase: Equatable {
         if let preset = CurvePresetItem.builtins.first(where: { same($0.ease) }) { return preset.name }
         let key: String
         switch interpolation {
+        case 0: key = "pn_ease_hold"
         case 3: key = "pn_ease_in"
         case 4: key = "pn_ease_out"
         case 5: key = "pn_ease_in_out"
@@ -407,7 +408,8 @@ struct NativeCurvePanel: View {
     private func segmentNavigation(_ segment: Segment) -> some View {
         HStack(spacing: 4) {
             glyphButton(CupertinoGlyph.ChevronLeft, size: 16, target: 44, label: AureaText.t("panel_keyframe_anterior")) { jump(-1) }
-            Text(graphMode == 0 ? "Cubic Bezier Easing" : AureaText.t(graphMode == 1 ? "particular_curve_value" : "panel_velocidade"))
+            Text(graphMode == 0 ? ((ease.interpolation == 0 || (7...9).contains(ease.interpolation)) ? ease.name : "Cubic Bezier Easing")
+                 : AureaText.t(graphMode == 1 ? "particular_curve_value" : "panel_velocidade"))
                 .font(.aurea(size: 10)).foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1).truncationMode(.tail).multilineTextAlignment(.center)
             glyphButton(CupertinoGlyph.ChevronRight, size: 16, target: 44, label: AureaText.t("panel_proximo_keyframe")) { jump(1) }

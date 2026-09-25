@@ -226,7 +226,11 @@ fun EditorScreen(store: EditorStore) {
         selectionSize == 1 -> SheetContent.Dock
         else -> SheetContent.None
     }
-    val stage = remember(store, ui) {
+    // Keep the native surface across normal narrow/wide/fullscreen layouts.
+    // A workspace transition must dispose its whole layout instead: moving the
+    // AndroidView out of the removed scene Column leaves its trailing controls
+    // attached to the Compose owner (including live, focusable numeric fields).
+    val stage = remember(store, ui, store.sceneEditor) {
         movableContentOf { modifier: Modifier -> PreviewStage(store, ui, modifier) }
     }
 

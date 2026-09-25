@@ -125,6 +125,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit { putInt(KEY_FPS, v) }
     }
 
+    // --- Tema do app (Ajustes) ----------------------------------------------------
+    internal fun changeTheme(id: String) {
+        val palette = com.aurea.aurea.ui.theme.AureaPalette.of(id)
+        com.aurea.aurea.ui.theme.AureaColors.palette = palette
+        prefs.edit { putString(KEY_THEME, palette.id) }
+    }
+
     // --- Sobre: ferramentas de desenvolvedor (sete toques na versão) -------------
     var devTools by mutableStateOf(prefs.getBoolean(KEY_DEV, false))
         private set
@@ -246,6 +253,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         private const val KEY_RESOLUTION = "settings.defaultResolution"
         private const val KEY_FPS = "settings.defaultFps"
         private const val KEY_DEV = "dev.escondido"
+        internal const val KEY_THEME = "tema"
+
+        /** O tema salvo, aplicado antes da primeira tela (sem piscar o padrão). */
+        fun loadTheme(context: Context) {
+            val id = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_THEME, null)
+            com.aurea.aurea.ui.theme.AureaColors.palette = com.aurea.aurea.ui.theme.AureaPalette.of(id)
+        }
         // 15 s nao bastavam no aparelho frio (compilar shader e abrir o cache
         // levam mais que isso na primeira vez). 90 s cobre a primeira abertura
         // sem transformar uma falha real em espera eterna.

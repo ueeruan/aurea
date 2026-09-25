@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.BLACK),
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        com.aurea.aurea.home.HomeViewModel.loadTheme(this)
         setContent { AureaApp(store) }
 
         // Anúncios: consentimento + SDK fora do caminho do app (nada aqui espera).

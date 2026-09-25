@@ -252,6 +252,11 @@ struct RenderSettings {
     /// Cor atrás da composição na área de preview (linear). É o fundo da
     /// marca (#0F141A), para o preview não "piscar" contra a interface.
     Vec4 editorBackground{0.0048f, 0.0070f, 0.0103f, 1.0f};
+    /// Área de trabalho em volta da composição (letterbox do preview), já
+    /// CODIFICADA (o swapchain é UNORM e o passe de saída limpa com ela).
+    /// #262C35: clara o bastante para uma composição preta não se confundir
+    /// com o entorno, escura o bastante para não brigar com o vídeo.
+    Vec4 pasteboard{0.149f, 0.173f, 0.208f, 1.0f};
     f32  viewportZoom = 1.0f;
     Vec2 viewportPan{0.0f, 0.0f};
     /// Export: amostras de desfoque de movimento da qualidade final

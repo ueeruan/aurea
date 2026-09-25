@@ -249,7 +249,9 @@ fun AureaNamePrompt(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var text by remember { mutableStateOf(initial) }
+    // Texto todo selecionado: digitar troca o nome; tocar põe o cursor onde quiser.
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(initial, androidx.compose.ui.text.TextRange(0, initial.length))) }
+    val text = field.text
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     AureaAlert(
@@ -259,8 +261,8 @@ fun AureaNamePrompt(
         onDismiss = onDismiss,
         extra = {
             BasicTextField(
-                value = text,
-                onValueChange = { text = it },
+                value = field,
+                onValueChange = { field = it },
                 singleLine = true,
                 textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp)),
                 cursorBrush = SolidColor(AureaColors.Accent),

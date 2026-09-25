@@ -63,6 +63,7 @@ aurea_compile_shaders(AUREA_SHADER_SOURCES AUREA_GENERATED_INCLUDE)
 set(AUREA_CORE_SOURCES
     src/core/Log.cpp
     src/core/Time.cpp
+    src/core/MiniXml.cpp
     src/core/Thread.cpp
     src/memory/MemoryManager.cpp
     src/jobs/JobSystem.cpp
@@ -76,6 +77,7 @@ set(AUREA_CORE_SOURCES
     src/project/Serialization.cpp
     src/project/FileIO.cpp
     src/project/Presets.cpp
+    src/project/AlightMotion.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp

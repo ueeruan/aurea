@@ -4,6 +4,9 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
@@ -31,46 +34,52 @@ import androidx.compose.ui.unit.sp
 // =============================================================================
 
 object AureaColors {
+    /**
+     * Tema escolhido nos Ajustes. É estado do Compose: trocar redesenha o app
+     * inteiro na hora, sem reiniciar. Só os tons de fundo, superfície e a cor
+     * de destaque mudam; estados (erro, aviso, sucesso) e o texto ficam.
+     */
+    var palette by mutableStateOf(AureaPalette.Aurea)
     // --- Marca ---------------------------------------------------------------
-    val BrandDeep = Color(0xFF123A63)
-    val Brand = Color(0xFF245D8C)          // preenchimento de ação (Exportar, "+")
-    val Accent = Color(0xFF6FAED9)         // ação/estado fora do editor, destaque
-    val Keyframe = Color(0xFFA9D3EC)       // keyframe, curva, valor, seleção em texto
-    val Background = Color(0xFF0F141A)
-    val Surface = Color(0xFF151C24)
-    val SurfaceHigh = Color(0xFF1B2530)
-    val Chip = Color(0xFF212D3A)
-    val ChipHigh = Color(0xFF323D49)       // campoAlto = lerp(chip, texto, 0,08)
-    val Border = Color(0xFF273442)
+    val BrandDeep: Color get() = palette.brandDeep
+    val Brand: Color get() = palette.brand          // preenchimento de ação (Exportar, "+")
+    val Accent: Color get() = palette.accent         // ação/estado fora do editor, destaque
+    val Keyframe: Color get() = palette.keyframe       // keyframe, curva, valor, seleção em texto
+    val Background: Color get() = palette.background
+    val Surface: Color get() = palette.surface
+    val SurfaceHigh: Color get() = palette.surfaceHigh
+    val Chip: Color get() = palette.chip
+    val ChipHigh: Color get() = palette.chipHigh       // campoAlto = lerp(chip, texto, 0,08)
+    val Border: Color get() = palette.border
     val Text = Color(0xFFF7F9FB)
-    val Muted = Color(0xFFAAB6C3)
-    val Subtle = Color(0xFF7C8A99)         // texto terciário: nota, rodapé, ficha
-    val OnAccent = Color(0xFF0B1117)
-    val AccentDim = Color(0xFF1D3A55)
-    val KeyframeDim = Color(0xFF22405A)
+    val Muted: Color get() = palette.muted
+    val Subtle: Color get() = palette.subtle         // texto terciário: nota, rodapé, ficha
+    val OnAccent: Color get() = palette.onAccent
+    val AccentDim: Color get() = palette.accentDim
+    val KeyframeDim: Color get() = palette.keyframeDim
     val Danger = Color(0xFFFF6B6B)
     val Warning = Color(0xFFFFC978)
     val Success = Color(0xFF4CD08A)
-    val Stage = Color(0xFF0A0E13)          // fundo atrás da composição / timeline
+    val Stage: Color get() = palette.stage          // fundo atrás da composição / timeline
     val Playhead = Color(0xFFFFFFFF)
-    val Hairline = Color(0xB8273442)       // #273442 @ 0,72
+    val Hairline: Color get() = palette.hairline       // #273442 @ 0,72
 
     // --- Cromo do editor (AmColors) -----------------------------------------
-    val EditorTopBar = Color(0xFF0F141A)
-    val EditorPanel = Color(0xFF0F141A)
-    val EditorPanelHigh = Color(0xFF151C24)
-    val Pill = Color(0xFF1B2530)
-    val Action = Brand
+    val EditorTopBar: Color get() = palette.editorTopBar
+    val EditorPanel: Color get() = palette.editorPanel
+    val EditorPanelHigh: Color get() = palette.editorPanelHigh
+    val Pill: Color get() = palette.pill
+    val Action: Color get() = Brand
     val OnAction = Text
-    val ActionDim = Color(0xFF16304A)
-    val Selection = BrandDeep
-    val SelectionText = Keyframe
+    val ActionDim: Color get() = palette.actionDim
+    val Selection: Color get() = BrandDeep
+    val SelectionText: Color get() = Keyframe
     val Disabled = Color(0x40FFFFFF)       // branco 25 %
-    val StatusBarVeil = Color(0xFF070A0E)
+    val StatusBarVeil: Color get() = palette.statusBarVeil
 
     // --- Barra de sistema (a Home é edge-to-edge) ----------------------------
     /** Faixa sob a status bar: o fundo #0F141A sob o véu preto 25 % do sistema. */
-    val SystemBarVeil = Color(0xFF0B0F13)
+    val SystemBarVeil: Color get() = palette.systemBarVeil
     /** Barra de gestos preta opaca (o app antigo não era edge-to-edge embaixo). */
     val NavigationBar = Color(0xFF000000)
     val Scrim = Color(0x8A000000)          // véu das folhas modais
@@ -97,8 +106,8 @@ object AureaColors {
     // --- Controles nativos (Cupertino) ---------------------------------------
     val SegmentSeparator = Color(0x4D8E8E93)
     val SegmentThumbShadow = Color(0x1F000000)
-    val SegmentTrack = Background
-    val SegmentThumb = SurfaceHigh
+    val SegmentTrack: Color get() = Background
+    val SegmentThumb: Color get() = SurfaceHigh
     /** Trilho desligado do interruptor (secondarySystemFill escuro). */
     val SwitchOffTrack = Color(0x52787880)
 
@@ -108,21 +117,21 @@ object AureaColors {
     val FieldBorder = Color(0x33FFFFFF)
     val FieldPlaceholder = Color(0x4DEBEBF5)
     /** Campo preenchido (busca do navegador de efeitos, formulários). */
-    val FieldFilled = Color(0xFF272B33)
+    val FieldFilled: Color get() = palette.fieldFilled
     /** Campo do diálogo de nome (o mesmo de `AureaNamePrompt`). */
     val FieldDialog = Color(0xFF1C1C1E)
 
     // --- Régua (AmTickRuler) --------------------------------------------------
-    val TickWeak = Color(0xFF43516A)
-    val TickStrong = Color(0xFF7485A3)
+    val TickWeak: Color get() = palette.tickWeak
+    val TickStrong: Color get() = palette.tickStrong
 
     // --- Diálogos Cupertino ----------------------------------------------------
     val DestructiveCupertino = Color(0xFFFF453A)
 
-    val BrandGradient = listOf(BrandDeep, Brand, Accent)
+    val BrandGradient: List<Color> get() = listOf(BrandDeep, Brand, Accent)
 
     // --- Painéis da A.01 (valores escritos à mão no Flutter, aqui viram token) ---
-    val RailModeFill = Color(0xFF1E222D)       // modo aceso do trilho, cartão de preset da curva
+    val RailModeFill: Color get() = palette.railModeFill       // modo aceso do trilho, cartão de preset da curva
     val RailDisabled = Color(0xFF434956)       // losango/curva do trilho sem alvo
     val ControlButton = Color(0xFF434A60)      // corrente Largura/Altura, botão "Centro"
     val DialTrack = Color(0xFF2E3548)          // anel do dial de rotação
@@ -134,6 +143,233 @@ object AureaColors {
     val EffectPreviewDisc = Color(0xFFFF4D2D)
     val BlendThumbBottom = Color(0xFFFF8A3D)   // miniatura da mescla: disco de baixo
     val BlendThumbTop = Color(0xFF3D9BFF)      // miniatura da mescla: disco de cima
+}
+
+/**
+ * Paleta de um tema: só o que muda entre temas (fundos, superfícies,
+ * marca e destaque). [id] é o que fica salvo nos Ajustes; nunca renomeie.
+ */
+data class AureaPalette(
+    val id: String,
+    val brandDeep: Color,
+    val brand: Color,
+    val accent: Color,
+    val keyframe: Color,
+    val background: Color,
+    val surface: Color,
+    val surfaceHigh: Color,
+    val chip: Color,
+    val chipHigh: Color,
+    val border: Color,
+    val muted: Color,
+    val subtle: Color,
+    val onAccent: Color,
+    val accentDim: Color,
+    val keyframeDim: Color,
+    val stage: Color,
+    val hairline: Color,
+    val editorTopBar: Color,
+    val editorPanel: Color,
+    val editorPanelHigh: Color,
+    val pill: Color,
+    val actionDim: Color,
+    val statusBarVeil: Color,
+    val systemBarVeil: Color,
+    val tickWeak: Color,
+    val tickStrong: Color,
+    val railModeFill: Color,
+    val fieldFilled: Color,
+) {
+    companion object {
+        val Aurea = AureaPalette(
+            id = "aurea",
+            brandDeep = Color(0xFF123A63),
+            brand = Color(0xFF245D8C),
+            accent = Color(0xFF6FAED9),
+            keyframe = Color(0xFFA9D3EC),
+            background = Color(0xFF0F141A),
+            surface = Color(0xFF151C24),
+            surfaceHigh = Color(0xFF1B2530),
+            chip = Color(0xFF212D3A),
+            chipHigh = Color(0xFF323D49),
+            border = Color(0xFF273442),
+            muted = Color(0xFFAAB6C3),
+            subtle = Color(0xFF7C8A99),
+            onAccent = Color(0xFF0B1117),
+            accentDim = Color(0xFF1D3A55),
+            keyframeDim = Color(0xFF22405A),
+            stage = Color(0xFF0A0E13),
+            hairline = Color(0xB8273442),
+            editorTopBar = Color(0xFF0F141A),
+            editorPanel = Color(0xFF0F141A),
+            editorPanelHigh = Color(0xFF151C24),
+            pill = Color(0xFF1B2530),
+            actionDim = Color(0xFF16304A),
+            statusBarVeil = Color(0xFF070A0E),
+            systemBarVeil = Color(0xFF0B0F13),
+            tickWeak = Color(0xFF43516A),
+            tickStrong = Color(0xFF7485A3),
+            railModeFill = Color(0xFF1E222D),
+            fieldFilled = Color(0xFF272B33),
+        )
+        val Midnight = AureaPalette(
+            id = "midnight",
+            brandDeep = Color(0xFF15325A),
+            brand = Color(0xFF2C66A0),
+            accent = Color(0xFF7DB8E6),
+            keyframe = Color(0xFFB3D9F0),
+            background = Color(0xFF000000),
+            surface = Color(0xFF0B0D10),
+            surfaceHigh = Color(0xFF14171C),
+            chip = Color(0xFF1A1E24),
+            chipHigh = Color(0xFF2A2F37),
+            border = Color(0xFF1E232A),
+            muted = Color(0xFFA7B0BA),
+            subtle = Color(0xFF77818C),
+            onAccent = Color(0xFF05080B),
+            accentDim = Color(0xFF15283C),
+            keyframeDim = Color(0xFF1A3247),
+            stage = Color(0xFF000000),
+            hairline = Color(0xB81E232A),
+            editorTopBar = Color(0xFF000000),
+            editorPanel = Color(0xFF000000),
+            editorPanelHigh = Color(0xFF0B0D10),
+            pill = Color(0xFF14171C),
+            actionDim = Color(0xFF102438),
+            statusBarVeil = Color(0xFF000000),
+            systemBarVeil = Color(0xFF000000),
+            tickWeak = Color(0xFF3A4250),
+            tickStrong = Color(0xFF6C788C),
+            railModeFill = Color(0xFF15181E),
+            fieldFilled = Color(0xFF1A1D22),
+        )
+        val Graphite = AureaPalette(
+            id = "graphite",
+            brandDeep = Color(0xFF3A4250),
+            brand = Color(0xFF566273),
+            accent = Color(0xFFB7C4D3),
+            keyframe = Color(0xFFD6DEE8),
+            background = Color(0xFF16181C),
+            surface = Color(0xFF1D2025),
+            surfaceHigh = Color(0xFF25292F),
+            chip = Color(0xFF2B3037),
+            chipHigh = Color(0xFF3A4048),
+            border = Color(0xFF33383F),
+            muted = Color(0xFFB0B6BE),
+            subtle = Color(0xFF838A94),
+            onAccent = Color(0xFF101215),
+            accentDim = Color(0xFF2E343C),
+            keyframeDim = Color(0xFF343B45),
+            stage = Color(0xFF111316),
+            hairline = Color(0xB833383F),
+            editorTopBar = Color(0xFF16181C),
+            editorPanel = Color(0xFF16181C),
+            editorPanelHigh = Color(0xFF1D2025),
+            pill = Color(0xFF25292F),
+            actionDim = Color(0xFF2A3038),
+            statusBarVeil = Color(0xFF0D0E10),
+            systemBarVeil = Color(0xFF121417),
+            tickWeak = Color(0xFF4A515C),
+            tickStrong = Color(0xFF7F8896),
+            railModeFill = Color(0xFF23272D),
+            fieldFilled = Color(0xFF2A2E34),
+        )
+        val Emerald = AureaPalette(
+            id = "emerald",
+            brandDeep = Color(0xFF0F4A3A),
+            brand = Color(0xFF1C7A5E),
+            accent = Color(0xFF5BD6A8),
+            keyframe = Color(0xFFA6ECD2),
+            background = Color(0xFF0B1411),
+            surface = Color(0xFF111D19),
+            surfaceHigh = Color(0xFF172722),
+            chip = Color(0xFF1D302A),
+            chipHigh = Color(0xFF2C403A),
+            border = Color(0xFF223A33),
+            muted = Color(0xFFA6BDB5),
+            subtle = Color(0xFF789088),
+            onAccent = Color(0xFF06110D),
+            accentDim = Color(0xFF163A30),
+            keyframeDim = Color(0xFF1D4539),
+            stage = Color(0xFF080F0C),
+            hairline = Color(0xB8223A33),
+            editorTopBar = Color(0xFF0B1411),
+            editorPanel = Color(0xFF0B1411),
+            editorPanelHigh = Color(0xFF111D19),
+            pill = Color(0xFF172722),
+            actionDim = Color(0xFF123326),
+            statusBarVeil = Color(0xFF060B09),
+            systemBarVeil = Color(0xFF09100D),
+            tickWeak = Color(0xFF3B5249),
+            tickStrong = Color(0xFF6C8C80),
+            railModeFill = Color(0xFF18251F),
+            fieldFilled = Color(0xFF1F2B27),
+        )
+        val Amethyst = AureaPalette(
+            id = "amethyst",
+            brandDeep = Color(0xFF3A2470),
+            brand = Color(0xFF6246B8),
+            accent = Color(0xFFB9A2FF),
+            keyframe = Color(0xFFDCCFFF),
+            background = Color(0xFF110E19),
+            surface = Color(0xFF181423),
+            surfaceHigh = Color(0xFF201B2E),
+            chip = Color(0xFF282238),
+            chipHigh = Color(0xFF383049),
+            border = Color(0xFF2F2842),
+            muted = Color(0xFFB5ADC6),
+            subtle = Color(0xFF877E99),
+            onAccent = Color(0xFF0D0A14),
+            accentDim = Color(0xFF2C2248),
+            keyframeDim = Color(0xFF362B55),
+            stage = Color(0xFF0C0A12),
+            hairline = Color(0xB82F2842),
+            editorTopBar = Color(0xFF110E19),
+            editorPanel = Color(0xFF110E19),
+            editorPanelHigh = Color(0xFF181423),
+            pill = Color(0xFF201B2E),
+            actionDim = Color(0xFF261E42),
+            statusBarVeil = Color(0xFF08070C),
+            systemBarVeil = Color(0xFF0D0B13),
+            tickWeak = Color(0xFF4A4260),
+            tickStrong = Color(0xFF7D7399),
+            railModeFill = Color(0xFF211C2D),
+            fieldFilled = Color(0xFF272233),
+        )
+        val Sunset = AureaPalette(
+            id = "sunset",
+            brandDeep = Color(0xFF6A3212),
+            brand = Color(0xFFB45A1E),
+            accent = Color(0xFFFFB060),
+            keyframe = Color(0xFFFFD6A8),
+            background = Color(0xFF15100C),
+            surface = Color(0xFF1E1712),
+            surfaceHigh = Color(0xFF281F18),
+            chip = Color(0xFF30251D),
+            chipHigh = Color(0xFF40342B),
+            border = Color(0xFF3A2C22),
+            muted = Color(0xFFC4B4A6),
+            subtle = Color(0xFF96867A),
+            onAccent = Color(0xFF140C06),
+            accentDim = Color(0xFF45280F),
+            keyframeDim = Color(0xFF4E3218),
+            stage = Color(0xFF100C09),
+            hairline = Color(0xB83A2C22),
+            editorTopBar = Color(0xFF15100C),
+            editorPanel = Color(0xFF15100C),
+            editorPanelHigh = Color(0xFF1E1712),
+            pill = Color(0xFF281F18),
+            actionDim = Color(0xFF3E230D),
+            statusBarVeil = Color(0xFF0B0806),
+            systemBarVeil = Color(0xFF110D0A),
+            tickWeak = Color(0xFF5A4838),
+            tickStrong = Color(0xFF907A66),
+            railModeFill = Color(0xFF271E17),
+            fieldFilled = Color(0xFF2E251E),
+        )
+        val all = listOf(Aurea, Midnight, Graphite, Emerald, Amethyst, Sunset)
+        fun of(id: String?): AureaPalette = all.firstOrNull { it.id == id } ?: Aurea
+    }
 }
 
 /** Cor (fundo de barra) e glifo por tipo de camada — `aurea_tipo_da_camada.dart`. */

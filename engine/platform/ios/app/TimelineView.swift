@@ -13,13 +13,15 @@ struct MarkerEditorSheet: View {
     @EnvironmentObject private var model: AureaModel
     @Environment(\.dismiss) private var dismiss
     let original: Int64
+    let isNew: Bool
     @State private var name: String
     @State private var frameText: String
     @State private var color: UInt32
     @State private var failure = false
     private let palette: [UInt32] = [0xFFF7C34F, 0xFF4D6EFF, 0xFF70D56B, 0xFFFFB75B, 0xFFD67BDB, 0xFFFFFFFF]
-    init(frame: Int64, color: UInt32, label: String) {
+    init(frame: Int64, color: UInt32, label: String, isNew: Bool = false) {
         original = frame
+        self.isNew = isNew
         _name = State(initialValue: label)
         _frameText = State(initialValue: String(frame))
         _color = State(initialValue: color)
@@ -41,14 +43,16 @@ struct MarkerEditorSheet: View {
                     }
                 }
                 Text(AureaText.t(failure ? "marker_error" : "marker_hint")).font(.footnote)
-                Button(AureaText.t("common_delete"), role: .destructive) { model.deleteMarker(original); dismiss() }
+                if !isNew {
+                    Button(AureaText.t("common_delete"), role: .destructive) { model.deleteMarker(original); dismiss() }
+                }
             }
             .navigationTitle(AureaText.t("marker_edit"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("common_cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(AureaText.t("common_save")) {
-                        if let target = Int64(frameText), model.editMarker(from: original, to: target, color: color, label: name) { dismiss() }
+                        if let target = Int64(frameText), model.editMarker(from: isNew ? -1 : original, to: target, color: color, label: name) { dismiss() }
                         else { failure = true }
                     }
                 }
@@ -78,6 +82,8 @@ struct TimelineView: View {
     @State private var thumbnails: [Int64: [MediaTile]] = [:]
     @State private var waves: [Int64: TimelineWaveStrip.Entry] = [:]
     @State private var markers: [Marker] = []
+    @State private var markersRevision: UInt32 = .max
+    @State private var markersFrames: [Int64] = []
     @State private var expandedLayer: Int64?
     @State private var rowCache = TimelineRowCache()
     @State private var thumbCache = TimelineThumbStrip()
@@ -251,15 +257,23 @@ struct TimelineView: View {
         var c = context
         c.clip(to: Path(CGRect(x: 0, y: m.rowsTop, width: size.width, height: max(0, size.height - m.rowsTop))))
         let visibleRows = rows
+        // Topo de cada linha somado UMA vez: `rowTop(i)` refaz `rows` (que
+        // compara todas as camadas e keyframes) — no laço, isso era quadrático.
+        var tops: [CGFloat] = []
+        tops.reserveCapacity(visibleRows.count + 1)
+        var acc: CGFloat = 0
+        for row in visibleRows { tops.append(acc); acc += rowHeight(row) }
+        tops.append(acc)
+        func topOf(_ i: Int) -> CGFloat { tops[min(max(0, i), tops.count - 1)] }
         for (index, row) in visibleRows.enumerated() {
-            let top = m.rowsTop + rowTop(index) - (compact ? 0 : scrollY)
+            let top = m.rowsTop + tops[index] - (compact ? 0 : scrollY)
             if top + rowHeight(row) < m.rowsTop || top > size.height { continue }
             drawRow(&c, row: row, top: top, width: size.width)
         }
         if reorderSource >= 0 {
-            let top = m.rowsTop + rowTop(reorderSource) - scrollY
+            let top = m.rowsTop + topOf(reorderSource) - scrollY
             c.fill(Path(CGRect(x: 0, y: top, width: size.width, height: m.row)), with: .color(AureaColors.accent.opacity(0.14)))
-            let y = reorderTarget < 0 || reorderSource == reorderTarget ? CGFloat.nan : m.rowsTop + rowTop(reorderTarget + (reorderTarget > reorderSource ? 1 : 0)) - scrollY
+            let y = reorderTarget < 0 || reorderSource == reorderTarget ? CGFloat.nan : m.rowsTop + topOf(reorderTarget + (reorderTarget > reorderSource ? 1 : 0)) - scrollY
             if y.isFinite {
                 c.fill(Path(CGRect(x: 0, y: y - m.reorderLine / 2, width: size.width, height: m.reorderLine)), with: .color(AureaColors.accent))
                 c.fill(Path(ellipseIn: CGRect(x: m.pillLeft - m.reorderDot, y: y - m.reorderDot, width: m.reorderDot * 2, height: m.reorderDot * 2)), with: .color(AureaColors.accent))
@@ -268,7 +282,7 @@ struct TimelineView: View {
         let shade = Gradient(stops: [.init(color: AureaColors.stage, location: 0), .init(color: AureaColors.stage.opacity(0.95), location: 0.78), .init(color: AureaColors.stage.opacity(0), location: 1)])
         c.fill(Path(CGRect(x: 0, y: m.rowsTop, width: m.headerColumn, height: max(0, size.height - m.rowsTop))), with: .linearGradient(shade, startPoint: .zero, endPoint: CGPoint(x: m.headerColumn, y: 0)))
         for (index, row) in visibleRows.enumerated() {
-            let cy = m.rowsTop + rowTop(index) - (compact ? 0 : scrollY) + rowHeight(row) / 2
+            let cy = m.rowsTop + tops[index] - (compact ? 0 : scrollY) + rowHeight(row) / 2
             guard cy + m.row / 2 >= m.rowsTop && cy - m.row / 2 <= size.height else { continue }
             if row.track != nil {
                 glyph(&c, CupertinoGlyph.ChevronRight, size: 10, tint: .white.opacity(0.6), x: m.swatchLeft + m.swatch / 2, y: cy)
@@ -340,6 +354,15 @@ struct TimelineView: View {
                 if x0 >= m.headerColumn { drawHandle(&context, left: x0 - m.trimInsetStart, top: top) }
                 if x1 <= width { drawHandle(&context, left: x1 - m.trimInsetEnd, top: top) }
             }
+        } else if row.track == nil {
+            // Clipe fora da janela: seta na borda para o lado dele (par do
+            // TimelinePainter) — linha vazia parecia camada quebrada.
+            let toRight = x0 > width
+            let tip = toRight ? width - 10 : m.headerColumn + 10, back = toRight ? tip - 7 : tip + 7
+            let cy = top + m.bar / 2
+            var arrow = Path(); arrow.move(to: CGPoint(x: tip, y: cy))
+            arrow.addLine(to: CGPoint(x: back, y: cy - 6)); arrow.addLine(to: CGPoint(x: back, y: cy + 6)); arrow.closeSubpath()
+            context.fill(arrow, with: .color(row.type.color.opacity(row.visible ? 0.9 : 0.45)))
         }
         drawKeys(&context, row: row, top: top, width: width)
     }
@@ -490,13 +513,20 @@ struct TimelineView: View {
             }
         }
         thumbnails = next; waves = nextWaves
-        let values = model.engine.markers()
-        markers = stride(from: 0, to: values.count - values.count % 3, by: 3).map { Marker(frame: values[$0].int32Value, packedColor: values[$0 + 1].uint32Value, kind: values[$0 + 2].uint32Value) }
+        // Marcas só mudam com o modelo (revisão) ou com a lista local do modelo:
+        // relê-las a cada quadro de playback/scrub era trabalho jogado fora.
+        let markerKey = (model.status.modelRevision, model.markerFrames)
+        if markerKey.0 != markersRevision || markerKey.1 != markersFrames {
+            markersRevision = markerKey.0; markersFrames = markerKey.1
+            let values = model.engine.markers()
+            markers = stride(from: 0, to: values.count - values.count % 3, by: 3).map { Marker(frame: values[$0].int32Value, packedColor: values[$0 + 1].uint32Value, kind: values[$0 + 2].uint32Value) }
+        }
     }
 
     // MARK: Android controller and hit priorities
     private func rowHeight(_ row: TimelineRow) -> CGFloat { row.track == nil ? m.row : 28 }
-    private func rowTop(_ index: Int) -> CGFloat { rows.prefix(max(0, index)).reduce(0) { $0 + rowHeight($1) } }
+    private func rowTop(_ index: Int) -> CGFloat { rowTop(index, in: rows) }
+    private func rowTop(_ index: Int, in list: [TimelineRow]) -> CGFloat { list.prefix(max(0, index)).reduce(0) { $0 + rowHeight($1) } }
     private func rowIndex(_ y: CGFloat) -> Int {
         guard y >= 0 else { return -1 }
         var bottom: CGFloat = 0
@@ -521,12 +551,20 @@ struct TimelineView: View {
         return (row, result)
     }
     private func tap(_ point: CGPoint, width: CGFloat) {
+        // Toque que só PAROU a rolagem inércia não é toque (igual ao Android).
+        let stoppedFling = abs(scrollVelocity) > 1
         scrollVelocity = 0
+        if stoppedFling { return }
         let (row, touched) = hit(point, width: width)
         switch touched.kind {
         case .ruler:
-            let target = max(0, timelineFrame(frame(point.x, width: width)))
-            model.seek(toFrame: Int64(target)); model.toggleMarkerAt(Int64(target))
+            // Régua = buscar. Não cria marca: ela divide a faixa com o relógio
+            // e o topo do cabeçote, e cada busca deixava uma marca "do nada".
+            // Tocar em cima de uma marca (até 12 pt) abre o editor dela.
+            let target = Int64(max(0, timelineFrame(frame(point.x, width: width))))
+            let marker = model.markerNear(target, tolerance: Int64(12 / max(0.0001, ppf)))
+            model.seek(toFrame: marker ?? target)
+            if let marker { model.openMarkerEditor(marker) }
             UISelectionFeedbackGenerator().selectionChanged()
         case .none:
             selectedKey = nil; model.editorBackFromTimeline()

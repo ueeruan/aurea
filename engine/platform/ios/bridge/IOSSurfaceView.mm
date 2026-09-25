@@ -24,6 +24,8 @@
 @implementation AureaMetalView {
     CADisplayLink* _link;
     BOOL _attached;
+    int _resizedWidth;     // último tamanho entregue ao motor (attach/resize)
+    int _resizedHeight;
 }
 
 // O layer da view É o CAMetalLayer. Sem esta linha o UIKit criaria um CALayer
@@ -50,7 +52,9 @@
 
 - (void)commonInit {
     self.opaque = YES;
-    self.backgroundColor = [UIColor blackColor];
+    // Mesma cor da área de trabalho que o motor limpa (RenderSettings::pasteboard),
+    // para não piscar preto antes do primeiro quadro.
+    self.backgroundColor = [UIColor colorWithRed:0.149 green:0.173 blue:0.208 alpha:1.0];
     self.userInteractionEnabled = YES;
     self.multipleTouchEnabled = YES;
     [self configureLayer];
@@ -82,11 +86,21 @@
 }
 
 - (void)setDevice:(id<MTLDevice>)device {
+    // O SwiftUI reatribui a cada atualização da view. Reconfigurar o layer
+    // de novo desfazia o que o motor ajustou no attach (framebufferOnly,
+    // timeout do drawable) enquanto a thread de render estava em nextDrawable.
+    if (_device == device && self.metalLayer.device == device) return;
     _device = device;
     [self configureLayer];
 }
 
 - (void)setEngine:(AureaEngine*)engine {
+    if (_engine == engine) {
+        // Mesmo motor reatribuído: é o caminho de quando ele subiu DEPOIS de a
+        // view existir — só tenta o attach, sem mexer em mais nada.
+        if (self.window && !_attached) [self attachIfNeeded];
+        return;
+    }
     _engine = engine;
     // A view pode ganhar o motor depois de já estar na tela (o SwiftUI monta a
     // view antes de a sessão subir o motor).
@@ -111,8 +125,13 @@
     [super layoutSubviews];
     [self updateDrawableSize];
     if (_attached) {
+        // Só quando o tamanho muda: o resize pega o lock do render, e o
+        // layout roda em qualquer mudança do SwiftUI em volta.
         const CGSize size = self.metalLayer.drawableSize;
-        [self.engine resizeSurfaceWidth:(int)size.width height:(int)size.height];
+        if ((int)size.width != _resizedWidth || (int)size.height != _resizedHeight) {
+            _resizedWidth = (int)size.width; _resizedHeight = (int)size.height;
+            [self.engine resizeSurfaceWidth:_resizedWidth height:_resizedHeight];
+        }
     }
 }
 
@@ -137,6 +156,7 @@
     const CGSize size = self.metalLayer.drawableSize;
     if (size.width < 1 || size.height < 1) return;
     _attached = [self.engine attachMetalLayer:self.metalLayer width:(int)size.width height:(int)size.height];
+    _resizedWidth = (int)size.width; _resizedHeight = (int)size.height;
     if (_attached) {
         [self willChangeValueForKey:@"surfaceAttached"];
         _surfaceAttached = YES;
@@ -191,11 +211,14 @@
     }
 }
 
-/// Um tique por vsync. Não desenha: acorda a thread de render do motor, que
-/// coalesce (nada a mostrar = nada é desenhado — ver `render_frame(true)`).
+/// Um tique por vsync. Não desenha nem força: só acorda a thread de render,
+/// que coalesce (nada a mostrar = nada é desenhado — ver `render_frame(true)`).
+/// Com `requestRender` aqui o motor redesenhava o quadro inteiro a cada vsync,
+/// parado ou tocando vídeo de 30 fps a 60 Hz: calor, bateria e o lock do
+/// modelo disputado com a UI.
 - (void)onTick:(CADisplayLink*)link {
     (void)link;
-    [self.engine requestRender];
+    [self.engine wakeRender];
 }
 
 // =============================================================================

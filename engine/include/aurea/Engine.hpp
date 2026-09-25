@@ -25,6 +25,7 @@
 #pragma once
 
 #include "aurea/text/Captions.hpp"
+#include "aurea/project/AlightMotion.hpp"
 #include "aurea/project/Presets.hpp"
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/scene3d/Importer.hpp"
@@ -259,6 +260,10 @@ public:
     void stop_render_thread() noexcept;
     /// Acorda a thread de render (há algo novo para mostrar).
     void request_render() noexcept;
+    /// Só acorda: a thread redesenha se algo mudou (playhead, modelo, frame de
+    /// vídeo que faltava) e dorme de novo se não. É o pulso do vsync no iOS —
+    /// `request_render` ali forçava um quadro inteiro a cada vsync, mesmo parado.
+    void wake_render() noexcept;
     /// Quantas vezes a thread de render acordou desde que subiu (§38: parado,
     /// sem superfície, tem de ficar parado; com superfície, no máximo a rede
     /// de 500 ms).
@@ -755,6 +760,15 @@ public:
     /// camada não tem o que salvar desse tipo. `parts` = TextPresetParts.
     [[nodiscard]] std::string save_preset(u64 layerId, presets::PresetKind kind, const std::string& name,
                                           u32 parts = presets::kTextAll) noexcept;
+    /// Preset de efeitos com SÓ o efeito `effectId` (id estável da instância
+    /// na camada) e os keyframes dele. Vazio = camada ou efeito não existe.
+    [[nodiscard]] std::string save_effect_preset(u64 layerId, u32 effectId, const std::string& name) noexcept;
+    /// Converte um XML do Alight Motion (projeto, elemento ou preset
+    /// compartilhado; também o pacote .zip/.amproj) num preset de EFEITOS do
+    /// Aurea (formato de project/Presets.hpp, pronto para `apply_preset`).
+    /// Vazio = nada aproveitável (`report.error` diz o porquê); o que ficou de
+    /// fora vai em `report.skipped`/`report.warnings`. Não mexe no projeto.
+    [[nodiscard]] std::string import_alight_motion(const std::string& data, presets::AlightImportReport& report) noexcept;
     /// Aplica o preset (um passo de desfazer). Efeitos ACRESCENTAM; texto troca
     /// estilo/animadores; animação começa no cabeçote (ou no início da camada
     /// se o cabeçote estiver fora dela) e, com `durationFrames` > 0, estica até

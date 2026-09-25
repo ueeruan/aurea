@@ -12,6 +12,8 @@
 // =============================================================================
 #include "aurea/vector/Vector.hpp"
 
+#include "aurea/core/MiniXml.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -22,95 +24,11 @@
 namespace aurea::vector {
 namespace {
 
-struct XNode {
-    std::string name;
-    std::vector<std::pair<std::string, std::string>> attrs;
-    std::vector<XNode> kids;
-    const std::string* attr(const char* n) const {
-        for (const auto& a : attrs) if (a.first == n) return &a.second;
-        return nullptr;
-    }
-};
+// Árvore XML mínima (tags, atributos; texto ignorado): o leitor comum do
+// motor (core/MiniXml), o mesmo que a importação do Alight Motion usa.
+using XNode = xml::Node;
 
-std::string decode_entities(const std::string& s) {
-    if (s.find('&') == std::string::npos) return s;
-    std::string o;
-    for (usize i = 0; i < s.size(); ++i) {
-        if (s[i] == '&') {
-            const usize e = s.find(';', i);
-            if (e != std::string::npos && e - i < 8) {
-                const std::string ent = s.substr(i + 1, e - i - 1);
-                char c = 0;
-                if (ent == "amp") c = '&'; else if (ent == "lt") c = '<'; else if (ent == "gt") c = '>';
-                else if (ent == "quot") c = '"'; else if (ent == "apos") c = '\'';
-                if (c) { o.push_back(c); i = e; continue; }
-            }
-        }
-        o.push_back(s[i]);
-    }
-    return o;
-}
-
-/// Árvore XML mínima (tags, atributos; texto ignorado).
-bool parse_xml(const std::string& s, XNode& root) {
-    std::vector<XNode*> stack{&root};
-    usize i = 0;
-    const usize n = s.size();
-    while (i < n) {
-        const usize lt = s.find('<', i);
-        if (lt == std::string::npos) break;
-        i = lt;
-        if (s.compare(i, 4, "<!--") == 0) { const usize e = s.find("-->", i + 4); i = e == std::string::npos ? n : e + 3; continue; }
-        if (s.compare(i, 9, "<![CDATA[") == 0) { const usize e = s.find("]]>", i); i = e == std::string::npos ? n : e + 3; continue; }
-        if (s.compare(i, 2, "<?") == 0) { const usize e = s.find("?>", i); i = e == std::string::npos ? n : e + 2; continue; }
-        if (s.compare(i, 2, "<!") == 0) {
-            // DOCTYPE (pode ter [ ... ] com '>' dentro).
-            int depth = 0;
-            for (++i; i < n; ++i) {
-                if (s[i] == '[') ++depth; else if (s[i] == ']') --depth;
-                else if (s[i] == '>' && depth <= 0) { ++i; break; }
-            }
-            continue;
-        }
-        if (s.compare(i, 2, "</") == 0) {
-            const usize e = s.find('>', i);
-            if (stack.size() > 1) stack.pop_back();
-            i = e == std::string::npos ? n : e + 1;
-            continue;
-        }
-        ++i;
-        XNode node;
-        while (i < n && !std::isspace(static_cast<unsigned char>(s[i])) && s[i] != '>' && s[i] != '/') node.name.push_back(s[i++]);
-        // Prefixo de namespace fora (svg:path → path).
-        if (const usize c = node.name.find(':'); c != std::string::npos) node.name = node.name.substr(c + 1);
-        bool selfClose = false;
-        while (i < n) {
-            while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
-            if (i >= n) break;
-            if (s[i] == '>') { ++i; break; }
-            if (s[i] == '/') { selfClose = true; ++i; continue; }
-            std::string key;
-            while (i < n && s[i] != '=' && !std::isspace(static_cast<unsigned char>(s[i])) && s[i] != '>' && s[i] != '/') key.push_back(s[i++]);
-            while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
-            std::string val;
-            if (i < n && s[i] == '=') {
-                ++i;
-                while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
-                if (i < n && (s[i] == '"' || s[i] == '\'')) {
-                    const char q = s[i++];
-                    const usize e = s.find(q, i);
-                    val = s.substr(i, (e == std::string::npos ? n : e) - i);
-                    i = e == std::string::npos ? n : e + 1;
-                }
-            }
-            if (!key.empty()) node.attrs.emplace_back(key, decode_entities(val));
-        }
-        XNode* parent = stack.back();
-        parent->kids.push_back(std::move(node));
-        if (!selfClose) stack.push_back(&parent->kids.back());
-    }
-    return !root.kids.empty();
-}
+bool parse_xml(const std::string& s, XNode& root) { return xml::parse(s, root); }
 
 // --- números -----------------------------------------------------------------
 struct NumReader {

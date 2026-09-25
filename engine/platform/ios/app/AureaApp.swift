@@ -16,6 +16,7 @@ struct AureaApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .id(model.themeId)
                 .environmentObject(model)
                 .environmentObject(model.playheadClock)
                 .environment(\.layoutDirection, model.language.resolved == .ar ? .rightToLeft : .leftToRight)

@@ -260,14 +260,21 @@ fun EditorScreen(store: EditorStore) {
 
                 // O "+": escondido em tela cheia, adicionando ou com painel aberto.
                 if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel) {
-                    val bottom = if (wide || content == SheetContent.None) 0f else m.sheet
+                    // Camada escolhida com a timeline baixa: o "+" cobria justamente o
+                    // clipe escolhido. Sobe para o canto do palco, acima do transporte.
+                    val lifted = !wide && content == SheetContent.Dock && m.timeline < 170f
+                    val bottom = when {
+                        wide || content == SheetContent.None -> 0f
+                        lifted -> m.sheet + m.timeline + m.transport + m.strip
+                        else -> m.sheet
+                    }
                     AddFab(
                         onClick = { openAdd(store, ui) },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(
-                                end = ShellDims.FabMargin + (if (wide) sheetWidth.dp else 0.dp),
-                                bottom = ShellDims.FabMargin + bottom.dp,
+                                end = (if (lifted) 10.dp else ShellDims.FabMargin) + (if (wide) sheetWidth.dp else 0.dp),
+                                bottom = (if (lifted) 10.dp else ShellDims.FabMargin) + bottom.dp,
                             ),
                     )
                 }

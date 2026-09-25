@@ -1,11 +1,13 @@
 // Port of EffectsPanel.kt and EffectStackCard. Project data stays in the core.
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 @MainActor
 struct EffectsView: View {
     @EnvironmentObject private var model: AureaModel
     @State private var browsing = false
+    @State private var importingAM = false
     @State private var openId: UInt32?
     @State private var known: Set<UInt32> = []
     @State private var loadedLayer: Int64?
@@ -67,6 +69,14 @@ struct EffectsView: View {
         .onChange(of: model.status.modelRevision) { _ in refreshExpressions() }
         .onChange(of: model.status.playhead) { _ in refreshExpressions() }
         .fullScreenCover(isPresented: $browsing) { EffectsBrowser(onDismiss: { browsing = false }).environmentObject(model) }
+        // Alight Motion: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
+        .fileImporter(isPresented: $importingAM, allowedContentTypes: [.data, .xml, .zip]) { result in
+            guard case .success(let url) = result else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url) { model.importAlightMotion(data) }
+            else { model.toast = AureaText.t("am_import_failed", url.lastPathComponent) }
+        }
         .onDisappear { finishReorder(); model.endGesture() }
     }
     @ViewBuilder private var rail: some View {
@@ -339,6 +349,8 @@ struct EffectsView: View {
     }
     private func listMenu() {
         var actions: [(String, () -> Void)] = [(AureaText.t("panel_adicionar_efeito"), { browsing = true })]
+        actions.append((AureaText.t("fx_my_presets"), { model.presetsOpenKind = "efeitos"; model.openPanel(.presets) }))
+        actions.append((AureaText.t("am_import_action"), { importingAM = true }))
         if !model.effects.isEmpty { actions.append((AureaText.t("panel_copiar_efeitos"), { if let layer = model.primarySelection { model.engine.copyEffects(layer) } })) }
         if model.engine.clipboardState & 4 != 0 {
             actions.append((AureaText.t("panel_colar_efeitos"), {
@@ -361,6 +373,11 @@ struct EffectsView: View {
         if effect.known {
             actions.append((AureaText.t(effect.enabled ? "panel_desligar_efeito" : "panel_ligar_efeito"), { enable(effect, !effect.enabled) }))
             actions.append((AureaText.t("panel_redefinir_efeito"), { reset(effect) }))
+            actions.append((AureaText.t("fx_save_as_preset"), {
+                model.namePrompt = NamePromptRequest(title: AureaText.t("fx_save_as_preset"), initial: fxEffectDisplayName(effect.typeId, effect.name)) {
+                    model.saveEffectPreset(effectId: effect.effectId, name: $0)
+                }
+            }))
             if let index = model.effects.firstIndex(where: { $0.effectId == effect.effectId }) {
                 if index > 0 { actions.append((AureaText.t("panel_mover_cima"), { move(effect, to: index - 1) })) }
                 if index < model.effects.count - 1 { actions.append((AureaText.t("panel_mover_baixo"), { move(effect, to: index + 1) })) }

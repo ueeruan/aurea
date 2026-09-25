@@ -5,6 +5,16 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import com.aurea.aurea.ui.theme.tocavel
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -155,6 +165,12 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                 ) { languageSheet = true }
             }
             GroupNote(stringResource(R.string.settings_language_note))
+        }
+        item(key = "tema") {
+            Spacer(Modifier.height(AureaDims.S5))
+            GroupHeader(stringResource(R.string.settings_group_theme))
+            Group { ThemePicker(AureaColors.palette.id, vm::changeTheme) }
+            GroupNote(stringResource(R.string.settings_theme_note))
         }
         item(key = "legendas") {
             Spacer(Modifier.height(AureaDims.S5))
@@ -340,4 +356,50 @@ private fun GroqKeyDialog(store: EditorStore, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+/** Nome de cada tema (o id é o salvo nos Ajustes). */
+@Composable
+private fun themeName(id: String): String = stringResource(when (id) {
+    "midnight" -> R.string.theme_midnight
+    "graphite" -> R.string.theme_graphite
+    "emerald" -> R.string.theme_emerald
+    "amethyst" -> R.string.theme_amethyst
+    "sunset" -> R.string.theme_sunset
+    else -> R.string.theme_aurea
+})
+
+/**
+ * Temas como amostras: o fundo do tema com a cor de destaque por cima, o nome
+ * embaixo. Tocar aplica na hora (o app inteiro redesenha), sem confirmar.
+ */
+@Composable
+private fun ThemePicker(current: String, onPick: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        com.aurea.aurea.ui.theme.AureaPalette.all.forEach { palette ->
+            val on = palette.id == current
+            val name = themeName(palette.id)
+            Column(
+                Modifier.width(64.dp).semantics { contentDescription = name; selected = on }
+                    .tocavel(haptic = true) { onPick(palette.id) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier.size(52.dp).clip(CircleShape).background(palette.background)
+                        .border(if (on) 3.dp else 1.dp, if (on) palette.accent else palette.border, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.size(22.dp).clip(CircleShape).background(palette.accent))
+                    Box(Modifier.size(52.dp).padding(6.dp), contentAlignment = Alignment.BottomEnd) {
+                        Box(Modifier.size(12.dp).clip(CircleShape).background(palette.surfaceHigh))
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(name, style = AureaType.Label, color = if (on) AureaColors.Text else AureaColors.Muted, maxLines = 1)
+            }
+        }
+    }
 }

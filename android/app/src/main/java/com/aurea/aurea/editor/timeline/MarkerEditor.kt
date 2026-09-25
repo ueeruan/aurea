@@ -23,19 +23,20 @@ private val markerPalette = intArrayOf(0xFFF7C34F.toInt(), 0xFF4D6EFF.toInt(), 0
     0xFFFFB75B.toInt(), 0xFFD67BDB.toInt(), 0xFFFFFFFF.toInt())
 private fun markerColor(packed: Int) = Color(packed and 255, (packed ushr 8) and 255, (packed ushr 16) and 255)
 
-/** Opened by holding the preview anchor; normal tap marks the current frame. */
+/** Opened by holding the preview anchor or tapping a marker on the ruler; a new marker only exists after Save. */
 @Composable
 internal fun MarkerEditor(store: EditorStore) {
     val editing = store.markerEditingFrame
+    val isNew = store.markerEditingIsNew
     var failure by remember(editing) { mutableStateOf(false) }
     val markers = store.markers
     editing?.let { original ->
         val index = markers.frames.indexOf(original)
-        if (index < 0) { LaunchedEffect(original) { store.markerEditingFrame = null }; return@let }
-        var name by remember(original) { mutableStateOf(store.markerLabel(original)) }
-        var frame by remember(original) { mutableStateOf(original.toString()) }
-        var color by remember(original) { mutableStateOf(markers.colors[index]) }
-        AlertDialog(onDismissRequest = { store.markerEditingFrame = null; failure = false },
+        if (index < 0 && !isNew) { LaunchedEffect(original) { store.closeMarkerEditor() }; return@let }
+        var name by remember(original, isNew) { mutableStateOf(if (isNew) "" else store.markerLabel(original)) }
+        var frame by remember(original, isNew) { mutableStateOf(original.toString()) }
+        var color by remember(original, isNew) { mutableStateOf(if (index >= 0) markers.colors[index] else markerPalette[0]) }
+        AlertDialog(onDismissRequest = { store.closeMarkerEditor(); failure = false },
             title = { Text(stringResource(R.string.marker_edit)) },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { if (it.length <= 200) name = it }, singleLine = true,
@@ -54,13 +55,15 @@ internal fun MarkerEditor(store: EditorStore) {
                     }
                 }
                 Text(stringResource(if (failure) R.string.marker_error else R.string.marker_hint), fontSize = 12.sp)
-                TextButton(onClick = { store.deleteMarker(original); store.markerEditingFrame = null; failure = false }) { Text(stringResource(R.string.common_delete)) }
+                if (!isNew) {
+                    TextButton(onClick = { store.deleteMarker(original); store.closeMarkerEditor(); failure = false }) { Text(stringResource(R.string.common_delete)) }
+                }
             } },
             confirmButton = { TextButton(onClick = {
                 val target = frame.toIntOrNull()
-                if (target != null && store.editMarker(original, target, color, name)) { store.markerEditingFrame = null; failure = false }
+                if (target != null && store.editMarker(if (isNew) -1 else original, target, color, name)) { store.closeMarkerEditor(); failure = false }
                 else failure = true
             }) { Text(stringResource(R.string.common_save)) } },
-            dismissButton = { TextButton(onClick = { store.markerEditingFrame = null; failure = false }) { Text(stringResource(R.string.common_cancel)) } })
+            dismissButton = { TextButton(onClick = { store.closeMarkerEditor(); failure = false }) { Text(stringResource(R.string.common_cancel)) } })
     }
 }

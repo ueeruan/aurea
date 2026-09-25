@@ -169,6 +169,71 @@ AUREA_TEST(Presets, EffectsRoundTripOnAnotherLayerKeepsParamsAndRelativeKeys) {
     for (usize i = 0; i + 1 < lb->effects.size(); ++i) AUREA_CHECK(lb->effects[i].id != extra);
 }
 
+// Um efeito só (o segundo de dois): o preset leva só ele, com os parâmetros
+// e os keyframes, e aplicado em outra camada não traz o vizinho.
+AUREA_TEST(Presets, SingleEffectPresetCapturesOnlyThatEffect) {
+    PresetRig r;
+    const u64 a = *r.e.add_shape(0);
+    const u64 b = *r.e.add_shape(3);
+    r.range(a, 10, 100, 0);
+    r.range(b, 40, 120, 5);
+    const u32 blur = r.add_effect(a, effect_keys::kGaussianBlur);
+    const u32 glow = r.add_effect(a, effect_keys::kGlow);
+    Layer* la = r.L(a);
+    la->effects[0].params[0].constant.v[0] = 6.5f;
+    la->effects[1].params[1].constant.v[0] = 44.0f;   // raio do brilho
+    la->effects[1].params[3].constant = ParamValue::color(1.0f, 0.5f, 0.25f, 1.0f);
+    const i64 s0 = la->local_time(la->start).value;
+    la->tracks.get_or_create(TrackProperty::EffectParam, blur, param_track_key(0, 0)).set(FrameIndex{s0 + 3}, 1.0f);
+    Track& g = la->tracks.get_or_create(TrackProperty::EffectParam, glow, param_track_key(2, 0));
+    g.set(FrameIndex{s0 + 4}, 0.5f, Interpolation::EaseOut);
+    g.set(FrameIndex{s0 + 16}, 3.0f);
+
+    const std::string js = r.e.save_effect_preset(a, glow, "Só o brilho");
+    AUREA_CHECK(!js.empty());
+    AUREA_CHECK(js.find("\"aurea.light.glow\"") != std::string::npos);
+    AUREA_CHECK(js.find("\"aurea.blur.gaussian\"") == std::string::npos);
+    AUREA_CHECK(r.e.save_effect_preset(a, 9999, "x").empty());          // efeito que não existe
+    AUREA_CHECK(r.e.save_effect_preset(0xDEADBEEFull, glow, "x").empty());   // camada que não existe
+    // O pedido de pilha inteira continua igual.
+    presets::Preset whole;
+    AUREA_CHECK(presets::parse(r.e.save_preset(a, PresetKind::Effects, "tudo"), whole, &r.e.effects()));
+    AUREA_CHECK_EQ(whole.effects.size(), usize{2});
+
+    presets::Preset p;
+    AUREA_CHECK(presets::parse(js, p, &r.e.effects()));
+    AUREA_CHECK(p.kind == PresetKind::Effects && p.name == "Só o brilho");
+    AUREA_CHECK_EQ(p.effects.size(), usize{1});
+    AUREA_CHECK_EQ(p.effectTracks.size(), usize{1});
+    AUREA_CHECK_EQ(presets::write(p, &r.e.effects()), js);
+
+    AUREA_CHECK(r.e.apply_preset(b, js));
+    la = r.L(a);
+    const Layer* lb = r.L(b);
+    AUREA_CHECK_EQ(lb->effects.size(), usize{1});
+    if (lb->effects.size() != 1) return;
+    const EffectInstance& src = la->effects[1];
+    const EffectInstance& dst = lb->effects[0];
+    AUREA_CHECK(dst.type == effect_type_id(effect_keys::kGlow));
+    AUREA_CHECK_EQ(src.params.size(), dst.params.size());
+    for (usize k = 0; k < src.params.size() && k < dst.params.size(); ++k) AUREA_CHECK(src.params[k].constant == dst.params[k].constant);
+    const auto ta = tracks_of(*la, TrackProperty::EffectParam, glow);
+    const auto tb = tracks_of(*lb, TrackProperty::EffectParam, dst.id);
+    AUREA_CHECK_EQ(ta.size(), usize{1});
+    AUREA_CHECK_EQ(tb.size(), usize{1});
+    if (ta.size() != 1 || tb.size() != 1) return;
+    AUREA_CHECK_EQ(tb[0]->effectParamIndex, param_track_key(2, 0));
+    AUREA_CHECK_EQ(tb[0]->keys.size(), usize{2});
+    for (usize q = 0; q < ta[0]->keys.size() && q < tb[0]->keys.size(); ++q) {
+        AUREA_CHECK(same_key(ta[0]->keys[q], tb[0]->keys[q]));
+        AUREA_CHECK_EQ(ta[0]->keys[q].time.value - la->offset.value, tb[0]->keys[q].time.value - lb->offset.value);
+    }
+    // Nenhuma trilha do desfoque veio junto.
+    u32 effectTracks = 0;
+    for (u32 i = 0; i < lb->tracks.size(); ++i) if (lb->tracks.at(i).property == TrackProperty::EffectParam) ++effectTracks;
+    AUREA_CHECK_EQ(effectTracks, 1u);
+}
+
 AUREA_TEST(Presets, TextStylePresetReproducesFieldsAndAnimators) {
     PresetRig r;
     const u64 a = *r.e.add_text("Origem");
@@ -333,7 +398,7 @@ AUREA_TEST(Presets, MalformedPresetIsRejectedWithoutMutation) {
         "", "{}", "[]", "null", truncated, future, unknown, badKey,
         R"({"aurea_preset":1,"kind":"planeta","name":"x"})",
         R"({"aurea_preset":1,"kind":"effects","effects":[{"key":"aurea.blur.gaussian","tracks":[{"index":0,"keys":[[1.5,2]]}]}]})",
-        R"({"aurea_preset":1,"kind":"effects","effects":[{"key":"aurea.blur.gaussian","tracks":[{"index":0,"keys":[[1,2,9]]}]}]})",
+        R"({"aurea_preset":1,"kind":"effects","effects":[{"key":"aurea.blur.gaussian","tracks":[{"index":0,"keys":[[1,2,99]]}]}]})",
         R"({"aurea_preset":1,"kind":"effects","effects":[{"key":"aurea.blur.gaussian","params":[{"index":0,"v":[1,2]}]}]})",
         R"({"aurea_preset":1,"kind":"animation","tracks":[{"prop":"cor","keys":[[0,1]]}]})",
         R"({"aurea_preset":1,"kind":"animation","tracks":[{"prop":"opacity","keys":[]}]})",

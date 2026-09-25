@@ -273,8 +273,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)detachSurface;
 - (void)resizeSurfaceWidth:(int)width height:(int)height;
 @property (nonatomic, readonly) BOOL hasSurface;
-/// Acorda a thread de render. É o que o CADisplayLink chama uma vez por vsync.
+/// Acorda a thread de render e força um quadro.
 - (void)requestRender;
+/// Pulso do vsync: acorda a thread, que só redesenha se algo mudou.
+- (void)wakeRender;
 
 // --- Estado -----------------------------------------------------------------
 /// `YES` se leu. Sem alocação: a UI chama isto uma vez por frame.
@@ -529,6 +531,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)keyParameter:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time value:(float)value;
 - (NSString*)savePreset:(long long)layerId kind:(uint32_t)kind name:(NSString*)name;
 - (NSString*)savePreset:(long long)layerId kind:(uint32_t)kind name:(NSString*)name parts:(uint32_t)parts NS_SWIFT_NAME(savePreset(_:kind:name:parts:));
+/// Preset de efeitos com SÓ o efeito `effectId` (id da instância) e os keyframes dele. "" = não existe.
+- (NSString*)saveEffectPreset:(long long)layerId effect:(uint32_t)effectId name:(NSString*)name NS_SWIFT_NAME(saveEffectPreset(_:effect:name:));
+/// XML do Alight Motion (ou os bytes do pacote .zip/.amproj) → envelope JSON
+/// {"preset", "name", "layer", "mapped", "skipped", "warnings", "error"}; "preset" vai para applyPreset.
+- (NSString*)importAlightMotion:(NSData*)data NS_SWIFT_NAME(importAlightMotion(_:));
 - (NSArray<NSNumber*>*)parseCaptionPreset:(NSString*)json NS_SWIFT_NAME(parseCaptionPreset(_:));
 - (NSString*)makeCaptionPreset:(NSString*)name options:(NSDictionary<NSString*, NSNumber*>*)options NS_SWIFT_NAME(makeCaptionPreset(_:options:));
 - (NSArray<NSNumber*>*)parseCurvePreset:(NSString*)json NS_SWIFT_NAME(parseCurvePreset(_:));

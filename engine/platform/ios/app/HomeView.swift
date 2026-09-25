@@ -722,6 +722,9 @@ struct HomeSettingsTab: View {
                     tapRow("settings_language", subtitle: model.language.label) { languageSheet = true }
                 }
                 groupNote("settings_language_note")
+                groupHeader("settings_group_theme", top: true)
+                group { themePicker }
+                groupNote("settings_theme_note")
                 groupHeader("settings_group_captions", top: true)
                 group {
                     tapRow("settings_groq_key", subtitle: AureaText.t(hasGroqKey ? "settings_groq_set" : "settings_groq_unset")) {
@@ -786,6 +789,31 @@ struct HomeSettingsTab: View {
         }
         .onChange(of: languageSheet) { _ in modalActive = languageSheet || keyDialog }
         .onChange(of: keyDialog) { _ in modalActive = languageSheet || keyDialog }
+    }
+
+    /// Temas como amostras (par do ThemePicker do Android): o fundo do tema com
+    /// o destaque por cima, o nome embaixo. Tocar aplica na hora.
+    private var themePicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                ForEach(AureaPalette.all) { palette in
+                    let on = palette.id == model.themeId
+                    Button { model.setTheme(palette.id) } label: {
+                        VStack(spacing: 6) {
+                            ZStack {
+                                Circle().fill(palette.background)
+                                Circle().fill(palette.accent).frame(width: 22, height: 22)
+                                Circle().fill(palette.surfaceHigh).frame(width: 12, height: 12).offset(x: 13, y: 13)
+                                Circle().strokeBorder(on ? palette.accent : palette.border, lineWidth: on ? 3 : 1)
+                            }.frame(width: 52, height: 52)
+                            Text(AureaText.t("theme_" + palette.id)).font(.aurea(size: 10))
+                                .foregroundStyle(on ? AureaColors.text : AureaColors.muted).lineLimit(1)
+                        }.frame(width: 64)
+                    }.buttonStyle(.plain).accessibilityLabel(AureaText.t("theme_" + palette.id))
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }.padding(.horizontal, 12).padding(.vertical, 14)
+        }
     }
 
     private func groupHeader(_ key: String, top: Bool = false) -> some View {

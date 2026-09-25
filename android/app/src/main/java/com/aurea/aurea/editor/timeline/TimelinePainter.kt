@@ -316,6 +316,20 @@ internal class TimelinePainter(
                 if (RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - m.trimInsetStart, top)
                 if (RowHit.endHandleVisible(x1, w)) drawTrimHandle(x1 - m.trimInsetEnd, top)
             }
+        } else if (r.track == null) {
+            // Clipe fora da janela: uma seta na borda diz para que lado ele
+            // está (linha vazia parecia camada quebrada).
+            val right = x0 > w
+            val tip = if (right) w - 10f * m.density else m.headerColumn + 10f * m.density
+            val back = if (right) tip - 7f * m.density else tip + 7f * m.density
+            val cy = top + m.bar / 2f
+            val arrow = androidx.compose.ui.graphics.Path().apply {
+                moveTo(tip, cy)
+                lineTo(back, cy - 6f * m.density)
+                lineTo(back, cy + 6f * m.density)
+                close()
+            }
+            drawPath(arrow, r.type.color.copy(alpha = if (r.visible) 0.9f else 0.45f))
         }
         drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps)
     }

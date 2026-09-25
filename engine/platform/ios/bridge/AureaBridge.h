@@ -166,8 +166,10 @@ public:
     void resize_surface(u32 width, u32 height) noexcept;
     [[nodiscard]] bool has_surface() const noexcept { return hasSurface_; }
 
-    /// Acorda a thread de render. É o que o CADisplayLink chama.
+    /// Acorda a thread de render e FORÇA um quadro (algo mudou fora do modelo).
     void request_render() noexcept;
+    /// Só acorda (redesenha se algo mudou). É o que o CADisplayLink chama.
+    void wake_render() noexcept;
     /// A janela voltou a aparecer: reapresenta mesmo sem mudança no modelo.
     void invalidate() noexcept;
 

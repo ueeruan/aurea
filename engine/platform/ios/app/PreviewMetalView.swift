@@ -120,7 +120,15 @@ struct PreviewMetalView: UIViewRepresentable {
         private var gizmoVector = CGPoint.zero
         private var gizmoCollapsed = false
         private var lastGizmoPoint = CGPoint.zero
-        private enum StageMode { case pending, move, scale, rotate, pinch, idle, gizmo, shape }
+        private enum StageMode { case pending, move, scale, rotate, pinch, idle, gizmo, shape, scene }
+        // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
+        private var sceneMode = 0
+        private var scenePicked: Int64?
+        private var sceneLast = CGPoint.zero
+        private var sceneSpan: CGFloat = 1
+        private var sceneDistance0: Float = 3
+        private var sceneTapAt: TimeInterval = 0
+        private var sceneTapPoint = CGPoint.zero
         private var stageMode: StageMode = .idle
         private var stageDown = CGPoint.zero
         private var stageFinger: ObjectIdentifier?
@@ -427,11 +435,19 @@ struct PreviewMetalView: UIViewRepresentable {
                 model.refreshSelectedLayer()
                 if !model.sceneEditor && startShape(at: first.position, view: view) { stageMode = .shape }
                 else if startGizmo(at: first.position, view: view) { stageMode = .gizmo }
-                else if model.sceneEditor { stageMode = .idle }
+                else if model.sceneEditor {
+                    stageMode = .scene; sceneMode = 0; sceneLast = first.position
+                    scenePicked = model.scenePick(compositionPoint(first.position, view: view), radius: 36 * scaleFactor(view))
+                }
                 else { recordTarget(first.position, view: view) }
                 if stageMode == .pending && handle < 0, let anchor = model.previewMarkerAnchor {
                     let p = screenPoint(anchor.x, anchor.y, view: view)
-                    if hypot(first.position.x - p.x, first.position.y - p.y) <= 24 {
+                    // Outra camada visível por cima do ponto tocado ganha: tocar
+                    // num texto sobre o vídeo selecionado seleciona o texto, não
+                    // marca o vídeo (era marca "do nada").
+                    let over = hitLayer(compositionPoint(first.position, view: view), slack: 0, includeLocked: false)
+                    if hypot(first.position.x - p.x, first.position.y - p.y) <= 24,
+                       over == nil || over == model.primarySelection {
                         markerAnchorLayer = model.primarySelection
                         let hold = DispatchWorkItem { [weak self] in
                             guard let self, self.stageMode == .pending, !self.hadMultipleTouches,
@@ -445,6 +461,11 @@ struct PreviewMetalView: UIViewRepresentable {
                     }
                 }
                 if pressed.count < 2 { return }
+            }
+            if stageMode == .scene {
+                sceneEvent(pressed, view: view)
+                if pressed.isEmpty { finishStageEdit(); stageFinger = nil; stageMode = .idle }
+                return
             }
             if pressed.isEmpty {
                 if stageMode == .pending && !hadMultipleTouches && handle < 0 {
@@ -615,6 +636,55 @@ struct PreviewMetalView: UIViewRepresentable {
             let local = localPosition(next, affine: moveAffine)
             beginEdit("mover"); model.setTransform2(0, local.x, 1, local.y, layer: id)
         }
+        /// Cena 3D "seca": tudo com o dedo na tela (par do `sceneGesture` do
+        /// Android). Objeto sob o dedo: escolhe e arrasta no plano mais de
+        /// frente. Vazio: 1 dedo gira a vista; toque solta a seleção; toque
+        /// duplo recentra. 2 dedos: pinça aproxima/afasta. Um arrasto de
+        /// objeto = UM passo de desfazer; a órbita é só da prévia.
+        private func sceneEvent(_ pressed: [StageTouchPoint], view: UIView) {
+            if pressed.isEmpty {
+                guard sceneMode == 0 else { return }
+                if let picked = scenePicked {
+                    if model.primarySelection != picked || model.selection.count != 1 {
+                        model.select(layerId: picked, additive: false); snapFeedback.selectionChanged()
+                    }
+                    return
+                }
+                let now = ProcessInfo.processInfo.systemUptime
+                let again = now - sceneTapAt < 0.32 && hypot(stageDown.x - sceneTapPoint.x, stageDown.y - sceneTapPoint.y) < 48
+                sceneTapAt = again ? 0 : now; sceneTapPoint = stageDown
+                if again { model.resetSceneView() } else { model.clearSelection() }
+                return
+            }
+            if pressed.count >= 2 {
+                let a = pressed[0].position, b = pressed[1].position
+                let span = max(1, hypot(a.x - b.x, a.y - b.y))
+                if sceneMode != 3 {
+                    finishStageEdit(); sceneMode = 3; sceneSpan = span; sceneDistance0 = model.sceneDistance
+                } else {
+                    model.setSceneView(yaw: model.sceneYaw, pitch: model.scenePitch, distance: sceneDistance0 * Float(sceneSpan / span))
+                }
+                return
+            }
+            if sceneMode == 3 { return }   // sobrou um dedo da pinça: nada
+            guard let first = pressed.first(where: { $0.id == stageFinger }) else { return }
+            if sceneMode == 0 && hypot(first.position.x - stageDown.x, first.position.y - stageDown.y) > 12 {
+                if let picked = scenePicked {
+                    if model.primarySelection != picked || model.selection.count != 1 { model.select(layerId: picked, additive: false) }
+                    beginEdit("mover na cena"); sceneMode = 2
+                } else {
+                    sceneMode = 1
+                }
+                sceneLast = stageDown   // a folga inteira entra: nada "pula" depois
+            }
+            let dx = first.position.x - sceneLast.x, dy = first.position.y - sceneLast.y
+            switch sceneMode {
+            case 1: model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.35, pitch: model.scenePitch + Float(dy) * 0.35, distance: model.sceneDistance)
+            case 2: let f = scaleFactor(view); model.sceneDragObject(dx: Float(dx) * f, dy: Float(dy) * f)
+            default: break
+            }
+            if sceneMode != 0 { sceneLast = first.position }
+        }
         private func startGizmo(at point: CGPoint, view: UIView) -> Bool {
             guard editableSelection(), let id = model.primarySelection, !ShapeStageGeometry.enabled(model) else { return false }
             let data = model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
@@ -639,21 +709,7 @@ struct PreviewMetalView: UIViewRepresentable {
             let amount = gizmoCollapsed ? -Float(dy) * scaleFactor(view) * 2 : length2 > 1 ? Float((dx * gizmoVector.x + dy * gizmoVector.y) / length2) * ShellStageGeometry.gizmoLength : 0
             guard amount != 0 else { return }
             let next = model.engine.gizmoMoveLocal(id, axis: UInt32(gizmoAxis), amount: amount).map(\.floatValue)
-            guard next.count == 3 else { return }
-            let animated = ((model.detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0) & 7 != 0
-            // Submission is asynchronous: three scalar setters would each read
-            // the same old XYZ and overwrite the preceding axis command.
-            let local = model.localPlayhead
-            model.mutate { core in
-                if model.sceneEditor {
-                    for axis in 0...2 { core.layoutTransform(id, property: UInt32(axis), value: next[axis]) }
-                } else if animated {
-                    for axis in 0...2 { core.insertKeyframe(forLayer: id, property: UInt32(axis), time: local, value: next[axis]) }
-                } else {
-                    core.setPosition(forLayer: id, x: next[0], y: next[1], z: next[2])
-                }
-            }
-            model.refreshModel(force: true)
+            model.applyGizmoPosition(id, next)
         }
         private func startShape(at point: CGPoint, view: UIView) -> Bool {
             guard ShapeStageGeometry.enabled(model) else { return false }

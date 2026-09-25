@@ -3514,7 +3514,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         struct Cap { PipelineHandle p; FGTexture comp; u64 sampler; Mat4 clip; f32 w, h; f32 dither; void* ubo; }
             cap{pOut.ok() ? *pOut : PipelineHandle{}, comp, shaders_.sampler(CommonSampler::LinearClamp).id,
                 clip, compW, compH, settings.dither ? 1.0f : 0.0f, ubo};
-        const Vec4 clear{0, 0, 0, 1};
+        const Vec4 clear = settings.pasteboard;
         const u32 pass = graph_.add_raster_pass("saida", PassStage::Output, bb, LoadOp::Clear, clear,
                                                 [cap](PassContext& pc) {
             if (!cap.p.valid()) return;

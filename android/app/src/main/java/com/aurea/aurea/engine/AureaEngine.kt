@@ -527,6 +527,17 @@ class AureaEngine private constructor() {
     /** kind 0 efeitos, 1 texto, 2 animação; parts (texto) 1 estilo, 2 animadores. Nulo = nada a salvar. */
     fun savePreset(layer: Long, kind: Int, name: String, parts: Int = 3): String? =
         nativeSavePreset(nativeHandle, layer, kind, name.toByteArray(Charsets.UTF_8), parts)?.toString(Charsets.UTF_8)
+    /** Preset de efeitos com SÓ o efeito [effectId] (id da instância) e os keyframes dele. Nulo = não existe. */
+    fun saveEffectPreset(layer: Long, effectId: Int, name: String): String? =
+        nativeSaveEffectPreset(nativeHandle, layer, effectId, name.toByteArray(Charsets.UTF_8))?.toString(Charsets.UTF_8)
+    /**
+     * XML do Alight Motion (ou os bytes do pacote .zip/.amproj) → envelope JSON
+     * {"preset", "name", "layer", "mapped", "skipped", "warnings", "error"}.
+     * "preset" é o JSON de efeitos para [applyPreset]; vazio = nada aproveitável.
+     */
+    fun importAlightMotion(data: ByteArray): String =
+        nativeImportAlightMotion(nativeHandle, data)?.toString(Charsets.UTF_8) ?: """{"preset":"","error":"motor indisponivel"}"""
+    fun importAlightMotion(xml: String): String = importAlightMotion(xml.toByteArray(Charsets.UTF_8))
     /** Um passo de desfazer. Nulo = aplicado; senão, o motivo. `duration` > 0 estica a animação. */
     fun applyPreset(layer: Long, json: String, duration: Long = 0): String? =
         nativeApplyPreset(nativeHandle, layer, json.toByteArray(Charsets.UTF_8), duration)?.toString(Charsets.UTF_8)
@@ -752,6 +763,8 @@ class AureaEngine private constructor() {
     private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
     private external fun nativeApplyTextPreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeSavePreset(handle: Long, layer: Long, kind: Int, name: ByteArray, parts: Int): ByteArray?
+    private external fun nativeSaveEffectPreset(handle: Long, layer: Long, effectId: Int, name: ByteArray): ByteArray?
+    private external fun nativeImportAlightMotion(handle: Long, data: ByteArray): ByteArray?
     private external fun nativeApplyPreset(handle: Long, layer: Long, json: ByteArray, duration: Long): ByteArray?
     private external fun nativeMakeCaptionPreset(name: ByteArray, ints: IntArray, floats: FloatArray): ByteArray?
     private external fun nativeParseCaptionPreset(json: ByteArray): FloatArray?

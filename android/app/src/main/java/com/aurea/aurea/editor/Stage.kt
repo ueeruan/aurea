@@ -299,7 +299,15 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.handlesValid = false
     m.markerAnchorValid = false
     if (!m.valid) return
+    // Borda do quadro: dá para ver onde a composição termina mesmo com o fundo
+    // do projeto da cor da área de trabalho (só na prévia, nunca no export).
+    drawRect(Color.White.copy(alpha = .16f), topLeft = Offset(m.sx(0f), m.sy(0f)),
+        size = androidx.compose.ui.geometry.Size(m.sx(project.width.toFloat()) - m.sx(0f), m.sy(project.height.toFloat()) - m.sy(0f)),
+        style = Stroke(1.dp.toPx()))
     if (store.sceneEditor) {
+        // Lidos AQUI para a órbita pelo dedo redesenhar guias e gizmo (as
+        // linhas saem do motor, que não é estado do Compose).
+        store.sceneYaw; store.scenePitch; store.sceneDistance
         val lines = store.sceneGuideLines()
         for (i in lines.indices step 5) {
             val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .35f) }
@@ -449,6 +457,94 @@ private fun DrawScope.drawGizmo(m: StageMapper, g: FloatArray) {
 }
 
 private fun activeAt(d: LayerDetail, frame: Int) = frame >= d.startFrame && frame < d.endFrame
+
+/** Último toque no vazio da cena (toque duplo = vista inicial). */
+private object SceneTap { var at = 0L; var x = 0f; var y = 0f }
+
+/**
+ * Cena 3D "seca": tudo com o dedo na própria tela, sem sliders nem campos.
+ * - 1 dedo NO objeto: escolhe e arrasta (o objeto segue o dedo, no plano
+ *   que a vista mostra mais de frente). As setas coloridas continuam para
+ *   um eixo só (profundidade, por exemplo).
+ * - 1 dedo no vazio: gira a vista em volta da cena. Toque no vazio: solta
+ *   a seleção; toque duplo no vazio: vista inicial.
+ * - 2 dedos: pinça aproxima/afasta.
+ * Só a vista de navegação muda com a órbita — o export não. Cada arrasto de
+ * objeto é UM passo de desfazer.
+ */
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sceneGesture(
+    store: EditorStore,
+    m: StageMapper,
+    down: androidx.compose.ui.input.pointer.PointerInputChange,
+    slop: Float,
+    haptic: HapticFeedback,
+) {
+    val degPerPx = 0.35f / 1.dp.toPx()
+    val picked = store.scenePick(m.cx(down.position.x), m.cy(down.position.y), 36.dp.toPx() / m.fit)
+    var mode = 0            // 0 pendente, 1 órbita, 2 objeto, 3 pinça
+    var last = down.position
+    var span0 = 1f
+    var distance0 = store.sceneDistance
+    var moved = false
+    var grouped = false
+    try {
+        while (true) {
+            val e = awaitPointerEvent()
+            val pressed = e.changes.filter { it.pressed }
+            if (pressed.isEmpty()) break
+            e.changes.forEach { it.consume() }
+            if (pressed.size >= 2) {
+                val a = pressed[0].position
+                val b = pressed[1].position
+                val span = hypot(a.x - b.x, a.y - b.y).coerceAtLeast(1f)
+                if (mode != 3) {
+                    if (grouped) { store.endGesture(); grouped = false }
+                    mode = 3; span0 = span; distance0 = store.sceneDistance
+                } else {
+                    store.updateSceneView(store.sceneYaw, store.scenePitch, distance0 * span0 / span)
+                }
+                moved = true
+                continue
+            }
+            if (mode == 3) continue      // sobrou um dedo da pinça: nada
+            val c = e.changes.firstOrNull { it.id == down.id } ?: break
+            if (mode == 0 && hypot(c.position.x - down.position.x, c.position.y - down.position.y) > slop) {
+                moved = true
+                if (picked != null) {
+                    if (store.primary != picked || store.selection.size != 1) store.select(picked)
+                    store.beginGesture("mover na cena")
+                    grouped = true
+                    mode = 2
+                } else {
+                    mode = 1
+                }
+                last = down.position     // a folga inteira entra: nada "pula" depois
+            }
+            val dx = c.position.x - last.x
+            val dy = c.position.y - last.y
+            when (mode) {
+                1 -> store.updateSceneView(store.sceneYaw - dx * degPerPx, store.scenePitch + dy * degPerPx, store.sceneDistance)
+                2 -> store.sceneDragObject(dx / m.fit, dy / m.fit)
+            }
+            if (mode != 0) last = c.position
+        }
+    } finally {
+        if (grouped) store.endGesture()
+    }
+    if (moved) return
+    if (picked != null) {
+        if (store.primary != picked || store.selection.size != 1) {
+            store.select(picked)
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        return
+    }
+    val now = down.uptimeMillis
+    val again = now - SceneTap.at < 320L && hypot(down.position.x - SceneTap.x, down.position.y - SceneTap.y) < 48.dp.toPx()
+    SceneTap.at = if (again) 0L else now
+    SceneTap.x = down.position.x; SceneTap.y = down.position.y
+    if (again) store.resetSceneView() else store.clearSelection()
+}
 
 private fun toScreenCorners(d: LayerDetail, m: StageMapper, out: FloatArray): Boolean {
     if (!LayerGeometry.corners(d, out)) return false
@@ -656,7 +752,10 @@ private suspend fun PointerInputScope.stageGestures(
             }
         }
 
-        if (store.sceneEditor) return@awaitEachGesture
+        if (store.sceneEditor) {
+            if (m.valid) sceneGesture(store, m, down, slop, haptic)
+            return@awaitEachGesture
+        }
 
         // Escolhendo o ponto do rastreio: a mira segue o dedo (dá para ajustar
         // antes de soltar); soltar vira a coordenada da camada.
@@ -736,8 +835,12 @@ private suspend fun PointerInputScope.stageGestures(
 
         var mode = MODE_PENDING
         val anchorDistance = hypot(downX - m.markerAnchorX, downY - m.markerAnchorY)
+        // A âncora só marca se o dedo não caiu sobre OUTRA camada visível por
+        // cima: tocar num texto no meio de um vídeo selecionado é selecionar o
+        // texto, não marcar o vídeo (era marca "do nada").
         val anchorTap = m.markerAnchorValid && anchorDistance <= 24.dp.toPx() &&
-            (handle < 0 || anchorDistance < hypot(downX - m.handles[handle * 2], downY - m.handles[handle * 2 + 1]))
+            (handle < 0 || anchorDistance < hypot(downX - m.handles[handle * 2], downY - m.handles[handle * 2 + 1])) &&
+            (!m.valid || hitLayer(store, m.cx(downX), m.cy(downY), 0f, includeLocked = false).let { it == null || it == store.primary })
         var lastTouchTime = down.uptimeMillis
         var anchorMoved = false
         var multi = false
@@ -1205,7 +1308,8 @@ private fun hitLayer(store: EditorStore, cx: Float, cy: Float, slack: Float, inc
  */
 @Composable
 private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier) {
-    if (ui.fullscreen) return
+    // Na cena 3D o canto é do desfazer/refazer flutuante.
+    if (ui.fullscreen || store.sceneEditor) return
     var open by remember { mutableStateOf(false) }
     val label = when (val l = store.preview.scaleLabel) {
         "FULL" -> "Full"

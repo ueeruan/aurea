@@ -889,12 +889,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshModel()
         } else if (playhead != lastPlayhead) {
             // Só o detalhe depende do playhead (valor animado, keyframe aqui).
-            lastPlayhead = playhead
-            refreshDetail()
-            refreshEffectParams()
+            // Tocando, 10 leituras por segundo bastam para o inspetor: a cada
+            // quadro eram ~15 consultas ao motor na main thread, cada uma no
+            // mesmo lock que o render usa — era trepidação no preview. Parado
+            // (scrub, passo, pausa), lê na hora.
+            val now = System.nanoTime()
+            if (!playing || now - lastDetailNs >= DETAIL_PLAYBACK_NS) {
+                lastPlayhead = playhead
+                lastDetailNs = now
+                refreshDetail()
+                refreshEffectParams()
+            }
         }
         autosaveIfIdle()
     }
+    private var lastDetailNs = 0L
 
     // --- Autosave -------------------------------------------------------------
     //
@@ -2202,9 +2211,63 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
     fun updateSceneView(yaw: Float, pitch: Float, distance: Float) {
-        sceneYaw = yaw; scenePitch = pitch; sceneDistance = distance
-        engine.setSceneEditor(sceneEditor, yaw, pitch, distance)
+        // Os mesmos limites do motor: a vista nunca "vira" nem atravessa o centro.
+        sceneYaw = ((yaw + 180f).mod(360f)) - 180f
+        scenePitch = pitch.coerceIn(-80f, 80f)
+        sceneDistance = distance.coerceIn(0.25f, 10f)
+        engine.setSceneEditor(sceneEditor, sceneYaw, scenePitch, sceneDistance)
         refreshNow()
+    }
+
+    /** Toque duplo no vazio da cena: a vista volta ao ângulo inicial. */
+    fun resetSceneView() = updateSceneView(-30f, 20f, 3f)
+
+    /**
+     * Objeto 3D sob o dedo (px da composição): o corpo (cantos vistos pela
+     * câmera de navegação) ou, sem corpo (modelo, câmera, luz, nulo), a
+     * origem a até [radius]. O de cima ganha no corpo; na origem, o mais perto.
+     */
+    fun scenePick(cx: Float, cy: Float, radius: Float): Long? {
+        val t = playhead
+        var best: Long? = null
+        var bestDistance = radius
+        val g = FloatArray(8)
+        for (row in layers) {
+            if (!row.isThreeD || !row.visible || row.locked || !com.aurea.aurea.editor.LayerGeometry.activeAt(row, t)) continue
+            val d = detailOf(row.id)
+            if (d != null && com.aurea.aurea.editor.LayerGeometry.contains(d, cx, cy, 0f)) return row.id
+            if (!engine.queryGizmo(row.id, GIZMO_LENGTH, g)) continue
+            val dist = kotlin.math.hypot(g[0] - cx, g[1] - cy)
+            if (dist < bestDistance) { bestDistance = dist; best = row.id }
+        }
+        return best
+    }
+
+    /**
+     * Arrasto livre do objeto 3D com o dedo: anda no plano dos dois eixos do
+     * mundo que a câmera de navegação vê mais de frente (de cima, o chão XZ;
+     * de frente, XY), com o objeto seguindo o dedo. [dx]/[dy] em px da composição.
+     */
+    fun sceneDragObject(dx: Float, dy: Float) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val g = gizmo ?: return
+        val ax = FloatArray(3) { g[(it + 1) * 2] - g[0] }
+        val ay = FloatArray(3) { g[(it + 1) * 2 + 1] - g[1] }
+        var u = 0; var v = 1; var area = -1f
+        for ((i, j) in arrayOf(0 to 1, 0 to 2, 1 to 2)) {
+            val a = kotlin.math.abs(ax[i] * ay[j] - ay[i] * ax[j])
+            if (a > area) { area = a; u = i; v = j }
+        }
+        if (area < 1f) return
+        val det = ax[u] * ay[v] - ay[u] * ax[v]
+        val a = (dx * ay[v] - dy * ax[v]) / det
+        val b = (ax[u] * dy - ay[u] * dx) / det
+        val base = FloatArray(3); val pu = FloatArray(3); val pv = FloatArray(3)
+        if (!engine.gizmoMoveLocal(id, u, 0f, base) || !engine.gizmoMoveLocal(id, u, a * GIZMO_LENGTH, pu) ||
+            !engine.gizmoMoveLocal(id, v, b * GIZMO_LENGTH, pv)) return
+        // A conversão mundo→local é afim: os dois passos somam sobre a base.
+        applyGizmoPosition(id, d, FloatArray(3) { pu[it] + pv[it] - base[it] })
     }
     fun sceneGuideLines(): FloatArray {
         val lines = FloatArray(1280)
@@ -2222,6 +2285,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = detail ?: return
         val out = FloatArray(3)
         if (!engine.gizmoMoveLocal(id, axis, amount, out)) return
+        applyGizmoPosition(id, d, out)
+    }
+
+    private fun applyGizmoPosition(id: Long, d: LayerDetail, out: FloatArray) {
         val animated = d.isAnimated(TrackProperty.POSITION_X) || d.isAnimated(TrackProperty.POSITION_Y) || d.isAnimated(TrackProperty.POSITION_Z)
         send {
             if (sceneEditor) {
@@ -2997,6 +3064,51 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return e != null
     }
 
+    /** Aba com que o painel de presets abre na próxima vez (ex.: "Meus presets" dos efeitos). */
+    var presetsOpenKind by mutableStateOf<com.aurea.aurea.presets.PresetKind?>(null)
+
+    /**
+     * Salva UM efeito da camada (parâmetros + keyframes) como preset do
+     * usuário: aparece em Presets › Efeitos e se aplica em qualquer camada.
+     */
+    fun saveEffectPreset(effectId: Int, name: String): Boolean {
+        val id = primary ?: return false
+        val json = engine.saveEffectPreset(id, effectId, name)?.takeIf { it.isNotEmpty() }
+        return savePreset(com.aurea.aurea.presets.PresetKind.Effects, name, json)
+    }
+
+    /**
+     * Importa efeitos de um projeto/elemento do Alight Motion (.xml, .amproj,
+     * .zip): o motor converte só o que tem equivalente no Aurea (o resto vira
+     * aviso, nunca erro), o resultado entra na biblioteca como preset de
+     * efeitos e, com uma camada escolhida, já é aplicado nela.
+     */
+    fun importAlightMotion(bytes: ByteArray) {
+        val envelope = runCatching { org.json.JSONObject(engine.importAlightMotion(bytes)) }.getOrNull()
+        val error = envelope?.optString("error").orEmpty()
+        val preset = envelope?.optString("preset").orEmpty()
+        val mapped = envelope?.optInt("mapped") ?: 0
+        if (envelope == null || error.isNotEmpty() || preset.isEmpty() || mapped == 0) {
+            showToast(appText(R.string.am_import_failed, error.ifEmpty { appText(R.string.am_import_nothing) }))
+            return
+        }
+        val skipped = envelope.optJSONArray("skipped")?.length() ?: 0
+        val base = envelope.optString("name").ifBlank { "Alight Motion" }
+        var name = "AM · $base".take(60)
+        var n = 2
+        while (presets.exists(com.aurea.aurea.presets.PresetKind.Effects, name)) name = "AM · $base ${n++}".take(60)
+        val entry = presets.save(com.aurea.aurea.presets.PresetKind.Effects, name, preset)
+        if (entry == null) {
+            showToast(appText(R.string.msg_nao_foi_possivel_salvar_o_preset))
+            return
+        }
+        if (primary != null) applyPreset(entry)
+        showToast(
+            if (skipped > 0) appText(R.string.am_import_done_skipped, mapped, skipped, entry.name)
+            else appText(R.string.am_import_done, mapped, entry.name),
+        )
+    }
+
     fun deletePreset(e: com.aurea.aurea.presets.PresetEntry) {
         showToast(if (presets.delete(e)) appText(R.string.msg_preset_apagado, e.name) else appText(R.string.msg_nao_foi_possivel_apagar))
     }
@@ -3415,11 +3527,37 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     private var markerBuf = LongArray(3 * 256)
     var markerEditingFrame by mutableStateOf<Int?>(null)
+    /**
+     * O editor aberto é de uma marca que AINDA NÃO existe: ela só nasce no
+     * Salvar. Segurar a âncora e desistir (Cancelar/fora) não deixa marca
+     * perdida na timeline — era uma das "marcas do nada".
+     */
+    var markerEditingIsNew by mutableStateOf(false)
+        private set
 
-    fun editMarkerAtPlayhead() {
-        val frame = playhead.coerceIn(0, (project.durationFrames - 1).coerceAtLeast(0))
-        if (frame !in markers.frames && !editMarker(-1, frame, 0xFFF7C34F.toInt(), "")) return
-        markerEditingFrame = frame
+    fun editMarkerAtPlayhead() = openMarkerEditor(playhead)
+
+    /** Editor da marca em [frame]; se não houver marca ali, um rascunho. */
+    fun openMarkerEditor(frame: Int) {
+        val f = frame.coerceIn(0, (project.durationFrames - 1).coerceAtLeast(0))
+        markerEditingIsNew = f !in markers.frames
+        markerEditingFrame = f
+    }
+
+    fun closeMarkerEditor() {
+        markerEditingFrame = null
+        markerEditingIsNew = false
+    }
+
+    /** A marca mais próxima de [frame] a até [tolerance] frames, ou null. */
+    fun markerNear(frame: Int, tolerance: Int): Int? {
+        var best: Int? = null
+        var bestDistance = Int.MAX_VALUE
+        for (f in markers.frames) {
+            val d = kotlin.math.abs(f - frame)
+            if (d <= tolerance && d < bestDistance) { best = f; bestDistance = d }
+        }
+        return best
     }
 
     private fun refreshMarkers() {
@@ -3461,11 +3599,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** "Marcas": marca (ou desmarca) o frame do cabeçote. */
     fun toggleMarker() = toggleMarkerAt(playhead)
 
-    /**
-     * Marca (ou desmarca) um frame qualquer. O toque na régua cai aqui com o
-     * frame do DEDO, não com o do cabeçote: a marca nasce onde se tocou, mesmo
-     * que a prévia ainda esteja alcançando aquele quadro.
-     */
+    /** Marca (ou desmarca) um frame qualquer, sempre com aviso na tela. */
     fun toggleMarkerAt(frame: Int) {
         val f = clampFrame(frame)
         val on = engine.toggleMarker(f.toLong())
@@ -4258,6 +4392,8 @@ class ThumbnailCache(private val engine: AureaEngine) {
 
 /** Comprimento das setas do gizmo 3D, em unidades do mundo (px da composição no plano Z = 0). */
 const val GIZMO_LENGTH = 320f
+/** Intervalo mínimo entre releituras do inspetor durante o playback (10 Hz). */
+private const val DETAIL_PLAYBACK_NS = 100_000_000L
 
 /**
  * Receita do texto 3D: geometria, chanfro e PBR. A ordem dos numeros em

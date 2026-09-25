@@ -324,17 +324,19 @@ internal class TimelineController(
 
     // --- Toque ------------------------------------------------------------------
     /**
-     * Toque na régua: o cabeçote vai para o instante do dedo e a marca nasce
-     * (ou some) naquele frame. O frame sai de [frameAt] — a posição tocada —,
-     * não do cabeçote: a prévia pode estar um quadro atrás, e a marca precisa
-     * cair onde o dedo encostou. Para só correr o cabeçote, arraste (o arrasto
-     * na régua continua sendo scrub puro).
+     * Toque na régua: só leva o cabeçote ao instante do dedo. NÃO cria marca —
+     * a régua divide a faixa com o relógio e o topo do cabeçote, e cada toque
+     * para buscar um ponto deixava uma marca "do nada". Tocar EM CIMA de uma
+     * marca (até 12dp) abre o editor dela; marca nova nasce pela âncora do
+     * preview ou pelo menu.
      */
     private fun rulerTap(x: Float) {
         val f = frameAt(x).toFrame()
         tick()
-        store.seek(f)
-        store.toggleMarkerAt(f)
+        val tolerance = (12f * metrics.density / pxPerFrame().coerceAtLeast(0.0001f)).toInt()
+        val marker = store.markerNear(f, tolerance)
+        store.seek(marker ?: f)
+        if (marker != null) store.openMarkerEditor(marker)
     }
 
     private fun onTap(hit: Hit, p: Offset) {

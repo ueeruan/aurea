@@ -220,6 +220,18 @@ internal fun EffectsPanel(env: PanelEnv) {
     var menuFor by remember { mutableStateOf<LayerEffect?>(null) }
     var paramMenu by remember { mutableStateOf<ParamMenuTarget?>(null) }
     var railMenu by remember { mutableStateOf(false) }
+    var savingPreset by remember { mutableStateOf<LayerEffect?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Alight Motion: qualquer arquivo (o .amproj/.xml não tem MIME padrão); o
+    // motor reconhece XML ou zip pelo conteúdo.
+    val amPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes != null) store.importAlightMotion(bytes)
+        }
+    }
     val reorder = remember(layerId) { ReorderState() }
     val listState = rememberLazyListState()
 
@@ -350,6 +362,11 @@ internal fun EffectsPanel(env: PanelEnv) {
             title = stringResource(R.string.panel_efeitos_camada),
             actions = buildList {
                 add(SheetAction(stringResource(R.string.panel_adicionar_efeito)) { env.onOpenEffectsBrowser() })
+                add(SheetAction(stringResource(R.string.fx_my_presets)) {
+                    store.presetsOpenKind = com.aurea.aurea.presets.PresetKind.Effects
+                    env.onOpenPanel(EditorPanel.Presets)
+                })
+                add(SheetAction(stringResource(R.string.am_import_action)) { amPicker.launch(arrayOf("*/*")) })
                 if (effects.isNotEmpty()) add(SheetAction(stringResource(R.string.panel_copiar_efeitos)) { store.copyEffects() })
                 if (store.clipboard and 4 != 0) add(SheetAction(stringResource(R.string.panel_colar_efeitos)) { store.pasteEffects() })
                 if (effects.isNotEmpty()) {
@@ -378,6 +395,7 @@ internal fun EffectsPanel(env: PanelEnv) {
             buildList {
                 add(SheetAction(if (e.enabled) stringResource(R.string.panel_desligar_efeito) else stringResource(R.string.panel_ligar_efeito)) { store.setEffectEnabled(e.effectId, !e.enabled) })
                 add(SheetAction(stringResource(R.string.panel_redefinir_efeito)) { resetEffect(env, e.effectId) })
+                add(SheetAction(stringResource(R.string.fx_save_as_preset)) { savingPreset = e })
                 if (index > 0) add(SheetAction(stringResource(R.string.panel_mover_cima)) { store.reorderEffect(e.effectId, index - 1) })
                 if (index in 0 until effects.lastIndex) add(SheetAction(stringResource(R.string.panel_mover_baixo)) { store.reorderEffect(e.effectId, index + 1) })
                 add(SheetAction(stringResource(R.string.panel_remover_efeito), destructive = true) { store.removeEffect(e.effectId) })
@@ -389,6 +407,15 @@ internal fun EffectsPanel(env: PanelEnv) {
             actions = actions,
             cancelLabel = if (e.known) stringResource(R.string.panel_cancelar) else stringResource(R.string.panel_manter),
             onDismiss = { menuFor = null },
+        )
+    }
+
+    savingPreset?.let { e ->
+        com.aurea.aurea.ui.ds.AureaNamePrompt(
+            title = stringResource(R.string.fx_save_as_preset),
+            initial = effectDisplayName(e.typeId, e.name),
+            onConfirm = { name -> store.saveEffectPreset(e.effectId, name.take(60)) },
+            onDismiss = { savingPreset = null },
         )
     }
 

@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
@@ -197,7 +198,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                 Modifier
                     .padding(start = 10.dp, top = 8.dp, end = 10.dp, bottom = 8.dp)
                     .fillMaxWidth()
-                    .height(44.dp)
+                    .height(54.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(ShellColors.DockRow),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -205,26 +206,26 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             ) {
                 // Velocidade: só quem tem tempo de mídia (o painel é de vídeo e áudio).
                 if (type == LayerType.Video || type == LayerType.Audio) {
-                    DockTool(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 21) { openPanel(store, ui, EditorPanel.Speed) }
+                    DockTool(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 21, label = stringResource(R.string.editor_velocidade)) { openPanel(store, ui, EditorPanel.Speed) }
                 }
                 // As portas do grupo: entrar e desagrupar.
                 if (type == LayerType.Group) {
-                    DockTool(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), 20) { store.openPrecomp(l.id) }
-                    DockTool(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), 20) { store.ungroupPrecomp(l.id) }
+                    DockTool(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), 20, label = stringResource(R.string.dock_short_enter)) { store.openPrecomp(l.id) }
+                    DockTool(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), 20, label = stringResource(R.string.editor_desagrupar)) { store.ungroupPrecomp(l.id) }
                 }
-                DockTool(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote), 19) {
+                DockTool(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote), 19, label = stringResource(R.string.dock_short_trim_start)) {
                     timeEdit(store, l) { store.trimStart(l.id, store.playhead) }
                 }
-                DockTool(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), 19) {
+                DockTool(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), 19, label = stringResource(R.string.dock_short_split)) {
                     timeEdit(store, l) { store.splitAtPlayhead(listOf(l.id)) }
                 }
-                DockTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), 19) {
+                DockTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), 19, label = stringResource(R.string.dock_short_trim_end)) {
                     timeEdit(store, l) { store.trimEnd(l.id, store.playhead) }
                 }
                 // Puxar para o cabeçote: o clipe inteiro anda até o cabeçote, a
                 // duração não muda. Não usa o `timeEdit` (que exige o cabeçote
                 // DENTRO da camada) — é justamente para quem está fora dele.
-                DockTool(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_puxar_cabecote), 19) {
+                DockTool(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_puxar_cabecote), 19, label = stringResource(R.string.dock_short_pull)) {
                     if (l.locked) store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar)
                     else {
                         if (store.playing) store.pause()
@@ -238,6 +239,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                         if (l.muted) stringResource(R.string.editor_som_desligado_toque_ligar_segure_volume) else stringResource(R.string.editor_desligar_som_segure_volume),
                         20,
                         tint = if (l.muted) AureaColors.Accent else AureaColors.Text,
+                        label = stringResource(R.string.dock_short_sound),
                         onLongClick = { openPanel(store, ui, EditorPanel.Audio) },
                     ) { store.setAudioMuted(!l.muted) }
                 }
@@ -295,18 +297,26 @@ private fun RowScope.DockTool(
     description: String,
     size: Int,
     tint: Color = AureaColors.Text,
+    label: String? = null,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    Box(
+    // Ícone sozinho obrigava a adivinhar (→| e |← parecem iguais): um nome
+    // curto embaixo diz o que o toque faz; a descrição completa fica no leitor.
+    Column(
         Modifier
             .weight(1f)
             .fillMaxHeight()
-            .semantics { contentDescription = description }
+            .semantics(mergeDescendants = true) { contentDescription = description }
             .tocavel(haptic = true, onLongClick = onLongClick, onClick = onClick),
-        contentAlignment = Alignment.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         CupertinoIcon(glyph, size.dp, tint)
+        if (label != null) {
+            Text(label, color = tint.copy(alpha = .78f), fontSize = 10.sp, maxLines = 1,
+                modifier = Modifier.padding(top = 3.dp).clearAndSetSemantics { })
+        }
     }
 }
 

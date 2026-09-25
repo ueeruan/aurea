@@ -258,6 +258,59 @@ final class AureaModel: ObservableObject {
     @Published var colorSheet: ColorSheetRequest?
     @Published var expressionSheet: ExpressionRequest?
     @Published var namePrompt: NamePromptRequest?
+    /// Aba com que o painel de presets abre na próxima vez ("Meus presets" dos efeitos).
+    @Published var presetsOpenKind: String?
+
+    /// Grava um preset de efeitos do usuário (mesma pasta/formato do PresetsPanel).
+    @discardableResult
+    func storeEffectPreset(name: String, json: String) -> String? {
+        let dir = PanelPresetKind.effects.directory
+        let fm = FileManager.default
+        var finalName = String(name.prefix(60)), n = 2
+        while fm.fileExists(atPath: dir.appendingPathComponent(PanelPresetKind.fileName(finalName)).path) && finalName.hasPrefix("AM · ") {
+            finalName = String("\(name) \(n)".prefix(60)); n += 1
+        }
+        let fileName = PanelPresetKind.fileName(finalName)
+        guard fileName != ".json" else { return nil }
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try json.write(to: dir.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
+            return finalName
+        } catch { return nil }
+    }
+
+    /// Salva UM efeito da camada (parâmetros + keyframes) como preset do usuário.
+    func saveEffectPreset(effectId: UInt32, name: String) {
+        guard let layer = primarySelection else { return }
+        let json = engine.saveEffectPreset(layer, effect: effectId, name: name)
+        guard !json.isEmpty else { toast = AureaText.t("msg_esta_camada_nao_tem_efeitos"); return }
+        if let saved = storeEffectPreset(name: name, json: json) { toast = AureaText.t("msg_preset_salvo", saved) }
+        else { toast = AureaText.t("msg_nao_foi_possivel_salvar_o_preset") }
+    }
+
+    /// Importa efeitos do Alight Motion (.xml/.amproj/.zip): só o que tem
+    /// equivalente vira preset (o resto é aviso); com camada escolhida, aplica.
+    func importAlightMotion(_ data: Data) {
+        let raw = engine.importAlightMotion(data)
+        let envelope = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any]
+        let error = envelope?["error"] as? String ?? ""
+        let preset = envelope?["preset"] as? String ?? ""
+        let mapped = (envelope?["mapped"] as? NSNumber)?.intValue ?? 0
+        guard envelope != nil, error.isEmpty, !preset.isEmpty, mapped > 0 else {
+            toast = AureaText.t("am_import_failed", error.isEmpty ? AureaText.t("am_import_nothing") : error); return
+        }
+        let skipped = (envelope?["skipped"] as? [Any])?.count ?? 0
+        let base = (envelope?["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Alight Motion"
+        guard let saved = storeEffectPreset(name: "AM · \(base)", json: preset) else {
+            toast = AureaText.t("msg_nao_foi_possivel_salvar_o_preset"); return
+        }
+        if let layer = primarySelection {
+            let failure = engine.applyPreset(layer, json: preset, duration: 0)
+            if !failure.isEmpty { toast = failure; return }
+            refreshModel(force: true)
+        }
+        toast = skipped > 0 ? AureaText.t("am_import_done_skipped", mapped, skipped, saved) : AureaText.t("am_import_done", mapped, saved)
+    }
     @Published var text3DFontSheet: Text3DFontRequest?
     @Published var presetDialog: PresetDialogRequest?
     @Published var curveReturnPanel: PanelKind = .none
@@ -312,6 +365,16 @@ final class AureaModel: ObservableObject {
         didSet { AureaText.language = language; UserDefaults.standard.set(language.rawValue, forKey: "aurea.language") }
     }
     @Published var showPerf = false
+    /// Tema escolhido nos Ajustes. É a identidade da raiz: trocar reconstrói
+    /// as telas com a paleta nova, na hora (as cores são lidas ao desenhar).
+    @Published private(set) var themeId: String = AureaTheme.palette.id
+    func setTheme(_ id: String) {
+        let palette = AureaPalette.of(id)
+        guard palette.id != themeId else { return }
+        AureaTheme.palette = palette
+        UserDefaults.standard.set(palette.id, forKey: "aurea.theme")
+        themeId = palette.id
+    }
 
     enum Screen { case home, editor }
     enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo }
@@ -821,8 +884,14 @@ final class AureaModel: ObservableObject {
     /// mudança de revisão (é UMA travessia por lista, ver Engine::query_*).
     func refreshModel(force: Bool = false) {
         guard started else { return }
+        // Desfazer/refazer, abrir projeto e ripple também mexem nas marcas: a
+        // lista local não pode ficar velha (a âncora acendia numa marca extinta).
+        refreshMarkers()
         let rows = engine.layers()
-        layers = rows.map { row in
+        // Cada atribuição a um @Published redesenha TODA tela que observa o
+        // modelo (a timeline inteira, o preview por cima): só publica o que
+        // mudou de verdade. Era o grosso da timeline lenta no iOS.
+        let nextLayers = rows.map { row in
             LayerItem(id: (row["id"] as? NSNumber)?.int64Value ?? 0,
                       kind: (row["kind"] as? NSNumber)?.uint32Value ?? 0,
                       name: row["name"] as? String ?? "",
@@ -845,7 +914,9 @@ final class AureaModel: ObservableObject {
                       adjustment: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 6) != 0,
                       guide: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 7) != 0)
         }
-        selection = Set(layers.filter(\.selected).map(\.id))
+        if nextLayers != layers { layers = nextLayers }
+        let nextSelection = Set(layers.filter(\.selected).map(\.id))
+        if nextSelection != selection { selection = nextSelection }
 
         // Keyframes: uma travessia para a composição inteira.
         var byLayer: [Int64: [KeyframeItem]] = [:]
@@ -861,14 +932,18 @@ final class AureaModel: ObservableObject {
                              interpolation: (key["interpolation"] as? NSNumber)?.uint32Value ?? 0)
             }
         }
-        keyframes = byLayer
-        composition = engine.composition() ?? [:]
-        dirty = status.dirty != 0
-        effectCatalog = engine.effectCatalog().map { row in
-            EffectCatalogItem(effectClass: (row["effectClass"] as? NSNumber)?.uint32Value ?? 0, typeId: (row["typeId"] as? NSNumber)?.uint32Value ?? 0,
-                              name: row["name"] as? String ?? "",
-                              category: row["category"] as? String ?? "",
-                              paramCount: (row["paramCount"] as? NSNumber)?.uint32Value ?? 0)
+        if byLayer != keyframes { keyframes = byLayer }
+        let nextComposition = engine.composition() ?? [:]
+        if !NSDictionary(dictionary: nextComposition).isEqual(to: composition) { composition = nextComposition }
+        if dirty != (status.dirty != 0) { dirty = status.dirty != 0 }
+        // O catálogo de efeitos é fixo na sessão: lido uma vez, não a cada revisão.
+        if effectCatalog.isEmpty {
+            effectCatalog = engine.effectCatalog().map { row in
+                EffectCatalogItem(effectClass: (row["effectClass"] as? NSNumber)?.uint32Value ?? 0, typeId: (row["typeId"] as? NSNumber)?.uint32Value ?? 0,
+                                  name: row["name"] as? String ?? "",
+                                  category: row["category"] as? String ?? "",
+                                  paramCount: (row["paramCount"] as? NSNumber)?.uint32Value ?? 0)
+            }
         }
         refreshSelectedLayer()
     }
@@ -876,12 +951,12 @@ final class AureaModel: ObservableObject {
     /// O que depende da camada escolhida: efeitos, parâmetros e o inspetor.
     func refreshSelectedLayer() {
         guard let layerId = primarySelection, started else {
-            effects = []
-            effectParams = []
-            detail = [:]
+            if !effects.isEmpty { effects = [] }
+            if !effectParams.isEmpty { effectParams = [] }
+            if !detail.isEmpty { detail = [:] }
             return
         }
-        effects = engine.effects(forLayer: layerId).map { row in
+        let nextEffects = engine.effects(forLayer: layerId).map { row in
             EffectItem(effectId: (row["effectId"] as? NSNumber)?.uint32Value ?? 0,
                        typeId: (row["typeId"] as? NSNumber)?.uint32Value ?? 0,
                        name: row["name"] as? String ?? "",
@@ -889,7 +964,9 @@ final class AureaModel: ObservableObject {
                        paramCount: (row["paramCount"] as? NSNumber)?.uint32Value ?? 0,
                        known: row["known"] as? Bool ?? true)
         }
-        detail = engine.layerDetail(layerId) ?? [:]
+        if nextEffects != effects { effects = nextEffects }
+        let nextDetail = engine.layerDetail(layerId) ?? [:]
+        if !NSDictionary(dictionary: nextDetail).isEqual(to: detail) { detail = nextDetail }
         if panel == .mask || panel == .vector { refreshMasks() }
         if let effectId = selectedEffectId {
             loadParams(layerId: layerId, effectId: effectId)
@@ -897,8 +974,8 @@ final class AureaModel: ObservableObject {
     }
 
     func loadParams(layerId: Int64, effectId: UInt32) {
-        selectedEffectId = effectId
-        effectParams = engine.effectParams(forLayer: layerId, effectId: effectId).map { row in
+        if selectedEffectId != effectId { selectedEffectId = effectId }
+        let nextParams = engine.effectParams(forLayer: layerId, effectId: effectId).map { row in
             let value = (row["value"] as? [NSNumber])?.map(\.floatValue) ?? [0, 0, 0, 0]
             let def = (row["defaultValue"] as? [NSNumber])?.map(\.floatValue) ?? [0, 0, 0, 0]
             return EffectParamItem(flags: (row["flags"] as? NSNumber)?.uint32Value ?? 0, index: (row["index"] as? NSNumber)?.uint32Value ?? 0,
@@ -913,6 +990,7 @@ final class AureaModel: ObservableObject {
                                    animated: row["animated"] as? Bool ?? false,
                                    enumLabels: row["enumLabels"] as? [String] ?? [])
         }
+        if nextParams != effectParams { effectParams = nextParams }
     }
 
     @Published var selectedEffectId: UInt32?
@@ -1610,7 +1688,80 @@ final class AureaModel: ObservableObject {
         updateSceneView()
     }
     func updateSceneView() {
+        // Os mesmos limites do motor: a vista nunca "vira" nem atravessa o centro.
+        sceneYaw = Float(remainder(Double(sceneYaw), 360))
+        scenePitch = min(80, max(-80, scenePitch))
+        sceneDistance = min(10, max(0.25, sceneDistance))
         engine.setSceneEditor(sceneEditor, yaw: sceneYaw, pitch: scenePitch, distance: sceneDistance)
+        refreshSelectedLayer()
+    }
+
+    func setSceneView(yaw: Float, pitch: Float, distance: Float) {
+        sceneYaw = yaw; scenePitch = pitch; sceneDistance = distance
+        updateSceneView()
+    }
+
+    /// Toque duplo no vazio da cena: a vista volta ao ângulo inicial.
+    func resetSceneView() { setSceneView(yaw: -30, pitch: 20, distance: 3) }
+
+    /// Objeto 3D sob o dedo (px da composição): o corpo (cantos vistos pela
+    /// câmera de navegação) ou, sem corpo (modelo, câmera, luz, nulo), a
+    /// origem a até `radius`. O de cima ganha no corpo; na origem, o mais perto.
+    func scenePick(_ point: SIMD2<Float>, radius: Float) -> Int64? {
+        let t = status.playhead
+        var best: Int64?
+        var bestDistance = radius
+        for row in layers where row.threeD && row.visible && !row.locked && t >= Int64(row.startFrame) && t < Int64(row.endFrame) {
+            if let detail = engine.layerDetail(row.id), StageGeom.contains(detail, point.x, point.y, slack: 0) { return row.id }
+            let g = engine.gizmo(row.id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
+            guard g.count == 8 else { continue }
+            let d = hypot(g[0] - point.x, g[1] - point.y)
+            if d < bestDistance { bestDistance = d; best = row.id }
+        }
+        return best
+    }
+
+    /// Arrasto livre do objeto 3D com o dedo: anda no plano dos dois eixos do
+    /// mundo que a vista mostra mais de frente (de cima, o chão XZ; de frente,
+    /// XY), seguindo o dedo. `dx`/`dy` em px da composição.
+    func sceneDragObject(dx: Float, dy: Float) {
+        guard let id = primarySelection else { return }
+        let g = engine.gizmo(id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
+        guard g.count == 8 else { return }
+        let ax = (0..<3).map { g[($0 + 1) * 2] - g[0] }, ay = (0..<3).map { g[($0 + 1) * 2 + 1] - g[1] }
+        var u = 0, v = 1, area: Float = -1
+        for (i, j) in [(0, 1), (0, 2), (1, 2)] {
+            let a = abs(ax[i] * ay[j] - ay[i] * ax[j])
+            if a > area { area = a; u = i; v = j }
+        }
+        guard area >= 1 else { return }
+        let det = ax[u] * ay[v] - ay[u] * ax[v]
+        let a = (dx * ay[v] - dy * ax[v]) / det, b = (ax[u] * dy - ay[u] * dx) / det
+        let base = engine.gizmoMoveLocal(id, axis: UInt32(u), amount: 0).map(\.floatValue)
+        let pu = engine.gizmoMoveLocal(id, axis: UInt32(u), amount: a * ShellStageGeometry.gizmoLength).map(\.floatValue)
+        let pv = engine.gizmoMoveLocal(id, axis: UInt32(v), amount: b * ShellStageGeometry.gizmoLength).map(\.floatValue)
+        guard base.count == 3, pu.count == 3, pv.count == 3 else { return }
+        // A conversão mundo→local é afim: os dois passos somam sobre a base.
+        applyGizmoPosition(id, (0..<3).map { pu[$0] + pv[$0] - base[$0] })
+    }
+
+    /// Posição vinda do gizmo/arrasto 3D: na cena, desloca a curva inteira
+    /// (layout); fora dela, keyframe se animado, senão valor estático.
+    func applyGizmoPosition(_ id: Int64, _ next: [Float]) {
+        guard next.count == 3 else { return }
+        let animated = ((detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0) & 7 != 0
+        let local = localPlayhead
+        // Submission is asynchronous: three scalar setters would each read
+        // the same old XYZ and overwrite the preceding axis command.
+        mutate { core in
+            if sceneEditor {
+                for axis in 0...2 { core.layoutTransform(id, property: UInt32(axis), value: next[axis]) }
+            } else if animated {
+                for axis in 0...2 { core.insertKeyframe(forLayer: id, property: UInt32(axis), time: local, value: next[axis]) }
+            } else {
+                core.setPosition(forLayer: id, x: next[0], y: next[1], z: next[2])
+            }
+        }
         refreshModel(force: true)
     }
 
@@ -1805,6 +1956,8 @@ final class AureaModel: ObservableObject {
         let frame: Int64
         let color: UInt32
         let label: String
+        /// Rascunho: a marca só nasce no Salvar (Cancelar não deixa marca perdida).
+        var isNew = false
         var id: Int64 { frame }
     }
     @Published var markerEditingFrame: MarkerEditingFrame?
@@ -1825,14 +1978,22 @@ final class AureaModel: ObservableObject {
         return x.isFinite && y.isFinite ? SIMD2(x, y) : nil
     }
 
-    func editMarkerAtPlayhead() {
-        let frame = status.playhead
+    func editMarkerAtPlayhead() { openMarkerEditor(status.playhead) }
+
+    /// Editor da marca em `frame`; sem marca ali, abre um rascunho que só vira
+    /// marca no Salvar. Segurar a âncora e desistir não deixa marca "do nada".
+    func openMarkerEditor(_ frame: Int64) {
         let values = engine.markers()
         if let index = stride(from: 0, to: values.count - values.count % 3, by: 3).first(where: { values[$0].int64Value == frame }) {
             markerEditingFrame = MarkerEditingFrame(frame: frame, color: values[index + 1].uint32Value, label: engine.markerLabel(frame))
-        } else if editMarker(from: -1, to: frame, color: 0xFFF7C34F, label: "") {
-            markerEditingFrame = MarkerEditingFrame(frame: frame, color: 0xFFF7C34F, label: "")
+        } else {
+            markerEditingFrame = MarkerEditingFrame(frame: frame, color: 0xFFF7C34F, label: "", isNew: true)
         }
+    }
+
+    /// A marca mais próxima de `frame` a até `tolerance` frames.
+    func markerNear(_ frame: Int64, tolerance: Int64) -> Int64? {
+        markerFrames.filter { abs($0 - frame) <= tolerance }.min { abs($0 - frame) < abs($1 - frame) }
     }
 
     func setLooping(_ on: Bool) {
@@ -1843,10 +2004,15 @@ final class AureaModel: ObservableObject {
 
     func toggleHud() { hudVisible.toggle() }
 
+    /// Marca (ou desmarca) com aviso e vibração, como no Android: marca
+    /// silenciosa parecia ter aparecido "do nada".
     func toggleMarkerAt(_ frame: Int64) {
-        _ = engine.toggleMarker(frame)
+        engine.toggleMarker(frame)
         refreshModel(force: true)
         refreshMarkers()
+        let on = markerFrames.contains(frame)
+        toast = AureaText.t(on ? "msg_marca_adicionada" : "msg_marca_removida")
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     func editMarker(from: Int64, to: Int64, color: UInt32, label: String) -> Bool {
@@ -1869,7 +2035,7 @@ final class AureaModel: ObservableObject {
             frames.append(all[index].int64Value)
             index += 3
         }
-        markerFrames = frames
+        if frames != markerFrames { markerFrames = frames }
     }
 
     func seekToNextMarker() {

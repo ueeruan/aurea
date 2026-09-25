@@ -31,6 +31,55 @@ extension Font {
     }
 }
 
+
+/// Paleta de um tema (par do `AureaPalette` do Android, mesmos ids e valores):
+/// só fundos, superfícies, marca e destaque mudam entre temas.
+struct AureaPalette: Identifiable {
+    let id: String
+    let brandDeep: Color
+    let brand: Color
+    let accent: Color
+    let keyframe: Color
+    let background: Color
+    let surface: Color
+    let surfaceHigh: Color
+    let chip: Color
+    let chipHigh: Color
+    let border: Color
+    let muted: Color
+    let subtle: Color
+    let onAccent: Color
+    let accentDim: Color
+    let keyframeDim: Color
+    let stage: Color
+    let hairline: Color
+    let editorTopBar: Color
+    let editorPanel: Color
+    let editorPanelHigh: Color
+    let pill: Color
+    let actionDim: Color
+    let statusBarVeil: Color
+    let systemBarVeil: Color
+    let tickWeak: Color
+    let tickStrong: Color
+    let railModeFill: Color
+    let fieldFilled: Color
+    static let aurea = AureaPalette(id: "aurea", brandDeep: Color(hex: 0xFF123A63), brand: Color(hex: 0xFF245D8C), accent: Color(hex: 0xFF6FAED9), keyframe: Color(hex: 0xFFA9D3EC), background: Color(hex: 0xFF0F141A), surface: Color(hex: 0xFF151C24), surfaceHigh: Color(hex: 0xFF1B2530), chip: Color(hex: 0xFF212D3A), chipHigh: Color(hex: 0xFF323D49), border: Color(hex: 0xFF273442), muted: Color(hex: 0xFFAAB6C3), subtle: Color(hex: 0xFF7C8A99), onAccent: Color(hex: 0xFF0B1117), accentDim: Color(hex: 0xFF1D3A55), keyframeDim: Color(hex: 0xFF22405A), stage: Color(hex: 0xFF0A0E13), hairline: Color(hex: 0xB8273442), editorTopBar: Color(hex: 0xFF0F141A), editorPanel: Color(hex: 0xFF0F141A), editorPanelHigh: Color(hex: 0xFF151C24), pill: Color(hex: 0xFF1B2530), actionDim: Color(hex: 0xFF16304A), statusBarVeil: Color(hex: 0xFF070A0E), systemBarVeil: Color(hex: 0xFF0B0F13), tickWeak: Color(hex: 0xFF43516A), tickStrong: Color(hex: 0xFF7485A3), railModeFill: Color(hex: 0xFF1E222D), fieldFilled: Color(hex: 0xFF272B33))
+    static let midnight = AureaPalette(id: "midnight", brandDeep: Color(hex: 0xFF15325A), brand: Color(hex: 0xFF2C66A0), accent: Color(hex: 0xFF7DB8E6), keyframe: Color(hex: 0xFFB3D9F0), background: Color(hex: 0xFF000000), surface: Color(hex: 0xFF0B0D10), surfaceHigh: Color(hex: 0xFF14171C), chip: Color(hex: 0xFF1A1E24), chipHigh: Color(hex: 0xFF2A2F37), border: Color(hex: 0xFF1E232A), muted: Color(hex: 0xFFA7B0BA), subtle: Color(hex: 0xFF77818C), onAccent: Color(hex: 0xFF05080B), accentDim: Color(hex: 0xFF15283C), keyframeDim: Color(hex: 0xFF1A3247), stage: Color(hex: 0xFF000000), hairline: Color(hex: 0xB81E232A), editorTopBar: Color(hex: 0xFF000000), editorPanel: Color(hex: 0xFF000000), editorPanelHigh: Color(hex: 0xFF0B0D10), pill: Color(hex: 0xFF14171C), actionDim: Color(hex: 0xFF102438), statusBarVeil: Color(hex: 0xFF000000), systemBarVeil: Color(hex: 0xFF000000), tickWeak: Color(hex: 0xFF3A4250), tickStrong: Color(hex: 0xFF6C788C), railModeFill: Color(hex: 0xFF15181E), fieldFilled: Color(hex: 0xFF1A1D22))
+    static let graphite = AureaPalette(id: "graphite", brandDeep: Color(hex: 0xFF3A4250), brand: Color(hex: 0xFF566273), accent: Color(hex: 0xFFB7C4D3), keyframe: Color(hex: 0xFFD6DEE8), background: Color(hex: 0xFF16181C), surface: Color(hex: 0xFF1D2025), surfaceHigh: Color(hex: 0xFF25292F), chip: Color(hex: 0xFF2B3037), chipHigh: Color(hex: 0xFF3A4048), border: Color(hex: 0xFF33383F), muted: Color(hex: 0xFFB0B6BE), subtle: Color(hex: 0xFF838A94), onAccent: Color(hex: 0xFF101215), accentDim: Color(hex: 0xFF2E343C), keyframeDim: Color(hex: 0xFF343B45), stage: Color(hex: 0xFF111316), hairline: Color(hex: 0xB833383F), editorTopBar: Color(hex: 0xFF16181C), editorPanel: Color(hex: 0xFF16181C), editorPanelHigh: Color(hex: 0xFF1D2025), pill: Color(hex: 0xFF25292F), actionDim: Color(hex: 0xFF2A3038), statusBarVeil: Color(hex: 0xFF0D0E10), systemBarVeil: Color(hex: 0xFF121417), tickWeak: Color(hex: 0xFF4A515C), tickStrong: Color(hex: 0xFF7F8896), railModeFill: Color(hex: 0xFF23272D), fieldFilled: Color(hex: 0xFF2A2E34))
+    static let emerald = AureaPalette(id: "emerald", brandDeep: Color(hex: 0xFF0F4A3A), brand: Color(hex: 0xFF1C7A5E), accent: Color(hex: 0xFF5BD6A8), keyframe: Color(hex: 0xFFA6ECD2), background: Color(hex: 0xFF0B1411), surface: Color(hex: 0xFF111D19), surfaceHigh: Color(hex: 0xFF172722), chip: Color(hex: 0xFF1D302A), chipHigh: Color(hex: 0xFF2C403A), border: Color(hex: 0xFF223A33), muted: Color(hex: 0xFFA6BDB5), subtle: Color(hex: 0xFF789088), onAccent: Color(hex: 0xFF06110D), accentDim: Color(hex: 0xFF163A30), keyframeDim: Color(hex: 0xFF1D4539), stage: Color(hex: 0xFF080F0C), hairline: Color(hex: 0xB8223A33), editorTopBar: Color(hex: 0xFF0B1411), editorPanel: Color(hex: 0xFF0B1411), editorPanelHigh: Color(hex: 0xFF111D19), pill: Color(hex: 0xFF172722), actionDim: Color(hex: 0xFF123326), statusBarVeil: Color(hex: 0xFF060B09), systemBarVeil: Color(hex: 0xFF09100D), tickWeak: Color(hex: 0xFF3B5249), tickStrong: Color(hex: 0xFF6C8C80), railModeFill: Color(hex: 0xFF18251F), fieldFilled: Color(hex: 0xFF1F2B27))
+    static let amethyst = AureaPalette(id: "amethyst", brandDeep: Color(hex: 0xFF3A2470), brand: Color(hex: 0xFF6246B8), accent: Color(hex: 0xFFB9A2FF), keyframe: Color(hex: 0xFFDCCFFF), background: Color(hex: 0xFF110E19), surface: Color(hex: 0xFF181423), surfaceHigh: Color(hex: 0xFF201B2E), chip: Color(hex: 0xFF282238), chipHigh: Color(hex: 0xFF383049), border: Color(hex: 0xFF2F2842), muted: Color(hex: 0xFFB5ADC6), subtle: Color(hex: 0xFF877E99), onAccent: Color(hex: 0xFF0D0A14), accentDim: Color(hex: 0xFF2C2248), keyframeDim: Color(hex: 0xFF362B55), stage: Color(hex: 0xFF0C0A12), hairline: Color(hex: 0xB82F2842), editorTopBar: Color(hex: 0xFF110E19), editorPanel: Color(hex: 0xFF110E19), editorPanelHigh: Color(hex: 0xFF181423), pill: Color(hex: 0xFF201B2E), actionDim: Color(hex: 0xFF261E42), statusBarVeil: Color(hex: 0xFF08070C), systemBarVeil: Color(hex: 0xFF0D0B13), tickWeak: Color(hex: 0xFF4A4260), tickStrong: Color(hex: 0xFF7D7399), railModeFill: Color(hex: 0xFF211C2D), fieldFilled: Color(hex: 0xFF272233))
+    static let sunset = AureaPalette(id: "sunset", brandDeep: Color(hex: 0xFF6A3212), brand: Color(hex: 0xFFB45A1E), accent: Color(hex: 0xFFFFB060), keyframe: Color(hex: 0xFFFFD6A8), background: Color(hex: 0xFF15100C), surface: Color(hex: 0xFF1E1712), surfaceHigh: Color(hex: 0xFF281F18), chip: Color(hex: 0xFF30251D), chipHigh: Color(hex: 0xFF40342B), border: Color(hex: 0xFF3A2C22), muted: Color(hex: 0xFFC4B4A6), subtle: Color(hex: 0xFF96867A), onAccent: Color(hex: 0xFF140C06), accentDim: Color(hex: 0xFF45280F), keyframeDim: Color(hex: 0xFF4E3218), stage: Color(hex: 0xFF100C09), hairline: Color(hex: 0xB83A2C22), editorTopBar: Color(hex: 0xFF15100C), editorPanel: Color(hex: 0xFF15100C), editorPanelHigh: Color(hex: 0xFF1E1712), pill: Color(hex: 0xFF281F18), actionDim: Color(hex: 0xFF3E230D), statusBarVeil: Color(hex: 0xFF0B0806), systemBarVeil: Color(hex: 0xFF110D0A), tickWeak: Color(hex: 0xFF5A4838), tickStrong: Color(hex: 0xFF907A66), railModeFill: Color(hex: 0xFF271E17), fieldFilled: Color(hex: 0xFF2E251E))
+    static let all: [AureaPalette] = [aurea, midnight, graphite, emerald, amethyst, sunset]
+    static func of(_ id: String?) -> AureaPalette { all.first { $0.id == id } ?? aurea }
+}
+
+/// O tema em uso. Trocar exige reconstruir as telas (o modelo muda `themeId`,
+/// que é a identidade da raiz).
+enum AureaTheme {
+    static var palette: AureaPalette = .of(UserDefaults.standard.string(forKey: "aurea.theme"))
+}
+
 // =============================================================================
 // Cores (AureaTokens.kt)
 // =============================================================================
@@ -43,44 +92,44 @@ enum AureaColors {
     static let actionSheetBg = HomeColors.sheetFill
     static let actionCancelBg = Color(hex: 0x2C2C2C)
     // --- Marca ---------------------------------------------------------------
-    static let brandDeep   = Color(hex: 0x123A63)
-    static let brand       = Color(hex: 0x245D8C)   // preenchimento de ação (Exportar, "+")
-    static let accent      = Color(hex: 0x6FAED9)   // ação/estado fora do editor, destaque
-    static let keyframe    = Color(hex: 0xA9D3EC)   // keyframe, curva, valor, seleção em texto
-    static let background  = Color(hex: 0x0F141A)
-    static let surface     = Color(hex: 0x151C24)
-    static let surfaceHigh = Color(hex: 0x1B2530)
-    static let chip        = Color(hex: 0x212D3A)
-    static let chipHigh    = Color(hex: 0x323D49)   // campoAlto = lerp(chip, texto, 0,08)
-    static let border      = Color(hex: 0x273442)
+    static var brandDeep: Color { AureaTheme.palette.brandDeep }
+    static var brand: Color { AureaTheme.palette.brand }
+    static var accent: Color { AureaTheme.palette.accent }
+    static var keyframe: Color { AureaTheme.palette.keyframe }
+    static var background: Color { AureaTheme.palette.background }
+    static var surface: Color { AureaTheme.palette.surface }
+    static var surfaceHigh: Color { AureaTheme.palette.surfaceHigh }
+    static var chip: Color { AureaTheme.palette.chip }
+    static var chipHigh: Color { AureaTheme.palette.chipHigh }
+    static var border: Color { AureaTheme.palette.border }
     static let text        = Color(hex: 0xF7F9FB)
-    static let muted       = Color(hex: 0xAAB6C3)
-    static let subtle      = Color(hex: 0x7C8A99)   // texto terciário: nota, rodapé
-    static let onAccent    = Color(hex: 0x0B1117)
-    static let accentDim   = Color(hex: 0x1D3A55)
-    static let keyframeDim = Color(hex: 0x22405A)
+    static var muted: Color { AureaTheme.palette.muted }
+    static var subtle: Color { AureaTheme.palette.subtle }
+    static var onAccent: Color { AureaTheme.palette.onAccent }
+    static var accentDim: Color { AureaTheme.palette.accentDim }
+    static var keyframeDim: Color { AureaTheme.palette.keyframeDim }
     static let danger      = Color(hex: 0xFF6B6B)
     static let warning     = Color(hex: 0xFFC978)
     static let success     = Color(hex: 0x4CD08A)
-    static let stage       = Color(hex: 0x0A0E13)   // fundo atrás da composição / timeline
+    static var stage: Color { AureaTheme.palette.stage }
     static let playhead    = Color(hex: 0xFFFFFFFF)
-    static let hairline    = Color(hex: 0x273442).opacity(0.72)
+    static var hairline: Color { AureaTheme.palette.hairline }
 
     // --- Cromo do editor (AmColors) -----------------------------------------
-    static let editorTopBar    = Color(hex: 0x0F141A)
-    static let editorPanel     = Color(hex: 0x0F141A)
-    static let editorPanelHigh = Color(hex: 0x151C24)
-    static let pill            = Color(hex: 0x1B2530)
-    static let action          = brand
+    static var editorTopBar: Color { AureaTheme.palette.editorTopBar }
+    static var editorPanel: Color { AureaTheme.palette.editorPanel }
+    static var editorPanelHigh: Color { AureaTheme.palette.editorPanelHigh }
+    static var pill: Color { AureaTheme.palette.pill }
+    static var action: Color { brand }
     static let onAction        = text
-    static let actionDim       = Color(hex: 0x16304A)
-    static let selection       = brandDeep
-    static let selectionText   = keyframe
+    static var actionDim: Color { AureaTheme.palette.actionDim }
+    static var selection: Color { brandDeep }
+    static var selectionText: Color { keyframe }
     static let disabled        = Color.white.opacity(0.25)
-    static let statusBarVeil   = Color(hex: 0x070A0E)
+    static var statusBarVeil: Color { AureaTheme.palette.statusBarVeil }
 
     // --- Barra de sistema (a Home é edge-to-edge) ----------------------------
-    static let systemBarVeil = Color(hex: 0x0B0F13)
+    static var systemBarVeil: Color { AureaTheme.palette.systemBarVeil }
     static let navigationBar = Color(hex: 0x000000)
     static let scrim         = Color(hex: 0x000000).opacity(0.54)
     static let sheetScrim    = Color(hex: 0x0A0E13).opacity(0.35)
@@ -103,30 +152,30 @@ enum AureaColors {
     // --- Controles nativos (Cupertino) ---------------------------------------
     static let segmentSeparator   = Color(hex: 0x8E8E93).opacity(0.30)
     static let segmentThumbShadow = Color(hex: 0x000000).opacity(0.12)
-    static let segmentTrack       = background
-    static let segmentThumb       = surfaceHigh
+    static var segmentTrack: Color { background }
+    static var segmentThumb: Color { surfaceHigh }
     static let switchOffTrack     = Color(hex: 0x787880).opacity(0.32)
 
     // --- Campos ---------------------------------------------------------------
     static let field            = Color(hex: 0x000000)
     static let fieldBorder      = Color(hex: 0xFFFFFF).opacity(0.20)
     static let fieldPlaceholder = Color(hex: 0xEBEBF5).opacity(0.30)
-    static let fieldFilled      = Color(hex: 0x272B33)
+    static var fieldFilled: Color { AureaTheme.palette.fieldFilled }
     static let fieldDialog      = Color(hex: 0x1C1C1E)
 
     // --- Régua (AmTickRuler) --------------------------------------------------
-    static let tickWeak   = Color(hex: 0x43516A)
-    static let tickStrong = Color(hex: 0x7485A3)
+    static var tickWeak: Color { AureaTheme.palette.tickWeak }
+    static var tickStrong: Color { AureaTheme.palette.tickStrong }
 
     // --- Diálogos Cupertino ----------------------------------------------------
     static let destructiveCupertino = Color(hex: 0xFF453A)
     /// O "=" com erro (`expressionColor` de `PropertyControls.kt`).
     static let expressionError = Color(hex: 0xFF6B5E)
 
-    static let brandGradient: [Color] = [brandDeep, brand, accent]
+    static var brandGradient: [Color] { [brandDeep, brand, accent] }
 
     // --- Painéis da A.01 (valores escritos à mão no Flutter, aqui viram token) ---
-    static let railModeFill        = Color(hex: 0x1E222D)
+    static var railModeFill: Color { AureaTheme.palette.railModeFill }
     static let railDisabled        = Color(hex: 0x434956)
     static let controlButton       = Color(hex: 0x434A60)
     static let dialTrack           = Color(hex: 0x2E3548)
@@ -155,28 +204,56 @@ enum AureaColors {
     ]
 
     // --- Espelho PascalCase dos nomes do Kotlin (o mesmo token, dois nomes) ---
-    static let BrandDeep = brandDeep, Brand = brand, Accent = accent, Keyframe = keyframe
-    static let Background = background, Surface = surface, SurfaceHigh = surfaceHigh
-    static let Chip = chip, ChipHigh = chipHigh, Border = border, Text = text
-    static let Muted = muted, Subtle = subtle, OnAccent = onAccent, AccentDim = accentDim
-    static let KeyframeDim = keyframeDim, Danger = danger, Warning = warning, Success = success
-    static let Stage = stage, Playhead = playhead, Hairline = hairline
-    static let EditorTopBar = editorTopBar, EditorPanel = editorPanel, EditorPanelHigh = editorPanelHigh
-    static let Pill = pill, Action = action, OnAction = onAction, ActionDim = actionDim
-    static let Selection = selection, SelectionText = selectionText, Disabled = disabled
-    static let StatusBarVeil = statusBarVeil, SystemBarVeil = systemBarVeil, NavigationBar = navigationBar
+    static var BrandDeep: Color { brandDeep }
+    static var Brand: Color { brand }
+    static var Accent: Color { accent }
+    static var Keyframe: Color { keyframe }
+    static var Background: Color { background }
+    static var Surface: Color { surface }
+    static var SurfaceHigh: Color { surfaceHigh }
+    static let Text = text
+    static var Chip: Color { chip }
+    static var ChipHigh: Color { chipHigh }
+    static var Border: Color { border }
+    static var Muted: Color { muted }
+    static var Subtle: Color { subtle }
+    static var OnAccent: Color { onAccent }
+    static var AccentDim: Color { accentDim }
+    static let Danger = danger, Warning = warning, Success = success
+    static var KeyframeDim: Color { keyframeDim }
+    static let Playhead = playhead
+    static var Stage: Color { stage }
+    static var Hairline: Color { hairline }
+    static var EditorTopBar: Color { editorTopBar }
+    static var EditorPanel: Color { editorPanel }
+    static var EditorPanelHigh: Color { editorPanelHigh }
+    static let OnAction = onAction
+    static var Pill: Color { pill }
+    static var Action: Color { action }
+    static var ActionDim: Color { actionDim }
+    static let Disabled = disabled
+    static var Selection: Color { selection }
+    static var SelectionText: Color { selectionText }
+    static let NavigationBar = navigationBar
+    static var StatusBarVeil: Color { statusBarVeil }
+    static var SystemBarVeil: Color { systemBarVeil }
     static let Scrim = scrim, SheetScrim = sheetScrim
     static let OnImage = onImage, OnImage70 = onImage70, ImageScrim = imageScrim
     static let Beta = beta, BetaFill = betaFill, BetaBorder = betaBorder
     static let PressHighlight = pressHighlight, RowHighlight = rowHighlight, OverlayPressed = overlayPressed
     static let SegmentSeparator = segmentSeparator, SegmentThumbShadow = segmentThumbShadow
-    static let SegmentTrack = segmentTrack, SegmentThumb = segmentThumb, SwitchOffTrack = switchOffTrack
+    static let SwitchOffTrack = switchOffTrack
+    static var SegmentTrack: Color { segmentTrack }
+    static var SegmentThumb: Color { segmentThumb }
     static let Field = field, FieldBorder = fieldBorder, FieldPlaceholder = fieldPlaceholder
-    static let FieldFilled = fieldFilled, FieldDialog = fieldDialog
-    static let TickWeak = tickWeak, TickStrong = tickStrong
+    static let FieldDialog = fieldDialog
+    static var FieldFilled: Color { fieldFilled }
+    static var TickWeak: Color { tickWeak }
+    static var TickStrong: Color { tickStrong }
     static let DestructiveCupertino = destructiveCupertino
-    static let BrandGradient = brandGradient
-    static let RailModeFill = railModeFill, RailDisabled = railDisabled, ControlButton = controlButton
+    static var BrandGradient: [Color] { brandGradient }
+    static let RailDisabled = railDisabled, ControlButton = controlButton
+    static var RailModeFill: Color { railModeFill }
     static let DialTrack = dialTrack, DialValueBox = dialValueBox, CurveGrid = curveGrid
     static let CurvePresetBorder = curvePresetBorder
     static let EffectPreviewTop = effectPreviewTop, EffectPreviewBottom = effectPreviewBottom

@@ -62,13 +62,15 @@ struct EditorView: View {
                             .overlay(Circle().stroke(AureaColors.action, lineWidth: 2.2))
                             .shadow(color: StageInk.fabShadow, radius: 6, y: 3)
                     }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_adicionar_camada"))
-                        .padding(.trailing, 18 + (wide ? sideWidth : 0)).padding(.bottom, 18 + (wide ? 0 : metrics.sheet))
+                        .padding(.trailing, (fabLifted(metrics, wide) ? 10 : 18) + (wide ? sideWidth : 0))
+                        .padding(.bottom, fabLifted(metrics, wide) ? 10 + metrics.sheet + metrics.timeline + metrics.transport + metrics.strip
+                                                                    : 18 + (wide ? 0 : metrics.sheet))
                 }
             }
         }
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
         .sheet(item: $model.markerEditingFrame) { marker in
-            MarkerEditorSheet(frame: marker.frame, color: marker.color, label: marker.label)
+            MarkerEditorSheet(frame: marker.frame, color: marker.color, label: marker.label, isNew: marker.isNew)
                 .environmentObject(model)
         }
         .overlay(alignment: .topTrailing) {
@@ -108,7 +110,7 @@ struct EditorView: View {
                     model.vectorFreehand = false; model.vectorEditingPoints = false; model.maskDrawing = false; model.freehandPoints = []
                 }.padding(.bottom, 10).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .bottom)
             }
-            if !model.fullscreen {
+            if !model.fullscreen && !model.sceneEditor {
                 Text(previewLabel).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
                     .padding(.horizontal, 10).padding(.vertical, 8).background(StageInk.resolutionChip, in: RoundedRectangle(cornerRadius: 6))
                     .overlay { GeometryReader { bounds in
@@ -218,6 +220,11 @@ private struct ShellStageBanner: View {
             let fit = min(size.width / CGFloat(max(1, model.compositionWidth)), size.height / CGFloat(max(1, model.compositionHeight)))
             let origin = CGPoint(x: (size.width - CGFloat(model.compositionWidth) * fit) / 2, y: (size.height - CGFloat(model.compositionHeight) * fit) / 2)
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: origin.x + CGFloat(x) * fit, y: origin.y + CGFloat(y) * fit) }
+            // Borda do quadro: dá para ver onde a composição termina mesmo com
+            // o fundo do projeto da cor da área de trabalho (só na prévia).
+            context.stroke(Path(CGRect(x: origin.x, y: origin.y, width: CGFloat(model.compositionWidth) * fit,
+                                       height: CGFloat(model.compositionHeight) * fit)),
+                           with: .color(.white.opacity(0.16)), lineWidth: 1)
             if model.sceneEditor {
                 let lines = model.engine.sceneGuides().map(\.floatValue)
                 for i in stride(from: 0, to: lines.count, by: 5) {
@@ -630,28 +637,30 @@ private struct DockView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         if layer.kind == 1 || layer.kind == 3 {
-                            quickAction(CupertinoGlyph.Speedometer, "editor_velocidade", size: 21) { model.openPanel(.speed) }
+                            quickAction(CupertinoGlyph.Speedometer, "editor_velocidade", label: "editor_velocidade", size: 21) { model.openPanel(.speed) }
                         }
                         if layer.kind == 12 {
-                            quickAction(CupertinoGlyph.ArrowDownRightSquare, "editor_entrar_grupo", size: 20) { model.openGroup(layer.id) }
-                            quickAction(ShellGlyph.SquareSplit2x2, "editor_desagrupar", size: 20) { model.ungroup(layer.id) }
+                            quickAction(CupertinoGlyph.ArrowDownRightSquare, "editor_entrar_grupo", label: "dock_short_enter", size: 20) { model.openGroup(layer.id) }
+                            quickAction(ShellGlyph.SquareSplit2x2, "editor_desagrupar", label: "editor_desagrupar", size: 20) { model.ungroup(layer.id) }
                         }
-                        quickAction(CupertinoGlyph.ArrowRightToLine, "editor_aparar_inicio_cabecote") { timeEdit(layer) { model.trimStart(layer.id, at: model.status.playhead) } }
-                        quickAction(CupertinoGlyph.Scissors, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
-                        quickAction(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote") { timeEdit(layer) { model.trimEnd(layer.id, at: model.status.playhead) } }
+                        quickAction(CupertinoGlyph.ArrowRightToLine, "editor_aparar_inicio_cabecote", label: "dock_short_trim_start") { timeEdit(layer) { model.trimStart(layer.id, at: model.status.playhead) } }
+                        quickAction(CupertinoGlyph.Scissors, "editor_dividir_cabecote", label: "dock_short_split") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
+                        quickAction(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote", label: "dock_short_trim_end") { timeEdit(layer) { model.trimEnd(layer.id, at: model.status.playhead) } }
                         // Puxar para o cabeçote: o clipe inteiro anda até o
                         // cabeçote, a duração não muda. Sem o `timeEdit` (que
                         // exige o cabeçote DENTRO da camada) — é para quem está
                         // fora dele.
-                        quickAction(CupertinoGlyph.ArrowDownToLine, "editor_puxar_cabecote") {
+                        quickAction(CupertinoGlyph.ArrowDownToLine, "editor_puxar_cabecote", label: "dock_short_pull") {
                             guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
-                            pause()
+                            // `pause()` solto aqui era o pause(3) da libc (a DockView
+                            // não tem um): suspendia o processo inteiro para sempre.
+                            if model.status.playing != 0 { model.playPause() }
                             model.moveToPlayhead(layer.id)
                         }
                         if hasAudio {
                             quickAction(muted ? CupertinoGlyph.SpeakerSlash : CupertinoGlyph.Speaker2,
                                         muted ? "editor_som_desligado_toque_ligar_segure_volume" : "editor_desligar_som_segure_volume",
-                                        size: 20, tint: muted ? AureaColors.accent : AureaColors.text,
+                                        label: "dock_short_sound", size: 20, tint: muted ? AureaColors.accent : AureaColors.text,
                                         hold: { model.openPanel(.audio) }) {
                                 guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
                                 model.mutate { $0.setLayer(layer.id, audioMuted: !muted) }; model.refreshModel(force: true)
@@ -697,9 +706,14 @@ private struct DockView: View {
         if model.status.playing != 0 { model.playPause() }
         action()
     }
-    private func quickAction(_ glyph: Character, _ key: String, size: CGFloat = 19, tint: Color = AureaColors.text,
+    /// Ícone + nome curto: só o ícone obrigava a adivinhar (→| e |← parecem
+    /// iguais). A descrição completa continua no leitor de tela.
+    private func quickAction(_ glyph: Character, _ key: String, label: String? = nil, size: CGFloat = 19, tint: Color = AureaColors.text,
                              hold: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
-        CupertinoGlyph.text(glyph, size: size, color: tint)
+        VStack(spacing: 3) {
+            CupertinoGlyph.text(glyph, size: size, color: tint)
+            if let label { Text(AureaText.t(label)).font(.aurea(size: 10)).foregroundStyle(tint.opacity(0.78)).lineLimit(1) }
+        }
             .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
             .onTapGesture(perform: action).onLongPressGesture(minimumDuration: 0.45) { hold?() }
             .accessibilityLabel(AureaText.t(key)).accessibilityAddTraits(.isButton)
@@ -1134,53 +1148,90 @@ private struct ShellMediaPicker: UIViewControllerRepresentable {
     }
 }
 
+/// Cena 3D "seca" (par do SceneLayoutWorkspace.kt): a cena ocupa a tela e se
+/// mexe com o dedo — arrastar o objeto move, 1 dedo no vazio gira a vista,
+/// pinça aproxima, toque duplo recentra (ver `sceneEvent`). Sem sliders nem
+/// campos XYZ: voltar, desfazer, adicionar, trocar de objeto e, conforme o
+/// escolhido, material ou luz. A órbita é só da prévia.
 @MainActor private struct SceneLayoutWorkspace: View {
     @EnvironmentObject private var model: AureaModel
     let height: CGFloat
-    @State private var group = 0
     @State private var materials = false
     @State private var lights = false
+    @State private var hint = true
     var body: some View {
-        VStack(spacing: 4) {
-            ScrollView(.horizontal) { HStack {
-                Button("← Timeline") { model.exitSceneEditor() }
-                Button("↶") { model.undo() }
-                Button("↷") { model.redo() }
-                Button(AureaText.t("panel_adicionar")) { model.showAddLayer = true }
-                Button("PBR / HDRI") { model.panel = .layer3D; materials = true }.disabled(model.selectedLayer?.kind != 10)
+        ZStack {
+            PreviewStage(height: height)
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    roundButton(CupertinoGlyph.ChevronLeft, "editor_voltar_editor") { model.exitSceneEditor() }
+                    Text(AureaText.t("scene_workspace")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.text)
+                        .padding(.leading, 2)
+                    Spacer()
+                    roundButton(CupertinoGlyph.ArrowUturnLeft, "editor_desfazer") { model.undo() }
+                    roundButton(CupertinoGlyph.ArrowUturnRight, "editor_refazer") { model.redo() }
+                }.padding(.horizontal, 8).padding(.top, 6)
                 Spacer()
-                Button(AureaText.t("pn_t3d_lighting")) { lights = true }
-                Button(AureaText.t("panel_camera_3d")) { model.addCamera() }
-                Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
-                Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: "Texto", depth: 0.25) }
-            }.padding(.horizontal, 10) }
-            PreviewStage(height: max(96, height - 256))
-            ScrollView(.horizontal) {
-                HStack { ForEach(model.layers.filter { $0.threeD }) { row in
-                    Button((model.primarySelection == row.id ? "● " : "") + row.name) { model.select(layerId: row.id) }
-                } }.padding(.horizontal, 10)
-            }
-            HStack {
-                VStack { Text(AureaText.t("scene_orbit_x")); Slider(value: $model.sceneYaw, in: -180...180).onChange(of: model.sceneYaw) { _ in model.updateSceneView() } }
-                VStack { Text(AureaText.t("scene_orbit_y")); Slider(value: $model.scenePitch, in: -80...80).onChange(of: model.scenePitch) { _ in model.updateSceneView() } }
-                VStack { Text(AureaText.t("scene_zoom")); Slider(value: $model.sceneDistance, in: 0.25...10).onChange(of: model.sceneDistance) { _ in model.updateSceneView() } }
-            }.padding(.horizontal, 12)
-            Picker("Transform", selection: $group) { Text(AureaText.t("fx_posicao")).tag(0); Text(AureaText.t("panel_escala")).tag(1); Text(AureaText.t("panel_rotacao")).tag(2) }.pickerStyle(.segmented)
-            if let id = model.primarySelection {
-                let values = StageGeom.floats(model.detail[["position", "scale", "rotation"][group]])
-                HStack { ForEach(0..<3, id: \.self) { axis in
-                    HStack {
-                        Text(["X", "Y", "Z"][axis])
-                        SceneNumberField(value: values.count > axis ? values[axis] : 0) { model.setTransform(UInt32(group * 3 + axis), value: $0, layer: id) }
-                            .id("transform:\(id):\(group):\(axis)")
+                if hint {
+                    Text(AureaText.t("scene_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
+                        .multilineTextAlignment(.center).padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(StageInk.floatingDark, in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 24).padding(.bottom, 8).transition(.opacity).allowsHitTesting(false)
+                }
+                let objects = model.layers.filter { $0.threeD }
+                if !objects.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(objects) { row in
+                                let on = model.primarySelection == row.id
+                                Button { model.select(layerId: row.id, additive: false) } label: {
+                                    Text(row.name).font(.aurea(size: 13)).lineLimit(1)
+                                        .foregroundStyle(on ? Color.black : AureaColors.text)
+                                        .padding(.horizontal, 12).padding(.vertical, 7)
+                                        .background(on ? AureaColors.accent.opacity(0.9) : StageInk.floatingDark, in: Capsule())
+                                }.buttonStyle(.plain)
+                            }
+                        }.padding(.horizontal, 12)
+                    }.padding(.bottom, 8)
+                }
+                HStack(spacing: 8) {
+                    Menu {
+                        Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: "Texto", depth: 0.25) }
+                        Button(AureaText.t("panel_camera_3d")) { model.addCamera() }
+                        Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
+                        Button(AureaText.t("scene_light_directional")) { model.addLight(0) }
+                        Button(AureaText.t("scene_light_point")) { model.addLight(1) }
+                        Button(AureaText.t("sh_add_model_3d") + "…") { model.showAddLayer = true }
+                    } label: { pill(CupertinoGlyph.Plus, String(AureaText.t("panel_adicionar").drop(while: { $0 == "+" || $0 == " " }))) }
+                    if let layer = model.selectedLayer, layer.kind == 10 || (layer.kind == 4 && layer.threeD) {
+                        Button { model.panel = .layer3D; materials = true } label: { pill(CupertinoGlyph.CubeFill, AureaText.t("scene_material")) }.buttonStyle(.plain)
                     }
-                } }.padding(.horizontal, 10)
+                    if model.selectedLayer?.kind == 9 {
+                        Button { lights = true } label: { pill(CupertinoGlyph.Lightbulb, AureaText.t("pn_t3d_lighting")) }.buttonStyle(.plain)
+                    }
+                    Button { model.resetSceneView() } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("scene_recenter")) }.buttonStyle(.plain)
+                }.padding(.bottom, 12)
             }
-        }.font(.caption)
+        }
+        .frame(height: height)
+        .task { try? await Task.sleep(nanoseconds: 7_000_000_000); withAnimation { hint = false } }
         .sheet(isPresented: $model.showAddLayer) { AddLayerSheet().environmentObject(model) }
         .sheet(isPresented: $lights) { SceneLightControls().environmentObject(model) }
         .sheet(isPresented: $materials) { Panel3DView().environmentObject(model) }
         .onChange(of: model.panel) { panel in if panel == .none { materials = false } }
+    }
+    private func roundButton(_ glyph: Character, _ key: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            CupertinoGlyph.text(glyph, size: 19).foregroundStyle(AureaColors.text)
+                .frame(width: 40, height: 40).background(StageInk.floatingDark, in: Circle())
+        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(key))
+    }
+    private func pill(_ glyph: Character, _ label: String) -> some View {
+        HStack(spacing: 6) {
+            CupertinoGlyph.text(glyph, size: 16)
+            Text(label).font(.aurea(size: 13, weight: .medium)).lineLimit(1)
+        }.foregroundStyle(AureaColors.text).padding(.horizontal, 14).frame(height: 40)
+            .background(StageInk.floatingDark, in: Capsule())
     }
 }
 
@@ -1226,5 +1277,13 @@ private struct ShellMediaPicker: UIViewControllerRepresentable {
             .onChange(of: draft) { text in
                 if focused, let next = Float(text), next.isFinite { onEdit(next) }
             }
+    }
+}
+
+extension EditorView {
+    /// Camada escolhida com a timeline baixa: o "+" cobria o clipe escolhido;
+    /// sobe para o canto do palco, acima do transporte (par do EditorScreen.kt).
+    fileprivate func fabLifted(_ metrics: EditorMetrics, _ wide: Bool) -> Bool {
+        !wide && model.sheetContent == .dock && metrics.timeline < 170
     }
 }

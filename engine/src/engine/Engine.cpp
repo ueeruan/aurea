@@ -578,6 +578,14 @@ void Engine::request_render() noexcept {
     wakeCv_.notify_one();
 }
 
+void Engine::wake_render() noexcept {
+    {
+        std::lock_guard<std::mutex> lock(wakeMutex_);
+        wakeFlag_ = true;
+    }
+    wakeCv_.notify_one();
+}
+
 void Engine::on_frame_ready(void* self) {
     // Thread de decode: só acorda o render. Nada de lock do modelo aqui. O
     // frame novo só força redesenho se o último frame mostrado estava
@@ -4119,6 +4127,22 @@ std::string Engine::save_preset(u64 layerId, presets::PresetKind kind, const std
     return presets::write(p, &effectRegistry_);
 }
 
+std::string Engine::save_effect_preset(u64 layerId, u32 effectId, const std::string& name) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return {};
+    presets::Preset p;
+    if (!presets::capture_effect(*l, effectId, name, comp->fps(), &effectRegistry_, p)) return {};
+    return presets::write(p, &effectRegistry_);
+}
+
+std::string Engine::import_alight_motion(const std::string& data, presets::AlightImportReport& report) noexcept {
+    // Só lê o registro de efeitos (imutável depois da inicialização): não
+    // precisa da trava do modelo, e um arquivo grande não segura a UI.
+    return presets::import_alight_motion(data, &effectRegistry_, report);
+}
+
 bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFrames, std::string* error) noexcept {
     // Lê e valida TUDO antes de travar/abrir o passo de desfazer: preset
     // quebrado não deixa passo vazio no histórico nem camada pela metade.
@@ -6406,7 +6430,11 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
                     && l->kind != LayerKind::Camera && l->kind != LayerKind::Light;
     if (boxed) {
         bool persp = false;
-        const Mat4 m = layer_comp_matrix(*comp, *l, now, &persp);
+        Mat4 m = layer_comp_matrix(*comp, *l, now, &persp);
+        // Cena 3D: o palco mostra a câmera de navegação, então os cantos (que
+        // a UI usa para tocar e arrastar o objeto com o dedo) seguem ela.
+        if (persp && sceneEditor_.enabled)
+            m = scene_editor_projection(comp->width(), comp->height(), sceneEditor_) * layer_world_3d(*comp, *l, now);
         const f32 w = static_cast<f32>(out.sourceWidth), h = static_cast<f32>(out.sourceHeight);
         // Vetor: a caixa do conteúdo pode começar fora da origem da camada.
         Vec2 o{0.0f, 0.0f};

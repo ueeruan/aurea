@@ -362,7 +362,12 @@ struct PresetsPanel: View {
             }.padding(.horizontal, 12)
         }
         .foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
-        .onAppear { if model.selectedLayer?.kind == 4 { picked = "texto" }; load() }
+        .onAppear {
+            if model.selectedLayer?.kind == 4 { picked = "texto" }
+            // "Meus presets" (vindo dos efeitos) abre direto na aba pedida.
+            if let kind = model.presetsOpenKind { picked = kind; model.presetsOpenKind = nil }
+            load()
+        }
         .onChange(of: model.language) { _ in load() }
     }
 

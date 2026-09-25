@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -112,6 +113,11 @@ internal fun PresetsPanel(env: PanelEnv) {
         }
     }
     var picked by rememberSaveable { mutableStateOf(if (isText) PresetTab.Text else PresetTab.Animation) }
+    // "Meus presets" (vindo dos efeitos) abre direto na aba pedida.
+    LaunchedEffect(store.presetsOpenKind) {
+        store.presetsOpenKind?.let { k -> PresetTab.entries.firstOrNull { it.kind == k }?.let { picked = it } }
+        store.presetsOpenKind = null
+    }
     val tab = if (picked in tabs) picked else PresetTab.Animation
     var query by rememberSaveable { mutableStateOf("") }
     var stretch by rememberSaveable { mutableStateOf(false) }

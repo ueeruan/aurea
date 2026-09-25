@@ -95,7 +95,7 @@ enum StageDim {
     static let pinchDeadZone: CGFloat = 4       // graus
 
     // --- Doca e adicionar (BottomArea.kt / AddLayerPanel.kt) ---
-    static let dockRowHeight: CGFloat = 44
+    static let dockRowHeight: CGFloat = 54   // ícone + nome curto (Android: 54 dp)
     static let dockRowPad: CGFloat = 10
     static let dockRowGap: CGFloat = 8
     static let dockTileMin: CGFloat = 64

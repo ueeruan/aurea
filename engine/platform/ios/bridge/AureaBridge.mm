@@ -264,6 +264,10 @@ void Host::request_render() noexcept {
     if (engine_) engine_->request_render();
 }
 
+void Host::wake_render() noexcept {
+    if (engine_) engine_->wake_render();
+}
+
 void Host::invalidate() noexcept {
     if (engine_) engine_->invalidate();
 }

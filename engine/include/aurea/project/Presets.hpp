@@ -221,6 +221,13 @@ struct Preset {
 [[nodiscard]] bool capture(const Layer& layer, PresetKind kind, std::string name, f64 fps, u32 parts,
                            const EffectRegistry* registry, Preset& out);
 
+/// Preset de efeitos com UM efeito só: a instância `effectId` (o id estável
+/// do efeito na camada, não a posição na pilha) com os keyframes dela — o
+/// MESMO formato "effects", então aplica pelo caminho de sempre. Falso = a
+/// camada não tem esse efeito.
+[[nodiscard]] bool capture_effect(const Layer& layer, u32 effectId, std::string name, f64 fps,
+                                  const EffectRegistry* registry, Preset& out);
+
 /// Aplica o preset (Effects, Text ou Animation) na camada. `anchorLocal` =
 /// instante LOCAL onde a animação começa (Animation; Effects e Text usam o
 /// início da camada); `durationFrames` > 0 estica a animação até essa

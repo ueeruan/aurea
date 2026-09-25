@@ -407,6 +407,10 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     if (_host) _host->request_render();
 }
 
+- (void)wakeRender {
+    if (_host) _host->wake_render();
+}
+
 // =============================================================================
 // Estado
 // =============================================================================
@@ -2125,6 +2129,18 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     auto* e = self.engine; if (!e || kind > 2) return @"";
     const auto json = e->save_preset(layerId, static_cast<aurea::presets::PresetKind>(kind), to_std(name), parts);
     return to_ns(json);
+}
+- (NSString*)saveEffectPreset:(long long)layerId effect:(uint32_t)effectId name:(NSString*)name {
+    auto* e = self.engine; if (!e) return @"";
+    return to_ns(e->save_effect_preset(layerId, effectId, to_std(name)));
+}
+- (NSString*)importAlightMotion:(NSData*)data {
+    aurea::presets::AlightImportReport report;
+    std::string json;
+    auto* e = self.engine;
+    if (e && data) json = e->import_alight_motion(std::string(static_cast<const char*>(data.bytes), data.length), report);
+    else report.error = e ? "arquivo vazio" : "motor indisponivel";
+    return to_ns(aurea::presets::alight_import_envelope(json, report));
 }
 - (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration {
     auto* e = self.engine;

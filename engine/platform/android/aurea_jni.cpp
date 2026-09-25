@@ -1743,6 +1743,27 @@ AUREA_JNI jbyteArray AUREA_FN(nativeSavePreset)(JNIEnv* env, jclass, jlong handl
     return js.empty() ? nullptr : bytes_of(env, js);
 }
 
+/// Preset de efeitos com SÓ o efeito `effectId` (id estável da instância) e
+/// os keyframes dele. Nulo = camada ou efeito não existe.
+AUREA_JNI jbyteArray AUREA_FN(nativeSaveEffectPreset)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId, jbyteArray name) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || effectId < 0) return nullptr;
+    const std::string js = c->engine.save_effect_preset(static_cast<u64>(layer), static_cast<u32>(effectId), utf8_of(env, name));
+    return js.empty() ? nullptr : bytes_of(env, js);
+}
+
+/// XML do Alight Motion (ou o pacote .zip/.amproj, em bytes) → envelope JSON
+/// {"preset", "name", "layer", "mapped", "skipped", "warnings", "error"}.
+/// "preset" vazio = nada aproveitável ("error" diz o porquê). Não mexe no projeto.
+AUREA_JNI jbyteArray AUREA_FN(nativeImportAlightMotion)(JNIEnv* env, jclass, jlong handle, jbyteArray data) {
+    NativeContext* c = ctx_of(handle);
+    presets::AlightImportReport report;
+    std::string js;
+    if (c) js = c->engine.import_alight_motion(utf8_of(env, data), report);
+    else report.error = "motor indisponivel";
+    return bytes_of(env, presets::alight_import_envelope(js, report));
+}
+
 /// Aplica (um passo de desfazer). Nulo = aplicado; senão, o motivo (UTF-8).
 AUREA_JNI jbyteArray AUREA_FN(nativeApplyPreset)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray json, jlong duration) {
     NativeContext* c = ctx_of(handle);

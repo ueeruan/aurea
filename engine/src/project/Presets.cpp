@@ -932,6 +932,36 @@ f64 fps_scale(const Preset& p, f64 fps) noexcept {
     return fps / p.fps;
 }
 
+/// Copia o efeito `src` da camada para a posição `pos` do preset, com os
+/// keyframes dele (tempo relativo ao início da camada). Expressão e
+/// referência externa não viajam.
+void capture_one_effect(const Layer& l, const EffectInstance& src, u32 pos, const EffectRegistry* registry, Preset& p) {
+    const i64 base = l.offset.value;
+    EffectInstance e = src;
+    const u32 oldId = e.id;
+    e.id = pos;
+    e.mask = MaskId{};
+    const ParameterRegistry* specs = registry ? registry->params(e.type) : nullptr;
+    for (u32 k = 0; k < e.params.size(); ++k) {
+        ParamSlot& s = e.params[k];
+        if (s.source == ParamSource::Expression) s.source = ParamSource::Constant;
+        s.expression = kInvalidIndex;
+        if (specs && k < specs->count()
+            && (specs->at(k).type == ParamType::LayerReference || specs->at(k).type == ParamType::TextureReference)) {
+            s.constant.ref = 0;
+        }
+    }
+    for (u32 t = 0; t < l.tracks.size(); ++t) {
+        const Track& tr = l.tracks.at(t);
+        if (tr.property != TrackProperty::EffectParam || tr.effectIndex != oldId) continue;
+        Track c = tr;
+        c.effectIndex = pos;
+        retime_track(c, -base, 1.0, 0.0f);
+        p.effectTracks.push_back(std::move(c));
+    }
+    p.effects.push_back(std::move(e));
+}
+
 } // namespace
 
 const char* kind_name(PresetKind k) noexcept {
@@ -1039,31 +1069,7 @@ bool capture(const Layer& l, PresetKind kind, std::string name, f64 fps, u32 par
     switch (kind) {
         case PresetKind::Effects: {
             if (l.effects.empty()) return false;
-            for (u32 i = 0; i < l.effects.size(); ++i) {
-                EffectInstance e = l.effects[i];
-                const u32 oldId = e.id;
-                e.id = i;
-                e.mask = MaskId{};
-                const ParameterRegistry* specs = registry ? registry->params(e.type) : nullptr;
-                for (u32 k = 0; k < e.params.size(); ++k) {
-                    ParamSlot& s = e.params[k];
-                    if (s.source == ParamSource::Expression) s.source = ParamSource::Constant;
-                    s.expression = kInvalidIndex;
-                    if (specs && k < specs->count()
-                        && (specs->at(k).type == ParamType::LayerReference || specs->at(k).type == ParamType::TextureReference)) {
-                        s.constant.ref = 0;
-                    }
-                }
-                for (u32 t = 0; t < l.tracks.size(); ++t) {
-                    const Track& tr = l.tracks.at(t);
-                    if (tr.property != TrackProperty::EffectParam || tr.effectIndex != oldId) continue;
-                    Track c = tr;
-                    c.effectIndex = i;
-                    retime_track(c, -base, 1.0, 0.0f);
-                    p.effectTracks.push_back(std::move(c));
-                }
-                p.effects.push_back(std::move(e));
-            }
+            for (u32 i = 0; i < l.effects.size(); ++i) capture_one_effect(l, l.effects[i], i, registry, p);
             break;
         }
         case PresetKind::Text: {
@@ -1118,6 +1124,21 @@ bool capture(const Layer& l, PresetKind kind, std::string name, f64 fps, u32 par
     }
     out = std::move(p);
     return true;
+}
+
+bool capture_effect(const Layer& l, u32 effectId, std::string name, f64 fps, const EffectRegistry* registry, Preset& out) {
+    if (effectId == kInvalidIndex) return false;
+    for (const EffectInstance& e : l.effects) {
+        if (e.id != effectId) continue;
+        Preset p;
+        p.kind = PresetKind::Effects;
+        p.name = std::move(name);
+        p.fps = fps > 0.0 ? fps : 30.0;
+        capture_one_effect(l, e, 0, registry, p);
+        out = std::move(p);
+        return true;
+    }
+    return false;
 }
 
 bool applicable(const Preset& p, const Layer& l) noexcept {

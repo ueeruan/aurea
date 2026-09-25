@@ -51,8 +51,10 @@ import XCTest
 
     func testAddingEffectClosesBrowserAndShowsAppliedCard() throws {
         _ = try launch("effects")
-        let add = app.buttons["Add effect"].firstMatch
+        let add = app.buttons["aurea.effects.add"].firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 5))
+        XCTAssertEqual(add.label, "Add effect")
+        XCTAssertTrue(add.isHittable)
         add.tap()
         let search = app.textFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
@@ -67,6 +69,14 @@ import XCTest
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: search)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
         XCTAssertTrue(app.staticTexts["Deep Glow"].firstMatch.waitForExistence(timeout: 5))
+        // New effects expand their real parameter card. The Add button is its
+        // scroll footer, so reveal it before checking that the modal is gone.
+        let stack = app.scrollViews["aurea.effects.stack"].firstMatch
+        XCTAssertTrue(stack.exists)
+        for _ in 0..<8 {
+            if add.isHittable { break }
+            stack.swipeUp()
+        }
         XCTAssertTrue(add.isHittable)
         // A second interaction proves the editor did not remain under a stale modal.
         try undo()

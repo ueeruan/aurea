@@ -58,6 +58,17 @@ READY_TIMEOUT = 90
 POLL_INTERVAL = 0.25
 
 
+def requested_scenes():
+    requested = os.environ.get('AUREA_PARITY_SCENES', '').strip()
+    if not requested:
+        return SCENES
+    scenes = tuple(part.strip() for part in requested.split(','))
+    unknown = [scene for scene in scenes if scene not in SCENES]
+    if unknown or len(set(scenes)) != len(scenes):
+        raise ValueError('Capture scenes must be distinct known scenes: ' + requested)
+    return scenes
+
+
 def save_json(path, value):
     """Replace atomically, so a cancelled capture leaves a readable manifest."""
     temporary = path.with_suffix(path.suffix + '.tmp')
@@ -599,7 +610,9 @@ def main(argv=None):
             raise RuntimeError('installed simctl has no console launch option; inspect recorded launch help')
         report['consoleOption'] = console_option
         startup_failures = 0
-        for scene in SCENES:
+        scenes = requested_scenes()
+        report['requestedScenes'] = list(scenes)
+        for scene in scenes:
             record = capture_scene(scene, app, output, udid, console_option, report, frame_checker)
             print(f'{scene}: {record["status"]} ({record["durationSeconds"]:.1f}s)', flush=True)
             if record['status'] != 'captured':

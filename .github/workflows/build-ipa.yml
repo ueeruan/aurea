@@ -1,6 +1,12 @@
 name: Build native IPA (unsigned)
 on:
   workflow_dispatch:
+    inputs:
+      capture_scenes:
+        description: 'Optional comma-separated capture scenes; empty runs the full matrix'
+        required: false
+        default: ''
+        type: string
   push:
     branches: ['codex/native-beta2-ipa']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
@@ -122,6 +128,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee build-simulator.log
       - name: Capture actual iOS UI and core fixture projects
+        env:
+          AUREA_PARITY_SCENES: ${{ inputs.capture_scenes || '' }}
         run: python3 engine/platform/ios/verify/capture_simulator.py build/simulator/Build/Products/Debug-iphonesimulator/Aurea.app build/ios-parity
       - uses: actions/upload-artifact@v4
         if: always()
@@ -136,7 +144,8 @@ jobs:
         run: |
           set -o pipefail
           SIMULATOR_UDID=$(python3 -c 'import json; print(json.load(open("build/ios-parity/manifest.json"))["device"]["udid"])')
-          xcodebuild test -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea-Gestures \
+          python3 engine/platform/ios/verify/run_gesture_tests.py build/ios-gesture-samples -- \
+            xcodebuild test -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea-Gestures \
             -configuration Debug -sdk iphonesimulator ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build/simulator -parallel-testing-enabled NO \
@@ -151,6 +160,7 @@ jobs:
           name: ios-gesture-tests
           path: |
             build/ios-gesture-tests.xcresult/
+            build/ios-gesture-samples/
             build-gesture-tests.log
           if-no-files-found: ignore
       - uses: actions/cache/save@v4

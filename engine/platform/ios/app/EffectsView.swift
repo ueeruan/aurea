@@ -52,6 +52,7 @@ struct EffectsView: View {
                         footer
                     }.padding(.init(top: 8, leading: 2, bottom: 16, trailing: 12))
                 }.coordinateSpace(name: "effect-stack")
+                    .accessibilityIdentifier("aurea.effects.stack")
                     .onPreferenceChange(EffectCardFrames.self) { cardFrames = $0 }
             }.frame(maxHeight: .infinity)
         }
@@ -402,10 +403,13 @@ struct EffectsView: View {
             Button { browsing = true } label: {
                 HStack(spacing: 8) {
                     CupertinoGlyph.text(CupertinoGlyph.Plus, size: 17, color: AureaColors.accent)
+                        .accessibilityHidden(true)
                     Text(AureaText.t("panel_adicionar_efeito")).font(.aurea(size: 16, weight: .semibold)).foregroundStyle(AureaColors.accent)
                 }.frame(maxWidth: .infinity).frame(height: 52)
                     .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 12))
             }.buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityLabel(AureaText.t("panel_adicionar_efeito"))
+                .accessibilityIdentifier("aurea.effects.add")
         }
     }
     private var adjustmentIntensity: some View {

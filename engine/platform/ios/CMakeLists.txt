@@ -113,6 +113,13 @@ endif()
 set(AUREA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory("${AUREA_ROOT}" "${CMAKE_BINARY_DIR}/aurea-engine")
 
+# Xcode links -lncnn in both configurations. Upstream adds a Debug-only "d"
+# postfix, producing libncnnd.a even though all archives share build/core.
+# Keep the iOS archive name stable without changing its Debug compiler flags.
+if(TARGET ncnn)
+    set_target_properties(ncnn PROPERTIES DEBUG_POSTFIX "")
+endif()
+
 # -----------------------------------------------------------------------------
 # aurea_metal — backend Metal (gpu/metal). O núcleo não depende dele: quem
 # depende é a ponte, e só ela conhece `mtl::create_backend`.

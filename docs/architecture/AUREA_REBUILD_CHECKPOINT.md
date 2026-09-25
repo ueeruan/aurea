@@ -8,6 +8,31 @@ new request. Existing features must be checked against the requested behavior.
 
 ### Build 2110 working checkpoint — user bug reports and revised curve reference
 
+Latest active acceptance (after8e6bea28):
+- Reference graph: both white handles respond, saved lower handle survived
+  app reinstall/reopen, Bounce/Elastic/Steps apply and Undo restores the curve.
+- Actual Android NotoSansGujarati font lacks every letter of "Texto" (checked
+  its real cmap); fallback preview is readable. Physical Samsung remains pending.
+- Scene exit orphan controls were reproduced persistently, then fixed by
+  giving scene/workspace transitions their own movable preview content. Fresh
+  APK no longer retains slider/field nodes, restores Add, and aligns text/gizmo.
+  First-focus tap plus typing960 now replaces1100 correctly without Ctrl+A.
+- Null3D detail POD omitted its3D flag, making Android's default-depth null
+  expose XY keys only. Shared flag and XYZ scale/anchor controls compiled;
+  core camera/null rendering+save/load passed36 checks after rebuilding the
+  stale host object. Actual controls/key diamond QA is still underway.
+- A real extra H264720p export of1000000022 failed at56/63 frames (timeout,
+  unavailable decoded frames). The video has TimeWarpRGB R+3/G0/B-3 and VFR.
+  Bounded temporal preroll retention and exact-PTS forward decode passed480
+  focused checks, then the same warm-seek/export scenario completed63/63 in
+  the app. FFmpeg decoded all63 frames (1280x720,21fps,3s), and the extracted
+  frame retains readable Gujarati-font fallback text. No physical-device
+  performance claim is made; see temporal-warm-export.log and
+  font-temporal-export-decode.log in engine/build/android-p0.
+- iOS Swift compilation now passed; release/simulator link/config acceptance
+  continues. ncnn's public RTTI flag and Debug archive postfix were corrected.
+  The final APKs/IPA must include these follow-ups before delivery.
+
 - Autosave now initializes Android's native file path at creation, persists
   empty projects, ignores cursor-only changes for debounce, and saves pending
   changes before closing. Android force-stop/reopen tests preserved both an

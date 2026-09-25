@@ -91,6 +91,7 @@ struct DecodeRequest {
     DecodeMode mode = DecodeMode::Still;
     i32 direction = 0;     ///< +1 para a frente, -1 para trás, 0 parado
     f32 speed = 1.0f;
+    bool retainPreroll = false; ///< Temporal effects reuse bounded nearby frames decoded during a seek.
 };
 
 class VideoSource {

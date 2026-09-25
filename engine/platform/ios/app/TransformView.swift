@@ -149,6 +149,11 @@ struct TransformView: View {
                     write([(pivot ? 10 : 1): $0 + (pivot ? sourceSize[1] / 2 : 0)])
                 }
             }.padding(.leading, 6)
+            if pivot && threeD {
+                field(number(value(11), decimals: 0) + "px", label: "z", width: 64) {
+                    keypad("Pivô Z", value(11), unit: "px", decimals: 1) { write([11: $0]) }
+                }.padding(.leading, 6)
+            }
             if pivot {
                 Button { write([9: sourceSize[0] / 2, 10: sourceSize[1] / 2]) } label: {
                     Text(AureaText.t("panel_centro")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(.white)
@@ -248,6 +253,11 @@ struct TransformView: View {
                     keypad("Altura", value(4) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: true, amount: $0, original: [value(3) * 100, value(4) * 100]) }
                 }
             }.frame(height: 44).frame(maxWidth: .infinity)
+            if threeD {
+                field(number(value(5) * 100, decimals: 1) + "%", label: "z", width: 80) {
+                    keypad("Escala Z", value(5) * 100, unit: "%", decimals: 1) { write([5: $0 / 100]) }
+                }.frame(height: 44)
+            }
             if [UInt32(1), 2].contains(model.selectedLayer?.kind ?? 0), sourceSize[0] > 0, sourceSize[1] > 0 {
                 fitChips.padding(.bottom, 6)
             }

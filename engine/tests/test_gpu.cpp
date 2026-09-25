@@ -7146,6 +7146,11 @@ AUREA_TEST(Gpu, CreatedCameraAndNullDepthTracksRenderAndReload) {
     auto parent = rig.e.add_null(true);
     AUREA_CHECK(parent.ok());
     if (!parent.ok()) return;
+    // Transform UI chooses XYZ key groups from this POD even at default Z=0.
+    bridge::LayerDetailPOD nullDetail{};
+    AUREA_CHECK(rig.e.query_layer_detail(*parent, nullDetail));
+    AUREA_CHECK((nullDetail.flags & bridge::kLayerRowFlagThreeD) != 0);
+    AUREA_CHECK(nullDetail.position[2] == 0);
     set_parent(rig.e, *shapeId, *parent);
     auto key = [&](u64 id, TrackProperty property, i64 time, f32 value) {
         Command c;

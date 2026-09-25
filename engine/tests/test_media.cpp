@@ -877,3 +877,49 @@ AUREA_TEST(Thumbnail, RelinkUsesNewSourceAndCodecAdmissionStaysBounded) {
     svc.stop();
     AUREA_CHECK_EQ(factory.live.load(), 0u);
 }
+
+AUREA_TEST(VideoSource, TemporalStillWindowReusesGopFramesThroughEnd) {
+    SyntheticConfig cfg; cfg.frameCount = 63; cfg.gop = 63;
+    auto decoder = std::make_unique<SyntheticDecoder>(cfg);
+    auto* raw = decoder.get();
+    VideoSource source(std::move(decoder), MediaPriority::Export);
+    source.start();
+    for (int base=0; base<63; ++base) {
+        const i64 times[] = {raw->pts_of(base), raw->pts_of(std::min(base+3,62)), raw->pts_of(std::max(base-3,0))};
+        source.cache().set_required_times(times,3,source.frame_duration_us()/2);
+        for (i64 time : times) {
+            DecodeRequest request{time, DecodeMode::Still, 0, 1};
+            request.retainPreroll = true;
+            source.request(request);
+            AUREA_CHECK(source.wait_for(time,1500));
+            bool exact=false; auto frame=source.frame_for(time,&exact);
+            AUREA_CHECK(frame && exact && frame->ptsUs == time);
+        }
+        AUREA_CHECK(source.cache().stats().frames <= source.cache().config().maxFrames);
+    }
+    source.stop();
+    std::printf("temporal GOP seeks=%u delivered=%u ",raw->seeks.load(),raw->delivered.load());
+    AUREA_CHECK(raw->seeks.load() <= 2);
+}
+
+AUREA_TEST(VideoSource, PreciseShortIntervalsAdvanceWithoutNominalHalfFrameSeek) {
+    struct Decoder : VideoDecoderBackend {
+        VideoStreamInfo stream{}; int index=0; std::atomic<int> seeks{0};
+        Decoder() { stream.fps=30; stream.durationUs=100000; stream.preciseFrameTiming=true; }
+        const VideoStreamInfo& info() const noexcept override { return stream; }
+        Status seek_to_keyframe(i64) noexcept override { index=0; ++seeks; return OkStatus; }
+        Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+            pts=index*10000; eos=index==10; out.reset(); if(eos) return OkStatus;
+            auto frame=frame_at(pts); frame->durationUs=10000; ++index;
+            if(pts>=from || frame->covers(from)) out=std::move(frame);
+            return OkStatus;
+        }
+    };
+    auto decoder=std::make_unique<Decoder>(); auto* raw=decoder.get();
+    VideoSource source(std::move(decoder),MediaPriority::Export); source.start();
+    for(i64 time : {0,10000,20000,30000,40000,50000}) {
+        source.request({time,DecodeMode::Still,0,1});
+        AUREA_CHECK(source.wait_for(time,1500));
+    }
+    source.stop(); AUREA_CHECK_EQ(raw->seeks.load(),1);
+}

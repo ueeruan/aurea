@@ -194,9 +194,9 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) { RotationDial(env, axis) }
                 }
-                TransformTab.Escalar -> ScaleFace(env)
+                TransformTab.Escalar -> ScaleFace(env, depth = show3D)
                 TransformTab.Opacidade -> OpacityFace(env, look)
-                TransformTab.Pivo -> MoveFace(env, pivot = true, depth = false)
+                TransformTab.Pivo -> MoveFace(env, pivot = true, depth = show3D)
                 TransformTab.Desfoque -> MotionBlurFace(env)
             }
             Spacer(Modifier.height(10.dp))
@@ -409,6 +409,15 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                     },
                 )
             })
+            if (pivot && depth) {
+                Spacer(Modifier.width(6.dp))
+                val az = store.detail?.anchor?.get(2) ?: 0f
+                ValueBox("${numeroPtBr(az, 0)}px", width = 64.dp, label = "z", onTap = {
+                    env.openKeypad(KeypadRequest("Pivô Z", az, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                        store.setTransform(TrackProperty.ANCHOR_Z, it)
+                    })
+                })
+            }
             Spacer(Modifier.width(14.dp))
             if (pivot) {
                 Box(
@@ -700,7 +709,7 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
  * mentir); solta, cada fita cuida do seu eixo. 0,5 %/dp.
  */
 @Composable
-private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelEnv) {
+private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
     val store = env.store
     var locked by rememberSaveable { mutableStateOf(true) }
     val sx by remember(store) { derivedStateOf { (store.detail?.scale?.get(0) ?: 1f) * 100f } }
@@ -738,6 +747,16 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
         ValueBox("${numeroPtBr(sy, 1)}%", width = 61.dp, label = stringResource(R.string.panel_altura), color = Color.White, onTap = {
             env.openKeypad(KeypadRequest("Altura", sy, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(true, it, sx, sy) })
         })
+    }
+    if (depth) {
+        val sz = (store.detail?.scale?.get(2) ?: 1f) * 100f
+        Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
+            ValueBox("${numeroPtBr(sz, 1)}%", width = 80.dp, label = "z", onTap = {
+                env.openKeypad(KeypadRequest("Escala Z", sz, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                    store.setTransform(TrackProperty.SCALE_Z, it / 100f)
+                })
+            })
+        }
     }
     if (kind == LayerType.Video.kind || kind == LayerType.Image.kind) {
         MediaFitChips(env)

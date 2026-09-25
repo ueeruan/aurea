@@ -169,3 +169,46 @@ subtree at that transition instead of extracting its AndroidView while removing
 the surrounding Column. Normal narrow/wide/fullscreen surface reuse remains.
 Existing surface lifecycle callbacks handle detach/rebind. Fresh-APK verification
 must establish that no orphan controls remain and the new preview still renders.
+
+
+## Fresh-APK validation of scene transition and first-focus selection
+
+The scene-rtti debug build succeeded in 1 minute 50 seconds; 103 JVM tests passed.
+On the installed APK (identifier prefix `8e6`):
+
+- `engine/build/android-p0/scene-rtti-fields.png`: reopening the scene shows the
+  previously stored coordinate `1100.0`.
+- `scene-rtti-first-focus.png` and its XML: one tap on X followed by typing `960`
+  produces exactly `960`, without Ctrl+A. The first-focus patch now passes the
+  interaction that previously produced `11000960.0`.
+- `scene-rtti-exit.png`: returning to Timeline removes the scene controls and
+  numeric fields completely; the bottom area is clean and Add Layer is restored.
+  Text3D and its gizmo also align correctly in this preview.
+
+These fresh-APK results validate the two pending Android fixes described above.
+The parent is capturing a further stable/cleared-selection state; native iOS
+interaction remains separate from this Android verification.
+
+
+## Null3D transform-panel follow-up
+
+The native `null3d-transform.png` capture exposed another real bridge issue:
+`query_layer_detail` omitted `kLayerRowFlagThreeD`, although layer-list rows
+included it. A default Null3D at Z=0 therefore appeared planar to Android's
+Transform panel, hiding Position Z and making its diamond key only XY.
+The detail POD now carries the authored threeD bit. The existing camera/null GPU
+regression also asserts this UI-facing POD flag at default Z=0.
+
+Position Z already supports choosing the depth drag axis by tap and opening the
+numeric keypad by long press. Scale Z and Anchor Z did lack direct controls;
+Android TransformPanel and iOS TransformView now expose both through their real
+set/keyframe path. Scale Z is below width/height (the link still explicitly links
+width and height); Anchor Z is beside X/Y. Three-dimensional diamonds group all
+three corresponding axes. Gizmo gestures on either platform already key XYZ
+when a position track is animated; dedicated Scene layout intentionally offsets
+curves without inserting keys. iOS detects threeD from its selected layer row,
+so its default-null dimension detection did not share the omitted-POD-bit bug.
+
+Swift API static check: 0 problems. Native Android build/UI verification and the
+updated host regression are queued with the parent/performance agent; no native
+iOS result is claimed from the static check.

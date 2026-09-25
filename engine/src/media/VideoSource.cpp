@@ -68,6 +68,7 @@ void VideoSource::request(const DecodeRequest& r) noexcept {
         const u32 cacheVersion = cache_.stats().version;
         if (requestGen_ != 0 && r.targetUs == request_.targetUs && r.mode == request_.mode
             && r.direction == request_.direction && r.speed == request_.speed
+            && r.retainPreroll == request_.retainPreroll
             && requestCacheVersion_ == cacheVersion) {
             return;
         }
@@ -133,7 +134,7 @@ VideoSource::Stats VideoSource::stats() const noexcept {
 
 bool VideoSource::reachable_forward(i64 needUs) const noexcept {
     if (!decoderValid_ || eos_) return false;
-    const i64 half = frameUs_ / 2;
+    const i64 half = backend_->info().preciseFrameTiming ? 0 : frameUs_ / 2;
     // The decoder cannot reproduce its last output without seeking. This also
     // covers requests within that frame's tolerance after cache invalidation.
     if (needUs <= decoderPosUs_ + half) return false;
@@ -290,6 +291,8 @@ void VideoSource::thread_main() noexcept {
             // o seek é o mesmo).
             if (req.mode == DecodeMode::Scrub && req.direction > 0) limit = need + 2 * frameUs_;
             if (backward) deliverStart = std::max<i64>(0, need - backFrames_ * frameUs_);
+            if (req.retainPreroll && req.mode == DecodeMode::Still)
+                deliverStart = std::max<i64>(0, need - backFrames_ * frameUs_);
         }
         if (durationUs > 0 && need > durationUs - half) need = std::max<i64>(0, durationUs - frameUs_);
         if (eos_ && need > decoderPosUs_) continue;   // pedido além do fim: o último frame já está no cache

@@ -1682,6 +1682,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     bool requestedMissing = !exact;
                     req.mode = DecodeMode::Still;
                     req.direction = 0;
+                    req.retainPreroll = true;
                     for (u32 c = 0; c < 3; ++c) {
                         bool ex = false;
                         rl.source.channel[c].frame = src->frame_for(chanUs[c], &ex);

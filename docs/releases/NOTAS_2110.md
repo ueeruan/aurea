@@ -13,7 +13,7 @@
 - Autosave de projetos novos/vazios e salvamento das alterações antes de fechar.
 - Exportação Android: corrigido o deslocamento duplicado dos pacotes do encoder; erros preservam detalhes da plataforma.
 - Time Remap agora edita a curva usada no playback/exportação. Curvas antigas são migradas com dados de recuperação; freeze, reverso e presets de velocidade corrigidos.
-- Preview reutiliza uploads do mesmo frame e recupera falhas de alocação.
+- Preview reutiliza uploads do mesmo frame e recupera falhas de alocação. TimeWarpRGB reaproveita frames vizinhos e evita seeks desnecessários em VFR; a exportação que parava foi retestada até o fim.
 - Texto recorre à fonte padrão para caracteres ausentes na fonte escolhida.
 - Texto 3D novo começa estático; campos numéricos preservam a digitação. Luzes e materiais animados afetam a renderização.
 - Busca VFR no iOS preserva timestamps exatos; confirmação no runtime nativo ainda pendente.
@@ -22,6 +22,7 @@
 
 - **721 testes do core e 182 GLES no emulador**, sem falhas, antes dos últimos ajustes de curvas/fontes. Testes focados posteriores: 3 de easing no host, 1 no GLES e 58 de texto/Text3D/GPU aprovados. **103 testes Android JVM** aprovados.
 - Exportações reais H.264 1080p horizontal/vertical com AAC e HEVC 720p; comparação independente de pacotes/vídeo/áudio. Proxy VFR: 63 frames, 960×540.
+- Reteste no app do projeto com texto e TimeWarpRGB: 63/63 frames em H.264 720p, 21 fps, 3 s; arquivo completo decodificado sem erro, mantendo o efeito e sem ampliar o timeout.
 - Upscale pelo app: 63 frames, 320×180 H.264, decodificados sem erro. O clipe não tinha áudio; áudio e cancelamento foram testados separadamente no pipeline compartilhado.
 
 ## Pendências e limites

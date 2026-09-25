@@ -6452,6 +6452,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     out.flags = (l->visible ? bridge::kLayerRowFlagVisible : 0u) | (l->locked ? bridge::kLayerRowFlagLocked : 0u)
               | (selected ? bridge::kLayerRowFlagSelected : 0u) | (l->solo ? bridge::kLayerRowFlagSolo : 0u)
               | (l->adjustment ? bridge::kLayerRowFlagAdjustment : 0u) | (l->guide ? bridge::kLayerRowFlagGuide : 0u)
+              | (l->threeD ? bridge::kLayerRowFlagThreeD : 0u)
               | ((static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask);
     out.startFrame = static_cast<i32>(l->start.value);
     out.endFrame = static_cast<i32>(l->end.value);

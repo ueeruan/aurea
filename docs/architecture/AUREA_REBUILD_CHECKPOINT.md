@@ -84,3 +84,9 @@ shared policy must use the native encoder/decoder integrations on both platforms
 ## Build 2109 delivery follow-up
 
 Transport now lands exactly on previous/next composition markers on Android/iOS. Final JVM count is 93 passing tests after this addition. User explicitly requested APK 32/64-bit and IPA through GitHub; this authorizes pushing the build branch to run the existing workflow, superseding the earlier no-publish constraint for this build only. No store/release publishing is requested.
+
+## Delivered build 2109 — native iOS build now verified
+
+Android release APKs armeabi-v7a and arm64-v8a compiled, package/version/ABI and v2/v3 signatures verified. Both include exact native frame seeking (aff4f70f). GitHub build branch codex/native-beta2-ipa is at dbf211ba; run https://github.com/ueeruan/aurea/actions/runs/36171107821 successfully compiled the iPhone app with Xcode 26.3, validated the Foundation bundle, compiled/linked all 66 Metal shaders, and packaged the IPA. Downloaded IPA passed local check_ipa.py, build 2109. Files are in build/releases/2109/. IPA is unsigned.
+
+Simulator app also compiled, but UI/project capture and gesture tests were still running at the time of this entry: follow run 36171107821 to completion before claiming iOS runtime parity. Shared baseline remains 696 host / 166 native GLES / 93 JVM tests passing. Actual text export: 63/63 frames, 1280x720 H.264, 21fps decoded independently. Known Unity/WebView post-export crash is documented in P10_EXPORT_AD_WEBVIEW_2026-09-25.md. All earlier unclosed feature and physical-device criteria remain unclosed.

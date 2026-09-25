@@ -36,3 +36,5 @@ Erro conhecido no ambiente de teste: após salvar corretamente o MP4, o anúncio
 Unity provocou uma falha interna do WebView 124 do emulador. A causa dentro do
 SDK/WebView não foi corrigida neste build; ainda requer reprodução em aparelho
 com WebView atualizado. Não confundir isso com falha na codificação do vídeo.
+
+Build iOS verificado no GitHub com Xcode 26.3: app para iPhone compilado, 66/66 shaders Metal validados e IPA 2109 conferido. O app do simulador também compilou; a regressão de UI ainda está em andamento. Android: APKs release 32/64 bits assinados e verificados.

@@ -157,6 +157,7 @@ private:
     u64 requestGen_ = 0;
     u64 handledGen_ = 0;
     u64 requestTimeNs_ = 0;
+    u32 requestCacheVersion_ = 0;
     bool running_ = false;
     bool suspended_ = false;
     bool suspendApplied_ = false;

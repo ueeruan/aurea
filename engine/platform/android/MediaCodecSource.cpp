@@ -235,7 +235,7 @@ struct ReaderState {
     ANativeWindow* window = nullptr;   // pertence ao reader
     std::mutex mutex;
     std::condition_variable cv;
-    u32 available = 0;
+    u64 imageGeneration = 0;
 
     ~ReaderState() {
         if (reader) AImageReader_delete(reader);
@@ -245,7 +245,7 @@ struct ReaderState {
         auto* s = static_cast<ReaderState*>(ctx);
         {
             std::lock_guard<std::mutex> lock(s->mutex);
-            ++s->available;
+            ++s->imageGeneration;
         }
         s->cv.notify_all();
     }
@@ -311,12 +311,16 @@ public:
         if (!codec_) {
             if (const Status s = create_codec(); !s.ok()) return s;
         }
-        AMediaExtractor_seekTo(ex_, std::max<i64>(0, targetUs), AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
+        if (AMediaExtractor_seekTo(ex_, std::max<i64>(0, targetUs), AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC) != AMEDIA_OK) {
+            return Status{Errc::DecodeFailed, "seek do extractor falhou"};
+        }
         if (AMediaCodec_flush(codec_) != AMEDIA_OK) {
             // Codec em estado ruim (erro de hardware): recria do zero.
             destroy_codec();
             if (const Status s = create_codec(); !s.ok()) return s;
-            AMediaExtractor_seekTo(ex_, std::max<i64>(0, targetUs), AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
+            if (AMediaExtractor_seekTo(ex_, std::max<i64>(0, targetUs), AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC) != AMEDIA_OK) {
+                return Status{Errc::DecodeFailed, "seek do extractor recriado falhou"};
+            }
         }
         inputEos_ = false;
         outputEos_ = false;
@@ -337,7 +341,7 @@ public:
         }
         const u64 deadline = monotonic_ns() + 3'000'000'000ull;
         for (;;) {
-            feed_input();
+            if (const Status s = feed_input(); !s.ok()) return s;
             AMediaCodecBufferInfo bi{};
             const ssize_t idx = AMediaCodec_dequeueOutputBuffer(codec_, &bi, 4000);
             if (idx >= 0) {
@@ -361,9 +365,12 @@ public:
                     AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(idx), false);
                     return OkStatus;
                 }
-                AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(idx), true);
+                // Explicit timestamp lets us reject a late image from a previous seek.
+                if (AMediaCodec_releaseOutputBufferAtTime(codec_, static_cast<size_t>(idx), pts * 1000) != AMEDIA_OK) {
+                    return Status{Errc::DecodeFailed, "releaseOutputBufferAtTime falhou"};
+                }
                 AImage* image = nullptr;
-                if (const Status s = acquire_image(image); !s.ok()) return s;
+                if (const Status s = acquire_image(pts, image); !s.ok()) return s;
                 return wrap(image, pts, out);
             }
             if (idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
@@ -484,6 +491,9 @@ private:
             ex_ = nullptr;
         }
         track_ = -1;
+        // Frames in flight retain their ReaderState. A new codec must get a
+        // new queue, never images or callback credits from the retired codec.
+        reader_.reset();
     }
 
     /// Intervalo entre quadros-chave, pelas primeiras amostras de sync. Decide
@@ -508,24 +518,32 @@ private:
         if (gap > 0) keyframeUs_ = std::clamp<i64>(gap, 33'000, 10'000'000);
     }
 
-    void feed_input() {
+    Status feed_input() {
         while (!inputEos_) {
             const ssize_t in = AMediaCodec_dequeueInputBuffer(codec_, 0);
-            if (in < 0) return;
+            if (in == AMEDIACODEC_INFO_TRY_AGAIN_LATER) return OkStatus;
+            if (in < 0) return Status{Errc::DecodeFailed, "dequeueInputBuffer falhou"};
             size_t cap = 0;
             uint8_t* buf = AMediaCodec_getInputBuffer(codec_, static_cast<size_t>(in), &cap);
-            const ssize_t n = buf ? AMediaExtractor_readSampleData(ex_, buf, cap) : -1;
+            if (!buf || cap == 0) return Status{Errc::DecodeFailed, "buffer de entrada indisponivel"};
+            const ssize_t n = AMediaExtractor_readSampleData(ex_, buf, cap);
             if (n < 0) {
-                AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(in), 0, 0, 0,
-                                             AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
+                if (AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(in), 0, 0, 0,
+                                                AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != AMEDIA_OK) {
+                    return Status{Errc::DecodeFailed, "queueInputBuffer EOS falhou"};
+                }
                 inputEos_ = true;
-                return;
+                return OkStatus;
             }
+            if (static_cast<size_t>(n) > cap) return Status{Errc::DecodeFailed, "amostra excede buffer de entrada"};
             const i64 t = AMediaExtractor_getSampleTime(ex_);
-            AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(in), 0, static_cast<size_t>(n),
-                                         static_cast<uint64_t>(std::max<i64>(0, t)), 0);
+            if (AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(in), 0, static_cast<size_t>(n),
+                                            static_cast<uint64_t>(std::max<i64>(0, t)), 0) != AMEDIA_OK) {
+                return Status{Errc::DecodeFailed, "queueInputBuffer falhou"};
+            }
             AMediaExtractor_advance(ex_);
         }
+        return OkStatus;
     }
 
     void update_output_format() {
@@ -545,23 +563,41 @@ private:
         AMediaFormat_delete(f);
     }
 
-    Status acquire_image(AImage*& out) {
+    Status acquire_image(i64 ptsUs, AImage*& out) {
         ReaderState& r = *reader_;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
         for (;;) {
-            {
-                std::unique_lock<std::mutex> lock(r.mutex);
-                if (!r.cv.wait_until(lock, deadline, [&] { return r.available > 0; })) {
-                    return Status{Errc::Timeout, "frame renderizado nao chegou ao ImageReader"};
-                }
-                --r.available;
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return Status{Errc::Timeout, "frame renderizado nao chegou ao ImageReader"};
             }
+            // Notifications are wakeups, not a count of queued images. Query
+            // the queue first; drain/flush can race with an old notification.
+            u64 observedGeneration = 0;
+            {
+                std::lock_guard<std::mutex> lock(r.mutex);
+                observedGeneration = r.imageGeneration;
+            }
+            // Never hold the listener lock across a native ImageReader call.
             const media_status_t s = AImageReader_acquireNextImage(r.reader, &out);
-            if (s == AMEDIA_OK && out) return OkStatus;
+            if (s == AMEDIA_OK && out) {
+                int64_t timestampNs = 0;
+                const media_status_t ts = AImage_getTimestamp(out, &timestampNs);
+                if (ts == AMEDIA_OK && timestampNs == ptsUs * 1000) return OkStatus;
+                AImage_delete(out);
+                out = nullptr;
+                if (ts != AMEDIA_OK) return Status{Errc::DecodeFailed, "timestamp do AImage indisponivel"};
+                continue;
+            }
             if (s == AMEDIA_IMGREADER_MAX_IMAGES_ACQUIRED) {
                 return Status{Errc::BudgetExceeded, "todas as imagens do ImageReader estao presas"};
             }
-            // Sinal sem imagem (corrida com o listener): espera o próximo.
+            if (s != AMEDIA_IMGREADER_NO_BUFFER_AVAILABLE) {
+                return Status{Errc::DecodeFailed, "acquireNextImage falhou"};
+            }
+            std::unique_lock<std::mutex> lock(r.mutex);
+            if (!r.cv.wait_until(lock, deadline, [&] { return r.imageGeneration != observedGeneration; })) {
+                return Status{Errc::Timeout, "frame renderizado nao chegou ao ImageReader"};
+            }
         }
     }
 
@@ -574,8 +610,6 @@ private:
             if (AImageReader_acquireNextImage(r.reader, &img) != AMEDIA_OK || !img) break;
             AImage_delete(img);
         }
-        std::lock_guard<std::mutex> lock(r.mutex);
-        r.available = 0;
     }
 
     Status wrap(AImage* image, i64 pts, FrameRef& out) {

@@ -177,6 +177,73 @@ AUREA_TEST(DecodedFrameCache, ContiguousEndFollowsTheRun) {
 // =============================================================================
 // VideoSource (DecodeScheduler)
 // =============================================================================
+AUREA_TEST(VideoSource, StoppedSourceDoesNotReportMissingFrameAsReady) {
+    VideoSource src(std::make_unique<SyntheticDecoder>(SyntheticConfig{}), MediaPriority::Preview);
+    AUREA_CHECK(!src.wait_for(0, 10));
+}
+
+AUREA_TEST(VideoSource, StopWakesPendingWaitWithoutReportingSuccess) {
+    VideoSource src(std::make_unique<SyntheticDecoder>(SyntheticConfig{}), MediaPriority::Preview);
+    src.start();
+    std::atomic<bool> entered{false}, done{false};
+    bool ready = true;
+    std::thread waiter([&] {
+        entered.store(true);
+        ready = src.wait_for(0, 1500);
+        done.store(true);
+    });
+    wait_until([&] { return entered.load(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    src.stop();
+    wait_until([&] { return done.load(); }, 200);
+    const bool woke = done.load();
+    waiter.join();
+    AUREA_CHECK(woke);
+    AUREA_CHECK(!ready);
+}
+
+AUREA_TEST(VideoSource, RestartRedecodesTheLastRequest) {
+    VideoSource src(std::make_unique<SyntheticDecoder>(SyntheticConfig{}), MediaPriority::Preview);
+    src.start();
+    src.request({0, DecodeMode::Still, 0, 1.0f});
+    AUREA_CHECK(src.wait_for(0, 1000));
+    src.stop();
+    src.start();
+    src.request({0, DecodeMode::Still, 0, 1.0f});
+    const bool ready = src.wait_for(0, 1000);
+    src.stop();
+    AUREA_CHECK(ready);
+}
+
+AUREA_TEST(VideoSource, SameRequestAfterCacheClearIsDecodedAgain) {
+    VideoSource src(std::make_unique<SyntheticDecoder>(SyntheticConfig{}), MediaPriority::Preview);
+    src.start();
+    src.request({0, DecodeMode::Still, 0, 1.0f});
+    AUREA_CHECK(src.wait_for(0, 1000));
+    src.cache().clear();
+    src.request({0, DecodeMode::Still, 0, 1.0f});
+    const bool ready = src.wait_for(0, 1000);
+    src.stop();
+    AUREA_CHECK(ready);
+}
+
+AUREA_TEST(DecodedFrameCache, ReplacementReappliesByteBudget) {
+    DecodedFrameCache cache;
+    DecodedFrameCache::Config cfg;
+    cfg.maxFrames = 10;
+    cfg.maxBytes = frame_at(0)->approx_bytes() * 3;
+    cache.configure(cfg);
+    cache.set_focus(0, 0);
+    (void)cache.insert(frame_at(0));
+    (void)cache.insert(frame_at(kFrame));
+    (void)cache.insert(frame_at(2 * kFrame));
+    auto larger = frame_at(0);
+    larger->width *= 2;
+    (void)cache.insert(std::move(larger));
+    AUREA_CHECK(cache.stats().bytes <= cfg.maxBytes);
+    AUREA_CHECK(cache.contains(0, 0));
+}
+
 AUREA_TEST(VideoSource, StillRequestDeliversTheExactFrame) {
     SyntheticConfig cfg;
     auto dec = std::make_unique<SyntheticDecoder>(cfg);

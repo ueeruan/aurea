@@ -96,6 +96,9 @@ bool DecodedFrameCache::insert(FrameRef frame) noexcept {
             memory_->commit(MemoryClass::DecodedFrames, static_cast<usize>(newB));
         }
         *it = std::move(frame);
+        // A replacement may have a different resolution/bit depth. Apply
+        // both local and shared budgets just as for a newly inserted PTS.
+        evict_locked();
         return true;
     }
 

@@ -32,6 +32,9 @@ void VideoSource::start() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (running_) return;
     running_ = true;
+    // stop() clears the cache. Restart must service the last target again,
+    // even if the render loop sends the identical request.
+    if (requestGen_ != 0) ++requestGen_;
     thread_ = std::thread([this] { thread_main(); });
 }
 
@@ -42,16 +45,22 @@ void VideoSource::stop() noexcept {
         running_ = false;
     }
     wake_.notify_all();
+    delivered_.notify_all();
     if (thread_.joinable()) thread_.join();
     cache_.clear();
+    decoderValid_ = false;
+    eos_ = false;
+    backfillAttemptUs_ = -1;
 }
 
 void VideoSource::request(const DecodeRequest& r) noexcept {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        // Mesmo pedido de novo (o render pede a cada vsync): não acorda ninguém.
+        // Coalesce vsync repeats, but never reuse completion after invalidation.
+        const u32 cacheVersion = cache_.stats().version;
         if (requestGen_ != 0 && r.targetUs == request_.targetUs && r.mode == request_.mode
-            && r.direction == request_.direction) {
+            && r.direction == request_.direction && r.speed == request_.speed
+            && requestCacheVersion_ == cacheVersion) {
             return;
         }
         if (requestGen_ != handledGen_) {
@@ -59,6 +68,7 @@ void VideoSource::request(const DecodeRequest& r) noexcept {
             ++stats_.coalesced;
         }
         request_ = r;
+        requestCacheVersion_ = cacheVersion;
         ++requestGen_;
         requestTimeNs_ = monotonic_ns();
         std::lock_guard<std::mutex> s(statsMutex_);
@@ -79,9 +89,10 @@ void VideoSource::set_ready_callback(void (*fn)(void*), void* ctx) noexcept {
 
 bool VideoSource::wait_for(i64 targetUs, u32 timeoutMs) noexcept {
     std::unique_lock<std::mutex> lock(mutex_);
-    return delivered_.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&] {
+    delivered_.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&] {
         return cache_.contains(targetUs, frameUs_ / 2) || !running_;
     });
+    return running_ && cache_.contains(targetUs, frameUs_ / 2);
 }
 
 void VideoSource::suspend() noexcept {
@@ -111,7 +122,9 @@ VideoSource::Stats VideoSource::stats() const noexcept {
 bool VideoSource::reachable_forward(i64 needUs) const noexcept {
     if (!decoderValid_ || eos_) return false;
     const i64 half = frameUs_ / 2;
-    if (needUs <= decoderPosUs_ - half) return false;               // já passou
+    // The decoder cannot reproduce its last output without seeking. This also
+    // covers requests within that frame's tolerance after cache invalidation.
+    if (needUs <= decoderPosUs_ + half) return false;
     return needUs - decoderPosUs_ <= backend_->keyframe_interval_us();   // andar custa menos que seek
 }
 
@@ -276,9 +289,9 @@ void VideoSource::thread_main() noexcept {
                     if (nr.direction < 0 && nr.mode != DecodeMode::Still) break;   // para trás: o laço externo monta a janela
                     const bool sameKind = (nr.mode == DecodeMode::Playback) == (req.mode == DecodeMode::Playback);
                     const i64 pos = decoderPosUs_ >= 0 ? decoderPosUs_ : seekTarget - half;
-                    const bool ahead = nr.targetUs > pos - half
-                                    && (decoderPosUs_ < 0 ? nr.targetUs >= seekTarget
-                                                          : nr.targetUs - pos <= backend_->keyframe_interval_us());
+                    const bool ahead = decoderPosUs_ < 0 ? nr.targetUs >= seekTarget
+                                     : nr.targetUs > pos + half
+                                       && nr.targetUs - pos <= backend_->keyframe_interval_us();
                     if (!sameKind || !ahead) break;   // o laço externo decide (talvez um seek)
                     // O alvo novo está à frente e ao alcance: segue andando.
                     req = nr;

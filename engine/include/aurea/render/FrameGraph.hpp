@@ -26,6 +26,8 @@
 // =============================================================================
 #pragma once
 
+#include <atomic>
+
 #include "aurea/core/InplaceFunction.hpp"
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Types.hpp"
@@ -117,6 +119,10 @@ public:
     void release(TextureHandle texture) noexcept;
     void end_frame() noexcept;
 
+    /// Soft retention budget: required live textures are never evicted.
+    /// Applied on the render thread; safe to update from device policy callbacks.
+    void set_budget(u64 bytes) noexcept { budget_.store(bytes, std::memory_order_relaxed); }
+
     /// Destrói tudo. Fechar projeto, perder o dispositivo, encerrar.
     void clear() noexcept;
     /// Esquece tudo SEM destruir: o dispositivo morreu e levou as texturas.
@@ -144,6 +150,8 @@ private:
     u64 frame_ = 0;
     u32 idleFrames_ = 120;
     Stats stats_{};
+    std::atomic<u64> budget_{128ull << 20};
+    void trim_for(u64 incomingBytes) noexcept;
 };
 
 // -----------------------------------------------------------------------------

@@ -32,6 +32,8 @@ TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     }
     if (!backend_) return TextureHandle{};
 
+    trim_for(desc.estimated_bytes());
+
     auto created = backend_->create_texture(desc);
     if (!created.ok()) {
         AUREA_LOG_ERROR("pool: falha ao criar textura %ux%u (%s)", desc.width, desc.height,
@@ -78,6 +80,28 @@ void TransientTexturePool::end_frame() noexcept {
             continue;
         }
         ++i;
+    }
+}
+
+void TransientTexturePool::trim_for(u64 incomingBytes) noexcept {
+    const u64 budget = budget_.load(std::memory_order_relaxed);
+    while (stats_.bytes > budget || incomingBytes > budget - stats_.bytes) {
+        usize oldest = entries_.size();
+        for (usize i = 0; i < entries_.size(); ++i) {
+            // Resources released during graph compilation can still be referenced
+            // by earlier passes of this frame. Only retire older frames here.
+            const Entry& e = entries_[i];
+            if (e.inUse || e.lastUsedFrame == frame_) continue;
+            if (oldest == entries_.size() || e.lastUsedFrame < entries_[oldest].lastUsedFrame) oldest = i;
+        }
+        if (oldest == entries_.size()) break;
+        const Entry& e = entries_[oldest];
+        backend_->destroy_texture(e.texture);
+        stats_.bytes -= std::min(stats_.bytes, e.desc.estimated_bytes());
+        --stats_.alive;
+        ++stats_.destroyedThisFrame;
+        entries_[oldest] = entries_.back();
+        entries_.pop_back();
     }
 }
 

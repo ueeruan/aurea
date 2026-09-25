@@ -288,6 +288,42 @@ AUREA_TEST(FrameGraph, PoolDestroysTexturesLeftIdle) {
     AUREA_CHECK_EQ(pool.stats().alive, static_cast<u32>(0));
 }
 
+AUREA_TEST(FrameGraph, PoolBudgetRetiresOldResolutionsWithoutBreakingCurrentPasses) {
+    MockBackend backend;
+    TransientTexturePool pool;
+    const auto large = rt(256, 256);
+    const auto small = rt(64, 64);
+    pool.set_budget(large.estimated_bytes());
+    pool.begin_frame(backend, 1);
+    const auto old = pool.acquire(large);
+    pool.release(old); pool.end_frame();
+    pool.begin_frame(backend, 2);
+    const auto current = pool.acquire(small);
+    AUREA_CHECK(current.valid());
+    AUREA_CHECK_EQ(backend.texturesDestroyed, 1u);
+    AUREA_CHECK_EQ(pool.stats().bytes, small.estimated_bytes());
+    pool.release(current);
+    // A previous pass may still reference current after its graph lifetime
+    // ended. Budget pressure must not destroy it before GPU submission.
+    const auto oversized = pool.acquire(large);
+    AUREA_CHECK(oversized.valid());
+    AUREA_CHECK_EQ(backend.texturesDestroyed, 1u);
+    AUREA_CHECK_EQ(pool.acquire(small), current);
+    pool.release(current); pool.release(oversized); pool.end_frame();
+    const u32 created = backend.texturesCreated;
+    pool.begin_frame(backend, 3);
+    AUREA_CHECK_EQ(pool.acquire(small), current);
+    AUREA_CHECK_EQ(pool.acquire(large), oversized);
+    AUREA_CHECK_EQ(backend.texturesCreated, created);
+    pool.release(current); pool.release(oversized); pool.end_frame();
+    // A third resolution evicts idle old targets immediately, not 120 frames later.
+    pool.begin_frame(backend, 4);
+    const auto third = pool.acquire(rt(128, 128));
+    AUREA_CHECK(third.valid());
+    AUREA_CHECK(pool.stats().bytes <= large.estimated_bytes());
+    pool.release(third); pool.end_frame(); pool.clear();
+}
+
 // =============================================================================
 // EffectGraph — planejamento
 // =============================================================================

@@ -372,6 +372,7 @@ public:
     /// Orçamento do cache do optical flow (padrão 48 MB; o gerenciador de
     /// memória pode baixar sob pressão). Acima dele sai a camada mais antiga.
     void set_flow_cache_budget(u64 bytes) noexcept { flowCacheBudget_ = bytes; }
+    void set_transient_cache_budget(u64 bytes) noexcept { pool_.set_budget(bytes); }
     [[nodiscard]] f32 effect_quality() const noexcept override { return heavyQ_.effects; }
 
     // --- EffectResources -----------------------------------------------------

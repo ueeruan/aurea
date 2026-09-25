@@ -345,6 +345,10 @@ void Engine::apply_memory_budgets() noexcept {
     // seu pedaço do orçamento medido do aparelho. Ver PHASE_8_REPORT §8B.
     const u64 budget = config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes();
     memory_.apply_budget_table(budget);
+    // The rendered-frame category also contains flow/LUT/mask caches. Reserve
+    // half for reusable intermediate render targets instead of retaining every
+    // preview/export resolution until the frame-age timeout.
+    renderer_.set_transient_cache_budget(memory_.budget(MemoryClass::RenderedFrames) / 2);
     // Aparelho de entrada (§107): cache de decode menor que o da tabela
     // (a fatia da tabela vale para o plano de sempre, 24 %).
     if (const u32 pct = caps_.policy().decodedFramesBudgetPercent; pct != 24) {

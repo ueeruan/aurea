@@ -33,3 +33,17 @@ These are emulator decoder tests, not measured phone preview/export performance,
 HDR/10-bit coverage or zero-copy validation. Native iOS compilation and execution
 remain unverified on this Windows host; its opt-in simulator regression now also
 includes the VFR fixture and interval-interior seeks. P1–P10 are not complete.
+
+## Editor export follow-up
+
+The actual Android editor exported the VFR project (21 fps composition) as H.264,
+1280x720 at 30 fps. Independent FFmpeg decoding found 90 complete frames over
+three seconds, SDR BT.709 tags and no audio track. Comparing sampled RGB pixels
+against every source fixture frame matched the expected presentation interval
+for all 90 output frames, including holds on the composition frame grid. The
+reproducible comparator is `tools/verify_video_presentation.py`; this test pattern
+comparison is not a general perceptual quality metric.
+
+After the autosave and transient texture retention changes, the complete host
+suite passed: 659 tests, 4,135,017 checks, zero failures, 197.10 seconds. The first
+overnight invocation was interrupted; this result is the subsequent complete run.

@@ -244,6 +244,34 @@ AUREA_TEST(DecodedFrameCache, ReplacementReappliesByteBudget) {
     AUREA_CHECK(cache.contains(0, 0));
 }
 
+AUREA_TEST(DecodedFrameCache, PackedRgbFramesRespectTheirActualBudget) {
+    DecodedFrameCache cache;
+    DecodedFrameCache::Config cfg;
+    cfg.maxFrames = 10;
+    cfg.maxBytes = 64u * 36u * 4u * 2u;
+    cache.configure(cfg);
+    for (i64 i = 0; i < 3; ++i) {
+        auto frame = frame_at(i * kFrame);
+        frame->format = PixelFormat::RGBA8;
+        (void)cache.insert(std::move(frame));
+    }
+    AUREA_CHECK_EQ(cache.stats().frames, 2u);
+    AUREA_CHECK_EQ(cache.stats().bytes, cfg.maxBytes);
+    auto half = frame_at(0);
+    half->format = PixelFormat::RGBA16F;
+    AUREA_CHECK_EQ(half->approx_bytes(), 64ull * 36ull * 8ull);
+}
+
+AUREA_TEST(DecodedFrameCache, OddYuvDimensionsIncludeRoundedChromaPlanes) {
+    auto frame = frame_at(0);
+    frame->width = 3;
+    frame->height = 3;
+    frame->format = PixelFormat::NV12;
+    AUREA_CHECK_EQ(frame->approx_bytes(), 17ull);
+    frame->format = PixelFormat::P010;
+    AUREA_CHECK_EQ(frame->approx_bytes(), 34ull);
+}
+
 AUREA_TEST(VideoSource, StillRequestDeliversTheExactFrame) {
     SyntheticConfig cfg;
     auto dec = std::make_unique<SyntheticDecoder>(cfg);

@@ -456,6 +456,47 @@ AUREA_TEST(Audio, WaveformPeaksAreComputedOnceAndServedAtAnyZoom) {
     e.shutdown();
 }
 
+AUREA_TEST(Audio, SilentVideoImportStaysSilentAfterReopen) {
+    for (bool withAudio : {false, true}) {
+        SyntheticConfig cfg;
+        cfg.audioRate = withAudio ? 48000 : 0;
+        SyntheticFactory factory(cfg);
+        EngineConfig ec = headless();
+        ec.mediaFactory = &factory;
+        Engine engine;
+        AUREA_CHECK(engine.initialize(ec).ok());
+        AUREA_CHECK(engine.new_project(64, 36, 30.0, nullptr).ok());
+        VideoImport input; input.sourcePath = "synthetic-video";
+        auto imported = engine.import_video(input);
+        AUREA_CHECK(imported.ok());
+        if (!imported.ok()) { engine.shutdown(); continue; }
+        const char* path = withAudio ? "import-with-audio.aurea" : "import-silent.aurea";
+        for (int pass = 0; pass < 2; ++pass) {
+            const Composition* comp = engine.project()->timeline().composition(engine.project()->timeline().current());
+            const Layer* layer = comp->layer(LayerId::unpack(*imported));
+            AUREA_CHECK(layer != nullptr);
+            if (!layer) break;
+            const Asset* asset = engine.project()->asset(layer->source);
+            AUREA_CHECK(asset != nullptr);
+            if (!asset) break;
+            AUREA_CHECK_EQ(asset->has_audio(), withAudio);
+            AUREA_CHECK_EQ(asset->audio.channels, withAudio ? 2u : 0u);
+            auto snapshot = audio::build_snapshot(*comp, *engine.project(), nullptr, nullptr, nullptr);
+            AUREA_CHECK_EQ(snapshot->clips.size(), withAudio ? usize{1} : usize{0});
+            if (!withAudio) {
+                u8 waveform[4]{};
+                AUREA_CHECK_EQ(engine.query_waveform(*imported, 0, 1, 4, waveform), 0u);
+                AUREA_CHECK(engine.extract_audio(*imported).status().code() == Errc::NotSupported);
+            }
+            if (pass == 0) {
+                AUREA_CHECK(engine.save_project(path).ok());
+                AUREA_CHECK(engine.load_project(path).ok());
+            }
+        }
+        engine.shutdown();
+    }
+}
+
 AUREA_TEST(Audio, CaptionsGroupBreakAndParse) {
     using text::CaptionWord;
     std::vector<CaptionWord> w = {

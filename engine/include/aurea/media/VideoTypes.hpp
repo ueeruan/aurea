@@ -130,8 +130,13 @@ public:
     u64 bufferId = 0;
 
     [[nodiscard]] u64 approx_bytes() const noexcept {
-        const u64 bpp = format == PixelFormat::P010 ? 2 : 1;
-        return static_cast<u64>(width) * height * bpp * 3 / 2;
+        const u64 pixels = static_cast<u64>(width) * height;
+        if (format == PixelFormat::RGBA8) return pixels * 4;
+        if (format == PixelFormat::RGBA16F) return pixels * 8;
+        // 4:2:0 chroma dimensions round up independently for odd frame sizes.
+        const u64 chroma = ((static_cast<u64>(width) + 1) / 2)
+                         * ((static_cast<u64>(height) + 1) / 2);
+        return (pixels + 2 * chroma) * (format == PixelFormat::P010 ? 2 : 1);
     }
 
     void add_ref() noexcept { refs_.fetch_add(1, std::memory_order_relaxed); }

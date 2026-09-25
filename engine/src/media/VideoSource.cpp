@@ -318,7 +318,10 @@ void VideoSource::thread_main() noexcept {
             const Status s = backend_->next_frame(deliverFrom, frame, pts, eos);
             const f32 ms = static_cast<f32>(static_cast<f64>(monotonic_ns() - t0) * 1e-6);
             if (!s.ok()) {
-                AUREA_LOG_ERROR("decode falhou: %s", s.message().data());
+                AUREA_LOG_ERROR("decode falhou (%s, alvo %lld us): %s — %.*s",
+                    priority_ == MediaPriority::Thumbnail ? "thumbnail" : "video",
+                    static_cast<long long>(need), s.message().data(),
+                    static_cast<int>(s.detail().size()), s.detail().empty() ? "" : s.detail().data());
                 decoderValid_ = false;
                 // Sem esta pausa, um arquivo corrompido faria a thread girar
                 // em seek+erro sem parar, queimando CPU que o render precisa.

@@ -1051,6 +1051,11 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
         asset.audio.sampleRate = probe.audioSampleRate;
         asset.audio.channels = probe.audioChannels;
         asset.audio.sampleCount = FrameIndex{probe.audioDurationUs * static_cast<i64>(probe.audioSampleRate) / 1'000'000};
+    } else {
+        // AudioTrackInfo defaults to stereo for audio creation. A silent video
+        // must not schedule mixer/waveform decoders or expose Extract Audio.
+        asset.audio.sampleRate = 0;
+        asset.audio.channels = 0;
     }
     const AssetId assetId = project_->add_asset(std::move(asset));
 

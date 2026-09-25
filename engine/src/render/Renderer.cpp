@@ -1512,7 +1512,19 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 i64 nextUs = -1;
                 f32 blendT = 0.0f;
                 const bool wantVector = l->vectorBlur > 0.0f && comp.motion_blur().shutterAngle > 0.0f;
-                if (l->frameBlend >= 1 || wantVector) {
+                if (src->info().preciseFrameTiming && (l->frameBlend >= 1 || wantVector)) {
+                    bool currentReady = false;
+                    const FrameRef current = src->frame_for(mediaUs, &currentReady);
+                    if (currentReady && current && current->durationUs > 0) {
+                        const i64 next = current->ptsUs + current->durationUs;
+                        const f64 fraction = static_cast<f64>(mediaUs - current->ptsUs) / current->durationUs;
+                        const bool between = l->frameBlend >= 1 && fraction > 0.01 && fraction < 0.99;
+                        if ((src->info().durationUs <= 0 || next < src->info().durationUs) && (between || wantVector)) {
+                            nextUs = next;
+                            blendT = between ? static_cast<f32>(fraction) : 0.0f;
+                        }
+                    }
+                } else if (l->frameBlend >= 1 || wantVector) {
                     if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
                         const f64 pos = l->source_frame(layerTime) / fps * srcFps;
                         const f64 idx = std::floor(pos + 1e-3);
@@ -1531,12 +1543,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // vídeo a 30 cai a cada dois quadros exatamente entre dois
                 // quadros da fonte — a meia distância de ambos, nenhum era
                 // "exato", e o export esperava o decoder até estourar o prazo.
-                if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
+                if (const f64 srcFps = src->info().fps; srcFps > 0.0 && !src->info().preciseFrameTiming) {
                     const f64 idx = std::floor(static_cast<f64>(mediaUs) * srcFps / 1e6 + 1e-3);
                     mediaUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
                 }
                 const i64 dur = src->info().durationUs;
-                if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, dur - src->frame_duration_us() / 2);
+                if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0,
+                    src->info().preciseFrameTiming ? dur - 1 : dur - src->frame_duration_us() / 2);
                 DecodeRequest req;
                 // Com mistura: primeiro o quadro atual; com ele no cache, o
                 // seguinte (os dois precisam estar lá ao mesmo tempo).

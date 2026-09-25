@@ -295,6 +295,12 @@ endif()
 # compila sem <jni.h>, senão deixa de rodar nos testes.
 # -----------------------------------------------------------------------------
 if(AUREA_PLATFORM_ANDROID)
+    option(AUREA_ANDROID_MEDIA_PROBE "Build the on-device decoder regression executable" OFF)
+    if(AUREA_ANDROID_MEDIA_PROBE)
+        add_executable(aurea_media_probe tests/android_media_probe.cpp platform/android/MediaCodecSource.cpp)
+        target_include_directories(aurea_media_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
+        target_link_libraries(aurea_media_probe PRIVATE aurea_core android log mediandk)
+    endif()
     add_library(aurea SHARED
         platform/android/aurea_jni.cpp
         platform/android/MediaCodecSource.cpp

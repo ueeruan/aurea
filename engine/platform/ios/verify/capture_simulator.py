@@ -371,6 +371,7 @@ def capture_scene(scene, app, output, udid, console_option, report, frame_checke
         documents.mkdir(parents=True, exist_ok=True)
         if scene == 'export-render':
             shutil.copy2('engine/tests/data/preview-bframes.mp4', documents / 'preview-bframes.mp4')
+            shutil.copy2('engine/tests/data/preview-vfr.mp4', documents / 'preview-vfr.mp4')
         ready = documents / 'parity-ready.json'
         record['readyPath'] = str(ready)
         if ready.exists():

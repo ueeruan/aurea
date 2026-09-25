@@ -173,6 +173,11 @@ enum ParityExportProbe {
             guard (reordered["passed"] as? NSNumber)?.boolValue == true else {
                 throw Failure(message: "Production B-frame decoder regression failed: \(reordered)")
             }
+            let variableRate = AureaVerifyVideoDecoder(documents.appendingPathComponent("preview-vfr.mp4").path, 63)
+            report["variableRateDecoder"] = variableRate
+            guard (variableRate["passed"] as? NSNumber)?.boolValue == true else {
+                throw Failure(message: "Production VFR decoder regression failed: \(variableRate)")
+            }
             report["passed"] = true
             report["phase"] = "complete"
         } catch {

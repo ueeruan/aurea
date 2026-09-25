@@ -144,6 +144,7 @@ private:
     void thread_main() noexcept;
     [[nodiscard]] bool reachable_forward(i64 needUs) const noexcept;
     void deliver(FrameRef frame) noexcept;
+    void schedule_retry(u64 generation) noexcept;
 
     std::unique_ptr<VideoDecoderBackend> backend_;
     MediaPriority priority_;
@@ -158,6 +159,8 @@ private:
     u64 handledGen_ = 0;
     u64 requestTimeNs_ = 0;
     u32 requestCacheVersion_ = 0;
+    u64 retryAfterNs_ = 0;
+    u32 retryAttempts_ = 0;
     bool running_ = false;
     bool suspended_ = false;
     bool suspendApplied_ = false;

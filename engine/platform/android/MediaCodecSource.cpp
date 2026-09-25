@@ -308,6 +308,9 @@ public:
     i64 keyframe_interval_us() const noexcept override { return keyframeUs_; }
 
     Status seek_to_keyframe(i64 targetUs) noexcept override {
+        pendingFrame_.reset();
+        pendingEos_ = false;
+        nextDeliveryUs_ = std::max<i64>(0, targetUs);
         if (!codec_) {
             if (const Status s = create_codec(); !s.ok()) return s;
         }
@@ -329,6 +332,52 @@ public:
     }
 
     Status next_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept override {
+        const Status result = next_timed_frame(deliverFromUs, out, outPtsUs, endOfStream);
+        if (result.ok() || softwareFallback_ || !info_.hardwareDecoder
+            || (result.code() != Errc::Timeout && result.code() != Errc::DecodeFailed)
+            || !software_decoder_for(info_.codec)) return result;
+        // Some drivers accept configuration but stall after flush/recreation.
+        // Retry that exact presentation interval once with the platform software
+        // codec; never pretend an empty frame is success or silently restart at 0.
+        const i64 target = std::max(deliverFromUs, nextDeliveryUs_);
+        AUREA_LOG_WARN("decoder %s falhou; tentando software em %lld us", info_.decoderName,
+            static_cast<long long>(target));
+        softwareFallback_ = true;
+        destroy_codec();
+        if (const Status opened = create_codec(); !opened.ok()) return opened;
+        if (const Status seek = seek_to_keyframe(target); !seek.ok()) return seek;
+        return next_timed_frame(target, out, outPtsUs, endOfStream);
+    }
+
+    Status next_timed_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept {
+        out.reset();
+        endOfStream = false;
+        if (!pendingFrame_) {
+            if (const Status s = next_raw_frame(pendingFrame_, outPtsUs, pendingEos_); !s.ok()) return s;
+            if (!pendingFrame_) { endOfStream = pendingEos_; return OkStatus; }
+        }
+        FrameRef next;
+        i64 nextPts = pendingFrame_->ptsUs;
+        bool eos = pendingEos_;
+        if (!pendingEos_) {
+            if (const Status s = next_raw_frame(next, nextPts, eos); !s.ok()) return s;
+        }
+        if (next && next->ptsUs <= pendingFrame_->ptsUs)
+            return Status{Errc::DecodeFailed, "PTS de video fora de ordem"};
+        FrameRef current = std::move(pendingFrame_);
+        current->durationUs = next ? next->ptsUs - current->ptsUs
+            : info_.durationUs > current->ptsUs ? info_.durationUs - current->ptsUs
+            : std::max<i64>(1, static_cast<i64>(1e6 / std::max(1.0, info_.fps)));
+        outPtsUs = current->ptsUs;
+        nextDeliveryUs_ = current->ptsUs + current->durationUs;
+        pendingFrame_ = std::move(next);
+        pendingEos_ = eos;
+        endOfStream = eos && !pendingFrame_;
+        if (outPtsUs >= deliverFromUs || current->covers(deliverFromUs)) out = std::move(current);
+        return OkStatus;
+    }
+
+    Status next_raw_frame(FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept {
         endOfStream = false;
         out.reset();
         if (!codec_) {
@@ -359,11 +408,6 @@ public:
                 if (eos) {
                     outputEos_ = true;
                     endOfStream = true;
-                }
-                if (pts < deliverFromUs) {
-                    // Intermediário de um seek/scrub: decodificado, nunca exibido.
-                    AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(idx), false);
-                    return OkStatus;
                 }
                 // Explicit timestamp lets us reject a late image from a previous seek.
                 if (AMediaCodec_releaseOutputBufferAtTime(codec_, static_cast<size_t>(idx), pts * 1000) != AMEDIA_OK) {
@@ -446,7 +490,8 @@ private:
         AMediaFormat_setInt32(format, kKeyPriority, thumbnail_ ? 1 : 0);
 
         Status result = OkStatus;
-        codec_ = AMediaCodec_createDecoderByType(mime);
+        codec_ = softwareFallback_ && software_decoder_for(mime)
+            ? AMediaCodec_createCodecByName(software_decoder_for(mime)) : AMediaCodec_createDecoderByType(mime);
         if (!codec_ || !configure_and_start(format)) {
             // Instâncias de hardware esgotadas (várias layers 4K) ou perfil que
             // o hardware recusa: o decoder de software do sistema ainda serve.
@@ -467,6 +512,7 @@ private:
             return result;
         }
         codec_name(codec_, info_.decoderName, sizeof(info_.decoderName), info_.hardwareDecoder);
+        info_.preciseFrameTiming = true;
         inputEos_ = false;
         outputEos_ = false;
         AUREA_LOG_INFO("decoder %s (%s, %s) %ux%u rot %u, %s", info_.decoderName[0] ? info_.decoderName : "?",
@@ -481,6 +527,8 @@ private:
     }
 
     void destroy_codec() noexcept {
+        pendingFrame_.reset();
+        pendingEos_ = false;
         if (codec_) {
             AMediaCodec_stop(codec_);
             AMediaCodec_delete(codec_);
@@ -738,6 +786,10 @@ private:
     bool inputEos_ = false;
     bool outputEos_ = false;
     i64 lastPts_ = 0;
+    FrameRef pendingFrame_; // One lookahead frame: durations come from actual PTS, including VFR.
+    bool pendingEos_ = false;
+    bool softwareFallback_ = false;
+    i64 nextDeliveryUs_ = 0;
     i64 keyframeUs_ = 2'000'000;
 };
 

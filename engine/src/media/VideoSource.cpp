@@ -32,6 +32,8 @@ void VideoSource::start() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (running_) return;
     running_ = true;
+    retryAfterNs_ = 0;
+    retryAttempts_ = 0;
     // stop() clears the cache. Restart must service the last target again,
     // even if the render loop sends the identical request.
     if (requestGen_ != 0) ++requestGen_;
@@ -68,6 +70,8 @@ void VideoSource::request(const DecodeRequest& r) noexcept {
             ++stats_.coalesced;
         }
         request_ = r;
+        retryAfterNs_ = 0;
+        retryAttempts_ = 0;
         requestCacheVersion_ = cacheVersion;
         ++requestGen_;
         requestTimeNs_ = monotonic_ns();
@@ -107,6 +111,8 @@ void VideoSource::resume() noexcept {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         suspended_ = false;
+        retryAfterNs_ = 0;
+        retryAttempts_ = 0;
         ++requestGen_;   // refaz o último pedido depois de recriar o codec
     }
     wake_.notify_all();
@@ -139,6 +145,15 @@ void VideoSource::deliver(FrameRef frame) noexcept {
     }
     delivered_.notify_all();
     if (fn) fn(ctx);
+}
+
+void VideoSource::schedule_retry(u64 generation) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Two delayed retries recover transient decoder/seek failures even when
+    // playback is paused and no further UI request arrives. Corrupt media
+    // cannot spin forever. A different request gets its own attempt budget.
+    if (running_ && requestGen_ == generation && retryAttempts_ < 2)
+        retryAfterNs_ = monotonic_ns() + 100'000'000ull * (retryAttempts_ + 1);
 }
 
 void VideoSource::thread_main() noexcept {
@@ -174,11 +189,25 @@ void VideoSource::thread_main() noexcept {
                 const i64 ahead = frameUs_ * (request_.speed > 1.5f ? 4 : 3);
                 return cache_.contiguous_end(request_.targetUs, frameUs_) < request_.targetUs + ahead - half;
             };
-            wake_.wait(lock, [&] {
+            auto work_pending = [&] {
                 return !running_ || requestGen_ != handledGen_ || suspended_ != suspendApplied_
-                    || prefetch_pending();
-            });
+                    || (retryAfterNs_ && monotonic_ns() >= retryAfterNs_) || prefetch_pending();
+            };
+            while (!work_pending()) {
+                if (retryAfterNs_) {
+                    const u64 now = monotonic_ns();
+                    if (now < retryAfterNs_)
+                        wake_.wait_for(lock, std::chrono::nanoseconds(retryAfterNs_ - now));
+                } else {
+                    wake_.wait(lock);
+                }
+            }
             if (!running_) break;
+            if (retryAfterNs_ && monotonic_ns() >= retryAfterNs_) {
+                retryAfterNs_ = 0;
+                ++retryAttempts_;
+                backfillAttemptUs_ = -1;
+            }
             if (suspended_ != suspendApplied_) {
                 applySuspend = suspended_;
                 applyResume = !suspended_;
@@ -236,8 +265,14 @@ void VideoSource::thread_main() noexcept {
         } else if (req.mode == DecodeMode::Playback) {
             const i64 ahead = frameUs_ * (req.speed > 1.5f ? 4 : 3);
             const i64 end = cache_.contiguous_end(req.targetUs, frameUs_);
-            if (end >= req.targetUs + ahead - half) continue;   // já está adiantado
-            need = end >= req.targetUs - half ? end + frameUs_ : req.targetUs;
+            if (backend_->info().preciseFrameTiming) {
+                const bool haveTarget = cache_.contains(req.targetUs, half);
+                if (haveTarget && end + frameUs_ >= req.targetUs + ahead) continue;
+                need = haveTarget ? end + frameUs_ : req.targetUs;
+            } else {
+                if (end >= req.targetUs + ahead - half) continue;   // já está adiantado
+                need = end >= req.targetUs - half ? end + frameUs_ : req.targetUs;
+            }
             limit = req.targetUs + ahead;
         } else {
             if (cache_.contains(req.targetUs, half)) continue;
@@ -256,6 +291,7 @@ void VideoSource::thread_main() noexcept {
             if (const Status s = backend_->seek_to_keyframe(need); !s.ok()) {
                 AUREA_LOG_ERROR("seek falhou em %lld us", static_cast<long long>(need));
                 decoderValid_ = false;
+                schedule_retry(gen);
                 continue;
             }
             decoderValid_ = true;
@@ -325,7 +361,7 @@ void VideoSource::thread_main() noexcept {
                 decoderValid_ = false;
                 // Sem esta pausa, um arquivo corrompido faria a thread girar
                 // em seek+erro sem parar, queimando CPU que o render precisa.
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                schedule_retry(gen);
                 break;
             }
             decoderPosUs_ = pts;
@@ -339,9 +375,10 @@ void VideoSource::thread_main() noexcept {
                 }
                 stats_.endOfStream = eos;
             }
+            const bool coversLimit = frame && frame->covers(limit);
             if (frame) deliver(std::move(frame));
             if (eos) { eos_ = true; break; }
-            if (pts >= limit - half) break;
+            if (backend_->info().preciseFrameTiming ? (coversLimit || pts > limit) : pts >= limit - half) break;
         }
     }
 }

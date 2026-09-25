@@ -68,6 +68,58 @@ AUREA_TEST(DecodedFrameCache, KeepsDisplayFrameWhenSingleFrameExceedsBudget) {
     AUREA_CHECK(cache.contains(0, 0));
 }
 
+AUREA_TEST(DecodedFrameCache, PresentationIntervalsResolveVariableFrameRate) {
+    DecodedFrameCache cache;
+    auto first = frame_at(0); first->durationUs = 500000;
+    auto second = frame_at(500000); second->durationUs = 10000;
+    auto third = frame_at(510000); third->durationUs = 90000;
+    (void)cache.insert(first); (void)cache.insert(second); (void)cache.insert(third);
+    for (i64 time : {i64{200000}, i64{499999}, i64{500000}, i64{509999}, i64{510000}, i64{599999}}) {
+        bool exact = false;
+        auto found = cache.find(time, 16667, &exact);
+        const i64 expected = time < 500000 ? 0 : time < 510000 ? 500000 : 510000;
+        AUREA_CHECK(found && exact && found->ptsUs == expected);
+        AUREA_CHECK(cache.contains(time, 16667));
+    }
+    AUREA_CHECK(!cache.contains(600000, 16667));
+    AUREA_CHECK_EQ(cache.contiguous_begin(250000, 33333), 0);
+    AUREA_CHECK_EQ(cache.contiguous_end(250000, 33333), 600000 - 33333);
+    DecodedFrameCache::Config budget; budget.maxFrames = 1;
+    cache.set_focus(250000, 1);
+    cache.configure(budget);
+    AUREA_CHECK(cache.contains(250000, 16667));
+}
+
+AUREA_TEST(VideoSource, VariableRateSeekWaitsForPresentationInterval) {
+    struct Decoder : VideoDecoderBackend {
+        VideoStreamInfo stream{};
+        usize index = 0;
+        Decoder() { stream.fps = 30; stream.durationUs = 600000; stream.preciseFrameTiming = true; }
+        const VideoStreamInfo& info() const noexcept override { return stream; }
+        Status seek_to_keyframe(i64) noexcept override { index = 0; return OkStatus; }
+        Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+            const i64 starts[] = {0, 500000, 510000, 600000};
+            out.reset(); eos = index == 3; pts = starts[index];
+            if (eos) return OkStatus;
+            auto frame = frame_at(pts); frame->durationUs = starts[index + 1] - pts;
+            ++index;
+            if (pts >= from || frame->covers(from)) out = std::move(frame);
+            return OkStatus;
+        }
+    };
+    VideoSource source(std::make_unique<Decoder>(), MediaPriority::Export);
+    source.start();
+    for (i64 time : {i64{575000}, i64{200000}, i64{505000}, i64{499999}, i64{599999}}) {
+        source.cache().clear();
+        source.request({time, DecodeMode::Still, 0, 1});
+        AUREA_CHECK(source.wait_for(time, 1500));
+        bool exact = false;
+        auto frame = source.frame_for(time, &exact);
+        AUREA_CHECK(frame && exact && frame->covers(time));
+    }
+    source.stop();
+}
+
 AUREA_TEST(MediaManager, CodecStartupDoesNotBlockRenderOrStatus) {
     struct SlowFactory : VideoSourceFactory {
         std::atomic<bool> release{false};
@@ -180,6 +232,43 @@ AUREA_TEST(DecodedFrameCache, ContiguousEndFollowsTheRun) {
 AUREA_TEST(VideoSource, StoppedSourceDoesNotReportMissingFrameAsReady) {
     VideoSource src(std::make_unique<SyntheticDecoder>(SyntheticConfig{}), MediaPriority::Preview);
     AUREA_CHECK(!src.wait_for(0, 10));
+}
+
+AUREA_TEST(VideoSource, RecoversTransientFailureWithoutAnotherRequest) {
+    struct Decoder : VideoDecoderBackend {
+        VideoStreamInfo stream{};
+        std::atomic<u32> attempts{0};
+        bool permanent = false;
+        i64 target = 0;
+        const VideoStreamInfo& info() const noexcept override { return stream; }
+        Status seek_to_keyframe(i64 time) noexcept override { target = time; return OkStatus; }
+        Status next_frame(i64, FrameRef& out, i64& pts, bool& eos) noexcept override {
+            eos = false; pts = target;
+            if (++attempts == 1 || permanent) return Status{Errc::Timeout, "injected transient failure"};
+            out = frame_at(target); return OkStatus;
+        }
+    };
+    for (bool permanent : {false, true}) {
+        auto decoder = std::make_unique<Decoder>();
+        auto* observed = decoder.get(); observed->permanent = permanent;
+        VideoSource source(std::move(decoder), MediaPriority::Preview);
+        source.start();
+        source.request({100000, DecodeMode::Still, 0, 1});
+        const bool ready = source.wait_for(100000, 1500);
+        AUREA_CHECK_EQ(ready, !permanent);
+        if (permanent) {
+            AUREA_CHECK_EQ(observed->attempts.load(), 3u);
+            for (int i = 0; i < 20; ++i) source.request({100000, DecodeMode::Still, 0, 1});
+            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+            AUREA_CHECK_EQ(observed->attempts.load(), 3u);
+        } else {
+            AUREA_CHECK_EQ(observed->attempts.load(), 2u);
+            bool exact = false;
+            auto frame = source.frame_for(100000, &exact);
+            AUREA_CHECK(frame && exact && frame->ptsUs == 100000);
+        }
+        source.stop();
+    }
 }
 
 AUREA_TEST(VideoSource, StopWakesPendingWaitWithoutReportingSuccess) {

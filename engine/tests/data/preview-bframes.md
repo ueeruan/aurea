@@ -14,3 +14,9 @@ The iOS `export-render` parity scene compares all production-decoder pixels
 and presentation timestamps against an independent AVAssetReader, in both
 CPU and IOSurface modes. It also checks EOS, seeks, retained frame ownership,
 and suspend/resume. This fixture can be imported unchanged on Android.
+
+`preview-vfr.mp4` uses the same generated source, selecting frames 0, 10, 20
+and all frames from 30 onwards: 63 samples with 333 ms intervals followed by
+33 ms intervals. It is encoded with the same codec/pixel format and
+`-vf "select=not(mod(n\,10))+gte(n\,30)" -fps_mode vfr`. The native probe also
+seeks into the interior of presentation intervals, including the long first frame.

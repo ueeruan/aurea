@@ -191,6 +191,7 @@ public:
 
 private:
     bool start_reader(i64 fromUs) noexcept;
+    bool build_timing_index() noexcept;
     void teardown() noexcept;
     [[nodiscard]] Status wrap_sample(CMSampleBufferRef sample, i64 deliverFromUs, FrameRef& out,
                                     i64& outPtsUs) noexcept;
@@ -208,6 +209,8 @@ private:
     bool suspended_ = false;
     bool tenBit_ = false;
     bool fullRange_ = false;
+    std::vector<i64> presentationTimes_;
+    bool timingIndexed_ = false;
 };
 
 AVFoundationVideoDecoder::AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack* track,
@@ -251,6 +254,7 @@ AVFoundationVideoDecoder::AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack*
         // AVAssetReader selects the platform decoder; it does not expose whether
         // that instance uses hardware. Do not claim hardware merely from the API.
         info_.hardwareDecoder = false;
+        info_.preciseFrameTiming = true;
     }
 }
 
@@ -260,6 +264,29 @@ void AVFoundationVideoDecoder::teardown() noexcept {
     if (reader_.status == AVAssetReaderStatusReading) [reader_ cancelReading];
     output_ = nil;
     reader_ = nil;
+}
+
+bool AVFoundationVideoDecoder::build_timing_index() noexcept {
+    if (timingIndexed_) return true;
+    // Sample references read container timing without copying/decoding video.
+    // Build lazily on the decode worker: initial playback at zero needs no index.
+    AVAssetReader* indexReader = [[AVAssetReader alloc] initWithAsset:asset_ error:nullptr];
+    AVAssetReaderSampleReferenceOutput* references = [[AVAssetReaderSampleReferenceOutput alloc] initWithTrack:track_];
+    if (!indexReader || ![indexReader canAddOutput:references]) return false;
+    [indexReader addOutput:references];
+    if (![indexReader startReading]) return false;
+    std::vector<i64> times;
+    while (CMSampleBufferRef sample = [references copyNextSampleBuffer]) {
+        const CMTime time = CMSampleBufferGetPresentationTimeStamp(sample);
+        if (CMTIME_IS_NUMERIC(time)) times.push_back(us_of(time));
+        CFRelease(sample);
+    }
+    if (indexReader.status != AVAssetReaderStatusCompleted || times.empty()) return false;
+    std::sort(times.begin(), times.end());
+    times.erase(std::unique(times.begin(), times.end()), times.end());
+    presentationTimes_ = std::move(times);
+    timingIndexed_ = true;
+    return true;
 }
 
 bool AVFoundationVideoDecoder::start_reader(i64 fromUs) noexcept {
@@ -285,10 +312,14 @@ bool AVFoundationVideoDecoder::start_reader(i64 fromUs) noexcept {
             return false;
         }
         [reader addOutput:output];
-        // AVFoundation performs codec preroll internally. Include one preceding
-        // presentation interval for the shared scheduler's nearest-frame rule.
-        const i64 slack = static_cast<i64>(std::ceil(1e6 / info_.fps));
-        const i64 begin = start > slack ? start - slack : 0;
+        // Seek to the sample that actually covers the requested time. Subtracting
+        // one nominal frame misses long VFR samples that began much earlier.
+        i64 begin = 0;
+        if (start > 0) {
+            if (!build_timing_index()) return false;
+            const auto after = std::upper_bound(presentationTimes_.begin(), presentationTimes_.end(), start);
+            if (after != presentationTimes_.begin()) begin = *(after - 1);
+        }
         reader.timeRange = CMTimeRangeMake(cm_time_us(begin), kCMTimePositiveInfinity);
         if (![reader startReading]) {
             AUREA_LOG_ERROR("videotoolbox: reader nao comecou (%s)", reader.error.localizedDescription.UTF8String);
@@ -317,7 +348,10 @@ Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 deliv
     const CMTime pts = CMSampleBufferGetPresentationTimeStamp(sample);
     if (!CMTIME_IS_NUMERIC(pts)) return Status{Errc::DecodeFailed, "timestamp de video invalido"};
     outPtsUs = us_of(pts);
-    if (outPtsUs < deliverFromUs) return OkStatus;
+    const CMTime sampleDuration = CMSampleBufferGetDuration(sample);
+    const i64 durationUs = CMTIME_IS_NUMERIC(sampleDuration) && us_of(sampleDuration) > 0
+        ? us_of(sampleDuration) : static_cast<i64>(std::llround(1e6 / info_.fps));
+    if (outPtsUs < deliverFromUs && deliverFromUs - outPtsUs >= durationUs) return OkStatus;
     CVPixelBufferRef pixel = CMSampleBufferGetImageBuffer(sample);
     if (!pixel) return Status{Errc::DecodeFailed, "amostra decodificada sem imagem"};
 
@@ -327,6 +361,7 @@ Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 deliv
     }
     frame->pixel = (CVPixelBufferRef)CFRetain(pixel); // outlives the sample and reader
     frame->ptsUs = outPtsUs;
+    frame->durationUs = durationUs;
     frame->width = (u32)CVPixelBufferGetWidth(pixel);
     frame->height = (u32)CVPixelBufferGetHeight(pixel);
     frame->cropLeft = 0;
@@ -742,11 +777,13 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
             if (!decoder->next_frame(0, frame, pts, eos).ok() || !eos || frame)
                 return failure(@"Decoder did not drain to EOS");
             for (usize index : {expected.size()-1, usize{0}, expected.size()/2}) {
-                if (!decoder->seek_to_keyframe(expected[index].pts).ok()) return failure(@"Seek failed");
+                const i64 end = index + 1 < expected.size() ? expected[index + 1].pts : decoder->info().durationUs;
+                const i64 target = expected[index].pts + std::max<i64>(0, end - expected[index].pts) / 2;
+                if (!decoder->seek_to_keyframe(target).ok()) return failure(@"Seek failed");
                 // The reader may include preroll, which must be discardable without losing PTS.
                 bool found = false;
                 for (usize step = 0; step <= expected.size(); ++step) {
-                    if (!decoder->next_frame(expected[index].pts, frame, pts, eos).ok() || eos) break;
+                    if (!decoder->next_frame(target, frame, pts, eos).ok() || eos) break;
                     if (frame) { found = matches(frame, expected[index]); break; }
                 }
                 if (!found) return failure(@"Seek returned wrong pixels/PTS");

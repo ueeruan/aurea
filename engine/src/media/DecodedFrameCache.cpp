@@ -47,7 +47,8 @@ void DecodedFrameCache::set_focus(i64 playheadUs, i32 direction) noexcept {
     direction_ = direction > 0 ? 1 : (direction < 0 ? -1 : 0);
 }
 
-f64 DecodedFrameCache::cost_locked(i64 ptsUs) const noexcept {
+f64 DecodedFrameCache::cost_locked(i64 ptsUs, i64 durationUs) const noexcept {
+    if (durationUs > 0 && focusUs_ >= ptsUs && focusUs_ - ptsUs < durationUs) return 0;
     const i64 d = ptsUs - focusUs_;
     const f64 dist = static_cast<f64>(d < 0 ? -d : d);
     const bool behind = (direction_ > 0 && d < 0) || (direction_ < 0 && d > 0);
@@ -58,7 +59,7 @@ usize DecodedFrameCache::worst_locked() const noexcept {
     usize worst = 0;
     f64 worstCost = -1.0;
     for (usize i = 0; i < frames_.size(); ++i) {
-        const f64 c = cost_locked(frames_[i]->ptsUs);
+        const f64 c = cost_locked(frames_[i]->ptsUs, frames_[i]->durationUs);
         if (c > worstCost) { worstCost = c; worst = i; }
     }
     return worst;
@@ -104,10 +105,10 @@ bool DecodedFrameCache::insert(FrameRef frame) noexcept {
 
     if (frames_.size() >= config_.maxFrames) {
         // Cheio: só entra se não for ele o pior de todos.
-        f64 worst = cost_locked(pts);
+        f64 worst = cost_locked(pts, frame->durationUs);
         bool newIsWorst = true;
         for (const FrameRef& f : frames_) {
-            if (cost_locked(f->ptsUs) > worst) { newIsWorst = false; break; }
+            if (cost_locked(f->ptsUs, f->durationUs) > worst) { newIsWorst = false; break; }
         }
         if (newIsWorst) return false;
     }
@@ -168,9 +169,17 @@ FrameRef DecodedFrameCache::find(i64 targetUs, i64 halfFrameUs, bool* exact) noe
     if (exact) *exact = false;
     if (frames_.empty()) { ++stats_.misses; return FrameRef{}; }
 
+    auto covering = std::upper_bound(frames_.begin(), frames_.end(), targetUs,
+        [](i64 time, const FrameRef& frame) { return time < frame->ptsUs; });
+    if (covering != frames_.begin() && (*(covering - 1))->covers(targetUs)) {
+        ++stats_.hits;
+        if (exact) *exact = true;
+        return *(covering - 1);
+    }
+
     auto it = std::lower_bound(frames_.begin(), frames_.end(), targetUs - halfFrameUs,
                                [](const FrameRef& f, i64 v) { return f->ptsUs < v; });
-    if (it != frames_.end() && std::llabs((*it)->ptsUs - targetUs) <= halfFrameUs) {
+    if (it != frames_.end() && (*it)->durationUs == 0 && std::llabs((*it)->ptsUs - targetUs) <= halfFrameUs) {
         ++stats_.hits;
         if (exact) *exact = true;
         return *it;
@@ -186,13 +195,28 @@ FrameRef DecodedFrameCache::find(i64 targetUs, i64 halfFrameUs, bool* exact) noe
 
 bool DecodedFrameCache::contains(i64 targetUs, i64 halfFrameUs) const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
+    auto covering = std::upper_bound(frames_.begin(), frames_.end(), targetUs,
+        [](i64 time, const FrameRef& frame) { return time < frame->ptsUs; });
+    if (covering != frames_.begin() && (*(covering - 1))->covers(targetUs)) return true;
     auto it = std::lower_bound(frames_.begin(), frames_.end(), targetUs - halfFrameUs,
                                [](const FrameRef& f, i64 v) { return f->ptsUs < v; });
-    return it != frames_.end() && std::llabs((*it)->ptsUs - targetUs) <= halfFrameUs;
+    return it != frames_.end() && (*it)->durationUs == 0 && std::llabs((*it)->ptsUs - targetUs) <= halfFrameUs;
 }
 
 i64 DecodedFrameCache::contiguous_end(i64 fromUs, i64 frameUs) const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
+    auto interval = std::upper_bound(frames_.begin(), frames_.end(), fromUs,
+        [](i64 time, const FrameRef& frame) { return time < frame->ptsUs; });
+    if (interval != frames_.begin() && (*(interval - 1))->covers(fromUs)) {
+        --interval;
+        i64 end = (*interval)->ptsUs + (*interval)->durationUs;
+        for (++interval; interval != frames_.end(); ++interval) {
+            if ((*interval)->durationUs <= 0 || (*interval)->ptsUs > end) break;
+            end = std::max(end, (*interval)->ptsUs + (*interval)->durationUs);
+        }
+        // Scheduler adds one nominal interval to request the next uncovered time.
+        return end - frameUs;
+    }
     const i64 half = frameUs / 2;
     auto it = std::lower_bound(frames_.begin(), frames_.end(), fromUs - half,
                                [](const FrameRef& f, i64 v) { return f->ptsUs < v; });
@@ -207,6 +231,18 @@ i64 DecodedFrameCache::contiguous_end(i64 fromUs, i64 frameUs) const noexcept {
 
 i64 DecodedFrameCache::contiguous_begin(i64 fromUs, i64 frameUs) const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
+    auto interval = std::upper_bound(frames_.begin(), frames_.end(), fromUs,
+        [](i64 time, const FrameRef& frame) { return time < frame->ptsUs; });
+    if (interval != frames_.begin() && (*(interval - 1))->covers(fromUs)) {
+        --interval;
+        i64 begin = (*interval)->ptsUs;
+        while (interval != frames_.begin()) {
+            --interval;
+            if ((*interval)->durationUs <= 0 || (*interval)->ptsUs + (*interval)->durationUs < begin) break;
+            begin = (*interval)->ptsUs;
+        }
+        return begin;
+    }
     const i64 half = frameUs / 2;
     // Primeiro frame com pts > fromUs + meio frame; o anterior a ele é o
     // candidato a "fromUs".

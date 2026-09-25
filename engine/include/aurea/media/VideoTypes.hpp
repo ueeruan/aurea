@@ -80,6 +80,7 @@ struct VideoStreamInfo {
     char codec[32] = {};      ///< "video/avc", "video/hevc"
     char decoderName[64] = {};
     bool hardwareDecoder = false;
+    bool preciseFrameTiming = false; ///< Decoded frames carry presentation durations.
 
     /// Tamanho visível (sem a sobra de alinhamento), antes da rotação.
     [[nodiscard]] u32 visible_width() const noexcept {
@@ -110,6 +111,11 @@ public:
     virtual ~DecodedFrame() = default;
 
     i64 ptsUs = 0;
+    i64 durationUs = 0; ///< Presentation interval; zero means legacy/unknown timing.
+
+    [[nodiscard]] bool covers(i64 timeUs) const noexcept {
+        return durationUs > 0 && timeUs >= ptsUs && timeUs - ptsUs < durationUs;
+    }
     u32 width = 0;          ///< codificado
     u32 height = 0;
     u32 cropLeft = 0, cropTop = 0, visibleWidth = 0, visibleHeight = 0;

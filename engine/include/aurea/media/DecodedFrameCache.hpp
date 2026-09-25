@@ -98,7 +98,7 @@ private:
     /// Tira o frame `i` e desconta os bytes (cache e orçamento).
     void erase_locked(usize i) noexcept;
     [[nodiscard]] usize worst_locked() const noexcept;
-    [[nodiscard]] f64 cost_locked(i64 ptsUs) const noexcept;
+    [[nodiscard]] f64 cost_locked(i64 ptsUs, i64 durationUs = 0) const noexcept;
     [[nodiscard]] bool over_shared_budget_locked() const noexcept;
 
     mutable std::mutex mutex_;

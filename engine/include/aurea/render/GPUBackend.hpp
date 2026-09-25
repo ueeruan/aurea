@@ -33,6 +33,7 @@
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Math.hpp"
 #include "aurea/render/GPUCapabilities.hpp"
+#include <limits>
 
 namespace aurea {
 
@@ -146,7 +147,27 @@ struct TextureDesc {
     }
     [[nodiscard]] u32 bytes_per_pixel() const noexcept { return surface_format_bytes(format); }
     [[nodiscard]] u64 estimated_bytes() const noexcept {
-        return static_cast<u64>(width) * height * depth * layers * bytes_per_pixel() * sampleCount;
+        if (!width || !height) return 0;
+        const bool compressed = format == SurfaceFormat::BC7 || format == SurfaceFormat::BC7_sRGB
+            || format == SurfaceFormat::ETC2_RGBA8 || format == SurfaceFormat::ETC2_RGBA8_sRGB
+            || format == SurfaceFormat::ASTC4x4 || format == SurfaceFormat::ASTC4x4_sRGB;
+        constexpr u64 max = std::numeric_limits<u64>::max();
+        const auto multiply = [](u64 a, u64 b) { return b && a > max / b ? max : a * b; };
+        u64 total = 0;
+        u32 w = width, h = height, z = depth ? depth : 1;
+        const u32 count = mipLevels ? mipLevels : 1;
+        for (u32 level = 0; level < count; ++level) {
+            // Compressed formats store complete 4x4 blocks even at tiny mip
+            // levels. Thin/non-square images cannot use a flat 4/3 multiplier.
+            const u64 row = compressed ? (static_cast<u64>(w) + 3) / 4 : w;
+            const u64 rows = compressed ? (static_cast<u64>(h) + 3) / 4 : h;
+            const u64 bytes = multiply(multiply(multiply(row, rows), z), compressed ? 16 : bytes_per_pixel());
+            if (bytes > max - total) return max;
+            total += bytes;
+            if (w == 1 && h == 1 && z == 1) break;
+            w = w > 1 ? w / 2 : 1; h = h > 1 ? h / 2 : 1; z = z > 1 ? z / 2 : 1;
+        }
+        return multiply(multiply(total, cube ? 6 : (layers ? layers : 1)), sampleCount ? sampleCount : 1);
     }
 
     /// Duas descrições são intercambiáveis para o pool de texturas quando

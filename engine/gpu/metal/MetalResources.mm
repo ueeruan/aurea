@@ -140,8 +140,12 @@ void Impl::destroy_texture_now(Texture& t) noexcept {
             t.cvTexture = nullptr;
         }
     }
-    const u64 bytes = t.desc.estimated_bytes();
-    textureBytes -= std::min<u64>(textureBytes, bytes);
+    // Imported IOSurfaces were allocated/accounted by the decoder, not here.
+    // Their release must not subtract bytes belonging to our other textures.
+    if (!t.external) {
+        const u64 bytes = t.desc.estimated_bytes();
+        textureBytes -= std::min<u64>(textureBytes, bytes);
+    }
     if (allocationCount) --allocationCount;
     t.texture = nil;
     t = Texture{};

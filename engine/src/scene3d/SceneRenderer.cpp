@@ -262,7 +262,7 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
         // Sem blit linear no formato: fica sem mips (correto, só mais serrilhado).
         if (!gpu.generate_mipmaps(*t).ok()) AUREA_LOG_WARN("3D: mips nao gerados para uma textura");
         ownedTextures_.push_back(*t);
-        textureBytes += d.estimated_bytes() * 4 / 3;
+        textureBytes += d.estimated_bytes();
         byImage.emplace(key, *t);
         return *t;
     };

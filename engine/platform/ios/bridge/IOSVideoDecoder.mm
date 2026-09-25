@@ -26,6 +26,9 @@
 #include "AureaBridge.h"
 #if DEBUG
 #import "AureaEngine.h"
+#if defined(AUREA_GPU_METAL)
+#include "MetalBackend.hpp"
+#endif
 #endif
 
 #import <AVFoundation/AVFoundation.h>
@@ -776,6 +779,37 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
             FrameRef frame; i64 pts = -1; bool eos = false;
             if (!decoder->next_frame(0, frame, pts, eos).ok() || !eos || frame)
                 return failure(@"Decoder did not drain to EOS");
+#if defined(AUREA_GPU_METAL)
+            if (zeroCopy) {
+                mtl::Backend gpu;
+                BackendConfig config;
+                config.enableValidation = false;
+                if (!gpu.initialize(config).ok()) return failure(@"Metal memory regression failed to initialize");
+                const auto baseline = gpu.memory_stats();
+                TextureDesc desc;
+                desc.width = 64; desc.height = 32; desc.mipLevels = 7;
+                auto owned = gpu.create_texture(desc);
+                if (!owned.ok()) return failure(@"Metal mip texture allocation failed");
+                const auto allocated = gpu.memory_stats();
+                if (allocated.usedBytes != baseline.usedBytes + desc.estimated_bytes())
+                    return failure(@"Metal mip texture memory is undercounted");
+                ExternalImageDesc image;
+                image.nativeHandle = retained->hardwareBuffer;
+                image.width = retained->width; image.height = retained->height;
+                auto imported = gpu.import_external_image(image);
+                if (!imported.ok()) return failure(@"Metal IOSurface import failed");
+                gpu.release_external_image(imported->texture);
+                gpu.wait_idle();
+                const auto released = gpu.memory_stats();
+                if (released.usedBytes != allocated.usedBytes || released.textureCount != allocated.textureCount)
+                    return failure(@"Metal IOSurface release changed owned texture accounting");
+                gpu.destroy_texture(*owned);
+                gpu.wait_idle();
+                if (gpu.memory_stats().usedBytes != baseline.usedBytes)
+                    return failure(@"Metal texture bytes remain after release");
+                checks += 3;
+            }
+#endif
             for (usize index : {expected.size()-1, usize{0}, expected.size()/2}) {
                 const i64 end = index + 1 < expected.size() ? expected[index + 1].pts : decoder->info().durationUs;
                 const i64 target = expected[index].pts + std::max<i64>(0, end - expected[index].pts) / 2;

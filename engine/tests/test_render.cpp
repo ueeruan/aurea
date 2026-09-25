@@ -20,6 +20,31 @@
 using namespace aurea;
 using aurea::test::MockBackend;
 
+AUREA_TEST(TextureMemory, MipsBlocksLayersAndVolumesUseTheirActualFootprint) {
+    TextureDesc d;
+    d.width = 8; d.height = 4; d.mipLevels = 4;
+    AUREA_CHECK_EQ(d.estimated_bytes(), 172ull); // (32 + 8 + 2 + 1) RGBA texels
+    d.width = 1; d.height = 8;
+    AUREA_CHECK_EQ(d.estimated_bytes(), 60ull); // thin chain is almost 2x, not 4/3
+    d.width = 5; d.height = 7; d.mipLevels = 3;
+    for (SurfaceFormat f : {SurfaceFormat::BC7, SurfaceFormat::ETC2_RGBA8, SurfaceFormat::ASTC4x4}) {
+        d.format = f;
+        AUREA_CHECK_EQ(d.estimated_bytes(), 96ull); // 4 + 1 + 1 complete blocks
+    }
+    d.width = d.height = 4; d.cube = true; d.layers = 6;
+    AUREA_CHECK_EQ(d.estimated_bytes(), 288ull); // 3 blocks per face
+    d.cube = false; d.layers = 2; d.format = SurfaceFormat::RGBA16F;
+    AUREA_CHECK_EQ(d.estimated_bytes(), 336ull);
+    d.layers = 1; d.depth = 4;
+    AUREA_CHECK_EQ(d.estimated_bytes(), 584ull); // 4^3 + 2^3 + 1^3 RGBA16F texels
+    d.depth = 1; d.sampleCount = 4; d.mipLevels = 1;
+    AUREA_CHECK_EQ(d.estimated_bytes(), 512ull);
+    d.width = d.height = d.depth = UINT32_MAX;
+    AUREA_CHECK_EQ(d.estimated_bytes(), UINT64_MAX);
+    d.width = 0;
+    AUREA_CHECK_EQ(d.estimated_bytes(), 0ull);
+}
+
 namespace {
 
 TextureDesc rt(u32 w = 64, u32 h = 64) {

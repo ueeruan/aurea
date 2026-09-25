@@ -529,62 +529,22 @@ struct HomeContinueCard: View {
     let onMenu: () -> Void
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
+        HStack(spacing: 12) {
             HomeThumbnail(url: entry.thumbnailURL, stamp: entry.modified,
-                          maxPx: HomeDims.heroDecode, ratio: homeProjectRatio(entry), hero: true)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            LinearGradient(colors: [.clear, HomeColors.imageScrim],
-                           startPoint: .center, endPoint: .bottom)
-            HStack(alignment: .bottom, spacing: 10) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(AureaText.t("home_continue"))
-                        .aureaFont(.heroKicker).foregroundStyle(AureaColors.accent)
-                    Text(entry.title)
-                        .aureaFont(.heroTitle).foregroundStyle(HomeColors.onImage)
-                        .lineLimit(1).padding(.top, 3)
-                    Text(homeProjectSpec(entry))
-                        .aureaFont(.heroSpec).foregroundStyle(HomeColors.onImage70)
-                        .lineLimit(1).padding(.top, 2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 6) {
-                    CupertinoGlyph.text(CupertinoGlyph.PlayFill, size: HomeDims.iconXs, color: AureaColors.onAccent)
-                    Text(AureaText.t("home_continue_action"))
-                        .aureaFont(.heroPill).foregroundStyle(AureaColors.onAccent)
-                }
-                .padding(.horizontal, HomeDims.rMd)
-                .padding(.vertical, 9)
-                .background(AureaColors.accent, in: Capsule())
-            }
-            .padding(.leading, HomeDims.s4)
-            .padding(.trailing, HomeDims.s4)
-            .padding(.bottom, HomeDims.rMd)
-
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: onMenu) {
-                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: HomeDims.menuDotIcon, color: HomeColors.onImage70)
-                            .frame(width: HomeDims.menuDot, height: HomeDims.menuDot)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(AureaText.t("home_menu_content"))
-                }
-                Spacer()
-            }
-            .padding(.top, 2)
-            .padding(.trailing, 2)
-        }
-        .aspectRatio(HomeDims.heroAspect, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: HomeDims.rXl))
-        .homeTapOrLong(onOpen, long: onMenu)
-        .padding(.leading, HomeDims.gutter)
-        .padding(.trailing, HomeDims.gutter)
-        .padding(.top, HomeDims.s4)
+                          maxPx: 256, ratio: homeProjectRatio(entry), hero: true)
+                .frame(width: 76, height: 76).clipShape(RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(AureaText.t("home_continue")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent)
+                Text(entry.title).font(.aurea(size: 17, weight: .semibold)).lineLimit(1)
+                Text(homeProjectSpec(entry)).aureaFont(.cardSpec).foregroundStyle(AureaColors.muted).lineLimit(2)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            HomeRoundIconButton(glyph: CupertinoGlyph.Ellipsis, description: AureaText.t("home_menu_content"), action: onMenu)
+        }.padding(12).foregroundStyle(AureaColors.text)
+            .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 22))
+            .homeTapOrLong(onOpen, long: onMenu)
+            .padding(.horizontal, HomeDims.gutter).padding(.top, 20)
     }
 }
-
 /// O cartão da grade: miniatura (raio 12), o nome, a ficha e as reticências.
 /// Escolhendo vários, o toque marca em vez de abrir.
 struct HomeProjectCard: View {
@@ -638,7 +598,9 @@ struct HomeProjectCard: View {
             }
             .padding(.top, 6)
         }
+        .padding(8)
         .aspectRatio(HomeDims.cardAspect, contentMode: .fit)
+        .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 22))
         .homeTapOrLong(selecting ? onMark : onOpen, long: selecting ? onMark : onMenu)
     }
 }
@@ -827,6 +789,25 @@ private struct HomeBatchButton: View {
 }
 
 /// Ação secundária da Início: cartão com ícone e rótulo, largura dividida.
+struct HomeStudioAction: View {
+    let glyph: Character
+    let label: String
+    var primary = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                CupertinoGlyph.text(glyph, size: 30, color: primary ? AureaColors.onAccent : AureaColors.text)
+                Spacer(minLength: 0)
+                Text(label).font(.aurea(size: 17, weight: .semibold)).multilineTextAlignment(.leading)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(18).frame(height: 142)
+                .foregroundStyle(primary ? AureaColors.onAccent : AureaColors.text)
+                .background(primary ? AureaColors.accent : AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 22))
+        }.buttonStyle(.plain)
+    }
+}
+
 struct HomeQuickAction: View {
     let glyph: Character
     let label: String

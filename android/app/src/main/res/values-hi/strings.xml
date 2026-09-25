@@ -876,4 +876,26 @@
     <string name="ai_limite_atingido">You\'ve used your %1$d AI generations for today. Come back tomorrow to generate more.</string>
     <string name="editor_marca_anterior_segure_inicio">पिछला मार्कर; शुरुआत में जाने के लिए दबाए रखें</string>
     <string name="editor_proxima_marca_segure_fim">अगला मार्कर; अंत में जाने के लिए दबाए रखें</string>
+    <string name="donation_title">Aurea का समर्थन करें</string>
+    <string name="donation_note">ऐप को मुफ़्त रखने के लिए वैकल्पिक दान।</string>
+    <string name="donation_detail">दान करना है या नहीं और कितना करना है, आप तय करें। सभी सुविधाएँ उपलब्ध रहेंगी।</string>
+    <string name="donation_pix_qr">Ruan Pablo का Pix QR कोड</string>
+    <string name="donation_copy_pix">Pix कॉपी करें</string>
+    <string name="donation_paypal">PayPal से दान करें</string>
+    <string name="donation_copy_paypal">PayPal लिंक कॉपी करें</string>
+    <string name="donation_export_note">निर्यात जारी है। पूरा होने के बाद कोड या लिंक का उपयोग करें।</string>
+    <string name="donation_copied">क्लिपबोर्ड पर कॉपी किया गया।</string>
+    <string name="ai_upscale_title">AI वीडियो अपस्केलर</string>
+    <string name="ai_upscale_note">एनीमे और चित्रों के लिए मॉडल। इंटरफ़ेस रोके बिना टाइलों में प्रोसेस करता है। नीचे चुना गया रिज़ॉल्यूशन अंतिम गुणवत्ता है।</string>
+    <string name="ai_upscale_dimensions">AI %1$dx · इनपुट %2$d × %3$d → आउटपुट %4$d × %5$d</string>
+    <string name="licenses_title">लाइसेंस · AI</string>
+    <string name="scene_workspace">3D दृश्य</string>
+    <string name="scene_orbit_x">कक्षा X</string>
+    <string name="scene_orbit_y">कक्षा Y</string>
+    <string name="scene_zoom">ज़ूम</string>
+    <string name="scene_light_directional">दिशात्मक प्रकाश</string>
+    <string name="scene_light_point">बिंदु प्रकाश</string>
+    <string name="scene_light_range">सीमा</string>
+    <string name="scene_light_shadows">छायाएँ</string>
+    <string name="scene_light_failed">प्रकाश नहीं बनाया जा सका।</string>
 </resources>

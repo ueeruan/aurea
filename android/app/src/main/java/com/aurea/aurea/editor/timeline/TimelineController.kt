@@ -90,6 +90,12 @@ internal class TimelineController(
     fun rowAt(list: List<RowModel>, i: Int): RowModel? =
         if (!state.compact) list.getOrNull(i) else compactRow(list)
 
+    fun rowHeight(row: RowModel): Float = timelineRowHeight(row, metrics.row, metrics.density)
+    fun rowTop(index: Int): Float = if (state.compact) 0f else timelineRowTop(rows.value, index, metrics.row, metrics.density)
+    fun rowIndexAt(y: Float): Int = if (state.compact) {
+        if (y < 0f) -1 else if (y < metrics.row) 0 else 1
+    } else timelineRowIndex(rows.value, y, metrics.row, metrics.density)
+
     private fun compactRow(list: List<RowModel>): RowModel? {
         val p = primaryId.value
         for (i in list.indices) if (list[i].id == p) return list[i]
@@ -103,7 +109,7 @@ internal class TimelineController(
     }
 
     private fun maxScroll(n: Int): Float =
-        max(0f, n * metrics.row + metrics.bottomPad - (state.height - metrics.rowsTop))
+        max(0f, rowTop(n) + metrics.bottomPad - (state.height - metrics.rowsTop))
 
     fun clampedScroll(n: Int): Float = if (state.compact) 0f else state.scrollY.coerceIn(0f, maxScroll(n))
 
@@ -207,19 +213,19 @@ internal class TimelineController(
         val list = rows.value
         val n = rowCount(list)
         val scroll = clampedScroll(n)
-        val i = floor((p.y - m.rowsTop + scroll) / m.row).toInt()
+        val i = rowIndexAt(p.y - m.rowsTop + scroll)
         if (i !in 0 until n) return hit
         val r = rowAt(list, i) ?: return hit
-        val top = m.rowsTop + i * m.row - scroll
+        val top = m.rowsTop + rowTop(i) - scroll
         val x0 = xOf(r.start)
         val x1 = max(xOf(r.end), x0 + m.barMinWidth)
         val handles = r.track == null && !state.compact && selectionSize() == 1 && isSelected(r.id) && !r.locked
         hit.kind = RowHit.hit(
-            m, p.x, p.y - top, state.width.toFloat(), x0, x1, handles, state.compact,
+            m, p.x, if (r.track == null) p.y - top else m.diamondCyNormal, state.width.toFloat(), x0, x1, handles, state.compact,
             keysEnabled = !multi(), instants = r.instants,
             view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,
         )
-        if (r.track != null && (hit.kind == HitKind.HEADER || hit.kind == HitKind.HEADER_EYE)) hit.kind = HitKind.BODY
+        if (r.track != null && hit.kind != HitKind.KEYFRAME) hit.kind = HitKind.BODY
         hit.row = r
         hit.rowIndex = i
         hit.keyIndex = hitOut[0]
@@ -685,7 +691,7 @@ internal class TimelineController(
         state.reorderTarget = index
         val released = dragLoop(down.id, down.position, horizontal = false) { p ->
             val n = rowCount(rows.value)
-            val t = Reorder.targetIndex(p.y, metrics.rowsTop, clampedScroll(n), metrics.row, n)
+            val t = rowIndexAt(p.y - metrics.rowsTop + clampedScroll(n)).coerceIn(0, maxOf(0, n - 1))
             if (t != state.reorderTarget) {
                 tick()
                 state.reorderTarget = t
@@ -877,8 +883,8 @@ internal class TimelineController(
         if (idx < 0) return
         val viewport = state.height - metrics.rowsTop
         if (viewport <= 0f) return
-        val top = idx * metrics.row
-        val bottom = top + metrics.row
+        val top = rowTop(idx)
+        val bottom = top + rowHeight(list[idx])
         val s = clampedScroll(list.size)
         val target = when {
             top < s -> top

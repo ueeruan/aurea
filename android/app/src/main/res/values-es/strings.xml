@@ -876,4 +876,26 @@ para editar la curva.</string>
     <string name="ai_limite_atingido">Usaste tus %1$d generaciones de IA de hoy. Vuelve mañana para generar más.</string>
     <string name="editor_marca_anterior_segure_inicio">Marca anterior; mantén para ir al inicio</string>
     <string name="editor_proxima_marca_segure_fim">Próxima marca; mantén para ir al final</string>
+    <string name="donation_title">Apoyar a Aurea</string>
+    <string name="donation_note">Donación opcional para mantener la app gratuita.</string>
+    <string name="donation_detail">Tú eliges si contribuir y cuánto. Todas las funciones siguen disponibles.</string>
+    <string name="donation_pix_qr">Código QR Pix de Ruan Pablo</string>
+    <string name="donation_copy_pix">Copiar Pix</string>
+    <string name="donation_paypal">Donar con PayPal</string>
+    <string name="donation_copy_paypal">Copiar enlace de PayPal</string>
+    <string name="donation_export_note">La exportación continúa. Usa el código o enlace cuando termine.</string>
+    <string name="donation_copied">Copiado al portapapeles.</string>
+    <string name="ai_upscale_title">Escalado de vídeo con IA</string>
+    <string name="ai_upscale_note">Modelo para anime e ilustración. Procesa por bloques sin bloquear la interfaz. La resolución elegida abajo es la calidad final.</string>
+    <string name="ai_upscale_dimensions">IA %1$dx · entrada %2$d × %3$d → salida %4$d × %5$d</string>
+    <string name="licenses_title">Licencias · IA</string>
+    <string name="scene_workspace">Escena 3D</string>
+    <string name="scene_orbit_x">Órbita X</string>
+    <string name="scene_orbit_y">Órbita Y</string>
+    <string name="scene_zoom">Zoom</string>
+    <string name="scene_light_directional">Luz direccional</string>
+    <string name="scene_light_point">Luz puntual</string>
+    <string name="scene_light_range">Alcance</string>
+    <string name="scene_light_shadows">Sombras</string>
+    <string name="scene_light_failed">No se pudo crear la luz.</string>
 </resources>

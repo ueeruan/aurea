@@ -428,6 +428,25 @@ struct Color {
         case Interpolation::EaseOut:   return 1.0f - (1.0f-t)*(1.0f-t);
         case Interpolation::EaseInOut: return t < 0.5f ? 2.0f*t*t
                                                        : 1.0f - 2.0f*(1.0f-t)*(1.0f-t);
+        case Interpolation::Bounce: {
+            if (t <= 0.f) return 0.f;
+            if (t >= 1.f) return 1.f;
+            if (t < 0.5f) return 4.f*t*t;
+            // Three shrinking ballistic rebounds after the first landing.
+            const f32 start = t < 0.75f ? 0.5f : (t < 0.9f ? 0.75f : 0.9f);
+            const f32 span = t < 0.75f ? 0.25f : (t < 0.9f ? 0.15f : 0.1f);
+            const f32 height = t < 0.75f ? 0.25f : (t < 0.9f ? 0.0625f : 0.015625f);
+            const f32 u = (t-start)/span;
+            return 1.f - 4.f*height*u*(1.f-u);
+        }
+        case Interpolation::Elastic: {
+            if (t <= 0.f) return 0.f;
+            if (t >= 1.f) return 1.f;
+            // Damped oscillator, normalized to land exactly on the endpoint.
+            return (1.f-std::exp(-6.f*t)*std::cos(6.f*kPi*t))/(1.f-std::exp(-6.f));
+        }
+        case Interpolation::Steps:
+            return std::floor(clampf(t, 0.f, 1.f)*4.f)*0.25f;
         case Interpolation::Bezier:
         case Interpolation::CustomCurve:
             return cubic_bezier(bx1, by1, bx2, by2, t);

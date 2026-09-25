@@ -225,3 +225,30 @@ AUREA_TEST(Track, BezierRandomReverseSeekPreservesCurveAndOvershoot) {
         }
     }
 }
+
+AUREA_TEST(Track, BounceElasticAndFourStepsHaveRealDistinctMotion) {
+    static_assert(static_cast<u8>(Interpolation::CustomCurve) == 6);
+    static_assert(static_cast<u8>(Interpolation::Bounce) == 7);
+    static_assert(static_cast<u8>(Interpolation::Steps) == 9);
+    Track t; t.set(FrameIndex{0}, 10.f); t.set(FrameIndex{1000}, 110.f);
+    for (auto mode : {Interpolation::Bounce, Interpolation::Elastic, Interpolation::Steps}) {
+        t.set_interpolation(FrameIndex{0}, mode, .33f, 0.f, .67f, 1.f);
+        AUREA_CHECK_NEAR(t.sample(FrameIndex{0}), 10.f, 1e-6);
+        AUREA_CHECK_NEAR(t.sample(FrameIndex{1000}), 110.f, 1e-6);
+        for (int frame = 0; frame <= 1000; ++frame)
+            AUREA_CHECK(std::isfinite(t.sample(FrameIndex{frame})));
+        if (mode == Interpolation::Bounce) {
+            AUREA_CHECK_NEAR(t.sample(FrameIndex{500}), 110.f, 1e-4);
+            AUREA_CHECK_NEAR(t.sample(FrameIndex{625}), 85.f, 1e-4);
+            AUREA_CHECK(t.sample(FrameIndex{825}) > t.sample(FrameIndex{625}));
+        } else if (mode == Interpolation::Elastic) {
+            AUREA_CHECK(t.sample(FrameIndex{160}) > 140.f);
+            AUREA_CHECK(t.sample(FrameIndex{330}) < 100.f);
+        } else {
+            AUREA_CHECK_NEAR(t.sample(FrameIndex{249}), 10.f, 1e-6);
+            AUREA_CHECK_NEAR(t.sample(FrameIndex{250}), 35.f, 1e-6);
+            AUREA_CHECK_NEAR(t.sample(FrameIndex{749}), 60.f, 1e-6);
+            AUREA_CHECK_NEAR(t.sample(FrameIndex{750}), 85.f, 1e-6);
+        }
+    }
+}

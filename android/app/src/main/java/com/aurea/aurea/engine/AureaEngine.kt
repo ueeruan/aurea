@@ -406,6 +406,10 @@ class AureaEngine private constructor() {
     fun queryObjectEnvironment(layer: Long, out: FloatArray): Boolean =
         nativeQueryObjectEnvironment(nativeHandle, layer, out)
 
+    fun queryMaterials(layer: Long): FloatArray = nativeQueryMaterials(nativeHandle, layer)
+    fun setMaterialParam(layer: Long, material: Int, param: Int, value: Float): Boolean =
+        nativeSetMaterialParam(nativeHandle, layer, material, param, value)
+
     // Pré-composição.
     fun precompose(ids: LongArray): Long = nativePrecompose(nativeHandle, ids)
     fun openPrecomp(layer: Long): Boolean = nativeOpenPrecomp(nativeHandle, layer)
@@ -591,6 +595,13 @@ class AureaEngine private constructor() {
     fun detectBeats(layer: Long, bpm: DoubleArray): Long = nativeDetectBeats(nativeHandle, layer, bpm)
 
     /** Nulo 2D ou 3D no centro. Id ≥ 0 ou −Errc. */
+    fun setSceneEditor(enabled: Boolean, yaw: Float, pitch: Float, distance: Float) = nativeSetSceneEditor(nativeHandle, enabled, yaw, pitch, distance)
+    fun sceneGuides(output: FloatArray): Int = nativeSceneGuides(nativeHandle, output)
+    fun layoutTransform(layer: Long, property: Int, value: Float): Boolean = nativeLayoutTransform(nativeHandle, layer, property, value)
+    fun addLight(kind: Int): Long = nativeAddLight(nativeHandle, kind)
+    fun lightInfo(layer: Long): FloatArray? = FloatArray(10).takeIf { nativeLightInfo(nativeHandle, layer, it) }
+    fun setLightParam(layer: Long, param: Int, value: Float): Boolean = nativeSetLightParam(nativeHandle, layer, param, value)
+    fun addCamera(): Long = nativeAddCamera(nativeHandle)
     fun addNull(threeD: Boolean): Long = nativeAddNull(nativeHandle, threeD)
 
     /** Congela o quadro do clipe no `frame` por `holdFrames`; o resto anda. Id ≥ 0 ou −Errc. */
@@ -624,8 +635,8 @@ class AureaEngine private constructor() {
      * `fps` 0 = o da composição, `codec` 0 = H.264 / 1 = HEVC, `bitrateMbps` 0 =
      * automático. Devolve o código de erro do motor (0 = começou).
      */
-    fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int): Int =
-        nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps)
+    fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int = 0): Int =
+        nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale)
     fun cancelExport(): Int = nativeCancelExport(nativeHandle)
 
     /**
@@ -703,6 +714,13 @@ class AureaEngine private constructor() {
     private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
     private external fun nativeAddShape(handle: Long, preset: Int): Long
+    private external fun nativeSetSceneEditor(handle: Long, enabled: Boolean, yaw: Float, pitch: Float, distance: Float)
+    private external fun nativeSceneGuides(handle: Long, output: FloatArray): Int
+    private external fun nativeLayoutTransform(handle: Long, layer: Long, property: Int, value: Float): Boolean
+    private external fun nativeAddLight(handle: Long, kind: Int): Long
+    private external fun nativeLightInfo(handle: Long, layer: Long, output: FloatArray): Boolean
+    private external fun nativeSetLightParam(handle: Long, layer: Long, param: Int, value: Float): Boolean
+    private external fun nativeAddCamera(handle: Long): Long
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
@@ -797,6 +815,8 @@ class AureaEngine private constructor() {
     private external fun nativeQueryEnvironment(handle: Long, out: FloatArray): Boolean
     private external fun nativeSetObjectEnvironment(handle: Long, layer: Long, source: Int, hdri: Long, intensity: Float, rotation: Float, exposure: Float): Boolean
     private external fun nativeQueryObjectEnvironment(handle: Long, layer: Long, out: FloatArray): Boolean
+    private external fun nativeQueryMaterials(handle: Long, layer: Long): FloatArray
+    private external fun nativeSetMaterialParam(handle: Long, layer: Long, material: Int, param: Int, value: Float): Boolean
     private external fun nativeOpenPrecomp(handle: Long, layer: Long): Boolean
     private external fun nativeClosePrecomp(handle: Long): Boolean
     private external fun nativePrecompDepth(handle: Long): Int
@@ -838,7 +858,7 @@ class AureaEngine private constructor() {
     private external fun nativeLoadNotice(handle: Long): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int
-    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int): Int
+    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int): Int
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>): Long
     private external fun nativeImportModelProgress(handle: Long): Int

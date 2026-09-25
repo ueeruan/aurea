@@ -6,6 +6,70 @@ new request. Existing features must be checked against the requested behavior.
 
 ## Verified work and remaining scope
 
+### Build 2110 working checkpoint — user bug reports and revised curve reference
+
+- Autosave now initializes Android's native file path at creation, persists
+  empty projects, ignores cursor-only changes for debounce, and saves pending
+  changes before closing. Android force-stop/reopen tests preserved both an
+  added layer and deletion of the last layer.
+- Native Android export corrected double application of encoded-packet offsets.
+  Error progress preserves platform details. Actual H.264 landscape/portrait
+  1080p+AAC and HEVC720p exports passed, including nonzero-offset remux and
+  independently decoded video/audio equivalence.
+- Time Remap commands, queries and interpolation now use the canonical remap
+  track. Legacy tracks migrate with preserved recovery data. Graph controls live
+  in the effect, not the video's speed panel; compact timeline children show
+  labels/keyframes/curves. iOS effect insertion waits for actual insertion before
+  closing the browser. Native iOS acceptance is still pending.
+- Shared 3D includes creatable cameras/lights, null-depth keys, per-instance
+  materials, static scene assembly with preview-only observer camera, and
+  serialization validation. New text3D is static. A scene field formatting bug
+  changed typed1100 to11000; focused numeric drafts now remain stable on both
+  platforms. Native field QA is pending the updated APK.
+- Real-ESRGAN animevideov3 runs in the shared core with bounded tiled2x/4x
+  inference and cancellation, connected to actual video export including audio.
+  This model targets anime/illustration; CPU performance and independent-frame
+  flicker remain limitations. No general-photo/temporal model or GPU inference
+  claim is made.
+- Home and optional settings/export donations implemented on Android/iOS. The
+  actual Android QR decodes to the user's exact Pix payload. No payment started.
+- Consolidated host: **721 tests /4,554,235 checks /0 failures**,
+  `engine/build/host/full-post-heartbeat-test.log` (before the additional easing
+  families below). Native GLES: **182 tests /872,788 checks /0 failures**,
+  `engine/build/android-p0/native-full-2110.log`; real MediaCodec and VFR proxy
+  opt-ins passed separately. Debug/JVM: **99 tests /0 failures**,
+  `engine/build/android-p0/2110-debug-regression.log`.
+- User supplied a new curve-editor screenshot after the first full-screen
+  design. Current work replaces default full-screen presentation with the
+  reference's timeline-adjacent panel, green curve, white handles and preset
+  rails, preserving larger hit targets. Real Bounce/Elastic/Steps families passed
+  3 host tests/3,351 checks and 1 native GLES test/21 checks. Latest layout/native numeric
+  fields still need emulator QA and final packaging.
+- Build number2110 is set on both platforms. One preliminary Android32 release
+  build passed (`2110-release-32.log`), but it predates the revised graph and
+  is **not** the final deliverable. iOS CI and final32/64/IPA packaging remain.
+- Reference-layout debug build passed in 1m22 with102 JVM tests. The optional
+  expanded iOS menu and unsupported-inversion states were corrected afterward;
+  their last focused JVM check remains for the final build.
+- Actual app neural export completed63 frames at2x and published320x180 H.264
+  21fps/3.00s to MediaStore. FFmpeg decoded the complete file without errors
+  (`ai-app-export-decode.log`). This fixture has no audio; audio retention was
+  independently checked by the shared export regression.
+- A new user screenshot shows missing-glyph boxes when choosing Samsung's
+  SECGujarati font. Font fallback is under investigation in Text.cpp/test_text;
+  those files are intentionally excluded from this checkpoint until tested.
+- The user explicitly cancelled recurring automation
+  `aurea-implementa-o-e-paridade`; it was deleted in the app. Continue only this
+  active task. Do not recreate the automation.
+
+Evidence and limits are detailed in `P10_EXPORT_PACKETS_AND_AUTOSAVE_2026-09-25.md`,
+`P9_NEURAL_UPSCALE_2026-09-25.md`, `P3_CAMERA_NULL_UI_2026-09-25.md`,
+`P2_GRAPH_EDITOR_2026-09-25.md`, `P5_TIME_REMAP_EFFECT_2026-09-25.md` and
+`P10_GLITCHIFY_2026-09-25.md`. Physical low-end/thermal, native iOS runtime,
+real-footage tracking/flow/particle acceptance and live generation-service tests
+remain open. The Android quality-resize complaint has not been reproduced in
+the tested cases; do not call it conclusively resolved.
+
 ### Latest verified checkpoint (supersedes the older table below)
 
 - Automatic preview proxies are implemented with native background encoding,

@@ -241,3 +241,46 @@ AUREA_TEST(Transform3D, ThreeAxisRotationKeysAsOneInstant) {
     AUREA_CHECK(std::fabs(meio.rotation[0] - 36.0f) < 2.0f);
     AUREA_CHECK(std::fabs(meio.rotation[1] - 24.0f) < 1e-3f);
 }
+
+AUREA_TEST(Transform3D, SceneLayoutPreservesAnimationAndHandlesZeroScale) {
+    Rig rig; AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    auto& e = rig.e;
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto* layer = comp->layer(rig.id);
+    editar(e, rig.id, TrackProperty::PositionZ, FrameIndex{0}, 30);
+    editar(e, rig.id, TrackProperty::PositionZ, FrameIndex{30}, 90);
+    seek(e, 0);
+    Command c; c.type = CommandType::LayerLayoutTransform;
+    c.shape_param = ShapeParamPayload{rig.id, 2, 50};
+    AUREA_CHECK(e.apply_command(c).ok());
+    AUREA_CHECK(std::fabs(detalhe(e, rig.id.pack()).position[2] - 50) < .001f);
+    seek(e, 30);
+    AUREA_CHECK(std::fabs(detalhe(e, rig.id.pack()).position[2] - 110) < .001f);
+    AUREA_CHECK_EQ(layer->tracks.find(TrackProperty::PositionZ)->keys.size(), 2u);
+    c.shape_param = ShapeParamPayload{rig.id, 6, 35};
+    AUREA_CHECK(e.apply_command(c).ok());
+    AUREA_CHECK(layer->tracks.find(TrackProperty::RotationX) == nullptr);
+    editar(e, rig.id, TrackProperty::ScaleX, FrameIndex{0}, 1);
+    editar(e, rig.id, TrackProperty::ScaleX, FrameIndex{30}, 2);
+    c.shape_param = ShapeParamPayload{rig.id, 3, 4};
+    AUREA_CHECK(e.apply_command(c).ok());
+    seek(e, 0);
+    AUREA_CHECK(std::fabs(detalhe(e, rig.id.pack()).scale[0] - 2) < .001f);
+    editar(e, rig.id, TrackProperty::ScaleY, FrameIndex{0}, 0);
+    editar(e, rig.id, TrackProperty::ScaleY, FrameIndex{30}, 1);
+    c.shape_param = ShapeParamPayload{rig.id, 4, 2};
+    AUREA_CHECK(e.apply_command(c).ok());
+    seek(e, 30);
+    AUREA_CHECK(std::fabs(detalhe(e, rig.id.pack()).scale[1] - 3) < .001f);
+    const auto camera = e.add_camera(); AUREA_CHECK(camera.ok());
+    const auto null = e.add_null(true); AUREA_CHECK(null.ok());
+    f32 guides[1280]{};
+    e.set_scene_editor(true, -30, 20, 3);
+    const u32 count = e.query_scene_guides(guides, 256);
+    AUREA_CHECK(count >= 20);
+    bool cameraFound = false, nullFound = false;
+    for (u32 i = 0; i < count; ++i) { cameraFound |= guides[i * 5 + 4] == 1; nullFound |= guides[i * 5 + 4] == 2; }
+    AUREA_CHECK(cameraFound); AUREA_CHECK(nullFound);
+    e.set_scene_editor(false, 0, 0, 3);
+    AUREA_CHECK_EQ(e.query_scene_guides(guides, 256), 0u);
+}

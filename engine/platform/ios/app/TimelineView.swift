@@ -128,7 +128,7 @@ struct TimelineView: View {
         TimeAxis.frameAt(x: x, view: viewFrame, pxPerFrame: ppf, centerX: width / 2)
     }
     private func maxScroll(_ height: CGFloat) -> CGFloat {
-        compact ? 0 : max(0, CGFloat(rows.count) * m.row + m.bottomPad - (height - m.rowsTop))
+        compact ? 0 : max(0, rowTop(rows.count) + m.bottomPad - (height - m.rowsTop))
     }
 
     var body: some View {
@@ -252,14 +252,14 @@ struct TimelineView: View {
         c.clip(to: Path(CGRect(x: 0, y: m.rowsTop, width: size.width, height: max(0, size.height - m.rowsTop))))
         let visibleRows = rows
         for (index, row) in visibleRows.enumerated() {
-            let top = m.rowsTop + CGFloat(index) * m.row - (compact ? 0 : scrollY)
-            if top + m.row < m.rowsTop || top > size.height { continue }
+            let top = m.rowsTop + rowTop(index) - (compact ? 0 : scrollY)
+            if top + rowHeight(row) < m.rowsTop || top > size.height { continue }
             drawRow(&c, row: row, top: top, width: size.width)
         }
         if reorderSource >= 0 {
-            let top = m.rowsTop + CGFloat(reorderSource) * m.row - scrollY
+            let top = m.rowsTop + rowTop(reorderSource) - scrollY
             c.fill(Path(CGRect(x: 0, y: top, width: size.width, height: m.row)), with: .color(AureaColors.accent.opacity(0.14)))
-            let y = Reorder.dropLineY(source: reorderSource, target: reorderTarget, rowsTop: m.rowsTop, scroll: scrollY, rowHeight: m.row)
+            let y = reorderTarget < 0 || reorderSource == reorderTarget ? CGFloat.nan : m.rowsTop + rowTop(reorderTarget + (reorderTarget > reorderSource ? 1 : 0)) - scrollY
             if y.isFinite {
                 c.fill(Path(CGRect(x: 0, y: y - m.reorderLine / 2, width: size.width, height: m.reorderLine)), with: .color(AureaColors.accent))
                 c.fill(Path(ellipseIn: CGRect(x: m.pillLeft - m.reorderDot, y: y - m.reorderDot, width: m.reorderDot * 2, height: m.reorderDot * 2)), with: .color(AureaColors.accent))
@@ -268,7 +268,7 @@ struct TimelineView: View {
         let shade = Gradient(stops: [.init(color: AureaColors.stage, location: 0), .init(color: AureaColors.stage.opacity(0.95), location: 0.78), .init(color: AureaColors.stage.opacity(0), location: 1)])
         c.fill(Path(CGRect(x: 0, y: m.rowsTop, width: m.headerColumn, height: max(0, size.height - m.rowsTop))), with: .linearGradient(shade, startPoint: .zero, endPoint: CGPoint(x: m.headerColumn, y: 0)))
         for (index, row) in visibleRows.enumerated() {
-            let cy = m.rowsTop + CGFloat(index) * m.row - (compact ? 0 : scrollY) + m.row / 2
+            let cy = m.rowsTop + rowTop(index) - (compact ? 0 : scrollY) + rowHeight(row) / 2
             guard cy + m.row / 2 >= m.rowsTop && cy - m.row / 2 <= size.height else { continue }
             if row.track != nil {
                 glyph(&c, CupertinoGlyph.ChevronRight, size: 10, tint: .white.opacity(0.6), x: m.swatchLeft + m.swatch / 2, y: cy)
@@ -294,6 +294,16 @@ struct TimelineView: View {
     }
 
     private func drawRow(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, width: CGFloat) {
+        if row.track != nil {
+            var line = Path(); line.move(to: CGPoint(x: m.headerColumn, y: top + 20)); line.addLine(to: CGPoint(x: width, y: top + 20))
+            context.stroke(line, with: .color(.white.opacity(0.08)), lineWidth: 1)
+            let label = context.resolve(Text(row.name).font(.aurea(size: 11)).foregroundColor(AureaColors.muted))
+            var title = context
+            title.clip(to: Path(CGRect(x: m.headerColumn + 4, y: top, width: max(0, width - m.headerColumn - 8), height: 16)))
+            title.draw(label, at: CGPoint(x: m.headerColumn + 4, y: top), anchor: .topLeading)
+            drawKeys(&context, row: row, top: top + 20 - m.diamondCyNormal, width: width)
+            return
+        }
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
         let selected = model.selection.contains(row.id)
         if x1 >= -m.barRadius && x0 <= width + m.barRadius {
@@ -449,8 +459,8 @@ struct TimelineView: View {
     private func refreshMedia(size: CGSize) {
         guard size.width > 0 && size.height > 0 else { return }
         thumbCache.beginFrame(6)
-        let first = max(0, Int(scrollY / m.row))
-        let visible = rows.dropFirst(first).prefix(Int(size.height / m.row) + 2)
+        let first = max(0, rowIndex(scrollY))
+        let visible = rows.dropFirst(first).prefix(Int(size.height / 28) + 2)
         var next: [Int64: [MediaTile]] = [:], nextWaves: [Int64: TimelineWaveStrip.Entry] = [:]
         for row in visible where row.track == nil {
             let x0 = x(Double(row.start), width: size.width), x1 = max(x(Double(row.end), width: size.width), x0 + m.barMinWidth)
@@ -485,17 +495,29 @@ struct TimelineView: View {
     }
 
     // MARK: Android controller and hit priorities
+    private func rowHeight(_ row: TimelineRow) -> CGFloat { row.track == nil ? m.row : 28 }
+    private func rowTop(_ index: Int) -> CGFloat { rows.prefix(max(0, index)).reduce(0) { $0 + rowHeight($1) } }
+    private func rowIndex(_ y: CGFloat) -> Int {
+        guard y >= 0 else { return -1 }
+        var bottom: CGFloat = 0
+        for (index, row) in rows.enumerated() {
+            bottom += rowHeight(row)
+            if y < bottom { return index }
+        }
+        return rows.count
+    }
+
     private func hit(_ point: CGPoint, width: CGFloat) -> (TimelineRow?, TimelineHit) {
         if point.y < m.rowsTop { return (nil, TimelineHit(kind: .ruler)) }
-        let index = Int(floor((point.y - m.rowsTop + (compact ? 0 : scrollY)) / m.row))
+        let index = rowIndex(point.y - m.rowsTop + (compact ? 0 : scrollY))
         let current = rows
         guard current.indices.contains(index) else { return (nil, TimelineHit(kind: .none)) }
         let row = current[index]
-        let y = point.y - m.rowsTop - CGFloat(index) * m.row + (compact ? 0 : scrollY)
+        let y = point.y - m.rowsTop - rowTop(index) + (compact ? 0 : scrollY)
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
         let handles = row.track == nil && !compact && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
-        var result = TimelineHit.test(m, point: CGPoint(x: point.x, y: y), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: row.instants, view: viewFrame, ppf: ppf)
-        if row.track != nil && (result.kind == .header || result.kind == .eye) { result = TimelineHit(kind: .body) }
+        var result = TimelineHit.test(m, point: CGPoint(x: point.x, y: row.track == nil ? y : m.diamondCyNormal), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: row.instants, view: viewFrame, ppf: ppf)
+        if row.track != nil && result.kind != .key { result = TimelineHit(kind: .body) }
         return (row, result)
     }
     private func tap(_ point: CGPoint, width: CGFloat) {
@@ -527,7 +549,7 @@ struct TimelineView: View {
             if let track = row.track {
                 model.select(layerId: row.id, additive: false)
                 switch track.property {
-                case 30: model.openPanel(.speed)
+                case 30: model.openPanel(.effects)
                 case 31:
                     model.openPanel(.effects)
                     model.loadParams(layerId: row.id, effectId: track.effect)
@@ -536,6 +558,7 @@ struct TimelineView: View {
                 case 34: model.openPanel(.vector)
                 case 35: model.openPanel(.shape)
                 case 36: model.openPanel(.particles)
+                case 37: model.openPanel(.layer3D)
                 default: model.openPanel(.transform)
                 }
                 return
@@ -659,7 +682,7 @@ struct TimelineView: View {
         case .scroll:
             scrollY = min(maxScroll(size.height), max(0, g.scroll - (point.y - g.start.y)))
         case .reorder:
-            reorderTarget = Reorder.targetIndex(y: point.y, rowsTop: m.rowsTop, scroll: scrollY, rowHeight: m.row, count: rows.count)
+            reorderTarget = min(max(0, rowIndex(point.y - m.rowsTop + scrollY)), max(0, rows.count - 1))
         case .move:
             guard let row = g.row, let earliest = g.selection.map(\.startFrame).min(), let latest = g.selection.map(\.endFrame).max() else { return }
             let desired = timelineFrame(Double(row.start) + delta)
@@ -768,7 +791,7 @@ struct TimelineView: View {
     }
     private func revealSelection(size: CGSize) {
         guard !compact, gesture == nil, let id = model.primarySelection, let index = rows.firstIndex(where: { $0.id == id }) else { return }
-        let top = CGFloat(index) * m.row, bottom = top + m.row
+        let top = rowTop(index), bottom = top + rowHeight(rows[index])
         let visibleHeight = max(0, size.height - m.rowsTop)
         if top < scrollY { scrollY = top }
         else if bottom > scrollY + visibleHeight { scrollY = min(maxScroll(size.height), max(0, bottom - visibleHeight)) }

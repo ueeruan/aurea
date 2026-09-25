@@ -13,7 +13,11 @@ struct ExportView: View {
     @State private var cancelled = false
     @State private var sharing = false
     @State private var viewing = false
-    private let resolutions: [UInt32] = [720, 1080, 1440, 2160]
+    private var resolutions: [UInt32] {
+        let standard: [UInt32] = [720, 1080, 1440, 2160]
+        let neural = min(model.compositionWidth, model.compositionHeight) * model.exportOptions.aiUpscale
+        return neural > 0 ? Array(Set(standard + [neural])).sorted() : standard
+    }
     private var seconds: Double { Double(model.compositionDuration) / max(1, model.compositionFps) }
     private var fps: Double { model.exportOptions.fps > 0 ? model.exportOptions.fps : model.compositionFps }
     private var codec: String { model.exportOptions.codec == .hevc ? "HEVC" : "H.264" }
@@ -41,6 +45,7 @@ struct ExportView: View {
                             if attempted, let notice = failureNotice { noticeView(notice, danger: !cancelled) }
                             options
                         }
+                        DonationCard(exporting: model.exporting)
                         Spacer().frame(height: 24)
                     }.padding(.horizontal, 18)
                 }
@@ -93,6 +98,21 @@ struct ExportView: View {
     }
     private var options: some View {
         VStack(alignment: .leading, spacing: 0) {
+            section("ai_upscale_title")
+            let off = AureaText.t("common_off")
+            chips([off, "2×", "4×"], selected: model.exportOptions.aiUpscale == 0 ? off : "\(model.exportOptions.aiUpscale)×") { label in
+                let factor: UInt32 = label == "2×" ? 2 : label == "4×" ? 4 : 0
+                model.exportOptions.aiUpscale = factor
+                let short = min(model.compositionWidth, model.compositionHeight)
+                model.exportOptions.shortSide = factor > 0 ? short * factor : min(1080, max(720, short))
+            }
+            if model.exportOptions.aiUpscale > 0 {
+                Text(AureaText.t("ai_upscale_note")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.top, 8)
+                let scale = model.exportOptions.aiUpscale
+                Text(AureaText.t("ai_upscale_dimensions", Int(scale), Int(((outputSize.0 + scale*2-1)/(scale*2))*2),
+                                Int(((outputSize.1 + scale*2-1)/(scale*2))*2), Int(outputSize.0), Int(outputSize.1)))
+                    .font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+            }
             section("editor_resolucao")
             chips(resolutions.map(resolutionLabel), selected: blocked.contains(model.exportOptions.shortSide) ? nil : resolutionLabel(model.exportOptions.shortSide),
                   disabled: Set(blocked.map(resolutionLabel))) { picked in
@@ -253,6 +273,9 @@ struct ExportView: View {
     private var progressNotice: String {
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
+        if model.exportOptions.aiUpscale > 0, let message = model.exportProgress["message"] as? String, message.hasPrefix("IA:") {
+            notices.append(message)
+        }
         if flags & AureaExportFlag.softwareEncoder.rawValue != 0 {
             notices.append("Este aparelho não tem encoder de hardware \(codec) para esta resolução: exportando por software (mais lento, mesma qualidade).")
         }

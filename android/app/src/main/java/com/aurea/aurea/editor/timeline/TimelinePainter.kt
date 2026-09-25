@@ -198,8 +198,8 @@ internal class TimelinePainter(
     ) {
         val st = c.state
         val scroll = c.clampedScroll(n)
-        val first = max(0, floor(scroll / m.row).toInt())
-        val last = min(n - 1, floor((scroll + h - m.rowsTop) / m.row).toInt())
+        val first = max(0, c.rowIndexAt(scroll))
+        val last = min(n - 1, c.rowIndexAt(scroll + h - m.rowsTop))
         val selCount = c.selectionSize()
         val multi = selCount >= 2
         val selKey = c.store.selectedKeyframe
@@ -208,7 +208,7 @@ internal class TimelinePainter(
 
         for (i in first..last) {
             val r = c.rowAt(rows, i) ?: continue
-            val top = m.rowsTop + i * m.row - scroll
+            val top = m.rowsTop + c.rowTop(i) - scroll
             val selected = c.isSelected(r.id)
             val handles = !compact && selCount == 1 && selected && !r.locked
             val selFrame = if (selKey != null && selKey.first == r.id && (r.track == null || r.track == TimelineTrack(selKey.second.property, selKey.second.effectIndex, selKey.second.paramIndex))) Keyframes.toTimeline(selKey.second.time, r.start, r.offset) else Snap.NONE
@@ -219,9 +219,9 @@ internal class TimelinePainter(
         // Reordenar: véu na linha segurada + traço de destino (a linha não sai do lugar).
         val src = st.reorderSource
         if (src >= 0) {
-            val srcTop = m.rowsTop + src * m.row - scroll
+            val srcTop = m.rowsTop + c.rowTop(src) - scroll
             drawRect(AureaColors.Accent.copy(alpha = 0.14f), Offset(0f, srcTop), Size(w, m.row))
-            val y = Reorder.dropLineY(src, st.reorderTarget, m.rowsTop, scroll, m.row)
+            val y = if (st.reorderTarget < 0 || st.reorderTarget == src) Float.NaN else m.rowsTop + c.rowTop(st.reorderTarget + if (st.reorderTarget > src) 1 else 0) - scroll
             if (!y.isNaN()) {
                 drawRect(AureaColors.Accent, Offset(0f, y - m.reorderLine / 2f), Size(w, m.reorderLine))
                 drawCircle(AureaColors.Accent, m.reorderDot, Offset(m.pillLeft, y))
@@ -232,7 +232,8 @@ internal class TimelinePainter(
         drawRect(headerShade, Offset(0f, m.rowsTop), Size(m.headerColumn, h - m.rowsTop))
         for (i in first..last) {
             val r = c.rowAt(rows, i) ?: continue
-            val cy = m.rowsTop + i * m.row - scroll + m.row / 2f
+            val cy = m.rowsTop + c.rowTop(i) - scroll + c.rowHeight(r) / 2f
+            if (r.track != null) continue
             drawHeaderPill(r, cy, multi && c.isSelected(r.id), c.expandedLayer.value == r.id)
         }
 
@@ -251,6 +252,18 @@ internal class TimelinePainter(
         compact: Boolean, selected: Boolean, multi: Boolean, handles: Boolean,
         selFrame: Int, dragFrame: Int, cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
     ) {
+        if (r.track != null) {
+            val cy = top + 20f * m.density
+            drawLine(Color.White.copy(alpha = 0.08f), Offset(m.headerColumn, cy), Offset(w, cy))
+            drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps)
+            val labelWidth = min(w - m.headerColumn - 8f * m.density, 240f * m.density)
+            if (labelWidth > 0f) {
+                val label = nameLayout(r, labelWidth)
+                val left = m.headerColumn + 4f * m.density
+                drawText(label, topLeft = Offset(left, top))
+            }
+            return
+        }
         val x0 = TimeAxis.xOf(r.start.toDouble(), view, ppf, cx)
         val x1 = max(TimeAxis.xOf(r.end.toDouble(), view, ppf, cx), x0 + m.barMinWidth)
         val barW = x1 - x0
@@ -717,7 +730,8 @@ internal class TimelinePainter(
     private fun nameLayout(r: RowModel, availPx: Float): TextLayoutResult {
         val step = NAME_STEP_DP * m.density
         val bucket = (availPx / step).toInt()
-        val cached = names.get(r.id)
+        val cacheKey = if (r.track == null) r.id else r.id xor (r.track.hashCode().toLong() shl 32)
+        val cached = names.get(cacheKey)
         if (cached != null && cached.bucket == bucket && cached.name == r.name) return cached.layout
         val layout = measurer.measure(
             text = r.name,
@@ -728,7 +742,7 @@ internal class TimelinePainter(
             constraints = Constraints(maxWidth = max(1, (bucket * step).toInt())),
         )
         if (names.size() > NAME_CACHE) names.clear()
-        names.put(r.id, NameLayout(r.name, bucket, layout))
+        names.put(cacheKey, NameLayout(r.name, bucket, layout))
         return layout
     }
 

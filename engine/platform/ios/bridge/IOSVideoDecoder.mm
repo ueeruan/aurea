@@ -213,7 +213,8 @@ private:
     bool suspended_ = false;
     bool tenBit_ = false;
     bool fullRange_ = false;
-    std::vector<i64> presentationTimes_;
+    struct PresentationTime { i64 us; CMTime exact; };
+    std::vector<PresentationTime> presentationTimes_;
     bool timingIndexed_ = false;
 };
 
@@ -279,15 +280,15 @@ bool AVFoundationVideoDecoder::build_timing_index() noexcept {
     if (!indexReader || ![indexReader canAddOutput:references]) return false;
     [indexReader addOutput:references];
     if (![indexReader startReading]) return false;
-    std::vector<i64> times;
+    std::vector<PresentationTime> times;
     while (CMSampleBufferRef sample = [references copyNextSampleBuffer]) {
         const CMTime time = CMSampleBufferGetPresentationTimeStamp(sample);
-        if (CMTIME_IS_NUMERIC(time)) times.push_back(us_of(time));
+        if (CMTIME_IS_NUMERIC(time)) times.push_back({us_of(time), time});
         CFRelease(sample);
     }
     if (indexReader.status != AVAssetReaderStatusCompleted || times.empty()) return false;
-    std::sort(times.begin(), times.end());
-    times.erase(std::unique(times.begin(), times.end()), times.end());
+    std::sort(times.begin(), times.end(), [](const auto& a, const auto& b) { return CMTimeCompare(a.exact, b.exact) < 0; });
+    times.erase(std::unique(times.begin(), times.end(), [](const auto& a, const auto& b) { return CMTimeCompare(a.exact, b.exact) == 0; }), times.end());
     presentationTimes_ = std::move(times);
     timingIndexed_ = true;
     return true;
@@ -324,12 +325,19 @@ bool AVFoundationVideoDecoder::start_reader(i64 fromUs) noexcept {
         // Seek to the sample that actually covers the requested time. Subtracting
         // one nominal frame misses long VFR samples that began much earlier.
         i64 begin = 0;
+        CMTime exactBegin = kCMTimeZero;
         if (start > 0) {
             if (!build_timing_index()) return false;
-            const auto after = std::upper_bound(presentationTimes_.begin(), presentationTimes_.end(), start);
-            if (after != presentationTimes_.begin()) begin = *(after - 1);
+            const auto after = std::upper_bound(presentationTimes_.begin(), presentationTimes_.end(), start,
+                [](i64 us, const PresentationTime& sample) { return us < sample.us; });
+            if (after != presentationTimes_.begin()) {
+                begin = (after - 1)->us;
+                exactBegin = (after - 1)->exact;
+            }
         }
-        reader.timeRange = CMTimeRangeMake(cm_time_us(begin), kCMTimePositiveInfinity);
+        // Rounding a rational PTS to microseconds can move the range start
+        // beyond the requested sample (e.g. 2/3s -> 666667us), excluding it.
+        reader.timeRange = CMTimeRangeMake(exactBegin, kCMTimePositiveInfinity);
         if (![reader startReading]) {
             AUREA_LOG_ERROR("videotoolbox: reader nao comecou (%s)", reader.error.localizedDescription.UTF8String);
             return false;
@@ -358,8 +366,16 @@ Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 deliv
     if (!CMTIME_IS_NUMERIC(pts)) return Status{Errc::DecodeFailed, "timestamp de video invalido"};
     outPtsUs = us_of(pts);
     const CMTime sampleDuration = CMSampleBufferGetDuration(sample);
-    const i64 durationUs = CMTIME_IS_NUMERIC(sampleDuration) && us_of(sampleDuration) > 0
+    i64 durationUs = CMTIME_IS_NUMERIC(sampleDuration) && us_of(sampleDuration) > 0
         ? us_of(sampleDuration) : static_cast<i64>(std::llround(1e6 / info_.fps));
+    if (timingIndexed_) {
+        const auto next = std::upper_bound(presentationTimes_.begin(), presentationTimes_.end(), outPtsUs,
+            [](i64 us, const PresentationTime& sample) { return us < sample.us; });
+        const i64 end = next != presentationTimes_.end() ? next->us : info_.durationUs;
+        // Container PTS define the display interval. A decoded sample may carry
+        // nominal duration even when a VFR frame remains visible much longer.
+        if (end > outPtsUs) durationUs = end - outPtsUs;
+    }
     if (outPtsUs < deliverFromUs && deliverFromUs - outPtsUs >= durationUs) return OkStatus;
     CVPixelBufferRef pixel = CMSampleBufferGetImageBuffer(sample);
     if (!pixel) return Status{Errc::DecodeFailed, "amostra decodificada sem imagem"};
@@ -826,7 +842,10 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
                     if (!decoder->next_frame(target, frame, pts, eos).ok() || eos) break;
                     if (frame) { found = matches(frame, expected[index]); break; }
                 }
-                if (!found) return failure(@"Seek returned wrong pixels/PTS");
+                if (!found) return failure([NSString stringWithFormat:
+                    @"Seek returned wrong pixels/PTS (zeroCopy=%d index=%zu target=%lld expected=%lld actual=%lld duration=%lld eos=%d)",
+                    zeroCopy, index, (long long)target, (long long)expected[index].pts,
+                    (long long)pts, (long long)(frame ? frame->durationUs : -1), eos]);
             }
             decoder->suspend();
             if (!matches(retained, expected.front())) return failure(@"Retained frame changed after suspend");

@@ -1693,4 +1693,26 @@ to edit the curve.</string>
     <string name="ai_limite_atingido">You\'ve used your %1$d AI generations for today. Come back tomorrow to generate more.</string>
     <string name="editor_marca_anterior_segure_inicio">Previous marker; hold to go to start</string>
     <string name="editor_proxima_marca_segure_fim">Next marker; hold to go to end</string>
+    <string name="donation_title">Support Aurea</string>
+    <string name="donation_note">Optional donations keep the app free.</string>
+    <string name="donation_detail">You choose whether to contribute and how much. All features remain available.</string>
+    <string name="donation_pix_qr">Ruan Pablo Pix QR code</string>
+    <string name="donation_copy_pix">Copy Pix</string>
+    <string name="donation_paypal">Donate with PayPal</string>
+    <string name="donation_copy_paypal">Copy PayPal link</string>
+    <string name="donation_export_note">Export continues. Use the code or link after it finishes.</string>
+    <string name="donation_copied">Copied to clipboard.</string>
+    <string name="ai_upscale_title">AI Video Upscaler</string>
+    <string name="ai_upscale_note">Model for anime and illustration. Processes tiles without blocking the interface. The resolution selected below is the final output quality.</string>
+    <string name="ai_upscale_dimensions">AI %1$dx · input %2$d × %3$d → output %4$d × %5$d</string>
+    <string name="licenses_title">Licenses · AI</string>
+    <string name="scene_workspace">3D Scene</string>
+    <string name="scene_orbit_x">Orbit X</string>
+    <string name="scene_orbit_y">Orbit Y</string>
+    <string name="scene_zoom">Zoom</string>
+    <string name="scene_light_directional">Directional light</string>
+    <string name="scene_light_point">Point light</string>
+    <string name="scene_light_range">Range</string>
+    <string name="scene_light_shadows">Shadows</string>
+    <string name="scene_light_failed">Could not create the light.</string>
 </resources>

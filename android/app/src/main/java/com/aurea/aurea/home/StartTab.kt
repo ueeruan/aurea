@@ -128,11 +128,16 @@ internal fun StartTab(
             }
             item(key = "criar") {
                 Column(Modifier.fillMaxWidth().padding(start = AureaDims.Gutter, top = AureaDims.S1, end = AureaDims.Gutter)) {
-                    FillButton(stringResource(R.string.home_new_project), CupertinoGlyph.Plus) { newSheet = true }
+                    Row(horizontalArrangement = Arrangement.spacedBy(AureaDims.S3)) {
+                        StudioAction(CupertinoGlyph.Plus, stringResource(R.string.home_new_project), Modifier.weight(1f), primary = true) { newSheet = true }
+                        StudioAction(CupertinoGlyph.PhotoOnRectangle, stringResource(R.string.home_import_media), Modifier.weight(1f)) {
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        }
+                    }
                     Spacer(Modifier.height(AureaDims.S2))
                     Row(horizontalArrangement = Arrangement.spacedBy(AureaDims.S3)) {
-                        QuickAction(CupertinoGlyph.PhotoOnRectangle, stringResource(R.string.home_import_media), Modifier.weight(1f)) {
-                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        QuickAction(CupertinoGlyph.RectangleStack, plural(R.plurals.home_project_count, all.size), Modifier.weight(1f)) {
+                            onSelectTab(HomeViewModel.PROJECTS_TAB)
                         }
                         QuickAction(CupertinoGlyph.ArrowUpArrowDown, stringResource(R.string.home_sort_title), Modifier.weight(1f)) {
                             dialog.current = ProjectDialog.Sort
@@ -205,6 +210,17 @@ internal fun StartTab(
 }
 
 /** Ação secundária: cartão com ícone e rótulo, largura dividida. */
+@Composable
+private fun StudioAction(glyph: Char, label: String, modifier: Modifier, primary: Boolean = false, onClick: () -> Unit) {
+    val ink = if (primary) AureaColors.OnAccent else AureaColors.Text
+    Column(modifier.height(142.dp).clip(AureaShape.Xl)
+        .background(if (primary) AureaColors.Accent else AureaColors.SurfaceHigh)
+        .tocavel(onClick = onClick).padding(18.dp), verticalArrangement = Arrangement.SpaceBetween) {
+        CupertinoIcon(glyph, 30.dp, ink)
+        Text(label, style = AureaType.TitleMedium, color = ink)
+    }
+}
+
 @Composable
 private fun QuickAction(glyph: Char, label: String, modifier: Modifier, onClick: () -> Unit) {
     Row(

@@ -19,6 +19,7 @@ struct EffectsBrowser: View {
     @State private var query = ""
     @State private var filter: FxEffectFilter = .all
     @State private var detail: EffectCatalogItem?
+    @State private var pendingApply: (type: UInt32, counts: [Int64: UInt32])?
     @FocusState private var searching: Bool
     let onDismiss: () -> Void
 
@@ -67,31 +68,50 @@ struct EffectsBrowser: View {
         }
         .foregroundStyle(AureaColors.text).background(AureaColors.editorPanel.ignoresSafeArea())
         .buttonStyle(.plain)
+        .onChange(of: model.status.modelRevision) { _ in finishPendingApply() }
+        .task(id: pendingApply?.type) {
+            guard pendingApply != nil else { return }
+            do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
+            model.refreshModel(force: true)
+            finishPendingApply()
+            if pendingApply != nil {
+                // A slow renderer is not a rejected command. Keep observing so
+                // late confirmation still closes the browser without duplicate adds.
+                model.toast = "Aguardando confirmação do efeito…"
+            }
+        }
         .overlay {
             if let entry = detail {
                 EffectBrowserDetail(entry: entry, store: model.effectPreviews,
                                 specs: model.engine.effectSpecs(entry.typeId),
                                 prefs: prefs,
                                 canApply: model.layers.contains { model.selection.contains($0.id) && !$0.locked },
-                                onDismiss: { detail = nil }) {
+                                onDismiss: { detail = nil; pendingApply = nil }) {
                 let targets = model.layers.filter { model.selection.contains($0.id) && !$0.locked }
-                guard model.started, !targets.isEmpty else { return }
+                guard model.started, !targets.isEmpty, pendingApply == nil else { return }
                 let before = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.effectCount) })
+                pendingApply = (entry.typeId, before)
                 model.mutate { engine in
                     engine.beginUndoGroup()
                     for layer in targets { engine.addEffect(entry.typeId, toLayer: layer.id, at: UInt32.max) }
                     engine.endUndoGroup()
                 }
                 model.refreshModel(force: true)
-                guard model.layers.contains(where: { layer in
-                    before[layer.id].map { layer.effectCount > $0 } ?? false
-                }) else { return }
-                prefs.addRecent(entry.typeId)
-                detail = nil
-                onDismiss()
+                finishPendingApply()
                 }.id(entry.typeId)
             }
         }
+    }
+
+    private func finishPendingApply() {
+        guard let pending = pendingApply else { return }
+        guard model.layers.contains(where: { row in
+            pending.counts[row.id].map { row.effectCount > $0 } ?? false
+        }) else { return }
+        prefs.addRecent(pending.type)
+        pendingApply = nil
+        detail = nil
+        onDismiss()
     }
 
     private var searchField: some View {

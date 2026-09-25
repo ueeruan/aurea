@@ -20,6 +20,8 @@ add_executable(aurea_tests
     test_engine.cpp
     test_media.cpp
     test_proxy.cpp
+    test_ai.cpp
+    test_upscale_color.cpp
     test_yuv_layout.cpp
     test_gpu.cpp
     test_scene3d.cpp
@@ -55,6 +57,9 @@ target_include_directories(aurea_tests PRIVATE
 )
 
 target_link_libraries(aurea_tests PRIVATE aurea_core)
+if(MSVC)
+    target_compile_options(aurea_tests PRIVATE /MP2)
+endif()
 
 # Os testes visuais usam o backend Vulkan real quando o host tem cabeçalhos
 # (a GPU em si é verificada em runtime: sem driver, os testes avisam e pulam).

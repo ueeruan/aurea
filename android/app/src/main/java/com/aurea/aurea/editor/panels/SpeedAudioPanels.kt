@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.engine.TrackProperty
+import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.PropertyCustomRow
@@ -136,33 +137,6 @@ internal fun SpeedPanel(env: PanelEnv) {
                     Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
                 }
             }
-        }
-        Spacer(Modifier.height(14.dp))
-        val remap by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
-        Text(stringResource(R.string.panel_acelerar_desacelerar_tempo), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.W700, color = AureaColors.Muted)))
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(-1 to stringResource(R.string.panel_sem_rampa), 1 to stringResource(R.string.panel_suave), 2 to stringResource(R.string.panel_lento_meio), 3 to stringResource(R.string.panel_acelerar), 4 to stringResource(R.string.panel_desacelerar)).forEach { (preset, label) ->
-                val on = (preset == -1 && !remap)
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                        .tocavel(onClick = { store.applySpeedRamp(preset) })
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
-                }
-            }
-        }
-        if (remap) {
-            Spacer(Modifier.height(8.dp))
-            TimeRemapGraph(store)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                stringResource(R.string.panel_rampa_ligada_som_video_seguem_mesma),
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
-            )
         }
         Spacer(Modifier.height(8.dp))
         if (kind == LayerType.Video.kind) {
@@ -349,6 +323,40 @@ private fun AudioRuler(
             }
             Spacer(Modifier.width(8.dp))
             ValueBox(text, onTap = null)
+        }
+    }
+}
+
+/** The effect edits the canonical source-time curve used by preview and export. */
+@Composable
+internal fun TimeRemapEffectEditor(store: EditorStore) {
+    Column(Modifier.fillMaxWidth()) {
+
+        val remap by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
+        Text(stringResource(R.string.panel_acelerar_desacelerar_tempo), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.W700, color = AureaColors.Muted)))
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0 to stringResource(R.string.panel_linear), 1 to stringResource(R.string.panel_suave), 2 to stringResource(R.string.panel_lento_meio), 3 to stringResource(R.string.panel_acelerar), 4 to stringResource(R.string.panel_desacelerar), 5 to stringResource(R.string.panel_congelar), 6 to stringResource(R.string.panel_passar_tras_frente)).forEach { (preset, label) ->
+                val on = false
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                        .tocavel(onClick = { store.applySpeedRamp(preset) })
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+                }
+            }
+        }
+        if (remap) {
+            Spacer(Modifier.height(8.dp))
+            TimeRemapGraph(store)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                stringResource(R.string.panel_rampa_ligada_som_video_seguem_mesma),
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
+            )
         }
     }
 }

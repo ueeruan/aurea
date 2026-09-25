@@ -87,10 +87,10 @@ internal fun HomeHeader(onSearch: () -> Unit, onSettings: () -> Unit) {
         Modifier.fillMaxWidth().padding(start = AureaDims.Gutter, top = 14.dp, end = AureaDims.S3, bottom = AureaDims.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AureaLogo(38.dp)
+        AureaLogo(30.dp)
         Spacer(Modifier.width(AureaDims.S3))
         Column(Modifier.weight(1f)) {
-            Text("Aurea", style = AureaType.Display)
+            Text("AUREA", style = AureaType.TitleLarge)
             Spacer(Modifier.height(2.dp))
             Text(greeting(), style = AureaType.Greeting, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -107,59 +107,24 @@ internal fun HomeHeader(onSearch: () -> Unit, onSettings: () -> Unit) {
 @Composable
 internal fun ContinueEditingCard(entry: ProjectEntry, thumbs: HomeThumbnails, onOpen: () -> Unit, onMenu: () -> Unit) {
     val spec = remember(entry) { projectSpec(entry) }
-    val image = rememberProjectThumbnail(thumbs, entry, HERO_DECODE_PX)
-    Box(
-        Modifier
-            .padding(start = AureaDims.Gutter, top = AureaDims.S4, end = AureaDims.Gutter)
-            .fillMaxWidth()
-            .tocavel(onLongClick = onMenu, onClick = onOpen)
-            .clip(AureaShape.Xl)
-            .aspectRatio(16f / 9f),
-    ) {
-        if (image != null) {
-            Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
-        } else {
-            Box(Modifier.fillMaxSize().background(PlaceholderBrush), contentAlignment = Alignment.Center) {
-                CupertinoIcon(CupertinoGlyph.Film, 34.dp, AureaColors.Muted)
-            }
+    val image = rememberProjectThumbnail(thumbs, entry, 256)
+    Row(Modifier.padding(start = AureaDims.Gutter, top = 20.dp, end = AureaDims.Gutter)
+        .fillMaxWidth().clip(AureaShape.Xl).background(AureaColors.Surface)
+        .tocavel(onLongClick = onMenu, onClick = onOpen).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(76.dp).clip(AureaShape.Md).background(PlaceholderBrush), contentAlignment = Alignment.Center) {
+            if (image != null) Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
+            else CupertinoIcon(CupertinoGlyph.Film, 28.dp, AureaColors.Muted)
         }
-        Box(Modifier.fillMaxSize().background(HeroScrimBrush))
-        Row(
-            Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = AureaDims.S4, end = AureaDims.S4, bottom = 14.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.home_continue), style = AureaType.HeroKicker)
-                Spacer(Modifier.height(3.dp))
-                Text(entry.title, style = AureaType.HeroTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(2.dp))
-                Text(spec, style = AureaType.HeroSpec, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.width(10.dp))
-            Row(
-                Modifier.clip(AureaShape.Pill).background(AureaColors.Accent).padding(horizontal = 14.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CupertinoIcon(CupertinoGlyph.PlayFill, AureaDims.IconXs, AureaColors.OnAccent)
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.home_continue_action), style = AureaType.HeroPill)
-            }
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(stringResource(R.string.home_continue), style = AureaType.BodySmall, color = AureaColors.Accent)
+            Text(entry.title, style = AureaType.TitleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(vertical = 3.dp))
+            Text(spec, style = AureaType.CardSpec, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        val menuLabel = stringResource(R.string.home_menu_content)
-        Box(
-            Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 2.dp, end = 2.dp)
-                .size(40.dp)
-                .semantics { contentDescription = menuLabel }
-                .tocavel(onClick = onMenu),
-            contentAlignment = Alignment.Center,
-        ) {
-            CupertinoIcon(CupertinoGlyph.Ellipsis, 18.dp, AureaColors.OnImage70)
-        }
+        RoundIconButton(CupertinoGlyph.Ellipsis, stringResource(R.string.home_menu_content), onMenu)
     }
 }
-
 /**
  * O cartão da grade: miniatura (raio 14) ou a moldura do formato, o nome, a
  * ficha e as reticências. Escolhendo vários, o toque marca em vez de abrir.
@@ -184,7 +149,9 @@ internal fun ProjectGridCard(
     Column(
         modifier
             .aspectRatio(HOME_CARD_ASPECT)
-            .tocavel(onLongClick = if (selecting) onMark else onMenu, onClick = if (selecting) onMark else onOpen),
+            .clip(AureaShape.Xl).background(AureaColors.Surface)
+            .tocavel(onLongClick = if (selecting) onMark else onMenu, onClick = if (selecting) onMark else onOpen)
+            .padding(8.dp),
     ) {
         Box(Modifier.weight(1f).fillMaxWidth().clip(AureaShape.Md)) {
             if (image != null) {

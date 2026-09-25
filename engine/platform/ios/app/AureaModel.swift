@@ -130,6 +130,7 @@ struct ExportOptions: Equatable {
     var shortSide: UInt32 = 1080
     var bitrateMbps: UInt32 = 20
     var audioBitrateKbps: UInt32 = 192
+    var aiUpscale: UInt32 = 0
     var fps: Double = 0   // 0 = o da composição
 }
 
@@ -302,6 +303,7 @@ final class AureaModel: ObservableObject {
     private let autosaveQueue = DispatchQueue(label: "com.aurea.autosave", qos: .utility)
     private var lastAutosaveActivity = ProcessInfo.processInfo.systemUptime
     private var autosaveRetryAfter = 0.0
+    private var unsavedSince = 0.0
     private var autosaving = false
     private var autosaveFailureShown = false
 
@@ -378,6 +380,23 @@ final class AureaModel: ObservableObject {
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 refreshModel(force: true); enterEditor()
                 if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
+            } else if scene == "video-move", started {
+                // Reuse the real H.264 export fixture, then import through the
+                // production decoder. The UI test operates only the visible dock.
+                exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
+                if exportProbe["passed"] as? Bool == true,
+                   let movie = exportProbe["movieFile"] as? String,
+                   newProject(width: 640, height: 360, fps: 30, title: "Video dock move") {
+                    let layer = engine.importVideo(AureaPaths.documents.appendingPathComponent(movie).path, name: "Dock move video")
+                    if layer >= 0 {
+                        if let compositionID = (engine.composition()?[AureaCompositionId] as? NSNumber)?.uint64Value {
+                            engine.setComposition(compositionID, duration: 180)
+                        }
+                        refreshModel(force: true); enterEditor(); select(layerId: layer, additive: false)
+                        panel = .dock; seek(toFrame: 60)
+                        _ = saveProject(writeThumbnail: false)
+                    }
+                }
             } else if ["metal-face-culling", "metal-face-control"].contains(scene), started {
                 faceProbe = prepareParityFaces(scene: scene)
             } else if ["android-precomp", "android-precomp-inside"].contains(scene), started {
@@ -723,7 +742,7 @@ final class AureaModel: ObservableObject {
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         let playheadChanged = out.playhead != lastEnginePlayhead
-        if playheadChanged || out.modelRevision != lastRevision {
+        if out.modelRevision != lastRevision {
             lastAutosaveActivity = ProcessInfo.processInfo.systemUptime
         }
         lastEnginePlayhead = out.playhead
@@ -750,9 +769,11 @@ final class AureaModel: ObservableObject {
 
     private func autosaveIfIdle() {
         let now = ProcessInfo.processInfo.systemUptime
+        guard status.dirty != 0 else { unsavedSince = 0; return }
+        if unsavedSince == 0 { unsavedSince = now }
         guard screen == .editor, status.dirty != 0, status.playing == 0,
               !autosaving, !importingMedia, !exporting,
-              now - lastAutosaveActivity >= 3, now >= autosaveRetryAfter,
+              (now - lastAutosaveActivity >= 3 || now - unsavedSince >= 30), now >= autosaveRetryAfter,
               let url = projectURL else { return }
         _ = engine.flush()
         autosaving = true
@@ -765,6 +786,7 @@ final class AureaModel: ObservableObject {
                 guard self.projectURL == url else { return }
                 if saved {
                     self.autosaveRetryAfter = 0
+                    self.unsavedSince = ProcessInfo.processInfo.systemUptime
                     self.autosaveFailureShown = false
                 } else {
                     self.autosaveRetryAfter = ProcessInfo.processInfo.systemUptime + 30
@@ -1263,7 +1285,8 @@ final class AureaModel: ObservableObject {
 
     func closeProject() {
         if exporting { toast = AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"); return }
-        saveProject(writeThumbnail: true)
+        if sceneEditor { exitSceneEditor() }
+        guard saveProject(writeThumbnail: true) else { return }
         engine.clearSelection()
         screen = .home
         fullscreen = false
@@ -1572,6 +1595,57 @@ final class AureaModel: ObservableObject {
         } else { toast = "Não foi possível adicionar o desenho" }
     }
 
+    @Published var sceneEditor = false
+    @Published var sceneYaw: Float = -30
+    @Published var scenePitch: Float = 20
+    @Published var sceneDistance: Float = 3
+    func enterSceneEditor() {
+        engine.run { $0.pause() }
+        status.playing = 0; panel = .none; fullscreen = false
+        sceneEditor = true
+        updateSceneView()
+    }
+    func exitSceneEditor() {
+        sceneEditor = false
+        updateSceneView()
+    }
+    func updateSceneView() {
+        engine.setSceneEditor(sceneEditor, yaw: sceneYaw, pitch: scenePitch, distance: sceneDistance)
+        refreshModel(force: true)
+    }
+
+    func addLight(_ kind: UInt32) {
+        let id = engine.addLight(kind)
+        guard id >= 0 else { toast = AureaText.t("scene_light_failed"); return }
+        selection = [id]; engine.selectLayers([NSNumber(value: id)])
+        refreshModel(force: true)
+    }
+    func setLightParam(_ param: UInt32, value: Float) {
+        guard let id = primarySelection else { return }
+        mutate { $0.setLightParam(id, param: param, value: value) }
+        refreshModel(force: true)
+    }
+    func toggleLightKey(_ param: UInt32, value: Float) {
+        guard let id = primarySelection else { return }
+        let property: UInt32
+        switch param { case 1...4: property = 20 + param; case 6: property = 25; case 7: property = 26; default: return }
+        let here = ((detail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0) & (1 << property) != 0
+        let local = localPlayhead
+        mutate { core in
+            if here { core.deleteKeyframe(forLayer: id, property: property, time: local) }
+            else { core.insertKeyframe(forLayer: id, property: property, time: local, value: value) }
+        }
+        refreshModel(force: true)
+    }
+
+    func addCamera() {
+        let id = engine.addCamera()
+        if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
+        else { toast = AureaText.t("msg_nao_foi_possivel_criar_a_camera", String(-id)) }
+        showAddLayer = false
+        syncAfterEdit()
+    }
+
     func addNull(threeD: Bool) {
         let id = engine.addNull(threeD)
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
@@ -1612,7 +1686,8 @@ final class AureaModel: ObservableObject {
                                     height: exportOptions.shortSide,
                                     fps: exportOptions.fps,
                                     bitrateMbps: exportOptions.bitrateMbps,
-                                    audioBitrateKbps: exportOptions.audioBitrateKbps)
+                                    audioBitrateKbps: exportOptions.audioBitrateKbps,
+                                    aiUpscale: exportOptions.aiUpscale)
         guard ok else {
             exportMessage = "o export não pôde começar"
             toast = exportMessage
@@ -1928,11 +2003,11 @@ final class AureaModel: ObservableObject {
     /// isto só move (e é justamente para quem está FORA do cabeçote).
     func moveToPlayhead(_ layerId: Int64) {
         guard let row = layers.first(where: { $0.id == layerId }), !row.locked else { return }
-        let start = Int(row.startFrame), end = Int(row.endFrame)
-        let target = max(0, Int(status.playhead))
-        guard target != start else { return }
+        let duration = max(Int64(1), Int64(row.endFrame) - Int64(row.startFrame))
+        let target = min(max(0, status.playhead), max(0, Int64(Int32.max) - duration))
+        guard target != Int64(row.startFrame) else { return }
         engine.run {
-            $0.setLayer(layerId, startFrame: Int32(target), endFrame: Int32(target + (end - start)),
+            $0.setLayer(layerId, startFrame: Int32(clamping: target), endFrame: Int32(clamping: target + duration),
                         offsetFrames: row.offsetFrames, setOffset: false)
         }
         refreshModel(force: true)
@@ -2032,6 +2107,10 @@ final class AureaModel: ObservableObject {
     /// X/Y/Z têm UM keyframe só (os três eixos no mesmo instante).
     func setTransform(_ property: UInt32, value: Float, layer: Int64) {
         guard value.isFinite, let d = engine.layerDetail(layer) else { return }
+        if sceneEditor && property < 12 {
+            mutate { $0.layoutTransform(layer, property: property, value: value) }
+            refreshSelectedLayer(); return
+        }
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
         let position = StageGeom.floats(d["position"])
@@ -2062,6 +2141,7 @@ final class AureaModel: ObservableObject {
                 case 8: engine.setRotation(forLayer: layer, x: component(rotation, 0), y: component(rotation, 1), z: value)
                 case 9: engine.setAnchor(forLayer: layer, x: value, y: component(anchor, 1), z: component(anchor, 2))
                 case 10: engine.setAnchor(forLayer: layer, x: component(anchor, 0), y: value, z: component(anchor, 2))
+                case 11: engine.setAnchor(forLayer: layer, x: component(anchor, 0), y: component(anchor, 1), z: value)
                 case 12: engine.setOpacity(forLayer: layer, value: value)
                 default: break
                 }

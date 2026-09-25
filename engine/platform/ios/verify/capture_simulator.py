@@ -42,6 +42,18 @@ def digest_canonico(path):
     return hashlib.sha256(bytes_canonicos(path)).hexdigest()
 
 
+def validate_face_fixture(fixture, audit):
+    digest = digest_canonico(fixture)
+    document = json.loads(bytes_canonicos(fixture))
+    external = [item['uri'] for group in ('buffers', 'images') for item in document.get(group, [])
+                if item.get('uri') and not item['uri'].startswith('data:')]
+    if digest != audit.get('sha256'):
+        raise RuntimeError('Synthetic front-face fixture does not match its audited bytes')
+    if audit.get('externalResources') != len(external) or external:
+        raise RuntimeError('Front-face fixture resource audit is missing, incorrect, or not self-contained')
+    return digest
+
+
 READY_TIMEOUT = 90
 POLL_INTERVAL = 0.25
 
@@ -403,9 +415,7 @@ def capture_scene(scene, app, output, udid, console_option, report, frame_checke
         if scene in ('metal-face-control', 'metal-face-culling'):
             fixture = Path('docs/parity/fixtures') / (scene + '.gltf')
             audit = json.loads(fixture.with_suffix('.audit.json').read_text(encoding='utf-8'))
-            digest = digest_canonico(fixture)
-            if digest != audit['sha256'] or audit['externalResources'] != 0:
-                raise RuntimeError('Synthetic front-face fixture does not match its audited bytes')
+            digest = validate_face_fixture(fixture, audit)
             shutil.copy2(fixture, documents / fixture.name)
             record['fixtureSHA256'] = digest
         argv = ['xcrun', 'simctl', 'launch', console_option, udid, BUNDLE]

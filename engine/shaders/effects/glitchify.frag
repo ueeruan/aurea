@@ -31,50 +31,66 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 color;
 } p;
 
-void main() {
-    const vec2 uvPerLayer = max(vec2(p.texel.x * p.texel.z, p.texel.y * p.texel.w), vec2(1e-9));
-    const vec2 inUv = v_uv * p.uvMap.xy + p.uvMap.zw;
-    const vec2 layerPx = inUv / uvPerLayer;
-
-    // O tempo do glitch anda em PASSOS: o efeito troca de estado a cada
-    // `frequência` quadros e fica parado no meio — é o que dá o estalo.
-    const float step = floor(p.p3.x / max(p.p1.x, 0.25));
-    const uint salt = uint(p.p1.y) * 2654435761u + uint(step) * 40503u;
-
-    // Uma faixa horizontal de `altura` pixels; `blocos verticais` troca por
-    // colunas, que é o rasgo de outra família de glitch.
-    const float bandH = max(p.p0.x, 1.0);
-    const float bandIndex = p.p2.x > 0.5 ? floor(layerPx.x / bandH) : floor(layerPx.y / bandH);
-
-    const float r0 = aurea_hash(uvec2(uint(int(bandIndex)), salt));
-    const float r1 = aurea_hash(uvec2(uint(int(bandIndex)) + 7919u, salt));
-    const float r2 = aurea_hash(uvec2(uint(int(bandIndex)) + 31337u, salt));
-
-    // Deslocamento da faixa: só as que passam do limiar andam, e as "pico"
-    // saem inteiras para fora.
-    float shift = 0.0;
-    if (r0 < 0.45) shift = (r1 * 2.0 - 1.0) * p.p0.y;
-    if (r2 < p.p0.z) shift += (r1 > 0.5 ? 1.0 : -1.0) * p.p0.y * 6.0;
-    const vec2 off = p.p2.x > 0.5 ? vec2(0.0, shift) : vec2(shift, 0.0);
-
-    // Separação RGB: cada canal lê de um ponto diferente. A separação é
-    // modulada por faixa, então ela "quebra" junto com os blocos.
-    const float sep = p.p0.w * (0.4 + r1 * 1.2);
-    const vec2 sepUv = (p.p2.x > 0.5 ? vec2(0.0, sep) : vec2(sep, 0.0)) * uvPerLayer;
-
-    vec4 s;
-    s.r = unpremultiply(texture(u_tex0, inUv + (off + sepUv) * uvPerLayer)).r;
-    s.g = unpremultiply(texture(u_tex0, inUv + off * uvPerLayer)).g;
-    s.b = unpremultiply(texture(u_tex0, inUv + (off - sepUv) * uvPerLayer)).b;
-    s.a = unpremultiply(texture(u_tex0, inUv + off * uvPerLayer)).a;
-
-    // Corrupção de cor: uma faixa rara troca os canais de lugar.
-    if (r2 > 1.0 - p.p2.y * 0.35) {
-        const float w = aurea_hash(uvec2(salt, uint(int(bandIndex))));
-        s.rgb = mix(s.rgb, s.gbr, w);
+// Original bounded sort: reorder a 16-pixel row segment by straight luminance.
+// Only enabled blocks pay the texture/sorting cost; seed and time select blocks.
+vec4 sortedPixel(vec2 uv, vec2 stepUV, uint salt) {
+    vec2 px = uv / stepUV;
+    float segment = floor(px.x / 16.0);
+    uint row = uint(int(floor(px.y)));
+    if (p.color.y <= 0.0 || aurea_hash(uvec2(uint(int(segment)) ^ row, salt + 701u)) >= p.color.y)
+        return texture(u_tex0, uv);
+    vec4 samples[16];
+    float light[16];
+    for (int i = 0; i < 16; ++i) {
+        samples[i] = texture(u_tex0, vec2(segment * 16.0 + float(i) + 0.5, floor(px.y) + 0.5) * stepUV);
+        light[i] = dot(unpremultiply(samples[i]).rgb, vec3(0.2126, 0.7152, 0.0722));
     }
+    int slot = clamp(int(floor(px.x - segment * 16.0)), 0, 15);
+    // Stable rank selection preserves equal luminance ordering and premultiplied alpha.
+    for (int i = 0; i < 16; ++i) {
+        int rank = 0;
+        for (int j = 0; j < 16; ++j)
+            if (light[j] < light[i] || (light[j] == light[i] && j < i)) ++rank;
+        if (rank == slot) return samples[i];
+    }
+    return samples[slot];
+}
 
-    const vec4 src = unpremultiply(texture(u_tex0, inUv));
-    const float k = clamp(p.p1.w, 0.0, 1.0);
-    o_color = premultiply(vec4(max(mix(src.rgb, s.rgb, k), vec3(0.0)), mix(src.a, s.a, k)));
+void main() {
+    vec2 uvPerLayer = max(p.texel.xy, vec2(1e-9));
+    vec2 inUv = v_uv * p.uvMap.xy + p.uvMap.zw;
+    vec2 layerPx = inUv / uvPerLayer + p.texel.zw;
+    float event = p.p1.z > 0.5 ? 0.0 : floor(p.p3.x / max(p.p1.x, 0.25));
+    uint salt = uint(p.p1.y) * 2654435761u + uint(int(event)) * 40503u;
+    float bandH = max(p.p0.x, 1.0);
+    float bandIndex = p.p2.x > 0.5 ? floor(layerPx.x / bandH) : floor(layerPx.y / bandH);
+    float r0 = aurea_hash(uvec2(uint(int(bandIndex)), salt));
+    float r1 = aurea_hash(uvec2(uint(int(bandIndex)) + 7919u, salt));
+    float r2 = aurea_hash(uvec2(uint(int(bandIndex)) + 31337u, salt));
+    float shift = r0 < 0.45 ? (r1 * 2.0 - 1.0) * p.p0.y : 0.0;
+    if (r2 < p.p0.z) shift += (r1 > 0.5 ? 1.0 : -1.0) * p.p0.y * 6.0;
+    vec2 off = p.p2.x > 0.5 ? vec2(0.0, shift) : vec2(shift, 0.0);
+    uvec2 block = uvec2(ivec2(floor(layerPx / vec2(max(p.p3.y, 4.0), bandH))));
+    float blockRandom = aurea_hash(block ^ uvec2(salt, salt + 419u));
+    if (blockRandom < 0.6) off += vec2(blockRandom * 2.0 - 1.0,
+        aurea_hash(block ^ uvec2(salt + 919u, salt)) * 2.0 - 1.0) * p.p3.z;
+    float tearBand = floor(layerPx.y / max(2.0, bandH * 0.18));
+    float tearRandom = aurea_hash(uvec2(uint(int(tearBand)), salt + 3251u));
+    if (tearRandom < 0.22) off.x += (tearRandom / 0.22 * 2.0 - 1.0) * p.p3.w;
+    vec2 sourcePx = layerPx + off;
+    if (p.p2.z > 1.0) sourcePx = (floor(sourcePx / p.p2.z) + 0.5) * p.p2.z;
+    vec2 displaced = (sourcePx - p.texel.zw) * uvPerLayer;
+    float sep = p.p0.w * (0.4 + r1 * 1.2);
+    vec2 sepUv = (p.p2.x > 0.5 ? vec2(0.0, sep) : vec2(sep, 0.0)) * uvPerLayer;
+    vec2 centered = displaced - vec2(0.5);
+    vec4 base = sortedPixel(displaced, uvPerLayer, salt);
+    vec4 red = p.p0.w > 0.0 || p.p2.w > 0.0 ? texture(u_tex0, vec2(0.5) + centered / (1.0 + p.p2.w) + sepUv) : base;
+    vec4 blue = p.p0.w > 0.0 || p.p2.w > 0.0 ? texture(u_tex0, vec2(0.5) + centered / max(0.1, 1.0 - p.p2.w) - sepUv) : base;
+    vec4 s = vec4(unpremultiply(red).r, unpremultiply(base).g, unpremultiply(blue).b, max(base.a, max(red.a, blue.a)));
+    if (r2 > 1.0 - p.p2.y * 0.35)
+        s.rgb = mix(s.rgb, s.gbr, aurea_hash(uvec2(salt, uint(int(bandIndex)))));
+    float exposure = 1.0 + (aurea_hash(uvec2(salt, 1709u)) * 2.0 - 1.0) * p.color.x;
+    s.rgb *= max(0.0, exposure);
+    vec4 src = texture(u_tex0, inUv);
+    o_color = mix(src, premultiply(vec4(max(s.rgb, vec3(0.0)), s.a)), clamp(p.p1.w, 0.0, 1.0));
 }

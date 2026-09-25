@@ -106,6 +106,16 @@ enum class TransformTab(val title: String, val icon: ImageVector, val railLabel:
 private val rotationAxis = androidx.compose.runtime.mutableIntStateOf(2)
 private val RotationProps = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.ROTATION_Y, TrackProperty.ROTATION_Z)
 
+/** The rail diamond keys every axis exposed by the current dimension mode. */
+internal fun transformKeyProperties(tab: TransformTab, threeD: Boolean): IntArray = when {
+    tab == TransformTab.Girar -> RotationProps
+    threeD && tab == TransformTab.Mover -> intArrayOf(TrackProperty.POSITION_X, TrackProperty.POSITION_Y, TrackProperty.POSITION_Z)
+    threeD && tab == TransformTab.Escalar -> intArrayOf(TrackProperty.SCALE_X, TrackProperty.SCALE_Y, TrackProperty.SCALE_Z)
+    threeD && tab == TransformTab.Pivo -> intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y, TrackProperty.ANCHOR_Z)
+    else -> tab.props
+}
+
+
 /** "Girar em 3D" aberto à mão numa camada 2D (X/Y e profundidade aparecem). */
 private val threeDOpen = androidx.compose.runtime.mutableStateOf(false)
 
@@ -130,16 +140,16 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val axis = if (show3D) rotationAxis.intValue else 2
     val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
     // O losango da Rotação vale para X, Y e Z juntos (um keyframe só).
-    val keyProps = if (tab == TransformTab.Girar) RotationProps else props
+    val keyProps = transformKeyProperties(tab, show3D)
     val canKey = props.isNotEmpty()
-    val look by remember(store, tab, axis) {
+    val look by remember(store, tab, axis, show3D) {
         derivedStateOf { if (keyProps.isEmpty()) com.aurea.aurea.ui.ds.KeyframeLook.None else transformLook(store.detail, keyProps) }
     }
-    val curveReady by remember(store, tab, axis) {
+    val curveReady by remember(store, tab, axis, show3D) {
         derivedStateOf { props.isNotEmpty() && store.primaryKeys().transformTrack(props[0]).size >= 2 }
     }
     val exprKeys = props.map { TrackKey(it) }
-    val exprLook by remember(store, tab, axis) { derivedStateOf { store.expressionLook(exprKeys) } }
+    val exprLook by remember(store, tab, axis, show3D) { derivedStateOf { store.expressionLook(exprKeys) } }
     // Expressão na unidade da tela: escala e opacidade em %, ângulo em °, o resto em px.
     val exprTitle = if (tab == TransformTab.Girar) "Rotação ${"XYZ"[axis]}" else tab.title
     val exprScale = if (tab == TransformTab.Escalar || tab == TransformTab.Opacidade) 100f else 1f

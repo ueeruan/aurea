@@ -519,3 +519,107 @@ AUREA_TEST(ClipTime, VectorShutterUsesRemappedSourceTravel) {
     AUREA_CHECK_NEAR(l->source_shutter_travel(50.0, 0.5), 0.0, 1e-9);
     AUREA_CHECK_NEAR(l->source_shutter_travel(50.0, 0.0), 0.0, 1e-9);
 }
+
+AUREA_TEST(ClipTime, RemapEffectKeysUseCanonicalCurveAndTimelineQuery) {
+    TimeRig r(cfg_with_audio());
+    Command add; add.type = CommandType::EffectAdd;
+    add.effect_add.layer = r.layer;
+    add.effect_add.effectType = effect_type_id(effect_keys::kTimeRemap);
+    add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(r.e.apply_command(add).ok());
+    const u32 effect = r.L()->effects.back().id;
+    Command key; key.type = CommandType::KeyframeInsert;
+    key.keyframe.track = TrackRef{r.layer, TrackProperty::EffectParam, effect, 0};
+    key.keyframe.time = FrameIndex{60}; key.keyframe.value = 4.0f;
+    AUREA_CHECK(r.e.apply_command(key).ok());
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{60}), 120.0, 0.001);
+    AUREA_CHECK(r.L()->tracks.find(TrackProperty::EffectParam, effect, 0) == nullptr);
+    key.type = CommandType::KeyframeSetValue; key.keyframe.value = 3.0f;
+    AUREA_CHECK(r.e.apply_command(key).ok());
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{60}), 90.0, 0.001);
+    Command move; move.type = CommandType::KeyframeMove;
+    move.keyframe_move.track = key.keyframe.track;
+    move.keyframe_move.fromTime = FrameIndex{60}; move.keyframe_move.toTime = FrameIndex{70};
+    AUREA_CHECK(r.e.apply_command(move).ok());
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{70}), 90.0, 0.001);
+    key.keyframe.track.property = TrackProperty::TimeRemap;
+    key.keyframe.time = FrameIndex{70}; key.keyframe.value = 135;
+    AUREA_CHECK(r.e.apply_command(key).ok());
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{70}), 135.0, 0.001);
+    bridge::KeyframeRow rows[16]{};
+    const u32 count = r.e.query_keyframes(r.layer.pack(), rows, 16);
+    AUREA_CHECK_EQ(count, 3u);
+    for (u32 i = 0; i < count; ++i) AUREA_CHECK_EQ(rows[i].property, static_cast<u32>(TrackProperty::TimeRemap));
+    u32 layers = 0;
+    AUREA_CHECK_EQ(r.e.query_all_keyframes(nullptr, 0, nullptr, 0, &layers), 3u);
+    f32 samples[3]{};
+    AUREA_CHECK_EQ(r.e.query_track_curve(r.layer.pack(), static_cast<u32>(TrackProperty::EffectParam), effect, 0, 0, 70, samples, 3), 3u);
+    AUREA_CHECK_NEAR(samples[2], 4.5f, 0.001f);
+    Command enabled; enabled.type = CommandType::EffectSetEnabled;
+    enabled.effect_enabled.layer = r.layer; enabled.effect_enabled.effect = EffectId{effect, 0}; enabled.effect_enabled.enabled = false;
+    AUREA_CHECK(r.e.apply_command(enabled).ok());
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{70}), 70.0, 0.001);
+    enabled.effect_enabled.enabled = true;
+    AUREA_CHECK(r.e.apply_command(enabled).ok());
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{70}), 135.0, 0.001);
+    const char* path = "remap_effect_canonical_test.aurea";
+    AUREA_CHECK(r.e.save_project(path).ok());
+    AUREA_CHECK(r.e.load_project(path).ok());
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{70}), 135.0, 0.001);
+    std::remove(path);
+    key.type = CommandType::KeyframeDelete;
+    AUREA_CHECK(r.e.apply_command(key).ok());
+    AUREA_CHECK_EQ(r.L()->timeRemap.keys.size(), usize{2});
+}
+
+AUREA_TEST(ClipTime, RemapSmoothFreezeAndReversePresetsChangeSourceTime) {
+    TimeRig r(cfg_with_audio());
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = r.layer;
+    add.effect_add.effectType = effect_type_id(effect_keys::kTimeRemap); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(r.e.apply_command(add).ok());
+    Command param; param.type = CommandType::EffectSetParam; param.effect_param.layer = r.layer;
+    param.effect_param.effect = EffectId{r.L()->effects.back().id, 0};
+    param.effect_param.paramIndex = 1; param.effect_param.value = 1;
+    AUREA_CHECK(r.e.apply_command(param).ok());
+    AUREA_CHECK(r.L()->timeRemap.keys[0].interp == Interpolation::EaseInOut);
+    AUREA_CHECK(r.L()->source_frame(FrameIndex{30}) < 25.0);
+    Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{60}, 30.0);
+    AUREA_CHECK(r.e.apply_command(seek).ok());
+    const f64 frozen = r.L()->source_frame(FrameIndex{60});
+    AUREA_CHECK(r.e.apply_speed_ramp(r.layer.pack(), 5));
+    for (i64 frame : {0LL, 280LL, 30LL, 150LL}) AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{frame}), frozen, 0.001);
+    AUREA_CHECK(r.e.apply_speed_ramp(r.layer.pack(), 6));
+    AUREA_CHECK(r.L()->source_frame(FrameIndex{10}) > r.L()->source_frame(FrameIndex{100}));
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{150}), 150.0, 0.001);
+}
+
+AUREA_TEST(ClipTime, MoveVideoToTwoSecondPlayheadPreservesSourceAndUndo) {
+    TimeRig r(cfg_with_audio());
+    const FrameIndex oldEnd = r.L()->end;
+    Command seek; seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{60}, 30.0);
+    AUREA_CHECK(r.e.apply_command(seek).ok());
+    Command move; move.type = CommandType::LayerSetTimeRange;
+    move.layer_range.layer = r.layer;
+    move.layer_range.start = FrameIndex{60};
+    move.layer_range.end = FrameIndex{60 + oldEnd.value};
+    move.layer_range.setOffset = 0;
+    // Same asynchronous command queue used by the iOS dock bridge.
+    AUREA_CHECK_EQ(r.e.submit_commands(&move, 1, nullptr, 0), 1u);
+    AUREA_CHECK(r.e.render_frame().ok());
+    AUREA_CHECK_EQ(r.L()->start.value, 60LL);
+    AUREA_CHECK_EQ(r.L()->end.value - r.L()->start.value, oldEnd.value);
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{60}), 0.0, 0.001);
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{90}), 30.0, 0.001);
+    for (i64 frame : {90LL, 60LL, 120LL, 61LL}) {
+        seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(r.e.apply_command(seek).ok());
+        AUREA_CHECK(r.e.render_frame().ok());
+        AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{frame}), static_cast<f64>(frame - 60), 0.001);
+    }
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(r.L()->start.value, 0LL);
+    AUREA_CHECK_EQ(r.L()->end.value, oldEnd.value);
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{60}), 60.0, 0.001);
+}

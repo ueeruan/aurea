@@ -425,8 +425,9 @@ struct PreviewMetalView: UIViewRepresentable {
                 stageMode = .pending; handle = -1; shapeHandle = -1; gizmoAxis = -1; targetLayer = nil
                 axisLock = 0; sweptAngle = 0; pinchRotationActive = false
                 model.refreshSelectedLayer()
-                if startShape(at: first.position, view: view) { stageMode = .shape }
+                if !model.sceneEditor && startShape(at: first.position, view: view) { stageMode = .shape }
                 else if startGizmo(at: first.position, view: view) { stageMode = .gizmo }
+                else if model.sceneEditor { stageMode = .idle }
                 else { recordTarget(first.position, view: view) }
                 if stageMode == .pending && handle < 0, let anchor = model.previewMarkerAnchor {
                     let p = screenPoint(anchor.x, anchor.y, view: view)
@@ -640,10 +641,19 @@ struct PreviewMetalView: UIViewRepresentable {
             let next = model.engine.gizmoMoveLocal(id, axis: UInt32(gizmoAxis), amount: amount).map(\.floatValue)
             guard next.count == 3 else { return }
             let animated = ((model.detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0) & 7 != 0
-            for axis in 0...2 {
-                if animated { model.keyProperty(UInt32(axis), value: next[axis]) }
-                else { model.setTransform(UInt32(axis), value: next[axis], layer: id) }
+            // Submission is asynchronous: three scalar setters would each read
+            // the same old XYZ and overwrite the preceding axis command.
+            let local = model.localPlayhead
+            model.mutate { core in
+                if model.sceneEditor {
+                    for axis in 0...2 { core.layoutTransform(id, property: UInt32(axis), value: next[axis]) }
+                } else if animated {
+                    for axis in 0...2 { core.insertKeyframe(forLayer: id, property: UInt32(axis), time: local, value: next[axis]) }
+                } else {
+                    core.setPosition(forLayer: id, x: next[0], y: next[1], z: next[2])
+                }
             }
+            model.refreshModel(force: true)
         }
         private func startShape(at point: CGPoint, view: UIView) -> Bool {
             guard ShapeStageGeometry.enabled(model) else { return false }

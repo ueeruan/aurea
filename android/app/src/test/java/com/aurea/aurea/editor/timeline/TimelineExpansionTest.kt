@@ -6,7 +6,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TimelineExpansionTest {
-    private fun row(id: Long) = RowModel(id, LayerType.Video, 100, 200, 20, true, false, true, "Clip", 0, intArrayOf(110), emptyArray())
+    private fun row(id: Long, track: TimelineTrack? = null) = RowModel(id, LayerType.Video, 100, 200, 20, true, false, true, "Clip", 0, intArrayOf(110), emptyArray(), track)
     @Test fun expandedKeysPreserveTrackIdentityAndLocalTime() {
         val position = KeyframeRow(0, -1, 30, 10f, 1, 0)
         val effect = KeyframeRow(31, 7, 30, 20f, 1, 2)
@@ -25,5 +25,20 @@ class TimelineExpansionTest {
         }
         assertTrue(expanded.single { it.track == TimelineTrack(31, 7, -1) }.keysAt.isEmpty())
         assertSame(base, expandedRows(base, null, emptyMap(), emptyList()))
+    }
+    @Test fun compactPropertyGeometryKeepsKeysAndFollowingLayersAligned() {
+        val lane = row(5, TimelineTrack(0))
+        val rows = listOf(row(5), lane, row(5, TimelineTrack(31, 7, 2)), row(6))
+        for (density in listOf(1f, 2.5f)) {
+            val layerHeight = 56f * density
+            val tops = listOf(0f, 56f, 84f, 112f, 168f)
+            tops.forEachIndexed { index, top ->
+                assertEquals(top * density, timelineRowTop(rows, index, layerHeight, density), 0.001f)
+                assertEquals(index, timelineRowIndex(rows, top * density, layerHeight, density))
+            }
+            assertEquals(1, timelineRowIndex(rows, 83.9f * density, layerHeight, density))
+            assertEquals(2, timelineRowIndex(rows, 111.9f * density, layerHeight, density))
+            assertEquals(-1, timelineRowIndex(rows, -1f, layerHeight, density))
+        }
     }
 }

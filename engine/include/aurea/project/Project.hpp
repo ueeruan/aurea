@@ -73,6 +73,9 @@ struct ExportSettings {
     /// Dither de 1/2 LSB na conversão para 8 bits. Só os testes desligam
     /// (querem códigos exatos). Não persiste.
     bool dither = true;
+    /// Offline neural super-resolution. 0 = normal, 2/4 = neural output scale.
+    /// Session option: output dimensions remain the requested final quality.
+    u32 aiUpscale = 0;
 };
 
 /// Ajustes de interface persistidos com o projeto — zoom da timeline, escala

@@ -436,6 +436,8 @@ NS_SWIFT_NAME(AureaEngine)
                            intensity:(float)intensity rotation:(float)rotation exposure:(float)exposure NS_SWIFT_NAME(setObjectEnvironment(forLayer:source:hdri:intensity:rotation:exposure:));
 /// {fonte, asset, intensidade, giro, exposicao}.
 - (NSArray<NSNumber*>*)objectEnvironmentForLayer:(long long)layerId;
+- (NSArray<NSNumber*>*)materialsForLayer:(long long)layerId NS_SWIFT_NAME(materials(forLayer:));
+- (BOOL)setMaterialForLayer:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value NS_SWIFT_NAME(setMaterial(forLayer:index:param:value:));
 
 // --- Composição -------------------------------------------------------------
 - (void)setComposition:(uint64_t)composition width:(uint32_t)width height:(uint32_t)height;
@@ -478,6 +480,13 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)clearHdri;
 - (long long)addShape:(uint32_t)preset;
 - (long long)addText:(nullable NSString*)content;
+- (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance;
+- (NSArray<NSNumber*>*)sceneGuides;
+- (void)layoutTransform:(long long)layer property:(uint32_t)property value:(float)value;
+- (long long)addLight:(uint32_t)kind;
+- (NSArray<NSNumber*>*)lightInfo:(long long)layer;
+- (void)setLightParam:(long long)layer param:(uint32_t)param value:(float)value;
+- (long long)addCamera;
 - (long long)addNull:(BOOL)threeD;
 - (long long)addText3D:(NSString*)content depth:(float)depth alignment:(uint32_t)alignment
                      r:(float)r g:(float)g b:(float)b;
@@ -633,6 +642,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps;
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale;
 - (void)cancelExport;
 /// Thumbnail quadrado do frame do playhead não é export: use `captureFrame`.
 @end

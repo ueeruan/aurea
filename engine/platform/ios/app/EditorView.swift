@@ -21,11 +21,13 @@ struct EditorView: View {
     @StateObject private var shell = ShellPresentation()
     var body: some View {
         GeometryReader { geometry in
-            let wide = !model.fullscreen && EditorLayout.isWide(geometry.size.width, geometry.size.height)
+            let wide = !model.fullscreen && model.panel != .curve && EditorLayout.isWide(geometry.size.width, geometry.size.height)
             let sideWidth = (geometry.size.width * 0.4).clamped(to: 280...380)
             let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent, fullscreen: model.fullscreen)
             Group {
-                if wide {
+                if model.sceneEditor {
+                    SceneLayoutWorkspace(height: geometry.size.height)
+                } else if wide {
                     VStack(spacing: 0) {
                         TopBarView().frame(height: EditorLayout.topBar)
                         HStack(spacing: 0) {
@@ -52,7 +54,7 @@ struct EditorView: View {
             }
             .background(AureaColors.background.ignoresSafeArea())
             .overlay(alignment: .bottomTrailing) {
-                if !model.fullscreen && !model.showAddLayer && model.sheetContent != .panel {
+                if !model.sceneEditor && !model.fullscreen && !model.showAddLayer && model.sheetContent != .panel {
                     Button { model.openAddLayer() } label: {
                         MaterialGlyph("filled.Add", size: 32, color: AureaColors.accent)
                             .frame(width: StageDim.fab, height: StageDim.fab)
@@ -216,6 +218,27 @@ private struct ShellStageBanner: View {
             let fit = min(size.width / CGFloat(max(1, model.compositionWidth)), size.height / CGFloat(max(1, model.compositionHeight)))
             let origin = CGPoint(x: (size.width - CGFloat(model.compositionWidth) * fit) / 2, y: (size.height - CGFloat(model.compositionHeight) * fit) / 2)
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: origin.x + CGFloat(x) * fit, y: origin.y + CGFloat(y) * fit) }
+            if model.sceneEditor {
+                let lines = model.engine.sceneGuides().map(\.floatValue)
+                for i in stride(from: 0, to: lines.count, by: 5) {
+                    var line = Path(); line.move(to: screen(lines[i], lines[i + 1])); line.addLine(to: screen(lines[i + 2], lines[i + 3]))
+                    let color: Color = lines[i + 4] == 1 ? .yellow : lines[i + 4] == 2 ? .cyan : .gray.opacity(0.35)
+                    context.stroke(line, with: .color(color), lineWidth: 1)
+                }
+                if let selected = model.selectedLayer {
+                    let g = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
+                    if g.count == 8 {
+                        let tips = ShellStageGeometry.gizmoTips(stride(from: 0, to: 8, by: 2).map { screen(g[$0], g[$0 + 1]) })
+                        for i in 1...3 {
+                            var line = Path(); line.move(to: tips[0]); line.addLine(to: tips[i])
+                            let color = [StageInk.gizmoX, StageInk.gizmoY, StageInk.gizmoZ][i - 1]
+                            context.stroke(line, with: .color(color), lineWidth: 2.5)
+                            circle(&context, tips[i], 7.5, color)
+                        }
+                    }
+                }
+                return
+            }
             if model.panel == .vector && model.vectorFreehand {
                 if model.freehandPoints.count >= 4 {
                     var path = Path(); path.move(to: screen(model.freehandPoints[0], model.freehandPoints[1]))
@@ -1014,8 +1037,10 @@ private struct AddLayerSheet: View {
                             else { close(); model.groupSelection() }
                         }
                     case 5:
+                        card("scene_workspace", glyph: CupertinoGlyph.Cube, accent: true) { close(); model.enterSceneEditor() }
                         card("sh_add_model_3d", glyph: CupertinoGlyph.Cube, accent: true) { files(.model) }
                         card("sh_add_text_3d", glyph: ShellGlyph.TextformatAlt, color: ShellColors.text3D) { model.addText3D(content: "Texto", depth: 0.25); close() }
+                        card("panel_camera_3d", glyph: CupertinoGlyph.CameraFill, accent: true) { model.addCamera(); close() }
                         drawnCard("sh_add_null_3d", kind: -1) { model.addNull(threeD: true); close() }
                     case 6:
                         card("editor_mao_livre", glyph: ShellGlyph.Scribble, accent: true) { close(); model.addVector(0, freehand: true) }
@@ -1106,5 +1131,100 @@ private struct ShellMediaPicker: UIViewControllerRepresentable {
                 } catch { DispatchQueue.main.async { picked(nil, video) } }
             }
         }
+    }
+}
+
+@MainActor private struct SceneLayoutWorkspace: View {
+    @EnvironmentObject private var model: AureaModel
+    let height: CGFloat
+    @State private var group = 0
+    @State private var materials = false
+    @State private var lights = false
+    var body: some View {
+        VStack(spacing: 4) {
+            ScrollView(.horizontal) { HStack {
+                Button("← Timeline") { model.exitSceneEditor() }
+                Button("↶") { model.undo() }
+                Button("↷") { model.redo() }
+                Button(AureaText.t("panel_adicionar")) { model.showAddLayer = true }
+                Button("PBR / HDRI") { model.panel = .layer3D; materials = true }.disabled(model.selectedLayer?.kind != 10)
+                Spacer()
+                Button(AureaText.t("pn_t3d_lighting")) { lights = true }
+                Button(AureaText.t("panel_camera_3d")) { model.addCamera() }
+                Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
+                Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: "Texto", depth: 0.25) }
+            }.padding(.horizontal, 10) }
+            PreviewStage(height: max(96, height - 256))
+            ScrollView(.horizontal) {
+                HStack { ForEach(model.layers.filter { $0.threeD }) { row in
+                    Button((model.primarySelection == row.id ? "● " : "") + row.name) { model.select(layerId: row.id) }
+                } }.padding(.horizontal, 10)
+            }
+            HStack {
+                VStack { Text(AureaText.t("scene_orbit_x")); Slider(value: $model.sceneYaw, in: -180...180).onChange(of: model.sceneYaw) { _ in model.updateSceneView() } }
+                VStack { Text(AureaText.t("scene_orbit_y")); Slider(value: $model.scenePitch, in: -80...80).onChange(of: model.scenePitch) { _ in model.updateSceneView() } }
+                VStack { Text(AureaText.t("scene_zoom")); Slider(value: $model.sceneDistance, in: 0.25...10).onChange(of: model.sceneDistance) { _ in model.updateSceneView() } }
+            }.padding(.horizontal, 12)
+            Picker("Transform", selection: $group) { Text(AureaText.t("fx_posicao")).tag(0); Text(AureaText.t("panel_escala")).tag(1); Text(AureaText.t("panel_rotacao")).tag(2) }.pickerStyle(.segmented)
+            if let id = model.primarySelection {
+                let values = StageGeom.floats(model.detail[["position", "scale", "rotation"][group]])
+                HStack { ForEach(0..<3, id: \.self) { axis in
+                    HStack {
+                        Text(["X", "Y", "Z"][axis])
+                        SceneNumberField(value: values.count > axis ? values[axis] : 0) { model.setTransform(UInt32(group * 3 + axis), value: $0, layer: id) }
+                            .id("transform:\(id):\(group):\(axis)")
+                    }
+                } }.padding(.horizontal, 10)
+            }
+        }.font(.caption)
+        .sheet(isPresented: $model.showAddLayer) { AddLayerSheet().environmentObject(model) }
+        .sheet(isPresented: $lights) { SceneLightControls().environmentObject(model) }
+        .sheet(isPresented: $materials) { Panel3DView().environmentObject(model) }
+        .onChange(of: model.panel) { panel in if panel == .none { materials = false } }
+    }
+}
+
+@MainActor private struct SceneLightControls: View {
+    @EnvironmentObject private var model: AureaModel
+    var body: some View {
+        ScrollView { VStack {
+            HStack { Button(AureaText.t("scene_light_directional")) { model.addLight(0) }; Button(AureaText.t("scene_light_point")) { model.addLight(1) } }
+            if let id = model.primarySelection {
+                let values = model.engine.lightInfo(id).map(\.floatValue)
+                if values.count == 10 {
+                    ForEach(Array(1..<(values[0] == 0 ? 5 : 6)), id: \.self) { param in
+                        HStack {
+                            Text(["", AureaText.t("panel_intensidade"), "R", "G", "B", AureaText.t("scene_light_range")][param])
+                            SceneNumberField(value: values[param]) { model.setLightParam(UInt32(param), value: $0) }
+                                .id("light:\(id):\(param)")
+                            if param < 5 {
+                                let here = ((model.detail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0) & (1 << (20 + param)) != 0
+                                Button(here ? "◆" : "◇") { model.toggleLightKey(UInt32(param), value: values[param]) }
+                            }
+                        }
+                    }
+                    if values[0] == 0 { Toggle(AureaText.t("scene_light_shadows"), isOn: Binding(get: { values[8] >= 0.5 }, set: { model.setLightParam(8, value: $0 ? 1 : 0) })) }
+                }
+            }
+        }.padding() }
+    }
+}
+
+/// Preserve intermediate numeric input and the insertion point across core refreshes.
+@MainActor private struct SceneNumberField: View {
+    let value: Float
+    let onEdit: (Float) -> Void
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+    var body: some View {
+        TextField("", text: $draft)
+            .keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder)
+            .focused($focused)
+            .onAppear { draft = String(value) }
+            .onChange(of: value) { next in if !focused { draft = String(next) } }
+            .onChange(of: focused) { active in if !active { draft = String(value) } }
+            .onChange(of: draft) { text in
+                if focused, let next = Float(text), next.isFinite { onEdit(next) }
+            }
     }
 }

@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <string>
+#include <limits>
 
 using namespace aurea;
 
@@ -1053,6 +1054,260 @@ AUREA_TEST(Serialization, LargeReverseOrderedTrackLoadsInSortedOrder) {
     for (i64 i = 0; i < count; ++i) {
         AUREA_CHECK_EQ(actual->keys[static_cast<usize>(i)].time.value, i + 1);
         AUREA_CHECK_NEAR(actual->keys[static_cast<usize>(i)].value, static_cast<f32>(i + 1), 1e-6);
+    }
+    std::remove(path.c_str());
+}
+
+namespace {
+Layer* remap_test_layer(Project& project) {
+    auto* comp = project.timeline().composition(project.timeline().root());
+    return comp->layer(comp->order().at(0));
+}
+u32 legacy_remap_effect(Layer& layer, bool enabled = true) {
+    EffectInstance effect;
+    effect.id = layer.alloc_effect_id();
+    effect.type = effect_type_id(effect_keys::kTimeRemap);
+    effect.enabled = enabled;
+    effect.params.resize(2);
+    layer.effects.push_back(effect);
+    return effect.id;
+}
+}
+
+AUREA_TEST(Serialization, LegacyRemapSecondsPreserveFractionalFpsCurvesAndHistory) {
+    const std::string path = temp_path("legacy_remap_seconds");
+    constexpr f64 fps = 30000.0 / 1001.0;
+    auto created = Project::create_new(320, 180, fps, "Old remap");
+    Project original = std::move(*created);
+    auto* comp = original.timeline().composition(original.timeline().root());
+    const LayerId id = comp->add_layer(LayerKind::Video, "VFR clip");
+    Layer* layer = comp->layer(id);
+    layer->start = FrameIndex{17}; layer->end = FrameIndex{217};
+    Asset asset; asset.kind = AssetKind::Video; asset.name = "VFR";
+    asset.video.fps = 59.94; asset.video.variableFrameRate = true;
+    asset.timebaseFps = 120.0; asset.contentHash = 812345;
+    layer->source = original.add_asset(std::move(asset));
+    const u32 effect = legacy_remap_effect(*layer, false);
+    Track& old = layer->tracks.get_or_create(TrackProperty::EffectParam, effect, 0);
+    // Explicit legacy data: time remains a local timeline frame, value is seconds.
+    old.keys = {Keyframe{FrameIndex{91}, 3.25f}, Keyframe{FrameIndex{7}, 0.5f, Interpolation::Bezier}};
+    old.keys.back().bx1 = 0.21f; old.keys.back().by1 = -0.4f;
+    old.keys.back().bx2 = 0.72f; old.keys.back().by2 = 1.3f;
+    old.keys.back().tangentIn = -0.75f; old.keys.back().tangentOut = 1.25f;
+    old.keys.back().easingPreset = 17;
+    AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}).ok());
+    Engine engine; EngineConfig config; config.workerCount = 1; config.disableAutosave = true;
+    AUREA_CHECK(engine.initialize(config).ok());
+    AUREA_CHECK(engine.load_project(path.c_str()).ok());
+    comp = engine.project()->timeline().composition(engine.project()->timeline().root());
+    const LayerId loadedId = comp->order().at(0);
+    layer = comp->layer(loadedId);
+    AUREA_CHECK_NEAR(comp->fps(), fps, 1e-12);
+    AUREA_CHECK(layer->timeRemapLegacyMigrated);
+    AUREA_CHECK(!layer->timeRemapEnabled);
+    AUREA_CHECK_EQ(layer->tracks.size(), 0u);
+    AUREA_CHECK_EQ(layer->timeRemapLegacyTracks.size(), usize{1});
+    AUREA_CHECK_EQ(layer->timeRemap.keys.size(), usize{2});
+    const Keyframe first = layer->timeRemap.keys.front();
+    AUREA_CHECK_EQ(first.time.value, i64{7});
+    AUREA_CHECK_NEAR(first.value, 0.5 * fps, 1e-5);
+    AUREA_CHECK_NEAR(first.tangentIn, -0.75 * fps, 1e-5);
+    AUREA_CHECK_NEAR(first.tangentOut, 1.25 * fps, 1e-5);
+    AUREA_CHECK_NEAR(first.by1, -0.4f, 1e-7);
+    AUREA_CHECK_NEAR(first.by2, 1.3f, 1e-7);
+    AUREA_CHECK_EQ(first.easingPreset, u16{17});
+    AUREA_CHECK_EQ(first.interp, Interpolation::Bezier);
+    AUREA_CHECK_NEAR(layer->timeRemapLegacyTracks[0].keys.front().value, 0.5f, 1e-7);
+    const Asset* loadedAsset = engine.project()->asset(layer->source);
+    AUREA_CHECK(loadedAsset && loadedAsset->video.variableFrameRate);
+    if (loadedAsset) AUREA_CHECK_NEAR(loadedAsset->video.fps, 59.94, 1e-12);
+    bridge::KeyframeRow rows[8]{};
+    AUREA_CHECK_EQ(engine.query_keyframes(loadedId.pack(), rows, 8), 2u);
+    AUREA_CHECK_EQ(engine.query_all_keyframes(nullptr, 0, nullptr, 0, nullptr), 2u);
+    for (u32 i = 0; i < 2; ++i) AUREA_CHECK_EQ(rows[i].property, static_cast<u32>(TrackProperty::TimeRemap));
+    Command enabled; enabled.type = CommandType::EffectSetEnabled;
+    enabled.effect_enabled.layer = loadedId; enabled.effect_enabled.effect = EffectId{effect, 0}; enabled.effect_enabled.enabled = true;
+    AUREA_CHECK(engine.apply_command(enabled).ok());
+    AUREA_CHECK(layer->timeRemapEnabled);
+    Command key; key.type = CommandType::KeyframeSetValue;
+    key.keyframe.track = TrackRef{loadedId, TrackProperty::EffectParam, effect, 0};
+    key.keyframe.time = FrameIndex{7}; key.keyframe.value = 2.0f;
+    AUREA_CHECK(engine.apply_command(key).ok());
+    AUREA_CHECK_NEAR(layer->timeRemap.keys.front().value, 2.0 * fps, 1e-5);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(engine.apply_command(undo).ok());
+    comp = engine.project()->timeline().composition(engine.project()->timeline().root());
+    layer = comp->layer(loadedId);
+    AUREA_CHECK_NEAR(layer->timeRemap.keys.front().value, first.value, 1e-7);
+    AUREA_CHECK_EQ(layer->timeRemapLegacyTracks.size(), usize{1});
+    // Removing every canonical key must not resurrect archived aliases on load.
+    key.type = CommandType::KeyframeDelete;
+    AUREA_CHECK(engine.apply_command(key).ok());
+    key.keyframe.time = FrameIndex{91};
+    AUREA_CHECK(engine.apply_command(key).ok());
+    AUREA_CHECK(engine.save_project(path.c_str()).ok());
+    AUREA_CHECK(engine.load_project(path.c_str()).ok());
+    layer = remap_test_layer(*engine.project());
+    AUREA_CHECK(layer->timeRemap.keys.empty());
+    AUREA_CHECK_EQ(layer->timeRemapLegacyTracks.size(), usize{1});
+    AUREA_CHECK_NEAR(layer->timeRemapLegacyTracks[0].keys.back().value, 3.25f, 1e-7);
+    AUREA_CHECK_EQ(engine.query_all_keyframes(nullptr, 0, nullptr, 0, nullptr), 0u);
+    engine.shutdown(); std::remove(path.c_str());
+}
+
+AUREA_TEST(Serialization, LegacyRemapCanonicalWinsAndArchivesConflictingInformation) {
+    const std::string path = temp_path("legacy_remap_canonical");
+    Project original = make_project();
+    auto* comp = original.timeline().composition(original.timeline().root());
+    Layer* layer = comp->layer(comp->add_layer(LayerKind::Video, "Canonical"));
+    const u32 effect = legacy_remap_effect(*layer);
+    layer->timeRemap.property = TrackProperty::TimeRemap;
+    layer->timeRemap.set(FrameIndex{11}, 72.0f, Interpolation::Hold);
+    layer->timeRemapEnabled = false;
+    layer->tracks.get_or_create(TrackProperty::TimeRemap).set(FrameIndex{5}, 900.0f);
+    layer->tracks.get_or_create(TrackProperty::EffectParam, effect, 0).set(FrameIndex{11}, 10.0f);
+    // Another effect component has unknown semantics and must stay untouched.
+    layer->tracks.get_or_create(TrackProperty::EffectParam, effect, 256).set(FrameIndex{99}, 6.0f);
+    AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}).ok());
+    Project loaded;
+    AUREA_CHECK(ProjectSerializer::load(loaded, path, LoadOptions{}).ok());
+    layer = remap_test_layer(loaded);
+    AUREA_CHECK_EQ(layer->timeRemap.keys.size(), usize{1});
+    AUREA_CHECK_EQ(layer->timeRemap.keys[0].time.value, i64{11});
+    AUREA_CHECK_NEAR(layer->timeRemap.keys[0].value, 72.0f, 1e-7);
+    AUREA_CHECK_EQ(layer->timeRemap.keys[0].interp, Interpolation::Hold);
+    AUREA_CHECK(!layer->timeRemapEnabled);
+    AUREA_CHECK_EQ(layer->timeRemapLegacyTracks.size(), usize{2});
+    AUREA_CHECK_EQ(layer->tracks.size(), 1u);
+    AUREA_CHECK_EQ(layer->tracks.at(0).effectParamIndex, 256u);
+    AUREA_CHECK(ProjectSerializer::save(loaded, path, SaveOptions{}).ok());
+    Project reopened;
+    AUREA_CHECK(ProjectSerializer::load(reopened, path, LoadOptions{}).ok());
+    layer = remap_test_layer(reopened);
+    AUREA_CHECK_EQ(layer->timeRemapLegacyTracks.size(), usize{2});
+    AUREA_CHECK_EQ(layer->timeRemap.keys.size(), usize{1});
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Serialization, LegacyRemapFrameUnitsWinButAmbiguousEffectsAreNotGuessed) {
+    const std::string path = temp_path("legacy_remap_ambiguous");
+    Project original = make_project();
+    auto* comp = original.timeline().composition(original.timeline().root());
+    Layer* layer = comp->layer(comp->add_layer(LayerKind::Video, "Ambiguous"));
+    const u32 a = legacy_remap_effect(*layer), b = legacy_remap_effect(*layer);
+    layer->tracks.get_or_create(TrackProperty::EffectParam, a, 0).set(FrameIndex{8}, 1.0f);
+    layer->tracks.get_or_create(TrackProperty::EffectParam, b, 0).set(FrameIndex{9}, 2.0f);
+    AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}).ok());
+    Project loaded;
+    AUREA_CHECK(ProjectSerializer::load(loaded, path, LoadOptions{}).ok());
+    layer = remap_test_layer(loaded);
+    AUREA_CHECK(!layer->timeRemapLegacyMigrated);
+    AUREA_CHECK(layer->timeRemap.keys.empty());
+    AUREA_CHECK_EQ(layer->tracks.size(), 2u);
+    layer->tracks.get_or_create(TrackProperty::TimeRemap).set(FrameIndex{13}, 43.5f);
+    AUREA_CHECK(ProjectSerializer::save(loaded, path, SaveOptions{}).ok());
+    Project reopened;
+    AUREA_CHECK(ProjectSerializer::load(reopened, path, LoadOptions{}).ok());
+    layer = remap_test_layer(reopened);
+    AUREA_CHECK(layer->timeRemapLegacyMigrated && layer->timeRemapEnabled);
+    AUREA_CHECK_EQ(layer->timeRemap.keys[0].time.value, i64{13});
+    AUREA_CHECK_NEAR(layer->timeRemap.keys[0].value, 43.5f, 1e-7);
+    AUREA_CHECK_EQ(layer->timeRemapLegacyTracks.size(), usize{3});
+    AUREA_CHECK_EQ(layer->tracks.size(), 0u);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Serialization, ObjectMaterialOverridesAndAnimationSurviveIndependently) {
+    const std::string path = temp_path("object_materials");
+    Project original = make_project();
+    auto* comp = original.timeline().composition(original.timeline().root());
+    const LayerId a = comp->add_layer(LayerKind::Model3D, "Red"), b = comp->add_layer(LayerKind::Model3D, "Original");
+    MaterialOverride override;
+    override.materialIndex = 3; override.mask = 63;
+    override.baseColor = {0.9f, 0.2f, 0.1f, 0.75f}; override.metallic = 0.8f; override.roughness = 0.27f;
+    comp->layer(a)->model.materials.push_back(override);
+    auto& track = comp->layer(a)->tracks.get_or_create(TrackProperty::MaterialParam, 3, 5);
+    track.set(FrameIndex{3}, 0.2f, Interpolation::Bezier);
+    track.set(FrameIndex{90}, 0.9f);
+    track.keys[0].by1 = -0.3f; track.keys[0].by2 = 1.4f;
+    AUREA_CHECK(ProjectSerializer::save(original,path,SaveOptions{}).ok());
+    Project loaded;
+    AUREA_CHECK(ProjectSerializer::load(loaded,path,LoadOptions{}).ok());
+    comp = loaded.timeline().composition(loaded.timeline().root());
+    const Layer* restored = nullptr;
+    for (u32 i=0; i<comp->order().size(); ++i) {
+        const Layer* layer = comp->layer(comp->order().at(i));
+        if (layer->name == "Red") restored = layer;
+        else AUREA_CHECK(layer->model.materials.empty());
+    }
+    AUREA_CHECK(restored != nullptr);
+    if (restored) {
+        AUREA_CHECK_EQ(restored->model.materials.size(),usize{1});
+        const auto& value=restored->model.materials[0];
+        AUREA_CHECK_EQ(value.materialIndex,3u); AUREA_CHECK_EQ(value.mask,63u);
+        AUREA_CHECK_NEAR(value.baseColor.w,0.75f,1e-7);
+        AUREA_CHECK_NEAR(value.metallic,0.8f,1e-7); AUREA_CHECK_NEAR(value.roughness,0.27f,1e-7);
+        const Track* animation=restored->tracks.find(TrackProperty::MaterialParam,3,5);
+        AUREA_CHECK(animation != nullptr);
+        if (animation) {
+            AUREA_CHECK_NEAR(animation->keys[0].by1,-0.3f,1e-7);
+            AUREA_CHECK_NEAR(animation->sample(FrameIndex{90}),0.9f,1e-7);
+            AUREA_CHECK_NEAR(animation->sample(FrameIndex{3}),0.2f,1e-7);
+        }
+        Layer duplicate=*restored;
+        duplicate.model.materials[0].metallic=0.0f;
+        AUREA_CHECK_NEAR(restored->model.materials[0].metallic,0.8f,1e-7);
+    }
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Serialization, InvalidMaterialOverridesAreRejectedWithoutPartialLoad) {
+    const std::string path=temp_path("invalid_materials");
+    for (u32 invalid=0; invalid<5; ++invalid) {
+        Project original=make_project();
+        auto* comp=original.timeline().composition(original.timeline().root());
+        Layer* layer=comp->layer(comp->add_layer(LayerKind::Model3D,"Invalid"));
+        MaterialOverride value;
+        if (invalid==0) value.materialIndex=4096;
+        if (invalid==1) value.mask=64;
+        if (invalid==2) value.roughness=1.1f;
+        if (invalid==3) value.baseColor.x=std::numeric_limits<f32>::quiet_NaN();
+        layer->model.materials.push_back(value);
+        if (invalid==4) layer->model.materials.push_back(value);
+        AUREA_CHECK(ProjectSerializer::save(original,path,SaveOptions{}).ok());
+        Project loaded;
+        AUREA_CHECK(!ProjectSerializer::load(loaded,path,LoadOptions{}).ok());
+    }
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Serialization, BounceElasticAndStepsSurviveProjectReload) {
+    const std::string path = temp_path("easing_families");
+    Project original = make_project();
+    auto* comp = original.timeline().composition(original.timeline().root());
+    const LayerId id = comp->add_layer(LayerKind::Shape, "Easing families");
+    const auto modes = {Interpolation::Bounce, Interpolation::Elastic, Interpolation::Steps};
+    u32 index = 0;
+    for (auto mode : modes) {
+        auto& track = comp->layer(id)->tracks.get_or_create(static_cast<TrackProperty>(index++));
+        track.set(FrameIndex{0}, -20.f, mode); track.set(FrameIndex{100}, 80.f);
+    }
+    AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}).ok());
+    Project restored;
+    AUREA_CHECK(ProjectSerializer::load(restored, path, LoadOptions{}).ok());
+    auto* loadedComp = restored.timeline().composition(restored.timeline().root());
+    const Layer* loaded = nullptr;
+    for (u32 i=0; i<loadedComp->order().size(); ++i)
+        if (loadedComp->layer(loadedComp->order().at(i))->name == "Easing families") loaded = loadedComp->layer(loadedComp->order().at(i));
+    AUREA_CHECK(loaded != nullptr);
+    if (loaded) for (u32 i=0; i<3; ++i) {
+        const auto* before = comp->layer(id)->tracks.find(static_cast<TrackProperty>(i));
+        const auto* after = loaded->tracks.find(static_cast<TrackProperty>(i));
+        AUREA_CHECK(before && after);
+        if (!before || !after) continue;
+        AUREA_CHECK(before->keys[0].interp == after->keys[0].interp);
+        for (int frame=0; frame<=100; ++frame)
+            AUREA_CHECK_NEAR(before->sample(FrameIndex{frame}), after->sample(FrameIndex{frame}), 1e-6);
     }
     std::remove(path.c_str());
 }

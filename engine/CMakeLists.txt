@@ -164,6 +164,7 @@ target_compile_options(aurea_thirdparty PRIVATE
 set_target_properties(aurea_thirdparty PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_library(aurea_core STATIC ${AUREA_CORE_SOURCES})
+include(cmake/AureaNcnn.cmake)
 target_link_libraries(aurea_core PUBLIC aurea_thirdparty)
 
 target_include_directories(aurea_core
@@ -310,6 +311,9 @@ if(AUREA_PLATFORM_ANDROID)
         add_executable(aurea_media_probe tests/android_media_probe.cpp platform/android/MediaCodecSource.cpp)
         target_include_directories(aurea_media_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
         target_link_libraries(aurea_media_probe PRIVATE aurea_core android log mediandk)
+        add_executable(aurea_export_probe tests/android_export_probe.cpp platform/android/MediaCodecExport.cpp)
+        target_include_directories(aurea_export_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
+        target_link_libraries(aurea_export_probe PRIVATE aurea_core android log mediandk)
     endif()
     add_library(aurea SHARED
         platform/android/aurea_jni.cpp

@@ -4,6 +4,9 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/expr/Expression.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
+#include <cmath>
+#include <limits>
 
 #include <algorithm>
 #include <cerrno>
@@ -144,6 +147,7 @@ public:
     /// numa versão futura (ou perde, numa anterior): a leitura do que existe é
     /// válida e o resto fica no padrão.
     void skip_to_end() noexcept { pos_ = size_; }
+    void fail() noexcept { failed_ = true; pos_ = size_; }
 
 private:
     [[nodiscard]] bool need(usize n) noexcept {
@@ -203,7 +207,7 @@ void read_track(ByteReader& r, Track& t) {
         Keyframe k;
         k.time = FrameIndex{r.i64v()};
         k.value = r.f32v();
-        k.interp = checked_enum(r.u8v(), Interpolation::CustomCurve, Interpolation::Linear);
+        k.interp = checked_enum(r.u8v(), Interpolation::Steps, Interpolation::Linear);
         k.bx1 = r.f32v(); k.by1 = r.f32v(); k.bx2 = r.f32v(); k.by2 = r.f32v();
         k.tangentIn = r.f32v(); k.tangentOut = r.f32v();
         k.easingPreset = r.u16v();
@@ -664,6 +668,23 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.f32v(l.environmentExposure);
     w.f32v(l.environmentRotation);
     w.boolv(l.environmentBackground);
+    // v23: retired remap aliases remain recoverable, but cannot create ghost keys.
+    w.boolv(l.timeRemapLegacyMigrated);
+    w.u32v(static_cast<u32>(l.timeRemapLegacyTracks.size()));
+    for (const Track& track : l.timeRemapLegacyTracks) {
+        write_track(w, track);
+        w.boolv(track.expressionEnabled);
+        w.str(track.expression ? track.expression->source : std::string{});
+    }
+    // v24: material factors belong to the object, not its shared scene asset.
+    w.u32v(static_cast<u32>(l.model.materials.size()));
+    for (const MaterialOverride& material : l.model.materials) {
+        w.u32v(material.materialIndex);
+        w.u32v(material.mask);
+        w.vec4(material.baseColor);
+        w.f32v(material.metallic);
+        w.f32v(material.roughness);
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -679,7 +700,7 @@ void write_layer(ByteWriter& w, const Layer& l) {
 ///      textura/malha, colisão esfera/caixa, curvas ao longo da vida).
 /// v22: ambiente por objeto 3D (Scene ou Custom, com HDRI, intensidade,
 ///      exposição e rotação próprios).
-constexpr u32 kTimelineSectionVersion = 22;
+constexpr u32 kTimelineSectionVersion = 24;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -1042,6 +1063,115 @@ void read_layer(ByteReader& r, Layer& l) {
         l.environmentRotation = r.f32v();
         l.environmentBackground = r.boolv();
     }
+    if (g_readingTimelineVersion >= 23) {
+        l.timeRemapLegacyMigrated = r.boolv();
+        const u32 count = r.u32v();
+        if (count > kMaxTrackCount) { r.skip_to_end(); return; }
+        l.timeRemapLegacyTracks.resize(count);
+        for (Track& track : l.timeRemapLegacyTracks) {
+            read_track(r, track);
+            track.expressionEnabled = r.boolv();
+            const std::string source = r.str();
+            if (source.size() > expr::kMaxSourceBytes) { r.skip_to_end(); return; }
+            if (!source.empty()) track.expression = expr::compile(source);
+        }
+    }
+    if (g_readingTimelineVersion >= 24) {
+        const u32 count = r.u32v();
+        if (count > 4096) { r.fail(); return; }
+        l.model.materials.resize(count);
+        std::vector<u32> indices;
+        indices.reserve(count);
+        auto validFactor = [](f32 value) { return std::isfinite(value) && value >= 0.0f && value <= 1.0f; };
+        for (MaterialOverride& material : l.model.materials) {
+            material.materialIndex = r.u32v();
+            material.mask = r.u32v();
+            material.baseColor = r.vec4();
+            material.metallic = r.f32v();
+            material.roughness = r.f32v();
+            if (material.materialIndex >= 4096 || (material.mask & ~63u) ||
+                !validFactor(material.baseColor.x) || !validFactor(material.baseColor.y) ||
+                !validFactor(material.baseColor.z) || !validFactor(material.baseColor.w) ||
+                !validFactor(material.metallic) || !validFactor(material.roughness)) {
+                r.fail(); return;
+            }
+            indices.push_back(material.materialIndex);
+        }
+        std::sort(indices.begin(), indices.end());
+        if (std::adjacent_find(indices.begin(), indices.end()) != indices.end()) { r.fail(); return; }
+    }
+}
+
+// Values in the old effect's time parameter are seconds; direct TimeRemap
+// tracks already store composition frames. Never infer units from magnitudes,
+// source FPS, file duration or VFR sample count.
+void migrate_legacy_time_remap(Layer& layer, f64 fps) {
+    if (layer.timeRemapLegacyMigrated || !std::isfinite(fps) || fps <= 0.0) return;
+    auto units = [&](const Track& track) -> f64 {
+        if (track.property == TrackProperty::TimeRemap) return 1.0;
+        if (track.property != TrackProperty::EffectParam || track.effectParamIndex != 0) return 0.0;
+        for (const EffectInstance& effect : layer.effects)
+            if (effect.id == track.effectIndex && effect.type == effect_type_id(effect_keys::kTimeRemap)) return fps;
+        return 0.0; // Dangling IDs/other components are ambiguous, so leave them alone.
+    };
+    auto valid = [](const Track& track, f64 scale) {
+        if (track.keys.empty() || track.expression) return false;
+        auto fits = [scale](f32 value) {
+            const f64 converted = static_cast<f64>(value) * scale;
+            return std::isfinite(converted) && std::abs(converted) <= std::numeric_limits<f32>::max();
+        };
+        if (!fits(track.staticValue)) return false;
+        for (const Keyframe& key : track.keys)
+            if (!fits(key.value) || !fits(key.tangentIn) || !fits(key.tangentOut)) return false;
+        return true;
+    };
+    // Existing canonical animation wins as a whole: merging conflicting curves
+    // would invent timing between keys even when their timestamps differ.
+    bool hasLegacy = false;
+    for (u32 i = 0; i < layer.tracks.size(); ++i) hasLegacy |= units(layer.tracks.at(i)) != 0.0;
+    if (!hasLegacy) return;
+    const bool canonical = valid(layer.timeRemap, 1.0) || layer.timeRemap.has_expression();
+    if (!canonical) {
+        const Track* chosen = nullptr;
+        f64 scale = 0.0;
+        bool ambiguous = false;
+        for (u32 i = 0; i < layer.tracks.size(); ++i) {
+            const Track& track = layer.tracks.at(i);
+            const f64 candidate = units(track);
+            if (candidate == 0.0 || !valid(track, candidate)) continue;
+            if (!chosen || (track.property == TrackProperty::TimeRemap && chosen->property != TrackProperty::TimeRemap)) {
+                chosen = &track;
+                scale = candidate;
+                ambiguous = false;
+            } else if (track.property == chosen->property) ambiguous = true;
+        }
+        if (!chosen || ambiguous) return;
+        // Preserve even an unusable previous canonical record for recovery.
+        if (!layer.timeRemap.keys.empty() || layer.timeRemap.expression)
+            layer.timeRemapLegacyTracks.push_back(layer.timeRemap);
+        layer.timeRemap = *chosen;
+        layer.timeRemap.property = TrackProperty::TimeRemap;
+        layer.timeRemap.effectIndex = kInvalidIndex;
+        layer.timeRemap.effectParamIndex = 0;
+        layer.timeRemap.staticValue = static_cast<f32>(static_cast<f64>(layer.timeRemap.staticValue) * scale);
+        for (Keyframe& key : layer.timeRemap.keys) {
+            key.value = static_cast<f32>(static_cast<f64>(key.value) * scale);
+            key.tangentIn = static_cast<f32>(static_cast<f64>(key.tangentIn) * scale);
+            key.tangentOut = static_cast<f32>(static_cast<f64>(key.tangentOut) * scale);
+        }
+        layer.timeRemap.lastIndex = 0;
+        if (chosen->property == TrackProperty::TimeRemap) layer.timeRemapEnabled = true;
+        else {
+            for (const EffectInstance& effect : layer.effects)
+                if (effect.id == chosen->effectIndex) layer.timeRemapEnabled = effect.enabled;
+        }
+    }
+    layer.tracks.remove_if([&](const Track& track) {
+        if (units(track) == 0.0) return false;
+        layer.timeRemapLegacyTracks.push_back(track);
+        return true;
+    });
+    layer.timeRemapLegacyMigrated = true;
 }
 
 void write_asset(ByteWriter& w, const Asset& a) {
@@ -1350,7 +1480,7 @@ void apply_project_section(const u8* data, usize size, Project& p) {
     }
 }
 
-void apply_timeline_section(const u8* data, usize size, Project& p) {
+bool apply_timeline_section(const u8* data, usize size, Project& p) {
     ByteReader r(data, size);
     Timeline& t = p.timeline();
 
@@ -1361,7 +1491,7 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
     t.set_loop(r.boolv());
 
     const u32 compCount = r.u32v();
-    if (compCount > 256u) { r.skip_to_end(); return; }
+    if (compCount > 256u) return false;
     std::vector<std::pair<u64, CompositionId>> compMap;
     compMap.reserve(compCount);
 
@@ -1401,6 +1531,8 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
             const u64 layerPack = r.u64v();
             Layer layer;
             read_layer(r, layer);
+            if (!r.good()) return false;
+            migrate_legacy_time_remap(layer, fps);
             // O nome vindo do arquivo é preservado (add_layer só usa o padrão
             // quando o nome está vazio).
             const LayerId lid = c->add_layer(layer.kind, layer.name);
@@ -1505,6 +1637,7 @@ void apply_timeline_section(const u8* data, usize size, Project& p) {
     if (const CompositionId root = remapComp(CompositionId::unpack(rootPack)); root.valid()) t.set_root(root);
     else if (rootPack != 0) t.set_root(t.current());
     if (const CompositionId cur = remapComp(CompositionId::unpack(currentPack)); cur.valid()) (void)t.set_current(cur);
+    return r.good();
 }
 
 void apply_assets_section(const u8* data, usize size, Project& p) {
@@ -1837,13 +1970,20 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
             case SectionKind::Project:
                 apply_project_section(effective, effectiveSize, out);
                 break;
-            case SectionKind::Timeline:
+            case SectionKind::Timeline: {
                 report.timelineVersion = sh.version;
                 if (sh.version < kTimelineSectionVersion) report.olderFormat = true;
                 g_readingTimelineVersion = sh.version;
-                apply_timeline_section(effective, effectiveSize, out);
+                const bool valid = apply_timeline_section(effective, effectiveSize, out);
                 g_readingTimelineVersion = kTimelineSectionVersion;
+                if (!valid) {
+                    report.sectionsCorrupt.push_back(sh.kind);
+                    report.partial = true;
+                    if (outReport) *outReport = report;
+                    return fail(Errc::CorruptData, "invalid timeline data");
+                }
                 break;
+            }
             case SectionKind::Assets:
                 apply_assets_section(effective, effectiveSize, out);
                 break;

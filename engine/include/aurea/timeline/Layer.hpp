@@ -254,6 +254,16 @@ struct LightData {
     f32  shadowBias = 0.001f;
 };
 
+// Per-layer factors over the immutable imported material. Mask bits select
+// R/G/B/A/metallic/roughness; unselected components retain the asset value.
+struct MaterialOverride {
+    u32 materialIndex = 0;
+    u32 mask = 0;
+    Vec4 baseColor{1.0f, 1.0f, 1.0f, 1.0f};
+    f32 metallic = 1.0f;
+    f32 roughness = 1.0f;
+};
+
 struct Model3DData {
     AssetId scene{};
     /// Metros do modelo → pixels da composição, e o centro da caixa do modelo
@@ -267,6 +277,7 @@ struct Model3DData {
     bool    receiveShadows = true;
     /// Índices de LOD forçado, ou -1 para automático por tamanho na tela.
     i32     forcedLod = -1;
+    std::vector<MaterialOverride> materials;
 };
 
 /// Forma do emissor (Aurea Particular). Todas amostradas em forma fechada no
@@ -470,6 +481,10 @@ struct Layer {
     /// avaliação dela acontece ANTES de tudo (decide qual frame decodificar).
     Track timeRemap;
     bool  timeRemapEnabled = false;
+    // Recovery metadata for pre-canonical remap tracks. Never evaluated or shown
+    // as active keyframes; copied with the layer/history and persisted losslessly.
+    std::vector<Track> timeRemapLegacyTracks;
+    bool timeRemapLegacyMigrated = false;
 
     /// Velocidade do conteúdo (quadros da fonte por quadro da timeline).
     /// 0 = quadro congelado. `reversed` toca do ponto de saída para o de

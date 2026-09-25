@@ -156,6 +156,7 @@ internal fun expandedRows(base: List<RowModel>, expanded: Long?, keys: Map<Long,
                     34 -> "Vector · ${track.param + 1}"
                     35 -> "Shape · ${track.param + 1}"
                     36 -> "Particles · ${track.param + 1}"
+                    37 -> "Material ${track.effect + 1} · ${listOf("R", "G", "B", "Alpha", "Metallic", "Roughness").getOrNull(track.param) ?: track.param}"
                     else -> "3D · ${track.property}"
                 }
                 lane(track, name, values)
@@ -163,4 +164,22 @@ internal fun expandedRows(base: List<RowModel>, expanded: Long?, keys: Map<Long,
             lanes
         }
     }
+}
+
+/** Shared by paint, hit testing, scroll bounds and layer-reorder geometry. */
+internal fun timelineRowHeight(row: RowModel, layerHeight: Float, density: Float): Float =
+    if (row.track == null) layerHeight else 28f * density
+internal fun timelineRowTop(rows: List<RowModel>, index: Int, layerHeight: Float, density: Float): Float {
+    var top = 0f
+    for (i in 0 until index.coerceIn(0, rows.size)) top += timelineRowHeight(rows[i], layerHeight, density)
+    return top
+}
+internal fun timelineRowIndex(rows: List<RowModel>, y: Float, layerHeight: Float, density: Float): Int {
+    if (y < 0f) return -1
+    var bottom = 0f
+    for (i in rows.indices) {
+        bottom += timelineRowHeight(rows[i], layerHeight, density)
+        if (y < bottom) return i
+    }
+    return rows.size
 }

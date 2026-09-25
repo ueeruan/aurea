@@ -69,3 +69,67 @@ Graph-specific multi-key selection, horizontal key movement and value/speed
 Bezier-handle editing remain separate work. Native iOS compilation and touch
 interaction validation are still required on macOS/device. Existing easing
 handles, presets, curve copying and apply-to-all controls remain available.
+
+## Full-screen interaction increment (build 2110)
+
+Curve entry points now open a dedicated full-screen editor on Android and iOS.
+Easing, value and speed modes remain available; the preset bank is toggled from
+Presets to keep the graph wide by default. Previous/next segment controls and
+zoom controls have larger touch areas. Easing handles are inset horizontally
+so targets at domain boundaries remain inside the graph.
+
+Time Remap retains its effect-card editor and adds a 240 dp/point canvas,
+full-screen expansion, zoom/Fit and pan on empty space. Android uses one contact
+handler rather than competing tap/drag handlers. Key dragging preserves the
+initial finger-to-point offset. Both platforms follow the index returned by the
+core when a dragged remap key crosses another key, instead of editing the key
+that took its old slot. View navigation does not write project keys.
+
+Verified on 2026-09-25:
+- `engine/build/android-p0/2110-debug-regression.log`: assembleDebug and
+  testDebugUnitTest succeeded in 1m 58s.
+- `build/android/app/test-results/testDebugUnitTest/TEST-com.aurea.aurea.editor.panels.TrackGraphMathTest.xml`:
+  six tests, zero failures/errors. The three added cases exercise 48 dp hit
+  targets at densities 1/2/3.5, nearby/coincident point selection, and hit mapping
+  after zoom and pan. Existing value/velocity/viewport tests also passed.
+- All 17 JVM suites in that run: 99 tests, zero failures/errors.
+- iOS API/static-name audit: zero problems. This is not native Swift compilation
+  or native touch validation.
+
+Runtime acceptance still to record separately: enter through a timeline key and
+an effect parameter, drag each easing handle and a value point, change segment,
+open/close presets, pan/zoom/Fit, expand Time Remap, drag a point across another,
+then undo and reopen the project. Confirm the visible graph and preview follow
+the intended key. Exercise both orientations and safe-area sizes. The parent is
+performing emulator UI validation; no device result is claimed by this document.
+
+### Runtime QA follow-up: default smooth curve
+The parent confirmed the larger full-screen graph in
+`engine/build/android-p0/graph-fullscreen.png`. That exercise found an additional
+input blocker: EaseInOut (the default text-animation interpolation) provided
+handle coordinates but `hasHandles` excluded its type. Android/iOS now expose
+those handles. Opening or tapping preserves the original piecewise quadratic
+curve; conversion to a cubic happens only after a deliberate handle drag.
+Android uses touch slop and iOS a 3-point movement threshold. Two new
+`CurveEaseInteractionTest` JVM cases cover smooth handles without changing its
+saved interpolation and the continuous built-in/hold distinction. These two
+cases and the handle-drag runtime recheck await the next consolidated build.
+
+## Latest requested layout: reference panel below timeline
+
+The later explicit screenshot request supersedes the full-screen default above.
+Android/iOS now keep Curve inside the contextual panel beneath the timeline,
+including wide layouts. Preview and layer keys remain visible. The reference
+arrangement uses a left back/invert/more rail, green curve on a subdued violet
+grid, large white handles, lower Cubic Bezier Easing caption with segment arrows,
+and two right columns for preset thumbnails and families. Value, Speed, copying,
+pasting, saved presets, apply-to-all, overshoot and optional expansion remain
+reachable through More. The full-screen editor is now optional.
+
+Bounce/Elastic/4-step families use the shared evaluator's appended interpolation
+IDs 7/8/9. Their thumbnails mirror the core formulas, including elastic
+overshoot and four fixed plateaus; they do not expose unsupported Bezier handles.
+Existing curve IDs remain unchanged. One additional JVM regression covers the
+new thumbnail semantics. Static iOS API checks passed after this change; the
+latest reference layout and family controls await consolidated compile/runtime
+QA. Do not treat the earlier full-screen screenshot as proof of this new layout.

@@ -17,6 +17,7 @@ import android.util.Log
 import android.view.Display
 import android.view.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -889,7 +890,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else if (playhead != lastPlayhead) {
             // Só o detalhe depende do playhead (valor animado, keyframe aqui).
             lastPlayhead = playhead
-            lastModelChangeNs = System.nanoTime()
             refreshDetail()
             refreshEffectParams()
         }
@@ -911,13 +911,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var lastAutosaveError = 0
     /** Depois de uma falha, espera mais antes de tentar de novo (disco cheio não some em 3 s). */
     private var autosaveRetryAfterNs = 0L
+    private var unsavedSinceNs = 0L
 
     private fun autosaveIfIdle() {
-        if (!status.dirty || autosaving || playing || scrubbing || gestureDepth > 0) return
         val now = System.nanoTime()
-        if (now - lastModelChangeNs < AUTOSAVE_IDLE_NS || now < autosaveRetryAfterNs) return
+        if (!status.dirty) { unsavedSinceNs = 0L; return }
+        if (unsavedSinceNs == 0L) unsavedSinceNs = now
+        if (autosaving || playing || scrubbing || gestureDepth > 0 || exporter.busy) return
+        // Small repeated edits should still get a checkpoint between gestures.
+        if ((now - lastModelChangeNs < AUTOSAVE_IDLE_NS && now - unsavedSinceNs < 30_000_000_000L) ||
+            now < autosaveRetryAfterNs) return
         val path = project.path ?: return
-        if (layers.isEmpty()) return
         autosaving = true
         viewModelScope.launch {
             // Tudo fora da main: o motor copia o modelo sob o lock (encode, ms) e
@@ -930,6 +934,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 if (code != lastAutosaveError) errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code))
             } else {
                 autosaveRetryAfterNs = 0L
+                unsavedSinceNs = System.nanoTime()
             }
             lastAutosaveError = code
         }
@@ -1715,6 +1720,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun setTransform(property: Int, value: Float, layer: Long? = primary) {
         val id = layer ?: return
+        if (sceneEditor && property in 0..11) { send { engine.layoutTransform(id, property, value) }; refreshNow(); return }
         val d = if (id == primary) detail else detailOf(id)
         d ?: return
         val rot = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.ROTATION_Y, TrackProperty.ROTATION_Z)
@@ -1735,11 +1741,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     TrackProperty.POSITION_Z -> setPosition(id, d.position[0], d.position[1], value)
                     TrackProperty.SCALE_X -> setScale(id, value, d.scale[1], d.scale[2])
                     TrackProperty.SCALE_Y -> setScale(id, d.scale[0], value, d.scale[2])
+                    TrackProperty.SCALE_Z -> setScale(id, d.scale[0], d.scale[1], value)
                     TrackProperty.ROTATION_X -> setRotation(id, value, d.rotation[1], d.rotation[2])
                     TrackProperty.ROTATION_Y -> setRotation(id, d.rotation[0], value, d.rotation[2])
                     TrackProperty.ROTATION_Z -> setRotation(id, d.rotation[0], d.rotation[1], value)
                     TrackProperty.ANCHOR_X -> setAnchor(id, value, d.anchor[1], d.anchor[2])
                     TrackProperty.ANCHOR_Y -> setAnchor(id, d.anchor[0], value, d.anchor[2])
+                    TrackProperty.ANCHOR_Z -> setAnchor(id, d.anchor[0], d.anchor[1], value)
                     TrackProperty.OPACITY -> setOpacity(id, value)
                     else -> {}
                 }
@@ -2174,6 +2182,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    var sceneEditor by mutableStateOf(false)
+        private set
+    var sceneYaw by mutableFloatStateOf(-30f)
+        private set
+    var scenePitch by mutableFloatStateOf(20f)
+        private set
+    var sceneDistance by mutableFloatStateOf(3f)
+        private set
+    fun enterSceneEditor() {
+        pause()
+        vectorTool = 0
+        sceneEditor = true
+        updateSceneView(sceneYaw, scenePitch, sceneDistance)
+    }
+    fun exitSceneEditor() {
+        sceneEditor = false
+        engine.setSceneEditor(false, sceneYaw, scenePitch, sceneDistance)
+        refreshNow()
+    }
+    fun updateSceneView(yaw: Float, pitch: Float, distance: Float) {
+        sceneYaw = yaw; scenePitch = pitch; sceneDistance = distance
+        engine.setSceneEditor(sceneEditor, yaw, pitch, distance)
+        refreshNow()
+    }
+    fun sceneGuideLines(): FloatArray {
+        val lines = FloatArray(1280)
+        return lines.copyOf(engine.sceneGuides(lines) * 5)
+    }
+
     // --- Gizmo 3D ---------------------------------------------------------------------------
     /** Setas da camada 3D escolhida: origem e pontas X, Y, Z em px da composição. */
     var gizmo by mutableStateOf<FloatArray?>(null)
@@ -2187,7 +2224,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (!engine.gizmoMoveLocal(id, axis, amount, out)) return
         val animated = d.isAnimated(TrackProperty.POSITION_X) || d.isAnimated(TrackProperty.POSITION_Y) || d.isAnimated(TrackProperty.POSITION_Z)
         send {
-            if (animated) {
+            if (sceneEditor) {
+                for (axis in 0..2) engine.layoutTransform(id, axis, out[axis])
+            } else if (animated) {
                 insertKeyframe(id, TrackProperty.POSITION_X, NO_EFFECT, 0, d.localPlayhead, out[0])
                 insertKeyframe(id, TrackProperty.POSITION_Y, NO_EFFECT, 0, d.localPlayhead, out[1])
                 insertKeyframe(id, TrackProperty.POSITION_Z, NO_EFFECT, 0, d.localPlayhead, out[2])
@@ -2705,6 +2744,31 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param
         }
 
+    fun queryMaterials(): List<FloatArray> {
+        val id = primary ?: return emptyList()
+        return engine.queryMaterials(id).asList().chunked(8).filter { it.size == 8 }.map { it.toFloatArray() }
+    }
+
+    fun setMaterialParameter(material: Int, param: Int, value: Float) {
+        val id = primary ?: return
+        if (!value.isFinite()) return
+        engine.setMaterialParam(id, material, param, value.coerceIn(0f, 1f))
+        refreshNow()
+    }
+
+    fun toggleMaterialKeyframe(material: Int, param: Int, value: Float) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val here = (keyframes[id] ?: emptyList()).filter {
+            it.property == TrackProperty.MATERIAL_PARAM && it.effectIndex == material && it.paramIndex == param && it.time == d.localPlayhead
+        }
+        group("keyframe de material") {
+            if (here.isEmpty()) insertKeyframe(id, TrackProperty.MATERIAL_PARAM, material, param, d.localPlayhead, value)
+            else here.forEach { deleteKeyframe(id, it.property, it.effectIndex, it.paramIndex, it.time) }
+        }
+        refreshNow()
+    }
+
     // --- Remapeamento de tempo -----------------------------------------------------------
     /** Rampa pronta (0 linear, 1 suave, 2 herói, 3 acelerar, 4 desacelerar); −1 = sem rampa. */
     fun applySpeedRamp(preset: Int) {
@@ -2805,10 +2869,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return i
     }
 
-    fun remapMove(index: Int, localFrame: Long, sourceFrame: Float) {
-        val id = primary ?: return
-        engine.editTimeRemapKey(id, index, localFrame, sourceFrame, -1)
+    fun remapMove(index: Int, localFrame: Long, sourceFrame: Float): Int {
+        val id = primary ?: return -1
+        val moved = engine.editTimeRemapKey(id, index, localFrame, sourceFrame, -1)
         refreshDetail()
+        return moved
     }
 
     fun remapInterp(index: Int, interp: Int) {
@@ -3442,6 +3507,34 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Nulo e parentesco --------------------------------------------------------
+    fun addLight(kind: Int) {
+        val id = engine.addLight(kind)
+        if (id < 0) { errorMessage = appText(R.string.scene_light_failed); return }
+        refreshNow(); select(id)
+    }
+    fun lightInfo(): FloatArray? = primary?.let { engine.lightInfo(it) }
+    fun setLightParam(param: Int, value: Float) {
+        val id = primary ?: return
+        send { engine.setLightParam(id, param, value) }; refreshNow()
+    }
+    fun toggleLightKey(param: Int, value: Float) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val property = when (param) { in 1..4 -> 20 + param; 6 -> 25; 7 -> 26; else -> return }
+        send {
+            if (d.hasKeyAtPlayhead(property)) deleteKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead)
+            else insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, value)
+        }
+        refreshNow()
+    }
+
+    fun addCamera() {
+        val id = engine.addCamera()
+        if (id < 0) { errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camera, -id); return }
+        refreshNow()
+        select(id)
+    }
+
     fun addNull(threeD: Boolean) {
         val id = engine.addNull(threeD)
         if (id < 0) {
@@ -3771,6 +3864,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             val path = File(directories().projects, "${uniqueName(title)}.aurea").absolutePath
+            // Establish the native path before the first autosave, including an empty project.
+            val saved = withContext(Dispatchers.IO) { engine.saveProject(path) }
+            if (saved != 0) {
+                errorMessage = appText(R.string.msg_nao_foi_possivel_salvar, humanError(saved))
+                return@launch
+            }
             project = ProjectState(title = title, path = path, width = width, height = height, fps = fps)
             enterEditor()
         }
@@ -3888,12 +3987,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             showToast(appText(R.string.msg_aguarde_a_exportacao_terminar))
             return
         }
+        if (sceneEditor) exitSceneEditor()
         val path = project.path
         stopScrubIfNeeded()
         if (playing) pause()
         viewModelScope.launch {
-            if (path != null && (project.dirty || !File(path).exists()) && layers.isNotEmpty()) {
-                withContext(Dispatchers.IO) { saveBlocking(path) }
+            if (path != null) {
+                // Save also drains the final queued edit (status.dirty may lag).
+                // Deleting the last layer is a real edit that must survive closing.
+                val code = withContext(Dispatchers.IO) { saveBlocking(path) }
+                if (code != 0) {
+                    errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code))
+                    return@launch
+                }
             }
             clearSelection()
             layers = emptyList()

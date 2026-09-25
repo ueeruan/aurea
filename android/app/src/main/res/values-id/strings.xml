@@ -875,4 +875,26 @@ untuk mengedit kurvanya.</string>
     <string name="ai_limite_atingido">You\'ve used your %1$d AI generations for today. Come back tomorrow to generate more.</string>
     <string name="editor_marca_anterior_segure_inicio">Penanda sebelumnya; tahan untuk ke awal</string>
     <string name="editor_proxima_marca_segure_fim">Penanda berikutnya; tahan untuk ke akhir</string>
+    <string name="donation_title">Dukung Aurea</string>
+    <string name="donation_note">Donasi opsional agar aplikasi tetap gratis.</string>
+    <string name="donation_detail">Anda memilih apakah ingin berdonasi dan jumlahnya. Semua fitur tetap tersedia.</string>
+    <string name="donation_pix_qr">Kode QR Pix Ruan Pablo</string>
+    <string name="donation_copy_pix">Salin Pix</string>
+    <string name="donation_paypal">Donasi dengan PayPal</string>
+    <string name="donation_copy_paypal">Salin tautan PayPal</string>
+    <string name="donation_export_note">Ekspor tetap berjalan. Gunakan kode atau tautan setelah selesai.</string>
+    <string name="donation_copied">Disalin ke papan klip.</string>
+    <string name="ai_upscale_title">Peningkat Resolusi Video AI</string>
+    <string name="ai_upscale_note">Model untuk anime dan ilustrasi. Memproses per bagian tanpa membekukan antarmuka. Resolusi di bawah adalah kualitas keluaran akhir.</string>
+    <string name="ai_upscale_dimensions">AI %1$dx · masukan %2$d × %3$d → keluaran %4$d × %5$d</string>
+    <string name="licenses_title">Lisensi · AI</string>
+    <string name="scene_workspace">Adegan 3D</string>
+    <string name="scene_orbit_x">Orbit X</string>
+    <string name="scene_orbit_y">Orbit Y</string>
+    <string name="scene_zoom">Zoom</string>
+    <string name="scene_light_directional">Cahaya terarah</string>
+    <string name="scene_light_point">Cahaya titik</string>
+    <string name="scene_light_range">Jangkauan</string>
+    <string name="scene_light_shadows">Bayangan</string>
+    <string name="scene_light_failed">Tidak dapat membuat cahaya.</string>
 </resources>

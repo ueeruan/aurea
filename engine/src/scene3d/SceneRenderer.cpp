@@ -6,6 +6,8 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <deque>
+#include <tuple>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -835,6 +837,32 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         return &envSlots[envCount++];
     };
 
+    // Stable per-frame copies change factors only; texture/buffer handles remain shared.
+    auto overriddenMaterials = std::make_shared<std::deque<GpuMaterial>>();
+    std::vector<std::tuple<const SceneInstance*, i32, const GpuMaterial*>> materialCopies;
+    auto material_for = [&](const SceneInstance& inst, const GpuModel& model, i32 index) -> const GpuMaterial* {
+        const GpuMaterial* source = index >= 0 && index < static_cast<i32>(model.materials.size()) ? &model.materials[index] : &model.defaultMaterial;
+        for (const auto& cached : materialCopies) if (std::get<0>(cached) == &inst && std::get<1>(cached) == index) return std::get<2>(cached);
+        for (const auto& over : inst.materials) if (index >= 0 && over.materialIndex == static_cast<u32>(index) && over.mask) {
+            overriddenMaterials->push_back(*source);
+            auto& mat = overriddenMaterials->back();
+            if (over.mask & 1) mat.factors.baseColor.x = over.baseColor.x;
+            if (over.mask & 2) mat.factors.baseColor.y = over.baseColor.y;
+            if (over.mask & 4) mat.factors.baseColor.z = over.baseColor.z;
+            if (over.mask & 8) {
+                mat.factors.baseColor.w = over.baseColor.w;
+                // Opaque glTF factors ignore alpha. An explicit opacity edit
+                // opts this instance into blending, preserving the source mode.
+                if (mat.factors.alphaMode == AlphaMode::Opaque && over.baseColor.w < 1.0f)
+                    mat.factors.alphaMode = AlphaMode::Blend;
+            }
+            if (over.mask & 16) mat.factors.metallic = over.metallic;
+            if (over.mask & 32) mat.factors.roughness = over.roughness;
+            if (over.mask & 48) mat.factors.unlit = false; // An explicit PBR edit opts this instance into lighting.
+            source = &mat; break;
+        }
+        materialCopies.emplace_back(&inst, index, source); return source;
+    };
     std::vector<Draw> opaque, blended;
     // Chave = (material, ambiente): dois objetos com o mesmo material e
     // ambientes diferentes NÃO podem dividir o mesmo bloco.
@@ -1112,8 +1140,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
                         const GpuPrimitive& p = gm->meshes[mi][primIndex];
                         const MorphJob* mj = morph_for(instIndex, n, primIndex);
-                        const GpuMaterial* mat = p.material >= 0 && p.material < static_cast<i32>(gm->materials.size())
-                                               ? &gm->materials[p.material] : &gm->defaultMaterial;
+                        const GpuMaterial* mat = material_for(inst, *gm, p.material);
                         if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
                         const bool sk = skinnedNode && p.skinned;
                         auto pipe = shaders_->pipeline(shadow_key(sk));
@@ -1185,8 +1212,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     ++stats_.culledPrimitives;
                     continue;
                 }
-                const GpuMaterial* mat = p.material >= 0 && p.material < static_cast<i32>(gm->materials.size())
-                                       ? &gm->materials[p.material] : &gm->defaultMaterial;
+                const GpuMaterial* mat = material_for(inst, *gm, p.material);
                 const bool skinDraw = skinnedNode && p.skinned;
                 PipelineKey key = key_for(mat->factors.alphaMode, mat->factors.doubleSided, skinDraw);
                 // A reflected node/parent reverses winding without changing
@@ -1423,7 +1449,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
 
     // Z reverso: limpa a profundidade com 0 (o infinito).
     const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
-                                LoadOp::Clear, false, 0.0f, [cap](PassContext& pc) {
+                                LoadOp::Clear, false, 0.0f, [cap, overriddenMaterials](PassContext& pc) {
         CommandList& c = pc.cmds;
         PipelineHandle bound{};
         const GpuModel* boundModel = nullptr;

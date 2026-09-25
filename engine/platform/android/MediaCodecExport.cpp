@@ -2,6 +2,7 @@
 //  Aurea / platform / android / MediaCodecExport.cpp
 // =============================================================================
 #include "MediaCodecExport.hpp"
+#include "MediaMuxerPacket.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -15,8 +16,10 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/statvfs.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -99,7 +102,7 @@ public:
         if (audio) audio_ = *audio;
 
         fd_ = ::open(path_.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0644);
-        if (fd_ < 0) return Status{Errc::IoError, "nao consegui criar o arquivo do export"};
+        if (fd_ < 0) return codec_error("nao consegui criar o arquivo do export", -errno, true);
         muxer_ = AMediaMuxer_new(fd_, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
         if (!muxer_) return fail(Errc::IoError, "muxer MP4 indisponivel");
 
@@ -162,7 +165,7 @@ public:
         }
         const media_status_t ms = AMediaCodec_queueInputBuffer(video__.codec, static_cast<size_t>(idx), 0,
                                                                p.totalBytes, static_cast<u64>(ptsUs), 0);
-        if (ms != AMEDIA_OK) return Status{Errc::IoError, "encoder recusou o quadro"};
+        if (ms != AMEDIA_OK) return codec_error("encoder recusou o quadro", ms);
         lastVideoPts_ = ptsUs;
         return drain(video__, false);
     }
@@ -186,9 +189,10 @@ public:
             const usize n = std::min<usize>(frames - done, cap / bytesPerFrame);
             std::memcpy(dst, interleaved + done * audio_.channels, n * bytesPerFrame);
             const i64 pts = ptsUs + static_cast<i64>(done * 1000000ull / audio_.sampleRate);
-            if (AMediaCodec_queueInputBuffer(audio__.codec, static_cast<size_t>(idx), 0, n * bytesPerFrame,
-                                             static_cast<u64>(pts), 0) != AMEDIA_OK) {
-                return Status{Errc::IoError, "encoder de audio recusou o PCM"};
+            const media_status_t queued = AMediaCodec_queueInputBuffer(audio__.codec, static_cast<size_t>(idx), 0,
+                n * bytesPerFrame, static_cast<u64>(pts), 0);
+            if (queued != AMEDIA_OK) {
+                return codec_error("encoder de audio recusou o PCM", queued);
             }
             done += n;
         }
@@ -216,7 +220,7 @@ public:
         release(false);
         if (ms != AMEDIA_OK) {
             ::unlink(path_.c_str());
-            return Status{Errc::IoError, "falha ao finalizar o MP4"};
+            return codec_error("falha ao finalizar o MP4", ms, true);
         }
         return OkStatus;
     }
@@ -467,25 +471,29 @@ private:
                 AMediaFormat* f = AMediaCodec_getOutputFormat(t.codec);
                 t.muxIndex = static_cast<i32>(AMediaMuxer_addTrack(muxer_, f));
                 AMediaFormat_delete(f);
-                if (t.muxIndex < 0) return Status{Errc::IoError, "muxer recusou a trilha"};
+                if (t.muxIndex < 0) return codec_error("muxer recusou a trilha", t.muxIndex);
                 t.formatKnown = true;
                 if (const Status s = maybe_start_muxer(); !s.ok()) return s;
                 continue;
             }
             if (idx == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) continue;
-            if (idx < 0) return Status{Errc::IoError, "encoder devolveu erro"};
+            if (idx < 0) return codec_error(t.audio ? "encoder AAC devolveu erro" : "encoder de video devolveu erro", idx);
 
             size_t cap = 0;
             u8* data = AMediaCodec_getOutputBuffer(t.codec, static_cast<size_t>(idx), &cap);
             const bool config = (info.flags & AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) != 0;
-            if (data && info.size > 0 && !config) {
+            if (info.size > 0 && !config) {
+                if (!data || info.offset < 0 || static_cast<size_t>(info.offset) > cap ||
+                    static_cast<size_t>(info.size) > cap - static_cast<size_t>(info.offset)) {
+                    AMediaCodec_releaseOutputBuffer(t.codec, static_cast<size_t>(idx), false);
+                    return Status{Errc::EncodeFailed, "encoder entregou pacote fora do buffer"};
+                }
                 if (t.audio) lastAudioPts_ = std::max<i64>(lastAudioPts_, info.presentationTimeUs);
                 if (muxStarted_) {
-                    const media_status_t ms = AMediaMuxer_writeSampleData(muxer_, static_cast<size_t>(t.muxIndex),
-                                                                          data + info.offset, &info);
+                    const media_status_t ms = write_muxer_packet(muxer_, static_cast<size_t>(t.muxIndex), data, cap, info);
                     if (ms != AMEDIA_OK) {
                         AMediaCodec_releaseOutputBuffer(t.codec, static_cast<size_t>(idx), false);
-                        return Status{Errc::IoError, "falha ao gravar no MP4"};
+                        return codec_error("falha ao gravar no MP4", ms, true);
                     }
                 } else {
                     Pending p;
@@ -508,16 +516,29 @@ private:
         if (muxStarted_ || !video__.formatKnown || (hasAudio_ && !audio__.formatKnown)) return OkStatus;
         // Orientação: o vídeo já sai de pé (a composição é renderizada com a
         // proporção final), então nenhuma rotação no contêiner.
-        if (AMediaMuxer_start(muxer_) != AMEDIA_OK) return Status{Errc::IoError, "muxer nao iniciou"};
+        const media_status_t started = AMediaMuxer_start(muxer_);
+        if (started != AMEDIA_OK) return codec_error("muxer nao iniciou", started);
         muxStarted_ = true;
         for (Pending& p : pending_) {
             const Track& t = p.audio ? audio__ : video__;
-            if (AMediaMuxer_writeSampleData(muxer_, static_cast<size_t>(t.muxIndex), p.data.data(), &p.info) != AMEDIA_OK) {
-                return Status{Errc::IoError, "falha ao gravar no MP4"};
+            const media_status_t written = write_muxer_packet(muxer_, static_cast<size_t>(t.muxIndex), p.data.data(), p.data.size(), p.info);
+            if (written != AMEDIA_OK) {
+                return codec_error("falha ao gravar no MP4", written, true);
             }
         }
         pending_.clear();
         return OkStatus;
+    }
+
+    Status codec_error(const char* message, i64 platformCode, bool storage = false) noexcept {
+        struct statvfs space{};
+        const bool full = storage && (platformCode == -ENOSPC || platformCode == -EDQUOT ||
+            (fd_ >= 0 && ::fstatvfs(fd_, &space) == 0 && space.f_bavail == 0));
+        std::snprintf(errorDetail_, sizeof(errorDetail_), "%s (codigo %lld)",
+            full ? "armazenamento cheio ao gravar o MP4" : message, static_cast<long long>(platformCode));
+        AUREA_LOG_ERROR("export: %s; encoder=%s, ultimo quadro=%lld us", errorDetail_, info_.name,
+            static_cast<long long>(lastVideoPts_));
+        return Status{full ? Errc::StorageFull : Errc::IoError, errorDetail_};
     }
 
     Status fail(Errc code, const char* msg) noexcept {
@@ -552,6 +573,7 @@ private:
     }
 
     std::string path_;
+    char errorDetail_[192]{};
     VideoStreamConfig video_{};
     AudioStreamConfig audio_{};
     bool hasAudio_ = false;

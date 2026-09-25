@@ -1488,6 +1488,22 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return @[@(v[0]), @(asset), @(v[2]), @(v[3]), @(v[4])];
 }
 
+- (NSArray<NSNumber*>*)materialsForLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const u32 count = std::min<u32>(4096, e->query_materials(static_cast<u64>(layerId), nullptr, 0));
+    std::vector<f32> values(static_cast<usize>(count) * 8);
+    const u32 written = count ? std::min(count, e->query_materials(static_cast<u64>(layerId), values.data(), count)) : 0;
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:written * 8];
+    for (u32 i = 0; i < written * 8; ++i) [out addObject:@(values[i])];
+    return out;
+}
+
+- (BOOL)setMaterialForLayer:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value {
+    auto* e = self.engine;
+    return e && e->set_material_param(static_cast<u64>(layerId), index, param, value).ok() ? YES : NO;
+}
+
 // =============================================================================
 // Composição
 // =============================================================================
@@ -1643,6 +1659,39 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     const std::string s = to_std(content);
     const aurea::Result<aurea::u64> r = e->add_text(s.empty() ? nullptr : s.c_str());
     return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
+}
+
+- (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance {
+    if (auto* e = self.engine) e->set_scene_editor(enabled != NO, yaw, pitch, distance);
+}
+- (NSArray<NSNumber*>*)sceneGuides {
+    float lines[256 * 5]{};
+    auto* e = self.engine;
+    const auto count = e ? e->query_scene_guides(lines, 256) : 0;
+    return floats_to_array(lines, count * 5);
+}
+- (void)layoutTransform:(long long)layer property:(uint32_t)property value:(float)value {
+    if (auto* c = _batch.add(CommandType::LayerLayoutTransform))
+        c->shape_param = aurea::ShapeParamPayload{LayerId::unpack(static_cast<aurea::u64>(layer)), property, value};
+}
+- (long long)addLight:(uint32_t)kind {
+    if (!self.engine) return -1;
+    const auto id = self.engine->add_light(kind); return id.ok() ? static_cast<long long>(*id) : -1;
+}
+- (NSArray<NSNumber*>*)lightInfo:(long long)layer {
+    float values[10]{};
+    if (!self.engine || !self.engine->query_light(static_cast<aurea::u64>(layer), values)) return @[];
+    return floats_to_array(values, 10);
+}
+- (void)setLightParam:(long long)layer param:(uint32_t)param value:(float)value {
+    if (auto* c = _batch.add(CommandType::LayerSetLightParam))
+        c->shape_param = aurea::ShapeParamPayload{LayerId::unpack(static_cast<aurea::u64>(layer)), param, value};
+}
+- (long long)addCamera {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    const auto result = e->add_camera();
+    return result.ok() ? static_cast<long long>(*result) : -static_cast<long long>(result.status().code());
 }
 
 - (long long)addNull:(BOOL)threeD {
@@ -2114,7 +2163,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (NSString*)makeCurvePreset:(NSString*)name interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles {
     if (handles.count != 4) return @"";
     for (NSNumber* n in handles) if (!std::isfinite(n.floatValue)) return @"";
-    const auto interp = static_cast<aurea::Interpolation>(std::min<uint32_t>(interpolation, static_cast<uint32_t>(aurea::Interpolation::CustomCurve)));
+    const auto interp = static_cast<aurea::Interpolation>(std::min<uint32_t>(interpolation, static_cast<uint32_t>(aurea::Interpolation::Steps)));
     return to_ns(aurea::presets::make_curve_preset(to_std(name), interp, std::clamp(handles[0].floatValue, 0.f, 1.f), std::clamp(handles[1].floatValue, -2.f, 3.f), std::clamp(handles[2].floatValue, 0.f, 1.f), std::clamp(handles[3].floatValue, -2.f, 3.f)));
 }
 - (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize {
@@ -2644,6 +2693,14 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps {
+    return [self startExportTo:path codec:codec height:height fps:fps bitrateMbps:bitrateMbps
+             audioBitrateKbps:audioBitrateKbps aiUpscale:0];
+}
+
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale {
     auto* e = self.engine;
     if (!e) return NO;
     aurea::ExportSettings settings;
@@ -2654,6 +2711,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     settings.videoCodec = static_cast<aurea::ExportCodec>(codec);
     settings.videoBitrateMbps = bitrateMbps;
     settings.audioBitrateKbps = audioBitrateKbps;
+    settings.aiUpscale = aiUpscale;
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
     return e->start_export(settings, out.c_str()).ok() ? YES : NO;

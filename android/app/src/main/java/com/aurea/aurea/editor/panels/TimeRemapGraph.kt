@@ -2,6 +2,10 @@ package com.aurea.aurea.editor.panels
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -48,97 +53,108 @@ import kotlin.math.roundToInt
  * deitada = congelado, descendo = de trás para a frente.
  */
 @Composable
-internal fun TimeRemapGraph(store: EditorStore) {
+internal fun TimeRemapGraph(store: EditorStore, expanded: Boolean = false) {
+    var fullscreen by remember { mutableStateOf(false) }
+    val graphHeight = if (expanded) max(240, androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - 240).dp else 240.dp
+    if (fullscreen) androidx.compose.ui.window.Dialog(onDismissRequest = { fullscreen = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxWidth().background(AureaColors.Surface).padding(16.dp)) {
+            androidx.compose.material3.TextButton(onClick = { fullscreen = false }) { Text(stringResource(R.string.editor_sair_tela_cheia)) }
+            TimeRemapGraph(store, expanded = true)
+        }
+    }
     val data by remember(store) { derivedStateOf { store.timeRemap } }
     val q = data ?: return
     var selected by remember(store.primary) { mutableIntStateOf(-1) }
     val n = q[0].toInt()
     if (n < 1) return
-    val t0 = q[1]
-    val t1 = max(q[2], t0 + 1f)
+    val fitFrom = q[1]
+    val fitTo = max(q[2], fitFrom + 1f)
     val keys = (0 until n).map { i -> FloatArray(7) { q[5 + i * 7 + it] } }
-    val srcMax = if (q[3] > 0f) q[3] else max(1f, keys.maxOf { it[1] } * 1.2f)
+    val fitMax = if (q[3] > 0f) q[3] else max(1f, keys.maxOf { it[1] } * 1.2f)
+    var viewport by remember(store.primary) { mutableStateOf(GraphViewport(fitFrom, fitTo, 0f, fitMax)) }
+    val t0 = viewport.from
+    val t1 = viewport.to
+    val srcMin = viewport.low
+    val srcMax = viewport.high
+    val srcRange = viewport.range
     val playhead = (store.detail?.localPlayhead ?: 0).toFloat()
-    val pad = 14f
+    val pad = with(androidx.compose.ui.platform.LocalDensity.current) { 24.dp.toPx() }
 
     Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            androidx.compose.material3.TextButton(onClick = { viewport = viewport.transform(1/1.5f, 0f, 0f) }) { Text("−") }
+            androidx.compose.material3.TextButton(onClick = { viewport = viewport.transform(1.5f, 0f, 0f) }) { Text("+") }
+            androidx.compose.material3.TextButton(onClick = { viewport = GraphViewport(fitFrom, fitTo, 0f, fitMax) }) { Text(stringResource(R.string.panel_ajustar)) }
+            if (!expanded) androidx.compose.material3.TextButton(onClick = { fullscreen = true }) { Text(stringResource(R.string.panel_expandir)) }
+        }
         Box(
-            Modifier.fillMaxWidth().height(170.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip),
+            Modifier.fillMaxWidth().height(graphHeight).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip),
         ) {
             Canvas(
                 Modifier
                     .fillMaxWidth()
-                    .height(170.dp)
-                    .pointerInput(n, t0, t1, srcMax) {
-                        val w = size.width.toFloat()
-                        val h = size.height.toFloat()
-                        fun px(k: FloatArray) = Offset(pad + (k[0] - t0) / (t1 - t0) * (w - 2 * pad), h - pad - k[1] / srcMax * (h - 2 * pad))
-                        fun frameAt(x: Float) = (t0 + (x - pad) / (w - 2 * pad) * (t1 - t0)).roundToInt().toLong()
-                        fun hit(o: Offset): Int {
-                            val cur = store.timeRemap ?: return -1
-                            val m = cur[0].toInt()
-                            var best = -1
-                            var bestD = 28.dp.toPx()
-                            for (i in 0 until m) {
-                                val p = px(FloatArray(7) { cur[5 + i * 7 + it] })
-                                val d = hypot(p.x - o.x, p.y - o.y)
-                                if (d < bestD) { bestD = d; best = i }
+                    .height(graphHeight)
+                    .pointerInput(store.primary) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            down.consume() // The graph owns this contact, not its parent ScrollView.
+                            val initial = viewport
+                            val w = max(1f, size.width - 2 * pad)
+                            val h = max(1f, size.height - 2 * pad)
+                            val cur = store.timeRemap ?: return@awaitEachGesture
+                            val points = (0 until cur[0].toInt()).map { i ->
+                                GraphHitPoint(i, pad + (cur[5+i*7] - initial.from) / initial.duration * w,
+                                    size.height-pad-(cur[6+i*7]-initial.low)/initial.range*h)
                             }
-                            return best
-                        }
-                        detectTapGestures(
-                            onTap = { o ->
-                                val i = hit(o)
-                                selected = if (i >= 0) i else store.remapInsert(frameAt(o.x))
-                            },
-                            onLongPress = { o ->
-                                val i = hit(o)
-                                if (i >= 0 && store.remapRemove(i)) selected = -1
-                            },
-                        )
-                    }
-                    .pointerInput(n, t0, t1, srcMax, "arrasto") {
-                        val w = size.width.toFloat()
-                        val h = size.height.toFloat()
-                        fun px(k: FloatArray) = Offset(pad + (k[0] - t0) / (t1 - t0) * (w - 2 * pad), h - pad - k[1] / srcMax * (h - 2 * pad))
-                        var dragging = -1
-                        var pos = Offset.Zero
-                        detectDragGestures(
-                            onDragStart = { o ->
-                                val cur = store.timeRemap
-                                dragging = -1
-                                if (cur != null) {
-                                    var bestD = 28.dp.toPx()
-                                    for (i in 0 until cur[0].toInt()) {
-                                        val p = px(FloatArray(7) { cur[5 + i * 7 + it] })
-                                        val d = hypot(p.x - o.x, p.y - o.y)
-                                        if (d < bestD) { bestD = d; dragging = i }
+                            var dragging = graphHitIndex(points, down.position.x, down.position.y, 24.dp.toPx(), selected)
+                            val picked = points.firstOrNull { it.index == dragging }
+                            val grab = picked?.let { Offset(it.x, it.y) - down.position } ?: Offset.Zero
+                            if (dragging >= 0) selected = dragging
+                            var began = false
+                            var moved = false
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) {
+                                        if (!moved) {
+                                            if (dragging >= 0 && change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) {
+                                                if (store.remapRemove(dragging)) selected = -1
+                                            } else if (dragging < 0) {
+                                                val frame = (initial.from + (down.position.x-pad)/w*initial.duration).roundToInt().toLong()
+                                                selected = store.remapInsert(frame)
+                                            }
+                                        }
+                                        break
                                     }
+                                    val displacement = change.position - down.position
+                                    if (!moved && displacement.getDistance() < viewConfiguration.touchSlop && event.changes.count { it.pressed } < 2) continue
+                                    moved = true
+                                    if (event.changes.count { it.pressed } > 1) {
+                                        if (began) { store.endGesture(); began = false }
+                                        dragging = -1
+                                    }
+                                    if (dragging >= 0) {
+                                        if (!began) { store.beginGesture("mover ponto da curva de tempo"); began = true }
+                                        val position = change.position + grab
+                                        val frame = (initial.from+(position.x-pad)/w*initial.duration).roundToInt().toLong()
+                                        val source = (initial.low+(size.height-pad-position.y)/h*initial.range).coerceAtLeast(0f)
+                                        val movedIndex = store.remapMove(dragging, frame, source)
+                                        if (movedIndex >= 0) { dragging = movedIndex; selected = movedIndex }
+                                    } else {
+                                        val pan = event.calculatePan()
+                                        viewport = viewport.transform(event.calculateZoom(), pan.x/w, pan.y/h)
+                                    }
+                                    event.changes.forEach { it.consume() }
                                 }
-                                pos = o
-                                if (dragging >= 0) {
-                                    selected = dragging
-                                    store.beginGesture("mover ponto da curva de tempo")
-                                }
-                            },
-                            onDrag = { change, delta ->
-                                if (dragging >= 0) {
-                                    change.consume()
-                                    pos += delta
-                                    val f = (t0 + (pos.x - pad) / (w - 2 * pad) * (t1 - t0)).roundToInt().toLong()
-                                    val v = ((h - pad - pos.y) / (h - 2 * pad) * srcMax).coerceIn(0f, srcMax)
-                                    store.remapMove(dragging, f, v)
-                                }
-                            },
-                            onDragEnd = { if (dragging >= 0) store.endGesture(); dragging = -1 },
-                            onDragCancel = { if (dragging >= 0) store.endGesture(); dragging = -1 },
-                        )
+                            } finally { if (began) store.endGesture() }
+                        }
                     },
             ) {
                 val w = size.width
                 val h = size.height
                 fun x(t: Float) = pad + (t - t0) / (t1 - t0) * (w - 2 * pad)
-                fun y(v: Float) = h - pad - v / srcMax * (h - 2 * pad)
+                fun y(v: Float) = h - pad - (v - srcMin) / srcRange * (h - 2 * pad)
                 // Grade: quartos do tempo e da fonte.
                 for (i in 1..3) {
                     val gx = pad + (w - 2 * pad) * i / 4f

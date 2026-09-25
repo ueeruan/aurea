@@ -261,6 +261,23 @@ Mat4 world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept
 void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAsset& asset, f64 time,
                  scene3d::SceneInstance& inst) {
     inst.world = world_3d_frac(comp, l, time) * layer_from_model(l.model);
+    inst.materials = l.model.materials;
+    const f64 materialTime = time - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
+    for (u32 i = 0; i < l.tracks.size(); ++i) {
+        const auto& track = l.tracks.at(i);
+        if (track.property != TrackProperty::MaterialParam || track.effectIndex >= asset.materials.size() || track.effectParamIndex >= 6) continue;
+        MaterialOverride* target = nullptr;
+        for (auto& over : inst.materials) if (over.materialIndex == track.effectIndex) { target = &over; break; }
+        if (!target) {
+            const auto& source = asset.materials[track.effectIndex];
+            MaterialOverride over; over.materialIndex = track.effectIndex; over.baseColor = source.baseColor; over.metallic = source.metallic; over.roughness = source.roughness;
+            inst.materials.push_back(over); target = &inst.materials.back();
+        }
+        f32* field = track.effectParamIndex == 0 ? &target->baseColor.x : track.effectParamIndex == 1 ? &target->baseColor.y : track.effectParamIndex == 2 ? &target->baseColor.z
+                   : track.effectParamIndex == 3 ? &target->baseColor.w : track.effectParamIndex == 4 ? &target->metallic : &target->roughness;
+        *field = std::clamp(sample_frac(track, materialTime, *field), 0.0f, 1.0f);
+        target->mask |= 1u << track.effectParamIndex;
+    }
     scene3d::Pose pose;
     const i32 clip = l.model.animationClip;
     f32 t = 0.0f;
@@ -330,6 +347,30 @@ Mat4 comp_view_projection_frac(const Composition& comp, f64 time, u32 w, u32 h) 
 }
 
 } // namespace
+
+scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& editor) noexcept {
+    scene3d::SceneCamera cam = scene3d::default_camera(width, height);
+    const f32 yaw = editor.yaw * kDeg2Rad, pitch = editor.pitch * kDeg2Rad;
+    const f32 distance = static_cast<f32>(std::max(1u, height)) * editor.distance;
+    const Vec3 target{width * 0.5f, height * 0.5f, 0};
+    const Vec3 position = target + Vec3{std::sin(yaw) * std::cos(pitch) * distance,
+        -std::sin(pitch) * distance, -std::cos(yaw) * std::cos(pitch) * distance};
+    const Vec3 z = (target - position).normalized();
+    const Vec3 x = Vec3{0, 1, 0}.cross(z).normalized();
+    const Vec3 y = z.cross(x).normalized();
+    cam.position = position;
+    cam.view.col[0] = Vec4{x.x, y.x, z.x, 0};
+    cam.view.col[1] = Vec4{x.y, y.y, z.y, 0};
+    cam.view.col[2] = Vec4{x.z, y.z, z.z, 0};
+    cam.view.col[3] = Vec4{-x.dot(position), -y.dot(position), -z.dot(position), 1};
+    return cam;
+}
+
+Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& editor) noexcept {
+    const auto cam = scene_editor_camera(width, height, editor);
+    return comp_from_clip(static_cast<f32>(width), static_cast<f32>(height))
+        * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(width) / std::max(1u, height), cam.nearZ) * cam.view;
+}
 
 Mat4 comp_view_projection(const Composition& comp, FrameIndex time) noexcept {
     const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
@@ -665,7 +706,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     const f32 previewFactor = static_cast<f32>(settings.previewNumerator)
                             / static_cast<f32>(std::max(1u, settings.previewDenominator));
     // Câmera da cena para camadas 2D que vivem no espaço 3D.
-    const scene3d::SceneCamera cam3d = camera_for(comp, time, out.compWidth, out.compHeight);
+    const scene3d::SceneCamera cam3d = settings.sceneEditor.enabled && !settings.finalQuality
+        ? scene_editor_camera(out.compWidth, out.compHeight, settings.sceneEditor) : camera_for(comp, time, out.compWidth, out.compHeight);
     const Mat4 viewProj3d = scene3d::reverse_z_perspective(
                                 cam3d.fovY, static_cast<f32>(out.compWidth) / static_cast<f32>(std::max(1u, out.compHeight)),
                                 cam3d.nearZ) * cam3d.view;
@@ -1229,7 +1271,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 nestSalt_ = (savedSalt * 131u + l->nested.composition.index + 1u) & 0x3FFFu;
                 if (nestSalt_ == 0) nestSalt_ = 1;
                 ++prepareDepth_;
-                prepare(*child, project, FrameIndex{cf}, media, imageLookup, imageCtx, settings, frameNumber,
+                RenderSettings childSettings = settings;
+                childSettings.sceneEditor.enabled = false;
+                prepare(*child, project, FrameIndex{cf}, media, imageLookup, imageCtx, childSettings, frameNumber,
                         playDirection, decodeMode, speed, *snapChild);
                 --prepareDepth_;
                 nestSalt_ = savedSalt;
@@ -1370,7 +1414,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 for (u32 i = 0; i < k; ++i) {
                     const f64 u = (static_cast<f64>(i) + 0.5) / static_cast<f64>(k) - 0.5;
                     const f64 ts = static_cast<f64>(time.value) + u * open;
-                    rl.blurMatrices[i] = in3d ? comp_view_projection_frac(comp, ts, out.compWidth, out.compHeight) * world_3d_frac(comp, *l, ts)
+                    rl.blurMatrices[i] = in3d ? (settings.sceneEditor.enabled && !settings.finalQuality ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor) : comp_view_projection_frac(comp, ts, out.compWidth, out.compHeight)) * world_3d_frac(comp, *l, ts)
                                               : world_2d_frac(comp, *l, ts);
                     if (shifted) rl.blurMatrices[i] = rl.blurMatrices[i] * shiftM;
                     for (int c = 0; c < 4 && !moves; ++c) {
@@ -1752,7 +1796,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (out.layers[j].matteOnly && out.layers[j].id.pack() == rl.matteId) { rl.matteIndex = static_cast<i32>(j); break; }
         }
     }
-    if (!out.scenes.empty()) fill_scene_context(comp, time, out);
+    if (!out.scenes.empty()) fill_scene_context(comp, time, out, cam3d);
     // Desfoque de movimento 3D: cada grupo com modelo que pede desfoque vira
     // K cenas no obturador (câmera, mundo e pose no sub-quadro).
     if (!out.scenes.empty() && comp.motion_blur().enabled && comp.motion_blur().shutterAngle > 0.0f) {
@@ -1783,7 +1827,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const f64 ts = static_cast<f64>(time.value) + ((static_cast<f64>(s) + 0.5) / static_cast<f64>(k) - 0.5) * open;
                 scene3d::SceneFrame& sf = f.blurFrames[s];
                 sf.subFrame = ts - static_cast<f64>(time.value);
-                sf.camera = camera_for_frac(comp, ts, out.compWidth, out.compHeight);
+                sf.camera = settings.sceneEditor.enabled && !settings.finalQuality ? cam3d : camera_for_frac(comp, ts, out.compWidth, out.compHeight);
                 sf.lights = f.lights;
                 sf.environment = f.environment;
                 sf.instances = f.instances;
@@ -1808,10 +1852,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     }
 }
 
-void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out) const noexcept {
+void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out, const scene3d::SceneCamera& camera) const noexcept {
     // Câmera: a camada de câmera ATIVA visível no instante (com pais, inclusive
     // nulo 3D — rig de órbita); sem ela, a padrão.
-    const scene3d::SceneCamera cam = camera_for(comp, time, out.compWidth, out.compHeight);
+    const scene3d::SceneCamera cam = camera;
     std::vector<scene3d::SceneLight> lights;
     const OrderedIds<LayerId>& order = comp.order();
     for (u32 i = 0; i < order.size(); ++i) {
@@ -1828,11 +1872,13 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
                    : l->light.kind == LightKind::Spot ? scene3d::LightKindGpu::Spot : scene3d::LightKindGpu::Directional;
             s.position = Vec3{w.col[3].x, w.col[3].y, w.col[3].z};
             s.direction = Vec3{w.col[2].x, w.col[2].y, w.col[2].z}.normalized();   // a luz aponta para +Z da layer
-            s.color = l->light.color.xyz();
-            s.intensity = l->light.intensity;
+            s.color = Vec3{l->tracks.sample_or(TrackProperty::LightColorR, local, l->light.color.x),
+                l->tracks.sample_or(TrackProperty::LightColorG, local, l->light.color.y),
+                l->tracks.sample_or(TrackProperty::LightColorB, local, l->light.color.z)};
+            s.intensity = std::max(0.0f, l->tracks.sample_or(TrackProperty::LightIntensity, local, l->light.intensity));
             s.range = l->light.range;
-            s.outerCone = l->light.coneAngle * 0.5f * kDeg2Rad;
-            s.innerCone = s.outerCone * (1.0f - std::clamp(l->light.penumbra, 0.0f, 1.0f));
+            s.outerCone = std::clamp(l->tracks.sample_or(TrackProperty::LightConeAngle, local, l->light.coneAngle), 1.0f, 179.0f) * 0.5f * kDeg2Rad;
+            s.innerCone = s.outerCone * (1.0f - std::clamp(l->tracks.sample_or(TrackProperty::LightPenumbra, local, l->light.penumbra), 0.0f, 1.0f));
             s.castShadows = l->light.castShadows;
             lights.push_back(s);
         }
@@ -2076,13 +2122,12 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
     const u64 key = layer.id.pack() ^ salt;
     PlanarTextures& pt = planar_[key];
     if (pt.width != f->width || pt.height != f->height || pt.format != f->format) {
+        pt.contentId = 0;
         for (TextureHandle& t : pt.plane) {
             if (t.valid()) backend_->destroy_texture(t);
             t = TextureHandle{};
         }
-        pt.width = f->width;
-        pt.height = f->height;
-        pt.format = f->format;
+        pt.width = pt.height = 0;
         const u32 planes = threePlane ? 3u : 2u;
         for (u32 p = 0; p < planes; ++p) {
             TextureDesc d;
@@ -2094,15 +2139,31 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
             d.transferDst = true;
             d.debugName = "plano-de-video";
             auto tex = backend_->create_texture(d);
-            if (!tex.ok()) return false;
+            if (!tex.ok()) {
+                for (TextureHandle& created : pt.plane) {
+                    if (created.valid()) backend_->destroy_texture(created);
+                    created = TextureHandle{};
+                }
+                return false;
+            }
             pt.plane[p] = *tex;
         }
+        // Publish dimensions only when the full plane set exists. Allocation
+        // failure must retry on the next frame, even at the same resolution.
+        pt.width = f->width;
+        pt.height = f->height;
+        pt.format = f->format;
     }
     pt.lastFrame = frameNumber;
     const u32 planes = threePlane ? 3u : 2u;
-    for (u32 p = 0; p < planes; ++p) {
-        if (!f->planes[p]) return false;
-        if (!backend_->upload_texture(pt.plane[p], f->planes[p], f->strides[p]).ok()) return false;
+    if (pt.contentId != f->content_id()) {
+        for (u32 p = 0; p < planes; ++p) {
+            if (!f->planes[p]) return false;
+            if (!backend_->upload_texture(pt.plane[p], f->planes[p], f->strides[p]).ok()) return false;
+            videoPlaneUploadBytes_ += static_cast<u64>(f->strides[p]) * (p == 0 ? f->height : (f->height + 1) / 2);
+        }
+        // Publish only after every plane succeeds; a partial upload must retry.
+        pt.contentId = f->content_id();
     }
 
     const f32 layoutKind = f->format == PixelFormat::NV21 ? 1.0f : (threePlane ? 2.0f : 0.0f);

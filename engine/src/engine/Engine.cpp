@@ -12,6 +12,8 @@
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/ai/Upscaler.hpp"
+#include "aurea/export/UpscaleColor.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -41,6 +43,27 @@ void enable_time_remap_curve(Layer& l) noexcept {
         l.timeRemap.set(l.local_time(l.end), static_cast<f32>(s1));
     }
     l.timeRemapEnabled = true;
+}
+
+bool is_remap_time_alias(const Layer& l, const TrackRef& ref) noexcept {
+    if (ref.property != TrackProperty::EffectParam || ref.effectParamIndex != 0) return false;
+    for (const EffectInstance& effect : l.effects)
+        if (effect.id == ref.effectIndex) return is_time_remap_type(effect.type);
+    return false;
+}
+
+const Track* read_command_track(const Layer& l, const TrackRef& ref) noexcept {
+    if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) return &l.timeRemap;
+    return l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
+}
+
+Track* command_track(Layer& l, const TrackRef& ref, bool create) noexcept {
+    if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) {
+        if (create) enable_time_remap_curve(l);
+        return &l.timeRemap;
+    }
+    if (create) return &l.tracks.get_or_create(ref.property, ref.effectIndex, ref.effectParamIndex);
+    return l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
 }
 
 /// Grava o tempo (segundos da FONTE) na curva, no instante local: atualiza a
@@ -129,6 +152,7 @@ struct Engine::ExportContext {
     // Plano da sessão, fixado no start (a timeline não muda durante o export:
     // o preview e os comandos da UI ficam congelados).
     u32 width = 0, height = 0;
+    u32 outputWidth = 0, outputHeight = 0;
     f64 fps = 30.0;
     f64 compFps = 30.0;
     u32 frames = 0;
@@ -1408,6 +1432,107 @@ bool transform_is_static(const Layer& l) noexcept {
 }
 
 } // namespace
+
+u32 Engine::query_materials(u64 layerId, f32* values, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    auto* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Model3D) return 0;
+    const auto found = models_.find(layer->model.scene.pack());
+    if (found == models_.end() || !found->second) return 0;
+    const auto& materials = found->second->materials;
+    if (!values) return static_cast<u32>(materials.size());
+    const auto local = layer->local_time(playback_.current());
+    const u32 count = std::min<u32>(capacity, static_cast<u32>(materials.size()));
+    for (u32 i = 0; i < count; ++i) {
+        const auto& source = materials[i];
+        f32 fields[6]{source.baseColor.x, source.baseColor.y, source.baseColor.z, source.baseColor.w, source.metallic, source.roughness};
+        u32 mask = 0;
+        for (const auto& over : layer->model.materials) if (over.materialIndex == i) {
+            mask = over.mask;
+            const f32 overrides[6]{over.baseColor.x, over.baseColor.y, over.baseColor.z, over.baseColor.w, over.metallic, over.roughness};
+            for (u32 p = 0; p < 6; ++p) if (mask & (1u << p)) fields[p] = overrides[p];
+            break;
+        }
+        for (u32 p = 0; p < 6; ++p) if (const Track* track = layer->tracks.find(TrackProperty::MaterialParam, i, p)) {
+            fields[p] = track->value_or(local, fields[p]); mask |= 1u << p;
+        }
+        values[i * 8] = static_cast<f32>(i); values[i * 8 + 1] = static_cast<f32>(mask);
+        for (u32 p = 0; p < 6; ++p) values[i * 8 + 2 + p] = std::clamp(fields[p], 0.0f, 1.0f);
+    }
+    return count;
+}
+
+Status Engine::set_material_param(u64 layer, u32 material, u32 param, f32 value) noexcept {
+    Command c; c.type = CommandType::LayerSetMaterialParam;
+    c.material_param = MaterialParamPayload{LayerId::unpack(layer), material, param, value};
+    return apply_command(c);
+}
+
+Result<u64> Engine::add_light(u32 kind) noexcept {
+    if (kind > 2) return Status{Errc::InvalidArgument};
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState};
+    history_.before_mutation(*comp, project_->timeline().current(), "adicionar luz 3D");
+    const LayerId id = comp->add_layer(LayerKind::Light, kind == 0 ? "Directional light" : kind == 1 ? "Point light" : "Spot light");
+    Layer* layer = comp->layer(id);
+    if (!layer) return Status{Errc::OutOfMemory};
+    layer->threeD = true; layer->end = comp->duration();
+    layer->transform.position = Vec3{comp->width() * .5f, comp->height() * .25f, -static_cast<f32>(comp->height())};
+    layer->light.kind = static_cast<LightKind>(kind);
+    layer->light.intensity = kind == 0 ? 3.0f : 8.0f;
+    layer->light.range = comp->height() * 5.0f;
+    layer->light.castShadows = kind == 0;
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty(); request_render(); return id.pack();
+}
+
+bool Engine::query_light(u64 layerId, f32* values) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    auto* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Light || !values) return false;
+    const auto local = layer->local_time(playback_.current());
+    const auto& light = layer->light;
+    values[0] = static_cast<f32>(light.kind);
+    values[1] = layer->tracks.sample_or(TrackProperty::LightIntensity, local, light.intensity);
+    values[2] = layer->tracks.sample_or(TrackProperty::LightColorR, local, light.color.x);
+    values[3] = layer->tracks.sample_or(TrackProperty::LightColorG, local, light.color.y);
+    values[4] = layer->tracks.sample_or(TrackProperty::LightColorB, local, light.color.z);
+    values[5] = light.range;
+    values[6] = layer->tracks.sample_or(TrackProperty::LightConeAngle, local, light.coneAngle);
+    values[7] = layer->tracks.sample_or(TrackProperty::LightPenumbra, local, light.penumbra);
+    values[8] = light.castShadows ? 1.0f : 0.0f; values[9] = light.shadowBias;
+    return true;
+}
+
+Result<u64> Engine::add_camera() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    history_.before_mutation(*comp, project_->timeline().current(), "adicionar camera 3D");
+    const LayerId id = comp->add_layer(LayerKind::Camera, "Camera 3D");
+    Layer* camera = comp->layer(id);
+    if (!camera) return Status{Errc::OutOfMemory, "camada nao criada"};
+    const auto fallback = scene3d::default_camera(comp->width(), comp->height());
+    camera->threeD = true;
+    camera->start = FrameIndex{0};
+    camera->end = comp->duration();
+    camera->transform.position = fallback.position;
+    camera->transform.anchor = Vec3{0, 0, 0};
+    camera->camera.fov = fallback.fovY / kDeg2Rad;
+    camera->camera.nearPlane = fallback.nearZ;
+    camera->camera.active = true;
+    for (u32 i = 0; i < comp->order().size(); ++i) {
+        Layer* other = comp->layer(comp->order().at(i));
+        if (other && other != camera && other->kind == LayerKind::Camera) other->camera.active = false;
+    }
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return id.pack();
+}
 
 Result<u64> Engine::add_null(bool threeD) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
@@ -2930,7 +3055,7 @@ i32 Engine::edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sour
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || !l->timeRemapEnabled || interp > static_cast<i32>(Interpolation::CustomCurve)) return -1;
+    if (!l || !l->timeRemapEnabled || interp > static_cast<i32>(Interpolation::Steps)) return -1;
     Track& t = l->timeRemap;
     const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
     const f64 last = source_last_frame(*project_, *l, fps);
@@ -2981,12 +3106,13 @@ bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || preset > 4) return false;
+    if (!l || preset > 6) return false;
     const i64 dur = l->end.value - l->start.value;
     if (dur < 2) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "rampa de velocidade");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     // O trecho da fonte que a camada mostra agora (sem a curva antiga).
+    const f32 freezeFrame = static_cast<f32>(l->source_frame(playback_.current()));
     const bool had = l->timeRemapEnabled;
     l->timeRemapEnabled = false;
     const f64 s0 = l->source_frame(l->start), s1 = l->source_frame(l->end);
@@ -3015,6 +3141,11 @@ bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
             break;
         case 3: key(0, 0, Interpolation::Bezier, 0.42f, 0.0f, 1.0f, 1.0f); key(1, 1, Interpolation::Linear); break;
         case 4: key(0, 0, Interpolation::Bezier, 0.0f, 0.0f, 0.58f, 1.0f); key(1, 1, Interpolation::Linear); break;
+        case 5:
+            t.set(FrameIndex{k0}, freezeFrame, Interpolation::Hold);
+            t.set(FrameIndex{k0 + dur}, freezeFrame, Interpolation::Hold);
+            break;
+        case 6: key(0, 1, Interpolation::Linear); key(1, 0, Interpolation::Linear); break;
         default: break;
     }
     l->timeRemapEnabled = true;
@@ -3225,6 +3356,61 @@ bool lives_in_3d(const Layer& l) noexcept {
 }
 } // namespace
 
+void Engine::set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) noexcept {
+    if (!std::isfinite(yaw) || !std::isfinite(pitch) || !std::isfinite(distance)) return;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    sceneEditor_ = SceneEditorView{enabled, std::remainder(yaw, 360.0f), std::clamp(pitch, -80.0f, 80.0f), std::clamp(distance, 0.25f, 30.0f)};
+    request_render();
+}
+
+u32 Engine::query_scene_guides(f32* lines, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !sceneEditor_.enabled || !lines || capacity == 0) return 0;
+    const Mat4 vp = scene_editor_projection(comp->width(), comp->height(), sceneEditor_);
+    u32 count = 0;
+    auto line = [&](Vec3 a, Vec3 b, f32 kind) {
+        if (count >= capacity) return;
+        const Vec4 x = vp * Vec4{a.x, a.y, a.z, 1}, y = vp * Vec4{b.x, b.y, b.z, 1};
+        if (x.w <= 1e-4f || y.w <= 1e-4f) return;
+        f32* p = lines + count++ * 5;
+        p[0] = x.x / x.w; p[1] = x.y / x.w; p[2] = y.x / y.w; p[3] = y.y / y.w; p[4] = kind;
+    };
+    const f32 width = static_cast<f32>(comp->width()), height = static_cast<f32>(comp->height());
+    for (u32 i = 0; i <= 10; ++i) {
+        const f32 t = static_cast<f32>(i) / 10;
+        line(Vec3{width * t, 0, 0}, Vec3{width * t, height, 0}, 0);
+        line(Vec3{0, height * t, 0}, Vec3{width, height * t, 0}, 0);
+    }
+    const auto time = playback_.current();
+    for (u32 i = 0; i < comp->order().size(); ++i) {
+        const Layer* layer = comp->layer(comp->order().at(i));
+        if (!layer || !layer->visible || !layer->contains_time(time)) continue;
+        if (layer->kind != LayerKind::Camera && layer->kind != LayerKind::Null && layer->kind != LayerKind::Light) continue;
+        const Mat4 world = layer_world_3d(*comp, *layer, time);
+        const Vec3 anchor = layer->kind == LayerKind::Camera ? Vec3{} : layer->transform.anchor;
+        const Vec3 origin = world.transform_point(anchor);
+        if (layer->kind == LayerKind::Null || layer->kind == LayerKind::Light) {
+            const f32 d = height * 0.035f;
+            line(origin - Vec3{d, 0, 0}, origin + Vec3{d, 0, 0}, 2);
+            line(origin - Vec3{0, d, 0}, origin + Vec3{0, d, 0}, 2);
+            line(origin - Vec3{0, 0, d}, origin + Vec3{0, 0, d}, 2);
+            continue;
+        }
+        const Vec3 forward = Vec3{world.col[2].x, world.col[2].y, world.col[2].z}.normalized();
+        const Vec3 right = Vec3{world.col[1].x, world.col[1].y, world.col[1].z}.cross(forward).normalized();
+        const Vec3 down = forward.cross(right).normalized();
+        const f32 fov = layer->tracks.sample_or(TrackProperty::Fov, layer->local_time(time), layer->camera.fov);
+        const f32 length = height * 0.4f, halfY = length * std::tan(std::clamp(fov, 1.0f, 170.0f) * kDeg2Rad * 0.5f);
+        const f32 halfX = halfY * width / std::max(1.0f, height);
+        const Vec3 center = origin + forward * length;
+        const Vec3 corners[4] = {center - right * halfX - down * halfY, center + right * halfX - down * halfY,
+            center + right * halfX + down * halfY, center - right * halfX + down * halfY};
+        for (u32 j = 0; j < 4; ++j) { line(origin, corners[j], 1); line(corners[j], corners[(j + 1) % 4], 1); }
+    }
+    return count;
+}
+
 bool Engine::query_gizmo(u64 layerId, f32 length, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -3235,7 +3421,8 @@ bool Engine::query_gizmo(u64 layerId, f32 length, f32* out) noexcept {
     const Vec3 a = l->kind == LayerKind::Model3D ? Vec3{0, 0, 0} : l->transform.anchor;
     const Vec4 o4 = w * Vec4{a.x, a.y, a.z, 1};
     const Vec3 o{o4.x, o4.y, o4.z};
-    const Mat4 vp = comp_view_projection(*comp, now);
+    const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
+        : comp_view_projection(*comp, now);
     auto proj = [&](Vec3 p, f32* xy) {
         const Vec4 c = vp * Vec4{p.x, p.y, p.z, 1};
         if (!(c.w > 1e-6f)) return false;
@@ -5304,6 +5491,7 @@ void Engine::drain_commands_locked() noexcept {
 
 RenderSettings Engine::current_render_settings() noexcept {
     RenderSettings rs;
+    rs.sceneEditor = sceneEditor_;
     // AUTO 2.0: os botões de redução decididos pela medição, nunca acima do
     // piso térmico do instante (o calor muda entre dois quadros medidos).
     rs.quality = adapt().quality().min(PreviewQuality::level(thermal_heavy_level()));
@@ -5969,7 +6157,7 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         row.opacity = l->transform.opacity;
         row.effectCount = static_cast<u32>(l->effects.size());
         row.maskCount = static_cast<u32>(l->masks.size());
-        u32 keyCount = 0;
+        u32 keyCount = static_cast<u32>(l->timeRemap.keys.size());
         for (u32 t = 0; t < l->tracks.size(); ++t) keyCount += static_cast<u32>(l->tracks.at(t).keys.size());
         row.keyframeCount = keyCount;
         row.blendMode = static_cast<u32>(l->blendMode);
@@ -6000,8 +6188,7 @@ namespace {
 /// Linhas de keyframe de uma camada (trilha a trilha), no máximo `capacity`.
 u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) noexcept {
     u32 written = 0;
-    for (u32 t = 0; t < l.tracks.size() && written < capacity; ++t) {
-        const Track& track = l.tracks.at(t);
+    auto put = [&](const Track& track) {
         for (const Keyframe& k : track.keys) {
             if (written >= capacity) break;
             bridge::KeyframeRow row;
@@ -6013,7 +6200,9 @@ u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) 
             row.paramIndex = track.effectParamIndex;
             out[written++] = row;
         }
-    }
+    };
+    put(l.timeRemap);
+    for (u32 t = 0; t < l.tracks.size() && written < capacity; ++t) put(l.tracks.at(t));
     return written;
 }
 } // namespace
@@ -6042,6 +6231,7 @@ u32 Engine::query_all_keyframes(bridge::KeyframeIndexRow* outIndex, u32 layerCap
         const Layer* l = comp->layer(comp->order().at(n - 1 - i));
         if (!l) continue;
         ++layers;
+        total += l->timeRemap.keys.size();
         for (u32 t = 0; t < l->tracks.size(); ++t) total += l->tracks.at(t).keys.size();
     }
     if (outLayers) *outLayers = layers;
@@ -6385,8 +6575,8 @@ bool Engine::query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u
     std::lock_guard<std::mutex> lock(modelMutex_);
     const Composition* comp = current_composition();
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    const Track* track = layer ? (property == static_cast<u32>(TrackProperty::TimeRemap) ? &layer->timeRemap :
-        layer->tracks.find(static_cast<TrackProperty>(property), effectIndex, paramIndex)) : nullptr;
+    const TrackRef ref{LayerId::unpack(layerId), static_cast<TrackProperty>(property), effectIndex, paramIndex};
+    const Track* track = layer ? read_command_track(*layer, ref) : nullptr;
     if (!track) return false;
     const u32 index = track->find_exact(FrameIndex{frame});
     if (index == kInvalidIndex) return false;
@@ -6408,12 +6598,13 @@ u32 Engine::query_track_curve(u64 layerId, u32 property, u32 effectIndex, u32 pa
     if (!comp) return 0;
     Layer* l = comp->layer(LayerId::unpack(layerId));
     if (!l) return 0;
-    const Track* track = property == static_cast<u32>(TrackProperty::TimeRemap) ? &l->timeRemap :
-        l->tracks.find(static_cast<TrackProperty>(property), effectIndex, paramIndex);
+    const TrackRef ref{LayerId::unpack(layerId), static_cast<TrackProperty>(property), effectIndex, paramIndex};
+    const Track* track = read_command_track(*l, ref);
     if (!track) return 0;
     const f64 step = (static_cast<f64>(endFrame) - startFrame) / static_cast<f64>(sampleCount > 1 ? sampleCount - 1 : 1);
     for (u32 i = 0; i < sampleCount; ++i) {
         outValues[i] = track->sample_keys(FrameIndex{static_cast<i64>(static_cast<f64>(startFrame) + step * i)});
+        if (is_remap_time_alias(*l, ref)) outValues[i] /= static_cast<f32>(comp->fps());
     }
     return sampleCount;
 }
@@ -6519,7 +6710,7 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
                 row.animated = l->timeRemap.keys.size() > 1 ? 1u : 0u;
             } else if (i == 1) {
                 const u32 at = l->timeRemap.find_exact(local);
-                row.value[0] = at != kInvalidIndex && l->timeRemap.keys[at].interp == Interpolation::Hold ? 2.0f : 0.0f;
+                row.value[0] = at == kInvalidIndex ? 0.0f : l->timeRemap.keys[at].interp == Interpolation::Hold ? 2.0f : l->timeRemap.keys[at].interp == Interpolation::Linear ? 0.0f : 1.0f;
             }
         }
         out[written++] = row;
@@ -6605,6 +6796,8 @@ bool Engine::is_selected(u64 layerId) const noexcept {
 // =============================================================================
 Status Engine::start_export(const ExportSettings& settings, const char* outputPath) noexcept {
     if (!project_) return Errc::InvalidState;
+    if (settings.aiUpscale != 0 && settings.aiUpscale != 2 && settings.aiUpscale != 4)
+        return Status{Errc::InvalidArgument, "escala neural deve ser 2x ou 4x"};
     if (!outputPath || !*outputPath) return Errc::InvalidArgument;
     if (!gpu_ || !renderer_.ready()) return Status{Errc::NotSupported, "export precisa de GPU"};
     if (!config_.exportSinkFactory) return Status{Errc::NotSupported, "sem encoder de video nesta plataforma"};
@@ -6652,6 +6845,20 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     if (maxTex > 0 && std::max(ctx->width, ctx->height) > maxTex) {
         return Status{Errc::NotSupported, "resolucao acima do limite de textura da GPU"};
     }
+    ctx->outputWidth = ctx->width;
+    ctx->outputHeight = ctx->height;
+    if (settings.aiUpscale) {
+        // Keep the entire composition and the selected output exactly. Round the
+        // inference input to even dimensions, then shrink the full neural image.
+        const u32 scale = settings.aiUpscale;
+        ctx->width = ((ctx->outputWidth + scale * 2 - 1) / (scale * 2)) * 2;
+        ctx->height = ((ctx->outputHeight + scale * 2 - 1) / (scale * 2)) * 2;
+        const u64 working = static_cast<u64>(ctx->width) * ctx->height * 3 +
+                            static_cast<u64>(ctx->width * scale) * (ctx->height * scale) * 3 / 2 + (64ull << 20);
+        if (working > std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2))
+            return Status{Errc::OutOfMemory, "memoria insuficiente para upscale nesta resolucao"};
+        ctx->dither = false; // Do not feed quantization noise to the neural network.
+    }
 
     struct ProxyExportPause {
         PreviewProxyService& service;
@@ -6663,13 +6870,13 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     if (!ctx->sink) return Status{Errc::NotSupported, "encoder indisponivel"};
 
     VideoStreamConfig vc;
-    vc.width = ctx->width;
-    vc.height = ctx->height;
+    vc.width = ctx->outputWidth;
+    vc.height = ctx->outputHeight;
     vc.fps = ctx->fps;
     vc.codec = settings.videoCodec;
     // Mbps do projeto, ou proporcional aos pixels (0,2 bit por pixel·s:
     // 1080p30 ≈ 12 Mbps, 4K30 ≈ 50 Mbps) — generoso, é arquivo de edição.
-    const f64 pixelsPerSecond = static_cast<f64>(ctx->width) * ctx->height * ctx->fps;
+    const f64 pixelsPerSecond = static_cast<f64>(ctx->outputWidth) * ctx->outputHeight * ctx->fps;
     vc.bitrateBps = settings.videoBitrateMbps > 0
                   ? settings.videoBitrateMbps * 1000000u
                   : static_cast<u32>(std::clamp(pixelsPerSecond * 0.2, 2.0e6, 120.0e6));
@@ -7018,10 +7225,11 @@ void Engine::export_thread_main() noexcept {
         ctx.progress.result = result.code();
         if (result.ok()) ctx.set_message("concluido");
         else if (result.code() == Errc::Cancelled) ctx.set_message("cancelado");
-        else ctx.set_message(result.message().data());
+        else ctx.set_message(result.detail().empty() ? result.message().data() : result.detail().data());
     }
     if (!result.ok() && result.code() != Errc::Cancelled) {
-        AUREA_LOG_ERROR("export falhou: %s", result.message().data());
+        AUREA_LOG_ERROR("export falhou [%d]: %s; %s", result.raw(), result.message().data(),
+                       result.detail().empty() ? "" : result.detail().data());
     }
     exportActive_.store(false, std::memory_order_release);
     media_.proxies().set_pause_reason(PreviewProxyService::Export, false);
@@ -7032,6 +7240,25 @@ void Engine::export_thread_main() noexcept {
 void Engine::export_encoder_main() noexcept {
     set_current_thread_name("aurea-export-enc");
     ExportContext& ctx = *exportCtx_;
+    std::unique_ptr<ai::Upscaler> upscaler;
+    std::unique_ptr<u8[]> neuralInput, neuralOutput;
+    if (ctx.settings.aiUpscale) {
+        // Loading weights and all inference stay on the encoder worker.
+        Status loaded = Errc::OutOfMemory;
+        upscaler.reset(new (std::nothrow) ai::Upscaler());
+        neuralInput.reset(new (std::nothrow) u8[static_cast<usize>(ctx.width) * ctx.height * 3]);
+        neuralOutput.reset(new (std::nothrow) u8[static_cast<usize>(ctx.width * ctx.settings.aiUpscale) *
+                                               (ctx.height * ctx.settings.aiUpscale) * 3 / 2]);
+        if (upscaler && neuralInput && neuralOutput) {
+            loaded = upscaler->load(ctx.settings.aiUpscale, 2, 64);
+        }
+        if (!loaded.ok()) {
+            { std::lock_guard<std::mutex> ql(ctx.qMutex);
+              ctx.encoderStatus = loaded; ctx.encoderFailed = true; ctx.stop = true; }
+            ctx.qCv.notify_all();
+            return;
+        }
+    }
     u32 sinceLog = 0;
     u64 logWrite = 0, logRead = 0, logRender = 0, logDecode = 0;
     for (;;) {
@@ -7053,7 +7280,30 @@ void Engine::export_encoder_main() noexcept {
         const i64 pts = static_cast<i64>(std::llround(seconds * 1e6));
         // Direto do buffer de leitura para o sink: nenhuma cópia intermediária.
         const u64 w0 = monotonic_ns();
-        Status s = ctx.sink->write_video(slot.yPtr, ctx.width, slot.uvPtr, ctx.width, pts);
+        Status s;
+        if (upscaler) {
+            ai::nv12_to_rgb709(slot.yPtr, slot.uvPtr, ctx.width, ctx.height, neuralInput.get());
+            struct Destination { ExportContext* exportContext; u8* pixels; u32 frame; } destination{&ctx, neuralOutput.get(), i};
+            s = upscaler->run(neuralInput.get(), ctx.width, ctx.height, ctx.width * 3, ctx.cancelRequested,
+                [](void* opaque, const ai::Upscaler::Tile& tile) {
+                    auto& d = *static_cast<Destination*>(opaque);
+                    auto& c = *d.exportContext;
+                    if (!ai::rgb_tile_to_nv12_709(tile.rgb, tile.stride, tile.x, tile.y,
+                        tile.width, tile.height, c.width * c.settings.aiUpscale,
+                        c.height * c.settings.aiUpscale, d.pixels)) return false;
+                    { std::lock_guard<std::mutex> lock(c.mutex);
+                      std::snprintf(c.progress.message, sizeof(c.progress.message), "IA: %u/%u · %u%%", d.frame + 1,
+                                    c.frames, static_cast<u32>(tile.progress * 100)); }
+                    return !c.cancelRequested.load();
+                }, &destination);
+            if (s.ok() && !ai::resize_nv12_709(neuralOutput.get(), ctx.width * ctx.settings.aiUpscale,
+                    ctx.height * ctx.settings.aiUpscale, neuralOutput.get(), ctx.outputWidth, ctx.outputHeight))
+                s = Status{Errc::InvalidState, "dimensoes invalidas no upscale"};
+            if (s.ok()) s = ctx.sink->write_video(neuralOutput.get(), ctx.outputWidth,
+                neuralOutput.get() + static_cast<usize>(ctx.outputWidth) * ctx.outputHeight, ctx.outputWidth, pts);
+        } else {
+            s = ctx.sink->write_video(slot.yPtr, ctx.width, slot.uvPtr, ctx.width, pts);
+        }
         const u64 w1 = monotonic_ns();
         ctx.writeNs.fetch_add(w1 - w0, std::memory_order_relaxed);
         // O som até o fim DESTE quadro (em amostras inteiras: nenhuma deriva
@@ -7145,7 +7395,7 @@ bool Engine::mutates_model(CommandType type) noexcept {
         || type == CommandType::AudioSetVolume || type == CommandType::AudioSetPan
         || type == CommandType::LayerSetSpeed || type == CommandType::LayerSetReversed
         || type == CommandType::ShapeSetFill || type == CommandType::ShapeSetStroke
-        || type == CommandType::ShapeSetParam;
+        || type == CommandType::ShapeSetParam || type == CommandType::LayerLayoutTransform || type == CommandType::LayerSetLightParam || type == CommandType::LayerSetMaterialParam;
 }
 
 void Engine::record_history_locked(CommandType type) noexcept {
@@ -7221,7 +7471,7 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::KeyframeSetEasing: {
             const KeyframeInterpPayload& k = c.keyframe_interp;
             return track_ok(k.track) && frame_ok(k.time)
-                && static_cast<u8>(k.interp) <= static_cast<u8>(Interpolation::CustomCurve)
+                && static_cast<u8>(k.interp) <= static_cast<u8>(Interpolation::Steps)
                 && finite_all({k.bx1, k.by1, k.bx2, k.by2});
         }
         case CommandType::MaskSetOperation:
@@ -7243,6 +7493,9 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::AudioSetFadeIn:
         case CommandType::AudioSetFadeOut:      return frame_ok(c.audio_fade.duration);
         case CommandType::ShapeSetParam:        return finite(c.shape_param.value);
+        case CommandType::LayerSetMaterialParam: return c.material_param.param < 6 && finite(c.material_param.value) && c.material_param.value >= 0 && c.material_param.value <= 1;
+        case CommandType::LayerSetLightParam: return c.shape_param.param < 10 && finite(c.shape_param.value);
+        case CommandType::LayerLayoutTransform: return c.shape_param.param < 12 && finite(c.shape_param.value);
         case CommandType::ShapeSetFill:
         case CommandType::ShapeSetStroke:
         case CommandType::TextSetColor:
@@ -7544,6 +7797,107 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             l->transform.opacity  = clampf(cmd.transform.opacity, 0.0f, 1.0f);
             return OkStatus;
         }
+        case CommandType::LayerSetMaterialParam: {
+            const auto& c = cmd.material_param;
+            Layer* l = need_layer(c.layer);
+            if (!l || l->kind != LayerKind::Model3D) return Errc::NotFound;
+            if (l->locked) return Errc::InvalidState;
+            const auto found = models_.find(l->model.scene.pack());
+            if (found == models_.end() || !found->second || c.material >= found->second->materials.size() || c.material >= 4096) return Errc::OutOfRange;
+            const auto& source = found->second->materials[c.material];
+            MaterialOverride* target = nullptr;
+            for (auto& over : l->model.materials) if (over.materialIndex == c.material) { target = &over; break; }
+            const f32 baseFields[6]{source.baseColor.x, source.baseColor.y, source.baseColor.z, source.baseColor.w, source.metallic, source.roughness};
+            f32 base = baseFields[c.param];
+            if (target && (target->mask & (1u << c.param))) {
+                const f32 fields[6]{target->baseColor.x, target->baseColor.y, target->baseColor.z, target->baseColor.w, target->metallic, target->roughness};
+                base = fields[c.param];
+            }
+            Track* track = l->tracks.find(TrackProperty::MaterialParam, c.material, c.param);
+            if (track && track->has_expression()) return Errc::InvalidState;
+            f32 next = c.value;
+            if (track && !track->keys.empty()) {
+                const auto local = l->local_time(playback_.current());
+                if (sceneEditor_.enabled) {
+                    const f32 delta = c.value - track->value_or(local, base);
+                    for (auto& key : track->keys) key.value = std::clamp(key.value + delta, 0.0f, 1.0f);
+                    track->staticValue = std::clamp(track->staticValue + delta, 0.0f, 1.0f);
+                    next = std::clamp(base + delta, 0.0f, 1.0f);
+                } else track->set(local, c.value);
+            }
+            if (!target) {
+                MaterialOverride over; over.materialIndex = c.material; over.baseColor = source.baseColor; over.metallic = source.metallic; over.roughness = source.roughness;
+                l->model.materials.push_back(over); target = &l->model.materials.back();
+            }
+            target->mask |= 1u << c.param;
+            switch (c.param) {
+                case 0: target->baseColor.x = next; break; case 1: target->baseColor.y = next; break;
+                case 2: target->baseColor.z = next; break; case 3: target->baseColor.w = next; break;
+                case 4: target->metallic = next; break; case 5: target->roughness = next; break;
+            }
+            return OkStatus;
+        }
+        case CommandType::LayerSetLightParam: {
+            Layer* l = need_layer(cmd.shape_param.layer);
+            if (!l || l->kind != LayerKind::Light) return Errc::NotFound;
+            if (l->locked) return Errc::InvalidState;
+            const u32 p = cmd.shape_param.param;
+            const f32 v = cmd.shape_param.value;
+            if (p == 0) { if (v < 0 || v > 2) return Errc::InvalidArgument; l->light.kind = static_cast<LightKind>(static_cast<u32>(v)); return OkStatus; }
+            if (p == 8) { l->light.castShadows = v >= .5f; return OkStatus; }
+            f32* field = p == 1 ? &l->light.intensity : p == 2 ? &l->light.color.x : p == 3 ? &l->light.color.y : p == 4 ? &l->light.color.z
+                       : p == 5 ? &l->light.range : p == 6 ? &l->light.coneAngle : p == 7 ? &l->light.penumbra : &l->light.shadowBias;
+            const f32 maximum = p >= 2 && p <= 4 ? 1.0f : p == 7 ? 1.0f : p == 6 ? 179.0f : p == 9 ? .1f : 1000000.0f;
+            if (v < 0 || v > maximum) return Errc::InvalidArgument;
+            const auto prop = p >= 1 && p <= 4 ? static_cast<TrackProperty>(static_cast<u32>(TrackProperty::LightIntensity) + p - 1)
+                            : p == 6 ? TrackProperty::LightConeAngle : p == 7 ? TrackProperty::LightPenumbra : TrackProperty::_Count;
+            Track* track = prop != TrackProperty::_Count ? l->tracks.find(prop) : nullptr;
+            if (track && track->has_expression()) return Errc::InvalidState;
+            if (track) {
+                const f32 delta = v - track->value_or(l->local_time(playback_.current()), *field);
+                for (auto& key : track->keys) key.value += delta;
+                track->staticValue += delta;
+                *field += delta;
+            } else *field = v;
+            return OkStatus;
+        }
+        case CommandType::LayerLayoutTransform: {
+            Layer* l = need_layer(cmd.shape_param.layer);
+            if (!l) return Errc::NotFound;
+            if (l->locked) return Errc::InvalidState;
+            const u32 property = cmd.shape_param.param, axis = property % 3;
+            Vec3* vector = property < 3 ? &l->transform.position : property < 6 ? &l->transform.scale
+                         : property < 9 ? &l->transform.rotation : &l->transform.anchor;
+            const f32 base = axis == 0 ? vector->x : axis == 1 ? vector->y : vector->z;
+            Track* track = l->tracks.find(static_cast<TrackProperty>(property));
+            if (track && track->has_expression()) return Status{Errc::InvalidState, "layout transform controlled by expression"};
+            const f32 current = track ? track->value_or(l->local_time(playback_.current()), base) : base;
+            const f64 target = cmd.shape_param.value;
+            // At zero scale, multiplication cannot restore a visible object:
+            // translate the whole scale curve instead, preserving its deltas.
+            const bool multiply = property >= 3 && property < 6 && std::fabs(current) > 1e-6f;
+            const f64 gain = multiply ? target / current : 1.0;
+            const f64 delta = multiply ? 0.0 : target - current;
+            auto mapped = [&](f32 value) { return static_cast<f64>(value) * gain + delta; };
+            auto fits = [](f64 value) { return std::isfinite(value) && std::fabs(value) <= std::numeric_limits<f32>::max(); };
+            if (!fits(mapped(base))) return Errc::InvalidArgument;
+            if (track) {
+                if (!fits(mapped(track->staticValue))) return Errc::InvalidArgument;
+                for (const auto& key : track->keys)
+                    if (!fits(mapped(key.value)) || !fits(key.tangentIn * gain) || !fits(key.tangentOut * gain)) return Errc::InvalidArgument;
+            }
+            const f32 next = static_cast<f32>(mapped(base));
+            if (axis == 0) vector->x = next; else if (axis == 1) vector->y = next; else vector->z = next;
+            if (track) {
+                track->staticValue = static_cast<f32>(mapped(track->staticValue));
+                for (auto& key : track->keys) {
+                    key.value = static_cast<f32>(mapped(key.value));
+                    key.tangentIn = static_cast<f32>(key.tangentIn * gain);
+                    key.tangentOut = static_cast<f32>(key.tangentOut * gain);
+                }
+            }
+            return OkStatus;
+        }
         case CommandType::LayerSetPosition: {
             Layer* l = need_layer(cmd.position.layer);
             if (!l) return Errc::NotFound;
@@ -7589,24 +7943,22 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeInsert: {
             Layer* l = need_layer(cmd.keyframe.track.layer);
             if (!l) return Errc::NotFound;
-            Track& track = l->tracks.get_or_create(cmd.keyframe.track.property, cmd.keyframe.track.effectIndex,
-                                                   cmd.keyframe.track.effectParamIndex);
-            (void)track.set(cmd.keyframe.time, cmd.keyframe.value, Interpolation::Linear);
+            Track* track = command_track(*l, cmd.keyframe.track, true);
+            const f32 scale = is_remap_time_alias(*l, cmd.keyframe.track) ? static_cast<f32>(comp->fps()) : 1.0f;
+            (void)track->set(cmd.keyframe.time, cmd.keyframe.value * scale, Interpolation::Linear);
             return OkStatus;
         }
         case CommandType::KeyframeDelete: {
             Layer* l = need_layer(cmd.keyframe.track.layer);
             if (!l) return Errc::NotFound;
-            Track* track = l->tracks.find(cmd.keyframe.track.property, cmd.keyframe.track.effectIndex,
-                                          cmd.keyframe.track.effectParamIndex);
+            Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track || !track->remove(cmd.keyframe.time)) return Errc::NotFound;
             return OkStatus;
         }
         case CommandType::KeyframeMove: {
             Layer* l = need_layer(cmd.keyframe_move.track.layer);
             if (!l) return Errc::NotFound;
-            Track* track = l->tracks.find(cmd.keyframe_move.track.property, cmd.keyframe_move.track.effectIndex,
-                                          cmd.keyframe_move.track.effectParamIndex);
+            Track* track = command_track(*l, cmd.keyframe_move.track, false);
             if (!track) return Errc::NotFound;
             if (track->move(cmd.keyframe_move.fromTime, cmd.keyframe_move.toTime) == kInvalidIndex) return Errc::NotFound;
             return OkStatus;
@@ -7614,12 +7966,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeSetValue: {
             Layer* l = need_layer(cmd.keyframe.track.layer);
             if (!l) return Errc::NotFound;
-            Track* track = l->tracks.find(cmd.keyframe.track.property, cmd.keyframe.track.effectIndex,
-                                          cmd.keyframe.track.effectParamIndex);
+            Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track) return Errc::NotFound;
             const u32 idx = track->find_exact(cmd.keyframe.time);
             if (idx == kInvalidIndex) return Errc::NotFound;
-            track->keys[idx].value = cmd.keyframe.value;
+            track->keys[idx].value = cmd.keyframe.value * (is_remap_time_alias(*l, cmd.keyframe.track) ? static_cast<f32>(comp->fps()) : 1.0f);
             return OkStatus;
         }
         case CommandType::KeyframeSetInterpolation:
@@ -7627,8 +7978,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeSetEasing: {
             Layer* l = need_layer(cmd.keyframe_interp.track.layer);
             if (!l) return Errc::NotFound;
-            Track* track = l->tracks.find(cmd.keyframe_interp.track.property, cmd.keyframe_interp.track.effectIndex,
-                                          cmd.keyframe_interp.track.effectParamIndex);
+            Track* track = command_track(*l, cmd.keyframe_interp.track, false);
             if (!track) return Errc::NotFound;
             track->set_interpolation(cmd.keyframe_interp.time, cmd.keyframe_interp.interp,
                                      cmd.keyframe_interp.bx1, cmd.keyframe_interp.by1,
@@ -7750,7 +8100,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             }
             // Tirar o Remapear tempo desliga a curva — mas ela FICA guardada,
             // igual a desligar o remapeamento pelo painel de velocidade.
-            if (era_remap) l->timeRemapEnabled = false;
+            if (era_remap) l->timeRemapEnabled = std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& item) {
+                return item.enabled && is_time_remap_type(item.type);
+            });
             return OkStatus;
         }
         case CommandType::EffectReorder: {
@@ -7770,6 +8122,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             EffectInstance* e = l->find_effect(cmd.effect_enabled.effect);
             if (!e) return Errc::NotFound;
             e->enabled = cmd.effect_enabled.enabled;
+            if (is_time_remap_type(e->type)) {
+                const bool on = std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& item) {
+                    return item.enabled && is_time_remap_type(item.type);
+                });
+                if (on) enable_time_remap_curve(*l); else l->timeRemapEnabled = false;
+            }
             return OkStatus;
         }
         case CommandType::EffectSetParam: {
@@ -7798,10 +8156,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 }
                 if (p == 1) {
                     // Modos do AE: 0 Linear, 1 Suave, 2 Segurar.
-                    if (at != kInvalidIndex) {
-                        l->timeRemap.keys[at].interp =
-                            cmd.effect_param.value >= 1.5f ? Interpolation::Hold : Interpolation::Linear;
-                    }
+                    const Interpolation mode = cmd.effect_param.value >= 1.5f ? Interpolation::Hold :
+                        cmd.effect_param.value >= 0.5f ? Interpolation::EaseInOut : Interpolation::Linear;
+                    const f32 value = l->timeRemap.sample_keys(local);
+                    write_time_remap(*l, local, value, mode);
                     e->params[1].constant.v[0] = cmd.effect_param.value;
                     return OkStatus;
                 }

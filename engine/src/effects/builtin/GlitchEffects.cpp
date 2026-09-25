@@ -27,7 +27,7 @@ namespace {
 class Glitchify final : public Effect {
 public:
     enum : u32 { kBandHeight = 0, kDisplace, kSpike, kChannelSplit, kFrequency, kSeed,
-                 kFreeze, kMix, kVertical, kColorCorruption };
+                 kFreeze, kMix, kVertical, kColorCorruption, kPixelSize, kChannelScale, kBlockWidth, kBlockShift, kTear, kFlicker, kPixelSort };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kGlitchify, "Glitchify", "Glitch", EffectClass::Domain};
@@ -44,12 +44,21 @@ public:
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_bool("vertical", "Blocos verticais", false);
         p.add_float("color_corruption", "Corrupção de cor", 30.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("pixel_size", "Pixelização", 0.0f, 0.0f, 64.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("channel_scale", "Escala RGB", 0.0f, 0.0f, 30.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("block_width", "Largura dos blocos", 64.0f, 4.0f, 512.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("block_shift", "Deslocamento dos blocos", 0.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("tear", "Rasgos horizontais", 0.0f, 0.0f, 400.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("flicker", "Cintilação", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("pixel_sort", "Ordenação de pixels", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
     bool is_identity(const EffectEval& e) const noexcept override {
-        return e.f(kMix) < 0.01f || (e.f(kDisplace) < 0.01f && e.f(kChannelSplit) < 0.01f && e.f(kSpike) < 0.01f);
+        return e.f(kMix) < 0.01f || (e.f(kDisplace) < 0.01f && e.f(kChannelSplit) < 0.01f && e.f(kColorCorruption) < 0.01f &&
+            e.f(kPixelSize) <= 1.0f && e.f(kChannelScale) < 0.01f && e.f(kBlockShift) < 0.01f &&
+            e.f(kTear) < 0.01f && e.f(kFlicker) < 0.01f && e.f(kPixelSort) < 0.01f);
     }
     f32 input_margin(const EffectEval& e) const noexcept override {
-        return e.f(kDisplace) * 7.0f + e.f(kChannelSplit) * 2.0f;
+        return e.f(kDisplace) * 7.0f + e.f(kChannelSplit) * 2.0f + e.f(kBlockShift) + e.f(kTear) + e.f(kPixelSize) + 16.0f;
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kBandHeight] = ParamValue::scalar(26.0f);
@@ -60,20 +69,21 @@ public:
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
-        const f32 reach = e.f(kDisplace) * 7.0f + e.f(kChannelSplit) * 2.0f;
+        const f32 reach = input_margin(e);
         const Rect region = spread_region(input.region, reach, reach, e.placement, margin);
         u32 w = 0, h = 0;
         ctx.region_size(region, input.texel_scale_x(), w, h);
 
         EffectUniforms u;
         u.uvMap = EffectBuildContext::uv_map(region, input.region);
-        u.texel = Vec4{region.w > 0.0f ? 1.0f / region.w : 0.0f, region.h > 0.0f ? 1.0f / region.h : 0.0f,
-                       input.texel_scale_x(), input.texel_scale_y()};
+        u.texel = Vec4{input.region.w > 0.0f ? 1.0f / input.region.w : 0.0f,
+                       input.region.h > 0.0f ? 1.0f / input.region.h : 0.0f, input.region.x, input.region.y};
         u.p0 = Vec4{e.f(kBandHeight), e.f(kDisplace), e.f(kSpike) / 100.0f, e.f(kChannelSplit)};
         u.p1 = Vec4{std::max(0.25f, e.f(kFrequency)), static_cast<f32>(e.e(kSeed)),
                     e.b(kFreeze) ? 1.0f : 0.0f, e.f(kMix) / 100.0f};
-        u.p2 = Vec4{e.b(kVertical) ? 1.0f : 0.0f, e.f(kColorCorruption) / 100.0f, 0.0f, 0.0f};
-        u.p3 = Vec4{static_cast<f32>(e.localTime.value), 0.0f, 0.0f, 0.0f};
+        u.p2 = Vec4{e.b(kVertical) ? 1.0f : 0.0f, e.f(kColorCorruption) / 100.0f, e.f(kPixelSize), e.f(kChannelScale) / 100.0f};
+        u.p3 = Vec4{static_cast<f32>(e.localTime.value), e.f(kBlockWidth), e.f(kBlockShift), e.f(kTear)};
+        u.color = Vec4{e.f(kFlicker) / 100.0f, e.f(kPixelSort) / 100.0f, 0.0f, 0.0f};
 
         out = LayerImage{ctx.texture("glitchify", w, h), region, w, h};
         if (ctx.fullscreen_pass("glitchify", PassStage::Transform, out.texture, ShaderId::effects_glitchify_frag,

@@ -128,10 +128,10 @@ public:
 
     /// O modo do AE (0 Linear, 1 Suave, 2 Segurar) na interpolação do motor.
     [[nodiscard]] static Interpolation interp_of(u32 mode) noexcept {
-        return mode == 2 ? Interpolation::Hold : Interpolation::Linear;
+        return mode == 2 ? Interpolation::Hold : mode == 1 ? Interpolation::EaseInOut : Interpolation::Linear;
     }
     [[nodiscard]] static u32 mode_of(Interpolation i) noexcept {
-        return i == Interpolation::Hold ? 2u : 0u;
+        return i == Interpolation::Hold ? 2u : i == Interpolation::Linear ? 0u : 1u;
     }
 };
 

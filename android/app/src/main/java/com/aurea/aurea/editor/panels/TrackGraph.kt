@@ -61,19 +61,20 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(if (speed) "${"%.3g".format(view.high)} /s" else "%.3g".format(view.high), fontSize = 10.sp, color = AureaColors.Muted, modifier = Modifier.weight(1f))
-            Text("−", Modifier.size(36.dp).tocavel { view = view.transform(1 / 1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
-            Text("+", Modifier.size(36.dp).tocavel { view = view.transform(1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
+            Text("−", Modifier.size(48.dp).tocavel { view = view.transform(1 / 1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
+            Text("+", Modifier.size(48.dp).tocavel { view = view.transform(1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
             Text(stringResource(R.string.panel_ajustar), Modifier.tocavel { view = fit() }.padding(8.dp), fontSize = 11.sp, color = AureaColors.Accent)
         }
         Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().pointerInput(layer, first.property, first.effectIndex, first.paramIndex, speed) {
             awaitEachGesture {
                 val down = awaitFirstDown()
+                down.consume()
                 if (size.width <= 0 || size.height <= 0) return@awaitEachGesture
                 val initial = view
                 fun point(key: KeyframeRow) = Offset((key.time - initial.from) / initial.duration * size.width,
                     size.height - (key.value - initial.low) / initial.range * size.height)
                 val radius = 24.dp.toPx()
-                val key = if (speed) null else currentTrack.minByOrNull { (point(it) - down.position).getDistanceSquared() }
+                var key = if (speed) null else currentTrack.minByOrNull { (point(it) - down.position).getDistanceSquared() }
                     ?.takeIf { (point(it) - down.position).getDistanceSquared() <= radius * radius }
                 if (key != null) store.selectKeyframe(layer, key)
                 var began = false
@@ -82,12 +83,16 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                         if (!change.pressed) break
-                        if (key != null) {
-                            if (event.changes.count { it.pressed } > 1) break
+                        if (event.changes.count { it.pressed } > 1 && key != null) {
+                            if (began) { store.endGesture(); began = false }
+                            key = null
+                        }
+                        val activeKey = key
+                        if (activeKey != null) {
                             val dy = change.position.y - down.position.y
                             if (!began && abs(dy) < 1f) continue
                             if (!began) { store.beginGesture("editar valor do keyframe"); began = true }
-                            store.setGraphKeyframeValue(layer, key, key.value - dy / size.height * initial.range)
+                            store.setGraphKeyframeValue(layer, activeKey, activeKey.value - dy / size.height * initial.range)
                         } else {
                             val pan = event.calculatePan()
                             val zoom = event.calculateZoom()

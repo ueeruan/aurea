@@ -8,6 +8,8 @@ struct Panel3DView: View {
     @State private var draft = ""
     @State private var environment: [Float] = [0, 1, 0]
     @State private var objectEnvironment: [NSNumber] = []
+    @State private var importedMaterials: [[Float]] = []
+    @State private var selectedMaterial: UInt32 = 0
     @State private var shadows: [Float] = []
     @State private var pickingHdri = false
     @State private var pickingFont = false
@@ -37,9 +39,7 @@ struct Panel3DView: View {
                     if !text3D.isEmpty {
                         colorRow("panel_cor", key: "color", region: 0, height: 48)
                         materialSection
-                    } else {
-                        note("panel_cor_brilho_metalico_rugosidade_vem_arquivo")
-                    }
+                    } else { importedMaterialSection }
                     lightingSection
                     gap(16)
                     environmentSection
@@ -61,6 +61,7 @@ struct Panel3DView: View {
         }
         .onAppear(perform: load)
         .onChange(of: model.status.modelRevision) { _ in load() }
+        .onChange(of: model.localPlayhead) { _ in loadMaterials() }
         .onChange(of: layerId) { _ in finishEditing(); editingText = false; load() }
         .onChange(of: editingText) { focused in if !focused && typingActive { finishEditing() } }
         .onDisappear {
@@ -316,6 +317,47 @@ struct Panel3DView: View {
     private func objectNumber(_ index: Int) -> Float { objectEnvironment[index].floatValue }
     private func rounded(_ value: Float) -> Int { Int(floor(Double(value) + 0.5)) }
     private func percent(_ value: Float) -> String { "\(rounded(value * 100))%" }
+
+    @ViewBuilder private var importedMaterialSection: some View {
+        if let material = importedMaterials.first(where: { UInt32($0[0]) == selectedMaterial }) ?? importedMaterials.first {
+            let index = UInt32(material[0])
+            Menu {
+                ForEach(importedMaterials.indices, id: \.self) { row in
+                    Button("Material \(Int(importedMaterials[row][0]) + 1)") { selectedMaterial = UInt32(importedMaterials[row][0]) }
+                }
+            } label: { Text("Material \(index + 1)").font(.aurea(size: 14)).frame(minHeight: 44) }
+            ForEach(0..<6, id: \.self) { param in
+                materialControl(material, index: index, param: param)
+            }
+        }
+    }
+
+    private func materialControl(_ material: [Float], index: UInt32, param: Int) -> some View {
+        let labels = ["R", "G", "B", "Alpha", AureaText.t("pn_t3d_metallic"), AureaText.t("pn_t3d_roughness")]
+        let value = min(1, max(0, material[param + 2]))
+        let keys = (model.keyframes[layerId] ?? []).filter { $0.property == 37 && $0.effectIndex == index && $0.paramIndex == UInt32(param) }
+        let here = keys.first { $0.time == model.localPlayhead }
+        return HStack(spacing: 8) {
+            Text(labels[param]).font(.aurea(size: 13)).frame(width: 78, alignment: .leading)
+            Slider(value: Binding(get: { value }, set: { newValue in
+                _ = model.engine.setMaterial(forLayer: layerId, index: index, param: UInt32(param), value: newValue)
+                refresh()
+            }), in: 0...1, onEditingChanged: { editing in
+                if editing { beginContinuous("material") } else { finishEditing() }
+            })
+            Button {
+                model.beginGesture("keyframe de material")
+                if let here {
+                    model.engine.editTrackKey(layerId, property: 37, effect: index, param: UInt32(param), time: here.time,
+                                              action: 1, value: here.value, targetTime: here.time, interpolation: here.interpolation, handles: [])
+                } else {
+                    model.engine.keyParameter(layerId, property: 37, effect: index, param: UInt32(param), time: model.localPlayhead, value: value)
+                }
+                model.endGesture(); model.commitPendingCommands(); refresh()
+            } label: { Text(here == nil ? "◇" : "◆").frame(width: 44, height: 44) }
+            .accessibilityLabel(AureaText.t(here == nil ? "panel_marcar_keyframe_aqui" : "panel_tirar_keyframe_daqui") + " · " + labels[param])
+        }
+    }
     private func degrees(_ value: Float) -> String { "\(rounded(value))°" }
     private func colorValues(_ key: String) -> [Float] {
         let values = (text3D[key] as? [NSNumber] ?? []).map(\.floatValue)
@@ -422,6 +464,11 @@ struct Panel3DView: View {
         environment = values.count >= 3 ? values : [0, 1, 0]
         shadows = model.engine.modelShadows(layerId).map(\.floatValue)
         objectEnvironment = model.engine.objectEnvironment(forLayer: layerId)
+        loadMaterials()
+    }
+    private func loadMaterials() {
+        let materials = model.engine.materials(forLayer: layerId).map(\.floatValue)
+        importedMaterials = stride(from: 0, to: materials.count - materials.count % 8, by: 8).map { Array(materials[$0..<($0 + 8)]) }
     }
     private func importFont(_ url: URL, target: Int64?) {
         guard ["ttf", "otf"].contains(url.pathExtension.lowercased()) else {

@@ -110,6 +110,11 @@ class DecodedFrame {
 public:
     virtual ~DecodedFrame() = default;
 
+    // Frame content is immutable after publication. Unlike a recycled decoder
+    // buffer address or PTS, this identifies a particular decoded result even
+    // after a seek/relink, without retaining its CPU planes in GPU caches.
+    [[nodiscard]] u64 content_id() const noexcept { return contentId_; }
+
     i64 ptsUs = 0;
     i64 durationUs = 0; ///< Presentation interval; zero means legacy/unknown timing.
 
@@ -151,6 +156,8 @@ public:
     }
 
 private:
+    inline static std::atomic<u64> nextContentId_{1};
+    const u64 contentId_ = nextContentId_.fetch_add(1, std::memory_order_relaxed);
     std::atomic<u32> refs_{1};
 };
 

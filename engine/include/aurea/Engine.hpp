@@ -505,6 +505,13 @@ public:
     /// Nulo (não desenha; serve de pai/controle). `threeD` = nulo 3D (vive na
     /// cena: posição/rotação/escala em X, Y e Z).
     [[nodiscard]] Result<u64> add_null(bool threeD) noexcept;
+    [[nodiscard]] Result<u64> add_camera() noexcept;
+    [[nodiscard]] Result<u64> add_light(u32 kind) noexcept;
+    [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
+    [[nodiscard]] Status set_material_param(u64 layer, u32 material, u32 param, f32 value) noexcept;
+    [[nodiscard]] bool query_light(u64 layer, f32* values) noexcept;
+    void set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) noexcept;
+    [[nodiscard]] u32 query_scene_guides(f32* lines, u32 capacity) noexcept;
 
     /// Remapeamento de tempo: ligar cria a curva equivalente ao tempo atual
     /// (nada muda até editar); desligar volta à velocidade (a curva fica guardada).
@@ -1138,6 +1145,7 @@ private:
     void migrate_echo_to_effect() noexcept;
     [[nodiscard]] std::string store_asset_path(const std::string& absolute) const;
 
+    SceneEditorView sceneEditor_{}; ///< modelMutex protected, never serialized
     std::vector<u64> selection_;
     std::atomic<u32> modelRevision_{1};   ///< a UI relê listas quando muda
 

@@ -948,23 +948,6 @@ struct SpeedPanel: View {
                                 speedChip(["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
                             }
                         }.padding(.top, 12)
-                        Text(AureaText.t("panel_acelerar_desacelerar_tempo")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 14)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(Array(["panel_sem_rampa", "panel_suave", "panel_lento_meio", "panel_acelerar", "panel_desacelerar"].enumerated()), id: \.offset) { index, label in
-                                    speedChip(AureaText.t(label), on: index == 0 && !remap) {
-                                        change { core in
-                                            if index == 0 { core.setTimeRemap(false, forLayer: id) }
-                                            else { core.applySpeedRamp(UInt32(index), forLayer: id) }
-                                        }
-                                    }
-                                }
-                            }
-                        }.padding(.top, 6)
-                        if remap {
-                            TimeRemapEditor().padding(.top, 8)
-                            hint("panel_rampa_ligada_som_video_seguem_mesma", size: 12).padding(.top, 6)
-                        }
                         if kind == 1 {
                             HStack {
                                 Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)

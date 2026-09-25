@@ -54,7 +54,13 @@ def canonico(path: Path) -> bytes:
 
 def digerir(path: Path) -> dict:
     dados = canonico(path)
-    return {"sha256": hashlib.sha256(dados).hexdigest(), "bytes": len(dados)}
+    result = {"sha256": hashlib.sha256(dados).hexdigest(), "bytes": len(dados)}
+    if path.suffix.lower() == ".gltf":
+        document = json.loads(dados)
+        result["externalResources"] = sum(
+            1 for group in ("buffers", "images") for item in document.get(group, [])
+            if item.get("uri") and not item["uri"].startswith("data:"))
+    return result
 
 
 def alvos():
@@ -74,7 +80,7 @@ def carregar(path: Path):
 
 def gravar(path: Path, registro: dict) -> Path:
     destino = path.with_suffix(".audit.json")
-    textos = sorted(set(registro) - {"sha256", "bytes", "externalResources"})
+    textos = sorted(set(registro) - {"sha256", "bytes"})
     ordenado = {}
     for campo in CAMPOS_BASE:
         if campo in registro:
@@ -108,9 +114,11 @@ def conferir() -> int:
                 problemas.append("%s: auditoria sem o campo %s" % (path.name, campo))
         # Um fixture que aponta para mídia externa não é autocontido: no
         # simulador ele abriria sem textura e o teste passaria por engano.
-        if registro.get("externalResources", 0) not in (0, None):
+        if path.suffix.lower() == ".gltf" and registro.get("externalResources") != dados["externalResources"]:
+            problemas.append("%s: externalResources ausente ou diferente dos URIs reais" % path.name)
+        if dados.get("externalResources", registro.get("externalResources", 0)) not in (0, None):
             problemas.append("%s: declara %s recurso(s) externo(s)"
-                             % (path.name, registro["externalResources"]))
+                             % (path.name, dados.get("externalResources", registro.get("externalResources"))))
     print("fixtures: %d" % len(itens))
     if problemas:
         print("PROBLEMAS (%d):" % len(problemas))

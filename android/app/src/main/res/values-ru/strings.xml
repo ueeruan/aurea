@@ -878,4 +878,26 @@
     <string name="ai_limite_atingido">You\'ve used your %1$d AI generations for today. Come back tomorrow to generate more.</string>
     <string name="editor_marca_anterior_segure_inicio">Предыдущая метка; удерживайте для перехода к началу</string>
     <string name="editor_proxima_marca_segure_fim">Следующая метка; удерживайте для перехода к концу</string>
+    <string name="donation_title">Поддержать Aurea</string>
+    <string name="donation_note">Добровольные пожертвования помогают приложению оставаться бесплатным.</string>
+    <string name="donation_detail">Вы сами решаете, помогать ли и какую сумму внести. Все функции остаются доступными.</string>
+    <string name="donation_pix_qr">QR-код Pix Руан Пабло</string>
+    <string name="donation_copy_pix">Копировать Pix</string>
+    <string name="donation_paypal">Пожертвовать через PayPal</string>
+    <string name="donation_copy_paypal">Копировать ссылку PayPal</string>
+    <string name="donation_export_note">Экспорт продолжается. Используйте код или ссылку после завершения.</string>
+    <string name="donation_copied">Скопировано в буфер обмена.</string>
+    <string name="ai_upscale_title">Увеличение видео с ИИ</string>
+    <string name="ai_upscale_note">Модель для аниме и иллюстраций. Обработка по блокам не блокирует интерфейс. Выбранное ниже разрешение задаёт итоговое качество.</string>
+    <string name="ai_upscale_dimensions">ИИ %1$dx · вход %2$d × %3$d → выход %4$d × %5$d</string>
+    <string name="licenses_title">Лицензии · ИИ</string>
+    <string name="scene_workspace">3D-сцена</string>
+    <string name="scene_orbit_x">Орбита X</string>
+    <string name="scene_orbit_y">Орбита Y</string>
+    <string name="scene_zoom">Масштаб</string>
+    <string name="scene_light_directional">Направленный свет</string>
+    <string name="scene_light_point">Точечный свет</string>
+    <string name="scene_light_range">Дальность</string>
+    <string name="scene_light_shadows">Тени</string>
+    <string name="scene_light_failed">Не удалось создать источник света.</string>
 </resources>

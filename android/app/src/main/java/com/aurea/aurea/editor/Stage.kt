@@ -299,6 +299,15 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.handlesValid = false
     m.markerAnchorValid = false
     if (!m.valid) return
+    if (store.sceneEditor) {
+        val lines = store.sceneGuideLines()
+        for (i in lines.indices step 5) {
+            val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .35f) }
+            drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), 1.dp.toPx())
+        }
+        store.gizmo?.let { drawGizmo(m, it) }
+        return
+    }
     // Modo vetorial (pontos / mão livre): o palco é do caminho, sem alças da camada.
     if (store.vectorTool != 0) {
         drawVectorOverlay(store, m)
@@ -598,7 +607,7 @@ private suspend fun PointerInputScope.stageGestures(
         }
 
         // Editar forma: as alças da silhueta (tamanho/raio) têm a vez.
-        if (m.valid && shapeEditMode(store, ui)) {
+        if (!store.sceneEditor && m.valid && shapeEditMode(store, ui)) {
             val sh = pickShapeHandle(downX, downY, 26.dp.toPx())
             if (sh >= 0) {
                 shapeEditGesture(store, m, sh, down)
@@ -646,6 +655,8 @@ private suspend fun PointerInputScope.stageGestures(
                 return@awaitEachGesture
             }
         }
+
+        if (store.sceneEditor) return@awaitEachGesture
 
         // Escolhendo o ponto do rastreio: a mira segue o dedo (dá para ajustar
         // antes de soltar); soltar vira a coordenada da camada.

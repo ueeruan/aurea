@@ -514,6 +514,9 @@ func expandedTimelineRows(_ base: [TimelineRow], expanded: Int64?, keys: [Int64:
                 case 34: name = "Vector · \(UInt64(track.param) + 1)"
                 case 35: name = "Shape · \(UInt64(track.param) + 1)"
                 case 36: name = "Particles · \(UInt64(track.param) + 1)"
+                case 37:
+                    let labels = ["R", "G", "B", "Alpha", "Metallic", "Roughness"]
+                    name = "Material \(UInt64(track.effect) + 1) · \(Int(track.param) < labels.count ? labels[Int(track.param)] : String(track.param))"
                 default: name = "3D · \(track.property)"
                 }
             }

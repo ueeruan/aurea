@@ -802,6 +802,7 @@ object TrackProperty {
     const val VECTOR_PARAM = 34
     const val SHAPE_PARAM = 35
     const val PARTICLE_PARAM = 36
+    const val MATERIAL_PARAM = 37
 }
 
 /**

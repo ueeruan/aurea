@@ -169,6 +169,9 @@ enum class CommandType : u16 {
     ShapeSetFill,          ///< cor de preenchimento sRGB + alfa (TextColorPayload); alfa 0 = sem preenchimento
     ShapeSetStroke,        ///< cor do contorno (TextColorPayload)
     ShapeSetParam,         ///< ShapeParamPayload: 0 tipo, 1 canto, 2 pontas, 3 raio interno, 4 contorno, 5 largura, 6 altura
+    LayerLayoutTransform, ///< ShapeParamPayload: transform property 0..11, target at playhead; preserves animation key times/count.
+    LayerSetLightParam,    ///< ShapeParamPayload: layer, LightData field 0..9, value.
+    LayerSetMaterialParam, ///< MaterialParamPayload: per-instance material override.
 };
 
 /// Alvo de um comando que mexe em uma propriedade animável.
@@ -254,6 +257,8 @@ struct ExportRequestPayload { u32 codec; u32 width; u32 height; f64 fps; u32 bit
 
 /// Comando. União de campos por tipo — `union` porque não há construtor nem
 /// destrutor a rodar, e o bloco inteiro é memcpy-ável pela bridge.
+struct MaterialParamPayload { LayerId layer; u32 material; u32 param; f32 value; };
+
 struct Command {
     /// Tudo zerado, payload inteiro incluído. O `raw = 0` da união só zera 8
     /// dos 64 bytes: um comando montado em C++ campo a campo (motor, testes,
@@ -318,6 +323,7 @@ struct Command {
         AudioFlagPayload audio_flag;
         AudioFadePayload audio_fade;
         ShapeParamPayload shape_param;
+        MaterialParamPayload material_param;
         TextSizePayload text_size;
         TextColorPayload text_color;
         TextAlignPayload text_align;

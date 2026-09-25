@@ -6,6 +6,7 @@
   "doubleSided": true,
   "embeddedBufferBytes": 84,
   "expected": "Both red left and green right visible",
+  "externalResources": 0,
   "materials": [
     "unlit pure red front left",
     "unlit pure green back right"

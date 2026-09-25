@@ -68,6 +68,7 @@ struct BenchCapture {
     bool opened = false, finished = false, aborted = false;
     bool keepFrames = false;
     u32 encodeUs = 0;                    ///< latência extra simulada do encoder
+    Status writeFailure{};              ///< fault injection at the platform boundary
     std::vector<u64> hashes;             ///< FNV-1a de Y+CbCr por quadro
     std::vector<std::vector<u8>> frames; ///< Y + CbCr (keepFrames)
     std::vector<i64> pts;
@@ -106,6 +107,7 @@ public:
         return OkStatus;
     }
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
+        if (!c_->writeFailure.ok()) return c_->writeFailure;
         const u32 w = c_->video.width, h = c_->video.height;
         // O trabalho do MediaCodecExport: planos → buffer de entrada do codec.
         u8* dst = c_->input.data();
@@ -359,12 +361,13 @@ struct Outcome {
     bool finished = false;
 };
 
-Outcome run_export(Rig& r, u32 shortSide, f64 fps, bool dither = true, int timeoutS = 600) {
+Outcome run_export(Rig& r, u32 shortSide, f64 fps, bool dither = true, int timeoutS = 600, u32 aiScale = 0) {
     Outcome o;
     ExportSettings s;
     s.height = shortSide;
     s.fps = fps;
     s.dither = dither;
+    s.aiUpscale = aiScale;
     const auto t0 = std::chrono::steady_clock::now();
     if (!r.e.start_export(s, "nao-usado.mp4").ok()) return o;
     for (int i = 0; i < timeoutS * 1000; ++i) {
@@ -419,6 +422,35 @@ bool gpu_ok() {
 // =============================================================================
 // Equivalência: pipeline × serial, bytes idênticos
 // =============================================================================
+AUREA_TEST(Export, NeuralUpscaleKeepsOutputTimingAudioAndDimensions) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 64; cfg.height = 36;
+    cfg.pattern = SyntheticPattern::MovingSquare;
+    cfg.audioRate = 44100; cfg.audioSeconds = 1;
+    for (const u32 scale : {2u, 4u}) {
+        std::vector<std::vector<u8>> serial;
+        u64 audioHash = 0;
+        for (const u32 depth : {1u, 3u}) {
+            Rig r(cfg, 29.97, 3, depth);
+            AUREA_CHECK(r.ok); if (!r.ok) return;
+            r.cap.keepFrames = true;
+            const Outcome o = run_export(r, 36 * scale, 0, false, 60, scale);
+            AUREA_CHECK(o.finished); AUREA_CHECK_EQ(o.p.result, Errc::Ok);
+            AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+            AUREA_CHECK_EQ(r.cap.video.width, 64u * scale);
+            AUREA_CHECK_EQ(r.cap.video.height, 36u * scale);
+            AUREA_CHECK_EQ(r.cap.frames.size(), static_cast<usize>(3));
+            AUREA_CHECK(r.cap.ptsMonotonic && r.cap.audioContiguous && r.cap.hasAudio);
+            AUREA_CHECK_EQ(r.cap.audioFrames, audio::frame_to_sample(3, 29.97));
+            for (usize i=0; i<r.cap.pts.size(); ++i)
+                AUREA_CHECK_EQ(r.cap.pts[i], static_cast<i64>(std::llround(i * 1e6 / 29.97)));
+            if (depth == 1) { serial = r.cap.frames; audioHash = r.cap.audioHash; }
+            else { AUREA_CHECK(r.cap.frames == serial); AUREA_CHECK_EQ(r.cap.audioHash, audioHash); }
+        }
+    }
+}
+
 AUREA_TEST(Export, PipelinedOutputIsByteIdenticalToSerial) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;
@@ -566,6 +598,19 @@ AUREA_TEST(Export, SoftwareEncoderIsFlaggedNotHidden) {
     }
 }
 
+AUREA_TEST(Export, EncoderFailurePreservesActionableDetailAndAborts) {
+    if (!gpu_ok()) return;
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36; cfg.frameCount = 3;
+    Rig r(cfg, 30, 3, 3); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.cap.writeFailure = Status{Errc::IoError, "falha ao gravar no MP4 (codigo -10000)"};
+    const Outcome o = run_export(r, 36, 30, false, 5);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::IoError);
+    AUREA_CHECK(std::strcmp(o.p.message, "falha ao gravar no MP4 (codigo -10000)") == 0);
+    AUREA_CHECK(r.cap.aborted);
+    AUREA_CHECK(!r.cap.finished);
+}
+
 AUREA_TEST(Export, CancelIsResponsiveAndReleasesTheSink) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;
@@ -597,6 +642,37 @@ AUREA_TEST(Export, CancelIsResponsiveAndReleasesTheSink) {
     std::vector<u8> rgba;
     u32 w = 0, h = 0;
     AUREA_CHECK(r.e.capture_frame_rgba(64, rgba, w, h).ok());
+}
+
+AUREA_TEST(Export, NeuralUpscaleCancelReturnsPreviewAndAbortsPartialOutput) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 128; cfg.height = 72;
+    cfg.pattern = SyntheticPattern::MovingSquare;
+    Rig r(cfg, 30.0, 120, 3);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    ExportSettings settings; settings.height = 288; settings.aiUpscale = 4;
+    AUREA_CHECK(r.e.start_export(settings, "nao-usado.mp4").ok());
+    bool processing = false;
+    for (int i=0; i<10000; ++i) {
+        const auto p = r.e.export_progress();
+        if (std::strncmp(p.message, "IA:", 3) == 0) { processing = true; break; }
+        if (p.finished) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    AUREA_CHECK(processing);
+    const auto start = std::chrono::steady_clock::now();
+    AUREA_CHECK(r.e.cancel_export().ok());
+    for (int i=0; i<5000 && !r.e.export_progress().finished; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+    const auto ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+    std::printf("neural cancel %.1f ms ", ms);
+    AUREA_CHECK(ms < 2000);
+    std::vector<u8> rgba; u32 w=0,h=0;
+    AUREA_CHECK(r.e.capture_frame_rgba(64,rgba,w,h).ok());
 }
 
 // =============================================================================

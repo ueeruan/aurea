@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 #include "aurea/scene3d/SceneAsset.hpp"
+#include "aurea/timeline/Layer.hpp"
 
 #include <algorithm>
 #include <future>
@@ -109,6 +110,7 @@ struct SceneInstance {
     std::vector<Mat4> jointMatrices;   ///< por skin, achatado (juntas × inversa de bind)
     std::vector<u32>  skinJointOffset; ///< início de cada skin em jointMatrices
     std::vector<std::vector<f32>> morphWeights;   ///< por nó (vazio = pesos da malha)
+    std::vector<MaterialOverride> materials; ///< Per-instance factors; GPU/source assets remain shared.
     bool castShadows = true;
     u64  layerKey = 0;                 ///< camada de origem (sub-quadros do desfoque)
     bool motionBlur = false;           ///< a camada pede desfoque de movimento

@@ -235,7 +235,16 @@ struct FrameSnapshot {
     }
 };
 
+struct SceneEditorView {
+    bool enabled = false;
+    f32 yaw = -30.0f, pitch = 20.0f, distance = 3.0f;
+};
+[[nodiscard]] scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& view) noexcept;
+[[nodiscard]] Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& view) noexcept;
+
 struct RenderSettings {
+    SceneEditorView sceneEditor{}; ///< transient preview observer; ignored by finalQuality/export
+
     u32  previewNumerator = 1;
     u32  previewDenominator = 1;
     bool dither = true;
@@ -395,6 +404,7 @@ public:
     /// playback), depois da abertura. Teste de abertura e HUD.
     [[nodiscard]] u32 pipelines_warmed_for_project() const noexcept { return warmedForProject_; }
     [[nodiscard]] bool last_frame_zero_copy() const noexcept { return lastZeroCopy_; }
+    [[nodiscard]] u64 video_plane_upload_bytes() const noexcept { return videoPlaneUploadBytes_; }
     [[nodiscard]] std::string graph_dump() const { return graph_.dump(); }
     [[nodiscard]] u32 frames_rendered() const noexcept { return framesRendered_; }
     /// Reduções do preview em vigor no quadro sendo preparado/renderizado
@@ -430,6 +440,7 @@ private:
         u32 width = 0, height = 0;
         PixelFormat format = PixelFormat::Unknown;
         u64 lastFrame = 0;
+        u64 contentId = 0;
     };
 
     // Foto de base das prévias de efeito (sobe na primeira prévia depois de trocada).
@@ -475,7 +486,7 @@ private:
         u32 bytesPerRow = 0;
     };
 
-    void fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out) const noexcept;
+    void fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out, const scene3d::SceneCamera& camera) const noexcept;
     /// Camadas do snapshot → alvo (fonte, efeitos, desfoque, composição). As
     /// pré-composições entram antes, cada uma no seu alvo (recursivo).
     void compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
@@ -653,6 +664,7 @@ private:
     u64 frameNumber_ = 0;
     u64 renderFrameNumber_ = 0;   ///< quadro do backend em render() (buffers extras do Particular)
     bool lastZeroCopy_ = false;
+    u64 videoPlaneUploadBytes_ = 0;
 };
 
 } // namespace aurea

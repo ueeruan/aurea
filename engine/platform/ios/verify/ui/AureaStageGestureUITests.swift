@@ -25,6 +25,55 @@ import XCTest
         app = nil
     }
 
+    func testDockMoveVideoAtTwoSecondsKeepsAppResponsiveAndPreservesDuration() throws {
+        let before = try launch("video-move")
+        XCTAssertEqual(before.detail.kind, 1)
+        XCTAssertEqual(before.corePlayhead, 60)
+        XCTAssertEqual(before.detail.startFrame, 0)
+        let duration = before.detail.endFrame - before.detail.startFrame
+        XCTAssertGreaterThan(duration, 0)
+        let move = app.descendants(matching: .any).matching(identifier: "Pull the layer to the playhead").firstMatch
+        XCTAssertTrue(move.waitForExistence(timeout: 5))
+        XCTAssertTrue(move.isHittable)
+        move.tap()
+        let after = try awaitSnapshot("Video moved to the two-second playhead", timeout: 10) {
+            $0.detail.startFrame == 60 && $0.detail.localPlayhead == 0 && $0.corePlayhead == 60
+        }
+        XCTAssertEqual(after.detail.endFrame - after.detail.startFrame, duration)
+        XCTAssertEqual(after.primaryID, before.primaryID)
+        try undo()
+        let undone = try awaitSnapshot("Undo remains responsive after moving decoded video", timeout: 10) {
+            $0.detail.startFrame == before.detail.startFrame && $0.detail.endFrame == before.detail.endFrame
+        }
+        XCTAssertEqual(undone.corePlayhead, 60)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    func testAddingEffectClosesBrowserAndShowsAppliedCard() throws {
+        _ = try launch("effects")
+        let add = app.buttons["Add effect"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        add.tap()
+        let search = app.textFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("Deep Glow")
+        let tile = app.buttons["Ver Deep Glow"].firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 5))
+        tile.tap()
+        let apply = app.buttons["Add to the selection"].firstMatch
+        XCTAssertTrue(apply.waitForExistence(timeout: 5))
+        if !apply.isHittable { app.swipeUp() }
+        apply.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: search)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
+        XCTAssertTrue(app.staticTexts["Deep Glow"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(add.isHittable)
+        // A second interaction proves the editor did not remain under a stale modal.
+        try undo()
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["Deep Glow"].firstMatch)
+        XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 5), .completed)
+    }
+
     func testShortTapDoesNotMoveScaleOrRotateLayer() throws {
         let before = try launch("transform")
         coordinate(bodyCenter(before)).tap()
@@ -184,12 +233,14 @@ import XCTest
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID
+        if scene == "video-move" { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
+        let preparationTimeout: TimeInterval = scene == "video-move" ? 120 : 30
         app.launch()
-        guard stage.waitForExistence(timeout: 30) else {
+        guard stage.waitForExistence(timeout: preparationTimeout) else {
             XCTFail("Read-only DEBUG preview probe is missing; inspect the app configuration and INTEGRATION.md")
             throw ProbeError.missing
         }
-        let state = try awaitSnapshot("Core fixture ready for \(scene)", timeout: 30) {
+        let state = try awaitSnapshot("Core fixture ready for \(scene)", timeout: preparationTimeout) {
             $0.ready && $0.scene == scene && $0.runID == self.runID
         }
         XCTAssertTrue(state.coreStarted, state.coreError)
@@ -310,6 +361,10 @@ import XCTest
         let stageGizmo: [Double]
     }
     private struct Detail: Decodable {
+        let kind: UInt32
+        let startFrame: Int64
+        let endFrame: Int64
+        let localPlayhead: Int64
         let position: [Double]
         let scale: [Double]
         let rotation: [Double]

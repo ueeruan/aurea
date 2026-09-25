@@ -40,6 +40,8 @@ namespace aurea { namespace vk = gles; }
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -263,13 +265,14 @@ struct Scene {
     }
 
     /// Renderiza o instante `t` fora da tela e lê a composição de volta.
-    FloatImage render(FrameIndex t = FrameIndex{0}, u32 den = 1, bool finalQuality = false) {
+    FloatImage render(FrameIndex t = FrameIndex{0}, u32 den = 1, bool finalQuality = false, SceneEditorView editor = {}) {
         Gpu& g = gpu();
         RenderSettings rs;
         rs.previewDenominator = den;
         rs.dither = false;
         rs.gpuTimers = true;
         rs.finalQuality = finalQuality;
+        rs.sceneEditor = editor;
         FrameSnapshot snap;
         static u64 frame = 0;
         for (int attempt = 0; attempt < 1500; ++attempt) {
@@ -489,6 +492,34 @@ AUREA_TEST(Gpu, PreviewScaleKeepsLogicalCoordinates) {
     AUREA_CHECK(near4(full.mean(), quarter.mean(), 0.02f));
     // O mesmo ponto lógico tem a mesma cor em qualquer escala.
     AUREA_CHECK(near4(full.v(100, 55), half.v(50, 27), 0.01f));
+}
+
+AUREA_TEST(Gpu, VideoPreviewScaleKeepsGeometryAndReusesPlaneUpload) {
+    AUREA_REQUIRE_GPU();
+    Scene s(256, 144);
+    SyntheticConfig cfg;
+    cfg.width = 128; cfg.height = 64;
+    s.video(cfg, 128, 72);
+    const FloatImage full = s.render();
+    const u64 uploaded = gpu().renderer.video_plane_upload_bytes();
+    for (u32 den : {2u, 4u, 8u, 1u}) {
+        const FloatImage img = s.render(FrameIndex{0}, den);
+        AUREA_CHECK_EQ(img.width, 256u / den);
+        // Well inside/outside the same logical layer bounds (64,40)-(192,104).
+        AUREA_CHECK(near4(img.v(80 / den, 56 / den), full.v(80, 56), 0.025f));
+        AUREA_CHECK(near4(img.v(176 / den, 88 / den), full.v(176, 88), 0.025f));
+        AUREA_CHECK(near4(img.v(24 / den, 56 / den), full.v(24, 56), 0.025f));
+        AUREA_CHECK_EQ(gpu().renderer.video_plane_upload_bytes(), uploaded);
+    }
+    const FloatImage exported = s.render(FrameIndex{0}, 1, true);
+    AUREA_CHECK(near4(exported.mean(), full.mean(), 0.002f));
+    AUREA_CHECK_EQ(gpu().renderer.video_plane_upload_bytes(), uploaded);
+    (void)s.render(FrameIndex{1});
+    AUREA_CHECK(gpu().renderer.video_plane_upload_bytes() > uploaded);
+    const u64 next = gpu().renderer.video_plane_upload_bytes();
+    s.media.close_all(); // Same PTS/dimensions, but a different decoded allocation.
+    (void)s.render(FrameIndex{1});
+    AUREA_CHECK(gpu().renderer.video_plane_upload_bytes() > next);
 }
 
 // =============================================================================
@@ -7083,3 +7114,301 @@ AUREA_TEST(Gpu, AddTextAnimationCreatesVisibleMotionAtPlayhead) {
     AUREA_CHECK(std::fabs(coverage(rig.capture(640)) - full) < full * 0.03f);
     std::remove(path.c_str());
 }
+
+
+AUREA_TEST(Gpu, CreatedCameraAndNullDepthTracksRenderAndReload) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto shapeId = rig.e.add_shape(0);
+    AUREA_CHECK(shapeId.ok());
+    if (!shapeId.ok()) return;
+    auto layer = [&](u64 id) { return current_comp(rig.e)->layer(LayerId::unpack(id)); };
+    auto* shape = layer(*shapeId);
+    shape->threeD = true;
+    shape->shape.bounds = Rect{0, 0, 100, 50};
+    shape->shape.filled = true;
+    shape->shape.strokeWidth = 0;
+    shape->shape.fillColor = Vec4{0.2f, 0.6f, 1, 1};
+    shape->transform.position = Vec3{160, 90, 0};
+    shape->transform.anchor = Vec3{50, 25, 0};
+    const Image8 implicitCamera = rig.capture(320);
+    auto camera = rig.e.add_camera();
+    AUREA_CHECK(camera.ok());
+    if (!camera.ok()) return;
+    AUREA_CHECK(layer(*camera)->camera.active);
+    AUREA_CHECK(layer(*camera)->tracks.empty());
+    AUREA_CHECK(max_diff(implicitCamera, rig.capture(320)) <= 2);
+    auto secondCamera = rig.e.add_camera();
+    AUREA_CHECK(secondCamera.ok());
+    if (!secondCamera.ok()) return;
+    AUREA_CHECK(!layer(*camera)->camera.active);
+    AUREA_CHECK(layer(*secondCamera)->camera.active);
+    auto parent = rig.e.add_null(true);
+    AUREA_CHECK(parent.ok());
+    if (!parent.ok()) return;
+    set_parent(rig.e, *shapeId, *parent);
+    auto key = [&](u64 id, TrackProperty property, i64 time, f32 value) {
+        Command c;
+        c.type = CommandType::KeyframeInsert;
+        c.keyframe.track.layer = LayerId::unpack(id);
+        c.keyframe.track.property = property;
+        c.keyframe.track.effectIndex = kInvalidIndex;
+        c.keyframe.track.effectParamIndex = 0;
+        c.keyframe.time = FrameIndex{time}; c.keyframe.value = value;
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    key(*parent, TrackProperty::PositionZ, 0, 0);
+    key(*parent, TrackProperty::PositionZ, 30, 180);
+    key(*secondCamera, TrackProperty::PositionX, 0, 160);
+    key(*secondCamera, TrackProperty::PositionX, 30, 190);
+    seek_frame(rig.e, 0);
+    const Image8 first = rig.capture(320);
+    seek_frame(rig.e, 30);
+    const Image8 moved = rig.capture(320);
+    AUREA_CHECK(coverage(first) > 0.03f);
+    AUREA_CHECK(coverage(moved) < coverage(first) * 0.6f);
+    AUREA_CHECK(max_diff(first, moved) > 20);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_created_camera_null_depth.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seek_frame(rig.e, 30);
+    AUREA_CHECK(max_diff(moved, rig.capture(320)) <= 2);
+    seek_frame(rig.e, 0);
+    AUREA_CHECK(max_diff(first, rig.capture(320)) <= 2);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Gpu, NewText3DIsStaticWithoutPresetAnimation) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    scene3d::Text3DSpec spec;
+    spec.content = "Static";
+    auto text = rig.e.add_text3d(spec);
+    AUREA_CHECK(text.ok());
+    if (!text.ok()) return;
+    const auto* layer = current_comp(rig.e)->layer(LayerId::unpack(*text));
+    AUREA_CHECK_EQ(layer->model.animationClip, -1);
+    scene3d::Text3DSpec saved;
+    AUREA_CHECK(rig.e.query_text3d(*text, saved));
+    AUREA_CHECK_EQ(saved.animation, 0u);
+    seek_frame(rig.e, 0);
+    const Image8 first = rig.capture(320);
+    AUREA_CHECK(coverage(first) > 0.005f);
+    seek_frame(rig.e, 30);
+    AUREA_CHECK(max_diff(first, rig.capture(320)) <= 2);
+}
+
+AUREA_TEST(Gpu, GlitchifyModulesFreezeAndFinalQualityAreDeterministic) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(96, 64);
+    ImagePixels pixels = uniform_image(96, 64, 0, 0, 0);
+    for (u32 y = 0; y < 64; ++y) for (u32 x = 0; x < 96; ++x) {
+        const usize at = (y * 96 + x) * 4;
+        pixels.rgba[at] = static_cast<u8>((x * 73 + y * 19) % 256);
+        pixels.rgba[at + 1] = static_cast<u8>((x * 11 + y * 47) % 256);
+        pixels.rgba[at + 2] = static_cast<u8>((x * 31 + y * 7) % 256);
+    }
+    const auto id = scene.image(std::move(pixels), 48, 32);
+    EffectInstance& effect = scene.add_effect(id, effect_keys::kGlitchify);
+    auto neutral = [&] {
+        for (u32 p : {1u, 2u, 3u, 9u, 10u, 11u, 13u, 14u, 15u, 16u}) effect.params[p].constant.v[0] = 0;
+        effect.params[0].constant.v[0] = 8;
+        effect.params[12].constant.v[0] = 16;
+        effect.params[6].constant.v[0] = 0;
+    };
+    auto difference = [](const FloatImage& a, const FloatImage& b) {
+        f32 maxError = 0;
+        for (usize i = 0; i < a.px.size(); ++i) maxError = std::max(maxError, std::fabs(a.px[i] - b.px[i]));
+        return maxError;
+    };
+    neutral();
+    const FloatImage original = scene.render();
+    const u32 params[] = {3, 10, 11, 13, 14, 15, 16};
+    const f32 values[] = {6, 7, 20, 20, 24, 75, 100};
+    for (u32 i = 0; i < 7; ++i) {
+        neutral(); effect.params[params[i]].constant.v[0] = values[i];
+        const FloatImage altered = scene.render(FrameIndex{12});
+        AUREA_CHECK(difference(original, altered) > 0.02f);
+        for (f32 value : altered.px) AUREA_CHECK(std::isfinite(value));
+    }
+    neutral();
+    effect.params[13].constant.v[0] = 24;
+    effect.params[14].constant.v[0] = 20;
+    effect.params[15].constant.v[0] = 60;
+    const FloatImage frame12 = scene.render(FrameIndex{12});
+    AUREA_CHECK(difference(frame12, scene.render(FrameIndex{27})) > 0.02f);
+    AUREA_CHECK(difference(frame12, scene.render(FrameIndex{12})) < 0.001f);
+    AUREA_CHECK(difference(frame12, scene.render(FrameIndex{12}, 1, true)) < 0.001f);
+    effect.params[6].constant.v[0] = 1;
+    const FloatImage frozen = scene.render(FrameIndex{0});
+    AUREA_CHECK(difference(frozen, scene.render(FrameIndex{99})) < 0.001f);
+    effect.params[7].constant.v[0] = 0;
+    AUREA_CHECK(difference(original, scene.render(FrameIndex{99})) < 0.001f);
+}
+
+AUREA_TEST(Gpu, GlitchifyNewControlsAnimateAndSurviveSaveLoad) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(128, 128);
+    const auto id = rig.e.add_shape(0);
+    AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    Layer* layer = current_comp(rig.e)->layer(LayerId::unpack(*id));
+    layer->shape.bounds = Rect{0, 0, 48, 48}; layer->shape.fillColor = Vec4{1, 1, 1, 1};
+    layer->transform.anchor = Vec3{24, 24, 0}; layer->transform.position = Vec3{64, 64, 0};
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = LayerId::unpack(*id);
+    add.effect_add.effectType = effect_type_id(effect_keys::kGlitchify); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(rig.e.apply_command(add).ok());
+    EffectInstance& effect = layer->effects.back();
+    for (u32 p : {1u, 2u, 3u, 9u}) effect.params[p].constant.v[0] = 0;
+    for (i64 frame : {0LL, 30LL}) {
+        Command key; key.type = CommandType::KeyframeInsert;
+        key.keyframe.track = TrackRef{LayerId::unpack(*id), TrackProperty::EffectParam, effect.id, param_track_key(11, 0)};
+        key.keyframe.time = FrameIndex{frame}; key.keyframe.value = frame == 0 ? 0.0f : 25.0f;
+        AUREA_CHECK(rig.e.apply_command(key).ok());
+    }
+    auto capture = [&](i64 frame) {
+        Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(rig.e.apply_command(seek).ok()); return rig.capture(128);
+    };
+    const Image8 original = capture(0), end = capture(30), middle = capture(15);
+    AUREA_CHECK(max_diff(original, end) > 20);
+    AUREA_CHECK(max_diff(original, middle) > 10);
+    AUREA_CHECK(max_diff(end, capture(30)) == 0);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_glitchify_extended.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    AUREA_CHECK(max_diff(middle, capture(15)) == 0);
+    AUREA_CHECK(max_diff(end, capture(30)) == 0);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Gpu, SceneObserverChangesPreviewButNeverExport) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(160, 90, 30.0);
+    const auto id = scene.solid(65, 40, Vec4{1, .1f, .05f, 1}, 80, 45);
+    scene.comp->layer(id)->threeD = true;
+    const FloatImage timeline = scene.render();
+    SceneEditorView observer; observer.enabled = true; observer.yaw = 48; observer.pitch = 25; observer.distance = 2;
+    const FloatImage workspace = scene.render(FrameIndex{0}, 1, false, observer);
+    const FloatImage exported = scene.render(FrameIndex{0}, 1, true, observer);
+    const FloatImage reference = scene.render(FrameIndex{0}, 1, true);
+    double changed = 0, exportError = 0, coverage = 0;
+    for (u32 y = 0; y < 90; ++y) for (u32 x = 0; x < 160; ++x) {
+        const Vec4 a = timeline.v(x, y), b = workspace.v(x, y);
+        const Vec4 c = exported.v(x, y), d = reference.v(x, y);
+        changed += std::fabs(a.x - b.x); coverage += b.x;
+        exportError += std::fabs(c.x - d.x) + std::fabs(c.y - d.y) + std::fabs(c.z - d.z);
+    }
+    AUREA_CHECK(changed > 100);
+    AUREA_CHECK(coverage > 50);
+    AUREA_CHECK(exportError < .001);
+}
+
+AUREA_TEST(Gpu, EditableLightsAndMaterialOverridesRenderAndReload) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    ModelImport mi; mi.path = write_triangle_gltf(true, 1, 1, 1);
+    const auto result = rig.e.import_model(mi); AUREA_CHECK(result.ok()); if (!result.ok()) return;
+    const u64 id = *result;
+    auto* comp = current_comp(rig.e);
+    auto* layer = comp->layer(LayerId::unpack(id));
+    layer->model.unitScale = 100; layer->transform.position.x = 90;
+    const auto secondId = comp->add_layer(LayerKind::Model3D, "shared asset second instance");
+    auto* second = comp->layer(secondId);
+    second->model = layer->model; second->transform = layer->transform;
+    second->transform.position.x = 230; second->threeD = true; second->end = comp->duration();
+    AUREA_CHECK_EQ(rig.e.query_materials(id, nullptr, 0), 1u);
+    AUREA_CHECK(rig.e.set_material_param(id, 0, 0, 0).ok());
+    AUREA_CHECK(rig.e.set_material_param(id, 0, 2, 0).ok());
+    const auto green = rig.capture(320);
+    AUREA_CHECK(rig.e.set_material_param(id, 0, 3, .25f).ok());
+    const auto translucent = rig.capture(320);
+    AUREA_CHECK(max_diff(green, translucent) > 30);
+    AUREA_CHECK(rig.e.set_material_param(id, 0, 3, 1).ok());
+    AUREA_CHECK(max_diff(green, rig.capture(320)) == 0);
+    double leftR = 0, leftG = 0, rightR = 0, rightG = 0;
+    for (u32 y = 0; y < green.height; ++y) for (u32 x = 0; x < green.width; ++x) {
+        const usize offset = (static_cast<usize>(y) * green.width + x) * 4;
+        if (x < 160) { leftR += green.rgba[offset]; leftG += green.rgba[offset + 1]; }
+        else { rightR += green.rgba[offset]; rightG += green.rgba[offset + 1]; }
+    }
+    AUREA_CHECK(leftG > 10000); AUREA_CHECK(leftR < leftG * .01);
+    AUREA_CHECK(rightR > 10000); AUREA_CHECK(std::fabs(rightR - rightG) < rightR * .01);
+    for (i64 frame : {0, 30}) {
+        Command c; c.type = CommandType::KeyframeInsert;
+        c.keyframe.track = TrackRef{LayerId::unpack(id), TrackProperty::MaterialParam, 0, 0};
+        c.keyframe.time = FrameIndex{frame}; c.keyframe.value = frame == 0 ? 0 : 1;
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    }
+    seek_frame(rig.e, 30); const auto yellow = rig.capture(320);
+    AUREA_CHECK(max_diff(green, yellow) > 100);
+    const auto lightId = rig.e.add_light(1); AUREA_CHECK(lightId.ok());
+    f32 values[10]{}; AUREA_CHECK(rig.e.query_light(*lightId, values)); AUREA_CHECK_EQ(values[0], 1.0f);
+    Command light; light.type = CommandType::LayerSetLightParam; light.shape_param = ShapeParamPayload{LayerId::unpack(*lightId), 1, 12};
+    AUREA_CHECK(rig.e.apply_command(light).ok());
+    AUREA_CHECK(rig.e.query_light(*lightId, values)); AUREA_CHECK_EQ(values[1], 12.0f);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_material_override_render.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok()); AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seek_frame(rig.e, 30); AUREA_CHECK(max_diff(yellow, rig.capture(320)) == 0);
+    seek_frame(rig.e, 0); AUREA_CHECK(max_diff(green, rig.capture(320)) == 0);
+    AUREA_CHECK(rig.e.query_light(*lightId, values)); AUREA_CHECK_EQ(values[1], 12.0f);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Gpu, LightIntensityKeyframesChangeActualPbrPixels) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = write_triangle_gltf(true, 1, 1, 1);
+    std::ifstream input(path); std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>()); input.close();
+    const std::string marker = ",\"extensions\":{\"KHR_materials_unlit\":{}}";
+    const auto unlit = json.find(marker); AUREA_CHECK(unlit != std::string::npos); if (unlit == std::string::npos) return;
+    json.erase(unlit, marker.size());
+    const std::string litPath = path + ".lit.gltf"; { std::ofstream output(litPath); output << json; }
+    Scene3DRig rig(320, 180); ModelImport mi; mi.path = litPath;
+    const auto model = rig.e.import_model(mi); AUREA_CHECK(model.ok()); if (!model.ok()) return;
+    current_comp(rig.e)->environment().intensity = 0; // Isolate direct light from the bright studio IBL.
+    const auto light = rig.e.add_light(0); AUREA_CHECK(light.ok()); if (!light.ok()) return;
+    for (i64 frame : {0, 30}) {
+        Command c; c.type = CommandType::KeyframeInsert;
+        c.keyframe.track = TrackRef{LayerId::unpack(*light), TrackProperty::LightIntensity, kInvalidIndex, 0};
+        c.keyframe.time = FrameIndex{frame}; c.keyframe.value = frame == 0 ? 0 : 5;
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    }
+    seek_frame(rig.e, 0); const auto dark = rig.capture(320);
+    seek_frame(rig.e, 30); const auto bright = rig.capture(320);
+    std::printf("    direct light pixel delta=%u darkCoverage=%f brightCoverage=%f\n", max_diff(dark, bright), coverage(dark), coverage(bright));
+    AUREA_CHECK(max_diff(dark, bright) > 20);
+    AUREA_CHECK(rig.e.set_material_param(*model, 0, 4, 1).ok());
+    AUREA_CHECK(rig.e.set_material_param(*model, 0, 5, .9f).ok());
+    AUREA_CHECK(max_diff(bright, rig.capture(320)) > 10);
+    f32 values[10]{}; AUREA_CHECK(rig.e.query_light(*light, values)); AUREA_CHECK_EQ(values[1], 5.0f);
+    seek_frame(rig.e, 0); AUREA_CHECK(rig.e.query_light(*light, values)); AUREA_CHECK_EQ(values[1], 0.0f);
+    std::remove(litPath.c_str());
+}
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(Gpu, BounceElasticStepsDrivePreviewAndFinalRendering) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(160, 64);
+    scene.comp->set_duration(FrameIndex{1001});
+    const auto id = scene.solid(8, 8, {1,1,1,1}, 20, 32);
+    auto& track = scene.comp->layer(id)->tracks.get_or_create(TrackProperty::PositionX);
+    track.set(FrameIndex{0}, 20); track.set(FrameIndex{1000}, 100);
+    for (auto mode : {Interpolation::Bounce, Interpolation::Elastic, Interpolation::Steps}) {
+        track.set_interpolation(FrameIndex{0}, mode, .33f, 0, .67f, 1);
+        const auto preview = scene.render(FrameIndex{160});
+        const auto finalFrame = scene.render(FrameIndex{160}, 1, true);
+        f32 delta = 0;
+        for (usize i=0; i<preview.px.size(); ++i) delta=std::max(delta,std::fabs(preview.px[i]-finalFrame.px[i]));
+        AUREA_CHECK(delta < 0.001f);
+        double weightedX=0,total=0;
+        for (u32 y=0; y<64; ++y) for (u32 x=0; x<160; ++x) {
+            const float value = preview.px[(y*160+x)*4];
+            weightedX += (x+.5)*value; total += value;
+        }
+        AUREA_CHECK(total > 50);
+        const float expected = mode == Interpolation::Bounce ? 28.192f
+            : mode == Interpolation::Elastic ? 130.6642f : 20.f;
+        AUREA_CHECK_NEAR(weightedX/total, expected, .7);
+    }
+}
+#endif
+

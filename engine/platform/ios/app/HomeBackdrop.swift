@@ -351,11 +351,15 @@ private struct HomeBlurOutput {
                 "sigmaPoints": Double(input.kind.sigma), "measuredSigmaPixels": output.measuredSigma,
                 "scale": Double(input.scale), "sourceWidth": input.image.width, "sourceHeight": input.image.height]
         }
-        func metrics(_ values: [Double]) -> [String: Any] {
+        func metrics(_ values: [Double]) -> [String: NSNumber] {
             let sorted = values.sorted()
-            return ["count": sorted.count, "mean": sorted.reduce(0, +) / Double(max(1, sorted.count)),
-                    "p95": sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))],
-                    "max": sorted.last ?? 0]
+            let mean: Double = sorted.reduce(0, +) / Double(max(1, sorted.count))
+            let p95: Double = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+            let maximum: Double = sorted.last ?? 0
+            // Resolve Optional<Double> before type erasure; otherwise the mixed
+            // Any dictionary can box it as __SwiftValue and JSON writing fails.
+            return ["count": NSNumber(value: sorted.count), "mean": NSNumber(value: mean),
+                    "p95": NSNumber(value: p95), "max": NSNumber(value: maximum)]
         }
         let report: [String: Any] = ["version": 1, "sourceOnly": true, "scrollCompleted": true,
             "bars": bars, "snapshotMilliseconds": metrics(snapshotTimes),

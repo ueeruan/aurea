@@ -890,4 +890,26 @@
     <string name="ai_limite_atingido">You\'ve used your %1$d AI generations for today. Come back tomorrow to generate more.</string>
     <string name="editor_marca_anterior_segure_inicio">العلامة السابقة؛ اضغط مطولاً للانتقال إلى البداية</string>
     <string name="editor_proxima_marca_segure_fim">العلامة التالية؛ اضغط مطولاً للانتقال إلى النهاية</string>
+    <string name="donation_title">ادعم Aurea</string>
+    <string name="donation_note">تبرعات اختيارية لإبقاء التطبيق مجانيًا.</string>
+    <string name="donation_detail">أنت تختار إن كنت تريد المساهمة والمبلغ. تظل جميع الميزات متاحة.</string>
+    <string name="donation_pix_qr">رمز Pix الخاص بـ Ruan Pablo</string>
+    <string name="donation_copy_pix">نسخ Pix</string>
+    <string name="donation_paypal">التبرع عبر PayPal</string>
+    <string name="donation_copy_paypal">نسخ رابط PayPal</string>
+    <string name="donation_export_note">يستمر التصدير. استخدم الرمز أو الرابط بعد انتهائه.</string>
+    <string name="donation_copied">تم النسخ إلى الحافظة.</string>
+    <string name="ai_upscale_title">تكبير الفيديو بالذكاء الاصطناعي</string>
+    <string name="ai_upscale_note">نموذج للأنمي والرسوم. يعالج أجزاء الصورة دون تجميد الواجهة. الدقة المختارة أدناه هي جودة الإخراج النهائية.</string>
+    <string name="ai_upscale_dimensions">AI %1$dx · إدخال %2$d × %3$d → إخراج %4$d × %5$d</string>
+    <string name="licenses_title">التراخيص · AI</string>
+    <string name="scene_workspace">مشهد ثلاثي الأبعاد</string>
+    <string name="scene_orbit_x">مدار X</string>
+    <string name="scene_orbit_y">مدار Y</string>
+    <string name="scene_zoom">تكبير</string>
+    <string name="scene_light_directional">ضوء اتجاهي</string>
+    <string name="scene_light_point">ضوء نقطي</string>
+    <string name="scene_light_range">النطاق</string>
+    <string name="scene_light_shadows">الظلال</string>
+    <string name="scene_light_failed">تعذر إنشاء الضوء.</string>
 </resources>

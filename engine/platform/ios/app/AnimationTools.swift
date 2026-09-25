@@ -1,6 +1,10 @@
 import SwiftUI
 import UIKit
 
+private let curveGreen = Color(red: 0, green: 239/255, blue: 164/255)
+private let curvePanelFill = Color(red: 55/255, green: 59/255, blue: 85/255)
+private let curveRailFill = Color(red: 43/255, green: 48/255, blue: 70/255)
+
 // CurvePanel.kt: easing descriptions for drawing and editing the core's keys.
 // These samples draw the control; project evaluation remains in the C++ core.
 struct CurveEase: Equatable {
@@ -11,7 +15,7 @@ struct CurveEase: Equatable {
     var y2: Float
     static let linear = CurveEase(interpolation: 1, x1: 0, y1: 0, x2: 1, y2: 1)
     var isBezier: Bool { interpolation == 2 || interpolation == 6 }
-    var hasHandles: Bool { isBezier || interpolation == 1 || interpolation == 3 || interpolation == 4 }
+    var hasHandles: Bool { isBezier || interpolation == 1 || interpolation == 3 || interpolation == 4 || interpolation == 5 }
     var handles: [Float] {
         switch interpolation {
         case 1: return [0, 0, 1, 1]
@@ -28,6 +32,16 @@ struct CurveEase: Equatable {
         case 3: return t * t
         case 4: return 1 - (1 - t) * (1 - t)
         case 5: return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
+        case 7:
+            let u = min(1, max(0,t))
+            if u < 0.5 { return 4*u*u }
+            let segment: (Float,Float,Float) = u < 0.75 ? (0.5,0.25,0.25) : u < 0.9 ? (0.75,0.15,0.0625) : (0.9,0.1,0.015625)
+            let p = (u-segment.0)/segment.1
+            return 1-4*segment.2*p*(1-p)
+        case 8:
+            if t <= 0 { return 0 }; if t >= 1 { return 1 }
+            return Float((1-exp(-6*Double(t))*cos(6*Double.pi*Double(t)))/(1-exp(-6)))
+        case 9: return floor(min(1,max(0,t))*4)/4
         default:
             if t <= 0 { return 0 }
             if t >= 1 { return 1 }
@@ -74,6 +88,9 @@ struct CurveEase: Equatable {
         case 3: key = "pn_ease_in"
         case 4: key = "pn_ease_out"
         case 5: key = "pn_ease_in_out"
+        case 7: key = "pn_textpreset_bounce"
+        case 8: key = "pn_textpreset_elastic"
+        case 9: key = "pn_curve_steps4"
         default: key = "pn_ease_bezier_custom"
         }
         return AureaText.t(key)
@@ -94,7 +111,7 @@ private struct CurvePresetItem: Identifiable {
     }
     static func read(_ object: [String: Any], id: String) -> CurvePresetItem? {
         guard object["kind"] as? String == "curve", let curve = object["curve"] as? [String: NSNumber],
-              let interpolation = curve["interp"]?.uint32Value, interpolation <= 6 else { return nil }
+              let interpolation = curve["interp"]?.uint32Value, interpolation <= 9 else { return nil }
         let h: [Float] = [curve["x1"]?.floatValue ?? 0.33, curve["y1"]?.floatValue ?? 0,
                  curve["x2"]?.floatValue ?? 0.67, curve["y2"]?.floatValue ?? 1]
         guard h.allSatisfy({ $0.isFinite }) else { return nil }
@@ -147,7 +164,7 @@ private struct NativeCurveGraph: View {
         var began = false
     }
     private var low: Float { drag?.low ?? min(overshoot ? -0.5 : -0.12, min(ease.handles[1], ease.handles[3]) - 0.12) }
-    private var high: Float { drag?.high ?? max(overshoot ? 1.5 : 1.12, max(ease.handles[1], ease.handles[3]) + 0.12) }
+    private var high: Float { drag?.high ?? max(overshoot || ease.interpolation == 8 ? 1.5 : 1.12, max(ease.handles[1], ease.handles[3]) + 0.12) }
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -170,7 +187,7 @@ private struct NativeCurveGraph: View {
         .onDisappear { finish() }
     }
     private func plot(_ x: Float, _ y: Float, _ size: CGSize, _ lo: Float, _ hi: Float) -> CGPoint {
-        CGPoint(x: CGFloat(x) * size.width, y: size.height - CGFloat((y - lo) / (hi - lo)) * size.height)
+        CGPoint(x: 24 + CGFloat(x) * max(1, size.width - 48), y: size.height - CGFloat((y - lo) / (hi - lo)) * size.height)
     }
     private func draw(_ context: GraphicsContext, _ size: CGSize) {
         func point(_ x: Float, _ y: Float) -> CGPoint { plot(x, y, size, low, high) }
@@ -181,10 +198,10 @@ private struct NativeCurveGraph: View {
         func dot(_ p: CGPoint, radius: CGFloat, color: Color) {
             context.fill(Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)), with: .color(color))
         }
-        for index in 1..<8 {
-            let x = size.width * CGFloat(index) / 8, y = size.height * CGFloat(index) / 8
-            line(CGPoint(x: x, y: 0), CGPoint(x: x, y: size.height), AureaColors.curveGrid, 1, [2.5, 4.5])
-            line(CGPoint(x: 0, y: y), CGPoint(x: size.width, y: y), AureaColors.curveGrid, 1, [2.5, 4.5])
+        for index in 1..<32 {
+            let x = size.width * CGFloat(index) / 32, y = size.height * CGFloat(index) / 32
+            line(CGPoint(x: x, y: 0), CGPoint(x: x, y: size.height), .white.opacity(0.045), 0.6)
+            line(CGPoint(x: 0, y: y), CGPoint(x: size.width, y: y), .white.opacity(0.045), 0.6)
         }
         for y in [Float(0), Float(1)] { line(point(0, y), point(1, y), .white.opacity(0.24), 1, [4.5, 4.5]) }
         let base = point(0, 0).y
@@ -195,8 +212,8 @@ private struct NativeCurveGraph: View {
             area.addLine(to: p)
         }
         area.addLine(to: CGPoint(x: size.width, y: base)); area.closeSubpath()
-        context.fill(area, with: .color(AureaColors.accent.opacity(0.1)))
-        context.stroke(curve, with: .color(AureaColors.accent), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+        context.fill(area, with: .color(curveGreen.opacity(0.025)))
+        context.stroke(curve, with: .color(curveGreen), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
         let start = point(0, 0), end = point(1, 1)
         if ease.hasHandles {
             let h = ease.handles, first = point(h[0], h[1]), second = point(h[2], h[3])
@@ -206,7 +223,7 @@ private struct NativeCurveGraph: View {
             line(start, first, .white, 2.5); line(end, second, .white, 2.5)
             dot(first, radius: 11, color: .white); dot(second, radius: 11, color: .white)
         }
-        dot(start, radius: 4.5, color: AureaColors.accent); dot(end, radius: 4.5, color: AureaColors.accent)
+        dot(start, radius: 4.5, color: curveGreen); dot(end, radius: 4.5, color: curveGreen)
     }
     private func move(_ value: DragGesture.Value, size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
@@ -225,9 +242,10 @@ private struct NativeCurveGraph: View {
                 ease: CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3]),
                 grabOffset: CGPoint(x: point.x - value.startLocation.x, y: point.y - value.startLocation.y))
         }
-        guard var current = drag, abs(value.translation.width) + abs(value.translation.height) > 0.01 else { return }
+        guard var current = drag else { return }
+        guard current.began || hypot(value.translation.width, value.translation.height) >= 3 else { return }
         let location = CGPoint(x: value.location.x + current.grabOffset.x, y: value.location.y + current.grabOffset.y)
-        let x = Float(location.x / size.width).clamped(to: 0...1)
+        let x = Float((location.x - 24) / max(1, size.width - 48)).clamped(to: 0...1)
         var y = current.low + Float((size.height - location.y) / size.height) * (current.high - current.low)
         if !overshoot { y = y.clamped(to: 0...1) }
         guard x.isFinite, y.isFinite else { return }
@@ -253,11 +271,11 @@ private struct CurvePresetThumb: View {
                 let p = CGPoint(x: pad + CGFloat(t) * width, y: pad + height - CGFloat(value) * height)
                 if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
             }
-            let color = selected ? AureaColors.accent : Color.white.opacity(0.7)
+            let color = selected ? curveGreen : Color.white.opacity(0.7)
             context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round))
             for p in [CGPoint(x: pad, y: pad + height), CGPoint(x: pad + width, y: pad)] {
                 context.fill(Path(ellipseIn: CGRect(x: p.x - 2.5, y: p.y - 2.5, width: 5, height: 5)),
-                    with: .color(selected ? AureaColors.accent : .white))
+                    with: .color(selected ? curveGreen : .white))
             }
         }
     }
@@ -266,6 +284,9 @@ private struct CurvePresetThumb: View {
 @MainActor
 struct NativeCurvePanel: View {
     @EnvironmentObject private var model: AureaModel
+    @Environment(\.dismiss) private var dismissExpanded
+    var expanded = false
+    @State private var fullscreen = false
     @State private var ease = CurveEase.linear
     @State private var overshoot = false
     @State private var family = 0
@@ -298,24 +319,15 @@ struct NativeCurvePanel: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_easing_curve"), onBack: { model.panel = .none })
             if let segment {
                 HStack(spacing: 0) {
                     leftRail(segment)
                     VStack(spacing: 0) {
-                        HStack(spacing: 0) {
-                            ForEach(0..<3, id: \.self) { index in
-                                Button(AureaText.t(["panel_curva", "particular_curve_value", "panel_velocidade"][index])) { graphMode = index }
-                                    .font(.aurea(size: 11)).padding(.horizontal, 8).padding(.vertical, 8)
-                                    .foregroundStyle(graphMode == index ? AureaColors.accent : AureaColors.muted)
-                            }
-                        }
                         if graphMode == 0 {
                             NativeCurveGraph(ease: ease, overshoot: overshoot, progress: progress(segment),
                                 onBegin: { model.beginGesture("curva") },
                                 onChange: { apply($0, to: segment.start); model.refreshModel(force: true) },
                                 onEnd: { model.endGesture() })
-                                .opacity(progress(segment) != nil ? 1 : 0.45)
                                 .id("\(layer):\(segment.id)")
                         } else {
                             NativeTrackGraph(layer: layer, keys: track, speed: graphMode == 2)
@@ -334,13 +346,27 @@ struct NativeCurvePanel: View {
                     }.buttonStyle(AureaPressStyle(shrink: 1))
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }.background(AureaColors.editorPanel)
-        .onAppear { load(); family = ease.interpolation == 0 ? 1 : 0; loadPresets() }
+        }.background(curvePanelFill)
+        .overlay {
+            if expanded {
+                ZStack {
+                    if let request = model.actionSheet {
+                        AureaActionSheet(title: request.title, actions: request.actions) { model.actionSheet = nil }
+                    }
+                    if let request = model.namePrompt {
+                        AureaNamePrompt(title: request.title, initial: request.initial, onConfirm: request.onConfirm,
+                            onDismiss: { model.namePrompt = nil }).id(request.id)
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $fullscreen) { NativeCurvePanel(expanded: true).environmentObject(model).interactiveDismissDisabled() }
+        .onAppear { load(); family = [7,8].contains(ease.interpolation) ? 1 : [0,9].contains(ease.interpolation) ? 2 : 0; loadPresets() }
         .onChange(of: model.status.modelRevision) { _ in load() }
         .onChange(of: segment?.id) { _ in load() }
         .onChange(of: layer) { _ in load() }
     }
-    private func back() { model.openPanel(model.curveReturnPanel == .curve ? .none : model.curveReturnPanel) }
+    private func back() { if expanded { dismissExpanded() } else { model.openPanel(model.curveReturnPanel == .curve ? .none : model.curveReturnPanel) } }
     private func load() {
         guard let key = segment?.start else { return }
         let h = model.engine.trackEasing(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time).map(\.floatValue)
@@ -367,11 +393,12 @@ struct NativeCurvePanel: View {
             glyphButton(CupertinoGlyph.ArrowRightArrowLeft, size: 20, target: 44, label: AureaText.t("panel_inverter_curva")) {
                 if let inverted = ease.inverted { set(inverted, to: segment.start, label: "inverter curva") }
                 else { model.toast = AureaText.t("pn_curve_symmetric") }
-            }
+            }.disabled(!(1...6).contains(ease.interpolation))
+                .opacity((1...6).contains(ease.interpolation) ? 1 : 0.35)
             Spacer().frame(height: 4)
             RailMoreButton(active: overshoot) { showMenu(segment) }
             Spacer().frame(height: 8)
-        }.frame(width: 44).frame(maxHeight: .infinity)
+        }.frame(width: 44).frame(maxHeight: .infinity).background(curveRailFill)
     }
     private func glyphButton(_ glyph: Character, size: CGFloat, target: CGFloat, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -381,12 +408,12 @@ struct NativeCurvePanel: View {
     }
     private func segmentNavigation(_ segment: Segment) -> some View {
         HStack(spacing: 4) {
-            glyphButton(CupertinoGlyph.ChevronLeft, size: 16, target: 32, label: AureaText.t("panel_keyframe_anterior")) { jump(-1) }
-            Text(progress(segment) != nil ? ease.name : AureaText.t("pn_curve_segment", segment.index + 1, segment.index + 2))
-                .font(.aurea(size: 12, weight: .semibold)).foregroundStyle(.white)
+            glyphButton(CupertinoGlyph.ChevronLeft, size: 16, target: 44, label: AureaText.t("panel_keyframe_anterior")) { jump(-1) }
+            Text(graphMode == 0 ? "Cubic Bezier Easing" : AureaText.t(graphMode == 1 ? "particular_curve_value" : "panel_velocidade"))
+                .font(.aurea(size: 10)).foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1).truncationMode(.tail).multilineTextAlignment(.center)
-            glyphButton(CupertinoGlyph.ChevronRight, size: 16, target: 32, label: AureaText.t("panel_proximo_keyframe")) { jump(1) }
-        }.frame(maxWidth: .infinity).frame(height: 32)
+            glyphButton(CupertinoGlyph.ChevronRight, size: 16, target: 44, label: AureaText.t("panel_proximo_keyframe")) { jump(1) }
+        }.frame(maxWidth: .infinity).frame(height: 44)
     }
     private func jump(_ direction: Int) {
         guard let segment else { return }
@@ -400,8 +427,10 @@ struct NativeCurvePanel: View {
     }
     private var presets: [CurvePresetItem] {
         switch family {
-        case 1: return Array(CurvePresetItem.builtins.suffix(1))
-        case 2: return saved
+        case 1: return [CurvePresetItem(id: "bounce", name: AureaText.t("pn_textpreset_bounce"), ease: CurveEase(interpolation: 7,x1: 0,y1: 0,x2: 1,y2: 1)),
+                        CurvePresetItem(id: "elastic", name: AureaText.t("pn_textpreset_elastic"), ease: CurveEase(interpolation: 8,x1: 0,y1: 0,x2: 1,y2: 1))]
+        case 2: return [CurvePresetItem(id: "steps4", name: AureaText.t("pn_curve_steps4"), ease: CurveEase(interpolation: 9,x1: 0,y1: 0,x2: 1,y2: 1))] + Array(CurvePresetItem.builtins.suffix(1))
+        case 3: return saved
         default: return Array(CurvePresetItem.builtins.prefix(4))
         }
     }
@@ -409,25 +438,21 @@ struct NativeCurvePanel: View {
         HStack(spacing: 0) {
             GeometryReader { geometry in
                 ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(0..<((presets.count + 1) / 2), id: \.self) { row in
-                            HStack(spacing: 8) {
-                                let start = row * 2
-                                ForEach(Array(presets[start..<min(start + 2, presets.count)])) { preset in presetTile(preset) }
-                            }.frame(maxWidth: .infinity)
-                        }
+                    LazyVStack(spacing: 2) {
+                        ForEach(presets) { preset in presetTile(preset) }
                     }.padding(.horizontal, 2).padding(.vertical, 6)
                         .frame(minHeight: geometry.size.height, alignment: .center)
                 }
-            }.frame(width: 98)
+            }.frame(width: 44)
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
                 familyTab(0, glyph: CupertinoGlyph.Scribble, title: "pn_curve_family_bezier")
-                familyTab(1, glyph: CupertinoGlyph.ChartBarAltFill, title: "pn_ease_hold")
-                familyTab(2, glyph: CupertinoGlyph.Star, title: "panel_presets")
+                familyTab(1, glyph: CupertinoGlyph.Scribble, title: "pn_textpreset_bounce")
+                familyTab(2, glyph: CupertinoGlyph.ChartBarAltFill, title: "pn_curve_steps4")
+                familyTab(3, glyph: CupertinoGlyph.Star, title: "panel_presets")
                 Spacer(minLength: 0)
-            }.frame(width: 34).background(AureaColors.surface)
-        }.frame(width: 132).frame(maxHeight: .infinity)
+            }.frame(width: 44).background(curveRailFill)
+        }.frame(width: 88).frame(maxHeight: .infinity)
     }
     private func presetTile(_ preset: CurvePresetItem) -> some View {
         Button {
@@ -440,23 +465,29 @@ struct NativeCurvePanel: View {
             }
         } label: {
             CurvePresetThumb(ease: preset.ease, selected: ease.same(preset.ease))
-                .frame(width: 38, height: 38)
-                .background(AureaColors.railModeFill, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ease.same(preset.ease) ? AureaColors.accent : AureaColors.curvePresetBorder,
+                .frame(width: 44, height: 44)
+                .background(curveRailFill, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ease.same(preset.ease) ? curveGreen : .clear,
                     lineWidth: ease.same(preset.ease) ? 1.8 : 1))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(preset.name)
     }
     private func familyTab(_ index: Int, glyph: Character, title: String) -> some View {
         Button { family = index } label: {
-            CupertinoGlyph.text(glyph, size: 17, color: family == index ? AureaColors.accent : AureaColors.muted)
-                .frame(width: 34, height: 34).contentShape(Rectangle())
+            Group {
+                if index == 3 { CupertinoGlyph.text(glyph, size: 20, color: family == index ? curveGreen : .white) }
+                else { CurvePresetThumb(ease: index == 0 ? CurveEase(interpolation: 2, x1: 0.5, y1: 0, x2: 0.5, y2: 1) : CurveEase(interpolation: index == 1 ? 7 : 9, x1: 0, y1: 0, x2: 1, y2: 1), selected: family == index) }
+            }.frame(width: 44, height: 44).contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t(title))
     }
     private func showMenu(_ segment: Segment) {
         let value = ease
         let copied = CurveClipboard.ease
         let actions: [SheetAction] = [
+            SheetAction(AureaText.t("panel_curva")) { graphMode = 0 },
+            SheetAction(AureaText.t("particular_curve_value")) { graphMode = 1 },
+            SheetAction(AureaText.t("panel_velocidade")) { graphMode = 2 },
+            SheetAction(AureaText.t(expanded ? "editor_sair_tela_cheia" : "panel_expandir")) { if expanded { dismissExpanded() } else { fullscreen = true } },
             SheetAction(AureaText.t("panel_copiar_curva")) { CurveClipboard.ease = value },
             SheetAction(AureaText.t("panel_salvar_curva_como_preset")) {
                 model.namePrompt = NamePromptRequest(title: AureaText.t("panel_salvar_curva_como_preset"), initial: value.name) { savePreset(name: $0, ease: value) }
@@ -529,9 +560,39 @@ struct ExpressionEditor: View {
     }
 }
 
+struct TimeRemapEffectEditor: View {
+    @EnvironmentObject private var model: AureaModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(["panel_linear", "panel_suave", "panel_lento_meio", "panel_acelerar", "panel_desacelerar", "panel_congelar", "panel_passar_tras_frente"].enumerated()), id: \.offset) { index, label in
+                        Button {
+                            guard let id = model.primarySelection else { return }
+                            model.engine.applySpeedRamp(UInt32(index), forLayer: id)
+                            model.refreshModel(force: true)
+                        } label: {
+                            Text(AureaText.t(label)).font(.aurea(size: 12))
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+            TimeRemapEditor()
+        }
+    }
+}
+
 // TimeRemapGraph.kt: source frame vertically, layer-local time horizontally.
 struct TimeRemapEditor: View {
     @EnvironmentObject private var model: AureaModel
+    var expanded = false
+    var expandedHeight: CGFloat = 240
+    @State private var fullscreen = false
+    @State private var viewport: TrackGraphViewport?
+    @State private var panInitial: TrackGraphViewport?
+    @State private var grabOffset = CGPoint.zero
     @State private var values: [Float] = []
     @State private var selected = -1
     @State private var editingPoint: Int?
@@ -541,12 +602,17 @@ struct TimeRemapEditor: View {
         let count = min(max(0, Int(values[0])), (values.count - 5) / 7)
         return (0..<count).map { index in Array(values[(5 + index * 7)..<(12 + index * 7)]) }
     }
-    private var low: Float { values.count >= 5 ? values[1] : 0 }
-    private var high: Float { values.count >= 5 ? max(values[2], low + 1) : 1 }
-    private var sourceMax: Float {
+    private var fitLow: Float { values.count >= 5 ? values[1] : 0 }
+    private var low: Float { viewport.map { Float($0.from) } ?? fitLow }
+    private var fitHigh: Float { values.count >= 5 ? max(values[2], fitLow + 1) : 1 }
+    private var high: Float { viewport.map { Float($0.to) } ?? fitHigh }
+    private var fitSourceMax: Float {
         if values.count >= 5 && values[3] > 0 { return values[3] }
         return max(1, (points.map { $0[1] }.max() ?? 0) * 1.2)
     }
+    private var sourceLow: Float { viewport.map { Float($0.low) } ?? 0 }
+    private var sourceMax: Float { viewport.map { Float($0.high) } ?? fitSourceMax }
+    private var view: TrackGraphViewport { viewport ?? TrackGraphViewport(from: Double(fitLow), to: Double(fitHigh), low: 0, high: Double(fitSourceMax)) }
     private var speedLabel: String {
         let speed = values.count >= 5 ? values[4] : 0
         if abs(speed) < 0.005 { return AureaText.t("panel_congelado_cabecote") }
@@ -566,6 +632,13 @@ struct TimeRemapEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !points.isEmpty {
+                HStack {
+                    Button("−") { viewport = view.transformed(zoom: 1/1.5) }.frame(width: 44, height: 44)
+                    Button("+") { viewport = view.transformed(zoom: 1.5) }.frame(width: 44, height: 44)
+                    Button(AureaText.t("panel_ajustar")) { viewport = nil }.frame(minWidth: 44, minHeight: 44)
+                    Spacer()
+                    if !expanded { Button(AureaText.t("panel_expandir")) { fullscreen = true }.frame(minHeight: 44) }
+                }
                 GeometryReader { geometry in
                     ZStack {
                         Canvas { context, size in draw(context, size: size) }
@@ -573,14 +646,23 @@ struct TimeRemapEditor: View {
                             hit: { hit($0, size: geometry.size) },
                             onTap: { location in tap(location, size: geometry.size) },
                             onLongPress: { location in remove(location, size: geometry.size) },
-                            onBegin: { index in
+                            onBegin: { index, location in
                                 finish(); selected = index; editingPoint = index
+                                let key = position(points[index], size: geometry.size)
+                                grabOffset = CGPoint(x: key.x-location.x, y: key.y-location.y)
                                 model.engine.beginUndoGroup()
                             },
                             onMove: { index, location in move(index, location: location, size: geometry.size) },
-                            onEnd: finish)
+                            onEnd: finish,
+                            onPan: { translation, ended in
+                                if panInitial == nil { panInitial = view }
+                                if let initial = panInitial {
+                                    viewport = initial.transformed(zoom: 1, dx: Double(translation.x / max(1, geometry.size.width - 48)), dy: Double(translation.y / max(1, geometry.size.height - 48)))
+                                }
+                                if ended { panInitial = nil }
+                            })
                     }
-                }.frame(height: 170).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                }.frame(height: expanded ? expandedHeight : 240).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 Text(speedLabel).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
@@ -602,6 +684,15 @@ struct TimeRemapEditor: View {
             .onChange(of: model.status.playhead) { _ in load() }
             .onChange(of: id) { _ in finish(); selected = -1; load() }
             .onDisappear(perform: finish)
+            .fullScreenCover(isPresented: $fullscreen) {
+                GeometryReader { bounds in
+                    VStack {
+                        Button(AureaText.t("editor_sair_tela_cheia")) { fullscreen = false }.frame(minHeight: 44)
+                        TimeRemapEditor(expanded: true, expandedHeight: max(96, bounds.size.height - 220)).environmentObject(model)
+                        Spacer(minLength: 0)
+                    }.padding(16).background(AureaColors.background)
+                }.interactiveDismissDisabled()
+            }
     }
     private func interpolationChip(_ interpolation: Int32, _ label: String) -> some View {
         let active = points.indices.contains(selected) && Int32(points[selected][2]) == interpolation
@@ -617,11 +708,11 @@ struct TimeRemapEditor: View {
         }.buttonStyle(AureaPressStyle())
     }
     private func position(_ point: [Float], size: CGSize) -> CGPoint {
-        CGPoint(x: 14 + CGFloat((point[0] - low) / (high - low)) * max(1, size.width - 28),
-                y: size.height - 14 - CGFloat(point[1] / sourceMax) * max(1, size.height - 28))
+        CGPoint(x: 24 + CGFloat((point[0] - low) / (high - low)) * max(1, size.width - 48),
+                y: size.height - 24 - CGFloat((point[1] - sourceLow) / max(0.0001, sourceMax-sourceLow)) * max(1, size.height - 48))
     }
     private func frame(at x: CGFloat, size: CGSize) -> Int64 {
-        let value = low + Float((x - 14) / max(1, size.width - 28)) * (high - low)
+        let value = low + Float((x - 24) / max(1, size.width - 48)) * (high - low)
         return Int64(floor(Double(value) + 0.5))
     }
     private func hit(_ location: CGPoint, size: CGSize) -> Int? {
@@ -644,14 +735,15 @@ struct TimeRemapEditor: View {
         selected = -1; refresh()
     }
     private func move(_ index: Int, location: CGPoint, size: CGSize) {
-        guard points.indices.contains(index), editingPoint == index else { return }
-        let value = Float((size.height - 14 - location.y) / max(1, size.height - 28)).clamped(to: 0...1) * sourceMax
+        guard let index = editingPoint, points.indices.contains(index) else { return }
+        let location = CGPoint(x: location.x+grabOffset.x, y: location.y+grabOffset.y)
+        let value = max(0, sourceLow + Float((size.height - 24 - location.y) / max(1, size.height - 48)) * (sourceMax-sourceLow))
         let moved = model.engine.editTimeRemap(id, index: Int32(index), time: frame(at: location.x, size: size), value: value, interpolation: -1)
-        if moved >= 0 { selected = Int(moved) }
+        if moved >= 0 { selected = Int(moved); editingPoint = Int(moved) }
         refresh()
     }
     private func draw(_ context: GraphicsContext, size: CGSize) {
-        let pad: CGFloat = 14, width = max(1, size.width - 28), height = max(1, size.height - 28)
+        let pad: CGFloat = 24, width = max(1, size.width - 48), height = max(1, size.height - 48)
         func line(_ start: CGPoint, _ end: CGPoint, _ color: Color, _ stroke: CGFloat) {
             var path = Path(); path.move(to: start); path.addLine(to: end)
             context.stroke(path, with: .color(color), lineWidth: stroke)
@@ -687,14 +779,15 @@ struct TimeRemapEditor: View {
     }
 }
 
-/// Gesture arbitration leaves the surrounding scroll view usable away from points.
+/// The graph owns drags inside its bounds: keys take priority, empty space pans. Scroll outside the graph remains available.
 private struct TimeRemapTouchSurface: UIViewRepresentable {
     var hit: (CGPoint) -> Int?
     var onTap: (CGPoint) -> Void
     var onLongPress: (CGPoint) -> Void
-    var onBegin: (Int) -> Void
+    var onBegin: (Int, CGPoint) -> Void
     var onMove: (Int, CGPoint) -> Void
     var onEnd: () -> Void
+    var onPan: (CGPoint, Bool) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UIView {
         let view = UIView(); view.backgroundColor = .clear
@@ -718,9 +811,7 @@ private struct TimeRemapTouchSurface: UIViewRepresentable {
             index = nil; owner.onEnd()
         }
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let pan = gestureRecognizer as? UIPanGestureRecognizer, let view = pan.view else { return true }
-            let location = pan.location(in: view), translation = pan.translation(in: view)
-            return owner.hit(CGPoint(x: location.x - translation.x, y: location.y - translation.y)) != nil
+            return true
         }
         @objc func tap(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended, let view = recognizer.view else { return }
@@ -730,6 +821,7 @@ private struct TimeRemapTouchSurface: UIViewRepresentable {
             guard recognizer.state == .began, let view = recognizer.view else { return }
             owner.onLongPress(recognizer.location(in: view))
         }
+        private func panTranslation(_ recognizer: UIPanGestureRecognizer, _ view: UIView) -> CGPoint { recognizer.translation(in: view) }
         @objc func pan(_ recognizer: UIPanGestureRecognizer) {
             guard let view = recognizer.view else { finish(); return }
             let location = recognizer.location(in: view)
@@ -737,10 +829,11 @@ private struct TimeRemapTouchSurface: UIViewRepresentable {
             case .began:
                 let translation = recognizer.translation(in: view)
                 index = owner.hit(CGPoint(x: location.x - translation.x, y: location.y - translation.y))
-                if let index { owner.onBegin(index) }
+                if let index { owner.onBegin(index, CGPoint(x: location.x-translation.x, y: location.y-translation.y)) }
             case .changed:
-                if let index { owner.onMove(index, location) }
-            case .ended, .cancelled, .failed: finish()
+                if let index { owner.onMove(index, location) } else { owner.onPan(panTranslation(recognizer, view), false) }
+            case .ended, .cancelled, .failed:
+                if index == nil { owner.onPan(panTranslation(recognizer, view), true) }; finish()
             default: break
             }
         }
@@ -1022,8 +1115,8 @@ private struct NativeTrackGraph: View {
                 Text(String(format: "%.3g%@", viewport.high, speed ? " /s" : ""))
                     .font(.aurea(size: 10)).foregroundStyle(AureaColors.muted)
                 Spacer(minLength: 0)
-                Button("−") { viewport = viewport.transformed(zoom: 1 / 1.5) }.frame(width: 36, height: 36)
-                Button("+") { viewport = viewport.transformed(zoom: 1.5) }.frame(width: 36, height: 36)
+                Button("−") { viewport = viewport.transformed(zoom: 1 / 1.5) }.frame(width: 44, height: 44)
+                Button("+") { viewport = viewport.transformed(zoom: 1.5) }.frame(width: 44, height: 44)
                 Button(AureaText.t("panel_ajustar")) { fit() }.font(.aurea(size: 11))
             }.foregroundStyle(AureaColors.accent)
             GeometryReader { geometry in

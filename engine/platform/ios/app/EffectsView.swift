@@ -143,6 +143,7 @@ struct EffectsView: View {
             if expanded {
                 VStack(spacing: 0) {
                     if !effect.known { PanelNotice(AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao")) }
+                    else if effect.typeId == fxEffectTypeId("aurea.time.remap") { TimeRemapEffectEditor() }
                     else {
                         let groups = parameterGroups(effect.effectId)
                         if groups.main.isEmpty && groups.rest.isEmpty { PanelNotice(AureaText.t("panel_este_efeito_nao_tem_ajustes")) }

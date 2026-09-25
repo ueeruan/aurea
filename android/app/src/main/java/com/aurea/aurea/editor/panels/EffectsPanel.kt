@@ -557,6 +557,10 @@ private fun EffectCardItem(
             PanelNotice(stringResource(R.string.panel_este_efeito_saiu_catalogo_ele_nao))
             return@EffectStackCard
         }
+        if (effect.typeId == effectTypeId("aurea.time.remap")) {
+            TimeRemapEffectEditor(store)
+            return@EffectStackCard
+        }
         val visible = slots.filter { !it.hidden }
         if (visible.isEmpty()) {
             PanelNotice(stringResource(R.string.panel_este_efeito_nao_tem_ajustes))

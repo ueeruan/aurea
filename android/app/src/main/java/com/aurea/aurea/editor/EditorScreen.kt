@@ -158,6 +158,7 @@ internal fun openSheet(store: EditorStore, ui: EditorUi, sheet: ShellSheet) {
  */
 internal fun shellBack(store: EditorStore, ui: EditorUi) {
     when {
+        store.sceneEditor -> store.exitSceneEditor()
         ui.adding -> ui.adding = false
         ui.fullscreen -> ui.fullscreen = false
         ui.panel != null -> ui.panel = null
@@ -242,17 +243,19 @@ fun EditorScreen(store: EditorStore) {
             ) {
                 val w = maxWidth.value
                 val h = maxHeight.value
-                val wide = !ui.fullscreen && EditorLayout.isWide(w, h)
+                val wide = !ui.fullscreen && ui.panel != EditorPanel.Curve && EditorLayout.isWide(w, h)
                 val sheetWidth = EditorLayout.wideSheetWidth(w)
                 val m = EditorLayout.solve(h, content, ui.fullscreen)
-                if (wide) {
+                if (store.sceneEditor) {
+                    SceneLayoutWorkspace(store, ui, stage)
+                } else if (wide) {
                     WideEditor(store, ui, content, h, sheetWidth, stage)
                 } else {
                     NarrowEditor(store, ui, content, m, stage)
                 }
 
                 // O "+": escondido em tela cheia, adicionando ou com painel aberto.
-                if (!ui.fullscreen && !ui.adding && content != SheetContent.Panel) {
+                if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel) {
                     val bottom = if (wide || content == SheetContent.None) 0f else m.sheet
                     AddFab(
                         onClick = { openAdd(store, ui) },
@@ -388,13 +391,14 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier) {
         onTrackTap = { layer, property, _ ->
             if (store.primary != layer) store.select(layer)
             openPanel(store, ui, when (property) {
-                30 -> EditorPanel.Speed
+                30 -> EditorPanel.Effects
                 31 -> EditorPanel.Effects
                 32 -> EditorPanel.Audio
                 33 -> EditorPanel.Text
                 34 -> EditorPanel.Vector
                 35 -> EditorPanel.Shape
                 36 -> EditorPanel.Particles
+                37 -> EditorPanel.Element3D
                 else -> EditorPanel.Transform
             })
         },

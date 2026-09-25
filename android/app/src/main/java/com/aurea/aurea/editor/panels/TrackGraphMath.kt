@@ -3,6 +3,23 @@ package com.aurea.aurea.editor.panels
 import kotlin.math.max
 
 internal data class GraphSample(val frame: Float, val value: Float)
+internal data class GraphHitPoint(val index: Int, val x: Float, val y: Float)
+
+/** Visual dots may be tiny; their touch target is independently 48dp wide.
+ * Prefer the selected point only for coincident/equidistant targets. */
+internal fun graphHitIndex(points: List<GraphHitPoint>, x: Float, y: Float, radius: Float, selected: Int = -1): Int {
+    if (!x.isFinite() || !y.isFinite() || !radius.isFinite() || radius <= 0f) return -1
+    var best = -1
+    var distance = radius * radius
+    points.forEach { point ->
+        val dx = point.x - x; val dy = point.y - y
+        val d = dx * dx + dy * dy
+        if (d.isFinite() && (d < distance || (d == distance && (best == -1 || point.index == selected)))) {
+            best = point.index; distance = d
+        }
+    }
+    return best
+}
 
 /** query_track_curve samples integer frames, including when the requested
  * resolution exceeds the number of frames. Remove repeats before deriving

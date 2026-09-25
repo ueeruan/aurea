@@ -54,10 +54,12 @@ add_dependencies(aurea_gles aurea_core)
 
 if(AUREA_ANDROID_GLES_PROBE)
     add_executable(aurea_gles_tests ../../tests/main.cpp ../../tests/test_gpu.cpp ../../tests/test_export.cpp
+        ../../tests/test_ai.cpp ../../tests/test_upscale_color.cpp
         ../../tests/test_gles_surface.cpp ../../tests/test_proxy.cpp ../../platform/android/MediaCodecSource.cpp
         ../../platform/android/MediaCodecExport.cpp)
     target_include_directories(aurea_gles_tests PRIVATE ../../platform/android)
     target_link_libraries(aurea_gles_tests PRIVATE aurea_gles android mediandk log)
+    target_compile_options(aurea_gles_tests PRIVATE -fno-rtti -fno-exceptions)
     target_compile_definitions(aurea_gles_tests PRIVATE AUREA_TEST_VULKAN=1 AUREA_TEST_GLES=1
         AUREA_GOLDEN_DIR="/data/local/tmp/aurea-gles-data/golden"
         AUREA_TEST_DATA_DIR="/data/local/tmp/aurea-gles-data/data")

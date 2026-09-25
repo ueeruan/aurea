@@ -21,6 +21,73 @@ import SwiftUI
 import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
+import CoreImage.CIFilterBuiltins
+
+private enum AureaDonations {
+    static let pix = "00020126360014br.gov.bcb.pix0114+55889961267175204000053039865802BR5911Ruan  Pablo6009Sao Paulo62240520daqr16872346348818576304A1F0"
+    static let paypal = "https://www.paypal.com/donate/?business=C7C2A2UH88NGW&no_recurring=0&item_name=Manter+o+Aurea+APP+funcionando+de+gra%C3%A7a.&currency_code=BRL"
+    // Cache one small image; export progress must not regenerate the QR code.
+    static let qr: UIImage? = {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(pix.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage,
+              let cg = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: cg)
+    }()
+}
+
+struct DonationCard: View {
+    var exporting = false
+    @Environment(\.openURL) private var openURL
+    @State private var showing = false
+    @State private var copied = false
+
+    var body: some View {
+        Button { copied = false; showing = true } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(AureaText.t("donation_title")).font(.aurea(size: 17, weight: .semibold))
+                    Text(AureaText.t("donation_note")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "heart").font(.system(size: 26)).foregroundStyle(AureaColors.accent)
+            }.padding(16).foregroundStyle(AureaColors.text)
+                .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 16))
+        }.buttonStyle(.plain).padding(.vertical, 12)
+            .sheet(isPresented: $showing) {
+                NavigationStack {
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            Text(AureaText.t("donation_detail"))
+                            if let qr = AureaDonations.qr {
+                                Image(uiImage: qr).interpolation(.none).resizable().scaledToFit()
+                                    .frame(width: 216, height: 216).padding(20).background(.white)
+                                    .accessibilityLabel(AureaText.t("donation_pix_qr"))
+                            }
+                            Text("Pix · Ruan Pablo").foregroundStyle(AureaColors.muted)
+                            Button(AureaText.t("donation_copy_pix")) { copy(AureaDonations.pix) }
+                                .buttonStyle(.bordered).frame(maxWidth: .infinity)
+                            Button(AureaText.t(exporting ? "donation_copy_paypal" : "donation_paypal")) {
+                                if exporting { copy(AureaDonations.paypal) }
+                                else if let url = URL(string: AureaDonations.paypal) {
+                                    openURL(url) { accepted in
+                                        if !accepted { copy(AureaDonations.paypal) }
+                                    }
+                                }
+                            }.buttonStyle(.bordered).frame(maxWidth: .infinity)
+                            if exporting { Text(AureaText.t("donation_export_note")).foregroundStyle(AureaColors.muted) }
+                            if copied { Text(AureaText.t("donation_copied")).foregroundStyle(AureaColors.accent) }
+                        }.font(.aurea(size: 15)).padding(24)
+                    }.background(AureaColors.background).foregroundStyle(AureaColors.text)
+                        .navigationTitle(AureaText.t("donation_title")).navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) {
+                            Button(AureaText.t("editor_fechar")) { showing = false }
+                        } }
+                }.preferredColorScheme(.dark)
+            }
+    }
+    private func copy(_ value: String) { UIPasteboard.general.string = value; copied = true }
+}
 
 // =============================================================================
 // Tokens da Home. Os que já existem no Theme.swift vêm de lá; estes são os que
@@ -630,6 +697,7 @@ struct HomeSettingsTab: View {
     @State private var groqKey = ""
     @State private var hasGroqKey = false
     @State private var betaTaps = 0
+    @State private var licenses = false
     @AppStorage("home.developerTools") private var developerTools = false
 
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" }
@@ -675,12 +743,15 @@ struct HomeSettingsTab: View {
                         model.toast = AureaText.t("settings_recents_cleared")
                     }
                 }
+                DonationCard()
                 groupHeader("settings_group_about", top: true)
                 group {
                     tileRow(CupertinoGlyph.Bolt, title: "settings_technology", subtitle: AureaText.t("settings_technology_ios_value"))
                     groupDivider
                     tileRow(CupertinoGlyph.PersonCropCircle, title: "settings_creator",
                             subtitle: AureaText.t("home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo"))
+                    groupDivider
+                    tapRow("licenses_title", subtitle: "Real-ESRGAN · Tencent/ncnn") { licenses = true }
                 }
                 betaBanner.padding(.top, HomeDims.s4)
                 if developerTools {
@@ -704,6 +775,15 @@ struct HomeSettingsTab: View {
             if keyDialog { groqDialog }
         }
         .onAppear { hasGroqKey = !CaptionKeychain.read().isEmpty }
+        .sheet(isPresented: $licenses) {
+            NavigationStack {
+                ScrollView { Text(AureaText.t("licenses_ai_body")).font(.system(size: 13)).textSelection(.enabled).padding(20) }
+                    .navigationTitle(AureaText.t("licenses_title")).navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) {
+                        Button(AureaText.t("editor_fechar")) { licenses = false }
+                    } }
+            }.preferredColorScheme(.dark)
+        }
         .onChange(of: languageSheet) { _ in modalActive = languageSheet || keyDialog }
         .onChange(of: keyDialog) { _ in modalActive = languageSheet || keyDialog }
     }
@@ -852,9 +932,9 @@ struct HomeStartTab: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 0) {
-                    HomeBrandLogo().frame(width: HomeDims.logo, height: HomeDims.logo)
+                    HomeBrandLogo().frame(width: 30, height: 30)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Aurea").aureaFont(.display).tracking(-0.8)
+                        Text("AUREA").aureaFont(.titleLarge)
                         Text(greeting).aureaFont(.greeting).foregroundStyle(AureaColors.muted).lineLimit(1)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.leading, HomeDims.s3)
                     HomeRoundIconButton(glyph: CupertinoGlyph.Search, description: AureaText.t("home_search_projects")) { searching.toggle() }
@@ -869,9 +949,12 @@ struct HomeStartTab: View {
                         .padding(.leading, HomeDims.gutter).padding(.trailing, HomeDims.s3).padding(.top, HomeDims.s1).padding(.bottom, HomeDims.s3)
                 }
                 VStack(spacing: HomeDims.s2) {
-                    HomeFillButton(label: AureaText.t("home_new_project"), glyph: CupertinoGlyph.Plus, action: onNewProject)
                     HStack(spacing: HomeDims.s3) {
-                        HomeQuickAction(glyph: CupertinoGlyph.PhotoOnRectangle, label: AureaText.t("home_import_media")) { importing = true }
+                        HomeStudioAction(glyph: CupertinoGlyph.Plus, label: AureaText.t("home_new_project"), primary: true, action: onNewProject)
+                        HomeStudioAction(glyph: CupertinoGlyph.PhotoOnRectangle, label: AureaText.t("home_import_media")) { importing = true }
+                    }
+                    HStack(spacing: HomeDims.s3) {
+                        HomeQuickAction(glyph: CupertinoGlyph.RectangleStack, label: AureaText.plural("home_project_count", library.all.count), action: onOpenProjects)
                         HomeQuickAction(glyph: CupertinoGlyph.ArrowUpArrowDown, label: AureaText.t("home_sort_title")) { onDialog(.sort) }
                     }
                 }.padding(.horizontal, HomeDims.gutter).padding(.top, HomeDims.s1)

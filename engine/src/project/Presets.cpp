@@ -603,7 +603,7 @@ struct Reader {
                 }
                 if (a[0] != std::floor(a[0]) || std::fabs(a[0]) > static_cast<f64>(kMaxRelFrames)) return fail("tempo de keyframe invalido");
                 if (std::fabs(a[1]) > 1e9) return fail("valor de keyframe fora da faixa");
-                if (a[2] < 0 || a[2] > static_cast<f64>(Interpolation::CustomCurve) || a[2] != std::floor(a[2])) return fail("interpolacao invalida");
+                if (a[2] < 0 || a[2] > static_cast<f64>(Interpolation::Steps) || a[2] != std::floor(a[2])) return fail("interpolacao invalida");
                 for (int i = 3; i < 9; ++i) if (std::fabs(a[i]) > 1e7) return fail("curva de keyframe fora da faixa");
                 if (a[9] < 0 || a[9] > 65535) return fail("easing invalido");
                 Keyframe k;
@@ -898,7 +898,7 @@ bool read_caption(Reader& r, const json::Value& root, Preset& p) {
 bool read_curve(Reader& r, const json::Value& root, Preset& p) {
     const json::Value* c = root.get("curve");
     if (!c || !c->is_object()) return r.fail("preset de curva sem bloco curve");
-    const u32 interp = r.u(*c, "interp", static_cast<u32>(Interpolation::Bezier), static_cast<u32>(Interpolation::CustomCurve));
+    const u32 interp = r.u(*c, "interp", static_cast<u32>(Interpolation::Bezier), static_cast<u32>(Interpolation::Steps));
     const f32 x1 = r.f(*c, "x1", 0.42f, 0.0, 1.0), y1 = r.f(*c, "y1", 0.0f, -2.0, 3.0);
     const f32 x2 = r.f(*c, "x2", 0.58f, 0.0, 1.0), y2 = r.f(*c, "y2", 1.0f, -2.0, 3.0);
     if (!r.ok()) return false;

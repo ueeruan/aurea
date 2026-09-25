@@ -159,6 +159,9 @@ enum class Interpolation : u8 {
     EaseOut,
     EaseInOut,
     CustomCurve,
+    Bounce,
+    Elastic,
+    Steps,
 };
 
 /// Modo da máscara na pilha (AE). `None` entra no FIM para os projetos
@@ -200,6 +203,7 @@ enum class TrackProperty : u16 {
     VectorParam,       ///< parâmetro de grupo vetorial (effectIndex = grupo, paramIndex = VectorParam)
     ShapeParam,        ///< parâmetro da forma (paramIndex = o mesmo de ShapeSetParam: 1 raio, 2 lados, 3 raio interno, 4 contorno, 5 largura, 6 altura)
     ParticleParam,     ///< parâmetro do Aurea Particular (paramIndex = ParticleParam)
+    MaterialParam,     ///< imported material: effectIndex=materialIndex, paramIndex=RGBA/metallic/roughness
     _Count,
 };
 

@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import androidx.compose.ui.draw.clip
@@ -87,12 +90,7 @@ internal fun Element3DPanel(env: PanelEnv) {
                 }
             }
             Text3DPbrSection(env, store)
-        } else {
-            Text(
-                stringResource(R.string.panel_cor_brilho_metalico_rugosidade_vem_arquivo),
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
-            )
-        }
+        } else ImportedMaterialSection(store)
         LightingSection(store)
         Spacer(Modifier.height(16.dp))
         SectionTitle(stringResource(R.string.panel_luz_ambiente))
@@ -111,6 +109,44 @@ internal fun Element3DPanel(env: PanelEnv) {
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
         )
         ObjectEnvironmentSection(store)
+    }
+}
+
+@Composable
+private fun ImportedMaterialSection(store: EditorStore) {
+    // Reading detail/curve revision subscribes to playback, edits and undo.
+    val detail = store.detail
+    val revision = store.curveRevision
+    val materials = remember(detail, revision) { store.queryMaterials() }
+    var selected by remember(store.primary) { mutableStateOf(0) }
+    var dragging by remember(store.primary) { mutableStateOf(false) }
+    if (materials.isEmpty()) return
+    val current = materials.firstOrNull { it[0].toInt() == selected } ?: materials.first()
+    val index = current[0].toInt()
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        materials.forEach { material ->
+            val id = material[0].toInt()
+            Chip("Material ${id + 1}", on = id == index) { selected = id }
+        }
+    }
+    val labels = listOf("R", "G", "B", "Alpha", stringResource(R.string.pn_t3d_metallic), stringResource(R.string.pn_t3d_roughness))
+    labels.forEachIndexed { param, label ->
+        val value = current[param + 2].coerceIn(0f, 1f)
+        val here = (store.keyframes[store.primary] ?: emptyList()).any {
+            it.property == 37 && it.effectIndex == index && it.paramIndex == param && it.time == detail?.localPlayhead
+        }
+        val keyLabel = stringResource(if (here) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui) + " · " + label
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, modifier = Modifier.width(78.dp), style = AureaType.BodySmall)
+            Slider(value = value, onValueChange = {
+                if (!dragging) { dragging = true; store.beginGesture("material") }
+                store.setMaterialParameter(index, param, it)
+            }, onValueChangeFinished = { if (dragging) { dragging = false; store.endGesture() } }, modifier = Modifier.weight(1f))
+            TextButton(onClick = { store.toggleMaterialKeyframe(index, param, value) }, modifier = Modifier.semantics { contentDescription = keyLabel }) { Text(if (here) "◆" else "◇") }
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(store.primary) {
+        onDispose { if (dragging) { dragging = false; store.endGesture() } }
     }
 }
 

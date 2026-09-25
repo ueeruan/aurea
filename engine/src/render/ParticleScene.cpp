@@ -246,7 +246,9 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
         ParticleSub& sub = ps.subs[s];
         sub.shift = static_cast<f32>(shiftFrames / fps);
         if (in3d) {
-            const scene3d::SceneCamera cam = particle_camera_at(comp, tl + shiftFrames + toTimeline, out.compWidth, out.compHeight);
+            const scene3d::SceneCamera cam = settings.sceneEditor.enabled && !settings.finalQuality
+                ? scene_editor_camera(out.compWidth, out.compHeight, settings.sceneEditor)
+                : particle_camera_at(comp, tl + shiftFrames + toTimeline, out.compWidth, out.compHeight);
             camera_clip(cam, out.compWidth, out.compHeight, sub.clip, sub.right, sub.down);
         } else {
             sub.clip = clip_from_px(static_cast<f32>(rl.source.width), static_cast<f32>(rl.source.height));

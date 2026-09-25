@@ -33,6 +33,7 @@ data class ExportOptions(
     val hevc: Boolean = false,
     /** Alta = 1,6× a taxa automática do motor. */
     val highQuality: Boolean = false,
+    val aiUpscale: Int = 0,
 )
 
 enum class ExportPhase { Idle, Running, Publishing, Done, Failed, Cancelled }
@@ -102,7 +103,7 @@ class Exporter internal constructor(
         val fps = if (options.fps > 0) options.fps else compFps
         val mbps = if (options.highQuality) estimatedMbps(w, h, fps, options).toInt().coerceAtLeast(1) else 0
 
-        val code = engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps)
+        val code = engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale)
         if (code != 0) {
             state = ExportUiState(ExportPhase.Failed, message = startError(code, options))
             return
@@ -119,7 +120,7 @@ class Exporter internal constructor(
                     framesTotal = progress.framesTotal,
                     fps = progress.fps,
                     etaSeconds = progress.etaSeconds,
-                    notice = noticeFor(progress, options),
+                    notice = if (options.aiUpscale > 0 && progress.message.startsWith("IA:")) progress.message else noticeFor(progress, options),
                 )
                 if (!progress.finished) continue
                 when (progress.result) {

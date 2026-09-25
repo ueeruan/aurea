@@ -1035,6 +1035,22 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryObjectEnvironment)(JNIEnv* env, jclass, j
     return JNI_TRUE;
 }
 
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryMaterials)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    const u32 count = c ? std::min<u32>(4096, c->engine.query_materials(static_cast<u64>(layer), nullptr, 0)) : 0;
+    std::vector<f32> values(static_cast<usize>(count) * 8);
+    const u32 written = count ? std::min(count, c->engine.query_materials(static_cast<u64>(layer), values.data(), count)) : 0;
+    jfloatArray out = env->NewFloatArray(static_cast<jsize>(written * 8));
+    if (out && written) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(written * 8), values.data());
+    return out;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetMaterialParam)(JNIEnv*, jclass, jlong handle, jlong layer, jint material, jint param, jfloat value) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_material_param(static_cast<u64>(layer), static_cast<u32>(material), static_cast<u32>(param), value).ok()
+        ? JNI_TRUE : JNI_FALSE;
+}
+
 /// Desagrupar: nulo = feito; senão o motivo da recusa (frase para a UI).
 AUREA_JNI jstring AUREA_FN(nativeUngroupPrecomp)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
@@ -1774,7 +1790,7 @@ AUREA_JNI jfloatArray AUREA_FN(nativeParseCaptionPreset)(JNIEnv* env, jclass, jb
 }
 
 AUREA_JNI jbyteArray AUREA_FN(nativeMakeCurvePreset)(JNIEnv* env, jclass, jbyteArray name, jint interp, jfloat x1, jfloat y1, jfloat x2, jfloat y2) {
-    const jint i = std::clamp(interp, 0, static_cast<jint>(Interpolation::CustomCurve));
+    const jint i = std::clamp(interp, 0, static_cast<jint>(Interpolation::Steps));
     return bytes_of(env, presets::make_curve_preset(utf8_of(env, name), static_cast<Interpolation>(i), std::clamp(x1, 0.0f, 1.0f),
                                                     std::clamp(y1, -2.0f, 3.0f), std::clamp(x2, 0.0f, 1.0f), std::clamp(y2, -2.0f, 3.0f)));
 }
@@ -2058,6 +2074,53 @@ AUREA_JNI jlong AUREA_FN(nativeDetectBeats)(JNIEnv* env, jclass, jlong handle, j
     return static_cast<jlong>(*r);
 }
 
+AUREA_JNI void AUREA_FN(nativeSetSceneEditor)(JNIEnv*, jclass, jlong handle, jboolean enabled, jfloat yaw, jfloat pitch, jfloat distance) {
+    if (auto* c = ctx_of(handle)) c->engine.set_scene_editor(enabled == JNI_TRUE, yaw, pitch, distance);
+}
+AUREA_JNI jint AUREA_FN(nativeSceneGuides)(JNIEnv* env, jclass, jlong handle, jfloatArray output) {
+    auto* c = ctx_of(handle);
+    if (!c || !output) return 0;
+    f32 lines[256 * 5]{};
+    const u32 capacity = std::min<u32>(256, static_cast<u32>(env->GetArrayLength(output)) / 5);
+    const u32 count = c->engine.query_scene_guides(lines, capacity);
+    if (count) env->SetFloatArrayRegion(output, 0, static_cast<jsize>(count * 5), lines);
+    return static_cast<jint>(count);
+}
+AUREA_JNI jboolean AUREA_FN(nativeLayoutTransform)(JNIEnv*, jclass, jlong handle, jlong layer, jint property, jfloat value) {
+    auto* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    Command command;
+    command.type = CommandType::LayerLayoutTransform;
+    command.shape_param = ShapeParamPayload{LayerId::unpack(static_cast<u64>(layer)), static_cast<u32>(property), value};
+    const auto accepted = c->engine.submit_commands(&command, 1, nullptr, 0);
+    c->engine.request_render();
+    return accepted == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jlong AUREA_FN(nativeAddLight)(JNIEnv*, jclass, jlong handle, jint kind) {
+    auto* c = ctx_of(handle); if (!c) return -1;
+    const auto id = c->engine.add_light(static_cast<u32>(kind));
+    return id.ok() ? static_cast<jlong>(*id) : -1;
+}
+AUREA_JNI jboolean AUREA_FN(nativeLightInfo)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray output) {
+    auto* c = ctx_of(handle); f32 values[10]{};
+    if (!c || !output || env->GetArrayLength(output) < 10 || !c->engine.query_light(static_cast<u64>(layer), values)) return JNI_FALSE;
+    env->SetFloatArrayRegion(output, 0, 10, values); return JNI_TRUE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeSetLightParam)(JNIEnv*, jclass, jlong handle, jlong layer, jint param, jfloat value) {
+    auto* c = ctx_of(handle); if (!c) return JNI_FALSE;
+    Command command; command.type = CommandType::LayerSetLightParam;
+    command.shape_param = ShapeParamPayload{LayerId::unpack(static_cast<u64>(layer)), static_cast<u32>(param), value};
+    return c->engine.submit_commands(&command, 1, nullptr, 0) == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jlong AUREA_FN(nativeAddCamera)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const Result<u64> r = c->engine.add_camera();
+    return r.ok() ? static_cast<jlong>(*r) : -static_cast<jlong>(r.status().code());
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddNull)(JNIEnv*, jclass, jlong handle, jboolean threeD) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);
@@ -2182,7 +2245,7 @@ AUREA_JNI jint AUREA_FN(nativeRecoverSession)(JNIEnv*, jclass, jlong handle) {
 /// `shortSide` = lado menor do vídeo (720/1080/1440/2160); `fps` 0 = o da
 /// composição; `codec` 0 = H.264, 1 = HEVC; `bitrateMbps` 0 = automático.
 AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint shortSide,
-                                           jdouble fps, jint codec, jint bitrateMbps) {
+                                           jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale) {
     NativeContext* c = ctx_of(handle);
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, outputPath);
@@ -2192,6 +2255,7 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
     settings.fps = fps > 0.0 ? fps : 0.0;
     settings.videoCodec = codec == 1 ? ExportCodec::HEVC : ExportCodec::H264;
     settings.videoBitrateMbps = bitrateMbps > 0 ? static_cast<u32>(bitrateMbps) : 0;
+    settings.aiUpscale = static_cast<u32>(aiUpscale);
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
 }
 

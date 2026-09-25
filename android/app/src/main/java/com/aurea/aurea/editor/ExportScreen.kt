@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
+import com.aurea.aurea.home.DonationCard
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -123,6 +124,7 @@ internal fun ExportScreen(store: EditorStore, onDismiss: () -> Unit) {
                         st.fps, st.etaSeconds, publishing = st.phase == ExportPhase.Publishing, notice = st.notice)
                     ExportPhase.Done -> Done(st.message)
                 }
+                DonationCard(exporting = exporter.busy)
                 Spacer(Modifier.height(24.dp))
             }
             BottomAction(store, options, compW, compH, compFps)
@@ -194,8 +196,11 @@ private fun Options(
     // Tudo aparece (§109): o que o aparelho não exporta fica marcado e
     // desligado, com a frase do porquê embaixo — o motor recusaria, e o
     // usuário não descobre só depois de tocar.
-    val available = Resolutions.filter { (side, _) -> val (w, h) = sizeFor(side); comp?.fits(w, h) ?: true }
-    val blocked = Resolutions.filter { it !in available }.map { it.second }.toSet()
+    val neuralSide = short * options.aiUpscale
+    val resolutions = if (options.aiUpscale > 0 && Resolutions.none { it.first == neuralSide })
+        (Resolutions + (neuralSide to "${neuralSide}p (${options.aiUpscale}×)")).sortedBy { it.first } else Resolutions
+    val available = resolutions.filter { (side, _) -> val (w, h) = sizeFor(side); comp?.fits(w, h) ?: true }
+    val blocked = resolutions.filter { it !in available }.map { it.second }.toSet()
     val device = store.deviceReport
     val fpsOptions = listOf(0.0, 24.0, 30.0, 60.0)
     val (w, h) = sizeFor(options.shortSide)
@@ -203,8 +208,20 @@ private fun Options(
     val mbps = store.exporter.estimatedMbps(w, h, fps, options)
     val sizeMb = mbps * seconds / 8.0
 
+    Section(stringResource(R.string.ai_upscale_title))
+    val off = stringResource(R.string.common_off)
+    Chips(listOf(off, "2×", "4×"), if (options.aiUpscale == 0) off else "${options.aiUpscale}×") { label ->
+        val factor = when (label) { "2×" -> 2; "4×" -> 4; else -> 0 }
+        onChange(options.copy(aiUpscale = factor, shortSide = if (factor > 0) short * factor else min(1080, max(720, short))))
+    }
+    if (options.aiUpscale > 0) {
+        Text(stringResource(R.string.ai_upscale_note), style = AureaType.BodySmall, modifier = Modifier.padding(top = 8.dp))
+        val factor = options.aiUpscale
+        Text(stringResource(R.string.ai_upscale_dimensions, factor, ((w + factor*2-1)/(factor*2))*2,
+            ((h + factor*2-1)/(factor*2))*2, w, h), style = AureaType.BodySmall, modifier = Modifier.padding(top = 6.dp))
+    }
     Section(stringResource(R.string.editor_resolucao))
-    Chips(Resolutions.map { it.second }, available.firstOrNull { it.first == options.shortSide }?.second, blocked) { label ->
+    Chips(resolutions.map { it.second }, available.firstOrNull { it.first == options.shortSide }?.second, blocked) { label ->
         onChange(options.copy(shortSide = available.first { it.second == label }.first))
     }
     if (blocked.isNotEmpty()) {

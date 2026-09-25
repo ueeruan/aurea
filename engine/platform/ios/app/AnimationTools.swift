@@ -1028,7 +1028,11 @@ private struct NativeTrackGraph: View {
             }.foregroundStyle(AureaColors.accent)
             GeometryReader { geometry in
                 Canvas { context, size in
-                    func plot(_ frame: Double, _ value: Double) -> CGPoint { point(frame, value, size, viewport) }
+                    let view = viewport
+                    func plot(_ frame: Double, _ value: Double) -> CGPoint {
+                        CGPoint(x: (frame - view.from) / view.duration * Double(size.width),
+                            y: Double(size.height) - (value - view.low) / view.range * Double(size.height))
+                    }
                     func line(_ a: CGPoint, _ b: CGPoint, color: Color, width: CGFloat = 1) {
                         var path = Path(); path.move(to: a); path.addLine(to: b)
                         context.stroke(path, with: .color(color), lineWidth: width)

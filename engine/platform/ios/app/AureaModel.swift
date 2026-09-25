@@ -1851,7 +1851,7 @@ final class AureaModel: ObservableObject {
                 ? markerFrames.filter { $0 > now }.min()
                 : markerFrames.filter { $0 < now }.max()
             if let target { seek(toFrame: target) }
-        } else if !stepToKeyframe(direction) { step(direction) }
+        } else if !stepToKeyframe(direction) { step(Int32(clamping: direction)) }
     }
 
     func stepToKeyframe(_ direction: Int) -> Bool {

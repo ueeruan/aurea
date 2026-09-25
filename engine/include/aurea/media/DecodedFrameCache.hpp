@@ -29,6 +29,7 @@
 #include "aurea/memory/MemoryManager.hpp"
 
 #include <mutex>
+#include <array>
 #include <vector>
 
 namespace aurea {
@@ -63,6 +64,9 @@ public:
 
     /// Onde está o playhead e para onde ele vai. Orienta o despejo.
     void set_focus(i64 playheadUs, i32 direction) noexcept;
+    /// Bounded working set for one render: base, blend neighbor and RGB samples.
+    /// Byte budgets evict optional prefetch first; decoder buffer limits remain hard.
+    void set_required_times(const i64* times, u32 count, i64 toleranceUs) noexcept;
 
     /// Guarda o frame. Devolve false quando ele próprio seria o primeiro a sair
     /// (longe demais do playhead para valer um lugar).
@@ -100,6 +104,7 @@ private:
     [[nodiscard]] usize worst_locked() const noexcept;
     [[nodiscard]] f64 cost_locked(i64 ptsUs, i64 durationUs = 0) const noexcept;
     [[nodiscard]] bool over_shared_budget_locked() const noexcept;
+    [[nodiscard]] bool required_locked(i64 pts, i64 duration) const noexcept;
 
     mutable std::mutex mutex_;
     std::vector<FrameRef> frames_;   ///< ordenado por pts
@@ -107,6 +112,9 @@ private:
     Stats  stats_{};
     i64    focusUs_ = 0;
     i32    direction_ = 0;
+    std::array<i64, 5> requiredTimes_{};
+    u32 requiredCount_ = 0;
+    i64 requiredTolerance_ = 0;
     MemoryManager* memory_ = nullptr;
 };
 

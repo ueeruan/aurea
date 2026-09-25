@@ -6693,6 +6693,7 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // decoder, a GPU fica livre para quem precisar (captura, prévia de efeito).
     const u64 t0 = monotonic_ns();
     const u64 deadline = t0 + 4'000'000'000ull;
+    bool drainedGpu = false;
     std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
     auto prepare = [&]() -> Status {
         if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
@@ -6709,8 +6710,12 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         rl.lock();
         if (const Status s = prepare(); !s.ok()) return s;
         if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) break;
-        if (monotonic_ns() > deadline) break;   // sai com o que o decoder tiver (a regra de antes)
-        for (RenderLayer& l : snapshot_.layers) l.source.frame.reset();
+        snapshot_.release_video_frames();
+        if (monotonic_ns() > deadline)
+            return Status{Errc::Timeout, "quadros de video indisponiveis para exportacao"};
+        // Waiting for decode must not pin completed external images behind GPU
+        // retirement callbacks that would otherwise run only on a new submission.
+        if (!drainedGpu) { gpu_->wait_idle(); drainedGpu = true; }
         rl.unlock();
         if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
         std::unique_lock<std::mutex> wl(exportWakeMutex_);

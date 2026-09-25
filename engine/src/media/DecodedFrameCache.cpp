@@ -48,11 +48,33 @@ void DecodedFrameCache::set_focus(i64 playheadUs, i32 direction) noexcept {
 }
 
 f64 DecodedFrameCache::cost_locked(i64 ptsUs, i64 durationUs) const noexcept {
+    if (required_locked(ptsUs, durationUs)) return -1;
     if (durationUs > 0 && focusUs_ >= ptsUs && focusUs_ - ptsUs < durationUs) return 0;
     const i64 d = ptsUs - focusUs_;
     const f64 dist = static_cast<f64>(d < 0 ? -d : d);
     const bool behind = (direction_ > 0 && d < 0) || (direction_ < 0 && d > 0);
     return behind ? dist * 3.0 : dist;
+}
+
+bool DecodedFrameCache::required_locked(i64 pts, i64 duration) const noexcept {
+    for (u32 i = 0; i < requiredCount_; ++i) {
+        const i64 delta = requiredTimes_[i] - pts;
+        if (duration > 0 ? (delta >= 0 && delta < duration) : std::llabs(delta) <= requiredTolerance_) return true;
+    }
+    return false;
+}
+
+void DecodedFrameCache::set_required_times(const i64* times, u32 count, i64 toleranceUs) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    count = times ? std::min<u32>(count, static_cast<u32>(requiredTimes_.size())) : 0;
+    bool changed = count != requiredCount_ || toleranceUs != requiredTolerance_;
+    for (u32 i = 0; i < count; ++i) {
+        changed |= requiredTimes_[i] != times[i];
+        requiredTimes_[i] = times[i];
+    }
+    requiredCount_ = count;
+    requiredTolerance_ = toleranceUs;
+    if (changed) { ++stats_.version; evict_locked(); }
 }
 
 usize DecodedFrameCache::worst_locked() const noexcept {
@@ -130,7 +152,9 @@ void DecodedFrameCache::evict_locked() noexcept {
     while (!frames_.empty()
            && (frames_.size() > config_.maxFrames || (frames_.size() > 1 && stats_.bytes > config_.maxBytes)
                || (frames_.size() > 1 && over_shared_budget_locked()))) {
-        erase_locked(worst_locked());
+        const usize worst = worst_locked();
+        if (frames_.size() <= config_.maxFrames && required_locked(frames_[worst]->ptsUs, frames_[worst]->durationUs)) break;
+        erase_locked(worst);
     }
     stats_.frames = static_cast<u32>(frames_.size());
 }
@@ -146,6 +170,7 @@ usize DecodedFrameCache::reclaim(usize targetBytes) noexcept {
         while (frames_.size() > 1 && before - stats_.bytes < targetBytes) erase_locked(worst_locked());
     }
     stats_.frames = static_cast<u32>(frames_.size());
+    if (before != stats_.bytes) ++stats_.version;
     return static_cast<usize>(before - stats_.bytes);
 }
 

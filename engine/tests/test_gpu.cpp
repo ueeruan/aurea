@@ -2317,6 +2317,64 @@ AUREA_TEST(Gpu, ExpressionOnPositionMovesTheLayer) {
 
 #endif // AUREA_TEST_VULKAN
 
+AUREA_TEST(Gpu, TemporalRgbVideoPixelsSurviveSaveAndReopen) {
+    AUREA_REQUIRE_GPU();
+    SyntheticConfig cfg;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    cfg.decodeCostUs = 1000;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.mediaFactory = &factory;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(64, 36, 30, "Temporal RGB video").ok());
+    // A real owned path lets the normal loader validate asset availability.
+    const char* mediaPath = "aurea_temporal_rgb_source.fixture";
+    if (std::FILE* file = std::fopen(mediaPath, "wb")) { std::fputc(0, file); std::fclose(file); }
+    VideoImport input; input.sourcePath = mediaPath; input.displayName = "timing fixture";
+    const auto imported = e.import_video(input);
+    AUREA_CHECK(imported.ok());
+    if (!imported.ok()) { e.shutdown(); std::remove(mediaPath); return; }
+    auto capture = [&](i64 frame) {
+        Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{frame}, 30);
+        AUREA_CHECK(e.apply_command(seek).ok());
+        std::vector<u8> pixels; u32 w = 0, h = 0;
+        AUREA_CHECK(e.capture_frame_rgba(64, pixels, w, h).ok());
+        AUREA_CHECK_EQ(w, 64u); AUREA_CHECK_EQ(h, 36u);
+        return pixels;
+    };
+    const auto red = capture(60), green = capture(45), blue = capture(30);
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*imported));
+    EffectInstance effect;
+    effect.id = 1; effect.type = e.effects().find_key(effect_keys::kTimeWarpRgb);
+    initialize_instance(effect, *e.effects().params(effect.type));
+    effect.params[0].constant.v[0] = 0; effect.params[1].constant.v[0] = -15; effect.params[2].constant.v[0] = -30;
+    effect.params[3].constant.v[0] = 0; effect.params[4].constant.v[0] = 100;
+    layer->effects.push_back(std::move(effect));
+    const auto combined = capture(60);
+    if (combined.size() == red.size() && combined.size() == green.size() && combined.size() == blue.size()) {
+        u32 worst = 0;
+        for (usize i = 0; i < combined.size(); i += 4) {
+            worst = std::max(worst, static_cast<u32>(std::abs(combined[i] - red[i])));
+            worst = std::max(worst, static_cast<u32>(std::abs(combined[i + 1] - green[i + 1])));
+            worst = std::max(worst, static_cast<u32>(std::abs(combined[i + 2] - blue[i + 2])));
+        }
+        AUREA_CHECK(worst <= 2);
+    } else AUREA_CHECK(false);
+    const char* path = "aurea_temporal_rgb_roundtrip.aurea";
+    AUREA_CHECK(e.save_project(path).ok());
+    AUREA_CHECK(e.load_project(path).ok());
+    AUREA_CHECK(capture(60) == combined);
+    e.shutdown();
+    std::remove(mediaPath); std::remove(path);
+    std::remove("aurea_temporal_rgb_roundtrip.aurea.bak");
+}
+
 AUREA_TEST(Gpu, CaptureFrameGivesSrgbThumbnail) {
     Gpu& g = gpu();
     if (!g.ok) return;

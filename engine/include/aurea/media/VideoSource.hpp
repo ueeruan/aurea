@@ -117,7 +117,10 @@ public:
     void start();
     void stop() noexcept;
 
-    [[nodiscard]] const VideoStreamInfo& info() const noexcept { return backend_->info(); }
+    [[nodiscard]] VideoStreamInfo info() const noexcept {
+        std::lock_guard<std::mutex> lock(infoMutex_);
+        return publishedInfo_;
+    }
     [[nodiscard]] i64 frame_duration_us() const noexcept { return frameUs_; }
 
     /// Pedido mais recente. Substitui o anterior (coalescência).
@@ -145,10 +148,13 @@ private:
     [[nodiscard]] bool reachable_forward(i64 needUs) const noexcept;
     void deliver(FrameRef frame) noexcept;
     void schedule_retry(u64 generation) noexcept;
+    void publish_info() noexcept;
 
     std::unique_ptr<VideoDecoderBackend> backend_;
     MediaPriority priority_;
     DecodedFrameCache cache_;
+    mutable std::mutex infoMutex_;
+    VideoStreamInfo publishedInfo_{};
     i64 frameUs_ = 33'333;
 
     mutable std::mutex mutex_;

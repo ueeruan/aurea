@@ -225,6 +225,14 @@ struct FrameSnapshot {
     /// Histórico das partículas (8.2, render/ParticleScene.hpp) e onde começa.
     std::vector<Vec4> particleData;
     u32 particleBase = 0;
+    void release_video_frames() noexcept {
+        for (RenderLayer& layer : layers) {
+            layer.source.frame.reset();
+            layer.source.frameB.reset();
+            for (auto& channel : layer.source.channel) channel.frame.reset();
+        }
+        for (auto& child : nested) if (child) child->release_video_frames();
+    }
 };
 
 struct RenderSettings {

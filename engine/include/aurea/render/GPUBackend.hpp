@@ -590,6 +590,7 @@ public:
     /// Sobe pixels para uma textura (imagem importada, LUT, fallback de vídeo
     /// sem zero-copy). Grava no fluxo de upload do frame atual se houver frame
     /// aberto; caso contrário, submete e espera.
+    /// Copies CPU data before returning; callers may release the source memory.
     [[nodiscard]] virtual Status upload_texture(TextureHandle dst, const void* data,
                                                 u32 bytesPerRow) noexcept = 0;
     [[nodiscard]] virtual Status write_buffer(BufferHandle dst, usize offset,

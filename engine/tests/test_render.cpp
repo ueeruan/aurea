@@ -5,6 +5,7 @@
 // =============================================================================
 #include "TestFramework.hpp"
 #include "MockBackend.hpp"
+#include "SyntheticVideo.hpp"
 
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/effects/MotionTile.hpp"
@@ -917,6 +918,54 @@ struct RenderFixture {
 // O teste prende o contrato: com superfície anexada, a prévia abre um quadro
 // offscreen, não adquire nada e não apresenta nada.
 // =============================================================================
+AUREA_TEST(Renderer, TemporalRgbVideoResolvesAllThreeDistantFrames) {
+    RenderFixture f;
+    aurea::test::SyntheticConfig config;
+    config.decodeCostUs = 1000;
+    aurea::test::SyntheticFactory factory(config);
+    MemoryManager memory;
+    memory.set_budget(MemoryClass::DecodedFrames, config.width * config.height * 3 / 2);
+    MediaManager media;
+    media.set_factory(&factory);
+    media.set_memory(&memory);
+    Asset asset;
+    asset.kind = AssetKind::Video;
+    asset.video.width = config.width; asset.video.height = config.height; asset.video.fps = config.fps;
+    const AssetId aid = f.project.add_asset(std::move(asset));
+    const LayerId id = f.comp->add_layer(LayerKind::Video, "RGB temporal");
+    Layer* layer = f.comp->layer(id);
+    layer->source = aid; layer->end = FrameIndex{300};
+    layer->transform.position = Vec3{960, 540, 0};
+    auto effect = make_effect(f.effects, effect_keys::kTimeWarpRgb, 1);
+    effect.params[0].constant.v[0] = 0;
+    effect.params[1].constant.v[0] = -15;
+    effect.params[2].constant.v[0] = -30;
+    effect.params[3].constant.v[0] = 0;
+    effect.params[4].constant.v[0] = 100;
+    layer->effects.push_back(std::move(effect));
+    RenderSettings settings; settings.finalQuality = true;
+    FrameSnapshot snapshot;
+    bool ready = false;
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(2)) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{60}, &media, nullptr, nullptr,
+                           settings, 1, 0, DecodeMode::Still, 1, snapshot);
+        ready = snapshot.layers.size() == 1 && snapshot.missingVideoFrames == 0 && snapshot.staleVideoFrames == 0;
+        if (ready) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    AUREA_CHECK(ready);
+    if (ready) {
+        const auto& source = snapshot.layers[0].source;
+        AUREA_CHECK_EQ(source.channelCount, 3u);
+        for (u32 c = 0; c < 3; ++c) {
+            AUREA_CHECK(static_cast<bool>(source.channel[c].frame));
+            if (source.channel[c].frame)
+                AUREA_CHECK_NEAR(source.channel[c].frame->ptsUs, (60 - c * 15) * 1e6 / 30, 1);
+        }
+    }
+}
+
 AUREA_TEST(EffectPreview, NeverTouchesTheSwapchain) {
     RenderFixture f;
     AUREA_CHECK(f.backend.attach_surface(SurfaceDesc{}).ok());

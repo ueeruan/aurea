@@ -11,6 +11,7 @@ namespace aurea {
 
 VideoSource::VideoSource(std::unique_ptr<VideoDecoderBackend> backend, MediaPriority priority)
     : backend_(std::move(backend)), priority_(priority) {
+    publish_info();
     const f64 fps = backend_->info().fps > 0.0 ? backend_->info().fps : 30.0;
     frameUs_ = static_cast<i64>(std::llround(1'000'000.0 / fps));
 
@@ -27,6 +28,11 @@ VideoSource::VideoSource(std::unique_ptr<VideoDecoderBackend> backend, MediaPrio
 }
 
 VideoSource::~VideoSource() { stop(); }
+
+void VideoSource::publish_info() noexcept {
+    std::lock_guard<std::mutex> lock(infoMutex_);
+    publishedInfo_ = backend_->info();
+}
 
 void VideoSource::start() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -234,6 +240,7 @@ void VideoSource::thread_main() noexcept {
             }
             decoderValid_ = false;
             eos_ = false;
+            publish_info();
         }
         if (suspendApplied_ || req.mode == DecodeMode::Idle) continue;
 
@@ -352,6 +359,9 @@ void VideoSource::thread_main() noexcept {
             bool eos = false;
             const u64 t0 = monotonic_ns();
             const Status s = backend_->next_frame(deliverFrom, frame, pts, eos);
+            // Codec fallback may change decoder name/acceleration. Only this
+            // worker reads backend metadata; UI/render readers get a snapshot.
+            publish_info();
             const f32 ms = static_cast<f32>(static_cast<f64>(monotonic_ns() - t0) * 1e-6);
             if (!s.ok()) {
                 AUREA_LOG_ERROR("decode falhou (%s, alvo %lld us): %s — %.*s",

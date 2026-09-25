@@ -165,11 +165,12 @@ struct Rig {
     BenchCapture cap;
     Engine e;
     bool ok = false;
-    Rig(const SyntheticConfig& cfg, f64 compFps, i64 frames, u32 depth) : factory(cfg) {
+    Rig(const SyntheticConfig& cfg, f64 compFps, i64 frames, u32 depth,
+        VideoSourceFactory* mediaFactory = nullptr) : factory(cfg) {
         EngineConfig ec;
         ec.backend = new vk::Backend();
         ec.backendConfig.enableValidation = false;
-        ec.mediaFactory = &factory;
+        ec.mediaFactory = mediaFactory ? mediaFactory : &factory;
         ec.exportSinkFactory = &make_bench_sink;
         ec.exportSinkContext = &cap;
         ec.exportPipelineDepth = depth;
@@ -225,6 +226,67 @@ struct Rig {
         Layer* l = comp()->layer(layer);
         return l && !l->effects.empty() ? &l->effects.back() : nullptr;
     }
+};
+
+// Model the finite image leases of a platform decoder, including CPU-plane
+// fallback: uploading pixels must not keep those leases until a later GPU frame.
+struct ImageLeases {
+    std::atomic<u32> live{0}, peak{0}, exhausted{0};
+    u32 limit = 12;
+};
+class LeasedFrame final : public DecodedFrame {
+public:
+    LeasedFrame(FrameRef source, std::shared_ptr<ImageLeases> leases)
+        : source_(std::move(source)), leases_(std::move(leases)) {
+        const auto& f = *source_.get();
+        ptsUs = f.ptsUs; durationUs = f.durationUs;
+        width = f.width; height = f.height;
+        cropLeft = f.cropLeft; cropTop = f.cropTop;
+        visibleWidth = f.visibleWidth; visibleHeight = f.visibleHeight;
+        rotation = f.rotation; format = f.format; color = f.color;
+        planeCount = f.planeCount; bufferId = f.bufferId;
+        for (u32 i = 0; i < 3; ++i) { planes[i] = f.planes[i]; strides[i] = f.strides[i]; }
+        const u32 live = ++leases_->live;
+        u32 peak = leases_->peak.load();
+        while (peak < live && !leases_->peak.compare_exchange_weak(peak, live)) {}
+    }
+    ~LeasedFrame() override { --leases_->live; }
+private:
+    FrameRef source_;
+    std::shared_ptr<ImageLeases> leases_;
+};
+class LeasedDecoder final : public VideoDecoderBackend {
+public:
+    LeasedDecoder(const SyntheticConfig& cfg, std::shared_ptr<ImageLeases> leases)
+        : decoder_(cfg), leases_(std::move(leases)) {}
+    const VideoStreamInfo& info() const noexcept override { return decoder_.info(); }
+    Status seek_to_keyframe(i64 us) noexcept override { return decoder_.seek_to_keyframe(us); }
+    Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+        if (leases_->live.load() >= leases_->limit) {
+            ++leases_->exhausted;
+            return Errc::BudgetExceeded;
+        }
+        FrameRef frame;
+        const Status status = decoder_.next_frame(from, frame, pts, eos);
+        if (frame) out = FrameRef::adopt(new LeasedFrame(std::move(frame), leases_));
+        return status;
+    }
+    u32 max_live_frames() const noexcept override { return 12; }
+    i64 keyframe_interval_us() const noexcept override { return decoder_.keyframe_interval_us(); }
+private:
+    SyntheticDecoder decoder_;
+    std::shared_ptr<ImageLeases> leases_;
+};
+class LeasedFactory final : public VideoSourceFactory {
+public:
+    explicit LeasedFactory(const SyntheticConfig& cfg) : cfg_(cfg) {}
+    bool probe(const char* path, MediaProbe& out) override { return SyntheticFactory(cfg_).probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+        return std::make_unique<LeasedDecoder>(cfg_, leases);
+    }
+    std::shared_ptr<ImageLeases> leases = std::make_shared<ImageLeases>();
+private:
+    SyntheticConfig cfg_;
 };
 
 /// 5 camadas + desfoque + brilho + cor + texto + desfoque de movimento.
@@ -398,6 +460,51 @@ AUREA_TEST(Export, PipelinedOutputIsByteIdenticalToSerial) {
         for (usize i = 0; i < std::min(frames[0][f].size(), frames[1][f].size()); ++i)
             maxDiff = std::max(maxDiff, std::abs(frames[0][f][i] - frames[1][f][i]));
     AUREA_CHECK_EQ(maxDiff, 0);
+}
+
+AUREA_TEST(Export, TemporalRgbReleasesFiniteDecoderImages) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 128; cfg.height = 72;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    LeasedFactory factory(cfg);
+    {
+        Rig r(cfg, 30.0, 90, 3, &factory);
+        AUREA_CHECK(r.ok);
+        if (!r.ok) return;
+        auto* fx = r.add_effect(r.video_layer(), effect_keys::kTimeWarpRgb);
+        AUREA_CHECK(fx != nullptr);
+        if (!fx) return;
+        fx->params[0].constant.v[0] = 3;
+        fx->params[1].constant.v[0] = 0;
+        fx->params[2].constant.v[0] = -3;
+        fx->params[3].constant.v[0] = 0;
+        fx->params[4].constant.v[0] = 100;
+        const Outcome o = run_export(r, 72, 30, false, 30);
+        AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+        AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+        AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(90));
+        AUREA_CHECK(r.cap.ptsMonotonic);
+        AUREA_CHECK_EQ(factory.leases->exhausted.load(), 0u);
+        AUREA_CHECK(factory.leases->peak.load() <= 12u);
+    }
+    AUREA_CHECK_EQ(factory.leases->live.load(), 0u);
+}
+
+AUREA_TEST(Export, MissingVideoFramesAbortInsteadOfEncodingFallback) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    LeasedFactory factory(cfg);
+    factory.leases->limit = 0;
+    Rig r(cfg, 30.0, 1, 3, &factory);
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    const Outcome o = run_export(r, 36, 30, false, 10);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::Timeout);
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+    AUREA_CHECK(r.cap.hashes.empty());
+    AUREA_CHECK(factory.leases->exhausted.load() > 0);
 }
 
 AUREA_TEST(Export, HeatReducesParallelismNeverQuality) {

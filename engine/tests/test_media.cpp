@@ -90,6 +90,37 @@ AUREA_TEST(DecodedFrameCache, PresentationIntervalsResolveVariableFrameRate) {
     AUREA_CHECK(cache.contains(250000, 16667));
 }
 
+AUREA_TEST(DecodedFrameCache, RequiredTemporalSamplesRespectDecoderLimitAndReleaseBudget) {
+    MemoryManager memory;
+    const auto bytes = frame_at(0)->approx_bytes();
+    memory.set_budget(MemoryClass::DecodedFrames, bytes);
+    DecodedFrameCache cache;
+    cache.attach(&memory);
+    cache.configure({3, bytes});
+    const i64 needed[] = {0, 10 * kFrame, 20 * kFrame};
+    cache.set_required_times(needed, 3, kFrame / 2);
+    for (i64 time : needed) AUREA_CHECK(cache.insert(frame_at(time)));
+    AUREA_CHECK_EQ(cache.stats().frames, 3u);
+    AUREA_CHECK_EQ(memory.used(MemoryClass::DecodedFrames), 3 * bytes);
+    AUREA_CHECK(!cache.insert(frame_at(5 * kFrame)));
+    for (i64 time : needed) AUREA_CHECK(cache.contains(time, kFrame / 2));
+    cache.set_required_times(needed, 1, kFrame / 2);
+    AUREA_CHECK_EQ(cache.stats().frames, 1u);
+    AUREA_CHECK_EQ(memory.used(MemoryClass::DecodedFrames), bytes);
+    cache.clear();
+    cache.configure({2, bytes});
+    cache.set_required_times(needed, 3, kFrame / 2);
+    AUREA_CHECK(cache.insert(frame_at(needed[0])));
+    AUREA_CHECK(cache.insert(frame_at(needed[1])));
+    AUREA_CHECK(!cache.insert(frame_at(needed[2])));
+    AUREA_CHECK_EQ(cache.stats().frames, 2u);
+    const auto version = cache.stats().version;
+    AUREA_CHECK(cache.reclaim(MemoryManager::kReclaimAll) > 0);
+    AUREA_CHECK(cache.stats().version > version);
+    cache.clear();
+    AUREA_CHECK_EQ(memory.used(MemoryClass::DecodedFrames), 0u);
+}
+
 AUREA_TEST(VideoSource, VariableRateSeekWaitsForPresentationInterval) {
     struct Decoder : VideoDecoderBackend {
         VideoStreamInfo stream{};
@@ -237,6 +268,7 @@ AUREA_TEST(VideoSource, StoppedSourceDoesNotReportMissingFrameAsReady) {
 AUREA_TEST(VideoSource, RecoversTransientFailureWithoutAnotherRequest) {
     struct Decoder : VideoDecoderBackend {
         VideoStreamInfo stream{};
+        Decoder() { stream.hardwareDecoder = true; std::strcpy(stream.decoderName, "hardware"); }
         std::atomic<u32> attempts{0};
         bool permanent = false;
         i64 target = 0;
@@ -245,6 +277,8 @@ AUREA_TEST(VideoSource, RecoversTransientFailureWithoutAnotherRequest) {
         Status next_frame(i64, FrameRef& out, i64& pts, bool& eos) noexcept override {
             eos = false; pts = target;
             if (++attempts == 1 || permanent) return Status{Errc::Timeout, "injected transient failure"};
+            stream.hardwareDecoder = false;
+            std::strcpy(stream.decoderName, "software");
             out = frame_at(target); return OkStatus;
         }
     };
@@ -252,6 +286,7 @@ AUREA_TEST(VideoSource, RecoversTransientFailureWithoutAnotherRequest) {
         auto decoder = std::make_unique<Decoder>();
         auto* observed = decoder.get(); observed->permanent = permanent;
         VideoSource source(std::move(decoder), MediaPriority::Preview);
+        const VideoStreamInfo initial = source.info();
         source.start();
         source.request({100000, DecodeMode::Still, 0, 1});
         const bool ready = source.wait_for(100000, 1500);
@@ -266,6 +301,9 @@ AUREA_TEST(VideoSource, RecoversTransientFailureWithoutAnotherRequest) {
             bool exact = false;
             auto frame = source.frame_for(100000, &exact);
             AUREA_CHECK(frame && exact && frame->ptsUs == 100000);
+            const VideoStreamInfo recovered = source.info();
+            AUREA_CHECK(initial.hardwareDecoder && std::strcmp(initial.decoderName, "hardware") == 0);
+            AUREA_CHECK(!recovered.hardwareDecoder && std::strcmp(recovered.decoderName, "software") == 0);
         }
         source.stop();
     }

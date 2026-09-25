@@ -518,8 +518,9 @@ AUREA_TEST(Memory8B, DecodedFramesShareOneBudget) {
     CacheMetrics m[4];
     AUREA_CHECK_EQ(mm.collect_metrics(m, 4), 2u);
     AUREA_CHECK(m[0].evictions > 0 || m[1].evictions > 0);
+    const u32 versionBeforeClear = a.stats().version;
     a.clear();
-    AUREA_CHECK(a.stats().version == 1u);
+    AUREA_CHECK_EQ(a.stats().version, versionBeforeClear + 1);
     b.attach(nullptr);
     AUREA_CHECK_EQ(mm.used(MemoryClass::DecodedFrames), static_cast<usize>(0));
     AUREA_CHECK_EQ(mm.reclaimable_count(), 1u);

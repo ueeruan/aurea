@@ -34,6 +34,8 @@ def main():
     parser.add_argument("--composition-fps", type=float, required=True)
     parser.add_argument("--export-fps", type=float, required=True)
     parser.add_argument("--expected-frames", type=int, required=True)
+    parser.add_argument("--rgb-offset-frames", type=int, nargs=3, metavar=("R", "G", "B"),
+                        help="Timewarp RGB offsets on the composition frame grid (100%% intensity)")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     if not all(math.isfinite(fps) and fps > 0 for fps in (args.composition_fps, args.export_fps)):
@@ -49,13 +51,27 @@ def main():
         math.floor(i * args.composition_fps / args.export_fps + 1e-6)
         * 1e6 / args.composition_fps)) - 1 for i in range(len(exported))]
     nearest = []
-    for frame in exported:
-        errors = [sum(abs(a - b) for a, b in zip(frame, original)) for original in source]
-        nearest.append(min(range(len(errors)), key=errors.__getitem__))
+    if args.rgb_offset_frames is None:
+        for frame in exported:
+            errors = [sum(abs(a - b) for a, b in zip(frame, original)) for original in source]
+            nearest.append(min(range(len(errors)), key=errors.__getitem__))
+    else:
+        expected = [[max(0, bisect.bisect_right(pts, round(
+            (math.floor(i * args.composition_fps / args.export_fps + 1e-6) + offset)
+            * 1e6 / args.composition_fps)) - 1)
+            for offset in args.rgb_offset_frames] for i in range(len(exported))]
+        for frame in exported:
+            channels = []
+            for channel in range(3):
+                errors = [sum(abs(a - b) for a, b in zip(frame[channel::3], original[channel::3]))
+                          for original in source]
+                channels.append(min(range(len(errors)), key=errors.__getitem__))
+            nearest.append(channels)
     mismatches = [i for i, (actual, wanted) in enumerate(zip(nearest, expected)) if actual != wanted]
     passed = len(exported) == args.expected_frames and not mismatches
     report = dict(passed=passed, frames=len(exported), sourceFrames=len(source),
                   compositionFps=args.composition_fps, exportFps=args.export_fps,
+                  rgbOffsetFrames=args.rgb_offset_frames,
                   mismatches=mismatches, expectedIndices=expected, nearestIndices=nearest)
     args.report.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"{'PASS' if passed else 'FAIL'}: {len(exported)} frames, {len(mismatches)} presentation mismatches")

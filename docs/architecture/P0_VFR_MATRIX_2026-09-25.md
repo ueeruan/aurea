@@ -47,3 +47,38 @@ comparison is not a general perceptual quality metric.
 After the autosave and transient texture retention changes, the complete host
 suite passed: 659 tests, 4,135,017 checks, zero failures, 197.10 seconds. The first
 overnight invocation was interrupted; this result is the subsequent complete run.
+
+## Temporal RGB export and finite decoder images
+
+The actual Android VFR project exposed two additional failures: repeated base/R/G/B
+requests superseded each other on the single decoder, and CPU-plane frames were
+retained across GPU submissions even after staging had copied their pixels. The
+second fault exhausted the ImageReader during export. Export also incorrectly
+continued with incomplete samples after its four-second decode deadline.
+
+The renderer now requests one missing temporal sample at a time, protects the
+bounded required sample set in the cache, and releases CPU images after recording.
+External images remain retained until GPU completion. Export drains completed
+GPU work when waiting for decode and aborts with Timeout when exact samples never
+arrive. Cache reclamation invalidates repeated requests. Decoder metadata is
+published as a locked value snapshot so runtime fallback cannot race the UI.
+
+Validation after these changes:
+
+- Complete host suite: 664 tests, 4,135,114 checks, zero failures, 203.12 seconds.
+- Regression covers finite decoder image leases, missing-frame export failure,
+  distant temporal samples under memory pressure, and GPU RGB pixels after save/reopen.
+- Android x86_64 and arm64 Debug builds and Kotlin unit tests passed.
+- Actual API 35 editor export: 1280x720 H.264, 30 fps, 90/90 frames, three frames
+  in flight; 6.7 seconds from encoder startup to completion, software encoder.
+  No ImageReader exhaustion or decoder failure occurred during this run.
+- Independent FFmpeg comparison verified all three channels with Timewarp RGB
+  offsets +3/0/-3 composition frames at 21 fps: zero mismatches across 90 outputs.
+  Reproduce with `verify_video_presentation.py --rgb-offset-frames 3 0 -3`.
+- iOS API names, effect parameter types, shared resources and scope checks passed.
+  These are static checks; native Metal/iOS execution remains unverified.
+
+Local evidence: `engine/build/android-p0/vfr-rgb-export.mp4`,
+`vfr-rgb-presentation.json`, `temporal-retention-native-export.log`, and
+`engine/build/host/temporal-retention-ctest.log`. Emulator timings are not phone
+performance measurements. This checkpoint does not complete P1–P10.

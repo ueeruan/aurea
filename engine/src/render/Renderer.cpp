@@ -1507,30 +1507,31 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const Asset* asset = project.asset(l->source);
             VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber);
             if (src) {
+                const VideoStreamInfo streamInfo = src->info();
                 i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(layerTime) * 1e6 / fps));
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
                 i64 nextUs = -1;
                 f32 blendT = 0.0f;
                 const bool wantVector = l->vectorBlur > 0.0f && comp.motion_blur().shutterAngle > 0.0f;
-                if (src->info().preciseFrameTiming && (l->frameBlend >= 1 || wantVector)) {
+                if (streamInfo.preciseFrameTiming && (l->frameBlend >= 1 || wantVector)) {
                     bool currentReady = false;
                     const FrameRef current = src->frame_for(mediaUs, &currentReady);
                     if (currentReady && current && current->durationUs > 0) {
                         const i64 next = current->ptsUs + current->durationUs;
                         const f64 fraction = static_cast<f64>(mediaUs - current->ptsUs) / current->durationUs;
                         const bool between = l->frameBlend >= 1 && fraction > 0.01 && fraction < 0.99;
-                        if ((src->info().durationUs <= 0 || next < src->info().durationUs) && (between || wantVector)) {
+                        if ((streamInfo.durationUs <= 0 || next < streamInfo.durationUs) && (between || wantVector)) {
                             nextUs = next;
                             blendT = between ? static_cast<f32>(fraction) : 0.0f;
                         }
                     }
                 } else if (l->frameBlend >= 1 || wantVector) {
-                    if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
+                    if (const f64 srcFps = streamInfo.fps; srcFps > 0.0) {
                         const f64 pos = l->source_frame(layerTime) / fps * srcFps;
                         const f64 idx = std::floor(pos + 1e-3);
                         const f64 frac = pos - idx;
                         const i64 us = static_cast<i64>(std::llround((idx + 1.0) * 1e6 / srcFps));
-                        const bool inside = src->info().durationUs <= 0 || us < src->info().durationUs;
+                        const bool inside = streamInfo.durationUs <= 0 || us < streamInfo.durationUs;
                         const bool between = l->frameBlend >= 1 && frac > 0.01 && frac < 0.99;
                         if (inside && (between || wantVector)) {
                             nextUs = us;
@@ -1543,14 +1544,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // vídeo a 30 cai a cada dois quadros exatamente entre dois
                 // quadros da fonte — a meia distância de ambos, nenhum era
                 // "exato", e o export esperava o decoder até estourar o prazo.
-                if (const f64 srcFps = src->info().fps; srcFps > 0.0 && !src->info().preciseFrameTiming) {
+                if (const f64 srcFps = streamInfo.fps; srcFps > 0.0 && !streamInfo.preciseFrameTiming) {
                     const f64 idx = std::floor(static_cast<f64>(mediaUs) * srcFps / 1e6 + 1e-3);
                     mediaUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
                 }
-                const i64 dur = src->info().durationUs;
+                const i64 dur = streamInfo.durationUs;
                 if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0,
-                    src->info().preciseFrameTiming ? dur - 1 : dur - src->frame_duration_us() / 2);
+                    streamInfo.preciseFrameTiming ? dur - 1 : dur - src->frame_duration_us() / 2);
                 DecodeRequest req;
+                i64 requiredTimes[5] = {mediaUs};
+                u32 requiredCount = 1;
+                if (nextUs >= 0) requiredTimes[requiredCount++] = nextUs;
                 // Com mistura: primeiro o quadro atual; com ele no cache, o
                 // seguinte (os dois precisam estar lá ao mesmo tempo).
                 bool haveA = false;
@@ -1568,7 +1572,6 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     req.direction = b > a + 1e-6 ? 1 : (b < a - 1e-6 ? -1 : 0);
                 }
                 req.speed = speed * std::max(0.0f, l->speed);
-                src->request(req);
                 bool exact = false;
                 rl.source.frame = src->frame_for(mediaUs, &exact);
                 if (nextUs >= 0) {
@@ -1597,28 +1600,35 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // faz as três leituras custarem o mesmo que uma quando os
                 // instantes são próximos, que é sempre o caso.
                 if (rgbOn) {
-                    const i64 dur2 = src->info().durationUs;
+                    const i64 dur2 = streamInfo.durationUs;
                     i64 chanUs[3] = {0, 0, 0};
                     for (u32 c = 0; c < 3; ++c) {
                         const f64 shifted = static_cast<f64>(time.value)
                                           + static_cast<f64>(rgbOffsets[c] * rgbUnit * rgbAmount);
                         f64 us = l->source_frame(FrameIndex{static_cast<i64>(std::llround(shifted))}) * 1e6 / fps;
-                        if (const f64 srcFps = src->info().fps; srcFps > 0.0) {
+                        if (const f64 srcFps = streamInfo.fps; srcFps > 0.0 && !streamInfo.preciseFrameTiming) {
                             us = std::llround(std::floor(us * srcFps / 1e6 + 1e-3) * 1e6 / srcFps);
                         }
-                        if (dur2 > 0) us = std::clamp<f64>(us, 0.0, static_cast<f64>(dur2 - src->frame_duration_us() / 2));
+                        if (dur2 > 0) us = std::clamp<f64>(us, 0.0, static_cast<f64>(
+                            streamInfo.preciseFrameTiming ? dur2 - 1 : dur2 - src->frame_duration_us() / 2));
                         chanUs[c] = static_cast<i64>(std::llround(us));
-                        // O PEDIDO vem antes da leitura: sem ele o decoder não
-                        // está trabalhando nesses instantes e `frame_for`
-                        // devolveria vazio para sempre.
-                        DecodeRequest creq = req;
-                        creq.targetUs = chanUs[c];
-                        src->request(creq);
+                        requiredTimes[requiredCount++] = chanUs[c];
                     }
+                    // One decoder has one active target. Submitting A/R/G/B
+                    // every prepare cancelled earlier channels before delivery.
+                    // Request the first missing sample and retain the completed
+                    // ones; the next prepare advances to the next missing sample.
+                    bool requestedMissing = !exact;
+                    req.mode = DecodeMode::Still;
+                    req.direction = 0;
                     for (u32 c = 0; c < 3; ++c) {
                         bool ex = false;
                         rl.source.channel[c].frame = src->frame_for(chanUs[c], &ex);
                         rl.source.channel[c].mask = kChannelMasks[c];
+                        if (!ex && !requestedMissing) {
+                            req.targetUs = chanUs[c];
+                            requestedMissing = true;
+                        }
                         // O quadro APROXIMADO serve para o preview (melhor um
                         // canal fora do lugar do que um buraco), mas o export
                         // ESPERA: um RGB no tempo que mostrasse o quadro atual
@@ -1627,6 +1637,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                     rl.source.channelCount = 3;
                 }
+                src->cache().set_required_times(requiredTimes, requiredCount, src->frame_duration_us() / 2);
+                src->request(req);
                 if (!rl.source.frame) ++out.missingVideoFrames;
                 else if (!exact) ++out.staleVideoFrames;
             }
@@ -2312,7 +2324,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         case LayerSource::Kind::Video: {
             out.texture = graph_.create_texture("layer-video", d);
             if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) return false;
-            framesUsed.push_back(layer.source.frame);
+            if (layer.source.frame->hardwareBuffer) framesUsed.push_back(layer.source.frame);
 
             // RGB NO TEMPO (Fase 7.3 §25): a textura da camada vira a JUNÇÃO
             // de três fontes, uma por canal de cor. Um passe de tela cheia
@@ -2326,7 +2338,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     chan[c] = graph_.create_texture("rgb-no-tempo-canal", d);
                     built = build_video_source(layer, layerIndex, w, h, chan[c], frameNumber,
                                                layer.source.channel[c].frame.get());
-                    framesUsed.push_back(layer.source.channel[c].frame);
+                    if (layer.source.channel[c].frame->hardwareBuffer) framesUsed.push_back(layer.source.channel[c].frame);
                 }
                 if (built && layer.source.channelCount == 3) {
                     const FGTexture merged = graph_.create_texture("rgb-no-tempo", d);
@@ -2347,7 +2359,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             if (layer.source.frameB) {
                 const FGTexture b = graph_.create_texture("layer-video-seguinte", d);
                 if (!build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) return true;
-                framesUsed.push_back(layer.source.frameB);
+                if (layer.source.frameB->hardwareBuffer) framesUsed.push_back(layer.source.frameB);
                 EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
                 const bool needFlow = (layer.source.blendMode == 2 && layer.source.blendT > 0.0f) || layer.source.vectorBlur > 0.0f;
                 FGTexture flow{};
@@ -3489,14 +3501,15 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     const Status endStatus = backend_->end_frame();
     const u64 tEnd = monotonic_ns();
 
-    // Os frames de vídeo lidos neste frame voltam ao decoder SÓ quando a GPU
-    // terminar — nem antes (frame rasgado), nem depois (decoder sem buffer).
+    // External images remain owned by the decoder until GPU completion. CPU
+    // planes have already been copied into backend staging by upload_texture;
+    // keeping those ImageReader buffers across GPU frames starves temporal effects.
     for (FrameRef& fr : framesInFlight_) {
         DecodedFrame* raw = fr.detach();
         if (raw) backend_->defer_until_gpu_done([](void* p) { static_cast<DecodedFrame*>(p)->release(); }, raw);
     }
     framesInFlight_.clear();
-    for (RenderLayer& l : snap.layers) l.source.frame.reset();
+    snap.release_video_frames();
 
     collect_resources(fb.frameNumber);
 

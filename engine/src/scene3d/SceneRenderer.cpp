@@ -717,7 +717,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const Mat4 viewProj = proj * frame.camera.view;
 
     // --- Cabeçalho comum a todos os desenhos do frame ---------------------------
-    SceneBlock header{};
+    auto* headerStorage = arena.alloc_array<SceneBlock>(1);
+    if (!headerStorage) return false;
+    *headerStorage = {};
+    SceneBlock& header = *headerStorage;
     header.viewProj = viewProj;
     header.cameraPos = Vec4{frame.camera.position, frame.environment.exposure};
     header.envParams = Vec4{frame.environment.intensity, ibl ? 1.0f : 0.0f, static_cast<f32>(prefilteredMips_),
@@ -798,14 +801,19 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // Ambiente por objeto (v22): cada ambiente distinto usado no quadro tem o
     // seu cabeçalho (parâmetros) e o seu conjunto de mapas na GPU. Sem nenhum
     // objeto com ambiente próprio, é só o do grupo — o caminho de sempre.
-    std::vector<EnvSlot> envSlots;
-    envSlots.reserve(kMaxEnvSets + 1);   // sem realocar: os Draws guardam o ponteiro
-    envSlots.push_back(EnvSlot{envKey_, &header, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
-                               ibl ? iblLut_ : brdfLut_, 0});
+    // Draw commands execute after this builder returns. Their environment
+    // pointers must live in the frame arena, not a local vector. At most one
+    // distinct environment per instance plus the scene environment is needed.
+    auto* envSlots = arena.alloc_array<EnvSlot>(frame.instances.size() + 1);
+    if (!envSlots) return false;
+    usize envCount = 1;
+    envSlots[0] = EnvSlot{envKey_, &header, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
+                         ibl ? iblLut_ : brdfLut_, 0};
     auto env_of = [&](const SceneInstance& inst) -> const EnvSlot* {
         if (!inst.ownEnvironment) return &envSlots[0];
         const u64 k = key_of(inst.environment);
-        for (const EnvSlot& e : envSlots) {
+        for (usize i = 0; i < envCount; ++i) {
+            const EnvSlot& e = envSlots[i];
             if (e.key == k) return &e;
         }
         const EnvSet* set = environment_set(inst.environment, frameNumber);
@@ -817,8 +825,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         b->envParams = Vec4{inst.environment.intensity, 1.0f, static_cast<f32>(set->mips), inst.environment.rotation};
         b->skyColor = Vec4{inst.environment.sky, 1.0f};
         b->groundColor = Vec4{inst.environment.ground, 1.0f};
-        envSlots.push_back(EnvSlot{k, b, set->irradiance, set->prefiltered, set->brdf, 0});
-        return &envSlots.back();
+        envSlots[envCount] = EnvSlot{k, b, set->irradiance, set->prefiltered, set->brdf, 0};
+        return &envSlots[envCount++];
     };
 
     std::vector<Draw> opaque, blended;

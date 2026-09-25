@@ -324,6 +324,24 @@ AUREA_TEST(Layer, ContainsTimeIsHalfOpen) {
     AUREA_CHECK(!l.contains_time(FrameIndex{20}));
 }
 
+AUREA_TEST(Composition, RippleKeepsMarkersOrderedAcrossUnchangedMarkers) {
+    Composition c = make_comp(1920, 1080, 30.0);
+    c.put_marker(Marker{FrameIndex{10}, 0xFFFFFFFFu, kMarkerManual, "earlier"});
+    c.put_marker(Marker{FrameIndex{25}, 0xFF00FFFFu, kMarkerManual, "unchanged"});
+    c.put_marker(Marker{FrameIndex{30}, 0xFFFF00FFu, kMarkerManual, "shifted"});
+    c.put_marker(Marker{FrameIndex{45}, 0xFFFFFFFFu, kMarkerManual, "collision"});
+    c.shift_from(FrameIndex{30}, -20);
+    AUREA_CHECK_EQ(c.markers().size(), static_cast<usize>(2));
+    AUREA_CHECK_EQ(c.markers()[0].frame.value, 10);
+    AUREA_CHECK_EQ(c.markers()[1].frame.value, 25);
+    AUREA_CHECK_EQ(c.markers()[0].label, std::string("earlier"));
+    AUREA_CHECK_EQ(c.markers()[1].label, std::string("unchanged"));
+    // Insertion after ripple relies on the same sorted invariant as snapping.
+    c.put_marker(Marker{FrameIndex{20}, 0xFFFFFFFFu, kMarkerManual, "inserted"});
+    AUREA_CHECK_EQ(c.markers().size(), static_cast<usize>(3));
+    AUREA_CHECK_EQ(c.markers()[1].frame.value, 20);
+}
+
 AUREA_TEST(Composition, RetimeKeepsSecondsNotFrames) {
     Composition c = make_comp(1920, 1080, 30.0);
     c.set_duration(FrameIndex{300});                 // 10 s
@@ -360,6 +378,18 @@ AUREA_TEST(Composition, RetimeKeepsSecondsNotFrames) {
     AUREA_CHECK_EQ(d->keys.size(), static_cast<size_t>(2));
     AUREA_CHECK_EQ(d->keys[1].time.value, static_cast<i64>(1));
     AUREA_CHECK(c.layer(id)->end.value > c.layer(id)->start.value);
+}
+
+AUREA_TEST(Composition, RetimeKeepsLastMarkerInsideDuration) {
+    Composition c = make_comp(1920, 1080, 60.0);
+    c.set_duration(FrameIndex{60});
+    c.put_marker(Marker{FrameIndex{59}, 0xFF00FFFFu, kMarkerManual, "last frame"});
+    c.retime(30.0);
+    AUREA_CHECK_EQ(c.duration().value, 30);
+    AUREA_CHECK_EQ(c.markers().size(), static_cast<usize>(1));
+    AUREA_CHECK_EQ(c.markers()[0].frame.value, 29);
+    AUREA_CHECK_EQ(c.markers()[0].label, std::string("last frame"));
+    AUREA_CHECK_EQ(c.markers()[0].color, 0xFF00FFFFu);
 }
 
 // -----------------------------------------------------------------------------

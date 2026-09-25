@@ -219,7 +219,12 @@ void Composition::retime(f64 fps) noexcept {
     // Marcas ficam no mesmo SEGUNDO; duas que caírem no mesmo frame viram uma.
     std::vector<Marker> kept = std::move(markers_);
     markers_.clear();
-    for (Marker& m : kept) { m.frame = scale(m.frame); put_marker(std::move(m)); }
+    for (Marker& m : kept) {
+        // Rounding down the duration can otherwise put the last marker exactly
+        // at the exclusive end (e.g. frame 59 at 60 fps -> 30 at 30 fps).
+        m.frame = FrameIndex{std::clamp<i64>(scale(m.frame).value, 0, duration_.value - 1)};
+        put_marker(std::move(m));
+    }
     touch();
 }
 
@@ -233,6 +238,10 @@ void Composition::shift_from(FrameIndex from, i64 delta, LayerId except) noexcep
     for (Marker& m : markers_) {
         if (m.frame.value >= from.value) m.frame = FrameIndex{std::max<i64>(0, m.frame.value + delta)};
     }
+    // A negative ripple can move later markers past unchanged earlier ones.
+    // put_marker uses lower_bound, so restore ordering before deduplication.
+    std::stable_sort(markers_.begin(), markers_.end(),
+                     [](const Marker& a, const Marker& b) { return a.frame.value < b.frame.value; });
     // Marcas que caírem no mesmo frame: fica a primeira.
     markers_.erase(std::unique(markers_.begin(), markers_.end(),
                                [](const Marker& a, const Marker& b) { return a.frame.value == b.frame.value; }),

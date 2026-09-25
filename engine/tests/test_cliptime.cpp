@@ -253,6 +253,24 @@ AUREA_TEST(ClipTime, DetectBeatsOn44kAudioLayer) {
     e.shutdown();
 }
 
+AUREA_TEST(ClipTime, MarkerDragPreservesOccupiedTargetsAndUndo) {
+    TimeRig r(cfg_with_audio());
+    AUREA_CHECK(r.e.toggle_marker(30));
+    AUREA_CHECK(r.e.toggle_marker(90));
+    AUREA_CHECK(!r.e.move_marker(90, 30));
+    AUREA_CHECK(r.e.move_marker(90, 90));
+    std::vector<i64> markers(3 * 8);
+    AUREA_CHECK_EQ(r.e.query_markers(markers.data(), 8), 2u);
+    AUREA_CHECK_EQ(markers[0], 30);
+    AUREA_CHECK_EQ(markers[3], 90);
+    // Collision and stationary drag must not consume an undo step.
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(r.e.query_markers(markers.data(), 8), 1u);
+    AUREA_CHECK_EQ(markers[0], 30);
+}
+
 AUREA_TEST(ClipTime, MarkersToggleUndoSaveAndRetime) {
     TimeRig r(cfg_with_audio());
     AUREA_CHECK(r.e.toggle_marker(30));

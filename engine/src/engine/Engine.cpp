@@ -4048,11 +4048,16 @@ bool Engine::move_marker(i64 from, i64 to) noexcept {
     auto it = std::find_if(comp->markers().begin(), comp->markers().end(),
                            [from](const Marker& m) { return m.frame.value == from; });
     if (it == comp->markers().end()) return false;
+    const i64 target = std::clamp<i64>(to, 0, std::max<i64>(0, comp->duration().value - 1));
+    if (target == from) return true;
+    // A drag must not silently replace another marker (including its label/color).
+    if (std::any_of(comp->markers().begin(), comp->markers().end(),
+                    [target](const Marker& marker) { return marker.frame.value == target; })) return false;
     Marker m = *it;
     history_.before_mutation(*comp, project_->timeline().current(), "mover marca");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     comp->remove_marker_at(FrameIndex{from});
-    m.frame = FrameIndex{std::clamp<i64>(to, 0, std::max<i64>(0, comp->duration().value - 1))};
+    m.frame = FrameIndex{target};
     comp->put_marker(std::move(m));
     project_->mark_dirty();
     return true;

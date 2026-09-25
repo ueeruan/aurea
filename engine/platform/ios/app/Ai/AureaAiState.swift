@@ -316,7 +316,13 @@ final class AureaAiState: ObservableObject {
         guard let id = session?.jobId else { return }
         Task { [weak self] in
             do { try await self?.provider.cancel(id) }
-            catch { self?.message = "A geração já começou e vai até o fim." }
+            catch is CancellationError { return }
+            catch let failure as VideoFailure {
+                if self?.session?.jobId == id { self?.error = explainVideoFailure(failure.code) }
+            }
+            catch {
+                if self?.session?.jobId == id { self?.error = explainVideoFailure("sem_conexao") }
+            }
         }
     }
 

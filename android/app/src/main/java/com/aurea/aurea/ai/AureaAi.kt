@@ -427,8 +427,15 @@ class AureaAiState(
     fun cancelar() {
         val id = sessao?.jobId ?: return
         escopo.launch {
-            val ok = runCatching { withContext(Dispatchers.IO) { provedor.cancelar(id) } }.isSuccess
-            if (!ok) mensagem = "A geração já começou e vai até o fim."
+            try {
+                withContext(Dispatchers.IO) { provedor.cancelar(id) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: FalhaDeVideo) {
+                if (sessao?.jobId == id) erro = explicarFalhaDeVideo(e.codigo)
+            } catch (e: Exception) {
+                if (sessao?.jobId == id) erro = explicarFalhaDeVideo("sem_conexao")
+            }
         }
     }
 
@@ -559,9 +566,8 @@ suspend fun lerImagemParaEnvio(app: Application, uri: Uri): Pair<ByteArray, Stri
     withContext(Dispatchers.IO) {
         val tipo = app.contentResolver.getType(uri)?.lowercase() ?: "image/jpeg"
         if (tipo !in setOf("image/png", "image/jpeg", "image/webp")) return@withContext null
-        val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        val bytes = app.contentResolver.openInputStream(uri)?.use { readImageUploadBytes(it) }
             ?: return@withContext null
-        if (bytes.size > 8 * 1024 * 1024) return@withContext null
         bytes to tipo
     }
 

@@ -88,6 +88,7 @@ internal fun AiVideoPanel(env: PanelEnv) {
     var assetId by remember { mutableStateOf<String?>(null) }
     var nomeImagem by remember { mutableStateOf("") }
     var enviandoImagem by remember { mutableStateOf(false) }
+    var erroImagem by remember { mutableStateOf("") }
 
     // Abriu o painel, o app já sai atrás do servidor. Não há nada a confirmar
     // antes: nem endereço, nem token, nem botão de conectar.
@@ -114,16 +115,25 @@ internal fun AiVideoPanel(env: PanelEnv) {
         if (uri == null) return@rememberLauncherForActivityResult
         escopo.launch {
             enviandoImagem = true
-            val par = lerImagemParaEnvio(app, uri)
-            if (par == null) {
+            erroImagem = ""
+            try {
+                val par = lerImagemParaEnvio(app, uri)
+                if (par == null) {
+                    erroImagem = "Escolha uma imagem PNG, JPEG ou WebP de até 8 MB."
+                    return@launch
+                }
+                val id = ai.enviarImagem(par.first, par.second)
+                if (id != null) {
+                    assetId = id
+                    nomeImagem = uri.lastPathSegment?.takeLast(28) ?: "imagem"
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                erroImagem = "Não foi possível abrir ou enviar a imagem. Tente novamente."
+            } finally {
                 enviandoImagem = false
-                return@launch
             }
-            // Sobe já: o servidor devolve o UUID que o pedido vai citar.
-            val id = runCatching { ai.enviarImagem(par.first, par.second) }.getOrNull()
-            assetId = id
-            nomeImagem = if (id != null) uri.lastPathSegment?.takeLast(28) ?: "imagem" else ""
-            enviandoImagem = false
         }
     }
 
@@ -141,12 +151,113 @@ internal fun AiVideoPanel(env: PanelEnv) {
                     else Nota(stringResource(R.string.ai_geracoes_hoje, c.usadas, c.limite), AureaColors.Subtle)
                 }
                 ai.erro.takeIf { it.isNotBlank() }?.let { Nota(it, AureaColors.Danger) }
+                erroImagem.takeIf { it.isNotBlank() }?.let { Nota(it, AureaColors.Danger) }
                 ai.mensagem.takeIf { it.isNotBlank() && ai.estado.podeGerar() }?.let { Nota(it, AureaColors.Muted) }
             }
         }
 
         // Offline: nada de formulário. Um prompt que não tem para onde ir só
         // faz o usuário escrever à toa.
+        // --- direito ao vídeo (Rewarded) -------------------------------------
+        ai.sessao?.let { s ->
+            item(key = "recompensa") {
+                Column {
+                    when (s.status) {
+                        SessaoStatus.Preparando ->
+                            Nota(stringResource(R.string.ai_preparando_geracao), AureaColors.Muted)
+                        SessaoStatus.AnuncioIndisponivel -> {
+                            Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
+                            Botao(stringResource(R.string.ai_procurar_de_novo)) { ai.tentarGerarDeNovo() }
+                        }
+                        SessaoStatus.AnuncioNaTela ->
+                            Nota(stringResource(R.string.ai_assista_para_gerar), AureaColors.Muted)
+                        SessaoStatus.SemRecompensa -> {
+                            // Nada foi gerado: o pedido espera um anúncio completo.
+                            Nota(stringResource(R.string.ai_assista_para_gerar), AureaColors.Muted)
+                            Botao(stringResource(R.string.ai_assistir_e_gerar_de_novo), primario = true,
+                                ativo = !ai.anunciando) { ai.liberarComAnuncio() }
+                        }
+                        SessaoStatus.Gerando ->
+                            Nota(stringResource(R.string.ai_gerando_seu_video), AureaColors.Muted)
+                        SessaoStatus.Falhou -> {
+                            Spacer(Modifier.height(10.dp))
+                            Text(stringResource(R.string.ai_falhou_titulo), style = AureaType.Base.merge(
+                                TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Danger)))
+                            Nota(explicarFalhaDeVideo(s.erro), AureaColors.Muted)
+                            Spacer(Modifier.height(6.dp))
+                            // Falha técnica depois da recompensa: tenta de novo SEM outro anúncio.
+                            Botao(
+                                stringResource(if (s.podeRepetirSemAnuncio) R.string.ai_tentar_sem_anuncio else R.string.ai_gerar_de_novo),
+                                primario = true, ativo = !ai.anunciando && !ai.sessaoOcupada,
+                            ) { ai.tentarDeNovoAposFalha() }
+                        }
+                        SessaoStatus.Liberado -> Unit
+                    }
+                }
+            }
+        }
+
+        // --- progresso ------------------------------------------------------
+        ai.job?.takeIf { ai.sessao?.status != SessaoStatus.Falhou }?.let { j ->
+            item(key = "progresso") {
+                Column {
+                    Spacer(Modifier.height(10.dp))
+                    val linha = when {
+                        j.status == "queued" && j.posicaoNaFila > 0 ->
+                            stringResource(R.string.ai_na_fila, j.posicaoNaFila)
+                        else -> j.etapa.ifBlank { j.status }
+                    }
+                    if (j.rodando) Botao(stringResource(R.string.ai_cancelar), secundario = true) { ai.cancelar() }
+                    Text(linha, style = AureaType.Base.merge(
+                        TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
+                    // O ComfyUI não dá porcentagem pelo /history: a barra só aparece
+                    // quando há progresso real; senão, a etapa e o tempo decorrido.
+                    if (j.progresso > 0.0) {
+                        Spacer(Modifier.height(6.dp))
+                        Barra(j.progresso)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        (if (j.progresso > 0.0) "${(j.progresso * 100).toInt()}%  ·  " else "") + formarDuracao(j.segundos),
+                        style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Subtle)),
+                    )
+                }
+            }
+        }
+
+        // --- resultado ------------------------------------------------------
+        if (ai.ultimoArquivo != null) {
+            item(key = "resultado") {
+                Column {
+                    Spacer(Modifier.height(12.dp))
+                    ai.job?.resultado?.let { r ->
+                        Text(
+                            "${r.largura}×${r.altura} · ${formarDuracao(r.duracaoSegundos)} · ${r.fps} fps" +
+                                if (r.comAudio) " · " + stringResource(R.string.ai_com_audio_curto) else "",
+                            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    // Player do aparelho, sem biblioteca nova.
+                    Player(ai.ultimoArquivo!!.absolutePath)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Botao(stringResource(R.string.ai_adicionar_timeline), primario = true) {
+                            ai.adicionarNaTimeline()
+                            env.onClose()
+                        }
+                        Botao(stringResource(R.string.ai_salvar_galeria), secundario = true) { ai.salvarNaGaleria() }
+                    }
+                    Nota(stringResource(R.string.ai_ficou_no_aparelho), AureaColors.Subtle)
+                }
+            }
+        } else if (ai.baixando) {
+            item(key = "baixando") {
+                Nota(stringResource(R.string.ai_baixando), AureaColors.Muted)
+            }
+        }
+
+
         if (!ai.estado.podeGerar()) {
             item(key = "offline") {
                 Column {
@@ -240,7 +351,7 @@ internal fun AiVideoPanel(env: PanelEnv) {
 
         item(key = "gerar") {
             val rodando = ai.job?.rodando == true
-            val pode = !rodando && !ai.anunciando && !ai.sessaoOcupada && prompt.isNotBlank() && ai.cota?.esgotada != true &&
+            val pode = !enviandoImagem && !rodando && !ai.anunciando && !ai.sessaoOcupada && prompt.isNotBlank() && ai.cota?.esgotada != true &&
                 (modo != "image_to_video" || assetId != null)
             Column {
                 Spacer(Modifier.height(8.dp))
@@ -264,110 +375,12 @@ internal fun AiVideoPanel(env: PanelEnv) {
                             ),
                         )
                     }
-                    if (rodando) Botao(stringResource(R.string.ai_cancelar), secundario = true) { ai.cancelar() }
+
                 }
                 if (ai.anunciando) {
                     Spacer(Modifier.height(6.dp))
                     Nota(stringResource(R.string.ai_anuncio_em_curso), AureaColors.Muted)
                 }
-            }
-        }
-
-        // --- direito ao vídeo (Rewarded) -------------------------------------
-        ai.sessao?.let { s ->
-            item(key = "recompensa") {
-                Column {
-                    when (s.status) {
-                        SessaoStatus.Preparando ->
-                            Nota(stringResource(R.string.ai_preparando_geracao), AureaColors.Muted)
-                        SessaoStatus.AnuncioIndisponivel -> {
-                            Nota(stringResource(R.string.ai_anuncio_indisponivel), AureaColors.Danger)
-                            Botao(stringResource(R.string.ai_procurar_de_novo)) { ai.tentarGerarDeNovo() }
-                        }
-                        SessaoStatus.AnuncioNaTela ->
-                            Nota(stringResource(R.string.ai_assista_para_gerar), AureaColors.Muted)
-                        SessaoStatus.SemRecompensa -> {
-                            // Nada foi gerado: o pedido espera um anúncio completo.
-                            Nota(stringResource(R.string.ai_assista_para_gerar), AureaColors.Muted)
-                            Botao(stringResource(R.string.ai_assistir_e_gerar_de_novo), primario = true,
-                                ativo = !ai.anunciando) { ai.liberarComAnuncio() }
-                        }
-                        SessaoStatus.Gerando ->
-                            Nota(stringResource(R.string.ai_gerando_seu_video), AureaColors.Muted)
-                        SessaoStatus.Falhou -> {
-                            Spacer(Modifier.height(10.dp))
-                            Text(stringResource(R.string.ai_falhou_titulo), style = AureaType.Base.merge(
-                                TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Danger)))
-                            Nota(explicarFalhaDeVideo(s.erro), AureaColors.Muted)
-                            Spacer(Modifier.height(6.dp))
-                            // Falha técnica depois da recompensa: tenta de novo SEM outro anúncio.
-                            Botao(
-                                stringResource(if (s.podeRepetirSemAnuncio) R.string.ai_tentar_sem_anuncio else R.string.ai_gerar_de_novo),
-                                primario = true, ativo = !ai.anunciando && !ai.sessaoOcupada,
-                            ) { ai.tentarDeNovoAposFalha() }
-                        }
-                        SessaoStatus.Liberado -> Unit
-                    }
-                }
-            }
-        }
-
-        // --- progresso ------------------------------------------------------
-        ai.job?.takeIf { ai.sessao?.status != SessaoStatus.Falhou }?.let { j ->
-            item(key = "progresso") {
-                Column {
-                    Spacer(Modifier.height(10.dp))
-                    val linha = when {
-                        j.status == "queued" && j.posicaoNaFila > 0 ->
-                            stringResource(R.string.ai_na_fila, j.posicaoNaFila)
-                        else -> j.etapa.ifBlank { j.status }
-                    }
-                    Text(linha, style = AureaType.Base.merge(
-                        TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
-                    // O ComfyUI não dá porcentagem pelo /history: a barra só aparece
-                    // quando há progresso real; senão, a etapa e o tempo decorrido.
-                    if (j.progresso > 0.0) {
-                        Spacer(Modifier.height(6.dp))
-                        Barra(j.progresso)
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        (if (j.progresso > 0.0) "${(j.progresso * 100).toInt()}%  ·  " else "") + formarDuracao(j.segundos),
-                        style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Subtle)),
-                    )
-                }
-            }
-        }
-
-        // --- resultado ------------------------------------------------------
-        if (ai.ultimoArquivo != null) {
-            item(key = "resultado") {
-                Column {
-                    Spacer(Modifier.height(12.dp))
-                    ai.job?.resultado?.let { r ->
-                        Text(
-                            "${r.largura}×${r.altura} · ${formarDuracao(r.duracaoSegundos)} · ${r.fps} fps" +
-                                if (r.comAudio) " · " + stringResource(R.string.ai_com_audio_curto) else "",
-                            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
-                        )
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    // Player do aparelho, sem biblioteca nova.
-                    Player(ai.ultimoArquivo!!.absolutePath)
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Botao(stringResource(R.string.ai_adicionar_timeline), primario = true) {
-                            ai.adicionarNaTimeline()
-                            env.onClose()
-                        }
-                        Botao(stringResource(R.string.ai_salvar_galeria), secundario = true) { ai.salvarNaGaleria() }
-                    }
-                    Nota(stringResource(R.string.ai_ficou_no_aparelho), AureaColors.Subtle)
-                }
-            }
-        } else if (ai.baixando) {
-            item(key = "baixando") {
-                Nota(stringResource(R.string.ai_baixando), AureaColors.Muted)
             }
         }
 

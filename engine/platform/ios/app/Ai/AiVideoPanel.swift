@@ -11,6 +11,22 @@ import SwiftUI
 import UIKit
 import AVKit
 import PhotosUI
+import CoreTransferable
+import UniformTypeIdentifiers
+import ImageIO
+
+private struct GenerationImageFile: Transferable {
+    let url: URL
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { received in
+            let size = try received.file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size > 0, size <= 8 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.copyItem(at: received.file, to: copy)
+            return GenerationImageFile(url: copy)
+        }
+    }
+}
 
 @MainActor
 struct AiVideoPanel: View {
@@ -30,6 +46,7 @@ struct AiVideoPanel: View {
     @State private var imageName = ""
     @State private var uploadingImage = false
     @State private var pickedImage: PhotosPickerItem?
+    @State private var imageError = ""
 
     private var caps: AiCapabilities { ai.capabilities }
     private var running: Bool { ai.job?.running == true }
@@ -47,7 +64,12 @@ struct AiVideoPanel: View {
                         else { note(AureaText.t("ai_geracoes_hoje", q.used, q.limit), AureaColors.subtle) }
                     }
                     if !ai.error.isEmpty { note(ai.error, AureaColors.danger) }
+                    if !imageError.isEmpty { note(imageError, AureaColors.danger) }
                     if !ai.message.isEmpty && ai.status.canGenerate { note(ai.message, AureaColors.muted) }
+                    rewardState
+                    progress
+                    result
+                    if running { button(AureaText.t("ai_cancelar"), secondary: true) { ai.cancel() } }
                     if ai.status.canGenerate { form } else { offline }
                     Spacer().frame(height: 24)
                 }
@@ -142,21 +164,17 @@ struct AiVideoPanel: View {
             toggle(AureaText.t("ai_avancado"), $advanced)
 
             generateRow
-            rewardState
-            progress
-            result
             historyList
             footer
         }
     }
 
     private var generateRow: some View {
-        let canGo = !running && !ai.showingAd && !ai.sessionBusy && ai.quota?.exhausted != true && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let canGo = !uploadingImage && !running && !ai.showingAd && !ai.sessionBusy && ai.quota?.exhausted != true && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (mode != "image_to_video" || imageRef != nil)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 button(AureaText.t("ai_assistir_e_gerar"), primary: true, active: canGo) { generate() }
-                if running { button(AureaText.t("ai_cancelar"), secondary: true) { ai.cancel() } }
             }
             if ai.showingAd { note(AureaText.t("ai_anuncio_em_curso"), AureaColors.muted) }
         }.padding(.top, 8)
@@ -272,19 +290,37 @@ struct AiVideoPanel: View {
 
     private func upload(_ item: PhotosPickerItem) async {
         uploadingImage = true
+        imageError = ""
         defer { uploadingImage = false; pickedImage = nil }
-        guard let data = try? await item.loadTransferable(type: Data.self), data.count <= 12 * 1024 * 1024 else { return }
+        guard let file = try? await item.loadTransferable(type: GenerationImageFile.self) else {
+            imageError = "Escolha uma imagem de até 8 MB."; return
+        }
+        defer { try? FileManager.default.removeItem(at: file.url) }
+        guard let handle = try? FileHandle(forReadingFrom: file.url) else {
+            imageError = "Não foi possível abrir a imagem."; return
+        }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 8 * 1024 * 1024 + 1), !data.isEmpty,
+              data.count <= 8 * 1024 * 1024 else {
+            imageError = "Escolha uma imagem de até 8 MB."; return
+        }
         // Só PNG/JPEG/WebP passam (o servidor recusa o resto); o resto vira JPEG.
         let type: String
         let bytes: Data
         if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { type = "image/png"; bytes = data }
         else if data.starts(with: [0xFF, 0xD8]) { type = "image/jpeg"; bytes = data }
         else if data.count > 12, data[8..<12].elementsEqual("WEBP".utf8) { type = "image/webp"; bytes = data }
-        else if let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.92) { type = "image/jpeg"; bytes = jpeg }
-        else { return }
+        else if let source = CGImageSourceCreateWithData(data as CFData, nil),
+                let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 2048,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                ] as CFDictionary),
+                let jpeg = UIImage(cgImage: image).jpegData(compressionQuality: 0.92), jpeg.count <= 8 * 1024 * 1024 {
+            type = "image/jpeg"; bytes = jpeg
+        } else { imageError = "Não foi possível preparar a imagem."; return }
         let ref = await ai.uploadImage(bytes, type: type)
-        imageRef = ref
-        imageName = ref.map { String($0.suffix(28)) } ?? ""
+        if let ref { imageRef = ref; imageName = String(ref.suffix(28)) }
     }
 
     // MARK: peças

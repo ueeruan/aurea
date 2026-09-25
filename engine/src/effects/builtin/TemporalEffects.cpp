@@ -63,6 +63,10 @@ class TimeWarpRgb final : public Effect {
 public:
     enum : u32 { kRedOffset = 0, kGreenOffset, kBlueOffset, kUnits, kBlend, kClamp };
 
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_rgb_merge_frag, work));
+    }
+
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kTimeWarpRgb, "RGB no tempo", "Tempo", EffectClass::Temporal};
         return i;

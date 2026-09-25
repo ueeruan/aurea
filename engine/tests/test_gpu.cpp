@@ -5081,6 +5081,46 @@ AUREA_TEST(Gpu, PosterizeTimeHoldsTheFrameAndThenLetsItGo) {
     AUREA_CHECK_MSG(nextDiff > 0.01f, "o quadro devia DESTRAVAR no 3");
 }
 
+AUREA_TEST(Gpu, TimeWarpRgbWarmsBeforeAnimatedBlendBecomesVisible) {
+    // Fresh renderer: another test must not hide a missing warmup declaration.
+    Gpu fresh;
+    AUREA_CHECK(fresh.ok);
+    if (!fresh.ok) return;
+    auto project = Project::create_new(32, 32, 30, "RGB warmup");
+    AUREA_CHECK(project.ok());
+    if (!project.ok()) return;
+    auto* comp = project->timeline().composition(project->timeline().root());
+    const auto id = comp->add_layer(LayerKind::Shape, "animated RGB");
+    auto* layer = comp->layer(id);
+    layer->shape.bounds = Rect{0, 0, 32, 32};
+    layer->shape.fillColor = Vec4{1, 0, 0, 1};
+    EffectInstance effect;
+    effect.id = 1;
+    effect.type = fresh.effects.find_key(effect_keys::kTimeWarpRgb);
+    initialize_instance(effect, *fresh.effects.params(effect.type));
+    effect.params[4].constant = ParamValue::scalar(0.0f);
+    layer->effects.push_back(std::move(effect));
+    const auto key = PipelineKey::fullscreen(ShaderId::effects_rgb_merge_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK(!fresh.renderer.shaders().has_pipeline(key));
+    RenderSettings settings;
+    OffscreenTarget target{fresh.target(32, 32), 32, 32};
+    FrameStats stats;
+    RenderTimings timings;
+    FrameSnapshot snapshot;
+    fresh.renderer.prepare(*comp, *project, FrameIndex{10}, nullptr, nullptr, nullptr,
+                           settings, 1, 0, DecodeMode::Still, 1, snapshot);
+    AUREA_CHECK(fresh.renderer.render(snapshot, settings, &target, stats, timings).ok());
+    // At zero blend no RGB merge pass runs, but later playback still needs it.
+    AUREA_CHECK(fresh.renderer.shaders().has_pipeline(key));
+    fresh.renderer.shaders().mark_steady_state();
+    layer->effects[0].params[4].constant = ParamValue::scalar(100.0f);
+    fresh.renderer.prepare(*comp, *project, FrameIndex{11}, nullptr, nullptr, nullptr,
+                           settings, 2, 0, DecodeMode::Playback, 1, snapshot);
+    AUREA_CHECK(fresh.renderer.render(snapshot, settings, &target, stats, timings).ok());
+    AUREA_CHECK_EQ(fresh.renderer.shaders().compiles_since_mark(), 0u);
+    fresh.backend.wait_idle();
+}
+
 AUREA_TEST(Gpu, TimeWarpRgbReadsEachChannelFromItsOwnInstant) {
     AUREA_REQUIRE_GPU();
     Scene s(128, 72, 30.0);

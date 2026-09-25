@@ -161,6 +161,18 @@ enum ParityExportProbe {
                   decoded.maxRGB - decoded.minRGB > 64 else {
                 throw Failure(message: "Decoded exported frame is blank or lacks the fixture's shape/background contrast")
             }
+            report["phase"] = "production-decoder"
+            try writeReport()
+            let productionDecoder = AureaVerifyVideoDecoder(movie.path, 30)
+            report["productionDecoder"] = productionDecoder
+            guard (productionDecoder["passed"] as? NSNumber)?.boolValue == true else {
+                throw Failure(message: "Production video decoder regression failed: \(productionDecoder)")
+            }
+            let reordered = AureaVerifyVideoDecoder(documents.appendingPathComponent("preview-bframes.mp4").path, 90)
+            report["bFrameDecoder"] = reordered
+            guard (reordered["passed"] as? NSNumber)?.boolValue == true else {
+                throw Failure(message: "Production B-frame decoder regression failed: \(reordered)")
+            }
             report["passed"] = true
             report["phase"] = "complete"
         } catch {

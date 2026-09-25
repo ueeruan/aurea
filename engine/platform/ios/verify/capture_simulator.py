@@ -369,6 +369,8 @@ def capture_scene(scene, app, output, udid, console_option, report, frame_checke
         container = Path(run(record, 'xcrun', 'simctl', 'get_app_container', udid, BUNDLE, 'data'))
         documents = container / 'Documents'
         documents.mkdir(parents=True, exist_ok=True)
+        if scene == 'export-render':
+            shutil.copy2('engine/tests/data/preview-bframes.mp4', documents / 'preview-bframes.mp4')
         ready = documents / 'parity-ready.json'
         record['readyPath'] = str(ready)
         if ready.exists():

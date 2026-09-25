@@ -7,9 +7,8 @@
 //   1. VideoToolboxFactory   → `aurea::VideoSourceFactory` (a interface que o
 //                              núcleo já tem — ver media/MediaManager.hpp):
 //                              `probe`, `open_video`, `open_audio`.
-//   2. VideoToolboxDecoder   → `aurea::VideoDecoderBackend` (video/VideoSource.
-//                              hpp): AVAssetReader desmultiplexa, VTDecompression
-//                              Session decodifica para CVPixelBuffer com
+//   2. AVFoundationVideoDecoder → `aurea::VideoDecoderBackend`: AVAssetReader
+//                              decodifica em ordem de apresentacao, para CVPixelBuffer com
 //                              MetalCompatibility + IOSurface vazio, que é o que
 //                              faz o buffer virar textura Metal SEM cópia.
 //   3. AudioToolboxDecoder   → `aurea::audio::AudioDecoderBackend` (audio/Audio.
@@ -20,13 +19,14 @@
 //   5. fill_platform_info / ios_load_image / ios_default_font_path: os fatos do
 //      aparelho e a decodificação de imagem que o motor não pode fazer sozinho.
 //
-//  ZERO-CÓPIA DE CPU: o decodificador NÃO converte cor nem copia plano nenhum.
-//  O CVPixelBuffer sai com `kCVPixelBufferMetalCompatibilityKey` e um
-//  `kCVPixelBufferIOSurfacePropertiesKey` VAZIO (IOSurface sem propriedades = o
-//  layout que a GPU amostra nativamente), e vai para o backend por
-//  `ExternalImageDesc::nativeHandle`. A conversão YCbCr é do sampler da GPU.
+//  No caminho BGRA/Metal o CVPixelBuffer com IOSurface é importado sem cópia
+//  pela CPU. AVFoundation faz a conversão de cor. Miniaturas e o caminho P010
+//  usam os planos; o fallback BGRA de miniaturas converte para RGBA na CPU.
 // =============================================================================
 #include "AureaBridge.h"
+#if DEBUG
+#import "AureaEngine.h"
+#endif
 
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
@@ -173,16 +173,18 @@ u64 buffer_identity(CVPixelBufferRef pixel) {
 // =============================================================================
 // 2. O decodificador de vídeo.
 // =============================================================================
-class VideoToolboxDecoder final : public VideoDecoderBackend {
+class AVFoundationVideoDecoder final : public VideoDecoderBackend {
 public:
-    VideoToolboxDecoder(AVAsset* asset, AVAssetTrack* track, MediaPriority priority, bool zeroCopy) noexcept;
-    ~VideoToolboxDecoder() override;
+    AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack* track, bool zeroCopy) noexcept;
+    ~AVFoundationVideoDecoder() override;
 
     [[nodiscard]] const VideoStreamInfo& info() const noexcept override { return info_; }
     [[nodiscard]] Status seek_to_keyframe(i64 targetUs) noexcept override;
     [[nodiscard]] Status next_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs,
                                     bool& endOfStream) noexcept override;
-    [[nodiscard]] u32 max_live_frames() const noexcept override { return 6; }
+    // Retained CVPixelBuffers are independent of the reader's next output.
+    // Match the Android cache window; the shared byte budget bounds memory.
+    [[nodiscard]] u32 max_live_frames() const noexcept override { return 12; }
     [[nodiscard]] i64 keyframe_interval_us() const noexcept override { return keyframeUs_; }
     void suspend() noexcept override;
     [[nodiscard]] Status resume() noexcept override;
@@ -190,35 +192,27 @@ public:
 private:
     bool start_reader(i64 fromUs) noexcept;
     void teardown() noexcept;
-    void teardown_session() noexcept;
-    [[nodiscard]] Status ensure_session(CMFormatDescriptionRef fmt) noexcept;
-    [[nodiscard]] Status push_compressed(CMSampleBufferRef sample, i64 deliverFromUs, FrameRef& out,
-                                         i64& outPtsUs) noexcept;
+    [[nodiscard]] Status wrap_sample(CMSampleBufferRef sample, i64 deliverFromUs, FrameRef& out,
+                                    i64& outPtsUs) noexcept;
 
     __strong AVAsset* asset_ = nil;
     __strong AVAssetTrack* track_ = nil;
     __strong AVAssetReader* reader_ = nil;
     __strong AVAssetReaderTrackOutput* output_ = nil;
-    VTDecompressionSessionRef session_ = nullptr;
 
     VideoStreamInfo info_{};
-    /// Publicado pelo callback do VideoToolbox (outra thread) e consumido
-    /// depois do `WaitForAsynchronousFrames` — que e o que garante a ordem.
-    CVPixelBufferRef callbackImage_ = nullptr;
-    i64 callbackPtsUs_ = 0;
     i64 keyframeUs_ = 2'000'000;
     i64 positionUs_ = 0;         ///< onde o decoder parou (para o resume)
     i64 seekTargetUs_ = -1;      ///< alvo do último seek (retoma aqui)
-    MediaPriority priority_ = MediaPriority::Preview;
     bool zeroCopy_ = true;
     bool suspended_ = false;
     bool tenBit_ = false;
     bool fullRange_ = false;
 };
 
-VideoToolboxDecoder::VideoToolboxDecoder(AVAsset* asset, AVAssetTrack* track, MediaPriority priority,
-                                         bool zeroCopy) noexcept
-    : asset_(asset), track_(track), priority_(priority), zeroCopy_(zeroCopy) {
+AVFoundationVideoDecoder::AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack* track,
+                                                  bool zeroCopy) noexcept
+    : asset_(asset), track_(track), zeroCopy_(zeroCopy) {
     @autoreleasepool {
         const CGSize size = track_.naturalSize;
         info_.codedWidth = (u32)llround(size.width);
@@ -253,75 +247,24 @@ VideoToolboxDecoder::VideoToolboxDecoder(AVAsset* asset, AVAssetTrack* track, Me
                    || info_.color.transfer == TransferFunction::HLG;
         }
         std::snprintf(info_.decoderName, sizeof(info_.decoderName), "%s",
-                      zeroCopy ? "VideoToolbox (zero-copy)" : "VideoToolbox (planos)");
-        info_.hardwareDecoder = true;   // o VTDecompressionSession usa o decoder do chip
+                      zeroCopy ? "AVFoundation (IOSurface)" : "AVFoundation (planos)");
+        // AVAssetReader selects the platform decoder; it does not expose whether
+        // that instance uses hardware. Do not claim hardware merely from the API.
+        info_.hardwareDecoder = false;
     }
 }
 
-VideoToolboxDecoder::~VideoToolboxDecoder() {
-    teardown();
-}
+AVFoundationVideoDecoder::~AVFoundationVideoDecoder() { teardown(); }
 
-void VideoToolboxDecoder::teardown_session() noexcept {
-    if (session_) {
-        VTDecompressionSessionWaitForAsynchronousFrames(session_);
-        VTDecompressionSessionInvalidate(session_);
-        CFRelease(session_);
-        session_ = nullptr;
-    }
-}
-
-void VideoToolboxDecoder::teardown() noexcept {
-    teardown_session();
+void AVFoundationVideoDecoder::teardown() noexcept {
+    if (reader_.status == AVAssetReaderStatusReading) [reader_ cancelReading];
     output_ = nil;
     reader_ = nil;
 }
 
-Status VideoToolboxDecoder::ensure_session(CMFormatDescriptionRef fmt) noexcept {
-    if (session_) return OkStatus;
+bool AVFoundationVideoDecoder::start_reader(i64 fromUs) noexcept {
     @autoreleasepool {
-        const u32 width = info_.codedWidth ? info_.codedWidth : 2;
-        const u32 height = info_.codedHeight ? info_.codedHeight : 2;
-        // A sessao RETEM o dicionario: nada precisa ficar guardado aqui.
-        NSDictionary* destinationAttributes = pixel_attributes(width, height, tenBit_, fullRange_);
-        VTDecompressionOutputCallbackRecord callback{};
-        callback.decompressionOutputCallback = [](void* refcon, void*, OSStatus status,
-                                                  VTDecodeInfoFlags, CVImageBufferRef image,
-                                                  CMTime pts, CMTime) {
-            if (status != noErr) return;
-            auto* self = static_cast<VideoToolboxDecoder*>(refcon);
-            // O callback pode vir de outra thread: o destino é publicado no
-            // slot e o `WaitForAsynchronousFrames` garante que ele está lá
-            // quando `next_frame` continuar.
-            if (image) {
-                self->callbackImage_ = (CVPixelBufferRef)CFRetain(image);
-                self->callbackPtsUs_ = us_of(pts);
-            }
-        };
-        callback.decompressionOutputRefCon = this;
-        VTDecompressionSessionRef session = nullptr;
-        // Sem `kVTDecompressionPropertyKey_RealTime` quando o consumidor é o
-        // export (qualidade acima de latência); com ele no preview.
-        const OSStatus status = VTDecompressionSessionCreate(
-            kCFAllocatorDefault, fmt, nullptr, (__bridge CFDictionaryRef)destinationAttributes,
-            &callback, &session);
-        if (status != noErr || !session) {
-            AUREA_LOG_ERROR("videotoolbox: sessao recusada (%d)", (int)status);
-            return Status{Errc::DecodeFailed, "VideoToolbox recusou a sessao"};
-        }
-        if (priority_ == MediaPriority::Preview) {
-            CFBooleanRef realTime = kCFBooleanTrue;
-            VTSessionSetProperty(session, kVTDecompressionPropertyKey_RealTime, realTime);
-        }
-        session_ = session;
-        return OkStatus;
-    }
-}
-
-bool VideoToolboxDecoder::start_reader(i64 fromUs) noexcept {
-    @autoreleasepool {
-        output_ = nil;
-        reader_ = nil;
+        teardown();
         const i64 start = fromUs > 0 ? fromUs : 0;
         NSError* error = nil;
         AVAssetReader* reader = [[AVAssetReader alloc] initWithAsset:asset_ error:&error];
@@ -329,7 +272,10 @@ bool VideoToolboxDecoder::start_reader(i64 fromUs) noexcept {
             AUREA_LOG_ERROR("videotoolbox: reader recusado (%s)", error.localizedDescription.UTF8String);
             return false;
         }
-        NSDictionary* outputSettings = nil;   // NULO = amostras COMPRIMIDAS
+        // Non-nil settings ask AVFoundation to decode and reorder B-frames.
+        // The previous compressed path returned decode-order PTS and overwrote
+        // delayed VideoToolbox callbacks in a single slot.
+        NSDictionary* outputSettings = pixel_attributes(info_.codedWidth, info_.codedHeight, tenBit_, fullRange_);
         AVAssetReaderTrackOutput* output =
             [[AVAssetReaderTrackOutput alloc] initWithTrack:track_ outputSettings:outputSettings];
         if (!output) return false;
@@ -339,10 +285,9 @@ bool VideoToolboxDecoder::start_reader(i64 fromUs) noexcept {
             return false;
         }
         [reader addOutput:output];
-        // `timeRange` começando no alvo: o AVAssetReader começa a decodificar
-        // no sample de sincronismo IGUAL OU ANTERIOR — é exatamente o contrato
-        // do `seek_to_keyframe`. Um pouco de folga cobre keyframe longo.
-        const i64 slack = keyframeUs_ > 0 ? keyframeUs_ : 2'000'000;
+        // AVFoundation performs codec preroll internally. Include one preceding
+        // presentation interval for the shared scheduler's nearest-frame rule.
+        const i64 slack = static_cast<i64>(std::ceil(1e6 / info_.fps));
         const i64 begin = start > slack ? start - slack : 0;
         reader.timeRange = CMTimeRangeMake(cm_time_us(begin), kCMTimePositiveInfinity);
         if (![reader startReading]) {
@@ -356,77 +301,31 @@ bool VideoToolboxDecoder::start_reader(i64 fromUs) noexcept {
     }
 }
 
-Status VideoToolboxDecoder::seek_to_keyframe(i64 targetUs) noexcept {
+Status AVFoundationVideoDecoder::seek_to_keyframe(i64 targetUs) noexcept {
     @autoreleasepool {
         seekTargetUs_ = targetUs;
-        // Um seek invalida a sessão de decode: o VideoToolbox mantém estado de
-        // referência entre quadros e continuar dela daria um quadro rasgado.
-        teardown_session();
+        // A new reader invalidates decoder history and pending output atomically.
+        // Frames already retained by Metal keep their CVPixelBuffer ownership.
         if (!start_reader(targetUs)) return Status{Errc::DecodeFailed, "nao foi possivel posicionar"};
         suspended_ = false;
         return OkStatus;
     }
 }
 
-Status VideoToolboxDecoder::push_compressed(CMSampleBufferRef sample, i64 deliverFromUs, FrameRef& out,
-                                            i64& outPtsUs) noexcept {
+Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 deliverFromUs, FrameRef& out,
+                                               i64& outPtsUs) noexcept {
     const CMTime pts = CMSampleBufferGetPresentationTimeStamp(sample);
+    if (!CMTIME_IS_NUMERIC(pts)) return Status{Errc::DecodeFailed, "timestamp de video invalido"};
     outPtsUs = us_of(pts);
-    CMFormatDescriptionRef fmt = CMSampleBufferGetFormatDescription(sample);
-    if (const Status s = ensure_session(fmt); !s.ok()) return s;
-
-    // A profundidade REAL vem do formato do buffer; pedir 10 bits a um stream de
-    // 8 faria o VideoToolbox recriar a sessão a cada quadro.
-    const FourCharCode sub = CMFormatDescriptionGetMediaSubType(fmt);
-    if (sub == 'x420' || sub == 'x422' || sub == 'hvc1') {
-        const CFDictionaryRef ext = CMFormatDescriptionGetExtensions(fmt);
-        if (ext) {
-            const CFBooleanRef full = (CFBooleanRef)CFDictionaryGetValue(
-                ext, kCMFormatDescriptionExtension_FullRangeVideo);
-            if (full) fullRange_ = CFBooleanGetValue(full);
-        }
-    }
-
-    callbackImage_ = nullptr;
-    callbackPtsUs_ = outPtsUs;
-    // `DoNotOutputFrame` no que vai ser descartado: o quadro é decodificado
-    // (é referência para os próximos) mas NÃO produz imagem — é o `render=false`
-    // do MediaCodec, com a mesma intenção: não pagar o custo de um buffer que
-    // ninguém vai ver.
-    VTDecodeFrameFlags flags = kVTDecodeFrame_EnableTemporalProcessing;
-    if (outPtsUs < deliverFromUs) flags |= kVTDecodeFrame_DoNotOutputFrame;
-    if (priority_ != MediaPriority::Export) flags |= kVTDecodeFrame_1xRealTimePlayback;
-
-    VTDecodeInfoFlags infoFlags = 0;
-    const OSStatus status = VTDecompressionSessionDecodeFrame(session_, sample, flags, nullptr, &infoFlags);
-    if (status != noErr) {
-        // Um quadro que falha não derruba o clipe: a fonte tenta o próximo e o
-        // motor mostra o último bom (nunca um quadro preto no lugar).
-        return Status{Errc::DecodeFailed, "quadro recusado pelo VideoToolbox"};
-    }
-    // A entrega é SÍNCRONA para quem chama: o backend de plataforma do Android
-    // também entrega de forma síncrona (`dequeueOutputBuffer` com timeout), e a
-    // fonte conta com isso para decidir o próximo pedido.
-    VTDecompressionSessionWaitForAsynchronousFrames(session_);
-
-    CVPixelBufferRef pixel = callbackImage_;
-    callbackImage_ = nullptr;
-    if (outPtsUs < deliverFromUs) {
-        if (pixel) CFRelease(pixel);
-        return OkStatus;
-    }
-    if (!pixel) {
-        // Fim de stream ou quadro sem imagem: quem decide é o chamador (o
-        // readerStatus diz se acabou).
-        return OkStatus;
-    }
+    if (outPtsUs < deliverFromUs) return OkStatus;
+    CVPixelBufferRef pixel = CMSampleBufferGetImageBuffer(sample);
+    if (!pixel) return Status{Errc::DecodeFailed, "amostra decodificada sem imagem"};
 
     auto* frame = new (std::nothrow) IOSDecodedFrame();
     if (!frame) {
-        CFRelease(pixel);
         return Status{Errc::OutOfMemory, "sem memoria para o quadro"};
     }
-    frame->pixel = pixel;   // adota a referência do callback
+    frame->pixel = (CVPixelBufferRef)CFRetain(pixel); // outlives the sample and reader
     frame->ptsUs = outPtsUs;
     frame->width = (u32)CVPixelBufferGetWidth(pixel);
     frame->height = (u32)CVPixelBufferGetHeight(pixel);
@@ -496,12 +395,12 @@ Status VideoToolboxDecoder::push_compressed(CMSampleBufferRef sample, i64 delive
     return OkStatus;
 }
 
-Status VideoToolboxDecoder::next_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs,
+Status AVFoundationVideoDecoder::next_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs,
                                        bool& endOfStream) noexcept {
     @autoreleasepool {
         endOfStream = false;
         out.reset();
-        outPtsUs = 0;
+        outPtsUs = positionUs_;
         if (suspended_) return Status{Errc::InvalidState, "decoder suspenso"};
         if (!reader_ && !start_reader(seekTargetUs_ > 0 ? seekTargetUs_ : 0)) {
             return Status{Errc::DecodeFailed, "nao foi possivel abrir o decode"};
@@ -522,17 +421,16 @@ Status VideoToolboxDecoder::next_frame(i64 deliverFromUs, FrameRef& out, i64& ou
                 endOfStream = true;
                 return Status{Errc::DecodeFailed, "leitura do arquivo terminou mal"};
             }
-            endOfStream = true;
-            return OkStatus;
+            return Status{Errc::DecodeFailed, "reader sem amostra antes do fim"};
         }
-        const Status s = push_compressed(sample, deliverFromUs, out, outPtsUs);
+        const Status s = wrap_sample(sample, deliverFromUs, out, outPtsUs);
         CFRelease(sample);
         positionUs_ = outPtsUs;
         return s;
     }
 }
 
-void VideoToolboxDecoder::suspend() noexcept {
+void AVFoundationVideoDecoder::suspend() noexcept {
     @autoreleasepool {
         // Segundo plano: devolver o decoder de hardware é obrigatório — o
         // sistema dá poucos (regra do VideoSource, §13 do spec da Fase 8).
@@ -541,7 +439,7 @@ void VideoToolboxDecoder::suspend() noexcept {
     }
 }
 
-Status VideoToolboxDecoder::resume() noexcept {
+Status AVFoundationVideoDecoder::resume() noexcept {
     if (!suspended_) return OkStatus;
     suspended_ = false;
     const i64 target = positionUs_ > 0 ? positionUs_ : (seekTargetUs_ > 0 ? seekTargetUs_ : 0);
@@ -733,7 +631,7 @@ public:
             NSArray<AVAssetTrack*>* tracks = [av tracksWithMediaType:AVMediaTypeVideo];
             if (tracks.count == 0) return nullptr;
             return std::unique_ptr<VideoDecoderBackend>(
-                new (std::nothrow) VideoToolboxDecoder(av, tracks.firstObject, priority, priority != MediaPriority::Thumbnail && zeroCopy_.load()));
+                new (std::nothrow) AVFoundationVideoDecoder(av, tracks.firstObject, priority != MediaPriority::Thumbnail && zeroCopy_.load()));
         }
     }
 
@@ -762,6 +660,113 @@ private:
 //  função C com refcon — ele entra no host, não na classe.
 // =============================================================================
 } // namespace aurea::ios
+
+#if DEBUG
+// Compare production CPU/IOSurface outputs against an independent presentation-
+// order reader. No renderer substitution: this is a decoder contract regression.
+NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger expectedFrames) {
+    @autoreleasepool {
+        auto failure = [](NSString* message) -> NSDictionary<NSString*, id>* {
+            return @{ @"passed": @NO, @"error": message };
+        };
+        struct Expected { i64 pts; u64 hash; };
+        std::vector<Expected> expected;
+        auto hashPixels = [](const u8* bytes, u32 width, u32 height, u32 stride, bool bgra) {
+            u64 hash = 14695981039346656037ULL;
+            for (u32 y = 0; y < height; ++y) for (u32 x = 0; x < width; ++x) {
+                const u8* p = bytes + static_cast<usize>(y) * stride + x * 4;
+                for (u32 c : {bgra ? 2u : 0u, 1u, bgra ? 0u : 2u, 3u}) {
+                    hash ^= p[c]; hash *= 1099511628211ULL;
+                }
+            }
+            return hash;
+        };
+        auto hashBuffer = [&](CVPixelBufferRef pixel, u64& hash) {
+            if (!pixel || CVPixelBufferGetPixelFormatType(pixel) != kCVPixelFormatType_32BGRA ||
+                CVPixelBufferLockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) return false;
+            hash = hashPixels(static_cast<const u8*>(CVPixelBufferGetBaseAddress(pixel)),
+                static_cast<u32>(CVPixelBufferGetWidth(pixel)), static_cast<u32>(CVPixelBufferGetHeight(pixel)),
+                static_cast<u32>(CVPixelBufferGetBytesPerRow(pixel)), true);
+            CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
+            return true;
+        };
+        AVURLAsset* movie = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:path] options:nil];
+        AVAssetTrack* track = [movie tracksWithMediaType:AVMediaTypeVideo].firstObject;
+        if (!track) return failure(@"Reference video track missing");
+        AVAssetReader* reader = [[AVAssetReader alloc] initWithAsset:movie error:nullptr];
+        AVAssetReaderTrackOutput* output = [[AVAssetReaderTrackOutput alloc] initWithTrack:track
+            outputSettings:@{(id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)}];
+        if (![reader canAddOutput:output]) return failure(@"Reference output rejected");
+        [reader addOutput:output];
+        if (![reader startReading]) return failure(@"Reference reader failed");
+        while (CMSampleBufferRef sample = [output copyNextSampleBuffer]) {
+            const CMTime time = CMSampleBufferGetPresentationTimeStamp(sample);
+            u64 hash = 0;
+            const bool valid = CMTIME_IS_NUMERIC(time) && hashBuffer(CMSampleBufferGetImageBuffer(sample), hash);
+            if (valid) expected.push_back({static_cast<i64>(llround(CMTimeGetSeconds(time) * 1e6)), hash});
+            CFRelease(sample);
+            if (!valid) return failure(@"Invalid reference pixels/timestamp");
+        }
+        if (reader.status != AVAssetReaderStatusCompleted || expected.size() != expectedFrames || expected.empty())
+            return failure(@"Reference frame count or EOS differs");
+        for (usize i = 1; i < expected.size(); ++i)
+            if (expected[i].pts <= expected[i-1].pts) return failure(@"Reference PTS are not increasing");
+        aurea::ios::MediaFactoryControl* control = nullptr;
+        auto factory = aurea::ios::make_video_factory(&control);
+        Asset asset; asset.kind = AssetKind::Video; asset.sourcePath = path.UTF8String;
+        u32 checks = 0;
+        for (bool zeroCopy : {false, true}) {
+            control->set_zero_copy(zeroCopy);
+            auto decoder = factory->open_video(asset, MediaPriority::Preview);
+            if (!decoder || !decoder->seek_to_keyframe(0).ok()) return failure(@"Production decoder failed to open");
+            auto matches = [&](const FrameRef& frame, const Expected& reference) {
+                if (!frame || frame->ptsUs != reference.pts || frame->format != PixelFormat::RGBA8) return false;
+                u64 hash = 0;
+                if (zeroCopy) {
+                    if (!hashBuffer(static_cast<CVPixelBufferRef>(frame->hardwareBuffer), hash)) return false;
+                } else {
+                    if (frame->hardwareBuffer || !frame->planes[0]) return false;
+                    hash = hashPixels(frame->planes[0], frame->width, frame->height, frame->strides[0], false);
+                }
+                ++checks;
+                return hash == reference.hash;
+            };
+            FrameRef retained;
+            for (const auto& reference : expected) {
+                FrameRef frame; i64 pts = -1; bool eos = false;
+                if (!decoder->next_frame(0, frame, pts, eos).ok() || eos || pts != reference.pts || !matches(frame, reference))
+                    return failure(@"Sequential decode pixels/PTS differ");
+                if (!retained) retained = frame;
+            }
+            FrameRef frame; i64 pts = -1; bool eos = false;
+            if (!decoder->next_frame(0, frame, pts, eos).ok() || !eos || frame)
+                return failure(@"Decoder did not drain to EOS");
+            for (usize index : {expected.size()-1, usize{0}, expected.size()/2}) {
+                if (!decoder->seek_to_keyframe(expected[index].pts).ok()) return failure(@"Seek failed");
+                // The reader may include preroll, which must be discardable without losing PTS.
+                bool found = false;
+                for (usize step = 0; step <= expected.size(); ++step) {
+                    if (!decoder->next_frame(expected[index].pts, frame, pts, eos).ok() || eos) break;
+                    if (frame) { found = matches(frame, expected[index]); break; }
+                }
+                if (!found) return failure(@"Seek returned wrong pixels/PTS");
+            }
+            decoder->suspend();
+            if (!matches(retained, expected.front())) return failure(@"Retained frame changed after suspend");
+            if (!decoder->resume().ok()) return failure(@"Resume failed");
+            bool found = false;
+            const auto& middle = expected[expected.size()/2];
+            for (usize step = 0; step <= expected.size(); ++step) {
+                if (!decoder->next_frame(middle.pts, frame, pts, eos).ok() || eos) break;
+                if (frame) { found = matches(frame, middle); break; }
+            }
+            if (!found) return failure(@"Resume returned wrong pixels/PTS");
+        }
+        return @{ @"passed": @YES, @"frames": @(expected.size()), @"pixelChecks": @(checks),
+                  @"cpuAndIOSurface": @YES, @"seekAndResume": @YES };
+    }
+}
+#endif
 
 @interface AureaExportHost : NSObject
 - (BOOL)openURL:(NSURL*)url

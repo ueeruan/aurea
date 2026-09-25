@@ -24,6 +24,11 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+#if DEBUG
+/// Native media regression used only by the opt-in simulator export probe.
+FOUNDATION_EXPORT NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger expectedFrames);
+#endif
+
 /// O estado do motor que a UI lê a cada frame. Campos que a UI desenha, mais
 /// nada: é o recorte de `bridge::EngineStatusPOD` (BridgePods.hpp) com os nomes
 /// que o Swift entende.

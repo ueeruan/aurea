@@ -103,9 +103,11 @@ private:
     struct Request {
         Key key;
         Asset asset;     ///< cópia: o modelo pode mudar enquanto decodifica
+        u32 version = 0;
     };
     struct Decoder {
         u64 asset = 0;
+        u64 source = 0;
         std::unique_ptr<VideoDecoderBackend> backend;
     };
 
@@ -128,7 +130,7 @@ private:
     std::unordered_map<Key, std::list<std::pair<Key, Image>>::iterator, KeyHash> index_;
     std::list<std::pair<Key, Image>> lru_;     ///< frente = mais recente
     std::unordered_map<Key, bool, KeyHash> pending_;
-    std::unordered_map<u64, bool> failedAssets_;   ///< decoder não abriu: não tenta de novo
+    std::unordered_map<Key, bool, KeyHash> failedAssets_; ///< asset + source; relink may recover
     std::vector<Decoder> decoders_;            ///< no máximo 2, só a thread mexe
     std::atomic<u32> generation_{0};
     MemoryManager* memory_ = nullptr;

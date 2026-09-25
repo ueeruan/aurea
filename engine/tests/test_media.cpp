@@ -781,3 +781,99 @@ AUREA_TEST(Thumbnail, ServiceDecodesAsyncAndCaches) {
     AUREA_CHECK_EQ(factory.opened.load(), 1u);
     svc.stop();
 }
+
+namespace {
+struct ThumbnailLifecycleFactory : VideoSourceFactory {
+    std::atomic<bool> block{false}, entered{false}, release{false};
+    std::atomic<u32> live{0}, peak{0}, opened{0}, attempts{0};
+    struct Decoder : VideoDecoderBackend {
+        ThumbnailLifecycleFactory& owner;
+        SyntheticDecoder inner;
+        Decoder(ThumbnailLifecycleFactory& o, SyntheticConfig cfg) : owner(o), inner(cfg) {
+            const u32 count = ++owner.live;
+            owner.peak.store(std::max(owner.peak.load(), count));
+            ++owner.opened;
+        }
+        ~Decoder() override { --owner.live; }
+        const VideoStreamInfo& info() const noexcept override { return inner.info(); }
+        Status seek_to_keyframe(i64 us) noexcept override { return inner.seek_to_keyframe(us); }
+        Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+            owner.entered.store(true);
+            while (owner.block.load() && !owner.release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return inner.next_frame(from, out, pts, eos);
+        }
+    };
+    bool probe(const char*, MediaProbe&) override { return false; }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset, MediaPriority) override {
+        ++attempts;
+        if (asset.sourcePath == "missing") return {};
+        SyntheticConfig cfg;
+        cfg.width = asset.sourcePath == "portrait" ? 36 : 64;
+        cfg.height = asset.sourcePath == "portrait" ? 64 : 36;
+        return std::make_unique<Decoder>(*this, cfg);
+    }
+};
+}
+
+AUREA_TEST(Thumbnail, FullTrimAndClearDiscardInflightWorkAndRetireCodecs) {
+    for (bool trim : {false, true}) {
+        MemoryManager memory;
+        ThumbnailLifecycleFactory factory;
+        factory.block.store(true);
+        ThumbnailService svc;
+        svc.attach(&memory);
+        svc.set_factory(&factory);
+        svc.start();
+        Asset asset;
+        ThumbnailService::Image img;
+        AUREA_CHECK(!svc.video(7, asset, 0, 24, img));
+        wait_until([&] { return factory.entered.load(); });
+        AUREA_CHECK(factory.entered.load());
+        // These calls must return while the backend is still decoding.
+        if (trim) (void)svc.reclaim(MemoryManager::kReclaimAll);
+        else svc.clear();
+        const u32 generation = svc.generation();
+        factory.release.store(true);
+        wait_until([&] { return factory.live.load() == 0; }, 1000);
+        AUREA_CHECK_EQ(factory.live.load(), 0u); // No two-second idle wait after trim.
+        AUREA_CHECK_EQ(svc.cached(), 0u);
+        AUREA_CHECK_EQ(svc.cached_bytes(), 0u);
+        AUREA_CHECK_EQ(memory.used(MemoryClass::Thumbnails), 0u);
+        AUREA_CHECK_EQ(svc.generation(), generation);
+        wait_until([&] { return svc.video(7, asset, 0, 24, img); });
+        AUREA_CHECK_EQ(svc.cached(), 1u);
+        AUREA_CHECK_EQ(factory.opened.load(), 2u);
+        svc.clear();
+        wait_until([&] { return factory.live.load() == 0; }, 1000);
+        AUREA_CHECK_EQ(factory.live.load(), 0u);
+        svc.stop();
+    }
+}
+
+AUREA_TEST(Thumbnail, RelinkUsesNewSourceAndCodecAdmissionStaysBounded) {
+    ThumbnailLifecycleFactory factory;
+    ThumbnailService svc;
+    svc.set_factory(&factory);
+    svc.start();
+    Asset asset;
+    asset.sourcePath = "landscape";
+    ThumbnailService::Image img;
+    wait_until([&] { return svc.video(7, asset, 0, 24, img); });
+    AUREA_CHECK(img.width > img.height);
+    asset.sourcePath = "portrait";
+    wait_until([&] { return svc.video(7, asset, 0, 24, img); });
+    AUREA_CHECK(img.width < img.height);
+    AUREA_CHECK_EQ(factory.opened.load(), 2u);
+    asset.sourcePath = "missing";
+    const u32 attempts = factory.attempts.load();
+    AUREA_CHECK(!svc.video(8, asset, 0, 24, img));
+    wait_until([&] { return factory.attempts.load() > attempts; });
+    asset.sourcePath = "landscape";
+    wait_until([&] { return svc.video(8, asset, 0, 24, img); });
+    AUREA_CHECK(img.width > img.height);
+    wait_until([&] { return svc.video(9, asset, 0, 24, img); });
+    AUREA_CHECK_EQ(factory.opened.load(), 4u);
+    AUREA_CHECK_EQ(factory.peak.load(), 2u);
+    svc.stop();
+    AUREA_CHECK_EQ(factory.live.load(), 0u);
+}

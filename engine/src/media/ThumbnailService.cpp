@@ -158,6 +158,7 @@ void ThumbnailService::clear() {
     bytes_ = 0;
     ++version_;
     generation_.fetch_add(1, std::memory_order_acq_rel);
+    wake_.notify_one();
 }
 
 u32 ThumbnailService::cached() const {
@@ -214,6 +215,8 @@ usize ThumbnailService::reclaim(usize targetBytes) noexcept {
         // depois é trabalho e memória sem motivo.
         queue_.clear();
         pending_.clear();
+        ++version_; // Invalidate the in-flight decode as well as queued requests.
+        wake_.notify_one();
     }
     return static_cast<usize>(before - bytes_);
 }
@@ -243,9 +246,10 @@ bool ThumbnailService::video(u64 assetKey, const Asset& asset, i64 timeUs, u32 h
         return true;
     }
     ++misses_;
-    if (!pending_.contains(k) && !failedAssets_.contains(assetKey) && factory_ && running_) {
+    const Key sourceKey{assetKey, 0, 0, k.source};
+    if (!pending_.contains(k) && !failedAssets_.contains(sourceKey) && factory_ && running_) {
         pending_[k] = true;
-        queue_.push_front(Request{k, asset});
+        queue_.push_front(Request{k, asset, version_});
         while (queue_.size() > kMaxQueued) {
             pending_.erase(queue_.back().key);
             queue_.pop_back();
@@ -286,16 +290,21 @@ bool ThumbnailService::image(u64 assetKey, const u8* rgba, u32 width, u32 height
 
 bool ThumbnailService::decode(const Request& r, Image& out) {
     // Um decoder por asset, reaproveitado (abrir um codec custa dezenas de ms).
-    auto it = std::find_if(decoders_.begin(), decoders_.end(), [&](const Decoder& d) { return d.asset == r.key.asset; });
+    // Relinking must retire the old codec, not just change the thumbnail key.
+    std::erase_if(decoders_, [&](const Decoder& d) { return d.asset == r.key.asset && d.source != r.key.source; });
+    openDecoders_.store(static_cast<u32>(decoders_.size()), std::memory_order_relaxed);
+    auto it = std::find_if(decoders_.begin(), decoders_.end(), [&](const Decoder& d) { return d.asset == r.key.asset && d.source == r.key.source; });
     if (it == decoders_.end()) {
+        // Close before opening: never temporarily consume a third codec session.
+        if (decoders_.size() >= 2) decoders_.erase(decoders_.begin());
+        openDecoders_.store(static_cast<u32>(decoders_.size()), std::memory_order_relaxed);
         auto backend = factory_->open_video(r.asset, MediaPriority::Thumbnail);
         if (!backend) {
             std::lock_guard<std::mutex> lock(mutex_);
-            failedAssets_[r.key.asset] = true;
+            if (r.version == version_) failedAssets_[Key{r.key.asset, 0, 0, r.key.source}] = true;
             return false;
         }
-        if (decoders_.size() >= 2) decoders_.erase(decoders_.begin());
-        decoders_.push_back(Decoder{r.key.asset, std::move(backend)});
+        decoders_.push_back(Decoder{r.key.asset, r.key.source, std::move(backend)});
         openDecoders_.store(static_cast<u32>(decoders_.size()), std::memory_order_relaxed);
         it = decoders_.end() - 1;
     }
@@ -318,12 +327,13 @@ bool ThumbnailService::decode(const Request& r, Image& out) {
 void ThumbnailService::thread_main() noexcept {
     set_current_thread_name("aurea-thumbs");
     set_current_thread_priority(ThreadPriority::Background);
+    u32 decoderVersion = 0;
     for (;;) {
         Request req;
         u32 version = 0;
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            const auto ready = [&] { return !running_ || !queue_.empty(); };
+            const auto ready = [&] { return !running_ || !queue_.empty() || decoderVersion != version_; };
             if (!decoders_.empty()) {
                 // Fila vazia com decoder aberto: espera o próximo pedido por um
                 // tempo; nada chegou, fecha. Antes os dois decoders ficavam
@@ -339,6 +349,13 @@ void ThumbnailService::thread_main() noexcept {
                 wake_.wait(lock, ready);
             }
             if (!running_) break;
+            if (decoderVersion != version_) {
+                decoderVersion = version_;
+                lock.unlock();
+                decoders_.clear(); // Keep platform codec destruction off the caller/UI thread.
+                openDecoders_.store(0, std::memory_order_relaxed);
+                continue;
+            }
             req = std::move(queue_.front());
             queue_.pop_front();
             version = version_;
@@ -347,17 +364,19 @@ void ThumbnailService::thread_main() noexcept {
         const bool ok = decode(req, img);
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            pending_.erase(req.key);
+            if (version == version_) pending_.erase(req.key);
             // Projeto trocado enquanto decodificava (clear): a miniatura é do
             // projeto velho e não entra no cache novo.
-            if (ok && version == version_) insert_locked(req.key, std::move(img));
+            if (ok && version == version_) {
+                insert_locked(req.key, std::move(img));
+                generation_.fetch_add(1, std::memory_order_acq_rel);
+            }
         }
-        if (ok) generation_.fetch_add(1, std::memory_order_acq_rel);
         // Aparelho quente (WARM/HOT/CRITICAL): uma pausa entre miniaturas. Sai
         // na hora se o serviço parar.
         if (const u32 pause = pacingMs_.load(std::memory_order_relaxed)) {
             std::unique_lock<std::mutex> lock(mutex_);
-            wake_.wait_for(lock, std::chrono::milliseconds(pause), [&] { return !running_; });
+            wake_.wait_for(lock, std::chrono::milliseconds(pause), [&] { return !running_ || decoderVersion != version_; });
         }
     }
 }

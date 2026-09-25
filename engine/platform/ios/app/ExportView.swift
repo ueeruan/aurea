@@ -98,6 +98,16 @@ struct ExportView: View {
     }
     private var options: some View {
         VStack(alignment: .leading, spacing: 0) {
+            upscaleOptions
+            resolutionOptions
+            frameRateOptions
+            codecOptions
+            qualityOptions
+            exportSummary
+        }
+    }
+    private var upscaleOptions: some View {
+        VStack(alignment: .leading, spacing: 0) {
             section("ai_upscale_title")
             let off = AureaText.t("common_off")
             chips([off, "2×", "4×"], selected: model.exportOptions.aiUpscale == 0 ? off : "\(model.exportOptions.aiUpscale)×") { label in
@@ -108,11 +118,13 @@ struct ExportView: View {
             }
             if model.exportOptions.aiUpscale > 0 {
                 Text(AureaText.t("ai_upscale_note")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.top, 8)
-                let scale = model.exportOptions.aiUpscale
-                Text(AureaText.t("ai_upscale_dimensions", Int(scale), Int(((outputSize.0 + scale*2-1)/(scale*2))*2),
-                                Int(((outputSize.1 + scale*2-1)/(scale*2))*2), Int(outputSize.0), Int(outputSize.1)))
+                Text(upscaleDimensionsDescription)
                     .font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.top, 6)
             }
+        }
+    }
+    private var resolutionOptions: some View {
+        VStack(alignment: .leading, spacing: 0) {
             section("editor_resolucao")
             chips(resolutions.map(resolutionLabel), selected: blocked.contains(model.exportOptions.shortSide) ? nil : resolutionLabel(model.exportOptions.shortSide),
                   disabled: Set(blocked.map(resolutionLabel))) { picked in
@@ -122,11 +134,19 @@ struct ExportView: View {
                 Text(exportLimitReason ?? AureaText.t("sh_export_above_device", blocked.map(resolutionLabel).joined(separator: ", ")))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
             }
+        }
+    }
+    private var frameRateOptions: some View {
+        VStack(alignment: .leading, spacing: 0) {
             section("editor_quadros_segundo")
             let projectFps = AureaText.t("sh_export_fps_from_project", format(model.compositionFps))
             chips([projectFps, "24", "30", "60"], selected: model.exportOptions.fps == 0 ? projectFps : format(model.exportOptions.fps)) {
                 model.exportOptions.fps = $0 == projectFps ? 0 : Double($0.replacingOccurrences(of: ",", with: ".")) ?? model.compositionFps
             }
+        }
+    }
+    private var codecOptions: some View {
+        VStack(alignment: .leading, spacing: 0) {
             section("editor_formato")
             chips(["H.264", "HEVC"], selected: codec, disabled: hevcAvailable ? [] : ["HEVC"]) {
                 model.exportOptions.codec = $0 == "HEVC" ? .hevc : .h264
@@ -134,16 +154,31 @@ struct ExportView: View {
             Text(hevcAvailable ? AureaText.t(model.exportOptions.codec == .hevc ? "editor_hevc_arquivo_menor_mesma_qualidade_alguns" : "editor_h_264_abre_qualquer_aparelho_rede")
                  : "HEVC indisponível neste aparelho: ele não tem codificador HEVC. O vídeo sai em H.264.")
                 .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+        }
+    }
+    private var qualityOptions: some View {
+        VStack(alignment: .leading, spacing: 0) {
             section("editor_qualidade")
             let standard = AureaText.t("editor_padrao"), high = AureaText.t("editor_alta")
             chips([standard, high], selected: highQuality ? high : standard) { highQuality = $0 == high }
-            VStack(spacing: 0) {
-                summary("editor_video", "\(outputSize.0) × \(outputSize.1) · \(format(fps)) fps · \(codec)")
-                summary("editor_duracao", formatTime(seconds))
-                summary("editor_tamanho_estimado", estimatedSize)
-                summary("editor_cor", AureaText.t("editor_sdr_bt_709"))
-            }.padding(.top, 18)
         }
+    }
+    private var exportSummary: some View {
+        VStack(spacing: 0) {
+            summary("editor_video", "\(outputSize.0) × \(outputSize.1) · \(format(fps)) fps · \(codec)")
+            summary("editor_duracao", formatTime(seconds))
+            summary("editor_tamanho_estimado", estimatedSize)
+            summary("editor_cor", AureaText.t("editor_sdr_bt_709"))
+        }.padding(.top, 18)
+    }
+    private var upscaleDimensionsDescription: String {
+        let scale: UInt32 = model.exportOptions.aiUpscale
+        guard scale > 0 else { return "" }
+        let divisor: UInt32 = scale * 2
+        let size: (UInt32, UInt32) = outputSize
+        let inputWidth: UInt32 = ((size.0 + divisor - 1) / divisor) * 2
+        let inputHeight: UInt32 = ((size.1 + divisor - 1) / divisor) * 2
+        return AureaText.t("ai_upscale_dimensions", Int(scale), Int(inputWidth), Int(inputHeight), Int(size.0), Int(size.1))
     }
     private func section(_ key: String) -> some View {
         Text(AureaText.t(key).uppercased()).font(.aurea(size: 12, weight: .semibold)).tracking(0.6)

@@ -170,11 +170,40 @@ void fallback_order(u32 cp, u8 (&order)[kFallbackCount], usize& n) {
     for (u8 i = 0; i < kFallbackCount; ++i) if (!used[i]) order[n++] = i;
 }
 
-/// A primeira fonte de reserva que tem o caractere (nula se nenhuma).
-const Font::Impl* fallback_for(u32 cp) {
+bool is_mark(u32 cp) {
+    const auto category = hb_unicode_general_category(hb_unicode_funcs_get_default(), cp);
+    return category == HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK
+        || category == HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK
+        || category == HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK
+        || cp == 0x200C || cp == 0x200D || (cp >= 0x1F3FB && cp <= 0x1F3FF)
+        || (cp >= 0xE0020 && cp <= 0xE007F);
+}
+
+/// Check an entire grapheme-like cluster, not just its base. HarfBuzz can
+/// normalize a base+mark into a supported precomposed glyph even when the mark
+/// itself has no cmap entry; joiners/selectors are handled by the shaper too.
+bool covers_cluster(const Font::Impl& font, const u32* chars, usize count) {
+    bool complete = true;
+    for (usize i = 0; i < count; ++i)
+        if (!stbtt_FindGlyphIndex(&font.info, static_cast<int>(chars[i]))) { complete = false; break; }
+    if (complete) return true;
+    if (count == 1 && !is_mark(chars[0])) return false;
+    hb_buffer_t* buffer = hb_buffer_create();
+    hb_buffer_add_codepoints(buffer, chars, static_cast<int>(count), 0, static_cast<int>(count));
+    hb_buffer_guess_segment_properties(buffer);
+    hb_shape(font.hb, buffer, nullptr, 0);
+    unsigned length = 0;
+    const auto* glyphs = hb_buffer_get_glyph_infos(buffer, &length);
+    complete = length != 0;
+    for (unsigned i = 0; i < length; ++i) if (!glyphs[i].codepoint) { complete = false; break; }
+    hb_buffer_destroy(buffer);
+    return complete;
+}
+
+const Font::Impl* fallback_for(const u32* chars, usize count) {
     u8 order[kFallbackCount];
     usize n = 0;
-    fallback_order(cp, order, n);
+    fallback_order(chars[0], order, n);
     std::lock_guard<std::mutex> lock(g_fallbackMutex);
     for (usize k = 0; k < n; ++k) {
         const u8 i = order[k];
@@ -186,15 +215,9 @@ const Font::Impl* fallback_for(u32 cp) {
                 g_fallbackBytes += g_fallbacks[i]->memory_bytes();
             }
         }
-        if (g_fallbacks[i] && stbtt_FindGlyphIndex(&g_fallbacks[i]->impl().info, static_cast<int>(cp)) != 0) return &g_fallbacks[i]->impl();
+        if (g_fallbacks[i] && covers_cluster(g_fallbacks[i]->impl(), chars, count)) return &g_fallbacks[i]->impl();
     }
     return nullptr;
-}
-
-bool is_mark(u32 cp) {   // combinantes, seletores de variação, ZWJ/ZWNJ: seguem o anterior
-    return (cp >= 0x0300 && cp <= 0x036F) || (cp >= 0x0610 && cp <= 0x061A) || (cp >= 0x064B && cp <= 0x065F)
-        || cp == 0x0670 || (cp >= 0x06D6 && cp <= 0x06ED) || (cp >= 0xFE00 && cp <= 0xFE0F) || cp == 0x200C || cp == 0x200D
-        || (cp >= 0x1AB0 && cp <= 0x1AFF) || (cp >= 0x20D0 && cp <= 0x20FF);
 }
 
 /// Direção forte do caractere: 1 = RTL, 0 = LTR, −1 = neutro/fraco
@@ -302,6 +325,7 @@ Line shape_span(const std::vector<u32>& cps, usize a, usize b, u32 globalBase, c
 /// Texto posicionado (escala pedida): glifos com x/y finais na caixa (linha
 /// de base), largura/altura da caixa sem margem.
 struct Placed {
+    std::shared_ptr<const Font> defaultFallback; ///< Retains its glyph pointers through raster/outline generation.
     std::vector<Glyph> glyphs;
     std::vector<f32> baselines;
     f32 width = 0, height = 0;
@@ -320,6 +344,7 @@ void place_once(const Font::Impl& f, const TextData& t, f32 pxScale, f32 factor,
     // Atributos por caractere (índice lógico global): fonte (trecho → reserva) e escala.
     std::vector<CharAttr> attr(all.size());
     std::shared_ptr<const Font> spanFonts[10];
+    std::shared_ptr<const Font> defaultFallback;
     auto spanFont = [&](u16 weight) -> const Font::Impl* {
         const u32 slot = std::min<u32>(9, weight / 100);
         if (!spanFonts[slot]) {
@@ -338,11 +363,25 @@ void place_once(const Font::Impl& f, const TextData& t, f32 pxScale, f32 factor,
             if (sp.weight) attr[i].font = spanFont(sp.weight);
             if (sp.scale > 0.0f) attr[i].scale = std::clamp(sp.scale, 0.1f, 10.0f);
         }
-        if (is_mark(all[i]) && i > 0) { attr[i].font = attr[i - 1].font; continue; }
-        const u32 cp = all[i];
-        if (cp == ' ' || cp == '\n' || stbtt_FindGlyphIndex(&attr[i].font->info, static_cast<int>(cp)) != 0) continue;
-        if (stbtt_FindGlyphIndex(&f.info, static_cast<int>(cp)) != 0) { attr[i].font = &f; continue; }
-        if (const Font::Impl* fb = fallback_for(cp)) attr[i].font = fb;
+    }
+    for (usize begin = 0; begin < all.size();) {
+        usize end = begin + 1;
+        while (end < all.size() && all[end] != '\n' && all[end] != '\r'
+               && (is_mark(all[end]) || all[end - 1] == 0x200D
+                   || (end == begin + 1 && all[begin] >= 0x1F1E6 && all[begin] <= 0x1F1FF && all[end] >= 0x1F1E6 && all[end] <= 0x1F1FF))) ++end;
+        const Font::Impl* selected = attr[begin].font;
+        const u32* chars = all.data() + begin;
+        const usize count = end - begin;
+        if (all[begin] != '\n' && all[begin] != '\r' && !covers_cluster(*selected, chars, count)) {
+            if (selected != &f && covers_cluster(f, chars, count)) selected = &f;
+            else {
+                if (!defaultFallback) defaultFallback = default_font();
+                if (defaultFallback && covers_cluster(defaultFallback->impl(), chars, count)) selected = &defaultFallback->impl();
+                else if (const auto* alternate = fallback_for(chars, count)) selected = alternate;
+            }
+        }
+        for (usize i = begin; i < end; ++i) attr[i].font = selected;
+        begin = end;
     }
     std::vector<Line> lines;
     hb_buffer_t* buf = hb_buffer_create();
@@ -408,6 +447,7 @@ void place_once(const Font::Impl& f, const TextData& t, f32 pxScale, f32 factor,
     for (const Line& l : lines) maxW = std::max(maxW, l.width);
     const f32 boxW = wrap > 0.0f ? wrap : maxW;
     out = Placed{};
+    out.defaultFallback = std::move(defaultFallback);
     out.lines = static_cast<u32>(lines.size());
     out.sizeFactor = factor;
     f32 baseline = 0;

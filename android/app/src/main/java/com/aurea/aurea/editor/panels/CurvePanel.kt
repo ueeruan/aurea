@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -548,15 +549,13 @@ private fun CurveGraph(
             drawCircle(CurveGreen, 4.5.dp.toPx(), p0)
             drawCircle(CurveGreen, 4.5.dp.toPx(), p1)
         }
-        // O ponto que corre com o cabeçote: camada própria, lida NO DESENHO — a
-        // reprodução só repinta estes três traços, sem recompor nem refazer a curva.
+        // Guia do cabeçote em camada própria, sem cobrir os pontos da curva.
         Canvas(Modifier.fillMaxSize()) {
             val f = progress() ?: return@Canvas
             val inset = 24.dp.toPx()
             val p = Offset(inset + f * max(1f, size.width - 2 * inset), size.height - (ease.transform(f) - yMin) / (yMax - yMin) * size.height)
-            drawLine(AureaColors.Danger.copy(alpha = 0.35f), Offset(p.x, 0f), Offset(p.x, size.height), 1.dp.toPx())
-            drawCircle(AureaColors.Danger, 8.dp.toPx(), p)
-            drawCircle(Color.White, 8.dp.toPx(), p, style = Stroke(2.dp.toPx()))
+            drawLine(Color.White.copy(alpha = 0.4f), Offset(p.x, 0f), Offset(p.x, size.height),
+                1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 4.dp.toPx())))
         }
     }
 }

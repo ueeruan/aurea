@@ -118,7 +118,7 @@ fun PanelContent(
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
-        PanelHeader(title, onBack = onClose)
+        if (panel != EditorPanel.Curve) PanelHeader(title, onBack = onClose)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             // O painel da Aurea AI gera um video e o poe na timeline: nao ha
             // camada escolhida para ele consultar, entao fica FORA do

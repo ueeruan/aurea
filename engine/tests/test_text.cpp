@@ -345,3 +345,50 @@ AUREA_TEST(Text, TypewriterUsesUnicodeCharactersAndKeepsInitialFrameHidden) {
     check("A\xC3\xA9\xE4\xB8\xAD\xF0\x9F\x98\x80", 4, 12);
     check("abcdefghij", 10, 2);
 }
+
+AUREA_TEST(Text, ScriptFontMissingLatinUsesConfiguredDefaultAndKeepsClusters) {
+    const char* scriptPath = "C:/Windows/Fonts/segmdl2.ttf";
+    const char* defaultPath = "C:/Windows/Fonts/calibri.ttf";
+    auto script = font_at(scriptPath), normal = font_at(defaultPath);
+    #if defined(_WIN32)
+    AUREA_CHECK(script && normal);
+    #endif
+    if (!script || !normal) return;
+    text::set_default_font_path(defaultPath);
+    const auto expected = shape(*normal, "a\xC3\xA7\xC3\xA3o");
+    const auto actual = shape(*script, "a\xC3\xA7\xC3\xA3o");
+    AUREA_CHECK_EQ(actual.size(), expected.size());
+    for (usize i = 0; i < actual.size() && i < expected.size(); ++i) {
+        AUREA_CHECK(actual[i].fallback);
+        AUREA_CHECK(actual[i].glyph != 0);
+        AUREA_CHECK_EQ(actual[i].glyph, expected[i].glyph);
+        AUREA_CHECK_NEAR(actual[i].x, expected[i].x, .001f);
+    }
+    const auto composed = shape(*script, "\xC3\xA9");
+    const auto decomposed = shape(*script, "e\xCC\x81");
+    AUREA_CHECK_EQ(composed.size(), 1u); AUREA_CHECK_EQ(decomposed.size(), 1u);
+    if (!composed.empty() && !decomposed.empty()) AUREA_CHECK_EQ(composed[0].glyph, decomposed[0].glyph);
+    const auto authored = shape(*script, "\xEE\x9C\x80"); // MDL2's actual U+E700 glyph remains authored.
+    AUREA_CHECK(!authored.empty());
+    if (!authored.empty()) { AUREA_CHECK(!authored[0].fallback); AUREA_CHECK(authored[0].glyph != 0); }
+    // A joiner is shaped together with its neighboring letters, never on a
+    // different fallback face. Compare HarfBuzz's real result, not a mock glyph.
+    const auto joined = shape(*script, "f\xE2\x80\x8Di"), joinedExpected = shape(*normal, "f\xE2\x80\x8Di");
+    AUREA_CHECK_EQ(joined.size(), joinedExpected.size());
+    for (usize i = 0; i < joined.size() && i < joinedExpected.size(); ++i) {
+        AUREA_CHECK_EQ(joined[i].glyph, joinedExpected[i].glyph);
+        AUREA_CHECK_EQ(joined[i].cluster, joinedExpected[i].cluster);
+    }
+    if (const auto display = font_at("C:/Windows/Fonts/impact.ttf")) {
+        const auto base = shape(*display, "a");
+        AUREA_CHECK(!base.empty() && !base[0].fallback);
+        const auto marked = shape(*display, "a\xD6\xB0"); // Base present, Hebrew combining mark missing.
+        const auto markedExpected = shape(*normal, "a\xD6\xB0");
+        AUREA_CHECK_EQ(marked.size(), markedExpected.size());
+        for (usize i = 0; i < marked.size() && i < markedExpected.size(); ++i) {
+            AUREA_CHECK(marked[i].glyph != 0);
+            AUREA_CHECK_EQ(marked[i].glyph, markedExpected[i].glyph);
+        }
+    }
+    text::set_default_font_path("");
+}

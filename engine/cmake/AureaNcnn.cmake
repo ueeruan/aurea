@@ -61,4 +61,3 @@ if(MSVC)
 else()
     set_source_files_properties(src/ai/Upscaler.cpp PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()
-

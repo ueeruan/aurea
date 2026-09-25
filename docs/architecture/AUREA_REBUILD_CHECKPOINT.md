@@ -55,9 +55,17 @@ new request. Existing features must be checked against the requested behavior.
   21fps/3.00s to MediaStore. FFmpeg decoded the complete file without errors
   (`ai-app-export-decode.log`). This fixture has no audio; audio retention was
   independently checked by the shared export regression.
-- A new user screenshot shows missing-glyph boxes when choosing Samsung's
-  SECGujarati font. Font fallback is under investigation in Text.cpp/test_text;
-  those files are intentionally excluded from this checkpoint until tested.
+- The Samsung SECGujarati missing-glyph report is corrected in shared Text.cpp:
+  an unsupported cluster now uses the configured default font while supported
+  authored glyphs remain unchanged. Baseline had7 failures; fixed regression
+  passed35 checks. Final Text/Text3D/GPU suite passed58 tests/77,998 checks.
+  Physical Samsung retesting remains pending.
+- Final reference-graph/font Android debug build passed with103 JVM tests,
+  zero failures. The reference panel keeps the timeline, white drag handles,
+  green curve, preset rails and a dotted white progress guide.
+- First2110 iOS CI failed Swift type-checking in ExportView.options. The large
+  builder was split into named sections with explicitly typed dimension math;
+  native recompilation is required before declaring the IPA ready.
 - The user explicitly cancelled recurring automation
   `aurea-implementa-o-e-paridade`; it was deleted in the app. Continue only this
   active task. Do not recreate the automation.

@@ -173,9 +173,7 @@ private struct NativeCurveGraph: View {
                     if let progress {
                         let p = plot(progress, ease.transform(progress), size, low, high)
                         var line = Path(); line.move(to: CGPoint(x: p.x, y: 0)); line.addLine(to: CGPoint(x: p.x, y: size.height))
-                        context.stroke(line, with: .color(AureaColors.danger.opacity(0.35)), lineWidth: 1)
-                        let dot = Path(ellipseIn: CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16))
-                        context.fill(dot, with: .color(AureaColors.danger)); context.stroke(dot, with: .color(.white), lineWidth: 2)
+                        context.stroke(line, with: .color(.white.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                     }
                 }
             }.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0)

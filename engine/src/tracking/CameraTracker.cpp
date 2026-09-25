@@ -565,6 +565,7 @@ struct SolveState {
     std::vector<Pose> poses;
     std::vector<V3> X;
     std::vector<u8> hasX;
+    std::vector<u8> rotationTracks;
     f64 rms = 1e30;
     u32 solved = 0, inliers = 0;
     u32 fixedFrame = 0;
@@ -1013,7 +1014,7 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
 }
 
 /// Tripé: rotação entre quadros por Kabsch (3 raios + RANSAC), acumulada.
-SolveState solve_rotation(const Tracks2D& T, f64 f) {
+SolveState solve_rotation(const Tracks2D& T, f64 f, const std::atomic<bool>* cancel) {
     SolveState S;
     S.rotationOnly = true;
     const u32 N = T.frames, M = static_cast<u32>(T.pos.size());
@@ -1045,15 +1046,19 @@ SolveState solve_rotation(const Tracks2D& T, f64 f) {
     std::mt19937 rng(99u);
     f64 sum = 0;
     u64 n = 0;
+    std::vector<u32> accepted(M, 0), observed(M, 0);
     for (u32 fr = 1; fr < N; ++fr) {
+        if (cancel && cancel->load()) return S;
         std::vector<V3> A, B;
-        for (u32 t = 0; t < M; ++t) if (has(t, fr - 1) && has(t, fr)) { A.push_back(dir(t, fr - 1)); B.push_back(dir(t, fr)); }
+        std::vector<u32> ids;
+        for (u32 t = 0; t < M; ++t) if (has(t, fr - 1) && has(t, fr)) { A.push_back(dir(t, fr - 1)); B.push_back(dir(t, fr)); ids.push_back(t); }
         if (A.size() < 8) break;
         std::uniform_int_distribution<u32> pick(0, static_cast<u32>(A.size() - 1));
         std::vector<u32> best;
         M3 bestR;
         const f64 thr = 1.5 / f;
         for (int it = 0; it < 150; ++it) {
+            if (cancel && cancel->load()) return S;
             std::vector<u32> smp;
             while (smp.size() < 3) { const u32 r = pick(rng); if (std::find(smp.begin(), smp.end(), r) == smp.end()) smp.push_back(r); }
             const M3 R = kabsch(A, B, smp);
@@ -1063,14 +1068,44 @@ SolveState solve_rotation(const Tracks2D& T, f64 f) {
         }
         if (best.size() < 8) break;
         const M3 R = kabsch(A, B, best);
+        for (u32 id : ids) ++observed[id];
         for (u32 i : best) {
             const V3 p = mul(R, A[i]);
             const f64 e = std::hypot(p.x / p.z - B[i].x / B[i].z, p.y / p.z - B[i].y / B[i].z) * f;
             sum += e * e;
             ++n;
+            if (std::isfinite(e) && e < 1.5) ++accepted[ids[i]];
         }
         S.poses[fr] = Pose{mul(R, S.poses[fr - 1].R), V3{}, true};
-        S.inliers = std::max<u32>(S.inliers, static_cast<u32>(best.size()));
+    }
+    S.rotationTracks.resize(M, 0);
+    // Validate the accumulated rotation over each entire track. Small adjacent
+    // displacements can fit rotation even on a travelling camera; their drift
+    // over the shot must not be mistaken for a tripod reconstruction.
+    sum = 0;
+    n = 0;
+    for (u32 t = 0; t < M; ++t) {
+        // A track's overlay is solved only if it actually agrees with the camera.
+        // A single lucky match must not mark a moving foreground object as solved.
+        if (observed[t] == 0 || accepted[t] < observed[t] - observed[t] / 5) continue;
+        u32 first = N, count = 0, good = 0;
+        f64 trackSum = 0;
+        V3 world{};
+        for (u32 fr = 0; fr < N; ++fr) {
+            if (!S.poses[fr].valid || !has(t, fr)) continue;
+            if (first == N) { first = fr; world = mul(transpose(S.poses[fr].R), dir(t, fr)); continue; }
+            ++count;
+            const V3 predicted = mul(S.poses[fr].R, world), actual = dir(t, fr);
+            if (predicted.z <= 1e-9) continue;
+            const f64 e = std::hypot(predicted.x / predicted.z - actual.x / actual.z,
+                                      predicted.y / predicted.z - actual.y / actual.z) * f;
+            if (std::isfinite(e) && e < 1.5) { ++good; trackSum += e * e; }
+        }
+        if (count == 0 || good < count - count / 5) continue;
+        S.rotationTracks[t] = 1;
+        ++S.inliers;
+        sum += trackSum;
+        n += good;
     }
     S.solved = static_cast<u32>(std::count_if(S.poses.begin(), S.poses.end(), [](const Pose& p) { return p.valid; }));
     S.rms = n ? std::sqrt(sum / static_cast<f64>(n)) : 1e30;
@@ -1083,6 +1118,12 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
                             std::atomic<f32>* progress) {
     CameraSolution out;
     const u32 N = tracks.frames;
+    if (cancel && cancel->load()) { out.failure = "cancelado"; return out; }
+    if (tracks.width == 0 || tracks.height == 0 ||
+        std::any_of(tracks.pos.begin(), tracks.pos.end(), [N](const auto& row) { return row.size() != N; })) {
+        out.failure = "rastros de camera invalidos";
+        return out;
+    }
     for (const auto& row : tracks.pos) {
         u32 c = 0;
         for (Vec2 p : row) c += Tracks2D::present(p) ? 1u : 0u;
@@ -1100,17 +1141,39 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
         const f64 missing = static_cast<f64>(N - s.solved) / static_cast<f64>(N);
         return s.rms * (1.0 + 4.0 * missing);
     };
-    auto run = [&](f64 fovDeg, bool rot) { return rot ? solve_rotation(tracks, focalOf(fovDeg)) : solve_with_focal(tracks, focalOf(fovDeg), opt.mode, cancel); };
+    auto run = [&](f64 fovDeg, bool rot) { return rot ? solve_rotation(tracks, focalOf(fovDeg), cancel) : solve_with_focal(tracks, focalOf(fovDeg), opt.mode, cancel); };
 
     const bool known = opt.knownFovDeg > 0.0f;
     const f64 lo = known ? opt.knownFovDeg : std::max(5.0f, opt.fovMinDeg);
     const f64 hi = known ? opt.knownFovDeg : std::min(150.0f, opt.fovMaxDeg);
     // Tripé? A FOV do meio decide o modo.
     SolveState probe = run(0.5 * (lo + hi), false);
-    const bool rot = probe.rotationOnly;
+    SolveState rotationProbe = run(0.5 * (lo + hi), true);
+    // Essential matrices are degenerate under pure rotation. Foreground motion
+    // can invent an apparently valid translation, so test the competing model
+    // against whole background tracks instead of trusting decomposition alone.
+    auto rotationFits = [&](const SolveState& s) {
+        return s.solved >= std::max<u32>(10, N / 2) && s.inliers >= 30 &&
+               static_cast<u64>(s.inliers) * 3 >= static_cast<u64>(out.tracks) * 2 && s.rms < 1.5;
+    };
+    f64 rotationFov = 0.5 * (lo + hi);
+    if (!known && !rotationFits(rotationProbe)) {
+        const int coarse = opt.mode == TrackMode::Fast ? 5 : 7;
+        for (int i = 0; i < coarse; ++i) {
+            if (cancel && cancel->load()) break;
+            const f64 fov = lo + (hi - lo) * (static_cast<f64>(i) + 0.5) / coarse;
+            SolveState candidate = run(fov, true);
+            if (candidate.inliers > rotationProbe.inliers ||
+                (candidate.inliers == rotationProbe.inliers && candidate.rms < rotationProbe.rms)) {
+                rotationProbe = std::move(candidate);
+                rotationFov = fov;
+            }
+        }
+    }
+    const bool rot = probe.rotationOnly || rotationFits(rotationProbe);
     if (progress) progress->store(0.15f);
-    f64 bestFov = 0.5 * (lo + hi);
-    SolveState best = rot ? run(bestFov, true) : std::move(probe);
+    f64 bestFov = rot ? rotationFov : 0.5 * (lo + hi);
+    SolveState best = rot ? std::move(rotationProbe) : std::move(probe);
     if (!known) {
         // Busca grossa + seção áurea em volta do melhor.
         const int coarse = opt.mode == TrackMode::Fast ? 5 : 7;
@@ -1119,9 +1182,31 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
             if (cancel && cancel->load()) break;
             const f64 fov = lo + (hi - lo) * (static_cast<f64>(i) + 0.5) / static_cast<f64>(coarse);
             SolveState s = run(fov, rot);
+            if (rot && !rotationFits(s)) continue;
             const f64 sc = score(s);
             if (sc < bestScore) { bestScore = sc; best = std::move(s); bestFov = fov; }
             if (progress) progress->store(0.15f + 0.45f * static_cast<f32>(i + 1) / static_cast<f32>(coarse));
+        }
+    }
+    if (rot && !known && !(cancel && cancel->load())) {
+        // Coarse FOV bins leave systematic pan drift at image edges. Refine the
+        // same global rotation residual instead of dropping those valid tracks.
+        const int coarse = opt.mode == TrackMode::Fast ? 5 : 7;
+        const f64 span = (hi - lo) / coarse;
+        f64 left = std::max(lo, bestFov - span), right = std::min(hi, bestFov + span);
+        auto objective = [&](const SolveState& s) {
+            return s.solved < std::max<u32>(10, N / 2) || s.inliers < 30 ? 1e30
+                : s.rms + 3.0 * (1.0 - static_cast<f64>(s.inliers) / std::max<u32>(1, out.tracks));
+        };
+        f64 bestValue = objective(best);
+        for (int iteration = 0; iteration < (opt.mode == TrackMode::Fast ? 8 : 12); ++iteration) {
+            if (cancel && cancel->load()) break;
+            const f64 a = left + (right - left) / 3.0, b = right - (right - left) / 3.0;
+            SolveState sa = run(a, true), sb = run(b, true);
+            const f64 va = objective(sa), vb = objective(sb);
+            if (va < bestValue) { bestValue = va; best = std::move(sa); bestFov = a; }
+            if (vb < bestValue) { bestValue = vb; best = std::move(sb); bestFov = b; }
+            if (va < vb) right = b; else left = a;
         }
     }
     if (!rot && best.solved >= 3 && !(cancel && cancel->load())) {
@@ -1154,7 +1239,7 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
         for (int k = 0; k < 9; ++k) out.poses[i].R[k] = p.R.m[k];
         out.poses[i].t[0] = p.t.x; out.poses[i].t[1] = p.t.y; out.poses[i].t[2] = p.t.z;
     }
-    out.trackSolved.assign(tracks.pos.size(), rot ? 1 : 0);
+    out.trackSolved = rot ? best.rotationTracks : std::vector<u8>(tracks.pos.size(), 0);
     for (usize t = 0; t < best.X.size(); ++t) {
         if (!best.hasX[t]) continue;
         out.points.push_back(Vec3{static_cast<f32>(best.X[t].x), static_cast<f32>(best.X[t].y), static_cast<f32>(best.X[t].z)});
@@ -1185,7 +1270,9 @@ Vec3 euler_zyx_from_matrix(const f64 m[9]) noexcept {
 }
 
 bool dominant_plane(const std::vector<Vec3>& pts, f32 tolerance, f32 minShare, Vec3& centroid, Vec3& normal) {
-    if (pts.size() < 10) return false;
+    if (pts.size() < 10 || !std::isfinite(tolerance) || tolerance <= 0 ||
+        !std::isfinite(minShare) || minShare <= 0 || minShare > 1) return false;
+    if (std::any_of(pts.begin(), pts.end(), [](Vec3 p) { return !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z); })) return false;
     std::mt19937 rng(7u);
     std::uniform_int_distribution<usize> pick(0, pts.size() - 1);
     usize bestCount = 0;
@@ -1203,10 +1290,32 @@ bool dominant_plane(const std::vector<Vec3>& pts, f32 tolerance, f32 minShare, V
         if (cnt > bestCount) { bestCount = cnt; bn = u; bd = d; }
     }
     if (static_cast<f32>(bestCount) < minShare * static_cast<f32>(pts.size())) return false;
-    Vec3 sum{0, 0, 0};
-    usize cnt = 0;
-    for (const Vec3& p : pts) if (std::fabs(bn.dot(p) - bd) < tolerance) { sum = sum + p; ++cnt; }
-    centroid = sum * (1.0f / static_cast<f32>(cnt));
+    // RANSAC chooses membership, not the final plane. Fit its normal using every
+    // inlier; a random three-point normal visibly tilted the tracked scene floor.
+    Vec3 center{};
+    for (int pass = 0; pass < 3; ++pass) {
+        V3 sum{};
+        usize cnt = 0;
+        for (const Vec3& p : pts) if (std::fabs(bn.dot(p) - bd) < tolerance) { sum = sum + V3{p.x, p.y, p.z}; ++cnt; }
+        if (cnt < 10 || static_cast<f32>(cnt) < minShare * static_cast<f32>(pts.size())) return false;
+        sum = sum * (1.0 / static_cast<f64>(cnt));
+        std::vector<f64> covariance(9, 0.0), vectors, values;
+        for (const Vec3& p : pts) if (std::fabs(bn.dot(p) - bd) < tolerance) {
+            const f64 d[3] = {p.x - sum.x, p.y - sum.y, p.z - sum.z};
+            for (int r = 0; r < 3; ++r) for (int c = 0; c < 3; ++c) covariance[r * 3 + c] += d[r] * d[c];
+        }
+        jacobi_eigen(3, covariance, vectors, values);
+        // Collinear/coincident features cannot establish a floor orientation.
+        if (values[2] <= 0 || values[1] <= values[2] * 1e-8) return false;
+        Vec3 fitted{static_cast<f32>(vectors[0]), static_cast<f32>(vectors[3]), static_cast<f32>(vectors[6])};
+        if (fitted.dot(bn) < 0) fitted = fitted * -1.0f;
+        center = Vec3{static_cast<f32>(sum.x), static_cast<f32>(sum.y), static_cast<f32>(sum.z)};
+        bn = fitted;
+        bd = bn.dot(center);
+    }
+    const usize finalCount = static_cast<usize>(std::count_if(pts.begin(), pts.end(), [&](Vec3 p) { return std::fabs(bn.dot(p) - bd) < tolerance; }));
+    if (static_cast<f32>(finalCount) < minShare * static_cast<f32>(pts.size())) return false;
+    centroid = center;
     normal = bn;
     return true;
 }

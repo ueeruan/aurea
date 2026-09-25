@@ -25,6 +25,7 @@
 #include "aurea/tracking/PointTracker.hpp"
 
 #include <atomic>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -35,7 +36,7 @@ struct Tracks2D {
     u32 frames = 0;
     u32 width = 0, height = 0;
     std::vector<std::vector<Vec2>> pos;
-    [[nodiscard]] static bool present(Vec2 p) noexcept { return p.x == p.x; }
+    [[nodiscard]] static bool present(Vec2 p) noexcept { return std::isfinite(p.x) && std::isfinite(p.y); }
 };
 
 /// FAST: menos pontos e menos análise; HIGH: mais pontos e mais refinamento.

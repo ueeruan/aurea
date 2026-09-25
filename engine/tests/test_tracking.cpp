@@ -168,11 +168,60 @@ AUREA_TEST(Tracking, TripodShotIsSolvedAsRotationOnly) {
         }
         if (seen >= 2) T.pos.push_back(std::move(row));
     }
+    const usize backgroundTracks = T.pos.size();
+    // Moving foreground points are present but do not follow camera rotation.
+    std::mt19937 foregroundRng(927u);
+    std::uniform_real_distribution<f32> fx(30, W - 30), fy(30, H - 30);
+    for (u32 i = 0; i < 20; ++i) {
+        std::vector<Vec2> row(N);
+        for (Vec2& p : row) p = Vec2{fx(foregroundRng), fy(foregroundRng)};
+        T.pos.push_back(std::move(row));
+    }
     const CameraSolution s = solve_camera(T, SolveOptions{});
     std::printf("    tripe: %s, so rotacao %d, FOV %.1f (verdade 50), erro %.3f px\n", s.ok ? "resolvida" : "falhou", s.rotationOnly ? 1 : 0,
                 s.fovY * 180.0 / kPiT, s.rmsError);
     AUREA_CHECK(s.ok && s.rotationOnly);
     AUREA_CHECK(s.rmsError < 0.5f);
+    AUREA_CHECK_EQ(s.trackSolved.size(), T.pos.size());
+    if (s.trackSolved.size() == T.pos.size()) {
+        u32 solvedBackground = 0;
+        for (usize i = 0; i < backgroundTracks; ++i) solvedBackground += s.trackSolved[i];
+        AUREA_CHECK(solvedBackground * 10 > backgroundTracks * 9);
+        for (usize i = backgroundTracks; i < T.pos.size(); ++i) AUREA_CHECK_EQ(s.trackSolved[i], 0u);
+        AUREA_CHECK_EQ(s.inliers, solvedBackground);
+    }
+}
+
+AUREA_TEST(Tracking, DominantFloorRefitsConsensusAndRejectsDegenerateGeometry) {
+    std::vector<Vec3> points;
+    for (int z = 0; z < 20; ++z) for (int x = 0; x < 20; ++x) {
+        const f32 px = (x - 9.5f) * 0.4f, pz = (z - 9.5f) * 0.4f;
+        points.push_back(Vec3{px, 2.0f + 0.25f * px - 0.17f * pz + 0.04f * std::sin(1.37f * x + 2.31f * z), pz});
+    }
+    for (int i = 0; i < 100; ++i) points.push_back(Vec3{(i % 10 - 5) * 0.7f, 5.f + (i % 7) * 0.3f, (i / 10 - 5) * 0.7f});
+    Vec3 center{}, normal{};
+    AUREA_CHECK(dominant_plane(points, 0.12f, 0.7f, center, normal));
+    Vec3 expected{-0.25f, 1.f, 0.17f};
+    expected = expected * (1.f / expected.length());
+    if (normal.dot(expected) < 0) normal = normal * -1.f;
+    AUREA_CHECK((normal - expected).length() < 0.001f);
+    AUREA_CHECK(std::fabs(center.y - 2.f) < 0.005f);
+    points.clear();
+    for (int i = 0; i < 40; ++i) points.push_back(Vec3{static_cast<f32>(i), 2.f, 3.f});
+    AUREA_CHECK(!dominant_plane(points, 0.1f, 0.7f, center, normal));
+}
+
+AUREA_TEST(Tracking, InvalidTracksAndCancelledSolveDoNotEnterNumericalSolver) {
+    AUREA_CHECK(!Tracks2D::present(Vec2{12.f, NAN}));
+    AUREA_CHECK(!Tracks2D::present(Vec2{INFINITY, 12.f}));
+    Tracks2D tracks;
+    tracks.width = 640; tracks.height = 360; tracks.frames = 30;
+    tracks.pos.assign(40, std::vector<Vec2>(29, Vec2{100.f, 100.f}));
+    AUREA_CHECK(!solve_camera(tracks, SolveOptions{}).ok);
+    std::atomic<bool> cancel{true};
+    const auto cancelled = solve_camera(tracks, SolveOptions{}, &cancel);
+    AUREA_CHECK(!cancelled.ok && cancelled.failure == "cancelado");
+    AUREA_CHECK(cancelled.poses.empty());
 }
 
 AUREA_TEST(Tracking, FeatureTrackerFollowsRenderedPoints) {

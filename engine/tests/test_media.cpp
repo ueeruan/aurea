@@ -178,6 +178,93 @@ AUREA_TEST(MediaManager, CodecStartupDoesNotBlockRenderOrStatus) {
     manager.close_all();
 }
 
+AUREA_TEST(MediaManager, RetirementDoesNotBlockFramesAndShutdownDrainsEveryCodec) {
+    struct Gate {
+        std::atomic<bool> entered{false}, release{false};
+        std::atomic<u32> opened{0}, destroyed{0}, ready{0};
+        bool blockOpen = false;
+        void wait() {
+            entered.store(true);
+            while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    struct Decoder : VideoDecoderBackend {
+        Gate& gate;
+        SyntheticDecoder decoder{SyntheticConfig{}};
+        explicit Decoder(Gate& g) : gate(g) {}
+        ~Decoder() override { ++gate.destroyed; }
+        const VideoStreamInfo& info() const noexcept override { return decoder.info(); }
+        Status seek_to_keyframe(i64 us) noexcept override { return decoder.seek_to_keyframe(us); }
+        Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+            if (!gate.blockOpen) gate.wait();
+            return decoder.next_frame(from, out, pts, eos);
+        }
+    };
+    struct Factory : VideoSourceFactory {
+        Gate& gate;
+        explicit Factory(Gate& g) : gate(g) {}
+        bool probe(const char*, MediaProbe&) override { return false; }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+            ++gate.opened;
+            if (gate.blockOpen) gate.wait();
+            return std::make_unique<Decoder>(gate);
+        }
+    };
+    for (bool opening : {true, false}) {
+        Gate gate; gate.blockOpen = opening;
+        Factory factory(gate);
+        MediaManager manager;
+        manager.set_factory(&factory);
+        manager.set_ready_callback([](void* context) { ++static_cast<Gate*>(context)->ready; }, &gate);
+        Asset asset;
+        auto* source = manager.source_for(LayerId{0, 1}, AssetId{0, 1}, asset, 1);
+        if (!opening) {
+            wait_until([&] {
+                source = manager.source_for(LayerId{0, 1}, AssetId{0, 1}, asset, 1);
+                return source != nullptr;
+            });
+            AUREA_CHECK(source != nullptr);
+            if (source) source->request({0, DecodeMode::Still, 0, 1});
+        }
+        wait_until([&] { return gate.entered.load(); });
+        AUREA_CHECK(gate.entered.load());
+        std::atomic<bool> returned{false};
+        std::thread render([&] {
+            if (opening) manager.collect(100, 1);
+            else manager.close_layer(LayerId{0, 1});
+            returned.store(true);
+        });
+        wait_until([&] { return returned.load(); }, 500);
+        const bool responsive = returned.load();
+        AUREA_CHECK(responsive);
+        if (!responsive) gate.release.store(true); // Always allow cleanup on regression.
+        render.join();
+        AUREA_CHECK_EQ(manager.stats().sources, 0u);
+        // Retirement must not become an unbounded queue of replacement codecs.
+        if (responsive) {
+            AUREA_CHECK(manager.source_for(LayerId{1, 1}, AssetId{0, 1}, asset, 101) == nullptr);
+            AUREA_CHECK_EQ(gate.opened.load(), 1u);
+        }
+        std::atomic<bool> drained{false};
+        std::thread shutdown([&] { manager.close_all(); drained.store(true); });
+        wait_until([&] { return drained.load(); }, 30);
+        if (responsive) AUREA_CHECK(!drained.load());
+        gate.release.store(true);
+        shutdown.join();
+        AUREA_CHECK(drained.load());
+        AUREA_CHECK_EQ(gate.destroyed.load(), 1u);
+        AUREA_CHECK(gate.ready.load() > 0);
+        // A closed manager can open the same layer again after the queue drains.
+        wait_until([&] {
+            source = manager.source_for(LayerId{0, 1}, AssetId{0, 1}, asset, 102);
+            return source != nullptr;
+        });
+        AUREA_CHECK(source != nullptr);
+        manager.close_all();
+        AUREA_CHECK_EQ(gate.destroyed.load(), 2u);
+    }
+}
+
 // =============================================================================
 // DecodedFrameCache
 // =============================================================================

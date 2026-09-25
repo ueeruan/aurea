@@ -5,7 +5,66 @@
 
 namespace aurea {
 
-MediaManager::~MediaManager() { close_all(); }
+MediaManager::~MediaManager() {
+    close_all();
+    {
+        std::lock_guard<std::mutex> lock(retireMutex_);
+        retireStop_ = true;
+    }
+    retireWake_.notify_all();
+    if (retireThread_.joinable()) retireThread_.join();
+}
+
+void MediaManager::retire_locked(Entry&& entry) {
+    if (entry.source) {
+        entry.source->set_ready_callback(nullptr, nullptr);
+        entry.source->suspend();
+    }
+    {
+        std::lock_guard<std::mutex> lock(retireMutex_);
+        retired_.push_back(std::move(entry));
+        if (!retireThread_.joinable()) retireThread_ = std::thread([this] { retire_main(); });
+    }
+    retireWake_.notify_all();
+}
+
+void MediaManager::retire_main() {
+    for (;;) {
+        Entry closing;
+        {
+            std::unique_lock<std::mutex> lock(retireMutex_);
+            retireWake_.wait(lock, [this] { return retireStop_ || !retired_.empty(); });
+            if (retired_.empty() && retireStop_) return;
+            closing = std::move(retired_.front());
+            retired_.pop_front();
+            retiring_ = true;
+        }
+        // Joins decode/open and releases platform buffers outside both locks.
+        closing = Entry{};
+        void (*ready)(void*) = nullptr;
+        void* context = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ready = readyFn_; context = readyCtx_;
+        }
+        {
+            std::lock_guard<std::mutex> lock(retireMutex_);
+            retiring_ = false;
+            retireNotifying_ = true;
+        }
+        if (ready) ready(context);
+        {
+            std::lock_guard<std::mutex> lock(retireMutex_);
+            retireNotifying_ = false;
+        }
+        retireWake_.notify_all();
+    }
+}
+
+void MediaManager::drain_retired() {
+    std::unique_lock<std::mutex> lock(retireMutex_);
+    retireWake_.wait(lock, [this] { return retired_.empty() && !retiring_ && !retireNotifying_; });
+}
 
 void MediaManager::set_factory(VideoSourceFactory* factory) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -13,6 +72,7 @@ void MediaManager::set_factory(VideoSourceFactory* factory) noexcept {
 }
 
 void MediaManager::set_memory(MemoryManager* memory) noexcept {
+    drain_retired();
     std::lock_guard<std::mutex> lock(mutex_);
     memory_ = memory;
     for (Entry& e : entries_) if (e.source) e.source->cache().attach(memory);
@@ -41,6 +101,13 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     }
     if (!factory_) return nullptr;
 
+    {
+        std::lock_guard<std::mutex> closing(retireMutex_);
+        // Do not accumulate replacement codecs while an old platform session
+        // is stuck closing. Completion wakes the renderer to retry admission.
+        if (retiring_ || !retired_.empty()) return nullptr;
+    }
+
     Entry e;
     e.layer = layer;
     e.asset = assetId;
@@ -60,12 +127,11 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
 }
 
 void MediaManager::collect(u64 frameNumber, u32 idleFrames) {
-    std::vector<Entry> closing;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (usize i = 0; i < entries_.size();) {
             if (frameNumber > entries_[i].lastUsedFrame + idleFrames) {
-                closing.push_back(std::move(entries_[i]));
+                retire_locked(std::move(entries_[i]));
                 entries_[i] = std::move(entries_.back());
                 entries_.pop_back();
                 continue;
@@ -73,18 +139,14 @@ void MediaManager::collect(u64 frameNumber, u32 idleFrames) {
             ++i;
         }
     }
-    // Fecha FORA do lock: parar a thread de decode espera ela terminar o frame
-    // em curso, e ninguém mais pode ficar travado por isso.
-    closing.clear();
 }
 
 void MediaManager::close_layer(LayerId layer) {
-    std::vector<Entry> closing;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (usize i = 0; i < entries_.size();) {
             if (entries_[i].layer == layer) {
-                closing.push_back(std::move(entries_[i]));
+                retire_locked(std::move(entries_[i]));
                 entries_[i] = std::move(entries_.back());
                 entries_.pop_back();
                 continue;
@@ -95,11 +157,12 @@ void MediaManager::close_layer(LayerId layer) {
 }
 
 void MediaManager::close_all() {
-    std::vector<Entry> closing;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        closing.swap(entries_);
+        for (Entry& entry : entries_) retire_locked(std::move(entry));
+        entries_.clear();
     }
+    drain_retired();
 }
 
 void MediaManager::suspend_all() {

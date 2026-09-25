@@ -466,7 +466,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
         media_.collect(frameCounter_, 1);
         const usize framesAfter = memory_.used(MemoryClass::DecodedFrames);
         memory_.note_trim_freed(TrimStage::Temporaries, framesBefore > framesAfter ? framesBefore - framesAfter : 0);
-        AUREA_LOG_INFO("memoria: %u fonte(s) de video ociosa(s) fechada(s)", before - media_.stats().sources);
+        AUREA_LOG_INFO("memoria: %u fonte(s) de video ociosa(s) encaminhada(s) para fechamento", before - media_.stats().sources);
     }
     return memory_.last_trim();
 }

@@ -19,6 +19,8 @@
 #include "aurea/project/Asset.hpp"
 
 #include <memory>
+#include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -67,11 +69,13 @@ public:
     [[nodiscard]] VideoSource* source_for(LayerId layer, AssetId assetId, const Asset& asset,
                                           u64 frameNumber);
 
-    /// Fecha fontes que ninguém pediu nos últimos `idleFrames`.
+    /// Retira fontes ociosas; a fila de encerramento fecha codecs fora do render.
     void collect(u64 frameNumber, u32 idleFrames = 180);
 
-    /// Fecha a fonte de uma layer (layer apagada, projeto fechado).
+    /// Retira a fonte de uma layer sem esperar pelo decoder na thread da UI.
     void close_layer(LayerId layer);
+    /// Fecha e espera todas as fontes, inclusive as já retiradas, antes de
+    /// substituir/destruir o projeto, a fábrica ou o contexto dos callbacks.
     void close_all();
 
     void suspend_all();
@@ -117,6 +121,19 @@ private:
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
     bool suspended_ = false;
+
+    // One retirement worker: a slow platform codec shutdown must not join on
+    // the render/UI thread. close_all drains it before factories/callbacks die.
+    void retire_locked(Entry&& entry);
+    void retire_main();
+    void drain_retired();
+    std::mutex retireMutex_;
+    std::condition_variable retireWake_;
+    std::deque<Entry> retired_;
+    std::thread retireThread_;
+    bool retiring_ = false;
+    bool retireNotifying_ = false;
+    bool retireStop_ = false;
 };
 
 } // namespace aurea

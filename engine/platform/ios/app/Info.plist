@@ -37,7 +37,7 @@
     <string>2.0.0</string>
     <!-- Build iOS do porte do editor Android atual. -->
     <key>CFBundleVersion</key>
-    <string>2109</string>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Salvar o vídeo exportado pelo Aurea na sua galeria.</string>
     <key>UIAppFonts</key>

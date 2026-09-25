@@ -6,6 +6,7 @@ import plistlib
 import struct
 import sys
 import zipfile
+from check_pbxproj import expected_build_version
 
 
 def validate(path):
@@ -19,6 +20,8 @@ def validate(path):
         assert info['CFBundleIdentifier'] == 'com.aurea.aurea', 'Incorrect bundle ID'
         assert info['CFBundlePackageType'] == 'APPL', 'Not an app bundle'
         assert info['CFBundleVersion'].isdigit(), 'Invalid build version'
+        expected_build = expected_build_version()
+        assert info['CFBundleVersion'] == expected_build, 'Stale IPA build: packaged %s, project expects %s' % (info['CFBundleVersion'], expected_build)
         binary = archive.read(prefix + info['CFBundleExecutable'])
         magic, cpu, _, kind = struct.unpack_from('<IIII', binary)
         assert (magic, cpu, kind) == (0xFEEDFACF, 0x0100000C, 2), 'Not an ARM64 executable'

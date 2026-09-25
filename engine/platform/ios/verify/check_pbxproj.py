@@ -86,6 +86,10 @@ def main():
         return report()
 
     text = read(PBX)
+    try:
+        expected_build_version(text)
+    except ValueError as error:
+        fail(str(error))
 
     # --- 1. estrutura ---------------------------------------------------------
     depth = 0
@@ -239,12 +243,32 @@ def main():
              % (bundle.group(1).strip(), android_id))
     if not plist_uses_variable:
         fail("o Info.plist deveria usar $(PRODUCT_BUNDLE_IDENTIFIER)")
+    if not re.search(r"CFBundleVersion</key>\s*<string>\$\(CURRENT_PROJECT_VERSION\)</string>", plist):
+        fail("o Info.plist deveria usar $(CURRENT_PROJECT_VERSION), sem build fixo")
     if not launch_screen:
         fail("Info.plist sem UILaunchScreen")
     if not metal_cap or metal_cap.group(1) != "metal":
         fail("Info.plist sem UIRequiredDeviceCapabilities = metal")
 
     return report()
+
+
+def expected_build_version(text=None):
+    """Resolve the app build number; reject missing or divergent configurations."""
+    objects = parse_objects(read(PBX) if text is None else text)
+    versions = []
+    for _comment, body in objects.values():
+        if "isa = XCBuildConfiguration;" not in body:
+            continue
+        if not re.search(r'PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?com\.aurea\.aurea"?\s*;', body):
+            continue
+        match = re.search(r'CURRENT_PROJECT_VERSION\s*=\s*"?([0-9]+)"?\s*;', body)
+        if not match:
+            raise ValueError("App configuration has no numeric CURRENT_PROJECT_VERSION")
+        versions.append(match.group(1))
+    if not versions or len(set(versions)) != 1:
+        raise ValueError("App configurations must share one CURRENT_PROJECT_VERSION")
+    return versions[0]
 
 
 def report():

@@ -313,7 +313,7 @@ private fun curveJson(store: EditorStore, name: String): String? {
     var i = track.indexOfFirst { it.time == sel.time }
     if (i < 0 || track.size < 2) return null
     if (i == track.lastIndex) i--
-    val e = easeOf(layer, track[i])
+    val e = easeOf(store, layer, track[i])
     val h = e.handles()
     return store.curvePresetJson(name, e.interp, h[0], h[1], h[2], h[3])
 }

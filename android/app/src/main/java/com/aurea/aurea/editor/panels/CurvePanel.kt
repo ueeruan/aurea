@@ -27,7 +27,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,7 +90,7 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
     val isBezier get() = interp == Interp.BEZIER || interp == Interp.CUSTOM
 
     /** Tem alças arrastáveis (bézier ou reta, que vira bézier ao ser puxada). */
-    val hasHandles get() = isBezier || interp == Interp.LINEAR
+    val hasHandles get() = isBezier || interp == Interp.LINEAR || interp == Interp.EASE_IN || interp == Interp.EASE_OUT
 
     fun transform(t: Float): Float = when (interp) {
         Interp.HOLD -> if (t < 1f) 0f else 1f
@@ -127,21 +126,6 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
         if (!isBezier) return true
         return abs(x1 - o.x1) < 0.01f && abs(y1 - o.y1) < 0.01f && abs(x2 - o.x2) < 0.01f && abs(y2 - o.y2) < 0.01f
     }
-}
-
-/** A mesma conta do motor (`cubic_bezier`): acha o t de x por bissecção e devolve y. */
-internal fun cubicBezier(x1: Float, y1: Float, x2: Float, y2: Float, x: Float): Float {
-    fun b(p: Float, q: Float, m: Float) = 3f * p * (1 - m) * (1 - m) * m + 3f * q * (1 - m) * m * m + m * m * m
-    var lo = 0f
-    var hi = 1f
-    var mid = x
-    repeat(24) {
-        mid = (lo + hi) / 2f
-        val e = b(x1, x2, mid)
-        if (abs(e - x) < 1e-4f) return b(y1, y2, mid)
-        if (e < x) lo = mid else hi = mid
-    }
-    return b(y1, y2, mid)
 }
 
 /** Um preset de uma família: nome [A] e o easing do motor. */
@@ -187,29 +171,16 @@ private fun nameOf(e: Ease): Int {
 
 private fun familyOf(e: Ease): Int = if (e.interp == Interp.HOLD) 1 else 0
 
-/**
- * AS ALÇAS QUE O MOTOR NÃO PUBLICA. `KeyframeRow` traz só a interpolação, não os
- * quatro números da bézier; a curva desenhada precisa deles. Guardamos aqui o
- * que ESTA sessão escreveu, por trilha e instante (é o valor que o motor tem,
- * porque fomos nós que mandamos). Keyframe bézier vindo de fora mostra o padrão
- * do motor (0,33 / 0,67). Lacuna do motor anotada no relatório.
- */
-private object HandleMemory {
-    val map = mutableStateMapOf<String, Ease>()
-    fun key(layer: Long, k: KeyframeRow) = "$layer/${k.property}/${k.effectIndex}/${k.paramIndex}/${k.time}"
-}
-
 /** Área de transferência da curva (Copiar curva / Colar curva). */
 private object CurveClipboard {
     var ease: Ease? = null
 }
 
-/** O easing de um keyframe como o motor o tem (com as alças lembradas). */
-internal fun easeOf(layer: Long, k: KeyframeRow): Ease {
-    if (k.interpolation == Interp.BEZIER || k.interpolation == Interp.CUSTOM) {
-        return HandleMemory.map[HandleMemory.key(layer, k)] ?: Ease(k.interpolation, 0.33f, 0f, 0.67f, 1f)
-    }
-    return Ease(k.interpolation, 0f, 0f, 1f, 1f)
+/** Reads the authoritative project curve, including after undo and reopen. */
+internal fun easeOf(store: EditorStore, layer: Long, k: KeyframeRow): Ease {
+    val h = store.queryKeyframeEasing(layer, k)
+    return Ease(k.interpolation, h?.get(0) ?: 0.33f, h?.get(1) ?: 0f,
+        h?.get(2) ?: 0.67f, h?.get(3) ?: 1f)
 }
 
 /**
@@ -220,7 +191,6 @@ internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: E
     val keys = store.keyframes[layer] ?: return
     keys.filter { it.time == start.time && it.sameGroup(start) }.forEach { k ->
         store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2)
-        if (e.isBezier) HandleMemory.map[HandleMemory.key(layer, k)] = e else HandleMemory.map.remove(HandleMemory.key(layer, k))
     }
 }
 
@@ -270,8 +240,9 @@ internal fun CurvePanel(env: PanelEnv) {
         return
     }
     val (layer, start, end) = seg
-    val ease = easeOf(layer, start)
+    val ease = remember(layer, start, store.curveRevision) { easeOf(store, layer, start) }
     var overshoot by rememberSaveable { mutableStateOf(false) }
+    var graphMode by rememberSaveable(layer, start.property, start.effectIndex, start.paramIndex) { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var savePrompt by remember { mutableStateOf(false) }
 
@@ -327,8 +298,16 @@ internal fun CurvePanel(env: PanelEnv) {
             Spacer(Modifier.height(8.dp))
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            Box(Modifier.weight(1f).fillMaxWidth().alpha(if (inside) 1f else 0.45f)) {
-                CurveGraph(
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                listOf(R.string.panel_curva, R.string.particular_curve_value, R.string.panel_velocidade).forEachIndexed { index, label ->
+                    Text(stringResource(label), Modifier.tocavel { graphMode = index }.padding(horizontal = 8.dp, vertical = 8.dp),
+                        fontSize = 11.sp, color = if (graphMode == index) AureaColors.Accent else AureaColors.Muted)
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth().alpha(if (graphMode != 0 || inside) 1f else 0.45f)) {
+                if (graphMode != 0) {
+                    TrackGraph(store, layer, (store.keyframes[layer] ?: emptyList()).track(start), graphMode == 2)
+                } else CurveGraph(
                     ease = ease,
                     overshoot = overshoot,
                     progress = progress,
@@ -361,7 +340,7 @@ internal fun CurvePanel(env: PanelEnv) {
         val saved = remember(store.presets.user) { store.presets.entries(com.aurea.aurea.presets.PresetKind.Curve).mapNotNull { entry ->
             store.curveOfPreset(entry)?.let { v -> CurvePreset(null, Ease(v[0].toInt(), v[1], v[2], v[3], v[4]), entry) }
         } }
-        CurveFamilies(
+        if (graphMode == 0) CurveFamilies(
             current = ease,
             saved = saved,
             onPick = { p ->
@@ -431,8 +410,9 @@ private fun CurveGraph(
     onEnd: () -> Unit,
 ) {
     val h = ease.handles()
-    val yMin = if (overshoot || h[1] < 0f || h[3] < 0f) -0.5f else -0.12f
-    val yMax = if (overshoot || h[1] > 1f || h[3] > 1f) 1.5f else 1.12f
+    var activeRange by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    val yMin = activeRange?.first ?: min(if (overshoot) -0.5f else -0.12f, min(h[1], h[3]) - 0.12f)
+    val yMax = activeRange?.second ?: max(if (overshoot) 1.5f else 1.12f, max(h[1], h[3]) + 0.12f)
     val current by rememberUpdatedState(ease)
     val over by rememberUpdatedState(overshoot)
     val range by rememberUpdatedState(Pair(yMin, yMax))
@@ -448,32 +428,43 @@ private fun CurveGraph(
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     val e0 = current
-                    if (!e0.hasHandles) return@awaitEachGesture
+                    if (!e0.hasHandles || size.width <= 0 || size.height <= 0) return@awaitEachGesture
                     val (lo, hi) = range
                     fun plot(x: Float, y: Float) = Offset(x * size.width, size.height - (y - lo) / (hi - lo) * size.height)
                     val hh = e0.handles()
                     val p1 = plot(hh[0], hh[1])
                     val p2 = plot(hh[2], hh[3])
-                    val first = (down.position - p1).getDistanceSquared() <= (down.position - p2).getDistanceSquared()
+                    val d1 = (down.position - p1).getDistanceSquared()
+                    val d2 = (down.position - p2).getDistanceSquared()
+                    val radius = 24.dp.toPx()
+                    if (min(d1, d2) > radius * radius) return@awaitEachGesture
+                    val first = d1 <= d2
+                    val grabOffset = (if (first) p1 else p2) - down.position
                     var began = false
                     var e = Ease(Interp.BEZIER, hh[0], hh[1], hh[2], hh[3])
-                    while (true) {
+                    try {
+                      while (true) {
                         val ev = awaitPointerEvent()
                         val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
                         if (!ch.pressed) break
                         ch.consume()
-                        val x = (ch.position.x / size.width).coerceIn(0f, 1f)
-                        var y = lo + (size.height - ch.position.y) / size.height * (hi - lo)
+                        val position = ch.position + grabOffset
+                        val x = (position.x / size.width).coerceIn(0f, 1f)
+                        var y = lo + (size.height - position.y) / size.height * (hi - lo)
                         if (!over) y = y.coerceIn(0f, 1f)
                         if (!x.isFinite() || !y.isFinite()) continue
                         if (!began) {
                             began = true
+                            activeRange = Pair(lo, hi)
                             begin()
                         }
                         e = if (first) e.copy(x1 = x, y1 = y) else e.copy(x2 = x, y2 = y)
                         change(e)
+                      }
+                    } finally {
+                        activeRange = null
+                        if (began) end()
                     }
-                    if (began) end()
                 }
             },
     ) {

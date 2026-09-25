@@ -285,8 +285,19 @@ class AureaEngine private constructor() {
      * concatenadas. Devolve `(camadas shl 32) or total`; se não coube, nada
      * foi escrito e quem chama cresce os buffers.
      */
+    fun queryKeyframeEasing(layer: Long, property: Int, effect: Int, param: Int, time: Int): FloatArray? {
+        val handles = FloatArray(4)
+        return if (nativeQueryKeyframeEasing(nativeHandle, layer, property, effect, param, time, handles)) handles else null
+    }
+
     fun queryAllKeyframes(index: ByteBuffer, layerCapacity: Int, rows: ByteBuffer, capacity: Int): Long =
         nativeQueryAllKeyframes(nativeHandle, index, layerCapacity, rows, capacity)
+
+    fun queryTrackCurve(layer: Long, property: Int, effect: Int, param: Int, from: Int, to: Int): FloatArray {
+        val values = FloatArray(160)
+        val count = nativeQueryTrackCurve(nativeHandle, layer, property, effect, param, from, to, values)
+        return if (count == values.size) values else values.copyOf(count.coerceIn(0, values.size))
+    }
 
     fun queryCurve(layer: Long, property: Int, from: Int, to: Int, out: FloatArray): Int =
         nativeQueryCurve(nativeHandle, layer, property, from, to, out, out.size)
@@ -656,6 +667,8 @@ class AureaEngine private constructor() {
     private external fun nativeQueryLayers(
         handle: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer, blobCapacity: Int,
     ): Int
+    private external fun nativeQueryTrackCurve(handle: Long, layer: Long, property: Int, effect: Int, param: Int, from: Int, to: Int, out: FloatArray): Int
+    private external fun nativeQueryKeyframeEasing(handle: Long, layer: Long, property: Int, effect: Int, param: Int, time: Int, out: FloatArray): Boolean
     private external fun nativeQueryKeyframes(handle: Long, layer: Long, rows: ByteBuffer, capacity: Int): Int
     private external fun nativeQueryAllKeyframes(handle: Long, index: ByteBuffer, layerCapacity: Int, rows: ByteBuffer, capacity: Int): Long
     private external fun nativeQueryCurve(

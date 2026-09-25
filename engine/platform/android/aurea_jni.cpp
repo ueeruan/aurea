@@ -571,6 +571,30 @@ AUREA_JNI jint AUREA_FN(nativeQueryLayers)(JNIEnv* env, jclass, jlong handle, jo
     return static_cast<jint>(c->engine.query_layers(out, cap, static_cast<char*>(buffer_ptr(env, blob)), blobCap));
 }
 
+AUREA_JNI jint AUREA_FN(nativeQueryTrackCurve)(JNIEnv* env, jclass, jlong handle, jlong layer,
+                                                jint property, jint effect, jint param, jint from, jint to, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    const jsize count = env->GetArrayLength(out);
+    jfloat* values = env->GetFloatArrayElements(out, nullptr);
+    if (!values) return 0;
+    const u32 written = c->engine.query_track_curve(static_cast<u64>(layer), static_cast<u32>(property),
+        static_cast<u32>(effect), static_cast<u32>(param), from, to, values, static_cast<u32>(count));
+    env->ReleaseFloatArrayElements(out, values, 0);
+    return static_cast<jint>(written);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeQueryKeyframeEasing)(JNIEnv* env, jclass, jlong handle, jlong layer,
+                                                       jint property, jint effect, jint param, jint time, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 4) return JNI_FALSE;
+    f32 handles[4];
+    if (!c->engine.query_keyframe_easing(static_cast<u64>(layer), static_cast<u32>(property),
+                                        static_cast<u32>(effect), static_cast<u32>(param), time, handles)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 4, handles);
+    return env->ExceptionCheck() ? JNI_FALSE : JNI_TRUE;
+}
+
 AUREA_JNI jint AUREA_FN(nativeQueryKeyframes)(JNIEnv* env, jclass, jlong handle, jlong layer, jobject rows,
                                               jint capacity) {
     NativeContext* c = ctx_of(handle);

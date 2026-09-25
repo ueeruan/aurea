@@ -11,7 +11,7 @@ struct CurveEase: Equatable {
     var y2: Float
     static let linear = CurveEase(interpolation: 1, x1: 0, y1: 0, x2: 1, y2: 1)
     var isBezier: Bool { interpolation == 2 || interpolation == 6 }
-    var hasHandles: Bool { isBezier || interpolation == 1 }
+    var hasHandles: Bool { isBezier || interpolation == 1 || interpolation == 3 || interpolation == 4 }
     var handles: [Float] {
         switch interpolation {
         case 1: return [0, 0, 1, 1]
@@ -29,17 +29,27 @@ struct CurveEase: Equatable {
         case 4: return 1 - (1 - t) * (1 - t)
         case 5: return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
         default:
-            func bezier(_ p: Float, _ q: Float, _ m: Float) -> Float {
-                3 * p * (1 - m) * (1 - m) * m + 3 * q * (1 - m) * m * m + m * m * m
+            if t <= 0 { return 0 }
+            if t >= 1 { return 1 }
+            func bezier(_ p: Float, _ q: Float, _ m: Double) -> Double {
+                3 * Double(p) * (1 - m) * (1 - m) * m + 3 * Double(q) * (1 - m) * m * m + m * m * m
             }
-            var low: Float = 0, high: Float = 1, mid = t
-            for _ in 0..<24 {
-                mid = (low + high) / 2
-                let value = bezier(x1, x2, mid)
-                if abs(value - t) < 0.0001 { return bezier(y1, y2, mid) }
-                if value < t { low = mid } else { high = mid }
+            var low = 0.0, high = 1.0, parameter = Double(t)
+            for _ in 0..<28 {
+                let error = bezier(x1, x2, parameter) - Double(t)
+                if error == 0 { return Float(bezier(y1, y2, parameter)) }
+                if error < 0 { low = parameter } else { high = parameter }
+                let m = 1 - parameter
+                let slope = 3 * m * m * Double(x1) + 6 * m * parameter * (Double(x2) - Double(x1)) + 3 * parameter * parameter * (1 - Double(x2))
+                var next = (low + high) * 0.5
+                if abs(slope) > 1e-12 {
+                    let candidate = parameter - error / slope
+                    if candidate > low && candidate < high { next = candidate }
+                }
+                if abs(next - parameter) < 1e-9 { return Float(bezier(y1, y2, next)) }
+                parameter = next
             }
-            return bezier(y1, y2, mid)
+            return Float(bezier(y1, y2, parameter))
         }
     }
     func same(_ other: CurveEase) -> Bool {
@@ -133,10 +143,11 @@ private struct NativeCurveGraph: View {
         var low: Float
         var high: Float
         var ease: CurveEase
+        var grabOffset: CGPoint
         var began = false
     }
-    private var low: Float { overshoot || ease.handles[1] < 0 || ease.handles[3] < 0 ? -0.5 : -0.12 }
-    private var high: Float { overshoot || ease.handles[1] > 1 || ease.handles[3] > 1 ? 1.5 : 1.12 }
+    private var low: Float { drag?.low ?? min(overshoot ? -0.5 : -0.12, min(ease.handles[1], ease.handles[3]) - 0.12) }
+    private var high: Float { drag?.high ?? max(overshoot ? 1.5 : 1.12, max(ease.handles[1], ease.handles[3]) + 0.12) }
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -207,12 +218,17 @@ private struct NativeCurveGraph: View {
                 let dx = value.startLocation.x - p.x, dy = value.startLocation.y - p.y
                 return dx * dx + dy * dy
             }
-            drag = HandleDrag(first: distance(a) <= distance(b), low: low, high: high,
-                ease: CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3]))
+            let d1 = distance(a), d2 = distance(b)
+            guard min(d1, d2) <= 24 * 24 else { return }
+            let first = d1 <= d2, point = first ? a : b
+            drag = HandleDrag(first: first, low: low, high: high,
+                ease: CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3]),
+                grabOffset: CGPoint(x: point.x - value.startLocation.x, y: point.y - value.startLocation.y))
         }
         guard var current = drag, abs(value.translation.width) + abs(value.translation.height) > 0.01 else { return }
-        let x = Float(value.location.x / size.width).clamped(to: 0...1)
-        var y = current.low + Float((size.height - value.location.y) / size.height) * (current.high - current.low)
+        let location = CGPoint(x: value.location.x + current.grabOffset.x, y: value.location.y + current.grabOffset.y)
+        let x = Float(location.x / size.width).clamped(to: 0...1)
+        var y = current.low + Float((size.height - location.y) / size.height) * (current.high - current.low)
         if !overshoot { y = y.clamped(to: 0...1) }
         guard x.isFinite, y.isFinite else { return }
         if !current.began { current.began = true; onBegin() }
@@ -253,6 +269,7 @@ struct NativeCurvePanel: View {
     @State private var ease = CurveEase.linear
     @State private var overshoot = false
     @State private var family = 0
+    @State private var graphMode = 0
     @State private var saved: [CurvePresetItem] = []
     private struct Segment {
         let start: KeyframeItem
@@ -286,15 +303,26 @@ struct NativeCurvePanel: View {
                 HStack(spacing: 0) {
                     leftRail(segment)
                     VStack(spacing: 0) {
-                        NativeCurveGraph(ease: ease, overshoot: overshoot, progress: progress(segment),
-                            onBegin: { model.beginGesture("curva") },
-                            onChange: { apply($0, to: segment.start); model.refreshModel(force: true) },
-                            onEnd: { model.endGesture() })
-                            .opacity(progress(segment) != nil ? 1 : 0.45)
-                            .id("\(layer):\(segment.id)")
+                        HStack(spacing: 0) {
+                            ForEach(0..<3, id: \.self) { index in
+                                Button(AureaText.t(["panel_curva", "particular_curve_value", "panel_velocidade"][index])) { graphMode = index }
+                                    .font(.aurea(size: 11)).padding(.horizontal, 8).padding(.vertical, 8)
+                                    .foregroundStyle(graphMode == index ? AureaColors.accent : AureaColors.muted)
+                            }
+                        }
+                        if graphMode == 0 {
+                            NativeCurveGraph(ease: ease, overshoot: overshoot, progress: progress(segment),
+                                onBegin: { model.beginGesture("curva") },
+                                onChange: { apply($0, to: segment.start); model.refreshModel(force: true) },
+                                onEnd: { model.endGesture() })
+                                .opacity(progress(segment) != nil ? 1 : 0.45)
+                                .id("\(layer):\(segment.id)")
+                        } else {
+                            NativeTrackGraph(layer: layer, keys: track, speed: graphMode == 2)
+                        }
                         segmentNavigation(segment)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    families
+                    if graphMode == 0 { families }
                 }.frame(maxHeight: .infinity)
             } else {
                 VStack(spacing: 12) {
@@ -915,5 +943,169 @@ private struct ExpressionTextInput: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) { parent.text = textView.text; parent.selection = textView.selectedRange }
         func textViewDidChangeSelection(_ textView: UITextView) { if parent.selection != textView.selectedRange { parent.selection = textView.selectedRange } }
         func scrollViewDidScroll(_ scrollView: UIScrollView) { parent.scroll = scrollView.contentOffset.y }
+    }
+}
+
+// Value/speed graph uses the core track evaluator, not the easing thumbnail.
+private struct TrackGraphViewport: Equatable {
+    var from: Double, to: Double, low: Double, high: Double
+    var duration: Double { max(1, to - from) }
+    var range: Double { max(0.0001, high - low) }
+    func transformed(zoom: Double, dx: Double = 0, dy: Double = 0) -> TrackGraphViewport {
+        let duration = min(1e9, max(1, self.duration / min(4, max(0.25, zoom))))
+        let range = min(1e12, max(0.0001, self.range / min(4, max(0.25, zoom))))
+        let from = min(1e9 - duration, max(-1e9, self.from + (self.duration - duration) * 0.5 - dx * self.duration))
+        let low = self.low + (self.range - range) * 0.5 + dy * self.range
+        return TrackGraphViewport(from: from, to: from + duration, low: low, high: low + range)
+    }
+}
+
+@MainActor
+private struct NativeTrackGraph: View {
+    @EnvironmentObject private var model: AureaModel
+    let layer: Int64
+    let keys: [KeyframeItem]
+    let speed: Bool
+    @State private var viewport = TrackGraphViewport(from: 0, to: 100, low: 0, high: 1)
+    @State private var samples: [CGPoint] = []
+    @State private var drag: GraphDrag?
+    @GestureState private var touching = false
+    private struct GraphDrag {
+        let initial: TrackGraphViewport
+        let key: KeyframeItem?
+        var began = false
+    }
+    private var start: Int32 { Int32(floor(viewport.from)) }
+    private var end: Int32 { max(start + 1, Int32(ceil(viewport.to))) }
+    private var signature: String {
+        guard let first = keys.first else { return "" }
+        return "\(layer):\(first.property):\(first.effectIndex):\(first.paramIndex):\(speed)"
+    }
+    private func read(from: Int32, to: Int32) -> [CGPoint] {
+        guard let first = keys.first, to > from else { return [] }
+        let values = model.engine.trackCurve(layer, property: first.property, effect: first.effectIndex,
+            param: first.paramIndex, from: from, to: to)
+        var result: [CGPoint] = []
+        for (index, number) in values.enumerated() {
+            let frame = Double(Int64(Double(from) + (Double(to) - Double(from)) * Double(index) / Double(max(1, values.count - 1))))
+            let value = number.doubleValue
+            if value.isFinite && (result.last == nil || result.last!.x != CGFloat(frame)) {
+                result.append(CGPoint(x: frame, y: value))
+            }
+        }
+        if !speed { return result }
+        let fps = max(1, Double(model.status.compFps))
+        return zip(result, result.dropFirst()).compactMap { a, b in
+            let velocity = Double(b.y - a.y) * fps / Double(b.x - a.x)
+            return velocity.isFinite ? CGPoint(x: (a.x + b.x) * 0.5, y: velocity) : nil
+        }
+    }
+    private func reload() { samples = read(from: start, to: end) }
+    private func fit() {
+        guard let first = keys.first, let last = keys.last else { return }
+        let to = max(first.time + 1, last.time)
+        let full = read(from: first.time, to: to)
+        let values = full.map { Double($0.y) } + (speed ? [0] : keys.map { Double($0.value) })
+        let low = values.min() ?? 0, high = values.max() ?? 1
+        let margin = max(0.1, max(high - low, abs(high) * 0.05) * 0.12)
+        let timeMargin = max(1, (Double(to) - Double(first.time)) * 0.06)
+        viewport = TrackGraphViewport(from: Double(first.time) - timeMargin, to: Double(to) + timeMargin, low: low - margin, high: high + margin)
+        reload()
+    }
+    private func point(_ frame: Double, _ value: Double, _ size: CGSize, _ view: TrackGraphViewport) -> CGPoint {
+        CGPoint(x: (frame - view.from) / view.duration * Double(size.width),
+            y: Double(size.height) - (value - view.low) / view.range * Double(size.height))
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text(String(format: "%.3g%@", viewport.high, speed ? " /s" : ""))
+                    .font(.aurea(size: 10)).foregroundStyle(AureaColors.muted)
+                Spacer(minLength: 0)
+                Button("−") { viewport = viewport.transformed(zoom: 1 / 1.5) }.frame(width: 36, height: 36)
+                Button("+") { viewport = viewport.transformed(zoom: 1.5) }.frame(width: 36, height: 36)
+                Button(AureaText.t("panel_ajustar")) { fit() }.font(.aurea(size: 11))
+            }.foregroundStyle(AureaColors.accent)
+            GeometryReader { geometry in
+                Canvas { context, size in
+                    func plot(_ frame: Double, _ value: Double) -> CGPoint { point(frame, value, size, viewport) }
+                    func line(_ a: CGPoint, _ b: CGPoint, color: Color, width: CGFloat = 1) {
+                        var path = Path(); path.move(to: a); path.addLine(to: b)
+                        context.stroke(path, with: .color(color), lineWidth: width)
+                    }
+                    for index in 1...3 {
+                        let x = size.width * CGFloat(index) / 4, y = size.height * CGFloat(index) / 4
+                        line(CGPoint(x: x, y: 0), CGPoint(x: x, y: size.height), color: .white.opacity(0.1))
+                        line(CGPoint(x: 0, y: y), CGPoint(x: size.width, y: y), color: .white.opacity(0.1))
+                    }
+                    let zero = plot(viewport.from, 0).y
+                    if zero >= 0 && zero <= size.height { line(CGPoint(x: 0, y: zero), CGPoint(x: size.width, y: zero), color: .white.opacity(0.3)) }
+                    var path = Path()
+                    for (index, sample) in samples.enumerated() {
+                        let p = plot(Double(sample.x), Double(sample.y))
+                        if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                    }
+                    context.stroke(path, with: .color(AureaColors.accent), lineWidth: 2)
+                    if !speed {
+                        for key in keys {
+                            let p = plot(Double(key.time), Double(key.value))
+                            let dot = Path(ellipseIn: CGRect(x: p.x - 6, y: p.y - 6, width: 12, height: 12))
+                            context.fill(dot, with: .color(key.time == model.curveSelectedTime ? .white : AureaColors.accent))
+                        }
+                    }
+                    let x = plot(Double(model.localPlayhead), 0).x
+                    if x >= 0 && x <= size.width { line(CGPoint(x: x, y: 0), CGPoint(x: x, y: size.height), color: AureaColors.danger) }
+                }.clipped().contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0)
+                    .updating($touching) { _, active, _ in active = true }
+                    .onChanged { move($0, size: geometry.size) }
+                    .onEnded { _ in finish() })
+            }
+            HStack {
+                Text(String(format: "%.3g%@", viewport.low, speed ? " /s" : ""))
+                Spacer()
+                Text("\(start)–\(end) f")
+            }.font(.aurea(size: 10)).foregroundStyle(AureaColors.muted)
+        }
+        .onAppear { fit() }
+        .onChange(of: signature) { _ in finish(); fit() }
+        .onChange(of: viewport) { _ in reload() }
+        .onChange(of: model.status.modelRevision) { _ in reload() }
+        .onChange(of: touching) { active in if !active { finish() } }
+        .onDisappear { finish() }
+    }
+    private func move(_ value: DragGesture.Value, size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        if drag == nil {
+            var nearest: KeyframeItem?
+            var distance = CGFloat(24 * 24)
+            if !speed {
+                for key in keys {
+                    let p = point(Double(key.time), Double(key.value), size, viewport)
+                    let dx = p.x - value.startLocation.x, dy = p.y - value.startLocation.y
+                    let d = dx * dx + dy * dy
+                    if d <= distance { nearest = key; distance = d }
+                }
+            }
+            drag = GraphDrag(initial: viewport, key: nearest)
+            if let nearest { model.curveSelectedTime = nearest.time }
+        }
+        guard var current = drag else { return }
+        if let key = current.key {
+            guard current.began || abs(value.translation.height) >= 1 else { return }
+            let changed = Double(key.value) - Double(value.translation.height / size.height) * current.initial.range
+            guard changed.isFinite, abs(changed) <= Double(Float.greatestFiniteMagnitude) else { return }
+            if !current.began { model.beginGesture("editar valor do keyframe"); current.began = true; drag = current }
+            model.engine.editTrackKey(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex,
+                time: key.time, action: 0, value: Float(changed), targetTime: key.time, interpolation: key.interpolation, handles: [])
+            model.refreshModel(force: true)
+        } else {
+            viewport = current.initial.transformed(zoom: 1,
+                dx: Double(value.translation.width / size.width), dy: Double(value.translation.height / size.height))
+        }
+    }
+    private func finish() {
+        let began = drag?.began == true; drag = nil
+        if began { model.endGesture() }
     }
 }

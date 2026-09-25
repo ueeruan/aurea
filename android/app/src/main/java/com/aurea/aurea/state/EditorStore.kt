@@ -937,6 +937,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Relê tudo o que depende do modelo. Barato: dezenas de linhas POD. */
     private fun refreshModel() {
+        curveRevision++
         layers = readLayers()
         refreshMarkers()
         editMode = engine.editMode()
@@ -1808,6 +1809,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         send { deleteKeyframe(layer, key.property, key.effectIndex, key.paramIndex, key.time) }
         refreshNow()
     }
+
+    // KeyframeRow omits Bezier handles, so equal timeline rows can still have
+    // changed curves after undo, imports or another editing surface.
+    var curveRevision by mutableIntStateOf(0)
+        private set
+
+    fun queryTrackCurve(layer: Long, key: KeyframeRow, from: Int, to: Int): FloatArray =
+        engine.queryTrackCurve(layer, key.property, key.effectIndex, key.paramIndex, from, to)
+
+    fun setGraphKeyframeValue(layer: Long, key: KeyframeRow, value: Float) {
+        if (!value.isFinite()) return
+        send { setKeyframeValue(layer, key.property, key.effectIndex, key.paramIndex, key.time, value) }
+        refreshNow()
+    }
+
+    fun queryKeyframeEasing(layer: Long, key: KeyframeRow): FloatArray? =
+        engine.queryKeyframeEasing(layer, key.property, key.effectIndex, key.paramIndex, key.time)
 
     /** Interpolação/easing de um keyframe (`interp` = `aurea::Interpolation`). */
     fun setKeyframeEasing(layer: Long, key: KeyframeRow, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float) {

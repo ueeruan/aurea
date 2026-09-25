@@ -20,3 +20,5 @@ screenshots establish interaction rather than final text quality.
 Native iOS execution and encoded-file text export were not newly verified in
 this checkpoint. Character offset/random order and subframe Hold behavior are
 separate remaining text-animation concerns; this change does not claim them.
+
+Follow-up actual Android export: saved 1280x720 H.264, 21fps, all 63 frames decode successfully with FFmpeg; text is present after its reveal (text-export-720p.mp4, text-export-frame.png). Immediately after export, the old emulator Chromium WebView crashed in MediaSessionImpl.mediaSessionPositionChanged; this is under separate investigation and is not reported as a clean whole-app export regression.

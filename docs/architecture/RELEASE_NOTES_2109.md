@@ -31,3 +31,8 @@ Mudanças aplicáveis incluídas no core compartilhado e interfaces Android/iOS.
 AI Video Upscaler, validação completa de tracking/estabilização/flow/3D,
 medições em celulares fracos e regressão nativa iOS permanecem pendentes.
 O IPA do workflow é sem assinatura e precisa ser assinado para instalar.
+
+Erro conhecido no ambiente de teste: após salvar corretamente o MP4, o anúncio
+Unity provocou uma falha interna do WebView 124 do emulador. A causa dentro do
+SDK/WebView não foi corrigida neste build; ainda requer reprodução em aparelho
+com WebView atualizado. Não confundir isso com falha na codificação do vídeo.

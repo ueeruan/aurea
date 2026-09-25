@@ -395,6 +395,7 @@ void Engine::shutdown() noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         project_.reset();
+        ++projectSession_;
         images_.clear();
         models_.clear();
         hdris_.clear();
@@ -629,6 +630,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
     project_ = std::make_unique<Project>(std::move(*result));
+    ++projectSession_;
     images_.clear();
     models_.clear();
     hdris_.clear();
@@ -796,6 +798,7 @@ Status Engine::load_project(const char* path) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         project_ = std::make_unique<Project>(std::move(loaded));
+        ++projectSession_;
         project_->set_path(main);
         mainFileSuspect_ = (notice & (kLoadRecoveredCopy | kLoadPartial)) != 0;
         migrate_echo_to_effect();
@@ -901,6 +904,16 @@ Status Engine::load_project(const char* path) noexcept {
 
 Status Engine::save_project(const char* path) noexcept {
     if (!path || !*path) return Errc::InvalidArgument;
+    return save_project_impl(path);
+}
+
+Status Engine::save_project_impl(const char* requestedPath, bool idleOnly) noexcept {
+    u64 session;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return Errc::InvalidState;
+        session = projectSession_;
+    }
     // Uma gravação por vez: autosave, "Salvar" e ir para segundo plano podem
     // chegar juntos, cada um na sua thread.
     std::lock_guard<std::mutex> saveLock(saveMutex_);
@@ -910,15 +923,21 @@ Status Engine::save_project(const char* path) noexcept {
     u32 revision = 0;
     bool keepBackup = true;
     SaveOptions options;
+    std::string path;
     const u64 t0 = monotonic_ns();
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         if (!project_) return Errc::InvalidState;
+        if (session != projectSession_) return Errc::Cancelled;
+        path = requestedPath ? requestedPath : project_->path();
+        if (path.empty()) return Status{Errc::InvalidState, "projeto nunca foi salvo"};
         // A UI pode salvar logo depois de submit_commands, antes do próximo
         // frame (inclusive sem GPU ou em segundo plano). O snapshot precisa
         // incluir essa edição. O mesmo lock serializa os consumidores da
         // fila no render e aqui; não há renderização nem espera pela GPU.
         drain_commands_locked();
+        if (idleOnly && (!project_->dirty() || playback_.mode() != PlaybackMode::Paused || history_.in_group()))
+            return OkStatus;
         project_->metadata().modifiedUnixMs = wall_clock_ms();
         if (const Status s = ProjectSerializer::encode(*project_, options, bytes); !s.ok()) {
             set_last_error(s, "salvar projeto");
@@ -934,7 +953,7 @@ Status Engine::save_project(const char* path) noexcept {
 
     options.keepBackup = keepBackup;
     std::string error;
-    const Status s = ProjectSerializer::write_encoded(bytes, path, options, &error);
+    const Status s = ProjectSerializer::write_encoded(bytes, path.c_str(), options, &error);
     const u64 t2 = monotonic_ns();
     {
         std::lock_guard<std::mutex> sl(saveStatsMutex_);
@@ -953,7 +972,7 @@ Status Engine::save_project(const char* path) noexcept {
     }
 
     std::lock_guard<std::mutex> lock(modelMutex_);
-    if (!project_) return OkStatus;
+    if (!project_ || session != projectSession_) return OkStatus;
     project_->set_path(path);
     mainFileSuspect_ = false;
     // Só limpa se ninguém mexeu durante a escrita: a edição feita durante o
@@ -968,14 +987,11 @@ Engine::SaveStats Engine::save_stats() const noexcept {
     return saveStats_;
 }
 Status Engine::save_project() noexcept {
-    std::string path;
-    {
-        std::lock_guard<std::mutex> lock(modelMutex_);
-        if (!project_) return Errc::InvalidState;
-        if (!project_->has_path()) return Status{Errc::InvalidState, "projeto nunca foi salvo"};
-        path = project_->path();
-    }
-    return save_project(path.c_str());
+    return save_project_impl(nullptr);
+}
+
+Status Engine::autosave_project() noexcept {
+    return save_project_impl(nullptr, true);
 }
 
 const AutosaveState& Engine::autosave_state() const noexcept {

@@ -288,6 +288,7 @@ public:
     /// a escrita. Disco cheio → StorageFull, com o arquivo anterior intacto.
     [[nodiscard]] Status save_project(const char* path) noexcept;
     [[nodiscard]] Status save_project() noexcept;
+    [[nodiscard]] Status autosave_project() noexcept;
 
     /// Bits do que a última abertura precisou fazer (0 = abriu limpo). A UI
     /// avisa em vez de esconder (§55, §120, §124).
@@ -1068,6 +1069,8 @@ private:
 
     // --- Gravação / abertura (Fase 8G) ---------------------------------------
     std::mutex         saveMutex_;              ///< uma gravação por vez
+    u64                projectSession_ = 0;     ///< under modelMutex_; changes on replacement
+    [[nodiscard]] Status save_project_impl(const char* path, bool idleOnly = false) noexcept;
     mutable std::mutex saveStatsMutex_;
     SaveStats          saveStats_{};
     /// O arquivo principal do projeto aberto estava ruim (abriu da cópia ou

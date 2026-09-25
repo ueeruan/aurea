@@ -645,6 +645,11 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     return e && e->save_project(to_std(path).c_str()).ok() ? YES : NO;
 }
 
+- (BOOL)autosaveProject {
+    auto* e = self.engine;
+    return e && e->autosave_project().ok() ? YES : NO;
+}
+
 - (BOOL)recoverSession {
     auto* e = self.engine;
     return e && e->recover_session().ok() ? YES : NO;

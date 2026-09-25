@@ -234,6 +234,21 @@ bool read_all(const std::string& path, std::vector<u8>& out, usize maxBytes) noe
 Status write_atomic(const std::string& path, const void* data, usize size,
                     const AtomicWriteOptions& options, std::string* outError) noexcept {
     if (path.empty() || (!data && size)) return Status{Errc::InvalidArgument, "caminho ou dados invalidos"};
+    if (g_faultArmed.load(std::memory_order_relaxed)) {
+        void (*callback)(void*) = nullptr;
+        void* context = nullptr;
+        {
+            std::lock_guard<std::mutex> faultLock(g_faultMutex);
+            if (g_fault.kind == Fault::BeforeWrite && g_fault.count &&
+                (g_fault.pathContains.empty() || path.find(g_fault.pathContains) != std::string::npos)) {
+                callback = g_fault.beforeWrite;
+                context = g_fault.context;
+                if (--g_fault.count == 0) g_faultArmed.store(false, std::memory_order_relaxed);
+                g_injected.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        if (callback) callback(context);
+    }
     std::lock_guard<std::mutex> lock(g_writeMutex);
 
     const std::string tmp = temp_path(path);

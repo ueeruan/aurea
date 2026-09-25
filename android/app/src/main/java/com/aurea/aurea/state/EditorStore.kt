@@ -889,6 +889,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else if (playhead != lastPlayhead) {
             // Só o detalhe depende do playhead (valor animado, keyframe aqui).
             lastPlayhead = playhead
+            lastModelChangeNs = System.nanoTime()
             refreshDetail()
             refreshEffectParams()
         }
@@ -921,8 +922,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             // Tudo fora da main: o motor copia o modelo sob o lock (encode, ms) e
             // grava sem ele (fsync). A main só dispara e recebe o código.
-            val code = withContext(Dispatchers.IO) { saveBlocking(path, withThumbnail = false) }
+            val code = withContext(Dispatchers.IO) { engine.autosaveProject() }
             autosaving = false
+            if (project.path != path) return@launch
             if (code != 0) {
                 autosaveRetryAfterNs = System.nanoTime() + AUTOSAVE_RETRY_NS
                 if (code != lastAutosaveError) errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code))

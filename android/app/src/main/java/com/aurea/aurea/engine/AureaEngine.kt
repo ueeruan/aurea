@@ -593,6 +593,7 @@ class AureaEngine private constructor() {
 
     fun loadProject(path: String): Int = nativeLoadProject(nativeHandle, path)
     fun saveProject(path: String): Int = nativeSaveProject(nativeHandle, path)
+    fun autosaveProject(): Int = nativeSaveProject(nativeHandle, null)
     /**
      * O que a última abertura precisou fazer (Engine::LoadNotice): bits 0–15 =
      * 1 abriu da cópia (.bak/.tmp), 2 parcial, 4 formato antigo (cópia
@@ -811,7 +812,7 @@ class AureaEngine private constructor() {
     ): Long
     private external fun nativeNewProject(handle: Long, width: Int, height: Int, fps: Float, title: String): Boolean
     private external fun nativeLoadProject(handle: Long, path: String): Int
-    private external fun nativeSaveProject(handle: Long, path: String): Int
+    private external fun nativeSaveProject(handle: Long, path: String?): Int
     private external fun nativeLoadNotice(handle: Long): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int

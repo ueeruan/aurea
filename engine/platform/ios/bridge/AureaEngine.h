@@ -294,6 +294,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)newProjectWidth:(uint32_t)width height:(uint32_t)height fps:(double)fps title:(nullable NSString*)title;
 - (BOOL)loadProject:(NSString*)path;
 - (BOOL)saveProject:(NSString*)path;
+/// Flush UI commands before dispatching. Safe to execute on an IO queue.
+- (BOOL)autosaveProject;
 - (BOOL)recoverSession;
 - (void)discardRecovery;
 /// Nome da composição aberta ("" quando não há projeto).

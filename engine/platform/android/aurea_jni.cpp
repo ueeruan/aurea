@@ -2055,6 +2055,7 @@ AUREA_JNI jint AUREA_FN(nativeLoadProject)(JNIEnv* env, jclass, jlong handle, js
 AUREA_JNI jint AUREA_FN(nativeSaveProject)(JNIEnv* env, jclass, jlong handle, jstring path) {
     NativeContext* c = ctx_of(handle);
     if (!c) return static_cast<jint>(Errc::InvalidState);
+    if (!path) return static_cast<jint>(c->engine.autosave_project().raw());
     const std::string p = to_string(env, path);
     return static_cast<jint>(c->engine.save_project(p.c_str()).raw());
 }

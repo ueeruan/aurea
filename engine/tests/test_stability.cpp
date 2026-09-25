@@ -539,6 +539,70 @@ AUREA_TEST(Stability, ConcurrentSavesAndEditsNeverCorruptTheFile) {
     remove_family(path);
 }
 
+AUREA_TEST(Stability, AutosaveWaitsForPlaybackScrubAndUndoGroups) {
+    const std::string path = test_path("idle_autosave");
+    remove_family(path);
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, "Autosave").ok());
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    const CommandType begin[] = {CommandType::PlaybackPlay, CommandType::PlaybackScrubBegin, CommandType::UndoBeginGroup};
+    const CommandType end[] = {CommandType::PlaybackPause, CommandType::PlaybackScrubEnd, CommandType::UndoEndGroup};
+    for (u32 i = 0; i < 3; ++i) {
+        AUREA_CHECK(e.add_text("pending edit").ok());
+        const auto original = read_file(path);
+        const auto saves = e.save_stats().saves;
+        Command command; command.type = begin[i];
+        AUREA_CHECK_EQ(e.submit_commands(&command, 1), 1u);
+        AUREA_CHECK(e.autosave_project().ok());
+        AUREA_CHECK_EQ(e.save_stats().saves, saves);
+        AUREA_CHECK(read_file(path) == original);
+        AUREA_CHECK(e.read_status().dirty);
+        command.type = end[i];
+        AUREA_CHECK_EQ(e.submit_commands(&command, 1), 1u);
+        AUREA_CHECK(e.autosave_project().ok());
+        AUREA_CHECK_EQ(e.save_stats().saves, saves + 1);
+        AUREA_CHECK(!e.read_status().dirty);
+        AUREA_CHECK(read_file(path) != original);
+        AUREA_CHECK(e.autosave_project().ok());
+        AUREA_CHECK_EQ(e.save_stats().saves, saves + 1);
+    }
+    Project saved;
+    AUREA_CHECK(ProjectSerializer::load(saved, path, LoadOptions{}).ok());
+    AUREA_CHECK_EQ(layer_count(e), 3u);
+    e.shutdown(); remove_family(path);
+}
+
+AUREA_TEST(Stability, SaveCompletionCannotAdoptAReplacedProject) {
+    const std::string path = test_path("save_replaced_project");
+    remove_family(path);
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, "Original").ok());
+    AUREA_CHECK(e.add_text("original content").ok());
+    fileio::FaultInjection fi;
+    fi.kind = fileio::Fault::BeforeWrite;
+    fi.pathContains = "save_replaced_project";
+    fi.context = &e;
+    fi.beforeWrite = [](void* context) {
+        auto& engine = *static_cast<Engine*>(context);
+        AUREA_CHECK(engine.new_project(640, 360, 24, "Replacement").ok());
+        AUREA_CHECK(engine.add_text("unsaved replacement").ok());
+    };
+    fileio::set_fault_injection(fi);
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(fileio::injected_failures(), 1u);
+    fileio::clear_fault_injection();
+    AUREA_CHECK(e.project()->path().empty());
+    AUREA_CHECK(e.read_status().dirty);
+    AUREA_CHECK_EQ(e.save_project().code(), Errc::InvalidState);
+    Project saved;
+    AUREA_CHECK(ProjectSerializer::load(saved, path, LoadOptions{}).ok());
+    AUREA_CHECK(saved.metadata().title == "Original");
+    e.shutdown();
+    remove_family(path);
+}
+
 AUREA_TEST(Stability, CorruptJournalHeaderDoesNotAllocateWhatItDeclares) {
     // Bug real (P1): o leitor do journal alocava pelo cabeçalho — um bloco
     // corrompido declarando 4 GB de strings (ou 1M comandos) virava um vector

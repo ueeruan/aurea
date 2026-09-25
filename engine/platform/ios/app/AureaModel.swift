@@ -299,6 +299,11 @@ final class AureaModel: ObservableObject {
     }
     private var pendingExportURL: URL?
     private let mediaQueue = DispatchQueue(label: "com.aurea.media-import", qos: .userInitiated)
+    private let autosaveQueue = DispatchQueue(label: "com.aurea.autosave", qos: .utility)
+    private var lastAutosaveActivity = ProcessInfo.processInfo.systemUptime
+    private var autosaveRetryAfter = 0.0
+    private var autosaving = false
+    private var autosaveFailureShown = false
 
     // --- Ajustes ------------------------------------------------------------
     @Published var language: AureaLanguage = .systemDefault {
@@ -657,7 +662,11 @@ final class AureaModel: ObservableObject {
 
     func enterBackground() {
         guard started else { return }
+        _ = engine.flush()
         engine.suspend()
+        if screen == .editor, projectURL != nil {
+            _ = saveProject(writeThumbnail: false)
+        }
     }
 
     func enterForeground() {
@@ -714,6 +723,9 @@ final class AureaModel: ObservableObject {
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         let playheadChanged = out.playhead != lastEnginePlayhead
+        if playheadChanged || out.modelRevision != lastRevision {
+            lastAutosaveActivity = ProcessInfo.processInfo.systemUptime
+        }
         lastEnginePlayhead = out.playhead
         if playheadClock.frame != out.playhead { playheadClock.frame = out.playhead }
         followPlayback(out.playing != 0)
@@ -733,6 +745,34 @@ final class AureaModel: ObservableObject {
             lastThumbGeneration = out.thumbnailGeneration
         }
         if showPerf { perf = engine.perf() }
+        autosaveIfIdle()
+    }
+
+    private func autosaveIfIdle() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard screen == .editor, status.dirty != 0, status.playing == 0,
+              !autosaving, !importingMedia, !exporting,
+              now - lastAutosaveActivity >= 3, now >= autosaveRetryAfter,
+              let url = projectURL else { return }
+        _ = engine.flush()
+        autosaving = true
+        let saver = engine
+        autosaveQueue.async { [weak self] in
+            let saved = saver.autosaveProject()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.autosaving = false
+                guard self.projectURL == url else { return }
+                if saved {
+                    self.autosaveRetryAfter = 0
+                    self.autosaveFailureShown = false
+                } else {
+                    self.autosaveRetryAfter = ProcessInfo.processInfo.systemUptime + 30
+                    if !self.autosaveFailureShown { self.toast = "falha ao salvar" }
+                    self.autosaveFailureShown = true
+                }
+            }
+        }
     }
 
     private func statusEquals(_ other: AureaStatus) -> Bool {

@@ -65,6 +65,7 @@ enum class Fault : u8 {
     DiskFullAfter,      ///< ENOSPC depois de `afterBytes` bytes
     FlushFails,         ///< fflush/fsync falham com ENOSPC (o caso real mais comum)
     RenameFails,        ///< o rename final falha
+    BeforeWrite,        ///< deterministic interleaving at the snapshot/IO boundary
 };
 
 struct FaultInjection {
@@ -74,6 +75,8 @@ struct FaultInjection {
     std::string pathContains;
     /// Quantas escritas falham antes de a injeção se desligar sozinha.
     u32 count = 1;
+    void (*beforeWrite)(void*) = nullptr;
+    void* context = nullptr;
 };
 
 void set_fault_injection(const FaultInjection& fault) noexcept;

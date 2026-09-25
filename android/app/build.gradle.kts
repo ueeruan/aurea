@@ -53,9 +53,9 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        // versionCode 2110: autosave, cena 3D, exportação, IA e controles de edição. Um número maior é
+        // versionCode 2111: cena 3D por gestos, temas, presets de efeito, import Alight Motion. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2110
+        versionCode = 2111
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

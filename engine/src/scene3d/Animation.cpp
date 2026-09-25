@@ -30,20 +30,21 @@ void locate(const std::vector<f32>& times, f32 t, usize& i, f32& frac) noexcept 
 }
 
 /// Valor de `comps` componentes do sampler no instante `t`.
-void sample(const AnimSampler& s, f32 t, u32 comps, f32* out, bool quat) noexcept {
+bool sample(const AnimSampler& s, f32 t, u32 comps, f32* out, bool quat) noexcept {
     const usize n = s.times.size();
-    if (n == 0) return;
+    const bool cubic = s.interpolation == AnimInterp::CubicSpline;
+    const usize stride = static_cast<usize>(comps) * (cubic ? 3u : 1u);
+    // A failed channel must leave the bind pose (or earlier valid channel)
+    // intact. Check before locating: NaN time otherwise reaches times[n].
+    if (n == 0 || stride == 0 || n > s.values.size() / stride || !std::isfinite(t)) return false;
     usize i = 0;
     f32 u = 0.0f;
     locate(s.times, t, i, u);
-    const bool cubic = s.interpolation == AnimInterp::CubicSpline;
-    const usize stride = cubic ? 3u * comps : comps;
     const usize valueOff = cubic ? comps : 0u;   // (in, valor, out)
     auto at = [&](usize k, usize c) { return s.values[k * stride + valueOff + c]; };
-    if (s.values.size() < n * stride) return;
     if (i + 1 >= n || s.interpolation == AnimInterp::Step || u == 0.0f) {
         for (u32 c = 0; c < comps; ++c) out[c] = at(i, c);
-        return;
+        return true;
     }
     if (cubic) {
         // Hermite: p = (2u³−3u²+1)v0 + (u³−2u²+u)·dt·b0 + (−2u³+3u²)v1 + (u³−u²)·dt·a1
@@ -60,22 +61,23 @@ void sample(const AnimSampler& s, f32 t, u32 comps, f32* out, bool quat) noexcep
             const Quat q = Quat{out[0], out[1], out[2], out[3]}.normalized();
             out[0] = q.x; out[1] = q.y; out[2] = q.z; out[3] = q.w;
         }
-        return;
+        return true;
     }
     if (quat) {
         const Quat a{at(i, 0), at(i, 1), at(i, 2), at(i, 3)};
         const Quat b{at(i + 1, 0), at(i + 1, 1), at(i + 1, 2), at(i + 1, 3)};
         const Quat q = Quat::slerp(a.normalized(), b.normalized(), u);
         out[0] = q.x; out[1] = q.y; out[2] = q.z; out[3] = q.w;
-        return;
+        return true;
     }
     for (u32 c = 0; c < comps; ++c) out[c] = at(i, c) + (at(i + 1, c) - at(i, c)) * u;
+    return true;
 }
 
 } // namespace
 
 f32 clip_time(const Animation& clip, f64 layerSeconds) noexcept {
-    if (!(clip.duration > 0.0f)) return 0.0f;
+    if (!(clip.duration > 0.0f) || !std::isfinite(clip.duration) || !std::isfinite(layerSeconds)) return 0.0f;
     const f64 d = clip.duration;
     f64 t = std::fmod(layerSeconds, d);
     if (t < 0.0) t += d;
@@ -101,11 +103,13 @@ void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out) {
             const AnimSampler& s = a.samplers[ch.sampler];
             const usize node = static_cast<usize>(ch.node);
             switch (ch.path) {
-                case AnimPath::Translation: sample(s, t, 3, v, false); tr[node] = Vec3{v[0], v[1], v[2]}; break;
-                case AnimPath::Scale:       sample(s, t, 3, v, false); sc[node] = Vec3{v[0], v[1], v[2]}; break;
-                case AnimPath::Rotation:    sample(s, t, 4, v, true);  rot[node] = Quat{v[0], v[1], v[2], v[3]}; break;
+                case AnimPath::Translation: if (sample(s, t, 3, v, false)) tr[node] = Vec3{v[0], v[1], v[2]}; break;
+                case AnimPath::Scale:       if (sample(s, t, 3, v, false)) sc[node] = Vec3{v[0], v[1], v[2]}; break;
+                case AnimPath::Rotation:    if (sample(s, t, 4, v, true)) rot[node] = Quat{v[0], v[1], v[2], v[3]}; break;
                 case AnimPath::Weights: {
                     const u32 k = std::max(1u, s.components);
+                    const usize stride = static_cast<usize>(k) * (s.interpolation == AnimInterp::CubicSpline ? 3u : 1u);
+                    if (s.times.empty() || s.times.size() > s.values.size() / stride || !std::isfinite(t)) break;
                     out.morphWeights[node].assign(k, 0.0f);
                     sample(s, t, k, out.morphWeights[node].data(), false);
                     break;

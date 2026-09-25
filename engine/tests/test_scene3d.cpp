@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -241,6 +242,90 @@ AUREA_TEST(Scene3D, TextureCapDownscalesAndWarns) {
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/scene3d/Environment.hpp"
 #include <chrono>
+
+AUREA_TEST(Scene3D, InvalidChannelsPreservePoseAndDoNotReusePreviousSamples) {
+    SceneAsset asset;
+    asset.nodes.resize(2);
+    asset.roots = {0};
+    asset.nodes[0].children = {1};
+    asset.nodes[1].parent = 0;
+    asset.nodes[1].translation = {2, 3, 4};
+    asset.nodes[1].scale = {2, 3, 4};
+    asset.nodes[1].morphWeights = {0.25f, 0.75f};
+    asset.animations.resize(1);
+    auto& clip = asset.animations[0];
+    clip.duration = 1;
+    clip.samplers.resize(5);
+    clip.samplers[0].times = {0, 1};
+    clip.samplers[0].values = {30, 0, 0, 50, 0, 0};
+    clip.samplers[2].times = {0, 1};
+    clip.samplers[2].values = {7, 8, 9}; // Truncated scale.
+    clip.samplers[3].times = {0, 1};
+    clip.samplers[3].components = 4;
+    clip.samplers[3].values = {0, 0, 0, 1}; // Truncated rotation.
+    clip.samplers[4].times = {0, 1};
+    clip.samplers[4].components = 2;
+    clip.samplers[4].interpolation = AnimInterp::CubicSpline;
+    clip.samplers[4].values = {0, 0, 1, 0, 0, 0}; // Missing second cubic key.
+    clip.channels = {{0, AnimPath::Translation, 0}, {1, AnimPath::Translation, 1},
+                     {1, AnimPath::Scale, 2}, {1, AnimPath::Rotation, 3}, {1, AnimPath::Weights, 4}};
+    Pose pose;
+    for (f32 time : {0.5f, 1.0f, 0.0f, 0.5f}) {
+        evaluate_pose(asset, 0, time, pose);
+        const Mat4 expected = Mat4::translation({30 + 20 * time, 0, 0}) * asset.nodes[1].local_matrix();
+        for (u32 col = 0; col < 4; ++col) for (u32 row = 0; row < 4; ++row)
+            AUREA_CHECK_NEAR((&pose.nodeWorld[1].col[col].x)[row], (&expected.col[col].x)[row], 1e-6f);
+        AUREA_CHECK_EQ(pose.morphWeights[1].size(), usize{2});
+        AUREA_CHECK_EQ(pose.morphWeights[1][0], 0.25f);
+        AUREA_CHECK_EQ(pose.morphWeights[1][1], 0.75f);
+    }
+}
+
+AUREA_TEST(Scene3D, FbxConstantTakeRetainsItsTransform) {
+    const auto result = import_scene_file(std::string(AUREA_TEST_DATA_DIR) + "/constant-take.fbx", ImportOptions{});
+    AUREA_CHECK_MSG(result.ok(), result.detail.c_str());
+    if (!result.ok()) return;
+    const auto& asset = *result.asset;
+    AUREA_CHECK_EQ(asset.animations.size(), usize{1});
+    if (asset.animations.empty()) return;
+    i32 node = -1;
+    for (usize i = 0; i < asset.nodes.size(); ++i)
+        if (asset.nodes[i].name == "AnimatedTriangle") node = static_cast<i32>(i);
+    AUREA_CHECK(node >= 0);
+    if (node < 0) return;
+    AUREA_CHECK_NEAR(asset.nodes[node].translation.x, 0.0f, 1e-6f);
+    Pose pose;
+    for (f32 time : {0.0f, 0.5f, 1.0f, 0.0f}) {
+        evaluate_pose(asset, 0, time, pose);
+        AUREA_CHECK_NEAR(pose.nodeWorld[node].col[3].x, 5.0f, 1e-5f);
+        AUREA_CHECK_NEAR(pose.nodeWorld[node].col[0].x, 1.0f, 1e-5f);
+    }
+    evaluate_pose(asset, -1, 0.5f, pose);
+    AUREA_CHECK_NEAR(pose.nodeWorld[node].col[3].x, 0.0f, 1e-6f);
+}
+
+AUREA_TEST(Scene3D, NonFiniteAnimationTimeCannotCorruptPose) {
+    SceneAsset asset;
+    asset.nodes.resize(1);
+    asset.roots = {0};
+    asset.nodes[0].translation = {2, 3, 4};
+    asset.animations.resize(1);
+    auto& clip = asset.animations[0];
+    clip.duration = 1;
+    clip.samplers.resize(1);
+    clip.samplers[0].times = {0, 1};
+    clip.samplers[0].values = {30, 0, 0, 50, 0, 0};
+    clip.channels = {{0, AnimPath::Translation, 0}};
+    Pose pose;
+    for (f32 time : {std::numeric_limits<f32>::quiet_NaN(), std::numeric_limits<f32>::infinity(),
+                     -std::numeric_limits<f32>::infinity()}) {
+        AUREA_CHECK_EQ(clip_time(clip, time), 0.0f);
+        evaluate_pose(asset, 0, time, pose);
+        AUREA_CHECK_EQ(pose.nodeWorld[0].col[3].x, 2.0f);
+        AUREA_CHECK_EQ(pose.nodeWorld[0].col[3].y, 3.0f);
+        AUREA_CHECK_EQ(pose.nodeWorld[0].col[3].z, 4.0f);
+    }
+}
 
 AUREA_TEST(Scene3D, EnvironmentBuildIsFastAndSane) {
     const auto t0 = std::chrono::steady_clock::now();

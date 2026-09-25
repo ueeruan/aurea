@@ -316,7 +316,7 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
         an.duration = static_cast<f32>(baked->playback_duration);
         const f64 t0 = baked->playback_time_begin;
         auto add_vec3 = [&](i32 node, AnimPath path, const ufbx_baked_vec3_list& keys) {
-            if (keys.count < 2) return;
+            if (keys.count == 0) return;
             AnimSampler s;
             s.components = 3;
             for (usize k = 0; k < keys.count; ++k) {
@@ -330,9 +330,12 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
         for (usize bn = 0; bn < baked->nodes.count; ++bn) {
             const ufbx_baked_node& nd = baked->nodes.data[bn];
             const i32 node = static_cast<i32>(nd.typed_id);
-            if (!nd.constant_translation) add_vec3(node, AnimPath::Translation, nd.translation_keys);
-            if (!nd.constant_scale) add_vec3(node, AnimPath::Scale, nd.scale_keys);
-            if (!nd.constant_rotation && nd.rotation_keys.count >= 2) {
+            // A constant channel belongs to this take, not necessarily the
+            // scene's bind pose. Keep even one baked key so switching takes
+            // cannot silently restore another take's translation/scale/rotation.
+            add_vec3(node, AnimPath::Translation, nd.translation_keys);
+            add_vec3(node, AnimPath::Scale, nd.scale_keys);
+            if (nd.rotation_keys.count > 0) {
                 AnimSampler s;
                 s.components = 4;
                 for (usize k = 0; k < nd.rotation_keys.count; ++k) {

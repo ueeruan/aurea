@@ -124,6 +124,8 @@ struct PreviewMetalView: UIViewRepresentable {
         private var stageMode: StageMode = .idle
         private var stageDown = CGPoint.zero
         private var stageFinger: ObjectIdentifier?
+        private var markerAnchorLayer: Int64?
+        private var markerHold: DispatchWorkItem?
         private var pinchFingers: [ObjectIdentifier] = []
         private var targetLayer: Int64?
         private var hadMultipleTouches = false
@@ -388,6 +390,8 @@ struct PreviewMetalView: UIViewRepresentable {
             model.stageManipulating = true
         }
         func finishStageEdit() {
+            markerHold?.cancel(); markerHold = nil
+            markerAnchorLayer = nil
             if editBegan { model.endGesture() }
             editBegan = false; model.stageManipulating = false
             shell.snapX = nil; shell.snapY = nil; shell.grabbedHandle = -1; shell.grabbedShapeHandle = -1
@@ -424,15 +428,34 @@ struct PreviewMetalView: UIViewRepresentable {
                 if startShape(at: first.position, view: view) { stageMode = .shape }
                 else if startGizmo(at: first.position, view: view) { stageMode = .gizmo }
                 else { recordTarget(first.position, view: view) }
+                if stageMode == .pending && handle < 0, let anchor = model.previewMarkerAnchor {
+                    let p = screenPoint(anchor.x, anchor.y, view: view)
+                    if hypot(first.position.x - p.x, first.position.y - p.y) <= 24 {
+                        markerAnchorLayer = model.primarySelection
+                        let hold = DispatchWorkItem { [weak self] in
+                            guard let self, self.stageMode == .pending, !self.hadMultipleTouches,
+                                  let layer = self.markerAnchorLayer, layer == self.model.primarySelection,
+                                  self.model.previewMarkerAnchor != nil else { return }
+                            self.model.editMarkerAtPlayhead()
+                            self.finishStageEdit(); self.stageMode = .idle
+                        }
+                        markerHold = hold
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: hold)
+                    }
+                }
                 if pressed.count < 2 { return }
             }
             if pressed.isEmpty {
                 if stageMode == .pending && !hadMultipleTouches && handle < 0 {
-                    let point = compositionPoint(stageDown, view: view)
-                    let hit = hitLayer(point, slack: 0, includeLocked: false) ?? hitLayer(point, slack: scaleFactor(view) * 12, includeLocked: false)
-                    if let hit {
-                        if model.primarySelection != hit || model.selection.count != 1 { model.select(layerId: hit, additive: false) }
-                    } else { model.clearSelection() }
+                    if let layer = markerAnchorLayer, layer == model.primarySelection, model.previewMarkerAnchor != nil {
+                        model.toggleMarkerAt(model.status.playhead)
+                    } else {
+                        let point = compositionPoint(stageDown, view: view)
+                        let hit = hitLayer(point, slack: 0, includeLocked: false) ?? hitLayer(point, slack: scaleFactor(view) * 12, includeLocked: false)
+                        if let hit {
+                            if model.primarySelection != hit || model.selection.count != 1 { model.select(layerId: hit, additive: false) }
+                        } else { model.clearSelection() }
+                    }
                 }
                 finishStageEdit(); stageFinger = nil; stageMode = .idle; return
             }
@@ -462,6 +485,9 @@ struct PreviewMetalView: UIViewRepresentable {
             switch stageMode {
             case .pending:
                 guard let first = pressed.first(where: { $0.id == stageFinger }) else { return }
+                if hypot(first.position.x - stageDown.x, first.position.y - stageDown.y) > 8 {
+                    markerHold?.cancel(); markerHold = nil; markerAnchorLayer = nil
+                }
                 if hypot(first.position.x - stageDown.x, first.position.y - stageDown.y) > (handle >= 0 ? 4 : 18) {
                     startDrag(view: view)
                     stepEdit(first.position, view: view)

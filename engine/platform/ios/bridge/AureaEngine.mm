@@ -2560,6 +2560,21 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return out;
 }
 
+- (BOOL)editMarker:(int64_t)from to:(int64_t)to color:(uint32_t)color label:(NSString*)label {
+    if (auto* e = self.engine) return e->edit_marker(from, to, color, to_std(label));
+    return NO;
+}
+
+- (BOOL)deleteMarker:(int64_t)frame {
+    if (auto* e = self.engine) return e->delete_marker(frame);
+    return NO;
+}
+
+- (NSString*)markerLabel:(int64_t)frame {
+    if (auto* e = self.engine) return to_ns(e->marker_label(frame));
+    return @"";
+}
+
 // =============================================================================
 // Imagens (miniatura / captura / prévia de efeito)
 // =============================================================================

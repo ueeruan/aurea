@@ -9,9 +9,9 @@ new request. Existing features must be checked against the requested behavior.
 | Phase | Evidence so far | Still required to close the phase |
 |---|---|---|
 | P0 preview/crashes/playback | VFR presentation fixes, bounded decoder recovery, software fallback, temporal sample retention, save revision race, asynchronous codec retirement; actual emulator preview/playback/export | Broader real-media/long-session and physical-device matrix; native iOS execution |
-| P1 backend/performance/memory | Vulkan startup and new ES fallback backend; exact mip accounting, bounded transient pool, real decoder upload regression, temporal RGB warmup | Transparent editing proxies are **not implemented**; physical low-end measurements, thermal/battery/long-session budgets, remaining performance criteria |
-| P2 keyframes/timeline/markers/gestures | Existing tests cover retime/save/undo; new marker ordering/collision/end-frame fixes | Dedicated marker strip, accessible editing/rename/color/drag flows on both UIs; full evaluator, graph editor and gesture audit against the prompt |
-| P3 3D/materials/lights/camera | Fixed shared deferred environment use-after-free, exercised 3D regression through ES | Complete requested 3D behavior and visual acceptance on Android/iOS |
+| P1 backend/performance/memory | Vulkan startup and ES fallback; exact mip accounting, bounded transient pool, real decoder upload regression, temporal RGB warmup; thumbnail trim/clear/relink/session admission fixes | Transparent editing proxies are **not implemented**; physical low-end measurements, thermal/battery/long-session budgets, remaining performance criteria |
+| P2 keyframes/timeline/markers/gestures | Marker integrity/editing; preview-anchor tap marks current frame on both platforms; Bezier endpoint solve, duplicate key normalization, track-reference lifetime fixes | Native iOS interaction validation; remaining graph editor/evaluator/gesture acceptance. User explicitly rejected a separate marker strip |
+| P3 3D/materials/lights/camera | Deferred environment lifetime fix; malformed animation channel protection; FBX constant-take preservation; parented XYZ storage regression | Complete requested 3D behavior and visual acceptance on Android/iOS |
 | P4 tracking/stabilization | Existing implementation has not yet been fully audited against this request | Audit, implement missing behavior, real-footage validation |
 | P5 time remap/flow/motion blur | Temporal RGB VFR export independently compared | Complete requested timing/optical-flow/motion-blur acceptance |
 | P6 particles | Existing implementation has not yet been fully audited against this request | Audit, implementation and measured validation |
@@ -25,8 +25,10 @@ new request. Existing features must be checked against the requested behavior.
 - P0 details: `P0_PREVIEW_2026-09-25.md`, `P0_MEDIA_FOLLOWUP_2026-09-25.md`,
   `P0_VFR_MATRIX_2026-09-25.md` in this directory.
 - P1 details: `P1_MEMORY_2026-09-25.md` and `P1_GLES_2026-09-25.md`.
-- P2 integrity details: `P2_MARKERS_2026-09-25.md`. Latest full host regression:
-  670 tests, 4,135,165 checks, zero failures in 215.19 seconds.
+- Follow-ups: `P1_THUMBNAIL_LIFECYCLE_2026-09-25.md`,
+  `P2_KEYFRAME_EVALUATION_2026-09-25.md`, `P2_MARKERS_2026-09-25.md`,
+  `P3_ANIMATION_INTEGRITY_2026-09-25.md`. Latest full host regression:
+  681 tests, 4,210,839 checks, zero failures in 226.14 seconds.
 - Emulator: `ANDROID_EMULATOR_LOCAL.md`; AVD Aurea_API35, API 35 x86_64,
   host GPU, headless. Its performance is not physical-phone performance.
 - ES actual app export: 90/90 VFR temporal RGB frames matched independent

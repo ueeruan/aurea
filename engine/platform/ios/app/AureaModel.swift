@@ -1726,6 +1726,39 @@ final class AureaModel: ObservableObject {
     @Published private(set) var editMode = false
     /// Marcas do projeto (só os quadros; o motor guarda cor e tipo).
     @Published private(set) var markerFrames: [Int64] = []
+    struct MarkerEditingFrame: Identifiable {
+        let frame: Int64
+        let color: UInt32
+        let label: String
+        var id: Int64 { frame }
+    }
+    @Published var markerEditingFrame: MarkerEditingFrame?
+
+    /// Composition-space anchor shared by the overlay and touch hit test.
+    var previewMarkerAnchor: SIMD2<Float>? {
+        guard selection.count == 1, let row = selectedLayer, row.visible, !row.locked,
+              status.playhead >= Int64(row.startFrame), status.playhead < Int64(row.endFrame),
+              pointPick == nil, panel != .mask, panel != .vector, panel != .tracking,
+              !ShapeStageGeometry.enabled(self) else { return nil }
+        let gizmo = engine.gizmo(row.id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
+        if gizmo.count == 8, gizmo[0].isFinite, gizmo[1].isFinite { return SIMD2(gizmo[0], gizmo[1]) }
+        let position = StageGeom.floats(detail["position"])
+        guard position.count >= 2 else { return nil }
+        let parent = StageGeom.floats(detail["parentAffine"])
+        let x = parent.count == 6 ? parent[0] * position[0] + parent[2] * position[1] + parent[4] : position[0]
+        let y = parent.count == 6 ? parent[1] * position[0] + parent[3] * position[1] + parent[5] : position[1]
+        return x.isFinite && y.isFinite ? SIMD2(x, y) : nil
+    }
+
+    func editMarkerAtPlayhead() {
+        let frame = status.playhead
+        let values = engine.markers()
+        if let index = stride(from: 0, to: values.count - values.count % 3, by: 3).first(where: { values[$0].int64Value == frame }) {
+            markerEditingFrame = MarkerEditingFrame(frame: frame, color: values[index + 1].uint32Value, label: engine.markerLabel(frame))
+        } else if editMarker(from: -1, to: frame, color: 0xFFF7C34F, label: "") {
+            markerEditingFrame = MarkerEditingFrame(frame: frame, color: 0xFFF7C34F, label: "")
+        }
+    }
 
     func setLooping(_ on: Bool) {
         guard looping != on else { return }
@@ -1737,6 +1770,18 @@ final class AureaModel: ObservableObject {
 
     func toggleMarkerAt(_ frame: Int64) {
         _ = engine.toggleMarker(frame)
+        refreshModel(force: true)
+        refreshMarkers()
+    }
+
+    func editMarker(from: Int64, to: Int64, color: UInt32, label: String) -> Bool {
+        let ok = engine.editMarker(from: from, to: to, color: color, label: label)
+        if ok { refreshModel(force: true); refreshMarkers() }
+        return ok
+    }
+
+    func deleteMarker(_ frame: Int64) {
+        _ = engine.deleteMarker(frame)
         refreshModel(force: true)
         refreshMarkers()
     }

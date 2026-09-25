@@ -569,6 +569,10 @@ class AureaEngine private constructor() {
     /** Liga/desliga a marca no frame. true = ficou marcada. */
     fun toggleMarker(frame: Long): Boolean = nativeToggleMarker(nativeHandle, frame)
     fun moveMarker(from: Long, to: Long): Boolean = nativeMoveMarker(nativeHandle, from, to)
+    fun editMarker(from: Long, to: Long, color: Int, label: String): Boolean =
+        nativeEditMarker(nativeHandle, from, to, color, label.toByteArray(Charsets.UTF_8))
+    fun deleteMarker(frame: Long): Boolean = nativeDeleteMarker(nativeHandle, frame)
+    fun markerLabel(frame: Long): String = nativeMarkerLabel(nativeHandle, frame).toString(Charsets.UTF_8)
     /** Marcas: frame, cor, tipo (3 longs cada). Devolve o total. */
     fun queryMarkers(out: LongArray): Int = nativeQueryMarkers(nativeHandle, out)
     /** Síncrono (decodifica o som): fora da thread de UI. Nº de batidas ou −Errc. */
@@ -799,6 +803,9 @@ class AureaEngine private constructor() {
     private external fun nativeRemoveGaps(handle: Long): Long
     private external fun nativeTrimComposition(handle: Long, frame: Long): Boolean
     private external fun nativeMoveMarker(handle: Long, from: Long, to: Long): Boolean
+    private external fun nativeEditMarker(handle: Long, from: Long, to: Long, color: Int, label: ByteArray): Boolean
+    private external fun nativeDeleteMarker(handle: Long, frame: Long): Boolean
+    private external fun nativeMarkerLabel(handle: Long, frame: Long): ByteArray
     private external fun nativeQueryMarkers(handle: Long, out: LongArray): Int
     private external fun nativeDetectBeats(handle: Long, layer: Long, bpm: DoubleArray): Long
     private external fun nativeAddText(handle: Long, content: String): Long

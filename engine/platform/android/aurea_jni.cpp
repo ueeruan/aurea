@@ -1988,6 +1988,29 @@ AUREA_JNI jint AUREA_FN(nativeQueryMarkers)(JNIEnv* env, jclass, jlong handle, j
     return static_cast<jint>(total);
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeEditMarker)(JNIEnv* env, jclass, jlong handle, jlong from, jlong to, jint color, jbyteArray label) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !label) return JNI_FALSE;
+    const jsize size = env->GetArrayLength(label);
+    if (size > 1024) return JNI_FALSE;
+    std::string text(static_cast<usize>(size), '\0');
+    if (size) env->GetByteArrayRegion(label, 0, size, reinterpret_cast<jbyte*>(text.data()));
+    return c->engine.edit_marker(from, to, static_cast<u32>(color), text) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDeleteMarker)(JNIEnv*, jclass, jlong handle, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.delete_marker(frame) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jbyteArray AUREA_FN(nativeMarkerLabel)(JNIEnv* env, jclass, jlong handle, jlong frame) {
+    NativeContext* c = ctx_of(handle);
+    const std::string text = c ? c->engine.marker_label(frame) : std::string{};
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(text.size()));
+    if (result && !text.empty()) env->SetByteArrayRegion(result, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte*>(text.data()));
+    return result;
+}
+
 AUREA_JNI jlong AUREA_FN(nativeDetectBeats)(JNIEnv* env, jclass, jlong handle, jlong layerId, jdoubleArray bpmOut) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

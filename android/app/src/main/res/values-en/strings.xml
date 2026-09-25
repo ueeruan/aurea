@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- English. Só o que traduz; o que faltar cai no catálogo padrão (pt-BR). -->
 <resources>
+    <string name="marker_edit">Edit marker</string>
+    <string name="marker_frame">Frame</string>
+    <string name="marker_hint">Tap the preview anchor to mark this instant. Hold to edit the marker.</string>
+    <string name="marker_error">Choose an empty frame inside the composition and a name up to 200 characters.</string>
+    <string name="marker_at_playhead">Use playhead</string>
+    <string name="marker_color">Color %1$d</string>
 
     <string name="common_ok">Got it</string>
     <string name="common_cancel">Cancel</string>

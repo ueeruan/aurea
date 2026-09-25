@@ -271,6 +271,43 @@ AUREA_TEST(ClipTime, MarkerDragPreservesOccupiedTargetsAndUndo) {
     AUREA_CHECK_EQ(markers[0], 30);
 }
 
+AUREA_TEST(ClipTime, MarkerEditingIsAtomicUndoableAndPortable) {
+    TimeRig r(cfg_with_audio());
+    const std::string label = "corte \xF0\x9F\x8E\xAC";
+    AUREA_CHECK(r.e.edit_marker(-1, 30, 0xFF112233u, label));
+    AUREA_CHECK(r.e.edit_marker(-1, 60, 0xFF445566u, "second"));
+    AUREA_CHECK(!r.e.edit_marker(30, 60, 0xFFFFFFFFu, "collision"));
+    AUREA_CHECK(!r.e.edit_marker(30, r.comp()->duration().value, 0xFFFFFFFFu, "outside"));
+    AUREA_CHECK(!r.e.edit_marker(30, 40, 0xFFFFFFFFu, std::string(1025, 'x')));
+    AUREA_CHECK_EQ(r.e.marker_label(30), label);
+    AUREA_CHECK(r.e.edit_marker(30, 45, 0xFF778899u, "renamed"));
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(r.e.marker_label(30), label);
+    AUREA_CHECK_EQ(r.e.marker_label(45), std::string{});
+    Command redo; redo.type = CommandType::Redo;
+    AUREA_CHECK(r.e.apply_command(redo).ok());
+    AUREA_CHECK_EQ(r.e.marker_label(45), std::string("renamed"));
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_marker_edit.aurea";
+    AUREA_CHECK(r.e.edit_marker(45, 45, 0xFF778899u, label));
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(r.e.marker_label(45), label);
+    std::vector<i64> markers(24);
+    AUREA_CHECK_EQ(r.e.query_markers(markers.data(), 8), 2u);
+    AUREA_CHECK_EQ(markers[1], static_cast<i64>(0xFF778899u));
+    AUREA_CHECK(r.e.delete_marker(45));
+    AUREA_CHECK(!r.e.delete_marker(45));
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(r.e.marker_label(45), label);
+    std::remove(path.c_str());
+    std::remove((path + ".bak").c_str());
+    r.comp()->put_marker(Marker{FrameIndex{75}, 0xFF112233u, kMarkerBeat, "beat"});
+    AUREA_CHECK(r.e.edit_marker(75, 80, 0xFF445566u, "beat moved"));
+    const auto& all = r.comp()->markers();
+    AUREA_CHECK_EQ(all.back().kind, kMarkerBeat);
+}
+
 AUREA_TEST(ClipTime, MarkersToggleUndoSaveAndRetime) {
     TimeRig r(cfg_with_audio());
     AUREA_CHECK(r.e.toggle_marker(30));

@@ -770,6 +770,11 @@ public:
     /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
     bool toggle_marker(i64 frame) noexcept;
     bool move_marker(i64 from, i64 to) noexcept;
+    /// from < 0 inserts; otherwise updates the existing marker atomically.
+    /// Rejects occupied destinations and invalid frames without changing history.
+    bool edit_marker(i64 from, i64 to, u32 color, const std::string& label) noexcept;
+    bool delete_marker(i64 frame) noexcept;
+    std::string marker_label(i64 frame) noexcept;
     /// Marcas da composição atual: frame, cor e tipo intercalados em `out`
     /// (3 por marca). Devolve o total (pode passar de `capacity`).
     u32 query_markers(i64* out, u32 capacity) noexcept;

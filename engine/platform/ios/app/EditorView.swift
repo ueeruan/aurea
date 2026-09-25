@@ -65,6 +65,10 @@ struct EditorView: View {
             }
         }
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
+        .sheet(item: $model.markerEditingFrame) { marker in
+            MarkerEditorSheet(frame: marker.frame, color: marker.color, label: marker.label)
+                .environmentObject(model)
+        }
         .overlay(alignment: .topTrailing) {
             if model.fullscreen {
                 Button { model.fullscreen = false } label: {
@@ -240,6 +244,16 @@ private struct ShellStageBanner: View {
             guard let selected = model.selectedLayer, active(selected) else { return }
             let points = corners(model.detail)
             outline(&context, points, under: 3.5, over: 2, color: selected.locked ? AureaColors.muted : AureaColors.accent)
+            if let anchor = model.previewMarkerAnchor {
+                let p = screen(anchor.x, anchor.y)
+                circle(&context, p, 7, StageInk.outlineUnder)
+                circle(&context, p, 5, model.markerFrames.contains(model.status.playhead) ? AureaColors.accent : .white)
+                var cross = Path()
+                cross.move(to: CGPoint(x: p.x - 10, y: p.y)); cross.addLine(to: CGPoint(x: p.x + 10, y: p.y))
+                cross.move(to: CGPoint(x: p.x, y: p.y - 10)); cross.addLine(to: CGPoint(x: p.x, y: p.y + 10))
+                context.stroke(cross, with: .color(StageInk.outlineUnder), lineWidth: 3)
+                context.stroke(cross, with: .color(AureaColors.accent), lineWidth: 1)
+            }
             guard model.selection.count == 1, !selected.locked, !(model.panel == .mask && model.editingMask != nil), points.count == 4 else { return }
             if ShapeStageGeometry.enabled(model) { return }
             let handles = ShellStageGeometry.handles(points, size: size)
@@ -261,6 +275,7 @@ private struct ShellStageBanner: View {
                 }
                 circle(&context, tips[0], 4, .white)
             }
+
         }
     }
     private func circle(_ context: inout GraphicsContext, _ p: CGPoint, _ r: CGFloat, _ color: Color) { context.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(color)) }

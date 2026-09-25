@@ -3310,6 +3310,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var markers by mutableStateOf(Markers(IntArray(0), IntArray(0), IntArray(0)))
         private set
     private var markerBuf = LongArray(3 * 256)
+    var markerEditingFrame by mutableStateOf<Int?>(null)
+
+    fun editMarkerAtPlayhead() {
+        val frame = playhead.coerceIn(0, (project.durationFrames - 1).coerceAtLeast(0))
+        if (frame !in markers.frames && !editMarker(-1, frame, 0xFFF7C34F.toInt(), "")) return
+        markerEditingFrame = frame
+    }
 
     private fun refreshMarkers() {
         var total = engine.queryMarkers(markerBuf)
@@ -3324,6 +3331,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val cur = markers
         if (f.contentEquals(cur.frames) && k.contentEquals(cur.kinds) && c.contentEquals(cur.colors)) return
         markers = Markers(f, k, c)
+    }
+
+    fun markerLabel(frame: Int): String = engine.markerLabel(frame.toLong())
+
+    fun editMarker(from: Int, to: Int, color: Int, label: String): Boolean {
+        val ok = engine.editMarker(from.toLong(), to.toLong(), color, label)
+        if (ok) refreshNow()
+        return ok
+    }
+
+    fun deleteMarker(frame: Int) {
+        engine.deleteMarker(frame.toLong())
+        refreshNow()
     }
 
     /** Cabeçote na próxima marca (volta à primeira depois da última). */

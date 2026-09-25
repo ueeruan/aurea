@@ -607,6 +607,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setFrameBlendForLayer:(long long)layerId mode:(uint32_t)mode;
 - (void)setVectorBlurForLayer:(long long)layerId amount:(float)amount NS_SWIFT_NAME(setVectorBlur(forLayer:amount:));
 - (void)toggleMarker:(int64_t)frame;
+- (BOOL)editMarker:(int64_t)from to:(int64_t)to color:(uint32_t)color label:(NSString*)label NS_SWIFT_NAME(editMarker(from:to:color:label:));
+- (BOOL)deleteMarker:(int64_t)frame;
+- (NSString*)markerLabel:(int64_t)frame;
 - (NSArray<NSNumber*>*)markers;   ///< tripletas (frame, cor, tipo)
 
 // --- Imagens (miniatura / captura / prévia de efeito) -----------------------

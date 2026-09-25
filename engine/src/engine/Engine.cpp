@@ -4075,6 +4075,53 @@ bool Engine::move_marker(i64 from, i64 to) noexcept {
     return true;
 }
 
+bool Engine::edit_marker(i64 from, i64 to, u32 color, const std::string& label) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || to < 0 || to >= comp->duration().value || label.size() > 1024) return false;
+    const auto& markers = comp->markers();
+    auto source = std::find_if(markers.begin(), markers.end(),
+                              [from](const Marker& m) { return m.frame.value == from; });
+    if (from >= 0 && source == markers.end()) return false;
+    if (std::any_of(markers.begin(), markers.end(), [from, to](const Marker& m) {
+            return m.frame.value == to && m.frame.value != from;
+        })) return false;
+    color |= 0xFF000000u;
+    if (source != markers.end() && from == to && source->color == color && source->label == label) return true;
+    const u32 kind = source == markers.end() ? kMarkerManual : source->kind;
+    history_.before_mutation(*comp, project_->timeline().current(), from < 0 ? "adicionar marca" : "editar marca");
+    if (from >= 0) comp->remove_marker_at(FrameIndex{from});
+    comp->put_marker(Marker{FrameIndex{to}, color, kind, label});
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::delete_marker(i64 frame) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || std::none_of(comp->markers().begin(), comp->markers().end(),
+                             [frame](const Marker& m) { return m.frame.value == frame; })) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "remover marca");
+    comp->remove_marker_at(FrameIndex{frame});
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+std::string Engine::marker_label(i64 frame) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return {};
+    const auto& markers = comp->markers();
+    const auto found = std::lower_bound(markers.begin(), markers.end(), frame,
+                                       [](const Marker& marker, i64 f) { return marker.frame.value < f; });
+    if (found != markers.end() && found->frame.value == frame) return found->label;
+    return {};
+}
+
 u32 Engine::query_markers(i64* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     const Composition* comp = project_ ? current_composition() : nullptr;

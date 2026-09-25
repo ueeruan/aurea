@@ -83,6 +83,7 @@ import kotlin.math.sin
  */
 @Composable
 internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) {
+    com.aurea.aurea.editor.timeline.MarkerEditor(store)
     val mapper = remember { StageMapper() }
     val haptic = LocalHapticFeedback.current
     val insetPx = with(LocalDensity.current) { ShellDims.StageInset.toPx() }
@@ -232,6 +233,9 @@ internal class StageMapper {
     /** Alças na tela: 0 = giro (sup-dir), 1 = escala inf-dir, 2 = sup-esq, 3 = inf-esq. */
     val handles = FloatArray(8)
     var handlesValid = false
+    var markerAnchorValid = false
+    var markerAnchorX = 0f
+    var markerAnchorY = 0f
 
     val scratch = FloatArray(8)
     val path = Path()
@@ -293,6 +297,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.update(size.width, size.height, inset, project.width, project.height)
     m.strokesFor(density)
     m.handlesValid = false
+    m.markerAnchorValid = false
     if (!m.valid) return
     // Modo vetorial (pontos / mão livre): o palco é do caminho, sem alças da camada.
     if (store.vectorTool != 0) {
@@ -384,6 +389,20 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     drawRotateHandle(m, grabbed == 0)
     // Camada no espaço 3D: as setas do mundo por cima (têm prioridade no toque).
     store.gizmo?.let { drawGizmo(m, it) }
+    if (store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
+    val anchor = m.scratch
+    val gizmo = store.gizmo
+    if (gizmo != null) { anchor[0] = gizmo[0]; anchor[1] = gizmo[1] }
+    else d.parentToComp(d.position[0], d.position[1], anchor)
+    m.markerAnchorX = m.sx(anchor[0]); m.markerAnchorY = m.sy(anchor[1])
+    m.markerAnchorValid = store.pointPick == null
+    val center = Offset(m.markerAnchorX, m.markerAnchorY)
+    val color = if (store.markers.frames.binarySearch(playhead) >= 0) Color(0xFFFFD34D) else Color.White
+    val radius = 7.dp.toPx()
+    drawCircle(ShellColors.OutlineUnder, radius + 2.dp.toPx(), center)
+    drawCircle(color, radius, center, style = m.ring15)
+    drawLine(color, center - Offset(radius + 3.dp.toPx(), 0f), center + Offset(radius + 3.dp.toPx(), 0f), 1.dp.toPx())
+    drawLine(color, center - Offset(0f, radius + 3.dp.toPx()), center + Offset(0f, radius + 3.dp.toPx()), 1.dp.toPx())
 }
 
 private val TrackSolved = Color(0xFFFFD34D)
@@ -705,6 +724,11 @@ private suspend fun PointerInputScope.stageGestures(
         }
 
         var mode = MODE_PENDING
+        val anchorDistance = hypot(downX - m.markerAnchorX, downY - m.markerAnchorY)
+        val anchorTap = m.markerAnchorValid && anchorDistance <= 24.dp.toPx() &&
+            (handle < 0 || anchorDistance < hypot(downX - m.handles[handle * 2], downY - m.handles[handle * 2 + 1]))
+        var lastTouchTime = down.uptimeMillis
+        var anchorMoved = false
         var multi = false
         var p1: PointerId? = null
         var p2: PointerId? = null
@@ -712,6 +736,10 @@ private suspend fun PointerInputScope.stageGestures(
         try {
             while (true) {
                 val event = awaitPointerEvent()
+                lastTouchTime = event.changes.maxOfOrNull { it.uptimeMillis } ?: lastTouchTime
+                event.changes.firstOrNull { it.id == down.id }?.let {
+                    if (hypot(it.position.x - downX, it.position.y - downY) > 8.dp.toPx()) anchorMoved = true
+                }
                 var pressed = 0
                 for (c in event.changes) if (c.pressed) pressed++
                 if (pressed == 0) break
@@ -775,6 +803,12 @@ private suspend fun PointerInputScope.stageGestures(
         }
 
         // --- Solta sem andar: toque. Nunca mexe no relógio.
+        if (mode == MODE_PENDING && !multi && !anchorMoved && anchorTap && m.valid) {
+            if (lastTouchTime - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) store.editMarkerAtPlayhead()
+            else store.toggleMarkerAt(store.playhead)
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            return@awaitEachGesture
+        }
         if (mode == MODE_PENDING && !multi && target != TARGET_HANDLE && m.valid) {
             val cx = m.cx(downX)
             val cy = m.cy(downY)

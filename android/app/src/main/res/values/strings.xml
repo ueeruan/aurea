@@ -15,6 +15,12 @@
   projeto salvo.
 -->
 <resources>
+    <string name="marker_edit">Editar marcador</string>
+    <string name="marker_frame">Quadro</string>
+    <string name="marker_hint">Toque na âncora do preview para marcar este instante. Segure para editar a marca.</string>
+    <string name="marker_error">Use um quadro livre dentro da composição e um nome de até 200 caracteres.</string>
+    <string name="marker_at_playhead">Usar cabeçote</string>
+    <string name="marker_color">Cor %1$d</string>
 
     <!-- =====================================================================
          Comum: o que aparece em qualquer tela

@@ -4,6 +4,59 @@ import SwiftUI
 import UIKit
 import Combine
 
+private func markerTint(_ packed: UInt32) -> Color {
+    Color(.sRGB, red: Double(packed & 255) / 255, green: Double((packed >> 8) & 255) / 255,
+          blue: Double((packed >> 16) & 255) / 255, opacity: 1)
+}
+
+struct MarkerEditorSheet: View {
+    @EnvironmentObject private var model: AureaModel
+    @Environment(\.dismiss) private var dismiss
+    let original: Int64
+    @State private var name: String
+    @State private var frameText: String
+    @State private var color: UInt32
+    @State private var failure = false
+    private let palette: [UInt32] = [0xFFF7C34F, 0xFF4D6EFF, 0xFF70D56B, 0xFFFFB75B, 0xFFD67BDB, 0xFFFFFFFF]
+    init(frame: Int64, color: UInt32, label: String) {
+        original = frame
+        _name = State(initialValue: label)
+        _frameText = State(initialValue: String(frame))
+        _color = State(initialValue: color)
+    }
+    var body: some View {
+        NavigationView {
+            Form {
+                TextField(AureaText.t("new_project_name"), text: $name)
+                    .onChange(of: name) { value in if value.count > 200 { name = String(value.prefix(200)) } }
+                TextField(AureaText.t("marker_frame"), text: $frameText).keyboardType(.numberPad)
+                Text(Timecode.format(Int32(clamping: max(0, Int64(frameText) ?? 0)), Float(model.compositionFps)))
+                Button(AureaText.t("marker_at_playhead")) { frameText = String(model.status.playhead) }
+                HStack {
+                    ForEach(Array(palette.enumerated()), id: \.offset) { index, packed in
+                        Button { color = packed } label: {
+                            Circle().fill(markerTint(packed)).frame(width: color == packed ? 32 : 22, height: color == packed ? 32 : 22)
+                                .frame(width: 40, height: 44)
+                        }.buttonStyle(.borderless).accessibilityLabel(AureaText.t("marker_color", index + 1))
+                    }
+                }
+                Text(AureaText.t(failure ? "marker_error" : "marker_hint")).font(.footnote)
+                Button(AureaText.t("common_delete"), role: .destructive) { model.deleteMarker(original); dismiss() }
+            }
+            .navigationTitle(AureaText.t("marker_edit"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("common_cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(AureaText.t("common_save")) {
+                        if let target = Int64(frameText), model.editMarker(from: original, to: target, color: color, label: name) { dismiss() }
+                        else { failure = true }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @MainActor
 struct TimelineView: View {
     @EnvironmentObject private var model: AureaModel

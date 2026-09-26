@@ -108,6 +108,20 @@ import XCTest
         _ = try awaitSnapshot("Undo added shape") { $0.layerCount == before.layerCount }
     }
 
+    func testCaptionsOpenFromAddMenuWithNonAudioSelection() throws {
+        let before = try launch("layer-dock")
+        app.buttons["Add layer"].firstMatch.tap()
+        let text = app.buttons["aurea.add.category.3"].firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 5)); text.tap()
+        let captions = app.buttons["Captions from speech"].firstMatch
+        XCTAssertTrue(captions.waitForExistence(timeout: 5)); captions.tap()
+        let choose = app.staticTexts["Pick a video or audio layer to take the captions from speech."].firstMatch
+        XCTAssertTrue(choose.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Captions"].firstMatch.exists)
+        XCTAssertFalse(text.exists)
+        XCTAssertEqual(try snapshot().layerCount, before.layerCount)
+    }
+
     func testShortTapDoesNotMoveScaleOrRotateLayer() throws {
         let before = try launch("transform")
         coordinate(bodyCenter(before)).tap()

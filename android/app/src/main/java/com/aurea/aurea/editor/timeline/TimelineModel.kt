@@ -34,6 +34,13 @@ internal class RowModel(
 
     fun toLocal(timelineFrame: Int) = Keyframes.toLocal(timelineFrame, start, offset)
 
+    fun selectedFrame(key: KeyframeRow): Int {
+        val frame = Keyframes.toTimeline(key.time, start, offset)
+        val index = instants.binarySearch(frame)
+        return if (index >= 0 && keysAt[index].any { it.property == key.property &&
+            it.effectIndex == key.effectIndex && it.paramIndex == key.paramIndex }) frame else Snap.NONE
+    }
+
     fun keysForDrag(index: Int, focused: Boolean): List<KeyframeRow> =
         if (focused || track != null) keysAt[index] else keysAt[index].take(1)
 

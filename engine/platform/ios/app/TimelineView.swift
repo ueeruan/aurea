@@ -417,7 +417,10 @@ struct TimelineView: View {
         var groups = [Int32](repeating: 0, count: 2 * Int((width + 2 * m.keyTouchHalf) / m.keyMergeGap) + 8)
         let count = Keyframes.visibleGroups(row.instants, view: viewFrame, pxPerFrame: ppf, centerX: width / 2, width: width, margin: m.keyTouchHalf, mergeGap: m.keyMergeGap, out: &groups)
         let cy = top + (compact ? m.diamondCyCompact : m.diamondCyNormal)
-        let selectedTrackMatches = row.track == nil || selectedKey?.track == nil || selectedKey?.track == row.track
+        let selectedIndex = lowerBound(row.instants, selectedKey?.frame ?? Snap.none)
+        let selectedTrackMatches = selectedIndex < row.instants.count && row.instants[selectedIndex] == selectedKey?.frame && row.keysAt[selectedIndex].contains { key in
+            selectedKey?.track == TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
+        }
         let chosen = selectedKey?.layer == row.id && selectedTrackMatches ? selectedKey?.frame ?? Snap.none : Snap.none
         for group in 0..<count {
             let i = Int(groups[group * 2]), j = Int(groups[group * 2 + 1])
@@ -584,7 +587,7 @@ struct TimelineView: View {
             guard let row, row.keysAt.indices.contains(touched.key) else { return }
             pause(); model.select(layerId: row.id, additive: false)
             let key = row.keysAt[touched.key][0]
-            selectedKey = (row.id, row.instants[touched.key], row.track)
+            selectedKey = (row.id, row.instants[touched.key], TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex))
             model.seek(toFrame: Int64(row.instants[touched.key]))
             model.openCurve(property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time)
         default:
@@ -647,7 +650,7 @@ struct TimelineView: View {
                 next.movingKeys.contains { $0.property == candidate.property && $0.effectIndex == candidate.effectIndex && $0.paramIndex == candidate.paramIndex }
             } }.map { $0.element }
             next.keyLimits = Keyframes.dragLimits(instants, instants.firstIndex(of: next.keyFrame) ?? 0, start: row.start, end: row.end)
-            selectedKey = (row.id, next.keyFrame, row.track)
+            if let key = next.movingKeys.first { selectedKey = (row.id, next.keyFrame, TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
             model.select(layerId: row.id, additive: false)
         }
         if next.mode == .reorder, let row {
@@ -771,7 +774,8 @@ struct TimelineView: View {
                 for key in g.movingKeys {
                     model.engine.editTrackKey(row.id, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: source, action: 2, value: key.value, targetTime: destination, interpolation: key.interpolation, handles: [])
                 }
-                g.keyFrame = target; selectedKey = (row.id, target, row.track)
+                g.keyFrame = target
+                if let key = g.movingKeys.first { selectedKey = (row.id, target, TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
                 model.curveSelectedTime = destination
                 model.refreshModel(force: true)
             }

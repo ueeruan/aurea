@@ -36,6 +36,13 @@ class TimelinePropertyIsolationTest {
         assertEquals(keys, listOf(position, rotation, scale, a, b, c))
     }
 
+    @Test fun selectionDoesNotJumpToAnotherPropertyAtTheSameFrame() {
+        assertEquals(25, row().selectedFrame(position))
+        assertEquals(Snap.NONE, row().selectedFrame(key(12, 10)))
+        assertEquals(Snap.NONE, row().selectedFrame(position.copy(time = 11)))
+        assertEquals(Snap.NONE, row().selectedFrame(position.copy(effectIndex = 2)))
+    }
+
     @Test fun frameGridRoundTripsAcrossZoomAndFractionalFps() {
         for (fps in listOf(23.976f, 29.97f, 30f, 59.94f, 60f)) {
             for (pps in listOf(2f, 80f, 800f)) {

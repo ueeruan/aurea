@@ -310,7 +310,10 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
     private var focusedResult: [TimelineRow] = []
 
     func focused(_ base: [TimelineRow], id: Int64?, tracks: [TimelineTrack]?, layers: [LayerItem], keys: [Int64: [KeyframeItem]]) -> [TimelineRow] {
-        guard let id, let tracks else { return base }
+        guard let id, let tracks else {
+            if focusedID != nil { focusedID = nil; expandedRevision = .max }
+            return base
+        }
         if focusedGeneration == generation && focusedID == id && focusedTracks == tracks { return focusedResult }
         focusedGeneration = generation; focusedID = id; focusedTracks = tracks
         focusedResult = base.map { row in

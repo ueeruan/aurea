@@ -211,7 +211,7 @@ internal class TimelinePainter(
             val top = m.rowsTop + c.rowTop(i) - scroll
             val selected = c.isSelected(r.id)
             val handles = !compact && selCount == 1 && selected && !r.locked
-            val selFrame = if (selKey != null && selKey.first == r.id && (r.track == null || r.track == TimelineTrack(selKey.second.property, selKey.second.effectIndex, selKey.second.paramIndex))) Keyframes.toTimeline(selKey.second.time, r.start, r.offset) else Snap.NONE
+            val selFrame = if (selKey != null && selKey.first == r.id) r.selectedFrame(selKey.second) else Snap.NONE
             val dragFrame = if (st.dragKeyLayer == r.id) st.dragKeyFrame else Snap.NONE
             drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation)
         }

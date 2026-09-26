@@ -147,8 +147,10 @@ public:
             if (level == 0) { out = lobe; continue; }
             EffectUniforms u;
             u.p3 = Vec4{1, static_cast<f32>(level) / (level + 1), 1.0f / (level + 1), 0};
-            LayerImage accumulated{ctx.texture("optical-glow-sum", source.width, source.height),
-                                   region, source.width, source.height};
+            // Keep broad lobes at their reduced resolution. Upsample only as
+            // finer lobes join, rather than allocating six full-size sums.
+            const u32 width = std::max(out.width, lobe.width), height = std::max(out.height, lobe.height);
+            LayerImage accumulated{ctx.texture("optical-glow-sum", width, height), region, width, height};
             if (ctx.fullscreen_pass("optical-glow-sum", PassStage::Effects, accumulated.texture,
                     ShaderId::effects_deep_glow_combine_frag,
                     {PassTexture{source.texture, {}, CommonSampler::LinearBorder},
@@ -177,7 +179,7 @@ public:
         LayerImage haloImage{input.texture, input.region, input.width, input.height};
         const f32 k = input.texel_scale_x();
         const u32 rCore = bright_reduction(coreR, k);
-        const u32 rHalo = bright_reduction(e.b(kOptical) ? haloR / 32.0f : haloR, k);
+        const u32 rHalo = e.b(kOptical) ? (haloR * k >= 12.0f ? 2u : 1u) : bright_reduction(haloR, k);
         LayerImage coreBright, haloBright;
         if (wantCore) {
             if (const Status s = bright(ctx, e, input, region, rCore, "brilho-nucleo", coreBright); !s.ok()) return s;

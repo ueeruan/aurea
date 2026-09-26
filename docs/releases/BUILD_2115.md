@@ -6,6 +6,7 @@
 - Legendas abrem mesmo sem seleção compatível e permitem selecionar uma fonte de vídeo/áudio. Texto comum não é tratado como fonte de fala.
 - Nomes visíveis dos presets de texto convertidos para nomes genéricos, preservando IDs.
 - Deep Glow: composição de luz premultiplicada, mapeamento correto da imagem expandida, aproximação óptica por seis Gaussianas em escalas logarítmicas, exposição e suavidade do limite. Não se afirma equivalência com o algoritmo proprietário.
+- Halo óptico reduzido e somas intermediárias dimensionadas pelos detalhes necessários, evitando seis somas em resolução cheia. Revalidados transparência/exposição, limites e parâmetros extremos na GPU.
 - Lens Blur: raio em unidades da textura de entrada e integração premultiplicada.
 - Pixel Sort: ordenação real em intervalos delimitados por limiares, com blocos de até 64 amostras; não é uma implementação de todos os modos do AE Pixel Sorter.
 - Turbulência: evolução em graus controlada por keyframes, deslocamento do domínio do ruído, mistura e fixação de bordas. A distribuição de ruído não foi comparada com AE.

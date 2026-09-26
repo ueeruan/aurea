@@ -713,7 +713,7 @@ struct TimelineView: View {
                 else if g.hit.kind == .header { mode = !horizontal && !compact ? .reorder : .blocked }
                 else { mode = horizontal || compact ? .move : .reorder }
                 if mode == .move, let row = g.row, !model.selection.contains(row.id) {
-                    model.select(layerId: row.id, additive: model.selection.count >= 2)
+                    model.select(layerId: row.id, additive: model.selection.count >= 2, openOptions: false)
                 }
                 begin(mode, start: start, width: size.width)
             }

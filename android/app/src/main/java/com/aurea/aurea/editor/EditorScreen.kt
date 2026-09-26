@@ -224,6 +224,7 @@ fun EditorScreen(store: EditorStore) {
         // `selectionSize == 1` que vale para os painéis que EDITAM a camada.
         ui.panel == EditorPanel.AiVideo || ui.panel == EditorPanel.Captions -> SheetContent.Panel
         ui.panel != null && selectionSize == 1 -> SheetContent.Panel
+        store.selection.isNotEmpty() && store.selection == store.timelineOnlySelection -> SheetContent.None
         selectionSize >= 2 -> SheetContent.Batch
         selectionSize == 1 -> SheetContent.Dock
         else -> SheetContent.None

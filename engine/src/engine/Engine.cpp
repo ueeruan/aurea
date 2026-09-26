@@ -4668,6 +4668,14 @@ std::string Engine::resolve_asset_path(const std::string& stored) const {
         const std::string relative = safe_asset_relative(stored.substr(std::strlen(prefix)));
         if (relative.empty()) return {};
         if (config_.documentsDirectory.empty()) return stored;
+        // Android's project root is files/projetos, but older model imports
+        // were stored in its sibling files/modelos. Resolve that exact owned
+        // directory before trying a portable companion inside Documents.
+        const auto docs = std::filesystem::u8path(config_.documentsDirectory).lexically_normal();
+        if (docs.filename() == "projetos" && relative.rfind("modelos/", 0) == 0) {
+            const auto legacy = document_asset_path(asset_path_utf8(docs.parent_path()), relative, true);
+            if (!legacy.empty()) return legacy;
+        }
         // No companion (or a symlink leaving Documents) stays missing; never
         // fall back to a different application's container or a basename scan.
         return document_asset_path(config_.documentsDirectory, relative, true);

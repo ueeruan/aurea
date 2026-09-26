@@ -475,7 +475,7 @@ internal class TimelineController(
      */
     private suspend fun AwaitPointerEventScope.longPressMove(r: RowModel, down: PointerInputChange) {
         if (!isSelected(r.id)) {
-            if (multi()) store.select(r.id, additive = true) else store.select(r.id)
+            store.select(r.id, additive = multi(), openOptions = false)
         }
         moveDrag(rowById(r.id) ?: r, down)
     }

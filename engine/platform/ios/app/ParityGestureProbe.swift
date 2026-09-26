@@ -49,6 +49,7 @@ import UIKit
             "modelRevision": model.status.modelRevision, "playhead": model.status.playhead,
             "corePlayhead": readCoreStatus ? coreStatus.playhead : -1,
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
+            "sheet": String(describing: model.sheetContent),
             "selectionCount": model.selection.count, "isManipulating": model.stageManipulating,
             "canUndo": model.status.canUndo != 0, "canRedo": model.status.canRedo != 0,
             "compositionWidth": model.compositionWidth, "compositionHeight": model.compositionHeight,

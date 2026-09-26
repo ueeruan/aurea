@@ -236,6 +236,26 @@ import XCTest
         } while Date() < deadline
     }
 
+    func testHoldingLayerToMoveDoesNotOpenOptionsButTapDoes() throws {
+        _ = try launch("layer-dock")
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let frame = timeline.frame
+        // First row, inside the clip body, away from its trim handles.
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 50)
+        let end = CGPoint(x: start.x + 45, y: start.y)
+        coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(end),
+                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try awaitSnapshot("Long press moves the unselected layer without opening its options") {
+            $0.detail.startFrame > 0 && $0.sheet == "none"
+        }
+        XCTAssertEqual(timeline.frame.height, frame.height, accuracy: 1)
+        XCTAssertEqual(moved.selectionCount, 1)
+        coordinate(end).tap()
+        _ = try awaitSnapshot("A deliberate tap opens the layer options") { $0.sheet == "dock" }
+    }
+
     func testText3DSelectionFollowsCoreBoundsAndGizmoDrag() throws {
         let before = try launch("text-3d")
         // Model3D may have no projected core corners. Its displayed selection
@@ -409,6 +429,7 @@ import XCTest
         let coreStarted: Bool
         let coreError: String
         let layerCount: Int
+        let sheet: String
         let primaryID: Int64
         let selectionCount: Int
         let isManipulating: Bool

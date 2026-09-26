@@ -224,6 +224,7 @@ final class AureaModel: ObservableObject {
         // O painel da Aurea AI CRIA a camada: abre sem nada selecionado (igual ao Android).
         if panel == .aiVideo || panel == .captions { return .panel }
         if selection.isEmpty { return .none }
+        if selection == timelineOnlySelection && (panel == .none || panel == .dock) { return .none }
         if selection.count > 1 { return .batch }
         return panel == .none || panel == .dock ? .dock : .panel
     }
@@ -1133,7 +1134,9 @@ final class AureaModel: ObservableObject {
         projectName = newName
     }
 
-    func select(layerId: Int64, additive: Bool = false) {
+    @Published private(set) var timelineOnlySelection: Set<Int64> = []
+
+    func select(layerId: Int64, additive: Bool = false, openOptions: Bool = true) {
         if primarySelection != layerId { selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; pointPick = nil; freehandPoints = []; panel = .none }
         if additive {
             var next = selection
@@ -1145,11 +1148,13 @@ final class AureaModel: ObservableObject {
             selection = [layerId]
         }
         selectedEffectId = nil
+        timelineOnlySelection = openOptions ? [] : selection
         if selection.count != 1 { panel = .none }
         refreshSelectedLayer()
     }
 
     func clearSelection() {
+        timelineOnlySelection = []
         selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; masks = []
         engine.run { $0.clearSelection() }
         selection = []
@@ -1165,6 +1170,7 @@ final class AureaModel: ObservableObject {
     }
 
     func openPanel(_ target: PanelKind) {
+        timelineOnlySelection = []
         if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
         showAddLayer = false
         panel = target
@@ -2275,6 +2281,7 @@ final class AureaModel: ObservableObject {
     }
 
     func selectAll() {
+        timelineOnlySelection = []
         let ids = layers.map { NSNumber(value: $0.id) }
         guard !ids.isEmpty else { return }
         engine.run { $0.selectLayers(ids) }

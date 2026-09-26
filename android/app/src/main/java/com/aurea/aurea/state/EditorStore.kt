@@ -325,6 +325,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     var selection by mutableStateOf<Set<Long>>(emptySet())
         private set
+    var timelineOnlySelection by mutableStateOf<Set<Long>>(emptySet())
+        private set
     var captionTracks by mutableStateOf<List<com.aurea.aurea.captions.CaptionTrack>>(emptyList())
         private set
     /** Detalhe da camada principal da seleção (a primeira escolhida). */
@@ -1515,18 +1517,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Seleção -------------------------------------------------------------
-    fun select(layer: Long, additive: Boolean = false) {
+    fun select(layer: Long, additive: Boolean = false, openOptions: Boolean = true) {
         selection = if (additive) {
             if (layer in selection) selection - layer else LinkedHashSet(selection).apply { add(layer) }
         } else {
             linkedSetOf(layer)
         }
         engine.setSelection(selection.toLongArray())
+        timelineOnlySelection = if (openOptions) emptySet() else selection.toSet()
         refreshDetail()
         refreshEffects()
     }
 
     fun selectAll() {
+        timelineOnlySelection = emptySet()
         selection = layers.map { it.id }.toCollection(LinkedHashSet())
         engine.setSelection(selection.toLongArray())
         refreshDetail()
@@ -1534,6 +1538,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearSelection() {
+        timelineOnlySelection = emptySet()
         if (selection.isEmpty()) return
         selection = emptySet()
         engine.clearSelection()
@@ -3957,7 +3962,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun copyModelToSandbox(uri: Uri, ext: String): File? = try {
-        val dir = File(getApplication<Application>().filesDir, "modelos").apply { mkdirs() }
+        val dir = File(File(getApplication<Application>().filesDir, "projetos"), "modelos").apply { mkdirs() }
         val tmp = File(dir, "importando.$ext")
         val digest = java.security.MessageDigest.getInstance("SHA-1")
         getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
@@ -3978,7 +3983,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     } catch (e: Exception) {
         // Temporário tem dono (§52): a cópia pela metade (disco cheio, stream cortado) sai.
         Log.w(TAG, "copia do modelo 3D para o app falhou: ${e.javaClass.simpleName}: ${e.message}")
-        File(File(getApplication<Application>().filesDir, "modelos"), "importando.$ext").delete()
+        File(File(File(getApplication<Application>().filesDir, "projetos"), "modelos"), "importando.$ext").delete()
         null
     }
 

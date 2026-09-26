@@ -406,7 +406,7 @@ class StressBattery(
         line("--- 4) PARTÍCULAS (6 s)")
         if (!store.newProjectHeadless(1920, 1080, 30f, "Estresse particulas")) { line("nao consegui criar o projeto de particulas; parando"); falhas += "newProject de particulas falhou"; return }
         delay(200)
-        store.addParticles(0)
+        store.addParticles(10)
         delay(300)
         val amostras = toca(segundos = 6)
         relataAmostras(amostras)
@@ -488,7 +488,7 @@ class StressBattery(
         repeat(2) { val id = store.addText(); if (id > 0) base.add(id); delay(80) }
         repeat(2) { val id = store.addText3D(); if (id > 0) base.add(id); delay(150) }
         var id3d = base.lastOrNull() ?: 0L
-        repeat(2) { val id = store.addParticles(0); if (id > 0) base.add(id); delay(120) }
+        repeat(2) { val id = store.addParticles(10); if (id > 0) base.add(id); delay(120) }
         repeat(2) { store.addShape(1); delay(80) }
         store.addAdjustmentLayer(); delay(80)
         store.addVectorLayer(1); delay(120)

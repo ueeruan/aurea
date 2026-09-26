@@ -804,7 +804,7 @@
     <string name="preset_starfield">Звёздное поле</string>
     <string name="preset_magic_dust">Волшебная пыль</string>
     <string name="preset_logo_burst">Взрыв логотипа</string>
-    <string name="particular_presets">Пресеты Aurea Particular</string>
+    <string name="particular_presets">Пресеты Particle World</string>
     <string name="particular_group_emitter">Эмиттер</string>
     <string name="particular_group_emission">Эмиссия</string>
     <string name="particular_group_particle">Частица</string>
@@ -868,7 +868,7 @@
     <string name="particular_depth">Глубина (Z)</string>
     <string name="particular_emitter_rotation">Поворот эмиттера</string>
     <string name="particular_deterministic_note">Симуляция замкнутая: просмотр и экспорт всегда дают один и тот же кадр, а переход по времени мгновенный.</string>
-    <string name="particular_title">Aurea Particular</string>
+    <string name="particular_title">Particle World</string>
     <string name="ai_aviso_online">Aurea AI online. Ads keep the infrastructure running — and you pay nothing.</string>
     <string name="ai_assista_para_gerar">Watch the full ad to generate your video.</string>
     <string name="ai_assistir_e_gerar_de_novo">Watch and generate</string>

@@ -484,7 +484,7 @@ private fun ElementTab(store: EditorStore, close: () -> Unit) {
             // UM sistema, nao tres. Faiscas/Neve/Poeira de luz viraram preset
             // do mesmo motor — listar os tres aqui prometia tres motores.
             AddItem(stringResource(R.string.particular_title), CupertinoGlyph.Sparkles, ShellColors.Text3D) {
-                close(); store.addParticles(0)
+                close(); store.addParticles(10)
             },
             AddItem(stringResource(R.string.editor_camada_ajuste), CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
             AddItem(stringResource(R.string.sh_add_group_selection), CupertinoGlyph.Folder) {

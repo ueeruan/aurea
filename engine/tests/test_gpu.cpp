@@ -4274,6 +4274,39 @@ AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
     AUREA_CHECK(whiteShadow * 10 > whitePlain * 8);   // a sombra fica ATRÁS do texto
 }
 
+AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
+    AUREA_REQUIRE_GPU();
+    for (u32 preset : {10u, 11u, 12u}) {
+        Scene3DRig rig(640, 360);
+        auto id = rig.e.add_particles(preset);
+        AUREA_CHECK(id.ok());
+        auto* project = rig.e.project();
+        auto* comp = project->timeline().composition(project->timeline().current());
+        auto* layer = comp->layer(LayerId::unpack(*id));
+        AUREA_CHECK(layer->threeD);
+        AUREA_CHECK_EQ(layer->particles.emitterType, preset);
+        AUREA_CHECK(layer->particles.maxParticles <= 12000);
+        auto seek = [&](i64 frame) {
+            Command cmd; cmd.type = CommandType::PlaybackSeek;
+            cmd.seek.time = tick_at(FrameIndex{frame}, 30.0);
+            AUREA_CHECK(rig.e.apply_command(cmd).ok());
+        };
+        seek(15);
+        const auto before = rig.capture(640);
+        AUREA_CHECK(coverage(before) > .00001f);
+        seek(90); (void)rig.capture(640); seek(15);
+        AUREA_CHECK(max_diff(before, rig.capture(640)) <= 1);
+        const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_particle_world.aurea";
+        AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+        AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+        seek(15);
+        AUREA_CHECK(max_diff(before, rig.capture(640)) <= 1);
+        std::printf("    Particle World %u: coverage %.6f\n", preset, coverage(before));
+        (void)write_png("build/particle-world-" + std::to_string(preset) + ".png", before);
+        std::remove(path.c_str());
+    }
+}
+
 AUREA_TEST(Gpu, JuanPresetsRenderAndKeepExpressionsAfterReopen) {
     AUREA_REQUIRE_GPU();
     for (u32 preset = 11; preset < text::kTextPresetCount; ++preset) {

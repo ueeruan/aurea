@@ -709,7 +709,9 @@ void write_layer(ByteWriter& w, const Layer& l) {
 ///      textura/malha, colisão esfera/caixa, curvas ao longo da vida).
 /// v22: ambiente por objeto 3D (Scene ou Custom, com HDRI, intensidade,
 ///      exposição e rotação próprios).
-constexpr u32 kTimelineSectionVersion = 25;
+// v26: Particle World emitter/model IDs 10..12. Byte layout is unchanged,
+// but older renderers must not silently reinterpret these as legacy emitters.
+constexpr u32 kTimelineSectionVersion = 26;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {

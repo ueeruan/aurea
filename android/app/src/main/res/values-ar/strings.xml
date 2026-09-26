@@ -816,7 +816,7 @@
     <string name="preset_starfield">حقل نجوم</string>
     <string name="preset_magic_dust">غبار سحري</string>
     <string name="preset_logo_burst">انفجار الشعار</string>
-    <string name="particular_presets">إعدادات Aurea Particular</string>
+    <string name="particular_presets">إعدادات Particle World</string>
     <string name="particular_group_emitter">المُصدِر</string>
     <string name="particular_group_emission">الانبعاث</string>
     <string name="particular_group_particle">الجسيم</string>
@@ -880,7 +880,7 @@
     <string name="particular_depth">العمق (Z)</string>
     <string name="particular_emitter_rotation">دوران المُصدِر</string>
     <string name="particular_deterministic_note">المحاكاة مغلقة: المعاينة والتصدير يعطيان الإطار نفسه دائمًا، والقفز في الزمن فوري.</string>
-    <string name="particular_title">Aurea Particular</string>
+    <string name="particular_title">Particle World</string>
     <string name="ai_aviso_online">Aurea AI online. Ads keep the infrastructure running — and you pay nothing.</string>
     <string name="ai_assista_para_gerar">Watch the full ad to generate your video.</string>
     <string name="ai_assistir_e_gerar_de_novo">Watch and generate</string>

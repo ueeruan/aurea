@@ -801,7 +801,7 @@ untuk mengedit kurvanya.</string>
     <string name="preset_starfield">Medan bintang</string>
     <string name="preset_magic_dust">Debu magis</string>
     <string name="preset_logo_burst">Ledakan logo</string>
-    <string name="particular_presets">Preset Aurea Particular</string>
+    <string name="particular_presets">Preset Particle World</string>
     <string name="particular_group_emitter">Pemancar</string>
     <string name="particular_group_emission">Pemancaran</string>
     <string name="particular_group_particle">Partikel</string>
@@ -865,7 +865,7 @@ untuk mengedit kurvanya.</string>
     <string name="particular_depth">Kedalaman (Z)</string>
     <string name="particular_emitter_rotation">Rotasi pemancar</string>
     <string name="particular_deterministic_note">Simulasinya tertutup: pratinjau dan ekspor selalu memberi frame yang sama, dan melompat di waktu itu instan.</string>
-    <string name="particular_title">Aurea Particular</string>
+    <string name="particular_title">Particle World</string>
     <string name="ai_aviso_online">Aurea AI online. Ads keep the infrastructure running — and you pay nothing.</string>
     <string name="ai_assista_para_gerar">Watch the full ad to generate your video.</string>
     <string name="ai_assistir_e_gerar_de_novo">Watch and generate</string>

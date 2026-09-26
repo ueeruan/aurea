@@ -295,6 +295,9 @@ enum class ParticleEmitter : u32 {
     Text,         ///< os glifos de uma camada de texto
     Path,         ///< o caminho da 1ª máscara (ou do vetor) de uma camada
     Mesh,         ///< vértices / superfície / arestas de um modelo 3D
+    WorldExplosive, ///< spherical producer, isotropic 3D velocity
+    WorldJet,       ///< spherical producer, directional 3D cone
+    WorldVortex,    ///< spherical producer, rotating 3D flow
     Count,
 };
 

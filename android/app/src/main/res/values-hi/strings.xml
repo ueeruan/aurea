@@ -802,7 +802,7 @@
     <string name="preset_starfield">तारा-क्षेत्र</string>
     <string name="preset_magic_dust">जादुई धूल</string>
     <string name="preset_logo_burst">लोगो विस्फोट</string>
-    <string name="particular_presets">Aurea Particular प्रीसेट</string>
+    <string name="particular_presets">Particle World प्रीसेट</string>
     <string name="particular_group_emitter">उत्सर्जक</string>
     <string name="particular_group_emission">उत्सर्जन</string>
     <string name="particular_group_particle">कण</string>
@@ -866,7 +866,7 @@
     <string name="particular_depth">गहराई (Z)</string>
     <string name="particular_emitter_rotation">उत्सर्जक का घुमाव</string>
     <string name="particular_deterministic_note">सिमुलेशन बंद-रूप है: प्रीव्यू और एक्सपोर्ट हमेशा एक ही फ़्रेम देते हैं, और समय में कूदना तुरंत होता है।</string>
-    <string name="particular_title">Aurea Particular</string>
+    <string name="particular_title">Particle World</string>
     <string name="ai_aviso_online">Aurea AI online. Ads keep the infrastructure running — and you pay nothing.</string>
     <string name="ai_assista_para_gerar">Watch the full ad to generate your video.</string>
     <string name="ai_assistir_e_gerar_de_novo">Watch and generate</string>

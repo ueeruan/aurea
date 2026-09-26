@@ -1044,7 +1044,7 @@ private struct AddLayerSheet: View {
                         }
                     case 4:
                         drawnCard("sh_add_null", kind: -1) { model.addNull(threeD: false); close() }
-                        card("particular_title", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(0); close() }
+                        card("particular_title", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(10); close() }
                         card("editor_camada_ajuste", glyph: CupertinoGlyph.WandStars) { close(); model.addAdjustmentLayer() }
                         card("sh_add_group_selection", glyph: CupertinoGlyph.Folder) {
                             if model.selection.isEmpty { model.toast = AureaText.t("sh_add_pick_layers_to_group") }

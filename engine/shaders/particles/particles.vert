@@ -109,6 +109,8 @@ uint pcg(uint v) {
 }
 float rnd(inout uint s) { s = pcg(s); return float(s) * (1.0 / 4294967296.0); }
 
+#include "particle_world.glsl"
+
 #include "particles_extras.glsl"
 // =============================================================================
 //  ESPAÇO DA CENA (8.2) — cena 3D, espaço mundo, histórico e desfoque.
@@ -282,6 +284,10 @@ void ps_place_streak(vec3 pos, vec2 offset2d, vec3 axis, float halfW, float birt
 vec3 shape_offset(float type, inout uint s) {
     const float w = p.area.x;
     const float h = p.area.y;
+    if (world_particle()) {
+        vec3 direction = world_direction(s);
+        return direction * (p.emitShape.y * pow(rnd(s), 1.0/3.0));
+    }
     if (type < 0.5) return vec3(0.0);                       // ponto
     if (type < 1.5) {                                        // caixa
         return vec3((vec2(rnd(s), rnd(s)) - 0.5) * vec2(w, h),
@@ -319,7 +325,7 @@ vec3 shape_offset(float type, inout uint s) {
 /// somado uma vez só.
 vec3 emit_start(float type, vec2 origin, inout uint s) {
     vec3 q;
-    if (type > 5.5 && emit_from_source(s, q)) return q;
+    if (type > 5.5 && type < 9.5 && emit_from_source(s, q)) return q;
     return vec3(origin, 0.0) + shape_offset(type, s);
 }
 
@@ -650,17 +656,25 @@ void main() {
 
     const float age = ageAll;
     vec2 pos;
-    if (col_volume()) {
-        pos = collide_volume(P, age);
+    vec3 grav;
+    float posZ;
+    vec3 currentVelocity;
+    if (world_particle()) {
+        vec3 velocity = world_velocity(spd, em.dir, em.spread, s);
+        velocity.xy += em.motion * p.emission.z;
+        vec3 result = world_path(st, vec3(em.origin, 0), velocity, vec3(P.acc, ps_accel_z()),
+                                 age, currentVelocity, grav);
+        pos = result.xy; posZ = result.z;
     } else {
-        pos = particle_path(P, age);
-        if (p.collide.x > 0.5 && p.collide.x < 1.5) pos = collide_plane(P, pos, age);
+        if (col_volume()) pos = collide_volume(P, age);
+        else {
+            pos = particle_path(P, age);
+            if (p.collide.x > 0.5 && p.collide.x < 1.5) pos = collide_plane(P, pos, age);
+        }
+        grav = ps_gravity(P.acc, age);
+        posZ = ps_depth(P.z, spd * cone.y, age, k) + grav.z;
+        currentVelocity = vec3(P.v0 + P.acc * age, spd * cone.y + ps_accel_z() * age);
     }
-
-    // Z (só no 3D) e a gravidade SEPARADA, para o espaço mundo agir nos eixos
-    // do mundo — ver ps_place.
-    const vec3 grav = ps_gravity(P.acc, age);
-    const float posZ = ps_depth(P.z, spd * cone.y, age, k) + grav.z;
 
     // ---- Ao longo da vida ---------------------------------------------------
     const float u = age / life;
@@ -679,8 +693,8 @@ void main() {
     const float size = max(life_size(u, p.force.z, p.force.w), 0.0) * sizeMul;
 
     // Rastro: estica no sentido do movimento, e afina com a idade.
-    if (p.trail.x > 1e-4 && !meshPass) {
-        const vec2 vel = P.v0 + P.acc * age;
+    if (p.trail.x > 1e-4 && !meshPass && (!world_particle() || p.emission.w == 2.0)) {
+        const vec2 vel = currentVelocity.xy;
         const float vlen = length(vel);
         if (vlen > 1e-3) {
             const vec2 tl = trail_look();
@@ -697,7 +711,7 @@ void main() {
             // A cauda (along = −1) sai com a opacidade do rastro.
             v_misc = vec4(tl.y, 1.0, c);
             // 3D: a fita segue a velocidade com Z (velocidade + gravidade Z).
-            const vec3 vel3 = vec3(vel, spd * cone.y + ps_accel_z() * age);
+            const vec3 vel3 = currentVelocity;
             ps_place_streak(vec3(pos, posZ), dir * (along * len) + perp * ((c.x * 2.0 - 1.0) * wNow),
                             vel3 * (along * len / vlen),
                             (c.x * 2.0 - 1.0) * wNow, birth, grav);

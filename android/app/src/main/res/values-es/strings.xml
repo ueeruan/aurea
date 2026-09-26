@@ -802,7 +802,7 @@ para editar la curva.</string>
     <string name="preset_starfield">Campo de estrellas</string>
     <string name="preset_magic_dust">Polvo mágico</string>
     <string name="preset_logo_burst">Explosión de logo</string>
-    <string name="particular_presets">Presets de Aurea Particular</string>
+    <string name="particular_presets">Presets de Particle World</string>
     <string name="particular_group_emitter">Emisor</string>
     <string name="particular_group_emission">Emisión</string>
     <string name="particular_group_particle">Partícula</string>
@@ -866,7 +866,7 @@ para editar la curva.</string>
     <string name="particular_depth">Profundidad (Z)</string>
     <string name="particular_emitter_rotation">Rotación del emisor</string>
     <string name="particular_deterministic_note">La simulación es cerrada: la vista previa y la exportación dan siempre el mismo fotograma, y saltar en el tiempo es instantáneo.</string>
-    <string name="particular_title">Aurea Particular</string>
+    <string name="particular_title">Particle World</string>
     <string name="ai_aviso_online">Aurea IA en línea. Los anuncios mantienen la infraestructura funcionando, y tú no pagas nada.</string>
     <string name="ai_assista_para_gerar">Mira el anuncio completo para generar tu video.</string>
     <string name="ai_assistir_e_gerar_de_novo">Ver y generar</string>

@@ -2478,6 +2478,28 @@ namespace {
 /// editaveis depois, e nenhum deles cria um motor proprio.
 void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
     p = ParticleData{};
+    if (preset >= 10 && preset <= 12) {
+        // Particle World: new analytic 3D dynamics, compact mobile controls.
+        // IDs 0..9 remain readable for existing projects, but are no longer
+        // offered by the mobile creation/preset panels.
+        p.emitterType = static_cast<u32>(ParticleEmitter::WorldExplosive) + preset - 10;
+        p.emitterRadius = w * .025f;
+        p.rate = 1000; p.lifetime = 1; p.lifeRandom = 0;
+        p.speed = w * .25f; p.speedRandom = .5f;
+        p.gravity = Vec3{0, -w * .25f, 0};
+        p.spread = preset == 11 ? 30.0f : 360.0f;
+        p.direction = -90; p.emitterSpace = 1;
+        p.startSize = w / 960; p.endSize = w / 960;
+        p.startOpacity = .75f; p.endOpacity = 0;
+        p.startColor = Vec4{1, 1, .3137255f, 1};
+        p.endColor = Vec4{.7843137f, .1568627f, .1568627f, 1};
+        p.particleType = static_cast<u32>(ParticleShape::Streak);
+        p.trailLength = .035f; p.trailTaper = 0;
+        p.sizeRandom = .5f; p.softness = .1f;
+        p.maxParticles = 12000; p.blendMode = 1;
+        if (preset == 12) { p.gravity = Vec3{}; p.lifetime = 2; p.speed *= .4f; }
+        return;
+    }
     switch (preset) {
         case 1:   // Neve: cai devagar, de toda a largura do topo
             p.rate = 40; p.lifetime = 9; p.speed = 70; p.spread = 25; p.gravity = Vec3{0, 0, 0};
@@ -2618,11 +2640,12 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     // UM sistema, UM nome. Os tres nomes antigos viraram preset: criar uma
     // camada chamada "Neve" sugeria um motor de neve, e nao existe motor de
     // neve — e o Particular com os parametros da neve.
-    const LayerId lid = comp->add_layer(LayerKind::ParticleSystem, "Aurea Particular");
+    const LayerId lid = comp->add_layer(LayerKind::ParticleSystem, preset >= 10 ? "Particle World" : "Aurea Particular");
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
     particle_preset(l->particles, preset, w, h);
+    if (preset >= 10 && preset <= 12) l->threeD = true;
     if (preset == 9) logo_burst_from_text(*comp, lid, l->particles);
     l->particles.seed = lid.index * 7919u + 1u;
     // O cursor pode estar DEPOIS do fim da composição (a timeline não trava
@@ -2651,6 +2674,10 @@ bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const u32 seed = l->particles.seed;
     particle_preset(l->particles, preset, static_cast<f32>(comp->width()), static_cast<f32>(comp->height()));
+    if (preset >= 10 && preset <= 12) {
+        l->threeD = true;
+        l->tracks.remove_if([](const Track& track) { return track.property == TrackProperty::ParticleParam; });
+    }
     if (preset == 9) logo_burst_from_text(*comp, LayerId::unpack(layerId), l->particles);
     l->particles.seed = seed;
     project_->mark_dirty();

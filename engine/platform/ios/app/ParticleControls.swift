@@ -5,74 +5,14 @@ struct ParticleControl: Identifiable {
     var toggle: Bool; var choices: [String]; var negate: Bool
 }
 let particleControls: [ParticleControl] = [
-    ParticleControl(id: 1, label: "particular_width", group: "particular_group_emitter", low: 0.0, high: 4000.0, toggle: false, choices: [], negate: false), // EmitterWidth
-    ParticleControl(id: 2, label: "particular_height", group: "particular_group_emitter", low: 0.0, high: 4000.0, toggle: false, choices: [], negate: false), // EmitterHeight
-    ParticleControl(id: 3, label: "particular_radius", group: "particular_group_emitter", low: 0.0, high: 4000.0, toggle: false, choices: [], negate: false), // EmitterRadius
-    ParticleControl(id: 8, label: "particular_fill", group: "particular_group_emitter", low: 0, high: 1, toggle: true, choices: [], negate: false), // EmitFill
-    ParticleControl(id: 4, label: "particular_rotation", group: "particular_group_emitter", low: -360, high: 360, toggle: false, choices: [], negate: false), // EmitterRotation
-    ParticleControl(id: 6, label: "particular_cols", group: "particular_group_emitter", low: 1.0, high: 64.0, toggle: false, choices: [], negate: false), // GridX
-    ParticleControl(id: 7, label: "particular_rows", group: "particular_group_emitter", low: 1.0, high: 64.0, toggle: false, choices: [], negate: false), // GridY
-    ParticleControl(id: 9, label: "particular_offset_x", group: "particular_group_emitter", low: -4000.0, high: 4000.0, toggle: false, choices: [], negate: false), // EmitterOffsetX
-    ParticleControl(id: 10, label: "particular_offset_y", group: "particular_group_emitter", low: -4000.0, high: 4000.0, toggle: false, choices: [], negate: false), // EmitterOffsetY
-    ParticleControl(id: 11, label: "panel_particulas_segundo", group: "particular_group_emission", low: 0.0, high: 5000.0, toggle: false, choices: [], negate: false), // Rate
-    ParticleControl(id: 12, label: "particular_burst", group: "particular_group_emission", low: 0.0, high: 20000.0, toggle: false, choices: [], negate: false), // Burst
-    ParticleControl(id: 13, label: "panel_duracao_cada", group: "particular_group_emission", low: 0.05, high: 60.0, toggle: false, choices: [], negate: false), // Lifetime
-    ParticleControl(id: 14, label: "particular_life_random", group: "particular_group_emission", low: 0, high: 1, toggle: false, choices: [], negate: false), // LifeRandom
-    ParticleControl(id: 15, label: "panel_velocidade", group: "particular_group_emission", low: 0.0, high: 8000.0, toggle: false, choices: [], negate: false), // Speed
-    ParticleControl(id: 16, label: "particular_speed_random", group: "particular_group_emission", low: 0, high: 1, toggle: false, choices: [], negate: false), // SpeedRandom
-    ParticleControl(id: 17, label: "panel_direcao", group: "particular_group_emission", low: -360.0, high: 360.0, toggle: false, choices: [], negate: false), // Direction
-    ParticleControl(id: 18, label: "panel_abertura", group: "particular_group_emission", low: -360, high: 360, toggle: false, choices: [], negate: false), // Spread
-    ParticleControl(id: 19, label: "particular_inherit", group: "particular_group_emission", low: 0, high: 2.0, toggle: false, choices: [], negate: false), // InheritVelocity
-    ParticleControl(id: 20, label: "particular_seed", group: "particular_group_emission", low: 0.0, high: 100000.0, toggle: false, choices: [], negate: false), // Seed
-    ParticleControl(id: 68, label: "particular_mesh_scale", group: "particular_group_particle", low: 0.01, high: 100.0, toggle: false, choices: [], negate: false), // MeshScale
-    ParticleControl(id: 69, label: "particular_mesh_lit", group: "particular_group_particle", low: 0, high: 1, toggle: true, choices: [], negate: false), // MeshLit
-    ParticleControl(id: 26, label: "panel_tamanho_inicial", group: "particular_group_particle", low: 0.0, high: 2000.0, toggle: false, choices: [], negate: false), // StartSize
-    ParticleControl(id: 27, label: "panel_tamanho_final", group: "particular_group_particle", low: 0.0, high: 2000.0, toggle: false, choices: [], negate: false), // EndSize
-    ParticleControl(id: 28, label: "panel_opacidade_inicial", group: "particular_group_particle", low: 0, high: 1, toggle: false, choices: [], negate: false), // StartOpacity
-    ParticleControl(id: 29, label: "panel_opacidade_final", group: "particular_group_particle", low: 0, high: 1, toggle: false, choices: [], negate: false), // EndOpacity
-    ParticleControl(id: 23, label: "panel_rotacao", group: "particular_group_particle", low: -360, high: 360, toggle: false, choices: [], negate: false), // Rotation
-    ParticleControl(id: 24, label: "particular_rotation_random", group: "particular_group_particle", low: 0.0, high: 360.0, toggle: false, choices: [], negate: false), // RotationRandom
-    ParticleControl(id: 25, label: "panel_giro", group: "particular_group_particle", low: -3600.0, high: 3600.0, toggle: false, choices: [], negate: false), // Spin
-    ParticleControl(id: 59, label: "particular_size_random", group: "particular_group_particle", low: 0, high: 1, toggle: false, choices: [], negate: false), // SizeRandom
-    ParticleControl(id: 60, label: "particular_opacity_random", group: "particular_group_particle", low: 0, high: 1, toggle: false, choices: [], negate: false), // OpacityRandom
-    ParticleControl(id: 61, label: "particular_color_random", group: "particular_group_particle", low: 0, high: 1, toggle: false, choices: [], negate: false), // ColorRandom
-    ParticleControl(id: 30, label: "particular_gravity_x", group: "particular_group_physics", low: -8000.0, high: 8000.0, toggle: false, choices: [], negate: false), // GravityX
-    ParticleControl(id: 31, label: "panel_gravidade", group: "particular_group_physics", low: -8000.0, high: 8000.0, toggle: false, choices: [], negate: true), // GravityY
-    ParticleControl(id: 34, label: "particular_wind", group: "particular_group_physics", low: -8000.0, high: 8000.0, toggle: false, choices: [], negate: true), // WindX
-    ParticleControl(id: 33, label: "particular_drag", group: "particular_group_physics", low: 0, high: 4.0, toggle: false, choices: [], negate: false), // Drag
-    ParticleControl(id: 36, label: "particular_turbulence", group: "particular_group_physics", low: 0.0, high: 2000.0, toggle: false, choices: [], negate: false), // Turbulence
-    ParticleControl(id: 37, label: "particular_turb_scale", group: "particular_group_physics", low: 0.05, high: 20.0, toggle: false, choices: [], negate: false), // TurbulenceScale
-    ParticleControl(id: 38, label: "particular_turb_speed", group: "particular_group_physics", low: 0.0, high: 20.0, toggle: false, choices: [], negate: false), // TurbulenceSpeed
-    ParticleControl(id: 39, label: "particular_vortex", group: "particular_group_physics", low: -3600.0, high: 3600.0, toggle: false, choices: [], negate: false), // Vortex
-    ParticleControl(id: 40, label: "particular_attractor", group: "particular_group_physics", low: -100.0, high: 100.0, toggle: false, choices: [], negate: false), // Attractor
-    ParticleControl(id: 50, label: "particular_collision_y", group: "particular_group_physics", low: -4000.0, high: 4000.0, toggle: false, choices: [], negate: false), // CollisionY
-    ParticleControl(id: 62, label: "particular_collision_cx", group: "particular_group_physics", low: -4000.0, high: 4000.0, toggle: false, choices: [], negate: false), // CollisionX
-    ParticleControl(id: 63, label: "particular_collision_cz", group: "particular_group_physics", low: -4000.0, high: 4000.0, toggle: false, choices: [], negate: false), // CollisionZ
-    ParticleControl(id: 64, label: "particular_radius", group: "particular_group_physics", low: 0.0, high: 8000.0, toggle: false, choices: [], negate: false), // CollisionRadius
-    ParticleControl(id: 65, label: "particular_width", group: "particular_group_physics", low: 0.0, high: 16000.0, toggle: false, choices: [], negate: false), // CollisionWidth
-    ParticleControl(id: 66, label: "particular_height", group: "particular_group_physics", low: 0.0, high: 16000.0, toggle: false, choices: [], negate: false), // CollisionHeight
-    ParticleControl(id: 67, label: "particular_depth", group: "particular_group_physics", low: 0.0, high: 16000.0, toggle: false, choices: [], negate: false), // CollisionDepth
-    ParticleControl(id: 51, label: "particular_bounce", group: "particular_group_physics", low: 0, high: 1, toggle: false, choices: [], negate: false), // CollisionBounce
-    ParticleControl(id: 43, label: "particular_aux_count", group: "particular_group_aux", low: 0.0, high: 16.0, toggle: false, choices: [], negate: false), // AuxCount
-    ParticleControl(id: 56, label: "particular_aux_probability", group: "particular_group_aux", low: 0, high: 1, toggle: false, choices: [], negate: false), // AuxProbability
-    ParticleControl(id: 44, label: "particular_aux_at", group: "particular_group_aux", low: 0, high: 1, toggle: false, choices: [], negate: false), // AuxAt
-    ParticleControl(id: 45, label: "panel_duracao_cada", group: "particular_group_aux", low: 0.05, high: 20.0, toggle: false, choices: [], negate: false), // AuxLife
-    ParticleControl(id: 46, label: "panel_velocidade", group: "particular_group_aux", low: 0.0, high: 5000.0, toggle: false, choices: [], negate: false), // AuxSpeed
-    ParticleControl(id: 47, label: "panel_tamanho", group: "particular_group_aux", low: 0.0, high: 500.0, toggle: false, choices: [], negate: false), // AuxSize
-    ParticleControl(id: 48, label: "panel_abertura", group: "particular_group_aux", low: -360, high: 360, toggle: false, choices: [], negate: false), // AuxSpread
-    ParticleControl(id: 41, label: "particular_trail_len", group: "particular_group_trail", low: 0.0, high: 2.0, toggle: false, choices: [], negate: false), // TrailLength
-    ParticleControl(id: 42, label: "particular_trail_taper", group: "particular_group_trail", low: 0, high: 1, toggle: false, choices: [], negate: false), // TrailTaper
-    ParticleControl(id: 57, label: "particular_trail_width", group: "particular_group_trail", low: 0.0, high: 8.0, toggle: false, choices: [], negate: false), // TrailWidth
-    ParticleControl(id: 58, label: "particular_trail_opacity", group: "particular_group_trail", low: 0, high: 1, toggle: false, choices: [], negate: false), // TrailOpacity
-    ParticleControl(id: 22, label: "particular_softness", group: "particular_group_render", low: 0, high: 1, toggle: false, choices: [], negate: false), // Softness
-    ParticleControl(id: 53, label: "particular_max_particles", group: "particular_group_render", low: 1.0, high: 1000000.0, toggle: false, choices: [], negate: false), // MaxParticles
-    ParticleControl(id: 5, label: "particular_depth", group: "particular_group_render", low: 0.0, high: 4000.0, toggle: false, choices: [], negate: false), // EmitterDepth
-    ParticleControl(id: 32, label: "particular_gravity_z", group: "particular_group_render", low: -8000.0, high: 8000.0, toggle: false, choices: [], negate: false), // GravityZ
-    ParticleControl(id: 35, label: "particular_wind_y", group: "particular_group_render", low: -8000.0, high: 8000.0, toggle: false, choices: [], negate: false), // WindY
-    ParticleControl(id: 0, label: "particular_emitter", group: "particular_group_emitter", low: 0, high: 9, toggle: false, choices: ["particular_emitter_point", "particular_emitter_box", "particular_emitter_sphere", "particular_emitter_disc", "particular_emitter_line", "particular_emitter_grid", "particular_emitter_layer", "particular_emitter_text", "particular_emitter_path", "particular_emitter_mesh"], negate: false), // EmitterType
-    ParticleControl(id: 55, label: "particular_emit_from", group: "particular_group_emitter", low: 0, high: 2, toggle: false, choices: ["particular_emit_vertices", "particular_emit_surface", "particular_emit_edges"], negate: false), // EmitFrom
-    ParticleControl(id: 54, label: "particular_space", group: "particular_group_emitter", low: 0, high: 1, toggle: false, choices: ["particular_space_local", "particular_space_world"], negate: false), // EmitterSpace
-    ParticleControl(id: 21, label: "particular_shape", group: "particular_group_particle", low: 0, high: 5, toggle: false, choices: ["particular_shape_circle", "particular_shape_square", "particular_shape_streak", "particular_shape_soft", "particular_shape_texture", "particular_shape_mesh"], negate: false), // ParticleType
-    ParticleControl(id: 49, label: "particular_collision", group: "particular_group_physics", low: 0, high: 3, toggle: false, choices: ["particular_collision_none", "particular_collision_plane", "particular_collision_sphere", "particular_collision_box"], negate: false), // Collision
-    ParticleControl(id: 52, label: "particular_blend", group: "particular_group_render", low: 0, high: 1, toggle: false, choices: ["particular_blend_normal", "particular_blend_add"], negate: false), // BlendMode
+    ParticleControl(id: 3, label: "particular_radius", group: "particular_group_emitter", low: 0.0, high: 2000.0, toggle: false, choices: [], negate: false), // EmitterRadius
+    ParticleControl(id: 11, label: "panel_particulas_segundo", group: "particular_group_emitter", low: 0.0, high: 6000.0, toggle: false, choices: [], negate: false), // Rate
+    ParticleControl(id: 13, label: "panel_duracao_cada", group: "particular_group_emitter", low: 0.05, high: 10.0, toggle: false, choices: [], negate: false), // Lifetime
+    ParticleControl(id: 15, label: "panel_velocidade", group: "particular_group_physics", low: 0.0, high: 4000.0, toggle: false, choices: [], negate: false), // Speed
+    ParticleControl(id: 31, label: "panel_gravidade", group: "particular_group_physics", low: -4000.0, high: 4000.0, toggle: false, choices: [], negate: true), // GravityY
+    ParticleControl(id: 33, label: "world_resistance", group: "particular_group_physics", low: 0.0, high: 10.0, toggle: false, choices: [], negate: false), // Drag
+    ParticleControl(id: 26, label: "panel_tamanho_inicial", group: "particular_group_particle", low: 0.1, high: 120.0, toggle: false, choices: [], negate: false), // StartSize
+    ParticleControl(id: 27, label: "panel_tamanho_final", group: "particular_group_particle", low: 0.0, high: 120.0, toggle: false, choices: [], negate: false), // EndSize
+    ParticleControl(id: 28, label: "panel_opacidade", group: "particular_group_particle", low: 0, high: 1, toggle: false, choices: [], negate: false), // StartOpacity
+    ParticleControl(id: 21, label: "particular_shape", group: "particular_group_particle", low: 0, high: 3, toggle: false, choices: ["particular_shape_circle", "particular_shape_square", "particular_shape_streak", "particular_shape_soft"], negate: false), // ParticleType
 ]

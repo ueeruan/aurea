@@ -1,21 +1,5 @@
-// =============================================================================
-//  Aurea / platform / ios / app / PanelParticles.swift
-//
-//  AUREA PARTICULAR — o painel. Porte de `ParticlesPanel.kt`.
-//
-//  SEIS grupos, nesta ordem de propósito: Emissor (de onde sai), Emissão (com
-//  que frequência), Partícula (o que sai), Ao longo da vida (as curvas), Física
-//  (para onde vai), Aux (o que ela gera), Rastro, Renderização e Avançado (o que
-//  quase ninguém mexe). Nada de cem controles numa tela só.
-//
-//  Os índices são `ParticleParam` no motor: o número é CONTRATO, não posição na
-//  tela. Um controle que muda de lugar não muda de significado.
-//
-//  O trilho da esquerda escolhe a LINHA (o losango acende o keyframe do
-//  parâmetro escolhido, como nos efeitos); a curva do trilho abre o editor de
-//  easing no trecho sob o cabeçote. Nada de valor guardado aqui: tudo sai do
-//  núcleo e volta por `setParticle` / `insertKeyframe`.
-// =============================================================================
+// Particle World: ten controls, two colors and three motion presets.
+// Parameter IDs remain compatible with existing saved projects.
 import SwiftUI
 
 /// Índices de `ParticleParam` no motor. Nomes legíveis, números do contrato.
@@ -54,9 +38,7 @@ private let particleProperty: UInt32 = 36
 struct ParticlesPanel: View {
     @EnvironmentObject private var model: AureaModel
     @State private var values: [Float] = []
-    @State private var links: [Int64] = []
     @State private var curves: [[Float]] = [[], [], []]
-    @State private var advanced = false
     @State private var selected: Int?
 
     private var id: Int64 { model.primarySelection ?? 0 }
@@ -97,182 +79,25 @@ struct ParticlesPanel: View {
 
     // =========================================================================
     @ViewBuilder private var parameterGroups: some View {
-        // --- Emissor: de onde sai ---------------------------------------------
-        let emitter = Int(value(PPP.emitterType))
+        if value(PPP.emitterType) < 10 {
+            PanelNotice(AureaText.t("world_legacy"))
+        } else {
         group(AureaText.t("particular_group_emitter"))
-        choice(AureaText.t("particular_emitter"), PPP.emitterType, [
-            "particular_emitter_point", "particular_emitter_box", "particular_emitter_sphere",
-            "particular_emitter_disc", "particular_emitter_line", "particular_emitter_grid",
-            "particular_emitter_layer", "particular_emitter_text", "particular_emitter_path",
-            "particular_emitter_mesh",
-        ])
-        switch emitter {
-        case 1:
-            dim(AureaText.t("particular_width"), PPP.emitterWidth, 1, 0, 4000, " px")
-            dim(AureaText.t("particular_height"), PPP.emitterHeight, 1, 0, 4000, " px")
-        case 2:
-            dim(AureaText.t("particular_radius"), PPP.emitterRadius, 0.5, 0, 4000, " px")
-            toggleRow(AureaText.t("particular_fill"), PPP.emitFill)
-        case 3:
-            dim(AureaText.t("particular_radius"), PPP.emitterRadius, 0.5, 0, 4000, " px")
-        case 4:
-            dim(AureaText.t("particular_length"), PPP.emitterWidth, 1, 0, 4000, " px")
-            angle(AureaText.t("particular_rotation"), PPP.emitterRotation)
-        case 5:
-            dim(AureaText.t("particular_width"), PPP.emitterWidth, 1, 1, 4000, " px")
-            dim(AureaText.t("particular_height"), PPP.emitterHeight, 1, 1, 4000, " px")
-            dim(AureaText.t("particular_cols"), PPP.gridX, 0.1, 1, 64, "")
-            dim(AureaText.t("particular_rows"), PPP.gridY, 0.1, 1, 64, "")
-        default:
-            if emitter >= 6 {
-                // Quem pode emitir: cada tipo lê a fonte do seu jeito (ver
-                // ParticleExtras.cpp). Sem fonte, sai da caixa do emissor.
-                let candidates = model.layers.filter { row in
-                    guard row.id != id else { return false }
-                    switch emitter {
-                    case 6: return row.kind == 2 || row.kind == 4 || row.kind == 5
-                    case 7: return row.kind == 4
-                    case 8: return row.maskCount > 0 || row.kind == 5 || row.kind == 4
-                    default: return row.kind == 10
-                    }
-                }
-                layerPick(AureaText.t("particular_source"), links.count > 0 ? links[0] : 0, candidates,
-                          AureaText.t("particular_source_hint_none")) { setLink(0, $0) }
-                choice(AureaText.t("particular_emit_from"), PPP.emitFrom,
-                       ["particular_emit_vertices", "particular_emit_surface", "particular_emit_edges"])
-            }
-        }
-        dim(AureaText.t("particular_offset_x"), PPP.emitterOffsetX, 1, -4000, 4000, " px")
-        dim(AureaText.t("particular_offset_y"), PPP.emitterOffsetY, 1, -4000, 4000, " px")
-        choice(AureaText.t("particular_space"), PPP.emitterSpace,
-               ["particular_space_local", "particular_space_world"])
-
-        // --- Emissão ----------------------------------------------------------
-        group(AureaText.t("particular_group_emission"))
-        dim(AureaText.t("panel_particulas_segundo"), PPP.rate, 0.2, 0, 5000, "/s")
-        dim(AureaText.t("particular_burst"), PPP.burst, 0.2, 0, 20000, "")
-        dim(AureaText.t("panel_duracao_cada"), PPP.lifetime, 0.02, 0.05, 60, " s")
-        percent(AureaText.t("particular_life_random"), PPP.lifeRandom)
-        dim(AureaText.t("panel_velocidade"), PPP.speed, 4, 0, 8000, " px/s")
-        percent(AureaText.t("particular_speed_random"), PPP.speedRandom)
-        angle(AureaText.t("panel_direcao"), PPP.direction, -360, 360)
-        angle(AureaText.t("panel_abertura"), PPP.spread)
-        percent(AureaText.t("particular_inherit"), PPP.inheritVelocity, 2)
-        dim(AureaText.t("particular_seed"), PPP.seed, 0.2, 0, 100000, "")
-
-        // --- Partícula: o que sai ---------------------------------------------
-        let shape = Int(value(PPP.particleType))
-        group(AureaText.t("particular_group_particle"))
-        choice(AureaText.t("particular_shape"), PPP.particleType, [
-            "particular_shape_circle", "particular_shape_square", "particular_shape_streak",
-            "particular_shape_soft", "particular_shape_texture", "particular_shape_mesh",
-        ])
-        if shape == 4 {
-            layerPick(AureaText.t("particular_texture_image"), links.count > 1 ? links[1] : 0,
-                      model.layers.filter { $0.id != id && $0.kind == 2 },
-                      AureaText.t("particular_texture_hint")) { setLink(1, $0) }
-        }
-        if shape == 5 {
-            layerPick(AureaText.t("particular_mesh_model"), links.count > 2 ? links[2] : 0,
-                      model.layers.filter { $0.id != id && $0.kind == 10 },
-                      AureaText.t("particular_mesh_hint")) { setLink(2, $0) }
-            dim(AureaText.t("particular_mesh_scale"), PPP.meshScale, 0.01, 0.01, 100, "x", decimals: 2)
-            toggleRow(AureaText.t("particular_mesh_lit"), PPP.meshLit)
-        }
-        dim(AureaText.t("panel_tamanho_inicial"), PPP.startSize, 0.5, 0, 2000, " px")
-        dim(AureaText.t("panel_tamanho_final"), PPP.endSize, 0.5, 0, 2000, " px")
-        percent(AureaText.t("panel_opacidade_inicial"), PPP.startOpacity)
-        percent(AureaText.t("panel_opacidade_final"), PPP.endOpacity)
-        angle(AureaText.t("panel_rotacao"), PPP.rotation)
-        angle(AureaText.t("particular_rotation_random"), PPP.rotationRandom, 0, 360)
-        dim(AureaText.t("panel_giro"), PPP.spin, 2, -3600, 3600, " °/s")
-        percent(AureaText.t("particular_size_random"), PPP.sizeRandom)
-        percent(AureaText.t("particular_opacity_random"), PPP.opacityRandom)
-        percent(AureaText.t("particular_color_random"), PPP.colorRandom)
-
-        // --- Ao longo da vida -------------------------------------------------
-        group(AureaText.t("particular_group_life"))
-        lifeGradient
-        lifeCurve(1, AureaText.t("particular_size_curve"), 0, 4)
-        lifeCurve(2, AureaText.t("particular_opacity_curve"), 0, 1)
-
-        // --- Física: para onde vai --------------------------------------------
+        dim(AureaText.t("particular_radius"), PPP.emitterRadius, 1, 0, 2000, " px")
+        dim(AureaText.t("panel_particulas_segundo"), PPP.rate, 5, 0, 6000, "/s")
+        dim(AureaText.t("panel_duracao_cada"), PPP.lifetime, 0.02, 0.05, 10, " s", decimals: 2)
         group(AureaText.t("particular_group_physics"))
-        dim(AureaText.t("particular_gravity_x"), PPP.gravityX, 8, -8000, 8000, " px/s²")
-        dim(AureaText.t("panel_gravidade"), PPP.gravityY, 8, -8000, 8000, " px/s²", negate: true)
-        dim(AureaText.t("particular_wind"), PPP.windX, 4, -8000, 8000, " px/s²", negate: true)
-        percent(AureaText.t("particular_drag"), PPP.drag, 4)
-        dim(AureaText.t("particular_turbulence"), PPP.turbulence, 0.5, 0, 2000, "")
-        dim(AureaText.t("particular_turb_scale"), PPP.turbulenceScale, 0.05, 0.05, 20, "x")
-        dim(AureaText.t("particular_turb_speed"), PPP.turbulenceSpeed, 0.05, 0, 20, "x")
-        dim(AureaText.t("particular_vortex"), PPP.vortex, 4, -3600, 3600, " °/s")
-        dim(AureaText.t("particular_attractor"), PPP.attractor, 0.5, -100, 100, "")
-        let collision = Int(value(PPP.collision))
-        choice(AureaText.t("particular_collision"), PPP.collision, [
-            "particular_collision_none", "particular_collision_plane",
-            "particular_collision_sphere", "particular_collision_box",
-        ])
-        switch collision {
-        case 1:
-            dim(AureaText.t("particular_collision_y"), PPP.collisionY, 1, -4000, 4000, " px")
-        case 2, 3:
-            // Centro a partir do centro do emissor (Y é o mesmo controle da
-            // altura do plano).
-            dim(AureaText.t("particular_collision_cx"), PPP.collisionX, 1, -4000, 4000, " px")
-            dim(AureaText.t("particular_collision_cy"), PPP.collisionY, 1, -4000, 4000, " px")
-            dim(AureaText.t("particular_collision_cz"), PPP.collisionZ, 1, -4000, 4000, " px")
-            if collision == 2 {
-                dim(AureaText.t("particular_radius"), PPP.collisionRadius, 0.5, 0, 8000, " px")
-            } else {
-                dim(AureaText.t("particular_width"), PPP.collisionWidth, 1, 0, 16000, " px")
-                dim(AureaText.t("particular_height"), PPP.collisionHeight, 1, 0, 16000, " px")
-                dim(AureaText.t("particular_depth"), PPP.collisionDepth, 1, 0, 16000, " px")
-            }
-        default:
-            EmptyView()
+        dim(AureaText.t("panel_velocidade"), PPP.speed, 2, 0, 4000, " px/s")
+        dim(AureaText.t("panel_gravidade"), PPP.gravityY, 4, -4000, 4000, " px/s²", negate: true)
+        dim(AureaText.t("world_resistance"), PPP.drag, 0.02, 0, 10, "", decimals: 2)
+        group(AureaText.t("particular_group_particle"))
+        choice(AureaText.t("particular_shape"), PPP.particleType,
+               ["particular_shape_circle", "particular_shape_square", "particular_shape_streak", "particular_shape_soft"])
+        dim(AureaText.t("panel_tamanho_inicial"), PPP.startSize, 0.25, 0.1, 120, " px", decimals: 1)
+        dim(AureaText.t("panel_tamanho_final"), PPP.endSize, 0.25, 0, 120, " px", decimals: 1)
+        percent(AureaText.t("panel_opacidade"), PPP.startOpacity)
+        lifeGradient
         }
-        if collision > 0 { percent(AureaText.t("particular_bounce"), PPP.collisionBounce) }
-
-        // --- Aux --------------------------------------------------------------
-        group(AureaText.t("particular_group_aux"))
-        dim(AureaText.t("particular_aux_count"), PPP.auxCount, 0.1, 0, 16, "")
-        if value(PPP.auxCount) >= 0.5 {
-            percent(AureaText.t("particular_aux_probability"), PPP.auxProbability)
-            percent(AureaText.t("particular_aux_at"), PPP.auxAt)
-            dim(AureaText.t("panel_duracao_cada"), PPP.auxLife, 0.02, 0.05, 20, " s")
-            dim(AureaText.t("panel_velocidade"), PPP.auxSpeed, 2, 0, 5000, " px/s")
-            dim(AureaText.t("panel_tamanho"), PPP.auxSize, 0.3, 0, 500, " px")
-            angle(AureaText.t("panel_abertura"), PPP.auxSpread)
-        }
-
-        // --- Rastro -----------------------------------------------------------
-        group(AureaText.t("particular_group_trail"))
-        dim(AureaText.t("particular_trail_len"), PPP.trailLength, 0.002, 0, 2, " s", decimals: 2)
-        if value(PPP.trailLength) > 0 {
-            percent(AureaText.t("particular_trail_taper"), PPP.trailTaper)
-            dim(AureaText.t("particular_trail_width"), PPP.trailWidth, 0.01, 0, 8, "x", decimals: 2)
-            percent(AureaText.t("particular_trail_opacity"), PPP.trailOpacity)
-        }
-
-        // --- Renderização -----------------------------------------------------
-        group(AureaText.t("particular_group_render"))
-        choice(AureaText.t("particular_blend"), PPP.blendMode,
-               ["particular_blend_normal", "particular_blend_add"])
-        percent(AureaText.t("particular_softness"), PPP.softness)
-
-        Spacer(minLength: 10)
-        AdvancedToggle(open: advanced, count: 5) { advanced.toggle() }
-        if advanced {
-            dim(AureaText.t("particular_max_particles"), PPP.maxParticles, 20, 1, 1000000, "")
-            angle(AureaText.t("particular_emitter_rotation"), PPP.emitterRotation)
-            dim(AureaText.t("particular_depth"), PPP.emitterDepth, 1, 0, 4000, " px")
-            dim(AureaText.t("particular_gravity_z"), PPP.gravityZ, 8, -8000, 8000, " px/s²")
-            dim(AureaText.t("particular_wind_y"), PPP.windY, 4, -8000, 8000, " px/s²")
-        }
-        Spacer(minLength: 6)
-        Text(AureaText.t("particular_deterministic_note"))
-            .font(AureaType.tiny)
-            .foregroundStyle(AureaColors.muted)
     }
 
     // =========================================================================
@@ -346,7 +171,7 @@ struct ParticlesPanel: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(presetKeys.enumerated()), id: \.offset) { entry in
-                        Button { applyPreset(entry.offset) } label: {
+                        Button { applyPreset(entry.offset + 10) } label: {
                             Text(AureaText.t(entry.element))
                                 .font(.aurea(size: 12))
                                 .foregroundStyle(AureaColors.text)
@@ -361,9 +186,7 @@ struct ParticlesPanel: View {
         }
     }
 
-    private let presetKeys = ["panel_faiscas", "panel_neve", "panel_poeira_luz", "preset_rain",
-                              "preset_fireflies", "preset_embers", "preset_confetti",
-                              "preset_starfield", "preset_magic_dust", "preset_logo_burst"]
+    private let presetKeys = ["world_explosive", "world_jet", "world_vortex"]
 
     private func group(_ title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -397,11 +220,6 @@ struct ParticlesPanel: View {
         }
     }
 
-    private func toggleRow(_ label: String, _ param: Int) -> some View {
-        PropertyCustomRow(label, selected: selected == param, onSelect: { selected = param }, keyframe: look(param)) {
-            AureaToggle(checked: value(param) >= 0.5) { set(param, $0 ? 1 : 0) }
-        }
-    }
 
     /// Valor com unidade. `negate` inverte o SENTIDO do arrasto (gravidade para
     /// baixo é o natural, como no Android).
@@ -412,9 +230,6 @@ struct ParticlesPanel: View {
         return ruler(label, param, text, unitsPerDp, min, max, negate: negate)
     }
 
-    private func angle(_ label: String, _ param: Int, _ min: Float = -180, _ max: Float = 180) -> some View {
-        ruler(label, param, "\(Int(value(param).rounded()))°", 1, min, max)
-    }
 
     private func percent(_ label: String, _ param: Int, _ unitsPerDp: Float = 0.01) -> some View {
         ruler(label, param, "\(Int((value(param) * 100).rounded()))%", unitsPerDp, 0, 1)
@@ -424,12 +239,12 @@ struct ParticlesPanel: View {
                        _ unitsPerDp: Float, _ min: Float, _ max: Float, negate: Bool = false) -> some View {
         PropertyCustomRow(label, selected: selected == param, onSelect: { selected = param }, keyframe: look(param)) {
             HStack(spacing: 8) {
-                TickRuler(value: { value(param) }, unitsPerDp: unitsPerDp, active: true)
+                TickRuler(value: { negate ? -value(param) : value(param) }, unitsPerDp: unitsPerDp, active: true)
                     .frame(maxWidth: .infinity)
-                    .valueDrag(enabled: true, start: { value(param) }, unitsPerDp: { unitsPerDp },
+                    .valueDrag(enabled: true, start: { negate ? -value(param) : value(param) }, unitsPerDp: { unitsPerDp },
                                min: min, max: max,
                                onStart: { model.engine.run { $0.beginUndoGroup() } },
-                               onValue: { set(param, $0) },
+                               onValue: { set(param, negate ? -$0 : $0) },
                                onEnd: { model.engine.run { $0.endUndoGroup() } })
                 ValueBox(text)
             }
@@ -437,147 +252,36 @@ struct ParticlesPanel: View {
     }
 
     /// Escolha de uma camada do projeto (fonte, imagem, modelo), com "Nenhuma".
-    private func layerPick(_ label: String, _ current: Int64, _ candidates: [LayerItem],
-                           _ emptyHint: String, onPick: @escaping (Int64) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(AureaType.tiny).foregroundStyle(AureaColors.muted)
-            if candidates.isEmpty {
-                Text(emptyHint).font(AureaType.tiny).foregroundStyle(AureaColors.muted)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        Chip(AureaText.t("particular_none"), on: current == 0) { onPick(0) }
-                        ForEach(candidates) { row in
-                            Chip(row.name, on: current == row.id) { onPick(row.id) }
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
+
 
     /// Cor ao longo da vida: até 8 paradas (posição + cor sRGB). Sem paradas vale
     /// o início → fim da partícula.
     private var lifeGradient: some View {
-        let stops = curveStops(0, stride: 4)
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(AureaText.t("particular_color_gradient"))
-                .font(AureaType.tiny)
-                .foregroundStyle(AureaColors.muted)
-            if stops.isEmpty {
-                HStack(spacing: 6) {
-                    Text(AureaText.t("particular_curve_off")).font(AureaType.tiny).foregroundStyle(AureaColors.muted)
-                    Chip(AureaText.t("particular_curve_use"), on: false) {
-                        writeCurve(0, [0, 1, 1, 1, 1, 1, 0.45, 0.1])
-                    }
+        let saved = curveStops(0, stride: 4)
+        let stops: [[Float]] = saved.count >= 2 ? [saved[0], saved[saved.count-1]] :
+            [[0, 1, 1, 0.3137255], [1, 0.7843137, 0.1568627, 0.1568627]]
+        return HStack(spacing: 12) {
+            ForEach(0..<2, id: \.self) { index in
+                let stop = stops[index]
+                ColorWell(color: Color(.sRGB, red: Double(stop[1]), green: Double(stop[2]), blue: Double(stop[3]), opacity: 1)) {
+                    model.engine.run { $0.beginUndoGroup() }
+                    model.colorSheet = ColorSheetRequest(title: AureaText.t(index == 0 ? "world_birth_color" : "world_death_color"), initial: [stop[1], stop[2], stop[3], 1], onChange: { r, g, b, _ in
+                        var colors = stops
+                        colors[index] = [Float(index), r, g, b]
+                        writeCurve(0, colors.flatMap { $0 })
+                    }, onDone: { model.engine.run { $0.endUndoGroup() } })
                 }
-            } else {
-                ForEach(Array(stops.enumerated()), id: \.offset) { entry in
-                    let index = entry.offset
-                    let stop = entry.element
-                    HStack(spacing: 6) {
-                        ColorWell(color: Color(.sRGB, red: Double(stop[1]), green: Double(stop[2]),
-                                               blue: Double(stop[3]), opacity: 1)) {
-                            model.engine.run { $0.beginUndoGroup() }
-                            model.colorSheet = ColorSheetRequest(title: AureaText.t("particular_color_gradient"), initial: [stop[1], stop[2], stop[3], 1], onChange: { r, g, b, _ in
-                                editStop(0, index, 4) { $0[1] = r; $0[2] = g; $0[3] = b }
-                            }, onDone: { model.engine.run { $0.endUndoGroup() } })
-                        }
-                        Spacer(minLength: 8)
-                        pointRuler(AureaText.t("particular_curve_at"), stop[0], 0, 1, 0.005, percent: true) { v in
-                            editStop(0, index, 4) { $0[0] = v }
-                        }
-                        removeChip { removeStop(0, index, 4) }
-                    }
-                }
-                curveButtons(stops.count) { add in
-                    if add, let last = stops.last {
-                        let prev = stops.count >= 2 ? stops[stops.count - 2] : last
-                        writeCurve(0, (stops + [[(prev[0] + last[0]) * 0.5, last[1], last[2], last[3]]]).flatMap { $0 })
-                    } else {
-                        writeCurve(0, [])
-                    }
-                }
+                Text(AureaText.t(index == 0 ? "world_birth_color" : "world_death_color")).font(AureaType.tiny)
             }
-        }
+        }.padding(.vertical, 12)
     }
 
-    /// Tamanho ou opacidade ao longo da vida: pontos (posição, multiplicador)
-    /// numa curva suave (Hermite, presa entre os vizinhos).
-    private func lifeCurve(_ kind: Int, _ title: String, _ min: Float, _ max: Float) -> some View {
-        let pts = curveStops(kind, stride: 2)
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(AureaType.tiny).foregroundStyle(AureaColors.muted)
-            if pts.isEmpty {
-                HStack(spacing: 6) {
-                    Text(AureaText.t("particular_curve_off")).font(AureaType.tiny).foregroundStyle(AureaColors.muted)
-                    Chip(AureaText.t("particular_curve_use"), on: false) {
-                        // Sobe e desce (tamanho) / aparece e some (opacidade).
-                        writeCurve(kind, [0, kind == 1 ? 0.2 : 0, 0.3, 1, 1, 0])
-                    }
-                }
-            } else {
-                ForEach(Array(pts.enumerated()), id: \.offset) { entry in
-                    let index = entry.offset
-                    let point = entry.element
-                    HStack(spacing: 6) {
-                        pointRuler(AureaText.t("particular_curve_at"), point[0], 0, 1, 0.005, percent: true) { v in
-                            editStop(kind, index, 2) { $0[0] = v }
-                        }
-                        pointRuler(AureaText.t("particular_curve_value"), point[1], min, max, 0.005, percent: kind == 2) { v in
-                            editStop(kind, index, 2) { $0[1] = v }
-                        }
-                        removeChip { removeStop(kind, index, 2) }
-                    }
-                }
-                curveButtons(pts.count) { add in
-                    if add, let last = pts.last {
-                        let prev = pts.count >= 2 ? pts[pts.count - 2] : last
-                        writeCurve(kind, (pts + [[(prev[0] + last[0]) * 0.5, last[1]]]).flatMap { $0 })
-                    } else {
-                        writeCurve(kind, [])
-                    }
-                }
-            }
-        }
-    }
 
     /// "+ Ponto" (até 8) e "voltar ao início → fim".
-    private func curveButtons(_ count: Int, onAction: @escaping (Bool) -> Void) -> some View {
-        HStack(spacing: 6) {
-            if count < 8 { Chip(AureaText.t("particular_curve_add"), on: false) { onAction(true) } }
-            Chip(AureaText.t("particular_curve_clear"), on: false) { onAction(false) }
-        }
-    }
 
-    private func removeChip(_ onClick: @escaping () -> Void) -> some View {
-        Button(action: onClick) {
-            Text("×").font(.aurea(size: 15)).foregroundStyle(AureaColors.muted)
-                .padding(.horizontal, 10).frame(height: 36)
-                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(AureaText.t("particular_remove"))
-    }
 
     /// Régua compacta de um ponto de curva (sem losango: a curva não é keyframe).
-    private func pointRuler(_ label: String, _ value: Float, _ min: Float, _ max: Float,
-                            _ unitsPerDp: Float, percent: Bool,
-                            onValue: @escaping (Float) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(label) " + (percent ? "\(Int((value * 100).rounded()))%" : numeroPtBr(value, casas: 2)))
-                .font(AureaType.tiny)
-                .foregroundStyle(AureaColors.muted)
-            TickRuler(value: { value }, unitsPerDp: unitsPerDp, active: true, height: 32)
-                .frame(maxWidth: .infinity)
-                .valueDrag(enabled: true, start: { value }, unitsPerDp: { unitsPerDp },
-                           min: min, max: max,
-                           onStart: { model.engine.run { $0.beginUndoGroup() } },
-                           onValue: onValue,
-                           onEnd: { model.engine.run { $0.endUndoGroup() } })
-        }
-    }
+
 
     // =========================================================================
     // Estado vindo do núcleo
@@ -585,9 +289,8 @@ struct ParticlesPanel: View {
     private func value(_ param: Int) -> Float { param < values.count ? values[param] : 0 }
 
     private func load() {
-        guard model.selectedLayer != nil else { values = []; links = []; return }
+        guard model.selectedLayer != nil else { values = []; return }
         values = model.engine.particleParams(id).map { $0.floatValue }
-        links = model.engine.particleLinks(id).map { $0.int64Value }
         curves = (0..<3).map { model.engine.particleCurve(id, kind: UInt32($0)).map { $0.floatValue } }
     }
 
@@ -605,11 +308,6 @@ struct ParticlesPanel: View {
         load()
     }
 
-    private func setLink(_ kind: UInt32, _ target: Int64) {
-        _ = model.engine.setParticleLink(id, kind: kind, target: target)
-        model.refreshModel(force: true)
-        load()
-    }
 
     private func applyPreset(_ preset: Int) {
         _ = model.engine.applyParticlePreset(id, preset: UInt32(preset))
@@ -632,19 +330,7 @@ struct ParticlesPanel: View {
     }
 
     /// Mexe num ponto da curva e devolve a lista inteira ao núcleo.
-    private func editStop(_ kind: Int, _ index: Int, _ stride: Int, _ change: (inout [Float]) -> Void) {
-        var stops = curveStops(kind, stride: stride)
-        guard index < stops.count else { return }
-        change(&stops[index])
-        writeCurve(kind, stops.flatMap { $0 })
-    }
 
-    private func removeStop(_ kind: Int, _ index: Int, _ stride: Int) {
-        var stops = curveStops(kind, stride: stride)
-        guard index < stops.count else { return }
-        stops.remove(at: index)
-        writeCurve(kind, stops.flatMap { $0 })
-    }
 }
 
 /// O respiro à esquerda dos botões de preset (12 dp do Android).

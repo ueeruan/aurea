@@ -19,6 +19,7 @@
 namespace aurea::audio {
 
 struct AudioBlockCache::Reader {
+    u64 assetRevision = 0;
     std::unique_ptr<AudioDecoderBackend> dec;
     AudioStreamInfo info{};
     std::vector<f32> buf;       ///< estéreo, taxa da fonte
@@ -115,16 +116,14 @@ void AudioBlockCache::register_asset(u64 key, AudioAssetRef ref) {
             return;
         }
     }
-    // Ordem dos locks em todo o arquivo: readerMutex_ → mutex_.
-    std::lock_guard<std::mutex> rl(readerMutex_);
     std::lock_guard<std::mutex> lock(mutex_);
     assets_[key] = std::move(ref);
-    // Caminho novo (relink): os blocos antigos são de outro arquivo.
+    ++assetVersions_[key];
     for (auto b = blocks_.begin(); b != blocks_.end();) {
-        if (b->first.asset == key) b = blocks_.erase(b);
-        else ++b;
+        if (b->first.asset == key) b = blocks_.erase(b); else ++b;
     }
-    readers_.erase(key);
+    // The decoder worker replaces its reader lazily. No decoder lock/join here.
+
 }
 
 bool AudioBlockCache::knows(u64 key) const {
@@ -172,16 +171,20 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::fetch(u64 key, i64 block) {
 
 std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 block) {
     AudioAssetRef ref;
+    u64 revision = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = assets_.find(key);
         if (it == assets_.end()) return nullptr;
         ref = it->second;
+        revision = assetVersions_[key];
     }
     std::lock_guard<std::mutex> rl(readerMutex_);
     auto& slot = readers_[key];
+    if (slot && slot->assetRevision != revision) slot.reset();
     if (!slot) {
         slot = std::make_unique<Reader>();
+        slot->assetRevision = revision;
         if (factory_) slot->dec = factory_->open_audio(ref.path.c_str());
         if (slot->dec) slot->info = slot->dec->info();
         if (!slot->dec || slot->info.sampleRate == 0) {
@@ -205,6 +208,7 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 blo
     r.ensure(std::max<i64>(0, from), to, half);
 
     auto out = std::make_shared<AudioBlock>();
+    out->assetRevision = revision;
     out->pcm.assign(static_cast<usize>(kBlockFrames) * kMixChannels, 0.0f);
     if (r.bufValid) {
         resample_to_mix(r.buf.data(), r.frames(), srcPos - static_cast<f64>(r.bufStart), step, out->pcm.data(),
@@ -226,10 +230,20 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 blo
     return out;
 }
 
+void AudioBlockCache::wait_for_data(u64 revision) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    dataReady_.wait_for(lock, std::chrono::milliseconds(10), [&] {
+        return !running_ || dataRevision_.load(std::memory_order_acquire) != revision;
+    });
+}
+
 void AudioBlockCache::insert(const Key& k, std::shared_ptr<const AudioBlock> b) {
     constexpr u64 kBlockBytes = static_cast<u64>(kBlockFrames) * kMixChannels * sizeof(f32);
     std::lock_guard<std::mutex> lock(mutex_);
+    if (b->assetRevision != assetVersions_[k.asset]) return;
     blocks_[k] = Entry{std::move(b), ++useClock_};
+    dataRevision_.fetch_add(1, std::memory_order_release);
+    dataReady_.notify_all();
     // Despejo pelo menos usado: o mixer toca os blocos em ordem de tempo, e o
     // que foi pedido adiante é o mais recente — o passado sai primeiro.
     while (blocks_.size() * kBlockBytes > budget_ && blocks_.size() > 1) {

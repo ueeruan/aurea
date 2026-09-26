@@ -7746,3 +7746,37 @@ AUREA_TEST(Gpu, BounceElasticStepsDrivePreviewAndFinalRendering) {
     }
 }
 #endif
+
+AUREA_TEST(Gpu, RawPlaybackBypassesTransformsEffectsAndOtherLayers) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(800,800);
+    SyntheticConfig config; config.width=128; config.height=72;
+    auto id=scene.video(config,9000,9000,0.01f);
+    scene.solid(800,800,{1,0,0,1},400,400);
+    scene.add_effect(id,effect_keys::kGaussianBlur).params[0].constant.v[0] = 40.0f;
+    auto* layer=scene.comp->layer(id);
+    auto* asset=scene.project.asset(layer->source);
+    auto& g=gpu();
+    FrameSnapshot snapshot;
+    for (u64 frame=1;frame<1500;++frame) {
+        g.renderer.prepare_raw(id,*layer,*asset,0,scene.media,frame,DecodeMode::Still,0,1,1,snapshot);
+        if (!snapshot.missingVideoFrames) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    AUREA_CHECK_EQ(snapshot.compWidth,128u); AUREA_CHECK_EQ(snapshot.compHeight,72u);
+    AUREA_CHECK_EQ(snapshot.layers.size(),1u);
+    AUREA_CHECK(snapshot.plans.empty() && snapshot.scenes.empty() && snapshot.maskData.empty() && snapshot.glyphs.empty());
+    AUREA_CHECK_EQ(snapshot.missingVideoFrames,0u);
+    RenderSettings settings; settings.rawPlayback=true;
+    OffscreenTarget target{g.target(128,72),128,72};
+    FrameStats stats; RenderTimings timings;
+    AUREA_CHECK(g.renderer.render(snapshot,settings,&target,stats,timings).ok());
+    AUREA_CHECK_EQ(stats.passesExecuted,1u); // decode/color conversion only; no compositor/effect graph
+    g.backend.wait_idle();
+    std::vector<u16> pixels(128*72*4);
+    AUREA_CHECK(g.backend.read_texture(target.texture,pixels.data(),128*8).ok());
+    double energy=0; for (usize i=0;i<pixels.size();i+=4) energy+=half_to_float(pixels[i])+half_to_float(pixels[i+1])+half_to_float(pixels[i+2]);
+    AUREA_CHECK(energy>100);
+    AUREA_CHECK_EQ(scene.comp->width(),800u); AUREA_CHECK_EQ(scene.comp->height(),800u);
+    AUREA_CHECK_NEAR(layer->transform.position.x,9000,0.001);
+}

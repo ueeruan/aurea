@@ -379,8 +379,8 @@ private struct ShellMenuRow: View {
                 }
                 if let anchor = shell.resolutionAnchor {
                     Color.clear.contentShape(Rectangle()).ignoresSafeArea().onTapGesture { shell.resolutionAnchor = nil }
-                    let pos = popupPosition(anchor, CGSize(width: 160, height: 208), geometry, gap: 4, flip: true)
-                    resolutionPopup.frame(width: 160).offset(x: pos.x, y: pos.y)
+                    let pos = popupPosition(anchor, CGSize(width: 220, height: 252), geometry, gap: 4, flip: true)
+                    resolutionPopup.frame(width: 220).offset(x: pos.x, y: pos.y)
                 }
             }.onChange(of: shell.sheet) { sheet in if sheet == .searchLayers { search = "" } }
         }
@@ -395,6 +395,9 @@ private struct ShellMenuRow: View {
     }
     private var resolutionPopup: some View {
         VStack(spacing: 0) {
+            Button(model.rawPlayback ? "Voltar ao compositor" : "AUREA RAW PLAYBACK TEST") {
+                shell.resolutionAnchor = nil; model.toggleRawPlayback()
+            }.font(.aurea(size: 11)).padding(8).accessibilityIdentifier("rawPlaybackToggle")
             ForEach(Array(["AUTO", "Full", "1/2", "1/4", "1/8"].enumerated()), id: \.offset) { index, name in
                 let denominator: UInt32 = [1, 1, 2, 4, 8][index]
                 let on = index == 0 ? model.status.previewAuto != 0 : model.status.previewAuto == 0 && model.status.previewDenominator == denominator

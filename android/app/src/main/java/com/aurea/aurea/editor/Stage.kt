@@ -1334,7 +1334,7 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
     // Na cena 3D o canto é do desfazer/refazer flutuante.
     if (ui.fullscreen || store.sceneEditor) return
     var open by remember { mutableStateOf(false) }
-    val label = when (val l = store.preview.scaleLabel) {
+    val label = if (store.rawPlayback) "RAW" else when (val l = store.preview.scaleLabel) {
         "FULL" -> "Full"
         else -> l
     }
@@ -1354,6 +1354,7 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
             val current = store.preview.scaleLabel
             ShellPopupMenu(
                 items = listOf(
+                    PopupItem(if (store.rawPlayback) "Voltar ao compositor" else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() },
                     PopupItem("AUTO", current == "AUTO") { store.setPreviewScale(true) },
                     PopupItem("Full", current == "FULL") { store.setPreviewScale(false, 1, 1) },
                     PopupItem("1/2", current == "1/2") { store.setPreviewScale(false, 1, 2) },
@@ -1372,7 +1373,7 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
 private fun PerfHud(store: EditorStore, modifier: Modifier) {
     if (!store.hudVisible) return
     val res = LocalContext.current.resources
-    val text = hudText(res, store.perf, store.uiFps, store.appMemory)
+    val text = if (store.rawPlayback) store.engineForStress.playbackReport() else hudText(res, store.perf, store.uiFps, store.appMemory)
     Box(
         modifier
             .clip(RoundedCornerShape(8.dp))

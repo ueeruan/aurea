@@ -2040,6 +2040,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setPreviewScale(automatic: Boolean, numerator: Int = 1, denominator: Int = 1) =
         send { setPreviewScale(automatic, numerator, denominator) }
 
+    var rawPlayback by mutableStateOf(false)
+        private set
+    fun toggleRawPlayback() {
+        val next = !rawPlayback
+        if (engine.setRawPlayback(next)) { rawPlayback = next; hudVisible = true }
+    }
     fun toggleHud() {
         hudVisible = !hudVisible
         wakeStatusLoop()   // o HUD mede o FPS da UI: precisa do vsync

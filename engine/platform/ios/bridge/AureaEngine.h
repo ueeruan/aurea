@@ -482,6 +482,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)clearHdri;
 - (long long)addShape:(uint32_t)preset;
 - (long long)addText:(nullable NSString*)content;
+- (NSString*)playbackReport;
+- (BOOL)setRawPlayback:(BOOL)enabled;
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance;
 - (NSArray<NSNumber*>*)sceneGuides;
 - (void)layoutTransform:(long long)layer property:(uint32_t)property value:(float)value;

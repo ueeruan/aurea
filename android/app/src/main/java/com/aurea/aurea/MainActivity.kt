@@ -52,6 +52,67 @@ class MainActivity : ComponentActivity() {
         com.aurea.aurea.home.HomeViewModel.loadTheme(this)
         setContent { AureaApp(store) }
 
+        // Debug-only, locally supplied media. No test intent is accepted by release builds.
+        if (BuildConfig.DEBUG && intent.hasExtra("aureaPlaybackTest")) {
+            lifecycleScope.launch {
+                snapshotFlow { store.engineReady }.first { it }
+                val name = intent.getStringExtra("aureaPlaybackTest") ?: return@launch
+                val root = java.io.File(filesDir, "playback").canonicalFile
+                val media = java.io.File(root, name).canonicalFile
+                if (media.parentFile != root || !media.isFile) return@launch
+                val fps = intent.getIntExtra("testFps", 30)
+                store.newProject(1920, 1080, fps.toFloat(), "Playback benchmark")
+                snapshotFlow { store.screen }.first { it == Screen.Editor }
+                val engine = store.engineForStress
+                val id = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    engine.importVideo(media.absolutePath, name)
+                }
+                if (id < 0) return@launch
+                val report = java.io.File(root, "$name-report.jsonl")
+                report.writeText("")
+                var heartbeatMaxMs = 0L
+                val heartbeat = launch {
+                    var previous = android.os.SystemClock.elapsedRealtime()
+                    while (true) {
+                        kotlinx.coroutines.delay(50)
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        heartbeatMaxMs = maxOf(heartbeatMaxMs, now - previous)
+                        previous = now
+                    }
+                }
+                suspend fun record(phase: String, samples: Int) {
+                    repeat(samples) {
+                        kotlinx.coroutines.delay(1000)
+                        val row = org.json.JSONObject()
+                            .put("phase", phase).put("elapsedMs", android.os.SystemClock.elapsedRealtime())
+                            .put("heartbeatMaxMs", heartbeatMaxMs).put("pssKB", android.os.Debug.getPss())
+                            .put("playback", engine.playbackReport())
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { report.appendText(row.toString()+"\n") }
+                    }
+                }
+                kotlinx.coroutines.delay(1500)
+                store.toggleRawPlayback()
+                store.play()
+                record("raw", 12)
+                store.seek(3 * fps)
+                record("raw-seek", 3)
+                store.pause()
+                record("raw-paused", 1)
+                store.play()
+                record("raw-resumed", 3)
+                store.pause()
+                store.toggleRawPlayback()
+                store.setPreviewScale(false, 1, 1)
+                store.seek(0)
+                store.play()
+                record("compositor", 12)
+                store.pause()
+                heartbeat.cancel()
+                report.appendText(org.json.JSONObject().put("complete", true).toString()+"\n")
+                android.util.Log.i("AureaPlaybackTest", "COMPLETE $name")
+            }
+        }
+
         // Anúncios: consentimento + SDK fora do caminho do app (nada aqui espera).
         AureaAds.initialize(this)
         if (savedInstanceState == null) {

@@ -308,7 +308,7 @@ public:
     i64 keyframe_interval_us() const noexcept override { return keyframeUs_; }
 
     Status seek_to_keyframe(i64 targetUs) noexcept override {
-        pendingFrame_.reset();
+        pendingOutput_ = -1;
         pendingEos_ = false;
         nextDeliveryUs_ = std::max<i64>(0, targetUs);
         if (!codec_) {
@@ -349,80 +349,69 @@ public:
         return next_timed_frame(target, out, outPtsUs, endOfStream);
     }
 
+    // Keep one codec output slot for PTS lookahead, not an ImageReader image.
+    // Late/preroll frames are released with render=false: they never cross the
+    // Surface/ImageReader boundary or allocate/copy GPU/CPU image planes.
     Status next_timed_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept {
-        out.reset();
-        endOfStream = false;
-        if (!pendingFrame_) {
-            if (const Status s = next_raw_frame(pendingFrame_, outPtsUs, pendingEos_); !s.ok()) return s;
-            if (!pendingFrame_) { endOfStream = pendingEos_; return OkStatus; }
+        out.reset(); endOfStream = false;
+        if (pendingOutput_ < 0) {
+            if (const Status status = next_raw_buffer(pendingOutput_, pendingPts_, pendingEos_); !status.ok()) return status;
+            if (pendingOutput_ < 0) { endOfStream = pendingEos_; outPtsUs = lastPts_; return OkStatus; }
         }
-        FrameRef next;
-        i64 nextPts = pendingFrame_->ptsUs;
+        ssize_t next = -1;
+        i64 nextPts = pendingPts_;
         bool eos = pendingEos_;
         if (!pendingEos_) {
-            if (const Status s = next_raw_frame(next, nextPts, eos); !s.ok()) return s;
+            if (const Status status = next_raw_buffer(next, nextPts, eos); !status.ok()) return status;
         }
-        if (next && next->ptsUs <= pendingFrame_->ptsUs)
+        const ssize_t current = pendingOutput_;
+        const i64 pts = pendingPts_;
+        pendingOutput_ = next; pendingPts_ = nextPts; pendingEos_ = eos;
+        if (next >= 0 && nextPts <= pts) {
+            AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(current), false);
             return Status{Errc::DecodeFailed, "PTS de video fora de ordem"};
-        FrameRef current = std::move(pendingFrame_);
-        current->durationUs = next ? next->ptsUs - current->ptsUs
-            : info_.durationUs > current->ptsUs ? info_.durationUs - current->ptsUs
+        }
+        const i64 duration = next >= 0 ? nextPts - pts : info_.durationUs > pts ? info_.durationUs - pts
             : std::max<i64>(1, static_cast<i64>(1e6 / std::max(1.0, info_.fps)));
-        outPtsUs = current->ptsUs;
-        nextDeliveryUs_ = current->ptsUs + current->durationUs;
-        pendingFrame_ = std::move(next);
-        pendingEos_ = eos;
-        endOfStream = eos && !pendingFrame_;
-        if (outPtsUs >= deliverFromUs || current->covers(deliverFromUs)) out = std::move(current);
-        return OkStatus;
+        outPtsUs = pts; nextDeliveryUs_ = pts + duration;
+        endOfStream = eos && next < 0;
+        if (pts < deliverFromUs && pts + duration <= deliverFromUs) {
+            return AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(current), false) == AMEDIA_OK
+                ? OkStatus : Status{Errc::DecodeFailed, "descarte de frame atrasado falhou"};
+        }
+        if (AMediaCodec_releaseOutputBufferAtTime(codec_, static_cast<size_t>(current), pts * 1000) != AMEDIA_OK)
+            return Status{Errc::DecodeFailed, "releaseOutputBufferAtTime falhou"};
+        AImage* image = nullptr;
+        if (const Status status = acquire_image(pts, image); !status.ok()) return status;
+        const Status status = wrap(image, pts, out);
+        if (status.ok() && out) out->durationUs = duration;
+        return status;
     }
 
-    Status next_raw_frame(FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept {
-        endOfStream = false;
-        out.reset();
+    Status next_raw_buffer(ssize_t& out, i64& outPtsUs, bool& endOfStream) noexcept {
+        out = -1; endOfStream = false;
         if (!codec_) {
-            if (const Status s = create_codec(); !s.ok()) return s;
+            if (const Status status = create_codec(); !status.ok()) return status;
         }
-        if (outputEos_) {
-            endOfStream = true;
-            outPtsUs = lastPts_;
-            return OkStatus;
-        }
+        if (outputEos_) { endOfStream = true; outPtsUs = lastPts_; return OkStatus; }
         const u64 deadline = monotonic_ns() + 3'000'000'000ull;
         for (;;) {
-            if (const Status s = feed_input(); !s.ok()) return s;
-            AMediaCodecBufferInfo bi{};
-            const ssize_t idx = AMediaCodec_dequeueOutputBuffer(codec_, &bi, 4000);
-            if (idx >= 0) {
-                const bool eos = (bi.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
-                if (eos && bi.size <= 0) {
-                    AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(idx), false);
-                    outputEos_ = true;
-                    endOfStream = true;
-                    outPtsUs = lastPts_;
-                    return OkStatus;
+            if (const Status status = feed_input(); !status.ok()) return status;
+            AMediaCodecBufferInfo info{};
+            const ssize_t index = AMediaCodec_dequeueOutputBuffer(codec_, &info, 4000);
+            if (index >= 0) {
+                const bool eos = (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
+                if (eos) { outputEos_ = true; endOfStream = true; }
+                if (eos && info.size <= 0) {
+                    AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(index), false);
+                    outPtsUs = lastPts_; return OkStatus;
                 }
-                const i64 pts = bi.presentationTimeUs;
-                lastPts_ = pts;
-                outPtsUs = pts;
-                if (eos) {
-                    outputEos_ = true;
-                    endOfStream = true;
-                }
-                // Explicit timestamp lets us reject a late image from a previous seek.
-                if (AMediaCodec_releaseOutputBufferAtTime(codec_, static_cast<size_t>(idx), pts * 1000) != AMEDIA_OK) {
-                    return Status{Errc::DecodeFailed, "releaseOutputBufferAtTime falhou"};
-                }
-                AImage* image = nullptr;
-                if (const Status s = acquire_image(pts, image); !s.ok()) return s;
-                return wrap(image, pts, out);
+                out = index; outPtsUs = lastPts_ = info.presentationTimeUs;
+                return OkStatus;
             }
-            if (idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
-                update_output_format();
-                continue;
-            }
-            if (idx == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) continue;
-            if (idx == AMEDIACODEC_INFO_TRY_AGAIN_LATER) {
+            if (index == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) { update_output_format(); continue; }
+            if (index == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) continue;
+            if (index == AMEDIACODEC_INFO_TRY_AGAIN_LATER) {
                 if (monotonic_ns() > deadline) return Status{Errc::Timeout, "decoder parado sem entregar frame"};
                 continue;
             }
@@ -527,7 +516,7 @@ private:
     }
 
     void destroy_codec() noexcept {
-        pendingFrame_.reset();
+        pendingOutput_ = -1;
         pendingEos_ = false;
         if (codec_) {
             AMediaCodec_stop(codec_);
@@ -786,7 +775,8 @@ private:
     bool inputEos_ = false;
     bool outputEos_ = false;
     i64 lastPts_ = 0;
-    FrameRef pendingFrame_; // One lookahead frame: durations come from actual PTS, including VFR.
+    ssize_t pendingOutput_ = -1;
+    i64 pendingPts_ = 0; // Actual PTS lookahead preserves long VFR presentation intervals.
     bool pendingEos_ = false;
     bool softwareFallback_ = false;
     i64 nextDeliveryUs_ = 0;

@@ -923,3 +923,21 @@ AUREA_TEST(VideoSource, PreciseShortIntervalsAdvanceWithoutNominalHalfFrameSeek)
     }
     source.stop(); AUREA_CHECK_EQ(raw->seeks.load(),1);
 }
+
+AUREA_TEST(VideoSource, SeekEpochRejectsFramesFromOutstandingDecode) {
+    SyntheticConfig config; config.decodeCostUs = 30000;
+    auto decoder = std::make_unique<SyntheticDecoder>(config);
+    VideoSource source(std::move(decoder),MediaPriority::Preview);
+    source.start(); source.set_epoch(1);
+    source.request(DecodeRequest{0,DecodeMode::Playback,1,1});
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    source.set_epoch(2);
+    source.request(DecodeRequest{2000000,DecodeMode::Still,0,1});
+    AUREA_CHECK(source.wait_for(2000000,3000));
+    bool exact=false;
+    (void)source.frame_for(0,&exact);
+    AUREA_CHECK(!exact);
+    (void)source.frame_for(2000000,&exact);
+    AUREA_CHECK(exact);
+    source.stop();
+}

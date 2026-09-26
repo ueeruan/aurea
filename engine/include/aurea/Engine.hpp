@@ -528,6 +528,9 @@ public:
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
     [[nodiscard]] Status set_material_param(u64 layer, u32 material, u32 param, f32 value) noexcept;
     [[nodiscard]] bool query_light(u64 layer, f32* values) noexcept;
+    // Diagnostic source playback: transient, never changes the project or export.
+    bool set_raw_playback(bool enabled) noexcept;
+    std::string playback_report() noexcept;
     void set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) noexcept;
     [[nodiscard]] u32 query_scene_guides(f32* lines, u32 capacity) noexcept;
 
@@ -1172,6 +1175,7 @@ private:
     void migrate_echo_to_effect() noexcept;
     [[nodiscard]] std::string store_asset_path(const std::string& absolute) const;
 
+    LayerId rawPlaybackLayer_{};
     SceneEditorView sceneEditor_{}; ///< modelMutex protected, never serialized
     std::vector<u64> selection_;
     std::atomic<u32> modelRevision_{1};   ///< a UI relê listas quando muda
@@ -1213,6 +1217,14 @@ private:
     // --- Métricas ---------------------------------------------------------------
     mutable std::mutex perfMutex_;
     bridge::PerfPOD perf_{};
+    struct PlaybackMeasurement {
+        u64 lastNs = 0, activeNs = 0, presented = 0, repeated = 0, dropped = 0, epoch = 0;
+        u64 rateFrames = 0, lastDecoded = 0, decoded = 0;
+        i64 lastPts = -1, lastDuration = 0;
+        bool playing = false;
+        std::string report;
+    } playbackMeasurement_;
+
     FrameStats lastFrame_{};
     u64 frameCounter_ = 0;
     u64 fpsWindowStartNs_ = 0;

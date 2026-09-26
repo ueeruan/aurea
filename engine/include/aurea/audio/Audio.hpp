@@ -114,6 +114,7 @@ void to_stereo(const f32* frame, u32 channels, f32& l, f32& r) noexcept;
 // Cache de blocos
 // =============================================================================
 struct AudioBlock {
+    u64 assetRevision = 0;
     std::vector<f32> pcm;   ///< kBlockFrames × 2 (o último bloco pode vir menor, completado com zero)
 };
 
@@ -143,6 +144,10 @@ public:
     /// Descarta pedidos pendentes (seek: o que foi pedido para o instante
     /// antigo não interessa mais).
     void clear_wants();
+    u64 data_revision() const noexcept { return dataRevision_.load(std::memory_order_acquire); }
+    // Decode/mixer workers only. The real-time audio callback never waits.
+    void wait_for_data(u64 revision);
+
     /// Bloco, decodificando agora se preciso (export / testes). Nulo = asset
     /// ilegível.
     [[nodiscard]] std::shared_ptr<const AudioBlock> fetch(u64 key, i64 block);
@@ -186,8 +191,11 @@ private:
 
     mutable std::mutex mutex_;          ///< blocos, assets, pedidos
     std::condition_variable wake_;
+    std::condition_variable dataReady_;
+    std::atomic<u64> dataRevision_{0};
     std::unordered_map<Key, Entry, KeyHash> blocks_;
     std::unordered_map<u64, AudioAssetRef> assets_;
+    std::unordered_map<u64, u64> assetVersions_;
     std::vector<Want> wants_;
     Stats stats_{};
     f64 decodeMsTotal_ = 0.0, decodedSeconds_ = 0.0;
@@ -429,7 +437,8 @@ public:
     void set_snapshot(std::shared_ptr<const AudioMixSnapshot> snap);
 
     /// Começa a tocar do instante `ns` da timeline (play, seek tocando, loop).
-    void play(i64 ns);
+    void play(i64 ns, f64 rate = 1.0);
+    f64 rate() const noexcept { return playbackRate_.load(std::memory_order_acquire); }
     void stop();
     [[nodiscard]] bool playing() const noexcept { return playing_.load(std::memory_order_acquire); }
 
@@ -467,7 +476,8 @@ private:
     static constexpr u32 kRingChunks = 64;
     struct Chunk {
         u64 gen = 0;
-        i64 start = 0;
+        f64 start = 0;
+        f64 rate = 1.0;
         f32 pcm[kChunkFrames * kMixChannels];
     };
     std::unique_ptr<std::array<Chunk, kRingChunks>> ring_;
@@ -484,7 +494,7 @@ private:
     std::condition_variable wake_;
     std::shared_ptr<const AudioMixSnapshot> snap_;
     std::atomic<u64> gen_{1};
-    i64 mixPos_ = 0;              ///< próxima amostra a mixar (thread do mixer)
+    f64 mixPos_ = 0;              ///< próxima amostra a mixar (thread do mixer)
     u64 mixGen_ = 0;
     std::atomic<bool> playing_{false};
     bool quit_ = false;
@@ -495,6 +505,8 @@ private:
     std::atomic<u64> clockSeq_{0};
     std::atomic<i64> baseWritten_{0};
     std::atomic<i64> baseTimeline_{0};
+    std::atomic<f64> playbackRate_{1.0}, baseRate_{1.0};
+    std::atomic<i64> deliveredEndTimeline_{0};
     std::atomic<u64> baseGen_{0};
     std::atomic<i64> written_{0};  ///< quadros entregues à saída desde o open
     std::atomic<i64> playStartNs_{0};

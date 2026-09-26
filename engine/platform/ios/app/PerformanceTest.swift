@@ -148,7 +148,7 @@ private final class PerformanceJournal: @unchecked Sendable {
                 "playing":model.status.playing != 0,"importing":model.importingMedia,"exporting":model.showExport,
                 "width":model.compositionWidth,"height":model.compositionHeight,"fps":model.compositionFps,"layers":model.layers.count,
                 "uiMaxGapMs":intervalMax,"thermalState":ProcessInfo.processInfo.thermalState.rawValue,
-                "lowPower":ProcessInfo.processInfo.isLowPowerModeEnabled,"perf":p])
+                "lowPower":ProcessInfo.processInfo.isLowPowerModeEnabled,"playback":model.engine.playbackReport(),"perf":p])
             intervalMax = 0
         }
     }

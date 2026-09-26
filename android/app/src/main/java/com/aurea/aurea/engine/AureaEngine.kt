@@ -619,6 +619,10 @@ class AureaEngine private constructor() {
     fun detectBeats(layer: Long, bpm: DoubleArray): Long = nativeDetectBeats(nativeHandle, layer, bpm)
 
     /** Nulo 2D ou 3D no centro. Id ≥ 0 ou −Errc. */
+    fun playbackReport(): String = nativePlaybackReport(nativeHandle)
+    private external fun nativePlaybackReport(handle: Long): String
+    fun setRawPlayback(enabled: Boolean): Boolean = nativeSetRawPlayback(nativeHandle, enabled)
+    private external fun nativeSetRawPlayback(handle: Long, enabled: Boolean): Boolean
     fun setSceneEditor(enabled: Boolean, yaw: Float, pitch: Float, distance: Float) = nativeSetSceneEditor(nativeHandle, enabled, yaw, pitch, distance)
     fun sceneGuides(output: FloatArray): Int = nativeSceneGuides(nativeHandle, output)
     fun layoutTransform(layer: Long, property: Int, value: Float): Boolean = nativeLayoutTransform(nativeHandle, layer, property, value)

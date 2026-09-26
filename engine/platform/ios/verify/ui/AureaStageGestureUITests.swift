@@ -25,6 +25,32 @@ import XCTest
         app = nil
     }
 
+    func testRawPlaybackMatrixWithNativeDecodersAndAudio() throws {
+        for name in ["h264-720p30", "h264-1080p30", "h264-1080p60", "hevc-1080p30", "h264-1080p-vfr"] {
+            _ = try launch("raw-" + name)
+            let play = app.buttons["Repeat on · hold to turn off"].firstMatch
+            XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+            _ = try awaitSnapshot("RAW playback starts") { $0.playing != 0 }
+            var records: [String] = []
+            var positions: Set<Int64> = []
+            var baseline: Double = 0
+            for sample in 0..<12 {
+                RunLoop.current.run(until: Date().addingTimeInterval(1))
+                XCTAssertEqual(app.state, .runningForeground)
+                let state = try snapshot()
+                records.append(state.playbackReport + "\nfootprint=\(state.processFootprintBytes)")
+                positions.insert(state.corePlayhead)
+                XCTAssertNotEqual(state.playing, 0)
+                if sample == 3 { baseline = state.processFootprintBytes }
+                if sample > 3 { XCTAssertLessThan(state.processFootprintBytes, baseline + 120 * 1024 * 1024) }
+            }
+            attach("RAW matrix " + name, records.joined(separator: "\n---\n"))
+            XCTAssertGreaterThan(positions.count, 8, "Playback must advance, not merely keep the process alive")
+            XCTAssertTrue(records.last?.contains("AUREA RAW PLAYBACK TEST") == true)
+            app.terminate()
+        }
+    }
+
     func testVideoTextAndCaptionsPlayForThirtySecondsWithBoundedMemory() throws {
         _ = try launch("playback-stress")
         let play = app.buttons["Repeat on · hold to turn off"].firstMatch
@@ -460,6 +486,7 @@ import XCTest
 
     private enum ProbeError: Error { case missing, timedOut, geometry }
     private struct Snapshot: Decodable {
+        let playbackReport: String
         let processFootprintBytes: Double
         let playing: UInt32
         let runID: String

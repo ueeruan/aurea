@@ -194,6 +194,11 @@ struct RenderLayer {
 };
 
 struct FrameSnapshot {
+    VideoStreamInfo playbackStream{};
+    VideoSource::Stats playbackDecode{};
+    i64 playbackTargetUs = 0, playbackPtsUs = -1, playbackDurationUs = 0;
+    u32 playbackPixelFormat = 0;
+
     u32  compWidth = 0;
     u32  compHeight = 0;
     Vec4 background{0, 0, 0, 1};   ///< linear
@@ -243,6 +248,8 @@ struct SceneEditorView {
 [[nodiscard]] Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& view) noexcept;
 
 struct RenderSettings {
+    bool rawPlayback = false;
+    u64 mediaGeneration = 0;
     SceneEditorView sceneEditor{}; ///< transient preview observer; ignored by finalQuality/export
 
     u32  previewNumerator = 1;
@@ -304,6 +311,7 @@ struct OffscreenTarget {
 /// Custo medido de um frame, por etapa. GPU vem das timestamp queries (de um
 /// frame já concluído); 0 = não medido, nunca "instantâneo".
 struct RenderTimings {
+    f32 videoUploadMs = 0.0f;
     f32 cpuPrepareMs = 0.0f;
     f32 cpuRecordMs = 0.0f;
     f32 acquireWaitMs = 0.0f;   ///< espera por imagem do swapchain / fence
@@ -338,6 +346,10 @@ public:
                  MediaManager* media, const ImagePixels* (*imageLookup)(void*, AssetId), void* imageCtx,
                  const RenderSettings& settings, u64 frameNumber, i32 playDirection,
                  DecodeMode decodeMode, f32 speed, FrameSnapshot& out);
+
+    void prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i64 mediaUs,
+                     MediaManager& media, u64 frameNumber, DecodeMode mode,
+                     i32 direction, f32 speed, u64 epoch, FrameSnapshot& out);
 
     /// Fase 2 (sem lock). `offscreen` nulo = apresenta no swapchain.
     [[nodiscard]] Status render(FrameSnapshot& snapshot, const RenderSettings& settings,
@@ -670,6 +682,7 @@ private:
     u64 renderFrameNumber_ = 0;   ///< quadro do backend em render() (buffers extras do Particular)
     bool lastZeroCopy_ = false;
     u64 videoPlaneUploadBytes_ = 0;
+    f32 videoUploadMs_ = 0;
 };
 
 } // namespace aurea

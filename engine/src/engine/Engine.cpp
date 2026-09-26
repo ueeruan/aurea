@@ -679,6 +679,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
         renderer_.release_project_resources();
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
+    rawPlaybackLayer_ = {};
     project_ = std::make_unique<Project>(std::move(*result));
     ++projectSession_;
     images_.clear();
@@ -848,6 +849,7 @@ Status Engine::load_project(const char* path) noexcept {
     }
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        rawPlaybackLayer_ = {};
         project_ = std::make_unique<Project>(std::move(loaded));
         ++projectSession_;
         project_->set_path(main);
@@ -3450,6 +3452,28 @@ bool lives_in_3d(const Layer& l) noexcept {
 }
 } // namespace
 
+std::string Engine::playback_report() noexcept {
+    std::lock_guard<std::mutex> lock(perfMutex_);
+    return playbackMeasurement_.report;
+}
+
+bool Engine::set_raw_playback(bool enabled) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    auto* comp = project_ ? current_composition() : nullptr;
+    LayerId chosen{};
+    if (enabled && comp) comp->layers().for_each([&](LayerId id, const Layer& layer) {
+        if (!chosen.valid() && layer.kind == LayerKind::Video) chosen = id;
+    });
+    if (enabled && !chosen.valid()) return false;
+    rawPlaybackLayer_ = chosen;
+    { std::lock_guard<std::mutex> perfLock(perfMutex_); playbackMeasurement_ = {}; }
+    audio_.stop();
+    audioComp_ = nullptr;
+    playback_.seek(FrameIndex{0}, monotonic_ns());
+    request_render();
+    return true;
+}
+
 void Engine::set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) noexcept {
     if (!std::isfinite(yaw) || !std::isfinite(pitch) || !std::isfinite(distance)) return;
     std::lock_guard<std::mutex> lock(modelMutex_);
@@ -4677,15 +4701,26 @@ void Engine::sync_audio_locked(const Composition& comp) noexcept {
     if (rev != audioRevision_ || &comp != audioComp_) {
         audioRevision_ = rev;
         audioComp_ = &comp;
-        audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this));
+        if (const Layer* raw = comp.layer(rawPlaybackLayer_)) {
+            auto snap = std::make_shared<audio::AudioMixSnapshot>();
+            if (const Asset* asset = project_->asset(raw->source); asset && asset->has_audio()) {
+                audio::AudioClip clip;
+                clip.asset = raw->source.pack();
+                clip.end = clip.sourceLength = audio::frame_to_sample(asset->video.frameCount.value, asset->video.fps);
+                clip.fadeTo = clip.end;
+                snap->endSample = clip.end;
+                snap->clips.push_back(clip);
+                audio_.cache()->register_asset(clip.asset, audio::AudioAssetRef{resolve_asset_path(asset->sourcePath), clip.end});
+            }
+            audio_.set_snapshot(std::move(snap));
+        } else audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this));
     }
-    // Velocidade ≠ 1 ainda sem time stretch (fase 6): o som sai de cena e o
-    // relógio do sistema conduz — melhor mudo que tocando na velocidade errada.
-    const bool want = playback_.playing() && std::fabs(playback_.speed() - 1.0f) < 1e-3f
+    // Audio remains master at every supported transport rate.
+    const bool want = playback_.playing()
                    && !exportActive_.load(std::memory_order_acquire);
     if (want) {
-        if (!audio_.playing() || playback_.generation() != audioGeneration_) {
-            audio_.play(playback_.current_ns());
+        if (!audio_.playing() || playback_.generation() != audioGeneration_ || std::fabs(audio_.rate() - playback_.speed()) > 1e-6) {
+            audio_.play(playback_.current_ns(), playback_.speed());
             audioGeneration_ = playback_.generation();
         }
         return;
@@ -5640,6 +5675,12 @@ void Engine::drain_commands_locked() noexcept {
 RenderSettings Engine::current_render_settings() noexcept {
     RenderSettings rs;
     rs.sceneEditor = sceneEditor_;
+    rs.mediaGeneration = playback_.generation();
+    if (rawPlaybackLayer_.valid()) {
+        rs.rawPlayback = true;
+        rs.gpuTimers = true;
+        return rs; // Original resolution, neutral viewport; no adaptive downscaling.
+    }
     // AUTO 2.0: os botões de redução decididos pela medição, nunca acima do
     // piso térmico do instante (o calor muda entre dois quadros medidos).
     rs.quality = adapt().quality().min(PreviewQuality::level(thermal_heavy_level()));
@@ -5699,7 +5740,13 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
 
-        playback_.configure(comp->fps(), comp->duration());
+        const Layer* rawLayer = comp->layer(rawPlaybackLayer_);
+        const Asset* rawAsset = rawLayer ? project_->asset(rawLayer->source) : nullptr;
+        // VFR can have faster sections than its average FPS. Poll at display
+        // cadence in RAW and use PTS to present; do not cap it to average FPS.
+        const f64 rawCadence = std::max<f64>(config_.displayRefreshRate, rawAsset ? rawAsset->video.fps : 0);
+        const FrameIndex rawDuration{rawAsset ? static_cast<i64>(std::ceil(rawAsset->video.frameCount.value * rawCadence / std::max(1.0, rawAsset->video.fps))) : 0};
+        playback_.configure(rawAsset ? rawCadence : comp->fps(), rawAsset ? rawDuration : comp->duration());
         // Antes do update: um seek/play desta leva recomeça o som no ponto
         // novo (senão o relógio do áudio ainda diria o instante antigo).
         sync_audio_locked(*comp);
@@ -5743,8 +5790,13 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         const DecodeMode mode = playing ? DecodeMode::Playback
                               : playback_.mode() == PlaybackMode::Scrubbing ? DecodeMode::Scrub
                                                                             : DecodeMode::Still;
-        renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
-                          playback_.direction(), mode, playback_.speed(), snapshot_);
+        if (rs.rawPlayback && rawLayer && rawAsset) {
+            renderer_.prepare_raw(rawPlaybackLayer_, *rawLayer, *rawAsset, playback_.current_ns() / 1000, media_, ++frameCounter_,
+                                  mode, playback_.direction(), playback_.speed(), rs.mediaGeneration, snapshot_);
+        } else {
+            renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
+                              playback_.direction(), mode, playback_.speed(), snapshot_);
+        }
     }
     const u64 tPrepared = monotonic_ns();
 
@@ -5758,7 +5810,69 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     FrameStats stats;
     RenderTimings timings;
     timings.cpuPrepareMs = static_cast<f32>(static_cast<f64>(tPrepared - frameStart) * 1e-6);
+    // Keep the last presented image during refill, rather than presenting a
+    // fabricated black frame after seek. Decode continues asynchronously.
+    if (rs.rawPlayback && snapshot_.missingVideoFrames) {
+        lastIncomplete_ = true;
+        lastRenderedFrame_ = t.value;
+        lastSkipped_ = true;
+        return OkStatus;
+    }
+    if (rs.rawPlayback && playing) {
+        std::lock_guard<std::mutex> perfLock(perfMutex_);
+        if (playbackMeasurement_.epoch == rs.mediaGeneration && playbackMeasurement_.lastPts == snapshot_.playbackPtsUs) {
+            // A video-only renderer has nothing new to draw. Keep the previous
+            // image while the decoder catches up; never burn another GPU pass.
+            ++playbackMeasurement_.repeated;
+            snapshot_.release_video_frames();
+            lastRenderedFrame_ = t.value;
+            lastIncomplete_ = true;
+            lastSkipped_ = true;
+            return OkStatus;
+        }
+    }
     const Status s = renderer_.render(snapshot_, rs, nullptr, stats, timings);
+    if (snapshot_.playbackPtsUs >= 0) {
+        const auto& stream = snapshot_.playbackStream;
+        const auto& decode = snapshot_.playbackDecode;
+        const auto audio = audio_.stats();
+        std::lock_guard<std::mutex> perfLock(perfMutex_);
+        auto& m = playbackMeasurement_;
+        const bool contiguous = m.playing && playing && m.epoch == rs.mediaGeneration;
+        if (contiguous && m.lastNs) {
+            m.activeNs += frameStart - m.lastNs;
+            if (decode.framesDelivered >= m.lastDecoded) m.decoded += decode.framesDelivered - m.lastDecoded;
+        }
+        m.lastDecoded = decode.framesDelivered;
+        if (s.ok() && playing) {
+            if (contiguous && m.lastPts == snapshot_.playbackPtsUs) ++m.repeated;
+            else {
+                ++m.presented;
+                if (contiguous) ++m.rateFrames;
+                const i64 frameUs = m.lastDuration > 0 ? m.lastDuration : static_cast<i64>(1e6 / std::max(1.0, stream.fps));
+                if (contiguous && snapshot_.playbackPtsUs > m.lastPts + frameUs)
+                    m.dropped += static_cast<u64>(std::max<i64>(0, (snapshot_.playbackPtsUs - m.lastPts + frameUs/2) / frameUs - 1));
+            }
+            m.lastPts = snapshot_.playbackPtsUs;
+            m.lastDuration = snapshot_.playbackDurationUs;
+        }
+        m.epoch = rs.mediaGeneration; m.lastNs = frameStart; m.playing = playing;
+        const double seconds = m.activeNs * 1e-9;
+        char report[1536];
+        std::snprintf(report, sizeof(report),
+            "%s\n%ux%u %s | pixel=%u\n%s | %s\nexpected=%.2f presented=%.2f fps\nunique=%llu repeated=%llu dropped_est=%llu\ndecoded=%llu decoded_fps=%.2f seeks=%llu queue=%u (%llu bytes)\naudio=%u ms underruns=%llu missing=%llu\ndecode=%.2f ms prepare=%.2f render=%.2f present=%.2f\nav_late=%.2f ms pts=%lld target=%lld\nactive=%.2f s passes=%u upload_cpu=%.3f ms gpu=%.2f ms gpu_measured=%d",
+            rs.rawPlayback ? "AUREA RAW PLAYBACK TEST" : "AUREA COMPOSITOR PLAYBACK TEST",
+            stream.display_width(), stream.display_height(), stream.codec, snapshot_.playbackPixelFormat,
+            stream.decoderName, stream.hardwareDecoder ? "hardware" : "software/unknown",
+            stream.fps, seconds > 0 ? m.rateFrames / seconds : 0,
+            static_cast<unsigned long long>(m.presented), static_cast<unsigned long long>(m.repeated), static_cast<unsigned long long>(m.dropped),
+            static_cast<unsigned long long>(decode.framesDelivered), seconds > 0 ? m.decoded / seconds : 0, static_cast<unsigned long long>(decode.seeks), decode.cache.frames, static_cast<unsigned long long>(decode.cache.bytes),
+            audio.queuedMs, static_cast<unsigned long long>(audio.underruns), static_cast<unsigned long long>(audio.missingBlocks),
+            decode.decodeMsAvg, timings.cpuPrepareMs, timings.cpuRecordMs, timings.presentMs,
+            (snapshot_.playbackTargetUs-snapshot_.playbackPtsUs)*0.001,
+            static_cast<long long>(snapshot_.playbackPtsUs), static_cast<long long>(snapshot_.playbackTargetUs), seconds, stats.passesExecuted, timings.videoUploadMs, timings.gpuTotalMs, timings.gpuMeasured ? 1 : 0);
+        m.report = report;
+    }
     if (!s.ok() && s.code() != Errc::SurfaceLost && s.code() != Errc::Timeout) {
         AUREA_LOG_WARN("frame nao renderizado: %s", s.message().data());
     }
@@ -5778,7 +5892,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         incompleteRetries_ = 0;
     }
     if (!s.ok()) forceRender_.store(true, std::memory_order_release);
-    frameScheduler_.presented(t, playing);
+    if (s.ok()) frameScheduler_.presented(t, playing);
     stats.frameIndex = static_cast<u32>(frameCounter_);
     stats.cpuMs = timings.cpuPrepareMs + timings.cpuRecordMs;
     stats.decodeMs = media_.stats().decodeMsAvg;
@@ -5787,7 +5901,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     stats.memoryPressure = memory_.pressure();
     // O refino não entra na média do AUTO: é um quadro avulso em outra
     // resolução, não o ritmo do preview.
-    if (!refineNow_) (void)adapt().update(stats, caps_.thermal());
+    if (!refineNow_ && !rs.rawPlayback) (void)adapt().update(stats, caps_.thermal());
     // A luz de ambiente termina em segundo plano. Mesmo parado, precisamos
     // apresentar outro quadro para que metais recebam os reflexos prontos.
     refinePending_ = !playing && ((!snapshot_.scenes.empty() && renderer_.environment_pending())

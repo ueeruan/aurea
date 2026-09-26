@@ -1671,6 +1671,12 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
 }
 
+- (NSString*)playbackReport {
+    auto* e = self.engine; return e ? [NSString stringWithUTF8String:e->playback_report().c_str()] : @"";
+}
+- (BOOL)setRawPlayback:(BOOL)enabled {
+    auto* e = self.engine; return e && e->set_raw_playback(enabled != NO);
+}
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance {
     if (auto* e = self.engine) e->set_scene_editor(enabled != NO, yaw, pitch, distance);
 }

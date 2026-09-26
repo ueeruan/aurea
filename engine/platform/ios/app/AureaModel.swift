@@ -454,6 +454,18 @@ final class AureaModel: ObservableObject {
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 refreshModel(force: true); enterEditor()
                 if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
+            } else if scene.hasPrefix("raw-"), started {
+                let name = String(scene.dropFirst(4))
+                let fps: Double = name.contains("60") || name.contains("vfr") ? 60 : 30
+                let movie = AureaPaths.documents.appendingPathComponent(name + ".mp4")
+                if FileManager.default.fileExists(atPath: movie.path),
+                   newProject(width: 1920, height: 1080, fps: fps, title: "RAW playback test") {
+                    let layer = engine.importVideo(movie.path, name: name)
+                    if layer >= 0 {
+                        refreshModel(force: true); enterEditor(); select(layerId: layer, additive: false)
+                        panel = .dock; seek(toFrame: 0); setLooping(true); toggleRawPlayback()
+                    }
+                }
             } else if ["video-move", "playback-stress"].contains(scene), started {
                 // Reuse the real H.264 export fixture, then import through the
                 // production decoder. The UI test operates only the visible dock.
@@ -2050,6 +2062,13 @@ final class AureaModel: ObservableObject {
         engine.run { $0.setLoop(on) }
     }
 
+    @Published private(set) var rawPlayback = false
+    func toggleRawPlayback() {
+        let next = !rawPlayback
+        guard engine.setRawPlayback(next) else { toast = "Importe um vídeo para o teste RAW."; return }
+        rawPlayback = next
+        hudVisible = true
+    }
     func toggleHud() { hudVisible.toggle() }
 
     /// Marca (ou desmarca) com aviso e vibração, como no Android: marca

@@ -61,6 +61,14 @@ void VideoSource::stop() noexcept {
     backfillAttemptUs_ = -1;
 }
 
+void VideoSource::set_epoch(u64 epoch) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (epoch_ == epoch) return;
+    epoch_ = epoch;
+    cache_.clear();
+    // The following request wakes the worker with the NEW target atomically.
+}
+
 void VideoSource::request(const DecodeRequest& r) noexcept {
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -141,12 +149,13 @@ bool VideoSource::reachable_forward(i64 needUs) const noexcept {
     return needUs - decoderPosUs_ <= backend_->keyframe_interval_us();   // andar custa menos que seek
 }
 
-void VideoSource::deliver(FrameRef frame) noexcept {
-    (void)cache_.insert(std::move(frame));
+void VideoSource::deliver(FrameRef frame, u64 epoch) noexcept {
     void (*fn)(void*) = nullptr;
     void* ctx = nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (epoch != epoch_ || !running_ || suspended_) return;
+        (void)cache_.insert(std::move(frame));
         fn = readyFn_;
         ctx = readyCtx_;
     }
@@ -169,11 +178,11 @@ void VideoSource::thread_main() noexcept {
                                                                        : ThreadPriority::Decode);
     const i64 half = frameUs_ / 2;
     const i64 durationUs = backend_->info().durationUs;
-    u64 prefetchAttemptGen = 0;
+    u64 prefetchAttemptGen = 0, appliedEpoch = 0;
 
     for (;;) {
         DecodeRequest req;
-        u64 gen = 0;
+        u64 gen = 0, epoch = 0;
         u64 requestNs = 0;
         bool applySuspend = false, applyResume = false;
         {
@@ -219,6 +228,13 @@ void VideoSource::thread_main() noexcept {
                 applySuspend = suspended_;
                 applyResume = !suspended_;
                 suspendApplied_ = suspended_;
+            }
+            epoch = epoch_;
+            if (appliedEpoch != epoch) {
+                decoderValid_ = false;
+                eos_ = false;
+                backfillAttemptUs_ = -1;
+                appliedEpoch = epoch;
             }
             req = request_;
             gen = requestGen_;
@@ -316,7 +332,7 @@ void VideoSource::thread_main() noexcept {
             // COALESCÊNCIA: chegou pedido novo enquanto decodificava?
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                if (!running_ || suspended_) break;
+                if (!running_ || suspended_ || epoch_ != epoch) break;
                 if (requestGen_ != gen && deliverStart >= 0) {
                     // Janela para trás em curso: um alvo novo DENTRO dela só
                     // troca o pedido (o frame dele sai nesta mesma passada).
@@ -389,7 +405,7 @@ void VideoSource::thread_main() noexcept {
                 stats_.endOfStream = eos;
             }
             const bool coversLimit = frame && frame->covers(limit);
-            if (frame) deliver(std::move(frame));
+            if (frame) deliver(std::move(frame), epoch);
             if (eos) { eos_ = true; break; }
             if (backend_->info().preciseFrameTiming ? (coversLimit || pts > limit) : pts >= limit - half) break;
         }

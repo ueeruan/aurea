@@ -124,6 +124,7 @@ struct EditorView: View {
         }.frame(height: height).clipped()
     }
     private var previewLabel: String {
+        if model.rawPlayback { return "RAW" }
         if model.status.previewAuto != 0 { return "AUTO" }
         let n = max(1, model.status.previewNumerator), d = max(1, model.status.previewDenominator)
         return n >= d ? "Full" : "1/\(d / n)"
@@ -171,13 +172,14 @@ private struct ShellStageBanner: View {
     @EnvironmentObject private var model: AureaModel
     @StateObject private var display = ShellDisplayRate()
     @State private var stats: [String: Any] = [:]
+    @State private var playbackReport = ""
     private let timer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
     var body: some View {
         Text(text).font(.aurea(size: 10, design: .monospaced)).lineSpacing(2).foregroundStyle(AureaColors.accent).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10).padding(.vertical, 6).background(StageInk.floatingDark, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(AureaColors.border, lineWidth: 0.5))
             .onAppear { stats = model.engine.perf(); display.start() }.onDisappear { display.stop() }
-            .onReceive(timer) { _ in stats = model.engine.perf() }
+            .onReceive(timer) { _ in stats = model.engine.perf(); playbackReport = model.engine.playbackReport() }
     }
     private func number(_ key: String) -> NSNumber? { stats[key] as? NSNumber }
     private func count(_ key: String) -> String { number(key)?.stringValue ?? "—" }
@@ -186,6 +188,7 @@ private struct ShellStageBanner: View {
     private func gpu(_ key: String) -> String { number("gpuTimers")?.boolValue == true ? decimal(key) : "—" }
     private func line(_ key: String, _ args: String...) -> String { String(format: AureaText.t(key), arguments: args.map { $0 as CVarArg }) }
     private var text: String {
+        if model.rawPlayback && !playbackReport.isEmpty { return playbackReport }
         var out = [line("sh_diag_fps", decimal("previewFps"), String(format: "%.1f", display.fps))]
         if (number("pacingSamples")?.intValue ?? 0) > 0 { out.append(line("sh_diag_pacing", decimal("pacingP50Ms"), decimal("pacingP95Ms"), decimal("pacingP99Ms"), decimal("pacingStdMs"), count("pacingSamples"))) }
         out.append(line("sh_diag_cpu", decimal("cpuFrameMs"), decimal("cpuPrepareMs"), decimal("cpuRecordMs"), gpu("gpuFrameMs"), decimal("frameBudgetMs")))

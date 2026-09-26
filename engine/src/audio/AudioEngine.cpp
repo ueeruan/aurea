@@ -26,10 +26,11 @@
 namespace aurea::audio {
 namespace {
 
-/// Mixer → cache: blocos que faltam contam como silêncio e são pedidos.
+/// Missing blocks are requested; the mixer retries without consuming timeline samples.
 class CacheBlocks final : public BlockSource {
 public:
     explicit CacheBlocks(AudioBlockCache& c) : cache_(c) {}
+    void reset() { held_.clear(); }
     const AudioBlock* block(u64 asset, i64 b) override {
         for (auto& h : held_) {
             if (h.asset == asset && h.block == b) return h.ptr.get();
@@ -103,22 +104,21 @@ void AudioEngine::set_snapshot(std::shared_ptr<const AudioMixSnapshot> snap) {
     snap_ = std::move(snap);
 }
 
-void AudioEngine::play(i64 ns) {
+void AudioEngine::play(i64 ns, f64 rate) {
+    if (!std::isfinite(rate) || rate <= 0.0 || rate > 16.0) return;
     if (!ring_) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         const u64 g = gen_.fetch_add(1, std::memory_order_acq_rel) + 1;
         mixGen_ = g;
+        playbackRate_.store(rate, std::memory_order_release);
         mixPos_ = ns_to_sample(ns);
         playStartNs_.store(sample_to_ns(mixPos_), std::memory_order_release);
         playing_.store(true, std::memory_order_release);
         if (cache_) cache_->clear_wants();
     }
     wake_.notify_all();
-    if (output_ && outputOpen_) {
-        const Status s = output_->start();
-        if (!s.ok()) AUREA_LOG_WARN("audio: start falhou: %s", s.message().data());
-    }
+
 }
 
 void AudioEngine::stop() {
@@ -128,7 +128,7 @@ void AudioEngine::stop() {
         playing_.store(false, std::memory_order_release);
         gen_.fetch_add(1, std::memory_order_acq_rel);   // o que sobrou no anel é descartado
     }
-    if (output_ && outputOpen_) output_->stop();
+    wake_.notify_all();
 }
 
 void AudioEngine::prefetch(i64 ns) {
@@ -152,12 +152,14 @@ i64 AudioEngine::position_ns() const noexcept {
     const u64 g = gen_.load(std::memory_order_acquire);
     i64 bw = 0, bt = 0;
     u64 bg = 0;
+    f64 rate = 1.0;
     for (u32 tries = 0; tries < 8; ++tries) {
         const u64 s0 = clockSeq_.load(std::memory_order_acquire);
         if (s0 & 1u) continue;
         bw = baseWritten_.load(std::memory_order_relaxed);
         bt = baseTimeline_.load(std::memory_order_relaxed);
         bg = baseGen_.load(std::memory_order_relaxed);
+        rate = baseRate_.load(std::memory_order_relaxed);
         if (clockSeq_.load(std::memory_order_acquire) == s0) break;
     }
     // Ainda não saiu nada desta geração: o relógio fica no ponto de partida (o
@@ -167,7 +169,10 @@ i64 AudioEngine::position_ns() const noexcept {
     if (!output_ || !output_->presented(monotonic_ns(), presented)) {
         presented = written_.load(std::memory_order_acquire) - (output_ ? output_->latency_frames() : 0);
     }
-    return sample_to_ns(bt + std::max<i64>(0, presented - bw));
+    // Hardware keeps consuming silence during an underrun; timeline audio
+    // did not advance. Clamp until decoded PCM resumes, then rebase.
+    return sample_to_ns(std::min(deliveredEndTimeline_.load(std::memory_order_acquire),
+                                  bt + static_cast<i64>(std::max<i64>(0, presented - bw) * rate)));
 }
 
 void AudioEngine::render(f32* out, u32 frames) noexcept {
@@ -190,7 +195,9 @@ void AudioEngine::render(f32* out, u32 frames) noexcept {
             // relógio aqui.
             clockSeq_.fetch_add(1, std::memory_order_acq_rel);
             baseWritten_.store(written + i, std::memory_order_relaxed);
-            baseTimeline_.store(c.start + readOffset_, std::memory_order_relaxed);
+            baseTimeline_.store(static_cast<i64>(c.start + readOffset_ * c.rate), std::memory_order_relaxed);
+            baseRate_.store(c.rate, std::memory_order_relaxed);
+            deliveredEndTimeline_.store(static_cast<i64>(c.start + readOffset_ * c.rate), std::memory_order_relaxed);
             baseGen_.store(g, std::memory_order_relaxed);
             clockSeq_.fetch_add(1, std::memory_order_acq_rel);
             needRebase_ = false;
@@ -199,6 +206,7 @@ void AudioEngine::render(f32* out, u32 frames) noexcept {
         const u32 n = std::min(frames - i, kChunkFrames - readOffset_);
         std::memcpy(out + static_cast<usize>(i) * 2, c.pcm + static_cast<usize>(readOffset_) * 2,
                     static_cast<usize>(n) * 2 * sizeof(f32));
+        deliveredEndTimeline_.store(static_cast<i64>(c.start + (readOffset_ + n) * c.rate), std::memory_order_release);
         i += n;
         readOffset_ += n;
         if (readOffset_ == kChunkFrames) {
@@ -224,8 +232,23 @@ void AudioEngine::mixer_main() {
     CacheBlocks blocks(*cache_);
     std::vector<std::pair<u64, i64>> need;
     u32 sincePrefetch = 1000;
+    std::vector<f32> ratePcm; // mixer thread only; bounded by rate <= 16
     std::unique_lock<std::mutex> lock(mutex_);
+    bool outputStarted = false;
     while (!quit_) {
+        const bool wantOutput = playing_.load(std::memory_order_acquire);
+        if (output_ && outputOpen_ && outputStarted != wantOutput) {
+            // Platform start/stop may block. Only this worker calls them;
+            // UI/render and the real-time callback never wait for the device.
+            lock.unlock();
+            if (wantOutput) {
+                const Status status = output_->start();
+                if (!status.ok()) AUREA_LOG_WARN("audio: output start failed: %s", status.message().data());
+            } else output_->stop();
+            lock.lock();
+            outputStarted = wantOutput;
+            continue;
+        }
         if (!playing_.load(std::memory_order_acquire)) {
             wake_.wait(lock, [this] { return quit_ || playing_.load(); });
             sincePrefetch = 1000;
@@ -237,18 +260,29 @@ void AudioEngine::mixer_main() {
             continue;
         }
         const u64 g = mixGen_;
-        const i64 pos = mixPos_;
+        const f64 position = mixPos_;
+        const i64 pos = static_cast<i64>(std::floor(position));
+        const f64 rate = playbackRate_.load(std::memory_order_acquire);
         auto snap = snap_;
-        mixPos_ += kChunkFrames;
+        const u64 dataRevision = cache_->data_revision();
         lock.unlock();
 
         const u32 h = head_.load(std::memory_order_relaxed);
         Chunk& c = (*ring_)[h % kRingChunks];
         c.gen = g;
-        c.start = pos;
+        c.start = position;
+        c.rate = rate;
         MixStats ms;
+        blocks.reset();
         if (snap) {
-            mix(*snap, pos, kChunkFrames, blocks, c.pcm, &ms);
+            if (rate == 1.0) mix(*snap, pos, kChunkFrames, blocks, c.pcm, &ms);
+            else {
+                const i64 margin = resample_half_width(rate) + 1;
+                const u32 count = static_cast<u32>(std::ceil(kChunkFrames * rate)) + 2 * static_cast<u32>(margin) + 2;
+                ratePcm.resize(static_cast<usize>(count) * 2);
+                mix(*snap, pos - margin, count, blocks, ratePcm.data(), &ms);
+                if (!ms.missingBlocks) resample_to_mix(ratePcm.data(), count, margin + position - pos, rate, c.pcm, kChunkFrames);
+            }
             // Pede adiante: 3 s, os mais próximos primeiro.
             if (++sincePrefetch >= 16) {
                 sincePrefetch = 0;
@@ -259,12 +293,19 @@ void AudioEngine::mixer_main() {
         } else {
             std::memset(c.pcm, 0, sizeof(c.pcm));
         }
-        if (ms.missingBlocks) missing_.fetch_add(ms.missingBlocks, std::memory_order_relaxed);
+        if (ms.missingBlocks) {
+            missing_.fetch_add(ms.missingBlocks, std::memory_order_relaxed);
+            cache_->wait_for_data(dataRevision);
+            lock.lock();
+            continue; // Retry the SAME position. Never publish fabricated PCM.
+        }
+        lock.lock();
+        if (quit_ || !playing_.load(std::memory_order_acquire) || g != mixGen_) continue;
+        mixPos_ = position + kChunkFrames * rate;
         u32 bits;
         std::memcpy(&bits, &ms.peak, sizeof(bits));
         peakBits_.store(bits, std::memory_order_relaxed);
         head_.store(h + 1, std::memory_order_release);
-        lock.lock();
     }
 }
 

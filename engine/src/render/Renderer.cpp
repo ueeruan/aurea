@@ -698,6 +698,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.background = Vec4{srgb_to_linear(bg.r), srgb_to_linear(bg.g), srgb_to_linear(bg.b),
                           comp.transparent_background() ? 0.0f : 1.0f};
     out.time = time;
+    out.playbackPtsUs = -1;
+    out.playbackStream = {};
+    out.playbackDecode = {};
     out.videoLayers = 0;
     out.staleVideoFrames = 0;
     out.missingVideoFrames = 0;
@@ -1598,6 +1601,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const Asset* asset = project.asset(l->source);
             VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber, settings.finalQuality);
             if (src) {
+                src->set_epoch(settings.mediaGeneration);
                 const VideoStreamInfo streamInfo = src->info();
                 i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(layerTime) * 1e6 / fps));
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
@@ -1737,6 +1741,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 src->cache().set_required_times(requiredTimes, requiredCount, src->frame_duration_us() / 2);
                 src->request(req);
+                if (out.playbackPtsUs < 0 && rl.source.frame) {
+                    out.playbackStream = streamInfo;
+                    out.playbackDecode = src->stats();
+                    out.playbackTargetUs = mediaUs;
+                    out.playbackPtsUs = rl.source.frame->ptsUs;
+                    out.playbackDurationUs = rl.source.frame->durationUs;
+                    out.playbackPixelFormat = static_cast<u32>(rl.source.frame->format);
+                }
                 if (!rl.source.frame) ++out.missingVideoFrames;
                 else if (!exact) ++out.staleVideoFrames;
             }
@@ -2196,7 +2208,10 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
     if (pt.contentId != f->content_id()) {
         for (u32 p = 0; p < planes; ++p) {
             if (!f->planes[p]) return false;
-            if (!backend_->upload_texture(pt.plane[p], f->planes[p], f->strides[p]).ok()) return false;
+            const u64 uploadStart = monotonic_ns();
+            const Status uploaded = backend_->upload_texture(pt.plane[p], f->planes[p], f->strides[p]);
+            videoUploadMs_ += static_cast<f32>((monotonic_ns() - uploadStart) * 1e-6);
+            if (!uploaded.ok()) return false;
             videoPlaneUploadBytes_ += static_cast<u64>(f->strides[p]) * (p == 0 ? f->height : (f->height + 1) / 2);
         }
         // Publish only after every plane succeeds; a partial upload must retry.
@@ -3395,14 +3410,55 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
     flush(count);
 }
 
+void Renderer::prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i64 mediaUs,
+                           MediaManager& media, u64 frameNumber, DecodeMode mode,
+                           i32 direction, f32 speed, u64 epoch, FrameSnapshot& out) {
+    out = FrameSnapshot{};
+    out.compWidth = std::max(1u, asset.video.width);
+    out.compHeight = std::max(1u, asset.video.height);
+    out.videoLayers = 1;
+    RenderLayer video;
+    video.id = id;
+    video.source.kind = LayerSource::Kind::Video;
+    // finalQuality=true here means original media, never a proxy.
+    if (auto* source = media.source_for(id, layer.source, asset, frameNumber, true)) {
+        source->set_epoch(epoch);
+        const auto info = source->info();
+        out.compWidth = std::max(1u, info.display_width());
+        out.compHeight = std::max(1u, info.display_height());
+        source->cache().set_required_times(&mediaUs, 1, source->frame_duration_us() / 2);
+        DecodeRequest request;
+        request.targetUs = mediaUs;
+        request.mode = mode;
+        request.direction = direction;
+        request.speed = speed;
+        source->request(request);
+        video.source.frame = source->frame_for(mediaUs, &video.source.frameExact);
+        out.playbackStream = info;
+        out.playbackDecode = source->stats();
+        out.playbackTargetUs = mediaUs;
+        if (video.source.frame) {
+            out.playbackPtsUs = video.source.frame->ptsUs;
+            out.playbackDurationUs = video.source.frame->durationUs;
+            out.playbackPixelFormat = static_cast<u32>(video.source.frame->format);
+        }
+    }
+    video.source.width = out.compWidth;
+    video.source.height = out.compHeight;
+    out.missingVideoFrames = !video.source.frame;
+    out.staleVideoFrames = video.source.frame && !video.source.frameExact;
+    out.layers.push_back(std::move(video));
+}
+
 Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                         const OffscreenTarget* offscreen, FrameStats& stats,
                         RenderTimings& timings) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
     // Pipelines que a varredura do projeto pediu: antes de pegar a imagem da
     // swapchain (compilar segurando a imagem atrasaria a apresentação).
-    flush_warmup();
+    if (!settings.rawPlayback) flush_warmup();
     const u64 t0 = monotonic_ns();
+    videoUploadMs_ = 0;
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
     quality_ = effective_quality(settings);
     heavyQ_ = resolve_heavy(settings);
@@ -3426,8 +3482,8 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     const u64 tBegin = monotonic_ns();
     timings.acquireWaitMs = static_cast<f32>(static_cast<f64>(tBegin - t0) * 1e-6);
 
-    // Atlas de glifos: sobe quando ganhou glifo novo (ou foi refeito).
-    {
+    // RAW never touches the text subsystem.
+    if (!settings.rawPlayback) {
         u64 gen = 0;
         bool dirty = false;
         const u8* px = text::glyph_atlas(gen, dirty);
@@ -3500,12 +3556,18 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     compTargetW_ = cw;
     compTargetH_ = ch;
 
+    if (settings.rawPlayback) {
+        const bool decoded = !snap.layers.empty() && build_video_source(snap.layers.front(), 0, cw, ch, comp, fb.frameNumber);
+        if (!decoded) graph_.add_raster_pass("raw-buffering", PassStage::Decode, comp, LoadOp::Clear,
+                                            Vec4{0, 0, 0, 1}, [](PassContext&) {});
+    } else {
     upload_glyphs(snap);
     upload_masks(snap);
     upload_vectors(snap);
     upload_particle_history(snap);
     renderFrameNumber_ = fb.frameNumber;   // o relógio dos buffers extras das partículas (2D e cena)
     compose_layers(snap, comp, compDesc, fb.frameNumber, draws_, 0);
+    }
     // A raiz de novo (as pré-composições trocaram o estado em curso).
     currentScenes_ = &snap.scenes;
     currentSnap_ = &snap;
@@ -3628,6 +3690,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
 
     collect_resources(fb.frameNumber);
 
+    timings.videoUploadMs = videoUploadMs_;
     timings.cpuRecordMs = static_cast<f32>(static_cast<f64>(tRecorded - tBegin) * 1e-6);
     timings.presentMs = static_cast<f32>(static_cast<f64>(tEnd - tRecorded) * 1e-6);
     read_timings(timings);

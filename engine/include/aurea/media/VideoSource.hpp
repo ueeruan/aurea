@@ -126,6 +126,7 @@ public:
 
     /// Pedido mais recente. Substitui o anterior (coalescência).
     void request(const DecodeRequest& r) noexcept;
+    void set_epoch(u64 epoch) noexcept;
 
     /// Melhor frame disponível agora para `targetUs`. Nunca bloqueia.
     [[nodiscard]] FrameRef frame_for(i64 targetUs, bool* exact) noexcept;
@@ -147,7 +148,7 @@ public:
 private:
     void thread_main() noexcept;
     [[nodiscard]] bool reachable_forward(i64 needUs) const noexcept;
-    void deliver(FrameRef frame) noexcept;
+    void deliver(FrameRef frame, u64 epoch) noexcept;
     void schedule_retry(u64 generation) noexcept;
     void publish_info() noexcept;
 
@@ -161,6 +162,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable wake_;
     std::condition_variable delivered_;
+    u64 epoch_ = 0;
     DecodeRequest request_{};
     u64 requestGen_ = 0;
     u64 handledGen_ = 0;

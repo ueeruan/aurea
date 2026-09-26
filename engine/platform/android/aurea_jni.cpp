@@ -2126,6 +2126,13 @@ AUREA_JNI jlong AUREA_FN(nativeDetectBeats)(JNIEnv* env, jclass, jlong handle, j
     return static_cast<jlong>(*r);
 }
 
+AUREA_JNI jstring AUREA_FN(nativePlaybackReport)(JNIEnv* env, jclass, jlong handle) {
+    auto* c = ctx_of(handle);
+    return env->NewStringUTF(c ? c->engine.playback_report().c_str() : "");
+}
+AUREA_JNI jboolean AUREA_FN(nativeSetRawPlayback)(JNIEnv*, jclass, jlong handle, jboolean enabled) {
+    auto* c = ctx_of(handle); return c && c->engine.set_raw_playback(enabled == JNI_TRUE);
+}
 AUREA_JNI void AUREA_FN(nativeSetSceneEditor)(JNIEnv*, jclass, jlong handle, jboolean enabled, jfloat yaw, jfloat pitch, jfloat distance) {
     if (auto* c = ctx_of(handle)) c->engine.set_scene_editor(enabled == JNI_TRUE, yaw, pitch, distance);
 }

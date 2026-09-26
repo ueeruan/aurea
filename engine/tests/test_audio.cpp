@@ -95,7 +95,7 @@ public:
     u32 latency_frames() const noexcept override { return static_cast<u32>(latency); }
     i64 pulled = 0;
     i64 latency = 512;
-    bool started = false;
+    std::atomic<bool> started{false};
 };
 
 EngineConfig headless() {
@@ -468,6 +468,7 @@ AUREA_TEST(Audio, EngineClockFollowsTheSampleAtTheSpeaker) {
 
     AUREA_CHECK(!eng.available());
     eng.play(2'000'000'000);
+    wait_until([&] { return out.started.load(); });
     AUREA_CHECK(eng.available() && out.started);
     // Nada saiu ainda: o relógio espera no ponto de partida.
     AUREA_CHECK_EQ(eng.position_ns(), 2'000'000'000);
@@ -502,6 +503,7 @@ AUREA_TEST(Audio, EngineClockFollowsTheSampleAtTheSpeaker) {
     AUREA_CHECK_EQ(eng.stats().underruns, 0u);
 
     eng.stop();
+    wait_until([&] { return !out.started.load(); });
     AUREA_CHECK(!eng.available() && !out.started);
     eng.shutdown();
 }
@@ -709,4 +711,67 @@ AUREA_TEST(Audio, CaptionsBecomeTimedTextLayersWithHighlightUndoAndReopen) {
     AUREA_CHECK_EQ(e.caption_count(*vid), 0u);
     std::remove(path.c_str());
     e.shutdown();
+}
+
+// A decoder deliberately held at startup proves that a cache miss cannot
+// consume timeline samples or masquerade as successfully queued audio.
+AUREA_TEST(Audio, ColdPlaybackNeverPublishesMissingPcmAsSilence) {
+    struct GatedFactory final : VideoSourceFactory {
+        SyntheticConfig cfg = audio_cfg(48000);
+        SyntheticFactory delegate{cfg};
+        std::atomic<bool> entered{false}, release{false};
+        bool probe(const char* p, MediaProbe& o) override { return delegate.probe(p, o); }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset& a, MediaPriority p) override {
+            return delegate.open_video(a,p);
+        }
+        std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char* p) override {
+            entered.store(true);
+            while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return delegate.open_audio(p);
+        }
+    } factory;
+    FakeOutput output;
+    audio::AudioEngine engine;
+    engine.initialize(&factory, &output, 8ull << 20);
+    auto snapshot = std::make_shared<audio::AudioMixSnapshot>();
+    audio::AudioClip clip;
+    clip.asset = 7; clip.end = clip.sourceLength = clip.fadeTo = 480000;
+    snapshot->clips.push_back(clip); snapshot->endSample = clip.end;
+    engine.cache()->register_asset(7, {"cold", clip.end});
+    engine.set_snapshot(snapshot);
+    engine.play(0);
+    wait_until([&] { return factory.entered.load(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    AUREA_CHECK_EQ(engine.stats().queuedMs, 0u);
+    std::vector<float> pcm(960);
+    engine.debug_render(pcm.data(), 480); output.pulled += 480;
+    AUREA_CHECK_EQ(engine.position_ns(), 0);
+    // Seek while old decoding is outstanding: first NEW PCM must be at 2s.
+    engine.play(2000000000);
+    engine.debug_render(pcm.data(), 480); output.pulled += 480;
+    factory.release.store(true);
+    wait_until([&] { return engine.stats().queuedMs >= 100; });
+    engine.debug_render(pcm.data(),480); output.pulled += 480;
+    AUREA_CHECK_NEAR(pcm[200], synthetic_audio_value(factory.cfg,0,2.0+100.0/48000.0),1e-6);
+    engine.shutdown();
+}
+
+AUREA_TEST(Audio, TransportRateKeepsAudioAndClockAtRequestedSpeed) {
+    for (double rate : {0.5, 1.0, 2.0, 4.0}) {
+        const auto config = audio_cfg(48000);
+        SyntheticFactory factory(config);
+        FakeOutput output; output.latency = 0;
+        audio::AudioEngine engine; engine.initialize(&factory,&output,8ull<<20);
+        auto snap = std::make_shared<audio::AudioMixSnapshot>();
+        audio::AudioClip clip; clip.asset=1; clip.end=clip.sourceLength=clip.fadeTo=480000;
+        snap->clips.push_back(clip); snap->endSample=clip.end;
+        engine.cache()->register_asset(1,{"rate",clip.end});
+        engine.set_snapshot(snap); engine.play(1000000000,rate);
+        wait_until([&]{return engine.stats().queuedMs>=100;});
+        std::vector<float> pcm(960);
+        engine.debug_render(pcm.data(),480); output.pulled+=480;
+        AUREA_CHECK_NEAR(pcm[200],synthetic_audio_value(config,0,1.0+100.0*rate/48000),0.001);
+        AUREA_CHECK_EQ(engine.position_ns(),audio::sample_to_ns(48000+static_cast<i64>(480*rate)));
+        engine.shutdown();
+    }
 }

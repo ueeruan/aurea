@@ -5,9 +5,19 @@ import sys
 
 root = Path(sys.argv[1])
 blobs = sorted(root.rglob('*.mslblob'))
-# Hotspots adds one pass to the existing catalog.
-if len(blobs) != 71:
-    raise SystemExit(f'Expected 71 Metal shaders, found {len(blobs)}')
+# Match CMake's shader catalog, including paths, so a newly added shader is
+# required without a manually maintained count masking missing/stale outputs.
+source_root = Path(__file__).resolve().parents[2] / 'shaders'
+expected = {
+    source.relative_to(source_root).as_posix() + '.spv.mslblob'
+    for extension in ('*.vert', '*.frag', '*.comp')
+    for source in source_root.rglob(extension)
+}
+actual = {blob.relative_to(root).as_posix() for blob in blobs}
+if not expected or actual != expected:
+    missing = ', '.join(sorted(expected - actual)) or 'none'
+    unexpected = ', '.join(sorted(actual - expected)) or 'none'
+    raise SystemExit(f'Metal shader catalog mismatch: missing {missing}; unexpected {unexpected}')
 
 failures = 0
 for blob in blobs:

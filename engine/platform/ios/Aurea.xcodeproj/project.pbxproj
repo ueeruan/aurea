@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DA2113000000000000000001 /* PerformanceTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2113000000000000000002 /* PerformanceTest.swift */; };
 		AE0000000000000000000121 /* HomeBackdrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000120 /* HomeBackdrop.swift */; };
 		AE0000000000000000000111 /* ParityExportProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000110 /* ParityExportProbe.swift */; };
 		AE0000000000000000000101 /* ParityGestureProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000100 /* ParityGestureProbe.swift */; };
@@ -92,6 +93,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DA2113000000000000000002 /* PerformanceTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTest.swift; sourceTree = "<group>"; };
 		AE0000000000000000000120 /* HomeBackdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBackdrop.swift; sourceTree = "<group>"; };
 		AE0000000000000000000110 /* ParityExportProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParityExportProbe.swift; sourceTree = "<group>"; };
 		AE0000000000000000000100 /* ParityGestureProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParityGestureProbe.swift; sourceTree = "<group>"; };
@@ -235,6 +237,7 @@
 				AE000000000000000000008A /* AnimationTools.swift */,
 				AE000000000000000000008C /* VectorPanel.swift */,
 				AE000000000000000000008E /* AppPanels.swift */,
+				DA2113000000000000000002 /* PerformanceTest.swift */,
 				AE0000000000000000000086 /* presets */,
 				AE0000000000000000000084 /* ParticleControls.swift */,
 				AE000000000000000000000A /* Panel3DView.swift */,
@@ -488,6 +491,7 @@
 				AE000000000000000000008B /* AnimationTools.swift in Sources */,
 				AE000000000000000000008D /* VectorPanel.swift in Sources */,
 				AE000000000000000000008F /* AppPanels.swift in Sources */,
+				DA2113000000000000000001 /* PerformanceTest.swift in Sources */,
 				AE0000000000000000000085 /* ParticleControls.swift in Sources */,
 				AE0000000000000000000042 /* Panel3DView.swift in Sources */,
 				AE0000000000000000000043 /* ExportView.swift in Sources */,

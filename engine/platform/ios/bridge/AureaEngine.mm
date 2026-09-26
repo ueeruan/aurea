@@ -34,6 +34,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <mach/mach.h>
 
 using aurea::Command;
 using aurea::CommandType;
@@ -458,7 +459,12 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     e->fill_perf(p);
     aurea::bridge::TelemetryPOD t;
     e->fill_telemetry(t);
+    task_vm_info_data_t vm{};
+    mach_msg_type_number_t vmCount = TASK_VM_INFO_COUNT;
+    const bool haveFootprint = task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&vm), &vmCount) == KERN_SUCCESS;
     return @{
+        @"processFootprintAvailable": @(haveFootprint),
+        @"processFootprintBytes": @(haveFootprint ? vm.phys_footprint : 0),
         @"decoder": to_ns(std::string(p.decoder)), @"gpuName": to_ns(std::string(p.gpuName)),
         @"gpuAllocations": @(p.gpuAllocations),
         @"gpuReservedBytes": @(p.gpuReservedBytes),

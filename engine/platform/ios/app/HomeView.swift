@@ -727,6 +727,7 @@ struct HomeSettingsTab: View {
     @State private var hasGroqKey = false
     @State private var betaTaps = 0
     @State private var licenses = false
+    @State private var performanceTest = false
     @AppStorage("home.developerTools") private var developerTools = false
 
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" }
@@ -764,6 +765,7 @@ struct HomeSettingsTab: View {
                 groupHeader("settings_group_device", top: true)
                 group {
                     tapRow("settings_device_auto", subtitle: deviceSummary) { model.analyseDeviceAgain() }
+                    Button("Desempenho no iPhone · testes e relatório") { performanceTest = true }.padding(16)
                 }
                 groupNote("settings_device_auto_note")
                 groupHeader("settings_group_general", top: true)
@@ -807,6 +809,7 @@ struct HomeSettingsTab: View {
             if keyDialog { groqDialog }
         }
         .onAppear { hasGroqKey = !CaptionKeychain.read().isEmpty }
+        .sheet(isPresented: $performanceTest) { PerformanceTestPanel() }
         .sheet(isPresented: $licenses) {
             NavigationStack {
                 ScrollView { Text(AureaText.t("licenses_ai_body")).font(.system(size: 13)).textSelection(.enabled).padding(20) }

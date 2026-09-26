@@ -86,6 +86,7 @@ struct ContentView: View {
             }
         }
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.5), value: model.screen)
+        .overlay(alignment: .bottom) { PerformanceTestBadge().padding(.bottom, 6) }
         .onChange(of: model.toast) { value in
             guard value != nil else { return }
             // O aviso some sozinho, como o do Android. Tocar nele também fecha.

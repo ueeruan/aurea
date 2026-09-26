@@ -1498,6 +1498,8 @@ final class AureaModel: ObservableObject {
     /// `atPlayhead`: o clipe entra no cabeçote (o vídeo gerado pela IA), não no zero.
     func importMedia(url: URL, kind: ImportKind, objectHDRI: Int64? = nil, atPlayhead: Bool = false) {
         guard !importingMedia else { return }
+        let performanceStart = ProcessInfo.processInfo.systemUptime
+        IPhonePerformanceTest.shared.event("import_start", values: ["kind": String(describing: kind)])
         operationMessage = "Importando mídia…"
         importingMedia = true
         if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
@@ -1530,6 +1532,7 @@ final class AureaModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
+                IPhonePerformanceTest.shared.event("import_end", values: ["kind": String(describing: kind), "milliseconds": (ProcessInfo.processInfo.systemUptime - performanceStart) * 1000, "success": importFailure.isEmpty])
                 if !importFailure.isEmpty { self.toast = importFailure; return }
                 if kind == .hdri { self.toast = "Ambiente importado" }
                 else { self.engine.selectLayers([NSNumber(value: importedId)]); self.selection = [importedId] }

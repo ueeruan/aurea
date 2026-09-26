@@ -5,6 +5,7 @@ import UIKit
 struct TopBarView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
+    @State private var performanceTest = false
     private var layer: LayerItem? { model.selectedLayer }
     private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
     private var count: Int { model.selection.count }
@@ -18,6 +19,7 @@ struct TopBarView: View {
         }
         .frame(height: StageDim.barButtonHeight)
         .background(count >= 2 ? AureaColors.accent : AureaColors.editorTopBar)
+        .sheet(isPresented: $performanceTest) { PerformanceTestPanel() }
     }
 
     private var projectBar: some View {
@@ -44,6 +46,8 @@ struct TopBarView: View {
             Button { open(.timelineMenu) } label: { MaterialGlyph("filled.MoreVert", size: 21, color: AureaColors.text).frame(width: 40, height: 44) }
                 .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_linha_tempo"))
             ShellBarButton(glyph: CupertinoGlyph.GearAltFill, description: AureaText.t("editor_projeto_cbe9"), size: 19) { open(.projectSettings) }
+            Button { performanceTest = true } label: { Image(systemName: "speedometer").frame(width: 40, height: 44) }
+                .buttonStyle(.plain).accessibilityLabel("Teste de desempenho no iPhone")
             ShellBarButton(glyph: CupertinoGlyph.SquareArrowUp, description: AureaText.t("editor_exportar"), tint: AureaColors.accent) { model.openExport() }
         }.padding(.trailing, 6)
     }

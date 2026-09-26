@@ -7,6 +7,11 @@ import UIKit
 
 enum AureaAds {
     static func start() {
+        #if DEBUG
+        // Gesture tests exercise the real editor, not third-party consent UI.
+        // Keep SDK/consent behavior unchanged in normal Debug and Release runs.
+        if ProcessInfo.processInfo.environment["AUREA_UI_TEST_PROBE"] == "1" { return }
+        #endif
         // Depois do primeiro frame: a janela já é a key window.
         DispatchQueue.main.async {
             guard let root = rootViewController() else { return }

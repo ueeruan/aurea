@@ -340,6 +340,11 @@ struct HomeView: View {
         .onChange(of: model.projects) { _ in library.refresh() }
         .onAppear {
             backdrop.select(tab); backdrop.start()
+            #if DEBUG
+            // Slow video fixtures yield to Home while preparing their real export.
+            // Do not present onboarding over a scripted editor gesture fixture.
+            if ProcessInfo.processInfo.environment["AUREA_UI_TEST_PROBE"] == "1" { return }
+            #endif
             if readReleaseNotes != releaseNotesEdition { showReleaseNotes = true }
         }
         .sheet(isPresented: $showReleaseNotes, onDismiss: { readReleaseNotes = releaseNotesEdition }) {

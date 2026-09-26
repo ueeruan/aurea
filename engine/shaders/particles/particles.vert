@@ -285,6 +285,7 @@ vec3 shape_offset(float type, inout uint s) {
     const float w = p.area.x;
     const float h = p.area.y;
     if (world_particle()) {
+        if (p.emitShape.x > 12.5) return vec3((rnd(s)-.5)*w, (rnd(s)-.5)*h, (rnd(s)-.5)*p.emitShape.w);
         vec3 direction = world_direction(s);
         return direction * (p.emitShape.y * pow(rnd(s), 1.0/3.0));
     }
@@ -599,7 +600,11 @@ void main() {
         if (auxRoll >= aux_probability()) return;
         // Ela nasce quando a primária chega em `auxAt` da vida dela; o que
         // sobra da vida da primária é o tempo que a aux tem para aparecer.
-        const float at = clamp(p.trail.w, 0.0, 0.95) * life;
+        float at = clamp(p.trail.w, 0.0, 0.95) * life;
+        if (world_particle()) {
+            float sub = floor((idx - primarySlots) / primarySlots);
+            at = life * (sub + .5) / max(1.0, float(auxPer));
+        }
         if (ageAll < at) return;
         const float auxAge = ageAll - at;
         const float auxLife = max(p.aux.x, 1e-4);
@@ -616,8 +621,16 @@ void main() {
         const vec2 cone0 = ps_cone(em.spread, primaryIdx, k);
         const vec2 v0 = spd0 * cone0.x * vec2(cos(ang0), sin(ang0)) + em.motion * p.emission.z;
         const vec2 acc = vec2(p.force.x, p.force.y) + p.physics.yz;
-        const vec2 pAt = start + v0 * at + 0.5 * acc * at * at;
-        const float zAt = ps_depth(st.z, spd0 * cone0.y, at, k);
+        vec2 pAt = start + v0 * at + 0.5 * acc * at * at;
+        float zAt = ps_depth(st.z, spd0 * cone0.y, at, k);
+        if (world_particle()) {
+            vec3 velocity = world_velocity(spd0, em.dir, em.spread, s);
+            velocity.xy += em.motion * p.emission.z;
+            vec3 ignoredVelocity, ignoredGravity;
+            vec3 point = world_path(st, vec3(em.origin,0), velocity,
+                vec3(acc, ps_accel_z()), at, ignoredVelocity, ignoredGravity);
+            pAt = point.xy; zAt = point.z;
+        }
 
         const float aAng = rnd(s) * 2.0 * kPi;
         const float aSpd = p.aux.y * (0.6 + 0.8 * rnd(s));
@@ -629,13 +642,14 @@ void main() {
         const float au = auxAge / auxLife;
         const float aSize = max(p.aux.z * (1.0 - au), 0.0);
         if (aSize <= 0.01) return;
-        const vec4 ac = p.auxTint;
+        const vec4 ac = world_particle() ? vec4(life_color(clamp(at/life,0.0,1.0),p.colorA.rgb,p.colorB.rgb),p.auxTint.a) : p.auxTint;
         const float aOp = (1.0 - au) * ac.a;
         v_soft = 0.6;
         if (!meshPass) v_shape = 0.0;   // secundária: disco macio
         // Gravidade da primária até o nascimento do aux + a do aux depois.
         const vec3 aGrav = ps_gravity(acc, at) + ps_gravity(acc, auxAge);
-        emit_vertex(aPos, zAt + aGrav.z, aSize, 0.0, vec4(ac.rgb * aOp, aOp), c, s2, birth, aGrav);
+        float extraZ = world_particle() ? ps_gravity(acc, auxAge).z : aGrav.z;
+        emit_vertex(aPos, zAt + extraZ, aSize, 0.0, vec4(ac.rgb * aOp, aOp), c, s2, birth, aGrav);
         return;
     }
 

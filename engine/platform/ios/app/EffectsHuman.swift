@@ -297,7 +297,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             0: FxParamHuman(label: "fx_intensidade", suffix: "px", decimals: 0),
             1: FxParamHuman(label: "fx_tamanho_ruido", suffix: "px", decimals: 0),
             2: FxParamHuman(label: "fx_complexidade", suffix: "oitavas", decimals: 0),
-            3: FxParamHuman(label: "fx_evolucao", suffix: "px/q", decimals: 1),
+            3: FxParamHuman(label: "fx_evolucao", suffix: "°", decimals: 1),
             4: FxParamHuman(label: "fx_deslocamento_x", suffix: "px", decimals: 0),
             5: FxParamHuman(label: "fx_deslocamento_y", suffix: "px", decimals: 0),
             8: FxParamHuman(label: "fx_bordas"),
@@ -347,7 +347,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.light.deep_glow", FxEffectHuman(
         name: "fx_name_deep_glow",
         keywords: "deep glow brilho profundo halo neon luz bloom",
-        principal: [0, 1, 2, 3, 4],
+        principal: [2, 13, 0, 14, 4],
         params: [
             0: FxParamHuman(label: "fx_limite", decimals: 0),
             1: FxParamHuman(label: "fx_raio_nucleo", suffix: "px", decimals: 0),

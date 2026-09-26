@@ -31,7 +31,8 @@ u32 reduction_for(f32 radius, f32 limit) noexcept {
 class DeepGlow final : public Effect {
 public:
     enum : u32 { kThreshold = 0, kCoreRadius, kHaloRadius, kCoreIntensity, kHaloIntensity,
-                 kColor, kPreserveShadows, kScreen, kTintCore, kTintHalo, kOnlyGlow, kClip };
+                 kColor, kPreserveShadows, kScreen, kTintCore, kTintHalo, kOnlyGlow, kClip,
+                 kOptical, kExposure, kSoftness };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kDeepGlow, "Brilho profundo", "Luz", EffectClass::Neighborhood};
@@ -44,15 +45,19 @@ public:
         p.add_float("core_intensity", "Força do núcleo", 1.4f, 0.0f, 8.0f);
         p.add_float("halo_intensity", "Força do halo", 0.8f, 0.0f, 8.0f);
         p.add_color("glow_color", "Cor do brilho", Vec4{1, 1, 1, 1});
-        p.add_bool("preserve_shadows", "Preservar as sombras", true);
-        p.add_bool("screen_halo", "Halo em tela", true);
+        p.add_bool("preserve_shadows", "Preservar as sombras", false);
+        p.add_bool("screen_halo", "Halo em tela", false);
         p.add_bool("tint_core", "Tingir o núcleo", false);
         p.add_bool("tint_halo", "Tingir o halo", true);
         p.add_bool("only_glow", "Só o brilho", false);
         p.add_float("clip", "Estouro", 100.0f, 10.0f, 400.0f, kParamAnimatable | kParamPercent, "%");
+        // Append parameters: saved projects keep the original parameter indices.
+        p.add_bool("optical_falloff", "Decaimento óptico", true);
+        p.add_float("exposure", "Exposição", 0.0f, -5.0f, 5.0f, kParamAnimatable, "EV");
+        p.add_float("threshold_softness", "Suavidade do limite", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
     bool is_identity(const EffectEval& e) const noexcept override {
-        return (e.f(kCoreIntensity) < 1e-3f && e.f(kHaloIntensity) < 1e-3f);
+        return !e.b(kOnlyGlow) && (e.f(kCoreIntensity) < 1e-3f && e.f(kHaloIntensity) < 1e-3f);
     }
     f32 input_margin(const EffectEval& e) const noexcept override {
         return std::max(e.f(kCoreRadius), e.f(kHaloRadius));
@@ -93,7 +98,7 @@ public:
         ctx.region_size(region, k / static_cast<f32>(r), bw, bh);
         const FGTexture tex = ctx.texture(label, bw, bh);
         const f32 t = e.f(kThreshold) / 100.0f;
-        const f32 knee = std::max(1e-4f, t * 0.5f);
+        const f32 knee = std::max(1e-4f, t * e.f(kSoftness) / 100.0f);
         struct {
             Vec4 uvMap;
             Vec4 texel;
@@ -128,6 +133,33 @@ public:
         return build_gaussian(ctx, brightImage, req, out);
     }
 
+    // Equal-energy Gaussians at logarithmic scales approximate a 1/r² radial
+    // kernel between the smallest and largest scales. Each lobe is normalized;
+    // increasing the radius spreads light instead of multiplying its energy.
+    // This is an independent optical model, not the proprietary AE algorithm.
+    static Status optical_halo(EffectBuildContext& ctx, const LayerImage& source,
+                               const Rect& region, f32 radius, LayerImage& out) {
+        constexpr u32 levels = 6;
+        for (u32 level = 0; level < levels; ++level) {
+            LayerImage lobe;
+            if (const Status s = blur_halo(ctx, source, region,
+                    radius / static_cast<f32>(1u << level), lobe); !s.ok()) return s;
+            if (level == 0) { out = lobe; continue; }
+            EffectUniforms u;
+            u.p3 = Vec4{1, static_cast<f32>(level) / (level + 1), 1.0f / (level + 1), 0};
+            LayerImage accumulated{ctx.texture("optical-glow-sum", source.width, source.height),
+                                   region, source.width, source.height};
+            if (ctx.fullscreen_pass("optical-glow-sum", PassStage::Effects, accumulated.texture,
+                    ShaderId::effects_deep_glow_combine_frag,
+                    {PassTexture{source.texture, {}, CommonSampler::LinearBorder},
+                     PassTexture{out.texture, {}, CommonSampler::LinearBorder},
+                     PassTexture{lobe.texture, {}, CommonSampler::LinearBorder}},
+                    &u, sizeof(u)) == kInvalidIndex) return Errc::PipelineCompileFailed;
+            out = accumulated;
+        }
+        return OkStatus;
+    }
+
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         const f32 coreR = std::max(0.0f, e.f(kCoreRadius));
@@ -144,7 +176,8 @@ public:
         LayerImage core{input.texture, input.region, input.width, input.height};
         LayerImage haloImage{input.texture, input.region, input.width, input.height};
         const f32 k = input.texel_scale_x();
-        const u32 rCore = bright_reduction(coreR, k), rHalo = bright_reduction(haloR, k);
+        const u32 rCore = bright_reduction(coreR, k);
+        const u32 rHalo = bright_reduction(e.b(kOptical) ? haloR / 32.0f : haloR, k);
         LayerImage coreBright, haloBright;
         if (wantCore) {
             if (const Status s = bright(ctx, e, input, region, rCore, "brilho-nucleo", coreBright); !s.ok()) return s;
@@ -153,7 +186,9 @@ public:
         if (wantHalo) {
             if (wantCore && rHalo == rCore) haloBright = coreBright;
             else if (const Status s = bright(ctx, e, input, region, rHalo, "brilho-halo", haloBright); !s.ok()) return s;
-            if (const Status s = blur_halo(ctx, haloBright, region, haloR, haloImage); !s.ok()) return s;
+            const Status s = e.b(kOptical) ? optical_halo(ctx, haloBright, region, haloR, haloImage)
+                                          : blur_halo(ctx, haloBright, region, haloR, haloImage);
+            if (!s.ok()) return s;
         }
 
         u32 w = 0, h = 0;
@@ -161,7 +196,8 @@ public:
         EffectUniforms u;
         u.uvMap = EffectBuildContext::uv_map(region, input.region);
         u.texel = Vec4{w > 0 ? 1.0f / static_cast<f32>(w) : 0.0f, h > 0 ? 1.0f / static_cast<f32>(h) : 0.0f, 0, 0};
-        u.p0 = Vec4{e.f(kCoreIntensity), e.f(kHaloIntensity), e.f(kClip) / 100.0f,
+        const f32 exposure = std::exp2(std::clamp(e.f(kExposure), -5.0f, 5.0f));
+        u.p0 = Vec4{e.f(kCoreIntensity) * exposure, e.f(kHaloIntensity) * exposure, e.f(kClip) / 100.0f,
                     e.b(kPreserveShadows) ? 1.0f : 0.0f};
         u.p1 = Vec4{e.b(kScreen) ? 1.0f : 0.0f, e.b(kTintCore) ? 1.0f : 0.0f,
                     e.b(kTintHalo) ? 1.0f : 0.0f, e.b(kOnlyGlow) ? 1.0f : 0.0f};
@@ -256,6 +292,45 @@ public:
 // -----------------------------------------------------------------------------
 // Raios
 // -----------------------------------------------------------------------------
+class Hotspots final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.light.hotspots", "Hotspots", "Luz", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("threshold", "Limite", 50, 0, 200, kParamAnimatable | kParamPercent, "%");
+        p.add_float("brightness", "Brilho", 2, 0, 10);
+        p.add_float("blur_input", "Desfoque de entrada", 0, 0, 100, kParamAnimatable | kParamPixels, "px");
+        p.add_float("saturation", "Saturação", 100, 0, 300, kParamAnimatable | kParamPercent, "%");
+        p.add_color("threshold_color", "Cor adicional do limite", Vec4{0,0,0,1});
+        p.add_float("mix", "Mistura", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.f(5) <= 0; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        for (auto id : {ShaderId::effects_hotspots_frag, ShaderId::effects_gaussian_blur_frag,
+                        ShaderId::effects_downsample_frag}) out.push_back(PipelineKey::fullscreen(id, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        LayerImage blurred = input;
+        if (e.f(2) > 0) {
+            BlurRequest req;
+            req.sigmaX = req.sigmaY = e.f(2) / 3;
+            req.repeatEdges = true; req.outRegion = input.region; req.label = "hotspots-blur-input";
+            if (const Status s = build_gaussian(ctx, input, req, blurred); !s.ok()) return s;
+        }
+        auto u = base_uniforms(blurred);
+        u.p0 = Vec4{e.f(0)/100, e.f(1), e.f(3)/100, e.f(5)/100};
+        u.color = e.color(4);
+        out = input; out.texture = ctx.texture("hotspots", input.width, input.height);
+        if (ctx.fullscreen_pass("hotspots", PassStage::Effects, out.texture, ShaderId::effects_hotspots_frag,
+                {PassTexture{blurred.texture, {}, CommonSampler::LinearClamp}}, &u, sizeof(u)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+};
+
 class Rays final : public Effect {
 public:
     enum : u32 { kIntensity = 0, kLength, kThreshold, kDecay, kCenter, kSamples, kKnee,
@@ -392,10 +467,9 @@ public:
         u.uvMap = EffectBuildContext::uv_map(region, input.region);
         const f32 texelScaleX = (w > 0 && region.w > 0.0f) ? static_cast<f32>(w) / region.w : 1.0f;
         const f32 texelScaleY = (h > 0 && region.h > 0.0f) ? static_cast<f32>(h) / region.h : 1.0f;
-        u.texel = Vec4{w > 0 ? 1.0f / static_cast<f32>(w) : 0.0f, h > 0 ? 1.0f / static_cast<f32>(h) : 0.0f,
-                       texelScaleX, texelScaleY};
+        u.texel = Vec4{1.0f / input.width, 1.0f / input.height, texelScaleX, texelScaleY};
         // O raio é medido em TEXELS da textura reduzida: por isso a divisão.
-        u.p0 = Vec4{radius * texelScaleX / static_cast<f32>(k), e.f(kHighlightBoost) / 100.0f,
+        u.p0 = Vec4{radius * input.texel_scale_x(), e.f(kHighlightBoost) / 100.0f,
                     static_cast<f32>(e.e(kIrisSides)), e.f(kIrisSharpness) / 100.0f};
         // Preview adaptativo (8E): a qualidade (anéis do disco) cai junto com
         // `effect_quality`; o export e a prévia do catálogo usam 1 (intocados).
@@ -464,6 +538,7 @@ public:
 
 void register_light_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<DeepGlow>());
+    (void)r.add(std::make_unique<Hotspots>());
     (void)r.add(std::make_unique<Halation>());
     (void)r.add(std::make_unique<Rays>());
     (void)r.add(std::make_unique<LightSweep>());

@@ -110,6 +110,8 @@ class CaptionsState(
      * Fase 8D: o tamanho do arquivo (content resolver) e o JSON de milhares de
      * palavras são lidos fora da thread da UI — abrir o painel não engasga.
      */
+    fun isCaption(layerId: Long?) = layerId != null && parseCaptionTracks(engine.captionTracks()).any { it.layer == layerId }
+
     fun open(layerId: Long) {
         val tracks = parseCaptionTracks(engine.captionTracks())
         track = tracks.firstOrNull { it.layer == layerId || it.source == layerId }

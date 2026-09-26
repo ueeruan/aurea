@@ -105,7 +105,14 @@ private fun ParticleBody(env: PanelEnv, p: List<Float>) {
             Text(stringResource(R.string.world_legacy), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
         } else {
         Group(stringResource(R.string.particular_group_emitter))
-        Dim(store, stringResource(R.string.particular_radius), P.EmitterRadius, p, 1f, 0f, 2000f, " px")
+        if (p[P.EmitterType] >= 13f) {
+            Dim(store, stringResource(R.string.particular_width), P.EmitterWidth, p, 10f, 0f, 8000f, " px")
+            Dim(store, stringResource(R.string.particular_height), P.EmitterHeight, p, 10f, 0f, 8000f, " px")
+            Dim(store, stringResource(R.string.particular_depth), P.EmitterDepth, p, 10f, 0f, 4000f, " px")
+            Dim(store, stringResource(R.string.particular_aux_count), P.AuxCount, p, 1f, 0f, 16f, "")
+        } else {
+            Dim(store, stringResource(R.string.particular_radius), P.EmitterRadius, p, 1f, 0f, 2000f, " px")
+        }
         Dim(store, stringResource(R.string.panel_particulas_segundo), P.Rate, p, 5f, 0f, 6000f, "/s")
         Dim(store, stringResource(R.string.panel_duracao_cada), P.Lifetime, p, .02f, .05f, 10f, " s", decimals = 2)
         Group(stringResource(R.string.particular_group_physics))
@@ -201,7 +208,7 @@ private fun LifeGradient(env: PanelEnv) {
 
 @Composable
 private fun PresetRow(store: EditorStore) {
-    val names = listOf(R.string.world_explosive, R.string.world_jet, R.string.world_vortex)
+    val names = listOf(R.string.world_explosive, R.string.world_jet, R.string.world_vortex, R.string.world_box_lights)
     Column {
         Text(stringResource(R.string.particular_presets), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)))
         Spacer(Modifier.height(5.dp))

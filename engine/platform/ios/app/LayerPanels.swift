@@ -1,7 +1,7 @@
 import SwiftUI
 
-let juanTextPresetNames = ["juan Text Bounce 2", "juan TEXT ANIMATION 01", "Juan Text Animation 5", "juan Text Animation2",
-                          "juan text animation fast 1", "juan text animation jump bounce", "juan text animation word jump", "juan Text Animation"]
+let extraTextPresetNames = ["Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
+                          "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave"]
 import UIKit
 import UniformTypeIdentifiers
 
@@ -409,7 +409,7 @@ struct PresetsPanel: View {
                 for (index, key) in keys.enumerated() {
                     result.append(PanelPresetEntry(id: "text:\(index)", name: AureaText.t(key), kind: kind, textPreset: UInt32(index)))
                 }
-                for (index, name) in juanTextPresetNames.enumerated() {
+                for (index, name) in extraTextPresetNames.enumerated() {
                     result.append(PanelPresetEntry(id: "text:\(index + 11)", name: name, kind: kind, textPreset: UInt32(index + 11)))
                 }
             } else if let url = Bundle.main.url(forResource: kind.rawValue, withExtension: "json", subdirectory: "presets"),
@@ -1589,7 +1589,7 @@ struct TextAnimationSection: View {
     @State private var animators: [[Float]] = []
     @State private var animationError = false
     private var id: Int64 { model.primarySelection ?? 0 }
-    private let presets = ["Pop", "Pulo", "Deslizar", "Escala", "Surgir", "Desfoque", "Destaque palavra", "Karaokê", "Máquina de escrever", "Onda", "Elástico"] + juanTextPresetNames
+    private let presets = ["Pop", "Pulo", "Deslizar", "Escala", "Surgir", "Desfoque", "Destaque palavra", "Karaokê", "Máquina de escrever", "Onda", "Elástico"] + extraTextPresetNames
     private func load() {
         let flat = model.engine.textAnimators(id).map(\.floatValue)
         animators = stride(from: 0, to: flat.count - flat.count % 40, by: 40).map { Array(flat[$0..<($0 + 40)]) }

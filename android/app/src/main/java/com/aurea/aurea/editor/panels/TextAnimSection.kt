@@ -46,7 +46,7 @@ import kotlin.math.roundToInt
 /** Presets nativos do motor (mesma ordem de `text_preset_name`). */
 private val TextPresets = listOf(
     "Pop", "Pulo", "Deslizar", "Escala", "Surgir", "Desfoque", "Destaque palavra", "Karaokê", "Máquina de escrever", "Onda", "Elástico",
-) + com.aurea.aurea.presets.JuanTextPresetNames
+) + com.aurea.aurea.presets.ExtraTextPresetNames
 
 /** Propriedade do animador: bit (TextAnimProp), rótulo e os parâmetros animáveis dela. */
 private class AnimProp(val bit: Int, val label: String, val params: List<AnimParam>)

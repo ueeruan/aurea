@@ -233,9 +233,9 @@ std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 loc
 // =============================================================================
 const char* text_preset_name(u32 id) noexcept {
     static const char* names[kTextPresetCount] = {"Pop", "Bounce", "Slide", "Scale", "Fade", "Blur Reveal", "Word Highlight", "Karaoke",
-        "Typewriter", "Wave", "Elastic", "juan Text Bounce 2", "juan TEXT ANIMATION 01", "Juan Text Animation 5",
-        "juan Text Animation2", "juan text animation fast 1", "juan text animation jump bounce",
-        "juan text animation word jump", "juan Text Animation"};
+        "Typewriter", "Wave", "Elastic", "Preset Bounce", "Preset Entrada suave", "Preset Revelar",
+        "Preset Deslizar", "Preset Entrada rápida", "Preset Salto elástico",
+        "Preset Salto por palavra", "Preset Movimento suave"};
     return id < kTextPresetCount ? names[id] : "";
 }
 

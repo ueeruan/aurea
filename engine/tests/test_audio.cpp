@@ -247,6 +247,39 @@ AUREA_TEST(Audio, MixerPlacesClipsWithEqualPowerFadesAndBalance) {
     AUREA_CHECK(peak <= 1.0f && peak > 0.95f);
 }
 
+AUREA_TEST(Audio, EffectSendsAreSeekableAndIndependentOfCallbackSize) {
+    const SyntheticConfig cfg = audio_cfg(48000);
+    SyntheticFactory factory(cfg);
+    audio::AudioBlockCache cache(&factory, 64ull << 20, false);
+    cache.register_asset(9, audio::AudioAssetRef{"s", 10 * 48000});
+    FetchBlocks blocks(cache);
+    audio::AudioMixSnapshot snap;
+    audio::AudioClip c;
+    c.asset=9; c.start=0; c.end=5*48000; c.sourceLength=10*48000;
+    c.fadeFrom=0; c.fadeTo=c.end;
+    snap.clips.push_back(c);
+    std::vector<f32> dry(4096*2), whole(dry.size()), chunked(dry.size());
+    audio::mix(snap,48000,4096,blocks,dry.data());
+    for(u32 kind=0;kind<3;++kind) {
+        snap.clips[0].sends={audio::AudioSend{kind,.4f,kind==1?.003f:.12f,.3f,.5f}};
+        audio::mix(snap,48000,4096,blocks,whole.data());
+        for(u32 at=0;at<4096;) {
+            const u32 count=std::min(127u,4096-at);
+            audio::mix(snap,48000+at,count,blocks,chunked.data()+at*2); at+=count;
+        }
+        f64 change=0;
+        for(usize i=0;i<whole.size();++i) {
+            AUREA_CHECK(std::isfinite(whole[i]));
+            AUREA_CHECK_NEAR(whole[i],chunked[i],1e-7);
+            change+=std::fabs(whole[i]-dry[i]);
+        }
+        AUREA_CHECK(change>1);
+        snap.clips[0].sends[0].wet=0;
+        audio::mix(snap,48000,4096,blocks,whole.data());
+        for(usize i=0;i<whole.size();++i) AUREA_CHECK_NEAR(whole[i],dry[i],1e-7);
+    }
+}
+
 AUREA_TEST(Audio, SnapshotFollowsTrimMuteSoloAndVolumeKeyframes) {
     SyntheticConfig cfg = audio_cfg(48000);
     SyntheticFactory f(cfg);

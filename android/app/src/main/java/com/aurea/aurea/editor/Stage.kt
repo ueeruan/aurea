@@ -86,12 +86,12 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     com.aurea.aurea.editor.timeline.MarkerEditor(store)
     val mapper = remember { StageMapper() }
     val haptic = LocalHapticFeedback.current
-    val insetPx = with(LocalDensity.current) { ShellDims.StageInset.toPx() }
+    val insetPx = 0f
     // Pontos do rastreio de câmera no vídeo (painel de Rastreio aberto).
     val showTrack = ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking
     androidx.compose.runtime.LaunchedEffect(store.playhead, showTrack, store.cameraTrack) { store.refreshCameraFeatures(showTrack) }
     Box(modifier.background(AureaColors.EditorTopBar).clipToBounds()) {
-        PreviewSurface(store, Modifier.fillMaxSize().padding(ShellDims.StageInset))
+        PreviewSurface(store, Modifier.fillMaxSize())
         Spacer(
             Modifier
                 .fillMaxSize()
@@ -265,7 +265,7 @@ internal class StageMapper {
         arc = Stroke(1.6f * density, cap = StrokeCap.Round)
     }
 
-    fun update(w: Float, h: Float, inset: Float, cw: Int, ch: Int) {
+    fun update(w: Float, h: Float, inset: Float, cw: Int, ch: Int, fill: Boolean) {
         boxW = w
         boxH = h
         val sw = w - 2 * inset
@@ -276,7 +276,7 @@ internal class StageMapper {
         }
         compW = cw.toFloat()
         compH = ch.toFloat()
-        fit = min(sw / compW, sh / compH)
+        fit = if (fill) max(sw / compW, sh / compH) else min(sw / compW, sh / compH)
         ox = inset + (sw - compW * fit) / 2
         oy = inset + (sh - compH * fit) / 2
         valid = true
@@ -294,7 +294,7 @@ internal class StageMapper {
 
 private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: StageMapper, inset: Float) {
     val project = store.project
-    m.update(size.width, size.height, inset, project.width, project.height)
+    m.update(size.width, size.height, inset, project.width, project.height, !store.sceneEditor)
     m.strokesFor(density)
     m.handlesValid = false
     m.markerAnchorValid = false

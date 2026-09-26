@@ -453,9 +453,35 @@ public:
     }
 };
 
+// Audio sends are serialized as regular effects, but never change video pixels.
+class AudioSendEffect final : public Effect {
+    u32 kind_;
+public:
+    explicit AudioSendEffect(u32 kind):kind_(kind) {}
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo infos[] = {
+            {"aurea.audio.reverb","Reverb","Áudio",EffectClass::PerPixel},
+            {"aurea.audio.flanger","Flanger","Áudio",EffectClass::PerPixel},
+            {"aurea.audio.echo","Echo / Delay","Áudio",EffectClass::PerPixel}};
+        return infos[kind_];
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("wet","Nível do efeito",30,0,100,0,"%");
+        p.add_float("delay","Tempo",kind_==1?3.f:120.f,kind_==1?.1f:10.f,kind_==1?10.f:500.f,0,"ms");
+        if (kind_ == 1) {
+            p.add_float("rate","Velocidade",.3f,.01f,5,0,"Hz");
+            p.add_float("decay","Realimentação",50,0,90,0,"%");
+        } else {
+            p.add_float("decay","Decaimento",50,0,90,0,"%");
+        }
+    }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
 } // namespace
 
 void register_stylize_effects(EffectRegistry& r) {
+    for(u32 i=0;i<3;++i) (void)r.add(std::make_unique<AudioSendEffect>(i));
     (void)r.add(std::make_unique<OminoDiffusion>());
     (void)r.add(std::make_unique<Invert>());
     (void)r.add(std::make_unique<Scanlines>());

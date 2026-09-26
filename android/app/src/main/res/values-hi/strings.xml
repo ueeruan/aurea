@@ -923,4 +923,5 @@
     <string name="am_import_done_skipped">%1$d इफ़ेक्ट इम्पोर्ट हुए, बिना बराबरी वाले %2$d छोड़े गए (“%3$s”)</string>
     <string name="am_import_failed">इम्पोर्ट नहीं हो सका: %1$s</string>
     <string name="am_import_nothing">Aurea में बराबरी वाला कोई इफ़ेक्ट नहीं</string>
+    <string name="world_box_lights">Luzes flutuantes</string>
 </resources>

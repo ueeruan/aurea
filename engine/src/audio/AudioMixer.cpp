@@ -4,10 +4,12 @@
 #include "aurea/audio/Audio.hpp"
 
 #include "aurea/expr/Expression.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/timeline/Composition.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace aurea::audio {
@@ -94,6 +96,18 @@ struct Flatten {
                 // A mesma função de tempo do vídeo (Layer::source_frame), em amostras.
                 const f64 srcFrameAtLs = l.source_frame(l.start);
                 c.sourceStartF = srcFrameAtLs * kMixRate / fps + static_cast<f64>(c.start - shift - ls) * c.rate;
+            }
+            for (const auto& effect:l.effects) {
+                if(!effect.enabled || effect.params.size()<3 || c.sends.size()>=8) continue;
+                u32 kind=3;
+                if(effect.type==effect_type_id("aurea.audio.reverb")) kind=0;
+                if(effect.type==effect_type_id("aurea.audio.flanger")) kind=1;
+                if(effect.type==effect_type_id("aurea.audio.echo")) kind=2;
+                if(kind==3) continue;
+                auto f=[&](u32 i,f32 lo,f32 hi){f32 v=effect.params[i].constant.v[0]; return std::isfinite(v)?std::clamp(v,lo,hi):lo;};
+                if (kind == 1 && effect.params.size() < 4) continue;
+                c.sends.push_back(AudioSend{kind,f(0,0,100)/100,f(1,kind==1?.1f:10.f,kind==1?10.f:500.f)/1000,
+                    kind == 1 ? f(2,.01f,5) : .3f, f(kind == 1 ? 3 : 2,0,90)/100});
             }
             c.sourceLength = asset_length(a);
             c.gain = gain * l.gain;
@@ -198,6 +212,82 @@ void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& block
         // Balanço (a fonte já é estéreo): o lado oposto desce, o próprio fica.
         const f32 balL = c.pan > 0.0f ? 1.0f - c.pan : 1.0f;
         const f32 balR = c.pan < 0.0f ? 1.0f + c.pan : 1.0f;
+        if (!c.sends.empty()) {
+            // Stateless finite impulse responses: identical at any seek/block size.
+            // Bounded, allocation-free cache: never lock the block store per tap.
+            std::array<i64, 32> cachedIndices;
+            cachedIndices.fill(-1);
+            std::array<const AudioBlock*, 32> cachedBlocks{};
+            struct Taps { u32 count = 0; std::array<f64, 24> delay{}; std::array<f32, 24> gain{}; };
+            std::array<Taps, 8> tapsBySend{};
+            for (usize j=0; j<std::min<usize>(c.sends.size(), tapsBySend.size()); ++j) {
+                const auto& fx=c.sends[j]; auto& taps=tapsBySend[j];
+                if (fx.kind==1) continue;
+                taps.count=fx.kind==0?24:6;
+                f32 norm=0;
+                for(u32 i=1;i<=taps.count;++i) {
+                    const f32 d=fx.kind==0?(.19f*i+.07f*std::sin(i*2.39996f)):static_cast<f32>(i);
+                    taps.delay[i-1]=d*fx.seconds*kMixRate;
+                    taps.gain[i-1]=std::pow(fx.decay,fx.kind==0?(i-1)*.22f:static_cast<f32>(i-1));
+                    norm+=taps.gain[i-1];
+                }
+                for(u32 i=0;i<taps.count;++i) taps.gain[i]/=std::max(1.f,norm);
+            }
+            auto read=[&](f64 timeline,f32& left,f32& right) {
+                left=right=0;
+                if(timeline<c.start || timeline>=c.end) return;
+                const i64 ti=static_cast<i64>(std::floor(timeline));
+                auto position=[&](i64 t){return c.rate==1.0?static_cast<f64>(c.sourceAt0+t-c.start):clip_pos(c,t);};
+                const f64 pos=position(ti)+(position(ti+1)-position(ti))*(timeline-ti);
+                const i64 at=static_cast<i64>(std::floor(pos)); const f32 frac=static_cast<f32>(pos-at);
+                for(u32 neighbor=0;neighbor<2;++neighbor) {
+                    const i64 index=at+neighbor; if(index<0 || index>=c.sourceLength) continue;
+                    const i64 blockIndex = index / kBlockFrames;
+                    const usize slot = static_cast<usize>(blockIndex) % cachedIndices.size();
+                    if (cachedIndices[slot] != blockIndex) {
+                        cachedIndices[slot] = blockIndex;
+                        cachedBlocks[slot] = blocks.block(c.asset, blockIndex);
+                    }
+                    const auto* b = cachedBlocks[slot];
+                    if(!b) { ++missing; continue; }
+                    const usize off=static_cast<usize>(index%kBlockFrames)*2;
+                    if(off+1>=b->pcm.size()) continue;
+                    const f32 w=neighbor?frac:1-frac;
+                    left+=b->pcm[off]*w; right+=b->pcm[off+1]*w;
+                }
+            };
+            for(i64 t=s0;t<s1;++t) {
+                f32 left,right; read(static_cast<f64>(t),left,right);
+                for(usize j=0;j<std::min<usize>(c.sends.size(),tapsBySend.size());++j) {
+                    const auto& fx=c.sends[j];
+                    if(fx.wet<=0) continue;
+                    f32 wl=0,wr=0;
+                    if(fx.kind==1) {
+                        const f64 phase=6.283185307179586*fx.rate*static_cast<f64>(t-c.start)/kMixRate;
+                        const f64 delay=(.2+.8*(.5+.5*std::sin(phase)))*fx.seconds*kMixRate;
+                        f32 gain=1, norm=0;
+                        for(u32 i=1;i<=4;++i) {
+                            f32 l,r; read(t-delay*i,l,r);
+                            wl+=l*gain; wr+=r*gain; norm+=gain; gain*=fx.decay;
+                        }
+                        wl/=norm; wr/=norm;
+                    } else {
+                        const auto& taps=tapsBySend[j];
+                        for(u32 i=0;i<taps.count;++i) {
+                            f32 l,r; read(t-taps.delay[i],l,r);
+                            const f32 gain=taps.gain[i];
+                            // Decorrelated stereo reflections, with bounded energy.
+                            wl+=(fx.kind==0 && i%2?r:l)*gain;
+                            wr+=(fx.kind==0 && i%2?l:r)*gain;
+                        }
+                    }
+                    left+=wl*fx.wet; right+=wr*fx.wet;
+                }
+                const f32 g=envelope(c,t); auto* o=out+static_cast<usize>(t-start)*2;
+                o[0]+=left*g*balL; o[1]+=right*g*balR;
+            }
+            continue;
+        }
         if (c.rate != 1.0) {
             // Leitura fracionária entre amostras vizinhas (que podem estar em
             // blocos diferentes).
@@ -272,7 +362,9 @@ void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& block
 void blocks_needed(const AudioMixSnapshot& snap, i64 start, i64 frames, std::vector<std::pair<u64, i64>>& out) {
     const i64 stop = start + frames;
     for (const AudioClip& c : snap.clips) {
-        const i64 s0 = std::max(start, c.start);
+        f64 lookback=0;
+        for(const auto& fx:c.sends) if(fx.wet>0) lookback=std::max(lookback,static_cast<f64>(fx.seconds)*(fx.kind==1?4:6)*kMixRate);
+        const i64 s0 = std::max(start-static_cast<i64>(std::ceil(lookback))-2, c.start);
         const i64 s1 = std::min(stop, c.end);
         if (s0 >= s1) continue;
         i64 a = 0, z = 0;

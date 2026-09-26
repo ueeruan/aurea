@@ -220,9 +220,9 @@ final class AureaModel: ObservableObject {
     /// doca, e não uma tela sem folha — foi o que a casca A.01 fixou, e cada
     /// ladrilho aberto é que decide a fração da folha.
     var sheetContent: SheetContent {
-        if showAddLayer { return .adding }
+        if showAddLayer { return .none }
         // O painel da Aurea AI CRIA a camada: abre sem nada selecionado (igual ao Android).
-        if panel == .aiVideo { return .panel }
+        if panel == .aiVideo || panel == .captions { return .panel }
         if selection.isEmpty { return .none }
         if selection.count > 1 { return .batch }
         return panel == .none || panel == .dock ? .dock : .panel

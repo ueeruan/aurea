@@ -99,6 +99,7 @@ internal enum class ShellSheet { LayerMenu, RenameLayer, TimelineMenu, ProjectSe
 internal class EditorUi {
     var panel by mutableStateOf<EditorPanel?>(null)
     var adding by mutableStateOf(false)
+    var addCategoryOpen by mutableStateOf(false)
     var addTab by mutableStateOf(AddTab.Shape)
     var fullscreen by mutableStateOf(false)
     var effectsBrowser by mutableStateOf(false)
@@ -142,6 +143,7 @@ internal fun openAdd(store: EditorStore, ui: EditorUi, tab: AddTab = AddTab.Shap
     if (store.playing) store.pause()
     ui.panel = null
     ui.addTab = tab
+    ui.addCategoryOpen = false
     ui.adding = true
 }
 
@@ -216,11 +218,11 @@ fun EditorScreen(store: EditorStore) {
     }
 
     val content = when {
-        ui.adding -> SheetContent.Adding
+        ui.adding -> SheetContent.None
         // O painel da Aurea AI CRIA a camada: abrir sem nada selecionado é o
         // caso normal do projeto novo, então ele não passa pelo portão do
         // `selectionSize == 1` que vale para os painéis que EDITAM a camada.
-        ui.panel == EditorPanel.AiVideo -> SheetContent.Panel
+        ui.panel == EditorPanel.AiVideo || ui.panel == EditorPanel.Captions -> SheetContent.Panel
         ui.panel != null && selectionSize == 1 -> SheetContent.Panel
         selectionSize >= 2 -> SheetContent.Batch
         selectionSize == 1 -> SheetContent.Dock
@@ -258,6 +260,7 @@ fun EditorScreen(store: EditorStore) {
                     NarrowEditor(store, ui, content, m, stage)
                 }
 
+                if (ui.adding) AddLayerOverlay(store, ui, Modifier.align(Alignment.BottomEnd).padding(end = if (wide) sheetWidth.dp else 0.dp))
                 // O "+": escondido em tela cheia, adicionando ou com painel aberto.
                 if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel) {
                     // Camada escolhida com a timeline baixa: o "+" cobria justamente o

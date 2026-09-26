@@ -4,6 +4,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -91,7 +97,10 @@ internal enum class AddTab(@StringRes val label: Int, val glyph: Char) {
 internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
     val close = { ui.adding = false }
     Column(Modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
-        AddCategories(ui, close)
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(ui.addTab.label), modifier = Modifier.weight(1f).padding(start = 16.dp), color = AureaColors.Text)
+            ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar_adicionar), onClick = close)
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (ui.addTab) {
                 AddTab.Shape -> ShapesTab(store, close)
@@ -256,7 +265,7 @@ private val SHAPES = listOf(
 private fun ShapesTab(store: EditorStore, close: () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Ladrilho de ~64 dp: 5 colunas num telefone, mais num tablet.
-        val cols = ((maxWidth.value - 24f) / 68f).toInt().coerceIn(5, 9)
+        val cols = ((maxWidth.value - 24f) / 96f).toInt().coerceIn(2, 3)
         Column(
             Modifier
                 .fillMaxSize()
@@ -462,13 +471,7 @@ private fun TextTab(store: EditorStore, ui: EditorUi) {
                 if (store.addText() >= 0) openPanel(store, ui, EditorPanel.Text)
             },
             AddItem(stringResource(R.string.sh_add_speech_captions), CupertinoGlyph.CaptionsBubble) {
-                // Legendas saem da fala de um vídeo/áudio: abre o painel dele.
-                val kind = store.detail?.kind
-                if (kind == LayerType.Video.kind || kind == LayerType.Audio.kind) {
-                    openPanel(store, ui, EditorPanel.Captions)
-                } else {
-                    store.showToast(needsSpeech)
-                }
+                openPanel(store, ui, EditorPanel.Captions)
             },
         ),
     )
@@ -628,5 +631,45 @@ private fun DrawScope.drawVectorIcon(kind: Int) {
     for (q in pts) {
         drawRect(Color.White, Offset(q.x - h / 2, q.y - h / 2), Size(h, h))
         drawRect(AureaColors.Accent, Offset(q.x - h / 2, q.y - h / 2), Size(h, h), style = Stroke(s * 0.03f))
+    }
+}
+
+/** Floating category buttons never reserve or cover a whole timeline panel. */
+@Composable
+internal fun AddLayerOverlay(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier) {
+    val close = { ui.adding = false; ui.addCategoryOpen = false }
+    val closeLabel = stringResource(R.string.editor_fechar_adicionar)
+    if (ui.addCategoryOpen) {
+        Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            BoxWithConstraints(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.widthIn(max = 380.dp).fillMaxWidth().height((maxHeight * .55f).coerceIn(180.dp, 390.dp))
+                    .clip(RoundedCornerShape(20.dp)).border(1.dp, AureaColors.Action, RoundedCornerShape(20.dp))) {
+                    AddLayerPanel(store, ui)
+                }
+            }
+        }
+    } else {
+        Column(modifier.padding(18.dp).width(132.dp), horizontalAlignment = Alignment.End) {
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AddTab.entries.chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        pair.forEach { tab ->
+                            Column(Modifier.width(62.dp)
+                                .tocavel { ui.addTab = tab; ui.addCategoryOpen = true }, horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(Modifier.size(44.dp).background(ShellColors.Fab, CircleShape).border(1.dp, AureaColors.Action, CircleShape), contentAlignment = Alignment.Center) {
+                                    CupertinoIcon(tab.glyph, 23.dp, AureaColors.Text)
+                                }
+                                Text(stringResource(tab.label), fontSize = 10.sp, color = AureaColors.Text, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Box(Modifier.size(ShellDims.Fab).background(ShellColors.Fab, CircleShape).border(2.dp, AureaColors.Action, CircleShape)
+                .semantics { contentDescription = closeLabel }.tocavel(onClick = close), contentAlignment = Alignment.Center) {
+                CupertinoIcon(CupertinoGlyph.Xmark, 28.dp, AureaColors.Text)
+            }
+        }
     }
 }

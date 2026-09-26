@@ -937,4 +937,5 @@
     <string name="am_import_done_skipped">تم استيراد %1$d، وتُرك %2$d بلا مقابل (“%3$s”)</string>
     <string name="am_import_failed">تعذّر الاستيراد: %1$s</string>
     <string name="am_import_nothing">لا يوجد تأثير له مقابل في Aurea</string>
+    <string name="world_box_lights">Luzes flutuantes</string>
 </resources>

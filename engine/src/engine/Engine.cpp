@@ -2478,7 +2478,7 @@ namespace {
 /// editaveis depois, e nenhum deles cria um motor proprio.
 void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
     p = ParticleData{};
-    if (preset >= 10 && preset <= 12) {
+    if (preset >= 10 && preset <= 13) {
         // Particle World: new analytic 3D dynamics, compact mobile controls.
         // IDs 0..9 remain readable for existing projects, but are no longer
         // offered by the mobile creation/preset panels.
@@ -2498,6 +2498,17 @@ void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
         p.sizeRandom = .5f; p.softness = .1f;
         p.maxParticles = 12000; p.blendMode = 1;
         if (preset == 12) { p.gravity = Vec3{}; p.lifetime = 2; p.speed *= .4f; }
+        if (preset == 13) {
+            p.emitterSize = Vec2{w * 1.82f, h * 1.82f}; p.emitterDepth = w * .13f;
+            p.rate = 30; p.lifetime = 5; p.speed = w * .012f;
+            p.gravity = Vec3{0, -w * .021f, 0};
+            p.startSize = w * .014f; p.endSize = w * .024f;
+            p.startColor = Vec4{.15f,1,.35f,1}; p.endColor = Vec4{.05f,.3f,1,1};
+            p.particleType = static_cast<u32>(ParticleShape::Soft); p.softness = .9f;
+            p.startOpacity = .65f; p.trailLength = 0;
+            p.auxCount = 8; p.auxLife = 1; p.auxSpeed = w * .004f; p.auxSize = w * .003f;
+            p.auxColor = Vec4{.1f,.8f,1,.5f};
+        }
         return;
     }
     switch (preset) {
@@ -2645,7 +2656,7 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
     particle_preset(l->particles, preset, w, h);
-    if (preset >= 10 && preset <= 12) l->threeD = true;
+    if (preset >= 10 && preset <= 13) l->threeD = true;
     if (preset == 9) logo_burst_from_text(*comp, lid, l->particles);
     l->particles.seed = lid.index * 7919u + 1u;
     // O cursor pode estar DEPOIS do fim da composição (a timeline não trava
@@ -2674,7 +2685,7 @@ bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const u32 seed = l->particles.seed;
     particle_preset(l->particles, preset, static_cast<f32>(comp->width()), static_cast<f32>(comp->height()));
-    if (preset >= 10 && preset <= 12) {
+    if (preset >= 10 && preset <= 13) {
         l->threeD = true;
         l->tracks.remove_if([](const Track& track) { return track.property == TrackProperty::ParticleParam; });
     }

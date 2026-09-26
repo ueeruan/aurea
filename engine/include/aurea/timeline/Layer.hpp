@@ -298,6 +298,7 @@ enum class ParticleEmitter : u32 {
     WorldExplosive, ///< spherical producer, isotropic 3D velocity
     WorldJet,       ///< spherical producer, directional 3D cone
     WorldVortex,    ///< spherical producer, rotating 3D flow
+    WorldBox,       ///< box producer with scattered light trails
     Count,
 };
 

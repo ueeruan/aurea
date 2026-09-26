@@ -116,7 +116,7 @@ public:
 class Turbulence final : public Effect {
 public:
     enum : u32 { kAmount = 0, kSize, kComplexity, kEvolution, kOffsetX, kOffsetY, kSeed,
-                 kHorizontal, kEdges, kSpin, kMix };
+                 kHorizontal, kEdges, kSpin, kMix, kPin };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kTurbulence, "Turbulência", "Distorcer", EffectClass::Domain};
@@ -127,7 +127,7 @@ public:
         p.add_float("amount", "Intensidade", 40.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("size", "Tamanho do ruído", 120.0f, 2.0f, 2000.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("complexity", "Complexidade", 3.0f, 1.0f, 6.0f, kParamAnimatable, "oitavas");
-        p.add_float("evolution", "Evolução", 0.0f, -50.0f, 50.0f, kParamAnimatable | kParamPixels, "px/quadro");
+        p.add_float("evolution", "Evolução", 0.0f, -360000.0f, 360000.0f, kParamAnimatable, "°");
         p.add_float("offset_x", "Deslocamento X", 0.0f, -1000.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("offset_y", "Deslocamento Y", 0.0f, -1000.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
         p.add_int("seed", "Semente", 3, 0, 9999);
@@ -135,12 +135,14 @@ public:
         p.add_enum("edges", "Bordas", kEdgeModes, 3, 1);
         p.add_angle("spin", "Girar o deslocamento", 0.0f);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        static const char* const pins[] = {"Nenhuma", "Todas", "Esquerda", "Direita", "Acima", "Abaixo"};
+        p.add_enum("pinning", "Fixar bordas", pins, 6, 0);
     }
     bool is_identity(const EffectEval& e) const noexcept override {
-        return e.f(kMix) < 0.01f || (e.f(kAmount) < 0.01f && e.f(kOffsetX) < 0.01f && e.f(kOffsetY) < 0.01f);
+        return e.f(kMix) < 0.01f || e.f(kAmount) < 0.01f;
     }
     f32 input_margin(const EffectEval& e) const noexcept override {
-        return e.f(kAmount) + std::max(std::fabs(e.f(kOffsetX)), std::fabs(e.f(kOffsetY)));
+        return e.f(kAmount);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kAmount] = ParamValue::scalar(55.0f);
@@ -149,18 +151,18 @@ public:
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
-        const f32 reach = e.f(kAmount) + std::max(std::fabs(e.f(kOffsetX)), std::fabs(e.f(kOffsetY)));
+        const f32 reach = e.f(kAmount);
         const Rect region = spread_region(input.region, reach, reach, e.placement, margin);
         u32 w = 0, h = 0;
         ctx.region_size(region, input.texel_scale_x(), w, h);
 
         EffectUniforms u;
         u.uvMap = EffectBuildContext::uv_map(region, input.region);
-        u.texel = Vec4{region.w > 0.0f ? 1.0f / region.w : 0.0f, region.h > 0.0f ? 1.0f / region.h : 0.0f,
+        u.texel = Vec4{1.0f/static_cast<f32>(input.width), 1.0f/static_cast<f32>(input.height),
                        input.texel_scale_x(), input.texel_scale_y()};
         u.p0 = Vec4{e.f(kAmount), e.f(kSize), e.f(kComplexity), e.f(kEvolution)};
         u.p1 = Vec4{e.f(kOffsetX), e.f(kOffsetY), static_cast<f32>(e.e(kSeed)), e.b(kHorizontal) ? 1.0f : 0.0f};
-        u.p2 = Vec4{static_cast<f32>(e.e(kEdges)), e.f(kSpin), 0.0f, 0.0f};
+        u.p2 = Vec4{static_cast<f32>(e.e(kEdges)), e.f(kSpin), e.f(kMix)/100.0f, static_cast<f32>(e.e(kPin))};
         u.p3 = Vec4{static_cast<f32>(e.localTime.value), finite_or(e.f(kComplexity), 3.0f), 0.0f, 0.0f};
 
         out = LayerImage{ctx.texture("turbulencia", w, h), region, w, h};

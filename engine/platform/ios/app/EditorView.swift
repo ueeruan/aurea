@@ -81,6 +81,7 @@ struct EditorView: View {
                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_voltar_editor")).padding(10)
             }
         }
+        .overlay { if model.showAddLayer { FloatingAddLayer() } }
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
     }
@@ -99,7 +100,7 @@ struct EditorView: View {
             AureaColors.editorTopBar
             PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen)
                 .overlay { if !model.fullscreen { StageOverlay().allowsHitTesting(false) } }
-                .overlay { if !model.fullscreen { StageInteractionOverlay().allowsHitTesting(false) } }.padding(StageDim.stageInset)
+                .overlay { if !model.fullscreen { StageInteractionOverlay().allowsHitTesting(false) } }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
                 ShellStageBanner(label: AureaText.t("editor_camada_bloqueada"), button: AureaText.t("editor_desbloquear"), icon: CupertinoGlyph.LockFill) {
                     model.mutate { $0.setLayer(layer.id, locked: false) }; model.refreshModel(force: true)
@@ -217,7 +218,8 @@ private struct ShellStageBanner: View {
     var body: some View {
         Canvas { raw, size in
             var context = raw
-            let fit = min(size.width / CGFloat(max(1, model.compositionWidth)), size.height / CGFloat(max(1, model.compositionHeight)))
+            let sx = size.width / CGFloat(max(1, model.compositionWidth)), sy = size.height / CGFloat(max(1, model.compositionHeight))
+            let fit = model.sceneEditor ? min(sx, sy) : max(sx, sy)
             let origin = CGPoint(x: (size.width - CGFloat(model.compositionWidth) * fit) / 2, y: (size.height - CGFloat(model.compositionHeight) * fit) / 2)
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: origin.x + CGFloat(x) * fit, y: origin.y + CGFloat(y) * fit) }
             // Borda do quadro: dá para ver onde a composição termina mesmo com
@@ -382,7 +384,7 @@ private struct ContextSheet: View {
 
             if model.showAddLayer {
                 AddLayerSheet()
-            } else if model.selection.count > 1 && model.panel != .aiVideo {
+            } else if model.selection.count > 1 && model.panel != .aiVideo && model.panel != .captions {
                 BatchToolsView()
             } else {
             switch model.panel {
@@ -935,7 +937,7 @@ private struct NativeTextInput: UIViewRepresentable {
 // =============================================================================
 private struct AddLayerSheet: View {
     @EnvironmentObject private var model: AureaModel
-    @State private var tab = 0
+    var tab = 0
     @State private var showingImporter = false
     @State private var fileKind = FileKind.audio
     @State private var showingPhotos = false
@@ -957,27 +959,11 @@ private struct AddLayerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_fechar_adicionar"), size: 20,
-                               width: 44, height: StageDim.addCategories, action: close)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        ForEach(Array(categories.enumerated()), id: \.offset) { entry in
-                            let selected = tab == entry.offset
-                            let tint = selected ? AureaColors.accent : AureaColors.text
-                            Button { tab = entry.offset } label: {
-                                VStack(spacing: 4) {
-                                    CupertinoGlyph.text(entry.element.1, size: 24, color: tint)
-                                    Text(AureaText.t(entry.element.0)).font(.aurea(size: 11, weight: .semibold)).lineLimit(1)
-                                }
-                                .foregroundStyle(tint).frame(width: 60, height: 58)
-                                .background(selected ? AureaColors.chip : .clear, in: RoundedRectangle(cornerRadius: 12))
-                                .padding(.horizontal, 2).padding(.vertical, 5)
-                            }.buttonStyle(.plain)
-                        }
-                    }.padding(.trailing, 6)
-                }
-            }.frame(height: StageDim.addCategories)
+            HStack {
+                Text(AureaText.t(categories[tab].0)).font(.aurea(size: 16, weight: .semibold))
+                Spacer()
+                ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_fechar_adicionar"), action: close)
+            }.padding(.leading, 16).frame(height: 48)
             AureaColors.hairline.frame(height: 1)
             if tab == 0 { shapeGrid } else { cards }
         }
@@ -1004,7 +990,7 @@ private struct AddLayerSheet: View {
 
     private var shapeGrid: some View {
         GeometryReader { geometry in
-            let columns = min(9, max(5, Int((geometry.size.width - 24) / 68)))
+            let columns = min(3, max(2, Int((geometry.size.width - 24) / 96)))
             ScrollView {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 10) {
                     ForEach(shapes, id: \.0) { preset, key in
@@ -1039,8 +1025,7 @@ private struct AddLayerSheet: View {
                     case 3:
                         card("sh_add_tab_text", glyph: CupertinoGlyph.Textformat, accent: true) { model.addText(); model.openPanel(.text) }
                         card("sh_add_speech_captions", glyph: CupertinoGlyph.CaptionsBubble) {
-                            if model.selectedLayer?.kind == 1 || model.selectedLayer?.kind == 3 { model.openPanel(.captions) }
-                            else { model.toast = AureaText.t("sh_add_captions_need_speech") }
+                            model.openPanel(.captions)
                         }
                     case 4:
                         drawnCard("sh_add_null", kind: -1) { model.addNull(threeD: false); close() }
@@ -1285,5 +1270,54 @@ extension EditorView {
     /// sobe para o canto do palco, acima do transporte (par do EditorScreen.kt).
     fileprivate func fabLifted(_ metrics: EditorMetrics, _ wide: Bool) -> Bool {
         !wide && model.sheetContent == .dock && metrics.timeline < 170
+    }
+}
+
+// Floating add categories keep the stage and timeline geometry unchanged.
+private struct FloatingAddLayer: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var category: Int?
+    private let categories: [(String, Character)] = [
+        ("sh_add_tab_shape", ShellGlyph.SquareOnCircle), ("sh_add_tab_media", CupertinoGlyph.PhotoOnRectangle),
+        ("sh_add_tab_audio", CupertinoGlyph.MusicNote2), ("sh_add_tab_text", CupertinoGlyph.Textformat),
+        ("sh_add_tab_element", ShellGlyph.CircleGridHex), ("sh_add_tab_3d", CupertinoGlyph.Cube),
+        ("sh_add_tab_draw", ShellGlyph.Scribble), ("sh_add_tab_vector", CupertinoGlyph.PencilOutline)
+    ]
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottomTrailing) {
+                if let category {
+                    Color.black.opacity(0.18).contentShape(Rectangle()).onTapGesture { model.showAddLayer = false }
+                    AddLayerSheet(tab: category)
+                        .frame(width: min(380, max(200, geometry.size.width - 48)), height: min(390, max(180, geometry.size.height * 0.55)))
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(AureaColors.action, lineWidth: 1))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VStack(alignment: .trailing, spacing: 10) {
+                        ScrollView {
+                            LazyVGrid(columns: [GridItem(.fixed(62)), GridItem(.fixed(62))], spacing: 8) {
+                                ForEach(categories.indices, id: \.self) { index in
+                                    Button { withAnimation(.easeOut(duration: 0.16)) { category = index } } label: {
+                                        VStack(spacing: 3) {
+                                            CupertinoGlyph.text(categories[index].1, size: 23, color: AureaColors.text)
+                                                .frame(width: 44, height: 44).background(StageInk.fab, in: Circle())
+                                                .overlay(Circle().stroke(AureaColors.action, lineWidth: 1))
+                                            Text(AureaText.t(categories[index].0)).font(.aurea(size: 10)).lineLimit(1)
+                                        }.foregroundStyle(AureaColors.text).frame(width: 62)
+                                    }.buttonStyle(.plain).accessibilityIdentifier("aurea.add.category.\(index)")
+                                }
+                            }
+                        }.frame(width: 132, height: min(278, max(120, geometry.size.height - 140)))
+                        Button { model.showAddLayer = false } label: {
+                            CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 28, color: AureaColors.text)
+                                .frame(width: 52, height: 52).background(StageInk.fab, in: Circle())
+                                .overlay(Circle().stroke(AureaColors.action, lineWidth: 2))
+                        }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_fechar_adicionar"))
+                    }.padding(18)
+                        .padding(.trailing, EditorLayout.isWide(geometry.size.width, geometry.size.height) ? (geometry.size.width * 0.4).clamped(to: 280...380) : 0)
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
     }
 }

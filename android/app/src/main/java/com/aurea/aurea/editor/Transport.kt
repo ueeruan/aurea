@@ -50,9 +50,8 @@ import kotlin.math.roundToInt
 // =============================================================================
 
 /**
- * ↶ ↷ · [|◀ ▶ ▶|] centrado · copiar/colar · tela cheia (o "olho" de opções
- * de visualização só dizia "em breve" e saiu na Fase 8I). Botões dos lados com
- * `clamp((W − 132)/6, 30, 40)` (num 320 os seis em 40 estouravam).
+ * ↶ ↷ · [|◀ ▶ ▶|] · marcador · copiar/colar · tela cheia.
+ * Sete alvos dividem a largura restante depois do Play (52 dp).
  * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
  */
 @Composable
@@ -67,9 +66,10 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
             .height(ShellDims.Transport)
             .background(AureaColors.EditorTopBar),
     ) {
-        val side = ((maxWidth.value - 132f) / 6f).coerceIn(30f, 40f).dp
+        val side = ((maxWidth.value - 52f) / 7f).coerceIn(30f, 40f).dp
         val canUndo by remember { derivedStateOf { store.project.canUndo } }
         val canRedo by remember { derivedStateOf { store.project.canRedo } }
+        val marked by remember { derivedStateOf { store.markers.frames.binarySearch(store.playhead) >= 0 } }
         // Composition markers precede layer keyframes.
         val hasMarks by remember {
             derivedStateOf { store.primary?.let { !store.keyframes[it].isNullOrEmpty() } ?: false }
@@ -82,6 +82,7 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
                     CupertinoGlyph.BackwardEnd,
                     if (store.markers.frames.isNotEmpty()) stringResource(R.string.editor_marca_anterior_segure_inicio) else if (hasMarks) stringResource(R.string.editor_keyframe_anterior_segure_inicio) else stringResource(R.string.editor_quadro_atras_segure_inicio),
                     onClick = { store.stepTransport(-1) },
+                    width = side,
                     height = ShellDims.Transport,
                     onLongClick = { store.seek(0) },
                 )
@@ -90,10 +91,19 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
                     CupertinoGlyph.ForwardEnd,
                     if (store.markers.frames.isNotEmpty()) stringResource(R.string.editor_proxima_marca_segure_fim) else if (hasMarks) stringResource(R.string.editor_proximo_keyframe_segure_fim) else stringResource(R.string.editor_quadro_frente_segure_fim),
                     onClick = { store.stepTransport(1) },
+                    width = side,
                     height = ShellDims.Transport,
                     onLongClick = { store.seek(store.project.durationFrames) },
                 )
             }
+            ChromeButton(
+                if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
+                stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
+                onClick = { store.toggleMarker() },
+                onLongClick = { store.editMarkerAtPlayhead() },
+                tint = if (marked) AureaColors.Accent else AureaColors.Text,
+                width = side, height = ShellDims.Transport,
+            )
             ChromeButton(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), onClick = { openSheet(store, ui, ShellSheet.CopyPaste) }, width = side, height = ShellDims.Transport)
             ChromeButton(
                 if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen,

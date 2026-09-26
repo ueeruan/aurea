@@ -299,7 +299,16 @@ struct CaptionsPanel: View {
             PanelHeader(title: AureaText.t("panel_legendas"), onBack: { model.panel = .none })
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    controls
+                    if model.primarySelection == nil || (![1, 3].contains(model.selectedLayer?.kind ?? 0) && captionTrack == nil) {
+                        Text(AureaText.t("sh_add_captions_need_speech")).font(.aurea(size: 13))
+                        ForEach(model.layers.filter { $0.kind == 1 || $0.kind == 3 }) { layer in
+                            CaptionAction(label: layer.name) {
+                                model.selection = [layer.id]
+                                model.engine.selectLayers([NSNumber(value: layer.id)])
+                                model.refreshModel(force: true)
+                            }
+                        }
+                    } else { controls }
                     ForEach(0..<((words.count + 23) / 24), id: \.self) { chunk in
                         transcriptChunk(chunk)
                     }

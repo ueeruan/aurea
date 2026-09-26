@@ -922,4 +922,5 @@ untuk mengedit kurvanya.</string>
     <string name="am_import_done_skipped">%1$d efek diimpor, %2$d tanpa padanan dilewati (“%3$s”)</string>
     <string name="am_import_failed">Gagal mengimpor: %1$s</string>
     <string name="am_import_nothing">tidak ada efek yang punya padanan di Aurea</string>
+    <string name="world_box_lights">Luzes flutuantes</string>
 </resources>

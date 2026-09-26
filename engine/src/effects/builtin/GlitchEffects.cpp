@@ -549,11 +549,7 @@ public:
         p.add_float("step", "Passo", 1.0f, 1.0f, 16.0f, kParamAnimatable | kParamPixels, "px");
     }
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(kLength) < 0.005f; }
-    f32 input_margin(const EffectEval& e) const noexcept override {
-        // A ordenação lê a linha inteira na direção escolhida.
-        const f32 reach = e.f(kLength) * 96.0f * e.f(kStep);
-        return std::min(reach, 4096.0f);
-    }
+    f32 input_margin(const EffectEval&) const noexcept override { return 0; }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kThresholdLow] = ParamValue::scalar(48.0f);
         v[kThresholdHigh] = ParamValue::scalar(100.0f);
@@ -562,15 +558,9 @@ public:
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
-        const f32 reach = std::min(e.f(kLength) * 96.0f * e.f(kStep), 4096.0f);
-        const Rect region = spread_region(input.region, reach, reach, e.placement, margin);
-        u32 w = 0, h = 0;
-        ctx.region_size(region, input.texel_scale_x(), w, h);
-
-        EffectUniforms u;
-        u.uvMap = EffectBuildContext::uv_map(region, input.region);
-        u.texel = Vec4{region.w > 0.0f ? 1.0f / region.w : 0.0f, region.h > 0.0f ? 1.0f / region.h : 0.0f,
-                       input.texel_scale_x(), input.texel_scale_y()};
+        const Rect region=input.region;
+        const u32 w=input.width, h=input.height;
+        EffectUniforms u=base_uniforms(input);
         u.p0 = Vec4{e.f(kThresholdLow) / 100.0f, e.f(kThresholdHigh) / 100.0f, e.f(kLength) / 100.0f,
                     e.f(kRandomness) / 100.0f};
         u.p1 = Vec4{static_cast<f32>(e.e(kDirection)), e.b(kReverse) ? 1.0f : 0.0f,

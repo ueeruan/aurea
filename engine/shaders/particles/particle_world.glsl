@@ -1,7 +1,7 @@
 // Particle World mobile model. Stateless evaluation makes scrubbing, reverse
 // playback and export independent of the order in which frames are requested.
 // Native implementation; the proprietary CC random sequence is not reproduced.
-bool world_particle() { return p.emitShape.x >= 9.5 && p.emitShape.x < 12.5; }
+bool world_particle() { return p.emitShape.x >= 9.5 && p.emitShape.x < 13.5; }
 
 vec3 world_direction(inout uint seed) {
     float z = rnd(seed) * 2.0 - 1.0;
@@ -35,7 +35,7 @@ vec3 world_path(vec3 start, vec3 origin, vec3 velocity, vec3 acceleration,
     gravityShift = acceleration * fall;
     vec3 displacement = start-origin + velocity*travel;
     currentVelocity = velocity*decay + acceleration*travel;
-    if (p.emitShape.x > 11.5) {
+    if (p.emitShape.x > 11.5 && p.emitShape.x < 12.5) {
         float angle = age * 3.0;
         mat2 spin = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
         displacement.xz = spin * displacement.xz;

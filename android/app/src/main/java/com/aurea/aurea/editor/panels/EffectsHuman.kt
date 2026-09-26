@@ -364,7 +364,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 0 to ParamHuman(label = R.string.fx_intensidade, suffix = "px", decimals = 0),
                 1 to ParamHuman(label = R.string.fx_tamanho_ruido, suffix = "px", decimals = 0),
                 2 to ParamHuman(label = R.string.fx_complexidade, suffix = "oitavas", decimals = 0),
-                3 to ParamHuman(label = R.string.fx_evolucao, suffix = "px/q", decimals = 1),
+                3 to ParamHuman(label = R.string.fx_evolucao, suffix = "°", decimals = 1),
                 4 to ParamHuman(label = R.string.fx_deslocamento_x, suffix = "px", decimals = 0),
                 5 to ParamHuman(label = R.string.fx_deslocamento_y, suffix = "px", decimals = 0),
                 8 to ParamHuman(label = R.string.fx_bordas),
@@ -430,7 +430,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         EffectHuman(
             name = R.string.fx_name_deep_glow,
             keywords = "deep glow brilho profundo halo neon luz bloom",
-            principal = listOf(0, 1, 2, 3, 4),
+            principal = listOf(2, 13, 0, 14, 4),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_limite, decimals = 0),
                 1 to ParamHuman(label = R.string.fx_raio_nucleo, suffix = "px", decimals = 0),

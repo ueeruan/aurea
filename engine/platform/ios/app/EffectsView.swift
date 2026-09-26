@@ -399,9 +399,9 @@ struct EffectsView: View {
         var actions: [(String, () -> Void)] = []
         if effect.known {
             if effect.typeId == fxEffectTypeId("aurea.distort.turbulence") {
-                actions.append(("juan turb time 6", {
+                actions.append(("Preset Turbulência dinâmica", {
                     guard let layer = model.primarySelection, model.selectedLayer?.locked != true else { return }
-                    model.beginGesture("juan turb time 6")
+                    model.beginGesture("Preset Turbulência dinâmica")
                     for (param, value) in [(UInt32(0), Float(15)), (1, 15), (2, 1), (3, 0), (4, 0), (5, 0), (6, 0)] {
                         model.engine.setEffect(effect.effectId, forLayer: layer, paramIndex: param, value: value)
                     }

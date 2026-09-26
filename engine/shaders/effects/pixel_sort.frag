@@ -1,20 +1,6 @@
 #version 450
-// =============================================================================
-//  Aurea / shaders / effects / pixel_sort.frag
-//
-//  Ordenação de pixels (Fase 7.3 §33): o efeito que ficou famoso — a imagem
-//  vira riscos porque os pixels de uma linha são ordenados pela luz.
-//
-//  Ordenar de verdade num shader exigiria uma rede de ordenação com centenas
-//  de comparações. O que se faz (e o que os plugins fazem) é uma REDE DE
-//  ORDENAÇÃO DE PASSOS: cada amostra dá um passo na direção `+` ou `−` se o
-//  vizinho for maior, o que empurra os claros para um lado. `passos` controla
-//  quanto a linha anda; com poucos passos o risco fica curto, com muitos ele
-//  atravessa a imagem. É o mesmo resultado visual, com custo fixo.
-//
-//  O LIMIAR decide quem entra: abaixo dele o pixel fica onde está (é o que
-//  separa "a imagem derreteu" de "choveu listras").
-// =============================================================================
+// Bounded interval sorting. Unlike max-filter streaks, eligible colors are
+// permuted inside each threshold-delimited run; 64 samples maximum per tile.
 #include "../common/bindings.glsl"
 #include "common.glsl"
 
@@ -36,7 +22,12 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
 /// A chave de ordenação: o que decide quem é "maior".
 float key_of(vec3 c) {
     const int mode = int(p.p1.z + 0.5);
-    if (mode == 1) return aurea_luma(aurea_linear_to_srgb(max(c, vec3(0.0))));
+    if (mode == 1) {
+        float hi=max(c.r,max(c.g,c.b)), lo=min(c.r,min(c.g,c.b)), d=hi-lo;
+        if(d<1e-6) return 0.0;
+        float h=hi==c.r ? (c.g-c.b)/d : hi==c.g ? 2.0+(c.b-c.r)/d : 4.0+(c.r-c.g)/d;
+        return fract(h/6.0);
+    }
     if (mode == 2) return c.r;
     if (mode == 3) return c.g;
     if (mode == 4) return c.b;
@@ -44,50 +35,40 @@ float key_of(vec3 c) {
 }
 
 void main() {
-    const vec4 src = unpremultiply(texture(u_tex0, v_uv * p.uvMap.xy + p.uvMap.zw));
-
-    // O eixo do risco, em pixels da entrada.
-    const int dir = int(p.p1.x + 0.5);
-    vec2 axis;
-    if (dir == 0)      axis = vec2(1.0, 0.0);
-    else if (dir == 1) axis = vec2(0.0, 1.0);
-    else if (dir == 2) axis = vec2(0.7071, 0.7071);
-    else               axis = normalize(v_uv - vec2(0.5) + vec2(1e-6));
-    if (p.p1.y > 0.5) axis = -axis;
-
-    const vec2 stepUv = axis * p.texel.xy * max(p.p3.x, 1.0);
-    const float len = clamp(p.p0.z, 0.0, 1.0);
-    const float lo = p.p0.x, hi = p.p0.y;
-
-    // A ordem da amostra na rede. O embaralhamento (`aleatoriedade`) tira o
-    // aspecto de "pente" que uma rede perfeita deixa.
-    const uint salt = uint(p.p1.w) * 2654435761u;
-    const float jitter = (aurea_hash(uvec2(ivec2(floor(v_uv / max(p.texel.xy, vec2(1e-6)))))
-                                     ^ uvec2(salt, 0u))) * 2.0 - 1.0;
-
-    vec4 cur = src;
-    float curKey = key_of(cur.rgb);
-
-    for (int i = 0; i < 96; ++i) {
-        // A rede percorre a linha para trás e para frente: cada passo compara
-        // com o vizinho e troca se estiver fora de ordem.
-        const float t = float(i) / 96.0;
-        if (t > len) break;
-        const vec2 off = stepUv * (float(i) + 1.0) * (1.0 + jitter * p.p0.w * 3.0);
-        const vec4 other = unpremultiply(texture(u_tex0, v_uv * p.uvMap.xy + p.uvMap.zw + off));
-        const float k = key_of(other.rgb);
-
-        // Máscara: só os pixels dentro da faixa entram na ordenação. Fora
-        // dela, a imagem fica exatamente como estava.
-        const float inBand = (curKey >= lo && curKey <= hi) ? 1.0 : 0.0;
-        const float otherBand = (k >= lo && k <= hi) ? 1.0 : 0.0;
-        if (inBand > 0.5 && otherBand > 0.5 && k > curKey) {
-            cur = other;
-            curKey = k;
-        }
+    vec2 uv=v_uv*p.uvMap.xy+p.uvMap.zw;
+    vec4 original=texture(u_tex0,uv);
+    if(p.p0.z<=0.0 || original.a<=1e-6) { o_color=original; return; }
+    int direction=int(p.p1.x+.5);
+    vec2 axis=direction==0 ? vec2(1,0) : direction==1 ? vec2(0,1) : direction==2 ? normalize(vec2(1)) : normalize(uv-.5+vec2(1e-6));
+    vec2 pixel=uv/p.texel.xy;
+    float coordinate=dot(pixel,axis)/max(1.0,p.p3.x);
+    int span=clamp(int(2.0+62.0*p.p0.z),2,64);
+    int position=int(mod(floor(coordinate),float(span)));
+    vec2 base=uv-axis*float(position)*p.texel.xy*max(1.0,p.p3.x);
+    vec4 values[64]; float keys[64]; bool eligible[64];
+    for(int i=0;i<64;++i) {
+        vec2 q=base+axis*float(i)*p.texel.xy*max(1.0,p.p3.x);
+        vec4 c=texture(u_tex0,q); float k=key_of(unpremultiply(c).rgb);
+        bool inside=all(greaterThanEqual(q,vec2(0))) && all(lessThan(q,vec2(1)));
+        float threshold=p.p2.x>.5 ? key_of(unpremultiply(c).rgb) : aurea_luma(aurea_linear_to_srgb(max(unpremultiply(c).rgb,vec3(0))));
+        eligible[i]=i<span && inside && c.a>1e-6 && threshold>=p.p0.x && threshold<=p.p0.y;
+        // Random barriers split runs, never duplicate or discard their colors.
+        if(i!=0 && p.p0.w>0.0 && aurea_hash(uvec2(ivec2(floor(q/p.texel.xy))) ^ uvec2(uint(p.p1.w),0))<p.p0.w*.15) eligible[i]=false;
+        values[i]=c; keys[i]=k;
     }
-
-    // Fora da faixa, `cur` nunca foi trocado e continua sendo o próprio pixel:
-    // a máscara sai de graça, sem um segundo teste aqui.
-    o_color = premultiply(vec4(max(cur.rgb, vec3(0.0)), src.a));
+    if(!eligible[position]) { o_color=original; return; }
+    int first=position,last=position;
+    for(int n=1;n<64;++n) { int i=position-n; if(i<0 || !eligible[i]) break; first=i; }
+    for(int n=1;n<64;++n) { int i=position+n; if(i>=span || !eligible[i]) break; last=i; }
+    for(int i=first+1;i<=last;++i) {
+        vec4 c=values[i]; float k=keys[i]; int j=i;
+        for(int n=0;n<64;++n) {
+            if(j<=first) break;
+            bool move=p.p1.y>.5 ? keys[j-1]<k : keys[j-1]>k;
+            if(!move) break;
+            values[j]=values[j-1]; keys[j]=keys[j-1]; --j;
+        }
+        values[j]=c; keys[j]=k;
+    }
+    o_color=values[position];
 }

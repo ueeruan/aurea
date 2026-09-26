@@ -46,12 +46,8 @@ internal object EditorLayout {
             return EditorMetrics(0f, max(0f, totalHeight - TRANSPORT), 0f, TRANSPORT, 0f, 0f)
         }
         val ws = workspace(totalHeight)
-        // O palco tem tamanho próprio (não depende da proporção do projeto): a
-        // reserva de 90 + clamp(42 %, 250, 320) é o que deixa o painel caber
-        // num celular baixo; numa tela alta a fração de 50 % nem encosta.
-        val fraction = if (totalHeight <= 0f) PREVIEW_FRACTION_MAX
-        else min(PREVIEW_FRACTION_MAX, max(PREVIEW_MIN, ws - 90f - (ws * 0.42f).coerceIn(250f, 320f)) / totalHeight)
-        val preview = (totalHeight * fraction.coerceIn(0.14f, 0.60f))
+        // Stable preview height while floating add controls open and close.
+        val preview = (totalHeight * 0.54f)
             .coerceIn(PREVIEW_MIN, max(PREVIEW_MIN, ws - TIMELINE_MIN))
 
         val sheetFraction = when (content) {

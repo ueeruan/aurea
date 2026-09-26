@@ -32,7 +32,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
 
 void main() {
     const vec2 inUv = v_uv * p.uvMap.xy + p.uvMap.zw;
-    const vec4 center = unpremultiply(texture(u_tex0, inUv));
+    const vec4 center = texture(u_tex0, inUv);
 
     const int sides = int(p.p0.z + 0.5);
     const int ringSamples = int(clamp(p.p1.y, 4.0, 24.0));
@@ -60,10 +60,10 @@ void main() {
                 const float k = cos(mod(a, sect) - sect * 0.5);
                 dir *= 1.0 / max(k, 0.35);
             }
-            const vec4 s = unpremultiply(texture(u_tex0, inUv + dir * r * p.texel.xy));
+            const vec4 s = texture(u_tex0, inUv + dir * r * p.texel.xy);
             // Ganho das luzes: o que é claro pesa mais no desfoque — é o que
             // faz uma lâmpada virar uma bola de luz em vez de um borrão cinza.
-            const float luma = aurea_luma(aurea_linear_to_srgb(max(s.rgb, vec3(0.0))));
+            const float luma = aurea_luma(aurea_linear_to_srgb(max(unpremultiply(s).rgb, vec3(0.0))));
             const float w = 1.0 + boost * luma * luma;
             acc += s.rgb * w;
             alpha += s.a * w;
@@ -76,5 +76,5 @@ void main() {
     const float k = clamp(p.p1.w, 0.0, 1.0);
     vec3 outc = mix(center.rgb, acc, k);
     if (p.p3.x > 0.5) outc = acc;
-    o_color = premultiply(vec4(max(outc, vec3(0.0)), mix(center.a, alpha, k)));
+    o_color = vec4(max(outc, vec3(0.0)), p.p3.x > .5 ? alpha : mix(center.a, alpha, k));
 }

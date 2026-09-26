@@ -182,7 +182,7 @@ struct PreviewMetalView: UIViewRepresentable {
             let height = max(1, view.bounds.height)
             let compWidth = max(1, compositionSize.width)
             let compHeight = max(1, compositionSize.height)
-            return Float(max(compWidth / width, compHeight / height))
+            return Float(model.sceneEditor ? max(compWidth / width, compHeight / height) : min(compWidth / width, compHeight / height))
         }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
@@ -836,7 +836,7 @@ struct StageTouchPoint {
     var body: some View {
         Canvas { context, size in
             let cw = CGFloat(max(1, model.compositionWidth)), ch = CGFloat(max(1, model.compositionHeight))
-            let fit = min(size.width / cw, size.height / ch), ox = (size.width - cw * fit) / 2, oy = (size.height - ch * fit) / 2
+            let fit = max(size.width / cw, size.height / ch), ox = (size.width - cw * fit) / 2, oy = (size.height - ch * fit) / 2
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: CGFloat(x) * fit + ox, y: CGFloat(y) * fit + oy) }
             if let x = shell.snapX {
                 var p = Path(); p.move(to: screen(x, 0)); p.addLine(to: screen(x, Float(ch)))

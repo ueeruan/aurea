@@ -3530,7 +3530,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const f32 dispW = static_cast<f32>(swap ? fb.backbufferHeight : fb.backbufferWidth);
         const f32 dispH = static_cast<f32>(swap ? fb.backbufferWidth : fb.backbufferHeight);
         const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);
-        const f32 fit = std::min(dispW / compW, dispH / compH) * std::max(0.01f, settings.viewportZoom);
+        const f32 fit = (settings.sceneEditor.enabled ? std::min(dispW / compW, dispH / compH) : std::max(dispW / compW, dispH / compH)) * std::max(0.01f, settings.viewportZoom);
         const f32 ox = (dispW - compW * fit) * 0.5f + settings.viewportPan.x;
         const f32 oy = (dispH - compH * fit) * 0.5f + settings.viewportPan.y;
         Mat4 dispFromComp = Mat4::translation(Vec3{ox, oy, 0}) * Mat4::scale(Vec3{fit, fit, 1});

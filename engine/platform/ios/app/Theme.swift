@@ -907,14 +907,7 @@ enum EditorLayout {
                                  transport: transport, timeline: 0, sheet: 0)
         }
         let ws = workspace(total)
-        let fraction: CGFloat
-        if total <= 0 {
-            fraction = previewFractionMax
-        } else {
-            let reserve = min(max(250, ws * 0.42), 320)
-            fraction = min(previewFractionMax, max(previewMin, ws - 90 - reserve) / total)
-        }
-        let preview = (total * min(max(fraction, 0.14), 0.60))
+        let preview = (total * 0.54)
             .clamped(to: previewMin...(max(previewMin, ws - timelineMin)))
 
         var sheetFraction: CGFloat = 0

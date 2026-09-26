@@ -145,12 +145,13 @@ struct TransportView: View {
         Group {
         if model.stageManipulating { StageInfoBar() } else {
         GeometryReader { geometry in
-            let side = min(40, max(30, (geometry.size.width - 132) / 6))
+            let side = min(40, max(30, (geometry.size.width - 52) / 7))
+            let marked = model.markerFrames.contains(model.status.playhead)
             HStack(spacing: 0) {
                 ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), width: side, height: 46, enabled: model.status.canUndo != 0) { model.undo() }
                 ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), width: side, height: 46, enabled: model.status.canRedo != 0) { model.redo() }
                 HStack(spacing: 0) {
-                    ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t(model.markerFrames.isEmpty ? "editor_keyframe_anterior_segure_inicio" : "editor_marca_anterior_segure_inicio"), height: 46,
+                    ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t(model.markerFrames.isEmpty ? "editor_keyframe_anterior_segure_inicio" : "editor_marca_anterior_segure_inicio"), width: side, height: 46,
                                    onLongPress: { model.seek(toFrame: 0) }, action: { model.stepTransport(-1) })
                     ZStack(alignment: .bottomTrailing) {
                         ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
@@ -159,9 +160,14 @@ struct TransportView: View {
                                        onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
                         if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 8).padding(.bottom, 8).allowsHitTesting(false) }
                     }
-                    ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t(model.markerFrames.isEmpty ? "editor_proximo_keyframe_segure_fim" : "editor_proxima_marca_segure_fim"), height: 46,
+                    ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t(model.markerFrames.isEmpty ? "editor_proximo_keyframe_segure_fim" : "editor_proxima_marca_segure_fim"), width: side, height: 46,
                                    onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { model.stepTransport(1) })
                 }.frame(maxWidth: .infinity)
+                ShellBarButton(glyph: marked ? CupertinoGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
+                               description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"),
+                               width: side, height: 46, tint: marked ? AureaColors.accent : AureaColors.text,
+                               onLongPress: { model.editMarkerAtPlayhead() },
+                               action: { model.toggleMarkerAt(model.status.playhead) })
                 ShellBarButton(glyph: CupertinoGlyph.DocOnClipboard, description: AureaText.t("editor_copiar_colar"), width: side, height: 46) { if model.status.playing != 0 { model.playPause() }; shell.sheet = .copyPaste }
                 ShellBarButton(glyph: model.fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen,
                                description: AureaText.t(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia"), width: side, height: 46) { model.fullscreen.toggle(); model.invalidatePreview() }

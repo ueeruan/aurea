@@ -125,6 +125,8 @@ fun PanelContent(
             // `hasLayer` — abrir sem nada selecionado e o caso normal.
             if (panel == EditorPanel.AiVideo) {
                 AiVideoPanel(env)
+            } else if (panel == EditorPanel.Captions) {
+                CaptionsPanel(env)
             } else if (hasLayer) {
                 when (panel) {
                     EditorPanel.Transform -> TransformPanel(env, transformTab, onTab = { transformTab = it })

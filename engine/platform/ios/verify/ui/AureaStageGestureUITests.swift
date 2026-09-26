@@ -84,6 +84,30 @@ import XCTest
         XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 5), .completed)
     }
 
+    func testFloatingAddKeepsPreviewStableAndClosesAfterSelection() throws {
+        let before = try launch("layer-dock")
+        let frame = stage.frame
+        let add = app.buttons["Add layer"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
+        let category = app.buttons["aurea.add.category.0"].firstMatch
+        XCTAssertTrue(category.waitForExistence(timeout: 5))
+        XCTAssertEqual(stage.frame.height, frame.height, accuracy: 1)
+        let bubbles = XCTAttachment(screenshot: app.screenshot())
+        bubbles.name = "Floating add categories"; bubbles.lifetime = .keepAlways; self.add(bubbles)
+        category.tap()
+        let circle = app.buttons["Circle"].firstMatch
+        XCTAssertTrue(circle.waitForExistence(timeout: 5))
+        let dialog = XCTAttachment(screenshot: app.screenshot())
+        dialog.name = "Centered shape dialog"; dialog.lifetime = .keepAlways; self.add(dialog)
+        circle.tap()
+        _ = try awaitSnapshot("Shape added and editor responds") { $0.layerCount == before.layerCount + 1 }
+        XCTAssertFalse(category.exists)
+        XCTAssertFalse(circle.exists)
+        XCTAssertEqual(stage.frame.height, frame.height, accuracy: 1)
+        try undo()
+        _ = try awaitSnapshot("Undo added shape") { $0.layerCount == before.layerCount }
+    }
+
     func testShortTapDoesNotMoveScaleOrRotateLayer() throws {
         let before = try launch("transform")
         coordinate(bodyCenter(before)).tap()
@@ -306,7 +330,7 @@ import XCTest
 
     private func screenPoint(x: Double, y: Double, snapshot s: Snapshot) -> CGPoint {
         let frame = stage.frame
-        let fit = min(frame.width / CGFloat(s.compositionWidth), frame.height / CGFloat(s.compositionHeight))
+        let fit = max(frame.width / CGFloat(s.compositionWidth), frame.height / CGFloat(s.compositionHeight))
         return CGPoint(x: frame.midX + CGFloat(x - s.compositionWidth / 2) * fit,
                        y: frame.midY + CGFloat(y - s.compositionHeight / 2) * fit)
     }

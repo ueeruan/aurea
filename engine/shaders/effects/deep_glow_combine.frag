@@ -35,9 +35,16 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
 } p;
 
 void main() {
-    const vec4 src = unpremultiply(texture(u_tex0, v_uv));
-    const vec3 core = max(unpremultiply(texture(u_tex1, v_uv)).rgb, vec3(0.0));
-    const vec3 halo = max(unpremultiply(texture(u_tex2, v_uv)).rgb, vec3(0.0));
+    // Internal linear-light accumulation. Do not apply alpha division, tint,
+    // saturation or exposure while combining normalized optical lobes.
+    if (p.p3.x > .5) {
+        o_color = texture(u_tex1, v_uv) * p.p3.y + texture(u_tex2, v_uv) * p.p3.z;
+        return;
+    }
+    const vec4 original = texture(u_tex0, v_uv * p.uvMap.xy + p.uvMap.zw);
+    const vec4 src = unpremultiply(original);
+    const vec3 core = max(texture(u_tex1, v_uv).rgb, vec3(0.0));
+    const vec3 halo = max(texture(u_tex2, v_uv).rgb, vec3(0.0));
 
     const vec3 tint = max(p.color.rgb, vec3(0.0));
     // Tingir por PESO: multiplica a cor do halo mas mantém o que ele já tinha.
@@ -64,5 +71,10 @@ void main() {
         outc = mix(outc, vec3(peak), clamp((peak - lim) / lim, 0.0, 1.0));
     }
 
-    o_color = premultiply(vec4(max(p.p1.w > 0.5 ? outc - src.rgb : outc, vec3(0.0)), src.a));
+    // Emitted light must survive outside the opaque source (text/particles).
+    vec3 emitted = max(coreC * p.p0.x + haloC * p.p0.y, vec3(0));
+    float glowAlpha = clamp(max(emitted.r,max(emitted.g,emitted.b)),0.0,1.0);
+    float alpha = p.p1.w > .5 ? glowAlpha : src.a + glowAlpha*(1.0-src.a);
+    vec3 rgb = p.p1.w > .5 ? emitted : mix(emitted,outc,src.a);
+    o_color = vec4(max(rgb,vec3(0)),alpha);
 }

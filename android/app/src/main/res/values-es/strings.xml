@@ -923,4 +923,5 @@ para editar la curva.</string>
     <string name="am_import_done_skipped">%1$d efecto(s) importados, %2$d sin equivalente quedaron fuera (“%3$s”)</string>
     <string name="am_import_failed">No se pudo importar: %1$s</string>
     <string name="am_import_nothing">ningún efecto con equivalente en Aurea</string>
+    <string name="world_box_lights">Luzes flutuantes</string>
 </resources>

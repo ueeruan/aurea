@@ -209,7 +209,13 @@ private:
 /// composição onde a layer mora (onde vivem os fades e os keyframes de
 /// volume). `envShift` converte: amostra da raiz − envShift = amostra na
 /// composição da layer.
+struct AudioSend {
+    u32 kind = 0; // 0 reverb, 1 flanger, 2 echo
+    f32 wet = .3f, seconds = .12f, rate = .3f, decay = .5f;
+};
 struct AudioClip {
+    std::vector<AudioSend> sends; // independent parallel sends; dry signal retained
+
     u64 asset = 0;
     i64 start = 0;          ///< amostra da timeline raiz onde o clipe começa (inclusive)
     i64 end = 0;            ///< exclusive

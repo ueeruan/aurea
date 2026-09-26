@@ -83,7 +83,14 @@ struct ParticlesPanel: View {
             PanelNotice(AureaText.t("world_legacy"))
         } else {
         group(AureaText.t("particular_group_emitter"))
-        dim(AureaText.t("particular_radius"), PPP.emitterRadius, 1, 0, 2000, " px")
+        if value(PPP.emitterType) >= 13 {
+            dim(AureaText.t("particular_width"), PPP.emitterWidth, 10, 0, 8000, " px")
+            dim(AureaText.t("particular_height"), PPP.emitterHeight, 10, 0, 8000, " px")
+            dim(AureaText.t("particular_depth"), PPP.emitterDepth, 10, 0, 4000, " px")
+            dim(AureaText.t("particular_aux_count"), PPP.auxCount, 1, 0, 16, "")
+        } else {
+            dim(AureaText.t("particular_radius"), PPP.emitterRadius, 1, 0, 2000, " px")
+        }
         dim(AureaText.t("panel_particulas_segundo"), PPP.rate, 5, 0, 6000, "/s")
         dim(AureaText.t("panel_duracao_cada"), PPP.lifetime, 0.02, 0.05, 10, " s", decimals: 2)
         group(AureaText.t("particular_group_physics"))
@@ -186,7 +193,7 @@ struct ParticlesPanel: View {
         }
     }
 
-    private let presetKeys = ["world_explosive", "world_jet", "world_vortex"]
+    private let presetKeys = ["world_explosive", "world_jet", "world_vortex", "world_box_lights"]
 
     private func group(_ title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {

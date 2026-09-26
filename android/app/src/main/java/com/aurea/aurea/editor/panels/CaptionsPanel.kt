@@ -63,6 +63,17 @@ private val Languages = listOf<Pair<String?, String?>>(null to null, "pt" to "Po
 internal fun CaptionsPanel(env: PanelEnv) {
     val store = env.store
     val cap = store.captions
+    val sourceLayers = store.layers.filter { it.kind == 1 || it.kind == 3 }
+    val selectedCaption = remember(store.primary, store.curveRevision) {
+        cap.isCaption(store.primary)
+    }
+    if (store.primary == null || (store.detail?.kind != 1 && store.detail?.kind != 3 && !selectedCaption)) {
+        LazyColumn(Modifier.fillMaxSize().padding(18.dp)) {
+            item { Text(stringResource(R.string.sh_add_captions_need_speech)) }
+            sourceLayers.forEach { layer -> item { Action(layer.name) { store.select(layer.id) } } }
+        }
+        return
+    }
     val layerId = store.primary ?: return
     LaunchedEffect(layerId, store.curveRevision) { cap.open(layerId) }
     var language by remember { mutableStateOf<String?>(null) }

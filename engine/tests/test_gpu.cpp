@@ -708,6 +708,84 @@ AUREA_TEST(Gpu, GlowAddsLightOnlyAboveThreshold) {
     AUREA_CHECK_NEAR(dimg.v(32, 32).x, srgb_decode(60 / 255.0f), 0.002);
 }
 
+AUREA_TEST(Gpu, DeepGlowOpticalHaloSurvivesTransparencyAndExposure) {
+    AUREA_REQUIRE_GPU();
+    Scene s(256, 256);
+    s.comp->set_background(Color{0, 0, 0, 0});
+    const LayerId id = s.image(uniform_image(16, 16, 255, 255, 255), 128, 128);
+    auto& e = s.add_effect(id, effect_keys::kDeepGlow);
+    e.params[0].constant = ParamValue::scalar(0); // no threshold attenuation
+    e.params[2].constant = ParamValue::scalar(80);
+    e.params[3].constant = ParamValue::scalar(0); // isolate optical halo
+    e.params[4].constant = ParamValue::scalar(1);
+    e.params[10].constant = ParamValue::boolean(true); // glow only
+    const FloatImage base = s.render();
+    const Vec4 near = base.v(140, 128), far = base.v(154, 128);
+    AUREA_CHECK(near.x > .001f && near.w > 0);
+    AUREA_CHECK(far.x > .00001f && far.w > 0);
+    AUREA_CHECK(near.x > far.x);
+    // Symmetry verifies the expanded-region UV mapping (16px source in 176px output).
+    AUREA_CHECK_NEAR(base.v(115,128).x, near.x, .003f);
+    e.params[13].constant = ParamValue::scalar(1); // one stop doubles emitted light
+    const FloatImage exposed = s.render();
+    AUREA_CHECK_NEAR(exposed.v(140,128).x, near.x * 2, .003f);
+    e.params[4].constant = ParamValue::scalar(0);
+    const FloatImage dark = s.render();
+    AUREA_CHECK_NEAR(dark.mean().x, 0, .00001f);
+    // Scene::render reads the final display target, whose alpha is opaque.
+    for (f32 v : base.px) AUREA_CHECK(std::isfinite(v));
+}
+
+AUREA_TEST(Gpu, PixelSortOrdersRatherThanDuplicatesBrightPixels) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 16);
+    auto px=uniform_image(64,16,0,0,0);
+    for(u32 y=0;y<16;++y) for(u32 x=0;x<64;++x) {
+        const u8 gray=static_cast<u8>(32+((x*17)%64)*3);
+        for(u32 c=0;c<3;++c) px.rgba[(y*64+x)*4+c]=gray;
+    }
+    auto id=s.image(px,32,8);
+    auto& e=s.add_effect(id,effect_keys::kPixelSort);
+    e.params[0].constant=ParamValue::scalar(0);
+    e.params[1].constant=ParamValue::scalar(100);
+    e.params[2].constant=ParamValue::scalar(100);
+    e.params[3].constant=ParamValue::scalar(0);
+    const auto sorted=s.render();
+    for(u32 x=0;x<64;++x) AUREA_CHECK_NEAR(sorted.v(x,8).x,srgb_decode((32+x*3)/255.f),.003f);
+    e.params[5].constant=ParamValue::boolean(true);
+    const auto reversed=s.render();
+    for(u32 x=0;x<64;++x) AUREA_CHECK_NEAR(reversed.v(x,8).x,sorted.v(63-x,8).x,.003f);
+}
+
+AUREA_TEST(Gpu, LensBlurRetainsPremultipliedEnergyAtTransparentEdges) {
+    AUREA_REQUIRE_GPU();
+    Scene s(192,192);
+    auto id=s.image(uniform_image(16,16,255,255,255),96,96);
+    const auto original=s.render();
+    auto& e=s.add_effect(id,effect_keys::kLensBlur);
+    e.params[0].constant=ParamValue::scalar(18);
+    e.params[1].constant=ParamValue::scalar(0);
+    const auto blurred=s.render();
+    AUREA_CHECK(blurred.v(108,96).x>.001f);
+    AUREA_CHECK(blurred.v(96,96).x<.95f);
+    AUREA_CHECK_NEAR(blurred.mean().x,original.mean().x,original.mean().x*.08f);
+}
+
+AUREA_TEST(Gpu, HotspotsThresholdAndSaturationAreFunctional) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64,64);
+    auto id=s.image(uniform_image(64,64,240,100,40),32,32);
+    auto& e=s.add_effect(id,"aurea.light.hotspots");
+    e.params[0].constant=ParamValue::scalar(0);
+    e.params[1].constant=ParamValue::scalar(1);
+    e.params[3].constant=ParamValue::scalar(0);
+    auto gray=s.render().v(32,32);
+    AUREA_CHECK_NEAR(gray.x,gray.y,.001f); AUREA_CHECK_NEAR(gray.y,gray.z,.001f);
+    AUREA_CHECK(gray.x>.01f);
+    e.params[0].constant=ParamValue::scalar(100);
+    AUREA_CHECK_NEAR(s.render().mean().x,0,.0001f);
+}
+
 AUREA_TEST(Gpu, SharpenOvershootsAtEdges) {
     AUREA_REQUIRE_GPU();
     Scene s(64, 64);
@@ -4280,7 +4358,7 @@ AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
 
 AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
     AUREA_REQUIRE_GPU();
-    for (u32 preset : {10u, 11u, 12u}) {
+    for (u32 preset : {10u, 11u, 12u, 13u}) {
         Scene3DRig rig(640, 360);
         auto id = rig.e.add_particles(preset);
         AUREA_CHECK(id.ok());

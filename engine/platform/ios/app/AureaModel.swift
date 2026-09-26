@@ -1383,6 +1383,7 @@ final class AureaModel: ObservableObject {
     }
 
     func enterEditor() {
+        timelineOnlySelection = []
         panel = .none
         screen = .editor
     }

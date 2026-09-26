@@ -273,70 +273,70 @@ AUREA_TEST(Engine, HdriLegacyAndroidPathResolvesOnlyExistingContainedCompanion) 
 
 AUREA_TEST(Engine, LegacyAndroidModelSurvivesRepeatedProjectReopen) {
     for (const char* sample : {"constant-take.fbx", "model-triangle.glb"}) {
-    const std::string ext = std::filesystem::path(sample).extension().string();
-    HdriPathFixture fixture;
-    AUREA_CHECK(fixture.owns);
-    const auto docs = fixture.root / "files" / "projetos";
-    const auto model = fixture.root / "files" / "modelos" / ("model" + ext);
-    std::error_code error;
-    std::filesystem::create_directories(docs, error);
-    std::filesystem::create_directories(model.parent_path(), error);
-    std::filesystem::copy_file(std::filesystem::u8path(AUREA_TEST_DATA_DIR) / sample, model, error);
-    AUREA_CHECK(!error);
-    Engine e;
-    auto config = headless_config(); config.documentsDirectory = HdriPathFixture::utf8(docs);
-    AUREA_CHECK(e.initialize(config).ok());
-    AUREA_CHECK(e.new_project(320, 180, 30, "legacy model").ok());
-    ModelImport request; request.path = HdriPathFixture::utf8(model);
-    const auto imported = e.import_model(request);
-    AUREA_CHECK(imported.ok());
-    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
-    const auto asset = comp->layer(LayerId::unpack(*imported))->model.scene;
-    e.project()->asset(asset)->sourcePath = "/data/user/0/com.aurea.aurea/files/modelos/model" + ext;
-    const auto path = HdriPathFixture::utf8(docs / "model.aurea");
-    for (int i = 0; i < 3; ++i) {
+        const std::string ext = std::filesystem::path(sample).extension().string();
+        HdriPathFixture fixture;
+        AUREA_CHECK(fixture.owns);
+        const auto docs = fixture.root / "files" / "projetos";
+        const auto model = fixture.root / "files" / "modelos" / ("model" + ext);
+        std::error_code error;
+        std::filesystem::create_directories(docs, error);
+        std::filesystem::create_directories(model.parent_path(), error);
+        std::filesystem::copy_file(std::filesystem::u8path(AUREA_TEST_DATA_DIR) / sample, model, error);
+        AUREA_CHECK(!error);
+        Engine e;
+        auto config = headless_config(); config.documentsDirectory = HdriPathFixture::utf8(docs);
+        AUREA_CHECK(e.initialize(config).ok());
+        AUREA_CHECK(e.new_project(320, 180, 30, "legacy model").ok());
+        ModelImport request; request.path = HdriPathFixture::utf8(model);
+        const auto imported = e.import_model(request);
+        AUREA_CHECK(imported.ok());
+        auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        const auto asset = comp->layer(LayerId::unpack(*imported))->model.scene;
+        e.project()->asset(asset)->sourcePath = "/data/user/0/com.aurea.aurea/files/modelos/model" + ext;
+        const auto path = HdriPathFixture::utf8(docs / "model.aurea");
+        for (int i = 0; i < 3; ++i) {
+            AUREA_CHECK(e.save_project(path.c_str()).ok());
+            AUREA_CHECK(e.load_project(path.c_str()).ok());
+            AUREA_CHECK_EQ(e.last_load_missing_assets(), 0u);
+            AUREA_CHECK(e.model_asset(asset.pack()) != nullptr);
+        }
+        // New imports live inside the project root and serialize portable paths.
+        const auto portable = docs / "modelos" / ("new" + ext);
+        std::filesystem::create_directories(portable.parent_path(), error);
+        std::filesystem::copy_file(model, portable, error);
+        AUREA_CHECK(!error);
+        request.path = HdriPathFixture::utf8(portable);
+        const auto added = e.import_model(request);
+        AUREA_CHECK(added.ok());
+        comp = e.project()->timeline().composition(e.project()->timeline().current());
+        const auto newAsset = comp->layer(LayerId::unpack(*added))->model.scene;
+        AUREA_CHECK_EQ(e.project()->asset(newAsset)->sourcePath, std::string("docs:modelos/new") + ext);
         AUREA_CHECK(e.save_project(path.c_str()).ok());
         AUREA_CHECK(e.load_project(path.c_str()).ok());
         AUREA_CHECK_EQ(e.last_load_missing_assets(), 0u);
-        AUREA_CHECK(e.model_asset(asset.pack()) != nullptr);
-    }
-    // New imports live inside the project root and serialize portable paths.
-    const auto portable = docs / "modelos" / ("new" + ext);
-    std::filesystem::create_directories(portable.parent_path(), error);
-    std::filesystem::copy_file(model, portable, error);
-    AUREA_CHECK(!error);
-    request.path = HdriPathFixture::utf8(portable);
-    const auto added = e.import_model(request);
-    AUREA_CHECK(added.ok());
-    comp = e.project()->timeline().composition(e.project()->timeline().current());
-    const auto newAsset = comp->layer(LayerId::unpack(*added))->model.scene;
-    AUREA_CHECK_EQ(e.project()->asset(newAsset)->sourcePath, std::string("docs:modelos/new") + ext);
-    AUREA_CHECK(e.save_project(path.c_str()).ok());
-    AUREA_CHECK(e.load_project(path.c_str()).ok());
-    AUREA_CHECK_EQ(e.last_load_missing_assets(), 0u);
-    AUREA_CHECK(e.model_asset(newAsset.pack()) != nullptr);
-    e.shutdown();
-    // iOS can relocate Documents after reinstall/restore. The same serialized
-    // project must reopen with its companion models and no original sandbox.
-    const auto relocated = fixture.root / "restored" / "Documents";
-    std::filesystem::create_directories(relocated / "modelos", error);
-    std::filesystem::copy_file(model, relocated / "modelos" / ("model" + ext), error);
-    std::filesystem::copy_file(portable, relocated / "modelos" / ("new" + ext), error);
-    const auto restoredPath = HdriPathFixture::utf8(relocated / "model.aurea");
-    std::filesystem::copy_file(std::filesystem::u8path(path), std::filesystem::u8path(restoredPath), error);
-    AUREA_CHECK(!error);
-    std::filesystem::rename(fixture.root / "files", fixture.root / "old-unavailable", error);
-    AUREA_CHECK(!error);
-    config.documentsDirectory = HdriPathFixture::utf8(relocated);
-    AUREA_CHECK(e.initialize(config).ok());
-    for (int i = 0; i < 2; ++i) {
-        AUREA_CHECK(e.load_project(restoredPath.c_str()).ok());
-        AUREA_CHECK_EQ(e.last_load_missing_assets(), 0u);
-        AUREA_CHECK(e.model_asset(asset.pack()) != nullptr);
         AUREA_CHECK(e.model_asset(newAsset.pack()) != nullptr);
-        AUREA_CHECK(e.save_project(restoredPath.c_str()).ok());
-    }
-    e.shutdown();
+        e.shutdown();
+        // iOS can relocate Documents after reinstall/restore. The same serialized
+        // project must reopen with its companion models and no original sandbox.
+        const auto relocated = fixture.root / "restored" / "Documents";
+        std::filesystem::create_directories(relocated / "modelos", error);
+        std::filesystem::copy_file(model, relocated / "modelos" / ("model" + ext), error);
+        std::filesystem::copy_file(portable, relocated / "modelos" / ("new" + ext), error);
+        const auto restoredPath = HdriPathFixture::utf8(relocated / "model.aurea");
+        std::filesystem::copy_file(std::filesystem::u8path(path), std::filesystem::u8path(restoredPath), error);
+        AUREA_CHECK(!error);
+        std::filesystem::rename(fixture.root / "files", fixture.root / "old-unavailable", error);
+        AUREA_CHECK(!error);
+        config.documentsDirectory = HdriPathFixture::utf8(relocated);
+        AUREA_CHECK(e.initialize(config).ok());
+        for (int i = 0; i < 2; ++i) {
+            AUREA_CHECK(e.load_project(restoredPath.c_str()).ok());
+            AUREA_CHECK_EQ(e.last_load_missing_assets(), 0u);
+            AUREA_CHECK(e.model_asset(asset.pack()) != nullptr);
+            AUREA_CHECK(e.model_asset(newAsset.pack()) != nullptr);
+            AUREA_CHECK(e.save_project(restoredPath.c_str()).ok());
+        }
+        e.shutdown();
     }
 }
 

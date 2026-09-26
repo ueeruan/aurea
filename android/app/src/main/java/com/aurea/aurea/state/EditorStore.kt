@@ -3909,7 +3909,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /**
      * Modelo 3D (glTF/GLB, FBX ou OBJ) do seletor de arquivos. O arquivo é COPIADO para o
-     * sandbox do app (`files/modelos/<hash>.glb`): a permissão de uma URI
+     * sandbox do app (`files/projetos/modelos/<hash>.glb`): a permissão de uma URI
      * `content://` pode sumir, e o projeto guarda só o caminho relativo — o
      * mesmo .aurea abre no Android e no iOS. Dois imports do mesmo arquivo
      * reaproveitam a cópia (hash do conteúdo).
@@ -4080,6 +4080,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun enterEditor() {
+        timelineOnlySelection = emptySet()
         selection = emptySet()
         detail = null
         effects = emptyList()

@@ -20,6 +20,42 @@ Composition make_comp(u32 w = 1920, u32 h = 1080, f64 fps = 60.0) {
 }
 } // namespace
 
+AUREA_TEST(Composition, ResizeFitsAnimatedHierarchyWithoutScalingChildrenTwice) {
+    Composition c = make_comp(1280, 720, 30);
+    const auto root = c.add_layer(LayerKind::Null, "root");
+    const auto child = c.add_layer(LayerKind::Video, "video");
+    auto* p = c.layer(root);
+    p->transform.position = Vec3{640, 360, 0};
+    auto& x = p->tracks.get_or_create(TrackProperty::PositionX);
+    x.set(FrameIndex{0}, 640); x.set(FrameIndex{30}, 960);
+    x.keys[0].tangentOut = 40;
+    p->tracks.get_or_create(TrackProperty::ScaleX).set(FrameIndex{0}, 1);
+    auto* v = c.layer(child); v->parent = root;
+    v->transform.position = Vec3{120, 80, 0};
+    v->transform.scale = Vec3{0.5f, 0.5f, 1};
+    const auto snapshot = c.clone();
+    c.resize_content(640, 360);
+    AUREA_CHECK_EQ(c.width(), 640u);
+    AUREA_CHECK_NEAR(p->transform.position.x, 320, 0.001f);
+    AUREA_CHECK_NEAR(p->transform.scale.x, 0.5f, 0.001f);
+    AUREA_CHECK_NEAR(p->tracks.find(TrackProperty::PositionX)->sample(FrameIndex{15}), 400, 0.001f);
+    AUREA_CHECK_NEAR(p->tracks.find(TrackProperty::PositionX)->keys[0].tangentOut, 20, 0.001f);
+    AUREA_CHECK_NEAR(p->tracks.find(TrackProperty::ScaleX)->sample(FrameIndex{0}), 0.5f, 0.001f);
+    AUREA_CHECK_NEAR(v->transform.position.x, 120, 0.001f);
+    AUREA_CHECK_NEAR(v->transform.scale.x, 0.5f, 0.001f);
+    c.resize_content(1280, 720);
+    AUREA_CHECK_NEAR(p->transform.position.x, 640, 0.001f);
+    AUREA_CHECK_NEAR(p->transform.scale.x, 1, 0.001f);
+    c.resize_content(720, 1280);
+    AUREA_CHECK_NEAR(p->transform.position.x, 360, 0.001f);
+    AUREA_CHECK_NEAR(p->transform.position.y, 640, 0.001f);
+    AUREA_CHECK_NEAR(p->transform.scale.x, p->transform.scale.y, 0.001f);
+    c.restore_from(*snapshot);
+    AUREA_CHECK_EQ(c.width(), 1280u);
+    AUREA_CHECK_NEAR(c.layer(root)->tracks.find(TrackProperty::PositionX)->sample(FrameIndex{15}), 800, 0.001f);
+    AUREA_CHECK_EQ(c.layer(child)->parent, root);
+}
+
 AUREA_TEST(Composition, AddLayerAppendsToOrder) {
     Composition c = make_comp();
     const LayerId a = c.add_layer(LayerKind::Video, "A");

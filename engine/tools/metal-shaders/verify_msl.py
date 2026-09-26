@@ -5,9 +5,9 @@ import sys
 
 root = Path(sys.argv[1])
 blobs = sorted(root.rglob('*.mslblob'))
-# Halation adds extraction and composition passes to the existing shader set.
-if len(blobs) != 66:
-    raise SystemExit(f'Expected 66 Metal shaders, found {len(blobs)}')
+# Wipe, optical effects and sampled box/directional blur add three passes.
+if len(blobs) != 69:
+    raise SystemExit(f'Expected 69 Metal shaders, found {len(blobs)}')
 
 failures = 0
 for blob in blobs:

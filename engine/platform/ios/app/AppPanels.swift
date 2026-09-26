@@ -173,6 +173,22 @@ struct ProjectSettingsPanel: View {
                             settingLine("editor_quadros_segundo") {
                                 dropdown(homeFormatFps(model.compositionFps).replacingOccurrences(of: ".", with: ",") + " fps", key: "fps")
                             }
+                            settingLine("editor_duracao") {
+                                Button {
+                                    model.numericKeypad = KeypadRequest(title: AureaText.t("editor_duracao"),
+                                        value: Float(Double(model.compositionDuration) / model.compositionFps), unit: "s",
+                                        min: Float(1 / model.compositionFps), max: 86400, decimals: 3, onValue: { seconds in
+                                            let frames = max(1, Int64((Double(seconds) * model.compositionFps).rounded()))
+                                            model.mutate { $0.setComposition(id, duration: frames) }
+                                            model.refreshModel(force: true)
+                                        })
+                                } label: {
+                                    Text(String(format: "%.3f s", Double(model.compositionDuration) / model.compositionFps))
+                                        .font(.aurea(size: 15, weight: .semibold).monospacedDigit())
+                                        .frame(maxWidth: .infinity).frame(height: 46)
+                                        .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+                                }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_duracao"))
+                            }
                             settingLine("editor_plano_fundo") {
                                 dropdown(backgroundName, key: "bg", swatch: Color(.sRGB, red: Double(background[0]), green: Double(background[1]), blue: Double(background[2]), opacity: 1))
                             }
@@ -180,7 +196,7 @@ struct ProjectSettingsPanel: View {
                         }.padding(.bottom, 12)
                     }
                 }
-                .frame(height: min(bounds.size.height * 0.7, free ? 378 : 320))
+                .frame(height: min(bounds.size.height * 0.7, free ? 436 : 378))
                 .frame(maxWidth: .infinity).background(AureaColors.editorPanel)
                 .clipShape(TopCorners())
             }

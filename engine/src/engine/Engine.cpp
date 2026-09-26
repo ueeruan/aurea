@@ -7651,6 +7651,16 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.layer_ref.layer);
             if (!l) return Errc::NotFound;
             if (cmd.layer_range.end.value <= cmd.layer_range.start.value) return Errc::InvalidArgument;
+            const auto extend_duration = [&] {
+                if (!comp) return;
+                i64 end = comp->duration().value;
+                comp->layers().for_each([&](LayerId, const Layer& item) { end = std::max(end, item.end.value); });
+                if (end > comp->duration().value) {
+                    comp->set_duration(FrameIndex{end});
+                    playback_.configure(comp->fps(), comp->duration());
+                    sync_timeline();
+                }
+            };
             if (comp && comp->edit_mode()) {
                 // Modo Edição (ímã): aparar não abre nem sobrepõe — quem vem
                 // depois anda junto. Mover (início e fim juntos) fica livre.
@@ -7661,6 +7671,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     l->end = cmd.layer_range.end;
                     if (cmd.layer_range.setOffset) l->offset = cmd.layer_range.offset;
                     comp->shift_from(FrameIndex{oldEnd}, de, self);
+                    extend_duration();
                     return OkStatus;
                 }
                 if (ds != 0 && de == 0) {
@@ -7672,12 +7683,14 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     l->end = FrameIndex{oldStart + len};
                     if (cmd.layer_range.setOffset) l->offset = cmd.layer_range.offset;
                     comp->shift_from(FrameIndex{oldEnd}, -ds, self);
+                    extend_duration();
                     return OkStatus;
                 }
             }
             l->start = cmd.layer_range.start;
             l->end = cmd.layer_range.end;
             if (cmd.layer_range.setOffset) l->offset = cmd.layer_range.offset;
+            extend_duration();
             return OkStatus;
         }
 
@@ -8423,7 +8436,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 || std::min(cmd.comp_size.width, cmd.comp_size.height) > capShort) {
                 return Errc::NotSupported;
             }
-            c->set_size(cmd.comp_size.width, cmd.comp_size.height);
+            c->resize_content(cmd.comp_size.width, cmd.comp_size.height);
             if (c == comp) adapt().configure(c->width(), c->height(), static_cast<f32>(c->fps()));
             return OkStatus;
         }

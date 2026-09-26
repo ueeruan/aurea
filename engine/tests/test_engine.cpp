@@ -703,6 +703,57 @@ AUREA_TEST(Engine, PlayPauseControlsClock) {
     e.shutdown();
 }
 
+AUREA_TEST(Engine, ExtendingFiveSecondClipExtendsPlaybackAndUndoRestoresBoth) {
+    for (bool ripple : {false, true}) {
+        Engine e;
+        AUREA_CHECK(e.initialize(headless_config()).ok());
+        AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+        auto& timeline = e.project()->timeline();
+        auto* c = timeline.composition(timeline.current());
+        Command duration; duration.type = CommandType::CompositionSetDuration;
+        duration.comp_duration.comp = timeline.current(); duration.comp_duration.duration = FrameIndex{150};
+        AUREA_CHECK(e.apply_command(duration).ok());
+        const auto id = c->add_layer(LayerKind::Shape, "five seconds");
+        c->set_edit_mode(ripple);
+        Command trim; trim.type = CommandType::LayerSetTimeRange;
+        trim.layer_range.layer = id; trim.layer_range.start = FrameIndex{0}; trim.layer_range.end = FrameIndex{900};
+        AUREA_CHECK(e.apply_command(trim).ok());
+        AUREA_CHECK_EQ(e.read_status().duration.value, 900);
+        Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{600}, 30);
+        AUREA_CHECK(e.apply_command(seek).ok());
+        AUREA_CHECK_EQ(e.read_status().playhead.value, 600);
+        Command undo; undo.type = CommandType::Undo;
+        AUREA_CHECK(e.apply_command(undo).ok());
+        c = timeline.composition(timeline.current());
+        AUREA_CHECK_EQ(c->duration().value, 150);
+        AUREA_CHECK_EQ(c->layer(id)->end.value, 150);
+        e.shutdown();
+    }
+}
+
+AUREA_TEST(Engine, CompositionResolutionKeepsVideoFramingAndUndo) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30, nullptr).ok());
+    auto& timeline = e.project()->timeline();
+    auto* c = timeline.composition(timeline.current());
+    const auto id = c->add_layer(LayerKind::Video, "video");
+    c->layer(id)->transform.position = Vec3{640, 360, 0};
+    c->layer(id)->transform.scale = Vec3{0.5f, 0.5f, 1};
+    Command size; size.type = CommandType::CompositionSetSize;
+    size.comp_size.comp = timeline.current(); size.comp_size.width = 640; size.comp_size.height = 360;
+    AUREA_CHECK(e.apply_command(size).ok());
+    AUREA_CHECK_NEAR(c->layer(id)->transform.position.x / c->width(), 0.5f, 0.001f);
+    AUREA_CHECK_NEAR(c->layer(id)->transform.scale.x, 0.25f, 0.001f);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    c = timeline.composition(timeline.current());
+    AUREA_CHECK_EQ(c->width(), 1280u);
+    AUREA_CHECK_NEAR(c->layer(id)->transform.position.x, 640, 0.001f);
+    AUREA_CHECK_NEAR(c->layer(id)->transform.scale.x, 0.5f, 0.001f);
+    e.shutdown();
+}
+
 AUREA_TEST(Engine, CompositionSizeBeyondDeviceIsRefused) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

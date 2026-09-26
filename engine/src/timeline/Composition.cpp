@@ -49,6 +49,45 @@ const char* default_layer_noun(LayerKind kind) noexcept {
 
 } // namespace
 
+void Composition::resize_content(u32 w, u32 h) noexcept {
+    if (!w || !h || (w == width_ && h == height_)) return;
+    const f32 k = std::min(static_cast<f32>(w) / width_, static_cast<f32>(h) / height_);
+    const f32 dx = (static_cast<f32>(w) - width_ * k) * 0.5f;
+    const f32 dy = (static_cast<f32>(h) - height_ * k) * 0.5f;
+    layers_.for_each([&](LayerId, Layer& l) {
+        // Descendants inherit the root's scale; scaling them again compounds it.
+        if (l.parent.valid() && layer(l.parent)) return;
+        l.transform.position = Vec3{l.transform.position.x * k + dx,
+                                    l.transform.position.y * k + dy, l.transform.position.z * k};
+        // Content Z is stored relative to X by layer_world_3d; cameras and
+        // lights store an absolute Z scale instead.
+        const bool absoluteZ = l.kind == LayerKind::Camera || l.kind == LayerKind::Light;
+        l.transform.scale = Vec3{l.transform.scale.x * k, l.transform.scale.y * k,
+                                l.transform.scale.z * (absoluteZ ? k : 1.0f)};
+        for (u32 i = 0; i < l.tracks.size(); ++i) {
+            Track& t = l.tracks.at(i);
+            const auto p = t.property;
+            if (p != TrackProperty::PositionX && p != TrackProperty::PositionY && p != TrackProperty::PositionZ
+                && p != TrackProperty::ScaleX && p != TrackProperty::ScaleY && p != TrackProperty::ScaleZ) continue;
+            if (p == TrackProperty::ScaleZ && !absoluteZ) continue;
+            const f32 d = p == TrackProperty::PositionX ? dx : p == TrackProperty::PositionY ? dy : 0.0f;
+            t.staticValue = t.staticValue * k + d;
+            for (Keyframe& key : t.keys) {
+                key.value = key.value * k + d;
+                key.tangentIn *= k; key.tangentOut *= k;
+            }
+        }
+    });
+    layers_.for_each([&](LayerId, Layer& l) {
+        if (l.kind == LayerKind::Camera) {
+            l.camera.nearPlane *= k; l.camera.farPlane *= k; l.camera.focusDistance *= k;
+        }
+        if (l.kind == LayerKind::Light) l.light.range *= k;
+    });
+    set_size(w, h);
+    touch();
+}
+
 LayerId Composition::add_layer(LayerKind kind, std::string name) {
     if (layers_.count() >= kMaxLayerCount) {
         AUREA_LOG_ERROR("composicao '%s' atingiu o limite de %u camadas",

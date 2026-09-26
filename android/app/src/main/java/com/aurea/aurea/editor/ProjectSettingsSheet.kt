@@ -87,6 +87,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
         ?.let { stringResource(it) } ?: stringResource(R.string.editor_personalizada)
     val widthLabel = stringResource(R.string.editor_largura)
     val heightLabel = stringResource(R.string.editor_altura)
+    val durationLabel = stringResource(R.string.editor_duracao)
 
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var pickingBackground by remember { mutableStateOf(false) }
@@ -176,6 +177,15 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
                     PopupItem("$f fps", abs(fpsValue - f) < 0.01) { store.setCompositionFps(f.toDouble()) }
                 },
             )
+        }
+
+        SettingLine(durationLabel) {
+            val seconds = (comp?.durationFrames ?: p.durationFrames) / fpsValue
+            SizeBox(String.format(Locale.getDefault(), "%.3f s", seconds), Modifier.fillMaxWidth()) {
+                keypad = KeypadRequest(durationLabel, seconds.toFloat(), "s", (1.0 / fpsValue).toFloat(), 86400f, 3) { value ->
+                    store.setCompositionDuration(max(1, (value * fpsValue).roundToInt()))
+                }
+            }
         }
 
         SettingLine(stringResource(R.string.editor_plano_fundo)) {

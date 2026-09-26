@@ -2665,6 +2665,31 @@ struct ExportRig {
 
 } // namespace
 
+AUREA_TEST(Gpu, RepeatedProjectResizeKeepsVideoInsideExport) {
+    if (!gpu().ok) return;
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    ExportRig rig(cfg, 0);
+    set_duration(rig.e, 4);
+    for (u32 multiplier : {2u, 1u, 4u, 1u}) {
+        Command resize; resize.type = CommandType::CompositionSetSize;
+        resize.comp_size.comp = rig.e.project()->timeline().current();
+        resize.comp_size.width = 64 * multiplier; resize.comp_size.height = 36 * multiplier;
+        AUREA_CHECK(rig.e.apply_command(resize).ok());
+        std::vector<u8> rgba; u32 w = 0, h = 0;
+        AUREA_CHECK(rig.e.capture_frame_rgba(64 * multiplier, rgba, w, h).ok());
+        AUREA_CHECK_EQ(w, 64 * multiplier);
+        AUREA_CHECK_EQ(h, 36 * multiplier);
+    }
+    ExportSettings settings; settings.height = 36; settings.fps = 0; settings.dither = false;
+    AUREA_CHECK(rig.e.start_export(settings, "unused-resize.mp4").ok());
+    AUREA_CHECK(wait_export(rig.e));
+    AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Ok);
+    AUREA_CHECK_EQ(rig.cap.y.size(), static_cast<usize>(4));
+    if (rig.cap.y.size() < 4) return;
+    AUREA_CHECK(std::abs(static_cast<int>(rig.cap.y[3][4 * 64 + 4]) - 63) <= 2);
+    AUREA_CHECK(std::abs(static_cast<int>(rig.cap.y[3][30 * 64 + 60]) - 235) <= 2);
+}
+
 AUREA_TEST(Gpu, ExportWritesBt709LimitedNv12WithExactTimestamps) {
     Gpu& g = gpu();
     if (!g.ok) return;

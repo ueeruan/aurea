@@ -104,6 +104,10 @@ public:
     }
     void set_fps(f64 fps) noexcept { fps_ = fps > 0.0 ? fps : 30.0; ++formatRevision_; }
 
+    /// Resize the editing canvas and fit its existing content, keeping aspect
+    /// ratio, hierarchy and animated transforms. set_size remains the raw loader API.
+    void resize_content(u32 w, u32 h) noexcept;
+
     /// Troca a taxa PRESERVANDO os segundos: todo tempo guardado em frames
     /// (duração, início/fim/offset e fades das layers, keyframes e o remap)
     /// é reescalado. Sem isto, 30 → 60 fps deixaria o vídeo tocando na

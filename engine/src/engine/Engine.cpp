@@ -5439,7 +5439,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     l->threeD = true;
     l->model.scene = assetId;
-    l->model.animationClip = spec.animation ? 0 : -1;
+    l->model.animationClip = -1; // Text 3D moves only through user-authored layer transforms.
     // Letra com ~25 % da altura da composição; texto longo encolhe para caber
     // em 80 % da largura.
     const Vec3 ext = scene->bounds.extent();
@@ -5472,7 +5472,7 @@ Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept
     const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
     models_[assetId.pack()] = scene;
     l->model.scene = assetId;
-    l->model.animationClip = spec.animation ? 0 : -1;
+    l->model.animationClip = -1; // Text 3D moves only through user-authored layer transforms.
     l->model.pivot = scene->bounds.center();
     project_->mark_dirty();
     request_render();

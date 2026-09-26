@@ -25,7 +25,6 @@ struct Panel3DView: View {
     private var layerId: Int64 { model.primarySelection ?? 0 }
     private let presetKeys = ["pn_t3d_preset_chrome", "pn_t3d_preset_gold", "pn_t3d_preset_brushed",
                               "pn_t3d_preset_glossy", "pn_t3d_preset_matte", "pn_t3d_preset_neon"]
-    private let animationKeys = ["t3d_still", "t3d_wave", "t3d_rotate_x", "t3d_rotate_y", "t3d_rotate_z"]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,23 +78,6 @@ struct Panel3DView: View {
                 chip("t3d_import_font") {
                     finishEditing(); fontTarget = layerId; pickingFont = true
                 }
-            }
-            gap(12)
-            section("t3d_animate_letters")
-            horizontal {
-                ForEach(Array(animationKeys.enumerated()), id: \.offset) { item in
-                    chip(item.element, on: Int(number("animation")) == item.offset) {
-                        set3D("animation", value: Float(item.offset))
-                    }
-                }
-            }
-            if number("animation") != 0 {
-                textRuler("t3d_cycle", key: "animationDuration", step: 0.1, min: 0.2, max: 10,
-                          shown: "\(number("animationDuration"))s", gesture: "duracao das letras")
-                textRuler("t3d_stagger", key: "animationStagger", step: 0.01, min: 0, max: 1,
-                          shown: percent(number("animationStagger")), gesture: "intervalo das letras")
-                textRuler("t3d_amount", key: "animationAmount", step: 0.01, min: 0, max: 1,
-                          shown: percent(number("animationAmount")), gesture: "amplitude das letras")
             }
             gap(12)
             TextField("", text: Binding(get: { draft }, set: changeText), axis: .vertical)

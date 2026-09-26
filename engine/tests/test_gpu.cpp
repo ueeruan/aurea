@@ -1153,12 +1153,8 @@ AUREA_TEST(Gpu, Scene3DSkinnedModelAnimatesOnTheTimelineClock) {
     (void)write_png("scene3d_fox_t12.png", b);
 }
 
-/// As letras do texto 3D precisam se mexer com o relógio da timeline. O teste de
-/// unidade (`LettersKeepLayoutAndAnimateIndependentlyWithoutRetessellation`) só
-/// prova que a pose do ASSET muda com o tempo — ele não passa pela camada, pelo
-/// clipe escolhido nem pelo renderizador. Era aí que o beta tester via a animação
-/// "não funcionar": dados certos, quadro parado.
-AUREA_TEST(Gpu, Text3DLettersFollowTheTimelineClock) {
+/// Legacy text recipes must remain still until the user authors layer keys.
+AUREA_TEST(Gpu, Text3DOnlyMovesWithUserKeyframes) {
     AUREA_REQUIRE_GPU();
     auto seek = [](Scene3DRig& rig, i64 frame) {
         Command c;
@@ -1213,14 +1209,22 @@ AUREA_TEST(Gpu, Text3DLettersFollowTheTimelineClock) {
                     static_cast<unsigned>(pico), static_cast<unsigned long long>(mudou),
                     static_cast<unsigned long long>(voltou));
         AUREA_CHECK_MSG(na > 200, "texto tem de aparecer");
-        // Modo 0 é "parado": o quadro NÃO pode mudar com o tempo.
-        if (mode == 0) {
-            AUREA_CHECK(mudou == 0);
-        } else {
-            AUREA_CHECK_MSG(mudou > 200, "letra animada ficou parada no quadro");
-        }
+        AUREA_CHECK_MSG(mudou == 0, "texto 3D nao deve animar sozinho");
         // Voltar ao quadro 0 tem de devolver exatamente o mesmo quadro.
         AUREA_CHECK(voltou <= 2);
+        auto* project = rig.e.project();
+        auto* comp = project->timeline().composition(project->timeline().current());
+        auto* layer = comp->layer(LayerId::unpack(*id));
+        AUREA_CHECK_EQ(layer->model.animationClip, -1);
+        auto& x = layer->tracks.get_or_create(TrackProperty::PositionX);
+        (void)x.set(FrameIndex{0}, layer->transform.position.x);
+        (void)x.set(FrameIndex{4}, layer->transform.position.x + 45);
+        auto& y = layer->tracks.get_or_create(TrackProperty::RotationY);
+        (void)y.set(FrameIndex{0}, 0);
+        (void)y.set(FrameIndex{4}, 35);
+        seek(rig, 4);
+        AUREA_CHECK_MSG(diff_de(a, rig.capture(320)) > 200, "keyframes manuais devem mover texto 3D");
+
     }
 }
 

@@ -9,3 +9,7 @@ Os padrões foram extraídos do CC Particle World instalado no After Effects 202
 Controles visíveis: raio do emissor, partículas por segundo, duração, velocidade, gravidade, resistência, forma, tamanho inicial, tamanho final e opacidade. Posição é controlada pela transformação da camada. Duas cores definem nascimento e morte. Parâmetros numéricos continuam com keyframes e desfazer. Selecionar outro preset substitui também os keyframes de partículas, dentro de uma operação reversível.
 
 Validação: testes GPU dos três movimentos, seek reverso e salvar/reabrir; regressão dos sistemas de partículas existentes; compilação Android e compilação iOS/Metal. Fluidez em aparelhos físicos e equivalência visual com After Effects exigem aceitação adicional.
+
+## Texto 3D manual
+
+Removidos os controles de animação automática de onda e giros X/Y/Z nas duas plataformas. O gerador de texto não cria mais clipes internos, inclusive ao ler receitas antigas. Transformações e keyframes da camada continuam disponíveis. Os testes comparam quadros sem keyframes (idênticos) e com posição/rotação animadas manualmente (diferentes). Modelos GLB importados mantêm suas animações próprias.

@@ -230,21 +230,6 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
         confirmButton = { TextButton(onClick = { fontsOpen = false }) { Text(stringResource(R.string.t3d_close)) } },
     )
     Spacer(Modifier.height(12.dp))
-    SectionTitle(stringResource(R.string.t3d_animate_letters))
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(R.string.t3d_still, R.string.t3d_wave, R.string.t3d_rotate_x, R.string.t3d_rotate_y, R.string.t3d_rotate_z).forEachIndexed { mode, label ->
-            Chip(stringResource(label), on = info.animation == mode) { store.text3d?.let { store.setText3D(it.copy(animation = mode)) } }
-        }
-    }
-    if (info.animation != 0) {
-        T3DRuler(store, stringResource(R.string.t3d_cycle), .1f, .2f, 10f, info.animationDuration,
-            "${info.animationDuration}s", "duracao das letras") { v -> store.text3d?.let { store.setText3D(it.copy(animationDuration = v), lazy = true) } }
-        T3DRuler(store, stringResource(R.string.t3d_stagger), .01f, 0f, 1f, info.animationStagger,
-            "${(info.animationStagger * 100).roundToInt()}%", "intervalo das letras") { v -> store.text3d?.let { store.setText3D(it.copy(animationStagger = v), lazy = true) } }
-        T3DRuler(store, stringResource(R.string.t3d_amount), .01f, 0f, 1f, info.animationAmount,
-            "${(info.animationAmount * 100).roundToInt()}%", "amplitude das letras") { v -> store.text3d?.let { store.setText3D(it.copy(animationAmount = v), lazy = true) } }
-    }
-    Spacer(Modifier.height(12.dp))
     Box(
         Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
             .padding(horizontal = 12.dp, vertical = 10.dp),

@@ -59,6 +59,33 @@ AUREA_TEST(VideoSource, TightCacheDoesNotDecodeAndSeekForever) {
     source.stop();
 }
 
+AUREA_TEST(VideoSource, SingleFrameBudgetPlaybackDoesNotSeekForEveryFrame) {
+    for (int budgetKind = 0; budgetKind < 3; ++budgetKind) {
+        SyntheticConfig cfg;
+        auto decoder = std::make_unique<SyntheticDecoder>(cfg);
+        auto* raw = decoder.get();
+        MemoryManager memory;
+        VideoSource source(std::move(decoder), MediaPriority::Preview);
+        const u64 oneFrame = static_cast<u64>(cfg.width) * cfg.height * 3 / 2;
+        if (budgetKind == 0) source.cache().configure({1, 192ull * 1024 * 1024});
+        if (budgetKind == 1) source.cache().configure({7, oneFrame});
+        if (budgetKind == 2) {
+            memory.set_budget(MemoryClass::DecodedFrames, oneFrame);
+            source.cache().attach(&memory);
+        }
+        source.start();
+        for (i64 index = 30; index < 60; ++index) {
+            source.request({raw->pts_of(index), DecodeMode::Playback, 1, 1.f});
+            AUREA_CHECK(source.wait_for(raw->pts_of(index), 3000));
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        source.stop();
+        std::printf("budget=%d seeks=%u decoded=%u ", budgetKind, raw->seeks.load(), raw->delivered.load());
+        AUREA_CHECK(raw->seeks.load() <= 2);
+        AUREA_CHECK(raw->delivered.load() <= 35);
+    }
+}
+
 AUREA_TEST(DecodedFrameCache, KeepsDisplayFrameWhenSingleFrameExceedsBudget) {
     DecodedFrameCache cache;
     DecodedFrameCache::Config cfg;

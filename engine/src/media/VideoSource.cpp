@@ -202,7 +202,7 @@ void VideoSource::thread_main() noexcept {
                     return begin <= request_.targetUs && begin > low + half;
                 }
                 if (request_.direction == 0 || eos_) return false;   // congelado: só o alvo
-                const i64 ahead = frameUs_ * (request_.speed > 1.5f ? 4 : 3);
+                const i64 ahead = frameUs_ * std::min<u32>(request_.speed > 1.5f ? 4u : 3u, cache_.prefetch_capacity());
                 return cache_.contiguous_end(request_.targetUs, frameUs_) < request_.targetUs + ahead - half;
             };
             auto work_pending = [&] {
@@ -287,7 +287,7 @@ void VideoSource::thread_main() noexcept {
             // Congelado / time remap parado: só o alvo, exato.
             if (cache_.contains(req.targetUs, half)) continue;
         } else if (req.mode == DecodeMode::Playback) {
-            const i64 ahead = frameUs_ * (req.speed > 1.5f ? 4 : 3);
+            const i64 ahead = frameUs_ * std::min<u32>(req.speed > 1.5f ? 4u : 3u, cache_.prefetch_capacity());
             const i64 end = cache_.contiguous_end(req.targetUs, frameUs_);
             if (backend_->info().preciseFrameTiming) {
                 const bool haveTarget = cache_.contains(req.targetUs, half);
@@ -363,7 +363,7 @@ void VideoSource::thread_main() noexcept {
                     requestNs = requestTimeNs_;
                     need = nr.targetUs;
                     limit = (nr.mode == DecodeMode::Playback)
-                          ? nr.targetUs + frameUs_ * (nr.speed > 1.5f ? 4 : 3)
+                          ? nr.targetUs + frameUs_ * std::min<u32>(nr.speed > 1.5f ? 4u : 3u, cache_.prefetch_capacity())
                           : (nr.mode == DecodeMode::Scrub && nr.direction > 0 ? need + 2 * frameUs_ : need);
                     std::lock_guard<std::mutex> s(statsMutex_);
                     ++stats_.forwardRetargets;
@@ -404,8 +404,16 @@ void VideoSource::thread_main() noexcept {
                 }
                 stats_.endOfStream = eos;
             }
-            const bool coversLimit = frame && frame->covers(limit);
+            const i64 deliveredEnd = frame && frame->durationUs > 0 ? frame->ptsUs + frame->durationUs : pts;
             if (frame) deliver(std::move(frame), epoch);
+            // The first decoded frame reveals actual byte cost. Re-evaluate
+            // before decoding ahead so a one-frame budget never throws away
+            // future frames only to seek backwards for them on the next tick.
+            if (req.mode == DecodeMode::Playback && req.direction > 0) {
+                limit = req.targetUs + frameUs_ * std::min<u32>(
+                    req.speed > 1.5f ? 4u : 3u, cache_.prefetch_capacity());
+            }
+            const bool coversLimit = deliveredEnd > limit;
             if (eos) { eos_ = true; break; }
             if (backend_->info().preciseFrameTiming ? (coversLimit || pts > limit) : pts >= limit - half) break;
         }

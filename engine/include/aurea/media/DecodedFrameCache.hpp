@@ -57,6 +57,8 @@ public:
 
     void configure(const Config& c) noexcept;
     [[nodiscard]] Config config() const noexcept;
+    /// Number of future frames that can coexist with the current display frame.
+    [[nodiscard]] u32 prefetch_capacity() const noexcept;
 
     /// Liga ao orçamento do motor (categoria DecodedFrames). Idempotente;
     /// nulo desliga. Os bytes já guardados passam a contar na hora.

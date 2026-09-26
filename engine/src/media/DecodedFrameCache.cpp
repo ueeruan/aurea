@@ -25,6 +25,25 @@ DecodedFrameCache::Config DecodedFrameCache::config() const noexcept {
     return config_;
 }
 
+u32 DecodedFrameCache::prefetch_capacity() const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    u64 slots = config_.maxFrames;
+    if (!frames_.empty()) {
+        // A source has one decoded layout; use its measured retained size.
+        // Keep the display-frame exception even if one frame exceeds budget.
+        const u64 bytes = std::max<u64>(1, stats_.bytes / frames_.size());
+        slots = std::min<u64>(slots, std::max<u64>(1, config_.maxBytes / bytes));
+        if (memory_) {
+            const u64 budget = memory_->budget(MemoryClass::DecodedFrames);
+            const u64 used = memory_->used(MemoryClass::DecodedFrames);
+            const u64 others = used > stats_.bytes ? used - stats_.bytes : 0;
+            if (budget) slots = std::min<u64>(slots,
+                std::max<u64>(1, (budget > others ? budget - others : 0) / bytes));
+        }
+    }
+    return static_cast<u32>(slots > 0 ? slots - 1 : 0);
+}
+
 void DecodedFrameCache::attach(MemoryManager* memory) noexcept {
     MemoryManager* old = nullptr;
     {

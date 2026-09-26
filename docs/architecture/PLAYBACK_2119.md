@@ -15,7 +15,7 @@ Status: native/device validation in progress. This document does not certify phy
 
 Open the preview resolution menu and select AUREA RAW PLAYBACK TEST after importing video. It plays the first video source in the project at original resolution, with a neutral viewport and no proxies. The project is unchanged; export continues through the normal compositor.
 
-RAW bypasses scene preparation, transforms, effect plans, masks, text/glyphs, particles, temporal effects and multicomp composition. The GPU records only native-image/YUV color conversion and display output. Duplicate source PTS are held on screen rather than rendered repeatedly. VFR polling follows display cadence, not the file's average frame rate.
+RAW bypasses scene preparation, transforms, effect plans, masks, text/glyphs, particles, temporal effects and multicomp composition. The GPU records only native-image/YUV color conversion and display output. Duplicate source PTS are held on screen rather than rendered repeatedly. RAW scheduling follows source PTS intervals against the audio clock, independently of the composition FPS grid; display cadence is only the fallback polling deadline.
 
 Transport uses the same play/pause/seek/loop/lifecycle controls. Audio uses the source clip without effect sends or automation. Diagnostic transport rate uses normal varispeed semantics.
 
@@ -39,3 +39,37 @@ Fixtures are generated from owned FFmpeg test patterns and a 440 Hz AAC tone wit
 - Seek cancellation: old in-flight video frame rejected, new target delivered.
 - Initial Android emulator measurements exposed remaining repeated-frame/late-output work. Those initial rates are not release acceptance; repeat after the MediaCodec refactor and without concurrent compilation.
 - Physical iPhone/Samsung and final RAW/compositor matrix remain to be recorded. AVAssetReader does not expose hardware use for its decoder instance, so iOS acceleration is reported unknown rather than guessed.
+
+
+## Android emulator acceptance run (2026-09-26, commit 8a96ceea)
+
+Five 20-second owned pattern/AAC files ran through RAW, seek, pause/resume and the normal compositor. No simultaneous native compilation. The Android emulator uses gfxstream with CPU YUV planes because its advertised external-YUV path is known to sample incorrectly. These numbers do not represent physical-device zero-copy performance.
+
+| Source | RAW FPS / estimated drops (initial ~12 s) | Compositor FPS / estimated drops (~12 s) | Audio underruns, whole test |
+|---|---:|---:|---:|
+| H.264 720p30 | 30.01 / 5 | 29.64 / 9 | 0 |
+| H.264 1080p30 | 27.42 / 35 | 29.84 / 8 | 0 |
+| H.264 1080p60 | 6.86 / 689 | 21.94 / 445 | 1 |
+| HEVC 1080p30 | 26.17 / 61 | 29.88 / 9 | 0 |
+| H.264 VFR (30/60) | 15.61 / approximate 222 | 29.83 / approximate 196 | 0 |
+
+**Performance acceptance is not complete.** 1080p60 fails the requested real-time target. The original-resolution CPU upload path frequently takes 20-75 ms in gfxstream. RAW's late-frame behaviour also needs further investigation under this backpressure. A/V frame age reached 333 ms at the final 60 FPS compositor sample; do not describe that case as synchronized. The 30 FPS cases remained close to the audio clock, with no observed audio underrun; physical lip-sync has not been measured.
+
+At final compositor samples PSS was approximately 192-200 MiB. This short run cannot establish absence of long-term leaks. Maximum UI heartbeat gaps across import/start/play were 375-887 ms, so instant interaction is not certified.
+
+Native decoder-only fixtures passed exact PTS/duration, retained-frame ownership, seeks and suspend/resume: 90 B-frames fixture frames and 63 VFR frames. This standalone probe fell back from goldfish to c2.android.avc.decoder; the full app matrix reported goldfish hardware decoding. No hardware result is inferred from the standalone probe.
+
+Local evidence: `build/playback-matrix/*-android.jsonl`, `build/playback-matrix/android-summary.json`, `build/preview-bframes-new-decoder.log`, `build/preview-vfr-new-decoder.log`.
+
+## iOS build delivery
+
+Workflow: https://github.com/ueeruan/aurea/actions/runs/36260350168 . Build 2119 is an unsigned IPA for sideloading. Native compilation, bundle checks and Apple audio sample-rate conversion checks passed. Simulator playback results must be assessed separately from package validation.
+
+The simulator job completed successfully: 14 native UI tests, zero failures (343.95 seconds). This includes all five RAW media cases and the 30-second video/text/captions test, plus video move, timeline dragging, add menu, effects and undo regressions. These assertions check survival, progression and bounded short-run memory; they do not enforce a 30/60 FPS performance threshold. Physical iPhone/Samsung acceptance remains outstanding.
+
+
+## Follow-up 2120: one-frame cache seek loop
+
+A physical-iPhone screenshot reported 22.4 preview FPS, 24.9 ms decode, one retained frame and 75 seeks; its installed build has not been confirmed. A shared-core regression reproduced a related defect independently of that clip: a one-frame cache retained the current frame while decode-ahead advanced three frames and discarded them, forcing a backwards seek on the next forward playback request. Thirty requested frames caused 30 seeks and 120 delivered frames.
+
+Decode-ahead now respects measured frame size, local frame/byte limits and the remaining shared decoded-frame budget. The first retained frame triggers a capacity recheck. Normal cache capacity retains the existing prefetch window. Regression results for a frame-count limit, byte limit and shared-memory limit: each plays 30 frames with one seek and 30 delivered frames. All 18 VideoSource tests pass (603 checks). This is a reproduced/fixed code defect, not proof that all causes in the submitted iPhone clip are solved.

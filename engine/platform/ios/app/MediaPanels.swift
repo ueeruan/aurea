@@ -303,9 +303,8 @@ struct CaptionsPanel: View {
                         Text(AureaText.t("sh_add_captions_need_speech")).font(.aurea(size: 13))
                         ForEach(model.layers.filter { $0.kind == 1 || $0.kind == 3 }) { layer in
                             CaptionAction(label: layer.name) {
-                                model.selection = [layer.id]
-                                model.engine.selectLayers([NSNumber(value: layer.id)])
-                                model.refreshModel(force: true)
+                                model.select(layerId: layer.id)
+                                model.panel = .captions
                             }
                         }
                     } else { controls }

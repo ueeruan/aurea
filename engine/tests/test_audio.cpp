@@ -10,6 +10,7 @@
 #include "aurea/audio/Audio.hpp"
 #include "aurea/audio/PlanarOutput.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/Composition.hpp"
@@ -245,6 +246,37 @@ AUREA_TEST(Audio, MixerPlacesClipsWithEqualPowerFadesAndBalance) {
     f32 peak = 0.0f;
     for (f32 v : out) peak = std::max(peak, std::fabs(v));
     AUREA_CHECK(peak <= 1.0f && peak > 0.95f);
+}
+
+AUREA_TEST(Audio, RegisteredEffectsReachAudioSnapshotAndUndo) {
+    SyntheticFactory factory(audio_cfg(48000));
+    EngineConfig config=headless(); config.mediaFactory=&factory;
+    Engine e; AUREA_CHECK(e.initialize(config).ok());
+    AUREA_CHECK(e.new_project(64,36,30,nullptr).ok());
+    VideoImport vi; vi.sourcePath="s"; vi.displayName="s";
+    auto id=e.import_video(vi); AUREA_CHECK(id.ok()); if(!id.ok()) return;
+    const char* keys[]={"aurea.audio.reverb","aurea.audio.flanger","aurea.audio.echo"};
+    for(u32 kind=0;kind<3;++kind) {
+        Command cmd; cmd.type=CommandType::EffectAdd;
+        cmd.effect_add.layer=LayerId::unpack(*id); cmd.effect_add.effectType=effect_type_id(keys[kind]);
+        cmd.effect_add.index=kInvalidIndex;
+        AUREA_CHECK(e.apply_command(cmd).ok());
+    }
+    auto snapshot=[&] {
+        auto* comp=e.project()->timeline().composition(e.project()->timeline().current());
+        return audio::build_snapshot(*comp,*e.project(),nullptr,nullptr,nullptr);
+    };
+    auto snap=snapshot();
+    AUREA_CHECK_EQ(snap->clips.size(),static_cast<usize>(1));
+    if(snap->clips.empty()) return;
+    AUREA_CHECK_EQ(snap->clips[0].sends.size(),static_cast<usize>(3));
+    if(snap->clips[0].sends.size()==3) for(u32 i=0;i<3;++i) {
+        AUREA_CHECK_EQ(snap->clips[0].sends[i].kind,i);
+        AUREA_CHECK_NEAR(snap->clips[0].sends[i].wet,.3f,1e-6);
+        AUREA_CHECK_NEAR(snap->clips[0].sends[i].seconds,i==1?.003f:.12f,1e-6);
+    }
+    Command undo; undo.type=CommandType::Undo; AUREA_CHECK(e.apply_command(undo).ok());
+    snap=snapshot(); AUREA_CHECK_EQ(snap->clips[0].sends.size(),static_cast<usize>(2));
 }
 
 AUREA_TEST(Audio, EffectSendsAreSeekableAndIndependentOfCallbackSize) {

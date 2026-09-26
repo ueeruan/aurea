@@ -26,9 +26,11 @@
 - Android `compileReleaseKotlin`: passou.
 - Contratos Swift/ponte, projeto Xcode, tipos de parâmetros e recursos compartilhados: passaram.
 - GPU: halo óptico, exposição, ordenação de pixels, Hotspots, determinismo/seek/reabertura dos quatro presets Particle World, limites das camadas: passaram.
-- Áudio: 17 testes passaram, incluindo comparação entre callbacks completos e fragmentados nos três efeitos.
+- Áudio: 17 testes passaram, incluindo comparação entre callbacks completos e fragmentados nos três efeitos; teste adicional de integração adicionar/desfazer no snapshot passou.
 - Texto: 60 testes passaram. Presets: 14 testes passaram. EffectGraph: 13 testes passaram.
-- A validação do IPA e os testes nativos do simulador serão registrados após a execução do workflow.
+- Lens Blur: preservação de energia em bordas transparentes passou.
+- Varredura GPU de 184 testes: 183 passaram; o teste de catálogo classificava áudio como efeito visual. Corrigido para exigir pixels inalterados nos três efeitos de áudio e reexecutado com sucesso.
+- Primeiro workflow iOS detectou acesso direto ao setter privado de seleção; corrigido para usar `model.select` e manter o painel de legendas aberto. A validação do IPA e do simulador será registrada após a nova execução.
 
 ## Limites de aceitação
 

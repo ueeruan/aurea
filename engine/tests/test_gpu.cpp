@@ -5658,7 +5658,10 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         const FloatImage with = s.render();
         u32 changed = 0;
         for (usize k = 0; k < with.px.size() && k < plain.px.size(); ++k) changed += std::fabs(with.px[k] - plain.px[k]) > 0.004f ? 1u : 0u;
-        if (changed == 0) inert.emplace_back(key);
+        if (std::strncmp(key, "aurea.audio.", 12) == 0) {
+            // Audio sends must leave video untouched; Audio tests validate PCM.
+            AUREA_CHECK_EQ(changed, 0u);
+        } else if (changed == 0) inert.emplace_back(key);
     }
     for (const std::string& k : inert) std::printf("\n    efeito sem efeito no projeto: %s", k.c_str());
     AUREA_CHECK_MSG(inert.empty(), "efeito do catalogo aplicado nao muda o quadro");

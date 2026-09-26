@@ -69,6 +69,18 @@ private val MatrixLabels = listOf(
 
 private val Table: Map<Int, EffectHuman> = buildMap {
     fun put(key: String, e: EffectHuman) = put(effectTypeId(key), e)
+    put("aurea.stylize.omino_diffusion", EffectHuman(
+        name = R.string.fx_name_omino_diffusion, keywords = "omino omine diffusion difusao glitch paleta faixas",
+        principal = listOf(0, 1, 2, 5, 6), params = mapOf(
+            0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+            1 to ParamHuman(label = R.string.fx_diffusion_weight, decimals = 2),
+            2 to ParamHuman(label = R.string.fx_angulo, decimals = 0),
+            3 to ParamHuman(label = R.string.fx_diffusion_reach, decimals = 0),
+            4 to ParamHuman(label = R.string.fx_amostras, decimals = 0),
+            5 to ParamHuman(label = R.string.fx_diffusion_stripes, decimals = 1),
+            6 to ParamHuman(label = R.string.fx_diffusion_palette, decimals = 0),
+            7 to ParamHuman(label = R.string.fx_diffusion_falloff, decimals = 0),
+        )))
     put(
         "aurea.transform",
         EffectHuman(

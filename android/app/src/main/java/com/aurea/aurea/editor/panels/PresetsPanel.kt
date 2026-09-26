@@ -162,6 +162,10 @@ internal fun PresetsPanel(env: PanelEnv) {
         ) {
             tabs.forEach { t -> Chip(t.label, t == tab) { picked = t } }
         }
+        if (tab == PresetTab.Effects) {
+            Text(stringResource(R.string.cc_preset_hint), modifier = Modifier.padding(bottom = 8.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        }
         if (tab == PresetTab.Animation) {
             Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.panel_durar_ate_fim_camada), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))

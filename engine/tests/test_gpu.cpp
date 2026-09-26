@@ -4941,6 +4941,43 @@ AUREA_TEST(Gpu, ChromaKeyRemovesGreenAndKeepsSkin) {
     AUREA_CHECK(lum.v(10, 16).w < 0.01f && lum.v(50, 16).w > 0.99f);
 }
 
+AUREA_TEST(Gpu, OminoDiffusionPaletteAlphaIdentityAndDirection) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64,64);
+    s.comp->set_transparent_background(true);
+    auto pixels = uniform_image(64,64,0,0,0,128);
+    for (u32 y=0;y<64;++y) for (u32 x=0;x<64;++x) {
+        auto* p = &pixels.rgba[(y*64+x)*4];
+        p[0]=static_cast<u8>(x*4); p[1]=static_cast<u8>(y*4); p[2]=static_cast<u8>((x+y)*2);
+        if (x<8) p[3]=0;
+    }
+    const auto id=s.image(std::move(pixels),32,32);
+    const auto original=s.render();
+    auto& fx=s.add_effect(id,"aurea.stylize.omino_diffusion");
+    fx.params[0].constant.v[0]=0;
+    const auto identity=s.render();
+    for (usize i=0;i<original.px.size();++i) AUREA_CHECK_NEAR(original.px[i],identity.px[i],.001f);
+    fx.params[0].constant.v[0]=100;
+    const auto horizontal=s.render();
+    fx.params[2].constant.v[0]=90;
+    const auto vertical=s.render();
+    f32 delta=0;
+    for (u32 y=1;y<63;++y) for (u32 x=1;x<63;++x) {
+        auto a=horizontal.v(x,y),b=vertical.v(x,y),o=original.v(x,y);
+        AUREA_CHECK_NEAR(a.w,o.w,.002f);
+        if (a.w>.01f) {
+            for (float c : {a.x/a.w,a.y/a.w,a.z/a.w}) AUREA_CHECK(c<.005f || c>.995f);
+        }
+        delta+=std::abs(a.x-b.x)+std::abs(a.y-b.y);
+    }
+    AUREA_CHECK(delta>10);
+    fx.params[1].constant.v[0]=10; fx.params[4].constant.v[0]=64;
+    const auto extreme=s.render();
+    for (float value:extreme.px) AUREA_CHECK(std::isfinite(value));
+    const auto again=s.render(FrameIndex{45});
+    for (usize i=0;i<extreme.px.size();++i) AUREA_CHECK_NEAR(extreme.px[i],again.px[i],.001f);
+}
+
 AUREA_TEST(Gpu, NativeBoxAndDirectionalBlurPreserveUniformAndSpreadImpulse) {
     AUREA_REQUIRE_GPU();
     for (const char* key : {effect_keys::kBoxBlur,effect_keys::kDirectionalBlur}) {

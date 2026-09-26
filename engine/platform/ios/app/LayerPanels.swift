@@ -325,6 +325,11 @@ struct PresetsPanel: View {
                         }
                     }.frame(height: 46)
                 }
+                if kind == .effects {
+                    Text(AureaText.t("cc_preset_hint")).font(.aurea(size: 12))
+                        .foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 8)
+                }
                 if kind == .animation {
                     HStack(spacing: 0) {
                         Text(AureaText.t("panel_durar_ate_fim_camada")).font(.aurea(size: 13))

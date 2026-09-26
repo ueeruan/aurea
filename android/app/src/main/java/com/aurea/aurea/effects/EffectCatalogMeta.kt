@@ -130,6 +130,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.stylize.grain", EffectMeta(R.string.fx_desc_stylize_grain, AllTargets))
     put("aurea.stylize.halftone", EffectMeta(R.string.fx_desc_stylize_halftone, AllTargets))
     put("aurea.stylize.minimax", EffectMeta(R.string.fx_desc_stylize_minimax, AllTargets))
+    put("aurea.stylize.omino_diffusion", EffectMeta(R.string.fx_desc_omino_diffusion, AllTargets))
     put("aurea.stylize.pixel_sort", EffectMeta(R.string.fx_desc_stylize_pixel_sort, AllTargets))
     put("aurea.stylize.film_damage", EffectMeta(R.string.fx_desc_stylize_film_damage, AllTargets))
     put("aurea.stylize.jpeg_damage", EffectMeta(R.string.fx_desc_stylize_jpeg_damage, AllTargets))

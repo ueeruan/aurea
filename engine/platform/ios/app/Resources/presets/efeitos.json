@@ -337,5 +337,324 @@
         ]
       }
     ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "CC • Detail",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.blur.sharpen",
+        "params": [
+          {
+            "id": "amount",
+            "v": [
+              50,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.blur.unsharp",
+        "params": [
+          {
+            "id": "amount",
+            "v": [
+              15,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "radius",
+            "v": [
+              30,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "threshold",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.exposure",
+        "params": [
+          {
+            "id": "exposure",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.brightness_contrast",
+        "params": [
+          {
+            "id": "contrast",
+            "v": [
+              12,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.saturation",
+        "params": [
+          {
+            "id": "saturation",
+            "v": [
+              8,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "CC • Cinema",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.blur.sharpen",
+        "params": [
+          {
+            "id": "amount",
+            "v": [
+              50,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.blur.unsharp",
+        "params": [
+          {
+            "id": "amount",
+            "v": [
+              15,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "radius",
+            "v": [
+              30,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "threshold",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.exposure",
+        "params": [
+          {
+            "id": "exposure",
+            "v": [
+              -0.15,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.brightness_contrast",
+        "params": [
+          {
+            "id": "contrast",
+            "v": [
+              18,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.saturation",
+        "params": [
+          {
+            "id": "saturation",
+            "v": [
+              -8,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "CC • Clean",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.blur.sharpen",
+        "params": [
+          {
+            "id": "amount",
+            "v": [
+              50,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.blur.unsharp",
+        "params": [
+          {
+            "id": "amount",
+            "v": [
+              15,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "radius",
+            "v": [
+              30,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "threshold",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.exposure",
+        "params": [
+          {
+            "id": "exposure",
+            "v": [
+              0.1,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.brightness_contrast",
+        "params": [
+          {
+            "id": "contrast",
+            "v": [
+              6,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.color.saturation",
+        "params": [
+          {
+            "id": "saturation",
+            "v": [
+              4,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Omino • Diffusion",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.stylize.omino_diffusion",
+        "params": [
+          {
+            "id": "error_weight",
+            "v": [
+              1.2,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "stripe_width",
+            "v": [
+              3,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
   }
 ]

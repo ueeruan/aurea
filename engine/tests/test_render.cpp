@@ -575,7 +575,7 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // + remapear tempo (9.3): o remapeamento da camada com o nome e a cara do
     //   After Effects, no navegador de efeitos ao lado do Posterizar tempo.
     // Three transitions, three optical effects and two spatial blurs.
-    AUREA_CHECK_EQ(before, static_cast<u32>(57));
+    AUREA_CHECK_EQ(before, static_cast<u32>(58));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

@@ -408,9 +408,55 @@ public:
     }
 };
 
+// Bounded spatial error diffusion. No history buffer: scrubbing is deterministic.
+class OminoDiffusion final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.stylize.omino_diffusion", "Omino Diffusion", "Estilizar", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const palettes[] = {"Preto e branco", "RGB 2", "RGB 3", "RGB 4", "4 cores"};
+        p.add_float("amount", "Intensidade", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("error_weight", "Difusão", 1.2f, 0, 10, kParamAnimatable);
+        p.add_float("angle", "Direção", 0, 0, 360, kParamAnimatable, "°");
+        p.add_float("strength", "Alcance", 25, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_int("steps", "Amostras", 24, 1, 64);
+        p.add_float("stripe_width", "Largura das faixas", 1, 1, 32, kParamAnimatable | kParamPixels, "px");
+        p.add_enum("palette", "Paleta", palettes, 5, 1);
+        p.add_float("falloff", "Atenuação", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_color("color_a", "Cor 1", Vec4{0,0,0,1});
+        p.add_color("color_b", "Cor 2", Vec4{0,1,1,1});
+        p.add_color("color_c", "Cor 3", Vec4{1,0,1,1});
+        p.add_color("color_d", "Cor 4", Vec4{1,1,1,1});
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.f(0) <= 0; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_omino_diffusion_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        struct Uniforms { EffectUniforms base; Vec4 colorD; } u{};
+        static_assert(sizeof(Uniforms) == 128);
+        auto value = [&](u32 index, f32 lo, f32 hi) { return std::clamp(finite_or(e.f(index), lo), lo, hi); };
+        u.base = base_uniforms(input);
+        u.base.p0 = Vec4{value(0,0,100)/100, value(1,0,10), value(2,0,360)*0.01745329252f, value(3,0,100)/100};
+        u.base.p1 = Vec4{value(4,1,64),value(5,1,32),value(6,0,4),value(7,0,100)/100};
+        u.base.p2 = e.color(8); u.base.p3 = e.color(9); u.base.color = e.color(10); u.colorD = e.color(11);
+        out = input;
+        out.texture = ctx.texture("omino-diffusion", input.width, input.height);
+        if (ctx.fullscreen_pass("omino-diffusion", PassStage::Effects, out.texture,
+            ShaderId::effects_omino_diffusion_frag,
+            {PassTexture{input.texture, {}, CommonSampler::LinearClamp}}, &u, sizeof(u)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+};
+
 } // namespace
 
 void register_stylize_effects(EffectRegistry& r) {
+    (void)r.add(std::make_unique<OminoDiffusion>());
     (void)r.add(std::make_unique<Invert>());
     (void)r.add(std::make_unique<Scanlines>());
     (void)r.add(std::make_unique<Grain>());

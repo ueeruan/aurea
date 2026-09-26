@@ -403,6 +403,18 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             7: FxParamHuman(label: "fx_peso_croma", decimals: 0),
             9: FxParamHuman(label: "fx_ganho", suffix: "x", decimals: 2),
         ])),
+    ("aurea.stylize.omino_diffusion", FxEffectHuman(
+        name: "fx_name_omino_diffusion", keywords: "omino omine diffusion difusao glitch paleta faixas",
+        principal: [0, 1, 2, 5, 6], params: [
+            0: FxParamHuman(label: "fx_intensidade", decimals: 0),
+            1: FxParamHuman(label: "fx_diffusion_weight", decimals: 2),
+            2: FxParamHuman(label: "fx_angulo", decimals: 0),
+            3: FxParamHuman(label: "fx_diffusion_reach", decimals: 0),
+            4: FxParamHuman(label: "fx_amostras", decimals: 0),
+            5: FxParamHuman(label: "fx_diffusion_stripes", decimals: 1),
+            6: FxParamHuman(label: "fx_diffusion_palette", decimals: 0),
+            7: FxParamHuman(label: "fx_diffusion_falloff", decimals: 0),
+        ])),
     ("aurea.stylize.pixel_sort", FxEffectHuman(
         name: "fx_name_pixel_sort",
         keywords: "pixel sort ordenar pixels derreter listras glitch sort",
@@ -841,6 +853,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.stylize.grain", "fx_desc_stylize_grain")
     put("aurea.stylize.halftone", "fx_desc_stylize_halftone")
     put("aurea.stylize.minimax", "fx_desc_stylize_minimax")
+    put("aurea.stylize.omino_diffusion", "fx_desc_omino_diffusion")
     put("aurea.stylize.pixel_sort", "fx_desc_stylize_pixel_sort")
     put("aurea.stylize.film_damage", "fx_desc_stylize_film_damage")
     put("aurea.stylize.jpeg_damage", "fx_desc_stylize_jpeg_damage")

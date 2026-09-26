@@ -477,6 +477,35 @@ AUREA_TEST(Presets, BuiltinAppPresetsAreValid) {
     AUREA_CHECK(total >= 20);
 }
 
+AUREA_TEST(Presets, OminoCustomPaletteAndCCStackSaveApplyUndo) {
+    PresetRig r;
+    const auto source=*r.e.add_shape(0), target=*r.e.add_shape(0);
+    for (const char* key : {effect_keys::kSharpen,effect_keys::kUnsharp,effect_keys::kExposure,
+                           effect_keys::kBrightnessContrast,effect_keys::kSaturation,"aurea.stylize.omino_diffusion"})
+        r.add_effect(source,key);
+    auto* layer=r.L(source);
+    layer->effects[0].params[0].constant.v[0]=50;
+    layer->effects[1].params[0].constant.v[0]=15;
+    layer->effects[1].params[1].constant.v[0]=30;
+    auto& omino=layer->effects.back();
+    omino.params[6].constant.v[0]=4;
+    omino.params[11].constant=ParamValue::color(.1f,.2f,.3f,1);
+    layer->tracks.get_or_create(TrackProperty::EffectParam,omino.id,param_track_key(2,0)).set(FrameIndex{12},90);
+    const auto saved=r.e.save_preset(source,PresetKind::Effects,"Meu CC + difusão");
+    AUREA_CHECK(r.e.apply_preset(target,saved));
+    const auto* applied=r.L(target);
+    AUREA_CHECK_EQ(applied->effects.size(),usize{6});
+    if(applied->effects.size()!=6) return;
+    for(usize i=0;i<6;++i) {
+        AUREA_CHECK_EQ(applied->effects[i].type,r.L(source)->effects[i].type);
+        for(usize p=0;p<applied->effects[i].params.size();++p)
+            AUREA_CHECK(applied->effects[i].params[p].constant==r.L(source)->effects[i].params[p].constant);
+    }
+    AUREA_CHECK_EQ(tracks_of(*applied,TrackProperty::EffectParam,applied->effects.back().id).size(),usize{1});
+    r.undo();
+    AUREA_CHECK(r.L(target)->effects.empty());
+}
+
 AUREA_TEST(Presets, CaptionAndCurvePresetsRoundTrip) {
     text::CaptionOptions o;
     o.mode = 1;

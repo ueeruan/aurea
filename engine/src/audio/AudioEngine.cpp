@@ -102,6 +102,14 @@ void AudioEngine::shutdown() {
 void AudioEngine::set_snapshot(std::shared_ptr<const AudioMixSnapshot> snap) {
     std::lock_guard<std::mutex> lock(mutex_);
     snap_ = std::move(snap);
+    if (playing_.load(std::memory_order_acquire)) {
+        const i64 position = position_ns();
+        mixGen_ = gen_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        mixPos_ = ns_to_sample(position);
+        playStartNs_.store(position, std::memory_order_release);
+        cache_->clear_wants();
+        wake_.notify_all();
+    }
 }
 
 void AudioEngine::play(i64 ns, f64 rate) {

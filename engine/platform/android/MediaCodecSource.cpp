@@ -309,6 +309,7 @@ public:
 
     Status seek_to_keyframe(i64 targetUs) noexcept override {
         pendingOutput_ = -1;
+        pendingFrame_.reset();
         pendingEos_ = false;
         nextDeliveryUs_ = std::max<i64>(0, targetUs);
         if (!codec_) {
@@ -332,7 +333,20 @@ public:
     }
 
     Status next_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept override {
-        const Status result = next_timed_frame(deliverFromUs, out, outPtsUs, endOfStream);
+        Status result = legacyLookahead_ ? next_image_timed_frame(deliverFromUs, out, outPtsUs, endOfStream)
+                                        : next_timed_frame(deliverFromUs, out, outPtsUs, endOfStream);
+        // Some surface decoders require each slot to be released before they
+        // produce another. Preserve hardware decoding with image lookahead on
+        // those drivers instead of mistaking buffer backpressure for codec failure.
+        if (!result.ok() && !legacyLookahead_ && pendingOutput_ >= 0 && result.code() == Errc::Timeout) {
+            const i64 target = std::max(deliverFromUs, nextDeliveryUs_);
+            legacyLookahead_ = true;
+            AUREA_LOG_WARN("decoder %s requires immediate output release; using image lookahead", info_.decoderName);
+            destroy_codec();
+            if (const Status status = create_codec(); !status.ok()) return status;
+            if (const Status status = seek_to_keyframe(target); !status.ok()) return status;
+            result = next_image_timed_frame(target, out, outPtsUs, endOfStream);
+        }
         if (result.ok() || softwareFallback_ || !info_.hardwareDecoder
             || (result.code() != Errc::Timeout && result.code() != Errc::DecodeFailed)
             || !software_decoder_for(info_.codec)) return result;
@@ -346,7 +360,89 @@ public:
         destroy_codec();
         if (const Status opened = create_codec(); !opened.ok()) return opened;
         if (const Status seek = seek_to_keyframe(target); !seek.ok()) return seek;
-        return next_timed_frame(target, out, outPtsUs, endOfStream);
+        return legacyLookahead_ ? next_image_timed_frame(target, out, outPtsUs, endOfStream)
+                                : next_timed_frame(target, out, outPtsUs, endOfStream);
+    }
+
+    Status next_image_timed_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept {
+        out.reset();
+        endOfStream = false;
+        if (!pendingFrame_) {
+            if (const Status s = next_raw_frame(pendingFrame_, outPtsUs, pendingEos_); !s.ok()) return s;
+            if (!pendingFrame_) { endOfStream = pendingEos_; return OkStatus; }
+        }
+        FrameRef next;
+        i64 nextPts = pendingFrame_->ptsUs;
+        bool eos = pendingEos_;
+        if (!pendingEos_) {
+            if (const Status s = next_raw_frame(next, nextPts, eos); !s.ok()) return s;
+        }
+        if (next && next->ptsUs <= pendingFrame_->ptsUs)
+            return Status{Errc::DecodeFailed, "PTS de video fora de ordem"};
+        FrameRef current = std::move(pendingFrame_);
+        current->durationUs = next ? next->ptsUs - current->ptsUs
+            : info_.durationUs > current->ptsUs ? info_.durationUs - current->ptsUs
+            : std::max<i64>(1, static_cast<i64>(1e6 / std::max(1.0, info_.fps)));
+        outPtsUs = current->ptsUs;
+        nextDeliveryUs_ = current->ptsUs + current->durationUs;
+        pendingFrame_ = std::move(next);
+        pendingEos_ = eos;
+        endOfStream = eos && !pendingFrame_;
+        if (outPtsUs >= deliverFromUs || current->covers(deliverFromUs)) out = std::move(current);
+        return OkStatus;
+    }
+
+    Status next_raw_frame(FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept {
+        endOfStream = false;
+        out.reset();
+        if (!codec_) {
+            if (const Status s = create_codec(); !s.ok()) return s;
+        }
+        if (outputEos_) {
+            endOfStream = true;
+            outPtsUs = lastPts_;
+            return OkStatus;
+        }
+        const u64 deadline = monotonic_ns() + 3'000'000'000ull;
+        for (;;) {
+            if (const Status s = feed_input(); !s.ok()) return s;
+            AMediaCodecBufferInfo bi{};
+            const ssize_t idx = AMediaCodec_dequeueOutputBuffer(codec_, &bi, 4000);
+            if (idx >= 0) {
+                const bool eos = (bi.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
+                if (eos && bi.size <= 0) {
+                    AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(idx), false);
+                    outputEos_ = true;
+                    endOfStream = true;
+                    outPtsUs = lastPts_;
+                    return OkStatus;
+                }
+                const i64 pts = bi.presentationTimeUs;
+                lastPts_ = pts;
+                outPtsUs = pts;
+                if (eos) {
+                    outputEos_ = true;
+                    endOfStream = true;
+                }
+                // Explicit timestamp lets us reject a late image from a previous seek.
+                if (AMediaCodec_releaseOutputBufferAtTime(codec_, static_cast<size_t>(idx), pts * 1000) != AMEDIA_OK) {
+                    return Status{Errc::DecodeFailed, "releaseOutputBufferAtTime falhou"};
+                }
+                AImage* image = nullptr;
+                if (const Status s = acquire_image(pts, image); !s.ok()) return s;
+                return wrap(image, pts, out);
+            }
+            if (idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
+                update_output_format();
+                continue;
+            }
+            if (idx == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) continue;
+            if (idx == AMEDIACODEC_INFO_TRY_AGAIN_LATER) {
+                if (monotonic_ns() > deadline) return Status{Errc::Timeout, "decoder parado sem entregar frame"};
+                continue;
+            }
+            return Status{Errc::DecodeFailed, "dequeueOutputBuffer falhou"};
+        }
     }
 
     // Keep one codec output slot for PTS lookahead, not an ImageReader image.
@@ -501,6 +597,8 @@ private:
             return result;
         }
         codec_name(codec_, info_.decoderName, sizeof(info_.decoderName), info_.hardwareDecoder);
+        // gfxstream/goldfish has a single outstanding surface output slot.
+        if (std::strstr(info_.decoderName, "goldfish")) legacyLookahead_ = true;
         info_.preciseFrameTiming = true;
         inputEos_ = false;
         outputEos_ = false;
@@ -517,6 +615,7 @@ private:
 
     void destroy_codec() noexcept {
         pendingOutput_ = -1;
+        pendingFrame_.reset();
         pendingEos_ = false;
         if (codec_) {
             AMediaCodec_stop(codec_);
@@ -775,6 +874,8 @@ private:
     bool inputEos_ = false;
     bool outputEos_ = false;
     i64 lastPts_ = 0;
+    FrameRef pendingFrame_;
+    bool legacyLookahead_ = false;
     ssize_t pendingOutput_ = -1;
     i64 pendingPts_ = 0; // Actual PTS lookahead preserves long VFR presentation intervals.
     bool pendingEos_ = false;

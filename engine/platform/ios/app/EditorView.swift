@@ -98,9 +98,9 @@ struct EditorView: View {
     var body: some View {
         ZStack {
             AureaColors.editorTopBar
-            PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen)
-                .overlay { if !model.fullscreen { StageOverlay().allowsHitTesting(false) } }
-                .overlay { if !model.fullscreen { StageInteractionOverlay().allowsHitTesting(false) } }
+            PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen && !model.rawPlayback)
+                .overlay { if !model.fullscreen && !model.rawPlayback { StageOverlay().allowsHitTesting(false) } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { StageInteractionOverlay().allowsHitTesting(false) } }
             if model.panel == .tracking && !model.cameraFeatures.isEmpty { CameraTrackingOverlay() }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
                 ShellStageBanner(label: AureaText.t("editor_camada_bloqueada"), button: AureaText.t("editor_desbloquear"), icon: CupertinoGlyph.LockFill) {

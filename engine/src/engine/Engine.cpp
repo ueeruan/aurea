@@ -5733,6 +5733,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     RenderSettings rs;
     FrameIndex t{0};
     bool playing = false;
+    f32 renderSpeed = 1.0f;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         if (!project_) return Errc::InvalidState;
@@ -5742,11 +5743,10 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
 
         const Layer* rawLayer = comp->layer(rawPlaybackLayer_);
         const Asset* rawAsset = rawLayer ? project_->asset(rawLayer->source) : nullptr;
-        // VFR can have faster sections than its average FPS. Poll at display
-        // cadence in RAW and use PTS to present; do not cap it to average FPS.
-        const f64 rawCadence = std::max<f64>(config_.displayRefreshRate, rawAsset ? rawAsset->video.fps : 0);
-        const FrameIndex rawDuration{rawAsset ? static_cast<i64>(std::ceil(rawAsset->video.frameCount.value * rawCadence / std::max(1.0, rawAsset->video.fps))) : 0};
-        playback_.configure(rawAsset ? rawCadence : comp->fps(), rawAsset ? rawDuration : comp->duration());
+        // Keep timeline controls in project-frame units. RAW scheduling below
+        // uses source PTS directly, independently of the composition frame grid.
+        const FrameIndex rawDuration{rawAsset ? static_cast<i64>(std::ceil(rawAsset->video.frameCount.value * comp->fps() / std::max(1.0, rawAsset->video.fps))) : 0};
+        playback_.configure(comp->fps(), rawAsset ? rawDuration : comp->duration());
         // Antes do update: um seek/play desta leva recomeça o som no ponto
         // novo (senão o relógio do áudio ainda diria o instante antigo).
         sync_audio_locked(*comp);
@@ -5755,6 +5755,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         sync_audio_locked(*comp);
         project_->timeline().set_playhead(t);
         playing = playback_.playing();
+        renderSpeed = playback_.speed();
         if (playingHint_.exchange(playing) != playing) media_.proxies().set_pause_reason(PreviewProxyService::Playback, playing);
 
         if (!gpu_ || !renderer_.ready()) return OkStatus;   // sem GPU: só o modelo avança
@@ -5771,7 +5772,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         const u32 rev = modelRevision_.load(std::memory_order_acquire);
         const bool force = forceRender_.exchange(false, std::memory_order_acq_rel) || rev != lastRenderedRevision_;
         lastRenderedRevision_ = rev;
-        if (onlyIfChanged && !force && t.value == lastRenderedFrame_
+        if (onlyIfChanged && !(rawAsset && playing) && !force && t.value == lastRenderedFrame_
             && !(lastIncomplete_ && mediaGen != lastMediaGen_)) {
             lastSkipped_ = true;
             if (playing) {
@@ -5813,6 +5814,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     // Keep the last presented image during refill, rather than presenting a
     // fabricated black frame after seek. Decode continues asynchronously.
     if (rs.rawPlayback && snapshot_.missingVideoFrames) {
+        nextFrameDueNs_ = frameStart + static_cast<u64>(1e9 / std::max(1.0f, config_.displayRefreshRate));
         lastIncomplete_ = true;
         lastRenderedFrame_ = t.value;
         lastSkipped_ = true;
@@ -5824,6 +5826,12 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             // A video-only renderer has nothing new to draw. Keep the previous
             // image while the decoder catches up; never burn another GPU pass.
             ++playbackMeasurement_.repeated;
+            const i64 interval = snapshot_.playbackDurationUs > 0 ? snapshot_.playbackDurationUs
+                : static_cast<i64>(1e6 / std::max(1.0, snapshot_.playbackStream.fps));
+            const i64 remainingUs = snapshot_.playbackPtsUs + interval - snapshot_.playbackTargetUs;
+            nextFrameDueNs_ = frameStart + (remainingUs > 0
+                ? static_cast<u64>(remainingUs * 1000 / std::max(0.05f, renderSpeed))
+                : static_cast<u64>(1e9 / std::max(1.0f, config_.displayRefreshRate)));
             snapshot_.release_video_frames();
             lastRenderedFrame_ = t.value;
             lastIncomplete_ = true;

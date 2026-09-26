@@ -93,7 +93,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     androidx.compose.runtime.LaunchedEffect(store.playhead, showTrack, store.cameraTrack) { store.refreshCameraFeatures(showTrack) }
     Box(modifier.background(AureaColors.EditorTopBar).clipToBounds()) {
         PreviewSurface(store, Modifier.fillMaxSize())
-        Spacer(
+        if (!store.rawPlayback) Spacer(
             Modifier
                 .fillMaxSize()
                 .pointerInput(store) { stageGestures(store, ui, mapper, haptic) }
@@ -1373,7 +1373,8 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
 private fun PerfHud(store: EditorStore, modifier: Modifier) {
     if (!store.hudVisible) return
     val res = LocalContext.current.resources
-    val text = if (store.rawPlayback) store.engineForStress.playbackReport() else hudText(res, store.perf, store.uiFps, store.appMemory)
+    val perf = store.perf // Observe the sampling tick in RAW mode too.
+    val text = if (store.rawPlayback) store.engineForStress.playbackReport() else hudText(res, perf, store.uiFps, store.appMemory)
     Box(
         modifier
             .clip(RoundedCornerShape(8.dp))

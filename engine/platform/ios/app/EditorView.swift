@@ -1093,7 +1093,7 @@ private struct AddLayerSheet: View {
                     .foregroundStyle(StageInk.dockTileContent)
             }.padding(.horizontal, 4).padding(.vertical, 8).frame(maxWidth: .infinity).frame(height: StageDim.addCardHeight)
                 .background(StageInk.dockTile, in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(.plain)
+        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(label))
     }
 }
 
@@ -1305,7 +1305,8 @@ private struct FloatingAddLayer: View {
                                                 .overlay(Circle().stroke(AureaColors.action, lineWidth: 1))
                                             Text(AureaText.t(categories[index].0)).font(.aurea(size: 10)).lineLimit(1)
                                         }.foregroundStyle(AureaColors.text).frame(width: 62)
-                                    }.buttonStyle(.plain).accessibilityIdentifier("aurea.add.category.\(index)")
+                                    }.buttonStyle(.plain).accessibilityLabel(AureaText.t(categories[index].0))
+                                        .accessibilityIdentifier("aurea.add.category.\(index)")
                                 }
                             }
                         }.frame(width: 132, height: min(278, max(120, geometry.size.height - 140)))

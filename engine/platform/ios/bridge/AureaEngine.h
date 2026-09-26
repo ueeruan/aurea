@@ -547,6 +547,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber*>*)gizmoMoveLocal:(long long)layerId axis:(uint32_t)axis amount:(float)amount NS_SWIFT_NAME(gizmoMoveLocal(_:axis:amount:));
 - (void)cancelCameraTracking;
 - (NSString*)applyCameraTracking;
+- (NSArray<NSNumber*>*)cameraFeaturesAtFrame:(long long)frame NS_SWIFT_NAME(cameraFeatures(atFrame:));
+- (NSString*)applyCameraSelectionAtFrame:(long long)frame x0:(float)x0 y0:(float)y0 x1:(float)x1 y1:(float)y1 NS_SWIFT_NAME(applyCameraSelection(atFrame:x0:y0:x1:y1:));
 - (NSString*)trackMask:(long long)layerId mask:(uint32_t)mask mode:(uint32_t)mode;
 - (NSString*)layerMediaPath:(long long)layerId;
 - (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt;

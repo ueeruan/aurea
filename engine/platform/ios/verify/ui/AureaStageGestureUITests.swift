@@ -25,6 +25,26 @@ import XCTest
         app = nil
     }
 
+    func testVideoTextAndCaptionsPlayForThirtySecondsWithBoundedMemory() throws {
+        _ = try launch("playback-stress")
+        let play = app.buttons["Repeat on · hold to turn off"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        let initial = try awaitSnapshot("Playback actually starts") { $0.playing != 0 }
+        var positions: Set<Int64> = []
+        var baseline = initial.processFootprintBytes
+        for sample in 0..<30 {
+            RunLoop.current.run(until: Date().addingTimeInterval(1))
+            XCTAssertEqual(app.state, .runningForeground)
+            let value = try snapshot()
+            XCTAssertNotEqual(value.playing, 0)
+            positions.insert(value.corePlayhead)
+            if sample == 5 { baseline = value.processFootprintBytes }
+            if sample > 5 { XCTAssertLessThan(value.processFootprintBytes, baseline + 180 * 1024 * 1024) }
+        }
+        XCTAssertGreaterThan(positions.count, 2, "Playhead must advance while decoding video and drawing text/captions")
+    }
+
     func testDockMoveVideoAtTwoSecondsKeepsAppResponsiveAndPreservesDuration() throws {
         let before = try launch("video-move")
         XCTAssertEqual(before.detail.kind, 1)
@@ -332,8 +352,8 @@ import XCTest
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID
-        if scene == "video-move" { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
-        let preparationTimeout: TimeInterval = scene == "video-move" ? 120 : 30
+        if ["video-move", "playback-stress"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
+        let preparationTimeout: TimeInterval = ["video-move", "playback-stress"].contains(scene) ? 120 : 30
         app.launch()
         guard stage.waitForExistence(timeout: preparationTimeout) else {
             XCTFail("Read-only DEBUG preview probe is missing; inspect the app configuration and INTEGRATION.md")
@@ -343,7 +363,7 @@ import XCTest
             $0.ready && $0.scene == scene && $0.runID == self.runID
         }
         XCTAssertTrue(state.coreStarted, state.coreError)
-        XCTAssertEqual(state.layerCount, 1)
+        if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) } else { XCTAssertEqual(state.layerCount, 1) }
         XCTAssertEqual(state.selectionCount, 1)
         XCTAssertGreaterThan(state.primaryID, 0)
         XCTAssertEqual(state.detail.position.count, 3)
@@ -395,7 +415,7 @@ import XCTest
 
     private func screenPoint(x: Double, y: Double, snapshot s: Snapshot) -> CGPoint {
         let frame = stage.frame
-        let fit = max(frame.width / CGFloat(s.compositionWidth), frame.height / CGFloat(s.compositionHeight))
+        let fit = min(frame.width / CGFloat(s.compositionWidth), frame.height / CGFloat(s.compositionHeight))
         return CGPoint(x: frame.midX + CGFloat(x - s.compositionWidth / 2) * fit,
                        y: frame.midY + CGFloat(y - s.compositionHeight / 2) * fit)
     }
@@ -440,6 +460,8 @@ import XCTest
 
     private enum ProbeError: Error { case missing, timedOut, geometry }
     private struct Snapshot: Decodable {
+        let processFootprintBytes: Double
+        let playing: UInt32
         let runID: String
         let scene: String
         let ready: Bool

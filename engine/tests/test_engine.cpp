@@ -1243,35 +1243,23 @@ AUREA_TEST(History, TrimStartKeepsContentWithOffset) {
     e.shutdown();
 }
 
-AUREA_TEST(Engine, PortraitVideoKeepsAspectInComposition) {
-    // Regressão: o teto de export era aplicado por eixo e um vídeo em pé
-    // (1080×1920) virava uma composição quadrada 1080×1080.
-    for (const auto& [w, h] : {std::pair<u32, u32>{1080, 1920}, std::pair<u32, u32>{2160, 3840},
-                               std::pair<u32, u32>{1920, 1080}, std::pair<u32, u32>{8000, 4500}}) {
-        test::SyntheticConfig cfg;
-        cfg.width = w;
-        cfg.height = h;
+AUREA_TEST(Engine, VideoImportPreservesChosenProjectResolutionAndFps) {
+    for (const auto& [w, h] : {std::pair<u32,u32>{1080,1920}, {1920,1080}, {800,800}}) {
+        test::SyntheticConfig cfg; cfg.width = 800; cfg.height = 800; cfg.fps = 24;
         test::SyntheticFactory factory(cfg);
-        EngineConfig ec = headless_config();
-        ec.mediaFactory = &factory;
+        EngineConfig ec = headless_config(); ec.mediaFactory = &factory;
         Engine e;
         AUREA_CHECK(e.initialize(ec).ok());
-        AUREA_CHECK(e.new_project(1920, 1080, 30.0, nullptr).ok());
-        VideoImport vi;
-        vi.sourcePath = "sintetico";
-        AUREA_CHECK(e.import_video(vi).ok());
+        AUREA_CHECK(e.new_project(w, h, 60.0, nullptr).ok());
+        VideoImport vi; vi.sourcePath = "sintetico";
+        const auto id = e.import_video(vi); AUREA_CHECK(id.ok());
         const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
-        const u32 capLong = std::max(e.caps().max_export_width(), e.caps().max_export_height());
-        const u32 capShort = std::min(e.caps().max_export_width(), e.caps().max_export_height());
-        // Proporção do vídeo mantida (até o arredondamento para par)...
-        AUREA_CHECK_NEAR(static_cast<f64>(c->width()) / c->height(), static_cast<f64>(w) / h, 0.01);
-        // ...e dentro do teto do aparelho nos dois lados.
-        AUREA_CHECK(std::max(c->width(), c->height()) <= capLong);
-        AUREA_CHECK(std::min(c->width(), c->height()) <= capShort);
-        // Vídeo que cabe no teto não é reduzido.
-        if (std::max(w, h) <= capLong && std::min(w, h) <= capShort) {
-            AUREA_CHECK_EQ(c->width(), w);
-            AUREA_CHECK_EQ(c->height(), h);
+        AUREA_CHECK_EQ(c->width(), w); AUREA_CHECK_EQ(c->height(), h); AUREA_CHECK_NEAR(c->fps(),60.0,0.001);
+        if (id.ok()) {
+            const Layer* layer = c->layer(LayerId::unpack(*id));
+            AUREA_CHECK_NEAR(layer->transform.scale.x,layer->transform.scale.y,0.0001);
+            AUREA_CHECK_NEAR(layer->transform.position.x,w*.5f,0.01);
+            AUREA_CHECK_NEAR(layer->transform.position.y,h*.5f,0.01);
         }
         e.shutdown();
     }

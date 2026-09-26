@@ -68,6 +68,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
+import androidx.compose.foundation.gestures.detectDragGestures
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sign
@@ -98,6 +99,26 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 .pointerInput(store) { stageGestures(store, ui, mapper, haptic) }
                 .drawBehind { drawStageOverlay(store, ui, mapper, insetPx) },
         )
+        if (showTrack && store.cameraFeatures != null) {
+            Spacer(Modifier.fillMaxSize().pointerInput(store, showTrack) {
+                detectDragGestures(onDragStart = { point ->
+                    store.pause()
+                    store.cameraSelectionFrame = store.playhead.toLong()
+                    val x = mapper.cx(point.x); val y = mapper.cy(point.y)
+                    store.cameraSelection = floatArrayOf(x, y, x, y)
+                }, onDragCancel = { store.cameraSelection = null }, onDrag = { change, _ ->
+                    change.consume()
+                    store.cameraSelection?.let { r ->
+                        store.cameraSelection = floatArrayOf(r[0], r[1], mapper.cx(change.position.x), mapper.cy(change.position.y))
+                    }
+                })
+            }.drawBehind {
+                store.cameraSelection?.let { r ->
+                    val x = mapper.sx(min(r[0], r[2])); val y = mapper.sy(min(r[1], r[3]))
+                    drawRect(Color.Green, Offset(x,y), androidx.compose.ui.geometry.Size(kotlin.math.abs(r[2]-r[0])*mapper.fit, kotlin.math.abs(r[3]-r[1])*mapper.fit), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+                }
+            })
+        }
         LockBanner(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
@@ -294,7 +315,7 @@ internal class StageMapper {
 
 private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: StageMapper, inset: Float) {
     val project = store.project
-    m.update(size.width, size.height, inset, project.width, project.height, !store.sceneEditor)
+    m.update(size.width, size.height, inset, project.width, project.height, false)
     m.strokesFor(density)
     m.handlesValid = false
     m.markerAnchorValid = false
@@ -337,7 +358,9 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         var k = 0
         while (k + 2 < f.size) {
             val c = Offset(m.sx(f[k]), m.sy(f[k + 1]))
-            val col = if (f[k + 2] > 0.5f) TrackSolved else TrackRejected
+            val r = store.cameraSelection
+            val selected = r != null && f[k] >= min(r[0],r[2]) && f[k] <= max(r[0],r[2]) && f[k+1] >= min(r[1],r[3]) && f[k+1] <= max(r[1],r[3])
+            val col = if (selected) Color.Green else if (f[k + 2] > 0.5f) TrackSolved else TrackRejected
             drawLine(Color.Black.copy(alpha = 0.5f), Offset(c.x - arm - 1, c.y), Offset(c.x + arm + 1, c.y), w + 1.5f)
             drawLine(Color.Black.copy(alpha = 0.5f), Offset(c.x, c.y - arm - 1), Offset(c.x, c.y + arm + 1), w + 1.5f)
             drawLine(col, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), w)

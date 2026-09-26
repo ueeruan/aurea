@@ -193,7 +193,7 @@ struct ParticlesPanel: View {
         }
     }
 
-    private let presetKeys = ["world_explosive", "world_jet", "world_vortex", "world_box_lights"]
+    private let presetKeys = ["world_explosive", "world_jet", "world_vortex", "world_box_lights", "world_embers", "world_snow", "world_bokeh", "world_fountain"]
 
     private func group(_ title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {

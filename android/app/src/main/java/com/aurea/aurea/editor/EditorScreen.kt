@@ -261,7 +261,7 @@ fun EditorScreen(store: EditorStore) {
                     NarrowEditor(store, ui, content, m, stage)
                 }
 
-                if (ui.adding) AddLayerOverlay(store, ui, Modifier.align(Alignment.BottomEnd).padding(end = if (wide) sheetWidth.dp else 0.dp))
+                if (ui.adding && !store.sceneEditor) AddLayerOverlay(store, ui, Modifier.align(Alignment.BottomEnd).padding(end = if (wide) sheetWidth.dp else 0.dp))
                 // O "+": escondido em tela cheia, adicionando ou com painel aberto.
                 if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel) {
                     // Camada escolhida com a timeline baixa: o "+" cobria justamente o

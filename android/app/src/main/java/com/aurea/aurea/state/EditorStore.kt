@@ -2928,6 +2928,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Pontos seguidos no quadro do cabeçote (x, y, estado)×n, px da composição; nulo = nada a mostrar. */
+    var cameraSelection by mutableStateOf<FloatArray?>(null)
+    var cameraSelectionFrame: Long = -1
     var cameraFeatures by mutableStateOf<FloatArray?>(null)
         private set
     private val featureBuf = FloatArray(3 * 1500)
@@ -2936,6 +2938,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun refreshCameraFeatures(show: Boolean) {
         val st = cameraTrack
         if (!show || st == null || st.state != 2) {
+            cameraSelection = null
             if (cameraFeatures != null) cameraFeatures = null
             return
         }
@@ -2950,7 +2953,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Cria a câmera rastreada e o Nulo de referência da cena. */
     fun applyCameraTrack() {
-        val id = engine.applyCameraTrack()
+        val id = engine.applyCameraTrack(if (cameraSelection != null) cameraSelectionFrame else -1, cameraSelection)
         if (id < 0) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camera, -id)
             return

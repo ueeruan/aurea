@@ -1796,4 +1796,8 @@
     <string name="donation_launch_question">Quer doar para ajudar o Aurea a continuar gratuito? Sua contribuição é opcional.</string>
     <string name="donation_launch_yes">Doar</string>
     <string name="donation_launch_later">Agora não</string>
+    <string name="world_embers">Brasas 3D</string>
+    <string name="world_snow">Neve 3D</string>
+    <string name="world_bokeh">Bokeh 3D</string>
+    <string name="world_fountain">Fonte de faíscas</string>
 </resources>

@@ -1763,4 +1763,8 @@ to edit the curve.</string>
     <string name="donation_launch_question">Would you like to donate to help keep Aurea free? Your contribution is optional.</string>
     <string name="donation_launch_yes">Donate</string>
     <string name="donation_launch_later">Not now</string>
+    <string name="world_embers">3D embers</string>
+    <string name="world_snow">3D snow</string>
+    <string name="world_bokeh">3D bokeh</string>
+    <string name="world_fountain">Spark fountain</string>
 </resources>

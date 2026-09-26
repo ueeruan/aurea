@@ -113,7 +113,9 @@ id<MTLBlitCommandEncoder> CommandListImpl::blit_encoder() noexcept {
     if (enc_ == Enc::Blit && blit_) return blit_;
     if (!cmd_) return nil;
     end_current();
-    blit_ = [cmd_ blitCommandEncoder];
+    // The engine renders on a C++ thread without an ambient Cocoa pool.
+    // Keep the strong encoder, but drain its autoreleased factory reference.
+    @autoreleasepool { blit_ = [cmd_ blitCommandEncoder]; }
     if (!blit_) return nil;
     enc_ = Enc::Blit;
     return blit_;
@@ -123,7 +125,7 @@ id<MTLComputeCommandEncoder> CommandListImpl::compute_encoder() noexcept {
     if (enc_ == Enc::Compute && compute_) return compute_;
     if (!cmd_) return nil;
     end_current();
-    compute_ = [cmd_ computeCommandEncoder];
+    @autoreleasepool { compute_ = [cmd_ computeCommandEncoder]; }
     if (!compute_) return nil;
     enc_ = Enc::Compute;
     return compute_;
@@ -624,9 +626,10 @@ void Impl::reclaim_stale_imports() noexcept {
     std::vector<u64> stale;
     for (const auto& [buffer, id] : importedByBuffer) {
         const Texture* t = textures.get(id);
-        // 10 s sem uso: o decoder trocou de buffers (seek, fechamento) e a
-        // importação antiga só ocupa memória — mesma política do Vulkan.
-        if (!t || frameNumber > t->lastUsedFrame + 600) stale.push_back(id);
+        // Retaining a CVPixelBuffer prevents AVFoundation from recycling it.
+        // Hundreds of retained 4K buffers can exhaust an iPhone in seconds.
+        // The deferred destroy queue still protects every in-flight GPU read.
+        if (!t || frameNumber > t->lastUsedFrame + framesInFlight) stale.push_back(id);
     }
     for (u64 id : stale) self->destroy_texture(TextureHandle{id});
 }
@@ -657,7 +660,7 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         f.submitted = false;
         collect_timings(f);
         run_deferred(f);
-        if (frameNumber % 120 == 0) reclaim_stale_imports();
+        reclaim_stale_imports();
     }
     f.frameNumber = ++frameNumber;
     f.uniforms.reset();

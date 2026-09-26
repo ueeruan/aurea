@@ -454,7 +454,7 @@ final class AureaModel: ObservableObject {
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 refreshModel(force: true); enterEditor()
                 if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
-            } else if scene == "video-move", started {
+            } else if ["video-move", "playback-stress"].contains(scene), started {
                 // Reuse the real H.264 export fixture, then import through the
                 // production decoder. The UI test operates only the visible dock.
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
@@ -464,10 +464,16 @@ final class AureaModel: ObservableObject {
                     let layer = engine.importVideo(AureaPaths.documents.appendingPathComponent(movie).path, name: "Dock move video")
                     if layer >= 0 {
                         if let compositionID = (engine.composition()?[AureaCompositionId] as? NSNumber)?.uint64Value {
-                            engine.setComposition(compositionID, duration: 180)
+                            engine.setComposition(compositionID, duration: scene == "playback-stress" ? 30 : 180)
                         }
                         refreshModel(force: true); enterEditor(); select(layerId: layer, additive: false)
-                        panel = .dock; seek(toFrame: 60)
+                        panel = .dock; seek(toFrame: scene == "playback-stress" ? 0 : 60)
+                        if scene == "playback-stress" {
+                            _ = engine.addText("Texto durante reprodução")
+                            _ = engine.createCaptions(layer, words: [["word": "Legenda", "start": 0.0, "end": 0.9]], options: [:])
+                            refreshModel(force: true); select(layerId: layer, additive: false)
+                            setLooping(true)
+                        }
                         _ = saveProject(writeThumbnail: false)
                     }
                 }
@@ -1568,6 +1574,17 @@ final class AureaModel: ObservableObject {
                 else { _ = self.saveProject(writeThumbnail: false) }
             }
         }
+    }
+
+    @Published var cameraFeatures: [Float] = []
+    @Published var cameraSelection: CGRect? = nil
+    var cameraSelectionFrame: Int64 = -1
+
+    func applySelectedCameraTracking() -> String {
+        if let rect = cameraSelection {
+            return engine.applyCameraSelection(atFrame: cameraSelectionFrame, x0: Float(rect.minX), y0: Float(rect.minY), x1: Float(rect.maxX), y1: Float(rect.maxY))
+        }
+        return engine.applyCameraTracking()
     }
 
     func beginPointPick(stabilize: Bool) {

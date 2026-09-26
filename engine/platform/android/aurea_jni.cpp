@@ -1994,10 +1994,10 @@ AUREA_JNI jint AUREA_FN(nativeCameraTrackFeatures)(JNIEnv* env, jclass, jlong ha
     return static_cast<jint>(n);
 }
 
-AUREA_JNI jlong AUREA_FN(nativeApplyCameraTrack)(JNIEnv*, jclass, jlong handle) {
+AUREA_JNI jlong AUREA_FN(nativeApplyCameraTrack)(JNIEnv*, jclass, jlong handle, jlong frame, jfloat x0, jfloat y0, jfloat x1, jfloat y1) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);
-    const Result<u64> r = c->engine.apply_camera_track();
+    const Result<u64> r = c->engine.apply_camera_track(frame, Vec4{x0, y0, x1, y1});
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
 }

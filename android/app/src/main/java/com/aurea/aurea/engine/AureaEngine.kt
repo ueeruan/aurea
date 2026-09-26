@@ -587,7 +587,7 @@ class AureaEngine private constructor() {
     fun startCameraTrack(layer: Long, mode: Int): Boolean = nativeStartCameraTrack(nativeHandle, layer, mode)
     fun cancelCameraTrack() = nativeCancelCameraTrack(nativeHandle)
     fun cameraTrackStatus(out: FloatArray): String? = nativeCameraTrackStatus(nativeHandle, out)
-    fun applyCameraTrack(): Long = nativeApplyCameraTrack(nativeHandle)
+    fun applyCameraTrack(frame: Long = -1, rect: FloatArray? = null): Long = nativeApplyCameraTrack(nativeHandle, frame, rect?.get(0) ?: 0f, rect?.get(1) ?: 0f, rect?.get(2) ?: 0f, rect?.get(3) ?: 0f)
     fun cameraTrackFeatures(frame: Long, out: FloatArray): Int = nativeCameraTrackFeatures(nativeHandle, frame, out)
     fun editTimeRemapKey(layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int =
         nativeEditTimeRemapKey(nativeHandle, layer, index, frame, value, interp)
@@ -795,7 +795,7 @@ class AureaEngine private constructor() {
     private external fun nativeCancelCameraTrack(handle: Long)
     private external fun nativeCameraTrackStatus(handle: Long, out: FloatArray): String?
     private external fun nativeCameraTrackFeatures(handle: Long, frame: Long, out: FloatArray): Int
-    private external fun nativeApplyCameraTrack(handle: Long): Long
+    private external fun nativeApplyCameraTrack(handle: Long, frame: Long, x0: Float, y0: Float, x1: Float, y1: Float): Long
     private external fun nativeQueryTimeRemap(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean

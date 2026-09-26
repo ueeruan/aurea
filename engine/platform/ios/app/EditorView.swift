@@ -81,7 +81,7 @@ struct EditorView: View {
                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_voltar_editor")).padding(10)
             }
         }
-        .overlay { if model.showAddLayer { FloatingAddLayer() } }
+        .overlay { if model.showAddLayer && !model.sceneEditor { FloatingAddLayer() } }
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
     }
@@ -101,6 +101,7 @@ struct EditorView: View {
             PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen)
                 .overlay { if !model.fullscreen { StageOverlay().allowsHitTesting(false) } }
                 .overlay { if !model.fullscreen { StageInteractionOverlay().allowsHitTesting(false) } }
+            if model.panel == .tracking && !model.cameraFeatures.isEmpty { CameraTrackingOverlay() }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
                 ShellStageBanner(label: AureaText.t("editor_camada_bloqueada"), button: AureaText.t("editor_desbloquear"), icon: CupertinoGlyph.LockFill) {
                     model.mutate { $0.setLayer(layer.id, locked: false) }; model.refreshModel(force: true)
@@ -219,7 +220,7 @@ private struct ShellStageBanner: View {
         Canvas { raw, size in
             var context = raw
             let sx = size.width / CGFloat(max(1, model.compositionWidth)), sy = size.height / CGFloat(max(1, model.compositionHeight))
-            let fit = model.sceneEditor ? min(sx, sy) : max(sx, sy)
+            let fit = min(sx, sy)
             let origin = CGPoint(x: (size.width - CGFloat(model.compositionWidth) * fit) / 2, y: (size.height - CGFloat(model.compositionHeight) * fit) / 2)
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: origin.x + CGFloat(x) * fit, y: origin.y + CGFloat(y) * fit) }
             // Borda do quadro: dá para ver onde a composição termina mesmo com
@@ -1200,7 +1201,7 @@ private struct ShellMediaPicker: UIViewControllerRepresentable {
         }
         .frame(height: height)
         .task { try? await Task.sleep(nanoseconds: 7_000_000_000); withAnimation { hint = false } }
-        .sheet(isPresented: $model.showAddLayer) { AddLayerSheet().environmentObject(model) }
+        .sheet(isPresented: $model.showAddLayer) { AddLayerSheet(tab: 5).environmentObject(model) }
         .sheet(isPresented: $lights) { SceneLightControls().environmentObject(model) }
         .sheet(isPresented: $materials) { Panel3DView().environmentObject(model) }
         .onChange(of: model.panel) { panel in if panel == .none { materials = false } }
@@ -1320,5 +1321,41 @@ private struct FloatingAddLayer: View {
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
+    }
+}
+
+// Real solved features in composition coordinates; dragging selects a region.
+@MainActor private struct CameraTrackingOverlay: View {
+    @EnvironmentObject private var model: AureaModel
+    var body: some View {
+        GeometryReader { geometry in
+            let cw = CGFloat(max(1, model.compositionWidth)), ch = CGFloat(max(1, model.compositionHeight))
+            let fit = min(geometry.size.width / cw, geometry.size.height / ch)
+            let ox = (geometry.size.width - cw * fit) / 2, oy = (geometry.size.height - ch * fit) / 2
+            Canvas { context, _ in
+                let points = model.cameraFeatures
+                for i in stride(from: 0, to: points.count - points.count % 3, by: 3) {
+                    let point = CGPoint(x: CGFloat(points[i]), y: CGFloat(points[i + 1]))
+                    let x = point.x * fit + ox, y = point.y * fit + oy
+                    var path = Path(); path.move(to: CGPoint(x: x-4, y: y)); path.addLine(to: CGPoint(x: x+4, y: y))
+                    path.move(to: CGPoint(x: x, y: y-4)); path.addLine(to: CGPoint(x: x, y: y+4))
+                    let selected = model.cameraSelection?.contains(point) == true
+                    context.stroke(path, with: .color(selected ? .green : points[i + 2] > 0.5 ? .yellow : .red), lineWidth: 2)
+                }
+                if let r = model.cameraSelection {
+                    let box = CGRect(x: r.minX * fit + ox, y: r.minY * fit + oy, width: r.width * fit, height: r.height * fit)
+                    context.stroke(Path(box), with: .color(.green), lineWidth: 1)
+                }
+            }.contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    guard fit > 0 else { return }
+                    model.engine.pause()
+                    let a = CGPoint(x: (value.startLocation.x - ox) / fit, y: (value.startLocation.y - oy) / fit)
+                    let b = CGPoint(x: (value.location.x - ox) / fit, y: (value.location.y - oy) / fit)
+                    let slack: CGFloat = 8 / fit
+                    model.cameraSelection = CGRect(x: min(a.x,b.x)-slack, y: min(a.y,b.y)-slack, width: abs(a.x-b.x)+2*slack, height: abs(a.y-b.y)+2*slack)
+                    model.cameraSelectionFrame = model.status.playhead
+                })
+        }.accessibilityIdentifier("aurea.tracking.points")
     }
 }

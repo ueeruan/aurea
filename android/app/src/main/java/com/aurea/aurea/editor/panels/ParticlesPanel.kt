@@ -208,7 +208,7 @@ private fun LifeGradient(env: PanelEnv) {
 
 @Composable
 private fun PresetRow(store: EditorStore) {
-    val names = listOf(R.string.world_explosive, R.string.world_jet, R.string.world_vortex, R.string.world_box_lights)
+    val names = listOf(R.string.world_explosive, R.string.world_jet, R.string.world_vortex, R.string.world_box_lights, R.string.world_embers, R.string.world_snow, R.string.world_bokeh, R.string.world_fountain)
     Column {
         Text(stringResource(R.string.particular_presets), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)))
         Spacer(Modifier.height(5.dp))

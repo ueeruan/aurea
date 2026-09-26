@@ -1126,24 +1126,9 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     }
     const AssetId assetId = project_->add_asset(std::move(asset));
 
-    // Primeiro clipe: a composição adota o vídeo (tamanho par, dentro do que
-    // o aparelho exporta).
+    // Importing media must preserve the format explicitly chosen for the project.
+    // Fit the layer below; only the duration grows to accommodate the clip.
     const bool first = comp->layers().count() == 0;
-    if (first) {
-        // O teto do aparelho é "lado maior × lado menor" (um 1920×1080 também
-        // exporta 1080×1920). Aplicado por eixo, um vídeo em pé viraria uma
-        // composição quadrada; aqui a escala é UMA só, e a proporção fica.
-        const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
-        const u32 capShort = std::min(caps_.max_export_width(), caps_.max_export_height());
-        const u32 vLong = std::max(dispW, dispH), vShort = std::min(dispW, dispH);
-        const f64 k = std::min({1.0, static_cast<f64>(capLong) / vLong, static_cast<f64>(capShort) / vShort});
-        u32 w = static_cast<u32>(std::lround(dispW * k)) & ~1u;
-        u32 h = static_cast<u32>(std::lround(dispH * k)) & ~1u;
-        if (w == 0) w = 2;
-        if (h == 0) h = 2;
-        comp->set_size(w, h);
-        comp->set_fps(v.fps > 0.0 ? v.fps : 30.0);
-    }
     const f64 fps = comp->fps();
     const i64 frames = std::max<i64>(1, static_cast<i64>(std::ceil(static_cast<f64>(v.durationUs) * fps / 1e6 - 1e-6)));
     if (first || frames > comp->duration().value) comp->set_duration(FrameIndex{frames});
@@ -1652,6 +1637,7 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
         const Asset* a = project_->asset(l->source);
         if (!a || !a->has_video()) return Status{Errc::InvalidArgument, "camada sem video"};
         asset = *a;
+        asset.sourcePath = resolve_asset_path(asset.sourcePath);
         fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
         // Do quadro do cabeçote (onde o ponto foi tocado) até o fim, como o
         // rastreio para a frente do AE; antes dele o Nulo fica no 1º ponto.
@@ -1959,6 +1945,7 @@ Result<u32> Engine::track_mask(u64 layerId, u32 maskId, u32 mode) noexcept {
         const Asset* a = project_->asset(l->source);
         if (!a || !a->has_video()) return Status{Errc::InvalidArgument, "camada sem video"};
         asset = *a;
+        asset.sourcePath = resolve_asset_path(asset.sourcePath);
         fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
         start = std::clamp<i64>(playback_.current().value, l->start.value, std::max<i64>(l->start.value, l->end.value - 2));
         end = std::min<i64>(l->end.value, start + 3600);
@@ -2102,6 +2089,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode) noexcept {
         const Asset* a = project_->asset(l->source);
         if (!a || !a->has_video() || a->video.height == 0) return false;
         asset = *a;
+        asset.sourcePath = resolve_asset_path(asset.sourcePath);
         const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
         start = l->start.value;
         const i64 end = std::min<i64>(l->end.value, start + 1800);   // até 1 min a 30 fps por análise
@@ -2242,7 +2230,7 @@ Engine::CameraTrackStatus Engine::camera_track_status() noexcept {
     return st;
 }
 
-Result<u64> Engine::apply_camera_track() noexcept {
+Result<u64> Engine::apply_camera_track(i64 selectionFrame, Vec4 selectionRect) noexcept {
     if (!cameraTrack_ || cameraTrack_->state.load() != 2) return Status{Errc::InvalidState, "rastreio nao terminou"};
     CameraTrackJob* job = cameraTrack_.get();
     if (job->thread.joinable()) job->thread.join();
@@ -2258,6 +2246,37 @@ Result<u64> Engine::apply_camera_track() noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* video = comp ? comp->layer(LayerId::unpack(job->layerId)) : nullptr;
     if (!video) return Status{Errc::NotFound, "camada sumiu"};
+    const Asset* source = project_->asset(video->source);
+    if (!source || source->video.height == 0) return Status{Errc::InvalidState, "video sem dimensoes"};
+    const Mat4 videoMatrix = layer_comp_matrix(*comp, *video, FrameIndex{job->start});
+    const f32 videoScale = std::hypot(videoMatrix.col[1].x, videoMatrix.col[1].y);
+    const f32 displayedHeight = source->video.height * videoScale;
+    if (displayedHeight < 1e-6f) return Status{Errc::InvalidArgument, "video sem escala"};
+    const f32 compositionFov = 2.0f * std::atan(static_cast<f32>(comp->height()) / displayedHeight * std::tan(s.fovY * 0.5f));
+    std::vector<usize> selectedPoints;
+    if (selectionFrame >= 0) {
+        const i64 frame = selectionFrame - job->start;
+        const Asset* asset = project_->asset(video->source);
+        if (!asset || frame < 0 || frame >= res->tracks.frames || s.rotationOnly)
+            return Status{Errc::InvalidArgument, "selecione pontos 3D resolvidos no trecho analisado"};
+        const Mat4 matrix = layer_comp_matrix(*comp, *video, FrameIndex{selectionFrame});
+        const f32 kx = static_cast<f32>(asset->video.width) / res->tracks.width;
+        const f32 ky = static_cast<f32>(asset->video.height) / res->tracks.height;
+        const f32 left = std::min(selectionRect.x, selectionRect.z), right = std::max(selectionRect.x, selectionRect.z);
+        const f32 top = std::min(selectionRect.y, selectionRect.w), bottom = std::max(selectionRect.y, selectionRect.w);
+        usize point = 0;
+        for (usize t = 0; t < s.trackSolved.size(); ++t) {
+            if (!s.trackSolved[t]) continue;
+            const usize index = point++;
+            if (index >= s.points.size() || t >= res->tracks.pos.size()) continue;
+            const Vec2 p = res->tracks.pos[t][static_cast<usize>(frame)];
+            if (!tracking::Tracks2D::present(p)) continue;
+            const Vec4 q = matrix * Vec4{p.x * kx, p.y * ky, 0, 1};
+            if (q.w > 1e-6f && q.x / q.w >= left && q.x / q.w <= right && q.y / q.w >= top && q.y / q.w <= bottom)
+                selectedPoints.push_back(index);
+        }
+        if (selectedPoints.empty()) return Status{Errc::InvalidArgument, "nenhum ponto 3D selecionado"};
+    }
     history_.before_mutation(*comp, project_->timeline().current(), "camera rastreada");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
@@ -2292,7 +2311,7 @@ Result<u64> Engine::apply_camera_track() noexcept {
     cam->start = video->start;
     cam->end = video->end;
     cam->camera.active = true;
-    cam->camera.fov = s.fovY / kDeg2Rad;
+    cam->camera.fov = compositionFov / kDeg2Rad;
     cam->camera.nearPlane = std::max(1.0f, dist * 0.01f);
     cam->transform.anchor = Vec3{0, 0, 0};
     cam->transform.scale = Vec3{1, 1, 1};
@@ -2337,19 +2356,24 @@ Result<u64> Engine::apply_camera_track() noexcept {
     job->appliedPoints.clear();
     for (const Vec3& X : s.points) job->appliedPoints.push_back(toComp(X));
     if (!job->appliedPoints.empty()) {
+        std::vector<Vec3> referencePoints;
+        if (selectionFrame >= 0) {
+            for (usize index : selectedPoints) referencePoints.push_back(job->appliedPoints[index]);
+        } else { referencePoints = job->appliedPoints; }
         Vec3 centroid{}, normal{};
-        const bool plane = tracking::dominant_plane(job->appliedPoints, dist * 0.02f, 0.3f, centroid, normal);
+        const bool plane = tracking::dominant_plane(referencePoints, dist * 0.02f, 0.3f, centroid, normal);
         if (!plane) {
             std::vector<f32> xs, ys, zs;
-            for (const Vec3& q : job->appliedPoints) { xs.push_back(q.x); ys.push_back(q.y); zs.push_back(q.z); }
+            for (const Vec3& q : referencePoints) { xs.push_back(q.x); ys.push_back(q.y); zs.push_back(q.z); }
             auto med = [](std::vector<f32>& v) { std::nth_element(v.begin(), v.begin() + static_cast<long>(v.size() / 2), v.end()); return v[v.size() / 2]; };
             centroid = Vec3{med(xs), med(ys), med(zs)};
         }
+        const FrameIndex cameraStart = cam->start, cameraEnd = cam->end;
         const LayerId nid = comp->add_layer(LayerKind::Null, plane ? "Chão da cena" : "Centro da cena");
         if (Layer* n = comp->layer(nid)) {
             n->threeD = true;
-            n->start = cam->start;
-            n->end = cam->end;
+            n->start = cameraStart;
+            n->end = cameraEnd;
             n->transform.anchor = Vec3{0, 0, 0};
             n->transform.position = centroid;
             if (plane) {
@@ -2478,11 +2502,11 @@ namespace {
 /// editaveis depois, e nenhum deles cria um motor proprio.
 void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
     p = ParticleData{};
-    if (preset >= 10 && preset <= 13) {
+    if (preset >= 10 && preset <= 17) {
         // Particle World: new analytic 3D dynamics, compact mobile controls.
         // IDs 0..9 remain readable for existing projects, but are no longer
         // offered by the mobile creation/preset panels.
-        p.emitterType = static_cast<u32>(ParticleEmitter::WorldExplosive) + preset - 10;
+        p.emitterType = static_cast<u32>(ParticleEmitter::WorldExplosive) + std::min(preset, 13u) - 10;
         p.emitterRadius = w * .025f;
         p.rate = 1000; p.lifetime = 1; p.lifeRandom = 0;
         p.speed = w * .25f; p.speedRandom = .5f;
@@ -2508,6 +2532,28 @@ void particle_preset(ParticleData& p, u32 preset, f32 w, f32 h) noexcept {
             p.startOpacity = .65f; p.trailLength = 0;
             p.auxCount = 8; p.auxLife = 1; p.auxSpeed = w * .004f; p.auxSize = w * .003f;
             p.auxColor = Vec4{.1f,.8f,1,.5f};
+        }
+        if (preset >= 14) {
+            p.emitterType = static_cast<u32>(ParticleEmitter::WorldBox);
+            p.emitterSize = Vec2{w * 1.2f, h * 1.2f}; p.emitterDepth = w * .5f;
+            p.rate = 70; p.lifetime = 5; p.gravity = Vec3{}; p.speed = w * .015f;
+            p.startSize = w * .003f; p.endSize = w * .004f; p.trailLength = 0;
+            p.particleType = static_cast<u32>(ParticleShape::Soft); p.softness = .8f;
+            p.startColor = Vec4{1, .7f, .2f, 1}; p.endColor = Vec4{1, .2f, .04f, 0};
+            if (preset == 14) { // Embers rising through a volume.
+                p.gravity.y = -w * .012f; p.emitterDepth = w * .2f;
+            } else if (preset == 15) { // Snow, without additive overexposure.
+                p.gravity.y = w * .01f; p.rate = 100; p.blendMode = 0;
+                p.startColor = Vec4{1,1,1,1}; p.endColor = Vec4{.8f,.9f,1,0};
+            } else if (preset == 16) { // Defocused colored lights.
+                p.rate = 18; p.startSize = w * .018f; p.endSize = w * .03f;
+                p.startOpacity = .35f; p.startColor = Vec4{.4f,.3f,1,1}; p.endColor = Vec4{1,.2f,.6f,0};
+            } else { // Fast narrow fountain.
+                p.emitterType = static_cast<u32>(ParticleEmitter::WorldJet);
+                p.emitterRadius = w * .008f; p.rate = 350; p.lifetime = 1.8f;
+                p.speed = w * .4f; p.spread = 18; p.gravity.y = w * .12f;
+                p.particleType = static_cast<u32>(ParticleShape::Streak); p.trailLength = .025f;
+            }
         }
         return;
     }
@@ -2656,7 +2702,7 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
     particle_preset(l->particles, preset, w, h);
-    if (preset >= 10 && preset <= 13) l->threeD = true;
+    if (preset >= 10 && preset <= 17) l->threeD = true;
     if (preset == 9) logo_burst_from_text(*comp, lid, l->particles);
     l->particles.seed = lid.index * 7919u + 1u;
     // O cursor pode estar DEPOIS do fim da composição (a timeline não trava
@@ -2685,7 +2731,7 @@ bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const u32 seed = l->particles.seed;
     particle_preset(l->particles, preset, static_cast<f32>(comp->width()), static_cast<f32>(comp->height()));
-    if (preset >= 10 && preset <= 13) {
+    if (preset >= 10 && preset <= 17) {
         l->threeD = true;
         l->tracks.remove_if([](const Track& track) { return track.property == TrackProperty::ParticleParam; });
     }

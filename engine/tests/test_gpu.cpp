@@ -4358,7 +4358,7 @@ AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
 
 AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
     AUREA_REQUIRE_GPU();
-    for (u32 preset : {10u, 11u, 12u, 13u}) {
+    for (u32 preset : {10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u}) {
         Scene3DRig rig(640, 360);
         auto id = rig.e.add_particles(preset);
         AUREA_CHECK(id.ok());
@@ -4366,7 +4366,7 @@ AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
         auto* comp = project->timeline().composition(project->timeline().current());
         auto* layer = comp->layer(LayerId::unpack(*id));
         AUREA_CHECK(layer->threeD);
-        AUREA_CHECK_EQ(layer->particles.emitterType, preset);
+        AUREA_CHECK_EQ(layer->particles.emitterType, preset < 14 ? preset : preset == 17 ? 11u : 13u);
         AUREA_CHECK(layer->particles.maxParticles <= 12000);
         auto seek = [&](i64 frame) {
             Command cmd; cmd.type = CommandType::PlaybackSeek;

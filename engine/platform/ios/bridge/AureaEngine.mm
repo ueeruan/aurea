@@ -2210,6 +2210,17 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return e && e->gizmo_move_local(layerId, axis, amount, xyz) ? floats_to_array(xyz, 3) : @[];
 }
 - (void)cancelCameraTracking { if (auto* e = self.engine) e->cancel_camera_track(); }
+- (NSArray<NSNumber*>*)cameraFeaturesAtFrame:(long long)frame {
+    auto* e = self.engine; if (!e) return @[];
+    std::vector<float> points(4500);
+    auto count = e->camera_track_features(frame, points.data(), 1500);
+    return floats_to_array(points.data(), count * 3);
+}
+- (NSString*)applyCameraSelectionAtFrame:(long long)frame x0:(float)x0 y0:(float)y0 x1:(float)x1 y1:(float)y1 {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    auto result = e->apply_camera_track(frame, aurea::Vec4{x0, y0, x1, y1});
+    return result.ok() ? @"" : @"Selecione pontos 3D resolvidos no trecho analisado.";
+}
 - (NSString*)applyCameraTracking {
     auto* e = self.engine; if (!e) return @"Motor indisponível";
     return e->apply_camera_track().ok() ? @"" : @"A análise ainda não produziu uma câmera válida.";

@@ -82,6 +82,7 @@ struct TrackingPanel: View {
             }
         }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
             .onAppear(perform: reload).onReceive(timer) { _ in reload() }
+            .onDisappear { model.cameraFeatures = []; model.cameraSelection = nil }
     }
     @ViewBuilder private var cameraSection: some View {
         Text(AureaText.t("panel_camera_3d")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
@@ -117,7 +118,7 @@ struct TrackingPanel: View {
             note("\(Int(number("solved"))) de \(Int(number("frames"))) quadros · precisão \(Int(number("confidence") * 100))% · abertura da lente \(Int(number("fovDeg").rounded()))°")
             Spacer().frame(height: 8)
             action("panel_criar_camera", "panel_cria_camera_3d_animada_ponto_guia") {
-                let error = model.engine.applyCameraTracking()
+                let error = model.applySelectedCameraTracking()
                 model.toast = error.isEmpty ? AureaText.t("msg_camera_rastreada_criada_ligue_modelos_3d") : error
                 model.refreshModel(force: true); reload()
             }
@@ -136,7 +137,10 @@ struct TrackingPanel: View {
     private func note(_ text: String) -> some View {
         Text(text).font(.aurea(size: 12)).lineSpacing(2).foregroundStyle(AureaColors.muted)
     }
-    private func reload() { status = model.engine.cameraTrackingStatus() }
+    private func reload() {
+        status = model.engine.cameraTrackingStatus()
+        model.cameraFeatures = state == 2 ? model.engine.cameraFeatures(atFrame: model.status.playhead).map(\.floatValue) : []
+    }
     private func analyze() {
         guard let id = model.primarySelection else { return }
         model.engine.setCameraTrack(mode, forLayer: id); reload()

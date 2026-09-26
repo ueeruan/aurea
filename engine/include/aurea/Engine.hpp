@@ -683,7 +683,7 @@ public:
     /// Cria a câmera rastreada (keyframes por quadro, FOV resolvida) e um Nulo
     /// 3D no chão da cena (plano dominante) ou no centro dos pontos. Devolve a
     /// câmera. A câmera antiga ativa é desativada (desfazível).
-    [[nodiscard]] Result<u64> apply_camera_track() noexcept;
+    [[nodiscard]] Result<u64> apply_camera_track(i64 selectionFrame = -1, Vec4 selectionRect = {}) noexcept;
     /// Pontos 3D reconstruídos, no mundo da composição (depois de aplicar).
     [[nodiscard]] std::vector<Vec3> camera_track_points() noexcept;
     /// Pontos seguidos no quadro `frame` da composição, em px da composição

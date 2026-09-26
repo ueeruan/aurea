@@ -44,6 +44,8 @@ import UIKit
         var coreStatus = AureaStatus()
         let readCoreStatus = model.engine.readStatus(&coreStatus)
         let packet: [String: Any] = [
+            "processFootprintBytes": model.engine.perf()["processFootprintBytes"] ?? 0,
+            "playing": readCoreStatus ? coreStatus.playing : 0,
             "version": 1, "runID": runID, "scene": scene, "ready": ready,
             "coreStarted": model.started, "coreError": model.startError ?? "",
             "modelRevision": model.status.modelRevision, "playhead": model.status.playhead,

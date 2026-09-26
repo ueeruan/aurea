@@ -124,7 +124,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                         PopupItem(stringResource(R.string.sh_add_null_3d), false) { addMenu = false; store.addNull(true) },
                         PopupItem(stringResource(R.string.scene_light_directional), false) { addMenu = false; store.addLight(0) },
                         PopupItem(stringResource(R.string.scene_light_point), false) { addMenu = false; store.addLight(1) },
-                        PopupItem(stringResource(R.string.sh_add_model_3d) + "…", false) { addMenu = false; ui.adding = true },
+                        PopupItem(stringResource(R.string.sh_add_model_3d) + "…", false) { addMenu = false; ui.addTab = AddTab.Model3D; ui.adding = true },
                     ), onDismiss = { addMenu = false }, width = 220.dp)
                 }
                 if (selected != null && (selected.kind == LayerType.Model3D.kind || (selected.kind == LayerType.Text.kind && selected.isThreeD))) {

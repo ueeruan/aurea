@@ -413,6 +413,11 @@ AUREA_TEST(Tracking, EngineTracksVideoAndPointsStayPinned) {
     }
     std::printf("    pontos no video (quadro 45): %u, %u no solve (%u sobre mancha), %u sobre uma mancha verdadeira\n", nf, solved, solvedNear, nearTruth);
     AUREA_CHECK(nf >= 100 && solved * 2 > nf && nearTruth * 10 >= nf * 8 && solvedNear * 10 >= solved * 8);
+    const u32 beforeSelection = comp->layers().count();
+    AUREA_CHECK(!e.apply_camera_track(45, Vec4{-100,-100,-90,-90}).ok());
+    AUREA_CHECK_EQ(comp->layers().count(), beforeSelection);
+    AUREA_CHECK(e.apply_camera_track(45, Vec4{0,0,640,360}).ok());
+    AUREA_CHECK_EQ(comp->layers().count(), beforeSelection + 2);
     // De novo, mesmo vídeo e ajustes: do cache, na hora.
     AUREA_CHECK(e.start_camera_track(*layer, 1));
     const Engine::CameraTrackStatus again = e.camera_track_status();

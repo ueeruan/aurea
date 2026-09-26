@@ -1,5 +1,6 @@
 #include "TestFramework.hpp"
 #include "aurea/ai/Upscaler.hpp"
+#include "aurea/ai/TemporalStabilizer.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -41,12 +42,12 @@ AUREA_TEST(Ai, TrainedUpscalerTilesMatchWholeImage) {
     for (u32 scale : {2u, 4u}) {
         std::atomic<bool> cancel{false};
         ai::Upscaler model;
-        AUREA_CHECK(model.load(scale, 1, 128).ok());
+        AUREA_CHECK(model.load(scale, 1, 128, ai::Upscaler::Backend::Cpu).ok());
         Output whole{w * scale, h * scale, std::vector<u8>(w * h * scale * scale * 3)};
         const auto start = std::chrono::steady_clock::now();
         AUREA_CHECK(model.run(input.data(), w, h, w * 3, cancel, Output::tile, &whole).ok());
         AUREA_CHECK_EQ(whole.calls, 1u);
-        AUREA_CHECK(model.load(scale, 1, 32).ok());
+        AUREA_CHECK(model.load(scale, 1, 32, ai::Upscaler::Backend::Cpu).ok());
         Output tiled{whole.width, whole.height, std::vector<u8>(whole.pixels.size())};
         AUREA_CHECK(model.run(input.data(), w, h, w * 3, cancel, Output::tile, &tiled).ok());
         AUREA_CHECK_EQ(tiled.calls, 6u);
@@ -84,4 +85,77 @@ AUREA_TEST(Ai, UpscalerRejectsInvalidInputs) {
     AUREA_CHECK(model.load(2, 1, 129).code() == Errc::InvalidArgument);
     std::atomic<bool> cancel{false};
     AUREA_CHECK(model.run(nullptr, 1, 1, 3, cancel, nullptr, nullptr).code() == Errc::InvalidState);
+}
+
+AUREA_TEST(Ai, VulkanMatchesCpuWhenAvailable) {
+    constexpr u32 w = 65, h = 49; // Multiple tiles and odd boundary dimensions.
+    std::vector<u8> rgb(w * h * 3);
+    for (usize i = 0; i < rgb.size(); ++i) rgb[i] = static_cast<u8>(i * 17);
+    std::atomic<bool> cancel{false};
+    for (u32 scale : {2u, 4u}) {
+        ai::Upscaler gpu, cpu;
+        const Status loaded = gpu.load(scale, 1, 32, ai::Upscaler::Backend::Vulkan);
+        if (loaded.code() == Errc::NotSupported) {
+            std::printf("    Vulkan inference unavailable on this host (GPU acceptance NOT run)\n");
+            AUREA_CHECK(cpu.load(scale).ok());
+            AUREA_CHECK(cpu.backend() == ai::Upscaler::Backend::Cpu);
+            continue;
+        }
+        AUREA_CHECK(loaded.ok());
+        if (!loaded.ok()) continue;
+        AUREA_CHECK(gpu.backend() == ai::Upscaler::Backend::Vulkan);
+        AUREA_CHECK(cpu.load(scale, 1, 32, ai::Upscaler::Backend::Cpu).ok());
+        Output a{w * scale, h * scale, std::vector<u8>(w * h * scale * scale * 3)};
+        Output b{a.width, a.height, std::vector<u8>(a.pixels.size())};
+        const auto begin = std::chrono::steady_clock::now();
+        AUREA_CHECK(cpu.run(rgb.data(), w, h, w * 3, cancel, Output::tile, &a).ok());
+        const auto middle = std::chrono::steady_clock::now();
+        AUREA_CHECK(gpu.run(rgb.data(), w, h, w * 3, cancel, Output::tile, &b).ok());
+        const auto end = std::chrono::steady_clock::now();
+        std::printf("    tiled CPU %.1f ms, Vulkan %.1f ms (host fixture, not phone FPS)\n",
+            std::chrono::duration<double, std::milli>(middle - begin).count(),
+            std::chrono::duration<double, std::milli>(end - middle).count());
+        int worst = 0; u64 error = 0;
+        for (usize i = 0; i < a.pixels.size(); ++i) {
+            const int d = std::abs(int(a.pixels[i]) - int(b.pixels[i]));
+            worst = std::max(worst, d); error += d;
+        }
+        std::printf("    Vulkan x%u vs CPU: max %d, mean %.6f\n", scale, worst, double(error) / a.pixels.size());
+        AUREA_CHECK(worst <= 4);
+        AUREA_CHECK(error < a.pixels.size());
+        Output interrupted{a.width, a.height, std::vector<u8>(a.pixels.size()), 0, 0, &cancel};
+        AUREA_CHECK(gpu.run(rgb.data(), w, h, w * 3, cancel, Output::tile, &interrupted).code() == Errc::Cancelled);
+        AUREA_CHECK_EQ(interrupted.calls, 1u);
+        cancel.store(false);
+    }
+}
+
+AUREA_TEST(Ai, TemporalStaticDetailDoesNotTrailMotionCutsOrSeeks) {
+    ai::TemporalStabilizer temporal;
+    constexpr u32 w = 8, h = 8, ow = 16, oh = 16;
+    std::vector<u8> rgb(w * h * 3, 100), y(ow * oh, 100);
+    AUREA_CHECK(temporal.process(rgb.data(), w, h, y.data(), ow, oh, 0).ok());
+    std::fill(y.begin(), y.end(), 108);
+    rgb[(3 * w + 3) * 3] = 140; // Local moving detail, less than 25% of scene.
+    AUREA_CHECK(temporal.process(rgb.data(), w, h, y.data(), ow, oh, 1).ok());
+    AUREA_CHECK_EQ(y[0], u8{102});
+    AUREA_CHECK_EQ(y[6 * ow + 6], u8{108});
+    AUREA_CHECK_EQ(y[4 * ow + 4], u8{108}); // Neighbourhood also protected.
+    std::fill(rgb.begin(), rgb.end(), 230); // Cut invalidates history.
+    std::fill(y.begin(), y.end(), 110);
+    AUREA_CHECK(temporal.process(rgb.data(), w, h, y.data(), ow, oh, 2).ok());
+    AUREA_CHECK(std::all_of(y.begin(), y.end(), [](u8 p) { return p == 110; }));
+    std::fill(y.begin(), y.end(), 118);
+    AUREA_CHECK(temporal.process(rgb.data(), w, h, y.data(), ow, oh, 9).ok());
+    AUREA_CHECK_EQ(y[0], u8{118}); // Discontinuous frame never reuses history.
+    temporal.reset();
+    std::fill(y.begin(), y.end(), 120);
+    AUREA_CHECK(temporal.process(rgb.data(), w, h, y.data(), ow, oh, 10).ok());
+    AUREA_CHECK_EQ(y[0], u8{120});
+    std::fill(rgb.begin(), rgb.end(), 231); // Small coherent fade is intentional.
+    std::fill(y.begin(), y.end(), 124);
+    AUREA_CHECK(temporal.process(rgb.data(), w, h, y.data(), ow, oh, 11).ok());
+    AUREA_CHECK_EQ(y[0], u8{124});
+    AUREA_CHECK(temporal.process(rgb.data(), 16384, 16384, y.data(), ow, oh, 11).code() == Errc::BudgetExceeded);
+    AUREA_CHECK(temporal.process(nullptr, w, h, y.data(), ow, oh, 11).code() == Errc::InvalidArgument);
 }

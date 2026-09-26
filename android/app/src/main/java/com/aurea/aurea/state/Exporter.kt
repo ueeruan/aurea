@@ -175,10 +175,10 @@ class Exporter internal constructor(
         result.fold(
             onSuccess = { (uri, label) ->
                 val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri, message = label)
-                // Ponto seguro: o render ACABOU e o vídeo já está na galeria. Se houver
-                // anúncio (e a frequência deixar), ele aparece antes do resultado; sem
-                // anúncio, offline ou com erro, o resultado aparece na hora.
-                com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { state = pronto }
+                // Publication succeeded independently of the ad SDK. A late
+                // callback must never overwrite a newer export's state.
+                state = pronto
+                com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { }
             },
             onFailure = { state = state.copy(phase = ExportPhase.Failed, message = "O vídeo foi gerado, mas não consegui salvar na galeria.") },
         )

@@ -97,6 +97,7 @@ fun HomeScreen(store: EditorStore) {
     ) {
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(AureaColors.SystemBarVeil))
         LiveNoticeBanners(vm.notices)
+        ReleaseNotesEntry()
         Box(Modifier.fillMaxWidth().weight(1f)) {
             Box(Modifier.fillMaxSize().backdropSource(shellBackdrop)) {
                 when (vm.tab) {

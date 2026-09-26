@@ -368,7 +368,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.mediaFactory = &c->media;
     config.exportSinkFactory = &android::make_mediacodec_export_sink;
     config.audioOutput = &c->audioOut;
-    config.defaultFontPath = "/system/fonts/Roboto-Regular.ttf";
+    config.defaultFontPath = config.cacheDirectory + "/Roboto-Regular.ttf";
     config.imageLoader = &load_image;
     config.enableTelemetry = true;
 

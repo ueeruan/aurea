@@ -1,6 +1,9 @@
 #include "aurea/ai/Upscaler.hpp"
 #include <net.h>
 #include <datareader.h>
+#include <gpu.h>
+#include <layer.h>
+#include "aurea/core/Log.hpp"
 #include <algorithm>
 #include <limits>
 #include <new>
@@ -46,6 +49,8 @@ struct Upscaler::Impl {
     u32 scale = 0;
     u32 tileSize = 64;
     u64 peak = 0;
+    Backend backend = Backend::Cpu;
+    bool fallback = false;
 };
 
 Upscaler::Upscaler() noexcept {
@@ -55,19 +60,36 @@ Upscaler::Upscaler() noexcept {
 Upscaler::~Upscaler() = default;
 u32 Upscaler::scale() const noexcept { return impl_ ? impl_->scale : 0; }
 u64 Upscaler::peak_working_bytes() const noexcept { return impl_ ? impl_->peak : 0; }
+Upscaler::Backend Upscaler::backend() const noexcept { return impl_ ? impl_->backend : Backend::Cpu; }
 
-Status Upscaler::load(u32 scale, u32 threads, u32 tileSize) try {
+Status Upscaler::load(u32 scale, u32 threads, u32 tileSize, Backend requested) try {
     if (!impl_) return Errc::OutOfMemory;
     if ((scale != 2 && scale != 4) || threads < 1 || threads > 4 || tileSize < 32 || tileSize > 128)
         return Errc::InvalidArgument;
     impl_->scale = 0;
     impl_->net.clear();
+    impl_->backend = Backend::Cpu;
+    impl_->fallback = requested == Backend::Auto;
     // Baseline is a single CPU worker on every platform. No OpenMP runtime or
     // graphics-device dependency is injected into the editor's render backend.
     impl_->net.opt.num_threads = 1;
     impl_->net.opt.use_vulkan_compute = false;
+#if NCNN_VULKAN
+    if (requested != Backend::Cpu && ncnn::get_gpu_count() > 0) {
+        const int index = ncnn::get_default_gpu_index();
+        if (index >= 0 && ncnn::get_gpu_device(index) && ncnn::get_gpu_device(index)->is_valid()
+            && (requested == Backend::Vulkan || ncnn::get_gpu_info(index).type() != 3)) {
+            impl_->net.set_vulkan_device(index);
+            impl_->net.opt.use_vulkan_compute = true;
+            impl_->backend = Backend::Vulkan;
+        }
+    }
+#endif
+    if (requested == Backend::Vulkan && impl_->backend != Backend::Vulkan)
+        return Status{Errc::NotSupported, "Vulkan inference unavailable"};
     impl_->net.opt.use_fp16_packed = false;
     impl_->net.opt.use_fp16_storage = false;
+    impl_->net.opt.use_fp16_uniform = false;
     impl_->net.opt.use_fp16_arithmetic = false;
     impl_->net.opt.use_bf16_storage = false;
     impl_->net.opt.use_winograd_convolution = false;
@@ -76,11 +98,26 @@ Status Upscaler::load(u32 scale, u32 threads, u32 tileSize) try {
     ncnn::DataReaderFromMemory reader(weights);
     // The raw-pointer overload reports bytes consumed, ignoring load errors.
     // The reader overload propagates allocation/weight parsing failures.
-    if (impl_->net.load_param_mem(embedded::model_param(scale)) != 0
-        || impl_->net.load_model(reader) != 0)
+    const int paramResult = impl_->net.load_param_mem(embedded::model_param(scale));
+#if NCNN_VULKAN
+    if (paramResult == 0 && impl_->backend == Backend::Vulkan && scale == 2) {
+        // This pinned ncnn bicubic Vulkan pass produced black x2 output in
+        // pixel parity tests. Keep learned convolutions/shuffle on the GPU,
+        // but run the model's final x4->x2 resample through its exact CPU op.
+        for (auto* layer : impl_->net.mutable_layers())
+            if (layer && layer->name == "Resize_40") layer->support_vulkan = false;
+    }
+#endif
+    if (paramResult != 0 || impl_->net.load_model(reader) != 0)
+    {
+        if (impl_->backend == Backend::Vulkan && impl_->fallback)
+            return load(scale, threads, tileSize, Backend::Cpu);
         return Status{Errc::CorruptData, "AI upscale model could not be loaded"};
+    }
     impl_->scale = scale;
     impl_->tileSize = tileSize;
+    AUREA_LOG_INFO("AI upscale x%u: %s, tile %u", scale,
+                   impl_->backend == Backend::Vulkan ? "Vulkan" : "CPU", tileSize);
     return OkStatus;
 } catch (const std::bad_alloc&) {
     if (impl_) impl_->scale = 0;
@@ -116,11 +153,24 @@ Status Upscaler::run(const u8* rgb, u32 width, u32 height, u32 stride,
         ncnn::Mat in = ncnn::Mat::from_pixels(input.data(), ncnn::Mat::PIXEL_RGB, static_cast<int>(tw), static_cast<int>(th), &allocator);
         if (in.empty()) return Errc::BudgetExceeded;
         in.substract_mean_normalize(nullptr, norm);
-        auto ex = impl_->net.create_extractor();
-        ex.set_blob_allocator(&allocator);
-        ex.set_workspace_allocator(&allocator);
         ncnn::Mat out;
-        if (ex.input("data", in) != 0 || ex.extract("output", out) != 0 || out.empty())
+        auto infer = [&]() {
+            auto ex = impl_->net.create_extractor();
+            ex.set_blob_allocator(&allocator);
+            ex.set_workspace_allocator(&allocator);
+            return ex.input("data", in) == 0 && ex.extract("output", out) == 0 && !out.empty();
+        };
+        bool inferred = infer();
+        if (!inferred && impl_->backend == Backend::Vulkan && impl_->fallback) {
+            // Retry only the failing tile, before delivering it. The extractor
+            // has released its GPU resources before the network is cleared.
+            out.release();
+            const Status cpu = load(scale, 1, tile, Backend::Cpu);
+            if (!cpu.ok()) return cpu;
+            AUREA_LOG_WARN("AI Vulkan tile failed; continuing on CPU");
+            inferred = infer();
+        }
+        if (!inferred)
             return Status{Errc::BudgetExceeded, "AI inference could not allocate or process a tile"};
         if (cancel.load(std::memory_order_relaxed)) return Errc::Cancelled;
         if (out.w != static_cast<int>(tw * scale) || out.h != static_cast<int>(th * scale) || out.c != 3)

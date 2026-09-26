@@ -141,6 +141,10 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
     // O losango da Rotação vale para X, Y e Z juntos (um keyframe só).
     val keyProps = transformKeyProperties(tab, show3D)
+    androidx.compose.runtime.DisposableEffect(store, tab, show3D) {
+        store.timelineFocus = keyProps.map { TrackKey(it) }
+        onDispose { store.timelineFocus = null }
+    }
     val canKey = props.isNotEmpty()
     val look by remember(store, tab, axis, show3D) {
         derivedStateOf { if (keyProps.isEmpty()) com.aurea.aurea.ui.ds.KeyframeLook.None else transformLook(store.detail, keyProps) }

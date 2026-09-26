@@ -10,6 +10,7 @@ namespace aurea::ai {
 /// The bundled model is Real-ESRGAN animevideov3, trained for animation.
 class Upscaler {
 public:
+    enum class Backend { Auto, Cpu, Vulkan };
     struct Tile {
         const u8* rgb = nullptr;
         u32 x = 0, y = 0, width = 0, height = 0, stride = 0;
@@ -25,12 +26,14 @@ public:
     Upscaler& operator=(const Upscaler&) = delete;
     /// Output scales 2 or 4 (2x uses upstream's neural 4x + bicubic output).
     /// Threads 1..4, input tile side 32..128.
-    [[nodiscard]] Status load(u32 scale, u32 threads = 2, u32 tileSize = 64);
+    [[nodiscard]] Status load(u32 scale, u32 threads = 2, u32 tileSize = 64,
+                              Backend backend = Backend::Auto);
+    [[nodiscard]] Backend backend() const noexcept;
     [[nodiscard]] Status run(const u8* rgb, u32 width, u32 height, u32 stride,
                              const std::atomic<bool>& cancel, TileCallback callback,
                              void* context);
     [[nodiscard]] u32 scale() const noexcept;
-    /// Activation/workspace peak from the most recent run (excludes weights).
+    /// CPU activation/workspace peak (excludes weights and Vulkan allocations).
     [[nodiscard]] u64 peak_working_bytes() const noexcept;
 
 private:

@@ -422,6 +422,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var selectedKeyframe by mutableStateOf<Pair<Long, KeyframeRow>?>(null)
         private set
 
+    var timelineFocus by mutableStateOf<List<com.aurea.aurea.engine.TrackKey>?>(null)
+
     /** Aviso curto e não bloqueante (ex.: "Salvo na galeria"). A UI some com ele em ~2 s. */
     var toast by mutableStateOf<String?>(null)
         private set
@@ -483,12 +485,30 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var systemMem: android.app.ActivityManager.MemoryInfo? = null
     private val vsyncNs: Long by lazy { (1e9f / displayRefreshRate().coerceAtLeast(30f)).toLong() }
     private var scrubbing = false
+    private var pendingPlayhead: Int? = null
+    private var pendingPlayheadUntil = 0L
+
+    private fun holdPlayhead(frame: Int) {
+        pendingPlayhead = frame
+        pendingPlayheadUntil = android.os.SystemClock.uptimeMillis() + 2000L
+        playhead = frame
+    }
 
     init {
         lifecycleThread.execute {
             synchronized(lifecycleLock) {
                 if (destroyed) return@synchronized
                 val dirs = directories()
+                // Runs on the lifecycle worker, before native text setup.
+                // A bundled face makes fallback independent of OEM font paths.
+                runCatching {
+                    val font = File(dirs.cache, "Roboto-Regular.ttf")
+                    val pending = File(dirs.cache, "Roboto-Regular.ttf.tmp")
+                    app.assets.open("Roboto-Regular.ttf").use { input ->
+                        pending.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    check(pending.renameTo(font)) { "Could not install default font" }
+                }.onFailure { android.util.Log.w("AureaFonts", "Bundled fallback unavailable; using system fonts", it) }
                 val debug = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 // Sondagem do aparelho: medida UMA vez (primeira abertura ou SO
                 // novo) e guardada; o motor decide orçamento, workers, teto de
@@ -868,14 +888,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             canRedo = status.canRedo,
         )
         if (p != project) project = p
-        if (!scrubbing && status.playhead.toInt() != playhead) playhead = status.playhead.toInt()
+        if (pendingPlayhead == status.playhead.toInt() || android.os.SystemClock.uptimeMillis() >= pendingPlayheadUntil) pendingPlayhead = null
+        if (!scrubbing && pendingPlayhead == null && status.playhead.toInt() != playhead) playhead = status.playhead.toInt()
         if (status.playing != playing) playing = status.playing
         val scale = when {
             status.previewAuto -> "AUTO"
             status.previewDenominator <= 1 -> "FULL"
             else -> "1/${status.previewDenominator}"
         }
-        val pv = PreviewState(status.previewWidth, status.previewHeight, scale, status.currentFps)
+        // FPS diagnostics belong to PerfSnapshot. Updating this geometry state
+        // for every floating-point FPS change invalidated the stage needlessly.
+        val pv = PreviewState(status.previewWidth, status.previewHeight, scale)
         if (pv != preview) preview = pv
         if (status.thumbnailGeneration != lastThumbGen) {
             lastThumbGen = status.thumbnailGeneration
@@ -1792,11 +1815,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleTransformKeyframe(properties: IntArray, layer: Long? = primary) {
         val id = layer ?: return
         val d = (if (id == primary) detail else detailOf(id)) ?: return
-        val allHere = properties.all { d.hasKeyAtPlayhead(it) }
+        val row = layers.firstOrNull { it.id == id } ?: return
+        val local = playhead - row.startFrame + row.offsetFrames
+        val allHere = properties.all { p -> keyframes[id].orEmpty().any {
+            it.property == p && it.effectIndex == NO_EFFECT && it.time == local
+        } }
         group(if (allHere) "remover keyframe" else "adicionar keyframe") {
             properties.forEach { p ->
-                if (allHere) deleteKeyframe(id, p, NO_EFFECT, 0, d.localPlayhead)
-                else insertKeyframe(id, p, NO_EFFECT, 0, d.localPlayhead, transformValue(d, p))
+                if (allHere) deleteKeyframe(id, p, NO_EFFECT, 0, local)
+                else insertKeyframe(id, p, NO_EFFECT, 0, local, transformValue(d, p))
             }
         }
     }
@@ -1934,14 +1961,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     private fun clampFrame(frame: Int) = max(0, frame)
 
-    fun play() = send { play() }
+    fun play() { pendingPlayhead = null; send { play() } }
     fun pause() = send { pause() }
-    fun togglePlayback() = send { togglePlayback() }
+    fun togglePlayback() { pendingPlayhead = null; send { togglePlayback() } }
 
     fun seek(frame: Int) {
         val f = clampFrame(frame)
         send { seek(frameToNs(f)) }
-        playhead = f
+        holdPlayhead(f)
     }
 
     /** Scrub: o playhead da UI segue o dedo; o decoder coalesce os pedidos. */
@@ -1960,13 +1987,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun scrubEnd() {
+        holdPlayhead(playhead)
         send { scrubEnd() }
         scrubbing = false
         refreshDetail()
         refreshEffectParams()
     }
 
-    fun step(frames: Int) = send { step(frames) }
+    fun step(frames: Int) { pendingPlayhead = null; send { step(frames) } }
 
     /** Composition markers take precedence even when there is no next marker. */
     fun stepTransport(direction: Int) {
@@ -3093,10 +3121,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return
         }
         val skipped = envelope.optJSONArray("skipped")?.length() ?: 0
+        val warnings = envelope.optJSONArray("warnings")?.length() ?: 0
+        if (skipped > 0 || warnings > 0) {
+            showToast(appText(R.string.am_import_lossless_required))
+            return
+        }
         val base = envelope.optString("name").ifBlank { "Alight Motion" }
-        var name = "AM · $base".take(60)
-        var n = 2
-        while (presets.exists(com.aurea.aurea.presets.PresetKind.Effects, name)) name = "AM · $base ${n++}".take(60)
+        val name = com.aurea.aurea.presets.importedPresetName(base) {
+            presets.exists(com.aurea.aurea.presets.PresetKind.Effects, it)
+        }
         val entry = presets.save(com.aurea.aurea.presets.PresetKind.Effects, name, preset)
         if (entry == null) {
             showToast(appText(R.string.msg_nao_foi_possivel_salvar_o_preset))
@@ -3601,7 +3634,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Marca (ou desmarca) um frame qualquer, sempre com aviso na tela. */
     fun toggleMarkerAt(frame: Int) {
-        val f = clampFrame(frame)
+        val f = frame.coerceIn(0, max(0, project.durationFrames - 1))
+        pause()
+        seek(f)
         val on = engine.toggleMarker(f.toLong())
         refreshNow()
         showToast(if (on) appText(R.string.msg_marca_adicionada) else appText(R.string.msg_marca_removida))

@@ -11,6 +11,7 @@ EN = ROOT + r"\android\app\src\main\res\values-en\strings.xml"
 OUT = ROOT + r"\engine\platform\ios\app\AureaStrings.swift"
 
 KEYS = [
+    "release_notes_title", "release_notes_body", "am_import_lossless_required", "am_import_read_failed",
     # comum
     "common_cancel", "common_delete", "common_duplicate", "common_remove", "common_rename",
     "common_save", "common_search", "common_open", "common_irreversible",

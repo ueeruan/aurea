@@ -303,6 +303,26 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
     private var byId: [Int64: Cached] = [:]
     private var ordered: [Cached] = []
     private var last: [TimelineRow] = []
+    private var generation: UInt64 = 0
+    private var focusedGeneration: UInt64 = .max
+    private var focusedID: Int64?
+    private var focusedTracks: [TimelineTrack] = []
+    private var focusedResult: [TimelineRow] = []
+
+    func focused(_ base: [TimelineRow], id: Int64?, tracks: [TimelineTrack]?, layers: [LayerItem], keys: [Int64: [KeyframeItem]]) -> [TimelineRow] {
+        guard let id, let tracks else { return base }
+        if focusedGeneration == generation && focusedID == id && focusedTracks == tracks { return focusedResult }
+        focusedGeneration = generation; focusedID = id; focusedTracks = tracks
+        focusedResult = base.map { row in
+            guard row.id == id, let layer = layers.first(where: { $0.id == id }) else { return row }
+            return buildTimelineRow(layer, (keys[id] ?? []).filter { key in
+                tracks.contains { $0.property == Int(key.property) && $0.effect == key.effectIndex && $0.param == key.paramIndex }
+            })
+        }
+        // Expanded rows also contain the base row, so a focus change invalidates them.
+        expandedRevision = .max
+        return focusedResult
+    }
 
     func build(_ layers: [LayerItem], _ keyframes: [Int64: [KeyframeItem]]) -> [TimelineRow] {
         // Nada mudou (o caso comum: revisão que não mexeu na timeline): a MESMA
@@ -342,6 +362,7 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
         byId = next
         ordered = byPos
         last = out
+        generation &+= 1
         return out
     }
 }

@@ -96,7 +96,13 @@ struct TransformView: View {
             }
         }
         .foregroundStyle(AureaColors.text)
-        .onDisappear { endGesture() }
+        .onAppear { updateTimelineFocus() }
+        .onChange(of: keyProps) { _ in updateTimelineFocus() }
+        .onDisappear { endGesture(); model.timelineFocus = nil }
+    }
+
+    private func updateTimelineFocus() {
+        model.timelineFocus = keyProps.map { TimelineTrack(property: Int($0)) }
     }
 
     // Fields are part of the touch pad for Position, above it for Pivot.
@@ -418,7 +424,9 @@ struct TransformView: View {
     }
     private func toggleKey() {
         guard !(model.selectedLayer?.locked ?? false), !keyProps.isEmpty else { return }
-        let remove = look == .keyHere
+        let remove = keyProps.allSatisfy { property in
+            (model.keyframes[id] ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == model.localPlayhead }
+        }
         let snapshot = keyProps.map { ($0, value($0)) }, local = model.localPlayhead
         model.mutate { core in
             core.beginUndoGroup()

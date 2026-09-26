@@ -8,6 +8,7 @@ struct EffectsView: View {
     @EnvironmentObject private var model: AureaModel
     @State private var browsing = false
     @State private var importingAM = false
+    @State private var importTask: Task<Void, Never>?
     @State private var openId: UInt32?
     @State private var known: Set<UInt32> = []
     @State private var loadedLayer: Int64?
@@ -61,6 +62,9 @@ struct EffectsView: View {
         .background(AureaColors.editorPanel)
         .onAppear { enterLayer(); model.refreshSelectedLayer(); refreshExpressions() }
         .onChange(of: model.primarySelection) { _ in enterLayer() }
+        .onChange(of: selected) { _ in updateTimelineFocus() }
+        .onAppear { updateTimelineFocus() }
+        .onDisappear { model.timelineFocus = nil }
         .onChange(of: model.effects.map(\.effectId)) { ids in
             let added = Set(ids).subtracting(known); known = Set(ids)
             if let id = ids.last(where: { added.contains($0) }) { open(id) }
@@ -72,12 +76,31 @@ struct EffectsView: View {
         // Alight Motion: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
         .fileImporter(isPresented: $importingAM, allowedContentTypes: [.data, .xml, .zip]) { result in
             guard case .success(let url) = result else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            if let data = try? Data(contentsOf: url) { model.importAlightMotion(data) }
-            else { model.toast = AureaText.t("am_import_failed", url.lastPathComponent) }
+            let target = model.primarySelection
+            importTask?.cancel()
+            importTask = Task {
+                let data = await Task.detached(priority: .userInitiated) { () -> Data? in
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    guard let stream = InputStream(url: url) else { return nil }
+                    stream.open()
+                    defer { stream.close() }
+                    var result = Data()
+                    var buffer = [UInt8](repeating: 0, count: 8192)
+                    while true {
+                        let count = stream.read(&buffer, maxLength: buffer.count)
+                        if count < 0 { return nil }
+                        if count == 0 { return result }
+                        guard count <= 64 * 1024 * 1024 - result.count else { return nil }
+                        result.append(contentsOf: buffer.prefix(count))
+                    }
+                }.value
+                guard !Task.isCancelled else { return }
+                if let data, model.primarySelection == target { model.importAlightMotion(data) }
+                else { model.toast = AureaText.t("am_import_failed", AureaText.t("am_import_read_failed")) }
+            }
         }
-        .onDisappear { finishReorder(); model.endGesture() }
+        .onDisappear { importTask?.cancel(); importTask = nil; finishReorder(); model.endGesture() }
     }
     @ViewBuilder private var rail: some View {
         if openId == nil {
@@ -288,6 +311,10 @@ struct EffectsView: View {
         }
         model.endGesture(); model.commitPendingCommands(); model.refreshModel(force: true)
     }
+    private func updateTimelineFocus() {
+        model.timelineFocus = selected.map { [TimelineTrack(property: 31, effect: $0.effect, param: $0.param * 4 + UInt32($0.component))] } ?? []
+    }
+
     private func openCurve() {
         guard let selected else { return }
         let track = selectedTrack

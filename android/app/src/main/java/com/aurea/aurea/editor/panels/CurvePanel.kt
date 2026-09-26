@@ -245,6 +245,11 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         if (expanded) collapse() else if (r != null && r != EditorPanel.Curve) env.onOpenPanel(r) else env.onClose()
     }
     // O trecho: a marca escolhida (relida FRESCA do store) e a seguinte na trilha.
+    val focusKey = store.selectedKeyframe?.second
+    androidx.compose.runtime.DisposableEffect(store, focusKey?.property, focusKey?.effectIndex, focusKey?.paramIndex) {
+        store.timelineFocus = focusKey?.let { listOf(com.aurea.aurea.engine.TrackKey(it.property, it.effectIndex, it.paramIndex)) }
+        onDispose { store.timelineFocus = null }
+    }
     val segment by remember(store) {
         derivedStateOf {
             val (layer, sel) = store.selectedKeyframe ?: return@derivedStateOf null

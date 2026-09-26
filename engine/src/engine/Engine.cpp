@@ -13,6 +13,7 @@
 #include "aurea/project/Serialization.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/ai/Upscaler.hpp"
+#include "aurea/ai/TemporalStabilizer.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 
 #include <algorithm>
@@ -7270,6 +7271,8 @@ void Engine::export_encoder_main() noexcept {
     set_current_thread_name("aurea-export-enc");
     ExportContext& ctx = *exportCtx_;
     std::unique_ptr<ai::Upscaler> upscaler;
+    ai::TemporalStabilizer temporalUpscale;
+    bool temporalAvailable = true;
     std::unique_ptr<u8[]> neuralInput, neuralOutput;
     if (ctx.settings.aiUpscale) {
         // Loading weights and all inference stay on the encoder worker.
@@ -7328,6 +7331,14 @@ void Engine::export_encoder_main() noexcept {
             if (s.ok() && !ai::resize_nv12_709(neuralOutput.get(), ctx.width * ctx.settings.aiUpscale,
                     ctx.height * ctx.settings.aiUpscale, neuralOutput.get(), ctx.outputWidth, ctx.outputHeight))
                 s = Status{Errc::InvalidState, "dimensoes invalidas no upscale"};
+            if (s.ok() && temporalAvailable) {
+                const Status temporal = temporalUpscale.process(neuralInput.get(), ctx.width, ctx.height,
+                    neuralOutput.get(), ctx.outputWidth, ctx.outputHeight, i);
+                if (!temporal.ok()) {
+                    temporalAvailable = false;
+                    AUREA_LOG_WARN("AI temporal history disabled: memory budget or invalid dimensions");
+                }
+            }
             if (s.ok()) s = ctx.sink->write_video(neuralOutput.get(), ctx.outputWidth,
                 neuralOutput.get() + static_cast<usize>(ctx.outputWidth) * ctx.outputHeight, ctx.outputWidth, pts);
         } else {

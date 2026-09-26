@@ -261,6 +261,11 @@ struct HomeView: View {
     @State private var selection: Set<String> = []
     @State private var showNewProject = false
     @State private var settingsModalActive = false
+    @AppStorage("aurea.releaseNotes.read") private var readReleaseNotes = ""
+    @State private var showReleaseNotes = false
+    private var releaseNotesEdition: String {
+        "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"):2112-1"
+    }
     @State private var dialog: HomeProjectDialog?
     @State private var pendingProject: NewProjectDraft?
     #if DEBUG
@@ -270,6 +275,9 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             LiveNoticeBanners()
+            Button(AureaText.t("release_notes_title")) { showReleaseNotes = true }
+                .font(.aurea(size: 14)).frame(minHeight: 44)
+                .accessibilityIdentifier("home.releaseNotes")
             ZStack(alignment: .bottom) {
                 // As três abas ficam VIVAS: a rolagem de cada uma volta igual ao
                 // trocar de aba ou ao voltar do editor (o mesmo que o
@@ -330,7 +338,23 @@ struct HomeView: View {
             library.refresh()
         }
         .onChange(of: model.projects) { _ in library.refresh() }
-        .onAppear { backdrop.select(tab); backdrop.start() }
+        .onAppear {
+            backdrop.select(tab); backdrop.start()
+            if readReleaseNotes != releaseNotesEdition { showReleaseNotes = true }
+        }
+        .sheet(isPresented: $showReleaseNotes, onDismiss: { readReleaseNotes = releaseNotesEdition }) {
+            NavigationStack {
+                ScrollView {
+                    Text(AureaText.t("release_notes_body"))
+                        .font(.aurea(size: 16)).frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                }
+                .background(AureaColors.background).foregroundStyle(AureaColors.text)
+                .navigationTitle(AureaText.t("release_notes_title")).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) {
+                    Button(AureaText.t("editor_fechar")) { showReleaseNotes = false }
+                } }
+            }.preferredColorScheme(.dark)
+        }
         .onDisappear { backdrop.stop() }
         .onChange(of: tab) { backdrop.select($0) }
         .onChange(of: selection) { _ in backdrop.invalidate() }

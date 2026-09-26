@@ -268,7 +268,8 @@ final class AureaModel: ObservableObject {
         let fm = FileManager.default
         var finalName = String(name.prefix(60)), n = 2
         while fm.fileExists(atPath: dir.appendingPathComponent(PanelPresetKind.fileName(finalName)).path) && finalName.hasPrefix("AM · ") {
-            finalName = String("\(name) \(n)".prefix(60)); n += 1
+            let suffix = " \(n)"
+            finalName = String(name.prefix(60 - suffix.count)) + suffix; n += 1
         }
         let fileName = PanelPresetKind.fileName(finalName)
         guard fileName != ".json" else { return nil }
@@ -300,6 +301,10 @@ final class AureaModel: ObservableObject {
             toast = AureaText.t("am_import_failed", error.isEmpty ? AureaText.t("am_import_nothing") : error); return
         }
         let skipped = (envelope?["skipped"] as? [Any])?.count ?? 0
+        let warnings = (envelope?["warnings"] as? [Any])?.count ?? 0
+        guard skipped == 0 && warnings == 0 else {
+            toast = AureaText.t("am_import_lossless_required"); return
+        }
         let base = (envelope?["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Alight Motion"
         guard let saved = storeEffectPreset(name: "AM · \(base)", json: preset) else {
             toast = AureaText.t("msg_nao_foi_possivel_salvar_o_preset"); return
@@ -379,6 +384,9 @@ final class AureaModel: ObservableObject {
     enum Screen { case home, editor }
     enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo }
     @Published var curveProperty: UInt32 = 0
+    @Published var timelineFocus: [TimelineTrack]? = nil
+    private var pendingPlayhead: Int64?
+    private var pendingPlayheadUntil: TimeInterval = 0
     enum ProjectSort: String, CaseIterable, Identifiable {
         case recent, name, longest, size
         var id: String { rawValue }
@@ -804,6 +812,10 @@ final class AureaModel: ObservableObject {
         guard started else { return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
+        if let pending = pendingPlayhead {
+            if out.playhead == pending || ProcessInfo.processInfo.systemUptime >= pendingPlayheadUntil { pendingPlayhead = nil }
+            else { out.playhead = pending }
+        }
         let playheadChanged = out.playhead != lastEnginePlayhead
         if out.modelRevision != lastRevision {
             lastAutosaveActivity = ProcessInfo.processInfo.systemUptime
@@ -821,7 +833,7 @@ final class AureaModel: ObservableObject {
             lastRevision = out.modelRevision
             refreshModel(force: true)
         } else if playheadChanged && primarySelection != nil {
-            refreshSelectedLayer()
+            refreshSelectedLayer(refreshEffectStack: false)
         }
         if out.thumbnailGeneration != lastThumbGeneration {
             lastThumbGeneration = out.thumbnailGeneration
@@ -949,14 +961,15 @@ final class AureaModel: ObservableObject {
     }
 
     /// O que depende da camada escolhida: efeitos, parâmetros e o inspetor.
-    func refreshSelectedLayer() {
+    func refreshSelectedLayer(refreshEffectStack: Bool = true) {
         guard let layerId = primarySelection, started else {
             if !effects.isEmpty { effects = [] }
             if !effectParams.isEmpty { effectParams = [] }
             if !detail.isEmpty { detail = [:] }
             return
         }
-        let nextEffects = engine.effects(forLayer: layerId).map { row in
+        if refreshEffectStack {
+          let nextEffects = engine.effects(forLayer: layerId).map { row in
             EffectItem(effectId: (row["effectId"] as? NSNumber)?.uint32Value ?? 0,
                        typeId: (row["typeId"] as? NSNumber)?.uint32Value ?? 0,
                        name: row["name"] as? String ?? "",
@@ -964,7 +977,8 @@ final class AureaModel: ObservableObject {
                        paramCount: (row["paramCount"] as? NSNumber)?.uint32Value ?? 0,
                        known: row["known"] as? Bool ?? true)
         }
-        if nextEffects != effects { effects = nextEffects }
+          if nextEffects != effects { effects = nextEffects }
+        }
         let nextDetail = engine.layerDetail(layerId) ?? [:]
         if !NSDictionary(dictionary: nextDetail).isEqual(to: detail) { detail = nextDetail }
         if panel == .mask || panel == .vector { refreshMasks() }
@@ -1020,6 +1034,7 @@ final class AureaModel: ObservableObject {
     func redo() { engine.run { $0.redo() }; syncAfterEdit() }
 
     func playPause() {
+        pendingPlayhead = nil
         engine.run { $0.togglePlayback() }
         status.playing = status.playing == 0 ? 1 : 0
         followPlayback(status.playing != 0)
@@ -1052,11 +1067,13 @@ final class AureaModel: ObservableObject {
     }
 
     func seek(toFrame frame: Int64) {
+        pendingPlayhead = frame
+        pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
         engine.run { $0.seek(toFrame: frame) }; status.playhead = frame
         playheadClock.frame = frame
         if primarySelection != nil { refreshSelectedLayer() }
     }
-    func step(_ frames: Int32) { engine.run { $0.stepFrames(frames) } }
+    func step(_ frames: Int32) { pendingPlayhead = nil; engine.run { $0.stepFrames(frames) } }
     func setLoop(_ on: Bool) { engine.run { $0.setLoop(on) } }
     func setSpeed(_ speed: Float) { engine.run { $0.setPlaybackSpeed(speed) } }
     func setPreviewScale(num: UInt32, den: UInt32, auto: Bool) {
@@ -1067,6 +1084,8 @@ final class AureaModel: ObservableObject {
     /// valor do MOTOR volta no próximo `fill_status` e o substitui. Sem isto, o
     /// playhead só andaria a cada 200 ms e o scrub pareceria travado.
     func optimisticPlayhead(_ frame: Int64) {
+        pendingPlayhead = frame
+        pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
         guard status.playhead != frame else { return }
         status.playhead = frame
         playheadClock.frame = frame
@@ -1224,7 +1243,6 @@ final class AureaModel: ObservableObject {
     }
 
     var localPlayhead: Int32 {
-        if let n = detail["localPlayhead"] as? NSNumber { return n.int32Value }
         guard let layer = selectedLayer else { return Int32(clamping: status.playhead) }
         return Int32(clamping: status.playhead - Int64(layer.startFrame) + Int64(layer.offsetFrames))
     }
@@ -2007,10 +2025,13 @@ final class AureaModel: ObservableObject {
     /// Marca (ou desmarca) com aviso e vibração, como no Android: marca
     /// silenciosa parecia ter aparecido "do nada".
     func toggleMarkerAt(_ frame: Int64) {
-        engine.toggleMarker(frame)
+        let target = min(max(0, frame), max(0, compositionDuration - 1))
+        engine.run { $0.pause() }
+        seek(toFrame: target)
+        engine.toggleMarker(target)
         refreshModel(force: true)
         refreshMarkers()
-        let on = markerFrames.contains(frame)
+        let on = markerFrames.contains(target)
         toast = AureaText.t(on ? "msg_marca_adicionada" : "msg_marca_removida")
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }

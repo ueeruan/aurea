@@ -2,6 +2,7 @@ package com.aurea.aurea.editor.timeline
 
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.engine.LayerRow
+import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.ui.theme.LayerType
 
 /**
@@ -32,7 +33,18 @@ internal class RowModel(
     val hasThumbs: Boolean get() = track == null && (type == LayerType.Video || type == LayerType.Image)
 
     fun toLocal(timelineFrame: Int) = Keyframes.toLocal(timelineFrame, start, offset)
+
+    fun keysForDrag(index: Int, focused: Boolean): List<KeyframeRow> =
+        if (focused || track != null) keysAt[index] else keysAt[index].take(1)
+
+    fun dragInstants(keys: List<KeyframeRow>): IntArray = instants.filterIndexed { i, _ ->
+        keysAt[i].any { candidate -> keys.any { it.property == candidate.property &&
+            it.effectIndex == candidate.effectIndex && it.paramIndex == candidate.paramIndex } }
+    }.toIntArray()
 }
+
+internal fun focusedKeys(keys: List<KeyframeRow>, focus: List<TrackKey>): List<KeyframeRow> =
+    keys.filter { key -> focus.any { it.property == key.property && it.effectIndex == key.effectIndex && it.paramIndex == key.paramIndex } }
 
 internal fun buildRows(layers: List<LayerRow>, keyframes: Map<Long, List<KeyframeRow>>): List<RowModel> =
     List(layers.size) { i -> buildRow(layers[i], keyframes[layers[i].id].orEmpty()) }
@@ -101,7 +113,7 @@ internal class RowCache {
     }
 }
 
-private fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name): RowModel {
+internal fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name): RowModel {
     val keys = all.sortedBy { it.time }
     val times = ArrayList<Int>()
     val groups = ArrayList<List<KeyframeRow>>()

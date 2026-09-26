@@ -18,8 +18,10 @@ inference. The x2 graph is the same trained 4x network followed by upstream's
 bicubic reduction, not a separately trained native 2x model.
 
 This is **animevideov3**, intended for animation/illustration. It is not a
-general photoreal restoration claim. Independent frame processing may cause
-temporal flicker. Inputs must be SDR RGB; do not feed PQ/HLG without appropriate
+general photoreal restoration claim. Conservative temporal luma stabilization
+now reduces changes in stationary detail and rejects detected motion, cuts,
+fades and discontinuities. It is not a learned temporal model and cannot
+guarantee elimination of flicker. Inputs must be SDR RGB; do not feed PQ/HLG without appropriate
 conversion. No conversion or retraining of weights was performed here.
 
 The network contains 18 padded spatial 3x3 convolutions, PReLU, pixel shuffle,
@@ -28,11 +30,18 @@ nearest-neighbor residual, sum, and (x2 only) bicubic resize. Aurea uses a
 the whole-image/tiled test verifies seams and image edges numerically.
 
 Runtime: Tencent/ncnn commit `305837fd4a722ebc47c5d72e72d8ec9ae970e932`
-(20250503), CPU only, OpenMP disabled, one inference worker. CMake pins its
+(20250503), Vulkan on Android/host, CPU fallback and CPU on Apple builds;
+OpenMP disabled, one inference worker. The final x2 bicubic operation runs on
+CPU because its pinned Vulkan implementation failed pixel parity tests. Neural
+convolutions remain on Vulkan. Software Vulkan devices are excluded from Auto.
+`AUREA_AI_VULKAN=OFF` builds the CPU-only path. CMake pins its
 archive hash. Model bytes are embedded once in the shared core so Android and
 iOS use the same weights and graphs without an external model download.
 
 Licenses are preserved in `LICENSE-Real-ESRGAN.txt` and `LICENSE-ncnn.txt`.
+The Vulkan shader compiler is nihui/glslang revision
+`a9ac7d5f307e5db5b8c4fbf904bdba8fca6283bc`, with its archive hash pinned in
+CMake and license shipped in Android assets/licenses/LICENSE-glslang.txt.
 Primary sources: https://github.com/xinntao/Real-ESRGAN,
 https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan,
 https://github.com/Tencent/ncnn.

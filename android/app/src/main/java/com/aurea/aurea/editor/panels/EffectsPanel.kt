@@ -1,6 +1,11 @@
 package com.aurea.aurea.editor.panels
 
 import com.aurea.aurea.engine.TrackKey
+import com.aurea.aurea.presets.readPreset
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.aurea.aurea.engine.ExpressionLook
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -208,6 +213,10 @@ internal fun EffectsPanel(env: PanelEnv) {
     var selected by remember(layerId) {
         mutableStateOf(entry?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) })
     }
+    androidx.compose.runtime.DisposableEffect(store, selected) {
+        store.timelineFocus = selected?.let { listOf(TrackKey(31, it.effectId, it.param * 4 + it.component)) } ?: emptyList()
+        onDispose { store.timelineFocus = null }
+    }
     var advancedOpen by remember(layerId) {
         mutableStateOf(
             entry?.let { k ->
@@ -222,14 +231,21 @@ internal fun EffectsPanel(env: PanelEnv) {
     var railMenu by remember { mutableStateOf(false) }
     var savingPreset by remember { mutableStateOf<LayerEffect?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val importScope = rememberCoroutineScope()
     // Alight Motion: qualquer arquivo (o .amproj/.xml não tem MIME padrão); o
     // motor reconhece XML ou zip pelo conteúdo.
     val amPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
-            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            if (bytes != null) store.importAlightMotion(bytes)
+            val target = store.primary
+            importScope.launch {
+                val bytes = withContext(Dispatchers.IO) {
+                    runCatching { context.contentResolver.openInputStream(uri)?.use { it.readPreset() } }.getOrNull()
+                }
+                if (bytes != null && store.primary == target) store.importAlightMotion(bytes)
+                else store.showToast(context.getString(R.string.am_import_failed, context.getString(R.string.am_import_read_failed)))
+            }
         }
     }
     val reorder = remember(layerId) { ReorderState() }

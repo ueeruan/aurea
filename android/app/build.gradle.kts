@@ -39,6 +39,8 @@ require(aureaAbi == null || aureaAbi in aureasAbisPermitidas) {
 }
 
 android {
+    // The same licensed Roboto used by iOS; Samsung system font paths vary.
+    sourceSets.getByName("main").assets.srcDir("../../engine/assets/fonts")
     namespace = "com.aurea.aurea"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
@@ -53,9 +55,9 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        // versionCode 2111: cena 3D por gestos, temas, presets de efeito, import Alight Motion. Um número maior é
+        // versionCode 2112: cena 3D por gestos, temas, presets de efeito, import Alight Motion. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2111
+        versionCode = 2112
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

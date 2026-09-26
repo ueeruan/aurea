@@ -16,6 +16,13 @@ object AureaAds {
 
     fun initialize(activity: Activity) {
         try {
+            if (AdsConfig.provider(activity) == AdsConfig.Provider.LevelPlay) {
+                val provider = android.webkit.WebView.getCurrentWebViewPackage()
+                if (!AdWebViewCompatibility.allowsLevelPlay(provider?.versionName)) {
+                    Log.w("AureaAds", "LevelPlay disabled for unavailable or quarantined WebView provider")
+                    return
+                }
+            }
             val debug = (activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
             AureaAdsManager.log = if (debug) { m -> Log.i("AureaAds", m) } else { _ -> }
             AureaAdsManager.agendar = { ms, bloco -> main.postDelayed({ bloco() }, ms) }

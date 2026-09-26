@@ -65,7 +65,13 @@ internal class TimelineController(
     private var expandedId: Long? = null
     private var expandedResult: List<RowModel> = emptyList()
     val rows = derivedStateOf {
-        val base = rowCache.build(store.layers, store.keyframes)
+        val focus = store.timelineFocus
+        val cached = rowCache.build(store.layers, store.keyframes)
+        val base = if (focus == null) cached else cached.map { row ->
+            val layer = if (row.id == store.primary) store.layers.firstOrNull { it.id == row.id } else null
+            if (row.id != store.primary || layer == null) row else buildRow(layer,
+                focusedKeys(store.keyframes[row.id].orEmpty(), focus))
+        }
         val id = expandedLayer.value?.takeUnless { state.compact }
         val revision = store.curveRevision
         if (id == null) base else if (expandedBase === base && expandedId == id && expandedRevision == revision) expandedResult else {
@@ -135,8 +141,8 @@ internal class TimelineController(
     /** Leva a vista a `v` pelo scrub do motor (o 1º passo abre o scrub e pausa). */
     private fun holdView(v: Double) {
         val c = TimeAxis.clampView(v, store.project.durationFrames)
-        state.heldView = c
         val f = c.toFrame()
+        state.heldView = f.toDouble()
         if (!scrubOpen) {
             scrubOpen = true
             if (store.playing) store.pause()
@@ -642,7 +648,7 @@ internal class TimelineController(
     }
 
     // --- Arrastar losango -----------------------------------------------------------------
-    /** Move o INSTANTE inteiro (todas as trilhas com marca ali), em frames, sem encostar no vizinho. */
+    /** Move only the focused property group; the overview chooses one real track. */
     private suspend fun AwaitPointerEventScope.keyframeDrag(r: RowModel, index: Int, down: PointerInputChange) {
         if (index !in r.instants.indices) return consumeUntilUp()
         if (r.locked) {
@@ -653,9 +659,10 @@ internal class TimelineController(
         light()
         pauseIfPlaying()
         if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id)
-        val keys = r.keysAt[index]
+        val keys = r.keysForDrag(index, store.timelineFocus != null)
+        val instants = r.dragInstants(keys)
         val limits = IntArray(2)
-        Keyframes.dragLimits(r.instants, index, r.start, r.end, limits)
+        Keyframes.dragLimits(instants, instants.indexOf(r.instants[index]), r.start, r.end, limits)
         val targets = snapTargets(longArrayOf(r.id), own = r, ownEdges = true, ownKeys = false)
         var current = r.instants[index]
         val grab = current - frameAt(down.position.x)

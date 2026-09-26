@@ -105,6 +105,7 @@ struct TimelineView: View {
         var snapTargets: [Int32]
         var keyIndex: Int = -1
         var keyFrame: Int32 = 0
+        var movingKeys: [KeyframeItem] = []
         var keyLimits: (lo: Int32, hi: Int32) = (0, 0)
         var sentDelta: Int32 = 0
         var undoOpen = false
@@ -113,8 +114,12 @@ struct TimelineView: View {
     private var fps: Float { TimeAxis.safeFps(Float(model.compositionFps)) }
     private var ppf: CGFloat { TimeAxis.pxPerFrame(pps: pps, density: 1, fps: fps) }
     private var viewFrame: Double { heldView ?? Double(clock.frame) }
+    private var focusTracks: [TimelineTrack]? {
+        model.panel == .curve ? [TimelineTrack(property: Int(model.curveProperty), effect: model.curveEffect, param: model.curveParam)] : model.timelineFocus
+    }
     private var rows: [TimelineRow] {
-        let all = rowCache.build(model.layers, model.keyframes)
+        let cached = rowCache.build(model.layers, model.keyframes)
+        let all = rowCache.focused(cached, id: model.primarySelection, tracks: focusTracks, layers: model.layers, keys: model.keyframes)
         return compact ? all.filter { $0.id == model.primarySelection } : rowCache.expanded(all, id: expandedLayer, revision: model.status.modelRevision, keys: model.keyframes, effects: {
             guard let id = expandedLayer else { return [] }
             return model.engine.effects(forLayer: id).map { row in
@@ -637,7 +642,11 @@ struct TimelineView: View {
         }
         if next.mode == .key, let row, row.instants.indices.contains(touched.key) {
             next.keyIndex = touched.key; next.keyFrame = row.instants[touched.key]
-            next.keyLimits = Keyframes.dragLimits(row.instants, touched.key, start: row.start, end: row.end)
+            next.movingKeys = focusTracks != nil || row.track != nil ? row.keysAt[touched.key] : Array(row.keysAt[touched.key].prefix(1))
+            let instants = row.instants.enumerated().filter { i, _ in row.keysAt[i].contains { candidate in
+                next.movingKeys.contains { $0.property == candidate.property && $0.effectIndex == candidate.effectIndex && $0.paramIndex == candidate.paramIndex }
+            } }.map { $0.element }
+            next.keyLimits = Keyframes.dragLimits(instants, instants.firstIndex(of: next.keyFrame) ?? 0, start: row.start, end: row.end)
             selectedKey = (row.id, next.keyFrame, row.track)
             model.select(layerId: row.id, additive: false)
         }
@@ -759,8 +768,7 @@ struct TimelineView: View {
             if target != g.keyFrame {
                 openUndo(&g)
                 let source = row.toLocal(g.keyFrame), destination = row.toLocal(target)
-                // The mark represents an instant across ALL animation tracks.
-                for key in row.keysAt[g.keyIndex] {
+                for key in g.movingKeys {
                     model.engine.editTrackKey(row.id, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: source, action: 2, value: key.value, targetTime: destination, interpolation: key.interpolation, handles: [])
                 }
                 g.keyFrame = target; selectedKey = (row.id, target, row.track)
@@ -777,8 +785,8 @@ struct TimelineView: View {
     }
     private func holdView(_ desired: Double) {
         let target = TimeAxis.clampView(desired, durationFrames: Int32(clamping: model.compositionDuration))
-        heldView = target
         let frame = Int64(timelineFrame(target))
+        heldView = Double(frame)
         model.engine.run { $0.scrub(toFrame: frame) }; model.optimisticPlayhead(frame)
     }
     private func finish(cancelled: Bool) {

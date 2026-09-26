@@ -1,4 +1,5 @@
 #include "aurea/Engine.hpp"
+#include "aurea/text/LocalWhisper.hpp"
 #include "aurea/audio/Beats.hpp"
 #include "aurea/tracking/PointTracker.hpp"
 #include "aurea/render/MaskRaster.hpp"
@@ -5243,15 +5244,29 @@ namespace {
 /// Tira as legendas de `src` (índices de trás para a frente).
 u32 drop_captions(Composition& comp, u64 src) {
     std::vector<LayerId> ids;
+    u32 removed = 0;
     for (u32 i = 0; i < comp.order().size(); ++i) {
         const LayerId id = comp.order().at(i);
         const Layer* l = comp.layer(id);
-        if (l && l->kind == LayerKind::Text && l->text.captionSource == src) ids.push_back(id);
+        if (l && l->kind == LayerKind::Text && l->text.captionSource == src) {
+            // Uma faixa guarda vários blocos: conta legendas, não camadas, para
+            // o número bater com `caption_count` (o que a UI mostra).
+            removed += l->captions.empty() ? 1u : static_cast<u32>(l->captions.size());
+            ids.push_back(id);
+        }
     }
     for (const LayerId id : ids) comp.remove_layer(id);
-    return static_cast<u32>(ids.size());
+    return removed;
 }
 } // namespace
+
+Result<std::vector<text::CaptionWord>> Engine::transcribe_local(u64 layerId, const std::string& model, const std::string& language) noexcept {
+    const auto path = layer_media_path(layerId);
+    if (path.empty() || !config_.mediaFactory) return Status{Errc::InvalidArgument, "camada sem audio"};
+    captionCancelled.store(false); captionProgress.store(0);
+    return text::transcribe_local(*config_.mediaFactory, path, model, language, captionCancelled,
+        [this](int value) { captionProgress.store(value); });
+}
 
 Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::CaptionWord>& words,
                                     const text::CaptionOptions& opt) noexcept {
@@ -5290,6 +5305,14 @@ Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::Cap
     drop_captions(*comp, key);
     const u32 shortSide = std::min(comp->width(), comp->height());
     const f32 posY = std::clamp(opt.posY, 0.1f, 0.9f);
+    const LayerId captionId = comp->add_layer(LayerKind::Text, "Legendas");
+    Layer* track = comp->layer(captionId);
+    if (!track) return Status{Errc::OutOfMemory, "faixa de legendas"};
+    track->text.captionSource = key;
+    track->start = FrameIndex{0}; track->end = comp->duration();
+    track->captionOptions = opt;
+    text::apply_caption_style(opt, shortSide, track->text, track->tracks, {}, 0);
+    track->transform.position = Vec3{static_cast<f32>(comp->width()) * .5f, static_cast<f32>(comp->height()) * posY, 0};
     u32 made = 0;
     for (usize g = 0; g < groups.size(); ++g) {
         const text::CaptionGroup& cg = groups[g];
@@ -5305,23 +5328,19 @@ Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::Cap
         }
         b = std::min(b, s1);
         if (b <= a) continue;
-        const LayerId lid = comp->add_layer(LayerKind::Text, "Legenda " + std::to_string(made + 1));
-        Layer* l = comp->layer(lid);
-        if (!l) break;
-        l->text.content = cg.text;
-        l->text.captionSource = key;
-        l->start = FrameIndex{a};
-        l->end = FrameIndex{b};
-        std::vector<i64> wf;
+        text::CaptionSegment segment;
+        segment.id = ++made; segment.start = a; segment.end = b; segment.text = cg.text;
         for (u32 w = 0; w < cg.count; ++w) {
-            const i64 f = frame_of(words[cg.first + w].start);
-            wf.push_back(f < 0 ? b - a : f - a);
+            const auto& input = words[cg.first + w];
+            i64 begin = frame_of(input.start), finish = frame_of(input.end);
+            begin = std::clamp(begin < 0 ? b - 1 : begin, a, b - 1);
+            finish = std::clamp(finish < 0 ? b : finish, begin + 1, b);
+            segment.words.push_back({input.text, begin, finish});
         }
-        text::apply_caption_style(opt, shortSide, l->text, l->tracks, wf, b - a);
-        l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * posY, 0.0f};
-        recenter_text(*l);
-        ++made;
+        track->captions.push_back(std::move(segment));
     }
+    if (track->captions.empty()) { comp->remove_layer(captionId); }
+    else { track->text.content = track->captions.front().text; recenter_text(*track); }
     project_->mark_dirty();
     request_render();
     return made;
@@ -5343,7 +5362,7 @@ u32 Engine::caption_count_locked(const Composition& comp, u64 sourceLayer) const
     u32 n = 0;
     for (u32 i = 0; i < comp.order().size(); ++i) {
         const Layer* l = comp.layer(comp.order().at(i));
-        n += l && l->kind == LayerKind::Text && l->text.captionSource == sourceLayer;
+        if (l && l->kind == LayerKind::Text && l->text.captionSource == sourceLayer) n += l->captions.empty() ? 1 : static_cast<u32>(l->captions.size());
     }
     return n;
 }
@@ -6195,6 +6214,7 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         if (l->threeD)  flags |= bridge::kLayerRowFlagThreeD;
         if (l->adjustment) flags |= bridge::kLayerRowFlagAdjustment;
         if (l->guide)   flags |= bridge::kLayerRowFlagGuide;
+        if (!l->captions.empty()) flags |= bridge::kLayerRowFlagCaptions;
         flags |= (static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask;
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
@@ -6482,6 +6502,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
               | (selected ? bridge::kLayerRowFlagSelected : 0u) | (l->solo ? bridge::kLayerRowFlagSolo : 0u)
               | (l->adjustment ? bridge::kLayerRowFlagAdjustment : 0u) | (l->guide ? bridge::kLayerRowFlagGuide : 0u)
               | (l->threeD ? bridge::kLayerRowFlagThreeD : 0u)
+              | (l->captions.empty() ? 0u : bridge::kLayerRowFlagCaptions)
               | ((static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask);
     out.startFrame = static_cast<i32>(l->start.value);
     out.endFrame = static_cast<i32>(l->end.value);

@@ -90,3 +90,8 @@ engine/tests/data/gltf/
 
 # APKs gerados para entrega (o binario nao vive no git)
 entrega/
+
+# Local Worker state and development credentials
+/discovery/.wrangler/
+/discovery/.dev.vars
+/discovery/.env*

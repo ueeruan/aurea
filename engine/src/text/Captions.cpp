@@ -14,6 +14,69 @@
 
 namespace aurea::text {
 
+const CaptionSegment* active_caption(const std::vector<CaptionSegment>& segments, i64 frame) noexcept {
+    auto it = std::upper_bound(segments.begin(), segments.end(), frame,
+        [](i64 value, const CaptionSegment& s) { return value < s.start; });
+    if (it == segments.begin()) return nullptr;
+    --it;
+    return frame < it->end ? &*it : nullptr;
+}
+
+bool valid_caption_track(const std::vector<CaptionSegment>& segments) noexcept {
+    if (segments.size() > 100000) return false;
+    i64 previous = 0;
+    std::vector<u64> ids;
+    for (const auto& s : segments) {
+        if (!s.id || s.start < previous || s.end <= s.start || s.end > 100000000 || s.text.size() > 16384 || s.words.size() > 1024) return false;
+        previous = s.end; ids.push_back(s.id);
+        i64 last = s.start;
+        for (const auto& w : s.words) {
+            if (w.text.empty() || w.text.size() > 4096 || w.start < last || w.end <= w.start || w.end > s.end) return false;
+            last = w.start;
+        }
+    }
+    std::sort(ids.begin(), ids.end());
+    return std::adjacent_find(ids.begin(), ids.end()) == ids.end();
+}
+
+void edit_caption_text(CaptionSegment& s, const std::string& text) {
+    std::vector<std::string> words;
+    for (usize p = 0; p < text.size();) {
+        p = text.find_first_not_of(" \t\r\n", p); if (p == std::string::npos) break;
+        const auto end = text.find_first_of(" \t\r\n", p);
+        words.push_back(text.substr(p, end == std::string::npos ? end : end - p));
+        if (end == std::string::npos) break; p = end;
+    }
+    if (words.size() > 1024 || text.size() > 16384) return;
+    // LCS preserves timings through insertions/deletions, including repeated words.
+    const usize n = words.size(), m = s.words.size();
+    std::vector<u16> lcs((n + 1) * (m + 1));
+    auto at = [&](usize i, usize j) -> u16& { return lcs[i * (m + 1) + j]; };
+    for (usize i = n; i-- > 0;) for (usize j = m; j-- > 0;)
+        at(i,j) = words[i] == s.words[j].text ? static_cast<u16>(1 + at(i+1,j+1)) : std::max(at(i+1,j),at(i,j+1));
+    std::vector<CaptionToken> next(n); std::vector<bool> matched(n, false);
+    for (usize i = 0, j = 0; i < n && j < m;) {
+        if (words[i] == s.words[j].text) { next[i] = s.words[j]; matched[i] = true; ++i; ++j; }
+        else if (at(i+1,j) >= at(i,j+1)) ++i; else ++j;
+    }
+    for (usize i = 0; i < n;) {
+        if (matched[i]) { ++i; continue; }
+        usize end = i; while (end < n && !matched[end]) ++end;
+        const i64 a = i ? next[i-1].end : s.start;
+        const i64 b = end < n ? next[end].start : s.end;
+        // A zero gap cannot hold a new spoken word. Keep it visually attached
+        // to the neighbour instead of changing the neighbour's original timing.
+        for (usize j = i; j < end; ++j) {
+            i64 from = a + std::max<i64>(0,b-a) * static_cast<i64>(j-i) / static_cast<i64>(end-i);
+            i64 to = a + std::max<i64>(0,b-a) * static_cast<i64>(j-i+1) / static_cast<i64>(end-i);
+            from = std::clamp(from, s.start, s.end-1); to = std::clamp(to, from+1, s.end);
+            next[j] = {words[j], from, to};
+        }
+        i = end;
+    }
+    s.text = text; s.words = std::move(next);
+}
+
 namespace {
 
 /// Caracteres visíveis (UTF-8: conta code points, não bytes).
@@ -198,6 +261,8 @@ std::vector<CaptionWord> parse_srt(const std::string& srt) {
     return out;
 }
 
+std::string upper_text(const std::string& s) { return upper(s); }
+
 void apply_caption_style(const CaptionOptions& opt, u32 shortSide, TextData& t, TrackSet& tr, const std::vector<i64>& wf, i64 endFrame) {
     const f32 size = std::round(std::clamp(opt.sizeFrac, 0.02f, 0.25f) * static_cast<f32>(std::max(1u, shortSide)));
     t.size = size;
@@ -205,6 +270,22 @@ void apply_caption_style(const CaptionOptions& opt, u32 shortSide, TextData& t, 
     t.lineHeight = 1.15f;
     t.animators.clear();
     tr.remove_if([](const Track& x) { return x.property == TrackProperty::TextAnimParam; });
+    // Zera o que o estilo define. Sem isto, trocar de estilo (ou aplicar um
+    // preset) HERDA a sombra/caixa/cor do estilo anterior: o preset mostraria
+    // uma aparência que não é a dele, e preview e exportação divergiriam.
+    t.fontWeight = 400;
+    t.color = Vec4{1.0f, 1.0f, 1.0f, 1.0f};
+    t.strokeWidth = 0.0f;
+    t.strokeColor = Vec4{0.0f, 0.0f, 0.0f, 1.0f};
+    t.tracking = 0.0f;
+    t.background = false;
+    t.backgroundColor = Vec4{0.0f, 0.0f, 0.0f, 0.6f};
+    t.backgroundPadding = 14.0f;
+    t.backgroundRadius = 10.0f;
+    t.shadow = false;
+    t.shadowColor = Vec4{0.0f, 0.0f, 0.0f, 0.6f};
+    t.shadowOffset = Vec2{4.0f, 6.0f};
+    t.shadowBlur = 6.0f;
     const u32 style = std::min(opt.style, kCaptionStyleCount - 1);
     switch (style) {
         case 0:   // Clássico: branco com contorno
@@ -252,6 +333,13 @@ void apply_caption_style(const CaptionOptions& opt, u32 shortSide, TextData& t, 
             t.strokeWidth = std::max(2.0f, size * 0.08f);
             break;
     }
+    apply_caption_animation(opt, t, tr, wf, endFrame);
+}
+
+void apply_caption_animation(const CaptionOptions& opt, TextData& t, TrackSet& tr, const std::vector<i64>& wf, i64 endFrame) {
+    t.animators.clear();
+    tr.remove_if([](const Track& x) { return x.property == TrackProperty::TextAnimParam; });
+    const u32 style = std::min(opt.style, kCaptionStyleCount - 1);
     const u32 n = static_cast<u32>(wf.size());
     if (n == 0) return;
     const f32 step = 100.0f / static_cast<f32>(n);

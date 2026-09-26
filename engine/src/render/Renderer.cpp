@@ -983,9 +983,36 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             case LayerKind::Light:
                 continue;   // não desenham; entram na cena depois do laço
             case LayerKind::Text: {
-                const auto font = text::FontManager::instance().font_for(l->text);
-                if (!font || l->text.content.empty() || (l->text.color.w <= 0.0f && l->text.strokeWidth <= 0.0f)) continue;
-                const TextData& T = l->text;
+                TextData captionText;
+                TrackSet captionTracks;
+                const TextData* textData = &l->text;
+                const TrackSet* textTracks = &l->tracks;
+                if (!l->captions.empty()) {
+                    const auto* segment = text::active_caption(l->captions, local.value);
+                    if (!segment) continue;
+                    captionText = l->text;
+                    // CAIXA ALTA aqui, não no texto guardado: ligar/desligar a
+                    // opção (ou aplicar um preset que a muda) vale na hora, e o
+                    // texto original continua intacto para editar.
+                    captionText.content = l->captionOptions.uppercase ? text::upper_text(segment->text) : segment->text;
+                    captionTracks = l->tracks;
+                    std::vector<i64> starts;
+                    for (const auto& word : segment->words) starts.push_back(word.start);
+                    TextData timedText;
+                    TrackSet timedTracks;
+                    text::apply_caption_animation(l->captionOptions, timedText, timedTracks, starts, segment->end);
+                    const u32 animatorBase = static_cast<u32>(captionText.animators.size());
+                    captionText.animators.insert(captionText.animators.end(), timedText.animators.begin(), timedText.animators.end());
+                    for (u32 i = 0; i < timedTracks.size(); ++i) {
+                        Track track = timedTracks.at(i);
+                        track.effectIndex += animatorBase;
+                        captionTracks.add(std::move(track));
+                    }
+                    textData = &captionText; textTracks = &captionTracks;
+                }
+                const auto font = text::FontManager::instance().font_for(*textData);
+                if (!font || textData->content.empty() || (textData->color.w <= 0.0f && textData->strokeWidth <= 0.0f)) continue;
+                const TextData& T = *textData;
                 const bool animated = text::has_animators(T);
                 // O contorno cabe na distância do atlas (16 px da base × escala).
                 const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, T.size) / text::kGlyphBasePx - 1.0f;
@@ -1000,7 +1027,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (animated) {
                     auto maxAbs = [&](u32 ai, u32 p, f32 v) {
                         f32 m = std::fabs(v);
-                        if (const Track* tr = l->tracks.find(TrackProperty::TextAnimParam, ai, p)) {
+                        if (const Track* tr = textTracks->find(TrackProperty::TextAnimParam, ai, p)) {
                             for (const Keyframe& k : tr->keys) m = std::max(m, std::fabs(k.value));
                             // Expressão: o limite dos keyframes não vale; mede o valor do quadro.
                             if (tr->has_expression()) m = std::max(m, std::fabs(tr->value_or(local, v)));
@@ -1023,14 +1050,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 TextData shaped;
                 const TextData* src = &T;
                 if (animated) {
-                    const std::string c = text::apply_char_offset(T, l->tracks, static_cast<f64>(local.value), fps);
+                    const std::string c = text::apply_char_offset(T, *textTracks, static_cast<f64>(local.value), fps);
                     if (c != T.content) { shaped = T; shaped.content = c; src = &shaped; }
                 }
                 text::TextLayout L;
                 if (!text::layout_quads(*font, *src, pad, L)) continue;
                 {
                     const f32 s = pad - (T.strokeWidth > 0.0f ? T.strokeWidth + 2.0f : 2.0f);   // a mesma margem de recenter_text
-                    srcShift = Vec2{s, s};
+                    srcShift = l->captions.empty() ? Vec2{s, s} : Vec2{L.width * .5f - l->transform.anchor.x, L.height * .5f - l->transform.anchor.y};
                 }
                 rl.source.kind = LayerSource::Kind::Text;
                 rl.source.width = static_cast<u32>(std::ceil(L.width));
@@ -1086,7 +1113,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 std::vector<text::GlyphAnim> anim;
                 for (u32 si = 0; si < sets; ++si) {
                     const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? ((static_cast<f64>(si) + 0.5) / static_cast<f64>(sets) - 0.5) * open : 0.0);
-                    text::evaluate_text_animators(T, l->tracks, lt, fps, units, L.chars, L.words, L.lines, anim);
+                    text::evaluate_text_animators(T, *textTracks, lt, fps, units, L.chars, L.words, L.lines, anim);
                     auto glyphMatrix = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
                         const Vec3 pivot{(q.x0 + q.x1) * 0.5f, (q.y0 + q.y1) * 0.5f, 0};
                         Mat4 m = Mat4::translation(pivot + a.translate + Vec3{a.trackingShift, 0, 0});

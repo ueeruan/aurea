@@ -2249,6 +2249,22 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if ([options[@"removeFillers"] boolValue]) parsed = aurea::text::remove_filler_words(parsed);
     return e->create_captions(layerId, parsed, o).ok() ? @"" : @"Não foi possível gerar legendas. Confira os tempos e o áudio da camada.";
 }
+- (NSArray<NSDictionary<NSString*, id>*>*)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language error:(NSError**)error {
+    auto* e = self.engine; if (!e) return nil;
+    auto result = e->transcribe_local(layerId, to_std(model), to_std(language));
+    if (!result) {
+        if (error) *error = [NSError errorWithDomain:@"AureaWhisper" code:(NSInteger)result.code() userInfo:@{NSLocalizedDescriptionKey: to_ns(std::string(result.status().detail()))}];
+        return nil;
+    }
+    NSMutableArray* output = [NSMutableArray array];
+    for (const auto& word : *result) [output addObject:@{@"word":to_ns(word.text), @"start":@(word.start), @"end":@(word.end)}];
+    return output;
+}
+- (int)captionProgress:(BOOL)cancel { auto* e = self.engine; if (!e) return 0; if (cancel) e->captionCancelled.store(true); return e->captionProgress.load(); }
+- (NSString*)captionTracks { auto* e = self.engine; return e ? to_ns(e->caption_tracks()) : @"[]"; }
+- (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name { auto* e = self.engine; return e ? to_ns(e->save_caption_bundle(layer,to_std(name))) : @""; }
+- (BOOL)applyCaptionBundle:(long long)layer data:(NSString*)data { auto* e = self.engine; return e && e->apply_caption_bundle(layer,to_std(data)); }
+- (BOOL)editCaptionTrack:(long long)layer command:(NSString*)command { auto* e = self.engine; return e && e->edit_caption_track(layer, to_std(command)); }
 - (uint32_t)captionCount:(long long)layerId { auto* e = self.engine; return e ? e->caption_count(layerId) : 0; }
 - (void)removeCaptions:(long long)layerId { if (auto* e = self.engine) (void)e->remove_captions(layerId); }
 - (NSArray<NSNumber*>*)trackCurve:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param from:(int32_t)from to:(int32_t)to {

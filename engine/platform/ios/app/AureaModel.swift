@@ -324,6 +324,7 @@ final class AureaModel: ObservableObject {
 
     // --- Modelo em memória (o que a timeline e os painéis desenham) ---------
     @Published private(set) var layers: [LayerItem] = []
+    @Published private(set) var captionTracks: [NativeCaptionTrack] = []
     @Published private(set) var keyframes: [Int64: [KeyframeItem]] = [:]
     @Published private(set) var selection: Set<Int64> = []
     @Published private(set) var composition: [String: Any] = [:]
@@ -927,6 +928,7 @@ final class AureaModel: ObservableObject {
                       guide: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 7) != 0)
         }
         if nextLayers != layers { layers = nextLayers }
+        if let data = engine.captionTracks().data(using: .utf8), let tracks = try? JSONDecoder().decode([NativeCaptionTrack].self, from: data), tracks != captionTracks { captionTracks = tracks }
         let nextSelection = Set(layers.filter(\.selected).map(\.id))
         if nextSelection != selection { selection = nextSelection }
 

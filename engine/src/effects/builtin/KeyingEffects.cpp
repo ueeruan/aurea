@@ -59,7 +59,7 @@ public:
 
 class ChromaKey final : public Effect {
 public:
-    enum : u32 { kColor = 0, kTolerance, kSoftness, kSpill };
+    enum : u32 { kColor = 0, kTolerance, kSoftness, kSpill, kClipBlack, kClipWhite, kGamma, kView, kSpillBalance };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kChromaKey, "Chave de croma", "Recorte", EffectClass::PerPixel};
@@ -72,6 +72,12 @@ public:
         p.add_float("tolerance", "Tolerância", 25.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("softness", "Suavidade", 10.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("spill", "Supressão de derramamento", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("clip_black", "Limpar fundo", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("clip_white", "Preencher primeiro plano", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("matte_gamma", "Detalhes de cabelo e borda", 1.f, .1f, 4.f);
+        static const char* const views[] = {"Composição", "Máscara", "Supressão de cor"};
+        p.add_enum("view", "Visualização", views, 3, 0);
+        p.add_float("spill_balance", "Proteger cores do primeiro plano", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
     }
     bool color_op(const EffectEval& e, ColorOp& op) const noexcept override {
         const Vec4 k = e.color(kColor);
@@ -84,6 +90,11 @@ public:
         op.p[4] = std::clamp(e.f(kTolerance), 0.0f, 100.0f) / 100.0f * 0.5f;
         op.p[5] = std::clamp(e.f(kSoftness), 0.0f, 100.0f) / 100.0f * 0.5f;
         op.p[6] = std::clamp(e.f(kSpill), 0.0f, 100.0f) / 100.0f;
+        op.p[7] = std::clamp(e.f(kClipBlack), 0.f, 100.f) / 100.f;
+        op.p[8] = std::max(op.p[7] + .0001f, std::clamp(e.f(kClipWhite), 0.f, 100.f) / 100.f);
+        op.p[9] = std::clamp(e.f(kGamma), .1f, 4.f);
+        op.p[10] = static_cast<f32>(e.e(kView));
+        op.p[11] = std::clamp(e.f(kSpillBalance), 0.f, 100.f) / 100.f;
         return true;
     }
 };

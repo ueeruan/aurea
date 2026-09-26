@@ -325,6 +325,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     var selection by mutableStateOf<Set<Long>>(emptySet())
         private set
+    var captionTracks by mutableStateOf<List<com.aurea.aurea.captions.CaptionTrack>>(emptyList())
+        private set
     /** Detalhe da camada principal da seleção (a primeira escolhida). */
     var detail by mutableStateOf<LayerDetail?>(null)
         private set
@@ -976,6 +978,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun refreshModel() {
         curveRevision++
         layers = readLayers()
+        captionTracks = com.aurea.aurea.captions.parseCaptionTracks(engine.captionTracks())
         refreshMarkers()
         editMode = engine.editMode()
         precompDepth = engine.precompDepth()

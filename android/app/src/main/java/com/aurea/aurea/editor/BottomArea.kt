@@ -136,7 +136,7 @@ private fun sectionsFor(l: DockLayer): List<DockSection> {
         } else {
             listOf(DockSection.ColorFill, DockSection.EditShape, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         }
-        LayerType.Text -> listOf(DockSection.EditText, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
+        LayerType.Text -> listOf(DockSection.EditText, DockSection.Captions, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         LayerType.Video -> buildList {
             add(DockSection.Move)
             if (l.hasAudio) add(DockSection.Audio)

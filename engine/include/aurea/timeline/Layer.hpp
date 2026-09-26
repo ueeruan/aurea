@@ -25,6 +25,7 @@
 #include "aurea/animation/Curve.hpp"
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/vector/VectorData.hpp"
+#include "aurea/text/Captions.hpp"
 
 #include <cmath>
 #include <string>
@@ -551,6 +552,8 @@ struct Layer {
 
     // --- Específico de tipo --------------------------------------------------
     TextData      text;
+    std::vector<text::CaptionSegment> captions;
+    text::CaptionOptions captionOptions;
     ShapeData     shape;
     CameraData    camera;
     LightData     light;

@@ -55,9 +55,9 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        // versionCode 2112: cena 3D por gestos, temas, presets de efeito, import Alight Motion. Um número maior é
+        // versionCode 2113: faixa de legendas, presets e novos efeitos nativos. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2112
+        versionCode = 2113
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -102,6 +102,9 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/LightEffects.cpp
     src/effects/builtin/GlitchEffects.cpp
     src/effects/builtin/TemporalEffects.cpp
+    src/effects/builtin/TransitionEffects.cpp
+    src/effects/builtin/OpticalEffects.cpp
+    src/effects/builtin/SampledBlurEffects.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -121,6 +124,8 @@ set(AUREA_CORE_SOURCES
     src/text/FontManager.cpp
     src/text/TextAnimator.cpp
     src/text/Captions.cpp
+    src/engine/EngineCaptions.cpp
+    src/engine/EngineCaptionPresets.cpp
     src/vector/Vector.cpp
     src/vector/Clipper.cpp
     src/vector/Svg.cpp
@@ -167,6 +172,7 @@ set_target_properties(aurea_thirdparty PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_library(aurea_core STATIC ${AUREA_CORE_SOURCES})
 include(cmake/AureaNcnn.cmake)
+include(cmake/AureaWhisper.cmake)
 target_link_libraries(aurea_core PUBLIC aurea_thirdparty)
 
 target_include_directories(aurea_core

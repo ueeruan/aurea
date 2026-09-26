@@ -186,8 +186,20 @@ AUREA_TEST(TimelineScale, Captions5000Words) {
     u64 kf = 0;
     for (u32 i = 0; i < n; ++i) kf += e.query_keyframes(rows[i].id, keys.data(), 65536);
     const f64 refreshMs = ms_since(t0);
-    AUREA_CHECK_EQ(n, count + 1);
-    std::printf("    create_captions(5000 palavras): %u camadas em %.1f ms | releitura da timeline: %u camadas, %llu kf em %.2f ms\n",
+    // UMA faixa de legendas + a camada de origem: 5000 palavras não viram
+    // 1390 camadas. É a razão de a timeline continuar leve com legenda longa.
+    AUREA_CHECK_EQ(n, 2u);
+    {
+        const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        const Layer* track = nullptr;
+        for (u32 i = 0; i < c->order().size(); ++i) {
+            const Layer* l = c->layer(c->order().at(i));
+            if (l && !l->captions.empty()) track = l;
+        }
+        AUREA_CHECK(track != nullptr);
+        if (track) AUREA_CHECK_EQ(track->captions.size(), static_cast<usize>(count));
+    }
+    std::printf("    create_captions(5000 palavras): %u blocos em 1 faixa em %.1f ms | releitura da timeline: %u camadas, %llu kf em %.2f ms\n",
                 count, createMs, n, static_cast<unsigned long long>(kf), refreshMs);
     e.shutdown();
 }

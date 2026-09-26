@@ -494,6 +494,19 @@ public:
     /// Arquivo de mídia da camada de vídeo/áudio (caminho ou content://), para
     /// o provedor de transcrição ler o áudio. Vazio = não tem mídia.
     [[nodiscard]] std::string layer_media_path(u64 layerId) noexcept;
+    [[nodiscard]] Result<std::vector<text::CaptionWord>> transcribe_local(u64 layerId, const std::string& model, const std::string& language) noexcept;
+    std::atomic<int> captionProgress{0};
+    std::atomic<bool> captionCancelled{false};
+    [[nodiscard]] std::string caption_tracks() noexcept;
+    [[nodiscard]] bool edit_caption_track(u64 layerId, const std::string& command) noexcept;
+    [[nodiscard]] std::string save_caption_bundle(u64 layerId, const std::string& name) noexcept;
+    [[nodiscard]] bool apply_caption_bundle(u64 layerId, const std::string& data) noexcept;
+    /// Blocos de TODAS as faixas de legendas numa travessia, na ordem das
+    /// camadas e por tempo dentro de cada faixa — é o que a timeline desenha.
+    /// Devolve `count << 32 | total`: `count` blocos escritos (até `capacity`) e
+    /// `total` que existem. Se qualquer um passar do buffer, o chamador cresce e
+    /// pergunta de novo (mesma regra de `query_all_keyframes`).
+    [[nodiscard]] u64 query_captions(bridge::CaptionRow* rows, u32 capacity, char* text, u32 textCapacity) noexcept;
     /// Legendas da fala da camada `sourceLayer` (palavras em segundos da
     /// mídia): camadas de texto no tempo da fala, num passo de desfazer.
     /// Substitui as legendas anteriores dessa camada. Devolve quantas criou.

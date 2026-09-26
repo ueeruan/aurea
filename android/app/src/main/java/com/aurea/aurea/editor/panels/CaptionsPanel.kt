@@ -64,7 +64,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
     val store = env.store
     val cap = store.captions
     val layerId = store.primary ?: return
-    LaunchedEffect(layerId) { cap.open(layerId) }
+    LaunchedEffect(layerId, store.curveRevision) { cap.open(layerId) }
     var language by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<Int?>(null) }
     val srt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { cap.importSrt(it) } }
@@ -81,15 +81,16 @@ internal fun CaptionsPanel(env: PanelEnv) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
         item(key = "opcoes", contentType = "opcoes") {
             Column {
+                cap.track?.let { CaptionBlockEditor(cap, store.playhead) }
+                CaptionPresetBrowser(cap)
                 cap.busy?.let { Note(it, AureaColors.Accent) }
                 cap.error?.let { Note(it, AureaColors.Danger) }
-                if (!cap.hasGroqKey) {
-                    Note(stringResource(R.string.panel_sem_chave_servico_transcricao_use_arquivo), AureaColors.Muted)
-                }
+                Note("Whisper no aparelho. O primeiro uso baixa o modelo; seu áudio permanece local.", AureaColors.Muted)
+                if (cap.busy != null) Action("Cancelar") { cap.cancelTranscription() }
                 Label(stringResource(R.string.panel_idioma_fala))
                 Chips(Languages.map { it.second ?: stringResource(R.string.pn_caption_lang_auto) }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Action(if (cap.words.isEmpty()) stringResource(R.string.panel_gerar_legendas) else stringResource(R.string.panel_transcrever_novo), primary = true, enabled = cap.hasGroqKey && cap.busy == null) {
+                    Action(if (cap.words.isEmpty()) stringResource(R.string.panel_gerar_legendas) else stringResource(R.string.panel_transcrever_novo), primary = true, enabled = cap.busy == null) {
                         cap.transcribe(language)
                     }
                     Action(stringResource(R.string.panel_importar_legenda_srt), enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }

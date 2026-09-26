@@ -29,6 +29,21 @@ struct CaptionWord {
     f64 end = 0.0;
 };
 
+// Times are integer frames local to one dedicated caption layer. Stable ids
+// survive text edits, moves and undo; a segment never creates another layer.
+struct CaptionToken { std::string text; i64 start = 0, end = 0; };
+struct CaptionSegment {
+    u64 id = 0;
+    i64 start = 0, end = 0;
+    std::string text;
+    std::vector<CaptionToken> words;
+};
+[[nodiscard]] const CaptionSegment* active_caption(const std::vector<CaptionSegment>& segments, i64 frame) noexcept;
+[[nodiscard]] bool valid_caption_track(const std::vector<CaptionSegment>& segments) noexcept;
+// Matching words retain their original timestamps; inserted/replaced words
+// use only the gap between their preserved neighbours.
+void edit_caption_text(CaptionSegment& segment, const std::string& text);
+
 struct CaptionOptions {
     u32  mode = 0;            ///< 0 agrupadas, 1 uma camada por palavra
     u32  maxWords = 4;        ///< por legenda (agrupadas)
@@ -58,6 +73,11 @@ inline constexpr u32 kCaptionStyleCount = 6;
 /// Agrupa as palavras (limites de palavras, caracteres, linhas e pausas).
 [[nodiscard]] std::vector<CaptionGroup> group_captions(const std::vector<CaptionWord>& words, const CaptionOptions& opt);
 
+/// CAIXA ALTA para exibição (ASCII + latino suplementar, igual ao agrupamento).
+/// Aplicar na renderização deixa a opção "caixa alta" viva: um preset que a
+/// liga/desliga aparece na hora, sem perder o texto original guardado.
+[[nodiscard]] std::string upper_text(const std::string& s);
+
 /// Vício de linguagem ("hum", "ahn", "tipo", "né", "uh", "um"…)?
 [[nodiscard]] bool is_filler_word(const std::string& word);
 /// Tira os vícios de linguagem (a legenda não mostra; o tempo continua).
@@ -70,5 +90,7 @@ inline constexpr u32 kCaptionStyleCount = 6;
 /// legenda em quadros LOCAIS da camada (destaque/pop seguem a fala).
 void apply_caption_style(const CaptionOptions& opt, u32 compShortSide, TextData& t, TrackSet& tracks,
                          const std::vector<i64>& wordFrames, i64 endFrame);
+void apply_caption_animation(const CaptionOptions& opt, TextData& t, TrackSet& tracks,
+                             const std::vector<i64>& wordFrames, i64 endFrame);
 
 } // namespace aurea::text

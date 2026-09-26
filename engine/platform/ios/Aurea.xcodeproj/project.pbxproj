@@ -586,7 +586,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2112;
+				CURRENT_PROJECT_VERSION = 2113;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -617,6 +617,10 @@
 					"-laurea_core",
 					"-laurea_thirdparty",
 					"-lncnn",
+					"-lwhisper",
+					"-lggml",
+					"-lggml-base",
+					"-lggml-cpu",
 					"-lc++",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.aurea.aurea;
@@ -635,7 +639,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2112;
+				CURRENT_PROJECT_VERSION = 2113;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -666,6 +670,10 @@
 					"-laurea_core",
 					"-laurea_thirdparty",
 					"-lncnn",
+					"-lwhisper",
+					"-lggml",
+					"-lggml-base",
+					"-lggml-cpu",
 					"-lc++",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.aurea.aurea;

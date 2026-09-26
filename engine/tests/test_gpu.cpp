@@ -4849,6 +4849,126 @@ AUREA_TEST(Gpu, ChromaKeyRemovesGreenAndKeepsSkin) {
     AUREA_CHECK(lum.v(10, 16).w < 0.01f && lum.v(50, 16).w > 0.99f);
 }
 
+AUREA_TEST(Gpu, NativeBoxAndDirectionalBlurPreserveUniformAndSpreadImpulse) {
+    AUREA_REQUIRE_GPU();
+    for (const char* key : {effect_keys::kBoxBlur,effect_keys::kDirectionalBlur}) {
+        Scene s(64,64);
+        s.comp->set_transparent_background(true);
+        auto pixels = uniform_image(64,64,0,0,0);
+        for (usize i=0;i<pixels.rgba.size();i+=4) pixels.rgba[i+3]=0;
+        const usize p=(32*64+32)*4;
+        for (u32 c=0;c<4;++c) pixels.rgba[p+c]=255;
+        auto id=s.image(std::move(pixels),32,32);
+        auto& fx=s.add_effect(id,key);
+        fx.params[0].constant.v[0]=4.f;
+        const auto image=s.render();
+        f32 energy=0.f;
+        for (u32 y=0;y<64;++y) for (u32 x=0;x<64;++x) energy+=image.v(x,y).w;
+        AUREA_CHECK(std::abs(energy-1.f)<.05f);
+        AUREA_CHECK(image.v(29,32).w>.001f);
+        if(key==effect_keys::kBoxBlur) AUREA_CHECK(image.v(32,29).w>.001f);
+        else AUREA_CHECK(image.v(32,29).w<.001f);
+        Scene flat(32,32);
+        flat.comp->set_transparent_background(true);
+        auto fid=flat.image(uniform_image(32,32,100,150,200),16,16);
+        const auto before=flat.render();
+        auto& ff=flat.add_effect(fid,key);
+        ff.params[0].constant.v[0]=64.f;
+        ff.params[2].constant.v[0]=1.f;
+        const auto after=flat.render();
+        AUREA_CHECK(std::abs(after.v(2,2).x-before.v(2,2).x)<.003f);
+        AUREA_CHECK(after.v(2,2).w>.99f);
+    }
+}
+
+AUREA_TEST(Gpu, NativeOpticalEffectsPreserveIdentityAndFinitePixels) {
+    AUREA_REQUIRE_GPU();
+    for (const char* key : {effect_keys::kLensFlare, effect_keys::kRipple, effect_keys::kOpticsCompensation}) {
+        Scene s(64, 64);
+        s.comp->set_transparent_background(true);
+        const auto id = s.image(uniform_image(64, 64, 120, 80, 30), 32, 32);
+        const auto original = s.render();
+        auto& fx = s.add_effect(id, key);
+        const auto active = s.render();
+        for (u32 y=0; y<64; ++y) for (u32 x=0; x<64; ++x) {
+            const auto v = active.v(x,y);
+            AUREA_CHECK(std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z));
+            AUREA_CHECK(v.w >= 0.f && v.w <= 1.001f);
+        }
+        if (key == effect_keys::kLensFlare) AUREA_CHECK(active.v(32,32).x > original.v(32,32).x + .1f);
+        fx.params[2].constant.v[0] = 0.f;
+        const auto neutral = s.render();
+        AUREA_CHECK(std::abs(neutral.v(32,32).x - original.v(32,32).x) < .001f);
+        AUREA_CHECK(std::abs(neutral.v(2,2).w - original.v(2,2).w) < .001f);
+    }
+}
+
+AUREA_TEST(Gpu, NativeWipesHaveExactEndpointsAndDeterministicBlocks) {
+    AUREA_REQUIRE_GPU();
+    for (const char* key : {effect_keys::kLinearWipe, effect_keys::kRadialWipe, effect_keys::kBlockDissolve}) {
+        Scene s(64, 64);
+        s.comp->set_transparent_background(true);
+        const auto id = s.image(uniform_image(64, 64, 220, 130, 40), 32, 32);
+        auto& fx = s.add_effect(id, key);
+        fx.params[0].constant.v[0] = 0.f;
+        const auto full = s.render();
+        AUREA_CHECK(full.v(16, 16).w > .99f);
+        fx.params[0].constant.v[0] = 100.f;
+        const auto empty = s.render();
+        AUREA_CHECK(empty.v(16, 16).w < .001f && empty.v(48, 48).w < .001f);
+        fx.params[0].constant.v[0] = 50.f;
+        const auto first = s.render();
+        const auto again = s.render();
+        f32 alphaSum = 0.f;
+        for (u32 y = 1; y < 63; ++y) for (u32 x = 1; x < 63; ++x) {
+            const auto a = first.v(x, y), b = again.v(x, y);
+            AUREA_CHECK(std::abs(a.w - b.w) < .001f);
+            AUREA_CHECK(std::isfinite(a.x) && a.x <= a.w + .001f);
+            alphaSum += a.w;
+        }
+        AUREA_CHECK(alphaSum > 20.f && alphaSum < 3820.f);
+        fx.params[3].constant.v[0] = 1.f;
+        const auto reverse = s.render();
+        for (u32 y = 2; y < 62; y += 5) for (u32 x = 2; x < 62; x += 5)
+            AUREA_CHECK(std::abs(first.v(x,y).w + reverse.v(x,y).w - 1.f) < .02f);
+    }
+}
+
+AUREA_TEST(Gpu, ChromaKeyMatteControlsKeepAlphaAndRespondToGamma) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 32);
+    s.comp->set_transparent_background(true);
+    auto pixels = uniform_image(64, 32, 25, 184, 56);
+    for (u32 y=0; y<32; ++y) for (u32 x=0; x<64; ++x) {
+        auto* p = &pixels.rgba[(y*64+x)*4];
+        p[0] = static_cast<u8>(25 + x*3); p[1] = static_cast<u8>(184 - x); p[2] = 56;
+    }
+    auto id = s.image(std::move(pixels), 32, 16);
+    auto& fx = s.add_effect(id, effect_keys::kChromaKey);
+    fx.params[1].constant.v[0] = 5.f;
+    fx.params[2].constant.v[0] = 60.f;
+    const auto normal = s.render();
+    fx.params[6].constant.v[0] = 2.f;
+    const auto gamma = s.render();
+    bool changed = false;
+    for (u32 x=3; x<61; ++x) {
+        AUREA_CHECK(gamma.v(x,16).w + .002f >= normal.v(x,16).w);
+        if (gamma.v(x,16).w > normal.v(x,16).w + .05f) changed = true;
+    }
+    AUREA_CHECK(changed);
+    fx.params[7].constant.v[0] = 1.f;
+    const auto matte = s.render();
+    AUREA_CHECK(matte.v(10,16).w > .99f);
+    AUREA_CHECK(std::abs(matte.v(30,16).x - matte.v(30,16).y) < .002f);
+    fx.params[7].constant.v[0] = 2.f;
+    const auto spill = s.render();
+    AUREA_CHECK(spill.v(10,16).w > .99f);
+    fx.params[7].constant.v[0] = 0.f;
+    fx.params[4].constant.v[0] = 90.f;
+    const auto clean = s.render();
+    AUREA_CHECK(clean.v(10,16).w <= normal.v(10,16).w + .001f);
+}
+
 AUREA_TEST(Gpu, MasksMatteAndKeysSurviveSaveAndReopen) {
     AUREA_REQUIRE_GPU();
     Scene3DRig rig(256, 144);

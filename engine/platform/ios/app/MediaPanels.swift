@@ -4,6 +4,61 @@ import UniformTypeIdentifiers
 import Security
 import CryptoKit
 
+struct NativeCaptionBlock: Codable, Equatable, Identifiable {
+    var id: Int64; var start: Int32; var end: Int32; var text: String
+}
+struct NativeCaptionTrack: Codable, Equatable {
+    var layer: Int64; var source: Int64; var segments: [NativeCaptionBlock]
+}
+
+@MainActor
+struct CaptionBlockEditor: View {
+    @EnvironmentObject private var model: AureaModel
+    let track: NativeCaptionTrack
+    @State private var selected: Set<Int64> = []
+    @State private var text = ""
+    @State private var start = ""
+    @State private var end = ""
+    @State private var error: String?
+    private func edit(_ op: String, _ fields: [String: Any] = [:]) {
+        var value = fields; value["op"] = op; value["ids"] = Array(selected)
+        guard let data = try? JSONSerialization.data(withJSONObject: value), let command = String(data: data, encoding: .utf8) else { return }
+        if model.engine.editCaptionTrack(track.layer, command: command) { error = nil; model.refreshModel(force: true) }
+        else { error = "A edição sobrepõe outro bloco ou possui tempos inválidos." }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Faixa de legendas · selecione um ou vários blocos")
+            ScrollView(.horizontal) {
+                HStack {
+                    ForEach(track.segments) { block in
+                        Button { if selected.contains(block.id) { selected.remove(block.id) } else { selected.insert(block.id) }; text = block.text; start = String(block.start); end = String(block.end) } label: {
+                            Text("\(block.start)–\(block.end)\n\(block.text)").lineLimit(2).padding(8).background(selected.contains(block.id) ? AureaColors.accent.opacity(0.5) : AureaColors.muted.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+            if !selected.isEmpty {
+                HStack {
+                    Button("← 1") { edit("move", ["delta": -1]) }
+                    Button("1 →") { edit("move", ["delta": 1]) }
+                    Button("Dividir") { edit("split", ["frame": model.status.playhead]) }.disabled(selected.count != 1)
+                    Button("Unir") { edit("merge"); selected.removeAll() }.disabled(selected.count < 2)
+                    Button("Excluir") { edit("delete"); selected.removeAll() }
+                }
+                if selected.count == 1 {
+                    TextField("Texto", text: $text).textFieldStyle(.roundedBorder)
+                    Button("Aplicar texto mantendo os tempos") { edit("text", ["text": text]) }
+                    HStack { TextField("Início · quadro", text: $start); TextField("Fim · quadro", text: $end) }.textFieldStyle(.roundedBorder).keyboardType(.numberPad)
+                    Button("Ajustar duração") { if let a = Int(start), let b = Int(end) { edit("trim", ["start": a, "end": b]) } }
+                }
+                Button("Limpar seleção") { selected.removeAll() }
+            }
+            if let error { Text(error).foregroundStyle(.red) }
+        }.padding(.vertical, 10)
+    }
+}
+
 @MainActor
 struct TrackingPanel: View {
     @EnvironmentObject private var model: AureaModel
@@ -149,45 +204,32 @@ enum CaptionTranscriber {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(words) { try? data.write(to: url, options: .atomic) }
     }
-    static func transcribe(path: String, key: String, language: String,
-                           progress: @escaping @Sendable (String) async -> Void = { _ in }) async throws -> [CaptionWord] {
-        guard !key.isEmpty else { throw Failure(message: "Coloque a chave da Groq em Ajustes de legendas, ou importe um SRT.") }
-        let audio = FileManager.default.temporaryDirectory.appendingPathComponent("aurea-caption-\(UUID().uuidString).m4a")
-        defer { try? FileManager.default.removeItem(at: audio) }
-        let asset = AVURLAsset(url: URL(fileURLWithPath: path))
-        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else { throw Failure(message: "Esta mídia não tem áudio compatível.") }
-        exporter.outputURL = audio; exporter.outputFileType = .m4a
-        await exporter.export()
-        try Task.checkCancellation()
-        guard exporter.status == .completed else { throw exporter.error ?? Failure(message: "Não foi possível extrair o áudio.") }
-        let data = try Data(contentsOf: audio)
-        guard data.count <= 25 * 1024 * 1024 else { throw Failure(message: "Áudio grande demais para a Groq (limite de 25 MB).") }
-        await progress("Transcrevendo na Groq…")
-        try Task.checkCancellation()
-        let boundary = "aurea-\(UUID().uuidString)"
-        var body = Data()
-        func append(_ value: String) { body.append(Data(value.utf8)) }
-        func field(_ name: String, _ value: String) { append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n") }
-        field("model", "whisper-large-v3-turbo"); field("response_format", "verbose_json")
-        field("timestamp_granularities[]", "word"); field("timestamp_granularities[]", "segment")
-        if !language.isEmpty { field("language", language) }
-        append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n")
-        body.append(data); append("\r\n--\(boundary)--\r\n")
-        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!)
-        request.httpMethod = "POST"; request.timeoutInterval = 180
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let (response, meta) = try await URLSession.shared.upload(for: request, from: body)
-        let code = (meta as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else {
-            if code == 401 { throw Failure(message: "A Groq recusou a chave (401). Confira em Ajustes de legendas.") }
-            if code == 429 { throw Failure(message: "Limite de uso da Groq atingido. Tente mais tarde.") }
-            throw Failure(message: "Não foi possível transcrever: resposta \(code) da Groq.")
+    static func prepareModel() async throws -> URL {
+        let base = ProcessInfo.processInfo.physicalMemory >= 6 * 1024 * 1024 * 1024 && !ProcessInfo.processInfo.isLowPowerModeEnabled
+        let name = base ? "base" : "tiny"
+        let expected = base ? 59707625 : 32152673
+        let hash = base ? "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898" : "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7"
+        let folder = AureaPaths.documents.appendingPathComponent("Whisper", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let target = folder.appendingPathComponent("ggml-\(name)-q5_1.bin")
+        func valid(_ url: URL) throws -> Bool {
+            guard (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue == expected else { return false }
+            let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+            var digest = SHA256()
+            while let data = try file.read(upToCount: 65536), !data.isEmpty { digest.update(data: data) }
+            return digest.finalize().map { String(format: "%02x", $0) }.joined() == hash
         }
-        guard let object = try JSONSerialization.jsonObject(with: response) as? [String: Any] else { throw Failure(message: "Resposta de transcrição inválida.") }
-        let result = parse(object)
-        guard !result.isEmpty else { throw Failure(message: "Não foi encontrada fala no áudio.") }
-        return result
+        if (try? valid(target)) == true { return target }
+        let remote = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(target.lastPathComponent)")!
+        let (temporary, response) = try await URLSession.shared.download(from: remote)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        guard (response as? HTTPURLResponse)?.statusCode == 200, try valid(temporary) else { throw Failure(message: "Falha na verificação do modelo Whisper") }
+        try Task.checkCancellation()
+        if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
+        try FileManager.default.moveItem(at: temporary, to: target)
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        var local = target; try local.setResourceValues(values)
+        return target
     }
     // Mesma combinação de palavras e pontuação de Captions.kt no Android.
     static func parse(_ object: [String: Any]) -> [CaptionWord] {
@@ -247,7 +289,8 @@ struct CaptionsPanel: View {
     @State private var removeFillers = true
     @State private var posY: Float = 0.78
     @State private var size: Float = 0.065
-    private var id: Int64 { model.primarySelection ?? 0 }
+    private var captionTrack: NativeCaptionTrack? { model.captionTracks.first { $0.layer == model.primarySelection || $0.source == model.primarySelection } }
+    private var id: Int64 { captionTrack?.source ?? model.primarySelection ?? 0 }
     private var path: String { model.engine.layerMediaPath(id) }
     private var languages: [String] { [AureaText.t("pn_caption_lang_auto"), "Português", "English", "Español"] }
     private let languageCodes = ["", "pt", "en", "es"]
@@ -267,20 +310,22 @@ struct CaptionsPanel: View {
         .onAppear { open(); loadOptions() }
         .onChange(of: id) { _ in open() }
         .onChange(of: model.status.modelRevision) { _ in captionCount = Int(model.engine.captionCount(id)) }
-        .onDisappear { job?.cancel(); loading?.cancel(); persist(); model.captionOptions = options }
+        .onDisappear { _ = model.engine.captionProgress(true); job?.cancel(); loading?.cancel(); persist(); model.captionOptions = options }
         .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "srt") ?? .plainText, .plainText, .data]) { result in
             importSRT(result)
         }
     }
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let captionTrack { CaptionBlockEditor(track: captionTrack) }
             if let busy { note(busy, color: AureaColors.accent) }
             if let error { note(error, color: AureaColors.danger) }
-            if !hasKey { note(AureaText.t("panel_sem_chave_servico_transcricao_use_arquivo"), color: AureaColors.muted) }
+            note("Whisper no aparelho. O primeiro uso baixa o modelo; seu áudio permanece local.", color: AureaColors.muted)
+            if busy != nil { CaptionAction(label: "Cancelar") { _ = model.engine.captionProgress(true); job?.cancel() } }
             label("panel_idioma_fala")
             CaptionChips(options: languages, selected: languageCodes.firstIndex(of: language) ?? 0) { language = languageCodes[$0] }
             HStack(spacing: 8) {
-                CaptionAction(label: AureaText.t(words.isEmpty ? "panel_gerar_legendas" : "panel_transcrever_novo"), primary: true, enabled: hasKey && busy == nil, action: transcribe)
+                CaptionAction(label: AureaText.t(words.isEmpty ? "panel_gerar_legendas" : "panel_transcrever_novo"), primary: true, enabled: busy == nil, action: transcribe)
                 CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: busy == nil) { importing = true }
             }.padding(.vertical, 6)
             label("panel_estilo")
@@ -417,18 +462,26 @@ struct CaptionsPanel: View {
     }
     private func transcribe() {
         guard busy == nil else { return }
-        let source = path, sourceId = id, key = CaptionKeychain.read(), selectedLanguage = language
-        guard !key.isEmpty else { hasKey = false; error = "Configure a chave da Groq nos Ajustes para transcrever."; return }
-        guard !source.isEmpty else { error = "Esta camada não tem mídia com som."; return }
-        busy = "Separando o áudio…"; error = nil
+        let sourceId = id, engine = model.engine, selectedLanguage = language
+        guard !path.isEmpty else { error = "Esta camada não tem mídia com som."; return }
+        busy = "Preparando modelo Whisper local…"; error = nil
         job = Task {
             do {
-                let result = try await CaptionTranscriber.transcribe(path: source, key: key, language: selectedLanguage) { stage in
-                    await MainActor.run { if model.primarySelection == sourceId { busy = stage } }
-                }
+                let modelFile = try await Task.detached(priority: .utility) { try await CaptionTranscriber.prepareModel() }.value
                 try Task.checkCancellation()
-                guard model.primarySelection == sourceId else { return }
-                setWords(result, from: "Groq"); busy = nil; persist(); apply()
+                busy = "Transcrevendo no aparelho…"
+                let ticker = Task { @MainActor in
+                    while !Task.isCancelled { try? await Task.sleep(nanoseconds: 400_000_000); if !Task.isCancelled { busy = "Whisper local: \(engine.captionProgress(false))%" } }
+                }
+                defer { ticker.cancel() }
+                let result = try await withTaskCancellationHandler {
+                    try await Task.detached(priority: .utility) {
+                        try engine.transcribeLocal(sourceId, model: modelFile.path, language: selectedLanguage).compactMap(CaptionWord.init)
+                    }.value
+                } onCancel: { _ = engine.captionProgress(true) }
+                try Task.checkCancellation()
+                guard model.primarySelection == sourceId else { busy = nil; return }
+                setWords(result, from: "Whisper local"); busy = nil; persist(); apply()
             } catch { if !Task.isCancelled { self.error = error.localizedDescription }; busy = nil }
         }
     }

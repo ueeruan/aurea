@@ -685,6 +685,15 @@ void write_layer(ByteWriter& w, const Layer& l) {
         w.f32v(material.metallic);
         w.f32v(material.roughness);
     }
+    // v25: one caption track with timed words; old text layers remain readable.
+    w.u32v(l.captionOptions.style); w.boolv(l.captionOptions.highlight); w.vec4(l.captionOptions.highlightColor);
+    w.u32v(static_cast<u32>(l.captions.size()));
+    for (const auto& segment : l.captions) {
+        w.u64v(segment.id); w.i64v(segment.start); w.i64v(segment.end); w.str(segment.text);
+        w.u32v(static_cast<u32>(segment.words.size()));
+        for (const auto& word : segment.words) { w.str(word.text); w.i64v(word.start); w.i64v(word.end); }
+    }
+
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -700,7 +709,7 @@ void write_layer(ByteWriter& w, const Layer& l) {
 ///      textura/malha, colisão esfera/caixa, curvas ao longo da vida).
 /// v22: ambiente por objeto 3D (Scene ou Custom, com HDRI, intensidade,
 ///      exposição e rotação próprios).
-constexpr u32 kTimelineSectionVersion = 24;
+constexpr u32 kTimelineSectionVersion = 25;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -1100,6 +1109,20 @@ void read_layer(ByteReader& r, Layer& l) {
         std::sort(indices.begin(), indices.end());
         if (std::adjacent_find(indices.begin(), indices.end()) != indices.end()) { r.fail(); return; }
     }
+    if (g_readingTimelineVersion >= 25) {
+        l.captionOptions.style = r.u32v(); l.captionOptions.highlight = r.boolv(); l.captionOptions.highlightColor = r.vec4();
+        const u32 count = r.u32v();
+        if (count > 100000 || l.captionOptions.style >= text::kCaptionStyleCount) { r.fail(); return; }
+        l.captions.resize(count);
+        for (auto& segment : l.captions) {
+            segment.id = r.u64v(); segment.start = r.i64v(); segment.end = r.i64v(); segment.text = r.str();
+            const u32 words = r.u32v(); if (words > 1024) { r.fail(); return; }
+            segment.words.resize(words);
+            for (auto& word : segment.words) { word.text = r.str(); word.start = r.i64v(); word.end = r.i64v(); }
+        }
+        if (!text::valid_caption_track(l.captions)) { r.fail(); return; }
+    }
+
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap

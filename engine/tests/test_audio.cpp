@@ -557,28 +557,44 @@ AUREA_TEST(Audio, CaptionsBecomeTimedTextLayersWithHighlightUndoAndReopen) {
     AUREA_CHECK(made.ok() && *made == 2);
     AUREA_CHECK_EQ(e.caption_count(*vid), 2u);
     comp = e.project()->timeline().composition(e.project()->timeline().current());
+    // UMA faixa de legendas: todos os blocos na mesma camada, na mesma linha.
     const Layer* c0 = nullptr;
     for (u32 i = 0; i < comp->order().size(); ++i) {
         const Layer* l = comp->layer(comp->order().at(i));
-        if (l && l->kind == LayerKind::Text && l->text.content == "um dois") c0 = l;
+        if (l && l->kind == LayerKind::Text && !l->captions.empty()) c0 = l;
     }
     AUREA_CHECK(c0 != nullptr);
     if (c0) {
+        std::printf("    faixa de legendas: %zu blocos, primeiro %lld..%lld, y %.0f, tamanho %.0f\n",
+                    c0->captions.size(), static_cast<long long>(c0->captions[0].start),
+                    static_cast<long long>(c0->captions[0].end), c0->transform.position.y, c0->text.size);
+        AUREA_CHECK_EQ(c0->captions.size(), 2u);
+        AUREA_CHECK_EQ(c0->captions[0].text, std::string("um dois"));
         // 1,0 s da mídia = quadro 30 da mídia = timeline 30 + (30 − 15) = 45.
-        std::printf("    legenda 1: quadros %lld..%lld, y %.0f, tamanho %.0f\n", static_cast<long long>(c0->start.value),
-                    static_cast<long long>(c0->end.value), c0->transform.position.y, c0->text.size);
-        AUREA_CHECK_EQ(c0->start.value, 45);
-        AUREA_CHECK_EQ(c0->end.value, 75);   // até a próxima legenda (2,0 s = timeline 75)
+        AUREA_CHECK_EQ(c0->captions[0].start, 45);
+        AUREA_CHECK_EQ(c0->captions[0].end, 75);   // até a próxima legenda (2,0 s = timeline 75)
         AUREA_CHECK(std::fabs(c0->transform.position.y - static_cast<f32>(comp->height()) * 0.78f) < 1);
         AUREA_CHECK_EQ(c0->text.fontWeight, 900);
-        AUREA_CHECK_EQ(c0->text.animators.size(), 1u);
-        // Destaque: "um" no começo, "dois" a partir de 1,5 s (quadro local 15 − 0 = 15).
+        // Cada palavra guarda o próprio tempo — é o que permite destacar a fala.
+        AUREA_CHECK_EQ(c0->captions[0].words.size(), 2u);
+        AUREA_CHECK_EQ(c0->captions[0].words[0].text, std::string("um"));
+        AUREA_CHECK_EQ(c0->captions[0].words[0].start, 45);
+        AUREA_CHECK_EQ(c0->captions[0].words[1].text, std::string("dois"));
+        AUREA_CHECK_EQ(c0->captions[0].words[1].start, 60);
+        // Destaque: exatamente o que o renderizador monta por bloco — animador
+        // sobre os tempos das palavras do bloco ("um" no começo, "dois" depois).
+        TextData styled = c0->text;
+        TrackSet tracks = c0->tracks;
+        std::vector<i64> starts;
+        for (const auto& w : c0->captions[0].words) starts.push_back(w.start);
+        text::apply_caption_animation(c0->captionOptions, styled, tracks, starts, c0->captions[0].end);
+        AUREA_CHECK_EQ(styled.animators.size(), 1u);
         std::vector<text::GlyphUnits> units(7);
         for (u32 i = 0; i < 7; ++i) { units[i].charIndex = i; units[i].wordIndex = i < 3 ? 0 : 1; }
         std::vector<text::GlyphAnim> a0, a1;
         const f64 l0 = static_cast<f64>(c0->local_time(FrameIndex{46}).value), l1 = static_cast<f64>(c0->local_time(FrameIndex{61}).value);
-        text::evaluate_text_animators(c0->text, c0->tracks, l0, 30.0, units, 7, 2, 1, a0);
-        text::evaluate_text_animators(c0->text, c0->tracks, l1 - 1, 30.0, units, 7, 2, 1, a1);
+        text::evaluate_text_animators(styled, tracks, l0, 30.0, units, 7, 2, 1, a0);
+        text::evaluate_text_animators(styled, tracks, l1, 30.0, units, 7, 2, 1, a1);
         AUREA_CHECK(a0[0].fill.w > 0.99f && a0[5].fill.w < 0.01f);
         AUREA_CHECK(a1[0].fill.w < 0.01f && a1[5].fill.w > 0.99f);
     }

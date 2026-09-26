@@ -616,7 +616,7 @@ private struct DockView: View {
         if layer.adjustment || layer.kind == 7 { return [.blend, .presets, .effects] }
         switch layer.kind {
         case 5: return model.isVectorLayer ? [.vector, .move, .blend, .mask, .presets, .effects] : [.color, .shape, .move, .blend, .mask, .presets, .effects]
-        case 4: return [.text, .move, .blend, .mask, .presets, .effects]
+        case 4: return [.text, .captions, .move, .blend, .mask, .presets, .effects]
         case 1:
             return [.move] + (hasAudio ? [.audio] : []) + [.mask, .blend, .tracking] + (hasAudio ? [.captions] : []) + [.presets, .effects]
         case 2, 12: return [.move, .blend, .mask, .presets, .effects]

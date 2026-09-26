@@ -83,6 +83,9 @@ inline constexpr u32 kLayerRowFlagSelected = 1u << 4;
 inline constexpr u32 kLayerRowFlagThreeD   = 1u << 5;
 inline constexpr u32 kLayerRowFlagAdjustment = 1u << 6;   ///< camada de ajuste
 inline constexpr u32 kLayerRowFlagGuide    = 1u << 7;     ///< guia (não exporta)
+/// Faixa de legendas: a UI desenha os blocos na MESMA linha, não um clipe só.
+/// Blocos (id/tempo/texto) vêm de `caption_tracks`.
+inline constexpr u32 kLayerRowFlagCaptions = 1u << 12;
 /// Etiqueta de cor (0 = nenhuma) nos bits 8..11.
 inline constexpr u32 kLayerRowLabelShift   = 8;
 inline constexpr u32 kLayerRowLabelMask    = 0xFu << kLayerRowLabelShift;
@@ -114,6 +117,28 @@ struct KeyframeRow {
     u32 interpolation = 0;    // +16
     u32 paramIndex    = 0;    // +20  parâmetro de efeito: param*4 + componente
 };
+
+/// Um bloco de legenda da faixa (a UI desenha todos na MESMA linha, em
+/// sequência). Os tempos já vêm na régua da TIMELINE: `local + start - offset`
+/// da camada da faixa, porque mover a faixa move os blocos junto.
+struct CaptionRow {
+    u64 layerId    = 0;    // +0  camada da faixa (handle empacotado)
+    u64 id         = 0;    // +8  id estável do bloco (é o que `edit_caption_track` usa)
+    i32 start      = 0;    // +16 quadro inicial, na timeline
+    i32 end        = 0;    // +20 quadro final (exclusivo)
+    u32 textOffset = 0;    // +24 offset no blob de texto
+    u32 textLength = 0;    // +28
+    u32 words      = 0;    // +32 quantas palavras com tempo próprio
+    u32 reserved   = 0;    // +36
+};
+static_assert(sizeof(CaptionRow) == 40, "CaptionRow e contrato de ABI com a UI");
+static_assert(offsetof(CaptionRow, layerId) == 0);
+static_assert(offsetof(CaptionRow, id) == 8);
+static_assert(offsetof(CaptionRow, start) == 16);
+static_assert(offsetof(CaptionRow, end) == 20);
+static_assert(offsetof(CaptionRow, textOffset) == 24);
+static_assert(offsetof(CaptionRow, textLength) == 28);
+static_assert(offsetof(CaptionRow, words) == 32);
 
 /// Índice de `Engine::query_all_keyframes`: quantos keyframes de cada camada
 /// vêm em seguida no buffer de KeyframeRow (mesma ordem de query_layers).

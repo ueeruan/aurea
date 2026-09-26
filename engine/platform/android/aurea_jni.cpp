@@ -1636,9 +1636,40 @@ AUREA_JNI jint AUREA_FN(nativeRemoveCaptions)(JNIEnv*, jclass, jlong handle, jlo
     return c ? static_cast<jint>(c->engine.remove_captions(static_cast<u64>(layer))) : 0;
 }
 
+namespace {
+std::string utf8_of(JNIEnv* env, jbyteArray a);
+jbyteArray bytes_of(JNIEnv* env, const std::string& s);
+}
+
+AUREA_JNI jbyteArray AUREA_FN(nativeTranscribeLocal)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray model, jbyteArray language) {
+    auto* c = ctx_of(handle); if (!c) return nullptr;
+    auto result = c->engine.transcribe_local(static_cast<u64>(layer), utf8_of(env, model), utf8_of(env, language));
+    if (!result) { env->ThrowNew(env->FindClass("java/io/IOException"), std::string(result.status().detail()).c_str()); return nullptr; }
+    std::string output;
+    for (const auto& word : *result) output += std::to_string(word.start) + "\t" + std::to_string(word.end) + "\t" + word.text + "\n";
+    return bytes_of(env, output);
+}
+AUREA_JNI jint AUREA_FN(nativeCaptionProgress)(JNIEnv*, jclass, jlong handle, jboolean cancel) {
+    auto* c = ctx_of(handle); if (!c) return 0;
+    if (cancel) c->engine.captionCancelled.store(true);
+    return c->engine.captionProgress.load();
+}
 AUREA_JNI jint AUREA_FN(nativeCaptionCount)(JNIEnv*, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     return c ? static_cast<jint>(c->engine.caption_count(static_cast<u64>(layer))) : 0;
+}
+
+AUREA_JNI jbyteArray AUREA_FN(nativeCaptionTracks)(JNIEnv* env, jclass, jlong handle) {
+    auto* c = ctx_of(handle); return bytes_of(env, c ? c->engine.caption_tracks() : "[]");
+}
+AUREA_JNI jbyteArray AUREA_FN(nativeSaveCaptionBundle)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray name) {
+    auto* c = ctx_of(handle); return bytes_of(env, c ? c->engine.save_caption_bundle(static_cast<u64>(layer), utf8_of(env,name)) : "");
+}
+AUREA_JNI jboolean AUREA_FN(nativeApplyCaptionBundle)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray data) {
+    auto* c = ctx_of(handle); return c && c->engine.apply_caption_bundle(static_cast<u64>(layer), utf8_of(env,data));
+}
+AUREA_JNI jboolean AUREA_FN(nativeEditCaptionTrack)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray command) {
+    auto* c = ctx_of(handle); return c && c->engine.edit_caption_track(static_cast<u64>(layer), utf8_of(env, command));
 }
 
 /// SRT → "início\tfim\tpalavra" por linha.

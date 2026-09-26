@@ -37,6 +37,10 @@ u64 layer_bytes(const Layer& l) noexcept {
         for (const MaskPathKey& k : m.pathKeys) n += sizeof(MaskPathKey) + k.points.size() * sizeof(MaskPoint);
     }
     n += l.text.content.size() + l.text.fontFamily.size() + l.text.fontPath.size();
+    for (const auto& segment : l.captions) {
+        n += sizeof(text::CaptionSegment) + segment.text.size();
+        for (const auto& word : segment.words) n += sizeof(text::CaptionToken) + word.text.size();
+    }
     n += l.text.spans.size() * sizeof(TextSpan) + l.text.animators.size() * sizeof(TextAnimator);
     n += l.shape.path.size() * sizeof(Vec2) + vector_bytes(l.shape.vector);
     return n;

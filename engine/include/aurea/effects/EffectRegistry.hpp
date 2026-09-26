@@ -44,6 +44,14 @@ void register_builtin_effects(EffectRegistry& registry);
 
 // Chaves estáveis dos efeitos embutidos (o id no projeto é o hash delas).
 namespace effect_keys {
+    inline constexpr const char* kBoxBlur = "aurea.blur.box";
+    inline constexpr const char* kDirectionalBlur = "aurea.blur.directional";
+    inline constexpr const char* kLensFlare = "aurea.light.lens_flare";
+    inline constexpr const char* kRipple = "aurea.distort.ripple";
+    inline constexpr const char* kOpticsCompensation = "aurea.distort.optics_compensation";
+    inline constexpr const char* kLinearWipe = "aurea.transition.linear_wipe";
+    inline constexpr const char* kRadialWipe = "aurea.transition.radial_wipe";
+    inline constexpr const char* kBlockDissolve = "aurea.transition.block_dissolve";
     inline constexpr const char* kTransform          = "aurea.transform";
     inline constexpr const char* kExposure           = "aurea.color.exposure";
     inline constexpr const char* kBrightnessContrast = "aurea.color.brightness_contrast";

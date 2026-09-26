@@ -45,6 +45,21 @@ class CaptionsState(
 ) {
     private val vault = KeyVault(app)
     private val cache = TranscriptCache(app)
+    var track by mutableStateOf<CaptionTrack?>(null)
+        private set
+    fun capturePreset(name: String): String = track?.let { engine.saveCaptionBundle(it.layer, name) }.orEmpty()
+    fun applyPreset(data: String) {
+        val current = track ?: return
+        error = if (engine.applyCaptionBundle(current.layer, data)) null else "Preset incompatível com esta versão do Aurea."
+        onModelChanged()
+    }
+    fun editBlocks(command: org.json.JSONObject) {
+        val current = track ?: return
+        if (!engine.editCaptionTrack(current.layer, command.toString())) { error = "A edição sobrepõe outro bloco ou possui tempos inválidos."; return }
+        error = null
+        track = parseCaptionTracks(engine.captionTracks()).firstOrNull { it.layer == current.layer }
+        onModelChanged()
+    }
 
     var hasGroqKey by mutableStateOf(vault.has(KeyVault.GROQ))
         private set
@@ -96,6 +111,12 @@ class CaptionsState(
      * palavras são lidos fora da thread da UI — abrir o painel não engasga.
      */
     fun open(layerId: Long) {
+        val tracks = parseCaptionTracks(engine.captionTracks())
+        track = tracks.firstOrNull { it.layer == layerId || it.source == layerId }
+        val sourceId = tracks.firstOrNull { it.layer == layerId }?.source ?: layerId
+        openSource(sourceId)
+    }
+    private fun openSource(layerId: Long) {
         if (layer != layerId) {
             layer = layerId
             error = null
@@ -133,41 +154,33 @@ class CaptionsState(
         scope.launch(Dispatchers.IO) { mediaKey(path)?.let { cache.save(it, snapshot) } }
     }
 
-    /** Envia o áudio da camada à Groq (só aqui) e guarda a transcrição. */
+    /** Whisper local: nenhum áudio é enviado à rede. */
+    fun cancelTranscription() { engine.captionProgress(true) }
     fun transcribe(language: String?, thenGenerate: Boolean = true) {
+        if (busy != null) return
         val id = layer ?: return
-        val key = vault.get(KeyVault.GROQ)
-        if (key == null) {
-            hasGroqKey = false
-            error = "Configure a chave da Groq nos Ajustes para transcrever."
-            return
-        }
-        val path = engine.layerMediaPath(id) ?: run { error = "Esta camada não tem mídia com som."; return }
-        busy = "Separando o áudio…"
-        error = null
+        if (engine.layerMediaPath(id) == null) { error = "Esta camada não tem mídia com som."; return }
+        busy = "Preparando Whisper local…"; error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                val tmp = File(app.cacheDir, "legendas/audio_${System.nanoTime()}.m4a")
-                try {
-                    AudioExtractor.extract(app, path, tmp)
-                    withContext(Dispatchers.Main) { busy = "Transcrevendo na Groq…" }
-                    Result.success(GroqWhisperProvider(key).transcribe(tmp, language))
-                } catch (e: Exception) {
-                    Result.failure(e)
-                } finally {
-                    tmp.delete()   // arquivo temporário do próprio app
+                runCatching {
+                    val model = WhisperModels.prepare(app) { stage -> scope.launch(Dispatchers.Main) { busy = stage } }
+                    withContext(Dispatchers.Main) { busy = "Transcrevendo no aparelho…" }
+                    val ticker = scope.launch { while (true) { kotlinx.coroutines.delay(400); busy = "Whisper local: ${engine.captionProgress()}%" } }
+                    try {
+                        engine.transcribeLocal(id, model.absolutePath, language.orEmpty()).lineSequence().mapNotNull { line ->
+                            val fields = line.split('\t', limit = 3)
+                            if (fields.size != 3) null else Word(fields[2], fields[0].toDouble(), fields[1].toDouble())
+                        }.toList()
+                    } finally { ticker.cancel() }
                 }
             }
             busy = null
+            if (layer != id) return@launch
             result.onSuccess { list ->
-                if (list.isEmpty()) {
-                    error = "Nenhuma fala encontrada."
-                } else {
-                    setWords(list, "Groq")
-                    persist()
-                    if (thenGenerate) generate()
-                }
-            }.onFailure { error = it.message ?: "Falha na transcrição." }
+                if (list.isEmpty()) error = "Nenhuma fala encontrada."
+                else { setWords(list, "Whisper local"); persist(); if (thenGenerate) generate() }
+            }.onFailure { error = it.message ?: "Falha na transcrição local." }
         }
     }
 

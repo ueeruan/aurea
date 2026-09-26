@@ -1452,8 +1452,11 @@ AUREA_TEST(Stability, ExtremeProjectOpensSavesAndRenders) {
     const u32 layers = layer_count(e);
     u32 comps = 0;
     e.project()->timeline().for_each_composition([&](CompositionId, const Composition&) { ++comps; });
-    AUREA_CHECK(layers >= 500);
-    AUREA_CHECK(keys >= 5000);
+    // As 150 legendas agora vivem numa única faixa (antes: 150 camadas de
+    // texto, ~1500 keyframes). O projeto continua extremo: 361 camadas e 3670
+    // keyframes com 21 composições.
+    AUREA_CHECK(layers >= 350);
+    AUREA_CHECK(keys >= 3500);
 
     const std::string path = test_path("extremo");
     remove_family(path);

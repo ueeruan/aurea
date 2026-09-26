@@ -2,6 +2,11 @@ name: Build native IPA (unsigned)
 on:
   workflow_dispatch:
     inputs:
+      run_simulator:
+        description: 'Run simulator parity and gestures in addition to packaging the IPA'
+        required: false
+        default: true
+        type: boolean
       capture_scenes:
         description: 'Optional comma-separated capture scenes; empty runs the full matrix'
         required: false
@@ -92,6 +97,7 @@ jobs:
           path: build/ccache
           key: ios-cxx-${{ runner.os }}-${{ github.run_id }}
   simulator-parity:
+    if: github.event_name != 'workflow_dispatch' || inputs.run_simulator
     runs-on: macos-15
     timeout-minutes: 60
     env:

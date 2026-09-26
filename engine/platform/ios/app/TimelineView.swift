@@ -323,6 +323,19 @@ struct TimelineView: View {
             drawKeys(&context, row: row, top: top + 20 - m.diamondCyNormal, width: width)
             return
         }
+        if let track = model.captionTracks.first(where: { $0.layer == row.id }) {
+            for block in track.segments {
+                let left = x(Double(block.start) + Double(row.start) - Double(row.offset), width: width)
+                let right = x(Double(block.end) + Double(row.start) - Double(row.offset), width: width) - 2
+                if right < 0 || left > width || right <= left { continue }
+                let rect = CGRect(x: max(0, left), y: top, width: min(width, right) - max(0, left), height: m.bar)
+                var clipped = context
+                clipped.clip(to: Path(rect))
+                clipped.fill(Path(roundedRect: rect, cornerRadius: m.barRadius), with: .color(model.selection.contains(row.id) ? AureaColors.accent.opacity(0.7) : row.type.color.opacity(0.5)))
+                clipped.draw(Text(block.text).font(.aurea(size: 11)).foregroundColor(.white), at: CGPoint(x: rect.minX + 5, y: top + 7), anchor: .topLeading)
+            }
+            return
+        }
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
         let selected = model.selection.contains(row.id)
         if x1 >= -m.barRadius && x0 <= width + m.barRadius {

@@ -264,6 +264,22 @@ internal class TimelinePainter(
             }
             return
         }
+        val captionTrack = waveStore?.captionTracks?.firstOrNull { it.layer == r.id }
+        if (captionTrack != null) {
+            for (block in captionTrack.segments) {
+                val left = TimeAxis.xOf((block.start + r.start - r.offset).toDouble(), view, ppf, cx)
+                val right = TimeAxis.xOf((block.end + r.start - r.offset).toDouble(), view, ppf, cx)
+                if (right < 0 || left > w) continue
+                val x = max(0f, left); val end = min(w, right - 2f)
+                if (end <= x) continue
+                drawRoundRect(if (selected) AureaColors.Accent.copy(alpha = .7f) else r.type.color.copy(alpha = .5f), Offset(x, top), Size(end - x, m.bar), CornerRadius(m.barRadius))
+                if (end - x > 20f) {
+                    val layout = measurer.measure(block.text, nameStyle, overflow = TextOverflow.Ellipsis, maxLines = 1, constraints = Constraints(maxWidth = (end - x - 10f).toInt().coerceAtLeast(1)))
+                    clipRect(x, top, end, top + m.bar) { drawText(layout, topLeft = Offset(x + 5f, top + 5f)) }
+                }
+            }
+            return
+        }
         val x0 = TimeAxis.xOf(r.start.toDouble(), view, ppf, cx)
         val x1 = max(TimeAxis.xOf(r.end.toDouble(), view, ppf, cx), x0 + m.barMinWidth)
         val barW = x1 - x0

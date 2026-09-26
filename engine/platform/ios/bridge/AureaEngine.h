@@ -553,6 +553,12 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)isFillerWord:(NSString*)word NS_SWIFT_NAME(isFillerWord(_:));
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options;
 - (uint32_t)captionCount:(long long)layerId;
+- (NSArray<NSDictionary<NSString*, id>*>* _Nullable)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language error:(NSError* _Nullable * _Nullable)error;
+- (int)captionProgress:(BOOL)cancel;
+- (NSString*)captionTracks;
+- (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name;
+- (BOOL)applyCaptionBundle:(long long)layer data:(NSString*)data;
+- (BOOL)editCaptionTrack:(long long)layer command:(NSString*)command;
 - (void)removeCaptions:(long long)layerId;
 - (NSArray<NSNumber*>*)trackCurve:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param from:(int32_t)from to:(int32_t)to;
 - (NSArray<NSNumber*>*)trackEasing:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time;

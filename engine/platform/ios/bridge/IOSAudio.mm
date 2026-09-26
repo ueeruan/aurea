@@ -26,6 +26,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 
 #include "aurea/core/Log.hpp"
+#include "aurea/audio/PlanarOutput.hpp"
 
 #include <atomic>
 #include <cmath>
@@ -135,10 +136,9 @@ static const char* aurea_describe(NSError* error) {
         if (error) *error = [NSError errorWithDomain:@"aurea.audio" code:1 userInfo:nil];
         return NO;
     }
-    // `initStandardFormatWithSampleRate:` do núcleo é FLOAT INTERCALADO, que é
-    // exatamente o que `AudioRenderFn` entrega (f32* estéreo intercalado): sem
-    // desintercalar por quadro dentro da thread de tempo real.
-    const u32 mixChannels = aurea::audio::kMixChannels;
+    // Standard AVAudioFormat is NON-INTERLEAVED Float32. The core produces
+    // interleaved stereo; writing it directly into mBuffers[0] both corrupts
+    // the channel order and overruns that mono buffer.
     aurea::ios::AudioRenderSlot* renderSlot = (aurea::ios::AudioRenderSlot*)slot;
     AVAudioSourceNode* source =
         [[AVAudioSourceNode alloc] initWithFormat:format
@@ -147,26 +147,22 @@ static const char* aurea_describe(NSError* error) {
                                                            AVAudioFrameCount frameCount,
                                                            AudioBufferList* outputData) {
         (void)timestamp;
-        f32* out = (outputData->mNumberBuffers > 0 && outputData->mBuffers[0].mData != nullptr)
-                       ? (f32*)outputData->mBuffers[0].mData
-                       : nullptr;
-        const u32 frames = (u32)frameCount;
-        if (out == nullptr) {
-            *isSilence = YES;
+        if (!outputData || outputData->mNumberBuffers != 2
+            || outputData->mBuffers[0].mNumberChannels != 1
+            || outputData->mBuffers[1].mNumberChannels != 1) {
+            if (outputData) for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
+                AudioBuffer& b = outputData->mBuffers[i];
+                if (b.mData) std::memset(b.mData, 0, b.mDataByteSize);
+            }
+            if (isSilence) *isSilence = YES;
             return noErr;
         }
-        void* fn = renderSlot->fn.load(std::memory_order_acquire);
-        if (fn == nullptr) {
-            // Sem motor ligado: silêncio EXPLÍCITO (o isSilence deixa o sistema
-            // economizar), nunca lixo do buffer.
-            *isSilence = YES;
-            std::memset(out, 0, (usize)frames * mixChannels * sizeof(f32));
-            return noErr;
-        }
-        // Nada de lock, alocação ou log aqui dentro: o AudioEngine do núcleo
-        // alimenta isto por um anel SPSC (ver audio/Audio.hpp).
-        reinterpret_cast<aurea::audio::AudioRenderFn>(fn)(renderSlot->ctx, out, frames);
-        *isSilence = NO;
+        auto fn = reinterpret_cast<aurea::audio::AudioRenderFn>(renderSlot->fn.load(std::memory_order_acquire));
+        const bool rendered = aurea::audio::render_planar_stereo(fn, renderSlot->ctx,
+            static_cast<f32*>(outputData->mBuffers[0].mData), outputData->mBuffers[0].mDataByteSize,
+            static_cast<f32*>(outputData->mBuffers[1].mData), outputData->mBuffers[1].mDataByteSize,
+            static_cast<u32>(frameCount));
+        if (isSilence) *isSilence = !rendered;
         return noErr;
     }];
     if (!source) {
@@ -314,11 +310,12 @@ public:
         @autoreleasepool {
             // O bloco de render para de receber o mixer ANTES de o host sumir.
             slot_.fn.store(nullptr, std::memory_order_release);
-            slot_.ctx = nullptr;
             if (!host_) return;
             AureaAudioHost* host = (__bridge_transfer AureaAudioHost*)host_;
             host_ = nullptr;
             [host tearDown];
+            // Stop/join the render graph before changing the callback context.
+            slot_.ctx = nullptr;
             [host closeSession];
         }
     }
@@ -344,7 +341,6 @@ public:
         @autoreleasepool {
             AureaAudioHost* host = host_ref();
             if (!host) return 0;
-            const double rate = [host outputSampleRate];
             double seconds = 0.0;
             if (host.engine) seconds += host.engine.outputNode.presentationLatency;
             const double io = AVAudioSession.sharedInstance.IOBufferDuration;
@@ -354,7 +350,8 @@ public:
                 // melhor um valor conhecido do que zero ("latência nenhuma").
                 seconds = 0.005;
             }
-            return (u32)llround(seconds * (rate > 0.0 ? rate : (double)audio::kMixRate));
+            // AudioOutput's clock uses mixer frames, including 44.1 kHz routes.
+            return (u32)llround(seconds * (double)audio::kMixRate);
         }
     }
 

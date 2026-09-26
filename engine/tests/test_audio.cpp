@@ -8,6 +8,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/audio/Audio.hpp"
+#include "aurea/audio/PlanarOutput.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/text/TextAnimator.hpp"
@@ -20,6 +21,34 @@
 
 using namespace aurea;
 using namespace aurea::test;
+
+AUREA_TEST(Audio, PlanarOutputPreservesStereoAndBufferGuardsAcrossQuanta) {
+    for (u32 frames : {1u, 128u, 256u, 511u, 1024u, 4096u}) {
+        std::vector<f32> left(frames + 2, 999), right(frames + 2, 999);
+        u32 cursor = 0;
+        const auto source = [](void* ctx, f32* stereo, u32 count) {
+            auto& at = *static_cast<u32*>(ctx);
+            for (u32 i = 0; i < count; ++i, ++at) {
+                stereo[2*i] = static_cast<f32>(at) * 0.0001f;
+                stereo[2*i+1] = -static_cast<f32>(at) * 0.0002f;
+            }
+        };
+        AUREA_CHECK(audio::render_planar_stereo(source, &cursor, left.data()+1, frames*sizeof(f32),
+                                                right.data()+1, frames*sizeof(f32), frames));
+        AUREA_CHECK_EQ(cursor, frames);
+        for (u32 i=0; i<frames; ++i) {
+            AUREA_CHECK_NEAR(left[i+1], i*0.0001f, 1e-7f);
+            AUREA_CHECK_NEAR(right[i+1], -static_cast<f32>(i)*0.0002f, 1e-7f);
+        }
+        AUREA_CHECK_EQ(left.front(),999); AUREA_CHECK_EQ(left.back(),999);
+        AUREA_CHECK_EQ(right.front(),999); AUREA_CHECK_EQ(right.back(),999);
+        AUREA_CHECK(!audio::render_planar_stereo(nullptr,nullptr,left.data()+1,frames*sizeof(f32),right.data()+1,frames*sizeof(f32),frames));
+        for (u32 i=0; i<frames; ++i) { AUREA_CHECK_EQ(left[i+1],0); AUREA_CHECK_EQ(right[i+1],0); }
+        AUREA_CHECK(!audio::render_planar_stereo(source,&cursor,left.data()+1,frames*sizeof(f32),right.data()+1,frames*sizeof(f32),frames+1));
+        AUREA_CHECK_EQ(cursor,frames);
+        AUREA_CHECK_EQ(left.back(),999); AUREA_CHECK_EQ(right.back(),999);
+    }
+}
 
 namespace {
 

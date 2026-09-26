@@ -9,6 +9,8 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/timeline/Timeline.hpp"
+#include "aurea/text/TextAnimator.hpp"
+#include "aurea/project/Presets.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -17,6 +19,61 @@
 #include <string>
 
 using namespace aurea;
+
+AUREA_TEST(Expressions, JuanSelectorsKeepPerLetterValuesAndSurvivePresetRoundTrip) {
+    Timeline tl;
+    const auto compId = tl.create_composition("Juan",1920,1080,60);
+    tl.set_current(compId);
+    auto* comp = tl.composition(compId);
+    const auto layerId = comp->add_layer(LayerKind::Text,"AUREA");
+    auto* layer = comp->layer(layerId);
+    layer->text.content = "AUREA JUAN TEST";
+    const std::vector<text::GlyphUnits> units{{0,0,0},{1,0,0},{2,0,0},{3,0,0},{4,0,0}};
+    for (u32 preset=11; preset<text::kTextPresetCount; ++preset) {
+        AUREA_CHECK(text::apply_text_preset(preset,layer->text,layer->tracks,0,60,60));
+        for (u32 i=0; i<layer->tracks.size(); ++i) {
+            const auto& tr=layer->tracks.at(i);
+            if (tr.expression) {
+                if (!tr.expression->program) std::printf("\nJuan %u: %s\n",preset,tr.expression->parseError.message.c_str());
+                AUREA_CHECK(tr.expression->program != nullptr);
+            }
+        }
+        for (i64 frame : {0,6,15,60,180,300}) {
+            expr::Scope scope(tl);
+            std::vector<text::GlyphAnim> out;
+            text::evaluate_text_animators(layer->text,layer->tracks,frame,60,units,5,1,1,out);
+            AUREA_CHECK_EQ(out.size(),units.size());
+            for (const auto& g : out) { AUREA_CHECK(std::isfinite(g.scale.x)); AUREA_CHECK(std::isfinite(g.translate.y)); }
+            for (u32 i=0;i<layer->tracks.size();++i) if (layer->tracks.at(i).expression) {
+                auto error=layer->tracks.at(i).expression->error();
+                if (!error.ok) std::printf("\nJuan %u frame %lld: %s\n",preset,frame,error.message.c_str());
+                AUREA_CHECK(error.ok);
+            }
+        }
+        presets::Preset saved,read;
+        AUREA_CHECK(presets::capture(*layer,presets::PresetKind::Text,"Juan",60,presets::kTextAnimators,nullptr,saved));
+        AUREA_CHECK(presets::parse(presets::write(saved),read));
+        AUREA_CHECK_EQ(saved.textTracks.size(),read.textTracks.size());
+        for (usize i=0;i<saved.textTracks.size();++i) if(saved.textTracks[i].expression) {
+            AUREA_CHECK(read.textTracks[i].expression != nullptr);
+            if(read.textTracks[i].expression) AUREA_CHECK_EQ(saved.textTracks[i].expression->source,read.textTracks[i].expression->source);
+        }
+    }
+    AUREA_CHECK(text::apply_text_preset(12,layer->text,layer->tracks,0,60,60));
+    {
+        expr::Scope scope(tl);
+        const auto& animator=layer->text.animators[0];
+        const f64 t=0.2;
+        const f64 expected0=.5*std::cos(2*(t-.06)*2*3.141592653589793)/std::exp(8*(t-.06));
+        const f64 expected1=.5*std::cos(2*(t-.12)*2*3.141592653589793)/std::exp(8*(t-.12));
+        const f32 first=text::selector_weight(animator,0,layer->tracks,12,t,0,5);
+        const f32 second=text::selector_weight(animator,0,layer->tracks,12,t,1,5);
+        AUREA_CHECK_NEAR(first,expected0,0.00001);
+        AUREA_CHECK_NEAR(second,expected1,0.00001);
+        AUREA_CHECK(std::fabs(first-second)>0.05f);
+        AUREA_CHECK_NEAR(text::selector_weight(animator,0,layer->tracks,12,t,0,5),first,0.00001);
+    }
+}
 
 namespace {
 

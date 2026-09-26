@@ -1,4 +1,7 @@
 import SwiftUI
+
+let juanTextPresetNames = ["juan Text Bounce 2", "juan TEXT ANIMATION 01", "Juan Text Animation 5", "juan Text Animation2",
+                          "juan text animation fast 1", "juan text animation jump bounce", "juan text animation word jump", "juan Text Animation"]
 import UIKit
 import UniformTypeIdentifiers
 
@@ -400,6 +403,9 @@ struct PresetsPanel: View {
                             "panel_desfoque", "pn_textpreset_word_highlight", "pn_karaoke", "pn_textpreset_typewriter", "pn_textpreset_wave", "pn_textpreset_elastic"]
                 for (index, key) in keys.enumerated() {
                     result.append(PanelPresetEntry(id: "text:\(index)", name: AureaText.t(key), kind: kind, textPreset: UInt32(index)))
+                }
+                for (index, name) in juanTextPresetNames.enumerated() {
+                    result.append(PanelPresetEntry(id: "text:\(index + 11)", name: name, kind: kind, textPreset: UInt32(index + 11)))
                 }
             } else if let url = Bundle.main.url(forResource: kind.rawValue, withExtension: "json", subdirectory: "presets"),
                       let data = try? Data(contentsOf: url), let objects = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
@@ -1578,7 +1584,7 @@ struct TextAnimationSection: View {
     @State private var animators: [[Float]] = []
     @State private var animationError = false
     private var id: Int64 { model.primarySelection ?? 0 }
-    private let presets = ["Pop", "Pulo", "Deslizar", "Escala", "Surgir", "Desfoque", "Destaque palavra", "Karaokê", "Máquina de escrever", "Onda", "Elástico"]
+    private let presets = ["Pop", "Pulo", "Deslizar", "Escala", "Surgir", "Desfoque", "Destaque palavra", "Karaokê", "Máquina de escrever", "Onda", "Elástico"] + juanTextPresetNames
     private func load() {
         let flat = model.engine.textAnimators(id).map(\.floatValue)
         animators = stride(from: 0, to: flat.count - flat.count % 40, by: 40).map { Array(flat[$0..<($0 + 40)]) }
@@ -1665,7 +1671,7 @@ private struct NativeTextAnimatorCard: View {
                 AureaToggle(checked: values[0] > 0.5) { set([0: $0 ? 1 : 0]) }
             }.frame(height: 40)
             choices("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha"], slot: 2)
-            choices("panel_escolhe", ["panel_ordem", "panel_sorteado"], slot: 3)
+            choices("panel_escolhe", ["panel_ordem", "panel_sorteado", "Intervalo AE"], slot: 3)
             selectorControls
             ForEach(NativeAnimParam.properties.filter { Int(values[1]) & (1 << $0.bit) != 0 }) { param in NativeTextAnimRuler(index: index, param: param, values: values) }
             ForEach([9, 10], id: \.self) { bit in if Int(values[1]) & (1 << bit) != 0 { colorRow(bit) } }
@@ -1679,7 +1685,7 @@ private struct NativeTextAnimatorCard: View {
         }.padding(8).background(AureaColors.chip.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
     }
     @ViewBuilder private var selectorControls: some View {
-        if values[3] < 0.5 {
+        if Int(values[3]) != 1 {
             choices("panel_passagem", ["panel_seco", "panel_sobe", "panel_desce", "panel_triangulo", "panel_redondo", "panel_suave"], slot: 4)
             HStack {
                 Text(AureaText.t("panel_ordem_aleatoria")).font(.aurea(size: 12)).frame(maxWidth: .infinity, alignment: .leading)

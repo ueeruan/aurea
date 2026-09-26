@@ -4998,7 +4998,7 @@ bool Engine::set_text_animator(u64 layerId, u32 index, const f32* v) noexcept {
     a.enabled = v[0] > 0.5f;
     a.props = static_cast<u32>(std::max(0.0f, v[1])) & 0x7FFu;
     a.selector.basedOn = static_cast<u8>(std::clamp(v[2], 0.0f, 2.0f));
-    a.selector.type = static_cast<u8>(std::clamp(v[3], 0.0f, 1.0f));
+    a.selector.type = static_cast<u8>(std::clamp(v[3], 0.0f, 2.0f));
     a.selector.shape = static_cast<u8>(std::clamp(v[4], 0.0f, 5.0f));
     a.selector.randomOrder = v[5] > 0.5f;
     a.selector.seed = static_cast<u32>(std::clamp(v[6], 0.0f, 1.0e6f));
@@ -5217,11 +5217,23 @@ bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
     // A entrada leva ~1 s (no máximo metade da camada).
     const i64 d = std::clamp<i64>(static_cast<i64>(std::lround(fps)), 2, std::max<i64>(2, len / 2));
     const bool ok = text::apply_text_preset(preset, l->text, l->tracks, s, d, fps);
+    if (ok && preset == 11) {
+        // The source includes Motion Tile and pixel motion blur. Preserve the
+        // tiling values; native shutter sampling is used for animated glyphs.
+        presets::Preset tile;
+        const char* data = R"({"aurea_preset":1,"kind":"effects","name":"Juan Motion Tile","fps":60,"effects":[{"key":"aurea.stylize.motion_tile","params":[{"id":"output_width","v":[300,0,0,0]},{"id":"output_height","v":[300,0,0,0]}]}]})";
+        if (presets::parse(data, tile, &effectRegistry_)) (void)presets::apply(tile, *l, s, 0, fps, &effectRegistry_);
+        l->motionBlur = true;
+        comp->motion_blur().enabled = true;
+        comp->motion_blur().shutterAngle = 180;
+        comp->motion_blur().samples = 5;
+    }
     if (ok && begin > l->start.value) {
         // Applying at the playhead must not retroactively hide or transform
         // the text before the requested animation starts.
         for (u32 i = 0; i < l->text.animators.size(); ++i) {
             Track& amount = l->tracks.get_or_create(TrackProperty::TextAnimParam, i, text::kSelAmount);
+            if (amount.expression) continue; // Juan expressions gate localTime themselves.
             (void)amount.set(l->local_time(l->start), 0.0f, Interpolation::Hold);
             (void)amount.set(FrameIndex{s}, 100.0f, Interpolation::Hold);
         }

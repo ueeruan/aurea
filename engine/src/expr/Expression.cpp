@@ -71,7 +71,7 @@ enum : u8 {
 enum GlobalId : u32 {
     GTime = 1, GValue, GIndex, GFps, GFrame, GThisLayer, GThisComp, GThisProperty, GTransform,
     GPosition, GScale, GRotation, GOpacity, GAnchor, GVelocity, GSpeed, GNumKeys, GInPoint,
-    GOutPoint, GWidth, GHeight, GMath,
+    GOutPoint, GWidth, GHeight, GMath, GTextIndex, GTextTotal, GLocalTime,
     // Funções (valor K::Fn quando citadas sem chamar).
     FWiggle = 100, FLoopOut, FLoopIn, FLoopOutDur, FLoopInDur, FLinear, FEase, FEaseIn, FEaseOut,
     FClamp, FRandom, FGaussRandom, FSeedRandom, FNoise, FSin, FCos, FTan, FAsin, FAcos, FAtan,
@@ -91,6 +91,7 @@ constexpr NameEntry kGlobals[] = {
     {"opacity", GOpacity}, {"anchorPoint", GAnchor}, {"velocity", GVelocity}, {"speed", GSpeed},
     {"numKeys", GNumKeys}, {"inPoint", GInPoint}, {"outPoint", GOutPoint}, {"width", GWidth},
     {"height", GHeight}, {"Math", GMath},
+    {"textIndex", GTextIndex}, {"textTotal", GTextTotal}, {"localTime", GLocalTime},
     {"wiggle", FWiggle}, {"loopOut", FLoopOut}, {"loopIn", FLoopIn}, {"loopOutDuration", FLoopOutDur},
     {"loopInDuration", FLoopInDur}, {"linear", FLinear}, {"ease", FEase}, {"easeIn", FEaseIn},
     {"easeOut", FEaseOut}, {"clamp", FClamp}, {"random", FRandom}, {"gaussRandom", FGaussRandom},
@@ -814,11 +815,13 @@ struct Owner {
 struct MemoKey {
     const Track* t;
     i64          f;
+    u64          textContext = 0;
     bool operator==(const MemoKey&) const noexcept = default;
 };
 struct MemoHash {
     usize operator()(const MemoKey& k) const noexcept {
-        return std::hash<const void*>()(k.t) ^ (std::hash<i64>()(k.f) * 0x9E3779B97F4A7C15ull);
+        return std::hash<const void*>()(k.t) ^ (std::hash<i64>()(k.f) * 0x9E3779B97F4A7C15ull)
+             ^ (std::hash<u64>()(k.textContext) * 0x85EBCA77u);
     }
 };
 
@@ -874,6 +877,7 @@ struct Tls {
 };
 
 thread_local Tls g_tls;
+thread_local u64 g_textContext = 0;
 
 struct Provider { TimelineProvider fn; void* ctx; };
 std::mutex g_providerMutex;
@@ -1617,6 +1621,9 @@ Val Ctx::global(u32 id, u32 pos) {
     if (id >= FWiggle && id < MCompLayer) { Val r; r.k = K::Fn; r.id = id; return r; }
     switch (id) {
         case GTime: return Val::num(e.compF / e.fps);
+        case GLocalTime: return Val::num(e.localF / e.fps);
+        case GTextIndex: return Val::num(static_cast<u32>(g_textContext));
+        case GTextTotal: return Val::num(static_cast<u32>(g_textContext >> 32));
         case GValue: return e.value;
         case GFps: return Val::num(e.fps);
         case GFrame: return Val::num(std::floor(e.compF));
@@ -2323,6 +2330,11 @@ const EffectRegistry& builtin_effects() {
     return reg;
 }
 
+TextScope::TextScope(u32 index, u32 total) noexcept : previous_(g_textContext) {
+    g_textContext = static_cast<u64>(index) | (static_cast<u64>(total) << 32);
+}
+TextScope::~TextScope() { g_textContext = previous_; }
+
 Scope::Scope(const Timeline& timeline) noexcept {
     if (!g_tls.scopes.empty() && g_tls.scopes.back()->tl == &timeline) return;   // aninhado: reaproveita
     g_tls.scopes.push_back(g_tls.acquire(&timeline));
@@ -2409,7 +2421,7 @@ f32 evaluate_track(const Track& track, FrameIndex t, const f32* fallback) noexce
         return done(raw());
     }
     if (sd) {
-        const auto it = sd->memo.find(MemoKey{&track, t.value});
+        const auto it = sd->memo.find(MemoKey{&track, t.value, g_textContext});
         if (it != sd->memo.end()) return done(it->second);
     }
 
@@ -2456,7 +2468,7 @@ f32 evaluate_track(const Track& track, FrameIndex t, const f32* fallback) noexce
                       : (env.component < result.n ? result.v[env.component] : rawDisplay);
     const f32 v = static_cast<f32>(display / env.self.scale);
     te->clear_runtime();
-    if (sd && sd->memo.size() < 262144) sd->memo.emplace(MemoKey{&track, t.value}, v);
+    if (sd && sd->memo.size() < 262144) sd->memo.emplace(MemoKey{&track, t.value, g_textContext}, v);
     return done(v);
 }
 

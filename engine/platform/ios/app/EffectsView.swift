@@ -398,6 +398,18 @@ struct EffectsView: View {
     private func effectMenu(_ effect: EffectItem) {
         var actions: [(String, () -> Void)] = []
         if effect.known {
+            if effect.typeId == fxEffectTypeId("aurea.distort.turbulence") {
+                actions.append(("juan turb time 6", {
+                    guard let layer = model.primarySelection, model.selectedLayer?.locked != true else { return }
+                    model.beginGesture("juan turb time 6")
+                    for (param, value) in [(UInt32(0), Float(15)), (1, 15), (2, 1), (3, 0), (4, 0), (5, 0), (6, 0)] {
+                        model.engine.setEffect(effect.effectId, forLayer: layer, paramIndex: param, value: value)
+                    }
+                    let error = model.engine.setExpression(layer, property: 31, effect: effect.effectId, param: 24, source: "time*6")
+                    model.endGesture(); model.refreshModel(force: true)
+                    if !error.isEmpty { model.toast = error }
+                }))
+            }
             actions.append((AureaText.t(effect.enabled ? "panel_desligar_efeito" : "panel_ligar_efeito"), { enable(effect, !effect.enabled) }))
             actions.append((AureaText.t("panel_redefinir_efeito"), { reset(effect) }))
             actions.append((AureaText.t("fx_save_as_preset"), {

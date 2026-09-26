@@ -9,6 +9,7 @@
 #include "aurea/project/Presets.hpp"
 
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/expr/Expression.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -339,6 +340,10 @@ f32 transform_value(const Transform& t, TrackProperty p) noexcept {
 // --- escrita -----------------------------------------------------------------
 
 void write_keys(json::Writer& w, const Track& t) {
+    if (t.expression) {
+        w.key("expression").value(t.expression->source);
+        w.key("expressionEnabled").value(t.expressionEnabled);
+    }
     w.key("static").value(t.staticValue);
     w.key("keys").begin_array();
     for (const Keyframe& k : t.keys) {
@@ -588,6 +593,12 @@ struct Reader {
 
     /// "static" + "keys" → trilha (ordenada; tempo repetido: fica o último).
     bool keys(const json::Value& o, Track& t) {
+        if (const auto* expression = o.get("expression")) {
+            if (!expression->is_string() || expression->string.size() > 16384) return fail("expressao invalida");
+            t.expression = expr::compile(expression->string);
+            if (!t.expression->program) return fail("expressao nao suportada");
+            t.expressionEnabled = b(o, "expressionEnabled", true);
+        }
         t.staticValue = f(o, "static", 0.0f);
         const json::Value* ks = arr(o, "keys", kMaxPresetKeys);
         if (!ok()) return false;
@@ -796,7 +807,7 @@ bool read_text(Reader& r, const json::Value& root, Preset& p) {
                 if (!so->is_object()) return r.fail("seletor invalido");
                 TextSelector& s = a.selector;
                 s.basedOn = static_cast<u8>(r.u(*so, "basedOn", 0, 2));
-                s.type = static_cast<u8>(r.u(*so, "type", 0, 1));
+                s.type = static_cast<u8>(r.u(*so, "type", 0, 2));
                 s.shape = static_cast<u8>(r.u(*so, "shape", 0, 5));
                 s.randomOrder = r.b(*so, "randomOrder", false);
                 s.seed = r.u(*so, "seed", 1, 0xFFFFFFFFu);

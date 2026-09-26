@@ -4,6 +4,7 @@
 #include "aurea/text/TextAnimator.hpp"
 
 #include "aurea/timeline/Layer.hpp"
+#include "aurea/expr/Expression.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -69,6 +70,7 @@ bool has_animators(const TextData& t) noexcept {
 }
 
 f32 selector_weight(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64 local, f64 timeSec, u32 unit, u32 count) noexcept {
+    expr::TextScope glyph(unit + 1, count);
     const TextSelector& s = a.selector;
     const f32 amount = anim_param(tracks, ai, kSelAmount, local, s.amount) / 100.0f;
     if (s.type == 1) {
@@ -88,7 +90,8 @@ f32 selector_weight(const TextAnimator& a, u32 ai, const TrackSet& tracks, f64 l
         w = ov / (u1 - u0);
     } else {
         const f32 c = (u0 + u1) * 0.5f;
-        if (c >= st && c <= en && en > st) w = shape_value(s.shape, (c - st) / (en - st));
+        if (en > st && ((c >= st && c <= en) || (s.type == 2 && (s.shape == 1 || s.shape == 2))))
+            w = shape_value(s.shape, (c - st) / (en - st));
     }
     const f32 eh = anim_param(tracks, ai, kSelEaseHigh, local, s.easeHigh), el = anim_param(tracks, ai, kSelEaseLow, local, s.easeLow);
     if (eh > 0.0f || el > 0.0f) {
@@ -116,7 +119,10 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
         const Vec3 pos{P(kPosX, a.position.x), P(kPosY, a.position.y), P(kPosZ, a.position.z)};
         const Vec2 scl{P(kScaleX, a.scale.x), P(kScaleY, a.scale.y)};
         const Vec3 rot{P(kRotX, a.rotation.x), P(kRotY, a.rotation.y), P(kRotZ, a.rotation.z)};
-        const f32 op = P(kOpacity, a.opacity), trk = P(kTracking, a.tracking), blur = P(kBlur, a.blur), skew = P(kSkew, a.skew);
+        const f32 op = P(kOpacity, a.opacity), blur = P(kBlur, a.blur), skew = P(kSkew, a.skew);
+        const f32 trk = P(kTracking, a.tracking) * (P(kTrackingEm, 0) > 0.5f ? t.size / 1000.0f : 1.0f);
+        const f32 skewAxis = P(kSkewAxis, 0) * kDeg2Rad;
+        const u32 anchorGrouping = static_cast<u32>(std::clamp(P(kAnchorGrouping, 0), 0.0f, 2.0f));
         const f32 sw = P(kStrokeWidth, a.strokeWidth);
         std::vector<f32> weight(units.size(), 0.0f);
         for (usize g = 0; g < units.size(); ++g) {
@@ -128,6 +134,7 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
             const f32 w = weight[g];
             if (w == 0.0f) continue;
             GlyphAnim& o = out[g];
+            o.anchorGrouping = anchorGrouping;
             if (a.props & kTextPropPosition) o.translate = o.translate + pos * w;
             if (a.props & kTextPropScale) {
                 o.scale.x *= std::max(0.0f, 1.0f + w * (scl.x / 100.0f - 1.0f));
@@ -136,7 +143,14 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
             if (a.props & kTextPropRotation) o.rotation = o.rotation + rot * w;
             if (a.props & kTextPropOpacity) o.opacity *= std::max(0.0f, 1.0f + w * (op / 100.0f - 1.0f));
             if (a.props & kTextPropBlur) o.blur += std::max(0.0f, w * blur);
-            if (a.props & kTextPropSkew) o.skew += w * skew;
+            if (a.props & kTextPropSkew) {
+                Mat4 shear;
+                shear.col[1].x = -std::tan(std::clamp(w * skew, -80.0f, 80.0f) * kDeg2Rad);
+                const Mat4 axis = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, skewAxis));
+                const Mat4 inverseAxis = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, -skewAxis));
+                o.skewTransform = o.skewTransform * axis * shear * inverseAxis;
+                o.skew += w * skew;
+            }
             if (a.props & kTextPropStrokeWidth) o.strokeAdd += w * sw;
             if (a.props & kTextPropFill) o.fill = Vec4{a.fill.x, a.fill.y, a.fill.z, std::clamp(std::fabs(w), 0.0f, 1.0f)};
             if (a.props & kTextPropStroke) o.stroke = Vec4{a.stroke.x, a.stroke.y, a.stroke.z, std::clamp(std::fabs(w), 0.0f, 1.0f)};
@@ -219,7 +233,9 @@ std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 loc
 // =============================================================================
 const char* text_preset_name(u32 id) noexcept {
     static const char* names[kTextPresetCount] = {"Pop", "Bounce", "Slide", "Scale", "Fade", "Blur Reveal", "Word Highlight", "Karaoke",
-                                                  "Typewriter", "Wave", "Elastic"};
+        "Typewriter", "Wave", "Elastic", "juan Text Bounce 2", "juan TEXT ANIMATION 01", "Juan Text Animation 5",
+        "juan Text Animation2", "juan text animation fast 1", "juan text animation jump bounce",
+        "juan text animation word jump", "juan Text Animation"};
     return id < kTextPresetCount ? names[id] : "";
 }
 
@@ -238,11 +254,14 @@ TextAnimator reveal(u8 basedOn, u8 shape, u32 props) {
 }
 } // namespace
 
+#include "JuanTextPresets.inc"
+
 bool apply_text_preset(u32 id, TextData& t, TrackSet& tr, i64 s, i64 d, f64 fps) {
     if (id >= kTextPresetCount) return false;
     d = std::max<i64>(2, d);
     tr.remove_if([](const Track& x) { return x.property == TrackProperty::TextAnimParam; });
     t.animators.clear();
+    if (id >= 11) return apply_juan_text(id, t, tr, s, fps > 0 ? fps : 30.0);
     u32 words = 0;
     {
         bool in = false;

@@ -1,21 +1,341 @@
 [
-  {"aurea_preset": 1, "kind": "effects", "name": "Desfoque suave", "fps": 30, "effects": [
-    {"key": "aurea.blur.gaussian", "params": [{"id": "blurriness", "v": [8, 0, 0, 0]}]}]},
-  {"aurea_preset": 1, "kind": "effects", "name": "Foco de entrada", "fps": 30, "effects": [
-    {"key": "aurea.blur.gaussian", "params": [{"id": "blurriness", "v": [0, 0, 0, 0]}],
-     "tracks": [{"param": "blurriness", "comp": 0, "keys": [[0, 40, 2, 0.16, 1, 0.3, 1], [20, 0]]}]}]},
-  {"aurea_preset": 1, "kind": "effects", "name": "Brilho neon", "fps": 30, "effects": [
-    {"key": "aurea.light.glow", "params": [{"id": "threshold", "v": [40, 0, 0, 0]}, {"id": "radius", "v": [40, 0, 0, 0]},
-                                           {"id": "intensity", "v": [1.6, 0, 0, 0]}]}]},
-  {"aurea_preset": 1, "kind": "effects", "name": "Preto e branco", "fps": 30, "effects": [
-    {"key": "aurea.color.saturation", "params": [{"id": "saturation", "v": [-100, 0, 0, 0]}]}]},
-  {"aurea_preset": 1, "kind": "effects", "name": "Contraste forte", "fps": 30, "effects": [
-    {"key": "aurea.color.brightness_contrast", "params": [{"id": "brightness", "v": [5, 0, 0, 0]}, {"id": "contrast", "v": [35, 0, 0, 0]}]}]},
-  {"aurea_preset": 1, "kind": "effects", "name": "Sépia", "fps": 30, "effects": [
-    {"key": "aurea.color.tint", "params": [{"id": "map_black", "v": [0.08, 0.04, 0.01, 1]}, {"id": "map_white", "v": [1, 0.85, 0.6, 1]},
-                                           {"id": "amount", "v": [80, 0, 0, 0]}]}]},
-  {"aurea_preset": 1, "kind": "effects", "name": "Sonho", "fps": 30, "effects": [
-    {"key": "aurea.color.exposure", "params": [{"id": "exposure", "v": [0.3, 0, 0, 0]}]},
-    {"key": "aurea.light.glow", "params": [{"id": "threshold", "v": [30, 0, 0, 0]}, {"id": "radius", "v": [60, 0, 0, 0]},
-                                           {"id": "intensity", "v": [1.2, 0, 0, 0]}]}]}
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Desfoque suave",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.blur.gaussian",
+        "params": [
+          {
+            "id": "blurriness",
+            "v": [
+              8,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Foco de entrada",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.blur.gaussian",
+        "params": [
+          {
+            "id": "blurriness",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ],
+        "tracks": [
+          {
+            "param": "blurriness",
+            "comp": 0,
+            "keys": [
+              [
+                0,
+                40,
+                2,
+                0.16,
+                1,
+                0.3,
+                1
+              ],
+              [
+                20,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Brilho neon",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.light.glow",
+        "params": [
+          {
+            "id": "threshold",
+            "v": [
+              40,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "radius",
+            "v": [
+              40,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "intensity",
+            "v": [
+              1.6,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Preto e branco",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.color.saturation",
+        "params": [
+          {
+            "id": "saturation",
+            "v": [
+              -100,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Contraste forte",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.color.brightness_contrast",
+        "params": [
+          {
+            "id": "brightness",
+            "v": [
+              5,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "contrast",
+            "v": [
+              35,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Sépia",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.color.tint",
+        "params": [
+          {
+            "id": "map_black",
+            "v": [
+              0.08,
+              0.04,
+              0.01,
+              1
+            ]
+          },
+          {
+            "id": "map_white",
+            "v": [
+              1,
+              0.85,
+              0.6,
+              1
+            ]
+          },
+          {
+            "id": "amount",
+            "v": [
+              80,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Sonho",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.color.exposure",
+        "params": [
+          {
+            "id": "exposure",
+            "v": [
+              0.3,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "key": "aurea.light.glow",
+        "params": [
+          {
+            "id": "threshold",
+            "v": [
+              30,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "radius",
+            "v": [
+              60,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "intensity",
+            "v": [
+              1.2,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "juan turb time 6",
+    "fps": 60,
+    "effects": [
+      {
+        "key": "aurea.distort.turbulence",
+        "params": [
+          {
+            "id": "amount",
+            "v": [
+              15,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "size",
+            "v": [
+              15,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "complexity",
+            "v": [
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "evolution",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "offset_x",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "offset_y",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "seed",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ],
+        "tracks": [
+          {
+            "param": "seed",
+            "index": 6,
+            "comp": 0,
+            "static": 0,
+            "keys": [],
+            "expression": "time*6",
+            "expressionEnabled": true
+          }
+        ]
+      }
+    ]
+  }
 ]

@@ -112,7 +112,7 @@ struct Mask {
 /// Seletor do animador de texto: quanto cada unidade está "dentro".
 struct TextSelector {
     u8   basedOn = 0;       ///< 0 caractere, 1 palavra, 2 linha
-    u8   type = 0;          ///< 0 intervalo, 1 wiggly (aleatório no tempo)
+    u8   type = 0;          ///< 0 intervalo, 1 wiggly, 2 intervalo AE (rampas saturadas)
     u8   shape = 0;         ///< 0 quadrado, 1 rampa sobe, 2 rampa desce, 3 triângulo, 4 redondo, 5 suave
     bool randomOrder = false;
     u32  seed = 1;

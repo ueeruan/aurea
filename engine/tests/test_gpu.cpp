@@ -4274,6 +4274,36 @@ AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
     AUREA_CHECK(whiteShadow * 10 > whitePlain * 8);   // a sombra fica ATRÁS do texto
 }
 
+AUREA_TEST(Gpu, JuanPresetsRenderAndKeepExpressionsAfterReopen) {
+    AUREA_REQUIRE_GPU();
+    for (u32 preset = 11; preset < text::kTextPresetCount; ++preset) {
+        Scene3DRig rig(1920, 1080);
+        auto id = rig.e.add_text("AUREA JUAN TEST");
+        AUREA_CHECK(id.ok());
+        AUREA_CHECK(rig.e.apply_text_preset(*id, preset));
+        auto seek = [&](i64 frame) {
+            Command command;
+            command.type = CommandType::PlaybackSeek;
+            command.seek.time = tick_at(FrameIndex{frame}, 30.0);
+            AUREA_CHECK(rig.e.apply_command(command).ok());
+        };
+        seek(60);
+        const auto settled = rig.capture(640);
+        AUREA_CHECK(coverage(settled) > .00001f);
+        seek(12);
+        const auto before = rig.capture(640);
+        const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_juan_roundtrip.aurea";
+        AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+        AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+        seek(12);
+        const auto after = rig.capture(640);
+        const u32 difference = max_diff(before, after);
+        std::printf("    Juan %u: coverage %.6f, reopened difference %u\n", preset, coverage(settled), difference);
+        AUREA_CHECK(difference <= 3);
+        std::remove(path.c_str());
+    }
+}
+
 AUREA_TEST(Gpu, TextAnimatorTypewriterPerCharRotationAndMotionBlur) {
     AUREA_REQUIRE_GPU();
     Scene3DRig rig(640, 360);

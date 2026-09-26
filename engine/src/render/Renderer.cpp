@@ -1111,19 +1111,28 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 auto pathM = [&](usize g) { return onPath.empty() ? Mat4::identity() : onPath[g]; };
                 std::vector<text::GlyphAnim> anim;
+                const Vec4 emptyBounds{1e30f, 1e30f, -1e30f, -1e30f};
+                std::vector<Vec4> wordBounds(std::max(1u, L.words), emptyBounds), lineBounds(std::max(1u, L.lines), emptyBounds);
+                for (const auto& q : L.quads) {
+                    auto extend = [&](Vec4& b) { b.x = std::min(b.x, q.x0); b.y = std::min(b.y, q.y0); b.z = std::max(b.z, q.x1); b.w = std::max(b.w, q.y1); };
+                    if (q.wordIndex < wordBounds.size()) extend(wordBounds[q.wordIndex]);
+                    if (q.lineIndex < lineBounds.size()) extend(lineBounds[q.lineIndex]);
+                }
                 for (u32 si = 0; si < sets; ++si) {
                     const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? ((static_cast<f64>(si) + 0.5) / static_cast<f64>(sets) - 0.5) * open : 0.0);
                     text::evaluate_text_animators(T, *textTracks, lt, fps, units, L.chars, L.words, L.lines, anim);
                     auto glyphMatrix = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
-                        const Vec3 pivot{(q.x0 + q.x1) * 0.5f, (q.y0 + q.y1) * 0.5f, 0};
+                        f32 x0 = q.x0, x1 = q.x1, y0 = q.y0, y1 = q.y1;
+                        const Vec4* group = a.anchorGrouping == 1 && q.wordIndex < wordBounds.size() ? &wordBounds[q.wordIndex]
+                                          : a.anchorGrouping == 2 && q.lineIndex < lineBounds.size() ? &lineBounds[q.lineIndex] : nullptr;
+                        if (group) {
+                            x0 = group->x; y0 = group->y; x1 = group->z; y1 = group->w;
+                        }
+                        const Vec3 pivot{(x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 0};
                         Mat4 m = Mat4::translation(pivot + a.translate + Vec3{a.trackingShift, 0, 0});
                         if (a.rotation.x != 0 || a.rotation.y != 0 || a.rotation.z != 0)
                             m = m * Mat4::from_quat(Quat::from_euler_zyx(a.rotation.x * kDeg2Rad, a.rotation.y * kDeg2Rad, a.rotation.z * kDeg2Rad));
-                        if (a.skew != 0) {
-                            Mat4 sk;
-                            sk.col[1].x = -std::tan(std::clamp(a.skew, -80.0f, 80.0f) * kDeg2Rad);   // inclina para a direita
-                            m = m * sk;
-                        }
+                        m = m * a.skewTransform;
                         return m * Mat4::scale(Vec3{a.scale.x, a.scale.y, 1}) * Mat4::translation(-pivot);
                     };
                     const f32 w = 1.0f / static_cast<f32>(sets);

@@ -46,6 +46,12 @@ jobs:
           python3 engine/platform/ios/verify/check_effect_contract.py
       - name: Install shader tools
         run: brew install cmake ninja shaderc ccache
+      - name: Verify Apple stereo audio and sample-rate conversion
+        run: |
+          mkdir -p build
+          clang++ -std=c++20 -fobjc-arc -framework AVFoundation -framework AudioToolbox \
+            -I engine/include engine/platform/ios/verify/check_audio.mm -o build/check-audio
+          build/check-audio
       - uses: actions/cache/restore@v4
         with:
           path: build/ccache

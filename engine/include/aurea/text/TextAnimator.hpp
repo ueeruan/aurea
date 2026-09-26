@@ -32,7 +32,7 @@ namespace aurea::text {
 enum TextAnimParam : u32 {
     kSelStart = 0, kSelEnd, kSelOffset, kSelAmount, kSelEaseHigh, kSelEaseLow,
     kPosX = 10, kPosY, kPosZ, kScaleX, kScaleY, kRotX, kRotY, kRotZ, kOpacity, kTracking, kBlur, kSkew, kStrokeWidth, kCharOffset,
-    kFillMix, kWiggleRate,
+    kFillMix, kWiggleRate, kSkewAxis, kTrackingEm, kAnchorGrouping,
 };
 
 /// Unidade de um glifo para os seletores.
@@ -49,6 +49,8 @@ struct GlyphAnim {
     f32  opacity = 1.0f;
     f32  blur = 0.0f;         ///< px
     f32  skew = 0.0f;         ///< graus
+    Mat4 skewTransform = Mat4::identity();
+    u32 anchorGrouping = 0;   ///< 0 glyph, 1 word, 2 line
     f32  strokeAdd = 0.0f;    ///< px
     f32  trackingShift = 0.0f;
     Vec4 fill{0, 0, 0, 0};    ///< a = peso da mistura com a cor do animador (sRGB)
@@ -80,7 +82,7 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
 /// 5 Blur Reveal, 6 Word Highlight, 7 Karaoke, 8 Typewriter, 9 Wave,
 /// 10 Elastic. Escreve animadores + keyframes na camada (substitui os
 /// existentes). `startLocal`/`durationFrames` = trecho da animação.
-inline constexpr u32 kTextPresetCount = 11;
+inline constexpr u32 kTextPresetCount = 19;
 [[nodiscard]] const char* text_preset_name(u32 id) noexcept;
 bool apply_text_preset(u32 id, TextData& t, TrackSet& tracks, i64 startLocal, i64 durationFrames, f64 fps);
 

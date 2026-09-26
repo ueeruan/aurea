@@ -604,12 +604,30 @@ Status AVFoundationAudioDecoder::read(std::vector<f32>& out, i64& ptsUs, bool& e
         }
         ptsUs = us_of(CMSampleBufferGetPresentationTimeStamp(sample));
         CMBlockBufferRef block = CMSampleBufferGetDataBuffer(sample);
-        size_t length = 0;
-        char* data = nullptr;
-        if (block && CMBlockBufferGetDataPointer(block, 0, nullptr, &length, &data) == noErr && data) {
-            const usize samples = length / sizeof(f32);
-            out.resize(samples);
-            std::memcpy(out.data(), data, samples * sizeof(f32));
+        const auto description = CMSampleBufferGetFormatDescription(sample);
+        const auto* format = description ? CMAudioFormatDescriptionGetStreamBasicDescription(description) : nullptr;
+        const CMItemCount frames = CMSampleBufferGetNumSamples(sample);
+        if (!block || !format || frames < 0 || frames > 16 * 1024 * 1024
+            || format->mFormatID != kAudioFormatLinearPCM || format->mBitsPerChannel != 32
+            || !(format->mFormatFlags & kAudioFormatFlagIsFloat)
+            || (format->mFormatFlags & (kAudioFormatFlagIsNonInterleaved | kAudioFormatFlagIsBigEndian))
+            || format->mChannelsPerFrame != info_.channels) {
+            CFRelease(sample);
+            return Status{Errc::DecodeFailed, "formato PCM de audio inesperado"};
+        }
+        const usize samples = static_cast<usize>(frames) * info_.channels;
+        const usize bytes = samples * sizeof(f32);
+        if (samples > 16 * 1024 * 1024 || CMBlockBufferGetDataLength(block) < bytes) {
+            CFRelease(sample);
+            return Status{Errc::DecodeFailed, "tamanho PCM de audio invalido"};
+        }
+        out.resize(samples);
+        // A CMBlockBuffer may consist of several non-contiguous memory blocks.
+        // GetDataPointer's total length does not make the first block contiguous.
+        if (CMBlockBufferCopyDataBytes(block, 0, bytes, out.data()) != kCMBlockBufferNoErr) {
+            out.clear();
+            CFRelease(sample);
+            return Status{Errc::DecodeFailed, "bloco PCM de audio incompleto"};
         }
         CFRelease(sample);
         return OkStatus;

@@ -11,6 +11,9 @@ import org.json.JSONArray
  * Nomes dos 11 presets de animação de texto do motor, na ordem de
  * `text::text_preset_name` (o índice é o que vai para o motor).
  */
+internal val JuanTextPresetNames = listOf("juan Text Bounce 2", "juan TEXT ANIMATION 01", "Juan Text Animation 5", "juan Text Animation2",
+    "juan text animation fast 1", "juan text animation jump bounce", "juan text animation word jump", "juan Text Animation")
+
 internal val TextPresetNames = listOf(
     R.string.pn_pop, R.string.pn_textpreset_bounce, R.string.pn_textpreset_slide, R.string.panel_escala,
     R.string.pn_textpreset_appear, R.string.panel_desfoque, R.string.pn_textpreset_word_highlight, R.string.pn_karaoke,
@@ -41,6 +44,8 @@ class BuiltinPresets(private val context: Context) {
         text?.let { (r, list) -> if (r === res) return list }
         val list = TextPresetNames.mapIndexed { i, id ->
             PresetEntry("b:texto:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = i)
+        } + JuanTextPresetNames.mapIndexed { i, name ->
+            PresetEntry("b:texto:${i + 11}", PresetKind.Text, name, builtin = true, textPreset = i + 11)
         }
         text = res to list
         return list

@@ -132,6 +132,18 @@ private:
     bool pushed_ = false;
 };
 
+/// Per-glyph selector context. Index is one-based, as in AE text expressions.
+/// The context also participates in memo keys, so letters never share a result.
+class TextScope {
+public:
+    TextScope(u32 index, u32 total) noexcept;
+    ~TextScope();
+    TextScope(const TextScope&) = delete;
+    TextScope& operator=(const TextScope&) = delete;
+private:
+    u64 previous_;
+};
+
 /// Fora de um Scope (consultas da UI), a avaliação pergunta a quem se
 /// registrou qual timeline está viva (o Engine se registra na inicialização).
 using TimelineProvider = const Timeline* (*)(void* ctx);

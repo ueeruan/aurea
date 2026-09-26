@@ -227,6 +227,7 @@ final class AureaModel: ObservableObject {
         if selection.isEmpty { return .none }
         if selection == timelineOnlySelection && (panel == .none || panel == .dock) { return .none }
         if selection.count > 1 { return .batch }
+        if panel == .curve { return .curve }
         return panel == .none || panel == .dock ? .dock : .panel
     }
 
@@ -386,7 +387,7 @@ final class AureaModel: ObservableObject {
     }
 
     enum Screen { case home, editor }
-    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo }
+    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo }
     @Published var curveProperty: UInt32 = 0
     @Published var timelineFocus: [TimelineTrack]? = nil
     private var pendingPlayhead: Int64?
@@ -467,7 +468,7 @@ final class AureaModel: ObservableObject {
                         panel = .dock; seek(toFrame: 0); setLooping(true); toggleRawPlayback()
                     }
                 }
-            } else if ["video-move", "playback-stress"].contains(scene), started {
+            } else if ["video-move", "playback-stress", "clip-edit"].contains(scene), started {
                 // Reuse the real H.264 export fixture, then import through the
                 // production decoder. The UI test operates only the visible dock.
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
@@ -479,8 +480,11 @@ final class AureaModel: ObservableObject {
                         if let compositionID = (engine.composition()?[AureaCompositionId] as? NSNumber)?.uint64Value {
                             engine.setComposition(compositionID, duration: scene == "playback-stress" ? 30 : 180)
                         }
+                        if scene == "clip-edit" {
+                            engine.setLayer(layer, startFrame: 0, endFrame: 15, offsetFrames: 5, setOffset: true)
+                        }
                         refreshModel(force: true); enterEditor(); select(layerId: layer, additive: false)
-                        panel = .dock; seek(toFrame: scene == "playback-stress" ? 0 : 60)
+                        panel = .dock; seek(toFrame: scene == "video-move" ? 60 : 0)
                         if scene == "playback-stress" {
                             _ = engine.addText("Texto durante reprodução")
                             _ = engine.createCaptions(layer, words: [["word": "Legenda", "start": 0.0, "end": 0.9]], options: [:])
@@ -539,6 +543,7 @@ final class AureaModel: ObservableObject {
                     switch scene {
                     case "text-2d": addText(); panel = .text
                     case "text-3d": addText3D(content: "Texto", depth: 0.25); panel = .layer3D
+                    case "curve-null": addNull(threeD: true); panel = .transform
                     case "vector": addVector(1); panel = .vector
                     default: addShape(1)
                     }
@@ -547,6 +552,17 @@ final class AureaModel: ObservableObject {
                     if scene == "export" { openExport() }
                     if scene == "project-settings" { clearSelection(); showProjectSettings = true }
                     if scene == "shape-edit" { panel = .shapeEdit }
+                    if ["curve-null", "curve-shape"].contains(scene), let id = primarySelection {
+                        let property: UInt32 = scene == "curve-null" ? 1 : 35
+                        let param: UInt32 = scene == "curve-null" ? 0 : 6
+                        for time in [Int32(0), Int32(30)] {
+                            engine.editTrackKey(id, property: property, effect: UInt32.max, param: param,
+                                time: time, action: 0, value: time == 0 ? 200 : 450, targetTime: time,
+                                interpolation: 1, handles: [])
+                        }
+                        refreshModel(force: true)
+                        panel = scene == "curve-null" ? .transform : .shapeEdit
+                    }
                     if scene == "appearance" { panel = .appearance }
                     if scene == "presets" { panel = .presets }
                     if scene == "mask" { addMask(1); panel = .mask }
@@ -2229,21 +2245,7 @@ final class AureaModel: ObservableObject {
 
     /// Trim do INÍCIO para `frame`: o conteúdo fica parado e só a borda anda.
     func trimStart(_ layerId: Int64, at frame: Int64) {
-        guard layers.first(where: { $0.id == layerId })?.locked == false else { return }
-        guard let d = engine.layerDetail(layerId),
-              let end = (d["endFrame"] as? NSNumber)?.int32Value,
-              let start = (d["startFrame"] as? NSNumber)?.int32Value,
-              let offset = (d["offsetFrames"] as? NSNumber)?.int32Value,
-              let source = (d["sourceFrames"] as? NSNumber)?.int32Value else { return }
-        var newStart = Int(min(Int32(clamping: frame), end - 1))
-        var newOffset = Int(offset) + (newStart - Int(start))
-        if source > 0 && newOffset < 0 {
-            newStart -= newOffset
-            newOffset = 0
-        }
-        newStart = max(0, newStart)
-        guard newStart != Int(start) else { return }
-        engine.run { $0.setLayer(layerId, startFrame: Int32(newStart), endFrame: end, offsetFrames: Int32(newOffset), setOffset: true) }
+        _ = engine.editClipTime(layerId, operation: 0, amount: frame, previous: 0, next: 0)
         refreshModel(force: true)
     }
 
@@ -2265,16 +2267,16 @@ final class AureaModel: ObservableObject {
 
     /// Trim do FIM para `frame`. O vídeo não passa do fim da mídia.
     func trimEnd(_ layerId: Int64, at frame: Int64) {
-        guard layers.first(where: { $0.id == layerId })?.locked == false else { return }
-        guard let d = engine.layerDetail(layerId),
-              let end = (d["endFrame"] as? NSNumber)?.int32Value,
-              let start = (d["startFrame"] as? NSNumber)?.int32Value,
-              let offset = (d["offsetFrames"] as? NSNumber)?.int32Value,
-              let source = (d["sourceFrames"] as? NSNumber)?.int32Value else { return }
-        var newEnd = max(Int32(clamping: frame), start + 1)
-        if source > 0 { newEnd = min(newEnd, start - offset + source) }
-        guard newEnd != end else { return }
-        engine.run { $0.setLayer(layerId, startFrame: start, endFrame: newEnd, offsetFrames: offset, setOffset: false) }
+        _ = engine.editClipTime(layerId, operation: 1, amount: frame, previous: 0, next: 0)
+        refreshModel(force: true)
+    }
+
+    func editClipTime(_ operation: UInt32, amount: Int64, previous: Int64 = 0, next: Int64 = 0) {
+        guard let id = primarySelection else { return }
+        if status.playing != 0 { playPause() }
+        if !engine.editClipTime(id, operation: operation, amount: amount, previous: previous, next: next) {
+            toast = "Sem margem na mídia, vizinho inválido ou camada bloqueada."
+        }
         refreshModel(force: true)
     }
 

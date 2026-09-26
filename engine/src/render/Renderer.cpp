@@ -3,6 +3,7 @@
 #include "aurea/expr/Expression.hpp"
 
 #include "aurea/scene3d/Animation.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "aurea/text/TextAnimator.hpp"
@@ -218,37 +219,112 @@ bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept
     return false;
 }
 
-/// Cadeia 2D (camada e pais) num instante fracionário da timeline.
-Mat4 world_2d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
-    auto localOf = [time](const Layer& x) {
-        return time - static_cast<f64>(x.start.value) + static_cast<f64>(x.offset.value);
-    };
-    Mat4 m = layer_matrix_frac(l, localOf(l));
-    LayerId parent = l.parent;
-    for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
-        const Layer* p = comp.layer(parent);
-        if (!p) break;
-        m = layer_matrix_frac(*p, localOf(*p)) * m;
-        parent = p->parent;
+// Parenting Helper changes the inherited basis, while the child's anchor
+// keeps following the parent's full transform (e.g. a Ferris-wheel gondola).
+Mat4 parenting_basis(const Layer& child, Mat4 parent, f64 local, f32* continuousZ) noexcept {
+    static const ParameterRegistry parameters = [] {
+        ParameterRegistry p;
+        p.add_float("rotation", "Inherit Rotation", 100.f, -200.f, 200.f);
+        p.add_float("scale", "Inherit Scale", 100.f, 0.f, 200.f);
+        return p;
+    }();
+    for (const EffectInstance& effect : child.effects) {
+        if (!effect.enabled || effect.type != effect_type_id(effect_keys::kParentingHelper)) continue;
+        auto value = [&](u32 i) {
+            const FrameIndex frame{static_cast<i64>(std::floor(local))};
+            const f32 a = evaluate_param(child.tracks, effect, i, parameters.at(i), frame).as_float();
+            const f32 b = evaluate_param(child.tracks, effect, i, parameters.at(i), FrameIndex{frame.value + 1}).as_float();
+            return lerpf(a, b, static_cast<f32>(local - std::floor(local))) * .01f;
+        };
+        const f32 rotation = value(0), scale = value(1);
+        if (rotation == 1.f && scale == 1.f) continue;
+        // QR keeps shear and signed scale when only rotation is changed.
+        auto xyz = [](Vec4 v) { return Vec3{v.x, v.y, v.z}; };
+        const Vec3 a = xyz(parent.col[0]), b = xyz(parent.col[1]), c = xyz(parent.col[2]);
+        const f32 sx = a.length();
+        const Vec3 x = sx > 1e-6f ? a * (1.f / sx) : Vec3{1, 0, 0};
+        const f32 xy = x.dot(b);
+        const Vec3 perpendicular = b - x * xy;
+        const f32 sy = perpendicular.length();
+        const Vec3 fallback = std::abs(x.y) < .9f ? Vec3{0, 1, 0} : Vec3{0, 0, 1};
+        const Vec3 y = sy > 1e-6f ? perpendicular * (1.f / sy) : (fallback - x * x.dot(fallback)).normalized();
+        const Vec3 z = x.cross(y).normalized();
+        const f32 sz = z.dot(c), xz = x.dot(c), yz = y.dot(c);
+        const f32 ry = std::asin(std::clamp(-x.z, -1.f, 1.f));
+        const bool pole = std::abs(std::cos(ry)) < 1e-5f;
+        const f32 rx = pole ? 0.f : std::atan2(y.z, z.z);
+        f32 rz = pole ? std::atan2(-y.x, y.y) : std::atan2(x.y, x.x);
+        // A 2D parent can turn past 180 degrees or make several revolutions.
+        // Matrix decomposition alone loses those turns and makes 50% weights jump.
+        if (continuousZ) {
+            rz += std::round((*continuousZ - rz) / (2.f * kPi)) * (2.f * kPi);
+            *continuousZ = rz * rotation;
+        }
+        const Mat4 r = Mat4::from_quat(Quat::from_euler_zyx(rx * rotation, ry * rotation, rz * rotation));
+        Mat4 stretch;
+        stretch.col[0] = {lerpf(1.f, sx, scale), 0, 0, 0};
+        stretch.col[1] = {xy * scale, lerpf(1.f, sy, scale), 0, 0};
+        stretch.col[2] = {xz * scale, yz * scale, lerpf(1.f, sz, scale), 0};
+        const Vec4 translation = parent.col[3];
+        parent = r * stretch;
+        parent.col[3] = translation;
     }
-    return m;
+    return parent;
 }
 
-/// Mundo 3D da camada com a cadeia de pais (cada pai no próprio tempo), num
-/// instante fracionário da timeline (sub-quadro do obturador).
-Mat4 world_3d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
-    auto localOf = [time](const Layer& x) {
-        return time - static_cast<f64>(x.start.value) + static_cast<f64>(x.offset.value);
-    };
-    Mat4 m = layer_matrix_3d_frac(l, localOf(l));
-    LayerId parent = l.parent;
-    for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
-        const Layer* p = comp.layer(parent);
-        if (!p) break;
-        m = layer_matrix_3d_frac(*p, localOf(*p)) * m;
-        parent = p->parent;
+Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool threeD, f64 parentTime) noexcept {
+    const Layer* chain[17]{};
+    u32 count = 0;
+    for (const Layer* p = &l; p && count < 17; p = p->parent.valid() ? comp.layer(p->parent) : nullptr) {
+        // Projects normally reject cycles on edit/load; retain a finite fallback.
+        bool cycle = false;
+        for (u32 i = 0; i < count; ++i) cycle |= chain[i] == p;
+        if (cycle) break;
+        chain[count++] = p;
     }
-    return m;
+    auto ownMatrix = [&](const Layer& node) {
+        const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
+        return threeD ? layer_matrix_3d_frac(node, local) : layer_matrix_frac(node, local);
+    };
+    bool helper = false;
+    for (u32 i = 0; i + 1 < count; ++i)
+        for (const auto& effect : chain[i]->effects)
+            helper |= effect.enabled && effect.type == effect_type_id(effect_keys::kParentingHelper);
+    if (!helper) {
+        Mat4 plain = ownMatrix(l);
+        for (u32 i = 1; i < count; ++i) plain = ownMatrix(*chain[i]) * plain;
+        return plain;
+    }
+    Mat4 world;
+    f32 continuousZ = 0.f;
+    while (count) {
+        const Layer& node = *chain[--count];
+        const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
+        const Mat4 own = threeD ? layer_matrix_3d_frac(node, local) : layer_matrix_frac(node, local);
+        const Mat4 basis = parenting_basis(node, world, local, threeD ? nullptr : &continuousZ);
+        auto anchor = [&](TrackProperty property, f32 fallback) {
+            const Track* track = node.tracks.find(property);
+            return track ? sample_frac(*track, local, fallback) : fallback;
+        };
+        const Vec4 pivot{anchor(TrackProperty::AnchorX, node.transform.anchor.x),
+                         anchor(TrackProperty::AnchorY, node.transform.anchor.y),
+                         threeD ? anchor(TrackProperty::AnchorZ, node.transform.anchor.z) : 0.f, 1.f};
+        const Vec4 wanted = world * (own * pivot);
+        world = basis * own;
+        const Vec4 actual = world * pivot;
+        world.col[3].x += wanted.x - actual.x;
+        world.col[3].y += wanted.y - actual.y;
+        world.col[3].z += wanted.z - actual.z;
+        if (!threeD) continuousZ += anchor(TrackProperty::RotationZ, node.transform.rotation.z) * kDeg2Rad;
+    }
+    return world;
+}
+
+Mat4 world_2d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
+    return world_chain_frac(comp, l, time, false, time);
+}
+Mat4 world_3d_frac(const Composition& comp, const Layer& l, f64 time) noexcept {
+    return world_chain_frac(comp, l, time, true, time);
 }
 
 /// Mundo 3D da camada com a cadeia de pais (cada pai no próprio tempo).
@@ -287,6 +363,7 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
         t = scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale);
     }
     scene3d::evaluate_pose(asset, clip, t, pose);
+    scene3d::apply_text3d_layout(asset, l, materialTime, pose.nodeWorld);
     inst.nodeWorld = std::move(pose.nodeWorld);
     inst.jointMatrices = std::move(pose.jointMatrices);
     inst.skinJointOffset = std::move(pose.skinJointOffset);
@@ -384,8 +461,12 @@ bool wants_layer_3d(const Composition& comp, const Layer& l, FrameIndex time) no
 
 // Partículas (8.2, ParticleScene.cpp): as MESMAS contas de mundo e câmera,
 // num instante fracionário da timeline.
-Mat4 particle_world_3d_at(const Composition& comp, const Layer& l, f64 time) noexcept { return world_3d_frac(comp, l, time); }
-Mat4 particle_world_2d_at(const Composition& comp, const Layer& l, f64 time) noexcept { return world_2d_frac(comp, l, time); }
+Mat4 particle_world_3d_at(const Composition& comp, const Layer& l, f64 time, f64 parentTime) noexcept {
+    return world_chain_frac(comp, l, time, true, parentTime);
+}
+Mat4 particle_world_2d_at(const Composition& comp, const Layer& l, f64 time, f64 parentTime) noexcept {
+    return world_chain_frac(comp, l, time, false, parentTime);
+}
 scene3d::SceneCamera particle_camera_at(const Composition& comp, f64 time, u32 w, u32 h) noexcept {
     return camera_for_frac(comp, time, w, h);
 }
@@ -403,15 +484,7 @@ Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time,
 
 Mat4 layer_world_matrix(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
     if (wants_3d(comp, l, time)) return world_3d(comp, l, time);
-    Mat4 m = layer_matrix(l, l.local_time(time));
-    LayerId parent = l.parent;
-    for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
-        const Layer* p = comp.layer(parent);
-        if (!p) break;
-        m = layer_matrix(*p, p->local_time(time)) * m;
-        parent = p->parent;
-    }
-    return m;
+    return world_2d_frac(comp, l, static_cast<f64>(time.value));
 }
 
 // Sistemas pesados (8E): o export é sempre cheio; o preview segue o bloco
@@ -881,14 +954,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (sh.shapeType == kShapeVector) {
                     // Densidade provável na tela (a mesma conta do texelScale
                     // adiante): tolerância do achatamento e largura do AA.
-                    Mat4 wm = layer_matrix(*l, local);
-                    LayerId par = l->parent;
-                    for (u32 depth = 0; par.valid() && depth < 16; ++depth) {
-                        const Layer* p = comp.layer(par);
-                        if (!p) break;
-                        wm = layer_matrix(*p, p->local_time(time)) * wm;
-                        par = p->parent;
-                    }
+                    const Mat4 wm = world_2d_frac(comp, *l, static_cast<f64>(time.value));
                     const f32 want = std::min(max_scale(wm), 4.0f) * previewFactor;
                     f32 dens = 1.0f;
                     while (dens < want && dens < 4.0f) dens *= 2.0f;
@@ -1342,14 +1408,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
 
         // Transform da layer, com a cadeia de pais (cada pai no próprio tempo).
-        Mat4 m = layer_matrix(*l, local);
-        LayerId parent = l->parent;
-        for (u32 depth = 0; parent.valid() && depth < 16; ++depth) {
-            const Layer* p = comp.layer(parent);
-            if (!p) break;
-            m = layer_matrix(*p, p->local_time(time)) * m;
-            parent = p->parent;
-        }
+        Mat4 m = world_2d_frac(comp, *l, static_cast<f64>(time.value));
         const bool inScene3d = wants_3d(comp, *l, time);
         if (inScene3d) {
             // Rotação X/Y, profundidade, nulo 3D na cadeia: a MESMA câmera dos

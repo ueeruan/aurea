@@ -1246,6 +1246,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e->query_text3d(static_cast<aurea::u64>(layerId), spec)) return nil;
     return @{ @"content": [NSString stringWithUTF8String:spec.content.c_str()] ?: @"",
               @"fontPath": [NSString stringWithUTF8String:spec.fontPath.c_str()] ?: @"",
+              @"surfaceFinish": @(spec.surfaceFinish), @"separateGlyphs": @(spec.separateGlyphs),
               @"depth": @(spec.depth), @"animation": @(spec.animation),
               @"animationDuration": @(spec.animationDuration), @"animationStagger": @(spec.animationStagger),
               @"animationAmount": @(spec.animationAmount), @"metallic": @(spec.metallic),
@@ -1259,6 +1260,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e->query_text3d(static_cast<aurea::u64>(layerId), spec)) return NO;
     if ([property isEqualToString:@"content"]) spec.content = stringValue.UTF8String ?: "";
     else if ([property isEqualToString:@"fontPath"]) spec.fontPath = stringValue.UTF8String ?: "";
+    else if ([property isEqualToString:@"surfaceFinish"]) spec.surfaceFinish = static_cast<aurea::u32>(std::clamp(numberValue, 0.f, 4.f));
     else if ([property isEqualToString:@"depth"]) spec.depth = numberValue;
     else if ([property isEqualToString:@"animation"]) spec.animation = static_cast<aurea::u32>(numberValue);
     else if ([property isEqualToString:@"animationDuration"]) spec.animationDuration = numberValue;
@@ -1296,17 +1298,8 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 }
 - (BOOL)applyText3DPreset:(long long)layerId preset:(uint32_t)preset {
     auto* e = self.engine; aurea::scene3d::Text3DSpec spec;
-    if (!e || preset > 5 || !e->query_text3d(layerId, spec)) return NO;
-    // Mesmas seis receitas de Text3DPreset em EditorStore.kt.
-    spec.specular = 1; spec.emissive = {0,0,0}; spec.emissiveStrength = 1;
-    switch (preset) {
-        case 0: spec.bevel = true; spec.regionMaterials = false; spec.color = {.95f,.96f,.98f,1}; spec.metallic = 1; spec.roughness = .05f; break;
-        case 1: spec.bevel = true; spec.regionMaterials = false; spec.color = {1,.77f,.34f,1}; spec.metallic = 1; spec.roughness = .18f; break;
-        case 2: spec.color = {.78f,.79f,.8f,1}; spec.metallic = 1; spec.roughness = .45f; break;
-        case 3: spec.color = {.9f,.1f,.12f,1}; spec.metallic = 0; spec.roughness = .08f; break;
-        case 4: spec.color = {.85f,.85f,.86f,1}; spec.metallic = 0; spec.roughness = .92f; spec.specular = .15f; break;
-        case 5: spec.color = {.1f,1,.85f,1}; spec.metallic = 0; spec.roughness = .35f; spec.emissive = {.1f,1,.85f}; spec.emissiveStrength = 3.5f; break;
-    }
+    if (!e || !e->query_text3d(layerId, spec) ||
+        !aurea::scene3d::apply_text3d_material_preset(spec, preset)) return NO;
     return e->set_text3d(layerId, spec).ok();
 }
 - (NSArray<NSNumber*>*)modelShadows:(long long)layerId {
@@ -1316,6 +1309,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     auto* e = self.engine; return e && e->set_model_shadows(layerId, cast, receive);
 }
 - (int64_t)removeGaps { auto* e = self.engine; return e ? e->remove_gaps() : 0; }
+- (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next {
+    auto* e = self.engine; return e && e->edit_clip_time(layerId, operation, amount, previous, next);
+}
 - (BOOL)trimComposition:(int64_t)frame { auto* e = self.engine; return e && e->trim_composition(frame); }
 
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm {

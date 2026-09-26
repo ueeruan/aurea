@@ -5,6 +5,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditorLayoutTest {
+    @Test fun curvesStayCompactWithoutShrinkingOtherTools() {
+        for (height in listOf(568f, 640f, 780f, 960f, 1200f)) {
+            val curve = EditorLayout.solve(height, SheetContent.Curve, false)
+            val panel = EditorLayout.solve(height, SheetContent.Panel, false)
+            assertTrue(curve.sheet <= 280.01f)
+            assertTrue(curve.sheet >= 230f)
+            assertTrue(curve.timeline >= 90f)
+            assertTrue(curve.preview >= panel.preview)
+            assertTrue(curve.sheet < panel.sheet)
+            assertEquals(height, curve.topBar + curve.preview + curve.strip + curve.transport + curve.timeline + curve.sheet, 0.01f)
+        }
+    }
     @Test fun editingPanelsKeepUsableSpaceOnPhoneScreens() {
         for (height in listOf(640f, 720f, 780f, 840f, 960f)) {
             val overview = EditorLayout.solve(height, SheetContent.None, false)

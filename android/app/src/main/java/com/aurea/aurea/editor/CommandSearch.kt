@@ -53,6 +53,7 @@ private fun commandUnavailable(requirement: String, store: EditorStore): String?
         "media" -> if (layer.kind in listOf(1, 3)) null else "Selecione vídeo ou áudio"
         "text" -> if (layer.kind == 4) null else "Selecione um texto"
         "visual" -> if (layer.kind != 3) null else "Selecione uma camada visual"
+        "text3d" -> if (store.text3d != null) null else "Selecione um texto 3D"
         "model3d" -> if (layer.kind == 10) null else "Selecione um modelo 3D"
         "particles" -> if (layer.kind == 11) null else "Selecione partículas"
         "vector" -> if (store.isVectorLayer) null else "Selecione um vetor"
@@ -74,7 +75,7 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
     // Reuse existing catalogs and preference stores; no duplicate effect/preset system.
     val hits = commands.map { CommandHit(it.id, it.title, it.detail, normalizeSearch("${it.title} ${it.keywords} ${it.detail}"), "Ações", it.requires) } +
         store.catalog.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), "Adicionar efeito · ${it.category}",
-            effectSearchText(it.typeId, it.name, it.category), "Efeitos", "selection", effect = it.typeId) } +
+            effectSearchText(it.typeId, it.name, it.category), "Efeitos", if (it.typeId == effectTypeId("aurea.text3d.layout")) "text3d" else "selection", effect = it.typeId) } +
         presets.map { CommandHit("preset:${it.key}", it.name, "Abrir preset · ${it.kind.dir}", normalizeSearch("${it.name} ${it.kind.dir} preset"),
             "Presets", if (it.kind == PresetKind.Text) "text" else "single", preset = it) }
     fun isFavorite(hit: CommandHit) = hit.effect?.let { store.effectPrefs.isFavorite(it) }
@@ -142,6 +143,7 @@ private fun executeEditorCommand(id: String, store: EditorStore, ui: EditorUi) {
         "trim_start" -> layer?.let { store.trimStart(it, store.playhead) }
         "trim_end" -> layer?.let { store.trimEnd(it, store.playhead) }
         "speed" -> panel(EditorPanel.Speed)
+        "clip_edit" -> panel(EditorPanel.ClipEdit)
         "freeze" -> store.freezeFrame()
         "extract_audio" -> store.extractAudio()
         "audio" -> panel(EditorPanel.Audio)

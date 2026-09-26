@@ -149,8 +149,11 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val look by remember(store, tab, axis, show3D) {
         derivedStateOf { if (keyProps.isEmpty()) com.aurea.aurea.ui.ds.KeyframeLook.None else transformLook(store.detail, keyProps) }
     }
-    val curveReady by remember(store, tab, axis, show3D) {
-        derivedStateOf { props.isNotEmpty() && store.primaryKeys().transformTrack(props[0]).size >= 2 }
+    val curveKeys by remember(store, tab, axis, show3D) {
+        derivedStateOf {
+            val candidates = (props.toList() + keyProps.toList()).distinct()
+            curveTrack(candidates.map { store.primaryKeys().transformTrack(it) })
+        }
     }
     val exprKeys = props.map { TrackKey(it) }
     val exprLook by remember(store, tab, axis, show3D) { derivedStateOf { store.expressionLook(exprKeys) } }
@@ -169,12 +172,12 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             keyframeLook = look,
             onKeyframe = if (canKey) ({ store.toggleTransformKeyframe(keyProps) }) else null,
             curveAnimated = look != com.aurea.aurea.ui.ds.KeyframeLook.None,
-            onCurve = if (curveReady) {
+            onCurve = if (curveKeys.isNotEmpty()) {
                 {
                     val layer = store.primary
                     val t = store.detail?.localPlayhead
                     if (layer != null && t != null) {
-                        store.primaryKeys().transformTrack(props[0]).segmentStart(t)?.let { key ->
+                        (curveKeys.segmentStart(t) ?: curveKeys.firstOrNull())?.let { key ->
                             store.selectKeyframe(layer, key)
                             env.onOpenPanel(EditorPanel.Curve)
                         }

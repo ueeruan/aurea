@@ -59,6 +59,7 @@ struct CommandSearchView: View {
         case "media": return [1, 3].contains(layer.kind) ? nil : "Selecione vídeo ou áudio"
         case "text": return layer.kind == 4 ? nil : "Selecione um texto"
         case "visual": return layer.kind != 3 ? nil : "Selecione uma camada visual"
+        case "text3d": return model.engine.text3D(forLayer: layer.id) != nil ? nil : "Selecione um texto 3D"
         case "model3d": return layer.kind == 10 ? nil : "Selecione um modelo 3D"
         case "particles": return layer.kind == 11 ? nil : "Selecione partículas"
         case "vector": return model.isVectorLayer ? nil : "Selecione um vetor"
@@ -143,7 +144,7 @@ struct CommandSearchView: View {
             CommandHit(id: $0.id, title: $0.title, detail: $0.detail, search: fxNormalizeSearch("\($0.title) \($0.detail) \($0.keywords)"), category: "Ações", requires: $0.requires)
         }
         hits += model.effectCatalog.map {
-            CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: "Adicionar efeito · \($0.category)", search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: "selection", effect: $0.typeId)
+            CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: "Adicionar efeito · \($0.category)", search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : "selection", effect: $0.typeId)
         }
         hits += PanelPresetEntry.loadAll().map {
             CommandHit(id: "preset:\($0.id)", title: $0.name, detail: "Abrir preset · \($0.kind.rawValue)", search: fxNormalizeSearch("\($0.name) \($0.kind.rawValue) preset"), category: "Presets", requires: $0.kind == .text ? "text" : "single", preset: $0)
@@ -184,6 +185,7 @@ struct CommandSearchView: View {
         case "trim_start": if let layer { model.trimStart(layer, at: model.status.playhead) }
         case "trim_end": if let layer { model.trimEnd(layer, at: model.status.playhead) }
         case "speed": model.openPanel(.speed)
+        case "clip_edit": model.openPanel(.clipEdit)
         case "freeze":
             if let layer {
                 let created = model.engine.freezeFrame(forLayer: layer, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3)))

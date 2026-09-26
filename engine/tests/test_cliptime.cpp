@@ -127,8 +127,31 @@ AUREA_TEST(ClipTime, ReverseAndSplitRespectTheSourceTime) {
     s.comp()->layers().for_each([&](LayerId id, const Layer& l) { if (id != s.layer) second = &l; });
     AUREA_CHECK(second != nullptr);
     if (second) {
-        AUREA_CHECK_EQ(second->offset.value, 100);
+        // Animation time stays frame-aligned; the remap retains 2x source time.
+        AUREA_CHECK_EQ(second->offset.value, 50);
+        AUREA_CHECK(second->timeRemapEnabled);
         AUREA_CHECK_NEAR(second->source_frame(FrameIndex{50}), s.L()->source_frame(FrameIndex{49}) + 2.0, 1e-9);
+    }
+}
+
+AUREA_TEST(ClipTime, TrimAndSlipKeepAudioOnTheVideoSourceClock) {
+    for (bool reverse : {false, true}) {
+        TimeRig r(cfg_with_audio()); r.speed(2); r.reverse(reverse);
+        AUREA_CHECK(r.e.edit_clip_time(r.layer.pack(), 0, 5));
+        AUREA_CHECK(r.e.edit_clip_time(r.layer.pack(), 1, 140));
+        AUREA_CHECK(r.e.edit_clip_time(r.layer.pack(), 2, reverse ? -3 : 3));
+        auto snap = audio::build_snapshot(*r.comp(), *r.e.project(), nullptr, nullptr, nullptr);
+        AUREA_CHECK_EQ(snap->clips.size(), static_cast<usize>(1));
+        if (snap->clips.empty()) continue;
+        audio::AudioBlockCache cache(&r.factory, 16ull << 20, false);
+        cache.register_asset(snap->clips[0].asset, audio::AudioAssetRef{"s", 10 * 48000});
+        Fetch f(cache); std::vector<f32> out(64);
+        audio::mix(*snap, 20 * 1600, 32, f, out.data());
+        for (u32 i = 0; i < 32; ++i) {
+            const f64 seconds = r.L()->source_frame_f(20.0 + i / 1600.0) / 30.0;
+            for (u32 channel = 0; channel < 2; ++channel)
+                AUREA_CHECK_NEAR(out[i * 2 + channel], synthetic_audio_value(cfg_with_audio(), channel, seconds), 0.002);
+        }
     }
 }
 

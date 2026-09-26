@@ -35,6 +35,13 @@
     "requires": "inside_single"
   },
   {
+    "id": "clip_edit",
+    "title": "Slip · Roll · Slide",
+    "detail": "Ajustar conteúdo, corte e vizinhos sem alterar a duração total",
+    "keywords": "aparar montagem rolar deslizar trim slip roll slide",
+    "requires": "media"
+  },
+  {
     "id": "speed",
     "title": "Velocidade e remapeamento",
     "detail": "Ajuste velocidade, reverso e curvas de tempo",

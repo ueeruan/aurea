@@ -20,6 +20,7 @@
 #include "aurea/core/Types.hpp"
 
 #include <string>
+#include <memory>
 #include <vector>
 
 namespace aurea::scene3d {
@@ -158,7 +159,11 @@ struct Image {
     std::string uri;          ///< externa (relativa ao .gltf) ou vazia (embutida)
     u32 width = 0, height = 0;
     std::vector<u8> rgba;     ///< vazio se a decodificação ficou para o streaming
+    // Runtime-only immutable pixels for procedural materials. Undo recipes may
+    // retain many SceneAssets; their identical maps must not be copied per edit.
+    std::shared_ptr<const std::vector<u8>> sharedRgba;
     bool hasAlpha = false;
+    [[nodiscard]] const std::vector<u8>& pixels() const noexcept { return sharedRgba ? *sharedRgba : rgba; }
 };
 
 struct TextureRef {
@@ -295,6 +300,7 @@ struct ImportStats {
 struct SceneAsset {
     u32 version = kSceneAssetVersion;
     std::string sourceName;
+    bool textGlyphLayout = false;   ///< Generated text only; roots are visible letters in visual order.
 
     std::vector<Node> nodes;
     std::vector<i32> roots;            ///< cena padrão

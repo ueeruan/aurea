@@ -682,6 +682,53 @@ AUREA_TEST(Engine, ParentingKeepsChildInPlace) {
     e.shutdown();
 }
 
+AUREA_TEST(Engine, MobileUnlinkKeepsChildrenInPlaceAndUndoes) {
+    for (bool threeD : {false, true}) for (u32 keyed : {0u, 1u, 2u}) {
+        Engine e;
+        AUREA_CHECK(e.initialize(headless_config()).ok());
+        AUREA_CHECK(e.new_project(1280, 720, 30, nullptr).ok());
+        const auto parentId = e.add_null(threeD), childId = e.add_shape(0);
+        AUREA_CHECK(parentId.ok() && childId.ok());
+        if (!parentId.ok() || !childId.ok()) continue;
+        auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        auto child = [&] { return comp->layer(LayerId::unpack(*childId)); };
+        auto* parent = comp->layer(LayerId::unpack(*parentId));
+        parent->transform.position = {280, 150, threeD ? 40.f : 0.f};
+        parent->transform.rotation = {threeD ? 25.f : 0.f, threeD ? -18.f : 0.f, 35};
+        parent->transform.scale = {1.4f, 1.4f, 1};
+        child()->parent = LayerId::unpack(*parentId);
+        child()->transform.position = {200, 180, 0};
+        if (keyed) {
+            for (auto property : {TrackProperty::RotationX, TrackProperty::RotationY, TrackProperty::RotationZ,
+                                  TrackProperty::ScaleX, TrackProperty::ScaleY, TrackProperty::ScaleZ,
+                                  TrackProperty::AnchorX, TrackProperty::AnchorY, TrackProperty::AnchorZ}) {
+                auto& track = child()->tracks.get_or_create(property);
+                const bool scale = property >= TrackProperty::ScaleX && property <= TrackProperty::ScaleZ;
+                const bool planar = property == TrackProperty::RotationZ || property == TrackProperty::AnchorX || property == TrackProperty::AnchorY;
+                track.set(FrameIndex{0}, scale ? 1.f : (threeD || planar ? 10.f : 0.f));
+                if (keyed == 2) track.set(FrameIndex{30}, scale ? 1.4f : (threeD || planar ? 35.f : 0.f));
+            }
+        }
+        Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{15}, 30.0);
+        AUREA_CHECK(e.apply_command(seek).ok());
+        // A 2D child inherits the dimension of a 3D parent.
+        const auto before = threeD ? layer_world_3d(*comp, *child(), FrameIndex{15}) : layer_world_matrix(*comp, *child(), FrameIndex{15});
+        Command unlink; unlink.type = CommandType::LayerSetParent;
+        unlink.layer_parent.layer = LayerId::unpack(*childId);
+        unlink.layer_parent.parent = LayerId::unpack(0); // Exact payload used by both mobile UIs.
+        AUREA_CHECK(e.apply_command(unlink).ok());
+        AUREA_CHECK(!child()->parent.valid());
+        if (threeD) AUREA_CHECK(child()->threeD);
+        const auto after = threeD ? layer_world_3d(*comp, *child(), FrameIndex{15}) : layer_world_matrix(*comp, *child(), FrameIndex{15});
+        for (Vec3 point : {Vec3{0, 0, 0}, Vec3{100, 0, 0}, Vec3{0, 100, 0}, Vec3{10, 20, 30}})
+            AUREA_CHECK((before.transform_point(point) - after.transform_point(point)).length() < .05f);
+        Command undo; undo.type = CommandType::Undo;
+        AUREA_CHECK(e.apply_command(undo).ok());
+        AUREA_CHECK(child()->parent == LayerId::unpack(*parentId));
+        e.shutdown();
+    }
+}
+
 AUREA_TEST(Engine, ParentSurvivesSaveAndReopenAfterReorder) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

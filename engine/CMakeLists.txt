@@ -104,6 +104,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/TemporalEffects.cpp
     src/effects/builtin/TransitionEffects.cpp
     src/effects/builtin/OpticalEffects.cpp
+    src/effects/builtin/PatternEffects.cpp
     src/effects/builtin/SampledBlurEffects.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp

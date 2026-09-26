@@ -37,6 +37,7 @@ enum class EditorPanel {
     Curve,         // curva de easing do keyframe escolhido
     Appearance,    // opacidade e mesclagem
     Speed,         // velocidade/tempo
+    ClipEdit,      // slip / rolling / slide, frame precise
     Audio,         // volume
     Shape,         // cor e preenchimento / editar forma
     Text,          // editar texto
@@ -102,6 +103,7 @@ fun PanelContent(
         EditorPanel.Curve -> stringResource(R.string.panel_easing_curve)
         EditorPanel.Appearance -> stringResource(R.string.panel_mistura_opacidade)
         EditorPanel.Speed -> stringResource(R.string.panel_tempo_velocidade)
+        EditorPanel.ClipEdit -> "Slip · Roll · Slide"
         EditorPanel.Audio -> stringResource(R.string.panel_som)
         EditorPanel.Shape -> stringResource(R.string.panel_cor_preenchimento)
         EditorPanel.Text -> stringResource(R.string.panel_texto)
@@ -134,6 +136,7 @@ fun PanelContent(
                     EditorPanel.Curve -> CurvePanel(env)
                     EditorPanel.Appearance -> AppearancePanel(env)
                     EditorPanel.Speed -> SpeedPanel(env)
+                    EditorPanel.ClipEdit -> ClipEditPanel(env)
                     EditorPanel.Audio -> AudioPanel(env)
                     EditorPanel.Shape -> ShapePanel(env)
                     EditorPanel.Text -> TextPanel(env)

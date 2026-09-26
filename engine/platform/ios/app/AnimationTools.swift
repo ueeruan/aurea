@@ -1,9 +1,15 @@
 import SwiftUI
+
+func preferredCurveTrack(_ tracks: [[KeyframeItem]]) -> [KeyframeItem] {
+    tracks.first(where: { track in track.count >= 2 && track.contains { $0.value != track[0].value } })
+        ?? tracks.first(where: { $0.count >= 2 })
+        ?? tracks.first(where: { !$0.isEmpty }) ?? []
+}
 import UIKit
 
-private let curveGreen = Color(red: 0, green: 239/255, blue: 164/255)
-private let curvePanelFill = Color(red: 55/255, green: 59/255, blue: 85/255)
-private let curveRailFill = Color(red: 43/255, green: 48/255, blue: 70/255)
+private var curveGreen: Color { AureaColors.accent }
+private var curvePanelFill: Color { AureaColors.editorPanel }
+private var curveRailFill: Color { AureaColors.editorPanelHigh }
 
 // CurvePanel.kt: easing descriptions for drawing and editing the core's keys.
 // These samples draw the control; project evaluation remains in the C++ core.
@@ -320,6 +326,16 @@ struct NativeCurvePanel: View {
         VStack(spacing: 0) {
             if let segment {
                 HStack(spacing: 0) {
+                    ForEach(0..<3, id: \.self) { index in
+                        Button { graphMode = index } label: {
+                            Text(AureaText.t(["panel_easing_curve", "particular_curve_value", "panel_velocidade"][index]))
+                                .font(.aurea(size: 12)).lineLimit(1)
+                                .foregroundStyle(graphMode == index ? AureaColors.accent : AureaColors.muted)
+                                .frame(maxWidth: .infinity).frame(height: 48).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityIdentifier("curve.mode.\(index)")
+                    }
+                }.background(curveRailFill)
+                HStack(spacing: 0) {
                     leftRail(segment)
                     VStack(spacing: 0) {
                         if graphMode == 0 {
@@ -345,7 +361,7 @@ struct NativeCurvePanel: View {
                     }.buttonStyle(AureaPressStyle(shrink: 1))
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }.background(curvePanelFill)
+        }.background(curvePanelFill).accessibilityElement(children: .contain).accessibilityIdentifier("curve.panel")
         .overlay {
             if expanded {
                 ZStack {

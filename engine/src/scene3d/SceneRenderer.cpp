@@ -244,7 +244,8 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
     auto texture_for = [&](const TextureRef& ref, bool srgb) -> TextureHandle {
         if (!ref.valid() || ref.image >= static_cast<i32>(asset.images.size())) return {};
         const Image& img = asset.images[ref.image];
-        if (img.rgba.empty() || img.width == 0) return {};
+        const auto& pixels = img.pixels();
+        if (pixels.empty() || img.width == 0) return {};
         const u64 key = (static_cast<u64>(ref.image) << 1) | (srgb ? 1u : 0u);
         if (auto it = byImage.find(key); it != byImage.end()) return it->second;
         TextureDesc d;
@@ -257,7 +258,7 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
         d.debugName = srgb ? "3d-textura-cor" : "3d-textura-dado";
         auto t = gpu.create_texture(d);
         if (!t.ok()) return {};
-        if (!gpu.upload_texture_level(*t, 0, 0, img.rgba.data(), img.rgba.size()).ok()) {
+        if (!gpu.upload_texture_level(*t, 0, 0, pixels.data(), pixels.size()).ok()) {
             gpu.destroy_texture(*t);
             return {};
         }

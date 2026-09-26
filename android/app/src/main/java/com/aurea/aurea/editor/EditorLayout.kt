@@ -23,7 +23,7 @@ internal data class EditorMetrics(
 )
 
 /** O que ocupa a zona do painel contextual (define a fração e o piso). */
-internal enum class SheetContent { None, Hint, Dock, Panel, Batch, Adding }
+internal enum class SheetContent { None, Hint, Dock, Panel, Curve, Batch, Adding }
 
 internal object EditorLayout {
     const val TOP_BAR = 44f
@@ -56,13 +56,14 @@ internal object EditorLayout {
             SheetContent.Batch -> if (ws > 0f) (SHEET_HANDLE + BATCH_BODY) / ws else 0f
             SheetContent.Dock -> DOCK_FRACTION
             SheetContent.Panel -> PANEL_FRACTION
+            SheetContent.Curve -> if (ws > 0f) 280f / ws else 0f
             SheetContent.Adding -> if (ws > 0f) (SHEET_HANDLE + ADD_BODY) / ws else 0f
         }
         var sheet = if (content != SheetContent.None) ws * sheetFraction.coerceIn(0f, 0.60f) else 0f
         // Camada escolhida ou painel: piso de 90 (uma linha de camada viva).
         // Nada escolhido: 120. Adicionando: o menu pode cobrir a timeline.
         val floor = when (content) {
-            SheetContent.Adding, SheetContent.Dock, SheetContent.Panel, SheetContent.Batch -> 90f
+            SheetContent.Adding, SheetContent.Dock, SheetContent.Panel, SheetContent.Curve, SheetContent.Batch -> 90f
             else -> 120f
         }
         // Editing controls get usable space first; only the overview keeps

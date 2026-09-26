@@ -45,8 +45,10 @@ struct TransformView: View {
         return keyProps.contains { animatedMask & (1 << $0) != 0 } ? .animated : .none
     }
     private var curveKeys: [KeyframeItem] {
-        guard let property = props.first else { return [] }
-        return (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max && $0.paramIndex == 0 }.sorted { $0.time < $1.time }
+        let candidates = props + keyProps.filter { !props.contains($0) }
+        return preferredCurveTrack(candidates.map { property in
+            (model.keyframes[id] ?? []).filter { $0.property == property }.sorted { $0.time < $1.time }
+        })
     }
     private var expressionLook: ExpressionLook {
         var result: ExpressionLook = .none
@@ -77,7 +79,7 @@ struct TransformView: View {
             PanelHeader(title: AureaText.t("panel_transformar") + " · " + names[tab]) { model.panel = .none }
             HStack(spacing: 0) {
                 LeftRail(keyframeLook: look, onKeyframe: props.isEmpty ? nil : toggleKey,
-                         curveAnimated: look != .none, onCurve: curveKeys.count >= 2 ? openCurve : nil,
+                         curveAnimated: look != .none, onCurve: curveKeys.isEmpty ? nil : openCurve,
                          onMore: openMenu, expression: expressionLook,
                          onExpression: props.isEmpty ? nil : openExpression,
                          onBack: { model.panel = .none })
@@ -409,10 +411,10 @@ struct TransformView: View {
         }
     }
     private func openCurve() {
-        guard let property = props.first, curveKeys.count >= 2 else { return }
+        guard let first = curveKeys.first else { return }
         let local = model.localPlayhead
         let segment = curveKeys.last { $0.time <= local } ?? curveKeys[0]
-        model.openCurve(property: property, time: segment.time)
+        model.openCurve(property: first.property, time: segment.time)
     }
     private func openExpression() {
         guard !props.isEmpty else { return }

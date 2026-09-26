@@ -633,8 +633,7 @@ internal class TimelineController(
                 val step = (target - r.start) - applied
                 if (step != 0) {
                     openUndo("aparar")
-                    store.trimStartBy(id, step)
-                    applied += step
+                    applied += store.trimStartBy(id, step)
                 }
             } else if (start && target != cur.start) {
                 openUndo("aparar")

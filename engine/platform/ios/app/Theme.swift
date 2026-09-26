@@ -872,7 +872,7 @@ enum AureaTimeline {
 //  mesmo tamanho durante um arrasto (redimensionar o drawable a cada gesto
 //  custaria uma recriação de swapchain).
 // =============================================================================
-enum SheetContent { case none, hint, dock, panel, batch, adding }
+enum SheetContent { case none, hint, dock, panel, curve, batch, adding }
 
 struct EditorMetrics {
     var topBar: CGFloat
@@ -917,13 +917,14 @@ enum EditorLayout {
         case .batch: sheetFraction = ws > 0 ? (sheetHandle + batchBody) / ws : 0
         case .dock: sheetFraction = dockFraction
         case .panel: sheetFraction = panelFraction
+        case .curve: sheetFraction = ws > 0 ? 280 / ws : 0
         case .adding: sheetFraction = ws > 0 ? (sheetHandle + addBody) / ws : 0
         }
         var sheet = content == .none ? 0 : ws * min(max(sheetFraction, 0), 0.60)
 
         let floor: CGFloat
         switch content {
-        case .adding, .dock, .panel, .batch: floor = 90
+        case .adding, .dock, .panel, .curve, .batch: floor = 90
         default: floor = 120
         }
         // Make room for editing controls instead of compressing their targets.

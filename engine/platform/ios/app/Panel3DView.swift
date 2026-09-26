@@ -24,7 +24,7 @@ struct Panel3DView: View {
 
     private var layerId: Int64 { model.primarySelection ?? 0 }
     private let presetKeys = ["pn_t3d_preset_chrome", "pn_t3d_preset_gold", "pn_t3d_preset_brushed",
-                              "pn_t3d_preset_glossy", "pn_t3d_preset_matte", "pn_t3d_preset_neon"]
+                              "pn_t3d_preset_glossy", "pn_t3d_preset_matte", "pn_t3d_preset_neon", "pn_t3d_preset_cinematic"]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +47,7 @@ struct Panel3DView: View {
                 .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .accessibilityIdentifier("text3d.materialScroll")
         }
         .background(AureaColors.background)
         .fileImporter(isPresented: $pickingHdri,
@@ -73,6 +74,16 @@ struct Panel3DView: View {
     private var textSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             section("pn_text3d_title")
+            Button("Letter rotation · Cylinder · Twist") {
+                finishEditing()
+                let type = fxEffectTypeId("aurea.text3d.layout")
+                let target = layerId
+                if !model.effects.contains(where: { $0.typeId == type }) {
+                    model.mutate { $0.addEffect(type, toLayer: target, at: UInt32.max) }
+                }
+                model.openPanel(.effects)
+            }
+            .font(.aurea(size: 14)).frame(minHeight: 44)
             HStack(spacing: 6) {
                 chip("t3d_font") { openFonts() }
                 chip("t3d_import_font") {
@@ -127,12 +138,20 @@ struct Panel3DView: View {
             gap(14)
             section("pn_t3d_presets")
             horizontal {
-                ForEach(Array(presetKeys.enumerated()), id: \.offset) { item in
-                    chip(item.element) {
+                ForEach(Array(["Smooth", "Brushed", "Scratched", "Hammered", "Weathered Metal"].enumerated()), id: \.offset) { item in
+                    T3DChip(label: item.element, on: Int(number("surfaceFinish")) == item.offset) {
+                        set3D("surfaceFinish", value: Float(item.offset))
+                    }
+                }
+            }
+            horizontal {
+                ForEach([6, 0, 1, 2, 3, 4, 5], id: \.self) { index in
+                    chip(presetKeys[index]) {
                         finishEditing()
-                        _ = model.engine.applyText3DPreset(layerId, preset: UInt32(item.offset))
+                        _ = model.engine.applyText3DPreset(layerId, preset: UInt32(index))
                         refresh()
                     }
+                    .accessibilityIdentifier("text3d.materialPreset.\(index)")
                 }
             }
             gap(14)

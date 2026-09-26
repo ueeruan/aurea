@@ -25,6 +25,7 @@ void register_temporal_effects(EffectRegistry& r);
 void register_transition_effects(EffectRegistry& r);
 void register_optical_effects(EffectRegistry& r);
 void register_sampled_blur_effects(EffectRegistry& r);
+void register_pattern_effects(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

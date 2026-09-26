@@ -223,6 +223,7 @@ fun EditorScreen(store: EditorStore) {
         // caso normal do projeto novo, então ele não passa pelo portão do
         // `selectionSize == 1` que vale para os painéis que EDITAM a camada.
         ui.panel == EditorPanel.AiVideo || ui.panel == EditorPanel.Captions -> SheetContent.Panel
+        ui.panel == EditorPanel.Curve && selectionSize == 1 -> SheetContent.Curve
         ui.panel != null && selectionSize == 1 -> SheetContent.Panel
         store.selection.isNotEmpty() && store.selection == store.timelineOnlySelection -> SheetContent.None
         selectionSize >= 2 -> SheetContent.Batch
@@ -263,7 +264,7 @@ fun EditorScreen(store: EditorStore) {
 
                 if (ui.adding && !store.sceneEditor) AddLayerOverlay(store, ui, Modifier.align(Alignment.BottomEnd).padding(end = if (wide) sheetWidth.dp else 0.dp))
                 // O "+": escondido em tela cheia, adicionando ou com painel aberto.
-                if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel) {
+                if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel && content != SheetContent.Curve) {
                     // Camada escolhida com a timeline baixa: o "+" cobria justamente o
                     // clipe escolhido. Sobe para o canto do palco, acima do transporte.
                     val lifted = !wide && content == SheetContent.Dock && m.timeline < 170f
@@ -445,7 +446,7 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
             .background(AureaColors.EditorPanelHigh)
             .drawTopHairline(),
     ) {
-        if (content == SheetContent.Panel && panel != null) {
+        if ((content == SheetContent.Panel || content == SheetContent.Curve) && panel != null) {
             PanelContent(
                 store = store,
                 panel = panel,

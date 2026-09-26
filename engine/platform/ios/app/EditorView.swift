@@ -54,7 +54,7 @@ struct EditorView: View {
             }
             .background(AureaColors.background.ignoresSafeArea())
             .overlay(alignment: .bottomTrailing) {
-                if !model.sceneEditor && !model.fullscreen && !model.showAddLayer && model.sheetContent != .panel {
+                if !model.sceneEditor && !model.fullscreen && !model.showAddLayer && model.sheetContent != .panel && model.sheetContent != .curve {
                     Button { model.openAddLayer() } label: {
                         MaterialGlyph("filled.Add", size: 32, color: AureaColors.accent)
                             .frame(width: StageDim.fab, height: StageDim.fab)
@@ -382,7 +382,7 @@ private struct ContextSheet: View {
             // ContextArea.kt: faixa VAZIA de 12; painel aberto começa no seu
             // próprio cabeçalho, sem puxador ou faixa adicionais.
             Rectangle().fill(AureaColors.border).frame(height: 1)
-            if model.sheetContent != .panel {
+            if model.sheetContent != .panel && model.sheetContent != .curve {
                 AureaColors.editorPanelHigh.frame(height: StageDim.sheetHandle)
             }
 
@@ -408,6 +408,8 @@ private struct ContextSheet: View {
                 AppearancePanel()
             case .speed:
                 SpeedPanel()
+            case .clipEdit:
+                ClipEditPanel()
             case .audio:
                 AudioPanel()
             case .shape:

@@ -206,6 +206,11 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
     var draft by remember(store.primary) { mutableStateOf(info.content) }
     LaunchedEffect(info.content) { if (info.content != draft && !store.textEditing) draft = info.content }
     SectionTitle(stringResource(R.string.pn_text3d_title))
+    TextButton(onClick = {
+        val type = effectTypeId("aurea.text3d.layout")
+        if (store.effects.none { it.typeId == type }) store.addEffect(type)
+        env.onOpenPanel(EditorPanel.Effects)
+    }) { Text("Letter rotation · Cylinder · Twist") }
     var fontsOpen by remember { mutableStateOf(false) }
     val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) store.importFont(uri, forText3d = true)
@@ -308,9 +313,16 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
     Spacer(Modifier.height(14.dp))
     SectionTitle(stringResource(R.string.pn_t3d_presets))
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text3DPreset.values().forEach { preset ->
+        listOf("Smooth", "Brushed", "Scratched", "Hammered", "Weathered Metal").forEachIndexed { index, label ->
+            Chip(label, on = info.surfaceFinish == index) {
+                store.text3d?.let { store.setText3D(it.copy(surfaceFinish = index)) }
+            }
+        }
+    }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
             Chip(stringResource(preset.labelRes), on = false) {
-                store.text3d?.let { store.setText3D(preset.apply(it)) }
+                store.applyText3DPreset(preset)
             }
         }
     }

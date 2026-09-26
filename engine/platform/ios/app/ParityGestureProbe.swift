@@ -38,6 +38,7 @@ import UIKit
         let primary = model.primarySelection
         let detail = primary.flatMap { model.engine.layerDetail($0) } ?? [:]
         let shape = primary.map { model.engine.shapeParams($0) } ?? []
+        let text3D = primary.flatMap { model.engine.text3D(forLayer: $0) } ?? [:]
         var stageCorners: [Float] = []
         _ = StageGeom.corners(detail, &stageCorners)
         let stageGizmo = primary.map { model.engine.gizmo($0, length: ShellStageGeometry.gizmoLength) } ?? []
@@ -54,7 +55,11 @@ import UIKit
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
             "editMode": model.editMode, "coreEditMode": model.engine.timelineEditMode,
             "effectCount": model.effects.count,
+            "clipTimeRemap": primary.map { model.engine.timeRemap($0) } ?? [],
+            "textGlyphLayout": (text3D["separateGlyphs"] as? NSNumber)?.boolValue ?? false,
+            "textSurfaceFinish": (text3D["surfaceFinish"] as? NSNumber)?.intValue ?? 0,
             "sheet": String(describing: model.sheetContent),
+            "curveProperty": model.curveProperty, "curveParam": model.curveParam,
             "selectionCount": model.selection.count, "isManipulating": model.stageManipulating,
             "canUndo": model.status.canUndo != 0, "canRedo": model.status.canRedo != 0,
             "compositionWidth": model.compositionWidth, "compositionHeight": model.compositionHeight,

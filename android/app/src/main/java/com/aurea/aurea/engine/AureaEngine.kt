@@ -458,6 +458,7 @@ class AureaEngine private constructor() {
         nativeSetText3d(nativeHandle, layer, content, fields, fontPath)
     fun queryText3dFont(layer: Long): String = nativeQueryText3dFont(nativeHandle, layer) ?: ""
     fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
+    fun applyText3dPreset(layer: Long, preset: Int): Boolean = nativeApplyText3dPreset(nativeHandle, layer, preset)
 
     /** Sombras do objeto 3D: projeta / recebe. */
     fun setModelShadows(layer: Long, cast: Boolean, receive: Boolean): Boolean =
@@ -604,6 +605,8 @@ class AureaEngine private constructor() {
     fun rippleDelete(ids: LongArray): Boolean = nativeRippleDelete(nativeHandle, ids)
     /** Fecha todos os espaços vazios. Devolve os frames removidos. */
     fun removeGaps(): Long = nativeRemoveGaps(nativeHandle)
+    fun editClipTime(layer: Long, operation: Int, amount: Long, previous: Long = 0, next: Long = 0): Boolean =
+        nativeEditClipTime(nativeHandle, layer, operation, amount, previous, next)
     fun trimComposition(frame: Long): Boolean = nativeTrimComposition(nativeHandle, frame)
 
     /** Liga/desliga a marca no frame. true = ficou marcada. */
@@ -807,6 +810,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
     private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray, fontPath: String): Boolean
+    private external fun nativeApplyText3dPreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeQueryText3dFont(handle: Long, layer: Long): String?
     private external fun nativeQueryText3d(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeSetModelShadows(handle: Long, layer: Long, cast: Boolean, receive: Boolean): Boolean
@@ -866,6 +870,7 @@ class AureaEngine private constructor() {
     private external fun nativeEditMode(handle: Long): Boolean
     private external fun nativeRippleDelete(handle: Long, ids: LongArray): Boolean
     private external fun nativeRemoveGaps(handle: Long): Long
+    private external fun nativeEditClipTime(handle: Long, layer: Long, operation: Int, amount: Long, previous: Long, next: Long): Boolean
     private external fun nativeTrimComposition(handle: Long, frame: Long): Boolean
     private external fun nativeMoveMarker(handle: Long, from: Long, to: Long): Boolean
     private external fun nativeEditMarker(handle: Long, from: Long, to: Long, color: Int, label: ByteArray): Boolean

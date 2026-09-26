@@ -518,7 +518,7 @@ func expandedTimelineRows(_ base: [TimelineRow], expanded: Int64?, keys: [Int64:
                 instants: times.map { Keyframes.toTimeline($0, row.start, row.offset) }, keysAt: times.map { groups[$0]! }, track: track))
         }
         lane(TimelineTrack(property: -1), AureaText.t("panel_transformar"))
-        for effect in effects { lane(TimelineTrack(property: 31, effect: effect.effectId, param: .max), effect.name) }
+        for effect in effects { lane(TimelineTrack(property: 31, effect: effect.effectId, param: .max), fxEffectDisplayName(effect.typeId, effect.name)) }
         let tracks = Dictionary(grouping: keys[row.id] ?? [], by: { TimelineTrack(property: Int($0.property), effect: $0.effectIndex, param: $0.paramIndex) })
         let ordered = tracks.keys.sorted {
             if $0.property != $1.property { return $0.property < $1.property }

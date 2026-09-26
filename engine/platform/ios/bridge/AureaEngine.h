@@ -604,6 +604,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber*>*)modelShadows:(long long)layerId;
 - (BOOL)setModelShadows:(long long)layerId cast:(BOOL)cast receive:(BOOL)receive;
 - (int64_t)removeGaps;
+- (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next;
 - (BOOL)trimComposition:(int64_t)frame;
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));
 - (NSArray<NSNumber*>*)motionBlurSettings;

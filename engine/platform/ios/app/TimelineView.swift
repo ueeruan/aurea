@@ -110,7 +110,7 @@ struct TimelineView: View {
         var sentDelta: Int32 = 0
         var undoOpen = false
     }
-    private var compact: Bool { model.sheetContent == .panel }
+    private var compact: Bool { model.sheetContent == .panel || model.sheetContent == .curve }
     private var fps: Float { TimeAxis.safeFps(Float(model.compositionFps)) }
     private var ppf: CGFloat { TimeAxis.pxPerFrame(pps: pps, density: 1, fps: fps) }
     private var viewFrame: Double { heldView ?? Double(clock.frame) }
@@ -771,9 +771,12 @@ struct TimelineView: View {
                 if g.mode == .trimStart {
                     if model.editMode, let current = model.layers.first(where: { $0.id == row.id }) {
                         model.trimStart(row.id, at: Int64(current.startFrame) + Int64(change) - Int64(g.sentDelta))
+                        if let changed = model.layers.first(where: { $0.id == row.id }) {
+                            g.sentDelta += current.duration - changed.duration
+                        }
                     } else { model.trimStart(row.id, at: Int64(target)) }
                 } else { model.trimEnd(row.id, at: Int64(target)) }
-                g.sentDelta = change
+                if g.mode != .trimStart || !model.editMode { g.sentDelta = change }
             }
             guide = snapped
         case .key:

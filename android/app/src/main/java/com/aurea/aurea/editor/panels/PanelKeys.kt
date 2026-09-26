@@ -57,6 +57,13 @@ internal fun List<KeyframeRow>.transformTrack(property: Int): List<KeyframeRow> 
 internal fun List<KeyframeRow>.shapeTrack(param: Int): List<KeyframeRow> =
     filter { it.property == TrackProperty.SHAPE_PARAM && it.paramIndex == param }.sortedBy { it.time }
 
+/** Prefer the focused track, then an animated sibling instead of a dead curve button. */
+internal fun curveTrack(tracks: List<List<KeyframeRow>>): List<KeyframeRow> =
+    tracks.firstOrNull { it.size >= 2 && it.any { key -> key.value != it.first().value } }
+        ?: tracks.firstOrNull { it.size >= 2 }
+        ?: tracks.firstOrNull { it.isNotEmpty() }
+        ?: emptyList()
+
 /** As marcas da trilha de um componente de parâmetro de efeito. */
 internal fun List<KeyframeRow>.effectTrack(effectId: Int, param: Int, component: Int): List<KeyframeRow> =
     filter { it.property == TrackProperty.EFFECT_PARAM && it.effectIndex == effectId && it.paramIndex == param * 4 + component }

@@ -27,6 +27,7 @@
 #include <vector>
 
 namespace aurea::text { class Font; }
+namespace aurea { struct Layer; }
 
 namespace aurea::scene3d {
 
@@ -48,6 +49,8 @@ struct Text3DSpec {
     f32 animationDuration = 2.0f;
     f32 animationStagger = 0.12f;
     f32 animationAmount = 0.3f;          ///< onda: alturas de letra; giro: voltas
+    bool separateGlyphs = false;         ///< Opt-in mesh per visible glyph; no generated animation.
+    u32 surfaceFinish = 0;               ///< 0 smooth, 1 brushed, 2 scratched, 3 hammered, 4 weathered metal.
     f32  depth = 0.25f;                   ///< profundidade, em "alturas de letra" (1 = o tamanho da fonte)
     u32  alignment = 1;                   ///< 0 esquerda, 1 centro, 2 direita
 
@@ -97,6 +100,8 @@ inline constexpr const char* kText3DScheme = "aurea-text3d:";
 [[nodiscard]] std::string encode_text3d(const Text3DSpec& spec);
 [[nodiscard]] bool decode_text3d(const std::string& source, Text3DSpec& out);
 [[nodiscard]] std::shared_ptr<const text::Font> text3d_font(const Text3DSpec& spec);
+/// Shared material recipes for both mobile UIs; content, font and animation are preserved.
+[[nodiscard]] bool apply_text3d_material_preset(Text3DSpec& spec, u32 preset) noexcept;
 
 /// Chave do cache de geometria (fonte + parâmetros + conteúdo). Exposta para o
 /// teste que prende a propriedade que interessa: ela NÃO pode mudar quando o
@@ -123,5 +128,8 @@ bool triangulate_polygon(const std::vector<std::vector<Vec2>>& rings, std::vecto
 /// Gera a malha do texto. Unidades: 1 = a altura da fonte; Y para cima,
 /// frente olhando para +Z (convenção glTF).
 [[nodiscard]] ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec);
+
+/// User-keyframed glyph transforms, shared by preview, shadows and export.
+void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<Mat4>& nodeWorld);
 
 } // namespace aurea::scene3d

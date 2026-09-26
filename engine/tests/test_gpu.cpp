@@ -983,11 +983,11 @@ AUREA_TEST(Gpu, EngineImportsSeeksAndScrubsARealVideoPipeline) {
     imp.displayName = "clipe";
     auto layer = e.import_video(imp);
     AUREA_CHECK(layer.ok());
-    // Primeiro clipe: a composição adota o vídeo.
+    // Import preserves the chosen project size/rate and extends its duration.
     const Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
-    AUREA_CHECK_EQ(c->width(), static_cast<u32>(96));
-    AUREA_CHECK_NEAR(c->fps(), 30.0, 1e-9);
-    AUREA_CHECK_EQ(c->duration().value, static_cast<i64>(300));
+    AUREA_CHECK_EQ(c->width(), static_cast<u32>(1920));
+    AUREA_CHECK_NEAR(c->fps(), 60.0, 1e-9);
+    AUREA_CHECK_EQ(c->duration().value, static_cast<i64>(600));
 
     TextureDesc d;
     d.width = 96;
@@ -6257,6 +6257,34 @@ AUREA_TEST(Gpu, ParticlesChildOfAnimated3DNullFollowIt) {
     AUREA_CHECK(b30.w() >= 9 && b30.w() <= 12);
 }
 
+AUREA_TEST(Gpu, ParticlesWorldSpaceAllFollowAnimatedNull) {
+    AUREA_REQUIRE_GPU();
+    for (bool threeD : {false, true}) {
+        Scene3DRig rig(320, 180);
+        const u64 pid = measuring_particles(rig.e, 12.f, 30.f, 5.f);
+        auto n = rig.e.add_null(threeD);
+        AUREA_CHECK(n.ok());
+        if (!n.ok()) continue;
+        set_parent(rig.e, pid, *n);
+        auto* comp = current_comp(rig.e);
+        auto* particles = comp->layer(LayerId::unpack(pid));
+        particles->particles.emitterSpace = 1;
+        auto* parent = comp->layer(LayerId::unpack(*n));
+        parent->transform.position = {220, 90, threeD ? 60.f : 0.f};
+        seek_frame(rig.e, 60);
+        const auto expected = rig.capture(320);
+        auto& x = parent->tracks.get_or_create(TrackProperty::PositionX);
+        x.set(FrameIndex{0}, 70.f); x.set(FrameIndex{60}, 220.f);
+        auto& z = parent->tracks.get_or_create(TrackProperty::PositionZ);
+        z.set(FrameIndex{0}, 0.f); z.set(FrameIndex{60}, threeD ? 60.f : 0.f);
+        const auto actual = rig.capture(320);
+        AUREA_CHECK(lit_box(actual).w() >= 5);
+        AUREA_CHECK(max_diff(expected, actual) <= 2);
+        seek_frame(rig.e, 10); (void)rig.capture(320); seek_frame(rig.e, 60);
+        AUREA_CHECK(max_diff(actual, rig.capture(320)) <= 2);
+    }
+}
+
 AUREA_TEST(Gpu, ParticlesWorldSpaceStayWhereBornLocalSpaceIsDragged) {
     AUREA_REQUIRE_GPU();
     // A camada anda de x 60 a 260 em 2 s. Local: todas as vivas andam com
@@ -7780,3 +7808,125 @@ AUREA_TEST(Gpu, RawPlaybackBypassesTransformsEffectsAndOtherLayers) {
     AUREA_CHECK_EQ(scene.comp->width(),800u); AUREA_CHECK_EQ(scene.comp->height(),800u);
     AUREA_CHECK_NEAR(layer->transform.position.x,9000,0.001);
 }
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(GpuPattern, ProceduralPatternsPreserveAlphaAreStaticAndChangeWithPhase) {
+    AUREA_REQUIRE_GPU();
+    for (const char* key : {effect_keys::kStripes, effect_keys::kRadialRays, effect_keys::kGrid}) {
+        Scene s(128, 128);
+        const LayerId layer = s.image(uniform_image(96, 96, 255, 255, 255, 128), 64, 64);
+        auto& effect = s.add_effect(layer, key);
+        effect.params[0].constant = ParamValue::scalar(8.f);
+        effect.params[2].constant = ParamValue::scalar(0.f);
+        effect.params[6].constant = ParamValue::color(1.f, 0.f, 0.f, 1.f);
+        const FloatImage a = s.render();
+        const FloatImage again = s.render(FrameIndex{80});
+        AUREA_CHECK(a.px == again.px);
+        AUREA_CHECK_NEAR(a.v(4, 4).x, 0.f, .001f);
+        AUREA_CHECK_NEAR(a.v(4, 4).y, 0.f, .001f);
+        // Red stays at the input coverage everywhere, even where green is removed.
+        AUREA_CHECK_NEAR(a.v(61, 60).x, 128.f / 255.f, .008f);
+        effect.params[3].constant = ParamValue::scalar(.37f);
+        const FloatImage shifted = s.render();
+        double difference = 0;
+        for (usize i = 0; i < a.px.size(); ++i) difference += std::abs(a.px[i] - shifted.px[i]);
+        AUREA_CHECK_MSG(difference > 10, key);
+        effect.params[1].constant = ParamValue::scalar(0.f);
+        const FloatImage off = s.render();
+        AUREA_CHECK_NEAR(off.v(61, 60).y, 128.f / 255.f, .008f);
+        effect.params[1].constant = ParamValue::scalar(100.f);
+        const FloatImage filled = s.render();
+        AUREA_CHECK_NEAR(filled.v(61, 60).y, 0.f, .008f);
+    }
+}
+#endif
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(GpuText3DLayout, LetterRotationCylinderAndPbrFinishReachTheRenderer) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 640);
+    scene3d::Text3DSpec spec; spec.content = "LOOP\nTHIS\nLOOP";
+    spec.depth = .22f; spec.bevel = true; spec.bevelWidth = .014f; spec.bevelDepth = .02f;
+    spec.color = {.65f, .86f, .94f, 1}; spec.metallic = .7f; spec.roughness = .32f;
+    auto id = rig.e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = LayerId::unpack(*id);
+    add.effect_add.effectType = effect_type_id(effect_keys::kText3DLayout); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(rig.e.apply_command(add).ok());
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    layer->transform.rotation = {-8, 0, 0};
+    layer->model.unitScale = 160.f;
+    const u32 effectId = layer->effects.back().id;
+    auto value = [&](u32 index, f32 v) {
+        Command c; c.type = CommandType::EffectSetParam; c.effect_param.layer = LayerId::unpack(*id);
+        c.effect_param.effect = EffectId{effectId, 0}; c.effect_param.paramIndex = index; c.effect_param.value = v;
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    const Image8 flat = rig.capture(640);
+    value(1, 45.f); const Image8 rotated = rig.capture(640);
+    AUREA_CHECK(max_diff(flat, rotated) > 50);
+    seek_frame(rig.e, 30); const Image8 still = rig.capture(640);
+    AUREA_CHECK(max_diff(rotated, still) <= 1);
+    value(1, 0.f); value(0, 45.f); const Image8 rotatedX = rig.capture(640);
+    AUREA_CHECK(max_diff(flat, rotatedX) > 50);
+    value(0, 0.f); value(3, 260.f); const Image8 cylinder = rig.capture(640);
+    AUREA_CHECK(max_diff(flat, cylinder) > 50);
+    AUREA_CHECK(rig.e.query_text3d(*id, spec)); spec.surfaceFinish = 1;
+    AUREA_CHECK(rig.e.set_text3d(*id, spec).ok()); const Image8 brushed = rig.capture(640);
+    AUREA_CHECK(max_diff(cylinder, brushed) > 5);
+    if (const char* dir = std::getenv("AUREA_EVIDENCE_DIR")) {
+        AUREA_CHECK(write_png(std::string(dir) + "/text3d-flat.png", flat));
+        AUREA_CHECK(write_png(std::string(dir) + "/text3d-letter-rotation.png", rotated));
+        AUREA_CHECK(write_png(std::string(dir) + "/text3d-letter-rotation-x.png", rotatedX));
+        AUREA_CHECK(write_png(std::string(dir) + "/text3d-cylinder.png", cylinder));
+        AUREA_CHECK(write_png(std::string(dir) + "/text3d-brushed.png", brushed));
+    }
+}
+
+AUREA_TEST(GpuText3DMaterial, CinematicMetalRendersWithLetterRotationsAndStableFrames) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(1200, 440);
+    scene3d::Text3DSpec spec; spec.content = "3D TEXT"; spec.separateGlyphs = true;
+    if (const char* font = std::getenv("AUREA_REFERENCE_FONT")) spec.fontPath = font;
+    AUREA_CHECK(scene3d::apply_text3d_material_preset(spec, 6));
+    auto id = rig.e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* comp = current_comp(rig.e);
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    auto asset = rig.e.model_asset(layer->model.scene.pack()); AUREA_CHECK(asset != nullptr); if (!asset) return;
+    layer->model.unitScale = 900.f / asset->bounds.extent().x;
+    layer->transform.rotation = {-9.f, -7.f, -1.5f};
+    EffectRegistry registry; register_builtin_effects(registry);
+    for (u32 i = 0; i < asset->nodes.size(); ++i) {
+        EffectInstance effect; effect.type = effect_type_id(effect_keys::kText3DLayout); effect.id = layer->alloc_effect_id();
+        initialize_instance(effect, *registry.params(effect.type));
+        static constexpr f32 rotations[] = {-5, 6, -8, 4, 7, -3};
+        effect.params[2].constant = ParamValue::scalar(rotations[i % 6]);
+        effect.params[6].constant = effect.params[7].constant = ParamValue::scalar(static_cast<f32>(i + 1));
+        layer->effects.push_back(effect);
+    }
+    const Image8 textured = rig.capture(1200);
+    AUREA_CHECK(coverage(textured) > .07f);
+    seek_frame(rig.e, 15); const Image8 same = rig.capture(1200);
+    AUREA_CHECK(max_diff(textured, same) <= 1);
+    spec.surfaceFinish = 0;
+    AUREA_CHECK(rig.e.set_text3d(*id, spec).ok());
+    const Image8 smooth = rig.capture(1200);
+    AUREA_CHECK(max_diff(textured, smooth) > 15);
+    spec.surfaceFinish = 4; AUREA_CHECK(rig.e.set_text3d(*id, spec).ok());
+    comp = current_comp(rig.e); comp->environment().intensity = .25f;
+    auto light = [&](Vec3 position, Vec3 color, f32 intensity) {
+        const auto lightId = rig.e.add_light(1); AUREA_CHECK(lightId.ok()); if (!lightId.ok()) return;
+        auto* node = current_comp(rig.e)->layer(LayerId::unpack(*lightId));
+        node->transform.position = position; node->light.color = Vec4{color, 1}; node->light.intensity = intensity;
+    };
+    light({940, 40, -360}, {1.f, .93f, .85f}, 320000.f);
+    light({180, 400, -100}, {1.f, .22f, .025f}, 90000.f);
+    const Image8 cinematic = rig.capture(1200);
+    AUREA_CHECK(max_diff(textured, cinematic) > 30);
+    if (const char* dir = std::getenv("AUREA_EVIDENCE_DIR")) {
+        AUREA_CHECK(write_png(std::string(dir) + "/cinematic-metal.png", textured));
+        AUREA_CHECK(write_png(std::string(dir) + "/cinematic-metal-smooth.png", smooth));
+        AUREA_CHECK(write_png(std::string(dir) + "/cinematic-metal-lighting.png", cinematic));
+    }
+}
+#endif

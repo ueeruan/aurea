@@ -38,8 +38,8 @@ namespace aurea {
 
 // Renderer.cpp: as MESMAS contas de mundo e câmera, num instante fracionário
 // da timeline.
-Mat4 particle_world_3d_at(const Composition& comp, const Layer& l, f64 time) noexcept;
-Mat4 particle_world_2d_at(const Composition& comp, const Layer& l, f64 time) noexcept;
+Mat4 particle_world_3d_at(const Composition& comp, const Layer& l, f64 time, f64 parentTime) noexcept;
+Mat4 particle_world_2d_at(const Composition& comp, const Layer& l, f64 time, f64 parentTime) noexcept;
 scene3d::SceneCamera particle_camera_at(const Composition& comp, f64 time, u32 w, u32 h) noexcept;
 
 namespace {
@@ -141,8 +141,11 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
     const f64 toTimeline = static_cast<f64>(l.start.value) - static_cast<f64>(l.offset.value);
     auto outFrom = [&](f64 localFrame) -> Mat4 {
         const f64 T = localFrame + toTimeline;
-        if (in3d) return particle_world_3d_at(comp, l, T);
-        if (ps.compSpace) return particle_world_2d_at(comp, l, T);
+        // The emitter may leave a trail, but a parent transforms the whole
+        // system, including particles born before the null moved.
+        const f64 parentTime = world ? static_cast<f64>(local.value) + toTimeline : T;
+        if (in3d) return particle_world_3d_at(comp, l, T, parentTime);
+        if (ps.compSpace) return particle_world_2d_at(comp, l, T, parentTime);
         return Mat4::identity();
     };
 

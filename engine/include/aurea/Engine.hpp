@@ -802,6 +802,11 @@ public:
     i64 remove_gaps() noexcept;
     /// Corta a composição no frame (duração = frame; camadas além são aparadas).
     bool trim_composition(i64 frame) noexcept;
+    /// Shared NLE edits: 0 trim-in, 1 trim-out (absolute timeline frame),
+    /// 2 slip, 3 roll-in, 4 roll-out, 5 slide (signed frame delta).
+    /// Neighbours are explicit IDs; invalid/locked edits leave history untouched.
+    /// Slip changes source time only. Roll/slide never ripple unrelated layers.
+    bool edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous = 0, u64 next = 0) noexcept;
 
     // --- Marcas e batidas -------------------------------------------------------
     /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
@@ -960,6 +965,7 @@ public:
     /// Detalhe de uma camada no playhead. false = camada não existe.
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
 private:
+    Status ensure_text3d_layout(Layer& layer) noexcept; // modelMutex_ held; caller owns undo.
     bool fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
 public:
     u32 query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,

@@ -777,3 +777,144 @@ AUREA_TEST(Text3D, MeshCacheNeverServesAnotherFont) {
     AUREA_CHECK_NEAR(b.asset->bounds.max.x, bref.asset->bounds.max.x, 1e-6f);
     AUREA_CHECK_NEAR(b.asset->bounds.max.y, bref.asset->bounds.max.y, 1e-6f);
 }
+
+
+AUREA_TEST(Text3DLayout, GlyphRotationsAreManualAndKeepEachLetterPivot) {
+    const auto font = text::default_font(); AUREA_CHECK(font != nullptr); if (!font) return;
+    Text3DSpec spec; spec.content = "Ai O"; spec.separateGlyphs = true; spec.surfaceFinish = 2; spec.bevel = true;
+    auto result = build_text3d(*font, spec); AUREA_CHECK(result.ok()); if (!result.ok()) return;
+    const auto& asset = *result.asset;
+    AUREA_CHECK(asset.textGlyphLayout); AUREA_CHECK_EQ(asset.nodes.size(), usize{3});
+    AUREA_CHECK(asset.animations.empty());
+    Text3DSpec read; AUREA_CHECK(decode_text3d(encode_text3d(spec), read));
+    AUREA_CHECK(read.separateGlyphs); AUREA_CHECK_EQ(read.surfaceFinish, 2u);
+    auto loaded = build_text3d(*font, read); AUREA_CHECK(loaded.ok());
+    AUREA_CHECK_EQ(asset.images.size(), usize{2});
+    AUREA_CHECK(asset.images[0].rgba == loaded.asset->images[0].rgba);
+    AUREA_CHECK(asset.materials[0].normalTex.valid());
+    AUREA_CHECK(asset.materials[0].metallicRoughnessTex.valid());
+    Text3DSpec smooth = spec; smooth.surfaceFinish = 0;
+    AUREA_CHECK_EQ(text3d_geometry_key(*font, spec), text3d_geometry_key(*font, smooth));
+    EffectRegistry registry; register_builtin_effects(registry);
+    EffectInstance effect; effect.id = 5; effect.type = effect_type_id(effect_keys::kText3DLayout);
+    initialize_instance(effect, *registry.params(effect.type));
+    effect.params[1].constant = ParamValue::scalar(60.f);
+    effect.params[6].constant = effect.params[7].constant = ParamValue::scalar(2.f);
+    Layer layer; layer.effects.push_back(effect);
+    auto at0 = asset.rest_world_matrices(), at80 = at0;
+    apply_text3d_layout(asset, layer, 0, at0); apply_text3d_layout(asset, layer, 80, at80);
+    for (u32 i = 0; i < asset.nodes.size(); ++i) {
+        const Vec3 center = asset.meshes[i].bounds.center();
+        AUREA_CHECK((at0[i].transform_point(center) - center).length() < .0001f);
+        AUREA_CHECK((at0[i].transform_point({0, 0, 1}) - at80[i].transform_point({0, 0, 1})).length() < .0001f);
+        AUREA_CHECK_NEAR(at0[i].col[0].x, i == 1 ? .5f : 1.f, .0001f);
+    }
+    // X and Z rotate the selected glyph about its own center too; neither may
+    // orbit the whole word around its combined bounding box.
+    for (u32 axis : {0u, 2u}) {
+        layer.effects[0].params[1].constant = ParamValue::scalar(0.f);
+        layer.effects[0].params[axis].constant = ParamValue::scalar(60.f);
+        auto axisPose = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 0, axisPose);
+        for (u32 i = 0; i < asset.nodes.size(); ++i) {
+            const Vec3 center = asset.meshes[i].bounds.center();
+            AUREA_CHECK((axisPose[i].transform_point(center) - center).length() < .0001f);
+            AUREA_CHECK_NEAR(axisPose[i].col[1].y, i == 1 ? .5f : 1.f, .0001f);
+        }
+        layer.effects[0].params[axis].constant = ParamValue::scalar(0.f);
+    }
+    auto& track = layer.tracks.get_or_create(TrackProperty::EffectParam, 5, param_track_key(1, 0));
+    track.set(FrameIndex{0}, 0); track.set(FrameIndex{30}, 90);
+    auto halfway = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 15, halfway);
+    AUREA_CHECK_NEAR(halfway[1].col[0].x, std::sqrt(.5f), .0001f);
+    layer.effects[0].params[3].constant = ParamValue::scalar(240.f);
+    layer.effects[0].params[6].constant = ParamValue::scalar(1.f);
+    layer.effects[0].params[7].constant = ParamValue::scalar(256.f);
+    auto bent = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 0, bent);
+    const auto firstCenter = asset.meshes[0].bounds.center();
+    AUREA_CHECK(std::abs(bent[0].transform_point(firstCenter).z - firstCenter.z) > .05f);
+}
+
+AUREA_TEST(Text3DLayout, AddingLayoutAndUndoRestoreTheRecipeAndReloadKeepsLetterKeys) {
+    Engine e; EngineConfig config; config.disableAutosave = true; config.workerCount = 1;
+    AUREA_CHECK(e.initialize(config).ok()); AUREA_CHECK(e.new_project(320, 180, 30, nullptr).ok());
+    Text3DSpec spec; spec.content = "AUREA"; spec.surfaceFinish = 1;
+    const auto id = e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = LayerId::unpack(*id);
+    add.effect_add.effectType = effect_type_id(effect_keys::kText3DLayout); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(e.apply_command(add).ok());
+    Text3DSpec read; AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(read.separateGlyphs);
+    Command undo; undo.type = CommandType::Undo; AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(!read.separateGlyphs);
+    AUREA_CHECK(e.apply_command(add).ok());
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK_EQ(layer->effects.size(), usize{1});
+    layer->tracks.get_or_create(TrackProperty::EffectParam, layer->effects[0].id, param_track_key(2, 0)).set(FrameIndex{30}, 90.f);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_text_glyph_controls.aurea";
+    AUREA_CHECK(e.save_project(path.c_str()).ok()); AUREA_CHECK(e.load_project(path.c_str()).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current()); layer = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(read.separateGlyphs); AUREA_CHECK_EQ(read.surfaceFinish, 1u);
+    auto asset = e.model_asset(layer->model.scene.pack()); AUREA_CHECK(asset != nullptr);
+    if (asset) { AUREA_CHECK(asset->textGlyphLayout); AUREA_CHECK_EQ(asset->nodes.size(), usize{5}); }
+    AUREA_CHECK(layer->tracks.find(TrackProperty::EffectParam, layer->effects[0].id, param_track_key(2, 0)) != nullptr);
+}
+
+AUREA_TEST(Text3DLayout, SavedEffectPreparesDestinationAndUndoRestoresUnsplitText) {
+    Engine e; EngineConfig config; config.disableAutosave = true; config.workerCount = 1;
+    AUREA_CHECK(e.initialize(config).ok()); AUREA_CHECK(e.new_project(320, 180, 30, nullptr).ok());
+    Text3DSpec spec; spec.content = "ABC";
+    const auto source = e.add_text3d(spec), destination = e.add_text3d(spec);
+    AUREA_CHECK(source.ok() && destination.ok()); if (!source.ok() || !destination.ok()) return;
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = LayerId::unpack(*source);
+    add.effect_add.effectType = effect_type_id(effect_keys::kText3DLayout); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(e.apply_command(add).ok());
+    const auto preset = e.save_preset(*source, presets::PresetKind::Effects, "Letters", 0);
+    AUREA_CHECK(!preset.empty()); AUREA_CHECK(e.apply_preset(*destination, preset, 0));
+    Text3DSpec read; AUREA_CHECK(e.query_text3d(*destination, read)); AUREA_CHECK(read.separateGlyphs);
+    Command undo; undo.type = CommandType::Undo; AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.query_text3d(*destination, read)); AUREA_CHECK(!read.separateGlyphs);
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK(comp->layer(LayerId::unpack(*destination))->effects.empty());
+    const auto shape = e.add_shape(0); AUREA_CHECK(shape.ok()); if (!shape.ok()) return;
+    std::string error; AUREA_CHECK(!e.apply_preset(*shape, preset, 0, &error)); AUREA_CHECK(!error.empty());
+    AUREA_CHECK(e.apply_command(undo).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK(comp->layer(LayerId::unpack(*shape)) == nullptr); // rejected preset added no undo step
+}
+
+AUREA_TEST(Text3DMaterial, CinematicMetalPreservesContentAndProducesBoundedPbrMaps) {
+    const auto font = text::default_font(); AUREA_CHECK(font != nullptr); if (!font) return;
+    Text3DSpec spec; spec.content = "3D TEXT"; spec.separateGlyphs = true;
+    AUREA_CHECK(apply_text3d_material_preset(spec, 6));
+    AUREA_CHECK(spec.content == "3D TEXT" && spec.separateGlyphs && spec.regionMaterials);
+    AUREA_CHECK_EQ(spec.animation, 0u);
+    const auto begin = std::chrono::steady_clock::now();
+    auto result = build_text3d(*font, spec); AUREA_CHECK(result.ok()); if (!result.ok()) return;
+    std::printf("    cinematic material + geometry: %.2f ms\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count());
+    const auto& asset = *result.asset;
+    AUREA_CHECK_EQ(asset.images.size(), usize{3});
+    AUREA_CHECK_EQ(asset.materials.size(), usize{3});
+    usize bytes = 0; for (const auto& image : asset.images) bytes += image.pixels().size();
+    AUREA_CHECK_EQ(bytes, usize{3 * 512 * 512 * 4});
+    AUREA_CHECK(asset.materials[0].baseColorTex.valid() && asset.materials[0].normalTex.valid());
+    AUREA_CHECK(asset.materials[0].metallicRoughnessTex.valid());
+    AUREA_CHECK(asset.materials[2].emissive.x > asset.materials[2].emissive.y);
+    Text3DSpec read; AUREA_CHECK(decode_text3d(encode_text3d(spec), read));
+    AUREA_CHECK_EQ(read.surfaceFinish, 4u); AUREA_CHECK(read.regionMaterials);
+    auto rebuilt = build_text3d(*font, read); AUREA_CHECK(rebuilt.ok()); if (!rebuilt.ok()) return;
+    for (usize i = 0; i < asset.images.size(); ++i) {
+        AUREA_CHECK(asset.images[i].pixels() == rebuilt.asset->images[i].pixels());
+        AUREA_CHECK(asset.images[i].pixels().data() == rebuilt.asset->images[i].pixels().data());
+        AUREA_CHECK(asset.images[i].rgba.empty()); // No 3 MiB copy retained per undo/material change.
+    }
+    for (u32 edit = 0; edit < 20; ++edit) {
+        read.roughness = .1f + edit * .02f;
+        auto changed = build_text3d(*font, read); AUREA_CHECK(changed.ok()); if (!changed.ok()) return;
+        AUREA_CHECK(changed.asset->images[0].pixels().data() == asset.images[0].pixels().data());
+    }
+    AUREA_CHECK(apply_text3d_material_preset(read, 0));
+    AUREA_CHECK_EQ(read.surfaceFinish, 0u); AUREA_CHECK(!read.regionMaterials);
+    AUREA_CHECK(read.content == spec.content && read.separateGlyphs);
+    const auto before = encode_text3d(read); AUREA_CHECK(!apply_text3d_material_preset(read, 100));
+    AUREA_CHECK(before == encode_text3d(read));
+}

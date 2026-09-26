@@ -20,6 +20,77 @@
 using namespace aurea;
 using aurea::test::MockBackend;
 
+AUREA_TEST(ParentingHelper, LocksOrientationAndScaleButKeepsTheAnchorOnItsOrbit) {
+    EffectRegistry registry;
+    register_builtin_effects(registry);
+    auto project = Project::create_new(320, 180, 30, "parenting");
+    auto* comp = project->timeline().composition(project->timeline().root());
+    const auto parent = comp->add_layer(LayerKind::Null, "parent");
+    const auto child = comp->add_layer(LayerKind::Shape, "child");
+    auto* p = comp->layer(parent); auto* c = comp->layer(child);
+    p->transform.position = {80, 60, 0};
+    p->transform.rotation.z = 90;
+    p->transform.scale = {2, 3, 1};
+    c->parent = parent; c->transform.position = {40, 0, 0};
+    c->transform.anchor = {10, 15, 0};
+    const Mat4 normal = layer_world_matrix(*comp, *c, FrameIndex{0});
+    EffectInstance helper; helper.type = effect_type_id(effect_keys::kParentingHelper); helper.id = 0;
+    initialize_instance(helper, *registry.params(helper.type));
+    helper.params[0].constant = ParamValue::scalar(0);
+    helper.params[1].constant = ParamValue::scalar(0);
+    c->effects.push_back(helper);
+    const Mat4 locked = layer_world_matrix(*comp, *c, FrameIndex{0});
+    AUREA_CHECK((normal.transform_point(c->transform.anchor) - locked.transform_point(c->transform.anchor)).length() < .001f);
+    AUREA_CHECK_NEAR(locked.col[0].x, 1.f, .001f);
+    AUREA_CHECK_NEAR(locked.col[0].y, 0.f, .001f);
+    AUREA_CHECK_NEAR(locked.col[1].y, 1.f, .001f);
+    c->effects[0].enabled = false;
+    const Mat4 disabled = layer_world_matrix(*comp, *c, FrameIndex{0});
+    for (u32 i = 0; i < 4; ++i) {
+        AUREA_CHECK_NEAR(disabled.col[i].x, normal.col[i].x, .001f);
+        AUREA_CHECK_NEAR(disabled.col[i].y, normal.col[i].y, .001f);
+    }
+    c->effects[0].enabled = true;
+    c->tracks.get_or_create(TrackProperty::EffectParam, 0, param_track_key(0, 0)).set(FrameIndex{0}, 50.f);
+    const Mat4 half = layer_world_matrix(*comp, *c, FrameIndex{0});
+    AUREA_CHECK_NEAR(half.col[0].x, std::sqrt(.5f), .001f);
+    AUREA_CHECK_NEAR(half.col[0].y, std::sqrt(.5f), .001f);
+    for (f32 degrees : {179.f, 181.f, 540.f, -540.f}) {
+        p->transform.rotation.z = degrees;
+        const Mat4 weighted = layer_world_matrix(*comp, *c, FrameIndex{0});
+        AUREA_CHECK_NEAR(weighted.col[0].x, std::cos(degrees * .5f * kDeg2Rad), .001f);
+        AUREA_CHECK_NEAR(weighted.col[0].y, std::sin(degrees * .5f * kDeg2Rad), .001f);
+    }
+}
+
+AUREA_TEST(ParentingHelper, ThreeDHierarchyKeepsPivotAndNormalDefault) {
+    EffectRegistry registry; register_builtin_effects(registry);
+    auto project = Project::create_new(320, 180, 30, "parenting3d");
+    auto* comp = project->timeline().composition(project->timeline().root());
+    auto parent = comp->add_layer(LayerKind::Null, "parent");
+    auto child = comp->add_layer(LayerKind::Null, "child");
+    auto grandchild = comp->add_layer(LayerKind::Shape, "grandchild");
+    auto* p = comp->layer(parent); auto* c = comp->layer(child); auto* g = comp->layer(grandchild);
+    p->threeD = true; p->transform.rotation = {20, 30, 45}; p->transform.scale = {2, 3, 1};
+    c->parent = parent; c->transform.position = {20, 10, 5}; c->transform.anchor = {4, 3, 2};
+    g->parent = child; g->transform.position = {10, 0, 0};
+    const Mat4 original = layer_world_3d(*comp, *c, FrameIndex{0});
+    EffectInstance helper; helper.type = effect_type_id(effect_keys::kParentingHelper); helper.id = 0;
+    initialize_instance(helper, *registry.params(helper.type)); c->effects.push_back(helper);
+    const Mat4 normal = layer_world_3d(*comp, *c, FrameIndex{0});
+    AUREA_CHECK((normal.transform_point({2, 3, 4}) - original.transform_point({2, 3, 4})).length() < .001f);
+    c->effects[0].params[0].constant = ParamValue::scalar(0);
+    c->effects[0].params[1].constant = ParamValue::scalar(0);
+    const Mat4 locked = layer_world_3d(*comp, *c, FrameIndex{0});
+    AUREA_CHECK((normal.transform_point(c->transform.anchor) - locked.transform_point(c->transform.anchor)).length() < .001f);
+    AUREA_CHECK_NEAR(locked.col[0].x, 1.f, .001f);
+    AUREA_CHECK_NEAR(locked.col[1].y, 1.f, .001f);
+    AUREA_CHECK_NEAR(locked.col[2].z, 1.f, .001f);
+    const Mat4 inherited = layer_world_3d(*comp, *g, FrameIndex{0});
+    AUREA_CHECK_NEAR(inherited.col[0].x, 1.f, .001f);
+    AUREA_CHECK_NEAR(inherited.col[1].y, 1.f, .001f);
+}
+
 AUREA_TEST(TextureMemory, MipsBlocksLayersAndVolumesUseTheirActualFootprint) {
     TextureDesc d;
     d.width = 8; d.height = 4; d.mipLevels = 4;
@@ -576,7 +647,8 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     //   After Effects, no navegador de efeitos ao lado do Posterizar tempo.
     // Three transitions, three optical effects and two spatial blurs.
     // Hotspots and three audio sends.
-    AUREA_CHECK_EQ(before, static_cast<u32>(62));
+    // Stripes, Radial Rays, Grid, Parenting Helper and Text 3D Layout.
+    AUREA_CHECK_EQ(before, static_cast<u32>(67));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

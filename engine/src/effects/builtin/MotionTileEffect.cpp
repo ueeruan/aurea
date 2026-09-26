@@ -235,6 +235,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_transition_effects(registry);
     builtin::register_optical_effects(registry);
     builtin::register_sampled_blur_effects(registry);
+    builtin::register_pattern_effects(registry);
 }
 
 } // namespace aurea

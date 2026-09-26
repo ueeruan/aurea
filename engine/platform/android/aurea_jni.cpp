@@ -1236,7 +1236,7 @@ AUREA_JNI jboolean AUREA_FN(nativeSetTransition)(JNIEnv*, jclass, jlong handle, 
 namespace {
 /// Receita do texto 3D, campo a campo. O Kotlin manda e recebe os números num
 /// FloatArray só: a ordem é o contrato entre os dois lados (kText3DFields).
-constexpr jint kText3DFields = 33;
+constexpr jint kText3DFields = 35;
 
 void write_text3d(const aurea::scene3d::Text3DSpec& s, f32* v) {
     v[0] = s.depth;
@@ -1257,6 +1257,7 @@ void write_text3d(const aurea::scene3d::Text3DSpec& s, f32* v) {
     v[27] = s.bevelMat.metallic; v[28] = s.bevelMat.roughness;
     v[29] = static_cast<f32>(s.animation); v[30] = s.animationDuration;
     v[31] = s.animationStagger; v[32] = s.animationAmount;
+    v[33] = static_cast<f32>(s.surfaceFinish); v[34] = s.separateGlyphs ? 1.f : 0.f;
 }
 
 bool read_text3d(JNIEnv* env, jstring content, jfloatArray p, aurea::scene3d::Text3DSpec& s) {
@@ -1286,6 +1287,7 @@ bool read_text3d(JNIEnv* env, jstring content, jfloatArray p, aurea::scene3d::Te
     s.animationDuration = std::clamp(v[30], .2f, 30.f);
     s.animationStagger = std::clamp(v[31], 0.f, 1.f);
     s.animationAmount = std::clamp(v[32], 0.f, 2.f);
+    s.surfaceFinish = static_cast<u32>(std::clamp(v[33], 0.f, 4.f)); s.separateGlyphs = v[34] >= .5f;
     return true;
 }
 } // namespace
@@ -1305,8 +1307,18 @@ AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, 
     NativeContext* c = ctx_of(handle);
     if (!c || !content) return JNI_FALSE;
     aurea::scene3d::Text3DSpec s;
+    // Preserve region emission and other recipe fields not exposed in the UI array.
+    if (!c->engine.query_text3d(static_cast<u64>(layer), s)) return JNI_FALSE;
     if (!read_text3d(env, content, p, s)) return JNI_FALSE;
     if (fontPath) { const char* v = env->GetStringUTFChars(fontPath, nullptr); if (v) { s.fontPath = v; env->ReleaseStringUTFChars(fontPath, v); } }
+    return c->engine.set_text3d(static_cast<u64>(layer), s).ok() ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeApplyText3dPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
+    NativeContext* c = ctx_of(handle);
+    aurea::scene3d::Text3DSpec s;
+    if (!c || !c->engine.query_text3d(static_cast<u64>(layer), s) ||
+        !aurea::scene3d::apply_text3d_material_preset(s, static_cast<u32>(preset))) return JNI_FALSE;
     return c->engine.set_text3d(static_cast<u64>(layer), s).ok() ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -2065,6 +2077,12 @@ AUREA_JNI jboolean AUREA_FN(nativeRippleDelete)(JNIEnv* env, jclass, jlong handl
 AUREA_JNI jlong AUREA_FN(nativeRemoveGaps)(JNIEnv*, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);
     return c ? static_cast<jlong>(c->engine.remove_gaps()) : 0;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeEditClipTime)(JNIEnv*, jclass, jlong handle, jlong layer, jint operation,
+                                               jlong amount, jlong previous, jlong next) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.edit_clip_time(layer, static_cast<u32>(operation), amount, previous, next) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeTrimComposition)(JNIEnv*, jclass, jlong handle, jlong frame) {

@@ -925,6 +925,71 @@ struct AppearancePanel: View {
 }
 
 // SpeedAudioPanels.kt: logarithmic speed ruler, real remap and mixer controls.
+struct ClipEditPanel: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var mode: UInt32 = 2
+    @State private var step = "1"
+    @State private var previous: Int64 = 0
+    @State private var next: Int64 = 0
+    private var before: [LayerItem] {
+        guard let row = model.selectedLayer else { return [] }
+        return model.layers.filter { $0.id != row.id && !$0.locked && $0.endFrame == row.startFrame }
+    }
+    private var after: [LayerItem] {
+        guard let row = model.selectedLayer else { return [] }
+        return model.layers.filter { $0.id != row.id && !$0.locked && $0.startFrame == row.endFrame }
+    }
+    private var left: Int64 { before.contains { $0.id == previous } ? previous : before.count == 1 ? before[0].id : 0 }
+    private var right: Int64 { after.contains { $0.id == next } ? next : after.count == 1 ? after[0].id : 0 }
+    private var frames: Int64? { guard let value = Int64(step), (1...3600).contains(value) else { return nil }; return value }
+    private var enabled: Bool {
+        model.selectedLayer?.locked == false && frames != nil && ((mode != 3 && mode != 5) || left != 0) && ((mode != 4 && mode != 5) || right != 0)
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            PanelHeader(title: "Slip · Roll · Slide") { model.panel = .none }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let row = model.selectedLayer {
+                        Text(row.name).font(.aurea(size: 15))
+                        Text("\(row.startFrame) → \(row.endFrame) · \(row.duration) quadros").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    }
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
+                        ForEach(2..<6) { value in
+                            let title = ["Slip", "Roll início", "Roll fim", "Slide"][value - 2]
+                            Button { mode = UInt32(value) } label: {
+                                Text(mode == UInt32(value) ? "✓ " + title : title).frame(maxWidth: .infinity, minHeight: 48)
+                            }.accessibilityLabel(title).foregroundStyle(mode == UInt32(value) ? AureaColors.accent : AureaColors.text)
+                        }
+                    }
+                    Text(mode == 2 ? "Troca o trecho da mídia. A posição, a duração e a animação da camada ficam no lugar." : mode == 5 ? "Move este clipe e apara os dois vizinhos, preservando o conteúdo e a duração deste clipe." : "Move o corte entre dois clipes. A duração total permanece igual.")
+                        .font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+                    if mode == 3 || mode == 5 { neighbour("Anterior", items: before, selected: left) { previous = $0 } }
+                    if mode == 4 || mode == 5 { neighbour("Próximo", items: after, selected: right) { next = $0 } }
+                    TextField("Passo em quadros (1–3600)", text: $step).keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder).accessibilityIdentifier("clipEdit.step").frame(minHeight: 44)
+                    HStack(spacing: 12) {
+                        Button { model.editClipTime(mode, amount: -(frames ?? 1), previous: left, next: right) } label: {
+                            Text("−\(frames ?? 0) · Recuar").frame(maxWidth: .infinity, minHeight: 48)
+                        }.accessibilityLabel("Recuar edição do clipe")
+                        Button { model.editClipTime(mode, amount: frames ?? 1, previous: left, next: right) } label: {
+                            Text("+\(frames ?? 0) · Avançar").frame(maxWidth: .infinity, minHeight: 48)
+                        }.accessibilityLabel("Avançar edição do clipe")
+                    }.disabled(!enabled)
+                    if !enabled { Text("Escolha clipes encostados na borda, desbloqueados, e um passo válido.").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
+                }.padding(16)
+            }
+        }.foregroundStyle(AureaColors.text)
+    }
+    private func neighbour(_ title: String, items: [LayerItem], selected: Int64, select: @escaping (Int64) -> Void) -> some View {
+        Menu {
+            ForEach(items) { item in Button(item.name) { select(item.id) } }
+        } label: {
+            Text(title + ": " + (items.first { $0.id == selected }?.name ?? "Escolher clipe")).frame(maxWidth: .infinity, minHeight: 48)
+        }
+    }
+}
+
 struct SpeedPanel: View {
     @EnvironmentObject private var model: AureaModel
     private var id: Int64 { model.primarySelection ?? 0 }
@@ -1118,7 +1183,9 @@ struct ShapePanel: View {
     private var stroke: [Float] { rgba(2) }
     private let types = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10]
     private var track: [KeyframeItem] {
-        (model.keyframes[id] ?? []).filter { $0.property == 35 && $0.paramIndex == UInt32(selected) }.sorted { $0.time < $1.time }
+        preferredCurveTrack(([selected] + [5, 6, 1, 2, 3, 4].filter { $0 != selected }).map { param in
+            (model.keyframes[id] ?? []).filter { $0.property == 35 && $0.paramIndex == UInt32(param) }.sorted { $0.time < $1.time }
+        })
     }
     private func look(_ param: Int) -> KeyframeLook {
         if UInt32(value(8)) & (1 << UInt32(param)) != 0 { return .keyHere }
@@ -1173,7 +1240,7 @@ struct ShapePanel: View {
     private var editBody: some View {
         HStack(spacing: 0) {
             LeftRail(keyframeLook: look(selected), onKeyframe: markKey, curveAnimated: look(selected) != .none,
-                     onCurve: track.count >= 2 ? openCurve : nil, onBack: { finishGesture(); model.panel = .none })
+                     onCurve: track.isEmpty ? nil : openCurve, onBack: { finishGesture(); model.panel = .none })
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switcher
@@ -1314,9 +1381,9 @@ struct ShapePanel: View {
         _ = model.engine.keyShape(id, param: UInt32(selected)); model.refreshModel(force: true); load()
     }
     private func openCurve() {
-        guard track.count >= 2 else { return }
+        guard !track.isEmpty else { return }
         let index = max(0, min(track.count - 2, track.lastIndex { $0.time <= model.localPlayhead } ?? 0))
-        model.openCurve(property: 35, effect: track[index].effectIndex, param: UInt32(selected), time: track[index].time)
+        model.openCurve(property: 35, effect: track[index].effectIndex, param: track[index].paramIndex, time: track[index].time)
     }
     private func kitTitle(_ key: String) -> some View {
         Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)

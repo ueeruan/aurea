@@ -190,6 +190,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         MenuItemRow(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), if (inside) timeAct { store.trimEnd(id, t) } else null)
         if (type == LayerType.Video || type == LayerType.Audio) {
             MenuItemRow(CupertinoGlyph.Speedometer, stringResource(R.string.sh_menu_speed_remap), act { openPanel(store, ui, EditorPanel.Speed) })
+            MenuItemRow(CupertinoGlyph.Scissors, "Slip · Roll · Slide", act { openPanel(store, ui, EditorPanel.ClipEdit) })
         }
         if (type == LayerType.Video) {
             MenuItemRow(ShellGlyph.Snow, stringResource(R.string.sh_menu_freeze_frame), if (inside) act { store.freezeFrame(id) } else null)

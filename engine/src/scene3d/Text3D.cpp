@@ -8,11 +8,11 @@
 //  contrário e a fonte do aparelho pode ser qualquer uma.
 // =============================================================================
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/timeline/Layer.hpp"
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
-#include "aurea/timeline/Layer.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -108,7 +108,7 @@ std::string encode_text3d(const Text3DSpec& s) {
     char anim[128];
     std::snprintf(anim, sizeof(anim), ";anim=%u/%.4f/%.4f/%.4f;", s.animation,
         double(s.animationDuration), double(s.animationStagger), double(s.animationAmount));
-    return out + anim + "t=" + s.content;
+    return out + anim + "glyphs=" + (s.separateGlyphs ? "1" : "0") + ";finish=" + std::to_string(std::min(s.surfaceFinish, 4u)) + ";t=" + s.content;
 }
 
 bool decode_text3d(const std::string& src, Text3DSpec& out) {
@@ -139,7 +139,9 @@ bool decode_text3d(const std::string& src, Text3DSpec& out) {
                 s.animationStagger = std::isfinite(stagger) ? std::clamp(stagger, 0.f, 1.f) : .12f;
                 s.animationAmount = std::isfinite(amount) ? std::clamp(amount, 0.f, 2.f) : .3f;
             }
-        } else if (kv.rfind("d=", 0) == 0) s.depth = std::strtof(kv.c_str() + 2, nullptr);
+        } else if (kv == "glyphs=1") s.separateGlyphs = true;
+        else if (kv.rfind("finish=", 0) == 0) s.surfaceFinish = std::min(4u, static_cast<u32>(std::strtoul(kv.c_str() + 7, nullptr, 10)));
+        else if (kv.rfind("d=", 0) == 0) s.depth = std::strtof(kv.c_str() + 2, nullptr);
         else if (kv.rfind("a=", 0) == 0) s.alignment = static_cast<u32>(std::strtoul(kv.c_str() + 2, nullptr, 10));
         else if (kv.rfind("c=", 0) == 0 && kv.size() == 10) {
             const unsigned long c = std::strtoul(kv.c_str() + 2, nullptr, 16);
@@ -994,6 +996,7 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
 // cor ou na rugosidade reaproveita a malha já pronta — que é o caso comum,
 // porque o painel reenvia a receita a cada arrasto.
 struct GeomAsset {
+    std::vector<Mesh> glyphMeshes;
     std::vector<Primitive> primitives;
     Aabb bounds;        ///< caixa da malha (o `Engine` usa para enquadrar a layer)
     Aabb assetBounds;   ///< caixa da cena, já com o nó — é a que o asset expõe
@@ -1023,7 +1026,7 @@ std::string geom_key(const text::Font& font, const Text3DSpec& s) {
                   s.bevel ? 1u : 0u, static_cast<double>(s.bevelWidth), static_cast<double>(s.bevelDepth),
                   s.bevelSegments, static_cast<double>(s.bevelRoundness), s.regionMaterials ? 1u : 0u,
                   s.content.size());
-    return std::string(buf) + "|static|" + s.content;
+    return std::string(buf) + (s.separateGlyphs ? "|glyphs|" : "|static|") + s.content;
 }
 
 void append_chunk(Primitive& p, const Chunk& c) {
@@ -1037,6 +1040,29 @@ void append_chunk(Primitive& p, const Chunk& c) {
 
 /// Malha + otimização: o que o cache guarda. Devolve nulo com `detail` cheio.
 std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3DSpec& spec, std::string& detail, i32 glyphIndex = -1) {
+    if (spec.separateGlyphs && glyphIndex < 0) {
+        TextData text; text.content = spec.content; text.size = 100.f; text.alignment = spec.alignment;
+        std::vector<text::ShapedGlyph> glyphs;
+        text::shaped_glyphs(font, text, glyphs);
+        if (glyphs.size() > 256) { detail = "Letter controls support up to 256 glyphs"; return nullptr; }
+        auto result = std::make_shared<GeomAsset>();
+        for (u32 i = 0; i < glyphs.size(); ++i) {
+            std::string glyphError;
+            auto geometry = build_geom(font, spec, glyphError, static_cast<i32>(i));
+            if (!geometry) {
+                if (glyphError == "texto sem letras visiveis") continue; // whitespace
+                detail = glyphError;
+                return nullptr; // Do not silently omit a letter that failed triangulation.
+            }
+            Mesh mesh; mesh.name = "Letter " + std::to_string(result->glyphMeshes.size() + 1);
+            mesh.bounds = geometry->bounds; mesh.primitives = geometry->primitives;
+            result->bounds.add(mesh.bounds);
+            result->glyphMeshes.push_back(std::move(mesh));
+        }
+        if (result->glyphMeshes.empty()) { detail = "text has no visible glyphs"; return nullptr; }
+        result->assetBounds = result->bounds;
+        return result;
+    }
     std::shared_ptr<const TextMesh> mesh = build_text_mesh(font, spec, detail, glyphIndex);
     if (!mesh) return nullptr;
 
@@ -1115,9 +1141,148 @@ Material make_material(const char* name, const Text3DMaterial& m) {
     return out;
 }
 
+
+// Original, deterministic wear maps: fine grain, irregular pits and scratches.
+// Generate on material edits, not on frames; all letters/regions share 3 MiB.
+void apply_weathered_metal(SceneAsset& asset) {
+    // Roughness/color sliders reuse these maps rather than rerunning generation.
+    static const std::vector<Image> maps = [] {
+    constexpr int size = 512;
+    constexpr usize pixels = size * size;
+    auto index = [](int x, int y) { return (y & (size - 1)) * size + (x & (size - 1)); };
+    auto hash = [](int x, int y) {
+        u32 n = static_cast<u32>(x) * 1597334677u ^ static_cast<u32>(y) * 3812015801u ^ 0xA08EAu;
+        n = (n ^ (n >> 16)) * 2246822519u;
+        return static_cast<f32>((n ^ (n >> 13)) & 65535u) / 65535.f;
+    };
+    auto noise = [&](f32 x, f32 y, int period) {
+        const int ix = static_cast<int>(std::floor(x)), iy = static_cast<int>(std::floor(y));
+        f32 fx = x - ix, fy = y - iy; fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+        return lerpf(lerpf(hash(ix & (period - 1), iy & (period - 1)), hash((ix + 1) & (period - 1), iy & (period - 1)), fx),
+                     lerpf(hash(ix & (period - 1), (iy + 1) & (period - 1)), hash((ix + 1) & (period - 1), (iy + 1) & (period - 1)), fx), fy);
+    };
+    std::vector<f32> heights(pixels), scratches(pixels, 0.f);
+    for (int y = 0; y < size; ++y) for (int x = 0; x < size; ++x) {
+        const f32 grain = hash(x, y), pores = std::max(0.f, .35f - noise(x / 8.f, y / 8.f, 64));
+        heights[index(x, y)] = .035f * grain - .18f * pores;
+    }
+    // Short, intersecting machining marks. Periodic rasterization avoids seams.
+    for (int line = 0; line < 700; ++line) {
+        const f32 x = hash(line, 71) * size, y = hash(line, 72) * size;
+        const f32 angle = line % 4 == 0 ? hash(line, 73) * kPi : -.45f + hash(line, 74) * .16f;
+        const f32 length = 8 + hash(line, 75) * 105;
+        const f32 strength = .25f + hash(line, 76) * .65f;
+        for (f32 t = 0; t < length; t += .5f) {
+            const int px = static_cast<int>(x + std::cos(angle) * t), py = static_cast<int>(y + std::sin(angle) * t);
+            const f32 tapered = strength * std::min(1.f, std::min(t, length - t) * .25f);
+            scratches[index(px, py)] = std::max(scratches[index(px, py)], tapered);
+        }
+    }
+    for (usize i = 0; i < pixels; ++i) heights[i] -= scratches[i] * .07f;
+    Image normal, mr, base;
+    normal.name = "Metal microstructure"; mr.name = "Metal roughness and wear"; base.name = "Metal grain and scratches";
+    for (Image* image : {&normal, &mr, &base}) { image->width = image->height = size; image->rgba.resize(pixels * 4); }
+    auto byte = [](f32 x) { return static_cast<u8>(std::lround(std::clamp(x, 0.f, 1.f) * 255)); };
+    for (int y = 0; y < size; ++y) for (int x = 0; x < size; ++x) {
+        const usize i = index(x, y), k = i * 4;
+        const f32 grain = hash(x, y), scratch = scratches[i];
+        const f32 wear = noise(x / 64.f, y / 64.f, 8);
+        const f32 pits = std::max(0.f, .24f - noise(x / 8.f, y / 8.f, 64)) * 2.f;
+        const Vec3 n = Vec3{(heights[index(x - 1, y)] - heights[index(x + 1, y)]) * 2.4f,
+                            (heights[index(x, y - 1)] - heights[index(x, y + 1)]) * 2.4f, 1.f}.normalized();
+        normal.rgba[k] = byte(n.x * .5f + .5f); normal.rgba[k + 1] = byte(n.y * .5f + .5f);
+        normal.rgba[k + 2] = byte(n.z * .5f + .5f); normal.rgba[k + 3] = 255;
+        const f32 tone = .72f + .20f * grain + .12f * wear + .10f * scratch - pits;
+        base.rgba[k] = base.rgba[k + 1] = base.rgba[k + 2] = byte(tone); base.rgba[k + 3] = 255;
+        mr.rgba[k] = 255; mr.rgba[k + 1] = byte(.40f + .35f * wear + .20f * grain - .20f * scratch + pits);
+        mr.rgba[k + 2] = byte(1.f - pits); mr.rgba[k + 3] = 255;
+    }
+    std::vector<Image> result{std::move(normal), std::move(mr), std::move(base)};
+    for (auto& image : result) image.sharedRgba = std::make_shared<const std::vector<u8>>(std::move(image.rgba));
+    return result;
+    }();
+    asset.images = maps;
+    for (usize i = 0; i < asset.materials.size(); ++i) {
+        auto& material = asset.materials[i];
+        material.normalTex.image = 0; material.normalScale = i == 2 ? .25f : 1.f;
+        material.metallicRoughnessTex.image = 1;
+        material.baseColorTex.image = 2;
+        const Vec2 repeats{i == 0 ? 2.f : 4.f, 1.f};
+        material.normalTex.scale = material.metallicRoughnessTex.scale = material.baseColorTex.scale = repeats;
+    }
+    asset.stats.images = 3; asset.stats.imageBytes = 512 * 512 * 12;
+}
+
+// Small, tileable PBR maps generated once per material recipe. Color and
+// geometry stay independent; changing finish never retriangulates a glyph.
+void apply_surface_finish(SceneAsset& asset, u32 finish) {
+    if (finish == 0) return;
+    if (finish == 4) { apply_weathered_metal(asset); return; }
+    constexpr u32 size = 128;
+    auto hash = [](int x, int y) {
+        u32 n = (static_cast<u32>(x) & 127u) * 1597334677u ^ (static_cast<u32>(y) & 127u) * 3812015801u;
+        n = (n ^ (n >> 16)) * 2246822519u;
+        return static_cast<f32>((n ^ (n >> 13)) & 65535u) / 65535.f;
+    };
+    auto height = [&](int x, int y) {
+        const f32 u = static_cast<f32>(x) / size, v = static_cast<f32>(y) / size;
+        if (finish == 1) return .12f * hash(0, y) + .01f * hash(x, y); // directional machining
+        if (finish == 2) {
+            const f32 line = std::abs(std::sin((u * 13.f + v * 29.f) * kPi));
+            return .10f * std::pow(std::max(0.f, 1.f - line * 12.f), 2.f) + .035f * hash(x, y);
+        }
+        return .10f * std::sin(u * 16.f * kPi) * std::sin(v * 16.f * kPi) + .02f * hash(x, y);
+    };
+    Image normal; normal.name = "Surface normal"; normal.width = normal.height = size;
+    Image mr; mr.name = "Surface roughness"; mr.width = mr.height = size;
+    normal.rgba.resize(size * size * 4); mr.rgba.resize(size * size * 4);
+    auto byte = [](f32 x) { return static_cast<u8>(std::lround(std::clamp(x, 0.f, 1.f) * 255.f)); };
+    for (u32 y = 0; y < size; ++y) for (u32 x = 0; x < size; ++x) {
+        const int ix = static_cast<int>(x), iy = static_cast<int>(y);
+        const Vec3 n = Vec3{-(height(ix + 1, iy) - height(ix - 1, iy)) * 2.f,
+                            -(height(ix, iy + 1) - height(ix, iy - 1)) * 2.f, 1.f}.normalized();
+        const usize k = (static_cast<usize>(y) * size + x) * 4;
+        normal.rgba[k] = byte(n.x * .5f + .5f); normal.rgba[k + 1] = byte(n.y * .5f + .5f);
+        normal.rgba[k + 2] = byte(n.z * .5f + .5f); normal.rgba[k + 3] = 255;
+        mr.rgba[k] = 255; mr.rgba[k + 1] = byte(.5f + .5f * hash(finish == 1 ? 0 : ix, iy));
+        mr.rgba[k + 2] = mr.rgba[k + 3] = 255;
+    }
+    asset.images.push_back(std::move(normal)); asset.images.push_back(std::move(mr));
+    for (auto& material : asset.materials) {
+        material.normalTex.image = 0; material.normalTex.scale = {4, 4};
+        material.metallicRoughnessTex.image = 1; material.metallicRoughnessTex.scale = {4, 4};
+    }
+    asset.stats.images = 2; asset.stats.imageBytes = size * size * 8;
+}
+
 } // namespace
 
 std::string text3d_geometry_key(const text::Font& font, const Text3DSpec& spec) { return geom_key(font, spec); }
+
+bool apply_text3d_material_preset(Text3DSpec& s, u32 preset) noexcept {
+    if (preset > 6) return false;
+    s.specular = 1; s.emissive = {}; s.emissiveStrength = 1;
+    s.surfaceFinish = preset == 2 ? 1u : 0u;
+    s.regionMaterials = false;
+    switch (preset) {
+        case 0: s.bevel = true; s.color = {.95f, .96f, .98f, 1}; s.metallic = 1; s.roughness = .05f; break;
+        case 1: s.bevel = true; s.color = {1, .77f, .34f, 1}; s.metallic = 1; s.roughness = .18f; break;
+        case 2: s.color = {.78f, .79f, .8f, 1}; s.metallic = 1; s.roughness = .45f; break;
+        case 3: s.color = {.9f, .1f, .12f, 1}; s.metallic = 0; s.roughness = .08f; break;
+        case 4: s.color = {.85f, .85f, .86f, 1}; s.metallic = 0; s.roughness = .92f; s.specular = .15f; break;
+        case 5: s.color = {.1f, 1, .85f, 1}; s.metallic = 0; s.roughness = .35f; s.emissive = {.1f, 1, .85f}; s.emissiveStrength = 3.5f; break;
+        case 6:
+            s.depth = .22f; s.bevel = true; s.bevelWidth = .012f; s.bevelDepth = .018f;
+            s.bevelSegments = 3; s.bevelRoundness = .45f;
+            s.surfaceFinish = 4; s.regionMaterials = true;
+            s.color = {.66f, .68f, .72f, 1}; s.metallic = .98f; s.roughness = .43f;
+            s.side = Text3DMaterial{}; s.side.color = {.32f, .13f, .065f, 1}; s.side.metallic = .8f; s.side.roughness = .4f;
+            s.bevelMat = Text3DMaterial{}; s.bevelMat.color = {1.f, .70f, .24f, 1}; s.bevelMat.metallic = .88f; s.bevelMat.roughness = .23f;
+            s.bevelMat.emissive = {1.f, .27f, .015f}; s.bevelMat.emissiveStrength = .08f;
+            break;
+    }
+    return true;
+}
 
 ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
     ImportResult res;
@@ -1152,22 +1317,76 @@ ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
     } else {
         asset->materials.push_back(make_material("texto", spec.front_material()));
     }
+    apply_surface_finish(*asset, std::min(spec.surfaceFinish, 4u));
     asset->bounds = geom->assetBounds;
-    Mesh mesh0;
-    mesh0.name = asset->sourceName;
-    mesh0.bounds = geom->bounds;           // a caixa da malha vem do cache
-    mesh0.primitives = geom->primitives;   // cópia rasa do cache: os materiais são o que muda
-    asset->meshes.push_back(std::move(mesh0));
-    scene3d::Node node;
-    node.name = asset->sourceName;
-    node.mesh = 0;
-    asset->nodes.push_back(node);
-    asset->roots.push_back(0);
+    if (spec.separateGlyphs) {
+        asset->textGlyphLayout = true;
+        asset->meshes = geom->glyphMeshes;
+        for (u32 i = 0; i < asset->meshes.size(); ++i) {
+            scene3d::Node node; node.name = asset->meshes[i].name; node.mesh = static_cast<i32>(i);
+            asset->nodes.push_back(node); asset->roots.push_back(static_cast<i32>(i));
+        }
+    } else {
+        Mesh mesh0;
+        mesh0.name = asset->sourceName;
+        mesh0.bounds = geom->bounds;
+        mesh0.primitives = geom->primitives;
+        asset->meshes.push_back(std::move(mesh0));
+        scene3d::Node node; node.name = asset->sourceName; node.mesh = 0;
+        asset->nodes.push_back(node); asset->roots.push_back(0);
+    }
+
 
 
     res.error = ImportError::None;
     res.asset = std::move(asset);
     return res;
+}
+
+
+void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<Mat4>& nodeWorld) {
+    if (!asset.textGlyphLayout || !asset.bounds.valid()) return;
+    const f32 span = std::max(.01f, asset.bounds.extent().x);
+    const f32 origin = asset.bounds.center().x;
+    for (const auto& effect : layer.effects) {
+        if (!effect.enabled || effect.type != effect_type_id(effect_keys::kText3DLayout)) continue;
+        static constexpr f32 defaults[] = {0, 0, 0, 0, 100, 0, 1, 256, 100};
+        static constexpr f32 minima[] = {-36000, -36000, -36000, -360, 10, -720, 1, 1, 0};
+        static constexpr f32 maxima[] = {36000, 36000, 36000, 360, 500, 720, 256, 256, 100};
+        f32 v[9];
+        const f64 floorTime = std::floor(localTime);
+        for (u32 i = 0; i < 9; ++i) {
+            f32 value = i < effect.params.size() ? effect.params[i].constant.as_float() : defaults[i];
+            if (const Track* track = layer.tracks.find(TrackProperty::EffectParam, effect.id, param_track_key(i, 0))) {
+                const f32 a = track->value_or(FrameIndex{static_cast<i64>(floorTime)}, value);
+                const f32 b = track->value_or(FrameIndex{static_cast<i64>(floorTime) + 1}, value);
+                value = lerpf(a, b, static_cast<f32>(localTime - floorTime));
+            }
+            v[i] = std::isfinite(value) ? std::clamp(value, minima[i], maxima[i]) : defaults[i];
+        }
+        const f32 amount = v[8] * .01f;
+        const f32 bend = v[3] * kDeg2Rad * amount;
+        const f32 spacing = lerpf(1.f, v[4] * .01f, amount);
+        for (u32 i = 0; i < asset.nodes.size() && i < nodeWorld.size(); ++i) {
+            if (i + 1 < static_cast<u32>(std::lround(v[6])) || i + 1 > static_cast<u32>(std::lround(v[7]))) continue;
+            const i32 mesh = asset.nodes[i].mesh;
+            if (mesh < 0 || static_cast<usize>(mesh) >= asset.meshes.size()) continue;
+            const Vec3 center = asset.meshes[mesh].bounds.center();
+            const f32 x = (center.x - origin) * spacing;
+            const f32 phase = x / span;
+            Vec3 target{origin + x, center.y, center.z};
+            if (std::abs(bend) > 1e-5f) {
+                const f32 radius = span / bend;
+                target.x = origin + std::sin(phase * bend) * radius;
+                target.z += (std::cos(phase * bend) - 1.f) * radius;
+            }
+            const Mat4 orient = Mat4::from_quat(Quat::from_euler_zyx(
+                (v[0] + v[5] * phase) * kDeg2Rad * amount,
+                v[1] * kDeg2Rad * amount + phase * bend,
+                v[2] * kDeg2Rad * amount));
+            nodeWorld[i] = Mat4::translation(target) * orient * Mat4::translation(-center) * nodeWorld[i];
+        }
+    }
 }
 
 } // namespace aurea::scene3d

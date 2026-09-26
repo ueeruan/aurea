@@ -608,11 +608,19 @@ private let FxTableOrder: [UInt32: Int] = {
 /// Quantos efeitos a tabela cobre (o relatório da sessão usa este número).
 var fxEffectTableCount: Int { FxTable.count }
 
-/// Nome exibido: o da tabela (traduzido), senão o do motor.
+/// Stable English names; localized names remain searchable aliases.
 func fxEffectDisplayName(_ typeId: UInt32, _ engineName: String) -> String {
-    guard let key = FxTableById[typeId]?.name else { return engineName }
-    return AureaText.t(key)
+    guard let key = FxTableById[typeId]?.name else { return FxEnglishEffectNames[typeId] ?? engineName }
+    return AureaText.english(key)
 }
+
+private let FxEnglishEffectNames: [UInt32: String] = Dictionary(uniqueKeysWithValues: [
+    "aurea.light.halation": "Halation", "aurea.light.lens_flare": "Lens Flare",
+    "aurea.distort.ripple": "Ripple", "aurea.distort.optics_compensation": "Optics Compensation",
+    "aurea.blur.box": "Box Blur", "aurea.blur.directional": "Directional Blur",
+    "aurea.transition.linear_wipe": "Linear Wipe", "aurea.transition.radial_wipe": "Radial Wipe",
+    "aurea.transition.block_dissolve": "Block Dissolve",
+].map { (fxEffectTypeId($0.key), $0.value) })
 
 /// A ordem declarada do efeito; fora da tabela vai para o fim.
 func fxEffectNameRank(_ typeId: UInt32) -> Int { FxTableOrder[typeId] ?? Int.max }
@@ -622,6 +630,7 @@ func fxEffectNameRank(_ typeId: UInt32) -> Int { FxTableOrder[typeId] ?? Int.max
 func fxEffectSearchText(_ typeId: UInt32, _ engineName: String, _ category: String) -> String {
     fxNormalizeSearch([
         fxEffectDisplayName(typeId, engineName), engineName, category,
+        (FxTableById[typeId]?.name).map { AureaText.t($0) } ?? "",
         FxTableById[typeId]?.keywords ?? "",
     ].joined(separator: " "))
 }
@@ -949,6 +958,7 @@ func fxCatalogHaystack(_ catalog: [EffectCatalogItem]) -> [UInt32: String] {
     for entry in catalog {
         let text = [
             fxEffectDisplayName(entry.typeId, entry.name),
+            (FxTableById[entry.typeId]?.name).map { AureaText.t($0) } ?? "",
             entry.name,
             entry.category,
             FxTableById[entry.typeId]?.keywords ?? "",

@@ -223,9 +223,9 @@ internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: E
  * O keyframe vem de `store.selectedKeyframe` (losango tocado na timeline, ou o
  * trecho sob o cabeçote escolhido pelo trilho do painel de origem).
  */
-private val CurveGreen = Color(0xFF00EFA4)
-private val CurvePanelFill = Color(0xFF373B55)
-private val CurveRailFill = Color(0xFF2B3046)
+private val CurveGreen get() = AureaColors.Accent
+private val CurvePanelFill get() = AureaColors.EditorPanel
+private val CurveRailFill get() = AureaColors.EditorPanelHigh
 
 @Composable
 internal fun CurvePanel(env: PanelEnv) { ReferenceCurvePanel(env) }
@@ -310,7 +310,17 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     }
 
     val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
-    Row(Modifier.fillMaxSize().background(CurvePanelFill)) {
+    Column(Modifier.fillMaxSize().background(CurvePanelFill)) {
+    Row(Modifier.fillMaxWidth().height(48.dp).background(CurveRailFill)) {
+        listOf(R.string.panel_easing_curve, R.string.particular_curve_value, R.string.panel_velocidade).forEachIndexed { index, label ->
+            Box(Modifier.weight(1f).fillMaxHeight().tocavel { graphMode = index }, contentAlignment = Alignment.Center) {
+                Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp,
+                        color = if (graphMode == index) AureaColors.Accent else AureaColors.Muted)))
+            }
+        }
+    }
+    Row(Modifier.fillMaxWidth().weight(1f)) {
         // Trilho esquerdo: voltar · inverter · menu.
         Column(Modifier.width(48.dp).fillMaxHeight().background(CurveRailFill), horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(Modifier.height(6.dp))
@@ -388,6 +398,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                 p.entry?.let { store.presets.markUsed(it) }
             },
         )
+    }
     }
 
     if (savePrompt) {

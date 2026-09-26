@@ -1,6 +1,10 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import android.content.res.Configuration
+import java.util.Locale
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import com.aurea.aurea.engine.ParamType
@@ -726,19 +730,33 @@ private val Table: Map<Int, EffectHuman> = buildMap {
 }
 
 /**
- * Nome exibido: o da tabela (traduzido), senão o do motor.
- *
- * @Composable porque o nome da tabela é recurso: a busca indexa o nome NO
- * IDIOMA do app, então quem monta o índice também precisa disto aqui dentro.
+ * Effect names stay in English in every app language. Localized names remain
+ * search aliases, so old search habits and saved expression names still work.
  */
 @Composable
-internal fun effectDisplayName(typeId: Int, engineName: String): String =
-    Table[typeId]?.name?.let { stringResource(it) } ?: engineName
+internal fun effectDisplayName(typeId: Int, engineName: String): String {
+    val context = LocalContext.current
+    val english = remember(context) {
+        context.createConfigurationContext(Configuration(context.resources.configuration).apply { setLocale(Locale.ENGLISH) }).resources
+    }
+    return englishEffectName(typeId, engineName, english)
+}
+
+internal fun englishEffectName(typeId: Int, engineName: String, english: android.content.res.Resources): String =
+    Table[typeId]?.name?.let { english.getString(it) } ?: EnglishEffectNames[typeId] ?: engineName
+
+private val EnglishEffectNames = mapOf(
+    "aurea.light.halation" to "Halation", "aurea.light.lens_flare" to "Lens Flare",
+    "aurea.distort.ripple" to "Ripple", "aurea.distort.optics_compensation" to "Optics Compensation",
+    "aurea.blur.box" to "Box Blur", "aurea.blur.directional" to "Directional Blur",
+    "aurea.transition.linear_wipe" to "Linear Wipe", "aurea.transition.radial_wipe" to "Radial Wipe",
+    "aurea.transition.block_dissolve" to "Block Dissolve",
+).mapKeys { effectTypeId(it.key) }
 
 /** Texto onde a busca procura: nome humano, nome do motor, categoria e sinônimos. */
 @Composable
 internal fun effectSearchText(typeId: Int, engineName: String, category: String): String =
-    normalizeSearch(listOf(effectDisplayName(typeId, engineName), engineName, category, Table[typeId]?.keywords.orEmpty()).joinToString(" "))
+    normalizeSearch(listOf(effectDisplayName(typeId, engineName), Table[typeId]?.name?.let { stringResource(it) }.orEmpty(), engineName, category, Table[typeId]?.keywords.orEmpty()).joinToString(" "))
 
 /** Ícone da categoria (rótulo visual do cartão do navegador — não é prévia). */
 internal fun categoryGlyph(category: String): Char = when (normalizeSearch(category)) {

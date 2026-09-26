@@ -485,6 +485,7 @@ private struct ShellMenuRow: View {
             ShellMenuRow(CupertinoGlyph.Scissors, "editor_dividir_cabecote", enabled: inside && !row.locked) { act { model.splitAtPlayhead([row.id]) } }
             ShellMenuRow(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote", enabled: inside && !row.locked) { act { model.trimEnd(row.id, at: model.status.playhead) } }
             if row.kind == 1 || row.kind == 3 { ShellMenuRow(CupertinoGlyph.Speedometer, "sh_menu_speed_remap") { act { model.openPanel(.speed) } } }
+            if row.kind == 1 || row.kind == 3 { ShellMenuRow(CupertinoGlyph.Scissors, "Slip · Roll · Slide") { act { model.openPanel(.clipEdit) } } }
             if row.kind == 1 {
                 ShellMenuRow(ShellGlyph.Snow, "sh_menu_freeze_frame", enabled: inside) { act { let created = model.engine.freezeFrame(forLayer: row.id, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3))); model.refreshModel(force: true); if created >= 0 { model.select(layerId: created) } } }
                 ShellMenuSection("editor_rastreio")

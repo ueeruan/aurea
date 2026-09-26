@@ -1385,15 +1385,16 @@ Mat4 inverse4(const Mat4& a) noexcept {
 /// Escreve o transform local (posição/rotação/escala, âncora mantida) que
 /// reproduz `local` (camada → espaço do pai). Trilhas sem keyframe acompanham.
 /// Usado pelo parentesco compensado e ao tirar a camada de perto do pai.
-void set_local_from(Layer& lay, const Mat4& local) noexcept {
+void set_local_from(Layer& lay, const Mat4& local, const Vec3* sampledAnchor = nullptr) noexcept {
     Layer* l = &lay;
-    const Vec3 anc = l->transform.anchor;
+    const Vec3 anc = sampledAnchor ? *sampledAnchor : l->transform.anchor;
     const Mat4 m = local * Mat4::translation(anc);
     const Vec3 c0{m.col[0].x, m.col[0].y, m.col[0].z};
     const Vec3 c1{m.col[1].x, m.col[1].y, m.col[1].z};
     const Vec3 c2{m.col[2].x, m.col[2].y, m.col[2].z};
-    const f32 sx = c0.length(), sy = c1.length(), sz = std::max(1e-6f, c2.length());
-    if (!(sx > 1e-6f && sy > 1e-6f)) return;
+    const f32 sx = c0.length() * (c0.dot(c1.cross(c2)) < 0.f ? -1.f : 1.f);
+    const f32 sy = c1.length(), sz = std::max(1e-6f, c2.length());
+    if (!(std::fabs(sx) > 1e-6f && sy > 1e-6f)) return;
     const f32 r20 = c0.z / sx, r21 = c1.z / sy, r22 = c2.z / sz, r10 = c0.y / sx, r00 = c0.x / sx;
     const f32 ry = std::asin(std::clamp(-r20, -1.0f, 1.0f));
     const f32 rx = std::atan2(r21, r22);
@@ -1406,7 +1407,7 @@ void set_local_from(Layer& lay, const Mat4& local) noexcept {
     l->transform.position = pos;
     l->transform.rotation = rotDeg;
     // Z guardado relativo a X (o render multiplica), menos câmera e luz.
-    l->transform.scale = Vec3{sx, sy, (l->kind == LayerKind::Camera || l->kind == LayerKind::Light) ? sz : sz / std::max(1e-6f, sx)};
+    l->transform.scale = Vec3{sx, sy, (l->kind == LayerKind::Camera || l->kind == LayerKind::Light) ? sz : sz / sx};
     auto set = [&](TrackProperty prop, f32 v) {
         if (Track* tr = l->tracks.find(prop); tr && tr->keys.size() <= 1) {
             if (tr->keys.size() == 1) tr->keys[0].value = v; else tr->staticValue = v;
@@ -1415,6 +1416,7 @@ void set_local_from(Layer& lay, const Mat4& local) noexcept {
     set(TrackProperty::PositionX, pos.x); set(TrackProperty::PositionY, pos.y); set(TrackProperty::PositionZ, pos.z);
     set(TrackProperty::RotationX, rotDeg.x); set(TrackProperty::RotationY, rotDeg.y); set(TrackProperty::RotationZ, rotDeg.z);
     set(TrackProperty::ScaleX, sx); set(TrackProperty::ScaleY, sy);
+    set(TrackProperty::ScaleZ, l->transform.scale.z);
 }
 
 /// Transform parado (posição/rotação/escala sem keyframes)? Só aí dá para
@@ -4138,6 +4140,7 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
         u32 next = 0;
         for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
         for (const EffectInstance& e : clipboard_.effects) {
+            if (e.type == effect_type_id(effect_keys::kText3DLayout) && !ensure_text3d_layout(*d).ok()) continue;
             EffectInstance c = e;
             const u32 oldId = e.id;
             c.id = next++;
@@ -4273,8 +4276,28 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
         if (error) *error = "este preset nao serve para esta camada";
         return false;
     }
+    if (l->locked) {
+        if (error) *error = "camada bloqueada";
+        return false;
+    }
+    // A saved letter effect needs the same geometry preparation as EffectAdd.
+    // Prepare a copy first: failure must not partially apply the preset or
+    // replace the original recipe recorded by undo.
+    AssetId preparedScene = l->model.scene;
+    if (std::any_of(p.effects.begin(), p.effects.end(), [](const EffectInstance& effect) {
+        return effect.type == effect_type_id(effect_keys::kText3DLayout);
+    })) {
+        Layer prepared = *l;
+        const Status ready = ensure_text3d_layout(prepared);
+        if (!ready.ok()) {
+            if (error) *error = "este preset precisa de texto 3D com ate 256 glifos";
+            return false;
+        }
+        preparedScene = prepared.model.scene;
+    }
     history_.before_mutation(*comp, project_->timeline().current(), "aplicar preset");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->model.scene = preparedScene;
     // Animação: começa no cabeçote; fora da camada, no início dela.
     const FrameIndex ph = playback_.current();
     const i64 anchor = l->contains_time(ph) ? l->local_time(ph).value : l->local_time(l->start).value;
@@ -4327,6 +4350,146 @@ bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
     }
     comp->close_gaps(FrameIndex{lo}, FrameIndex{hi});
     comp->rebuild_draw_order();
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+namespace {
+bool has_clip_source(const Layer& l) noexcept {
+    return l.kind == LayerKind::Video || l.kind == LayerKind::Audio || l.kind == LayerKind::Composition;
+}
+
+f64 clip_source_limit(const Project& project, const Composition& comp, const Layer& item) noexcept {
+    if (item.kind == LayerKind::Composition) {
+        if (const Composition* child = project.timeline().composition(item.nested.composition))
+            return static_cast<f64>(child->duration().value - 1);
+    } else if (const Asset* asset = project.asset(item.source); asset && asset->duration.value > 0 && asset->timebaseFps > 0) {
+        return std::max(0.0, asset->duration.value * comp.fps() / asset->timebaseFps - 1.0);
+    }
+    return -1.0;
+}
+
+void materialize_clip_time(Layer& l, i64 start, i64 end, f64 sourceLimit) noexcept {
+    i64 lo = std::min(start, l.start.value), hi = std::max(end, l.end.value);
+    if (sourceLimit >= 0 && l.speed > 0) {
+        const f64 slope = l.reversed ? -l.speed : l.speed;
+        const f64 origin = l.source_frame(l.start);
+        const f64 t0 = l.start.value - origin / slope;
+        const f64 t1 = l.start.value + (sourceLimit - origin) / slope;
+        // Cover all remaining source handles, so extending a previously trimmed
+        // accelerated/reversed clip cannot freeze at the old trim boundary.
+        constexpr f64 maxFrame = static_cast<f64>(i64{1} << 40);
+        if (std::isfinite(t0) && std::isfinite(t1)) {
+            lo = std::min(lo, static_cast<i64>(std::floor(std::clamp(std::min(t0,t1), -maxFrame, maxFrame))) - 1);
+            hi = std::max(hi, static_cast<i64>(std::ceil(std::clamp(std::max(t0,t1), -maxFrame, maxFrame))) + 1);
+        }
+    }
+    const f32 a = static_cast<f32>(l.source_frame(FrameIndex{lo})), b = static_cast<f32>(l.source_frame(FrameIndex{hi}));
+    l.timeRemap = Track{}; l.timeRemap.property = TrackProperty::TimeRemap;
+    l.timeRemap.set(l.local_time(FrameIndex{lo}), a); l.timeRemap.set(l.local_time(FrameIndex{hi}), b);
+    l.timeRemapEnabled = true;
+}
+
+// Preserve the animation clock AND the sampled source. Offset is also used by
+// transform/effect keys, so multiplying it by speed would move those keys.
+// Only when the old constant-speed mapping cannot express both clocks do we
+// materialize it as the existing, editable time-remap curve.
+void trim_clip_copy(Layer& l, i64 start, i64 end, f64 sourceLimit = -1) noexcept {
+    const i64 oldStart = l.start.value, oldEnd = l.end.value;
+    const i64 ds = start - oldStart;
+    if (has_clip_source(l) && !l.timeRemapEnabled &&
+        ((l.reversed && (ds != 0 || end != oldEnd)) || (!l.reversed && ds != 0 && l.speed != 1.0f))) {
+        materialize_clip_time(l, start, end, sourceLimit);
+    }
+    l.offset.value += ds;
+    l.start = FrameIndex{start};
+    l.end = FrameIndex{end};
+}
+}
+
+bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous, u64 next) noexcept {
+    constexpr i64 limit = i64{1} << 31;
+    if (operation > 5 || amount <= -limit || amount >= limit) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->locked) return false;
+    const bool needsPrevious = operation == 3 || operation == 5;
+    const bool needsNext = operation == 4 || operation == 5;
+    Layer* before = needsPrevious ? comp->layer(LayerId::unpack(previous)) : nullptr;
+    Layer* after = needsNext ? comp->layer(LayerId::unpack(next)) : nullptr;
+    if (needsPrevious && (!before || before == layer || before->locked || before->end != layer->start)) return false;
+    if (needsNext && (!after || after == layer || after == before || after->locked || after->start != layer->end)) return false;
+    if (operation == 2 && (!has_clip_source(*layer) || layer->timeRemap.has_expression())) return false;
+    const i64 start = layer->start.value, end = layer->end.value;
+    const i64 target = operation == 0 ? std::clamp(amount, i64{0}, end - 1)
+                     : operation == 1 ? std::max(amount, start + 1) : amount;
+    if ((operation == 0 && target == start) || (operation == 1 && target == end) || (operation > 1 && amount == 0)) return false;
+    Layer edited = *layer;
+    Layer left, right;
+    if (before) left = *before;
+    if (after) right = *after;
+    i64 ripple = 0;
+    const auto trim = [&](Layer& item, i64 s, i64 e) { trim_clip_copy(item, s, e, clip_source_limit(*project_, *comp, item)); };
+    if (operation <= 1) {
+        trim(edited, operation == 0 ? target : start, operation == 1 ? target : end);
+        if (comp->edit_mode()) {
+            ripple = operation == 0 ? start - target : target - end;
+            if (operation == 0) { edited.start.value += ripple; edited.end.value += ripple; }
+        }
+    } else if (operation == 2) {
+        // Change content without moving a single transform/effect key.
+        if (!edited.timeRemapEnabled || edited.timeRemap.keys.empty()) {
+            materialize_clip_time(edited, start, end, clip_source_limit(*project_, *comp, edited));
+        }
+        for (auto& key : edited.timeRemap.keys) key.value += static_cast<f32>(amount);
+        edited.timeRemap.lastIndex = 0;
+    } else if (operation == 3) {
+        trim(left, left.start.value, start + amount);
+        trim(edited, start + amount, end);
+    } else if (operation == 4) {
+        trim(edited, start, end + amount);
+        trim(right, end + amount, right.end.value);
+    } else {
+        trim(left, left.start.value, start + amount);
+        edited.start.value += amount; edited.end.value += amount;
+        trim(right, end + amount, right.end.value);
+    }
+    const auto valid = [&](const Layer& item) {
+        if (item.start.value < 0 || item.end.value <= item.start.value || item.end.value >= limit) return false;
+        if (!has_clip_source(item)) return true;
+        const f64 maxSource = clip_source_limit(*project_, *comp, item);
+        // Missing media cannot supply a reliable source bound; timeline edits
+        // must still work so it can be relinked later.
+        if (maxSource < 0) return true;
+        const auto inside = [&](f64 value) { return std::isfinite(value) && value >= -0.001 && value <= maxSource + 0.001; };
+        if (!inside(item.source_frame(item.start)) || !inside(item.source_frame(FrameIndex{item.end.value - 1}))) return false;
+        if (operation == 2) {
+            const i64 lo = item.local_time(item.start).value, hi = item.local_time(FrameIndex{item.end.value - 1}).value;
+            for (const auto& key : item.timeRemap.keys)
+                if (key.time.value >= lo && key.time.value <= hi && !inside(key.value)) return false;
+        }
+        return true;
+    };
+    if (!valid(edited) || (before && !valid(left)) || (after && !valid(right))) return false;
+    // Ripple never silently moves a locked downstream clip or overlaps it.
+    bool blocked = false;
+    if (ripple) comp->layers().for_each([&](LayerId id, const Layer& item) {
+        if (id.pack() != layerId && item.locked && item.start.value >= end) blocked = true;
+    });
+    if (blocked) return false;
+    const char* labels[] = {"aparar inicio", "aparar fim", "slip", "roll inicio", "roll fim", "slide"};
+    history_.before_mutation(*comp, project_->timeline().current(), labels[operation]);
+    *layer = std::move(edited);
+    if (before) *before = std::move(left);
+    if (after) *after = std::move(right);
+    if (ripple) comp->shift_from(FrameIndex{end}, ripple, LayerId::unpack(layerId));
+    i64 duration = comp->duration().value;
+    comp->layers().for_each([&](LayerId, const Layer& item) { duration = std::max(duration, item.end.value); });
+    if (duration != comp->duration().value) { comp->set_duration(FrameIndex{duration}); playback_.configure(comp->fps(), comp->duration()); }
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     project_->mark_dirty();
     request_render();
     return true;
@@ -5520,6 +5683,25 @@ std::string Engine::text_font(u64 layerId) noexcept {
     if (!l || l->kind != LayerKind::Text) return {};
     return l->text.fontFamily + "\t" + std::to_string(l->text.fontWeight) + "\t" + (l->text.fontItalic ? "1" : "0") + "\t"
          + (l->text.fontPath.empty() ? std::string{} : resolve_asset_path(l->text.fontPath));
+}
+
+Status Engine::ensure_text3d_layout(Layer& layer) noexcept {
+    if (layer.locked) return Status{Errc::InvalidState, "camada bloqueada"};
+    const Asset* old = project_->asset(layer.model.scene);
+    scene3d::Text3DSpec spec;
+    if (layer.kind != LayerKind::Model3D || !old || !scene3d::decode_text3d(old->sourcePath, spec))
+        return Status{Errc::InvalidArgument, "selecione texto 3D"};
+    if (spec.separateGlyphs) return OkStatus;
+    spec.separateGlyphs = true;
+    const auto font = scene3d::text3d_font(spec);
+    if (!font) return Errc::NotFound;
+    auto result = scene3d::build_text3d(*font, spec);
+    if (!result.ok()) return Status{Errc::InvalidArgument, "nao foi possivel separar as letras (limite de 256 glifos)"};
+    std::shared_ptr<const scene3d::SceneAsset> scene(std::move(result.asset));
+    const auto id = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
+    models_[id.pack()] = scene;
+    layer.model.scene = id;
+    return OkStatus;
 }
 
 Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
@@ -7815,6 +7997,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
     const u64 now = monotonic_ns();
 
     auto need_layer = [&](LayerId id) -> Layer* { return comp ? comp->layer(id) : nullptr; };
+    if (cmd.type == CommandType::EffectAdd && cmd.effect_add.effectType == effect_type_id(effect_keys::kText3DLayout)) {
+        const Layer* layer = need_layer(cmd.effect_add.layer);
+        const Asset* source = layer ? project_->asset(layer->model.scene) : nullptr;
+        scene3d::Text3DSpec spec;
+        if (!layer || layer->locked || !source || layer->kind != LayerKind::Model3D || !scene3d::decode_text3d(source->sourcePath, spec))
+            return Status{Errc::InvalidArgument, "selecione texto 3D desbloqueado"};
+    }
     // A lock protects timeline edits at the shared boundary, including queued
     // commands after a gesture has started. Reject before recording undo.
     if (cmd.type == CommandType::LayerDelete || cmd.type == CommandType::LayerSetTimeRange ||
@@ -7933,27 +8122,16 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l || !comp) return Errc::NotFound;
             const FrameIndex at = cmd.layer_split.at;
             if (at.value <= l->start.value || at.value >= l->end.value) return Errc::OutOfRange;
-            const FrameIndex originalEnd = l->end;
-            const FrameIndex originalOffset = l->offset;
+            const FrameIndex originalStart = l->start, originalEnd = l->end, originalOffset = l->offset;
             const LayerId second = comp->duplicate_layer(cmd.layer_ref.layer, at);
             if (!second.valid()) return Errc::OutOfMemory;
             l = need_layer(cmd.layer_ref.layer);
             if (!l) return Errc::NotFound;
-            l->end = at;
+            const f64 sourceLimit = clip_source_limit(*project_, *comp, *l);
+            trim_clip_copy(*l, originalStart.value, at.value, sourceLimit);
             if (Layer* s = comp->layer(second)) {
-                s->start = at;
-                s->end = originalEnd;
-                // Ponto de entrada de cada metade pela velocidade; no reverso a
-                // primeira metade é a que começa mais tarde na fonte.
-                const f64 sp = l->speed;
-                if (l->reversed) {
-                    s->offset = originalOffset;
-                    l->offset = FrameIndex{originalOffset.value
-                                           + static_cast<i64>(std::llround(static_cast<f64>(originalEnd.value - at.value) * sp))};
-                } else {
-                    s->offset = FrameIndex{originalOffset.value
-                                           + static_cast<i64>(std::llround(static_cast<f64>(at.value - l->start.value) * sp))};
-                }
+                s->start = originalStart; s->end = originalEnd; s->offset = originalOffset;
+                trim_clip_copy(*s, at.value, originalEnd.value, sourceLimit);
             }
             return OkStatus;
         }
@@ -7975,7 +8153,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::LayerSetParent: {
             Layer* l = need_layer(cmd.layer_parent.layer);
             if (!l) return Errc::NotFound;
-            const LayerId parent = cmd.layer_parent.parent;
+            // Both mobile UIs use zero for "None"; zero is not the C++ invalid
+            // handle sentinel. Normalize it before validating or compensating.
+            const LayerId parent = cmd.layer_parent.parent.pack() == 0 ? LayerId{} : cmd.layer_parent.parent;
             if (parent.valid()) {
                 if (!comp || !comp->layer(parent)) return Errc::NotFound;
                 if (parent == cmd.layer_parent.layer) return Errc::InvalidArgument;
@@ -7995,12 +8175,15 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!comp) { l->parent = parent; return OkStatus; }
             const FrameIndex now = playback_.current();
             const bool in3d = l->kind == LayerKind::Model3D || l->kind == LayerKind::Camera || l->kind == LayerKind::Light
-                           || l->threeD;
+                           || l->threeD || wants_layer_3d(*comp, *l, now);
             auto worldOf = [&](const Layer& x) { return in3d ? layer_world_3d(*comp, x, now) : layer_world_matrix(*comp, x, now); };
             const Layer* oldP = l->parent.valid() ? comp->layer(l->parent) : nullptr;
             const Mat4 oldPw = oldP ? worldOf(*oldP) : Mat4::identity();
             const Mat4 world = worldOf(*l);
             l->parent = parent;
+            // Detaching must not switch an inherited 3D plane to the 2D
+            // compositor, which would bypass the scene camera and make it jump.
+            if (oldP && in3d) l->threeD = true;
             const Layer* newP = parent.valid() ? comp->layer(parent) : nullptr;
             // Pai novo pode puxar a camada para o 3D (pai 3D): mede no mesmo espaço.
             const bool now3d = in3d || (newP && (newP->threeD || wants_layer_3d(*comp, *l, now)));
@@ -8009,9 +8192,16 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const Mat4 M = inverse4(newPw) * oldPw;
             // Keyframes: posição como ponto (M inteira), rotação Z mais o giro
             // de M, escala vezes a escala de M. Tudo lido ANTES de reescrever.
-            const Vec3 mx{M.col[0].x, M.col[0].y, M.col[0].z}, my{M.col[1].x, M.col[1].y, M.col[1].z};
-            const f32 mScale = std::max(1e-6f, 0.5f * (mx.length() + my.length()));
-            const f32 mRotZ = std::atan2(M.col[0].y, M.col[0].x) / kDeg2Rad;
+            const auto localNow = l->local_time(now);
+            auto sample = [&](TrackProperty prop, f32 fallback) { return l->tracks.sample_or(prop, localNow, fallback); };
+            const Vec3 anchor{sample(TrackProperty::AnchorX, l->transform.anchor.x),
+                              sample(TrackProperty::AnchorY, l->transform.anchor.y),
+                              sample(TrackProperty::AnchorZ, l->transform.anchor.z)};
+            const TrackProperty orientScale[] = {TrackProperty::RotationX, TrackProperty::RotationY, TrackProperty::RotationZ,
+                                                 TrackProperty::ScaleX, TrackProperty::ScaleY, TrackProperty::ScaleZ};
+            const f32 oldValues[] = {sample(orientScale[0], l->transform.rotation.x), sample(orientScale[1], l->transform.rotation.y),
+                                    sample(orientScale[2], l->transform.rotation.z), sample(orientScale[3], l->transform.scale.x),
+                                    sample(orientScale[4], l->transform.scale.y), sample(orientScale[5], l->transform.scale.z)};
             auto animatedTrack = [](Track* t) { return t && t->keys.size() > 1; };
             Track* tx0 = l->tracks.find(TrackProperty::PositionX);
             Track* ty0 = l->tracks.find(TrackProperty::PositionY);
@@ -8031,7 +8221,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     }
                 }
             }
-            set_local_from(*l, inverse4(newPw) * world);
+            set_local_from(*l, inverse4(newPw) * world, &anchor);
             if (!posKeys.empty()) {
                 // Com giro na troca de pai, X animado e Y parado viram os dois
                 // animados: todas as trilhas de posição recebem o vetor inteiro,
@@ -8063,12 +8253,17 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     if (Z) put(*Z, q.p.z);
                 }
             }
-            if (Track* rz = l->tracks.find(TrackProperty::RotationZ); animatedTrack(rz)) {
-                for (Keyframe& k : rz->keys) k.value += mRotZ;
-            }
-            for (TrackProperty sp : {TrackProperty::ScaleX, TrackProperty::ScaleY}) {
-                if (Track* st = l->tracks.find(sp); animatedTrack(st)) {
-                    for (Keyframe& k : st->keys) k.value *= mScale;
+            const f32 newValues[] = {l->transform.rotation.x, l->transform.rotation.y, l->transform.rotation.z,
+                                    l->transform.scale.x, l->transform.scale.y, l->transform.scale.z};
+            for (u32 i = 0; i < 6; ++i) {
+                if (Track* track = l->tracks.find(orientScale[i]); animatedTrack(track)) {
+                    if (i < 3) {
+                        const f32 delta = std::remainder(newValues[i] - oldValues[i], 360.f);
+                        for (Keyframe& key : track->keys) key.value += delta;
+                    } else if (std::fabs(oldValues[i]) > 1e-6f) {
+                        const f32 ratio = newValues[i] / oldValues[i];
+                        for (Keyframe& key : track->keys) key.value *= ratio;
+                    }
                 }
             }
             return OkStatus;
@@ -8377,6 +8572,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const EffectTypeId type = cmd.effect_add.effectType;
             const ParameterRegistry* params = effectRegistry_.params(type);
             if (!params) return Errc::NotSupported;
+            if (type == effect_type_id(effect_keys::kText3DLayout)) {
+                const Status ready = ensure_text3d_layout(*l);
+                if (!ready.ok()) return ready;
+            }
             EffectInstance e;
             e.id = l->alloc_effect_id();
             e.type = type;

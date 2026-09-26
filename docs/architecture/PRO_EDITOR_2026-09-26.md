@@ -24,11 +24,11 @@ comandos deve decodificar mídia ou renderizar miniaturas de todos os resultados
 | Trim, split, marcadores, undo | Existem no core compartilhado | `Engine.cpp`, `test_edit.cpp`, `test_timeline.cpp` |
 | Edição magnética iOS | Quebrada na integração | UI mantinha flag local após undo/load; exclusão ignorava o modo |
 | Bloqueio de camadas | Quebrado em operações indiretas | Ripple podia mover/excluir camadas bloqueadas |
-| Roll / slip / slide | Lacuna | Não há operações transacionais dedicadas na API auditada |
+| Roll / slip / slide | Implementado no incremento 2122; aceitação móvel em curso | API transacional `edit_clip_time`, painel e busca nos dois OS |
 | Descoberta de ferramentas | Precisa melhorar | Busca de camadas/efeitos/presets isoladas; nenhuma busca universal |
 | Favoritos | Funciona parcialmente | Efeitos e presets já persistem; faltam ações/ferramentas |
 | Pré-composição / parenting | Implementado e editável | Testes de cópia, vínculo, nesting e save/reopen; preservar |
-| Curvas | Precisa melhorar | Easing touch, presets, copy/paste existem; não equivalem a value/speed graph completo |
+| Curvas | Implementado parcialmente | Value Graph edita valores; Speed Graph mostra derivada real; faltam edição de tangentes no gráfico de velocidade e seleção múltipla no gráfico |
 | Máscaras, mattes, blend | Implementado, aceitação por workflow pendente | Core de composição e painéis existentes; não criar outro compositor |
 | Texto, vetor, animação por caractere | Implementado parcialmente | `LayerPanels.swift`, `AnimationTools.swift`, testes text/vector; auditar modificadores |
 | Tracking / 3D / partículas | Implementação existente, aceitação incompleta | Não basta a presença de GLB, câmera e parâmetros para aprovar integração real |
@@ -93,8 +93,8 @@ digitação e rolagem. Não declarar números de redução baseados só no desen
   Timeline 22/1.827; Clipboard 3/48; Precomp 5/75. Zero falhas.
 - Auditorias de API Swift, tipos, projeto Xcode e recursos compartilhados
   passaram. Não substituem compilação Swift e testes no simulador.
-- Dois novos testes nativos iOS exercitam busca sem acento, modo magnético +
-  undo, aplicação de efeito + undo e favoritos; execução ainda pendente.
+- Execução iOS 36264180437 concluída: 16 testes nativos, zero falhas, 400,239 s. IPA 2121 produzido. Busca sem acento, modo magnético + undo, efeito + undo e favoritos passaram.
+- RAW no simulador: 720p30 30,16 fps; 1080p30 17,59; 1080p60 53,58; HEVC30 29,63; VFR 42,47. Zero underruns nas cinco execuções. Isso não aprova fluidez em aparelhos físicos.
 
 ## Fila de aceitação do pedido completo
 

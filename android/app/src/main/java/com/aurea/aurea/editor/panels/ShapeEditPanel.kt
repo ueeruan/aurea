@@ -123,6 +123,8 @@ internal fun ShapeEditPanel(env: PanelEnv) {
     // Estado de animação dos parâmetros (valores + bits) no cabeçote.
     val sp by remember(store) { derivedStateOf { store.shapeParams } }
     val sel = ShapeEditState.param
+    val curveKeys = curveTrack((listOf(sel) + listOf(5, 6, 1, 2, 3, 4)).distinct()
+        .map { store.primaryKeys().shapeTrack(it) })
     val animBits = sp?.getOrNull(7)?.toInt() ?: 0
     val keyBits = sp?.getOrNull(8)?.toInt() ?: 0
     val look = when {
@@ -137,12 +139,12 @@ internal fun ShapeEditPanel(env: PanelEnv) {
             onKeyframe = { store.toggleShapeParamKey(sel) },
             curveAnimated = animBits and (1 shl sel) != 0,
             // Curva do trecho sob o cabeçote, na trilha da linha acesa.
-            onCurve = if (store.primaryKeys().shapeTrack(sel).size >= 2) {
+            onCurve = if (curveKeys.isNotEmpty()) {
                 {
                     val layer = store.primary
                     val t = store.detail?.localPlayhead
                     if (layer != null && t != null) {
-                        store.primaryKeys().shapeTrack(sel).segmentStart(t)?.let { key ->
+                        (curveKeys.segmentStart(t) ?: curveKeys.firstOrNull())?.let { key ->
                             store.selectKeyframe(layer, key)
                             env.onOpenPanel(EditorPanel.Curve)
                         }

@@ -1361,12 +1361,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         text3d = info
         if (lazy) {
+            text3dPending = true
             // Arrasto (cor, profundidade): a malha acompanha em passos curtos.
             typingHandler.removeCallbacks(applyText3d)
             typingHandler.postDelayed(applyText3d, 90)
             return
         }
         if (typing) {
+            text3dPending = true
             if (!textEditing) {
                 textEditing = true
                 beginGesture("editar texto 3D")
@@ -1378,12 +1380,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             typingHandler.postDelayed(applyText3d, 250)
             return
         }
+        typingHandler.removeCallbacks(applyText3d)
         pushText3D(id, info)
     }
 
+    private var text3dPending = false
     private val applyText3d = Runnable { primary?.let { id -> text3d?.let { pushText3D(id, it) } } }
 
+    fun applyText3DPreset(preset: Text3DPreset) {
+        val id = primary ?: return
+        typingHandler.removeCallbacks(applyText3d)
+        if (text3dPending) text3d?.let { pushText3D(id, it) }
+        typingHandler.removeCallbacks(closeTyping)
+        closeTyping.run()
+        engine.applyText3dPreset(id, preset.ordinal)
+        refreshNow()
+    }
+
     private fun pushText3D(id: Long, info: Text3DInfo) {
+        text3dPending = false
         if (info.content.isBlank()) return
         engine.setText3d(id, info.content, info.toFields(), info.fontPath)
         refreshNow()
@@ -1406,8 +1421,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private val textFloats = FloatArray(13)
 
     private fun readCatalog(): List<EffectCatalogEntry> {
-        val n = engine.queryEffectCatalog(rowBuffer, 64, textBlob)
-        return List(max(0, n)) { EffectCatalogEntry.read(rowBuffer, it, textBlob) }
+        var capacity = 64
+        val blob = directBuffer(64 * 1024)
+        while (true) {
+            val rows = directBuffer(capacity * EffectCatalogEntry.ROW_BYTES)
+            val n = engine.queryEffectCatalog(rows, capacity, blob)
+            if (n < capacity || capacity >= 1024)
+                return List(max(0, n)) { EffectCatalogEntry.read(rows, it, blob) }
+            capacity *= 2
+        }
     }
 
     // Buffers próprios da ficha do catálogo: `effectSpecs` é chamado do
@@ -1428,9 +1450,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Read-only timeline expansion snapshot; does not select the layer or open its dock. */
+    private val englishEffectResources by lazy {
+        val context = getApplication<Application>()
+        context.createConfigurationContext(android.content.res.Configuration(context.resources.configuration).apply {
+            setLocale(java.util.Locale.ENGLISH)
+        }).resources
+    }
+
     fun timelineEffects(layerId: Long): List<Pair<Int, String>> {
         val n = engine.queryLayerEffects(layerId, rowBuffer, 64, textBlob)
-        return List(max(0, n)) { LayerEffect.read(rowBuffer, it, textBlob).let { e -> e.effectId to e.name } }
+        return List(max(0, n)) { LayerEffect.read(rowBuffer, it, textBlob).let { e ->
+            e.effectId to com.aurea.aurea.editor.panels.englishEffectName(e.typeId, e.name, englishEffectResources)
+        } }
     }
 
     private fun refreshEffects() {
@@ -1709,26 +1740,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * da mídia; nenhuma camada fica com menos de 1 frame.
      */
     fun trimStart(layer: Long, newStart: Int) {
-        val d = detailOf(layer) ?: return
-        var start = min(newStart, d.endFrame - 1)
-        var offset = d.offsetFrames + (start - d.startFrame)
-        if (d.sourceFrames > 0 && offset < 0) {
-            start -= offset
-            offset = 0
-        }
-        start = max(0, start)
-        if (start == d.startFrame) return
-        send { setLayerTimeRange(layer, start, d.endFrame, offset) }
+        engine.editClipTime(layer, 0, newStart.toLong())
         refreshNow()
     }
 
-    /** Trim do FIM para `newEnd`. Vídeo não passa do fim da mídia. */
     fun trimEnd(layer: Long, newEnd: Int) {
-        val d = detailOf(layer) ?: return
-        var end = max(newEnd, d.startFrame + 1)
-        if (d.sourceFrames > 0) end = min(end, d.startFrame - d.offsetFrames + d.sourceFrames)
-        if (end == d.endFrame) return
-        send { setLayerTimeRange(layer, d.startFrame, end) }
+        engine.editClipTime(layer, 1, newEnd.toLong())
+        refreshNow()
+    }
+
+    fun editClipTime(operation: Int, amount: Int, previous: Long = 0, next: Long = 0) {
+        val id = primary ?: return
+        if (playing) pause()
+        if (!engine.editClipTime(id, operation, amount.toLong(), previous, next))
+            showToast("Sem margem na mídia, vizinho inválido ou camada bloqueada.")
         refreshNow()
     }
 
@@ -3557,18 +3582,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Aparar o começo por um INCREMENTO (arrasto no modo Edição: a camada não
      * sai do lugar, então o alvo absoluto não serve — conta o que já aparou).
      */
-    fun trimStartBy(layer: Long, delta: Int) {
-        val d = detailOf(layer) ?: return
-        var start = min(d.startFrame + delta, d.endFrame - 1)
-        var offset = d.offsetFrames + (start - d.startFrame)
-        if (d.sourceFrames > 0 && offset < 0) {
-            start -= offset
-            offset = 0
-        }
-        start = max(0, start)
-        if (start == d.startFrame) return
-        send { setLayerTimeRange(layer, start, d.endFrame, offset) }
+    fun trimStartBy(layer: Long, delta: Int): Int {
+        val before = detailOf(layer) ?: return 0
+        engine.editClipTime(layer, 0, before.startFrame.toLong() + delta)
+        val after = detailOf(layer) ?: return 0
         refreshNow()
+        return (before.endFrame - before.startFrame) - (after.endFrame - after.startFrame)
     }
 
     // --- Marcas e batidas ----------------------------------------------------------
@@ -4486,6 +4505,8 @@ data class Text3DInfo(
     val animationDuration: Float = 2f,
     val animationStagger: Float = .12f,
     val animationAmount: Float = .3f,
+    val surfaceFinish: Int = 0,
+    val separateGlyphs: Boolean = false,
 ) {
     fun toFields(): FloatArray = floatArrayOf(
         depth, alignment.toFloat(), color[0], color[1], color[2],
@@ -4496,10 +4517,11 @@ data class Text3DInfo(
         sideColor[0], sideColor[1], sideColor[2], sideMetallic, sideRoughness,
         bevelColor[0], bevelColor[1], bevelColor[2], bevelMetallic, bevelRoughness,
         animation.toFloat(), animationDuration, animationStagger, animationAmount,
+        surfaceFinish.toFloat(), if (separateGlyphs) 1f else 0f,
     )
 
     fun sameAs(o: Text3DInfo?): Boolean =
-        o != null && content == o.content && alignment == o.alignment &&
+        o != null && content == o.content && alignment == o.alignment && surfaceFinish == o.surfaceFinish && separateGlyphs == o.separateGlyphs &&
             fontPath == o.fontPath && animation == o.animation && animationDuration == o.animationDuration &&
             animationStagger == o.animationStagger && animationAmount == o.animationAmount &&
             depth == o.depth && bevel == o.bevel && bevelWidth == o.bevelWidth &&
@@ -4513,7 +4535,7 @@ data class Text3DInfo(
             sideColor.contentEquals(o.sideColor) && bevelColor.contentEquals(o.bevelColor)
 
     companion object {
-        const val FIELDS = 33
+        const val FIELDS = 35
 
         fun of(content: String, f: FloatArray, fontPath: String = ""): Text3DInfo = Text3DInfo(
             content = content,
@@ -4535,6 +4557,7 @@ data class Text3DInfo(
             bevelMetallic = f[27], bevelRoughness = f[28],
             fontPath = fontPath, animation = f[29].toInt(), animationDuration = f[30],
             animationStagger = f[31], animationAmount = f[32],
+            surfaceFinish = f[33].toInt(), separateGlyphs = f[34] >= .5f,
         )
     }
 }
@@ -4546,20 +4569,7 @@ enum class Text3DPreset(val labelRes: Int) {
     Brushed(R.string.pn_t3d_preset_brushed),
     Glossy(R.string.pn_t3d_preset_glossy),
     Matte(R.string.pn_t3d_preset_matte),
-    Neon(R.string.pn_t3d_preset_neon);
+    Neon(R.string.pn_t3d_preset_neon),
+    CinematicMetal(R.string.pn_t3d_preset_cinematic);
 
-    fun apply(i: Text3DInfo): Text3DInfo = when (this) {
-        Chrome -> i.copy(bevel = true, regionMaterials = false, color = floatArrayOf(0.95f, 0.96f, 0.98f, 1f), metallic = 1f, roughness = 0.05f,
-            specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
-        Gold -> i.copy(bevel = true, regionMaterials = false, color = floatArrayOf(1f, 0.77f, 0.34f, 1f), metallic = 1f, roughness = 0.18f,
-            specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
-        Brushed -> i.copy(color = floatArrayOf(0.78f, 0.79f, 0.8f, 1f), metallic = 1f, roughness = 0.45f,
-            specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
-        Glossy -> i.copy(color = floatArrayOf(0.9f, 0.1f, 0.12f, 1f), metallic = 0f, roughness = 0.08f,
-            specular = 1f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
-        Matte -> i.copy(color = floatArrayOf(0.85f, 0.85f, 0.86f, 1f), metallic = 0f, roughness = 0.92f,
-            specular = 0.15f, emissive = floatArrayOf(0f, 0f, 0f), emissiveStrength = 1f)
-        Neon -> i.copy(color = floatArrayOf(0.1f, 1f, 0.85f, 1f), metallic = 0f, roughness = 0.35f,
-            specular = 1f, emissive = floatArrayOf(0.1f, 1f, 0.85f), emissiveStrength = 3.5f)
-    }
 }

@@ -11,6 +11,7 @@ EN = ROOT + r"\android\app\src\main\res\values-en\strings.xml"
 OUT = ROOT + r"\engine\platform\ios\app\AureaStrings.swift"
 
 KEYS = [
+    "pn_t3d_preset_cinematic",
     "world_embers", "world_snow", "world_bokeh", "world_fountain",
     "donation_launch_question", "donation_launch_yes", "donation_launch_later",
     "release_notes_title", "release_notes_body", "am_import_lossless_required", "am_import_read_failed",
@@ -169,6 +170,7 @@ for code, raw, label, folder in languages:
     lines.append(f'            if language.hasPrefix("{code}") {{ return .{code} }}')
 lines += ['            if language.hasPrefix("in") { return .id }', '        }', '        return .pt', '    }', '}', '',
           'enum AureaText {', '    static var language: AureaLanguage = .system',
+          '    static func english(_ key: String) -> String { en[key] ?? pt[key] ?? key }',
           '    static func t(_ key: String) -> String {', '        let table: [String: String]',
           '        switch language.resolved {']
 for code, raw, label, folder in languages:

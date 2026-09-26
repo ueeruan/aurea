@@ -55,6 +55,117 @@ struct EditRig {
 
 } // namespace
 
+namespace {
+void clip_source(EditRig& r, u64 id, f32 speed = 1, bool reverse = false) {
+    Asset a; a.kind = AssetKind::Video; a.duration = FrameIndex{300}; a.timebaseFps = 30;
+    const AssetId source = r.e.project()->add_asset(std::move(a));
+    Layer* l = r.comp()->layer(LayerId::unpack(id));
+    l->kind = LayerKind::Video; l->source = source; l->speed = speed; l->reversed = reverse;
+    l->offset = FrameIndex{60};
+    auto& x = l->tracks.get_or_create(TrackProperty::PositionX);
+    x.set(FrameIndex{0}, 0); x.set(FrameIndex{200}, 500);
+}
+}
+
+AUREA_TEST(ClipEdit, TrimPreservesSourceAndAnimationAcrossSpeedsAndReverse) {
+    for (bool reverse : {false, true}) for (float speed : {0.0f, .5f, 1.0f, 2.0f}) for (u32 op : {0u, 1u}) {
+        EditRig r; clip_source(r, r.b, speed, reverse);
+        const Layer original = *r.L(r.b);
+        AUREA_CHECK(r.e.edit_clip_time(r.b, op, op == 0 ? 37 : 53));
+        const Layer* edited = r.L(r.b);
+        for (i64 frame = edited->start.value; frame < edited->end.value; ++frame) {
+            AUREA_CHECK_NEAR(edited->source_frame_f(frame + .25), original.source_frame_f(frame + .25), .001);
+            AUREA_CHECK_EQ(edited->local_time(FrameIndex{frame}).value, original.local_time(FrameIndex{frame}).value);
+        }
+        r.undo();
+        AUREA_CHECK(r.at(r.b, 30, 60)); AUREA_CHECK(!r.L(r.b)->timeRemapEnabled);
+    }
+}
+
+AUREA_TEST(ClipEdit, RippleTrimKeepsTheContentAtItsNewPosition) {
+    EditRig r; clip_source(r, r.b, 2, true); r.e.set_edit_mode(true);
+    const Layer original = *r.L(r.b);
+    AUREA_CHECK(r.e.edit_clip_time(r.b, 0, 38));
+    AUREA_CHECK(r.at(r.b, 30, 52)); AUREA_CHECK(r.at(r.c, 52, 82));
+    for (i64 f = 30; f < 52; ++f) {
+        AUREA_CHECK_NEAR(r.L(r.b)->source_frame_f(f), original.source_frame_f(f + 8), .001);
+        AUREA_CHECK_EQ(r.L(r.b)->local_time(FrameIndex{f}).value, original.local_time(FrameIndex{f+8}).value);
+    }
+}
+
+AUREA_TEST(ClipEdit, ExtendingAfterTrimDoesNotFreezeAtTheOldBoundary) {
+    for(bool reverse : {false,true}) {
+        EditRig r; clip_source(r,r.b,2,reverse); const Layer original=*r.L(r.b);
+        AUREA_CHECK(r.e.edit_clip_time(r.b,0,35));
+        AUREA_CHECK(r.e.edit_clip_time(r.b,1,70));
+        AUREA_CHECK_NEAR(r.L(r.b)->source_frame_f(67.25),original.source_frame_f(67.25),.001);
+        AUREA_CHECK(r.e.edit_clip_time(r.b,0,25));
+        AUREA_CHECK_NEAR(r.L(r.b)->source_frame_f(26.25),original.source_frame_f(26.25),.001);
+    }
+}
+
+AUREA_TEST(ClipEdit, SlipKeepsBoundsAndAnimationAndSupportsUndo) {
+    EditRig r; clip_source(r, r.b, .5f, true);
+    const Layer original = *r.L(r.b);
+    AUREA_CHECK(r.e.edit_clip_time(r.b, 2, 12)); AUREA_CHECK(r.at(r.b, 30, 60));
+    for (i64 f = 30; f < 60; ++f) {
+        AUREA_CHECK_NEAR(r.L(r.b)->source_frame_f(f+.125), original.source_frame_f(f+.125)+12, .001);
+        AUREA_CHECK_EQ(r.L(r.b)->local_time(FrameIndex{f}).value, original.local_time(FrameIndex{f}).value);
+    }
+    r.undo(); AUREA_CHECK(!r.L(r.b)->timeRemapEnabled);
+    AUREA_CHECK(r.e.edit_clip_time(r.b, 2, -12));
+    AUREA_CHECK_NEAR(r.L(r.b)->source_frame_f(45), original.source_frame_f(45)-12, .001);
+}
+
+AUREA_TEST(ClipEdit, RollAndSlideAreAtomicAndLeaveOtherClipsAlone) {
+    for (u32 operation : {3u, 4u, 5u}) {
+        EditRig r; for (u64 id : {r.a,r.b,r.c}) clip_source(r,id,2,true);
+        r.e.set_edit_mode(true); // explicit roll/slide overrides ripple mode
+        const Layer b = *r.L(r.b), a = *r.L(r.a), c = *r.L(r.c);
+        AUREA_CHECK(r.e.edit_clip_time(r.b, operation, 5, r.a, r.c));
+        AUREA_CHECK_EQ(r.L(r.a)->end.value, operation == 4 ? 30 : 35);
+        AUREA_CHECK_EQ(r.L(r.c)->start.value, operation == 3 ? 60 : 65);
+        AUREA_CHECK_NEAR(r.L(r.b)->source_frame_f(45), b.source_frame_f(operation == 5 ? 40 : 45), .001);
+        AUREA_CHECK_NEAR(r.L(r.a)->source_frame_f(20), a.source_frame_f(20), .001);
+        AUREA_CHECK_NEAR(r.L(r.c)->source_frame_f(75), c.source_frame_f(75), .001);
+        r.undo(); AUREA_CHECK(r.at(r.a,0,30)); AUREA_CHECK(r.at(r.b,30,60)); AUREA_CHECK(r.at(r.c,60,90));
+    }
+}
+
+AUREA_TEST(ClipEdit, RejectsMissingNeighboursLocksAndSourceOverrunWithoutUndoEntry) {
+    EditRig r; clip_source(r, r.b); AUREA_CHECK(r.e.toggle_marker(12));
+    AUREA_CHECK(!r.e.edit_clip_time(r.b, 5, 10));
+    AUREA_CHECK(!r.e.edit_clip_time(r.b, 4, 40, r.a, r.c));
+    AUREA_CHECK(!r.e.edit_clip_time(r.b, 2, -100));
+    AUREA_CHECK(!r.e.edit_clip_time(r.b, 1, 1000));
+    r.comp()->layer(LayerId::unpack(r.c))->locked = true;
+    AUREA_CHECK(!r.e.edit_clip_time(r.b, 4, 1, r.a, r.c));
+    r.e.set_edit_mode(true);
+    AUREA_CHECK(!r.e.edit_clip_time(r.b, 1, 55));
+    AUREA_CHECK(r.at(r.b,30,60)); AUREA_CHECK(r.at(r.c,60,90));
+    r.undo(); AUREA_CHECK(!r.e.edit_mode());
+    r.undo(); i64 marks[2]{}; AUREA_CHECK_EQ(r.e.query_markers(marks,2),0u);
+}
+
+AUREA_TEST(ClipEdit, SplitKeepsAnimatedClockAndRampedOrReverseSource) {
+    for (bool remap : {false,true}) for (bool reverse : {false,true}) {
+        EditRig r; clip_source(r,r.b,2,reverse);
+        Layer* originalLayer = r.comp()->layer(LayerId::unpack(r.b));
+        if(remap) { originalLayer->timeRemapEnabled=true; originalLayer->timeRemap.set(FrameIndex{60},80); originalLayer->timeRemap.set(FrameIndex{90},110,Interpolation::Linear); }
+        const Layer original=*originalLayer;
+        Command split; split.type=CommandType::LayerSplit; split.layer_split.layer=LayerId::unpack(r.b); split.layer_split.at=FrameIndex{43};
+        AUREA_CHECK(r.e.apply_command(split).ok());
+        const Layer* second=nullptr;
+        r.comp()->layers().for_each([&](LayerId id,const Layer& l){ if(id.pack()!=r.a&&id.pack()!=r.b&&id.pack()!=r.c) second=&l; });
+        AUREA_CHECK(second!=nullptr); if(!second)continue;
+        for(i64 frame=30;frame<60;++frame) {
+            const Layer* l=frame<43?r.L(r.b):second;
+            AUREA_CHECK_NEAR(l->source_frame_f(frame+.125),original.source_frame_f(frame+.125),.001);
+            AUREA_CHECK_EQ(l->local_time(FrameIndex{frame}).value,original.local_time(FrameIndex{frame}).value);
+        }
+    }
+}
+
 AUREA_TEST(Edit, CompositionModeTrimIsFree) {
     EditRig r;
     r.range(r.a, 0, 20);

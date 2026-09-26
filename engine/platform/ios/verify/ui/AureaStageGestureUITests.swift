@@ -97,6 +97,77 @@ import XCTest
         if !query.isEmpty { field.tap(); field.typeText(query) }
     }
 
+    func testSlipChangesContentKeepsBoundsAndUndoRestoresIt() throws {
+        let before = try launch("clip-edit")
+        try openCommandSearch("slip")
+        let command = app.buttons["command:clip_edit"]
+        XCTAssertTrue(command.waitForExistence(timeout: 5)); command.tap()
+        let advance = app.buttons["Avançar edição do clipe"]
+        XCTAssertTrue(advance.waitForExistence(timeout: 5)); XCTAssertTrue(advance.isEnabled)
+        advance.tap()
+        let changed = try awaitSnapshot("Slip creates an editable remap in the native layer") {
+            ($0.clipTimeRemap.first ?? 0) > 0
+        }
+        XCTAssertEqual(changed.detail.startFrame, before.detail.startFrame)
+        XCTAssertEqual(changed.detail.endFrame, before.detail.endFrame)
+        XCTAssertEqual(changed.detail.localPlayhead, before.detail.localPlayhead)
+        assertTransform(changed, equals: before)
+        try undo()
+        _ = try awaitSnapshot("One undo restores the original clip timing") { $0.clipTimeRemap == before.clipTimeRemap && $0.canRedo }
+        let roll = app.buttons["Roll fim"]
+        XCTAssertTrue(roll.exists); roll.tap()
+        XCTAssertFalse(advance.isEnabled, "Roll needs an explicit adjacent clip")
+    }
+
+    func testText3DLetterControlsPrepareGeometryAndUndoRestoresIt() throws {
+        let before = try launch("text-3d")
+        XCTAssertFalse(before.textGlyphLayout)
+        try openCommandSearch("Text 3D Layout")
+        let effect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "command:effect:")).firstMatch
+        XCTAssertTrue(effect.waitForExistence(timeout: 5)); XCTAssertTrue(effect.isEnabled)
+        XCTAssertTrue(effect.label.contains("Text 3D Layout")); effect.tap()
+        _ = try awaitSnapshot("Letter geometry and effect added together") {
+            $0.textGlyphLayout && $0.effectCount == before.effectCount + 1
+        }
+        XCTAssertTrue(app.staticTexts["Text 3D Layout"].firstMatch.waitForExistence(timeout: 5))
+        try undo()
+        _ = try awaitSnapshot("Undo restores unsplit geometry and removes the effect") {
+            !$0.textGlyphLayout && $0.effectCount == before.effectCount
+        }
+    }
+
+    func testProceduralPatternsCanBeFoundAddedAndUndone() throws {
+        _ = try launch("transform")
+        let before = try snapshot()
+        for name in ["Stripes", "Radial Rays", "Grid", "Parenting Helper"] {
+            try openCommandSearch(name)
+            let effect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "command:effect:")).firstMatch
+            XCTAssertTrue(effect.waitForExistence(timeout: 5)); XCTAssertTrue(effect.isEnabled)
+            XCTAssertTrue(effect.label.contains(name)); effect.tap()
+            _ = try awaitSnapshot("New effect reaches native stack") { $0.effectCount == before.effectCount + 1 }
+            try undo()
+            _ = try awaitSnapshot("New effect is reversible") { $0.effectCount == before.effectCount }
+        }
+    }
+
+    func testCinematicMetalMaterialAppliesFromPanelAndCanBeUndone() throws {
+        let before = try launch("text-3d")
+        try openCommandSearch("material")
+        let action = app.buttons["command:environment"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5)); action.tap()
+        let preset = app.buttons["text3d.materialPreset.6"]
+        let scroll = app.scrollViews["text3d.materialScroll"].firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<6 {
+            if preset.exists && preset.isHittable { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(preset.isHittable); preset.tap()
+        _ = try awaitSnapshot("Cinematic Metal reaches the native material recipe") { $0.textSurfaceFinish == 4 }
+        try undo()
+        _ = try awaitSnapshot("Undo restores the previous material") { $0.textSurfaceFinish == before.textSurfaceFinish }
+    }
+
     func testVideoTextAndCaptionsPlayForThirtySecondsWithBoundedMemory() throws {
         _ = try launch("playback-stress")
         let play = app.buttons["Repeat on · hold to turn off"].firstMatch
@@ -303,6 +374,29 @@ import XCTest
         assertTransform(restored, equals: before)
     }
 
+    func testCurvesOpenForNullYAndShapeHeightInCompactPanel() throws {
+        for scene in ["curve-null", "curve-shape"] {
+            _ = try launch(scene)
+            let open = app.buttons["Edit the property curve"].firstMatch
+            XCTAssertTrue(open.waitForExistence(timeout: 5)); XCTAssertTrue(open.isEnabled)
+            open.tap()
+            let state = try awaitSnapshot("Animated component opens its curve") { $0.sheet == "curve" }
+            XCTAssertEqual(state.curveProperty, scene == "curve-null" ? 1 : 35)
+            XCTAssertEqual(state.curveParam, scene == "curve-null" ? 0 : 6)
+            let panel = app.otherElements["curve.panel"].firstMatch
+            XCTAssertTrue(panel.waitForExistence(timeout: 5))
+            XCTAssertLessThanOrEqual(panel.frame.height, 281)
+            for mode in [1, 2, 0] {
+                let button = app.buttons["curve.mode.\(mode)"]
+                XCTAssertTrue(button.isHittable); button.tap()
+                XCTAssertEqual(app.state, .runningForeground)
+            }
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Compact themed graph \(scene)"; screenshot.lifetime = .keepAlways; add(screenshot)
+            app.terminate()
+        }
+    }
+
     func testTimelineDragChangesRealCorePlayheadAndKeepsLayerTransform() throws {
         let before = try launch("transform")
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
@@ -424,8 +518,8 @@ import XCTest
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID
-        if ["video-move", "playback-stress"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
-        let preparationTimeout: TimeInterval = ["video-move", "playback-stress"].contains(scene) ? 120 : 30
+        if ["video-move", "playback-stress", "clip-edit"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
+        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit"].contains(scene) ? 120 : 30
         app.launch()
         guard stage.waitForExistence(timeout: preparationTimeout) else {
             XCTFail("Read-only DEBUG preview probe is missing; inspect the app configuration and INTEGRATION.md")
@@ -544,7 +638,12 @@ import XCTest
         let editMode: Bool
         let coreEditMode: Bool
         let effectCount: Int
+        let clipTimeRemap: [Double]
+        let textGlyphLayout: Bool
+        let textSurfaceFinish: Int
         let sheet: String
+        let curveProperty: UInt32
+        let curveParam: UInt32
         let primaryID: Int64
         let selectionCount: Int
         let isManipulating: Bool

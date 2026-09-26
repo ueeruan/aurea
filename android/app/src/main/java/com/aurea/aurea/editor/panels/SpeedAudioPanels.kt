@@ -16,10 +16,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -48,6 +56,68 @@ import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
+
+@Composable
+internal fun ClipEditPanel(env: PanelEnv) {
+    val store = env.store
+    val row = store.layers.firstOrNull { it.id == store.primary } ?: return
+    var mode by remember(row.id) { mutableStateOf(2) }
+    var step by remember(row.id) { mutableStateOf("1") }
+    var previous by remember(row.id) { mutableStateOf(0L) }
+    var next by remember(row.id) { mutableStateOf(0L) }
+    val before = store.layers.filter { it.id != row.id && !it.locked && it.endFrame == row.startFrame }
+    val after = store.layers.filter { it.id != row.id && !it.locked && it.startFrame == row.endFrame }
+    val left = before.firstOrNull { it.id == previous }?.id ?: before.singleOrNull()?.id ?: 0L
+    val right = after.firstOrNull { it.id == next }?.id ?: after.singleOrNull()?.id ?: 0L
+    val needsLeft = mode == 3 || mode == 5
+    val needsRight = mode == 4 || mode == 5
+    val frames = step.toIntOrNull()?.takeIf { it in 1..3600 }
+    val enabled = !row.locked && frames != null && (!needsLeft || left != 0L) && (!needsRight || right != 0L)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(row.name, color = AureaColors.Text, fontSize = 15.sp)
+        Text("${row.startFrame} → ${row.endFrame} · ${row.durationFrames} quadros", color = AureaColors.Muted, fontSize = 12.sp)
+        listOf(2 to "Slip", 3 to "Roll início", 4 to "Roll fim", 5 to "Slide").chunked(2).forEach { choices ->
+            Row(Modifier.fillMaxWidth()) {
+                choices.forEach { (value, name) ->
+                    TextButton(onClick = { mode = value }, modifier = Modifier.weight(1f).height(48.dp)) {
+                        Text(if (mode == value) "✓ $name" else name, color = if (mode == value) AureaColors.Accent else AureaColors.Text)
+                    }
+                }
+            }
+        }
+        Text(when(mode) {
+            2 -> "Troca o trecho da mídia. A posição, a duração e a animação da camada ficam no lugar."
+            3, 4 -> "Move o corte entre dois clipes. A duração total permanece igual."
+            else -> "Move este clipe e apara os dois vizinhos, preservando o conteúdo e a duração deste clipe."
+        }, color = AureaColors.Muted, fontSize = 13.sp)
+        if (needsLeft) ClipNeighbour("Anterior", before.map { it.id to it.name }, left) { previous = it }
+        if (needsRight) ClipNeighbour("Próximo", after.map { it.id to it.name }, right) { next = it }
+        OutlinedTextField(value = step, onValueChange = { value -> if (value.length <= 4 && value.all(Char::isDigit)) step = value },
+            label = { Text("Passo em quadros (1–3600)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            listOf(-1 to "Recuar", 1 to "Avançar").forEach { (sign, title) ->
+                TextButton(onClick = { store.editClipTime(mode, sign * (frames ?: 1), left, right) }, enabled = enabled,
+                    modifier = Modifier.weight(1f).height(48.dp).semantics { contentDescription = "$title edição do clipe" }) {
+                    Text("${if(sign < 0) "−" else "+"}${frames ?: 0} · $title")
+                }
+            }
+        }
+        if (!enabled) Text(if(row.locked) "Desbloqueie a camada para editar." else "Escolha clipes encostados na borda e um passo válido.", color = AureaColors.Muted, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun ClipNeighbour(title: String, items: List<Pair<Long, String>>, selected: Long, select: (Long) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+            Text("$title: ${items.firstOrNull { it.first == selected }?.second ?: "Escolher clipe"}")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            items.forEach { (id, name) -> DropdownMenuItem(text = { Text(name) }, onClick = { select(id); expanded = false }) }
+        }
+    }
+}
 
 /** Duração da camada em "m:ss". */
 private fun clock(frames: Int, fps: Float): String {

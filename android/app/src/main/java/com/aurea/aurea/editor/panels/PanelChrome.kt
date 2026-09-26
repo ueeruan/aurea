@@ -4,6 +4,8 @@ import com.aurea.aurea.engine.ExpressionLook
 import com.aurea.aurea.ui.ds.expressionColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -220,10 +223,10 @@ internal class RailMode(val icon: ImageVector, val label: String)
  */
 @Composable
 internal fun RightRail(modes: List<RailMode>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    BoxWithConstraints(modifier.width(40.dp).fillMaxHeight()) {
-        val cell: Dp = if (modes.isEmpty()) 36.dp else min(36.dp, maxHeight / modes.size)
+    BoxWithConstraints(modifier.width(48.dp).fillMaxHeight()) {
+        val cell = 44.dp
         Column(
-            Modifier.fillMaxHeight().fillMaxWidth(),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight),
             verticalArrangement = Arrangement.SpaceEvenly,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -231,7 +234,7 @@ internal fun RightRail(modes: List<RailMode>, selected: Int, onSelect: (Int) -> 
                 val on = i == selected
                 Box(
                     Modifier
-                        .size(cell)
+                        .padding(vertical = 2.dp).size(cell)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (on) AureaColors.RailModeFill else Color.Transparent)
                         .then(if (on) Modifier.border(1.5.dp, AureaColors.Accent, RoundedCornerShape(8.dp)) else Modifier)

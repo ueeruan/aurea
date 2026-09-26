@@ -263,6 +263,7 @@ struct HomeView: View {
     @State private var settingsModalActive = false
     @AppStorage("aurea.releaseNotes.read") private var readReleaseNotes = ""
     @State private var showReleaseNotes = false
+    @State private var showDonationPrompt = false
     private var releaseNotesEdition: String {
         "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"):2112-1"
     }
@@ -346,8 +347,19 @@ struct HomeView: View {
             if ProcessInfo.processInfo.environment["AUREA_UI_TEST_PROBE"] == "1" { return }
             #endif
             if readReleaseNotes != releaseNotesEdition { showReleaseNotes = true }
+            else if model.donationPromptPending { showDonationPrompt = true }
         }
-        .sheet(isPresented: $showReleaseNotes, onDismiss: { readReleaseNotes = releaseNotesEdition }) {
+        .alert(AureaText.t("donation_title"), isPresented: $showDonationPrompt) {
+            Button(AureaText.t("donation_launch_yes")) {
+                model.donationPromptPending = false
+                if let url = URL(string: AureaDonations.paypal) { UIApplication.shared.open(url) }
+            }
+            Button(AureaText.t("donation_launch_later"), role: .cancel) { model.donationPromptPending = false }
+        } message: { Text(AureaText.t("donation_launch_question")) }
+        .sheet(isPresented: $showReleaseNotes, onDismiss: {
+            readReleaseNotes = releaseNotesEdition
+            if model.donationPromptPending { showDonationPrompt = true }
+        }) {
             NavigationStack {
                 ScrollView {
                     Text(AureaText.t("release_notes_body"))

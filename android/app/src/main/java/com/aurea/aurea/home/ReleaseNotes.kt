@@ -28,6 +28,27 @@ internal fun ReleaseNotesEntry() {
     val edition = "${BuildConfig.VERSION_CODE}:2112-1"
     var showing by rememberSaveable(edition) { mutableStateOf(prefs.getString("read", null) != edition) }
     TextButton(onClick = { showing = true }) { Text(stringResource(R.string.release_notes_title)) }
+    if (!showing && AureaDonations.launchPromptPending) {
+        AlertDialog(
+            onDismissRequest = { AureaDonations.launchPromptPending = false },
+            title = { Text(stringResource(R.string.donation_title)) },
+            text = { Text(stringResource(R.string.donation_launch_question)) },
+            confirmButton = { TextButton(onClick = {
+                AureaDonations.launchPromptPending = false
+                try {
+                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(AureaDonations.PAYPAL)))
+                } catch (_: android.content.ActivityNotFoundException) {
+                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("Aurea", AureaDonations.PAYPAL))
+                    android.widget.Toast.makeText(context, R.string.donation_copied, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }) { Text(stringResource(R.string.donation_launch_yes)) } },
+            dismissButton = { TextButton(onClick = { AureaDonations.launchPromptPending = false }) {
+                Text(stringResource(R.string.donation_launch_later))
+            } },
+        )
+    }
     if (showing) {
         val close = {
             prefs.edit().putString("read", edition).apply()

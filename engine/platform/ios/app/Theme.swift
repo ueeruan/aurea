@@ -907,7 +907,7 @@ enum EditorLayout {
                                  transport: transport, timeline: 0, sheet: 0)
         }
         let ws = workspace(total)
-        let preview = (total * 0.54)
+        var preview = (total * 0.54)
             .clamped(to: previewMin...(max(previewMin, ws - timelineMin)))
 
         var sheetFraction: CGFloat = 0
@@ -926,6 +926,10 @@ enum EditorLayout {
         case .adding, .dock, .panel, .batch: floor = 90
         default: floor = 120
         }
+        // Make room for editing controls instead of compressing their targets.
+        let requiredSheet: CGFloat = content == .panel ? 336 : (content == .dock ? 240 : 0)
+        sheet = min(max(sheet, requiredSheet), max(0, ws - previewMin - floor))
+        preview = min(preview, max(previewMin, ws - sheet - floor))
         var timeline = ws - preview - sheet
         if timeline < floor {
             sheet = max(0, sheet - (floor - timeline))

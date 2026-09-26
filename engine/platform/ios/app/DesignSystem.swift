@@ -858,8 +858,8 @@ struct RightRail: View {
 
     var body: some View {
         GeometryReader { geo in
-            let cell = modes.isEmpty ? AureaDims.railCell
-                : max(0, min(AureaDims.railCell, geo.size.height / CGFloat(modes.count) - AureaDims.s1 * 2))
+            let cell: CGFloat = 44
+            ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
                 ForEach(Array(modes.enumerated()), id: \.offset) { index, mode in
@@ -876,13 +876,18 @@ struct RightRail: View {
                         }
                         .contentShape(Rectangle())
                         .aureaTappable(shrink: 1) { onSelect(index) }
-                        .padding(.vertical, AureaDims.s1)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("aurea.panel.mode.\(index)")
+                        .padding(.vertical, 2)
                 }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
+            .frame(minHeight: geo.size.height)
+            }
+            .accessibilityIdentifier("aurea.panel.tools")
         }
-        .frame(width: AureaDims.railModeW)
+        .frame(width: 48)
         .frame(maxHeight: .infinity)
     }
 

@@ -47,7 +47,7 @@ internal object EditorLayout {
         }
         val ws = workspace(totalHeight)
         // Stable preview height while floating add controls open and close.
-        val preview = (totalHeight * 0.54f)
+        var preview = (totalHeight * 0.54f)
             .coerceIn(PREVIEW_MIN, max(PREVIEW_MIN, ws - TIMELINE_MIN))
 
         val sheetFraction = when (content) {
@@ -65,6 +65,14 @@ internal object EditorLayout {
             SheetContent.Adding, SheetContent.Dock, SheetContent.Panel, SheetContent.Batch -> 90f
             else -> 120f
         }
+        // Editing controls get usable space first; only the overview keeps
+        // the tall preview. Never shrink every button to preserve the preview.
+        sheet = max(sheet, when (content) {
+            SheetContent.Panel -> 336f
+            SheetContent.Dock -> 240f
+            else -> 0f
+        }).coerceAtMost(max(0f, ws - PREVIEW_MIN - floor))
+        preview = min(preview, max(PREVIEW_MIN, ws - sheet - floor))
         var timeline = ws - preview - sheet
         if (timeline < floor) {
             sheet = max(0f, sheet - (floor - timeline))

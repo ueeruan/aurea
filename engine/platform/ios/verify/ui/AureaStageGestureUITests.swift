@@ -84,14 +84,14 @@ import XCTest
         XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 5), .completed)
     }
 
-    func testFloatingAddKeepsPreviewStableAndClosesAfterSelection() throws {
+    func testFloatingAddRestoresPreviewAndClosesAfterSelection() throws {
         let before = try launch("layer-dock")
         let frame = stage.frame
         let add = app.buttons["Add layer"].firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
         let category = app.buttons["aurea.add.category.0"].firstMatch
         XCTAssertTrue(category.waitForExistence(timeout: 5))
-        XCTAssertEqual(stage.frame.height, frame.height, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(stage.frame.height, frame.height - 1)
         let bubbles = XCTAttachment(screenshot: app.screenshot())
         bubbles.name = "Floating add categories"; bubbles.lifetime = .keepAlways; self.add(bubbles)
         category.tap()
@@ -254,6 +254,23 @@ import XCTest
         XCTAssertEqual(moved.selectionCount, 1)
         coordinate(end).tap()
         _ = try awaitSnapshot("A deliberate tap opens the layer options") { $0.sheet == "dock" }
+    }
+
+    func testTransformToolsKeepFingerSizedTargets() throws {
+        _ = try launch("transform")
+        let modes = app.descendants(matching: .any)
+        let first = modes.matching(identifier: "aurea.panel.mode.0").firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(first.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(first.frame.height, 44)
+        let tools = app.scrollViews["aurea.panel.tools"].firstMatch
+        let last = modes.matching(identifier: "aurea.panel.mode.5").firstMatch
+        if !last.isHittable && tools.exists { tools.swipeUp() }
+        XCTAssertTrue(last.isHittable)
+        XCTAssertGreaterThanOrEqual(last.frame.height, 44)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Transform controls at usable size"; screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     func testText3DSelectionFollowsCoreBoundsAndGizmoDrag() throws {

@@ -213,6 +213,7 @@ final class AureaModel: ObservableObject {
     @Published var showExport = false
     @Published var showProjectSettings = false
     @Published var showSettings = false
+    @Published var donationPromptPending = true
     /// A folha de geração atual (a doca de painéis, o painel aberto ou o
     /// "adicionar camada").
     ///

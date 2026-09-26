@@ -57,7 +57,7 @@ android {
 
         // versionCode 2113: faixa de legendas, presets e novos efeitos nativos. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2116
+        versionCode = 2117
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

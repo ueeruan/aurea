@@ -621,6 +621,8 @@
 					"-lggml",
 					"-lggml-base",
 					"-lggml-cpu",
+					"-framework",
+					"Accelerate",
 					"-lc++",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.aurea.aurea;
@@ -674,6 +676,8 @@
 					"-lggml",
 					"-lggml-base",
 					"-lggml-cpu",
+					"-framework",
+					"Accelerate",
 					"-lc++",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.aurea.aurea;

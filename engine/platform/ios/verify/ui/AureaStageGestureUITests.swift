@@ -105,7 +105,21 @@ import XCTest
         XCTAssertFalse(circle.exists)
         XCTAssertEqual(stage.frame.height, frame.height, accuracy: 1)
         try undo()
-        _ = try awaitSnapshot("Undo added shape") { $0.layerCount == before.layerCount }
+        // Undo deletes the selected new layer, so the probe intentionally has
+        // no geometry. Decode the layer summary instead of requiring Detail.
+        struct LayerSummary: Decodable {
+            let layerCount: Int
+            let selectionCount: Int
+            let canRedo: Bool
+        }
+        let restored = XCTNSPredicateExpectation(predicate: NSPredicate { element, _ in
+            guard let view = element as? XCUIElement,
+                  let json = view.value as? String, let data = json.data(using: .utf8),
+                  let value = try? JSONDecoder().decode(LayerSummary.self, from: data) else { return false }
+            return value.layerCount == before.layerCount && value.selectionCount == 0 && value.canRedo
+        }, object: stage)
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 6), .completed)
+        attach("After undo added shape", stage.value as? String ?? "missing")
     }
 
     func testCaptionsOpenFromAddMenuWithNonAudioSelection() throws {

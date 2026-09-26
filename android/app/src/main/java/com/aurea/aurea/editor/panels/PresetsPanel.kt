@@ -119,7 +119,8 @@ internal fun PresetsPanel(env: PanelEnv) {
         store.presetsOpenKind = null
     }
     val tab = if (picked in tabs) picked else PresetTab.Animation
-    var query by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf(store.presetsOpenSearch.orEmpty()) }
+    LaunchedEffect(Unit) { store.presetsOpenSearch = null }
     var stretch by rememberSaveable { mutableStateOf(false) }
     var saving by remember { mutableStateOf<PresetKind?>(null) }
     var deleting by remember { mutableStateOf<PresetEntry?>(null) }

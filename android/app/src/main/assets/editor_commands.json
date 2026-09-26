@@ -1,0 +1,254 @@
+[
+  {
+    "id": "split",
+    "title": "Dividir no cabeçote",
+    "detail": "Corta as camadas selecionadas neste quadro",
+    "keywords": "blade cut corte tesoura",
+    "requires": "inside"
+  },
+  {
+    "id": "duplicate",
+    "title": "Duplicar seleção",
+    "detail": "Cria cópias editáveis das camadas",
+    "keywords": "copy duplicar camada",
+    "requires": "selection"
+  },
+  {
+    "id": "ripple_delete",
+    "title": "Excluir e fechar espaço",
+    "detail": "Remove a seleção e fecha os espaços livres",
+    "keywords": "ripple delete apagar",
+    "requires": "selection"
+  },
+  {
+    "id": "trim_start",
+    "title": "Aparar início",
+    "detail": "Remove o trecho anterior ao cabeçote",
+    "keywords": "trim in corte inicio",
+    "requires": "inside_single"
+  },
+  {
+    "id": "trim_end",
+    "title": "Aparar fim",
+    "detail": "Remove o trecho depois do cabeçote",
+    "keywords": "trim out corte final",
+    "requires": "inside_single"
+  },
+  {
+    "id": "speed",
+    "title": "Velocidade e remapeamento",
+    "detail": "Ajuste velocidade, reverso e curvas de tempo",
+    "keywords": "velocity speed ramp reverse slow motion optical flow",
+    "requires": "media"
+  },
+  {
+    "id": "freeze",
+    "title": "Congelar quadro",
+    "detail": "Cria uma camada com este quadro do vídeo",
+    "keywords": "freeze frame hold congelar",
+    "requires": "video_inside"
+  },
+  {
+    "id": "extract_audio",
+    "title": "Extrair áudio",
+    "detail": "Separa o som do vídeo para editar os cortes",
+    "keywords": "j cut l cut audio separado",
+    "requires": "video"
+  },
+  {
+    "id": "audio",
+    "title": "Áudio",
+    "detail": "Volume, fades e efeitos de áudio",
+    "keywords": "reverb flanger normalizacao som",
+    "requires": "media"
+  },
+  {
+    "id": "beats",
+    "title": "Detectar batidas",
+    "detail": "Analisa o áudio e cria marcadores editáveis",
+    "keywords": "beat detect musica ritmo sincronizar",
+    "requires": "media"
+  },
+  {
+    "id": "transform",
+    "title": "Transformar e animar",
+    "detail": "Posição, escala, rotação e keyframes",
+    "keywords": "motion position keyframe movimento",
+    "requires": "single"
+  },
+  {
+    "id": "text",
+    "title": "Editar texto",
+    "detail": "Conteúdo, fonte e estilo",
+    "keywords": "typography texto estilo fonte",
+    "requires": "text"
+  },
+  {
+    "id": "mask",
+    "title": "Máscaras e mattes",
+    "detail": "Recorte, feather e composição de camadas",
+    "keywords": "alpha luma matte mask recorte",
+    "requires": "visual"
+  },
+  {
+    "id": "effects",
+    "title": "Pilha de efeitos",
+    "detail": "Organize e ajuste os efeitos da camada",
+    "keywords": "effect stack color cor glow blur",
+    "requires": "visual"
+  },
+  {
+    "id": "appearance",
+    "title": "Opacidade e mistura",
+    "detail": "Transparência e modos de mesclagem",
+    "keywords": "blend screen multiply overlay compositor",
+    "requires": "visual"
+  },
+  {
+    "id": "tracking",
+    "title": "Rastreamento",
+    "detail": "Ponto, estabilização e câmera 3D",
+    "keywords": "track stabilize camera tracker estabilizar",
+    "requires": "video"
+  },
+  {
+    "id": "environment",
+    "title": "Ambiente 3D",
+    "detail": "Materiais, luz e ambiente da cena",
+    "keywords": "3d pbr material hdri lighting camera",
+    "requires": "model3d"
+  },
+  {
+    "id": "particles",
+    "title": "Partículas",
+    "detail": "Emissor, física e aparência",
+    "keywords": "particle sparks dust snow chuva",
+    "requires": "particles"
+  },
+  {
+    "id": "vector",
+    "title": "Editar vetor",
+    "detail": "Pontos, curvas e modificadores do caminho",
+    "keywords": "svg bezier shape vector path",
+    "requires": "vector"
+  },
+  {
+    "id": "presets",
+    "title": "Biblioteca de presets",
+    "detail": "Aplicar, salvar e compartilhar estilos editáveis",
+    "keywords": "preset motion texto curva color",
+    "requires": "single"
+  },
+  {
+    "id": "precompose",
+    "title": "Criar pré-composição",
+    "detail": "Agrupa a seleção sem rasterizar as camadas",
+    "keywords": "precomp nested compound agrupar",
+    "requires": "selection"
+  },
+  {
+    "id": "enter_precomp",
+    "title": "Editar pré-composição",
+    "detail": "Entra no grupo para editar suas camadas",
+    "keywords": "nested precomp entrar grupo",
+    "requires": "precomp"
+  },
+  {
+    "id": "marker",
+    "title": "Adicionar ou remover marcador",
+    "detail": "Marca o quadro atual da timeline",
+    "keywords": "bookmark marker beat marca",
+    "requires": "any"
+  },
+  {
+    "id": "magnetic",
+    "title": "Alternar edição magnética",
+    "detail": "Aparar e excluir fecha os espaços",
+    "keywords": "ripple magnet snapping ima",
+    "requires": "any"
+  },
+  {
+    "id": "remove_gaps",
+    "title": "Remover espaços vazios",
+    "detail": "Fecha intervalos livres respeitando bloqueios",
+    "keywords": "gap remove ripple espaco",
+    "requires": "layers"
+  },
+  {
+    "id": "previous_frame",
+    "title": "Quadro anterior",
+    "detail": "Recua exatamente um quadro",
+    "keywords": "frame step anterior",
+    "requires": "any"
+  },
+  {
+    "id": "next_frame",
+    "title": "Próximo quadro",
+    "detail": "Avança exatamente um quadro",
+    "keywords": "frame step proximo",
+    "requires": "any"
+  },
+  {
+    "id": "add_text",
+    "title": "Adicionar texto",
+    "detail": "Cria uma camada de texto editável",
+    "keywords": "text typography criar texto",
+    "requires": "any"
+  },
+  {
+    "id": "add_null",
+    "title": "Adicionar nulo 2D",
+    "detail": "Cria um controlador para parenting",
+    "keywords": "null rig parent nulo",
+    "requires": "any"
+  },
+  {
+    "id": "add_null3d",
+    "title": "Adicionar nulo 3D",
+    "detail": "Cria um controlador no espaço 3D",
+    "keywords": "null rig parent xyz",
+    "requires": "any"
+  },
+  {
+    "id": "add_camera",
+    "title": "Adicionar câmera",
+    "detail": "Cria uma câmera editável na composição",
+    "keywords": "camera dolly orbit 3d",
+    "requires": "any"
+  },
+  {
+    "id": "captions",
+    "title": "Legendas",
+    "detail": "Transcrição, estilo e animação de legendas",
+    "keywords": "caption subtitle speech legenda",
+    "requires": "any"
+  },
+  {
+    "id": "project_settings",
+    "title": "Configurações do projeto",
+    "detail": "Resolução, quadros por segundo e duração",
+    "keywords": "resolution fps projeto configuracao",
+    "requires": "any"
+  },
+  {
+    "id": "search_layers",
+    "title": "Buscar camadas",
+    "detail": "Localize uma camada pelo nome",
+    "keywords": "layer search encontrar camada",
+    "requires": "layers"
+  },
+  {
+    "id": "undo",
+    "title": "Desfazer",
+    "detail": "Reverte a última edição",
+    "keywords": "undo desfazer",
+    "requires": "undo"
+  },
+  {
+    "id": "redo",
+    "title": "Refazer",
+    "detail": "Reaplica a edição desfeita",
+    "keywords": "redo refazer",
+    "requires": "redo"
+  }
+]

@@ -267,7 +267,7 @@ enum PanelPresetKind: String, CaseIterable {
     }
 }
 
-private struct PanelPresetEntry: Identifiable {
+struct PanelPresetEntry: Identifiable {
     let id: String
     let name: String
     let kind: PanelPresetKind
@@ -278,6 +278,39 @@ private struct PanelPresetEntry: Identifiable {
     var object: [String: Any]? {
         guard let data = source?.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+}
+
+extension PanelPresetEntry {
+    static func loadAll() -> [PanelPresetEntry] {
+        var result: [PanelPresetEntry] = []
+        for kind in PanelPresetKind.allCases {
+            if kind == .text {
+                let keys = ["pn_pop", "pn_textpreset_bounce", "pn_textpreset_slide", "panel_escala", "pn_textpreset_appear",
+                            "panel_desfoque", "pn_textpreset_word_highlight", "pn_karaoke", "pn_textpreset_typewriter", "pn_textpreset_wave", "pn_textpreset_elastic"]
+                for (index, key) in keys.enumerated() {
+                    result.append(PanelPresetEntry(id: "text:\(index)", name: AureaText.t(key), kind: kind, textPreset: UInt32(index)))
+                }
+                for (index, name) in extraTextPresetNames.enumerated() {
+                    result.append(PanelPresetEntry(id: "text:\(index + 11)", name: name, kind: kind, textPreset: UInt32(index + 11)))
+                }
+            } else if let url = Bundle.main.url(forResource: kind.rawValue, withExtension: "json", subdirectory: "presets"),
+                      let data = try? Data(contentsOf: url), let objects = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
+                for (index, object) in objects.enumerated() {
+                    if let bytes = AureaJSONData(object, false), let json = String(data: bytes, encoding: .utf8) {
+                        let name = object["name"] as? String ?? ""
+                        result.append(PanelPresetEntry(id: "b:\(kind.rawValue):\(index)", name: name.isEmpty ? AureaText.t("pn_preset_n", index + 1) : name, kind: kind, json: json))
+                    }
+                }
+            }
+            let files = ((try? FileManager.default.contentsOfDirectory(at: kind.directory, includingPropertiesForKeys: [.isRegularFileKey])) ?? [])
+                .filter { $0.pathExtension == "json" && (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+                .sorted { $0.lastPathComponent.lowercased() < $1.lastPathComponent.lowercased() }
+            for file in files {
+                result.append(PanelPresetEntry(id: "user:\(kind.rawValue):\(file.lastPathComponent)", name: file.deletingPathExtension().lastPathComponent, kind: kind, file: file))
+            }
+        }
+        return result
     }
 }
 
@@ -374,6 +407,7 @@ struct PresetsPanel: View {
             if model.selectedLayer?.kind == 4 { picked = "texto" }
             // "Meus presets" (vindo dos efeitos) abre direto na aba pedida.
             if let kind = model.presetsOpenKind { picked = kind; model.presetsOpenKind = nil }
+            if let query = model.presetsOpenSearch { search = query; model.presetsOpenSearch = nil }
             load()
         }
         .onChange(of: model.language) { _ in load() }
@@ -401,34 +435,7 @@ struct PresetsPanel: View {
     private func load() {
         favorites = Set(UserDefaults.standard.stringArray(forKey: "presetFavorites") ?? [])
         recents = UserDefaults.standard.stringArray(forKey: "presetRecents") ?? []
-        var result: [PanelPresetEntry] = []
-        for kind in PanelPresetKind.allCases {
-            if kind == .text {
-                let keys = ["pn_pop", "pn_textpreset_bounce", "pn_textpreset_slide", "panel_escala", "pn_textpreset_appear",
-                            "panel_desfoque", "pn_textpreset_word_highlight", "pn_karaoke", "pn_textpreset_typewriter", "pn_textpreset_wave", "pn_textpreset_elastic"]
-                for (index, key) in keys.enumerated() {
-                    result.append(PanelPresetEntry(id: "text:\(index)", name: AureaText.t(key), kind: kind, textPreset: UInt32(index)))
-                }
-                for (index, name) in extraTextPresetNames.enumerated() {
-                    result.append(PanelPresetEntry(id: "text:\(index + 11)", name: name, kind: kind, textPreset: UInt32(index + 11)))
-                }
-            } else if let url = Bundle.main.url(forResource: kind.rawValue, withExtension: "json", subdirectory: "presets"),
-                      let data = try? Data(contentsOf: url), let objects = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
-                for (index, object) in objects.enumerated() {
-                    if let bytes = AureaJSONData(object, false), let json = String(data: bytes, encoding: .utf8) {
-                        let name = object["name"] as? String ?? ""
-                        result.append(PanelPresetEntry(id: "b:\(kind.rawValue):\(index)", name: name.isEmpty ? AureaText.t("pn_preset_n", index + 1) : name, kind: kind, json: json))
-                    }
-                }
-            }
-            let files = ((try? FileManager.default.contentsOfDirectory(at: kind.directory, includingPropertiesForKeys: [.isRegularFileKey])) ?? [])
-                .filter { $0.pathExtension == "json" && (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
-                .sorted { $0.lastPathComponent.lowercased() < $1.lastPathComponent.lowercased() }
-            for file in files {
-                result.append(PanelPresetEntry(id: "user:\(kind.rawValue):\(file.lastPathComponent)", name: file.deletingPathExtension().lastPathComponent, kind: kind, file: file))
-            }
-        }
-        presets = result
+        presets = PanelPresetEntry.loadAll()
     }
     private func markUsed(_ entry: PanelPresetEntry) {
         recents.removeAll { $0 == entry.id }; recents.insert(entry.id, at: 0); recents = Array(recents.prefix(10))

@@ -15,6 +15,7 @@ def validate():
     pairs.append((android / 'assets/previa_efeitos.jpg', app / 'previa_efeitos.jpg'))
     pairs += [(android / f'assets/presets/{name}.json', app / f'Resources/presets/{name}.json')
               for name in ('animacao', 'efeitos', 'curva', 'legenda')]
+    pairs.append((android / 'assets/editor_commands.json', app / 'Resources/editor_commands.json'))
     for source, destination in pairs:
         if hashlib.sha256(source.read_bytes()).digest() != hashlib.sha256(destination.read_bytes()).digest():
             raise ValueError(f'iOS resource differs from Android: {destination.relative_to(root)}')

@@ -167,6 +167,54 @@ AUREA_TEST(Edit, EditModeSurvivesSaveAndReopen) {
     std::remove(path.c_str());
 }
 
+AUREA_TEST(Edit, LockedClipsRejectDestructiveEditsWithoutAddingUndo) {
+    EditRig r;
+    r.comp()->layer(LayerId::unpack(r.b))->locked = true;
+    r.e.set_edit_mode(true);
+    for (const auto type : {CommandType::LayerDelete, CommandType::LayerSplit, CommandType::LayerSetTimeRange}) {
+        Command cmd;
+        cmd.type = type;
+        cmd.layer_ref.layer = LayerId::unpack(r.b);
+        if (type == CommandType::LayerSplit) cmd.layer_split.at = FrameIndex{45};
+        if (type == CommandType::LayerSetTimeRange) {
+            cmd.layer_range.start = FrameIndex{30};
+            cmd.layer_range.end = FrameIndex{40};
+        }
+        AUREA_CHECK(!r.e.apply_command(cmd).ok());
+    }
+    AUREA_CHECK(!r.e.ripple_delete(&r.b, 1));
+    AUREA_CHECK(r.at(r.b, 30, 60));
+    r.undo(); // Rejected edits did not hide the actual previous operation.
+    AUREA_CHECK(!r.e.edit_mode());
+    AUREA_CHECK(r.at(r.b, 30, 60));
+}
+
+AUREA_TEST(Edit, MagneticTrimKeepsLockedLayerAnchored) {
+    EditRig r;
+    r.comp()->layer(LayerId::unpack(r.c))->locked = true;
+    r.e.set_edit_mode(true);
+    r.range(r.a, 0, 20);
+    AUREA_CHECK(r.at(r.b, 20, 50));
+    AUREA_CHECK(r.at(r.c, 60, 90));
+    r.undo();
+    AUREA_CHECK(r.at(r.b, 30, 60));
+    AUREA_CHECK(r.at(r.c, 60, 90));
+}
+
+AUREA_TEST(Edit, RippleDeletePreservesLocksAndDoesNotRepeatedlyCollapseAnchoredGaps) {
+    EditRig r;
+    r.comp()->layer(LayerId::unpack(r.c))->locked = true;
+    const u64 ids[] = {r.b, r.c};
+    AUREA_CHECK(r.e.ripple_delete(ids, 2));
+    AUREA_CHECK(r.L(r.b) == nullptr);
+    AUREA_CHECK(r.at(r.c, 60, 90));
+    AUREA_CHECK_EQ(r.e.remove_gaps(), 0);
+    AUREA_CHECK_EQ(r.e.remove_gaps(), 0);
+    r.undo();
+    AUREA_CHECK(r.at(r.b, 30, 60));
+    AUREA_CHECK(r.at(r.c, 60, 90));
+}
+
 // =============================================================================
 //  Copiar e colar
 // =============================================================================

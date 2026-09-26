@@ -88,7 +88,7 @@ import com.aurea.aurea.ui.theme.tocavel
 // =============================================================================
 
 /** Folhas e diálogos que a casca abre (um por vez). */
-internal enum class ShellSheet { LayerMenu, RenameLayer, TimelineMenu, ProjectSettings, CopyPaste, GoToTime, SearchLayers }
+internal enum class ShellSheet { LayerMenu, RenameLayer, TimelineMenu, ProjectSettings, CopyPaste, GoToTime, SearchLayers, CommandSearch }
 
 /**
  * O que está aberto na casca. Nada aqui é do projeto: o motor não sabe que
@@ -375,7 +375,7 @@ private fun TopBarHost(store: EditorStore, ui: EditorUi) {
     val primary by remember { derivedStateOf { store.primary } }
     val id = primary
     when {
-        size >= 2 -> BatchTopBar(store)
+        size >= 2 -> BatchTopBar(store, ui)
         id != null -> LayerTopBar(store, ui, id)
         else -> ProjectTopBar(store, ui)
     }
@@ -528,6 +528,7 @@ private fun ShellSheets(store: EditorStore, ui: EditorUi) {
         ShellSheet.ProjectSettings -> ProjectSettingsSheet(store, dismiss)
         ShellSheet.CopyPaste -> CopyPasteSheet(store, dismiss)
         ShellSheet.SearchLayers -> SearchLayersSheet(store, dismiss)
+        ShellSheet.CommandSearch -> CommandSearchSheet(store, ui, dismiss)
         ShellSheet.GoToTime -> {
             val fps = store.project.fps
             val seconds = remember { "%.2f".format(java.util.Locale.ROOT, store.playhead / (if (fps > 0f) fps else 30f)) }

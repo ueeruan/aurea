@@ -52,6 +52,8 @@ import UIKit
             "modelRevision": model.status.modelRevision, "playhead": model.status.playhead,
             "corePlayhead": readCoreStatus ? coreStatus.playhead : -1,
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
+            "editMode": model.editMode, "coreEditMode": model.engine.timelineEditMode,
+            "effectCount": model.effects.count,
             "sheet": String(describing: model.sheetContent),
             "selectionCount": model.selection.count, "isManipulating": model.stageManipulating,
             "canUndo": model.status.canUndo != 0, "canRedo": model.status.canRedo != 0,

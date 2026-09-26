@@ -270,7 +270,7 @@ void Composition::retime(f64 fps) noexcept {
 void Composition::shift_from(FrameIndex from, i64 delta, LayerId except) noexcept {
     if (delta == 0) return;
     layers_.for_each([&](LayerId id, Layer& l) {
-        if (id == except || l.start.value < from.value) return;
+        if (id == except || l.locked || l.start.value < from.value) return;
         l.start = FrameIndex{std::max<i64>(0, l.start.value + delta)};
         l.end = FrameIndex{std::max<i64>(l.start.value + 1, l.end.value + delta)};
     });
@@ -310,6 +310,13 @@ i64 Composition::close_gaps(FrameIndex from, FrameIndex to) noexcept {
     i64 removed = 0;
     // Do fim para o começo: cada deslocamento não mexe nos buracos anteriores.
     for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
+        // Removing a global gap must preserve sync. If a locked layer would
+        // have to move, keep this gap; repeated calls remain idempotent.
+        bool anchored = false;
+        layers_.for_each([&](LayerId, const Layer& l) {
+            if (l.locked && l.start.value >= it->second) anchored = true;
+        });
+        if (anchored) continue;
         shift_from(FrameIndex{it->second}, -(it->second - it->first));
         removed += it->second - it->first;
     }

@@ -261,6 +261,7 @@ final class AureaModel: ObservableObject {
     @Published var expressionSheet: ExpressionRequest?
     @Published var namePrompt: NamePromptRequest?
     /// Aba com que o painel de presets abre na próxima vez ("Meus presets" dos efeitos).
+    var presetsOpenSearch: String?
     @Published var presetsOpenKind: String?
 
     /// Grava um preset de efeitos do usuário (mesma pasta/formato do PresetsPanel).
@@ -917,6 +918,8 @@ final class AureaModel: ObservableObject {
     /// mudança de revisão (é UMA travessia por lista, ver Engine::query_*).
     func refreshModel(force: Bool = false) {
         guard started else { return }
+        let nextEditMode = engine.timelineEditMode
+        if editMode != nextEditMode { editMode = nextEditMode }
         // Desfazer/refazer, abrir projeto e ripple também mexem nas marcas: a
         // lista local não pode ficar velha (a âncora acendia numa marca extinta).
         refreshMarkers()
@@ -2137,8 +2140,19 @@ final class AureaModel: ObservableObject {
 
     // --- Modo Edição ---------------------------------------------------------
     func toggleEditMode() {
-        editMode.toggle()
-        engine.run { $0.setEditMode(editMode) }
+        let next = !engine.timelineEditMode
+        engine.run { $0.setEditMode(next) }
+        refreshModel(force: true)
+    }
+
+    func deleteSelectedLayers(ripple: Bool? = nil) {
+        let targets = layers.filter { selection.contains($0.id) && !$0.locked }
+        guard !targets.isEmpty else { toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
+        if status.playing != 0 { playPause() }
+        let ids = targets.map { NSNumber(value: $0.id) }
+        if ripple ?? engine.timelineEditMode { engine.rippleDeleteLayers(ids) }
+        else { engine.deleteLayers(ids) }
+        clearSelection()
         refreshModel(force: true)
     }
 

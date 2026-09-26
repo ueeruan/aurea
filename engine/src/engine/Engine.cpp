@@ -4309,7 +4309,7 @@ bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
     // Trecho que as camadas excluídas ocupavam: só buracos DENTRO dele fecham.
     i64 lo = std::numeric_limits<i64>::max(), hi = 0;
     for (u32 i = 0; i < count; ++i) {
-        if (const Layer* l = comp->layer(LayerId::unpack(ids[i]))) {
+        if (const Layer* l = comp->layer(LayerId::unpack(ids[i])); l && !l->locked) {
             lo = std::min(lo, l->start.value);
             hi = std::max(hi, l->end.value);
         }
@@ -4319,7 +4319,8 @@ bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     for (u32 i = 0; i < count; ++i) {
         const LayerId id = LayerId::unpack(ids[i]);
-        if (!comp->layer(id)) continue;
+        const Layer* layer = comp->layer(id);
+        if (!layer || layer->locked) continue;
         media_.close_layer(id);
         comp->remove_layer(id);
         selection_.erase(std::remove(selection_.begin(), selection_.end(), ids[i]), selection_.end());
@@ -7814,6 +7815,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
     const u64 now = monotonic_ns();
 
     auto need_layer = [&](LayerId id) -> Layer* { return comp ? comp->layer(id) : nullptr; };
+    // A lock protects timeline edits at the shared boundary, including queued
+    // commands after a gesture has started. Reject before recording undo.
+    if (cmd.type == CommandType::LayerDelete || cmd.type == CommandType::LayerSetTimeRange ||
+        cmd.type == CommandType::LayerSplit) {
+        if (const Layer* layer = need_layer(cmd.layer_ref.layer); layer && layer->locked)
+            return Status{Errc::InvalidState, "camada bloqueada"};
+    }
     // O PlaybackController é a fonte da verdade; a timeline espelha o estado
     // para quem a consulta (serialização, estado da UI).
     auto sync_timeline = [&] {

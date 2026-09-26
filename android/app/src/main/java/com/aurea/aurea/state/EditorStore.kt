@@ -1556,14 +1556,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Camadas ------------------------------------------------------------
-    fun deleteLayers(ids: Collection<Long> = selection) {
-        if (ids.isEmpty()) return
-        if (editMode) {
+    fun deleteLayers(ids: Collection<Long> = selection, ripple: Boolean = editMode) {
+        val targets = layers.filter { it.id in ids && !it.locked }.map { it.id }
+        if (targets.isEmpty()) return
+        if (playing) pause()
+        if (ripple) {
             // Modo Edição: some e o buraco fecha (um passo de desfazer).
-            engine.rippleDelete(ids.toLongArray())
+            engine.rippleDelete(targets.toLongArray())
             refreshNow()
         } else {
-            group("apagar") { ids.forEach { deleteLayer(it) } }
+            group("apagar") { targets.forEach { deleteLayer(it) } }
         }
         clearSelection()
     }
@@ -3110,6 +3112,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Aba com que o painel de presets abre na próxima vez (ex.: "Meus presets" dos efeitos). */
+    var presetsOpenSearch: String? = null
     var presetsOpenKind by mutableStateOf<com.aurea.aurea.presets.PresetKind?>(null)
 
     /**

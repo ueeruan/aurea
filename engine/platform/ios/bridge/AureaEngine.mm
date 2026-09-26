@@ -938,6 +938,11 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     if (auto* e = self.engine) e->set_edit_mode(on != NO);
 }
 
+- (BOOL)timelineEditMode {
+    auto* e = self.engine;
+    return e && e->edit_mode();
+}
+
 // =============================================================================
 // Transform
 // =============================================================================

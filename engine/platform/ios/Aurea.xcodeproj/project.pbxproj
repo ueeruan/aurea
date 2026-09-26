@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DA2121000000000000000001 /* CommandSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000002 /* CommandSearch.swift */; };
+		DA2121000000000000000003 /* editor_commands.json in Resources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000004 /* editor_commands.json */; };
 		DA2113000000000000000001 /* PerformanceTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2113000000000000000002 /* PerformanceTest.swift */; };
 		AE0000000000000000000121 /* HomeBackdrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000120 /* HomeBackdrop.swift */; };
 		AE0000000000000000000111 /* ParityExportProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000110 /* ParityExportProbe.swift */; };
@@ -93,6 +95,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DA2121000000000000000002 /* CommandSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSearch.swift; sourceTree = "<group>"; };
+		DA2121000000000000000004 /* editor_commands.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Resources/editor_commands.json; sourceTree = "<group>"; };
 		DA2113000000000000000002 /* PerformanceTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTest.swift; sourceTree = "<group>"; };
 		AE0000000000000000000120 /* HomeBackdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBackdrop.swift; sourceTree = "<group>"; };
 		AE0000000000000000000110 /* ParityExportProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParityExportProbe.swift; sourceTree = "<group>"; };
@@ -238,6 +242,8 @@
 				AE000000000000000000008C /* VectorPanel.swift */,
 				AE000000000000000000008E /* AppPanels.swift */,
 				DA2113000000000000000002 /* PerformanceTest.swift */,
+				DA2121000000000000000002 /* CommandSearch.swift */,
+				DA2121000000000000000004 /* editor_commands.json */,
 				AE0000000000000000000086 /* presets */,
 				AE0000000000000000000084 /* ParticleControls.swift */,
 				AE000000000000000000000A /* Panel3DView.swift */,
@@ -432,6 +438,7 @@
 				AD0000000000000000000065 /* minimax_h3_api.json in Resources */,
 				AE00000000000000000000E0 /* Fonts in Resources */,
 				AE0000000000000000000087 /* presets in Resources */,
+				DA2121000000000000000003 /* editor_commands.json in Resources */,
 				AE00000000000000000000C5 /* previa_efeitos.jpg in Resources */,
 				AE0000000000000000000090 /* CupertinoIcons.ttf in Resources */,
 				AE0000000000000000000130 /* PrivacyInfo.xcprivacy in Resources */,
@@ -492,6 +499,7 @@
 				AE000000000000000000008D /* VectorPanel.swift in Sources */,
 				AE000000000000000000008F /* AppPanels.swift in Sources */,
 				DA2113000000000000000001 /* PerformanceTest.swift in Sources */,
+				DA2121000000000000000001 /* CommandSearch.swift in Sources */,
 				AE0000000000000000000085 /* ParticleControls.swift in Sources */,
 				AE0000000000000000000042 /* Panel3DView.swift in Sources */,
 				AE0000000000000000000043 /* ExportView.swift in Sources */,
@@ -590,7 +598,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2120;
+				CURRENT_PROJECT_VERSION = 2121;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -645,7 +653,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2120;
+				CURRENT_PROJECT_VERSION = 2121;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",

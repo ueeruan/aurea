@@ -135,6 +135,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             )
             if (linking) LinkMenu(store, listOf(h.id)) { linking = false }
         }
+        ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
         ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp, width = 44.dp)
         ChromeVectorButton(Icons.Filled.MoreHoriz, stringResource(R.string.editor_mais_acoes_camada), onClick = { openSheet(store, ui, ShellSheet.LayerMenu) }, size = 22.dp, width = 44.dp)
     }
@@ -337,7 +338,7 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                 )
             }
         }
-        ProjectClock(store) { openSheet(store, ui, ShellSheet.GoToTime) }
+        ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
         ChromeVectorButton(Icons.Filled.MoreVert, stringResource(R.string.editor_mais_linha_tempo), onClick = { openSheet(store, ui, ShellSheet.TimelineMenu) })
         ChromeButton(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_projeto_cbe9), onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) }, size = 19.dp)
         // Exportar em destaque: a A.01 pintava em `acao` (#245D8C), 2,6:1
@@ -346,22 +347,6 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
             if (store.playing) store.pause()
             ui.exporting = true
         }, tint = AureaColors.Accent)
-    }
-}
-
-/** O relógio da barra do projeto: única peça do topo que recompõe com o tempo. */
-@Composable
-private fun ProjectClock(store: EditorStore, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .semantics { contentDescription = "Ir para o tempo" }
-            .tocavel(haptic = true, onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 12.dp),
-    ) {
-        Text(
-            ShellTime.short(store.playhead, store.project.fps),
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, color = ShellColors.White40)).merge(AureaType.Tabular),
-        )
     }
 }
 
@@ -435,7 +420,7 @@ private fun InlineName(
  * baixo ([MultiSelectionPanel]).
  */
 @Composable
-internal fun BatchTopBar(store: EditorStore) {
+internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
     val count by remember { derivedStateOf { store.selection.size } }
     val groups by remember {
         derivedStateOf { store.layers.filter { it.id in store.selection && it.kind == LayerType.Group.kind }.map { it.id } }
@@ -458,6 +443,7 @@ internal fun BatchTopBar(store: EditorStore) {
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = ink)),
             modifier = Modifier.weight(1f),
         )
+        ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp, tint = ink)
         Box {
             ChromeButton(CupertinoGlyph.Link, stringResource(R.string.editor_vincular_escolhidas_camada), onClick = {
                 if (store.playing) store.pause()

@@ -51,6 +51,52 @@ import XCTest
         }
     }
 
+    func testCommandSearchFindsAccentlessActionAndUndoRefreshesMagneticMode() throws {
+        _ = try launch("transform")
+        let before = try snapshot()
+        try openCommandSearch("magnetica")
+        let action = app.buttons["command:magnetic"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5)); XCTAssertTrue(action.isEnabled)
+        action.tap()
+        _ = try awaitSnapshot("Magnetic mode changes in the model and core") {
+            $0.editMode != before.editMode && $0.editMode == $0.coreEditMode
+        }
+        try undo()
+        _ = try awaitSnapshot("Undo refreshes the iOS magnetic indicator") {
+            $0.editMode == before.editMode && $0.editMode == $0.coreEditMode
+        }
+    }
+
+    func testCommandSearchAppliesEffectAndKeepsFavoriteAcrossOpenings() throws {
+        _ = try launch("transform")
+        let before = try snapshot()
+        try openCommandSearch("glow")
+        let effect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "command:effect:")).firstMatch
+        XCTAssertTrue(effect.waitForExistence(timeout: 5)); XCTAssertTrue(effect.isEnabled)
+        effect.tap()
+        _ = try awaitSnapshot("Effect from universal search reaches the native stack") { $0.effectCount == before.effectCount + 1 }
+        try undo()
+        _ = try awaitSnapshot("Search effect is a reversible edit") { $0.effectCount == before.effectCount }
+
+        try openCommandSearch("magnetica")
+        let add = app.buttons["Adicionar aos favoritos: Alternar edição magnética"]
+        if add.exists { add.tap() }
+        app.buttons["Fechar"].tap()
+        try openCommandSearch("")
+        app.buttons["Favoritos"].tap()
+        XCTAssertTrue(app.buttons["command:magnetic"].waitForExistence(timeout: 5))
+        app.buttons["Fechar"].tap()
+        XCTAssertEqual(try snapshot().editMode, before.editMode, "Favoriting must not execute the command")
+    }
+
+    private func openCommandSearch(_ query: String) throws {
+        let open = app.buttons["commandSearchOpen"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5)); XCTAssertTrue(open.isHittable); open.tap()
+        let field = app.textFields["commandSearchField"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        if !query.isEmpty { field.tap(); field.typeText(query) }
+    }
+
     func testVideoTextAndCaptionsPlayForThirtySecondsWithBoundedMemory() throws {
         _ = try launch("playback-stress")
         let play = app.buttons["Repeat on · hold to turn off"].firstMatch
@@ -495,6 +541,9 @@ import XCTest
         let coreStarted: Bool
         let coreError: String
         let layerCount: Int
+        let editMode: Bool
+        let coreEditMode: Bool
+        let effectCount: Int
         let sheet: String
         let primaryID: Int64
         let selectionCount: Int

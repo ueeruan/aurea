@@ -6,6 +6,7 @@ struct TopBarView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     @State private var performanceTest = false
+    @State private var commandSearch = false
     private var layer: LayerItem? { model.selectedLayer }
     private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
     private var count: Int { model.selection.count }
@@ -20,6 +21,15 @@ struct TopBarView: View {
         .frame(height: StageDim.barButtonHeight)
         .background(count >= 2 ? AureaColors.accent : AureaColors.editorTopBar)
         .sheet(isPresented: $performanceTest) { PerformanceTestPanel() }
+        .sheet(isPresented: $commandSearch) { CommandSearchView().environmentObject(model).environmentObject(shell) }
+    }
+
+    private var searchButton: some View {
+        Button {
+            if model.status.playing != 0 { model.playPause() }
+            commandSearch = true
+        } label: { Image(systemName: "magnifyingglass").frame(width: 44, height: 44) }
+            .buttonStyle(.plain).accessibilityLabel("Buscar ferramentas").accessibilityIdentifier("commandSearchOpen")
     }
 
     private var projectBar: some View {
@@ -36,13 +46,7 @@ struct TopBarView: View {
                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_projetos"))
                 ShellInlineName(name: model.projectName, placeholder: "(Sem título)", limit: 320) { model.renameCurrentProject(to: $0) }
             }
-            Button {
-                shell.timeInput = ShellClock.short(model.status.playhead, Float(model.compositionFps)); open(.goToTime)
-            } label: {
-                Text(ShellClock.short(model.status.playhead, Float(model.compositionFps)))
-                    .font(.aurea(size: 12.5)).monospacedDigit().foregroundStyle(StageInk.white40)
-                    .padding(.horizontal, 6).padding(.vertical, 12)
-            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_ir_tempo"))
+            searchButton
             Button { open(.timelineMenu) } label: { MaterialGlyph("filled.MoreVert", size: 21, color: AureaColors.text).frame(width: 40, height: 44) }
                 .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_linha_tempo"))
             ShellBarButton(glyph: CupertinoGlyph.GearAltFill, description: AureaText.t("editor_projeto_cbe9"), size: 19) { open(.projectSettings) }
@@ -58,6 +62,7 @@ struct TopBarView: View {
                 model.mutate { $0.setLayer(row.id, name: value) }; model.refreshModel(force: true)
             }
             .id(row.id)
+            searchButton
             linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 44) { removeSelection() }
             Button { open(.layerMenu) } label: { MaterialGlyph("filled.MoreHoriz", size: 22, color: AureaColors.text).frame(width: 44, height: 44) }
@@ -69,6 +74,7 @@ struct TopBarView: View {
             ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 44, tint: AureaColors.onAccent) { model.clearSelection() }
             Text("\(count) camadas selecionadas").font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.onAccent)
                 .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            searchButton
             linkMenuButton(tint: AureaColors.onAccent)
             ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, tint: AureaColors.onAccent) { model.groupSelection() }
             if model.layers.contains(where: { model.selection.contains($0.id) && $0.kind == 12 }) {
@@ -100,9 +106,7 @@ struct TopBarView: View {
         model.setParentMany(Array(model.selection), parent: id)
     }
     private func removeSelection() {
-        let targets = model.layers.filter { model.selection.contains($0.id) && !$0.locked }
-        guard !targets.isEmpty else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
-        model.engine.deleteLayers(targets.map { NSNumber(value: $0.id) }); model.clearSelection(); model.refreshModel(force: true)
+        model.deleteSelectedLayers()
     }
 }
 
@@ -415,9 +419,7 @@ private struct ShellMenuRow: View {
     private func dismiss() { shell.dismiss(); UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
     private func act(_ action: () -> Void) { dismiss(); action() }
     private func removeSelection() {
-        let targets = model.layers.filter { model.selection.contains($0.id) && !$0.locked }
-        guard !targets.isEmpty else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
-        model.engine.deleteLayers(targets.map { NSNumber(value: $0.id) }); model.clearSelection(); model.refreshModel(force: true)
+        model.deleteSelectedLayers()
     }
     @ViewBuilder private var layerMenu: some View {
         if let row = layer {

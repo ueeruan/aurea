@@ -352,6 +352,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)duplicateLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)rippleDeleteLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)setEditMode:(BOOL)on;
+@property(nonatomic, readonly) BOOL timelineEditMode;
 
 // --- Transform --------------------------------------------------------------
 - (void)setTransformForLayer:(long long)layerId

@@ -5,9 +5,9 @@ import sys
 
 root = Path(sys.argv[1])
 blobs = sorted(root.rglob('*.mslblob'))
-# Wipe, optical effects and sampled box/directional blur add three passes.
-if len(blobs) != 70:
-    raise SystemExit(f'Expected 70 Metal shaders, found {len(blobs)}')
+# Hotspots adds one pass to the existing catalog.
+if len(blobs) != 71:
+    raise SystemExit(f'Expected 71 Metal shaders, found {len(blobs)}')
 
 failures = 0
 for blob in blobs:

@@ -41,7 +41,7 @@ struct TransformView: View {
         return props
     }
     private var look: KeyframeLook {
-        if !keyProps.isEmpty && keyProps.allSatisfy({ keyMask & (1 << $0) != 0 }) { return .keyHere }
+        if keyProps.contains(where: { keyMask & (1 << $0) != 0 }) { return .keyHere }
         return keyProps.contains { animatedMask & (1 << $0) != 0 } ? .animated : .none
     }
     private var curveKeys: [KeyframeItem] {
@@ -424,7 +424,7 @@ struct TransformView: View {
     }
     private func toggleKey() {
         guard !(model.selectedLayer?.locked ?? false), !keyProps.isEmpty else { return }
-        let remove = keyProps.allSatisfy { property in
+        let remove = keyProps.contains { property in
             (model.keyframes[id] ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == model.localPlayhead }
         }
         let snapshot = keyProps.map { ($0, value($0)) }, local = model.localPlayhead

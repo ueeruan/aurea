@@ -107,12 +107,11 @@ internal fun effectLook(store: EditorStore, effectId: Int, param: Int, component
 }
 
 /**
- * Losango de um grupo de transform. "Marca aqui" só quando TODAS têm marca no
- * cabeçote — é exatamente quando o toque vai APAGAR (`toggleTransformKeyframe`).
+ * A partial property group is still a removable keyframe at the playhead.
  */
 internal fun transformLook(d: LayerDetail?, props: IntArray): KeyframeLook {
     d ?: return KeyframeLook.None
-    if (props.isNotEmpty() && props.all { d.hasKeyAtPlayhead(it) }) return KeyframeLook.KeyHere
+    if (props.any { d.hasKeyAtPlayhead(it) }) return KeyframeLook.KeyHere
     return if (props.any { d.isAnimated(it) }) KeyframeLook.Animated else KeyframeLook.None
 }
 

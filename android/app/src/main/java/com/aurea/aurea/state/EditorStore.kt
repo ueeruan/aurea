@@ -1810,19 +1810,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /**
      * Losango de keyframe de um grupo de propriedades (ex.: posição = X+Y).
-     * Keyframe no playhead em todas → apaga; senão → cria com o valor atual.
+     * Any key in the focused group at the playhead is removable, including partial XYZ groups.
      */
     fun toggleTransformKeyframe(properties: IntArray, layer: Long? = primary) {
         val id = layer ?: return
         val d = (if (id == primary) detail else detailOf(id)) ?: return
         val row = layers.firstOrNull { it.id == id } ?: return
         val local = playhead - row.startFrame + row.offsetFrames
-        val allHere = properties.all { p -> keyframes[id].orEmpty().any {
+        val anyHere = properties.any { p -> keyframes[id].orEmpty().any {
             it.property == p && it.effectIndex == NO_EFFECT && it.time == local
         } }
-        group(if (allHere) "remover keyframe" else "adicionar keyframe") {
+        group(if (anyHere) "remover keyframe" else "adicionar keyframe") {
             properties.forEach { p ->
-                if (allHere) deleteKeyframe(id, p, NO_EFFECT, 0, local)
+                if (anyHere) deleteKeyframe(id, p, NO_EFFECT, 0, local)
                 else insertKeyframe(id, p, NO_EFFECT, 0, local, transformValue(d, p))
             }
         }

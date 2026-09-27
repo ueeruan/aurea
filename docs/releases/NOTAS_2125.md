@@ -8,5 +8,6 @@
 - Consentimento e Responsabilidade com aceite explícito, inclusive para quem atualiza uma instalação existente.
 - Abertura dos perfis do criador uma vez por instalação. O app registra abertura dos links, sem verificar seguidores.
 - Mantidas as correções anteriores de vídeo Android, Samsung, Metal e efeitos.
+- Samsung usa decoder de software desde a abertura, inclusive nas miniaturas; frames da CPU ficam em memória própria. Coleta da pilha Java antecipada para a inicialização do app.
 
 Os presets de texto preservam as proporções de tempo das specs e usam os recursos nativos do Aurea; os previews dos cartões são ilustrativos.

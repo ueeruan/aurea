@@ -6,13 +6,8 @@
 
 namespace aurea::android {
 
-// Samsung video import crash mitigation. Keep MediaCodec hardware decoding,
-// but use readable YUV planes instead of PRIVATE gralloc buffers sampled by
-// the GPU (zero-copy). Evidence: limited to Android 12/12L, it stopped the
-// crash on the reported Galaxy A51; other Samsung models and Android versions
-// (Exynos AND Snapdragon, so the common factor is Samsung's codec/gralloc
-// vendor layer, not one GPU driver) kept closing on any video import. It now
-// applies to every Samsung release the app supports (API 26+).
+// Samsung vendor CPU mappings also fault in planes_from and texture upload.
+// Use the platform software decoder before producing the first frame.
 inline bool needs_readable_video_planes(std::string_view manufacturer, int sdk) noexcept {
     if (sdk < 26) return false;
     constexpr std::string_view samsung = "samsung";
@@ -22,6 +17,22 @@ inline bool needs_readable_video_planes(std::string_view manufacturer, int sdk) 
         if ((ch >= 'A' && ch <= 'Z' ? ch + ('a' - 'A') : ch) != samsung[i]) return false;
     }
     return true;
+}
+
+inline bool needs_software_video(std::string_view manufacturer, int sdk, bool safeMode = false) noexcept {
+    return safeMode || needs_readable_video_planes(manufacturer, sdk);
+}
+
+// Explicit allowlist: never silently return to a vendor decoder in safe mode.
+inline const char* software_video_decoder(std::string_view mime, bool legacy = false) noexcept {
+    if (mime == "video/avc") return legacy ? "OMX.google.h264.decoder" : "c2.android.avc.decoder";
+    if (mime == "video/hevc") return legacy ? "OMX.google.hevc.decoder" : "c2.android.hevc.decoder";
+    if (mime == "video/x-vnd.on2.vp8") return legacy ? "OMX.google.vp8.decoder" : "c2.android.vp8.decoder";
+    if (mime == "video/x-vnd.on2.vp9") return legacy ? "OMX.google.vp9.decoder" : "c2.android.vp9.decoder";
+    if (mime == "video/mp4v-es") return legacy ? "OMX.google.mpeg4.decoder" : "c2.android.mpeg4.decoder";
+    if (mime == "video/3gpp") return legacy ? "OMX.google.h263.decoder" : "c2.android.h263.decoder";
+    if (mime == "video/av01") return legacy ? nullptr : "c2.android.av1.decoder";
+    return nullptr;
 }
 
 // Readable-planes mode (Samsung, and the sticky "safe video mode" any device

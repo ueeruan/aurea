@@ -19,16 +19,18 @@ static u64 luma_hash(const FrameRef& frame) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 3) { std::fprintf(stderr, "usage: aurea_media_probe video timestamps-us.txt\n"); return 2; }
+    if (argc != 3 && argc != 4) { std::fprintf(stderr, "usage: aurea_media_probe video timestamps-us.txt [software]\n"); return 2; }
     std::ifstream timing(argv[2]);
     std::vector<i64> expected;
     for (i64 pts; timing >> pts;) expected.push_back(pts);
     if (expected.empty()) return 2;
     android::MediaCodecFactory factory;
     factory.set_zero_copy(false);
+    if (argc == 4) factory.set_software_only(true);
     Asset asset; asset.kind = AssetKind::Video; asset.sourcePath = argv[1];
     auto decoder = factory.open_video(asset, MediaPriority::Preview);
     if (!decoder || !decoder->seek_to_keyframe(0).ok()) return 3;
+    if (argc == 4 && decoder->info().hardwareDecoder) return 15;
     std::vector<u64> hashes;
     FrameRef retained;
     const u64 started = monotonic_ns();

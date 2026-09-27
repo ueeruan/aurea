@@ -74,6 +74,20 @@ AUREA_TEST(AndroidVideoCompatibility, ReadablePlanesMappingFailureFallsBackToThe
     }
 }
 
+AUREA_TEST(AndroidVideoCompatibility, SamsungAndSafeModeNeverSelectVendorDecoder) {
+    for (int sdk : {26, 28, 31, 35, 36}) {
+        AUREA_CHECK(android::needs_software_video("Samsung", sdk));
+        AUREA_CHECK(!android::needs_software_video("Google", sdk));
+        AUREA_CHECK(android::needs_software_video("Google", sdk, true));
+    }
+    for (const char* mime : {"video/avc", "video/hevc", "video/x-vnd.on2.vp8", "video/x-vnd.on2.vp9", "video/mp4v-es", "video/3gpp"}) {
+        AUREA_CHECK(std::string_view(android::software_video_decoder(mime)).find("c2.android.") == 0);
+        AUREA_CHECK(std::string_view(android::software_video_decoder(mime, true)).find("OMX.google.") == 0);
+    }
+    AUREA_CHECK(android::software_video_decoder("video/av01") != nullptr);
+    AUREA_CHECK(android::software_video_decoder("video/unknown") == nullptr);
+}
+
 namespace {
 
 /// CPU (usuário + sistema) consumida pelo PROCESSO até agora, em ns.

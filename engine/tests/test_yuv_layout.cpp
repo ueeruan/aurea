@@ -43,6 +43,21 @@ AUREA_TEST(DecodedPlaneBounds, LastRowPaddingIsOptionalButEverySampleMustFit) {
     AUREA_CHECK(decoded_plane_fits(1, 1, 128, 1, 1));
 }
 
+AUREA_TEST(DecodedPlaneBounds, OwnedCopyHandlesOddDimensionsAndTruncatedPadding) {
+    const uint8_t y[]{1,2,3,99,4,5,6,99,7,8,9};
+    const uint8_t uv[]{10,20,11,21,99,99,12,22,13,23};
+    const uint8_t* data[]{y,uv,uv+1};
+    const int row[]{4,6,6}, pixel[]{1,2,2}, length[]{11,9,9};
+    std::vector<uint8_t> output;
+    AUREA_CHECK(copy_decoded_yuv420(3,3,data,row,pixel,length,output));
+    const std::vector<uint8_t> expected{1,2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23};
+    AUREA_CHECK(output == expected);
+    const int shortLength[]{11,8,9}, exoticPixel[]{1,4,4};
+    AUREA_CHECK(!copy_decoded_yuv420(3,3,data,row,pixel,shortLength,output));
+    AUREA_CHECK(!copy_decoded_yuv420(3,3,data,row,exoticPixel,length,output));
+    AUREA_CHECK(output == expected);
+}
+
 namespace {
 
 /// Escreve o quadro no buffer como o plano manda (é o que o sink faz).

@@ -419,10 +419,11 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     __system_property_get("ro.build.version.sdk", sdk);
     const bool readablePlanes = android::needs_readable_video_planes(manufacturer, std::atoi(sdk));
     const bool zeroCopy = gpu->capabilities().zero_copy_video() && !emulator && !readablePlanes;
+    c->media.set_software_only(android::needs_software_video(manufacturer, std::atoi(sdk)));
     c->media.set_zero_copy(zeroCopy);
     AUREA_LOG_INFO("video: %s%s", zeroCopy ? "zero-copy (AHardwareBuffer)" : "planos pela CPU",
                    emulator ? " (emulador: YCbCr externo nao confiavel)" :
-                   readablePlanes ? " (compatibilidade Samsung; MediaCodec mantido)" : "");
+                   readablePlanes ? " (compatibilidade Samsung; decoder de software)" : "");
     c->engine.start_render_thread();
     c->initialized = true;
     return JNI_TRUE;
@@ -434,8 +435,9 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
 AUREA_JNI void AUREA_FN(nativeUseReadableVideoPlanes)(JNIEnv*, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);
     if (!c) return;
+    c->media.set_software_only(true);
     c->media.set_zero_copy(false);
-    AUREA_LOG_INFO("video: planos pela CPU (modo seguro depois de fechamento com video)");
+    AUREA_LOG_INFO("video: decoder de software e planos proprios (modo seguro)");
 }
 
 AUREA_JNI void AUREA_FN(nativeShutdown)(JNIEnv*, jclass, jlong handle) {

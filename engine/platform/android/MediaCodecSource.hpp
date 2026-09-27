@@ -33,6 +33,7 @@ public:
     /// Zero-copy só quando o backend importa AHardwareBuffer com conversão
     /// YCbCr (GPUCapabilities::zero_copy_video). Vale para decoders abertos
     /// depois da chamada.
+    void set_software_only(bool enabled) noexcept { softwareOnly_.store(enabled); }
     void set_zero_copy(bool enabled) noexcept { zeroCopy_.store(enabled); }
     [[nodiscard]] bool zero_copy() const noexcept { return zeroCopy_.load(); }
 
@@ -49,6 +50,7 @@ public:
 
 private:
     std::atomic<bool> zeroCopy_{true};
+    std::atomic<bool> softwareOnly_{false};
     FdOpener opener_ = nullptr;
     void* openerCtx_ = nullptr;
 };

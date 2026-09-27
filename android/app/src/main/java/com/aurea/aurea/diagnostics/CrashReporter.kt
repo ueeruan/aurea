@@ -62,7 +62,7 @@ object CrashReporter {
      */
     fun instalar(context: Context) {
         if (!instalado.compareAndSet(false, true)) return
-        val app = context.applicationContext
+        val app = context.applicationContext ?: context
         runCatching {
             val anterior = marcador(app)
             if (anterior.exists()) anterior.renameTo(marcadorAnterior(app))
@@ -119,7 +119,7 @@ object CrashReporter {
 
     /** Na abertura, em IO: junta os relatórios novos na caixa de saída. */
     fun coletar(context: Context) = synchronized(lock) {
-        val app = context.applicationContext
+        val app = context.applicationContext ?: context
         val vistos = CrashLedger.ler(prefs(app).getString(KEY_VISTOS, null))
         val javas = pastaJava(app).listFiles { f -> f.name.endsWith(".json") }.orEmpty().mapNotNull { f ->
             runCatching {
@@ -238,7 +238,7 @@ object CrashReporter {
      */
     fun enviar(context: Context, sessao: SessaoGuardada?) = synchronized(lock) {
         if (sessao == null) return@synchronized
-        val app = context.applicationContext
+        val app = context.applicationContext ?: context
         val instalacao = instalacao(app)
         val pendentes = caixa(app).listFiles { f -> f.name.endsWith(".json") }.orEmpty().sortedBy { it.name }.take(ENVIOS_POR_VEZ)
         for (arquivo in pendentes) {

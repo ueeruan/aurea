@@ -283,11 +283,7 @@ void codec_name(AMediaCodec* codec, char* out, size_t cap, bool& hardware) {
 }
 
 const char* software_decoder_for(const char* mime) {
-    if (std::strcmp(mime, "video/avc") == 0) return "c2.android.avc.decoder";
-    if (std::strcmp(mime, "video/hevc") == 0) return "c2.android.hevc.decoder";
-    if (std::strcmp(mime, "video/x-vnd.on2.vp9") == 0) return "c2.android.vp9.decoder";
-    if (std::strcmp(mime, "video/av01") == 0) return "c2.android.av1.decoder";
-    return nullptr;
+    return android::software_video_decoder(mime ? mime : "");
 }
 
 // -----------------------------------------------------------------------------
@@ -295,8 +291,8 @@ const char* software_decoder_for(const char* mime) {
 // -----------------------------------------------------------------------------
 class MediaCodecDecoder final : public VideoDecoderBackend {
 public:
-    MediaCodecDecoder(SourceFd fd, bool zeroCopy, bool thumbnail)
-        : fd_(std::move(fd)), zeroCopy_(zeroCopy), thumbnail_(thumbnail) {}
+    MediaCodecDecoder(SourceFd fd, bool zeroCopy, bool thumbnail, bool softwareOnly)
+        : fd_(std::move(fd)), zeroCopy_(zeroCopy && !softwareOnly), thumbnail_(thumbnail), softwareFallback_(softwareOnly) {}
     ~MediaCodecDecoder() override { destroy_codec(); }
 
     Status open() {
@@ -581,21 +577,28 @@ private:
         AMediaFormat_setInt32(format, kKeyPriority, thumbnail_ ? 1 : 0);
 
         Status result = OkStatus;
-        codec_ = softwareFallback_ && software_decoder_for(mime)
-            ? AMediaCodec_createCodecByName(software_decoder_for(mime)) : AMediaCodec_createDecoderByType(mime);
-        if (!codec_ || !configure_and_start(format)) {
-            // Instâncias de hardware esgotadas (várias layers 4K) ou perfil que
-            // o hardware recusa: o decoder de software do sistema ainda serve.
-            if (codec_) AMediaCodec_delete(codec_);
-            codec_ = nullptr;
-            if (const char* sw = software_decoder_for(mime)) {
-                codec_ = AMediaCodec_createCodecByName(sw);
-                if (codec_ && !configure_and_start(format)) {
-                    AMediaCodec_delete(codec_);
-                    codec_ = nullptr;
-                }
+        // SIGSEGV in vendor planes cannot be caught and retried. In software
+        // mode do not create a decoder by MIME, even when no AOSP codec exists.
+        if (!softwareFallback_) {
+            codec_ = AMediaCodec_createDecoderByType(mime);
+            if (codec_ && !configure_and_start(format)) {
+                AMediaCodec_delete(codec_);
+                codec_ = nullptr;
             }
-            if (!codec_) result = Status{Errc::UnsupportedCodec, "nenhum decoder aceitou o video"};
+        }
+        if (!codec_) {
+            for (bool legacy : {false, true}) {
+                const char* sw = android::software_video_decoder(mime, legacy);
+                if (!sw) continue;
+                codec_ = AMediaCodec_createCodecByName(sw);
+                if (codec_ && configure_and_start(format)) {
+                    softwareFallback_ = true;
+                    break;
+                }
+                if (codec_) AMediaCodec_delete(codec_);
+                codec_ = nullptr;
+            }
+            if (!codec_) result = Status{Errc::UnsupportedCodec, "nenhum decoder seguro aceitou o video"};
         }
         AMediaFormat_delete(format);
         if (!result.ok()) {
@@ -820,8 +823,7 @@ private:
         return OkStatus;
     }
 
-    /// Planos do YUV_420_888 no layout que o renderer lê: NV12, NV21 ou I420.
-    /// Qualquer outro arranjo é compactado para NV12.
+    /// Copy standard YUV_420_888 planes into owned I420 storage.
     static bool planes_from(AImage* image, CodecFrame& f) {
         int32_t n = 0;
         if (AImage_getNumberOfPlanes(image, &n) != AMEDIA_OK || n < 3) return false;
@@ -836,52 +838,20 @@ private:
             const u32 h = i == 0 ? f.height : (f.height + 1) / 2;
             if (!media::decoded_plane_fits(w, h, row[i], pixel[i], len[i])) return false;
         }
-        if (pixel[0] != 1) return false;
-        f.planes[0] = data[0];
-        f.strides[0] = static_cast<u32>(row[0]);
-        if (pixel[1] == 1 && pixel[2] == 1) {
-            f.format = PixelFormat::YUV420P;
-            f.planes[1] = data[1];
-            f.planes[2] = data[2];
-            f.strides[1] = static_cast<u32>(row[1]);
-            f.strides[2] = static_cast<u32>(row[2]);
-            f.planeCount = 3;
-            return true;
-        }
-        if (pixel[1] == 2 && pixel[2] == 2 && row[1] == row[2]) {
-            if (data[2] == data[1] + 1 &&
-                media::decoded_plane_fits(((f.width + 1) / 2) * 2, (f.height + 1) / 2, row[1], 1, len[1])) {
-                f.format = PixelFormat::NV12;
-                f.planes[1] = data[1];
-                f.strides[1] = static_cast<u32>(row[1]);
-                f.planeCount = 2;
-                return true;
-            }
-            if (data[1] == data[2] + 1 &&
-                media::decoded_plane_fits(((f.width + 1) / 2) * 2, (f.height + 1) / 2, row[2], 1, len[2])) {
-                f.format = PixelFormat::NV21;
-                f.planes[1] = data[2];
-                f.strides[1] = static_cast<u32>(row[2]);
-                f.planeCount = 2;
-                return true;
-            }
-        }
-        // Layout exótico: intercala U/V numa cópia NV12 compacta.
+        const uint8_t* input[3]{data[0], data[1], data[2]};
+        if (!media::copy_decoded_yuv420(f.width, f.height, input, row, pixel, len, f.compact)) return false;
         const u32 cw = (f.width + 1) / 2, ch = (f.height + 1) / 2;
-        f.compact.resize(static_cast<size_t>(cw) * 2 * ch);
-        for (u32 y = 0; y < ch; ++y) {
-            u8* dst = f.compact.data() + static_cast<size_t>(y) * cw * 2;
-            for (u32 x = 0; x < cw; ++x) {
-                const size_t ou = static_cast<size_t>(y) * row[1] + static_cast<size_t>(x) * pixel[1];
-                const size_t ov = static_cast<size_t>(y) * row[2] + static_cast<size_t>(x) * pixel[2];
-                dst[x * 2] = ou < static_cast<size_t>(len[1]) ? data[1][ou] : 128;
-                dst[x * 2 + 1] = ov < static_cast<size_t>(len[2]) ? data[2][ov] : 128;
-            }
-        }
-        f.format = PixelFormat::NV12;
-        f.planes[1] = f.compact.data();
-        f.strides[1] = cw * 2;
-        f.planeCount = 2;
+        f.format = PixelFormat::YUV420P;
+        f.planes[0] = f.compact.data();
+        f.planes[1] = f.planes[0] + static_cast<size_t>(f.width) * f.height;
+        f.planes[2] = f.planes[1] + static_cast<size_t>(cw) * ch;
+        f.strides[0] = f.width;
+        f.strides[1] = f.strides[2] = cw;
+        f.planeCount = 3;
+        // No mapped AImage address escapes to the renderer/cache/thumbnail.
+        AImage_delete(f.image);
+        f.image = nullptr;
+        f.owner.reset();
         return true;
     }
 
@@ -1137,7 +1107,7 @@ std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& 
         return nullptr;
     }
     const bool zeroCopy = priority != MediaPriority::Thumbnail && zeroCopy_.load();
-    auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy, priority == MediaPriority::Thumbnail);
+    auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy, priority == MediaPriority::Thumbnail, softwareOnly_.load());
     if (const Status s = decoder->open(); !s.ok()) {
         AUREA_LOG_ERROR("decoder nao abriu: %s", s.message().data());
         return nullptr;

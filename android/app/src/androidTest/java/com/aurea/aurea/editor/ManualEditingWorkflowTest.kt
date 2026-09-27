@@ -46,9 +46,10 @@ class ManualEditingWorkflowTest {
 
     @Test fun eightClipProjectEditsPlaysAcrossCutsAndReopensWithoutLosingWork() {
         assertTrue(context.packageName.endsWith(".uitest"))
-        val video = File(context.filesDir, "manual-motion.mp4")
+        val fixtureDir = File(context.filesDir,"projetos").apply { mkdirs() }
+        val video = File(fixtureDir, "manual-motion.mp4")
         instrumentation.context.assets.open("motion-fixture.mp4").use { input -> video.outputStream().use { input.copyTo(it) } }
-        val music = File(context.filesDir, "manual-rhythm.wav")
+        val music = File(fixtureDir, "manual-rhythm.wav")
         val rate = 24000
         val pcm = ByteBuffer.allocate(rate * 16 * 2).order(ByteOrder.LITTLE_ENDIAN)
         repeat(rate * 16) { sample ->

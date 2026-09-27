@@ -54,6 +54,8 @@ import UIKit
             "corePlayhead": readCoreStatus ? coreStatus.playhead : -1,
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
             "layerOrder": model.layers.map { $0.id },
+            "markerCount": model.markerFrames.count,
+            "missingAssets": model.engine.lastLoadMissingAssets,
             "curveKeys": (primary.flatMap { model.keyframes[$0] } ?? []).map {
                 ["property": Int($0.property), "time": Int($0.time), "interpolation": Int($0.interpolation),
                  "value": Double($0.value)] as [String: Any]

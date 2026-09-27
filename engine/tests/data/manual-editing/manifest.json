@@ -1,0 +1,18 @@
+{
+  "source": "Android ManualEditingWorkflowTest on emulator-5554, API 35, 2026-09-27",
+  "description": "Synthetic eight-clip workflow, UI split and markers, six effects, 2D/3D text, animated camera, null parenting and manual remap. Original binary saved by Android; not reconstructed for iOS.",
+  "files": {
+    "manual-editing.aurea": {
+      "bytes": 21698,
+      "sha256": "63601e426a3683d0393fe47f0a7f8eabc6d055cab1fac82b98d5b2b61635cb1c"
+    },
+    "manual-motion.mp4": {
+      "bytes": 441434,
+      "sha256": "c4535c4d44c3daeac9b0ef7a1a2dd45d8ae906c02b7caf9ff4fc0fd78d350a3e"
+    },
+    "manual-rhythm.wav": {
+      "bytes": 768044,
+      "sha256": "0a379c68ceb2f46816081c33f47a2ed0ae1e7a7f324b6facb3d251098abedf3c"
+    }
+  }
+}

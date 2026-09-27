@@ -170,6 +170,8 @@ jobs:
           if ! command -v ffmpeg >/dev/null; then brew install ffmpeg; fi
           python3 tools/playback_matrix.py --ffmpeg "$(command -v ffmpeg)" --output build/playback-matrix
           cp build/playback-matrix/*.mp4 "$APP_DATA/Documents/"
+          python3 tools/verify_manual_editing_fixture.py
+          cp engine/tests/data/manual-editing/manual-editing.aurea engine/tests/data/manual-editing/manual-motion.mp4 engine/tests/data/manual-editing/manual-rhythm.wav "$APP_DATA/Documents/"
           python3 engine/platform/ios/verify/run_gesture_tests.py build/ios-gesture-samples -- \
             xcodebuild test -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea-Gestures \
             -configuration Debug -sdk iphonesimulator ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \

@@ -25,6 +25,35 @@ import XCTest
         app = nil
     }
 
+    func testAndroidManualProjectOpensEditsAndPlaysAcrossCuts() throws {
+        let before = try launch("manual-android-project")
+        XCTAssertEqual(before.layerCount,14)
+        XCTAssertEqual(before.markerCount,16)
+        XCTAssertEqual(before.missingAssets,0,"The exact Android project must resolve its portable media on iOS")
+        XCTAssertEqual(before.effectCount,6)
+        try openCommandSearch("Chromatic Aberration")
+        let effect = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@","command:effect:")).firstMatch
+        XCTAssertTrue(effect.waitForExistence(timeout:5)); effect.tap()
+        _ = try awaitSnapshot("Existing Android stack is editable on iOS") { $0.effectCount == 7 }
+        try undo()
+        _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
+        let play = app.buttons["Play · hold to repeat"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout:5)); play.tap()
+        _ = try awaitSnapshot("Shared project playback starts") { $0.playing != 0 }
+        var passedCut = false
+        for _ in 0..<15 {
+            RunLoop.current.run(until:Date().addingTimeInterval(1))
+            XCTAssertEqual(app.state,.runningForeground)
+            let state = try snapshot()
+            XCTAssertEqual(state.layerCount,14); XCTAssertEqual(state.markerCount,16)
+            if state.corePlayhead > 190 { passedCut = true; break }
+        }
+        XCTAssertTrue(passedCut,"Composition must actually advance through multiple video cuts")
+        let pause = app.buttons["Pause"].firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout:5)); pause.tap()
+        _ = try awaitSnapshot("Shared project pauses") { $0.playing == 0 }
+    }
+
     func testRawPlaybackMatrixWithNativeDecodersAndAudio() throws {
         for name in ["h264-720p30", "h264-1080p30", "h264-1080p60", "hevc-1080p30", "h264-1080p-vfr"] {
             _ = try launch("raw-" + name)
@@ -834,6 +863,8 @@ import XCTest
         let coreError: String
         let layerCount: Int
         let layerOrder: [Int64]
+        let markerCount: Int
+        let missingAssets: Int
         let curveKeys: [CurveKey]
         let editMode: Bool
         let coreEditMode: Bool

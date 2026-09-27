@@ -488,6 +488,17 @@ final class AureaModel: ObservableObject {
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 refreshModel(force: true); enterEditor()
                 if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
+            } else if scene == "manual-android-project", started {
+                // The binary project is produced by the Android instrumented
+                // editing workflow. Do not reconstruct its layers on iOS.
+                let url = AureaPaths.documents.appendingPathComponent("manual-editing.aurea")
+                if engine.loadProject(url.path) {
+                    projectURL = url; projectName = "Manual editing acceptance"
+                    refreshModel(force:true); enterEditor(); seek(toFrame:0); setLooping(false)
+                    if let id = layers.first(where: { $0.name == "Clip 1" })?.id {
+                        select(layerId:id,additive:false); panel = .dock
+                    }
+                }
             } else if scene.hasPrefix("raw-"), started {
                 let name = String(scene.dropFirst(4))
                 let fps: Double = name.contains("60") || name.contains("vfr") ? 60 : 30

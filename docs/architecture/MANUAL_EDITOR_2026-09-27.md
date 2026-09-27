@@ -87,8 +87,17 @@ has passed acceptance.
   passed; native iOS touch regression added.
 - Native f15ef224 compiled and packaged successfully. Simulator transform
   capture timed out at first launch; text-3d and layer-dock captures succeeded.
-  Its gesture suite was still running when this checkpoint was written. New
-  changes above are not included in that older native build.
+  Its gesture suite completed: 26/27 passed, including layer reorder, independent
+  easing, group-key moves, value graph, video/text/captions and decoder matrix.
+  Compact curve accessibility bounds still included 34 pt below its container;
+  explicit content/scroll clipping added and awaits native retest. New features
+  above are not included in that older native build.
+- Animated anchor is now sampled when projecting the gizmo, matching the
+  evaluated renderer transform. Three core gizmo tests / 44 checks passed.
+- The expanded Android project and its two synthetic media files are preserved
+  in engine/tests/data/manual-editing with hashes. A native iOS test loads that
+  exact project, verifies resolved media/layer/effect/marker counts, edits and
+  undoes its stack, then plays across cuts. Native result pending.
 
 Native iOS execution and the two previous UI failures (curve-panel bounds and
 material preset reachability); axis manipulation and cancellation at different

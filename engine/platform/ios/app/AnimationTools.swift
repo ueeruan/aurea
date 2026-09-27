@@ -343,7 +343,9 @@ struct NativeCurvePanel: View {
                     }.buttonStyle(AureaPressStyle(shrink: 1))
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }.background(curvePanelFill, ignoresSafeAreaEdges: []).accessibilityElement(children: .contain).accessibilityIdentifier("curve.panel")
+        }.clipped().contentShape(Rectangle())
+        .background(curvePanelFill, ignoresSafeAreaEdges: [])
+        .accessibilityElement(children: .contain).accessibilityIdentifier("curve.panel")
         .overlay {
             if expanded {
                 ZStack {
@@ -435,12 +437,12 @@ struct NativeCurvePanel: View {
     private var families: some View {
         HStack(spacing: 0) {
             GeometryReader { geometry in
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 2) {
                         ForEach(presets) { preset in presetTile(preset) }
                     }.padding(.horizontal, 2).padding(.vertical, 6)
                         .frame(minHeight: geometry.size.height, alignment: .center)
-                }
+                }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
             }.frame(width: 44)
             VStack(spacing: 0) {
                 Spacer(minLength: 0)

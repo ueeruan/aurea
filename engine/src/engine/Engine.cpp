@@ -3896,7 +3896,11 @@ bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noe
     if (!l || !out || !lives_in_3d(*l)) return false;
     const FrameIndex now = playback_.current();
     const Mat4 w = layer_world_3d(*comp, *l, now);
-    const Vec3 a = l->kind == LayerKind::Model3D ? Vec3{0, 0, 0} : l->transform.anchor;
+    const FrameIndex local = l->local_time(now);
+    const Vec3 a = l->kind == LayerKind::Model3D ? Vec3{0, 0, 0} : Vec3{
+        l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
+        l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
+        l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
     const Vec4 o4 = w * Vec4{a.x, a.y, a.z, 1};
     const Vec3 o{o4.x, o4.y, o4.z};
     const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)

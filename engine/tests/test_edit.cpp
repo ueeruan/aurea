@@ -619,3 +619,17 @@ AUREA_TEST(Gizmo, LocalAxesFollowRotationAndRespectParentScale) {
     AUREA_CHECK(!r.e.gizmo_move_local(r.b, 6, 10, moved));
 }
 
+AUREA_TEST(Gizmo, AnimatedAnchorKeepsGizmoAtEvaluatedPivot) {
+    EditRig r;
+    Layer* child = r.comp()->layer(LayerId::unpack(r.b));
+    child->threeD = true;
+    child->transform.rotation = Vec3{20,15,30};
+    f32 before[8]{},after[8]{};
+    AUREA_CHECK(r.e.query_gizmo(r.b,50,before));
+    child->tracks.get_or_create(TrackProperty::AnchorX).set(FrameIndex{0},130);
+    child->tracks.get_or_create(TrackProperty::AnchorY).set(FrameIndex{0},75);
+    child->tracks.get_or_create(TrackProperty::AnchorZ).set(FrameIndex{0},20);
+    AUREA_CHECK(r.e.query_gizmo(r.b,50,after));
+    for(u32 i=0;i<8;++i)AUREA_CHECK_NEAR(before[i],after[i],.01f);
+}
+

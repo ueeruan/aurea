@@ -27,6 +27,16 @@ has passed acceptance.
   iOS toolbar now passes composition time to the engine for keyframe copy/paste.
 - Material preset access moved to the top of the text 3D panel on both platforms;
   iOS chips now have a minimum 44-point touch target. Android compilation passed.
+- Rotation component editing no longer inserts keys in untouched axes; Android
+  real-editor rotation and graph tests both passed. Native dial test added.
+- Repeated effect occurrences retain separate pasted animation; locked targets
+  are skipped. Five clipboard tests / 82 checks passed.
+- Snapping is exposed in both editor menus and respected by Android clip move,
+  trim and key drag. Actual Android gesture test passed with the same drag first
+  ignoring and then snapping to a nearby marker.
+- Existing parenting tests: 6 / 750 checks passed, including GPU world-image
+  preservation. Existing ClipTime tests: 19 / 1206 checks passed, including
+  remap/reverse/freeze and audio timing. These are not full mobile acceptance.
 - iOS compile/package passed at 084592bd. The first simulator dispatch used
   invalid capture scene names and did not execute gestures; corrected dispatch
   is run 36319772180. This is not a native gesture pass.

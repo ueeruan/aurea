@@ -367,6 +367,11 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
 
         MenuSection(stringResource(R.string.editor_edicao))
         MenuItemRow(
+            CupertinoGlyph.Link, "Snapping",
+            act { store.snapping = !store.snapping },
+            checked = store.snapping,
+        )
+        MenuItemRow(
             CupertinoGlyph.Link,
             stringResource(R.string.editor_timeline_magnetica_modo_edicao),
             act { store.toggleEditMode() },

@@ -63,6 +63,32 @@ class TimelineGesturesTest {
         assertTrue("A real tap should still open layer options", timeline().fetchSemanticsNode().size.height < height)
     }
 
+    @Test fun snappingCanBeDisabledAndEnabledForTheSameClipGesture() {
+        launch()
+        compose.runOnIdle { store.snapping = false }
+        fun drag() = timeline().performTouchInput {
+            swipe(Offset(width / 2f + 30 * density, 52 * density),
+                Offset(width / 2f + 100 * density, 52 * density), 240)
+        }
+        drag()
+        compose.waitUntil(5000) { store.layers.single().startFrame > 0 }
+        val freeFrame = store.layers.single().startFrame
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.layers.single().startFrame == 0 }
+        compose.runOnIdle { store.seek(freeFrame + 1) }
+        compose.waitUntil(5000) { store.playhead == freeFrame + 1 }
+        compose.runOnIdle { store.toggleMarker(); store.seek(0); store.clearSelection() }
+        compose.waitUntil(5000) { store.playhead == 0 && store.markers.size > 0 }
+        drag()
+        compose.waitUntil(5000) { store.layers.single().startFrame > 0 }
+        compose.runOnIdle { assertEquals(freeFrame, store.layers.single().startFrame); store.undo() }
+        compose.waitUntil(5000) { store.layers.single().startFrame == 0 }
+        compose.runOnIdle { store.snapping = true; store.clearSelection() }
+        drag()
+        compose.waitUntil(5000) { store.layers.single().startFrame > 0 }
+        compose.runOnIdle { assertEquals(freeFrame + 1, store.layers.single().startFrame) }
+    }
+
     @Test fun verticalSwipeScrollsManyLayersWithoutMovingOrOpeningAny() {
         launch(24)
         val before = store.layers.map { Triple(it.id, it.startFrame, it.endFrame) }

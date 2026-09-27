@@ -3723,6 +3723,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Modo Edição (timeline magnética) -------------------------------------------
     /** Aparar empurra/puxa as seguintes; excluir fecha o buraco. */
+    var snapping by mutableStateOf(true)
     var editMode by mutableStateOf(false)
         private set
 

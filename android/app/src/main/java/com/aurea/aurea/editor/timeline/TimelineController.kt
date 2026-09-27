@@ -621,7 +621,8 @@ internal class TimelineController(
         var sent = 0
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = (frameAt(p.x) + grab).toFrame()
-            Snap.span(targets, desired, length, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble(), out)
+            if (store.snapping) Snap.span(targets, desired, length, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble(), out)
+            else { out[0] = desired; out[1] = Snap.NONE }
             val target = out[0].coerceIn(floorStart, r.start + maxDelta)
             val delta = target - r.start
             if (delta != sent) {
@@ -650,7 +651,7 @@ internal class TimelineController(
         var applied = 0
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = frameAt(p.x) + grab
-            val snapped = Snap.nearest(targets, desired, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble())
+            val snapped = if (store.snapping) Snap.nearest(targets, desired, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble()) else Snap.NONE
             val target = max(0, if (snapped != Snap.NONE) snapped else desired.toFrame())
             val cur = rowById(id) ?: return@dragLoop
             if (magnetic) {
@@ -694,7 +695,7 @@ internal class TimelineController(
         state.dragKeyFrame = current
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = frameAt(p.x) + grab
-            val snapped = Snap.nearest(targets, desired, playheadFrame(), (metrics.snapKey / pxPerFrame()).toDouble())
+            val snapped = if (store.snapping) Snap.nearest(targets, desired, playheadFrame(), (metrics.snapKey / pxPerFrame()).toDouble()) else Snap.NONE
             val t = (if (snapped != Snap.NONE) snapped else desired.toFrame()).coerceIn(limits[0], limits[1])
             if (t != current) {
                 openUndo("mover keyframe")

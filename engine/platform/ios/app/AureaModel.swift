@@ -321,6 +321,36 @@ final class AureaModel: ObservableObject {
         toast = skipped > 0 ? AureaText.t("am_import_done_skipped", mapped, skipped, saved) : AureaText.t("am_import_done", mapped, saved)
     }
     @Published var text3DFontSheet: Text3DFontRequest?
+    struct TextContentRequest: Identifiable {
+        let id: Int64
+        let content: String
+        let is3D: Bool
+        let selectAll: Bool
+    }
+    @Published var textContentRequest: TextContentRequest?
+
+    func openTextContentEditor(selectAll: Bool = false) {
+        guard let id = primarySelection, selectedLayer?.locked != true else { return }
+        if status.playing != 0 { playPause() }
+        showAddLayer = false
+        let recipe = engine.text3D(forLayer: id) ?? [:]
+        let is3D = !recipe.isEmpty
+        guard let content = (is3D ? recipe : (engine.text(forLayer: id) ?? [:]))["content"] as? String else { return }
+        textContentRequest = TextContentRequest(id: id, content: content, is3D: is3D, selectAll: selectAll)
+    }
+
+    func commitTextContent(_ request: TextContentRequest, content: String) -> Bool {
+        guard layers.contains(where: { $0.id == request.id && !$0.locked }) else { return false }
+        if content != request.content {
+            if request.is3D {
+                guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      engine.setText3D(forLayer: request.id, property: "content", stringValue: content, numberValue: 0) else { return false }
+            } else { engine.setText(request.id, content: content) }
+        }
+        textContentRequest = nil
+        refreshModel(force: true)
+        return true
+    }
     @Published var presetDialog: PresetDialogRequest?
     @Published var curveReturnPanel: PanelKind = .none
     @Published var stageManipulating = false
@@ -541,8 +571,10 @@ final class AureaModel: ObservableObject {
                 _ = newProject(width: 1920, height: 1080, fps: 30, title: "Project 1")
                 if scene != "editor-empty" {
                     switch scene {
-                    case "text-2d": addText(); panel = .text
-                    case "text-3d": addText3D(content: "Texto", depth: 0.25); panel = .layer3D
+                    case "text-2d": addText(); textContentRequest = nil; panel = .text
+                    case "text-3d": addText3D(content: "Texto", depth: 0.25); textContentRequest = nil; panel = .layer3D
+                    case "text-edit-2d": addText()
+                    case "text-edit-3d": addText3D(content: "Texto", depth: 0.25)
                     case "curve-null": addNull(threeD: true); panel = .transform
                     case "vector": addVector(1); panel = .vector
                     default: addShape(1)
@@ -556,10 +588,15 @@ final class AureaModel: ObservableObject {
                         let property: UInt32 = scene == "curve-null" ? 1 : 35
                         let param: UInt32 = scene == "curve-null" ? 0 : 6
                         for time in [Int32(0), Int32(30)] {
-                            engine.editTrackKey(id, property: property, effect: UInt32.max, param: param,
-                                time: time, action: 0, value: time == 0 ? 200 : 450, targetTime: time,
-                                interpolation: 1, handles: [])
+                            if scene == "curve-null" {
+                                engine.insertKeyframe(forLayer: id, property: property, time: time, value: time == 0 ? 200 : 450)
+                            } else {
+                                engine.seek(toFrame: Int64(time))
+                                _ = engine.keyShape(id, param: param)
+                                _ = engine.editShape(id, param: param, value: time == 0 ? 200 : 450, continuing: false)
+                            }
                         }
+                        engine.seek(toFrame: 0)
                         refreshModel(force: true)
                         panel = scene == "curve-null" ? .transform : .shapeEdit
                     }
@@ -1071,8 +1108,16 @@ final class AureaModel: ObservableObject {
         _ = engine.flush()
     }
 
-    func undo() { engine.run { $0.undo() }; syncAfterEdit() }
-    func redo() { engine.run { $0.redo() }; syncAfterEdit() }
+    func undo() { engine.run { $0.undo() }; syncAfterEdit(); restoreTrackingAfterHistory() }
+    func redo() { engine.run { $0.redo() }; syncAfterEdit(); restoreTrackingAfterHistory() }
+    private func restoreTrackingAfterHistory() {
+        guard let id = primarySelection else { return }
+        if !cameraFeatures.isEmpty {
+            if engine.restoreCameraTrack(forLayer: id) { cameraSelectedCount = 0; refreshCameraTrackPoints() }
+            else { cameraFeatures = []; cameraTarget = [] }
+        }
+        if engine.restoreMotionTrack(id) { motionSource = id; motionStatus = engine.motionTrackStatus() }
+    }
 
     func playPause() {
         pendingPlayhead = nil
@@ -1427,6 +1472,7 @@ final class AureaModel: ObservableObject {
     }
 
     func closeProject() {
+        textContentRequest = nil
         if exporting { toast = AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"); return }
         if sceneEditor { exitSceneEditor() }
         guard saveProject(writeThumbnail: true) else { return }
@@ -1610,6 +1656,71 @@ final class AureaModel: ObservableObject {
     @Published var cameraFeatures: [Float] = []
     @Published var cameraSelection: CGRect? = nil
     var cameraSelectionFrame: Int64 = -1
+    @Published var cameraMultiSelect = false
+    @Published var cameraTargetMode = true
+    @Published var cameraTarget: [Float] = []
+    @Published var cameraGoodPointsOnly = true
+    @Published var cameraPointSize: Double = 3
+    @Published var cameraContextMenu = false
+    @Published var cameraSelectedCount: UInt32 = 0
+
+    func refreshCameraTrackPoints() {
+        cameraFeatures = engine.cameraTrackDetails(atFrame: status.playhead).map(\.floatValue)
+        cameraTarget = engine.cameraTrackTarget(status.playhead).map(\.floatValue)
+    }
+    func moveCameraTarget(_ point: CGPoint) {
+        let p = cameraFeatures
+        let nearby = stride(from: 0, to: p.count - p.count % 6, by: 6).filter { p[$0+2] > 0 && (!cameraGoodPointsOnly || p[$0+2] >= 0.4) }.sorted {
+            hypot(p[$0] - Float(point.x), p[$0+1] - Float(point.y)) < hypot(p[$1] - Float(point.x), p[$1+1] - Float(point.y))
+        }.prefix(3).map { NSNumber(value: p[$0+3]) }
+        cameraSelectedCount = engine.selectCameraTrackPoints(nearby, operation: 0)
+        cameraSelection = nil; refreshCameraTrackPoints()
+    }
+    func calibrateCamera(_ operation: UInt32, distance: Float = 100) {
+        guard engine.calibrateCameraScene(operation, distance: distance) else { toast = "Crie a câmera e selecione pontos válidos; distância exige 2 pontos e chão exige 3"; return }
+        refreshModel(force: true); refreshCameraTrackPoints(); toast = "Referência atualizada; você pode desfazer"
+    }
+    func placeTrackedModel(_ id: Int64) {
+        guard engine.placeModelOnTrack(id) else { toast = "Crie a câmera e selecione a superfície antes de posicionar o modelo"; return }
+        refreshModel(force: true); toast = "Modelo colocado na superfície rastreada"
+    }
+    func selectCameraPoint(_ location: CGPoint, radius: CGFloat) {
+        engine.pause()
+        var best: Int? = nil
+        var distance = Float(radius * radius)
+        for i in stride(from: 0, to: cameraFeatures.count - cameraFeatures.count % 6, by: 6) {
+            if cameraFeatures[i+2] <= 0 || (cameraGoodPointsOnly && cameraFeatures[i+2] < 0.4) { continue }
+            let dx = cameraFeatures[i] - Float(location.x), dy = cameraFeatures[i+1] - Float(location.y)
+            let d = dx*dx + dy*dy
+            if d < distance { best = i; distance = d }
+        }
+        if let i = best {
+            let op: UInt32 = !cameraMultiSelect ? 0 : cameraFeatures[i+4] > 0.5 ? 2 : 1
+            cameraSelectedCount = engine.selectCameraTrackPoints([NSNumber(value: cameraFeatures[i+3])], operation: op)
+        } else if !cameraMultiSelect {
+            cameraSelectedCount = engine.selectCameraTrackPoints([], operation: 0)
+        }
+        cameraSelection = nil
+        refreshCameraTrackPoints()
+    }
+    func finishCameraSelectionBox() {
+        guard let box = cameraSelection else { return }
+        var ids: [NSNumber] = []
+        for i in stride(from: 0, to: cameraFeatures.count - cameraFeatures.count % 6, by: 6) {
+            if cameraFeatures[i+2] <= 0 || (cameraGoodPointsOnly && cameraFeatures[i+2] < 0.4) { continue }
+            if box.contains(CGPoint(x: CGFloat(cameraFeatures[i]), y: CGFloat(cameraFeatures[i+1]))) { ids.append(NSNumber(value: cameraFeatures[i+3])) }
+        }
+        cameraSelectedCount = engine.selectCameraTrackPoints(ids, operation: cameraMultiSelect ? 1 : 0)
+        cameraSelection = nil
+        refreshCameraTrackPoints()
+    }
+    func createTrackedObject(_ kind: UInt32) {
+        let error = engine.createCameraTrackObject(kind)
+        if !error.isEmpty { toast = error }
+        cameraContextMenu = false
+        refreshModel(force: true)
+        refreshCameraTrackPoints()
+    }
 
     func applySelectedCameraTracking() -> String {
         if let rect = cameraSelection {
@@ -1618,25 +1729,53 @@ final class AureaModel: ObservableObject {
         return engine.applyCameraTracking()
     }
 
-    func beginPointPick(stabilize: Bool) {
-        guard let layer = selectedLayer, layer.kind == 1, !layer.locked else { return }
-        engine.run { $0.pause(); $0.seek(toFrame: Int64(layer.startFrame)) }
-        refreshStatus(); refreshSelectedLayer()
-        pointPick = stabilize; panel = .none
+    @Published var motionTool: UInt32 = 0
+    @Published var motionModel: UInt32 = 0
+    @Published var motionBackward = false
+    @Published var motionFeature: Float = 12
+    @Published var motionSearch: Float = 48
+    @Published var motionStatus: [String: Any] = [:]
+    @Published var motionPicked = 0
+    private var motionSeeds: [NSNumber] = []
+    private var motionSource: Int64?
+    func beginPointPick(stabilize: Bool) { beginMotionPick(stabilize ? 4 : 0) }
+    func beginMotionPick(_ tool: UInt32) {
+        guard let layer = selectedLayer, layer.kind == 1, !layer.locked, let id = primarySelection else { return }
+        guard (motionStatus["state"] as? NSNumber)?.intValue != 1 else { return }
+        engine.run { $0.pause() }
+        motionTool = tool; motionSource = id; motionSeeds = []; motionPicked = 0
+        if tool == 4 { startPickedMotion(); return }
+        pointPick = false
+        toast = tool >= 2 ? "Toque nos cantos: superior esquerdo, direito, inferior direito e esquerdo" : "Toque no detalhe a seguir no preview"
     }
-
+    func cancelMotionPick() { pointPick = nil; motionSeeds = []; motionPicked = 0 }
     func finishPointPick(_ point: CGPoint) {
-        guard let stabilize = pointPick, let id = primarySelection else { return }
+        guard pointPick != nil, let id = primarySelection, id == motionSource else { cancelMotionPick(); return }
         let a = engine.maskData(id).prefix(6).map(\.floatValue)
         guard a.count == 6 else { return }
         let det = a[0] * a[3] - a[1] * a[2]
         guard abs(det) > 0.000001 else { return }
         let x = Float(point.x) - a[4], y = Float(point.y) - a[5]
-        let localX = (a[3] * x - a[2] * y) / det, localY = (-a[1] * x + a[0] * y) / det
-        pointPick = nil
-        performMediaOperation(stabilize ? "Estabilizando…" : "Rastreando o ponto…") {
-            $0.trackPoint(id, x: localX, y: localY, stabilize: stabilize)
+        motionSeeds += [NSNumber(value: (a[3] * x - a[2] * y) / det), NSNumber(value: (-a[1] * x + a[0] * y) / det)]
+        motionPicked += 1
+        let needed = motionTool == 0 ? 1 : motionTool == 1 ? 2 : 4
+        if motionPicked < needed { toast = "Ponto \(motionPicked)/\(needed). Toque no próximo"; return }
+        pointPick = nil; startPickedMotion()
+    }
+    private func startPickedMotion() {
+        guard let id = motionSource else { return }
+        if !engine.startMotionTrack(id, tool: motionTool, model: motionModel, backward: motionBackward, points: motionSeeds, feature: motionFeature, search: motionSearch) {
+            toast = "Confira os pontos e use um trecho de até 1800 frames"
         }
+        motionStatus = engine.motionTrackStatus()
+    }
+    func restoreMotion() {
+        if let id = primarySelection, engine.restoreMotionTrack(id) { motionSource = id; motionStatus = engine.motionTrackStatus() }
+    }
+    func applyMotion(_ apply: UInt32, lock: Bool = false, smooth: Float = 0.5, maxScale: Float = 1.15, crop: UInt32 = 1) {
+        let error = engine.applyMotionTrack(primarySelection ?? 0, apply: apply, lock: lock, smooth: smooth, maxScale: maxScale, crop: crop)
+        toast = error.isEmpty ? "Rastreio aplicado. Você pode desfazer" : error
+        refreshModel(force: true); motionStatus = engine.motionTrackStatus()
     }
 
     func removeGaps() {
@@ -1733,6 +1872,7 @@ final class AureaModel: ObservableObject {
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
         showAddLayer = false
         syncAfterEdit()
+        if id >= 0 { openTextContentEditor(selectAll: true) }
     }
 
     func addVector(_ preset: UInt32, freehand: Bool = false) {
@@ -1888,6 +2028,7 @@ final class AureaModel: ObservableObject {
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
         showAddLayer = false
         syncAfterEdit()
+        if id >= 0 { openTextContentEditor(selectAll: true) }
     }
 
     func addParticles(_ preset: UInt32) {

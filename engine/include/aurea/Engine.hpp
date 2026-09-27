@@ -50,6 +50,7 @@
 #include "aurea/render/GPUBackend.hpp"
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/render/PreviewRefill.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -679,14 +680,51 @@ public:
     };
     /// Analisa o vídeo da camada em segundo plano (0 rápido, 1 equilibrado,
     /// 2 alta qualidade). Uma análise por vez; a UI continua navegando.
-    bool start_camera_track(u64 layerId, u32 mode) noexcept;
+    bool start_camera_track(u64 layerId, u32 mode, u32 motion = 0, f32 knownFov = 0) noexcept;
+    /// Remove selected feature tracks and re-solve the saved observations.
+    /// No decode, no UI blocking; previous camera/objects stay until applied.
+    bool refine_camera_track(bool removeSelected = true, u32 motion = 0, f32 knownFov = 0) noexcept;
+    /// 0 selected origin, 1 selected ground/origin, 2 distance between two
+    /// selected points in scene units. Rebase camera and anchors together.
+    bool calibrate_camera_scene(u32 operation, f32 distance = 100) noexcept;
+    /// 32-point target ring on the selected 3D surface, composition pixels.
+    u32 camera_track_target(i64 frame, f32* xy, u32 capacity) noexcept;
+    /// Place an already-imported GLB/3D object at the selected tracked surface.
+    bool place_model_on_track(u64 layer) noexcept;
+    /// Point / 2 Point / Planar / Corner Pin / Stabilizer. Seeds are source
+    /// pixels, analysis starts at the playhead (stabilizer uses the full clip).
+    bool start_motion_track(u64 layerId, u32 tool, u32 model, bool backward,
+                            const f32* pointsXY, u32 count, f32 featureRadius = 12, f32 searchRadius = 48) noexcept;
+    bool restore_motion_track(u64 layerId) noexcept;
+    void cancel_motion_track() noexcept;
+    struct MotionTrackStatus {
+        u32 state = 0, tool = 0, frames = 0, validFrames = 0, lost = 0, reacquired = 0;
+        f32 progress = 0, confidence = 0, errorPx = 0, cropPercent = 0;
+        u64 memoryBytes = 0;
+        std::string message;
+    };
+    [[nodiscard]] MotionTrackStatus motion_track_status() noexcept;
+    /// x,y,confidence for the chosen source points, in composition pixels.
+    u32 motion_track_features(i64 frame, f32* out3, u32 capacity) noexcept;
+    /// Apply: 0 new Null, 1 target transform, 2 target Corner Pin,
+    /// 3 stabilize source, 4 new Shape, 5 new Text. One undo operation.
+    [[nodiscard]] Result<u64> apply_motion_track(u64 target, u32 apply, bool lock = false,
+        f32 smoothSeconds = .5f, f32 maxScale = 1.15f, u32 crop = 1) noexcept;
+    /// Load an existing analysis without starting decoding/analysis.
+    bool restore_camera_track(u64 layerId) noexcept;
     /// Interrompe a análise (libera os quadros; o projeto não muda).
     void cancel_camera_track() noexcept;
     [[nodiscard]] CameraTrackStatus camera_track_status() noexcept;
     /// Cria a câmera rastreada (keyframes por quadro, FOV resolvida) e um Nulo
     /// 3D no chão da cena (plano dominante) ou no centro dos pontos. Devolve a
     /// câmera. A câmera antiga ativa é desativada (desfazível).
-    [[nodiscard]] Result<u64> apply_camera_track(i64 selectionFrame = -1, Vec4 selectionRect = {}) noexcept;
+    // object: 0 camera only, 1 null, 2 shape, 3 text, 4 solid.
+    [[nodiscard]] Result<u64> apply_camera_track(i64 selectionFrame = -1, Vec4 selectionRect = {}, u32 object = 1) noexcept;
+    /// Stable feature ids (independent of playhead and missing observations).
+    u32 select_camera_track_points(const u32* ids, u32 count, u32 operation = 0) noexcept;
+    /// x,y,confidence,trackId,selected,reprojectionError; solved points use the
+    /// actual 3D projection, rejected tracks remain at their 2D observations.
+    u32 camera_track_features_detail(i64 frame, f32* out6, u32 maxPoints) noexcept;
     /// Pontos 3D reconstruídos, no mundo da composição (depois de aplicar).
     [[nodiscard]] std::vector<Vec3> camera_track_points() noexcept;
     /// Pontos seguidos no quadro `frame` da composição, em px da composição
@@ -710,6 +748,8 @@ public:
     /// Volta ao estúdio neutro.
     bool clear_hdri() noexcept;
     /// Intensidade (≥ 0) e giro (graus) do ambiente.
+    bool set_environment_background(bool visible) noexcept;
+    bool environment_background() noexcept;
     bool set_environment_params(f32 intensity, f32 rotationDeg) noexcept;
     /// {tem HDRI (0/1), intensidade, giro}.
     bool query_environment(f32* out3) noexcept;
@@ -1158,8 +1198,10 @@ private:
     std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris_;
     struct CameraTrackJob;
     std::unique_ptr<CameraTrackJob> cameraTrack_;
-    std::unordered_map<u64, std::shared_ptr<void>> cameraTrackCache_;
     void join_camera_track() noexcept;
+    struct MotionTrackJob;
+    std::shared_ptr<MotionTrackJob> motionTrack_;
+    void join_motion_track() noexcept;
     static std::shared_ptr<const scene3d::HdriPixels> hdri_lookup(void* self, AssetId id);
     struct Clipboard {
         std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia
@@ -1202,6 +1244,7 @@ private:
     std::atomic<bool> forceRender_{true};     ///< a UI mudou algo / superfície nova
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
+    PreviewRefill previewRefill_;
     u32  lastRenderedRevision_ = 0;           ///< modelRevision_ do último frame desenhado
     u32  incompleteRetries_ = 0;              ///< quadros seguidos com camada pendente
     u64  lastMediaGen_ = 0;

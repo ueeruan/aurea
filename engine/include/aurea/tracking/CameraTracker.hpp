@@ -85,6 +85,7 @@ struct CameraSolution {
 };
 
 struct SolveOptions {
+    u32 motion = 0;                 ///< 0 auto, 1 free camera, 2 tripod
     TrackMode mode = TrackMode::Balanced;
     f32 fovMinDeg = 25.0f, fovMaxDeg = 100.0f;
     f32 knownFovDeg = 0.0f;          ///< > 0: FOV conhecida (sem busca)

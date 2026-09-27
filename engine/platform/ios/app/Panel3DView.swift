@@ -28,11 +28,12 @@ struct Panel3DView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_material_ambiente"), onBack: {
+            PanelHeader(title: AureaText.t(text3D.isEmpty ? "panel_material_ambiente" : "text_options"), onBack: {
                 finishEditing(); model.panel = .none
             })
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    if model.selectedLayer?.kind != 8 {
                     if !text3D.isEmpty { textSection }
                     section("panel_material")
                     if !text3D.isEmpty {
@@ -41,8 +42,9 @@ struct Panel3DView: View {
                     } else { importedMaterialSection }
                     lightingSection
                     gap(16)
+                    }
                     environmentSection
-                    objectEnvironmentSection
+                    if model.selectedLayer?.kind != 8 { objectEnvironmentSection }
                 }
                 .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -51,8 +53,9 @@ struct Panel3DView: View {
         }
         .background(AureaColors.background)
         .fileImporter(isPresented: $pickingHdri,
-                      allowedContentTypes: [UTType(filenameExtension: "hdr") ?? .data, .data]) { result in
+                      allowedContentTypes: [UTType(filenameExtension: "hdr") ?? .data, .image, .data]) { result in
             if case .success(let url) = result {
+                if model.selectedLayer?.kind == 8 { _ = model.engine.setEnvironmentBackground(true) }
                 model.importMedia(url: url, kind: .hdri, objectHDRI: hdriTarget)
             }
         }
@@ -91,18 +94,6 @@ struct Panel3DView: View {
                 }
             }
             gap(12)
-            TextField("", text: Binding(get: { draft }, set: changeText), axis: .vertical)
-                .font(.aurea(size: 15)).foregroundStyle(AureaColors.text).tint(AureaColors.accent)
-                .textFieldStyle(.plain).focused($editingText)
-                .frame(maxWidth: .infinity, minHeight: 32, alignment: .topLeading)
-                .overlay(alignment: .topLeading) {
-                    if draft.isEmpty {
-                        Text(AureaText.t("pn_text3d_placeholder")).font(.aurea(size: 15))
-                            .foregroundStyle(AureaColors.muted).allowsHitTesting(false)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
             gap(6)
             textRuler("pn_depth", key: "depth", step: 0.005, min: 0, max: 3,
                       shown: percent(number("depth")), gesture: "profundidade do texto 3D")
@@ -204,7 +195,7 @@ struct Panel3DView: View {
 
     private var environmentSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            section("panel_luz_ambiente")
+            section("environment_texture")
             horizontal {
                 chip("panel_estudio_neutro", on: environment[0] < 0.5) {
                     finishEditing(); model.engine.clearHdri(); refresh()
@@ -222,7 +213,10 @@ struct Panel3DView: View {
                 _ = model.engine.setEnvironmentIntensity(environment[1], rotation: value); refresh()
             }
             gap(8)
-            note("pn_env_light_hint")
+            Toggle(AureaText.t("environment_background"), isOn: Binding(
+                get: { environment.count > 3 && environment[3] > 0.5 },
+                set: { _ = model.engine.setEnvironmentBackground($0); refresh() })).padding(.vertical, 10)
+            note("environment_hint")
         }
     }
 

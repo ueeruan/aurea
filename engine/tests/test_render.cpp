@@ -9,16 +9,53 @@
 
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/effects/MotionTile.hpp"
+#include "aurea/effects/ShakeMotion.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
+#include "aurea/render/PreviewRefill.hpp"
 
 #include <cmath>
 #include <vector>
 
 using namespace aurea;
 using aurea::test::MockBackend;
+
+AUREA_TEST(PreviewRefill, SeekHoldsAreBoundedAndRecoverOnDecodeAndProjectChange) {
+    PreviewRefill refill;
+    AUREA_CHECK(!refill.hold(true, false, 100)); // initial frame, no previous picture
+    AUREA_CHECK(refill.hold(true, true, 1000));
+    AUREA_CHECK(refill.hold(true, true, 200001000)); // rapid seeks do not restart timeout
+    AUREA_CHECK(!refill.hold(true, true, 250001000));
+    AUREA_CHECK(!refill.hold(true, true, 900001000)); // failed source cannot freeze forever
+    AUREA_CHECK(!refill.hold(false, true, 900002000)); // decoded picture releases hold
+    AUREA_CHECK(refill.hold(true, true, 900003000));
+    AUREA_CHECK(!refill.hold(true, false, 900004000)); // new project/playback
+    AUREA_CHECK(refill.hold(true, true, 1900000000));
+}
+
+AUREA_TEST(CameraShake, ContinuousSeededMotionWorksInBothTimeDirections) {
+    shake::Settings s; s.rotation = 20; s.zoom = 10;
+    for (u32 style = 0; style < 3; ++style) {
+        s.style = style;
+        for (int cell = -8; cell < 8; ++cell) {
+            const double t = cell / 8.0;
+            const auto a = shake::sample(s, t - 1e-7), b = shake::sample(s, t + 1e-7);
+            AUREA_CHECK_NEAR(a.x, b.x, .01); AUREA_CHECK_NEAR(a.y, b.y, .01);
+            AUREA_CHECK_NEAR(a.rotation, b.rotation, .01); AUREA_CHECK(a.scale > 0);
+        }
+        const auto a = shake::sample(s, 1.25);
+        (void)shake::sample(s, 8.0);
+        const auto b = shake::sample(s, 1.25);
+        AUREA_CHECK_EQ(a.x, b.x); AUREA_CHECK_EQ(a.scale, b.scale);
+    }
+    s.style = 0; s.separate = false;
+    AUREA_CHECK_EQ(shake::sample(s, .73).x, shake::sample(s, .73).y);
+    s.amount = 0;
+    AUREA_CHECK_EQ(shake::sample(s, .73).scale, 1.f);
+    AUREA_CHECK_EQ(shake::sample(s, .73).rotation, 0.f);
+}
 
 AUREA_TEST(ParentingHelper, LocksOrientationAndScaleButKeepsTheAnchorOnItsOrbit) {
     EffectRegistry registry;

@@ -522,7 +522,7 @@ void emit_vertex(vec2 pos, float z, float size, float rot, vec4 colPremul, vec2 
     const vec2 local = c * 2.0 - 1.0;
     const float cs = cos(rot), sn = sin(rot);
     const vec2 rl = vec2(local.x * cs - local.y * sn, local.x * sn + local.y * cs);
-    v_local = rl;
+    v_local = local;
     v_misc.zw = c;
     // Textura: a imagem CABE no quadrado com a proporção dela (H1.w = l/a); o
     // que sobra do quadrado sai do uv [0,1] e o fragmento descarta.

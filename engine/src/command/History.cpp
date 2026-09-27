@@ -4,6 +4,8 @@
 #include "aurea/command/History.hpp"
 
 #include "aurea/timeline/Timeline.hpp"
+#include "aurea/tracking/CameraTrackData.hpp"
+#include "aurea/tracking/MotionTrackData.hpp"
 
 namespace aurea {
 
@@ -43,6 +45,10 @@ u64 layer_bytes(const Layer& l) noexcept {
     }
     n += l.text.spans.size() * sizeof(TextSpan) + l.text.animators.size() * sizeof(TextAnimator);
     n += l.shape.path.size() * sizeof(Vec2) + vector_bytes(l.shape.vector);
+    // Conservative accounting: shared snapshots do not allocate this again,
+    // but an old snapshot may be the last owner after reanalysis.
+    if (l.cameraTrack) n += l.cameraTrack->memory_bytes();
+    if (l.motionTrack) n += l.motionTrack->memory_bytes();
     return n;
 }
 

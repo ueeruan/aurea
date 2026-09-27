@@ -38,11 +38,14 @@ std::vector<f32> patch(const Gray& g, Vec2 c, i32 half) {
 
 } // namespace
 
-TrackStep track_step(const Gray& prev, const Gray& cur, Vec2 from, i32 half, i32 radius) {
+TrackStep track_step(const Gray& prev, const Gray& cur, Vec2 from, i32 half, i32 radius, Vec2 searchCenter) {
     TrackStep best;
     best.pos = from;
     best.score = -2.0f;
-    if (prev.px.empty() || cur.px.empty()) return best;
+    if (!prev.width || !prev.height || !cur.width || !cur.height ||
+        prev.px.size()!=static_cast<usize>(prev.width)*prev.height || cur.px.size()!=static_cast<usize>(cur.width)*cur.height ||
+        !std::isfinite(from.x) || !std::isfinite(from.y)) return best;
+    half=std::clamp(half,2,32);radius=std::clamp(radius,1,96);
     const i32 n = 2 * half + 1;
     const std::vector<f32> t = patch(prev, from, half);
     f64 tm = 0;
@@ -51,12 +54,15 @@ TrackStep track_step(const Gray& prev, const Gray& cur, Vec2 from, i32 half, i32
     f64 tv = 0;
     for (f32 v : t) tv += (v - tm) * (v - tm);
     if (tv < 1e-8) return best;   // bloco liso: nada para seguir
-    const i32 cx = static_cast<i32>(std::lround(from.x)), cy = static_cast<i32>(std::lround(from.y));
+    if(!std::isfinite(searchCenter.x)||!std::isfinite(searchCenter.y))searchCenter=from;
+    const i32 cx = static_cast<i32>(std::lround(std::clamp(searchCenter.x,0.f,static_cast<f32>(cur.width-1))));
+    const i32 cy = static_cast<i32>(std::lround(std::clamp(searchCenter.y,0.f,static_cast<f32>(cur.height-1))));
     const i32 w = 2 * radius + 1;
     std::vector<f32> score(static_cast<usize>(w * w), -2.0f);
     i32 bx = 0, by = 0;
     for (i32 dy = -radius; dy <= radius; ++dy) {
         for (i32 dx = -radius; dx <= radius; ++dx) {
+            if(cx+dx-half<0 || cy+dy-half<0 || cx+dx+half>=static_cast<i32>(cur.width) || cy+dy+half>=static_cast<i32>(cur.height))continue;
             f64 sm = 0;
             for (i32 y = -half; y <= half; ++y) for (i32 x = -half; x <= half; ++x) sm += cur.at(cx + dx + x, cy + dy + y);
             sm /= static_cast<f64>(n * n);

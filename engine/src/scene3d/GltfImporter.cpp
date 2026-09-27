@@ -1065,6 +1065,8 @@ ImportResult import_gltf_file(const std::string& path, const ImportOptions& opti
 std::shared_ptr<HdriPixels> decode_hdri(const u8* bytes, usize size) noexcept {
     if (!bytes || size == 0) return nullptr;
     int w = 0, h = 0, c = 0;
+    if (size > (128u << 20) || !stbi_info_from_memory(bytes, static_cast<int>(size), &w, &h, &c)
+        || w <= 0 || h <= 0 || static_cast<u64>(w)*h > 8388608ull) return nullptr;
     f32* px = stbi_loadf_from_memory(bytes, static_cast<int>(size), &w, &h, &c, 3);
     if (!px || w <= 0 || h <= 0) {
         if (px) stbi_image_free(px);

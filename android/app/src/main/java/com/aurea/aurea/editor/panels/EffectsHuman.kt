@@ -73,6 +73,18 @@ private val MatrixLabels = listOf(
 
 private val Table: Map<Int, EffectHuman> = buildMap {
     fun put(key: String, e: EffectHuman) = put(effectTypeId(key), e)
+    put("aurea.glitch.jpeg_codec", EffectHuman(keywords = "jpeg glitch compression compressao dct quantization dano",
+        principal = listOf(0, 1, 2, 4, 5)))
+    put("aurea.glitch.analog_signal", EffectHuman(keywords = "signal analog analogico ntsc pal vhs television",
+        principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.light.deep_glow_2", EffectHuman(keywords = "deep glow 2 brilho bloom halo",
+        principal = listOf(0, 1, 2, 3, 13)))
+    put("aurea.light.shadow_studio_3", EffectHuman(keywords = "shadow studio 3 sombra long radial inner",
+        principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.generate.tracery", EffectHuman(keywords = "tracery color detection boxes rastreio cor conexoes",
+        principal = listOf(0, 1, 3, 7, 14), params = mapOf(2 to ParamHuman(decimals = 2))))
+    put("aurea.text3d.layout", EffectHuman(keywords = "letter rotation letras rotacao delay atraso cylinder twist",
+        principal = listOf(0, 1, 2, 9, 10)))
     put("aurea.stylize.omino_diffusion", EffectHuman(
         name = R.string.fx_name_omino_diffusion, keywords = "omino omine diffusion difusao glitch paleta faixas",
         principal = listOf(0, 1, 2, 5, 6), params = mapOf(
@@ -346,11 +358,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         EffectHuman(
             name = R.string.fx_name_shake,
             keywords = "shake tremor camera balancar vibrar tremer",
-            principal = listOf(0, 1, 2, 4, 5),
+            principal = listOf(8, 2, 10, 5, 9, 11),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_amplitude_x, suffix = "px", decimals = 0),
                 1 to ParamHuman(label = R.string.fx_amplitude_y, suffix = "px", decimals = 0),
-                2 to ParamHuman(label = R.string.fx_frequencia, suffix = "x", decimals = 2),
+                2 to ParamHuman(label = R.string.fx_frequencia, suffix = "Hz", decimals = 2),
                 4 to ParamHuman(label = R.string.fx_eixos_separados),
                 5 to ParamHuman(label = R.string.fx_rotacao, suffix = "°", decimals = 0),
                 6 to ParamHuman(label = R.string.fx_suavizacao, decimals = 0),
@@ -472,16 +484,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         EffectHuman(
             name = R.string.fx_name_light_sweep,
             keywords = "light sweep faixa de luz brilho varredura reflexo",
-            principal = listOf(0, 1, 2, 4, 5),
+            principal = listOf(9, 1, 2, 4, 5, 10),
             params = mapOf(
-                0 to ParamHuman(label = R.string.fx_posicao, decimals = 0),
-                1 to ParamHuman(label = R.string.fx_largura, decimals = 0),
-                2 to ParamHuman(label = R.string.fx_intensidade, suffix = "x", decimals = 2),
-                3 to ParamHuman(label = R.string.fx_suavidade_borda, decimals = 0),
-                4 to ParamHuman(label = R.string.fx_angulo, suffix = "°", decimals = 0),
-                5 to ParamHuman(label = R.string.fx_relevo, decimals = 0),
-                6 to ParamHuman(label = R.string.fx_multiplicar),
-                7 to ParamHuman(label = R.string.fx_so_onde_imagem_clara),
             ),
         ),
     )
@@ -586,7 +590,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         EffectHuman(
             name = R.string.fx_name_glitchify,
             keywords = "glitchify glitch defeito digital rasgo bloco corrupcao",
-            principal = listOf(0, 1, 2, 3, 4),
+            principal = listOf(17, 18, 1, 3, 13, 34),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_altura_faixa, suffix = "px", decimals = 0),
                 1 to ParamHuman(label = R.string.fx_deslocamento, suffix = "px", decimals = 0),

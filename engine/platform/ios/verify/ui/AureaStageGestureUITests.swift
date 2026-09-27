@@ -374,9 +374,31 @@ import XCTest
         assertTransform(restored, equals: before)
     }
 
+    func testMediaLabEffectsReachNativeRendererAndUndo() throws {
+        _ = try launch("transform")
+        let before = try snapshot()
+        for name in ["JPEG Glitch", "Signal Analog", "Tracery", "Deep Glow 2", "Shadow Studio 3"] {
+            try openCommandSearch(name)
+            let effect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "command:effect:")).firstMatch
+            XCTAssertTrue(effect.waitForExistence(timeout: 5)); XCTAssertTrue(effect.isEnabled)
+            XCTAssertTrue(effect.label.contains(name)); effect.tap()
+            _ = try awaitSnapshot("Media Lab effect reaches the native stack") { $0.effectCount == before.effectCount + 1 }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            XCTAssertEqual(app.state, .runningForeground)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = name; screenshot.lifetime = .keepAlways; add(screenshot)
+            try undo()
+            _ = try awaitSnapshot("Media Lab effect can be undone") { $0.effectCount == before.effectCount }
+        }
+    }
+
     func testCurvesOpenForNullYAndShapeHeightInCompactPanel() throws {
         for scene in ["curve-null", "curve-shape"] {
-            _ = try launch(scene)
+            let prepared = try launch(scene)
+            if scene == "curve-null" {
+                XCTAssertNotEqual(prepared.detail.animatedMask & 2, 0,
+                                  "The fixture must insert real Y keyframes before testing curve access")
+            }
             let open = app.buttons["Edit the property curve"].firstMatch
             XCTAssertTrue(open.waitForExistence(timeout: 5)); XCTAssertTrue(open.isEnabled)
             open.tap()
@@ -658,6 +680,7 @@ import XCTest
         let stageGizmo: [Double]
     }
     private struct Detail: Decodable {
+        let animatedMask: UInt64
         let kind: UInt32
         let startFrame: Int64
         let endFrame: Int64

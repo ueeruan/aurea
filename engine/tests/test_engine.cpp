@@ -729,6 +729,126 @@ AUREA_TEST(Engine, MobileUnlinkKeepsChildrenInPlaceAndUndoes) {
     }
 }
 
+AUREA_TEST(Engine, ParentRowsExposeNestedLinksInDisplayOrder) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30, nullptr).ok());
+    const auto root = e.add_null(false), child = e.add_null(true), leaf = e.add_shape(0);
+    AUREA_CHECK(root.ok() && child.ok() && leaf.ok());
+    if (!root.ok() || !child.ok() || !leaf.ok()) return;
+    Command link; link.type = CommandType::LayerSetParent;
+    link.layer_parent = {LayerId::unpack(*child), LayerId::unpack(*root)};
+    AUREA_CHECK(e.apply_command(link).ok());
+    link.layer_parent = {LayerId::unpack(*leaf), LayerId::unpack(*child)};
+    AUREA_CHECK(e.apply_command(link).ok());
+    bridge::LayerRow rows[3]{};
+    auto check = [&] {
+        AUREA_CHECK_EQ(e.query_layers(rows, 3, nullptr, 0), 3u);
+        for (const auto& row : rows) {
+            if (row.id == *root) AUREA_CHECK_EQ(row.parentIndex, kInvalidIndex);
+            else {
+                AUREA_CHECK(row.parentIndex < 3);
+                if (row.parentIndex < 3) AUREA_CHECK_EQ(rows[row.parentIndex].id, row.id == *leaf ? *child : *root);
+            }
+        }
+    };
+    check();
+    AUREA_CHECK_EQ(rows[0].id, *leaf);
+    AUREA_CHECK_EQ(e.query_layers(rows, 1, nullptr, 0), 1u);
+    AUREA_CHECK_EQ(rows[0].parentIndex, kInvalidIndex); // Parent omitted by capacity.
+    Command reorder; reorder.type = CommandType::LayerReorder;
+    reorder.layer_reorder.layer = LayerId::unpack(*root); reorder.layer_reorder.newIndex = 2;
+    AUREA_CHECK(e.apply_command(reorder).ok());
+    check();
+    link.layer_parent = {LayerId::unpack(*child), LayerId::unpack(0)};
+    AUREA_CHECK(e.apply_command(link).ok());
+    AUREA_CHECK_EQ(e.query_layers(rows, 3, nullptr, 0), 3u);
+    for (const auto& row : rows) if (row.id == *child) AUREA_CHECK_EQ(row.parentIndex, kInvalidIndex);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    check();
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, NestedNull3DLinkPreservesAnimatedDescendants) {
+    for (bool root3D : {false, true}) for (bool nonuniform : {false, true}) {
+        Engine e;
+        AUREA_CHECK(e.initialize(headless_config()).ok());
+        AUREA_CHECK(e.new_project(1280, 720, 30, nullptr).ok());
+        const auto rootId = e.add_null(root3D), nullId = e.add_null(true), shapeId = e.add_shape(0);
+        AUREA_CHECK(rootId.ok() && nullId.ok() && shapeId.ok());
+        if (!rootId.ok() || !nullId.ok() || !shapeId.ok()) continue;
+        auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        auto* root = comp->layer(LayerId::unpack(*rootId));
+        auto* node = comp->layer(LayerId::unpack(*nullId));
+        auto* shape = comp->layer(LayerId::unpack(*shapeId));
+        root->transform.position = {280, 170, root3D ? 75.f : 0.f};
+        root->transform.rotation = {root3D ? 25.f : 0.f, root3D ? -35.f : 0.f, 40};
+        root->transform.scale = {1.6f, nonuniform ? .65f : 1.6f, nonuniform ? .7f : 1.f};
+        node->transform.position = {710, 420, 80};
+        node->transform.rotation = {15, 30, -20};
+        node->tracks.get_or_create(TrackProperty::RotationX).set(FrameIndex{0}, 15);
+        node->tracks.get_or_create(TrackProperty::RotationX).set(FrameIndex{30}, 70);
+        node->tracks.get_or_create(TrackProperty::RotationY).set(FrameIndex{0}, 30);
+        node->tracks.get_or_create(TrackProperty::RotationY).set(FrameIndex{30}, -45);
+        node->tracks.get_or_create(TrackProperty::PositionY).set(FrameIndex{0}, 420);
+        node->tracks.get_or_create(TrackProperty::PositionY).set(FrameIndex{30}, 510);
+        shape->parent = LayerId::unpack(*nullId);
+        shape->transform.position = {80, 120, 35};
+        Mat4 before[3];
+        for (int i = 0; i < 3; ++i) before[i] = layer_world_3d(*comp, *shape, FrameIndex{i * 15});
+        Command link; link.type = CommandType::LayerSetParent;
+        link.layer_parent.layer = LayerId::unpack(*nullId);
+        link.layer_parent.parent = LayerId::unpack(*rootId);
+        AUREA_CHECK(e.apply_command(link).ok());
+        f32 worst = 0;
+        for (int i = 0; i < 3; ++i) {
+            const auto after = layer_world_3d(*comp, *shape, FrameIndex{i * 15});
+            for (Vec3 p : {Vec3{0, 0, 0}, Vec3{100, 0, 0}, Vec3{0, 100, 0}, Vec3{10, 20, 30}})
+                worst = std::max(worst, (before[i].transform_point(p) - after.transform_point(p)).length());
+        }
+        std::printf("    nested null: root3D=%d nonuniform=%d drift=%.3f px\n", root3D, nonuniform, worst);
+        AUREA_CHECK(worst < .05f);
+        root->transform.position.x += 100;
+        const auto moved = layer_world_3d(*comp, *shape, FrameIndex{0}).transform_point({0, 0, 0});
+        AUREA_CHECK((moved - before[0].transform_point({0, 0, 0}) - Vec3{100, 0, 0}).length() < .05f);
+        root->transform.position.x -= 100;
+        // World-axis dragging must account for the bind compensation too.
+        f32 dragged[3]{};
+        AUREA_CHECK(e.gizmo_move_local(*nullId, 0, 25, dragged));
+        const Vec3 oldPosition = node->transform.position;
+        node->transform.position.x = dragged[0];
+        AUREA_CHECK((layer_world_3d(*comp, *shape, FrameIndex{0}).transform_point({0, 0, 0})
+            - before[0].transform_point({0, 0, 0}) - Vec3{25, 0, 0}).length() < .05f);
+        node->transform.position = oldPosition;
+        link.layer_parent.parent = LayerId::unpack(0);
+        AUREA_CHECK(e.apply_command(link).ok());
+        for (int i = 0; i < 3; ++i)
+            AUREA_CHECK((before[i].transform_point({25, 50, 40}) - layer_world_3d(*comp, *shape, FrameIndex{i * 15}).transform_point({25, 50, 40})).length() < .05f);
+        Command undo; undo.type = CommandType::Undo;
+        AUREA_CHECK(e.apply_command(undo).ok());
+        node = comp->layer(LayerId::unpack(*nullId));
+        shape = comp->layer(LayerId::unpack(*shapeId));
+        AUREA_CHECK(node->parent == LayerId::unpack(*rootId));
+        AUREA_CHECK(node->tracks.find(TrackProperty::RotationY)->keys.size() == 2);
+        const std::string path = (std::filesystem::temp_directory_path() / "aurea_nested_null_3d_test.aurea").string();
+        AUREA_CHECK(e.save_project(path.c_str()).ok());
+        AUREA_CHECK(e.load_project(path.c_str()).ok());
+        comp = e.project()->timeline().composition(e.project()->timeline().current());
+        shape = nullptr;
+        comp->layers().for_each([&](LayerId, Layer& layer) { if (layer.kind == LayerKind::Shape) shape = &layer; });
+        AUREA_CHECK(shape != nullptr);
+        if (shape) for (int i = 0; i < 3; ++i)
+            AUREA_CHECK((before[i].transform_point({25, 50, 40}) - layer_world_3d(*comp, *shape, FrameIndex{i * 15}).transform_point({25, 50, 40})).length() < .05f);
+        // Resizing acts once on roots, including any retained bind space.
+        comp->resize_content(2560, 1440);
+        if (shape) AUREA_CHECK((before[0].transform_point({25, 50, 40}) * 2.f
+            - layer_world_3d(*comp, *shape, FrameIndex{0}).transform_point({25, 50, 40})).length() < .05f);
+        std::remove(path.c_str());
+        e.shutdown();
+    }
+}
+
 AUREA_TEST(Engine, ParentSurvivesSaveAndReopenAfterReorder) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());
@@ -1545,22 +1665,22 @@ AUREA_TEST(Engine, EffectSpecsCoverTheWholeCatalog) {
     e.shutdown();
 }
 
-AUREA_TEST(Engine, ParentingAnimated3DLayerSurvivesTrackStorageGrowth) {
-    for (const u32 initialTracks : {1u, 15u, 16u}) {
+AUREA_TEST(Engine, ParentingAnimatedLayersPreserveTracksAndWorldSamples) {
+    for (bool threeD : {false, true}) for (const u32 initialTracks : {1u, 15u, 16u}) {
         Engine e;
         AUREA_CHECK(e.initialize(headless_config()).ok());
         AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
-        const auto parentId = e.add_null(true);
-        const auto childId = e.add_null(true);
+        const auto parentId = e.add_null(threeD);
+        const auto childId = e.add_null(threeD);
         AUREA_CHECK(parentId.ok() && childId.ok());
         Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
         Layer* parent = comp->layer(LayerId::unpack(*parentId));
         Layer* child = comp->layer(LayerId::unpack(*childId));
-        parent->transform.position = Vec3{300, 200, 70};
+        parent->transform.position = Vec3{300, 200, threeD ? 70.f : 0.f};
         parent->transform.rotation.z = 30;
         parent->transform.scale = Vec3{2, 2, 2};
         parent->transform.anchor = Vec3{0, 0, 0};
-        child->transform.position = Vec3{500, 400, 90};
+        child->transform.position = Vec3{500, 400, threeD ? 90.f : 0.f};
         child->transform.anchor = Vec3{0, 0, 0};
         Track& x = child->tracks.get_or_create(TrackProperty::PositionX);
         x.set(FrameIndex{0}, 500.0f);
@@ -1582,11 +1702,17 @@ AUREA_TEST(Engine, ParentingAnimated3DLayerSurvivesTrackStorageGrowth) {
         command.layer_parent.layer = LayerId::unpack(*childId);
         command.layer_parent.parent = LayerId::unpack(*parentId);
         AUREA_CHECK(e.apply_command(command).ok());
-        AUREA_CHECK_EQ(child->tracks.size(), initialTracks + 2);
+        // 3D retains authored tracks verbatim; 2D still compensates X/Y
+        // and must safely grow storage when rotating an animated X track.
+        AUREA_CHECK_EQ(child->tracks.size(), initialTracks + (threeD ? 0u : 1u));
         for (const TrackProperty property : {TrackProperty::PositionX, TrackProperty::PositionY, TrackProperty::PositionZ}) {
             const Track* track = child->tracks.find(property);
+            if (property == TrackProperty::PositionZ || (threeD && property == TrackProperty::PositionY)) {
+                AUREA_CHECK(track == nullptr);
+                continue;
+            }
             AUREA_CHECK(track != nullptr);
-            AUREA_CHECK_EQ(track->keys.size(), static_cast<usize>(2));
+            if (track) AUREA_CHECK_EQ(track->keys.size(), static_cast<usize>(2));
         }
         for (i64 frame = 30; frame >= 0; --frame) {
             const Vec4 actual = layer_world_3d(*comp, *child, FrameIndex{frame}) * Vec4{0, 0, 0, 1};
@@ -1600,4 +1726,52 @@ AUREA_TEST(Engine, ParentingAnimated3DLayerSurvivesTrackStorageGrowth) {
         }
         e.shutdown();
     }
+}
+
+AUREA_TEST(Engine, LegacyEffectControlsExpandOnLoadWithoutLosingKeys) {
+    Engine e; AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(320,180,30,"legacy effects").ok());
+    scene3d::Text3DSpec text; text.content = "Legacy";
+    const auto added=e.add_text3d(text); AUREA_CHECK(added.ok()); if (!added.ok()) return;
+    const auto id=LayerId::unpack(*added);
+    auto layer=[&]() { return e.project()->timeline().composition(e.project()->timeline().current())->layer(id); };
+    const char* keys[]={"aurea.distort.shake","aurea.light.sweep","aurea.glitch.glitchify","aurea.text3d.layout"};
+    const u32 oldCounts[]={8,9,17,9}, newCounts[]={15,13,35,12};
+    for(u32 i=0;i<4;++i) {
+        Command add;add.type=CommandType::EffectAdd;add.effect_add.layer=id;
+        add.effect_add.effectType=effect_type_id(keys[i]);add.effect_add.index=kInvalidIndex;
+        const auto status=e.apply_command(add); AUREA_CHECK(status.ok()); if (!status.ok()) return;
+        auto& fx=layer()->effects.back();fx.params.resize(oldCounts[i]);fx.params[0].constant.v[0]=7;
+        layer()->tracks.get_or_create(TrackProperty::EffectParam,fx.id,0).set(FrameIndex{12},19);
+    }
+    const char* path="build/prompt03/legacy-controls.aurea";
+    AUREA_CHECK(e.save_project(path).ok());AUREA_CHECK(e.load_project(path).ok());
+    for(u32 i=0;i<4;++i) {
+        auto& fx=layer()->effects[i];AUREA_CHECK_EQ(fx.params.size(),newCounts[i]);
+        AUREA_CHECK_NEAR(fx.params[0].constant.v[0],7,.0001f);
+        const auto* tr=layer()->tracks.find(TrackProperty::EffectParam,fx.id,0);
+        AUREA_CHECK(tr && tr->find_exact(FrameIndex{12})!=kInvalidIndex);
+        Command change;change.type=CommandType::EffectSetParam;change.effect_param.layer=id;
+        change.effect_param.effect=EffectId{fx.id,0};change.effect_param.paramIndex=newCounts[i]-1;change.effect_param.value=1;
+        AUREA_CHECK(e.apply_command(change).ok());
+        AUREA_CHECK_NEAR(fx.params.back().constant.v[0],1,.0001f);
+    }
+    AUREA_CHECK(e.save_project(path).ok());AUREA_CHECK(e.load_project(path).ok());
+    for(u32 i=0;i<4;++i)AUREA_CHECK_NEAR(layer()->effects[i].params.back().constant.v[0],1,.0001f);
+}
+
+AUREA_TEST(MediaLab, FiveEffectsSaveReopenKeysAndUndo) {
+    Engine e;AUREA_CHECK(e.initialize(headless_config()).ok());AUREA_CHECK(e.new_project(320,180,30,"Media Lab").ok());
+    const auto added=e.add_shape(0);AUREA_CHECK(added.ok());if(!added.ok())return;const auto id=LayerId::unpack(*added);
+    auto layer=[&](){return e.project()->timeline().composition(e.project()->timeline().current())->layer(id);};
+    const char* keys[]={effect_keys::kJpegGlitch,effect_keys::kAnalogSignal,effect_keys::kDeepGlow2,effect_keys::kShadowStudio3,effect_keys::kTracery};
+    for(auto key:keys){Command add;add.type=CommandType::EffectAdd;add.effect_add.layer=id;add.effect_add.effectType=effect_type_id(key);add.effect_add.index=kInvalidIndex;AUREA_CHECK(e.apply_command(add).ok());
+        auto& fx=layer()->effects.back();layer()->tracks.get_or_create(TrackProperty::EffectParam,fx.id,param_track_key(1,0)).set(FrameIndex{12},17);
+    }
+    AUREA_CHECK_EQ(layer()->effects.size(),5u);const char* path="build/effects-packages/five-effects.aurea";
+    AUREA_CHECK(e.save_project(path).ok());AUREA_CHECK(e.load_project(path).ok());
+    for(u32 i=0;i<5;++i){auto& fx=layer()->effects[i];AUREA_CHECK_EQ(fx.type,effect_type_id(keys[i]));const auto* track=layer()->tracks.find(TrackProperty::EffectParam,fx.id,param_track_key(1,0));AUREA_CHECK(track&&track->find_exact(FrameIndex{12})!=kInvalidIndex);}
+    Command change;change.type=CommandType::EffectSetParam;change.effect_param.layer=id;change.effect_param.effect=EffectId{layer()->effects[0].id,0};change.effect_param.paramIndex=0;change.effect_param.value=75;
+    const f32 before=layer()->effects[0].params[0].constant.v[0];AUREA_CHECK(e.apply_command(change).ok());AUREA_CHECK_NEAR(layer()->effects[0].params[0].constant.v[0],75,.001f);
+    Command undo;undo.type=CommandType::Undo;AUREA_CHECK(e.apply_command(undo).ok());AUREA_CHECK_NEAR(layer()->effects[0].params[0].constant.v[0],before,.001f);
 }

@@ -16,6 +16,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.rememberTextMeasurer
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.state.EditorStore
@@ -79,6 +80,7 @@ fun Timeline(
 
     Box(
         modifier
+            .testTag("editor.timeline")
             .clipToBounds()
             .background(AureaColors.Stage)
             .onSizeChanged {

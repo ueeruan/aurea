@@ -78,10 +78,9 @@ internal fun TextPanel(env: PanelEnv) {
             BasicTextField(
                 value = field,
                 onValueChange = {
-                    val changed = it.text != field.text
-                    field = it
-                    if (changed) store.setTextContent(it.text)
+                    field = it.copy(text = td.content)
                 },
+                readOnly = true, // selection stays available for rich text styling; no keyboard here
                 textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text)),
                 cursorBrush = SolidColor(AureaColors.Accent),
                 modifier = Modifier.fillMaxWidth(),

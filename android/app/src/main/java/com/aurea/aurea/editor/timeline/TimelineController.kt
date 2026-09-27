@@ -97,10 +97,27 @@ internal class TimelineController(
         if (!state.compact) list.getOrNull(i) else compactRow(list)
 
     fun rowHeight(row: RowModel): Float = timelineRowHeight(row, metrics.row, metrics.density)
-    fun rowTop(index: Int): Float = if (state.compact) 0f else timelineRowTop(rows.value, index, metrics.row, metrics.density)
+    private var geometryRows: List<RowModel>? = null
+    private var geometryMetrics: TimelineMetrics? = null
+    private var rowOffsets = FloatArray(1)
+    private fun offsets(): FloatArray {
+        val current = rows.value
+        if (geometryRows !== current || geometryMetrics !== metrics) {
+            geometryRows = current
+            geometryMetrics = metrics
+            rowOffsets = FloatArray(current.size + 1)
+            for (i in current.indices) rowOffsets[i + 1] = rowOffsets[i] + rowHeight(current[i])
+        }
+        return rowOffsets
+    }
+    fun rowTop(index: Int): Float = if (state.compact) 0f else offsets().let { it[index.coerceIn(0, it.lastIndex)] }
     fun rowIndexAt(y: Float): Int = if (state.compact) {
         if (y < 0f) -1 else if (y < metrics.row) 0 else 1
-    } else timelineRowIndex(rows.value, y, metrics.row, metrics.density)
+    } else {
+        val offsets = offsets()
+        val index = Arrays.binarySearch(offsets, y)
+        if (index >= 0) index else -index - 2
+    }
 
     private fun compactRow(list: List<RowModel>): RowModel? {
         val p = primaryId.value
@@ -142,7 +159,7 @@ internal class TimelineController(
     private fun holdView(v: Double) {
         val c = TimeAxis.clampView(v, store.project.durationFrames)
         val f = c.toFrame()
-        state.heldView = f.toDouble()
+        state.heldView = c
         if (!scrubOpen) {
             scrubOpen = true
             if (store.playing) store.pause()
@@ -225,7 +242,7 @@ internal class TimelineController(
         val top = m.rowsTop + rowTop(i) - scroll
         val x0 = xOf(r.start)
         val x1 = max(xOf(r.end), x0 + m.barMinWidth)
-        val handles = r.track == null && !state.compact && selectionSize() == 1 && isSelected(r.id) && !r.locked
+        val handles = r.track == null && selectionSize() == 1 && isSelected(r.id) && !r.locked
         hit.kind = RowHit.hit(
             m, p.x, if (r.track == null) p.y - top else m.diamondCyNormal, state.width.toFloat(), x0, x1, handles, state.compact,
             keysEnabled = !multi(), instants = r.instants,
@@ -278,7 +295,7 @@ internal class TimelineController(
                 }
                 if (!ch.pressed) {
                     ch.consume()
-                    phase = Phase.TAP
+                    phase = if ((ch.position - down.position).getDistance() <= slop) Phase.TAP else Phase.CANCEL
                     break
                 }
                 tracker.addPointerInputChange(ch)
@@ -440,9 +457,12 @@ internal class TimelineController(
             // O eixo se decide UMA vez, no 1º movimento (A.01): tremor não vira deslocamento.
             val timeAxis = abs(d.x) > abs(d.y)
             when (kind) {
-                HitKind.KEYFRAME -> if (timeAxis) keyframeDrag(r, hit.keyIndex, down) else consumeUntilUp()
+                HitKind.KEYFRAME -> if (timeAxis) keyframeDrag(r, hit.keyIndex, down)
+                    else if (!state.compact) scroll(down.id, down.position, tracker) else consumeUntilUp()
                 HitKind.HEADER -> if (!timeAxis && !state.compact) reorderDrag(r, hit.rowIndex, down) else consumeUntilUp()
-                else -> if (timeAxis || state.compact) longPressMove(r, down) else reorderDrag(r, hit.rowIndex, down)
+                // Reordering belongs to the header. A slow vertical swipe on a
+                // clip must scroll even if the finger paused before moving.
+                else -> if (timeAxis || state.compact) longPressMove(r, down) else scroll(down.id, down.position, tracker)
             }
             return
         }
@@ -460,9 +480,9 @@ internal class TimelineController(
                 if (state.compact) return
                 tick()
                 when {
-                    selectionSize() == 0 -> store.select(r.id)
+                    selectionSize() == 0 -> store.select(r.id, openOptions = false)
                     selectionSize() == 1 && isSelected(r.id) -> {}   // segurar a única escolhida não a solta
-                    else -> store.select(r.id, additive = true)      // soma/tira do lote
+                    else -> store.select(r.id, additive = true, openOptions = false)
                 }
             }
         }
@@ -489,9 +509,12 @@ internal class TimelineController(
             r != null && horizontal && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
             r != null && horizontal && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
             r != null && horizontal && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
-            // Clipe escolhido anda no tempo; o não escolhido não se arrasta (o arrasto é scrub).
-            // No compacto a barra ocupa a timeline: arrastar nela é scrub, mover é por toque longo (A.01).
-            r != null && r.track == null && horizontal && !state.compact && isSelected(r.id) && hit.kind == HitKind.BODY -> moveDrag(r, down)
+            // Select only after the gesture crosses touch slop, without opening
+            // the dock. Ruler and empty space remain available for scrubbing.
+            r != null && r.track == null && horizontal && !state.compact && hit.kind == HitKind.BODY -> {
+                if (!isSelected(r.id)) store.select(r.id, openOptions = false)
+                moveDrag(r, down)
+            }
             horizontal -> scrub(down.id, slopAt, tracker)
             !state.compact -> scroll(down.id, slopAt, tracker)
             else -> consumeUntilUp()
@@ -592,13 +615,14 @@ internal class TimelineController(
         val groupIds = group.toLongArray()
         val baseStarts = IntArray(groupIds.size) { rowById(groupIds[it])?.start ?: 0 }
         val baseEnds = IntArray(groupIds.size) { rowById(groupIds[it])?.end ?: 0 }
+        val maxDelta = Int.MAX_VALUE - 1 - (baseEnds.maxOrNull() ?: r.end)
         val starts = IntArray(groupIds.size)
         val ends = IntArray(groupIds.size)
         var sent = 0
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = (frameAt(p.x) + grab).toFrame()
             Snap.span(targets, desired, length, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble(), out)
-            val target = max(out[0], floorStart)
+            val target = out[0].coerceIn(floorStart, r.start + maxDelta)
             val delta = target - r.start
             if (delta != sent) {
                 openUndo("mover")
@@ -657,7 +681,7 @@ internal class TimelineController(
         }
         light()
         pauseIfPlaying()
-        if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id)
+        if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id, openOptions = false)
         val keys = r.keysForDrag(index, store.timelineFocus != null)
         val instants = r.dragInstants(keys)
         val limits = IntArray(2)
@@ -906,9 +930,9 @@ internal class TimelineController(
     fun autoFit() {
         val path = store.project.path ?: return
         if (path == state.fittedPath || state.width <= 0) return
+        state.fittedPath = path
         val seconds = store.project.durationFrames / fps
         if (seconds < Zoom.AUTO_FIT_MIN_SECONDS) return
-        state.fittedPath = path
         state.pps = Zoom.autoFit(state.width / metrics.density - AUTO_FIT_MARGIN_DP, seconds)
     }
 

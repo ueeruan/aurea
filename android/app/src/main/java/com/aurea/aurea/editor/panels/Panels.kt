@@ -106,11 +106,11 @@ fun PanelContent(
         EditorPanel.ClipEdit -> "Slip · Roll · Slide"
         EditorPanel.Audio -> stringResource(R.string.panel_som)
         EditorPanel.Shape -> stringResource(R.string.panel_cor_preenchimento)
-        EditorPanel.Text -> stringResource(R.string.panel_texto)
+        EditorPanel.Text -> stringResource(R.string.text_options)
         EditorPanel.Font -> stringResource(R.string.panel_fonte)
         EditorPanel.Particles -> stringResource(R.string.panel_particulas)
         EditorPanel.Tracking -> stringResource(R.string.panel_rastreio)
-        EditorPanel.Element3D -> stringResource(R.string.panel_material_ambiente)
+        EditorPanel.Element3D -> stringResource(if (store.text3d != null) R.string.text_options else R.string.panel_material_ambiente)
         EditorPanel.Captions -> stringResource(R.string.panel_legendas)
         EditorPanel.Presets -> stringResource(R.string.panel_presets)
         EditorPanel.Mask -> stringResource(R.string.panel_mascara_recorte)

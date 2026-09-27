@@ -122,7 +122,7 @@ private fun ParticleBody(env: PanelEnv, p: List<Float>) {
         Group(stringResource(R.string.particular_group_particle))
         Choice(store, stringResource(R.string.particular_shape), P.ParticleType) {
             listOf(stringResource(R.string.particular_shape_circle), stringResource(R.string.particular_shape_square),
-                stringResource(R.string.particular_shape_streak), stringResource(R.string.particular_shape_soft))
+                stringResource(R.string.particular_shape_streak), stringResource(R.string.particular_shape_soft), stringResource(R.string.world_purple_crystals))
         }
         Dim(store, stringResource(R.string.panel_tamanho_inicial), P.StartSize, p, .25f, .1f, 120f, " px", decimals = 1)
         Dim(store, stringResource(R.string.panel_tamanho_final), P.EndSize, p, .25f, 0f, 120f, " px", decimals = 1)
@@ -208,7 +208,7 @@ private fun LifeGradient(env: PanelEnv) {
 
 @Composable
 private fun PresetRow(store: EditorStore) {
-    val names = listOf(R.string.world_explosive, R.string.world_jet, R.string.world_vortex, R.string.world_box_lights, R.string.world_embers, R.string.world_snow, R.string.world_bokeh, R.string.world_fountain)
+    val names = listOf(R.string.world_explosive, R.string.world_jet, R.string.world_vortex, R.string.world_box_lights, R.string.world_embers, R.string.world_snow, R.string.world_bokeh, R.string.world_fountain, R.string.world_purple_crystals)
     Column {
         Text(stringResource(R.string.particular_presets), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)))
         Spacer(Modifier.height(5.dp))
@@ -238,10 +238,11 @@ private fun Choice(store: EditorStore, label: String, param: Int, options: @Comp
     PropertyCustomRow(label, selected = sel == param, onSelect = { pick(param) }, keyframe = particleLook(store, param)) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             options().forEachIndexed { i, name ->
-                val on = i == current
+                val value = if (param == P.ParticleType && i == 4) 6 else i
+                val on = value == current
                 Box(Modifier.clip(RoundedCornerShape(7.dp))
                     .background(if (on) AureaColors.Accent else AureaColors.Chip)
-                    .tocavel(onClick = { store.setParticleParam(param, i.toFloat()) })
+                    .tocavel(onClick = { store.setParticleParam(param, value.toFloat()) })
                     .padding(horizontal = 10.dp, vertical = 5.dp)) {
                     Text(name, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp,
                         color = if (on) AureaColors.OnAccent else AureaColors.Text)))

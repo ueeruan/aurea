@@ -236,6 +236,10 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_optical_effects(registry);
     builtin::register_sampled_blur_effects(registry);
     builtin::register_pattern_effects(registry);
+    builtin::register_corner_pin_effect(registry);
+    builtin::register_media_lab_effects(registry);
+    builtin::register_studio_light_effects(registry);
+    builtin::register_tracery_effect(registry);
 }
 
 } // namespace aurea

@@ -430,6 +430,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setMaterialInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
              materialIndex:(uint32_t)materialIndex param:(uint32_t)param value:(float)value;
 /// Ambiente do PROJETO (HDRI + intensidade + giro, em graus).
+- (BOOL)setEnvironmentBackground:(BOOL)visible;
 - (BOOL)setEnvironmentIntensity:(float)intensity rotation:(float)rotation;
 /// {tem HDRI, intensidade, giro}.
 - (NSArray<NSNumber*>*)environment;
@@ -546,10 +547,23 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration;
 - (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize;
 - (NSDictionary<NSString*, id>*)cameraTrackingStatus;
+- (BOOL)startMotionTrack:(long long)layer tool:(uint32_t)tool model:(uint32_t)model backward:(BOOL)backward points:(NSArray<NSNumber*>*)points feature:(float)feature search:(float)search;
+- (void)cancelMotionTrack;
+- (BOOL)restoreMotionTrack:(long long)layer;
+- (NSDictionary<NSString*, id>*)motionTrackStatus;
+- (NSString*)applyMotionTrack:(long long)target apply:(uint32_t)apply lock:(BOOL)lock smooth:(float)smooth maxScale:(float)maxScale crop:(uint32_t)crop;
 - (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length NS_SWIFT_NAME(gizmo(_:length:));
 - (NSArray<NSNumber*>*)gizmoMoveLocal:(long long)layerId axis:(uint32_t)axis amount:(float)amount NS_SWIFT_NAME(gizmoMoveLocal(_:axis:amount:));
 - (void)cancelCameraTracking;
+- (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov;
+- (NSArray<NSNumber*>*)cameraTrackTarget:(long long)frame;
+- (BOOL)calibrateCameraScene:(uint32_t)operation distance:(float)distance;
+- (BOOL)placeModelOnTrack:(long long)layer;
 - (NSString*)applyCameraTracking;
+- (BOOL)restoreCameraTrackForLayer:(long long)layerId NS_SWIFT_NAME(restoreCameraTrack(forLayer:));
+- (NSArray<NSNumber*>*)cameraTrackDetailsAtFrame:(long long)frame NS_SWIFT_NAME(cameraTrackDetails(atFrame:));
+- (uint32_t)selectCameraTrackPoints:(NSArray<NSNumber*>*)ids operation:(uint32_t)operation NS_SWIFT_NAME(selectCameraTrackPoints(_:operation:));
+- (NSString*)createCameraTrackObject:(uint32_t)kind NS_SWIFT_NAME(createCameraTrackObject(_:));
 - (NSArray<NSNumber*>*)cameraFeaturesAtFrame:(long long)frame NS_SWIFT_NAME(cameraFeatures(atFrame:));
 - (NSString*)applyCameraSelectionAtFrame:(long long)frame x0:(float)x0 y0:(float)y0 x1:(float)x1 y1:(float)y1 NS_SWIFT_NAME(applyCameraSelection(atFrame:x0:y0:x1:y1:));
 - (NSString*)trackMask:(long long)layerId mask:(uint32_t)mask mode:(uint32_t)mode;

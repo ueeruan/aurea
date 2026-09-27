@@ -193,9 +193,8 @@ struct CommandSearchView: View {
             }
         case "extract_audio": if let layer { _ = model.engine.extractAudio(fromLayer: layer); model.refreshModel(force: true) }
         case "audio": model.openPanel(.audio)
-        case "beats": model.detectBeats()
         case "transform": model.openPanel(.transform)
-        case "text": model.openPanel(.text)
+        case "text": model.openTextContentEditor()
         case "mask": model.openPanel(.mask)
         case "effects": model.openPanel(.effects)
         case "appearance": model.openPanel(.appearance)

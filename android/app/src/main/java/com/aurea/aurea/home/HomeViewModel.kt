@@ -48,7 +48,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     // --- Abas ------------------------------------------------------------------
-    var tab by mutableIntStateOf(HOME_TAB)
+    var tab by mutableIntStateOf(PROJECTS_TAB)
         private set
 
     fun selectTab(i: Int) {

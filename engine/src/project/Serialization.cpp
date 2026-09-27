@@ -5,6 +5,8 @@
 #include "aurea/core/Time.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/tracking/CameraTrackData.hpp"
+#include "aurea/tracking/MotionTrackData.hpp"
 #include <cmath>
 #include <limits>
 
@@ -347,6 +349,122 @@ void read_mask(ByteReader& r, Mask& m) {
     // O cache da máscara é derivado; a chave gravada não vale porque a
     // rasterização depende da GPU desta sessão.
     m.cacheKey = 0;
+}
+
+void write_motion_track(ByteWriter& w, const tracking::MotionTrackData& d) {
+    w.u32v(static_cast<u32>(d.tool)); w.u32v(static_cast<u32>(d.model));
+    w.u32v(d.sourceW); w.u32v(d.sourceH); w.u32v(d.analysisW); w.u32v(d.analysisH);
+    w.u32v(d.lost); w.u32v(d.reacquired); w.u32v(d.pointCount); w.f64v(d.fps);
+    w.u32v(static_cast<u32>(d.path.size()));
+    for (usize i=0;i<d.path.size();++i) {
+        w.i64v(d.localFrames[i]); w.i64v(d.sourceUs[i]);
+        const auto& p=d.path[i]; w.boolv(p.valid); w.f32v(p.confidence); w.f32v(p.rms); w.u32v(p.inliers);
+        for (auto v:p.path.m) w.f64v(v);
+        for (auto q:d.points[i]) w.vec2(q);
+    }
+}
+std::shared_ptr<const tracking::MotionTrackData> read_motion_track(ByteReader& r) {
+    auto d=std::make_shared<tracking::MotionTrackData>();
+    const auto tool=r.u32v(),model=r.u32v();d->tool=static_cast<tracking::MotionTool>(tool);d->model=static_cast<tracking::MotionModel>(model);
+    d->sourceW=r.u32v();d->sourceH=r.u32v();d->analysisW=r.u32v();d->analysisH=r.u32v();
+    d->lost=r.u32v();d->reacquired=r.u32v();d->pointCount=r.u32v();d->fps=r.f64v();const auto n=r.u32v();
+    if(tool>4||model>3||d->pointCount!=(tool==0?1u:tool==1?2u:tool==4?0u:4u)||n<2||n>1800||d->lost>n||!std::isfinite(d->fps)||d->fps<=0||d->fps>1000||
+       !d->sourceW||!d->sourceH||d->sourceW>65536||d->sourceH>65536||!d->analysisW||!d->analysisH||d->analysisW>d->sourceW||d->analysisH>d->sourceH||r.remaining()<static_cast<u64>(n)*133){r.fail();return {};}
+    d->path.resize(n);d->localFrames.resize(n);d->sourceUs.resize(n);d->points.resize(n);
+    for(u32 i=0;i<n;++i){
+        d->localFrames[i]=r.i64v();d->sourceUs[i]=r.i64v();auto& p=d->path[i];p.valid=r.boolv();p.confidence=r.f32v();p.rms=r.f32v();p.inliers=r.u32v();
+        if(d->localFrames[i]<0||d->localFrames[i]>2147483646||d->sourceUs[i]<0||!std::isfinite(p.confidence)||p.confidence<0||p.confidence>1||!std::isfinite(p.rms)||p.rms<0){r.fail();return {};}
+        for(auto& v:p.path.m){v=r.f64v();if(!std::isfinite(v)){r.fail();return {};}}
+        for(auto& q:d->points[i]){q=r.vec2();if(!tracking::Tracks2D::present(q)){r.fail();return {};}}
+        if(i&&std::abs(d->localFrames[i]-d->localFrames[i-1])!=1){r.fail();return {};}
+        if(i>1&&(d->localFrames[i]-d->localFrames[i-1])!=(d->localFrames[1]-d->localFrames[0])){r.fail();return {};}
+    }
+    if(d->lost!=std::count_if(d->path.begin(),d->path.end(),[](const auto& p){return !p.valid;})){r.fail();return {};}
+    return d;
+}
+
+void write_camera_track(ByteWriter& w, const tracking::CameraTrackData& d) {
+    w.u64v(d.cacheKey); w.u32v(d.mode);
+    w.u32v(d.frames); w.u32v(d.analysisW); w.u32v(d.analysisH);
+    for (i64 us : d.sourceUs) w.i64v(us);
+    const auto& s = d.solution;
+    w.boolv(s.ok); w.boolv(s.rotationOnly); w.f32v(s.fovY);
+    w.u32v(s.tracks); w.u32v(s.inliers); w.u32v(s.framesSolved);
+    w.f32v(s.rmsError); w.f32v(s.confidence); w.str(s.failure);
+    w.u32v(static_cast<u32>(s.poses.size()));
+    for (const auto& p : s.poses) {
+        w.boolv(p.valid);
+        for (f64 v : p.R) w.f64v(v);
+        for (f64 v : p.t) w.f64v(v);
+    }
+    w.u32v(static_cast<u32>(s.points.size()));
+    for (Vec3 p : s.points) w.vec3(p);
+    w.u32v(static_cast<u32>(d.tracks.pos.size()));
+    for (usize t = 0; t < d.tracks.pos.size(); ++t) {
+        w.u8v(t < s.trackSolved.size() ? s.trackSolved[t] : 0);
+        const auto& row = d.tracks.pos[t];
+        u32 count = 0;
+        for (Vec2 p : row) if (tracking::Tracks2D::present(p)) ++count;
+        w.u32v(count);
+        // Sparse observations: absent frames consume no coordinates on disk.
+        for (u32 f = 0; f < row.size(); ++f) if (tracking::Tracks2D::present(row[f])) {
+            w.u16v(static_cast<u16>(f)); w.vec2(row[f]);
+        }
+    }
+}
+
+std::shared_ptr<const tracking::CameraTrackData> read_camera_track(ByteReader& r) {
+    auto d = std::make_shared<tracking::CameraTrackData>();
+    d->cacheKey = r.u64v(); d->mode = r.u32v();
+    d->frames = r.u32v(); d->analysisW = r.u32v(); d->analysisH = r.u32v();
+    if (!r.good() || d->frames < 10 || d->frames > tracking::kMaxCameraTrackFrames ||
+        !d->analysisW || !d->analysisH || d->analysisW > 8192 || d->analysisH > 8192 || d->mode > 2 ||
+        r.remaining() < d->frames * sizeof(i64)) { r.fail(); return {}; }
+    d->sourceUs.resize(d->frames);
+    for (i64& us : d->sourceUs) { us = r.i64v(); if (us < 0) { r.fail(); return {}; } }
+    auto& s = d->solution;
+    s.ok = r.boolv(); s.rotationOnly = r.boolv(); s.fovY = r.f32v();
+    s.tracks = r.u32v(); s.inliers = r.u32v(); s.framesSolved = r.u32v();
+    s.rmsError = r.f32v(); s.confidence = r.f32v(); s.failure = r.str();
+    const u32 poses = r.u32v();
+    if (!r.good() || poses != d->frames || !std::isfinite(s.fovY) || s.fovY <= 0 || s.fovY >= kPi ||
+        !std::isfinite(s.rmsError) || s.rmsError < 0 || !std::isfinite(s.confidence) || s.confidence < 0 || s.confidence > 1 ||
+        s.framesSolved > d->frames || r.remaining() < static_cast<u64>(poses) * 97) { r.fail(); return {}; }
+    s.poses.resize(poses);
+    for (auto& p : s.poses) {
+        p.valid = r.boolv();
+        for (f64& v : p.R) { v = r.f64v(); if (!std::isfinite(v)) { r.fail(); return {}; } }
+        for (f64& v : p.t) { v = r.f64v(); if (!std::isfinite(v)) { r.fail(); return {}; } }
+    }
+    const u32 points = r.u32v();
+    if (points > 100000 || r.remaining() < static_cast<u64>(points) * 12) { r.fail(); return {}; }
+    s.points.resize(points);
+    for (Vec3& p : s.points) {
+        p = r.vec3();
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) { r.fail(); return {}; }
+    }
+    const u32 tracks = r.u32v();
+    if (tracks > 100000 || static_cast<u64>(tracks) * d->frames > tracking::kMaxCameraTrackCells ||
+        r.remaining() < static_cast<u64>(tracks) * 5) { r.fail(); return {}; }
+    d->tracks.frames = d->frames; d->tracks.width = d->analysisW; d->tracks.height = d->analysisH;
+    d->tracks.pos.resize(tracks); s.trackSolved.resize(tracks);
+    u32 solved = 0;
+    for (u32 t = 0; t < tracks; ++t) {
+        s.trackSolved[t] = r.u8v(); solved += s.trackSolved[t] ? 1 : 0;
+        const u32 count = r.u32v();
+        if (s.trackSolved[t] > 1 || count > d->frames || r.remaining() < static_cast<u64>(count) * 10) { r.fail(); return {}; }
+        auto& row = d->tracks.pos[t]; row.assign(d->frames, Vec2{NAN, NAN});
+        i32 previous = -1;
+        for (u32 i = 0; i < count; ++i) {
+            const u32 frame = r.u16v(); const Vec2 p = r.vec2();
+            if (frame >= d->frames || static_cast<i32>(frame) <= previous || !tracking::Tracks2D::present(p) ||
+                p.x < 0 || p.y < 0 || p.x >= d->analysisW || p.y >= d->analysisH) { r.fail(); return {}; }
+            row[frame] = p; previous = static_cast<i32>(frame);
+        }
+    }
+    if (!r.good() || (!s.rotationOnly && solved != points) || s.inliers != solved || s.tracks > tracks ||
+        s.framesSolved != std::count_if(s.poses.begin(), s.poses.end(), [](const auto& p) { return p.valid; })) { r.fail(); return {}; }
+    return d;
 }
 
 void write_layer(ByteWriter& w, const Layer& l) {
@@ -693,7 +811,20 @@ void write_layer(ByteWriter& w, const Layer& l) {
         w.u32v(static_cast<u32>(segment.words.size()));
         for (const auto& word : segment.words) { w.str(word.text); w.i64v(word.start); w.i64v(word.end); }
     }
-
+    // v27: exact 3D parent bind space, independent of animated TRS.
+    w.boolv(l.hasParentBasis);
+    if (l.hasParentBasis) for (const Vec4& column : l.parentBasis.col) w.vec4(column);
+    // v28: portable camera analysis and generated-layer provenance.
+    w.boolv(l.cameraTrack != nullptr);
+    if (l.cameraTrack) write_camera_track(w, *l.cameraTrack);
+    w.u64v(l.cameraTrackSource.pack()); w.u64v(l.cameraTrackKey);
+    w.boolv(l.motionTrack != nullptr);
+    if (l.motionTrack) write_motion_track(w, *l.motionTrack);
+    w.vec2(l.camera.trackingSourceSize);
+    w.u32v(l.motionTrackEffect);
+    if(l.cameraTrack)for(const auto& c:l.cameraTrack->sceneCalibration.col)w.vec4(c);
+    if(l.cameraTrack)w.u64v(l.cameraTrack->sourceSignature);
+    if(l.motionTrack)w.u64v(l.motionTrack->sourceSignature);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -711,7 +842,10 @@ void write_layer(ByteWriter& w, const Layer& l) {
 ///      exposição e rotação próprios).
 // v26: Particle World emitter/model IDs 10..12. Byte layout is unchanged,
 // but older renderers must not silently reinterpret these as legacy emitters.
-constexpr u32 kTimelineSectionVersion = 26;
+// v27: lossless 3D parenting compensation, including nested nulls.
+// v28 also persists camera observations; generated layers refer back to this
+// analysis after reopening instead of relying on an in-memory worker result.
+constexpr u32 kTimelineSectionVersion = 30;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -1124,7 +1258,37 @@ void read_layer(ByteReader& r, Layer& l) {
         }
         if (!text::valid_caption_track(l.captions)) { r.fail(); return; }
     }
-
+    if (g_readingTimelineVersion >= 27) {
+        l.hasParentBasis = r.boolv();
+        if (l.hasParentBasis) {
+            for (Vec4& column : l.parentBasis.col) {
+                column = r.vec4();
+                if (!std::isfinite(column.x) || !std::isfinite(column.y) || !std::isfinite(column.z) || !std::isfinite(column.w)) { r.fail(); return; }
+            }
+            if (l.parentBasis.col[0].w != 0 || l.parentBasis.col[1].w != 0 || l.parentBasis.col[2].w != 0 || l.parentBasis.col[3].w != 1) { r.fail(); return; }
+        }
+    }
+    if (g_readingTimelineVersion >= 28) {
+        if (r.boolv()) l.cameraTrack = read_camera_track(r);
+        l.cameraTrackSource = LayerId::unpack(r.u64v()); l.cameraTrackKey = r.u64v();
+    }
+    if (g_readingTimelineVersion >= 29) {
+        if (r.boolv()) l.motionTrack = read_motion_track(r);
+        l.camera.trackingSourceSize = r.vec2();
+        const auto size = l.camera.trackingSourceSize;
+        if (!std::isfinite(size.x) || !std::isfinite(size.y) || size.x<0 || size.y<0 || size.x>65536 || size.y>65536) r.fail();
+        l.motionTrackEffect=r.u32v();
+        if(l.cameraTrack){
+            auto data=std::make_shared<tracking::CameraTrackData>(*l.cameraTrack);
+            for(auto& c:data->sceneCalibration.col){c=r.vec4();if(!std::isfinite(c.x)||!std::isfinite(c.y)||!std::isfinite(c.z)||!std::isfinite(c.w))r.fail();}
+            if(data->sceneCalibration.col[0].w!=0||data->sceneCalibration.col[1].w!=0||data->sceneCalibration.col[2].w!=0||data->sceneCalibration.col[3].w!=1)r.fail();
+            l.cameraTrack=std::move(data);
+        }
+    }
+    if (g_readingTimelineVersion >= 30) {
+        if(l.cameraTrack){auto data=std::make_shared<tracking::CameraTrackData>(*l.cameraTrack);data->sourceSignature=r.u64v();l.cameraTrack=std::move(data);}
+        if(l.motionTrack){auto data=std::make_shared<tracking::MotionTrackData>(*l.motionTrack);data->sourceSignature=r.u64v();l.motionTrack=std::move(data);}
+    }
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap
@@ -1586,6 +1750,7 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
             if (Layer* dst = c->layer(now)) {
                 dst->parent = remap(dst->parent);
                 dst->matteSource = remap(dst->matteSource);
+                dst->cameraTrackSource = remap(dst->cameraTrackSource);
                 dst->text.captionSource = remapPack(dst->text.captionSource);
                 dst->text.pathLayer = remapPack(dst->text.pathLayer);
             }

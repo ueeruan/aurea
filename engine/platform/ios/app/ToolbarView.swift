@@ -519,7 +519,6 @@ private struct ShellMenuRow: View {
         ShellMenuSection("editor_marcas_ritmo")
         ShellMenuRow(CupertinoGlyph.Bookmark, "editor_marcar_ou_desmarcar_este_instante") { act { model.toggleMarkerAt(model.status.playhead) } }
         ShellMenuRow(ShellGlyph.BookmarkSolid, "editor_ir_proxima_marca", enabled: !model.markerFrames.isEmpty) { act { model.seekToNextMarker() } }
-        ShellMenuRow(CupertinoGlyph.MusicNote2, "editor_detectar_batidas_camada_escolhida") { act { model.detectBeats() } }
         ShellMenuSection("editor_mais")
         ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas", enabled: !model.selection.isEmpty) { act { model.groupSelection() } }
     }

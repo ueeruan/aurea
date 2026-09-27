@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aurea.aurea.diagnostics.ExitDiagnostics
+import com.aurea.aurea.diagnostics.ExitDiagnostics.Phase
 import com.aurea.aurea.effects.EffectPreviewStore
 import com.aurea.aurea.effects.EffectPrefs
 import com.aurea.aurea.engine.AureaEngine
@@ -518,11 +520,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 // novo) e guardada; o motor decide orçamento, workers, teto de
                 // textura/preview/export a partir dela e da GPU real.
                 val probe = runCatching { com.aurea.aurea.engine.DeviceProfile.probe(app) }.getOrNull()
+                ExitDiagnostics.mark(app, Phase.ENGINE_START)
                 val ok = engine.initialize(
                     displayRefreshRate(), dirs.cache.absolutePath, dirs.projects.absolutePath, debug,
                     probe?.memory, probe?.codecs,
                 )
                 ready = ok
+                if (ok) ExitDiagnostics.mark(app, Phase.ENGINE_READY)
                 if (ok) pendingSurface?.let { (s, w, h) -> engine.attachSurface(s, w, h) }
                 pendingSurface = null
                 main.post {
@@ -985,7 +989,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         editMode = engine.editMode()
         precompDepth = engine.precompDepth()
         run {
-            val out = FloatArray(3)
+            val out = FloatArray(4)
             if (engine.queryEnvironment(out)) environment = out.toList()
         }
         compositionName = if (precompDepth > 0) engine.compositionName() else ""
@@ -1353,6 +1357,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         refreshNow()
         select(id)
+        openTextContentEditor(selectAll = true)
         return id
     }
 
@@ -1540,11 +1545,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun undo() {
         send { undo() }
         refreshNow()
+        restoreTrackingAfterHistory()
     }
 
     fun redo() {
         send { redo() }
         refreshNow()
+        restoreTrackingAfterHistory()
+    }
+
+    private fun restoreTrackingAfterHistory() {
+        val id = primary ?: return
+        if (cameraTrack?.state == 2 && cameraTrackLayer == id) {
+            cameraTrack = if (engine.restoreCameraTrack(id)) readCameraTrack() else null
+            cameraSelectedCount = 0
+            refreshCameraFeatures(true)
+        }
+        if (motionStatus[0].toInt() == 2) restoreMotion()
     }
 
     // --- Seleção -------------------------------------------------------------
@@ -2129,18 +2146,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     /** Vídeo do seletor do sistema. O motor guarda a URI e abre descritores por ela. */
     fun importVideo(uri: Uri) {
-        takePermission(uri)
-        val name = displayName(uri) ?: "Vídeo"
+        val app = getApplication<Application>()
         busyMessage = "Importando vídeo…"
         viewModelScope.launch {
-            val id = withContext(Dispatchers.IO) { engine.importVideo(uri.toString(), name) }
-            busyMessage = null
-            if (id < 0) {
-                errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video, humanError((-id).toInt()))
-                return@launch
+            try {
+                val id = withContext(Dispatchers.IO) {
+                    ExitDiagnostics.mark(app, Phase.VIDEO_PERMISSION)
+                    takePermission(uri)
+                    val name = displayName(uri) ?: "Vídeo"
+                    ExitDiagnostics.mark(app, Phase.VIDEO_NATIVE)
+                    engine.importVideo(uri.toString(), name).also { imported ->
+                        ExitDiagnostics.mark(app, if (imported < 0) Phase.VIDEO_FAILED else Phase.VIDEO_READY)
+                    }
+                }
+                if (id < 0) {
+                    errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video, humanError((-id).toInt()))
+                    return@launch
+                }
+                refreshNow()
+                select(id)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                ExitDiagnostics.mark(app, Phase.VIDEO_CANCELLED)
+                throw cancelled
+            } catch (failure: Exception) {
+                ExitDiagnostics.mark(app, Phase.VIDEO_FAILED)
+                Log.w(TAG, "importacao de video interrompida: ${failure.javaClass.simpleName}")
+                errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video, humanError(ERRC_UNSUPPORTED_FORMAT.toInt()))
+            } finally {
+                busyMessage = null
             }
-            refreshNow()
-            select(id)
         }
     }
 
@@ -2201,7 +2235,44 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         refreshNow()
         select(id)
+        openTextContentEditor(selectAll = true)
         return id
+    }
+
+    data class TextContentRequest(val layerId: Long, val content: String, val is3D: Boolean, val selectAll: Boolean)
+    var textContentRequest by mutableStateOf<TextContentRequest?>(null)
+        private set
+
+    fun openTextContentEditor(selectAll: Boolean = false) {
+        val id = primary ?: return
+        if (detail?.locked == true) { showToast(appText(R.string.editor_camada_bloqueada)); return }
+        if (playing) pause()
+        typingHandler.removeCallbacks(applyText3d)
+        if (text3dPending) text3d?.let { pushText3D(id, it) }
+        typingHandler.removeCallbacks(closeTyping)
+        closeTyping.run()
+        val content = text3d?.content ?: textDetail?.content ?: return
+        textContentRequest = TextContentRequest(id, content, text3d != null, selectAll)
+    }
+
+    fun dismissTextContentEditor() { textContentRequest = null }
+
+    /** Commit only the words, against the original layer and its CURRENT style. */
+    fun commitTextContent(request: TextContentRequest, content: String): Boolean {
+        if (request.is3D && content.isBlank()) return false
+        val ok = if (content == request.content) true else if (request.is3D) {
+            val fields = FloatArray(Text3DInfo.FIELDS)
+            val existing = engine.queryText3d(request.layerId, fields) ?: return false
+            val current = Text3DInfo.of(existing, fields, engine.queryText3dFont(request.layerId))
+            engine.setText3d(request.layerId, content, current.toFields(), current.fontPath)
+        } else {
+            engine.beginCommandBatch()
+            batch.setTextContent(request.layerId, content)
+            (engine.submitCommands() == 1).also { wakeStatusLoop() }
+        }
+        if (ok) { textContentRequest = null; refreshNow() }
+        else errorMessage = appText(R.string.text_content_save_failed)
+        return ok
     }
 
     /**
@@ -2375,12 +2446,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Ambiente 3D (HDRI) --------------------------------------------------------------
     /** {tem HDRI, intensidade, giro°}. */
-    var environment by mutableStateOf(listOf(0f, 1f, 0f))
+    var environment by mutableStateOf(listOf(0f, 1f, 0f, 0f))
         private set
 
     fun importHdri(uri: Uri) {
         val name = displayName(uri) ?: "ambiente.hdr"
-        if (!name.lowercase().endsWith(".hdr")) {
+        if (name.substringAfterLast(".", "").lowercase() !in setOf("hdr", "hdri", "jpg", "jpeg", "png")) {
             errorMessage = appText(R.string.msg_use_um_hdri_hdr_radiance)
             return
         }
@@ -2402,6 +2473,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    fun setEnvironmentBackground(visible: Boolean) { engine.setEnvironmentBackground(visible); refreshNow() }
     fun setEnvironment(intensity: Float, rotation: Float) {
         engine.setEnvironment(intensity, rotation)
         refreshNow()
@@ -2423,7 +2495,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun importObjectHdri(uri: Uri) {
         val id = primary ?: return
         val name = displayName(uri) ?: "ambiente.hdr"
-        if (!name.lowercase().endsWith(".hdr")) {
+        if (name.substringAfterLast(".", "").lowercase() !in setOf("hdr", "hdri", "jpg", "jpeg", "png")) {
             errorMessage = appText(R.string.msg_use_um_hdri_hdr_radiance)
             return
         }
@@ -2513,45 +2585,59 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     private val trackHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
-    fun beginPointPick(stabilize: Boolean) {
-        val row = layers.firstOrNull { it.id == primary }
-        if (row == null || row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
-            showToast(appText(R.string.msg_escolha_uma_camada_de_video))
-            return
-        }
-        pointPick = stabilize
-        showToast(appText(R.string.msg_toque_no_ponto_a_seguir_um))
-    }
-
-    /** Mira do rastreio de ponto (px da composição): segue o dedo; no rastreio, fica no ponto. */
+    var motionTool by mutableIntStateOf(0)
+    var motionModel by mutableIntStateOf(0)
+    var motionBackward by mutableStateOf(false)
+    var motionFeature by mutableFloatStateOf(12f)
+    var motionSearch by mutableFloatStateOf(48f)
+    var motionStatus by mutableStateOf(FloatArray(12))
+    var motionMessage by mutableStateOf("")
+    var motionPicked by mutableIntStateOf(0)
+    private var motionSource: Long? = null
+    private val motionSeeds = ArrayList<Float>()
     var pickCursor by mutableStateOf<androidx.compose.ui.geometry.Offset?>(null)
-    /** Tamanho do bloco e da janela de busca do rastreio, em px da composição (desenho da mira). */
     var pickBoxes by mutableStateOf(floatArrayOf(17f, 65f))
 
-    /** Toque em (x, y) — px da camada, no primeiro quadro dela. */
-    fun finishPointPick(x: Float, y: Float) {
-        val stabilize = pointPick ?: return
+    fun beginPointPick(stabilize: Boolean) { beginMotionPick(if (stabilize) 4 else 0) }
+    fun beginMotionPick(tool: Int) {
         val id = primary ?: return
-        pointPick = null
-        if (tracking) { pickCursor = null; return }
-        tracking = true
-        showToast(if (stabilize) appText(R.string.msg_estabilizando) else appText(R.string.msg_rastreando_o_ponto))
-        lifecycleThread.execute {
-            val tracked = IntArray(1)
-            val r = synchronized(lifecycleLock) { if (ready) engine.trackPoint(id, x, y, stabilize, tracked) else -1L }
-            trackHandler.post {
-                tracking = false
-                pickCursor = null
-                refreshNow()
-                when {
-                    r >= 0 && !stabilize -> { select(r); showToast(appText(R.string.msg_rastreio_quadros_o_nulo_segue_o, tracked[0])) }
-                    r >= 0 -> showToast(appText(R.string.msg_estabilizado_em_quadros, tracked[0]))
-                    else -> showToast(appText(R.string.msg_nao_deu_para_seguir_este_ponto, tracked[0]))
-                }
-            }
+        if (layers.firstOrNull { it.id == id }?.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
+            showToast(appText(R.string.msg_escolha_uma_camada_de_video)); return
         }
+        if (motionStatus[0].toInt() == 1) { showToast("Cancele a análise atual primeiro"); return }
+        pause()
+        motionTool = tool; motionSource = id; motionSeeds.clear(); motionPicked = 0
+        if (tool == 4) { startPickedMotion(); return }
+        pointPick = false
+        showToast(if (tool >= 2) "Toque nos cantos: superior esquerdo, direito, inferior direito e esquerdo" else "Toque no detalhe a seguir no preview")
     }
-
+    fun cancelMotionPick() { pointPick = null; motionSeeds.clear(); motionPicked = 0; pickCursor = null }
+    fun finishPointPick(x: Float, y: Float) {
+        if (pointPick == null || motionSource != primary) { cancelMotionPick(); return }
+        motionSeeds.add(x); motionSeeds.add(y); motionPicked++
+        val needed = if (motionTool == 0) 1 else if (motionTool == 1) 2 else 4
+        if (motionPicked < needed) { showToast("Ponto $motionPicked/$needed. Toque no próximo"); return }
+        pointPick = null; pickCursor = null; startPickedMotion()
+    }
+    private fun startPickedMotion() {
+        val id = motionSource ?: return
+        if (!engine.startMotionTrack(id, motionTool, motionModel, motionBackward, motionSeeds.toFloatArray(), motionFeature, motionSearch))
+            showToast("Não foi possível iniciar. Confira os pontos e use um trecho de até 1800 frames")
+        refreshMotionStatus()
+    }
+    fun refreshMotionStatus() {
+        val values = FloatArray(12); motionMessage = engine.motionTrackStatus(values); motionStatus = values
+        tracking = values[0].toInt() == 1
+    }
+    fun restoreMotion() { primary?.let { if (engine.restoreMotionTrack(it)) { motionSource = it; refreshMotionStatus() } } }
+    fun cancelMotion() { engine.cancelMotionTrack(); cancelMotionPick(); refreshMotionStatus() }
+    fun applyMotion(apply: Int, lock: Boolean = false, smooth: Float = .5f, maxScale: Float = 1.15f, crop: Int = 1) {
+        val result = engine.applyMotionTrack(primary ?: 0, apply, lock, smooth, maxScale, crop)
+        if (result < 0) { showToast("Confira a análise e escolha uma camada 2D sem pai para receber o rastreio"); return }
+        refreshNow(); refreshMotionStatus()
+        if (apply == 0 || apply == 4 || apply == 5) select(result)
+        showToast("Rastreio aplicado. Você pode desfazer")
+    }
 
     // --- Máscaras (roto) e track matte ----------------------------------------------------------
     /**
@@ -2934,6 +3020,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var cameraTrack by mutableStateOf<CameraTrackUi?>(null)
         private set
     private var cameraTrackPoll: kotlinx.coroutines.Job? = null
+    private var cameraTrackLayer: Long? = null
+    var cameraMultiSelect by mutableStateOf(false)
+    var cameraTargetMode by mutableStateOf(true)
+    var cameraTarget by mutableStateOf<FloatArray?>(null)
+    private val cameraTargetBuffer = FloatArray(64)
+    var cameraGoodPointsOnly by mutableStateOf(true)
+    var cameraPointSize by mutableStateOf(3f)
+    var cameraContextMenu by mutableStateOf(false)
+    var cameraSelectedCount by mutableIntStateOf(0)
+        private set
 
     private fun readCameraTrack(): CameraTrackUi {
         val f = FloatArray(11)
@@ -2950,6 +3046,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return
         }
         cameraTrackPoll?.cancel()
+        cameraTrackLayer = id
+        cameraSelectedCount = 0
         cameraTrackPoll = viewModelScope.launch {
             while (true) {
                 val st = readCameraTrack()
@@ -2965,20 +3063,92 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var cameraSelectionFrame: Long = -1
     var cameraFeatures by mutableStateOf<FloatArray?>(null)
         private set
-    private val featureBuf = FloatArray(3 * 1500)
+    private val featureBuf = FloatArray(6 * 1500)
 
     /** Chamado a cada atualização: mostra os pontos enquanto o painel de rastreio está aberto. */
     fun refreshCameraFeatures(show: Boolean) {
+        if (show && primary != null && (cameraTrackLayer != primary || cameraTrack == null)) {
+            if (engine.restoreCameraTrack(primary!!)) {
+                cameraTrackLayer = primary
+                cameraTrack = readCameraTrack()
+                cameraSelectedCount = 0
+            } else if (cameraTrack?.state != 1) {
+                cameraTrackLayer = primary
+                cameraTrack = null
+            }
+        }
         val st = cameraTrack
-        if (!show || st == null || st.state != 2) {
+        if (!show || st == null || st.state != 2 || cameraTrackLayer != primary) {
             cameraSelection = null
             if (cameraFeatures != null) cameraFeatures = null
             return
         }
-        val n = engine.cameraTrackFeatures(playhead.toLong(), featureBuf)
-        cameraFeatures = if (n > 0) featureBuf.copyOf(n * 3) else null
+        val n = engine.cameraTrackDetails(playhead.toLong(), featureBuf)
+        cameraFeatures = if (n > 0) featureBuf.copyOf(n * 6) else null
+        val targetCount = engine.cameraTrackTarget(playhead.toLong(), cameraTargetBuffer)
+        cameraTarget = if (targetCount > 0) cameraTargetBuffer.copyOf(targetCount * 2) else null
     }
 
+    fun moveCameraTarget(x: Float, y: Float) {
+        val p = cameraFeatures ?: return
+        val nearby = p.indices.step(6).filter { p[it + 2] > 0f && (!cameraGoodPointsOnly || p[it + 2] >= .4f) }
+            .sortedBy { (p[it] - x) * (p[it] - x) + (p[it + 1] - y) * (p[it + 1] - y) }.take(3)
+        cameraSelectedCount = engine.selectCameraTrackPoints(nearby.map { p[it + 3].toInt() }.toIntArray())
+        cameraSelection = null; refreshCameraFeatures(true)
+    }
+    fun calibrateCamera(operation: Int, distance: Float = 100f) {
+        if (!engine.calibrateCameraScene(operation, distance)) { showToast("Crie a câmera e selecione pontos válidos; distância exige 2 pontos e chão exige 3"); return }
+        refreshNow(); refreshCameraFeatures(true); showToast("Referência da cena atualizada; você pode desfazer")
+    }
+    fun placeTrackedModel(id: Long) {
+        if (!engine.placeModelOnTrack(id)) { showToast("Crie a câmera e selecione a superfície antes de posicionar o modelo"); return }
+        refreshNow(); showToast("Modelo colocado na superfície rastreada")
+    }
+
+    fun selectCameraPoint(x: Float, y: Float, radius: Float) {
+        pause()
+        val points = cameraFeatures ?: return
+        var best = -1; var distance = radius * radius
+        for (i in points.indices step 6) {
+            if (points[i + 2] <= 0f || (cameraGoodPointsOnly && points[i + 2] < 0.4f)) continue
+            val d = (points[i] - x) * (points[i] - x) + (points[i + 1] - y) * (points[i + 1] - y)
+            if (d < distance) { best = i; distance = d }
+        }
+        if (best >= 0) {
+            val operation = if (!cameraMultiSelect) 0 else if (points[best + 4] > 0.5f) 2 else 1
+            cameraSelectedCount = engine.selectCameraTrackPoints(intArrayOf(points[best + 3].toInt()), operation)
+        } else if (!cameraMultiSelect) cameraSelectedCount = engine.selectCameraTrackPoints(intArrayOf())
+        cameraSelection = null
+        refreshCameraFeatures(true)
+    }
+
+    fun finishCameraBox() {
+        val box = cameraSelection ?: return
+        val points = cameraFeatures ?: return
+        val ids = mutableListOf<Int>()
+        for (i in points.indices step 6) if (points[i + 2] > 0f && (!cameraGoodPointsOnly || points[i + 2] >= 0.4f) &&
+            points[i] in minOf(box[0], box[2])..maxOf(box[0], box[2]) &&
+            points[i + 1] in minOf(box[1], box[3])..maxOf(box[1], box[3])) ids.add(points[i + 3].toInt())
+        cameraSelectedCount = engine.selectCameraTrackPoints(ids.toIntArray(), if (cameraMultiSelect) 1 else 0)
+        cameraSelection = null
+        refreshCameraFeatures(true)
+    }
+
+    fun createCameraTrackObject(kind: Int) {
+        val result = engine.createCameraTrackObject(kind)
+        if (result < 0) { errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camera, -result); return }
+        cameraContextMenu = false
+        refreshNow()
+        refreshCameraFeatures(true)
+    }
+
+    fun refineCamera(remove: Boolean, motion: Int, fov: Float) {
+        if (!engine.refineCameraTrack(remove, motion, fov)) { showToast("Selecione pontos e aguarde o fim da análise"); return }
+        cameraTrackPoll?.cancel(); cameraSelectedCount = 0
+        cameraTrackPoll = viewModelScope.launch {
+            while (true) { cameraTrack = readCameraTrack(); if (cameraTrack?.state != 1) break; kotlinx.coroutines.delay(150) }
+        }
+    }
     fun cancelCameraTrack() {
         engine.cancelCameraTrack()
         cameraTrack = readCameraTrack()
@@ -4192,6 +4362,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Sai do editor: salva (se mudou) e volta à Home. */
     fun closeProject() {
+        textContentRequest = null
         if (exporter.busy) {
             showToast(appText(R.string.msg_aguarde_a_exportacao_terminar))
             return

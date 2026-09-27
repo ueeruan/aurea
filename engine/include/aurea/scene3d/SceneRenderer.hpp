@@ -91,6 +91,7 @@ struct SceneLight {
 /// O ambiente (luz de imagem) de uma cena — ou de UM objeto, quando ele tem o
 /// seu (v22). Nulo = estúdio neutro.
 struct SceneEnvironment {
+    bool showBackground = false;
     u64  hdriKey = 0;
     std::shared_ptr<const HdriPixels> hdri;
     f32  intensity = 1.0f;
@@ -123,6 +124,7 @@ struct SceneInstance {
 };
 
 struct SceneCamera {
+    Mat4 imageTransform = Mat4::identity(); ///< clip-to-clip framing of a tracked source
     Mat4 view = Mat4::identity();      ///< vista ← mundo (x direita, y baixo, z frente)
     Vec3 position{0, 0, 0};
     f32  fovY = 0.785f;                ///< radianos
@@ -315,7 +317,7 @@ private:
     usize morphCap_[kJointRing]{};
     u32 morphSlot_ = 0;
     TextureHandle white_{}, flatNormal_{}, black_{}, envCube_{}, brdfLut_{};
-    TextureHandle irradiance_{}, prefiltered_{}, iblLut_{};
+    TextureHandle irradiance_{}, prefiltered_{}, iblLut_{}, background_{};
     u32 prefilteredMips_ = 1;
     /// Estúdio padrão sendo gerado numa thread de fundo (~0,3 s no desktop):
     /// o primeiro quadro 3D não espera; usa o céu analítico até ficar pronto.

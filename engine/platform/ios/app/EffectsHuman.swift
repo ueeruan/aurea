@@ -10,13 +10,8 @@
 //  motor não a quebra; efeito fora da tabela cai na regra padrão (rótulo do
 //  motor, primeiros N parâmetros).
 //
-//  Uma diferença de PLATAFORMA que não é de desenho: a ponte do iOS não expõe
-//  os bits de `aurea::ParamFlags` (o `ParamSpec.flags` existe no núcleo e viaja
-//  no POD, mas não atravessa a fronteira ObjC). O que depende deles aqui é só
-//  a REGRA DE RESERVA das unidades (o `%`/`px` relativos); os efeitos da tabela
-//  não são afetados, porque o rótulo, o fator, o sufixo e as casas deles vêm
-//  declarados linha a linha. Hoje o núcleo não usa `kParamHidden` em efeito
-//  nenhum, então a visibilidade não muda.
+//  ParamFlags cross the ObjC bridge. EffectsView applies the same hidden and
+//  animatable flags as Android; this table controls labels and presentation.
 // =============================================================================
 import Foundation
 import SwiftUI
@@ -81,6 +76,13 @@ private let FxMatrixLabels = [
 /// idioma — ordenar pelo nome traduzido reordenaria a lista ao trocar de
 /// língua).
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
+    ("aurea.glitch.jpeg_codec", FxEffectHuman(keywords: "jpeg glitch compression compressao dct quantization dano", principal: [0, 1, 2, 4, 5])),
+    ("aurea.glitch.analog_signal", FxEffectHuman(keywords: "signal analog analogico ntsc pal vhs television", principal: [0, 1, 2, 3, 4])),
+    ("aurea.light.deep_glow_2", FxEffectHuman(keywords: "deep glow 2 brilho bloom halo", principal: [0, 1, 2, 3, 13])),
+    ("aurea.light.shadow_studio_3", FxEffectHuman(keywords: "shadow studio 3 sombra long radial inner", principal: [0, 1, 2, 3, 4])),
+    ("aurea.generate.tracery", FxEffectHuman(keywords: "tracery color detection boxes rastreio cor conexoes", principal: [0, 1, 3, 7, 14], params: [2: FxParamHuman(decimals: 2)])),
+    ("aurea.text3d.layout", FxEffectHuman(keywords: "letter rotation letras rotacao delay atraso cylinder twist",
+        principal: [0, 1, 2, 9, 10])),
     ("aurea.transform", FxEffectHuman(
         name: "fx_name_transform",
         keywords: "transform mover posicao escala girar rotacao opacidade",
@@ -279,11 +281,11 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.shake", FxEffectHuman(
         name: "fx_name_shake",
         keywords: "shake tremor camera balancar vibrar tremer",
-        principal: [0, 1, 2, 4, 5],
+        principal: [8, 2, 10, 5, 9, 11],
         params: [
             0: FxParamHuman(label: "fx_amplitude_x", suffix: "px", decimals: 0),
             1: FxParamHuman(label: "fx_amplitude_y", suffix: "px", decimals: 0),
-            2: FxParamHuman(label: "fx_frequencia", suffix: "x", decimals: 2),
+            2: FxParamHuman(label: "fx_frequencia", suffix: "Hz", decimals: 2),
             4: FxParamHuman(label: "fx_eixos_separados"),
             5: FxParamHuman(label: "fx_rotacao", suffix: "°", decimals: 0),
             6: FxParamHuman(label: "fx_suavizacao", decimals: 0),
@@ -377,17 +379,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.light.sweep", FxEffectHuman(
         name: "fx_name_light_sweep",
         keywords: "light sweep faixa de luz brilho varredura reflexo",
-        principal: [0, 1, 2, 4, 5],
-        params: [
-            0: FxParamHuman(label: "fx_posicao", decimals: 0),
-            1: FxParamHuman(label: "fx_largura", decimals: 0),
-            2: FxParamHuman(label: "fx_intensidade", suffix: "x", decimals: 2),
-            3: FxParamHuman(label: "fx_suavidade_borda", decimals: 0),
-            4: FxParamHuman(label: "fx_angulo", suffix: "°", decimals: 0),
-            5: FxParamHuman(label: "fx_relevo", decimals: 0),
-            6: FxParamHuman(label: "fx_multiplicar"),
-            7: FxParamHuman(label: "fx_so_onde_imagem_clara"),
-        ])),
+        principal: [9, 1, 2, 4, 5, 10],
+        params: [:])),
     ("aurea.color.colorama", FxEffectHuman(
         name: "fx_name_colorama",
         keywords: "colorama remapeamento de cor arco-iris psicodelico mapa de cor",
@@ -479,7 +472,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.glitch.glitchify", FxEffectHuman(
         name: "fx_name_glitchify",
         keywords: "glitchify glitch defeito digital rasgo bloco corrupcao",
-        principal: [0, 1, 2, 3, 4],
+        principal: [17, 18, 1, 3, 13, 34],
         params: [
             0: FxParamHuman(label: "fx_altura_faixa", suffix: "px", decimals: 0),
             1: FxParamHuman(label: "fx_deslocamento", suffix: "px", decimals: 0),

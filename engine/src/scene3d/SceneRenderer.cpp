@@ -376,7 +376,7 @@ void SceneRenderer::release_environment() noexcept {
         }
     }
     envSets_.clear();
-    for (TextureHandle* t : {&irradiance_, &prefiltered_, &iblLut_}) {
+    for (TextureHandle* t : {&irradiance_, &prefiltered_, &iblLut_, &background_}) {
         if (t->valid()) gpu_->destroy_texture(*t);
         *t = TextureHandle{};
     }
@@ -454,9 +454,20 @@ Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
     // próximo quadro não reconhecia o ambiente que acabou de subir e pedia
     // outro: o IBL era refeito em laço durante o preview (texto/modelo 3D
     // piscando entre a luz do HDRI e a do estúdio, e CPU esquentando).
-    for (TextureHandle* t : {&irradiance_, &prefiltered_, &iblLut_}) {
+    for (TextureHandle* t : {&irradiance_, &prefiltered_, &iblLut_, &background_}) {
         if (t->valid()) gpu_->destroy_texture(*t);
         *t = TextureHandle{};
+    }
+    TextureDesc bg;
+    bg.width = bg.height = maps.background.size; bg.layers = 6; bg.cube = true;
+    bg.format = SurfaceFormat::RGBA16F; bg.sampled = true; bg.transferDst = true;
+    auto texture = gpu_->create_texture(bg);
+    if (texture.ok()) {
+        const usize count = static_cast<usize>(bg.width)*bg.height*4;
+        bool uploaded = true;
+        for (u32 f=0; f<6 && uploaded; ++f)
+            uploaded = gpu_->upload_texture_level(*texture,0,f,maps.background.levels[0].data()+count*f,count*2).ok();
+        if (uploaded) background_ = *texture; else gpu_->destroy_texture(*texture);
     }
     ++envUploads_;
     irradiance_ = novo.irradiance;
@@ -568,7 +579,7 @@ void SceneRenderer::forget_device() noexcept {
         jointBuf_[i] = morphBuf_[i] = instBuf_[i] = BufferHandle{};
         jointCap_[i] = morphCap_[i] = instCap_[i] = 0;
     }
-    irradiance_ = prefiltered_ = iblLut_ = TextureHandle{};
+    irradiance_ = prefiltered_ = iblLut_ = background_ = TextureHandle{};
     white_ = flatNormal_ = black_ = envCube_ = brdfLut_ = TextureHandle{};
     cubeSampler_ = SamplerHandle{};
     gpu_ = nullptr;
@@ -688,6 +699,9 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     out.push_back(shadow_key(false));
     out.push_back(shadow_key(true));
     out.push_back(plane_key());
+    auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
+    sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
+    out.push_back(sky);
 }
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
@@ -722,7 +736,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const FGTexture depth = graph.create_texture("3d-profundidade", dd);
 
     const f32 aspect = static_cast<f32>(width) / static_cast<f32>(height);
-    const Mat4 proj = reverse_z_perspective(frame.camera.fovY, aspect, frame.camera.nearZ);
+    const Mat4 proj = frame.camera.imageTransform * reverse_z_perspective(frame.camera.fovY, aspect, frame.camera.nearZ);
     const Mat4 viewProj = proj * frame.camera.view;
 
     // --- Cabeçalho comum a todos os desenhos do frame ---------------------------
@@ -1448,14 +1462,29 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
           shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe,
           partList, partList ? particleCount : 0u, envSlots[0]};
 
+    PipelineHandle skyPipe{};
+    const bool skyReady = frame.environment.showBackground && background_.valid() && envKey_ == key_of(frame.environment);
+    if (skyReady) {
+        auto key = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
+        key.hasDepth = true; key.depthFormat = SurfaceFormat::Depth32F;
+        auto pipe = shaders_->pipeline(key); if (pipe.ok()) skyPipe = *pipe;
+    }
+    struct SkyBlock { Mat4 view; Vec4 projection; Vec4 light; };
+    const SkyBlock sky{frame.camera.view, Vec4{aspect, std::tan(frame.camera.fovY*.5f), 0, 0},
+        Vec4{frame.environment.rotation, frame.environment.intensity, frame.environment.exposure, 0}};
+    const TextureHandle skyTexture = background_;
     // Z reverso: limpa a profundidade com 0 (o infinito).
     const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
-                                LoadOp::Clear, false, 0.0f, [cap, overriddenMaterials](PassContext& pc) {
+                                LoadOp::Clear, false, 0.0f, [cap, overriddenMaterials, skyPipe, skyTexture, sky](PassContext& pc) {
         CommandList& c = pc.cmds;
         PipelineHandle bound{};
         const GpuModel* boundModel = nullptr;
         const GpuMaterial* boundMat = nullptr;
         const EnvSlot* boundEnv = nullptr;
+        if (skyPipe.valid()) {
+            c.bind_pipeline(skyPipe); c.set_uniforms(&sky, sizeof(sky));
+            c.bind_texture(0, skyTexture, cap.cubeSampler); c.draw(3);
+        }
         auto drawPlanes = [&]() {
             if (!cap.planeCount) return;
             c.bind_pipeline(cap.planePipe);

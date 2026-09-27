@@ -196,10 +196,10 @@ private class ReorderState {
  * - Toque longo no rótulo: Redefinir (e Expressão). Tocar no valor: teclado.
  */
 @Composable
-internal fun EffectsPanel(env: PanelEnv) {
+internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     val store = env.store
     val layerId = store.primary
-    val effects = store.effects
+    val effects = store.effects.filter { focusedType == null || it.typeId == focusedType }
     // `detail` muda a cada quadro da reprodução; o painel só quer o TIPO.
     val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
 
@@ -208,7 +208,7 @@ internal fun EffectsPanel(env: PanelEnv) {
         store.selectedKeyframe?.takeIf { it.first == layerId && it.second.property == TrackProperty.EFFECT_PARAM }?.second
             ?.takeIf { k -> effects.any { it.effectId == k.effectIndex } }
     }
-    var openId by remember(layerId) { mutableStateOf(entry?.effectIndex) }
+    var openId by remember(layerId, focusedType) { mutableStateOf(entry?.effectIndex ?: effects.firstOrNull { it.typeId == focusedType }?.effectId) }
     var known by remember(layerId) { mutableStateOf(effects.map { it.effectId }.toSet()) }
     var selected by remember(layerId) {
         mutableStateOf(entry?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) })
@@ -368,7 +368,12 @@ internal fun EffectsPanel(env: PanelEnv) {
                     },
                 )
             }
-            item(key = "rodape") { EffectsFooter(env, kind) }
+            item(key = "rodape") {
+                if (focusedType == null) EffectsFooter(env, kind)
+                else if (effects.isEmpty()) androidx.compose.material3.TextButton(onClick = { store.addEffect(focusedType) }) {
+                    Text(stringResource(R.string.t3d_enable_letters))
+                }
+            }
         }
     }
 

@@ -142,7 +142,7 @@ void EffectPlan::clear() noexcept {
 // =============================================================================
 void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, FrameIndex localTime,
                        f32 texelScale, const LayerPlacement& placement,
-                       EffectResources* resources, EffectPlan& out) {
+                       EffectResources* resources, EffectPlan& out, f64 framesPerSecond) {
     out.clear();
     out.placement = placement;
 
@@ -175,6 +175,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         e.count = params->count();
         e.effectIndex = i;
         e.localTime = localTime;
+        e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
         e.texelScale = texelScale;
         e.placement = &out.placement;
 

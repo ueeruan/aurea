@@ -81,11 +81,6 @@ fun Modifier.tocavel(
         label = "tocavel-opacidade",
     )
     this
-        .graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-            this.alpha = alpha
-        }
         .combinedClickable(
             interactionSource = interaction,
             indication = null,
@@ -102,4 +97,11 @@ fun Modifier.tocavel(
                 onClick()
             },
         )
+        // Animate only the visual content. Scaling the outer hit area cancels
+        // presses near an edge as soon as the button shrinks under the finger.
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            this.alpha = alpha
+        }
 }

@@ -446,10 +446,6 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
             AddItem(stringResource(R.string.sh_add_video_sound), CupertinoGlyph.Film) {
                 videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
             },
-            AddItem(stringResource(R.string.sh_add_detect_beats), ShellGlyph.Metronome) {
-                close()
-                store.detectBeats()
-            },
             AddItem(stringResource(R.string.sh_add_marker_at_playhead), CupertinoGlyph.Bookmark) {
                 close()
                 store.toggleMarker()
@@ -468,7 +464,7 @@ private fun TextTab(store: EditorStore, ui: EditorUi) {
     CardGrid(
         listOf(
             AddItem(stringResource(R.string.sh_add_tab_text), CupertinoGlyph.Textformat, AureaColors.Accent) {
-                if (store.addText() >= 0) openPanel(store, ui, EditorPanel.Text)
+                if (store.addText() >= 0) { ui.adding = false; ui.panel = null }
             },
             AddItem(stringResource(R.string.sh_add_speech_captions), CupertinoGlyph.CaptionsBubble) {
                 openPanel(store, ui, EditorPanel.Captions)

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
@@ -90,7 +91,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     val insetPx = 0f
     // Pontos do rastreio de câmera no vídeo (painel de Rastreio aberto).
     val showTrack = ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking
-    androidx.compose.runtime.LaunchedEffect(store.playhead, showTrack, store.cameraTrack) { store.refreshCameraFeatures(showTrack) }
+    androidx.compose.runtime.LaunchedEffect(store.playhead, showTrack, store.cameraTrack, store.primary) { store.refreshCameraFeatures(showTrack) }
     Box(modifier.background(AureaColors.EditorTopBar).clipToBounds()) {
         PreviewSurface(store, Modifier.fillMaxSize())
         if (!store.rawPlayback) Spacer(
@@ -99,15 +100,24 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 .pointerInput(store) { stageGestures(store, ui, mapper, haptic) }
                 .drawBehind { drawStageOverlay(store, ui, mapper, insetPx) },
         )
-        if (showTrack && store.cameraFeatures != null) {
+        if (showTrack && store.cameraFeatures != null && store.pointPick == null) {
             Spacer(Modifier.fillMaxSize().pointerInput(store, showTrack) {
+                detectTapGestures(
+                    onTap = { point -> store.selectCameraPoint(mapper.cx(point.x), mapper.cy(point.y), 24.dp.toPx() / mapper.fit) },
+                    onLongPress = { point ->
+                        if (store.cameraSelectedCount == 0) store.selectCameraPoint(mapper.cx(point.x), mapper.cy(point.y), 24.dp.toPx() / mapper.fit)
+                        store.cameraContextMenu = true
+                    },
+                )
+            }.pointerInput(store, showTrack) {
                 detectDragGestures(onDragStart = { point ->
                     store.pause()
                     store.cameraSelectionFrame = store.playhead.toLong()
                     val x = mapper.cx(point.x); val y = mapper.cy(point.y)
-                    store.cameraSelection = floatArrayOf(x, y, x, y)
-                }, onDragCancel = { store.cameraSelection = null }, onDrag = { change, _ ->
+                    if (store.cameraTargetMode) store.moveCameraTarget(x, y) else store.cameraSelection = floatArrayOf(x, y, x, y)
+                }, onDragEnd = { if (!store.cameraTargetMode) store.finishCameraBox() }, onDragCancel = { store.cameraSelection = null }, onDrag = { change, _ ->
                     change.consume()
+                    if (store.cameraTargetMode) store.moveCameraTarget(mapper.cx(change.position.x), mapper.cy(change.position.y))
                     store.cameraSelection?.let { r ->
                         store.cameraSelection = floatArrayOf(r[0], r[1], mapper.cx(change.position.x), mapper.cy(change.position.y))
                     }
@@ -118,6 +128,25 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                     drawRect(Color.Green, Offset(x,y), androidx.compose.ui.geometry.Size(kotlin.math.abs(r[2]-r[0])*mapper.fit, kotlin.math.abs(r[3]-r[1])*mapper.fit), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
                 }
             })
+        }
+        if (store.cameraContextMenu) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { store.cameraContextMenu = false },
+                title = { androidx.compose.material3.Text("3D Camera Tracker") },
+                text = {
+                    androidx.compose.foundation.layout.Column {
+                        listOf("Create Camera", "Create Null", "Create Shape", "Create Text", "Create Solid").forEachIndexed { index, title ->
+                            androidx.compose.material3.TextButton(onClick = { store.createCameraTrackObject(index) }, enabled = index == 0 || store.cameraSelectedCount > 0) {
+                                androidx.compose.material3.Text(title)
+                            }
+                        }
+                    }
+                },
+                confirmButton = { androidx.compose.material3.TextButton(onClick = { store.cameraContextMenu = false }) { androidx.compose.material3.Text("Close") } },
+                containerColor = AureaColors.EditorTopBar,
+                titleContentColor = AureaColors.Text,
+                textContentColor = AureaColors.Text,
+            )
         }
         LockBanner(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
@@ -353,19 +382,30 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     // Rastreio de câmera: os pontos seguidos neste quadro (amarelo = entrou no
     // solve, vermelho = rejeitado), como no AE.
     store.cameraFeatures?.let { f ->
-        val arm = 3.dp.toPx()
+        store.cameraTarget?.let { ring ->
+            if (ring.size >= 6) {
+                val path = androidx.compose.ui.graphics.Path()
+                path.moveTo(m.sx(ring[0]), m.sy(ring[1]))
+                for (i in 2 until ring.size step 2) path.lineTo(m.sx(ring[i]), m.sy(ring[i + 1]))
+                path.close()
+                drawPath(path, Color.Green.copy(alpha = .15f))
+                drawPath(path, Color.Green, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+            }
+        }
+        val arm = store.cameraPointSize.dp.toPx()
         val w = 1.2.dp.toPx()
         var k = 0
-        while (k + 2 < f.size) {
+        while (k + 5 < f.size) {
+            if (store.cameraGoodPointsOnly && f[k + 2] < 0.4f) { k += 6; continue }
             val c = Offset(m.sx(f[k]), m.sy(f[k + 1]))
             val r = store.cameraSelection
-            val selected = r != null && f[k] >= min(r[0],r[2]) && f[k] <= max(r[0],r[2]) && f[k+1] >= min(r[1],r[3]) && f[k+1] <= max(r[1],r[3])
+            val selected = f[k + 4] > 0.5f || (r != null && f[k] >= min(r[0],r[2]) && f[k] <= max(r[0],r[2]) && f[k+1] >= min(r[1],r[3]) && f[k+1] <= max(r[1],r[3]))
             val col = if (selected) Color.Green else if (f[k + 2] > 0.5f) TrackSolved else TrackRejected
             drawLine(Color.Black.copy(alpha = 0.5f), Offset(c.x - arm - 1, c.y), Offset(c.x + arm + 1, c.y), w + 1.5f)
             drawLine(Color.Black.copy(alpha = 0.5f), Offset(c.x, c.y - arm - 1), Offset(c.x, c.y + arm + 1), w + 1.5f)
             drawLine(col, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), w)
             drawLine(col, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), w)
-            k += 3
+            k += 6
         }
     }
     // Rastreio de ponto: a mira onde o dedo está (bloco seguido + janela de busca).

@@ -28,10 +28,13 @@
 #include "aurea/text/Captions.hpp"
 
 #include <cmath>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace aurea {
+
+namespace tracking { struct CameraTrackData; struct MotionTrackData; }
 
 /// Transform de uma layer. Sempre guardado como valor estático aqui; quando
 /// animado, o TrackSet sobrepõe. Manter os dois evita caso especial: uma layer
@@ -232,6 +235,7 @@ struct ShapeData {
 };
 
 struct CameraData {
+    Vec2 trackingSourceSize{};     ///< solved video's source pixels; zero = regular camera
     f32 fov           = 50.0f;      ///< graus
     f32 focalLength   = 35.0f;      ///< mm — sincronizado com fov
     f32 nearPlane     = 1.0f;
@@ -310,6 +314,7 @@ enum class ParticleShape : u32 {
     Soft,         ///< brilho radial bem suave (poeira, luz)
     Texture,      ///< imagem do projeto (`textureAsset`)
     Mesh,         ///< malha 3D instanciada (`meshSource`)
+    Crystal,      ///< faceted luminous shard with a soft halo
     Count,
 };
 
@@ -521,6 +526,11 @@ struct Layer {
 
     // --- Hierarquia e composição --------------------------------------------
     LayerId  parent{};
+    // Bind-space compensation for 3D parenting. A rotated nonuniform scale
+    // cannot be represented by Euler rotation + diagonal scale without loss.
+    // Keep it separate from editable/animated TRS, including after unlinking.
+    Mat4     parentBasis = Mat4::identity();
+    bool     hasParentBasis = false;
     u32      zOrder = 0;       ///< posição vertical; maior = na frente
     BlendMode blendMode = BlendMode::Normal;
     bool     visible = true;
@@ -546,6 +556,12 @@ struct Layer {
     // --- Conteúdo ------------------------------------------------------------
     AssetId source{};              ///< vídeo, imagem, áudio ou modelo
     CompositionRef nested{};       ///< quando kind == Composition
+    std::shared_ptr<const tracking::CameraTrackData> cameraTrack;
+    std::shared_ptr<const tracking::MotionTrackData> motionTrack;
+    u32 motionTrackEffect = kInvalidIndex;
+    // Generated camera/anchors retain their source id through undo and reload.
+    LayerId cameraTrackSource{};
+    u64 cameraTrackKey = 0;
 
     // --- Universal -----------------------------------------------------------
     Transform transform;

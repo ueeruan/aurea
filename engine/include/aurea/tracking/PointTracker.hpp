@@ -13,6 +13,7 @@
 #include "aurea/core/Math.hpp"
 
 #include <vector>
+#include <cmath>
 
 namespace aurea::tracking {
 
@@ -36,6 +37,7 @@ struct TrackStep {
 
 /// Procura, em `cur`, o bloco (2·half+1)² de `prev` centrado em `from`, numa
 /// janela de ±`radius` px. Devolve a posição subpixel e a pontuação.
-[[nodiscard]] TrackStep track_step(const Gray& prev, const Gray& cur, Vec2 from, i32 half = 8, i32 radius = 24);
+[[nodiscard]] TrackStep track_step(const Gray& prev, const Gray& cur, Vec2 from, i32 half = 8, i32 radius = 24,
+                                   Vec2 searchCenter = {NAN, NAN});
 
 } // namespace aurea::tracking

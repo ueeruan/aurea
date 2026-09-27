@@ -1,163 +1,133 @@
 package com.aurea.aurea.home
 
-import android.view.HapticFeedbackConstants
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsBottomHeight
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.aurea.aurea.BuildConfig
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
-import com.aurea.aurea.ui.theme.AureaColors
-import com.aurea.aurea.ui.theme.AureaDims
-import com.aurea.aurea.ui.theme.AureaElevation
-import com.aurea.aurea.ui.theme.AureaType
-import com.aurea.aurea.ui.theme.CupertinoGlyph
-import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.ds.AureaActionSheet
+import com.aurea.aurea.ui.ds.SheetAction
+import com.aurea.aurea.ui.theme.*
 
-/** Uma aba da barra: rótulo (do catálogo), ícone inativo e ativo. */
-private class HomeTab(val label: Int, val icon: Char, val active: Char)
-
-/**
- * As três abas da Home. Comunidade e Perfil saíram (§2); a aba Efeitos saiu
- * depois — ela mostrava o catálogo sem NADA para aplicar, um espelho só de
- * leitura do navegador que já existe dentro do editor, onde o toque aplica.
- * Fora do editor não há camada selecionada, então não há o que fazer com o
- * efeito: o navegador vive onde ele serve para alguma coisa.
- */
-private val Tabs = listOf(
-    HomeTab(R.string.home_tab_start, CupertinoGlyph.House, CupertinoGlyph.HouseFill),
-    HomeTab(R.string.home_tab_projects, CupertinoGlyph.RectangleStack, CupertinoGlyph.RectangleStack),
-    HomeTab(R.string.home_tab_settings, CupertinoGlyph.SliderHorizontal3, CupertinoGlyph.SliderHorizontal3),
-)
-
-/**
- * A Home: a casca com a barra de 3 abas translúcida e o conteúdo rolando por
- * baixo dela.
- *
- * - Só a aba atual fica composta; a rolagem de cada uma mora no
- *   [HomeViewModel] e volta igual ao trocar de aba ou voltar do editor.
- * - O recuo da status bar entra UMA vez, aqui. A status bar leva o véu
- *   #0B0F13 do desenho aprovado.
- */
 @Composable
 fun HomeScreen(store: EditorStore) {
     val vm: HomeViewModel = viewModel()
-    // Uma chamada por aba (nada de laço): cada estado tem o seu lugar fixo na composição.
-    val home = rememberTabListState(vm, HomeViewModel.HOME_TAB)
     val projects = rememberTabListState(vm, HomeViewModel.PROJECTS_TAB)
     val settings = rememberTabListState(vm, HomeViewModel.SETTINGS_TAB)
-    val shellBackdrop = rememberBackdrop()
-    val view = LocalView.current
-    val navBottom = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
-    // Altura total da barra de abas: hairline + 54 + a barra de gestos.
-    val bottomBar = AureaDims.Hairline + AureaDims.TabBarHeight + navBottom
-
-    val selectTab: (Int) -> Unit = { i ->
-        if (i != vm.tab) {
-            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)   // = selectionClick
-            vm.selectTab(i)
-        }
+    var menu by remember { mutableStateOf(false) }
+    var about by remember { mutableStateOf(false) }
+    var licenses by remember { mutableStateOf(false) }
+    var newProject by rememberSaveable { mutableStateOf(false) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) vm.createFromMedia(store, uri)
     }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(AureaColors.Background)
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
-    ) {
-        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(AureaColors.SystemBarVeil))
+    BackHandler(vm.tab != HomeViewModel.PROJECTS_TAB) { vm.selectTab(HomeViewModel.PROJECTS_TAB) }
+    Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()) {
         LiveNoticeBanners(vm.notices)
-        ReleaseNotesEntry()
-        Box(Modifier.fillMaxWidth().weight(1f)) {
-            Box(Modifier.fillMaxSize().backdropSource(shellBackdrop)) {
-                when (vm.tab) {
-                    HomeViewModel.HOME_TAB -> StartTab(store, vm, home, bottomBar, selectTab)
-                    HomeViewModel.PROJECTS_TAB -> ProjectsTab(store, vm, projects, bottomBar)
-                    else -> SettingsTab(store, vm, settings, bottomBar)
-                }
-            }
-            HomeTabBar(vm.tab, selectTab, shellBackdrop, Modifier.align(Alignment.BottomCenter))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("aurea", style = AureaType.HeadlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-1).sp), modifier = Modifier.weight(1f))
+            ReleaseNotesEntry()
         }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (vm.tab) {
+                HomeViewModel.HOME_TAB -> CommunityPresetsTab()
+                HomeViewModel.SETTINGS_TAB -> SettingsTab(store, vm, settings, AureaDims.TabBarHeight)
+                else -> ProjectsTab(store, vm, projects, AureaDims.TabBarHeight)
+            }
+        }
+        HomeDock(selected = vm.tab, onProjects = { vm.selectTab(HomeViewModel.PROJECTS_TAB) },
+            onCommunity = { vm.selectTab(HomeViewModel.HOME_TAB) }, onCreate = { newProject = true },
+            onMenu = { menu = true }, onImport = {
+                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+            })
+    }
+    if (newProject) NewProjectSheetFor(store, vm, store.projects) { newProject = false }
+    if (menu) AureaActionSheet(title = "Aurea", onDismiss = { menu = false }, actions = listOf(
+        SheetAction(stringResource(R.string.home_tab_settings)) { vm.selectTab(HomeViewModel.SETTINGS_TAB) },
+        SheetAction(stringResource(R.string.settings_group_about)) { about = true },
+        SheetAction(stringResource(R.string.licenses_title)) { licenses = true },
+    ))
+    if (about || licenses) AlertDialog(onDismissRequest = { about = false; licenses = false },
+        title = { Text(stringResource(if (licenses) R.string.licenses_title else R.string.settings_group_about)) },
+        text = { Text(if (licenses) stringResource(R.string.licenses_ai_body) else
+            "Aurea ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n\n" + stringResource(R.string.settings_technology_value) + "\n\n" + stringResource(R.string.settings_made_by),
+            modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) },
+        confirmButton = { TextButton(onClick = { about = false; licenses = false }) { Text(stringResource(R.string.editor_fechar)) } })
+}
+
+/** Equal side groups keep Create precisely centered at every phone width. */
+@Composable
+internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> Unit,
+                      onCreate: () -> Unit, onMenu: () -> Unit, onImport: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+        .clip(RoundedCornerShape(28.dp)).background(AureaColors.Surface)
+        .border(1.dp, AureaColors.Border, RoundedCornerShape(28.dp)).padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        DockUtility(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_tab_settings), "home.menu", onMenu)
+        DockTab(CupertinoGlyph.RectangleStack, stringResource(R.string.home_tab_projects), selected == HomeViewModel.PROJECTS_TAB,
+            Modifier.weight(1f).testTag("home.projects"), onProjects)
+        val createLabel = stringResource(R.string.home_new_project)
+        Box(Modifier.size(64.dp).clip(CircleShape).background(AureaColors.Accent)
+            .testTag("home.create").semantics { contentDescription = createLabel }
+            .clickable(role = Role.Button, onClick = onCreate), contentAlignment = Alignment.Center) {
+            CupertinoIcon(CupertinoGlyph.Plus, 30.dp, AureaColors.OnAccent)
+        }
+        DockTab(CupertinoGlyph.Sparkles, stringResource(R.string.home_presets_short), selected == HomeViewModel.HOME_TAB,
+            Modifier.weight(1f).testTag("home.community"), onCommunity)
+        DockUtility(CupertinoGlyph.PhotoOnRectangle, stringResource(R.string.home_import_media), "home.import", onImport)
     }
 }
 
-/** Estado de rolagem de uma aba, com a posição guardada no ViewModel ao sair. */
+@Composable
+private fun DockUtility(icon: Char, label: String, tag: String, onClick: () -> Unit) {
+    Box(Modifier.size(48.dp).clip(CircleShape).testTag(tag).semantics { contentDescription = label }
+        .clickable(role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
+        CupertinoIcon(icon, 21.dp, AureaColors.Muted)
+    }
+}
+
+@Composable
+private fun DockTab(icon: Char, label: String, active: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Column(modifier.heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
+        .semantics { selected = active }.clickable(role = Role.Tab, onClick = onClick).padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
+        CupertinoIcon(icon, 23.dp, if (active) AureaColors.Accent else AureaColors.Muted)
+        Text(label, style = AureaType.BodySmall.copy(fontSize = 12.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal),
+            color = if (active) AureaColors.Text else AureaColors.Muted, textAlign = TextAlign.Center)
+        Box(Modifier.size(width = 16.dp, height = 2.dp).background(if (active) AureaColors.Accent else AureaColors.Surface, CircleShape))
+    }
+}
+
 @Composable
 private fun rememberTabListState(vm: HomeViewModel, tab: Int): LazyListState {
     val state = remember { LazyListState(vm.scrollIndex(tab), vm.scrollOffset(tab)) }
-    DisposableEffect(state) {
-        onDispose { vm.saveScroll(tab, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset) }
-    }
+    DisposableEffect(state) { onDispose { vm.saveScroll(tab, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset) } }
     return state
-}
-
-/**
- * A barra de abas: vidro #0F141A @ 0,72 com blur σ 24, hairline no topo,
- * 54 de altura; embaixo, a barra de gestos preta.
- */
-@Composable
-private fun HomeTabBar(selected: Int, onSelect: (Int) -> Unit, backdrop: Backdrop, modifier: Modifier) {
-    Column(modifier.fillMaxWidth()) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .blockTouches()
-                .glass(backdrop, AureaElevation.TabBarBlur, AureaElevation.tabBarTint(), AureaElevation.tabBarFallback()),
-        ) {
-            Box(Modifier.fillMaxWidth().height(AureaDims.Hairline).background(AureaColors.Hairline))
-            Row(Modifier.fillMaxWidth().height(AureaDims.TabBarHeight)) {
-                Tabs.forEachIndexed { i, tab ->
-                    TabItem(tab, i == selected, Modifier.weight(1f)) { onSelect(i) }
-                }
-            }
-        }
-        Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(AureaColors.NavigationBar))
-    }
-}
-
-/** `_TabItem`: ícone 24 · 3 · rótulo 10,5 w500; ativo no destaque com o ícone cheio. */
-@Composable
-private fun TabItem(tab: HomeTab, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    val color = if (selected) AureaColors.Accent else AureaColors.Muted
-    Column(
-        modifier
-            .fillMaxHeight()
-            .clickable(interactionSource = null, indication = null, role = Role.Tab, onClick = onClick),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        CupertinoIcon(if (selected) tab.active else tab.icon, AureaDims.IconLg, color)
-        Spacer(Modifier.height(3.dp))
-        Text(stringResource(tab.label), style = AureaType.TabLabel, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
 }

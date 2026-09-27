@@ -284,7 +284,8 @@ Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool th
     }
     auto ownMatrix = [&](const Layer& node) {
         const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
-        return threeD ? layer_matrix_3d_frac(node, local) : layer_matrix_frac(node, local);
+        const Mat4 own = threeD ? layer_matrix_3d_frac(node, local) : layer_matrix_frac(node, local);
+        return node.hasParentBasis ? node.parentBasis * own : own;
     };
     bool helper = false;
     for (u32 i = 0; i + 1 < count; ++i)
@@ -300,7 +301,7 @@ Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool th
     while (count) {
         const Layer& node = *chain[--count];
         const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
-        const Mat4 own = threeD ? layer_matrix_3d_frac(node, local) : layer_matrix_frac(node, local);
+        const Mat4 own = ownMatrix(node);
         const Mat4 basis = parenting_basis(node, world, local, threeD ? nullptr : &continuousZ);
         auto anchor = [&](TrackProperty property, f32 fallback) {
             const Track* track = node.tracks.find(property);
@@ -407,6 +408,17 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
         const f32 deg = fov ? sample_frac(*fov, local, l->camera.fov) : l->camera.fov;
         cam.fovY = std::clamp(deg, 1.0f, 170.0f) * kDeg2Rad;
         cam.nearZ = std::max(0.1f, l->camera.nearPlane);
+        const Vec2 sourceSize = l->camera.trackingSourceSize;
+        const Layer* source = comp.layer(l->cameraTrackSource);
+        if (source && sourceSize.x > 0 && sourceSize.y > 0) {
+            // Reframe the solved source's calibrated image into composition
+            // pixels. Includes translation, nonuniform scale and Z rotation;
+            // all 3D paths (meshes, planes, particles, hit testing) share it.
+            Mat4 aspectCorrection = Mat4::identity();
+            aspectCorrection.col[0].x = (static_cast<f32>(w) / std::max(1u, h)) / (sourceSize.x / sourceSize.y);
+            cam.imageTransform = clip_from_comp(static_cast<f32>(w), static_cast<f32>(h))
+                * world_2d_frac(comp, *source, timeF) * comp_from_clip(sourceSize.x, sourceSize.y) * aspectCorrection;
+        }
         break;
     }
     return cam;
@@ -420,7 +432,7 @@ scene3d::SceneCamera camera_for(const Composition& comp, FrameIndex time, u32 w,
 Mat4 comp_view_projection_frac(const Composition& comp, f64 time, u32 w, u32 h) noexcept {
     const scene3d::SceneCamera cam = camera_for_frac(comp, time, w, h);
     return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
-         * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(std::max(1u, h)), cam.nearZ) * cam.view;
+         * cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(std::max(1u, h)), cam.nearZ) * cam.view;
 }
 
 } // namespace
@@ -446,14 +458,14 @@ scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEdito
 Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& editor) noexcept {
     const auto cam = scene_editor_camera(width, height, editor);
     return comp_from_clip(static_cast<f32>(width), static_cast<f32>(height))
-        * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(width) / std::max(1u, height), cam.nearZ) * cam.view;
+        * cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(width) / std::max(1u, height), cam.nearZ) * cam.view;
 }
 
 Mat4 comp_view_projection(const Composition& comp, FrameIndex time) noexcept {
     const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
     const scene3d::SceneCamera cam = camera_for(comp, time, w, h);
     return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
-         * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(h), cam.nearZ) * cam.view;
+         * cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(h), cam.nearZ) * cam.view;
 }
 
 Mat4 layer_world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept { return world_3d(comp, l, time); }
@@ -478,7 +490,7 @@ Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time,
     const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
     const scene3d::SceneCamera cam = camera_for(comp, time, w, h);
     return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
-         * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(h), cam.nearZ) * cam.view
+         * cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(h), cam.nearZ) * cam.view
          * world_3d(comp, l, time);
 }
 
@@ -784,7 +796,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     // Câmera da cena para camadas 2D que vivem no espaço 3D.
     const scene3d::SceneCamera cam3d = settings.sceneEditor.enabled && !settings.finalQuality
         ? scene_editor_camera(out.compWidth, out.compHeight, settings.sceneEditor) : camera_for(comp, time, out.compWidth, out.compHeight);
-    const Mat4 viewProj3d = scene3d::reverse_z_perspective(
+    const Mat4 viewProj3d = cam3d.imageTransform * scene3d::reverse_z_perspective(
                                 cam3d.fovY, static_cast<f32>(out.compWidth) / static_cast<f32>(std::max(1u, out.compHeight)),
                                 cam3d.nearZ) * cam3d.view;
     const Mat4 compFromClip = comp_from_clip(static_cast<f32>(out.compWidth), static_cast<f32>(out.compHeight));
@@ -796,6 +808,20 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     const u32 n = order.size();
     u32 used = 0;
     out.scenes.clear();
+    // The panorama is a bottom layer, even in a camera-only scene. Never
+    // repeat it in subsequent 3D groups (which would hide lower 2D layers).
+    if (comp.environment().showBackground && comp.environment().hdri.valid()) {
+        out.scenes.emplace_back();
+        out.scenes.back().environment.showBackground = true;
+        RenderLayer sky;
+        sky.id = LayerId{0xFFFFFFFEu, nestSalt_ + 1};
+        sky.source.kind = LayerSource::Kind::Scene3D; sky.source.sceneGroup = 0;
+        sky.source.width = out.compWidth; sky.source.height = out.compHeight;
+        sky.compFromLayer = Mat4::identity(); sky.texelScale = previewFactor;
+        out.layers.push_back(std::move(sky));
+        if (out.plans.empty()) out.plans.emplace_back();
+        out.plans[0].clear(); ++used;
+    }
     // Layers 3D CONSECUTIVAS na pilha formam um grupo (uma cena, uma
     // profundidade compartilhada: elas se ocluem). Qualquer layer 2D entre
     // elas fecha o grupo — a ordem da pilha continua sendo a lei.
@@ -892,7 +918,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             pl.compHeight = out.compHeight;
             pl.layerWidth = out.compWidth;
             pl.layerHeight = out.compHeight;
-            EffectGraph::plan(*l, *effects_, local, rl.texelScale, pl, this, out.plans[used]);
+            EffectGraph::plan(*l, *effects_, local, rl.texelScale, pl, this, out.plans[used], fps);
             if (out.plans[used].empty()) {   // nenhum efeito vivo: não muda nada
                 out.plans[used].clear();
                 continue;
@@ -1621,7 +1647,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // Vai para a cena 3D (plano no mundo): o corte pela área visível da
             // composição não se aplica — ver LayerPlacement::inScene3d.
             placement.inScene3d = inScene3d;
-            EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used]);
+            EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used], fps);
         }
         // FORA DA TELA: a caixa da camada (com o Transform dobrado) não toca a
         // composição e nada na pilha dela pode trazer pixel para dentro (só

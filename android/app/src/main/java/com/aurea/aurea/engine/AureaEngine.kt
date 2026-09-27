@@ -395,6 +395,7 @@ class AureaEngine private constructor() {
     // Ambiente 3D (HDRI).
     fun importHdri(path: String): Long = nativeImportHdri(nativeHandle, path)
     fun clearHdri(): Boolean = nativeClearHdri(nativeHandle)
+    fun setEnvironmentBackground(visible: Boolean): Boolean = nativeSetEnvironmentBackground(nativeHandle, visible)
     fun setEnvironment(intensity: Float, rotation: Float): Boolean = nativeSetEnvironment(nativeHandle, intensity, rotation)
     fun queryEnvironment(out: FloatArray): Boolean = nativeQueryEnvironment(nativeHandle, out)
 
@@ -585,11 +586,33 @@ class AureaEngine private constructor() {
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
 
     // Rastreio de câmera 3D.
+    fun startMotionTrack(layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float): Boolean = nativeStartMotionTrack(nativeHandle, layer, tool, model, backward, points, feature, search)
+    fun cancelMotionTrack() = nativeCancelMotionTrack(nativeHandle)
+    fun restoreMotionTrack(layer: Long): Boolean = nativeRestoreMotionTrack(nativeHandle, layer)
+    fun motionTrackStatus(out: FloatArray): String = nativeMotionTrackStatus(nativeHandle, out) ?: ""
+    fun applyMotionTrack(target: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int): Long = nativeApplyMotionTrack(nativeHandle, target, apply, lock, smooth, maxScale, crop)
+    private external fun nativeStartMotionTrack(handle: Long, layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float): Boolean
+    private external fun nativeCancelMotionTrack(handle: Long)
+    private external fun nativeRestoreMotionTrack(handle: Long, layer: Long): Boolean
+    private external fun nativeMotionTrackStatus(handle: Long, out: FloatArray): String?
+    private external fun nativeApplyMotionTrack(handle: Long, target: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int): Long
     fun startCameraTrack(layer: Long, mode: Int): Boolean = nativeStartCameraTrack(nativeHandle, layer, mode)
     fun cancelCameraTrack() = nativeCancelCameraTrack(nativeHandle)
+    fun refineCameraTrack(remove: Boolean, motion: Int, fov: Float): Boolean = nativeRefineCameraTrack(nativeHandle, remove, motion, fov)
+    fun cameraTrackTarget(frame: Long, out: FloatArray): Int = nativeCameraTrackTarget(nativeHandle, frame, out)
+    fun calibrateCameraScene(operation: Int, distance: Float): Boolean = nativeCalibrateCameraScene(nativeHandle, operation, distance)
+    fun placeModelOnTrack(layer: Long): Boolean = nativePlaceModelOnTrack(nativeHandle, layer)
+    private external fun nativeCameraTrackTarget(handle: Long, frame: Long, out: FloatArray): Int
+    private external fun nativeCalibrateCameraScene(handle: Long, operation: Int, distance: Float): Boolean
+    private external fun nativePlaceModelOnTrack(handle: Long, layer: Long): Boolean
+    private external fun nativeRefineCameraTrack(handle: Long, remove: Boolean, motion: Int, fov: Float): Boolean
     fun cameraTrackStatus(out: FloatArray): String? = nativeCameraTrackStatus(nativeHandle, out)
     fun applyCameraTrack(frame: Long = -1, rect: FloatArray? = null): Long = nativeApplyCameraTrack(nativeHandle, frame, rect?.get(0) ?: 0f, rect?.get(1) ?: 0f, rect?.get(2) ?: 0f, rect?.get(3) ?: 0f)
     fun cameraTrackFeatures(frame: Long, out: FloatArray): Int = nativeCameraTrackFeatures(nativeHandle, frame, out)
+    fun restoreCameraTrack(layer: Long): Boolean = nativeRestoreCameraTrack(nativeHandle, layer)
+    fun cameraTrackDetails(frame: Long, out: FloatArray): Int = nativeCameraTrackDetails(nativeHandle, frame, out)
+    fun selectCameraTrackPoints(ids: IntArray, operation: Int = 0): Int = nativeSelectCameraTrackPoints(nativeHandle, ids, operation)
+    fun createCameraTrackObject(kind: Int): Long = nativeCreateCameraTrackObject(nativeHandle, kind)
     fun editTimeRemapKey(layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int =
         nativeEditTimeRemapKey(nativeHandle, layer, index, frame, value, interp)
     fun removeTimeRemapKey(layer: Long, index: Int): Boolean = nativeRemoveTimeRemapKey(nativeHandle, layer, index)
@@ -803,6 +826,10 @@ class AureaEngine private constructor() {
     private external fun nativeCameraTrackStatus(handle: Long, out: FloatArray): String?
     private external fun nativeCameraTrackFeatures(handle: Long, frame: Long, out: FloatArray): Int
     private external fun nativeApplyCameraTrack(handle: Long, frame: Long, x0: Float, y0: Float, x1: Float, y1: Float): Long
+    private external fun nativeRestoreCameraTrack(handle: Long, layer: Long): Boolean
+    private external fun nativeCameraTrackDetails(handle: Long, frame: Long, out: FloatArray): Int
+    private external fun nativeSelectCameraTrackPoints(handle: Long, ids: IntArray, operation: Int): Int
+    private external fun nativeCreateCameraTrackObject(handle: Long, kind: Int): Long
     private external fun nativeQueryTimeRemap(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
@@ -845,6 +872,7 @@ class AureaEngine private constructor() {
     private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray): Boolean
     private external fun nativeGizmoMoveLocal(handle: Long, layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean
     private external fun nativeClearHdri(handle: Long): Boolean
+    private external fun nativeSetEnvironmentBackground(handle: Long, visible: Boolean): Boolean
     private external fun nativeSetEnvironment(handle: Long, intensity: Float, rotation: Float): Boolean
     private external fun nativeQueryEnvironment(handle: Long, out: FloatArray): Boolean
     private external fun nativeSetObjectEnvironment(handle: Long, layer: Long, source: Int, hdri: Long, intensity: Float, rotation: Float, exposure: Float): Boolean

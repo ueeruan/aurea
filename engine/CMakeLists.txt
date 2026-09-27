@@ -104,6 +104,10 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/TemporalEffects.cpp
     src/effects/builtin/TransitionEffects.cpp
     src/effects/builtin/OpticalEffects.cpp
+    src/effects/builtin/CornerPinEffect.cpp
+    src/effects/builtin/MediaLabEffects.cpp
+    src/effects/builtin/StudioLightEffects.cpp
+    src/effects/builtin/TraceryEffect.cpp
     src/effects/builtin/PatternEffects.cpp
     src/effects/builtin/SampledBlurEffects.cpp
     src/expr/Expression.cpp
@@ -121,6 +125,7 @@ set(AUREA_CORE_SOURCES
     src/audio/Beats.cpp
     src/tracking/PointTracker.cpp
     src/tracking/CameraTracker.cpp
+    src/tracking/MotionGeometry.cpp
     src/text/Text.cpp
     src/text/FontManager.cpp
     src/text/TextAnimator.cpp
@@ -139,6 +144,8 @@ set(AUREA_CORE_SOURCES
     src/scene3d/Animation.cpp
     src/scene3d/Text3D.cpp
     src/engine/Engine.cpp
+    src/engine/EngineMotion.cpp
+    src/engine/EngineMotion.cpp
     ${AUREA_SHADER_SOURCES}
 )
 

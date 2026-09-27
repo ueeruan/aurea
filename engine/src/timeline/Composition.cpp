@@ -57,6 +57,10 @@ void Composition::resize_content(u32 w, u32 h) noexcept {
     layers_.for_each([&](LayerId, Layer& l) {
         // Descendants inherit the root's scale; scaling them again compounds it.
         if (l.parent.valid() && layer(l.parent)) return;
+        if (l.hasParentBasis) {
+            l.parentBasis = Mat4::translation(Vec3{dx, dy, 0}) * Mat4::scale(Vec3{k, k, k}) * l.parentBasis;
+            return;
+        }
         l.transform.position = Vec3{l.transform.position.x * k + dx,
                                     l.transform.position.y * k + dy, l.transform.position.z * k};
         // Content Z is stored relative to X by layer_world_3d; cameras and

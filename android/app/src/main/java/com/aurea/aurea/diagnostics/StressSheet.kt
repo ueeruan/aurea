@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +44,8 @@ import com.aurea.aurea.ui.theme.AureaDims
 import com.aurea.aurea.ui.theme.AureaShape
 import com.aurea.aurea.ui.theme.AureaType
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * A folha do teste de estresse: um botão para rodar, o passo atual, e o relatório
@@ -66,12 +69,48 @@ fun StressSheet(
     var rodando by remember { mutableStateOf(false) }
     var passo by remember { mutableStateOf("") }
     var relatorio by remember { mutableStateOf("") }
+    var lendoDiagnostico by remember { mutableStateOf(true) }
+    var salvando by remember { mutableStateOf(false) }
+    var escolhendoVideo by remember { mutableStateOf(false) }
+    val ocupado = rodando || lendoDiagnostico || salvando || escolhendoVideo
+
+    // A crash during ordinary import must be inspectable without running a
+    // stress battery (which could crash again before producing its report).
+    LaunchedEffect(Unit) {
+        try {
+            relatorio = withContext(Dispatchers.IO) { ExitDiagnostics.report(context) }
+        } finally {
+            lendoDiagnostico = false
+        }
+    }
+    val salvarDiagnostico = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri == null) {
+            salvando = false
+        } else scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val output = requireNotNull(context.contentResolver.openOutputStream(uri))
+                    output.use { ExitDiagnostics.writeArchive(context, it) }
+                }
+                store.showToast(context.getString(R.string.stress_diagnostico_salvo))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                store.showToast(context.getString(R.string.stress_diagnostico_falhou))
+            } finally {
+                salvando = false
+            }
+        }
+    }
 
     // A fase pesada quer vídeo de verdade. Em vez de exigir que o tester prepare
     // um projeto, o arquivo é pedido na hora.
     val escolherVideo = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
+        escolhendoVideo = false
         if (uri != null) {
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
@@ -82,8 +121,11 @@ fun StressSheet(
             relatorio = ""
             passo = ""
             scope.launch {
-                relatorio = executar(context, store, version, uri) { passo = it }
-                rodando = false
+                try {
+                    relatorio = executar(context, store, version, uri) { passo = it }
+                } finally {
+                    rodando = false
+                }
             }
         }
     }
@@ -92,6 +134,7 @@ fun StressSheet(
         Column(
             Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = AureaDims.S4)
                 .padding(bottom = AureaDims.S4),
         ) {
@@ -137,20 +180,30 @@ fun StressSheet(
             }
 
             Spacer(Modifier.height(AureaDims.S3))
+            Text(stringResource(R.string.stress_diagnostico_nota), style = AureaType.BodySmall)
+            Spacer(Modifier.height(AureaDims.S2))
+            Botao(
+                stringResource(R.string.stress_salvar_diagnostico),
+                enabled = !ocupado,
+                modifier = Modifier.fillMaxWidth(),
+                secundario = true,
+            ) {
+                salvando = true
+                salvarDiagnostico.launch("Aurea-diagnostico.zip")
+            }
+            Spacer(Modifier.height(AureaDims.S3))
             Botao(
                 if (rodando) stringResource(R.string.stress_rodando) else stringResource(R.string.stress_rodar_pesado),
-                enabled = !rodando,
+                enabled = !ocupado,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                rodando = true
-                relatorio = ""
-                passo = ""
+                escolhendoVideo = true
                 escolherVideo.launch(arrayOf("video/*"))
             }
             Spacer(Modifier.height(AureaDims.S2))
             Botao(
                 stringResource(R.string.stress_rodar),
-                enabled = !rodando,
+                enabled = !ocupado,
                 modifier = Modifier.fillMaxWidth(),
                 secundario = true,
             ) {
@@ -158,8 +211,11 @@ fun StressSheet(
                 relatorio = ""
                 passo = ""
                 scope.launch {
-                    relatorio = executar(context, store, version, null, { passo = it })
-                    rodando = false
+                    try {
+                        relatorio = executar(context, store, version, null, { passo = it })
+                    } finally {
+                        rodando = false
+                    }
                 }
             }
         }
@@ -182,7 +238,9 @@ private suspend fun executar(
         videoDoUsuario = video,
         onProgress = onProgress,
     ).run()
-} catch (t: Throwable) {
+} catch (cancelled: kotlinx.coroutines.CancellationException) {
+    throw cancelled
+} catch (t: Exception) {
     // Sem isto, qualquer falha deixava a folha presa em "Rodando…" e o tester
     // ficava sem nada para mandar.
     "O TESTE NÃO TERMINOU\n\n${t::class.java.name}: ${t.message}\n\n${t.stackTraceToString()}"

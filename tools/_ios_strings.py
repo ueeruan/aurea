@@ -11,14 +11,19 @@ EN = ROOT + r"\android\app\src\main\res\values-en\strings.xml"
 OUT = ROOT + r"\engine\platform\ios\app\AureaStrings.swift"
 
 KEYS = [
+    "text_options", "text_content_3d_required", "text_content_save_failed",
     "pn_t3d_preset_cinematic",
-    "world_embers", "world_snow", "world_bokeh", "world_fountain",
+    "world_embers", "world_snow", "world_bokeh", "world_fountain", "world_purple_crystals", "environment_texture", "environment_background", "environment_hint",
     "donation_launch_question", "donation_launch_yes", "donation_launch_later",
     "release_notes_title", "release_notes_body", "am_import_lossless_required", "am_import_read_failed",
     # comum
     "common_cancel", "common_delete", "common_duplicate", "common_remove", "common_rename",
     "common_save", "common_search", "common_open", "common_irreversible",
     # home
+    "home_presets_short", "home_community_title", "home_community_caption_hint", "home_downloaded",
+    "home_download", "home_downloading", "home_search_presets", "home_search_action", "home_retry",
+    "home_no_presets", "home_community_unavailable", "home_preset_saved", "home_preset_parts_saved",
+    "t3d_letters", "t3d_whole_object", "t3d_enable_letters",
     "home_tab_start", "home_tab_projects", "home_tab_settings",
     "home_title_start", "home_title_projects", "home_search_projects", "home_search_hint",
     "home_new_project", "home_no_projects", "home_no_projects_hint", "home_no_results",

@@ -13,6 +13,7 @@
 #include "aurea/core/Time.hpp"
 #include "aurea/jobs/JobSystem.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
+#include "aurea/platform/AndroidVideoCompatibility.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -29,6 +30,18 @@
 #endif
 
 using namespace aurea;
+
+AUREA_TEST(AndroidVideoCompatibility, SamsungAndroid12UsesReadablePlanesOnlyOnAffectedVersions) {
+    for (const char* vendor : {"samsung", "Samsung", "SAMSUNG"}) {
+        AUREA_CHECK(android::needs_readable_video_planes(vendor, 31));
+        AUREA_CHECK(android::needs_readable_video_planes(vendor, 32));
+        for (int sdk : {26, 30, 33, 35, 36}) AUREA_CHECK(!android::needs_readable_video_planes(vendor, sdk));
+    }
+    for (const char* vendor : {"", "Google", "Xiaomi", "samsung-other"}) {
+        AUREA_CHECK(!android::needs_readable_video_planes(vendor, 31));
+        AUREA_CHECK(!android::needs_readable_video_planes(vendor, 32));
+    }
+}
 
 namespace {
 

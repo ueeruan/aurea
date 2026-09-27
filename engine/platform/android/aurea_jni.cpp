@@ -38,6 +38,8 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <cstdlib>
+#include "aurea/platform/AndroidVideoCompatibility.hpp"
 
 using namespace aurea;
 
@@ -412,10 +414,15 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     // hardware_buffer e a conversão YCbCr, mas amostra o buffer YUV externo como
     // bytes crus (plano Y em cima, UV embaixo). Lá o caminho é o de planos.
     const bool emulator = running_on_emulator();
-    const bool zeroCopy = gpu->capabilities().zero_copy_video() && !emulator;
+    char manufacturer[PROP_VALUE_MAX]{}, sdk[PROP_VALUE_MAX]{};
+    __system_property_get("ro.product.manufacturer", manufacturer);
+    __system_property_get("ro.build.version.sdk", sdk);
+    const bool readablePlanes = android::needs_readable_video_planes(manufacturer, std::atoi(sdk));
+    const bool zeroCopy = gpu->capabilities().zero_copy_video() && !emulator && !readablePlanes;
     c->media.set_zero_copy(zeroCopy);
     AUREA_LOG_INFO("video: %s%s", zeroCopy ? "zero-copy (AHardwareBuffer)" : "planos pela CPU",
-                   emulator ? " (emulador: YCbCr externo nao confiavel)" : "");
+                   emulator ? " (emulador: YCbCr externo nao confiavel)" :
+                   readablePlanes ? " (compatibilidade Samsung Android 12/12L; MediaCodec mantido)" : "");
     c->engine.start_render_thread();
     c->initialized = true;
     return JNI_TRUE;
@@ -1004,6 +1011,10 @@ AUREA_JNI jboolean AUREA_FN(nativeClearHdri)(JNIEnv*, jclass, jlong handle) {
     return c && c->engine.clear_hdri() ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetEnvironmentBackground)(JNIEnv*, jclass, jlong handle, jboolean visible) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_environment_background(visible == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
 AUREA_JNI jboolean AUREA_FN(nativeSetEnvironment)(JNIEnv*, jclass, jlong handle, jfloat intensity, jfloat rotation) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_environment_params(intensity, rotation) ? JNI_TRUE : JNI_FALSE;
@@ -1015,6 +1026,7 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryEnvironment)(JNIEnv* env, jclass, jlong h
     f32 v[3];
     if (!c->engine.query_environment(v)) return JNI_FALSE;
     env->SetFloatArrayRegion(out, 0, 3, v);
+    if (env->GetArrayLength(out) >= 4) { const f32 visible = c->engine.environment_background() ? 1.f : 0.f; env->SetFloatArrayRegion(out, 3, 1, &visible); }
     return JNI_TRUE;
 }
 
@@ -1973,6 +1985,22 @@ AUREA_JNI jboolean AUREA_FN(nativeSetVectorBlur)(JNIEnv*, jclass, jlong handle, 
     return c && c->engine.set_vector_blur(static_cast<u64>(layer), amount) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeStartMotionTrack)(JNIEnv* env, jclass, jlong handle, jlong layer, jint tool, jint model, jboolean backward, jfloatArray points, jfloat feature, jfloat search) {
+    auto* c=ctx_of(handle);if(!c||!points)return JNI_FALSE;
+    const auto n=env->GetArrayLength(points);if(n>8||n%2)return JNI_FALSE;
+    f32 xy[8]{};if(n)env->GetFloatArrayRegion(points,0,n,xy);
+    return c->engine.start_motion_track(layer,tool,model,backward,xy,n/2,feature,search)?JNI_TRUE:JNI_FALSE;
+}
+AUREA_JNI void AUREA_FN(nativeCancelMotionTrack)(JNIEnv*,jclass,jlong handle){if(auto* c=ctx_of(handle))c->engine.cancel_motion_track();}
+AUREA_JNI jboolean AUREA_FN(nativeRestoreMotionTrack)(JNIEnv*,jclass,jlong handle,jlong layer){auto* c=ctx_of(handle);return c&&c->engine.restore_motion_track(layer)?JNI_TRUE:JNI_FALSE;}
+AUREA_JNI jstring AUREA_FN(nativeMotionTrackStatus)(JNIEnv* env,jclass,jlong handle,jfloatArray out){
+    auto* c=ctx_of(handle);if(!c||!out||env->GetArrayLength(out)<12)return nullptr;
+    auto s=c->engine.motion_track_status();const f32 v[]={static_cast<f32>(s.state),s.progress,static_cast<f32>(s.frames),static_cast<f32>(s.validFrames),static_cast<f32>(s.tool),static_cast<f32>(s.lost),static_cast<f32>(s.reacquired),s.confidence,s.errorPx,s.cropPercent,static_cast<f32>(s.memoryBytes)/1048576.f,0};
+    env->SetFloatArrayRegion(out,0,12,v);return env->NewStringUTF(s.message.c_str());
+}
+AUREA_JNI jlong AUREA_FN(nativeApplyMotionTrack)(JNIEnv*,jclass,jlong handle,jlong target,jint apply,jboolean lock,jfloat smooth,jfloat maxScale,jint crop){
+    auto* c=ctx_of(handle);if(!c)return -1;auto r=c->engine.apply_motion_track(target,apply,lock,smooth,maxScale,crop);return r.ok()?static_cast<jlong>(*r):-static_cast<jlong>(r.code());
+}
 AUREA_JNI jboolean AUREA_FN(nativeStartCameraTrack)(JNIEnv*, jclass, jlong handle, jlong layer, jint mode) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.start_camera_track(static_cast<u64>(layer), static_cast<u32>(mode)) ? JNI_TRUE : JNI_FALSE;
@@ -2012,6 +2040,39 @@ AUREA_JNI jlong AUREA_FN(nativeApplyCameraTrack)(JNIEnv*, jclass, jlong handle, 
     const Result<u64> r = c->engine.apply_camera_track(frame, Vec4{x0, y0, x1, y1});
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
+}
+AUREA_JNI jboolean AUREA_FN(nativeRefineCameraTrack)(JNIEnv*,jclass,jlong handle,jboolean remove,jint motion,jfloat fov) {
+    auto* c=ctx_of(handle);return c&&c->engine.refine_camera_track(remove,motion,fov)?JNI_TRUE:JNI_FALSE;
+}
+AUREA_JNI jint AUREA_FN(nativeCameraTrackTarget)(JNIEnv* env,jclass,jlong handle,jlong frame,jfloatArray out){
+    auto* c=ctx_of(handle);if(!c||!out||env->GetArrayLength(out)<64)return 0;f32 data[64]{};const auto n=c->engine.camera_track_target(frame,data,32);if(n)env->SetFloatArrayRegion(out,0,n*2,data);return static_cast<jint>(n);
+}
+AUREA_JNI jboolean AUREA_FN(nativeCalibrateCameraScene)(JNIEnv*,jclass,jlong handle,jint operation,jfloat distance){auto* c=ctx_of(handle);return c&&c->engine.calibrate_camera_scene(operation,distance)?JNI_TRUE:JNI_FALSE;}
+AUREA_JNI jboolean AUREA_FN(nativePlaceModelOnTrack)(JNIEnv*,jclass,jlong handle,jlong layer){auto* c=ctx_of(handle);return c&&c->engine.place_model_on_track(layer)?JNI_TRUE:JNI_FALSE;}
+
+AUREA_JNI jboolean AUREA_FN(nativeRestoreCameraTrack)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.restore_camera_track(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jint AUREA_FN(nativeCameraTrackDetails)(JNIEnv* env, jclass, jlong handle, jlong frame, jfloatArray out) {
+    NativeContext* c = ctx_of(handle); if (!c || !out) return 0;
+    const u32 cap = std::min<u32>(1500, static_cast<u32>(env->GetArrayLength(out) / 6));
+    std::vector<f32> data(cap * 6);
+    const u32 count = c->engine.camera_track_features_detail(frame, data.data(), cap);
+    if (count) env->SetFloatArrayRegion(out, 0, count * 6, data.data());
+    return static_cast<jint>(count);
+}
+AUREA_JNI jint AUREA_FN(nativeSelectCameraTrackPoints)(JNIEnv* env, jclass, jlong handle, jintArray ids, jint operation) {
+    NativeContext* c = ctx_of(handle); if (!c || !ids || env->GetArrayLength(ids) > 1500) return 0;
+    std::vector<jint> input(static_cast<usize>(env->GetArrayLength(ids)));
+    if (!input.empty()) env->GetIntArrayRegion(ids, 0, static_cast<jsize>(input.size()), input.data());
+    std::vector<u32> values; for (jint value : input) if (value >= 0) values.push_back(static_cast<u32>(value));
+    return static_cast<jint>(c->engine.select_camera_track_points(values.data(), static_cast<u32>(values.size()), static_cast<u32>(operation)));
+}
+AUREA_JNI jlong AUREA_FN(nativeCreateCameraTrackObject)(JNIEnv*, jclass, jlong handle, jint kind) {
+    NativeContext* c = ctx_of(handle); if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const auto result = c->engine.apply_camera_track(-1, {}, static_cast<u32>(kind));
+    return result.ok() ? static_cast<jlong>(*result) : -static_cast<jlong>(result.code());
 }
 
 AUREA_JNI jint AUREA_FN(nativeQueryTimeRemap)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {

@@ -253,7 +253,10 @@ struct HomeView: View {
     @StateObject private var defaults = HomeDefaults()
     @StateObject private var backdrop = HomeBackdrop()
 
-    @State private var tab: HomeTabKind = .start
+    @State private var tab: HomeTabKind = .projects
+    @State private var homeMenu = false
+    @State private var homeInfo: String?
+    @State private var importing = false
     /// Busca aberta em cada aba (o Android tem uma bandeira por aba).
     @State private var startSearching = false
     @State private var projectsSearching = false
@@ -265,7 +268,7 @@ struct HomeView: View {
     @State private var showReleaseNotes = false
     @State private var showDonationPrompt = false
     private var releaseNotesEdition: String {
-        "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"):2112-1"
+        "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"):2123-1"
     }
     @State private var dialog: HomeProjectDialog?
     @State private var pendingProject: NewProjectDraft?
@@ -276,34 +279,28 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             LiveNoticeBanners()
-            Button(AureaText.t("release_notes_title")) { showReleaseNotes = true }
-                .font(.aurea(size: 14)).frame(minHeight: 44)
-                .accessibilityIdentifier("home.releaseNotes")
-            ZStack(alignment: .bottom) {
-                // As três abas ficam VIVAS: a rolagem de cada uma volta igual ao
-                // trocar de aba ou ao voltar do editor (o mesmo que o
-                // `HomeViewModel` guarda do lado do Android).
-                ZStack {
-                    HomeStartTab(library: library, defaults: defaults,
-                                 searching: $startSearching, selection: $selection,
-                                 onNewProject: { showNewProject = true },
-                                 onDialog: { dialog = $0 },
-                                 onOpenSettings: { select(.settings) }, onOpenProjects: { select(.projects) })
-                        .opacity(tab == .start ? 1 : 0)
-                        .allowsHitTesting(tab == .start)
-                    HomeProjectsTab(library: library, defaults: defaults,
-                                    searching: $projectsSearching, selection: $selection,
-                                    onNewProject: { showNewProject = true },
-                                    onDialog: { dialog = $0 })
-                        .opacity(tab == .projects ? 1 : 0)
-                        .allowsHitTesting(tab == .projects)
-                    HomeSettingsTab(library: library, defaults: defaults, modalActive: $settingsModalActive)
-                        .opacity(tab == .settings ? 1 : 0)
-                        .allowsHitTesting(tab == .settings)
-                }
-                HomeTabBar(selected: tab, onSelect: select)
-                    .zIndex(settingsModalActive ? -1 : 0)
-            }
+            HStack {
+                Text("aurea").font(.aurea(size: 32, weight: .bold)).tracking(-1)
+                Spacer()
+                Button(AureaText.t("release_notes_title")) { showReleaseNotes = true }
+                    .font(.aurea(size: 13)).frame(minHeight: 44)
+                    .accessibilityIdentifier("home.releaseNotes")
+            }.foregroundStyle(AureaColors.text).padding(.horizontal, 20)
+            ZStack {
+                HomeProjectsTab(library: library, defaults: defaults,
+                                searching: $projectsSearching, selection: $selection,
+                                onNewProject: { showNewProject = true }, onDialog: { dialog = $0 })
+                    .opacity(tab == .projects ? 1 : 0).allowsHitTesting(tab == .projects)
+                    .accessibilityHidden(tab != .projects)
+                HomeSettingsTab(library: library, defaults: defaults, modalActive: $settingsModalActive)
+                    .opacity(tab == .settings ? 1 : 0).allowsHitTesting(tab == .settings)
+                    .accessibilityHidden(tab != .settings)
+                if tab == .start { HomeCommunityPresets() }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            HomeDock(selected: tab, onSelect: select, onCreate: { showNewProject = true },
+                     onMenu: { homeMenu = true }, onImport: { importing = true })
+                .disabled(settingsModalActive)
+
         }
         .background {
             GeometryReader { geometry in
@@ -317,6 +314,30 @@ struct HomeView: View {
         }
         .background(AureaColors.background.ignoresSafeArea())
         .environment(\.homeBackdrop, backdrop)
+        .confirmationDialog("Aurea", isPresented: $homeMenu, titleVisibility: .visible) {
+            Button(AureaText.t("home_tab_settings")) { select(.settings) }
+            Button(AureaText.t("settings_group_about")) { homeInfo = "settings_group_about" }
+            Button(AureaText.t("licenses_title")) { homeInfo = "licenses_title" }
+        }
+        .sheet(isPresented: Binding(get: { homeInfo != nil }, set: { if !$0 { homeInfo = nil } })) {
+            NavigationStack {
+                ScrollView {
+                    Text(homeInfo == "licenses_title" ? AureaText.t("licenses_ai_body") :
+                         "Aurea \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")\n\n" +
+                         AureaText.t("settings_technology_ios_value") + "\n\n" + AureaText.t("settings_made_by"))
+                        .font(.body).textSelection(.enabled).padding(20)
+                }.background(AureaColors.background).foregroundStyle(AureaColors.text)
+                    .navigationTitle(AureaText.t(homeInfo ?? "settings_group_about"))
+                    .toolbar { ToolbarItem(placement: .confirmationAction) {
+                        Button(AureaText.t("editor_fechar")) { homeInfo = nil }
+                    } }
+            }
+        }
+        .sheet(isPresented: $importing) {
+            HomeMediaPicker(onDismiss: { importing = false }, onPick: { url, kind in
+                importing = false; model.createFromMedia(url: url, kind: kind)
+            }, onError: { error in importing = false; model.toast = error })
+        }
         .overlay {
             if showNewProject {
                 NewProjectSheet(defaults: defaults,
@@ -443,37 +464,190 @@ struct HomeView: View {
     }
 }
 
-/// HomeScreen.kt: hairline no topo, altura 54, sigma 24 e tinta de 72%.
-private struct HomeTabBar: View {
+/// A separate safe-area row: content never scrolls under the primary action.
+private struct HomeDock: View {
     let selected: HomeTabKind
     let onSelect: (HomeTabKind) -> Void
-
+    let onCreate: () -> Void
+    let onMenu: () -> Void
+    let onImport: () -> Void
     var body: some View {
-        VStack(spacing: 0) {
-            Rectangle().fill(AureaColors.hairline).frame(height: HomeDims.hairline)
-            HStack(spacing: 0) {
-                ForEach(HomeTabKind.allCases) { item in
-                    Button { onSelect(item) } label: {
-                        VStack(spacing: 3) {
-                            CupertinoGlyph.text(selected == item ? item.iconActive : item.icon,
-                                                size: HomeDims.iconLg,
-                                                color: selected == item ? AureaColors.accent : AureaColors.muted)
-                                .frame(width: HomeDims.iconLg, height: HomeDims.iconLg)
-                                .accessibilityHidden(true)
-                            Text(item.label)
-                                .aureaFont(.tabLabel)
-                                .lineLimit(1)
-                        }
-                        .foregroundStyle(selected == item ? AureaColors.accent : AureaColors.muted)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+        HStack(spacing: 0) {
+            utility(CupertinoGlyph.SliderHorizontal3, "home_tab_settings", "home.menu", onMenu)
+            tab(.projects, CupertinoGlyph.RectangleStack, "home_tab_projects", "home.projects")
+            Button(action: onCreate) {
+                CupertinoGlyph.text(CupertinoGlyph.Plus, size: 30, color: AureaColors.onAccent)
+                    .frame(width: 64, height: 64).background(AureaColors.accent, in: Circle())
+                    .contentShape(Circle())
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("home_new_project"))
+                .accessibilityIdentifier("home.create")
+            tab(.start, CupertinoGlyph.Sparkles, "home_presets_short", "home.community")
+            utility(CupertinoGlyph.PhotoOnRectangle, "home_import_media", "home.import", onImport)
+        }.padding(.horizontal, 4).padding(.vertical, 10)
+            .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 28))
+            .overlay { RoundedRectangle(cornerRadius: 28).stroke(AureaColors.border, lineWidth: 1).allowsHitTesting(false) }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+    private func utility(_ glyph: Character, _ label: String, _ tag: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            CupertinoGlyph.text(glyph, size: 21, color: AureaColors.muted)
+                .frame(width: 48, height: 48).contentShape(Circle())
+        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(label)).accessibilityIdentifier(tag)
+    }
+    private func tab(_ kind: HomeTabKind, _ glyph: Character, _ label: String, _ tag: String) -> some View {
+        Button { onSelect(kind) } label: {
+            VStack(spacing: 4) {
+                CupertinoGlyph.text(glyph, size: 23, color: selected == kind ? AureaColors.accent : AureaColors.muted)
+                Text(AureaText.t(label)).font(.caption).multilineTextAlignment(.center)
+                    .foregroundStyle(selected == kind ? AureaColors.text : AureaColors.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Capsule().fill(selected == kind ? AureaColors.accent : AureaColors.surface).frame(width: 16, height: 2)
+            }.padding(.vertical, 8).frame(maxWidth: .infinity, minHeight: 64).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityIdentifier(tag)
+            .accessibilityAddTraits(selected == kind ? .isSelected : [])
+    }
+}
+
+@MainActor
+private struct HomeCommunityPresets: View {
+    @State private var entries: [HomeCommunityEntry] = []
+    @State private var offline = false
+    @State private var query = ""
+    @State private var revision = 0
+    @State private var loading = false
+    @State private var downloading: String?
+    @State private var message: String?
+    @State private var failed = false
+    @State private var downloadTask: Task<Void, Never>?
+    private var requestKey: String { "\(offline):\(revision)" }
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                Text(AureaText.t("home_community_title")).font(.title2.bold())
+                Text(AureaText.t("home_community_caption_hint")).font(.subheadline).foregroundStyle(AureaColors.muted)
+                Picker("", selection: $offline) {
+                    Text(AureaText.t("home_presets_short")).tag(false)
+                    Text(AureaText.t("home_downloaded")).tag(true)
+                }.pickerStyle(.segmented)
+                HStack {
+                    TextField(AureaText.t("home_search_presets"), text: $query)
+                        .submitLabel(.search).onSubmit { revision += 1 }
+                        .padding(12).background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 12))
+                        .onChange(of: query) { if $0.count > 80 { query = String($0.prefix(80)) } }
+                    Button(AureaText.t("home_search_action")) { revision += 1 }.frame(minHeight: 48)
                 }
-            }
-            .frame(height: HomeDims.tabBar)
+                if loading { ProgressView().frame(maxWidth: .infinity) }
+                if let message {
+                    Text(message).font(.subheadline).foregroundStyle(AureaColors.muted)
+                    if failed { Button(AureaText.t("home_retry")) { revision += 1 }.frame(minHeight: 48) }
+                } else if !loading && entries.isEmpty {
+                    Text(AureaText.t("home_no_presets")).foregroundStyle(AureaColors.muted).padding(.vertical, 32)
+                }
+                ForEach(entries) { entry in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(entry.name).font(.headline)
+                        Text(entry.author).font(.caption).foregroundStyle(AureaColors.muted)
+                        if offline { Text(AureaText.t("home_downloaded")).font(.caption) }
+                        else {
+                            Button(AureaText.t(downloading == entry.id ? "home_downloading" : "home_download")) {
+                                downloading = entry.id
+                                downloadTask = Task {
+                                    defer { downloading = nil }
+                                    do {
+                                        try await HomeCommunityAPI.download(entry)
+                                        try Task.checkCancellation()
+                                        failed = false; message = AureaText.t("home_preset_parts_saved")
+                                    } catch is CancellationError {} catch {
+                                        failed = true; message = AureaText.t("home_community_unavailable")
+                                    }
+                                }
+                            }.frame(minHeight: 48).disabled(downloading != nil)
+                        }
+                    }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 20))
+                }
+            }.padding(20)
+        }.foregroundStyle(AureaColors.text).tint(AureaColors.accent)
+            .task(id: requestKey) {
+                loading = true; message = nil; failed = false
+                defer { loading = false }
+                do { entries = try await HomeCommunityAPI.list(offline: offline, query: query) }
+                catch is CancellationError {} catch {
+                    entries = []; failed = true; message = AureaText.t("home_community_unavailable")
+                }
+            }.onDisappear { downloadTask?.cancel() }
+    }
+}
+
+private struct HomeCommunityEntry: Identifiable, Codable, Sendable {
+    let id: String
+    let name: String
+    let author: String
+    init?(_ value: [String: Any]) {
+        guard let id = value["id"] as? String, UUID(uuidString: id) != nil,
+              let name = value["name"] as? String else { return nil }
+        self.id = id; self.name = name; self.author = value["author"] as? String ?? "Aurea"
+    }
+}
+
+private enum HomeCommunityAPI {
+    private static var root: URL { AureaPaths.documents.appendingPathComponent("caption-community", isDirectory: true) }
+    private static func request(_ path: String, post: Bool = false, token: String? = nil) async throws -> [String: Any] {
+        guard let url = URL(string: "https://aurea-ai-discovery.aureaapp.workers.dev/api/captions" + path) else { throw URLError(.badURL) }
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        if post { request.httpMethod = "POST"; request.httpBody = Data("{}".utf8); request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
+        // Enforce the bound while receiving, before a large response can be allocated.
+        let (stream, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        var data = Data()
+        for try await byte in stream {
+            guard data.count < 5 * 1024 * 1024 else { throw URLError(.dataLengthExceedsMaximum) }
+            data.append(byte)
         }
-        .background { HomeGlass(kind: .tab).allowsHitTesting(false) }
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw URLError(.cannotParseResponse) }
+        return value
+    }
+    static func list(offline: Bool, query: String) async throws -> [HomeCommunityEntry] {
+        if offline {
+            let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+            return files.filter { $0.pathExtension == "json" }.compactMap { url in
+                guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 132 * 1024,
+                      let bytes = try? Data(contentsOf: url), let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return nil }
+                return HomeCommunityEntry(value)
+            }.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }.sorted { $0.name < $1.name }
+        }
+        var components = URLComponents(); components.queryItems = [URLQueryItem(name: "sort", value: "recent"), URLQueryItem(name: "q", value: query)]
+        let result = try await request("/presets?" + (components.percentEncodedQuery ?? ""))
+        return (result["items"] as? [[String: Any]] ?? []).compactMap(HomeCommunityEntry.init)
+    }
+    static func download(_ entry: HomeCommunityEntry) async throws {
+        let session = try await request("/session", post: true)
+        guard let token = session["token"] as? String else { throw URLError(.userAuthenticationRequired) }
+        let received = try await request("/presets/\(entry.id)/download", post: true, token: token)
+        guard let preset = received["preset"] as? [String: Any], preset["schema"] as? Int == 1 else { throw URLError(.cannotParseResponse) }
+        let bytes = try JSONSerialization.data(withJSONObject: preset)
+        guard bytes.count <= 128 * 1024 else { throw URLError(.dataLengthExceedsMaximum) }
+        // Keep the full bundle and expose each native component in the existing
+        // editor library. No arbitrary URLs or external assets are imported.
+        var parts: [(URL, Data)] = []
+        for (key, kind) in [("caption", PanelPresetKind.caption), ("text", .text), ("effects", .effects), ("animation", .animation)] {
+            guard let source = preset[key] as? String, !source.isEmpty else { continue }
+            let data = Data(source.utf8)
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["aurea_preset"] as? Int == 1, object["kind"] as? String == key else { throw URLError(.cannotParseResponse) }
+            let file = kind.directory.appendingPathComponent(PanelPresetKind.fileName(entry.name + " · " + String(entry.id.prefix(8))))
+            parts.append((file, data))
+        }
+        guard parts.contains(where: { $0.0.deletingLastPathComponent() == PanelPresetKind.caption.directory }) else { throw URLError(.cannotParseResponse) }
+        try Task.checkCancellation()
+        for (file, data) in parts {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: file, options: .atomic)
+        }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let stored: [String: Any] = ["id": entry.id, "name": entry.name, "author": entry.author, "preset": preset]
+        try JSONSerialization.data(withJSONObject: stored).write(to: root.appendingPathComponent(entry.id + ".json"), options: .atomic)
     }
 }
 

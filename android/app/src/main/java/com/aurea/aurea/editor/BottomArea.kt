@@ -95,6 +95,7 @@ private data class DockLayer(
     val vector: Boolean,
     val hasAudio: Boolean,
     val muted: Boolean,
+    val text3D: Boolean,
 )
 
 /**
@@ -106,6 +107,7 @@ private enum class DockSection(val glyph: Char, @StringRes val label: Int, val p
     EditShape(ShellGlyph.SliderHorizontalBelowRectangle, R.string.sh_dock_edit_shape, EditorPanel.Shape),
     EditVector(CupertinoGlyph.PencilOutline, R.string.sh_dock_edit_vector, EditorPanel.Vector),
     EditText(CupertinoGlyph.Textformat, R.string.sh_dock_edit_text, EditorPanel.Text),
+    TextOptions(ShellGlyph.SliderHorizontalBelowRectangle, R.string.text_options, EditorPanel.Text),
     Particles(CupertinoGlyph.Sparkles, R.string.sh_dock_particles, EditorPanel.Particles),
     Audio(CupertinoGlyph.Speaker2, R.string.sh_add_tab_audio, EditorPanel.Audio),
     Move(CupertinoGlyph.Move, R.string.sh_dock_transform, EditorPanel.Transform),
@@ -136,7 +138,7 @@ private fun sectionsFor(l: DockLayer): List<DockSection> {
         } else {
             listOf(DockSection.ColorFill, DockSection.EditShape, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         }
-        LayerType.Text -> listOf(DockSection.EditText, DockSection.Captions, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
+        LayerType.Text -> listOf(DockSection.EditText, DockSection.TextOptions, DockSection.Captions, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         LayerType.Video -> buildList {
             add(DockSection.Move)
             if (l.hasAudio) add(DockSection.Audio)
@@ -149,10 +151,12 @@ private fun sectionsFor(l: DockLayer): List<DockSection> {
         }
         LayerType.Image -> listOf(DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         LayerType.Audio -> listOf(DockSection.Audio, DockSection.Captions, DockSection.Presets, DockSection.Effects)
-        LayerType.Model3D -> listOf(DockSection.Move, DockSection.Environment, DockSection.Blend, DockSection.Presets, DockSection.Effects)
+        LayerType.Model3D -> if (l.text3D) listOf(DockSection.EditText, DockSection.TextOptions, DockSection.Move, DockSection.Blend, DockSection.Presets, DockSection.Effects)
+            else listOf(DockSection.Move, DockSection.Environment, DockSection.Blend, DockSection.Presets, DockSection.Effects)
         LayerType.Particles -> listOf(DockSection.Particles, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         LayerType.Group -> listOf(DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
-        LayerType.Null, LayerType.Camera, LayerType.Light -> listOf(DockSection.Move, DockSection.Presets)
+        LayerType.Camera -> listOf(DockSection.Move, DockSection.Environment, DockSection.Presets)
+        LayerType.Null, LayerType.Light -> listOf(DockSection.Move, DockSection.Presets)
         LayerType.Adjustment -> emptyList()
     }
 }
@@ -181,6 +185,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                     vector = d != null && store.isVectorLayer,
                     hasAudio = d?.hasAudio == true,
                     muted = d?.audioMuted == true,
+                    text3D = store.text3d != null,
                 )
             }
         }
@@ -253,7 +258,10 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             ) {
                 rows.forEach { row ->
                     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { s -> DockTile(s, tileHeight) { openPanel(store, ui, panelFor(store, s)) } }
+                        row.forEach { s -> DockTile(s, tileHeight) {
+                            if (s == DockSection.EditText) store.openTextContentEditor()
+                            else openPanel(store, ui, panelFor(store, s))
+                        } }
                         // A coluna vazia guarda o lugar: sem ela a última ficha
                         // de uma fileira incompleta esticava.
                         repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
@@ -283,6 +291,7 @@ private inline fun timeEdit(store: EditorStore, l: DockLayer, action: () -> Unit
  * entre forma, vetor e texto.
  */
 private fun panelFor(store: EditorStore, s: DockSection): EditorPanel = when (s) {
+    DockSection.TextOptions -> if (store.text3d != null) EditorPanel.Element3D else EditorPanel.Text
     DockSection.EditShape -> if (store.isVectorLayer) EditorPanel.Vector else EditorPanel.ShapeEdit
     DockSection.ColorFill -> when (store.detail?.kind) {
         com.aurea.aurea.ui.theme.LayerType.Text.kind -> EditorPanel.Text

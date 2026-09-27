@@ -1350,20 +1350,21 @@ void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localT
     const f32 origin = asset.bounds.center().x;
     for (const auto& effect : layer.effects) {
         if (!effect.enabled || effect.type != effect_type_id(effect_keys::kText3DLayout)) continue;
-        static constexpr f32 defaults[] = {0, 0, 0, 0, 100, 0, 1, 256, 100};
-        static constexpr f32 minima[] = {-36000, -36000, -36000, -360, 10, -720, 1, 1, 0};
-        static constexpr f32 maxima[] = {36000, 36000, 36000, 360, 500, 720, 256, 256, 100};
-        f32 v[9];
-        const f64 floorTime = std::floor(localTime);
-        for (u32 i = 0; i < 9; ++i) {
+        static constexpr f32 defaults[] = {0, 0, 0, 0, 100, 0, 1, 256, 100, 0, 0, 1};
+        static constexpr f32 minima[] = {-36000, -36000, -36000, -360, 10, -720, 1, 1, 0, 0, 0, 0};
+        static constexpr f32 maxima[] = {36000, 36000, 36000, 360, 500, 720, 256, 256, 100, 30, 100, 9999};
+        f32 v[12];
+        auto evaluate = [&](u32 i, f64 time) {
+            const f64 floorTime = std::floor(time);
             f32 value = i < effect.params.size() ? effect.params[i].constant.as_float() : defaults[i];
             if (const Track* track = layer.tracks.find(TrackProperty::EffectParam, effect.id, param_track_key(i, 0))) {
                 const f32 a = track->value_or(FrameIndex{static_cast<i64>(floorTime)}, value);
                 const f32 b = track->value_or(FrameIndex{static_cast<i64>(floorTime) + 1}, value);
-                value = lerpf(a, b, static_cast<f32>(localTime - floorTime));
+                value = lerpf(a, b, static_cast<f32>(time - floorTime));
             }
-            v[i] = std::isfinite(value) ? std::clamp(value, minima[i], maxima[i]) : defaults[i];
-        }
+            return std::isfinite(value) ? std::clamp(value, minima[i], maxima[i]) : defaults[i];
+        };
+        for (u32 i = 0; i < 12; ++i) v[i] = evaluate(i, localTime);
         const f32 amount = v[8] * .01f;
         const f32 bend = v[3] * kDeg2Rad * amount;
         const f32 spacing = lerpf(1.f, v[4] * .01f, amount);
@@ -1380,10 +1381,16 @@ void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localT
                 target.x = origin + std::sin(phase * bend) * radius;
                 target.z += (std::cos(phase * bend) - 1.f) * radius;
             }
+            // Only authored rotation keys are delayed: no automatic animation.
+            const f64 letterTime = localTime - (i + 1 - static_cast<u32>(std::lround(v[6]))) * v[9];
+            u32 hash = (i + 1) * 747796405u + static_cast<u32>(v[11]) * 2891336453u;
+            hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
+            hash = (hash >> 22u) ^ hash;
+            const f32 variation = 1.f + (static_cast<f32>(hash & 65535u) / 32767.5f - 1.f) * v[10] * .01f;
             const Mat4 orient = Mat4::from_quat(Quat::from_euler_zyx(
-                (v[0] + v[5] * phase) * kDeg2Rad * amount,
-                v[1] * kDeg2Rad * amount + phase * bend,
-                v[2] * kDeg2Rad * amount));
+                (evaluate(0, letterTime) * variation + v[5] * phase) * kDeg2Rad * amount,
+                evaluate(1, letterTime) * variation * kDeg2Rad * amount + phase * bend,
+                evaluate(2, letterTime) * variation * kDeg2Rad * amount));
             nodeWorld[i] = Mat4::translation(target) * orient * Mat4::translation(-center) * nodeWorld[i];
         }
     }

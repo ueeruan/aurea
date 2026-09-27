@@ -335,6 +335,7 @@ struct ValueBox: View {
                 .padding(.horizontal, AureaDims.s1)
                 .frame(width: width, height: AureaDims.valueBoxH)
                 .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: AureaDims.valueBoxRadius))
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
                 .aureaTappable(shrink: 1, enabled: tappable) { onTap?() }
         }

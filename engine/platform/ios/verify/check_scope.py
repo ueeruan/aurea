@@ -27,7 +27,7 @@ APPLE_IMPORTS = {
     "SwiftUI", "PhotosUI", "Photos", "AVKit", "Foundation", "UIKit", "Metal", "MetalKit", "QuartzCore", "CoreGraphics", "CoreText",
     "CoreVideo", "CoreMedia", "CoreImage", "VideoToolbox", "AVFoundation", "AudioToolbox", "CoreAudio",
     "ImageIO", "UniformTypeIdentifiers", "simd", "Combine", "Dispatch", "os", "Swift",
-    "Accelerate", "CoreFoundation", "IOSurface", "AVFAudio", "os.log", "CryptoKit", "Security",
+    "Accelerate", "CoreFoundation", "IOSurface", "AVFAudio", "os.log", "CryptoKit", "Security", "Darwin",
 }
 
 problems = []

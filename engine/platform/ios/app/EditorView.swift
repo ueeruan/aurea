@@ -69,6 +69,10 @@ struct EditorView: View {
             }
         }
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
+        .sheet(item: $model.textContentRequest) { request in
+            TextContentEditor(request: request).environmentObject(model)
+                .presentationDetents([.large]).interactiveDismissDisabled()
+        }
         .sheet(item: $model.markerEditingFrame) { marker in
             MarkerEditorSheet(frame: marker.frame, color: marker.color, label: marker.label, isNew: marker.isNew)
                 .environmentObject(model)
@@ -101,7 +105,7 @@ struct EditorView: View {
             PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen && !model.rawPlayback)
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageOverlay().allowsHitTesting(false) } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageInteractionOverlay().allowsHitTesting(false) } }
-            if model.panel == .tracking && !model.cameraFeatures.isEmpty { CameraTrackingOverlay() }
+            if model.panel == .tracking && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
                 ShellStageBanner(label: AureaText.t("editor_camada_bloqueada"), button: AureaText.t("editor_desbloquear"), icon: CupertinoGlyph.LockFill) {
                     model.mutate { $0.setLayer(layer.id, locked: false) }; model.refreshModel(force: true)
@@ -563,13 +567,14 @@ private struct DockView: View {
     @EnvironmentObject private var model: AureaModel
 
     private enum Section: String {
-        case color, shape, vector, text, particles, audio, move, blend, environment, mask, tracking, captions, presets, effects
+        case color, shape, vector, editText, text, text3DOptions, particles, audio, move, blend, environment, mask, tracking, captions, presets, effects
         var label: String {
             switch self {
             case .color: return "sh_dock_color_fill"
             case .shape: return "sh_dock_edit_shape"
             case .vector: return "sh_dock_edit_vector"
-            case .text: return "sh_dock_edit_text"
+            case .editText: return "sh_dock_edit_text"
+            case .text, .text3DOptions: return "text_options"
             case .particles: return "sh_dock_particles"
             case .audio: return "sh_add_tab_audio"
             case .move: return "sh_dock_transform"
@@ -587,7 +592,8 @@ private struct DockView: View {
             case .color: return CupertinoGlyph.Paintbrush
             case .shape: return ShellGlyph.SliderHorizontalBelowRectangle
             case .vector, .mask: return CupertinoGlyph.PencilOutline
-            case .text: return CupertinoGlyph.Textformat
+            case .editText: return CupertinoGlyph.Textformat
+            case .text, .text3DOptions: return ShellGlyph.SliderHorizontalBelowRectangle
             case .particles, .effects: return CupertinoGlyph.Sparkles
             case .audio: return CupertinoGlyph.Speaker2
             case .move: return CupertinoGlyph.Move
@@ -603,7 +609,8 @@ private struct DockView: View {
             case .color: return .shape
             case .shape: return .shapeEdit
             case .vector: return .vector
-            case .text: return .text
+            case .editText, .text: return .text
+            case .text3DOptions: return .layer3D
             case .particles: return .particles
             case .audio: return .audio
             case .move: return .transform
@@ -624,14 +631,17 @@ private struct DockView: View {
         if layer.adjustment || layer.kind == 7 { return [.blend, .presets, .effects] }
         switch layer.kind {
         case 5: return model.isVectorLayer ? [.vector, .move, .blend, .mask, .presets, .effects] : [.color, .shape, .move, .blend, .mask, .presets, .effects]
-        case 4: return [.text, .captions, .move, .blend, .mask, .presets, .effects]
+        case 4: return [.editText, .text, .captions, .move, .blend, .mask, .presets, .effects]
         case 1:
             return [.move] + (hasAudio ? [.audio] : []) + [.mask, .blend, .tracking] + (hasAudio ? [.captions] : []) + [.presets, .effects]
         case 2, 12: return [.move, .blend, .mask, .presets, .effects]
         case 3: return [.audio, .captions, .presets, .effects]
-        case 10: return [.move, .environment, .blend, .presets, .effects]
+        case 10: return (model.engine.text3D(forLayer: layer.id) ?? [:]).isEmpty
+            ? [.move, .environment, .blend, .presets, .effects]
+            : [.editText, .text3DOptions, .move, .blend, .presets, .effects]
+        case 8: return [.move, .environment, .presets]
         case 11: return [.particles, .move, .blend, .mask, .presets, .effects]
-        case 6, 8, 9: return [.move, .presets]
+        case 6, 9: return [.move, .presets]
         default: return []
         }
     }
@@ -681,7 +691,10 @@ private struct DockView: View {
                     ScrollView {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
                             ForEach(sections, id: \.rawValue) { section in
-                                Button { model.openPanel(section.panel) } label: {
+                                Button {
+                                    if section == .editText { model.openTextContentEditor() }
+                                    else { model.openPanel(section.panel) }
+                                } label: {
                                     VStack(spacing: tileHeight < 72 ? 4 : 7) {
                                         if section == .move {
                                             MaterialGlyph("rounded.OpenWith", size: tileHeight < 72 ? 22 : 27, color: StageInk.dockTileContent)
@@ -748,16 +761,14 @@ private struct TextPanelView: View {
     private var selectedStyles: [[String: Any]] { fonts.filter { $0["family"] as? String == currentFont } }
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t(showingFonts ? "panel_fonte" : "panel_texto")) { dismissEditing(); model.panel = .none }
+            PanelHeader(title: AureaText.t(showingFonts ? "panel_fonte" : "text_options")) { dismissEditing(); model.panel = .none }
             if showingFonts { fontPanel }
             else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ZStack(alignment: .topLeading) {
                             if content.isEmpty { Text(AureaText.t("panel_digite_texto")).font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 12).padding(.vertical, 10).allowsHitTesting(false) }
-                            NativeTextInput(text: $content, selection: $selection, editing: $editing) {
-                                model.engine.setText(layerId, content: $0); model.refreshModel(force: true)
-                            }
+                            NativeTextInput(text: $content, selection: $selection, editing: $editing, editable: false) { _ in }
                         }.frame(minHeight: 56).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
                         if selection.length > 0 { spanTools.padding(.top, 6) }
                         Button { dismissEditing(); fonts = model.engine.availableFonts(); showingFonts = true } label: {
@@ -898,14 +909,73 @@ private enum NativeFontPreview {
     }
 }
 
+private struct TextContentEditor: View {
+    @EnvironmentObject private var model: AureaModel
+    let request: AureaModel.TextContentRequest
+    @State private var content: String
+    @State private var selection: NSRange
+    @State private var editing = false
+    @State private var failed = false
+    init(request: AureaModel.TextContentRequest) {
+        self.request = request
+        _content = State(initialValue: request.content)
+        let length = (request.content as NSString).length
+        _selection = State(initialValue: NSRange(location: request.selectAll ? 0 : length, length: request.selectAll ? length : 0))
+    }
+    private var valid: Bool { !request.is3D || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(AureaText.t("sh_dock_edit_text")).font(.aurea(size: 18, weight: .semibold))
+                Spacer()
+                Button(AureaText.t("common_cancel")) { model.textContentRequest = nil }
+                    .frame(minHeight: 44).accessibilityIdentifier("text.content.cancel")
+                Button(AureaText.t("editor_concluir")) {
+                    failed = !model.commitTextContent(request, content: content)
+                }.frame(minHeight: 44).disabled(!valid).accessibilityIdentifier("text.content.done")
+            }
+            NativeTextInput(text: $content, selection: $selection, editing: $editing,
+                            autoFocus: true, selectAllOnFocus: request.selectAll, scrollable: true) { _ in failed = false }
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityIdentifier("text.content.input")
+            if !valid { Text(AureaText.t("text_content_3d_required")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
+            if failed { Text(AureaText.t("text_content_save_failed")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
+        }.padding(18).foregroundStyle(AureaColors.text).tint(AureaColors.accent)
+            .background(AureaColors.editorPanel.ignoresSafeArea())
+    }
+}
+
+private final class FocusedContentTextView: UITextView {
+    var wantsInitialFocus = false
+    var selectAllInitially = false
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, wantsInitialFocus else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window != nil, self.wantsInitialFocus else { return }
+            if self.becomeFirstResponder() {
+                self.wantsInitialFocus = false
+                let count = (self.text as NSString).length
+                self.selectedRange = NSRange(location: self.selectAllInitially ? 0 : count, length: self.selectAllInitially ? count : 0)
+            }
+        }
+    }
+}
+
 private struct NativeTextInput: UIViewRepresentable {
     @Binding var text: String
     @Binding var selection: NSRange
     @Binding var editing: Bool
+    var editable = true
+    var autoFocus = false
+    var selectAllOnFocus = false
+    var scrollable = false
     let onChange: (String) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView(); view.delegate = context.coordinator; view.isScrollEnabled = false
+        let view = FocusedContentTextView(); view.delegate = context.coordinator; view.isScrollEnabled = scrollable
+        view.isEditable = editable; view.wantsInitialFocus = autoFocus; view.selectAllInitially = selectAllOnFocus
+        view.text = text; view.selectedRange = selection
         view.backgroundColor = .clear; view.font = .systemFont(ofSize: 15); view.textColor = UIColor(AureaColors.text); view.tintColor = UIColor(AureaColors.accent)
         view.textContainerInset = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12); view.textContainer.lineFragmentPadding = 0
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -921,6 +991,7 @@ private struct NativeTextInput: UIViewRepresentable {
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width else { return nil }
+        if scrollable { return CGSize(width: width, height: max(96, proposal.height ?? 240)) }
         let result = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         return CGSize(width: width, height: max(56, result.height))
     }
@@ -1026,10 +1097,9 @@ private struct AddLayerSheet: View {
                     case 2:
                         card("editor_musica_ou_som", glyph: CupertinoGlyph.MusicNote, accent: true) { files(.audio) }
                         card("sh_add_video_sound", glyph: CupertinoGlyph.Film) { photos(.audioFromVideo) }
-                        card("sh_add_detect_beats", glyph: ShellGlyph.Metronome) { close(); model.detectBeats() }
                         card("sh_add_marker_at_playhead", glyph: CupertinoGlyph.Bookmark) { close(); model.toggleMarkerAt(model.status.playhead) }
                     case 3:
-                        card("sh_add_tab_text", glyph: CupertinoGlyph.Textformat, accent: true) { model.addText(); model.openPanel(.text) }
+                        card("sh_add_tab_text", glyph: CupertinoGlyph.Textformat, accent: true) { model.addText(); close() }
                         card("sh_add_speech_captions", glyph: CupertinoGlyph.CaptionsBubble) {
                             model.openPanel(.captions)
                         }
@@ -1194,8 +1264,8 @@ private struct ShellMediaPicker: UIViewControllerRepresentable {
                         Button(AureaText.t("scene_light_point")) { model.addLight(1) }
                         Button(AureaText.t("sh_add_model_3d") + "…") { model.showAddLayer = true }
                     } label: { pill(CupertinoGlyph.Plus, String(AureaText.t("panel_adicionar").drop(while: { $0 == "+" || $0 == " " }))) }
-                    if let layer = model.selectedLayer, layer.kind == 10 || (layer.kind == 4 && layer.threeD) {
-                        Button { model.panel = .layer3D; materials = true } label: { pill(CupertinoGlyph.CubeFill, AureaText.t("scene_material")) }.buttonStyle(.plain)
+                    if let layer = model.selectedLayer, layer.kind == 8 || layer.kind == 10 || (layer.kind == 4 && layer.threeD) {
+                        Button { model.panel = .layer3D; materials = true } label: { pill(CupertinoGlyph.CubeFill, AureaText.t(layer.kind == 8 ? "environment_texture" : "scene_material")) }.buttonStyle(.plain)
                     }
                     if model.selectedLayer?.kind == 9 {
                         Button { lights = true } label: { pill(CupertinoGlyph.Lightbulb, AureaText.t("pn_t3d_lighting")) }.buttonStyle(.plain)
@@ -1339,12 +1409,20 @@ private struct FloatingAddLayer: View {
             let ox = (geometry.size.width - cw * fit) / 2, oy = (geometry.size.height - ch * fit) / 2
             Canvas { context, _ in
                 let points = model.cameraFeatures
-                for i in stride(from: 0, to: points.count - points.count % 3, by: 3) {
+                let ring = model.cameraTarget
+                if ring.count >= 6 {
+                    var target = Path(); target.move(to: CGPoint(x: CGFloat(ring[0])*fit+ox, y: CGFloat(ring[1])*fit+oy))
+                    for i in stride(from: 2, to: ring.count-1, by: 2) { target.addLine(to: CGPoint(x: CGFloat(ring[i])*fit+ox, y: CGFloat(ring[i+1])*fit+oy)) }
+                    target.closeSubpath(); context.fill(target, with: .color(.green.opacity(0.15))); context.stroke(target, with: .color(.green), lineWidth: 2)
+                }
+                for i in stride(from: 0, to: points.count - points.count % 6, by: 6) {
+                    if model.cameraGoodPointsOnly && points[i+2] < 0.4 { continue }
                     let point = CGPoint(x: CGFloat(points[i]), y: CGFloat(points[i + 1]))
                     let x = point.x * fit + ox, y = point.y * fit + oy
-                    var path = Path(); path.move(to: CGPoint(x: x-4, y: y)); path.addLine(to: CGPoint(x: x+4, y: y))
-                    path.move(to: CGPoint(x: x, y: y-4)); path.addLine(to: CGPoint(x: x, y: y+4))
-                    let selected = model.cameraSelection?.contains(point) == true
+                    let arm = CGFloat(model.cameraPointSize)
+                    var path = Path(); path.move(to: CGPoint(x: x-arm, y: y)); path.addLine(to: CGPoint(x: x+arm, y: y))
+                    path.move(to: CGPoint(x: x, y: y-arm)); path.addLine(to: CGPoint(x: x, y: y+arm))
+                    let selected = points[i+4] > 0.5 || model.cameraSelection?.contains(point) == true
                     context.stroke(path, with: .color(selected ? .green : points[i + 2] > 0.5 ? .yellow : .red), lineWidth: 2)
                 }
                 if let r = model.cameraSelection {
@@ -1355,12 +1433,30 @@ private struct FloatingAddLayer: View {
                 .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                     guard fit > 0 else { return }
                     model.engine.pause()
+                    if hypot(value.translation.width, value.translation.height) < 8 { return }
                     let a = CGPoint(x: (value.startLocation.x - ox) / fit, y: (value.startLocation.y - oy) / fit)
                     let b = CGPoint(x: (value.location.x - ox) / fit, y: (value.location.y - oy) / fit)
-                    let slack: CGFloat = 8 / fit
+                    if model.cameraTargetMode { model.moveCameraTarget(b); return }
+                    let slack: CGFloat = 0
                     model.cameraSelection = CGRect(x: min(a.x,b.x)-slack, y: min(a.y,b.y)-slack, width: abs(a.x-b.x)+2*slack, height: abs(a.y-b.y)+2*slack)
                     model.cameraSelectionFrame = model.status.playhead
+                }.onEnded { value in
+                    guard fit > 0 else { return }
+                    if hypot(value.translation.width, value.translation.height) < 8 {
+                        model.selectCameraPoint(CGPoint(x: (value.location.x-ox)/fit, y: (value.location.y-oy)/fit), radius: 24/fit)
+                    } else if !model.cameraTargetMode { model.finishCameraSelectionBox() }
                 })
+                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in model.cameraContextMenu = true })
+                .confirmationDialog("3D Camera Tracker", isPresented: $model.cameraContextMenu) {
+                    Button("Create Camera") { model.createTrackedObject(0) }
+                    if model.cameraSelectedCount > 0 {
+                        Button("Create Null") { model.createTrackedObject(1) }
+                        Button("Create Shape") { model.createTrackedObject(2) }
+                        Button("Create Text") { model.createTrackedObject(3) }
+                        Button("Create Solid") { model.createTrackedObject(4) }
+                    }
+                    Button("Close", role: .cancel) { }
+                }
         }.accessibilityIdentifier("aurea.tracking.points")
     }
 }

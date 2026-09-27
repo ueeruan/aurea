@@ -64,6 +64,11 @@ struct TrackingPanel: View {
     @EnvironmentObject private var model: AureaModel
     @State private var mode: UInt32 = 1
     @State private var status: [String: Any] = [:]
+    @State private var sourceLayer: Int64? = nil
+    @State private var advanced = false
+    @State private var cameraMotion: UInt32 = 0
+    @State private var knownFov: Float = 0
+    @State private var distanceText = "100"
     private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
     private var state: Int { (status["state"] as? NSNumber)?.intValue ?? 0 }
     var body: some View {
@@ -71,17 +76,14 @@ struct TrackingPanel: View {
             PanelHeader(title: AureaText.t("panel_rastreio"), onBack: { model.panel = .none })
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    action("panel_rastrear_ponto", "panel_cria_ponto_guia_segue_objeto_ligue") { model.panel = .none; model.beginPointPick(stabilize: false) }
-                    Spacer().frame(height: 10)
-                    action("panel_estabilizar_pelo_ponto", "panel_move_video_ponto_ficar_parado_tela") { model.panel = .none; model.beginPointPick(stabilize: true) }
-                    Spacer().frame(height: 12)
-                    note(AureaText.t("panel_toque_num_detalhe_contraste_canto_luz"))
+                    MotionTrackingSection()
                     Spacer().frame(height: 18)
                     cameraSection
                 }.padding(.init(top: 12, leading: 18, bottom: 24, trailing: 18))
             }
         }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
-            .onAppear(perform: reload).onReceive(timer) { _ in reload() }
+            .onAppear { restore(); reload() }.onReceive(timer) { _ in reload() }
+            .onChange(of: model.primarySelection) { _ in restore(); reload() }
             .onDisappear { model.cameraFeatures = []; model.cameraSelection = nil }
     }
     @ViewBuilder private var cameraSection: some View {
@@ -115,12 +117,43 @@ struct TrackingPanel: View {
             Text(kind + (flag("cached") ? AureaText.t("panel_analise_guardada") : ""))
                 .font(.aurea(size: 13, weight: .semibold))
             Spacer().frame(height: 4)
-            note("\(Int(number("solved"))) de \(Int(number("frames"))) quadros · precisão \(Int(number("confidence") * 100))% · abertura da lente \(Int(number("fovDeg").rounded()))°")
+            let quality = number("solved") != number("frames") || number("error") > 2 ? "Poor" : number("error") > 1 ? "Fair" : number("error") > 0.5 ? "Good" : "Excellent"
+            note("Solve quality: \(quality) · \(model.cameraSelectedCount) selected")
+            Toggle("Multi-select", isOn: $model.cameraMultiSelect).font(.aurea(size: 13)).tint(AureaColors.accent)
+            Toggle("Good points", isOn: $model.cameraGoodPointsOnly).font(.aurea(size: 13)).tint(AureaColors.accent)
+            Toggle("Drag surface target", isOn: $model.cameraTargetMode).font(.aurea(size: 13)).tint(AureaColors.accent)
+            HStack { Text("Point size").font(.aurea(size: 12)); Slider(value: $model.cameraPointSize, in: 2...8).tint(AureaColors.accent) }
             Spacer().frame(height: 8)
-            action("panel_criar_camera", "panel_cria_camera_3d_animada_ponto_guia") {
-                let error = model.applySelectedCameraTracking()
-                model.toast = error.isEmpty ? AureaText.t("msg_camera_rastreada_criada_ligue_modelos_3d") : error
-                model.refreshModel(force: true); reload()
+            action("Create Camera", "Reuse the solved camera when it already exists") { model.createTrackedObject(0); reload() }
+            if model.cameraSelectedCount > 0 {
+                Button("Set Origin") { model.calibrateCamera(0) }.padding(.vertical, 12)
+                if model.cameraSelectedCount >= 3 { Button("Set Ground Plane + Origin") { model.calibrateCamera(1) }.padding(.vertical, 12) }
+                if model.cameraSelectedCount == 2 {
+                    TextField("Distance (scene units)", text: $distanceText).keyboardType(.decimalPad).textFieldStyle(.roundedBorder)
+                    Button("Set Scale") { if let value = Float(distanceText.replacingOccurrences(of: ",", with: ".")) { model.calibrateCamera(2, distance: value) } }.padding(.vertical, 12)
+                }
+                ForEach(model.layers.filter { $0.kind == 10 }) { layer in
+                    Button("Place 3D: \(layer.name)") { model.placeTrackedModel(layer.id) }.padding(.vertical, 12)
+                }
+            }
+            if !flag("rotationOnly") && model.cameraSelectedCount > 0 {
+                ForEach(Array(["Create Null / Anchor", "Create Camera + Shape", "Create Camera + Text", "Create Camera + Solid"].enumerated()), id: \.offset) { index, title in
+                    Spacer().frame(height: 8)
+                    action(title, "Place on the selected 3D points") { model.createTrackedObject(UInt32(index + 1)); reload() }
+                }
+            } else if !flag("rotationOnly") {
+                note("Tap a point or drag a selection box on the video.")
+            }
+            Button(advanced ? "Hide advanced" : "Advanced") { advanced.toggle() }.padding(.vertical, 12)
+            if advanced { note("\(Int(number("solved")))/\(Int(number("frames"))) frames · RMS \(String(format: "%.2f", number("error"))) px · FOV \(Int(number("fovDeg").rounded()))°") }
+            if advanced {
+                Picker("Camera", selection: $cameraMotion) { Text("Auto").tag(UInt32(0)); Text("Free camera").tag(UInt32(1)); Text("Tripod").tag(UInt32(2)) }
+                Button(knownFov == 0 ? "FOV: Auto" : "FOV: \(Int(knownFov))°") { knownFov = knownFov == 0 ? Float(number("fovDeg")).clamped(to: 10...120) : 0 }
+                if knownFov > 0 { Slider(value: $knownFov, in: 10...120).tint(AureaColors.accent) }
+                action("Re-solve", "Reuse observations with these camera constraints") { _ = model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov); reload() }
+                if model.cameraSelectedCount > 0 {
+                    action("Delete selected points + Re-solve", "Remove unwanted motion from this analysis") { _ = model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov); model.cameraSelectedCount = 0; reload() }
+                }
             }
             Spacer().frame(height: 8)
             action("panel_analisar_novo", "panel_modo_escolhido_acima", run: analyze)
@@ -138,11 +171,17 @@ struct TrackingPanel: View {
         Text(text).font(.aurea(size: 12)).lineSpacing(2).foregroundStyle(AureaColors.muted)
     }
     private func reload() {
+        guard sourceLayer == model.primarySelection else { status = [:]; model.cameraFeatures = []; return }
         status = model.engine.cameraTrackingStatus()
-        model.cameraFeatures = state == 2 ? model.engine.cameraFeatures(atFrame: model.status.playhead).map(\.floatValue) : []
+        if state == 2 { model.refreshCameraTrackPoints() } else { model.cameraFeatures = []; model.cameraTarget = [] }
+    }
+    private func restore() {
+        guard let id = model.primarySelection else { sourceLayer = nil; return }
+        if model.engine.restoreCameraTrack(forLayer: id) { sourceLayer = id; model.cameraSelectedCount = 0 }
     }
     private func analyze() {
         guard let id = model.primarySelection else { return }
+        sourceLayer = id
         model.engine.setCameraTrack(mode, forLayer: id); reload()
     }
     private func action(_ title: String, _ subtitle: String, run: @escaping () -> Void) -> some View {
@@ -153,6 +192,70 @@ struct TrackingPanel: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 12)
                 .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(AureaPressStyle())
+    }
+}
+
+@MainActor
+private struct MotionTrackingSection: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var lock = false
+    @State private var smooth: Float = 0.5
+    @State private var zoom: Float = 1.15
+    @State private var crop: UInt32 = 1
+    private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+    private func n(_ key: String) -> Double { (model.motionStatus[key] as? NSNumber)?.doubleValue ?? 0 }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Motion Tracking").font(.aurea(size: 14, weight: .bold))
+            if n("state") != 1 && model.pointPick == nil {
+                ForEach(Array(["Point", "Two Points", "Planar", "Corner Pin", "Stabilizer"].enumerated()), id: \.offset) { i, name in
+                    button(name) { model.beginMotionPick(UInt32(i)) }
+                }
+                Toggle("Backward", isOn: $model.motionBackward)
+                Picker("Motion", selection: $model.motionModel) {
+                    Text("Auto").tag(UInt32(0)); Text("Position").tag(UInt32(1))
+                    Text("Position / Rotation / Scale").tag(UInt32(2)); Text("Perspective").tag(UInt32(3))
+                }
+                Text("Feature radius: \(Int(model.motionFeature)) px")
+                Slider(value: $model.motionFeature, in: 6...48)
+                Text("Search radius: \(Int(model.motionSearch)) px")
+                Slider(value: $model.motionSearch, in: 16...192)
+                button("Restore saved analysis") { model.restoreMotion() }
+            }
+            if model.pointPick != nil {
+                Text("Pontos selecionados: \(model.motionPicked). Toque no preview.")
+                button("Cancel selection") { model.cancelMotionPick() }
+            }
+            if n("state") == 1 {
+                ProgressView(value: n("progress"))
+                Text("Analisando… \(Int(n("progress") * 100))%")
+                button("Cancel") { model.engine.cancelMotionTrack() }
+            }
+            if let message = model.motionStatus["message"] as? String, !message.isEmpty { Text(message).foregroundStyle(AureaColors.muted) }
+            if n("state") == 2 {
+                Text("\(Int(n("validFrames")))/\(Int(n("frames"))) frames · confidence \(Int(n("confidence") * 100))% · RMS \(String(format: "%.2f", n("error"))) px")
+                if n("lost") == 0 {
+                    if n("tool") == 4 {
+                        Toggle("Lock camera", isOn: $lock)
+                        Text("Smoothness: \(String(format: "%.1f", smooth)) s")
+                        Slider(value: $smooth, in: 0.1...2)
+                        Text("Maximum zoom: \(Int((zoom - 1) * 100))%")
+                        Slider(value: $zoom, in: 1...1.5)
+                        Picker("Crop", selection: $crop) { Text("None").tag(UInt32(0)); Text("Static").tag(UInt32(1)); Text("Dynamic").tag(UInt32(2)) }
+                        button("Apply stabilization") { model.applyMotion(3, lock: lock, smooth: smooth, maxScale: zoom, crop: crop) }
+                    } else {
+                        button("Create Null") { model.applyMotion(0) }
+                        button("Apply to selected layer") { model.applyMotion(1) }
+                        if n("tool") >= 2 { button("Apply Corner Pin") { model.applyMotion(2) } }
+                    }
+                }
+            }
+        }.font(.aurea(size: 12)).tint(AureaColors.accent)
+            .onAppear { model.motionStatus = model.engine.motionTrackStatus() }
+            .onReceive(timer) { _ in model.motionStatus = model.engine.motionTrackStatus() }
+    }
+    private func button(_ title: String, run: @escaping () -> Void) -> some View {
+        Button(action: run) { Text(title).font(.aurea(size: 14, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(AureaPressStyle())
     }
 }
 

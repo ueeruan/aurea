@@ -36,11 +36,11 @@ internal object TimeAxis {
      * — o motor também deixa o cursor lá. Prender a vista ao último quadro
      * travava a timeline inteira no fim do projeto (arrastar e ampliar paravam
      * junto com o cursor), que era o "trava em 09 segundo" do relato.
-     * O teto fica em `durationFrames` para não rolar para o vazio sem fim; a
-     * duração ainda é o que delimita o conteúdo, e é ela que a régua desenha.
+     * A duração cresce ao mover/aparar camadas, por isso não limita a vista.
+     * Só o limite numérico do protocolo de frames limita a navegação.
      */
-    fun clampView(view: Double, durationFrames: Int): Double =
-        view.coerceIn(0.0, max(0, durationFrames).toDouble())
+    fun clampView(view: Double, @Suppress("UNUSED_PARAMETER") durationFrames: Int): Double =
+        if (view.isFinite()) view.coerceIn(0.0, (Int.MAX_VALUE - 1).toDouble()) else 0.0
 }
 
 /** Zoom em dp por segundo. */
@@ -173,9 +173,10 @@ internal object Snap {
      */
     fun span(targets: IntArray, start: Int, length: Int, extra: Int, tol: Double, out: IntArray) {
         val a = nearest(targets, start.toDouble(), extra, tol)
-        val b = nearest(targets, (start + length).toDouble(), extra, tol)
-        val da = if (a == NONE) Double.MAX_VALUE else abs(a - start).toDouble()
-        val db = if (b == NONE) Double.MAX_VALUE else abs(b - (start + length)).toDouble()
+        val end = start.toLong() + length
+        val b = nearest(targets, end.toDouble(), extra, tol)
+        val da = if (a == NONE) Double.MAX_VALUE else abs(a.toLong() - start).toDouble()
+        val db = if (b == NONE) Double.MAX_VALUE else abs(b.toLong() - end).toDouble()
         when {
             a != NONE && da <= db -> { out[0] = a; out[1] = a }
             b != NONE -> { out[0] = b - length; out[1] = b }

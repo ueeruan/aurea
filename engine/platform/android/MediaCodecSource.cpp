@@ -5,6 +5,7 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/media/DecodedPlaneBounds.hpp"
 
 #include <android/hardware_buffer.h>
 #include <media/NdkImage.h>
@@ -795,6 +796,10 @@ private:
                 b = static_cast<i32>(info_.codedHeight ? std::min(info_.codedHeight, f->height) : f->height);
             }
         }
+        if (!f->width || !f->height || l >= static_cast<i32>(f->width) || t >= static_cast<i32>(f->height)) {
+            f->release();
+            return Status{Errc::UnsupportedFormat, "crop fora do buffer decodificado"};
+        }
         f->cropLeft = static_cast<u32>(std::max(0, l));
         f->cropTop = static_cast<u32>(std::max(0, t));
         f->visibleWidth = std::min<u32>(static_cast<u32>(std::max(1, r - l)), f->width - f->cropLeft);
@@ -813,9 +818,13 @@ private:
         int32_t pixel[3]{}, row[3]{};
         for (int i = 0; i < 3; ++i) {
             if (AImage_getPlaneData(image, i, &data[i], &len[i]) != AMEDIA_OK || !data[i]) return false;
-            AImage_getPlanePixelStride(image, i, &pixel[i]);
-            AImage_getPlaneRowStride(image, i, &row[i]);
+            if (AImage_getPlanePixelStride(image, i, &pixel[i]) != AMEDIA_OK ||
+                AImage_getPlaneRowStride(image, i, &row[i]) != AMEDIA_OK) return false;
+            const u32 w = i == 0 ? f.width : (f.width + 1) / 2;
+            const u32 h = i == 0 ? f.height : (f.height + 1) / 2;
+            if (!media::decoded_plane_fits(w, h, row[i], pixel[i], len[i])) return false;
         }
+        if (pixel[0] != 1) return false;
         f.planes[0] = data[0];
         f.strides[0] = static_cast<u32>(row[0]);
         if (pixel[1] == 1 && pixel[2] == 1) {
@@ -828,14 +837,16 @@ private:
             return true;
         }
         if (pixel[1] == 2 && pixel[2] == 2 && row[1] == row[2]) {
-            if (data[2] == data[1] + 1) {
+            if (data[2] == data[1] + 1 &&
+                media::decoded_plane_fits(((f.width + 1) / 2) * 2, (f.height + 1) / 2, row[1], 1, len[1])) {
                 f.format = PixelFormat::NV12;
                 f.planes[1] = data[1];
                 f.strides[1] = static_cast<u32>(row[1]);
                 f.planeCount = 2;
                 return true;
             }
-            if (data[1] == data[2] + 1) {
+            if (data[1] == data[2] + 1 &&
+                media::decoded_plane_fits(((f.width + 1) / 2) * 2, (f.height + 1) / 2, row[2], 1, len[2])) {
                 f.format = PixelFormat::NV21;
                 f.planes[1] = data[2];
                 f.strides[1] = static_cast<u32>(row[2]);

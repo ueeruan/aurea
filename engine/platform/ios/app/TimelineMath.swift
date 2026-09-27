@@ -54,11 +54,11 @@ enum TimeAxis {
     /**
      * A vista não vai para antes do zero, mas PODE passar do fim da composição
      * — o motor também deixa o cursor lá. Prender a vista ao último quadro
-     * travava a timeline inteira no fim do projeto. O teto fica em
-     * `durationFrames` para não rolar para o vazio sem fim.
+     * travava a timeline inteira no fim do projeto. A duração cresce durante
+     * a edição; só o limite numérico de frames limita a navegação.
      */
     static func clampView(_ view: Double, durationFrames: Int32) -> Double {
-        min(max(view, 0), Double(max(0, durationFrames)))
+        view.isFinite ? min(max(view, 0), Double(Int32.max - 1)) : 0
     }
 }
 

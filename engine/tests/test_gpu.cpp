@@ -4358,7 +4358,7 @@ AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
 
 AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
     AUREA_REQUIRE_GPU();
-    for (u32 preset : {10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u}) {
+    for (u32 preset : {10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u, 18u}) {
         Scene3DRig rig(640, 360);
         auto id = rig.e.add_particles(preset);
         AUREA_CHECK(id.ok());
@@ -4385,6 +4385,10 @@ AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
         AUREA_CHECK(max_diff(before, rig.capture(640)) <= 1);
         std::printf("    Particle World %u: coverage %.6f\n", preset, coverage(before));
         (void)write_png("build/particle-world-" + std::to_string(preset) + ".png", before);
+        if (preset == 18) {
+            seek(120);
+            AUREA_CHECK(write_png("build/prompt03/purple-crystals.png", rig.capture(640)));
+        }
         std::remove(path.c_str());
     }
 }
@@ -7927,6 +7931,246 @@ AUREA_TEST(GpuText3DMaterial, CinematicMetalRendersWithLetterRotationsAndStableF
         AUREA_CHECK(write_png(std::string(dir) + "/cinematic-metal.png", textured));
         AUREA_CHECK(write_png(std::string(dir) + "/cinematic-metal-smooth.png", smooth));
         AUREA_CHECK(write_png(std::string(dir) + "/cinematic-metal-lighting.png", cinematic));
+    }
+}
+#endif
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(CameraShakeGpu, SameTimestampAt24_30_60FpsAndMixPreservesAlpha) {
+    AUREA_REQUIRE_GPU();
+    std::vector<FloatImage> frames;
+    for (const int fps : {24,30,60}) {
+        Scene s(96,64,fps); s.comp->set_transparent_background(true);
+        auto px = uniform_image(96,64,0,0,0,128);
+        for (u32 y=0;y<64;++y) for (u32 x=0;x<96;++x) {
+            const usize i=(y*96+x)*4; px.rgba[i]=((x/7+y/9)%2) ? 200:20; px.rgba[i+1]=u8(x*2);
+        }
+        const auto id=s.image(px,48,32); auto& effect=s.add_effect(id,effect_keys::kShake);
+        effect.params[5].constant=ParamValue::scalar(8);
+        effect.params[9].constant=ParamValue::scalar(10);
+        const auto full=s.render(FrameIndex{fps}); frames.push_back(full);
+        effect.params[7].constant=ParamValue::scalar(0); const auto original=s.render(FrameIndex{fps});
+        effect.params[7].constant=ParamValue::scalar(50); const auto half=s.render(FrameIndex{fps});
+        for (usize i=0;i<full.px.size();++i) AUREA_CHECK_NEAR(half.px[i],(full.px[i]+original.px[i])*.5f,.004f);
+        effect.params[7].constant=ParamValue::scalar(100); effect.params[11].constant=ParamValue::scalar(100);
+        const auto blurred=s.render(FrameIndex{fps});
+        for (usize i=3;i<blurred.px.size();i+=4) AUREA_CHECK_NEAR(blurred.px[i],128.f/255.f,.004f);
+    }
+    for (usize n=1;n<frames.size();++n) for (usize i=0;i<frames[0].px.size();++i)
+        AUREA_CHECK_NEAR(frames[0].px[i],frames[n].px[i],.001f);
+}
+
+AUREA_TEST(LightSweepGpu, BeamHasPixelWidthKeepsAlphaAndFollowsCenterKeys) {
+    AUREA_REQUIRE_GPU();
+    Scene s(160,80); s.comp->set_transparent_background(true);
+    const auto id=s.image(uniform_image(160,80,32,32,32,128),80,40);
+    auto& e=s.add_effect(id,effect_keys::kLightSweep);
+    e.params[1].constant=ParamValue::scalar(40); e.params[4].constant=ParamValue::scalar(0);
+    e.params[5].constant=ParamValue::scalar(0); e.params[11].constant=ParamValue::scalar(0);
+    const auto center=s.render();
+    AUREA_CHECK(center.v(80,40).x > center.v(60,40).x+.1f);
+    AUREA_CHECK_NEAR(center.v(55,40).x,center.v(10,40).x,.005f);
+    for (usize i=3;i<center.px.size();i+=4) AUREA_CHECK_NEAR(center.px[i],128.f/255.f,.003f);
+    s.comp->layer(id)->tracks.get_or_create(TrackProperty::EffectParam,e.id,param_track_key(9,0)).set(FrameIndex{30},.25f);
+    const auto moved=s.render(FrameIndex{30});
+    AUREA_CHECK(moved.v(40,40).x > moved.v(80,40).x+.1f);
+    e.params[12].constant=ParamValue::scalar(2); const auto cutout=s.render(FrameIndex{30});
+    AUREA_CHECK(cutout.v(40,40).w > .1f); AUREA_CHECK_NEAR(cutout.v(100,40).w,0,.001f);
+}
+AUREA_TEST(CornerPinGpu, MovesContentAndKeyframesWithoutMovingLayer) {
+    AUREA_REQUIRE_GPU();
+    Scene s(180,100);s.comp->set_transparent_background(true);
+    const auto id=s.image(quadrants(128,72),64,36);
+    auto& e=s.add_effect(id,effect_keys::kCornerPin);
+    for(u32 i=0;i<4;++i)e.params[i*2].constant.v[0]+=25;
+    const auto moved=s.render();
+    AUREA_CHECK(moved.v(5,18).w<.001f);
+    AUREA_CHECK(near4(moved.v(45,18),{1,0,0,1},.01f));
+    AUREA_CHECK(near4(moved.v(130,18),{0,1,0,1},.01f));
+    AUREA_CHECK(near4(moved.v(45,54),{0,0,1,1},.01f));
+    AUREA_CHECK(near4(moved.v(130,54),{1,1,1,1},.01f));
+    auto* l=s.comp->layer(id);AUREA_CHECK_NEAR(l->transform.position.x,64,.001);
+    for(u32 i=0;i<4;++i)l->tracks.get_or_create(TrackProperty::EffectParam,e.id,param_track_key(i*2,0)).set(FrameIndex{30},e.params[i*2].constant.v[0]+12.5f);
+    const auto animated=s.render(FrameIndex{30});AUREA_CHECK(animated.v(40,18).w<.001f);AUREA_CHECK(near4(animated.v(60,18),{1,0,0,1},.01f));
+    (void)write_png("build/prompt04/corner-pin-gpu.png",animated.encoded());
+}
+#endif
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(EnvironmentTexture, PanoramaFollowsCameraRotationNotTranslationAndSurvivesReopen) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320,180);
+    auto pano=uniform_image(256,128,0,0,0,255);
+    for(u32 y=0;y<128;++y) for(u32 x=0;x<256;++x) {
+        const usize i=(y*256+x)*4;
+        pano.rgba[i]=(x<85?220:20); pano.rgba[i+1]=(x>=85&&x<171?210:15); pano.rgba[i+2]=(x>=171?220:20);
+    }
+    const std::string png="build/prompt03/environment-panorama.png";
+    AUREA_CHECK(write_png(png,Image8{256,128,pano.rgba}));
+    AUREA_CHECK(rig.e.import_hdri(png.c_str()).ok());
+    AUREA_CHECK(rig.e.set_environment_background(true));
+    const auto base=rig.capture(320);
+    AUREA_CHECK(coverage(base)>.99f);
+    const u64 cid=add_test_camera(rig.e,Vec3{160,90,-216},kDefaultFov180);
+    auto* cam=current_comp(rig.e)->layer(LayerId::unpack(cid));
+    const auto camera=rig.capture(320);
+    cam->transform.position.x+=2000; cam->transform.position.z-=1000;
+    AUREA_CHECK(max_diff(camera,rig.capture(320))<=1); // infinite panorama has no translation parallax
+    cam->transform.rotation.y=90;
+    const auto rotated=rig.capture(320);
+    AUREA_CHECK(max_diff(camera,rotated)>80);
+    cam->transform.rotation.y=0;
+    AUREA_CHECK(rig.e.set_environment_params(1,90));
+    const auto spun=rig.capture(320);
+    AUREA_CHECK(max_diff(camera,spun)>80);
+    const std::string save="build/prompt03/environment-roundtrip.aurea";
+    AUREA_CHECK(rig.e.save_project(save.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(save.c_str()).ok());
+    AUREA_CHECK(rig.e.environment_background());
+    AUREA_CHECK(max_diff(spun,rig.capture(320))<=1);
+    AUREA_CHECK(rig.e.set_environment_background(false));
+    AUREA_CHECK(coverage(rig.capture(320))<.001f);
+    Command undo; undo.type=CommandType::Undo;
+    AUREA_CHECK(rig.e.apply_command(undo).ok());
+    AUREA_CHECK(rig.e.environment_background());
+    AUREA_CHECK(max_diff(spun,rig.capture(320))<=1);
+    AUREA_CHECK(write_png("build/prompt03/environment-render.png",spun));
+    const auto overlay=rig.e.add_shape(0); AUREA_CHECK(overlay.ok());
+    auto* foreground=current_comp(rig.e)->layer(LayerId::unpack(*overlay));
+    foreground->shape.bounds={0,0,48,48};foreground->shape.fillColor={0,0,1,1};
+    foreground->transform.anchor={24,24,0};foreground->transform.position={160,90,0};
+    const auto composed=rig.capture(320);
+    AUREA_CHECK(composed.at(160,90)[2]>240);
+    AUREA_CHECK(composed.at(160,90)[0]<10); // panorama never covers foreground layers
+}
+
+AUREA_TEST(GlitchifyGpu, ModulesAreDeterministicInSecondsAndTransitionClearsAlpha) {
+    AUREA_REQUIRE_GPU();
+    std::vector<FloatImage> rendered;
+    for(int fps:{24,30,60}) {
+        Scene s(128,96,fps); s.comp->set_transparent_background(true);
+        auto px=uniform_image(128,96,0,0,0,255);
+        for(u32 y=0;y<96;++y)for(u32 x=0;x<128;++x) {
+            const usize i=(y*128+x)*4;px.rgba[i]=u8(x*2);px.rgba[i+1]=u8(y*2);px.rgba[i+2]=u8((x+y)%2*255);
+        }
+        const auto id=s.image(px,64,48); auto& fx=s.add_effect(id,effect_keys::kGlitchify);
+        fx.params[20].constant=ParamValue::scalar(15);fx.params[21].constant=ParamValue::scalar(20);
+        fx.params[23].constant=ParamValue::scalar(12);fx.params[24].constant=ParamValue::scalar(30);
+        fx.params[31].constant=ParamValue::scalar(40);fx.params[34].constant=ParamValue::scalar(50);
+        const auto frame=s.render(FrameIndex{fps});rendered.push_back(frame);
+        (void)s.render(FrameIndex{fps*2});const auto reverse=s.render(FrameIndex{fps});
+        for(usize i=0;i<frame.px.size();++i) AUREA_CHECK_NEAR(frame.px[i],reverse.px[i],.001f);
+        fx.params[29].constant=ParamValue::scalar(100);
+        const auto invisible=s.render(FrameIndex{fps});
+        for(usize i=3;i<invisible.px.size();i+=4) AUREA_CHECK_NEAR(invisible.px[i],0,.001f);
+    }
+    for(usize n=1;n<rendered.size();++n)for(usize i=0;i<rendered[0].px.size();++i)
+        AUREA_CHECK_NEAR(rendered[0].px[i],rendered[n].px[i],.001f);
+}
+
+AUREA_TEST(MediaLabGpu, JpegCompressionQualityDamageAndAlpha) {
+    AUREA_REQUIRE_GPU();
+    Scene s(67,49);s.comp->set_transparent_background(true);
+    auto pixels=reference_image(67,49);
+    for(u32 y=0;y<49;++y)for(u32 x=0;x<67;++x)if(x<4||y<3)pixels.rgba[(y*67+x)*4+3]=0;
+    const auto id=s.image(pixels,33.5f,24.5f);const auto original=s.render();
+    auto& fx=s.add_effect(id,effect_keys::kJpegGlitch);
+    fx.params[0].constant=ParamValue::scalar(100);fx.params[1].constant=ParamValue::scalar(0);fx.params[11].constant=ParamValue::scalar(0);
+    const auto high=s.render();
+    fx.params[0].constant=ParamValue::scalar(5);const auto low=s.render();
+    double highError=0,lowError=0,alphaError=0;
+    for(usize i=0;i<original.px.size();++i){AUREA_CHECK(std::isfinite(low.px[i]));if(i%4==3)alphaError+=std::abs(high.px[i]-original.px[i]);else{highError+=std::abs(high.px[i]-original.px[i]);lowError+=std::abs(low.px[i]-original.px[i]);}}
+    std::printf(" JPEG error high=%.5f low=%.5f ",highError/original.px.size(),lowError/original.px.size());
+    AUREA_CHECK(highError/original.px.size()<.015);AUREA_CHECK(lowError>highError*2);AUREA_CHECK(alphaError<.01);
+    fx.params[1].constant=ParamValue::scalar(80);fx.params[2].constant=ParamValue::scalar(80);
+    const auto first=s.render(FrameIndex{30});(void)s.render(FrameIndex{60});const auto repeated=s.render(FrameIndex{30});
+    double damage=0;for(usize i=0;i<first.px.size();++i){AUREA_CHECK_NEAR(first.px[i],repeated.px[i],.001f);damage+=std::abs(first.px[i]-low.px[i]);}
+    AUREA_CHECK(damage>10);AUREA_CHECK(write_png("build/effects-packages/jpeg-glitch.png",first.encoded()));
+}
+
+AUREA_TEST(MediaLabGpu, AnalogSignalRecoversColorAndFreezesReproducibly) {
+    AUREA_REQUIRE_GPU();Scene s(96,64);s.comp->set_transparent_background(true);
+    const auto id=s.image(uniform_image(96,64,180,90,40),48,32);const auto original=s.render();
+    auto& fx=s.add_effect(id,effect_keys::kAnalogSignal);
+    for(u32 index:{0u,2u,7u,8u,9u,10u,11u,14u})fx.params[index].constant=ParamValue::scalar(0);
+    const auto decoded=s.render();AUREA_CHECK(near4(decoded.v(48,32),original.v(48,32),.04f));
+    fx.params[0].constant=ParamValue::scalar(80);fx.params[2].constant=ParamValue::scalar(30);fx.params[15].constant=ParamValue::boolean(true);
+    const auto first=s.render(FrameIndex{7}),second=s.render(FrameIndex{89});
+    double difference=0;for(usize i=0;i<first.px.size();++i){AUREA_CHECK(std::isfinite(first.px[i]));AUREA_CHECK_NEAR(first.px[i],second.px[i],.001f);difference+=std::abs(first.px[i]-decoded.px[i]);}
+    AUREA_CHECK(difference>10);AUREA_CHECK(write_png("build/effects-packages/signal.png",first.encoded()));
+}
+
+AUREA_TEST(MediaLabGpu, Glow2SpreadsLightAndToneMapsWithoutClippingAlpha) {
+    AUREA_REQUIRE_GPU();Scene s(128,96);s.comp->set_transparent_background(true);
+    const auto id=s.solid(12,12,{1,1,1,1},64,48);auto& fx=s.add_effect(id,effect_keys::kDeepGlow2);
+    fx.params[0].constant=ParamValue::scalar(35);fx.params[2].constant=ParamValue::scalar(0);fx.params[1].constant=ParamValue::scalar(3);
+    const auto glow=s.render();AUREA_CHECK(glow.v(64,48).x>1);AUREA_CHECK(glow.v(77,48).w>0);AUREA_CHECK(glow.v(1,1).w<.001f);
+    fx.params[11].constant=ParamValue::scalar(2);const auto mapped=s.render();
+    for(usize i=0;i<mapped.px.size();i+=4){AUREA_CHECK(std::isfinite(mapped.px[i]));AUREA_CHECK(mapped.px[i]>=0&&mapped.px[i]<=mapped.px[i+3]+.002f);}
+    fx.params[13].constant=ParamValue::scalar(1);const auto only=s.render();AUREA_CHECK(only.v(64,48).w<=1);
+    AUREA_CHECK(write_png("build/effects-packages/deep-glow-2.png",mapped.encoded()));
+}
+
+AUREA_TEST(MediaLabGpu, ShadowStudioHasDropLongAndInnerOcclusion) {
+    AUREA_REQUIRE_GPU();Scene s(128,96);s.comp->set_transparent_background(true);
+    const auto id=s.solid(24,24,{1,1,1,1},40,40);auto& fx=s.add_effect(id,effect_keys::kShadowStudio3);
+    fx.params[0].constant=ParamValue::scalar(0);fx.params[1].constant=ParamValue::scalar(30);fx.params[2].constant=ParamValue::scalar(0);fx.params[3].constant=ParamValue::scalar(0);
+    auto drop=s.render();AUREA_CHECK(drop.v(70,40).w>.6f);AUREA_CHECK(drop.v(70,40).x<.001f);AUREA_CHECK(drop.v(40,40).x>.99f);AUREA_CHECK(drop.v(10,40).w<.001f);
+    fx.params[0].constant=ParamValue::scalar(1);fx.params[6].constant=ParamValue::color(0,0,0,1);
+    auto extended=s.render();AUREA_CHECK(extended.v(56,40).w>.6f);
+    fx.params[8].constant=ParamValue::boolean(true);auto inner=s.render();AUREA_CHECK(inner.v(56,40).w<.001f);AUREA_CHECK(inner.v(29,40).x<.5f);AUREA_CHECK(inner.v(29,40).w>.99f);
+    fx.params[8].constant=ParamValue::boolean(false);fx.params[3].constant=ParamValue::scalar(8);fx.params[2].constant=ParamValue::scalar(35);
+    AUREA_CHECK(write_png("build/effects-packages/shadow-studio-3.png",s.render().encoded()));
+}
+
+AUREA_TEST(MediaLabGpu, TraceryDetectsSeparateColorRegionsAndFollowsMovement) {
+    AUREA_REQUIRE_GPU();Scene s(128,96);s.comp->set_transparent_background(true);
+    auto source=uniform_image(128,96,0,0,0);
+    for(u32 y=20;y<36;++y)for(u32 x=12;x<28;++x){auto i=(y*128+x)*4;source.rgba[i]=255;}
+    for(u32 y=52;y<72;++y)for(u32 x=86;x<110;++x){auto i=(y*128+x)*4;source.rgba[i]=255;}
+    // A green distractor must not be tracked by the red key.
+    for(u32 y=10;y<25;++y)for(u32 x=65;x<80;++x)source.rgba[(y*128+x)*4+1]=255;
+    const auto id=s.image(source,64,48);auto& fx=s.add_effect(id,effect_keys::kTracery);
+    fx.params[0].constant=ParamValue::color(1,0,0,1);fx.params[5].constant=ParamValue::color(0,1,1,1);fx.params[7].constant=ParamValue::scalar(0);fx.params[9].constant=ParamValue::scalar(100);
+    fx.params[12].constant=ParamValue::scalar(0);fx.params[13].constant=ParamValue::boolean(true);fx.params[15].constant=ParamValue::scalar(2);fx.params[17].constant=ParamValue::scalar(0);
+    const auto boxes=s.render();
+    AUREA_CHECK(boxes.v(12,25).w>.4f);AUREA_CHECK(boxes.v(86,60).w>.4f);AUREA_CHECK(boxes.v(65,15).w<.001f);AUREA_CHECK(boxes.v(52,44).w<.001f);
+    fx.params[7].constant=ParamValue::scalar(4);const auto linked=s.render();AUREA_CHECK(linked.v(59,45).w>.1f);
+    AUREA_CHECK(write_png("build/effects-packages/tracery.png",linked.encoded()));
+    s.comp->layer(id)->transform.position.x+=10;const auto moved=s.render();AUREA_CHECK(moved.v(22,25).w>.4f);AUREA_CHECK(moved.v(12,25).w<.001f);
+}
+
+AUREA_TEST(MediaLabGpu, Benchmark720pAndNonSequentialFrames) {
+    if(!std::getenv("AUREA_MEDIA_LAB_BENCH")){std::printf(" (skipped: AUREA_MEDIA_LAB_BENCH) ");return;}
+    AUREA_REQUIRE_GPU();
+    const char* keys[]={effect_keys::kJpegGlitch,effect_keys::kAnalogSignal,effect_keys::kDeepGlow2,effect_keys::kShadowStudio3,effect_keys::kTracery};
+    std::ofstream report("build/effects-packages/performance.csv");report<<"effect,width,height,mean_ms,max_ms\n";
+    for(const char* key:keys){
+        Scene s(1280,720);s.comp->set_transparent_background(true);const auto id=s.image(reference_image(1280,720),640,360);(void)s.add_effect(id,key);
+        (void)s.render();double sum=0,maximum=0;const i64 frames[]={0,15,3,45,9,15};
+        for(i64 frame:frames){const auto start=std::chrono::steady_clock::now();const auto image=s.render(FrameIndex{frame});const double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();sum+=elapsed;maximum=std::max(maximum,elapsed);
+            bool finite=true;for(auto value:image.px)finite=finite&&std::isfinite(value);AUREA_CHECK(finite);
+        }
+        std::printf("\n    %s: mean %.2f ms, max %.2f ms (host + readback) ",key,sum/6,maximum);report<<key<<",1280,720,"<<sum/6<<","<<maximum<<"\n";
+    }
+}
+
+AUREA_TEST(ScrubScene, ImagePlanesRemainVisibleAcrossReverseSeeksWithCamera) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320,180);
+    auto px=uniform_image(120,80,235,35,170,255);
+    auto id=rig.e.import_image(px.rgba.data(),120,80,"scrub-image"); AUREA_CHECK(id.ok());
+    auto* l=current_comp(rig.e)->layer(LayerId::unpack(*id));l->threeD=true;
+    l->tracks.get_or_create(TrackProperty::RotationY).set(FrameIndex{0},-25);
+    l->tracks.get_or_create(TrackProperty::RotationY).set(FrameIndex{100},25);
+    (void)add_test_camera(rig.e,Vec3{160,90,-216},kDefaultFov180);
+    std::vector<Image8> expected;
+    for(i64 t:{0,20,40,60,80,100}) {seek_frame(rig.e,t);expected.push_back(rig.capture(320));AUREA_CHECK(coverage(expected.back())>.05f);}
+    Command begin;begin.type=CommandType::PlaybackScrubBegin;AUREA_CHECK(rig.e.apply_command(begin).ok());
+    for(int n:{5,0,4,1,3,2,0,5}) {
+        Command scrub;scrub.type=CommandType::PlaybackScrub;scrub.seek.time=tick_at(FrameIndex{n*20},30);
+        AUREA_CHECK(rig.e.apply_command(scrub).ok());
+        AUREA_CHECK(max_diff(expected[n],rig.capture(320))<=1);
     }
 }
 #endif

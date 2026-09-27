@@ -404,7 +404,19 @@ EnvironmentMaps build_environment_from_equirect(const f32* rgb, u32 width, u32 h
             }
         }
     }
-    return build_from_chain(build_chain(std::move(base)));
+    EnvironmentMaps maps = build_from_chain(build_chain(std::move(base)));
+    const u32 bgSize = std::max(baseSize, std::min(width / 4, 512u));
+    if (bgSize > baseSize) {
+        FCube background; background.init(bgSize);
+        for (u32 f=0; f<6; ++f) for (u32 y=0; y<bgSize; ++y) for (u32 x=0; x<bgSize; ++x) {
+            const Vec3 d = cube_direction(f,x,y,bgSize);
+            const Vec3 c = fetch(.5f + std::atan2(d.x,-d.z)/(2*kPi), std::acos(std::clamp(d.y,-1.f,1.f))/kPi);
+            background.at(f,x,y) = Vec3{std::clamp(c.x,0.f,60000.f),std::clamp(c.y,0.f,60000.f),std::clamp(c.z,0.f,60000.f)};
+        }
+        maps.background.size = bgSize;
+        to_half_cube(background, maps.background.levels[0]);
+    }
+    return maps;
 }
 
 } // namespace aurea::scene3d

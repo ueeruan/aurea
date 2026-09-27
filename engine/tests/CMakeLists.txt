@@ -34,6 +34,7 @@ add_executable(aurea_tests
     test_beats.cpp
     test_edit.cpp
     test_tracking.cpp
+    test_motion_geometry.cpp
     test_text.cpp
     test_presets.cpp
     test_alight_motion.cpp

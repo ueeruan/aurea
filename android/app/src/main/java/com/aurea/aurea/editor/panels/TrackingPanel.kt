@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +22,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
@@ -41,22 +45,65 @@ import com.aurea.aurea.ui.theme.tocavel
 internal fun TrackingPanel(env: PanelEnv) {
     val store = env.store
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
-        Action(stringResource(R.string.panel_rastrear_ponto), stringResource(R.string.panel_cria_ponto_guia_segue_objeto_ligue)) {
-            env.onClose()
-            store.beginPointPick(false)
-        }
-        Spacer(Modifier.height(10.dp))
-        Action(stringResource(R.string.panel_estabilizar_pelo_ponto), stringResource(R.string.panel_move_video_ponto_ficar_parado_tela)) {
-            env.onClose()
-            store.beginPointPick(true)
-        }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            stringResource(R.string.panel_toque_num_detalhe_contraste_canto_luz),
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
-        )
+        MotionTrackSection(env)
         Spacer(Modifier.height(18.dp))
         CameraTrackSection(env)
+    }
+}
+
+@Composable
+private fun MotionTrackSection(env: PanelEnv) {
+    val store = env.store
+    var lock by remember { mutableStateOf(false) }
+    var smooth by remember { mutableFloatStateOf(.5f) }
+    var zoom by remember { mutableFloatStateOf(1.15f) }
+    var crop by remember { mutableIntStateOf(1) }
+    LaunchedEffect(store) { while (true) { store.refreshMotionStatus(); delay(400) } }
+    val s = store.motionStatus
+    Text("Motion Tracking", style = AureaType.Base.merge(TextStyle(fontWeight = FontWeight.W700)))
+    if (s[0].toInt() != 1 && store.pointPick == null) {
+        listOf("Point", "Two Points", "Planar", "Corner Pin", "Stabilizer").forEachIndexed { i, name ->
+            Spacer(Modifier.height(6.dp))
+            Action(name, if (i == 4) "Movimento global com vários pontos" else "Escolha os pontos no preview, no frame atual") { store.beginMotionPick(i) }
+        }
+        androidx.compose.material3.TextButton(onClick = { store.motionBackward = !store.motionBackward }) { Text(if (store.motionBackward) "Direction: Backward" else "Direction: Forward") }
+        androidx.compose.material3.TextButton(onClick = { store.motionModel = (store.motionModel + 1) % 4 }) { Text("Motion: " + listOf("Auto", "Position", "Position / Rotation / Scale", "Perspective")[store.motionModel]) }
+        Text("Feature radius: ${store.motionFeature.toInt()} px")
+        androidx.compose.material3.Slider(value = store.motionFeature, onValueChange = { store.motionFeature = it }, valueRange = 6f..48f)
+        Text("Search radius: ${store.motionSearch.toInt()} px")
+        androidx.compose.material3.Slider(value = store.motionSearch, onValueChange = { store.motionSearch = it }, valueRange = 16f..192f)
+        androidx.compose.material3.TextButton(onClick = store::restoreMotion) { Text("Restore saved analysis") }
+    }
+    if (store.pointPick != null) {
+        Text("Pontos selecionados: ${store.motionPicked}. Toque no preview.")
+        androidx.compose.material3.TextButton(onClick = store::cancelMotionPick) { Text("Cancel selection") }
+    }
+    if (s[0].toInt() == 1) {
+        Text("Analisando… ${(s[1] * 100).toInt()}%")
+        androidx.compose.material3.TextButton(onClick = store::cancelMotion) { Text("Cancel") }
+    }
+    if (store.motionMessage.isNotEmpty()) Text(store.motionMessage, color = AureaColors.Muted, fontSize = 12.sp)
+    if (s[0].toInt() == 2) {
+        Text("${s[3].toInt()}/${s[2].toInt()} frames · confidence ${(s[7] * 100).toInt()}% · RMS ${"%.2f".format(s[8])} px", fontSize = 12.sp)
+        if (s[5] == 0f) {
+            if (s[4].toInt() == 4) {
+                androidx.compose.material3.TextButton(onClick = { lock = !lock }) { Text(if (lock) "Lock camera" else "Smooth motion") }
+                Text("Smoothness: ${"%.1f".format(smooth)} s")
+                androidx.compose.material3.Slider(value = smooth, onValueChange = { smooth = it }, valueRange = .1f..2f)
+                Text("Maximum zoom: ${((zoom - 1) * 100).toInt()}%")
+                androidx.compose.material3.Slider(value = zoom, onValueChange = { zoom = it }, valueRange = 1f..1.5f)
+                androidx.compose.material3.TextButton(onClick = { crop = (crop + 1) % 3 }) { Text("Crop: " + listOf("None", "Static", "Dynamic")[crop]) }
+                Action("Apply stabilization", "Um passo de desfazer; preserva os transforms do vídeo") { store.applyMotion(3, lock, smooth, zoom, crop) }
+            } else {
+                Action("Create Null", "Vincule uma camada ao nulo para seguir o movimento") { store.applyMotion(0) }
+                Spacer(Modifier.height(6.dp))
+                Action("Apply to selected layer", "Selecione uma camada 2D sem pai") { store.applyMotion(1) }
+                if (s[4].toInt() >= 2) {
+                    Spacer(Modifier.height(6.dp))
+                    Action("Apply Corner Pin", "Selecione a imagem ou vídeo que deve ocupar a superfície") { store.applyMotion(2) }
+                }
+            }
+        }
     }
 }
 
@@ -70,6 +117,10 @@ private fun CameraTrackSection(env: PanelEnv) {
     val store = env.store
     val st by remember(store) { derivedStateOf { store.cameraTrack } }
     var mode by remember { mutableIntStateOf(1) }
+    var advanced by remember { mutableStateOf(false) }
+    var cameraMotion by remember { mutableIntStateOf(0) }
+    var knownFov by remember { mutableFloatStateOf(0f) }
+    var distanceText by remember { mutableStateOf("100") }
     Text(stringResource(R.string.panel_camera_3d), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
     Spacer(Modifier.height(6.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -99,12 +150,51 @@ private fun CameraTrackSection(env: PanelEnv) {
             val kind = if (s.rotationOnly) stringResource(R.string.panel_camera_so_gira_lugar_sem_profundidade) else stringResource(R.string.panel_movimento_camera_encontrado)
             Text(kind + if (s.cached) stringResource(R.string.panel_analise_guardada) else "", style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600)))
             Spacer(Modifier.height(4.dp))
+            val quality = when { s.solved != s.frames || s.errorPx > 2f -> "Poor"; s.errorPx > 1f -> "Fair"; s.errorPx > 0.5f -> "Good"; else -> "Excellent" }
             Text(
-                "${s.solved} de ${s.frames} quadros · precisão ${(s.confidence * 100).toInt()}% · abertura da lente ${kotlin.math.round(s.fovDeg).toInt()}°",
+                "Solve quality: $quality · ${store.cameraSelectedCount} selected",
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
             Spacer(Modifier.height(8.dp))
-            Action(stringResource(R.string.panel_criar_camera), stringResource(R.string.panel_cria_camera_3d_animada_ponto_guia)) { store.applyCameraTrack() }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilterChip(selected = store.cameraMultiSelect, onClick = { store.cameraMultiSelect = !store.cameraMultiSelect }, label = { Text("Multi-select") })
+                androidx.compose.material3.FilterChip(selected = store.cameraGoodPointsOnly, onClick = { store.cameraGoodPointsOnly = !store.cameraGoodPointsOnly }, label = { Text("Good points") })
+            }
+            androidx.compose.material3.TextButton(onClick = { store.cameraTargetMode = !store.cameraTargetMode }) { Text(if (store.cameraTargetMode) "Drag: Surface target" else "Drag: Selection box") }
+            Text("Point size", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp)))
+            androidx.compose.material3.Slider(value = store.cameraPointSize, onValueChange = { store.cameraPointSize = it }, valueRange = 2f..8f)
+            Action("Create Camera", "Reuse the solved camera when it already exists") { store.createCameraTrackObject(0) }
+            if (store.cameraSelectedCount > 0) {
+                androidx.compose.material3.TextButton(onClick = { store.calibrateCamera(0) }) { Text("Set Origin") }
+                if (store.cameraSelectedCount >= 3) androidx.compose.material3.TextButton(onClick = { store.calibrateCamera(1) }) { Text("Set Ground Plane + Origin") }
+                if (store.cameraSelectedCount == 2) {
+                    androidx.compose.material3.OutlinedTextField(value = distanceText, onValueChange = { distanceText = it }, label = { Text("Distance (scene units)") }, singleLine = true)
+                    androidx.compose.material3.TextButton(onClick = { distanceText.replace(',', '.').toFloatOrNull()?.let { store.calibrateCamera(2, it) } }) { Text("Set Scale") }
+                }
+                store.layers.filter { it.kind == 10 }.forEach { layer ->
+                    androidx.compose.material3.TextButton(onClick = { store.placeTrackedModel(layer.id) }) { Text("Place 3D: ${layer.name}") }
+                }
+            }
+            if (!s.rotationOnly && store.cameraSelectedCount > 0) {
+                listOf(1 to "Create Null / Anchor", 2 to "Create Camera + Shape", 3 to "Create Camera + Text", 4 to "Create Camera + Solid").forEach { (kind, title) ->
+                    Spacer(Modifier.height(8.dp))
+                    Action(title, "Place on the selected 3D points") { store.createCameraTrackObject(kind) }
+                }
+            } else if (!s.rotationOnly) {
+                Text("Tap a point or drag a selection box on the video.", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+            }
+            androidx.compose.material3.TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide advanced" else "Advanced") }
+            if (advanced) Text("${s.solved}/${s.frames} frames · ${s.points}/${s.tracks} inliers · RMS ${"%.2f".format(s.errorPx)} px · FOV ${"%.1f".format(s.fovDeg)}°", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+            if (advanced) {
+                androidx.compose.material3.TextButton(onClick = { cameraMotion = (cameraMotion + 1) % 3 }) { Text("Camera: " + listOf("Auto", "Free camera", "Tripod")[cameraMotion]) }
+                androidx.compose.material3.TextButton(onClick = { knownFov = if (knownFov == 0f) s.fovDeg.coerceIn(10f,120f) else 0f }) { Text(if (knownFov == 0f) "FOV: Auto" else "FOV: ${knownFov.toInt()}°") }
+                if (knownFov > 0f) androidx.compose.material3.Slider(value = knownFov, onValueChange = { knownFov = it }, valueRange = 10f..120f)
+                Action("Re-solve", "Reuse observations with these camera constraints") { store.refineCamera(false, cameraMotion, knownFov) }
+                if (store.cameraSelectedCount > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Action("Delete selected points + Re-solve", "Remove unwanted motion from this analysis") { store.refineCamera(true, cameraMotion, knownFov) }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Action(stringResource(R.string.panel_analisar_novo), stringResource(R.string.panel_modo_escolhido_acima)) { store.startCameraTrack(mode) }
         }

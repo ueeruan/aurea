@@ -80,6 +80,9 @@ public:
         p.add_int("first", "First Letter", 1, 1, 256);
         p.add_int("last", "Last Letter", 256, 1, 256);
         p.add_float("amount", "Amount", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("letter_delay", "Delay per Letter", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
+        p.add_float("rotation_variation", "Rotation Variation", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_int("seed", "Variation Seed", 1, 0, 9999);
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };

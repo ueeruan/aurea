@@ -20,6 +20,33 @@
 using namespace aurea;
 using namespace aurea::scene3d;
 
+AUREA_TEST(Text3DLayout, DelayedLetterXKeysKeepPivotsAndFinishWithoutAutomaticMotion) {
+    const auto font = text::default_font(); AUREA_CHECK(font != nullptr); if (!font) return;
+    Text3DSpec spec; spec.content = "BRAIAN"; spec.separateGlyphs = true;
+    auto result = build_text3d(*font, spec); AUREA_CHECK(result.ok()); if (!result.ok()) return;
+    EffectRegistry registry; register_builtin_effects(registry);
+    EffectInstance e; e.id = 1; e.type = effect_type_id(effect_keys::kText3DLayout);
+    initialize_instance(e, *registry.params(e.type));
+    e.params[9].constant = ParamValue::scalar(2.f);
+    Layer layer; layer.effects.push_back(e);
+    auto& keys = layer.tracks.get_or_create(TrackProperty::EffectParam, 1, param_track_key(0, 0));
+    keys.set(FrameIndex{0}, -90); keys.set(FrameIndex{20}, 0);
+    const auto& asset = *result.asset;
+    auto pose = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 10, pose);
+    AUREA_CHECK_EQ(pose.size(), usize{6});
+    for (u32 i = 0; i < pose.size(); ++i) {
+        const auto center = asset.meshes[i].bounds.center();
+        AUREA_CHECK((pose[i].transform_point(center) - center).length() < 1e-4f);
+        if (i > 0) AUREA_CHECK(pose[i].col[1].y < pose[i-1].col[1].y);
+    }
+    auto end = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 60, end);
+    auto later = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 160, later);
+    for (u32 i = 0; i < end.size(); ++i) {
+        AUREA_CHECK_NEAR(end[i].col[1].y, 1.f, 1e-5f);
+        AUREA_CHECK_NEAR(end[i].col[1].y, later[i].col[1].y, 1e-5f);
+    }
+}
+
 AUREA_TEST(Text3D, FontAndLetterAnimationSurviveRecipeRoundTrip) {
     Text3DSpec spec;
     spec.content = "A;t=B\nC";

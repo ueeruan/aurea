@@ -56,7 +56,7 @@ Mat4 clip_from_px(f32 w, f32 h) noexcept {
 /// Clip ← mundo e os eixos da câmera no mundo (billboard): a MESMA projeção
 /// que a cena usa (Z reverso, proporção do alvo).
 void camera_clip(const scene3d::SceneCamera& cam, u32 w, u32 h, Mat4& clip, Vec4& right, Vec4& down) noexcept {
-    clip = scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(std::max(1u, w)) / static_cast<f32>(std::max(1u, h)), cam.nearZ)
+    clip = cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(std::max(1u, w)) / static_cast<f32>(std::max(1u, h)), cam.nearZ)
          * cam.view;
     // Linhas 0 e 1 da vista = eixos X e Y (para baixo) da câmera no mundo.
     right = Vec4{cam.view.col[0].x, cam.view.col[1].x, cam.view.col[2].x, 0};

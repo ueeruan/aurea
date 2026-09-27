@@ -99,7 +99,7 @@ struct ParticlesPanel: View {
         dim(AureaText.t("world_resistance"), PPP.drag, 0.02, 0, 10, "", decimals: 2)
         group(AureaText.t("particular_group_particle"))
         choice(AureaText.t("particular_shape"), PPP.particleType,
-               ["particular_shape_circle", "particular_shape_square", "particular_shape_streak", "particular_shape_soft"])
+               ["particular_shape_circle", "particular_shape_square", "particular_shape_streak", "particular_shape_soft", "world_purple_crystals"])
         dim(AureaText.t("panel_tamanho_inicial"), PPP.startSize, 0.25, 0.1, 120, " px", decimals: 1)
         dim(AureaText.t("panel_tamanho_final"), PPP.endSize, 0.25, 0, 120, " px", decimals: 1)
         percent(AureaText.t("panel_opacidade"), PPP.startOpacity)
@@ -193,7 +193,7 @@ struct ParticlesPanel: View {
         }
     }
 
-    private let presetKeys = ["world_explosive", "world_jet", "world_vortex", "world_box_lights", "world_embers", "world_snow", "world_bokeh", "world_fountain"]
+    private let presetKeys = ["world_explosive", "world_jet", "world_vortex", "world_box_lights", "world_embers", "world_snow", "world_bokeh", "world_fountain", "world_purple_crystals"]
 
     private func group(_ title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -210,8 +210,9 @@ struct ParticlesPanel: View {
                 // the shared, dimmed property-picker appearance.
                 HStack(spacing: 5) {
                     ForEach(Array(options.enumerated()), id: \.offset) { index, key in
-                        let on = index == Int(value(param).rounded())
-                        Button { set(param, Float(index)) } label: {
+                        let option = param == PPP.particleType && index == 4 ? 6 : index
+                        let on = option == Int(value(param).rounded())
+                        Button { set(param, Float(option)) } label: {
                             Text(AureaText.t(key))
                                 .font(.aurea(size: 11.5))
                                 .foregroundStyle(on ? AureaColors.onAccent : AureaColors.text)

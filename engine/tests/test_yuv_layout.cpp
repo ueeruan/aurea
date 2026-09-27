@@ -14,6 +14,7 @@
 #include "TestFramework.hpp"
 
 #include "aurea/media/YuvLayout.hpp"
+#include "aurea/media/DecodedPlaneBounds.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,26 @@
 
 using namespace aurea;
 using namespace aurea::media;
+
+AUREA_TEST(DecodedPlaneBounds, LastRowPaddingIsOptionalButEverySampleMustFit) {
+    // 1080-wide planes on a 1088 stride; no mapped padding on the last row.
+    const int yLength = 1088 * 1919 + 1080;
+    AUREA_CHECK(decoded_plane_fits(1080, 1920, 1088, 1, yLength));
+    AUREA_CHECK(!decoded_plane_fits(1080, 1920, 1088, 1, yLength - 1));
+    // The first interleaved plane may omit the other component's last byte.
+    const int uvLength = 1088 * 959 + 1079;
+    AUREA_CHECK(decoded_plane_fits(540, 960, 1088, 2, uvLength));
+    AUREA_CHECK(!decoded_plane_fits(1080, 960, 1088, 1, uvLength));
+    AUREA_CHECK(decoded_plane_fits(1080, 960, 1088, 1, uvLength + 1));
+    AUREA_CHECK(!decoded_plane_fits(540, 960, 1088, 2, uvLength - 1));
+    AUREA_CHECK(!decoded_plane_fits(1080, 1920, 1000, 1, yLength));
+    AUREA_CHECK(!decoded_plane_fits(1080, 1920, -1, 1, yLength));
+    AUREA_CHECK(!decoded_plane_fits(1080, 1920, 1088, 0, yLength));
+    AUREA_CHECK(!decoded_plane_fits(0, 1920, 1088, 1, yLength));
+    AUREA_CHECK(!decoded_plane_fits(1080, 0, 1088, 1, yLength));
+    AUREA_CHECK(!decoded_plane_fits(0xffffffffu, 0xffffffffu, 0x7fffffff, 0x7fffffff, 0x7fffffff));
+    AUREA_CHECK(decoded_plane_fits(1, 1, 128, 1, 1));
+}
 
 namespace {
 

@@ -7,12 +7,11 @@
 //  todos declaram a margem que leem para o grafo recortar a região sem cortar
 //  o que eles precisam.
 //
-//  Shake é o caso especial: ele não escreve shader nenhum, ele REUSA a
-//  reamostragem afim do Transformar com uma matriz sorteada por quadro. O
-//  sorteio vem de uma hash de (semente, quadro) — o mesmo tremor no preview e
-//  no export, e o mesmo tremor ao reabrir o projeto.
+//  Shake usa uma trajetória contínua em segundos e reamostragem com bordas
+//  configuráveis. Preview, scrubbing e export avaliam a mesma trajetória.
 // =============================================================================
 #include "BuiltinEffects.hpp"
+#include "aurea/effects/ShakeMotion.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,91 +21,80 @@ namespace {
 
 f32 finite_or(f32 v, f32 fallback) noexcept { return std::isfinite(v) ? v : fallback; }
 
-/// Hash determinística de (semente, quadro, eixo) em [-1, 1]. Um `sin` grande
-/// em vez de uma tabela: mesma entrada, mesma saída, em qualquer aparelho.
-f32 noise1(u32 seed, i64 frame, u32 axis) noexcept {
-    u64 x = static_cast<u64>(seed) * 0x9E3779B97F4A7C15ull;
-    x ^= static_cast<u64>(frame) * 0xBF58476D1CE4E5B9ull;
-    x ^= static_cast<u64>(axis) * 0x94D049BB133111EBull;
-    x ^= x >> 31;
-    x *= 0xD6E8FEB86659FD93ull;
-    x ^= x >> 29;
-    const f32 u = static_cast<f32>(x & 0xFFFFFFull) / 16777215.0f;
-    return u * 2.0f - 1.0f;
-}
-
-// -----------------------------------------------------------------------------
-// Shake — tremor determinístico
-// -----------------------------------------------------------------------------
+// Continuous camera shake. Shared CPU path supplies inverse transforms to a
+// single GPU pass; no frame cache or random generator state is needed.
 class Shake final : public Effect {
 public:
-    enum : u32 { kAmplitudeX = 0, kAmplitudeY, kFrequency, kSeed, kSeparate, kRotation, kSmoothing, kMix };
-
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_camera_shake_frag, work));
+    }
+    enum : u32 { kAmplitudeX, kAmplitudeY, kFrequency, kSeed, kSeparate, kRotation, kSmoothing, kMix,
+                 kAmount, kZoom, kStyle, kBlur, kPhase, kEdges, kWave };
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kShake, "Tremor", "Distorcer", EffectClass::Domain};
+        static const EffectInfo i{effect_keys::kShake, "Shake", "Distort", EffectClass::Domain};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_float("amplitude_x", "Amplitude X", 20.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
-        p.add_float("amplitude_y", "Amplitude Y", 20.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
-        p.add_float("frequency", "Frequência", 1.0f, 0.05f, 20.0f, kParamAnimatable, "por quadro");
-        p.add_int("seed", "Semente", 1, 0, 9999);
-        p.add_bool("separate_axes", "Eixos separados", true);
-        p.add_angle("rotation", "Rotação", 0.0f);
-        p.add_float("smoothing", "Suavização", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("amplitude_x", "Horizontal", 20, 0, 1000, kParamAnimatable | kParamPixels, "px");
+        p.add_float("amplitude_y", "Vertical", 20, 0, 1000, kParamAnimatable | kParamPixels, "px");
+        p.add_float("frequency", "Speed", 8, 0, 60, kParamAnimatable, "Hz");
+        p.add_int("seed", "Seed", 1, 0, 9999);
+        p.add_bool("separate_axes", "Independent axes", true);
+        p.add_angle("rotation", "Rotation", 0);
+        p.add_float("smoothing", "Smoothness", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("mix", "Mix", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("amount", "Amount", 100, 0, 500, kParamAnimatable | kParamPercent, "%");
+        p.add_float("zoom", "Zoom", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        static const char* const styles[] = {"Normal", "Twitchy", "Jumpy"};
+        p.add_enum("style", "Style", styles, 3, 0);
+        p.add_float("motion_blur", "Motion blur", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("phase", "Phase", 0, -10000, 10000, kParamAnimatable);
+        static const char* const edges[] = {"Reflect", "Clamp", "Tile", "Transparent"};
+        p.add_enum("edges", "Edges", edges, 4, 0);
+        p.add_float("wave", "Wave", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
     }
     bool is_identity(const EffectEval& e) const noexcept override {
-        return e.f(kMix) < 0.01f
-            || (e.f(kAmplitudeX) < 0.01f && e.f(kAmplitudeY) < 0.01f && std::fabs(e.f(kRotation)) < 0.01f);
+        return e.f(kMix) <= 0 || e.f(kAmount) <= 0 || e.f(kFrequency) <= 0
+            || (e.f(kAmplitudeX) == 0 && e.f(kAmplitudeY) == 0 && e.f(kRotation) == 0 && e.f(kZoom) == 0);
     }
-    f32 input_margin(const EffectEval& e) const noexcept override {
-        // A rotação pode trazer imagem de fora da caixa; a margem cobre o pior
-        // caso (a metade da diagonal) só quando há rotação.
-        const f32 rot = std::fabs(e.f(kRotation));
-        return std::max(e.f(kAmplitudeX), e.f(kAmplitudeY)) + (rot > 0.01f ? 64.0f : 0.0f);
-    }
-    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
-        v[kAmplitudeX] = ParamValue::scalar(34.0f);
-        v[kAmplitudeY] = ParamValue::scalar(22.0f);
-        v[kSmoothing] = ParamValue::scalar(35.0f);
-        return true;
-    }
-
-    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+    f32 input_margin(const EffectEval&) const noexcept override { return 0; }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
                  LayerImage& out) const override {
-        const u32 seed = e.e(kSeed);
-        const f32 freq = std::max(0.05f, e.f(kFrequency));
-        const f32 smooth = std::clamp(e.f(kSmoothing) / 100.0f, 0.0f, 1.0f);
-        // A suavização pega a média de três quadros vizinhos: o tremor fica
-        // menos nervoso sem deixar de ser tremor.
-        const f32 t = static_cast<f32>(e.localTime.value) * freq;
-        const i64 f0 = static_cast<i64>(std::floor(t));
-        const f32 frac = t - static_cast<f32>(f0);
-
-        auto axis_value = [&](u32 axis, f32 amplitude) noexcept {
-            const f32 a = noise1(seed, f0, axis);
-            if (smooth <= 0.0f) return a * amplitude;
-            const f32 b = noise1(seed, f0 + 1, axis);
-            const f32 c = noise1(seed, f0 - 1, axis);
-            const f32 smoothVal = (c + 2.0f * a + b) * 0.25f;
-            // Interpola entre o valor duro (por quadro) e o suavizado.
-            return (a + (smoothVal - a) * smooth) * amplitude;
-        };
-
-        const f32 ax = e.f(kAmplitudeX), ay = e.f(kAmplitudeY);
-        const f32 dx = axis_value(1u, ax);
-        const f32 dy = e.b(kSeparate) ? axis_value(2u, ay) : dx * (ay / std::max(ax, 1e-3f));
-        const f32 rot = e.f(kRotation) * noise1(seed, f0, 3u) * kDeg2Rad;
-
-        const f32 w = e.placement ? static_cast<f32>(e.placement->layerWidth) : 1.0f;
-        const f32 h = e.placement ? static_cast<f32>(e.placement->layerHeight) : 1.0f;
-        const Vec3 center{w * 0.5f, h * 0.5f, 0.0f};
-        const Mat4 r = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot));
-        const Mat4 m = Mat4::translation(Vec3{dx, dy, 0.0f}) * Mat4::translation(center) * r
-                     * Mat4::translation(-center);
-        (void)frac;
-        return affine_pass(ctx, input, m, e.placement, e.f(kMix) / 100.0f, "tremor", margin, out);
+        shake::Settings s;
+        s.amplitudeX = finite_or(e.f(kAmplitudeX), 0); s.amplitudeY = finite_or(e.f(kAmplitudeY), 0);
+        s.frequency = std::clamp(finite_or(e.f(kFrequency), 8), 0.f, 60.f);
+        s.seed = e.e(kSeed); s.separate = e.b(kSeparate);
+        s.rotation = finite_or(e.f(kRotation), 0); s.zoom = finite_or(e.f(kZoom), 0);
+        s.smoothness = std::clamp(finite_or(e.f(kSmoothing), 100) / 100.f, 0.f, 1.f);
+        s.amount = std::clamp(finite_or(e.f(kAmount), 100) / 100.f, 0.f, 5.f);
+        s.style = e.e(kStyle); s.phase = finite_or(e.f(kPhase), 0);
+        s.wave = std::clamp(finite_or(e.f(kWave), 0) / 100.f, 0.f, 1.f);
+        const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
+        const f64 seconds = static_cast<f64>(e.localTime.value) / fps;
+        const f32 blur = std::clamp(finite_or(e.f(kBlur), 0) / 100.f, 0.f, 1.f);
+        const u32 count = blur > .001f ? 8u : 1u;
+        struct { Vec4 rows[16]; Vec4 options; Vec4 bounds; } u{};
+        const Rect in = input.region;
+        const f32 cx = e.placement ? e.placement->layerWidth * .5f : in.x + in.w*.5f;
+        const f32 cy = e.placement ? e.placement->layerHeight * .5f : in.y + in.h*.5f;
+        for (u32 i = 0; i < count; ++i) {
+            const f64 dt = count == 1 ? 0 : ((i + .5) / count - .5) * blur / fps;
+            const auto pose = shake::sample(s, seconds + dt);
+            const f32 angle = pose.rotation * kDeg2Rad;
+            const f32 a = std::cos(angle)/pose.scale, c = std::sin(angle)/pose.scale;
+            const f32 b = -c, d = a;
+            const f32 tx = cx-a*(cx+pose.x)-c*(cy+pose.y);
+            const f32 ty = cy-b*(cx+pose.x)-d*(cy+pose.y);
+            u.rows[i*2] = {a, c*in.h/in.w, (a*in.x+c*in.y+tx-in.x)/in.w, 0};
+            u.rows[i*2+1] = {b*in.w/in.h, d, (b*in.x+d*in.y+ty-in.y)/in.h, 0};
+        }
+        u.options = {static_cast<f32>(count), std::clamp(finite_or(e.f(kMix), 100)/100.f, 0.f, 1.f), static_cast<f32>(e.e(kEdges)), 0};
+        u.bounds = {.5f/input.width, .5f/input.height, 0, 0};
+        out = input;
+        out.texture = ctx.texture("shake", input.width, input.height);
+        return ctx.fullscreen_pass("shake", PassStage::Effects, out.texture, ShaderId::effects_camera_shake_frag,
+            {PassTexture{input.texture, {}, CommonSampler::LinearClamp}}, &u, sizeof(u)) == kInvalidIndex
+            ? Status{Errc::PipelineCompileFailed} : OkStatus;
     }
 };
 
@@ -362,10 +350,6 @@ public:
         return OkStatus;
     }
 };
-
-// No shake o "mix" já entra na opacidade da reamostragem; nos outros, ele
-// mistura com o original — o que exige o original guardado. Para não alocar um
-// passe a mais só por isso, os efeitos de deslocamento puro não têm mistura.
 
 } // namespace
 

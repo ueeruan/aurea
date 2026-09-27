@@ -384,42 +384,49 @@ public:
 // -----------------------------------------------------------------------------
 class LightSweep final : public Effect {
 public:
-    enum : u32 { kCenter = 0, kWidth, kIntensity, kSoftness, kAngle, kRelief, kMultiply,
-                 kFollowImage, kColor };
-
+    // Preserve existing IDs/indices so project keys keep addressing their property.
+    enum : u32 { kLegacyPosition, kWidth, kIntensity, kLegacySoftness, kDirection, kEdgeIntensity,
+                 kLegacyMultiply, kLegacyFollow, kColor, kCenter, kThickness, kShape, kReception };
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kLightSweep, "Faixa de luz", "Luz", EffectClass::Neighborhood};
-        return i;
+        static const EffectInfo i{effect_keys::kLightSweep, "Light Sweep", "Light", EffectClass::Neighborhood}; return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_float("center", "Posição", -50.0f, -100.0f, 200.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("width", "Largura", 25.0f, 0.0f, 200.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("intensity", "Intensidade", 1.2f, 0.0f, 8.0f, kParamAnimatable);
-        p.add_float("softness", "Suavidade da borda", 15.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_angle("angle", "Ângulo", 90.0f);
-        p.add_float("relief", "Relevo", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_bool("multiply", "Multiplicar", false);
-        p.add_bool("follow_image", "Só onde a imagem é clara", false);
-        p.add_color("color", "Cor da luz", Vec4{1, 0.97f, 0.92f, 1.0f});
+        p.add_float("center", "Legacy Position", 0, -100, 200, kParamAnimatable | kParamHidden);
+        p.add_float("width", "Width", 50, 0, 4000, kParamAnimatable | kParamPixels, "px");
+        p.add_float("intensity", "Sweep Intensity", .5f, 0, 10, kParamAnimatable);
+        p.add_float("softness", "Legacy Softness", 0, 0, 100, kParamHidden);
+        p.add_angle("angle", "Direction", 30);
+        p.add_float("relief", "Edge Intensity", 50, 0, 1000, kParamAnimatable | kParamPercent, "%");
+        for (const char* id : {"multiply", "follow_image"}) {
+            ParamSpec old; old.id = id; old.label = id; old.type = ParamType::Bool; old.flags = kParamHidden;
+            old.defaultValue = ParamValue::boolean(false); old.minValue = 0; old.maxValue = 1; p.add(old);
+        }
+        p.add_color("color", "Light Color", {1, 1, 1, 1});
+        p.add_point2("light_center", "Center", {.5f, .5f}, -4, 5, kParamAnimatable | kParamRelative);
+        p.add_float("edge_thickness", "Edge Thickness", 4, 0, 128, kParamAnimatable | kParamPixels, "px");
+        static const char* shapes[] = {"Linear", "Smooth", "Sharp"}; p.add_enum("shape", "Shape", shapes, 3, 1);
+        static const char* reception[] = {"Add", "Composite", "Cutout"}; p.add_enum("reception", "Light Reception", reception, 3, 0);
     }
-    bool is_identity(const EffectEval& e) const noexcept override { return e.f(kIntensity) < 1e-3f || e.f(kWidth) < 1e-3f; }
-    f32 input_margin(const EffectEval& e) const noexcept override { return e.f(kRelief) > 0.0f ? 4.0f : 0.0f; }
-    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
-        v[kCenter] = ParamValue::scalar(35.0f);
-        v[kWidth] = ParamValue::scalar(22.0f);
-        v[kAngle] = ParamValue::scalar(70.0f);
-        v[kRelief] = ParamValue::scalar(45.0f);
-        return true;
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.e(kReception) != 2 && (e.f(kWidth) <= 0 || (e.f(kIntensity) <= 0 && e.f(kEdgeIntensity) <= 0));
     }
-    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
-                 LayerImage& out) const override {
+    f32 input_margin(const EffectEval& e) const noexcept override { return e.f(kEdgeIntensity) > 0 ? e.f(kThickness) : 0; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_light_sweep_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
         EffectUniforms u = base_uniforms(input);
-        // O centro vive em -1..2; o shader projeta sobre o eixo do ângulo, e o
-        // que entra é a posição normalizada nesse eixo.
-        u.p0 = Vec4{e.f(kCenter) / 100.0f + 0.5f, e.f(kWidth) / 100.0f, e.f(kIntensity), e.f(kSoftness) / 100.0f * 0.5f};
-        u.p1 = Vec4{e.f(kAngle), e.f(kRelief) / 100.0f, e.b(kMultiply) ? 1.0f : 0.0f, e.b(kFollowImage) ? 1.0f : 0.0f};
+        const f32 w = e.placement ? e.placement->layerWidth : input.region.w;
+        const f32 h = e.placement ? e.placement->layerHeight : input.region.h;
+        const Vec2 center = e.p2(kCenter);
+        const f32 angle = e.f(kDirection) * kDeg2Rad;
+        const f32 legacy = e.f(kLegacyPosition) * .01f * std::max(w,h);
+        u.p0 = {center.x*w + std::cos(angle)*legacy, center.y*h + std::sin(angle)*legacy, e.f(kWidth), e.f(kIntensity)};
+        u.p1 = {angle, e.f(kEdgeIntensity)*.01f, e.f(kThickness), static_cast<f32>(e.e(kShape))};
+        u.p2 = {input.region.x, input.region.y, input.region.w, input.region.h};
+        u.p3 = {static_cast<f32>(e.e(kReception)), e.b(kLegacyMultiply) ? 1.f : 0.f, e.b(kLegacyFollow) ? 1.f : 0.f, 0};
         u.color = e.color(kColor);
-        return single_pass(ctx, ShaderId::effects_light_sweep_frag, input, u, "faixa-de-luz", out);
+        return single_pass(ctx, ShaderId::effects_light_sweep_frag, input, u, "light-sweep", out);
     }
 };
 

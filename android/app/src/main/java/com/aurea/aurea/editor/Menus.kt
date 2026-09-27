@@ -386,7 +386,6 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         MenuSection(stringResource(R.string.editor_marcas_ritmo))
         MenuItemRow(CupertinoGlyph.Bookmark, stringResource(R.string.editor_marcar_ou_desmarcar_este_instante), act { store.toggleMarker() })
         MenuItemRow(ShellGlyph.BookmarkSolid, stringResource(R.string.editor_ir_proxima_marca), if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
-        MenuItemRow(CupertinoGlyph.MusicNote2, stringResource(R.string.editor_detectar_batidas_camada_escolhida), act { store.detectBeats() })
 
         MenuSection(stringResource(R.string.editor_mais))
         MenuItemRow(

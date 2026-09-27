@@ -5,6 +5,8 @@
 #include "TestFramework.hpp"
 
 #include "aurea/tracking/CameraTracker.hpp"
+#include "aurea/tracking/CameraTrackData.hpp"
+#include "aurea/project/Serialization.hpp"
 
 #include <algorithm>
 #include <array>
@@ -413,11 +415,27 @@ AUREA_TEST(Tracking, EngineTracksVideoAndPointsStayPinned) {
     }
     std::printf("    pontos no video (quadro 45): %u, %u no solve (%u sobre mancha), %u sobre uma mancha verdadeira\n", nf, solved, solvedNear, nearTruth);
     AUREA_CHECK(nf >= 100 && solved * 2 > nf && nearTruth * 10 >= nf * 8 && solvedNear * 10 >= solved * 8);
+    auto* videoLayer=e.project()->timeline().composition(e.project()->timeline().current())->layer(LayerId::unpack(*layer));
+    const auto savedTransform=videoLayer->transform;
+    videoLayer->transform.position.x+=51;videoLayer->transform.position.y-=27;
+    videoLayer->transform.scale.x*=.7f;videoLayer->transform.scale.y*=1.1f;videoLayer->transform.rotation.z=17;
+    std::vector<f32> mapped(9000);const auto countMapped=e.camera_track_features_detail(45,mapped.data(),1500);
+    const auto projection=comp_view_projection(*comp,FrameIndex{45});
+    auto solvedCache=videoLayer->cameraTrack;usize solvedPoint=0;f32 maxFramingError=0;
+    for(usize t=0;t<solvedCache->solution.trackSolved.size();++t){
+        if(!solvedCache->solution.trackSolved[t])continue;
+        const auto point=pts[solvedPoint++];auto q=projection*Vec4{point.x,point.y,point.z,1};
+        for(u32 k=0;k<countMapped;++k)if(static_cast<u32>(mapped[k*6+3])==t)maxFramingError=std::max(maxFramingError,std::hypot(q.x/q.w-mapped[k*6],q.y/q.w-mapped[k*6+1]));
+    }
+    AUREA_CHECK(maxFramingError<.01f);videoLayer->transform=savedTransform;
+    auto* editableCamera = e.project()->timeline().composition(e.project()->timeline().current())->layer(LayerId::unpack(*cam));
+    editableCamera->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{45}, 987.f);
     const u32 beforeSelection = comp->layers().count();
     AUREA_CHECK(!e.apply_camera_track(45, Vec4{-100,-100,-90,-90}).ok());
     AUREA_CHECK_EQ(comp->layers().count(), beforeSelection);
     AUREA_CHECK(e.apply_camera_track(45, Vec4{0,0,640,360}).ok());
-    AUREA_CHECK_EQ(comp->layers().count(), beforeSelection + 2);
+    AUREA_CHECK_EQ(comp->layers().count(), beforeSelection + 1);
+    AUREA_CHECK_NEAR(comp->layer(LayerId::unpack(*cam))->tracks.find(TrackProperty::PositionX)->sample_keys(FrameIndex{45}),987.f,.001);
     // De novo, mesmo vídeo e ajustes: do cache, na hora.
     AUREA_CHECK(e.start_camera_track(*layer, 1));
     const Engine::CameraTrackStatus again = e.camera_track_status();
@@ -440,6 +458,66 @@ AUREA_TEST(Tracking, EngineTracksVideoAndPointsStayPinned) {
     AUREA_CHECK(again.cached && again.state == 2);
     AUREA_CHECK(cancelled.state == 4);
     AUREA_CHECK(comp->layers().count() == layersBefore);
+    const char* savedPath = "aurea_test_tracking_cache.aurea";
+    AUREA_CHECK(comp->layer(LayerId::unpack(*layer))->cameraTrack != nullptr);
+    AUREA_CHECK(e.save_project(savedPath).ok());
+    // Strict load of this exact save: recovery from a stale .bak must never
+    // make a broken serialization round trip look successful.
+    Project direct;
+    LoadReport report;
+    std::string loadError;
+    const auto loadStatus = ProjectSerializer::load(direct, savedPath, LoadOptions{}, &report, &loadError);
+    std::printf("    strict tracking load: version=%u ok=%d partial=%d error=%s\n", report.timelineVersion, loadStatus.ok(), report.partial, loadError.c_str());
+    AUREA_CHECK(loadStatus.ok());
+    AUREA_CHECK_EQ(report.timelineVersion, 30u);
+    AUREA_CHECK(e.load_project(savedPath).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    u64 reopenedVideo = 0;
+    comp->layers().for_each([&](LayerId id, const Layer& l) {
+        if (l.kind != LayerKind::Video) return;
+        reopenedVideo = id.pack();
+        AUREA_CHECK(l.cameraTrack != nullptr);
+        if (l.cameraTrack) {
+            std::printf("    reopened tracking: frames=%u duration=%lld start=%lld offset=%lld fps=%.9f source0=%lld source1=%lld eval1=%.9f\n",
+                l.cameraTrack->frames, l.duration().value, l.start.value, l.offset.value, comp->fps(), l.cameraTrack->sourceUs[0], l.cameraTrack->sourceUs[1], l.source_frame(FrameIndex{l.start.value+1}));
+        }
+    });
+    AUREA_CHECK(e.restore_camera_track(reopenedVideo));
+    AUREA_CHECK(e.camera_track_status().cached);
+    AUREA_CHECK(e.camera_track_status().state == 2);
+    const u32 reopenedCount = comp->layers().count();
+    AUREA_CHECK(e.apply_camera_track(45, Vec4{0, 0, 640, 360}).ok());
+    AUREA_CHECK_EQ(comp->layers().count(), reopenedCount + 1);
+    u32 cameras = 0;
+    comp->layers().for_each([&](LayerId, const Layer& l) { if (l.kind == LayerKind::Camera) ++cameras; });
+    AUREA_CHECK_EQ(cameras, 1u);
+    comp->layers().for_each([&](LayerId, const Layer& l){if(l.kind==LayerKind::Camera)AUREA_CHECK(l.camera.active);});
+    // Rebase scene coordinates without changing the projected composition.
+    auto* mutableComp=e.project()->timeline().composition(e.project()->timeline().current());
+    auto cache=mutableComp->layer(LayerId::unpack(reopenedVideo))->cameraTrack;
+    std::vector<u32> selectedIds;for(u32 t=0;t<cache->solution.trackSolved.size()&&selectedIds.size()<3;++t)if(cache->solution.trackSolved[t])selectedIds.push_back(t);
+    AUREA_CHECK_EQ(e.select_camera_track_points(selectedIds.data(),3),3u);
+    f32 ring[64]{};AUREA_CHECK_EQ(e.camera_track_target(45,ring,32),32u);for(auto value:ring)AUREA_CHECK(std::isfinite(value));
+    LayerId anchor;mutableComp->layers().for_each([&](LayerId id,const Layer& l){if(l.kind==LayerKind::Null&&l.cameraTrackSource==LayerId::unpack(reopenedVideo))anchor=id;});
+    auto screenAnchor=[&](){const auto m=comp_view_projection(*mutableComp,FrameIndex{45})*layer_world_3d(*mutableComp,*mutableComp->layer(anchor),FrameIndex{45});const auto q=m*Vec4{0,0,0,1};return Vec2{q.x/q.w,q.y/q.w};};
+    const auto screenBefore=screenAnchor();AUREA_CHECK(e.calibrate_camera_scene(0));const auto screenOrigin=screenAnchor();AUREA_CHECK_NEAR(screenBefore.x,screenOrigin.x,.01);AUREA_CHECK_NEAR(screenBefore.y,screenOrigin.y,.01);
+    AUREA_CHECK(e.calibrate_camera_scene(1));const auto screenGround=screenAnchor();AUREA_CHECK_NEAR(screenBefore.x,screenGround.x,.01);AUREA_CHECK_NEAR(screenBefore.y,screenGround.y,.01);
+    AUREA_CHECK_EQ(e.select_camera_track_points(selectedIds.data(),2),2u);AUREA_CHECK(e.calibrate_camera_scene(2,100));const auto screenScale=screenAnchor();AUREA_CHECK_NEAR(screenBefore.x,screenScale.x,.01);AUREA_CHECK_NEAR(screenBefore.y,screenScale.y,.01);
+    auto calibratedPoints=e.camera_track_points();AUREA_CHECK(calibratedPoints.size()>2);if(calibratedPoints.size()>2)AUREA_CHECK_NEAR((calibratedPoints[0]-calibratedPoints[1]).length(),100,.02);
+    AUREA_CHECK(e.save_project(savedPath).ok());AUREA_CHECK(e.load_project(savedPath).ok());
+    mutableComp=e.project()->timeline().composition(e.project()->timeline().current());u64 calibratedVideo=0;mutableComp->layers().for_each([&](LayerId id,const Layer& l){if(l.kind==LayerKind::Video)calibratedVideo=id.pack();});
+    AUREA_CHECK(e.restore_camera_track(calibratedVideo));AUREA_CHECK(e.apply_camera_track(-1,{},0).ok());
+    auto* video=mutableComp->layer(LayerId::unpack(calibratedVideo));
+    const auto speed=video->speed;video->speed=2;
+    AUREA_CHECK(!e.restore_camera_track(calibratedVideo));AUREA_CHECK(!e.calibrate_camera_scene(0));AUREA_CHECK(!e.apply_camera_track().ok());
+    video->speed=speed;AUREA_CHECK(e.restore_camera_track(calibratedVideo));
+    auto* media=e.project()->asset(video->source);const auto originalPath=media->sourcePath;media->sourcePath="replacement-video";
+    AUREA_CHECK(!e.restore_camera_track(calibratedVideo));AUREA_CHECK(!e.apply_camera_track().ok());
+    media->sourcePath=originalPath;AUREA_CHECK(e.restore_camera_track(calibratedVideo));
+    AUREA_CHECK(e.new_project(640, 360, 30.0, "Another project").ok());
+    AUREA_CHECK_EQ(e.camera_track_status().state, 0u);
+    AUREA_CHECK(!e.apply_camera_track().ok());
+    std::remove(savedPath);
     e.shutdown();
 }
 
@@ -474,4 +552,63 @@ AUREA_TEST(Tracking, BenchTracker1080p10s) {
                     st.frames / secs, st.fovDeg, st.rmsError, st.framesSolved, st.frames, st.inliers);
         e.shutdown();
     }
+}
+
+// Opt-in, real-footage acceptance probe. Input is tightly packed 480x360
+// grayscale at source cadence, not a synthetic scene. CSV retains stable track
+// ids and observations for an independent visual reprojection inspection.
+AUREA_TEST(Tracking, RealFootageProbe) {
+    const char* path = std::getenv("AUREA_TRACKING_FOOTAGE");
+    if (!path) { std::printf("    (skipped: AUREA_TRACKING_FOOTAGE)\n"); return; }
+    FILE* input = std::fopen(path, "rb");
+    AUREA_CHECK(input != nullptr);
+    if (!input) return;
+    const auto started = std::chrono::steady_clock::now();
+    FeatureTracker tracker(TrackMode::Balanced);
+    Gray frame; frame.width = 480; frame.height = 360; frame.px.resize(480 * 360);
+    std::vector<u8> bytes(frame.px.size());
+    while (tracker.tracks().frames < 1800 && std::fread(bytes.data(), 1, bytes.size(), input) == bytes.size()) {
+        for (usize i = 0; i < bytes.size(); ++i) frame.px[i] = bytes[i] / 255.0f;
+        tracker.add_frame(frame);
+    }
+    std::fclose(input);
+    const auto tracked = std::chrono::steady_clock::now();
+    SolveOptions options;
+    if (const char* fov = std::getenv("AUREA_TRACKING_FOV")) options.knownFovDeg = std::strtof(fov, nullptr);
+    const auto solution = solve_camera(tracker.tracks(), options);
+    const auto ended = std::chrono::steady_clock::now();
+    const auto& tracks = tracker.tracks();
+    std::printf("    REAL FOOTAGE: ok=%d rotationOnly=%d frames=%u/%u tracks=%zu inliers=%u fov=%.4f rms=%.4f confidence=%.4f extraction=%.3fs solve=%.3fs failure=%s\n",
+        solution.ok, solution.rotationOnly, solution.framesSolved, tracks.frames, tracks.pos.size(), solution.inliers,
+        solution.fovY / kDeg2Rad, solution.rmsError, solution.confidence,
+        std::chrono::duration<f64>(tracked - started).count(), std::chrono::duration<f64>(ended - tracked).count(), solution.failure.c_str());
+    const std::string base = std::string(path) + ".probe";
+    FILE* poses = std::fopen((base + "-poses.csv").c_str(), "w");
+    if (poses) {
+        std::fprintf(poses, "frame,valid,fov,r00,r01,r02,r10,r11,r12,r20,r21,r22,tx,ty,tz\n");
+        for (usize f = 0; f < solution.poses.size(); ++f) {
+            const auto& p = solution.poses[f];
+            std::fprintf(poses, "%zu,%d,%.9g", f, p.valid, solution.fovY);
+            for (f64 v : p.R) std::fprintf(poses, ",%.12g", v);
+            for (f64 v : p.t) std::fprintf(poses, ",%.12g", v);
+            std::fprintf(poses, "\n");
+        }
+        std::fclose(poses);
+    }
+    FILE* obs = std::fopen((base + "-observations.csv").c_str(), "w");
+    if (obs) {
+        std::fprintf(obs, "track,frame,u,v,solved,x,y,z\n");
+        usize pointIndex = 0;
+        for (usize t = 0; t < tracks.pos.size(); ++t) {
+            const bool solved = t < solution.trackSolved.size() && solution.trackSolved[t] && !solution.rotationOnly && pointIndex < solution.points.size();
+            const Vec3 p = solved ? solution.points[pointIndex++] : Vec3{};
+            for (u32 f = 0; f < tracks.frames; ++f) if (Tracks2D::present(tracks.pos[t][f]))
+                std::fprintf(obs, "%zu,%u,%.7g,%.7g,%d,%.9g,%.9g,%.9g\n", t, f, tracks.pos[t][f].x, tracks.pos[t][f].y, solved, p.x, p.y, p.z);
+        }
+        std::fclose(obs);
+    }
+    AUREA_CHECK(tracks.frames >= 300);
+    AUREA_CHECK(solution.ok);
+    AUREA_CHECK(!solution.rotationOnly);
+    AUREA_CHECK(solution.framesSolved == tracks.frames);
 }

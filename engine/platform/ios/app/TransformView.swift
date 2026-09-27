@@ -8,6 +8,8 @@ struct TransformView: View {
     @State private var axis = 2
     @State private var linked = true
     @State private var expand3D = false
+    @State private var text3D = false
+    @State private var wholeText = false
     @State private var zPicked = false
     @State private var gestureOpen = false
     @State private var gestureValues: [Float] = []
@@ -77,6 +79,14 @@ struct TransformView: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_transformar") + " · " + names[tab]) { model.panel = .none }
+            if tab == 2 && text3D && !wholeText {
+                HStack {
+                    Text(AureaText.t("t3d_letters")).foregroundStyle(AureaColors.accent)
+                    Spacer()
+                    Button(AureaText.t("t3d_whole_object")) { wholeText = true }.frame(minHeight: 48)
+                }.font(.subheadline).padding(.horizontal, 12)
+                EffectsView(focusedType: fxEffectTypeId("aurea.text3d.layout"), embedded: true)
+            } else {
             HStack(spacing: 0) {
                 LeftRail(keyframeLook: look, onKeyframe: props.isEmpty ? nil : toggleKey,
                          curveAnimated: look != .none, onCurve: curveKeys.isEmpty ? nil : openCurve,
@@ -84,6 +94,9 @@ struct TransformView: View {
                          onExpression: props.isEmpty ? nil : openExpression,
                          onBack: { model.panel = .none })
                 VStack(spacing: 0) {
+                    if tab == 2 && text3D {
+                        Button(AureaText.t("t3d_letters")) { wholeText = false }.frame(minHeight: 44)
+                    }
                     switch tab {
                     case 0: moveFace(pivot: false)
                     case 1: scaleFace
@@ -96,14 +109,18 @@ struct TransformView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 RightRail(modes: icons, selected: tab) { index in endGesture(); tab = index }
             }
+            }
         }
         .foregroundStyle(AureaColors.text)
-        .onAppear { updateTimelineFocus() }
+        .onAppear { text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; updateTimelineFocus() }
+        .onChange(of: id) { _ in text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; wholeText = false }
+        .onChange(of: wholeText) { _ in updateTimelineFocus() }
         .onChange(of: keyProps) { _ in updateTimelineFocus() }
         .onDisappear { endGesture(); model.timelineFocus = nil }
     }
 
     private func updateTimelineFocus() {
+        if tab == 2 && text3D && !wholeText { return }
         model.timelineFocus = keyProps.map { TimelineTrack(property: Int($0)) }
     }
 

@@ -135,6 +135,17 @@ internal fun uses3D(d: com.aurea.aurea.engine.LayerDetail?): Boolean {
 @Composable
 internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformTab) -> Unit) {
     val store = env.store
+    var wholeText by remember(store.primary) { mutableStateOf(false) }
+    if (tab == TransformTab.Girar && store.text3d != null && !wholeText) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.t3d_letters), modifier = Modifier.weight(1f), color = AureaColors.Accent)
+                androidx.compose.material3.TextButton(onClick = { wholeText = true }) { Text(stringResource(R.string.t3d_whole_object)) }
+            }
+            Box(Modifier.weight(1f)) { EffectsPanel(env, focusedType = effectTypeId("aurea.text3d.layout")) }
+        }
+        return
+    }
     var menu by remember { mutableStateOf(false) }
     val show3D by remember(store) { derivedStateOf { threeDOpen.value || uses3D(store.detail) } }
     val axis = if (show3D) rotationAxis.intValue else 2
@@ -191,6 +202,9 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             onExpression = if (canKey) ({ store.openExpression(exprTitle, exprKeys, exprScale, exprUnit) }) else null,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
+            if (tab == TransformTab.Girar && store.text3d != null) {
+                androidx.compose.material3.TextButton(onClick = { wholeText = false }) { Text(stringResource(R.string.t3d_letters)) }
+            }
             when (tab) {
                 TransformTab.Mover -> MoveFace(env, pivot = false, depth = show3D)
                 TransformTab.Girar -> {

@@ -70,13 +70,6 @@
     "requires": "media"
   },
   {
-    "id": "beats",
-    "title": "Detectar batidas",
-    "detail": "Analisa o áudio e cria marcadores editáveis",
-    "keywords": "beat detect musica ritmo sincronizar",
-    "requires": "media"
-  },
-  {
     "id": "transform",
     "title": "Transformar e animar",
     "detail": "Posição, escala, rotação e keyframes",

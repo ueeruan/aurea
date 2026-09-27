@@ -152,6 +152,8 @@ class StressBattery(
         line("AUREA — TESTE DE ESTRESSE")
         line("gerado: " + SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(Date()))
         line("app: ${version.first} (build ${version.second})")
+        line("aparelho: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}; Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
+        line("hardware=${android.os.Build.HARDWARE}; firmware=${android.os.Build.DISPLAY}")
         val d = engine.deviceReport()
         if (d == null) {
             line("aparelho: (o motor ainda não reportou)")

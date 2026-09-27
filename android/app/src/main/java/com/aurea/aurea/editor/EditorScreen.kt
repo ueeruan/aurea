@@ -306,6 +306,9 @@ fun EditorScreen(store: EditorStore) {
     }
 
     ShellSheets(store, ui)
+    store.textContentRequest?.let { request ->
+        TextContentDialog(request, onSave = { store.commitTextContent(request, it) }, onDismiss = store::dismissTextContentEditor)
+    }
     if (ui.effectsBrowser) EffectsBrowserSheet(store) { ui.effectsBrowser = false }
     store.expressionTarget?.let { com.aurea.aurea.editor.panels.ExpressionSheet(store, it) }
     if (ui.exporting) ExportScreen(store) { ui.exporting = false }

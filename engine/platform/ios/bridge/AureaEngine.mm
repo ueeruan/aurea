@@ -1468,6 +1468,10 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     [self flush];
 }
 
+- (BOOL)setEnvironmentBackground:(BOOL)visible {
+    auto* e = self.engine;
+    return e && e->set_environment_background(visible) ? YES : NO;
+}
 - (BOOL)setEnvironmentIntensity:(float)intensity rotation:(float)rotation {
     auto* e = self.engine;
     return e && e->set_environment_params(intensity, rotation) ? YES : NO;
@@ -1478,7 +1482,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e) return @[];
     f32 v[3]{};
     if (!e->query_environment(v)) return @[];
-    return @[@(v[0]), @(v[1]), @(v[2])];
+    return @[@(v[0]), @(v[1]), @(v[2]), @(e->environment_background())];
 }
 
 - (BOOL)setObjectEnvironmentForLayer:(long long)layerId source:(uint32_t)source hdri:(long long)hdri
@@ -2200,6 +2204,22 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     auto result = e->track_point(layerId, x, y, stabilize);
     return result.ok() ? @"" : @"Não foi possível rastrear esse ponto. Escolha um detalhe visível no vídeo.";
 }
+- (BOOL)startMotionTrack:(long long)layer tool:(uint32_t)tool model:(uint32_t)model backward:(BOOL)backward points:(NSArray<NSNumber*>*)points feature:(float)feature search:(float)search {
+    auto* e=self.engine;if(!e||points.count>8||points.count%2)return NO;
+    float xy[8]{};for(NSUInteger i=0;i<points.count;++i)xy[i]=points[i].floatValue;
+    return e->start_motion_track(layer,tool,model,backward,xy,static_cast<aurea::u32>(points.count/2),feature,search);
+}
+- (void)cancelMotionTrack { if(auto* e=self.engine)e->cancel_motion_track(); }
+- (BOOL)restoreMotionTrack:(long long)layer { auto* e=self.engine;return e&&e->restore_motion_track(layer); }
+- (NSDictionary<NSString*, id>*)motionTrackStatus {
+    auto* e=self.engine;if(!e)return @{};const auto s=e->motion_track_status();
+    return @{ @"state":@(s.state), @"progress":@(s.progress), @"tool":@(s.tool), @"frames":@(s.frames), @"validFrames":@(s.validFrames), @"lost":@(s.lost), @"reacquired":@(s.reacquired), @"confidence":@(s.confidence), @"error":@(s.errorPx), @"crop":@(s.cropPercent), @"memoryMB":@(s.memoryBytes/1048576.0), @"message":[NSString stringWithUTF8String:s.message.c_str()]?:@"" };
+}
+- (NSString*)applyMotionTrack:(long long)target apply:(uint32_t)apply lock:(BOOL)lock smooth:(float)smooth maxScale:(float)maxScale crop:(uint32_t)crop {
+    auto* e=self.engine;if(!e)return @"Motor indisponível";
+    auto r=e->apply_motion_track(target,apply,lock,smooth,maxScale,crop);
+    return r.ok()?@"":[NSString stringWithUTF8String:std::string(r.status().detail()).c_str()]?:@"Não foi possível aplicar o rastreio";
+}
 - (NSDictionary<NSString*, id>*)cameraTrackingStatus {
     auto* e = self.engine; if (!e) return @{};
     const auto s = e->camera_track_status();
@@ -2217,6 +2237,10 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return e && e->gizmo_move_local(layerId, axis, amount, xyz) ? floats_to_array(xyz, 3) : @[];
 }
 - (void)cancelCameraTracking { if (auto* e = self.engine) e->cancel_camera_track(); }
+- (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov { auto* e=self.engine;return e&&e->refine_camera_track(remove,motion,fov); }
+- (NSArray<NSNumber*>*)cameraTrackTarget:(long long)frame { auto* e=self.engine;if(!e)return @[];float xy[64]{};const auto n=e->camera_track_target(frame,xy,32);return floats_to_array(xy,n*2); }
+- (BOOL)calibrateCameraScene:(uint32_t)operation distance:(float)distance { auto* e=self.engine;return e&&e->calibrate_camera_scene(operation,distance); }
+- (BOOL)placeModelOnTrack:(long long)layer { auto* e=self.engine;return e&&e->place_model_on_track(layer); }
 - (NSArray<NSNumber*>*)cameraFeaturesAtFrame:(long long)frame {
     auto* e = self.engine; if (!e) return @[];
     std::vector<float> points(4500);
@@ -2231,6 +2255,25 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (NSString*)applyCameraTracking {
     auto* e = self.engine; if (!e) return @"Motor indisponível";
     return e->apply_camera_track().ok() ? @"" : @"A análise ainda não produziu uma câmera válida.";
+}
+- (BOOL)restoreCameraTrackForLayer:(long long)layerId {
+    auto* e = self.engine; return e && e->restore_camera_track(layerId);
+}
+- (NSArray<NSNumber*>*)cameraTrackDetailsAtFrame:(long long)frame {
+    auto* e = self.engine; if (!e) return @[];
+    std::vector<float> values(9000);
+    const auto count = e->camera_track_features_detail(frame, values.data(), 1500);
+    return floats_to_array(values.data(), count * 6);
+}
+- (uint32_t)selectCameraTrackPoints:(NSArray<NSNumber*>*)ids operation:(uint32_t)operation {
+    auto* e = self.engine; if (!e || ids.count > 1500) return 0;
+    std::vector<aurea::u32> values; for (NSNumber* value in ids) if (value.longLongValue >= 0) values.push_back(value.unsignedIntValue);
+    return e->select_camera_track_points(values.data(), static_cast<aurea::u32>(values.size()), operation);
+}
+- (NSString*)createCameraTrackObject:(uint32_t)kind {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    const auto result = e->apply_camera_track(-1, {}, kind);
+    return result.ok() ? @"" : @"Não foi possível criar. Selecione pontos resolvidos ou reanalise o trecho após mudar o tempo do vídeo.";
 }
 - (NSString*)trackMask:(long long)layerId mask:(uint32_t)mask mode:(uint32_t)mode {
     auto* e = self.engine; if (!e) return @"Motor indisponível";

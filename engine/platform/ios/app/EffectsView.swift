@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct EffectsView: View {
+    var focusedType: UInt32? = nil
+    var embedded = false
     @EnvironmentObject private var model: AureaModel
     @State private var browsing = false
     @State private var importingAM = false
@@ -23,6 +25,7 @@ struct EffectsView: View {
     private var ordered: [EffectItem] {
         let byId = Dictionary(uniqueKeysWithValues: model.effects.map { ($0.effectId, $0) })
         return (dragOrder ?? model.effects.map(\.effectId)).compactMap { byId[$0] }
+            .filter { focusedType == nil || $0.typeId == focusedType }
     }
     private var selectedParam: EffectParamItem? {
         guard let selected, selected.effect == openId else { return nil }
@@ -39,7 +42,7 @@ struct EffectsView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_efeitos"), onBack: { model.panel = .none })
+            if !embedded { PanelHeader(title: AureaText.t("panel_efeitos"), onBack: { model.panel = .none }) }
             HStack(spacing: 0) {
                 rail
                 ScrollView {
@@ -52,7 +55,13 @@ struct EffectsView: View {
                                 .offset(y: dragId == effect.effectId ? dragOffset : 0)
                                 .zIndex(dragId == effect.effectId ? 1 : 0)
                         }
-                        footer
+                        if focusedType == nil { footer }
+                        else if ordered.isEmpty, let type = focusedType {
+                            Button(AureaText.t("t3d_enable_letters")) {
+                                guard let layer = model.primarySelection else { return }
+                                model.mutate { $0.addEffect(type, toLayer: layer, at: UInt32.max) }
+                            }.frame(minHeight: 48)
+                        }
                     }.padding(.init(top: 8, leading: 2, bottom: 16, trailing: 12))
                 }.coordinateSpace(name: "effect-stack")
                     .accessibilityIdentifier("aurea.effects.stack")
@@ -123,6 +132,9 @@ struct EffectsView: View {
         guard loadedLayer != model.primarySelection else { return }
         loadedLayer = model.primarySelection; known = Set(model.effects.map(\.effectId))
         closeCard(); advanced = []; expressionLooks = [:]
+        if let type = focusedType, let effect = model.effects.first(where: { $0.typeId == type }) {
+            open(effect.effectId); return
+        }
         guard model.curveProperty == 31, model.curveSelectedTime != nil,
               model.effects.contains(where: { $0.effectId == model.curveEffect }) else { return }
         let entry = EffectParamSelection(effect: model.curveEffect, param: model.curveParam / 4, component: Int(model.curveParam % 4))

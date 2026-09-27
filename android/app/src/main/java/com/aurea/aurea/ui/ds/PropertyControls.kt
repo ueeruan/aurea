@@ -33,6 +33,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -197,39 +198,46 @@ fun Modifier.valueDrag(
     onStart: () -> Unit,
     onValue: (Float) -> Unit,
     onEnd: () -> Unit,
-): Modifier = if (!enabled) this else pointerInput(min, max) {
-    var from = 0f
-    var walked = 0f
-    var active = false
-    val lo = if (min.isNaN()) Float.NEGATIVE_INFINITY else min
-    val hi = if (max.isNaN()) Float.POSITIVE_INFINITY else max
-    detectHorizontalDragGestures(
-        onDragStart = {
-            val s = start()
-            from = if (s.isFinite()) s else 0f
-            walked = 0f
-            active = true
-            onStart()
-        },
-        onDragEnd = {
-            if (active) {
-                active = false
-                onEnd()
-            }
-        },
-        onDragCancel = {
-            if (active) {
-                active = false
-                onEnd()
-            }
-        },
-        onHorizontalDrag = { change, dx ->
-            change.consume()
-            walked += dx / density
-            val v = (from + walked * unitsPerDp()).coerceIn(lo, hi)
-            if (v.isFinite()) onValue(v)
-        },
-    )
+): Modifier = if (!enabled) this else composed {
+    val readStart by rememberUpdatedState(start)
+    val readUnits by rememberUpdatedState(unitsPerDp)
+    val begin by rememberUpdatedState(onStart)
+    val send by rememberUpdatedState(onValue)
+    val finish by rememberUpdatedState(onEnd)
+    this.pointerInput(min, max) {
+        var from = 0f
+        var walked = 0f
+        var active = false
+        val lo = if (min.isNaN()) Float.NEGATIVE_INFINITY else min
+        val hi = if (max.isNaN()) Float.POSITIVE_INFINITY else max
+        detectHorizontalDragGestures(
+            onDragStart = {
+                val s = readStart()
+                from = if (s.isFinite()) s else 0f
+                walked = 0f
+                active = true
+                begin()
+            },
+            onDragEnd = {
+                if (active) {
+                    active = false
+                    finish()
+                }
+            },
+            onDragCancel = {
+                if (active) {
+                    active = false
+                    finish()
+                }
+            },
+            onHorizontalDrag = { change, dx ->
+                change.consume()
+                walked += dx / density
+                val v = (from + walked * readUnits()).coerceIn(lo, hi)
+                if (v.isFinite()) send(v)
+            },
+        )
+    }
 }
 
 // =============================================================================
@@ -257,6 +265,7 @@ fun ValueBox(
     Column(
         modifier
             .width(width)
+            .heightIn(min = 48.dp)
             .then(
                 if (onTap != null || onLongPress != null) {
                     Modifier.tocavel(enabled = enabled, shrink = 1f, onLongClick = onLongPress, onClick = { onTap?.invoke() })
@@ -265,6 +274,7 @@ fun ValueBox(
                 },
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         Box(
             Modifier

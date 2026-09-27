@@ -35,6 +35,17 @@ const vec3 kLight = vec3(-0.36, -0.60, -0.71);
 const float kAmbient = 0.30;
 
 void main() {
+    if (v_shape > 5.5) {
+        vec2 p = v_local;
+        float diamond = abs(p.x)*1.4 + abs(p.y)*.8;
+        float core = 1.0-smoothstep(.32,.37,diamond);
+        float halo = exp(-diamond*5.0) * (1.0-smoothstep(.75,1.0,length(p)));
+        float facet = p.x > 0.0 ? .6 : 1.0;
+        float alpha = max(core, halo*.7)*v_color.a;
+        o_color = vec4(v_color.rgb*(core*facet + halo*.7),alpha);
+        if(alpha < .001) discard;
+        return;
+    }
     if (v_shape > 4.5) {
         float shade = 1.0;
         if (v_normal.w > 0.5) {

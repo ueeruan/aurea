@@ -140,6 +140,7 @@ struct EffectEval {
     u32                   count = 0;
     u32                   effectIndex = 0;     ///< posição na layer (painel)
     FrameIndex            localTime{0};
+    f64                   framesPerSecond = 30.0;
     /// Texels por pixel de layer na resolução de trabalho. Todo comprimento
     /// em pixel (raio de blur, passo de nitidez) é multiplicado por isto.
     f32                   texelScale = 1.0f;

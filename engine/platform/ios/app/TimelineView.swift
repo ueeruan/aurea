@@ -79,6 +79,9 @@ struct TimelineView: View {
     @State private var reorderTarget = -1
     @State private var scrollVelocity: CGFloat = 0
     @State private var lastPointer = CGPoint.zero
+    @State private var pendingPointer = false
+    @State private var lastTick: TimeInterval = 0
+    @State private var mediaNeedsRefresh = false
     @State private var thumbnails: [Int64: [MediaTile]] = [:]
     @State private var waves: [Int64: TimelineWaveStrip.Entry] = [:]
     @State private var markers: [Marker] = []
@@ -168,21 +171,21 @@ struct TimelineView: View {
                 if seconds >= Zoom.autoFitMinSeconds { pps = Zoom.autoFit(availableDp: size.width - 32, seconds: seconds) }
                 refreshMedia(size: size)
             }
-            .onChange(of: model.status.thumbnailGeneration) { _ in refreshMedia(size: size) }
-            .onChange(of: model.status.playhead) { _ in refreshMedia(size: size) }
-            .onChange(of: model.status.modelRevision) { _ in refreshMedia(size: size) }
-            .onChange(of: scrollY) { _ in refreshMedia(size: size) }
-            .onChange(of: pps) { _ in refreshMedia(size: size) }
-            .onChange(of: heldView) { _ in refreshMedia(size: size) }
-            .onChange(of: size) { _ in scrollY = min(scrollY, maxScroll(size.height)); refreshMedia(size: size) }
-            .onChange(of: model.primarySelection) { _ in revealSelection(size: size); refreshMedia(size: size) }
+            .onChange(of: model.status.thumbnailGeneration) { _ in mediaNeedsRefresh = true }
+            .onChange(of: model.status.playhead) { _ in mediaNeedsRefresh = true }
+            .onChange(of: model.status.modelRevision) { _ in mediaNeedsRefresh = true }
+            .onChange(of: scrollY) { _ in mediaNeedsRefresh = true }
+            .onChange(of: pps) { _ in mediaNeedsRefresh = true }
+            .onChange(of: heldView) { _ in mediaNeedsRefresh = true }
+            .onChange(of: size) { _ in scrollY = min(scrollY, maxScroll(size.height)); mediaNeedsRefresh = true }
+            .onChange(of: model.primarySelection) { _ in revealSelection(size: size); mediaNeedsRefresh = true }
             .onChange(of: model.curveSelectedTime) { time in
                 if gesture?.mode != .key, let time, let id = model.primarySelection, let row = rows.first(where: { $0.id == id }) {
                     selectedKey = (id, Keyframes.toTimeline(time, row.start, row.offset),
                         TimelineTrack(property: Int(model.curveProperty), effect: model.curveEffect, param: model.curveParam))
                 }
             }
-            .onChange(of: compact) { _ in scrollY = 0; refreshMedia(size: size) }
+            .onChange(of: compact) { _ in scrollY = 0; mediaNeedsRefresh = true }
             .onReceive(pulse) { _ in tick(size: size) }
             .onDisappear { finish(cancelled: true); finishPinch() }
             .clipped()
@@ -368,7 +371,7 @@ struct TimelineView: View {
                 let stroke = model.selection.count >= 2 ? m.multiStroke : m.selStroke
                 context.stroke(Path(roundedRect: rect.insetBy(dx: stroke / 2, dy: stroke / 2), cornerRadius: m.barRadius - stroke / 2), with: .color(.white), lineWidth: stroke)
             }
-            if row.track == nil && !compact && model.selection.count == 1 && selected && !row.locked {
+            if row.track == nil && model.selection.count == 1 && selected && !row.locked {
                 if x0 >= m.headerColumn { drawHandle(&context, left: x0 - m.trimInsetStart, top: top) }
                 if x1 <= width { drawHandle(&context, left: x1 - m.trimInsetEnd, top: top) }
             }
@@ -566,7 +569,7 @@ struct TimelineView: View {
         let row = current[index]
         let y = point.y - m.rowsTop - rowTop(index) + (compact ? 0 : scrollY)
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
-        let handles = row.track == nil && !compact && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
+        let handles = row.track == nil && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
         var result = TimelineHit.test(m, point: CGPoint(x: point.x, y: row.track == nil ? y : m.diamondCyNormal), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: row.instants, view: viewFrame, ppf: ppf)
         if row.track != nil && result.kind != .key { result = TimelineHit(kind: .body) }
         return (row, result)
@@ -647,6 +650,9 @@ struct TimelineView: View {
     private func begin(_ mode: Mode, start: CGPoint, width: CGFloat) {
         scrollVelocity = 0
         let (row, touched) = hit(start, width: width)
+        if mode == .move, let row, !model.selection.contains(row.id) {
+            model.select(layerId: row.id, additive: false, openOptions: false)
+        }
         var selected = model.layers.filter { model.selection.contains($0.id) }
         if mode == .move, let row, !selected.contains(where: { $0.id == row.id }), let item = model.layers.first(where: { $0.id == row.id }) { selected = [item] }
         var next = Interaction(mode: mode, start: start, view: viewFrame, scroll: scrollY, row: row, hit: touched, selection: selected, snapTargets: [])
@@ -664,7 +670,7 @@ struct TimelineView: View {
             } }.map { $0.element }
             next.keyLimits = Keyframes.dragLimits(instants, instants.firstIndex(of: next.keyFrame) ?? 0, start: row.start, end: row.end)
             if let key = next.movingKeys.first { selectedKey = (row.id, next.keyFrame, TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
-            model.select(layerId: row.id, additive: false)
+            model.select(layerId: row.id, additive: false, openOptions: false)
         }
         if next.mode == .reorder, let row {
             reorderSource = rows.firstIndex(where: { $0.id == row.id }) ?? -1; reorderTarget = reorderSource
@@ -685,12 +691,13 @@ struct TimelineView: View {
             if horizontal && touched.kind == .key { mode = .key }
             else if horizontal && touched.kind == .trimStart { mode = .trimStart }
             else if horizontal && touched.kind == .trimEnd { mode = .trimEnd }
-            else if horizontal && !compact && touched.kind == .body && row.map({ $0.track == nil && model.selection.contains($0.id) }) == true { mode = .move }
+            else if horizontal && !compact && touched.kind == .body && row.map({ $0.track == nil }) == true { mode = .move }
             else { mode = horizontal || compact ? .scrub : .scroll }
             begin(mode, start: start, width: size.width)
         }
-        if state == .began || state == .changed { lastPointer = point; update(point, size: size) }
+        if state == .began || state == .changed { lastPointer = point; pendingPointer = true }
         if state == .ended {
+            update(point, size: size)
             let wasScroll = gesture?.mode == .scroll
             finish(cancelled: false)
             if wasScroll && abs(velocity.y) >= m.flingMin { scrollVelocity = -velocity.y }
@@ -709,17 +716,18 @@ struct TimelineView: View {
                 let horizontal = abs(dx) > abs(dy)
                 let mode: Mode
                 if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal || compact ? .scrub : .scroll }
-                else if g.hit.kind == .key { mode = horizontal ? .key : .blocked }
+                else if g.hit.kind == .key { mode = horizontal ? .key : (compact ? .blocked : .scroll) }
                 else if g.hit.kind == .header { mode = !horizontal && !compact ? .reorder : .blocked }
-                else { mode = horizontal || compact ? .move : .reorder }
+                else { mode = horizontal || compact ? .move : .scroll }
                 if mode == .move, let row = g.row, !model.selection.contains(row.id) {
                     model.select(layerId: row.id, additive: model.selection.count >= 2, openOptions: false)
                 }
                 begin(mode, start: start, width: size.width)
             }
         }
-        if state == .began || state == .changed { lastPointer = point; update(point, size: size) }
+        if state == .began || state == .changed { lastPointer = point; pendingPointer = true }
         if state == .ended {
+            update(point, size: size)
             if let g = gesture, g.mode == .hold, let row = g.row {
                 if g.row?.track != nil {
                     tap(start, width: size.width)
@@ -727,8 +735,8 @@ struct TimelineView: View {
                     model.engine.setLayer(row.id, locked: !row.locked); model.refreshModel(force: true)
                 } else if g.hit.kind == .key { tap(start, width: size.width) }
                 else if !compact && g.hit.kind != .eye && g.hit.kind != .none {
-                    if model.selection.isEmpty { model.select(layerId: row.id, additive: false) }
-                    else if !(model.selection.count == 1 && model.selection.contains(row.id)) { model.select(layerId: row.id, additive: true) }
+                    if model.selection.isEmpty { model.select(layerId: row.id, additive: false, openOptions: false) }
+                    else if !(model.selection.count == 1 && model.selection.contains(row.id)) { model.select(layerId: row.id, additive: true, openOptions: false) }
                 }
             }
             finish(cancelled: false)
@@ -806,10 +814,11 @@ struct TimelineView: View {
     private func holdView(_ desired: Double) {
         let target = TimeAxis.clampView(desired, durationFrames: Int32(clamping: model.compositionDuration))
         let frame = Int64(timelineFrame(target))
-        heldView = Double(frame)
+        heldView = target
         model.engine.run { $0.scrub(toFrame: frame) }; model.optimisticPlayhead(frame)
     }
     private func finish(cancelled: Bool) {
+        pendingPointer = false
         guard let g = gesture else { return }
         if g.mode == .reorder && !cancelled, let row = g.row, reorderTarget >= 0 && reorderTarget != reorderSource {
             model.engine.run { $0.beginUndoGroup() }; model.reorderLayer(row.id, displayIndex: model.layers.firstIndex { $0.id == rows[reorderTarget].id } ?? 0); model.engine.run { $0.endUndoGroup() }
@@ -835,25 +844,37 @@ struct TimelineView: View {
         if pinching { model.engine.run { $0.scrubEnd() }; pinching = false; heldView = nil }
     }
     private func tick(size: CGSize) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let dt = CGFloat(lastTick > 0 ? min(0.05, max(0, now - lastTick)) : 1.0 / 60)
+        lastTick = now
+        // Touch delivery can exceed display cadence. Apply only the newest
+        // sample each tick and always flush the release position in pan/hold.
+        if pendingPointer {
+            pendingPointer = false
+            update(lastPointer, size: size)
+        }
         if let g = gesture {
             if g.mode == .move || g.mode == .key || g.mode == .trimStart || g.mode == .trimEnd {
                 let direction = AutoScroll.direction(pos: lastPointer.x, from: g.start.x, low: m.headerColumn + m.autoEdge, high: size.width - m.autoEdge, intent: m.autoIntent)
                 if direction != 0 {
                     // Auto-scroll moves the presentation window; the editing gesture
                     // reapplies its absolute target and the core remains authoritative.
-                    let target = TimeAxis.clampView(viewFrame + Double(direction) * Double(m.autoSpeed / 60 / ppf), durationFrames: Int32(clamping: model.compositionDuration))
+                    let target = TimeAxis.clampView(viewFrame + Double(direction) * Double(m.autoSpeed * dt / ppf), durationFrames: Int32(clamping: model.compositionDuration))
                     heldView = target; model.seek(toFrame: Int64(timelineFrame(target)))
                     update(lastPointer, size: size)
                 }
             } else if g.mode == .reorder {
                 let direction = AutoScroll.direction(pos: lastPointer.y, from: g.start.y, low: m.rowsTop + m.autoEdge, high: size.height - m.autoEdge, intent: m.autoIntent)
-                if direction != 0 { scrollY = min(maxScroll(size.height), max(0, scrollY + CGFloat(direction) * m.autoSpeed / 60)); update(lastPointer, size: size) }
+                if direction != 0 { scrollY = min(maxScroll(size.height), max(0, scrollY + CGFloat(direction) * m.autoSpeed * dt)); update(lastPointer, size: size) }
             }
         } else if abs(scrollVelocity) > 1 {
-            let next = min(maxScroll(size.height), max(0, scrollY + scrollVelocity / 60))
-            if next == scrollY { scrollVelocity = 0 } else { scrollY = next; scrollVelocity *= 0.94 }
+            let next = min(maxScroll(size.height), max(0, scrollY + scrollVelocity * dt))
+            if next == scrollY { scrollVelocity = 0 } else { scrollY = next; scrollVelocity *= CGFloat(pow(0.94, Double(dt) * 60)) }
         }
-        if thumbCache.starved { refreshMedia(size: size) }
+        if mediaNeedsRefresh || thumbCache.starved {
+            mediaNeedsRefresh = false
+            refreshMedia(size: size)
+        }
     }
     private func revealSelection(size: CGSize) {
         guard !compact, gesture == nil, let id = model.primarySelection, let index = rows.firstIndex(where: { $0.id == id }) else { return }

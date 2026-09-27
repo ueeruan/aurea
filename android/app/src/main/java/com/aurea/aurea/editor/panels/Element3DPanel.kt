@@ -72,10 +72,11 @@ internal fun Element3DPanel(env: PanelEnv) {
     val store = env.store
     val e by remember(store) { derivedStateOf { store.environment } }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) store.importHdri(uri)
+        if (uri != null) { store.importHdri(uri); if (store.detail?.kind == 8) store.setEnvironmentBackground(true) }
     }
     val t3 by remember(store) { derivedStateOf { store.text3d } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
+        if (store.detail?.kind != 8) {
         t3?.let { Text3DSection(env, it) }
         SectionTitle(stringResource(R.string.panel_material))
         val info = t3
@@ -93,7 +94,8 @@ internal fun Element3DPanel(env: PanelEnv) {
         } else ImportedMaterialSection(store)
         LightingSection(store)
         Spacer(Modifier.height(16.dp))
-        SectionTitle(stringResource(R.string.panel_luz_ambiente))
+        }
+        SectionTitle(stringResource(R.string.environment_texture))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Chip(stringResource(R.string.panel_estudio_neutro), on = e[0] < 0.5f) { store.clearHdri() }
             Chip(if (e[0] >= 0.5f) stringResource(R.string.panel_imagem_ambiente) else stringResource(R.string.panel_usar_imagem_ambiente_hdr), on = e[0] >= 0.5f) {
@@ -105,10 +107,14 @@ internal fun Element3DPanel(env: PanelEnv) {
         EnvRuler(store, 2, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
         Spacer(Modifier.height(8.dp))
         Text(
-            stringResource(R.string.pn_env_light_hint),
+            stringResource(R.string.environment_hint),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
         )
-        ObjectEnvironmentSection(store)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.environment_background), Modifier.weight(1f), style = AureaType.BodySmall)
+            androidx.compose.material3.Switch(checked = (e.getOrNull(3) ?: 0f) > .5f, onCheckedChange = store::setEnvironmentBackground)
+        }
+        if (store.detail?.kind != 8) ObjectEnvironmentSection(store)
     }
 }
 
@@ -203,8 +209,6 @@ private fun SectionTitle(t: String) {
 @Composable
 private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
     val store = env.store
-    var draft by remember(store.primary) { mutableStateOf(info.content) }
-    LaunchedEffect(info.content) { if (info.content != draft && !store.textEditing) draft = info.content }
     SectionTitle(stringResource(R.string.pn_text3d_title))
     TextButton(onClick = {
         val type = effectTypeId("aurea.text3d.layout")
@@ -235,22 +239,6 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
         confirmButton = { TextButton(onClick = { fontsOpen = false }) { Text(stringResource(R.string.t3d_close)) } },
     )
     Spacer(Modifier.height(12.dp))
-    Box(
-        Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        BasicTextField(
-            value = draft,
-            onValueChange = {
-                draft = it
-                store.text3d?.let { cur -> store.setText3D(cur.copy(content = it), typing = true) }
-            },
-            textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text)),
-            cursorBrush = SolidColor(AureaColors.Accent),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (draft.isEmpty()) Text(stringResource(R.string.pn_text3d_placeholder), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
-    }
     Spacer(Modifier.height(6.dp))
     PropertyCustomRow(stringResource(R.string.pn_depth), selected = false, onSelect = {}) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

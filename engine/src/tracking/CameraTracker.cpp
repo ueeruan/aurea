@@ -199,7 +199,14 @@ Gray half(const Gray& g) {
     for (u32 y = 0; y < o.height; ++y)
         for (u32 x = 0; x < o.width; ++x) {
             const i32 X = static_cast<i32>(x * 2), Y = static_cast<i32>(y * 2);
-            o.px[static_cast<usize>(y) * o.width + x] = 0.25f * (g.at(X, Y) + g.at(X + 1, Y) + g.at(X, Y + 1) + g.at(X + 1, Y + 1));
+            // Binomial low-pass before decimation prevents fine texture from
+            // aliasing into a different corner in the coarse LK levels.
+            static constexpr f32 kernel[5] = {1, 4, 6, 4, 1};
+            f32 sum = 0;
+            for (i32 dy = -2; dy <= 2; ++dy)
+                for (i32 dx = -2; dx <= 2; ++dx)
+                    sum += kernel[dy + 2] * kernel[dx + 2] * g.at(X + dx, Y + dy);
+            o.px[static_cast<usize>(y) * o.width + x] = sum / 256.0f;
         }
     return o;
 }
@@ -214,7 +221,7 @@ std::vector<Gray> pyramid(const Gray& g, int levels) {
     return p;
 }
 
-/// Lucas-Kanade em pirâmide (janela 9×9): posição em `cur` do ponto `p` de
+/// Lucas-Kanade: coarse 15x15 search, fine 9x9 subpixel localization.
 /// `prev`. Falso se perdeu (região lisa ou não convergiu).
 bool lk_track(const std::vector<Gray>& prev, const std::vector<Gray>& cur, Vec2 p, Vec2& out) {
     const int levels = static_cast<int>(std::min(prev.size(), cur.size()));
@@ -224,11 +231,13 @@ bool lk_track(const std::vector<Gray>& prev, const std::vector<Gray>& cur, Vec2 
         const Gray& A = prev[static_cast<usize>(L)];
         const Gray& B = cur[static_cast<usize>(L)];
         const Vec2 q{p.x * s, p.y * s};
-        f32 ix[81], iy[81], a[81];
+        const int radius = L == 0 ? 4 : 7;
+        constexpr int samples = 15 * 15;
+        f32 ix[samples], iy[samples], a[samples];
         f64 gxx = 0, gxy = 0, gyy = 0;
         int k = 0;
-        for (int wy = -4; wy <= 4; ++wy)
-            for (int wx = -4; wx <= 4; ++wx, ++k) {
+        for (int wy = -radius; wy <= radius; ++wy)
+            for (int wx = -radius; wx <= radius; ++wx, ++k) {
                 const f32 x = q.x + static_cast<f32>(wx), y = q.y + static_cast<f32>(wy);
                 ix[k] = 0.5f * (sample(A, x + 1, y) - sample(A, x - 1, y));
                 iy[k] = 0.5f * (sample(A, x, y + 1) - sample(A, x, y - 1));
@@ -240,12 +249,18 @@ bool lk_track(const std::vector<Gray>& prev, const std::vector<Gray>& cur, Vec2 
         const f64 det = gxx * gyy - gxy * gxy;
         const f64 tr = gxx + gyy;
         const f64 lmin = 0.5 * (tr - std::sqrt(std::max(0.0, tr * tr - 4 * det)));
-        if (lmin < 1e-4 || det < 1e-12) return false;
+        if (lmin < 1e-4 || det < 1e-12) {
+            if (L == 0) return false;
+            // A real corner can disappear at the coarsest level. Continue at
+            // finer resolution instead of throwing away its persistent id.
+            d.x *= 2.0f; d.y *= 2.0f;
+            continue;
+        }
         for (int it = 0; it < 20; ++it) {
             f64 bx = 0, by = 0;
             k = 0;
-            for (int wy = -4; wy <= 4; ++wy)
-                for (int wx = -4; wx <= 4; ++wx, ++k) {
+            for (int wy = -radius; wy <= radius; ++wy)
+                for (int wx = -radius; wx <= radius; ++wx, ++k) {
                     const f32 x = q.x + d.x + static_cast<f32>(wx), y = q.y + d.y + static_cast<f32>(wy);
                     const f32 dt = sample(B, x, y) - a[k];
                     bx += ix[k] * dt;
@@ -320,17 +335,19 @@ void FeatureTracker::detect(const Gray& g) {
     // Grade de ocupação (célula = distância mínima): espalha os pontos.
     const f32 cell = minDistance_;
     const u32 gw = static_cast<u32>(std::ceil(static_cast<f32>(w) / cell)) + 1, gh = static_cast<u32>(std::ceil(static_cast<f32>(h) / cell)) + 1;
-    std::vector<u8> occ(static_cast<usize>(gw) * gh, 0);
+    std::vector<std::vector<Vec2>> occ(static_cast<usize>(gw) * gh);
     auto mark = [&](Vec2 p) {
         const u32 cx = static_cast<u32>(p.x / cell), cy = static_cast<u32>(p.y / cell);
-        if (cx < gw && cy < gh) occ[static_cast<usize>(cy) * gw + cx] = 1;
+        if (cx < gw && cy < gh) occ[static_cast<usize>(cy) * gw + cx].push_back(p);
     };
     auto freeAt = [&](Vec2 p) {
         const i32 cx = static_cast<i32>(p.x / cell), cy = static_cast<i32>(p.y / cell);
         for (int dy = -1; dy <= 1; ++dy)
             for (int dx = -1; dx <= 1; ++dx) {
                 const i32 X = cx + dx, Y = cy + dy;
-                if (X >= 0 && Y >= 0 && X < static_cast<i32>(gw) && Y < static_cast<i32>(gh) && occ[static_cast<usize>(Y) * gw + static_cast<usize>(X)]) return false;
+                if (X >= 0 && Y >= 0 && X < static_cast<i32>(gw) && Y < static_cast<i32>(gh))
+                    for (Vec2 q : occ[static_cast<usize>(Y) * gw + static_cast<usize>(X)])
+                        if ((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y) < cell * cell) return false;
             }
         return true;
     };
@@ -426,9 +443,22 @@ f64 parallax(const Pose& a, const Pose& b, V3 X) {
 
 /// Essencial pelo método de 8 pontos (x2ᵀ·E·x1 = 0), projetada nas essenciais.
 bool essential8(const std::vector<V3>& x1, const std::vector<V3>& x2, const std::vector<u32>& idx, M3& E) {
+    if (idx.size() < 8) return false;
+    // Hartley normalization is still needed after camera normalization: on a
+    // phone most rays occupy a small image region, making A^T A ill-conditioned.
+    V3 c1{}, c2{};
+    for (u32 i : idx) { c1 = c1 + x1[i]; c2 = c2 + x2[i]; }
+    c1 = c1 * (1.0 / idx.size()); c2 = c2 * (1.0 / idx.size());
+    f64 d1 = 0, d2 = 0;
+    for (u32 i : idx) { d1 += std::hypot(x1[i].x - c1.x, x1[i].y - c1.y); d2 += std::hypot(x2[i].x - c2.x, x2[i].y - c2.y); }
+    if (d1 < 1e-9 || d2 < 1e-9) return false;
+    const f64 z1 = std::sqrt(2.0) * idx.size() / d1, z2 = std::sqrt(2.0) * idx.size() / d2;
+    M3 T1, T2;
+    T1(0, 0) = T1(1, 1) = z1; T1(0, 2) = -c1.x * z1; T1(1, 2) = -c1.y * z1;
+    T2(0, 0) = T2(1, 1) = z2; T2(0, 2) = -c2.x * z2; T2(1, 2) = -c2.y * z2;
     std::vector<f64> AtA(81, 0.0);
     for (u32 i : idx) {
-        const V3 a = x1[i], b = x2[i];
+        const V3 a = mul(T1, x1[i]), b = mul(T2, x2[i]);
         const f64 r[9] = {b.x * a.x, b.x * a.y, b.x, b.y * a.x, b.y * a.y, b.y, a.x, a.y, 1.0};
         for (int p = 0; p < 9; ++p)
             for (int q = 0; q < 9; ++q) AtA[static_cast<usize>(p * 9 + q)] += r[p] * r[q];
@@ -436,6 +466,7 @@ bool essential8(const std::vector<V3>& x1, const std::vector<V3>& x2, const std:
     const std::vector<f64> e = null_vector(AtA, 9);
     M3 F;
     for (int k = 0; k < 9; ++k) F.m[k] = e[static_cast<usize>(k)];
+    F = mul(mul(transpose(T2), F), T1);
     M3 U, V;
     f64 s[3];
     svd3(F, U, s, V);
@@ -891,7 +922,7 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
         std::vector<V3> x1, x2;
         std::vector<u32> ids;
         for (u32 t = 0; t < M; ++t) if (has(t, a) && has(t, cand)) { x1.push_back(ray(t, a)); x2.push_back(ray(t, cand)); ids.push_back(t); }
-        if (x1.size() < 30) break;
+        if (x1.size() < 30) continue;
         std::vector<u32> bestInl;
         M3 bestE;
         std::uniform_int_distribution<u32> pick(0, static_cast<u32>(x1.size() - 1));
@@ -955,7 +986,8 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
             if (ps.size() < 2 || first == frame) continue;
             V3 X;
             if (!triangulate(ps, rs, X)) continue;
-            if (parallax(S.poses[first], S.poses[frame], X) < 2.0 * kPi / 180.0) continue;
+            if (parallax(S.poses[first], S.poses[frame], X) < 1.0 * kPi / 180.0) continue;
+            refine_point(X, ps, rs, f);
             bool good = true;
             for (usize i = 0; i < ps.size() && good; ++i) {
                 f64 u, v;
@@ -969,18 +1001,47 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
         std::vector<V3> Xs, rs;
         std::vector<u32> ids;
         for (u32 t = 0; t < M; ++t) if (S.hasX[t] && has(t, fr)) { Xs.push_back(S.X[t]); rs.push_back(ray(t, fr)); ids.push_back(t); }
-        if (Xs.size() < 12) break;   // perdeu a cena: para aqui
+        if (Xs.size() < 8) break;   // perdeu a cena: para aqui
         Pose P = S.poses[fr].valid && fr == k ? S.poses[fr] : S.poses[fr - 1];
         std::vector<u8> inl;
         if (!refine_pose(P, Xs, rs, f, &inl)) break;
         // Segunda passada só com os inliers (o ponto errado não puxa a pose).
         std::vector<V3> X2, r2;
         for (usize i = 0; i < inl.size(); ++i) if (inl[i]) { X2.push_back(Xs[i]); r2.push_back(rs[i]); }
-        if (X2.size() < 10) break;
+        if (X2.size() < std::max<usize>(8, Xs.size() / 2)) {
+            // Robust PnP around the last known pose. A handful of bad/new
+            // landmarks must not pull every observation into a wrong minimum.
+            std::uniform_int_distribution<usize> choose(0, Xs.size() - 1);
+            for (int attempt = 0; attempt < 64; ++attempt) {
+                if (cancel && cancel->load()) return S;
+                std::vector<usize> indices;
+                while (indices.size() < 6) { const usize id = choose(rng); if (std::find(indices.begin(), indices.end(), id) == indices.end()) indices.push_back(id); }
+                std::vector<V3> xx, rr;
+                for (usize id : indices) { xx.push_back(Xs[id]); rr.push_back(rs[id]); }
+                Pose candidate = S.poses[fr - 1];
+                if (!refine_pose(candidate, xx, rr, f)) continue;
+                xx.clear(); rr.clear();
+                for (usize id = 0; id < Xs.size(); ++id) {
+                    f64 u, v;
+                    if (project(candidate, Xs[id], u, v) && std::hypot(u - rs[id].x, v - rs[id].y) * f < 2.5) { xx.push_back(Xs[id]); rr.push_back(rs[id]); }
+                }
+                if (xx.size() > X2.size()) { P = candidate; X2 = std::move(xx); r2 = std::move(rr); }
+            }
+        }
+        if (X2.size() < 8) break;
         refine_pose(P, X2, r2, f);
         P.valid = true;
         S.poses[fr] = P;
         triangulate_new(fr);
+        // Keep the growing map conditioned before older features leave the
+        // image. Waiting until the end caused new points to inherit drift and
+        // made the pose solver lose otherwise textured handheld sequences.
+        if (fr > k && fr % 20 == 0) {
+            S.fixedFrame = a;
+            f64 fixedFocal = f;
+            bundle_adjust(S, T, fixedFocal, false, 12, 5, cancel);
+            triangulate_new(fr);
+        }
     }
 
     // --- Refinamento alternado: pontos com poses fixas, poses com pontos fixos.
@@ -1117,6 +1178,9 @@ SolveState solve_rotation(const Tracks2D& T, f64 f, const std::atomic<bool>* can
 CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, const std::atomic<bool>* cancel,
                             std::atomic<f32>* progress) {
     CameraSolution out;
+    if (opt.motion > 2 || !std::isfinite(opt.knownFovDeg) || opt.knownFovDeg < 0 || opt.knownFovDeg > 150) {
+        out.failure = "invalid camera constraints"; return out;
+    }
     const u32 N = tracks.frames;
     if (cancel && cancel->load()) { out.failure = "cancelado"; return out; }
     if (tracks.width == 0 || tracks.height == 0 ||
@@ -1139,7 +1203,7 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
     auto score = [&](const SolveState& s) {
         if (s.solved < 2) return 1e30;
         const f64 missing = static_cast<f64>(N - s.solved) / static_cast<f64>(N);
-        return s.rms * (1.0 + 4.0 * missing);
+        return s.rms + 100.0 * missing;
     };
     auto run = [&](f64 fovDeg, bool rot) { return rot ? solve_rotation(tracks, focalOf(fovDeg), cancel) : solve_with_focal(tracks, focalOf(fovDeg), opt.mode, cancel); };
 
@@ -1170,7 +1234,9 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
             }
         }
     }
-    const bool rot = probe.rotationOnly || rotationFits(rotationProbe);
+    // Failure to initialize translation does not prove a tripod shot. Require
+    // whole-track background consensus for the rotation-only model as well.
+    const bool rot = opt.motion == 2 || (opt.motion == 0 && rotationFits(rotationProbe));
     if (progress) progress->store(0.15f);
     f64 bestFov = rot ? rotationFov : 0.5 * (lo + hi);
     SolveState best = rot ? std::move(rotationProbe) : std::move(probe);
@@ -1218,11 +1284,22 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
             bundle_adjust(best, tracks, f, !known, keysMax, iters, cancel);
             evaluate(best, tracks, f);
         }
+        // A coarse focal seed can lose PnP support before global BA recovers
+        // the lens. Reuse the tracked images with that refined focal instead
+        // of accepting the short prefix or decoding the footage again.
+        if (!known && best.solved < N && !(cancel && cancel->load())) {
+            SolveState recovered = solve_with_focal(tracks, f, opt.mode, cancel);
+            if (recovered.solved > best.solved) {
+                best = std::move(recovered);
+                bundle_adjust(best, tracks, f, true, keysMax, iters, cancel);
+                evaluate(best, tracks, f);
+            }
+        }
         bestFov = 2.0 * std::atan(0.5 * h / f) * 180.0 / kPi;
         if (progress) progress->store(1.0f);
     }
     if (cancel && cancel->load()) { out.failure = "cancelado"; return out; }
-    if (best.solved < std::max<u32>(10, N / 2) || best.rms > 3.0) {
+    if (best.solved != N || best.rms > 3.0) {
         out.failure = best.solved < 2 ? "nao deu para resolver a camera (pouca paralaxe ou cena sem textura)"
                                       : "solve fraco: erro alto ou poucos quadros resolvidos";
         out.rmsError = static_cast<f32>(std::min(best.rms, 999.0));
@@ -1270,7 +1347,7 @@ Vec3 euler_zyx_from_matrix(const f64 m[9]) noexcept {
 }
 
 bool dominant_plane(const std::vector<Vec3>& pts, f32 tolerance, f32 minShare, Vec3& centroid, Vec3& normal) {
-    if (pts.size() < 10 || !std::isfinite(tolerance) || tolerance <= 0 ||
+    if (pts.size() < 3 || !std::isfinite(tolerance) || tolerance <= 0 ||
         !std::isfinite(minShare) || minShare <= 0 || minShare > 1) return false;
     if (std::any_of(pts.begin(), pts.end(), [](Vec3 p) { return !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z); })) return false;
     std::mt19937 rng(7u);
@@ -1297,7 +1374,7 @@ bool dominant_plane(const std::vector<Vec3>& pts, f32 tolerance, f32 minShare, V
         V3 sum{};
         usize cnt = 0;
         for (const Vec3& p : pts) if (std::fabs(bn.dot(p) - bd) < tolerance) { sum = sum + V3{p.x, p.y, p.z}; ++cnt; }
-        if (cnt < 10 || static_cast<f32>(cnt) < minShare * static_cast<f32>(pts.size())) return false;
+        if (cnt < 3 || static_cast<f32>(cnt) < minShare * static_cast<f32>(pts.size())) return false;
         sum = sum * (1.0 / static_cast<f64>(cnt));
         std::vector<f64> covariance(9, 0.0), vectors, values;
         for (const Vec3& p : pts) if (std::fabs(bn.dot(p) - bd) < tolerance) {

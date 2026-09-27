@@ -54,10 +54,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-
         // versionCode 2113: faixa de legendas, presets e novos efeitos nativos. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2122
+        versionCode = 2123
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -149,7 +148,16 @@ android {
             // quando o crash acontece dentro do C++.
             ndk { debugSymbolLevel = "FULL" }
         }
+        // Connected-test runners can uninstall their target at teardown.
+        // Never target the debug app where people keep emulator projects.
+        create("uiTest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".uitest"
+            versionNameSuffix = "-uitest"
+            matchingFallbacks += "debug"
+        }
     }
+    testBuildType = "uiTest"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -221,6 +229,10 @@ dependencies {
     implementation(libs.levelplay.unityads.adapter)
     implementation(libs.unity.ads)
     testImplementation(libs.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    add("uiTestImplementation", "androidx.compose.ui:ui-test-manifest")
     // Nos testes de JVM o `org.json` do android.jar é só um esqueleto que
     // lança "Stub!": sem isto, qualquer teste que leia um JSON do contrato
     // falharia por motivo que não tem nada a ver com o código testado.

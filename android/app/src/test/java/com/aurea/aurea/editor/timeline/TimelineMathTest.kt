@@ -20,12 +20,15 @@ class TimelineMathTest {
     }
 
     @Test
-    fun `px por frame e vista limitada a composicao`() {
+    fun `px por frame e navegacao alem do fim atual`() {
         assertEquals(7f, TimeAxis.pxPerFrame(80f, 2.625f, 30f), 1e-4f)
         assertEquals(TimeAxis.pxPerFrame(80f, 1f, 30f), TimeAxis.pxPerFrame(80f, 1f, 0f), 0f) // fps inválido = 30
         assertEquals(0.0, TimeAxis.clampView(-5.0, 100), 0.0)
-        assertEquals(100.0, TimeAxis.clampView(150.0, 100), 0.0) // a vista pode alcançar o fim exclusivo
-        assertEquals(0.0, TimeAxis.clampView(10.0, 0), 0.0)
+        assertEquals(150.0, TimeAxis.clampView(150.0, 100), 0.0)
+        assertEquals(10.0, TimeAxis.clampView(10.0, 0), 0.0)
+        assertEquals(150.25, TimeAxis.clampView(150.25, 100), 0.0)
+        assertEquals(0.0, TimeAxis.clampView(Double.NaN, 100), 0.0)
+        assertEquals((Int.MAX_VALUE - 1).toDouble(), TimeAxis.clampView(Double.MAX_VALUE, 100), 0.0)
     }
 
     @Test

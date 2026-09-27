@@ -845,7 +845,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
 // v27: lossless 3D parenting compensation, including nested nulls.
 // v28 also persists camera observations; generated layers refer back to this
 // analysis after reopening instead of relying on an in-memory worker result.
-constexpr u32 kTimelineSectionVersion = 30;
+// v32: ambiente de estúdio procedural e o chão do grupo 3D (FloorSettings).
+constexpr u32 kTimelineSectionVersion = 32;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -1600,6 +1601,21 @@ std::vector<u8> build_timeline_section(const Project& p) {
         }
         // v5: modo da timeline.
         w.boolv(c.edit_mode());
+        // v31: qualidade do 3D, operador de tone map e exposição do grupo.
+        w.u32v(pp.quality3d);
+        w.u32v(pp.toneMapper);
+        w.f32v(pp.exposure);
+        // v32: estúdio procedural e chão do grupo 3D.
+        w.u32v(c.environment().studioPreset);
+        {
+            const FloorSettings& fl = c.floor();
+            w.u32v(fl.mode);
+            w.color(fl.color);
+            w.f32v(fl.roughness);
+            w.f32v(fl.reflectivity);
+            w.f32v(fl.contactShadow);
+            w.f32v(fl.fade);
+        }
     });
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
@@ -1805,6 +1821,23 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
             }
         }
         if (g_readingTimelineVersion >= 5) c->set_edit_mode(r.boolv());
+        if (g_readingTimelineVersion >= 31) {
+            pp.quality3d = std::min<u32>(r.u32v(), 4u);
+            pp.toneMapper = std::min<u32>(r.u32v(), 1u);
+            const f32 ev = r.f32v();
+            pp.exposure = std::isfinite(ev) ? std::clamp(ev, 0.01f, 64.0f) : 1.0f;
+        }
+        if (g_readingTimelineVersion >= 32) {
+            auto fin = [](f32 v, f32 lo, f32 hi, f32 def) { return std::isfinite(v) ? std::clamp(v, lo, hi) : def; };
+            c->environment().studioPreset = std::min<u32>(r.u32v(), 3u);
+            FloorSettings& fl = c->floor();
+            fl.mode = std::min<u32>(r.u32v(), 2u);
+            fl.color = r.color();
+            fl.roughness = fin(r.f32v(), 0.0f, 1.0f, 0.35f);
+            fl.reflectivity = fin(r.f32v(), 0.0f, 1.0f, 0.5f);
+            fl.contactShadow = fin(r.f32v(), 0.0f, 1.0f, 0.8f);
+            fl.fade = fin(r.f32v(), 1.0f, 100.0f, 6.0f);
+        }
         c->rebuild_draw_order();
     }
 

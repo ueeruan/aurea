@@ -21,7 +21,8 @@
 #define TEX_IRRADIANCE AUREA_TEX5
 #define TEX_PREFILTER AUREA_TEX6
 #define TEX_BRDF      AUREA_TEX7
-#define TEX_SHADOW    AUREA_TEX8
+#define TEX_SHADOW    AUREA_TEX8   // sampler2DShadow (comparação do hardware)
+#define TEX_SHADOW_DEPTH AUREA_TEX11 // o MESMO mapa, profundidade crua (busca de bloqueadores do PCSS)
 
 #define MAX_LIGHTS 4
 
@@ -53,7 +54,14 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform SceneBlock {
 
     // Sombra da luz principal
     mat4 shadowMatrix;      // (uv, profundidade) do mapa ← mundo
-    vec4 shadowParams;      // x = ligado, y = tamanho do texel, z = viés, w = índice da luz
+    vec4 shadowParams;      // x = amostras do PCF (0 = sem sombra), y = tamanho do texel (uv), z = viés constante (profundidade), w = índice da luz
+
+    // Material premium (KHR_materials_*): verniz de carro, vidro, IOR.
+    vec4 clearcoat;         // x = verniz (0..1), y = rugosidade do verniz, z = IOR, w = força do specular (KHR_materials_specular)
+    vec4 specularColor;     // rgb = cor do specular dielétrico; w = transmissão (0..1)
+    // Sombra suave (PCSS) — ver common/shadow.glsl.
+    vec4 shadowParams2;     // x = k da penumbra (uv por unidade de profundidade), y = normal offset (mundo),
+                            // z = inclinação uv → profundidade (S/R), w = amostras da busca de bloqueadores (0 = PCF fixo)
 } u;
 
 const float PI = 3.14159265359;

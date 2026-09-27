@@ -3947,6 +3947,36 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Aparar empurra/puxa as seguintes; excluir fecha o buraco. */
     var autoKeyTransforms by mutableStateOf(true)
     var snapping by mutableStateOf(true)
+    /**
+     * Losangos de keyframe em TODAS as linhas da timeline (padrão). Desligado,
+     * só as camadas escolhidas mostram (e deixam tocar) os seus — com muitas
+     * camadas animadas a timeline fica legível.
+     */
+    var showAllKeyframes by mutableStateOf(true)
+    fun toggleShowAllKeyframes() { showAllKeyframes = !showAllKeyframes }
+
+    /**
+     * "Escalonar" as escolhidas: cascata de [stepFrames] quadros na ordem da
+     * timeline (de cima para baixo; passo negativo = de baixo para cima). Com
+     * [keysOnly] só a animação anda; senão as camadas inteiras. O motor faz
+     * tudo num passo de desfazer e pula as bloqueadas.
+     */
+    fun staggerSelection(stepFrames: Int, keysOnly: Boolean, ids: Collection<Long> = selection) {
+        val ordered = layers.filter { it.id in ids && !it.locked }.map { it.id }
+        if (ordered.size < 2) {
+            showToast(appText(R.string.sh_pick_two_unlocked_layers))
+            return
+        }
+        val plan = com.aurea.aurea.editor.timeline.Stagger.plan(ordered, stepFrames) ?: return
+        if (playing) pause()
+        val moved = engine.staggerLayers(plan.first, plan.second, keysOnly)
+        if (moved < 0) {
+            showToast(appText(R.string.msg_escalonar_recusado))
+            return
+        }
+        refreshNow()
+        showToast(appText(if (keysOnly) R.string.msg_keyframes_escalonados else R.string.msg_camadas_escalonadas, moved + 1, kotlin.math.abs(stepFrames)))
+    }
     var editMode by mutableStateOf(false)
         private set
 

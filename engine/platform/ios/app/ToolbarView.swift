@@ -513,6 +513,7 @@ private struct ShellMenuRow: View {
         ShellMenuRow(ShellGlyph.WaveformPathEcg, "editor_diagnostico_tela", checked: model.hudVisible, detail: "editor_quadros_segundo_tempos_gpu_memoria_decodificador") { model.toggleHud() }
         ShellMenuSection("editor_edicao")
         ShellMenuRow(CupertinoGlyph.Link, "editor_edicao", title: "Snapping", checked: model.snapping) { act { model.snapping.toggle() } }
+        ShellMenuRow(CupertinoGlyph.SuitDiamond, "editor_keyframes_todas_camadas", checked: model.showAllKeyframes, detail: "editor_keyframes_todas_camadas_detalhe") { act { model.showAllKeyframes.toggle() } }
         ShellMenuRow(CupertinoGlyph.Link, "editor_timeline_magnetica_modo_edicao", checked: model.editMode, detail: "editor_aparar_empurra_camadas_seguintes_excluir_fecha") { act { model.toggleEditMode() } }
         ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_remover_espacos_vazios") { act { model.removeGaps() } }
         ShellMenuSection("editor_projeto_cbe9")

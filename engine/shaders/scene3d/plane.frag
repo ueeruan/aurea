@@ -18,7 +18,11 @@ layout(push_constant) uniform Push {
 } pc;
 
 layout(location = 0) in vec2 v_uv;
+// MRT do passe 3D: a camada é cor de EXIBIÇÃO (alvo 0) — não passa pelo tone
+// map nem pelo bloom da cena, sai exatamente como no 2D; no alvo HDR (1) ela
+// só tapa, pelo alfa, a cena que está atrás.
 layout(location = 0) out vec4 o_color;
+layout(location = 1) out vec4 o_scene;
 
 layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex0;
 
@@ -26,4 +30,5 @@ void main() {
     const vec4 c = texture(u_tex0, v_uv) * pc.params.x;
     if (c.a < 0.02) discard;
     o_color = c;
+    o_scene = vec4(0.0, 0.0, 0.0, c.a);
 }

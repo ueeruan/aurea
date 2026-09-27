@@ -122,7 +122,7 @@ struct Backend::Impl final : CommandList {
     void uniforms(u32 binding, const void*, u32);
     void vertices(i32 baseVertex);
     void update_border(u32 slot);
-    void attach(GLenum target, Texture* color, Texture* depth);
+    void attach(GLenum target, Texture* color, Texture* depth, Texture* color1 = nullptr);
     std::string cache_path(u64 key) const;
     void barrier(TextureHandle, ResourceState, bool) noexcept override;
     void begin_render_pass(const RenderPassBegin&) noexcept override;

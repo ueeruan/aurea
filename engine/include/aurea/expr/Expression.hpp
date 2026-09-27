@@ -13,7 +13,10 @@
 //  easeIn/easeOut, clamp, random/gaussRandom/seedRandom (determinísticos),
 //  noise, Math.* e as mesmas como globais, length/normalize/dot/cross/add/
 //  sub/mul/div, degreesToRadians/radiansToDegrees, valueAtTime/velocityAtTime,
-//  key(i).time/.value, numKeys, framesToTime/timeToFrames. Objetos: thisLayer,
+//  key(i).time/.value, numKeys, framesToTime/timeToFrames, shake (tremor com
+//  decaimento), temporalWiggle, speedAtTime, smooth, nearestKey, posterizeTime,
+//  timeSinceMarker e `marker` (as marcas da régua: .key(i | "nome"),
+//  .nearestKey(t), .numKeys → .time/.index/.name). Objetos: thisLayer,
 //  thisComp, thisProperty, layer("Nome" | índice), .transform.position/...,
 //  effect("Slider Control")("Slider") (os controles são efeitos de verdade,
 //  ver effects/builtin/ExpressionControls.cpp).

@@ -55,6 +55,7 @@ import UIKit
             "corePlayhead": readCoreStatus ? coreStatus.playhead : -1,
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
             "layerOrder": model.layers.map { $0.id },
+            "layerStarts": model.layers.map { (row: LayerItem) -> Int64 in Int64(row.startFrame) },
             "layerParents": model.layers.map { (row: LayerItem) -> Int64 in
                 (model.engine.layerDetail(row.id)?["parentId"] as? NSNumber)?.int64Value ?? 0
             },

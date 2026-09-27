@@ -367,6 +367,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 5 to ParamHuman(label = R.string.fx_rotacao, suffix = "°", decimals = 0),
                 6 to ParamHuman(label = R.string.fx_suavizacao, decimals = 0),
                 7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                15 to ParamHuman(label = R.string.fx_direcao),
+                16 to ParamHuman(label = R.string.fx_decaimento, suffix = "1/s", decimals = 2),
             ),
         ),
     )
@@ -731,6 +733,157 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.control.checkbox", EffectHuman(name = R.string.fx_name_checkbox_control, keywords = "expressao caixa controle"))
     put("aurea.control.color", EffectHuman(name = R.string.fx_name_color_control, keywords = "expressao cor controle"))
     put("aurea.control.point", EffectHuman(name = R.string.fx_name_point_control, keywords = "expressao ponto controle"))
+    // --- Pacote de paridade: movimento, transições por forma e acabamento ---
+    put("aurea.motion.oscillate", EffectHuman(
+        name = R.string.fx_name_oscillate,
+        keywords = "oscilar oscillate vai e vem pendular onda seno movimento decaimento balanco",
+        principal = listOf(1, 0, 2, 8, 3, 4),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_direcao),
+            1 to ParamHuman(label = R.string.fx_amplitude, suffix = "px", decimals = 0),
+            2 to ParamHuman(label = R.string.fx_frequencia, suffix = "Hz", decimals = 2),
+            3 to ParamHuman(label = R.string.fx_fase),
+            4 to ParamHuman(label = R.string.fx_rotacao),
+            5 to ParamHuman(label = R.string.fx_pulso_escala, decimals = 0),
+            6 to ParamHuman(label = R.string.fx_forma_onda),
+            7 to ParamHuman(label = R.string.fx_semente),
+            8 to ParamHuman(label = R.string.fx_decaimento, suffix = "1/s", decimals = 2),
+            9 to ParamHuman(label = R.string.fx_pivo),
+        )))
+    put("aurea.motion.swing", EffectHuman(
+        name = R.string.fx_name_swing,
+        keywords = "balancar swing pendulo pendulum pivo girar oscilar",
+        principal = listOf(0, 1, 2, 3, 4),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_angulo),
+            1 to ParamHuman(label = R.string.fx_frequencia, suffix = "Hz", decimals = 2),
+            2 to ParamHuman(label = R.string.fx_pivo),
+            3 to ParamHuman(label = R.string.fx_fase),
+            4 to ParamHuman(label = R.string.fx_decaimento, suffix = "1/s", decimals = 2),
+        )))
+    put("aurea.motion.wiggle", EffectHuman(
+        name = R.string.fx_name_wiggle,
+        keywords = "wiggle agitar aleatorio tremer mexer posicao rotacao escala",
+        principal = listOf(0, 1, 2, 3, 4, 5),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_frequencia, suffix = "Hz", decimals = 2),
+            1 to ParamHuman(label = R.string.fx_posicao_x, suffix = "px", decimals = 0),
+            2 to ParamHuman(label = R.string.fx_posicao_y, suffix = "px", decimals = 0),
+            3 to ParamHuman(label = R.string.fx_rotacao),
+            4 to ParamHuman(label = R.string.fx_escala, decimals = 0),
+            5 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+            6 to ParamHuman(label = R.string.fx_oitavas),
+            7 to ParamHuman(label = R.string.fx_segurar_saltos),
+            8 to ParamHuman(label = R.string.fx_semente),
+            9 to ParamHuman(label = R.string.fx_pivo),
+        )))
+    put("aurea.transition.iris_wipe", EffectHuman(
+        name = R.string.fx_name_iris_wipe,
+        keywords = "iris wipe circulo poligono transicao revelar abrir fechar",
+        principal = listOf(0, 1, 3, 5),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_conclusao, decimals = 0),
+            1 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_sentido_inverso),
+            3 to ParamHuman(label = R.string.fx_centro),
+            4 to ParamHuman(label = R.string.fx_rotacao),
+            5 to ParamHuman(label = R.string.fx_lados_iris),
+        )))
+    put("aurea.transition.box_wipe", EffectHuman(
+        name = R.string.fx_name_box_wipe,
+        keywords = "caixa box wipe retangulo transicao revelar",
+        principal = listOf(0, 1, 3, 4),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_conclusao, decimals = 0),
+            1 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_sentido_inverso),
+            3 to ParamHuman(label = R.string.fx_centro),
+            4 to ParamHuman(label = R.string.fx_rotacao),
+        )))
+    put("aurea.transition.venetian_blinds", EffectHuman(
+        name = R.string.fx_name_venetian_blinds,
+        keywords = "persianas venetian blinds faixas listras transicao",
+        principal = listOf(0, 4, 3, 1),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_conclusao, decimals = 0),
+            1 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_sentido_inverso),
+            3 to ParamHuman(label = R.string.fx_direcao),
+            4 to ParamHuman(label = R.string.fx_faixas, decimals = 0),
+        )))
+    put("aurea.blur.radial", EffectHuman(
+        name = R.string.fx_name_radial_blur,
+        keywords = "desfoque radial radial blur zoom blur spin giro rotacional velocidade",
+        principal = listOf(0, 1, 2, 3, 4),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_tipo),
+            1 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_centro),
+            3 to ParamHuman(label = R.string.fx_qualidade),
+            4 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+        )))
+    put("aurea.distort.mirror", EffectHuman(
+        name = R.string.fx_name_mirror,
+        keywords = "espelho mirror refletir simetria reflexo",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_centro),
+            1 to ParamHuman(label = R.string.fx_angulo),
+            2 to ParamHuman(label = R.string.fx_trocar_lado),
+        )))
+    put("aurea.transform.crop", EffectHuman(
+        name = R.string.fx_name_crop_edges,
+        keywords = "cortar crop recortar bordas margens aparar",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_esquerda, decimals = 0),
+            1 to ParamHuman(label = R.string.fx_topo, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_direita, decimals = 0),
+            3 to ParamHuman(label = R.string.fx_base, decimals = 0),
+            4 to ParamHuman(label = R.string.fx_suavidade_borda, suffix = "px", decimals = 0),
+        )))
+    put("aurea.stylize.vignette", EffectHuman(
+        name = R.string.fx_name_vignette,
+        keywords = "vinheta vignette escurecer bordas cantos",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+            1 to ParamHuman(label = R.string.fx_tamanho, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+            3 to ParamHuman(label = R.string.fx_arredondamento, decimals = 0),
+            4 to ParamHuman(label = R.string.fx_centro),
+            5 to ParamHuman(label = R.string.fx_cor),
+        )))
+    put("aurea.stylize.mosaic", EffectHuman(
+        name = R.string.fx_name_mosaic,
+        keywords = "mosaico mosaic pixelar pixelate led painel celulas pixel",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_tamanho_celula, suffix = "px", decimals = 0),
+            1 to ParamHuman(label = R.string.fx_vao_celulas, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_celulas_redondas),
+            3 to ParamHuman(label = R.string.fx_sombreado, decimals = 0),
+            4 to ParamHuman(label = R.string.fx_vinheta_celula, decimals = 0),
+            5 to ParamHuman(label = R.string.fx_cor_fundo),
+        )))
+    put("aurea.stylize.find_edges", EffectHuman(
+        name = R.string.fx_name_find_edges,
+        keywords = "detectar bordas find edges contorno sobel desenho lapis",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+            1 to ParamHuman(label = R.string.fx_largura, suffix = "px", decimals = 1),
+            2 to ParamHuman(label = R.string.fx_inverter),
+            3 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+        )))
+    put("aurea.color.hue_saturation", EffectHuman(
+        name = R.string.fx_name_hue_saturation,
+        keywords = "matiz saturacao hue saturation luminosidade colorir tom cor",
+        principal = listOf(0, 1, 2, 3),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_matiz),
+            1 to ParamHuman(label = R.string.fx_saturacao, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_luminosidade, decimals = 0),
+            3 to ParamHuman(label = R.string.fx_colorir),
+            4 to ParamHuman(label = R.string.fx_matiz_colorir),
+            5 to ParamHuman(label = R.string.fx_saturacao_colorir, decimals = 0),
+            6 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+        )))
 }
 
 /**

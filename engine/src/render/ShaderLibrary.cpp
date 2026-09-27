@@ -1,6 +1,7 @@
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/core/Log.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -29,6 +30,8 @@ usize PipelineKeyHash::operator()(const PipelineKey& k) const noexcept {
     std::memcpy(&bc, &k.depthBiasConstant, 4);
     std::memcpy(&bs, &k.depthBiasSlope, 4);
     mix((static_cast<u64>(bc) << 32) | bs);
+    mix(static_cast<u64>(k.sampleCount) | (static_cast<u64>(k.alphaToCoverage) << 8)
+        | (static_cast<u64>(k.hasColor1) << 9));
     return static_cast<usize>(h ^ (h >> 32));
 }
 
@@ -70,6 +73,9 @@ SamplerDesc common_sampler_desc(CommonSampler s) noexcept {
             break;
         case CommonSampler::LinearMirror:
             d.wrapU = d.wrapV = SamplerDesc::Wrap::MirroredRepeat;
+            break;
+        case CommonSampler::ShadowCompare:
+            d.compare = true;   // linear + clamp: PCF 2×2 do hardware por amostra
             break;
         case CommonSampler::Count: break;
     }
@@ -186,6 +192,10 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
     desc.depthFormat = key.depthFormat;
     desc.cull = key.cull;
     desc.frontFaceCCW = key.frontFaceCCW;
+    desc.sampleCount = std::max<u32>(1u, key.sampleCount);
+    desc.alphaToCoverage = key.alphaToCoverage && desc.sampleCount > 1;
+    desc.hasColor1 = key.hasColor1 && !key.depthOnly;
+    desc.colorFormat1 = key.format;
 
     auto created = backend_->create_pipeline(desc);
     if (!created.ok()) {

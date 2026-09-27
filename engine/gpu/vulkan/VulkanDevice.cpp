@@ -109,6 +109,10 @@ void Backend::shutdown() noexcept {
         samplers_.clear();
         for (auto& [k, rp] : renderPasses_) vkDestroyRenderPass(device_, rp, nullptr);
         renderPasses_.clear();
+        for (Framebuffer3d& f : framebuffers3d_) if (f.fb) vkDestroyFramebuffer(device_, f.fb, nullptr);
+        framebuffers3d_.clear();
+        for (auto& [k, rp] : renderPasses3d_) vkDestroyRenderPass(device_, rp, nullptr);
+        renderPasses3d_.clear();
         for (auto& [k, l] : layouts_) vkDestroyPipelineLayout(device_, l, nullptr);
         layouts_.clear();
         for (auto& [k, l] : setLayouts_) vkDestroyDescriptorSetLayout(device_, l, nullptr);
@@ -279,6 +283,17 @@ Status Backend::create_device() noexcept {
         }
     }
 #endif
+    // MSAA do 3D: profundidade de 1 amostra resolvida no próprio passe (a
+    // amostra 0), para SSAO/sombra de contato lerem sem pré-passe. As duas
+    // extensões dependem de multiview/maintenance2, que são núcleo no 1.1.
+    depthResolve_ = false;
+    if (apiVersion_ >= VK_API_VERSION_1_1 && !config_.conservativeVulkan
+        && has_extension(exts, VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME)
+        && has_extension(exts, VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME)) {
+        enabled.push_back(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);
+        enabled.push_back(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);
+        depthResolve_ = true;
+    }
 
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES};
     VkPhysicalDeviceFeatures2 features2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
@@ -302,6 +317,10 @@ Status Backend::create_device() noexcept {
     enable.features.textureCompressionASTC_LDR = features2.features.textureCompressionASTC_LDR;
     enable.features.textureCompressionETC2 = features2.features.textureCompressionETC2;
     enable.features.textureCompressionBC = features2.features.textureCompressionBC;
+    // Recorte MASK por cobertura (MSAA): sem alpha-to-one o alfa guardado
+    // seria a cobertura, e não 1.
+    enable.features.alphaToOne = features2.features.alphaToOne;
+    alphaToOne_ = features2.features.alphaToOne == VK_TRUE;
 
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
@@ -333,8 +352,24 @@ Status Backend::create_device() noexcept {
         device_ = VK_NULL_HANDLE;
         created = vkCreateDevice(physical_, &info, nullptr, &device_);
     }
+    if (created != VK_SUCCESS && (depthResolve_ || alphaToOne_)) {
+        // Extras do MSAA do 3D são opcionais: o 3D continua (sem profundidade
+        // resolvida e com o recorte por descarte) num driver que os recuse.
+        AUREA_LOG_WARN("Vulkan: tentando dispositivo sem resolve de profundidade/alpha-to-one");
+        enabled.erase(std::remove_if(enabled.begin(), enabled.end(), [](const char* e) {
+            return std::strcmp(e, VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME) == 0
+                || std::strcmp(e, VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME) == 0;
+        }), enabled.end());
+        depthResolve_ = alphaToOne_ = false;
+        enable.features.alphaToOne = VK_FALSE;
+        info.enabledExtensionCount = static_cast<u32>(enabled.size());
+        info.ppEnabledExtensionNames = enabled.data();
+        device_ = VK_NULL_HANDLE;
+        created = vkCreateDevice(physical_, &info, nullptr, &device_);
+    }
     if (const Status s = check(created, "vkCreateDevice"); !s.ok()) return s;
     load_device(device_);
+    if (depthResolve_ && !vkCreateRenderPass2KHR) depthResolve_ = false;
     vkGetDeviceQueue(device_, graphicsFamily_, 0, &queue_);
 
     caps_.extensions.clear();
@@ -390,6 +425,9 @@ void Backend::fill_capabilities() noexcept {
     caps_.maxColorAttachments = l.maxColorAttachments;
     caps_.minUniformBufferOffsetAlignment = static_cast<u32>(std::max<VkDeviceSize>(16, l.minUniformBufferOffsetAlignment));
     caps_.colorSampleCountMask = l.framebufferColorSampleCounts;
+    caps_.depthSampleCountMask = l.framebufferDepthSampleCounts;
+    caps_.depthResolveSampleZero = depthResolve_;
+    caps_.alphaToOne = alphaToOne_;
 
     // Timestamps: a fila precisa ter bits válidos e o período ser conhecido.
     u32 qc = 0;
@@ -441,6 +479,7 @@ void Backend::fill_capabilities() noexcept {
         if (mp.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
             caps_.hostVisibleBytes = std::max<u64>(caps_.hostVisibleBytes, mp.memoryHeaps[mp.memoryTypes[i].heapIndex].size);
         }
+        if (mp.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) caps_.lazyAttachments = true;
     }
     caps_.unifiedMemory = allocator_.unified();
 }

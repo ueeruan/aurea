@@ -198,7 +198,21 @@ void Impl::fill_capabilities() noexcept {
     // Deslocamento num buffer de constantes: 256 bytes é a exigência do Metal
     // (e é o que o anel de uniforms respeita).
     caps.minUniformBufferOffsetAlignment = slot::kRingAlignment;
-    caps.colorSampleCountMask = 1u | ([dev supportsTextureSampleCount:4] ? 4u : 0u);
+    caps.colorSampleCountMask = 1u | ([dev supportsTextureSampleCount:2] ? 2u : 0u)
+                              | ([dev supportsTextureSampleCount:4] ? 4u : 0u)
+                              | ([dev supportsTextureSampleCount:8] ? 8u : 0u);
+    // A profundidade multiamostrada segue a cor em toda GPU Metal.
+    caps.depthSampleCountMask = caps.colorSampleCountMask;
+    // Resolve da profundidade (amostra 0) e alpha-to-one: GPU Apple A9+ (família
+    // Apple3) e Mac. Memoryless (anexo só no tile): GPU Apple, fora do
+    // simulador.
+    caps.depthResolveSampleZero = [dev supportsFamily:MTLGPUFamilyApple3] || mac2;
+    caps.alphaToOne = true;
+#if TARGET_OS_SIMULATOR
+    caps.lazyAttachments = false;
+#else
+    caps.lazyAttachments = apple;
+#endif
 
     caps.rgba16fRenderable = true;
     caps.rgba16fFilterable = true;

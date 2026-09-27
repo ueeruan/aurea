@@ -39,7 +39,10 @@ struct alignas(16) SceneBlock {
     i32  texMask0[4];
     i32  texMask1[4];
     Mat4 shadowMatrix;      ///< uv/profundidade do mapa ← mundo
-    Vec4 shadowParams;      ///< x = ligado, y = texel, z = viés, w = índice da luz
+    Vec4 shadowParams;      ///< x = amostras do PCF (0 = sem sombra), y = texel (uv), z = viés, w = índice da luz
+    Vec4 clearcoat;         ///< x = verniz, y = rugosidade do verniz, z = IOR, w = força do specular
+    Vec4 specularColor;     ///< rgb = cor do specular dielétrico, w = transmissão
+    Vec4 shadowParams2;     ///< x = k da penumbra, y = normal offset (mundo), z = S/R, w = amostras de bloqueador
 };
 static_assert(sizeof(SceneBlock) <= binding::kMaxUniformBytes, "bloco da cena 3D maior que o limite de uniform");
 
@@ -319,6 +322,9 @@ void GpuModel::release(GPUBackend& gpu) noexcept {
     materials.clear();
 }
 
+// Chão do grupo 3D (reflexo planar, sombra de contato, plano): ver Ground.cpp.
+#include "Ground.cpp"
+
 // =============================================================================
 // SceneRenderer
 // =============================================================================
@@ -385,6 +391,8 @@ void SceneRenderer::release_environment() noexcept {
     // chave nova com uma antiga ainda "montada", não gera nada, e a cena fica
     // sem ambiente nenhum. `envCube_` é o céu analítico e cai junto.
     envKey_ = pendingKey_ = ~0ull;
+    envSpecTier_ = envBgTier_ = pendingSpecTier_ = pendingBgTier_ = 0;
+    prefilteredSize_ = backgroundSize_ = 0;
     envRequested_ = false;
     if (envCube_.valid()) { gpu_->destroy_texture(envCube_); envCube_ = TextureHandle{}; }
 }
@@ -458,32 +466,42 @@ Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
         if (t->valid()) gpu_->destroy_texture(*t);
         *t = TextureHandle{};
     }
-    TextureDesc bg;
-    bg.width = bg.height = maps.background.size; bg.layers = 6; bg.cube = true;
-    bg.format = SurfaceFormat::RGBA16F; bg.sampled = true; bg.transferDst = true;
-    auto texture = gpu_->create_texture(bg);
-    if (texture.ok()) {
-        const usize count = static_cast<usize>(bg.width)*bg.height*4;
-        bool uploaded = true;
-        for (u32 f=0; f<6 && uploaded; ++f)
-            uploaded = gpu_->upload_texture_level(*texture,0,f,maps.background.levels[0].data()+count*f,count*2).ok();
-        if (uploaded) background_ = *texture; else gpu_->destroy_texture(*texture);
+    // Fundo com a cadeia de mips inteira: o céu escolhe o LOD pela pegada do
+    // pixel (nítido sem serrilhar) e o desfoque sobe nela.
+    backgroundSize_ = 0;
+    const CubeData& b = maps.background;
+    if (b.size > 0 && b.mips > 0 && b.levels.size() >= b.mips) {
+        TextureDesc bg;
+        bg.width = bg.height = b.size; bg.layers = 6; bg.cube = true; bg.mipLevels = b.mips;
+        bg.format = SurfaceFormat::RGBA16F; bg.sampled = true; bg.transferDst = true; bg.debugName = "3d-fundo";
+        auto texture = gpu_->create_texture(bg);
+        if (texture.ok()) {
+            bool uploaded = true;
+            for (u32 m = 0; m < b.mips && uploaded; ++m) {
+                const u32 side = std::max(1u, b.size >> m);
+                const usize count = static_cast<usize>(side) * side * 4;
+                for (u32 f = 0; f < 6 && uploaded; ++f)
+                    uploaded = gpu_->upload_texture_level(*texture, m, f, b.levels[m].data() + count * f, count * 2).ok();
+            }
+            if (uploaded) { background_ = *texture; backgroundSize_ = b.size; } else gpu_->destroy_texture(*texture);
+        }
     }
     ++envUploads_;
     irradiance_ = novo.irradiance;
     prefiltered_ = novo.prefiltered;
     iblLut_ = novo.brdf;
     prefilteredMips_ = novo.mips;
+    prefilteredSize_ = maps.prefiltered.size;
     return OkStatus;
 }
 
 namespace {
 /// Constrói os mapas de um ambiente (fora da thread de render).
-EnvironmentMaps build_for(const SceneEnvironment& env) {
+EnvironmentMaps build_for(const SceneEnvironment& env, const EnvironmentQuality& q) {
     if (env.hdri && env.hdri->width > 0 && !env.hdri->rgb.empty()) {
-        return build_environment_from_equirect(env.hdri->rgb.data(), env.hdri->width, env.hdri->height);
+        return build_environment_from_equirect(env.hdri->rgb.data(), env.hdri->width, env.hdri->height, q);
     }
-    return build_studio_environment();
+    return build_studio_environment(q);
 }
 /// A chave do ambiente na GPU: o HDRI (0 = estúdio neutro do projeto).
 u64 key_of(const SceneEnvironment& env) noexcept { return env.hdri ? env.hdriKey : 0ull; }
@@ -510,8 +528,11 @@ const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironme
         }
         envSets_.erase(envSets_.begin() + static_cast<ptrdiff_t>(pior));
     }
+    // Ambiente por objeto: só luz (sem fundo), na qualidade do preview.
+    EnvironmentQuality q = envPreview_;
+    q.backgroundSize = 0;
     EnvSet novo;
-    if (!upload_environment(build_for(env), novo).ok()) return nullptr;
+    if (!upload_environment(build_for(env, q), novo).ok()) return nullptr;
     novo.lastFrame = frameNumber;
     envSets_.emplace_back(key, novo);
     return &envSets_.back().second;
@@ -524,32 +545,53 @@ void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
         if (pendingEnv_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;   // ainda gerando
         const Status s = set_environment(pendingEnv_.get());
         if (!s.ok()) AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
-        else envKey_ = pendingKey_;
+        else { envKey_ = pendingKey_; envSpecTier_ = pendingSpecTier_; envBgTier_ = pendingBgTier_; }
     }
-    if (key == envKey_) return;
+    // Atendido: mesma chave, qualidade ≥ a do preview e fundo (se pedido).
+    // O que está na GPU nunca é rebaixado (um final do export serve ao preview).
+    const u32 wantBg = env.showBackground ? envPreview_.backgroundSize : 0u;
+    const bool same = key == envKey_;
+    if (same && envSpecTier_ >= envPreview_.specularSize && envBgTier_ >= wantBg) return;
     envRequested_ = true;
     pendingKey_ = key;
+    EnvironmentQuality q = envPreview_;
+    q.specularSize = same ? std::max(envSpecTier_, q.specularSize) : q.specularSize;
+    q.backgroundSize = same ? std::max(envBgTier_, wantBg) : wantBg;
+    pendingSpecTier_ = q.specularSize;
+    pendingBgTier_ = q.backgroundSize;
     SceneEnvironment copy = env;
-    pendingEnv_ = std::async(std::launch::async, [copy] { return build_for(copy); });
+    pendingEnv_ = std::async(std::launch::async, [copy, q] { return build_for(copy, q); });
 }
 
 void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
-    // Export: o ambiente CERTO já no primeiro quadro (sem esperar a troca).
+    // Export/captura: o ambiente CERTO, na qualidade final, já no primeiro
+    // quadro (sem esperar a troca). Um preview em andamento da mesma chave e
+    // qualidade serve; se for menor, espera e gera o final.
     if (!gpu_) return;
     const u64 key = key_of(env);
-    if (key == envKey_ && !pendingEnv_.valid()) return;
+    const u32 wantBg = env.showBackground ? envFinal_.backgroundSize : 0u;
+    auto enough = [&](u64 k, u32 spec, u32 bg) { return k == key && spec >= envFinal_.specularSize && bg >= wantBg; };
+    if (enough(envKey_, envSpecTier_, envBgTier_) && !pendingEnv_.valid()) return;
     EnvironmentMaps maps;
-    if (pendingEnv_.valid() && pendingKey_ == key) {
+    u32 spec = 0, bg = 0;
+    if (pendingEnv_.valid() && enough(pendingKey_, pendingSpecTier_, pendingBgTier_)) {
         maps = pendingEnv_.get();
+        spec = pendingSpecTier_;
+        bg = pendingBgTier_;
     } else {
         if (pendingEnv_.valid()) pendingEnv_.wait();
         pendingEnv_ = {};
-        if (key == envKey_) return;
-        maps = build_for(env);
+        if (enough(envKey_, envSpecTier_, envBgTier_)) return;
+        EnvironmentQuality q = envFinal_;
+        q.backgroundSize = key == envKey_ ? std::max(envBgTier_, wantBg) : wantBg;
+        q.specularSize = key == envKey_ ? std::max(envSpecTier_, q.specularSize) : q.specularSize;
+        maps = build_for(env, q);
+        spec = q.specularSize;
+        bg = q.backgroundSize;
     }
     envRequested_ = true;
     if (const Status s = set_environment(maps); !s.ok()) AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
-    else envKey_ = key;
+    else { envKey_ = key; envSpecTier_ = spec; envBgTier_ = bg; }
 }
 
 void SceneRenderer::shutdown() noexcept {
@@ -663,6 +705,10 @@ PipelineKey SceneRenderer::key_for(AlphaMode mode, bool doubleSided, bool skinne
     k.depthCompare = CompareOp::GreaterOrEqual;
     k.depthFormat = SurfaceFormat::Depth32F;
     k.cull = doubleSided ? CullMode::None : CullMode::Back;
+    // Passe da cena: MSAA e MRT do quadro; MASK por cobertura com MSAA.
+    k.sampleCount = static_cast<u8>(passSamples_);
+    k.hasColor1 = passMrt_;
+    k.alphaToCoverage = passA2C_ && mode == AlphaMode::Mask;
     // A face da frente do glTF (anti-horária vista de fora) continua anti-
     // horária no framebuffer: o giro de 180° em X (glTF → espaço da
     // composição) e o Y para baixo da projeção se cancelam. Travado pelo teste
@@ -680,10 +726,25 @@ PipelineKey SceneRenderer::plane_key() const noexcept {
     k.depthCompare = CompareOp::GreaterOrEqual;
     k.depthFormat = SurfaceFormat::Depth32F;
     k.cull = CullMode::None;                   // camada vista de costas continua visível
+    k.sampleCount = static_cast<u8>(passSamples_);
+    k.hasColor1 = passMrt_;
     return k;
 }
 
+u32 SceneRenderer::pass_samples() const noexcept {
+    return gpu_ && antialias_ ? gpu_->capabilities().msaa_samples(postMsaa_) : 1u;
+}
+
 void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
+    // As chaves do passe da cena dependem das amostras (qualidade) e do MRT:
+    // aquece o que a qualidade atual pede — modelos com MRT, planos com e sem.
+    auto* self = const_cast<SceneRenderer*>(this);
+    const u32 savedSamples = passSamples_;
+    const bool savedMrt = passMrt_, savedA2C = passA2C_;
+    self->passSamples_ = pass_samples();
+    self->passMrt_ = true;
+    self->passA2C_ = passSamples_ > 1 && gpu_ && gpu_->capabilities().alphaToOne;
+    const usize groundFirst = out.size();   // chão: variantes do reflexo (Ground.cpp)
     for (AlphaMode mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
         for (bool twoSided : {false, true}) {
             for (bool skinned : {false, true}) {
@@ -696,17 +757,32 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
             }
         }
     }
+    collect_ground_pipelines(out, groundFirst, out.size(), passSamples_);
     out.push_back(shadow_key(false));
     out.push_back(shadow_key(true));
     out.push_back(plane_key());
+    self->passMrt_ = false;
+    out.push_back(plane_key());
     auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
     sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
+    sky.sampleCount = static_cast<u8>(passSamples_);
+    sky.hasColor1 = true;
     out.push_back(sky);
+    // Pós do grupo.
+    out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_tonemap_frag, SurfaceFormat::RGBA16F));
+    out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_bloom_down_frag, SurfaceFormat::RGBA16F));
+    out.push_back(PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_post_bloom_up_frag,
+                                        SurfaceFormat::RGBA16F, true, BlendMode::Add));
+    out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_fxaa_frag, SurfaceFormat::RGBA16F));
+    self->passSamples_ = savedSamples;
+    self->passMrt_ = savedMrt;
+    self->passA2C_ = savedA2C;
 }
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                           u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes,
-                          const SceneParticleDraw* particles, u32 particleCount) noexcept {
+                          const SceneParticleDraw* particles, u32 particleCount, FGTexture* outDepth) noexcept {
+    if (outDepth) *outDepth = FGTexture{};
     if (frameNumber != statsFrame_) {
         stats_ = SceneStats{};
         statsFrame_ = frameNumber;
@@ -723,17 +799,53 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     request_environment(frame.environment);
     const bool ibl = irradiance_.valid();
 
+    // --- Alvos do passe da cena ----------------------------------------------
+    // MSAA (a qualidade pede, o aparelho corta) e MRT: 0 = 2D de exibição,
+    // 1 = cena HDR — só quando há luz de cena (modelo, texto 3D, céu). Os
+    // multiamostrados e a profundidade são TRANSITÓRIOS (vivem no tile: LAZY no
+    // Vulkan, memoryless no Metal); o resolve do fim do passe entrega os de 1
+    // amostra. O MSAA num alvo RGBA16F é caro em banda SÓ se sair do tile — e
+    // aqui ele não sai.
+    // Grupo só de fundo (ver o passe direto do céu mais abaixo): 1 amostra.
+    const bool skyOnly = frame.instances.empty() && frame.environment.showBackground && (!planes || planes->empty())
+                      && !(particles && particleCount);
+    passSamples_ = skyOnly ? 1u : pass_samples();
+    passMrt_ = wants_hdr(frame) && !skyOnly;
+    passA2C_ = passSamples_ > 1 && gpu_->capabilities().alphaToOne;
+    const bool msaa = passSamples_ > 1;
     TextureDesc cd;
     cd.width = width;
     cd.height = height;
     cd.format = SurfaceFormat::RGBA16F;
     cd.sampled = true;
     cd.renderTarget = true;
+    TextureDesc msd = cd;
+    msd.sampleCount = passSamples_;
+    msd.sampled = false;
+    msd.transient = true;
     TextureDesc dd = cd;
     dd.format = SurfaceFormat::Depth32F;
     dd.sampled = false;
+    dd.sampleCount = passSamples_;
+    dd.transient = true;
+    // Profundidade para quem lê depois: de 1 amostra direto (sem MSAA) ou pelo
+    // resolve da amostra 0 (com MSAA, onde o aparelho resolve profundidade).
+    const bool depthOut = outDepth && (!msaa || gpu_->capabilities().depthResolveSampleZero);
+    if (depthOut && !msaa) {
+        dd.sampled = true;
+        dd.transient = false;
+    }
     const FGTexture color = graph.create_texture("3d-cor", cd);
+    const FGTexture sceneHdr = passMrt_ ? graph.create_texture("3d-hdr", cd) : FGTexture{};
+    const FGTexture colorMs = msaa ? graph.create_texture("3d-cor-msaa", msd) : FGTexture{};
+    const FGTexture sceneMs = msaa && passMrt_ ? graph.create_texture("3d-hdr-msaa", msd) : FGTexture{};
     const FGTexture depth = graph.create_texture("3d-profundidade", dd);
+    FGTexture depthResolved{};
+    if (depthOut && msaa) {
+        TextureDesc dr = cd;
+        dr.format = SurfaceFormat::Depth32F;
+        depthResolved = graph.create_texture("3d-profundidade-1x", dr);
+    }
 
     const f32 aspect = static_cast<f32>(width) / static_cast<f32>(height);
     const Mat4 proj = frame.camera.imageTransform * reverse_z_perspective(frame.camera.fovY, aspect, frame.camera.nearZ);
@@ -745,7 +857,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     *headerStorage = {};
     SceneBlock& header = *headerStorage;
     header.viewProj = viewProj;
-    header.cameraPos = Vec4{frame.camera.position, frame.environment.exposure};
+    // A exposição do GRUPO é do pós (vale para céu, modelos e bloom juntos);
+    // no shader fica só a de um objeto com ambiente próprio (relativa).
+    header.cameraPos = Vec4{frame.camera.position, 1.0f};
     header.envParams = Vec4{frame.environment.intensity, ibl ? 1.0f : 0.0f, static_cast<f32>(prefilteredMips_),
                             frame.environment.rotation};
     header.skyColor = Vec4{frame.environment.sky, 1.0f};
@@ -903,8 +1017,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         b->baseColor = m.baseColor;
         b->emissive = Vec4{m.emissive * m.emissiveStrength, 0.0f};
         b->mr = Vec4{m.metallic, m.roughness, m.normalScale, m.occlusionStrength};
-        b->alpha = Vec4{m.alphaCutoff, static_cast<f32>(static_cast<u8>(m.alphaMode)), m.unlit ? 1.0f : 0.0f,
+        // MASK com MSAA vira o modo 3 (recorte por cobertura, ver pbr.frag).
+        const f32 alphaMode = m.alphaMode == AlphaMode::Mask && passA2C_ ? 3.0f
+                            : static_cast<f32>(static_cast<u8>(m.alphaMode));
+        b->alpha = Vec4{m.alphaCutoff, alphaMode, m.unlit ? 1.0f : 0.0f,
                         m.doubleSided ? 1.0f : 0.0f};
+        // Verniz (pintura de carro), IOR/specular (F0 do dielétrico) e
+        // transmissão (vidro fino) — lidos do glTF e antes ignorados.
+        b->clearcoat = Vec4{std::clamp(m.clearcoat, 0.0f, 1.0f), std::clamp(m.clearcoatRoughness, 0.0f, 1.0f),
+                            std::clamp(m.ior, 1.0f, 3.0f), std::clamp(m.specular, 0.0f, 1.0f)};
+        b->specularColor = Vec4{m.specularColor.x, m.specularColor.y, m.specularColor.z, std::clamp(m.transmission, 0.0f, 1.0f)};
         const TextureRef* refs[5] = {&m.baseColorTex, &m.metallicRoughnessTex, &m.normalTex, &m.occlusionTex, &m.emissiveTex};
         for (int k = 0; k < 5; ++k) {
             b->uvXform[k] = Vec4{refs[k]->offset.x, refs[k]->offset.y, refs[k]->scale.x, refs[k]->scale.y};
@@ -1060,8 +1182,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
 
 
     // --- Sombra da luz principal ------------------------------------------------
-    // Ortográfica ao longo da luz, ajustada à caixa dos modelos do grupo (com
-    // folga: a pose animada sai da caixa de repouso).
+    // Ortográfica ao longo da primeira direcional com sombra, ajustada à caixa
+    // dos PROJETORES no espaço da luz: vista da luz, a sombra de um objeto cai
+    // dentro da pegada dele — receptor fora dela nunca está na sombra, então o
+    // mapa inteiro serve aos texels que importam (antes: esfera da cena ×1,25).
+    // Estável: o lado é quantizado em degraus de 2^(1/4) e o centro preso à
+    // grade de texels do espaço da luz — o objeto que anda não faz a sombra
+    // dos outros "nadar", e a câmera não entra no ajuste. As caixas são as da
+    // pose ATUAL: nó animado (matriz do nó), morph (caixa deformada) e skin
+    // (união das juntas × caixa da primitiva, conservadora e barata).
     struct ShadowDraw {
         const GpuModel* model;
         const GpuPrimitive* prim;
@@ -1081,117 +1210,135 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             break;
         }
     }
+    // Nível (HeavyQuality → set_quality): amostras do PCF e da busca de
+    // bloqueadores do PCSS. ShadowSettings da composição só sobe o piso.
+    static constexpr u32 kPcfTaps[4] = {8, 16, 24, 32};
+    static constexpr u32 kBlockerTaps[4] = {0, 0, 12, 16};
+    const u32 shadowTier = std::min(shadowFilter_, 3u);
+    const u32 pcfTaps = std::clamp(std::max(kPcfTaps[shadowTier], frame.shadow.pcfSamples), 1u, 32u);
+    const u32 blockerTaps = kBlockerTaps[shadowTier] ? kBlockerTaps[shadowTier] : (frame.shadow.softShadows ? 8u : 0u);
+    const u32 mapSize = std::clamp(std::max(shadowSize_, std::min(frame.shadow.mapResolution, 4096u)), 256u, 4096u);
+    Vec4 shadowParams2{};
+    f32 shadowBiasDepth = 0.0f;
     if (shadowLight >= 0) {
-        Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
-        bool any = false;
-        for (const SceneInstance& inst : frame.instances) {
-            if (!inst.asset) continue;
-            const Aabb& b = inst.asset->bounds;
-            for (int c = 0; c < 8; ++c) {
-                const Vec3 pt{(c & 1) ? b.max.x : b.min.x, (c & 2) ? b.max.y : b.min.y, (c & 4) ? b.max.z : b.min.z};
-                const Vec3 w = inst.world.transform_point(pt);
-                lo = Vec3{std::min(lo.x, w.x), std::min(lo.y, w.y), std::min(lo.z, w.z)};
-                hi = Vec3{std::max(hi.x, w.x), std::max(hi.y, w.y), std::max(hi.z, w.z)};
-                any = true;
+        const SceneLight& sl = frame.lights[static_cast<usize>(shadowLight)];
+        const Vec3 fwd = sl.direction.normalized();
+        const Vec3 upRef = std::fabs(fwd.y) > 0.95f ? Vec3{1, 0, 0} : Vec3{0, -1, 0};
+        const Vec3 right = upRef.cross(fwd).normalized();
+        const Vec3 up = fwd.cross(right);
+        // Luz ← mundo, só rotação: a grade de texels vive neste espaço.
+        Mat4 lightRot;
+        lightRot.col[0] = Vec4{right.x, up.x, fwd.x, 0};
+        lightRot.col[1] = Vec4{right.y, up.y, fwd.y, 0};
+        lightRot.col[2] = Vec4{right.z, up.z, fwd.z, 0};
+        lightRot.col[3] = Vec4{0, 0, 0, 1};
+        Aabb ls;   // projetores, no espaço da luz
+        for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
+            const SceneInstance& inst = frame.instances[instIndex];
+            if (!inst.asset || !inst.castShadows) continue;
+            const GpuModel* gm = model(inst.assetKey, *inst.asset);
+            if (!gm) continue;
+            const std::vector<Node>& nodes = inst.asset->nodes;
+            for (usize n = 0; n < nodes.size(); ++n) {
+                const i32 mi = nodes[n].mesh;
+                if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
+                const i32 skinIndex = nodes[n].skin;
+                const bool skinnedNode = joints.valid() && skinIndex >= 0
+                                       && skinIndex < static_cast<i32>(inst.skinJointOffset.size()) && gm->skin.valid();
+                const Mat4 world = skinnedNode ? inst.world
+                                               : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
+                Aabb skinBox;   // primitivas com skin deste nó (espaço de bind)
+                for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
+                    const GpuPrimitive& p = gm->meshes[mi][primIndex];
+                    const MorphJob* mj = morph_for(instIndex, n, primIndex);
+                    const GpuMaterial* mat = material_for(inst, *gm, p.material);
+                    if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
+                    const bool sk = skinnedNode && p.skinned;
+                    auto pipe = shaders_->pipeline(shadow_key(sk));
+                    if (!pipe.ok()) continue;
+                    ShadowDraw sd{};
+                    sd.model = gm;
+                    sd.prim = &p;
+                    sd.push.model = world;   // × luz depois do ajuste
+                    sd.push.normalCol[0].x = sk ? static_cast<f32>(instJointBase[instIndex]
+                                                                    + inst.skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
+                    sd.pipeline = *pipe;
+                    sd.skinned = sk;
+                    sd.morph = mj != nullptr;
+                    sd.morphPos = mj ? mj->posOffset : 0;
+                    sd.instanceCount = 1;
+                    shadowDraws.push_back(sd);
+                    const Aabb& box = mj && mj->bounds.valid() ? mj->bounds : p.bounds;
+                    if (sk) skinBox.add(box);
+                    else if (box.valid()) ls.add(box.transformed(lightRot * world));
+                }
+                if (skinBox.valid()) {
+                    const usize first = inst.skinJointOffset[static_cast<usize>(skinIndex)];
+                    const usize last = static_cast<usize>(skinIndex) + 1 < inst.skinJointOffset.size()
+                                     ? inst.skinJointOffset[static_cast<usize>(skinIndex) + 1] : inst.jointMatrices.size();
+                    const Mat4 lw = lightRot * inst.world;
+                    for (usize j = first; j < last && j < inst.jointMatrices.size(); ++j)
+                        ls.add(skinBox.transformed(lw * inst.jointMatrices[j]));
+                }
             }
         }
-        // Animated morphs can extend far beyond the imported rest bounds.
-        // Bounds were accumulated in the existing deformation pass; fitting
-        // costs only eight transformed corners per active primitive.
-        for (const MorphJob& job : morphJobs) {
-            if (!job.bounds.valid()) continue;
-            const SceneInstance& inst = frame.instances[job.inst];
-            const Mat4 world = inst.world * (job.node < inst.nodeWorld.size() ? inst.nodeWorld[job.node] : Mat4::identity());
-            for (int c = 0; c < 8; ++c) {
-                const Vec3 p{(c & 1) ? job.bounds.max.x : job.bounds.min.x,
-                             (c & 2) ? job.bounds.max.y : job.bounds.min.y,
-                             (c & 4) ? job.bounds.max.z : job.bounds.min.z};
-                const Vec3 w = world.transform_point(p);
-                lo = Vec3{std::min(lo.x, w.x), std::min(lo.y, w.y), std::min(lo.z, w.z)};
-                hi = Vec3{std::max(hi.x, w.x), std::max(hi.y, w.y), std::max(hi.z, w.z)};
-                any = true;
-            }
-        }
-        if (any) {
-            const Vec3 center = (lo + hi) * 0.5f;
-            const f32 radius = std::max(1.0f, (hi - lo).length() * 0.5f * 1.25f);
-            const Vec3 fwd = frame.lights[static_cast<usize>(shadowLight)].direction.normalized();
-            const Vec3 upRef = std::fabs(fwd.y) > 0.95f ? Vec3{1, 0, 0} : Vec3{0, -1, 0};
-            const Vec3 right = upRef.cross(fwd).normalized();
-            const Vec3 up = fwd.cross(right);
-            const Vec3 eye = center - fwd * (radius * 2.0f);
-            Mat4 view;
-            view.col[0] = Vec4{right.x, up.x, fwd.x, 0};
-            view.col[1] = Vec4{right.y, up.y, fwd.y, 0};
-            view.col[2] = Vec4{right.z, up.z, fwd.z, 0};
-            view.col[3] = Vec4{-right.dot(eye), -up.dot(eye), -fwd.dot(eye), 1};
-            // Ortográfica: x,y em ±radius → [−1, 1]; z em [radius, 3·radius] → [0, 1].
+        if (ls.valid() && !shadowDraws.empty()) {
+            // Folga: o raio máximo da penumbra (2·tan do raio angular da luz,
+            // até 0,12 do mapa — common/shadow.glsl) dos dois lados + 4%;
+            // depois o degrau de 2^(1/4).
+            const f32 extent = std::max(ls.max.x - ls.min.x, ls.max.y - ls.min.y);
+            const f32 maxPenumbra = std::min(2.0f * std::max(sl.sourceRadius, 0.0f), 0.12f);
+            f32 size = std::max(extent * 1.04f / (1.0f - 2.0f * maxPenumbra), 1.0f);
+            size = std::exp2(std::ceil(std::log2(size) * 4.0f) * 0.25f);
+            const f32 texelWorld = size / static_cast<f32>(mapSize);
+            const f32 cx = std::round((ls.min.x + ls.max.x) * 0.5f / texelWorld) * texelWorld;
+            const f32 cy = std::round((ls.min.y + ls.max.y) * 0.5f / texelWorld) * texelWorld;
+            // Profundidade: só os projetores (o receptor atrás do último fica
+            // em 1 no shader e continua recebendo). Mesmo degrau na faixa.
+            const f32 zPad = std::max((ls.max.z - ls.min.z) * 0.05f, 4.0f * texelWorld);
+            f32 zSpan = std::max((ls.max.z - ls.min.z + 2.0f * zPad) * 1.02f, 1.0f);
+            zSpan = std::exp2(std::ceil(std::log2(zSpan) * 4.0f) * 0.25f);
+            const f32 zStep = zSpan / 64.0f;
+            const f32 z0 = std::floor((ls.min.z - zPad) / zStep) * zStep;
             Mat4 ortho;
-            ortho.col[0] = Vec4{1.0f / radius, 0, 0, 0};
-            ortho.col[1] = Vec4{0, 1.0f / radius, 0, 0};
-            ortho.col[2] = Vec4{0, 0, 1.0f / (radius * 2.0f), 0};
-            ortho.col[3] = Vec4{0, 0, -radius / (radius * 2.0f), 1};
-            const Mat4 lightViewProj = ortho * view;
+            ortho.col[0] = Vec4{2.0f / size, 0, 0, 0};
+            ortho.col[1] = Vec4{0, 2.0f / size, 0, 0};
+            ortho.col[2] = Vec4{0, 0, 1.0f / zSpan, 0};
+            ortho.col[3] = Vec4{-cx * 2.0f / size, -cy * 2.0f / size, -z0 / zSpan, 1};
+            const Mat4 lightViewProj = ortho * lightRot;
             // NDC → uv do mapa (o Y do Vulkan já desce com o v da textura).
             Mat4 toUv;
             toUv.col[0] = Vec4{0.5f, 0, 0, 0};
             toUv.col[1] = Vec4{0, 0.5f, 0, 0};
             toUv.col[3] = Vec4{0.5f, 0.5f, 0, 1};
             shadowMatrix = toUv * lightViewProj;
-            for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
-                const SceneInstance& inst = frame.instances[instIndex];
-                if (!inst.asset || !inst.castShadows) continue;
-                const GpuModel* gm = model(inst.assetKey, *inst.asset);
-                if (!gm) continue;
-                const std::vector<Node>& nodes = inst.asset->nodes;
-                for (usize n = 0; n < nodes.size(); ++n) {
-                    const i32 mi = nodes[n].mesh;
-                    if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
-                    const i32 skinIndex = nodes[n].skin;
-                    const bool skinnedNode = joints.valid() && skinIndex >= 0
-                                           && skinIndex < static_cast<i32>(inst.skinJointOffset.size()) && gm->skin.valid();
-                    const Mat4 world = skinnedNode ? inst.world
-                                                   : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
-                    for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
-                        const GpuPrimitive& p = gm->meshes[mi][primIndex];
-                        const MorphJob* mj = morph_for(instIndex, n, primIndex);
-                        const GpuMaterial* mat = material_for(inst, *gm, p.material);
-                        if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
-                        const bool sk = skinnedNode && p.skinned;
-                        auto pipe = shaders_->pipeline(shadow_key(sk));
-                        if (!pipe.ok()) continue;
-                        ShadowDraw sd{};
-                        sd.model = gm;
-                        sd.prim = &p;
-                        sd.push.model = lightViewProj * world;
-                        sd.push.normalCol[0].x = sk ? static_cast<f32>(instJointBase[instIndex]
-                                                                        + inst.skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
-                        sd.pipeline = *pipe;
-                        sd.skinned = sk;
-                        sd.morph = mj != nullptr;
-                        sd.morphPos = mj ? mj->posOffset : 0;
-                        sd.instanceCount = 1;
-                        shadowDraws.push_back(sd);
-                    }
-                }
-            }
+            for (ShadowDraw& d : shadowDraws) d.push.model = lightViewProj * d.push.model;
+            // Unidades do shader (common/shadow.glsl): viés em profundidade,
+            // normal offset em px, k = tan·R/S (raio uv por profundidade), S/R.
+            shadowBiasDepth = std::max(sl.shadowBias, 0.0f) / 0.001f * 0.5f * texelWorld / zSpan;
+            const f32 normalOffset = std::max(frame.shadow.normalBias, 0.0f) / 0.02f * 1.5f * texelWorld;
+            shadowParams2 = Vec4{std::max(sl.sourceRadius, 0.0f) * zSpan / size, normalOffset, size / zSpan,
+                                 static_cast<f32>(blockerTaps)};
+        } else {
+            shadowDraws.clear();
         }
     }
     const bool shadowsOn = !shadowDraws.empty();
     header.shadowMatrix = shadowMatrix;
-    // x: 0 = sem sombra; 1 = PCF 6×6 (export), 2 = 2×2 bilinear, 3 = uma amostra (preview, 8E).
-    const f32 filterCode = shadowFilter_ >= 2 ? 1.0f : (shadowFilter_ == 1 ? 2.0f : 3.0f);
-    header.shadowParams = Vec4{shadowsOn ? filterCode : 0.0f, 1.0f / static_cast<f32>(shadowSize_), 0.0015f,
-                               static_cast<f32>(shadowLight)};
+    header.shadowParams = Vec4{shadowsOn ? static_cast<f32>(pcfTaps) : 0.0f, 1.0f / static_cast<f32>(mapSize),
+                               shadowBiasDepth, static_cast<f32>(shadowLight)};
+    header.shadowParams2 = shadowParams2;
+    // Sem sombra o mapa é 1×1 limpo: o slot de comparação do PBR precisa de uma
+    // textura de PROFUNDIDADE (Metal: depth2d; Vulkan: formato com comparação).
     FGTexture shadowTex{};
-    if (shadowsOn) {
+    {
         TextureDesc sd;
-        sd.width = sd.height = shadowSize_;
+        sd.width = sd.height = shadowsOn ? mapSize : 1u;
         sd.format = SurfaceFormat::Depth32F;
         sd.sampled = true;
         sd.renderTarget = true;
         shadowTex = graph.create_texture("3d-sombra", sd);
-        stats_.shadowMapSize = std::max(stats_.shadowMapSize, shadowSize_);
+        if (shadowsOn) stats_.shadowMapSize = std::max(stats_.shadowMapSize, mapSize);
     }
 
 
@@ -1229,7 +1376,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 const GpuMaterial* mat = material_for(inst, *gm, p.material);
                 const bool skinDraw = skinnedNode && p.skinned;
-                PipelineKey key = key_for(mat->factors.alphaMode, mat->factors.doubleSided, skinDraw);
+                // Vidro (KHR_materials_transmission) mistura como transparente:
+                // o que está atrás aparece e o reflexo continua inteiro.
+                const AlphaMode drawMode = mat->factors.transmission > 0.0f ? AlphaMode::Blend : mat->factors.alphaMode;
+                PipelineKey key = key_for(drawMode, mat->factors.doubleSided, skinDraw);
                 // A reflected node/parent reverses winding without changing
                 // which authored surface is its front face.
                 if (mirrored && !mat->factors.doubleSided) key.frontFaceCCW = false;
@@ -1266,7 +1416,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 d.viewDepth = viewFromLocal.transform_point(p.bounds.center()).z;
                 d.sortKey = static_cast<u32>(pipe->id & 0xFFFF) << 16 | static_cast<u32>(reinterpret_cast<uintptr_t>(mat) >> 4 & 0xFFFF);
-                (mat->factors.alphaMode == AlphaMode::Blend ? blended : opaque).push_back(d);
+                (drawMode == AlphaMode::Blend ? blended : opaque).push_back(d);
                 ++stats_.visiblePrimitives;
                 stats_.triangles += d.indexCount / 3;
             }
@@ -1373,11 +1523,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!instBuf.valid()) return false;
     }
 
-    if (shadowsOn) {
+    {
+        // Sem sombra: o passe só limpa o mapa 1×1 (nenhum desenho).
         const u32 n = static_cast<u32>(shadowDraws.size());
-        ShadowDraw* sl = arena.alloc_array<ShadowDraw>(n);
-        if (!sl) return false;
-        std::copy(shadowDraws.begin(), shadowDraws.end(), sl);
+        ShadowDraw* sl = n ? arena.alloc_array<ShadowDraw>(n) : nullptr;
+        if (n && !sl) return false;
+        if (n) std::copy(shadowDraws.begin(), shadowDraws.end(), sl);
         stats_.shadowDrawCalls += n;
         struct SCap {
             ShadowDraw* draws;
@@ -1430,7 +1581,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     if (particles && particleCount) {
         partList = arena.alloc_array<SceneParticleDraw>(particleCount);
         if (!partList) return false;
-        for (u32 i = 0; i < particleCount; ++i) partList[i] = particles[i];
+        for (u32 i = 0; i < particleCount; ++i) {
+            partList[i] = particles[i];
+            // O pipeline da partícula tem de casar com o passe: amostras e MRT.
+            PipelineKey k = particles[i].key;
+            if (k.fragment == ShaderId::Count) continue;
+            k.sampleCount = static_cast<u8>(passSamples_);
+            k.hasColor1 = passMrt_;
+            if (auto pp = shaders_->pipeline(k); pp.ok()) partList[i].pipeline = *pp;
+        }
     }
     const u32 opaqueCount = static_cast<u32>(opaque.size());
     for (usize i = 0; i < opaque.size(); ++i) list[i] = opaque[i];
@@ -1447,6 +1606,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         BufferHandle joints;
         FGTexture shadow;
         u64 nearestSampler;
+        u64 compareSampler;
         BufferHandle morph;
         BufferHandle inst;
         ScenePlane* planes;
@@ -1459,23 +1619,104 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
-          shaders_->sampler(CommonSampler::NearestClamp).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe,
+          shaders_->sampler(CommonSampler::NearestClamp).id, shaders_->sampler(CommonSampler::ShadowCompare).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe,
           partList, partList ? particleCount : 0u, envSlots[0]};
 
+    // ===== CHÃO DO GRUPO 3D (Ground.cpp) =========================================
+    // Reflexo planar (os opacos espelhados, 1 amostra) e sombra de contato
+    // (profundidade vista de baixo) em passes próprios ANTES do principal; o
+    // plano é desenhado no principal depois dos opacos (`draw_ground`).
+    GroundDraw groundDraw{};
+    if (frame.floor.mode != 0 && passMrt_) {
+        GroundInputs gi;
+        gi.frame = &frame;
+        gi.header = &header;
+        gi.viewProj = viewProj;
+        gi.width = width;
+        gi.height = height;
+        gi.samples = passSamples_;
+        gi.exportQuality = !lodHysteresis_;       // export/captura: sem histerese de LOD
+        gi.lowTier = frame.post.quality == 1u;    // BAIXO: sem reflexo planar
+        gi.white = white_;
+        gi.black = black_;
+        gi.mesh.white = white_;
+        gi.mesh.flatNormal = flatNormal_;
+        gi.mesh.irradiance = cap.irradiance;
+        gi.mesh.prefiltered = cap.prefiltered;
+        gi.mesh.brdf = cap.brdf;
+        gi.mesh.cubeSampler = cubeSampler_;
+        gi.mesh.linearSampler = cap.linearSampler;
+        gi.mesh.clampSampler = cap.clampSampler;
+        gi.mesh.nearestSampler = cap.nearestSampler;
+        gi.mesh.compareSampler = cap.compareSampler;
+        gi.mesh.shadow = shadowTex;
+        gi.mesh.joints = joints;
+        gi.mesh.morph = morphBuf;
+        gi.mesh.inst = instBuf;
+        groundDraw = build_ground(graph, arena, *shaders_, gi, list, opaqueCount, [this](const Draw& d) {
+            const GpuMaterial& m = *d.material;
+            PipelineKey k = key_for(m.factors.alphaMode == AlphaMode::Mask ? AlphaMode::Mask : AlphaMode::Opaque,
+                                    m.factors.doubleSided, d.skinned);
+            const Mat4& w = d.push.model;
+            const Vec3 x{w.col[0].x, w.col[0].y, w.col[0].z}, y{w.col[1].x, w.col[1].y, w.col[1].z},
+                       z{w.col[2].x, w.col[2].y, w.col[2].z};
+            if (x.dot(y.cross(z)) < 0.0f && !m.factors.doubleSided) k.frontFaceCCW = false;
+            return k;
+        });
+    }
+    // ===== fim do chão ==========================================================
     PipelineHandle skyPipe{};
     const bool skyReady = frame.environment.showBackground && background_.valid() && envKey_ == key_of(frame.environment);
     if (skyReady) {
         auto key = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
         key.hasDepth = true; key.depthFormat = SurfaceFormat::Depth32F;
+        key.sampleCount = static_cast<u8>(passSamples_);
+        key.hasColor1 = passMrt_;
         auto pipe = shaders_->pipeline(key); if (pipe.ok()) skyPipe = *pipe;
     }
-    struct SkyBlock { Mat4 view; Vec4 projection; Vec4 light; };
-    const SkyBlock sky{frame.camera.view, Vec4{aspect, std::tan(frame.camera.fovY*.5f), 0, 0},
-        Vec4{frame.environment.rotation, frame.environment.intensity, frame.environment.exposure, 0}};
+    struct SkyBlock { Mat4 view; Vec4 projection; Vec4 light; Vec4 post; };
+    // Fundo: LOD pela pegada do pixel (textureGrad no shader) × o desfoque;
+    // desfoque forte mistura o especular pré-filtrado (liso, GGX).
+    const BackgroundSampling bgs = background_sampling(frame.environment.backgroundBlur, frame.camera.fovY, height,
+                                                       backgroundSize_, prefilteredMips_);
+    const SkyBlock sky{frame.camera.view, Vec4{aspect, std::tan(frame.camera.fovY*.5f), bgs.gradScale, bgs.specLod},
+        // Exposição do grupo = 1 aqui: ela é aplicada no pós, junto dos modelos.
+        Vec4{frame.environment.rotation, frame.environment.intensity, 1.0f, bgs.specBlend}, Vec4{}};
     const TextureHandle skyTexture = background_;
+    // Grupo SÓ de fundo (o panorama no fundo da pilha, sem modelo, plano,
+    // partícula nem chão): um passe de tela cheia de 1 amostra, sem
+    // profundidade e sem pós — o tone map vai no próprio shader do céu. Custa
+    // um passe, não um passe 3D com MSAA + a cadeia do pós.
+    if (frame.instances.empty() && planeCount == 0 && !partList && !groundDraw.valid() && frame.environment.showBackground) {
+        PipelineHandle direct{};
+        if (skyReady) {
+            auto key = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag,
+                                             SurfaceFormat::RGBA16F);
+            if (auto pipe = shaders_->pipeline(key); pipe.ok()) direct = *pipe;
+        }
+        SkyBlock skyDirect = sky;
+        skyDirect.post = Vec4{std::clamp(frame.environment.exposure, 0.01f, 64.0f),
+                              frame.post.toneMapper >= 1 ? 1.0f : 0.0f, 1.0f, 0.0f};
+        struct SkyCap { PipelineHandle p; TextureHandle panorama, blurred; SamplerHandle sampler; SkyBlock u; }
+            skyCap{direct, skyTexture, cap.prefiltered, cubeSampler_, skyDirect};
+        graph.add_raster_pass("3d-fundo", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                              [skyCap](PassContext& pc) {
+            if (!skyCap.p.valid()) return;   // ambiente ainda gerando: transparente até ficar pronto
+            pc.cmds.bind_pipeline(skyCap.p);
+            pc.cmds.set_uniforms(&skyCap.u, sizeof(skyCap.u));
+            pc.cmds.bind_texture(0, skyCap.panorama, skyCap.sampler);
+            pc.cmds.bind_texture(1, skyCap.blurred, skyCap.sampler);
+            pc.cmds.draw(3);
+        });
+        outColor = color;
+        return true;
+    }
     // Z reverso: limpa a profundidade com 0 (o infinito).
-    const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, color, LoadOp::Clear, Vec4{0, 0, 0, 0}, depth,
-                                LoadOp::Clear, false, 0.0f, [cap, overriddenMaterials, skyPipe, skyTexture, sky](PassContext& pc) {
+    // Com MSAA desenha nos multiamostrados (transitórios) e resolve no fim;
+    // sem, direto nos de 1 amostra.
+    const u32 pbrPass = graph.add_raster_pass_depth("3d-pbr", PassStage::Scene3D, msaa ? colorMs : color, LoadOp::Clear,
+                                Vec4{0, 0, 0, 0}, depth, LoadOp::Clear, depthOut && !msaa, 0.0f,
+                                [cap, overriddenMaterials, skyPipe, skyTexture, sky, groundDraw](PassContext& pc) {
         CommandList& c = pc.cmds;
         PipelineHandle bound{};
         const GpuModel* boundModel = nullptr;
@@ -1483,7 +1724,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         const EnvSlot* boundEnv = nullptr;
         if (skyPipe.valid()) {
             c.bind_pipeline(skyPipe); c.set_uniforms(&sky, sizeof(sky));
-            c.bind_texture(0, skyTexture, cap.cubeSampler); c.draw(3);
+            c.bind_texture(0, skyTexture, cap.cubeSampler);
+            c.bind_texture(1, cap.prefiltered, cap.cubeSampler);   // desfoque forte do fundo
+            c.draw(3);
         }
         auto drawPlanes = [&]() {
             if (!cap.planeCount) return;
@@ -1500,7 +1743,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             boundModel = nullptr;
         };
         for (u32 i = 0; i < cap.count; ++i) {
-            if (i == cap.opaqueCount) drawPlanes();
+            if (i == cap.opaqueCount) {
+                if (groundDraw.valid()) { draw_ground(c, pc, groundDraw); bound = PipelineHandle{}; boundMat = nullptr; boundEnv = nullptr; }   // chão
+                drawPlanes();
+            }
             const Draw& d = cap.draws[i];
             if (!(d.pipeline == bound)) {
                 c.bind_pipeline(d.pipeline);
@@ -1520,7 +1766,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 c.bind_texture(5, e->irradiance, cap.cubeSampler);
                 c.bind_texture(6, e->prefiltered, cap.cubeSampler);
                 c.bind_texture(7, e->brdf, SamplerHandle{cap.clampSampler});
-                c.bind_texture(8, cap.shadow.valid() ? pc.texture(cap.shadow) : cap.white, SamplerHandle{cap.nearestSampler});
+                // 8 = comparação do hardware (PCF); 11 = o mesmo mapa cru (busca do PCSS).
+                c.bind_texture(8, pc.texture(cap.shadow), SamplerHandle{cap.compareSampler});
+                c.bind_texture(11, pc.texture(cap.shadow), SamplerHandle{cap.nearestSampler});
                 boundMat = d.material;
                 boundEnv = d.env;
             }
@@ -1552,7 +1800,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             c.push_constants(&d.push, sizeof(MeshPush));
             c.draw_indexed(d.indexCount, std::max(1u, d.instanceCount), d.firstIndex, d.prim->vertexOffset, 0);
         }
-        if (cap.opaqueCount >= cap.count) drawPlanes();
+        if (cap.opaqueCount >= cap.count) {
+            draw_ground(c, pc, groundDraw);   // chão (sem transparentes na lista)
+            drawPlanes();
+        }
         // Partículas: testam o depth de modelos e planos, não escrevem nele.
         for (u32 k = 0; k < cap.partCount; ++k) {
             const SceneParticleDraw& d = cap.parts[k];
@@ -1570,7 +1821,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             c.draw_indexed(6, d.instances, 0, 0, 0);
         }
     });
+    if (passMrt_) graph.set_color1(pbrPass, msaa ? sceneMs : sceneHdr);
+    if (msaa) graph.set_resolve(pbrPass, color, passMrt_ ? sceneHdr : FGTexture{}, depthResolved);
+    if (outDepth && depthOut) *outDepth = msaa ? depthResolved : depth;
     if (shadowTex.valid()) graph.read(pbrPass, shadowTex);
+    ground_reads(graph, pbrPass, groundDraw);   // chão
     for (u32 k = 0; k < planeCount; ++k) graph.read(pbrPass, planeList[k].texture);
     // Memória residente: por modelo (instâncias do mesmo asset dividem malha,
     // texturas e materiais — um GpuModel por asset).
@@ -1580,8 +1835,155 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         stats_.geometryBytes += e.model->geometryBytes;
         stats_.textureBytes += e.model->textureBytes;
     }
-    outColor = color;
+    // --- Pós do grupo --------------------------------------------------------
+    // Com luz de cena: exposição → bloom → tone map → + 2D. Sem (só planos e
+    // partículas): o alvo de exibição já é a saída, como sempre foi.
+    FGTexture result = passMrt_ ? build_post(graph, frame, width, height, color, sceneHdr) : color;
+    if (!result.valid()) result = color;
+    // Sem MSAA (GLES, nível BAIXO): FXAA na imagem já em espaço de exibição.
+    // FXAA: nível BAIXO, ou o aparelho não tem o MSAA pedido (GLES).
+    if (!msaa && (postFxaa_ || postMsaa_ > 1) && antialias_) {
+        const FGTexture aa = build_fxaa(graph, width, height, result);
+        if (aa.valid()) result = aa;
+    }
+    outColor = result;
     return true;
+}
+
+FGTexture SceneRenderer::build_post(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
+                                    FGTexture display, FGTexture scene) noexcept {
+    const u64 linearClamp = shaders_->sampler(CommonSampler::LinearClamp).id;
+    auto tonemapPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_tonemap_frag, SurfaceFormat::RGBA16F));
+    if (!tonemapPipe.ok()) return FGTexture{};
+    const f32 exposure = std::clamp(frame.environment.exposure, 0.01f, 64.0f);
+
+    // --- Bloom (Jimenez 2014): descida de 13 amostras a partir de 1/div da
+    // resolução (o primeiro nível já decodifica, expõe, aplica o limiar e a
+    // média de Karis), subida em tenda somada nível a nível. -----------------
+    const ScenePost& post = frame.post;
+    const f32 intensity = std::clamp(post.bloomIntensity, 0.0f, 4.0f);
+    const bool bloomOn = post.bloom && intensity > 0.0f;
+    constexpr u32 kMaxLevels = 8;
+    FGTexture levels[kMaxLevels]{};
+    u32 lw[kMaxLevels]{}, lh[kMaxLevels]{};
+    u32 levelCount = 0;
+    if (bloomOn) {
+        auto downPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_bloom_down_frag, SurfaceFormat::RGBA16F));
+        auto upPipe = shaders_->pipeline(PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_post_bloom_up_frag,
+                                                               SurfaceFormat::RGBA16F, true, BlendMode::Add));
+        if (downPipe.ok() && upPipe.ok()) {
+            u32 w = std::max(1u, width / bloomDiv_), h = std::max(1u, height / bloomDiv_);
+            const u32 want = std::min(bloomLevels_, kMaxLevels);
+            // Para quando o menor lado fica abaixo de 4 px: nível que não tem
+            // mais o que espalhar só custa um passe.
+            while (levelCount < want && std::min(w, h) >= 4) {
+                TextureDesc d;
+                d.width = w;
+                d.height = h;
+                d.format = SurfaceFormat::RGBA16F;
+                d.sampled = true;
+                d.renderTarget = true;
+                levels[levelCount] = graph.create_texture("3d-bloom", d);
+                lw[levelCount] = w;
+                lh[levelCount] = h;
+                ++levelCount;
+                w = std::max(1u, w / 2);
+                h = std::max(1u, h / 2);
+            }
+            struct DownParams { Vec4 texel; Vec4 cfg; };
+            for (u32 i = 0; i < levelCount; ++i) {
+                const bool first = i == 0;
+                const FGTexture src = first ? scene : levels[i - 1];
+                const f32 sw = static_cast<f32>(first ? width : lw[i - 1]);
+                const f32 sh = static_cast<f32>(first ? height : lh[i - 1]);
+                const f32 threshold = std::max(0.0f, post.bloomThreshold);
+                const DownParams params{Vec4{1.0f / sw, 1.0f / sh, first ? 1.0f : 0.0f, threshold},
+                                        Vec4{std::max(threshold * 0.2f, 1e-3f), exposure, 0, 0}};
+                struct Cap { PipelineHandle p; FGTexture src; u64 sampler; DownParams u; } cap{*downPipe, src, linearClamp, params};
+                const u32 pass = graph.add_raster_pass("3d-bloom-desce", PassStage::PostProcess, levels[i], LoadOp::DontCare,
+                                                       Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                    pc.cmds.bind_pipeline(cap.p);
+                    pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+                    pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
+                    pc.cmds.draw(3);
+                });
+                graph.read(pass, src);
+            }
+            for (u32 i = levelCount; i-- > 1;) {
+                const Vec4 texel{1.0f / static_cast<f32>(lw[i]), 1.0f / static_cast<f32>(lh[i]), 1.0f, 0.0f};
+                struct Cap { PipelineHandle p; FGTexture src; u64 sampler; Vec4 u; } cap{*upPipe, levels[i], linearClamp, texel};
+                const u32 pass = graph.add_raster_pass("3d-bloom-sobe", PassStage::PostProcess, levels[i - 1], LoadOp::Load,
+                                                       Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                    pc.cmds.bind_pipeline(cap.p);
+                    pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+                    pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
+                    pc.cmds.draw(3);
+                });
+                graph.read(pass, levels[i]);
+            }
+        }
+    }
+
+    // --- Tone map + 2D -------------------------------------------------------
+    // Força do bloom: com limiar (o padrão, 1,25 com joelho de 20%: só a luz
+    // HDR de verdade — farol, emissivo, reflexo do sol — espalha; a pintura
+    // difusa perto de 1 não ganha halo), soma de intensidade/10 (0,6 → 6%).
+    // Sem limiar, mistura conservadora de intensidade/15 (0,6 → 4%, estilo
+    // COD/Unreal: tudo espalha um pouco).
+    const bool additive = post.bloomThreshold > 0.0f;
+    const f32 mode = levelCount ? (additive ? 2.0f : 1.0f) : 0.0f;
+    const f32 strength = additive ? intensity * 0.1f : std::min(intensity / 15.0f, 1.0f);
+    struct ToneParams { Vec4 cfg; Vec4 bloom; };
+    const ToneParams tp{Vec4{exposure, strength, mode, post.toneMapper >= 1 ? 1.0f : 0.0f},
+                        Vec4{levelCount ? 1.0f / static_cast<f32>(levelCount) : 0.0f, 0, 0, 0}};
+    TextureDesc od;
+    od.width = width;
+    od.height = height;
+    od.format = SurfaceFormat::RGBA16F;
+    od.sampled = true;
+    od.renderTarget = true;
+    const FGTexture out = graph.create_texture("3d-saida", od);
+    const FGTexture bloom = levelCount ? levels[0] : display;
+    struct Cap { PipelineHandle p; FGTexture scene, display, bloom; u64 sampler; ToneParams u; }
+        cap{*tonemapPipe, scene, display, bloom, linearClamp, tp};
+    const u32 pass = graph.add_raster_pass("3d-tonemap", PassStage::PostProcess, out, LoadOp::DontCare, Vec4{0, 0, 0, 0},
+                                           [cap](PassContext& pc) {
+        pc.cmds.bind_pipeline(cap.p);
+        pc.cmds.bind_texture(0, pc.texture(cap.scene), SamplerHandle{cap.sampler});
+        pc.cmds.bind_texture(1, pc.texture(cap.display), SamplerHandle{cap.sampler});
+        pc.cmds.bind_texture(2, pc.texture(cap.bloom), SamplerHandle{cap.sampler});
+        pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
+        pc.cmds.draw(3);
+    });
+    graph.read(pass, scene);
+    graph.read(pass, display);
+    if (levelCount) graph.read(pass, levels[0]);
+    return out;
+}
+
+FGTexture SceneRenderer::build_fxaa(FrameGraph& graph, u32 width, u32 height, FGTexture src) noexcept {
+    auto pipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_fxaa_frag, SurfaceFormat::RGBA16F));
+    if (!pipe.ok()) return FGTexture{};
+    TextureDesc d;
+    d.width = width;
+    d.height = height;
+    d.format = SurfaceFormat::RGBA16F;
+    d.sampled = true;
+    d.renderTarget = true;
+    const FGTexture out = graph.create_texture("3d-fxaa", d);
+    // Subpixel 0,75 e limiar 0,125: o "alta qualidade" do FXAA 3.11.
+    const Vec4 params{1.0f / static_cast<f32>(width), 1.0f / static_cast<f32>(height), 0.75f, 0.125f};
+    struct Cap { PipelineHandle p; FGTexture src; u64 sampler; Vec4 u; }
+        cap{*pipe, src, shaders_->sampler(CommonSampler::LinearClamp).id, params};
+    const u32 pass = graph.add_raster_pass("3d-fxaa", PassStage::PostProcess, out, LoadOp::DontCare, Vec4{0, 0, 0, 0},
+                                           [cap](PassContext& pc) {
+        pc.cmds.bind_pipeline(cap.p);
+        pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+        pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
+        pc.cmds.draw(3);
+    });
+    graph.read(pass, src);
+    return out;
 }
 
 } // namespace aurea::scene3d

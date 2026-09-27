@@ -45,18 +45,50 @@ struct EnvironmentSettings {
     Color   ambientColor{0.05f, 0.05f, 0.06f, 1.0f};
     bool    showBackground = false;
     f32     backgroundBlur = 0.0f;
+    /// v32: ambiente de estúdio procedural (StudioPreset: 0 nenhum, 1 estúdio
+    /// escuro, 2 estúdio de produto, 3 céu e sol). Vale quando não há HDRI.
+    u32     studioPreset = 0;
+};
+
+/// v32: chão do grupo 3D (plano horizontal no ponto mais baixo dos modelos;
+/// "para cima" no mundo é −Y). Modo 0 = sem chão, 1 = chão visível (PBR
+/// dielétrico com IBL, sombra e reflexo planar), 2 = só sombra/reflexo
+/// ("shadow catcher": transparente fora da sombra e do reflexo — compõe
+/// sobre um fundo 2D).
+struct FloorSettings {
+    u32   mode = 0;
+    Color color{0.5f, 0.5f, 0.5f, 1.0f};   ///< linear
+    f32   roughness = 0.35f;               ///< 0..1: desfoque do reflexo
+    f32   reflectivity = 0.5f;             ///< 0..1 (0 = sem passe de reflexo)
+    f32   contactShadow = 0.8f;            ///< força da sombra de contato (0..1)
+    f32   fade = 6.0f;                     ///< raio do desbotamento (× raio dos modelos)
 };
 
 /// Grafo de pós-processamento 3D habilitado na composição.
 struct PostProcessSettings {
     bool ssao      = false;  f32 ssaoRadius = 0.5f;   f32 ssaoIntensity = 1.0f;
-    bool bloom     = false;  f32 bloomThreshold = 1.0f; f32 bloomIntensity = 0.6f;
+    /// Bloom HDR do grupo 3D. Padrão: limiar 1,25 (joelho suave de 20%) e
+    /// soma de 6% — só a luz HDR de verdade (farol, emissivo, reflexo do sol)
+    /// espalha; a cor difusa perto de 1 fica limpa. Limiar 0 = espalhamento
+    /// conservador de tudo (~4%, estilo COD/Unreal). Projeto novo nasce com o
+    /// bloom ligado; projeto antigo mantém o que gravou.
+    bool bloom     = true;   f32 bloomThreshold = 1.25f; f32 bloomIntensity = 0.6f;
     bool dof       = false;  f32 dofAperture = 2.8f;
     bool fog       = false;  Vec4 fogColor{0.5f, 0.5f, 0.55f, 1.0f}; f32 fogDensity = 0.001f;
     bool vignette  = false;  f32 vignetteAmount = 0.3f;
     bool colorGrade = false;
     /// Índice do LUT aplicado (0 = nenhum).
     u32  lutIndex  = 0;
+    // --- v31 -----------------------------------------------------------------
+    /// Qualidade do 3D (AA + pós): `Scene3DQuality` (0 AUTO, 1 BAIXO, 2 MÉDIO,
+    /// 3 ALTO, 4 ULTRA). O export nunca fica abaixo do ALTO.
+    u32  quality3d = 0;
+    /// Tone map do grupo 3D: 0 = Khronos PBR Neutral (cores de catálogo),
+    /// 1 = AgX (fílmico/cinema).
+    u32  toneMapper = 0;
+    /// Exposição do grupo 3D (multiplicador linear da luz da cena; 1 = neutro).
+    /// Vale para modelos e céu; o 2D dentro da cena não muda.
+    f32  exposure = 1.0f;
 };
 
 /// Motion blur da composição (o global; cada layer multiplica por seu próprio).
@@ -179,6 +211,8 @@ public:
     [[nodiscard]] EnvironmentSettings& environment() noexcept { return environment_; }
     [[nodiscard]] const EnvironmentSettings& environment() const noexcept { return environment_; }
 
+    [[nodiscard]] FloorSettings& floor() noexcept { return floor_; }
+    [[nodiscard]] const FloorSettings& floor() const noexcept { return floor_; }
     [[nodiscard]] PostProcessSettings& post_process() noexcept { return postProcess_; }
     [[nodiscard]] const PostProcessSettings& post_process() const noexcept { return postProcess_; }
 
@@ -259,6 +293,7 @@ private:
     ShadowSettings      shadows_{};
     EnvironmentSettings environment_{};
     PostProcessSettings postProcess_{};
+    FloorSettings floor_{};
     MotionBlurSettings  motionBlur_{};
     Scene3DId           scene_{};
     std::vector<Marker> markers_;

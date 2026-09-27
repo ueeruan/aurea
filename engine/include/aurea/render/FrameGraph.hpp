@@ -185,6 +185,13 @@ public:
     u32 add_raster_pass_depth(const char* name, PassStage stage, FGTexture colorTarget, LoadOp load, Vec4 clear,
                               FGTexture depthTarget, LoadOp depthLoad, bool storeDepth, f32 clearDepth,
                               PassFn fn) noexcept;
+    /// Segundo alvo de cor (MRT) de um passe de raster já declarado. Mesmo
+    /// `load`/`clear` da cor 0.
+    void set_color1(u32 pass, FGTexture colorTarget1) noexcept;
+    /// MSAA: alvos de 1 amostra que recebem o resolve no fim do passe (cor 0,
+    /// cor 1 e profundidade — a amostra 0). Os multiamostrados do passe
+    /// devem ser transitórios: o que sai do passe é o resolve.
+    void set_resolve(u32 pass, FGTexture color, FGTexture color1 = {}, FGTexture depth = {}) noexcept;
     u32 add_compute_pass(const char* name, PassStage stage, PassFn fn) noexcept;
     u32 add_transfer_pass(const char* name, PassStage stage, PassFn fn) noexcept;
 
@@ -261,7 +268,8 @@ public:
     [[nodiscard]] std::string dump() const;
 
 private:
-    enum class Access : u8 { Read = 0, ColorWrite, StorageWrite, CopySrc, CopyDst, DepthWrite };
+    enum class Access : u8 { Read = 0, ColorWrite, StorageWrite, CopySrc, CopyDst, DepthWrite, ResolveWrite,
+                             DepthResolveWrite };
 
     struct AccessRecord {
         u32 pass = 0;
@@ -293,6 +301,10 @@ private:
         bool        storeDepth = false;
         f32         clearDepth = 1.0f;
         f32         clear[4] = {0, 0, 0, 0};
+        FGTexture   colorTarget1{};
+        FGTexture   resolve{};
+        FGTexture   resolve1{};
+        FGTexture   depthResolve{};
         PassFn      fn;
         bool        sideEffect = false;
         bool        culled = false;

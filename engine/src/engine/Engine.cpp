@@ -1,4 +1,5 @@
 #include "aurea/Engine.hpp"
+#include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/text/LocalWhisper.hpp"
 #include "aurea/audio/Beats.hpp"
 #include "aurea/tracking/PointTracker.hpp"
@@ -1664,6 +1665,73 @@ Result<u64> Engine::parent_to_new_null(const u64* layerIds, u32 count) noexcept 
     request_render();
     AUREA_LOG_INFO("novo nulo %s: %u de %zu camadas vinculadas", threeD ? "3D" : "2D", linked, children.size());
     return nullId.pack();
+}
+
+namespace {
+/// Toda a animação da camada anda `delta` quadros no tempo LOCAL: trilhas
+/// (transform, efeitos, texto, partículas...), caminhos de máscara e formas
+/// vetoriais. O time remap fica — ele é o relógio do conteúdo, não animação.
+void shift_layer_animation(Layer& l, i64 delta) noexcept {
+    for (u32 i = 0; i < l.tracks.size(); ++i) {
+        Track& t = l.tracks.at(i);
+        for (Keyframe& k : t.keys) k.time.value += delta;
+        t.lastIndex = 0;
+    }
+    for (Mask& m : l.masks) for (MaskPathKey& k : m.pathKeys) k.frame += delta;
+    for (VectorGroup& g : l.shape.vector.groups)
+        for (VectorPath& p : g.paths) for (PathKey& k : p.keys) k.frame += delta;
+}
+} // namespace
+
+Result<u32> Engine::stagger_layers(const u64* layerIds, u32 count, i64 stepFrames, bool keysOnly) noexcept {
+    if (!layerIds || count < 2 || count > 4096) return Status{Errc::InvalidArgument, "escolha duas camadas ou mais"};
+    if (stepFrames == 0 || stepFrames < -100000 || stepFrames > 100000) return Status{Errc::InvalidArgument, "passo invalido"};
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    // O que a UI enfileirou (arrastos, keys) vale antes: a cascata parte do estado final.
+    drain_commands_locked();
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    std::vector<LayerId> order;
+    for (u32 i = 0; i < count; ++i) {
+        const LayerId id = LayerId::unpack(layerIds[i]);
+        const Layer* l = comp->layer(id);
+        if (!l || l->locked || std::find(order.begin(), order.end(), id) != order.end()) continue;
+        order.push_back(id);
+    }
+    if (order.size() < 2) return Status{Errc::InvalidArgument, "escolha duas camadas desbloqueadas"};
+    if (!keysOnly) {
+        // Passo negativo não empurra ninguém para antes do zero (a camada sumiria do começo).
+        for (u32 i = 1; i < order.size(); ++i) {
+            if (comp->layer(order[i])->start.value + static_cast<i64>(i) * stepFrames < 0)
+                return Status{Errc::OutOfRange, "a cascata passaria do inicio do projeto"};
+        }
+    }
+    history_.begin_group("escalonar");
+    history_.before_mutation(*comp, project_->timeline().current(), "escalonar");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    u32 moved = 0;
+    for (u32 i = 1; i < order.size(); ++i) {
+        const i64 delta = static_cast<i64>(i) * stepFrames;
+        Layer* l = comp->layer(order[i]);
+        if (!l) continue;
+        if (keysOnly) {
+            shift_layer_animation(*l, delta);
+            ++moved;
+            continue;
+        }
+        // Pelo comando de sempre: duração do projeto cresce junto, modo ímã respeitado.
+        Command c;
+        c.type = CommandType::LayerSetTimeRange;
+        c.layer_range.layer = order[i];
+        c.layer_range.start = FrameIndex{l->start.value + delta};
+        c.layer_range.end = FrameIndex{l->end.value + delta};
+        if (apply_command_internal(c, nullptr, true).ok()) ++moved;
+    }
+    history_.end_group();
+    project_->mark_dirty();
+    request_render();
+    return moved;
 }
 
 namespace {
@@ -4135,6 +4203,132 @@ bool Engine::query_environment(f32* out) noexcept {
     out[0] = comp->environment().hdri.valid() ? 1.0f : 0.0f;
     out[1] = comp->environment().intensity;
     out[2] = comp->environment().rotation;
+    return true;
+}
+
+// --- Estúdio procedural e chão do 3D (v32) ------------------------------------------
+Result<u64> Engine::set_studio_environment(u32 preset, u64 objectLayer) noexcept {
+    if (preset >= scene3d::kStudioPresetCount) return Status{Errc::InvalidArgument, "preset de estudio invalido"};
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    Layer* object = objectLayer ? comp->layer(LayerId::unpack(objectLayer)) : nullptr;
+    if (objectLayer && (!object || !(object->threeD || object->kind == LayerKind::Model3D)))
+        return Status{Errc::InvalidArgument, "objeto 3D nao encontrado"};
+    history_.before_mutation(*comp, project_->timeline().current(), object ? "estudio do objeto" : "estudio");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const u64 key = preset ? scene3d::studio_environment_key(preset) : 0ull;
+    if (object) {
+        object->environmentSource = preset ? 1u : 0u;
+        object->environmentAsset = key;
+        if (preset) { object->environmentIntensity = 1; object->environmentRotation = 0; object->environmentExposure = 1; }
+    } else {
+        comp->environment().studioPreset = preset;
+        // O estúdio escolhido vence: um HDRI importado antes sai (o asset fica no projeto).
+        if (preset) comp->environment().hdri = AssetId{};
+    }
+    project_->mark_dirty();
+    request_render();
+    return key;
+}
+
+u32 Engine::studio_environment() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    return comp ? comp->environment().studioPreset : 0u;
+}
+
+bool Engine::set_scene_floor(u32 mode, f32 r, f32 g, f32 b, f32 roughness, f32 reflectivity, f32 contactShadow,
+                             f32 fade) noexcept {
+    for (f32 v : {r, g, b, roughness, reflectivity, contactShadow, fade}) if (!std::isfinite(v)) return false;
+    if (mode > 2u) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "chao 3D");
+    FloorSettings& fl = comp->floor();
+    fl.mode = mode;
+    fl.color = Color{std::clamp(r, 0.0f, 1.0f), std::clamp(g, 0.0f, 1.0f), std::clamp(b, 0.0f, 1.0f), 1.0f};
+    fl.roughness = std::clamp(roughness, 0.0f, 1.0f);
+    fl.reflectivity = std::clamp(reflectivity, 0.0f, 1.0f);
+    fl.contactShadow = std::clamp(contactShadow, 0.0f, 1.0f);
+    fl.fade = std::clamp(fade, 1.0f, 100.0f);
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_scene_floor(f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !out) return false;
+    const FloorSettings& fl = comp->floor();
+    out[0] = static_cast<f32>(fl.mode);
+    out[1] = fl.color.r; out[2] = fl.color.g; out[3] = fl.color.b;
+    out[4] = fl.roughness; out[5] = fl.reflectivity; out[6] = fl.contactShadow; out[7] = fl.fade;
+    return true;
+}
+
+// --- Qualidade e pós do 3D ---------------------------------------------------------
+bool Engine::set_scene3d_quality(u32 tier) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || tier >= kScene3DQualityCount) return false;
+    if (comp->post_process().quality3d == tier) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "qualidade 3D");
+    comp->post_process().quality3d = tier;
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+u32 Engine::scene3d_quality() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    return comp ? comp->post_process().quality3d : 0u;
+}
+
+bool Engine::set_scene3d_tonemap(u32 op, f32 exposure) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || op > 1u || !std::isfinite(exposure)) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "tone map 3D");
+    comp->post_process().toneMapper = op;
+    comp->post_process().exposure = std::clamp(exposure, 0.01f, 64.0f);
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_scene3d_bloom(bool on, f32 intensity, f32 threshold) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !std::isfinite(intensity) || !std::isfinite(threshold)) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "bloom 3D");
+    PostProcessSettings& pp = comp->post_process();
+    pp.bloom = on;
+    pp.bloomIntensity = std::clamp(intensity, 0.0f, 4.0f);
+    pp.bloomThreshold = std::clamp(threshold, 0.0f, 64.0f);
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::query_scene3d_post(f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !out) return false;
+    const PostProcessSettings& pp = comp->post_process();
+    out[0] = static_cast<f32>(pp.quality3d);
+    out[1] = static_cast<f32>(pp.toneMapper);
+    out[2] = pp.exposure;
+    out[3] = pp.bloom ? 1.0f : 0.0f;
+    out[4] = pp.bloomIntensity;
+    out[5] = pp.bloomThreshold;
     return true;
 }
 

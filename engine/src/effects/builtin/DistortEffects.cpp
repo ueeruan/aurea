@@ -26,6 +26,7 @@ constexpr f32 kShakeMaxAmplitude = 20000.0f;   // px
 constexpr f32 kShakeMaxFrequency = 240.0f;     // Hz: acima de fps/2 já é tremor quadro a quadro
 constexpr f32 kShakeMaxAmount = 20.0f;         // 2000 %
 constexpr f32 kShakeMaxShutter = 4.0f;         // 400 % do quadro
+constexpr f32 kShakeMaxDecay = 100.0f;         // 1/s: some em ~50 ms
 
 // Continuous camera shake. Shared CPU path supplies inverse transforms to a
 // single GPU pass; no frame cache or random generator state is needed.
@@ -35,7 +36,7 @@ public:
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_camera_shake_frag, work));
     }
     enum : u32 { kAmplitudeX, kAmplitudeY, kFrequency, kSeed, kSeparate, kRotation, kSmoothing, kMix,
-                 kAmount, kZoom, kStyle, kBlur, kPhase, kEdges, kWave };
+                 kAmount, kZoom, kStyle, kBlur, kPhase, kEdges, kWave, kDirection, kDecay };
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kShake, "Shake", "Distort", EffectClass::Domain};
         return i;
@@ -70,10 +71,27 @@ public:
         static const char* const edges[] = {"Reflect", "Clamp", "Tile", "Transparent"};
         p.add_enum("edges", "Edges", edges, 4, 0);
         p.add_float("wave", "Wave", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        // Pacote de paridade (anexados no fim: projeto antigo lê o padrão, que
+        // não muda nada). Direção gira o par Horizontal/Vertical — com Vertical
+        // em 0 o tremor corre só ao longo dela. Decaimento apaga o tremor por
+        // exp(-decaimento · t), t em segundos desde o início da camada.
+        p.add_angle("direction", "Direção", 0);
+        p.add_float("decay", "Decaimento", 0, 0, 10, kParamAnimatable, "1/s");
+        p.typed_range(0, kShakeMaxDecay);
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return e.f(kMix) <= 0 || e.f(kAmount) <= 0 || e.f(kFrequency) <= 0
-            || (e.f(kAmplitudeX) == 0 && e.f(kAmplitudeY) == 0 && e.f(kRotation) == 0 && e.f(kZoom) == 0);
+            || (e.f(kAmplitudeX) == 0 && e.f(kAmplitudeY) == 0 && e.f(kRotation) == 0 && e.f(kZoom) == 0)
+            || died_out(e);
+    }
+    /// O decaimento já apagou o tremor (mesmo no começo do obturador mais
+    /// longo): o passe sairia idêntico à entrada.
+    static bool died_out(const EffectEval& e) noexcept {
+        const f64 decay = static_cast<f64>(finite_or(e.f(kDecay), 0));
+        if (!(decay > 0)) return false;
+        const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
+        const f64 earliest = static_cast<f64>(e.localTime.value) / fps - kShakeMaxShutter / fps;
+        return std::exp(-std::min(decay, static_cast<f64>(kShakeMaxDecay)) * std::max(0.0, earliest)) < 1e-6;
     }
     f32 input_margin(const EffectEval&) const noexcept override { return 0; }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
@@ -95,14 +113,22 @@ public:
         const Rect in = input.region;
         const f32 cx = e.placement ? e.placement->layerWidth * .5f : in.x + in.w*.5f;
         const f32 cy = e.placement ? e.placement->layerHeight * .5f : in.y + in.h*.5f;
+        const f32 dir = finite_or(e.f(kDirection), 0) * kDeg2Rad;
+        const f32 dirC = std::cos(dir), dirS = std::sin(dir);
+        const f64 decay = std::clamp(static_cast<f64>(finite_or(e.f(kDecay), 0)), 0.0,
+                                     static_cast<f64>(kShakeMaxDecay));
         for (u32 i = 0; i < count; ++i) {
             const f64 dt = count == 1 ? 0 : ((i + .5) / count - .5) * blur / fps;
-            const auto pose = shake::sample(s, seconds + dt);
+            // O decaimento entra na intensidade: x, y, giro e zoom caem juntos.
+            shake::Settings si = s;
+            si.amount *= static_cast<f32>(std::exp(-decay * std::max(0.0, seconds + dt)));
+            const auto pose = shake::sample(si, seconds + dt);
+            const f32 px = pose.x * dirC - pose.y * dirS, py = pose.x * dirS + pose.y * dirC;
             const f32 angle = pose.rotation * kDeg2Rad;
             const f32 a = std::cos(angle)/pose.scale, c = std::sin(angle)/pose.scale;
             const f32 b = -c, d = a;
-            const f32 tx = cx-a*(cx+pose.x)-c*(cy+pose.y);
-            const f32 ty = cy-b*(cx+pose.x)-d*(cy+pose.y);
+            const f32 tx = cx-a*(cx+px)-c*(cy+py);
+            const f32 ty = cy-b*(cx+px)-d*(cy+py);
             u.rows[i*2] = {a, c*in.h/in.w, (a*in.x+c*in.y+tx-in.x)/in.w, 0};
             u.rows[i*2+1] = {b*in.w/in.h, d, (b*in.x+d*in.y+ty-in.y)/in.h, 0};
         }

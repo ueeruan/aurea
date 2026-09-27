@@ -245,7 +245,8 @@ internal class TimelineController(
         val handles = r.track == null && selectionSize() == 1 && isSelected(r.id) && !r.locked
         hit.kind = RowHit.hit(
             m, p.x, if (r.track == null) p.y - top else m.diamondCyNormal, state.width.toFloat(), x0, x1, handles, state.compact,
-            keysEnabled = !multi(), instants = r.instants,
+            keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, r.track != null, isSelected(r.id)),
+            instants = r.instants,
             view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,
         )
         if (r.track != null && hit.kind != HitKind.KEYFRAME) hit.kind = HitKind.BODY

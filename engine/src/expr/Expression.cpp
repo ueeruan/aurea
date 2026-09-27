@@ -72,14 +72,18 @@ enum GlobalId : u32 {
     GTime = 1, GValue, GIndex, GFps, GFrame, GThisLayer, GThisComp, GThisProperty, GTransform,
     GPosition, GScale, GRotation, GOpacity, GAnchor, GVelocity, GSpeed, GNumKeys, GInPoint,
     GOutPoint, GWidth, GHeight, GMath, GTextIndex, GTextTotal, GLocalTime,
+    GTimeMs, GMarker,
     // Funções (valor K::Fn quando citadas sem chamar).
     FWiggle = 100, FLoopOut, FLoopIn, FLoopOutDur, FLoopInDur, FLinear, FEase, FEaseIn, FEaseOut,
     FClamp, FRandom, FGaussRandom, FSeedRandom, FNoise, FSin, FCos, FTan, FAsin, FAcos, FAtan,
     FAtan2, FSqrt, FAbs, FFloor, FCeil, FRound, FMin, FMax, FPow, FExp, FLog, FDeg2Rad, FRad2Deg,
     FLength, FNormalize, FAdd, FSub, FMul, FDiv, FDot, FCross, FValueAtTime, FVelocityAtTime,
     FKey, FLayer, FEffect, FFramesToTime, FTimeToFrames,
+    // Ritmo e tremor (tremor com decaimento, marcas, tempo em degraus).
+    FShake, FTemporalWiggle, FSpeedAtTime, FTimeSinceMarker, FPosterizeTime, FSmooth, FNearestKey,
     // Métodos (valor K::Method: função + objeto receptor).
     MCompLayer = 200, MLayerEffect, MEffectParam, MPropValueAtTime, MPropVelocityAtTime, MPropKey,
+    MPropSpeedAtTime, MPropNearestKey, MMarkerKey, MMarkerNearestKey,
 };
 
 struct NameEntry { const char* name; u32 id; };
@@ -104,6 +108,10 @@ constexpr NameEntry kGlobals[] = {
     {"valueAtTime", FValueAtTime}, {"velocityAtTime", FVelocityAtTime}, {"key", FKey},
     {"layer", FLayer}, {"effect", FEffect}, {"framesToTime", FFramesToTime},
     {"timeToFrames", FTimeToFrames},
+    {"timeMs", GTimeMs}, {"marker", GMarker},
+    {"shake", FShake}, {"temporalWiggle", FTemporalWiggle}, {"speedAtTime", FSpeedAtTime},
+    {"timeSinceMarker", FTimeSinceMarker}, {"posterizeTime", FPosterizeTime}, {"smooth", FSmooth},
+    {"nearestKey", FNearestKey},
 };
 
 u32 find_global(std::string_view s) noexcept {
@@ -764,7 +772,9 @@ std::shared_ptr<const Program> compile_program(std::string_view source, Diagnost
 // =============================================================================
 // Valores
 // =============================================================================
-enum class K : u8 { Undef, Num, Vec, Str, Fn, Method, Layer, Comp, Transform, Effect, Prop, Key, Math };
+/// Markers = as marcas da composição da camada (`marker`, `thisComp.marker`);
+/// MarkerKey = uma delas (`a` = índice na lista, em ordem de tempo).
+enum class K : u8 { Undef, Num, Vec, Str, Fn, Method, Layer, Comp, Transform, Effect, Prop, Key, Math, Markers, MarkerKey };
 
 struct Val {
     K   k = K::Undef;
@@ -1135,6 +1145,18 @@ f64 fractal(u32 seed, f64 x, u32 octaves, f64 ampMult) noexcept {
     return norm > 0.0 ? sum / norm : 0.0;
 }
 
+/// Ruído de VALOR 1D em [-1, 1]: sorteios da grade interpolados (suave). O de
+/// gradiente zera nos inteiros — e o tremor na taxa do projeto (30 Hz a 30
+/// fps) cai num inteiro a cada quadro; este não.
+f64 vnoise1(u32 seed, f64 x) noexcept {
+    const f64 fl = std::floor(x);
+    const i64 i = static_cast<i64>(fl);
+    const f64 f = x - fl;
+    const f64 w = f * f * (3.0 - 2.0 * f);
+    const f64 a = lattice(seed, i), b = lattice(seed, i + 1);
+    return a + (b - a) * w;
+}
+
 /// Ruído 3D de gradiente (Perlin melhorado, 12 direções), limitado a [-1, 1].
 f64 noise3(f64 x, f64 y, f64 z) noexcept {
     auto grad = [](u32 h, f64 gx, f64 gy, f64 gz) {
@@ -1205,10 +1227,20 @@ struct Ctx {
     u64            rng = 0;
     bool           rngTimeless = false;
     u32            rngUserSeed = 0;
+    /// "Agora" desta avaliação, em quadros da composição. Começa no quadro de
+    /// verdade; `posterizeTime(n)` o prende em degraus de 1/n s — e aí `time`,
+    /// `value`, o aleatório e os padrões de wiggle/shake passam a ler o degrau.
+    f64            nowF = 0.0;
+    Val            nowValue;
+
+    /// Quadro LOCAL da camada no "agora" (posterizado ou não).
+    [[nodiscard]] f64 now_local() const { return env ? env->localF + (nowF - env->compF) : nowF; }
 
     void reset(const Program* prog, const Env* e) {
         p = prog;
         env = e;
+        nowF = e ? e->compF : 0.0;
+        nowValue = e ? e->value : Val{};
         steps = 0;
         failed = false;
         err.clear();
@@ -1232,7 +1264,7 @@ struct Ctx {
 
     // --- aleatório: xorshift64* semeado por camada/propriedade/quadro ---------
     void seed_rng() {
-        const i64 f = rngTimeless ? 0 : static_cast<i64>(std::floor(env ? env->compF : 0.0));
+        const i64 f = rngTimeless ? 0 : static_cast<i64>(std::floor(nowF));
         u64 s = (static_cast<u64>(hash_mix(env ? env->seedBase : 1u, rngUserSeed)) << 32)
               ^ hash_mix(static_cast<u32>(f), static_cast<u32>(static_cast<u64>(f) >> 32) ^ 0xA511E9B3u);
         rng = s ? s : 0x9E3779B97F4A7C15ull;
@@ -1316,7 +1348,7 @@ struct Ctx {
 
     /// Coerção: propriedade vira o valor no instante atual.
     Val deref(const Val& v, u32 pos) {
-        if (v.k == K::Prop) return prop_value(props[v.a], env->compF, true, pos);
+        if (v.k == K::Prop) return prop_value(props[v.a], nowF, true, pos);
         return v;
     }
 
@@ -1418,6 +1450,24 @@ struct Ctx {
     Val loop(bool out, const Val* args, u32 argc, bool duration, u32 pos);
     Val lerp_fn(u32 id, const Val* args, u32 argc, u32 pos);
     Val key_of(const PropDesc& d, u32 propIndex, f64 idx, u32 pos);
+    Val nearest_key(const PropDesc& d, u32 propIndex, f64 compF, u32 pos);
+    Val marker_key(const Val* args, u32 argc, bool nearest, u32 pos);
+    Val shake(const Val* args, u32 argc, u32 pos);
+    Val time_since_marker(const Val* args, u32 argc, u32 pos);
+
+    /// Módulo de um vetor de velocidade (speed/speedAtTime).
+    static Val magnitude(const Val& v) {
+        f64 s = 0;
+        for (u32 i = 0; i < v.n; ++i) s += v.v[i] * v.v[i];
+        return Val::num(std::sqrt(s));
+    }
+    /// A própria trilha (o componente desta expressão), como `key()` a lê.
+    PropDesc own_track() const {
+        PropDesc own = env->self;
+        if (own.kind == 0) own.prop = static_cast<TrackProperty>(static_cast<u16>(own.prop) + env->component), own.count = 1;
+        else if (own.kind == 1 || own.kind == 3) own.key0 += env->component, own.count = 1;
+        return own;
+    }
 };
 
 Val Ctx::exec(i32 ni, u32 depth) {
@@ -1620,17 +1670,22 @@ Val Ctx::global(u32 id, u32 pos) {
     const Env& e = *env;
     if (id >= FWiggle && id < MCompLayer) { Val r; r.k = K::Fn; r.id = id; return r; }
     switch (id) {
-        case GTime: return Val::num(e.compF / e.fps);
-        case GLocalTime: return Val::num(e.localF / e.fps);
+        case GTime: return Val::num(nowF / e.fps);
+        case GTimeMs: return Val::num(nowF / e.fps * 1000.0);
+        case GLocalTime: return Val::num(now_local() / e.fps);
         case GTextIndex: return Val::num(static_cast<u32>(g_textContext));
         case GTextTotal: return Val::num(static_cast<u32>(g_textContext >> 32));
-        case GValue: return e.value;
+        case GValue: return nowValue;
         case GFps: return Val::num(e.fps);
-        case GFrame: return Val::num(std::floor(e.compF));
+        case GFrame: return Val::num(std::floor(nowF));
         case GMath: { Val r; r.k = K::Math; return r; }
         case GThisComp:
             if (!e.comp) return fail(pos, "sem composição (expressão fora de uma camada)");
             { Val r; r.k = K::Comp; return r; }
+        case GMarker:
+            // As marcas são da composição (a régua); `marker` e `thisComp.marker` são as mesmas.
+            if (!e.comp) return fail(pos, "sem marcas (expressão fora de uma camada)");
+            { Val r; r.k = K::Markers; return r; }
         default: break;
     }
     if (!e.layer) return fail(pos, "sem camada (expressão fora de uma camada)");
@@ -1647,9 +1702,9 @@ Val Ctx::global(u32 id, u32 pos) {
         case GRotation: return make_prop(transform_desc(e.layer, e.layerId, TrackProperty::RotationZ));
         case GOpacity: return make_prop(transform_desc(e.layer, e.layerId, TrackProperty::Opacity));
         case GAnchor: return make_prop(transform_desc(e.layer, e.layerId, TrackProperty::AnchorX));
-        case GVelocity: return prop_velocity(e.self, e.compF, pos);
+        case GVelocity: return prop_velocity(e.self, nowF, pos);
         case GSpeed: {
-            const Val v = prop_velocity(e.self, e.compF, pos);
+            const Val v = prop_velocity(e.self, nowF, pos);
             f64 s = 0;
             for (u32 i = 0; i < v.n; ++i) s += v.v[i] * v.v[i];
             return Val::num(std::sqrt(s));
@@ -1689,7 +1744,25 @@ Val Ctx::member(const Val& obj, std::string_view name, u32 pos) {
             if (name == "frameDuration") return Val::num(1.0 / env->fps);
             if (name == "numLayers") return Val::num(c->order().size());
             if (name == "name") return make_str(c->name());
+            if (name == "marker") { Val r; r.k = K::Markers; return r; }
             return fail(pos, "thisComp." + std::string(name) + " não existe");
+        }
+        case K::Markers: {
+            if (name == "numKeys") return Val::num(static_cast<f64>(env->comp->markers().size()));
+            if (name == "key") return make_method(MMarkerKey, obj);
+            if (name == "nearestKey") return make_method(MMarkerNearestKey, obj);
+            return fail(pos, "marker." + std::string(name) + " não existe (use key, nearestKey ou numKeys)");
+        }
+        case K::MarkerKey: {
+            const std::vector<Marker>& ms = env->comp->markers();
+            if (obj.a >= ms.size()) return fail(pos, "a marca não existe mais");
+            const Marker& m = ms[obj.a];
+            if (name == "time") return Val::num(static_cast<f64>(m.frame.value) / env->fps);
+            if (name == "index") return Val::num(obj.a + 1.0);
+            if (name == "frame") return Val::num(static_cast<f64>(m.frame.value));
+            if (name == "name" || name == "comment") return make_str(m.label);
+            if (name == "duration") return Val::num(0.0);
+            return fail(pos, "a marca não tem '" + std::string(name) + "'");
         }
         case K::Layer: {
             const Layer* l = layer_of(obj);
@@ -1753,12 +1826,14 @@ Val Ctx::member(const Val& obj, std::string_view name, u32 pos) {
         }
         case K::Prop: {
             const PropDesc d = props[obj.a];
-            if (name == "value") return prop_value(d, env->compF, true, pos);
+            if (name == "value") return prop_value(d, nowF, true, pos);
             if (name == "valueAtTime") return make_method(MPropValueAtTime, obj);
             if (name == "velocityAtTime") return make_method(MPropVelocityAtTime, obj);
-            if (name == "velocity") return prop_velocity(d, env->compF, pos);
+            if (name == "speedAtTime") return make_method(MPropSpeedAtTime, obj);
+            if (name == "nearestKey") return make_method(MPropNearestKey, obj);
+            if (name == "velocity") return prop_velocity(d, nowF, pos);
             if (name == "speed") {
-                const Val v = prop_velocity(d, env->compF, pos);
+                const Val v = prop_velocity(d, nowF, pos);
                 f64 s = 0;
                 for (u32 i = 0; i < v.n; ++i) s += v.v[i] * v.v[i];
                 return Val::num(std::sqrt(s));
@@ -1805,6 +1880,126 @@ Val Ctx::key_of(const PropDesc& d, u32 propIndex, f64 idx, u32 pos) {
     r.a = propIndex;
     r.b = static_cast<u32>(k - 1);
     return r;
+}
+
+/// O keyframe mais perto do quadro da composição `compF` (empate: o anterior).
+Val Ctx::nearest_key(const PropDesc& d, u32 propIndex, f64 compF, u32 pos) {
+    const Track* t = find_track(d, 0);
+    if (!t || t->keys.empty()) return fail(pos, "nearestKey: a propriedade não tem keyframes");
+    const f64 local = layer_local_from_comp(d.layer, compF);
+    u32 best = 0;
+    f64 bestD = std::fabs(static_cast<f64>(t->keys[0].time.value) - local);
+    for (u32 i = 1; i < t->keys.size(); ++i) {
+        const f64 dist = std::fabs(static_cast<f64>(t->keys[i].time.value) - local);
+        if (dist < bestD) { bestD = dist; best = i; }
+    }
+    Val r;
+    r.k = K::Key;
+    r.a = propIndex;
+    r.b = best;
+    return r;
+}
+
+/// `marker.key(índice | "nome")` e `marker.nearestKey(t)`. O nome compara
+/// sem diferenciar maiúsculas (a pessoa digita "Drop", a marca é "drop").
+Val Ctx::marker_key(const Val* args, u32 argc, bool nearest, u32 pos) {
+    const std::vector<Marker>& ms = env->comp->markers();
+    if (argc != 1) return fail(pos, nearest ? "uso: marker.nearestKey(t)" : "uso: marker.key(índice ou \"nome\")");
+    if (ms.empty()) return fail(pos, "a composição não tem marcas");
+    Val r;
+    r.k = K::MarkerKey;
+    if (nearest) {
+        f64 t = 0;
+        if (!want_num(args[0], t, pos, "tempo")) return Val{};
+        const f64 f = t * env->fps;
+        u32 best = 0;
+        for (u32 i = 1; i < ms.size(); ++i) {
+            if (std::fabs(static_cast<f64>(ms[i].frame.value) - f) < std::fabs(static_cast<f64>(ms[best].frame.value) - f)) best = i;
+        }
+        r.a = best;
+        return r;
+    }
+    if (args[0].k == K::Str) {
+        const std::string_view nm = str(args[0]);
+        for (u32 i = 0; i < ms.size(); ++i) if (ms[i].label == nm) { r.a = i; return r; }
+        for (u32 i = 0; i < ms.size(); ++i) if (name_eq(ms[i].label, nm)) { r.a = i; return r; }
+        return fail(pos, "marca \"" + std::string(nm) + "\" não existe");
+    }
+    f64 idx = 0;
+    if (!want_num(args[0], idx, pos, "índice da marca")) return Val{};
+    const i64 k = static_cast<i64>(std::floor(idx + 0.5));
+    if (k < 1 || k > static_cast<i64>(ms.size())) {
+        return fail(pos, "marker.key(" + std::to_string(k) + "): a composição tem " + std::to_string(ms.size()) + " marca(s)");
+    }
+    r.a = static_cast<u32>(k - 1);
+    return r;
+}
+
+/// shake(frequência = 30, amplitude = 8, aspereza = 0.4, decaimento = 0, início = 0)
+///
+/// Tremor de câmera: ruído de valor em oitavas (1 a 4, pela aspereza 0..1),
+/// cada componente com o seu sorteio. Com `decaimento` > 0 (segundos), é um
+/// IMPACTO: nada antes de `início` (segundos da composição — `inPoint` para
+/// começar com a camada) e a força cai como e^(−3·Δt/decaimento), ~5% depois
+/// de `decaimento`. A amplitude está na unidade da propriedade (px, graus, %),
+/// como no wiggle.
+Val Ctx::shake(const Val* args, u32 argc, u32 pos) {
+    const Env& e = *env;
+    if (argc > 5) return fail(pos, "uso: shake(frequência, amplitude[, aspereza, decaimento, início])");
+    f64 freq = 30.0, rough = 0.4, decay = 0.0, start = 0.0;
+    if (argc >= 1 && !want_num(args[0], freq, pos, "frequência")) return Val{};
+    if (argc >= 2 && !want_numvec(args[1], pos, "amplitude")) return Val{};
+    if (argc >= 3 && !want_num(args[2], rough, pos, "aspereza")) return Val{};
+    if (argc >= 4 && !want_num(args[3], decay, pos, "decaimento")) return Val{};
+    if (argc >= 5 && !want_num(args[4], start, pos, "início")) return Val{};
+    const f64 t = nowF / e.fps;
+    f64 env01 = 1.0;
+    if (decay > 0.0) {
+        const f64 dt = t - start;
+        env01 = dt < 0.0 ? 0.0 : std::exp(-3.0 * dt / decay);
+    }
+    rough = std::clamp(rough, 0.0, 1.0);
+    const u32 octaves = static_cast<u32>(std::llround(3.0 * rough)) + 1u;
+    const f64 persistence = rough * 0.4 + 0.3;
+    Val base = nowValue;
+    if (base.k != K::Num && base.k != K::Vec) base = Val::num(0.0);
+    Val r = base;
+    for (u32 c = 0; c < r.n; ++c) {
+        const f64 a = argc < 2 ? 8.0 : (args[1].k == K::Num ? args[1].v[0] : (c < args[1].n ? args[1].v[c] : 0.0));
+        if (a == 0.0 || freq == 0.0 || env01 == 0.0) continue;
+        f64 sum = 0.0, w = 1.0, norm = 0.0, fm = freq;
+        for (u32 o = 0; o < octaves; ++o) {
+            sum += w * vnoise1(hash_mix(e.seedBase, 0x5A4Bu + c * 131u + o * 7919u), t * fm + static_cast<f64>(o) * 17.13);
+            norm += w;
+            w *= persistence;
+            fm *= 2.0;
+        }
+        r.v[c] += a * env01 * (norm > 0.0 ? sum / norm : 0.0);
+    }
+    return r;
+}
+
+/// timeSinceMarker() | ("nome") | (t) | ("nome", t): segundos desde a última
+/// marca em t ou antes (a de nome igual, se pedido). Sem marca antes, é
+/// infinito — `ease(timeSinceMarker(), 0, 0.3, 120, 100)` fica no fim.
+Val Ctx::time_since_marker(const Val* args, u32 argc, u32 pos) {
+    if (!env->comp) return fail(pos, "sem marcas (expressão fora de uma camada)");
+    if (argc > 2) return fail(pos, "uso: timeSinceMarker([\"nome\"][, t])");
+    std::string_view nm;
+    bool named = false;
+    f64 t = nowF / env->fps;
+    u32 ti = 0;
+    if (argc >= 1 && args[0].k == K::Str) { nm = str(args[0]); named = true; ti = 1; }
+    if (argc > ti && !want_num(args[ti], t, pos, "t")) return Val{};
+    if (argc > ti + 1) return fail(pos, "uso: timeSinceMarker([\"nome\"][, t])");
+    const f64 f = t * env->fps;
+    const std::vector<Marker>& ms = env->comp->markers();
+    for (usize i = ms.size(); i-- > 0;) {
+        if (static_cast<f64>(ms[i].frame.value) > f + 1e-9) continue;
+        if (named && !name_eq(ms[i].label, nm)) continue;
+        return Val::num(t - static_cast<f64>(ms[i].frame.value) / env->fps);
+    }
+    return Val::num(INFINITY);
 }
 
 Val Ctx::call_method(u32 id, const Val& obj, const Val* args, u32 argc, u32 pos) {
@@ -1912,6 +2107,19 @@ Val Ctx::call_method(u32 id, const Val& obj, const Val* args, u32 argc, u32 pos)
             if (id == MPropValueAtTime) return prop_value(d, t * env->fps, true, pos);
             return prop_velocity(d, t * env->fps, pos);
         }
+        case MPropSpeedAtTime: {
+            f64 t = 0;
+            if (argc != 1 || !want_num(args[0], t, pos, "tempo")) return Val{};
+            const Val v = prop_velocity(props[obj.a], t * env->fps, pos);
+            return failed ? Val{} : magnitude(v);
+        }
+        case MPropNearestKey: {
+            f64 t = 0;
+            if (argc != 1 || !want_num(args[0], t, pos, "tempo")) return Val{};
+            return nearest_key(props[obj.a], obj.a, t * env->fps, pos);
+        }
+        case MMarkerKey: return marker_key(args, argc, false, pos);
+        case MMarkerNearestKey: return marker_key(args, argc, true, pos);
         case MPropKey: {
             f64 i = 0;
             if (argc != 1 || !want_num(args[0], i, pos, "índice do keyframe")) return Val{};
@@ -1966,7 +2174,7 @@ Val Ctx::loop(bool out, const Val* args, u32 argc, bool duration, u32 pos) {
     f64 res[4]{};
     for (u32 c = 0; c < d.count; ++c) {
         const Track* tr = find_track(d, c);
-        const f64 local = e.localF;
+        const f64 local = now_local();
         auto raw = [&](f64 f) { return component(d, c, f, false); };
         if (!tr || tr->keys.size() < 2) { res[c] = raw(local); continue; }
         const u32 n = static_cast<u32>(tr->keys.size());
@@ -2123,7 +2331,7 @@ Val Ctx::call_fn(u32 id, const Val* args, u32 argc, u32 pos) {
             return Val::num(fps > 0 ? f / fps : 0.0);
         }
         case FTimeToFrames: {
-            f64 t = e.compF / e.fps, fps = e.fps;
+            f64 t = nowF / e.fps, fps = e.fps;
             if (argc > 2) return fail(pos, "uso: timeToFrames([t[, fps]])");
             if (argc >= 1 && !want_num(args[0], t, pos, "t")) return Val{};
             if (argc == 2 && !want_num(args[1], fps, pos, "fps")) return Val{};
@@ -2167,7 +2375,7 @@ Val Ctx::call_fn(u32 id, const Val* args, u32 argc, u32 pos) {
             return Val::num(noise3(v.v[0], v.n > 1 ? v.v[1] : 0.37, v.n > 2 ? v.v[2] : 0.61));
         }
         case FWiggle: {
-            f64 freq = 0, oct = 1, mult = 0.5, t = e.compF / e.fps;
+            f64 freq = 0, oct = 1, mult = 0.5, t = nowF / e.fps;
             if (!need(2, 5, "wiggle(frequência, amplitude[, oitavas, multiplicador, t])")) return Val{};
             if (!want_num(args[0], freq, pos, "frequência")) return Val{};
             if (!want_numvec(args[1], pos, "amplitude")) return Val{};
@@ -2175,7 +2383,7 @@ Val Ctx::call_fn(u32 id, const Val* args, u32 argc, u32 pos) {
             if (argc >= 4 && !want_num(args[3], mult, pos, "multiplicador")) return Val{};
             if (argc >= 5 && !want_num(args[4], t, pos, "t")) return Val{};
             const u32 octaves = static_cast<u32>(std::clamp(oct, 1.0, 10.0));
-            Val base = e.value;
+            Val base = nowValue;
             if (base.k != K::Num && base.k != K::Vec) base = Val::num(0.0);
             Val r = base;
             for (u32 c = 0; c < r.n; ++c) {
@@ -2193,7 +2401,7 @@ Val Ctx::call_fn(u32 id, const Val* args, u32 argc, u32 pos) {
             f64 t = 0;
             if (!need(1, 1, id == FValueAtTime ? "valueAtTime(t)" : "velocityAtTime(t)") || !want_num(args[0], t, pos, "t")) return Val{};
             if (!e.layer) {
-                if (id == FValueAtTime) return e.value;
+                if (id == FValueAtTime) return nowValue;
                 return Val::num(0.0);
             }
             if (id == FValueAtTime) return prop_value(e.self, t * e.fps, false, pos);
@@ -2210,6 +2418,74 @@ Val Ctx::call_fn(u32 id, const Val* args, u32 argc, u32 pos) {
             else if (own.kind == 1 || own.kind == 3) own.key0 += e.component, own.count = 1;
             props[pr.a] = own;
             return key_of(own, pr.a, i, pos);
+        }
+        case FShake: return shake(args, argc, pos);
+        case FTimeSinceMarker: return time_since_marker(args, argc, pos);
+        case FSpeedAtTime: {
+            f64 t = 0;
+            if (!need(1, 1, "speedAtTime(t)") || !want_num(args[0], t, pos, "t")) return Val{};
+            if (!e.layer) return Val::num(0.0);
+            const Val v = prop_velocity(e.self, t * e.fps, pos);
+            return failed ? Val{} : magnitude(v);
+        }
+        case FTemporalWiggle: {
+            // Lê a PRÓPRIA propriedade num instante que oscila: t + ruído × amplitude (segundos).
+            f64 freq = 0, amp = 0, oct = 1, mult = 0.5, t = nowF / e.fps;
+            if (!need(2, 5, "temporalWiggle(frequência, amplitude[, oitavas, multiplicador, t])")) return Val{};
+            if (!want_num(args[0], freq, pos, "frequência") || !want_num(args[1], amp, pos, "amplitude")) return Val{};
+            if (argc >= 3 && !want_num(args[2], oct, pos, "oitavas")) return Val{};
+            if (argc >= 4 && !want_num(args[3], mult, pos, "multiplicador")) return Val{};
+            if (argc >= 5 && !want_num(args[4], t, pos, "t")) return Val{};
+            const u32 octaves = static_cast<u32>(std::clamp(oct, 1.0, 10.0));
+            const f64 when = t + amp * fractal(hash_mix(e.seedBase, 0x7E3Au), t * freq + 0.2718, octaves, mult);
+            if (!e.layer) return nowValue;
+            return prop_value(e.self, when * e.fps, false, pos);
+        }
+        case FSmooth: {
+            // Média de `amostras` leituras da própria propriedade numa janela de `largura` s em volta de t.
+            f64 width = 0.2, samples = 5, t = nowF / e.fps;
+            if (!need(0, 3, "smooth([largura, amostras, t])")) return Val{};
+            if (argc >= 1 && !want_num(args[0], width, pos, "largura")) return Val{};
+            if (argc >= 2 && !want_num(args[1], samples, pos, "amostras")) return Val{};
+            if (argc >= 3 && !want_num(args[2], t, pos, "t")) return Val{};
+            if (!e.layer) return nowValue;
+            const u32 n = static_cast<u32>(std::clamp(std::floor(samples), 1.0, 64.0));
+            if (n == 1 || width <= 0.0) return prop_value(e.self, t * e.fps, false, pos);
+            f64 acc[4]{};
+            u32 comps = 1;
+            for (u32 i = 0; i < n; ++i) {
+                const f64 at = t + (static_cast<f64>(i) / static_cast<f64>(n - 1) - 0.5) * width;
+                const Val v = prop_value(e.self, at * e.fps, false, pos);
+                if (failed) return Val{};
+                comps = v.n;
+                for (u32 c = 0; c < v.n; ++c) acc[c] += v.v[c];
+            }
+            for (u32 c = 0; c < comps; ++c) acc[c] /= static_cast<f64>(n);
+            return Val::vec(acc, comps);
+        }
+        case FPosterizeTime: {
+            // Daqui em diante, o "agora" anda em degraus de 1/n s (n ≤ 0: parado no início).
+            f64 rate = 0;
+            if (!need(1, 1, "posterizeTime(quadros por segundo)") || !want_num(args[0], rate, pos, "quadros por segundo")) return Val{};
+            const f64 secs = e.compF / e.fps;
+            const f64 stepped = rate > 0.0 ? std::floor(secs * rate + 1e-9) / rate : 0.0;
+            nowF = stepped * e.fps;
+            if (e.layer) {
+                f64 vals[4]{};
+                for (u32 c = 0; c < e.self.count; ++c) vals[c] = component(e.self, c, now_local(), false);
+                nowValue = Val::vec(vals, e.self.count);
+            }
+            seed_rng();
+            return Val{};   // instrução, como seedRandom: sozinha não vira valor
+        }
+        case FNearestKey: {
+            f64 t = 0;
+            if (!need(1, 1, "nearestKey(t)") || !want_num(args[0], t, pos, "t")) return Val{};
+            if (!e.layer) return fail(pos, "sem keyframes (expressão fora de uma camada)");
+            const Val pr = make_prop(e.self);
+            const PropDesc own = own_track();
+            props[pr.a] = own;
+            return nearest_key(own, pr.a, t * e.fps, pos);
         }
         case FLayer: return call_method(FLayer, Val{}, args, argc, pos);
         case FEffect: return call_method(FEffect, Val{}, args, argc, pos);

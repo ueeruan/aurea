@@ -208,6 +208,24 @@ u32 FrameGraph::add_raster_pass_depth(const char* name, PassStage stage, FGTextu
     return index;
 }
 
+void FrameGraph::set_color1(u32 pass, FGTexture colorTarget1) noexcept {
+    if (pass >= passes_.size() || !colorTarget1.valid()) return;
+    Pass& p = passes_[pass];
+    p.colorTarget1 = colorTarget1;
+    if (p.load == LoadOp::Load) add_access(pass, colorTarget1, Access::Read);
+    add_access(pass, colorTarget1, Access::ColorWrite);
+}
+
+void FrameGraph::set_resolve(u32 pass, FGTexture color, FGTexture color1, FGTexture depth) noexcept {
+    if (pass >= passes_.size()) return;
+    Pass& p = passes_[pass];
+    // O resolve reescreve o alvo inteiro: é escrita (e primeira escrita, sem
+    // carga do conteúdo anterior).
+    if (color.valid()) { p.resolve = color; add_access(pass, color, Access::ResolveWrite); }
+    if (color1.valid()) { p.resolve1 = color1; add_access(pass, color1, Access::ResolveWrite); }
+    if (depth.valid()) { p.depthResolve = depth; add_access(pass, depth, Access::DepthResolveWrite); }
+}
+
 u32 FrameGraph::add_compute_pass(const char* name, PassStage stage, PassFn fn) noexcept {
     Pass p;
     p.name = name ? name : "";
@@ -552,7 +570,8 @@ void FrameGraph::plan_barriers() noexcept {
                     // Leitura do alvo do próprio passe (LoadOp::Load) é a carga do
                     // render pass, não amostragem: o estado certo é o de anexo.
                     if (p.kind == PassKind::Raster
-                        && (p.colorTarget.index == a.resource || p.depthTarget.index == a.resource)) continue;
+                        && (p.colorTarget.index == a.resource || p.depthTarget.index == a.resource
+                            || p.colorTarget1.index == a.resource)) continue;
                     want = ResourceState::ShaderRead;
                     break;
                 case Access::ColorWrite:
@@ -573,6 +592,15 @@ void FrameGraph::plan_barriers() noexcept {
                 case Access::CopyDst:
                     want = ResourceState::TransferDst;
                     discard = !r.imported && r.firstUse == pos;
+                    break;
+                case Access::ResolveWrite:
+                    // O resolve escreve o alvo inteiro no fim do passe.
+                    want = ResourceState::ColorAttachment;
+                    discard = true;
+                    break;
+                case Access::DepthResolveWrite:
+                    want = ResourceState::DepthAttachment;
+                    discard = true;
                     break;
             }
             if (tracked_[a.resource] == want && !discard) continue;
@@ -620,6 +648,10 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
                 rp.clearDepth = p.clearDepth;
             }
             for (int c = 0; c < 4; ++c) rp.clear[c] = p.clear[c];
+            if (p.colorTarget1.valid()) rp.color1 = resources_[p.colorTarget1.index].physical;
+            if (p.resolve.valid()) rp.resolve = resources_[p.resolve.index].physical;
+            if (p.resolve1.valid()) rp.resolve1 = resources_[p.resolve1.index].physical;
+            if (p.depthResolve.valid()) rp.depthResolve = resources_[p.depthResolve.index].physical;
             cmds.begin_render_pass(rp);
             if (p.fn) p.fn(ctx);
             cmds.end_render_pass();

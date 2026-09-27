@@ -20,7 +20,7 @@ layout(push_constant) uniform Push {
     mat4 clipFromLayer;
     vec4 region;
     vec4 uvRect;
-    vec4 params;    // x=dither (0/1)
+    vec4 params;    // x=dither (0/1), y=texels da composição por pixel do display
 } pc;
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
@@ -36,8 +36,20 @@ float interleaved_gradient_noise(vec2 pixel) {
     return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
 }
 
+// Minificação: com a composição encolhida no display (zoom < 0,75), uma única
+// amostra bilinear pula texels — a imagem cintila quando algo se move (grade,
+// texto fino, arestas do 3D). Quatro amostras bilineares a ±1/4 da pegada do
+// pixel cobrem uma caixa de ~2×2 pegadas: média de área quase de graça.
+vec4 sample_footprint(vec2 uv) {
+    const float k = pc.params.y;
+    if (k < 1.33) return texture(u_tex0, uv);
+    const vec2 o = (0.25 * min(k, 4.0)) / vec2(textureSize(u_tex0, 0));
+    return 0.25 * (texture(u_tex0, uv + vec2(-o.x, -o.y)) + texture(u_tex0, uv + vec2(o.x, -o.y))
+                 + texture(u_tex0, uv + vec2(-o.x, o.y)) + texture(u_tex0, uv + vec2(o.x, o.y)));
+}
+
 void main() {
-    vec4 c = texture(u_tex0, v_uv);
+    vec4 c = sample_footprint(v_uv);
     vec3 lin = c.rgb + p.background.rgb * (1.0 - c.a);
     vec3 enc = linear_to_srgb(lin);
     if (pc.params.x > 0.5) {

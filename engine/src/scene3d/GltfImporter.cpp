@@ -1062,21 +1062,57 @@ ImportResult import_gltf_file(const std::string& path, const ImportOptions& opti
     return r;
 }
 
-std::shared_ptr<HdriPixels> decode_hdri(const u8* bytes, usize size) noexcept {
+std::shared_ptr<HdriPixels> decode_hdri(const u8* bytes, usize size, f32 ldrGain) noexcept {
     if (!bytes || size == 0) return nullptr;
     int w = 0, h = 0, c = 0;
     if (size > (128u << 20) || !stbi_info_from_memory(bytes, static_cast<int>(size), &w, &h, &c)
         || w <= 0 || h <= 0 || static_cast<u64>(w)*h > 8388608ull) return nullptr;
-    f32* px = stbi_loadf_from_memory(bytes, static_cast<int>(size), &w, &h, &c, 3);
-    if (!px || w <= 0 || h <= 0) {
-        if (px) stbi_image_free(px);
-        return nullptr;
+    const int n = static_cast<int>(size);
+    if (stbi_is_hdr_from_memory(bytes, n)) {
+        // Radiance: já é radiância linear.
+        f32* px = stbi_loadf_from_memory(bytes, n, &w, &h, &c, 3);
+        if (!px || w <= 0 || h <= 0) {
+            if (px) stbi_image_free(px);
+            return nullptr;
+        }
+        auto out = std::make_shared<HdriPixels>();
+        out->width = static_cast<u32>(w);
+        out->height = static_cast<u32>(h);
+        out->rgb.assign(px, px + static_cast<usize>(w) * h * 3);
+        stbi_image_free(px);
+        return out;
     }
+    // jpg/png: a curva sRGB exata → linear (o `stbi_loadf` usaria gama 2,2 —
+    // sombras erradas). 16 bits (png) mantém a precisão.
+    const f32 gain = std::isfinite(ldrGain) && ldrGain > 0.0f ? ldrGain : 1.0f;
+    auto eotf = [gain](f32 e) {
+        return (e <= 0.04045f ? e / 12.92f : std::pow((e + 0.055f) / 1.055f, 2.4f)) * gain;
+    };
     auto out = std::make_shared<HdriPixels>();
+    out->ldr = true;
+    if (stbi_is_16_bit_from_memory(bytes, n)) {
+        stbi_us* px = stbi_load_16_from_memory(bytes, n, &w, &h, &c, 3);
+        if (!px || w <= 0 || h <= 0) {
+            if (px) stbi_image_free(px);
+            return nullptr;
+        }
+        out->rgb.resize(static_cast<usize>(w) * h * 3);
+        for (usize i = 0; i < out->rgb.size(); ++i) out->rgb[i] = eotf(static_cast<f32>(px[i]) / 65535.0f);
+        stbi_image_free(px);
+    } else {
+        stbi_uc* px = stbi_load_from_memory(bytes, n, &w, &h, &c, 3);
+        if (!px || w <= 0 || h <= 0) {
+            if (px) stbi_image_free(px);
+            return nullptr;
+        }
+        f32 lut[256];
+        for (u32 i = 0; i < 256; ++i) lut[i] = eotf(static_cast<f32>(i) / 255.0f);
+        out->rgb.resize(static_cast<usize>(w) * h * 3);
+        for (usize i = 0; i < out->rgb.size(); ++i) out->rgb[i] = lut[px[i]];
+        stbi_image_free(px);
+    }
     out->width = static_cast<u32>(w);
     out->height = static_cast<u32>(h);
-    out->rgb.assign(px, px + static_cast<usize>(w) * h * 3);
-    stbi_image_free(px);
     return out;
 }
 

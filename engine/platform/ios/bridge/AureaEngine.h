@@ -502,6 +502,10 @@ NS_SWIFT_NAME(AureaEngine)
 /// dele o pai de todas — nada sai do lugar na tela; nulo 3D se alguma camada
 /// é 3D; um passo de desfazer. Devolve o id do nulo, ou −Errc.
 - (long long)parentToNewNull:(NSArray<NSNumber*>*)layerIds;
+/// "Escalonar": cascata de `stepFrames` na ordem de `layerIds` (a primeira
+/// fica); `keysOnly` = só a animação anda. Um passo de desfazer. Devolve
+/// quantas camadas andaram, ou −Errc.
+- (int)staggerLayers:(NSArray<NSNumber*>*)layerIds stepFrames:(int)stepFrames keysOnly:(BOOL)keysOnly;
 - (long long)addText3D:(NSString*)content depth:(float)depth alignment:(uint32_t)alignment
                      r:(float)r g:(float)g b:(float)b;
 - (long long)addParticles:(uint32_t)preset;

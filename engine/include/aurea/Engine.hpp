@@ -529,6 +529,13 @@ public:
     /// sai do lugar na tela e as animações próprias ficam. Nulo 3D se alguma
     /// camada é 3D. Tudo num passo de desfazer. Devolve o id do nulo.
     [[nodiscard]] Result<u64> parent_to_new_null(const u64* layerIds, u32 count) noexcept;
+    /// "Escalonar": em cascata, na ordem de `layerIds`, a i-ésima camada
+    /// desbloqueada anda i × `stepFrames` quadros (a primeira fica). Com
+    /// `keysOnly`, só a ANIMAÇÃO anda — keyframes de todas as trilhas, das
+    /// máscaras e das formas vetoriais; a barra e o conteúdo ficam. Sem ele, a
+    /// camada inteira anda (conteúdo e keyframes junto). Um passo de desfazer.
+    /// Devolve quantas camadas andaram.
+    [[nodiscard]] Result<u32> stagger_layers(const u64* layerIds, u32 count, i64 stepFrames, bool keysOnly) noexcept;
     [[nodiscard]] Result<u64> add_camera() noexcept;
     [[nodiscard]] Result<u64> add_light(u32 kind) noexcept;
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
@@ -759,6 +766,39 @@ public:
     bool set_environment_params(f32 intensity, f32 rotationDeg) noexcept;
     /// {tem HDRI (0/1), intensidade, giro}.
     bool query_environment(f32* out3) noexcept;
+    /// v32: ambiente de estúdio PROCEDURAL (StudioEnvironment.hpp): 1 estúdio
+    /// escuro (faixas de softbox, chão preto), 2 estúdio de produto (ciclorama
+    /// cinza), 3 céu com sol. Vale para a composição inteira (`objectLayer` 0,
+    /// quando ela não tem HDRI importado — o HDRI importado sai) ou para UM
+    /// objeto 3D. 0 = volta ao estúdio neutro / ao ambiente do projeto.
+    /// Entra no desfazer e no arquivo. Devolve a chave do ambiente.
+    [[nodiscard]] Result<u64> set_studio_environment(u32 preset, u64 objectLayer = 0) noexcept;
+    /// Preset de estúdio da composição atual (0 = nenhum).
+    [[nodiscard]] u32 studio_environment() noexcept;
+    /// v32: chão do grupo 3D. `mode` 0 sem chão, 1 chão visível, 2 só sombra e
+    /// reflexo (shadow catcher, compõe sobre o 2D). Cor linear; rugosidade e
+    /// refletividade 0..1 (0 = sem reflexo planar); força da sombra de contato
+    /// 0..1; `fade` = raio do desbotamento em raios dos modelos (1..100).
+    bool set_scene_floor(u32 mode, f32 r, f32 g, f32 b, f32 roughness, f32 reflectivity,
+                         f32 contactShadow = 0.8f, f32 fade = 6.0f) noexcept;
+    /// {modo, r, g, b, rugosidade, refletividade, sombra de contato, fade}.
+    bool query_scene_floor(f32* out8) noexcept;
+
+    // --- Qualidade e pós do 3D (composição atual) ---------------------------------
+    /// Nível de qualidade do 3D: 0 AUTO (segue o preview adaptativo), 1 BAIXO
+    /// (1 amostra + FXAA), 2 MÉDIO (MSAA 2×), 3 ALTO (MSAA 4×), 4 ULTRA (4×,
+    /// 8× no export, bloom na resolução inteira). O export nunca fica abaixo
+    /// do ALTO. Entra no desfazer e no arquivo do projeto.
+    bool set_scene3d_quality(u32 tier) noexcept;
+    [[nodiscard]] u32 scene3d_quality() noexcept;
+    /// Tone map do grupo 3D (0 PBR Neutral, 1 AgX fílmico) e exposição do
+    /// grupo (multiplicador linear, 0,01..64; 1 = neutro).
+    bool set_scene3d_tonemap(u32 op, f32 exposure) noexcept;
+    /// Bloom HDR do 3D: liga, força (0..4; 0,6 = sutil) e limiar (0 = sem
+    /// limiar, espalhamento conservador).
+    bool set_scene3d_bloom(bool on, f32 intensity, f32 threshold) noexcept;
+    /// {qualidade, operador, exposição, bloom (0/1), força, limiar}.
+    bool query_scene3d_post(f32* out6) noexcept;
 
     /// Ambiente POR OBJETO (v22): um modelo 3D escolhe entre o ambiente do
     /// projeto (0) e o dele (1), com HDRI, intensidade, giro e exposição

@@ -486,7 +486,10 @@ struct TimelineView: View {
             arrow.addLine(to: CGPoint(x: back, y: cy - 6)); arrow.addLine(to: CGPoint(x: back, y: cy + 6)); arrow.closeSubpath()
             context.fill(arrow, with: .color(row.type.color.opacity(row.visible ? 0.9 : 0.45)))
         }
-        drawKeys(&context, row: row, top: top, width: width)
+        // "Keyframes de todas as camadas" desligado: só as escolhidas mostram os losangos.
+        if KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: false, selected: model.selection.contains(row.id)) {
+            drawKeys(&context, row: row, top: top, width: width)
+        }
     }
 
     private func drawContent(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat) {
@@ -687,7 +690,9 @@ struct TimelineView: View {
         let y = point.y - m.rowsTop - rowTop(index) + (compact ? 0 : scrollY)
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
         let handles = row.track == nil && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
-        var result = TimelineHit.test(m, point: CGPoint(x: point.x, y: row.track == nil ? y : m.diamondCyNormal), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: row.instants, view: viewFrame, ppf: ppf)
+        let keysShown: Bool = KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: row.track != nil, selected: model.selection.contains(row.id))
+        let touchable: [Int32] = keysShown ? row.instants : []
+        var result = TimelineHit.test(m, point: CGPoint(x: point.x, y: row.track == nil ? y : m.diamondCyNormal), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: touchable, view: viewFrame, ppf: ppf)
         if row.track != nil && result.kind != .key { result = TimelineHit(kind: .body) }
         return (row, result)
     }

@@ -760,6 +760,34 @@ import XCTest
         for parent in restoredParents { XCTAssertEqual(parent, 0) }
     }
 
+    func testStaggerRowCascadesLayersInTimelineOrderAndOneUndoRestores() throws {
+        let before = try launch("stagger")
+        let starts: [Int64] = before.layerStarts ?? []
+        XCTAssertEqual(starts.count, 3)
+        XCTAssertEqual(Set(starts).count, 1, "The fixture starts all three layers together")
+        let base: Int64 = starts.first ?? 0
+        let step = app.staticTexts["stagger.step"].firstMatch
+        XCTAssertTrue(step.waitForExistence(timeout: 5))
+        let apply = app.buttons["stagger.layers"].firstMatch
+        XCTAssertTrue(apply.waitForExistence(timeout: 5)); XCTAssertTrue(apply.isHittable)
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
+        apply.tap()
+        let staggered = try awaitSnapshot("Layers cascade by 3 frames in timeline order") {
+            ($0.layerStarts ?? []) == [base, base + 3, base + 6]
+        }
+        XCTAssertEqual(staggered.layerOrder, before.layerOrder, "Staggering never reorders the stack")
+        try undo()
+        _ = try awaitSnapshot("One undo restores every start") {
+            ($0.layerStarts ?? []) == starts && $0.canRedo
+        }
+        let keys = app.buttons["stagger.keys"].firstMatch
+        XCTAssertTrue(keys.waitForExistence(timeout: 5))
+        keys.tap()
+        _ = try awaitSnapshot("Keys-only stagger keeps every bar in place") {
+            ($0.layerStarts ?? []) == starts
+        }
+    }
+
     func testTransformToolsKeepFingerSizedTargets() throws {
         _ = try launch("transform")
         let modes = app.descendants(matching: .any)
@@ -932,8 +960,9 @@ import XCTest
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
         else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
         else if scene == "parent-new-null" { XCTAssertEqual(state.layerCount, 2) }
+        else if scene == "stagger" { XCTAssertEqual(state.layerCount, 3) }
         else { XCTAssertEqual(state.layerCount, 1) }
-        let expectedSelection: Int = scene == "parent-new-null" ? 2 : 1
+        let expectedSelection: Int = scene == "parent-new-null" ? 2 : (scene == "stagger" ? 3 : 1)
         XCTAssertEqual(state.selectionCount, expectedSelection)
         XCTAssertGreaterThan(state.primaryID, 0)
         XCTAssertEqual(state.detail.position.count, 3)
@@ -1041,6 +1070,7 @@ import XCTest
         let layerCount: Int
         let layerOrder: [Int64]
         let layerParents: [Int64]?
+        let layerStarts: [Int64]?
         let markerCount: Int
         let missingAssets: Int
         let curveKeys: [CurveKey]

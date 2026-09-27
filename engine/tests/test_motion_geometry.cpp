@@ -67,7 +67,7 @@ AUREA_TEST(MotionGeometry, EngineCacheApplyUndoAndTimingInvalidation) {
     AUREA_CHECK_EQ(layer->effects.size(),1u);AUREA_CHECK_EQ(layer->effects[0].id,effectId);
     Command undoRepeat;undoRepeat.type=CommandType::Undo;AUREA_CHECK(e.apply_command(undoRepeat).ok());
     Command undo;undo.type=CommandType::Undo;AUREA_CHECK(e.apply_command(undo).ok());layer=comp->layer(LayerId::unpack(*source));AUREA_CHECK(layer->effects.empty());AUREA_CHECK(layer->motionTrack!=nullptr);
-    const char* file="aurea_test_motion_cache.aurea";AUREA_CHECK(e.save_project(file).ok());Project saved;LoadReport report;AUREA_CHECK(ProjectSerializer::load(saved,file,LoadOptions{},&report).ok());AUREA_CHECK_EQ(report.timelineVersion,30u);
+    const char* file="aurea_test_motion_cache.aurea";AUREA_CHECK(e.save_project(file).ok());Project saved;LoadReport report;AUREA_CHECK(ProjectSerializer::load(saved,file,LoadOptions{},&report).ok());AUREA_CHECK_EQ(report.timelineVersion,32u);
     AUREA_CHECK(e.load_project(file).ok());comp=e.project()->timeline().composition(e.project()->timeline().current());u64 restored=0;comp->layers().for_each([&](LayerId id,const Layer& l){if(l.kind==LayerKind::Video)restored=id.pack();});AUREA_CHECK(e.restore_motion_track(restored));
     layer=comp->layer(LayerId::unpack(restored));layer->speed=2;AUREA_CHECK(!e.apply_motion_track(restored,3).ok());AUREA_CHECK(!e.restore_motion_track(restored));
     AUREA_CHECK(e.new_project(320,180,30,"new").ok());AUREA_CHECK_EQ(e.motion_track_status().state,0u);AUREA_CHECK(!e.apply_motion_track(restored,3).ok());e.shutdown();std::remove(file);

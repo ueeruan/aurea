@@ -2304,6 +2304,16 @@ AUREA_JNI jlong AUREA_FN(nativeParentToNewNull)(JNIEnv* env, jclass, jlong handl
     return static_cast<jlong>(*r);
 }
 
+/// "Escalonar": quantas camadas andaram (≥ 0) ou `-Errc` em caso de recusa.
+AUREA_JNI jint AUREA_FN(nativeStaggerLayers)(JNIEnv* env, jclass, jlong handle, jlongArray ids, jint stepFrames, jboolean keysOnly) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jint>(Errc::InvalidState);
+    const auto v = jlongs(env, ids);
+    const Result<u32> r = c->engine.stagger_layers(v.data(), static_cast<u32>(v.size()), static_cast<i64>(stepFrames), keysOnly == JNI_TRUE);
+    if (!r.ok()) return -static_cast<jint>(r.status().code());
+    return static_cast<jint>(*r);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeExtractAudio)(JNIEnv*, jclass, jlong handle, jlong layerId) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

@@ -247,6 +247,11 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_media_lab_effects(registry);
     builtin::register_studio_light_effects(registry);
     builtin::register_tracery_effect(registry);
+    // Pacote de paridade: comportamentos de movimento, transições por forma
+    // e acabamento. No fim, para não mudar a ordem que o dono já conhece.
+    builtin::register_motion_behavior_effects(registry);
+    builtin::register_shape_transition_effects(registry);
+    builtin::register_finishing_effects(registry);
 }
 
 } // namespace aurea

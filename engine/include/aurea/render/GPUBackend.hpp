@@ -138,6 +138,12 @@ struct TextureDesc {
     bool storage      = false;
     bool transferSrc  = false;
     bool transferDst  = false;
+    /// Anexo TRANSITÓRIO: só vive dentro de um render pass (alvo MSAA que é
+    /// resolvido no fim, profundidade só de teste). Em GPU tile-based ele fica
+    /// no tile e nunca vai para a memória: Vulkan `TRANSIENT_ATTACHMENT` com
+    /// memória `LAZILY_ALLOCATED` quando existe; Metal `Memoryless`. Não pode
+    /// ser amostrado nem copiado (`sampled`/`transfer*` são ignorados).
+    bool transient    = false;
 
     /// Nome para validação/depuração. Não entra na identidade da textura.
     const char* debugName = nullptr;
@@ -177,7 +183,8 @@ struct TextureDesc {
             && layers == o.layers && mipLevels == o.mipLevels && format == o.format
             && sampleCount == o.sampleCount && sampled == o.sampled
             && renderTarget == o.renderTarget && storage == o.storage
-            && transferSrc == o.transferSrc && transferDst == o.transferDst;
+            && transferSrc == o.transferSrc && transferDst == o.transferDst
+            && transient == o.transient;
     }
 
     [[nodiscard]] static constexpr u32 surface_format_bytes(SurfaceFormat f) noexcept {
@@ -255,6 +262,11 @@ struct SamplerDesc {
     /// Borda transparente (0,0,0,0) quando `ClampToBorder`. É o que efeito de
     /// vizinhança usa para não "esticar" a última coluna da imagem.
     f32    maxAnisotropy = 1.0f;
+    /// Sampler de COMPARAÇÃO (mapa de sombra, `sampler2DShadow`): o hardware
+    /// compara a referência com a profundidade e devolve 1 quando
+    /// referência ≤ profundidade (LessOrEqual). Com filtro linear a GPU faz o
+    /// PCF 2×2 bilinear de graça. Só para texturas de profundidade.
+    bool   compare = false;
 
     friend constexpr bool operator==(const SamplerDesc&, const SamplerDesc&) noexcept = default;
 };
@@ -353,7 +365,19 @@ struct PipelineDesc {
     BlendMode blend = BlendMode::Normal;
 
     SurfaceFormat colorFormat = SurfaceFormat::RGBA16F;
+    /// Segundo anexo de cor (MRT) — o passe 3D escreve a cena HDR (linear,
+    /// sem teto) num alvo e o conteúdo 2D (planos, partículas), já no espaço
+    /// de exibição, no outro. Mesmo blend nos dois. `hasColor1` falso = um só.
+    bool          hasColor1 = false;
+    SurfaceFormat colorFormat1 = SurfaceFormat::RGBA16F;
     Topology topology = Topology::TriangleList;
+    /// Amostras por pixel (MSAA): 1, 2, 4 ou 8. O render pass que usa o
+    /// pipeline tem de ter a mesma contagem em todos os anexos.
+    u32 sampleCount = 1;
+    /// Alpha-to-coverage (+ alpha-to-one quando o aparelho tem): o alfa da
+    /// saída 0 vira máscara de cobertura das amostras. É o recorte (glTF MASK)
+    /// sem serrilhado quando há MSAA. Ignorado com `sampleCount` 1.
+    bool alphaToCoverage = false;
 
     // --- 3D ------------------------------------------------------------------
     VertexLayout vertexLayout{};
@@ -473,6 +497,19 @@ struct RenderPassBegin {
     /// depois). Profundidade só de teste não precisa ir para a memória — em
     /// GPU tile-based isso economiza a escrita inteira.
     bool    storeDepth = false;
+
+    /// Segundo alvo de cor (MRT, mesmo tamanho e amostras do primeiro). Usa o
+    /// mesmo `load` e `clear` da cor 0.
+    TextureHandle color1{};
+    /// MSAA: alvos de 1 amostra que recebem a média das amostras no FIM do
+    /// passe (resolve no tile, sem ir para a memória em GPU tile-based). Com
+    /// resolve, a cor multiamostrada NÃO é guardada (ela deve ser transitória).
+    TextureHandle resolve{};
+    TextureHandle resolve1{};
+    /// Profundidade de 1 amostra (a amostra 0 de cada pixel) para passes que a
+    /// leem depois (SSAO, sombras de contato). Só vale quando o aparelho tem
+    /// `GPUCapabilities::depthResolveSampleZero`.
+    TextureHandle depthResolve{};
 };
 
 class CommandList {

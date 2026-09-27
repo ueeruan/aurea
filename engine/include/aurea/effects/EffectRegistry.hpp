@@ -124,6 +124,30 @@ namespace effect_keys {
     inline constexpr const char* kCheckboxControl    = "aurea.control.checkbox";
     inline constexpr const char* kColorControl       = "aurea.control.color";
     inline constexpr const char* kPointControl       = "aurea.control.point";
+
+    // --- Pacote de paridade: o que faltava para editar movimento e acabamento ---
+    // Comportamentos de movimento (função pura do tempo; ver MotionBehaviorEffects.cpp)
+    inline constexpr const char* kOscillate          = "aurea.motion.oscillate";
+    inline constexpr const char* kSwing              = "aurea.motion.swing";
+    inline constexpr const char* kWiggle             = "aurea.motion.wiggle";
+    // Transições por forma (ver TransitionEffects.cpp)
+    inline constexpr const char* kIrisWipe           = "aurea.transition.iris_wipe";
+    inline constexpr const char* kBoxWipe            = "aurea.transition.box_wipe";
+    inline constexpr const char* kVenetianBlinds     = "aurea.transition.venetian_blinds";
+    // Acabamento (ver FinishingEffects.cpp e MatteEffects.cpp)
+    inline constexpr const char* kRadialBlur         = "aurea.blur.radial";
+    inline constexpr const char* kMirror             = "aurea.distort.mirror";
+    inline constexpr const char* kCrop               = "aurea.transform.crop";
+    inline constexpr const char* kVignette           = "aurea.stylize.vignette";
+    inline constexpr const char* kMosaic             = "aurea.stylize.mosaic";
+    inline constexpr const char* kFindEdges          = "aurea.stylize.find_edges";
+    inline constexpr const char* kHueSaturation      = "aurea.color.hue_saturation";
+    inline constexpr const char* kStroke             = "aurea.stylize.stroke";
+    inline constexpr const char* kMatteRefine        = "aurea.key.matte_refine";
+    // Geradores (ver GenerateEffects.cpp)
+    inline constexpr const char* kFractalNoise       = "aurea.generate.fractal_noise";
+    inline constexpr const char* kGradientRamp       = "aurea.generate.gradient_ramp";
+    inline constexpr const char* kFourColorGradient  = "aurea.generate.four_color_gradient";
 }
 
 } // namespace aurea

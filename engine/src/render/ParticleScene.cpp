@@ -385,6 +385,7 @@ u32 Renderer::scene_particle_draws(const scene3d::SceneFrame& group, const scene
         scene3d::SceneParticleDraw& d = out[used++];
         d = scene3d::SceneParticleDraw{};
         d.pipeline = *pipe;
+        d.key = key;   // o passe da cena troca amostras/MRT (SceneRenderer::build)
         d.uniforms = uni;
         d.uniformBytes = static_cast<u32>(sizeof(Vec4) * LayerSource::kParticleBlocks);
         static_assert(sizeof(ParticlePush) <= sizeof(d.push), "push das partículas");

@@ -23,6 +23,10 @@ layout(location = 3) in float v_shape;   // 0/3 redondo, 1/2 quadrado, 4 textura
 layout(location = 4) in vec4 v_misc;     // opacidade da cauda, é rastro, uv da textura
 layout(location = 5) in vec4 v_normal;   // malha: normal (px da camada), iluminada
 layout(location = 0) out vec4 o_color;
+// Dentro do passe 3D (MRT): a partícula é cor de exibição (alvo 0, como no 2D)
+// e só tapa pelo alfa a cena HDR atrás dela (alvo 1). No 2D não há alvo 1 e a
+// escrita é descartada.
+layout(location = 1) out vec4 o_scene;
 
 layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex;
 
@@ -34,7 +38,7 @@ layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex;
 const vec3 kLight = vec3(-0.36, -0.60, -0.71);
 const float kAmbient = 0.30;
 
-void main() {
+void particle_main() {
     if (v_shape > 5.5) {
         vec2 p = v_local;
         float diamond = abs(p.x)*1.4 + abs(p.y)*.8;
@@ -84,4 +88,9 @@ void main() {
     const float a = 1.0 - smoothstep(inner, 1.0, d);
     if (a <= 0.001) discard;
     o_color = v_color * (a * tail);
+}
+
+void main() {
+    particle_main();
+    o_scene = vec4(0.0, 0.0, 0.0, o_color.a);
 }

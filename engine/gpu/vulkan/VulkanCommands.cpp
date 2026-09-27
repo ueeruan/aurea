@@ -176,6 +176,71 @@ void CommandListImpl::barrier(TextureHandle texture, ResourceState newState, boo
 
 void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
     if (inRenderPass_) return;
+    if (pass.depth.valid() && (pass.color1.valid() || pass.resolve.valid()
+                               || (pass.color.valid() && backend_->texture(pass.color.id)
+                                   && backend_->texture(pass.color.id)->desc.sampleCount > 1))) {
+        // 3D com MSAA / MRT / resolve.
+        Texture* c0 = pass.color.valid() ? backend_->texture(pass.color.id) : nullptr;
+        Texture* c1 = pass.color1.valid() ? backend_->texture(pass.color1.id) : nullptr;
+        Texture* d = backend_->texture(pass.depth.id);
+        Texture* r0 = pass.resolve.valid() ? backend_->texture(pass.resolve.id) : nullptr;
+        Texture* r1 = pass.resolve1.valid() ? backend_->texture(pass.resolve1.id) : nullptr;
+        const bool wantDepthResolve = pass.depthResolve.valid() && backend_->depth_resolve_supported() && r0;
+        Texture* dr = wantDepthResolve ? backend_->texture(pass.depthResolve.id) : nullptr;
+        if (!d || !c0 || (pass.color1.valid() && !c1) || (pass.resolve.valid() && !r0)
+            || (pass.resolve1.valid() && !r1)) return;
+        const bool discardColor = pass.load != LoadOp::Load;
+        for (Texture* t : {c0, c1}) {
+            if (t && t->state != ResourceState::ColorAttachment) backend_->transition(cmd_, *t, ResourceState::ColorAttachment, discardColor);
+        }
+        if (d->state != ResourceState::DepthAttachment) {
+            backend_->transition(cmd_, *d, ResourceState::DepthAttachment, pass.depthLoad != LoadOp::Load);
+        }
+        for (Texture* t : {r0, r1}) {
+            if (t && t->state != ResourceState::ColorAttachment) backend_->transition(cmd_, *t, ResourceState::ColorAttachment, true);
+        }
+        if (dr && dr->state != ResourceState::DepthAttachment) backend_->transition(cmd_, *dr, ResourceState::DepthAttachment, true);
+
+        Backend::RenderPassKey key;
+        key.color0 = c0->format;
+        key.color1 = c1 ? c1->format : VK_FORMAT_UNDEFINED;
+        key.depth = d->format;
+        key.samples = std::max(1u, c0->desc.sampleCount);
+        key.load = pass.load;
+        key.depthLoad = pass.depthLoad;
+        key.storeDepth = pass.storeDepth;
+        key.resolve = r0 != nullptr;
+        key.depthResolve = dr != nullptr;
+        u64 ids[6] = {pass.color.id, c1 ? pass.color1.id : 0, pass.depth.id, r0 ? pass.resolve.id : 0,
+                      r1 ? pass.resolve1.id : 0, dr ? pass.depthResolve.id : 0};
+        VkImageView views[6] = {c0->view, c1 ? c1->view : VK_NULL_HANDLE, d->view, r0 ? r0->view : VK_NULL_HANDLE,
+                                r1 ? r1->view : VK_NULL_HANDLE, dr ? dr->view : VK_NULL_HANDLE};
+        VkRenderPassBeginInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        info.renderPass = backend_->render_pass(key);
+        info.framebuffer = backend_->framebuffer(key, ids, views, d->desc.width, d->desc.height);
+        info.renderArea = {{0, 0}, {d->desc.width, d->desc.height}};
+        // Um valor de limpeza por anexo (os de resolve/DONT_CARE são ignorados).
+        VkClearValue clears[6]{};
+        u32 n = 0;
+        std::memcpy(clears[n++].color.float32, pass.clear, sizeof(f32) * 4);
+        if (c1) std::memcpy(clears[n++].color.float32, pass.clear, sizeof(f32) * 4);
+        clears[n++].depthStencil = {pass.clearDepth, 0};
+        info.clearValueCount = n;
+        info.pClearValues = clears;
+        if (!info.renderPass || !info.framebuffer) return;
+        vkCmdBeginRenderPass(cmd_, &info, VK_SUBPASS_CONTENTS_INLINE);
+        inRenderPass_ = true;
+        targetWidth_ = d->desc.width;
+        targetHeight_ = d->desc.height;
+        if (frame_) {
+            for (Texture* t : {c0, c1, d, r0, r1, dr}) if (t) t->lastUsedFrame = frame_->frameNumber;
+        }
+        // O estado depois do passe: o resolve deixa os alvos de 1 amostra em
+        // anexo (layout de anexo), como os próprios multiamostrados.
+        set_viewport(0, 0, static_cast<f32>(targetWidth_), static_cast<f32>(targetHeight_));
+        set_scissor(0, 0, targetWidth_, targetHeight_);
+        return;
+    }
     if (pass.depth.valid()) {
         // 3D: cor (opcional) + profundidade.
         Texture* d = backend_->texture(pass.depth.id);

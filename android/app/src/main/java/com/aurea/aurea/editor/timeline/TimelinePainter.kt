@@ -233,7 +233,8 @@ internal class TimelinePainter(
             val dragFrame = if (st.dragKeyLayer == r.id) st.dragKeyFrame else Snap.NONE
             // Seleção de keyframes da timeline: quais instantes desta linha têm keyframe escolhido.
             val picked = if (keySel != null && keySel.layer == r.id && !keySel.isEmpty()) pickedInstants(r, keySel) else null
-            drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked)
+            val keysShown = KeyframeVisibility.visible(c.store.showAllKeyframes, r.track != null, selected)
+            drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked, keysShown)
         }
 
         // Coluna das pílulas por cima das barras.
@@ -263,6 +264,7 @@ internal class TimelinePainter(
         compact: Boolean, selected: Boolean, multi: Boolean, handles: Boolean,
         selFrame: Int, dragFrame: Int, cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
         picked: BooleanArray?,
+        keysShown: Boolean = true,
     ) {
         if (r.track != null) {
             val cy = top + 20f * m.density
@@ -359,7 +361,10 @@ internal class TimelinePainter(
             }
             drawPath(arrow, r.type.color.copy(alpha = if (r.visible) 0.9f else 0.45f))
         }
-        drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps, picked)
+        // "Keyframes: só as escolhidas" (menu da timeline): as outras linhas ficam limpas.
+        if (keysShown) {
+            drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps, picked)
+        }
     }
 
     /** Conteúdo da barra (A.01): [‹] · ícone do tipo · cadeado · nome · ◇ · [›] ou ≡. */

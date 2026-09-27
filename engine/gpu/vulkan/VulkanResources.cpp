@@ -16,6 +16,12 @@ namespace aurea::vk {
 namespace {
 
 VkImageUsageFlags usage_for(const TextureDesc& d) noexcept {
+    // Anexo transitório (alvo MSAA resolvido no passe, profundidade só de
+    // teste): só o uso de anexo, que é o que deixa a memória ser LAZY.
+    if (d.transient) {
+        return VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT
+             | (d.is_depth() ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+    }
     VkImageUsageFlags u = 0;
     if (d.sampled)      u |= VK_IMAGE_USAGE_SAMPLED_BIT;
     if (d.is_depth()) {
@@ -105,7 +111,11 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
     info.extent = {desc.width, desc.height, 1};
     info.mipLevels = std::max(1u, desc.mipLevels);
     info.arrayLayers = std::max(1u, desc.layers);
-    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    const u32 samples = std::max(1u, desc.sampleCount);
+    if (samples > 1 && (desc.cube || desc.mipLevels > 1 || desc.layers > 1)) {
+        return Status{Errc::InvalidArgument, "textura MSAA precisa ser 2D de um nivel"};
+    }
+    info.samples = static_cast<VkSampleCountFlagBits>(samples);
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
     info.usage = usage_for(desc);
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -118,7 +128,11 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
 
     VkMemoryRequirements req{};
     vkGetImageMemoryRequirements(device_, t.image, &req);
-    t.alloc = allocator_.allocate(req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, false, desc.debugName);
+    // Transitório: memória LAZY (só no tile) quando o aparelho tem; alocação
+    // dedicada, para o driver não precisar comprometer um bloco inteiro.
+    const bool lazy = desc.transient && caps_.lazyAttachments;
+    t.alloc = allocator_.allocate(req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                  lazy ? VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT : 0, lazy, desc.debugName);
     if (!t.alloc.valid()) {
         vkDestroyImage(device_, t.image, nullptr);
         return Status{Errc::OutOfDeviceMemory, "sem memoria para textura"};
@@ -168,6 +182,19 @@ void Backend::destroy_texture_now(Texture& t) noexcept {
 void Backend::destroy_texture(TextureHandle h) noexcept {
     Texture t;
     if (!textures_.remove(h.id, t)) return;
+    // Framebuffers 3D (MSAA/MRT/resolve) que usavam esta textura saem junto.
+    for (auto it = framebuffers3d_.begin(); it != framebuffers3d_.end();) {
+        bool uses = false;
+        for (u64 id : it->ids) uses = uses || id == h.id;
+        if (!uses) { ++it; continue; }
+        struct Node { Backend* b; VkFramebuffer fb; };
+        defer_until_gpu_done([](void* p) {
+            auto* n = static_cast<Node*>(p);
+            vkDestroyFramebuffer(n->b->device(), n->fb, nullptr);
+            delete n;
+        }, new Node{this, it->fb});
+        it = framebuffers3d_.erase(it);
+    }
     if (is_depth_format(t.format)) {
         // Framebuffers de outras texturas que usam esta profundidade: saem
         // junto (a view vai ser destruída).
@@ -326,7 +353,13 @@ Result<SamplerHandle> Backend::create_sampler(const SamplerDesc& desc) noexcept 
     info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
     info.maxLod = VK_LOD_CLAMP_NONE;
-    if (desc.maxAnisotropy > 1.0f && caps_.maxSamplerAnisotropy > 1.0f) {
+    if (desc.compare) {
+        // Mapa de sombra: 1 quando referência ≤ profundidade guardada.
+        info.compareEnable = VK_TRUE;
+        info.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    }
+    if (desc.maxAnisotropy > 1.0f && caps_.maxSamplerAnisotropy > 1.0f && !desc.compare) {
         info.anisotropyEnable = VK_TRUE;
         info.maxAnisotropy = std::min(desc.maxAnisotropy, caps_.maxSamplerAnisotropy);
     }
@@ -622,6 +655,209 @@ VkFramebuffer Backend::framebuffer(Texture& t, LoadOp load) noexcept {
     return t.framebuffers[i];
 }
 
+// -----------------------------------------------------------------------------
+// Passe 3D com MSAA / MRT / resolve.
+//
+// Anexos, nesta ordem: cor 0, [cor 1], profundidade, [resolve 0, resolve 1],
+// [resolve da profundidade]. Com resolve, as cores multiamostradas NÃO são
+// guardadas (STORE_OP_DONT_CARE): em GPU tile-based elas nascem e morrem no
+// tile, e o que vai para a memória é só a média de 1 amostra. A profundidade
+// resolvida (amostra 0) precisa do render pass 2 (VK_KHR_depth_stencil_resolve).
+// -----------------------------------------------------------------------------
+VkRenderPass Backend::render_pass(const RenderPassKey& k) noexcept {
+    for (const auto& [key, rp] : renderPasses3d_) {
+        if (key == k) return rp;
+    }
+    const bool depthResolve = k.depthResolve && depthResolve_ && k.depth != VK_FORMAT_UNDEFINED;
+    const VkSampleCountFlagBits samples = static_cast<VkSampleCountFlagBits>(std::max(1u, k.samples));
+    const bool resolve = k.resolve && samples != VK_SAMPLE_COUNT_1_BIT;
+    auto load_op = [](LoadOp l) {
+        return l == LoadOp::Clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
+             : l == LoadOp::Load  ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    };
+    const u32 colorCount = (k.color0 != VK_FORMAT_UNDEFINED ? 1u : 0u) + (k.color1 != VK_FORMAT_UNDEFINED ? 1u : 0u);
+    const VkFormat colorFormats[2] = {k.color0, k.color1};
+
+    // Descrições em forma "2" (superconjunto); o caminho 1 converte.
+    VkAttachmentDescription2 att[6]{};
+    VkAttachmentReference2 colorRefs[2]{}, resolveRefs[2]{}, depthRef{}, depthResolveRef{};
+    u32 n = 0;
+    for (u32 c = 0; c < colorCount; ++c) {
+        VkAttachmentDescription2& a = att[n];
+        a.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+        a.format = colorFormats[c];
+        a.samples = samples;
+        a.loadOp = load_op(k.load);
+        a.storeOp = resolve ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorRefs[c] = VkAttachmentReference2{VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, n,
+                                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT};
+        ++n;
+    }
+    const bool hasDepth = k.depth != VK_FORMAT_UNDEFINED;
+    if (hasDepth) {
+        VkAttachmentDescription2& a = att[n];
+        a.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+        a.format = k.depth;
+        a.samples = samples;
+        a.loadOp = load_op(k.depthLoad);
+        a.storeOp = k.storeDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depthRef = VkAttachmentReference2{VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, n,
+                                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
+        ++n;
+    }
+    if (resolve) {
+        for (u32 c = 0; c < colorCount; ++c) {
+            VkAttachmentDescription2& a = att[n];
+            a.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+            a.format = colorFormats[c];
+            a.samples = VK_SAMPLE_COUNT_1_BIT;
+            a.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            resolveRefs[c] = VkAttachmentReference2{VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, n,
+                                                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT};
+            ++n;
+        }
+    }
+    if (depthResolve && resolve) {
+        VkAttachmentDescription2& a = att[n];
+        a.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+        a.format = k.depth;
+        a.samples = VK_SAMPLE_COUNT_1_BIT;
+        a.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depthResolveRef = VkAttachmentReference2{VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, n,
+                                                 VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
+        ++n;
+    }
+
+    const VkPipelineStageFlags stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                                      | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+                                      | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    const VkAccessFlags access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                               | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+                               | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    const VkAccessFlags writes = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPass rp = VK_NULL_HANDLE;
+    if (depthResolve && resolve) {
+        VkSubpassDescriptionDepthStencilResolve dsr{VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE};
+        dsr.depthResolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+        dsr.stencilResolveMode = VK_RESOLVE_MODE_NONE;
+        dsr.pDepthStencilResolveAttachment = &depthResolveRef;
+        VkSubpassDescription2 sub{VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2};
+        sub.pNext = &dsr;
+        sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        sub.colorAttachmentCount = colorCount;
+        sub.pColorAttachments = colorCount ? colorRefs : nullptr;
+        sub.pResolveAttachments = colorCount ? resolveRefs : nullptr;
+        sub.pDepthStencilAttachment = &depthRef;
+        VkSubpassDependency2 deps[2]{};
+        for (VkSubpassDependency2& d : deps) {
+            d.sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
+            d.srcStageMask = d.dstStageMask = stages;
+            d.srcAccessMask = writes;
+            d.dstAccessMask = access;
+        }
+        deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+        deps[0].dstSubpass = 0;
+        deps[1].srcSubpass = 0;
+        deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+        VkRenderPassCreateInfo2 info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2};
+        info.attachmentCount = n;
+        info.pAttachments = att;
+        info.subpassCount = 1;
+        info.pSubpasses = &sub;
+        info.dependencyCount = 2;
+        info.pDependencies = deps;
+        if (!vkCreateRenderPass2KHR || vkCreateRenderPass2KHR(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
+    } else {
+        VkAttachmentDescription a1[6]{};
+        for (u32 i = 0; i < n; ++i) {
+            a1[i].format = att[i].format;
+            a1[i].samples = att[i].samples;
+            a1[i].loadOp = att[i].loadOp;
+            a1[i].storeOp = att[i].storeOp;
+            a1[i].stencilLoadOp = att[i].stencilLoadOp;
+            a1[i].stencilStoreOp = att[i].stencilStoreOp;
+            a1[i].initialLayout = att[i].initialLayout;
+            a1[i].finalLayout = att[i].finalLayout;
+        }
+        VkAttachmentReference c1[2]{}, r1[2]{};
+        for (u32 c = 0; c < colorCount; ++c) {
+            c1[c] = VkAttachmentReference{colorRefs[c].attachment, colorRefs[c].layout};
+            r1[c] = VkAttachmentReference{resolveRefs[c].attachment, resolveRefs[c].layout};
+        }
+        const VkAttachmentReference d1{depthRef.attachment, depthRef.layout};
+        VkSubpassDescription sub{};
+        sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        sub.colorAttachmentCount = colorCount;
+        sub.pColorAttachments = colorCount ? c1 : nullptr;
+        sub.pResolveAttachments = resolve && colorCount ? r1 : nullptr;
+        sub.pDepthStencilAttachment = hasDepth ? &d1 : nullptr;
+        VkSubpassDependency deps[2]{};
+        for (VkSubpassDependency& d : deps) {
+            d.srcStageMask = d.dstStageMask = stages;
+            d.srcAccessMask = writes;
+            d.dstAccessMask = access;
+        }
+        deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+        deps[0].dstSubpass = 0;
+        deps[1].srcSubpass = 0;
+        deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+        VkRenderPassCreateInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        info.attachmentCount = n;
+        info.pAttachments = a1;
+        info.subpassCount = 1;
+        info.pSubpasses = &sub;
+        info.dependencyCount = 2;
+        info.pDependencies = deps;
+        if (vkCreateRenderPass(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
+    }
+    renderPasses3d_.emplace_back(k, rp);
+    return rp;
+}
+
+VkFramebuffer Backend::framebuffer(const RenderPassKey& k, const u64 ids[6], VkImageView views[6], u32 width,
+                                   u32 height) noexcept {
+    for (const Framebuffer3d& f : framebuffers3d_) {
+        if (f.key == k && f.width == width && f.height == height && std::equal(ids, ids + 6, f.ids)) return f.fb;
+    }
+    VkImageView packed[6];
+    u32 n = 0;
+    for (u32 i = 0; i < 6; ++i) {
+        if (ids[i]) packed[n++] = views[i];
+    }
+    VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    info.renderPass = render_pass(k);
+    info.attachmentCount = n;
+    info.pAttachments = packed;
+    info.width = width;
+    info.height = height;
+    info.layers = 1;
+    VkFramebuffer fb = VK_NULL_HANDLE;
+    if (!info.renderPass || vkCreateFramebuffer(device_, &info, nullptr, &fb) != VK_SUCCESS) return VK_NULL_HANDLE;
+    Framebuffer3d entry;
+    entry.key = k;
+    std::copy(ids, ids + 6, entry.ids);
+    entry.width = width;
+    entry.height = height;
+    entry.fb = fb;
+    framebuffers3d_.push_back(entry);
+    return fb;
+}
+
 // =============================================================================
 // Pipelines
 // =============================================================================
@@ -703,7 +939,14 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     }
     raster.lineWidth = 1.0f;
     VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    const u32 samples = std::max(1u, desc.sampleCount);
+    multisample.rasterizationSamples = static_cast<VkSampleCountFlagBits>(samples);
+    // Recorte por cobertura: só com MSAA, e só com alpha-to-one (senão o alfa
+    // guardado seria a própria cobertura, e a borda sairia com alfa²).
+    if (samples > 1 && desc.alphaToCoverage && alphaToOne_) {
+        multisample.alphaToCoverageEnable = VK_TRUE;
+        multisample.alphaToOneEnable = VK_TRUE;
+    }
 
     // Alvos PRÉ-MULTIPLICADOS: Normal = src + dst*(1-srcA); Add = src + dst.
     VkPipelineColorBlendAttachmentState blend{};
@@ -723,9 +966,12 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
             blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         }
     }
+    // MRT: o mesmo blend nos dois alvos (sem precisar de independentBlend).
+    const VkPipelineColorBlendAttachmentState blends[2] = {blend, blend};
+    const bool mrt = desc.hasColor1 && !desc.depthOnly;
     VkPipelineColorBlendStateCreateInfo blendState{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    blendState.attachmentCount = desc.depthOnly ? 0 : 1;
-    blendState.pAttachments = desc.depthOnly ? nullptr : &blend;
+    blendState.attachmentCount = desc.depthOnly ? 0 : (mrt ? 2 : 1);
+    blendState.pAttachments = desc.depthOnly ? nullptr : blends;
 
     const VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
@@ -747,10 +993,23 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     // Qualquer render pass com o mesmo formato é compatível: o load op não
     // entra na compatibilidade, então um pipeline serve para CLEAR, LOAD e
     // DONT_CARE.
-    info.renderPass = desc.hasDepth
-                    ? render_pass(desc.depthOnly ? VK_FORMAT_UNDEFINED : to_vk(desc.colorFormat), LoadOp::Load,
-                                  to_vk(desc.depthFormat), LoadOp::Load, true)
-                    : render_pass(to_vk(desc.colorFormat), LoadOp::Load);
+    if (samples > 1 || mrt) {
+        // Passe 3D com MSAA/MRT. Com um subpasso só, o resolve não entra na
+        // compatibilidade: o mesmo pipeline serve ao passe com e sem resolve.
+        RenderPassKey rk;
+        rk.color0 = desc.depthOnly ? VK_FORMAT_UNDEFINED : to_vk(desc.colorFormat);
+        rk.color1 = mrt ? to_vk(desc.colorFormat1) : VK_FORMAT_UNDEFINED;
+        rk.depth = desc.hasDepth ? to_vk(desc.depthFormat) : VK_FORMAT_UNDEFINED;
+        rk.samples = samples;
+        rk.load = rk.depthLoad = LoadOp::Load;
+        rk.storeDepth = true;
+        info.renderPass = render_pass(rk);
+    } else {
+        info.renderPass = desc.hasDepth
+                        ? render_pass(desc.depthOnly ? VK_FORMAT_UNDEFINED : to_vk(desc.colorFormat), LoadOp::Load,
+                                      to_vk(desc.depthFormat), LoadOp::Load, true)
+                        : render_pass(to_vk(desc.colorFormat), LoadOp::Load);
+    }
     info.subpass = 0;
     if (!info.renderPass) return Status{Errc::PipelineCompileFailed, "render pass"};
     if (vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {

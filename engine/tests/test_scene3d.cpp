@@ -4,9 +4,12 @@
 // .gitignore). Sem a pasta, os testes avisam e passam — o CI sem os modelos
 // não quebra, mas também não finge que testou.
 #include "TestFramework.hpp"
+#include "ImageIO.hpp"
 
 #include "aurea/scene3d/Importer.hpp"
+#include "aurea/scene3d/StudioEnvironment.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -349,6 +352,206 @@ AUREA_TEST(Scene3D, EnvironmentBuildIsFastAndSane) {
     for (f32 v : {0.0f, 0.5f, 1.0f, 65504.0f, 1e-3f}) AUREA_CHECK_NEAR(half_to_float(float_to_half(v)), v, std::fmax(1e-3f, v * 1e-3f));
 }
 
+namespace {
+/// Equiretangular sintético: fundo constante + um "sol" (disco de poucos texels).
+std::vector<f32> synthetic_equirect(u32 w, u32 h, f32 base, f32 sun, u32 sunX, u32 sunY, u32 sunR) {
+    std::vector<f32> px(static_cast<usize>(w) * h * 3, base);
+    if (sun <= 0.0f) return px;
+    for (u32 y = sunY > sunR ? sunY - sunR : 0; y <= sunY + sunR && y < h; ++y) {
+        for (u32 x = sunX - sunR; x <= sunX + sunR; ++x) {
+            const i32 dx = static_cast<i32>(x) - static_cast<i32>(sunX), dy = static_cast<i32>(y) - static_cast<i32>(sunY);
+            if (static_cast<u32>(dx * dx + dy * dy) > sunR * sunR) continue;
+            f32* p = &px[(static_cast<usize>(y) * w + x) * 3];
+            p[0] = p[1] = p[2] = sun;
+        }
+    }
+    return px;
+}
+
+/// Σ radiância × ângulo sólido (canal R) de um nível de cubo RGBA16F.
+f64 cube_energy(const CubeData& c, u32 level, f32 minus = 0.0f) {
+    const u32 s = std::max(1u, c.size >> level);
+    f64 e = 0.0;
+    for (u32 f = 0; f < 6; ++f) {
+        for (u32 y = 0; y < s; ++y) {
+            for (u32 x = 0; x < s; ++x) {
+                const f64 u = 2.0 * (x + 0.5) / s - 1.0, v = 2.0 * (y + 0.5) / s - 1.0;
+                const f64 sa = 4.0 / (static_cast<f64>(s) * s) / std::pow(1.0 + u * u + v * v, 1.5);
+                const usize i = ((static_cast<usize>(f) * s + y) * s + x) * 4;
+                e += (half_to_float(c.levels[level][i]) - minus) * sa;
+            }
+        }
+    }
+    return e;
+}
+
+f64 equirect_energy(const std::vector<f32>& px, u32 w, u32 h, f32 minus = 0.0f) {
+    f64 e = 0.0;
+    for (u32 y = 0; y < h; ++y) {
+        const f64 sa = (2.0 * 3.14159265358979 / w) * (3.14159265358979 / h) * std::sin((y + 0.5) * 3.14159265358979 / h);
+        for (u32 x = 0; x < w; ++x) e += (px[(static_cast<usize>(y) * w + x) * 3] - minus) * sa;
+    }
+    return e;
+}
+
+/// Maior razão texel / média dos 4 vizinhos (dentro de cada face): um
+/// vaga-lume é um texel isolado muito acima dos vizinhos.
+f32 firefly_ratio(const CubeData& c, u32 level) {
+    const u32 s = std::max(1u, c.size >> level);
+    auto at = [&](u32 f, u32 x, u32 y) { return half_to_float(c.levels[level][((static_cast<usize>(f) * s + y) * s + x) * 4]); };
+    f32 worst = 1.0f;
+    for (u32 f = 0; f < 6; ++f) {
+        for (u32 y = 1; y + 1 < s; ++y) {
+            for (u32 x = 1; x + 1 < s; ++x) {
+                const f32 n = 0.25f * (at(f, x - 1, y) + at(f, x + 1, y) + at(f, x, y - 1) + at(f, x, y + 1));
+                if (n > 1e-4f) worst = std::max(worst, at(f, x, y) / n);
+            }
+        }
+    }
+    return worst;
+}
+} // namespace
+
+AUREA_TEST(Scene3D, EnvironmentConstantRadianceIsPreservedEverywhere) {
+    // Radiância constante → cubo, todos os mips do especular, o fundo e a
+    // irradiância (radiância difusa = E/π) têm de devolver a mesma constante.
+    const std::vector<f32> eq = synthetic_equirect(1024, 512, 0.7f, 0.0f, 0, 0, 0);
+    const EnvironmentQuality q{128u, 256u, 0u};
+    const EnvironmentMaps m = build_environment_from_equirect(eq.data(), 1024, 512, q);
+    AUREA_CHECK_EQ(m.prefiltered.size, 128u);
+    AUREA_CHECK_EQ(m.background.size, 256u);
+    AUREA_CHECK_EQ(m.background.mips, 9u);   // 256..1
+    f32 worst = 0.0f;
+    auto scan = [&](const CubeData& c) {
+        for (u32 l = 0; l < c.mips; ++l) {
+            for (usize i = 0; i < c.levels[l].size(); i += 4) {
+                for (usize k = 0; k < 3; ++k) worst = std::max(worst, std::fabs(half_to_float(c.levels[l][i + k]) - 0.7f));
+            }
+        }
+    };
+    scan(m.prefiltered);
+    scan(m.background);
+    scan(m.irradiance);
+    std::printf("\n    (radiancia constante 0,7: maior erro %.5f)", static_cast<double>(worst));
+    AUREA_CHECK(worst < 0.7f * 0.01f);
+    // O estúdio com fundo pedido também gera a cadeia inteira.
+    const EnvironmentMaps st = build_studio_environment(EnvironmentQuality{64u, 128u, 0u});
+    AUREA_CHECK_EQ(st.background.size, 128u);
+    AUREA_CHECK_EQ(st.background.mips, 8u);
+    AUREA_CHECK_EQ(st.prefiltered.size, 64u);
+    AUREA_CHECK_EQ(build_studio_environment(EnvironmentQuality{64u, 0u, 0u}).background.size, 0u);
+}
+
+AUREA_TEST(Scene3D, EnvironmentTinySunKeepsItsEnergyWithoutFireflies) {
+    // Um sol de raio 3 texels (5000) num 4K: a conversão antiga (uma amostra
+    // bilinear por texel de 128²) o perdia ou o fazia piscar com o giro.
+    const u32 W = 4096, H = 2048;
+    const f32 base = 0.02f;
+    const std::vector<f32> eq = synthetic_equirect(W, H, base, 5000.0f, 1000, 700, 3);
+    const f64 sunEq = equirect_energy(eq, W, H, base);
+    const EnvironmentMaps m = build_environment_from_equirect(eq.data(), W, H, EnvironmentQuality::final_quality());
+    AUREA_CHECK_EQ(m.prefiltered.size, 512u);
+    AUREA_CHECK_EQ(m.background.size, 1024u);
+    const f64 sunBg = cube_energy(m.background, 0, base), sunSpec0 = cube_energy(m.prefiltered, 0, base);
+    std::printf("\n    (energia do sol: equiret %.4f, fundo 1024 %.4f, especular mip0 %.4f)", sunEq, sunBg, sunSpec0);
+    AUREA_CHECK_NEAR(sunBg / sunEq, 1.0, 0.05);
+    AUREA_CHECK_NEAR(sunSpec0 / sunEq, 1.0, 0.05);
+    // Mips ásperos: energia preservada (±5%: lóbulo normalizado pela soma de
+    // N·L e mips pesados pelo ângulo sólido) e nenhum vaga-lume isolado.
+    for (u32 l = 1; l < m.prefiltered.mips; ++l) {
+        const f64 e = cube_energy(m.prefiltered, l, base);
+        const f32 ff = firefly_ratio(m.prefiltered, l);
+        std::printf("\n    (mip %u, rugosidade %.2f: energia %.3f do original, vaga-lume %.2f)", l,
+                    static_cast<double>(specular_roughness_at(static_cast<f32>(l), m.prefiltered.mips)), e / sunEq,
+                    static_cast<double>(ff));
+        AUREA_CHECK_NEAR(e / sunEq, 1.0, 0.05);
+        if (l >= 3) AUREA_CHECK(ff < 2.0f);
+    }
+    // Deslocar o sol um texel não pode fazer o reflexo "piscar": a energia
+    // no mip 0 do especular quase não muda.
+    const std::vector<f32> eq2 = synthetic_equirect(W, H, base, 5000.0f, 1001, 700, 3);
+    const EnvironmentMaps m1 = build_environment_from_equirect(eq.data(), W, H, EnvironmentQuality{256u, 0u, 0u});
+    const EnvironmentMaps m2 = build_environment_from_equirect(eq2.data(), W, H, EnvironmentQuality{256u, 0u, 0u});
+    const f64 a = cube_energy(m1.prefiltered, 0, base), b = cube_energy(m2.prefiltered, 0, base);
+    std::printf("\n    (sol deslocado 1 texel: %.4f -> %.4f)", a, b);
+    AUREA_CHECK_NEAR(a / b, 1.0, 0.03);
+}
+
+AUREA_TEST(Scene3D, EnvironmentBackgroundLodGrowsWithBlur) {
+    const f32 fov = 45.0f * 3.14159265f / 180.0f;
+    const BackgroundSampling sharp = background_sampling(0.0f, fov, 1080, 1024, 8);
+    AUREA_CHECK_EQ(sharp.gradScale, 1.0f);
+    AUREA_CHECK_EQ(sharp.specBlend, 0.0f);
+    BackgroundSampling prev = sharp;
+    for (int i = 1; i <= 20; ++i) {
+        const BackgroundSampling s = background_sampling(static_cast<f32>(i) / 20.0f, fov, 1080, 1024, 8);
+        AUREA_CHECK(s.gradScale >= prev.gradScale);
+        AUREA_CHECK(s.specLod >= prev.specLod);
+        AUREA_CHECK(s.specBlend >= prev.specBlend);
+        prev = s;
+    }
+    AUREA_CHECK(prev.gradScale > 64.0f);
+    AUREA_CHECK_NEAR(prev.specLod, 7.0f, 1e-4f);   // desfoque 1 = o mip mais áspero
+    AUREA_CHECK_EQ(prev.specBlend, 1.0f);
+    // NaN / fora da faixa não quebram o céu.
+    AUREA_CHECK_EQ(background_sampling(std::numeric_limits<f32>::quiet_NaN(), fov, 1080, 1024, 8).gradScale, 1.0f);
+    // A curva do LOD especular e a inversa (a da geração) casam.
+    for (u32 l = 0; l < 8; ++l) {
+        AUREA_CHECK_NEAR(specular_lod(specular_roughness_at(static_cast<f32>(l), 8), 8), static_cast<f32>(l), 1e-3f);
+    }
+    AUREA_CHECK_NEAR(specular_lod(1.0f, 8), 7.0f, 1e-5f);
+    AUREA_CHECK_EQ(specular_lod(0.0f, 8), 0.0f);
+}
+
+AUREA_TEST(Scene3D, EnvironmentLdrPanoramaIsLinearizedAsSrgb) {
+    const test::Image8 img{3, 1, {0, 0, 0, 255, 128, 128, 128, 255, 255, 255, 255, 255}};
+    const std::string path = "env_ldr_srgb.png";
+    std::vector<u8> bytes;
+    AUREA_CHECK(test::write_png(path, img));
+    if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
+        std::fseek(f, 0, SEEK_END);
+        bytes.resize(static_cast<usize>(std::ftell(f)));
+        std::fseek(f, 0, SEEK_SET);
+        bytes.resize(std::fread(bytes.data(), 1, bytes.size(), f));
+        std::fclose(f);
+    }
+    const auto px = decode_hdri(bytes.data(), bytes.size());
+    AUREA_CHECK(px && px->ldr && px->width == 3);
+    if (!px) return;
+    AUREA_CHECK_NEAR(px->rgb[0], 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(px->rgb[3], 0.21586f, 1e-4f);   // sRGB 128 → linear (a gama 2,2 dava 0,2195)
+    AUREA_CHECK_NEAR(px->rgb[6], 1.0f, 1e-6f);
+    const auto boosted = decode_hdri(bytes.data(), bytes.size(), 4.0f);
+    AUREA_CHECK(boosted && std::fabs(boosted->rgb[6] - 4.0f) < 1e-5f);
+}
+
+AUREA_TEST(Scene3D, EnvironmentHdriBuildTimes) {
+    const std::vector<f32> eq = synthetic_equirect(4096, 2048, 0.5f, 2000.0f, 1000, 700, 3);
+    struct Tier { const char* name; EnvironmentQuality q; };
+    const Tier tiers[] = {{"preview sem fundo, 2 threads", EnvironmentQuality{256u, 0u, 2u}},
+                          {"preview (2 threads)", EnvironmentQuality::preview()},
+                          {"final sem fundo", EnvironmentQuality{512u, 0u, 0u}},
+                          {"final", EnvironmentQuality::final_quality()},
+                          {"final 1 thread", EnvironmentQuality{512u, 1024u, 1u}}};
+    for (const Tier& t : tiers) {
+        const auto t0 = std::chrono::steady_clock::now();
+        const EnvironmentMaps m = build_environment_from_equirect(eq.data(), 4096, 2048, t.q);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        usize bytes = m.irradiance.levels[0].size() * 2 + m.brdfLut.size() * 2;
+        for (const auto& l : m.prefiltered.levels) bytes += l.size() * 2;
+        for (const auto& l : m.background.levels) bytes += l.size() * 2;
+        std::printf("\n    (hdri 4096x2048, %s: %.0f ms, especular %u/%u mips, fundo %u/%u mips, %.1f MB)", t.name, ms,
+                    m.prefiltered.size, m.prefiltered.mips, m.background.size, m.background.mips,
+                    static_cast<double>(bytes) / 1048576.0);
+    }
+    for (const EnvironmentQuality q : {EnvironmentQuality{256u, 0u, 0u}, EnvironmentQuality{512u, 0u, 0u}}) {
+        const auto t0 = std::chrono::steady_clock::now();
+        (void)build_studio_environment(q);
+        std::printf("\n    (estudio %u: %.0f ms)", q.specularSize,
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    }
+}
+
 
 AUREA_TEST(Scene3D, SkinnedAnimationPoseFollowsTheClipTime) {
     if (!have("Fox.glb")) return;
@@ -639,4 +842,67 @@ AUREA_TEST(Scene3D, GltfWithKtx2OnlyTextureImports) {
     }
     std::remove(path.c_str());
     std::remove((dir + "aurea_teste_tex.ktx2").c_str());
+}
+
+// Estúdios procedurais (v32): valores finitos, energia plausível por preset e
+// a faixa dinâmica que desenha o reflexo (faixas >> fundo no escuro; sol HDR).
+AUREA_TEST(Scene3D, StudioEnvironmentsHaveFiniteEnergy) {
+    AUREA_CHECK(studio_preset_from_name("estudio_escuro") == 1u);
+    AUREA_CHECK(studio_preset_from_name("estudio_produto") == 2u);
+    AUREA_CHECK(studio_preset_from_name("ceu_sol") == 3u);
+    AUREA_CHECK(studio_preset_from_name("nada") == 0u);
+    AUREA_CHECK(studio_preset_of_key(studio_environment_key(2)) == 2u);
+    AUREA_CHECK(studio_preset_of_key(0x0000000100000001ull) == 0u);
+    AUREA_CHECK(!generate_studio_hdri(0) && !generate_studio_hdri(9));
+    for (u32 preset = 1; preset < kStudioPresetCount; ++preset) {
+        const auto px = generate_studio_hdri(preset, 512);
+        AUREA_CHECK(px && px->width == 512 && px->height == 256);
+        if (!px) continue;
+        bool finite = true;
+        f64 sum = 0.0, wsum = 0.0, upper = 0.0, upperW = 0.0;
+        f32 peak = 0.0f;
+        std::vector<f32> lum;
+        lum.reserve(static_cast<usize>(px->width) * px->height);
+        for (u32 y = 0; y < px->height; ++y) {
+            const f64 w = std::sin((y + 0.5) / px->height * 3.14159265358979);   // área do texel
+            for (u32 x = 0; x < px->width; ++x) {
+                const f32* c = &px->rgb[(static_cast<usize>(y) * px->width + x) * 3];
+                for (int k = 0; k < 3; ++k) finite = finite && std::isfinite(c[k]) && c[k] >= 0.0f;
+                const f32 l = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+                sum += l * w;
+                wsum += w;
+                if (y < px->height / 2) { upper += l * w; upperW += w; }
+                peak = std::max(peak, l);
+                lum.push_back(l);
+            }
+        }
+        std::nth_element(lum.begin(), lum.begin() + lum.size() / 2, lum.end());
+        const f32 median = lum[lum.size() / 2];
+        const f64 mean = sum / wsum;
+        std::printf("\n    %s: media %.3f mediana %.4f pico %.1f", studio_preset_name(preset), mean, median, peak);
+        AUREA_CHECK_MSG(finite, studio_preset_name(preset));
+        AUREA_CHECK(mean > 0.05 && mean < 5.0);
+        if (preset == 1) {
+            // Escuro: fundo quase preto, faixas várias ordens acima.
+            AUREA_CHECK(median < 0.03f);
+            AUREA_CHECK(peak > 8.0f && peak > 300.0f * median);
+        } else if (preset == 2) {
+            // Produto: ciclorama cinza médio visível, luz macia (sem pico duro).
+            AUREA_CHECK(median > 0.3f && median < 0.9f);
+            AUREA_CHECK(peak < 20.0f);
+        } else {
+            // Céu: hemisfério de cima azul-claro; o sol, HDR de verdade.
+            AUREA_CHECK(upper / upperW > 0.3);
+            AUREA_CHECK(peak > 1000.0f && peak < 65000.0f);   // cabe em fp16
+        }
+        // O mesmo caminho de um HDRI importado: mapas finitos.
+        const EnvironmentMaps maps = build_environment_from_equirect(px->rgb.data(), px->width, px->height,
+                                                                     EnvironmentQuality{64u, 0u, 0u});
+        AUREA_CHECK(maps.irradiance.size > 0 && !maps.irradiance.levels.empty());
+        bool mapsFinite = !maps.irradiance.levels.empty();
+        for (u16 h : maps.irradiance.levels[0]) mapsFinite = mapsFinite && std::isfinite(half_to_float(h));
+        AUREA_CHECK_MSG(mapsFinite, studio_preset_name(preset));
+    }
+    // Determinístico e compartilhado.
+    AUREA_CHECK(studio_hdri(1) && studio_hdri(1).get() == studio_hdri(1).get());
 }

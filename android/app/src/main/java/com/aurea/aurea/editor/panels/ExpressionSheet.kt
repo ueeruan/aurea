@@ -59,6 +59,10 @@ import kotlinx.coroutines.delay
  */
 private val Snippets = listOf(
     "wiggle(2, 30)",
+    "shake(30, 8)",
+    "shake(80, 14, 0.6, 0.6, inPoint)",
+    "ease(timeSinceMarker(), 0, 0.3, 120, 100)",
+    "posterizeTime(12); wiggle(2, 30)",
     "loopOut(\"cycle\")",
     "time * 90",
     "value",

@@ -80,13 +80,43 @@ struct SceneLight {
     Vec3 position{0, 0, 0};           ///< mundo (px)
     Vec3 direction{0, 1, 0};          ///< para onde a luz aponta (mundo)
     Vec3 color{1, 1, 1};
-    f32  intensity = 1.0f;            ///< já em unidades do mundo do Aurea
+    /// Já em unidades do mundo do Aurea (px). Direcional: irradiância.
+    /// Ponto/spot: candela × (px/m)² — o Renderer converte a intensidade da
+    /// luz (candela, KHR_lights_punctual) com a escala da composição
+    /// (`scene_pixels_per_meter`), e a queda 1/d² do shader em px dá o mesmo
+    /// que 1/d² em metros.
+    f32  intensity = 1.0f;
     f32  range = 0.0f;
     f32  innerCone = 0.0f, outerCone = 0.7853982f;
     /// Só a primeira DIRECIONAL com sombra projeta (mapa ortográfico ajustado
     /// aos modelos do grupo).
     bool castShadows = false;
+    /// Viés constante da sombra (LightData::shadowBias): 0,001 = meio texel do
+    /// mapa em profundidade de mundo (o normal offset faz o grosso).
+    f32  shadowBias = 0.001f;
+    /// Tamanho da fonte (tangente do raio angular): a penumbra do PCSS tem
+    /// largura ≈ 2·tan·(distância bloqueador → receptor). 0,04 ≈ 2,3° — uma
+    /// caixa de luz de estúdio; o sol real é ~0,0047.
+    f32  sourceRadius = 0.04f;
 };
+
+/// Sombra da composição (ShadowSettings): o nível de qualidade (HeavyQuality)
+/// escolhe mapa e amostras; isto só SOBE o piso ou ajusta o viés — o padrão
+/// de um projeto antigo (sem nada escolhido) não perde a sombra suave.
+struct SceneShadowSettings {
+    f32  normalBias = 0.02f;   ///< normal offset: 0,02 = 1,5 texel do mapa (escala linear)
+    bool softShadows = false;  ///< true = PCSS até no BAIXO/MÉDIO
+    u32  pcfSamples = 0;       ///< piso de amostras do PCF (0 = o do nível)
+    u32  mapResolution = 0;    ///< piso do lado do mapa (0 = o do nível)
+};
+
+/// Escala física da cena 3D: a altura do quadro da composição vale 2 m no
+/// plano Z = 0 (a câmera padrão mostra esse plano 1:1 em pixels). Assim uma
+/// luz pontual de 8 cd a ~1 altura de distância dá ~1,9 de irradiância — a
+/// mesma ordem da direcional padrão (3) — em qualquer resolução da composição.
+[[nodiscard]] inline f32 scene_pixels_per_meter(u32 compHeight) noexcept {
+    return std::max(1.0f, static_cast<f32>(compHeight) * 0.5f);
+}
 
 /// O ambiente (luz de imagem) de uma cena — ou de UM objeto, quando ele tem o
 /// seu (v22). Nulo = estúdio neutro.
@@ -97,6 +127,9 @@ struct SceneEnvironment {
     f32  intensity = 1.0f;
     f32  exposure = 1.0f;
     f32  rotation = 0.0f;              ///< radianos em torno do eixo vertical
+    /// Desfoque do fundo visível, 0..1 (EnvironmentSettings::backgroundBlur,
+    /// lido como rugosidade: 0 = nítido; forte = o especular pré-filtrado).
+    f32  backgroundBlur = 0.0f;
     Vec3 sky{0.80f, 0.85f, 0.95f};
     Vec3 ground{0.30f, 0.28f, 0.26f};
 };
@@ -145,10 +178,34 @@ struct ScenePlane {
     f32  viewDepth = 0.0f;         ///< w do centro (ordem do mais longe para o mais perto)
 };
 
+/// Pós do grupo 3D vindo da composição (PostProcessSettings): o que a pessoa
+/// escolheu. A resolução do AA/bloom vem da qualidade (HeavyQuality + nível).
+struct ScenePost {
+    u32  toneMapper = 0;        ///< 0 PBR Neutral, 1 AgX
+    bool bloom = true;
+    f32  bloomIntensity = 0.6f; ///< 0..4
+    f32  bloomThreshold = 0.0f; ///< 0 = sem limiar (mistura conservadora)
+    u32  quality = 0;           ///< Scene3DQuality
+};
+
+/// Chão do grupo 3D (FloorSettings da composição; ver Ground.cpp). Plano
+/// horizontal no ponto mais baixo dos modelos ("para cima" = −Y).
+struct SceneFloor {
+    u32  mode = 0;                    ///< 0 sem chão, 1 visível, 2 só sombra/reflexo (shadow catcher)
+    Vec3 color{0.5f, 0.5f, 0.5f};     ///< linear
+    f32  roughness = 0.35f;
+    f32  reflectivity = 0.5f;         ///< 0 = sem passe de reflexo planar
+    f32  contactShadow = 0.8f;
+    f32  fade = 6.0f;                 ///< raio do desbotamento (× raio dos modelos)
+};
+
 struct SceneFrame {
     SceneCamera camera;
     SceneEnvironment environment;
+    ScenePost post;
+    SceneFloor floor;
     std::vector<SceneLight> lights;
+    SceneShadowSettings shadow;
     std::vector<SceneInstance> instances;
     /// Desfoque de movimento: a cena em K instantes do obturador (câmera,
     /// modelos e pose da animação). Vazio = sem desfoque; o render acumula a
@@ -185,6 +242,9 @@ struct SceneParticleDraw {
     TextureHandle texture{};
     u64 sampler = 0;
     u32 meshVertices = 0;
+    /// Chave do pipeline: o build troca amostras (MSAA) e o segundo alvo (MRT)
+    /// para os do passe da cena — quem monta a partícula não precisa saber.
+    PipelineKey key{};
 };
 
 /// Contas do QUADRO inteiro (todas as cenas e subquadros de desfoque): o
@@ -226,9 +286,38 @@ public:
 
     /// Monta os passes do grupo: cor (RGBA16F, limpa transparente) e
     /// profundidade (transitória). `outColor` recebe a textura a compor.
+    ///
+    /// O passe da cena desenha em DOIS alvos (MRT): 0 = 2D de exibição
+    /// (planos, partículas, unlit — sai exatamente como no 2D), 1 = a cena em
+    /// luz linear HDR. Com MSAA os dois são multiamostrados e transitórios, e
+    /// o resolve do fim do passe (no tile) entrega os de 1 amostra. Depois,
+    /// o pós do grupo: exposição → bloom → tone map → + 2D → (FXAA). Grupo
+    /// só com planos/partículas não tem HDR: um alvo só, sem pós.
+    ///
+    /// `outDepth` (opcional): profundidade de 1 amostra para quem lê depois
+    /// (SSAO/sombra de contato). Com MSAA ela sai do resolve da amostra 0 —
+    /// só onde o aparelho tem (`depthResolveSampleZero`); sem, fica inválida
+    /// e quem precisa faz um pré-passe de profundidade de 1 amostra.
     [[nodiscard]] bool build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                              u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes = nullptr,
-                             const SceneParticleDraw* particles = nullptr, u32 particleCount = 0) noexcept;
+                             const SceneParticleDraw* particles = nullptr, u32 particleCount = 0,
+                             FGTexture* outDepth = nullptr) noexcept;
+    /// O grupo tem luz de cena (modelo, texto 3D, céu)? Sem ela, planos e
+    /// partículas vão num alvo só, sem pós.
+    [[nodiscard]] static bool wants_hdr(const SceneFrame& frame) noexcept {
+        return !frame.instances.empty() || frame.environment.showBackground;
+    }
+    /// AA e pós do quadro (HeavyQuality já com o nível da composição):
+    /// amostras pedidas (o aparelho corta), FXAA, bloom (resolução inicial
+    /// 1/div e níveis).
+    void set_post_quality(u32 msaaSamples, bool fxaa, u32 bloomStartDiv, u32 bloomLevels) noexcept {
+        postMsaa_ = std::clamp(msaaSamples, 1u, 8u);
+        postFxaa_ = fxaa;
+        bloomDiv_ = std::clamp(bloomStartDiv, 1u, 4u);
+        bloomLevels_ = std::clamp(bloomLevels, 1u, 8u);
+    }
+    /// Amostras que o passe da cena usa de fato (pedido ∩ aparelho).
+    [[nodiscard]] u32 pass_samples() const noexcept;
     [[nodiscard]] PipelineKey plane_key() const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.
@@ -261,17 +350,31 @@ public:
     void request_environment(const SceneEnvironment& env) noexcept;
     /// Quantas vezes um ambiente do grupo subiu para a GPU (desde o início).
     [[nodiscard]] u64 environment_uploads() const noexcept { return envUploads_; }
+    /// Qualidade do IBL: o preview gera `preview` (fora da thread de render,
+    /// troca quando pronto); export/captura (`finish_environment`) esperam o
+    /// `final`. O que já está na GPU nunca é rebaixado (o final serve ao
+    /// preview). Padrão: especular 256²/fundo 512² e 512²/1024².
+    void set_environment_quality(const EnvironmentQuality& preview, const EnvironmentQuality& final) noexcept {
+        envPreview_ = preview;
+        envFinal_ = final;
+    }
+    /// Tamanhos do que está na GPU (0 = nada): base do especular e face do fundo.
+    [[nodiscard]] u32 environment_specular_size() const noexcept { return prefilteredSize_; }
+    [[nodiscard]] u32 environment_background_size() const noexcept { return backgroundSize_; }
 
     [[nodiscard]] const SceneStats& stats() const noexcept { return stats_; }
-    /// Qualidade do preview (HeavyQuality): mapa de sombra (512..2048), filtro
-    /// (2 = PCF 6×6, 1 = 2×2 bilinear, 0 = uma amostra) e viés do LOD. O
-    /// export chama com (2048, 2, 1).
+    /// Qualidade (HeavyQuality): mapa de sombra (256..4096), nível da sombra
+    /// (0 BAIXO = PCF 8, 1 MÉDIO = PCF 16, 2 ALTO = PCSS 12+24, 3 ULTRA =
+    /// PCSS 16+32) e viés do LOD. O export chama com (4096, 3, 1).
     /// Instancing ligado (padrão). Desligar serve só ao benchmark A/B.
     void set_instancing(bool on) noexcept { instancing_ = on; }
+    /// AA do 3D ligado (padrão). Desligar (1 amostra, sem FXAA) serve só ao
+    /// A/B de teste e benchmark — a referência "sem AA" das medições.
+    void set_antialias(bool on) noexcept { antialias_ = on; }
     void set_quality(u32 shadowMapSize, u32 shadowFilter, f32 lodBias, bool lodHysteresis = true) noexcept {
         lodHysteresis_ = lodHysteresis;
         shadowSize_ = std::clamp(shadowMapSize, 256u, 4096u);
-        shadowFilter_ = std::min(shadowFilter, 2u);
+        shadowFilter_ = std::min(shadowFilter, 3u);
         lodBias_ = std::clamp(lodBias, 0.1f, 1.0f);
     }
     [[nodiscard]] u64 resident_bytes() const noexcept;
@@ -284,6 +387,20 @@ private:
     };
 
     [[nodiscard]] PipelineKey key_for(AlphaMode mode, bool doubleSided, bool skinned) const noexcept;
+    /// Estado do passe da cena no build corrente (as chaves dependem dele).
+    u32  passSamples_ = 1;
+    bool passMrt_ = false;
+    bool passA2C_ = false;
+    u32  postMsaa_ = 4;
+    bool postFxaa_ = false;
+    bool antialias_ = true;
+    u32  bloomDiv_ = 2;
+    u32  bloomLevels_ = 6;
+    /// Pós do grupo: bloom (cadeia descida/subida), tone map e FXAA. Devolve
+    /// a textura final do grupo.
+    [[nodiscard]] FGTexture build_post(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
+                                       FGTexture display, FGTexture scene) noexcept;
+    [[nodiscard]] FGTexture build_fxaa(FrameGraph& graph, u32 width, u32 height, FGTexture src) noexcept;
     [[nodiscard]] PipelineKey shadow_key(bool skinned) const noexcept;
     u32 shadowSize_ = 2048;
     u32 shadowFilter_ = 2;
@@ -319,6 +436,13 @@ private:
     TextureHandle white_{}, flatNormal_{}, black_{}, envCube_{}, brdfLut_{};
     TextureHandle irradiance_{}, prefiltered_{}, iblLut_{}, background_{};
     u32 prefilteredMips_ = 1;
+    u32 prefilteredSize_ = 0, backgroundSize_ = 0;
+    EnvironmentQuality envPreview_ = EnvironmentQuality::preview();
+    EnvironmentQuality envFinal_ = EnvironmentQuality::final_quality();
+    /// Qualidade PEDIDA do que está na GPU e do que está sendo gerado (tetos
+    /// do especular e do fundo; 0 = sem fundo). Decide se um pedido já está
+    /// atendido sem depender do tamanho real (um HDRI pequeno gera menos).
+    u32 envSpecTier_ = 0, envBgTier_ = 0, pendingSpecTier_ = 0, pendingBgTier_ = 0;
     /// Estúdio padrão sendo gerado numa thread de fundo (~0,3 s no desktop):
     /// o primeiro quadro 3D não espera; usa o céu analítico até ficar pronto.
     std::future<EnvironmentMaps> pendingEnv_;

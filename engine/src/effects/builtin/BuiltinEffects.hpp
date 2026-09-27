@@ -30,6 +30,10 @@ void register_corner_pin_effect(EffectRegistry& r);
 void register_media_lab_effects(EffectRegistry& r);
 void register_studio_light_effects(EffectRegistry& r);
 void register_tracery_effect(EffectRegistry& r);
+// Pacote de paridade (registrados no fim: a ordem dos antigos não muda).
+void register_motion_behavior_effects(EffectRegistry& r);
+void register_shape_transition_effects(EffectRegistry& r);
+void register_finishing_effects(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

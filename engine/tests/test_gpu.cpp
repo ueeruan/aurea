@@ -36,6 +36,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/render/Renderer.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/render/ParticleExtras.hpp"
+#include "aurea/scene3d/StudioEnvironment.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -1250,11 +1251,21 @@ AUREA_TEST(Gpu, Scene3DLookDevRendersAndTimesPremiumScenes) {
     const char* dir = std::getenv("AUREA_LOOKDEV_DIR");
     const char* tagEnv = std::getenv("AUREA_LOOKDEV_TAG");
     const std::string tag = tagEnv && *tagEnv ? tagEnv : "atual";
-    const std::string hdri = std::string(AUREA_TEST_DATA_DIR) + "/../../../output/iphone-cinematic-20s/assets/studio-original.hdr";
-    struct Shot { const char* name; const char* model; };
-    const Shot shots[] = {{"capacete", "DamagedHelmet.glb"}, {"esferas", "MetalRoughSpheres.glb"}, {"alfa", "AlphaBlendModeTest.glb"}};
+    const char* hdriEnv = std::getenv("AUREA_LOOKDEV_HDRI");
+    const std::string hdri = hdriEnv && *hdriEnv ? std::string(hdriEnv)
+        : std::string(AUREA_TEST_DATA_DIR) + "/../../../output/iphone-cinematic-20s/assets/studio-original.hdr";
+    // Rotação (graus) e escala da camada: ângulo 3/4 de catálogo, igual em todo "antes/depois".
+    struct Shot { const char* name; const char* model; Vec3 rot; f32 scale; };
+    // "@x.glb" = AUREA_LOOKDEV_ASSETS/x.glb (carros Khronos CC-BY, fora do git).
+    const Shot shots[] = {{"capacete", "DamagedHelmet.glb", {0, 25, 0}, 1.4f},
+                          {"esferas", "MetalRoughSpheres.glb", {0, 0, 0}, 1.4f},
+                          {"alfa", "AlphaBlendModeTest.glb", {10, 20, 0}, 1.3f},
+                          {"carro", "@CarConcept.glb", {14, 36, 0}, 1.0f},
+                          {"carrinho", "@ToyCar.glb", {14, 32, 0}, 1.3f}};
+    const char* assets = std::getenv("AUREA_LOOKDEV_ASSETS");
     for (const Shot& s : shots) {
-        const std::string path = gltf_data(s.model);
+        if (s.model[0] == '@' && !(assets && *assets)) continue;
+        const std::string path = s.model[0] == '@' ? std::string(assets) + "/" + (s.model + 1) : gltf_data(s.model);
         if (!file_exists(path)) continue;
         Scene3DRig rig(1280, 720);
         ModelImport mi;
@@ -1262,7 +1273,47 @@ AUREA_TEST(Gpu, Scene3DLookDevRendersAndTimesPremiumScenes) {
         const Result<u64> model = rig.e.import_model(mi);
         AUREA_CHECK_MSG(model.ok(), s.name);
         if (!model.ok()) continue;
+        if (Composition* c = rig.e.project()->timeline().composition(rig.e.project()->timeline().current())) {
+            if (Layer* l = c->layer(LayerId::unpack(*model))) {
+                l->transform.rotation = s.rot;
+                l->transform.scale = Vec3{l->transform.scale.x * s.scale, l->transform.scale.y * s.scale, l->transform.scale.z * s.scale};
+            }
+        }
         if (file_exists(hdri)) AUREA_CHECK(rig.e.import_hdri(hdri.c_str()).ok());
+        // AUREA_LOOKDEV_BG=1: mostra o HDRI como fundo (desligado por padrão no
+        // projeto — o fundo preto do "antes" não é defeito, é o padrão).
+        if (const char* bgEnv = std::getenv("AUREA_LOOKDEV_BG"); bgEnv && *bgEnv == '1' && file_exists(hdri)) {
+            AUREA_CHECK(rig.e.set_environment_background(true));
+        }
+        // Variantes do pós para o "antes/depois" do AA e do HDR:
+        // AUREA_LOOKDEV_QUALITY=0..4 (AUTO..ULTRA), AUREA_LOOKDEV_BLOOM=0/1,
+        // AUREA_LOOKDEV_TONEMAP=0 (PBR Neutral)/1 (AgX), AUREA_LOOKDEV_AA=0 (sem AA).
+        if (const char* q = std::getenv("AUREA_LOOKDEV_QUALITY"); q && *q) {
+            AUREA_CHECK(rig.e.set_scene3d_quality(static_cast<u32>(std::atoi(q))));
+        }
+        if (const char* b = std::getenv("AUREA_LOOKDEV_BLOOM"); b && *b) AUREA_CHECK(rig.e.set_scene3d_bloom(*b == '1', 0.6f, 0.0f));
+        if (const char* t = std::getenv("AUREA_LOOKDEV_TONEMAP"); t && *t) {
+            AUREA_CHECK(rig.e.set_scene3d_tonemap(static_cast<u32>(std::atoi(t)), 1.0f));
+        }
+        if (const char* aa = std::getenv("AUREA_LOOKDEV_AA"); aa && *aa == '0') rig.e.renderer().scene_renderer().set_antialias(false);
+        // AUREA_LOOKDEV_STUDIO=<preset> (estudio_escuro | estudio_produto | ceu_sol):
+        // estúdio procedural como ambiente e fundo + o chão do grupo (modo 1;
+        // AUREA_LOOKDEV_FLOOR=0..2 troca o modo). O modelo fica reto (sem a
+        // inclinação em X do "3/4 de catálogo"): o chão é horizontal.
+        if (const char* st = std::getenv("AUREA_LOOKDEV_STUDIO"); st && *st) {
+            const u32 preset = scene3d::studio_preset_from_name(st);
+            AUREA_CHECK_MSG(preset != 0, st);
+            if (Composition* c = rig.e.project()->timeline().composition(rig.e.project()->timeline().current())) {
+                if (Layer* l = c->layer(LayerId::unpack(*model))) l->transform.rotation.x = 0.0f;
+            }
+            AUREA_CHECK(rig.e.set_studio_environment(preset).ok());
+            AUREA_CHECK(rig.e.set_environment_background(true));
+            u32 floorMode = 1;
+            if (const char* fm = std::getenv("AUREA_LOOKDEV_FLOOR"); fm && *fm) floorMode = static_cast<u32>(std::atoi(fm));
+            if (preset == 1) AUREA_CHECK(rig.e.set_scene_floor(floorMode, 0.012f, 0.012f, 0.014f, 0.12f, 1.0f, 0.9f, 6.0f));
+            else if (preset == 2) AUREA_CHECK(rig.e.set_scene_floor(floorMode, 0.2f, 0.2f, 0.21f, 0.45f, 0.3f, 0.85f, 8.0f));
+            else AUREA_CHECK(rig.e.set_scene_floor(floorMode, 0.30f, 0.28f, 0.25f, 0.7f, 0.1f, 0.8f, 10.0f));
+        }
         (void)rig.capture(1280);   // aquece pipelines e o IBL
         f64 best = 1e9;
         Image8 img;
@@ -1275,6 +1326,328 @@ AUREA_TEST(Gpu, Scene3DLookDevRendersAndTimesPremiumScenes) {
         std::printf("\n    lookdev %s/%s: %ux%u, melhor quadro %.1f ms", tag.c_str(), s.name, img.width, img.height, best);
         if (dir && *dir) (void)write_png(std::string(dir) + "/" + tag + "_" + s.name + ".png", img);
     }
+}
+
+// -----------------------------------------------------------------------------
+// AA e HDR do 3D: MSAA no passe da cena (resolve no tile), recorte MASK por
+// cobertura, bloom HDR e tone map no pós do grupo.
+// -----------------------------------------------------------------------------
+namespace {
+
+std::string gltf_b64(const std::vector<u8>& bin) {
+    static const char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string enc;
+    for (usize i = 0; i < bin.size(); i += 3) {
+        const u32 v = (static_cast<u32>(bin[i]) << 16) | (i + 1 < bin.size() ? static_cast<u32>(bin[i + 1]) << 8 : 0u)
+                    | (i + 2 < bin.size() ? bin[i + 2] : 0u);
+        enc += b64[(v >> 18) & 63];
+        enc += b64[(v >> 12) & 63];
+        enc += i + 1 < bin.size() ? b64[(v >> 6) & 63] : '=';
+        enc += i + 2 < bin.size() ? b64[v & 63] : '=';
+    }
+    return enc;
+}
+
+/// Quadrado (2 triângulos) virado para o observador, com COR_0 de alfa em
+/// degradê da esquerda (0) para a direita (1). `mask`: MASK com corte 0,5 (a
+/// borda do recorte é uma reta no meio do quadrado, longe das arestas);
+/// senão, emissivo `emissive` sobre base preta (cor plana em HDR).
+std::string write_quad_gltf(const char* name, bool mask, f32 emissive) {
+    const f32 pos[12] = {-0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.5f, 0.5f, 0.0f, -0.5f, 0.5f, 0.0f};
+    const f32 col[16] = {1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0};
+    const u16 idx[6] = {0, 1, 2, 0, 2, 3};
+    std::vector<u8> bin(48 + 64 + 12);
+    std::memcpy(bin.data(), pos, 48);
+    std::memcpy(bin.data() + 48, col, 64);
+    std::memcpy(bin.data() + 112, idx, 12);
+    const std::string material = mask
+        ? R"({"pbrMetallicRoughness":{"baseColorFactor":[1,1,1,1],"metallicFactor":0,"roughnessFactor":1},"alphaMode":"MASK","alphaCutoff":0.5,"extensions":{"KHR_materials_unlit":{}}})"
+        : std::string(R"({"pbrMetallicRoughness":{"baseColorFactor":[0,0,0,1],"metallicFactor":0,"roughnessFactor":1},"emissiveFactor":[1,1,1],"extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":)")
+          + std::to_string(emissive) + "}}}";
+    std::string json = R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)";
+    json += R"("meshes":[{"primitives":[{"attributes":{"POSITION":0)";
+    json += mask ? R"(,"COLOR_0":1)" : "";
+    json += R"(},"indices":2,"material":0}]}],"materials":[)" + material + "],";
+    json += R"("extensionsUsed":["KHR_materials_unlit","KHR_materials_emissive_strength"],)";
+    json += R"("buffers":[{"byteLength":124,"uri":"data:application/octet-stream;base64,)" + gltf_b64(bin) + R"("}],)";
+    json += R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":48},{"buffer":0,"byteOffset":48,"byteLength":64},{"buffer":0,"byteOffset":112,"byteLength":12}],)";
+    json += R"("accessors":[{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3","min":[-0.5,-0.5,0],"max":[0.5,0.5,0]},)";
+    json += R"({"bufferView":1,"componentType":5126,"count":4,"type":"VEC4"},{"bufferView":2,"componentType":5123,"count":6,"type":"SCALAR"}]})";
+    const std::string path = std::string("aurea_teste_") + name + ".gltf";
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    std::fwrite(json.data(), 1, json.size(), f);
+    std::fclose(f);
+    return path;
+}
+
+/// Pixels "de borda": nem fundo nem o objeto cheio (canal vermelho entre 12 e
+/// 243), dentro da janela [x0,x1)×[y0,y1).
+u32 edge_pixels(const Image8& img, u32 x0, u32 y0, u32 x1, u32 y1) {
+    u32 n = 0;
+    for (u32 y = y0; y < y1 && y < img.height; ++y) {
+        for (u32 x = x0; x < x1 && x < img.width; ++x) {
+            const u8 r = img.at(x, y)[0];
+            n += r > 12 && r < 243;
+        }
+    }
+    return n;
+}
+
+/// Níveis distintos de cinza nos pixels de borda (4× MSAA dá ≥ 3 degraus).
+u32 edge_levels(const Image8& img) {
+    bool seen[256]{};
+    u32 n = 0;
+    for (u32 y = 0; y < img.height; ++y) {
+        for (u32 x = 0; x < img.width; ++x) {
+            const u8 r = img.at(x, y)[0];
+            if (r > 12 && r < 243 && !seen[r]) { seen[r] = true; ++n; }
+        }
+    }
+    return n;
+}
+
+void rotate_layer(Engine& e, u64 id, Vec3 rot, f32 scale = 1.0f) {
+    if (Composition* c = e.project()->timeline().composition(e.project()->timeline().current())) {
+        if (Layer* l = c->layer(LayerId::unpack(id))) {
+            l->transform.rotation = rot;
+            l->transform.scale = l->transform.scale * scale;
+        }
+    }
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, Scene3DMsaaSmoothsGeometricEdges) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    ModelImport mi;
+    mi.path = write_triangle_gltf(true, 1.0f, 1.0f, 1.0f);   // branco unlit sobre preto: contraste máximo
+    const Result<u64> id = rig.e.import_model(mi);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    rotate_layer(rig.e, *id, Vec3{0, 0, 7});                  // nenhuma aresta alinhada ao pixel
+    const u32 samples = rig.e.renderer().scene_renderer().pass_samples();
+    rig.e.renderer().scene_renderer().set_antialias(false);
+    const Image8 hard = rig.capture(320);
+    rig.e.renderer().scene_renderer().set_antialias(true);
+    const Image8 msaa = rig.capture(320);
+    AUREA_CHECK(rig.e.set_scene3d_quality(static_cast<u32>(Scene3DQuality::Low)));
+    const Image8 fxaa = rig.capture(320);
+    const u32 n1 = edge_pixels(hard, 0, 0, 320, 180), n4 = edge_pixels(msaa, 0, 0, 320, 180);
+    const u32 nf = edge_pixels(fxaa, 0, 0, 320, 180);
+    std::printf("    aresta branco/preto: sem AA %u px de borda (%u niveis), MSAA %ux %u px (%u niveis), FXAA %u px\n",
+                n1, edge_levels(hard), rig.e.renderer().scene_renderer().pass_samples() > 0 ? samples : 0u, n4,
+                edge_levels(msaa), nf);
+    (void)write_png("scene3d_aa_sem.png", hard);
+    (void)write_png("scene3d_aa_msaa.png", msaa);
+    (void)write_png("scene3d_aa_fxaa.png", fxaa);
+    if (samples < 4) {
+        std::printf("    (aparelho sem MSAA 4x: so o FXAA e medido)\n");
+    } else {
+        // Sem AA a aresta é escada: nenhum pixel parcial. Com 4× cada pixel
+        // cortado pela aresta vira degradê — centenas ao longo do perímetro.
+        AUREA_CHECK(n1 <= 4);
+        AUREA_CHECK(n4 >= 150);
+        AUREA_CHECK(n4 >= 20 * std::max(n1, 1u));
+        AUREA_CHECK(edge_levels(msaa) >= 3);
+    }
+    AUREA_CHECK(nf >= 100);   // o nível BAIXO (FXAA) também suaviza
+}
+
+AUREA_TEST(Gpu, Scene3DMaskCutoutIsAntialiasedByCoverage) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    ModelImport mi;
+    mi.path = write_quad_gltf("recorte", true, 0.0f);
+    const Result<u64> id = rig.e.import_model(mi);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    rotate_layer(rig.e, *id, Vec3{0, 0, 9});
+    const bool coverage = rig.e.gpu()->capabilities().alphaToOne && rig.e.renderer().scene_renderer().pass_samples() > 1;
+    rig.e.renderer().scene_renderer().set_antialias(false);
+    const Image8 hard = rig.capture(320);
+    rig.e.renderer().scene_renderer().set_antialias(true);
+    const Image8 soft = rig.capture(320);
+    (void)write_png("scene3d_mask_sem.png", hard);
+    (void)write_png("scene3d_mask_msaa.png", soft);
+    // Caixa do que aparece (a metade direita do quadrado): a coluna da
+    // esquerda dela é o recorte (reta no meio do quadrado, longe das arestas
+    // de cima e de baixo). A janela de medida fica em volta dele.
+    u32 x0 = 320, y0 = 180, x1 = 0, y1 = 0;
+    for (u32 y = 0; y < 180; ++y) for (u32 x = 0; x < 320; ++x) {
+        if (hard.at(x, y)[0] > 128) { x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x); y1 = std::max(y1, y); }
+    }
+    AUREA_CHECK(x1 > x0 + 20 && y1 > y0 + 40);
+    if (!(x1 > x0 + 20 && y1 > y0 + 40)) return;
+    const u32 cy = (y0 + y1) / 2, band = (y1 - y0) / 4;
+    u32 cut = x1;
+    for (u32 x = 0; x < 320; ++x) if (hard.at(x, cy)[0] > 128) { cut = x; break; }
+    const u32 nh = edge_pixels(hard, cut > 12 ? cut - 12 : 0, cy - band, cut + 12, cy + band);
+    const u32 ns = edge_pixels(soft, cut > 12 ? cut - 12 : 0, cy - band, cut + 12, cy + band);
+    const u8 left = soft.at(cut > 10 ? cut - 10 : 0, cy)[0];
+    const u8 right = soft.at((cut + x1) / 2, cy)[0];
+    std::printf("    recorte MASK (cobertura %s): caixa %u..%u x %u..%u, corte em x=%u; sem AA %u px de borda, com MSAA %u px; "
+                "esquerda %u, direita %u\n", coverage ? "sim" : "nao", x0, x1, y0, y1, cut, nh, ns, left, right);
+    AUREA_CHECK(left < 20 && right > 235);
+    if (coverage) {
+        AUREA_CHECK(nh <= 3);
+        AUREA_CHECK(ns >= band);   // ~um pixel parcial por linha ao longo do recorte
+    }
+}
+
+AUREA_TEST(Gpu, Scene3DHdrEmissiveBloomsAndOutputStaysInRange) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    ModelImport mi;
+    mi.path = write_quad_gltf("emissivo", false, 8.0f);   // emissivo 8× o branco: HDR de verdade
+    const Result<u64> id = rig.e.import_model(mi);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    rotate_layer(rig.e, *id, Vec3{0, 0, 0}, 0.6f);
+    TextureDesc d;
+    d.width = 320;
+    d.height = 180;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *rig.e.gpu()->create_texture(d);
+    std::vector<u16> half(320 * 180 * 4);
+    auto render = [&](std::vector<f32>& out) {
+        AUREA_CHECK(rig.e.render_offscreen(target, 320, 180).ok());
+        AUREA_CHECK(rig.e.gpu()->read_texture(target, half.data(), 320 * 8).ok());
+        out.resize(half.size());
+        for (usize i = 0; i < half.size(); ++i) out[i] = half_to_float(half[i]);
+    };
+    std::vector<f32> off, on;
+    AUREA_CHECK(rig.e.set_scene3d_bloom(false, 0.6f, 0.0f));
+    render(off);
+    AUREA_CHECK(rig.e.set_scene3d_bloom(true, 0.6f, 1.25f));   // o padrão
+    render(on);
+    // Caixa do quadrado (sem bloom) e três faixas: dentro, halo (4..14 px
+    // fora da borda) e longe (canto da imagem).
+    u32 x0 = 320, y0 = 180, x1 = 0, y1 = 0;
+    for (u32 y = 0; y < 180; ++y) for (u32 x = 0; x < 320; ++x) {
+        if (off[(y * 320 + x) * 4] > 0.5f) { x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x); y1 = std::max(y1, y); }
+    }
+    AUREA_CHECK(x1 > x0 && y1 > y0);
+    if (!(x1 > x0 && y1 > y0)) { rig.e.gpu()->destroy_texture(target); return; }
+    bool finite = true, inRange = true;
+    f64 haloOn = 0, haloOff = 0;
+    u32 haloN = 0;
+    for (u32 y = 0; y < 180; ++y) for (u32 x = 0; x < 320; ++x) {
+        const usize i = (y * 320 + x) * 4;
+        for (u32 c = 0; c < 4; ++c) {
+            finite = finite && std::isfinite(on[i + c]) && std::isfinite(off[i + c]);
+            inRange = inRange && on[i + c] >= 0.0f && on[i + c] <= 1.0005f;
+        }
+        const i32 dx = std::max(std::max(static_cast<i32>(x0) - static_cast<i32>(x), static_cast<i32>(x) - static_cast<i32>(x1)), 0);
+        const i32 dy = std::max(std::max(static_cast<i32>(y0) - static_cast<i32>(y), static_cast<i32>(y) - static_cast<i32>(y1)), 0);
+        const i32 dist = std::max(dx, dy);
+        if (dist >= 4 && dist <= 14) { haloOn += on[i]; haloOff += off[i]; ++haloN; }
+    }
+    const usize centre = ((y0 + y1) / 2 * 320 + (x0 + x1) / 2) * 4;
+    const f32 far = on[(2 * 320 + 2) * 4];
+    std::printf("    emissivo 8x: centro %.3f (sem bloom %.3f); halo medio %.4f (sem bloom %.4f); canto %.5f\n",
+                static_cast<double>(on[centre]), static_cast<double>(off[centre]), haloOn / std::max(haloN, 1u),
+                haloOff / std::max(haloN, 1u), static_cast<double>(far));
+    AUREA_CHECK(finite);
+    AUREA_CHECK(inRange);
+    // O tone map leva 8 para perto de 1 sem estourar; o bloom espalha a luz
+    // que passa de 1 para fora do objeto (o fundo preto ganha halo).
+    AUREA_CHECK(off[centre] > 0.9f && off[centre] <= 1.0f);
+    AUREA_CHECK(haloOff / std::max(haloN, 1u) < 0.002);
+    AUREA_CHECK(haloOn / std::max(haloN, 1u) > 0.004);
+    AUREA_CHECK(far < 0.02f);
+    rig.e.gpu()->destroy_texture(target);
+}
+
+// Chão do grupo 3D (v32): o reflexo planar mostra o objeto espelhado logo
+// abaixo dele; o shadow catcher é transparente longe do objeto (o fundo 2D
+// passa intacto) e escurece embaixo dele; as escolhas voltam do arquivo.
+AUREA_TEST(Gpu, Scene3DFloorReflectsAndCatchesShadows) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data("Box.glb");
+    if (!file_exists(path)) return;
+    Scene3DRig rig(384, 216);
+    ModelImport mi;
+    mi.path = path;
+    const Result<u64> model = rig.e.import_model(mi);
+    AUREA_CHECK(model.ok());
+    if (!model.ok()) return;
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    AUREA_CHECK(comp != nullptr);
+    if (!comp) return;
+    comp->set_background(Color{0, 0, 0, 1});
+    if (Layer* l = comp->layer(LayerId::unpack(*model))) {
+        l->transform.rotation = Vec3{0, 30, 0};
+        l->transform.scale = l->transform.scale * 0.5f;
+    }
+    AUREA_CHECK(rig.e.set_studio_environment(1).ok());
+    AUREA_CHECK(rig.e.studio_environment() == 1u);
+    auto luma = [](const Image8& img, u32 x, u32 y) {
+        const u8* p = img.at(x, y);
+        return static_cast<f32>(std::max(p[0], std::max(p[1], p[2])));   // a caixa é vermelha
+    };
+    // Sem chão: a caixa do objeto na tela.
+    AUREA_CHECK(rig.e.set_scene_floor(0, 0, 0, 0, 0.02f, 1.0f, 0.0f));
+    const Image8 bare = rig.capture(384);
+    u32 x0 = bare.width, x1 = 0, y0 = bare.height, y1 = 0;
+    for (u32 y = 0; y < bare.height; ++y) {
+        for (u32 x = 0; x < bare.width; ++x) {
+            if (luma(bare, x, y) > 10.0f) { x0 = std::min(x0, x); x1 = std::max(x1, x); y0 = std::min(y0, y); y1 = std::max(y1, y); }
+        }
+    }
+    AUREA_CHECK(x1 > x0 && y1 > y0 && y1 + 12 < bare.height);
+    if (!(x1 > x0 && y1 > y0 && y1 + 12 < bare.height)) return;
+    const u32 w = x1 - x0, rowA = y1 + 3, rowB = std::min(bare.height - 1, y1 + 3 + (y1 - y0) / 4);
+    auto mean = [&](const Image8& img, u32 ax, u32 bx) {
+        f64 s = 0; u32 n = 0;
+        for (u32 y = rowA; y <= rowB; ++y) for (u32 x = ax; x < bx; ++x) { s += luma(img, x, y); ++n; }
+        return n ? s / n : 0.0;
+    };
+    // Chão preto espelhado: com reflexo × sem reflexo.
+    AUREA_CHECK(rig.e.set_scene_floor(1, 0, 0, 0, 0.02f, 1.0f, 0.0f));
+    const Image8 mirror = rig.capture(384);
+    AUREA_CHECK(rig.e.set_scene_floor(1, 0, 0, 0, 0.02f, 0.0f, 0.0f));
+    const Image8 matte = rig.capture(384);
+    const u32 ix0 = x0 + w / 4, ix1 = x1 - w / 4;
+    const u32 ox1 = x0 > w / 3 ? x0 - w / 3 : 0;
+    const f64 below = mean(mirror, ix0, ix1) - mean(matte, ix0, ix1);
+    const f64 beside = ox1 > 4 ? mean(mirror, 0, ox1) : 0.0;
+    std::printf("\n    chao: reflexo embaixo +%.1f, chao ao lado %.1f", below, beside);
+    AUREA_CHECK(below > 8.0);
+    AUREA_CHECK(mean(mirror, ix0, ix1) > beside + 6.0);
+    (void)write_png("scene3d_chao_reflexo.png", mirror);
+
+    // Shadow catcher sobre fundo 2D branco: longe do objeto o branco passa intacto.
+    comp->set_background(Color{1, 1, 1, 1});
+    AUREA_CHECK(rig.e.set_scene_floor(2, 0.5f, 0.5f, 0.5f, 0.3f, 0.0f, 1.0f));
+    const Image8 catcher = rig.capture(384);
+    (void)write_png("scene3d_chao_catcher.png", catcher);
+    const f32 corner = std::min(luma(catcher, 2, catcher.height - 3), luma(catcher, catcher.width - 3, catcher.height - 3));
+    // O mais escuro na faixa do pé do objeto (o objeto é vermelho: o canal
+    // máximo dele é alto; a sombra é cinza/preta).
+    const f64 under = [&] {
+        f32 m = 255.0f;
+        const u32 xa = x0 > w / 2 ? x0 - w / 2 : 0, xb = std::min(catcher.width, x1 + w / 2);
+        for (u32 y = y1 > 2 ? y1 - 2 : 0; y < std::min(catcher.height, y1 + 8); ++y)
+            for (u32 x = xa; x < xb; ++x) m = std::min(m, luma(catcher, x, y));
+        return static_cast<f64>(m);
+    }();
+    std::printf("\n    shadow catcher: canto %.1f, embaixo %.1f", corner, under);
+    AUREA_CHECK(corner > 250.0f);
+    AUREA_CHECK(under < 200.0);
+
+    // Volta do arquivo.
+    const char* file = "aurea_teste_chao.aurea";
+    AUREA_CHECK(rig.e.save_project(file).ok());
+    AUREA_CHECK(rig.e.set_scene_floor(0, 1, 1, 1, 1, 0, 0));
+    AUREA_CHECK(rig.e.load_project(file).ok());
+    f32 fl[8]{};
+    AUREA_CHECK(rig.e.query_scene_floor(fl));
+    AUREA_CHECK(fl[0] == 2.0f && std::fabs(fl[1] - 0.5f) < 1e-6f && std::fabs(fl[4] - 0.3f) < 1e-6f && fl[6] == 1.0f);
+    AUREA_CHECK(rig.e.studio_environment() == 1u);
+    std::remove(file);
 }
 
 AUREA_TEST(Gpu, Scene3DSkinnedModelAnimatesOnTheTimelineClock) {
@@ -1429,19 +1802,26 @@ AUREA_TEST(Gpu, Scene3DKeyLightCastsShadows) {
     rig.e.request_render();
     const Image8 noShadow = rig.capture(512);
     f64 sumLit = 0, sumNo = 0;
-    u64 darker = 0;
+    u64 darker = 0, energy = 0;
     for (usize i = 0; i + 3 < lit.rgba.size() && i + 3 < noShadow.rgba.size(); i += 4) {
         const int a = lit.rgba[i] + lit.rgba[i + 1] + lit.rgba[i + 2];
         const int b = noShadow.rgba[i] + noShadow.rgba[i + 1] + noShadow.rgba[i + 2];
         sumLit += a;
         sumNo += b;
-        darker += static_cast<u64>(b - a > 30);
+        darker += static_cast<u64>(b - a > 12);   // ~4/255 por canal
+        energy += static_cast<u64>(std::max(b - a, 0));
     }
-    std::printf("    pixels escurecidos pela sombra: %llu (luz media %.1f -> %.1f)\n",
-                static_cast<unsigned long long>(darker), sumNo / (lit.rgba.size() / 4), sumLit / (lit.rgba.size() / 4));
+    std::printf("    pixels escurecidos pela sombra: %llu, energia %llu (luz media %.1f -> %.1f)\n",
+                static_cast<unsigned long long>(darker), static_cast<unsigned long long>(energy),
+                sumNo / (lit.rgba.size() / 4), sumLit / (lit.rgba.size() / 4));
     // As esferas de trás recebem a sombra das da frente: há área mais escura,
-    // e nada fica mais claro com a sombra ligada.
-    AUREA_CHECK(darker > 120);   // medido: 182 (o IBL de estúdio domina; a chave é 1,2)
+    // e nada fica mais claro com a sombra ligada. Sombra suave (PCSS): a borda
+    // abre e o pico cai — o antigo "> 30 em 182 px" contava borda dura. Medido
+    // com PCSS: 557 px > 12 e energia 16196; o PCF antigo dava 394 px e 12621
+    // (a sombra de agora escurece MAIS no total, só que espalhada). O IBL de
+    // estúdio domina; a chave padrão é 1,2.
+    AUREA_CHECK(darker > 300);
+    AUREA_CHECK(energy > 9000);
     AUREA_CHECK(sumLit < sumNo);
     (void)write_png("scene3d_sombra_on.png", lit);
     (void)write_png("scene3d_sombra_off.png", noShadow);
@@ -5225,6 +5605,236 @@ AUREA_TEST(Gpu, NativeWipesHaveExactEndpointsAndDeterministicBlocks) {
     }
 }
 
+// =============================================================================
+// Pacote de paridade — os efeitos novos na GPU real.
+// =============================================================================
+namespace {
+
+const char* const kEffectPackGpuKeys[] = {
+    effect_keys::kOscillate, effect_keys::kSwing, effect_keys::kWiggle,
+    effect_keys::kIrisWipe, effect_keys::kBoxWipe, effect_keys::kVenetianBlinds,
+    effect_keys::kRadialBlur, effect_keys::kMirror, effect_keys::kCrop, effect_keys::kVignette,
+    effect_keys::kMosaic, effect_keys::kFindEdges, effect_keys::kHueSaturation,
+};
+
+f32 max_abs_diff(const FloatImage& a, const FloatImage& b) {
+    f32 d = 0.0f;
+    for (usize i = 0; i < a.px.size() && i < b.px.size(); ++i) d = std::max(d, std::fabs(a.px[i] - b.px[i]));
+    return d;
+}
+
+bool all_finite(const FloatImage& img) {
+    for (const f32 v : img.px) if (!std::isfinite(v)) return false;
+    return true;
+}
+
+/// Degradê só em x (cada coluna uma cor): mover na vertical não muda nada.
+ImagePixels column_gradient(u32 w, u32 h) {
+    ImagePixels px = uniform_image(w, h, 0, 0, 0);
+    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+        u8* p = &px.rgba[(static_cast<usize>(y) * w + x) * 4];
+        p[0] = static_cast<u8>(20 + x * 200 / std::max(1u, w - 1));
+        p[1] = static_cast<u8>(230 - x * 200 / std::max(1u, w - 1));
+        p[2] = 90;
+    }
+    return px;
+}
+
+} // namespace
+
+AUREA_TEST(EffectPackGpu, NewEffectsRenderFinitePixelsAtDefaultsDemoAndTypedExtremes) {
+    AUREA_REQUIRE_GPU();
+    for (const char* key : kEffectPackGpuKeys) {
+        Scene s(64, 64);
+        const LayerId id = s.image(reference_image(48, 48), 32, 32);
+        EffectInstance& fx = s.add_effect(id, key);
+        AUREA_CHECK_MSG(all_finite(s.render(FrameIndex{5})), key);
+        const Effect* effect = gpu().effects.find(fx.type);
+        const ParameterRegistry* params = gpu().effects.params(fx.type);
+        AUREA_CHECK_MSG(effect && params, key);
+        if (!effect || !params) continue;
+        std::vector<ParamValue> v(fx.params.size());
+        for (usize i = 0; i < v.size(); ++i) v[i] = fx.params[i].constant;
+        if (effect->demo_values(fx, v)) for (usize i = 0; i < v.size(); ++i) fx.params[i].constant = v[i];
+        AUREA_CHECK_MSG(all_finite(s.render(FrameIndex{5})), key);
+        for (u32 p = 0; p < params->count(); ++p) {
+            const ParamSpec& spec = params->at(p);
+            if (spec.type != ParamType::Float && spec.type != ParamType::Int) continue;
+            for (const f32 end : {spec.typed_min(), spec.typed_max(), spec.minValue, spec.maxValue}) {
+                Layer* l = s.comp->layer(id);
+                const ParamValue keep = l->effects[0].params[p].constant;
+                l->effects[0].params[p].constant = ParamValue::scalar(end);
+                const bool ok = all_finite(s.render(FrameIndex{11}));
+                if (!ok) std::printf("\n    %s: parametro %u em %g deu pixel nao-finito", key, p, end);
+                AUREA_CHECK(ok);
+                l->effects[0].params[p].constant = keep;
+            }
+        }
+    }
+}
+
+AUREA_TEST(EffectPackGpu, ShapeWipesHaveExactEndpointsAndReverseIsTheComplement) {
+    AUREA_REQUIRE_GPU();
+    for (const char* key : {effect_keys::kIrisWipe, effect_keys::kBoxWipe, effect_keys::kVenetianBlinds}) {
+        Scene s(64, 64);
+        s.comp->set_transparent_background(true);
+        const auto id = s.image(uniform_image(64, 64, 220, 130, 40), 32, 32);
+        auto& fx = s.add_effect(id, key);
+        fx.params[1].constant.v[0] = 30.0f;   // a suavidade não pode mexer nas pontas
+        fx.params[0].constant.v[0] = 0.0f;
+        const auto full = s.render();
+        AUREA_CHECK_MSG(full.v(2, 2).w > .99f && full.v(32, 32).w > .99f && full.v(61, 61).w > .99f, key);
+        fx.params[0].constant.v[0] = 100.0f;
+        const auto empty = s.render();
+        AUREA_CHECK_MSG(empty.v(32, 32).w < .001f && empty.v(2, 60).w < .001f, key);
+        fx.params[1].constant.v[0] = 0.0f;
+        fx.params[0].constant.v[0] = 50.0f;
+        const auto half = s.render();
+        f32 alpha = 0.0f;
+        for (u32 y = 0; y < 64; ++y) for (u32 x = 0; x < 64; ++x) {
+            const Vec4 v = half.v(x, y);
+            AUREA_CHECK(std::isfinite(v.x) && v.x <= v.w + .001f);
+            alpha += v.w;
+        }
+        AUREA_CHECK_MSG(alpha > 200.0f && alpha < 3900.0f, key);
+        fx.params[2].constant = ParamValue::boolean(true);
+        const auto reverse = s.render();
+        for (u32 y = 2; y < 62; y += 5) for (u32 x = 2; x < 62; x += 5)
+            AUREA_CHECK(std::abs(half.v(x, y).w + reverse.v(x, y).w - 1.f) < .02f);
+    }
+    // Íris: o centro some por último; a caixa com 50% ainda cobre o centro.
+    Scene s(64, 64);
+    s.comp->set_transparent_background(true);
+    const auto id = s.image(uniform_image(64, 64, 200, 200, 200), 32, 32);
+    auto& iris = s.add_effect(id, effect_keys::kIrisWipe);
+    iris.params[0].constant.v[0] = 60.0f;
+    const auto img = s.render();
+    AUREA_CHECK(img.v(32, 32).w > .99f);
+    AUREA_CHECK(img.v(1, 1).w < .01f);
+}
+
+AUREA_TEST(EffectPackGpu, OscillateMovesTheLayerAndSettlesBackExactly) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    const auto id = s.image(uniform_image(16, 16, 255, 255, 255), 32, 32);
+    const FloatImage plain = s.render();
+    auto& fx = s.add_effect(id, effect_keys::kOscillate);
+    fx.params[1].constant = ParamValue::scalar(12.0f);   // 12 px para a direita
+    fx.params[3].constant = ParamValue::scalar(90.0f);   // pico no quadro 0
+    const FloatImage moved = s.render();
+    AUREA_CHECK(moved.v(26, 32).x < .01f);       // a borda esquerda saiu dali
+    AUREA_CHECK(moved.v(44, 32).x > .9f);        // e chegou 12 px depois
+    fx.params[8].constant = ParamValue::scalar(4.0f);    // decaimento 4/s
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{150}), plain) < 1e-3f);
+}
+
+AUREA_TEST(EffectPackGpu, ShakeDirectionConstrainsTheAxisAndDecayStopsIt) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    const auto id = s.image(column_gradient(64, 64), 32, 32);
+    const FloatImage plain = s.render(FrameIndex{7});
+    auto& fx = s.add_effect(id, effect_keys::kShake);
+    fx.params[1].constant = ParamValue::scalar(0.0f);    // só a amplitude "horizontal"
+    fx.params[0].constant = ParamValue::scalar(10.0f);
+    const FloatImage sideways = s.render(FrameIndex{7});
+    AUREA_CHECK(max_abs_diff(sideways, plain) > .02f);
+    // Direção 90°: o tremor vira vertical — num degradê só em x, nada muda.
+    fx.params[15].constant = ParamValue::scalar(90.0f);
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{7}), plain) < .004f);
+    fx.params[15].constant = ParamValue::scalar(0.0f);
+    fx.params[16].constant = ParamValue::scalar(6.0f);   // decaimento
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{7}), plain) > .002f);
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{200}), plain) < 1e-3f);
+}
+
+AUREA_TEST(EffectPackGpu, FinishingEffectsAreNeutralAtZeroAndDoWhatTheySay) {
+    AUREA_REQUIRE_GPU();
+    // Cortar bordas: 50% à esquerda some com a metade esquerda.
+    {
+        Scene s(64, 64);
+        s.comp->set_transparent_background(true);
+        const auto id = s.image(uniform_image(64, 64, 200, 100, 50), 32, 32);
+        const FloatImage plain = s.render();
+        auto& fx = s.add_effect(id, effect_keys::kCrop);
+        AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+        fx.params[0].constant = ParamValue::scalar(50.0f);
+        const FloatImage cut = s.render();
+        AUREA_CHECK(cut.v(10, 30).w < .001f && cut.v(40, 30).w > .99f);
+    }
+    // Vinheta: o centro fica, os cantos escurecem; intensidade 0 é neutra.
+    {
+        Scene s(64, 64);
+        const auto id = s.image(uniform_image(64, 64, 200, 200, 200), 32, 32);
+        const FloatImage plain = s.render();
+        auto& fx = s.add_effect(id, effect_keys::kVignette);
+        fx.params[0].constant = ParamValue::scalar(100.0f);
+        fx.params[1].constant = ParamValue::scalar(20.0f);
+        const FloatImage dark = s.render();
+        AUREA_CHECK(std::fabs(dark.v(32, 32).x - plain.v(32, 32).x) < 1e-3f);
+        AUREA_CHECK(dark.v(1, 1).x < plain.v(1, 1).x * 0.5f);
+        fx.params[0].constant = ParamValue::scalar(0.0f);
+        AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+    }
+    // Mosaico: dentro de uma célula, uma cor só.
+    {
+        Scene s(64, 64);
+        const auto id = s.image(column_gradient(64, 64), 32, 32);
+        auto& fx = s.add_effect(id, effect_keys::kMosaic);
+        fx.params[0].constant = ParamValue::scalar(16.0f);
+        const FloatImage img = s.render();
+        AUREA_CHECK(std::fabs(img.v(17, 20).x - img.v(30, 27).x) < 1e-3f);
+        AUREA_CHECK(std::fabs(img.v(17, 20).x - img.v(34, 20).x) > 1e-2f);
+    }
+    // Detectar bordas: numa cor lisa não há borda; invertido = branco.
+    {
+        Scene s(64, 64);
+        const auto id = s.image(uniform_image(64, 64, 40, 160, 90), 32, 32);
+        const FloatImage plain = s.render();
+        auto& fx = s.add_effect(id, effect_keys::kFindEdges);
+        const FloatImage edges = s.render();
+        AUREA_CHECK(edges.v(32, 32).x > .98f && edges.v(32, 32).y > .98f);
+        fx.params[3].constant = ParamValue::scalar(0.0f);
+        AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+    }
+    // Matiz e saturação: 180° leva o vermelho ao ciano; -100% tira a cor.
+    {
+        Scene s(64, 64);
+        const auto id = s.image(uniform_image(64, 64, 230, 20, 20), 32, 32);
+        const FloatImage plain = s.render();
+        auto& fx = s.add_effect(id, effect_keys::kHueSaturation);
+        AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+        fx.params[0].constant = ParamValue::scalar(180.0f);
+        const Vec4 cyan = s.render().v(32, 32);
+        AUREA_CHECK(cyan.x < .05f && cyan.y > .5f && cyan.z > .5f);
+        fx.params[0].constant = ParamValue::scalar(0.0f);
+        fx.params[1].constant = ParamValue::scalar(-100.0f);
+        const Vec4 gray = s.render().v(32, 32);
+        AUREA_CHECK(std::fabs(gray.x - gray.y) < 2e-3f && std::fabs(gray.y - gray.z) < 2e-3f);
+    }
+    // Espelho: a metade direita é o reflexo exato da esquerda.
+    {
+        Scene s(64, 64);
+        const auto id = s.image(column_gradient(64, 64), 32, 32);
+        s.add_effect(id, effect_keys::kMirror);
+        const FloatImage img = s.render();
+        for (u32 x = 0; x < 32; x += 3) AUREA_CHECK(std::fabs(img.v(x, 20).x - img.v(63 - x, 20).x) < 2e-3f);
+    }
+    // Desfoque radial: zoom preserva o centro, amplitude 0 é neutra.
+    {
+        Scene s(64, 64);
+        const auto id = s.image(reference_image(64, 64), 32, 32);
+        const FloatImage plain = s.render();
+        auto& fx = s.add_effect(id, effect_keys::kRadialBlur);
+        fx.params[0].constant = ParamValue::scalar(1.0f);
+        fx.params[1].constant = ParamValue::scalar(60.0f);
+        const FloatImage zoom = s.render();
+        AUREA_CHECK(max_abs_diff(zoom, plain) > .01f);
+        AUREA_CHECK(near4(zoom.v(32, 32), plain.v(32, 32), .03f));
+        fx.params[1].constant = ParamValue::scalar(0.0f);
+        AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+    }
+}
+
 AUREA_TEST(Gpu, ChromaKeyMatteControlsKeepAlphaAndRespondToGamma) {
     AUREA_REQUIRE_GPU();
     Scene s(64, 32);
@@ -6208,6 +6818,220 @@ AUREA_TEST(Gpu, Scene3DMorphShadowsMatchDeformedGeometry) {
     AUREA_CHECK(darkPixels > 20);
     AUREA_CHECK(error < 0.1);
     }
+}
+
+// --- Sombra suave (PCSS), estabilidade, acne e luz pontual física ---------------
+namespace {
+
+/// Quadrados virados para +Z (o observador do glTF), um material cinza fosco
+/// com luz. z = distância até a "parede" (o quadrado de z = 0).
+struct ShadowQuad { f32 x, y, z, half; };
+
+std::string write_quads_gltf(const char* name, const std::vector<ShadowQuad>& quads) {
+    std::vector<f32> pos;
+    std::vector<u16> idx;
+    f32 lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+    for (const ShadowQuad& q : quads) {
+        const u16 b = static_cast<u16>(pos.size() / 3);
+        const f32 c[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+        for (const auto& k : c) {
+            const f32 p[3] = {q.x + k[0] * q.half, q.y + k[1] * q.half, q.z};
+            for (int a = 0; a < 3; ++a) { pos.push_back(p[a]); lo[a] = std::min(lo[a], p[a]); hi[a] = std::max(hi[a], p[a]); }
+        }
+        for (u16 t : {0, 1, 2, 0, 2, 3}) idx.push_back(static_cast<u16>(b + t));
+    }
+    if (idx.size() % 2) idx.push_back(0);
+    const usize posBytes = pos.size() * 4, idxBytes = idx.size() * 2;
+    std::vector<u8> bin(posBytes + idxBytes);
+    std::memcpy(bin.data(), pos.data(), posBytes);
+    std::memcpy(bin.data() + posBytes, idx.data(), idxBytes);
+    static const char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string enc;
+    for (usize i = 0; i < bin.size(); i += 3) {
+        const u32 v = (static_cast<u32>(bin[i]) << 16) | (i + 1 < bin.size() ? static_cast<u32>(bin[i + 1]) << 8 : 0u)
+                    | (i + 2 < bin.size() ? bin[i + 2] : 0u);
+        enc += b64[(v >> 18) & 63];
+        enc += b64[(v >> 12) & 63];
+        enc += i + 1 < bin.size() ? b64[(v >> 6) & 63] : '=';
+        enc += i + 2 < bin.size() ? b64[v & 63] : '=';
+    }
+    std::string json(enc.size() + 2048, '\0');
+    const int n = std::snprintf(json.data(), json.size(),
+        R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)"
+        R"("meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],)"
+        R"("materials":[{"pbrMetallicRoughness":{"baseColorFactor":[0.8,0.8,0.8,1],"metallicFactor":0,"roughnessFactor":1}}],)"
+        R"("buffers":[{"byteLength":%u,"uri":"data:application/octet-stream;base64,%s"}],)"
+        R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":%u},{"buffer":0,"byteOffset":%u,"byteLength":%u}],)"
+        R"("accessors":[{"bufferView":0,"componentType":5126,"count":%u,"type":"VEC3","min":[%f,%f,%f],"max":[%f,%f,%f]},)"
+        R"({"bufferView":1,"componentType":5123,"count":%u,"type":"SCALAR"}]})",
+        static_cast<unsigned>(bin.size()), enc.c_str(), static_cast<unsigned>(posBytes), static_cast<unsigned>(posBytes),
+        static_cast<unsigned>(idxBytes), static_cast<unsigned>(pos.size() / 3), lo[0], lo[1], lo[2], hi[0], hi[1], hi[2],
+        static_cast<unsigned>(quads.size() * 6));
+    json.resize(static_cast<usize>(std::max(n, 0)));
+    const std::string path = std::string("aurea_teste_sombra_") + name + ".gltf";
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (f) { std::fwrite(json.data(), 1, json.size(), f); std::fclose(f); }
+    return path;
+}
+
+/// Importa os quadrados com escala fixa (px por unidade) no centro da tela.
+u64 import_quads(Scene3DRig& rig, const char* name, const std::vector<ShadowQuad>& quads, f32 unitScale, bool casts = true) {
+    ModelImport mi;
+    mi.path = write_quads_gltf(name, quads);
+    const auto id = rig.e.import_model(mi);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return 0;
+    Layer* layer = current_comp(rig.e)->layer(LayerId::unpack(*id));
+    layer->model.unitScale = unitScale;
+    layer->model.pivot = Vec3{0, 0, 0};
+    layer->model.castShadows = casts;
+    return *id;
+}
+
+/// Direcional com sombra; rotação em graus (a luz aponta para +Z da layer).
+Layer* add_shadow_light(Scene3DRig& rig, Vec3 rotationDeg, f32 intensity = 3.0f) {
+    Composition* comp = current_comp(rig.e);
+    const LayerId light = comp->add_layer(LayerKind::Light, "luz de sombra");
+    Layer* l = comp->layer(light);
+    l->start = FrameIndex{0};
+    l->end = comp->duration();
+    l->threeD = true;
+    l->light.kind = LightKind::Directional;
+    l->light.intensity = intensity;
+    l->light.castShadows = true;
+    l->transform.rotation = rotationDeg;
+    return l;
+}
+
+f32 luma(const u8* p) { return 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2]; }
+
+} // namespace
+
+// Parede de frente para a luz (e rasante a 70°): ela mesma projeta e recebe.
+// Sem acne: praticamente nenhum pixel escurece em relação à mesma parede sem
+// projetar sombra.
+AUREA_TEST(Gpu, Scene3DShadowNoAcneOnLitPlane) {
+    AUREA_REQUIRE_GPU();
+    for (f32 angle : {0.0f, 45.0f, 70.0f}) {
+        auto render = [&](bool casts) {
+            Scene3DRig rig(480, 270);
+            current_comp(rig.e)->environment().intensity = 0.1f;
+            (void)import_quads(rig, "acne", {{0, 0, 0, 1.2f}}, 100, casts);
+            (void)add_shadow_light(rig, Vec3{angle * 0.3f, angle, 0});
+            return rig.capture(480);
+        };
+        const Image8 on = render(true), off = render(false);
+        AUREA_CHECK_EQ(on.rgba.size(), off.rgba.size());
+        if (on.rgba.size() != off.rgba.size() || on.rgba.empty()) return;
+        u32 wall = 0, acne = 0;
+        for (u32 y = 0; y < on.height; ++y) for (u32 x = 0; x < on.width; ++x) {
+            const f32 b = luma(off.at(x, y));
+            if (b < 12) continue;
+            ++wall;
+            acne += luma(on.at(x, y)) < b - 6.0f;
+        }
+        std::printf("    parede a %.0f graus: %u px iluminados, %u com acne\n", angle, wall, acne);
+        AUREA_CHECK(wall > 20000);
+        AUREA_CHECK(acne * 1000 <= wall);   // ≤ 0,1%
+        if (angle == 70.0f) (void)write_png("scene3d_sombra_acne70.png", on);
+    }
+}
+
+// PCSS: com o mesmo quadrado mais longe da parede, a borda da sombra abre.
+// Mede a largura da transição (10%..90% do escurecimento) na linha do meio.
+AUREA_TEST(Gpu, Scene3DShadowPenumbraWidensWithDistance) {
+    AUREA_REQUIRE_GPU();
+    auto width = [&](f32 z, const char* png) {
+        auto render = [&](bool casts) {
+            Scene3DRig rig(640, 360);
+            current_comp(rig.e)->environment().intensity = 0.1f;
+            (void)import_quads(rig, "parede", {{0, 0, 0, 1.6f}}, 100, false);
+            (void)import_quads(rig, z > 0.5f ? "longe" : "perto", {{-0.3f, 0, z, 0.3f}}, 100, casts);
+            (void)add_shadow_light(rig, Vec3{0, 40, 0});
+            return rig.capture(640);
+        };
+        const Image8 on = render(true), off = render(false);
+        if (on.rgba.size() != off.rgba.size() || on.rgba.empty()) return 0.0f;
+        if (png) (void)write_png(png, on);
+        // Linha do meio: o escurecimento relativo por coluna; a borda da sombra
+        // mais longe do quadrado é a que aparece inteira.
+        f32 best = 0;
+        std::vector<f32> dark(on.width, 0.0f);
+        for (u32 x = 0; x < on.width; ++x) {
+            f32 s = 0;
+            for (u32 y = on.height / 2 - 4; y < on.height / 2 + 4; ++y) {
+                const f32 b = luma(off.at(x, y));
+                s += b > 12 ? std::clamp((b - luma(on.at(x, y))) / b, 0.0f, 1.0f) : 0.0f;
+            }
+            dark[x] = s / 8.0f;
+            best = std::max(best, dark[x]);
+        }
+        if (best < 0.2f) return 0.0f;
+        u32 transition = 0;
+        for (u32 x = 0; x < on.width; ++x) transition += dark[x] > 0.1f * best && dark[x] < 0.9f * best;
+        std::printf("    quadrado a z=%.2f: escurecimento max %.2f, transicao %u px\n", z, best, transition);
+        return static_cast<f32>(transition);
+    };
+    const f32 nearW = width(0.15f, "scene3d_sombra_pcss_perto.png");
+    const f32 farW = width(1.0f, "scene3d_sombra_pcss_longe.png");
+    AUREA_CHECK(nearW > 0.0f);
+    AUREA_CHECK(farW > nearW * 2.0f);
+}
+
+// Estabilidade: um objeto se mexe em passos menores que um texel do mapa;
+// a sombra de OUTRO objeto, parado, não "nada" (antes o ajuste seguia a
+// caixa da cena e a grade inteira andava junto).
+AUREA_TEST(Gpu, Scene3DShadowStableWhenAnotherObjectMoves) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    current_comp(rig.e)->environment().intensity = 0.1f;
+    (void)import_quads(rig, "estavel_parede", {{0, 0, 0, 1.6f}, {-0.8f, 0, 0.5f, 0.3f}}, 100);
+    const u64 mover = import_quads(rig, "estavel_movel", {{0.8f, 0, 0.5f, 0.3f}}, 100);
+    (void)add_shadow_light(rig, Vec3{10, 30, 0});
+    Layer* m = current_comp(rig.e)->layer(LayerId::unpack(mover));
+    AUREA_CHECK(m != nullptr);
+    if (!m) return;
+    const Vec3 base = m->transform.position;
+    const Image8 ref = rig.capture(640);
+    u32 worst = 0;
+    for (f32 dx : {0.013f, 0.029f, 0.041f, 0.067f, 0.083f}) {
+        m->transform.position = Vec3{base.x + dx, base.y + dx * 0.5f, base.z};
+        rig.e.request_render();
+        const Image8 img = rig.capture(640);
+        if (img.rgba.size() != ref.rgba.size()) { AUREA_CHECK(false); return; }
+        // Metade esquerda: a parede e a sombra do objeto parado.
+        u32 w = 0;
+        for (u32 y = 0; y < ref.height; ++y) for (u32 x = 0; x < ref.width * 2 / 5; ++x)
+            for (int c = 0; c < 3; ++c) w = std::max<u32>(w, static_cast<u32>(std::abs(img.at(x, y)[c] - ref.at(x, y)[c])));
+        worst = std::max(worst, w);
+    }
+    std::printf("    sombra parada: maior diferenca %u (0..255) com o outro objeto andando\n", worst);
+    AUREA_CHECK(worst <= 2);
+}
+
+// Luz pontual padrão (8 cd, posição e alcance do add_light) ilumina de
+// verdade: a escala física (altura do quadro = 2 m) faz 1/d² dar ~2 de
+// irradiância — antes, 8/d² com d em px (~1000) era preto.
+AUREA_TEST(Gpu, Scene3DPointLightDefaultIntensityIsVisible) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(480, 270);
+    current_comp(rig.e)->environment().intensity = 0.0f;
+    (void)import_quads(rig, "ponto", {{0, 0, 0, 1.2f}}, 100, false);
+    const auto light = rig.e.add_light(1);
+    AUREA_CHECK(light.ok());
+    const Image8 img = rig.capture(480);
+    f64 sum = 0;
+    u32 n = 0, saturated = 0;
+    for (u32 y = img.height / 2 - 20; y < img.height / 2 + 20; ++y) for (u32 x = img.width / 2 - 20; x < img.width / 2 + 20; ++x) {
+        sum += luma(img.at(x, y));
+        saturated += img.at(x, y)[0] >= 250;
+        ++n;
+    }
+    const f64 mean = n ? sum / n : 0.0;
+    std::printf("    luz pontual padrao: brilho medio da parede %.1f, saturados %u/%u\n", mean, saturated, n);
+    AUREA_CHECK(mean > 40.0);
+    AUREA_CHECK(saturated * 2 < n);
+    (void)write_png("scene3d_luz_pontual_padrao.png", img);
 }
 
 AUREA_TEST(Gpu, Scene3DMirroredNormalMapMatchesBakedReflection) {
@@ -7423,7 +8247,9 @@ AUREA_TEST(Gpu, Text3DKeepsItsShadingWhenPreviewQualityDrops) {
     AUREA_CHECK(n0 > 500);
     // O objeto é o mesmo: cobertura e cor média praticamente iguais.
     AUREA_CHECK(std::abs(static_cast<i64>(n0) - static_cast<i64>(n1)) < static_cast<i64>(n0 / 20));
-    AUREA_CHECK_NEAR(r1, r0, 0.05f * std::max(r0, 0.01f));
+    // 7%: o AUTO troca MSAA 4× por 2× no degrau baixo — a borda do texto tem
+    // menos degraus parciais (a média dos pixels "de texto" sobe um pouco).
+    AUREA_CHECK_NEAR(r1, r0, 0.07f * std::max(r0, 0.01f));
     AUREA_CHECK_NEAR(g1, g0, 0.05f * std::max(g0, 0.01f) + 0.002f);
     rig.e.gpu()->destroy_texture(target);
 }
@@ -8028,8 +8854,10 @@ AUREA_TEST(GpuText3DMaterial, CinematicMetalRendersWithLetterRotationsAndStableF
         auto* node = current_comp(rig.e)->layer(LayerId::unpack(*lightId));
         node->transform.position = position; node->light.color = Vec4{color, 1}; node->light.intensity = intensity;
     };
-    light({940, 40, -360}, {1.f, .93f, .85f}, 320000.f);
-    light({180, 400, -100}, {1.f, .22f, .025f}, 90000.f);
+    // Candela na escala física (altura 440 px = 2 m → 220 px/m): a mesma luz
+    // de antes, quando a intensidade ia crua em px² (320000 e 90000).
+    light({940, 40, -360}, {1.f, .93f, .85f}, 320000.f / (220.f * 220.f));
+    light({180, 400, -100}, {1.f, .22f, .025f}, 90000.f / (220.f * 220.f));
     const Image8 cinematic = rig.capture(1200);
     AUREA_CHECK(max_diff(textured, cinematic) > 30);
     if (const char* dir = std::getenv("AUREA_EVIDENCE_DIR")) {

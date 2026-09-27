@@ -518,8 +518,32 @@ private struct BatchToolsView: View {
                 tool(CupertinoGlyph.ArrowLeftRightSquare, "editor_distribuir_horizontal_vaos_iguais", size: 18, enabled: selected.count >= 3) { distribute(horizontal: true) }
                 tool(CupertinoGlyph.ArrowUpDownSquare, "editor_distribuir_vertical_vaos_iguais", size: 18, enabled: selected.count >= 3) { distribute(horizontal: false) }
             }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+            staggerRow
             Spacer(minLength: 0)
         }.padding(.horizontal, 10).padding(.top, 4)
+    }
+    /// "Escalonar" (par do StaggerRow do Android): − N + quadros e dois toques
+    /// que aplicam — camadas inteiras ou só keyframes — em cascata na ordem da timeline.
+    @State private var staggerStep: Int = StaggerPlan.defaultStep
+    private var staggerRow: some View {
+        HStack(spacing: 0) {
+            Text(AureaText.t("editor_escalonar")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted)
+                .lineLimit(1).padding(.leading, 12).padding(.trailing, 4)
+            tool(CupertinoGlyph.Minus, "editor_escalonar_menos", size: 16) { staggerStep = StaggerPlan.step(staggerStep, -1) }
+            Text(AureaText.t("editor_escalonar_quadros", String(staggerStep))).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.text)
+                .lineLimit(1).frame(width: 52).accessibilityIdentifier("stagger.step")
+            tool(CupertinoGlyph.Plus, "editor_escalonar_mais", size: 16) { staggerStep = StaggerPlan.step(staggerStep, 1) }
+            AureaColors.border.frame(width: 1, height: 24)
+            staggerApply("editor_escalonar_camadas", id: "stagger.layers") { model.staggerSelection(step: staggerStep, keysOnly: false) }
+            staggerApply("editor_escalonar_keyframes", id: "stagger.keys") { model.staggerSelection(step: staggerStep, keysOnly: true) }
+        }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+    }
+    private func staggerApply(_ key: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.accent).lineLimit(1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.plain).accessibilityLabel(AureaText.t(key)).accessibilityIdentifier(id)
     }
     private func tool(_ glyph: Character, _ key: String, size: CGFloat = 20, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) { CupertinoGlyph.text(glyph, size: size, color: enabled ? AureaColors.text : AureaColors.disabled).frame(maxWidth: .infinity, maxHeight: .infinity) }

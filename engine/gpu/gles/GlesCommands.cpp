@@ -7,10 +7,15 @@ GLenum topology(Topology t) {
          : t == Topology::LineList ? GL_LINES : GL_TRIANGLES;
 }
 }
-void Backend::Impl::attach(GLenum target, Texture* color, Texture* depth) {
+void Backend::Impl::attach(GLenum target, Texture* color, Texture* depth, Texture* color1) {
     glFramebufferTexture2D(target, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color ? color->id : 0, 0);
+    // MRT do 3D (cena HDR no segundo alvo). O framebuffer é compartilhado:
+    // passes de um alvo só desligam o anexo 1 de novo.
+    if (target == GL_DRAW_FRAMEBUFFER)
+        glFramebufferTexture2D(target, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, color1 ? color1->id : 0, 0);
     glFramebufferTexture2D(target, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth ? depth->id : 0, 0);
     if (target == GL_READ_FRAMEBUFFER) glReadBuffer(color ? GL_COLOR_ATTACHMENT0 : GL_NONE);
+    else if (color && color1) { const GLenum draw[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1}; glDrawBuffers(2, draw); }
     else { const GLenum draw = color ? GL_COLOR_ATTACHMENT0 : GL_NONE; glDrawBuffers(1, &draw); }
     if (glCheckFramebufferStatus(target) != GL_FRAMEBUFFER_COMPLETE) fail(Errc::UnsupportedFormat, "GLES framebuffer incomplete");
 }
@@ -26,13 +31,17 @@ void Backend::Impl::begin_render_pass(const RenderPassBegin& begin) noexcept {
     if (!color && !depth) { fail(Errc::InvalidArgument, "GLES render pass has no target"); return; }
     targetWidth = color ? color->desc.width : depth->desc.width;
     targetHeight = color ? color->desc.height : depth->desc.height;
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer); attach(GL_DRAW_FRAMEBUFFER, color, depth);
+    // Sem MSAA no GLES (o 3D usa FXAA): um resolve pedido não tem o que fazer.
+    auto* color1 = color ? find(textures, pass.color1.id) : nullptr;
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer); attach(GL_DRAW_FRAMEBUFFER, color, depth, color1);
     glEnable(GL_SCISSOR_TEST); glScissor(0, 0, targetWidth, targetHeight); glViewport(0, 0, targetWidth, targetHeight);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE); glDepthMask(GL_TRUE);
     if (color && pass.load == LoadOp::Clear) glClearBufferfv(GL_COLOR, 0, pass.clear);
+    if (color1 && pass.load == LoadOp::Clear) glClearBufferfv(GL_COLOR, 1, pass.clear);
     if (depth && pass.depthLoad == LoadOp::Clear) glClearBufferfv(GL_DEPTH, 0, &pass.clearDepth);
-    GLenum discard[2]; GLsizei count = 0;
+    GLenum discard[3]; GLsizei count = 0;
     if (color && pass.load == LoadOp::DontCare) discard[count++] = GL_COLOR_ATTACHMENT0;
+    if (color1 && pass.load == LoadOp::DontCare) discard[count++] = GL_COLOR_ATTACHMENT1;
     if (depth && pass.depthLoad == LoadOp::DontCare) discard[count++] = GL_DEPTH_ATTACHMENT;
     if (count) glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, count, discard);
     (void)check("begin_render_pass");

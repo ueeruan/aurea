@@ -617,3 +617,103 @@ AUREA_TEST(Expr, ThousandLayersWiggleCostPerFrame) {
     std::printf("1000 camadas x wiggle em X e Y (2000 expressoes): %.3f ms/quadro (%.2f us/expr); so keyframes: %.3f ms ",
                 ms, ms * 1000.0 / (kLayers * 2), msKeys);
 }
+
+// -----------------------------------------------------------------------------
+// Tremor, marcas e tempo em degraus (ritmo de AMV/tipografia)
+// -----------------------------------------------------------------------------
+AUREA_TEST(Expr, ShakeIsBoundedJitteryAndDecaysAfterItsStart) {
+    Rig rig;
+    Layer* a = rig.add("A");
+    a->transform.position = Vec3{500.0f, 300.0f, 0.0f};
+    Track& tx = a->tracks.get_or_create(TrackProperty::PositionX);
+    set_expr(tx, "shake(30, 8)");
+    f64 maxDev = 0, sum2 = 0;
+    u32 moved = 0;
+    f32 prev = 500.0f;
+    for (i64 f = 0; f < 300; ++f) {
+        const f32 x = val(rig, tx, f, 500.0f);
+        maxDev = std::max<f64>(maxDev, std::fabs(x - 500.0f));
+        sum2 += (x - 500.0) * (x - 500.0);
+        if (std::fabs(x - prev) > 1e-3f) ++moved;
+        prev = x;
+    }
+    const f64 sd = std::sqrt(sum2 / 300.0);
+    AUREA_CHECK(maxDev <= 8.0 + 1e-3);
+    AUREA_CHECK(sd > 1.0);                 // 30 Hz a 30 fps: treme de verdade (não zera nos inteiros)
+    AUREA_CHECK(moved > 280);              // quase todo quadro muda
+    AUREA_CHECK_EQ(val(rig, tx, 123, 500.0f), val(rig, tx, 123, 500.0f));   // determinístico
+    // Impacto: nada antes de 1 s; forte logo depois; ~zero depois de 2 decaimentos.
+    set_expr(tx, "shake(80, 14, 0.6, 0.6, 1)");
+    for (i64 f = 0; f < 30; ++f) AUREA_CHECK_EQ(val(rig, tx, f, 500.0f), 500.0f);
+    f64 early = 0, late = 0;
+    for (i64 f = 30; f < 36; ++f) early = std::max<f64>(early, std::fabs(val(rig, tx, f, 500.0f) - 500.0f));
+    for (i64 f = 66; f < 120; ++f) late = std::max<f64>(late, std::fabs(val(rig, tx, f, 500.0f) - 500.0f));
+    AUREA_CHECK(early > 2.0 && early <= 14.0 + 1e-3);
+    AUREA_CHECK(late < 0.05);
+    set_expr(tx, "shake(80, 14, 0.6, 0.6, inPoint)");
+    (void)val(rig, tx, 10, 500.0f);
+    AUREA_CHECK(tx.expression->error().ok);
+    const auto r = ev("shake(30, 8)", 0.5, {100.0});
+    AUREA_CHECK(r.ok && std::fabs(r.v[0] - 100.0) <= 8.0 + 1e-9);
+    std::printf("shake(30,8): |desvio| max %.2f (<=8), dp %.2f, %u/300 quadros mudam; impacto: pico %.2f, depois %.4f ",
+                maxDev, sd, moved, early, late);
+}
+
+AUREA_TEST(Expr, MarkersAndTimeSinceMarkerReadTheRuler) {
+    Rig rig;
+    rig.comp->put_marker(Marker{FrameIndex{30}, 0xFFF7C34Fu, kMarkerManual, "intro"});
+    rig.comp->put_marker(Marker{FrameIndex{90}, 0xFFF7C34Fu, kMarkerManual, "Drop"});
+    Layer* a = rig.add("A");
+    Track& rz = a->tracks.get_or_create(TrackProperty::RotationZ);
+    auto at = [&](const char* src, i64 f) { set_expr(rz, src); return val(rig, rz, f, 0.0f); };
+    AUREA_CHECK_NEAR(at("timeSinceMarker()", 60), 1.0, 1e-5);
+    AUREA_CHECK_NEAR(at("timeSinceMarker()", 100), 10.0 / 30.0, 1e-5);
+    AUREA_CHECK_NEAR(at("min(timeSinceMarker(), 99)", 10), 99.0, 1e-5);        // antes da 1ª: infinito
+    AUREA_CHECK_NEAR(at("timeSinceMarker(\"intro\")", 100), 70.0 / 30.0, 1e-5);
+    AUREA_CHECK_NEAR(at("timeSinceMarker(\"DROP\", 4)", 0), 1.0, 1e-5);
+    AUREA_CHECK_NEAR(at("ease(timeSinceMarker(), 0, 0.5, 120, 100)", 30), 120.0, 1e-4);   // pulso na batida
+    AUREA_CHECK_NEAR(at("ease(timeSinceMarker(), 0, 0.5, 120, 100)", 60), 100.0, 1e-4);
+    AUREA_CHECK_NEAR(at("marker.numKeys", 0), 2.0, 1e-9);
+    AUREA_CHECK_NEAR(at("marker.key(\"drop\").time", 0), 3.0, 1e-5);
+    AUREA_CHECK_NEAR(at("thisComp.marker.key(1).time", 0), 1.0, 1e-5);
+    AUREA_CHECK_NEAR(at("marker.nearestKey(2.1).index", 0), 2.0, 1e-9);
+    AUREA_CHECK_NEAR(at("marker.key(2).frame", 0), 90.0, 1e-9);
+    AUREA_CHECK_NEAR(at("marker.key(1).name == \"intro\" ? 7 : 3", 0), 7.0, 1e-9);
+    // Erros viram fallback com mensagem (nunca derrubam).
+    AUREA_CHECK_NEAR(at("marker.key(3).time", 0), 0.0, 1e-9);
+    AUREA_CHECK(!rz.expression->error().ok);
+    AUREA_CHECK(!ev("marker.numKeys").ok);            // fora de camada: sem régua
+    std::printf("timeSinceMarker (por nome e t), marker.key/nearestKey/numKeys, pulso ease na batida; ");
+}
+
+AUREA_TEST(Expr, PosterizeTemporalWiggleSmoothSpeedAtTimeNearestKeyAndTimeMs) {
+    Rig rig;
+    Layer* a = rig.add("A");
+    Track& rz = a->tracks.get_or_create(TrackProperty::RotationZ);
+    (void)rz.set(FrameIndex{0}, 0.0f);
+    (void)rz.set(FrameIndex{300}, 300.0f);             // 1 grau por quadro
+    auto at = [&](const char* src, i64 f) { set_expr(rz, src); return val(rig, rz, f, 0.0f); };
+    AUREA_CHECK_NEAR(at("posterizeTime(2); time", 44), 1.0, 1e-6);
+    AUREA_CHECK_NEAR(at("posterizeTime(2); time", 45), 1.5, 1e-6);
+    AUREA_CHECK_NEAR(at("posterizeTime(2); value", 44), 30.0, 1e-4);   // lê o valor no degrau
+    AUREA_CHECK_EQ(at("posterizeTime(1); random()", 31), at("posterizeTime(1); random()", 59));
+    AUREA_CHECK(at("posterizeTime(1); random()", 31) != at("posterizeTime(1); random()", 61));
+    set_expr(rz, "posterizeTime(12)");
+    (void)val(rig, rz, 5, 0.0f);
+    AUREA_CHECK(!rz.expression->error().ok);          // sozinha não é valor
+    AUREA_CHECK_NEAR(at("timeMs", 15), 500.0, 1e-6);
+    AUREA_CHECK_NEAR(at("speedAtTime(2)", 0), 30.0, 1e-3);            // 1 grau/quadro × 30 fps
+    AUREA_CHECK_NEAR(at("thisProperty.speedAtTime(1) - length(velocityAtTime(1))", 0), 0.0, 1e-6);
+    AUREA_CHECK_NEAR(at("smooth(0.5, 5)", 150), 150.0, 1e-3);          // rampa reta: a média é o meio
+    AUREA_CHECK_NEAR(at("nearestKey(9).time", 0), 10.0, 1e-6);
+    AUREA_CHECK_NEAR(at("nearestKey(2).index", 0), 1.0, 1e-9);
+    f64 lo = 1e9, hi = -1e9;
+    for (i64 f = 100; f < 200; ++f) {
+        const f32 v = at("temporalWiggle(2, 0.25)", f);
+        const f64 d = v - static_cast<f64>(f);                        // sem wiggle seria f graus
+        lo = std::min(lo, d); hi = std::max(hi, d);
+    }
+    AUREA_CHECK(lo >= -7.5 - 1e-3 && hi <= 7.5 + 1e-3);                // ±0,25 s = ±7,5 quadros = ±7,5 graus
+    AUREA_CHECK(hi - lo > 2.0);
+    std::printf("posterizeTime (time/value/random em degraus), timeMs, speedAtTime, smooth, nearestKey, temporalWiggle [%.2f, %.2f] ", lo, hi);
+}

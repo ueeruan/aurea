@@ -110,6 +110,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/TraceryEffect.cpp
     src/effects/builtin/PatternEffects.cpp
     src/effects/builtin/SampledBlurEffects.cpp
+    src/effects/builtin/MotionBehaviorEffects.cpp
+    src/effects/builtin/FinishingEffects.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -141,6 +143,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/GltfImporter.cpp
     src/scene3d/SceneRenderer.cpp
     src/scene3d/Environment.cpp
+    src/scene3d/StudioEnvironment.cpp
     src/scene3d/Animation.cpp
     src/scene3d/Text3D.cpp
     src/engine/Engine.cpp

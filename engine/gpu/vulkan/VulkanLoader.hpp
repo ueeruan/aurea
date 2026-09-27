@@ -152,7 +152,8 @@ namespace aurea::vk {
     X(vkCmdCopyBuffer)                          \
     X(vkCmdBeginDebugUtilsLabelEXT)             \
     X(vkCmdEndDebugUtilsLabelEXT)               \
-    X(vkSetDebugUtilsObjectNameEXT)
+    X(vkSetDebugUtilsObjectNameEXT)             \
+    X(vkCreateRenderPass2KHR)
 
 #define AUREA_VK_DECLARE(name) extern PFN_##name name;
 AUREA_VK_GLOBAL_FUNCTIONS(AUREA_VK_DECLARE)

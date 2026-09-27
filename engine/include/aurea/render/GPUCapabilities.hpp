@@ -55,6 +55,27 @@ struct GPUCapabilities {
     u32 minUniformBufferOffsetAlignment = 256;
     /// Bits de sample count suportados para cor (1 = 1x, 4 = 4x...). Máscara.
     u32 colorSampleCountMask = 1;
+    /// O mesmo para profundidade. O MSAA do 3D usa o que as duas têm.
+    u32 depthSampleCountMask = 1;
+    /// Resolve da profundidade MSAA (amostra 0) no fim do passe: Vulkan
+    /// VK_KHR_depth_stencil_resolve, Metal `depthAttachment.resolveTexture`.
+    bool depthResolveSampleZero = false;
+    /// Alpha-to-one junto do alpha-to-coverage (sem ele, o recorte por
+    /// cobertura deixaria o alfa guardado = cobertura², ver SceneRenderer).
+    bool alphaToOne = false;
+    /// Memória que só existe no tile (Vulkan LAZILY_ALLOCATED, Metal
+    /// memoryless): anexo MSAA transitório de graça em GPU móvel.
+    bool lazyAttachments = false;
+
+    /// Maior contagem de amostras ≤ `wanted` que cor e profundidade suportam
+    /// (potência de 2; 1 quando não há MSAA).
+    [[nodiscard]] u32 msaa_samples(u32 wanted) const noexcept {
+        const u32 mask = colorSampleCountMask & depthSampleCountMask;
+        for (u32 s = 8; s > 1; s >>= 1) {
+            if (s <= wanted && (mask & s)) return s;
+        }
+        return 1;
+    }
 
     // --- Tempo ----------------------------------------------------------------
     bool timestampQueries = false;  ///< mede GPU de verdade, por passe

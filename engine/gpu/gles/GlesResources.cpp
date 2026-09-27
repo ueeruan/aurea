@@ -144,7 +144,13 @@ Result<SamplerHandle> Backend::create_sampler(const SamplerDesc& desc) noexcept 
         s.borderMask = (desc.wrapU == SamplerDesc::Wrap::ClampToBorder ? 1 : 0) | (desc.wrapV == SamplerDesc::Wrap::ClampToBorder ? 2 : 0);
         s.nearest = desc.minFilter == SamplerDesc::Filter::Nearest ? 1 : 0;
     }
-    if (d.caps.maxSamplerAnisotropy > 1) glSamplerParameterf(s.id, GL_TEXTURE_MAX_ANISOTROPY_EXT, std::clamp(desc.maxAnisotropy, 1.0f, d.caps.maxSamplerAnisotropy));
+    if (desc.compare) {
+        // Mapa de sombra (sampler2DShadow): com a comparação ligada o ES 3
+        // aceita filtro linear em profundidade (PCF 2×2 do hardware).
+        glSamplerParameteri(s.id, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+        glSamplerParameteri(s.id, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+    }
+    if (d.caps.maxSamplerAnisotropy > 1 && !desc.compare) glSamplerParameterf(s.id, GL_TEXTURE_MAX_ANISOTROPY_EXT, std::clamp(desc.maxAnisotropy, 1.0f, d.caps.maxSamplerAnisotropy));
     const auto status = d.check("create_sampler");
     if (!status.ok()) { glDeleteSamplers(1, &s.id); return status; }
     const u64 id = d.nextId++; d.samplers.emplace(id, s); return SamplerHandle{id};

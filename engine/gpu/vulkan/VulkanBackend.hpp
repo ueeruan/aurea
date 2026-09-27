@@ -406,6 +406,26 @@ public:
     [[nodiscard]] VkFramebuffer framebuffer(Texture* color, Texture& depth, u64 depthId, LoadOp load,
                                             LoadOp depthLoad, bool storeDepth) noexcept;
     [[nodiscard]] VkFramebuffer framebuffer(Texture& t, LoadOp load) noexcept;
+
+    /// Render pass do 3D com MSAA, MRT e resolve. Os passes 2D e o de sombra
+    /// continuam nas duas formas acima (nenhuma mudança de caminho para eles).
+    struct RenderPassKey {
+        VkFormat color0 = VK_FORMAT_UNDEFINED;
+        VkFormat color1 = VK_FORMAT_UNDEFINED;   ///< UNDEFINED = sem segundo alvo
+        VkFormat depth = VK_FORMAT_UNDEFINED;
+        u32      samples = 1;
+        LoadOp   load = LoadOp::Clear;
+        LoadOp   depthLoad = LoadOp::Clear;
+        bool     storeDepth = false;
+        bool     resolve = false;                ///< cor(es) resolvida(s) no fim
+        bool     depthResolve = false;           ///< amostra 0 da profundidade
+        friend bool operator==(const RenderPassKey&, const RenderPassKey&) noexcept = default;
+    };
+    [[nodiscard]] VkRenderPass render_pass(const RenderPassKey& key) noexcept;
+    /// Framebuffer de um passe 3D (ids: cor 0, cor 1, profundidade, resolves).
+    [[nodiscard]] VkFramebuffer framebuffer(const RenderPassKey& key, const u64 ids[6], VkImageView views[6],
+                                            u32 width, u32 height) noexcept;
+    [[nodiscard]] bool depth_resolve_supported() const noexcept { return depthResolve_; }
     [[nodiscard]] VkDescriptorSet allocate_set(FrameContext& frame, VkDescriptorSetLayout layout) noexcept;
     void transition(VkCommandBuffer cmd, Texture& t, ResourceState newState, bool discard) noexcept;
     [[nodiscard]] Texture& dummy_texture() noexcept { return *textures_.get(dummyTexture_); }
@@ -464,6 +484,8 @@ private:
     bool hasAhb_ = false;
     bool hasForeignQueue_ = false;
     bool hasYcbcr_ = false;
+    bool depthResolve_ = false;      ///< VK_KHR_depth_stencil_resolve + create_renderpass2
+    bool alphaToOne_ = false;        ///< recurso `alphaToOne` ligado no dispositivo
     u32 apiVersion_ = 0;
     u32 instanceApiVersion_ = VK_API_VERSION_1_0;
 
@@ -482,6 +504,16 @@ private:
 
     // Caches
     std::unordered_map<u64, VkRenderPass> renderPasses_;          ///< (formato, load)
+    /// Passes 3D (MSAA/MRT/resolve): poucas variantes — busca linear.
+    std::vector<std::pair<RenderPassKey, VkRenderPass>> renderPasses3d_;
+    struct Framebuffer3d {
+        RenderPassKey key{};
+        u64 ids[6]{};
+        u32 width = 0, height = 0;
+        VkFramebuffer fb = VK_NULL_HANDLE;
+    };
+    /// Framebuffers dos passes 3D. Saem quando QUALQUER textura deles morre.
+    std::vector<Framebuffer3d> framebuffers3d_;
     std::unordered_map<u64, VkPipelineLayout> layouts_;           ///< por sampler imutável
     std::unordered_map<u64, VkDescriptorSetLayout> setLayouts_;
     std::unordered_map<u64, u64> ycbcrByFormat_;                  ///< formato externo → sampler

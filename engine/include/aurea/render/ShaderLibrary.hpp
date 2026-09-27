@@ -82,6 +82,13 @@ struct PipelineKey {
     bool          frontFaceCCW = true;
     f32           depthBiasConstant = 0.0f;
     f32           depthBiasSlope = 0.0f;
+    /// MSAA do passe 3D (1 = sem). O pipeline só serve a passes com a mesma
+    /// contagem — por isso entra na chave.
+    u8            sampleCount = 1;
+    /// Recorte glTF MASK por cobertura das amostras (só com MSAA).
+    bool          alphaToCoverage = false;
+    /// Segundo anexo de cor do passe 3D (MRT: HDR da cena + 2D de exibição).
+    bool          hasColor1 = false;
 
     [[nodiscard]] bool is_compute() const noexcept { return compute != ShaderId::Count; }
 
@@ -120,6 +127,7 @@ enum class CommonSampler : u8 {
     NearestClamp,
     LinearRepeat,
     LinearMirror,
+    ShadowCompare,     ///< mapa de sombra: bilinear com comparação (sampler2DShadow)
     Count,
 };
 

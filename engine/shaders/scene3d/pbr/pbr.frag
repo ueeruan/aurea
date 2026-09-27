@@ -15,6 +15,7 @@
 //  _SRGB); metal/rugosidade, normal e oclusão são dados lineares.
 // =============================================================================
 #include "../common/scene.glsl"
+#include "../common/hdr.glsl"
 
 layout(location = 0) in vec3 v_world;
 layout(location = 1) in vec3 v_normal;
@@ -23,7 +24,10 @@ layout(location = 3) in vec2 v_uv0;
 layout(location = 4) in vec2 v_uv1;
 layout(location = 5) in vec4 v_color;
 
+// MRT do passe 3D (ver common/hdr.glsl): 0 = 2D de exibição — aqui só o
+// alfa, que tapa planos/partículas atrás; 1 = a cena, linear HDR sem teto.
 layout(location = 0) out vec4 o_color;
+layout(location = 1) out vec4 o_scene;
 
 layout(set = 0, binding = TEX_BASE) uniform sampler2D t_base;
 layout(set = 0, binding = TEX_MR) uniform sampler2D t_mr;
@@ -33,41 +37,15 @@ layout(set = 0, binding = TEX_EMISSIVE) uniform sampler2D t_emissive;
 layout(set = 0, binding = TEX_IRRADIANCE) uniform samplerCube t_irradiance;
 layout(set = 0, binding = TEX_PREFILTER) uniform samplerCube t_prefilter;
 layout(set = 0, binding = TEX_BRDF) uniform sampler2D t_brdf;
-layout(set = 0, binding = TEX_SHADOW) uniform sampler2D t_shadow;
+layout(set = 0, binding = TEX_SHADOW) uniform sampler2DShadow t_shadow;
+layout(set = 0, binding = TEX_SHADOW_DEPTH) uniform sampler2D t_shadowDepth;
 
-// Sombra da luz principal: PCF 5×5 com peso bilinear nas bordas do texel
-// (sem a escada do PCF de amostra única). 1 = iluminado, 0 = na sombra.
-float shadow_factor(vec3 world, float NdotL) {
-    if (u.shadowParams.x < 0.5) return 1.0;
-    vec4 sc = u.shadowMatrix * vec4(world, 1.0);
-    vec3 p = sc.xyz / sc.w;
-    if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;
-    float texel = u.shadowParams.y;
-    // Filtro do preview (8E): x = 1 PCF 6×6 (export), 2 = 2×2 bilinear, 3 = uma amostra.
-    // Viés maior em superfície rasante (onde a acne aparece primeiro).
-    float bias = u.shadowParams.z * (1.0 + 3.0 * (1.0 - clamp(NdotL, 0.0, 1.0)));
-    vec2 base = p.xy / texel - 0.5;
-    vec2 f = fract(base);
-    vec2 origin = (floor(base) + 0.5) * texel;
-    if (u.shadowParams.x > 2.5) return (p.z - bias) <= texture(t_shadow, p.xy).r ? 1.0 : 0.0;
-    if (u.shadowParams.x > 1.5) {
-        float s00 = (p.z - bias) <= texture(t_shadow, origin).r ? 1.0 : 0.0;
-        float s10 = (p.z - bias) <= texture(t_shadow, origin + vec2(texel, 0.0)).r ? 1.0 : 0.0;
-        float s01 = (p.z - bias) <= texture(t_shadow, origin + vec2(0.0, texel)).r ? 1.0 : 0.0;
-        float s11 = (p.z - bias) <= texture(t_shadow, origin + vec2(texel)).r ? 1.0 : 0.0;
-        return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
-    }
-    float lit = 0.0;
-    for (int y = -2; y <= 3; ++y) {
-        for (int x = -2; x <= 3; ++x) {
-            float d = texture(t_shadow, origin + vec2(x, y) * texel).r;
-            float s = (p.z - bias) <= d ? 1.0 : 0.0;
-            float wx = x == -2 ? 1.0 - f.x : (x == 3 ? f.x : 1.0);
-            float wy = y == -2 ? 1.0 - f.y : (y == 3 ? f.y : 1.0);
-            lit += s * wx * wy;
-        }
-    }
-    return lit / 25.0;
+#include "../common/shadow.glsl"
+
+// Sombra da luz principal: PCSS (common/shadow.glsl). 1 = iluminado, 0 = na sombra.
+float shadow_factor(vec3 world, vec3 Ng, vec3 L) {
+    return aurea_shadow(t_shadow, t_shadowDepth, u.shadowMatrix, u.shadowParams, u.shadowParams2,
+                        world, Ng, L, gl_FragCoord.xy);
 }
 
 vec2 uv_for(int slot) {
@@ -103,6 +81,31 @@ vec3 F_Schlick(vec3 f0, float VdotH) {
     return f0 + (1.0 - f0) * pow(1.0 - VdotH, 5.0);
 }
 
+vec3 F_Schlick90(vec3 f0, float f90, float VdotH) {
+    return f0 + (vec3(f90) - f0) * pow(1.0 - VdotH, 5.0);
+}
+
+// Visibilidade de Kelemen para o verniz (camada fina e lisa, barata).
+float V_Kelemen(float LdotH) {
+    return 0.25 / max(LdotH * LdotH, 1e-4);
+}
+
+// AA especular geométrico (Tokuyoshi & Kaplanyan): onde a normal muda rápido
+// dentro do pixel, a rugosidade sobe o bastante para o brilho não virar
+// cintilação/serrilhado (quinas, curvas finas, malha densa ao longe).
+float specular_aa(vec3 n, float a) {
+    vec3 du = dFdx(n), dv = dFdy(n);
+    float variance = 0.25 * (dot(du, du) + dot(dv, dv));
+    float kernel = min(2.0 * variance, 0.18);
+    return sqrt(clamp(a * a + kernel, 0.0, 1.0));
+}
+
+// Oclusão especular (Lagarde): o AO da textura escurece o reflexo só onde a
+// cavidade o bloquearia, sem apagar o brilho de superfícies abertas.
+float specular_occlusion(float NdotV, float ao, float roughness) {
+    return clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
+}
+
 // Karis, "Physically Based Shading on Mobile" — ajuste analítico da LUT.
 vec2 env_brdf_approx(float NdotV, float roughness) {
     const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
@@ -133,6 +136,14 @@ vec3 rotate_env(vec3 d) {
 // Y para baixo. Converte a direção antes de amostrar.
 vec3 env_dir(vec3 worldDir) { return rotate_env(vec3(worldDir.x, -worldDir.y, -worldDir.z)); }
 
+// Mapeamento rugosidade → mip do especular pré-filtrado (dono: construção do IBL).
+// Rugosidade perceptual → LOD (Frostbite/Unity): lod = (mips−1)·r·(1,7−0,7r).
+// Os mips são gerados com a inversa (Environment.cpp, specular_lod).
+float env_lod(float roughness) { float r = clamp(roughness, 0.0, 1.0); return max(u.envParams.z - 1.0, 0.0) * r * (1.7 - 0.7 * r); }
+vec3 sample_prefilter(vec3 worldDir, float roughness) {
+    return textureLod(t_prefilter, env_dir(worldDir), env_lod(roughness)).rgb;
+}
+
 // Tone mapping "PBR Neutral" (Khronos): leva a cena (linear, sem teto) para o
 // espaço de trabalho do compositor (linear, 0..1) preservando a cor base até
 // ~0,76 e comprimindo só os realces. É a transformação de SAÍDA do grupo 3D —
@@ -157,13 +168,24 @@ void main() {
     vec4 base = u.baseColor * v_color;
     if (has_tex(0)) base *= texture(t_base, uv_for(0));
     int mode = int(u.alpha.y + 0.5);
-    if (mode == 1 && base.a < u.alpha.x) discard;
+    // Modo 3 = MASK com MSAA: recorte por COBERTURA (alpha-to-coverage +
+    // alpha-to-one no pipeline). O alfa vira uma rampa de ~1 pixel em volta do
+    // corte (derivada de tela) e as amostras do pixel fazem o degradê — folha,
+    // grade e cabelo sem escada. Sem MSAA (modo 1), o descarte de sempre.
+    float coverage = 1.0;
+    if (mode == 3) {
+        coverage = clamp((base.a - u.alpha.x) / max(fwidth(base.a), 1e-4) + 0.5, 0.0, 1.0);
+        if (coverage <= 0.0) discard;
+    } else if (mode == 1 && base.a < u.alpha.x) discard;
     float alpha = mode == 2 ? base.a : 1.0;
 
     // --- Sem iluminação (KHR_materials_unlit) ------------------------------------
     if (u.alpha.z > 0.5) {
+        // Unlit é cor de EXIBIÇÃO (texto, logotipo): vai no alvo 2D, fora do
+        // tone map e do bloom — a cor escolhida é a cor que aparece.
         vec3 c = base.rgb * u.cameraPos.w;
-        o_color = vec4(c * alpha, alpha);
+        o_color = vec4(c * alpha, mode == 3 ? coverage : alpha);
+        o_scene = vec4(0.0, 0.0, 0.0, mode == 3 ? coverage : alpha);
         return;
     }
 
@@ -171,13 +193,17 @@ void main() {
     vec3 N = normalize(v_normal);
     vec3 T = v_tangent.xyz;
     bool twoSided = u.alpha.w > 0.5;
-    if (twoSided && !gl_FrontFacing) {
+    bool back = twoSided && !gl_FrontFacing;
+    if (back) {
         N = -N;
         T = -T;
     }
+    // Normal geométrica: o verniz é liso por cima do relevo (pintura de carro).
+    vec3 Ng = N;
     if (has_tex(2) && dot(T, T) > 1e-12) {
         T = normalize(T - N * dot(N, T));
-        vec3 B = cross(N, T) * (v_tangent.w < 0.0 ? -1.0 : 1.0);
+        // Face de trás: N, T E B invertem juntos (antes o verde do mapa invertia).
+        vec3 B = cross(N, T) * (v_tangent.w < 0.0 ? -1.0 : 1.0) * (back ? -1.0 : 1.0);
         vec3 tn = texture(t_normal, uv_for(2)).xyz * 2.0 - 1.0;
         tn.xy *= u.mr.z;
         N = normalize(mat3(T, B, N) * tn);
@@ -195,12 +221,35 @@ void main() {
     }
     roughness = clamp(roughness, 0.045, 1.0);   // abaixo disso o GGX some em fp16
     metallic = clamp(metallic, 0.0, 1.0);
-    float a = roughness * roughness;
+    // AA especular: a rugosidade efetiva cobre a variação da normal no pixel.
+    float a = specular_aa(N, roughness * roughness);
+    roughness = sqrt(a);
     vec3 diffuseColor = base.rgb * (1.0 - metallic);
-    vec3 f0 = mix(vec3(0.04), base.rgb, metallic);
+    // F0 do dielétrico pelo IOR (1,5 → 0,04 como antes) e KHR_materials_specular.
+    float iorF0 = (u.clearcoat.z - 1.0) / (u.clearcoat.z + 1.0);
+    float specStrength = u.clearcoat.w;
+    vec3 dielectricF0 = min(vec3(iorF0 * iorF0) * u.specularColor.rgb, vec3(1.0)) * specStrength;
+    vec3 f0 = mix(dielectricF0, base.rgb, metallic);
+    float f90 = mix(specStrength, 1.0, metallic);
+    // Verniz (KHR_materials_clearcoat).
+    float cc = u.clearcoat.x;
+    float ccRough = clamp(u.clearcoat.y, 0.045, 1.0);
+    float ccA = specular_aa(Ng, ccRough * ccRough);
+    ccRough = sqrt(ccA);
+    float NcdotV = clamp(dot(Ng, V), 1e-4, 1.0);
+    float ccFv = cc > 0.0 ? cc * (0.04 + 0.96 * pow(1.0 - NcdotV, 5.0)) : 0.0;
+    // Transmissão fina (vidro): o que passa pela superfície não é difuso.
+    float transmission = u.specularColor.w;
+    diffuseColor *= 1.0 - transmission;
+    // Compensação de energia multi-espalhamento (Fdez-Agüera): metal rugoso
+    // deixa de escurecer por perder a luz que quica entre as microfacetas.
+    vec2 dfg = texture(t_brdf, vec2(NdotV, roughness)).rg;
+    float Ess = max(dfg.x + dfg.y, 1e-3);
+    vec3 energyComp = 1.0 + f0 * (1.0 / Ess - 1.0);
 
     // --- Luzes pontuais ----------------------------------------------------------
-    vec3 color = vec3(0.0);
+    // Difuso e especular separados: na transparência só o difuso é coberto.
+    vec3 colorD = vec3(0.0), colorS = vec3(0.0);
     int count = int(u.lightCount.x + 0.5);
     for (int i = 0; i < MAX_LIGHTS; ++i) {
         if (i >= count) break;
@@ -233,41 +282,76 @@ void main() {
         vec3 H = normalize(L + V);
         float NdotH = clamp(dot(N, H), 0.0, 1.0);
         float VdotH = clamp(dot(V, H), 0.0, 1.0);
-        vec3 F = F_Schlick(f0, VdotH);
-        vec3 spec = F * (D_GGX(NdotH, a) * V_SmithGGXCorrelated(NdotV, NdotL, a));
+        vec3 F = F_Schlick90(f0, f90, VdotH);
+        vec3 spec = F * (D_GGX(NdotH, a) * V_SmithGGXCorrelated(NdotV, NdotL, a)) * energyComp;
         vec3 diff = (1.0 - F) * diffuseColor / PI;
-        float sh = i == int(u.shadowParams.w + 0.5) ? shadow_factor(v_world, NdotL) : 1.0;
-        color += (diff + spec) * u.lightColor[i].rgb * (NdotL * atten * sh);
+        float base_ = 1.0;
+        vec3 ccLobe = vec3(0.0);
+        if (cc > 0.0) {
+            // Verniz por cima: brilho próprio e atenuação da base pelo seu Fresnel.
+            float NcdotL = clamp(dot(Ng, L), 0.0, 1.0);
+            float NcdotH = clamp(dot(Ng, H), 0.0, 1.0);
+            float Fc = cc * (0.04 + 0.96 * pow(1.0 - VdotH, 5.0));
+            base_ = 1.0 - Fc;
+            ccLobe = vec3(D_GGX(NcdotH, ccA) * V_Kelemen(VdotH) * Fc * NcdotL / max(NdotL, 1e-4));
+        }
+        float sh = i == int(u.shadowParams.w + 0.5) ? shadow_factor(v_world, Ng, L) : 1.0;
+        vec3 radiance = u.lightColor[i].rgb * (NdotL * atten * sh);
+        colorD += diff * base_ * radiance;
+        colorS += (spec * base_ + ccLobe) * radiance;
     }
 
     // --- Ambiente --------------------------------------------------------------
     float ao = 1.0;
     if (has_tex(3)) ao = mix(1.0, texture(t_occlusion, uv_for(3)).r, u.mr.w);
     vec3 R = reflect(-V, N);
-    vec3 ambient;
+    float specAO = specular_occlusion(NdotV, ao, roughness);
+    vec3 diffAmb, specAmb, ccAmb = vec3(0.0);
     if (u.envParams.y > 0.5) {
         vec3 irradiance = texture(t_irradiance, env_dir(N)).rgb;
-        float lod = roughness * max(u.envParams.z - 1.0, 0.0);
-        vec3 prefiltered = textureLod(t_prefilter, env_dir(R), lod).rgb;
-        vec2 brdf = texture(t_brdf, vec2(NdotV, roughness)).rg;
+        vec3 prefiltered = sample_prefilter(R, roughness);
+        // Split-sum com Fresnel dependente da rugosidade + multi-espalhamento.
         vec3 Fr = max(vec3(1.0 - roughness), f0) - f0;
         vec3 kS = f0 + Fr * pow(1.0 - NdotV, 5.0);
-        vec3 specAmb = prefiltered * (kS * brdf.x + brdf.y);
-        vec3 diffAmb = irradiance * diffuseColor * (1.0 - kS);
-        ambient = diffAmb + specAmb;
+        vec3 FssEss = kS * dfg.x + dfg.y * f90;
+        float Ems = 1.0 - Ess;
+        vec3 Favg = f0 + (1.0 - f0) / 21.0;
+        vec3 Fms = FssEss * Favg / (1.0 - Ems * Favg);
+        specAmb = prefiltered * FssEss * specAO + Fms * Ems * irradiance * ao;
+        diffAmb = irradiance * diffuseColor * (1.0 - FssEss - Fms * Ems) * ao;
+        if (cc > 0.0) {
+            vec3 Rc = reflect(-V, Ng);
+            vec2 dfgc = texture(t_brdf, vec2(NcdotV, ccRough)).rg;
+            ccAmb = sample_prefilter(Rc, ccRough) * (cc * (0.04 * dfgc.x + dfgc.y)) * specAO;
+        }
     } else {
         vec2 brdf = env_brdf_approx(NdotV, roughness);
-        vec3 specAmb = analytic_env(R, roughness) * (f0 * brdf.x + brdf.y);
-        vec3 diffAmb = analytic_env(N, 1.0) * diffuseColor;
-        ambient = diffAmb + specAmb;
+        specAmb = analytic_env(R, roughness) * (f0 * brdf.x + brdf.y * f90) * specAO;
+        diffAmb = analytic_env(N, 1.0) * diffuseColor * ao;
+        if (cc > 0.0) {
+            vec2 brdfc = env_brdf_approx(NcdotV, ccRough);
+            ccAmb = analytic_env(reflect(-V, Ng), ccRough) * (cc * (0.04 * brdfc.x + brdfc.y)) * specAO;
+        }
     }
-    color += ambient * ao * u.envParams.x;
+    // O verniz reflete por cima e tira da base o que ele mesmo reflete.
+    colorD += diffAmb * (1.0 - ccFv) * u.envParams.x;
+    colorS += (specAmb * (1.0 - ccFv) + ccAmb) * u.envParams.x;
 
     // --- Emissiva ----------------------------------------------------------------
     vec3 emissive = u.emissive.rgb;
     if (has_tex(4)) emissive *= texture(t_emissive, uv_for(4)).rgb;
-    color += emissive;
+    colorD += emissive;
 
-    color = pbr_neutral(color * u.cameraPos.w);
-    o_color = vec4(color * alpha, alpha);
+    // Transparência física (pré-multiplicada): o difuso é coberto pelo alfa,
+    // a luz REFLETIDA não — vidro transparente continua espelhando (antes o
+    // especular era multiplicado pelo alfa e o vidro perdia o reflexo). A
+    // transmissão abre o material para o que está atrás.
+    float coverageAlpha = alpha * (1.0 - transmission);
+    vec3 color = colorD * coverageAlpha + colorS;
+    // Linear HDR: exposição DO OBJETO (ambiente próprio, v22) aqui; a do grupo,
+    // o bloom e o tone map ficam no pós (SceneRenderer), depois do resolve.
+    color *= u.cameraPos.w;
+    float outAlpha = mode == 3 ? coverage : coverageAlpha;
+    o_color = vec4(0.0, 0.0, 0.0, outAlpha);
+    o_scene = vec4(aurea_hdr_encode(color), outAlpha);
 }

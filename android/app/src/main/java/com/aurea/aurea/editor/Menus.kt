@@ -372,6 +372,13 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             checked = store.snapping,
         )
         MenuItemRow(
+            CupertinoGlyph.SuitDiamond,
+            stringResource(R.string.editor_keyframes_todas_camadas),
+            act { store.toggleShowAllKeyframes() },
+            checked = store.showAllKeyframes,
+            detail = stringResource(R.string.editor_keyframes_todas_camadas_detalhe),
+        )
+        MenuItemRow(
             CupertinoGlyph.Link,
             stringResource(R.string.editor_timeline_magnetica_modo_edicao),
             act { store.toggleEditMode() },

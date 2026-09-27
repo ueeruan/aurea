@@ -93,14 +93,29 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
         // Metal conta cubos, não faces, em arrayLength. Um MTLTextureTypeCube
         // tem arrayLength=1 e seis slices (0...5) para upload e amostragem.
         td.arrayLength = desc.cube ? 1u : std::max(1u, desc.layers);
-        // O motor é 1 amostra em todo alvo (o AA do preview é resolução, não
-        // MSAA): declarado e não usado. Um dia que entre, entra aqui.
-        td.sampleCount = 1;
+        // MSAA só no passe 3D (espelho do Vulkan): 2D de um nível, resolvido
+        // no fim do passe.
+        const u32 samples = std::max(1u, desc.sampleCount);
+        if (samples > 1 && (desc.cube || desc.mipLevels > 1 || desc.layers > 1 || desc.depth > 1)) {
+            return Status{Errc::InvalidArgument, "textura MSAA precisa ser 2D de um nivel"};
+        }
+        td.sampleCount = samples;
         // Textura do motor é sempre privada: a CPU sobe por staging e lê por
         // blit. É o mesmo caminho do Vulkan (DEVICE_LOCAL + transfer).
         td.storageMode = MTLStorageModePrivate;
         td.usage = MTLTextureUsageShaderRead;
-        if (desc.cube) {
+        if (desc.transient) {
+            // Anexo transitório (alvo MSAA resolvido, profundidade só de
+            // teste): memoryless — vive só no tile. É o LAZILY_ALLOCATED do
+            // Vulkan. O simulador não tem memoryless: fica privado.
+            td.usage = MTLTextureUsageRenderTarget;
+            if (@available(iOS 10.0, macOS 11.0, *)) {
+                if (d.caps.lazyAttachments) td.storageMode = MTLStorageModeMemoryless;
+            }
+        }
+        if (samples > 1) {
+            td.textureType = MTLTextureType2DMultisample;
+        } else if (desc.cube) {
             td.textureType = MTLTextureTypeCube;
         } else if (desc.depth > 1) {
             td.textureType = MTLTextureType3D;
@@ -110,7 +125,7 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
         } else {
             td.textureType = MTLTextureType2D;
         }
-        if (desc.storage) td.usage |= MTLTextureUsageShaderWrite;
+        if (desc.storage && !desc.transient) td.usage |= MTLTextureUsageShaderWrite;
         if (desc.renderTarget || desc.is_depth()) td.usage |= MTLTextureUsageRenderTarget;
 
         t.texture = [d.device newTextureWithDescriptor:td];
@@ -341,8 +356,13 @@ Result<SamplerHandle> Backend::create_sampler(const SamplerDesc& desc) noexcept 
                 AUREA_LOG_WARN("metal: ClampToBorder sem suporte nesta versao; usando ClampToEdge");
             }
         }
-        if (desc.maxAnisotropy > 1.0f) {
+        if (desc.maxAnisotropy > 1.0f && !desc.compare) {
             sd.maxAnisotropy = std::min<NSUInteger>(static_cast<NSUInteger>(desc.maxAnisotropy), 16);
+        }
+        if (desc.compare) {
+            // Mapa de sombra (depth2d::sample_compare do SPIRV-Cross): 1 quando
+            // referência ≤ profundidade; linear = PCF 2×2 do hardware.
+            sd.compareFunction = MTLCompareFunctionLessEqual;
         }
         SamplerObject s;
         s.sampler = [d.device newSamplerStateWithDescriptor:sd];
@@ -562,12 +582,23 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         pd.vertexFunction = vs->function;
         pd.fragmentFunction = fs->function;
         pd.label = desc.debugName ? [NSString stringWithUTF8String:desc.debugName] : @"render";
-        pd.rasterSampleCount = 1;
+        // MSAA do passe 3D (espelho do Vulkan): a contagem do pipeline é a dos
+        // anexos do passe. Recorte MASK por cobertura com alpha-to-one (o
+        // alfa guardado fica 1, não a cobertura).
+        const u32 samples = std::max(1u, desc.sampleCount);
+        pd.rasterSampleCount = samples;
+        if (samples > 1 && desc.alphaToCoverage) {
+            pd.alphaToCoverageEnabled = YES;
+            pd.alphaToOneEnabled = YES;
+        }
         pd.inputPrimitiveTopology = to_mtl_topology(desc.topology);
         // Alvo da cor: um pipeline só de profundidade (sombra) não tem anexo de
         // cor, e o formato TEM de ser inválido no descritor — senão o Metal
         // recusa o draw no passe sem cor.
         pd.colorAttachments[0].pixelFormat = desc.depthOnly ? MTLPixelFormatInvalid : to_mtl(desc.colorFormat);
+        // MRT do 3D: segundo alvo (cena HDR), mesmo blend do primeiro.
+        const bool mrt = desc.hasColor1 && !desc.depthOnly;
+        if (mrt) pd.colorAttachments[1].pixelFormat = to_mtl(desc.colorFormat1);
         if (desc.hasDepth) {
             pd.depthAttachmentPixelFormat = to_mtl(desc.depthFormat);
         } else {
@@ -575,18 +606,21 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         }
         // Alvos PRÉ-MULTIPLICADOS: Normal = src + dst*(1-srcA); Add = src + dst.
         if (desc.blendEnabled) {
-            MTLRenderPipelineColorAttachmentDescriptor* a = pd.colorAttachments[0];
-            a.blendingEnabled = YES;
-            a.sourceRGBBlendFactor = MTLBlendFactorOne;
-            a.sourceAlphaBlendFactor = MTLBlendFactorOne;
-            a.rgbBlendOperation = MTLBlendOperationAdd;
-            a.alphaBlendOperation = MTLBlendOperationAdd;
-            a.destinationRGBBlendFactor = desc.blend == BlendMode::Add ? MTLBlendFactorOne
-                                                                       : MTLBlendFactorOneMinusSourceAlpha;
-            a.destinationAlphaBlendFactor = desc.blend == BlendMode::Add ? MTLBlendFactorOne
-                                                                         : MTLBlendFactorOneMinusSourceAlpha;
+            for (NSUInteger i = 0; i < (mrt ? 2u : 1u); ++i) {
+                MTLRenderPipelineColorAttachmentDescriptor* a = pd.colorAttachments[i];
+                a.blendingEnabled = YES;
+                a.sourceRGBBlendFactor = MTLBlendFactorOne;
+                a.sourceAlphaBlendFactor = MTLBlendFactorOne;
+                a.rgbBlendOperation = MTLBlendOperationAdd;
+                a.alphaBlendOperation = MTLBlendOperationAdd;
+                a.destinationRGBBlendFactor = desc.blend == BlendMode::Add ? MTLBlendFactorOne
+                                                                           : MTLBlendFactorOneMinusSourceAlpha;
+                a.destinationAlphaBlendFactor = desc.blend == BlendMode::Add ? MTLBlendFactorOne
+                                                                             : MTLBlendFactorOneMinusSourceAlpha;
+            }
         }
         pd.colorAttachments[0].writeMask = MTLColorWriteMaskAll;
+        if (mrt) pd.colorAttachments[1].writeMask = MTLColorWriteMaskAll;
 
         MTLVertexDescriptor* vd = nil;
         const VertexLayout& vl = desc.vertexLayout;

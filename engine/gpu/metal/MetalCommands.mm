@@ -175,6 +175,27 @@ void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
             rp.colorAttachments[0].clearColor = MTLClearColorMake(pass.clear[0], pass.clear[1],
                                                                  pass.clear[2], pass.clear[3]);
         }
+        // MRT do 3D (espelho do Vulkan): segundo alvo com o mesmo load/clear.
+        Texture* color1 = pass.color1.valid() ? d.textures.get(pass.color1.id) : nullptr;
+        if (color && color1) {
+            rp.colorAttachments[1].texture = color1->texture;
+            rp.colorAttachments[1].loadAction = to_mtl(pass.load);
+            rp.colorAttachments[1].storeAction = MTLStoreActionStore;
+            rp.colorAttachments[1].clearColor = MTLClearColorMake(pass.clear[0], pass.clear[1],
+                                                                 pass.clear[2], pass.clear[3]);
+        }
+        // MSAA: resolve no fim do passe, no tile. A cor multiamostrada é
+        // memoryless (transitória): só o resolve vai para a memória.
+        Texture* resolve0 = pass.resolve.valid() ? d.textures.get(pass.resolve.id) : nullptr;
+        Texture* resolve1 = pass.resolve1.valid() ? d.textures.get(pass.resolve1.id) : nullptr;
+        if (color && resolve0) {
+            rp.colorAttachments[0].resolveTexture = resolve0->texture;
+            rp.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+        }
+        if (color1 && resolve1) {
+            rp.colorAttachments[1].resolveTexture = resolve1->texture;
+            rp.colorAttachments[1].storeAction = MTLStoreActionMultisampleResolve;
+        }
         if (depth) {
             rp.depthAttachment.texture = depth->texture;
             rp.depthAttachment.loadAction = to_mtl(pass.depthLoad);
@@ -182,7 +203,20 @@ void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
             // Profundidade só de teste não precisa ir para a memória — em GPU
             // tile-based isso economiza a escrita inteira do anexo.
             rp.depthAttachment.storeAction = pass.storeDepth ? MTLStoreActionStore : MTLStoreActionDontCare;
+            // Profundidade de 1 amostra para quem lê depois (SSAO): a amostra 0.
+            Texture* depthResolve = pass.depthResolve.valid() && d.caps.depthResolveSampleZero
+                                  ? d.textures.get(pass.depthResolve.id) : nullptr;
+            if (depthResolve && resolve0) {
+                rp.depthAttachment.resolveTexture = depthResolve->texture;
+                rp.depthAttachment.depthResolveFilter = MTLMultisampleDepthResolveFilterSample0;
+                rp.depthAttachment.storeAction = pass.storeDepth ? MTLStoreActionStoreAndMultisampleResolve
+                                                                 : MTLStoreActionMultisampleResolve;
+                depthResolve->state = ResourceState::DepthAttachment;
+            }
         }
+        if (resolve0) resolve0->state = ResourceState::ColorAttachment;
+        if (resolve1) resolve1->state = ResourceState::ColorAttachment;
+        if (color1) color1->state = ResourceState::ColorAttachment;
         render_ = [cmd_ renderCommandEncoderWithDescriptor:rp];
         if (!render_) {
             AUREA_LOG_ERROR("metal: render pass nao abriu (formato/anexo incompativeis)");

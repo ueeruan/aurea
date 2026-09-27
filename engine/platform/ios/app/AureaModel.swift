@@ -258,6 +258,8 @@ final class AureaModel: ObservableObject {
     @Published var liveNoticePopup: LiveNoticePopupRequest?
     @Published var vectorEditingPoints = false
     @Published var snapping = true
+    /// Losangos de keyframe em todas as linhas (padrão); desligado, só as escolhidas mostram e deixam tocar.
+    @Published var showAllKeyframes: Bool = true
     @Published var autoKeyTransforms = true
     @Published var freehandPoints: [Float] = []
     @Published var actionSheet: ActionSheetRequest?
@@ -649,6 +651,11 @@ final class AureaModel: ObservableObject {
                             select(layerId: first, additive: false)
                             select(layerId: last, additive: true)
                         }
+                    case "stagger":
+                        // Três formas no mesmo início, todas escolhidas: o teste escalona pela barra de lote.
+                        addShape(1); addShape(1); addShape(1)
+                        refreshModel(force: true)
+                        for (index, row) in layers.enumerated() { select(layerId: row.id, additive: index > 0) }
                     default: addShape(1)
                     }
                     if scene == "transform" { panel = .transform }
@@ -2473,6 +2480,26 @@ final class AureaModel: ObservableObject {
         guard clamped != index else { return }
         engine.run { $0.setLayerOrder(layerId, newIndex: UInt32(count - 1 - clamped)) }
         refreshModel(force: true)
+    }
+
+    /// "Escalonar" as escolhidas (o mesmo do Android): cascata de `step`
+    /// quadros na ordem da timeline — a de cima fica; passo negativo = de
+    /// baixo para cima. `keysOnly` anda só a animação. Um passo de desfazer.
+    func staggerSelection(step: Int, keysOnly: Bool) {
+        let ordered: [Int64] = layers.filter { selection.contains($0.id) && !$0.locked }.map { $0.id }
+        guard ordered.count >= 2 else { toast = AureaText.t("sh_pick_two_unlocked_layers"); return }
+        guard step != 0 else { return }
+        let chain: [Int64] = step > 0 ? ordered : Array(ordered.reversed())
+        let numbers: [NSNumber] = chain.map { NSNumber(value: $0) }
+        if status.playing != 0 { playPause() }
+        let moved: Int32 = engine.staggerLayers(numbers, stepFrames: Int32(abs(step)), keysOnly: keysOnly)
+        if moved < 0 {
+            toast = AureaText.t("msg_escalonar_recusado")
+            return
+        }
+        refreshModel(force: true)
+        let key: String = keysOnly ? "msg_keyframes_escalonados" : "msg_camadas_escalonadas"
+        toast = AureaText.t(key, String(Int(moved) + 1), String(abs(step)))
     }
 
     /// Move camadas no tempo (o conteúdo anda junto). Um passo de desfazer.

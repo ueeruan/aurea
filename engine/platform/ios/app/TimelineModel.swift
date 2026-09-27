@@ -673,3 +673,26 @@ struct TimelineKeySelection: Equatable {
         return TimelineKeySelection(layer: layer, keys: refs)
     }
 }
+
+/// Quem mostra (e deixa tocar) os losangos de keyframe na timeline — o mesmo
+/// do Android (`KeyframeVisibility`): trilha aberta sempre; a linha da camada,
+/// com "Keyframes de todas as camadas" ligado ou quando ela está escolhida.
+enum KeyframeVisibility {
+    static func visible(showAll: Bool, isPropertyLane: Bool, selected: Bool) -> Bool {
+        return showAll || isPropertyLane || selected
+    }
+}
+
+/// "Escalonar": a conta da UI antes do motor (par do `Stagger` do Android).
+enum StaggerPlan {
+    static let minStep: Int = -120
+    static let maxStep: Int = 120
+    static let defaultStep: Int = 3
+
+    /// Próximo valor do contador: anda `delta`, nunca para no 0 e fica na faixa.
+    static func step(_ current: Int, _ delta: Int) -> Int {
+        var next: Int = min(max(current + delta, minStep), maxStep)
+        if next == 0 { next = delta > 0 ? 1 : -1 }
+        return next
+    }
+}

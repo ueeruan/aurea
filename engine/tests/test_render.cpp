@@ -779,7 +779,10 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // Stripes, Radial Rays, Grid, Parenting Helper and Text 3D Layout.
     // Corner Pin and the five Media Lab effects.
     // RGB Split and Chromatic Aberration (independent spatial channel effects).
-    AUREA_CHECK_EQ(before, static_cast<u32>(75));
+    // + o pacote de paridade (13): Oscilar, Balançar, Agitar; Íris, Caixa,
+    //   Persianas; Desfoque radial, Espelho, Cortar bordas, Vinheta,
+    //   Mosaico/LED, Detectar bordas, Matiz e saturação.
+    AUREA_CHECK_EQ(before, static_cast<u32>(88));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {
@@ -1366,4 +1369,189 @@ AUREA_TEST(MotionTile, ScaleAndRotationAddUp) {
     const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1000, 1000, 1000, 1000, 500, 500, 0.5f, 45.0f));
     AUREA_CHECK_NEAR(f.x, 2.0f * std::sqrt(2.0f), 2e-3);
     AUREA_CHECK_NEAR(f.y, 2.0f * std::sqrt(2.0f), 2e-3);
+}
+
+// =============================================================================
+// Pacote de paridade — comportamentos de movimento (sem GPU).
+//
+// Oscilar, Balançar e Agitar são função pura do tempo: no fim da pilha viram
+// a matriz da composição, então o plano do EffectGraph já diz a pose inteira.
+// =============================================================================
+namespace {
+
+const char* const kEffectPackKeys[] = {
+    effect_keys::kOscillate, effect_keys::kSwing, effect_keys::kWiggle,
+    effect_keys::kIrisWipe, effect_keys::kBoxWipe, effect_keys::kVenetianBlinds,
+    effect_keys::kRadialBlur, effect_keys::kMirror, effect_keys::kCrop, effect_keys::kVignette,
+    effect_keys::kMosaic, effect_keys::kFindEdges, effect_keys::kHueSaturation,
+};
+
+/// Plano de UMA camada 100x100 com o efeito no fim, no quadro pedido (30 qps).
+EffectPlan plan_motion(const EffectRegistry& reg, const EffectInstance& fx, i64 frame) {
+    Layer l;
+    l.effects.push_back(fx);
+    EffectPlan plan;
+    EffectGraph::plan(l, reg, FrameIndex{frame}, 1.0f, placement(100, 100), nullptr, plan, 30.0);
+    return plan;
+}
+
+Vec2 apply(const Mat4& m, Vec2 p) {
+    const Vec4 r = m * Vec4{p.x, p.y, 0.0f, 1.0f};
+    return Vec2{r.x, r.y};
+}
+
+} // namespace
+
+AUREA_TEST(EffectPack, EveryNewEffectRegistersWithStableIdsAndTypedRanges) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    for (const char* key : kEffectPackKeys) {
+        const EffectTypeId id = reg.find_key(key);
+        AUREA_CHECK_MSG(id != 0 && reg.find(id) != nullptr, key);
+        const ParameterRegistry* p = reg.params(id);
+        AUREA_CHECK_MSG(p && p->count() > 0, key);
+        if (!p) continue;
+        for (u32 i = 0; i < p->count(); ++i) {
+            const ParamSpec& s = p->at(i);
+            // A faixa digitada nunca é mais estreita que a do slider.
+            AUREA_CHECK(s.typed_min() <= s.minValue && s.typed_max() >= s.maxValue);
+            // Números contínuos são keyframáveis (o pedido do dono).
+            if (s.type == ParamType::Float || s.type == ParamType::Angle || s.type == ParamType::Point2D)
+                AUREA_CHECK_MSG(s.animatable(), key);
+        }
+    }
+    // As amplitudes dos comportamentos aceitam digitação além do slider.
+    const ParameterRegistry* osc = reg.params(reg.find_key(effect_keys::kOscillate));
+    AUREA_CHECK(osc && osc->at(osc->find("magnitude")).typed_max() > osc->at(osc->find("magnitude")).maxValue);
+    AUREA_CHECK(osc && osc->at(osc->find("decay")).typed_max() > osc->at(osc->find("decay")).maxValue);
+    const ParameterRegistry* shake = reg.params(reg.find_key(effect_keys::kShake));
+    AUREA_CHECK(shake && shake->find("direction") != kInvalidIndex && shake->find("decay") != kInvalidIndex);
+}
+
+AUREA_TEST(EffectPack, OscillateTravelsAlongItsDirectionAndDecaysToIdentity) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    EffectInstance fx = make_effect(reg, effect_keys::kOscillate, 1);
+    fx.params[0].constant = ParamValue::scalar(90.0f);   // direção: para baixo
+    fx.params[1].constant = ParamValue::scalar(40.0f);   // amplitude
+    fx.params[2].constant = ParamValue::scalar(1.0f);    // 1 Hz
+    // Fase 0 no quadro 0: seno 0 → nenhuma mudança, efeito sai da cadeia.
+    EffectPlan still = plan_motion(reg, fx, 0);
+    AUREA_CHECK(!still.hasFold);
+    AUREA_CHECK_EQ(still.droppedIdentity, 1u);
+    // Um quarto de ciclo (7,5 quadros ≈ quadro 7 e 8): pico para baixo.
+    fx.params[3].constant = ParamValue::scalar(90.0f);   // fase = pico no início
+    EffectPlan peak = plan_motion(reg, fx, 0);
+    AUREA_CHECK(peak.hasFold);
+    AUREA_CHECK_NEAR(peak.foldMatrix.col[3].x, 0.0f, 1e-3);
+    AUREA_CHECK_NEAR(peak.foldMatrix.col[3].y, 40.0f, 1e-3);
+    // Meio ciclo depois (0,5 s = 15 quadros): o outro extremo.
+    EffectPlan other = plan_motion(reg, fx, 15);
+    AUREA_CHECK_NEAR(other.foldMatrix.col[3].y, -40.0f, 1e-3);
+    // Decaimento 2/s: em 1 s a amplitude cai a e^-2; em 10 s é identidade.
+    fx.params[8].constant = ParamValue::scalar(2.0f);
+    EffectPlan oneSecond = plan_motion(reg, fx, 30);
+    AUREA_CHECK_NEAR(oneSecond.foldMatrix.col[3].y, 40.0f * std::exp(-2.0f), 1e-2);
+    EffectPlan settled = plan_motion(reg, fx, 300);
+    AUREA_CHECK(!settled.hasFold);
+    AUREA_CHECK_EQ(settled.droppedIdentity, 1u);
+    // Rotação e pulso de escala giram/escalam em volta do pivô: ele não anda.
+    fx.params[8].constant = ParamValue::scalar(0.0f);
+    fx.params[1].constant = ParamValue::scalar(0.0f);
+    fx.params[4].constant = ParamValue::scalar(20.0f);
+    fx.params[5].constant = ParamValue::scalar(50.0f);
+    EffectPlan spin = plan_motion(reg, fx, 0);
+    const Vec2 pivot = apply(spin.foldMatrix, Vec2{50.0f, 50.0f});
+    AUREA_CHECK_NEAR(pivot.x, 50.0f, 1e-3);
+    AUREA_CHECK_NEAR(pivot.y, 50.0f, 1e-3);
+    const Vec2 corner = apply(spin.foldMatrix, Vec2{100.0f, 50.0f});
+    AUREA_CHECK_NEAR(std::hypot(corner.x - 50.0f, corner.y - 50.0f), 75.0f, 1e-2);   // 50 px × 150%
+}
+
+AUREA_TEST(EffectPack, OscillateWaveformsStayInsideTheAmplitude) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    EffectInstance fx = make_effect(reg, effect_keys::kOscillate, 1);
+    fx.params[1].constant = ParamValue::scalar(25.0f);
+    fx.params[2].constant = ParamValue::scalar(3.0f);
+    for (u32 shape = 0; shape < 5; ++shape) {
+        fx.params[6].constant = ParamValue::scalar(static_cast<f32>(shape));
+        f32 lo = 0.0f, hi = 0.0f;
+        for (i64 f = 0; f < 60; ++f) {
+            const EffectPlan pl = plan_motion(reg, fx, f);
+            const f32 x = pl.hasFold ? pl.foldMatrix.col[3].x : 0.0f;
+            AUREA_CHECK(std::isfinite(x));
+            lo = std::min(lo, x);
+            hi = std::max(hi, x);
+        }
+        AUREA_CHECK(hi <= 25.0f + 1e-3f && lo >= -25.0f - 1e-3f);
+        AUREA_CHECK_MSG(hi - lo > 10.0f, "a onda devia andar");
+    }
+}
+
+AUREA_TEST(EffectPack, SwingTurnsAroundThePivotAndSettles) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    EffectInstance fx = make_effect(reg, effect_keys::kSwing, 1);
+    fx.params[0].constant = ParamValue::scalar(30.0f);   // 30° para cada lado
+    fx.params[3].constant = ParamValue::scalar(90.0f);   // pico no início
+    const EffectPlan peak = plan_motion(reg, fx, 0);
+    AUREA_CHECK(peak.hasFold);
+    // Pivô padrão: meio da borda de cima.
+    const Vec2 pivot = apply(peak.foldMatrix, Vec2{50.0f, 0.0f});
+    AUREA_CHECK_NEAR(pivot.x, 50.0f, 1e-3);
+    AUREA_CHECK_NEAR(pivot.y, 0.0f, 1e-3);
+    const Vec2 bob = apply(peak.foldMatrix, Vec2{50.0f, 100.0f});
+    AUREA_CHECK_NEAR(std::fabs(bob.x - 50.0f), 50.0f, 1e-2);   // 100 · sen 30°
+    AUREA_CHECK_NEAR(bob.y, 100.0f * std::cos(30.0f * kDeg2Rad), 1e-2);
+    // Meio ciclo depois (1 Hz → 15 quadros) o pêndulo está do outro lado.
+    const Vec2 back = apply(plan_motion(reg, fx, 15).foldMatrix, Vec2{50.0f, 100.0f});
+    AUREA_CHECK((back.x - 50.0f) * (bob.x - 50.0f) < 0.0f);
+    fx.params[4].constant = ParamValue::scalar(5.0f);    // decaimento
+    AUREA_CHECK(!plan_motion(reg, fx, 300).hasFold);
+}
+
+AUREA_TEST(EffectPack, WiggleChannelsAreIndependentDeterministicAndHold) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    EffectInstance fx = make_effect(reg, effect_keys::kWiggle, 1);
+    fx.params[2].constant = ParamValue::scalar(0.0f);    // só X
+    const EffectPlan a = plan_motion(reg, fx, 7);
+    const EffectPlan again = plan_motion(reg, fx, 7);
+    AUREA_CHECK(a.hasFold);
+    AUREA_CHECK_NEAR(a.foldMatrix.col[3].x, again.foldMatrix.col[3].x, 1e-6);
+    AUREA_CHECK_NEAR(a.foldMatrix.col[3].y, 0.0f, 1e-4);
+    AUREA_CHECK_NEAR(a.foldMatrix.col[0].y, 0.0f, 1e-5);   // sem rotação
+    AUREA_CHECK(std::fabs(a.foldMatrix.col[3].x) <= 30.0f + 1e-3f);
+    // Outra semente, outro caminho.
+    f32 diff = 0.0f;
+    EffectInstance other = fx;
+    other.params[8].constant = ParamValue::scalar(77.0f);
+    for (i64 f = 1; f < 40; f += 3) {
+        diff += std::fabs(plan_motion(reg, fx, f).foldMatrix.col[3].x - plan_motion(reg, other, f).foldMatrix.col[3].x);
+    }
+    AUREA_CHECK(diff > 1.0f);
+    // Segurar: 2 Hz → um valor por meio segundo (15 quadros). 16 e 20 caem no
+    // mesmo degrau; sem segurar, a curva anda entre eles.
+    fx.params[7].constant = ParamValue::boolean(true);
+    AUREA_CHECK_NEAR(plan_motion(reg, fx, 16).foldMatrix.col[3].x, plan_motion(reg, fx, 20).foldMatrix.col[3].x, 1e-5);
+    fx.params[7].constant = ParamValue::boolean(false);
+    AUREA_CHECK(std::fabs(plan_motion(reg, fx, 16).foldMatrix.col[3].x - plan_motion(reg, fx, 20).foldMatrix.col[3].x) > 1e-3f);
+    // Intensidade 0 = nenhum movimento.
+    fx.params[5].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK(!plan_motion(reg, fx, 7).hasFold);
+}
+
+AUREA_TEST(EffectPack, MotionBehaviorInTheMiddleOfTheStackGetsItsOwnPass) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kSwing, 0));
+    l.effects.back().params[3].constant = ParamValue::scalar(90.0f);
+    l.effects.push_back(make_effect(reg, effect_keys::kGaussianBlur, 1));
+    l.effects.back().params[0].constant.v[0] = 4.0f;
+    EffectPlan plan;
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK(!plan.hasFold);
+    AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(2));
 }

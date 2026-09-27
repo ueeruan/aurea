@@ -737,3 +737,61 @@ AUREA_TEST(Parenting, SelectionParentsToNewNullWithoutMovingAndUndoesOnce) {
     AUREA_CHECK_EQ(r.comp()->layers().count(), before);
     AUREA_CHECK(!r.L(r.a)->parent.valid() && !r.L(r.b)->parent.valid());
 }
+
+// =============================================================================
+//  Escalonar: cascata de N quadros na ordem escolhida (camadas ou só animação)
+// =============================================================================
+AUREA_TEST(Stagger, LayersCascadeInGivenOrderSkipLockedAndUndoOnce) {
+    EditRig r;
+    r.range(r.a, 0, 30); r.range(r.b, 0, 30); r.range(r.c, 0, 30);
+    const u64 ids[3] = {r.c, r.a, r.b};              // ordem da pessoa, não a de criação
+    auto moved = r.e.stagger_layers(ids, 3, 4, false);
+    AUREA_CHECK(moved.ok() && *moved == 2);
+    AUREA_CHECK(r.at(r.c, 0, 30) && r.at(r.a, 4, 34) && r.at(r.b, 8, 38));
+    r.undo();                                         // UM passo
+    AUREA_CHECK(r.at(r.a, 0, 30) && r.at(r.b, 0, 30) && r.at(r.c, 0, 30));
+    // Bloqueada não anda nem ocupa um degrau.
+    r.comp()->layer(LayerId::unpack(r.a))->locked = true;
+    moved = r.e.stagger_layers(ids, 3, 5, false);
+    AUREA_CHECK(moved.ok() && *moved == 1);
+    AUREA_CHECK(r.at(r.a, 0, 30) && r.at(r.c, 0, 30) && r.at(r.b, 5, 35));
+    r.comp()->layer(LayerId::unpack(r.a))->locked = false;
+    // Passo negativo que passaria do zero é recusado sem entrar no histórico.
+    const u32 depth = r.e.history().depth();
+    AUREA_CHECK(!r.e.stagger_layers(ids, 3, -3, false).ok());
+    AUREA_CHECK_EQ(r.e.history().depth(), depth);
+    // Cascata além do fim estica o projeto.
+    const u64 far[3] = {r.a, r.b, r.c};
+    AUREA_CHECK(r.e.stagger_layers(far, 3, 200, false).ok());
+    AUREA_CHECK(r.comp()->duration().value >= 430);
+}
+
+AUREA_TEST(Stagger, KeysOnlyShiftsEveryAnimationButKeepsTheBars) {
+    EditRig r;
+    r.range(r.a, 0, 90); r.range(r.b, 0, 90);
+    Layer* b = r.comp()->layer(LayerId::unpack(r.b));
+    Track& x = b->tracks.get_or_create(TrackProperty::PositionX);
+    (void)x.set(FrameIndex{0}, 0.0f); (void)x.set(FrameIndex{20}, 100.0f);
+    Track& o = b->tracks.get_or_create(TrackProperty::Opacity);
+    (void)o.set(FrameIndex{5}, 0.0f); (void)o.set(FrameIndex{15}, 1.0f);
+    Mask m; m.id = b->alloc_mask_id();
+    MaskPathKey mk; mk.frame = 10; m.pathKeys.push_back(mk);
+    b->masks.push_back(m);
+    const u64 ids[2] = {r.a, r.b};
+    auto moved = r.e.stagger_layers(ids, 2, 6, true);
+    AUREA_CHECK(moved.ok() && *moved == 1);
+    b = r.comp()->layer(LayerId::unpack(r.b));
+    AUREA_CHECK(r.at(r.b, 0, 90));                    // a barra ficou
+    const Track* nx = b->tracks.find(TrackProperty::PositionX);
+    const Track* no = b->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(nx && nx->keys.size() == 2 && nx->keys[0].time.value == 6 && nx->keys[1].time.value == 26);
+    AUREA_CHECK(no && no->keys[0].time.value == 11 && no->keys[1].time.value == 21);
+    AUREA_CHECK(b->masks.size() == 1 && b->masks[0].pathKeys[0].frame == 16);
+    AUREA_CHECK_NEAR(nx->sample_keys(FrameIndex{16}), 50.0f, 1e-3f);
+    r.undo();
+    b = r.comp()->layer(LayerId::unpack(r.b));
+    AUREA_CHECK(b->tracks.find(TrackProperty::PositionX)->keys[0].time.value == 0);
+    AUREA_CHECK(b->masks[0].pathKeys[0].frame == 10);
+    // Uma camada só não escalona.
+    AUREA_CHECK(!r.e.stagger_layers(ids, 1, 6, true).ok());
+}

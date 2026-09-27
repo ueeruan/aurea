@@ -4,6 +4,7 @@
 
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "aurea/text/TextAnimator.hpp"
@@ -823,7 +824,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.scenes.clear();
     // The panorama is a bottom layer, even in a camera-only scene. Never
     // repeat it in subsequent 3D groups (which would hide lower 2D layers).
-    if (comp.environment().showBackground && comp.environment().hdri.valid()) {
+    if (comp.environment().showBackground && (comp.environment().hdri.valid() || comp.environment().studioPreset != 0)) {
         out.scenes.emplace_back();
         out.scenes.back().environment.showBackground = true;
         RenderLayer sky;
@@ -1975,6 +1976,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 sf.camera = settings.sceneEditor.enabled && !settings.finalQuality ? cam3d : camera_for_frac(comp, ts, out.compWidth, out.compHeight);
                 sf.lights = f.lights;
                 sf.environment = f.environment;
+                sf.post = f.post;
                 sf.instances = f.instances;
                 for (scene3d::SceneInstance& in : sf.instances) {
                     if (!in.motionBlur) continue;
@@ -2025,6 +2027,14 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
             s.outerCone = std::clamp(l->tracks.sample_or(TrackProperty::LightConeAngle, local, l->light.coneAngle), 1.0f, 179.0f) * 0.5f * kDeg2Rad;
             s.innerCone = s.outerCone * (1.0f - std::clamp(l->tracks.sample_or(TrackProperty::LightPenumbra, local, l->light.penumbra), 0.0f, 1.0f));
             s.castShadows = l->light.castShadows;
+            s.shadowBias = l->light.shadowBias;
+            // Ponto/spot: candela (KHR_lights_punctual) → mundo em px. A queda
+            // 1/d² do shader é em px; × (px/m)² dá a mesma luz que 1/d² em
+            // metros na escala física da cena (altura do quadro = 2 m).
+            if (s.kind != scene3d::LightKindGpu::Directional) {
+                const f32 ppm = scene3d::scene_pixels_per_meter(comp.height());
+                s.intensity *= ppm * ppm;
+            }
             lights.push_back(s);
         }
     }
@@ -2047,14 +2057,57 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     if (es.hdri.valid() && hdriLookup_) {
         env.hdri = hdriLookup_(hdriCtx_, es.hdri);
         env.hdriKey = es.hdri.pack();
+    } else if (es.studioPreset != 0) {
+        // v32: estúdio procedural — o MESMO caminho de um HDRI (chave própria).
+        env.hdri = scene3d::studio_hdri(es.studioPreset);
+        if (env.hdri) env.hdriKey = scene3d::studio_environment_key(es.studioPreset);
+    }
+    // v32: chão do grupo 3D.
+    scene3d::SceneFloor sceneFloor;
+    {
+        const FloorSettings& fl = comp.floor();
+        sceneFloor.mode = std::min(fl.mode, 2u);
+        sceneFloor.color = Vec3{fl.color.r, fl.color.g, fl.color.b};
+        sceneFloor.roughness = fl.roughness;
+        sceneFloor.reflectivity = fl.reflectivity;
+        sceneFloor.contactShadow = fl.contactShadow;
+        sceneFloor.fade = fl.fade;
+    }
+    // Pós do grupo (v31): exposição, tone map, bloom e o nível de qualidade.
+    const PostProcessSettings& pp = comp.post_process();
+    scene3d::ScenePost post;
+    post.toneMapper = std::min(pp.toneMapper, 1u);
+    post.bloom = pp.bloom;
+    post.bloomIntensity = std::clamp(pp.bloomIntensity, 0.0f, 4.0f);
+    post.bloomThreshold = std::max(0.0f, pp.bloomThreshold);
+    post.quality = std::min(pp.quality3d, kScene3DQualityCount - 1);
+    const f32 groupExposure = std::isfinite(pp.exposure) ? std::clamp(pp.exposure, 0.01f, 64.0f) : 1.0f;
+    // Sombra da composição (ShadowSettings): só pisos e viés — o nível de
+    // qualidade escolhe mapa e amostras.
+    scene3d::SceneShadowSettings shadow;
+    {
+        const ShadowSettings& sh = comp.shadows();
+        shadow.normalBias = std::isfinite(sh.normalBias) ? std::clamp(sh.normalBias, 0.0f, 1.0f) : 0.02f;
+        shadow.softShadows = sh.softShadows;
+        shadow.pcfSamples = std::min(sh.pcfSamples, 32u);
+        // 1024 é o padrão gravado em todo projeto: só um valor MAIOR (escolha
+        // explícita) vira piso — senão o calor/AUTO não consegue baixar a 512.
+        shadow.mapResolution = sh.mapResolution > 1024u ? std::min(sh.mapResolution, 4096u) : 0u;
     }
     for (scene3d::SceneFrame& f : out.scenes) {
         f.camera = cam;
         f.lights = lights;
+        f.shadow = shadow;
+        for (scene3d::SceneFrame& b : f.blurFrames) b.shadow = shadow;
+        f.environment.exposure = groupExposure;
+        f.post = post;
+        f.floor = sceneFloor;
+        for (scene3d::SceneFrame& b : f.blurFrames) b.floor = sceneFloor;
         f.environment.intensity = env.intensity;
         f.environment.rotation = env.rotation;
         f.environment.hdri = env.hdri;
         f.environment.hdriKey = env.hdriKey;
+        f.environment.backgroundBlur = std::isfinite(es.backgroundBlur) ? std::clamp(es.backgroundBlur, 0.0f, 1.0f) : 0.0f;
     }
 }
 
@@ -2071,7 +2124,11 @@ void Renderer::fill_object_environment(const Layer& l, scene3d::SceneInstance& i
     e.exposure = std::max(0.01f, l.environmentExposure);
     e.rotation = l.environmentRotation * kDeg2Rad;
     const AssetId hdri = AssetId::unpack(l.environmentAsset);
-    if (hdri.valid() && hdriLookup_) {
+    if (const u32 preset = scene3d::studio_preset_of_key(l.environmentAsset); preset != 0) {
+        // v32: estúdio procedural no objeto (a chave do preset no lugar do asset).
+        e.hdri = scene3d::studio_hdri(preset);
+        if (e.hdri) e.hdriKey = l.environmentAsset;
+    } else if (hdri.valid() && hdriLookup_) {
         e.hdri = hdriLookup_(hdriCtx_, hdri);
         e.hdriKey = hdri.pack();
     }
@@ -2458,7 +2515,24 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             layer.source.sceneGroup < groupPlanes_.size() && !groupPlanes_[layer.source.sceneGroup].empty() ? &groupPlanes_[layer.source.sceneGroup] : nullptr;
         // Sombra e LOD do bloco de qualidade (export = cheio); as contas do
         // quadro (todas as cenas e subquadros) vão para os contadores 8E.
-        scene3d_.set_quality(heavyQ_.shadowMapSize, heavyQ_.shadowFilter, heavyQ_.lodBias, !heavyQ_.exportFrame);
+        // AA, pós e sombra: o bloco do quadro (AUTO do preview ou cheio do
+        // export) com o nível escolhido na composição por cima.
+        {
+            HeavyQuality q = heavyQ_;
+            apply_scene3d_quality(q, static_cast<Scene3DQuality>(group.post.quality));
+            scene3d_.set_quality(q.shadowMapSize, q.shadowFilter, heavyQ_.lodBias, !heavyQ_.exportFrame);
+            scene3d_.set_post_quality(q.msaaSamples, q.fxaa, q.bloomStartDiv, q.bloomLevels);
+            // IBL do preview pelo nível: BAIXO gera mapas menores (especular
+            // 128², fundo 256²), ULTRA já usa os do export; AUTO/MÉDIO/ALTO o
+            // padrão. Fixo por nível (não pela escala do AUTO): regerar o IBL
+            // a cada degrau do preview custaria mais do que economiza. O
+            // export (finish_environment) usa sempre o final.
+            const auto tier = static_cast<Scene3DQuality>(group.post.quality);
+            scene3d::EnvironmentQuality preview = scene3d::EnvironmentQuality::preview();
+            if (tier == Scene3DQuality::Low) preview = scene3d::EnvironmentQuality{128u, 256u, 2u};
+            else if (tier == Scene3DQuality::Ultra) preview = scene3d::EnvironmentQuality::final_quality();
+            scene3d_.set_environment_quality(preview, scene3d::EnvironmentQuality::final_quality());
+        }
         struct SceneStatsSink {
             Renderer* r;
             ~SceneStatsSink() {
@@ -3705,9 +3779,12 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const Vec4 bg = settings.editorBackground;
         void* ubo = arena_.alloc(16, 16);
         std::memcpy(ubo, &bg, 16);
-        struct Cap { PipelineHandle p; FGTexture comp; u64 sampler; Mat4 clip; f32 w, h; f32 dither; void* ubo; }
+        // Largura da composição em pixels do display: o shader de saída troca a
+        // amostra única por uma média de área quando a imagem encolhe (zoom
+        // pequeno, preview em tela menor que o alvo) — sem cintilar.
+        struct Cap { PipelineHandle p; FGTexture comp; u64 sampler; Mat4 clip; f32 w, h; f32 dither; void* ubo; f32 dispW; }
             cap{pOut.ok() ? *pOut : PipelineHandle{}, comp, shaders_.sampler(CommonSampler::LinearClamp).id,
-                clip, compW, compH, settings.dither ? 1.0f : 0.0f, ubo};
+                clip, compW, compH, settings.dither ? 1.0f : 0.0f, ubo, compW * fit};
         const Vec4 clear = settings.pasteboard;
         const u32 pass = graph_.add_raster_pass("saida", PassStage::Output, bb, LoadOp::Clear, clear,
                                                 [cap](PassContext& pc) {
@@ -3717,7 +3794,8 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             push.clipFromLayer = cap.clip;
             push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
             push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
-            push.params = Vec4{cap.dither, 0, 0, 0};
+            const f32 texelsPerPixel = static_cast<f32>(pc.desc(cap.comp).width) / std::max(1.0f, cap.dispW);
+            push.params = Vec4{cap.dither, texelsPerPixel, 0, 0};
             pc.cmds.bind_texture(0, pc.texture(cap.comp), SamplerHandle{cap.sampler});
             pc.cmds.set_uniforms(cap.ubo, 16);
             pc.cmds.push_constants(&push, sizeof(push));

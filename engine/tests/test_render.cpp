@@ -685,7 +685,8 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // Three transitions, three optical effects and two spatial blurs.
     // Hotspots and three audio sends.
     // Stripes, Radial Rays, Grid, Parenting Helper and Text 3D Layout.
-    AUREA_CHECK_EQ(before, static_cast<u32>(67));
+    // Corner Pin and the five Media Lab effects.
+    AUREA_CHECK_EQ(before, static_cast<u32>(73));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

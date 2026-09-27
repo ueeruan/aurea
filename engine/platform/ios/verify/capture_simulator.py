@@ -313,7 +313,11 @@ def validate_hdri_probe(state, documents, output, record, frame_checker):
         environment = row.get('environment', [])
         if (not row.get('statusRead') or row.get('actualFrame') != 0
                 or sorted(layer.get('kind') for layer in row.get('layers', [])) != [10, 11]
-                or len(environment) != 3 or environment[0] != 1 or environment[1] <= 0
+                # The environment API now also returns the panorama background
+                # switch. This legacy fixture uses HDRI lighting only: loading
+                # it must keep that new switch off, including after reopening.
+                or len(environment) != 4 or environment[0] != 1 or environment[1] <= 0
+                or environment[3] is not False
                 or environment != initial_environment or not initial_object or initial_object[0] != 0
                 or row.get('objectEnvironment') != initial_object):
             raise RuntimeError('Original HDRI environment/parameters or frame-zero composition changed after loading')

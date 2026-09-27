@@ -5645,9 +5645,25 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         const Effect& fx = gpu().effects.at(i);
         const char* key = fx.info().key;
         if (fx.effect_class() == EffectClass::Temporal || std::strncmp(key, "aurea.control.", 14) == 0) continue;
+        // Text 3D Layout is rejected on images. Its actual glyph geometry and
+        // visible XYZ changes are covered by GpuText3DLayout, not this raster fixture.
+        if (fx.type_id() == effect_type_id(effect_keys::kText3DLayout)) continue;
+        const bool parenting = fx.type_id() == effect_type_id(effect_keys::kParentingHelper);
+        const bool shadow = fx.type_id() == effect_type_id(effect_keys::kShadowStudio3);
         const ParameterRegistry& params = gpu().effects.params_at(i);
         Scene s(96, 96);
-        const LayerId id = s.image(reference_image(96, 96), 48, 48);
+        // Black shadows need exposed, lit background; a full opaque image
+        // covering a black canvas cannot reveal them.
+        if (shadow) s.comp->set_background(Color{1, 1, 1, 1});
+        const u32 size = shadow || parenting ? 40u : 96u;
+        const LayerId id = s.image(reference_image(size, size), 48, 48);
+        if (parenting) {
+            const LayerId parent = s.comp->add_layer(LayerKind::Null, "rotated parent");
+            s.comp->layer(parent)->transform.position = {48, 48, 0};
+            s.comp->layer(parent)->transform.rotation.z = 35;
+            s.comp->layer(id)->parent = parent;
+            s.comp->layer(id)->transform.position = {0, 0, 0};
+        }
         const FloatImage plain = s.render();
         EffectInstance e;
         e.id = s.comp->layer(id)->alloc_effect_id();
@@ -5658,6 +5674,10 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         if (fx.demo_values(e, values)) {
             for (u32 p = 0; p < params.count(); ++p) e.params[p].constant = values[p];
         }
+        if (parenting) e.params[0].constant = ParamValue::scalar(0.f);
+        // Corner Pin intentionally starts at identity; move one corner.
+        if (fx.type_id() == effect_type_id(effect_keys::kCornerPin))
+            e.params[0].constant = ParamValue::scalar(20.f);
         s.comp->layer(id)->effects.push_back(std::move(e));
         const FloatImage with = s.render();
         u32 changed = 0;

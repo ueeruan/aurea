@@ -8674,9 +8674,19 @@ AUREA_TEST(Gpu, LightIntensityKeyframesChangeActualPbrPixels) {
     seek_frame(rig.e, 30); const auto bright = rig.capture(320);
     std::printf("    direct light pixel delta=%u darkCoverage=%f brightCoverage=%f\n", max_diff(dark, bright), coverage(dark), coverage(bright));
     AUREA_CHECK(max_diff(dark, bright) > 20);
+    // Material trocado medido com luz que NÃO satura: a 5× o branco difuso e o
+    // metal áspero (com compensação multi-espalhamento) já encostam no teto do
+    // tone map e ficam iguais. Quadro 6 = intensidade 1.
+    seek_frame(rig.e, 6); const auto soft = rig.capture(320);
     AUREA_CHECK(rig.e.set_material_param(*model, 0, 4, 1).ok());
-    AUREA_CHECK(rig.e.set_material_param(*model, 0, 5, .9f).ok());
-    AUREA_CHECK(max_diff(bright, rig.capture(320)) > 10);
+    // Metal POLIDO: o metal branco áspero com compensação multi-espalhamento
+    // reflete quase a mesma energia que o branco difuso (teste da fornalha
+    // branca) — a diferença visível é a do lóbulo concentrado.
+    AUREA_CHECK(rig.e.set_material_param(*model, 0, 5, .15f).ok());
+    const auto softMetal = rig.capture(320);
+    std::printf("    material change delta at intensity 1: %u\n", max_diff(soft, softMetal));
+    AUREA_CHECK(max_diff(soft, softMetal) > 10);
+    seek_frame(rig.e, 30);
     f32 values[10]{}; AUREA_CHECK(rig.e.query_light(*light, values)); AUREA_CHECK_EQ(values[1], 5.0f);
     seek_frame(rig.e, 0); AUREA_CHECK(rig.e.query_light(*light, values)); AUREA_CHECK_EQ(values[1], 0.0f);
     std::remove(litPath.c_str());

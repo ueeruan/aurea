@@ -914,7 +914,8 @@ AUREA_TEST(Heavy, QualityLadderAndExportIsAlwaysFull) {
     rs.heavyScale = 0.25f;
     rs.previewDenominator = 2;
     const HeavyQuality q = resolve_heavy(rs);
-    AUREA_CHECK(q.particles <= 0.25f && q.flow <= 0.25f && q.shadowMapSize == 512u && q.shadowFilter == 1u && q.effects <= 0.25f);
+    // shadowFilter é o degrau da sombra (0 LOW … 3 ULTRA): no fundo da escada, LOW.
+    AUREA_CHECK(q.particles <= 0.25f && q.flow <= 0.25f && q.shadowMapSize == 512u && q.shadowFilter == 0u && q.effects <= 0.25f);
     AUREA_CHECK(!q.exportFrame);
     rs.finalQuality = true;
     const HeavyQuality e = resolve_heavy(rs);

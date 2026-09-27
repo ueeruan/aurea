@@ -1769,7 +1769,8 @@ AUREA_TEST(Engine, LegacyEffectControlsExpandOnLoadWithoutLosingKeys) {
     const auto id=LayerId::unpack(*added);
     auto layer=[&]() { return e.project()->timeline().composition(e.project()->timeline().current())->layer(id); };
     const char* keys[]={"aurea.distort.shake","aurea.light.sweep","aurea.glitch.glitchify","aurea.text3d.layout"};
-    const u32 oldCounts[]={8,9,17,9}, newCounts[]={15,13,35,12};
+    // Shake: 15 → 17 com direção e decaimento (acrescentados no fim, neutros).
+    const u32 oldCounts[]={8,9,17,9}, newCounts[]={17,13,35,12};
     for(u32 i=0;i<4;++i) {
         Command add;add.type=CommandType::EffectAdd;add.effect_add.layer=id;
         add.effect_add.effectType=effect_type_id(keys[i]);add.effect_add.index=kInvalidIndex;

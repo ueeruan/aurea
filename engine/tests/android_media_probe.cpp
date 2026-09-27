@@ -8,12 +8,17 @@
 
 using namespace aurea;
 
-static u64 luma_hash(const FrameRef& frame) {
-    if (!frame || !frame->planes[0]) return 0;
+static u64 frame_hash(const FrameRef& frame) {
+    if (!frame || frame->planeCount != 3 || frame->format != PixelFormat::YUV420P) return 0;
     u64 hash = 14695981039346656037ULL;
-    for (u32 y = 0; y < frame->visibleHeight; ++y) for (u32 x = 0; x < frame->visibleWidth; ++x) {
-        hash ^= frame->planes[0][static_cast<usize>(y + frame->cropTop) * frame->strides[0] + x + frame->cropLeft];
-        hash *= 1099511628211ULL;
+    for (u32 p = 0; p < 3; ++p) {
+        if (!frame->planes[p]) return 0;
+        const u32 w = p ? (frame->width + 1) / 2 : frame->width;
+        const u32 h = p ? (frame->height + 1) / 2 : frame->height;
+        for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+            hash ^= frame->planes[p][static_cast<usize>(y) * frame->strides[p] + x];
+            hash *= 1099511628211ULL;
+        }
     }
     return hash;
 }
@@ -49,7 +54,7 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "timing mismatch at %zu: pts=%lld duration=%lld\n", index,
                 static_cast<long long>(pts), static_cast<long long>(frame->durationUs)); return 6;
         }
-        const u64 hash = luma_hash(frame);
+        const u64 hash = frame_hash(frame);
         if (!hash) return 7;
         hashes.push_back(hash);
         if (!retained) retained = frame;
@@ -66,7 +71,7 @@ int main(int argc, char** argv) {
             FrameRef frame; i64 pts = -1; bool ended = false;
             if (!decoder->next_frame(target, frame, pts, ended).ok()) return 10;
             if (frame) {
-                found = std::llabs(pts - expected[index]) <= 1 && frame->covers(target) && luma_hash(frame) == hashes[index];
+                found = std::llabs(pts - expected[index]) <= 1 && frame->covers(target) && frame_hash(frame) == hashes[index];
                 break;
             }
             if (ended) break;
@@ -74,17 +79,23 @@ int main(int argc, char** argv) {
         if (!found) { std::fprintf(stderr, "seek mismatch at %zu\n", index); return 11; }
     }
     decoder->suspend();
-    if (luma_hash(retained) != hashes.front()) return 12;
+    if (frame_hash(retained) != hashes.front()) return 12;
     if (!decoder->resume().ok() || !decoder->seek_to_keyframe(0).ok()) return 13;
     FrameRef first; i64 pts = -1;
     const Status resumed = decoder->next_frame(0, first, pts, eos);
-    if (!resumed.ok() || pts != expected.front() || luma_hash(first) != hashes.front()) {
+    if (!resumed.ok() || pts != expected.front() || frame_hash(first) != hashes.front()) {
         std::fprintf(stderr, "resume: status=%d pts=%lld frame=%d hash=%llu expected=%llu detail=%.*s\n",
             resumed.raw(), static_cast<long long>(pts), first ? 1 : 0,
-            static_cast<unsigned long long>(luma_hash(first)), static_cast<unsigned long long>(hashes.front()),
+            static_cast<unsigned long long>(frame_hash(first)), static_cast<unsigned long long>(hashes.front()),
             static_cast<int>(resumed.detail().size()), resumed.detail().empty() ? "" : resumed.detail().data());
         return 14;
     }
+    auto thumbnail = factory.open_video(asset, MediaPriority::Thumbnail);
+    if (!thumbnail || (argc == 4 && thumbnail->info().hardwareDecoder)) return 16;
+    FrameRef thumb; i64 thumbPts = -1; bool thumbEos = false;
+    if (!thumbnail->next_frame(0, thumb, thumbPts, thumbEos).ok() || frame_hash(thumb) != hashes.front()) return 17;
+    thumbnail.reset();
+    if (frame_hash(thumb) != hashes.front()) return 18;
     std::printf("PASS frames=%zu decoder=%s sequential_ms=%.3f seek_suspend_resume=pass\n",
         hashes.size(), decoder->info().decoderName, sequentialMs);
     return 0;

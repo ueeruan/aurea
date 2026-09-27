@@ -665,6 +665,12 @@ class AureaEngine private constructor() {
     fun lightInfo(layer: Long): FloatArray? = FloatArray(10).takeIf { nativeLightInfo(nativeHandle, layer, it) }
     fun setLightParam(layer: Long, param: Int, value: Float): Boolean = nativeSetLightParam(nativeHandle, layer, param, value)
     fun addCamera(): Long = nativeAddCamera(nativeHandle)
+    /** Lente da câmera 3D (9 valores, ver `nativeQueryCameraLens`); null se a camada não é câmera. */
+    fun cameraLens(layer: Long): FloatArray? = FloatArray(9).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
+    /** Pick Focus: distância no eixo ótico até o 3D sob o ponto (px da composição); < 0 = nada ali. */
+    fun pickFocusDistance(layer: Long, compX: Float, compY: Float): Float = nativePickFocusDistance(nativeHandle, layer, compX, compY)
+    /** LayerSetCameraParam: 0 mm, 1 DOF, 2 distância de foco, 3 f/, 4 desfoque ×. */
+    fun setCameraParam(layer: Long, param: Int, value: Float): Boolean = nativeSetCameraParam(nativeHandle, layer, param, value)
     fun addNull(threeD: Boolean): Long = nativeAddNull(nativeHandle, threeD)
     /** "Vincular a novo nulo": nulo no centro das camadas, pai de todas (um desfazer). Id ≥ 0 ou −Errc. */
     fun parentToNewNull(ids: LongArray): Long = nativeParentToNewNull(nativeHandle, ids)
@@ -787,6 +793,9 @@ class AureaEngine private constructor() {
     private external fun nativeAddLight(handle: Long, kind: Int): Long
     private external fun nativeLightInfo(handle: Long, layer: Long, output: FloatArray): Boolean
     private external fun nativeSetLightParam(handle: Long, layer: Long, param: Int, value: Float): Boolean
+    private external fun nativeQueryCameraLens(handle: Long, layer: Long, output: FloatArray): Boolean
+    private external fun nativePickFocusDistance(handle: Long, layer: Long, compX: Float, compY: Float): Float
+    private external fun nativeSetCameraParam(handle: Long, layer: Long, param: Int, value: Float): Boolean
     private external fun nativeAddCamera(handle: Long): Long
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeParentToNewNull(handle: Long, ids: LongArray): Long

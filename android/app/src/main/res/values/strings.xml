@@ -1936,4 +1936,19 @@
         <item quantity="one">%1$s pessoa cadastrada</item>
         <item quantity="other">%1$s pessoas cadastradas</item>
     </plurals>
+    <!-- Lente da câmera 3D (face Lente do painel Transformar) -->
+    <string name="lens_title">Lente</string>
+    <string name="lens_focal">Distância focal</string>
+    <string name="lens_fov_readout">FOV %1$s°</string>
+    <string name="lens_dof">Profundidade de campo</string>
+    <string name="lens_dof_hint">Desfoca o que fica longe do plano de foco</string>
+    <string name="lens_focus_distance">Distância de foco</string>
+    <string name="lens_aperture">Abertura</string>
+    <string name="lens_blur">Força do desfoque</string>
+    <string name="lens_pick_focus">Tocar para focar</string>
+    <string name="lens_pick_focus_hint">Toque no palco sobre o objeto 3D que deve ficar nítido</string>
+    <string name="lens_msg_tap_to_focus">Toque no palco no ponto que deve ficar em foco</string>
+    <string name="lens_msg_focus_set">Foco a %1$s px</string>
+    <string name="lens_msg_nothing_there">Nada 3D nesse ponto. Toque sobre uma camada 3D</string>
+    <string name="lens_msg_not_camera">Selecione uma câmera 3D</string>
 </resources>

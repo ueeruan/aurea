@@ -2286,6 +2286,30 @@ AUREA_JNI jlong AUREA_FN(nativeAddCamera)(JNIEnv*, jclass, jlong handle) {
     return r.ok() ? static_cast<jlong>(*r) : -static_cast<jlong>(r.status().code());
 }
 
+// --- Lente da câmera 3D (ver Engine::query_camera_lens) ----------------------
+/// 9 valores: mm, FOV°, DOF, foco (px), f/, desfoque ×, px/m, máscara de
+/// trilhas com keyframe, câmera ativa. Falso = não é câmera.
+AUREA_JNI jboolean AUREA_FN(nativeQueryCameraLens)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray output) {
+    auto* c = ctx_of(handle); f32 values[9]{};
+    if (!c || !output || env->GetArrayLength(output) < 9 || !c->engine.query_camera_lens(static_cast<u64>(layer), values)) return JNI_FALSE;
+    env->SetFloatArrayRegion(output, 0, 9, values); return JNI_TRUE;
+}
+/// Pick Focus: distância ao longo do eixo ótico até a superfície 3D sob o ponto
+/// (px da composição). < 0 = nada 3D ali. Só mede; a UI grava com o comando.
+AUREA_JNI jfloat AUREA_FN(nativePickFocusDistance)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat compX, jfloat compY) {
+    auto* c = ctx_of(handle); if (!c) return -1.f;
+    return c->engine.pick_focus_distance(static_cast<u64>(layer), compX, compY);
+}
+/// LayerSetCameraParam: 0 mm, 1 DOF (0/1), 2 distância de foco, 3 f/, 4 desfoque ×.
+AUREA_JNI jboolean AUREA_FN(nativeSetCameraParam)(JNIEnv*, jclass, jlong handle, jlong layer, jint param, jfloat value) {
+    auto* c = ctx_of(handle); if (!c) return JNI_FALSE;
+    Command command; command.type = CommandType::LayerSetCameraParam;
+    command.shape_param = ShapeParamPayload{LayerId::unpack(static_cast<u64>(layer)), static_cast<u32>(param), value};
+    const bool ok = c->engine.submit_commands(&command, 1, nullptr, 0) == 1;
+    c->engine.request_render();
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddNull)(JNIEnv*, jclass, jlong handle, jboolean threeD) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

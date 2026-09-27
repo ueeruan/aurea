@@ -1033,4 +1033,19 @@
         <item quantity="one">%1$s पंजीकृत व्यक्ति</item>
         <item quantity="other">%1$s पंजीकृत लोग</item>
     </plurals>
+    <!-- Lente da câmera 3D (face Lente do painel Transformar) -->
+    <string name="lens_title">लेंस</string>
+    <string name="lens_focal">फ़ोकल लंबाई</string>
+    <string name="lens_fov_readout">FOV %1$s°</string>
+    <string name="lens_dof">डेप्थ ऑफ़ फ़ील्ड</string>
+    <string name="lens_dof_hint">फ़ोकस तल से दूर की चीज़ें धुंधली करता है</string>
+    <string name="lens_focus_distance">फ़ोकस दूरी</string>
+    <string name="lens_aperture">अपर्चर</string>
+    <string name="lens_blur">धुंधलेपन की ताकत</string>
+    <string name="lens_pick_focus">फ़ोकस के लिए टैप करें</string>
+    <string name="lens_pick_focus_hint">स्टेज पर उस 3D ऑब्जेक्ट पर टैप करें जो साफ़ रहना चाहिए</string>
+    <string name="lens_msg_tap_to_focus">स्टेज पर उस बिंदु पर टैप करें जो फ़ोकस में होना चाहिए</string>
+    <string name="lens_msg_focus_set">फ़ोकस %1$s px पर</string>
+    <string name="lens_msg_nothing_there">यहाँ कुछ 3D नहीं है। किसी 3D लेयर पर टैप करें</string>
+    <string name="lens_msg_not_camera">कोई 3D कैमरा चुनें</string>
 </resources>

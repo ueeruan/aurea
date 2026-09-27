@@ -1037,4 +1037,19 @@
         <item quantity="many">%1$s зарегистрированных пользователей</item>
         <item quantity="other">%1$s зарегистрированного пользователя</item>
     </plurals>
+    <!-- Lente da câmera 3D (face Lente do painel Transformar) -->
+    <string name="lens_title">Объектив</string>
+    <string name="lens_focal">Фокусное расстояние</string>
+    <string name="lens_fov_readout">FOV %1$s°</string>
+    <string name="lens_dof">Глубина резкости</string>
+    <string name="lens_dof_hint">Размывает то, что далеко от плоскости фокуса</string>
+    <string name="lens_focus_distance">Дистанция фокуса</string>
+    <string name="lens_aperture">Диафрагма</string>
+    <string name="lens_blur">Сила размытия</string>
+    <string name="lens_pick_focus">Коснитесь, чтобы сфокусировать</string>
+    <string name="lens_pick_focus_hint">Коснитесь сцены на 3D-объекте, который должен остаться резким</string>
+    <string name="lens_msg_tap_to_focus">Коснитесь сцены в точке, которая должна быть в фокусе</string>
+    <string name="lens_msg_focus_set">Фокус на %1$s px</string>
+    <string name="lens_msg_nothing_there">Здесь нет 3D. Коснитесь 3D-слоя</string>
+    <string name="lens_msg_not_camera">Выберите 3D-камеру</string>
 </resources>

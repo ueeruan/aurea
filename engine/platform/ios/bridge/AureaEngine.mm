@@ -1725,6 +1725,20 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (auto* c = _batch.add(CommandType::LayerSetLightParam))
         c->shape_param = aurea::ShapeParamPayload{LayerId::unpack(static_cast<aurea::u64>(layer)), param, value};
 }
+// --- Lente da câmera 3D (ver Engine::query_camera_lens) ----------------------
+- (NSArray<NSNumber*>*)cameraLens:(long long)layer {
+    float values[9]{};
+    if (!self.engine || !self.engine->query_camera_lens(static_cast<aurea::u64>(layer), values)) return @[];
+    return floats_to_array(values, 9);
+}
+- (float)pickFocusDistance:(long long)layer x:(float)x y:(float)y {
+    if (!self.engine) return -1.f;
+    return self.engine->pick_focus_distance(static_cast<aurea::u64>(layer), x, y);
+}
+- (void)setCameraParam:(long long)layer param:(uint32_t)param value:(float)value {
+    if (auto* c = _batch.add(CommandType::LayerSetCameraParam))
+        c->shape_param = aurea::ShapeParamPayload{LayerId::unpack(static_cast<aurea::u64>(layer)), param, value};
+}
 - (long long)addCamera {
     auto* e = self.engine;
     if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);

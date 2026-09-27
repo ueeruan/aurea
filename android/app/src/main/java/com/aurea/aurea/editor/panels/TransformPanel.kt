@@ -25,6 +25,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.heightIn
+import com.aurea.aurea.state.EditorStore
 import androidx.compose.material.icons.rounded.Opacity
 import androidx.compose.material.icons.rounded.FilterCenterFocus
 import androidx.compose.material.icons.rounded.Link
@@ -95,6 +99,8 @@ enum class TransformTab(val title: String, val icon: ImageVector, val railLabel:
     Opacidade("Opacidade", Icons.Rounded.Opacity, "Opacidade", intArrayOf(TrackProperty.OPACITY)),
     Pivo("Pivô", Icons.Rounded.FilterCenterFocus, "Pivô (ponto de giro)", intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y)),
     Desfoque("Desfoque de movimento", Icons.Rounded.BlurOn, "Desfoque de movimento", intArrayOf()),
+    /** Só câmera 3D: distância focal, profundidade de campo e Pick Focus (◇ por linha). */
+    Lente("Lente", Icons.Rounded.CameraAlt, "Lente", intArrayOf()),
 }
 
 /**
@@ -147,6 +153,10 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
         return
     }
     var menu by remember { mutableStateOf(false) }
+    // A face Lente só existe na câmera 3D; trocou de camada com ela aberta → volta ao Mover.
+    val isCamera = store.detail?.kind == LayerType.Camera.kind
+    val tabs = if (isCamera) TransformTab.entries else TransformTab.entries.filter { it != TransformTab.Lente }
+    androidx.compose.runtime.LaunchedEffect(isCamera, tab) { if (tab == TransformTab.Lente && !isCamera) onTab(TransformTab.Mover) }
     val show3D by remember(store) { derivedStateOf { threeDOpen.value || uses3D(store.detail) } }
     val axis = if (show3D) rotationAxis.intValue else 2
     val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
@@ -219,13 +229,14 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                 TransformTab.Opacidade -> OpacityFace(env, look)
                 TransformTab.Pivo -> MoveFace(env, pivot = true, depth = show3D)
                 TransformTab.Desfoque -> MotionBlurFace(env)
+                TransformTab.Lente -> LensFace(env)
             }
             Spacer(Modifier.height(10.dp))
         }
         RightRail(
-            modes = TransformTab.entries.map { RailMode(it.icon, it.railLabel) },
-            selected = tab.ordinal,
-            onSelect = { i -> onTab(TransformTab.entries[i]) },
+            modes = tabs.map { RailMode(it.icon, it.railLabel) },
+            selected = tabs.indexOf(tab).coerceAtLeast(0),
+            onSelect = { i -> onTab(tabs[i]) },
         )
     }
 
@@ -235,7 +246,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             actions = buildList {
                 add(SheetAction(stringResource(R.string.panel_keyframe_anterior)) { store.pause(); store.stepToKeyframe(-1) })
                 add(SheetAction(stringResource(R.string.panel_proximo_keyframe)) { store.pause(); store.stepToKeyframe(1) })
-                if (tab != TransformTab.Desfoque) add(SheetAction(stringResource(R.string.panel_voltar_padrao)) { resetTab(env, tab, axis) })
+                if (tab != TransformTab.Desfoque && tab != TransformTab.Lente) add(SheetAction(stringResource(R.string.panel_voltar_padrao)) { resetTab(env, tab, axis) })
                 if (canKey) add(SheetAction(if (exprLook == com.aurea.aurea.engine.ExpressionLook.None) stringResource(R.string.panel_adicionar_expressao) else stringResource(R.string.panel_editar_expressao)) {
                     store.openExpression(exprTitle, exprKeys, exprScale, exprUnit)
                 })
@@ -263,6 +274,7 @@ private fun resetTab(env: PanelEnv, tab: TransformTab, axis: Int) {
             TrackProperty.ANCHOR_X, d.sourceWidth / 2f, TrackProperty.ANCHOR_Y, d.sourceHeight / 2f,
         )
         TransformTab.Desfoque -> Unit
+        TransformTab.Lente -> Unit
     }
 }
 
@@ -368,6 +380,179 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
         if (d.kind == LayerType.Video.kind) {
             Spacer(Modifier.height(8.dp))
             BlurToggleRow(stringResource(R.string.panel_desfoque_movimento_video), stringResource(R.string.panel_borra_mexe_dentro_video), d.vectorBlur) { store.setVectorBlur(d.id, it) }
+        }
+    }
+}
+
+/**
+ * LENTE (só câmera 3D): a distância focal em mm manda na projeção (FOV =
+ * 2·atan(24 / 2f), mostrado ao lado) com lentes prontas em fichas; a
+ * profundidade de campo liga a distância de foco, a abertura e a força do
+ * desfoque; "Tocar para focar" arma o próximo toque no palco, que mede a
+ * distância até o 3D sob o dedo. Cada linha tem o seu ◇ (trilha própria).
+ */
+@Composable
+private fun androidx.compose.foundation.layout.ColumnScope.LensFace(env: PanelEnv) {
+    val store = env.store
+    val d = store.detail ?: return
+    val lens = store.cameraLens ?: return
+    val focal = lens[0]
+    val dof = lens[2] >= 0.5f
+    val keys = store.keyframes[d.id].orEmpty()
+    fun look(param: Int): com.aurea.aurea.ui.ds.KeyframeLook {
+        val p = store.cameraLensTrack(param) ?: return com.aurea.aurea.ui.ds.KeyframeLook.None
+        val own = keys.filter { it.property == p && it.effectIndex == EditorStore.NO_EFFECT }
+        return when {
+            own.any { it.time == d.localPlayhead } -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
+            own.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
+            else -> com.aurea.aurea.ui.ds.KeyframeLook.None
+        }
+    }
+    val focalLabel = stringResource(R.string.lens_focal)
+    val focusLabel = stringResource(R.string.lens_focus_distance)
+    val apertureLabel = stringResource(R.string.lens_aperture)
+    val blurLabel = stringResource(R.string.lens_blur)
+    Column(
+        Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp),
+    ) {
+        com.aurea.aurea.ui.ds.PropertyRow(
+            label = focalLabel,
+            value = focal,
+            unitsPerDp = 0.5f,
+            min = CameraLens.DRAG_MIN_MM,
+            max = CameraLens.DRAG_MAX_MM,
+            format = { CameraLens.formatFocal(it) },
+            selected = true,
+            onSelect = { store.toggleCameraLensKey(EditorStore.CAMERA_LENS_FOCAL) },
+            onGestureStart = { store.beginGesture("distância focal") },
+            onValue = { store.setCameraLens(EditorStore.CAMERA_LENS_FOCAL, it.coerceIn(CameraLens.DRAG_MIN_MM, CameraLens.DRAG_MAX_MM)) },
+            onGestureEnd = { store.endGesture() },
+            onTapValue = {
+                env.openKeypad(KeypadRequest(focalLabel, focal, "mm", CameraLens.KEYPAD_MIN_MM, CameraLens.KEYPAD_MAX_MM, 0) {
+                    store.setCameraLens(EditorStore.CAMERA_LENS_FOCAL, it)
+                })
+            },
+            keyframe = look(EditorStore.CAMERA_LENS_FOCAL),
+        )
+        // FOV derivado + lentes prontas (a ficha acesa é a que bate com a focal).
+        Row(
+            Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.lens_fov_readout, CameraLens.formatFov(lens[1])),
+                modifier = Modifier.padding(start = 4.dp, end = 6.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)),
+            )
+            val picked = CameraLens.presetIndex(focal)
+            CameraLens.PRESETS_MM.forEachIndexed { i, mm ->
+                val on = picked == i
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                        .tocavel(onClick = {
+                            store.beginGesture("distância focal")
+                            store.setCameraLens(EditorStore.CAMERA_LENS_FOCAL, mm.toFloat())
+                            store.endGesture()
+                        })
+                        .heightIn(min = 36.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text("$mm", style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W700,
+                        color = if (on) AureaColors.Accent else AureaColors.Text)))
+                }
+            }
+        }
+        BlurToggleRow(stringResource(R.string.lens_dof), stringResource(R.string.lens_dof_hint), dof) { on ->
+            store.beginGesture("profundidade de campo")
+            store.setCameraLens(EditorStore.CAMERA_LENS_DOF, if (on) 1f else 0f)
+            store.endGesture()
+        }
+        if (dof) {
+            val focus = lens[3]
+            // 1 dp de dedo ≈ 2 cm da cena (px por metro vem do motor).
+            val focusPerDp = (lens[6] / 50f).let { if (it.isFinite() && it > 0f) it else 1f }
+            com.aurea.aurea.ui.ds.PropertyRow(
+                label = focusLabel,
+                value = focus,
+                unitsPerDp = focusPerDp,
+                min = 0f,
+                max = Float.POSITIVE_INFINITY,
+                format = { "${numeroPtBr(it, 0)} px" },
+                selected = true,
+                onSelect = { store.toggleCameraLensKey(EditorStore.CAMERA_LENS_FOCUS) },
+                onGestureStart = { store.beginGesture("distância de foco") },
+                onValue = { store.setCameraLens(EditorStore.CAMERA_LENS_FOCUS, max(0f, it)) },
+                onGestureEnd = { store.endGesture() },
+                onTapValue = {
+                    env.openKeypad(KeypadRequest(focusLabel, focus, "px", 0f, Float.POSITIVE_INFINITY, 0) {
+                        store.setCameraLens(EditorStore.CAMERA_LENS_FOCUS, max(0f, it))
+                    })
+                },
+                keyframe = look(EditorStore.CAMERA_LENS_FOCUS),
+            )
+            val aperture = lens[4]
+            com.aurea.aurea.ui.ds.PropertyRow(
+                label = apertureLabel,
+                value = aperture,
+                unitsPerDp = 0.05f,
+                min = CameraLens.APERTURE_MIN,
+                max = CameraLens.APERTURE_MAX,
+                format = { CameraLens.formatAperture(it) },
+                selected = true,
+                onSelect = { store.toggleCameraLensKey(EditorStore.CAMERA_LENS_APERTURE) },
+                onGestureStart = { store.beginGesture("abertura") },
+                onValue = { store.setCameraLens(EditorStore.CAMERA_LENS_APERTURE, it.coerceIn(CameraLens.APERTURE_MIN, CameraLens.APERTURE_MAX)) },
+                onGestureEnd = { store.endGesture() },
+                onTapValue = {
+                    env.openKeypad(KeypadRequest(apertureLabel, aperture, "f/", CameraLens.APERTURE_MIN, CameraLens.APERTURE_MAX, 1) {
+                        store.setCameraLens(EditorStore.CAMERA_LENS_APERTURE, it)
+                    })
+                },
+                keyframe = look(EditorStore.CAMERA_LENS_APERTURE),
+            )
+            val blur = lens[5] * 100f
+            com.aurea.aurea.ui.ds.PropertyRow(
+                label = blurLabel,
+                value = blur,
+                unitsPerDp = 1f,
+                min = 0f,
+                max = CameraLens.BLUR_MAX_PERCENT,
+                format = { "${numeroPtBr(it, 0)}%" },
+                selected = true,
+                onSelect = { store.toggleCameraLensKey(EditorStore.CAMERA_LENS_BLUR) },
+                onGestureStart = { store.beginGesture("força do desfoque") },
+                onValue = { store.setCameraLens(EditorStore.CAMERA_LENS_BLUR, it.coerceIn(0f, CameraLens.BLUR_MAX_PERCENT) / 100f) },
+                onGestureEnd = { store.endGesture() },
+                onTapValue = {
+                    env.openKeypad(KeypadRequest(blurLabel, blur, "%", 0f, CameraLens.BLUR_MAX_PERCENT, 0) {
+                        store.setCameraLens(EditorStore.CAMERA_LENS_BLUR, it / 100f)
+                    })
+                },
+                keyframe = look(EditorStore.CAMERA_LENS_BLUR),
+            )
+            // "Tocar para focar": ≥ 48 dp; arma o próximo toque no palco.
+            val armed = store.focusPick
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, start = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (armed) AureaColors.AccentDim else AureaColors.Chip)
+                    .tocavel(onClick = { if (armed) store.cancelFocusPick() else store.armPickFocus() })
+                    .heightIn(min = 48.dp)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.FilterCenterFocus, contentDescription = null, tint = if (armed) AureaColors.Accent else AureaColors.Text, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.lens_pick_focus), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = if (armed) AureaColors.Accent else AureaColors.Text)))
+                    Text(stringResource(R.string.lens_pick_focus_hint), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)))
+                }
+            }
         }
     }
 }

@@ -182,7 +182,7 @@ struct PreviewMetalView: UIViewRepresentable {
 
         func configureGestures() {
             let path = (model.panel == .vector && (model.vectorFreehand || model.vectorEditingPoints)) || (model.panel == .mask && model.editingMask != nil)
-            let legacy = path || model.pointPick != nil
+            let legacy = path || model.pointPick != nil || model.focusPick
             if tap?.isEnabled != (interactive && legacy) { tap?.isEnabled = interactive && legacy }
             if pan?.isEnabled != (interactive && path) { pan?.isEnabled = interactive && path }
             if stage?.isEnabled != (interactive && !legacy) { stage?.isEnabled = interactive && !legacy }
@@ -204,6 +204,7 @@ struct PreviewMetalView: UIViewRepresentable {
             let p = gesture.location(in: view)
             let point = CGPoint(x: (p.x - view.bounds.width / 2) * factor + compositionSize.width / 2,
                                 y: (p.y - view.bounds.height / 2) * factor + compositionSize.height / 2)
+            if model.focusPick { model.finishFocusPick(point); return }
             if model.pointPick != nil { model.finishPointPick(point); return }
             if model.panel == .vector && model.vectorFreehand { return }
             if model.panel == .vector && model.vectorEditingPoints, let mask = model.editingMask, let local = maskLocal(point) {
@@ -845,7 +846,7 @@ struct PreviewMetalView: UIViewRepresentable {
         }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-            guard interactive, model.pointPick == nil, let view = gesture.view, model.primarySelection != nil, !(model.selectedLayer?.locked ?? false) else { return }
+            guard interactive, model.pointPick == nil, !model.focusPick, let view = gesture.view, model.primarySelection != nil, !(model.selectedLayer?.locked ?? false) else { return }
             if model.panel == .vector && model.vectorFreehand {
                 let p = compositionPoint(gesture.location(in: view), view: view), f = scaleFactor(view)
                 switch gesture.state {

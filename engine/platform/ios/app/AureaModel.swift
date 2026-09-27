@@ -245,6 +245,10 @@ final class AureaModel: ObservableObject {
     @Published private(set) var importingMedia = false
     @Published private(set) var operationMessage = "Importando mídia…"
     @Published var pointPick: Bool?
+    /// Pick Focus da lente armado: o próximo toque no palco mede a distância de foco.
+    @Published var focusPick: Bool = false
+    /// Lente da câmera selecionada (9 valores, ver `AureaEngine.cameraLens`); vazio se não é câmera.
+    @Published private(set) var cameraLens: [Float] = []
     @Published var curveEffect: UInt32 = UInt32.max
     @Published var curveParam: UInt32 = 0
     @Published var curveSelectedTime: Int32?
@@ -1125,6 +1129,7 @@ final class AureaModel: ObservableObject {
             if !effects.isEmpty { effects = [] }
             if !effectParams.isEmpty { effectParams = [] }
             if !detail.isEmpty { detail = [:] }
+            if !cameraLens.isEmpty { cameraLens = [] }
             return
         }
         if refreshEffectStack {
@@ -1140,6 +1145,8 @@ final class AureaModel: ObservableObject {
         }
         let nextDetail = engine.layerDetail(layerId) ?? [:]
         if !NSDictionary(dictionary: nextDetail).isEqual(to: detail) { detail = nextDetail }
+        let nextLens: [Float] = selectedLayer?.kind == 8 ? engine.cameraLens(layerId).map(\.floatValue) : []
+        if nextLens != cameraLens { cameraLens = nextLens }
         if panel == .mask || panel == .vector { refreshMasks() }
         if let effectId = selectedEffectId {
             loadParams(layerId: layerId, effectId: effectId)
@@ -1313,7 +1320,7 @@ final class AureaModel: ObservableObject {
     func select(layerId: Int64, additive: Bool = false, openOptions: Bool = true) {
         // A seleção de keyframes é de UMA camada: trocar a principal a descarta.
         if let keys = timelineKeySelection, additive || keys.layer != layerId { clearTimelineKeySelection() }
-        if primarySelection != layerId { selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; pointPick = nil; freehandPoints = []; panel = .none }
+        if primarySelection != layerId { selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; pointPick = nil; focusPick = false; freehandPoints = []; panel = .none }
         if additive {
             var next = selection
             if next.contains(layerId) { next.remove(layerId) } else { next.insert(layerId) }
@@ -2115,6 +2122,76 @@ final class AureaModel: ObservableObject {
             else { core.insertKeyframe(forLayer: id, property: property, time: local, value: value) }
         }
         refreshModel(force: true)
+    }
+
+    // --- Lente da câmera 3D ---------------------------------------------------
+    /// Índices de LayerSetCameraParam (ver Command.hpp): 0 mm, 1 DOF, 2 foco, 3 f/, 4 desfoque ×.
+    static let cameraLensFocal: UInt32 = 0
+    static let cameraLensDof: UInt32 = 1
+    static let cameraLensFocus: UInt32 = 2
+    static let cameraLensAperture: UInt32 = 3
+    static let cameraLensBlur: UInt32 = 4
+
+    /// Trilha animável de um parâmetro da lente (`aurea::TrackProperty`; DOF ligado não anima).
+    func cameraLensTrack(_ param: UInt32) -> UInt32? {
+        switch param {
+        case AureaModel.cameraLensFocal: return 16
+        case AureaModel.cameraLensFocus: return 17
+        case AureaModel.cameraLensAperture: return 18
+        case AureaModel.cameraLensBlur: return 38
+        default: return nil
+        }
+    }
+
+    /// Escreve um parâmetro da lente; trilha com keyframe → keyframe no cabeçote, senão o valor parado.
+    func setCameraLens(_ param: UInt32, value: Float) {
+        guard let id = primarySelection, value.isFinite else { return }
+        if selectedLayer?.locked == true { toast = AureaText.t("editor_camada_bloqueada"); return }
+        mutate { $0.setCameraParam(id, param: param, value: value) }
+        refreshModel(force: true)
+    }
+
+    /// ◇ da lente: alterna o keyframe no cabeçote com o valor atual da lente.
+    func toggleCameraLensKey(_ param: UInt32) {
+        guard let id = primarySelection, let property = cameraLensTrack(param), cameraLens.count >= 9 else { return }
+        let value: Float
+        switch param {
+        case AureaModel.cameraLensFocal: value = cameraLens[0]
+        case AureaModel.cameraLensFocus: value = cameraLens[3]
+        case AureaModel.cameraLensAperture: value = cameraLens[4]
+        default: value = cameraLens[5]
+        }
+        let local: Int32 = localPlayhead
+        let here: Bool = (keyframes[id] ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == local }
+        mutate { core in
+            core.beginUndoGroup()
+            if here { core.deleteKeyframe(forLayer: id, property: property, time: local) }
+            else { core.insertKeyframe(forLayer: id, property: property, time: local, value: value) }
+            core.endUndoGroup()
+        }
+        refreshModel(force: true)
+    }
+
+    /// "Tocar para focar": arma o próximo toque no palco.
+    func armPickFocus() {
+        guard let layer = selectedLayer, primarySelection != nil else { return }
+        if layer.kind != 8 { toast = AureaText.t("lens_msg_not_camera"); return }
+        if layer.locked { toast = AureaText.t("editor_camada_bloqueada"); return }
+        engine.run { $0.pause() }
+        cancelMotionPick()
+        focusPick = true
+        toast = AureaText.t("lens_msg_tap_to_focus")
+    }
+    func cancelFocusPick() { focusPick = false }
+    /// Toque em (x, y) da composição: mede e grava a distância de foco (um comando = um desfazer).
+    func finishFocusPick(_ point: CGPoint) {
+        focusPick = false
+        guard let id = primarySelection, selectedLayer?.kind == 8 else { return }
+        let distance: Float = engine.pickFocusDistance(id, x: Float(point.x), y: Float(point.y))
+        guard distance >= 0, distance.isFinite else { toast = AureaText.t("lens_msg_nothing_there"); return }
+        mutate { $0.setCameraParam(id, param: AureaModel.cameraLensFocus, value: distance) }
+        refreshModel(force: true)
+        toast = AureaText.t("lens_msg_focus_set", numeroPtBr(distance, casas: 0))
     }
 
     func addCamera() {

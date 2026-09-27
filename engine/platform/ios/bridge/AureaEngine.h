@@ -496,6 +496,15 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)addLight:(uint32_t)kind;
 - (NSArray<NSNumber*>*)lightInfo:(long long)layer;
 - (void)setLightParam:(long long)layer param:(uint32_t)param value:(float)value;
+/// Lente da câmera 3D (9 valores, ver Engine::query_camera_lens): mm, FOV°,
+/// DOF, foco (px), f/, desfoque ×, px/m, máscara de trilhas com keyframe,
+/// ativa. Vazio se a camada não é câmera.
+- (NSArray<NSNumber*>*)cameraLens:(long long)layer NS_SWIFT_NAME(cameraLens(_:));
+/// Pick Focus: distância no eixo ótico até o 3D sob o ponto (px da
+/// composição); < 0 = nada 3D ali. Só mede; grave com setCameraParam.
+- (float)pickFocusDistance:(long long)layer x:(float)x y:(float)y NS_SWIFT_NAME(pickFocusDistance(_:x:y:));
+/// LayerSetCameraParam: 0 mm, 1 DOF (0/1), 2 distância de foco, 3 f/, 4 desfoque ×.
+- (void)setCameraParam:(long long)layer param:(uint32_t)param value:(float)value NS_SWIFT_NAME(setCameraParam(_:param:value:));
 - (long long)addCamera;
 - (long long)addNull:(BOOL)threeD;
 /// "Vincular a novo nulo": cria um nulo no centro (mundo) das camadas e faz

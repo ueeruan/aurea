@@ -1903,4 +1903,19 @@ to edit the curve.</string>
         <item quantity="one">%1$s registered person</item>
         <item quantity="other">%1$s registered people</item>
     </plurals>
+    <!-- Lente da câmera 3D (face Lente do painel Transformar) -->
+    <string name="lens_title">Lens</string>
+    <string name="lens_focal">Focal length</string>
+    <string name="lens_fov_readout">FOV %1$s°</string>
+    <string name="lens_dof">Depth of field</string>
+    <string name="lens_dof_hint">Blurs what is far from the focus plane</string>
+    <string name="lens_focus_distance">Focus distance</string>
+    <string name="lens_aperture">Aperture</string>
+    <string name="lens_blur">Blur strength</string>
+    <string name="lens_pick_focus">Tap to focus</string>
+    <string name="lens_pick_focus_hint">Tap the stage on the 3D object that should stay sharp</string>
+    <string name="lens_msg_tap_to_focus">Tap the stage where it should be in focus</string>
+    <string name="lens_msg_focus_set">Focus at %1$s px</string>
+    <string name="lens_msg_nothing_there">Nothing 3D there. Tap on a 3D layer</string>
+    <string name="lens_msg_not_camera">Select a 3D camera</string>
 </resources>

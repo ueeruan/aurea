@@ -1031,4 +1031,19 @@ untuk mengedit kurvanya.</string>
     <plurals name="conta_usuarios">
         <item quantity="other">%1$s orang terdaftar</item>
     </plurals>
+    <!-- Lente da câmera 3D (face Lente do painel Transformar) -->
+    <string name="lens_title">Lensa</string>
+    <string name="lens_focal">Panjang fokus</string>
+    <string name="lens_fov_readout">FOV %1$s°</string>
+    <string name="lens_dof">Kedalaman bidang</string>
+    <string name="lens_dof_hint">Mengaburkan yang jauh dari bidang fokus</string>
+    <string name="lens_focus_distance">Jarak fokus</string>
+    <string name="lens_aperture">Bukaan</string>
+    <string name="lens_blur">Kekuatan blur</string>
+    <string name="lens_pick_focus">Ketuk untuk fokus</string>
+    <string name="lens_pick_focus_hint">Ketuk panggung di objek 3D yang harus tetap tajam</string>
+    <string name="lens_msg_tap_to_focus">Ketuk panggung di titik yang harus fokus</string>
+    <string name="lens_msg_focus_set">Fokus di %1$s px</string>
+    <string name="lens_msg_nothing_there">Tidak ada 3D di sana. Ketuk lapisan 3D</string>
+    <string name="lens_msg_not_camera">Pilih kamera 3D</string>
 </resources>

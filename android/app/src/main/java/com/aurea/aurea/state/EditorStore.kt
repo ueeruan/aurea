@@ -1230,6 +1230,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         refreshObjectEnvironment()
         refreshParticleLinks(id)
+        cameraLens = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Camera.kind) {
+            engine.cameraLens(id)?.let { novo -> if (cameraLens?.contentEquals(novo) == true) cameraLens else novo }
+        } else {
+            null
+        }
         timeRemap = if (id != null && detail?.timeRemap == true) {
             val out = FloatArray(5 + 7 * 64)
             val n = engine.queryTimeRemap(id, out)
@@ -4175,6 +4180,85 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    // --- Lente da câmera 3D ---------------------------------------------------------
+    /**
+     * Lente da câmera selecionada (ver `AureaEngine.cameraLens`): [0] mm, [1] FOV°,
+     * [2] DOF, [3] distância de foco (px), [4] f/, [5] desfoque ×, [6] px/m,
+     * [7] máscara de trilhas com keyframe, [8] ativa. Relida com o detalhe.
+     */
+    var cameraLens by mutableStateOf<FloatArray?>(null)
+        private set
+
+    /**
+     * Escreve um parâmetro da lente (`CAMERA_LENS_*`). Trilha com keyframe →
+     * keyframe no cabeçote; senão o valor parado. Num arrasto, abra
+     * `beginGesture`/`endGesture` em volta (um passo de desfazer).
+     */
+    fun setCameraLens(param: Int, value: Float) {
+        val id = primary ?: return
+        if (detail?.locked == true) { showToast(appText(R.string.editor_camada_bloqueada)); return }
+        if (!value.isFinite()) return
+        send { engine.setCameraParam(id, param, value) }
+        refreshNow()
+    }
+
+    /** Trilha animável de um parâmetro da lente (DOF ligado não anima). */
+    fun cameraLensTrack(param: Int): Int? = when (param) {
+        CAMERA_LENS_FOCAL -> TrackProperty.FOCAL_LENGTH
+        CAMERA_LENS_FOCUS -> TrackProperty.FOCUS_DISTANCE
+        CAMERA_LENS_APERTURE -> TrackProperty.APERTURE
+        CAMERA_LENS_BLUR -> TrackProperty.CAMERA_BLUR
+        else -> null
+    }
+
+    /** ◇ da lente: keyframe no cabeçote alterna; o valor é o atual da lente. */
+    fun toggleCameraLensKey(param: Int) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val lens = cameraLens ?: return
+        val property = cameraLensTrack(param) ?: return
+        val value = when (param) {
+            CAMERA_LENS_FOCAL -> lens[0]
+            CAMERA_LENS_FOCUS -> lens[3]
+            CAMERA_LENS_APERTURE -> lens[4]
+            else -> lens[5]
+        }
+        val here = keyframes[id].orEmpty().any { it.property == property && it.effectIndex == NO_EFFECT && it.time == d.localPlayhead }
+        group(if (here) "remover keyframe" else "adicionar keyframe") {
+            if (here) deleteKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead)
+            else insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, value)
+        }
+    }
+
+    /** Pick Focus armado: o próximo toque no palco mede a distância de foco. */
+    var focusPick by mutableStateOf(false)
+        private set
+
+    /** "Tocar para focar": arma o próximo toque no palco (a mira segue o dedo). */
+    fun armPickFocus() {
+        val id = primary ?: return
+        if (detail?.kind != com.aurea.aurea.ui.theme.LayerType.Camera.kind) { showToast(appText(R.string.lens_msg_not_camera)); return }
+        if (detail?.locked == true) { showToast(appText(R.string.editor_camada_bloqueada)); return }
+        pause()
+        cancelMotionPick()
+        pickBoxes = floatArrayOf(0f, 0f)
+        focusPick = true
+        showToast(appText(R.string.lens_msg_tap_to_focus))
+    }
+    fun cancelFocusPick() { focusPick = false; pickCursor = null; pickBoxes = floatArrayOf(17f, 65f) }
+    /** Soltou o dedo em (x, y) da composição: mede e grava a distância de foco (um desfazer). */
+    fun finishFocusPick(compX: Float, compY: Float) {
+        val id = primary
+        focusPick = false; pickCursor = null; pickBoxes = floatArrayOf(17f, 65f)
+        if (id == null || detail?.kind != com.aurea.aurea.ui.theme.LayerType.Camera.kind) return
+        val distance = engine.pickFocusDistance(id, compX, compY)
+        if (!(distance >= 0f) || !distance.isFinite()) { showToast(appText(R.string.lens_msg_nothing_there)); return }
+        // Um comando = um passo de desfazer (o motor grava keyframe se a trilha anima).
+        send { engine.setCameraParam(id, CAMERA_LENS_FOCUS, distance) }
+        refreshNow()
+        showToast(appText(R.string.lens_msg_focus_set, com.aurea.aurea.ui.ds.numeroPtBr(distance, 0)))
+    }
+
     fun addCamera() {
         val id = engine.addCamera()
         if (id < 0) { errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camera, -id); return }
@@ -4867,6 +4951,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val META_SUFFIX = ".meta.json"
         /** `kInvalidIndex` do C++: keyframe que não é de efeito. */
         const val NO_EFFECT = -1
+        /** Índices de `LayerSetCameraParam` (ver Command.hpp). */
+        const val CAMERA_LENS_FOCAL = 0
+        const val CAMERA_LENS_DOF = 1
+        const val CAMERA_LENS_FOCUS = 2
+        const val CAMERA_LENS_APERTURE = 3
+        const val CAMERA_LENS_BLUR = 4
         /** `ParticleParam::Count` do motor (contrato v21: 70 parâmetros). */
         const val PARTICLE_PARAM_COUNT = 70
         /** Id do "tipo" memória na tela Armazenamento. */

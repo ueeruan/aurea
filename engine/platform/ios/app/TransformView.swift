@@ -17,9 +17,9 @@ struct TransformView: View {
     @State private var dialTotal: Float = 0
     @State private var dialWalked: CGFloat = 0
     @State private var dialLast: CGPoint?
-    private let names = ["Posição", "Escala", "Rotação", "Opacidade", "Pivô", "Desfoque de movimento"]
-    private let icons = ["material:rounded.OpenWith", "material:rounded.AspectRatio", "material:automirrored.rounded.RotateRight",
-                         "material:rounded.Opacity", "material:rounded.FilterCenterFocus", "material:rounded.BlurOn"]
+    private let baseNames = ["Posição", "Escala", "Rotação", "Opacidade", "Pivô", "Desfoque de movimento"]
+    private let baseIcons = ["material:rounded.OpenWith", "material:rounded.AspectRatio", "material:automirrored.rounded.RotateRight",
+                             "material:rounded.Opacity", "material:rounded.FilterCenterFocus", "material:rounded.BlurOn"]
     private var id: Int64 { model.primarySelection ?? 0 }
     private var animatedMask: UInt32 { (model.detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0 }
     private var keyMask: UInt32 { (model.detail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0 }
@@ -78,7 +78,7 @@ struct TransformView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_transformar") + " · " + names[tab]) { model.panel = .none }
+            PanelHeader(title: AureaText.t("panel_transformar") + " · " + tabName) { model.panel = .none }
             if tab == 2 && text3D && !wholeText {
                 HStack {
                     Text(AureaText.t("t3d_letters")).foregroundStyle(AureaColors.accent)
@@ -103,7 +103,8 @@ struct TransformView: View {
                     case 2: rotationFace
                     case 3: opacityFace
                     case 4: moveFace(pivot: true)
-                    default: motionBlurFace
+                    case 5: motionBlurFace
+                    default: lensFace
                     }
                     Spacer().frame(height: 10)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -113,7 +114,11 @@ struct TransformView: View {
         }
         .foregroundStyle(AureaColors.text)
         .onAppear { text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; updateTimelineFocus() }
-        .onChange(of: id) { _ in text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; wholeText = false }
+        .onChange(of: id) { _ in
+            text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; wholeText = false
+            // A face Lente só existe na câmera 3D: trocou de camada com ela aberta → Posição.
+            if tab >= baseNames.count && !isCamera { tab = 0 }
+        }
         .onChange(of: wholeText) { _ in updateTimelineFocus() }
         .onChange(of: keyProps) { _ in updateTimelineFocus() }
         .onDisappear { endGesture(); model.timelineFocus = nil }
@@ -366,6 +371,117 @@ struct TransformView: View {
         }
     }
 
+
+    // --- Lente (só câmera 3D) --------------------------------------------------
+    private var isCamera: Bool { model.selectedLayer?.kind == 8 }
+    private var names: [String] { isCamera ? baseNames + [AureaText.t("lens_title")] : baseNames }
+    private var icons: [String] { isCamera ? baseIcons + ["camera.aperture"] : baseIcons }
+    private var tabName: String { names[min(tab, names.count - 1)] }
+    private func lensLook(_ param: UInt32) -> KeyframeLook {
+        guard let property = model.cameraLensTrack(param) else { return .none }
+        let own: [KeyframeItem] = (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }
+        if own.contains(where: { $0.time == model.localPlayhead }) { return .keyHere }
+        return own.isEmpty ? .none : .animated
+    }
+    /// Direct port of LensFace: focal (mm) with FOV readout and preset chips,
+    /// DOF toggle, focus distance, aperture, blur strength, and Pick Focus.
+    private var lensFace: some View {
+        let lens: [Float] = model.cameraLens
+        let ready: Bool = lens.count >= 9
+        let focal: Float = ready ? lens[0] : 50
+        let fov: Float = ready ? lens[1] : 0
+        let dof: Bool = ready && lens[2] >= 0.5
+        let focus: Float = ready ? lens[3] : 0
+        let aperture: Float = ready ? lens[4] : 2.8
+        let blur: Float = ready ? lens[5] * 100 : 100
+        let perMeter: Float = ready ? lens[6] : 50
+        // 1 pt de dedo ≈ 2 cm da cena (px por metro vem do motor).
+        let focusSpeed: Float = perMeter > 0 && perMeter.isFinite ? perMeter / 50 : 1
+        let presets: [Int] = [14, 18, 24, 35, 50, 85, 135, 200]
+        let armed: Bool = model.focusPick
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                lensRow(AureaText.t("lens_focal"), amount: focal, speed: 0.5, lower: 8, upper: 400, text: "\(Int(focal.rounded())) mm",
+                        keyframe: lensLook(AureaModel.cameraLensFocal), onKey: { model.toggleCameraLensKey(AureaModel.cameraLensFocal) },
+                        onValue: { model.setCameraLens(AureaModel.cameraLensFocal, value: min(400, max(8, $0))) }, onTap: {
+                    keypad(AureaText.t("lens_focal"), focal, unit: "mm", min: 4, max: 1200, decimals: 0) { model.setCameraLens(AureaModel.cameraLensFocal, value: $0) }
+                })
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        Text(AureaText.t("lens_fov_readout", numeroPtBr(fov, casas: 1))).font(.aurea(size: 11.5))
+                            .foregroundStyle(AureaColors.muted).padding(.leading, 4).padding(.trailing, 6)
+                        ForEach(presets, id: \.self) { mm in
+                            let on: Bool = abs(focal - Float(mm)) < 0.5
+                            Button {
+                                beginGesture(); model.setCameraLens(AureaModel.cameraLensFocal, value: Float(mm)); endGesture()
+                            } label: {
+                                Text("\(mm)").font(.aurea(size: 12.5, weight: .bold))
+                                    .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+                                    .padding(.horizontal, 12).frame(minHeight: 36)
+                                    .background(on ? AureaColors.accent.opacity(0.18) : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                            }.buttonStyle(.plain)
+                        }
+                    }.padding(.top, 2).padding(.bottom, 6)
+                }
+                blurToggle("lens_dof", hint: "lens_dof_hint", checked: dof) { enabled in
+                    beginGesture(); model.setCameraLens(AureaModel.cameraLensDof, value: enabled ? 1 : 0); endGesture()
+                }
+                if dof {
+                    lensRow(AureaText.t("lens_focus_distance"), amount: focus, speed: focusSpeed, lower: 0, upper: .infinity, text: numeroPtBr(focus, casas: 0) + " px",
+                            keyframe: lensLook(AureaModel.cameraLensFocus), onKey: { model.toggleCameraLensKey(AureaModel.cameraLensFocus) },
+                            onValue: { model.setCameraLens(AureaModel.cameraLensFocus, value: max(0, $0)) }, onTap: {
+                        keypad(AureaText.t("lens_focus_distance"), focus, unit: "px", min: 0, decimals: 0) { model.setCameraLens(AureaModel.cameraLensFocus, value: max(0, $0)) }
+                    })
+                    lensRow(AureaText.t("lens_aperture"), amount: aperture, speed: 0.05, lower: 1.2, upper: 22,
+                            text: "f/" + numeroPtBr(aperture, casas: 1).replacingOccurrences(of: ",", with: "."),
+                            keyframe: lensLook(AureaModel.cameraLensAperture), onKey: { model.toggleCameraLensKey(AureaModel.cameraLensAperture) },
+                            onValue: { model.setCameraLens(AureaModel.cameraLensAperture, value: min(22, max(1.2, $0))) }, onTap: {
+                        keypad(AureaText.t("lens_aperture"), aperture, unit: "f/", min: 1.2, max: 22, decimals: 1) { model.setCameraLens(AureaModel.cameraLensAperture, value: $0) }
+                    })
+                    lensRow(AureaText.t("lens_blur"), amount: blur, speed: 1, lower: 0, upper: 300, text: numeroPtBr(blur, casas: 0) + "%",
+                            keyframe: lensLook(AureaModel.cameraLensBlur), onKey: { model.toggleCameraLensKey(AureaModel.cameraLensBlur) },
+                            onValue: { model.setCameraLens(AureaModel.cameraLensBlur, value: min(300, max(0, $0)) / 100) }, onTap: {
+                        keypad(AureaText.t("lens_blur"), blur, unit: "%", min: 0, max: 300, decimals: 0) { model.setCameraLens(AureaModel.cameraLensBlur, value: $0 / 100) }
+                    })
+                    // "Tocar para focar": ≥ 44 pt; arma o próximo toque no palco.
+                    Button {
+                        if armed { model.cancelFocusPick() } else { model.armPickFocus() }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "scope").foregroundStyle(armed ? AureaColors.accent : AureaColors.text)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(AureaText.t("lens_pick_focus")).font(.aurea(size: 14, weight: .semibold))
+                                    .foregroundStyle(armed ? AureaColors.accent : AureaColors.text)
+                                Text(AureaText.t("lens_pick_focus_hint")).font(.aurea(size: 11.5)).foregroundStyle(AureaColors.muted)
+                            }
+                            Spacer()
+                        }.padding(.horizontal, 14).padding(.vertical, 8).frame(maxWidth: .infinity, minHeight: 48)
+                        .background(armed ? AureaColors.accent.opacity(0.18) : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                    }.buttonStyle(.plain).padding(.top, 8).padding(.leading, 4)
+                }
+            }.padding(.leading, 8).padding(.trailing, 12).padding(.top, 6)
+        }
+    }
+    /// scalarRow with its own unit text, lower bound and a tappable ◇ label.
+    private func lensRow(_ label: String, amount: Float, speed: Float, lower: Float, upper: Float, text: String, keyframe: KeyframeLook,
+                         onKey: @escaping () -> Void, onValue: @escaping (Float) -> Void, onTap: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            ZStack(alignment: .topLeading) {
+                Text(label).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.accent).underline()
+                    .multilineTextAlignment(.center).lineLimit(2).frame(width: 94, height: 32)
+                    .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                if keyframe != .none {
+                    TransformMiniDiamond(filled: keyframe == .keyHere).frame(width: 7, height: 7).offset(x: 3, y: 3)
+                }
+            }.contentShape(Rectangle()).onTapGesture { onKey() }
+            TickRuler(value: { amount }, unitsPerDp: speed, active: true, height: 40)
+                .frame(maxWidth: .infinity)
+                .valueDrag(enabled: true, start: { amount }, unitsPerDp: { speed }, min: lower, max: upper,
+                           onStart: beginGesture, onValue: onValue, onEnd: endGesture)
+            ValueBox(text, width: 68, onTap: onTap)
+        }.frame(height: 48)
+    }
+
     private func field(_ text: String, label: String, width: CGFloat, color: Color = AureaColors.accent,
                        onLongPress: (() -> Void)? = nil, onTap: @escaping () -> Void) -> some View {
         VStack(spacing: 3) {
@@ -437,7 +553,7 @@ struct TransformView: View {
     }
     private func openExpression() {
         guard !props.isEmpty else { return }
-        let title = tab == 2 ? "Rotação \(["X", "Y", "Z"][rotationAxis])" : names[tab]
+        let title = tab == 2 ? "Rotação \(["X", "Y", "Z"][rotationAxis])" : tabName
         model.expressionSheet = ExpressionRequest(layer: id, label: title,
             tracks: props.map { ExpressionTrack(property: $0) },
             scale: tab == 1 || tab == 3 ? 100 : 1,

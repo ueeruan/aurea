@@ -996,6 +996,24 @@ private suspend fun PointerInputScope.stageGestures(
             return@awaitEachGesture
         }
 
+        // Pick Focus da lente: a mira segue o dedo; soltar mede a distância até o
+        // 3D sob o ponto (px da composição) e grava a distância de foco.
+        if (store.focusPick) {
+            var upX = downX
+            var upY = downY
+            if (m.valid) store.pickCursor = Offset(m.cx(downX), m.cy(downY))
+            do {
+                val ev = awaitPointerEvent()
+                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                ch.consume()
+                upX = ch.position.x
+                upY = ch.position.y
+                if (m.valid) store.pickCursor = Offset(m.cx(upX), m.cy(upY))
+            } while (ch.pressed)
+            if (m.valid) store.finishFocusPick(m.cx(upX), m.cy(upY)) else store.cancelFocusPick()
+            return@awaitEachGesture
+        }
+
         // Escolhendo o ponto do rastreio: a mira segue o dedo (dá para ajustar
         // antes de soltar); soltar vira a coordenada da camada.
         if (store.pointPick != null) {

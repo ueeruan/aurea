@@ -1051,4 +1051,19 @@
         <item quantity="many">%1$s شخصًا مسجّلًا</item>
         <item quantity="other">%1$s شخص مسجّل</item>
     </plurals>
+    <!-- Lente da câmera 3D (face Lente do painel Transformar) -->
+    <string name="lens_title">العدسة</string>
+    <string name="lens_focal">البعد البؤري</string>
+    <string name="lens_fov_readout">مجال الرؤية %1$s°</string>
+    <string name="lens_dof">عمق الميدان</string>
+    <string name="lens_dof_hint">يطمس ما يبعد عن مستوى التركيز</string>
+    <string name="lens_focus_distance">مسافة التركيز</string>
+    <string name="lens_aperture">فتحة العدسة</string>
+    <string name="lens_blur">قوة الطمس</string>
+    <string name="lens_pick_focus">المس للتركيز</string>
+    <string name="lens_pick_focus_hint">المس المسرح فوق الجسم ثلاثي الأبعاد الذي يجب أن يبقى حادًا</string>
+    <string name="lens_msg_tap_to_focus">المس المسرح في النقطة التي يجب أن تكون في البؤرة</string>
+    <string name="lens_msg_focus_set">التركيز عند %1$s بكسل</string>
+    <string name="lens_msg_nothing_there">لا يوجد شيء ثلاثي الأبعاد هنا. المس طبقة ثلاثية الأبعاد</string>
+    <string name="lens_msg_not_camera">اختر كاميرا ثلاثية الأبعاد</string>
 </resources>

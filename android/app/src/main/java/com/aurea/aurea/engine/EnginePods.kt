@@ -808,6 +808,11 @@ object TrackProperty {
     const val OPACITY = 12
     const val SKEW_X = 13
     const val SKEW_Y = 14
+    // Câmera (lente): os ids do `aurea::TrackProperty`.
+    const val FOV = 15
+    const val FOCAL_LENGTH = 16
+    const val FOCUS_DISTANCE = 17
+    const val APERTURE = 18
     const val TIME_REMAP = 30
     const val EFFECT_PARAM = 31
     const val AUDIO_VOLUME = 32
@@ -816,6 +821,8 @@ object TrackProperty {
     const val SHAPE_PARAM = 35
     const val PARTICLE_PARAM = 36
     const val MATERIAL_PARAM = 37
+    /** Lente: força do desfoque de profundidade (× o círculo de confusão). */
+    const val CAMERA_BLUR = 38
 }
 
 /**

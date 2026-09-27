@@ -1033,4 +1033,19 @@ para editar la curva.</string>
         <item quantity="one">%1$s persona registrada</item>
         <item quantity="other">%1$s personas registradas</item>
     </plurals>
+    <!-- Lente da câmera 3D (face Lente do painel Transformar) -->
+    <string name="lens_title">Lente</string>
+    <string name="lens_focal">Distancia focal</string>
+    <string name="lens_fov_readout">FOV %1$s°</string>
+    <string name="lens_dof">Profundidad de campo</string>
+    <string name="lens_dof_hint">Desenfoca lo que está lejos del plano de enfoque</string>
+    <string name="lens_focus_distance">Distancia de enfoque</string>
+    <string name="lens_aperture">Apertura</string>
+    <string name="lens_blur">Fuerza del desenfoque</string>
+    <string name="lens_pick_focus">Tocar para enfocar</string>
+    <string name="lens_pick_focus_hint">Toca el escenario sobre el objeto 3D que debe quedar nítido</string>
+    <string name="lens_msg_tap_to_focus">Toca el escenario en el punto que debe quedar enfocado</string>
+    <string name="lens_msg_focus_set">Enfoque a %1$s px</string>
+    <string name="lens_msg_nothing_there">No hay nada 3D ahí. Toca sobre una capa 3D</string>
+    <string name="lens_msg_not_camera">Selecciona una cámara 3D</string>
 </resources>

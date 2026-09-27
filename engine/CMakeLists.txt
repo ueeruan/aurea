@@ -112,6 +112,9 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/SampledBlurEffects.cpp
     src/effects/builtin/MotionBehaviorEffects.cpp
     src/effects/builtin/FinishingEffects.cpp
+    src/effects/builtin/GenerateEffects.cpp
+    src/effects/builtin/MatteEffects.cpp
+    src/effects/builtin/VhsLookEffect.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -125,6 +128,7 @@ set(AUREA_CORE_SOURCES
     src/audio/AudioEngine.cpp
     src/audio/Waveform.cpp
     src/audio/Beats.cpp
+    src/audio/Spectrum.cpp
     src/tracking/PointTracker.cpp
     src/tracking/CameraTracker.cpp
     src/tracking/MotionGeometry.cpp

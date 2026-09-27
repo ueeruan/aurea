@@ -207,6 +207,60 @@ internal object AutoScroll {
     }
 }
 
+/**
+ * O que o dedo QUIS, decidido uma vez por gesto (spec §5.1). Rolar e fazer
+ * scrub não custam nada e ficam nos 45°; EDITAR o projeto (mover clipe,
+ * aparar, arrastar losango, reordenar) exige eixo claro, 2:1 — o empate de
+ * 45° classificava uma rolagem um pouco torta como "mover clipe", e a camada
+ * era escolhida e ia junto com o dedo.
+ */
+internal object Press {
+    /** |eixo| ≥ EDIT_RATIO·|outro| para um arrasto editar. */
+    const val EDIT_RATIO = 2f
+    /** Toque longo: o dedo tem de estar quieto há pelo menos isto ao vencer o prazo. */
+    const val STILL_MS = 150L
+
+    fun horizontal(dx: Float, dy: Float): Boolean = abs(dx) >= abs(dy)
+
+    /** Claramente no eixo do tempo: mover, aparar, arrastar losango. */
+    fun timeEdit(dx: Float, dy: Float): Boolean = abs(dx) >= EDIT_RATIO * abs(dy)
+
+    /** Claramente na pilha: reordenar. */
+    fun stackEdit(dx: Float, dy: Float): Boolean = abs(dy) >= EDIT_RATIO * abs(dx)
+
+    /**
+     * Quietude do dedo antes do toque longo. O prazo de 500 ms corria mesmo com
+     * o dedo rastejando (menos que o slop) e, vencido, o primeiro movimento
+     * virava mover/reordenar — a rolagem que começava devagar levantava a
+     * camada. Aqui cada amostra que sai do "ninho" (mais que o tremor) marca a
+     * hora; o toque longo só é aceito se a última saída foi há [STILL_MS] ou mais.
+     */
+    class Stillness(private val jitter: Float) {
+        private var restX = 0f
+        private var restY = 0f
+        private var lastMoveAt = 0L
+
+        fun down(x: Float, y: Float, at: Long) {
+            restX = x
+            restY = y
+            lastMoveAt = at
+        }
+
+        fun move(x: Float, y: Float, at: Long) {
+            val dx = x - restX
+            val dy = y - restY
+            if (dx * dx + dy * dy > jitter * jitter) {
+                restX = x
+                restY = y
+                lastMoveAt = at
+            }
+        }
+
+        /** Aceita o toque longo em [now]? */
+        fun still(now: Long): Boolean = now - lastMoveAt >= STILL_MS
+    }
+}
+
 /** Instantes de keyframe de uma camada, em frames da timeline. */
 internal object Keyframes {
     /** Tempo local → frame da timeline (`t + start − offset`). */

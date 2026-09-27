@@ -32,31 +32,51 @@ object ExitDiagnostics {
     }
 
     private const val PREFS = "aurea_exit_diagnostics"
-    private const val SAFE_VIDEO = "safe_video_planes"
+    private const val SAFE_VIDEO = "safe_video_planes"          // antigo (permanente): só é apagado
+    private const val SAFE_VIDEO_BUILD = "safe_video_planes_build"
+
+    /** Janela depois de importar em que um crash ainda conta como "do vídeo". */
+    internal const val VIDEO_READY_WINDOW_MS = 20_000L
 
     /**
-     * Modo seguro de vídeo, permanente no aparelho: ligado quando o processo
-     * anterior morreu por crash nativo (ou do app) numa etapa de vídeo — dentro
-     * da importação ou depois dela, quando o decoder e a GPU já trabalham. O
-     * custo é só desempenho (planos YUV pela CPU); o ganho é o app não fechar
-     * de novo a cada vídeo num aparelho cujo driver/gralloc ainda não conhecemos.
+     * Modo seguro de vídeo (planos YUV pela CPU) NESTE build: ligado quando o
+     * processo anterior, do mesmo build, morreu por crash durante a importação
+     * de um vídeo ou logo depois dela (até [VIDEO_READY_WINDOW_MS]). Antes era
+     * permanente e contava qualquer crash depois de importar — um crash da
+     * superfície ou do 3D prendia o aparelho nos planos da CPU para sempre, e
+     * lá um decoder de hardware que não entrega planos deixava o vídeo preto.
+     * Um build novo reavalia do zero.
      */
     fun safeVideoMode(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(SAFE_VIDEO, false)) return true
+        if (prefs.contains(SAFE_VIDEO)) prefs.edit().remove(SAFE_VIDEO).apply()
+        val build = BuildConfig.VERSION_CODE
+        if (prefs.getInt(SAFE_VIDEO_BUILD, 0) == build) return true
         val crashed = runCatching {
             exits(context).firstOrNull()?.let { exit ->
-                crashedDuringVideo(exit.reason, exit.processStateSummary?.toString(Charsets.UTF_8))
+                val bootWallMs = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+                val crashElapsedMs = (exit.timestamp - bootWallMs).takeIf { it > 0 }
+                crashedDuringVideo(exit.reason, exit.processStateSummary?.toString(Charsets.UTF_8), build, crashElapsedMs)
             } ?: false
         }.getOrDefault(false)
-        if (crashed) prefs.edit().putBoolean(SAFE_VIDEO, true).apply()
+        if (crashed) prefs.edit().putInt(SAFE_VIDEO_BUILD, build).apply()
         return crashed
     }
 
-    internal fun crashedDuringVideo(reason: Int, summary: String?): Boolean {
+    /**
+     * O encerramento foi um crash do vídeo neste build? `crashElapsedMs` é o
+     * relógio desde o boot na hora do crash (null = desconhecido): com ele, um
+     * crash em VIDEO_READY só conta se veio logo depois de importar.
+     */
+    internal fun crashedDuringVideo(reason: Int, summary: String?, build: Int, crashElapsedMs: Long?): Boolean {
         if (summary == null) return false
         val crash = reason == ApplicationExitInfo.REASON_CRASH_NATIVE || reason == ApplicationExitInfo.REASON_CRASH
-        return crash && (summary.contains("phase=${Phase.VIDEO_NATIVE.name}") || summary.contains("phase=${Phase.VIDEO_READY.name}"))
+        if (!crash || !summary.contains("build=$build ")) return false
+        if (summary.contains("phase=${Phase.VIDEO_NATIVE.name} ")) return true
+        if (!summary.contains("phase=${Phase.VIDEO_READY.name} ")) return false
+        val markedAt = summary.substringAfter("uptimeMs=", "").trim().toLongOrNull() ?: return false
+        val after = (crashElapsedMs ?: return false) - markedAt
+        return after in 0..VIDEO_READY_WINDOW_MS
     }
 
     internal fun marker(phase: Phase, build: Int, uptimeMs: Long): ByteArray =

@@ -8,7 +8,15 @@ new request. Existing features must be checked against the requested behavior.
 
 ### Build 2110 working checkpoint — user bug reports and revised curve reference
 
-Latest active acceptance (after8e6bea28):
+Latest active acceptance (code29dac3f3, iOS metadata450974e0):
+- New blocker: native iOS gesture suite36187809403 finished6/8 PASS. The
+  move-video button reproducibly freezes the main thread when making a1s
+  H264/AAC clip visible at the2s playhead. No decoder/Metal cause is yet proven;
+  host thread sampling is being added to the next native run. Effects test
+  stopped before insertion because the real accessible button name included
+  the private-use Plus glyph; accessibility labeling is corrected, pending retest.
+- Metadata-only run36189998665 compiled/package-verified2110 successfully;
+  that candidate still contains the video-move freeze and is not final acceptance.
 - Reference graph: both white handles respond, saved lower handle survived
   app reinstall/reopen, Bounce/Elastic/Steps apply and Undo restores the curve.
 - Actual Android NotoSansGujarati font lacks every letter of "Texto" (checked
@@ -20,7 +28,10 @@ Latest active acceptance (after8e6bea28):
 - Null3D detail POD omitted its3D flag, making Android's default-depth null
   expose XY keys only. Shared flag and XYZ scale/anchor controls compiled;
   core camera/null rendering+save/load passed36 checks after rebuilding the
-  stale host object. Actual controls/key diamond QA is still underway.
+  stale host object. Actual Android UI created depth keys0/1000 at frames0/23;
+  frame8 evaluates348px and the parented Text3D moves in depth. Process restart
+  and reopen preserved both keys and parenting. A300-frame H264720p export
+  decoded completely and retains the depth animation. Scale/Anchor Z are exposed.
 - A real extra H264720p export of1000000022 failed at56/63 frames (timeout,
   unavailable decoded frames). The video has TimeWarpRGB R+3/G0/B-3 and VFR.
   Bounded temporal preroll retention and exact-PTS forward decode passed480
@@ -29,9 +40,14 @@ Latest active acceptance (after8e6bea28):
   frame retains readable Gujarati-font fallback text. No physical-device
   performance claim is made; see temporal-warm-export.log and
   font-temporal-export-decode.log in engine/build/android-p0.
-- iOS Swift compilation now passed; release/simulator link/config acceptance
-  continues. ncnn's public RTTI flag and Debug archive postfix were corrected.
-  The final APKs/IPA must include these follow-ups before delivery.
+- Android32/64 final signed APKs contain29dac3f3 and pass package/ABI/signature
+  checks. Their exact hashes will be recorded in the delivery manifest.
+- GitHub run36187809403 passed iOS release build, Apple Metal compilation,
+  bundle packaging, and25 simulator capture/render scenarios. Native H264/AAC
+  export and production/B-frame/VFR decoder CPU+IOSurface probes passed. Native
+  gesture tests are still running. The downloaded IPA exposed a separate stale
+  CFBundleVersion2109 despite project2110; metadata450974e0 derives the value
+  from the project and rejects stale packages. Corrected IPA packaging is pending.
 
 - Autosave now initializes Android's native file path at creation, persists
   empty projects, ignores cursor-only changes for debounce, and saves pending
@@ -45,12 +61,12 @@ Latest active acceptance (after8e6bea28):
   track. Legacy tracks migrate with preserved recovery data. Graph controls live
   in the effect, not the video's speed panel; compact timeline children show
   labels/keyframes/curves. iOS effect insertion waits for actual insertion before
-  closing the browser. Native iOS acceptance is still pending.
+  closing the browser. The native iOS gesture acceptance is still pending.
 - Shared 3D includes creatable cameras/lights, null-depth keys, per-instance
   materials, static scene assembly with preview-only observer camera, and
   serialization validation. New text3D is static. A scene field formatting bug
   changed typed1100 to11000; focused numeric drafts now remain stable on both
-  platforms. Native field QA is pending the updated APK.
+  platforms. Android first-focus typing and scene-exit QA passed as recorded above.
 - Real-ESRGAN animevideov3 runs in the shared core with bounded tiled2x/4x
   inference and cancellation, connected to actual video export including audio.
   This model targets anime/illustration; CPU performance and independent-frame
@@ -62,20 +78,21 @@ Latest active acceptance (after8e6bea28):
   `engine/build/host/full-post-heartbeat-test.log` (before the additional easing
   families below). Native GLES: **182 tests /872,788 checks /0 failures**,
   `engine/build/android-p0/native-full-2110.log`; real MediaCodec and VFR proxy
-  opt-ins passed separately. Debug/JVM: **99 tests /0 failures**,
-  `engine/build/android-p0/2110-debug-regression.log`.
+  opt-ins passed separately. Latest Debug/JVM: **103 tests /0 failures**,
+  `engine/build/android-p0/2110-temporal-null-debug.log`.
 - User supplied a new curve-editor screenshot after the first full-screen
-  design. Current work replaces default full-screen presentation with the
+  design. The final implementation replaces default full-screen presentation with the
   reference's timeline-adjacent panel, green curve, white handles and preset
   rails, preserving larger hit targets. Real Bounce/Elastic/Steps families passed
-  3 host tests/3,351 checks and 1 native GLES test/21 checks. Latest layout/native numeric
-  fields still need emulator QA and final packaging.
-- Build number2110 is set on both platforms. One preliminary Android32 release
-  build passed (`2110-release-32.log`), but it predates the revised graph and
-  is **not** the final deliverable. iOS CI and final32/64/IPA packaging remain.
+  3 host tests/3,351 checks and 1 native GLES test/21 checks. Android layout,
+  handles, presets and numeric fields passed the actual UI checks listed above.
+- Android final32/64 builds passed. Preliminary logs (`2110-release-32.log`)
+  predate the reference graph; only `2110-delivery-release-32.log` and
+  `2110-delivery-release-64.log` correspond to the final APKs. The iOS packaged
+  version follow-up is tracked above.
 - Reference-layout debug build passed in 1m22 with102 JVM tests. The optional
   expanded iOS menu and unsupported-inversion states were corrected afterward;
-  their last focused JVM check remains for the final build.
+  they are included in the later103-test JVM/build result.
 - Actual app neural export completed63 frames at2x and published320x180 H.264
   21fps/3.00s to MediaStore. FFmpeg decoded the complete file without errors
   (`ai-app-export-decode.log`). This fixture has no audio; audio retention was
@@ -90,7 +107,8 @@ Latest active acceptance (after8e6bea28):
   green curve, preset rails and a dotted white progress guide.
 - First2110 iOS CI failed Swift type-checking in ExportView.options. The large
   builder was split into named sections with explicitly typed dimension math;
-  native recompilation is required before declaring the IPA ready.
+  native recompilation passed in run36187809403. Only the separate packaged
+  version mismatch remains in the IPA follow-up described above.
 - The user explicitly cancelled recurring automation
   `aurea-implementa-o-e-paridade`; it was deleted in the app. Continue only this
   active task. Do not recreate the automation.

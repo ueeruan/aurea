@@ -101,7 +101,7 @@ internal fun TextAnimSection(env: PanelEnv) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        TextPresets.forEachIndexed { i, name -> AnimChip(name, false) { store.applyTextPreset(i) } }
+        TextPresets.forEachIndexed { i, name -> AnimChip(if (i >= 19) androidx.compose.ui.res.stringResource(com.aurea.aurea.presets.PackTextPresetLabels[i - 19]) else name, false) { store.applyTextPreset(i) } }
     }
     list.forEachIndexed { index, v -> AnimatorCard(env, index, v) }
     Spacer(Modifier.height(4.dp))

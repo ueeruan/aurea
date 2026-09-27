@@ -235,7 +235,7 @@ const char* text_preset_name(u32 id) noexcept {
     static const char* names[kTextPresetCount] = {"Pop", "Bounce", "Slide", "Scale", "Fade", "Blur Reveal", "Word Highlight", "Karaoke",
         "Typewriter", "Wave", "Elastic", "Preset Bounce", "Preset Entrada suave", "Preset Revelar",
         "Preset Deslizar", "Preset Entrada rápida", "Preset Salto elástico",
-        "Preset Salto por palavra", "Preset Movimento suave"};
+        "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa"};
     return id < kTextPresetCount ? names[id] : "";
 }
 
@@ -255,12 +255,14 @@ TextAnimator reveal(u8 basedOn, u8 shape, u32 props) {
 } // namespace
 
 #include "JuanTextPresets.inc"
+#include "PackTextPresets.inc"
 
 bool apply_text_preset(u32 id, TextData& t, TrackSet& tr, i64 s, i64 d, f64 fps) {
     if (id >= kTextPresetCount) return false;
     d = std::max<i64>(2, d);
     tr.remove_if([](const Track& x) { return x.property == TrackProperty::TextAnimParam; });
     t.animators.clear();
+    if (id >= 19) return apply_pack_text(id, t, tr, s, d);
     if (id >= 11) return apply_juan_text(id, t, tr, s, fps > 0 ? fps : 30.0);
     u32 words = 0;
     {

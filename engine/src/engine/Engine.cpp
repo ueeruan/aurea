@@ -7000,7 +7000,12 @@ f32 Engine::preview_heavy_scale() const noexcept {
 }
 
 Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview) noexcept {
-    std::lock_guard<std::mutex> rl(renderMutex_);
+    // O lock de render é pego só por PREPARE + RENDER (curto). A espera pelos
+    // frames de vídeo (até 4 s num arquivo quebrado) fica FORA dele: com o
+    // lock preso, `detach_surface` (surfaceDestroyed na thread principal) e a
+    // thread de render esperavam a captura da miniatura — no Galaxy S22 isso
+    // deu ANR ("Input dispatching timed out") ao sair do editor.
+    std::unique_lock<std::mutex> rl(renderMutex_);
     if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
 
     RenderSettings rs;
@@ -7014,6 +7019,8 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
     // aproximado que o scrub mostra). Limite de 4 s para arquivo quebrado não
     // travar para sempre.
     for (int attempt = 0; attempt < 800; ++attempt) {
+        if (!rl.owns_lock()) rl.lock();
+        if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
         tPrep0 = monotonic_ns();
         ++m.mediaAttempts;
         {
@@ -7031,8 +7038,13 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
         tPrep1 = monotonic_ns();
         if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) break;
         for (RenderLayer& l : snapshot_.layers) l.source.frame.reset();
+        // Dorme SEM o lock: quem precisa da GPU/superfície nesse meio-tempo
+        // (detach, render do preview) passa na frente.
+        rl.unlock();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    if (!rl.owns_lock()) rl.lock();
+    if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
     auto ms = [](u64 a, u64 b) { return static_cast<f32>(static_cast<f64>(b - a) * 1e-6); };
     m.prepareMs = ms(tPrep0, tPrep1);
     m.mediaWaitMs = ms(tStart, tPrep0);

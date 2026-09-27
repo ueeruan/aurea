@@ -23,7 +23,7 @@ struct AureaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            CreatorWelcome { ContentView() }
                 .id(model.themeId)
                 .environmentObject(model)
                 .environmentObject(conta)
@@ -61,5 +61,39 @@ struct AureaApp: App {
             @unknown default: break
             }
         }
+    }
+}
+
+private struct CreatorWelcome<Content: View>: View {
+    @AppStorage("creatorWelcomeOpened") private var opened = 0
+    @Environment(\.openURL) private var openURL
+    @State private var failed = false
+    @ViewBuilder var content: () -> Content
+    private var testing: Bool {
+#if DEBUG
+        return ProcessInfo.processInfo.environment["AUREA_PARITY_SCENE"] != nil
+#else
+        return false
+#endif
+    }
+    var body: some View {
+        if opened == 3 || testing { content() }
+        else {
+            VStack(alignment: .leading, spacing: 20) {
+                Text(AureaText.t("social_title")).font(.title)
+                Text(AureaText.t("social_body"))
+                profile("TikTok @ruanzitwo", "https://www.tiktok.com/@ruanzitwo", bit: 1)
+                profile("Instagram @ofruanzitwo", "https://www.instagram.com/ofruanzitwo/", bit: 2)
+                if failed { Text(AureaText.t("social_open_error")).foregroundStyle(.red) }
+            }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black)
+        }
+    }
+    private func profile(_ title: String, _ address: String, bit: Int) -> some View {
+        Button(title) {
+            guard let url = URL(string: address) else { return }
+            openURL(url) { accepted in
+                if accepted { opened |= bit; failed = false } else { failed = true }
+            }
+        }.buttonStyle(.borderedProminent).frame(minHeight: 44).disabled(opened & bit != 0)
     }
 }

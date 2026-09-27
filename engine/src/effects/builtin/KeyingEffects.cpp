@@ -59,7 +59,8 @@ public:
 
 class ChromaKey final : public Effect {
 public:
-    enum : u32 { kColor = 0, kTolerance, kSoftness, kSpill, kClipBlack, kClipWhite, kGamma, kView, kSpillBalance };
+    enum : u32 { kColor = 0, kTolerance, kSoftness, kSpill, kClipBlack, kClipWhite, kGamma, kView, kSpillBalance,
+                 kPreBlur };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kChromaKey, "Chave de croma", "Recorte", EffectClass::PerPixel};
@@ -78,6 +79,13 @@ public:
         static const char* const views[] = {"Composição", "Máscara", "Supressão de cor"};
         p.add_enum("view", "Visualização", views, 3, 0);
         p.add_float("spill_balance", "Proteger cores do primeiro plano", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        // Pré-desfoque: a DECISÃO (dentro/fora da chave) é tomada sobre um
+        // anel de vizinhos, não sobre o pixel cru — o ruído de compressão do
+        // fundo verde deixa de furar a máscara. A cor que sai continua a do
+        // pixel. Um anel de 8 amostras dentro do passe fundido: a chave não
+        // perde a fusão com a correção de cor que vem depois.
+        p.add_float("pre_blur", "Pré-desfoque", 0.0f, 0.0f, 10.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, 50.0f);
     }
     bool color_op(const EffectEval& e, ColorOp& op) const noexcept override {
         const Vec4 k = e.color(kColor);
@@ -95,6 +103,10 @@ public:
         op.p[9] = std::clamp(e.f(kGamma), .1f, 4.f);
         op.p[10] = static_cast<f32>(e.e(kView));
         op.p[11] = std::clamp(e.f(kSpillBalance), 0.f, 100.f) / 100.f;
+        // Raio do anel em px da camada; o shader converte pela densidade do
+        // passe (header.w). Projeto antigo: 0, nenhum vizinho é lido.
+        const f32 preBlur = std::isfinite(e.f(kPreBlur)) ? e.f(kPreBlur) : 0.0f;
+        op.p[12] = std::clamp(preBlur, 0.0f, 50.0f);
         return true;
     }
 };

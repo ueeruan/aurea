@@ -115,6 +115,29 @@ struct LayerImage {
 };
 
 class Effect;
+struct Layer;
+
+/// De qual camada o Espectro de áudio lê o som (ver `EffectResources::audio_spectrum`).
+enum class AudioSpectrumSource : u8 {
+    /// A própria camada se ela tem som; senão a camada com som mais próxima
+    /// ABAIXO dela na pilha; senão a primeira da composição que tem som.
+    Automatic = 0,
+    /// Só a própria camada (um vídeo com trilha). Sem som, o espectro repousa.
+    ThisLayer,
+    /// A primeira camada com som da composição (a de baixo).
+    FirstWithAudio,
+};
+
+/// O que o Espectro de áudio pede ao renderer no planejamento.
+struct AudioSpectrumRequest {
+    const Layer* host = nullptr;       ///< a camada dona do efeito (só no planejamento)
+    AudioSpectrumSource source = AudioSpectrumSource::Automatic;
+    u32 bands = 32;                    ///< 1..kAudioSpectrumMaxBands
+    f32 gain = 1.0f;                   ///< sensibilidade (1 = 0 dB)
+};
+
+/// Teto de faixas de um espectro (uma textura `bands`×1).
+inline constexpr u32 kAudioSpectrumMaxBands = 128;
 
 /// Recursos persistentes de efeito (LUTs de curva). Implementado pelo renderer.
 class EffectResources {
@@ -125,6 +148,15 @@ public:
     /// Fração das amostras que os efeitos caros usam neste quadro (0,25..1).
     /// Preview adaptativo/calor < 1; export e prévia do catálogo = 1 sempre.
     [[nodiscard]] virtual f32 effect_quality() const noexcept { return 1.0f; }
+    /// Espectro do som que uma camada toca NESTE quadro: textura `bands`×1
+    /// (R = magnitude 0..1 da faixa, dos graves aos agudos; G = nível geral
+    /// do quadro). Calculado do áudio decodificado, sem estado entre quadros:
+    /// o mesmo quadro dá a mesma textura no preview, no scrubbing e no export.
+    /// Nula = sem som, sem decoder ou sem GPU (o efeito desenha o repouso).
+    [[nodiscard]] virtual TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept {
+        (void)request;
+        return TextureHandle{};
+    }
 };
 
 /// Valores resolvidos de UMA instância num instante.
@@ -145,6 +177,13 @@ struct EffectEval {
     /// em pixel (raio de blur, passo de nitidez) é multiplicado por isto.
     f32                   texelScale = 1.0f;
     const LayerPlacement* placement = nullptr;
+    /// A camada dona do efeito. Como `instance`, só vale no PLANEJAMENTO.
+    const Layer*          layer = nullptr;
+    /// Recurso resolvido no planejamento por `Effect::resolve_resources` (o
+    /// espectro do som, por exemplo) e que VIAJA até a montagem — como a LUT
+    /// da curva no ColorOp. Textura persistente do renderer, fora do grafo.
+    TextureHandle         aux{};
+    Vec4                  auxInfo{};   ///< o que o efeito quiser anotar junto (nº de faixas...)
 
     [[nodiscard]] const ParamValue& value(u32 i) const noexcept { return values[i]; }
     [[nodiscard]] f32  f(u32 i) const noexcept { return values[i].v[0]; }
@@ -251,6 +290,12 @@ public:
         (void)eval; (void)out;
         return false;
     }
+
+    /// Recursos que só existem sob o lock do modelo (o espectro do som da
+    /// camada, por exemplo) são resolvidos AQUI, no planejamento, e guardados
+    /// em `eval.aux`/`eval.auxInfo` para a montagem. `eval.resources` pode
+    /// ser nulo (teste sem GPU): aí o efeito monta sem o recurso.
+    virtual void resolve_resources(EffectEval& eval) const noexcept { (void)eval; }
 
     /// Margem (px da layer) que o efeito lê em volta de cada pixel. É o que o
     /// EffectGraph soma para recortar a região visível de um efeito anterior

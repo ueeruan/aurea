@@ -34,6 +34,12 @@ void register_tracery_effect(EffectRegistry& r);
 void register_motion_behavior_effects(EffectRegistry& r);
 void register_shape_transition_effects(EffectRegistry& r);
 void register_finishing_effects(EffectRegistry& r);
+// Geradores (ruído fractal, degradês, espectro de áudio) e recorte
+// (contorno da silhueta, refinar recorte). Também no fim.
+void register_generate_effects(EffectRegistry& r);
+void register_matte_effects(EffectRegistry& r);
+// O VHS de Estilizar (o look de fita com OSD). Também no fim.
+void register_vhs_look_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

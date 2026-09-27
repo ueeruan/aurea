@@ -53,3 +53,24 @@ linear/clamp quando a slot não recebe nenhum). O bloco de push constants tem de
 `setBytes:` de 128 B existem em todas as versões que o Metal 2.1 cobre). Para o caminho rápido,
 compile o `.metal` com `xcrun -sdk iphoneos metal -c` + `metallib` e embuta o `.metallib` com
 `flags |= 1` — a abertura não paga compilação de shader nenhuma.
+
+## 5. Fragment shader com `location = 1` (MRT do 3D): a variante `fs_main_c0`
+
+O passe 3D escreve dois alvos (cor 0 = 2D de exibição, cor 1 = cena HDR), e
+`plane.frag`, `particles.frag`, `environment.frag`, `ground.frag`, `pbr.frag` e
+`dof.frag` declaram `layout(location = 1) out`. Os MESMOS shaders também vão em
+pipelines com UM alvo só (partículas 2D, planos de um grupo sem HDR, o céu
+direto). No Vulkan e no GLES a escrita num anexo que não existe é descartada; o
+Metal RECUSA criar o pipeline ("writes to color attachment 1" com
+`pixelFormat` Invalid) — e o desenho some em silêncio.
+
+Por isso o build gera, para todo fragment shader com saída em location ≥ 1, uma
+segunda tradução com `enable_frag_output_mask = 0x1` (só a cor 0 no struct de
+saída) e ponto de entrada **`fs_main_c0`**, num segundo `.metal` ligado no MESMO
+`.metallib` (`tools/metal-shaders/compile_metal.cmake`). O backend procura
+`fs_main_c0` na biblioteca de todo fragment shader e o usa em QUALQUER pipeline
+sem segundo alvo (`PipelineDesc::hasColor1 == false`); `fs_main` fica para o
+passe MRT. Um shader sem location 1 não tem a variante (a função não existe na
+biblioteca) e o backend usa `fs_main` como sempre.
+
+Conferido sem Mac por `engine/platform/ios/verify/check_metal_frag_outputs.py`.

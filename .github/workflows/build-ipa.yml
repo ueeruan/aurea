@@ -50,6 +50,7 @@ jobs:
           python3 tools/_ios_check.py tipos
           python3 engine/platform/ios/verify/check_shared_assets.py
           python3 engine/platform/ios/verify/check_effect_contract.py
+          python3 engine/platform/ios/verify/check_metal_frag_outputs.py
       - name: Install shader tools
         run: brew install cmake ninja shaderc ccache
       - name: Verify Apple stereo audio and sample-rate conversion

@@ -462,3 +462,17 @@ AUREA_TEST(Text, ImportedFontsReturnToTheListAfterReopeningTheApp) {
     std::error_code ignored;
     std::filesystem::remove_all(docs, ignored);
 }
+
+AUREA_TEST(Text, PackPresetsKeepContentAndLocalStart) {
+    for (u32 id = 19; id < text::kTextPresetCount; ++id) {
+        TextData data; data.content = "Minha legenda"; TrackSet tracks;
+        AUREA_CHECK(text::apply_text_preset(id, data, tracks, 17, 30, 30));
+        AUREA_CHECK(data.content == "Minha legenda");
+        AUREA_CHECK(!data.animators.empty());
+        if (id != 22) {
+            auto* track = tracks.find(TrackProperty::TextAnimParam, 0, id == 19 || id >= 23 ? text::kSelOffset : text::kSelStart);
+            AUREA_CHECK(track && !track->keys.empty());
+            if (track && !track->keys.empty()) AUREA_CHECK_EQ(track->keys.front().time.value, 17);
+        }
+    }
+}

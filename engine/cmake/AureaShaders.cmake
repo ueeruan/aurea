@@ -209,17 +209,21 @@ const ShaderBlob& shader_blob(ShaderId id) noexcept;
             set(_air "${_spv}.air")
             set(_metallib "${_spv}.metallib")
             set(_msl "${_spv}.mslblob")
+            # Um script (-P) por shader: o fragment shader que escreve
+            # location 1 ganha um segundo .metal (`fs_main_c0`, só a cor 0)
+            # ligado no MESMO .metallib — ver tools/metal-shaders/compile_metal.cmake.
             add_custom_command(OUTPUT "${_msl}"
-                BYPRODUCTS "${_raw}" "${_raw}.metal" "${_air}" "${_metallib}"
-                COMMAND "${AUREA_METAL_COMPILER}" "${_spv}" "${_raw}"
-                COMMAND "${_xcrun}" --sdk "${_metal_sdk}" metal -c "-std=${_metal_standard}"
-                        "${_metal_minimum_flag}"
-                        "${_raw}.metal" -o "${_air}"
-                COMMAND "${_xcrun}" --sdk "${_metal_sdk}" metallib "${_air}" -o "${_metallib}"
-                COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/metal-shaders/pack_metallib.py"
-                        "${_raw}" "${_metallib}" "${_msl}"
+                BYPRODUCTS "${_raw}" "${_raw}.metal" "${_raw}.c0.metal" "${_air}" "${_air}.c0" "${_metallib}"
+                COMMAND "${CMAKE_COMMAND}"
+                        "-DTOOL=${AUREA_METAL_COMPILER}" "-DXCRUN=${_xcrun}"
+                        "-DSDK=${_metal_sdk}" "-DSTD=${_metal_standard}" "-DMIN=${_metal_minimum_flag}"
+                        "-DSPV=${_spv}" "-DRAW=${_raw}" "-DAIR=${_air}" "-DLIB=${_metallib}" "-DOUT=${_msl}"
+                        "-DPYTHON=${Python3_EXECUTABLE}"
+                        "-DPACK=${PROJECT_SOURCE_DIR}/tools/metal-shaders/pack_metallib.py"
+                        -P "${PROJECT_SOURCE_DIR}/tools/metal-shaders/compile_metal.cmake"
                 DEPENDS "${_spv}" "${AUREA_METAL_COMPILER}"
                         "${PROJECT_SOURCE_DIR}/tools/metal-shaders/pack_metallib.py"
+                        "${PROJECT_SOURCE_DIR}/tools/metal-shaders/compile_metal.cmake"
                 COMMENT "SPIR-V -> Metal precompilado: ${_spv}"
                 VERBATIM)
             list(APPEND _embed_list "${_msl}")

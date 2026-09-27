@@ -28,6 +28,7 @@ add_executable(aurea_tests
     test_text3d.cpp
     test_transform3d_keys.cpp
     test_camera_lens.cpp
+    test_scene_param_keys.cpp
     test_effect3d_sweep.cpp
     test_audio.cpp
     test_captions.cpp

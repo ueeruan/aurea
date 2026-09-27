@@ -226,7 +226,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             name = R.string.fx_name_chroma_key,
             keywords = "chave de croma chroma key fundo verde green screen remover cor",
             principal = listOf(0, 1, 2),
-            params = mapOf(0 to ParamHuman(label = R.string.fx_cor_remover), 3 to ParamHuman(label = R.string.fx_limpar_contorno)),
+            params = mapOf(
+                0 to ParamHuman(label = R.string.fx_cor_remover),
+                3 to ParamHuman(label = R.string.fx_limpar_contorno),
+                9 to ParamHuman(label = R.string.fx_pre_desfoque, suffix = "px", decimals = 1),
+            ),
         ),
     )
     put(
@@ -350,6 +354,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 3 to ParamHuman(label = R.string.fx_rotacao_iris, suffix = "°", decimals = 0),
                 4 to ParamHuman(label = R.string.fx_qualidade, decimals = 0),
                 7 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+                8 to ParamHuman(label = R.string.fx_curvatura_iris, decimals = 0),
+                9 to ParamHuman(label = R.string.fx_escala_x, decimals = 0),
+                10 to ParamHuman(label = R.string.fx_escala_y, decimals = 0),
             ),
         ),
     )
@@ -883,6 +890,102 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             4 to ParamHuman(label = R.string.fx_matiz_colorir),
             5 to ParamHuman(label = R.string.fx_saturacao_colorir, decimals = 0),
             6 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+        )))
+    // --- Geradores e recorte do editor antigo ---
+    put("aurea.generate.fractal_noise", EffectHuman(
+        name = R.string.fx_name_fractal_noise,
+        keywords = "ruido fractal fractal noise nuvem fumaca textura turbulencia perlin simplex",
+        principal = listOf(0, 1, 2, 6, 7, 8),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_tipo_ruido),
+            1 to ParamHuman(label = R.string.fx_tipo_fractal),
+            2 to ParamHuman(label = R.string.fx_contraste, decimals = 0),
+            3 to ParamHuman(label = R.string.fx_brilho, decimals = 0),
+            4 to ParamHuman(label = R.string.fx_inverter),
+            5 to ParamHuman(label = R.string.fx_estouro),
+            6 to ParamHuman(label = R.string.fx_escala, suffix = "px", decimals = 0),
+            7 to ParamHuman(label = R.string.fx_complexidade, suffix = "oitavas", decimals = 1),
+            8 to ParamHuman(label = R.string.fx_evolucao),
+            9 to ParamHuman(label = R.string.fx_deslocamento, suffix = "px", decimals = 0),
+            10 to ParamHuman(label = R.string.fx_rotacao),
+            11 to ParamHuman(label = R.string.fx_semente),
+            12 to ParamHuman(label = R.string.fx_influencia_oitavas, decimals = 0),
+            13 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+            14 to ParamHuman(label = R.string.fx_mistura_camada),
+            15 to ParamHuman(label = R.string.fx_preencher_caixa),
+        )))
+    put("aurea.generate.gradient_ramp", EffectHuman(
+        name = R.string.fx_name_gradient_ramp,
+        keywords = "degrade gradient ramp gradiente linear radial duas cores",
+        principal = listOf(0, 1, 2, 3, 4, 6),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_forma),
+            1 to ParamHuman(label = R.string.fx_ponto_inicial),
+            2 to ParamHuman(label = R.string.fx_ponto_final),
+            3 to ParamHuman(label = R.string.fx_cor_inicial),
+            4 to ParamHuman(label = R.string.fx_cor_final),
+            5 to ParamHuman(label = R.string.fx_dispersao, suffix = "px", decimals = 0),
+            6 to ParamHuman(label = R.string.fx_mistura_original, decimals = 0),
+            7 to ParamHuman(label = R.string.fx_mistura_camada),
+            8 to ParamHuman(label = R.string.fx_preencher_caixa),
+        )))
+    put("aurea.generate.four_color_gradient", EffectHuman(
+        name = R.string.fx_name_four_color_gradient,
+        keywords = "degrade 4 cores four color gradient quatro cores cantos",
+        principal = listOf(4, 5, 6, 7, 8, 10),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_ponto_1),
+            1 to ParamHuman(label = R.string.fx_ponto_2),
+            2 to ParamHuman(label = R.string.fx_ponto_3),
+            3 to ParamHuman(label = R.string.fx_ponto_4),
+            4 to ParamHuman(label = R.string.fx_cor_1),
+            5 to ParamHuman(label = R.string.fx_cor_2),
+            6 to ParamHuman(label = R.string.fx_cor_3),
+            7 to ParamHuman(label = R.string.fx_cor_4),
+            8 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+            9 to ParamHuman(label = R.string.fx_ruido, decimals = 0),
+            10 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+            11 to ParamHuman(label = R.string.fx_mistura_camada),
+            12 to ParamHuman(label = R.string.fx_preencher_caixa),
+        )))
+    put("aurea.generate.audio_spectrum", EffectHuman(
+        name = R.string.fx_name_audio_spectrum,
+        keywords = "espectro de audio audio spectrum som musica barras visualizador equalizador",
+        principal = listOf(0, 1, 4, 5, 7, 8, 10),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_fonte_som),
+            1 to ParamHuman(label = R.string.fx_bandas),
+            2 to ParamHuman(label = R.string.fx_ponto_inicial),
+            3 to ParamHuman(label = R.string.fx_ponto_final),
+            4 to ParamHuman(label = R.string.fx_altura_maxima, suffix = "px", decimals = 0),
+            5 to ParamHuman(label = R.string.fx_espessura, suffix = "px", decimals = 1),
+            6 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+            7 to ParamHuman(label = R.string.fx_cor_dentro),
+            8 to ParamHuman(label = R.string.fx_cor_fora),
+            9 to ParamHuman(label = R.string.fx_giro_matiz),
+            10 to ParamHuman(label = R.string.fx_exibicao),
+            11 to ParamHuman(label = R.string.fx_lado),
+            12 to ParamHuman(label = R.string.fx_em_circulo),
+            13 to ParamHuman(label = R.string.fx_compor_original),
+            14 to ParamHuman(label = R.string.fx_sensibilidade, decimals = 0),
+        )))
+    put("aurea.stylize.stroke_outline", EffectHuman(
+        name = R.string.fx_name_stroke_outline,
+        keywords = "contorno stroke outline traco borda silhueta",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_largura, suffix = "px", decimals = 1),
+            1 to ParamHuman(label = R.string.fx_cor),
+            2 to ParamHuman(label = R.string.fx_suavidade, suffix = "px", decimals = 1),
+            3 to ParamHuman(label = R.string.fx_posicao),
+            4 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+        )))
+    put("aurea.key.matte_refine", EffectHuman(
+        name = R.string.fx_name_matte_refine,
+        keywords = "refinar recorte matte refine choke feather encolher suavizar mascara",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_encolher, suffix = "px", decimals = 1),
+            1 to ParamHuman(label = R.string.fx_suavizar_borda, suffix = "px", decimals = 1),
+            2 to ParamHuman(label = R.string.fx_mostrar_mascara),
         )))
 }
 

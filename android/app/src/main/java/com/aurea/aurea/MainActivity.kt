@@ -9,6 +9,15 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.lifecycleScope
 import com.aurea.aurea.ads.AureaAds
@@ -61,7 +70,7 @@ class MainActivity : ComponentActivity() {
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         com.aurea.aurea.home.HomeViewModel.loadTheme(this)
-        setContent { AureaApp(store, conta) }
+        setContent { CreatorWelcome { AureaApp(store, conta) } }
 
         if (savedInstanceState == null) {
             // Número de cadastrados + revalidação da sessão (com rede; offline, segue dentro).
@@ -195,5 +204,39 @@ class MainActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         super.onLowMemory()
         store.onTrimMemory(EditorStore.TRIM_COMPLETE)
+    }
+}
+
+@Composable
+private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
+    val prefs = remember { getSharedPreferences("creator_welcome", Context.MODE_PRIVATE) }
+    var opened by remember { mutableIntStateOf(prefs.getInt("opened", 0)) }
+    var error by remember { mutableStateOf(false) }
+    if (opened == 3) { content(); return }
+    BackHandler { finish() }
+    MaterialTheme(colorScheme = darkColorScheme()) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center) {
+                Text(stringResource(R.string.social_title), style = MaterialTheme.typography.headlineMedium)
+                Spacer(Modifier.height(16.dp))
+                Text(stringResource(R.string.social_body))
+                Spacer(Modifier.height(24.dp))
+                listOf("TikTok @ruanzitwo" to "https://www.tiktok.com/@ruanzitwo", "Instagram @ofruanzitwo" to "https://www.instagram.com/ofruanzitwo/").forEachIndexed { i, profile ->
+                    val bit = 1 shl i
+                    Button(onClick = {
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(profile.second)))
+                            opened = opened or bit
+                            prefs.edit().putInt("opened", opened).apply()
+                            error = false
+                        } catch (_: android.content.ActivityNotFoundException) { error = true }
+                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = opened and bit == 0) {
+                        Text(profile.first)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+                if (error) Text(stringResource(R.string.social_open_error), color = MaterialTheme.colorScheme.error)
+            }
+        }
     }
 }

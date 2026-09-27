@@ -584,7 +584,8 @@ struct TransformView: View {
         let snapshot = group.map { ($0, changes[$0] ?? value($0)) }, local = model.localPlayhead
         model.mutate { core in
             if !gestureOpen { core.beginUndoGroup() }
-            if model.sceneEditor || !model.autoKeyTransforms {
+            // Auto-Key + trilha animada grava keyframe também na cena 3D (regra do modelo).
+            if model.transformLayout(animated: keyed) {
                 for (property, amount) in snapshot { core.layoutTransform(id, property: property, value: amount) }
             } else if keyed {
                 for (property, amount) in snapshot { core.insertKeyframe(forLayer: id, property: property, time: local, value: amount) }

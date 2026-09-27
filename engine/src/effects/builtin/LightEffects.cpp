@@ -436,11 +436,16 @@ public:
 class LensBlur final : public Effect {
 public:
     enum : u32 { kRadius = 0, kHighlightBoost, kIrisSides, kIrisRotation, kQuality,
-                 kIrisSharpness, kOnlyBlur, kMix };
+                 kIrisSharpness, kOnlyBlur, kMix, kIrisCurvature, kScaleX, kScaleY };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kLensBlur, "Desfoque de lente", "Desfoque", EffectClass::Neighborhood};
         return i;
+    }
+    /// Quanto o disco pode esticar: o maior dos dois eixos, em fator.
+    static f32 stretch(const EffectEval& e, u32 axis) noexcept {
+        const f32 v = e.f(axis);
+        return std::isfinite(v) ? std::clamp(v, 1.0f, 1000.0f) / 100.0f : 1.0f;
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("radius", "Raio", 18.0f, 0.0f, 400.0f, kParamAnimatable | kParamPixels, "px");
@@ -451,9 +456,20 @@ public:
         p.add_float("iris_sharpness", "Suavidade", 100.0f, 10.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_bool("only_blur", "Só o desfoque", false);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        // Íris (acrescentados depois; o padrão é o desenho de sempre): a
+        // curvatura das lâminas — positiva arredonda o polígono até o círculo,
+        // negativa puxa o meio de cada lado para dentro (estrela) — e o
+        // achatamento do disco (bokeh anamórfico).
+        p.add_float("iris_curvature", "Curvatura da íris", 0.0f, -100.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("scale_x", "Escala X", 100.0f, 10.0f, 300.0f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(1.0f, 1000.0f);
+        p.add_float("scale_y", "Escala Y", 100.0f, 10.0f, 300.0f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(1.0f, 1000.0f);
     }
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(kRadius) < 0.5f || e.f(kMix) < 0.01f; }
-    f32 input_margin(const EffectEval& e) const noexcept override { return e.f(kRadius); }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        return e.f(kRadius) * std::max(stretch(e, kScaleX), stretch(e, kScaleY));
+    }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_lens_blur_frag, work));
     }
@@ -465,10 +481,11 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         const f32 radius = std::max(0.0f, e.f(kRadius));
+        const f32 sx = stretch(e, kScaleX), sy = stretch(e, kScaleY);
         // Um disco de raio r na escala 1/k é um disco de raio r/k: reduzir não
         // muda o desenho e prende o custo por pixel.
-        const u32 k = reduction_for(radius, 20.0f);
-        const Rect region = spread_region(input.region, radius, radius, e.placement, margin);
+        const u32 k = reduction_for(radius * std::max(sx, sy), 20.0f);
+        const Rect region = spread_region(input.region, radius * sx, radius * sy, e.placement, margin);
         u32 w = 0, h = 0;
         ctx.region_size(region, input.texel_scale_x() / static_cast<f32>(k), w, h);
 
@@ -485,7 +502,8 @@ public:
         const f32 quality = std::clamp(e.f(kQuality) * ctx.resources().effect_quality(), 1.0f, 6.0f);
         u.p1 = Vec4{e.f(kIrisRotation), std::round(6.0f + quality * 3.0f), std::round(quality),
                     e.f(kMix) / 100.0f};
-        u.p3 = Vec4{e.b(kOnlyBlur) ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+        const f32 curvature = std::isfinite(e.f(kIrisCurvature)) ? std::clamp(e.f(kIrisCurvature) / 100.0f, -1.0f, 1.0f) : 0.0f;
+        u.p3 = Vec4{e.b(kOnlyBlur) ? 1.0f : 0.0f, curvature, sx, sy};
 
         out = LayerImage{ctx.texture("desfoque-lente", w, h), region, w, h};
         if (ctx.fullscreen_pass("desfoque-lente", PassStage::Effects, out.texture, ShaderId::effects_lens_blur_frag,

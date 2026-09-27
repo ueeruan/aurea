@@ -1485,6 +1485,31 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     [self flush];
 }
 
+- (NSArray<NSNumber*>*)sceneSettings {
+    auto* e = self.engine; if (!e) return @[];
+    float post[6]{}, floor[8]{};
+    e->query_scene3d_post(post); e->query_scene_floor(floor);
+    return @[@(e->studio_environment()), @(floor[0]), @(post[0]), @(post[1]), @(post[2]), @(post[3]), @(post[4]), @(post[5])];
+}
+- (BOOL)setSceneSetting:(uint32_t)parameter value:(float)value {
+    if (!self.engine || !std::isfinite(value)) return NO;
+    auto& e = *self.engine;
+    float post[6]{}, floor[8]{};
+    e.query_scene3d_post(post); e.query_scene_floor(floor);
+    switch (parameter) {
+    case 0: {
+        if (!e.set_studio_environment(static_cast<aurea::u32>(value)).ok()) return false;
+        return e.set_scene_floor(value > 0 ? 1 : 0, .18f, .18f, .18f, .2f, .5f);
+    }
+    case 1: return e.set_scene_floor(value > 0 ? 1 : 0, floor[1], floor[2], floor[3], floor[4], floor[5] > 0 ? floor[5] : .5f, floor[6], floor[7]);
+    case 2: return e.set_scene3d_quality(static_cast<aurea::u32>(value));
+    case 3: return e.set_scene3d_tonemap(static_cast<aurea::u32>(value), post[2]);
+    case 4: return e.set_scene3d_tonemap(static_cast<aurea::u32>(post[1]), value);
+    case 5: return e.set_scene3d_bloom(value > 0, post[4], post[5]);
+    case 6: return e.set_scene3d_bloom(post[3] > 0, value, post[5]);
+    default: return false;
+    }
+}
 - (BOOL)setEnvironmentBackground:(BOOL)visible {
     auto* e = self.engine;
     return e && e->set_environment_background(visible) ? YES : NO;

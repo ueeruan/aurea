@@ -142,7 +142,23 @@ void main() {
             float y = dot(enc, vec3(0.2126, 0.7152, 0.0722));
             vec2 cc = chroma709(enc, y);
             vec2 kc = chroma709(a.yzw, dot(a.yzw, vec3(0.2126, 0.7152, 0.0722)));
-            float dist = length(cc - kc);
+            // Pré-desfoque (e4.x, px da camada): a distância à chave é medida
+            // na média de um anel de 8 vizinhos mais o centro (a cor da FONTE,
+            // alfa-pesada) — o ruído do fundo deixa de furar a máscara. A cor
+            // que segue é a do pixel; só a decisão é suavizada.
+            vec2 judged = cc;
+            if (e4.x > 0.0 && p.header.y > 0.0) {
+                float rb = e4.x * p.header.w;   // texels
+                vec4 acc = texture(u_tex0, v_uv) * 2.0;
+                for (int k = 0; k < 8; ++k) {
+                    float ang = float(k) * 0.7853982;
+                    vec2 o = vec2(cos(ang), sin(ang)) * rb * p.header.yz;
+                    acc += texture(u_tex0, clamp(v_uv + o, vec2(0.0), vec2(1.0)));
+                }
+                vec3 avg = linear_to_srgb(acc.rgb / max(acc.a, 1e-4));
+                judged = chroma709(avg, dot(avg, vec3(0.2126, 0.7152, 0.0722)));
+            }
+            float dist = length(judged - kc);
             float matte = smoothstep(b.x, b.x + max(b.y, 1e-4), dist);
             matte = pow(clamp((matte - b.w) / max(d.x - b.w, 1e-4), 0.0, 1.0), 1.0 / max(d.y, 0.1));
             if (d.z < .5) alpha *= matte;

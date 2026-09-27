@@ -285,6 +285,109 @@ AUREA_TEST(Transform3D, SceneLayoutPreservesAnimationAndHandlesZeroScale) {
     AUREA_CHECK_EQ(e.query_scene_guides(guides, 256), 0u);
 }
 
+// A câmera com dois keys (quadro 0 e 60). Auto-Key (After Effects): mexer no
+// quadro 30 é KeyframeInsert — os keys de 0 e 60 NÃO mudam. O que a cena 3D
+// manda hoje (LayerLayoutTransform) desloca a curva INTEIRA: o key inicial e o
+// final andam junto — era "os keyframes da câmera mudam a posição inicial e
+// final sempre". O contrato do motor está certo; a escolha do comando é dos apps.
+AUREA_TEST(Transform3D, CameraKeyAtPlayheadKeepsOtherKeysButLayoutShiftsThem) {
+    Rig rig; AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    Engine& e = rig.e;
+    const auto camera = e.add_camera(); AUREA_CHECK(camera.ok()); if (!camera.ok()) return;
+    const u64 id = *camera;
+    const LayerId lid = LayerId::unpack(id);
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+
+    seek(e, 0);
+    editar(e, lid, TrackProperty::PositionX, FrameIndex{0}, 100.0f);
+    editar(e, lid, TrackProperty::PositionY, FrameIndex{0}, 50.0f);
+    seek(e, 60);
+    editar(e, lid, TrackProperty::PositionX, FrameIndex{60}, 300.0f);
+    editar(e, lid, TrackProperty::PositionY, FrameIndex{60}, 150.0f);
+
+    // --- Auto-Key: mover a câmera no quadro 30 cria o key de X e de Y ali ---
+    seek(e, 30);
+    editar(e, lid, TrackProperty::PositionX, FrameIndex{30}, 500.0f);
+    editar(e, lid, TrackProperty::PositionY, FrameIndex{30}, 400.0f);
+    const bridge::LayerDetailPOD em30 = detalhe(e, id);
+    const u32 xy = kBit(TrackProperty::PositionX) | kBit(TrackProperty::PositionY);
+    AUREA_CHECK((em30.animatedMask & xy) == xy);
+    AUREA_CHECK((em30.keyAtPlayheadMask & xy) == xy);
+    AUREA_CHECK(std::fabs(em30.position[0] - 500.0f) < 1e-3f);
+    AUREA_CHECK(std::fabs(em30.position[1] - 400.0f) < 1e-3f);
+    seek(e, 0);
+    const bridge::LayerDetailPOD inicio = detalhe(e, id);
+    seek(e, 60);
+    const bridge::LayerDetailPOD fim = detalhe(e, id);
+    std::printf("\n    camera Auto-Key: quadro 0 (%.0f, %.0f) quadro 60 (%.0f, %.0f) — era 100/50 e 300/150\n",
+                static_cast<double>(inicio.position[0]), static_cast<double>(inicio.position[1]),
+                static_cast<double>(fim.position[0]), static_cast<double>(fim.position[1]));
+    AUREA_CHECK(std::fabs(inicio.position[0] - 100.0f) < 1e-3f);
+    AUREA_CHECK(std::fabs(inicio.position[1] - 50.0f) < 1e-3f);
+    AUREA_CHECK(std::fabs(fim.position[0] - 300.0f) < 1e-3f);
+    AUREA_CHECK(std::fabs(fim.position[1] - 150.0f) < 1e-3f);
+    AUREA_CHECK_EQ(comp->layer(lid)->tracks.find(TrackProperty::PositionX)->keys.size(), 3u);
+
+    // --- O que a cena 3D manda hoje: LayerLayoutTransform no quadro 0 -------
+    // Alvo X = 160 no quadro 0 (delta +60): TODOS os keys de X andam 60.
+    seek(e, 0);
+    Command c; c.type = CommandType::LayerLayoutTransform;
+    c.shape_param = ShapeParamPayload{lid, 0, 160.0f};
+    AUREA_CHECK(e.apply_command(c).ok());
+    AUREA_CHECK(std::fabs(detalhe(e, id).position[0] - 160.0f) < 1e-3f);
+    seek(e, 30);
+    const f32 x30 = detalhe(e, id).position[0];
+    seek(e, 60);
+    const f32 x60 = detalhe(e, id).position[0];
+    std::printf("    camera layout no quadro 0 (+60): quadro 30 x %.0f (era 500), quadro 60 x %.0f (era 300)\n",
+                static_cast<double>(x30), static_cast<double>(x60));
+    AUREA_CHECK(std::fabs(x30 - 560.0f) < 1e-3f);
+    AUREA_CHECK(std::fabs(x60 - 360.0f) < 1e-3f);
+    AUREA_CHECK_EQ(comp->layer(lid)->tracks.find(TrackProperty::PositionX)->keys.size(), 3u);
+    // Y não foi tocado pelo layout de X.
+    AUREA_CHECK(std::fabs(detalhe(e, id).position[1] - 150.0f) < 1e-3f);
+}
+
+// O relato "os keyframes de qualquer camada e nulo 3D em X/Y não marcam": a
+// cena 3D ligada (set_scene_editor) só troca a vista de navegação — o motor
+// NÃO bloqueia KeyframeInsert no nulo 3D nem na câmera. Quem decide entre
+// keyframe e LayerLayoutTransform é a UI (hoje manda layout na cena).
+AUREA_TEST(Transform3D, SceneEditorNeverBlocksPositionKeysOnNullAndCamera) {
+    Rig rig; AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    Engine& e = rig.e;
+    const auto null3d = e.add_null(true); AUREA_CHECK(null3d.ok());
+    const auto camera = e.add_camera(); AUREA_CHECK(camera.ok());
+    if (!null3d.ok() || !camera.ok()) return;
+    e.set_scene_editor(true, -30, 20, 3);
+    const u32 xy = kBit(TrackProperty::PositionX) | kBit(TrackProperty::PositionY);
+    for (const u64 id : {*null3d, *camera}) {
+        seek(e, 24);
+        const LayerId lid = LayerId::unpack(id);
+        const bridge::LayerDetailPOD antes = detalhe(e, id);
+        AUREA_CHECK_EQ(antes.animatedMask & xy, 0u);
+        // A mesma sequência de `setTransform2` com a trilha animada (Auto-Key ON):
+        // um KeyframeInsert por componente, no cabeçote LOCAL da camada.
+        editar(e, lid, TrackProperty::PositionX, FrameIndex{antes.localPlayhead}, antes.position[0] + 40.0f);
+        editar(e, lid, TrackProperty::PositionY, FrameIndex{antes.localPlayhead}, antes.position[1] - 25.0f);
+        const bridge::LayerDetailPOD marcado = detalhe(e, id);
+        AUREA_CHECK_EQ(marcado.animatedMask & xy, xy);
+        AUREA_CHECK_EQ(marcado.keyAtPlayheadMask & xy, xy);
+        AUREA_CHECK_NEAR(marcado.position[0], antes.position[0] + 40.0f, 1e-3f);
+        AUREA_CHECK_NEAR(marcado.position[1], antes.position[1] - 25.0f, 1e-3f);
+        // Segundo key mais adiante: o primeiro fica como foi marcado.
+        seek(e, 60);
+        editar(e, lid, TrackProperty::PositionX, FrameIndex{detalhe(e, id).localPlayhead}, antes.position[0] + 120.0f);
+        seek(e, 24);
+        AUREA_CHECK_NEAR(detalhe(e, id).position[0], antes.position[0] + 40.0f, 1e-3f);
+        seek(e, 42);
+        AUREA_CHECK_NEAR(detalhe(e, id).position[0], antes.position[0] + 80.0f, 1.0f);
+        const Layer* l = e.project()->timeline().composition(e.project()->timeline().current())->layer(lid);
+        AUREA_CHECK(l && l->tracks.find(TrackProperty::PositionX) && l->tracks.find(TrackProperty::PositionX)->keys.size() == 2);
+        AUREA_CHECK(l && l->tracks.find(TrackProperty::PositionY) && l->tracks.find(TrackProperty::PositionY)->keys.size() == 1);
+    }
+    e.set_scene_editor(false, 0, 0, 3);
+}
+
 AUREA_TEST(Transform3D, LayoutOpacityAndSkewPreserveKeysAndUndo) {
     Rig rig; AUREA_CHECK(rig.ok); if (!rig.ok) return;
     auto& engine = rig.e;
@@ -309,4 +412,29 @@ AUREA_TEST(Transform3D, LayoutOpacityAndSkewPreserveKeysAndUndo) {
         track = comp->layer(rig.id)->tracks.find(static_cast<TrackProperty>(property));
         AUREA_CHECK(track && std::fabs(track->keys[0].value - 0.2f) < .001f);
     }
+}
+
+AUREA_TEST(Transform3D, CameraOffsetAndSceneOrbitKeepEndpoints) {
+    Rig rig; AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    auto& e = rig.e;
+    auto camera = e.add_camera(); AUREA_CHECK(camera.ok()); if (!camera.ok()) return;
+    auto id = LayerId::unpack(*camera);
+    auto* layer = e.project()->timeline().composition(e.project()->timeline().current())->layer(id);
+    layer->start = FrameIndex{20}; layer->end = FrameIndex{100}; layer->offset = FrameIndex{7};
+    auto anchor = layer->transform.anchor;
+    editar(e, id, TrackProperty::PositionX, FrameIndex{7}, 100);
+    editar(e, id, TrackProperty::PositionX, FrameIndex{67}, 300);
+    seek(e, 50);
+    auto before = detalhe(e, *camera); AUREA_CHECK_EQ(before.localPlayhead, 37);
+    e.set_scene_editor(true, 75, -30, 4);
+    auto orbit = detalhe(e, *camera);
+    AUREA_CHECK_NEAR(orbit.position[0], before.position[0], .001f);
+    editar(e, id, TrackProperty::PositionX, FrameIndex{orbit.localPlayhead}, 500);
+    e.set_scene_editor(false, 0, 0, 3);
+    seek(e, 20); AUREA_CHECK_NEAR(detalhe(e, *camera).position[0], 100, .001f);
+    seek(e, 80); AUREA_CHECK_NEAR(detalhe(e, *camera).position[0], 300, .001f);
+    seek(e, 50); AUREA_CHECK_NEAR(detalhe(e, *camera).position[0], 500, .001f);
+    AUREA_CHECK_NEAR(layer->transform.anchor.x, anchor.x, .001f);
+    AUREA_CHECK_NEAR(layer->transform.anchor.y, anchor.y, .001f);
+    AUREA_CHECK_NEAR(layer->transform.anchor.z, anchor.z, .001f);
 }

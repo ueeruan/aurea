@@ -523,9 +523,14 @@ AUREA_JNI void AUREA_FN(nativeDetachSurface)(JNIEnv*, jclass, jlong handle) {
 }
 
 AUREA_JNI void AUREA_FN(nativeResizeSurface)(JNIEnv*, jclass, jlong handle, jint width, jint height) {
-    if (NativeContext* c = ctx_of(handle)) {
-        (void)c->engine.resize_surface(static_cast<u32>(width), static_cast<u32>(height));
-    }
+    NativeContext* c = ctx_of(handle);
+    if (!c) return;
+    // Mesmo lock do attach/detach: um surfaceChanged que chega enquanto a
+    // janela está sendo solta/trocada não pode redimensionar uma superfície
+    // que já não existe (Galaxy S24 FE: SIGSEGV no resize pela thread de render).
+    std::lock_guard<std::mutex> lock(c->surfaceMutex);
+    if (!c->window) return;
+    (void)c->engine.resize_surface(static_cast<u32>(width), static_cast<u32>(height));
 }
 
 // =============================================================================
@@ -2659,4 +2664,31 @@ AUREA_JNI jlongArray AUREA_FN(nativeQueryTextPath)(JNIEnv* env, jclass, jlong ha
     jlongArray out = env->NewLongArray(4);
     if (out) env->SetLongArrayRegion(out, 0, 4, v);
     return out;
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeSceneSettings)(JNIEnv* env, jclass, jlong handle) {
+    auto* c = ctx_of(handle); if (!c) return nullptr;
+    float post[6]{}, floor[8]{};
+    c->engine.query_scene3d_post(post); c->engine.query_scene_floor(floor);
+    float values[8]{static_cast<float>(c->engine.studio_environment()), floor[0], post[0], post[1], post[2], post[3], post[4], post[5]};
+    auto out = env->NewFloatArray(8); if (out) env->SetFloatArrayRegion(out, 0, 8, values); return out;
+}
+AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle, jint parameter, jfloat value) {
+    auto* c = ctx_of(handle); if (!c || !std::isfinite(value)) return false;
+    auto& e = c->engine;
+    float post[6]{}, floor[8]{};
+    e.query_scene3d_post(post); e.query_scene_floor(floor);
+    switch (parameter) {
+    case 0: {
+        if (!e.set_studio_environment(static_cast<aurea::u32>(value)).ok()) return false;
+        return e.set_scene_floor(value > 0 ? 1 : 0, .18f, .18f, .18f, .2f, .5f);
+    }
+    case 1: return e.set_scene_floor(value > 0 ? 1 : 0, floor[1], floor[2], floor[3], floor[4], floor[5] > 0 ? floor[5] : .5f, floor[6], floor[7]);
+    case 2: return e.set_scene3d_quality(static_cast<aurea::u32>(value));
+    case 3: return e.set_scene3d_tonemap(static_cast<aurea::u32>(value), post[2]);
+    case 4: return e.set_scene3d_tonemap(static_cast<aurea::u32>(post[1]), value);
+    case 5: return e.set_scene3d_bloom(value > 0, post[4], post[5]);
+    case 6: return e.set_scene3d_bloom(post[3] > 0, value, post[5]);
+    default: return false;
+    }
 }

@@ -153,6 +153,11 @@ struct Buffer {
 struct ShaderObject {
     id<MTLLibrary>  library = nil;
     id<MTLFunction> function = nil;
+    /// Fragment shader que escreve location 1 (MRT do 3D): `fs_main_c0`, o
+    /// mesmo shader só com a cor 0 (msl_glue.md §5). O Metal recusa um
+    /// pipeline cuja função escreve um anexo que o descritor não tem; esta
+    /// variante é a que vai em todo pipeline sem segundo alvo. nil = não há.
+    id<MTLFunction> functionColor0 = nil;
     ShaderStage     stage = ShaderStage::Fragment;
     /// Tamanho do grupo de threads (só compute): o Metal não o conhece pelo
     /// pipeline, então vem declarado no bloco MSL (msl_glue.md).

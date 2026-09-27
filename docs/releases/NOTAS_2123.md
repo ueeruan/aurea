@@ -1,7 +1,7 @@
 # Aurea — build 2123
 
 HOME E EDIÇÃO
-Nova Home com botão central de projeto, Projetos e Presets da comunidade. Editar texto separado de Opções de texto: texto 2D/3D abre com teclado. Timeline distingue toque, arrasto e rolagem; esticar a camada amplia o projeto. Detectar batidas removido da interface.
+Nova Home com botão central de projeto, Projetos e Presets de legendas da comunidade. Editar texto separado de Opções de texto: texto 2D/3D abre com teclado. Timeline distingue toque, arrasto e rolagem; esticar a camada amplia o projeto. Detectar batidas removido da interface.
 
 EFEITOS
 JPEG Glitch, Signal Analog, Tracery, Deep Glow 2 e Shadow Studio 3. Shake e Light Sweep refeitos; Glitchify ampliado. Controles simples e avançados, keyframes e desfazer. Implementações nativas próprias; não executam plugins do After Effects.
@@ -19,4 +19,4 @@ Paridade visual exata com plugins desktop e desempenho em A51/iPhone físico ain
 
 Requisitos configurados no build: Android 8/API 26 ou superior, pacote ARM de 32 ou 64 bits conforme o aparelho; iOS 16.3 ou superior. Isso não define desempenho mínimo garantido. O IPA sem assinatura exige assinatura/sideload para instalar.
 
-Validação e arquivos de distribuição serão registrados em BUILD_2123.md depois da execução. O emulador Android continua em uso pelo usuário; testes conectados novos aguardam disponibilidade.
+Arquivos gerados: APK 32 bits, APK 64 bits e IPA ARM64 sem assinatura. Suíte completa do motor: 834 testes e 5.574.767 verificações, zero falhas. Validação e hashes em BUILD_2123.md. O emulador Android continua em uso pelo usuário; testes conectados novos aguardam disponibilidade.

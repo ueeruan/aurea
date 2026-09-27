@@ -129,6 +129,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val autoSpeed = dp(120f)        // px/s, constante
     val autoIntent = dp(4f)
     val axisSlop = dp(8f)           // depois do toque longo, o eixo se decide com 8 dp
+    val holdJitter = dp(2f)         // tremor de um dedo parado (mais que isto é movimento)
     val flingMin = dp(50f)          // px/s
 
     // --- Guias ----------------------------------------------------------------------------

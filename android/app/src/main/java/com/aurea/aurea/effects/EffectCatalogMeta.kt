@@ -155,6 +155,34 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.control.checkbox", EffectMeta(R.string.fx_desc_control_checkbox, AllTargets))
     put("aurea.control.color", EffectMeta(R.string.fx_desc_control_color, AllTargets))
     put("aurea.control.point", EffectMeta(R.string.fx_desc_control_point, AllTargets))
+    // --- Pacote de paridade: movimento, transições por forma e acabamento ---
+    put("aurea.motion.oscillate", EffectMeta(R.string.fx_desc_motion_oscillate, AllTargets))
+    put("aurea.motion.swing", EffectMeta(R.string.fx_desc_motion_swing, AllTargets))
+    put("aurea.motion.wiggle", EffectMeta(R.string.fx_desc_motion_wiggle, AllTargets))
+    put("aurea.transition.iris_wipe", EffectMeta(R.string.fx_desc_transition_iris_wipe, AllTargets))
+    put("aurea.transition.box_wipe", EffectMeta(R.string.fx_desc_transition_box_wipe, AllTargets))
+    put("aurea.transition.venetian_blinds", EffectMeta(R.string.fx_desc_transition_venetian_blinds, AllTargets))
+    put("aurea.blur.radial", EffectMeta(R.string.fx_desc_blur_radial, AllTargets))
+    put("aurea.distort.mirror", EffectMeta(R.string.fx_desc_distort_mirror, AllTargets))
+    put("aurea.transform.crop", EffectMeta(R.string.fx_desc_transform_crop, AllTargets))
+    put("aurea.stylize.vignette", EffectMeta(R.string.fx_desc_stylize_vignette, AllTargets))
+    put("aurea.stylize.mosaic", EffectMeta(R.string.fx_desc_stylize_mosaic, AllTargets))
+    put("aurea.stylize.find_edges", EffectMeta(R.string.fx_desc_stylize_find_edges, AllTargets))
+    put("aurea.color.hue_saturation", EffectMeta(R.string.fx_desc_color_hue_saturation, AllTargets))
+    // --- Geradores e recorte do editor antigo ---
+    put("aurea.generate.fractal_noise", EffectMeta(R.string.fx_desc_generate_fractal_noise, AllTargets,
+        "fractal noise nuvem fumaca textura turbulencia"))
+    put("aurea.generate.gradient_ramp", EffectMeta(R.string.fx_desc_generate_gradient_ramp, AllTargets,
+        "ramp gradiente degrade linear radial"))
+    put("aurea.generate.four_color_gradient", EffectMeta(R.string.fx_desc_generate_four_color_gradient, AllTargets,
+        "4 color gradient quatro cores degrade"))
+    put("aurea.generate.audio_spectrum", EffectMeta(R.string.fx_desc_generate_audio_spectrum, AllTargets,
+        "audio spectrum espectro som musica barras visualizador"))
+    put("aurea.stylize.stroke_outline", EffectMeta(R.string.fx_desc_stylize_stroke_outline, AllTargets,
+        "stroke contorno traco borda silhueta outline"))
+    put("aurea.key.matte_refine", EffectMeta(R.string.fx_desc_key_matte_refine,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Texto, EffectTarget.Forma),
+        "choke feather encolher suavizar mascara matte recorte"))
 }
 
 /** Descrição, alvos e palavras extras de um efeito. */

@@ -1,5 +1,7 @@
 #include "aurea/render/Renderer.hpp"
 #include "aurea/render/MaskRaster.hpp"
+#include "aurea/audio/Audio.hpp"
+#include "aurea/audio/Spectrum.hpp"
 #include "aurea/expr/Expression.hpp"
 
 #include "aurea/scene3d/Animation.hpp"
@@ -814,6 +816,7 @@ void Renderer::forget_device() noexcept {
     heavyStats_.flowCacheBytes = 0;
     images_.clear();
     luts_.clear();
+    spectra_.clear();
     uploads_.clear();
     particleExtraBufs_.forget();
     particleStatics_.clear();
@@ -833,6 +836,7 @@ void Renderer::release_project_resources() noexcept {
         backend_->destroy_texture(i.texture);
     }
     for (auto& [k, l] : luts_) backend_->destroy_texture(l.texture);
+    for (auto& [k, s] : spectra_) backend_->destroy_texture(s.texture);
     for (auto& [k, f] : flowCache_) for (TextureHandle& t : f.tex) if (t.valid()) backend_->destroy_texture(t);
     flowCache_.clear();
     heavyStats_.flowCacheBytes = 0;
@@ -841,6 +845,10 @@ void Renderer::release_project_resources() noexcept {
     planar_.clear();
     images_.clear();
     luts_.clear();
+    spectra_.clear();
+    // Projeto fechado: os blocos de som eram dele.
+    spectrumBlocks_.reset();
+    spectrumFactory_ = nullptr;
     uploads_.clear();
     particleExtraBufs_.release(*backend_);
     particleStatics_.clear();
@@ -899,6 +907,137 @@ TextureHandle Renderer::curve_lut(const CurveData& curve) noexcept {
     return *tex;
 }
 
+namespace {
+
+/// A camada tem som que toca no instante `t`? (vídeo com trilha ou áudio,
+/// dentro do intervalo, não congelada)
+bool layer_sounds_at(const Layer& l, const Project& project, FrameIndex t) noexcept {
+    if (l.kind != LayerKind::Video && l.kind != LayerKind::Audio) return false;
+    if (t.value < l.start.value || t.value >= l.end.value) return false;
+    const Asset* a = project.asset(l.source);
+    if (!a || !a->has_audio()) return false;
+    return l.speed > 0.0f || (l.timeRemapEnabled && !l.timeRemap.keys.empty());
+}
+
+} // namespace
+
+TextureHandle Renderer::audio_spectrum(const AudioSpectrumRequest& request) noexcept {
+    if (!backend_ || !planComp_ || !planProject_ || !planMedia_) return TextureHandle{};
+    VideoSourceFactory* factory = planMedia_->factory();
+    if (!factory) return TextureHandle{};
+    const Composition& comp = *planComp_;
+    const Project& project = *planProject_;
+    const FrameIndex t = planTime_;
+
+    // 1. Qual camada toca: a própria, a mais próxima abaixo, ou a primeira.
+    const OrderedIds<LayerId>& order = comp.order();
+    const Layer* source = nullptr;
+    i32 hostIndex = -1;
+    for (u32 i = 0; i < order.size() && hostIndex < 0; ++i) {
+        if (comp.layer(order.at(i)) == request.host) hostIndex = static_cast<i32>(i);
+    }
+    if (request.source != AudioSpectrumSource::FirstWithAudio && request.host
+        && layer_sounds_at(*request.host, project, t)) {
+        source = request.host;
+    } else if (request.source == AudioSpectrumSource::ThisLayer) {
+        return TextureHandle{};
+    }
+    if (!source && request.source == AudioSpectrumSource::Automatic && hostIndex > 0) {
+        for (i32 i = hostIndex - 1; i >= 0 && !source; --i) {
+            const Layer* l = comp.layer(order.at(static_cast<u32>(i)));
+            if (l && layer_sounds_at(*l, project, t)) source = l;
+        }
+    }
+    if (!source) {
+        for (u32 i = 0; i < order.size() && !source; ++i) {
+            const Layer* l = comp.layer(order.at(i));
+            if (l && layer_sounds_at(*l, project, t)) source = l;
+        }
+    }
+    if (!source) return TextureHandle{};
+    const Asset* asset = project.asset(source->source);
+    if (!asset) return TextureHandle{};
+
+    // 2. A amostra da fonte no instante — a MESMA conta do vídeo e do mixer.
+    const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+    const f64 srcFrame = source->source_frame_f(static_cast<f64>(t.value));
+    if (!std::isfinite(srcFrame)) return TextureHandle{};
+    const i64 center = static_cast<i64>(std::llround(srcFrame * audio::kMixRate / fps));
+    const i64 first = center - static_cast<i64>(audio::kSpectrumWindow / 2);
+    const i64 length = asset->audio.sampleCount.value > 0 && asset->audio.sampleRate > 0
+                     ? asset->audio.sampleCount.value * static_cast<i64>(audio::kMixRate) / asset->audio.sampleRate
+                     : audio::frame_to_sample(asset->duration.value, asset->timebaseFps > 0.0 ? asset->timebaseFps : fps);
+    if (length <= 0 || first + static_cast<i64>(audio::kSpectrumWindow) <= 0 || first >= length) return TextureHandle{};
+
+    const u32 bands = std::clamp(request.bands, 1u, kAudioSpectrumMaxBands);
+    const f32 gain = std::isfinite(request.gain) && request.gain > 0.0f ? request.gain : 1.0f;
+    u32 gainBits = 0;
+    std::memcpy(&gainBits, &gain, sizeof(gainBits));
+    const u64 assetKey = source->source.pack();
+    u64 key = assetKey * 0x9E3779B97F4A7C15ull;
+    key ^= static_cast<u64>(first) * 0xBF58476D1CE4E5B9ull + 0x94D049BB133111EBull;
+    key ^= (static_cast<u64>(bands) << 32) ^ gainBits;
+    key ^= key >> 29;
+    if (auto it = spectra_.find(key); it != spectra_.end()) {
+        it->second.lastFrame = frameNumber_;
+        return it->second.texture;
+    }
+
+    // 3. O trecho, decodificado agora (blocos ficam para os quadros vizinhos).
+    if (!spectrumBlocks_ || spectrumFactory_ != factory) {
+        spectrumBlocks_ = std::make_unique<audio::AudioBlockCache>(factory, 8ull << 20, false);
+        spectrumFactory_ = factory;
+    }
+    if (!spectrumBlocks_->knows(assetKey)) {
+        spectrumBlocks_->register_asset(assetKey, audio::AudioAssetRef{asset->sourcePath, length});
+    }
+    f32 mono[audio::kSpectrumWindow];
+    std::shared_ptr<const audio::AudioBlock> block;
+    i64 blockIndex = -1;
+    for (u32 i = 0; i < audio::kSpectrumWindow; ++i) {
+        const i64 s = first + static_cast<i64>(i);
+        mono[i] = 0.0f;
+        if (s < 0 || s >= length) continue;
+        const i64 b = s / static_cast<i64>(audio::kBlockFrames);
+        if (b != blockIndex) {
+            blockIndex = b;
+            block = spectrumBlocks_->fetch(assetKey, b);
+        }
+        if (!block) continue;
+        const usize k = static_cast<usize>(s - b * static_cast<i64>(audio::kBlockFrames)) * audio::kMixChannels;
+        if (k + 1 < block->pcm.size()) mono[i] = 0.5f * (block->pcm[k] + block->pcm[k + 1]);
+    }
+
+    // 4. A análise → textura `bands`×1 (R = faixa, G = nível).
+    f32 magnitudes[kAudioSpectrumMaxBands];
+    f32 level = 0.0f;
+    audio::analyze_spectrum(mono, audio::kSpectrumWindow, bands, gain, magnitudes, &level);
+
+    TextureDesc d;
+    d.width = bands;
+    d.height = 1;
+    d.format = SurfaceFormat::RGBA16F;
+    d.sampled = true;
+    d.transferDst = true;
+    d.debugName = "espectro-audio";
+    auto tex = backend_->create_texture(d);
+    if (!tex.ok()) return TextureHandle{};
+    PendingUpload up;
+    up.texture = *tex;
+    up.bytesPerRow = bands * 8;
+    up.data.resize(static_cast<usize>(bands) * 8);
+    u16* px = reinterpret_cast<u16*>(up.data.data());
+    for (u32 i = 0; i < bands; ++i) {
+        px[i * 4 + 0] = to_half(magnitudes[i]);
+        px[i * 4 + 1] = to_half(level);
+        px[i * 4 + 2] = to_half(0.0f);
+        px[i * 4 + 3] = to_half(1.0f);
+    }
+    uploads_.push_back(std::move(up));
+    spectra_[key] = LutTexture{*tex, frameNumber_};
+    return *tex;
+}
+
 // =============================================================================
 // Fase 1 — prepare (sob o lock do modelo)
 // =============================================================================
@@ -907,6 +1046,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
     frameNumber_ = frameNumber;
+    // O espectro de áudio (EffectResources) precisa saber DE QUE composição,
+    // projeto e instante o planejamento é — dentro de uma pré-composição, os
+    // dela. Guarda o de fora e devolve ao sair.
+    struct PlanScope {
+        Renderer& r;
+        const Composition* comp;
+        const Project* project;
+        MediaManager* media;
+        FrameIndex time;
+        PlanScope(Renderer& self, const Composition& c, const Project& p, MediaManager* m, FrameIndex t)
+            : r(self), comp(self.planComp_), project(self.planProject_), media(self.planMedia_), time(self.planTime_) {
+            r.planComp_ = &c; r.planProject_ = &p; r.planMedia_ = m; r.planTime_ = t;
+        }
+        ~PlanScope() { r.planComp_ = comp; r.planProject_ = project; r.planMedia_ = media; r.planTime_ = time; }
+    } planScope{*this, comp, project, media, time};
     if (prepareDepth_ == 0) quality_ = effective_quality(settings);
     // Fora do playback contínuo (parado, scrub, export): o que o projeto usa e
     // ainda não foi compilado entra na fila; render() compila antes do grafo.
@@ -3889,20 +4043,28 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                            std::min<u32>(backend_->capabilities().maxTexture2D, 8192));
 
     // --- Saída.
-    if (!offscreen && fb.backbuffer.valid()) {
+    // Teste do passe de saída sem swapchain (OffscreenTarget::display): o
+    // alvo, o tamanho e a rotação vêm do alvo; tudo o mais é o caminho da tela.
+    const bool displayTest = offscreen && offscreen->display.valid() && !offscreen->yPlane.valid();
+    if ((!offscreen && fb.backbuffer.valid()) || displayTest) {
+        const TextureHandle bbTex = displayTest ? offscreen->display : fb.backbuffer;
+        const u32 bbW = displayTest ? offscreen->displayWidth : fb.backbufferWidth;
+        const u32 bbH = displayTest ? offscreen->displayHeight : fb.backbufferHeight;
+        const SurfaceFormat bbFormat = displayTest ? backend_->texture_desc(offscreen->display).format : fb.backbufferFormat;
+        const SurfaceRotation rotation = displayTest ? offscreen->displayRotation : fb.rotation;
         TextureDesc bbDesc;
-        bbDesc.width = fb.backbufferWidth;
-        bbDesc.height = fb.backbufferHeight;
-        bbDesc.format = fb.backbufferFormat;
-        const FGTexture bb = graph_.import_texture("swapchain", fb.backbuffer, bbDesc);
+        bbDesc.width = bbW;
+        bbDesc.height = bbH;
+        bbDesc.format = bbFormat;
+        const FGTexture bb = graph_.import_texture("swapchain", bbTex, bbDesc);
         auto pOut = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
-                                                            ShaderId::composite_output_frag, fb.backbufferFormat));
+                                                            ShaderId::composite_output_frag, bbFormat));
         // A composição encaixada (letterbox) no espaço LÓGICO do display, e a
         // pré-rotação aplicada no clip: o compositor do sistema não precisa
         // girar a imagem (o que custaria um passe a mais por frame, dele).
-        const bool swap = fb.rotation == SurfaceRotation::Rotate90 || fb.rotation == SurfaceRotation::Rotate270;
-        const f32 dispW = static_cast<f32>(swap ? fb.backbufferHeight : fb.backbufferWidth);
-        const f32 dispH = static_cast<f32>(swap ? fb.backbufferWidth : fb.backbufferHeight);
+        const bool swap = rotation == SurfaceRotation::Rotate90 || rotation == SurfaceRotation::Rotate270;
+        const f32 dispW = static_cast<f32>(swap ? bbH : bbW);
+        const f32 dispH = static_cast<f32>(swap ? bbW : bbH);
         const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);
         const f32 fit = std::min(dispW / compW, dispH / compH) * std::max(0.01f, settings.viewportZoom);
         const f32 ox = (dispW - compW * fit) * 0.5f + settings.viewportPan.x;
@@ -3910,7 +4072,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         Mat4 dispFromComp = Mat4::translation(Vec3{ox, oy, 0}) * Mat4::scale(Vec3{fit, fit, 1});
         Mat4 clip = clip_from_comp(dispW, dispH) * dispFromComp;
         f32 angle = 0.0f;
-        switch (fb.rotation) {
+        switch (rotation) {
             case SurfaceRotation::Rotate90:  angle = 90.0f; break;
             case SurfaceRotation::Rotate180: angle = 180.0f; break;
             case SurfaceRotation::Rotate270: angle = 270.0f; break;
@@ -3944,7 +4106,9 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             pc.cmds.draw(6);
         });
         graph_.read(pass, comp);
-        graph_.set_output(bb, ResourceState::Present);
+        // O alvo de teste é uma textura comum (não há apresentação): fica
+        // legível para o `read_texture` de quem chamou.
+        graph_.set_output(bb, displayTest ? ResourceState::ShaderRead : ResourceState::Present);
     } else if (offscreen && offscreen->yPlane.valid() && offscreen->uvPlane.valid()) {
         // Export: composição → NV12 na GPU (o encoder recebe planos prontos).
         TextureDesc yd;
@@ -4394,6 +4558,16 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
             ++it;
         }
     }
+    // Espectros: cada quadro de som é uma textura nova; 60 quadros de folga
+    // cobrem o vai-e-vem do scrubbing sem acumular.
+    for (auto it = spectra_.begin(); it != spectra_.end();) {
+        if (frameNumber > it->second.lastFrame + 60) {
+            backend_->destroy_texture(it->second.texture);
+            it = spectra_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     // Versões lineares de imagens que saíram de cena (a RGBA8 original fica).
     for (auto& [k, img] : images_) {
         for (ImageTexture::Linear& L : img.linear) {
@@ -4436,6 +4610,12 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
         backend_->destroy_texture(it->second.texture);
         ++n;
         it = luts_.erase(it);
+    }
+    for (auto it = spectra_.begin(); it != spectra_.end();) {
+        if (!unused(it->second.lastFrame)) { ++it; continue; }
+        backend_->destroy_texture(it->second.texture);
+        ++n;
+        it = spectra_.erase(it);
     }
     for (auto it = vectorCache_.begin(); it != vectorCache_.end();) {
         if (unused(it->second.lastFrame)) it = vectorCache_.erase(it);

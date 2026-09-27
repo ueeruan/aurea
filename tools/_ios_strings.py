@@ -11,6 +11,8 @@ EN = ROOT + r"\android\app\src\main\res\values-en\strings.xml"
 OUT = ROOT + r"\engine\platform\ios\app\AureaStrings.swift"
 
 KEYS = [
+    'pack_text_0', 'pack_text_1', 'pack_text_2', 'pack_text_3', 'pack_text_4', 'pack_text_5',
+    'scene_studio', 'scene_none', 'scene_dark', 'scene_product', 'scene_sky', 'scene_floor', 'scene_quality', 'scene_auto', 'scene_low', 'scene_medium', 'scene_high', 'scene_ultra', 'scene_tonemap', 'scene_exposure', 'scene_bloom', 'social_title', 'social_body', 'social_open_error',
     "text_options", "text_content_3d_required", "text_content_save_failed",
     "pn_t3d_preset_cinematic",
     "world_embers", "world_snow", "world_bokeh", "world_fountain", "world_purple_crystals", "environment_texture", "environment_background", "environment_hint",

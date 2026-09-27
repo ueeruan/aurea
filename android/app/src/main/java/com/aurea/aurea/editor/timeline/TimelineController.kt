@@ -273,7 +273,8 @@ internal class TimelineController(
         }
     }
 
-    private enum class Phase { TAP, DRAG, PINCH, LONG_PRESS, CANCEL }
+    /** SLOW: o prazo do toque longo venceu com o dedo rastejando — segue como arrasto. */
+    private enum class Phase { TAP, DRAG, PINCH, LONG_PRESS, SLOW, CANCEL }
 
     private suspend fun AwaitPointerEventScope.gesture(down: PointerInputChange, stoppedFling: Boolean) {
         val hit = hitAt(down.position)
@@ -282,6 +283,11 @@ internal class TimelineController(
         val slop = viewConfiguration.touchSlop
         var phase = Phase.CANCEL
         var slopAt = down.position
+        // Toque longo só com o dedo QUIETO: o prazo corria com o dedo rastejando
+        // abaixo do slop e o primeiro movimento depois dele levantava a camada.
+        val stillness = Press.Stillness(metrics.holdJitter)
+        stillness.down(down.position.x, down.position.y, down.uptimeMillis)
+        var last = down.position
         val finished = withTimeoutOrNull(LONG_PRESS_MS) {
             while (true) {
                 val ev = awaitPointerEvent()
@@ -300,6 +306,8 @@ internal class TimelineController(
                     break
                 }
                 tracker.addPointerInputChange(ch)
+                last = ch.position
+                stillness.move(ch.position.x, ch.position.y, ch.uptimeMillis)
                 if ((ch.position - down.position).getDistance() > slop) {
                     ch.consume()
                     slopAt = ch.position
@@ -308,12 +316,15 @@ internal class TimelineController(
                 }
             }
         }
-        if (finished == null) phase = Phase.LONG_PRESS
+        if (finished == null) {
+            phase = if (stillness.still(down.uptimeMillis + LONG_PRESS_MS)) Phase.LONG_PRESS else Phase.SLOW
+        }
         when (phase) {
             Phase.TAP -> if (!stoppedFling) onTap(hit, down.position)
             Phase.DRAG -> drag(hit, down, slopAt, tracker)
             Phase.PINCH -> pinch()
-            Phase.LONG_PRESS -> longPress(hit, down, tracker)
+            Phase.LONG_PRESS -> longPress(hit, down, last, tracker, stoppedFling)
+            Phase.SLOW -> awaitSlop(hit, down, tracker)
             Phase.CANCEL -> {}
         }
     }
@@ -438,51 +449,77 @@ internal class TimelineController(
     }
 
     // --- Toque longo ---------------------------------------------------------------
-    private suspend fun AwaitPointerEventScope.longPress(hit: Hit, down: PointerInputChange, tracker: VelocityTracker) {
+    /**
+     * O gesto ainda não decidiu nada (prazo vencido com o dedo rastejando, ou
+     * pouso onde toque longo não faz nada): espera o slop e segue como arrasto
+     * (scrub, rolagem ou edição, pelo eixo).
+     */
+    private suspend fun AwaitPointerEventScope.awaitSlop(hit: Hit, down: PointerInputChange, tracker: VelocityTracker) {
+        val slop = viewConfiguration.touchSlop
+        while (true) {
+            val ev = awaitPointerEvent()
+            if (pressedCount(ev) >= 2) return pinch()
+            val ch = changeOf(ev, down.id) ?: return
+            if (!ch.pressed) return
+            tracker.addPointerInputChange(ch)
+            if ((ch.position - down.position).getDistance() > slop) {
+                ch.consume()
+                return drag(hit, down, ch.position, tracker)
+            }
+        }
+    }
+
+    /**
+     * Toque longo aceito com o dedo quieto em [holdAt]. O eixo se decide UMA
+     * vez, pelo movimento a partir DALI (o que o dedo andou antes do prazo não
+     * conta), e só um eixo CLARO edita (tempo 2:1 move, pilha 2:1 reordena);
+     * uma diagonal só rola, que não custa nada.
+     */
+    private suspend fun AwaitPointerEventScope.longPress(
+        hit: Hit,
+        down: PointerInputChange,
+        holdAt: Offset,
+        tracker: VelocityTracker,
+        stoppedFling: Boolean,
+    ) {
         val r = hit.row
         val kind = hit.kind
         if ((r?.track != null && kind != HitKind.KEYFRAME) || r == null || kind == HitKind.NONE || kind == HitKind.RULER || kind == HitKind.HEADER_EYE) {
             // Sem ação de toque longo aqui: o gesto segue como arrasto (scrub/rolagem).
-            val slop = viewConfiguration.touchSlop
-            while (true) {
-                val ev = awaitPointerEvent()
-                if (pressedCount(ev) >= 2) return pinch()
-                val ch = changeOf(ev, down.id) ?: return
-                if (!ch.pressed) return
-                tracker.addPointerInputChange(ch)
-                if ((ch.position - down.position).getDistance() > slop) {
-                    ch.consume()
-                    return drag(hit, down, ch.position, tracker)
-                }
-            }
+            return awaitSlop(hit, down, tracker)
         }
         heavy()
         while (true) {
             val ev = awaitPointerEvent()
+            // Um segundo dedo desiste do toque longo: pinça, como antes do prazo.
+            if (pressedCount(ev) >= 2) return pinch()
             val ch = changeOf(ev, down.id)
             if (ch == null || !ch.pressed) {
                 ch?.consume()
-                longPressStill(hit, r)
+                longPressStill(hit, r, stoppedFling)
                 return
             }
             consumeAll(ev)
-            val d = ch.position - down.position
+            val d = ch.position - holdAt
             if (d.getDistance() < metrics.axisSlop) continue
-            // O eixo se decide UMA vez, no 1º movimento (A.01): tremor não vira deslocamento.
-            val timeAxis = abs(d.x) > abs(d.y)
+            val time = Press.timeEdit(d.x, d.y)
             when (kind) {
-                HitKind.KEYFRAME -> if (timeAxis) keyframeDrag(r, hit.keyIndex, down)
-                    else if (!state.compact) scroll(down.id, down.position, tracker) else consumeUntilUp()
-                HitKind.HEADER -> if (!timeAxis && !state.compact) reorderDrag(r, hit.rowIndex, down) else consumeUntilUp()
-                // A deliberate hold lifts the layer. A swipe before the hold
-                // threshold still scrolls; horizontal motion still edits time.
-                else -> if (timeAxis || state.compact) longPressMove(r, down) else reorderDrag(r, hit.rowIndex, down)
+                HitKind.KEYFRAME -> if (time) keyframeDrag(r, hit.keyIndex, down)
+                    else if (!state.compact) scroll(down.id, ch.position, tracker) else consumeUntilUp()
+                HitKind.HEADER -> if (!time && !state.compact) reorderDrag(r, hit.rowIndex, down) else consumeUntilUp()
+                // Segurar de propósito levanta a camada: claramente na pilha reordena,
+                // claramente no tempo move; o resto rola.
+                else -> when {
+                    time || state.compact -> longPressMove(r, down)
+                    Press.stackEdit(d.x, d.y) -> reorderDrag(r, hit.rowIndex, down)
+                    else -> scroll(down.id, ch.position, tracker)
+                }
             }
             return
         }
     }
 
-    private fun longPressStill(hit: Hit, r: RowModel) {
+    private fun longPressStill(hit: Hit, r: RowModel, stoppedFling: Boolean) {
         when (hit.kind) {
             // A.01: segurar o quadradinho trava/destrava.
             HitKind.HEADER -> {
@@ -491,7 +528,8 @@ internal class TimelineController(
             }
             HitKind.KEYFRAME -> keyframeTap(r, hit.keyIndex)
             else -> {
-                if (state.compact) return
+                // O dedo que só pousou para parar a inércia não escolhe (como no toque).
+                if (state.compact || stoppedFling) return
                 tick()
                 when {
                     selectionSize() == 0 -> store.select(r.id, openOptions = false)
@@ -517,18 +555,14 @@ internal class TimelineController(
     // --- Arrasto ---------------------------------------------------------------------
     private suspend fun AwaitPointerEventScope.drag(hit: Hit, down: PointerInputChange, slopAt: Offset, tracker: VelocityTracker) {
         val d = slopAt - down.position
-        val horizontal = abs(d.x) >= abs(d.y)
+        val horizontal = Press.horizontal(d.x, d.y)
+        // Editar (losango, alça, mover) exige eixo claro, 2:1; scrub e rolagem ficam nos 45°.
+        val edit = Press.timeEdit(d.x, d.y)
         val r = hit.row
         when {
-            r != null && horizontal && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
-            r != null && horizontal && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
-            r != null && horizontal && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
-            // Select only after the gesture crosses touch slop, without opening
-            // the dock. Ruler and empty space remain available for scrubbing.
-            r != null && r.track == null && horizontal && !state.compact && hit.kind == HitKind.BODY -> {
-                if (!isSelected(r.id)) store.select(r.id, openOptions = false)
-                moveDrag(r, down)
-            }
+            r != null && edit && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
+            r != null && edit && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
+            r != null && edit && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
             horizontal -> scrub(down.id, slopAt, tracker)
             !state.compact -> scroll(down.id, slopAt, tracker)
             else -> consumeUntilUp()

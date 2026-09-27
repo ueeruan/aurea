@@ -12,7 +12,9 @@ import org.json.JSONArray
  * `text::text_preset_name` (o índice é o que vai para o motor).
  */
 internal val ExtraTextPresetNames = listOf("Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
-    "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave")
+    "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa")
+
+internal val PackTextPresetLabels = listOf(R.string.pack_text_0, R.string.pack_text_1, R.string.pack_text_2, R.string.pack_text_3, R.string.pack_text_4, R.string.pack_text_5)
 
 internal val TextPresetNames = listOf(
     R.string.pn_pop, R.string.pn_textpreset_bounce, R.string.pn_textpreset_slide, R.string.panel_escala,
@@ -45,7 +47,7 @@ class BuiltinPresets(private val context: Context) {
         val list = TextPresetNames.mapIndexed { i, id ->
             PresetEntry("b:texto:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = i)
         } + ExtraTextPresetNames.mapIndexed { i, name ->
-            PresetEntry("b:texto:${i + 11}", PresetKind.Text, name, builtin = true, textPreset = i + 11)
+            PresetEntry("b:texto:${i + 11}", PresetKind.Text, if (i >= 8) AppText.get(context, PackTextPresetLabels[i - 8]) else name, builtin = true, textPreset = i + 11)
         }
         text = res to list
         return list

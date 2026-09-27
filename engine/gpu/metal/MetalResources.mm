@@ -476,6 +476,15 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
             AUREA_LOG_ERROR("metal: %s", s.library.functionNames.description.UTF8String);
             return Status{Errc::ShaderCompileFailed, "funcao de entrada ausente"};
         }
+        if (desc.stage == ShaderStage::Fragment) {
+            // Fragment shader que escreve location 1 (MRT do 3D) traz também a
+            // variante só com a cor 0 — `fs_main_c0` (msl_glue.md §5). Ela é a
+            // função de todo pipeline SEM segundo alvo: o Metal recusa criar um
+            // pipeline cuja função escreve um anexo com formato Invalid, e sem
+            // isto planos, partículas 2D e o céu direto sumiriam no iOS (o
+            // Vulkan e o GLES simplesmente descartam essa escrita).
+            s.functionColor0 = [s.library newFunctionWithName:@"fs_main_c0"];
+        }
 
         if (desc.stage == ShaderStage::Compute) {
             if (threadgroup[0] == 0) {
@@ -500,11 +509,12 @@ void Backend::destroy_shader(ShaderHandle h) noexcept {
     // A `MTLFunction`/`MTLLibrary` de um pipeline já criado não é mais
     // necessária, mas a destruição vai adiada por simetria com o Vulkan (um
     // shader pode ser destruído logo depois de criar os pipelines que o usam).
-    struct Node { id<MTLLibrary> library; id<MTLFunction> function; };
-    auto* node = new (std::nothrow) Node{s.library, s.function};
+    struct Node { id<MTLLibrary> library; id<MTLFunction> function; id<MTLFunction> functionColor0; };
+    auto* node = new (std::nothrow) Node{s.library, s.function, s.functionColor0};
     if (!node) return;
     defer_until_gpu_done([](void* p) {
         auto* n = static_cast<Node*>(p);
+        n->functionColor0 = nil;
         n->function = nil;
         n->library = nil;
         delete n;
@@ -578,9 +588,14 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         if (!vs || !fs || !vs->function || !fs->function) {
             return Status{Errc::InvalidArgument, "shader grafico ausente"};
         }
+        // MRT do 3D: segundo alvo (cena HDR), mesmo blend do primeiro.
+        const bool mrt = desc.hasColor1 && !desc.depthOnly;
         MTLRenderPipelineDescriptor* pd = [[MTLRenderPipelineDescriptor alloc] init];
         pd.vertexFunction = vs->function;
-        pd.fragmentFunction = fs->function;
+        // Sem segundo alvo, a função tem de ser a que só escreve a cor 0
+        // (`fs_main_c0`, quando o shader declara location 1): o Metal recusa o
+        // pipeline se a função escreve um anexo com pixelFormat Invalid.
+        pd.fragmentFunction = (!mrt && fs->functionColor0) ? fs->functionColor0 : fs->function;
         pd.label = desc.debugName ? [NSString stringWithUTF8String:desc.debugName] : @"render";
         // MSAA do passe 3D (espelho do Vulkan): a contagem do pipeline é a dos
         // anexos do passe. Recorte MASK por cobertura com alpha-to-one (o
@@ -596,8 +611,6 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         // cor, e o formato TEM de ser inválido no descritor — senão o Metal
         // recusa o draw no passe sem cor.
         pd.colorAttachments[0].pixelFormat = desc.depthOnly ? MTLPixelFormatInvalid : to_mtl(desc.colorFormat);
-        // MRT do 3D: segundo alvo (cena HDR), mesmo blend do primeiro.
-        const bool mrt = desc.hasColor1 && !desc.depthOnly;
         if (mrt) pd.colorAttachments[1].pixelFormat = to_mtl(desc.colorFormat1);
         if (desc.hasDepth) {
             pd.depthAttachmentPixelFormat = to_mtl(desc.depthFormat);

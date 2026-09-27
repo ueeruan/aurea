@@ -33,6 +33,15 @@ Validation:
 No Android/iOS bridge or font-catalog filtering changed. Actual Samsung device
 retesting remains pending; the original selected font is retained in the project.
 
+The same authored NotoSansGujarati caption was subsequently saved, the APK
+reinstalled, and the project reopened. A full app export (H2641280x720,
+21fps,63 frames/3s) completed with its TimeWarpRGB video effect preserved.
+FFmpeg decoded every frame successfully; the extracted2.09s frame contains
+readable "Texto". Evidence: font-temporal-export-720p.mp4,
+font-temporal-export-decode.log and font-temporal-export-frame.png under
+engine/build/android-p0. This extends emulator acceptance to save/load and
+export, not to the Samsung device or native iOS runtime.
+
 
 ## Android emulator preview verification
 
@@ -46,7 +55,7 @@ cannot draw the caption, rather than a Gujarati font that happens to contain
 Latin glyphs.
 
 This is an Android emulator result, not validation on a physical Samsung device.
-Native save/reload and export with this selected font remain pending, as does
-native iOS verification. The shared host regression and Android preview evidence
-above cover different parts of the path and should not be substituted for those
-remaining checks.
+Native Android save/reload and export with this selected font subsequently
+passed in the TimeWarpRGB retest documented above. The specific missing-glyph
+scenario still needs native iOS and physical Samsung verification; ordinary
+iOS text/Text3D fixture captures do not replace that scenario.

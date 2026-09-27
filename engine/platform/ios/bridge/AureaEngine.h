@@ -434,6 +434,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setMaterialInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
              materialIndex:(uint32_t)materialIndex param:(uint32_t)param value:(float)value;
 /// Ambiente do PROJETO (HDRI + intensidade + giro, em graus).
+- (NSArray<NSNumber*>*)sceneSettings;
+- (BOOL)setSceneSetting:(uint32_t)parameter value:(float)value;
 - (BOOL)setEnvironmentBackground:(BOOL)visible;
 - (BOOL)setEnvironmentIntensity:(float)intensity rotation:(float)rotation;
 /// {tem HDRI, intensidade, giro}.

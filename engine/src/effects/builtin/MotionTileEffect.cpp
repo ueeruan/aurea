@@ -252,6 +252,12 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_motion_behavior_effects(registry);
     builtin::register_shape_transition_effects(registry);
     builtin::register_finishing_effects(registry);
+    // Geradores e recorte do editor antigo, nativos. Sempre depois dos que
+    // já existiam.
+    builtin::register_generate_effects(registry);
+    builtin::register_matte_effects(registry);
+    // O VHS de Estilizar, depois de todos.
+    builtin::register_vhs_look_effect(registry);
 }
 
 } // namespace aurea

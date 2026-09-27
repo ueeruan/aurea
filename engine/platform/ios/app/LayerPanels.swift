@@ -1,7 +1,8 @@
 import SwiftUI
 
-let extraTextPresetNames = ["Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
-                          "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave"]
+var extraTextPresetNames: [String] { ["Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
+                          "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave"] + (0..<6).map { AureaText.t("pack_text_\($0)") }
+}
 import UIKit
 import UniformTypeIdentifiers
 
@@ -708,8 +709,18 @@ private struct PresetPreviewView: View {
                 let keys = (object?["effects"] as? [[String: Any]] ?? []).compactMap { $0["key"] as? String }
                 glyph(effectGlyph(keys.first), badge: keys.count > 1 ? "\(keys.count) efeitos" : nil)
             case .text:
-                Text(AureaText.t("panel_aa")).font(.aurea(size: 24, weight: .bold)).foregroundStyle(AureaColors.text)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    let phase = timeline.date.timeIntervalSince(began).truncatingRemainder(dividingBy: 2.4) / 2.4
+                    HStack(spacing: 0) {
+                        ForEach(Array("Aurea".enumerated()), id: \.offset) { index, glyph in
+                            let progress = min(1, max(0, phase * 2 - Double(index) * 0.12))
+                            let id = entry.textPreset ?? 0
+                            let alpha = id == 22 ? 0.3 + 0.7 * abs(sin(phase * 60 + Double(index) * 4)) : ([20, 21, 23, 24].contains(id) ? min(1, progress * 3) * min(1, (1 - phase) * 5) : 1)
+                            Text(String(glyph)).font(.aurea(size: 24, weight: .bold)).foregroundStyle(AureaColors.text)
+                                .opacity(alpha).scaleEffect(id == 19 ? 1 - 0.8 * sin(progress * .pi) : 1)
+                        }
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
         .onAppear {

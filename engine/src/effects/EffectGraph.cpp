@@ -178,6 +178,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
         e.texelScale = texelScale;
         e.placement = &out.placement;
+        e.layer = &layer;
 
         if (effect->is_identity(e)) {
             ++out.droppedIdentity;
@@ -193,6 +194,8 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
             out.values.resize(offset);
             continue;
         }
+        // O que só existe sob o lock (espectro do som) entra no eval agora.
+        effect->resolve_resources(e);
         out.evals.push_back(e);
         out.colorOps.push_back(op);
     }
@@ -275,6 +278,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
     for (EffectEval& e : out.evals) {
         e.instance = nullptr;
         e.resources = nullptr;
+        e.layer = nullptr;
     }
 }
 
@@ -318,6 +322,11 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
         if (st.kind == EffectStage::Kind::FusedColor) {
             ColorStackUniforms u{};
             u.header[0] = static_cast<f32>(st.count);
+            // Tamanho do texel e densidade: a chave de croma com pré-desfoque
+            // lê um anel de vizinhos medido em px da camada.
+            u.header[1] = cur.width > 0 ? 1.0f / static_cast<f32>(cur.width) : 0.0f;
+            u.header[2] = cur.height > 0 ? 1.0f / static_cast<f32>(cur.height) : 0.0f;
+            u.header[3] = cur.texel_scale_x();
             TextureHandle lut{};
             for (u32 k = 0; k < st.count; ++k) {
                 const ColorOp& op = plan.colorOps[st.begin + k];

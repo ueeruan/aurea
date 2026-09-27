@@ -41,6 +41,9 @@ public:
     u32 presents = 0;
     u32 surfaceWidth = 1920;
     u32 surfaceHeight = 1080;
+    /// Pré-rotação que a "superfície" pede (o Android em paisagem): o quadro
+    /// com backbuffer a informa, como o backend de verdade.
+    SurfaceRotation surfaceRotation = SurfaceRotation::None;
     bool frameHadBackbuffer = false;
     bool surfaceAttached = false;
     bool frameOpen = false;
@@ -80,6 +83,7 @@ public:
             out.backbuffer = TextureHandle{++ids_};
             out.backbufferWidth = surfaceWidth;
             out.backbufferHeight = surfaceHeight;
+            out.rotation = surfaceRotation;
             frameHadBackbuffer = true;
         }
         return OkStatus;

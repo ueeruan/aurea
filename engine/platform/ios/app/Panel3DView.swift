@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct Panel3DView: View {
     @EnvironmentObject private var model: AureaModel
+    @State private var sceneSettings: [Float] = []
     @State private var text3D: [String: Any] = [:]
     @State private var draft = ""
     @State private var environment: [Float] = [0, 1, 0]
@@ -43,6 +44,7 @@ struct Panel3DView: View {
                     lightingSection
                     gap(16)
                     }
+                    sceneSettingsSection
                     environmentSection
                     if model.selectedLayer?.kind != 8 { objectEnvironmentSection }
                 }
@@ -70,6 +72,41 @@ struct Panel3DView: View {
         .onDisappear {
             finishEditing()
             model.text3DFontSheet = nil
+        }
+    }
+
+    private func setScene(_ index: UInt32, _ value: Float) {
+        _ = model.engine.setSceneSetting(index, value: value)
+        sceneSettings = model.engine.sceneSettings().map(\.floatValue)
+        model.refreshModel(force: true)
+    }
+    @ViewBuilder private var sceneSettingsSection: some View {
+        if sceneSettings.count >= 8 {
+            section("scene_studio")
+            horizontal {
+                ForEach(Array(["scene_none", "scene_dark", "scene_product", "scene_sky"].enumerated()), id: \.offset) { i, key in
+                    T3DChip(label: AureaText.t(key), on: Int(sceneSettings[0]) == i) { setScene(0, Float(i)) }
+                }
+            }
+            Toggle(AureaText.t("scene_floor"), isOn: Binding(get: { sceneSettings[1] > 0 }, set: { setScene(1, $0 ? 1 : 0) })).frame(minHeight: 44)
+            section("scene_quality")
+            horizontal {
+                ForEach(Array(["scene_auto", "scene_low", "scene_medium", "scene_high", "scene_ultra"].enumerated()), id: \.offset) { i, key in
+                    T3DChip(label: AureaText.t(key), on: Int(sceneSettings[2]) == i) { setScene(2, Float(i)) }
+                }
+            }
+            section("scene_tonemap")
+            horizontal {
+                T3DChip(label: "PBR Neutral", on: sceneSettings[3] == 0) { setScene(3, 0) }
+                T3DChip(label: "AgX", on: sceneSettings[3] == 1) { setScene(3, 1) }
+            }
+            Text(AureaText.t("scene_exposure"))
+            Slider(value: Binding(get: { min(4, max(0.01, sceneSettings[4])) }, set: { setScene(4, $0) }), in: 0.01...4)
+            Toggle(AureaText.t("scene_bloom"), isOn: Binding(get: { sceneSettings[5] > 0 }, set: { setScene(5, $0 ? 1 : 0) })).frame(minHeight: 44)
+            if sceneSettings[5] > 0 {
+                Slider(value: Binding(get: { min(4, max(0, sceneSettings[6])) }, set: { setScene(6, $0) }), in: 0...4)
+            }
+            gap(16)
         }
     }
 
@@ -451,6 +488,7 @@ struct Panel3DView: View {
     }
     private func refresh() { model.refreshModel(force: true); load() }
     private func load() {
+        sceneSettings = model.engine.sceneSettings().map(\.floatValue)
         if pending == nil {
             text3D = model.engine.text3D(forLayer: layerId) ?? [:]
             if !typingActive && !editingText { draft = text3D["content"] as? String ?? "" }

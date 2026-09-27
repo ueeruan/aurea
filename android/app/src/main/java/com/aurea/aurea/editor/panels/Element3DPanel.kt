@@ -76,6 +76,7 @@ internal fun Element3DPanel(env: PanelEnv) {
     }
     val t3 by remember(store) { derivedStateOf { store.text3d } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
+        SceneSettingsSection(store)
         if (store.detail?.kind != 8) {
         t3?.let { Text3DSection(env, it) }
         SectionTitle(stringResource(R.string.panel_material))
@@ -477,4 +478,40 @@ private fun EnvRuler(
             ValueBox(text, onTap = null)
         }
     }
+}
+
+@Composable
+private fun SceneSettingsSection(store: EditorStore) {
+    val revision = store.sceneSettingsRevision
+    var settings by remember(revision) { mutableStateOf(store.sceneSettings()) }
+    if (settings.size < 8) return
+    fun change(index: Int, value: Float) { store.setSceneSetting(index, value); settings = store.sceneSettings() }
+    SectionTitle(stringResource(R.string.scene_studio))
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(R.string.scene_none, R.string.scene_dark, R.string.scene_product, R.string.scene_sky).forEachIndexed { i, label ->
+            Chip(stringResource(label), on = settings[0].toInt() == i) { change(0, i.toFloat()) }
+        }
+    }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.scene_floor), Modifier.weight(1f))
+        androidx.compose.material3.Switch(checked = settings[1] > 0, onCheckedChange = { change(1, if (it) 1f else 0f) })
+    }
+    SectionTitle(stringResource(R.string.scene_quality))
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(R.string.scene_auto, R.string.scene_low, R.string.scene_medium, R.string.scene_high, R.string.scene_ultra).forEachIndexed { i, label ->
+            Chip(stringResource(label), on = settings[2].toInt() == i) { change(2, i.toFloat()) }
+        }
+    }
+    SectionTitle(stringResource(R.string.scene_tonemap))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Chip("PBR Neutral", on = settings[3] == 0f) { change(3, 0f) }
+        Chip("AgX", on = settings[3] == 1f) { change(3, 1f) }
+    }
+    Text(stringResource(R.string.scene_exposure))
+    Slider(value = settings[4].coerceIn(.01f, 4f), onValueChange = { change(4, it) }, valueRange = .01f..4f)
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.scene_bloom), Modifier.weight(1f))
+        androidx.compose.material3.Switch(checked = settings[5] > 0, onCheckedChange = { change(5, if (it) 1f else 0f) })
+    }
+    if (settings[5] > 0) Slider(value = settings[6].coerceIn(0f, 4f), onValueChange = { change(6, it) }, valueRange = 0f..4f)
 }

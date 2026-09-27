@@ -7,6 +7,7 @@
 #include "MockBackend.hpp"
 #include "SyntheticVideo.hpp"
 
+#include "aurea/audio/Spectrum.hpp"
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/ShakeMotion.hpp"
@@ -782,7 +783,11 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // + o pacote de paridade (13): Oscilar, Balançar, Agitar; Íris, Caixa,
     //   Persianas; Desfoque radial, Espelho, Cortar bordas, Vinheta,
     //   Mosaico/LED, Detectar bordas, Matiz e saturação.
-    AUREA_CHECK_EQ(before, static_cast<u32>(88));
+    // + geradores e recorte do editor antigo (6): Ruído fractal, Degradê,
+    //   Degradê de 4 cores, Espectro de áudio; Contorno da silhueta,
+    //   Refinar recorte.
+    // + o VHS de Estilizar (1): look de fita com OSD do videocassete.
+    AUREA_CHECK_EQ(before, static_cast<u32>(95));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {
@@ -1338,6 +1343,105 @@ AUREA_TEST(Compositor, TransformEffectAtTheEndAddsNoPass) {
 }
 
 // -----------------------------------------------------------------------------
+// Passe de saída — o caminho do aparelho, que nenhum teste offscreen percorre.
+// Com superfície (backbuffer em paisagem, pré-girado 90°), preview em 1/2,
+// calor e zoom < 1, o quadro de vídeo vai para a composição e a composição é
+// LIDA pelo passe de saída: a sua última transição antes do passe é para
+// leitura (ShaderRead) SEM descartar o conteúdo, e o passe desenha no
+// backbuffer. É a sequência que, errada, deixa o vídeo preto na tela e
+// invisível em todo teste que lê a composição de volta.
+// -----------------------------------------------------------------------------
+AUREA_TEST(Compositor, OutputPassReadsTheCompositionWithPhoneSettings) {
+    RenderFixture f;
+    f.backend.surfaceWidth = 2400;                             // backbuffer físico em paisagem
+    f.backend.surfaceHeight = 1080;
+    f.backend.surfaceRotation = SurfaceRotation::Rotate90;     // lógico 1080×2400, em pé
+    AUREA_CHECK(f.backend.attach_surface(SurfaceDesc{}).ok());
+
+    aurea::test::SyntheticConfig config;
+    aurea::test::SyntheticFactory factory(config);
+    MemoryManager memory;
+    memory.set_budget(MemoryClass::DecodedFrames, static_cast<u64>(config.width) * config.height * 3 / 2 * 8);
+    MediaManager media;
+    media.set_factory(&factory);
+    media.set_memory(&memory);
+    Asset asset;
+    asset.kind = AssetKind::Video;
+    asset.video.width = config.width;
+    asset.video.height = config.height;
+    asset.video.fps = config.fps;
+    const AssetId aid = f.project.add_asset(std::move(asset));
+    const LayerId id = f.comp->add_layer(LayerKind::Video, "video");
+    Layer* layer = f.comp->layer(id);
+    layer->source = aid;
+    layer->end = FrameIndex{300};
+    layer->transform.anchor = Vec3{config.width * 0.5f, config.height * 0.5f, 0};
+    layer->transform.position = Vec3{960, 540, 0};
+
+    RenderSettings rs;
+    rs.previewDenominator = 2;
+    rs.heavyScale = 0.5f;
+    rs.viewportZoom = 0.5f;
+    FrameSnapshot snap;
+    bool ready = false;
+    const auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(2)) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{0}, &media, nullptr, nullptr, rs, 1, 0,
+                           DecodeMode::Still, 1, snap);
+        ready = snap.layers.size() == 1 && snap.missingVideoFrames == 0 && snap.staleVideoFrames == 0;
+        if (ready) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    AUREA_CHECK(ready);
+    if (!ready) return;
+    FrameStats stats;
+    RenderTimings timings;
+    AUREA_CHECK(f.renderer.render(snap, rs, nullptr, stats, timings).ok());
+    AUREA_CHECK_EQ(stats.layersRendered, 1u);
+    AUREA_CHECK_EQ(f.backend.presents, 1u);
+
+    // O passe de saída é o único que desenha no backbuffer (id da superfície,
+    // acima dos ids das texturas criadas). Dentro dele: a composição é
+    // amostrada e há um draw.
+    const auto& ev = f.backend.events;
+    constexpr u32 kNone = 0xFFFFFFFFu;
+    u32 outBegin = kNone, outEnd = kNone;
+    u64 compTex = 0;
+    bool drew = false;
+    for (u32 i = 0; i < ev.size(); ++i) {
+        if (ev[i].kind != MockBackend::Event::BeginPass || ev[i].texture <= f.backend.textures.size()) continue;
+        outBegin = i;
+        for (u32 k = i + 1; k < ev.size(); ++k) {
+            if (ev[k].kind == MockBackend::Event::BindTexture) compTex = ev[k].texture;
+            if (ev[k].kind == MockBackend::Event::Draw) drew = true;
+            if (ev[k].kind == MockBackend::Event::EndPass) { outEnd = k; break; }
+        }
+        break;
+    }
+    AUREA_CHECK(outBegin != kNone && outEnd != kNone);
+    AUREA_CHECK(drew);
+    AUREA_CHECK(compTex != 0);
+    if (outBegin == kNone || !compTex) return;
+    // A composição foi escrita (anexo de cor) antes; a última transição dela
+    // antes do passe de saída é para leitura e NÃO descarta o conteúdo.
+    bool written = false, lastRead = false, lastDiscard = true;
+    for (u32 i = 0; i < outBegin; ++i) {
+        if (ev[i].kind != MockBackend::Event::Barrier || ev[i].texture != compTex) continue;
+        // A PRIMEIRA escrita descarta (textura nova, sem conteúdo a guardar);
+        // depois de escrita, nenhuma transição pode jogar o conteúdo fora.
+        if (written) AUREA_CHECK(!ev[i].discard);
+        if (ev[i].state == ResourceState::ColorAttachment) written = true;
+        lastRead = ev[i].state == ResourceState::ShaderRead;
+        lastDiscard = ev[i].discard;
+    }
+    AUREA_CHECK(written);
+    AUREA_CHECK(lastRead);
+    AUREA_CHECK(!lastDiscard);
+    // Nada mais é desenhado na composição entre a leitura e o passe de saída.
+    for (u32 i = outBegin; i < outEnd; ++i) AUREA_CHECK(ev[i].kind != MockBackend::Event::BeginPass || i == outBegin);
+}
+
+// -----------------------------------------------------------------------------
 // Motion Tile — cenários dos testes do Aurea antigo que faltavam no porte
 // (motion_tile_test.dart / motion_tile_escala_test.dart).
 // -----------------------------------------------------------------------------
@@ -1384,6 +1488,24 @@ const char* const kEffectPackKeys[] = {
     effect_keys::kIrisWipe, effect_keys::kBoxWipe, effect_keys::kVenetianBlinds,
     effect_keys::kRadialBlur, effect_keys::kMirror, effect_keys::kCrop, effect_keys::kVignette,
     effect_keys::kMosaic, effect_keys::kFindEdges, effect_keys::kHueSaturation,
+    // Geradores e recorte do editor antigo.
+    effect_keys::kFractalNoise, effect_keys::kGradientRamp, effect_keys::kFourColorGradient,
+    effect_keys::kAudioSpectrum, effect_keys::kStrokeOutline, effect_keys::kMatteRefine,
+    // O VHS de Estilizar (look de fita com OSD).
+    effect_keys::kVhsLook,
+};
+
+/// Recursos de teste que "têm" espectro: devolvem uma textura fixa e anotam
+/// o pedido que o efeito fez no planejamento.
+struct SpectrumResources final : EffectResources {
+    AudioSpectrumRequest last{};
+    u32 calls = 0;
+    TextureHandle curve_lut(const CurveData&) noexcept override { return TextureHandle{4242}; }
+    TextureHandle audio_spectrum(const AudioSpectrumRequest& r) noexcept override {
+        last = r;
+        ++calls;
+        return TextureHandle{77};
+    }
 };
 
 /// Plano de UMA camada 100x100 com o efeito no fim, no quadro pedido (30 qps).
@@ -1426,6 +1548,111 @@ AUREA_TEST(EffectPack, EveryNewEffectRegistersWithStableIdsAndTypedRanges) {
     AUREA_CHECK(osc && osc->at(osc->find("decay")).typed_max() > osc->at(osc->find("decay")).maxValue);
     const ParameterRegistry* shake = reg.params(reg.find_key(effect_keys::kShake));
     AUREA_CHECK(shake && shake->find("direction") != kInvalidIndex && shake->find("decay") != kInvalidIndex);
+}
+
+AUREA_TEST(EffectPack, GeneratorsAndMatteEffectsDeclareTheirTypedRangesAndAppendedParams) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    // Ruído fractal: a célula digitada vai muito além do slider; a semente é
+    // inteira (fica no slider) e a evolução é um ângulo animável.
+    const ParameterRegistry* noise = reg.params(reg.find_key(effect_keys::kFractalNoise));
+    AUREA_CHECK(noise && noise->at(noise->find("scale")).typed_max() > noise->at(noise->find("scale")).maxValue);
+    AUREA_CHECK(noise && noise->at(noise->find("seed")).type == ParamType::Int);
+    AUREA_CHECK(noise && noise->at(noise->find("evolution")).type == ParamType::Angle
+                && noise->at(noise->find("evolution")).animatable());
+    // Contorno: largura e suavidade em px, digitadas até 10x o slider.
+    const ParameterRegistry* stroke = reg.params(reg.find_key(effect_keys::kStrokeOutline));
+    AUREA_CHECK(stroke && stroke->at(stroke->find("width")).typed_max() >= 1000.0f);
+    AUREA_CHECK(stroke && stroke->at(stroke->find("softness")).typed_max() > stroke->at(stroke->find("softness")).maxValue);
+    AUREA_CHECK(stroke && stroke->at(stroke->find("position")).type == ParamType::Enum);
+    // Espectro: faixas inteiras limitadas ao teto da textura; pontos relativos.
+    const ParameterRegistry* spectrum = reg.params(reg.find_key(effect_keys::kAudioSpectrum));
+    AUREA_CHECK(spectrum && spectrum->at(spectrum->find("bands")).maxValue == static_cast<f32>(kAudioSpectrumMaxBands));
+    AUREA_CHECK(spectrum && (spectrum->at(spectrum->find("start")).flags & kParamRelative));
+    // Os acrescentados aos efeitos que já existiam vêm DEPOIS dos antigos, com
+    // padrão neutro: projeto antigo abre igual.
+    const ParameterRegistry* chroma = reg.params(reg.find_key(effect_keys::kChromaKey));
+    AUREA_CHECK(chroma && chroma->find("pre_blur") == chroma->count() - 1);
+    AUREA_CHECK(chroma && chroma->at(chroma->find("pre_blur")).defaultValue.as_float() == 0.0f);
+    const ParameterRegistry* lens = reg.params(reg.find_key(effect_keys::kLensBlur));
+    AUREA_CHECK(lens && lens->find("iris_curvature") == lens->count() - 3
+                && lens->find("scale_x") == lens->count() - 2 && lens->find("scale_y") == lens->count() - 1);
+    AUREA_CHECK(lens && lens->at(lens->find("iris_curvature")).defaultValue.as_float() == 0.0f
+                && lens->at(lens->find("scale_x")).defaultValue.as_float() == 100.0f
+                && lens->at(lens->find("scale_y")).typed_max() > lens->at(lens->find("scale_y")).maxValue);
+    // Neutros saem da cadeia: contorno sem largura, refinar sem nada.
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kStrokeOutline, 0));
+    l.effects.back().params[0].constant = ParamValue::scalar(0.0f);
+    l.effects.push_back(make_effect(reg, effect_keys::kMatteRefine, 1));
+    EffectPlan plan;
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK(plan.empty());
+    AUREA_CHECK_EQ(plan.droppedIdentity, 2u);
+}
+
+AUREA_TEST(EffectPack, SpectrumAnalysisFindsATestToneInItsBand) {
+    // Um seno de 1 kHz em escala 0,5 (−6 dB): a faixa dele, em 16 faixas
+    // logarítmicas de 30 Hz a 16 kHz, é a 8 — e só ela.
+    std::vector<f32> tone(audio::kSpectrumWindow);
+    for (u32 i = 0; i < tone.size(); ++i) tone[i] = 0.5f * std::sin(2.0 * 3.14159265358979 * 1000.0 * i / 48000.0);
+    f32 bands[16] = {};
+    f32 level = 0.0f;
+    audio::analyze_spectrum(tone.data(), static_cast<u32>(tone.size()), 16, 1.0f, bands, &level);
+    u32 best = 0;
+    for (u32 b = 1; b < 16; ++b) if (bands[b] > bands[best]) best = b;
+    AUREA_CHECK_EQ(best, 8u);
+    AUREA_CHECK(bands[8] > 0.8f && bands[8] <= 1.0f);   // −6 dB numa régua de 60 dB
+    for (u32 b = 0; b < 6; ++b) AUREA_CHECK(bands[b] < 0.05f);
+    for (u32 b = 11; b < 16; ++b) AUREA_CHECK(bands[b] < 0.05f);
+    AUREA_CHECK(level > 0.7f && level <= 1.0f);
+    // O centro da faixa 8 fica perto do tom; a 0 é grave, a 15 é aguda.
+    AUREA_CHECK(audio::spectrum_band_center_hz(8, 16) > 700.0f && audio::spectrum_band_center_hz(8, 16) < 1400.0f);
+    AUREA_CHECK(audio::spectrum_band_center_hz(0, 16) < 60.0f && audio::spectrum_band_center_hz(15, 16) > 10000.0f);
+    // Determinístico: a mesma janela dá os mesmos bits.
+    f32 again[16] = {};
+    audio::analyze_spectrum(tone.data(), static_cast<u32>(tone.size()), 16, 1.0f, again, nullptr);
+    for (u32 b = 0; b < 16; ++b) AUREA_CHECK(again[b] == bands[b]);
+    // Sensibilidade: o dobro do ganho sobe a barra (+6 dB = 0,1 da régua).
+    audio::analyze_spectrum(tone.data(), static_cast<u32>(tone.size()), 16, 2.0f, again, nullptr);
+    AUREA_CHECK_NEAR(again[8] - bands[8], 0.1f, 0.02f);
+    // Silêncio: tudo em zero, sem NaN.
+    std::vector<f32> silence(audio::kSpectrumWindow, 0.0f);
+    audio::analyze_spectrum(silence.data(), static_cast<u32>(silence.size()), 16, 1.0f, bands, &level);
+    for (u32 b = 0; b < 16; ++b) AUREA_CHECK(bands[b] == 0.0f);
+    AUREA_CHECK(level == 0.0f);
+}
+
+AUREA_TEST(EffectPack, AudioSpectrumResolvesItsSpectrumAtPlanTimeAndCarriesItToBuild) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kAudioSpectrum, 0));
+    l.effects.back().params[1].constant = ParamValue::scalar(24.0f);    // faixas
+    l.effects.back().params[14].constant = ParamValue::scalar(200.0f);  // sensibilidade
+    // Com recursos: o pedido leva a camada dona, as faixas e o ganho; a
+    // textura viaja no eval.
+    SpectrumResources res;
+    EffectPlan plan;
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), &res, plan);
+    AUREA_CHECK_EQ(plan.evals.size(), static_cast<usize>(1));
+    AUREA_CHECK_EQ(res.calls, 1u);
+    AUREA_CHECK(res.last.host == &l);
+    AUREA_CHECK_EQ(res.last.bands, 24u);
+    AUREA_CHECK_NEAR(res.last.gain, 2.0f, 1e-5);
+    AUREA_CHECK(res.last.source == AudioSpectrumSource::Automatic);
+    AUREA_CHECK(!plan.evals.empty() && plan.evals[0].aux.valid() && plan.evals[0].aux.id == 77u);
+    AUREA_CHECK(!plan.evals.empty() && plan.evals[0].auxInfo.x == 1.0f);
+    // O que só valia sob o lock não sai do planejamento.
+    AUREA_CHECK(!plan.evals.empty() && plan.evals[0].layer == nullptr && plan.evals[0].resources == nullptr);
+    // A fonte escolhida chega ao renderer.
+    l.effects.back().params[0].constant = ParamValue::scalar(2.0f);
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), &res, plan);
+    AUREA_CHECK(res.last.source == AudioSpectrumSource::FirstWithAudio);
+    // Sem recursos (teste sem GPU): o efeito fica no plano, sem textura.
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK_EQ(plan.evals.size(), static_cast<usize>(1));
+    AUREA_CHECK(!plan.evals.empty() && !plan.evals[0].aux.valid() && plan.evals[0].auxInfo.x == 0.0f);
 }
 
 AUREA_TEST(EffectPack, OscillateTravelsAlongItsDirectionAndDecaysToIdentity) {

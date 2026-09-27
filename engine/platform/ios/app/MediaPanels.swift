@@ -444,7 +444,7 @@ struct CaptionsPanel: View {
                 CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: busy == nil) { importing = true }
             }.padding(.vertical, 6)
             label("panel_estilo")
-            CaptionChips(options: ["pn_caption_style_classic", "panel_caixa", "pn_caption_style_highlight", "pn_caption_style_neon", "pn_karaoke", "pn_pop"].map { AureaText.t($0) }, selected: style) { style = $0 }
+            CaptionChips(options: ["pn_caption_style_classic", "panel_caixa", "pn_caption_style_highlight", "pn_caption_style_neon", "pn_karaoke", "pn_pop", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }, selected: style) { style = $0 }
             label("pn_caption")
             CaptionChips(options: [AureaText.t("pn_caption_grouped"), AureaText.t("pn_caption_one_per_word")], selected: mode) { mode = $0 }
             if mode == 0 { groupingControls }
@@ -626,7 +626,7 @@ struct CaptionsPanel: View {
     }
     private func loadOptions() {
         let v = model.captionOptions
-        mode = (v["mode"]?.intValue ?? 0).clamped(to: 0...1); style = (v["style"]?.intValue ?? 2).clamped(to: 0...5)
+        mode = (v["mode"]?.intValue ?? 0).clamped(to: 0...1); style = (v["style"]?.intValue ?? 2).clamped(to: 0...7)
         maxWords = (v["maxWords"]?.intValue ?? 4).clamped(to: 1...12); maxChars = (v["maxChars"]?.intValue ?? 18).clamped(to: 6...60); maxLines = (v["maxLines"]?.intValue ?? 2).clamped(to: 1...4)
         highlight = v["highlight"]?.boolValue ?? true; uppercase = v["uppercase"]?.boolValue ?? false
         breakOnPause = v["breakOnPause"]?.boolValue ?? true; removeFillers = v["removeFillers"]?.boolValue ?? true

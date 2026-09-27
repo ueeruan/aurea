@@ -44,6 +44,36 @@ AUREA_TEST(AndroidVideoCompatibility, EverySamsungReleaseUsesReadablePlanes) {
     }
 }
 
+AUREA_TEST(AndroidVideoCompatibility, ReadablePlanesMappingFailureFallsBackToTheSoftwareDecoder) {
+    // Build 2124 black video: every Samsung (and any device in the sticky safe
+    // video mode) decodes into a CPU-readable YUV_420_888 reader. A hardware
+    // codec whose images do not map to 4:2:0 planes makes wrap() answer
+    // UnsupportedFormat/UnsupportedFeature; that was not a software-fallback
+    // reason, so the source failed every frame and the layer stayed black.
+    using android::video_software_fallback;
+    constexpr bool kZeroCopy = true, kPlanes = false, kHardware = true, kSoftware = false;
+    for (const Errc code : {Errc::UnsupportedFormat, Errc::UnsupportedFeature}) {
+        AUREA_CHECK(video_software_fallback(code, kPlanes, kHardware, /*alreadySoftware*/ false));
+        // Zero-copy keeps the old rule: the GPU samples the buffer, no mapping.
+        AUREA_CHECK(!video_software_fallback(code, kZeroCopy, kHardware, false));
+        // A software codec has nothing left to fall back to, and never twice.
+        AUREA_CHECK(!video_software_fallback(code, kPlanes, kSoftware, false));
+        AUREA_CHECK(!video_software_fallback(code, kPlanes, kHardware, true));
+    }
+    // The pre-existing reasons (stall after flush, decode error) stay in both modes.
+    for (const Errc code : {Errc::Timeout, Errc::DecodeFailed}) {
+        AUREA_CHECK(video_software_fallback(code, kPlanes, kHardware, false));
+        AUREA_CHECK(video_software_fallback(code, kZeroCopy, kHardware, false));
+        AUREA_CHECK(!video_software_fallback(code, kZeroCopy, kHardware, true));
+        AUREA_CHECK(!video_software_fallback(code, kPlanes, kSoftware, false));
+    }
+    // Anything else (budget, unsupported codec, state) is not the codec's layout.
+    for (const Errc code : {Errc::BudgetExceeded, Errc::UnsupportedCodec, Errc::InvalidState}) {
+        AUREA_CHECK(!video_software_fallback(code, kPlanes, kHardware, false));
+        AUREA_CHECK(!video_software_fallback(code, kZeroCopy, kHardware, false));
+    }
+}
+
 namespace {
 
 /// CPU (usuário + sistema) consumida pelo PROCESSO até agora, em ns.

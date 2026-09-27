@@ -845,12 +845,14 @@ struct TimelineView: View {
         guard !pinching else { return }
         if state == .began {
             let (row, touched) = hit(start, width: size.width)
-            let horizontal = abs(point.x - start.x) >= abs(point.y - start.y)
+            let dx = point.x - start.x, dy = point.y - start.y
+            let horizontal = TimelinePress.horizontal(dx, dy)
+            // Editar (losango, alça, mover) exige eixo claro, 2:1; scrub e rolagem ficam nos 45°.
+            let edit = TimelinePress.timeEdit(dx, dy)
             let mode: Mode
-            if horizontal && touched.kind == .key { mode = .key }
-            else if horizontal && touched.kind == .trimStart { mode = .trimStart }
-            else if horizontal && touched.kind == .trimEnd { mode = .trimEnd }
-            else if horizontal && !compact && touched.kind == .body && row.map({ $0.track == nil }) == true { mode = .move }
+            if edit && touched.kind == .key { mode = .key }
+            else if edit && touched.kind == .trimStart { mode = .trimStart }
+            else if edit && touched.kind == .trimEnd { mode = .trimEnd }
             else { mode = horizontal || compact ? .scrub : .scroll }
             begin(mode, start: start, width: size.width)
         }
@@ -872,12 +874,15 @@ struct TimelineView: View {
         if state == .changed, let g = gesture, g.mode == .hold {
             let dx = point.x - start.x, dy = point.y - start.y
             if hypot(dx, dy) >= m.axisSlop {
-                let horizontal = abs(dx) > abs(dy)
+                let horizontal = TimelinePress.horizontal(dx, dy)
+                // Só um eixo CLARO edita: tempo 2:1 move, pilha 2:1 reordena; a diagonal só rola.
+                let time = TimelinePress.timeEdit(dx, dy), stack = TimelinePress.stackEdit(dx, dy)
                 let mode: Mode
                 if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal || compact ? .scrub : .scroll }
-                else if g.hit.kind == .key { mode = horizontal ? .key : (compact ? .blocked : .scroll) }
-                else if g.hit.kind == .header { mode = !horizontal && !compact ? .reorder : .blocked }
-                else { mode = horizontal || compact ? .move : .reorder }
+                else if g.hit.kind == .key { mode = time ? .key : (compact ? .blocked : .scroll) }
+                else if g.hit.kind == .header { mode = !time && !compact ? .reorder : .blocked }
+                else if time || compact { mode = .move }
+                else { mode = stack ? .reorder : .scroll }
                 if mode == .move, let row = g.row, !model.selection.contains(row.id) {
                     model.select(layerId: row.id, additive: model.selection.count >= 2, openOptions: false)
                 }
@@ -1137,7 +1142,9 @@ private struct TimelineGestureSurface: UIViewRepresentable {
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.panned(_:)))
         pan.maximumNumberOfTouches = 1
         let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.held(_:)))
-        hold.minimumPressDuration = 0.5; hold.allowableMovement = 8
+        // Toque longo só com o dedo QUIETO: um dedo que rasteja 4 pt em 500 ms está
+        // começando a rolar — o hold falha e o pan (que espera por ele) assume.
+        hold.minimumPressDuration = 0.5; hold.allowableMovement = 4
         let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinched(_:)))
         pan.require(toFail: hold); tap.require(toFail: pan); tap.require(toFail: hold)
         let recognizers: [UIGestureRecognizer] = [tap, pan, hold, pinch]

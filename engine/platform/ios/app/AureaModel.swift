@@ -265,6 +265,11 @@ final class AureaModel: ObservableObject {
     /// Losangos de keyframe em todas as linhas (padrão); desligado, só as escolhidas mostram e deixam tocar.
     @Published var showAllKeyframes: Bool = true
     @Published var autoKeyTransforms = true
+    /// Como um gesto de transform escreve no motor (a MESMA regra do Android,
+    /// `transformWrite`): Auto-Key desligado desloca a animação inteira; na
+    /// cena 3D só a trilha PARADA é deslocada — a animada grava keyframe no
+    /// cabeçote, como fora dela. Antes a cena nunca marcava keyframe nenhum.
+    func transformLayout(animated: Bool) -> Bool { !autoKeyTransforms || (sceneEditor && !animated) }
     @Published var freehandPoints: [Float] = []
     @Published var actionSheet: ActionSheetRequest?
     @Published var numericKeypad: KeypadRequest?
@@ -647,6 +652,19 @@ final class AureaModel: ObservableObject {
                         }
                     case "timeline-reorder":
                         for _ in 0..<8 { addShape(1) }
+                    case "scene-keyframe":
+                        // Nulo 3D com Posição animada no quadro 0, cabeçote no 30, já dentro da
+                        // cena 3D: o teste arrasta o nulo e espera o keyframe do quadro 30.
+                        addNull(threeD: true)
+                        refreshModel(force: true)
+                        if let id = primarySelection {
+                            let position = StageGeom.floats(detail["position"])
+                            for property in UInt32(0)...UInt32(2) where position.count == 3 {
+                                engine.insertKeyframe(forLayer: id, property: property, time: 0, value: position[Int(property)])
+                            }
+                            engine.seek(toFrame: 30); refreshModel(force: true)
+                        }
+                        enterSceneEditor()
                     case "parent-new-null":
                         // Duas formas escolhidas juntas: o teste liga as duas a um nulo novo.
                         addShape(1); addShape(1)
@@ -1449,12 +1467,14 @@ final class AureaModel: ObservableObject {
     /// Writing only its base transform would be hidden by the existing track.
     func editTransform(_ property: UInt32, value: Float) {
         guard let id = primarySelection, value.isFinite, !(selectedLayer?.locked ?? false) else { return }
-        if property < 15 && (sceneEditor || !autoKeyTransforms) {
+        let mask = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let keyed = property < 32 && mask & (1 << property) != 0
+        // Trilha animada com Auto-Key marca keyframe TAMBÉM na cena 3D (como no Android).
+        if property < 15 && transformLayout(animated: keyed) {
             mutate { $0.layoutTransform(id, property: property, value: value) }
             refreshModel(force: true); return
         }
-        let mask = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
-        if property < 32 && mask & (1 << property) != 0 {
+        if keyed {
             keyProperty(property, value: value)
             return
         }
@@ -2069,8 +2089,8 @@ final class AureaModel: ObservableObject {
         applyGizmoPosition(id, (0..<3).map { pu[$0] + pv[$0] - base[$0] })
     }
 
-    /// Posição vinda do gizmo/arrasto 3D: na cena, desloca a curva inteira
-    /// (layout); fora dela, keyframe se animado, senão valor estático.
+    /// Posição vinda do gizmo/arrasto 3D: com Auto-Key, trilha animada grava
+    /// keyframe no cabeçote (na cena 3D também); trilha parada é deslocada.
     func applyGizmoPosition(_ id: Int64, _ next: [Float]) {
         applyGizmoComponents(id, base: 0, previous: StageGeom.floats(detail["position"]), next: next)
     }
@@ -2085,14 +2105,16 @@ final class AureaModel: ObservableObject {
 
     private func applyGizmoComponents(_ id: Int64, base: UInt32, previous: [Float], next: [Float]) {
         guard next.count == 3, previous.count >= 3, next.allSatisfy({ $0.isFinite }) else { return }
-        let animated = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
-        let local = localPlayhead
+        guard let layerDetail = engine.layerDetail(id),
+              let local = (layerDetail["localPlayhead"] as? NSNumber)?.int32Value else { return }
+        let animated = (layerDetail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         // Submission is asynchronous: three scalar setters would each read
         // the same old XYZ and overwrite the preceding axis command.
         mutate { core in
             for axis in 0...2 where abs(next[axis] - previous[axis]) >= 0.00001 {
                 let property = base + UInt32(axis)
-                if !sceneEditor && autoKeyTransforms && animated & (UInt32(1) << property) != 0 {
+                // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote.
+                if autoKeyTransforms && animated & (UInt32(1) << property) != 0 {
                     core.insertKeyframe(forLayer: id, property: property, time: local, value: next[axis])
                 } else { core.layoutTransform(id, property: property, value: next[axis]) }
             }
@@ -2748,11 +2770,11 @@ final class AureaModel: ObservableObject {
     /// Each component owns its track; editing X does not insert Y/Z keys.
     func setTransform(_ property: UInt32, value: Float, layer: Int64) {
         guard value.isFinite, let d = engine.layerDetail(layer) else { return }
-        if (sceneEditor || !autoKeyTransforms) && property < 15 {
+        let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        if property < 15 && transformLayout(animated: property < 32 && animated & (1 << property) != 0) {
             mutate { $0.layoutTransform(layer, property: property, value: value) }
             refreshSelectedLayer(); return
         }
-        let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
         let position = StageGeom.floats(d["position"])
         let scale = StageGeom.floats(d["scale"])
@@ -2787,16 +2809,16 @@ final class AureaModel: ObservableObject {
     /// Duas propriedades de uma vez (o arrasto da camada no palco: X e Y).
     func setTransform2(_ pa: UInt32, _ va: Float, _ pb: UInt32, _ vb: Float, layer: Int64) {
         guard va.isFinite, vb.isFinite, let d = engine.layerDetail(layer) else { return }
-        if (sceneEditor || !autoKeyTransforms) && pa < 15 && pb < 15 {
+        let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let isAnimated = (pa < 32 && animated & (1 << pa) != 0) || (pb < 32 && animated & (1 << pb) != 0)
+        if pa < 15 && pb < 15 && transformLayout(animated: isAnimated) {
             mutate { $0.layoutTransform(layer, property: pa, value: va); $0.layoutTransform(layer, property: pb, value: vb) }
             refreshSelectedLayer(); return
         }
-        let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
         let position = StageGeom.floats(d["position"])
         let scale = StageGeom.floats(d["scale"])
         func component(_ values: [Float], _ index: Int) -> Float { values.count > index ? values[index] : 0 }
-        let isAnimated = (pa < 32 && animated & (1 << pa) != 0) || (pb < 32 && animated & (1 << pb) != 0)
         mutate { engine in
             if isAnimated {
                 engine.insertKeyframe(forLayer: layer, property: pa, time: local, value: va)

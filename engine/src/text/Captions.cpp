@@ -134,7 +134,7 @@ Vec4 rgb(u32 hex, f32 a = 1.0f) {
 } // namespace
 
 const char* caption_style_name(u32 id) noexcept {
-    static const char* const names[kCaptionStyleCount] = {"Clássico", "Caixa", "Destaque", "Neon", "Karaokê", "Pop"};
+    static const char* const names[kCaptionStyleCount] = {"Clássico", "Caixa", "Destaque", "Neon", "Karaokê", "Pop", "Legenda suave", "Legenda luminosa"};
     return id < kCaptionStyleCount ? names[id] : nullptr;
 }
 
@@ -288,6 +288,14 @@ void apply_caption_style(const CaptionOptions& opt, u32 shortSide, TextData& t, 
     t.shadowBlur = 6.0f;
     const u32 style = std::min(opt.style, kCaptionStyleCount - 1);
     switch (style) {
+        case 6:
+        case 7:
+            t.fontWeight = 700;
+            t.color = style == 7 ? rgb(0xFFC600) : rgb(0xFFFFFF);
+            t.strokeColor = style == 7 ? rgb(0xFFFFFF) : rgb(0x000000);
+            t.strokeWidth = std::max(1.0f, size * 0.03f);
+            t.shadow = true; t.shadowOffset = Vec2{0, 1}; t.shadowBlur = size * 0.3f;
+            break;
         case 0:   // Clássico: branco com contorno
             t.fontWeight = 700;
             t.color = rgb(0xFFFFFF);
@@ -342,6 +350,13 @@ void apply_caption_animation(const CaptionOptions& opt, TextData& t, TrackSet& t
     const u32 style = std::min(opt.style, kCaptionStyleCount - 1);
     const u32 n = static_cast<u32>(wf.size());
     if (n == 0) return;
+    if (style >= 6) {
+        const i64 begin = std::max<i64>(0, wf.front());
+        const double ratio = style == 6 ? 88.0 / 184.0 : 120.121094 / 236.121094;
+        const i64 duration = std::max<i64>(2, static_cast<i64>((endFrame - begin) * ratio));
+        (void)apply_text_preset(style == 6 ? 23 : 24, t, tr, begin, duration, 30.0);
+        return;
+    }
     const f32 step = 100.0f / static_cast<f32>(n);
     if (style == 4) {
         // Seletor 0..fim; o fim anda palavra por palavra na fala.

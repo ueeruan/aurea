@@ -6,6 +6,7 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/media/DecodedPlaneBounds.hpp"
+#include "aurea/platform/AndroidVideoCompatibility.hpp"
 
 #include <android/hardware_buffer.h>
 #include <media/NdkImage.h>
@@ -348,15 +349,19 @@ public:
             if (const Status status = seek_to_keyframe(target); !status.ok()) return status;
             result = next_image_timed_frame(target, out, outPtsUs, endOfStream);
         }
-        if (result.ok() || softwareFallback_ || !info_.hardwareDecoder
-            || (result.code() != Errc::Timeout && result.code() != Errc::DecodeFailed)
-            || !software_decoder_for(info_.codec)) return result;
-        // Some drivers accept configuration but stall after flush/recreation.
-        // Retry that exact presentation interval once with the platform software
-        // codec; never pretend an empty frame is success or silently restart at 0.
+        if (result.ok() || !software_decoder_for(info_.codec)
+            || !android::video_software_fallback(result.code(), zeroCopy_, info_.hardwareDecoder, softwareFallback_)) {
+            return result;
+        }
+        // Some drivers accept configuration but stall after flush/recreation;
+        // in readable-planes mode (Samsung / safe video mode) a vendor codec can
+        // also deliver YUV_420_888 images whose planes the CPU cannot map
+        // (video_software_fallback). Retry that exact presentation interval
+        // once with the platform software codec; never pretend an empty frame
+        // is success or silently restart at 0.
         const i64 target = std::max(deliverFromUs, nextDeliveryUs_);
-        AUREA_LOG_WARN("decoder %s falhou; tentando software em %lld us", info_.decoderName,
-            static_cast<long long>(target));
+        AUREA_LOG_WARN("decoder %s falhou (%s%s); tentando software em %lld us", info_.decoderName,
+            result.message().data(), zeroCopy_ ? "" : ", planos pela CPU", static_cast<long long>(target));
         softwareFallback_ = true;
         destroy_codec();
         if (const Status opened = create_codec(); !opened.ok()) return opened;
@@ -780,6 +785,13 @@ private:
             f->width = static_cast<u32>(std::max(0, iw));
             f->height = static_cast<u32>(std::max(0, ih));
             if (!planes_from(image, *f)) {
+                // Readable planes the CPU cannot read as 4:2:0: said out loud
+                // (it used to be a silent black layer) and reported as a format
+                // error, which next_frame() turns into the software-codec retry.
+                int32_t planes = 0;
+                AImage_getNumberOfPlanes(image, &planes);
+                AUREA_LOG_ERROR("decoder %s: imagem YUV_420_888 %dx%d com %d plano(s) nao mapeia para planos na CPU",
+                                info_.decoderName, iw, ih, planes);
                 f->release();
                 return Status{Errc::UnsupportedFormat, "layout YUV do ImageReader nao suportado"};
             }

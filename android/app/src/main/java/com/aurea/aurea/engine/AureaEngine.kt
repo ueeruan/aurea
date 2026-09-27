@@ -399,6 +399,11 @@ class AureaEngine private constructor() {
     fun queryGizmo(layer: Long, length: Float, out: FloatArray, localSpace: Boolean = false): Boolean = nativeQueryGizmo(nativeHandle, layer, length, out, localSpace)
     fun gizmoMoveLocal(layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean = nativeGizmoMoveLocal(nativeHandle, layer, axis, amount, out)
 
+    fun sceneSettings(): FloatArray = nativeSceneSettings(nativeHandle)
+    fun setSceneSetting(parameter: Int, value: Float): Boolean = nativeSetSceneSetting(nativeHandle, parameter, value)
+    private external fun nativeSceneSettings(handle: Long): FloatArray
+    private external fun nativeSetSceneSetting(handle: Long, parameter: Int, value: Float): Boolean
+
     // Ambiente 3D (HDRI).
     fun importHdri(path: String): Long = nativeImportHdri(nativeHandle, path)
     fun clearHdri(): Boolean = nativeClearHdri(nativeHandle)

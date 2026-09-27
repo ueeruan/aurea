@@ -629,6 +629,191 @@ AUREA_TEST(Gpu, VideoShowsTheFrameOfTheRequestedTime) {
 }
 
 // =============================================================================
+// Passe de SAÍDA — o caminho do aparelho. Os testes offscreen param na
+// composição (RGBA16F) e nunca passam pelo passe "saida" que leva a imagem ao
+// swapchain: letterbox, zoom, pan, pré-rotação e a média de área quando a
+// composição encolhe no display. É só ali que o preview do celular vive, com
+// os ajustes que o host nunca vê: preview em 1/2, calor (heavyScale < 1),
+// backbuffer em paisagem pré-girado 90° e zoom < 1. Um vídeo tem de chegar ao
+// display com as quatro cores do padrão — nunca preto.
+// =============================================================================
+namespace {
+
+struct DisplayImage {
+    u32 width = 0, height = 0;
+    std::vector<u8> rgba;   // UNORM codificado, como o swapchain
+    [[nodiscard]] const u8* at(u32 x, u32 y) const { return &rgba[(static_cast<usize>(y) * width + x) * 4]; }
+};
+
+/// Pixels a ≤ `tol` (por canal) de (r,g,b) e o centro de massa deles.
+u32 count_color(const DisplayImage& img, int r, int g, int b, int tol, f32& cx, f32& cy) {
+    u32 n = 0;
+    f64 sx = 0, sy = 0;
+    for (u32 y = 0; y < img.height; ++y) {
+        for (u32 x = 0; x < img.width; ++x) {
+            const u8* p = img.at(x, y);
+            if (std::abs(static_cast<int>(p[0]) - r) <= tol && std::abs(static_cast<int>(p[1]) - g) <= tol
+                && std::abs(static_cast<int>(p[2]) - b) <= tol) {
+                ++n;
+                sx += x;
+                sy += y;
+            }
+        }
+    }
+    cx = n ? static_cast<f32>(sx / n) : -1.0f;
+    cy = n ? static_cast<f32>(sy / n) : -1.0f;
+    return n;
+}
+
+/// Renderiza o instante 0 pelo passe de saída num "backbuffer" RGBA8 de
+/// `dispW`×`dispH` pixels FÍSICOS com a pré-rotação `rot` e os ajustes `rsIn`,
+/// e lê o display de volta.
+DisplayImage render_display(Scene& s, u32 dispW, u32 dispH, SurfaceRotation rot, const RenderSettings& rsIn) {
+    Gpu& g = gpu();
+    RenderSettings rs = rsIn;
+    FrameSnapshot snap;
+    static u64 frame = 500000;
+    for (int attempt = 0; attempt < 1500; ++attempt) {
+        g.renderer.prepare(*s.comp, s.project, FrameIndex{0}, &s.media, &Scene::lookup, &s, rs, ++frame, 0,
+                           DecodeMode::Still, 1.0f, snap);
+        if (snap.missingVideoFrames == 0 && snap.staleVideoFrames == 0) break;
+        for (RenderLayer& l : snap.layers) l.source.frame.reset();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    const u32 den = std::max(1u, rs.previewDenominator);
+    const u32 w = std::max(1u, s.comp->width() / den);
+    const u32 h = std::max(1u, s.comp->height() / den);
+    OffscreenTarget off{g.target(w, h), w, h};
+    TextureDesc dd;
+    dd.width = dispW;
+    dd.height = dispH;
+    dd.format = SurfaceFormat::RGBA8;
+    dd.renderTarget = true;
+    dd.sampled = true;
+    dd.transferSrc = true;
+    dd.debugName = "display-de-teste";
+    auto display = g.backend.create_texture(dd);
+    AUREA_CHECK(display.ok());
+    DisplayImage img;
+    if (!display.ok()) return img;
+    off.display = *display;
+    off.displayWidth = dispW;
+    off.displayHeight = dispH;
+    off.displayRotation = rot;
+    FrameStats stats;
+    RenderTimings timings;
+    const Status st = g.renderer.render(snap, rs, &off, stats, timings);
+    AUREA_CHECK_MSG(st.ok(), "render pelo passe de saida falhou");
+    g.backend.wait_idle();
+    img.width = dispW;
+    img.height = dispH;
+    img.rgba.resize(static_cast<usize>(dispW) * dispH * 4);
+    AUREA_CHECK(g.backend.read_texture(*display, img.rgba.data(), dispW * 4).ok());
+    g.backend.destroy_texture(*display);
+    return img;
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, VideoReachesTheDisplayThroughTheOutputPassWithPhoneSettings) {
+    AUREA_REQUIRE_GPU();
+    // Composição em pé (256×448) coberta pelo vídeo: quadrantes vermelho (cima
+    // à esquerda), verde (cima à direita), azul (baixo à esquerda) e branco.
+    Scene s(256, 448);
+    SyntheticConfig cfg;
+    cfg.width = 256;
+    cfg.height = 448;
+    s.video(cfg, 128, 224);
+
+    // 1) Sem rotação, preview cheio, zoom 1: a referência da orientação.
+    {
+        RenderSettings rs;
+        rs.dither = true;
+        const DisplayImage img = render_display(s, 256, 448, SurfaceRotation::None, rs);
+        if (img.rgba.empty()) return;
+        f32 cx[4], cy[4], px, py;
+        const u32 red = count_color(img, 255, 0, 0, 24, cx[0], cy[0]);
+        const u32 green = count_color(img, 0, 255, 0, 24, cx[1], cy[1]);
+        const u32 blue = count_color(img, 0, 0, 255, 24, cx[2], cy[2]);
+        const u32 white = count_color(img, 255, 255, 255, 24, cx[3], cy[3]);
+        const u32 black = count_color(img, 0, 0, 0, 8, px, py);
+        std::printf("\n    display 256x448 reto: vermelho %u verde %u azul %u branco %u preto %u", red, green, blue,
+                    white, black);
+        // Cada quadrante: 128×224 = 28672 px (a borda entre eles mistura).
+        for (u32 n : {red, green, blue, white}) {
+            AUREA_CHECK(n > 28672u * 9 / 10);
+            AUREA_CHECK(n <= 28672u);
+        }
+        AUREA_CHECK_EQ(black, 0u);
+        AUREA_CHECK(cx[0] < 128.0f && cy[0] < 224.0f);   // vermelho em cima à esquerda
+        AUREA_CHECK(cx[1] > 128.0f && cy[1] < 224.0f);   // verde em cima à direita
+        AUREA_CHECK(cx[2] < 128.0f && cy[2] > 224.0f);   // azul embaixo à esquerda
+    }
+
+    // 2) O celular: preview em 1/2, calor, dither, backbuffer em PAISAGEM
+    //    (448×256 físicos) que o sistema pede pré-girado 90° — o display
+    //    lógico é 256×448, em pé — e zoom 0,5.
+    {
+        RenderSettings rs;
+        rs.previewDenominator = 2;
+        rs.heavyScale = 0.5f;
+        rs.viewportZoom = 0.5f;
+        rs.dither = true;
+        const DisplayImage img = render_display(s, 448, 256, SurfaceRotation::Rotate90, rs);
+        if (img.rgba.empty()) return;
+        f32 cx[4], cy[4], px, py;
+        const u32 red = count_color(img, 255, 0, 0, 24, cx[0], cy[0]);
+        const u32 green = count_color(img, 0, 255, 0, 24, cx[1], cy[1]);
+        const u32 blue = count_color(img, 0, 0, 255, 24, cx[2], cy[2]);
+        const u32 white = count_color(img, 255, 255, 255, 24, cx[3], cy[3]);
+        const u32 black = count_color(img, 0, 0, 0, 8, px, py);
+        std::printf("\n    display 448x256 girado 90, preview 1/2, zoom 0,5: vermelho %u verde %u azul %u branco %u preto %u",
+                    red, green, blue, white, black);
+        // Com zoom 0,5 a composição ocupa 128×224 lógicos: cada quadrante 64×112 = 7168 px.
+        for (u32 n : {red, green, blue, white}) {
+            AUREA_CHECK(n > 7168u * 8 / 10);
+            AUREA_CHECK(n < 7168u * 12 / 10);
+        }
+        AUREA_CHECK_EQ(black, 0u);   // nem o vídeo nem a área de trabalho saem pretos
+        // Pré-rotação: o eixo X lógico vira o eixo Y físico. Vermelho e verde
+        // (lado a lado na composição) ficam um sobre o outro no backbuffer;
+        // vermelho e azul (um sobre o outro) ficam lado a lado.
+        AUREA_CHECK(std::fabs(cx[0] - cx[1]) < 4.0f);
+        AUREA_CHECK(std::fabs(cy[0] - cy[1]) > 50.0f);
+        AUREA_CHECK(std::fabs(cy[0] - cy[2]) < 4.0f);
+        AUREA_CHECK(std::fabs(cx[0] - cx[2]) > 100.0f);
+    }
+
+    // 3) Encolhida no display (zoom 0,25 com preview em 1/2): 2 texels da
+    //    composição por pixel — a média de área de 4 amostras do shader de
+    //    saída (params.y ≥ 1,33). Continua com as quatro cores, nada preto.
+    {
+        RenderSettings rs;
+        rs.previewDenominator = 2;
+        rs.heavyScale = 0.5f;
+        rs.viewportZoom = 0.25f;
+        rs.dither = true;
+        const DisplayImage img = render_display(s, 448, 256, SurfaceRotation::Rotate90, rs);
+        if (img.rgba.empty()) return;
+        f32 cx, cy, px, py;
+        const u32 red = count_color(img, 255, 0, 0, 24, cx, cy);
+        const u32 green = count_color(img, 0, 255, 0, 24, cx, cy);
+        const u32 blue = count_color(img, 0, 0, 255, 24, cx, cy);
+        const u32 white = count_color(img, 255, 255, 255, 24, cx, cy);
+        const u32 black = count_color(img, 0, 0, 0, 8, px, py);
+        std::printf("\n    display 448x256 girado 90, preview 1/2, zoom 0,25 (4 amostras): vermelho %u verde %u azul %u branco %u preto %u",
+                    red, green, blue, white, black);
+        // Cada quadrante 32×56 = 1792 px; a média de área mistura uma faixa
+        // de ~2 px nas bordas entre eles.
+        for (u32 n : {red, green, blue, white}) {
+            AUREA_CHECK(n > 1792u * 7 / 10);
+            AUREA_CHECK(n < 1792u * 12 / 10);
+        }
+        AUREA_CHECK_EQ(black, 0u);
+    }
+}
+
+// =============================================================================
 // Efeitos — verificação analítica
 // =============================================================================
 AUREA_TEST(Gpu, ExposureDoublesTheLightPerStop) {
@@ -5615,6 +5800,13 @@ const char* const kEffectPackGpuKeys[] = {
     effect_keys::kIrisWipe, effect_keys::kBoxWipe, effect_keys::kVenetianBlinds,
     effect_keys::kRadialBlur, effect_keys::kMirror, effect_keys::kCrop, effect_keys::kVignette,
     effect_keys::kMosaic, effect_keys::kFindEdges, effect_keys::kHueSaturation,
+    // Geradores e recorte do editor antigo — e os dois efeitos que ganharam
+    // parâmetros no fim (pré-desfoque da chave; curvatura e escala da íris).
+    effect_keys::kFractalNoise, effect_keys::kGradientRamp, effect_keys::kFourColorGradient,
+    effect_keys::kAudioSpectrum, effect_keys::kStrokeOutline, effect_keys::kMatteRefine,
+    effect_keys::kChromaKey, effect_keys::kLensBlur,
+    // O VHS de Estilizar.
+    effect_keys::kVhsLook,
 };
 
 f32 max_abs_diff(const FloatImage& a, const FloatImage& b) {
@@ -5832,6 +6024,448 @@ AUREA_TEST(EffectPackGpu, FinishingEffectsAreNeutralAtZeroAndDoWhatTheySay) {
         AUREA_CHECK(near4(zoom.v(32, 32), plain.v(32, 32), .03f));
         fx.params[1].constant = ParamValue::scalar(0.0f);
         AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+    }
+}
+
+AUREA_TEST(EffectPackGpu, FractalNoiseIsDeterministicPerSeedAndEvolves) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    const auto id = s.image(uniform_image(64, 64, 255, 255, 255), 32, 32);
+    auto& fx = s.add_effect(id, effect_keys::kFractalNoise);
+    fx.params[2].constant = ParamValue::scalar(200.0f);   // contraste
+    fx.params[6].constant = ParamValue::scalar(16.0f);    // célula de 16 px: várias no quadro
+    const FloatImage a = s.render(FrameIndex{3});
+    AUREA_CHECK(all_finite(a));
+    // Mesma semente, mesmo quadro: os mesmos bits — e é ruído, não cinza liso.
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{3}), a) < 1e-5f);
+    f32 lo = 1.0f, hi = 0.0f;
+    for (u32 y = 2; y < 62; y += 3) for (u32 x = 2; x < 62; x += 3) {
+        lo = std::min(lo, a.v(x, y).x);
+        hi = std::max(hi, a.v(x, y).x);
+        AUREA_CHECK(std::fabs(a.v(x, y).x - a.v(x, y).y) < 1e-3f);   // cinza
+    }
+    AUREA_CHECK(hi - lo > 0.2f);
+    // Outra semente: outro campo. A evolução muda o campo sem pular.
+    fx.params[11].constant = ParamValue::scalar(2.0f);
+    const FloatImage other = s.render(FrameIndex{3});
+    AUREA_CHECK(max_abs_diff(other, a) > 0.1f);
+    fx.params[11].constant = ParamValue::scalar(1.0f);
+    fx.params[8].constant = ParamValue::scalar(180.0f);
+    const FloatImage evolved = s.render(FrameIndex{3});
+    AUREA_CHECK(max_abs_diff(evolved, a) > 0.02f);
+    fx.params[8].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{3}), a) < 1e-5f);
+    // Cada tipo de ruído e de fractal desenha algo finito e diferente de liso.
+    for (u32 noise = 0; noise < 5; ++noise) for (u32 fractal = 0; fractal < 3; ++fractal) {
+        fx.params[0].constant = ParamValue::scalar(static_cast<f32>(noise));
+        fx.params[1].constant = ParamValue::scalar(static_cast<f32>(fractal));
+        const FloatImage img = s.render(FrameIndex{3});
+        AUREA_CHECK(all_finite(img));
+        f32 l = 1.0f, h = 0.0f;
+        for (u32 y = 2; y < 62; y += 5) for (u32 x = 2; x < 62; x += 5) {
+            l = std::min(l, img.v(x, y).x);
+            h = std::max(h, img.v(x, y).x);
+        }
+        AUREA_CHECK_MSG(h - l > 0.05f, "ruido liso demais");
+    }
+    // Opacidade 0 é neutra.
+    fx.params[13].constant = ParamValue::scalar(0.0f);
+    const FloatImage plain = s.render(FrameIndex{3});
+    AUREA_CHECK(plain.v(32, 32).x > .99f);
+}
+
+AUREA_TEST(EffectPackGpu, GradientRampHasItsTwoColorsAtTheEndpoints) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    const auto id = s.image(uniform_image(64, 64, 128, 128, 128), 32, 32);
+    const FloatImage plain = s.render();
+    auto& fx = s.add_effect(id, effect_keys::kGradientRamp);
+    // Do preto (topo) ao branco (base), linear.
+    const FloatImage ramp = s.render();
+    AUREA_CHECK(all_finite(ramp));
+    AUREA_CHECK(ramp.v(32, 1).x < 0.2f && ramp.v(32, 62).x > 0.9f);
+    AUREA_CHECK(ramp.v(32, 20).x < ramp.v(32, 44).x);
+    AUREA_CHECK(std::fabs(ramp.v(5, 32).x - ramp.v(58, 32).x) < 1e-3f);   // só depende de y
+    AUREA_CHECK(ramp.v(32, 32).w > .99f);                                  // o alfa da camada fica
+    // Cores trocadas: o degradê inverte.
+    fx.params[3].constant = ParamValue::color(1.0f, 1.0f, 1.0f, 1.0f);
+    fx.params[4].constant = ParamValue::color(0.0f, 0.0f, 0.0f, 1.0f);
+    const FloatImage flipped = s.render();
+    AUREA_CHECK(flipped.v(32, 1).x > 0.9f && flipped.v(32, 62).x < 0.2f);
+    // Radial: o ponto inicial no centro tem a cor inicial, o canto a final.
+    fx.params[0].constant = ParamValue::scalar(1.0f);
+    fx.params[1].constant = ParamValue::vec2(0.5f, 0.5f);
+    fx.params[2].constant = ParamValue::vec2(1.0f, 0.5f);
+    const FloatImage radial = s.render();
+    AUREA_CHECK(radial.v(32, 32).x > 0.9f && radial.v(1, 1).x < 0.2f);
+    AUREA_CHECK(std::fabs(radial.v(32, 8).x - radial.v(8, 32).x) < 2e-2f);   // círculo
+    // 100% do original é neutro; a dispersão mantém tudo finito.
+    fx.params[6].constant = ParamValue::scalar(100.0f);
+    AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+    fx.params[6].constant = ParamValue::scalar(0.0f);
+    fx.params[5].constant = ParamValue::scalar(40.0f);
+    AUREA_CHECK(all_finite(s.render()));
+}
+
+AUREA_TEST(EffectPackGpu, FourColorGradientPutsEachColorAtItsCorner) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    const auto id = s.image(uniform_image(64, 64, 128, 128, 128), 32, 32);
+    auto& fx = s.add_effect(id, effect_keys::kFourColorGradient);
+    fx.params[4].constant = ParamValue::color(1.0f, 0.0f, 0.0f, 1.0f);   // canto superior esquerdo
+    fx.params[5].constant = ParamValue::color(0.0f, 1.0f, 0.0f, 1.0f);   // superior direito
+    fx.params[6].constant = ParamValue::color(0.0f, 0.0f, 1.0f, 1.0f);   // inferior esquerdo
+    fx.params[7].constant = ParamValue::color(1.0f, 1.0f, 1.0f, 1.0f);   // inferior direito
+    fx.params[8].constant = ParamValue::scalar(0.0f);                    // regiões duras
+    const FloatImage img = s.render();
+    AUREA_CHECK(all_finite(img));
+    const Vec4 tl = img.v(6, 6), tr = img.v(57, 6), bl = img.v(6, 57), br = img.v(57, 57);
+    AUREA_CHECK(tl.x > 0.8f && tl.y < 0.15f && tl.z < 0.15f);
+    AUREA_CHECK(tr.y > 0.8f && tr.x < 0.15f && tr.z < 0.15f);
+    AUREA_CHECK(bl.z > 0.8f && bl.x < 0.15f && bl.y < 0.15f);
+    AUREA_CHECK(br.x > 0.8f && br.y > 0.8f && br.z > 0.8f);
+    // No meio, a mistura das quatro: nenhum canal domina como num canto.
+    const Vec4 mid = img.v(32, 32);
+    AUREA_CHECK(mid.x > 0.2f && mid.y > 0.2f && mid.z > 0.2f);
+    // Suave: as cores se espalham — o canto continua sendo o mais parecido
+    // com a cor dele.
+    fx.params[8].constant = ParamValue::scalar(100.0f);
+    const FloatImage soft = s.render();
+    AUREA_CHECK(soft.v(6, 6).x > soft.v(6, 6).y && soft.v(6, 6).x > soft.v(6, 6).z);
+    AUREA_CHECK(soft.v(6, 6).y > 0.05f);
+    // Opacidade 0: a camada cinza volta.
+    fx.params[10].constant = ParamValue::scalar(0.0f);
+    const Vec4 gray = s.render().v(6, 6);
+    AUREA_CHECK(std::fabs(gray.x - gray.y) < 1e-3f && gray.x < 0.5f);
+}
+
+AUREA_TEST(EffectPackGpu, StrokeOutlinePaintsAroundTheSilhouette) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    s.comp->set_transparent_background(true);
+    // Quadrado branco de 16 px no meio: a silhueta ocupa [24, 40).
+    const auto id = s.image(uniform_image(16, 16, 255, 255, 255), 32, 32);
+    const FloatImage plain = s.render();
+    AUREA_CHECK(plain.v(44, 32).w < 0.01f);
+    auto& fx = s.add_effect(id, effect_keys::kStrokeOutline);
+    fx.params[0].constant = ParamValue::scalar(8.0f);                     // largura
+    fx.params[1].constant = ParamValue::color(1.0f, 0.0f, 0.0f, 1.0f);    // vermelho
+    // Fora: 8 px opacos em volta, nada além, o interior intocado.
+    const FloatImage outside = s.render();
+    AUREA_CHECK(all_finite(outside));
+    for (const Vec4 p : {outside.v(44, 32), outside.v(19, 32), outside.v(32, 44), outside.v(32, 19)}) {
+        AUREA_CHECK(p.w > 0.95f && p.x > 0.9f && p.y < 0.05f);
+    }
+    AUREA_CHECK(outside.v(50, 32).w < 0.05f && outside.v(32, 13).w < 0.05f);
+    AUREA_CHECK(outside.v(32, 32).x > 0.95f && outside.v(32, 32).y > 0.95f);
+    AUREA_CHECK(outside.v(37, 32).y > 0.95f);   // dentro, perto da borda: ainda branco
+    // Cantos: distância EUCLIDIANA, não de xadrez — a 4,5 px de cada lado na
+    // diagonal (6,4 px) está pintado; a 6,5 px de cada lado (9,2 px) não,
+    // embora um núcleo quadrado de 8 px o pintasse.
+    AUREA_CHECK(outside.v(44, 44).w > 0.9f);
+    AUREA_CHECK(outside.v(46, 46).w < 0.1f);
+    // Dentro (4 px): o traço cobre a borda interna, o miolo continua branco
+    // e fora fica transparente.
+    fx.params[0].constant = ParamValue::scalar(4.0f);
+    fx.params[3].constant = ParamValue::scalar(2.0f);
+    const FloatImage inside = s.render();
+    AUREA_CHECK(inside.v(44, 32).w < 0.05f);
+    AUREA_CHECK(inside.v(38, 32).x > 0.9f && inside.v(38, 32).y < 0.05f);
+    AUREA_CHECK(inside.v(32, 32).y > 0.95f);
+    // Centro (8 px): metade para cada lado.
+    fx.params[0].constant = ParamValue::scalar(8.0f);
+    fx.params[3].constant = ParamValue::scalar(1.0f);
+    const FloatImage center = s.render();
+    AUREA_CHECK(center.v(42, 32).w > 0.9f && center.v(42, 32).x > 0.9f);
+    AUREA_CHECK(center.v(38, 32).y < 0.05f && center.v(38, 32).x > 0.9f);
+    AUREA_CHECK(center.v(46, 32).w < 0.1f);
+    // Suavidade: a borda externa vira rampa, sem NaN; opacidade 0 é neutra.
+    fx.params[3].constant = ParamValue::scalar(0.0f);
+    fx.params[2].constant = ParamValue::scalar(6.0f);
+    const FloatImage soft = s.render();
+    AUREA_CHECK(all_finite(soft));
+    AUREA_CHECK(soft.v(48, 32).w > 0.05f && soft.v(48, 32).w < 0.95f);
+    fx.params[4].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+}
+
+AUREA_TEST(EffectPackGpu, MatteRefineChokesAndFeathersTheSilhouette) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    s.comp->set_transparent_background(true);
+    const auto id = s.image(uniform_image(16, 16, 255, 255, 255), 32, 32);
+    const FloatImage plain = s.render();
+    auto& fx = s.add_effect(id, effect_keys::kMatteRefine);
+    AUREA_CHECK(max_abs_diff(s.render(), plain) < 1e-4f);
+    // Encolher 4 px: a borda some, o miolo fica.
+    fx.params[0].constant = ParamValue::scalar(4.0f);
+    const FloatImage choked = s.render();
+    AUREA_CHECK(choked.v(38, 32).w < 0.1f && choked.v(32, 32).w > 0.95f);
+    // Crescer 4 px: 2 px fora da borda passa a ser opaco.
+    fx.params[0].constant = ParamValue::scalar(-4.0f);
+    const FloatImage grown = s.render();
+    AUREA_CHECK(grown.v(42, 32).w > 0.9f && grown.v(50, 32).w < 0.1f);
+    // Suavizar: a borda vira rampa.
+    fx.params[0].constant = ParamValue::scalar(0.0f);
+    fx.params[1].constant = ParamValue::scalar(6.0f);
+    const FloatImage feathered = s.render();
+    AUREA_CHECK(all_finite(feathered));
+    AUREA_CHECK(feathered.v(40, 32).w > 0.1f && feathered.v(40, 32).w < 0.9f && feathered.v(32, 32).w > 0.9f);
+    // Mostrar máscara: cinza opaco do alfa, dentro da região da camada
+    // (suavizada, ela vai de 15 a 49).
+    fx.params[2].constant = ParamValue::boolean(true);
+    const FloatImage matte = s.render();
+    AUREA_CHECK(matte.v(32, 32).w > 0.99f && matte.v(32, 32).x > 0.9f);
+    AUREA_CHECK(matte.v(17, 32).w > 0.99f && matte.v(17, 32).x < 0.05f);
+}
+
+AUREA_TEST(EffectPackGpu, AudioSpectrumReactsToATestTone) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 64);
+    s.comp->set_transparent_background(true);
+    // Vídeo com uma senoide de 1 kHz (e 2 kHz no outro canal) durante 10 s.
+    SyntheticConfig cfg;
+    cfg.width = 128;
+    cfg.height = 64;
+    cfg.audioRate = 48000;
+    cfg.audioFreq = 1000.0;
+    cfg.audioSeconds = 10.0;
+    const auto id = s.video(cfg, 64, 32);
+    Asset* asset = s.project.asset(s.comp->layer(id)->source);
+    AUREA_CHECK(asset != nullptr);
+    if (asset) {
+        asset->audio.channels = 2;
+        asset->audio.sampleRate = 48000;
+        asset->audio.sampleCount = FrameIndex{480000};
+    }
+    auto& fx = s.add_effect(id, effect_keys::kAudioSpectrum);
+    fx.params[1].constant = ParamValue::scalar(16.0f);          // faixas: 8 px cada
+    fx.params[2].constant = ParamValue::vec2(0.0f, 0.95f);      // caminho perto da base
+    fx.params[3].constant = ParamValue::vec2(1.0f, 0.95f);
+    fx.params[4].constant = ParamValue::scalar(40.0f);          // altura máxima
+    fx.params[5].constant = ParamValue::scalar(6.0f);           // espessura
+    fx.params[6].constant = ParamValue::scalar(0.0f);           // sem suavidade
+    const FloatImage img = s.render(FrameIndex{30});
+    AUREA_CHECK(all_finite(img));
+    // 1 kHz cai na faixa 8 (16 faixas logarítmicas de 30 Hz a 16 kHz): a
+    // barra dela, a −12 dB do fundo de escala, sobe ~30 px do caminho.
+    AUREA_CHECK(img.v(68, 45).w > 0.9f);
+    AUREA_CHECK(img.v(68, 45).x < 0.5f && img.v(68, 45).z > 0.5f);   // cor de dentro
+    AUREA_CHECK(img.v(20, 45).w < 0.05f);    // faixa 2 (graves): silêncio
+    AUREA_CHECK(img.v(68, 10).w < 0.05f);    // além da altura da barra
+    AUREA_CHECK(img.v(63, 45).w < 0.05f);    // ao lado da barra, fora da espessura
+    // Sem compor, a camada sumiu; compondo, o vídeo volta por baixo.
+    AUREA_CHECK(img.v(100, 20).w < 0.05f);
+    fx.params[13].constant = ParamValue::boolean(true);
+    const FloatImage over = s.render(FrameIndex{30});
+    AUREA_CHECK(over.v(100, 20).w > 0.95f);
+    AUREA_CHECK(over.v(68, 45).w > 0.9f);
+    // Determinístico: o mesmo quadro dá os mesmos bits; outro quadro da
+    // mesma senoide dá as mesmas barras (o tom é constante).
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{30}), over) < 1e-4f);
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{31}), over) < 0.05f);
+    // Sensibilidade 0: nada sobe; "só esta camada" num vídeo com som ainda toca.
+    fx.params[13].constant = ParamValue::boolean(false);
+    fx.params[14].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK(s.render(FrameIndex{30}).v(68, 45).w < 0.05f);
+    fx.params[14].constant = ParamValue::scalar(100.0f);
+    fx.params[0].constant = ParamValue::scalar(1.0f);
+    AUREA_CHECK(s.render(FrameIndex{30}).v(68, 45).w > 0.9f);
+    // Linhas e pontos: finitos e com desenho.
+    for (const f32 mode : {1.0f, 2.0f}) {
+        fx.params[10].constant = ParamValue::scalar(mode);
+        const FloatImage shape = s.render(FrameIndex{30});
+        AUREA_CHECK(all_finite(shape));
+        f32 alpha = 0.0f;
+        for (u32 y = 0; y < 64; ++y) for (u32 x = 0; x < 128; ++x) alpha += shape.v(x, y).w;
+        AUREA_CHECK(alpha > 20.0f);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// VHS (Estilizar): índices dos parâmetros na ordem declarada.
+// -----------------------------------------------------------------------------
+namespace {
+
+enum : u32 { kVhsIntensity = 0, kVhsBleed, kVhsSoften, kVhsNoise, kVhsScanlines, kVhsTracking, kVhsJitter,
+             kVhsTone, kVhsSaturation, kVhsVignette, kVhsOverlay, kVhsShowTime, kVhsLabel, kVhsOsdColor,
+             kVhsOsdSize, kVhsSeed };
+
+/// Tira tudo que mexe com o tempo ou com a cor, para um teste isolar uma peça.
+void vhs_quiet(EffectInstance& fx) {
+    for (const u32 i : {kVhsSoften, kVhsNoise, kVhsScanlines, kVhsTracking, kVhsJitter, kVhsTone, kVhsVignette})
+        fx.params[i].constant = ParamValue::scalar(0.0f);
+    fx.params[kVhsSaturation].constant = ParamValue::scalar(100.0f);
+}
+
+/// Pixels brancos (todos os canais altos, sem tinta) num retângulo.
+u32 vhs_white_pixels(const FloatImage& img, u32 x0, u32 y0, u32 x1, u32 y1) {
+    u32 n = 0;
+    for (u32 y = y0; y < y1; ++y) for (u32 x = x0; x < x1; ++x) {
+        const Vec4 v = img.v(x, y);
+        if (std::min({v.x, v.y, v.z}) > 0.7f && std::fabs(v.x - v.z) < 0.15f) ++n;
+    }
+    return n;
+}
+
+f32 vhs_region_diff(const FloatImage& a, const FloatImage& b, u32 x0, u32 y0, u32 x1, u32 y1) {
+    f32 d = 0.0f;
+    for (u32 y = y0; y < y1; ++y) for (u32 x = x0; x < x1; ++x)
+        for (int c = 0; c < 4; ++c) d = std::max(d, std::fabs(a.at(x, y)[c] - b.at(x, y)[c]));
+    return d;
+}
+
+/// Cartão colorido para o lookdev: céu de fim de tarde, sol, rosto, morros e
+/// barras de cor — saturação e bordas duras onde o VHS mais aparece.
+ImagePixels vhs_test_card(u32 w, u32 h) {
+    ImagePixels px = uniform_image(w, h, 0, 0, 0);
+    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+        u8* p = &px.rgba[(static_cast<usize>(y) * w + x) * 4];
+        const f32 fx = static_cast<f32>(x) / static_cast<f32>(w), fy = static_cast<f32>(y) / static_cast<f32>(h);
+        f32 r = 40.0f + 215.0f * std::min(1.0f, fy * 1.5f), g = 50.0f + 110.0f * fy, b = 190.0f - 110.0f * fy;
+        const auto in_circle = [&](f32 cx, f32 cy, f32 rad) {
+            const f32 dx = (fx - cx) * static_cast<f32>(w), dy = (fy - cy) * static_cast<f32>(h);
+            return dx * dx + dy * dy < rad * rad * static_cast<f32>(h) * static_cast<f32>(h);
+        };
+        if (in_circle(0.74f, 0.36f, 0.11f)) { r = 255; g = 214; b = 90; }
+        if (fy > 0.60f + 0.05f * std::sin(fx * 9.0f)) { r = 40; g = 150.0f + 40.0f * fx; b = 60; }
+        if (in_circle(0.30f, 0.46f, 0.12f)) { r = 232; g = 172; b = 138; }
+        if (fx > 0.20f && fx < 0.40f && fy > 0.58f && fy < 0.80f) { r = 210; g = 30; b = 40; }
+        if (fy > 0.82f) {
+            static const u8 kBars[7][3] = {{191, 191, 191}, {191, 191, 0}, {0, 191, 191}, {0, 191, 0},
+                                           {191, 0, 191}, {191, 0, 0}, {0, 0, 191}};
+            const u32 bar = std::min(6u, static_cast<u32>(fx * 7.0f));
+            r = kBars[bar][0]; g = kBars[bar][1]; b = kBars[bar][2];
+        }
+        p[0] = static_cast<u8>(std::clamp(r, 0.0f, 255.0f));
+        p[1] = static_cast<u8>(std::clamp(g, 0.0f, 255.0f));
+        p[2] = static_cast<u8>(std::clamp(b, 0.0f, 255.0f));
+    }
+    return px;
+}
+
+} // namespace
+
+AUREA_TEST(EffectPackGpu, VhsBleedShiftsColorEdgesOnlyToTheRight) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 48);
+    // Cinza | vermelho | cinza: duas bordas de cor, uma de cada lado.
+    ImagePixels img = uniform_image(96, 48, 128, 128, 128);
+    for (u32 y = 0; y < 48; ++y) for (u32 x = 32; x < 64; ++x) {
+        u8* p = &img.rgba[(static_cast<usize>(y) * 96 + x) * 4];
+        p[0] = 220; p[1] = 40; p[2] = 40;
+    }
+    const auto id = s.image(std::move(img), 48, 24);
+    auto& fx = s.add_effect(id, effect_keys::kVhsLook);
+    vhs_quiet(fx);
+    fx.params[kVhsOverlay].constant = ParamValue::scalar(0.0f);
+    fx.params[kVhsShowTime].constant = ParamValue::boolean(false);
+    fx.params[kVhsBleed].constant = ParamValue::scalar(0.0f);
+    const FloatImage sharp = s.render(FrameIndex{4});
+    fx.params[kVhsBleed].constant = ParamValue::scalar(12.0f);
+    const FloatImage bled = s.render(FrameIndex{4});
+    AUREA_CHECK(all_finite(bled));
+    const auto redness = [](const Vec4& v) { return v.x - v.y; };
+    for (u32 y = 8; y < 40; y += 7) {
+        // À direita da borda vermelho→cinza, o vermelho escorre para dentro.
+        for (u32 x = 65; x < 70; ++x) AUREA_CHECK(redness(bled.v(x, y)) > redness(sharp.v(x, y)) + 0.05f);
+        // A borda cinza→vermelho também anda para a direita: o começo do
+        // vermelho fica mais pálido...
+        AUREA_CHECK(redness(bled.v(33, y)) < redness(sharp.v(33, y)) - 0.05f);
+        // ...e NADA escorre para a esquerda: antes de cada borda, intacto.
+        for (u32 x = 24; x < 32; ++x) AUREA_CHECK(near4(bled.v(x, y), sharp.v(x, y), 2e-3f));
+        for (u32 x = 58; x < 64; ++x) AUREA_CHECK(near4(bled.v(x, y), sharp.v(x, y), 2e-3f));
+    }
+}
+
+AUREA_TEST(EffectPackGpu, VhsOsdPlayDrawsWhitePixelsTopLeft) {
+    AUREA_REQUIRE_GPU();
+    Scene s(256, 144);
+    const auto id = s.image(uniform_image(256, 144, 40, 40, 40), 128, 72);
+    auto& fx = s.add_effect(id, effect_keys::kVhsLook);
+    fx.params[kVhsTracking].constant = ParamValue::scalar(0.0f);   // sem chuvisco branco
+    fx.params[kVhsOsdSize].constant = ParamValue::scalar(300.0f);
+    const FloatImage play = s.render(FrameIndex{12});
+    AUREA_CHECK(all_finite(play));
+    const u32 lit = vhs_white_pixels(play, 0, 0, 144, 48);
+    std::printf("\n    VHS: %u pixels brancos no alto a esquerda com PLAY", lit);
+    AUREA_CHECK(lit > 60);
+    // O ▶ fica depois de "PLAY": a metade direita do texto também acende.
+    AUREA_CHECK(vhs_white_pixels(play, 110, 0, 144, 48) > 10);
+    // O canto de cima à direita não tem OSD.
+    AUREA_CHECK(vhs_white_pixels(play, 160, 0, 256, 48) == 0);
+    // Sem sobreposição, nada branco no alto à esquerda.
+    fx.params[kVhsOverlay].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK(vhs_white_pixels(s.render(FrameIndex{12}), 0, 0, 144, 48) == 0);
+    // REC e PAUSE também escrevem ali.
+    for (const f32 mode : {2.0f, 3.0f}) {
+        fx.params[kVhsOverlay].constant = ParamValue::scalar(mode);
+        AUREA_CHECK(vhs_white_pixels(s.render(FrameIndex{12}), 0, 0, 144, 48) > 40);
+    }
+}
+
+AUREA_TEST(EffectPackGpu, VhsTimeDigitsFollowTheLayerLocalTime) {
+    AUREA_REQUIRE_GPU();
+    const f64 fps = 30.0;
+    Scene s(256, 144, fps);
+    s.comp->set_duration(FrameIndex{2000});
+    const auto id = s.image(uniform_image(256, 144, 60, 70, 90), 128, 72);
+    auto& fx = s.add_effect(id, effect_keys::kVhsLook);
+    vhs_quiet(fx);   // só os dígitos dependem do quadro
+    fx.params[kVhsOsdSize].constant = ParamValue::scalar(300.0f);
+    const FloatImage t0 = s.render(FrameIndex{0});
+    const FloatImage t27 = s.render(FrameIndex{static_cast<i64>(fps * 27.0)});
+    AUREA_CHECK(all_finite(t0) && all_finite(t27));
+    // 00:00:00 → 00:00:27: os dígitos embaixo à direita mudam...
+    const f32 digits = vhs_region_diff(t0, t27, 128, 96, 256, 144);
+    std::printf("\n    VHS: diferenca dos digitos 0 s x 27 s = %.3f", digits);
+    AUREA_CHECK(digits > 0.5f);
+    // ...o PLAY e o SP não.
+    AUREA_CHECK(vhs_region_diff(t0, t27, 0, 0, 256, 60) < 1e-4f);
+    AUREA_CHECK(vhs_region_diff(t0, t27, 0, 96, 100, 144) < 1e-4f);
+    // Dentro do mesmo segundo, o relógio não anda.
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{static_cast<i64>(fps * 27.0) + 1}), t27) < 1e-5f);
+    // Sem o tempo, o canto de baixo à direita não muda com o quadro.
+    fx.params[kVhsShowTime].constant = ParamValue::boolean(false);
+    AUREA_CHECK(vhs_region_diff(s.render(FrameIndex{0}), s.render(FrameIndex{static_cast<i64>(fps * 27.0)}),
+                                128, 96, 256, 144) < 1e-4f);
+}
+
+AUREA_TEST(EffectPackGpu, VhsSameFrameRendersIdentically) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 72);
+    const auto id = s.image(reference_image(128, 72), 64, 36);
+    const FloatImage plain = s.render(FrameIndex{7});
+    auto& fx = s.add_effect(id, effect_keys::kVhsLook);
+    const FloatImage a = s.render(FrameIndex{7});
+    AUREA_CHECK(all_finite(a));
+    AUREA_CHECK(max_abs_diff(a, plain) > 0.05f);                     // o padrão já é VHS
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{7}), a) < 1e-5f);   // mesmos bits
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{8}), a) > 0.01f);   // o ruído anda
+    // Outra semente: outro sorteio no mesmo quadro.
+    fx.params[kVhsSeed].constant = ParamValue::scalar(7.0f);
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{7}), a) > 0.01f);
+    // Intensidade 0 é neutra.
+    fx.params[kVhsIntensity].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK(max_abs_diff(s.render(FrameIndex{7}), plain) < 1e-4f);
+}
+
+AUREA_TEST(EffectPackGpu, VhsDefaultLookdev) {
+    AUREA_REQUIRE_GPU();
+    // O padrão num cartão colorido, aos 27 s. AUREA_LOOKDEV_DIR=<pasta> grava
+    // vhs_default.png (e o original) para olhar.
+    const u32 w = 960, h = 540;
+    Scene s(w, h, 30.0);
+    s.comp->set_duration(FrameIndex{2000});
+    const auto id = s.image(vhs_test_card(w, h), w * 0.5f, h * 0.5f);
+    const FloatImage source = s.render(FrameIndex{810});
+    (void)s.add_effect(id, effect_keys::kVhsLook);
+    const FloatImage look = s.render(FrameIndex{810});
+    AUREA_CHECK(all_finite(look));
+    AUREA_CHECK(max_abs_diff(look, source) > 0.1f);
+    if (const char* dir = std::getenv("AUREA_LOOKDEV_DIR"); dir && *dir) {
+        AUREA_CHECK(write_png(std::string(dir) + "/vhs_default.png", look.encoded()));
+        (void)write_png(std::string(dir) + "/vhs_source.png", source.encoded());
     }
 }
 
@@ -9254,3 +9888,49 @@ AUREA_TEST(ScrubScene, ImagePlanesRemainVisibleAcrossReverseSeeksWithCamera) {
     }
 }
 #endif
+
+// Galaxy S22 (ANR): a captura da miniatura esperava até 4 s pelos frames de
+// vídeo COM o lock de render preso; o surfaceDestroyed da thread principal
+// ficava atrás dela (Input dispatching timed out). A espera agora solta o
+// lock: soltar a superfície durante uma captura responde em milissegundos.
+AUREA_TEST(Gpu, DetachSurfaceIsNotBlockedByAThumbnailCaptureWaitingForVideo) {
+    AUREA_REQUIRE_GPU();
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 54;
+    cfg.frameCount = 300;
+    cfg.decodeCostUs = 150'000;   // decoder lento: os primeiros pedidos ficam "faltando"
+    cfg.pattern = SyntheticPattern::FrameGray;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, "anr").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "clipe";
+    AUREA_CHECK(e.import_video(imp).ok());
+    int dummyWindow = 0;
+    (void)e.attach_surface(&dummyWindow, 320, 180);   // sem janela real o backend pode recusar: irrelevante aqui
+    std::atomic<bool> captureStarted{false};
+    std::thread capture([&] {
+        std::vector<u8> rgba;
+        u32 w = 0, h = 0;
+        captureStarted = true;
+        (void)e.capture_frame_rgba(160, rgba, w, h);
+    });
+    while (!captureStarted) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));   // a captura já está na espera pelos frames
+    const auto t0 = std::chrono::steady_clock::now();
+    e.detach_surface();
+    const f64 detachMs = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("    detach_surface durante a captura: %.1f ms\n", detachMs);
+    AUREA_CHECK(detachMs < 500.0);   // antes: preso até a captura terminar (segundos)
+    capture.join();
+    e.shutdown();
+}

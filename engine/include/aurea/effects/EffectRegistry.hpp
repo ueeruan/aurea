@@ -144,10 +144,16 @@ namespace effect_keys {
     inline constexpr const char* kHueSaturation      = "aurea.color.hue_saturation";
     inline constexpr const char* kStroke             = "aurea.stylize.stroke";
     inline constexpr const char* kMatteRefine        = "aurea.key.matte_refine";
+    /// Contorno da silhueta (alfa) de QUALQUER camada — o traço de forma e
+    /// texto continua sendo o deles; este é o do pixel.
+    inline constexpr const char* kStrokeOutline      = "aurea.stylize.stroke_outline";
     // Geradores (ver GenerateEffects.cpp)
     inline constexpr const char* kFractalNoise       = "aurea.generate.fractal_noise";
     inline constexpr const char* kGradientRamp       = "aurea.generate.gradient_ramp";
     inline constexpr const char* kFourColorGradient  = "aurea.generate.four_color_gradient";
+    inline constexpr const char* kAudioSpectrum      = "aurea.generate.audio_spectrum";
+    // O look de fita pronto (ver VhsLookEffect.cpp); o de Glitch é o defeito.
+    inline constexpr const char* kVhsLook            = "aurea.stylize.vhs";
 }
 
 } // namespace aurea

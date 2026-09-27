@@ -40,6 +40,7 @@
 namespace aurea {
 
 class Project;
+namespace audio { class AudioBlockCache; }
 
 /// Pixels de uma imagem importada (RGBA8, sRGB, alfa reto).
 struct ImagePixels {
@@ -316,6 +317,17 @@ struct OffscreenTarget {
     /// quem chama espera o fence do frame e lê do buffer mapeado.
     BufferHandle yReadback{};
     BufferHandle uvReadback{};
+
+    /// Teste do passe de SAÍDA sem swapchain: quando válido, a composição
+    /// (`texture`) ainda é composta, e depois vai para este alvo UNORM pelo
+    /// MESMO passe "saida" do preview — letterbox, zoom, pan, pré-rotação e a
+    /// média de área do encolhimento — como se ele fosse a imagem do
+    /// swapchain com `displayRotation`. É o que o host consegue exercer do
+    /// caminho do aparelho (que só existe com superfície). Sem planos NV12.
+    TextureHandle display{};
+    u32 displayWidth = 0;
+    u32 displayHeight = 0;
+    SurfaceRotation displayRotation = SurfaceRotation::None;
 };
 
 /// Custo medido de um frame, por etapa. GPU vem das timestamp queries (de um
@@ -421,6 +433,10 @@ public:
 
     // --- EffectResources -----------------------------------------------------
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
+    /// Espectro do som de uma camada no instante do `prepare` em curso (ver
+    /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
+    /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
+    [[nodiscard]] TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept override;
 
     // --- Consultas -------------------------------------------------------------
     [[nodiscard]] const FrameGraph::Stats& graph_stats() const noexcept { return graph_.stats(); }
@@ -666,6 +682,19 @@ public:
 private:
     std::unordered_map<u64, ImageTexture> images_;     ///< por AssetId empacotado
     std::unordered_map<u64, LutTexture> luts_;         ///< por hash da curva
+    // --- Espectro de áudio (EffectResources::audio_spectrum) ----------------
+    // A textura de um quadro é função pura de (asset, amostra central, faixas,
+    // ganho): a chave é isso. Blocos decodificados na hora, num cache próprio
+    // (o do playback pertence ao motor e anda com o alto-falante).
+    std::unordered_map<u64, LutTexture> spectra_;
+    std::unique_ptr<audio::AudioBlockCache> spectrumBlocks_;
+    VideoSourceFactory* spectrumFactory_ = nullptr;
+    /// A composição, o projeto, a mídia e o instante do `prepare` em curso
+    /// (aninhado numa pré-composição, os dela). Só valem durante o prepare.
+    const Composition* planComp_ = nullptr;
+    const Project* planProject_ = nullptr;
+    MediaManager* planMedia_ = nullptr;
+    FrameIndex planTime_{0};
     std::vector<PendingUpload> uploads_;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)

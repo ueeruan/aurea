@@ -42,13 +42,28 @@ class TimelineGesturesTest {
         compose.waitForIdle()
     }
 
+    @Test fun horizontalSwipeOnClipOnlyScrolls() {
+        launch()
+        val initial = store.layers.single()
+        timeline().performTouchInput {
+            swipe(Offset(width / 2f + 30 * density, 52 * density),
+                Offset(width / 2f - 50 * density, 52 * density), 240)
+        }
+        compose.runOnIdle {
+            assertEquals(initial.startFrame, store.layers.single().startFrame)
+            assertTrue(store.selection.isEmpty())
+        }
+    }
+
     @Test fun draggingUnselectedClipMovesWithoutOpeningOptionsAndUndoRestoresIt() {
         launch()
         val initial = store.layers.single()
         val height = timeline().fetchSemanticsNode().size.height
         timeline().performTouchInput {
-            swipe(Offset(width / 2f + 30 * density, 52 * density),
-                Offset(width / 2f + 100 * density, 52 * density), 240)
+            down(Offset(width / 2f + 30 * density, 52 * density))
+            advanceEventTime(600)
+            moveTo(Offset(width / 2f + 100 * density, 52 * density), 240)
+            up()
         }
         compose.waitUntil(5000) { store.layers.single().startFrame > initial.startFrame }
         compose.runOnIdle {
@@ -68,8 +83,10 @@ class TimelineGesturesTest {
         launch()
         compose.runOnIdle { store.snapping = false }
         fun drag() = timeline().performTouchInput {
-            swipe(Offset(width / 2f + 30 * density, 52 * density),
-                Offset(width / 2f + 100 * density, 52 * density), 240)
+            down(Offset(width / 2f + 30 * density, 52 * density))
+            advanceEventTime(600)
+            moveTo(Offset(width / 2f + 100 * density, 52 * density), 240)
+            up()
         }
         drag()
         compose.waitUntil(5000) { store.layers.single().startFrame > 0 }
@@ -124,6 +141,64 @@ class TimelineGesturesTest {
         compose.runOnIdle { assertEquals(before.first().first, store.primary) }
     }
 
+    /**
+     * "Às vezes a camada é escolhida e vai junto": (1) o dedo rasteja abaixo do
+     * slop enquanto o prazo do toque longo corre e então rola — o prazo vencia e
+     * o movimento seguinte levantava a camada (reordenar); (2) uma rolagem um
+     * pouco torta (dx > dy por pouco) sobre um clipe não escolhido era "mover".
+     * Nenhuma das duas escolhe, move ou reordena: a 1ª rola, a 2ª faz scrub.
+     */
+    @Test fun creepingOrSlightlyDiagonalSwipesOnClipsNeverSelectMoveOrReorder() {
+        launch(24)
+        val before = store.layers.map { Triple(it.id, it.startFrame, it.endFrame) }
+        val order = store.layers.map { it.id }
+        val height = timeline().fetchSemanticsNode().size.height
+        // (1) 1,2 dp a cada 100 ms: 6 dp em 500 ms, abaixo do slop de 8 — e só então rola.
+        timeline().performTouchInput {
+            val x = width * .72f
+            val y0 = height - 18 * density
+            down(Offset(x, y0))
+            for (i in 1..5) moveTo(Offset(x, y0 - 1.2f * i * density), 100)
+            moveTo(Offset(x, y0 - 40 * density), 60)
+            moveTo(Offset(x, 54 * density), 250)
+            advanceEventTime(120)
+            up()
+        }
+        compose.runOnIdle {
+            assertTrue("A creeping start must not select", store.selection.isEmpty())
+            assertEquals("A creeping start must not reorder", order, store.layers.map { it.id })
+            assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
+        }
+        assertEquals(height, timeline().fetchSemanticsNode().size.height)
+        timeline().performTouchInput { click(Offset(width * .72f, 54 * density)) }
+        compose.runOnIdle {
+            val index = order.indexOf(store.primary)
+            assertTrue("A creeping start must still scroll, index=$index", index >= 2)
+            store.clearSelection()
+        }
+        timeline().performTouchInput {
+            swipe(Offset(width * .72f, 55 * density), Offset(width * .72f, height - 5 * density), 300)
+        }
+        compose.waitForIdle()
+        // (2) Rolagem um pouco torta sobre o corpo da 1ª camada: 7:6 além do slop, para a esquerda.
+        timeline().performTouchInput {
+            val x = width / 2f + 30 * density
+            val y = 52 * density
+            down(Offset(x, y))
+            advanceEventTime(60)
+            moveTo(Offset(x - 14 * density, y + 12 * density), 40)
+            moveTo(Offset(x - 60 * density, y + 40 * density), 200)
+            advanceEventTime(60)
+            up()
+        }
+        compose.waitUntil(5000) { store.playhead > 0 }
+        compose.runOnIdle {
+            assertTrue("A slightly diagonal swipe must scrub, not select", store.selection.isEmpty())
+            assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
+        }
+        assertEquals(height, timeline().fetchSemanticsNode().size.height)
+    }
+
     @Test fun holdingLayerBodyReordersWithoutChangingTimingAndOneUndoRestoresOrder() {
         launch(5)
         val before = store.layers.map { it.id }
@@ -150,6 +225,49 @@ class TimelineGesturesTest {
         compose.waitUntil(5000) { store.layers.map { it.id } == before }
         compose.runOnIdle { store.redo() }
         compose.waitUntil(5000) { store.layers.map { it.id } != before }
+    }
+
+    /**
+     * Segundo dedo DEPOIS do toque longo aceito (o primeiro pousou 600 ms
+     * antes, quieto, sobre um clipe não escolhido): é pinça, como antes do
+     * prazo. O movimento do primeiro dedo não escolhe nem levanta a camada, e o
+     * zoom acontece — a 80 dp/s, 40 dp da régua valem 15 quadros; com a pinça
+     * (dedos de 80 para 140 dp) valem menos.
+     */
+    @Test fun secondFingerAfterAcceptedHoldPinchesInsteadOfSelectingOrLiftingTheLayer() {
+        launch(5)
+        val before = store.layers.map { Triple(it.id, it.startFrame, it.endFrame) }
+        val order = store.layers.map { it.id }
+        val height = timeline().fetchSemanticsNode().size.height
+        timeline().performTouchInput {
+            val x = width / 2f + 40 * density
+            val y = 52 * density
+            down(0, Offset(x, y))
+            advanceEventTime(600)
+            down(1, Offset(x + 80 * density, y))
+            for (i in 1..3) {
+                updatePointerTo(0, Offset(x - 10 * i * density, y))
+                updatePointerTo(1, Offset(x + (80 + 10 * i) * density, y))
+                move(50)
+            }
+            advanceEventTime(60)
+            up(0)
+            up(1)
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertTrue("A pinça depois do toque longo não escolhe", store.selection.isEmpty())
+            assertEquals("A pinça depois do toque longo não reordena", order, store.layers.map { it.id })
+            assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
+        }
+        assertEquals(height, timeline().fetchSemanticsNode().size.height)
+        val playhead = compose.runOnIdle { store.playhead }
+        timeline().performTouchInput { click(Offset(width / 2f + 40 * density, 16 * density)) }
+        compose.waitUntil(5000) { store.playhead != playhead }
+        compose.runOnIdle {
+            val frames = store.playhead - playhead
+            assertTrue("A pinça deveria ter ampliado a timeline: 40 dp = $frames quadros", frames in 1..14)
+        }
     }
 
     @Test fun editingOneCurveLeavesCoincidentAxisKeysAndLaterSegmentsUnchanged() {

@@ -48,7 +48,7 @@ import com.aurea.aurea.ui.theme.tocavel
 // O índice é o `style` salvo nas opções da legenda; o rótulo sai do idioma do app.
 private val CaptionStyles = listOf(
     R.string.pn_caption_style_classic, R.string.panel_caixa, R.string.pn_caption_style_highlight,
-    R.string.pn_caption_style_neon, R.string.pn_karaoke, R.string.pn_pop,
+    R.string.pn_caption_style_neon, R.string.pn_karaoke, R.string.pn_pop, R.string.pack_text_4, R.string.pack_text_5,
 )
 // Nome do idioma da fala no próprio idioma (endônimo); nulo = "Automático", traduzido.
 private val Languages = listOf<Pair<String?, String?>>(null to null, "pt" to "Português", "en" to "English", "es" to "Español")

@@ -67,3 +67,18 @@ O `verify_msl.py` é do Mac: ele confere os 64 `.mslblob` com a flag de
 `.metallib` depois do `xcrun metal` + `metallib` (o `pack_metallib.py` troca o
 texto MSL pelo binário pré-compilado, para a abertura do app não pagar compilação
 de shader).
+
+## A variante `fs_main_c0` (fragment shader com `location = 1`)
+
+O passe 3D do motor escreve dois alvos (MRT), e os shaders dele — `plane.frag`,
+`particles.frag`, `environment.frag`, `ground.frag`, `pbr.frag`, `dof.frag` —
+declaram `layout(location = 1) out`. Os mesmos shaders também desenham em
+passes de UM alvo (partículas 2D, planos sem HDR, céu direto). O Vulkan e o GLES
+descartam a escrita no anexo que não existe; o Metal **recusa criar o
+pipeline**, e o desenho some. Para todo fragment shader com saída em
+location ≥ 1 o programa escreve um segundo arquivo, `<saida>.c0.metal`: a
+mesma tradução com `enable_frag_output_mask = 0x1` e ponto de entrada
+`fs_main_c0`. O `compile_metal.cmake` liga os dois `.metal` no mesmo `.metallib`
+e o backend (`MetalResources.mm`) usa `fs_main_c0` em todo pipeline sem
+segundo alvo. Contrato em `engine/gpu/metal/msl_glue.md` §5; conferência sem
+Mac em `engine/platform/ios/verify/check_metal_frag_outputs.py`.

@@ -26,9 +26,22 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 p0;   // x = raio em texels, y = ganho das luzes, z = lados da íris (0 = redonda), w = suavidade
     vec4 p1;   // x = rotação da íris (graus), y = amostras por anel (4..24), z = anéis (1..6), w = mistura
     vec4 p2;   // x = 1 brilhar o que passa do limiar, y = limiar
-    vec4 p3;   // x = 1 mostrar só o desfoque
+    vec4 p3;   // x = 1 mostrar só o desfoque, y = curvatura da íris (−1 estrela .. +1 círculo), zw = escala x/y do disco
     vec4 color;
 } p;
+
+/// Quanto a íris alcança na direção `a` (0 = meio de um lado), relativo ao
+/// raio do meio do lado: 1 no meio, 1/cos(setor/2) na quina — o polígono de
+/// sempre. Curvatura positiva encurta as quinas até o círculo; negativa puxa
+/// o meio dos lados para dentro (estrela). `s` = cos(setor/2)/cos(a) ≤ 1 é a
+/// forma normalizada (1 na quina), o que dá base segura ao pow.
+float iris_reach(float a, float sect, float curve) {
+    const float k = max(cos(a), 0.35);
+    const float edge = cos(sect * 0.5);
+    const float s = min(edge / k, 1.0);
+    const float shaped = curve >= 0.0 ? mix(s, 1.0, curve) : pow(s, 1.0 + 4.0 * (-curve));
+    return shaped / edge;
+}
 
 void main() {
     const vec2 inUv = v_uv * p.uvMap.xy + p.uvMap.zw;
@@ -57,9 +70,10 @@ void main() {
             // transforma o disco num pentágono/hexágono — o bokeh com quinas.
             if (sides >= 3) {
                 const float sect = AUREA_TAU / float(sides);
-                const float k = cos(mod(a, sect) - sect * 0.5);
-                dir *= 1.0 / max(k, 0.35);
+                dir *= iris_reach(mod(a, sect) - sect * 0.5, sect, clamp(p.p3.y, -1.0, 1.0));
             }
+            // Escala x/y: o disco vira elipse (bokeh anamórfico).
+            dir *= vec2(max(p.p3.z, 0.01), max(p.p3.w, 0.01));
             const vec4 s = texture(u_tex0, inUv + dir * r * p.texel.xy);
             // Ganho das luzes: o que é claro pesa mais no desfoque — é o que
             // faz uma lâmpada virar uma bola de luz em vez de um borrão cinza.

@@ -184,6 +184,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         params: [
             0: FxParamHuman(label: "fx_cor_remover"),
             3: FxParamHuman(label: "fx_limpar_contorno"),
+            9: FxParamHuman(label: "fx_pre_desfoque", suffix: "px", decimals: 1),
         ])),
     ("aurea.time.echo", FxEffectHuman(
         name: "fx_name_echo_trail",
@@ -277,6 +278,9 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             3: FxParamHuman(label: "fx_rotacao_iris", suffix: "°", decimals: 0),
             4: FxParamHuman(label: "fx_qualidade", decimals: 0),
             7: FxParamHuman(label: "fx_mistura", decimals: 0),
+            8: FxParamHuman(label: "fx_curvatura_iris", decimals: 0),
+            9: FxParamHuman(label: "fx_escala_x", decimals: 0),
+            10: FxParamHuman(label: "fx_escala_y", decimals: 0),
         ])),
     ("aurea.distort.shake", FxEffectHuman(
         name: "fx_name_shake",
@@ -582,6 +586,253 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.control.checkbox", FxEffectHuman(name: "fx_name_checkbox_control", keywords: "expressao caixa controle")),
     ("aurea.control.color", FxEffectHuman(name: "fx_name_color_control", keywords: "expressao cor controle")),
     ("aurea.control.point", FxEffectHuman(name: "fx_name_point_control", keywords: "expressao ponto controle")),
+    // --- Pacote de paridade: movimento, transições por forma e acabamento ---
+    ("aurea.motion.oscillate", FxEffectHuman(
+        name: "fx_name_oscillate",
+        keywords: "oscilar oscillate vai e vem pendular onda seno movimento decaimento balanco",
+        principal: [1, 0, 2, 8, 3, 4],
+        params: [
+            0: FxParamHuman(label: "fx_direcao"),
+            1: FxParamHuman(label: "fx_amplitude", suffix: "px", decimals: 0),
+            2: FxParamHuman(label: "fx_frequencia", suffix: "Hz", decimals: 2),
+            3: FxParamHuman(label: "fx_fase"),
+            4: FxParamHuman(label: "fx_rotacao"),
+            5: FxParamHuman(label: "fx_pulso_escala", decimals: 0),
+            6: FxParamHuman(label: "fx_forma_onda"),
+            7: FxParamHuman(label: "fx_semente"),
+            8: FxParamHuman(label: "fx_decaimento", suffix: "1/s", decimals: 2),
+            9: FxParamHuman(label: "fx_pivo"),
+        ])),
+    ("aurea.motion.swing", FxEffectHuman(
+        name: "fx_name_swing",
+        keywords: "balancar swing pendulo pendulum pivo girar oscilar",
+        principal: [0, 1, 2, 3, 4],
+        params: [
+            0: FxParamHuman(label: "fx_angulo"),
+            1: FxParamHuman(label: "fx_frequencia", suffix: "Hz", decimals: 2),
+            2: FxParamHuman(label: "fx_pivo"),
+            3: FxParamHuman(label: "fx_fase"),
+            4: FxParamHuman(label: "fx_decaimento", suffix: "1/s", decimals: 2),
+        ])),
+    ("aurea.motion.wiggle", FxEffectHuman(
+        name: "fx_name_wiggle",
+        keywords: "wiggle agitar aleatorio tremer mexer posicao rotacao escala",
+        principal: [0, 1, 2, 3, 4, 5],
+        params: [
+            0: FxParamHuman(label: "fx_frequencia", suffix: "Hz", decimals: 2),
+            1: FxParamHuman(label: "fx_posicao_x", suffix: "px", decimals: 0),
+            2: FxParamHuman(label: "fx_posicao_y", suffix: "px", decimals: 0),
+            3: FxParamHuman(label: "fx_rotacao"),
+            4: FxParamHuman(label: "fx_escala", decimals: 0),
+            5: FxParamHuman(label: "fx_intensidade", decimals: 0),
+            6: FxParamHuman(label: "fx_oitavas"),
+            7: FxParamHuman(label: "fx_segurar_saltos"),
+            8: FxParamHuman(label: "fx_semente"),
+            9: FxParamHuman(label: "fx_pivo"),
+        ])),
+    ("aurea.transition.iris_wipe", FxEffectHuman(
+        name: "fx_name_iris_wipe",
+        keywords: "iris wipe circulo poligono transicao revelar abrir fechar",
+        principal: [0, 1, 3, 5],
+        params: [
+            0: FxParamHuman(label: "fx_conclusao", decimals: 0),
+            1: FxParamHuman(label: "fx_suavidade", decimals: 0),
+            2: FxParamHuman(label: "fx_sentido_inverso"),
+            3: FxParamHuman(label: "fx_centro"),
+            4: FxParamHuman(label: "fx_rotacao"),
+            5: FxParamHuman(label: "fx_lados_iris"),
+        ])),
+    ("aurea.transition.box_wipe", FxEffectHuman(
+        name: "fx_name_box_wipe",
+        keywords: "caixa box wipe retangulo transicao revelar",
+        principal: [0, 1, 3, 4],
+        params: [
+            0: FxParamHuman(label: "fx_conclusao", decimals: 0),
+            1: FxParamHuman(label: "fx_suavidade", decimals: 0),
+            2: FxParamHuman(label: "fx_sentido_inverso"),
+            3: FxParamHuman(label: "fx_centro"),
+            4: FxParamHuman(label: "fx_rotacao"),
+        ])),
+    ("aurea.transition.venetian_blinds", FxEffectHuman(
+        name: "fx_name_venetian_blinds",
+        keywords: "persianas venetian blinds faixas listras transicao",
+        principal: [0, 4, 3, 1],
+        params: [
+            0: FxParamHuman(label: "fx_conclusao", decimals: 0),
+            1: FxParamHuman(label: "fx_suavidade", decimals: 0),
+            2: FxParamHuman(label: "fx_sentido_inverso"),
+            3: FxParamHuman(label: "fx_direcao"),
+            4: FxParamHuman(label: "fx_faixas", decimals: 0),
+        ])),
+    ("aurea.blur.radial", FxEffectHuman(
+        name: "fx_name_radial_blur",
+        keywords: "desfoque radial radial blur zoom blur spin giro rotacional velocidade",
+        principal: [0, 1, 2, 3, 4],
+        params: [
+            0: FxParamHuman(label: "fx_tipo"),
+            1: FxParamHuman(label: "fx_intensidade", decimals: 0),
+            2: FxParamHuman(label: "fx_centro"),
+            3: FxParamHuman(label: "fx_qualidade"),
+            4: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    ("aurea.distort.mirror", FxEffectHuman(
+        name: "fx_name_mirror",
+        keywords: "espelho mirror refletir simetria reflexo",
+        params: [
+            0: FxParamHuman(label: "fx_centro"),
+            1: FxParamHuman(label: "fx_angulo"),
+            2: FxParamHuman(label: "fx_trocar_lado"),
+        ])),
+    ("aurea.transform.crop", FxEffectHuman(
+        name: "fx_name_crop_edges",
+        keywords: "cortar crop recortar bordas margens aparar",
+        params: [
+            0: FxParamHuman(label: "fx_esquerda", decimals: 0),
+            1: FxParamHuman(label: "fx_topo", decimals: 0),
+            2: FxParamHuman(label: "fx_direita", decimals: 0),
+            3: FxParamHuman(label: "fx_base", decimals: 0),
+            4: FxParamHuman(label: "fx_suavidade_borda", suffix: "px", decimals: 0),
+        ])),
+    ("aurea.stylize.vignette", FxEffectHuman(
+        name: "fx_name_vignette",
+        keywords: "vinheta vignette escurecer bordas cantos",
+        params: [
+            0: FxParamHuman(label: "fx_intensidade", decimals: 0),
+            1: FxParamHuman(label: "fx_tamanho", decimals: 0),
+            2: FxParamHuman(label: "fx_suavidade", decimals: 0),
+            3: FxParamHuman(label: "fx_arredondamento", decimals: 0),
+            4: FxParamHuman(label: "fx_centro"),
+            5: FxParamHuman(label: "fx_cor"),
+        ])),
+    ("aurea.stylize.mosaic", FxEffectHuman(
+        name: "fx_name_mosaic",
+        keywords: "mosaico mosaic pixelar pixelate led painel celulas pixel",
+        params: [
+            0: FxParamHuman(label: "fx_tamanho_celula", suffix: "px", decimals: 0),
+            1: FxParamHuman(label: "fx_vao_celulas", decimals: 0),
+            2: FxParamHuman(label: "fx_celulas_redondas"),
+            3: FxParamHuman(label: "fx_sombreado", decimals: 0),
+            4: FxParamHuman(label: "fx_vinheta_celula", decimals: 0),
+            5: FxParamHuman(label: "fx_cor_fundo"),
+        ])),
+    ("aurea.stylize.find_edges", FxEffectHuman(
+        name: "fx_name_find_edges",
+        keywords: "detectar bordas find edges contorno sobel desenho lapis",
+        params: [
+            0: FxParamHuman(label: "fx_intensidade", decimals: 0),
+            1: FxParamHuman(label: "fx_largura", suffix: "px", decimals: 1),
+            2: FxParamHuman(label: "fx_inverter"),
+            3: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    ("aurea.color.hue_saturation", FxEffectHuman(
+        name: "fx_name_hue_saturation",
+        keywords: "matiz saturacao hue saturation luminosidade colorir tom cor",
+        principal: [0, 1, 2, 3],
+        params: [
+            0: FxParamHuman(label: "fx_matiz"),
+            1: FxParamHuman(label: "fx_saturacao", decimals: 0),
+            2: FxParamHuman(label: "fx_luminosidade", decimals: 0),
+            3: FxParamHuman(label: "fx_colorir"),
+            4: FxParamHuman(label: "fx_matiz_colorir"),
+            5: FxParamHuman(label: "fx_saturacao_colorir", decimals: 0),
+            6: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    // --- Geradores e recorte do editor antigo ---
+    ("aurea.generate.fractal_noise", FxEffectHuman(
+        name: "fx_name_fractal_noise",
+        keywords: "ruido fractal fractal noise nuvem fumaca textura turbulencia perlin simplex",
+        principal: [0, 1, 2, 6, 7, 8],
+        params: [
+            0: FxParamHuman(label: "fx_tipo_ruido"),
+            1: FxParamHuman(label: "fx_tipo_fractal"),
+            2: FxParamHuman(label: "fx_contraste", decimals: 0),
+            3: FxParamHuman(label: "fx_brilho", decimals: 0),
+            4: FxParamHuman(label: "fx_inverter"),
+            5: FxParamHuman(label: "fx_estouro"),
+            6: FxParamHuman(label: "fx_escala", suffix: "px", decimals: 0),
+            7: FxParamHuman(label: "fx_complexidade", suffix: "oitavas", decimals: 1),
+            8: FxParamHuman(label: "fx_evolucao"),
+            9: FxParamHuman(label: "fx_deslocamento", suffix: "px", decimals: 0),
+            10: FxParamHuman(label: "fx_rotacao"),
+            11: FxParamHuman(label: "fx_semente"),
+            12: FxParamHuman(label: "fx_influencia_oitavas", decimals: 0),
+            13: FxParamHuman(label: "fx_opacidade", decimals: 0),
+            14: FxParamHuman(label: "fx_mistura_camada"),
+            15: FxParamHuman(label: "fx_preencher_caixa"),
+        ])),
+    ("aurea.generate.gradient_ramp", FxEffectHuman(
+        name: "fx_name_gradient_ramp",
+        keywords: "degrade gradient ramp gradiente linear radial duas cores",
+        principal: [0, 1, 2, 3, 4, 6],
+        params: [
+            0: FxParamHuman(label: "fx_forma"),
+            1: FxParamHuman(label: "fx_ponto_inicial"),
+            2: FxParamHuman(label: "fx_ponto_final"),
+            3: FxParamHuman(label: "fx_cor_inicial"),
+            4: FxParamHuman(label: "fx_cor_final"),
+            5: FxParamHuman(label: "fx_dispersao", suffix: "px", decimals: 0),
+            6: FxParamHuman(label: "fx_mistura_original", decimals: 0),
+            7: FxParamHuman(label: "fx_mistura_camada"),
+            8: FxParamHuman(label: "fx_preencher_caixa"),
+        ])),
+    ("aurea.generate.four_color_gradient", FxEffectHuman(
+        name: "fx_name_four_color_gradient",
+        keywords: "degrade 4 cores four color gradient quatro cores cantos",
+        principal: [4, 5, 6, 7, 8, 10],
+        params: [
+            0: FxParamHuman(label: "fx_ponto_1"),
+            1: FxParamHuman(label: "fx_ponto_2"),
+            2: FxParamHuman(label: "fx_ponto_3"),
+            3: FxParamHuman(label: "fx_ponto_4"),
+            4: FxParamHuman(label: "fx_cor_1"),
+            5: FxParamHuman(label: "fx_cor_2"),
+            6: FxParamHuman(label: "fx_cor_3"),
+            7: FxParamHuman(label: "fx_cor_4"),
+            8: FxParamHuman(label: "fx_suavidade", decimals: 0),
+            9: FxParamHuman(label: "fx_ruido", decimals: 0),
+            10: FxParamHuman(label: "fx_opacidade", decimals: 0),
+            11: FxParamHuman(label: "fx_mistura_camada"),
+            12: FxParamHuman(label: "fx_preencher_caixa"),
+        ])),
+    ("aurea.generate.audio_spectrum", FxEffectHuman(
+        name: "fx_name_audio_spectrum",
+        keywords: "espectro de audio audio spectrum som musica barras visualizador equalizador",
+        principal: [0, 1, 4, 5, 7, 8, 10],
+        params: [
+            0: FxParamHuman(label: "fx_fonte_som"),
+            1: FxParamHuman(label: "fx_bandas"),
+            2: FxParamHuman(label: "fx_ponto_inicial"),
+            3: FxParamHuman(label: "fx_ponto_final"),
+            4: FxParamHuman(label: "fx_altura_maxima", suffix: "px", decimals: 0),
+            5: FxParamHuman(label: "fx_espessura", suffix: "px", decimals: 1),
+            6: FxParamHuman(label: "fx_suavidade", decimals: 0),
+            7: FxParamHuman(label: "fx_cor_dentro"),
+            8: FxParamHuman(label: "fx_cor_fora"),
+            9: FxParamHuman(label: "fx_giro_matiz"),
+            10: FxParamHuman(label: "fx_exibicao"),
+            11: FxParamHuman(label: "fx_lado"),
+            12: FxParamHuman(label: "fx_em_circulo"),
+            13: FxParamHuman(label: "fx_compor_original"),
+            14: FxParamHuman(label: "fx_sensibilidade", decimals: 0),
+        ])),
+    ("aurea.stylize.stroke_outline", FxEffectHuman(
+        name: "fx_name_stroke_outline",
+        keywords: "contorno stroke outline traco borda silhueta",
+        params: [
+            0: FxParamHuman(label: "fx_largura", suffix: "px", decimals: 1),
+            1: FxParamHuman(label: "fx_cor"),
+            2: FxParamHuman(label: "fx_suavidade", suffix: "px", decimals: 1),
+            3: FxParamHuman(label: "fx_posicao"),
+            4: FxParamHuman(label: "fx_opacidade", decimals: 0),
+        ])),
+    ("aurea.key.matte_refine", FxEffectHuman(
+        name: "fx_name_matte_refine",
+        keywords: "refinar recorte matte refine choke feather encolher suavizar mascara",
+        params: [
+            0: FxParamHuman(label: "fx_encolher", suffix: "px", decimals: 1),
+            1: FxParamHuman(label: "fx_suavizar_borda", suffix: "px", decimals: 1),
+            2: FxParamHuman(label: "fx_mostrar_mascara"),
+        ])),
 ]
 
 /// A tabela indexada pelo `typeId`, e a posição declarada (para ordenar sem
@@ -872,6 +1123,27 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.control.checkbox", "fx_desc_control_checkbox")
     put("aurea.control.color", "fx_desc_control_color")
     put("aurea.control.point", "fx_desc_control_point")
+    // --- Pacote de paridade: movimento, transições por forma e acabamento ---
+    put("aurea.motion.oscillate", "fx_desc_motion_oscillate")
+    put("aurea.motion.swing", "fx_desc_motion_swing")
+    put("aurea.motion.wiggle", "fx_desc_motion_wiggle")
+    put("aurea.transition.iris_wipe", "fx_desc_transition_iris_wipe")
+    put("aurea.transition.box_wipe", "fx_desc_transition_box_wipe")
+    put("aurea.transition.venetian_blinds", "fx_desc_transition_venetian_blinds")
+    put("aurea.blur.radial", "fx_desc_blur_radial")
+    put("aurea.distort.mirror", "fx_desc_distort_mirror")
+    put("aurea.transform.crop", "fx_desc_transform_crop")
+    put("aurea.stylize.vignette", "fx_desc_stylize_vignette")
+    put("aurea.stylize.mosaic", "fx_desc_stylize_mosaic")
+    put("aurea.stylize.find_edges", "fx_desc_stylize_find_edges")
+    put("aurea.color.hue_saturation", "fx_desc_color_hue_saturation")
+    // --- Geradores e recorte do editor antigo ---
+    put("aurea.generate.fractal_noise", "fx_desc_generate_fractal_noise", FxAllTargets, "fractal noise nuvem fumaca textura turbulencia")
+    put("aurea.generate.gradient_ramp", "fx_desc_generate_gradient_ramp", FxAllTargets, "ramp gradiente degrade linear radial")
+    put("aurea.generate.four_color_gradient", "fx_desc_generate_four_color_gradient", FxAllTargets, "4 color gradient quatro cores degrade")
+    put("aurea.generate.audio_spectrum", "fx_desc_generate_audio_spectrum", FxAllTargets, "audio spectrum espectro som musica barras visualizador")
+    put("aurea.stylize.stroke_outline", "fx_desc_stylize_stroke_outline", FxAllTargets, "stroke contorno traco borda silhueta outline")
+    put("aurea.key.matte_refine", "fx_desc_key_matte_refine", [.imagem, .video, .preComposicao, .texto, .forma], "choke feather encolher suavizar mascara matte recorte")
     return out
 }()
 

@@ -111,6 +111,27 @@ vec3 aurea_hsv_shift(vec3 lin, float hueTurns, float satMul) {
     return aurea_srgb_to_linear(clamp(mx * mix(vec3(1.0), clamp(p, 0.0, 1.0), s), 0.0, 1.0));
 }
 
+/// Mistura de um GERADOR com a cor da camada (as duas lineares, alfa reto).
+/// `mode`: 0 normal (substitui), 1 multiplicar, 2 tela, 3 sobrepor, 4 adicionar.
+vec3 aurea_blend_generated(vec3 base, vec3 top, int mode) {
+    if (mode == 1) return base * top;
+    if (mode == 2) return 1.0 - (1.0 - base) * (1.0 - top);
+    if (mode == 3) {
+        return mix(2.0 * base * top, 1.0 - 2.0 * (1.0 - base) * (1.0 - top), step(0.5, base));
+    }
+    if (mode == 4) return base + top;
+    return top;
+}
+
+/// Cobertura de uma faixa [-hw, hw] sobre o pixel de largura `w` centrado na
+/// distância `d`: antialiasing analítico (1 = dentro, 0 = fora).
+float aurea_band_coverage(float d, float hw, float w) {
+    w = max(w, 1e-6);
+    const float lo = max(d - 0.5 * w, -hw);
+    const float hi = min(d + 0.5 * w, hw);
+    return clamp((hi - lo) / w, 0.0, 1.0);
+}
+
 // --- Geometria ---------------------------------------------------------------
 mat2 aurea_rot2(float radians) {
     const float c = cos(radians), s = sin(radians);

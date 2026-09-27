@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
@@ -431,9 +432,7 @@ private fun PresetPreview(store: EditorStore, e: PresetEntry, modifier: Modifier
             val keys = remember(json) { json?.let { effectKeys(it) }.orEmpty() }
             GlyphPreview(effectGlyph(keys.firstOrNull()), modifier, badge = if (keys.size > 1) "${keys.size} efeitos" else null)
         }
-        PresetKind.Text -> Box(modifier, contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.panel_aa), style = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)))
-        }
+        PresetKind.Text -> TextMotionPreview(e.textPreset, modifier)
     }
 }
 
@@ -625,5 +624,26 @@ private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W500, color = if (on) AureaColors.Accent else AureaColors.Text)))
+    }
+}
+
+@Composable
+private fun TextMotionPreview(preset: Int?, modifier: Modifier) {
+    val transition = rememberInfiniteTransition(label = "text preview")
+    val phase by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "phase")
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Row {
+            "Aurea".forEachIndexed { index, glyph ->
+                val progress = ((phase * 2f).coerceAtMost(2f) - index * .12f).coerceIn(0f, 1f)
+                val opacity = when (preset) {
+                    20, 21, 23, 24 -> (progress * 3f).coerceIn(0f, 1f) * ((1f - phase) * 5f).coerceIn(0f, 1f)
+                    22 -> .3f + .7f * kotlin.math.abs(kotlin.math.sin(phase * 60f + index * 4f))
+                    else -> 1f
+                }
+                val size = if (preset == 19) 1f - .8f * kotlin.math.sin(progress * Math.PI).toFloat() else 1f
+                Text(glyph.toString(), Modifier.graphicsLayer { alpha = opacity; scaleX = size; scaleY = size },
+                    style = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)))
+            }
+        }
     }
 }

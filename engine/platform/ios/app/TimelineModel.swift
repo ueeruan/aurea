@@ -683,6 +683,20 @@ enum KeyframeVisibility {
     }
 }
 
+/// O que o dedo QUIS, decidido uma vez por gesto — o mesmo do Android (`Press`).
+/// Rolar e fazer scrub não custam nada e ficam nos 45°; EDITAR o projeto (mover
+/// clipe, aparar, arrastar losango, reordenar) exige eixo claro, 2:1 — o empate
+/// de 45° classificava uma rolagem um pouco torta como "mover clipe", e a camada
+/// era escolhida e ia junto com o dedo.
+enum TimelinePress {
+    static let editRatio: CGFloat = 2
+    static func horizontal(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dx) >= abs(dy) }
+    /// Claramente no eixo do tempo: mover, aparar, arrastar losango.
+    static func timeEdit(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dx) >= editRatio * abs(dy) }
+    /// Claramente na pilha: reordenar.
+    static func stackEdit(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dy) >= editRatio * abs(dx) }
+}
+
 /// "Escalonar": a conta da UI antes do motor (par do `Stagger` do Android).
 enum StaggerPlan {
     static let minStep: Int = -120

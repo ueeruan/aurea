@@ -630,6 +630,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var destroyed = false
     private var pendingSurface: Triple<Surface, Int, Int>? = null
     private var statusLoop: RenderLoop? = null
+    var sceneSettingsRevision by mutableIntStateOf(0)
+        private set
     private var lastRevision = -1
     private var lastPlayhead = -1
     private var lastThumbGen = -1
@@ -1069,6 +1071,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (screen != Screen.Editor) return
         if (status.modelRevision != lastRevision) {
             lastRevision = status.modelRevision
+            sceneSettingsRevision++
             lastPlayhead = playhead
             lastModelChangeNs = System.nanoTime()
             refreshModel()
@@ -1973,8 +1976,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setTransform(property: Int, value: Float, layer: Long? = primary) {
         val id = layer ?: return
         if (!value.isFinite()) return
-        if ((sceneEditor || !autoKeyTransforms) && property in 0..14) { send { engine.layoutTransform(id, property, value) }; refreshNow(); return }
         val d = if (id == primary) detail else detailOf(id)
+        // Trilha animada com Auto-Key marca keyframe TAMBÉM na cena 3D (ver `transformWrite`).
+        if (property in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, d?.isAnimated(property) == true) == TransformWrite.Layout) {
+            send { engine.layoutTransform(id, property, value) }; refreshNow(); return
+        }
         d ?: return
         if (d.isAnimated(property)) {
             send { insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, value) }
@@ -2005,12 +2011,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setTransform2(pa: Int, va: Float, pb: Int, vb: Float, layer: Long? = primary) {
         val id = layer ?: return
         if (!va.isFinite() || !vb.isFinite()) return
-        if ((sceneEditor || !autoKeyTransforms) && pa in 0..14 && pb in 0..14) {
+        val d = if (id == primary) detail else detailOf(id)
+        val animated = d?.isAnimated(pa) == true || d?.isAnimated(pb) == true
+        if (pa in 0..14 && pb in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, animated) == TransformWrite.Layout) {
             send { engine.layoutTransform(id, pa, va); engine.layoutTransform(id, pb, vb) }
             refreshNow(); return
         }
-        val d = (if (id == primary) detail else detailOf(id)) ?: return
-        val animated = d.isAnimated(pa) || d.isAnimated(pb)
+        d ?: return
         send {
             if (animated) {
                 insertKeyframe(id, pa, NO_EFFECT, 0, d.localPlayhead, va)
@@ -2656,12 +2663,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             for (axis in 0..2) {
                 if (kotlin.math.abs(out[axis] - current[axis]) < .00001f) continue
                 val property = base + axis
-                if (!sceneEditor && autoKeyTransforms && d.isAnimated(property)) {
+                // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote.
+                if (transformWrite(sceneEditor, autoKeyTransforms, d.isAnimated(property)) == TransformWrite.Keyframe) {
                     insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, out[axis])
                 } else engine.layoutTransform(id, property, out[axis])
             }
         }
         refreshNow()
+    }
+
+    fun sceneSettings(): FloatArray = engine.sceneSettings()
+    fun setSceneSetting(parameter: Int, value: Float) {
+        if (engine.setSceneSetting(parameter, value)) refreshNow()
     }
 
     // --- Ambiente 3D (HDRI) --------------------------------------------------------------

@@ -209,6 +209,66 @@ when a position track is animated; dedicated Scene layout intentionally offsets
 curves without inserting keys. iOS detects threeD from its selected layer row,
 so its default-null dimension detection did not share the omitted-POD-bit bug.
 
-Swift API static check: 0 problems. Native Android build/UI verification and the
-updated host regression are queued with the parent/performance agent; no native
-iOS result is claimed from the static check.
+Swift API static check: 0 problems. After rebuilding the stale Engine object,
+`engine/build/host/null-detail-fresh-test.log` reports
+`CreatedCameraAndNullDepthTracksRenderAndReload`: **36 checks PASS**, exit 0.
+The earlier 1/36 failure used an Engine object compiled before the source edit;
+no additional source change was necessary to make the fresh binary pass.
+
+### Android acceptance: actual parented depth animation
+
+The parent inspected these interactions in APK `29dac3f3` on the emulator:
+
+- Text3D was parented to Null3D through the real UI. The null's Position panel
+  shows XYZ even at Z=0 (`engine/build/android-p0/null-depth-controls.png`).
+- The diamond at frame 0 inserts XYZ keys (`null-depth-key-zero.png`).
+- After scrubbing to frame 23, long-pressing Z, entering `1000` and confirming
+  creates the second depth key (`null-depth-key-1000.png`).
+- Previous-key navigation returns to frame 0 / Z=0, with the Text3D child visibly
+  larger (`null-depth-animated-zero.png`). Scrubbing to frame 8 evaluates Z=348px
+  and renders the child at an intermediate size (`null-depth-animated-middle.png`).
+  This verifies the UI keyframe path, timeline interpolation and parented preview
+  together, rather than only shared-core tests.
+- Scale Z is directly exposed at 100% (`null-scale-z-controls.png`).
+
+Native save/reopen now also passes: the parent returned through the tools panel,
+cleared selection and opened Projects. Home Continue showed `AureaAutosave2110`.
+After `adb force-stop` and a fresh app launch, reopening Continue restored both
+diamonds and the parented Text3D child (`engine/build/android-p0/null-reopened.png`).
+Selecting Null → Transform → Position showed frame 0 / Z=0. Next-key navigation
+restored frame 23 / Z=1000 with the smaller Text3D child; the parent inspected
+`null-reopened-key-1000.png` and its XML. Thus the actual UI-authored depth keys
+and parenting survive an app process restart, not just an in-memory reload.
+
+`null-anchor-z-controls.png` additionally shows the Pivot panel's X/Y/Z controls
+at zero. Anchor Z was exposed but not edited during this acceptance sequence.
+Physical iOS interaction has not been tested; the Swift static result does not
+establish native iOS acceptance.
+
+### Export of the UI-authored animation after reopening
+
+The same reopened project completed H.264 720p export, 300/300 frames at 30fps,
+10 seconds (`null-export-completed.png`: Video ready / saved in gallery).
+MediaStore item1000000050 was pulled as
+`engine/build/android-p0/null-depth-export-720p.mp4` (151,756 bytes).
+FFmpeg decoded all300 frames without errors (`null-depth-export-decode.log`).
+Extracted frames0,8,23 are `null-export-frame-01.png` through `03.png`;
+visual inspection of frames0 and23 confirms the parented text changes size
+with the authored depth animation, matching preview. The project has no audio.
+
+## Scene keyframes follow Auto-Key (2026-09-27)
+
+The Scene workspace no longer forces `LayerLayoutTransform` for every finger
+drag. The reported defect was "keyframes of any layer / null 3D XY are not
+being marked": dragging an animated null or object inside the 3D scene
+offset the whole curve (including the frame-0 pose) and never inserted a key.
+Android (`transformWrite` in `state/TransformWrite.kt`, used by `setTransform`,
+`setTransform2` and the gizmo/scene drag path) and iOS (`AureaModel.transformLayout`,
+used by `editTransform`, `setTransform`, `setTransform2`, `applyGizmoComponents`
+and `TransformView.write`) now share one rule: Auto-Key off shifts the whole
+animation; with Auto-Key on, an animated track receives a key at the playhead
+in the scene exactly as in the timeline, and only a static track is laid out.
+Android instrumented regression `SceneKeyframeTest` (real touch on the scene
+stage, x86_64 emulator) and the new native iOS scene `scene-keyframe` with
+`testDraggingAnimatedNullInSceneKeysThePlayheadAndKeepsFirstPose` cover it;
+the iOS test still requires the CI simulator run.

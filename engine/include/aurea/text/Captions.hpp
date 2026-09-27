@@ -66,7 +66,7 @@ struct CaptionGroup {
     u32 first = 0, count = 0;   ///< palavras [first, first+count)
 };
 
-inline constexpr u32 kCaptionStyleCount = 6;
+inline constexpr u32 kCaptionStyleCount = 8;
 /// 0 Clássico, 1 Caixa, 2 Destaque, 3 Neon, 4 Karaokê, 5 Pop.
 [[nodiscard]] const char* caption_style_name(u32 id) noexcept;
 

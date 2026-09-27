@@ -495,6 +495,20 @@ import XCTest
         } while Date() < deadline
     }
 
+    func testHorizontalSwipeOnClipOnlyScrolls() throws {
+        _ = try launch("layer-dock")
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
+        let cleared = try awaitSnapshot("Selection cleared") { $0.selectionCount == 0 }
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let start = CGPoint(x: timeline.frame.midX + 40, y: timeline.frame.minY + 50)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x - 60, y: start.y)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        let after = try snapshot()
+        XCTAssertEqual(after.selectionCount, 0)
+        XCTAssertEqual(after.layerStarts, cleared.layerStarts)
+    }
+
     func testHoldingLayerToMoveDoesNotOpenOptionsButTapDoes() throws {
         _ = try launch("layer-dock")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
@@ -728,6 +742,36 @@ import XCTest
         }
     }
 
+    /// "Às vezes a camada é escolhida e vai junto": uma rolagem um pouco torta
+    /// (dx > dy por pouco) sobre um clipe NÃO escolhido era classificada como
+    /// mover, e uma diagonal depois do toque longo levantava a camada. Nenhuma
+    /// das duas pode escolher, mover ou reordenar.
+    func testSlightlyDiagonalSwipeOnLayerBodyNeverSelectsMovesOrReorders() throws {
+        let before = try launch("timeline-reorder")
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let cleared = try awaitSnapshot("Selection is cleared before the swipe") { $0.selectionCount == 0 }
+        let frame = timeline.frame
+        // First row, inside the clip body, away from its trim handles; ≈ 40° below horizontal.
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 50)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x + 48, y: start.y + 40)),
+                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        let swiped = try snapshot()
+        XCTAssertEqual(swiped.selectionCount, 0, "A slightly diagonal swipe must not select the layer under the finger")
+        XCTAssertEqual(swiped.layerOrder, before.layerOrder)
+        XCTAssertEqual(swiped.layerStarts, cleared.layerStarts, "A slightly diagonal swipe must not move the layer")
+        // After a deliberate hold, a diagonal only scrolls: neither time nor stack is clear.
+        coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(CGPoint(x: start.x + 40, y: start.y + 48)),
+                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        let held = try snapshot()
+        XCTAssertEqual(held.selectionCount, 0, "A diagonal after the hold must not select the layer")
+        XCTAssertEqual(held.layerOrder, before.layerOrder, "A diagonal after the hold must not reorder")
+        XCTAssertEqual(held.layerStarts, cleared.layerStarts, "A diagonal after the hold must not move the layer")
+    }
+
     func testParentToNewNullLinksBothChosenLayersAndOneUndoRemovesIt() throws {
         let before = try launch("parent-new-null")
         let beforeIDs: Set<Int64> = Set(before.layerOrder)
@@ -878,6 +922,29 @@ import XCTest
         _ = try awaitSnapshot("Undo uniform scale") { $0.detail.scale == scaledY.detail.scale }
         try undo()
         _ = try awaitSnapshot("Undo Y scale") { $0.detail.scale == before.detail.scale }
+    }
+
+    /// Cena 3D: arrastar um nulo com Posição ANIMADA grava keyframe no cabeçote
+    /// (quadro 30) e deixa a pose do quadro 0 como estava. Antes a cena forçava
+    /// "deslocar a curva inteira" e nenhum keyframe era marcado ali.
+    func testDraggingAnimatedNullInSceneKeysThePlayheadAndKeepsFirstPose() throws {
+        let before = try launch("scene-keyframe")
+        XCTAssertEqual(before.corePlayhead, 30)
+        let first = before.curveKeys.filter { $0.time == 0 }
+        XCTAssertEqual(first.count, 3, "Position X/Y/Z are keyed at frame 0 by the fixture")
+        XCTAssertEqual(before.stageGizmo.count, 8)
+        // The null's gizmo origin, projected by the scene observer camera.
+        let origin = screenPoint(x: before.stageGizmo[0], y: before.stageGizmo[1], snapshot: before)
+        let end = CGPoint(x: origin.x + 40, y: origin.y)
+        try requireInsideStage(origin, end)
+        coordinate(origin).press(forDuration: 0.05, thenDragTo: coordinate(end),
+                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        let keyed = try awaitSnapshot("Dragging the animated null in the scene keys frame 30") {
+            !$0.isManipulating && $0.curveKeys.contains { $0.property <= 2 && $0.time == 30 }
+        }
+        XCTAssertEqual(keyed.curveKeys.filter { $0.time == 0 }, first, "The frame-0 pose must not move")
+        try undo()
+        _ = try awaitSnapshot("One undo removes the scene keyframe") { $0.curveKeys == before.curveKeys }
     }
 
     func testText3DSelectionFollowsCoreBoundsAndGizmoDrag() throws {

@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
@@ -65,7 +66,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             Text("+", Modifier.size(48.dp).tocavel { view = view.transform(1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
             Text(stringResource(R.string.panel_ajustar), Modifier.tocavel { view = fit() }.padding(8.dp), fontSize = 11.sp, color = AureaColors.Accent)
         }
-        Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().pointerInput(layer, first.property, first.effectIndex, first.paramIndex, speed) {
+        Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("curve.trackGraph").pointerInput(layer, first.property, first.effectIndex, first.paramIndex, speed) {
             awaitEachGesture {
                 val down = awaitFirstDown()
                 down.consume()
@@ -77,6 +78,9 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 var key = if (speed) null else currentTrack.minByOrNull { (point(it) - down.position).getDistanceSquared() }
                     ?.takeIf { (point(it) - down.position).getDistanceSquared() <= radius * radius }
                 if (key != null) store.selectKeyframe(layer, key)
+                var currentTime = key?.time ?: 0
+                val previous = key?.let { k -> currentTrack.lastOrNull { it.time < k.time }?.time }
+                val next = key?.let { k -> currentTrack.firstOrNull { it.time > k.time }?.time }
                 var began = false
                 try {
                     while (true) {
@@ -90,9 +94,19 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                         val activeKey = key
                         if (activeKey != null) {
                             val dy = change.position.y - down.position.y
-                            if (!began && abs(dy) < 1f) continue
-                            if (!began) { store.beginGesture("editar valor do keyframe"); began = true }
-                            store.setGraphKeyframeValue(layer, activeKey, activeKey.value - dy / size.height * initial.range)
+                            val dx = change.position.x - down.position.x
+                            if (!began && kotlin.math.hypot(dx, dy) < 4.dp.toPx()) continue
+                            if (!began) { store.beginGesture("editar keyframe no gráfico"); began = true }
+                            val target = graphDragFrame(activeKey.time, dx / size.width * initial.duration, previous, next)
+                            var actual = activeKey.copy(time = currentTime)
+                            if (target != currentTime) {
+                                store.moveKeyframe(layer, actual, target)
+                                currentTime = target
+                                actual = actual.copy(time = target)
+                            }
+                            val value = activeKey.value - dy / size.height * initial.range
+                            store.setGraphKeyframeValue(layer, actual, value)
+                            store.selectKeyframe(layer, actual.copy(value = value))
                         } else {
                             val pan = event.calculatePan()
                             val zoom = event.calculateZoom()

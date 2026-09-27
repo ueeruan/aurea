@@ -124,6 +124,17 @@ struct EditorView: View {
                     }}.accessibilityLabel(AureaText.t("editor_resolucao_previa_segure_diagnostico"))
                     .padding(4).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
+            if !model.fullscreen && !model.rawPlayback, model.selection.count == 1,
+               let id = model.primarySelection,
+               !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty {
+                Button { model.gizmoLocalSpace.toggle() } label: {
+                    Text(model.gizmoLocalSpace ? "Local XYZ" : "World XYZ")
+                        .font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
+                        .padding(.horizontal, 12).frame(minHeight: 48)
+                        .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain).accessibilityIdentifier("stage.gizmo.space")
+                    .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
             if model.hudVisible { ShellPerfHud().padding(.leading, 8).padding(.top, 6).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).allowsHitTesting(false) }
         }.frame(height: height).clipped()
     }
@@ -243,7 +254,7 @@ private struct ShellStageBanner: View {
                     context.stroke(line, with: .color(color), lineWidth: 1)
                 }
                 if let selected = model.selectedLayer {
-                    let g = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
+                    let g = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoLocalSpace).map(\.floatValue)
                     if g.count == 8 {
                         let tips = ShellStageGeometry.gizmoTips(stride(from: 0, to: 8, by: 2).map { screen(g[$0], g[$0 + 1]) })
                         for i in 1...3 {
@@ -304,7 +315,7 @@ private struct ShellStageBanner: View {
                 context.stroke(Path(ellipseIn: CGRect(x: handles[n].x - radius, y: handles[n].y - radius, width: radius * 2, height: radius * 2)), with: .color(AureaColors.accent), lineWidth: 1.5)
             }
             rotationHandle(&context, handles[0], grabbed: shell.grabbedHandle == 0)
-            let gizmo = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
+            let gizmo = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoLocalSpace).map(\.floatValue)
             if gizmo.count == 8 {
                 let tips = ShellStageGeometry.gizmoTips(stride(from: 0, to: 8, by: 2).map { screen(gizmo[$0], gizmo[$0 + 1]) })
                 for i in 1...3 {

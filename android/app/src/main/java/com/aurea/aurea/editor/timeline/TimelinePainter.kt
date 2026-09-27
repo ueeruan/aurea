@@ -205,10 +205,26 @@ internal class TimelinePainter(
         val selKey = c.store.selectedKeyframe
         val generation = c.store.thumbnailGeneration
         val cache = c.store.thumbnails
-
-        for (i in first..last) {
+        val preview = if (st.reorderSource >= 0 && !compact) Reorder.preview(
+            FloatArray(n + 1) { c.rowTop(it) }, LongArray(n) { rows[it].id },
+            st.reorderSource, st.reorderTarget, st.reorderTop - m.rowsTop + scroll,
+        ) else null
+        val indices = if (preview != null) 0 until n else first..last
+        val passes = if (preview != null) 0..1 else 0..0
+        if (preview != null && preview.gapTop.isFinite()) {
+            val y = m.rowsTop + preview.gapTop - scroll
+            drawRect(AureaColors.Accent, Offset(0f, y), Size(w, m.reorderLine))
+        }
+        for (pass in passes) for (i in indices) {
+            val lifted = preview != null && i in preview.sourceStart until preview.sourceEnd
+            if (preview != null && lifted != (pass == 1)) continue
             val r = c.rowAt(rows, i) ?: continue
-            val top = m.rowsTop + c.rowTop(i) - scroll
+            val top = m.rowsTop + c.rowTop(i) - scroll + (preview?.offsets?.get(i) ?: 0f)
+            if (top + c.rowHeight(r) < m.rowsTop || top > h) continue
+            if (lifted) {
+                drawRect(AureaColors.Stage, Offset(0f, top), Size(w, c.rowHeight(r)))
+                drawRect(AureaColors.Accent.copy(alpha = 0.14f), Offset(0f, top), Size(w, c.rowHeight(r)))
+            }
             val selected = c.isSelected(r.id)
             val handles = selCount == 1 && selected && !r.locked
             val selFrame = if (selKey != null && selKey.first == r.id) r.selectedFrame(selKey.second) else Snap.NONE
@@ -216,23 +232,14 @@ internal class TimelinePainter(
             drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation)
         }
 
-        // Reordenar: véu na linha segurada + traço de destino (a linha não sai do lugar).
-        val src = st.reorderSource
-        if (src >= 0) {
-            val srcTop = m.rowsTop + c.rowTop(src) - scroll
-            drawRect(AureaColors.Accent.copy(alpha = 0.14f), Offset(0f, srcTop), Size(w, m.row))
-            val y = if (st.reorderTarget < 0 || st.reorderTarget == src) Float.NaN else m.rowsTop + c.rowTop(st.reorderTarget + if (st.reorderTarget > src) 1 else 0) - scroll
-            if (!y.isNaN()) {
-                drawRect(AureaColors.Accent, Offset(0f, y - m.reorderLine / 2f), Size(w, m.reorderLine))
-                drawCircle(AureaColors.Accent, m.reorderDot, Offset(m.pillLeft, y))
-            }
-        }
-
         // Coluna das pílulas por cima das barras.
         drawRect(headerShade, Offset(0f, m.rowsTop), Size(m.headerColumn, h - m.rowsTop))
-        for (i in first..last) {
+        for (pass in passes) for (i in indices) {
+            val lifted = preview != null && i in preview.sourceStart until preview.sourceEnd
+            if (preview != null && lifted != (pass == 1)) continue
             val r = c.rowAt(rows, i) ?: continue
-            val cy = m.rowsTop + c.rowTop(i) - scroll + c.rowHeight(r) / 2f
+            val cy = m.rowsTop + c.rowTop(i) - scroll + (preview?.offsets?.get(i) ?: 0f) + c.rowHeight(r) / 2f
+            if (cy + c.rowHeight(r) / 2f < m.rowsTop || cy - c.rowHeight(r) / 2f > h) continue
             if (r.track != null) continue
             drawHeaderPill(r, cy, multi && c.isSelected(r.id), c.expandedLayer.value == r.id)
         }

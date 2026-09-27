@@ -35,6 +35,8 @@ internal class TimelineState {
     /** Reordenar: linha segurada e destino sob o dedo (−1 = sem reordenar). */
     var reorderSource by mutableIntStateOf(-1)
     var reorderTarget by mutableIntStateOf(-1)
+    /** Floating layer top in viewport pixels; independent of vertical auto-scroll. */
+    var reorderTop by mutableFloatStateOf(0f)
     /** Losango na mão (cresce e mostra o tempo). */
     var dragKeyLayer by mutableLongStateOf(0L)
     var dragKeyFrame by mutableIntStateOf(Snap.NONE)

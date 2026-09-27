@@ -130,27 +130,9 @@ private struct CurvePresetItem: Identifiable {
 @MainActor
 private enum CurveClipboard { static var ease: CurveEase? }
 
-func curveSameGroup(_ a: KeyframeItem, _ b: KeyframeItem) -> Bool {
-    if a.property == 31 || b.property == 31 {
-        return a.property == b.property && a.effectIndex == b.effectIndex && a.paramIndex / 4 == b.paramIndex / 4
-    }
-    if a.property == 35 && b.property == 35 {
-        return a.paramIndex == b.paramIndex || ((5...6).contains(a.paramIndex) && (5...6).contains(b.paramIndex))
-    }
-    if a.property > 31 || b.property > 31 {
-        return a.property == b.property && a.effectIndex == b.effectIndex && a.paramIndex == b.paramIndex
-    }
-    func group(_ property: UInt32) -> UInt32 {
-        switch property {
-        case 0...2: return 0
-        case 3...5: return 1
-        case 6...8: return 2
-        case 9...11: return 3
-        case 13...14: return 4
-        default: return 100 + property
-        }
-    }
-    return group(a.property) == group(b.property)
+func curveSameTrack(_ a: KeyframeItem, _ b: KeyframeItem) -> Bool {
+    a.property == b.property && (a.property < 31 ||
+        (a.effectIndex == b.effectIndex && a.paramIndex == b.paramIndex))
 }
 
 private struct NativeCurveGraph: View {
@@ -389,8 +371,8 @@ struct NativeCurvePanel: View {
             y1: h.count == 4 ? h[1] : 0, x2: h.count == 4 ? h[2] : 0.67, y2: h.count == 4 ? h[3] : 1)
     }
     private func apply(_ value: CurveEase, to key: KeyframeItem) {
-        // Android's sameGroup: all axes/components with a mark at this instant.
-        for sibling in model.keyframes[layer] ?? [] where sibling.time == key.time && curveSameGroup(sibling, key) {
+        // Other axes and effect components keep their own segment curves.
+        for sibling in model.keyframes[layer] ?? [] where sibling.time == key.time && curveSameTrack(sibling, key) {
             model.engine.editTrackKey(layer, property: sibling.property, effect: sibling.effectIndex, param: sibling.paramIndex,
                 time: sibling.time, action: 3, value: sibling.value, targetTime: sibling.time,
                 interpolation: value.interpolation, handles: [value.x1, value.y1, value.x2, value.y2].map { NSNumber(value: $0) })
@@ -487,6 +469,7 @@ struct NativeCurvePanel: View {
                     lineWidth: ease.same(preset.ease) ? 1.8 : 1))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(preset.name)
+            .accessibilityIdentifier("curve.preset.\(preset.id)")
     }
     private func familyTab(_ index: Int, glyph: Character, title: String) -> some View {
         Button { family = index } label: {
@@ -1082,6 +1065,9 @@ private struct NativeTrackGraph: View {
     private struct GraphDrag {
         let initial: TrackGraphViewport
         let key: KeyframeItem?
+        var currentTime: Int32 = 0
+        var previous: Int32?
+        var next: Int32?
         var began = false
     }
     private var start: Int32 { Int32(floor(viewport.from)) }
@@ -1168,7 +1154,7 @@ private struct NativeTrackGraph: View {
                     }
                     let x = plot(Double(model.localPlayhead), 0).x
                     if x >= 0 && x <= size.width { line(CGPoint(x: x, y: 0), CGPoint(x: x, y: size.height), color: AureaColors.danger) }
-                }.clipped().contentShape(Rectangle())
+                }.clipped().contentShape(Rectangle()).accessibilityIdentifier("curve.trackGraph")
                 .gesture(DragGesture(minimumDistance: 0)
                     .updating($touching) { _, active, _ in active = true }
                     .onChanged { move($0, size: geometry.size) }
@@ -1200,17 +1186,31 @@ private struct NativeTrackGraph: View {
                     if d <= distance { nearest = key; distance = d }
                 }
             }
-            drag = GraphDrag(initial: viewport, key: nearest)
+            drag = GraphDrag(initial: viewport, key: nearest, currentTime: nearest?.time ?? 0,
+                previous: nearest.flatMap { selected in keys.last(where: { $0.time < selected.time })?.time },
+                next: nearest.flatMap { selected in keys.first(where: { $0.time > selected.time })?.time })
             if let nearest { model.curveSelectedTime = nearest.time }
         }
         guard var current = drag else { return }
         if let key = current.key {
-            guard current.began || abs(value.translation.height) >= 1 else { return }
+            guard current.began || hypot(value.translation.width, value.translation.height) >= 4 else { return }
             let changed = Double(key.value) - Double(value.translation.height / size.height) * current.initial.range
             guard changed.isFinite, abs(changed) <= Double(Float.greatestFiniteMagnitude) else { return }
-            if !current.began { model.beginGesture("editar valor do keyframe"); current.began = true; drag = current }
+            if !current.began { model.beginGesture("editar keyframe no gráfico"); current.began = true }
+            let low = current.previous.map { Int64($0) + 1 } ?? Int64(Int32.min)
+            let high = current.next.map { Int64($0) - 1 } ?? Int64(Int32.max)
+            let desired = (Double(key.time) + Double(value.translation.width / size.width) * current.initial.duration).rounded()
+            guard desired.isFinite, low <= high else { return }
+            let target = Int32(min(Double(high), max(Double(low), desired)))
+            if target != current.currentTime {
+                model.engine.editTrackKey(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex,
+                    time: current.currentTime, action: 2, value: key.value, targetTime: target, interpolation: key.interpolation, handles: [])
+                current.currentTime = target
+            }
+            drag = current
             model.engine.editTrackKey(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex,
-                time: key.time, action: 0, value: Float(changed), targetTime: key.time, interpolation: key.interpolation, handles: [])
+                time: current.currentTime, action: 0, value: Float(changed), targetTime: current.currentTime, interpolation: key.interpolation, handles: [])
+            model.curveSelectedTime = current.currentTime
             model.refreshModel(force: true)
         } else {
             viewport = current.initial.transformed(zoom: 1,

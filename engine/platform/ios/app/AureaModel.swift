@@ -354,6 +354,7 @@ final class AureaModel: ObservableObject {
     @Published var presetDialog: PresetDialogRequest?
     @Published var curveReturnPanel: PanelKind = .none
     @Published var stageManipulating = false
+    @Published var gizmoLocalSpace = false
     @Published var toast: String?
 
     // --- Modelo em memória (o que a timeline e os painéis desenham) ---------
@@ -576,7 +577,20 @@ final class AureaModel: ObservableObject {
                     case "text-edit-2d": addText()
                     case "text-edit-3d": addText3D(content: "Texto", depth: 0.25)
                     case "curve-null": addNull(threeD: true); panel = .transform
+                    case "curve-isolation":
+                        addNull(threeD: true)
+                        if let id = primarySelection {
+                            for time in [Int32(0), Int32(30), Int32(60)] {
+                                for property in UInt32(0)...UInt32(2) {
+                                    engine.insertKeyframe(forLayer: id, property: property, time: time, value: Float(200 + time))
+                                }
+                            }
+                            engine.seek(toFrame: 0); refreshModel(force: true)
+                        }
+                        panel = .transform
                     case "vector": addVector(1); panel = .vector
+                    case "timeline-reorder":
+                        for _ in 0..<8 { addShape(1) }
                     default: addShape(1)
                     }
                     if scene == "transform" { panel = .transform }

@@ -151,6 +151,13 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         LockBanner(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
+        if (store.gizmo != null && store.selection.size == 1 && !store.rawPlayback) {
+            androidx.compose.material3.TextButton(
+                onClick = store::toggleGizmoSpace,
+                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).heightIn(min = 48.dp)
+                    .background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp)),
+            ) { Text(if (store.gizmoLocalSpace) "Local XYZ" else "World XYZ", color = AureaColors.Text) }
+        }
         PerfHud(store, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 6.dp))
     }
 }
@@ -497,16 +504,13 @@ private fun gizmoTips(m: StageMapper, g: FloatArray, zOffset: Float): FloatArray
     val t = FloatArray(8)
     t[0] = m.sx(g[0]); t[1] = m.sy(g[1])
     for (i in 1..3) { t[i * 2] = m.sx(g[i * 2]); t[i * 2 + 1] = m.sy(g[i * 2 + 1]) }
-    if (kotlin.math.hypot(t[6] - t[0], t[7] - t[1]) < zOffset * 0.6f) {
-        t[6] = t[0] + zOffset * 0.7f
-        t[7] = t[1] - zOffset * 0.7f
-    }
-    return t
+    return GizmoGeometry.tips(t, zOffset / 44f)
 }
 
 /** Gizmo 3D: setas X (vermelha), Y (verde) e Z (azul) do mundo, na origem da camada. */
 private fun DrawScope.drawGizmo(m: StageMapper, g: FloatArray) {
     val t = gizmoTips(m, g, 44.dp.toPx())
+    if (t.size != 8) return
     val o = Offset(t[0], t[1])
     val colors = arrayOf(GizmoX, GizmoY, GizmoZ)
     for (i in 1..3) {
@@ -776,7 +780,7 @@ private suspend fun PointerInputScope.stageGestures(
 
         // Gizmo 3D: tocar numa ponta de seta arrasta no eixo do mundo.
         val gz = store.gizmo
-        if (gz != null && store.selection.size == 1 && m.valid) {
+        if (gz != null && gz.size == 8 && gz.all { it.isFinite() } && store.selection.size == 1 && m.valid) {
             val zOff = 44.dp.toPx()
             val tips = gizmoTips(m, gz, zOff)
             val reach = 24.dp.toPx()
@@ -787,14 +791,18 @@ private suspend fun PointerInputScope.stageGestures(
                 if (dd < best) { best = dd; axis = i - 1 }
             }
             if (axis >= 0) {
-                val ax = tips[(axis + 1) * 2] - tips[0]
-                val ay = tips[(axis + 1) * 2 + 1] - tips[1]
+                // The handle has fixed screen size; inverse movement must use
+                // the original projection, frozen for the entire gesture.
+                val ax = m.sx(gz[(axis + 1) * 2]) - tips[0]
+                val ay = m.sy(gz[(axis + 1) * 2 + 1]) - tips[1]
                 val len2 = ax * ax + ay * ay
-                val zCollapsed = axis == 2 && kotlin.math.hypot(m.sx(gz[6]) - tips[0], m.sy(gz[7]) - tips[1]) < zOff * 0.6f
+                val rawExtent = (1..3).maxOf { kotlin.math.hypot(m.sx(gz[it * 2]) - tips[0], m.sy(gz[it * 2 + 1]) - tips[1]) }
+                val zCollapsed = axis == 2 && kotlin.math.hypot(ax, ay) * 80.dp.toPx() / max(rawExtent, 0.0001f) < zOff * 0.6f
                 var last = down.position
                 store.beginGesture("mover no eixo ${"XYZ"[axis]}")
                 do {
                     val e = awaitPointerEvent()
+                    if (e.changes.count { it.pressed } > 1) break
                     val c = e.changes.firstOrNull { it.id == down.id } ?: break
                     c.consume()
                     val dx = c.position.x - last.x

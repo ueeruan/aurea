@@ -464,6 +464,65 @@ import XCTest
         _ = try awaitSnapshot("A deliberate tap opens the layer options") { $0.sheet == "dock" }
     }
 
+    func testCurvePresetChangesOnlySelectedComponentAndSegment() throws {
+        let before = try launch("curve-isolation")
+        let open = app.buttons["Edit the property curve"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5)); open.tap()
+        let selected = try awaitSnapshot("Independent component curve opens") { $0.sheet == "curve" }
+        let preset = app.buttons["curve.preset.in"].firstMatch
+        XCTAssertTrue(preset.waitForExistence(timeout: 5)); XCTAssertTrue(preset.isHittable); preset.tap()
+        let changed = try awaitSnapshot("Preset changes the selected outgoing segment") {
+            $0.curveKeys.contains { $0.property == Int(selected.curveProperty) && $0.time == 0 && $0.interpolation == 2 }
+        }
+        let untouched: (CurveKey) -> Bool = { $0.property != Int(selected.curveProperty) || $0.time != 0 }
+        XCTAssertEqual(before.curveKeys.filter(untouched), changed.curveKeys.filter(untouched))
+        try undo()
+        _ = try awaitSnapshot("One undo restores all original curves") { $0.curveKeys == before.curveKeys }
+    }
+
+    func testValueGraphDragsTimeAndValueWithoutChangingOtherTracks() throws {
+        let before = try launch("curve-isolation")
+        app.buttons["Edit the property curve"].firstMatch.tap()
+        let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
+        app.buttons["curve.mode.1"].tap()
+        let graph = app.otherElements["curve.trackGraph"].firstMatch
+        XCTAssertTrue(graph.waitForExistence(timeout: 5))
+        let frame = graph.frame
+        let start = CGPoint(x: frame.midX, y: frame.midY)
+        let end = CGPoint(x: start.x + 20, y: start.y - 15)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try awaitSnapshot("Value graph changes both frame and value") {
+            $0.curveKeys.contains { $0.property == Int(selected.curveProperty) && $0.time > 30 && $0.time < 60 && $0.value > 230 }
+        }
+        let other: (CurveKey) -> Bool = { $0.property != Int(selected.curveProperty) }
+        XCTAssertEqual(before.curveKeys.filter(other), moved.curveKeys.filter(other))
+        XCTAssertEqual(moved.curveKeys.count, before.curveKeys.count)
+        try undo()
+        _ = try awaitSnapshot("One undo restores time and value") { $0.curveKeys == before.curveKeys }
+    }
+
+    func testHoldingLayerBodyReordersAndOneUndoRestoresOrder() throws {
+        let before = try launch("timeline-reorder")
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let frame = timeline.frame
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 50)
+        let end = CGPoint(x: start.x, y: start.y + 96)
+        coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(end),
+                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try awaitSnapshot("Layer body hold changes stacking order") {
+            $0.layerOrder != before.layerOrder && $0.sheet == "none"
+        }
+        XCTAssertEqual(Set(moved.layerOrder), Set(before.layerOrder))
+        XCTAssertEqual(moved.primaryID, before.layerOrder.first)
+        XCTAssertEqual(timeline.frame.height, frame.height, accuracy: 1)
+        try undo()
+        _ = try awaitSnapshot("One undo restores the entire original stacking order") {
+            $0.layerOrder == before.layerOrder && $0.canRedo
+        }
+    }
+
     func testTransformToolsKeepFingerSizedTargets() throws {
         _ = try launch("transform")
         let modes = app.descendants(matching: .any)
@@ -488,7 +547,13 @@ import XCTest
         // Read dimensions from the core; font/platform metrics are not fixed.
         try assertText3DSelectionBounds(before)
         XCTAssertEqual(before.stageGizmo.count, 8)
-        let start = screenPoint(x: before.stageGizmo[2], y: before.stageGizmo[3], snapshot: before)
+        let raw = stride(from: 0, to: 8, by: 2).map {
+            screenPoint(x: before.stageGizmo[$0], y: before.stageGizmo[$0 + 1], snapshot: before)
+        }
+        let extent = (1...3).map { hypot(raw[$0].x - raw[0].x, raw[$0].y - raw[0].y) }.max() ?? 0
+        XCTAssertGreaterThan(extent, 0)
+        let start = CGPoint(x: raw[0].x + (raw[1].x - raw[0].x) * 80 / max(extent, 0.001),
+                            y: raw[0].y + (raw[1].y - raw[0].y) * 80 / max(extent, 0.001))
         let end = CGPoint(x: start.x + 40, y: start.y)
         try requireInsideStage(start, end)
         // Touch the actual X-axis tip, avoiding text holes and overlapping
@@ -551,7 +616,9 @@ import XCTest
             $0.ready && $0.scene == scene && $0.runID == self.runID
         }
         XCTAssertTrue(state.coreStarted, state.coreError)
-        if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) } else { XCTAssertEqual(state.layerCount, 1) }
+        if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) }
+        else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
+        else { XCTAssertEqual(state.layerCount, 1) }
         XCTAssertEqual(state.selectionCount, 1)
         XCTAssertGreaterThan(state.primaryID, 0)
         XCTAssertEqual(state.detail.position.count, 3)
@@ -657,6 +724,8 @@ import XCTest
         let coreStarted: Bool
         let coreError: String
         let layerCount: Int
+        let layerOrder: [Int64]
+        let curveKeys: [CurveKey]
         let editMode: Bool
         let coreEditMode: Bool
         let effectCount: Int
@@ -678,6 +747,12 @@ import XCTest
         let shapeParams: [Double]
         let stageCorners: [Double]
         let stageGizmo: [Double]
+    }
+    private struct CurveKey: Decodable, Equatable {
+        let property: Int
+        let time: Int
+        let interpolation: Int
+        let value: Double
     }
     private struct Detail: Decodable {
         let animatedMask: UInt64

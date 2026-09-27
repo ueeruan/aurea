@@ -250,6 +250,14 @@ enum ShellStageGeometry {
     }
     static func gizmoTips(_ points: [CGPoint]) -> [CGPoint] {
         guard points.count == 4 else { return [] }; var result = points
+        let extent = (1...3).map { hypot(points[$0].x - points[0].x, points[$0].y - points[0].y) }.max() ?? 0
+        if extent > 0.0001 {
+            let scale = 80 / extent
+            for i in 1...3 {
+                result[i] = CGPoint(x: points[0].x + (points[i].x - points[0].x) * scale,
+                                    y: points[0].y + (points[i].y - points[0].y) * scale)
+            }
+        }
         if hypot(result[3].x - result[0].x, result[3].y - result[0].y) < 44 * 0.6 { result[3] = CGPoint(x: result[0].x + 44 * 0.7, y: result[0].y - 44 * 0.7) }
         return result
     }

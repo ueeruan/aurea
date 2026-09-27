@@ -456,7 +456,7 @@ struct PresetsPanel: View {
             guard let source = entry.source, let ease = presetCurve(model.engine.parseCurvePreset(source)) else { model.toast = "Preset de curva inválido"; return }
             guard let key = curveKey else { model.toast = "Crie pelo menos 2 keyframes para aplicar a curva"; return }
             model.beginGesture("preset de curva")
-            for sibling in model.keyframes[layerId] ?? [] where sibling.time == key.time && curveSameGroup(sibling, key) {
+            for sibling in model.keyframes[layerId] ?? [] where sibling.time == key.time && curveSameTrack(sibling, key) {
                 model.engine.editTrackKey(layerId, property: sibling.property, effect: sibling.effectIndex, param: sibling.paramIndex,
                                           time: sibling.time, action: 3, value: sibling.value, targetTime: sibling.time,
                                           interpolation: ease.interpolation, handles: [ease.x1, ease.y1, ease.x2, ease.y2].map { NSNumber(value: $0) })

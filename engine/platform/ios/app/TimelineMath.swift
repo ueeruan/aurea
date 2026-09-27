@@ -357,6 +357,35 @@ enum WaveGrid {
 
 /// Reordenar: linha de destino sob o dedo (0 = topo = camada da frente).
 enum Reorder {
+    struct Preview {
+        let offsets: [CGFloat]
+        let sourceStart: Int
+        let sourceEnd: Int
+        let gapTop: CGFloat
+    }
+
+    /// Presentation only, matching Android. A layer includes its expanded tracks.
+    static func preview(tops: [CGFloat], ids: [Int64], source: Int, target: Int, dragTop: CGFloat) -> Preview {
+        var offsets = [CGFloat](repeating: 0, count: ids.count)
+        guard ids.indices.contains(source), ids.indices.contains(target), tops.count == ids.count + 1, dragTop.isFinite else {
+            return Preview(offsets: offsets, sourceStart: -1, sourceEnd: -1, gapTop: .nan)
+        }
+        var start = source, end = source + 1
+        while start > 0 && ids[start - 1] == ids[source] { start -= 1 }
+        while end < ids.count && ids[end] == ids[source] { end += 1 }
+        var targetStart = target, targetEnd = target + 1
+        while targetStart > 0 && ids[targetStart - 1] == ids[target] { targetStart -= 1 }
+        while targetEnd < ids.count && ids[targetEnd] == ids[target] { targetEnd += 1 }
+        let height = tops[end] - tops[start]
+        for i in ids.indices {
+            if i >= start && i < end { offsets[i] = dragTop - tops[start] }
+            else if targetStart > start && i >= end && i < targetEnd { offsets[i] = -height }
+            else if targetStart < start && i >= targetStart && i < start { offsets[i] = height }
+        }
+        let gap = targetStart > start ? tops[targetEnd] - height : tops[targetStart]
+        return Preview(offsets: offsets, sourceStart: start, sourceEnd: end, gapTop: gap)
+    }
+
     static func targetIndex(y: CGFloat, rowsTop: CGFloat, scroll: CGFloat, rowHeight: CGFloat, count: Int) -> Int {
         guard count > 0, rowHeight > 0 else { return -1 }
         let i = Int(((y - rowsTop + scroll) / rowHeight).rounded(.down))

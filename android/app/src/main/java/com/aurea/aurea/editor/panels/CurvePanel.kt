@@ -204,12 +204,12 @@ internal fun easeOf(store: EditorStore, layer: Long, k: KeyframeRow): Ease {
 }
 
 /**
- * Escreve o easing no trecho que SAI de [start], em todas as trilhas irmãs que
- * têm marca no mesmo instante (X e Y da posição andam juntos, como a A.01).
+ * Write only the outgoing segment of the selected component. Coincident
+ * keys on other axes or effect components are independent tracks.
  */
 internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease) {
     val keys = store.keyframes[layer] ?: return
-    keys.filter { it.time == start.time && it.sameGroup(start) }.forEach { k ->
+    keys.filter { it.time == start.time && it.sameTrack(start) }.forEach { k ->
         store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2)
     }
 }

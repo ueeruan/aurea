@@ -41,7 +41,7 @@ import UIKit
         let text3D = primary.flatMap { model.engine.text3D(forLayer: $0) } ?? [:]
         var stageCorners: [Float] = []
         _ = StageGeom.corners(detail, &stageCorners)
-        let stageGizmo = primary.map { model.engine.gizmo($0, length: ShellStageGeometry.gizmoLength) } ?? []
+        let stageGizmo = primary.map { model.engine.gizmo($0, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoLocalSpace) } ?? []
         var coreStatus = AureaStatus()
         let readCoreStatus = model.engine.readStatus(&coreStatus)
         let packet: [String: Any] = [
@@ -53,6 +53,11 @@ import UIKit
             "modelRevision": model.status.modelRevision, "playhead": model.status.playhead,
             "corePlayhead": readCoreStatus ? coreStatus.playhead : -1,
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
+            "layerOrder": model.layers.map { $0.id },
+            "curveKeys": (primary.flatMap { model.keyframes[$0] } ?? []).map {
+                ["property": Int($0.property), "time": Int($0.time), "interpolation": Int($0.interpolation),
+                 "value": Double($0.value)] as [String: Any]
+            },
             "editMode": model.editMode, "coreEditMode": model.engine.timelineEditMode,
             "effectCount": model.effects.count,
             "clipTimeRemap": primary.map { model.engine.timeRemap($0) } ?? [],

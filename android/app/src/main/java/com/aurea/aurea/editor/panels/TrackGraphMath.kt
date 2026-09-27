@@ -1,6 +1,15 @@
 package com.aurea.aurea.editor.panels
 
 import kotlin.math.max
+import kotlin.math.roundToLong
+
+internal fun graphDragFrame(original: Int, delta: Float, previous: Int?, next: Int?): Int {
+    if (!delta.isFinite()) return original
+    val low = previous?.toLong()?.plus(1) ?: Int.MIN_VALUE.toLong()
+    val high = next?.toLong()?.minus(1) ?: Int.MAX_VALUE.toLong()
+    if (low > high) return original
+    return (original.toDouble() + delta).roundToLong().coerceIn(low, high).toInt()
+}
 
 internal data class GraphSample(val frame: Float, val value: Float)
 internal data class GraphHitPoint(val index: Int, val x: Float, val y: Float)

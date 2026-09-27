@@ -2236,6 +2236,10 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     float xyz[3]{}; auto* e = self.engine;
     return e && e->gizmo_move_local(layerId, axis, amount, xyz) ? floats_to_array(xyz, 3) : @[];
 }
+- (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length localSpace:(BOOL)localSpace {
+    float points[8]{}; auto* e = self.engine;
+    return e && e->query_gizmo(layerId, length, points, localSpace) ? floats_to_array(points, 8) : @[];
+}
 - (void)cancelCameraTracking { if (auto* e = self.engine) e->cancel_camera_track(); }
 - (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov { auto* e=self.engine;return e&&e->refine_camera_track(remove,motion,fov); }
 - (NSArray<NSNumber*>*)cameraTrackTarget:(long long)frame { auto* e=self.engine;if(!e)return @[];float xy[64]{};const auto n=e->camera_track_target(frame,xy,32);return floats_to_array(xy,n*2); }

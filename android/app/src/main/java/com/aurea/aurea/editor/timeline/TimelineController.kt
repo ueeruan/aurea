@@ -460,9 +460,9 @@ internal class TimelineController(
                 HitKind.KEYFRAME -> if (timeAxis) keyframeDrag(r, hit.keyIndex, down)
                     else if (!state.compact) scroll(down.id, down.position, tracker) else consumeUntilUp()
                 HitKind.HEADER -> if (!timeAxis && !state.compact) reorderDrag(r, hit.rowIndex, down) else consumeUntilUp()
-                // Reordering belongs to the header. A slow vertical swipe on a
-                // clip must scroll even if the finger paused before moving.
-                else -> if (timeAxis || state.compact) longPressMove(r, down) else scroll(down.id, down.position, tracker)
+                // A deliberate hold lifts the layer. A swipe before the hold
+                // threshold still scrolls; horizontal motion still edits time.
+                else -> if (timeAxis || state.compact) longPressMove(r, down) else reorderDrag(r, hit.rowIndex, down)
             }
             return
         }
@@ -711,7 +711,7 @@ internal class TimelineController(
     }
 
     // --- Reordenar ---------------------------------------------------------------------------
-    /** A linha não sai do lugar durante o gesto (véu + traço); aplica UMA vez ao soltar. */
+    /** Lift a whole layer, preview the gap, then commit one engine order command. */
     private suspend fun AwaitPointerEventScope.reorderDrag(r: RowModel, index: Int, down: PointerInputChange) {
         if (r.locked) {
             light()
@@ -719,9 +719,14 @@ internal class TimelineController(
             return consumeUntilUp()
         }
         heavy()
+        pauseIfPlaying()
+        if (!isSelected(r.id)) store.select(r.id, openOptions = false)
         state.reorderSource = index
         state.reorderTarget = index
+        state.reorderTop = metrics.rowsTop + rowTop(index) - clampedScroll(rowCount(rows.value))
+        val grabOffset = down.position.y - state.reorderTop
         val released = dragLoop(down.id, down.position, horizontal = false) { p ->
+            state.reorderTop = p.y - grabOffset
             val n = rowCount(rows.value)
             val t = rowIndexAt(p.y - metrics.rowsTop + clampedScroll(n)).coerceIn(0, maxOf(0, n - 1))
             if (t != state.reorderTarget) {
@@ -730,9 +735,11 @@ internal class TimelineController(
             }
         }
         val target = state.reorderTarget
-        if (released && target >= 0 && target != index) {
+        val targetId = rows.value.getOrNull(target)?.id
+        val targetIndex = store.layers.indexOfFirst { it.id == targetId }
+        if (released && targetIndex >= 0 && targetId != r.id) {
             openUndo("reordenar")
-            store.reorderLayer(r.id, store.layers.indexOfFirst { it.id == rows.value.getOrNull(target)?.id }.coerceAtLeast(0))
+            store.reorderLayer(r.id, targetIndex)
             closeUndo()
             light()
         }
@@ -755,10 +762,12 @@ internal class TimelineController(
         while (true) {
             val ev = awaitPointerEvent()
             val ch = changeOf(ev, id)
+            if (pressedCount(ev) >= 2) { consumeAll(ev); stopAutoScroll(); return false }
             if (ch == null || !ch.pressed) {
+                if (ch != null) apply(ch.position)
                 consumeAll(ev)
                 stopAutoScroll()
-                return true
+                return ch != null
             }
             consumeAll(ev)
             lastPointer = ch.position

@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.R
+import com.aurea.aurea.editor.panels.Ease
+import com.aurea.aurea.editor.panels.applyEase
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -61,15 +63,15 @@ class TimelineGesturesTest {
         assertTrue("A real tap should still open layer options", timeline().fetchSemanticsNode().size.height < height)
     }
 
-    @Test fun slowVerticalSwipeScrollsManyLayersWithoutMovingOrOpeningAny() {
+    @Test fun verticalSwipeScrollsManyLayersWithoutMovingOrOpeningAny() {
         launch(24)
         val before = store.layers.map { Triple(it.id, it.startFrame, it.endFrame) }
         val height = timeline().fetchSemanticsNode().size.height
         timeline().performTouchInput {
             val x = width * .72f
             down(Offset(x, height - 18 * density))
-            advanceEventTime(650)
-            // Slow initial press must not switch the body into layer reordering.
+            advanceEventTime(80)
+            // Scrolling begins before the deliberate hold used for reordering.
             moveTo(Offset(x, height - 45 * density), 50)
             moveTo(Offset(x, 54 * density), 250)
             advanceEventTime(120)
@@ -93,6 +95,60 @@ class TimelineGesturesTest {
         compose.waitForIdle()
         timeline().performTouchInput { click(Offset(width * .72f, 54 * density)) }
         compose.runOnIdle { assertEquals(before.first().first, store.primary) }
+    }
+
+    @Test fun holdingLayerBodyReordersWithoutChangingTimingAndOneUndoRestoresOrder() {
+        launch(5)
+        val before = store.layers.map { it.id }
+        val ranges = store.layers.associate { it.id to Triple(it.startFrame, it.endFrame, it.offsetFrames) }
+        val duration = store.project.durationFrames
+        val height = timeline().fetchSemanticsNode().size.height
+        timeline().performTouchInput {
+            val x = width / 2f + 40 * density
+            down(Offset(x, 52 * density))
+            advanceEventTime(650)
+            moveTo(Offset(x, 75 * density), 50)
+            moveTo(Offset(x, 148 * density), 300)
+            up()
+        }
+        compose.waitUntil(5000) { store.layers.map { it.id } != before }
+        compose.runOnIdle {
+            assertEquals(before.toSet(), store.layers.map { it.id }.toSet())
+            assertEquals(ranges, store.layers.associate { it.id to Triple(it.startFrame, it.endFrame, it.offsetFrames) })
+            assertEquals(duration, store.project.durationFrames)
+            assertEquals(setOf(before.first()), store.timelineOnlySelection)
+        }
+        assertEquals(height, timeline().fetchSemanticsNode().size.height)
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.layers.map { it.id } == before }
+        compose.runOnIdle { store.redo() }
+        compose.waitUntil(5000) { store.layers.map { it.id } != before }
+    }
+
+    @Test fun editingOneCurveLeavesCoincidentAxisKeysAndLaterSegmentsUnchanged() {
+        launch()
+        val id = store.layers.single().id
+        compose.runOnIdle { store.select(id, openOptions = false) }
+        for (frame in listOf(0, 30, 60)) {
+            compose.runOnIdle { store.seek(frame) }
+            compose.waitUntil(5000) { store.playhead == frame }
+            compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(0, 1, 2)) }
+            compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.time == frame } == 3 }
+        }
+        val before = store.keyframes[id].orEmpty()
+        val key = before.single { it.property == 0 && it.time == 0 }
+        compose.runOnIdle {
+            store.beginGesture("Independent curve")
+            applyEase(store, id, key, Ease(6, 0.2f, -0.5f, 0.8f, 1.5f))
+            store.endGesture()
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().single { it.property == 0 && it.time == 0 }.interpolation == 6 }
+        compose.runOnIdle {
+            assertEquals(before.filterNot { it.property == 0 && it.time == 0 },
+                store.keyframes[id].orEmpty().filterNot { it.property == 0 && it.time == 0 })
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.keyframes[id] == before }
     }
 
     @Test fun trimmingBeyondProjectEndGrowsDurationAndUndoRestoresIt() {

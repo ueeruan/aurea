@@ -389,7 +389,7 @@ class AureaEngine private constructor() {
     fun clipboardState(): Int = nativeClipboardState(nativeHandle)
 
     // Gizmo 3D.
-    fun queryGizmo(layer: Long, length: Float, out: FloatArray): Boolean = nativeQueryGizmo(nativeHandle, layer, length, out)
+    fun queryGizmo(layer: Long, length: Float, out: FloatArray, localSpace: Boolean = false): Boolean = nativeQueryGizmo(nativeHandle, layer, length, out, localSpace)
     fun gizmoMoveLocal(layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean = nativeGizmoMoveLocal(nativeHandle, layer, axis, amount, out)
 
     // Ambiente 3D (HDRI).
@@ -869,7 +869,7 @@ class AureaEngine private constructor() {
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
     private external fun nativeUngroupPrecomp(handle: Long, layer: Long): String?
     private external fun nativeImportHdri(handle: Long, path: String): Long
-    private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray): Boolean
+    private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray, localSpace: Boolean): Boolean
     private external fun nativeGizmoMoveLocal(handle: Long, layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean
     private external fun nativeClearHdri(handle: Long): Boolean
     private external fun nativeSetEnvironmentBackground(handle: Long, visible: Boolean): Boolean

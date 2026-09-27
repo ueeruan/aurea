@@ -3889,7 +3889,7 @@ u32 Engine::query_scene_guides(f32* lines, u32 capacity) noexcept {
     return count;
 }
 
-bool Engine::query_gizmo(u64 layerId, f32 length, f32* out) noexcept {
+bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
@@ -3910,15 +3910,19 @@ bool Engine::query_gizmo(u64 layerId, f32 length, f32* out) noexcept {
     };
     // Mundo da cena: X para a direita, Y para BAIXO (px da composição), Z para
     // dentro da tela — os mesmos eixos da posição da camada.
-    return proj(o, out) && proj(o + Vec3{length, 0, 0}, out + 2) && proj(o + Vec3{0, length, 0}, out + 4)
-        && proj(o + Vec3{0, 0, length}, out + 6);
+    auto axis = [&](u32 index) {
+        if (localSpace) return Vec3{w.col[index].x, w.col[index].y, w.col[index].z}.normalized() * length;
+        return Vec3{index == 0 ? length : 0, index == 1 ? length : 0, index == 2 ? length : 0};
+    };
+    return proj(o, out) && proj(o + axis(0), out + 2) && proj(o + axis(1), out + 4)
+        && proj(o + axis(2), out + 6);
 }
 
 bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || !out || axis > 2) return false;
+    if (!l || !out || axis > 5 || !std::isfinite(amount)) return false;
     const FrameIndex now = playback_.current();
     const FrameIndex local = l->local_time(now);
     auto s = [&](TrackProperty prop, f32 fallback) {
@@ -3928,6 +3932,12 @@ bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexc
     Vec3 pos{s(TrackProperty::PositionX, l->transform.position.x), s(TrackProperty::PositionY, l->transform.position.y),
              s(TrackProperty::PositionZ, l->transform.position.z)};
     Vec3 d{axis == 0 ? amount : 0.0f, axis == 1 ? amount : 0.0f, axis == 2 ? amount : 0.0f};
+    // 0..2 = world axes; 3..5 = the evaluated object's local axes in world space.
+    if (axis >= 3) {
+        const Mat4 world = layer_world_3d(*comp, *l, now);
+        const auto& column = world.col[axis - 3];
+        d = Vec3{column.x, column.y, column.z}.normalized() * amount;
+    }
     // Com pai, o passo no mundo vira passo no espaço do pai (só a parte linear).
     const Layer* p = l->parent.valid() ? comp->layer(l->parent) : nullptr;
     if (p || l->hasParentBasis) {

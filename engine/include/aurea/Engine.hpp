@@ -736,9 +736,10 @@ public:
     /// Setas do gizmo da camada (só camadas que vivem no espaço 3D): origem e
     /// pontas dos eixos X, Y, Z do MUNDO (comprimento `length` no mundo),
     /// projetadas em px da composição: {ox, oy, xx, xy, yx, yy, zx, zy}.
-    bool query_gizmo(u64 layerId, f32 length, f32* out8) noexcept;
+    bool query_gizmo(u64 layerId, f32 length, f32* out8, bool localSpace = false) noexcept;
     /// Posição LOCAL (espaço do pai) que leva a camada `amount` unidades do
     /// mundo ao longo do eixo `axis` (0 X, 1 Y, 2 Z) a partir de onde está.
+    /// axis 0..2 uses world XYZ; 3..5 uses evaluated local XYZ. Output is parent-local position.
     bool gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* outXYZ) noexcept;
 
     // --- Ambiente 3D (HDRI) ------------------------------------------------------

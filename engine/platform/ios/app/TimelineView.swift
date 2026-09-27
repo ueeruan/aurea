@@ -77,6 +77,8 @@ struct TimelineView: View {
     @State private var selectedKey: (layer: Int64, frame: Int32, track: TimelineTrack?)?
     @State private var reorderSource = -1
     @State private var reorderTarget = -1
+    @State private var reorderTop: CGFloat = 0
+    @State private var reorderGrabOffset: CGFloat = 0
     @State private var scrollVelocity: CGFloat = 0
     @State private var lastPointer = CGPoint.zero
     @State private var pendingPointer = false
@@ -272,25 +274,30 @@ struct TimelineView: View {
         var acc: CGFloat = 0
         for row in visibleRows { tops.append(acc); acc += rowHeight(row) }
         tops.append(acc)
-        func topOf(_ i: Int) -> CGFloat { tops[min(max(0, i), tops.count - 1)] }
-        for (index, row) in visibleRows.enumerated() {
-            let top = m.rowsTop + tops[index] - (compact ? 0 : scrollY)
-            if top + rowHeight(row) < m.rowsTop || top > size.height { continue }
-            drawRow(&c, row: row, top: top, width: size.width)
+        let preview = reorderSource >= 0 && !compact ? Reorder.preview(tops: tops, ids: visibleRows.map(\.id), source: reorderSource, target: reorderTarget, dragTop: reorderTop - m.rowsTop + scrollY) : nil
+        var paintIndices = Array(visibleRows.indices)
+        if let preview, preview.sourceStart >= 0 {
+            paintIndices.removeSubrange(preview.sourceStart..<preview.sourceEnd)
+            paintIndices.append(contentsOf: preview.sourceStart..<preview.sourceEnd)
+            let y = m.rowsTop + preview.gapTop - scrollY
+            c.fill(Path(CGRect(x: 0, y: y, width: size.width, height: m.reorderLine)), with: .color(AureaColors.accent))
         }
-        if reorderSource >= 0 {
-            let top = m.rowsTop + topOf(reorderSource) - scrollY
-            c.fill(Path(CGRect(x: 0, y: top, width: size.width, height: m.row)), with: .color(AureaColors.accent.opacity(0.14)))
-            let y = reorderTarget < 0 || reorderSource == reorderTarget ? CGFloat.nan : m.rowsTop + topOf(reorderTarget + (reorderTarget > reorderSource ? 1 : 0)) - scrollY
-            if y.isFinite {
-                c.fill(Path(CGRect(x: 0, y: y - m.reorderLine / 2, width: size.width, height: m.reorderLine)), with: .color(AureaColors.accent))
-                c.fill(Path(ellipseIn: CGRect(x: m.pillLeft - m.reorderDot, y: y - m.reorderDot, width: m.reorderDot * 2, height: m.reorderDot * 2)), with: .color(AureaColors.accent))
+        for index in paintIndices {
+            let row = visibleRows[index]
+            let top = m.rowsTop + tops[index] - (compact ? 0 : scrollY) + (preview?.offsets[index] ?? 0)
+            if top + rowHeight(row) < m.rowsTop || top > size.height { continue }
+            if let preview, index >= preview.sourceStart && index < preview.sourceEnd {
+                let rect = Path(CGRect(x: 0, y: top, width: size.width, height: rowHeight(row)))
+                c.fill(rect, with: .color(AureaColors.stage))
+                c.fill(rect, with: .color(AureaColors.accent.opacity(0.14)))
             }
+            drawRow(&c, row: row, top: top, width: size.width)
         }
         let shade = Gradient(stops: [.init(color: AureaColors.stage, location: 0), .init(color: AureaColors.stage.opacity(0.95), location: 0.78), .init(color: AureaColors.stage.opacity(0), location: 1)])
         c.fill(Path(CGRect(x: 0, y: m.rowsTop, width: m.headerColumn, height: max(0, size.height - m.rowsTop))), with: .linearGradient(shade, startPoint: .zero, endPoint: CGPoint(x: m.headerColumn, y: 0)))
-        for (index, row) in visibleRows.enumerated() {
-            let cy = m.rowsTop + tops[index] - (compact ? 0 : scrollY) + rowHeight(row) / 2
+        for index in paintIndices {
+            let row = visibleRows[index]
+            let cy = m.rowsTop + tops[index] - (compact ? 0 : scrollY) + (preview?.offsets[index] ?? 0) + rowHeight(row) / 2
             guard cy + m.row / 2 >= m.rowsTop && cy - m.row / 2 <= size.height else { continue }
             if row.track != nil {
                 glyph(&c, CupertinoGlyph.ChevronRight, size: 10, tint: .white.opacity(0.6), x: m.swatchLeft + m.swatch / 2, y: cy)
@@ -674,6 +681,9 @@ struct TimelineView: View {
         }
         if next.mode == .reorder, let row {
             reorderSource = rows.firstIndex(where: { $0.id == row.id }) ?? -1; reorderTarget = reorderSource
+            reorderTop = m.rowsTop + rowTop(max(0, reorderSource)) - scrollY
+            reorderGrabOffset = start.y - reorderTop
+            if !model.selection.contains(row.id) { model.select(layerId: row.id, additive: false, openOptions: false) }
         }
         if next.mode != .hold && next.mode != .blocked && next.mode != .scroll { pause() }
         if next.mode == .scrub {
@@ -718,7 +728,7 @@ struct TimelineView: View {
                 if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal || compact ? .scrub : .scroll }
                 else if g.hit.kind == .key { mode = horizontal ? .key : (compact ? .blocked : .scroll) }
                 else if g.hit.kind == .header { mode = !horizontal && !compact ? .reorder : .blocked }
-                else { mode = horizontal || compact ? .move : .scroll }
+                else { mode = horizontal || compact ? .move : .reorder }
                 if mode == .move, let row = g.row, !model.selection.contains(row.id) {
                     model.select(layerId: row.id, additive: model.selection.count >= 2, openOptions: false)
                 }
@@ -753,6 +763,7 @@ struct TimelineView: View {
         case .scroll:
             scrollY = min(maxScroll(size.height), max(0, g.scroll - (point.y - g.start.y)))
         case .reorder:
+            reorderTop = point.y - reorderGrabOffset
             reorderTarget = min(max(0, rowIndex(point.y - m.rowsTop + scrollY)), max(0, rows.count - 1))
         case .move:
             guard let row = g.row, let earliest = g.selection.map(\.startFrame).min(), let latest = g.selection.map(\.endFrame).max() else { return }
@@ -820,7 +831,7 @@ struct TimelineView: View {
     private func finish(cancelled: Bool) {
         pendingPointer = false
         guard let g = gesture else { return }
-        if g.mode == .reorder && !cancelled, let row = g.row, reorderTarget >= 0 && reorderTarget != reorderSource {
+        if g.mode == .reorder && !cancelled, let row = g.row, rows.indices.contains(reorderTarget), reorderTarget != reorderSource {
             model.engine.run { $0.beginUndoGroup() }; model.reorderLayer(row.id, displayIndex: model.layers.firstIndex { $0.id == rows[reorderTarget].id } ?? 0); model.engine.run { $0.endUndoGroup() }
         }
         if g.mode == .scrub { model.engine.run { $0.scrubEnd() } }

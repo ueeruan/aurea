@@ -1061,7 +1061,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         expressions = if (id != null) engine.queryExpressions(id) else emptyList()
         gizmo = same(gizmo, if (id != null) {
             val out = FloatArray(8)
-            if (engine.queryGizmo(id, GIZMO_LENGTH, out)) out else null
+            if (engine.queryGizmo(id, GIZMO_LENGTH, out, gizmoLocalSpace)) out else null
         } else {
             null
         })
@@ -2418,13 +2418,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Setas da camada 3D escolhida: origem e pontas X, Y, Z em px da composição. */
     var gizmo by mutableStateOf<FloatArray?>(null)
         private set
+    var gizmoLocalSpace by mutableStateOf(false)
+        private set
+    fun toggleGizmoSpace() {
+        gizmoLocalSpace = !gizmoLocalSpace
+        refreshNow()
+    }
 
     /** Arrasto numa seta: anda `amount` unidades do mundo no eixo (0 X, 1 Y, 2 Z). */
     fun gizmoDrag(axis: Int, amount: Float) {
         val id = primary ?: return
         val d = detail ?: return
         val out = FloatArray(3)
-        if (!engine.gizmoMoveLocal(id, axis, amount, out)) return
+        if (!engine.gizmoMoveLocal(id, axis + if (gizmoLocalSpace) 3 else 0, amount, out)) return
         applyGizmoPosition(id, d, out)
     }
 

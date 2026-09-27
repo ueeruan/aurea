@@ -185,6 +185,15 @@ jobs:
           if [ -d build/ios-gesture-tests.xcresult ]; then
             xcrun xcresulttool export attachments --path build/ios-gesture-tests.xcresult --output-path build/ios-gesture-attachments
           fi
+      - name: Save compact native gesture screenshots
+        if: always() && !inputs.capture_only
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-gesture-screenshots
+          path: |
+            build/ios-gesture-attachments/
+            build-gesture-tests.log
+          if-no-files-found: ignore
       - name: Save native gesture test diagnostics
         if: always() && !inputs.capture_only
         uses: actions/upload-artifact@v4

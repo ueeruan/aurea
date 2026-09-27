@@ -344,6 +344,32 @@ internal object WaveGrid {
 
 /** Reordenar: linha de destino sob o dedo (0 = topo = camada da frente). */
 internal object Reorder {
+    /** Presentation only. Expanded property rows travel with their owning layer. */
+    data class Preview(val offsets: FloatArray, val sourceStart: Int, val sourceEnd: Int, val gapTop: Float)
+
+    fun preview(tops: FloatArray, ids: LongArray, source: Int, target: Int, dragTop: Float): Preview {
+        val offsets = FloatArray(ids.size)
+        if (source !in ids.indices || target !in ids.indices || tops.size != ids.size + 1 || !dragTop.isFinite())
+            return Preview(offsets, -1, -1, Float.NaN)
+        var start = source
+        while (start > 0 && ids[start - 1] == ids[source]) start--
+        var end = source + 1
+        while (end < ids.size && ids[end] == ids[source]) end++
+        var targetStart = target
+        while (targetStart > 0 && ids[targetStart - 1] == ids[target]) targetStart--
+        var targetEnd = target + 1
+        while (targetEnd < ids.size && ids[targetEnd] == ids[target]) targetEnd++
+        val height = tops[end] - tops[start]
+        for (i in ids.indices) offsets[i] = when {
+            i in start until end -> dragTop - tops[start]
+            targetStart > start && i in end until targetEnd -> -height
+            targetStart < start && i in targetStart until start -> height
+            else -> 0f
+        }
+        val gap = if (targetStart > start) tops[targetEnd] - height else tops[targetStart]
+        return Preview(offsets, start, end, gap)
+    }
+
     fun targetIndex(y: Float, rowsTop: Float, scroll: Float, rowHeight: Float, count: Int): Int {
         if (count <= 0) return -1
         return floor((y - rowsTop + scroll) / rowHeight).toInt().coerceIn(0, count - 1)

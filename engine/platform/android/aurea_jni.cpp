@@ -978,11 +978,11 @@ AUREA_JNI jint AUREA_FN(nativeClipboardState)(JNIEnv*, jclass, jlong handle) {
     return c ? static_cast<jint>(c->engine.clipboard_state()) : 0;
 }
 
-AUREA_JNI jboolean AUREA_FN(nativeQueryGizmo)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloat length, jfloatArray out) {
+AUREA_JNI jboolean AUREA_FN(nativeQueryGizmo)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloat length, jfloatArray out, jboolean localSpace) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out || env->GetArrayLength(out) < 8) return JNI_FALSE;
     f32 v[8];
-    if (!c->engine.query_gizmo(static_cast<u64>(layer), length, v)) return JNI_FALSE;
+    if (!c->engine.query_gizmo(static_cast<u64>(layer), length, v, localSpace == JNI_TRUE)) return JNI_FALSE;
     env->SetFloatArrayRegion(out, 0, 8, v);
     return JNI_TRUE;
 }

@@ -553,6 +553,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSDictionary<NSString*, id>*)motionTrackStatus;
 - (NSString*)applyMotionTrack:(long long)target apply:(uint32_t)apply lock:(BOOL)lock smooth:(float)smooth maxScale:(float)maxScale crop:(uint32_t)crop;
 - (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length NS_SWIFT_NAME(gizmo(_:length:));
+- (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length localSpace:(BOOL)localSpace NS_SWIFT_NAME(gizmo(_:length:localSpace:));
 - (NSArray<NSNumber*>*)gizmoMoveLocal:(long long)layerId axis:(uint32_t)axis amount:(float)amount NS_SWIFT_NAME(gizmoMoveLocal(_:axis:amount:));
 - (void)cancelCameraTracking;
 - (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov;

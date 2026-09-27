@@ -504,3 +504,28 @@ AUREA_TEST(Gizmo, AxesProjectAndMoveInWorldEvenWithAParent) {
     AUREA_CHECK(r.e.gizmo_move_local(r.b, 2, 8.0f, out));
     AUREA_CHECK(std::fabs(out[2] - (bl->transform.position.z + 4.0f)) < 1e-3f);
 }
+
+AUREA_TEST(Gizmo, LocalAxesFollowRotationAndRespectParentScale) {
+    EditRig r;
+    Layer* child = r.comp()->layer(LayerId::unpack(r.b));
+    Layer* parent = r.comp()->layer(LayerId::unpack(r.a));
+    child->threeD = true;
+    child->transform.rotation = Vec3{0, 0, 90};
+    f32 world[8]{}, local[8]{};
+    AUREA_CHECK(r.e.query_gizmo(r.b, 25, world));
+    AUREA_CHECK(r.e.query_gizmo(r.b, 25, local, true));
+    AUREA_CHECK(world[2] > world[0]);
+    AUREA_CHECK(std::fabs(local[2] - local[0]) < 0.01f);
+    AUREA_CHECK(local[3] > local[1]);
+    parent->threeD = true;
+    parent->transform.scale = Vec3{2, 2, 2};
+    child->parent = LayerId::unpack(r.a);
+    const Vec3 original = child->transform.position;
+    f32 moved[3]{};
+    AUREA_CHECK(r.e.gizmo_move_local(r.b, 3, 10, moved));
+    AUREA_CHECK(std::fabs(moved[0] - original.x) < 0.01f);
+    AUREA_CHECK(std::fabs(moved[1] - original.y - 5) < 0.01f);
+    AUREA_CHECK(std::fabs(moved[2] - original.z) < 0.01f);
+    AUREA_CHECK(!r.e.gizmo_move_local(r.b, 6, 10, moved));
+}
+

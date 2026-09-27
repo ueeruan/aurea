@@ -687,7 +687,7 @@ struct PreviewMetalView: UIViewRepresentable {
         }
         private func startGizmo(at point: CGPoint, view: UIView) -> Bool {
             guard editableSelection(), let id = model.primarySelection, !ShapeStageGeometry.enabled(model) else { return false }
-            let data = model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
+            let data = model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoLocalSpace).map(\.floatValue)
             guard data.count == 8 else { return false }
             let raw = stride(from: 0, to: 8, by: 2).map { screenPoint(data[$0], data[$0 + 1], view: view) }
             let tips = ShellStageGeometry.gizmoTips(raw)
@@ -697,8 +697,10 @@ struct PreviewMetalView: UIViewRepresentable {
                 if distance < closest { closest = distance; gizmoAxis = i - 1 }
             }
             guard gizmoAxis >= 0 else { return false }
-            gizmoVector = CGPoint(x: tips[gizmoAxis + 1].x - tips[0].x, y: tips[gizmoAxis + 1].y - tips[0].y)
-            gizmoCollapsed = gizmoAxis == 2 && hypot(raw[3].x - raw[0].x, raw[3].y - raw[0].y) < 44 * 0.6
+            // Fixed-size display handles must not change world-space drag gain.
+            gizmoVector = CGPoint(x: raw[gizmoAxis + 1].x - raw[0].x, y: raw[gizmoAxis + 1].y - raw[0].y)
+            let extent = (1...3).map { hypot(raw[$0].x - raw[0].x, raw[$0].y - raw[0].y) }.max() ?? 0
+            gizmoCollapsed = gizmoAxis == 2 && hypot(gizmoVector.x, gizmoVector.y) * 80 / max(extent, 0.0001) < 44 * 0.6
             lastGizmoPoint = point; beginEdit("mover no eixo"); return true
         }
         private func stepGizmo(_ point: CGPoint, view: UIView) {
@@ -708,7 +710,7 @@ struct PreviewMetalView: UIViewRepresentable {
             let length2 = gizmoVector.x * gizmoVector.x + gizmoVector.y * gizmoVector.y
             let amount = gizmoCollapsed ? -Float(dy) * scaleFactor(view) * 2 : length2 > 1 ? Float((dx * gizmoVector.x + dy * gizmoVector.y) / length2) * ShellStageGeometry.gizmoLength : 0
             guard amount != 0 else { return }
-            let next = model.engine.gizmoMoveLocal(id, axis: UInt32(gizmoAxis), amount: amount).map(\.floatValue)
+            let next = model.engine.gizmoMoveLocal(id, axis: UInt32(gizmoAxis + (model.gizmoLocalSpace ? 3 : 0)), amount: amount).map(\.floatValue)
             model.applyGizmoPosition(id, next)
         }
         private func startShape(at point: CGPoint, view: UIView) -> Bool {

@@ -106,6 +106,20 @@ class GraphGesturesTest {
             store.undo()
         }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 1 }
+        compose.runOnIdle { store.seek(0) }
+        compose.waitUntil(5000) { store.playhead == 0 }
+        compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(0)) }
+        compose.runOnIdle { store.seek(15) }
+        compose.waitUntil(5000) { store.playhead == 15 }
+        val beforeGizmo = store.keyframes[id].orEmpty()
+        compose.runOnIdle { store.gizmoDrag(0, 20f) }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 15 } }
+        compose.runOnIdle {
+            assertEquals(beforeGizmo.size + 1, store.keyframes[id].orEmpty().size)
+            assertTrue(store.keyframes[id].orEmpty().none { it.property == 1 || it.property == 2 })
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.keyframes[id] == beforeGizmo }
     }
 
     @Test fun graphDragMovesTimeAndValuePreservesOtherTracksAndUndoesOnce() {

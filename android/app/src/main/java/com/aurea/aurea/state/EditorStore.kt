@@ -2451,16 +2451,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun applyGizmoPosition(id: Long, d: LayerDetail, out: FloatArray) {
-        val animated = d.isAnimated(TrackProperty.POSITION_X) || d.isAnimated(TrackProperty.POSITION_Y) || d.isAnimated(TrackProperty.POSITION_Z)
+        if (out.size != 3 || out.any { !it.isFinite() }) return
         send {
-            if (sceneEditor || !autoKeyTransforms) {
-                for (axis in 0..2) engine.layoutTransform(id, axis, out[axis])
-            } else if (animated) {
-                insertKeyframe(id, TrackProperty.POSITION_X, NO_EFFECT, 0, d.localPlayhead, out[0])
-                insertKeyframe(id, TrackProperty.POSITION_Y, NO_EFFECT, 0, d.localPlayhead, out[1])
-                insertKeyframe(id, TrackProperty.POSITION_Z, NO_EFFECT, 0, d.localPlayhead, out[2])
-            } else {
-                setPosition(id, out[0], out[1], out[2])
+            for (axis in 0..2) {
+                if (kotlin.math.abs(out[axis] - d.position[axis]) < .00001f) continue
+                if (!sceneEditor && autoKeyTransforms && d.isAnimated(axis)) {
+                    insertKeyframe(id, axis, NO_EFFECT, 0, d.localPlayhead, out[axis])
+                } else engine.layoutTransform(id, axis, out[axis])
             }
         }
         refreshNow()

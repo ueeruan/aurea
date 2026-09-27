@@ -1995,18 +1995,17 @@ final class AureaModel: ObservableObject {
     /// Posição vinda do gizmo/arrasto 3D: na cena, desloca a curva inteira
     /// (layout); fora dela, keyframe se animado, senão valor estático.
     func applyGizmoPosition(_ id: Int64, _ next: [Float]) {
-        guard next.count == 3 else { return }
-        let animated = ((detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0) & 7 != 0
+        let previous = StageGeom.floats(detail["position"])
+        guard next.count == 3, previous.count == 3, next.allSatisfy({ $0.isFinite }) else { return }
+        let animated = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let local = localPlayhead
         // Submission is asynchronous: three scalar setters would each read
         // the same old XYZ and overwrite the preceding axis command.
         mutate { core in
-            if sceneEditor || !autoKeyTransforms {
-                for axis in 0...2 { core.layoutTransform(id, property: UInt32(axis), value: next[axis]) }
-            } else if animated {
-                for axis in 0...2 { core.insertKeyframe(forLayer: id, property: UInt32(axis), time: local, value: next[axis]) }
-            } else {
-                core.setPosition(forLayer: id, x: next[0], y: next[1], z: next[2])
+            for axis in 0...2 where abs(next[axis] - previous[axis]) >= 0.00001 {
+                if !sceneEditor && autoKeyTransforms && animated & (1 << axis) != 0 {
+                    core.insertKeyframe(forLayer:id,property:UInt32(axis),time:local,value:next[axis])
+                } else { core.layoutTransform(id,property:UInt32(axis),value:next[axis]) }
             }
         }
         refreshModel(force: true)

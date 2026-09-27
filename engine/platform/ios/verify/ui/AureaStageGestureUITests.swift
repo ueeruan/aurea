@@ -630,6 +630,25 @@ import XCTest
         add(screenshot)
     }
 
+    func testGizmoXDoesNotRewriteYOrZAnimation() throws {
+        let before = try launch("curve-isolation")
+        XCTAssertEqual(before.stageGizmo.count,8)
+        let raw = stride(from:0,to:8,by:2).map {
+            screenPoint(x:before.stageGizmo[$0],y:before.stageGizmo[$0+1],snapshot:before)
+        }
+        let extent = (1...3).map { hypot(raw[$0].x-raw[0].x,raw[$0].y-raw[0].y) }.max() ?? 0
+        XCTAssertGreaterThan(extent,0)
+        let start = CGPoint(x:raw[0].x+(raw[1].x-raw[0].x)*80/max(extent,0.001),
+                            y:raw[0].y+(raw[1].y-raw[0].y)*80/max(extent,0.001))
+        let end = CGPoint(x:start.x+30,y:start.y)
+        try requireInsideStage(start,end)
+        coordinate(start).press(forDuration:0.05,thenDragTo:coordinate(end),withVelocity:.slow,thenHoldForDuration:0.1)
+        let changed = try awaitSnapshot("X gizmo changes X track") { $0.curveKeys != before.curveKeys }
+        XCTAssertEqual(before.curveKeys.filter { $0.property != 0 },changed.curveKeys.filter { $0.property != 0 })
+        try undo()
+        _ = try awaitSnapshot("Undo restores gizmo animation") { $0.curveKeys == before.curveKeys }
+    }
+
     func testText3DSelectionFollowsCoreBoundsAndGizmoDrag() throws {
         let before = try launch("text-3d")
         // Model3D may have no projected core corners. Its displayed selection

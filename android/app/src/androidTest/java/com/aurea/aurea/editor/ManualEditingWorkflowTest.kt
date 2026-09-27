@@ -94,7 +94,10 @@ class ManualEditingWorkflowTest {
         command("Adicionar nulo 2D")
         compose.waitUntil(5000) { store.layers.size == 11 }
         val nullId = store.primary!!
-        compose.runOnIdle { store.renameLayer(nullId, "AMV controller") }
+        compose.runOnIdle {
+            store.renameLayer(nullId, "AMV controller")
+            store.setLayerRanges(longArrayOf(nullId),intArrayOf(0),intArrayOf(480))
+        }
         for (clip in clips.take(2)) {
             select(clip)
             compose.onNodeWithContentDescription(context.getString(R.string.editor_vincular_outra_camada)).performClick()
@@ -109,7 +112,7 @@ class ManualEditingWorkflowTest {
         seek(90)
         compose.runOnIdle { store.setTransform(0, 300f) }
         select(clips[0]); seek(0)
-        for (effect in listOf("Gaussian Blur", "Glow", "RGB Split")) {
+        for (effect in listOf("Gaussian Blur", "Glow", "RGB Split", "Shake", "Turbulent Displace", "Motion Tile")) {
             val count = store.effects.size
             command(effect)
             compose.waitUntil(5000) { store.effects.size == count + 1 }
@@ -118,6 +121,22 @@ class ManualEditingWorkflowTest {
         select(clips[3])
         compose.runOnIdle { store.enableManualTimeRemap() }
         compose.runOnIdle { val point = store.remapInsert(30); assertTrue(point >= 0); store.remapMove(point, 30, 20f) }
+        seek(0)
+        compose.runOnIdle { store.addText() }
+        compose.onNodeWithTag("text.content.input").performTextReplacement("MANUAL EDIT")
+        compose.onNodeWithTag("text.content.done").performClick()
+        compose.waitUntil(5000) { store.textContentRequest == null }
+        compose.runOnIdle { store.renameLayer(store.primary!!,"AMV title") }
+        compose.runOnIdle { store.addText3D() }
+        compose.onNodeWithTag("text.content.input").performTextReplacement("AUREA")
+        compose.onNodeWithTag("text.content.done").performClick()
+        compose.waitUntil(5000) { store.textContentRequest == null }
+        compose.runOnIdle { store.renameLayer(store.primary!!,"3D title"); store.setTransform(6,20f) }
+        compose.runOnIdle { store.addCamera() }
+        compose.runOnIdle { store.renameLayer(store.primary!!,"AMV camera"); store.toggleTransformKeyframe(intArrayOf(0)) }
+        val cameraX=store.detail!!.position[0]
+        seek(120)
+        compose.runOnIdle { store.setTransform(0,cameraX+30f) }
         compose.runOnIdle { store.clearSelection() }
         seek(0)
         compose.onNodeWithContentDescription(context.getString(R.string.editor_reproduzir_segure_repetir)).performClick()
@@ -141,8 +160,10 @@ class ManualEditingWorkflowTest {
             assertEquals(expectedRanges, store.layers.map { Pair(it.name, Triple(it.startFrame, it.endFrame, it.parentIndex)) })
             assertEquals(16, store.markers.size)
         }
-        select(store.layers.first { it.name == "Clip 1" }.id); compose.runOnIdle { assertEquals(3, store.effects.size) }
+        select(store.layers.first { it.name == "Clip 1" }.id); compose.runOnIdle { assertEquals(6, store.effects.size) }
         val reopenedNull = store.layers.first { it.name == "AMV controller" }.id
         select(reopenedNull); compose.runOnIdle { assertEquals(2, store.keyframes[reopenedNull].orEmpty().size) }
+        val reopenedCamera=store.layers.first { it.name=="AMV camera" }.id
+        select(reopenedCamera); compose.runOnIdle { assertEquals(2,store.keyframes[reopenedCamera].orEmpty().size) }
     }
 }

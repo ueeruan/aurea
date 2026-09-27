@@ -79,6 +79,12 @@ has passed acceptance.
   remap, playback beyond six seconds across cuts, save/reopen and content checks.
   Fixture import/numeric setup uses the normal store API. Synthetic media and
   mixed API/UI interaction do not constitute a finished real AMV acceptance.
+- Expanded Android integration also passed with six stacked effects (blur, glow,
+  RGB Split, Shake, Turbulent Displace, Motion Tile), 2D/3D text changed through
+  the actual text dialog, and an animated camera retained after reopen.
+- Gizmo position writes now touch only changed components, keying only already
+  animated axes. An X drag no longer manufactures Y/Z keys. Android regression
+  passed; native iOS touch regression added.
 - Native f15ef224 compiled and packaged successfully. Simulator transform
   capture timed out at first launch; text-3d and layer-dock captures succeeded.
   Its gesture suite was still running when this checkpoint was written. New

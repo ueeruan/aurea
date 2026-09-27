@@ -558,7 +558,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov;
 - (NSArray<NSNumber*>*)cameraTrackTarget:(long long)frame;
 - (BOOL)calibrateCameraScene:(uint32_t)operation distance:(float)distance;
-- (BOOL)placeModelOnTrack:(long long)layer;
+- (BOOL)placeModelOnTrack:(long long)layer NS_SWIFT_NAME(placeModelOnTrack(_:));
 - (NSString*)applyCameraTracking;
 - (BOOL)restoreCameraTrackForLayer:(long long)layerId NS_SWIFT_NAME(restoreCameraTrack(forLayer:));
 - (NSArray<NSNumber*>*)cameraTrackDetailsAtFrame:(long long)frame NS_SWIFT_NAME(cameraTrackDetails(atFrame:));

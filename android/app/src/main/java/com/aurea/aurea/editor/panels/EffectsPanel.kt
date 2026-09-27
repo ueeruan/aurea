@@ -256,7 +256,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     LaunchedEffect(effects) {
         val ids = effects.map { it.effectId }.toSet()
         val added = ids - known
-        if (added.isNotEmpty()) openId = effects.last { it.effectId in added }.effectId
+        if (added.isNotEmpty()) {
+            val index = effects.indexOfLast { it.effectId in added }
+            openId = effects[index].effectId
+            listState.animateScrollToItem(index)
+        }
         else if (openId != null && openId !in ids) openId = null
         known = ids
     }
@@ -416,6 +420,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             buildList {
                 add(SheetAction(if (e.enabled) stringResource(R.string.panel_desligar_efeito) else stringResource(R.string.panel_ligar_efeito)) { store.setEffectEnabled(e.effectId, !e.enabled) })
                 add(SheetAction(stringResource(R.string.panel_redefinir_efeito)) { resetEffect(env, e.effectId) })
+                add(SheetAction("Copiar este efeito") { store.copyEffects(e.effectId) })
                 add(SheetAction(stringResource(R.string.fx_save_as_preset)) { savingPreset = e })
                 if (index > 0) add(SheetAction(stringResource(R.string.panel_mover_cima)) { store.reorderEffect(e.effectId, index - 1) })
                 if (index in 0 until effects.lastIndex) add(SheetAction(stringResource(R.string.panel_mover_baixo)) { store.reorderEffect(e.effectId, index + 1) })

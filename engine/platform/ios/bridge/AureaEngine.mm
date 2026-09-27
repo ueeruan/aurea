@@ -1160,6 +1160,9 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 - (void)copyEffects:(long long)layerId {
     if (auto* e = self.engine) (void)e->copy_effects(static_cast<aurea::u64>(layerId));
 }
+- (void)copyEffect:(unsigned int)effectId fromLayer:(long long)layerId {
+    if (auto* e = self.engine) (void)e->copy_effects(static_cast<aurea::u64>(layerId),effectId);
+}
 
 - (void)pasteEffects:(NSArray<NSNumber*>*)layerIds {
     auto* e = self.engine;

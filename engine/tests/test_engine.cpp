@@ -42,6 +42,28 @@ AUREA_TEST(Engine, InitializeHeadlessSucceeds) {
     AUREA_CHECK_EQ(e.state(), EngineState::Uninitialized);
 }
 
+AUREA_TEST(Engine, AndroidManualEditingFixtureResolvesPortableAssets) {
+    Engine e;
+    auto config=headless_config();
+    config.documentsDirectory=std::string(AUREA_TEST_DATA_DIR)+"/manual-editing";
+    AUREA_CHECK(e.initialize(config).ok());
+    const auto path=config.documentsDirectory+"/manual-editing.aurea";
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(e.last_load_missing_assets(),0u);
+    auto* comp=e.project()?e.project()->timeline().composition(e.project()->timeline().root()):nullptr;
+    AUREA_CHECK(comp!=nullptr);if(!comp)return;
+    AUREA_CHECK_EQ(comp->layers().count(),14u);
+    u32 videos=0,effects=0,parents=0;
+    comp->layers().for_each([&](LayerId,const Layer& layer) {
+        videos+=layer.kind==LayerKind::Video;
+        effects+=static_cast<u32>(layer.effects.size());
+        parents+=layer.parent.valid();
+    });
+    AUREA_CHECK_EQ(videos,9u);
+    AUREA_CHECK_EQ(effects,6u);
+    AUREA_CHECK_EQ(parents,2u);
+}
+
 AUREA_TEST(Engine, DoubleInitializeIsRefused) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

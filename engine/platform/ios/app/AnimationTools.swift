@@ -1090,17 +1090,26 @@ private struct NativeTrackGraph: View {
         }
     }
     private var speedHandles: [SpeedHandle] {
-        guard speed else { return [] }
-        return zip(keys, keys.dropFirst()).flatMap { a, b -> [SpeedHandle] in
-            let base = Double(b.value - a.value) * max(1, Double(model.status.compFps)) / (Double(b.time) - Double(a.time))
+        guard speed, keys.count >= 2 else { return [] }
+        var result: [SpeedHandle] = []
+        let fps: Double = max(1, Double(model.status.compFps))
+        for index in 0..<(keys.count - 1) {
+            let a: KeyframeItem = keys[index]
+            let b: KeyframeItem = keys[index + 1]
+            let duration: Double = Double(b.time) - Double(a.time)
+            let difference: Double = Double(b.value) - Double(a.value)
+            let base: Double = difference * fps / duration
             let raw = model.engine.trackEasing(layer, property: a.property, effect: a.effectIndex, param: a.paramIndex, time: a.time).map(\.floatValue)
-            guard raw.count == 4, base.isFinite, abs(base) > 0.000001 else { return [] }
+            guard raw.count == 4, base.isFinite, abs(base) > 0.000001 else { continue }
             let ease = CurveEase(interpolation: a.interpolation, x1: raw[0], y1: raw[1], x2: raw[2], y2: raw[3])
-            guard ease.hasHandles else { return [] }
-            var h: [Float] = a.interpolation == 1 ? [1/3,1/3,2/3,2/3] : ease.handles
+            guard ease.hasHandles else { continue }
+            var h: [Float] = ease.handles
+            if a.interpolation == 1 { h = [0.33333334,0.33333334,0.6666667,0.6666667] }
             h[0] = min(0.99,max(0.01,h[0])); h[2] = min(0.99,max(0.01,h[2]))
-            return [SpeedHandle(key:a,end:b,incoming:false,handles:h,base:base), SpeedHandle(key:a,end:b,incoming:true,handles:h,base:base)]
+            result.append(SpeedHandle(key:a,end:b,incoming:false,handles:h,base:base))
+            result.append(SpeedHandle(key:a,end:b,incoming:true,handles:h,base:base))
         }
+        return result
     }
     private struct GraphDrag {
         let initial: TrackGraphViewport

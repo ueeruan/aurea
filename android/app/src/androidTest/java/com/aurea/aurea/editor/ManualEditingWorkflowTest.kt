@@ -118,6 +118,15 @@ class ManualEditingWorkflowTest {
             command(effect)
             compose.waitUntil(5000) { store.effects.size == count + 1 }
         }
+        val copiedType=store.effects.last().typeId
+        compose.onNodeWithContentDescription("Mais opções de Motion Tile").performClick()
+        compose.onNodeWithText("Copiar este efeito").performClick()
+        select(clips[1])
+        compose.runOnIdle { store.pasteEffects() }
+        compose.waitUntil(5000) { store.effects.size==1 }
+        compose.runOnIdle { assertEquals(copiedType,store.effects.single().typeId); store.undo() }
+        compose.waitUntil(5000) { store.effects.isEmpty() }
+        select(clips[0])
         compose.runOnIdle { store.setLayerMotionBlur(clips[0], true) }
         select(clips[3])
         compose.runOnIdle { store.enableManualTimeRemap() }

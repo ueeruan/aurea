@@ -804,7 +804,7 @@ public:
     bool copy_style(u64 layerId) noexcept;
     u32 paste_style(const u64* ids, u32 count) noexcept;
     /// Efeitos (com os keyframes deles): colar ACRESCENTA ao fim da pilha.
-    u32 copy_effects(u64 layerId) noexcept;
+    u32 copy_effects(u64 layerId, u32 effectId = kInvalidIndex) noexcept;
     u32 paste_effects(const u64* ids, u32 count) noexcept;
     /// Keyframes no instante do frame (todas as propriedades com marca ali).
     u32 copy_keyframes(u64 layerId, i64 frame) noexcept;

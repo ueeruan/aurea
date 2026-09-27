@@ -178,6 +178,7 @@ struct EffectsView: View {
                 }.buttonStyle(AureaPressStyle(shrink: 1))
                 if expanded {
                     cardButton(CupertinoGlyph.Ellipsis) { effectMenu(effect) }
+                        .accessibilityLabel("Mais opções de " + fxEffectDisplayName(effect.typeId,effect.name))
                     cardButton(CupertinoGlyph.Trash) { remove(effect) }
                 } else {
                     cardButton(effect.enabled ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, tint: effect.enabled ? AureaColors.text : AureaColors.muted) { enable(effect, !effect.enabled) }
@@ -424,6 +425,9 @@ struct EffectsView: View {
             }
             actions.append((AureaText.t(effect.enabled ? "panel_desligar_efeito" : "panel_ligar_efeito"), { enable(effect, !effect.enabled) }))
             actions.append((AureaText.t("panel_redefinir_efeito"), { reset(effect) }))
+            actions.append(("Copiar este efeito", {
+                if let layer = model.primarySelection { model.engine.copyEffect(effect.effectId, fromLayer:layer) }
+            }))
             actions.append((AureaText.t("fx_save_as_preset"), {
                 model.namePrompt = NamePromptRequest(title: AureaText.t("fx_save_as_preset"), initial: fxEffectDisplayName(effect.typeId, effect.name)) {
                     model.saveEffectPreset(effectId: effect.effectId, name: $0)

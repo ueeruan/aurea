@@ -3719,9 +3719,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (n > 0) showToast(appText(R.string.msg_estilo_colado))
     }
 
-    fun copyEffects() {
+    fun copyEffects(effect: Int = -1) {
         val id = primary ?: return
-        val n = engine.copyEffects(id)
+        val n = engine.copyEffects(id, effect)
         afterClipboard()
         showToast(if (n > 0) appText(R.string.msg_efeito_s_copiado_s, n) else appText(R.string.msg_esta_camada_nao_tem_efeitos))
     }

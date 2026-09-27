@@ -951,9 +951,9 @@ AUREA_JNI jint AUREA_FN(nativePasteStyle)(JNIEnv* env, jclass, jlong handle, jlo
     return c ? static_cast<jint>(c->engine.paste_style(v.data(), static_cast<u32>(v.size()))) : 0;
 }
 
-AUREA_JNI jint AUREA_FN(nativeCopyEffects)(JNIEnv*, jclass, jlong handle, jlong layer) {
+AUREA_JNI jint AUREA_FN(nativeCopyEffects)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect) {
     NativeContext* c = ctx_of(handle);
-    return c ? static_cast<jint>(c->engine.copy_effects(static_cast<u64>(layer))) : 0;
+    return c ? static_cast<jint>(c->engine.copy_effects(static_cast<u64>(layer),static_cast<u32>(effect))) : 0;
 }
 
 AUREA_JNI jint AUREA_FN(nativePasteEffects)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {

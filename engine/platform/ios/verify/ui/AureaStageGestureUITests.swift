@@ -35,8 +35,16 @@ import XCTest
         let effect = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@","command:effect:")).firstMatch
         XCTAssertTrue(effect.waitForExistence(timeout:5)); effect.tap()
         _ = try awaitSnapshot("Existing Android stack is editable on iOS") { $0.effectCount == 7 }
+        let menu = app.buttons["Mais opções de Chromatic Aberration"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout:5)); menu.tap()
+        app.buttons["Copiar este efeito"].tap()
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
+        app.buttons["Copy and paste"].firstMatch.tap()
+        app.buttons["Paste effects"].firstMatch.tap()
+        _ = try awaitSnapshot("Only the chosen effect is pasted, not the whole stack") { $0.effectCount == 7 }
+        try undo()
+        _ = try awaitSnapshot("Pasted effect is reversible") { $0.effectCount == 6 }
         let play = app.buttons["Play · hold to repeat"].firstMatch
         XCTAssertTrue(play.waitForExistence(timeout:5)); play.tap()
         _ = try awaitSnapshot("Shared project playback starts") { $0.playing != 0 }

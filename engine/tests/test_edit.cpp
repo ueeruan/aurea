@@ -426,6 +426,31 @@ AUREA_TEST(Clipboard, StyleAndEffectsAndKeyframes) {
     AUREA_CHECK(!op || op->find_exact(b->local_time(FrameIndex{40})) == kInvalidIndex);
 }
 
+AUREA_TEST(Clipboard, SingleEffectPreservesOnlyItsAnimationAndSkipsLockedTargets) {
+    EditRig r;
+    for (const char* type : {effect_keys::kGlow,effect_keys::kGaussianBlur}) {
+        Command fx;fx.type=CommandType::EffectAdd;fx.effect_add.layer=LayerId::unpack(r.a);
+        fx.effect_add.effectType=effect_type_id(type);fx.effect_add.index=kInvalidIndex;
+        AUREA_CHECK(r.e.apply_command(fx).ok());
+    }
+    auto* source=r.comp()->layer(LayerId::unpack(r.a));
+    const u32 glow=source->effects[0].id,blur=source->effects[1].id;
+    source->tracks.get_or_create(TrackProperty::EffectParam,glow,0).set(FrameIndex{0},40);
+    source->tracks.get_or_create(TrackProperty::EffectParam,blur,0).set(FrameIndex{12},25);
+    AUREA_CHECK_EQ(r.e.copy_effects(r.a,blur),1u);
+    AUREA_CHECK_EQ(r.e.copy_effects(r.a,9999),0u); // Invalid selection does not erase the clipboard.
+    auto* locked=r.comp()->layer(LayerId::unpack(r.c));locked->locked=true;
+    const u64 targets[]={r.c,r.b};
+    AUREA_CHECK_EQ(r.e.paste_effects(targets,2),1u);
+    AUREA_CHECK(r.L(r.c)->effects.empty());
+    const auto* result=r.L(r.b);
+    AUREA_CHECK_EQ(result->effects.size(),usize{1});
+    AUREA_CHECK_EQ(result->effects[0].type,effect_type_id(effect_keys::kGaussianBlur));
+    const Track* track=result->tracks.find(TrackProperty::EffectParam,result->effects[0].id,0);
+    AUREA_CHECK(track && track->keys.size()==1 && track->keys[0].time.value==12 && track->keys[0].value==25);
+    r.undo();AUREA_CHECK(r.L(r.b)->effects.empty());
+}
+
 AUREA_TEST(Clipboard, ShiftedTrimmedLayersUseCompositionTime) {
     EditRig r;
     r.range(r.a, 30, 90, 12);

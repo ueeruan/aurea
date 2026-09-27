@@ -391,6 +391,7 @@ NS_SWIFT_NAME(AureaEngine)
                      r:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)moveEffect:(uint32_t)effectId inLayer:(long long)layerId toIndex:(uint32_t)newIndex;
 - (void)copyEffects:(long long)layerId;
+- (void)copyEffect:(unsigned int)effectId fromLayer:(long long)layerId;
 - (void)pasteEffects:(NSArray<NSNumber*>*)layerIds;
 - (void)copyStyle:(long long)layerId;
 - (void)pasteStyle:(NSArray<NSNumber*>*)layerIds;

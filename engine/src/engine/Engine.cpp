@@ -4507,15 +4507,18 @@ u32 Engine::paste_style(const u64* ids, u32 count) noexcept {
     return done;
 }
 
-u32 Engine::copy_effects(u64 layerId) noexcept {
+u32 Engine::copy_effects(u64 layerId, u32 effectId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
-    clipboard_.effects = l->effects;
+    if (effectId != kInvalidIndex && std::none_of(l->effects.begin(),l->effects.end(),[&](const auto& e){return e.id == effectId;})) return 0;
+    clipboard_.effects.clear();
+    for (const auto& e : l->effects) if (effectId == kInvalidIndex || e.id == effectId) clipboard_.effects.push_back(e);
     clipboard_.effectTracks.clear();
     for (u32 i = 0; i < l->tracks.size(); ++i) {
-        if (l->tracks.at(i).property == TrackProperty::EffectParam) clipboard_.effectTracks.push_back(l->tracks.at(i));
+        const auto& track = l->tracks.at(i);
+        if (track.property == TrackProperty::EffectParam && (effectId == kInvalidIndex || track.effectIndex == effectId)) clipboard_.effectTracks.push_back(track);
     }
     return static_cast<u32>(clipboard_.effects.size());
 }
@@ -4524,12 +4527,14 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || clipboard_.effects.empty()) return 0;
-    history_.before_mutation(*comp, project_->timeline().current(), "colar efeitos");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     u32 done = 0;
     for (u32 i = 0; i < count; ++i) {
         Layer* d = comp->layer(LayerId::unpack(ids[i]));
-        if (!d) continue;
+        if (!d || d->locked) continue;
+        if (done == 0) {
+            history_.before_mutation(*comp, project_->timeline().current(), "colar efeitos");
+            modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        }
         // Ids novos depois do maior da camada: os keyframes seguem pelo id.
         u32 next = 0;
         for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
@@ -4551,8 +4556,7 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
         d->nextEffectId = std::max(d->nextEffectId, next);
         ++done;
     }
-    project_->mark_dirty();
-    request_render();
+    if (done) { project_->mark_dirty(); request_render(); }
     return done;
 }
 

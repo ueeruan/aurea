@@ -381,7 +381,7 @@ class AureaEngine private constructor() {
     fun pasteLayers(frame: Long): Int = nativePasteLayers(nativeHandle, frame)
     fun copyStyle(layer: Long): Boolean = nativeCopyStyle(nativeHandle, layer)
     fun pasteStyle(ids: LongArray): Int = nativePasteStyle(nativeHandle, ids)
-    fun copyEffects(layer: Long): Int = nativeCopyEffects(nativeHandle, layer)
+    fun copyEffects(layer: Long, effect: Int = -1): Int = nativeCopyEffects(nativeHandle, layer, effect)
     fun pasteEffects(ids: LongArray): Int = nativePasteEffects(nativeHandle, ids)
     fun copyKeyframes(layer: Long, frame: Long): Int = nativeCopyKeyframes(nativeHandle, layer, frame)
     fun copyKeyframeSelection(layer: Long, references: LongArray): Int = nativeKeyframeSelection(nativeHandle, layer, references, 0, 0)
@@ -893,7 +893,7 @@ class AureaEngine private constructor() {
     private external fun nativePasteLayers(handle: Long, frame: Long): Int
     private external fun nativeCopyStyle(handle: Long, layer: Long): Boolean
     private external fun nativePasteStyle(handle: Long, ids: LongArray): Int
-    private external fun nativeCopyEffects(handle: Long, layer: Long): Int
+    private external fun nativeCopyEffects(handle: Long, layer: Long, effect: Int): Int
     private external fun nativePasteEffects(handle: Long, ids: LongArray): Int
     private external fun nativeCopyKeyframes(handle: Long, layer: Long, frame: Long): Int
     private external fun nativeKeyframeSelection(handle: Long, layer: Long, references: LongArray, action: Int, delta: Int): Int

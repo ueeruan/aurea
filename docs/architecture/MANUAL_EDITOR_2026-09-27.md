@@ -108,6 +108,18 @@ on both platforms. Existing tools must be exercised before adding replacements.
 
 ## Behaviour references consulted
 
+### Follow-up validation
+
+- Single-effect copying now preserves only that effect and its animation on both
+  platform bridges. Locked paste targets are skipped without creating an undo
+  entry. Core clipboard regressions passed: 7 tests / 122 checks.
+- Android's integrated workflow passed again with single-effect copy/paste/undo.
+  Adding an effect now scrolls its card into view, including long stacks.
+- The portable Android project passed headless asset/layer/effect checks (1 test,
+  8 checks). Native playback of this same project is still awaiting execution.
+- Native run 36322789798 failed to compile a complex Swift Speed Graph expression.
+  Replaced it with an explicitly typed loop; a new native build is required.
+
 - [Alight Motion easing](https://support.alightmotion.com/hc/en-us/articles/10536934703889-Animation-Easing-Curves): curves are edited between neighbouring keys and can be copied to other segments.
 - [Alight Motion parenting](https://support.alightmotion.com/hc/en-us/articles/10536997444369-Layer-Parenting-and-Null-Objects): assigning a parent compensates the current placement.
 - [Alight Motion effect copying](https://support.alightmotion.com/hc/en-us/articles/13725250940689-How-do-I-copy-and-paste-effects): effect copying/pasting belongs to the layer's effects workflow.

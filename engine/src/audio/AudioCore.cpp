@@ -5,27 +5,37 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace aurea::audio {
 
 i64 frame_to_sample(i64 frame, f64 fps) noexcept {
-    if (!(fps > 0.0)) fps = 30.0;
+    if (!std::isfinite(fps) || !(fps > 0.0)) fps = 30.0;
+    constexpr i64 lo=std::numeric_limits<i64>::min(),hi=std::numeric_limits<i64>::max();
+    auto fits=[&](i64 factor){return frame>=lo/factor&&frame<=hi/factor;};
+    auto divideFloor=[](i64 n,i64 d){return n/d-(n%d<0?1:0);};
     const f64 rounded = std::round(fps);
-    if (std::fabs(fps - rounded) < 1e-6) {
+    if (rounded>=1 && rounded<=1e9 && std::fabs(fps - rounded) < 1e-6 && fits(kMixRate)) {
         const i64 f = static_cast<i64>(rounded);
         // Floor também para negativos (frame antes do zero da mídia).
         const i64 n = frame * static_cast<i64>(kMixRate);
-        return n >= 0 ? n / f : -((-n + f - 1) / f);
+        return divideFloor(n,f);
     }
     // NTSC: 23,976 / 29,97 / 59,94 = N·1000/1001. A conta em inteiros não
     // acumula deriva: o frame 107892 de um 29,97 cai na amostra exata.
     const f64 ntsc = fps * 1001.0 / 1000.0;
-    if (std::fabs(ntsc - std::round(ntsc)) < 1e-3) {
+    if (std::round(ntsc)>=1 && std::round(ntsc)<=1e6 && std::fabs(ntsc - std::round(ntsc)) < 1e-3 && fits(static_cast<i64>(kMixRate)*1001)) {
         const i64 num = static_cast<i64>(std::round(ntsc)) * 1000;
         const i64 n = frame * static_cast<i64>(kMixRate) * 1001;
-        return n >= 0 ? n / num : -((-n + num - 1) / num);
+        return divideFloor(n,num);
     }
-    return static_cast<i64>(std::floor(static_cast<f64>(frame) * kMixRate / fps));
+    // Huge frame indices and tiny positive rates can overflow intermediate
+    // integer products, or round a rational denominator to zero. Saturate the
+    // final sample rather than casting an out-of-range floating-point value.
+    const long double sample=std::floor(static_cast<long double>(frame)*kMixRate/fps);
+    if(sample>=static_cast<long double>(hi))return hi;
+    if(sample<=static_cast<long double>(lo))return lo;
+    return static_cast<i64>(sample);
 }
 
 // -----------------------------------------------------------------------------

@@ -17,6 +17,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -127,6 +128,27 @@ AUREA_TEST(Audio, TimeToSampleIsExactForIntegerAndNtscRates) {
     AUREA_CHECK_EQ(audio::ns_to_sample(1'000'000'000), 48000);
     AUREA_CHECK_EQ(audio::sample_to_ns(48000), 1'000'000'000);
     AUREA_CHECK_EQ(audio::ns_to_sample(audio::sample_to_ns(123457)), 123457);
+}
+
+AUREA_TEST(Audio, FrameSamplesHandleTinyInvalidRatesAndIntegerLimits) {
+    constexpr i64 lo=std::numeric_limits<i64>::min(),hi=std::numeric_limits<i64>::max();
+    for (f64 fps : {0.0,-1.0,std::numeric_limits<f64>::infinity(),std::numeric_limits<f64>::quiet_NaN()}) {
+        AUREA_CHECK_EQ(audio::frame_to_sample(30,fps),48000);
+        AUREA_CHECK_EQ(audio::frame_to_sample(-1,fps),-1600);
+    }
+    AUREA_CHECK_EQ(audio::frame_to_sample(1,.5),96000);
+    AUREA_CHECK_EQ(audio::frame_to_sample(-1,.5),-96000);
+    AUREA_CHECK_EQ(audio::frame_to_sample(1,1e-30),hi);
+    AUREA_CHECK_EQ(audio::frame_to_sample(-1,1e-30),lo);
+    AUREA_CHECK_EQ(audio::frame_to_sample(0,1e-30),0);
+    AUREA_CHECK_EQ(audio::frame_to_sample(1,1e30),0);
+    AUREA_CHECK_EQ(audio::frame_to_sample(-1,1e30),-1);
+    for(f64 fps : {30.0,29.97,0.5}){
+        AUREA_CHECK_EQ(audio::frame_to_sample(hi,fps),hi);
+        AUREA_CHECK_EQ(audio::frame_to_sample(lo,fps),lo);
+    }
+    AUREA_CHECK_EQ(audio::frame_to_sample(-1,23),-2087);
+    AUREA_CHECK_EQ(audio::frame_to_sample(-1,30000.0/1001),-1602);
 }
 
 AUREA_TEST(Audio, ResamplerIsCleanUpAndRejectsAliasesDown) {

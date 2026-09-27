@@ -11,6 +11,7 @@ Rotação manual por letra no texto 3D. Environment Texture com HDR/HDRI Radianc
 
 ESTABILIDADE
 Mitigação de compatibilidade de vídeo Samsung Android 12 e relatório local de encerramentos. Preview conserva o último quadro durante uma espera breve do decoder no scrubbing. Aplicar tracking preserva a animação da camada de destino.
+Corrigido também um fechamento na conversão do tempo de áudio com FPS inválido ou extremamente pequeno, encontrado na bateria de comandos aleatórios.
 
 LIMITES DESTA VERSÃO
 Paridade visual exata com plugins desktop e desempenho em A51/iPhone físico ainda exigem validação. Tracking não inclui calibração completa de lente, Mostly Flat, correção manual/retomada ou warp/rolling shutter. Deep Glow 2 ainda não inclui Iris e Lens Dirt por imagem. Tracery aceita até 64 regiões e não mantém IDs entre frames.

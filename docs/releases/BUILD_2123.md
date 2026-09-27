@@ -10,6 +10,8 @@ Pacotes em preparação. Android `com.aurea.aurea`, ARMv7 e ARM64, mínimo API 2
 - Android: compilação debug anterior e 124 testes JVM passaram. Release 2123 e suíte completa do motor em execução; atualizar este registro ao concluir.
 - Emulador Android reservado ao usuário. O teste novo de tracking compila, mas sua execução conectada aguarda disponibilidade.
 
+A suíte ampla identificou divisão por zero em `audio::frame_to_sample` ao receber FPS positivo extremamente pequeno. Correção adicional: não usar denominador inteiro arredondado a zero; tratar taxas não finitas e saturar conversões fora de `i64`, preservando o caminho inteiro exato para taxas usuais/NTSC. A reprodução de 20.000 comandos agora passa (8 verificações). Suíte de áudio: 22 entradas/98.488 verificações, zero falhas. Os pacotes são regenerados com essa correção; os hashes preliminares não representam os arquivos finais.
+
 ## Limites conhecidos
 
 Não equivale à conclusão integral do Prompt 4 ou à reprodução idêntica dos plugins desktop. Ver `PROMPT04_TRACKING_PROGRESS_2026-09-26.md` e `MEDIA_LAB_EFFECTS_2026-09-26.md` em `docs/architecture` para recursos faltantes e evidência. A51 5G e iPhone físicos não estão disponíveis nesta máquina. A mitigação Samsung não comprova a resolução do fechamento relatado.

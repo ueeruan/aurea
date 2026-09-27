@@ -1,7 +1,7 @@
 import SwiftUI
 
 var extraTextPresetNames: [String] { ["Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
-                          "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave"] + (0..<6).map { AureaText.t("pack_text_\($0)") }
+                          "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave"] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }
 }
 import UIKit
 import UniformTypeIdentifiers

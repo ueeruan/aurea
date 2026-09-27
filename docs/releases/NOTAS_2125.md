@@ -4,6 +4,7 @@
 - Mover clipes exige toque longo parado; arrastar o corpo rola a timeline.
 - Painel 3D com estúdio, chão refletivo, qualidade, tonemap, exposição e bloom.
 - VHS e seis adaptações nativas de animação de texto com previews; dois estilos de legenda automática.
+- Consentimento e Responsabilidade com aceite explícito, inclusive para quem atualiza uma instalação existente.
 - Abertura dos perfis do criador uma vez por instalação. O app registra abertura dos links, sem verificar seguidores.
 - Mantidas as correções anteriores de vídeo Android, Samsung, Metal e efeitos.
 

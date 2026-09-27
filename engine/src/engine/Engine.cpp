@@ -9228,23 +9228,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const auto& source = found->second->materials[c.material];
             MaterialOverride* target = nullptr;
             for (auto& over : l->model.materials) if (over.materialIndex == c.material) { target = &over; break; }
-            const f32 baseFields[6]{source.baseColor.x, source.baseColor.y, source.baseColor.z, source.baseColor.w, source.metallic, source.roughness};
-            f32 base = baseFields[c.param];
-            if (target && (target->mask & (1u << c.param))) {
-                const f32 fields[6]{target->baseColor.x, target->baseColor.y, target->baseColor.z, target->baseColor.w, target->metallic, target->roughness};
-                base = fields[c.param];
-            }
             Track* track = l->tracks.find(TrackProperty::MaterialParam, c.material, c.param);
             if (track && track->has_expression()) return Errc::InvalidState;
             f32 next = c.value;
             if (track && !track->keys.empty()) {
                 const auto local = l->local_time(playback_.current());
-                if (sceneEditor_.enabled) {
-                    const f32 delta = c.value - track->value_or(local, base);
-                    for (auto& key : track->keys) key.value = std::clamp(key.value + delta, 0.0f, 1.0f);
-                    track->staticValue = std::clamp(track->staticValue + delta, 0.0f, 1.0f);
-                    next = std::clamp(base + delta, 0.0f, 1.0f);
-                } else track->set(local, c.value);
+                track->set(local, c.value);
             }
             if (!target) {
                 MaterialOverride over; over.materialIndex = c.material; over.baseColor = source.baseColor; over.metallic = source.metallic; over.roughness = source.roughness;
@@ -9274,12 +9263,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                             : p == 6 ? TrackProperty::LightConeAngle : p == 7 ? TrackProperty::LightPenumbra : TrackProperty::_Count;
             Track* track = prop != TrackProperty::_Count ? l->tracks.find(prop) : nullptr;
             if (track && track->has_expression()) return Errc::InvalidState;
-            if (track) {
-                const f32 delta = v - track->value_or(l->local_time(playback_.current()), *field);
-                for (auto& key : track->keys) key.value += delta;
-                track->staticValue += delta;
-                *field += delta;
-            } else *field = v;
+            if (track && !track->keys.empty()) track->set(l->local_time(playback_.current()), v);
+            else { if (track) track->staticValue = v; *field = v; }
             return OkStatus;
         }
         case CommandType::LayerSetCameraParam: {

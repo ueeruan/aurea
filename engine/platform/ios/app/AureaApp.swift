@@ -65,6 +65,7 @@ struct AureaApp: App {
 }
 
 private struct CreatorWelcome<Content: View>: View {
+    @AppStorage("consentVersion") private var consentVersion = 0
     @AppStorage("creatorWelcomeOpened") private var opened = 0
     @Environment(\.openURL) private var openURL
     @State private var failed = false
@@ -77,7 +78,15 @@ private struct CreatorWelcome<Content: View>: View {
 #endif
     }
     var body: some View {
-        if opened == 3 || testing { content() }
+        if consentVersion < 2125 && !testing {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(AureaText.t("consent_title")).font(.title2).bold()
+                ScrollView { Text(AureaText.t("consent_body")).font(.body).frame(maxWidth: .infinity, alignment: .leading) }
+                Button(AureaText.t("consent_accept")) { consentVersion = 2125 }
+                    .buttonStyle(.borderedProminent).frame(maxWidth: .infinity, minHeight: 44)
+            }.padding(24).background(Color.black)
+        }
+        else if opened == 3 || testing { content() }
         else {
             VStack(alignment: .leading, spacing: 20) {
                 Text(AureaText.t("social_title")).font(.title)

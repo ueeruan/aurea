@@ -11,6 +11,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -210,8 +212,27 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
     val prefs = remember { getSharedPreferences("creator_welcome", Context.MODE_PRIVATE) }
+    var consent by remember { mutableIntStateOf(prefs.getInt("consent_version", 0)) }
     var opened by remember { mutableIntStateOf(prefs.getInt("opened", 0)) }
     var error by remember { mutableStateOf(false) }
+    if (consent < 2125) {
+        BackHandler { finish() }
+        MaterialTheme(colorScheme = darkColorScheme()) {
+            Surface(Modifier.fillMaxSize()) {
+                Column(Modifier.safeDrawingPadding().padding(24.dp)) {
+                    Text(stringResource(R.string.consent_title), style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(16.dp))
+                    Text(stringResource(R.string.consent_body), Modifier.weight(1f).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = {
+                        prefs.edit().putInt("consent_version", 2125).apply()
+                        consent = 2125
+                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(stringResource(R.string.consent_accept)) }
+                }
+            }
+        }
+        return
+    }
     if (opened == 3) { content(); return }
     BackHandler { finish() }
     MaterialTheme(colorScheme = darkColorScheme()) {

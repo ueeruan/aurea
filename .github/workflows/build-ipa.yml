@@ -21,7 +21,7 @@ on:
     branches: ['codex/native-beta2-ipa']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
 concurrency:
-  group: native-ipa-${{ github.ref }}
+  group: native-ipa-${{ github.ref }}${{ inputs.capture_only && '-capture' || '' }}
   cancel-in-progress: true
 permissions:
   contents: read

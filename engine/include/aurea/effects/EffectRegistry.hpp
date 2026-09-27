@@ -44,6 +44,8 @@ void register_builtin_effects(EffectRegistry& registry);
 
 // Chaves estáveis dos efeitos embutidos (o id no projeto é o hash delas).
 namespace effect_keys {
+    inline constexpr const char* kRgbSplit = "aurea.color.rgb_split";
+    inline constexpr const char* kChromaticAberration = "aurea.color.chromatic_aberration";
     inline constexpr const char* kJpegGlitch = "aurea.glitch.jpeg_codec";
     inline constexpr const char* kAnalogSignal = "aurea.glitch.analog_signal";
     inline constexpr const char* kTracery = "aurea.generate.tracery";

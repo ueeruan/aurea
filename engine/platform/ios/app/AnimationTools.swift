@@ -563,6 +563,12 @@ struct TimeRemapEffectEditor: View {
     @EnvironmentObject private var model: AureaModel
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Button("Edit time curve") {
+                guard let id = model.primarySelection else { return }
+                let flags = (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0
+                if flags & 4 == 0 { model.engine.setTimeRemap(true, forLayer: id) }
+                model.refreshModel(force: true)
+            }.frame(minHeight: 44)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(["panel_linear", "panel_suave", "panel_lento_meio", "panel_acelerar", "panel_desacelerar", "panel_congelar", "panel_passar_tras_frente"].enumerated()), id: \.offset) { index, label in
@@ -1064,6 +1070,36 @@ private struct NativeTrackGraph: View {
     @State private var multi = false
     @State private var picked = Set<Int32>()
     @GestureState private var touching = false
+    private struct SpeedHandle {
+        let key: KeyframeItem
+        let end: KeyframeItem
+        let incoming: Bool
+        let handles: [Float]
+        let base: Double
+        var influence: Double { Double(incoming ? 1 - handles[2] : handles[0]) }
+        var velocity: Double { base * Double(incoming ? 1 - handles[3] : handles[1]) / influence }
+        var frame: Double { Double(key.time) + (Double(end.time) - Double(key.time)) * Double(incoming ? handles[2] : handles[0]) }
+        func changed(frame: Double, velocity: Double) -> [Float] {
+            var h = handles
+            let fraction = min(0.99, max(0.01, (frame - Double(key.time)) / (Double(end.time) - Double(key.time))))
+            if incoming { h[2] = Float(fraction); h[3] = Float(1 - velocity / base * (1 - fraction)) }
+            else { h[0] = Float(fraction); h[1] = Float(velocity / base * fraction) }
+            return h
+        }
+    }
+    private var speedHandles: [SpeedHandle] {
+        guard speed else { return [] }
+        return zip(keys, keys.dropFirst()).flatMap { a, b -> [SpeedHandle] in
+            let base = Double(b.value - a.value) * max(1, Double(model.status.compFps)) / (Double(b.time) - Double(a.time))
+            let raw = model.engine.trackEasing(layer, property: a.property, effect: a.effectIndex, param: a.paramIndex, time: a.time).map(\.floatValue)
+            guard raw.count == 4, base.isFinite, abs(base) > 0.000001 else { return [] }
+            let ease = CurveEase(interpolation: a.interpolation, x1: raw[0], y1: raw[1], x2: raw[2], y2: raw[3])
+            guard ease.hasHandles else { return [] }
+            var h: [Float] = a.interpolation == 1 ? [1/3,1/3,2/3,2/3] : ease.handles
+            h[0] = min(0.99,max(0.01,h[0])); h[2] = min(0.99,max(0.01,h[2]))
+            return [SpeedHandle(key:a,end:b,incoming:false,handles:h,base:base), SpeedHandle(key:a,end:b,incoming:true,handles:h,base:base)]
+        }
+    }
     private struct GraphDrag {
         let initial: TrackGraphViewport
         let key: KeyframeItem?
@@ -1073,6 +1109,7 @@ private struct NativeTrackGraph: View {
         var began = false
         var group: [KeyframeItem] = []
         var groupDelta: Int32 = 0
+        var handle: SpeedHandle?
     }
     private var start: Int32 { Int32(floor(viewport.from)) }
     private var end: Int32 { max(start + 1, Int32(ceil(viewport.to))) }
@@ -1104,7 +1141,7 @@ private struct NativeTrackGraph: View {
         guard let first = keys.first, let last = keys.last else { return }
         let to = max(first.time + 1, last.time)
         let full = read(from: first.time, to: to)
-        let values = full.map { Double($0.y) } + (speed ? [0] : keys.map { Double($0.value) })
+        let values = full.map { Double($0.y) } + (speed ? speedHandles.map(\.velocity) + [0] : keys.map { Double($0.value) })
         let low = values.min() ?? 0, high = values.max() ?? 1
         let margin = max(0.1, max(high - low, abs(high) * 0.05) * 0.12)
         let timeMargin = max(1, (Double(to) - Double(first.time)) * 0.06)
@@ -1176,6 +1213,12 @@ private struct NativeTrackGraph: View {
                         if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
                     }
                     context.stroke(path, with: .color(AureaColors.accent), lineWidth: 2)
+                    for handle in speedHandles {
+                        let p = plot(handle.frame, handle.velocity)
+                        line(plot(Double(handle.incoming ? handle.end.time : handle.key.time), handle.velocity), p, color: AureaColors.muted)
+                        let dot = Path(ellipseIn: CGRect(x:p.x-7,y:p.y-7,width:14,height:14))
+                        context.stroke(dot, with:.color(AureaColors.accent),lineWidth:2)
+                    }
                     if !speed {
                         for key in keys {
                             let p = plot(Double(key.time), Double(key.value))
@@ -1220,11 +1263,28 @@ private struct NativeTrackGraph: View {
             drag = GraphDrag(initial: viewport, key: nearest, currentTime: nearest?.time ?? 0,
                 previous: nearest.flatMap { selected in keys.last(where: { $0.time < selected.time })?.time },
                 next: nearest.flatMap { selected in keys.first(where: { $0.time > selected.time })?.time })
+            if speed {
+                for handle in speedHandles {
+                    let p = point(handle.frame,handle.velocity,size,viewport)
+                    let dx = p.x-value.startLocation.x, dy = p.y-value.startLocation.y
+                    let d = dx*dx+dy*dy
+                    if d <= distance { drag?.handle = handle; distance = d }
+                }
+            }
             if multi, let nearest { drag?.group = picked.contains(nearest.time) ? keys.filter { picked.contains($0.time) } : [nearest] }
             if let nearest { model.curveSelectedTime = nearest.time }
         }
         guard var current = drag else { return }
-        if let key = current.key {
+        if let handle = current.handle {
+            guard current.began || hypot(value.translation.width,value.translation.height) >= 4 else { return }
+            let h = handle.changed(frame:handle.frame+Double(value.translation.width/size.width)*current.initial.duration,
+                velocity:handle.velocity-Double(value.translation.height/size.height)*current.initial.range)
+            guard h.allSatisfy({ $0.isFinite }) else { return }
+            if !current.began { model.beginGesture("editar velocidade do intervalo");current.began = true }
+            model.engine.editTrackKey(layer,property:handle.key.property,effect:handle.key.effectIndex,param:handle.key.paramIndex,
+                time:handle.key.time,action:3,value:handle.key.value,targetTime:handle.key.time,interpolation:2,handles:h.map { NSNumber(value:$0) })
+            drag = current; model.refreshModel(force:true)
+        } else if let key = current.key {
             guard current.began || hypot(value.translation.width, value.translation.height) >= 4 else { return }
             let changed = Double(key.value) - Double(value.translation.height / size.height) * current.initial.range
             guard changed.isFinite, abs(changed) <= Double(Float.greatestFiniteMagnitude) else { return }

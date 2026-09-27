@@ -468,7 +468,9 @@ struct TransformView: View {
         let snapshot = group.map { ($0, changes[$0] ?? value($0)) }, local = model.localPlayhead
         model.mutate { core in
             if !gestureOpen { core.beginUndoGroup() }
-            if keyed {
+            if model.sceneEditor || !model.autoKeyTransforms {
+                for (property, amount) in snapshot { core.layoutTransform(id, property: property, value: amount) }
+            } else if keyed {
                 for (property, amount) in snapshot { core.insertKeyframe(forLayer: id, property: property, time: local, value: amount) }
             } else {
                 let base = Int(properties[0] / 3)

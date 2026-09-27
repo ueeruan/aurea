@@ -8492,7 +8492,7 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::ShapeSetParam:        return finite(c.shape_param.value);
         case CommandType::LayerSetMaterialParam: return c.material_param.param < 6 && finite(c.material_param.value) && c.material_param.value >= 0 && c.material_param.value <= 1;
         case CommandType::LayerSetLightParam: return c.shape_param.param < 10 && finite(c.shape_param.value);
-        case CommandType::LayerLayoutTransform: return c.shape_param.param < 12 && finite(c.shape_param.value);
+        case CommandType::LayerLayoutTransform: return c.shape_param.param < 15 && finite(c.shape_param.value);
         case CommandType::ShapeSetFill:
         case CommandType::ShapeSetStroke:
         case CommandType::TextSetColor:
@@ -8919,9 +8919,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             if (l->locked) return Errc::InvalidState;
             const u32 property = cmd.shape_param.param, axis = property % 3;
+            f32* scalar = property == 12 ? &l->transform.opacity : property == 13 ? &l->transform.skewX
+                         : property == 14 ? &l->transform.skewY : nullptr;
             Vec3* vector = property < 3 ? &l->transform.position : property < 6 ? &l->transform.scale
                          : property < 9 ? &l->transform.rotation : &l->transform.anchor;
-            const f32 base = axis == 0 ? vector->x : axis == 1 ? vector->y : vector->z;
+            const f32 base = scalar ? *scalar : axis == 0 ? vector->x : axis == 1 ? vector->y : vector->z;
             Track* track = l->tracks.find(static_cast<TrackProperty>(property));
             if (track && track->has_expression()) return Status{Errc::InvalidState, "layout transform controlled by expression"};
             const f32 current = track ? track->value_or(l->local_time(playback_.current()), base) : base;
@@ -8940,7 +8942,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     if (!fits(mapped(key.value)) || !fits(key.tangentIn * gain) || !fits(key.tangentOut * gain)) return Errc::InvalidArgument;
             }
             const f32 next = static_cast<f32>(mapped(base));
-            if (axis == 0) vector->x = next; else if (axis == 1) vector->y = next; else vector->z = next;
+            if (scalar) *scalar = next;
+            else if (axis == 0) vector->x = next; else if (axis == 1) vector->y = next; else vector->z = next;
             if (track) {
                 track->staticValue = static_cast<f32>(mapped(track->staticValue));
                 for (auto& key : track->keys) {

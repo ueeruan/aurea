@@ -403,6 +403,9 @@ internal fun TimeRemapEffectEditor(store: EditorStore) {
     Column(Modifier.fillMaxWidth()) {
 
         val remap by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
+        androidx.compose.material3.TextButton(onClick = store::enableManualTimeRemap) {
+            Text("Edit time curve")
+        }
         Text(stringResource(R.string.panel_acelerar_desacelerar_tempo), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.W700, color = AureaColors.Muted)))
         Spacer(Modifier.height(6.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

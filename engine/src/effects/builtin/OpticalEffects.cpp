@@ -3,6 +3,64 @@
 #include <cmath>
 namespace aurea::builtin {
 namespace {
+// Spatial channel separation, independent of temporal RGB offsets.
+class ChannelSplit final : public Effect {
+public:
+    explicit ChannelSplit(bool radial) : radial_(radial) {}
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo split{effect_keys::kRgbSplit,"RGB Split","Color",EffectClass::Domain};
+        static const EffectInfo radial{effect_keys::kChromaticAberration,"Chromatic Aberration","Color",EffectClass::Domain};
+        return radial_ ? radial : split;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        if (radial_) {
+            p.add_float("amount","Amount",10,-2000,2000,kParamAnimatable|kParamPixels,"px");
+            p.add_float("center_x","Center X",50,-1000,1000,kParamAnimatable|kParamPercent,"%");
+            p.add_float("center_y","Center Y",50,-1000,1000,kParamAnimatable|kParamPercent,"%");
+        } else {
+            const char* keys[]={"red_x","red_y","green_x","green_y","blue_x","blue_y"};
+            const char* names[]={"Red X","Red Y","Green X","Green Y","Blue X","Blue Y"};
+            const f32 defaults[]={10,0,0,0,-10,0};
+            for(u32 i=0;i<6;++i)p.add_float(keys[i],names[i],defaults[i],-2000,2000,kParamAnimatable|kParamPixels,"px");
+        }
+        p.add_float("mix","Mix",100,0,100,kParamAnimatable|kParamPercent,"%");
+        p.add_bool("repeat_edges","Repeat edges",false);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        if(e.f(radial_?3:6)<=0)return true;
+        for(u32 i=0;i<(radial_?1u:6u);++i)if(std::abs(e.f(i))>.0001f)return false;
+        return true;
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        f32 amount=0;for(u32 i=0;i<(radial_?1u:6u);++i)amount=std::max(amount,std::abs(e.f(i)));
+        return amount+1;
+    }
+    void pipelines(std::vector<PipelineKey>& out,SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_rgb_split_frag,work));
+    }
+    Status build(EffectBuildContext& ctx,const EffectEval& e,const LayerImage& input,f32 margin,LayerImage& out) const override {
+        const f32 w=e.placement?static_cast<f32>(e.placement->layerWidth):input.region.w;
+        const f32 h=e.placement?static_cast<f32>(e.placement->layerHeight):input.region.h;
+        auto u=base_uniforms(input);
+        if(radial_)u.p0={e.f(0),e.f(1)*w/100,e.f(2)*h/100,std::max(std::min(w,h)*.5f,1.f)};
+        else {u.p0={e.f(0),e.f(1),e.f(2),e.f(3)};u.p1={e.f(4),e.f(5),0,0};}
+        u.p1.z=e.f(radial_?3:6)/100;u.p1.w=e.f(radial_?4:7);
+        u.p2={input.region.x,input.region.y,input.region.w,input.region.h};
+        u.p3.x=radial_?1.f:0.f;
+        // Keep channel tails outside the source bounds, clipped only to the visible region.
+        const f32 extent=input_margin(e);
+        const Rect region=spread_region(input.region,extent,extent,e.placement,margin);
+        u.uvMap={region.x,region.y,region.w,region.h};
+        u32 ow=0,oh=0;ctx.region_size(region,input.texel_scale_x(),ow,oh);
+        if(!ow||!oh){out=input;return OkStatus;}
+        out={ctx.texture("channel split",ow,oh),region,ow,oh};
+        if(ctx.fullscreen_pass("channel split",PassStage::Effects,out.texture,ShaderId::effects_rgb_split_frag,
+            {PassTexture{input.texture,{},CommonSampler::LinearClamp}},&u,sizeof(u))==kInvalidIndex)return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+private:
+    bool radial_;
+};
 class Optical final : public Effect {
 public:
     explicit Optical(u32 mode) : mode_(mode) {}
@@ -54,5 +112,7 @@ private:
 }
 void register_optical_effects(EffectRegistry& r) {
     for (u32 mode = 0; mode < 3; ++mode) (void)r.add(std::make_unique<Optical>(mode));
+    (void)r.add(std::make_unique<ChannelSplit>(false));
+    (void)r.add(std::make_unique<ChannelSplit>(true));
 }
 }

@@ -124,15 +124,27 @@ struct EditorView: View {
                     }}.accessibilityLabel(AureaText.t("editor_resolucao_previa_segure_diagnostico"))
                     .padding(4).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
-            if !model.fullscreen && !model.rawPlayback, model.selection.count == 1,
-               let id = model.primarySelection,
-               !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty {
-                Button { model.gizmoLocalSpace.toggle() } label: {
-                    Text(model.gizmoLocalSpace ? "Local XYZ" : "World XYZ")
-                        .font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
-                        .padding(.horizontal, 12).frame(minHeight: 48)
-                        .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
-                }.buttonStyle(.plain).accessibilityIdentifier("stage.gizmo.space")
+            if !model.fullscreen && !model.rawPlayback, model.selection.count == 1, let id = model.primarySelection {
+                HStack(spacing: 6) {
+                    if !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty {
+                        Button { model.gizmoLocalSpace.toggle() } label: {
+                            Text(model.gizmoLocalSpace ? "Local XYZ" : "World XYZ")
+                                .padding(.horizontal, 12).frame(minHeight: 48)
+                                .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
+                        }.accessibilityIdentifier("stage.gizmo.space")
+                    }
+                    if !model.sceneEditor {
+                        Button {
+                            model.autoKeyTransforms.toggle()
+                            model.toast = model.autoKeyTransforms ? "Auto-Key: edita tracks animadas no cabeçote" : "Auto-Key desligado: desloca toda a animação sem criar keys"
+                        } label: {
+                            Text(model.autoKeyTransforms ? "Auto-Key: On" : "Auto-Key: Off")
+                                .foregroundStyle(model.autoKeyTransforms ? AureaColors.accent : AureaColors.text)
+                                .padding(.horizontal, 12).frame(minHeight: 48)
+                                .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
+                        }.accessibilityIdentifier("stage.autokey")
+                    }
+                }.font(.aurea(size: 14)).foregroundStyle(AureaColors.text).buttonStyle(.plain)
                     .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
             if model.hudVisible { ShellPerfHud().padding(.leading, 8).padding(.top, 6).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).allowsHitTesting(false) }

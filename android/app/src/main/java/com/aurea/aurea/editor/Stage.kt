@@ -151,12 +151,20 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         LockBanner(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
-        if (store.gizmo != null && store.selection.size == 1 && !store.rawPlayback) {
-            androidx.compose.material3.TextButton(
-                onClick = store::toggleGizmoSpace,
-                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).heightIn(min = 48.dp)
-                    .background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp)),
-            ) { Text(if (store.gizmoLocalSpace) "Local XYZ" else "World XYZ", color = AureaColors.Text) }
+        if (store.selection.size == 1 && !store.rawPlayback) {
+            Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
+                if (store.gizmo != null) androidx.compose.material3.TextButton(
+                    onClick = store::toggleGizmoSpace,
+                    modifier = Modifier.heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp)),
+                ) { Text(if (store.gizmoLocalSpace) "Local XYZ" else "World XYZ", color = AureaColors.Text) }
+                if (!store.sceneEditor) androidx.compose.material3.TextButton(
+                    onClick = {
+                        store.autoKeyTransforms = !store.autoKeyTransforms
+                        store.showToast(if (store.autoKeyTransforms) "Auto-Key: edita tracks animadas no cabeçote" else "Auto-Key desligado: desloca toda a animação sem criar keys")
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp)),
+                ) { Text(if (store.autoKeyTransforms) "Auto-Key: On" else "Auto-Key: Off", color = if (store.autoKeyTransforms) AureaColors.Accent else AureaColors.Text) }
+            }
         }
         PerfHud(store, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 6.dp))
     }

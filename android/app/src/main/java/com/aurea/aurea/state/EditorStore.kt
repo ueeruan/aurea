@@ -1804,7 +1804,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun setTransform(property: Int, value: Float, layer: Long? = primary) {
         val id = layer ?: return
-        if (sceneEditor && property in 0..11) { send { engine.layoutTransform(id, property, value) }; refreshNow(); return }
+        if (!value.isFinite()) return
+        if ((sceneEditor || !autoKeyTransforms) && property in 0..14) { send { engine.layoutTransform(id, property, value) }; refreshNow(); return }
         val d = if (id == primary) detail else detailOf(id)
         d ?: return
         if (d.isAnimated(property)) {
@@ -1835,6 +1836,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Duas propriedades de uma vez (arrastar a camada no palco: X e Y). */
     fun setTransform2(pa: Int, va: Float, pb: Int, vb: Float, layer: Long? = primary) {
         val id = layer ?: return
+        if (!va.isFinite() || !vb.isFinite()) return
+        if ((sceneEditor || !autoKeyTransforms) && pa in 0..14 && pb in 0..14) {
+            send { engine.layoutTransform(id, pa, va); engine.layoutTransform(id, pb, vb) }
+            refreshNow(); return
+        }
         val d = (if (id == primary) detail else detailOf(id)) ?: return
         val animated = d.isAnimated(pa) || d.isAnimated(pb)
         send {
@@ -2447,7 +2453,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun applyGizmoPosition(id: Long, d: LayerDetail, out: FloatArray) {
         val animated = d.isAnimated(TrackProperty.POSITION_X) || d.isAnimated(TrackProperty.POSITION_Y) || d.isAnimated(TrackProperty.POSITION_Z)
         send {
-            if (sceneEditor) {
+            if (sceneEditor || !autoKeyTransforms) {
                 for (axis in 0..2) engine.layoutTransform(id, axis, out[axis])
             } else if (animated) {
                 insertKeyframe(id, TrackProperty.POSITION_X, NO_EFFECT, 0, d.localPlayhead, out[0])
@@ -3008,6 +3014,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Remapeamento de tempo -----------------------------------------------------------
+    fun enableManualTimeRemap() {
+        val id = primary ?: return
+        if (detail?.timeRemap != true) engine.setTimeRemap(id, true)
+        refreshNow()
+    }
     /** Rampa pronta (0 linear, 1 suave, 2 herói, 3 acelerar, 4 desacelerar); −1 = sem rampa. */
     fun applySpeedRamp(preset: Int) {
         val id = primary ?: return
@@ -3741,6 +3752,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Modo Edição (timeline magnética) -------------------------------------------
     /** Aparar empurra/puxa as seguintes; excluir fecha o buraco. */
+    var autoKeyTransforms by mutableStateOf(true)
     var snapping by mutableStateOf(true)
     var editMode by mutableStateOf(false)
         private set

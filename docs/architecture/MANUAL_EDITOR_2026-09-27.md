@@ -56,6 +56,34 @@ has passed acceptance.
 
 ## Acceptance still to complete
 
+### Continued implementation checkpoint
+
+- Explicit transform Auto-Key toggle on both stages. Off offsets the complete
+  existing transform animation without inserting keys; On retains component-only
+  keying. Layout edits now also support opacity/skew. Android toggle/undo passed;
+  native iOS regression added, not yet run for this checkpoint.
+- Speed Graph now has interval tangent handles: horizontal dragging changes
+  influence and vertical dragging changes signed endpoint velocity. Writes the
+  original outgoing Bézier interval, preserves key times/values and other tracks,
+  and groups one drag into one undo. Three Android graph gesture tests passed,
+  including speed handles and independent rotation/Auto-Key. iOS test added.
+  Flat intervals and hold/bounce/elastic/steps retain their own easing editor;
+  they do not show tangent handles that their evaluator cannot represent.
+- RGB Split and Chromatic Aberration are independent shared GPU effects, with
+  animated channel offsets/radial amount, mix, edge handling and expanded bounds.
+  Two real Vulkan pixel tests passed (6167 checks): RGB locations, signed radial
+  channel reversal, and zero/mix identity. iOS Metal/native acceptance pending.
+- Explicit manual time-remap curve entry added on both platforms.
+- Android eight-clip integration test passed: actual video/audio import, 16
+  markers from UI, UI split, null parenting, effect search/stack, motion blur,
+  remap, playback beyond six seconds across cuts, save/reopen and content checks.
+  Fixture import/numeric setup uses the normal store API. Synthetic media and
+  mixed API/UI interaction do not constitute a finished real AMV acceptance.
+- Native f15ef224 compiled and packaged successfully. Simulator transform
+  capture timed out at first launch; text-3d and layer-dock captures succeeded.
+  Its gesture suite was still running when this checkpoint was written. New
+  changes above are not included in that older native build.
+
 Native iOS execution and the two previous UI failures (curve-panel bounds and
 material preset reachability); axis manipulation and cancellation at different
 zoom levels; native multiple-key selection/copy/move acceptance; explicit auto-key behaviour;

@@ -67,6 +67,20 @@ import XCTest
         }
     }
 
+    func testSpatialChannelEffectsAreIndependentStackEntries() throws {
+        _ = try launch("transform")
+        for name in ["RGB Split", "Chromatic Aberration"] {
+            let before = try snapshot()
+            try openCommandSearch(name)
+            let effect = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@", "command:effect:")).firstMatch
+            XCTAssertTrue(effect.waitForExistence(timeout:5)); XCTAssertTrue(effect.label.contains(name))
+            effect.tap()
+            _ = try awaitSnapshot("Spatial effect enters native stack") { $0.effectCount == before.effectCount+1 }
+            try undo()
+            _ = try awaitSnapshot("Undo removes the spatial effect") { $0.effectCount == before.effectCount }
+        }
+    }
+
     func testCommandSearchAppliesEffectAndKeepsFavoriteAcrossOpenings() throws {
         _ = try launch("transform")
         let before = try snapshot()
@@ -475,6 +489,15 @@ import XCTest
         let frame = dial.frame
         let start = CGPoint(x: frame.midX + frame.width * 0.3, y: frame.midY)
         let end = CGPoint(x: frame.midX, y: frame.midY - frame.height * 0.3)
+        app.buttons["stage.autokey"].tap()
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let layout = try awaitSnapshot("Auto-Key off moves existing animation without inserting keys") {
+            $0.curveKeys.contains { $0.property == 6 && $0.time == 0 && abs($0.value) > 1 }
+        }
+        XCTAssertEqual(layout.curveKeys.count, before.curveKeys.count)
+        try undo()
+        _ = try awaitSnapshot("Layout adjustment undoes once") { $0.curveKeys == before.curveKeys }
+        app.buttons["stage.autokey"].tap()
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
         let changed = try awaitSnapshot("Only rotation X receives a new key") {
             $0.curveKeys.contains { $0.property == 6 && $0.time == 15 && abs($0.value) > 1 }
@@ -520,6 +543,28 @@ import XCTest
         XCTAssertEqual(moved.curveKeys.count, before.curveKeys.count)
         try undo()
         _ = try awaitSnapshot("One undo restores time and value") { $0.curveKeys == before.curveKeys }
+    }
+
+    func testSpeedGraphHandleEditsOnlyOutgoingIntervalAndUndoesOnce() throws {
+        let before = try launch("curve-isolation")
+        app.buttons["Edit the property curve"].firstMatch.tap()
+        let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
+        app.buttons["curve.mode.2"].tap()
+        let graph = app.otherElements["curve.trackGraph"].firstMatch
+        XCTAssertTrue(graph.waitForExistence(timeout:5))
+        let frame = graph.frame
+        let start = CGPoint(x:frame.minX+frame.width*0.2024,y:frame.minY+frame.height*0.0968)
+        let end = CGPoint(x:start.x+12,y:frame.minY+frame.height*0.4)
+        coordinate(start).press(forDuration:0.05,thenDragTo:coordinate(end),withVelocity:.slow,thenHoldForDuration:0.1)
+        let changed = try awaitSnapshot("Speed handle changes the selected interval") {
+            $0.curveKeys != before.curveKeys
+        }
+        let untouched: (CurveKey) -> Bool = { $0.property != Int(selected.curveProperty) || $0.time != 0 }
+        XCTAssertEqual(before.curveKeys.filter(untouched),changed.curveKeys.filter(untouched))
+        XCTAssertEqual(before.curveKeys.map(\.time),changed.curveKeys.map(\.time))
+        XCTAssertEqual(before.curveKeys.map(\.value),changed.curveKeys.map(\.value))
+        try undo()
+        _ = try awaitSnapshot("Undo restores speed curve") { $0.curveKeys == before.curveKeys }
     }
 
     func testGraphMovesSelectedKeysTogetherAndUndoesOnce() throws {

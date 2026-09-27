@@ -24,6 +24,53 @@ import org.junit.Test
 class GraphGesturesTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun speedHandleEditsOnlyItsIntervalAndUndoRestoresCurve() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assertTrue(context.packageName.endsWith(".uitest"))
+        lateinit var store: EditorStore
+        var initialized = false
+        val show = mutableStateOf(false)
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            initialized = true
+            AureaTheme { Box {
+                EditorScreen(store)
+                if(show.value) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(280.dp)) {
+                    val id=store.layers.single().id
+                    TrackGraph(store,id,store.keyframes[id].orEmpty().filter { it.property==0 },true)
+                }
+            } }
+        }
+        compose.waitUntil(30000) { initialized && store.engineReady }
+        compose.runOnIdle { store.newProject(320,240,30f,"Speed handles") }
+        compose.waitUntil(15000) { store.project.title=="Speed handles" }
+        compose.runOnIdle { store.addNull(false) }
+        compose.waitUntil(5000) { store.layers.size==1 }
+        val id=store.layers.single().id
+        for(frame in listOf(0,30)) {
+            compose.runOnIdle { store.seek(frame) }
+            compose.waitUntil(5000) { store.playhead==frame }
+            compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(0,1)) }
+        }
+        compose.runOnIdle { store.setTransform(0,260f) }
+        val before=store.keyframes[id].orEmpty()
+        val first=before.first { it.property==0 && it.time==0 }
+        val original=store.queryKeyframeEasing(id,first)!!.toList()
+        compose.runOnIdle { show.value=true }
+        compose.onNodeWithTag("curve.trackGraph").performTouchInput {
+            swipe(Offset(width*.3512f,height*.0968f),Offset(width*.43f,height*.4f),350)
+        }
+        compose.waitUntil(5000) { store.queryKeyframeEasing(id,first)?.toList()!=original }
+        compose.runOnIdle {
+            assertEquals(before.filter { it.property==1 },store.keyframes[id].orEmpty().filter { it.property==1 })
+            assertEquals(before.map { it.time to it.value },store.keyframes[id].orEmpty().map { it.time to it.value })
+            val h=store.queryKeyframeEasing(id,first)!!
+            assertTrue(h[1]/h[0] < .9f)
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.queryKeyframeEasing(id,first)?.toList()==original }
+    }
+
     @Test fun editingRotationXDoesNotCreateKeysForOtherAxes() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))
@@ -44,6 +91,12 @@ class GraphGesturesTest {
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 1 }
         compose.runOnIdle { store.seek(15) }
         compose.waitUntil(5000) { store.playhead == 15 }
+        compose.onNodeWithText("Auto-Key: On").performClick()
+        compose.runOnIdle { store.setTransform(6, 30f) }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().singleOrNull()?.value == 30f }
+        compose.runOnIdle { assertEquals(0, store.keyframes[id].orEmpty().single().time); store.undo() }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().singleOrNull()?.value == 0f }
+        compose.onNodeWithText("Auto-Key: Off").performClick()
         compose.runOnIdle { store.setTransform(6, 45f) }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().size >= 2 }
         compose.runOnIdle {

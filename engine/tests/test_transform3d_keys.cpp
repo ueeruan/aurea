@@ -284,3 +284,29 @@ AUREA_TEST(Transform3D, SceneLayoutPreservesAnimationAndHandlesZeroScale) {
     e.set_scene_editor(false, 0, 0, 3);
     AUREA_CHECK_EQ(e.query_scene_guides(guides, 256), 0u);
 }
+
+AUREA_TEST(Transform3D, LayoutOpacityAndSkewPreserveKeysAndUndo) {
+    Rig rig; AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    auto& engine = rig.e;
+    auto* comp = engine.project()->timeline().composition(engine.project()->timeline().current());
+    for (u32 property : {12u, 13u, 14u}) {
+        editar(engine, rig.id, static_cast<TrackProperty>(property), FrameIndex{0}, 0.2f);
+        editar(engine, rig.id, static_cast<TrackProperty>(property), FrameIndex{30}, 0.6f);
+        seek(engine, 15);
+        Command command; command.type = CommandType::LayerLayoutTransform;
+        command.shape_param = ShapeParamPayload{rig.id, property, 0.5f};
+        AUREA_CHECK(engine.apply_command(command).ok());
+        const Track* track = comp->layer(rig.id)->tracks.find(static_cast<TrackProperty>(property));
+        AUREA_CHECK(track && track->keys.size() == 2);
+        if (track && track->keys.size() == 2) {
+            AUREA_CHECK(std::fabs(track->keys[0].value - 0.3f) < .001f);
+            AUREA_CHECK(std::fabs(track->keys[1].value - 0.7f) < .001f);
+            AUREA_CHECK_EQ(track->keys[0].time.value, 0);
+            AUREA_CHECK_EQ(track->keys[1].time.value, 30);
+        }
+        Command undo; undo.type = CommandType::Undo;
+        AUREA_CHECK(engine.apply_command(undo).ok());
+        track = comp->layer(rig.id)->tracks.find(static_cast<TrackProperty>(property));
+        AUREA_CHECK(track && std::fabs(track->keys[0].value - 0.2f) < .001f);
+    }
+}

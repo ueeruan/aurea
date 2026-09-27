@@ -169,7 +169,7 @@ enum class CommandType : u16 {
     ShapeSetFill,          ///< cor de preenchimento sRGB + alfa (TextColorPayload); alfa 0 = sem preenchimento
     ShapeSetStroke,        ///< cor do contorno (TextColorPayload)
     ShapeSetParam,         ///< ShapeParamPayload: 0 tipo, 1 canto, 2 pontas, 3 raio interno, 4 contorno, 5 largura, 6 altura
-    LayerLayoutTransform, ///< ShapeParamPayload: transform property 0..11, target at playhead; preserves animation key times/count.
+    LayerLayoutTransform, ///< ShapeParamPayload: transform property 0..14, target at playhead; preserves animation key times/count.
     LayerSetLightParam,    ///< ShapeParamPayload: layer, LightData field 0..9, value.
     LayerSetMaterialParam, ///< MaterialParamPayload: per-instance material override.
 };

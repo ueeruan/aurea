@@ -255,6 +255,7 @@ final class AureaModel: ObservableObject {
     @Published var liveNoticePopup: LiveNoticePopupRequest?
     @Published var vectorEditingPoints = false
     @Published var snapping = true
+    @Published var autoKeyTransforms = true
     @Published var freehandPoints: [Float] = []
     @Published var actionSheet: ActionSheetRequest?
     @Published var numericKeypad: KeypadRequest?
@@ -1371,6 +1372,10 @@ final class AureaModel: ObservableObject {
     /// Writing only its base transform would be hidden by the existing track.
     func editTransform(_ property: UInt32, value: Float) {
         guard let id = primarySelection, value.isFinite, !(selectedLayer?.locked ?? false) else { return }
+        if property < 15 && (sceneEditor || !autoKeyTransforms) {
+            mutate { $0.layoutTransform(id, property: property, value: value) }
+            refreshModel(force: true); return
+        }
         let mask = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         if property < 32 && mask & (1 << property) != 0 {
             keyProperty(property, value: value)
@@ -1996,7 +2001,7 @@ final class AureaModel: ObservableObject {
         // Submission is asynchronous: three scalar setters would each read
         // the same old XYZ and overwrite the preceding axis command.
         mutate { core in
-            if sceneEditor {
+            if sceneEditor || !autoKeyTransforms {
                 for axis in 0...2 { core.layoutTransform(id, property: UInt32(axis), value: next[axis]) }
             } else if animated {
                 for axis in 0...2 { core.insertKeyframe(forLayer: id, property: UInt32(axis), time: local, value: next[axis]) }
@@ -2524,7 +2529,7 @@ final class AureaModel: ObservableObject {
     /// Each component owns its track; editing X does not insert Y/Z keys.
     func setTransform(_ property: UInt32, value: Float, layer: Int64) {
         guard value.isFinite, let d = engine.layerDetail(layer) else { return }
-        if sceneEditor && property < 12 {
+        if (sceneEditor || !autoKeyTransforms) && property < 15 {
             mutate { $0.layoutTransform(layer, property: property, value: value) }
             refreshSelectedLayer(); return
         }
@@ -2563,6 +2568,10 @@ final class AureaModel: ObservableObject {
     /// Duas propriedades de uma vez (o arrasto da camada no palco: X e Y).
     func setTransform2(_ pa: UInt32, _ va: Float, _ pb: UInt32, _ vb: Float, layer: Int64) {
         guard va.isFinite, vb.isFinite, let d = engine.layerDetail(layer) else { return }
+        if (sceneEditor || !autoKeyTransforms) && pa < 15 && pb < 15 {
+            mutate { $0.layoutTransform(layer, property: pa, value: va); $0.layoutTransform(layer, property: pb, value: vb) }
+            refreshSelectedLayer(); return
+        }
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
         let position = StageGeom.floats(d["position"])

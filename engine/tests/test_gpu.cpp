@@ -385,6 +385,51 @@ void check_golden(const char* name, const FloatImage& img) {
 // =============================================================================
 // Backend
 // =============================================================================
+AUREA_TEST(Gpu, ChannelSplitSeparatesChannelsAndPreservesIdentity) {
+    if(!gpu().ok)return;
+    Scene s(96,64);
+    const auto id=s.solid(8,8,{1,1,1,1},48,32);
+    const auto baseline=s.render();
+    auto& fx=s.add_effect(id,effect_keys::kRgbSplit);
+    fx.params[0].constant.v[0]=16;
+    fx.params[4].constant.v[0]=-16;
+    const auto split=s.render();
+    AUREA_CHECK(split.v(64,32).x>.9f && split.v(64,32).y<.01f && split.v(64,32).z<.01f);
+    AUREA_CHECK(split.v(48,32).y>.9f && split.v(48,32).x<.01f && split.v(48,32).z<.01f);
+    AUREA_CHECK(split.v(32,32).z>.9f && split.v(32,32).x<.01f && split.v(32,32).y<.01f);
+    fx.params[6].constant.v[0]=0;
+    const auto unmixed=s.render();
+    AUREA_CHECK(unmixed.px==baseline.px);
+    fx.params[6].constant.v[0]=100;
+    fx.params[0].constant.v[0]=0;fx.params[4].constant.v[0]=0;
+    AUREA_CHECK(s.render().px==baseline.px);
+}
+
+AUREA_TEST(Gpu, ChannelSplitRadialCenterAndSignedAmount) {
+    if(!gpu().ok)return;
+    Scene s(96,64);
+    auto source=uniform_image(96,64,0,0,0,0);
+    for(u32 y=28;y<36;++y)for(u32 x=60;x<66;++x){
+        auto* pixel=&source.rgba[(y*96+x)*4];pixel[0]=pixel[1]=pixel[2]=pixel[3]=255;
+    }
+    const auto id=s.image(std::move(source),48,32);
+    const auto baseline=s.render();
+    auto& fx=s.add_effect(id,effect_keys::kChromaticAberration);
+    fx.params[0].constant.v[0]=8;
+    const auto positive=s.render();
+    fx.params[0].constant.v[0]=-8;
+    const auto negative=s.render();
+    f64 red=0,blue=0,rm=0,bm=0;
+    for(u32 y=0;y<64;++y)for(u32 x=0;x<96;++x){
+        const auto p=positive.v(x,y),n=negative.v(x,y);
+        red+=p.x*x;rm+=p.x;blue+=p.z*x;bm+=p.z;
+        AUREA_CHECK(std::abs(p.x-n.z)<.001f && std::abs(p.z-n.x)<.001f);
+    }
+    AUREA_CHECK(rm>1 && bm>1 && red/rm>blue/bm+3);
+    fx.params[0].constant.v[0]=0;
+    AUREA_CHECK(s.render().px==baseline.px);
+}
+
 AUREA_TEST(Gpu, Vulkan10CompatibilityRendersPixels) {
     Gpu legacy(true);
     AUREA_CHECK(legacy.ok);

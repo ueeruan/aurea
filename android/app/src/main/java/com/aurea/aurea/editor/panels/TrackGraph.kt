@@ -41,13 +41,15 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     val first = track.firstOrNull() ?: return
     val fps = store.project.fps.coerceAtLeast(1f)
     val revision = store.curveRevision
+    val handles = remember(layer, track, revision, speed, fps) { if (speed) speedHandles(store, layer, track, fps) else emptyList() }
+    val currentHandles by rememberUpdatedState(handles)
     val fullFrom = first.time
     val fullTo = max(fullFrom + 1, track.last().time)
     val full = remember(layer, first.property, first.effectIndex, first.paramIndex, fullFrom, fullTo, revision, speed, fps) {
         graphSamples(store.queryTrackCurve(layer, first, fullFrom, fullTo), fullFrom, fullTo, fps, speed)
     }
     fun fit(): GraphViewport {
-        val values = if (speed) full.map { it.value } + 0f else full.map { it.value } + track.map { it.value }
+        val values = if (speed) full.map { it.value } + handles.map { it.velocity } + 0f else full.map { it.value } + track.map { it.value }
         val low = values.minOrNull() ?: 0f
         val high = values.maxOrNull() ?: 1f
         val margin = max(0.1f, max(high - low, abs(high) * 0.05f) * 0.12f)
@@ -97,6 +99,10 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 fun point(key: KeyframeRow) = Offset((key.time - initial.from) / initial.duration * size.width,
                     size.height - (key.value - initial.low) / initial.range * size.height)
                 val radius = 24.dp.toPx()
+                fun handlePoint(h: SpeedHandle) = Offset((h.frame - initial.from) / initial.duration * size.width,
+                    size.height - (h.velocity - initial.low) / initial.range * size.height)
+                var handle = currentHandles.minByOrNull { (handlePoint(it) - down.position).getDistanceSquared() }
+                    ?.takeIf { (handlePoint(it) - down.position).getDistanceSquared() <= radius * radius }
                 var key = if (speed) null else currentTrack.minByOrNull { (point(it) - down.position).getDistanceSquared() }
                     ?.takeIf { (point(it) - down.position).getDistanceSquared() <= radius * radius }
                 if (key != null) store.selectKeyframe(layer, key)
@@ -115,12 +121,21 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                             if (multi && !began && key != null) picked = if (key.time in initialPicked) initialPicked - key.time else initialPicked + key.time
                             break
                         }
-                        if (event.changes.count { it.pressed } > 1 && key != null) {
+                        if (event.changes.count { it.pressed } > 1 && (key != null || handle != null)) {
                             if (began) { store.endGesture(); began = false }
                             key = null
+                            handle = null
                         }
                         val activeKey = key
-                        if (activeKey != null) {
+                        val activeHandle = handle
+                        if (activeHandle != null) {
+                            val delta = change.position - down.position
+                            if (!began && delta.getDistance() < 4.dp.toPx()) continue
+                            if (!began) { store.beginGesture("editar velocidade do intervalo"); began = true }
+                            val h = activeHandle.changed(activeHandle.frame + delta.x / size.width * initial.duration,
+                                activeHandle.velocity - delta.y / size.height * initial.range)
+                            if (h.all { it.isFinite() }) store.setKeyframeEasing(layer, activeHandle.key, Interp.BEZIER, h[0], h[1], h[2], h[3])
+                        } else if (activeKey != null) {
                             val dy = change.position.y - down.position.y
                             val dx = change.position.x - down.position.x
                             if (!began && kotlin.math.hypot(dx, dy) < 4.dp.toPx()) continue
@@ -173,6 +188,11 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
             }
             drawPath(path, AureaColors.Accent, style = Stroke(2.dp.toPx()))
+            handles.forEach { h ->
+                val p = point(h.frame, h.velocity)
+                drawLine(AureaColors.Muted, point((if(h.incoming) h.end.time else h.key.time).toFloat(), h.velocity), p)
+                drawCircle(AureaColors.Accent, 7.dp.toPx(), p, style = Stroke(2.dp.toPx()))
+            }
             if (!speed) track.forEach { key ->
                 drawCircle(if ((multi && key.time in picked) || (!multi && key.time == selected)) Color.White else AureaColors.Accent, 6.dp.toPx(), point(key.time.toFloat(), key.value))
             }

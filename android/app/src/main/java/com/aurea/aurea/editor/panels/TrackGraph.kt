@@ -1,6 +1,8 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -8,6 +10,7 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,13 +61,32 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
         graphSamples(store.queryTrackCurve(layer, first, from, to), from, to, fps, speed)
     }
     val currentTrack by rememberUpdatedState(track)
+    var multi by remember(layer, first.property, first.effectIndex, first.paramIndex) { mutableStateOf(false) }
+    var picked by remember(layer, first.property, first.effectIndex, first.paramIndex) { mutableStateOf(emptySet<Int>()) }
+    LaunchedEffect(track) { picked = picked.intersect(track.map { it.time }.toSet()) }
     val selected = store.selectedKeyframe?.second?.time
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (!speed) TextButton(onClick = { multi = !multi; if (!multi) picked = emptySet() }, modifier = Modifier.testTag("curve.multi")) {
+                Text(if (multi) "Done (${picked.size})" else "Select", fontSize = 11.sp)
+            }
             Text(if (speed) "${"%.3g".format(view.high)} /s" else "%.3g".format(view.high), fontSize = 10.sp, color = AureaColors.Muted, modifier = Modifier.weight(1f))
             Text("−", Modifier.size(48.dp).tocavel { view = view.transform(1 / 1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
             Text("+", Modifier.size(48.dp).tocavel { view = view.transform(1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
             Text(stringResource(R.string.panel_ajustar), Modifier.tocavel { view = fit() }.padding(8.dp), fontSize = 11.sp, color = AureaColors.Accent)
+        }
+        if (multi && !speed) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
+            TextButton(onClick = { picked = track.map { it.time }.toSet() }) { Text("All", fontSize = 11.sp) }
+            TextButton(onClick = { store.copySelectedKeys(layer, track.filter { it.time in picked }) }, enabled = picked.isNotEmpty()) { Text("Copy", fontSize = 11.sp) }
+            TextButton(onClick = {
+                val row = store.layers.firstOrNull { it.id == layer }
+                val target = track.maxOf { it.time }.toLong() + 1 + (row?.startFrame ?: 0) - (row?.offsetFrames ?: 0)
+                if (target in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() && store.copySelectedKeys(layer, track.filter { it.time in picked })) {
+                    store.pasteSelectedKeysAt(layer, target.toInt())
+                }
+            }, enabled = picked.isNotEmpty()) { Text("Duplicate", fontSize = 11.sp) }
+            TextButton(onClick = { store.pasteKeyframes(listOf(layer)) }) { Text("Paste", fontSize = 11.sp) }
+            TextButton(onClick = { if (store.editSelectedKeys(layer, track.filter { it.time in picked }, 0, true)) picked = emptySet() }, enabled = picked.isNotEmpty()) { Text("Delete", fontSize = 11.sp) }
         }
         Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("curve.trackGraph").pointerInput(layer, first.property, first.effectIndex, first.paramIndex, speed) {
             awaitEachGesture {
@@ -82,11 +104,17 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 val previous = key?.let { k -> currentTrack.lastOrNull { it.time < k.time }?.time }
                 val next = key?.let { k -> currentTrack.firstOrNull { it.time > k.time }?.time }
                 var began = false
+                val initialPicked = picked
+                val groupKeys = if (multi && key != null) currentTrack.filter { it.time in (if (key.time in picked) picked else setOf(key.time)) } else emptyList()
+                var groupDelta = 0
                 try {
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) break
+                        if (!change.pressed) {
+                            if (multi && !began && key != null) picked = if (key.time in initialPicked) initialPicked - key.time else initialPicked + key.time
+                            break
+                        }
                         if (event.changes.count { it.pressed } > 1 && key != null) {
                             if (began) { store.endGesture(); began = false }
                             key = null
@@ -97,6 +125,16 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                             val dx = change.position.x - down.position.x
                             if (!began && kotlin.math.hypot(dx, dy) < 4.dp.toPx()) continue
                             if (!began) { store.beginGesture("editar keyframe no gráfico"); began = true }
+                            if (multi && groupKeys.isNotEmpty()) {
+                                val delta = (dx / size.width * initial.duration).toInt()
+                                val step = delta.toLong() - groupDelta
+                                if (step in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() && step != 0L && store.editSelectedKeys(layer, groupKeys.map { it.copy(time = it.time + groupDelta) }, step.toInt())) {
+                                    groupDelta = delta
+                                    picked = groupKeys.map { it.time + delta }.toSet()
+                                }
+                                change.consume()
+                                continue
+                            }
                             val target = graphDragFrame(activeKey.time, dx / size.width * initial.duration, previous, next)
                             var actual = activeKey.copy(time = currentTime)
                             if (target != currentTime) {
@@ -136,7 +174,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             }
             drawPath(path, AureaColors.Accent, style = Stroke(2.dp.toPx()))
             if (!speed) track.forEach { key ->
-                drawCircle(if (key.time == selected) Color.White else AureaColors.Accent, 6.dp.toPx(), point(key.time.toFloat(), key.value))
+                drawCircle(if ((multi && key.time in picked) || (!multi && key.time == selected)) Color.White else AureaColors.Accent, 6.dp.toPx(), point(key.time.toFloat(), key.value))
             }
             store.detail?.localPlayhead?.let { frame ->
                 val x = point(frame.toFloat(), 0f).x

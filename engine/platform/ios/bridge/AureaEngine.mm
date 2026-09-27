@@ -1187,6 +1187,16 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     if (auto* e = self.engine) (void)e->copy_keyframes(static_cast<aurea::u64>(layerId), frame);
 }
 
+- (uint32_t)keyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references action:(uint32_t)action delta:(int32_t)delta {
+    auto* e = self.engine;
+    if (!e || references.count == 0 || references.count % 4 != 0 || references.count > 16384 * 4 || action > 2) return 0;
+    std::vector<aurea::i64> refs;
+    refs.reserve(references.count);
+    for (NSNumber* value in references) refs.push_back(value.longLongValue);
+    return action == 0 ? e->copy_keyframe_selection(static_cast<aurea::u64>(layerId), refs.data(), static_cast<aurea::u32>(refs.size() / 4))
+        : e->edit_keyframe_selection(static_cast<aurea::u64>(layerId), refs.data(), static_cast<aurea::u32>(refs.size() / 4), delta, action == 2);
+}
+
 - (void)pasteKeyframes:(NSArray<NSNumber*>*)layerIds atFrame:(int32_t)frame {
     auto* e = self.engine;
     if (!e) return;

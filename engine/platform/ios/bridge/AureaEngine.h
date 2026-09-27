@@ -395,6 +395,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)copyStyle:(long long)layerId;
 - (void)pasteStyle:(NSArray<NSNumber*>*)layerIds;
 - (void)copyKeyframes:(long long)layerId atFrame:(int32_t)frame;
+- (uint32_t)keyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references action:(uint32_t)action delta:(int32_t)delta;
 - (void)pasteKeyframes:(NSArray<NSNumber*>*)layerIds atFrame:(int32_t)frame;
 - (void)copyLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)pasteLayers:(int64_t)frame;

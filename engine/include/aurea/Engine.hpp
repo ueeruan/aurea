@@ -808,6 +808,11 @@ public:
     u32 paste_effects(const u64* ids, u32 count) noexcept;
     /// Keyframes no instante do frame (todas as propriedades com marca ali).
     u32 copy_keyframes(u64 layerId, i64 frame) noexcept;
+    /// Packed references: property, effect ID, parameter component, local frame.
+    /// Selection operations are atomic; moving cannot overwrite an unselected key.
+    u32 copy_keyframe_selection(u64 layerId, const i64* references, u32 count) noexcept;
+    u32 edit_keyframe_selection(u64 layerId, const i64* references, u32 count,
+                               i64 delta, bool remove) noexcept;
     u32 paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept;
     /// Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes.
     [[nodiscard]] u32 clipboard_state() noexcept;

@@ -1061,6 +1061,8 @@ private struct NativeTrackGraph: View {
     @State private var viewport = TrackGraphViewport(from: 0, to: 100, low: 0, high: 1)
     @State private var samples: [CGPoint] = []
     @State private var drag: GraphDrag?
+    @State private var multi = false
+    @State private var picked = Set<Int32>()
     @GestureState private var touching = false
     private struct GraphDrag {
         let initial: TrackGraphViewport
@@ -1069,6 +1071,8 @@ private struct NativeTrackGraph: View {
         var previous: Int32?
         var next: Int32?
         var began = false
+        var group: [KeyframeItem] = []
+        var groupDelta: Int32 = 0
     }
     private var start: Int32 { Int32(floor(viewport.from)) }
     private var end: Int32 { max(start + 1, Int32(ceil(viewport.to))) }
@@ -1114,6 +1118,10 @@ private struct NativeTrackGraph: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
+                if !speed {
+                    Button(multi ? "Done (\(picked.count))" : "Select") { multi.toggle(); if !multi { picked.removeAll() } }
+                        .font(.aurea(size: 11)).frame(minHeight: 44).accessibilityIdentifier("curve.multi")
+                }
                 Text(String(format: "%.3g%@", viewport.high, speed ? " /s" : ""))
                     .font(.aurea(size: 10)).foregroundStyle(AureaColors.muted)
                 Spacer(minLength: 0)
@@ -1121,6 +1129,29 @@ private struct NativeTrackGraph: View {
                 Button("+") { viewport = viewport.transformed(zoom: 1.5) }.frame(width: 44, height: 44)
                 Button(AureaText.t("panel_ajustar")) { fit() }.font(.aurea(size: 11))
             }.foregroundStyle(AureaColors.accent)
+            if multi && !speed {
+                ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 16) {
+                    Button("All") { picked = Set(keys.map(\.time)) }
+                    Spacer(minLength: 0)
+                    Button("Copy") { _ = model.engine.keyframeSelection(layer, references: references(keys.filter { picked.contains($0.time) }), action: 0, delta: 0) }.disabled(picked.isEmpty)
+                    Button("Duplicate") {
+                        guard let row = model.layers.first(where: { $0.id == layer }), let last = keys.last else { return }
+                        let target = Int64(last.time) + 1 + Int64(row.startFrame) - Int64(row.offsetFrames)
+                        guard target >= Int64(Int32.min), target <= Int64(Int32.max) else { return }
+                        if model.engine.keyframeSelection(layer, references: references(keys.filter { picked.contains($0.time) }), action: 0, delta: 0) > 0 {
+                            model.engine.pasteKeyframes([NSNumber(value: layer)], atFrame: Int32(target)); model.refreshModel(force: true)
+                        }
+                    }.disabled(picked.isEmpty)
+                    Spacer(minLength: 0)
+                    Button("Paste") { model.engine.pasteKeyframes([NSNumber(value: layer)], atFrame: Int32(clamping: model.status.playhead)); model.refreshModel(force: true) }
+                    Spacer(minLength: 0)
+                    Button("Delete") {
+                        if model.engine.keyframeSelection(layer, references: references(keys.filter { picked.contains($0.time) }), action: 2, delta: 0) > 0 {
+                            picked.removeAll(); model.refreshModel(force: true)
+                        }
+                    }.disabled(picked.isEmpty)
+                }.font(.aurea(size: 11)).frame(minHeight: 44).foregroundStyle(AureaColors.accent) }
+            }
             GeometryReader { geometry in
                 Canvas { context, size in
                     let view = viewport
@@ -1149,7 +1180,7 @@ private struct NativeTrackGraph: View {
                         for key in keys {
                             let p = plot(Double(key.time), Double(key.value))
                             let dot = Path(ellipseIn: CGRect(x: p.x - 6, y: p.y - 6, width: 12, height: 12))
-                            context.fill(dot, with: .color(key.time == model.curveSelectedTime ? .white : AureaColors.accent))
+                            context.fill(dot, with: .color((multi ? picked.contains(key.time) : key.time == model.curveSelectedTime) ? .white : AureaColors.accent))
                         }
                     }
                     let x = plot(Double(model.localPlayhead), 0).x
@@ -1158,7 +1189,7 @@ private struct NativeTrackGraph: View {
                 .gesture(DragGesture(minimumDistance: 0)
                     .updating($touching) { _, active, _ in active = true }
                     .onChanged { move($0, size: geometry.size) }
-                    .onEnded { _ in finish() })
+                    .onEnded { _ in finish(toggle: true) })
             }
             HStack {
                 Text(String(format: "%.3g%@", viewport.low, speed ? " /s" : ""))
@@ -1167,10 +1198,10 @@ private struct NativeTrackGraph: View {
             }.font(.aurea(size: 10)).foregroundStyle(AureaColors.muted)
         }
         .onAppear { fit() }
-        .onChange(of: signature) { _ in finish(); fit() }
+        .onChange(of: signature) { _ in finish(); multi = false; picked.removeAll(); fit() }
         .onChange(of: viewport) { _ in reload() }
-        .onChange(of: model.status.modelRevision) { _ in reload() }
-        .onChange(of: touching) { active in if !active { finish() } }
+        .onChange(of: model.status.modelRevision) { _ in reload(); picked.formIntersection(Set(keys.map(\.time))) }
+        .onChange(of: touching) { active in if !active && drag?.began == true { finish() } }
         .onDisappear { finish() }
     }
     private func move(_ value: DragGesture.Value, size: CGSize) {
@@ -1189,6 +1220,7 @@ private struct NativeTrackGraph: View {
             drag = GraphDrag(initial: viewport, key: nearest, currentTime: nearest?.time ?? 0,
                 previous: nearest.flatMap { selected in keys.last(where: { $0.time < selected.time })?.time },
                 next: nearest.flatMap { selected in keys.first(where: { $0.time > selected.time })?.time })
+            if multi, let nearest { drag?.group = picked.contains(nearest.time) ? keys.filter { picked.contains($0.time) } : [nearest] }
             if let nearest { model.curveSelectedTime = nearest.time }
         }
         guard var current = drag else { return }
@@ -1197,6 +1229,20 @@ private struct NativeTrackGraph: View {
             let changed = Double(key.value) - Double(value.translation.height / size.height) * current.initial.range
             guard changed.isFinite, abs(changed) <= Double(Float.greatestFiniteMagnitude) else { return }
             if !current.began { model.beginGesture("editar keyframe no gráfico"); current.began = true }
+            if multi && !current.group.isEmpty {
+                let desired = Double(value.translation.width / size.width) * current.initial.duration
+                guard desired.isFinite else { return }
+                let delta = Int32(clamping: Int64(min(Double(Int32.max), max(Double(Int32.min), desired.rounded()))))
+                let step = Int64(delta) - Int64(current.groupDelta)
+                if step >= Int64(Int32.min) && step <= Int64(Int32.max) && step != 0,
+                   model.engine.keyframeSelection(layer, references: references(current.group, offset: current.groupDelta), action: 1, delta: Int32(step)) > 0 {
+                    current.groupDelta = delta
+                    picked = Set(current.group.map { Int32(clamping: Int64($0.time) + Int64(delta)) })
+                    model.refreshModel(force: true)
+                }
+                drag = current
+                return
+            }
             let low = current.previous.map { Int64($0) + 1 } ?? Int64(Int32.min)
             let high = current.next.map { Int64($0) - 1 } ?? Int64(Int32.max)
             let desired = (Double(key.time) + Double(value.translation.width / size.width) * current.initial.duration).rounded()
@@ -1217,7 +1263,15 @@ private struct NativeTrackGraph: View {
                 dx: Double(value.translation.width / size.width), dy: Double(value.translation.height / size.height))
         }
     }
-    private func finish() {
+    private func references(_ selected: [KeyframeItem], offset: Int32 = 0) -> [NSNumber] {
+        selected.flatMap { key in
+            [NSNumber(value: key.property), NSNumber(value: key.effectIndex), NSNumber(value: key.paramIndex), NSNumber(value: Int64(key.time) + Int64(offset))]
+        }
+    }
+    private func finish(toggle: Bool = false) {
+        if toggle && multi, let current = drag, !current.began, let key = current.key {
+            if picked.contains(key.time) { picked.remove(key.time) } else { picked.insert(key.time) }
+        }
         let began = drag?.began == true; drag = nil
         if began { model.endGesture() }
     }

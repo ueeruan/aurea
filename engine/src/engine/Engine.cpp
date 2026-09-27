@@ -4581,15 +4581,108 @@ u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
     return static_cast<u32>(clipboard_.keys.size());
 }
 
+namespace {
+struct SelectedTrackKey { u32 track; u32 key; };
+bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
+                           std::vector<SelectedTrackKey>& out) {
+    if (!refs || count == 0 || count > 16384) return false;
+    for (u32 i = 0; i < count; ++i) {
+        const i64* ref = refs + i * 4;
+        if (ref[0] < 0 || ref[0] > 65535 || ref[1] < -1 || ref[1] > UINT32_MAX
+            || ref[2] < 0 || ref[2] > UINT32_MAX || ref[3] < INT32_MIN || ref[3] > INT32_MAX) return false;
+        bool found = false;
+        for (u32 t = 0; t < layer.tracks.size(); ++t) {
+            const Track& track = layer.tracks.at(t);
+            if (static_cast<i64>(track.property) != ref[0] || track.effectIndex != static_cast<u32>(ref[1])
+                || track.effectParamIndex != static_cast<u32>(ref[2])) continue;
+            const u32 key = track.find_exact(FrameIndex{ref[3]});
+            if (key == kInvalidIndex) return false;
+            if (std::none_of(out.begin(), out.end(), [=](const auto& item) { return item.track == t && item.key == key; }))
+                out.push_back({t, key});
+            found = true; break;
+        }
+        if (!found) return false;
+    }
+    return !out.empty();
+}
+}
+
+u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    std::vector<SelectedTrackKey> selected;
+    if (!layer || !resolve_selected_keys(*layer, refs, count, selected)) return 0;
+    i64 anchor = INT64_MAX;
+    for (const auto& item : selected) anchor = std::min(anchor, layer->tracks.at(item.track).keys[item.key].time.value);
+    std::vector<Clipboard::Key> copied;
+    for (const auto& item : selected) {
+        const Track& track = layer->tracks.at(item.track);
+        Keyframe key = track.keys[item.key]; key.time.value -= anchor;
+        EffectTypeId type = 0; u32 ordinal = 0;
+        if (track.property == TrackProperty::EffectParam) {
+            for (const auto& effect : layer->effects) if (effect.id == track.effectIndex) { type = effect.type; break; }
+            for (const auto& effect : layer->effects) {
+                if (effect.id == track.effectIndex) break;
+                if (effect.type == type) ++ordinal;
+            }
+        }
+        copied.push_back({track.property, track.effectIndex, track.effectParamIndex, type, key, ordinal});
+    }
+    clipboard_.keys = std::move(copied);
+    return static_cast<u32>(clipboard_.keys.size());
+}
+
+u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64 delta, bool remove) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    std::vector<SelectedTrackKey> selected;
+    if (!layer || layer->locked || (!remove && delta == 0) || delta < INT32_MIN || delta > INT32_MAX
+        || !resolve_selected_keys(*layer, refs, count, selected)) return 0;
+    std::vector<std::pair<u32, Track>> changed;
+    for (u32 index = 0; index < layer->tracks.size(); ++index) {
+        std::vector<u32> keys;
+        for (const auto& item : selected) if (item.track == index) keys.push_back(item.key);
+        if (keys.empty()) continue;
+        const Track& original = layer->tracks.at(index);
+        Track next = original;
+        next.keys.clear();
+        for (u32 k = 0; k < original.keys.size(); ++k) {
+            const bool picked = std::find(keys.begin(), keys.end(), k) != keys.end();
+            if (picked && remove) continue;
+            Keyframe key = original.keys[k];
+            if (picked) {
+                const i64 target = key.time.value + delta;
+                if (target < INT32_MIN || target > INT32_MAX) return 0;
+                key.time.value = target;
+            }
+            next.keys.push_back(key);
+        }
+        std::sort(next.keys.begin(), next.keys.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
+        for (usize k = 1; k < next.keys.size(); ++k) if (next.keys[k - 1].time == next.keys[k].time) return 0;
+        changed.emplace_back(index, std::move(next));
+    }
+    history_.before_mutation(*comp, project_->timeline().current(), remove ? "remover keyframes" : "mover keyframes");
+    for (auto& entry : changed) layer->tracks.at(entry.first) = std::move(entry.second);
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty(); request_render();
+    return static_cast<u32>(selected.size());
+}
+
 u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
-    if (!comp || !ids || clipboard_.keys.empty()) return 0;
+    if (!comp || !ids || clipboard_.keys.empty() || frame < INT32_MIN || frame > INT32_MAX) return 0;
     u32 placed = 0;
     for (u32 i = 0; i < count; ++i) {
         Layer* d = comp->layer(LayerId::unpack(ids[i]));
         if (!d || d->locked) continue;
         const FrameIndex local = d->local_time(FrameIndex{frame});
+        if (std::any_of(clipboard_.keys.begin(), clipboard_.keys.end(), [&](const auto& key) {
+            const i64 target = local.value + key.key.time.value;
+            return target < INT32_MIN || target > INT32_MAX;
+        })) continue;
         for (const Clipboard::Key& ck : clipboard_.keys) {
             u32 effectIndex = ck.effectIndex;
             if (ck.property == TrackProperty::EffectParam) {
@@ -4608,12 +4701,14 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
                 history_.before_mutation(*comp, project_->timeline().current(), "colar keyframes");
                 modelRevision_.fetch_add(1, std::memory_order_acq_rel);
             }
+            const FrameIndex target{local.value + ck.key.time.value};
+            if (target.value < INT32_MIN || target.value > INT32_MAX) continue;
             Track& t = d->tracks.get_or_create(ck.property, effectIndex, ck.effectParamIndex);
-            const u32 k = t.set(local, ck.key.value, ck.key.interp);
+            const u32 k = t.set(target, ck.key.value, ck.key.interp);
             if (k < t.keys.size()) {
                 // Curva inteira (bezier, tangentes, easing) do keyframe copiado.
                 Keyframe nk = ck.key;
-                nk.time = local;
+                nk.time = target;
                 t.keys[k] = nk;
             }
             ++placed;

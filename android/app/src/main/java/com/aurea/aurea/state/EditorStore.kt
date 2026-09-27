@@ -1909,6 +1909,24 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var curveRevision by mutableIntStateOf(0)
         private set
 
+    private fun keyReferences(keys: List<KeyframeRow>) = keys.flatMap {
+        listOf(it.property.toLong(), it.effectIndex.toLong(), it.paramIndex.toLong(), it.time.toLong())
+    }.toLongArray()
+
+    fun copySelectedKeys(layer: Long, keys: List<KeyframeRow>): Boolean =
+        engine.copyKeyframeSelection(layer, keyReferences(keys)) > 0
+
+    fun pasteSelectedKeysAt(layer: Long, compositionFrame: Int) {
+        engine.pasteKeyframes(longArrayOf(layer), compositionFrame.toLong())
+        refreshNow()
+    }
+
+    fun editSelectedKeys(layer: Long, keys: List<KeyframeRow>, delta: Int, remove: Boolean = false): Boolean {
+        val changed = engine.editKeyframeSelection(layer, keyReferences(keys), delta, remove) > 0
+        if (changed) refreshNow()
+        return changed
+    }
+
     fun queryTrackCurve(layer: Long, key: KeyframeRow, from: Int, to: Int): FloatArray =
         engine.queryTrackCurve(layer, key.property, key.effectIndex, key.paramIndex, from, to)
 

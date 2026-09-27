@@ -448,6 +448,40 @@ AUREA_TEST(Clipboard, ShiftedTrimmedLayersUseCompositionTime) {
     AUREA_CHECK(r.at(r.a, 30, 90) && r.at(r.b, 120, 180));
 }
 
+AUREA_TEST(Clipboard, SelectedKeysMoveAtomicallyCopySpacingAndDeleteWithUndo) {
+    EditRig r;
+    auto* layer = r.comp()->layer(LayerId::unpack(r.a));
+    for (i64 frame : {0, 10, 20}) {
+        layer->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{frame}, static_cast<f32>(frame));
+        layer->tracks.get_or_create(TrackProperty::PositionY).set(FrameIndex{frame}, 100.0f + frame);
+    }
+    const i64 refs[] = {0, -1, 0, 0, 0, -1, 0, 10, 1, -1, 0, 10};
+    // X at 10 would collide with unselected X at 20: nothing may move.
+    AUREA_CHECK_EQ(r.e.edit_keyframe_selection(r.a, refs, 3, 10, false), 0u);
+    AUREA_CHECK_EQ(r.L(r.a)->tracks.find(TrackProperty::PositionX)->keys[0].time.value, 0);
+    AUREA_CHECK_EQ(r.e.copy_keyframe_selection(r.a, refs, 3), 3u);
+    AUREA_CHECK_EQ(r.e.paste_keyframes(&r.b, 1, 35), 3u);
+    const auto* x = r.L(r.b)->tracks.find(TrackProperty::PositionX);
+    const auto* y = r.L(r.b)->tracks.find(TrackProperty::PositionY);
+    AUREA_CHECK(x && x->keys.size() == 2 && y && y->keys.size() == 1);
+    if (x && x->keys.size() == 2 && y && y->keys.size() == 1) {
+        AUREA_CHECK_EQ(x->keys[0].time.value, 5);
+        AUREA_CHECK_EQ(x->keys[1].time.value, 15);
+        AUREA_CHECK_EQ(y->keys[0].time.value, 15);
+    }
+    r.undo();
+    AUREA_CHECK_EQ(r.L(r.b)->tracks.size(), 0u);
+    AUREA_CHECK_EQ(r.e.edit_keyframe_selection(r.a, refs, 3, 5, false), 3u);
+    AUREA_CHECK_EQ(r.L(r.a)->tracks.find(TrackProperty::PositionX)->keys[0].time.value, 5);
+    AUREA_CHECK_EQ(r.L(r.a)->tracks.find(TrackProperty::PositionY)->keys[0].time.value, 0);
+    r.undo();
+    AUREA_CHECK_EQ(r.L(r.a)->tracks.find(TrackProperty::PositionX)->keys[0].time.value, 0);
+    AUREA_CHECK_EQ(r.e.edit_keyframe_selection(r.a, refs, 3, 0, true), 3u);
+    AUREA_CHECK_EQ(r.L(r.a)->tracks.find(TrackProperty::PositionX)->keys.size(), usize{1});
+    r.undo();
+    AUREA_CHECK_EQ(r.L(r.a)->tracks.find(TrackProperty::PositionX)->keys.size(), usize{3});
+}
+
 AUREA_TEST(Clipboard, RepeatedEffectsKeepSeparateKeysAndLockedTargetsStayUntouched) {
     EditRig r;
     for (u64 id : {r.a, r.b}) {

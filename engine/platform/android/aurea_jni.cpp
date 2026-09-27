@@ -967,6 +967,18 @@ AUREA_JNI jint AUREA_FN(nativeCopyKeyframes)(JNIEnv*, jclass, jlong handle, jlon
     return c ? static_cast<jint>(c->engine.copy_keyframes(static_cast<u64>(layer), frame)) : 0;
 }
 
+AUREA_JNI jint AUREA_FN(nativeKeyframeSelection)(JNIEnv* env, jclass, jlong handle, jlong layer, jlongArray references, jint action, jint delta) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !references || action < 0 || action > 2) return 0;
+    const jsize length = env->GetArrayLength(references);
+    if (length <= 0 || length % 4 != 0 || length > 16384 * 4) return 0;
+    std::vector<jlong> packed(length);
+    env->GetLongArrayRegion(references, 0, length, packed.data());
+    std::vector<i64> refs(packed.begin(), packed.end());
+    return action == 0 ? c->engine.copy_keyframe_selection(static_cast<u64>(layer), refs.data(), length / 4)
+        : c->engine.edit_keyframe_selection(static_cast<u64>(layer), refs.data(), length / 4, delta, action == 2);
+}
+
 AUREA_JNI jint AUREA_FN(nativePasteKeyframes)(JNIEnv* env, jclass, jlong handle, jlongArray ids, jlong frame) {
     NativeContext* c = ctx_of(handle);
     const auto v = jlongs(env, ids);

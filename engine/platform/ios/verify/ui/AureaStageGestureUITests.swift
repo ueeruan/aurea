@@ -522,6 +522,30 @@ import XCTest
         _ = try awaitSnapshot("One undo restores time and value") { $0.curveKeys == before.curveKeys }
     }
 
+    func testGraphMovesSelectedKeysTogetherAndUndoesOnce() throws {
+        let before = try launch("curve-isolation")
+        app.buttons["Edit the property curve"].firstMatch.tap()
+        let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
+        app.buttons["curve.mode.1"].tap()
+        app.buttons["curve.multi"].tap()
+        app.buttons["All"].tap()
+        let graph = app.otherElements["curve.trackGraph"].firstMatch
+        XCTAssertTrue(graph.waitForExistence(timeout: 5))
+        let frame = graph.frame
+        let start = CGPoint(x: frame.midX, y: frame.midY)
+        coordinate(start).press(forDuration: 0.05,
+            thenDragTo: coordinate(CGPoint(x: start.x + 20, y: start.y)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try awaitSnapshot("All selected keys move in the same gesture") {
+            ($0.curveKeys.filter { $0.property == Int(selected.curveProperty) }.map(\.time).min() ?? 0) > 0
+        }
+        let times = moved.curveKeys.filter { $0.property == Int(selected.curveProperty) }.map(\.time).sorted()
+        XCTAssertEqual(times.count, 3)
+        if times.count == 3 { XCTAssertEqual(times[1] - times[0], 30); XCTAssertEqual(times[2] - times[1], 30) }
+        XCTAssertEqual(moved.curveKeys.filter { $0.property != Int(selected.curveProperty) }, before.curveKeys.filter { $0.property != Int(selected.curveProperty) })
+        try undo()
+        _ = try awaitSnapshot("One undo restores the whole key selection") { $0.curveKeys == before.curveKeys }
+    }
+
     func testHoldingLayerBodyReordersAndOneUndoRestoresOrder() throws {
         let before = try launch("timeline-reorder")
         app.buttons["Back (clear the selection)"].firstMatch.tap()

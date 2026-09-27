@@ -107,8 +107,8 @@ private val rotationAxis = androidx.compose.runtime.mutableIntStateOf(2)
 private val RotationProps = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.ROTATION_Y, TrackProperty.ROTATION_Z)
 
 /** The rail diamond keys every axis exposed by the current dimension mode. */
-internal fun transformKeyProperties(tab: TransformTab, threeD: Boolean): IntArray = when {
-    tab == TransformTab.Girar -> RotationProps
+internal fun transformKeyProperties(tab: TransformTab, threeD: Boolean, axis: Int = 2): IntArray = when {
+    tab == TransformTab.Girar -> intArrayOf(RotationProps[if (threeD) axis.coerceIn(0, 2) else 2])
     threeD && tab == TransformTab.Mover -> intArrayOf(TrackProperty.POSITION_X, TrackProperty.POSITION_Y, TrackProperty.POSITION_Z)
     threeD && tab == TransformTab.Escalar -> intArrayOf(TrackProperty.SCALE_X, TrackProperty.SCALE_Y, TrackProperty.SCALE_Z)
     threeD && tab == TransformTab.Pivo -> intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y, TrackProperty.ANCHOR_Z)
@@ -150,9 +150,9 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val show3D by remember(store) { derivedStateOf { threeDOpen.value || uses3D(store.detail) } }
     val axis = if (show3D) rotationAxis.intValue else 2
     val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
-    // O losango da Rotação vale para X, Y e Z juntos (um keyframe só).
-    val keyProps = transformKeyProperties(tab, show3D)
-    androidx.compose.runtime.DisposableEffect(store, tab, show3D) {
+    // Rotation diamond and timeline focus follow the selected axis.
+    val keyProps = transformKeyProperties(tab, show3D, axis)
+    androidx.compose.runtime.DisposableEffect(store, tab, show3D, axis) {
         store.timelineFocus = keyProps.map { TrackKey(it) }
         onDispose { store.timelineFocus = null }
     }

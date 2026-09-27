@@ -100,5 +100,38 @@ class GraphGesturesTest {
         }
         try { compose.waitUntil(5000) { store.keyframes[id] == before } }
         catch (error: Throwable) { throw AssertionError("One undo must restore both coordinates. Before=$before After=${store.keyframes[id]}", error) }
+
+        compose.onNodeWithTag("curve.multi").performClick()
+        compose.onNodeWithText("All").performScrollTo().performClick()
+        compose.onNodeWithTag("curve.trackGraph").performTouchInput {
+            swipe(Offset(width / 2f, height / 2f), Offset(width * .62f, height / 2f), 350)
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().filter { it.property == 0 }.minOf { it.time } > 0 }
+        compose.runOnIdle {
+            val moved = store.keyframes[id].orEmpty().filter { it.property == 0 }.sortedBy { it.time }
+            assertEquals(listOf(30, 30), moved.zipWithNext { a, b -> b.time - a.time })
+            assertEquals(before.filter { it.property != 0 }, store.keyframes[id].orEmpty().filter { it.property != 0 })
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.keyframes[id] == before }
+        compose.onNodeWithText("All").performScrollTo().performClick()
+        compose.onNodeWithText("Copy").performScrollTo().performClick()
+        compose.runOnIdle { store.seek(90) }
+        compose.waitUntil(5000) { store.playhead == 90 }
+        compose.onNodeWithText("Paste").performScrollTo().performClick()
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 6 }
+        compose.runOnIdle {
+            assertEquals(listOf(0, 30, 60, 90, 120, 150), store.keyframes[id].orEmpty().filter { it.property == 0 }.map { it.time }.sorted())
+        }
+        compose.onNodeWithText("All").performScrollTo().performClick()
+        compose.onNodeWithText("Duplicate").performScrollTo().performClick()
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 12 }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 6 }
+        compose.onNodeWithText("All").performScrollTo().performClick()
+        compose.onNodeWithText("Delete").performScrollTo().performClick()
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().none { it.property == 0 } }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 6 }
     }
 }

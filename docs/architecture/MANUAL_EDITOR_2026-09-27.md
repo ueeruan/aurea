@@ -15,6 +15,9 @@ has passed acceptance.
   segment, rather than coincident X/Y/Z or effect-component keys.
 - Value graphs support frame-aligned horizontal time edits and vertical value
   edits, bounded by neighbouring keys so they are not overwritten.
+- Value graphs now include Select/All, group time drag, Copy/Paste, Duplicate
+  and Delete. Shared engine operations preserve relative timing and reject
+  collisions atomically. Rotation diamonds/focus follow the selected axis.
 
 ## Evidence so far
 
@@ -37,6 +40,13 @@ has passed acceptance.
 - Existing parenting tests: 6 / 750 checks passed, including GPU world-image
   preservation. Existing ClipTime tests: 19 / 1206 checks passed, including
   remap/reverse/freeze and audio timing. These are not full mobile acceptance.
+- Shared multi-key clipboard tests: 6 / 106 checks passed. Android real graph
+  test passed group dragging, spacing, copying, pasting, duplication, deletion
+  and single-step undo. Native iOS multi-key gesture regression added.
+- GPU motion blur tests: 4 / 121 checks passed, including 3D objects, glyphs,
+  particles and full-preview/export equivalence for particles.
+- Native d9c74d13 compile caught an Int64/Int32 mismatch in the toolbar clipboard
+  call. Explicit bounded conversion is now applied; native retest is required.
 - iOS compile/package passed at 084592bd. The first simulator dispatch used
   invalid capture scene names and did not execute gestures; corrected dispatch
   is run 36319772180. This is not a native gesture pass.
@@ -48,7 +58,7 @@ has passed acceptance.
 
 Native iOS execution and the two previous UI failures (curve-panel bounds and
 material preset reachability); axis manipulation and cancellation at different
-zoom levels; multiple-key selection/copy/move; explicit auto-key behaviour;
+zoom levels; native multiple-key selection/copy/move acceptance; explicit auto-key behaviour;
 effect-stack operations and numeric ranges; parenting/camera/remap and real motion
 blur checks; a complete 8–12-clip manual editing workflow using the same project
 on both platforms. Existing tools must be exercised before adding replacements.

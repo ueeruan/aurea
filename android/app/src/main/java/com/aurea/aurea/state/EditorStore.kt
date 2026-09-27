@@ -430,6 +430,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var selectedKeyframe by mutableStateOf<Pair<Long, KeyframeRow>?>(null)
         private set
 
+    var curveGraphMode by mutableIntStateOf(0)
+    var scaleAxesLinked by mutableStateOf(true)
+
     var timelineFocus by mutableStateOf<List<com.aurea.aurea.engine.TrackKey>?>(null)
 
     /** Aviso curto e não bloqueante (ex.: "Salvo na galeria"). A UI some com ele em ~2 s. */
@@ -1987,6 +1990,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return true
     }
 
+    fun setScale3(values: FloatArray, layer: Long? = primary) {
+        val id = layer ?: return
+        if (values.size != 3 || values.any { !it.isFinite() }) return
+        val d = (if (id == primary) detail else detailOf(id)) ?: return
+        group("scale XYZ") {
+            when (transformWrite(sceneEditor, autoKeyTransforms, (3..5).any { d.isAnimated(it) })) {
+                TransformWrite.Keyframe -> (0..2).forEach { insertKeyframe(id, 3 + it, NO_EFFECT, 0, d.localPlayhead, values[it]) }
+                TransformWrite.Layout -> (0..2).forEach { engine.layoutTransform(id, 3 + it, values[it]) }
+                TransformWrite.Static -> setScale(id, values[0], values[1], values[2])
+            }
+        }
+    }
+
     fun setTransform(property: Int, value: Float, layer: Long? = primary) {
         val id = layer ?: return
         if (!value.isFinite()) return
@@ -2128,6 +2144,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun queryTrackCurve(layer: Long, key: KeyframeRow, from: Int, to: Int): FloatArray =
         engine.queryTrackCurve(layer, key.property, key.effectIndex, key.paramIndex, from, to)
 
+    fun editGraphKeyframe(layer: Long, key: KeyframeRow, time: Int, value: Float, originalGroup: List<KeyframeRow> = graphKeyGroup(layer, key)): Int {
+        if (!value.isFinite()) return key.time
+        val peers = originalGroup
+        val target = time
+        val current = peers.firstOrNull { it.property == key.property }?.value ?: key.value
+        selectKeyframe(layer, key.copy(time = target, value = value))
+        send {
+            peers.forEach { peer ->
+                if (key.time != target) moveKeyframe(layer, peer.property, peer.effectIndex, peer.paramIndex, key.time, target)
+                if (peer.property == key.property || (scaleAxesLinked && key.property in 3..5)) {
+                    val amount = if (peer.property == key.property || current == 0f) value else peer.value * (value / current)
+                    setKeyframeValue(layer, peer.property, peer.effectIndex, peer.paramIndex, target, amount)
+                }
+            }
+        }
+        refreshNow()
+        return target
+    }
+
     fun setGraphKeyframeValue(layer: Long, key: KeyframeRow, value: Float) {
         if (!value.isFinite()) return
         send { setKeyframeValue(layer, key.property, key.effectIndex, key.paramIndex, key.time, value) }
@@ -2138,8 +2173,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         engine.queryKeyframeEasing(layer, key.property, key.effectIndex, key.paramIndex, key.time)
 
     /** Interpolação/easing de um keyframe (`interp` = `aurea::Interpolation`). */
+    fun graphKeyGroup(layer: Long, key: KeyframeRow): List<KeyframeRow> {
+        val row = layers.firstOrNull { it.id == layer }
+        val threeD = row?.let { it.kind in 8..10 || it.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D != 0 } == true
+        if (!threeD || key.effectIndex != NO_EFFECT || key.property !in 0..11) return listOf(key)
+        val base = key.property / 3 * 3
+        return keyframes[layer].orEmpty().filter { it.effectIndex == NO_EFFECT && it.property in base..base + 2 && it.time == key.time }.ifEmpty { listOf(key) }
+    }
+
     fun setKeyframeEasing(layer: Long, key: KeyframeRow, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float) {
-        send { setKeyframeInterpolation(layer, key.property, key.effectIndex, key.paramIndex, key.time, interp, bx1, by1, bx2, by2) }
+        val peers = graphKeyGroup(layer, key)
+        group("curve XYZ") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2) } }
         refreshNow()
     }
 

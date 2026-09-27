@@ -251,6 +251,19 @@ final class AureaModel: ObservableObject {
     @Published private(set) var cameraLens: [Float] = []
     @Published var curveEffect: UInt32 = UInt32.max
     @Published var curveParam: UInt32 = 0
+    func graphKeyGroup(_ layer: Int64, _ key: KeyframeItem) -> [KeyframeItem] {
+        guard let row = layers.first(where: { $0.id == layer }),
+              row.threeD || [UInt32(8), 9, 10].contains(row.kind),
+              key.effectIndex == UInt32.max, key.property < 12 else { return [key] }
+        let base = key.property / 3 * 3
+        let peers = (keyframes[layer] ?? []).filter {
+            $0.effectIndex == UInt32.max && $0.property >= base && $0.property < base + 3 && $0.time == key.time
+        }
+        return peers.isEmpty ? [key] : peers
+    }
+
+    @Published var curveGraphMode = 0
+    @Published var scaleAxesLinked = true
     @Published var curveSelectedTime: Int32?
     @Published var captionOptions: [String: NSNumber] = [:]
     @Published var vectorGroup: UInt32 = 0

@@ -10,6 +10,15 @@ import org.junit.Test
  * inteira" e nenhum keyframe de nulo/objeto arrastado ali era marcado.
  */
 class TransformWriteTest {
+    @Test fun linkedScalePreservesAllThreeRatiosFromGestureStart() {
+        val start = floatArrayOf(1f, 2f, 3f)
+        for (axis in 0..2) {
+            assertArrayEquals(floatArrayOf(2f, 4f, 6f), linkedScale(start, axis, start[axis] * 2), .0001f)
+            assertArrayEquals(floatArrayOf(-1f, -2f, -3f), linkedScale(start, axis, -start[axis]), .0001f)
+        }
+        assertArrayEquals(floatArrayOf(2f, 2f, 2f), linkedScale(floatArrayOf(0f, 0f, 0f), 2, 2f), .0001f)
+    }
+
     @Test fun editingAnyAxisKeysTheEntireAnimated3DVector() {
         for (base in listOf(0, 3, 6, 9)) for (animatedAxis in 0..2) for (editedAxis in 0..2) {
             assertArrayEquals(intArrayOf(base, base + 1, base + 2),

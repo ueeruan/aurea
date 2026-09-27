@@ -30,3 +30,10 @@ internal fun transformKeyGroup(property: Int, threeD: Boolean, animatedMask: Int
     val base = property / 3 * 3
     return if (animatedMask and (7 shl base) != 0) intArrayOf(base, base + 1, base + 2) else intArrayOf()
 }
+
+/** Absolute scale from the gesture-start snapshot; never accumulate a ratio per event. */
+internal fun linkedScale(original: FloatArray, axis: Int, value: Float): FloatArray {
+    require(original.size == 3 && axis in 0..2)
+    val from = original[axis]
+    return FloatArray(3) { if (it == axis || from == 0f) value else original[it] * (value / from) }
+}

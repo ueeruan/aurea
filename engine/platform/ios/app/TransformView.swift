@@ -6,7 +6,7 @@ struct TransformView: View {
     @EnvironmentObject private var model: AureaModel
     @State private var tab = 0
     @State private var axis = 2
-    @State private var linked = true
+    private var linked: Bool { model.scaleAxesLinked }
     @State private var expand3D = false
     @State private var text3D = false
     @State private var wholeText = false
@@ -274,20 +274,26 @@ struct TransformView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 field(number(value(3) * 100, decimals: 1) + "%", label: AureaText.t("panel_largura"), width: 61) {
-                    keypad("Largura", value(3) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: false, amount: $0, original: [value(3) * 100, value(4) * 100]) }
+                    keypad("Largura", value(3) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: false, amount: $0, original: [value(3) * 100, value(4) * 100, value(5) * 100]) }
                 }
-                Button { linked.toggle() } label: {
+                Button { model.scaleAxesLinked.toggle() } label: {
                     MaterialGlyph(linked ? "rounded.Link" : "rounded.LinkOff", size: 16, color: .white)
                         .frame(width: 34, height: 24).background(AureaColors.controlButton, in: RoundedRectangle(cornerRadius: 8))
                 }.buttonStyle(.plain).padding(.horizontal, 5)
                     .accessibilityLabel(AureaText.t(linked ? "panel_soltar_largura_altura" : "panel_travar_largura_altura"))
                 field(number(value(4) * 100, decimals: 1) + "%", label: AureaText.t("panel_altura"), width: 61, color: .white) {
-                    keypad("Altura", value(4) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: true, amount: $0, original: [value(3) * 100, value(4) * 100]) }
+                    keypad("Altura", value(4) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: true, amount: $0, original: [value(3) * 100, value(4) * 100, value(5) * 100]) }
                 }
             }.frame(height: 44).frame(maxWidth: .infinity)
             if threeD {
                 field(number(value(5) * 100, decimals: 1) + "%", label: "z", width: 80) {
-                    keypad("Escala Z", value(5) * 100, unit: "%", decimals: 1) { write([5: $0 / 100]) }
+                    keypad("Escala Z", value(5) * 100, unit: "%", decimals: 1) { amount in
+                        if linked {
+                            let from = value(5) * 100, factor = from != 0 ? amount / from : 1
+                            write([3: from != 0 ? value(3) * factor : amount / 100,
+                                   4: from != 0 ? value(4) * factor : amount / 100, 5: amount / 100])
+                        } else { write([5: amount / 100]) }
+                    }
                 }.frame(height: 44)
             }
             if [UInt32(1), 2].contains(model.selectedLayer?.kind ?? 0), sourceSize[0] > 0, sourceSize[1] > 0 {
@@ -302,17 +308,19 @@ struct TransformView: View {
         GeometryReader { bounds in
             TickRuler(value: { value(axisY ? 4 : 3) * 100 }, unitsPerDp: 0.5, active: !axisY, height: bounds.size.height)
                 .valueDrag(enabled: true, start: { value(axisY ? 4 : 3) * 100 }, unitsPerDp: { 0.5 }, min: -.infinity, max: .infinity,
-                           onStart: { gestureValues = [value(3) * 100, value(4) * 100]; beginGesture() },
+                           onStart: { gestureValues = [value(3) * 100, value(4) * 100, value(5) * 100]; beginGesture() },
                            onValue: { scaleWrite(axisY: axisY, amount: $0, original: gestureValues) }, onEnd: endGesture)
         }
     }
     private func scaleWrite(axisY: Bool, amount: Float, original: [Float]) {
-        guard original.count >= 2 else { return }
+        guard original.count >= 3 else { return }
         if linked {
             let from = original[axisY ? 1 : 0], multiplier = from != 0 ? amount / from : 1
             let x = axisY ? (from != 0 ? original[0] * multiplier : amount) : amount
             let y = axisY ? amount : (from != 0 ? original[1] * multiplier : amount)
-            write([3: x / 100, 4: y / 100])
+            var changes: [UInt32: Float] = [3: x / 100, 4: y / 100]
+            if threeD { changes[5] = (from != 0 ? original[2] * multiplier : amount) / 100 }
+            write(changes)
         } else { write([(axisY ? 4 : 3): amount / 100]) }
     }
     private var fitChips: some View {
@@ -538,7 +546,7 @@ struct TransformView: View {
     private func reset() {
         switch tab {
         case 0: write([0: Float(model.compositionWidth) / 2, 1: Float(model.compositionHeight) / 2])
-        case 1: write([3: 1, 4: 1])
+        case 1: write(threeD ? [3: 1, 4: 1, 5: 1] : [3: 1, 4: 1])
         case 2: write([UInt32(6 + rotationAxis): 0])
         case 3: write([12: 1])
         case 4: write([9: sourceSize[0] / 2, 10: sourceSize[1] / 2])

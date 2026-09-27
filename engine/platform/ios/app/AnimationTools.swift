@@ -277,7 +277,7 @@ struct NativeCurvePanel: View {
     @State private var ease = CurveEase.linear
     @State private var overshoot = false
     @State private var family = 0
-    @State private var graphMode = 0
+    private var graphMode: Int { model.curveGraphMode }
     @State private var saved: [CurvePresetItem] = []
     private struct Segment {
         let start: KeyframeItem
@@ -309,7 +309,7 @@ struct NativeCurvePanel: View {
             if let segment {
                 HStack(spacing: 0) {
                     ForEach(0..<3, id: \.self) { index in
-                        Button { graphMode = index } label: {
+                        Button { model.curveGraphMode = index } label: {
                             Text(AureaText.t(["panel_easing_curve", "particular_curve_value", "panel_velocidade"][index]))
                                 .font(.aurea(size: 12)).lineLimit(1)
                                 .foregroundStyle(graphMode == index ? AureaColors.accent : AureaColors.muted)
@@ -373,8 +373,8 @@ struct NativeCurvePanel: View {
             y1: h.count == 4 ? h[1] : 0, x2: h.count == 4 ? h[2] : 0.67, y2: h.count == 4 ? h[3] : 1)
     }
     private func apply(_ value: CurveEase, to key: KeyframeItem) {
-        // Other axes and effect components keep their own segment curves.
-        for sibling in model.keyframes[layer] ?? [] where sibling.time == key.time && curveSameTrack(sibling, key) {
+        // 3D transform axes share easing; effect components remain independent.
+        for sibling in model.graphKeyGroup(layer, key) {
             model.engine.editTrackKey(layer, property: sibling.property, effect: sibling.effectIndex, param: sibling.paramIndex,
                 time: sibling.time, action: 3, value: sibling.value, targetTime: sibling.time,
                 interpolation: value.interpolation, handles: [value.x1, value.y1, value.x2, value.y2].map { NSNumber(value: $0) })
@@ -485,9 +485,9 @@ struct NativeCurvePanel: View {
         let value = ease
         let copied = CurveClipboard.ease
         let actions: [SheetAction] = [
-            SheetAction(AureaText.t("panel_curva")) { graphMode = 0 },
-            SheetAction(AureaText.t("particular_curve_value")) { graphMode = 1 },
-            SheetAction(AureaText.t("panel_velocidade")) { graphMode = 2 },
+            SheetAction(AureaText.t("panel_curva")) { model.curveGraphMode = 0 },
+            SheetAction(AureaText.t("particular_curve_value")) { model.curveGraphMode = 1 },
+            SheetAction(AureaText.t("panel_velocidade")) { model.curveGraphMode = 2 },
             SheetAction(AureaText.t(expanded ? "editor_sair_tela_cheia" : "panel_expandir")) { if expanded { dismissExpanded() } else { fullscreen = true } },
             SheetAction(AureaText.t("panel_copiar_curva")) { CurveClipboard.ease = value },
             SheetAction(AureaText.t("panel_salvar_curva_como_preset")) {
@@ -1119,6 +1119,7 @@ private struct NativeTrackGraph: View {
         var next: Int32?
         var began = false
         var group: [KeyframeItem] = []
+        var originalPeers: [KeyframeItem] = []
         var groupDelta: Int32 = 0
         var handle: SpeedHandle?
     }
@@ -1274,6 +1275,13 @@ private struct NativeTrackGraph: View {
             drag = GraphDrag(initial: viewport, key: nearest, currentTime: nearest?.time ?? 0,
                 previous: nearest.flatMap { selected in keys.last(where: { $0.time < selected.time })?.time },
                 next: nearest.flatMap { selected in keys.first(where: { $0.time > selected.time })?.time })
+            if let nearest {
+                let peers = model.graphKeyGroup(layer, nearest)
+                drag?.originalPeers = peers
+                let tracks = (model.keyframes[layer] ?? []).filter { candidate in peers.contains { curveSameTrack($0, candidate) } }
+                drag?.previous = tracks.filter { $0.time < nearest.time }.map(\.time).max()
+                drag?.next = tracks.filter { $0.time > nearest.time }.map(\.time).min()
+            }
             if speed {
                 for handle in speedHandles {
                     let p = point(handle.frame,handle.velocity,size,viewport)
@@ -1292,8 +1300,10 @@ private struct NativeTrackGraph: View {
                 velocity:handle.velocity-Double(value.translation.height/size.height)*current.initial.range)
             guard h.allSatisfy({ $0.isFinite }) else { return }
             if !current.began { model.beginGesture("editar velocidade do intervalo");current.began = true }
-            model.engine.editTrackKey(layer,property:handle.key.property,effect:handle.key.effectIndex,param:handle.key.paramIndex,
-                time:handle.key.time,action:3,value:handle.key.value,targetTime:handle.key.time,interpolation:2,handles:h.map { NSNumber(value:$0) })
+            for peer in model.graphKeyGroup(layer, handle.key) {
+                model.engine.editTrackKey(layer,property:peer.property,effect:peer.effectIndex,param:peer.paramIndex,
+                    time:peer.time,action:3,value:peer.value,targetTime:peer.time,interpolation:2,handles:h.map { NSNumber(value:$0) })
+            }
             drag = current; model.refreshModel(force:true)
         } else if let key = current.key {
             guard current.began || hypot(value.translation.width, value.translation.height) >= 4 else { return }
@@ -1319,15 +1329,22 @@ private struct NativeTrackGraph: View {
             let desired = (Double(key.time) + Double(value.translation.width / size.width) * current.initial.duration).rounded()
             guard desired.isFinite, low <= high else { return }
             let target = Int32(min(Double(high), max(Double(low), desired)))
-            if target != current.currentTime {
-                model.engine.editTrackKey(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex,
-                    time: current.currentTime, action: 2, value: key.value, targetTime: target, interpolation: key.interpolation, handles: [])
-                current.currentTime = target
+            let live = key
+            let peers = current.originalPeers.isEmpty ? [key] : current.originalPeers
+            for peer in peers {
+                if target != current.currentTime {
+                    model.engine.editTrackKey(layer, property: peer.property, effect: peer.effectIndex, param: peer.paramIndex,
+                        time: current.currentTime, action: 2, value: peer.value, targetTime: target, interpolation: peer.interpolation, handles: [])
+                }
+                if peer.property == key.property || (model.scaleAxesLinked && (3...5).contains(key.property)) {
+                    let amount = peer.property == key.property || live.value == 0 ? Float(changed) : peer.value * (Float(changed) / live.value)
+                    model.engine.editTrackKey(layer, property: peer.property, effect: peer.effectIndex, param: peer.paramIndex,
+                        time: target, action: 0, value: amount, targetTime: target, interpolation: peer.interpolation, handles: [])
+                }
             }
+            current.currentTime = target
             drag = current
-            model.engine.editTrackKey(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex,
-                time: current.currentTime, action: 0, value: Float(changed), targetTime: current.currentTime, interpolation: key.interpolation, handles: [])
-            model.curveSelectedTime = current.currentTime
+            model.curveSelectedTime = target
             model.refreshModel(force: true)
         } else {
             viewport = current.initial.transformed(zoom: 1,

@@ -1311,7 +1311,7 @@ private class StageEdit(
         sy0 = d.scale[1]
         sz0 = d.scale.getOrElse(2) { 1f }
         // Camada 3D (tem gizmo): a pinça escala X, Y e Z juntos, sem achatar a profundidade.
-        threeD = store.gizmo != null
+        threeD = d.kind in 8..10 || d.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D != 0
         rot0 = d.rotation[2]
     }
 
@@ -1377,7 +1377,8 @@ private class StageEdit(
                 // proporção X/Y e o espelhamento.
                 val f = clampFactor(hypot(x - pivotX, y - pivotY) / dist0)
                 begin("escala")
-                store.setTransform2(TrackProperty.SCALE_X, sx0 * f, TrackProperty.SCALE_Y, sy0 * f)
+                if (threeD) store.setScale3(floatArrayOf(sx0 * f, sy0 * f, sz0 * f))
+                else store.setTransform2(TrackProperty.SCALE_X, sx0 * f, TrackProperty.SCALE_Y, sy0 * f)
             }
             MODE_ROTATE -> {
                 // Giro relativo (ângulo varrido em volta do pivô), sem salto.

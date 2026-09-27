@@ -268,7 +268,7 @@ private fun resetTab(env: PanelEnv, tab: TransformTab, axis: Int) {
             TrackProperty.POSITION_X, store.project.width / 2f, TrackProperty.POSITION_Y, store.project.height / 2f,
         )
         TransformTab.Girar -> store.setTransform(RotationProps[axis], 0f)
-        TransformTab.Escalar -> store.setTransform2(TrackProperty.SCALE_X, 1f, TrackProperty.SCALE_Y, 1f)
+        TransformTab.Escalar -> if (store.layers.firstOrNull { it.id == store.primary }?.isThreeD == true) store.setScale3(floatArrayOf(1f, 1f, 1f)) else store.setTransform2(TrackProperty.SCALE_X, 1f, TrackProperty.SCALE_Y, 1f)
         TransformTab.Opacidade -> store.setTransform(TrackProperty.OPACITY, 1f)
         TransformTab.Pivo -> store.setTransform2(
             TrackProperty.ANCHOR_X, d.sourceWidth / 2f, TrackProperty.ANCHOR_Y, d.sourceHeight / 2f,
@@ -917,19 +917,21 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
     val store = env.store
-    var locked by rememberSaveable { mutableStateOf(true) }
+    val locked = store.scaleAxesLinked
     val sx by remember(store) { derivedStateOf { (store.detail?.scale?.get(0) ?: 1f) * 100f } }
     val sy by remember(store) { derivedStateOf { (store.detail?.scale?.get(1) ?: 1f) * 100f } }
     val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
+    val sz by remember(store) { derivedStateOf { (store.detail?.scale?.get(2) ?: 1f) * 100f } }
     val lockNow by rememberUpdatedState(locked)
 
-    fun write(axisY: Boolean, v: Float, fromX: Float, fromY: Float) {
+    fun write(axisY: Boolean, v: Float, fromX: Float, fromY: Float, fromZ: Float) {
         if (lockNow) {
             val from = if (axisY) fromY else fromX
             val k = if (from != 0f) v / from else 1f
             val nx = if (axisY) (if (from != 0f) fromX * k else v) else v
             val ny = if (axisY) v else (if (from != 0f) fromY * k else v)
-            store.setTransform2(TrackProperty.SCALE_X, nx / 100f, TrackProperty.SCALE_Y, ny / 100f)
+            if (depth) store.setScale3(com.aurea.aurea.state.linkedScale(floatArrayOf(fromX, fromY, fromZ), if (axisY) 1 else 0, v).map { it / 100f }.toFloatArray())
+            else store.setTransform2(TrackProperty.SCALE_X, nx / 100f, TrackProperty.SCALE_Y, ny / 100f)
         } else {
             store.setTransform(if (axisY) TrackProperty.SCALE_Y else TrackProperty.SCALE_X, v / 100f)
         }
@@ -937,7 +939,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
 
     Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         ValueBox("${numeroPtBr(sx, 1)}%", width = 61.dp, label = stringResource(R.string.panel_largura), onTap = {
-            env.openKeypad(KeypadRequest("Largura", sx, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(false, it, sx, sy) })
+            env.openKeypad(KeypadRequest("Largura", sx, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(false, it, sx, sy, sz) })
         })
         Box(
             Modifier
@@ -945,21 +947,21 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
                 .size(width = 34.dp, height = 24.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(AureaColors.ControlButton)
-                .tocavel(shrink = 1f) { locked = !locked },
+                .tocavel(shrink = 1f) { store.scaleAxesLinked = !locked },
             contentAlignment = Alignment.Center,
         ) {
             Icon(if (locked) Icons.Rounded.Link else Icons.Rounded.LinkOff, contentDescription = if (locked) stringResource(R.string.panel_soltar_largura_altura) else stringResource(R.string.panel_travar_largura_altura), tint = Color.White, modifier = Modifier.size(16.dp))
         }
         ValueBox("${numeroPtBr(sy, 1)}%", width = 61.dp, label = stringResource(R.string.panel_altura), color = Color.White, onTap = {
-            env.openKeypad(KeypadRequest("Altura", sy, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(true, it, sx, sy) })
+            env.openKeypad(KeypadRequest("Altura", sy, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(true, it, sx, sy, sz) })
         })
     }
     if (depth) {
-        val sz = (store.detail?.scale?.get(2) ?: 1f) * 100f
         Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
             ValueBox("${numeroPtBr(sz, 1)}%", width = 80.dp, label = "z", onTap = {
                 env.openKeypad(KeypadRequest("Escala Z", sz, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
-                    store.setTransform(TrackProperty.SCALE_Z, it / 100f)
+                    if (lockNow) store.setScale3(com.aurea.aurea.state.linkedScale(floatArrayOf(sx, sy, sz), 2, it).map { v -> v / 100f }.toFloatArray())
+                    else store.setTransform(TrackProperty.SCALE_Z, it / 100f)
                 })
             })
         }
@@ -968,24 +970,24 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
         MediaFitChips(env)
         Spacer(Modifier.height(6.dp))
     }
-    val both = { Pair(sx, sy) }
-    ScaleTape(active = true, value = { sx }, both = both, onStart = { store.beginGesture("escala") }, onEnd = { store.endGesture() }) { v, fx, fy -> write(false, v, fx, fy) }
+    val both = { Triple(sx, sy, sz) }
+    ScaleTape(active = true, value = { sx }, both = both, onStart = { store.beginGesture("escala") }, onEnd = { store.endGesture() }) { v, fx, fy, fz -> write(false, v, fx, fy, fz) }
     Spacer(Modifier.height(8.dp))
-    ScaleTape(active = false, value = { sy }, both = both, onStart = { store.beginGesture("escala") }, onEnd = { store.endGesture() }) { v, fx, fy -> write(true, v, fx, fy) }
+    ScaleTape(active = false, value = { sy }, both = both, onStart = { store.beginGesture("escala") }, onEnd = { store.endGesture() }) { v, fx, fy, fz -> write(true, v, fx, fy, fz) }
 }
 
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.ScaleTape(
     active: Boolean,
     value: () -> Float,
-    both: () -> Pair<Float, Float>,
+    both: () -> Triple<Float, Float, Float>,
     onStart: () -> Unit,
     onEnd: () -> Unit,
-    onValue: (v: Float, fromX: Float, fromY: Float) -> Unit,
+    onValue: (v: Float, fromX: Float, fromY: Float, fromZ: Float) -> Unit,
 ) {
     // A foto dos DOIS eixos no início do arrasto: a escala proporcional parte dela
     // (partir do valor que volta do motor a cada passo acumularia o arredondamento).
-    var from by remember { mutableStateOf(Pair(0f, 0f)) }
+    var from by remember { mutableStateOf(Triple(0f, 0f, 0f)) }
     val read by rememberUpdatedState(value)
     val snap by rememberUpdatedState(both)
     val send by rememberUpdatedState(onValue)
@@ -1008,7 +1010,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleTape(
                     from = snap()
                     begin()
                 },
-                onValue = { v -> send(v, from.first, from.second) },
+                onValue = { v -> send(v, from.first, from.second, from.third) },
                 onEnd = { end() },
             ),
     )

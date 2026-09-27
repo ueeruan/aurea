@@ -106,9 +106,13 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 var key = if (speed) null else currentTrack.minByOrNull { (point(it) - down.position).getDistanceSquared() }
                     ?.takeIf { (point(it) - down.position).getDistanceSquared() <= radius * radius }
                 if (key != null) store.selectKeyframe(layer, key)
+                val originalGroup = key?.let { store.graphKeyGroup(layer, it) }.orEmpty()
                 var currentTime = key?.time ?: 0
-                val previous = key?.let { k -> currentTrack.lastOrNull { it.time < k.time }?.time }
-                val next = key?.let { k -> currentTrack.firstOrNull { it.time > k.time }?.time }
+                val groupTrack = store.keyframes[layer].orEmpty().filter { candidate -> originalGroup.any {
+                    it.property == candidate.property && it.effectIndex == candidate.effectIndex && it.paramIndex == candidate.paramIndex
+                } }
+                val previous = key?.let { k -> groupTrack.filter { it.time < k.time }.maxOfOrNull { it.time } }
+                val next = key?.let { k -> groupTrack.filter { it.time > k.time }.minOfOrNull { it.time } }
                 var began = false
                 val initialPicked = picked
                 val groupKeys = if (multi && key != null) currentTrack.filter { it.time in (if (key.time in picked) picked else setOf(key.time)) } else emptyList()
@@ -151,15 +155,8 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                                 continue
                             }
                             val target = graphDragFrame(activeKey.time, dx / size.width * initial.duration, previous, next)
-                            var actual = activeKey.copy(time = currentTime)
-                            if (target != currentTime) {
-                                store.moveKeyframe(layer, actual, target)
-                                currentTime = target
-                                actual = actual.copy(time = target)
-                            }
                             val value = activeKey.value - dy / size.height * initial.range
-                            store.setGraphKeyframeValue(layer, actual, value)
-                            store.selectKeyframe(layer, actual.copy(value = value))
+                            currentTime = store.editGraphKeyframe(layer, activeKey.copy(time = currentTime), target, value, originalGroup)
                         } else {
                             val pan = event.calculatePan()
                             val zoom = event.calculateZoom()

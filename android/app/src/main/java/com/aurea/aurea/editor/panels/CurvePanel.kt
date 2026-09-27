@@ -204,8 +204,8 @@ internal fun easeOf(store: EditorStore, layer: Long, k: KeyframeRow): Ease {
 }
 
 /**
- * Write only the outgoing segment of the selected component. Coincident
- * keys on other axes or effect components are independent tracks.
+ * Write the outgoing segment; the store synchronizes grouped 3D axes.
+ * Effects and planar tracks keep their independent curves.
  */
 internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease) {
     val keys = store.keyframes[layer] ?: return
@@ -256,7 +256,10 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             val keys = store.keyframes[layer] ?: return@derivedStateOf null
             val track = keys.track(sel)
             var i = track.indexOfFirst { it.time == sel.time }
-            if (i < 0 || track.size < 2) return@derivedStateOf null
+            if (track.size < 2) return@derivedStateOf null
+            // The engine publishes on its next frame; keep the gesture mounted
+            // while the selected key's new time is still in the command queue.
+            if (i < 0) i = track.indexOfLast { it.time <= sel.time }.coerceAtLeast(0)
             if (i == track.lastIndex) i-- // a última marca não abre trecho: mostra o que chega nela
             Triple(layer, track[i], track[i + 1])
         }
@@ -281,7 +284,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     val (layer, start, end) = seg
     val ease = remember(layer, start, store.curveRevision) { easeOf(store, layer, start) }
     var overshoot by rememberSaveable { mutableStateOf(false) }
-    var graphMode by rememberSaveable(layer, start.property, start.effectIndex, start.paramIndex) { mutableIntStateOf(0) }
+    val graphMode = store.curveGraphMode
     var menu by remember { mutableStateOf(false) }
     var savePrompt by remember { mutableStateOf(false) }
 
@@ -313,7 +316,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     Column(Modifier.fillMaxSize().background(CurvePanelFill)) {
     Row(Modifier.fillMaxWidth().height(48.dp).background(CurveRailFill)) {
         listOf(R.string.panel_easing_curve, R.string.particular_curve_value, R.string.panel_velocidade).forEachIndexed { index, label ->
-            Box(Modifier.weight(1f).fillMaxHeight().tocavel { graphMode = index }, contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxHeight().tocavel { store.curveGraphMode = index }, contentAlignment = Alignment.Center) {
                 Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = AureaType.Base.merge(TextStyle(fontSize = 12.sp,
                         color = if (graphMode == index) AureaColors.Accent else AureaColors.Muted)))
@@ -418,9 +421,9 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         AureaActionSheet(
             title = stringResource(R.string.panel_curva),
             actions = listOf(
-                SheetAction(stringResource(R.string.panel_curva)) { graphMode = 0 },
-                SheetAction(stringResource(R.string.particular_curve_value)) { graphMode = 1 },
-                SheetAction(stringResource(R.string.panel_velocidade)) { graphMode = 2 },
+                SheetAction(stringResource(R.string.panel_curva)) { store.curveGraphMode = 0 },
+                SheetAction(stringResource(R.string.particular_curve_value)) { store.curveGraphMode = 1 },
+                SheetAction(stringResource(R.string.panel_velocidade)) { store.curveGraphMode = 2 },
                 SheetAction(stringResource(if (expanded) R.string.editor_sair_tela_cheia else R.string.panel_expandir)) { if (expanded) collapse() else fullscreen = true },
                 SheetAction(stringResource(R.string.panel_copiar_curva)) { CurveClipboard.ease = ease },
                 SheetAction(stringResource(R.string.panel_salvar_curva_como_preset)) { savePrompt = true },

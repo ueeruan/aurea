@@ -11,9 +11,9 @@ class EditorLayoutTest {
             val panel = EditorLayout.solve(height, SheetContent.Panel, false)
             assertTrue(curve.sheet <= 280.01f)
             assertTrue(curve.sheet >= 230f)
-            assertTrue(curve.timeline >= 90f)
+            assertTrue(curve.timeline >= 110f)
             assertTrue(curve.preview >= panel.preview)
-            assertTrue(curve.sheet < panel.sheet)
+            assertTrue(curve.sheet <= panel.sheet)
             assertEquals(height, curve.topBar + curve.preview + curve.strip + curve.transport + curve.timeline + curve.sheet, 0.01f)
         }
     }
@@ -26,10 +26,10 @@ class EditorLayoutTest {
             assertTrue("dock at $height", dock.sheet >= 240f)
             assertTrue(editing.preview >= 96f)
             assertTrue(editing.preview < overview.preview)
-            assertTrue(editing.timeline >= 90f)
+            assertTrue(editing.timeline >= 110f)
             assertEquals(height, editing.topBar + editing.preview + editing.strip +
                 editing.transport + editing.timeline + editing.sheet, 0.01f)
-            assertEquals(height * 0.54f, overview.preview, 0.01f)
+            assertEquals(height * 0.54f - 32f, overview.preview, 0.01f)
         }
     }
 }

@@ -375,7 +375,10 @@ struct CaptionsPanel: View {
     @State private var sourcePath = ""
     @State private var transcriptSource: String?
     @State private var hasKey = false
-    @State private var language = ""
+    @State private var language: String = {
+        let code = Locale.current.languageCode ?? ""
+        return ["pt", "en", "es"].contains(code) ? code : ""
+    }()
     @State private var importing = false
     @State private var busy: String?
     @State private var error: String?

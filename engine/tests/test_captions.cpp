@@ -16,6 +16,7 @@
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/project/Presets.hpp"
 #include "aurea/timeline/Composition.hpp"
+#include "aurea/text/WhisperWords.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -26,6 +27,47 @@
 
 using namespace aurea;
 using namespace aurea::test;
+
+AUREA_TEST(Captions, WhisperPreservesUnalignedPortugueseSubtokens) {
+    std::vector<text::CaptionWord> result;
+    text::WhisperWords words(result, 27, 28, 56);
+    words.token(" trans", 1.1, 1.3, 1.1, 1.6);
+    words.token("cri", -1, -1, 1.1, 1.6);
+    words.token("ção", 1.4, 1.6, 1.1, 1.6);
+    words.flush();
+    AUREA_CHECK_EQ(result.size(), 1u);
+    AUREA_CHECK(result[0].text == "transcrição");
+    AUREA_CHECK(std::abs(result[0].start - 28.1) < .001);
+    AUREA_CHECK(std::abs(result[0].end - 28.6) < .001);
+}
+
+AUREA_TEST(Captions, WhisperKeepsWordsWithOverlappingTimestamps) {
+    std::vector<text::CaptionWord> result;
+    text::WhisperWords words(result, 0, 0, 28);
+    words.token(" uma", 1, 1.6, 1, 2);
+    words.token(" palavra", 1.5, 2, 1, 2);
+    words.flush();
+    AUREA_CHECK_EQ(result.size(), 2u);
+    AUREA_CHECK(result[0].text == "uma");
+    AUREA_CHECK(result[1].text == "palavra");
+    AUREA_CHECK(result[0].end <= result[1].start);
+    AUREA_CHECK(result[1].start < result[1].end);
+}
+
+AUREA_TEST(Captions, WhisperOverlapChunkEmitsWordOnlyOnce) {
+    std::vector<text::CaptionWord> result;
+    text::WhisperWords first(result, 0, 0, 28);
+    first.token(" antes", 27.5, 27.8, 27, 29);
+    first.token(" depois", 28.1, 28.5, 27, 29);
+    first.flush();
+    text::WhisperWords second(result, 27, 28, 56);
+    second.token(" antes", .5, .8, 0, 2);
+    second.token(" depois", 1.1, 1.5, 0, 2);
+    second.flush();
+    AUREA_CHECK_EQ(result.size(), 2u);
+    AUREA_CHECK(result[1].text == "depois");
+    AUREA_CHECK(std::abs(result[1].start - 28.1) < .001);
+}
 
 namespace {
 

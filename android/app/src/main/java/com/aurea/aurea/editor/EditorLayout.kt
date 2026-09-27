@@ -47,7 +47,7 @@ internal object EditorLayout {
         }
         val ws = workspace(totalHeight)
         // Stable preview height while floating add controls open and close.
-        var preview = (totalHeight * 0.54f)
+        var preview = (totalHeight * 0.54f - 32f)
             .coerceIn(PREVIEW_MIN, max(PREVIEW_MIN, ws - TIMELINE_MIN))
 
         val sheetFraction = when (content) {
@@ -63,7 +63,7 @@ internal object EditorLayout {
         // Camada escolhida ou painel: piso de 90 (uma linha de camada viva).
         // Nada escolhido: 120. Adicionando: o menu pode cobrir a timeline.
         val floor = when (content) {
-            SheetContent.Adding, SheetContent.Dock, SheetContent.Panel, SheetContent.Curve, SheetContent.Batch -> 90f
+            SheetContent.Adding, SheetContent.Dock, SheetContent.Panel, SheetContent.Curve, SheetContent.Batch -> TIMELINE_MIN
             else -> 120f
         }
         // Editing controls get usable space first; only the overview keeps

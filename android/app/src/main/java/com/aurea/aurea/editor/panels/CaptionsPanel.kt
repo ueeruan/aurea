@@ -76,7 +76,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
     }
     val layerId = store.primary ?: return
     LaunchedEffect(layerId, store.curveRevision) { cap.open(layerId) }
-    var language by remember { mutableStateOf<String?>(null) }
+    var language by remember { mutableStateOf<String?>(java.util.Locale.getDefault().language.takeIf { code -> Languages.any { it.first == code } }) }
     var editing by remember { mutableStateOf<Int?>(null) }
     val srt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { cap.importSrt(it) } }
     val s = cap.settings

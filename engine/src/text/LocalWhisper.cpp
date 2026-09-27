@@ -2,6 +2,7 @@
 #include "aurea/audio/Audio.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include "whisper.h"
+#include "aurea/text/WhisperWords.hpp"
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -66,7 +67,8 @@ Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
                                    resampled.data(), samples);
             for (u32 i = 0; i < samples; ++i) pcm[i] = (resampled[i*2] + resampled[i*2+1]) * 0.5f;
             stereo.clear(); stereo.shrink_to_fit(); resampled.clear(); resampled.shrink_to_fit();
-            auto p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+            auto p = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
+            p.beam_search.beam_size = 3;
             p.n_threads = 2; p.translate = false; p.no_context = true;
             p.language = language.empty() ? "auto" : language.c_str();
             p.print_progress = p.print_realtime = p.print_timestamps = p.print_special = false;
@@ -80,29 +82,18 @@ Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
             }; p.progress_callback_user_data = &state;
             if (whisper_full(ctx.get(), p, pcm.data(), static_cast<int>(pcm.size())) != 0)
                 return Status{cancelled.load() ? Errc::Cancelled : Errc::DecodeFailed, "Whisper interrompido"};
-            CaptionWord word;
-            auto flush = [&] {
-                const double middle = (word.start + word.end) * .5;
-                if (!word.text.empty() && word.end > word.start && middle >= base && middle < std::min(stop, base + 28.0)) {
-                    word.start = std::max(start, word.start); word.end = std::min(stop, word.end);
-                    if (result.empty() || word.start >= result.back().end - .02) result.push_back(word);
-                }
-                word = {};
-            };
+            text::WhisperWords words(result, from, base, std::min(stop, base + 28.0));
             for (int s = 0; s < whisper_full_n_segments(ctx.get()); ++s) {
                 for (int t = 0; t < whisper_full_n_tokens(ctx.get(), s); ++t) {
                     const auto token = whisper_full_get_token_data(ctx.get(), s, t);
-                    if (token.id >= whisper_token_eot(ctx.get()) || token.t0 < 0 || token.t1 < token.t0) continue;
-                    std::string text = whisper_full_get_token_text(ctx.get(), s, t);
-                    if (text.empty()) continue;
-                    if (text.front() == ' ') flush();
-                    const auto firstChar = text.find_first_not_of(" \r\n\t");
-                    if (firstChar == std::string::npos) continue;
-                    if (word.text.empty()) word.start = from + token.t0 * .01;
-                    word.text += text.substr(firstChar); word.end = from + token.t1 * .01;
+                    if (token.id >= whisper_token_eot(ctx.get())) continue;
+                    words.token(whisper_full_get_token_text(ctx.get(), s, t),
+                        token.t0 * .01, token.t1 * .01,
+                        whisper_full_get_segment_t0(ctx.get(), s) * .01,
+                        whisper_full_get_segment_t1(ctx.get(), s) * .01);
                 }
+                words.flush();
             }
-            flush();
             if (result.size() > 100000) return Status{Errc::BudgetExceeded, "transcricao muito longa"};
         }
         progress(100); return result;

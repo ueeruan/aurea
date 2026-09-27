@@ -1206,18 +1206,28 @@ AUREA_TEST(Fuzz, EffectParametersWithWildValuesRenderOnGpu) {
     f64 worstMs = 0.0;
     const u64 bypassBefore = EffectGraph::bypassed_total();
     for (u32 t = 0; t < reg.count(); ++t) {
+        u64 targetLayer=*layer;
+        if(reg.at(t).type_id()==effect_type_id(effect_keys::kText3DLayout)){
+            // The UI correctly rejects letter layout on video. Exercise its
+            // actual 3D text target instead of dereferencing an empty stack.
+            AUREA_CHECK(!e.apply_command(effect_add(*layer,reg.at(t).type_id())).ok());
+            scene3d::Text3DSpec text;text.content="F";
+            auto added=e.add_text3d(text);AUREA_CHECK(added.ok());if(!added.ok())continue;
+            targetLayer=*added;
+        }
         {
             Project* p = e.project();
             Composition* c = p->timeline().composition(p->timeline().current());
-            Layer* l = c->layer(LayerId::unpack(*layer));
+            Layer* l = c->layer(LayerId::unpack(targetLayer));
             l->effects.clear();
         }
-        AUREA_CHECK(e.apply_command(effect_add(*layer, reg.at(t).type_id())).ok());
+        const auto added=e.apply_command(effect_add(targetLayer,reg.at(t).type_id()));
+        AUREA_CHECK(added.ok());if(!added.ok())continue;
         for (u32 it = 0; it < 6; ++it) {
             {
                 Project* p = e.project();
                 Composition* c = p->timeline().composition(p->timeline().current());
-                Layer* l = c->layer(LayerId::unpack(*layer));
+                Layer* l = c->layer(LayerId::unpack(targetLayer));
                 // Direto no modelo: é o que uma expressão pode produzir (NaN,
                 // inf), coisa que o comando validado não deixa entrar.
                 for (ParamSlot& s : l->effects[0].params) {
@@ -1226,7 +1236,7 @@ AUREA_TEST(Fuzz, EffectParametersWithWildValuesRenderOnGpu) {
             }
             Command bump;   // revisão nova: o render não reaproveita o quadro anterior
             bump.type = CommandType::LayerSetOpacity;
-            bump.opacity.layer = LayerId::unpack(*layer);
+            bump.opacity.layer = LayerId::unpack(targetLayer);
             bump.opacity.opacity = it % 2 ? 1.0f : 0.99f;
             AUREA_CHECK(e.apply_command(bump).ok());
             const auto t0 = std::chrono::steady_clock::now();
@@ -1238,13 +1248,14 @@ AUREA_TEST(Fuzz, EffectParametersWithWildValuesRenderOnGpu) {
                 ++slow;
                 const Project* p = e.project();
                 const Composition* c = p->timeline().composition(p->timeline().current());
-                const Layer* l = c->layer(LayerId::unpack(*layer));
+                const Layer* l = c->layer(LayerId::unpack(targetLayer));
                 std::printf("\n      LENTO %.0f ms: %s [", ms, reg.at(t).info().key);
                 for (const ParamSlot& s : l->effects[0].params) std::printf("%g ", static_cast<f64>(s.constant.v[0]));
                 std::printf("]");
             }
             ++frames;
         }
+        if(targetLayer!=*layer){Command remove;remove.type=CommandType::LayerDelete;remove.layer_ref.layer=LayerId::unpack(targetLayer);AUREA_CHECK(e.apply_command(remove).ok());}
     }
     e.gpu()->destroy_texture(target);
     std::printf("(%u efeitos, %u quadros, %u recusados, %llu bypass, pior %.1f ms) ", reg.count(), frames, failed,

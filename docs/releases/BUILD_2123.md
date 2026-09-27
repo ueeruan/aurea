@@ -12,6 +12,8 @@ Pacotes em preparação. Android `com.aurea.aurea`, ARMv7 e ARM64, mínimo API 2
 
 A suíte ampla identificou divisão por zero em `audio::frame_to_sample` ao receber FPS positivo extremamente pequeno. Correção adicional: não usar denominador inteiro arredondado a zero; tratar taxas não finitas e saturar conversões fora de `i64`, preservando o caminho inteiro exato para taxas usuais/NTSC. A reprodução de 20.000 comandos agora passa (8 verificações). Suíte de áudio: 22 entradas/98.488 verificações, zero falhas. Os pacotes são regenerados com essa correção; os hashes preliminares não representam os arquivos finais.
 
+A bateria GPU identificou espera de até 12,5 s no RGB no tempo ao pedir o fim de uma mídia CFR. O limite anterior podia ficar 1 µs além da tolerância do decoder. O renderer agora limita ao timestamp do último frame. Regressão de comparação da imagem: erro zero, 0,7 ms; filtro TimeWarpRgb: 3 testes/24 verificações, zero falhas. Fuzz final: 5 testes/6.297 verificações, zero falhas, incluindo 6.000 arquivos mutados, 300 projetos, 20.000 comandos, 4.380 planos e 438 frames GPU. O teste do Text 3D Layout usa texto 3D real e verifica que o efeito é recusado em vídeo; não acessa mais uma pilha vazia depois da recusa esperada.
+
 ## Limites conhecidos
 
 Não equivale à conclusão integral do Prompt 4 ou à reprodução idêntica dos plugins desktop. Ver `PROMPT04_TRACKING_PROGRESS_2026-09-26.md` e `MEDIA_LAB_EFFECTS_2026-09-26.md` em `docs/architecture` para recursos faltantes e evidência. A51 5G e iPhone físicos não estão disponíveis nesta máquina. A mitigação Samsung não comprova a resolução do fechamento relatado.

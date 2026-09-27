@@ -7977,6 +7977,26 @@ AUREA_TEST(LightSweepGpu, BeamHasPixelWidthKeepsAlphaAndFollowsCenterKeys) {
     e.params[12].constant=ParamValue::scalar(2); const auto cutout=s.render(FrameIndex{30});
     AUREA_CHECK(cutout.v(40,40).w > .1f); AUREA_CHECK_NEAR(cutout.v(100,40).w,0,.001f);
 }
+
+AUREA_TEST(Gpu, TimeWarpRgbBeyondEndUsesLastFrameWithoutDecoderTimeout) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128,72,30.0);SyntheticConfig cfg;
+    cfg.width=64;cfg.height=36;cfg.frameCount=300;cfg.pattern=SyntheticPattern::FrameGray;
+    const auto id=s.video(cfg,64,36,.5f);
+    const auto last=s.render(FrameIndex{299});
+    (void)s.render(FrameIndex{0});
+    auto& effect=s.add_effect(id,effect_keys::kTimeWarpRgb);
+    for(u32 i=0;i<3;++i)effect.params[i].constant=ParamValue::scalar(120);
+    effect.params[3].constant=ParamValue::scalar(1); // seconds: beyond source duration
+    effect.params[4].constant=ParamValue::scalar(100);
+    effect.params[5].constant=ParamValue::boolean(true);
+    const auto begin=std::chrono::steady_clock::now();
+    const auto beyond=s.render(FrameIndex{0});
+    const auto elapsed=std::chrono::duration<f64,std::milli>(std::chrono::steady_clock::now()-begin).count();
+    f32 error=0;for(usize i=0;i<last.px.size();++i)error=std::max(error,std::abs(last.px[i]-beyond.px[i]));
+    std::printf("    endpoint error %.5f, %.1f ms ",error,elapsed);
+    AUREA_CHECK(error<.02f);AUREA_CHECK(elapsed<2000);
+}
 AUREA_TEST(CornerPinGpu, MovesContentAndKeyframesWithoutMovingLayer) {
     AUREA_REQUIRE_GPU();
     Scene s(180,100);s.comp->set_transparent_background(true);

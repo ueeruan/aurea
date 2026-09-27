@@ -22,6 +22,19 @@ namespace {
 
 constexpr SurfaceFormat kWorkFormat = SurfaceFormat::RGBA16F;
 
+// A CFR boundary must land on the last frame's actual timestamp. Using half
+// a frame before EOF can be one microsecond outside the decoder's tolerance
+// (30 fps: 9,983,334 vs 9,966,667), making an export wait until its timeout.
+i64 last_source_timestamp(const VideoStreamInfo& info, i64 frameUs) noexcept {
+    if(info.durationUs<=0)return 0;
+    if(info.preciseFrameTiming)return info.durationUs-1;
+    if(std::isfinite(info.fps)&&info.fps>0){
+        const f64 index=std::max(0.0,std::ceil(info.durationUs*info.fps/1e6-1e-6)-1.0);
+        return std::clamp<i64>(static_cast<i64>(std::llround(index*1e6/info.fps)),0,info.durationUs-1);
+    }
+    return std::max<i64>(0,info.durationUs-std::max<i64>(1,frameUs));
+}
+
 /// As máscaras de canal do RGB no tempo: uma amostra contribui exatamente um
 /// canal, e as três somadas refazem a cor inteira (o alfa entra dividido por
 /// três no shader de composição).
@@ -1733,8 +1746,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     mediaUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
                 }
                 const i64 dur = streamInfo.durationUs;
-                if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0,
-                    streamInfo.preciseFrameTiming ? dur - 1 : dur - src->frame_duration_us() / 2);
+                if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, last_source_timestamp(streamInfo,src->frame_duration_us()));
                 DecodeRequest req;
                 i64 requiredTimes[5] = {mediaUs};
                 u32 requiredCount = 1;
@@ -1795,8 +1807,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (const f64 srcFps = streamInfo.fps; srcFps > 0.0 && !streamInfo.preciseFrameTiming) {
                             us = std::llround(std::floor(us * srcFps / 1e6 + 1e-3) * 1e6 / srcFps);
                         }
-                        if (dur2 > 0) us = std::clamp<f64>(us, 0.0, static_cast<f64>(
-                            streamInfo.preciseFrameTiming ? dur2 - 1 : dur2 - src->frame_duration_us() / 2));
+                        if (dur2 > 0) us = std::clamp<f64>(us, 0.0, static_cast<f64>(last_source_timestamp(streamInfo,src->frame_duration_us())));
                         chanUs[c] = static_cast<i64>(std::llround(us));
                         requiredTimes[requiredCount++] = chanUs[c];
                     }

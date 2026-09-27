@@ -23,3 +23,10 @@ internal fun transformWrite(sceneEditor: Boolean, autoKey: Boolean, animated: Bo
     sceneEditor -> TransformWrite.Layout
     else -> TransformWrite.Static
 }
+
+/** Animated 3D vectors are one keyframe group, even if only one axis was animated. */
+internal fun transformKeyGroup(property: Int, threeD: Boolean, animatedMask: Int): IntArray {
+    if (!threeD || property !in 0..11) return intArrayOf()
+    val base = property / 3 * 3
+    return if (animatedMask and (7 shl base) != 0) intArrayOf(base, base + 1, base + 2) else intArrayOf()
+}

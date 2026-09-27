@@ -114,7 +114,7 @@ private val RotationProps = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.R
 
 /** The rail diamond keys every axis exposed by the current dimension mode. */
 internal fun transformKeyProperties(tab: TransformTab, threeD: Boolean, axis: Int = 2): IntArray = when {
-    tab == TransformTab.Girar -> intArrayOf(RotationProps[if (threeD) axis.coerceIn(0, 2) else 2])
+    tab == TransformTab.Girar -> if (threeD) RotationProps.copyOf() else intArrayOf(RotationProps[2])
     threeD && tab == TransformTab.Mover -> intArrayOf(TrackProperty.POSITION_X, TrackProperty.POSITION_Y, TrackProperty.POSITION_Z)
     threeD && tab == TransformTab.Escalar -> intArrayOf(TrackProperty.SCALE_X, TrackProperty.SCALE_Y, TrackProperty.SCALE_Z)
     threeD && tab == TransformTab.Pivo -> intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y, TrackProperty.ANCHOR_Z)

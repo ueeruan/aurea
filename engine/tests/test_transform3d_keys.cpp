@@ -438,3 +438,42 @@ AUREA_TEST(Transform3D, CameraOffsetAndSceneOrbitKeepEndpoints) {
     AUREA_CHECK_NEAR(layer->transform.anchor.y, anchor.y, .001f);
     AUREA_CHECK_NEAR(layer->transform.anchor.z, anchor.z, .001f);
 }
+
+AUREA_TEST(Transform3D, XYZGroupPreservesOtherAxesEndpointsAndUndoOnShapeNullCamera) {
+    Rig rig; AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    auto& e = rig.e;
+    auto null3d = e.add_null(true), camera = e.add_camera();
+    AUREA_CHECK(null3d.ok() && camera.ok()); if (!null3d.ok() || !camera.ok()) return;
+    for (u64 id : {rig.id.pack(), *null3d, *camera}) {
+        const auto lid = LayerId::unpack(id);
+        auto* layer = e.project()->timeline().composition(e.project()->timeline().current())->layer(lid);
+        layer->start = FrameIndex{10}; layer->offset = FrameIndex{5}; layer->end = FrameIndex{100};
+        for (u32 base : {0u, 3u, 6u, 9u}) {
+            const auto property = static_cast<TrackProperty>(base);
+            editar(e, lid, property, FrameIndex{5}, 10);
+            editar(e, lid, property, FrameIndex{65}, 30);
+            for (bool scene : {false, true}) {
+                e.set_scene_editor(scene, -30, 20, 3);
+                seek(e, 40); const auto before = detalhe(e, id);
+                AUREA_CHECK_EQ(before.localPlayhead, 35);
+                const float* values = base == 0 ? before.position : base == 3 ? before.scale : base == 6 ? before.rotation : before.anchor;
+                const float y = values[1], z = values[2];
+                Command c; c.type = CommandType::UndoBeginGroup; AUREA_CHECK(e.apply_command(c).ok());
+                editar(e, lid, property, FrameIndex{35}, 50);
+                editar(e, lid, static_cast<TrackProperty>(base + 1), FrameIndex{35}, y);
+                editar(e, lid, static_cast<TrackProperty>(base + 2), FrameIndex{35}, z);
+                c.type = CommandType::UndoEndGroup; AUREA_CHECK(e.apply_command(c).ok());
+                const auto keyed = detalhe(e, id);
+                AUREA_CHECK_EQ(keyed.keyAtPlayheadMask & (7u << base), 7u << base);
+                auto* current = e.project()->timeline().composition(e.project()->timeline().current())->layer(lid);
+                const auto* track = current->tracks.find(property);
+                AUREA_CHECK_NEAR(track->sample(FrameIndex{5}), 10, .001f);
+                AUREA_CHECK_NEAR(track->sample(FrameIndex{65}), 30, .001f);
+                AUREA_CHECK_NEAR(current->tracks.find(static_cast<TrackProperty>(base + 1))->sample(FrameIndex{35}), y, .001f);
+                AUREA_CHECK_NEAR(current->tracks.find(static_cast<TrackProperty>(base + 2))->sample(FrameIndex{35}), z, .001f);
+                c.type = CommandType::Undo; AUREA_CHECK(e.apply_command(c).ok());
+                AUREA_CHECK_EQ(detalhe(e, id).keyAtPlayheadMask & (7u << base), 0u);
+            }
+        }
+    }
+}

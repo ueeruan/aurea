@@ -529,7 +529,7 @@ import XCTest
         _ = try awaitSnapshot("A deliberate tap opens the layer options") { $0.sheet == "dock" }
     }
 
-    func testRotationDialOnlyKeysTheSelectedAxis() throws {
+    func testRotationDialKeysXYZTogether() throws {
         let before = try launch("rotation-isolation")
         let mode = app.descendants(matching: .any)["aurea.panel.mode.2"].firstMatch
         XCTAssertTrue(mode.waitForExistence(timeout: 5)); mode.tap()
@@ -550,13 +550,17 @@ import XCTest
         _ = try awaitSnapshot("Layout adjustment undoes once") { $0.curveKeys == before.curveKeys }
         app.buttons["stage.autokey"].tap()
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
-        let changed = try awaitSnapshot("Only rotation X receives a new key") {
+        let changed = try awaitSnapshot("Rotation XYZ receives one grouped key at the playhead") {
             $0.curveKeys.contains { $0.property == 6 && $0.time == 15 && abs($0.value) > 1 }
         }
-        XCTAssertEqual(changed.curveKeys.count, before.curveKeys.count + 1)
-        XCTAssertEqual(changed.curveKeys.filter { $0.property != 6 }, before.curveKeys.filter { $0.property != 6 })
+        XCTAssertEqual(changed.curveKeys.count, before.curveKeys.count + 3)
+        XCTAssertEqual(changed.curveKeys.filter { $0.time != 15 }, before.curveKeys)
+        for property in [7, 8] {
+            XCTAssertEqual(changed.curveKeys.first { $0.property == property && $0.time == 15 }?.value,
+                           before.curveKeys.first { $0.property == property }?.value)
+        }
         try undo()
-        _ = try awaitSnapshot("Undo restores independent rotation tracks") { $0.curveKeys == before.curveKeys }
+        _ = try awaitSnapshot("Undo restores all three rotation tracks") { $0.curveKeys == before.curveKeys }
     }
 
     func testCurvePresetChangesOnlySelectedComponentAndSegment() throws {
@@ -940,7 +944,7 @@ import XCTest
         coordinate(origin).press(forDuration: 0.05, thenDragTo: coordinate(end),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
         let keyed = try awaitSnapshot("Dragging the animated null in the scene keys frame 30") {
-            !$0.isManipulating && $0.curveKeys.contains { $0.property <= 2 && $0.time == 30 }
+            !$0.isManipulating && $0.curveKeys.filter { $0.property <= 2 && $0.time == 30 }.count == 3
         }
         XCTAssertEqual(keyed.curveKeys.filter { $0.time == 0 }, first, "The frame-0 pose must not move")
         try undo()

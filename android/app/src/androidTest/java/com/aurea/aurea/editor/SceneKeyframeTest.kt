@@ -83,7 +83,7 @@ class SceneKeyframeTest {
         compose.waitUntil(5000) { store.detail!!.position != before }
         // Track animada + Auto-Key ligado: o arrasto grava keyframe NO CABEÇOTE (quadro 30)…
         try {
-            compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property in 0..2 && it.time == 30 } }
+            compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property in 0..2 && it.time == 30 } == 3 }
         } catch (error: Throwable) {
             throw AssertionError("Arrastar o nulo animado na cena não marcou keyframe no quadro 30: ${store.keyframes[id]}", error)
         }

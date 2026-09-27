@@ -1973,10 +1973,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Effects); senão muda o valor fixo. Rotação em graus; escala em fração
      * (1 = 100 %); opacidade 0..1; posição/âncora em px da composição.
      */
+    private fun keyTransformGroup(id: Long, d: LayerDetail, changes: Map<Int, Float>): Boolean {
+        if (!autoKeyTransforms || changes.isEmpty()) return false
+        val threeD = d.kind in 8..10 || d.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D != 0 ||
+            kotlin.math.abs(d.position[2]) > .01f || kotlin.math.abs(d.rotation[0]) > .01f ||
+            kotlin.math.abs(d.rotation[1]) > .01f || d.animatedMask and ((1 shl 2) or (1 shl 6) or (1 shl 7)) != 0
+        val properties = transformKeyGroup(changes.keys.first(), threeD, d.animatedMask)
+        if (properties.isEmpty() || changes.keys.any { it !in properties }) return false
+        val values = properties.map { changes[it] ?: transformValue(d, it) }
+        group("keyframe XYZ") { properties.forEachIndexed { axis, property ->
+            insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, values[axis])
+        } }
+        return true
+    }
+
     fun setTransform(property: Int, value: Float, layer: Long? = primary) {
         val id = layer ?: return
         if (!value.isFinite()) return
         val d = if (id == primary) detail else detailOf(id)
+        if (d != null && keyTransformGroup(id, d, mapOf(property to value))) return
         // Trilha animada com Auto-Key marca keyframe TAMBÉM na cena 3D (ver `transformWrite`).
         if (property in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, d?.isAnimated(property) == true) == TransformWrite.Layout) {
             send { engine.layoutTransform(id, property, value) }; refreshNow(); return
@@ -2012,6 +2027,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = layer ?: return
         if (!va.isFinite() || !vb.isFinite()) return
         val d = if (id == primary) detail else detailOf(id)
+        if (d != null && keyTransformGroup(id, d, mapOf(pa to va, pb to vb))) return
         val animated = d?.isAnimated(pa) == true || d?.isAnimated(pb) == true
         if (pa in 0..14 && pb in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, animated) == TransformWrite.Layout) {
             send { engine.layoutTransform(id, pa, va); engine.layoutTransform(id, pb, vb) }
@@ -2042,9 +2058,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = (if (id == primary) detail else detailOf(id)) ?: return
         val row = layers.firstOrNull { it.id == id } ?: return
         val local = playhead - row.startFrame + row.offsetFrames
-        val anyHere = properties.any { p -> keyframes[id].orEmpty().any {
+        val keyedHere = properties.count { p -> keyframes[id].orEmpty().any {
             it.property == p && it.effectIndex == NO_EFFECT && it.time == local
         } }
+        val anyHere = if (properties.size == 3) keyedHere == 3 else keyedHere > 0
         group(if (anyHere) "remover keyframe" else "adicionar keyframe") {
             properties.forEach { p ->
                 if (anyHere) deleteKeyframe(id, p, NO_EFFECT, 0, local)
@@ -2659,6 +2676,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun applyGizmoComponents(id: Long, d: LayerDetail, base: Int, current: List<Float>, out: FloatArray) {
         if (out.size != 3 || current.size < 3 || out.any { !it.isFinite() }) return
+        if ((0..2).all { kotlin.math.abs(out[it] - current[it]) < .00001f }) return
+        if (keyTransformGroup(id, d, (0..2).associate { base + it to out[it] })) return
         send {
             for (axis in 0..2) {
                 if (kotlin.math.abs(out[axis] - current[axis]) < .00001f) continue

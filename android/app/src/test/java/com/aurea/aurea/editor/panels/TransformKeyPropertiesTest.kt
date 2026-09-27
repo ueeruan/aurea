@@ -8,12 +8,13 @@ import com.aurea.aurea.ui.ds.KeyframeLook
 import java.nio.ByteBuffer
 
 class TransformKeyPropertiesTest {
-    @Test fun planarKeysRemainRemovableAfterDepthControlsBecomeVisible() {
+    @Test fun partialXYZKeysAreCompletedBeforeTheyCanBeRemoved() {
         val buffer = ByteBuffer.allocate(LayerDetail.BYTES)
         buffer.putInt(92, 3)
         buffer.putInt(96, 3) // X/Y keyed, Z absent
         val detail = LayerDetail.read(buffer)
-        assertEquals(KeyframeLook.KeyHere, transformLook(detail, intArrayOf(0, 1, 2)))
+        assertEquals(KeyframeLook.Animated, transformLook(detail, intArrayOf(0, 1, 2)))
+        assertEquals(KeyframeLook.KeyHere, transformLook(detail.copy(keyAtPlayheadMask = 7), intArrayOf(0, 1, 2)))
         assertEquals(KeyframeLook.None, transformLook(detail, intArrayOf(6, 7, 8)))
         assertEquals(KeyframeLook.Animated, transformLook(detail.copy(keyAtPlayheadMask = 0), intArrayOf(0, 1, 2)))
     }
@@ -21,9 +22,9 @@ class TransformKeyPropertiesTest {
         assertArrayEquals(intArrayOf(0, 1, 2), transformKeyProperties(TransformTab.Mover, true))
         assertArrayEquals(intArrayOf(3, 4, 5), transformKeyProperties(TransformTab.Escalar, true))
         assertArrayEquals(intArrayOf(9, 10, 11), transformKeyProperties(TransformTab.Pivo, true))
-        assertArrayEquals(intArrayOf(8), transformKeyProperties(TransformTab.Girar, true))
-        assertArrayEquals(intArrayOf(6), transformKeyProperties(TransformTab.Girar, true, 0))
-        assertArrayEquals(intArrayOf(7), transformKeyProperties(TransformTab.Girar, true, 1))
+        assertArrayEquals(intArrayOf(6, 7, 8), transformKeyProperties(TransformTab.Girar, true))
+        assertArrayEquals(intArrayOf(6, 7, 8), transformKeyProperties(TransformTab.Girar, true, 0))
+        assertArrayEquals(intArrayOf(6, 7, 8), transformKeyProperties(TransformTab.Girar, true, 1))
         assertArrayEquals(intArrayOf(8), transformKeyProperties(TransformTab.Girar, false, 0))
     }
     @Test fun planarLayersKeepPlanarPositionScaleAndAnchor() {

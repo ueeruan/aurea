@@ -114,11 +114,11 @@ internal fun effectLook(store: EditorStore, effectId: Int, param: Int, component
 }
 
 /**
- * A partial property group is still a removable keyframe at the playhead.
+ * A 3D key is complete only when all three axes are keyed at the playhead.
  */
 internal fun transformLook(d: LayerDetail?, props: IntArray): KeyframeLook {
     d ?: return KeyframeLook.None
-    if (props.any { d.hasKeyAtPlayhead(it) }) return KeyframeLook.KeyHere
+    if (if (props.size == 3) props.all { d.hasKeyAtPlayhead(it) } else props.any { d.hasKeyAtPlayhead(it) }) return KeyframeLook.KeyHere
     return if (props.any { d.isAnimated(it) }) KeyframeLook.Animated else KeyframeLook.None
 }
 

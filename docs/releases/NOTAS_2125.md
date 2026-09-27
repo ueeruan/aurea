@@ -1,6 +1,7 @@
 # Aurea 2125
 
 - Auto-Key em X/Y e gizmos também na cena 3D; regressão de câmera com tempo local e órbita separada.
+- Keyframes XYZ agrupados em posição, escala, rotação e pivô de camadas, câmeras e nulos 3D, preservando os eixos não alterados.
 - Mover clipes exige toque longo parado; arrastar o corpo rola a timeline.
 - Painel 3D com estúdio, chão refletivo, qualidade, tonemap, exposição e bloom.
 - VHS e seis adaptações nativas de animação de texto com previews; dois estilos de legenda automática.

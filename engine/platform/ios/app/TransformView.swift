@@ -36,14 +36,14 @@ struct TransformView: View {
         case 3: return [12]; case 4: return [9, 10]; default: return [] }
     }
     private var keyProps: [UInt32] {
-        if tab == 2 { return props }
+        if tab == 2 { return threeD ? [6, 7, 8] : props }
         if threeD {
             switch tab { case 0: return [0, 1, 2]; case 1: return [3, 4, 5]; case 4: return [9, 10, 11]; default: break }
         }
         return props
     }
     private var look: KeyframeLook {
-        if keyProps.contains(where: { keyMask & (1 << $0) != 0 }) { return .keyHere }
+        if !keyProps.isEmpty && (keyProps.count == 3 ? keyProps.allSatisfy { keyMask & (1 << $0) != 0 } : keyProps.contains { keyMask & (1 << $0) != 0 }) { return .keyHere }
         return keyProps.contains { animatedMask & (1 << $0) != 0 } ? .animated : .none
     }
     private var curveKeys: [KeyframeItem] {
@@ -561,9 +561,10 @@ struct TransformView: View {
     }
     private func toggleKey() {
         guard !(model.selectedLayer?.locked ?? false), !keyProps.isEmpty else { return }
-        let remove = keyProps.contains { property in
+        let present = keyProps.filter { property in
             (model.keyframes[id] ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == model.localPlayhead }
-        }
+        }.count
+        let remove = keyProps.count == 3 ? present == 3 : present > 0
         let snapshot = keyProps.map { ($0, value($0)) }, local = model.localPlayhead
         model.mutate { core in
             core.beginUndoGroup()
@@ -575,11 +576,13 @@ struct TransformView: View {
         }
         model.refreshModel(force: true)
     }
-    /// Only the components explicitly changed by this gesture receive keys.
+    /// A 3D vector is keyed as XYZ; unchanged axes retain their evaluated value.
     private func write(_ changes: [UInt32: Float]) {
         guard !(model.selectedLayer?.locked ?? false), !changes.isEmpty, changes.values.allSatisfy(\.isFinite) else { return }
         let properties = changes.keys.sorted()
-        let group = properties
+        let base = properties[0] / 3 * 3
+        let grouped = threeD && properties[0] < 12 && properties.allSatisfy { $0 >= base && $0 < base + 3 }
+        let group: [UInt32] = grouped && model.autoKeyTransforms ? [base, base + 1, base + 2] : properties
         let keyed = group.contains { animatedMask & (1 << $0) != 0 }
         let snapshot = group.map { ($0, changes[$0] ?? value($0)) }, local = model.localPlayhead
         model.mutate { core in

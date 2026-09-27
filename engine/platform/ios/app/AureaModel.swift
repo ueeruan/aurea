@@ -1467,6 +1467,7 @@ final class AureaModel: ObservableObject {
     /// Writing only its base transform would be hidden by the existing track.
     func editTransform(_ property: UInt32, value: Float) {
         guard let id = primarySelection, value.isFinite, !(selectedLayer?.locked ?? false) else { return }
+        if let d = engine.layerDetail(id), keyTransformGroup(id, detail: d, changes: [property: value]) { return }
         let mask = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let keyed = property < 32 && mask & (1 << property) != 0
         // Trilha animada com Auto-Key marca keyframe TAMBÉM na cena 3D (como no Android).
@@ -2107,6 +2108,9 @@ final class AureaModel: ObservableObject {
         guard next.count == 3, previous.count >= 3, next.allSatisfy({ $0.isFinite }) else { return }
         guard let layerDetail = engine.layerDetail(id),
               let local = (layerDetail["localPlayhead"] as? NSNumber)?.int32Value else { return }
+        guard (0..<3).contains(where: { abs(next[$0] - previous[$0]) >= 0.00001 }) else { return }
+        let changes = Dictionary(uniqueKeysWithValues: (0..<3).map { (base + UInt32($0), next[$0]) })
+        if keyTransformGroup(id, detail: layerDetail, changes: changes) { return }
         let animated = (layerDetail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         // Submission is asynchronous: three scalar setters would each read
         // the same old XYZ and overwrite the preceding axis command.
@@ -2767,9 +2771,34 @@ final class AureaModel: ObservableObject {
 
     /// Muda UMA propriedade de transform, com semântica de keyframe: animada
     /// cria/atualiza o keyframe no cabeçote, senão muda o valor fixo. Rotação
-    /// Each component owns its track; editing X does not insert Y/Z keys.
+    /// Animated 3D vectors always key XYZ together at the layer-local playhead.
+    private func keyTransformGroup(_ id: Int64, detail d: [String: Any], changes: [UInt32: Float]) -> Bool {
+        guard autoKeyTransforms, let first = changes.keys.first, first < 12 else { return false }
+        let base = first / 3 * 3
+        guard changes.keys.allSatisfy({ $0 >= base && $0 < base + 3 }) else { return false }
+        let mask = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let row = layers.first { $0.id == id }
+        let position = StageGeom.floats(d["position"]), rotation = StageGeom.floats(d["rotation"])
+        let threeD = row?.threeD == true || [8, 9, 10].contains(row?.kind ?? 0) ||
+            (position.count >= 3 && abs(position[2]) > 0.01) ||
+            (rotation.count >= 2 && (abs(rotation[0]) > 0.01 || abs(rotation[1]) > 0.01)) || mask & ((1 << 2) | (1 << 6) | (1 << 7)) != 0
+        guard threeD, mask & (UInt32(7) << base) != 0,
+              let local = (d["localPlayhead"] as? NSNumber)?.int32Value else { return false }
+        let current = StageGeom.floats(d[["position", "scale", "rotation", "anchor"][Int(base / 3)]])
+        guard current.count >= 3 else { return false }
+        let values = (0..<3).map { changes[base + UInt32($0)] ?? current[$0] }
+        mutate { core in
+            core.beginUndoGroup()
+            for axis in 0..<3 { core.insertKeyframe(forLayer: id, property: base + UInt32(axis), time: local, value: values[axis]) }
+            core.endUndoGroup()
+        }
+        refreshSelectedLayer()
+        return true
+    }
+
     func setTransform(_ property: UInt32, value: Float, layer: Int64) {
         guard value.isFinite, let d = engine.layerDetail(layer) else { return }
+        if keyTransformGroup(layer, detail: d, changes: [property: value]) { return }
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         if property < 15 && transformLayout(animated: property < 32 && animated & (1 << property) != 0) {
             mutate { $0.layoutTransform(layer, property: property, value: value) }
@@ -2809,6 +2838,7 @@ final class AureaModel: ObservableObject {
     /// Duas propriedades de uma vez (o arrasto da camada no palco: X e Y).
     func setTransform2(_ pa: UInt32, _ va: Float, _ pb: UInt32, _ vb: Float, layer: Int64) {
         guard va.isFinite, vb.isFinite, let d = engine.layerDetail(layer) else { return }
+        if keyTransformGroup(layer, detail: d, changes: [pa: va, pb: vb]) { return }
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let isAnimated = (pa < 32 && animated & (1 << pa) != 0) || (pb < 32 && animated & (1 << pb) != 0)
         if pa < 15 && pb < 15 && transformLayout(animated: isAnimated) {

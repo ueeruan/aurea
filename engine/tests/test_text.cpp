@@ -392,3 +392,73 @@ AUREA_TEST(Text, ScriptFontMissingLatinUsesConfiguredDefaultAndKeepsClusters) {
     }
     text::set_default_font_path("");
 }
+
+// Contornos sobrepostos (fontes variáveis e muitas fontes baixadas) deixavam
+// a aresta interna no SDF do stb: risco dentro da letra e o stroke contornando
+// o meio dela. O SDF usado agora nunca contradiz a cobertura real do glifo.
+AUREA_TEST(Text, OverlappingContoursDoNotLeaveSeamsInGlyphSdf) {
+    const char* fonts[] = {"C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/SegUIVar.ttf",
+                           "C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/impact.ttf"};
+    const char* chars = "ABDGKMOQRSWXabdegkmoqsw&@%#48";
+    u32 checked = 0;
+    for (const char* path : fonts) {
+        const auto font = text::Font::load(path);
+        if (!font) continue;
+        u32 rawBad = 0, fixedBad = 0;
+        for (const char* c = chars; *c; ++c) {
+            text::GlyphSdfProbe raw, fixed;
+            if (!text::probe_glyph_sdf(*font, static_cast<u8>(*c), true, raw)) continue;
+            AUREA_CHECK(text::probe_glyph_sdf(*font, static_cast<u8>(*c), false, fixed));
+            AUREA_CHECK_EQ(fixed.w, raw.w);
+            AUREA_CHECK_EQ(fixed.h, raw.h);
+            rawBad += raw.contradictions;
+            fixedBad += fixed.contradictions;
+            // Onde o analítico já concordava, o SDF é o mesmo (qualidade intacta).
+            if (raw.contradictions == 0) AUREA_CHECK(raw.sdf == fixed.sdf);
+            ++checked;
+        }
+        std::printf("  %s: pixels contraditorios %u (stb cru) -> %u\n", path, rawBad, fixedBad);
+        AUREA_CHECK_EQ(fixedBad, 0u);
+    }
+    AUREA_CHECK(checked > 0);
+}
+
+// "Fonte importada não salva no app": o arquivo ficava em docs/fontes (Android)
+// ou docs/Media (iOS), mas o registro era só em memória — depois de reabrir o
+// app ela sumia do seletor. Um motor novo agora a encontra nas duas pastas.
+AUREA_TEST(Text, ImportedFontsReturnToTheListAfterReopeningTheApp) {
+    const std::string src = "C:/Windows/Fonts/consola.ttf";
+    if (!std::filesystem::exists(src)) return;
+    const std::string docs = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_reabrir_fontes";
+    std::filesystem::remove_all(docs);
+    std::filesystem::create_directories(docs + "/fontes");
+    std::filesystem::create_directories(docs + "/Media");
+    const std::string android = docs + "/fontes/0123abcd.ttf";
+    const std::string ios = docs + "/Media/Minha Fonte.ttf";
+    std::filesystem::copy_file(src, android);
+    std::filesystem::copy_file(src, ios);
+    std::filesystem::copy_file(src, docs + "/fontes/importando.ttf");   // cópia interrompida: fica fora
+    {
+        std::FILE* junk = std::fopen((docs + "/Media/clip.mp4").c_str(), "wb");
+        if (junk) { std::fputs("nao e fonte", junk); std::fclose(junk); }
+    }
+    Engine e;   // processo novo: nada foi importado nesta sessão
+    EngineConfig ec;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    ec.documentsDirectory = docs;
+    AUREA_CHECK(e.initialize(ec).ok());
+    bool androidListed = false, iosListed = false, partial = false;
+    for (const auto& f : e.list_fonts()) {
+        const std::string p = std::filesystem::path(f.path).generic_string();
+        androidListed |= f.imported && p == std::filesystem::path(android).generic_string();
+        iosListed |= f.imported && p == std::filesystem::path(ios).generic_string();
+        partial |= p.find("importando.") != std::string::npos;
+    }
+    AUREA_CHECK(androidListed);
+    AUREA_CHECK(iosListed);
+    AUREA_CHECK(!partial);
+    e.shutdown();
+    std::error_code ignored;
+    std::filesystem::remove_all(docs, ignored);
+}

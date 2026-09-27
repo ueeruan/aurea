@@ -47,6 +47,10 @@ public:
     /// Pastas de fontes do sistema (varridas na 1ª consulta). Vazio = padrão
     /// da plataforma (/system/fonts, C:/Windows/Fonts, /System/Library/Fonts).
     void set_system_dirs(std::vector<std::string> dirs);
+    /// Pastas onde o app guarda as fontes IMPORTADAS (Android: docs/fontes,
+    /// iOS: docs/Media). Varridas junto com as do sistema: a fonte importada
+    /// volta à lista depois de fechar e abrir o app, não só no projeto.
+    void set_imported_dirs(std::vector<std::string> dirs);
     /// Caminho guardado ("docs:…") → caminho real (o motor passa o dele).
     void set_path_resolver(std::function<std::string(const std::string&)> fn);
 
@@ -65,6 +69,7 @@ private:
     std::mutex mutex_;
     bool scanned_ = false;
     std::vector<std::string> dirs_;
+    std::vector<std::string> importedDirs_;
     std::vector<FontEntry> entries_;
     std::unordered_map<std::string, std::shared_ptr<const Font>> cache_;
     std::function<std::string(const std::string&)> resolver_;

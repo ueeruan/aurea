@@ -137,6 +137,13 @@ void FontManager::set_system_dirs(std::vector<std::string> dirs) {
     entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [](const FontEntry& e) { return !e.imported; }), entries_.end());
 }
 
+void FontManager::set_imported_dirs(std::vector<std::string> dirs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    importedDirs_ = std::move(dirs);
+    scanned_ = false;
+    entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [](const FontEntry& e) { return !e.imported; }), entries_.end());
+}
+
 void FontManager::set_path_resolver(std::function<std::string(const std::string&)> fn) {
     std::lock_guard<std::mutex> lock(mutex_);
     resolver_ = std::move(fn);
@@ -161,6 +168,27 @@ void FontManager::scan_locked() {
         ec.clear();
     }
     AUREA_LOG_INFO("fontes do sistema: %zu", entries_.size() - before);
+    // Importadas em sessões anteriores: o arquivo ficou na pasta do app, mas o
+    // registro era só em memória — sumiam da lista ao reabrir.
+    before = entries_.size();
+    for (const std::string& d : importedDirs_) {
+        for (std::filesystem::directory_iterator it(d, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            const std::string name = it->path().filename().string();
+            if (name.rfind("importando.", 0) == 0) continue;   // cópia pela metade
+            std::string ext = it->path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (ext != ".ttf" && ext != ".otf" && ext != ".ttc") continue;
+            const std::string path = it->path().string();
+            if (std::any_of(entries_.begin(), entries_.end(), [&](const FontEntry& x) { return x.path == path; })) continue;
+            FontEntry e;
+            if (!read_font_info(path, e)) continue;
+            e.imported = true;
+            entries_.push_back(std::move(e));
+        }
+        ec.clear();
+    }
+    AUREA_LOG_INFO("fontes importadas: %zu", entries_.size() - before);
 }
 
 std::vector<FontEntry> FontManager::list() {

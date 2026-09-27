@@ -99,6 +99,141 @@ std::shared_ptr<const Font> Font::load(const std::string& path) {
 }
 
 namespace {
+
+/// Distância euclidiana exata ao quadrado, 1D (Felzenszwalb & Huttenlocher).
+void edt_1d(const f32* f, int n, f32* d, int* v, f32* z) {
+    int k = 0;
+    v[0] = 0;
+    z[0] = -1e20f;
+    z[1] = 1e20f;
+    for (int q = 1; q < n; ++q) {
+        f32 s = ((f[q] + static_cast<f32>(q * q)) - (f[v[k]] + static_cast<f32>(v[k] * v[k]))) / static_cast<f32>(2 * q - 2 * v[k]);
+        while (k > 0 && s <= z[k]) {
+            --k;
+            s = ((f[q] + static_cast<f32>(q * q)) - (f[v[k]] + static_cast<f32>(v[k] * v[k]))) / static_cast<f32>(2 * q - 2 * v[k]);
+        }
+        ++k;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = 1e20f;
+    }
+    k = 0;
+    for (int q = 0; q < n; ++q) {
+        while (z[k + 1] < static_cast<f32>(q)) ++k;
+        const f32 dq = static_cast<f32>(q - v[k]);
+        d[q] = dq * dq + f[v[k]];
+    }
+}
+
+/// `g`: 0 nas sementes, "infinito" no resto → distância ao quadrado até a semente mais perto.
+void edt_2d(std::vector<f32>& g, int w, int h) {
+    const int n = std::max(w, h);
+    std::vector<f32> f(static_cast<usize>(n)), d(static_cast<usize>(n)), z(static_cast<usize>(n) + 1);
+    std::vector<int> v(static_cast<usize>(n));
+    for (int x = 0; x < w; ++x) {
+        for (int y = 0; y < h; ++y) f[static_cast<usize>(y)] = g[static_cast<usize>(y) * w + x];
+        edt_1d(f.data(), h, d.data(), v.data(), z.data());
+        for (int y = 0; y < h; ++y) g[static_cast<usize>(y) * w + x] = d[static_cast<usize>(y)];
+    }
+    for (int y = 0; y < h; ++y) {
+        f32* row = g.data() + static_cast<usize>(y) * w;
+        std::copy(row, row + w, f.begin());
+        edt_1d(f.data(), w, d.data(), v.data(), z.data());
+        std::copy(d.begin(), d.begin() + w, row);
+    }
+}
+
+/// Cobertura do glifo na MESMA grade do SDF do stb (caixa + `padding`).
+std::vector<u8> glyph_coverage_grid(const stbtt_fontinfo* info, f32 scale, int glyph, int padding, int w, int h) {
+    std::vector<u8> cov(static_cast<usize>(w) * h, 0);
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    stbtt_GetGlyphBitmapBoxSubpixel(info, glyph, scale, scale, 0.0f, 0.0f, &x0, &y0, &x1, &y1);
+    const int gw = x1 - x0, gh = y1 - y0;
+    if (gw > 0 && gh > 0 && gw + 2 * padding <= w && gh + 2 * padding <= h) {
+        stbtt_MakeGlyphBitmapSubpixel(info, cov.data() + static_cast<usize>(padding) * w + padding, gw, gh, w, scale, scale,
+                                      0.0f, 0.0f, glyph);
+    }
+    return cov;
+}
+
+/// Pixels em que o SDF analítico contradiz a cobertura: "borda" no meio do
+/// preenchimento (contornos sobrepostos — fontes variáveis e muitas fontes
+/// baixadas — deixam a aresta interna no SDF: risco dentro da letra e
+/// contorno do stroke no meio dela) ou preenchimento no vazio.
+u32 sdf_contradictions(const u8* sdf, const std::vector<u8>& cov, int w, int h, u8 onedge, f32 distScale) {
+    u32 bad = 0;
+    const f32 margin = distScale * 0.5f;
+    for (int y = 1; y + 1 < h; ++y) {
+        for (int x = 1; x + 1 < w; ++x) {
+            bool full = true, empty = true;
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const u8 c = cov[static_cast<usize>(y + dy) * w + x + dx];
+                    full = full && c == 255;
+                    empty = empty && c == 0;
+                }
+            const f32 s = static_cast<f32>(sdf[static_cast<usize>(y) * w + x]);
+            if ((full && s < onedge + margin) || (empty && s > onedge - margin)) ++bad;
+        }
+    }
+    return bad;
+}
+
+/// SDF a partir da cobertura (regra de preenchimento correta mesmo com
+/// contornos sobrepostos): EDT exata dos dois lados + borda sub-pixel pela
+/// própria cobertura anti-serrilhada.
+void sdf_from_coverage(const std::vector<u8>& cov, int w, int h, u8 onedge, f32 distScale, u8* out) {
+    constexpr f32 kFar = 1e20f;
+    std::vector<f32> toInside(cov.size()), toOutside(cov.size());
+    for (usize i = 0; i < cov.size(); ++i) {
+        const bool in = cov[i] >= 128;
+        toInside[i] = in ? 0.0f : kFar;
+        toOutside[i] = in ? kFar : 0.0f;
+    }
+    edt_2d(toInside, w, h);
+    edt_2d(toOutside, w, h);
+    for (usize i = 0; i < cov.size(); ++i) {
+        f32 s = cov[i] >= 128 ? std::sqrt(toOutside[i]) - 0.5f : -(std::sqrt(toInside[i]) - 0.5f);
+        if (cov[i] > 0 && cov[i] < 255) s = static_cast<f32>(cov[i]) / 255.0f - 0.5f;   // borda: fração coberta
+        out[i] = static_cast<u8>(std::clamp(static_cast<f32>(onedge) + s * distScale, 0.0f, 255.0f));
+    }
+}
+
+/// stbtt_GetGlyphSDF à prova de contornos sobrepostos. O analítico fica
+/// quando concorda com a cobertura (a qualidade de sempre); se contradiz,
+/// o SDF é refeito da cobertura na mesma grade (mesmo tamanho e offset).
+u8* glyph_sdf(const stbtt_fontinfo* info, f32 scale, int glyph, int padding, u8 onedge, f32 distScale,
+              int* w, int* h, int* xoff, int* yoff) {
+    u8* sdf = stbtt_GetGlyphSDF(info, scale, glyph, padding, onedge, distScale, w, h, xoff, yoff);
+    if (!sdf || *w <= 2 || *h <= 2) return sdf;
+    const std::vector<u8> cov = glyph_coverage_grid(info, scale, glyph, padding, *w, *h);
+    if (sdf_contradictions(sdf, cov, *w, *h, onedge, distScale) == 0) return sdf;
+    sdf_from_coverage(cov, *w, *h, onedge, distScale, sdf);
+    return sdf;
+}
+
+} // namespace
+
+bool probe_glyph_sdf(const Font& font, u32 codepoint, bool analyticOnly, GlyphSdfProbe& out) {
+    const Font::Impl& f = font.impl();
+    const int glyph = stbtt_FindGlyphIndex(&f.info, static_cast<int>(codepoint));
+    if (!glyph) return false;
+    const f32 fs = stbtt_ScaleForPixelHeight(&f.info, kGlyphBasePx);
+    int w = 0, h = 0, xo = 0, yo = 0;
+    const int pad = static_cast<int>(kGlyphSpread);
+    u8* sdf = analyticOnly ? stbtt_GetGlyphSDF(&f.info, fs, glyph, pad, 128, kGlyphDistScale, &w, &h, &xo, &yo)
+                           : glyph_sdf(&f.info, fs, glyph, pad, 128, kGlyphDistScale, &w, &h, &xo, &yo);
+    if (!sdf) return false;
+    out.w = w;
+    out.h = h;
+    out.sdf.assign(sdf, sdf + static_cast<usize>(w) * h);
+    stbtt_FreeSDF(sdf, nullptr);
+    out.coverage = glyph_coverage_grid(&f.info, fs, glyph, pad, w, h);
+    out.contradictions = sdf_contradictions(out.sdf.data(), out.coverage, w, h, 128, kGlyphDistScale);
+    return true;
+}
+
+namespace {
 std::mutex g_fontMutex;
 std::string g_fontPath;
 std::shared_ptr<const Font> g_font;
@@ -632,7 +767,7 @@ bool atlas_glyph(Atlas& A, const Font::Impl& f, int glyph, AtlasEntry& out) {
     if (auto it = A.entries.find(key); it != A.entries.end()) { out = it->second; return true; }
     const f32 fs = stbtt_ScaleForPixelHeight(&f.info, kGlyphBasePx);
     int w = 0, h = 0, xo = 0, yo = 0;
-    u8* sdf = stbtt_GetGlyphSDF(&f.info, fs, glyph, static_cast<int>(kGlyphSpread), 128, kGlyphDistScale, &w, &h, &xo, &yo);
+    u8* sdf = glyph_sdf(&f.info, fs, glyph, static_cast<int>(kGlyphSpread), 128, kGlyphDistScale, &w, &h, &xo, &yo);
     AtlasEntry e;
     if (sdf && w > 0 && h > 0) {
         if (A.shelfX + static_cast<u32>(w) + 1 > kGlyphAtlasSize) { A.shelfX = 1; A.shelfY += A.shelfH + 1; A.shelfH = 0; }
@@ -845,7 +980,7 @@ bool rasterize(const Font& font, const TextData& t, f32 scale, TextRaster& out) 
             }
             if (hasStroke) {
                 int sw = 0, sh = 0, sx = 0, sy = 0;
-                u8* sdf = stbtt_GetGlyphSDF(gi, gfs, gl.id, sdfPad, static_cast<u8>(onedge), distScale, &sw, &sh, &sx, &sy);
+                u8* sdf = glyph_sdf(gi, gfs, gl.id, sdfPad, static_cast<u8>(onedge), distScale, &sw, &sh, &sx, &sy);
                 if (sdf) {
                     const int bx = static_cast<int>(std::floor(gx)) + sx;
                     const int by = static_cast<int>(std::floor(gy)) + sy;

@@ -330,6 +330,11 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     text::set_default_font_path(config.defaultFontPath);
     // Fonte importada guardada como "docs:…": o gerenciador resolve pelo motor.
     text::FontManager::instance().set_path_resolver([this](const std::string& s) { return resolve_asset_path(s); });
+    if (!config.documentsDirectory.empty()) {
+        // Onde cada app copia a fonte importada: Android docs/fontes, iOS docs/Media.
+        text::FontManager::instance().set_imported_dirs({config.documentsDirectory + "/fontes",
+                                                         config.documentsDirectory + "/Media"});
+    }
     media_.set_factory(config.mediaFactory);
     media_.set_memory(&memory_);
     media_.set_ready_callback(&Engine::on_frame_ready, this);

@@ -108,6 +108,18 @@ inline constexpr f32 kGlyphBasePx = 64.0f;
 inline constexpr f32 kGlyphSpread = 16.0f;       ///< px da base, em volta do glifo
 inline constexpr f32 kGlyphDistScale = 8.0f;     ///< valor (0..255) por px da base
 
+/// Diagnóstico do SDF de um glifo na grade do atlas (kGlyphBasePx, kGlyphSpread):
+/// o SDF usado no texto, a cobertura do mesmo glifo na MESMA grade e quantos
+/// pixels os dois contradizem (borda no meio do preenchimento / fill no vazio).
+struct GlyphSdfProbe {
+    int w = 0, h = 0;
+    std::vector<u8> sdf, coverage;
+    u32 contradictions = 0;
+};
+/// `analyticOnly` = o SDF analítico cru do stb (sem a correção de contornos
+/// sobrepostos). Falso se a fonte não tem glifo para o codepoint.
+bool probe_glyph_sdf(const Font& font, u32 codepoint, bool analyticOnly, GlyphSdfProbe& out);
+
 struct GlyphQuad {
     f32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;   ///< px da layer (margem incluída)
     f32 u0 = 0, v0 = 0, u1 = 0, v1 = 0;   ///< no atlas

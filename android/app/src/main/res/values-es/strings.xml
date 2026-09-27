@@ -331,6 +331,8 @@
     <string name="editor_video_pronto">Vídeo listo</string>
     <string name="editor_vinculada_outra_camada_trocar">Vinculada a otra capa · cambiar</string>
     <string name="editor_vincular_escolhidas_camada">Vincular las elegidas a una capa</string>
+    <string name="editor_vincular_novo_nulo">Nuevo nulo</string>
+    <string name="msg_camadas_seguindo_novo_nulo">%1$s capa(s) siguiendo el nuevo nulo</string>
     <string name="editor_vincular_outra_camada">Vincular a otra capa</string>
     <string name="editor_volta_aceitar_movimento_edicao">Vuelve a aceptar movimiento y edición</string>
     <string name="editor_voltar_composicao_principal">Volver a la composición principal</string>

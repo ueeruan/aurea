@@ -498,6 +498,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setLightParam:(long long)layer param:(uint32_t)param value:(float)value;
 - (long long)addCamera;
 - (long long)addNull:(BOOL)threeD;
+/// "Vincular a novo nulo": cria um nulo no centro (mundo) das camadas e faz
+/// dele o pai de todas — nada sai do lugar na tela; nulo 3D se alguma camada
+/// é 3D; um passo de desfazer. Devolve o id do nulo, ou −Errc.
+- (long long)parentToNewNull:(NSArray<NSNumber*>*)layerIds;
 - (long long)addText3D:(NSString*)content depth:(float)depth alignment:(uint32_t)alignment
                      r:(float)r g:(float)g b:(float)b;
 - (long long)addParticles:(uint32_t)preset;

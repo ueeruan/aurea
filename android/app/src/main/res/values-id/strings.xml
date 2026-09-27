@@ -330,6 +330,8 @@
     <string name="editor_video_pronto">Video siap</string>
     <string name="editor_vinculada_outra_camada_trocar">Terpaut ke lapisan lain · ganti</string>
     <string name="editor_vincular_escolhidas_camada">Pautkan yang terpilih ke sebuah lapisan</string>
+    <string name="editor_vincular_novo_nulo">Null baru</string>
+    <string name="msg_camadas_seguindo_novo_nulo">%1$s lapisan mengikuti Null baru</string>
     <string name="editor_vincular_outra_camada">Pautkan ke lapisan lain</string>
     <string name="editor_volta_aceitar_movimento_edicao">Menerima gerak dan penyuntingan lagi</string>
     <string name="editor_voltar_composicao_principal">Kembali ke komposisi utama</string>

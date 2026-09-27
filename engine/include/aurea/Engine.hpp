@@ -524,6 +524,11 @@ public:
     /// Nulo (não desenha; serve de pai/controle). `threeD` = nulo 3D (vive na
     /// cena: posição/rotação/escala em X, Y e Z).
     [[nodiscard]] Result<u64> add_null(bool threeD) noexcept;
+    /// "Vincular a novo nulo": cria um nulo no centro (mundo) das camadas e
+    /// faz dele o pai de todas, com a compensação de LayerSetParent — nada
+    /// sai do lugar na tela e as animações próprias ficam. Nulo 3D se alguma
+    /// camada é 3D. Tudo num passo de desfazer. Devolve o id do nulo.
+    [[nodiscard]] Result<u64> parent_to_new_null(const u64* layerIds, u32 count) noexcept;
     [[nodiscard]] Result<u64> add_camera() noexcept;
     [[nodiscard]] Result<u64> add_light(u32 kind) noexcept;
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;

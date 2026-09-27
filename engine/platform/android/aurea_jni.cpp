@@ -2294,6 +2294,16 @@ AUREA_JNI jlong AUREA_FN(nativeAddNull)(JNIEnv*, jclass, jlong handle, jboolean 
     return static_cast<jlong>(*r);
 }
 
+/// "Vincular a novo nulo": id do nulo criado (≥ 0) ou `-Errc` em caso de falha.
+AUREA_JNI jlong AUREA_FN(nativeParentToNewNull)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const auto v = jlongs(env, ids);
+    const Result<u64> r = c->engine.parent_to_new_null(v.data(), static_cast<u32>(v.size()));
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeExtractAudio)(JNIEnv*, jclass, jlong handle, jlong layerId) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

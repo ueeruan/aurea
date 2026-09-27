@@ -1739,6 +1739,17 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
 }
 
+- (long long)parentToNewNull:(NSArray<NSNumber*>*)layerIds {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    std::vector<aurea::u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    if (ids.empty()) return -static_cast<long long>(aurea::Errc::InvalidArgument);
+    const aurea::Result<aurea::u64> r = e->parent_to_new_null(ids.data(), static_cast<aurea::u32>(ids.size()));
+    return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
+}
+
 - (long long)addText3D:(NSString*)content depth:(float)depth alignment:(uint32_t)alignment
                      r:(float)r g:(float)g b:(float)b {
     auto* e = self.engine;

@@ -365,6 +365,8 @@ final class AureaModel: ObservableObject {
     /// Girar/escala editam os eixos da PRÓPRIA camada: o gizmo mostra os locais.
     var gizmoAxesLocal: Bool { gizmoLocalSpace || gizmoTool != 0 }
     func cycleGizmoTool() { gizmoTool = (gizmoTool + 1) % 3 }
+    /// Efeitos que o painel já mostrou, por camada (EffectsView revela o novo).
+    var seenEffectIds: [Int64: Set<UInt32>] = [:]
     @Published var toast: String?
 
     // --- Modelo em memória (o que a timeline e os painéis desenham) ---------
@@ -639,6 +641,14 @@ final class AureaModel: ObservableObject {
                         }
                     case "timeline-reorder":
                         for _ in 0..<8 { addShape(1) }
+                    case "parent-new-null":
+                        // Duas formas escolhidas juntas: o teste liga as duas a um nulo novo.
+                        addShape(1); addShape(1)
+                        refreshModel(force: true)
+                        if let first = layers.first?.id, let last = layers.last?.id, first != last {
+                            select(layerId: first, additive: false)
+                            select(layerId: last, additive: true)
+                        }
                     default: addShape(1)
                     }
                     if scene == "transform" { panel = .transform }
@@ -2546,6 +2556,31 @@ final class AureaModel: ObservableObject {
         mutate { engine in for id in children { engine.setLayer(id, parent: parent) } }
         endGesture()
         refreshModel(force: true)
+    }
+
+    /// "Vincular a novo nulo" (o mesmo do Android): o motor cria um nulo no
+    /// centro das camadas (3D se alguma é 3D) e faz dele o pai de todas — nada
+    /// sai do lugar na tela. Um passo de desfazer; o nulo novo fica selecionado.
+    func parentSelectionToNewNull() {
+        parentSelectionToNewNull(Array(selection))
+    }
+
+    func parentSelectionToNewNull(_ ids: [Int64]) {
+        guard !ids.isEmpty else { return }
+        let numbers: [NSNumber] = ids.map { NSNumber(value: $0) }
+        let created: Int64 = engine.parentToNewNull(numbers)
+        if created < 0 {
+            toast = AureaText.t("msg_nao_foi_possivel_criar_o_nulo", String(-created))
+            return
+        }
+        refreshModel(force: true)
+        select(layerId: created)
+        var linked: Int = 0
+        for id in ids {
+            let parent: Int64 = (engine.layerDetail(id)?["parentId"] as? NSNumber)?.int64Value ?? 0
+            if parent == created { linked += 1 }
+        }
+        toast = AureaText.t("msg_camadas_seguindo_novo_nulo", String(linked))
     }
 
     /// Pais possíveis para TODAS as escolhidas: nenhuma delas nem descendente.

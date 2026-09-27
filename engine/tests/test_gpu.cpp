@@ -1242,6 +1242,41 @@ AUREA_TEST(Gpu, Scene3DModelsAppearFramedWithPbr) {
 }
 
 
+// Look-dev 3D (antes/depois): cenas em 1280x720 com a HDRI de estúdio, para
+// comparar AA, cor, reflexos e sombras e medir o custo por quadro. PNGs em
+// AUREA_LOOKDEV_DIR/<AUREA_LOOKDEV_TAG>_<cena>.png (sem a variável, só mede).
+AUREA_TEST(Gpu, Scene3DLookDevRendersAndTimesPremiumScenes) {
+    AUREA_REQUIRE_GPU();
+    const char* dir = std::getenv("AUREA_LOOKDEV_DIR");
+    const char* tagEnv = std::getenv("AUREA_LOOKDEV_TAG");
+    const std::string tag = tagEnv && *tagEnv ? tagEnv : "atual";
+    const std::string hdri = std::string(AUREA_TEST_DATA_DIR) + "/../../../output/iphone-cinematic-20s/assets/studio-original.hdr";
+    struct Shot { const char* name; const char* model; };
+    const Shot shots[] = {{"capacete", "DamagedHelmet.glb"}, {"esferas", "MetalRoughSpheres.glb"}, {"alfa", "AlphaBlendModeTest.glb"}};
+    for (const Shot& s : shots) {
+        const std::string path = gltf_data(s.model);
+        if (!file_exists(path)) continue;
+        Scene3DRig rig(1280, 720);
+        ModelImport mi;
+        mi.path = path;
+        const Result<u64> model = rig.e.import_model(mi);
+        AUREA_CHECK_MSG(model.ok(), s.name);
+        if (!model.ok()) continue;
+        if (file_exists(hdri)) AUREA_CHECK(rig.e.import_hdri(hdri.c_str()).ok());
+        (void)rig.capture(1280);   // aquece pipelines e o IBL
+        f64 best = 1e9;
+        Image8 img;
+        for (int i = 0; i < 3; ++i) {
+            const auto t0 = std::chrono::steady_clock::now();
+            img = rig.capture(1280);
+            best = std::min(best, std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        }
+        AUREA_CHECK_MSG(coverage(img) > 0.03f, s.name);
+        std::printf("\n    lookdev %s/%s: %ux%u, melhor quadro %.1f ms", tag.c_str(), s.name, img.width, img.height, best);
+        if (dir && *dir) (void)write_png(std::string(dir) + "/" + tag + "_" + s.name + ".png", img);
+    }
+}
+
 AUREA_TEST(Gpu, Scene3DSkinnedModelAnimatesOnTheTimelineClock) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("Fox.glb");

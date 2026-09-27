@@ -55,6 +55,9 @@ import UIKit
             "corePlayhead": readCoreStatus ? coreStatus.playhead : -1,
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
             "layerOrder": model.layers.map { $0.id },
+            "layerParents": model.layers.map { (row: LayerItem) -> Int64 in
+                (model.engine.layerDetail(row.id)?["parentId"] as? NSNumber)?.int64Value ?? 0
+            },
             "markerCount": model.markerFrames.count,
             "missingAssets": model.engine.lastLoadMissingAssets,
             "curveKeys": (primary.flatMap { model.keyframes[$0] } ?? []).map {

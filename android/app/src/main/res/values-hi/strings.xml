@@ -331,6 +331,8 @@
     <string name="editor_video_pronto">वीडियो तैयार</string>
     <string name="editor_vinculada_outra_camada_trocar">दूसरी लेयर से जुड़ी · बदलें</string>
     <string name="editor_vincular_escolhidas_camada">चुनी हुई को एक लेयर से जोड़ें</string>
+    <string name="editor_vincular_novo_nulo">नया Null</string>
+    <string name="msg_camadas_seguindo_novo_nulo">%1$s लेयर नए Null के साथ चल रही हैं</string>
     <string name="editor_vincular_outra_camada">दूसरी लेयर से जोड़ें</string>
     <string name="editor_volta_aceitar_movimento_edicao">फिर से गति और संपादन स्वीकार करता है</string>
     <string name="editor_voltar_composicao_principal">मुख्य कंपोज़िशन पर वापस</string>

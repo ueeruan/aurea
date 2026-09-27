@@ -6,6 +6,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/render/Renderer.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -697,3 +698,42 @@ AUREA_TEST(Gizmo, AnimatedAnchorKeepsGizmoAtEvaluatedPivot) {
     for(u32 i=0;i<8;++i)AUREA_CHECK_NEAR(before[i],after[i],.01f);
 }
 
+
+// "Vincular a novo nulo": um toque cria o nulo no centro das camadas e liga
+// todas a ele sem ninguém sair do lugar na tela; um desfazer volta tudo.
+AUREA_TEST(Parenting, SelectionParentsToNewNullWithoutMovingAndUndoesOnce) {
+    EditRig r;
+    Layer* la = r.comp()->layer(LayerId::unpack(r.a));
+    Layer* lb = r.comp()->layer(LayerId::unpack(r.b));
+    la->transform.position = Vec3{100.0f, 50.0f, 0.0f};
+    lb->transform.position = Vec3{220.0f, 130.0f, 0.0f};
+    lb->transform.rotation = Vec3{0.0f, 0.0f, 30.0f};
+    lb->transform.scale = Vec3{2.0f, 2.0f, 1.0f};
+    const FrameIndex t{0};
+    const Mat4 wa = layer_world_matrix(*r.comp(), *la, t), wb = layer_world_matrix(*r.comp(), *lb, t);
+    const u32 before = r.comp()->layers().count();
+    const u64 ids[2] = {r.a, r.b};
+    auto made = r.e.parent_to_new_null(ids, 2);
+    AUREA_CHECK(made.ok());
+    if (!made.ok()) return;
+    const Layer* n = r.L(*made);
+    AUREA_CHECK(n && n->kind == LayerKind::Null && !n->threeD);
+    AUREA_CHECK_EQ(r.comp()->layers().count(), before + 1);
+    AUREA_CHECK(r.L(r.a)->parent == LayerId::unpack(*made));
+    AUREA_CHECK(r.L(r.b)->parent == LayerId::unpack(*made));
+    // O nulo nasce no centro dos pontos de ancoragem no mundo e cobre os filhos no tempo.
+    const Vec4 oa = wa * Vec4{la->transform.anchor.x, la->transform.anchor.y, 0, 1};
+    const Vec4 ob = wb * Vec4{lb->transform.anchor.x, lb->transform.anchor.y, 0, 1};
+    AUREA_CHECK_NEAR(n->transform.position.x, (oa.x + ob.x) * 0.5f, 0.01f);
+    AUREA_CHECK_NEAR(n->transform.position.y, (oa.y + ob.y) * 0.5f, 0.01f);
+    AUREA_CHECK(n->start.value == 0 && n->end.value >= 60);
+    // Compensação: nada mudou na tela.
+    const Mat4 wa2 = layer_world_matrix(*r.comp(), *r.L(r.a), t), wb2 = layer_world_matrix(*r.comp(), *r.L(r.b), t);
+    for (int c = 0; c < 4; ++c) {
+        AUREA_CHECK_NEAR(wa2.col[c].x, wa.col[c].x, 0.01f); AUREA_CHECK_NEAR(wa2.col[c].y, wa.col[c].y, 0.01f);
+        AUREA_CHECK_NEAR(wb2.col[c].x, wb.col[c].x, 0.01f); AUREA_CHECK_NEAR(wb2.col[c].y, wb.col[c].y, 0.01f);
+    }
+    r.undo();   // UM passo: some o nulo e os vínculos
+    AUREA_CHECK_EQ(r.comp()->layers().count(), before);
+    AUREA_CHECK(!r.L(r.a)->parent.valid() && !r.L(r.b)->parent.valid());
+}

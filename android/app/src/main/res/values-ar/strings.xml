@@ -345,6 +345,8 @@
     <string name="editor_video_pronto">الفيديو جاهز</string>
     <string name="editor_vinculada_outra_camada_trocar">مرتبطة بطبقة أخرى · تغيير</string>
     <string name="editor_vincular_escolhidas_camada">ربط المختارة بطبقة</string>
+    <string name="editor_vincular_novo_nulo">Null جديد</string>
+    <string name="msg_camadas_seguindo_novo_nulo">%1$s طبقة/طبقات تتبع الـ Null الجديد</string>
     <string name="editor_vincular_outra_camada">الربط بطبقة أخرى</string>
     <string name="editor_volta_aceitar_movimento_edicao">يعود لقبول الحركة والتحرير</string>
     <string name="editor_voltar_composicao_principal">العودة إلى التركيب الرئيسي</string>

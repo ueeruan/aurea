@@ -340,6 +340,8 @@
     <string name="editor_video_pronto">Video ready</string>
     <string name="editor_vinculada_outra_camada_trocar">Parented to another layer · change</string>
     <string name="editor_vincular_escolhidas_camada">Parent the selected ones to a layer</string>
+    <string name="editor_vincular_novo_nulo">New null</string>
+    <string name="msg_camadas_seguindo_novo_nulo">%1$s layer(s) following the new null</string>
     <string name="editor_vincular_outra_camada">Parent to another layer</string>
     <string name="editor_volta_aceitar_movimento_edicao">Takes motion and editing again</string>
     <string name="editor_voltar_composicao_principal">Back to the main composition</string>

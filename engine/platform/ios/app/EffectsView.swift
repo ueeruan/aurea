@@ -45,10 +45,11 @@ struct EffectsView: View {
             if !embedded { PanelHeader(title: AureaText.t("panel_efeitos"), onBack: { model.panel = .none }) }
             HStack(spacing: 0) {
                 rail
+                ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(ordered) { effect in
-                            card(effect).padding(.bottom, 8)
+                            card(effect).padding(.bottom, 8).id(effect.effectId)
                                 .background(GeometryReader { geometry in
                                     Color.clear.preference(key: EffectCardFrames.self, value: [effect.effectId: geometry.frame(in: .named("effect-stack"))])
                                 })
@@ -66,6 +67,9 @@ struct EffectsView: View {
                 }.coordinateSpace(name: "effect-stack")
                     .accessibilityIdentifier("aurea.effects.stack")
                     .onPreferenceChange(EffectCardFrames.self) { cardFrames = $0 }
+                    .onAppear { revealAdded(ordered.map(\.effectId), proxy: proxy) }
+                    .onChange(of: ordered.map(\.effectId)) { ids in revealAdded(ids, proxy: proxy) }
+                }
             }.frame(maxHeight: .infinity)
         }
         .background(AureaColors.editorPanel)
@@ -140,6 +144,19 @@ struct EffectsView: View {
         let entry = EffectParamSelection(effect: model.curveEffect, param: model.curveParam / 4, component: Int(model.curveParam % 4))
         selected = entry; open(entry.effect)
         if parameterGroups(entry.effect).rest.contains(where: { $0.index == entry.param }) { advanced.insert(entry.effect) }
+    }
+    /// Efeito novo na camada (busca, navegador, colar): abre o cartão e rola
+    /// até ele — paridade com o Android. Os ids vistos ficam no MODELO: o painel
+    /// recriado (depois da busca de comandos) ainda reconhece o que é novo.
+    private func revealAdded(_ ids: [UInt32], proxy: ScrollViewProxy) {
+        guard let layer = model.primarySelection else { return }
+        let seen: Set<UInt32>? = model.seenEffectIds[layer]
+        model.seenEffectIds[layer] = Set(ids)
+        guard let seen, let added = ids.last(where: { !seen.contains($0) }) else { return }
+        open(added)
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(added, anchor: .top) }
+        }
     }
     private func open(_ id: UInt32) {
         guard let layer = model.primarySelection else { return }

@@ -333,6 +333,8 @@
     <string name="editor_video_pronto">Видео готово</string>
     <string name="editor_vinculada_outra_camada_trocar">Привязана к другому слою · сменить</string>
     <string name="editor_vincular_escolhidas_camada">Привязать выбранные к слою</string>
+    <string name="editor_vincular_novo_nulo">Новый Null</string>
+    <string name="msg_camadas_seguindo_novo_nulo">Слоёв, следующих за новым Null: %1$s</string>
     <string name="editor_vincular_outra_camada">Привязать к другому слою</string>
     <string name="editor_volta_aceitar_movimento_edicao">Снова принимает движение и монтаж</string>
     <string name="editor_voltar_composicao_principal">Назад к основной композиции</string>

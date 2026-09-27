@@ -666,6 +666,8 @@ class AureaEngine private constructor() {
     fun setLightParam(layer: Long, param: Int, value: Float): Boolean = nativeSetLightParam(nativeHandle, layer, param, value)
     fun addCamera(): Long = nativeAddCamera(nativeHandle)
     fun addNull(threeD: Boolean): Long = nativeAddNull(nativeHandle, threeD)
+    /** "Vincular a novo nulo": nulo no centro das camadas, pai de todas (um desfazer). Id ≥ 0 ou −Errc. */
+    fun parentToNewNull(ids: LongArray): Long = nativeParentToNewNull(nativeHandle, ids)
 
     /** Congela o quadro do clipe no `frame` por `holdFrames`; o resto anda. Id ≥ 0 ou −Errc. */
     fun freezeFrame(layer: Long, frame: Int, holdFrames: Int): Long = nativeFreezeFrame(nativeHandle, layer, frame, holdFrames)
@@ -785,6 +787,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetLightParam(handle: Long, layer: Long, param: Int, value: Float): Boolean
     private external fun nativeAddCamera(handle: Long): Long
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
+    private external fun nativeParentToNewNull(handle: Long, ids: LongArray): Long
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeMarkBeatLive(handle: Long): Long
     private external fun nativeSetEditMode(handle: Long, on: Boolean)

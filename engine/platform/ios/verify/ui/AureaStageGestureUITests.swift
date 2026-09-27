@@ -644,7 +644,11 @@ import XCTest
         // (a vista É o cabeçote): 80 pt/s = 8/3 pt por frame a partir do centro.
         let positionY: CGFloat = frame.minY + 122
         let scaleY: CGFloat = frame.minY + 150
-        func keyX(_ f: Int) -> CGFloat { frame.midX + CGFloat(f - 30) * 80 / 30 }
+        // A vista é o cabeçote: lê o quadro REAL (a fixture pode não estar no 30).
+        func keyX(_ f: Int) -> CGFloat {
+            let playhead: Int64 = (try? snapshot())?.playhead ?? 30
+            return frame.midX + CGFloat(Int64(f) - playhead) * 80 / 30
+        }
         func has(_ state: Snapshot, _ property: Int, _ time: Int) -> Bool {
             state.curveKeys.contains { $0.property == property && $0.time == time }
         }
@@ -724,6 +728,38 @@ import XCTest
         }
     }
 
+    func testParentToNewNullLinksBothChosenLayersAndOneUndoRemovesIt() throws {
+        let before = try launch("parent-new-null")
+        let beforeIDs: Set<Int64> = Set(before.layerOrder)
+        let open = app.buttons["link.open"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5)); XCTAssertTrue(open.isHittable)
+        open.tap()
+        let row = app.buttons["link.newNull"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(row.frame.height, 44)
+        row.tap()
+        let linked = try awaitSnapshot("A new null is created and selected") {
+            $0.layerCount == 3 && $0.selectionCount == 1
+        }
+        let nullID: Int64 = linked.primaryID
+        XCTAssertFalse(beforeIDs.contains(nullID), "The selected layer must be the new null")
+        let parents: [Int64] = linked.layerParents ?? []
+        XCTAssertEqual(parents.count, linked.layerOrder.count)
+        for index in 0..<min(parents.count, linked.layerOrder.count) {
+            let id: Int64 = linked.layerOrder[index]
+            let expected: Int64 = beforeIDs.contains(id) ? nullID : 0
+            XCTAssertEqual(parents[index], expected, "Both chosen layers follow the new null; the null has no parent")
+        }
+        try undo()
+        let restored = try awaitSnapshot("One undo removes the null and both links") {
+            $0.layerCount == 2 && $0.canRedo
+        }
+        XCTAssertEqual(Set(restored.layerOrder), beforeIDs)
+        let restoredParents: [Int64] = restored.layerParents ?? []
+        XCTAssertEqual(restoredParents.count, 2)
+        for parent in restoredParents { XCTAssertEqual(parent, 0) }
+    }
+
     func testTransformToolsKeepFingerSizedTargets() throws {
         _ = try launch("transform")
         let modes = app.descendants(matching: .any)
@@ -800,7 +836,7 @@ import XCTest
         XCTAssertEqual(scaledY.detail.scale[0], before.detail.scale[0], accuracy: 0.0001)
         XCTAssertEqual(scaledY.detail.scale[2], before.detail.scale[2], accuracy: 0.0001)
         XCTAssertEqual(scaledY.detail.position, before.detail.position)
-        let centerEnd = CGPoint(x: origin.x + 40, y: origin.y - 40)
+        let centerEnd = CGPoint(x: origin.x + 60, y: origin.y)   // dx − dy > 0 cresce; fica dentro do preview
         try requireInsideStage(origin, centerEnd)
         coordinate(origin).press(forDuration: 0.05, thenDragTo: coordinate(centerEnd), withVelocity: .slow, thenHoldForDuration: 0.1)
         let uniform = try awaitSnapshot("Center square scales XYZ together") {
@@ -895,8 +931,10 @@ import XCTest
         if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) }
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
         else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
+        else if scene == "parent-new-null" { XCTAssertEqual(state.layerCount, 2) }
         else { XCTAssertEqual(state.layerCount, 1) }
-        XCTAssertEqual(state.selectionCount, 1)
+        let expectedSelection: Int = scene == "parent-new-null" ? 2 : 1
+        XCTAssertEqual(state.selectionCount, expectedSelection)
         XCTAssertGreaterThan(state.primaryID, 0)
         XCTAssertEqual(state.detail.position.count, 3)
         XCTAssertEqual(state.detail.scale.count, 3)
@@ -1002,6 +1040,7 @@ import XCTest
         let coreError: String
         let layerCount: Int
         let layerOrder: [Int64]
+        let layerParents: [Int64]?
         let markerCount: Int
         let missingAssets: Int
         let curveKeys: [CurveKey]

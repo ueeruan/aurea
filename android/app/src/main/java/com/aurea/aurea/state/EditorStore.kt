@@ -4182,6 +4182,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (parent != 0L) showToast(appText(R.string.msg_camada_s_seguindo_o_pai_escolhido, children.size))
     }
 
+    /**
+     * "Vincular a novo nulo": o motor cria um nulo no centro das camadas (3D se
+     * alguma é 3D) e faz dele o pai de todas — nada sai do lugar na tela. Um
+     * passo de desfazer; o nulo novo fica selecionado.
+     */
+    fun parentSelectionToNewNull(ids: Collection<Long> = selection) {
+        if (ids.isEmpty()) return
+        val id = engine.parentToNewNull(ids.toLongArray())
+        if (id < 0) {
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_nulo, -id)
+            return
+        }
+        refreshNow()
+        select(id)
+        val rows = layers
+        val linked = rows.count { rows.getOrNull(it.parentIndex)?.id == id }
+        showToast(appText(R.string.msg_camadas_seguindo_novo_nulo, linked))
+    }
+
     /** Pais possíveis para todas: nenhuma das escolhidas nem descendente delas. */
     fun parentCandidatesForAll(ids: Collection<Long>): List<LayerRow> {
         if (ids.isEmpty()) return emptyList()

@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
@@ -177,6 +178,24 @@ internal fun LinkMenu(store: EditorStore, ids: List<Long>, onDismiss: () -> Unit
                 .border(1.dp, AureaColors.Border, RoundedCornerShape(12.dp))
                 .verticalScroll(rememberScrollState()),
         ) {
+            // "Novo nulo": cria o nulo no centro das escolhidas e vincula todas a ele.
+            LinkRow(
+                thumb = {
+                    Box(
+                        Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)).background(LayerType.Null.color),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CupertinoIcon(LayerType.Null.glyph, 20.dp, Color.White)
+                    }
+                },
+                label = stringResource(R.string.editor_vincular_novo_nulo),
+                bold = true,
+                on = false,
+                modifier = Modifier.testTag("link.newNull"),
+            ) {
+                onDismiss()
+                store.parentSelectionToNewNull(ids)
+            }
             LinkRow(
                 thumb = {
                     Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
@@ -214,10 +233,11 @@ private fun LinkRow(
     on: Boolean,
     bold: Boolean = false,
     background: Color = Color.Transparent,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .height(56.dp)
             .background(if (on) AureaColors.AccentDim else background)

@@ -1602,6 +1602,70 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     return lid.pack();
 }
 
+Result<u64> Engine::parent_to_new_null(const u64* layerIds, u32 count) noexcept {
+    if (!layerIds || count == 0 || count > 4096) return Status{Errc::InvalidArgument, "nenhuma camada"};
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    // Edições ainda na fila (arrastos, keys) vêm ANTES: a compensação mede o estado final.
+    drain_commands_locked();
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    const FrameIndex now = playback_.current();
+    std::vector<LayerId> children;
+    bool threeD = false;
+    Vec3 center{0.0f, 0.0f, 0.0f};
+    i64 start = std::numeric_limits<i64>::max(), end = 0;
+    for (u32 i = 0; i < count; ++i) {
+        const LayerId id = LayerId::unpack(layerIds[i]);
+        const Layer* l = comp->layer(id);
+        if (!l || l->locked || std::find(children.begin(), children.end(), id) != children.end()) continue;
+        const bool in3d = l->kind == LayerKind::Model3D || l->kind == LayerKind::Camera || l->kind == LayerKind::Light
+                       || l->threeD || wants_layer_3d(*comp, *l, now);
+        threeD = threeD || in3d;
+        // Ponto de ancoragem no mundo = onde a camada "está" na tela.
+        const Mat4 w = in3d ? layer_world_3d(*comp, *l, now) : layer_world_matrix(*comp, *l, now);
+        const Vec4 o = w * Vec4{l->transform.anchor.x, l->transform.anchor.y, l->transform.anchor.z, 1.0f};
+        const f32 inv = std::fabs(o.w) > 1e-6f ? 1.0f / o.w : 1.0f;
+        if (!std::isfinite(o.x * inv) || !std::isfinite(o.y * inv) || !std::isfinite(o.z * inv)) continue;
+        center = Vec3{center.x + o.x * inv, center.y + o.y * inv, center.z + (in3d ? o.z * inv : 0.0f)};
+        start = std::min(start, l->start.value);
+        end = std::max(end, l->end.value);
+        children.push_back(id);
+    }
+    if (children.empty()) return Status{Errc::InvalidArgument, "nenhuma camada desbloqueada"};
+    const f32 n = static_cast<f32>(children.size());
+    center = Vec3{center.x / n, center.y / n, center.z / n};
+
+    history_.begin_group("vincular a novo nulo");
+    history_.before_mutation(*comp, project_->timeline().current(), "vincular a novo nulo");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const LayerId nullId = comp->add_layer(LayerKind::Null, threeD ? "Nulo 3D" : "Nulo");
+    Layer* nl = comp->layer(nullId);
+    if (!nl) {
+        history_.end_group();
+        return Status{Errc::OutOfMemory, "camada nao criada"};
+    }
+    nl->threeD = threeD;
+    // Vive enquanto os filhos vivem (não some antes deles na timeline).
+    nl->start = FrameIndex{std::max<i64>(0, start)};
+    nl->end = FrameIndex{std::max<i64>(nl->start.value + 1, end)};
+    nl->transform.anchor = Vec3{50.0f, 50.0f, 0.0f};   // caixa virtual de 100 px (alças no palco)
+    nl->transform.position = center;
+    u32 linked = 0;
+    for (const LayerId child : children) {
+        Command c;
+        c.type = CommandType::LayerSetParent;
+        c.layer_parent.layer = child;
+        c.layer_parent.parent = nullId;
+        if (apply_command_internal(c, nullptr, true).ok()) ++linked;
+    }
+    history_.end_group();
+    project_->mark_dirty();
+    request_render();
+    AUREA_LOG_INFO("novo nulo %s: %u de %zu camadas vinculadas", threeD ? "3D" : "2D", linked, children.size());
+    return nullId.pack();
+}
+
 namespace {
 
 /// Segue `pts` (px da camada, no 1º quadro de `targetUs`) quadro a quadro por

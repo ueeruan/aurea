@@ -93,7 +93,7 @@ struct TopBarView: View {
                 description: AureaText.t(parent != 0 ? "editor_vinculada_outra_camada_trocar" : "editor_vincular_outra_camada"), size: 20, width: width, tint: tint) {
                 if model.status.playing != 0 { model.playPause() }
                 shell.linkIds = Array(model.selection); shell.linkAnchor = bounds.frame(in: .global)
-            }
+            }.accessibilityIdentifier("link.open")
         }.frame(width: width, height: 44)
     }
     private func open(_ value: ShellSheet) {
@@ -575,6 +575,7 @@ private struct ShellLinkPopup: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
+                newNullRow
                 row(AureaText.t("editor_nenhum"), id: 0, bold: true) { CupertinoGlyph.text(ShellGlyph.Nosign, size: 22).frame(width: 44, height: 44) }
                 ForEach(candidates) { layer in row(layer.name, id: layer.id) { ShellLayerThumbnail(row: layer) } }
                 if candidates.isEmpty { Text(AureaText.t("editor_nenhuma_outra_camada_seguir_crie_nulo")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.horizontal, 16).padding(.vertical, 12) }
@@ -582,6 +583,22 @@ private struct ShellLinkPopup: View {
         }.onPreferenceChange(ShellMenuHeightKey.self, perform: onHeight)
             .background(AureaColors.pill, in: RoundedRectangle(cornerRadius: 12)).clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(AureaColors.border, lineWidth: 1))
+    }
+    /// "Novo nulo": cria o nulo no centro das escolhidas e vincula todas a ele.
+    private var newNullRow: some View {
+        let type: TimelineLayerType = .null
+        return Button {
+            dismiss(); model.parentSelectionToNewNull(ids)
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    type.color
+                    CupertinoGlyph.text(type.glyph, size: 20, color: .white)
+                }.frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
+                Text(AureaText.t("editor_vincular_novo_nulo")).font(.aurea(size: 15, weight: .bold)).foregroundStyle(AureaColors.text)
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.horizontal, 12).frame(height: 56).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("link.newNull")
     }
     private func row<Thumb: View>(_ title: String, id: Int64, bold: Bool = false, @ViewBuilder thumb: () -> Thumb) -> some View {
         Button {

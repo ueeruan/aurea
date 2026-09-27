@@ -12,6 +12,11 @@ on:
         required: false
         default: ''
         type: string
+      capture_only:
+        description: 'Retest simulator captures only, without regenerating the IPA or repeating gestures'
+        required: false
+        default: false
+        type: boolean
   push:
     branches: ['codex/native-beta2-ipa']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
@@ -22,6 +27,7 @@ permissions:
   contents: read
 jobs:
   build-ipa:
+    if: github.event_name != 'workflow_dispatch' || !inputs.capture_only
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -152,7 +158,7 @@ jobs:
             build-simulator.log
           if-no-files-found: ignore
       - name: Run native preview gestures and undo tests
-        if: always() && steps.compile_simulator.outcome == 'success'
+        if: always() && steps.compile_simulator.outcome == 'success' && !inputs.capture_only
         run: |
           set -o pipefail
           SIMULATOR_UDID=$(python3 -c 'import json; print(json.load(open("build/ios-parity/manifest.json"))["device"]["udid"])')
@@ -174,13 +180,13 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             2>&1 | tee build-gesture-tests.log
       - name: Export native gesture attachments
-        if: always()
+        if: always() && !inputs.capture_only
         run: |
           if [ -d build/ios-gesture-tests.xcresult ]; then
             xcrun xcresulttool export attachments --path build/ios-gesture-tests.xcresult --output-path build/ios-gesture-attachments
           fi
       - name: Save native gesture test diagnostics
-        if: always()
+        if: always() && !inputs.capture_only
         uses: actions/upload-artifact@v4
         with:
           name: ios-gesture-tests

@@ -96,7 +96,7 @@ new_sqlite_classes = ["CaptionCommunity"]
 [[d1_databases]]
 binding = "AUREA_DB"
 database_name = "aurea-contas"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "89dcf8de-9102-4a1a-a50d-1126174632b2"
 migrations_dir = "migrations"
 
 # Caminho "cloudflare" do e-mail de crash (Email Workers). Só descomente depois

@@ -253,11 +253,13 @@ final class AureaModel: ObservableObject {
     @Published var curveParam: UInt32 = 0
     func graphKeyGroup(_ layer: Int64, _ key: KeyframeItem) -> [KeyframeItem] {
         guard let row = layers.first(where: { $0.id == layer }),
-              row.threeD || [UInt32(8), 9, 10].contains(row.kind),
               key.effectIndex == UInt32.max, key.property < 12 else { return [key] }
+        let threeD = row.threeD || [UInt32(8), 9, 10].contains(row.kind)
+        let linked2DScale = scaleAxesLinked && (3...4).contains(key.property)
+        guard threeD || linked2DScale else { return [key] }
         let base = key.property / 3 * 3
         let peers = (keyframes[layer] ?? []).filter {
-            $0.effectIndex == UInt32.max && $0.property >= base && $0.property < base + 3 && $0.time == key.time
+            $0.effectIndex == UInt32.max && $0.property >= base && $0.property < base + (threeD ? 3 : 2) && $0.time == key.time
         }
         return peers.isEmpty ? [key] : peers
     }

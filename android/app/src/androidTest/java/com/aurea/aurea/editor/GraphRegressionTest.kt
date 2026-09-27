@@ -22,6 +22,45 @@ import org.junit.Test
 
 class GraphRegressionTest {
     @get:Rule val compose = createComposeRule()
+    @Test fun linked2DScaleCurveChangesBothAxesAndUnlockedCurveStaysIndependent() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assertTrue(context.packageName.endsWith(".uitest"))
+        lateinit var store: EditorStore
+        var initialized = false
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            initialized = true
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { initialized && store.engineReady }
+        compose.runOnIdle { store.newProject(320,240,30f,"Scale XY regression") }
+        compose.waitUntil(15000) { store.project.title == "Scale XY regression" }
+        compose.runOnIdle { store.addNull(false) }
+        compose.waitUntil(5000) { store.layers.size == 1 }
+        val id = store.layers.single().id
+        compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(3,4)) }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 2 }
+        val first = store.keyframes[id]!!.single { it.property == 3 }
+        compose.runOnIdle { store.setKeyframeEasing(id,first,2,0f,1f,.1f,1f) }
+        compose.runOnIdle {
+            val keys = store.keyframes[id]!!
+            assertEquals(store.queryKeyframeEasing(id,keys[0])!!.toList(),store.queryKeyframeEasing(id,keys[1])!!.toList())
+            store.beginGesture("linked scale")
+            store.editGraphKeyframe(id,first,5,2f)
+            store.endGesture()
+        }
+        compose.waitUntil(5000) { store.keyframes[id]!!.all { it.time == 5 && it.value == 2f } }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.keyframes[id]!!.all { it.time == 0 && it.value == 1f } }
+        compose.runOnIdle {
+            store.scaleAxesLinked = false
+            store.setKeyframeEasing(id,first,2,.4f,0f,1f,1f)
+        }
+        compose.runOnIdle {
+            val keys = store.keyframes[id]!!
+            assertNotEquals(store.queryKeyframeEasing(id,keys[0])!!.toList(),store.queryKeyframeEasing(id,keys[1])!!.toList())
+        }
+    }
     @Test fun valueGraphKeepsItsModeAndLinkedXYZWhileDraggingAndUndoing() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))

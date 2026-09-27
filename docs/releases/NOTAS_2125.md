@@ -2,6 +2,7 @@
 
 - Auto-Key em X/Y e gizmos também na cena 3D; regressão de câmera com tempo local e órbita separada.
 - Keyframes XYZ agrupados em posição, escala, rotação e pivô de camadas, câmeras e nulos 3D, preservando os eixos não alterados.
+- Escala vinculada 2D aplica o gráfico a X e Y, evitando deformar texto e imagens durante a animação.
 - Escala proporcional inclui Z; o gráfico mantém o modo escolhido e sincroniza curvas e arrastos do grupo XYZ, com um passo de desfazer por gesto.
 - Timeline elevada no layout vertical, com mais espaço durante a edição.
 - Legendas locais preservam palavras sobrepostas e fragmentos sem timestamp; idioma inicial acompanha o aparelho e a busca do Whisper considera mais alternativas.

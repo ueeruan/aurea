@@ -2176,9 +2176,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun graphKeyGroup(layer: Long, key: KeyframeRow): List<KeyframeRow> {
         val row = layers.firstOrNull { it.id == layer }
         val threeD = row?.let { it.kind in 8..10 || it.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D != 0 } == true
-        if (!threeD || key.effectIndex != NO_EFFECT || key.property !in 0..11) return listOf(key)
+        val linked2DScale = scaleAxesLinked && key.property in 3..4
+        if ((!threeD && !linked2DScale) || key.effectIndex != NO_EFFECT || key.property !in 0..11) return listOf(key)
         val base = key.property / 3 * 3
-        return keyframes[layer].orEmpty().filter { it.effectIndex == NO_EFFECT && it.property in base..base + 2 && it.time == key.time }.ifEmpty { listOf(key) }
+        return keyframes[layer].orEmpty().filter { it.effectIndex == NO_EFFECT && it.property in base..base + (if (threeD) 2 else 1) && it.time == key.time }.ifEmpty { listOf(key) }
     }
 
     fun setKeyframeEasing(layer: Long, key: KeyframeRow, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float) {

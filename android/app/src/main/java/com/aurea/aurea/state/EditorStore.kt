@@ -1807,15 +1807,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (sceneEditor && property in 0..11) { send { engine.layoutTransform(id, property, value) }; refreshNow(); return }
         val d = if (id == primary) detail else detailOf(id)
         d ?: return
-        val rot = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.ROTATION_Y, TrackProperty.ROTATION_Z)
-        val axis = rot.indexOf(property)
-        if (axis >= 0 && rot.any { d.isAnimated(it) }) {
-            // Rotação X/Y/Z têm UM keyframe só: mexer num eixo grava os três
-            // no mesmo instante (os outros com o valor que já têm ali).
-            send {
-                for (k in 0 until 3) insertKeyframe(id, rot[k], NO_EFFECT, 0, d.localPlayhead, if (k == axis) value else d.rotation[k])
-            }
-        } else if (d.isAnimated(property)) {
+        if (d.isAnimated(property)) {
             send { insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, value) }
         } else {
             send {

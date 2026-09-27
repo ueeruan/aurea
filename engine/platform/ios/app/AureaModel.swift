@@ -577,6 +577,15 @@ final class AureaModel: ObservableObject {
                     case "text-edit-2d": addText()
                     case "text-edit-3d": addText3D(content: "Texto", depth: 0.25)
                     case "curve-null": addNull(threeD: true); panel = .transform
+                    case "rotation-isolation":
+                        addNull(threeD: true)
+                        if let id = primarySelection {
+                            for property in UInt32(6)...UInt32(8) {
+                                engine.insertKeyframe(forLayer: id, property: property, time: 0, value: 0)
+                            }
+                            engine.seek(toFrame: 15); refreshModel(force: true)
+                        }
+                        panel = .transform
                     case "curve-isolation":
                         addNull(threeD: true)
                         if let id = primarySelection {
@@ -2512,7 +2521,7 @@ final class AureaModel: ObservableObject {
 
     /// Muda UMA propriedade de transform, com semântica de keyframe: animada
     /// cria/atualiza o keyframe no cabeçote, senão muda o valor fixo. Rotação
-    /// X/Y/Z têm UM keyframe só (os três eixos no mesmo instante).
+    /// Each component owns its track; editing X does not insert Y/Z keys.
     func setTransform(_ property: UInt32, value: Float, layer: Int64) {
         guard value.isFinite, let d = engine.layerDetail(layer) else { return }
         if sceneEditor && property < 12 {
@@ -2526,14 +2535,7 @@ final class AureaModel: ObservableObject {
         let rotation = StageGeom.floats(d["rotation"])
         let anchor = StageGeom.floats(d["anchor"])
         func component(_ values: [Float], _ index: Int) -> Float { values.count > index ? values[index] : 0 }
-        if property >= 6 && property <= 8 && (animated & (1 << 6 | 1 << 7 | 1 << 8)) != 0 {
-            mutate { engine in
-                for axis in 0..<3 {
-                    engine.insertKeyframe(forLayer: layer, property: UInt32(6 + axis), time: local,
-                                          value: axis == Int(property) - 6 ? value : component(rotation, axis))
-                }
-            }
-        } else if property < 32 && animated & (1 << property) != 0 {
+        if property < 32 && animated & (1 << property) != 0 {
             mutate { engine in engine.insertKeyframe(forLayer: layer, property: property, time: local, value: value) }
         } else {
             mutate { engine in

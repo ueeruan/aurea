@@ -209,6 +209,7 @@ struct TransformView: View {
                                 .padding(.horizontal, 18).padding(.vertical, 6)
                                 .background(axis == index ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
                         }.buttonStyle(.plain)
+                        .accessibilityIdentifier("transform.rotation.axis.\(index)")
                     }
                 } else {
                     Button { expand3D = true } label: {
@@ -225,6 +226,7 @@ struct TransformView: View {
                 ZStack {
                     TransformDial(angle: angle)
                         .contentShape(Rectangle())
+                        .accessibilityIdentifier("transform.rotation.dial")
                         .gesture(DragGesture(minimumDistance: 0).onChanged { event in
                             if dialLast == nil {
                                 dialLast = event.startLocation; dialWalked = 0; dialTotal = angle
@@ -457,13 +459,11 @@ struct TransformView: View {
         }
         model.refreshModel(force: true)
     }
-    /// Preserve grouped track editing from EditorStore.setTransform(2): if one
-    /// member animates, all members are keyed at the same local playhead.
+    /// Only the components explicitly changed by this gesture receive keys.
     private func write(_ changes: [UInt32: Float]) {
         guard !(model.selectedLayer?.locked ?? false), !changes.isEmpty, changes.values.allSatisfy(\.isFinite) else { return }
         let properties = changes.keys.sorted()
-        let rotation = properties.contains { (6...8).contains($0) }
-        let group: [UInt32] = rotation ? [6, 7, 8] : properties
+        let group = properties
         let keyed = group.contains { animatedMask & (1 << $0) != 0 }
         let snapshot = group.map { ($0, changes[$0] ?? value($0)) }, local = model.localPlayhead
         model.mutate { core in

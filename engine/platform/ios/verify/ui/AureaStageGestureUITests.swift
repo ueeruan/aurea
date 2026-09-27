@@ -464,6 +464,27 @@ import XCTest
         _ = try awaitSnapshot("A deliberate tap opens the layer options") { $0.sheet == "dock" }
     }
 
+    func testRotationDialOnlyKeysTheSelectedAxis() throws {
+        let before = try launch("rotation-isolation")
+        let mode = app.descendants(matching: .any)["aurea.panel.mode.2"].firstMatch
+        XCTAssertTrue(mode.waitForExistence(timeout: 5)); mode.tap()
+        let axis = app.buttons["transform.rotation.axis.0"]
+        XCTAssertTrue(axis.waitForExistence(timeout: 5)); axis.tap()
+        let dial = app.descendants(matching: .any)["transform.rotation.dial"].firstMatch
+        XCTAssertTrue(dial.waitForExistence(timeout: 5))
+        let frame = dial.frame
+        let start = CGPoint(x: frame.midX + frame.width * 0.3, y: frame.midY)
+        let end = CGPoint(x: frame.midX, y: frame.midY - frame.height * 0.3)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let changed = try awaitSnapshot("Only rotation X receives a new key") {
+            $0.curveKeys.contains { $0.property == 6 && $0.time == 15 && abs($0.value) > 1 }
+        }
+        XCTAssertEqual(changed.curveKeys.count, before.curveKeys.count + 1)
+        XCTAssertEqual(changed.curveKeys.filter { $0.property != 6 }, before.curveKeys.filter { $0.property != 6 })
+        try undo()
+        _ = try awaitSnapshot("Undo restores independent rotation tracks") { $0.curveKeys == before.curveKeys }
+    }
+
     func testCurvePresetChangesOnlySelectedComponentAndSegment() throws {
         let before = try launch("curve-isolation")
         let open = app.buttons["Edit the property curve"].firstMatch

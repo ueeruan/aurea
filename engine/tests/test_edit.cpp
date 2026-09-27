@@ -448,6 +448,40 @@ AUREA_TEST(Clipboard, ShiftedTrimmedLayersUseCompositionTime) {
     AUREA_CHECK(r.at(r.a, 30, 90) && r.at(r.b, 120, 180));
 }
 
+AUREA_TEST(Clipboard, RepeatedEffectsKeepSeparateKeysAndLockedTargetsStayUntouched) {
+    EditRig r;
+    for (u64 id : {r.a, r.b}) {
+        for (int index = 0; index < 2; ++index) {
+            Command command;
+            command.type = CommandType::EffectAdd;
+            command.effect_add.layer = LayerId::unpack(id);
+            command.effect_add.effectType = effect_type_id(effect_keys::kGaussianBlur);
+            command.effect_add.index = kInvalidIndex;
+            AUREA_CHECK(r.e.apply_command(command).ok());
+        }
+    }
+    Layer* source = r.comp()->layer(LayerId::unpack(r.a));
+    for (u32 index = 0; index < 2; ++index) {
+        source->tracks.get_or_create(TrackProperty::EffectParam, source->effects[index].id, 0)
+            .set(source->local_time(FrameIndex{10}), 3.0f + index * 10.0f);
+    }
+    AUREA_CHECK_EQ(r.e.copy_keyframes(r.a, 10), 2u);
+    r.comp()->layer(LayerId::unpack(r.b))->locked = true;
+    AUREA_CHECK_EQ(r.e.paste_keyframes(&r.b, 1, 40), 0u);
+    AUREA_CHECK_EQ(r.L(r.b)->tracks.size(), 0u);
+    r.comp()->layer(LayerId::unpack(r.b))->locked = false;
+    AUREA_CHECK_EQ(r.e.paste_keyframes(&r.b, 1, 40), 2u);
+    const Layer* target = r.L(r.b);
+    for (u32 index = 0; index < 2; ++index) {
+        const Track* track = target->tracks.find(TrackProperty::EffectParam, target->effects[index].id, 0);
+        AUREA_CHECK(track && track->keys.size() == 1);
+        if (track && track->keys.size() == 1)
+            AUREA_CHECK_EQ(track->keys[0].value, 3.0f + index * 10.0f);
+    }
+    r.undo();
+    AUREA_CHECK_EQ(r.L(r.b)->tracks.size(), 0u);
+}
+
 // =============================================================================
 //  Pré-composição
 // =============================================================================

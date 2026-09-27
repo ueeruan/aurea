@@ -4569,7 +4569,14 @@ u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
         }
         Keyframe key = t.keys[k];
         key.time = FrameIndex{0};
-        clipboard_.keys.push_back(Clipboard::Key{t.property, t.effectIndex, t.effectParamIndex, type, key});
+        u32 ordinal = 0;
+        if (t.property == TrackProperty::EffectParam) {
+            for (const EffectInstance& e : l->effects) {
+                if (e.id == t.effectIndex) break;
+                if (e.type == type) ++ordinal;
+            }
+        }
+        clipboard_.keys.push_back(Clipboard::Key{t.property, t.effectIndex, t.effectParamIndex, type, key, ordinal});
     }
     return static_cast<u32>(clipboard_.keys.size());
 }
@@ -4578,22 +4585,28 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || clipboard_.keys.empty()) return 0;
-    history_.before_mutation(*comp, project_->timeline().current(), "colar keyframes");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     u32 placed = 0;
     for (u32 i = 0; i < count; ++i) {
         Layer* d = comp->layer(LayerId::unpack(ids[i]));
-        if (!d) continue;
+        if (!d || d->locked) continue;
         const FrameIndex local = d->local_time(FrameIndex{frame});
         for (const Clipboard::Key& ck : clipboard_.keys) {
             u32 effectIndex = ck.effectIndex;
             if (ck.property == TrackProperty::EffectParam) {
-                // O mesmo efeito (pelo tipo) na camada de destino; sem ele, pula.
+                // Match the same occurrence, so two Glows do not overwrite
+                // each other's animation. Missing occurrences are skipped.
                 effectIndex = kInvalidIndex;
+                u32 ordinal = 0;
                 for (const EffectInstance& e : d->effects) {
-                    if (e.type == ck.effectType) { effectIndex = e.id; break; }
+                    if (e.type == ck.effectType && ordinal++ == ck.effectOrdinal) {
+                        effectIndex = e.id; break;
+                    }
                 }
                 if (effectIndex == kInvalidIndex) continue;
+            }
+            if (placed == 0) {
+                history_.before_mutation(*comp, project_->timeline().current(), "colar keyframes");
+                modelRevision_.fetch_add(1, std::memory_order_acq_rel);
             }
             Track& t = d->tracks.get_or_create(ck.property, effectIndex, ck.effectParamIndex);
             const u32 k = t.set(local, ck.key.value, ck.key.interp);
@@ -4606,8 +4619,10 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
             ++placed;
         }
     }
-    project_->mark_dirty();
-    request_render();
+    if (placed != 0) {
+        project_->mark_dirty();
+        request_render();
+    }
     return placed;
 }
 

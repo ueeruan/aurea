@@ -1211,7 +1211,7 @@ private:
         Layer style;
         std::vector<EffectInstance> effects;
         std::vector<Track> effectTracks;            ///< EffectParam dos efeitos copiados
-        struct Key { TrackProperty property; u32 effectIndex; u32 effectParamIndex; EffectTypeId effectType; Keyframe key; };
+        struct Key { TrackProperty property; u32 effectIndex; u32 effectParamIndex; EffectTypeId effectType; Keyframe key; u32 effectOrdinal = 0; };
         std::vector<Key> keys;                       ///< tempo relativo ao instante copiado (0)
     } clipboard_;
     std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado

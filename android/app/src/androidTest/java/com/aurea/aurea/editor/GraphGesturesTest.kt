@@ -24,6 +24,37 @@ import org.junit.Test
 class GraphGesturesTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun editingRotationXDoesNotCreateKeysForOtherAxes() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assertTrue(context.packageName.endsWith(".uitest"))
+        lateinit var store: EditorStore
+        var initialized = false
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            initialized = true
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { initialized && store.engineReady }
+        compose.runOnIdle { store.newProject(320, 240, 30f, "Independent rotation") }
+        compose.waitUntil(15000) { store.project.title == "Independent rotation" }
+        compose.runOnIdle { store.addNull(true) }
+        compose.waitUntil(5000) { store.layers.size == 1 }
+        val id = store.layers.single().id
+        compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(6)) }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 1 }
+        compose.runOnIdle { store.seek(15) }
+        compose.waitUntil(5000) { store.playhead == 15 }
+        compose.runOnIdle { store.setTransform(6, 45f) }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size >= 2 }
+        compose.runOnIdle {
+            assertEquals(2, store.keyframes[id].orEmpty().size)
+            assertTrue(store.keyframes[id].orEmpty().all { it.property == 6 })
+            assertEquals(45f, store.keyframes[id].orEmpty().single { it.time == 15 }.value)
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 1 }
+    }
+
     @Test fun graphDragMovesTimeAndValuePreservesOtherTracksAndUndoesOnce() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))

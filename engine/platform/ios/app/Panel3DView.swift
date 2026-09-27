@@ -77,6 +77,26 @@ struct Panel3DView: View {
     private var textSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             section("pn_text3d_title")
+            gap(14)
+            section("pn_t3d_presets")
+            horizontal {
+                ForEach(Array(["Smooth", "Brushed", "Scratched", "Hammered", "Weathered Metal"].enumerated()), id: \.offset) { item in
+                    T3DChip(label: item.element, on: Int(number("surfaceFinish")) == item.offset) {
+                        set3D("surfaceFinish", value: Float(item.offset))
+                    }
+                }
+            }
+            horizontal {
+                ForEach([6, 0, 1, 2, 3, 4, 5], id: \.self) { index in
+                    chip(presetKeys[index]) {
+                        finishEditing()
+                        _ = model.engine.applyText3DPreset(layerId, preset: UInt32(index))
+                        refresh()
+                    }
+                    .accessibilityIdentifier("text3d.materialPreset.\(index)")
+                }
+            }
+            gap(14)
             Button("Letter rotation · Cylinder · Twist") {
                 finishEditing()
                 let type = fxEffectTypeId("aurea.text3d.layout")
@@ -126,26 +146,6 @@ struct Panel3DView: View {
                 textRuler("pn_t3d_bevel_roundness", key: "bevelRoundness", step: 0.006, min: 0, max: 1,
                           shown: percent(number("bevelRoundness")), gesture: "arredondamento")
             }
-            gap(14)
-            section("pn_t3d_presets")
-            horizontal {
-                ForEach(Array(["Smooth", "Brushed", "Scratched", "Hammered", "Weathered Metal"].enumerated()), id: \.offset) { item in
-                    T3DChip(label: item.element, on: Int(number("surfaceFinish")) == item.offset) {
-                        set3D("surfaceFinish", value: Float(item.offset))
-                    }
-                }
-            }
-            horizontal {
-                ForEach([6, 0, 1, 2, 3, 4, 5], id: \.self) { index in
-                    chip(presetKeys[index]) {
-                        finishEditing()
-                        _ = model.engine.applyText3DPreset(layerId, preset: UInt32(index))
-                        refresh()
-                    }
-                    .accessibilityIdentifier("text3d.materialPreset.\(index)")
-                }
-            }
-            gap(14)
         }
     }
 
@@ -503,7 +503,9 @@ private struct T3DChip: View {
         Button(action: action) {
             Text(label).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
                 .padding(.horizontal, 12).padding(.vertical, 6)
+                .frame(minHeight: 44)
                 .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle())
     }
 }

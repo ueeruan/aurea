@@ -426,6 +426,28 @@ AUREA_TEST(Clipboard, StyleAndEffectsAndKeyframes) {
     AUREA_CHECK(!op || op->find_exact(b->local_time(FrameIndex{40})) == kInvalidIndex);
 }
 
+AUREA_TEST(Clipboard, ShiftedTrimmedLayersUseCompositionTime) {
+    EditRig r;
+    r.range(r.a, 30, 90, 12);
+    r.range(r.b, 120, 180, 7);
+    Layer* source = r.comp()->layer(LayerId::unpack(r.a));
+    source->tracks.get_or_create(TrackProperty::Opacity).set(
+        source->local_time(FrameIndex{45}), 0.35f);
+    AUREA_CHECK_EQ(r.e.copy_keyframes(r.a, 45), 1u);
+    AUREA_CHECK_EQ(r.e.paste_keyframes(&r.b, 1, 140), 1u);
+    const Layer* target = r.L(r.b);
+    const Track* track = target->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(track && track->keys.size() == 1);
+    if (track && track->keys.size() == 1) {
+        AUREA_CHECK_EQ(track->keys[0].time.value, target->local_time(FrameIndex{140}).value);
+        AUREA_CHECK_EQ(track->keys[0].value, 0.35f);
+    }
+    r.undo();
+    track = r.L(r.b)->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(!track || track->keys.empty());
+    AUREA_CHECK(r.at(r.a, 30, 90) && r.at(r.b, 120, 180));
+}
+
 // =============================================================================
 //  Pré-composição
 // =============================================================================

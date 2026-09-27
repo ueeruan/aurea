@@ -316,7 +316,7 @@ struct NativeCurvePanel: View {
                                 .frame(maxWidth: .infinity).frame(height: 48).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityIdentifier("curve.mode.\(index)")
                     }
-                }.background(curveRailFill)
+                }.background(curveRailFill, ignoresSafeAreaEdges: [])
                 HStack(spacing: 0) {
                     leftRail(segment)
                     VStack(spacing: 0) {
@@ -343,7 +343,7 @@ struct NativeCurvePanel: View {
                     }.buttonStyle(AureaPressStyle(shrink: 1))
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }.background(curvePanelFill).accessibilityElement(children: .contain).accessibilityIdentifier("curve.panel")
+        }.background(curvePanelFill, ignoresSafeAreaEdges: []).accessibilityElement(children: .contain).accessibilityIdentifier("curve.panel")
         .overlay {
             if expanded {
                 ZStack {
@@ -395,7 +395,7 @@ struct NativeCurvePanel: View {
             Spacer().frame(height: 4)
             RailMoreButton(active: overshoot) { showMenu(segment) }
             Spacer().frame(height: 8)
-        }.frame(width: 44).frame(maxHeight: .infinity).background(curveRailFill)
+        }.frame(width: 44).frame(maxHeight: .infinity).background(curveRailFill, ignoresSafeAreaEdges: [])
     }
     private func glyphButton(_ glyph: Character, size: CGFloat, target: CGFloat, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -449,7 +449,7 @@ struct NativeCurvePanel: View {
                 familyTab(2, glyph: CupertinoGlyph.ChartBarAltFill, title: "pn_curve_steps4")
                 familyTab(3, glyph: CupertinoGlyph.Star, title: "panel_presets")
                 Spacer(minLength: 0)
-            }.frame(width: 44).background(curveRailFill)
+            }.frame(width: 44).background(curveRailFill, ignoresSafeAreaEdges: [])
         }.frame(width: 88).frame(maxHeight: .infinity)
     }
     private func presetTile(_ preset: CurvePresetItem) -> some View {

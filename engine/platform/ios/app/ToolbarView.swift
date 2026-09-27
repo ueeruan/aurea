@@ -260,8 +260,8 @@ private struct CopyPasteMenu: View {
             ShellMenuRow(CupertinoGlyph.Sparkles, "editor_copiar_efeitos", enabled: !ids.isEmpty) { act { if let id = model.primarySelection { model.engine.copyEffects(id) } } }
             ShellMenuRow(CupertinoGlyph.WandStars, "editor_colar_efeitos", enabled: !ids.isEmpty && model.engine.clipboardState & 4 != 0) { act { model.engine.pasteEffects(ids); model.refreshModel(force: true) } }
             ShellMenuSection("editor_keyframes")
-            ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_keyframes_cabecote", enabled: !ids.isEmpty) { act { if let id = model.primarySelection { model.engine.copyKeyframes(id, atFrame: model.localPlayhead) } } }
-            ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_keyframes_cabecote", enabled: !ids.isEmpty && model.engine.clipboardState & 8 != 0) { act { model.engine.pasteKeyframes(ids, atFrame: model.localPlayhead); model.refreshModel(force: true) } }
+            ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_keyframes_cabecote", enabled: !ids.isEmpty) { act { if let id = model.primarySelection { model.engine.copyKeyframes(id, atFrame: model.status.playhead) } } }
+            ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_keyframes_cabecote", enabled: !ids.isEmpty && model.engine.clipboardState & 8 != 0) { act { model.engine.pasteKeyframes(ids, atFrame: model.status.playhead); model.refreshModel(force: true) } }
         }
     }
     private func act(_ action: () -> Void) { dismiss(); action() }

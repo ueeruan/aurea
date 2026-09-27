@@ -210,6 +210,23 @@ private fun SectionTitle(t: String) {
 private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
     val store = env.store
     SectionTitle(stringResource(R.string.pn_text3d_title))
+    Spacer(Modifier.height(14.dp))
+    SectionTitle(stringResource(R.string.pn_t3d_presets))
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf("Smooth", "Brushed", "Scratched", "Hammered", "Weathered Metal").forEachIndexed { index, label ->
+            Chip(label, on = info.surfaceFinish == index) {
+                store.text3d?.let { store.setText3D(it.copy(surfaceFinish = index)) }
+            }
+        }
+    }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
+            Chip(stringResource(preset.labelRes), on = false) {
+                store.applyText3DPreset(preset)
+            }
+        }
+    }
+    Spacer(Modifier.height(14.dp))
     TextButton(onClick = {
         val type = effectTypeId("aurea.text3d.layout")
         if (store.effects.none { it.typeId == type }) store.addEffect(type)
@@ -298,23 +315,6 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
         T3DRuler(store, stringResource(R.string.pn_t3d_bevel_roundness), 0.006f, 0f, 1f, info.bevelRoundness,
             "${(info.bevelRoundness * 100).roundToInt()}%", "arredondamento") { v -> store.setText3D(info.copy(bevelRoundness = v), lazy = true) }
     }
-    Spacer(Modifier.height(14.dp))
-    SectionTitle(stringResource(R.string.pn_t3d_presets))
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf("Smooth", "Brushed", "Scratched", "Hammered", "Weathered Metal").forEachIndexed { index, label ->
-            Chip(label, on = info.surfaceFinish == index) {
-                store.text3d?.let { store.setText3D(it.copy(surfaceFinish = index)) }
-            }
-        }
-    }
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
-            Chip(stringResource(preset.labelRes), on = false) {
-                store.applyText3DPreset(preset)
-            }
-        }
-    }
-    Spacer(Modifier.height(14.dp))
 }
 
 /**

@@ -21,7 +21,15 @@ has passed acceptance.
 - Android: 132 JVM tests passed after graph-time changes.
 - Emulator API 35: six actual editor tests passed (scroll, body reorder/undo,
   horizontal move versus tap, independent curves, trim, compact-panel trim).
-- Local/World engine regression added; host compilation is still underway.
+- Local/World engine regression passed: 2 tests, 29 checks.
+- Actual Android value-graph touch drag and single undo passed.
+- Shifted/trimmed clipboard regression passed: 4 clipboard tests, 63 checks.
+  iOS toolbar now passes composition time to the engine for keyframe copy/paste.
+- Material preset access moved to the top of the text 3D panel on both platforms;
+  iOS chips now have a minimum 44-point touch target. Android compilation passed.
+- iOS compile/package passed at 084592bd. The first simulator dispatch used
+  invalid capture scene names and did not execute gestures; corrected dispatch
+  is run 36319772180. This is not a native gesture pass.
 - iOS native regressions added for body reorder, isolated easing and graph
   time/value dragging. Native execution is still required.
 - This does not validate a physical Samsung A51 5G or sustained iPhone workload.

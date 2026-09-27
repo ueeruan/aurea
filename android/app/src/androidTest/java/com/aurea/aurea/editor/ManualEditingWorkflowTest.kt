@@ -2,6 +2,7 @@ package com.aurea.aurea.editor
 
 import android.app.Application
 import android.net.Uri
+import android.media.MediaMetadataRetriever
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
@@ -9,6 +10,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
 import org.junit.Rule
@@ -175,5 +177,35 @@ class ManualEditingWorkflowTest {
         select(reopenedNull); compose.runOnIdle { assertEquals(2, store.keyframes[reopenedNull].orEmpty().size) }
         val reopenedCamera=store.layers.first { it.name=="AMV camera" }.id
         select(reopenedCamera); compose.runOnIdle { assertEquals(2,store.keyframes[reopenedCamera].orEmpty().size) }
+        val output = File(context.filesDir,"manual-editing-acceptance.mp4")
+        val progress = ExportProgress()
+        val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
+        compose.runOnIdle { assertEquals(0,store.engineForStress.startExport(output.absolutePath,320,30.0,0,4)) }
+        try {
+            compose.waitUntil(120000) {
+                store.engineForStress.exportProgress(buffer) && run { progress.readFrom(buffer); progress.finished }
+            }
+            assertEquals(progress.message,0,progress.result)
+            assertEquals(progress.framesTotal,progress.framesDone)
+            assertTrue(output.length()>10000)
+            val media=MediaMetadataRetriever()
+            try {
+                media.setDataSource(output.absolutePath)
+                assertEquals("480",media.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH))
+                assertEquals("320",media.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT))
+                assertEquals("yes",media.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO))
+                assertTrue(media.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)!!.toLong()>=15900)
+                for (second in listOf(1,3,7,13)) {
+                    val frame=media.getFrameAtTime(second*1_000_000L,MediaMetadataRetriever.OPTION_CLOSEST)
+                    assertNotNull("Encoded frame at ${second}s must decode",frame)
+                    if(frame!=null) {
+                        File(context.filesDir,"manual-editing-frame-$second.png").outputStream().use {
+                            assertTrue(frame.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it))
+                        }
+                        frame.recycle()
+                    }
+                }
+            } finally { media.release() }
+        } finally { if(!progress.finished) store.engineForStress.cancelExport() }
     }
 }

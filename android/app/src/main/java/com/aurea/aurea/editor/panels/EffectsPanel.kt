@@ -256,13 +256,13 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     LaunchedEffect(effects) {
         val ids = effects.map { it.effectId }.toSet()
         val added = ids - known
+        known = ids
         if (added.isNotEmpty()) {
             val index = effects.indexOfLast { it.effectId in added }
             openId = effects[index].effectId
             listState.animateScrollToItem(index)
         }
         else if (openId != null && openId !in ids) openId = null
-        known = ids
     }
     // O cartão aberto escolhe a sua primeira linha PRINCIPAL (se a escolhida não é dele).
     LaunchedEffect(openId, effects) {

@@ -106,9 +106,7 @@ effect-stack operations and numeric ranges; parenting/camera/remap and real moti
 blur checks; a complete 8–12-clip manual editing workflow using the same project
 on both platforms. Existing tools must be exercised before adding replacements.
 
-## Behaviour references consulted
-
-### Follow-up validation
+## Follow-up validation
 
 - Single-effect copying now preserves only that effect and its animation on both
   platform bridges. Locked paste targets are skipped without creating an undo
@@ -119,6 +117,18 @@ on both platforms. Existing tools must be exercised before adding replacements.
   8 checks). Native playback of this same project is still awaiting execution.
 - Native run 36322789798 failed to compile a complex Swift Speed Graph expression.
   Replaced it with an explicitly typed loop; a new native build is required.
+- Follow-up run 36323431150 compiled and packaged successfully (04f26a85).
+  All three requested UI scenes captured, including transform. Native gesture
+  results are still pending; this IPA is an intermediate build, not completion.
+- Interrupted Android gizmo drags now close their undo group in a finally block.
+  A real touch test leaves/re-enters the preview during an X drag, confirms Y/Z
+  stay unchanged, and undoes a subsequent Y edit separately. Passed on emulator.
+- The expanded Android workflow exported a real H.264 MP4: 16 seconds, 480x320,
+  audio present, all planned frames encoded; decoded frames at 1/3/7/13 seconds
+  were preserved and viewed. Output is synthetic noisy test media with overlapping
+  test titles, not a finished AMV or evidence of artistic quality.
+
+## Behaviour references consulted
 
 - [Alight Motion easing](https://support.alightmotion.com/hc/en-us/articles/10536934703889-Animation-Easing-Curves): curves are edited between neighbouring keys and can be copied to other segments.
 - [Alight Motion parenting](https://support.alightmotion.com/hc/en-us/articles/10536997444369-Layer-Parenting-and-Null-Objects): assigning a parent compensates the current placement.

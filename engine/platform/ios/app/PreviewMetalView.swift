@@ -120,6 +120,19 @@ struct PreviewMetalView: UIViewRepresentable {
         private var gizmoVector = CGPoint.zero
         private var gizmoCollapsed = false
         private var lastGizmoPoint = CGPoint.zero
+        // Gizmo.kt/Stage.kt gizmoGesture: ferramenta, alça desenhada e valores de
+        // PARTIDA (rotação/escala absolutas desde o toque, sem deriva).
+        private var gizmoTool = 0
+        private var gizmoOrigin = CGPoint.zero
+        private var gizmoHandle = CGPoint.zero
+        private var gizmoFacing = false
+        private var gizmoMoved = false
+        private var gizmoBase: SIMD3<Float> = .zero
+        private var gizmoSwept: CGFloat = 0
+        private var gizmoAlong: CGFloat = 0
+        private var gizmoLastAngle: CGFloat = 0
+        private var gizmoDownTime: CFTimeInterval = 0
+        private var pinchThreeD = false
         private enum StageMode { case pending, move, scale, rotate, pinch, idle, gizmo, shape, scene }
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
         private var sceneMode = 0
@@ -468,6 +481,11 @@ struct PreviewMetalView: UIViewRepresentable {
                 return
             }
             if pressed.isEmpty {
+                // Toque parado no quadrado central da escala = toque da âncora (beat).
+                if stageMode == .gizmo && !gizmoMoved && gizmoAxis == 3 && !hadMultipleTouches && model.previewMarkerAnchor != nil {
+                    if CACurrentMediaTime() - gizmoDownTime >= 0.45 { model.editMarkerAtPlayhead() }
+                    else { model.toggleMarkerAt(model.status.playhead) }
+                }
                 if stageMode == .pending && !hadMultipleTouches && handle < 0 {
                     if let layer = markerAnchorLayer, layer == model.primarySelection, model.previewMarkerAnchor != nil {
                         model.toggleMarkerAt(model.status.playhead)
@@ -498,6 +516,10 @@ struct PreviewMetalView: UIViewRepresentable {
                 }
                 if editableSelection() && over {
                     keepTransform(); pinchFingers = [a.id, b.id]
+                    // Camada 3D (tem gizmo): a pinça escala X, Y e Z juntos.
+                    if let id = model.primarySelection {
+                        pinchThreeD = !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty
+                    } else { pinchThreeD = false }
                     pinchSpan = max(1, hypot(a.position.x - b.position.x, a.position.y - b.position.y))
                     lastAngle = atan2(b.position.y - a.position.y, b.position.x - a.position.x)
                     sweptAngle = 0; pinchRotationActive = false; pinchRotationOffset = 0
@@ -592,7 +614,9 @@ struct PreviewMetalView: UIViewRepresentable {
             sweep(atan2(b.y - a.y, b.x - a.x))
             let degrees = Float(sweptAngle * 180 / .pi)
             if !pinchRotationActive && abs(degrees) > 4 { pinchRotationActive = true; pinchRotationOffset = degrees < 0 ? -4 : 4 }
-            beginEdit("pinça"); model.setTransform2(3, startScale.x * f, 4, startScale.y * f, layer: id)
+            beginEdit("pinça")
+            if pinchThreeD { model.gizmoSetComponents(id, base: 3, values: [startScale.x * f, startScale.y * f, startScale.z * f]) }
+            else { model.setTransform2(3, startScale.x * f, 4, startScale.y * f, layer: id) }
             if pinchRotationActive { model.setTransform(8, value: startRotation.z + degrees - pinchRotationOffset, layer: id) }
         }
         private func collectSnapTargets(_ own: Int64) {
@@ -685,33 +709,100 @@ struct PreviewMetalView: UIViewRepresentable {
             }
             if sceneMode != 0 { sceneLast = first.position }
         }
+        /// Stage.kt gizmoGesture: o eixo tocado fica travado até o dedo subir.
         private func startGizmo(at point: CGPoint, view: UIView) -> Bool {
             guard editableSelection(), let id = model.primarySelection, !ShapeStageGeometry.enabled(model) else { return false }
-            let data = model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoLocalSpace).map(\.floatValue)
+            let data = model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
             guard data.count == 8 else { return false }
             let raw = stride(from: 0, to: 8, by: 2).map { screenPoint(data[$0], data[$0 + 1], view: view) }
             let tips = ShellStageGeometry.gizmoTips(raw)
+            let tool = model.gizmoTool
             var closest: CGFloat = 24
             for i in 1...3 {
                 let distance = hypot(point.x - tips[i].x, point.y - tips[i].y)
                 if distance < closest { closest = distance; gizmoAxis = i - 1 }
             }
+            // Escala: o quadrado do centro escala X, Y e Z juntos.
+            if gizmoAxis < 0 && tool == 2 && hypot(point.x - tips[0].x, point.y - tips[0].y) < 20 { gizmoAxis = 3 }
             guard gizmoAxis >= 0 else { return false }
-            // Fixed-size display handles must not change world-space drag gain.
-            gizmoVector = CGPoint(x: raw[gizmoAxis + 1].x - raw[0].x, y: raw[gizmoAxis + 1].y - raw[0].y)
+            gizmoTool = tool
+            gizmoOrigin = tips[0]
+            if gizmoAxis < 3 {
+                // Fixed-size display handles must not change world-space drag gain.
+                gizmoVector = CGPoint(x: raw[gizmoAxis + 1].x - raw[0].x, y: raw[gizmoAxis + 1].y - raw[0].y)
+                gizmoHandle = CGPoint(x: tips[gizmoAxis + 1].x - tips[0].x, y: tips[gizmoAxis + 1].y - tips[0].y)
+            } else {
+                gizmoVector = .zero
+                gizmoHandle = .zero
+            }
             let extent = (1...3).map { hypot(raw[$0].x - raw[0].x, raw[$0].y - raw[0].y) }.max() ?? 0
-            gizmoCollapsed = gizmoAxis == 2 && hypot(gizmoVector.x, gizmoVector.y) * 80 / max(extent, 0.0001) < 44 * 0.6
-            lastGizmoPoint = point; beginEdit("mover no eixo"); return true
+            gizmoFacing = gizmoAxis < 3 && hypot(gizmoVector.x, gizmoVector.y) * 80 / max(extent, 0.0001) < 44 * 0.6
+            gizmoCollapsed = gizmoAxis == 2 && gizmoFacing
+            let key = tool == 1 ? "rotation" : tool == 2 ? "scale" : "position"
+            gizmoBase = vector(model.detail[key])
+            gizmoSwept = 0; gizmoAlong = 0; gizmoMoved = false
+            gizmoLastAngle = atan2(point.y - tips[0].y, point.x - tips[0].x)
+            gizmoDownTime = CACurrentMediaTime()
+            lastGizmoPoint = point
+            return true
         }
         private func stepGizmo(_ point: CGPoint, view: UIView) {
             guard let id = model.primarySelection else { return }
+            if !gizmoMoved {
+                // Folga de alça (4 pt): um toque parado nunca vira edição.
+                guard hypot(point.x - stageDown.x, point.y - stageDown.y) >= 4 else { return }
+                gizmoMoved = true
+            }
+            // O 1º passo conta desde o toque: a alça alcança o dedo sem perder a folga.
             let dx = point.x - lastGizmoPoint.x, dy = point.y - lastGizmoPoint.y
             lastGizmoPoint = point
-            let length2 = gizmoVector.x * gizmoVector.x + gizmoVector.y * gizmoVector.y
-            let amount = gizmoCollapsed ? -Float(dy) * scaleFactor(view) * 2 : length2 > 1 ? Float((dx * gizmoVector.x + dy * gizmoVector.y) / length2) * ShellStageGeometry.gizmoLength : 0
-            guard amount != 0 else { return }
-            let next = model.engine.gizmoMoveLocal(id, axis: UInt32(gizmoAxis + (model.gizmoLocalSpace ? 3 : 0)), amount: amount).map(\.floatValue)
-            model.applyGizmoPosition(id, next)
+            guard dx != 0 || dy != 0 else { return }
+            let axisName = gizmoAxis < 3 ? ["X", "Y", "Z"][gizmoAxis] : "XYZ"
+            var out: [Float] = [gizmoBase.x, gizmoBase.y, gizmoBase.z]
+            switch gizmoTool {
+            case 1:
+                let length = hypot(gizmoVector.x, gizmoVector.y)
+                if gizmoFacing || length <= 1 {
+                    let angle = atan2(point.y - gizmoOrigin.y, point.x - gizmoOrigin.x)
+                    var delta = angle - gizmoLastAngle
+                    while delta > .pi { delta -= 2 * .pi }
+                    while delta < -.pi { delta += 2 * .pi }
+                    gizmoSwept += delta * 180 / .pi
+                    gizmoLastAngle = angle
+                } else {
+                    gizmoSwept += (-dx * gizmoVector.y + dy * gizmoVector.x) / length * 0.5
+                }
+                out[gizmoAxis] = gizmoBase[gizmoAxis] + Float(gizmoSwept)
+                beginEdit("girar no eixo \(axisName)")
+                model.gizmoSetComponents(id, base: 6, values: out)
+            case 2:
+                let handleLength: CGFloat = max(hypot(gizmoHandle.x, gizmoHandle.y), 1)
+                if gizmoAxis == 3 { gizmoAlong += dx - dy }
+                else if gizmoFacing { gizmoAlong += -dy }
+                else { gizmoAlong += (dx * gizmoHandle.x + dy * gizmoHandle.y) / handleLength }
+                if gizmoAxis == 3 {
+                    let factor = Float(exp(Double(gizmoAlong) / 120))
+                    for i in 0..<3 { out[i] = gizmoScale(out[i] * factor) }
+                } else {
+                    let factor: Float = max(0.01, 1 + Float(gizmoAlong / handleLength))
+                    out[gizmoAxis] = gizmoScale(gizmoBase[gizmoAxis] * factor)
+                }
+                beginEdit(gizmoAxis == 3 ? "escala uniforme" : "escala no eixo \(axisName)")
+                model.gizmoSetComponents(id, base: 3, values: out)
+            default:
+                let length2 = gizmoVector.x * gizmoVector.x + gizmoVector.y * gizmoVector.y
+                let amount: Float = gizmoCollapsed ? -Float(dy) * scaleFactor(view) * 2 : length2 > 1 ? Float((dx * gizmoVector.x + dy * gizmoVector.y) / length2) * ShellStageGeometry.gizmoLength : 0
+                guard amount != 0 else { return }
+                beginEdit("mover no eixo \(axisName)")
+                let next = model.engine.gizmoMoveLocal(id, axis: UInt32(gizmoAxis + (model.gizmoLocalSpace ? 3 : 0)), amount: amount).map(\.floatValue)
+                model.applyGizmoPosition(id, next)
+            }
+        }
+        /// Escala do gizmo: mantém o sinal (espelho) e |escala| em [0,001; 100].
+        private func gizmoScale(_ value: Float) -> Float {
+            guard value.isFinite else { return 1 }
+            let sign: Float = value < 0 ? -1 : 1
+            return sign * min(100, max(0.001, abs(value)))
         }
         private func startShape(at point: CGPoint, view: UIView) -> Bool {
             guard ShapeStageGeometry.enabled(model) else { return false }

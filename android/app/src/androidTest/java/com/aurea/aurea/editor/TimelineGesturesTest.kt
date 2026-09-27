@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.R
+import com.aurea.aurea.editor.timeline.KeyRef
 import com.aurea.aurea.editor.panels.Ease
 import com.aurea.aurea.editor.panels.applyEase
 import com.aurea.aurea.state.EditorStore
@@ -172,6 +173,105 @@ class TimelineGesturesTest {
         compose.runOnIdle {
             assertEquals(before.filterNot { it.property == 0 && it.time == 0 },
                 store.keyframes[id].orEmpty().filterNot { it.property == 0 && it.time == 0 })
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.keyframes[id] == before }
+    }
+
+    /**
+     * Seleção de keyframes entre PROPRIEDADES na timeline: Posição X e Escala X
+     * em frames diferentes, trilhas abertas, modo "Selecionar", um keyframe de
+     * cada trilha; arrastar um move os dois (e só eles) num passo de desfazer.
+     * Excluir e Duplicar agem na seleção inteira.
+     */
+    @Test fun multiSelectedKeysAcrossPropertiesMoveDeleteAndDuplicateTogether() {
+        launch()
+        val id = store.layers.single().id
+        compose.runOnIdle { store.select(id, openOptions = false); store.snapping = false }
+        // Posição X em 0 e 30; Escala X em 15 e 45.
+        for ((frame, property) in listOf(0 to 0, 30 to 0, 15 to 3, 45 to 3)) {
+            compose.runOnIdle { store.seek(frame) }
+            compose.waitUntil(5000) { store.playhead == frame }
+            compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(property)) }
+            compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == property && it.time == frame } }
+        }
+        compose.runOnIdle { store.clearSelection(); store.seek(30) }
+        compose.waitUntil(5000) { store.playhead == 30 }
+        val before = store.keyframes[id].orEmpty()
+        assertEquals(4, before.size)
+        // Geometria da timeline (dp): régua 38, linha da camada 36, trilhas de 28 com o
+        // losango a 20 do topo. Abertas: Transform (74), Position X (102), Scale X (130).
+        val positionY = 122 * density
+        val scaleY = 150 * density
+        // A vista É o cabeçote (30): 80 dp/s = 8/3 dp por frame a partir do centro.
+        fun keyX(width: Int, frame: Int) = width / 2f + (frame - 30) * 80f / 30f * density
+
+        // Abrir as trilhas pela pílula da camada.
+        timeline().performTouchInput { click(Offset(50 * density, 56 * density)) }
+        compose.waitForIdle()
+
+        fun selectPositionAndScale() {
+            // Toque simples: só a Posição X @30 (abre a curva; timeline compacta).
+            timeline().performTouchInput { click(Offset(keyX(width, 30), positionY)) }
+            compose.waitUntil(5000) { store.keySelection?.size == 1 }
+            compose.onNodeWithTag("timeline.keys.select").performClick()
+            compose.waitUntil(5000) { store.keySelectMode }
+            compose.waitForIdle()
+            // O modo fecha o painel: a timeline volta alta com as trilhas abertas.
+            timeline().performTouchInput { click(Offset(keyX(width, 45), scaleY)) }
+            compose.waitUntil(5000) { store.keySelection?.size == 2 }
+            compose.runOnIdle {
+                assertEquals(setOf(KeyRef(0, -1, 0, 30), KeyRef(3, -1, 0, 45)), store.keySelection?.keys)
+            }
+        }
+
+        // --- Arrastar um move os dois -----------------------------------------------------
+        selectPositionAndScale()
+        timeline().performTouchInput {
+            swipe(Offset(keyX(width, 30), positionY), Offset(keyX(width, 40), positionY), 400)
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().none { it.property == 0 && it.time == 30 } }
+        compose.runOnIdle {
+            val keys = store.keyframes[id].orEmpty()
+            val moved = keys.single { it.property == 0 && it.time != 0 }.time - 30
+            assertTrue("Selection should move about 10 frames, moved=$moved", moved in 8..12)
+            assertTrue("Scale key moves by the same delta", keys.any { it.property == 3 && it.time == 45 + moved })
+            // Os NÃO escolhidos ficam.
+            assertTrue(keys.any { it.property == 0 && it.time == 0 })
+            assertTrue(keys.any { it.property == 3 && it.time == 15 })
+            assertEquals(before.size, keys.size)
+            // A seleção acompanhou o motor.
+            assertEquals(setOf(KeyRef(0, -1, 0, 30 + moved), KeyRef(3, -1, 0, 45 + moved)), store.keySelection?.keys)
+            store.undo()
+        }
+        try { compose.waitUntil(5000) { store.keyframes[id] == before } }
+        catch (error: Throwable) { throw AssertionError("One undo must restore both properties. Before=$before After=${store.keyframes[id]}", error) }
+        compose.runOnIdle { assertNull("Undo clears the key selection", store.keySelection) }
+
+        // --- Excluir -----------------------------------------------------------------------
+        selectPositionAndScale()
+        compose.onNodeWithTag("timeline.keys.delete").performClick()
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 2 }
+        compose.runOnIdle {
+            val keys = store.keyframes[id].orEmpty()
+            assertTrue(keys.any { it.property == 0 && it.time == 0 })
+            assertTrue(keys.any { it.property == 3 && it.time == 15 })
+            assertNull(store.keySelection)
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.keyframes[id] == before }
+
+        // --- Duplicar: cópia 1 frame depois do último (anc. 30 → 46) ------------------------
+        selectPositionAndScale()
+        compose.onNodeWithTag("timeline.keys.duplicate").performClick()
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 6 }
+        compose.runOnIdle {
+            val keys = store.keyframes[id].orEmpty()
+            assertTrue(keys.any { it.property == 0 && it.time == 46 })
+            assertTrue(keys.any { it.property == 3 && it.time == 61 })
+            assertEquals(before, keys.filterNot { (it.property == 0 && it.time == 46) || (it.property == 3 && it.time == 61) })
+            // As cópias viram a seleção.
+            assertEquals(setOf(KeyRef(0, -1, 0, 46), KeyRef(3, -1, 0, 61)), store.keySelection?.keys)
             store.undo()
         }
         compose.waitUntil(5000) { store.keyframes[id] == before }

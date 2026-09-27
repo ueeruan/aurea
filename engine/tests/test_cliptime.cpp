@@ -10,7 +10,9 @@
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
 
+#include <chrono>
 #include <cmath>
+#include <thread>
 #include <vector>
 
 using namespace aurea;
@@ -329,6 +331,36 @@ AUREA_TEST(ClipTime, MarkerEditingIsAtomicUndoableAndPortable) {
     AUREA_CHECK(r.e.edit_marker(75, 80, 0xFF445566u, "beat moved"));
     const auto& all = r.comp()->markers();
     AUREA_CHECK_EQ(all.back().kind, kMarkerBeat);
+}
+
+AUREA_TEST(ClipTime, BeatTapMarksLiveWithoutTogglingOrPausing) {
+    TimeRig r(cfg_with_audio());
+    Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{45}, 30.0);
+    AUREA_CHECK(r.e.apply_command(seek).ok());
+    AUREA_CHECK_EQ(r.e.mark_beat_live(), 45);
+    // Dois toques no mesmo quadro: o 2º não apaga (toggle apagaria).
+    AUREA_CHECK_EQ(r.e.mark_beat_live(), -1);
+    std::vector<i64> m(3 * 8);
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 1u);
+    AUREA_CHECK_EQ(m[0], 45);
+    // Tocando: marca pelo relógio de mídia (não pelo último quadro
+    // desenhado, que aqui nem avança — ninguém chama update) e segue tocando.
+    seek.seek.time = tick_at(FrameIndex{90}, 30.0);
+    AUREA_CHECK(r.e.apply_command(seek).ok());
+    Command play; play.type = CommandType::PlaybackPlay;
+    AUREA_CHECK(r.e.apply_command(play).ok());
+    AUREA_CHECK(r.e.playback().playing());
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    const i64 live = r.e.mark_beat_live();
+    AUREA_CHECK(live >= 92 && live <= 120);   // ≥ 3 quadros de 30 fps depois do play
+    AUREA_CHECK(r.e.playback().playing());
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 2u);
+    Command pause; pause.type = CommandType::PlaybackPause;
+    AUREA_CHECK(r.e.apply_command(pause).ok());
+    Command u; u.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(u).ok());   // cada toque é um passo
+    AUREA_CHECK_EQ(r.e.query_markers(m.data(), 8), 1u);
+    AUREA_CHECK_EQ(m[0], 45);
 }
 
 AUREA_TEST(ClipTime, MarkersToggleUndoSaveAndRetime) {

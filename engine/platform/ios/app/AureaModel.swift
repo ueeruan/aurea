@@ -97,6 +97,9 @@ struct EffectParamItem: Identifiable, Equatable {
     var defaultValue: [Float]
     var minValue: Float
     var maxValue: Float
+    /// Faixa DIGITADA (teclado numérico): contém minValue...maxValue (a da régua).
+    var hardMin: Float
+    var hardMax: Float
     var animated: Bool
     var enumLabels: [String]
     var id: UInt32 { index }
@@ -356,6 +359,12 @@ final class AureaModel: ObservableObject {
     @Published var curveReturnPanel: PanelKind = .none
     @Published var stageManipulating = false
     @Published var gizmoLocalSpace = false
+    /// Ferramenta das alças do gizmo 3D (GIZMO_* do EditorStore): 0 mover,
+    /// 1 girar (Rotação X/Y/Z), 2 escala (Escala X/Y/Z; o centro = uniforme).
+    @Published var gizmoTool = 0
+    /// Girar/escala editam os eixos da PRÓPRIA camada: o gizmo mostra os locais.
+    var gizmoAxesLocal: Bool { gizmoLocalSpace || gizmoTool != 0 }
+    func cycleGizmoTool() { gizmoTool = (gizmoTool + 1) % 3 }
     @Published var toast: String?
 
     // --- Modelo em memória (o que a timeline e os painéis desenham) ---------
@@ -422,6 +431,11 @@ final class AureaModel: ObservableObject {
     enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo }
     @Published var curveProperty: UInt32 = 0
     @Published var timelineFocus: [TimelineTrack]? = nil
+    /// Keyframes escolhidos na timeline (várias trilhas de UMA camada; ações em
+    /// TimelineModel.swift). nil = barra de ações fechada.
+    @Published var timelineKeySelection: TimelineKeySelection? = nil
+    /// Modo "Selecionar": tocar num losango soma/tira em vez de trocar.
+    @Published var timelineKeySelectMode = false
     private var pendingPlayhead: Int64?
     private var pendingPlayheadUntil: TimeInterval = 0
     enum ProjectSort: String, CaseIterable, Identifiable {
@@ -609,7 +623,20 @@ final class AureaModel: ObservableObject {
                             engine.seek(toFrame: 0); refreshModel(force: true)
                         }
                         panel = .transform
-                    case "vector": addVector(1); panel = .vector
+                    case "timeline-keys":
+                        // Posição X em 0 e 30; Escala X em 15 e 45 (seleção entre propriedades).
+                        addNull(threeD: false)
+                        if let id = primarySelection {
+                            let keys: [(UInt32, Int32)] = [(0, 0), (0, 30), (3, 15), (3, 45)]
+                            for (property, time) in keys {
+                                engine.insertKeyframe(forLayer: id, property: property, time: time, value: Float(100 + time))
+                            }
+                            refreshModel(force: true)
+                            // Camada só na timeline (sem doca): a timeline fica alta e as trilhas cabem.
+                            select(layerId: id, additive: false, openOptions: false)
+                            panel = .none
+                            seek(toFrame: 30)
+                        }
                     case "timeline-reorder":
                         for _ in 0..<8 { addShape(1) }
                     default: addShape(1)
@@ -626,9 +653,10 @@ final class AureaModel: ObservableObject {
                             if scene == "curve-null" {
                                 engine.insertKeyframe(forLayer: id, property: property, time: time, value: time == 0 ? 200 : 450)
                             } else {
-                                engine.seek(toFrame: Int64(time))
-                                _ = engine.keyShape(id, param: param)
-                                _ = engine.editShape(id, param: param, value: time == 0 ? 200 : 450, continuing: false)
+                                // seek é enfileirado e keyShape é direto: o 2º key caía no
+                                // quadro 0. Inserir pela fila fixa o tempo explicitamente.
+                                engine.editTrackKey(id, property: property, effect: 0, param: param, time: time, action: 4,
+                                                    value: time == 0 ? 200 : 450, targetTime: time, interpolation: 2, handles: [])
                             }
                         }
                         engine.seek(toFrame: 0)
@@ -1058,6 +1086,7 @@ final class AureaModel: ObservableObject {
             }
         }
         if byLayer != keyframes { keyframes = byLayer }
+        validateTimelineKeySelection()
         let nextComposition = engine.composition() ?? [:]
         if !NSDictionary(dictionary: nextComposition).isEqual(to: composition) { composition = nextComposition }
         if dirty != (status.dirty != 0) { dirty = status.dirty != 0 }
@@ -1105,6 +1134,13 @@ final class AureaModel: ObservableObject {
         let nextParams = engine.effectParams(forLayer: layerId, effectId: effectId).map { row in
             let value = (row["value"] as? [NSNumber])?.map(\.floatValue) ?? [0, 0, 0, 0]
             let def = (row["defaultValue"] as? [NSNumber])?.map(\.floatValue) ?? [0, 0, 0, 0]
+            let lo: Float = (row["min"] as? NSNumber)?.floatValue ?? 0
+            let hi: Float = (row["max"] as? NSNumber)?.floatValue ?? 1
+            // Sem a chave (ponte antiga) ou NaN: a faixa digitada é a do slider, nunca mais estreita.
+            let rawHardMin: Float = (row["hardMin"] as? NSNumber)?.floatValue ?? lo
+            let rawHardMax: Float = (row["hardMax"] as? NSNumber)?.floatValue ?? hi
+            let hardLo: Float = rawHardMin.isNaN ? lo : Swift.min(rawHardMin, lo)
+            let hardHi: Float = rawHardMax.isNaN ? hi : Swift.max(rawHardMax, hi)
             return EffectParamItem(flags: (row["flags"] as? NSNumber)?.uint32Value ?? 0, index: (row["index"] as? NSNumber)?.uint32Value ?? 0,
                                    type: (row["type"] as? NSNumber)?.uint32Value ?? 0,
                                    label: row["label"] as? String ?? "",
@@ -1112,8 +1148,10 @@ final class AureaModel: ObservableObject {
                                    paramId: row["id"] as? String ?? "",
                                    value: value,
                                    defaultValue: def,
-                                   minValue: (row["min"] as? NSNumber)?.floatValue ?? 0,
-                                   maxValue: (row["max"] as? NSNumber)?.floatValue ?? 1,
+                                   minValue: lo,
+                                   maxValue: hi,
+                                   hardMin: hardLo,
+                                   hardMax: hardHi,
                                    animated: row["animated"] as? Bool ?? false,
                                    enumLabels: row["enumLabels"] as? [String] ?? [])
         }
@@ -1143,8 +1181,9 @@ final class AureaModel: ObservableObject {
         _ = engine.flush()
     }
 
-    func undo() { engine.run { $0.undo() }; syncAfterEdit(); restoreTrackingAfterHistory() }
-    func redo() { engine.run { $0.redo() }; syncAfterEdit(); restoreTrackingAfterHistory() }
+    // Desfazer/refazer podem mover ou apagar os keyframes escolhidos: a seleção da timeline some.
+    func undo() { clearTimelineKeySelection(); engine.run { $0.undo() }; syncAfterEdit(); restoreTrackingAfterHistory() }
+    func redo() { clearTimelineKeySelection(); engine.run { $0.redo() }; syncAfterEdit(); restoreTrackingAfterHistory() }
     private func restoreTrackingAfterHistory() {
         guard let id = primarySelection else { return }
         if !cameraFeatures.isEmpty {
@@ -1255,6 +1294,8 @@ final class AureaModel: ObservableObject {
     @Published private(set) var timelineOnlySelection: Set<Int64> = []
 
     func select(layerId: Int64, additive: Bool = false, openOptions: Bool = true) {
+        // A seleção de keyframes é de UMA camada: trocar a principal a descarta.
+        if let keys = timelineKeySelection, additive || keys.layer != layerId { clearTimelineKeySelection() }
         if primarySelection != layerId { selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; pointPick = nil; freehandPoints = []; panel = .none }
         if additive {
             var next = selection
@@ -1273,6 +1314,7 @@ final class AureaModel: ObservableObject {
 
     func clearSelection() {
         timelineOnlySelection = []
+        clearTimelineKeySelection()
         selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; masks = []
         engine.run { $0.clearSelection() }
         selection = []
@@ -2006,17 +2048,29 @@ final class AureaModel: ObservableObject {
     /// Posição vinda do gizmo/arrasto 3D: na cena, desloca a curva inteira
     /// (layout); fora dela, keyframe se animado, senão valor estático.
     func applyGizmoPosition(_ id: Int64, _ next: [Float]) {
-        let previous = StageGeom.floats(detail["position"])
-        guard next.count == 3, previous.count == 3, next.allSatisfy({ $0.isFinite }) else { return }
+        applyGizmoComponents(id, base: 0, previous: StageGeom.floats(detail["position"]), next: next)
+    }
+
+    /// Valores ABSOLUTOS de Escala (base 3) ou Rotação (base 6) XYZ vindos do
+    /// gizmo/pinça 3D — calculados do início do gesto, sem deriva nem salto.
+    func gizmoSetComponents(_ id: Int64, base: UInt32, values: [Float]) {
+        let key = base == 3 ? "scale" : base == 6 ? "rotation" : ""
+        guard !key.isEmpty else { return }
+        applyGizmoComponents(id, base: base, previous: StageGeom.floats(detail[key]), next: values)
+    }
+
+    private func applyGizmoComponents(_ id: Int64, base: UInt32, previous: [Float], next: [Float]) {
+        guard next.count == 3, previous.count >= 3, next.allSatisfy({ $0.isFinite }) else { return }
         let animated = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         let local = localPlayhead
         // Submission is asynchronous: three scalar setters would each read
         // the same old XYZ and overwrite the preceding axis command.
         mutate { core in
             for axis in 0...2 where abs(next[axis] - previous[axis]) >= 0.00001 {
-                if !sceneEditor && autoKeyTransforms && animated & (1 << axis) != 0 {
-                    core.insertKeyframe(forLayer:id,property:UInt32(axis),time:local,value:next[axis])
-                } else { core.layoutTransform(id,property:UInt32(axis),value:next[axis]) }
+                let property = base + UInt32(axis)
+                if !sceneEditor && autoKeyTransforms && animated & (UInt32(1) << property) != 0 {
+                    core.insertKeyframe(forLayer: id, property: property, time: local, value: next[axis])
+                } else { core.layoutTransform(id, property: property, value: next[axis]) }
             }
         }
         refreshModel(force: true)
@@ -2272,6 +2326,11 @@ final class AureaModel: ObservableObject {
     /// Marca (ou desmarca) com aviso e vibração, como no Android: marca
     /// silenciosa parecia ter aparecido "do nada".
     func toggleMarkerAt(_ frame: Int64) {
+        // Música tocando: TAP → marca, TAP → marca… sem parar o som (EditorStore.markBeatLive).
+        if status.playing != 0 {
+            markBeatLive()
+            return
+        }
         let target = min(max(0, frame), max(0, compositionDuration - 1))
         engine.run { $0.pause() }
         seek(toFrame: target)
@@ -2281,6 +2340,16 @@ final class AureaModel: ObservableObject {
         let on = markerFrames.contains(target)
         toast = AureaText.t(on ? "msg_marca_adicionada" : "msg_marca_removida")
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// Marca de batida ao vivo: o motor lê o relógio do áudio no instante do
+    /// toque. Não pausa, não faz seek, não alterna e não mostra toast.
+    @discardableResult
+    func markBeatLive() -> Bool {
+        guard engine.markBeatLive() >= 0 else { return false }
+        refreshMarkers()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        return true
     }
 
     func editMarker(from: Int64, to: Int64, color: UInt32, label: String) -> Bool {
@@ -2515,6 +2584,7 @@ final class AureaModel: ObservableObject {
 
     func selectAll() {
         timelineOnlySelection = []
+        clearTimelineKeySelection()
         let ids = layers.map { NSNumber(value: $0.id) }
         guard !ids.isEmpty else { return }
         engine.run { $0.selectLayers(ids) }
@@ -2649,5 +2719,118 @@ extension UIImage {
                                provider: provider, decode: nil, shouldInterpolate: false,
                                intent: .defaultIntent) else { return nil }
         return UIImage(cgImage: cg)
+    }
+}
+
+// =============================================================================
+// Ações da seleção de keyframes da timeline (as mesmas do EditorStore.kt)
+// =============================================================================
+extension AureaModel {
+    func clearTimelineKeySelection() {
+        if timelineKeySelection != nil { timelineKeySelection = nil }
+        if timelineKeySelectMode { timelineKeySelectMode = false }
+    }
+
+    /// Toque simples num losango: só ele fica escolhido.
+    func tapTimelineKey(_ layer: Int64, _ key: KeyframeItem) {
+        timelineKeySelection = TimelineKeySelection.single(layer, key)
+        timelineKeySelectMode = false
+    }
+
+    /// Liga/desliga o modo "Selecionar". Ligar fecha o painel (a timeline volta
+    /// alta, com as trilhas abertas) e deixa a camada escolhida só na timeline.
+    func changeTimelineKeySelectMode(_ on: Bool) {
+        if !on { timelineKeySelectMode = false; return }
+        let base: TimelineKeySelection
+        if let current = timelineKeySelection { base = current }
+        else if let id = primarySelection { base = TimelineKeySelection(layer: id) }
+        else { return }
+        select(layerId: base.layer, additive: false, openOptions: false)
+        panel = .none
+        timelineKeySelection = base
+        timelineKeySelectMode = true
+    }
+
+    /// Modo de escolha: alterna o grupo do losango (1 keyframe numa trilha; o
+    /// instante inteiro no resumo). Outra camada começa outra seleção.
+    func toggleTimelineKeys(_ layer: Int64, _ group: [KeyframeItem]) {
+        if group.isEmpty { return }
+        let mode = timelineKeySelectMode
+        if primarySelection != layer || selection.count != 1 {
+            select(layerId: layer, additive: false, openOptions: false)
+        }
+        timelineKeySelectMode = mode
+        var base = TimelineKeySelection(layer: layer)
+        if let current = timelineKeySelection, current.layer == layer { base = current }
+        timelineKeySelection = base.toggledGroup(group)
+    }
+
+    func selectAllTimelineKeys() {
+        guard let layer = timelineKeySelection?.layer ?? primarySelection else { return }
+        let keys: [KeyframeItem] = keyframes[layer] ?? []
+        timelineKeySelection = TimelineKeySelection.all(layer, keys, focus: timelineFocus)
+    }
+
+    /// Move a seleção inteira (atômico no motor: recusa colisão com keyframe
+    /// não escolhido). Só atualiza as referências se o motor aceitou.
+    @discardableResult
+    func shiftTimelineKeys(_ delta: Int32) -> Bool {
+        guard let sel = timelineKeySelection, !sel.isEmpty, delta != 0 else { return false }
+        let changed: UInt32 = engine.keyframeSelection(sel.layer, references: sel.references(), action: 1, delta: delta)
+        if changed == 0 { return false }
+        timelineKeySelection = sel.shifted(delta)
+        refreshModel(force: true)
+        return true
+    }
+
+    func copyTimelineKeys() {
+        guard let sel = timelineKeySelection, !sel.isEmpty else { return }
+        let copied: UInt32 = engine.keyframeSelection(sel.layer, references: sel.references(), action: 0, delta: 0)
+        if copied > 0 {
+            let count: NSString = NSString(string: String(copied))
+            toast = AureaText.t("msg_keyframe_s_copiado_s", count)
+        }
+    }
+
+    /// Colar no cabeçote (o caminho de sempre), na camada da seleção.
+    func pasteTimelineKeys() {
+        guard let layer = timelineKeySelection?.layer else { return }
+        engine.pasteKeyframes([NSNumber(value: layer)], atFrame: Int32(clamping: status.playhead))
+        refreshModel(force: true)
+    }
+
+    /// Duplicar = copiar + colar 1 frame depois do último escolhido; as cópias viram a seleção.
+    func duplicateTimelineKeys() {
+        guard let sel = timelineKeySelection, let delta = sel.duplicateDelta(),
+              let row = layers.first(where: { $0.id == sel.layer }) else { return }
+        let target: Int64 = Int64(sel.maxTime) + 1 + Int64(row.startFrame) - Int64(row.offsetFrames)
+        if target < Int64(Int32.min) || target > Int64(Int32.max) { return }
+        let copied: UInt32 = engine.keyframeSelection(sel.layer, references: sel.references(), action: 0, delta: 0)
+        if copied == 0 { return }
+        if status.playing != 0 { playPause() }
+        engine.pasteKeyframes([NSNumber(value: sel.layer)], atFrame: Int32(target))
+        timelineKeySelection = sel.shifted(delta)
+        refreshModel(force: true)
+    }
+
+    /// Excluir a seleção inteira (um passo de desfazer); a barra fecha.
+    func deleteTimelineKeys() {
+        guard let sel = timelineKeySelection, !sel.isEmpty else { return }
+        let removed: UInt32 = engine.keyframeSelection(sel.layer, references: sel.references(), action: 2, delta: 0)
+        if removed == 0 { return }
+        if let time = curveSelectedTime {
+            let primary = TimelineKeyRef(property: curveProperty, effect: curveEffect, param: curveParam, time: time)
+            if sel.keys.contains(primary) { curveSelectedTime = nil }
+        }
+        clearTimelineKeySelection()
+        refreshModel(force: true)
+    }
+
+    /// A seleção some se a camada sumiu ou algum keyframe referido deixou de existir.
+    func validateTimelineKeySelection() {
+        guard let sel = timelineKeySelection else { return }
+        let alive: Bool = layers.contains { $0.id == sel.layer }
+        let keys: [KeyframeItem] = keyframes[sel.layer] ?? []
+        if !alive || sel.validated(keys) == nil { clearTimelineKeySelection() }
     }
 }

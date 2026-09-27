@@ -17,6 +17,7 @@
 #include "aurea/render/PreviewRefill.hpp"
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace aurea;
@@ -649,6 +650,97 @@ AUREA_TEST(EffectGraph, ExpressionFallsBackToConstantAndSaysSo) {
     AUREA_CHECK_NEAR(v.v[0], 0.25f, 1e-6);
 }
 
+// Faixa do SLIDER x faixa DIGITADA (edição extrema): toda declaração do
+// catálogo tem hardMin <= min <= max <= hardMax, e o que não é número
+// contínuo (contagem, semente, amostras, enum, bool) não alarga.
+AUREA_TEST(EffectParams, TypedRangeAlwaysContainsTheSliderRange) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    AUREA_CHECK(reg.count() > 0);
+    u32 checked = 0, widened = 0;
+    for (u32 i = 0; i < reg.count(); ++i) {
+        const ParameterRegistry& params = reg.params_at(i);
+        for (u32 p = 0; p < params.count(); ++p) {
+            const ParamSpec& s = params.at(p);
+            // O registro grava a faixa digitada EXPLÍCITA (nunca NaN).
+            AUREA_CHECK(!std::isnan(s.hardMin) && !std::isnan(s.hardMax));
+            AUREA_CHECK_MSG(s.hardMin <= s.minValue && s.minValue <= s.maxValue && s.maxValue <= s.hardMax,
+                            s.id);
+            AUREA_CHECK_EQ(s.typed_min(), s.hardMin);
+            AUREA_CHECK_EQ(s.typed_max(), s.hardMax);
+            const bool wide = s.hardMin < s.minValue || s.hardMax > s.maxValue;
+            if (s.type != ParamType::Float && s.type != ParamType::Angle && s.type != ParamType::Point2D
+                && s.type != ParamType::Point3D) {
+                AUREA_CHECK_MSG(!wide, s.id);
+            }
+            if (wide) ++widened;
+            ++checked;
+        }
+    }
+    AUREA_CHECK(checked > 100);
+    AUREA_CHECK(widened >= 20);
+}
+
+AUREA_TEST(EffectParams, TypedRangeApiOnlyWidensContinuousNumbers) {
+    ParameterRegistry p;
+    const u32 f = p.add_float("r", "R", 10.0f, 0.0f, 100.0f);
+    const u32 n = p.add_int("n", "N", 4, 1, 16);
+    const u32 b = p.add_bool("b", "B", false);
+    // Padrão explícito: a faixa digitada nasce igual à do slider.
+    AUREA_CHECK_EQ(p.at(f).hardMin, 0.0f);
+    AUREA_CHECK_EQ(p.at(f).hardMax, 100.0f);
+    AUREA_CHECK_EQ(p.set_typed_range(f, 50.0f, 1000.0f), f);   // não estreita o mínimo
+    AUREA_CHECK_EQ(p.at(f).hardMin, 0.0f);
+    AUREA_CHECK_EQ(p.at(f).hardMax, 1000.0f);
+    (void)p.set_typed_range(f, -std::numeric_limits<f32>::infinity(), std::nanf(""));   // não finito: ignorado
+    AUREA_CHECK_EQ(p.at(f).hardMin, 0.0f);
+    AUREA_CHECK_EQ(p.at(f).hardMax, 1000.0f);
+    (void)p.set_typed_range(n, -100.0f, 100.0f);   // contagem: fica
+    AUREA_CHECK_EQ(p.at(n).hardMin, 1.0f);
+    AUREA_CHECK_EQ(p.at(n).hardMax, 16.0f);
+    (void)p.typed_range(-5.0f, 5.0f);              // o último é o bool: fica
+    AUREA_CHECK_EQ(p.at(b).hardMin, 0.0f);
+    AUREA_CHECK_EQ(p.at(b).hardMax, 1.0f);
+    AUREA_CHECK_EQ(p.set_typed_range(99, 0.0f, 1.0f), kInvalidIndex);
+    // Spec montada à mão, fora do registro: NaN = a faixa do slider.
+    ParamSpec loose;
+    loose.minValue = -2.0f; loose.maxValue = 3.0f;
+    AUREA_CHECK_EQ(loose.typed_min(), -2.0f);
+    AUREA_CHECK_EQ(loose.typed_max(), 3.0f);
+}
+
+AUREA_TEST(EffectParams, ValueBeyondTheSliderReachesTheEffectUntilTheTypedLimit) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    EffectInstance e = make_effect(reg, effect_keys::kGaussianBlur, 0);
+    const ParamSpec& spec = reg.params(e.type)->at(0);   // "blurriness": slider 0..500
+    AUREA_CHECK_EQ(spec.maxValue, 500.0f);
+    AUREA_CHECK(spec.hardMax > 1200.0f);
+    TrackSet tracks;
+    // Além do slider, dentro da faixa digitada: chega como foi digitado.
+    e.params[0].constant.v[0] = 1200.0f;
+    AUREA_CHECK_NEAR(evaluate_param(tracks, e, 0, spec, FrameIndex{0}).v[0], 1200.0f, 1e-4);
+    // Além da faixa digitada: preso nela (não no slider).
+    e.params[0].constant.v[0] = 1e7f;
+    AUREA_CHECK_NEAR(evaluate_param(tracks, e, 0, spec, FrameIndex{0}).v[0], spec.hardMax, 1e-4);
+    e.params[0].constant.v[0] = -50.0f;
+    AUREA_CHECK_NEAR(evaluate_param(tracks, e, 0, spec, FrameIndex{0}).v[0], spec.hardMin, 1e-6);
+    // NaN/inf continuam virando o padrão.
+    e.params[0].constant.v[0] = std::numeric_limits<f32>::infinity();
+    AUREA_CHECK_NEAR(evaluate_param(tracks, e, 0, spec, FrameIndex{0}).v[0], spec.defaultValue.v[0], 1e-6);
+    // Keyframe extremo passa pelo mesmo contrato.
+    Track& t = tracks.get_or_create(TrackProperty::EffectParam, e.id, param_track_key(0, 0));
+    (void)t.set(FrameIndex{0}, 2500.0f);
+    AUREA_CHECK_NEAR(evaluate_param(tracks, e, 0, spec, FrameIndex{0}).v[0], 2500.0f, 1e-3);
+
+    // Contagem (Int) não alarga: além do slider, preso no slider.
+    EffectInstance echo = make_effect(reg, effect_keys::kEchoTrail, 1);
+    const ParamSpec& copies = reg.params(echo.type)->at(0);   // "copies": 0..16
+    AUREA_CHECK(copies.type == ParamType::Int);
+    echo.params[0].constant.v[0] = 400.0f;
+    AUREA_CHECK_NEAR(evaluate_param(tracks, echo, 0, copies, FrameIndex{0}).v[0], copies.maxValue, 1e-6);
+}
+
 AUREA_TEST(EffectGraph, UnknownAndDisabledEffectsAreDropped) {
     EffectRegistry reg;
     register_builtin_effects(reg);
@@ -686,7 +778,8 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // Hotspots and three audio sends.
     // Stripes, Radial Rays, Grid, Parenting Helper and Text 3D Layout.
     // Corner Pin and the five Media Lab effects.
-    AUREA_CHECK_EQ(before, static_cast<u32>(73));
+    // RGB Split and Chromatic Aberration (independent spatial channel effects).
+    AUREA_CHECK_EQ(before, static_cast<u32>(75));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

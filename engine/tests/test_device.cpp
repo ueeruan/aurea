@@ -31,11 +31,12 @@
 
 using namespace aurea;
 
-AUREA_TEST(AndroidVideoCompatibility, SamsungAndroid12UsesReadablePlanesOnlyOnAffectedVersions) {
+AUREA_TEST(AndroidVideoCompatibility, EverySamsungReleaseUsesReadablePlanes) {
+    // A51 (Android 12) was fixed by readable planes; other Samsung models and
+    // versions still crashed with PRIVATE zero-copy buffers.
     for (const char* vendor : {"samsung", "Samsung", "SAMSUNG"}) {
-        AUREA_CHECK(android::needs_readable_video_planes(vendor, 31));
-        AUREA_CHECK(android::needs_readable_video_planes(vendor, 32));
-        for (int sdk : {26, 30, 33, 35, 36}) AUREA_CHECK(!android::needs_readable_video_planes(vendor, sdk));
+        for (int sdk : {26, 29, 30, 31, 32, 33, 34, 35, 36}) AUREA_CHECK(android::needs_readable_video_planes(vendor, sdk));
+        AUREA_CHECK(!android::needs_readable_video_planes(vendor, 25));
     }
     for (const char* vendor : {"", "Google", "Xiaomi", "samsung-other"}) {
         AUREA_CHECK(!android::needs_readable_video_planes(vendor, 31));

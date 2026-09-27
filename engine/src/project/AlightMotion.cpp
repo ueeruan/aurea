@@ -589,7 +589,9 @@ void param_range(const ParamSpec& s, f64& lo, f64& hi) {
         case ParamType::Color:
         case ParamType::Bool: lo = 0.0; hi = 1.0; break;
         case ParamType::Enum: lo = 0.0; hi = s.enumCount > 0 ? static_cast<f64>(s.enumCount - 1) : 0.0; break;
-        default: lo = s.minValue; hi = s.maxValue; break;
+        // A faixa DIGITADA (a que o efeito aceita), não a do slider: um valor
+        // extremo do AM que o Aurea sabe renderizar chega inteiro.
+        default: lo = s.typed_min(); hi = s.typed_max(); break;
     }
 }
 

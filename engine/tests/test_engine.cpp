@@ -1646,12 +1646,18 @@ AUREA_TEST(Engine, EffectSpecsDescribeEveryParameterOfAType) {
         AUREA_CHECK_EQ(rows[i].index, i);
         AUREA_CHECK(rows[i].labelLength > 0);                 // sem rótulo a UI fica muda
         AUREA_CHECK(rows[i].minValue <= rows[i].maxValue);
+        // A faixa digitada (teclado) sempre contém a do slider.
+        AUREA_CHECK(rows[i].hardMin <= rows[i].minValue && rows[i].maxValue <= rows[i].hardMax);
         for (int c = 0; c < 4; ++c) {
             AUREA_CHECK_EQ(rows[i].value[c], rows[i].defaultValue[c]);
         }
         // Sem instância não há keyframe: a ficha nunca mente dizendo "animado".
         AUREA_CHECK_EQ(rows[i].animated, 0u);
     }
+    // "Desfoque" (índice 0): slider até 500 px, digitado além (edição extrema).
+    AUREA_CHECK_EQ(rows[0].maxValue, 500.0f);
+    AUREA_CHECK(rows[0].hardMax > rows[0].maxValue);
+    AUREA_CHECK_EQ(rows[0].hardMin, rows[0].minValue);
 
     // Tipo que não existe: nenhuma linha, sem escrever nada.
     AUREA_CHECK_EQ(e.query_effect_specs(0u, rows.data(), static_cast<u32>(rows.size()), blob.data(),
@@ -1680,6 +1686,11 @@ AUREA_TEST(Engine, EffectSpecsCoverTheWholeCatalog) {
                                            specBlob.data(), static_cast<u32>(specBlob.size()));
         // O catálogo diz quantos parâmetros o efeito tem; a ficha tem de bater.
         AUREA_CHECK_EQ(n, catalog[i].paramCount);
+        // Toda linha da ponte: hardMin <= min <= max <= hardMax.
+        for (u32 k = 0; k < n && k < rows.size(); ++k) {
+            AUREA_CHECK(rows[k].hardMin <= rows[k].minValue && rows[k].minValue <= rows[k].maxValue
+                        && rows[k].maxValue <= rows[k].hardMax);
+        }
         if (n > 0 && n <= rows.size()) ++withParams;
     }
     // Todo efeito do motor tem ficha — nenhum entra no catálogo mudo.

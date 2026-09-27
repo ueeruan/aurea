@@ -20,6 +20,8 @@
 #include "aurea/core/Math.hpp"
 #include "aurea/core/Types.hpp"
 
+#include <cmath>
+#include <limits>
 #include <string_view>
 #include <vector>
 
@@ -97,20 +99,37 @@ enum ParamFlags : u16 {
     kParamHidden      = 1u << 4,
 };
 
+/// Marca de "faixa digitada não declarada": vale a faixa do slider.
+inline constexpr f32 kParamSameAsSlider = std::numeric_limits<f32>::quiet_NaN();
+
 struct ParamSpec {
     const char* id = "";          ///< chave estável (projeto, UI)
     const char* label = "";       ///< nome na interface
     ParamType   type = ParamType::Float;
     u16         flags = kParamAnimatable;
     ParamValue  defaultValue{};
+    /// Faixa do SLIDER (a régua): o curso confortável do dedo.
     f32         minValue = 0.0f;
     f32         maxValue = 1.0f;
+    /// Faixa DIGITADA (teclado numérico) — o contrato do efeito. É ela que
+    /// `evaluate_param` impõe; o slider é só um atalho dentro dela. Sempre
+    /// contém a faixa do slider. NaN (padrão) = igual à do slider; o registro
+    /// grava o valor explícito ao declarar (`ParameterRegistry::add`).
+    f32         hardMin = kParamSameAsSlider;
+    f32         hardMax = kParamSameAsSlider;
     const char* unit = nullptr;   ///< "px", "%", "°"
     u32         enumCount = 0;
     const char* const* enumLabels = nullptr;
 
     [[nodiscard]] bool animatable() const noexcept {
         return (flags & kParamAnimatable) != 0 && component_count(type) > 0;
+    }
+    /// Limites digitados resolvidos (nunca mais estreitos que o slider).
+    [[nodiscard]] f32 typed_min() const noexcept {
+        return !std::isnan(hardMin) && hardMin < minValue ? hardMin : minValue;
+    }
+    [[nodiscard]] f32 typed_max() const noexcept {
+        return !std::isnan(hardMax) && hardMax > maxValue ? hardMax : maxValue;
     }
 };
 
@@ -134,6 +153,21 @@ public:
     u32 add_gradient(const char* id, const char* label);
     u32 add_layer_ref(const char* id, const char* label);
     u32 add_texture_ref(const char* id, const char* label);
+
+    /// Alarga a faixa DIGITADA do parâmetro `index` (o slider não muda). Serve
+    /// para a edição extrema (AMV): digitar um raio de 2000 px com a régua
+    /// indo só até 500. Só números contínuos (Float, Angle, Point2D/3D): contagem,
+    /// iteração, amostras, qualidade, enum e bool ficam com a faixa do slider —
+    /// é o que limita memória e custo por pixel. Regra dos tetos: ~5-10x o
+    /// curso do slider, ou o limite físico/da implementação (pirâmide do blur,
+    /// meia precisão, laço fixo do shader) quando ele vem antes — anotado no
+    /// efeito. Nunca estreita: o resultado sempre contém a faixa do slider.
+    /// Devolve `index` para encadear.
+    u32 set_typed_range(u32 index, f32 hardMin, f32 hardMax) noexcept;
+    /// Atalho: alarga a faixa digitada do ÚLTIMO parâmetro declarado.
+    u32 typed_range(f32 hardMin, f32 hardMax) noexcept {
+        return specs_.empty() ? kInvalidIndex : set_typed_range(count() - 1, hardMin, hardMax);
+    }
 
     [[nodiscard]] u32 count() const noexcept { return static_cast<u32>(specs_.size()); }
     [[nodiscard]] const ParamSpec& at(u32 i) const noexcept { return specs_[i]; }

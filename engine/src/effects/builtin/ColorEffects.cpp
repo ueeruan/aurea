@@ -28,8 +28,14 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("exposure", "Exposição", 0.0f, -10.0f, 10.0f, kParamAnimatable, "stops");
+        // Digitado até ±14 stops: 2^14 x o branco ainda é finito na textura de
+        // trabalho em meia precisão (teto 65504); acima disso o branco vira inf.
+        p.typed_range(-14.0f, 14.0f);
         p.add_float("offset", "Deslocamento", 0.0f, -0.5f, 0.5f);
+        p.typed_range(-2.0f, 2.0f);
+        // O mínimo 0.1 fica: gama menor eleva luz HDR a potências que estouram.
         p.add_float("gamma", "Correção de gama", 1.0f, 0.1f, 10.0f);
+        p.typed_range(0.1f, 100.0f);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kExposure] = ParamValue::scalar(1.0f);      // um ponto de luz já se vê
@@ -61,7 +67,11 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("brightness", "Brilho", 0.0f, -150.0f, 150.0f);
+        p.typed_range(-1000.0f, 1000.0f);
+        // Abaixo de -100 o fator fica negativo: o contraste INVERTE em torno do
+        // cinza médio (-200 = negativo inteiro). Custo fixo, só aritmética.
         p.add_float("contrast", "Contraste", 0.0f, -100.0f, 100.0f);
+        p.typed_range(-300.0f, 1000.0f);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kBrightness] = ParamValue::scalar(25.0f);
@@ -98,6 +108,8 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("saturation", "Saturação", 0.0f, -100.0f, 100.0f);
+        // Abaixo de -100 as cores viram as complementares; acima, supersaturam.
+        p.typed_range(-300.0f, 1000.0f);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kSaturation] = ParamValue::scalar(80.0f);

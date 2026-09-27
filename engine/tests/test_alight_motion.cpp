@@ -282,7 +282,8 @@ AUREA_TEST(AlightMotion, OutOfRangeIsClampedAndUntimedKeysBecomeStatic) {
     AUREA_CHECK_EQ(p.effects.size(), usize{2});
     if (p.effects.size() != 2) return;
     AUREA_CHECK_NEAR(static_cast<f32>(p.fps), 60.0f, 1e-6f);
-    AUREA_CHECK_NEAR(p.effects[0].params[param_of(reg, effect_keys::kGaussianBlur, "blurriness")].constant.v[0], 500.0f, 1e-4f);
+    // 900 px passa do slider (500) mas cabe na faixa DIGITADA (3000): chega inteiro.
+    AUREA_CHECK_NEAR(p.effects[0].params[param_of(reg, effect_keys::kGaussianBlur, "blurriness")].constant.v[0], 900.0f, 1e-4f);
     AUREA_CHECK_NEAR(p.effects[1].params[param_of(reg, effect_keys::kGlow, "threshold")].constant.v[0], 0.0f, 1e-6f);
     // Parado no valor de t = 0 (0.25 como fração → 0.5 de intensidade).
     AUREA_CHECK_NEAR(p.effects[1].params[param_of(reg, effect_keys::kGlow, "intensity")].constant.v[0], 0.5f, 1e-6f);

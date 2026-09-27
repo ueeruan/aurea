@@ -126,7 +126,17 @@ struct EditorView: View {
             }
             if !model.fullscreen && !model.rawPlayback, model.selection.count == 1, let id = model.primarySelection {
                 HStack(spacing: 6) {
-                    if !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty {
+                    let hasGizmo = !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty
+                    if hasGizmo {
+                        Button { model.cycleGizmoTool() } label: {
+                            Text(AureaText.t(model.gizmoTool == 1 ? "gizmo_tool_rotate" : model.gizmoTool == 2 ? "gizmo_tool_scale" : "gizmo_tool_move"))
+                                .foregroundStyle(AureaColors.accent)
+                                .padding(.horizontal, 12).frame(minHeight: 48)
+                                .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
+                        }.accessibilityLabel(AureaText.t("gizmo_tool_label")).accessibilityIdentifier("stage.gizmo.tool")
+                    }
+                    // Mundo/Local vale para mover; girar e escala usam os eixos da camada.
+                    if hasGizmo && model.gizmoTool == 0 {
                         Button { model.gizmoLocalSpace.toggle() } label: {
                             Text(model.gizmoLocalSpace ? "Local XYZ" : "World XYZ")
                                 .padding(.horizontal, 12).frame(minHeight: 48)
@@ -266,7 +276,7 @@ private struct ShellStageBanner: View {
                     context.stroke(line, with: .color(color), lineWidth: 1)
                 }
                 if let selected = model.selectedLayer {
-                    let g = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoLocalSpace).map(\.floatValue)
+                    let g = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
                     if g.count == 8 {
                         let tips = ShellStageGeometry.gizmoTips(stride(from: 0, to: 8, by: 2).map { screen(g[$0], g[$0 + 1]) })
                         for i in 1...3 {
@@ -327,16 +337,29 @@ private struct ShellStageBanner: View {
                 context.stroke(Path(ellipseIn: CGRect(x: handles[n].x - radius, y: handles[n].y - radius, width: radius * 2, height: radius * 2)), with: .color(AureaColors.accent), lineWidth: 1.5)
             }
             rotationHandle(&context, handles[0], grabbed: shell.grabbedHandle == 0)
-            let gizmo = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoLocalSpace).map(\.floatValue)
+            let gizmo = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
             if gizmo.count == 8 {
+                // Ponta = ferramenta (Stage.kt drawGizmo): bola mover, anel girar, quadrado escala.
                 let tips = ShellStageGeometry.gizmoTips(stride(from: 0, to: 8, by: 2).map { screen(gizmo[$0], gizmo[$0 + 1]) })
+                let tool = model.gizmoTool
                 for i in 1...3 {
                     var line = Path(); line.move(to: tips[0]); line.addLine(to: tips[i])
                     let color = [StageInk.gizmoX, StageInk.gizmoY, StageInk.gizmoZ][i - 1]
                     context.stroke(line, with: .color(StageInk.outlineUnder), lineWidth: 5); context.stroke(line, with: .color(color), lineWidth: 2.5)
-                    circle(&context, tips[i], 9, StageInk.outlineUnder); circle(&context, tips[i], 7.5, color)
+                    if tool == 1 {
+                        let ring = Path(ellipseIn: CGRect(x: tips[i].x - 10, y: tips[i].y - 10, width: 20, height: 20))
+                        context.stroke(ring, with: .color(StageInk.outlineUnder), lineWidth: 5); context.stroke(ring, with: .color(color), lineWidth: 3)
+                    } else if tool == 2 {
+                        context.fill(Path(CGRect(x: tips[i].x - 9.5, y: tips[i].y - 9.5, width: 19, height: 19)), with: .color(StageInk.outlineUnder))
+                        context.fill(Path(CGRect(x: tips[i].x - 8, y: tips[i].y - 8, width: 16, height: 16)), with: .color(color))
+                    } else {
+                        circle(&context, tips[i], 9, StageInk.outlineUnder); circle(&context, tips[i], 7.5, color)
+                    }
                 }
-                circle(&context, tips[0], 4, .white)
+                if tool == 2 {
+                    context.fill(Path(CGRect(x: tips[0].x - 8.5, y: tips[0].y - 8.5, width: 17, height: 17)), with: .color(StageInk.outlineUnder))
+                    context.fill(Path(CGRect(x: tips[0].x - 7, y: tips[0].y - 7, width: 14, height: 14)), with: .color(.white))
+                } else { circle(&context, tips[0], 4, .white) }
             }
 
         }

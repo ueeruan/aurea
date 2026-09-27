@@ -12,7 +12,32 @@ namespace aurea {
 // =============================================================================
 u32 ParameterRegistry::add(const ParamSpec& spec) {
     specs_.push_back(spec);
+    // Faixa digitada EXPLÍCITA desde a declaração: sem pedido de alargar, é a
+    // do slider (todo parâmetro existente fica exatamente como era).
+    ParamSpec& s = specs_.back();
+    s.hardMin = s.typed_min();
+    s.hardMax = s.typed_max();
     return static_cast<u32>(specs_.size() - 1);
+}
+
+u32 ParameterRegistry::set_typed_range(u32 index, f32 hardMin, f32 hardMax) noexcept {
+    if (index >= specs_.size()) return kInvalidIndex;
+    ParamSpec& s = specs_[index];
+    switch (s.type) {
+        case ParamType::Float:
+        case ParamType::Angle:
+        case ParamType::Point2D:
+        case ParamType::Point3D:
+            break;
+        default:
+            // Int (contagens, sementes, amostras), Enum, Bool e o resto não se
+            // alargam: a faixa deles é o limite de custo/memória, ou nem é número.
+            return index;
+    }
+    // Só alarga (nunca estreita o slider) e ignora limite não finito.
+    if (std::isfinite(hardMin)) s.hardMin = std::min(s.typed_min(), hardMin);
+    if (std::isfinite(hardMax)) s.hardMax = std::max(s.typed_max(), hardMax);
+    return index;
 }
 
 u32 ParameterRegistry::add_float(const char* id, const char* label, f32 def, f32 min, f32 max,
@@ -220,7 +245,9 @@ ParamValue evaluate_param(const TrackSet& tracks, const EffectInstance& effect, 
     // expressão, um keyframe antigo ou um arquivo corrompido podem trazer NaN,
     // infinito ou 1e6: o RGB no tempo com deslocamento de 1e6 quadros prendia
     // o quadro por 4–5 s esperando o decoder (fuzz Fuzz.EffectParameters…
-    // RenderOnGpu). NaN/inf viram o padrão; o resto entra em [min, max].
+    // RenderOnGpu). NaN/inf viram o padrão; o resto entra na faixa DIGITADA
+    // [hardMin, hardMax] — não na do slider: um valor digitado além da régua
+    // (edição extrema) chega ao efeito como foi digitado.
     const u32 n = component_count(spec.type);
     for (u32 c = 0; c < n; ++c) {
         if (!std::isfinite(out.v[c])) out.v[c] = spec.defaultValue.v[c];
@@ -231,11 +258,14 @@ ParamValue evaluate_param(const TrackSet& tracks, const EffectInstance& effect, 
         case ParamType::Angle:
         case ParamType::Enum:
         case ParamType::Point2D:
-        case ParamType::Point3D:
-            if (spec.minValue < spec.maxValue) {
-                for (u32 c = 0; c < n; ++c) out.v[c] = std::clamp(out.v[c], spec.minValue, spec.maxValue);
+        case ParamType::Point3D: {
+            const f32 lo = spec.typed_min();
+            const f32 hi = spec.typed_max();
+            if (lo < hi) {
+                for (u32 c = 0; c < n; ++c) out.v[c] = std::clamp(out.v[c], lo, hi);
             }
             break;
+        }
         case ParamType::Bool:
             out.v[0] = std::clamp(out.v[0], 0.0f, 1.0f);
             break;

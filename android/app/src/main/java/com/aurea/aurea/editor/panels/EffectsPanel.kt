@@ -105,8 +105,26 @@ internal data class ParamSlot(
     val label: String,
     val unit: String,
     val enumLabels: List<String>,
+    /** Faixa DIGITADA (teclado), na unidade do motor; [min]..[max] é só a da régua. */
+    val hardMin: Float = min,
+    val hardMax: Float = max,
 ) {
     val hidden get() = (flags and ParamType.FLAG_HIDDEN) != 0
+
+    /**
+     * Limites do teclado na unidade do motor: a faixa digitada, nunca mais
+     * estreita que a da régua. Sem faixa finita, ±∞ (o motor ainda prende).
+     */
+    val typedLo: Float
+        get() {
+            val lo = if (min.isFinite()) min else Float.NEGATIVE_INFINITY
+            return if (hardMin.isFinite()) min(hardMin, lo) else lo
+        }
+    val typedHi: Float
+        get() {
+            val hi = if (max.isFinite()) max else Float.POSITIVE_INFINITY
+            return if (hardMax.isFinite()) max(hardMax, hi) else hi
+        }
     val animatable get() = (flags and ParamType.FLAG_ANIMATABLE) != 0 && ParamType.componentCount(type) > 0
     val components get() = ParamType.componentCount(type)
 
@@ -123,7 +141,8 @@ internal data class ParamSlot(
         }
 
     companion object {
-        fun of(p: EffectParam) = ParamSlot(p.index, p.type, p.flags, p.min, p.max, p.label, p.unit, p.enumLabels)
+        fun of(p: EffectParam) =
+            ParamSlot(p.index, p.type, p.flags, p.min, p.max, p.label, p.unit, p.enumLabels, p.hardMin, p.hardMax)
     }
 }
 
@@ -715,13 +734,20 @@ private fun EffectNumberRow(
     val store = env.store
     val value = rememberParamValue(env, effectId, s.index, component)
     val look = rememberLook(env, effectId, s.index, component)
+    // Duas faixas: a RÉGUA anda só na do slider ([s.min]..[s.max]); o TECLADO
+    // aceita a digitada ([s.typedLo]..[s.typedHi]), que o motor impõe. A
+    // escrita prende só na digitada — um valor digitado além da régua fica.
     val lo = if (s.min.isFinite()) s.min else Float.NEGATIVE_INFINITY
     val hi = if (s.max.isFinite()) s.max else Float.POSITIVE_INFINITY
+    val typedLo = s.typedLo
+    val typedHi = s.typedHi
     val shownLo = if (lo.isFinite()) d.toDisplay(lo) else lo
     val shownHi = if (hi.isFinite()) d.toDisplay(hi) else hi
+    val typedShownLo = if (typedLo.isFinite()) d.toDisplay(typedLo) else typedLo
+    val typedShownHi = if (typedHi.isFinite()) d.toDisplay(typedHi) else typedHi
     fun write(display: Float) {
         val p = store.paramOf(effectId, s.index) ?: return
-        val clamped = d.toEngine(display).coerceIn(lo, hi)
+        val clamped = d.toEngine(display).coerceIn(typedLo, typedHi)
         store.setEffectParam(effectId, p, if (s.type == ParamType.INT) clamped.roundToInt().toFloat() else clamped, component)
     }
     val shown = d.toDisplay(value)
@@ -743,7 +769,13 @@ private fun EffectNumberRow(
         onGestureEnd = { store.endGesture() },
         onTapValue = {
             onSelect(ParamKey(effectId, s.index, component))
-            env.openKeypad(KeypadRequest(label, shown, d.suffix, min(shownLo, shownHi), max(shownLo, shownHi), d.decimals) { write(it) })
+            // "50%" no teclado continua sendo 50 % do fim da RÉGUA (não do teto digitado).
+            env.openKeypad(
+                KeypadRequest(
+                    label, shown, d.suffix, min(typedShownLo, typedShownHi), max(typedShownLo, typedShownHi), d.decimals,
+                    percentBase = max(shownLo, shownHi),
+                ) { write(it) },
+            )
         },
     )
 }

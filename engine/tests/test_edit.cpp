@@ -507,6 +507,45 @@ AUREA_TEST(Clipboard, SelectedKeysMoveAtomicallyCopySpacingAndDeleteWithUndo) {
     AUREA_CHECK_EQ(r.L(r.a)->tracks.find(TrackProperty::PositionX)->keys.size(), usize{3});
 }
 
+// A timeline arrasta a seleção de keyframes (várias propriedades) com o
+// `UndoBeginGroup` na FILA e a edição direta: o grupo precisa valer antes da
+// 1ª mutação, senão o 1º passo do arrasto vira um desfazer à parte.
+AUREA_TEST(Clipboard, QueuedUndoGroupWrapsDirectKeySelectionDragAcrossProperties) {
+    EditRig r;
+    auto* layer = r.comp()->layer(LayerId::unpack(r.a));
+    for (i64 frame : {0, 20}) {
+        layer->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{frame}, static_cast<f32>(frame));
+        layer->tracks.get_or_create(TrackProperty::Opacity).set(FrameIndex{frame + 5}, 1.0f);
+    }
+    const i64 opacity = static_cast<i64>(TrackProperty::Opacity);
+    Command begin; begin.type = CommandType::UndoBeginGroup;
+    AUREA_CHECK_EQ(r.e.submit_commands(&begin, 1, nullptr, 0), 1u);
+    i64 refs[] = {0, -1, 0, 20, opacity, -1, 0, 25};
+    AUREA_CHECK_EQ(r.e.edit_keyframe_selection(r.a, refs, 2, 3, false), 2u);
+    refs[3] = 23; refs[7] = 28;
+    AUREA_CHECK_EQ(r.e.edit_keyframe_selection(r.a, refs, 2, 2, false), 2u);
+    Command end; end.type = CommandType::UndoEndGroup;
+    AUREA_CHECK_EQ(r.e.submit_commands(&end, 1, nullptr, 0), 1u);
+    AUREA_CHECK(r.e.render_frame().ok());
+    const auto* x = r.L(r.a)->tracks.find(TrackProperty::PositionX);
+    const auto* o = r.L(r.a)->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(x && x->keys.size() == 2 && o && o->keys.size() == 2);
+    if (x && o && x->keys.size() == 2 && o->keys.size() == 2) {
+        AUREA_CHECK_EQ(x->keys[0].time.value, 0);
+        AUREA_CHECK_EQ(x->keys[1].time.value, 25);
+        AUREA_CHECK_EQ(o->keys[0].time.value, 5);
+        AUREA_CHECK_EQ(o->keys[1].time.value, 30);
+    }
+    r.undo();
+    x = r.L(r.a)->tracks.find(TrackProperty::PositionX);
+    o = r.L(r.a)->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(x && o && x->keys.size() == 2 && o->keys.size() == 2);
+    if (x && o && x->keys.size() == 2 && o->keys.size() == 2) {
+        AUREA_CHECK_EQ(x->keys[1].time.value, 20);
+        AUREA_CHECK_EQ(o->keys[1].time.value, 25);
+    }
+}
+
 AUREA_TEST(Clipboard, RepeatedEffectsKeepSeparateKeysAndLockedTargetsStayUntouched) {
     EditRig r;
     for (u64 id : {r.a, r.b}) {

@@ -9,6 +9,8 @@
     <string name="common_remove">Quitar</string>
     <string name="common_rename">Renombrar</string>
     <string name="common_duplicate">Duplicar</string>
+    <string name="common_copy">Copiar</string>
+    <string name="common_paste">Pegar</string>
     <string name="common_open">Abrir</string>
     <string name="common_back">Volver</string>
     <string name="common_close">Cerrar</string>
@@ -924,4 +926,8 @@ para editar la curva.</string>
     <string name="am_import_failed">No se pudo importar: %1$s</string>
     <string name="am_import_nothing">ningún efecto con equivalente en Aurea</string>
     <string name="world_box_lights">Luzes flutuantes</string>
+    <string name="gizmo_tool_move">Mover</string>
+    <string name="gizmo_tool_rotate">Rotar</string>
+    <string name="gizmo_tool_scale">Escala</string>
+    <string name="gizmo_tool_label">Herramienta del gizmo 3D</string>
 </resources>

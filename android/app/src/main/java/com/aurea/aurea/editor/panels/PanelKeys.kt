@@ -143,6 +143,9 @@ internal fun EditorStore.writeParamVector(effectId: Int, p: EffectParam, values:
         if (!p.animated && cur.value[c] == v) continue
         setEffectParam(effectId, cur, v, c)
         val nv = cur.value.copyOf().also { it[c] = v }
-        cur = EffectParam(cur.index, cur.type, cur.flags, cur.min, cur.max, nv, cur.defaultValue, cur.label, cur.unit, cur.enumLabels, cur.animated)
+        cur = EffectParam(
+            cur.index, cur.type, cur.flags, cur.min, cur.max, nv, cur.defaultValue, cur.label, cur.unit, cur.enumLabels, cur.animated,
+            hardMin = cur.hardMin, hardMax = cur.hardMax,
+        )
     }
 }

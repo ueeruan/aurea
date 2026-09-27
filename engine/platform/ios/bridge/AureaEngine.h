@@ -168,8 +168,10 @@ extern NSString* const AureaParamUnit;
 extern NSString* const AureaParamId;
 extern NSString* const AureaParamValue;        ///< NSArray de 4 (RGBA ou 1 valor)
 extern NSString* const AureaParamDefault;
-extern NSString* const AureaParamMin;
+extern NSString* const AureaParamMin;         ///< faixa do SLIDER
 extern NSString* const AureaParamMax;
+extern NSString* const AureaParamHardMin;     ///< faixa DIGITADA (teclado); contém a do slider
+extern NSString* const AureaParamHardMax;
 extern NSString* const AureaParamAnimated;
 extern NSString* const AureaParamEnumLabels;   ///< NSArray<NSString*>
 
@@ -584,6 +586,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)removeCaptions:(long long)layerId;
 - (NSArray<NSNumber*>*)trackCurve:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param from:(int32_t)from to:(int32_t)to;
 - (NSArray<NSNumber*>*)trackEasing:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time;
+/// action: 0 valor, 1 apagar, 2 mover, 3 interpolação, 4 inserir (cria a track se faltar).
 - (void)editTrackKey:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time action:(uint32_t)action value:(float)value targetTime:(int32_t)targetTime interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles;
 - (NSDictionary<NSString*, id>*)expression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param;
 - (NSString*)setExpression:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param source:(NSString*)source;
@@ -652,6 +655,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setFrameBlendForLayer:(long long)layerId mode:(uint32_t)mode;
 - (void)setVectorBlurForLayer:(long long)layerId amount:(float)amount NS_SWIFT_NAME(setVectorBlur(forLayer:amount:));
 - (void)toggleMarker:(int64_t)frame;
+/// Tap de batida tocando: marca o instante que soa, sem pausar nem alternar. Quadro ou -1.
+- (int64_t)markBeatLive;
 - (BOOL)editMarker:(int64_t)from to:(int64_t)to color:(uint32_t)color label:(NSString*)label NS_SWIFT_NAME(editMarker(from:to:color:label:));
 - (BOOL)deleteMarker:(int64_t)frame;
 - (NSString*)markerLabel:(int64_t)frame;

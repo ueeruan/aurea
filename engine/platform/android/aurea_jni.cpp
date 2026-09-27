@@ -422,10 +422,20 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     c->media.set_zero_copy(zeroCopy);
     AUREA_LOG_INFO("video: %s%s", zeroCopy ? "zero-copy (AHardwareBuffer)" : "planos pela CPU",
                    emulator ? " (emulador: YCbCr externo nao confiavel)" :
-                   readablePlanes ? " (compatibilidade Samsung Android 12/12L; MediaCodec mantido)" : "");
+                   readablePlanes ? " (compatibilidade Samsung; MediaCodec mantido)" : "");
     c->engine.start_render_thread();
     c->initialized = true;
     return JNI_TRUE;
+}
+
+/// Rede de segurança do app: o processo anterior morreu por crash nativo com
+/// vídeo aberto → planos YUV pela CPU (sem AHardwareBuffer na GPU). Vale para
+/// os decoders abertos depois desta chamada.
+AUREA_JNI void AUREA_FN(nativeUseReadableVideoPlanes)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return;
+    c->media.set_zero_copy(false);
+    AUREA_LOG_INFO("video: planos pela CPU (modo seguro depois de fechamento com video)");
 }
 
 AUREA_JNI void AUREA_FN(nativeShutdown)(JNIEnv*, jclass, jlong handle) {
@@ -2161,6 +2171,11 @@ AUREA_JNI jboolean AUREA_FN(nativeEditClipTime)(JNIEnv*, jclass, jlong handle, j
 AUREA_JNI jboolean AUREA_FN(nativeTrimComposition)(JNIEnv*, jclass, jlong handle, jlong frame) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.trim_composition(frame) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jlong AUREA_FN(nativeMarkBeatLive)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.mark_beat_live()) : -1;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeToggleMarker)(JNIEnv*, jclass, jlong handle, jlong frame) {

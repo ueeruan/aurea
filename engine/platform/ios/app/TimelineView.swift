@@ -98,7 +98,8 @@ struct TimelineView: View {
 
     private struct MediaTile { var localFrame: Double; var width: CGFloat; var image: UIImage }
     private struct Marker { var frame: Int32; var packedColor: UInt32; var kind: UInt32 }
-    private enum Mode { case scrub, scroll, move, trimStart, trimEnd, key, reorder, hold, blocked }
+    /// `.keys`: arrasto de um losango ESCOLHIDO — a seleção de keyframes inteira anda junta.
+    private enum Mode { case scrub, scroll, move, trimStart, trimEnd, key, keys, reorder, hold, blocked }
     private struct Interaction {
         var mode: Mode
         var start: CGPoint
@@ -112,6 +113,8 @@ struct TimelineView: View {
         var keyFrame: Int32 = 0
         var movingKeys: [KeyframeItem] = []
         var keyLimits: (lo: Int32, hi: Int32) = (0, 0)
+        /// `.keys`: instante do losango pego no começo (keyFrame = grabFrame + sentDelta).
+        var grabFrame: Int32 = 0
         var sentDelta: Int32 = 0
         var undoOpen = false
     }
@@ -168,6 +171,8 @@ struct TimelineView: View {
                     pinch: { state, scale, focus in pinch(state, scale: scale, focus: focus, width: size.width) }
                 )
             }
+            // Por cima da superfície de gestos: o toque num botão não chega à timeline.
+            .overlay(alignment: keyBarAlignment) { keyActionBar }
             .onAppear {
                 let seconds = CGFloat(model.compositionDuration) / CGFloat(fps)
                 if seconds >= Zoom.autoFitMinSeconds { pps = Zoom.autoFit(availableDp: size.width - 32, seconds: seconds) }
@@ -185,6 +190,12 @@ struct TimelineView: View {
                 if gesture?.mode != .key, let time, let id = model.primarySelection, let row = rows.first(where: { $0.id == id }) {
                     selectedKey = (id, Keyframes.toTimeline(time, row.start, row.offset),
                         TimelineTrack(property: Int(model.curveProperty), effect: model.curveEffect, param: model.curveParam))
+                    // Fora do modo de escolha, a seleção da barra acompanha o keyframe do gráfico.
+                    if !model.timelineKeySelectMode, let current = model.timelineKeySelection, current.layer == id {
+                        let ref = TimelineKeyRef(property: model.curveProperty, effect: model.curveEffect, param: model.curveParam, time: time)
+                        let next = TimelineKeySelection(layer: id, keys: [ref])
+                        if next != current { model.timelineKeySelection = next }
+                    }
                 }
             }
             .onChange(of: compact) { _ in scrollY = 0; mediaNeedsRefresh = true }
@@ -192,6 +203,89 @@ struct TimelineView: View {
             .onDisappear { finish(cancelled: true); finishPinch() }
             .clipped()
         }
+    }
+
+    // MARK: Barra de ações da seleção de keyframes (par do KeyActionBar do Android)
+    /// Com painel aberto (timeline compacta, uma linha) só o "Selecionar" cabe,
+    /// por cima da régua; ligar o modo fecha o painel e a barra inteira aparece
+    /// embaixo. Todos = todos os keyframes da camada que a timeline mostra;
+    /// Colar = no cabeçote; Duplicar = 1 frame depois do último escolhido.
+    private var keyBarAlignment: Alignment { compact ? .topTrailing : .bottom }
+
+    @ViewBuilder private var keyActionBar: some View {
+        if let selection = model.timelineKeySelection {
+            let mode: Bool = model.timelineKeySelectMode
+            let count: Int = selection.count
+            let title: String = mode ? AureaText.t("panel_selecionar") + " · \(count)" : AureaText.t("panel_selecionar")
+            if compact {
+                keyAction(title, id: "timeline.keys.select", active: mode) { model.changeTimelineKeySelectMode(!mode) }
+                    .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.8)))
+                    .padding(.trailing, 6)
+            } else {
+                let canPaste: Bool = model.engine.clipboardState & 8 != 0
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        keyAction(title, id: "timeline.keys.select", active: mode) { model.changeTimelineKeySelectMode(!mode) }
+                        keyAction(AureaText.t("common_all"), id: "timeline.keys.all") { model.selectAllTimelineKeys() }
+                        keyAction(AureaText.t("common_copy"), id: "timeline.keys.copy", enabled: count > 0) { model.copyTimelineKeys() }
+                        keyAction(AureaText.t("common_paste"), id: "timeline.keys.paste", enabled: canPaste) { model.pasteTimelineKeys() }
+                        keyAction(AureaText.t("common_duplicate"), id: "timeline.keys.duplicate", enabled: count > 0) { model.duplicateTimelineKeys() }
+                        keyAction(AureaText.t("common_delete"), id: "timeline.keys.delete", enabled: count > 0, danger: true) { model.deleteTimelineKeys() }
+                        keyAction(AureaText.t("editor_concluir"), id: "timeline.keys.done") { model.clearTimelineKeySelection() }
+                    }
+                    .padding(.horizontal, 4)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.8)))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 6)
+            }
+        }
+    }
+
+    /// Botão da barra: alvo de 44 pt no mínimo.
+    private func keyAction(_ title: String, id: String, enabled: Bool = true, active: Bool = false,
+                           danger: Bool = false, action: @escaping () -> Void) -> some View {
+        let tint: Color
+        if !enabled { tint = AureaColors.muted }
+        else if danger { tint = AureaColors.danger }
+        else if active { tint = AureaColors.accent }
+        else { tint = Color.white }
+        let fill: Color = active ? AureaColors.accent.opacity(0.28) : Color.clear
+        return Button(action: action) {
+            Text(title)
+                .font(.aurea(size: 13))
+                .lineLimit(1)
+                .foregroundColor(tint)
+                .padding(.horizontal, 12)
+                .frame(minWidth: 44, minHeight: 44)
+                .background(RoundedRectangle(cornerRadius: 10).fill(fill))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityIdentifier(id)
+    }
+
+    /// O losango principal (âmbar) faz parte da seleção de keyframes?
+    private func primaryInKeySelection(_ current: (layer: Int64, frame: Int32, track: TimelineTrack?)) -> Bool {
+        guard let keys = model.timelineKeySelection, keys.layer == current.layer, let track = current.track,
+              let layer = model.layers.first(where: { $0.id == current.layer }) else { return false }
+        let local: Int32 = Keyframes.toLocal(current.frame, layer.startFrame, layer.offsetFrames)
+        let ref = TimelineKeyRef(property: UInt32(clamping: track.property), effect: track.effect, param: track.param, time: local)
+        return keys.keys.contains(ref)
+    }
+
+    /// Instantes da linha com algum keyframe da seleção (paralelo a `instants`); nil = nenhum.
+    private func pickedInstants(_ row: TimelineRow) -> [Bool]? {
+        guard let selection = model.timelineKeySelection, selection.layer == row.id, !selection.isEmpty else { return nil }
+        var out = [Bool](repeating: false, count: row.keysAt.count)
+        var any = false
+        for index in 0..<row.keysAt.count where selection.containsAny(row.keysAt[index]) {
+            out[index] = true
+            any = true
+        }
+        return any ? out : nil
     }
 
     // MARK: Android painter
@@ -445,20 +539,34 @@ struct TimelineView: View {
             selectedKey?.track == TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
         }
         let chosen = selectedKey?.layer == row.id && selectedTrackMatches ? selectedKey?.frame ?? Snap.none : Snap.none
+        // Seleção de keyframes da timeline: azul com anel branco (o principal segue âmbar).
+        let picked: [Bool]? = pickedInstants(row)
+        let dragMode: Bool = gesture?.mode == .key || gesture?.mode == .keys
         for group in 0..<count {
             let i = Int(groups[group * 2]), j = Int(groups[group * 2 + 1])
             let px = x(Double(row.instants[i]), width: width)
             let on = Keyframes.groupHas(row.instants, i, j, chosen)
-            let fill = on ? AureaTimeline.keyframeOn : Color.white.opacity(0.9)
+            var inSelection = false
+            if let picked {
+                for k in i...j where picked[k] { inSelection = true; break }
+            }
+            let fill: Color = on ? AureaTimeline.keyframeOn : (inSelection ? Color(hex: 0x4DA3FF) : Color.white.opacity(0.9))
             if i == j {
                 let dragTrackMatches = row.track == nil || gesture?.row?.track == nil || gesture?.row?.track == row.track
-                let dragging = gesture?.mode == .key && gesture?.row?.id == row.id && dragTrackMatches && gesture?.keyFrame == row.instants[i]
+                let dragging = dragMode && gesture?.row?.id == row.id && dragTrackMatches && gesture?.keyFrame == row.instants[i]
                 let side = m.diamond * (dragging ? m.keyDragScale : 1)
                 var diamond = context; diamond.translateBy(x: px, y: cy); diamond.rotate(by: .degrees(45))
                 let glow = side / 2 * 1.3
                 diamond.fill(Path(roundedRect: CGRect(x: -glow, y: -glow, width: glow * 2, height: glow * 2), cornerRadius: m.diamondRadius * 1.5), with: .color(on ? AureaTimeline.keyframeOn.opacity(0.35) : .black.opacity(0.3)))
                 diamond.fill(Path(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side), cornerRadius: m.diamondRadius), with: .color(fill))
                 diamond.stroke(Path(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side).insetBy(dx: m.diamondStroke / 2, dy: m.diamondStroke / 2), cornerRadius: m.diamondRadius), with: .color(.black.opacity(0.85)), lineWidth: m.diamondStroke)
+                if inSelection {
+                    // Anel branco POR FORA do contorno: escolhido se lê em qualquer fundo.
+                    let ring: CGFloat = 2
+                    let outer: CGFloat = side / 2 + ring / 2 + m.diamondStroke / 2
+                    let ringRect = CGRect(x: -outer, y: -outer, width: outer * 2, height: outer * 2)
+                    diamond.stroke(Path(roundedRect: ringRect, cornerRadius: m.diamondRadius + ring), with: .color(.white), lineWidth: ring)
+                }
                 if dragging {
                     let text = context.resolve(Text(Timecode.format(row.instants[i], fps)).font(.aurea(size: 10, weight: .bold)).monospacedDigit().foregroundColor(.white))
                     let measured = text.measure(in: CGSize(width: 180, height: 20))
@@ -470,7 +578,9 @@ struct TimelineView: View {
                 let lastX = x(Double(row.instants[j]), width: width), pillWidth = max(lastX - px, m.keyPillMinWidth)
                 let rect = CGRect(x: (px + lastX - pillWidth) / 2, y: cy - m.keyPillHeight / 2, width: pillWidth, height: m.keyPillHeight)
                 context.fill(Path(roundedRect: rect, cornerRadius: m.keyPillHeight / 2), with: .color(fill))
-                context.stroke(Path(roundedRect: rect.insetBy(dx: m.diamondStroke / 2, dy: m.diamondStroke / 2), cornerRadius: m.keyPillHeight / 2), with: .color(.black.opacity(0.85)), lineWidth: m.diamondStroke)
+                let border: Color = inSelection ? Color.white : Color.black.opacity(0.85)
+                let borderWidth: CGFloat = inSelection ? 2 : m.diamondStroke
+                context.stroke(Path(roundedRect: rect.insetBy(dx: m.diamondStroke / 2, dy: m.diamondStroke / 2), cornerRadius: m.keyPillHeight / 2), with: .color(border), lineWidth: borderWidth)
             }
         }
     }
@@ -598,7 +708,7 @@ struct TimelineView: View {
             if let marker { model.openMarkerEditor(marker) }
             UISelectionFeedbackGenerator().selectionChanged()
         case .none:
-            selectedKey = nil; model.editorBackFromTimeline()
+            selectedKey = nil; model.clearTimelineKeySelection(); model.editorBackFromTimeline()
         case .eye:
             guard let row else { return }
             model.engine.setLayer(row.id, visible: !row.visible); model.refreshModel(force: true)
@@ -608,13 +718,32 @@ struct TimelineView: View {
             if model.layers.indices.contains(neighbor) { model.select(layerId: model.layers[neighbor].id, additive: false) }
         case .key:
             guard let row, row.keysAt.indices.contains(touched.key) else { return }
-            pause(); model.select(layerId: row.id, additive: false)
+            pause()
             let key = row.keysAt[touched.key][0]
-            selectedKey = (row.id, row.instants[touched.key], TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex))
+            let track = TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
+            if model.timelineKeySelectMode {
+                // Modo "Selecionar": soma/tira (trilha: 1 keyframe; resumo: o instante
+                // inteiro), sem buscar (a vista É o cabeçote) e sem abrir a curva.
+                model.toggleTimelineKeys(row.id, row.keysAt[touched.key])
+                if model.timelineKeySelection?.contains(key) == true {
+                    selectedKey = (row.id, row.instants[touched.key], track)
+                } else if let current = selectedKey, !primaryInKeySelection(current) {
+                    // O principal saiu da seleção: fica sem principal (nenhum losango âmbar).
+                    selectedKey = nil
+                }
+                UISelectionFeedbackGenerator().selectionChanged()
+                return
+            }
+            model.select(layerId: row.id, additive: false)
+            selectedKey = (row.id, row.instants[touched.key], track)
             model.seek(toFrame: Int64(row.instants[touched.key]))
+            model.tapTimelineKey(row.id, key)
             model.openCurve(property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time)
         default:
             guard let row else { return }
+            // Escolhendo keyframes, o corpo da camada da seleção (barra ou trilha) não
+            // abre painel nem doca; a pílula ainda abre/fecha as trilhas.
+            if touched.kind != .header && model.timelineKeySelectMode && model.timelineKeySelection?.layer == row.id { return }
             if let track = row.track {
                 model.select(layerId: row.id, additive: false)
                 switch track.property {
@@ -668,6 +797,21 @@ struct TimelineView: View {
         if mode == .move && selected.contains(where: \.locked) || (mode == .key || mode == .trimStart || mode == .trimEnd || mode == .reorder) && row?.locked == true {
             next.mode = .blocked
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        }
+        // Losango ESCOLHIDO (lote de 2+ ou modo de escolha): a seleção inteira anda junta.
+        if next.mode == .key, let row, row.instants.indices.contains(touched.key),
+           let keys = model.timelineKeySelection, keys.layer == row.id,
+           keys.count >= 2 || model.timelineKeySelectMode, keys.containsAny(row.keysAt[touched.key]) {
+            next.mode = .keys
+            next.keyIndex = touched.key
+            next.grabFrame = row.instants[touched.key]
+            next.keyFrame = next.grabFrame
+            // A seleção inteira fica dentro da camada, como o losango sozinho.
+            let first: Int64 = Int64(Keyframes.toTimeline(keys.minTime, row.start, row.offset))
+            let last: Int64 = Int64(Keyframes.toTimeline(keys.maxTime, row.start, row.offset))
+            let lo: Int64 = min(0, Int64(row.start) - first)
+            let hi: Int64 = max(0, Int64(row.end) - last)
+            next.keyLimits = (lo: Int32(clamping: lo), hi: Int32(clamping: hi))
         }
         if next.mode == .key, let row, row.instants.indices.contains(touched.key) {
             next.keyIndex = touched.key; next.keyFrame = row.instants[touched.key]
@@ -811,10 +955,40 @@ struct TimelineView: View {
                 }
                 g.keyFrame = target
                 if let key = g.movingKeys.first { selectedKey = (row.id, target, TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
+                // Fora do modo de escolha, a seleção da barra acompanha o losango movido.
+                if !model.timelineKeySelectMode, model.timelineKeySelection != nil, let key = g.movingKeys.first {
+                    var moved: KeyframeItem = key
+                    moved.time = destination
+                    model.tapTimelineKey(row.id, moved)
+                }
                 model.curveSelectedTime = destination
                 model.refreshModel(force: true)
             }
             guide = snapped == target ? snapped : Snap.none
+        case .keys:
+            // Cada passo manda ao motor só o INCREMENTO desde o último aceito;
+            // colisão recusada deixa a seleção onde estava.
+            let desired: Double = Double(g.grabFrame) + delta
+            let snapped: Int32 = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapKey / ppf)) : Snap.none
+            let target: Int32 = snapped == Snap.none ? timelineFrame(desired) : snapped
+            let raw: Int64 = Int64(target) - Int64(g.grabFrame)
+            let want: Int32 = Int32(clamping: min(Int64(g.keyLimits.hi), max(Int64(g.keyLimits.lo), raw)))
+            if want != g.sentDelta {
+                openUndo(&g)
+                let step: Int32 = Int32(clamping: Int64(want) - Int64(g.sentDelta))
+                // O losango principal acompanha, se ele faz parte da seleção.
+                var primaryMoves = false
+                if let current = selectedKey { primaryMoves = primaryInKeySelection(current) }
+                if model.shiftTimelineKeys(step) {
+                    if primaryMoves, let current = selectedKey {
+                        let frame: Int32 = Int32(clamping: Int64(current.frame) + Int64(step))
+                        selectedKey = (current.layer, frame, current.track)
+                    }
+                    g.sentDelta = want
+                    g.keyFrame = Int32(clamping: Int64(g.grabFrame) + Int64(want))
+                }
+            }
+            guide = snapped != Snap.none && snapped == g.keyFrame ? snapped : Snap.none
         case .hold, .blocked: break
         }
         gesture = g
@@ -865,7 +1039,7 @@ struct TimelineView: View {
             update(lastPointer, size: size)
         }
         if let g = gesture {
-            if g.mode == .move || g.mode == .key || g.mode == .trimStart || g.mode == .trimEnd {
+            if g.mode == .move || g.mode == .key || g.mode == .keys || g.mode == .trimStart || g.mode == .trimEnd {
                 let direction = AutoScroll.direction(pos: lastPointer.x, from: g.start.x, low: m.headerColumn + m.autoEdge, high: size.width - m.autoEdge, intent: m.autoIntent)
                 if direction != 0 {
                     // Auto-scroll moves the presentation window; the editing gesture

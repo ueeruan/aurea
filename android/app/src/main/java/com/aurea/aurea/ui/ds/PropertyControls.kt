@@ -188,6 +188,10 @@ private fun DrawScope.drawTicks(value: Float, unitsPerDp: Float, active: Boolean
  *
  * O início e o fim do gesto são avisados para quem abre/fecha o passo de
  * desfazer (um arrasto = um desfazer). Cancelamento também fecha.
+ *
+ * Valor já FORA da faixa da régua (digitado além do slider): a faixa do gesto
+ * se estende até ele ([dragBounds]) — o primeiro toque não o puxa de volta, e o
+ * arrasto continua do valor mostrado, sem salto.
  */
 fun Modifier.valueDrag(
     enabled: Boolean,
@@ -210,10 +214,15 @@ fun Modifier.valueDrag(
         var active = false
         val lo = if (min.isNaN()) Float.NEGATIVE_INFINITY else min
         val hi = if (max.isNaN()) Float.POSITIVE_INFINITY else max
+        var dragLo = lo
+        var dragHi = hi
         detectHorizontalDragGestures(
             onDragStart = {
                 val s = readStart()
                 from = if (s.isFinite()) s else 0f
+                val (l, h) = dragBounds(lo, hi, from)
+                dragLo = l
+                dragHi = h
                 walked = 0f
                 active = true
                 begin()
@@ -233,11 +242,23 @@ fun Modifier.valueDrag(
             onHorizontalDrag = { change, dx ->
                 change.consume()
                 walked += dx / density
-                val v = (from + walked * readUnits()).coerceIn(lo, hi)
+                val v = (from + walked * readUnits()).coerceIn(dragLo, dragHi)
                 if (v.isFinite()) send(v)
             },
         )
     }
+}
+
+/**
+ * Faixa de UM arrasto da régua: [min]..[max], estendida até o valor de partida
+ * [from] quando ele está fora (valor digitado além do slider). Dentro da faixa,
+ * é a própria faixa. Nunca troca os lados (min > max vira a faixa ordenada).
+ */
+internal fun dragBounds(min: Float, max: Float, from: Float): Pair<Float, Float> {
+    val lo = kotlin.math.min(min, max)
+    val hi = kotlin.math.max(min, max)
+    if (!from.isFinite()) return lo to hi
+    return kotlin.math.min(lo, from) to kotlin.math.max(hi, from)
 }
 
 // =============================================================================

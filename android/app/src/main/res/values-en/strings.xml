@@ -18,6 +18,8 @@
     <string name="common_remove">Remove</string>
     <string name="common_rename">Rename</string>
     <string name="common_duplicate">Duplicate</string>
+    <string name="common_copy">Copy</string>
+    <string name="common_paste">Paste</string>
     <string name="common_open">Open</string>
     <string name="common_back">Back</string>
     <string name="common_close">Close</string>
@@ -1795,4 +1797,8 @@ to edit the curve.</string>
     <string name="environment_texture">Environment Texture</string>
     <string name="environment_background">Show as 360° background</string>
     <string name="environment_hint">Import Radiance HDR/HDRI or a 360° JPG/PNG panorama (2:1), up to 8 MP. The image surrounds the camera and lights the scene.</string>
+    <string name="gizmo_tool_move">Move</string>
+    <string name="gizmo_tool_rotate">Rotate</string>
+    <string name="gizmo_tool_scale">Scale</string>
+    <string name="gizmo_tool_label">3D gizmo tool</string>
 </resources>

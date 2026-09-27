@@ -30,12 +30,18 @@ public:
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
+        // Faixas digitadas 10x o slider: é só a matriz (dobrada na composição
+        // ou um passe afim de custo fixo); a textura de saída é presa ao quadro
+        // visível e ao teto do aparelho. A rotação já aceita ±100 voltas.
         p.add_point2("anchor", "Ponto de âncora", Vec2{0.5f, 0.5f}, -10.0f, 10.0f,
                      kParamAnimatable | kParamRelative);
+        p.typed_range(-100.0f, 100.0f);
         p.add_point2("position", "Posição", Vec2{0.5f, 0.5f}, -10.0f, 10.0f,
                      kParamAnimatable | kParamRelative);
+        p.typed_range(-100.0f, 100.0f);
         p.add_point2("scale", "Escala", Vec2{100.0f, 100.0f}, -10000.0f, 10000.0f,
                      kParamAnimatable | kParamPercent);
+        p.typed_range(-100000.0f, 100000.0f);
         p.add_angle("rotation", "Rotação", 0.0f);
         p.add_float("opacity", "Opacidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }

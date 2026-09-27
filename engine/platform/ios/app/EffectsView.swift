@@ -260,12 +260,18 @@ struct EffectsView: View {
     private func numberRow(_ param: EffectParamItem, effect: UInt32, component: Int) -> some View {
         let d = display(param, effectId: effect), key = EffectParamSelection(effect: effect, param: param.index, component: component)
         let label = Int(param.type) == fxParamPoint2D || Int(param.type) == fxParamPoint3D ? axisLabel(d.label, component: component) : d.label
+        // Duas faixas (EffectsPanel.kt): a RÉGUA anda na do slider (minValue...maxValue);
+        // o TECLADO aceita a digitada (hardMin...hardMax), que o motor impõe. A
+        // escrita prende só na digitada — um valor digitado além da régua fica.
         let lo = d.toDisplay(param.minValue), hi = d.toDisplay(param.maxValue)
+        let typedMin: Float = Swift.min(param.hardMin, param.minValue)
+        let typedMax: Float = Swift.max(param.hardMax, param.maxValue)
+        let typedLo = d.toDisplay(typedMin), typedHi = d.toDisplay(typedMax)
         let range = param.maxValue - param.minValue
         let step: Float = Int(param.type) == fxParamAngle ? 0.5 : range.isFinite && range > 0 ? min(range / 500, 2) : 0.5
         let shown = d.toDisplay(component < param.value.count ? param.value[component] : 0)
         let send: (Float) -> Void = { value in
-            let coreValue = min(param.maxValue, max(param.minValue, d.toEngine(value)))
+            let coreValue = min(typedMax, max(typedMin, d.toEngine(value)))
             writeComponent(param.index, effect: effect, component: component, value: Int(param.type) == fxParamInt ? coreValue.rounded() : coreValue)
         }
         return EffectNumberRow(label: label, value: shown, unitsPerPoint: step * d.scale, minimum: min(lo, hi), maximum: max(lo, hi), suffix: d.suffix, decimals: d.decimals,
@@ -273,7 +279,9 @@ struct EffectsView: View {
                                onSelect: { selected = key }, onMenu: { paramMenu(param, effect: effect) },
                                onBegin: { model.beginGesture("ajustar " + label) }, onValue: send, onEnd: { model.endGesture() }, onKeypad: {
                                    selected = key
-                                   model.numericKeypad = KeypadRequest(title: label, value: shown, unit: d.suffix, min: min(lo, hi), max: max(lo, hi), decimals: d.decimals, onValue: send)
+                                   // "50%" continua sendo 50 % do fim da RÉGUA (não do teto digitado).
+                                   model.numericKeypad = KeypadRequest(title: label, value: shown, unit: d.suffix, min: min(typedLo, typedHi), max: max(typedLo, typedHi),
+                                                                       decimals: d.decimals, percentBase: max(lo, hi), onValue: send)
                                })
     }
     private func customRow<Content: View>(_ param: EffectParamItem, effect: UInt32, @ViewBuilder content: () -> Content) -> some View {
@@ -564,7 +572,11 @@ private struct EffectNumberRow: View {
                         origin = value; live = value; dragging = true; onSelect(); onBegin()
                     }
                     guard dragging else { return }
-                    let next = min(maximum, max(minimum, origin + Float(gesture.translation.width) * unitsPerPoint))
+                    // Valor já fora da régua (digitado além do slider): a faixa do
+                    // gesto vai até ele — o toque não o puxa de volta, sem salto.
+                    let low: Float = origin.isFinite ? Swift.min(minimum, origin) : minimum
+                    let high: Float = origin.isFinite ? Swift.max(maximum, origin) : maximum
+                    let next = min(high, max(low, origin + Float(gesture.translation.width) * unitsPerPoint))
                     if next.isFinite { live = next; onValue(next) }
                 }.onEnded { _ in finish() })
             ValueBox(comUnidade(numeroPtBr(dragging ? live : value, casas: decimals), suffix), width: 68, onTap: onKeypad)

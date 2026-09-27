@@ -34,7 +34,12 @@ import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 
-/** O que o teclado precisa para abrir: título, valor de partida, faixa e casas. */
+/**
+ * O que o teclado precisa para abrir: título, valor de partida, faixa e casas.
+ * [min]..[max] é a faixa que o teclado ACEITA (num parâmetro de efeito, a faixa
+ * digitada, que pode passar da régua). [percentBase] é o 100 % de "50%" quando
+ * a unidade não é "%" (padrão: [max]; o efeito passa o fim da régua).
+ */
 class KeypadRequest(
     val title: String,
     val initial: Float,
@@ -42,6 +47,7 @@ class KeypadRequest(
     val min: Float,
     val max: Float,
     val decimals: Int,
+    val percentBase: Float = max,
     val onConfirm: (Float) -> Unit,
 )
 
@@ -139,7 +145,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
     var selectedAll by remember { mutableStateOf(true) }
     val percentOf = when {
         request.unit == "%" -> 100.0
-        request.max.isFinite() -> request.max.toDouble()
+        request.percentBase.isFinite() -> request.percentBase.toDouble()
         else -> 100.0
     }
     val result = ValueExpression.evaluate(text, percentOf)

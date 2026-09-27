@@ -567,7 +567,11 @@ object ParamType {
     const val FLAG_HIDDEN = 1 shl 4
 }
 
-/** Espelho de `bridge::EffectParamRow` (96 bytes). `value` é o valor no playhead. */
+/**
+ * Espelho de `bridge::EffectParamRow` (104 bytes). `value` é o valor no playhead.
+ * [min]..[max] é a faixa do SLIDER; [hardMin]..[hardMax] é a faixa DIGITADA
+ * (teclado numérico) — sempre a contém, e é a que o motor impõe.
+ */
 class EffectParam(
     val index: Int,
     val type: Int,
@@ -580,6 +584,8 @@ class EffectParam(
     val unit: String,
     val enumLabels: List<String>,
     val animated: Boolean,
+    val hardMin: Float = min,
+    val hardMax: Float = max,
 ) {
     val hidden: Boolean get() = (flags and ParamType.FLAG_HIDDEN) != 0
 
@@ -590,17 +596,24 @@ class EffectParam(
     override fun hashCode(): Int = 31 * (31 * index + type) + value.contentHashCode()
 
     companion object {
-        const val ROW_BYTES = 96
+        const val ROW_BYTES = 104
 
         internal fun read(rows: ByteBuffer, i: Int, blob: ByteBuffer): EffectParam {
             val b = i * ROW_BYTES
             val enumText = blob.utf8(rows.getInt(b + 72), rows.getInt(b + 76))
+            val min = rows.getFloat(b + 16)
+            val max = rows.getFloat(b + 20)
+            // A faixa digitada nunca é mais estreita que a do slider (nem NaN).
+            val hardMin = rows.getFloat(b + 92).let { if (it.isNaN() || it > min) min else it }
+            val hardMax = rows.getFloat(b + 96).let { if (it.isNaN() || it < max) max else it }
             return EffectParam(
                 index = rows.getInt(b),
                 type = rows.getInt(b + 4),
                 flags = rows.getInt(b + 8),
-                min = rows.getFloat(b + 16),
-                max = rows.getFloat(b + 20),
+                min = min,
+                max = max,
+                hardMin = hardMin,
+                hardMax = hardMax,
                 value = FloatArray(4) { rows.getFloat(b + 24 + it * 4) },
                 defaultValue = FloatArray(4) { rows.getFloat(b + 40 + it * 4) },
                 label = blob.utf8(rows.getInt(b + 56), rows.getInt(b + 60)),

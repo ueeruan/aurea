@@ -391,6 +391,9 @@ internal class TimelineController(
                 } else selectTap(r)
             }
             HitKind.BODY, HitKind.TRIM_START, HitKind.TRIM_END -> if (r != null) {
+                // Escolhendo keyframes, o corpo da camada da seleção não abre
+                // painel nem doca (fecharia as trilhas abertas no meio da escolha).
+                if (store.keySelectMode && store.keySelection?.layer == r.id) return
                 if (r.track != null) onTrackTap(r.id, r.track.property, r.track.effect) else selectTap(r)
             }
         }
@@ -411,15 +414,25 @@ internal class TimelineController(
         }
     }
 
-    /** Losango: escolhe a camada, leva o cabeçote ao instante e avisa a casca (curva). */
+    /**
+     * Losango: escolhe a camada, leva o cabeçote ao instante e avisa a casca
+     * (curva). No modo "Selecionar" o toque SOMA/TIRA da seleção de keyframes
+     * — numa trilha, aquele keyframe; no resumo, todos do instante — sem buscar
+     * (a vista É o cabeçote: buscar faria a timeline pular sob o dedo) e sem
+     * abrir a curva.
+     */
     private fun keyframeTap(r: RowModel, index: Int) {
         if (index !in r.instants.indices) return
         tick()
         pauseIfPlaying()
+        if (store.keySelectMode) {
+            store.toggleTimelineKeys(r.id, r.keysAt[index])
+            return
+        }
         if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id)
         val key = r.keysAt[index].first()
         store.seek(r.instants[index])
-        store.selectKeyframe(r.id, key)
+        store.tapTimelineKey(r.id, key)
         onKeyframeTap(r.id, key)
     }
 
@@ -680,6 +693,11 @@ internal class TimelineController(
             store.showToast("Camada bloqueada: desbloqueie para mover o keyframe")
             return consumeUntilUp()
         }
+        // Losango ESCOLHIDO (lote de 2+ ou modo de escolha): a seleção inteira anda junta.
+        val sel = store.keySelection
+        if (sel != null && sel.layer == r.id && (sel.size >= 2 || store.keySelectMode) && sel.containsAny(r.keysAt[index])) {
+            return selectionDrag(r, index, down)
+        }
         light()
         pauseIfPlaying()
         if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id, openOptions = false)
@@ -708,6 +726,45 @@ internal class TimelineController(
                 state.dragKeyFrame = t
             }
             setGuide(if (snapped != Snap.NONE && snapped == t) snapped else Snap.NONE)
+        }
+    }
+
+    /**
+     * Arrasto de um losango escolhido: TODOS os keyframes da seleção (de
+     * qualquer trilha) andam o mesmo número inteiro de frames, num passo de
+     * desfazer. Cada passo manda ao motor só o INCREMENTO desde o último
+     * aceito; colisão com keyframe não escolhido é recusada pelo motor e aí a
+     * seleção fica onde estava (o próximo movimento tenta de novo).
+     */
+    private suspend fun AwaitPointerEventScope.selectionDrag(r: RowModel, index: Int, down: PointerInputChange) {
+        val sel = store.keySelection ?: return consumeUntilUp()
+        if (sel.isEmpty()) return consumeUntilUp()
+        light()
+        pauseIfPlaying()
+        val grabbed = r.instants[index]
+        // A seleção inteira fica dentro da camada, como o losango sozinho.
+        val first = Keyframes.toTimeline(sel.minTime(), r.start, r.offset)
+        val last = Keyframes.toTimeline(sel.maxTime(), r.start, r.offset)
+        val lo = minOf(0, r.start - first)
+        val hi = max(0, r.end - last)
+        val targets = snapTargets(longArrayOf(r.id), own = r, ownEdges = true, ownKeys = false)
+        val grab = grabbed - frameAt(down.position.x)
+        var applied = 0
+        state.dragKeyLayer = r.id
+        state.dragKeyFrame = grabbed
+        dragLoop(down.id, down.position, horizontal = true) { p ->
+            val desired = frameAt(p.x) + grab
+            val snapped = if (store.snapping) Snap.nearest(targets, desired, playheadFrame(), (metrics.snapKey / pxPerFrame()).toDouble()) else Snap.NONE
+            val t = if (snapped != Snap.NONE) snapped else desired.toFrame()
+            val want = (t - grabbed).coerceIn(lo, hi)
+            if (want != applied) {
+                openUndo("mover keyframes")
+                if (store.shiftTimelineKeys(want - applied)) {
+                    applied = want
+                    state.dragKeyFrame = grabbed + applied
+                }
+            }
+            setGuide(if (snapped != Snap.NONE && snapped == grabbed + applied) snapped else Snap.NONE)
         }
     }
 

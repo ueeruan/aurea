@@ -21,6 +21,12 @@ namespace {
 
 f32 finite_or(f32 v, f32 fallback) noexcept { return std::isfinite(v) ? v : fallback; }
 
+// Tetos da faixa DIGITADA do Shake (o slider segue 1000 px · 60 Hz · 500 % · 100 %).
+constexpr f32 kShakeMaxAmplitude = 20000.0f;   // px
+constexpr f32 kShakeMaxFrequency = 240.0f;     // Hz: acima de fps/2 já é tremor quadro a quadro
+constexpr f32 kShakeMaxAmount = 20.0f;         // 2000 %
+constexpr f32 kShakeMaxShutter = 4.0f;         // 400 % do quadro
+
 // Continuous camera shake. Shared CPU path supplies inverse transforms to a
 // single GPU pass; no frame cache or random generator state is needed.
 class Shake final : public Effect {
@@ -35,19 +41,31 @@ public:
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
+        // Faixas digitadas (edição extrema): a trajetória é função pura do
+        // tempo e o passe tem no máximo 8 amostras — nada aqui cresce custo ou
+        // memória com o valor; os tetos são só de sanidade numérica.
         p.add_float("amplitude_x", "Horizontal", 20, 0, 1000, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0, kShakeMaxAmplitude);
         p.add_float("amplitude_y", "Vertical", 20, 0, 1000, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0, kShakeMaxAmplitude);
         p.add_float("frequency", "Speed", 8, 0, 60, kParamAnimatable, "Hz");
+        p.typed_range(0, kShakeMaxFrequency);
         p.add_int("seed", "Seed", 1, 0, 9999);
         p.add_bool("separate_axes", "Independent axes", true);
         p.add_angle("rotation", "Rotation", 0);
         p.add_float("smoothing", "Smoothness", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
         p.add_float("mix", "Mix", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
         p.add_float("amount", "Amount", 100, 0, 500, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(0, kShakeMaxAmount * 100.0f);
+        // Zoom: a trajetória prende a escala em ±2 stops; 200 % já alcança o teto.
         p.add_float("zoom", "Zoom", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(0, 200);
         static const char* const styles[] = {"Normal", "Twitchy", "Jumpy"};
         p.add_enum("style", "Style", styles, 3, 0);
+        // Obturador em fração do quadro: acima de 100 % o rastro cobre vários
+        // quadros (as mesmas 8 amostras, custo fixo).
         p.add_float("motion_blur", "Motion blur", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(0, kShakeMaxShutter * 100.0f);
         p.add_float("phase", "Phase", 0, -10000, 10000, kParamAnimatable);
         static const char* const edges[] = {"Reflect", "Clamp", "Tile", "Transparent"};
         p.add_enum("edges", "Edges", edges, 4, 0);
@@ -62,16 +80,16 @@ public:
                  LayerImage& out) const override {
         shake::Settings s;
         s.amplitudeX = finite_or(e.f(kAmplitudeX), 0); s.amplitudeY = finite_or(e.f(kAmplitudeY), 0);
-        s.frequency = std::clamp(finite_or(e.f(kFrequency), 8), 0.f, 60.f);
+        s.frequency = std::clamp(finite_or(e.f(kFrequency), 8), 0.f, kShakeMaxFrequency);
         s.seed = e.e(kSeed); s.separate = e.b(kSeparate);
         s.rotation = finite_or(e.f(kRotation), 0); s.zoom = finite_or(e.f(kZoom), 0);
         s.smoothness = std::clamp(finite_or(e.f(kSmoothing), 100) / 100.f, 0.f, 1.f);
-        s.amount = std::clamp(finite_or(e.f(kAmount), 100) / 100.f, 0.f, 5.f);
+        s.amount = std::clamp(finite_or(e.f(kAmount), 100) / 100.f, 0.f, kShakeMaxAmount);
         s.style = e.e(kStyle); s.phase = finite_or(e.f(kPhase), 0);
         s.wave = std::clamp(finite_or(e.f(kWave), 0) / 100.f, 0.f, 1.f);
         const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
         const f64 seconds = static_cast<f64>(e.localTime.value) / fps;
-        const f32 blur = std::clamp(finite_or(e.f(kBlur), 0) / 100.f, 0.f, 1.f);
+        const f32 blur = std::clamp(finite_or(e.f(kBlur), 0) / 100.f, 0.f, kShakeMaxShutter);
         const u32 count = blur > .001f ? 8u : 1u;
         struct { Vec4 rows[16]; Vec4 options; Vec4 bounds; } u{};
         const Rect in = input.region;
@@ -112,12 +130,19 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         static const char* const kEdgeModes[] = {"Repetir", "Recortar", "Esticar"};
+        // Digitado ~10x o slider. O laço do shader é fixo (6 oitavas); a margem
+        // cresce com a intensidade, mas a textura fica presa ao quadro visível
+        // e ao teto do aparelho. A complexidade (oitavas = iterações) não alarga.
         p.add_float("amount", "Intensidade", 40.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, 5000.0f);
         p.add_float("size", "Tamanho do ruído", 120.0f, 2.0f, 2000.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(2.0f, 20000.0f);
         p.add_float("complexity", "Complexidade", 3.0f, 1.0f, 6.0f, kParamAnimatable, "oitavas");
         p.add_float("evolution", "Evolução", 0.0f, -360000.0f, 360000.0f, kParamAnimatable, "°");
         p.add_float("offset_x", "Deslocamento X", 0.0f, -1000.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(-100000.0f, 100000.0f);
         p.add_float("offset_y", "Deslocamento Y", 0.0f, -1000.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(-100000.0f, 100000.0f);
         p.add_int("seed", "Semente", 3, 0, 9999);
         p.add_bool("horizontal_only", "Só na horizontal", false);
         p.add_enum("edges", "Bordas", kEdgeModes, 3, 1);
@@ -179,9 +204,13 @@ public:
     void declare_parameters(ParameterRegistry& p) const override {
         static const char* const kDirs[] = {"Horizontal", "Vertical", "Diagonal", "As duas"};
         static const char* const kEdgeModes[] = {"Repetir", "Recortar", "Esticar"};
+        // Digitado ~10x o slider: uma amostra por pixel, custo fixo.
         p.add_float("height", "Altura da onda", 30.0f, 0.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, 10000.0f);
         p.add_float("wavelength", "Largura de onda", 200.0f, 2.0f, 4000.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(2.0f, 40000.0f);
         p.add_float("speed", "Velocidade", 0.0f, -200.0f, 200.0f, kParamAnimatable | kParamPixels, "px/quadro");
+        p.typed_range(-5000.0f, 5000.0f);
         p.add_angle("phase", "Fase", 0.0f);
         p.add_enum("direction", "Direção", kDirs, 4, 0);
         p.add_bool("square", "Onda quadrada", false);
@@ -237,9 +266,13 @@ public:
         static const char* const kModes[] = {"Empurrar", "Puxar", "Torcer", "Esfera", "Canto"};
         static const char* const kEdgeModes[] = {"Repetir", "Recortar", "Esticar"};
         p.add_enum("mode", "Modo", kModes, 5, 0);
+        // Digitado ~10x o slider: uma amostra por pixel, custo fixo.
         p.add_float("amount", "Intensidade", 60.0f, -1000.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(-10000.0f, 10000.0f);
         p.add_float("radius", "Raio", 260.0f, 1.0f, 4000.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(1.0f, 40000.0f);
         p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.0f, 2.0f, kParamAnimatable | kParamRelative);
+        p.typed_range(-10.0f, 10.0f);
         p.add_enum("edges", "Bordas", kEdgeModes, 3, 1);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("sphere_light", "Luz da esfera", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
@@ -296,11 +329,17 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("progress", "Progresso", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        // Digitado alargado: a margem é 9x a ondulação (presa ao quadro
+        // visível), por isso a ondulação para em 4x o slider; o resto ~10x.
         p.add_float("amplitude", "Ondulação", 25.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, 2000.0f);
         p.add_float("wavelength", "Comprimento da onda", 120.0f, 4.0f, 2000.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(4.0f, 20000.0f);
         p.add_float("softness", "Suavidade da borda", 15.0f, 1.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.0f, 2.0f, kParamAnimatable | kParamRelative);
+        p.typed_range(-10.0f, 10.0f);
         p.add_float("speed", "Velocidade da onda", 0.0f, -100.0f, 100.0f, kParamAnimatable);
+        p.typed_range(-1000.0f, 1000.0f);
         p.add_int("seed", "Semente", 2, 0, 9999);
         p.add_bool("warp_image", "Distorcer a imagem junto", true);
         p.add_bool("outside_in", "De fora para dentro", false);

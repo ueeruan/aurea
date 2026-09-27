@@ -4617,6 +4617,9 @@ bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
 
 u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    // As referências vêm do modelo que a UI já viu: o que ela enfileirou antes
+    // (inserir/mover keyframe) precisa estar aplicado.
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<SelectedTrackKey> selected;
@@ -4643,6 +4646,10 @@ u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noe
 
 u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64 delta, bool remove) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    // Chamada direta, fora da fila: o `beginUndoGroup` que o gesto acabou de
+    // enfileirar precisa valer ANTES desta mutação, senão o 1º passo do
+    // arrasto vira um desfazer à parte (arrasto = UM passo).
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<SelectedTrackKey> selected;
@@ -4680,6 +4687,7 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
 
 u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || clipboard_.keys.empty() || frame < INT32_MIN || frame > INT32_MAX) return 0;
     u32 placed = 0;
@@ -5055,6 +5063,29 @@ bool Engine::toggle_marker(i64 frame) noexcept {
     else comp->put_marker(Marker{FrameIndex{f}, 0xFFF7C34Fu, kMarkerManual, {}});
     project_->mark_dirty();
     return !had;
+}
+
+i64 Engine::mark_beat_live() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return -1;
+    i64 f = playback_.current().value;
+    if (playback_.playing()) {
+        // O último quadro desenhado atrasa até um quadro de display; o que o
+        // ouvido segue é o relógio mestre (áudio), lido no instante do toque.
+        const i64 ns = playback_.clock().media_ns(monotonic_ns());
+        f = frame_at(TickNs{ns}, comp->fps()).value;
+        const i64 duration = comp->duration().value;
+        if (playback_.loop() && duration > 0) f = ((f % duration) + duration) % duration;
+    }
+    f = std::clamp<i64>(f, 0, std::max<i64>(0, comp->duration().value - 1));
+    if (std::any_of(comp->markers().begin(), comp->markers().end(),
+                    [f](const Marker& m) { return m.frame.value == f; })) return -1;
+    history_.before_mutation(*comp, project_->timeline().current(), "marcar batida");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    comp->put_marker(Marker{FrameIndex{f}, 0xFFF7C34Fu, kMarkerManual, {}});
+    project_->mark_dirty();
+    return f;
 }
 
 bool Engine::move_marker(i64 from, i64 to) noexcept {
@@ -7670,6 +7701,8 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         row.enumCount = spec.enumCount;
         row.minValue = spec.minValue;
         row.maxValue = spec.maxValue;
+        row.hardMin = spec.typed_min();
+        row.hardMax = spec.typed_max();
         const ParamValue v = evaluate_param(l->tracks, *inst, i, spec, local);
         for (int c = 0; c < 4; ++c) {
             row.value[c] = v.v[c];
@@ -7728,6 +7761,8 @@ u32 Engine::query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capa
         row.enumCount = spec.enumCount;
         row.minValue = spec.minValue;
         row.maxValue = spec.maxValue;
+        row.hardMin = spec.typed_min();
+        row.hardMax = spec.typed_max();
         // Sem instância não há valor corrente: o padrão da declaração responde
         // pelos dois, e nada aparece animado.
         for (int c = 0; c < 4; ++c) {

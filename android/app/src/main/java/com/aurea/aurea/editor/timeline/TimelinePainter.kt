@@ -77,6 +77,7 @@ internal class TimelinePainter(
     private val selStroke = Stroke(m.selStroke)
     private val multiStroke = Stroke(m.multiStroke)
     private val diamondStroke = Stroke(m.diamondStroke)
+    private val pickedStroke = Stroke(2f * m.density)
     private val tc = IntArray(4)
     /** Grupos de losangos visíveis de uma linha ([primeiro, último] por grupo), reusado. */
     private var groupBuf = IntArray(256)
@@ -203,6 +204,7 @@ internal class TimelinePainter(
         val selCount = c.selectionSize()
         val multi = selCount >= 2
         val selKey = c.store.selectedKeyframe
+        val keySel = c.store.keySelection
         val generation = c.store.thumbnailGeneration
         val cache = c.store.thumbnails
         val preview = if (st.reorderSource >= 0 && !compact) Reorder.preview(
@@ -229,7 +231,9 @@ internal class TimelinePainter(
             val handles = selCount == 1 && selected && !r.locked
             val selFrame = if (selKey != null && selKey.first == r.id) r.selectedFrame(selKey.second) else Snap.NONE
             val dragFrame = if (st.dragKeyLayer == r.id) st.dragKeyFrame else Snap.NONE
-            drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation)
+            // Seleção de keyframes da timeline: quais instantes desta linha têm keyframe escolhido.
+            val picked = if (keySel != null && keySel.layer == r.id && !keySel.isEmpty()) pickedInstants(r, keySel) else null
+            drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked)
         }
 
         // Coluna das pílulas por cima das barras.
@@ -258,11 +262,12 @@ internal class TimelinePainter(
         r: RowModel, top: Float, w: Float, view: Double, ppf: Float, cx: Float, fps: Float,
         compact: Boolean, selected: Boolean, multi: Boolean, handles: Boolean,
         selFrame: Int, dragFrame: Int, cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
+        picked: BooleanArray?,
     ) {
         if (r.track != null) {
             val cy = top + 20f * m.density
             drawLine(Color.White.copy(alpha = 0.08f), Offset(m.headerColumn, cy), Offset(w, cy))
-            drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps)
+            drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps, picked)
             val labelWidth = min(w - m.headerColumn - 8f * m.density, 240f * m.density)
             if (labelWidth > 0f) {
                 val label = nameLayout(r, labelWidth)
@@ -354,7 +359,7 @@ internal class TimelinePainter(
             }
             drawPath(arrow, r.type.color.copy(alpha = if (r.visible) 0.9f else 0.45f))
         }
-        drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps)
+        drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps, picked)
     }
 
     /** Conteúdo da barra (A.01): [‹] · ícone do tipo · cadeado · nome · ◇ · [›] ou ≡. */
@@ -501,10 +506,24 @@ internal class TimelinePainter(
         canvas.drawLines(waveLines, 0, k, wavePaint)
     }
 
-    /** Losangos da A.01: quadrado 11 girado, âmbar se escolhido; vizinhos a < 4 dp viram pílula. */
+    /**
+     * Instantes da linha com algum keyframe da seleção da timeline (paralelo a
+     * `instants`). Só roda para as linhas da camada da seleção.
+     */
+    private fun pickedInstants(r: RowModel, sel: KeySelection): BooleanArray? {
+        var any = false
+        val out = BooleanArray(r.instants.size) { i -> sel.containsAny(r.keysAt[i]).also { if (it) any = true } }
+        return if (any) out else null
+    }
+
+    /**
+     * Losangos da A.01: quadrado 11 girado, âmbar se escolhido; vizinhos a < 4 dp
+     * viram pílula. Os da seleção da timeline ganham anel branco (e azul quando
+     * não são o principal, que continua âmbar).
+     */
     private fun DrawScope.drawDiamonds(
         r: RowModel, top: Float, w: Float, view: Double, ppf: Float, cx: Float,
-        compact: Boolean, selFrame: Int, dragFrame: Int, fps: Float,
+        compact: Boolean, selFrame: Int, dragFrame: Int, fps: Float, picked: BooleanArray? = null,
     ) {
         val inst = r.instants
         if (inst.isEmpty()) return
@@ -520,19 +539,21 @@ internal class TimelinePainter(
             val j = groupBuf[2 * g + 1]
             val kx = TimeAxis.xOf(inst[i].toDouble(), view, ppf, cx)
             val on = Keyframes.groupHas(inst, i, j, selFrame)
-            val fill = if (on) AureaTimeline.KeyframeOn else KEY_OFF
+            var inSelection = false
+            if (picked != null) for (k in i..j) if (picked[k]) { inSelection = true; break }
+            val fill = if (on) AureaTimeline.KeyframeOn else if (inSelection) KEY_PICKED else KEY_OFF
             if (j == i) {
                 val dragging = inst[i] == dragFrame
                 if (dragging) dragX = kx
-                drawDiamond(kx, cy, fill, on, if (dragging) m.keyDragScale else 1f)
+                drawDiamond(kx, cy, fill, on, if (dragging) m.keyDragScale else 1f, inSelection)
             } else {
-                drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, fill)
+                drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, fill, inSelection)
             }
         }
         if (!dragX.isNaN()) drawBalloon(dragX, cy, dragFrame, fps)
     }
 
-    private fun DrawScope.drawDiamond(x: Float, y: Float, fill: Color, on: Boolean, scale: Float) {
+    private fun DrawScope.drawDiamond(x: Float, y: Float, fill: Color, on: Boolean, scale: Float, picked: Boolean = false) {
         val s = m.diamond * scale
         val half = s / 2f
         rotate(45f, Offset(x, y)) {
@@ -553,21 +574,33 @@ internal class TimelinePainter(
                 CornerRadius(m.diamondRadius),
                 style = diamondStroke,
             )
+            if (picked) {
+                // Anel branco POR FORA do contorno: escolhido se lê em qualquer fundo.
+                val ring = pickedStroke.width
+                val o = half + ring / 2f + m.diamondStroke / 2f
+                drawRoundRect(
+                    KEY_PICKED_RING,
+                    Offset(x - o, y - o),
+                    Size(o * 2f, o * 2f),
+                    CornerRadius(m.diamondRadius + ring),
+                    style = pickedStroke,
+                )
+            }
         }
     }
 
-    private fun DrawScope.drawKeyPill(xa: Float, xb: Float, y: Float, fill: Color) {
+    private fun DrawScope.drawKeyPill(xa: Float, xb: Float, y: Float, fill: Color, picked: Boolean = false) {
         val wPill = max(xb - xa, m.keyPillMinWidth)
         val left = (xa + xb) / 2f - wPill / 2f
         val hPill = m.keyPillHeight
         drawRoundRect(fill, Offset(left, y - hPill / 2f), Size(wPill, hPill), CornerRadius(hPill / 2f))
         val b = m.diamondStroke / 2f
         drawRoundRect(
-            KEY_BORDER,
+            if (picked) KEY_PICKED_RING else KEY_BORDER,
             Offset(left + b, y - hPill / 2f + b),
             Size(wPill - m.diamondStroke, hPill - m.diamondStroke),
             CornerRadius(hPill / 2f),
-            style = diamondStroke,
+            style = if (picked) pickedStroke else diamondStroke,
         )
     }
 
@@ -823,6 +856,9 @@ internal class TimelinePainter(
         val EYE_TINT = Color.White.copy(alpha = 0.7f)
         val KEY_OFF = Color.White.copy(alpha = 0.9f)
         val KEY_BORDER = Color.Black.copy(alpha = 0.85f)
+        /** Keyframe na seleção da timeline (não principal): azul com anel branco — o mesmo no iOS. */
+        val KEY_PICKED = Color(0xFF4DA3FF)
+        val KEY_PICKED_RING = Color.White
         val BALLOON = Color.Black.copy(alpha = 0.82f)
 
         fun lerpSrgb(a: Color, b: Color, t: Float) = Color(

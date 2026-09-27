@@ -52,6 +52,10 @@ enum ParamIndex : u32 {
 /// por quadro. 24x a layer cobre uma composição com a layer em 1/24.
 inline constexpr f32 kMaxCoverage = 24.0f;
 
+/// Teto do ladrilho digitado (10x a layer). O slider vai só a 3x; acima disso
+/// cada cópia é maior que a layer — é amostragem, não custo nem memória.
+inline constexpr f32 kMaxTileScale = 10.0f;
+
 /// Fatores (largura, altura, em múltiplos da layer) que fazem a região
 /// ladrilhada cobrir o quadro inteiro da composição DEPOIS do transform da
 /// layer — o maior entre isso e o que a pessoa pediu em "Largura/Altura da

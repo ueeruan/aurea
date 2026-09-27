@@ -34,7 +34,9 @@ public:
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("threshold", "Limiar", 60.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("radius", "Raio", 30.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, 3000.0f);   // o mesmo teto da pirâmide do Gaussian Blur
         p.add_float("intensity", "Intensidade", 1.0f, 0.0f, 10.0f);
+        p.typed_range(0.0f, 100.0f);    // ganho da soma: custo fixo
         p.add_color("color", "Cor", Vec4{1, 1, 1, 1});
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {

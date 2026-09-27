@@ -298,6 +298,9 @@ struct KeypadRequest: Identifiable {
     let min: Float
     let max: Float
     let decimals: Int
+    /// O 100 % de "50%" quando a unidade não é "%" (nil = `max`). Num parâmetro
+    /// de efeito, min...max é a faixa DIGITADA e isto é o fim da régua.
+    var percentBase: Float? = nil
     let onValue: (Float) -> Void
 }
 
@@ -354,7 +357,12 @@ struct NumericKeypadSheet: View {
     @State private var text = ""
     @State private var selectedAll = true
     private let rows = [["7", "8", "9", "⌫"], ["4", "5", "6", "÷"], ["1", "2", "3", "×"], [",", "0", "±", "−"], [":", "%", "=", "+"]]
-    private var result: Double? { KeypadExpression.evaluate(text, percentOf: request.unit == "%" ? 100 : (request.max.isFinite ? Double(request.max) : 100)) }
+    private var percentOf: Double {
+        if request.unit == "%" { return 100 }
+        let base: Float = request.percentBase ?? request.max
+        return base.isFinite ? Double(base) : 100
+    }
+    private var result: Double? { KeypadExpression.evaluate(text, percentOf: percentOf) }
     private var value: Float? {
         guard let result, result.isFinite else { return nil }
         let clamped = Float(result).clamped(to: (request.min.isNaN ? -.infinity : request.min)...(request.max.isNaN ? .infinity : request.max))

@@ -39,13 +39,13 @@ Params params_from(const EffectEval& e) noexcept {
     const Vec2 c = e.p2(kCenter);
     p.centerX = finite_or(c.x, 0.5f);
     p.centerY = finite_or(c.y, 0.5f);
-    // Mesmos limites do antigo: o ladrilho vai de 1% a 300% (passa de 100% e
-    // fica MAIOR que a layer — o teto antigo de 100% era o "a imagem só
-    // encolhe" do relato), a saída pedida de 1% a 600%.
-    p.tileX = std::clamp(finite_or(e.f(kTileWidth), 100.0f) / 100.0f, 0.01f, 3.0f);
-    p.tileY = std::clamp(finite_or(e.f(kTileHeight), 100.0f) / 100.0f, 0.01f, 3.0f);
-    p.outputX = std::clamp(finite_or(e.f(kOutputWidth), 100.0f) / 100.0f, 0.01f, 6.0f);
-    p.outputY = std::clamp(finite_or(e.f(kOutputHeight), 100.0f) / 100.0f, 0.01f, 6.0f);
+    // O slider segue os limites do antigo (ladrilho 1%..300%, saída 1%..600%);
+    // DIGITADO, o ladrilho vai a 1000% e a saída ao teto da cobertura
+    // (kMaxCoverage = 2400%). A região só aloca o que o quadro mostra.
+    p.tileX = std::clamp(finite_or(e.f(kTileWidth), 100.0f) / 100.0f, 0.01f, kMaxTileScale);
+    p.tileY = std::clamp(finite_or(e.f(kTileHeight), 100.0f) / 100.0f, 0.01f, kMaxTileScale);
+    p.outputX = std::clamp(finite_or(e.f(kOutputWidth), 100.0f) / 100.0f, 0.01f, kMaxCoverage);
+    p.outputY = std::clamp(finite_or(e.f(kOutputHeight), 100.0f) / 100.0f, 0.01f, kMaxCoverage);
     p.mirror = e.b(kMirror);
     p.clamp = e.b(kClampEdges);
     p.horizontalPhase = e.b(kHorizontalPhase);
@@ -54,7 +54,7 @@ Params params_from(const EffectEval& e) noexcept {
 }
 
 Vec2 coverage_factors(const Params& p, const LayerPlacement& pl) noexcept {
-    const Vec2 requested{std::clamp(p.outputX, 0.01f, 6.0f), std::clamp(p.outputY, 0.01f, 6.0f)};
+    const Vec2 requested{std::clamp(p.outputX, 0.01f, kMaxCoverage), std::clamp(p.outputY, 0.01f, kMaxCoverage)};
     const f32 w = static_cast<f32>(pl.layerWidth);
     const f32 h = static_cast<f32>(pl.layerHeight);
     if (w <= 0.0f || h <= 0.0f || pl.compWidth == 0 || pl.compHeight == 0) return requested;
@@ -126,16 +126,23 @@ public:
     void declare_parameters(ParameterRegistry& p) const override {
         using namespace motion_tile;
         // A ORDEM É O `ParamIndex` de MotionTile.hpp.
+        // Faixas digitadas: as mesmas de `params_from` (ladrilho até
+        // kMaxTileScale, saída até kMaxCoverage); o centro vai a ±10 layers.
         p.add_point2("tile_center", "Centro do mosaico", Vec2{0.5f, 0.5f}, -1.0f, 2.0f,
                      kParamAnimatable | kParamRelative);
+        p.typed_range(-10.0f, 10.0f);
         p.add_float("tile_width", "Largura do mosaico", 100.0f, 1.0f, 300.0f,
                     kParamAnimatable | kParamPercent, "%");
+        p.typed_range(1.0f, kMaxTileScale * 100.0f);
         p.add_float("tile_height", "Altura do mosaico", 100.0f, 1.0f, 300.0f,
                     kParamAnimatable | kParamPercent, "%");
+        p.typed_range(1.0f, kMaxTileScale * 100.0f);
         p.add_float("output_width", "Largura da saída", 100.0f, 1.0f, 600.0f,
                     kParamAnimatable | kParamPercent, "%");
+        p.typed_range(1.0f, kMaxCoverage * 100.0f);
         p.add_float("output_height", "Altura da saída", 100.0f, 1.0f, 600.0f,
                     kParamAnimatable | kParamPercent, "%");
+        p.typed_range(1.0f, kMaxCoverage * 100.0f);
         p.add_bool("mirror_edges", "Bordas espelhadas", false);
         p.add_bool("clamp_edges", "Esticar bordas", false);
         p.add_angle("phase", "Fase", 0.0f);

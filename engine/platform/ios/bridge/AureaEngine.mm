@@ -151,6 +151,8 @@ NSString* const AureaParamValue      = @"value";
 NSString* const AureaParamDefault    = @"defaultValue";
 NSString* const AureaParamMin        = @"min";
 NSString* const AureaParamMax        = @"max";
+NSString* const AureaParamHardMin    = @"hardMin";
+NSString* const AureaParamHardMax    = @"hardMax";
 NSString* const AureaParamAnimated   = @"animated";
 NSString* const AureaParamEnumLabels = @"enumLabels";
 
@@ -273,6 +275,8 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         AureaParamDefault:    floats_to_array(def, 4),
         AureaParamMin:        @(p.minValue),
         AureaParamMax:        @(p.maxValue),
+        AureaParamHardMin:    @(p.hardMin),
+        AureaParamHardMax:    @(p.hardMax),
         AureaParamAnimated:   @(p.animated != 0),
         AureaParamEnumLabels: enums,
     };
@@ -2362,12 +2366,14 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return floats_to_array(v, 4);
 }
 - (void)editTrackKey:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time action:(uint32_t)action value:(float)value targetTime:(int32_t)targetTime interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles {
-    if (property >= static_cast<u32>(aurea::TrackProperty::_Count) || action > 3) return;
+    if (property >= static_cast<u32>(aurea::TrackProperty::_Count) || action > 4) return;
     aurea::TrackRef track{}; track.layer = layer_of(layerId); track.property = static_cast<aurea::TrackProperty>(property);
     track.effectIndex = effect; track.effectParamIndex = param;
-    const auto type = action == 0 ? CommandType::KeyframeSetValue : action == 1 ? CommandType::KeyframeDelete : action == 2 ? CommandType::KeyframeMove : CommandType::KeyframeSetInterpolation;
+    // Tudo pela fila de comandos: a ordem com seek/edições anteriores é a do envio.
+    const auto type = action == 0 ? CommandType::KeyframeSetValue : action == 1 ? CommandType::KeyframeDelete
+        : action == 2 ? CommandType::KeyframeMove : action == 4 ? CommandType::KeyframeInsert : CommandType::KeyframeSetInterpolation;
     if (auto* c = _batch.add(type)) {
-        if (action < 2) { c->keyframe.track = track; c->keyframe.time = aurea::FrameIndex{time}; c->keyframe.value = value; }
+        if (action < 2 || action == 4) { c->keyframe.track = track; c->keyframe.time = aurea::FrameIndex{time}; c->keyframe.value = value; }
         else if (action == 2) { c->keyframe_move.track = track; c->keyframe_move.fromTime = aurea::FrameIndex{time}; c->keyframe_move.toTime = aurea::FrameIndex{targetTime}; }
         else {
             c->keyframe_interp.track = track; c->keyframe_interp.time = aurea::FrameIndex{time};
@@ -2707,6 +2713,11 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 
 - (void)setVectorBlurForLayer:(long long)layerId amount:(float)amount {
     if (auto* e = self.engine) (void)e->set_vector_blur(static_cast<aurea::u64>(layerId), amount);
+}
+
+- (int64_t)markBeatLive {
+    auto* e = self.engine;
+    return e ? e->mark_beat_live() : -1;
 }
 
 - (void)toggleMarker:(int64_t)frame {

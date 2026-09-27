@@ -26,6 +26,34 @@ object ExitDiagnostics {
         } // An OEM refusing/throttling diagnostics must never break import.
     }
 
+    private const val PREFS = "aurea_exit_diagnostics"
+    private const val SAFE_VIDEO = "safe_video_planes"
+
+    /**
+     * Modo seguro de vídeo, permanente no aparelho: ligado quando o processo
+     * anterior morreu por crash nativo (ou do app) numa etapa de vídeo — dentro
+     * da importação ou depois dela, quando o decoder e a GPU já trabalham. O
+     * custo é só desempenho (planos YUV pela CPU); o ganho é o app não fechar
+     * de novo a cada vídeo num aparelho cujo driver/gralloc ainda não conhecemos.
+     */
+    fun safeVideoMode(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(SAFE_VIDEO, false)) return true
+        val crashed = runCatching {
+            exits(context).firstOrNull()?.let { exit ->
+                crashedDuringVideo(exit.reason, exit.processStateSummary?.toString(Charsets.UTF_8))
+            } ?: false
+        }.getOrDefault(false)
+        if (crashed) prefs.edit().putBoolean(SAFE_VIDEO, true).apply()
+        return crashed
+    }
+
+    internal fun crashedDuringVideo(reason: Int, summary: String?): Boolean {
+        if (summary == null) return false
+        val crash = reason == ApplicationExitInfo.REASON_CRASH_NATIVE || reason == ApplicationExitInfo.REASON_CRASH
+        return crash && (summary.contains("phase=${Phase.VIDEO_NATIVE.name}") || summary.contains("phase=${Phase.VIDEO_READY.name}"))
+    }
+
     internal fun marker(phase: Phase, build: Int, uptimeMs: Long): ByteArray =
         "Aurea build=$build phase=${phase.name} uptimeMs=$uptimeMs".toByteArray(Charsets.UTF_8)
 
@@ -43,8 +71,8 @@ object ExitDiagnostics {
         appendLine("device=${Build.DEVICE} hardware=${Build.HARDWARE}")
         appendLine("Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT}, firmware=${Build.DISPLAY}")
         appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
-        appendLine("Samsung Android 12/12L: " +
-            if (Build.MANUFACTURER.equals("samsung", ignoreCase = true) && Build.VERSION.SDK_INT in 31..32)
+        appendLine("Samsung (todas as versoes): " +
+            if (Build.MANUFACTURER.equals("samsung", ignoreCase = true))
                 "proteção de planos YUV ativa; confirmação no aparelho pendente" else "não se aplica")
         appendLine("Decodificadores disponíveis (não necessariamente em uso):")
         runCatching {

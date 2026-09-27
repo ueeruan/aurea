@@ -857,6 +857,11 @@ public:
     // --- Marcas e batidas -------------------------------------------------------
     /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
     bool toggle_marker(i64 frame) noexcept;
+    /// Tap de batida ao ouvir a música: marca o instante que está SOANDO
+    /// (relógio mestre do áudio quando tocando; o cabeçote quando parado).
+    /// Nunca pausa, nunca alterna: um 2º toque no mesmo quadro não apaga.
+    /// Devolve o quadro marcado, ou -1 se já havia marca ali / sem composição.
+    i64 mark_beat_live() noexcept;
     bool move_marker(i64 from, i64 to) noexcept;
     /// from < 0 inserts; otherwise updates the existing marker atomically.
     /// Rejects occupied destinations and invalid frames without changing history.

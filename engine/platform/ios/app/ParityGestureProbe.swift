@@ -41,9 +41,10 @@ import UIKit
         let text3D = primary.flatMap { model.engine.text3D(forLayer: $0) } ?? [:]
         var stageCorners: [Float] = []
         _ = StageGeom.corners(detail, &stageCorners)
-        let stageGizmo = primary.map { model.engine.gizmo($0, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoLocalSpace) } ?? []
+        let stageGizmo = primary.map { model.engine.gizmo($0, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal) } ?? []
         var coreStatus = AureaStatus()
         let readCoreStatus = model.engine.readStatus(&coreStatus)
+        let keySelectionCount: Int = model.timelineKeySelection?.count ?? -1
         let packet: [String: Any] = [
             "playbackReport": model.engine.playbackReport(),
             "processFootprintBytes": model.engine.perf()["processFootprintBytes"] ?? 0,
@@ -68,6 +69,8 @@ import UIKit
             "sheet": String(describing: model.sheetContent),
             "curveProperty": model.curveProperty, "curveParam": model.curveParam,
             "selectionCount": model.selection.count, "isManipulating": model.stageManipulating,
+            "keySelectionCount": keySelectionCount,
+            "keySelectMode": model.timelineKeySelectMode,
             "canUndo": model.status.canUndo != 0, "canRedo": model.status.canRedo != 0,
             "compositionWidth": model.compositionWidth, "compositionHeight": model.compositionHeight,
             "detail": detail, "shapeParams": shape,

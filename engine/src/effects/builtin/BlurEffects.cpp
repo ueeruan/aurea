@@ -179,6 +179,10 @@ public:
         static const char* const kDims[] = {"Horizontal e vertical", "Horizontal", "Vertical"};
         // "Desfoque" é o raio visível, em pixels da layer: sigma = raio / 3.
         p.add_float("blurriness", "Desfoque", 0.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        // Digitado até 3000 px: é o que a pirâmide cobre sem truncar o núcleo
+        // (7 reduções x sigma 8 texels ≈ raio 3000). O custo por pixel não
+        // cresce com o raio (≤ 2x24 pares) e a textura é presa ao quadro.
+        p.typed_range(0.0f, 3000.0f);
         p.add_enum("dimensions", "Dimensões", kDims, 3, kBoth);
         p.add_bool("repeat_edges", "Repetir pixels da borda", false);
     }
@@ -226,6 +230,7 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("amount", "Intensidade", 0.0f, 0.0f, 500.0f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(0.0f, 2000.0f);   // multiplicador de um núcleo 3x3: custo fixo
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kAmount] = ParamValue::scalar(160.0f);      // as arestas da cartela realçam

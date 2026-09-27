@@ -14,6 +14,20 @@ class ExitDiagnosticsTest {
         }
     }
 
+    @Test fun onlyCrashesDuringVideoPhasesTurnOnSafeVideoMode() {
+        val native = 5   // ApplicationExitInfo.REASON_CRASH_NATIVE
+        val java = 4     // ApplicationExitInfo.REASON_CRASH
+        val userRequested = 10
+        fun summary(phase: ExitDiagnostics.Phase) = ExitDiagnostics.marker(phase, 2124, 1).toString(Charsets.UTF_8)
+        assertTrue(ExitDiagnostics.crashedDuringVideo(native, summary(ExitDiagnostics.Phase.VIDEO_NATIVE)))
+        assertTrue(ExitDiagnostics.crashedDuringVideo(native, summary(ExitDiagnostics.Phase.VIDEO_READY)))
+        assertTrue(ExitDiagnostics.crashedDuringVideo(java, summary(ExitDiagnostics.Phase.VIDEO_READY)))
+        assertFalse(ExitDiagnostics.crashedDuringVideo(native, summary(ExitDiagnostics.Phase.ENGINE_READY)))
+        assertFalse(ExitDiagnostics.crashedDuringVideo(native, summary(ExitDiagnostics.Phase.VIDEO_FAILED)))
+        assertFalse(ExitDiagnostics.crashedDuringVideo(userRequested, summary(ExitDiagnostics.Phase.VIDEO_READY)))
+        assertFalse(ExitDiagnostics.crashedDuringVideo(native, null))
+    }
+
     @Test fun traceAtLimitIsPreservedButLargerTraceIsNotExportedTruncated() {
         val binary = byteArrayOf(0, -1, 2, 13, 10)
         assertArrayEquals(binary, ExitDiagnostics.readBounded(ByteArrayInputStream(binary), binary.size))

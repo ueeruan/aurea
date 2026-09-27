@@ -13,15 +13,22 @@ public:
         return radial_ ? radial : split;
     }
     void declare_parameters(ParameterRegistry& p) const override {
+        // Deslocamentos digitados até ±20000 px (10x o slider): uma leitura por
+        // canal, custo fixo; a margem cresce, mas a textura é presa ao quadro
+        // visível e ao teto do aparelho.
         if (radial_) {
             p.add_float("amount","Amount",10,-2000,2000,kParamAnimatable|kParamPixels,"px");
+            p.typed_range(-20000,20000);
             p.add_float("center_x","Center X",50,-1000,1000,kParamAnimatable|kParamPercent,"%");
             p.add_float("center_y","Center Y",50,-1000,1000,kParamAnimatable|kParamPercent,"%");
         } else {
             const char* keys[]={"red_x","red_y","green_x","green_y","blue_x","blue_y"};
             const char* names[]={"Red X","Red Y","Green X","Green Y","Blue X","Blue Y"};
             const f32 defaults[]={10,0,0,0,-10,0};
-            for(u32 i=0;i<6;++i)p.add_float(keys[i],names[i],defaults[i],-2000,2000,kParamAnimatable|kParamPixels,"px");
+            for(u32 i=0;i<6;++i){
+                p.add_float(keys[i],names[i],defaults[i],-2000,2000,kParamAnimatable|kParamPixels,"px");
+                p.typed_range(-20000,20000);
+            }
         }
         p.add_float("mix","Mix",100,0,100,kParamAnimatable|kParamPercent,"%");
         p.add_bool("repeat_edges","Repeat edges",false);
@@ -73,19 +80,29 @@ public:
         return infos[mode_];
     }
     void declare_parameters(ParameterRegistry& p) const override {
+        // Faixas digitadas: o passe é uma amostra por pixel (o laço de 6 do
+        // shader é fixo), então os valores alargam ~5-10x o slider.
         p.add_float("center_x", "Centro X", 50.f, -100.f, 200.f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(-1000.f, 1000.f);
         p.add_float("center_y", "Centro Y", 50.f, -100.f, 200.f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(-1000.f, 1000.f);
         if (mode_ == 0) {
             p.add_float("brightness", "Brilho", 100.f, 0.f, 500.f, kParamAnimatable | kParamPercent, "%");
+            p.typed_range(0.f, 2000.f);
             p.add_float("size", "Tamanho", 100.f, 1.f, 400.f, kParamAnimatable | kParamPercent, "%");
+            p.typed_range(1.f, 2000.f);
             p.add_float("ghosts", "Reflexos internos", 60.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
             p.add_color("tint", "Cor", {1.f, .7f, .4f, 1.f});
         } else if (mode_ == 1) {
             p.add_float("amplitude", "Amplitude", 12.f, 0.f, 128.f, kParamAnimatable | kParamPixels, "px");
+            p.typed_range(0.f, 1000.f);
             p.add_float("wavelength", "Comprimento da onda", 80.f, 2.f, 2000.f, kParamAnimatable | kParamPixels, "px");
+            p.typed_range(2.f, 20000.f);
             p.add_angle("phase", "Fase", 0.f);
             p.add_float("decay", "Atenuação", 0.f, 0.f, 10.f);
+            p.typed_range(0.f, 100.f);
         } else {
+            // Campo de visão NÃO alarga: 180° é o limite físico (tan 90° = ∞).
             p.add_float("fov", "Campo de visão", 60.f, 0.f, 160.f, kParamAnimatable, "°");
             p.add_bool("reverse", "Inverter distorção", false);
         }

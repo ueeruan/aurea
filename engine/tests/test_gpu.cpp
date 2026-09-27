@@ -5647,7 +5647,12 @@ AUREA_TEST(Gpu, EveryRegisteredEffectBuildsAndRenders) {
         for (u32 p = 0; p < params.count(); ++p) {
             const ParamSpec& spec = params.at(p);
             if (spec.type != ParamType::Float && spec.type != ParamType::Int) continue;
-            for (f32 v : {spec.minValue, spec.maxValue}) {
+            // E os extremos DIGITADOS (edição extrema além do slider), quando
+            // a declaração alarga: o valor chega ao efeito sem ser preso.
+            std::vector<f32> ends{spec.minValue, spec.maxValue};
+            if (spec.hardMin < spec.minValue) ends.push_back(spec.hardMin);
+            if (spec.hardMax > spec.maxValue) ends.push_back(spec.hardMax);
+            for (f32 v : ends) {
                 Layer* ll = s.comp->layer(id);
                 ll->effects[0].params[p].constant = ParamValue::scalar(v);
                 const FloatImage im = s.render();

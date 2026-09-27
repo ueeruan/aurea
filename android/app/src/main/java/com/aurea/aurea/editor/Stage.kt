@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import android.app.Application
 import android.content.res.Resources
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import com.aurea.aurea.ui.i18n.AppText
@@ -32,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -58,6 +60,9 @@ import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.GIZMO_LENGTH
+import com.aurea.aurea.state.GIZMO_MOVE
+import com.aurea.aurea.state.GIZMO_ROTATE
+import com.aurea.aurea.state.GIZMO_SCALE
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -153,7 +158,25 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
         if (store.selection.size == 1 && !store.rawPlayback) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
-                if (store.gizmo != null) androidx.compose.material3.TextButton(
+                if (store.gizmo != null) {
+                    val toolLabel = stringResource(R.string.gizmo_tool_label)
+                    androidx.compose.material3.TextButton(
+                        onClick = store::cycleGizmoTool,
+                        modifier = Modifier.heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
+                            .testTag("gizmo.tool").semantics { contentDescription = toolLabel },
+                    ) {
+                        Text(
+                            stringResource(when (store.gizmoTool) {
+                                GIZMO_ROTATE -> R.string.gizmo_tool_rotate
+                                GIZMO_SCALE -> R.string.gizmo_tool_scale
+                                else -> R.string.gizmo_tool_move
+                            }),
+                            color = AureaColors.Accent,
+                        )
+                    }
+                }
+                // Mundo/Local vale para mover; girar e escala usam os eixos da camada.
+                if (store.gizmo != null && store.gizmoTool == GIZMO_MOVE) androidx.compose.material3.TextButton(
                     onClick = store::toggleGizmoSpace,
                     modifier = Modifier.heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp)),
                 ) { Text(if (store.gizmoLocalSpace) "Local XYZ" else "World XYZ", color = AureaColors.Text) }
@@ -378,7 +401,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
             val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .35f) }
             drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), 1.dp.toPx())
         }
-        store.gizmo?.let { drawGizmo(m, it) }
+        store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
         return
     }
     // Modo vetorial (pontos / mão livre): o palco é do caminho, sem alças da camada.
@@ -483,7 +506,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     }
     drawRotateHandle(m, grabbed == 0)
     // Camada no espaço 3D: as setas do mundo por cima (têm prioridade no toque).
-    store.gizmo?.let { drawGizmo(m, it) }
+    store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
     if (store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
     val anchor = m.scratch
     val gizmo = store.gizmo
@@ -515,8 +538,12 @@ private fun gizmoTips(m: StageMapper, g: FloatArray, zOffset: Float): FloatArray
     return GizmoGeometry.tips(t, zOffset / 44f)
 }
 
-/** Gizmo 3D: setas X (vermelha), Y (verde) e Z (azul) do mundo, na origem da camada. */
-private fun DrawScope.drawGizmo(m: StageMapper, g: FloatArray) {
+/**
+ * Gizmo 3D: eixos X (vermelho), Y (verde) e Z (azul) na origem da camada.
+ * A ponta diz a ferramenta: bola = mover, anel = girar, quadrado = escala
+ * (com o quadrado branco do centro para escala uniforme).
+ */
+private fun DrawScope.drawGizmo(m: StageMapper, g: FloatArray, tool: Int) {
     val t = gizmoTips(m, g, 44.dp.toPx())
     if (t.size != 8) return
     val o = Offset(t[0], t[1])
@@ -525,10 +552,167 @@ private fun DrawScope.drawGizmo(m: StageMapper, g: FloatArray) {
         val tip = Offset(t[i * 2], t[i * 2 + 1])
         drawLine(ShellColors.OutlineUnder, o, tip, 5.dp.toPx())
         drawLine(colors[i - 1], o, tip, 2.5.dp.toPx())
-        drawCircle(ShellColors.OutlineUnder, 9.dp.toPx(), tip)
-        drawCircle(colors[i - 1], 7.5.dp.toPx(), tip)
+        when (tool) {
+            GIZMO_ROTATE -> {
+                drawCircle(ShellColors.OutlineUnder, 10.dp.toPx(), tip, style = Stroke(5.dp.toPx()))
+                drawCircle(colors[i - 1], 10.dp.toPx(), tip, style = Stroke(3.dp.toPx()))
+            }
+            GIZMO_SCALE -> {
+                val h = 8.dp.toPx()
+                drawRect(ShellColors.OutlineUnder, tip - Offset(h + 1.5f, h + 1.5f), Size(2 * h + 3f, 2 * h + 3f))
+                drawRect(colors[i - 1], tip - Offset(h, h), Size(2 * h, 2 * h))
+            }
+            else -> {
+                drawCircle(ShellColors.OutlineUnder, 9.dp.toPx(), tip)
+                drawCircle(colors[i - 1], 7.5.dp.toPx(), tip)
+            }
+        }
     }
-    drawCircle(Color.White, 4.dp.toPx(), o)
+    if (tool == GIZMO_SCALE) {
+        val h = 7.dp.toPx()
+        drawRect(ShellColors.OutlineUnder, o - Offset(h + 1.5f, h + 1.5f), Size(2 * h + 3f, 2 * h + 3f))
+        drawRect(Color.White, o - Offset(h, h), Size(2 * h, 2 * h))
+    } else drawCircle(Color.White, 4.dp.toPx(), o)
+}
+
+/**
+ * Arrasto numa alça do gizmo 3D. O eixo escolhido no toque fica travado até o
+ * dedo subir, e a projeção do início vale o gesto inteiro (a alça tem tamanho
+ * fixo na tela; o ganho não muda com o zoom). Mover anda no eixo Mundo/Local;
+ * Girar muda a Rotação do eixo — arrasto transversal à alça ou, com o eixo
+ * apontando para a câmera, o ângulo varrido em volta do centro; Escala muda a
+ * Escala do eixo pelo quanto o dedo anda ao longo da alça ([axis] 3 = o
+ * quadrado do centro, os três juntos). Rotação e escala são ABSOLUTAS desde o
+ * toque: sem deriva, sem salto e sem Z inesperado. Um passo de desfazer, e só
+ * se algo mudou; toque parado no centro continua marcando o beat.
+ */
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.gizmoGesture(
+    store: EditorStore,
+    m: StageMapper,
+    gz: FloatArray,
+    tips: FloatArray,
+    axis: Int,
+    tool: Int,
+    down: androidx.compose.ui.input.pointer.PointerInputChange,
+    zOff: Float,
+    haptic: HapticFeedback,
+) {
+    val d = store.detail ?: return
+    val ox = tips[0]
+    val oy = tips[1]
+    // Projeção crua de GIZMO_LENGTH unidades no eixo, congelada no toque.
+    val ax = if (axis < 3) m.sx(gz[(axis + 1) * 2]) - ox else 0f
+    val ay = if (axis < 3) m.sy(gz[(axis + 1) * 2 + 1]) - oy else 0f
+    val len2 = ax * ax + ay * ay
+    val rawExtent = max((1..3).maxOf { hypot(m.sx(gz[it * 2]) - ox, m.sy(gz[it * 2 + 1]) - oy) }, 0.0001f)
+    // Eixo quase apontando para a câmera: a alça vira um toco ao lado do centro.
+    val facing = axis < 3 && hypot(ax, ay) * 80.dp.toPx() / rawExtent < zOff * 0.6f
+    // Alça como desenhada: a escala mede o dedo ao longo DELA.
+    val hx = if (axis < 3) tips[(axis + 1) * 2] - ox else 0f
+    val hy = if (axis < 3) tips[(axis + 1) * 2 + 1] - oy else 0f
+    val hLen = max(hypot(hx, hy), 1f)
+    val base = when (tool) {
+        GIZMO_ROTATE -> d.rotation
+        GIZMO_SCALE -> d.scale
+        else -> d.position
+    }.toFloatArray()
+    if (base.size < 3) return
+    val axisName = if (axis < 3) "XYZ"[axis].toString() else "XYZ"
+    val label = when (tool) {
+        GIZMO_ROTATE -> "girar no eixo $axisName"
+        GIZMO_SCALE -> if (axis == 3) "escala uniforme" else "escala no eixo $axisName"
+        else -> "mover no eixo $axisName"
+    }
+    val slop = ShellDims.HandleSlop.toPx()
+    val degPerPx = 0.5f / 1.dp.toPx()
+    val uniformPx = 120.dp.toPx()
+    var last = down.position
+    var lastAngle = atan2(down.position.y - oy, down.position.x - ox)
+    var swept = 0f
+    var along = 0f
+    var began = false
+    var moved = false
+    var upTime = down.uptimeMillis
+    try {
+        while (true) {
+            val e = awaitPointerEvent()
+            if (e.changes.count { it.pressed } > 1) break
+            val c = e.changes.firstOrNull { it.id == down.id } ?: break
+            c.consume()
+            upTime = c.uptimeMillis
+            if (!c.pressed) break
+            if (!moved && hypot(c.position.x - down.position.x, c.position.y - down.position.y) < slop) continue
+            moved = true
+            // O 1º passo conta desde o toque: a alça alcança o dedo sem perder a folga.
+            val dx = c.position.x - last.x
+            val dy = c.position.y - last.y
+            last = c.position
+            if (dx == 0f && dy == 0f) continue
+            if (!began) {
+                store.beginGesture(label)
+                began = true
+            }
+            when (tool) {
+                GIZMO_ROTATE -> {
+                    if (facing || len2 <= 1f) {
+                        val a = atan2(c.position.y - oy, c.position.x - ox)
+                        swept += Math.toDegrees(wrapRad(a - lastAngle).toDouble()).toFloat()
+                        lastAngle = a
+                    } else {
+                        val l = kotlin.math.sqrt(len2)
+                        swept += (-dx * ay + dy * ax) / l * degPerPx
+                    }
+                    val out = base.copyOf()
+                    out[axis] = base[axis] + swept
+                    store.gizmoSetComponents(TrackProperty.ROTATION_X, out)
+                }
+                GIZMO_SCALE -> {
+                    along += when {
+                        axis == 3 -> dx - dy
+                        facing -> -dy
+                        else -> (dx * hx + dy * hy) / hLen
+                    }
+                    val out = base.copyOf()
+                    if (axis == 3) {
+                        val f = kotlin.math.exp(along / uniformPx)
+                        for (i in 0..2) out[i] = gizmoScale(base[i] * f)
+                    } else {
+                        out[axis] = gizmoScale(base[axis] * max(0.01f, 1f + along / hLen))
+                    }
+                    store.gizmoSetComponents(TrackProperty.SCALE_X, out)
+                }
+                else -> {
+                    val amount = if (axis == 2 && facing) {
+                        // Olhando reto para Z: arrastar para cima afasta (Z+ é para dentro).
+                        -dy / m.fit * 2f
+                    } else if (len2 > 1f) {
+                        (dx * ax + dy * ay) / len2 * GIZMO_LENGTH
+                    } else {
+                        0f
+                    }
+                    if (amount != 0f) store.gizmoDrag(axis, amount)
+                }
+            }
+        }
+    } finally {
+        // Pointer input is cancelled when the stage leaves composition.
+        // Always close history grouping so later edits and autosave
+        // do not remain part of this interrupted drag.
+        if (began) store.endGesture()
+    }
+    // Toque parado no quadrado do centro = o toque da âncora (marcar o beat).
+    if (!moved && axis == 3 && m.markerAnchorValid) {
+        if (upTime - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) store.editMarkerAtPlayhead()
+        else store.toggleMarkerAt(store.playhead)
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+}
+
+/** Escala do gizmo: mantém o sinal (espelho) e |escala| em [0,001; 100]. */
+private fun gizmoScale(v: Float): Float {
+    if (!v.isFinite()) return 1f
+    val s = if (v < 0f) -1f else 1f
+    return s * abs(v).coerceIn(0.001f, 100f)
 }
 
 private fun activeAt(d: LayerDetail, frame: Int) = frame >= d.startFrame && frame < d.endFrame
@@ -786,53 +970,23 @@ private suspend fun PointerInputScope.stageGestures(
             }
         }
 
-        // Gizmo 3D: tocar numa ponta de seta arrasta no eixo do mundo.
+        // Gizmo 3D: tocar numa alça trava AQUELE eixo até soltar o dedo.
         val gz = store.gizmo
         if (gz != null && gz.size == 8 && gz.all { it.isFinite() } && store.selection.size == 1 && m.valid) {
             val zOff = 44.dp.toPx()
             val tips = gizmoTips(m, gz, zOff)
             val reach = 24.dp.toPx()
+            val tool = store.gizmoTool
             var axis = -1
             var best = reach
             for (i in 1..3) {
                 val dd = kotlin.math.hypot(downX - tips[i * 2], downY - tips[i * 2 + 1])
                 if (dd < best) { best = dd; axis = i - 1 }
             }
+            // Escala: o quadrado do centro escala X, Y e Z juntos.
+            if (axis < 0 && tool == GIZMO_SCALE && kotlin.math.hypot(downX - tips[0], downY - tips[1]) < 20.dp.toPx()) axis = 3
             if (axis >= 0) {
-                // The handle has fixed screen size; inverse movement must use
-                // the original projection, frozen for the entire gesture.
-                val ax = m.sx(gz[(axis + 1) * 2]) - tips[0]
-                val ay = m.sy(gz[(axis + 1) * 2 + 1]) - tips[1]
-                val len2 = ax * ax + ay * ay
-                val rawExtent = (1..3).maxOf { kotlin.math.hypot(m.sx(gz[it * 2]) - tips[0], m.sy(gz[it * 2 + 1]) - tips[1]) }
-                val zCollapsed = axis == 2 && kotlin.math.hypot(ax, ay) * 80.dp.toPx() / max(rawExtent, 0.0001f) < zOff * 0.6f
-                var last = down.position
-                store.beginGesture("mover no eixo ${"XYZ"[axis]}")
-                try {
-                    do {
-                        val e = awaitPointerEvent()
-                        if (e.changes.count { it.pressed } > 1) break
-                        val c = e.changes.firstOrNull { it.id == down.id } ?: break
-                        c.consume()
-                        val dx = c.position.x - last.x
-                        val dy = c.position.y - last.y
-                        last = c.position
-                        val amount = if (zCollapsed) {
-                            // Olhando reto para Z: arrastar para cima afasta (Z+ é para dentro).
-                            -dy / m.fit * 2f
-                        } else if (len2 > 1f) {
-                            (dx * ax + dy * ay) / len2 * GIZMO_LENGTH
-                        } else {
-                            0f
-                        }
-                        if (amount != 0f) store.gizmoDrag(axis, amount)
-                    } while (c.pressed)
-                } finally {
-                    // Pointer input is cancelled when the stage leaves composition.
-                    // Always close history grouping so later edits and autosave
-                    // do not remain part of this interrupted drag.
-                    store.endGesture()
-                }
+                gizmoGesture(store, m, gz, tips, axis, tool, down, zOff, haptic)
                 return@awaitEachGesture
             }
         }
@@ -1089,6 +1243,8 @@ private class StageEdit(
     // Escala / giro (alça e pinça)
     private var sx0 = 1f
     private var sy0 = 1f
+    private var sz0 = 1f
+    private var threeD = false
     private var rot0 = 0f
     private var pivotX = 0f
     private var pivotY = 0f
@@ -1135,6 +1291,9 @@ private class StageEdit(
     private fun keepTransform(d: LayerDetail) {
         sx0 = d.scale[0]
         sy0 = d.scale[1]
+        sz0 = d.scale.getOrElse(2) { 1f }
+        // Camada 3D (tem gizmo): a pinça escala X, Y e Z juntos, sem achatar a profundidade.
+        threeD = store.gizmo != null
         rot0 = d.rotation[2]
     }
 
@@ -1275,7 +1434,8 @@ private class StageEdit(
             rotOffset = 4f * sign(deg)
         }
         begin("pinça")
-        store.setTransform2(TrackProperty.SCALE_X, sx0 * f, TrackProperty.SCALE_Y, sy0 * f)
+        if (threeD) store.gizmoSetComponents(TrackProperty.SCALE_X, floatArrayOf(sx0 * f, sy0 * f, sz0 * f))
+        else store.setTransform2(TrackProperty.SCALE_X, sx0 * f, TrackProperty.SCALE_Y, sy0 * f)
         if (rotActive) store.setTransform(TrackProperty.ROTATION_Z, rot0 + deg - rotOffset)
     }
 

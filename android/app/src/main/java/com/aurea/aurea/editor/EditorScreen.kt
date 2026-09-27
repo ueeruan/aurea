@@ -264,7 +264,9 @@ fun EditorScreen(store: EditorStore) {
 
                 if (ui.adding && !store.sceneEditor) AddLayerOverlay(store, ui, Modifier.align(Alignment.BottomEnd).padding(end = if (wide) sheetWidth.dp else 0.dp))
                 // O "+": escondido em tela cheia, adicionando ou com painel aberto.
-                if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel && content != SheetContent.Curve) {
+                // Com a barra de keyframes aberta o "+" sairia por cima dela.
+                if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel && content != SheetContent.Curve &&
+                    store.keySelection == null) {
                     // Camada escolhida com a timeline baixa: o "+" cobria justamente o
                     // clipe escolhido. Sobe para o canto do palco, acima do transporte.
                     val lifted = !wide && content == SheetContent.Dock && m.timeline < 170f
@@ -393,6 +395,10 @@ private fun PreviewStrip(@Suppress("UNUSED_PARAMETER") ui: EditorUi) {
 
 @Composable
 private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier) {
+    // Modo "Selecionar keyframes": o painel fecha para a timeline voltar alta,
+    // com as trilhas abertas e a barra de ações inteira.
+    val selectingKeys = store.keySelectMode
+    LaunchedEffect(selectingKeys) { if (selectingKeys) ui.panel = null }
     Timeline(
         store = store,
         compact = ui.panel != null,

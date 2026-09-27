@@ -549,3 +549,127 @@ func expandedTimelineRows(_ base: [TimelineRow], expanded: Int64?, keys: [Int64:
         return lanes
     }
 }
+
+// =============================================================================
+// Seleção de keyframes da timeline (KeySelection.kt)
+// =============================================================================
+/// Um keyframe pela TRILHA (propriedade, efeito, componente) e tempo LOCAL da
+/// camada — sem valor nem curva: a chave que o motor entende em
+/// `keyframeSelection` (4 números por keyframe).
+struct TimelineKeyRef: Hashable {
+    let property: UInt32
+    let effect: UInt32
+    let param: UInt32
+    let time: Int32
+
+    func matches(_ key: KeyframeItem) -> Bool {
+        key.property == property && key.effectIndex == effect && key.paramIndex == param && key.time == time
+    }
+}
+
+extension TimelineKeyRef {
+    init(_ key: KeyframeItem) {
+        self.init(property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time)
+    }
+}
+
+/// UMA camada e um conjunto de keyframes de QUALQUER trilha dela. Mesmo
+/// contrato do Android (`KeySelection`): trilha alterna 1 keyframe; resumo
+/// alterna o instante inteiro; mover desloca todas as referências pelo mesmo
+/// delta; se alguma referência sumiu dos keyframes relidos, a seleção inteira
+/// é descartada.
+struct TimelineKeySelection: Equatable {
+    let layer: Int64
+    var keys: Set<TimelineKeyRef> = []
+
+    var count: Int { keys.count }
+    var isEmpty: Bool { keys.isEmpty }
+
+    func contains(_ key: KeyframeItem) -> Bool { keys.contains(TimelineKeyRef(key)) }
+
+    func containsAny(_ group: [KeyframeItem]) -> Bool {
+        for key in group where keys.contains(TimelineKeyRef(key)) { return true }
+        return false
+    }
+
+    /// Entra tudo o que falta do grupo; se já estava todo escolhido, sai todo.
+    func toggledGroup(_ group: [KeyframeItem]) -> TimelineKeySelection {
+        if group.isEmpty { return self }
+        var refs = Set<TimelineKeyRef>()
+        for key in group { refs.insert(TimelineKeyRef(key)) }
+        var next = self
+        if refs.isSubset(of: keys) { next.keys.subtract(refs) } else { next.keys.formUnion(refs) }
+        return next
+    }
+
+    /// Todas as referências andam `delta` frames (depois que o motor aceitou o mesmo delta).
+    func shifted(_ delta: Int32) -> TimelineKeySelection {
+        if delta == 0 { return self }
+        var moved = Set<TimelineKeyRef>()
+        for ref in keys {
+            let time = Int32(clamping: Int64(ref.time) + Int64(delta))
+            moved.insert(TimelineKeyRef(property: ref.property, effect: ref.effect, param: ref.param, time: time))
+        }
+        return TimelineKeySelection(layer: layer, keys: moved)
+    }
+
+    /// Continua valendo só se TODA referência ainda existe; senão nil.
+    func validated(_ current: [KeyframeItem]) -> TimelineKeySelection? {
+        if keys.isEmpty { return self }
+        var present = Set<TimelineKeyRef>()
+        for key in current { present.insert(TimelineKeyRef(key)) }
+        return keys.isSubset(of: present) ? self : nil
+    }
+
+    var minTime: Int32 {
+        var result = Int32.max
+        for ref in keys where ref.time < result { result = ref.time }
+        return keys.isEmpty ? 0 : result
+    }
+
+    var maxTime: Int32 {
+        var result = Int32.min
+        for ref in keys where ref.time > result { result = ref.time }
+        return keys.isEmpty ? 0 : result
+    }
+
+    /// Empacotado para o motor: propriedade, efeito, componente, tempo local.
+    func references() -> [NSNumber] {
+        var out: [NSNumber] = []
+        out.reserveCapacity(keys.count * 4)
+        for ref in keys {
+            out.append(NSNumber(value: ref.property))
+            out.append(NSNumber(value: ref.effect))
+            out.append(NSNumber(value: ref.param))
+            out.append(NSNumber(value: Int64(ref.time)))
+        }
+        return out
+    }
+
+    /// "Duplicar": a cópia começa 1 frame depois do ÚLTIMO escolhido (o motor
+    /// cola ancorado no mais cedo). nil se estoura o Int32 do motor.
+    func duplicateDelta() -> Int32? {
+        if keys.isEmpty { return nil }
+        let delta: Int64 = Int64(maxTime) + 1 - Int64(minTime)
+        let last: Int64 = Int64(maxTime) + delta
+        if last > Int64(Int32.max) { return nil }
+        return Int32(delta)
+    }
+
+    static func single(_ layer: Int64, _ key: KeyframeItem) -> TimelineKeySelection {
+        TimelineKeySelection(layer: layer, keys: [TimelineKeyRef(key)])
+    }
+
+    /// "Todos": todos os keyframes que a timeline mostra da camada (respeita o foco de trilhas).
+    static func all(_ layer: Int64, _ keys: [KeyframeItem], focus: [TimelineTrack]?) -> TimelineKeySelection {
+        var refs = Set<TimelineKeyRef>()
+        for key in keys {
+            if let focus {
+                let track = TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
+                if !focus.contains(track) { continue }
+            }
+            refs.insert(TimelineKeyRef(key))
+        }
+        return TimelineKeySelection(layer: layer, keys: refs)
+    }
+}

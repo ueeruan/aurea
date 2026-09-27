@@ -29,6 +29,8 @@ import com.aurea.aurea.diagnostics.ExitDiagnostics
 import com.aurea.aurea.diagnostics.ExitDiagnostics.Phase
 import com.aurea.aurea.effects.EffectPreviewStore
 import com.aurea.aurea.effects.EffectPrefs
+import com.aurea.aurea.editor.timeline.KeyRef
+import com.aurea.aurea.editor.timeline.KeySelection
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.EffectCatalogEntry
@@ -443,10 +445,159 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun selectKeyframe(layer: Long, key: KeyframeRow) {
         selectedKeyframe = layer to key
+        // Fora do modo de escolha, a seleção da timeline (se a barra está aberta)
+        // acompanha o keyframe principal — o gráfico move/escolhe o mesmo.
+        if (!keySelectMode && keySelection != null) keySelection = KeySelection.single(layer, key)
     }
 
     fun clearSelectedKeyframe() {
         selectedKeyframe = null
+        clearKeySelection()
+    }
+
+    // --- Seleção de keyframes da timeline (várias trilhas, UMA camada) ------
+    /**
+     * Keyframes escolhidos na timeline, de qualquer trilha da camada. Nula =
+     * barra de ações fechada. O principal continua em [selectedKeyframe]
+     * (curva, inspetor); esta é a seleção sobre a qual Copiar, Duplicar,
+     * Excluir e o arrasto em grupo agem.
+     */
+    var keySelection by mutableStateOf<KeySelection?>(null)
+        private set
+    /** Modo "Selecionar": tocar num losango soma/tira em vez de trocar. */
+    var keySelectMode by mutableStateOf(false)
+        private set
+
+    fun clearKeySelection() {
+        keySelection = null
+        keySelectMode = false
+    }
+
+    /** Toque simples num losango da timeline: só ele fica escolhido (e é o principal). */
+    fun tapTimelineKey(layer: Long, key: KeyframeRow) {
+        selectedKeyframe = layer to key
+        keySelection = KeySelection.single(layer, key)
+        keySelectMode = false
+    }
+
+    /**
+     * Liga/desliga o modo de escolha. Ligar deixa a camada escolhida "só na
+     * timeline" (sem doca: a timeline fica alta e as trilhas abertas cabem);
+     * a casca fecha o painel aberto ao ver o modo ligado.
+     */
+    fun changeKeySelectMode(on: Boolean) {
+        if (!on) {
+            keySelectMode = false
+            return
+        }
+        val sel = keySelection
+            ?: selectedKeyframe?.let { KeySelection.single(it.first, it.second) }
+            ?: primary?.let { KeySelection(it) }
+            ?: return
+        keySelection = sel
+        keySelectMode = true
+        if (primary == sel.layer && selection.size == 1) timelineOnlySelection = selection.toSet()
+        else select(sel.layer, openOptions = false)
+    }
+
+    /**
+     * Modo de escolha: alterna o grupo do losango tocado (1 keyframe numa
+     * trilha; todos do instante no resumo). Outra camada começa outra seleção.
+     */
+    fun toggleTimelineKeys(layer: Long, group: List<KeyframeRow>) {
+        if (group.isEmpty()) return
+        val mode = keySelectMode
+        // Outra camada: ela vira a escolhida (só na timeline, sem doca) e a seleção recomeça nela.
+        if (primary != layer || selection.size != 1) select(layer, openOptions = false)
+        keySelectMode = mode
+        val base = keySelection?.takeIf { it.layer == layer } ?: KeySelection(layer)
+        val next = base.toggleGroup(group)
+        keySelection = next
+        val first = group.first()
+        val current = selectedKeyframe
+        if (KeyRef.of(first) in next.keys) {
+            selectedKeyframe = layer to first
+        } else if (current != null && (current.first != layer || KeyRef.of(current.second) !in next.keys)) {
+            // O principal saiu da seleção: fica sem principal (nenhum losango âmbar).
+            selectedKeyframe = null
+        }
+    }
+
+    /** "Todos": todos os keyframes que a timeline mostra da camada da seleção. */
+    fun selectAllTimelineKeys() {
+        val layer = keySelection?.layer ?: selectedKeyframe?.first ?: primary ?: return
+        keySelection = KeySelection.all(layer, keyframes[layer].orEmpty(), timelineFocus)
+    }
+
+    /**
+     * Move a seleção inteira `delta` frames (atômico no motor: recusa colisão
+     * com keyframe não escolhido). Só atualiza as referências se o motor
+     * aceitou — recusado, nada muda e a seleção continua coerente.
+     */
+    fun shiftTimelineKeys(delta: Int): Boolean {
+        val sel = keySelection ?: return false
+        if (sel.isEmpty() || delta == 0) return false
+        if (engine.editKeyframeSelection(sel.layer, sel.references(), delta, false) <= 0) return false
+        keySelection = sel.shifted(delta)
+        selectedKeyframe?.let { (l, k) ->
+            if (l == sel.layer && k in sel) selectedKeyframe = l to k.copy(time = k.time + delta)
+        }
+        refreshNow()
+        return true
+    }
+
+    fun copyTimelineKeys(): Boolean {
+        val sel = keySelection ?: return false
+        if (sel.isEmpty()) return false
+        val n = engine.copyKeyframeSelection(sel.layer, sel.references())
+        afterClipboard()
+        if (n > 0) showToast(appText(R.string.msg_keyframe_s_copiado_s, n))
+        return n > 0
+    }
+
+    /** Colar no cabeçote (o caminho de sempre), na camada da seleção. */
+    fun pasteTimelineKeys() {
+        val layer = keySelection?.layer ?: return
+        pasteKeyframes(listOf(layer))
+    }
+
+    /**
+     * Duplicar = copiar + colar 1 frame depois do último escolhido. As cópias
+     * viram a seleção (mesmas trilhas, deslocadas pelo mesmo delta).
+     */
+    fun duplicateTimelineKeys(): Boolean {
+        val sel = keySelection ?: return false
+        val delta = sel.duplicateDelta() ?: return false
+        val row = layers.firstOrNull { it.id == sel.layer } ?: return false
+        val target = sel.maxTime().toLong() + 1L + row.startFrame - row.offsetFrames
+        if (target !in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) return false
+        if (engine.copyKeyframeSelection(sel.layer, sel.references()) <= 0) return false
+        afterClipboard()
+        if (playing) pause()
+        if (engine.pasteKeyframes(longArrayOf(sel.layer), target) <= 0) return false
+        keySelection = sel.shifted(delta)
+        selectedKeyframe?.let { (l, k) ->
+            if (l == sel.layer && k in sel) selectedKeyframe = l to k.copy(time = k.time + delta)
+        }
+        refreshNow()
+        return true
+    }
+
+    /** Excluir a seleção inteira (um passo de desfazer); a barra fecha. */
+    fun deleteTimelineKeys(): Boolean {
+        val sel = keySelection ?: return false
+        if (sel.isEmpty()) return false
+        if (engine.editKeyframeSelection(sel.layer, sel.references(), 0, true) <= 0) return false
+        selectedKeyframe?.let { (l, k) -> if (l == sel.layer && k in sel) selectedKeyframe = null }
+        clearKeySelection()
+        refreshNow()
+        return true
+    }
+
+    /** A seleção some se a camada sumiu ou algum keyframe referido deixou de existir. */
+    private fun validateKeySelection() {
+        val sel = keySelection ?: return
+        if (layers.none { it.id == sel.layer } || sel.validated(keyframes[sel.layer].orEmpty()) == null) clearKeySelection()
     }
 
     // =========================================================================
@@ -526,6 +677,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     probe?.memory, probe?.codecs,
                 )
                 ready = ok
+                // Fechou por crash nativo com vídeo aberto na sessão anterior:
+                // sem zero-copy daqui em diante neste aparelho (qualquer marca).
+                if (ok && ExitDiagnostics.safeVideoMode(app)) engine.useReadableVideoPlanes()
                 if (ok) ExitDiagnostics.mark(app, Phase.ENGINE_READY)
                 if (ok) pendingSurface?.let { (s, w, h) -> engine.attachSurface(s, w, h) }
                 pendingSurface = null
@@ -1011,6 +1165,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         // Uma consulta para todas as camadas; o mapa só troca se algum keyframe mudou.
         if (readAllKeyframes()) keyframes = keySnapshot.map
+        validateKeySelection()
         refreshComposition()
         refreshDetail()
         refreshEffects()
@@ -1061,7 +1216,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         expressions = if (id != null) engine.queryExpressions(id) else emptyList()
         gizmo = same(gizmo, if (id != null) {
             val out = FloatArray(8)
-            if (engine.queryGizmo(id, GIZMO_LENGTH, out, gizmoLocalSpace)) out else null
+            // Girar/escala editam os eixos da PRÓPRIA camada: o gizmo mostra os locais.
+            if (engine.queryGizmo(id, GIZMO_LENGTH, out, gizmoLocalSpace || gizmoTool != GIZMO_MOVE)) out else null
         } else {
             null
         })
@@ -1543,12 +1699,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun undo() {
+        // Desfazer/refazer podem mover ou apagar os keyframes escolhidos: a seleção da timeline some.
+        clearKeySelection()
         send { undo() }
         refreshNow()
         restoreTrackingAfterHistory()
     }
 
     fun redo() {
+        clearKeySelection()
         send { redo() }
         refreshNow()
         restoreTrackingAfterHistory()
@@ -1566,6 +1725,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Seleção -------------------------------------------------------------
     fun select(layer: Long, additive: Boolean = false, openOptions: Boolean = true) {
+        // A seleção de keyframes é de UMA camada: trocar a principal a descarta.
+        if (keySelection != null && (additive || keySelection?.layer != layer)) clearKeySelection()
         selection = if (additive) {
             if (layer in selection) selection - layer else LinkedHashSet(selection).apply { add(layer) }
         } else {
@@ -1579,6 +1740,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun selectAll() {
         timelineOnlySelection = emptySet()
+        clearKeySelection()
         selection = layers.map { it.id }.toCollection(LinkedHashSet())
         engine.setSelection(selection.toLongArray())
         refreshDetail()
@@ -1587,6 +1749,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun clearSelection() {
         timelineOnlySelection = emptySet()
+        clearKeySelection()
         if (selection.isEmpty()) return
         selection = emptySet()
         engine.clearSelection()
@@ -2441,6 +2604,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    /**
+     * Ferramenta das alças do gizmo: [GIZMO_MOVE] (setas no espaço Mundo/Local),
+     * [GIZMO_ROTATE] (Rotação X/Y/Z da camada) ou [GIZMO_SCALE] (Escala X/Y/Z
+     * por eixo; o centro escala os três juntos).
+     */
+    var gizmoTool by mutableStateOf(GIZMO_MOVE)
+        private set
+    fun cycleGizmoTool() {
+        gizmoTool = (gizmoTool + 1) % 3
+        refreshNow()
+    }
+
     /** Arrasto numa seta: anda `amount` unidades do mundo no eixo (0 X, 1 Y, 2 Z). */
     fun gizmoDrag(axis: Int, amount: Float) {
         val id = primary ?: return
@@ -2450,14 +2625,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         applyGizmoPosition(id, d, out)
     }
 
-    private fun applyGizmoPosition(id: Long, d: LayerDetail, out: FloatArray) {
-        if (out.size != 3 || out.any { !it.isFinite() }) return
+    /**
+     * Valores ABSOLUTOS de Escala ([TrackProperty.SCALE_X]) ou Rotação
+     * ([TrackProperty.ROTATION_X]) XYZ vindos do gizmo/pinça 3D. Absolutos
+     * (calculados do início do gesto) não acumulam erro nem pulam quando o
+     * detalhe atrasa um quadro. Só grava os componentes que mudaram.
+     */
+    fun gizmoSetComponents(base: Int, values: FloatArray) {
+        val id = primary ?: return
+        val d = detail ?: return
+        val current = when (base) {
+            TrackProperty.SCALE_X -> d.scale
+            TrackProperty.ROTATION_X -> d.rotation
+            else -> return
+        }
+        applyGizmoComponents(id, d, base, current, values)
+    }
+
+    private fun applyGizmoPosition(id: Long, d: LayerDetail, out: FloatArray) =
+        applyGizmoComponents(id, d, TrackProperty.POSITION_X, d.position, out)
+
+    private fun applyGizmoComponents(id: Long, d: LayerDetail, base: Int, current: List<Float>, out: FloatArray) {
+        if (out.size != 3 || current.size < 3 || out.any { !it.isFinite() }) return
         send {
             for (axis in 0..2) {
-                if (kotlin.math.abs(out[axis] - d.position[axis]) < .00001f) continue
-                if (!sceneEditor && autoKeyTransforms && d.isAnimated(axis)) {
-                    insertKeyframe(id, axis, NO_EFFECT, 0, d.localPlayhead, out[axis])
-                } else engine.layoutTransform(id, axis, out[axis])
+                if (kotlin.math.abs(out[axis] - current[axis]) < .00001f) continue
+                val property = base + axis
+                if (!sceneEditor && autoKeyTransforms && d.isAnimated(property)) {
+                    insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, out[axis])
+                } else engine.layoutTransform(id, property, out[axis])
             }
         }
         refreshNow()
@@ -3869,12 +4065,29 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Marca (ou desmarca) um frame qualquer, sempre com aviso na tela. */
     fun toggleMarkerAt(frame: Int) {
+        // Música tocando: TAP → marca, TAP → marca… sem parar o som.
+        if (playing) {
+            markBeatLive()
+            return
+        }
         val f = frame.coerceIn(0, max(0, project.durationFrames - 1))
         pause()
         seek(f)
         val on = engine.toggleMarker(f.toLong())
         refreshNow()
         showToast(if (on) appText(R.string.msg_marca_adicionada) else appText(R.string.msg_marca_removida))
+    }
+
+    /**
+     * Marca de batida ao vivo: o motor lê o relógio do áudio no instante do
+     * toque (não o último quadro desenhado). Não pausa, não faz seek, não
+     * alterna (toques rápidos no mesmo quadro não apagam) e não mostra toast —
+     * quem toca no ritmo não pode ser interrompido. Só as marcas recarregam.
+     */
+    fun markBeatLive(): Boolean {
+        if (engine.markBeatLive() < 0) return false
+        refreshMarkers()
+        return true
     }
 
     var detectingBeats by mutableStateOf(false)
@@ -4664,6 +4877,9 @@ class ThumbnailCache(private val engine: AureaEngine) {
 
 /** Comprimento das setas do gizmo 3D, em unidades do mundo (px da composição no plano Z = 0). */
 const val GIZMO_LENGTH = 320f
+const val GIZMO_MOVE = 0
+const val GIZMO_ROTATE = 1
+const val GIZMO_SCALE = 2
 /** Intervalo mínimo entre releituras do inspetor durante o playback (10 Hz). */
 private const val DETAIL_PLAYBACK_NS = 100_000_000L
 

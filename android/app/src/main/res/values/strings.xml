@@ -35,6 +35,8 @@
     <string name="common_remove">Remover</string>
     <string name="common_rename">Renomear</string>
     <string name="common_duplicate">Duplicar</string>
+    <string name="common_copy">Copiar</string>
+    <string name="common_paste">Colar</string>
     <string name="common_open">Abrir</string>
     <string name="common_back">Voltar</string>
     <string name="common_close">Fechar</string>
@@ -1828,4 +1830,8 @@
     <string name="environment_texture">Environment Texture</string>
     <string name="environment_background">Mostrar como fundo 360°</string>
     <string name="environment_hint">Importe HDR/HDRI Radiance ou panorama JPG/PNG de 360° (2:1), até 8 MP. A imagem envolve a câmera e ilumina a cena.</string>
+    <string name="gizmo_tool_move">Mover</string>
+    <string name="gizmo_tool_rotate">Girar</string>
+    <string name="gizmo_tool_scale">Escala</string>
+    <string name="gizmo_tool_label">Ferramenta do gizmo 3D</string>
 </resources>

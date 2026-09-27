@@ -148,6 +148,10 @@ class AureaEngine private constructor() {
     fun startupError(): String = nativeStartupError(nativeHandle)
     private external fun nativeStartupError(handle: Long): String
 
+    /** Modo seguro de vídeo: planos YUV pela CPU, sem zero-copy na GPU (decoders abertos depois). */
+    fun useReadableVideoPlanes() = nativeUseReadableVideoPlanes(nativeHandle)
+    private external fun nativeUseReadableVideoPlanes(handle: Long)
+
     /**
      * O que o motor decidiu para ESTE aparelho, já em números.
      *
@@ -637,6 +641,8 @@ class AureaEngine private constructor() {
 
     /** Liga/desliga a marca no frame. true = ficou marcada. */
     fun toggleMarker(frame: Long): Boolean = nativeToggleMarker(nativeHandle, frame)
+    /** Tap de batida tocando: marca o instante que soa, sem pausar nem alternar. Quadro ou -1. */
+    fun markBeatLive(): Long = nativeMarkBeatLive(nativeHandle)
     fun moveMarker(from: Long, to: Long): Boolean = nativeMoveMarker(nativeHandle, from, to)
     fun editMarker(from: Long, to: Long, color: Int, label: String): Boolean =
         nativeEditMarker(nativeHandle, from, to, color, label.toByteArray(Charsets.UTF_8))
@@ -780,6 +786,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddCamera(handle: Long): Long
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
+    private external fun nativeMarkBeatLive(handle: Long): Long
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerAdjustment(handle: Long, layer: Long, on: Boolean): Boolean

@@ -628,6 +628,80 @@ import XCTest
         _ = try awaitSnapshot("One undo restores the whole key selection") { $0.curveKeys == before.curveKeys }
     }
 
+    /// Seleção de keyframes entre PROPRIEDADES na timeline (par do Android
+    /// TimelineGesturesTest.multiSelectedKeysAcrossPropertiesMoveDeleteAndDuplicateTogether):
+    /// Posição X (0, 30) e Escala X (15, 45), trilhas abertas, modo "Selecionar",
+    /// um keyframe de cada trilha; arrastar um move os dois num passo de desfazer;
+    /// Excluir e Duplicar agem na seleção inteira.
+    func testTimelineMultiSelectsKeysAcrossPropertiesMovesDeletesAndDuplicates() throws {
+        let before = try launch("timeline-keys")
+        XCTAssertEqual(before.curveKeys.count, 4)
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let frame = timeline.frame
+        // Geometria (pt): régua 38, linha 36, trilhas de 28 com o losango a 20 do topo.
+        // Abertas: Transform (74), Position X (102), Scale X (130). Cabeçote no frame 30
+        // (a vista É o cabeçote): 80 pt/s = 8/3 pt por frame a partir do centro.
+        let positionY: CGFloat = frame.minY + 122
+        let scaleY: CGFloat = frame.minY + 150
+        func keyX(_ f: Int) -> CGFloat { frame.midX + CGFloat(f - 30) * 80 / 30 }
+        func has(_ state: Snapshot, _ property: Int, _ time: Int) -> Bool {
+            state.curveKeys.contains { $0.property == property && $0.time == time }
+        }
+        // Abrir as trilhas pela pílula da camada.
+        coordinate(CGPoint(x: frame.minX + 50, y: frame.minY + 56)).tap()
+        func selectPositionAndScale() throws {
+            // Toque simples: só a Posição X @30 (abre a curva; timeline compacta).
+            coordinate(CGPoint(x: keyX(30), y: positionY)).tap()
+            _ = try awaitSnapshot("Plain tap selects one timeline key") { $0.keySelectionCount == 1 && $0.sheet == "curve" }
+            let select = app.buttons["timeline.keys.select"].firstMatch
+            XCTAssertTrue(select.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(select.frame.height, 44)
+            select.tap()
+            _ = try awaitSnapshot("Select mode closes the panel") { $0.keySelectMode == true && $0.sheet == "none" }
+            // A timeline voltou alta com as trilhas abertas: soma a Escala X @45.
+            coordinate(CGPoint(x: keyX(45), y: scaleY)).tap()
+            _ = try awaitSnapshot("Scale key joins the selection") { $0.keySelectionCount == 2 }
+        }
+
+        // --- Arrastar um move os dois -------------------------------------------------
+        try selectPositionAndScale()
+        coordinate(CGPoint(x: keyX(30), y: positionY)).press(forDuration: 0.05,
+            thenDragTo: coordinate(CGPoint(x: keyX(40), y: positionY)), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try awaitSnapshot("Both selected keys move together") {
+            !has($0, 0, 30) && $0.curveKeys.count == 4
+        }
+        let position = moved.curveKeys.filter { $0.property == 0 && $0.time != 0 }.map(\.time)
+        XCTAssertEqual(position.count, 1)
+        let delta = (position.first ?? 30) - 30
+        XCTAssertGreaterThan(delta, 0)
+        XCTAssertTrue(has(moved, 3, 45 + delta), "Scale key moves by the same delta")
+        XCTAssertTrue(has(moved, 0, 0)); XCTAssertTrue(has(moved, 3, 15))
+        XCTAssertEqual(moved.keySelectionCount, 2)
+        try undo()
+        _ = try awaitSnapshot("One undo restores both properties") { $0.curveKeys == before.curveKeys }
+
+        // --- Excluir ---------------------------------------------------------------------
+        try selectPositionAndScale()
+        let delete = app.buttons["timeline.keys.delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5)); delete.tap()
+        let deleted = try awaitSnapshot("Delete removes the whole selection") { $0.curveKeys.count == 2 }
+        XCTAssertTrue(has(deleted, 0, 0)); XCTAssertTrue(has(deleted, 3, 15))
+        XCTAssertEqual(deleted.keySelectionCount, -1)
+        try undo()
+        _ = try awaitSnapshot("Undo restores deleted keys") { $0.curveKeys == before.curveKeys }
+
+        // --- Duplicar: cópia 1 frame depois do último (âncora 30 → 46) ----------------------
+        try selectPositionAndScale()
+        let duplicate = app.buttons["timeline.keys.duplicate"].firstMatch
+        XCTAssertTrue(duplicate.waitForExistence(timeout: 5)); duplicate.tap()
+        let duplicated = try awaitSnapshot("Duplicate pastes after the last selected key") { $0.curveKeys.count == 6 }
+        XCTAssertTrue(has(duplicated, 0, 46)); XCTAssertTrue(has(duplicated, 3, 61))
+        XCTAssertEqual(duplicated.keySelectionCount, 2)
+        try undo()
+        _ = try awaitSnapshot("Undo removes the duplicates") { $0.curveKeys == before.curveKeys }
+    }
+
     func testHoldingLayerBodyReordersAndOneUndoRestoresOrder() throws {
         let before = try launch("timeline-reorder")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
@@ -684,6 +758,62 @@ import XCTest
         XCTAssertEqual(before.curveKeys.filter { $0.property != 0 },changed.curveKeys.filter { $0.property != 0 })
         try undo()
         _ = try awaitSnapshot("Undo restores gizmo animation") { $0.curveKeys == before.curveKeys }
+    }
+
+    /// Stage.kt gizmoGesture parity: girar/escala mexem só no eixo tocado,
+    /// nunca na posição; o centro da escala é uniforme; um passo de desfazer.
+    func testGizmoRotateAndScaleToolsEditOnlyTheirAxes() throws {
+        let before = try launch("curve-null")
+        let tool = app.buttons["stage.gizmo.tool"].firstMatch
+        XCTAssertTrue(tool.waitForExistence(timeout: 5)); tool.tap()   // Mover -> Girar
+        let rotating = try awaitSnapshot("Rotate tool shows the gizmo") { $0.stageGizmo.count == 8 }
+        func handle(_ s: Snapshot, _ axis: Int) -> (CGPoint, CGPoint) {
+            let raw = stride(from: 0, to: 8, by: 2).map { screenPoint(x: s.stageGizmo[$0], y: s.stageGizmo[$0 + 1], snapshot: s) }
+            let extent = max((1...3).map { hypot(raw[$0].x - raw[0].x, raw[$0].y - raw[0].y) }.max() ?? 0, 0.001)
+            let direction = CGPoint(x: (raw[axis + 1].x - raw[0].x) / extent, y: (raw[axis + 1].y - raw[0].y) / extent)
+            return (CGPoint(x: raw[0].x + direction.x * 80, y: raw[0].y + direction.y * 80), raw[0])
+        }
+        let (xTip, _) = handle(rotating, 0)
+        let xEnd = CGPoint(x: xTip.x, y: xTip.y + 60)
+        try requireInsideStage(xTip, xEnd)
+        coordinate(xTip).press(forDuration: 0.05, thenDragTo: coordinate(xEnd), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let rotated = try awaitSnapshot("Rotate X handle changes only Rotation X") {
+            !$0.isManipulating && abs($0.detail.rotation[0] - before.detail.rotation[0]) > 5
+        }
+        XCTAssertEqual(rotated.detail.rotation[1], before.detail.rotation[1], accuracy: 0.0001)
+        XCTAssertEqual(rotated.detail.rotation[2], before.detail.rotation[2], accuracy: 0.0001)
+        XCTAssertEqual(rotated.detail.position, before.detail.position)
+        XCTAssertEqual(rotated.detail.scale, before.detail.scale)
+        try undo()
+        _ = try awaitSnapshot("One undo restores rotation") { $0.detail.rotation == before.detail.rotation }
+
+        tool.tap()   // Girar -> Escala
+        let scaling = try awaitSnapshot("Scale tool shows the gizmo") { $0.stageGizmo.count == 8 }
+        let (yTip, origin) = handle(scaling, 1)
+        let along = CGPoint(x: (yTip.x - origin.x) / 80 * 50, y: (yTip.y - origin.y) / 80 * 50)
+        let yEnd = CGPoint(x: yTip.x + along.x, y: yTip.y + along.y)
+        try requireInsideStage(yTip, yEnd)
+        coordinate(yTip).press(forDuration: 0.05, thenDragTo: coordinate(yEnd), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let scaledY = try awaitSnapshot("Scale Y handle grows only Scale Y") {
+            !$0.isManipulating && $0.detail.scale[1] > before.detail.scale[1] + 0.05
+        }
+        XCTAssertEqual(scaledY.detail.scale[0], before.detail.scale[0], accuracy: 0.0001)
+        XCTAssertEqual(scaledY.detail.scale[2], before.detail.scale[2], accuracy: 0.0001)
+        XCTAssertEqual(scaledY.detail.position, before.detail.position)
+        let centerEnd = CGPoint(x: origin.x + 40, y: origin.y - 40)
+        try requireInsideStage(origin, centerEnd)
+        coordinate(origin).press(forDuration: 0.05, thenDragTo: coordinate(centerEnd), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let uniform = try awaitSnapshot("Center square scales XYZ together") {
+            !$0.isManipulating && $0.detail.scale[0] > scaledY.detail.scale[0] + 0.05
+        }
+        let factor = uniform.detail.scale[0] / scaledY.detail.scale[0]
+        XCTAssertEqual(uniform.detail.scale[1] / scaledY.detail.scale[1], factor, accuracy: 0.001)
+        XCTAssertEqual(uniform.detail.scale[2] / scaledY.detail.scale[2], factor, accuracy: 0.001)
+        XCTAssertEqual(uniform.detail.position, before.detail.position)
+        try undo()
+        _ = try awaitSnapshot("Undo uniform scale") { $0.detail.scale == scaledY.detail.scale }
+        try undo()
+        _ = try awaitSnapshot("Undo Y scale") { $0.detail.scale == before.detail.scale }
     }
 
     func testText3DSelectionFollowsCoreBoundsAndGizmoDrag() throws {
@@ -764,6 +894,7 @@ import XCTest
         XCTAssertTrue(state.coreStarted, state.coreError)
         if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) }
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
+        else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
         else { XCTAssertEqual(state.layerCount, 1) }
         XCTAssertEqual(state.selectionCount, 1)
         XCTAssertGreaterThan(state.primaryID, 0)
@@ -885,6 +1016,8 @@ import XCTest
         let curveParam: UInt32
         let primaryID: Int64
         let selectionCount: Int
+        let keySelectionCount: Int?
+        let keySelectMode: Bool?
         let isManipulating: Bool
         let canRedo: Bool
         let playhead: Int64

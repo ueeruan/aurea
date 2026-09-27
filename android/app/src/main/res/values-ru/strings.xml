@@ -1004,4 +1004,5 @@
     <string name="fx_base">Снизу</string>
     <string name="fx_trocar_lado">Сменить сторону</string>
     <string name="fx_tipo">Тип</string>
+    <string name="donation_launch_question">Пожертвование помогает приложению оставаться бесплатным — поддержите автора :)</string>
 </resources>

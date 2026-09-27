@@ -54,9 +54,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // versionCode 2113: faixa de legendas, presets e novos efeitos nativos. Um número maior é
+        // versionCode 2124: 3D premium, conta, modo seguro de vídeo Samsung. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2123
+        versionCode = 2124
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

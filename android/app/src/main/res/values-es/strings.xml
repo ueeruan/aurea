@@ -1002,4 +1002,5 @@ para editar la curva.</string>
     <string name="fx_base">Abajo</string>
     <string name="fx_trocar_lado">Cambiar de lado</string>
     <string name="fx_tipo">Tipo</string>
+    <string name="donation_launch_question">Donar mantiene la app gratuita, ¡ayuda al creador! :)</string>
 </resources>

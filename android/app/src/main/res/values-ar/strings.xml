@@ -1016,4 +1016,5 @@
     <string name="fx_base">الأسفل</string>
     <string name="fx_trocar_lado">تبديل الجانب</string>
     <string name="fx_tipo">النوع</string>
+    <string name="donation_launch_question">تبرعك يبقي التطبيق مجانيًا، ساعد المطوّر :)</string>
 </resources>

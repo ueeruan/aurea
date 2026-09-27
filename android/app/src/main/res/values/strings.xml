@@ -1804,7 +1804,7 @@
     <string name="fx_diffusion_falloff">Atenuação</string>
     <string name="cc_preset_hint">Para um CC sobre vários clipes, use uma camada de ajuste acima deles. Aplique CC • Detail, Cinema ou Clean, personalize em Efeitos e use Salvar desta camada para guardar seu CC.</string>
     <string name="world_box_lights">Luzes flutuantes</string>
-    <string name="donation_launch_question">Quer doar para ajudar o Aurea a continuar gratuito? Sua contribuição é opcional.</string>
+    <string name="donation_launch_question">Doar faz o app continuar gratuito, ajude o criador :)</string>
     <string name="donation_launch_yes">Doar</string>
     <string name="donation_launch_later">Agora não</string>
     <string name="world_embers">Brasas 3D</string>

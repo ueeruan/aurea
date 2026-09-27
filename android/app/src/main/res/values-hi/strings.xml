@@ -1002,4 +1002,5 @@
     <string name="fx_base">नीचे</string>
     <string name="fx_trocar_lado">पक्ष बदलें</string>
     <string name="fx_tipo">प्रकार</string>
+    <string name="donation_launch_question">दान करने से ऐप मुफ़्त रहता है, निर्माता की मदद करें :)</string>
 </resources>

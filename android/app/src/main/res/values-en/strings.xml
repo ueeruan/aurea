@@ -1771,7 +1771,7 @@ to edit the curve.</string>
     <string name="fx_diffusion_falloff">Falloff</string>
     <string name="cc_preset_hint">For a CC across clips, use an adjustment layer above them. Apply CC • Detail, Cinema or Clean, customize in Effects, then Save from this layer to keep your CC.</string>
     <string name="world_box_lights">Floating lights</string>
-    <string name="donation_launch_question">Would you like to donate to help keep Aurea free? Your contribution is optional.</string>
+    <string name="donation_launch_question">Donating keeps the app free — help the creator :)</string>
     <string name="donation_launch_yes">Donate</string>
     <string name="donation_launch_later">Not now</string>
     <string name="world_embers">3D embers</string>

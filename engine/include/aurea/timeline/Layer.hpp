@@ -27,6 +27,7 @@
 #include "aurea/vector/VectorData.hpp"
 #include "aurea/text/Captions.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -236,15 +237,38 @@ struct ShapeData {
 
 struct CameraData {
     Vec2 trackingSourceSize{};     ///< solved video's source pixels; zero = regular camera
-    f32 fov           = 50.0f;      ///< graus
-    f32 focalLength   = 35.0f;      ///< mm — sincronizado com fov
+    f32 fov           = 50.0f;      ///< graus (VERTICAL) — a projeção parada da câmera
+    f32 focalLength   = 35.0f;      ///< mm — sincronizado com fov (sensor full frame, ver abaixo)
     f32 nearPlane     = 1.0f;
     f32 farPlane      = 10000.0f;
-    f32 focusDistance = 1000.0f;
+    f32 focusDistance = 1000.0f;    ///< px do mundo, ao longo do eixo ótico (plano de foco)
     f32 aperture      = 2.8f;       ///< f-stop
     /// Câmera ativa da composição. Só uma por vez.
     bool active = true;
+    // --- v33: lente --------------------------------------------------------------
+    /// Profundidade de campo (desfoque pela distância ao plano de foco).
+    bool dofEnabled = false;
+    /// Força do desfoque: × o círculo de confusão da lente fina (1 = físico).
+    f32 blurAmount = 1.0f;
 };
+
+/// LENTE: sensor full frame 36 × 24 mm. A projeção do Aurea é por FOV
+/// VERTICAL (reverse_z_perspective recebe fovY), então a dimensão que vale é a
+/// ALTURA do sensor, 24 mm: FOV = 2·atan(24 / (2·f)). 50 mm → 26,99°;
+/// 24 mm → 53,13°. A largura (36 mm) sai sozinha do aspecto da composição.
+inline constexpr f32 kCameraSensorHeightMm = 24.0f;
+inline constexpr f32 kCameraFocalMinMm = 4.0f;
+inline constexpr f32 kCameraFocalMaxMm = 1200.0f;
+/// FOV vertical (graus) de uma distância focal (mm).
+[[nodiscard]] inline f32 camera_fov_from_focal(f32 focalMm) noexcept {
+    const f32 f = std::clamp(focalMm, kCameraFocalMinMm, kCameraFocalMaxMm);
+    return 2.0f * std::atan(kCameraSensorHeightMm / (2.0f * f)) / kDeg2Rad;
+}
+/// Distância focal (mm) de um FOV vertical (graus) — o inverso exato.
+[[nodiscard]] inline f32 camera_focal_from_fov(f32 fovDeg) noexcept {
+    const f32 half = std::clamp(fovDeg, 0.1f, 179.0f) * 0.5f * kDeg2Rad;
+    return std::clamp(0.5f * kCameraSensorHeightMm / std::tan(half), kCameraFocalMinMm, kCameraFocalMaxMm);
+}
 
 enum class LightKind : u8 { Directional = 0, Point, Spot, Ambient };
 

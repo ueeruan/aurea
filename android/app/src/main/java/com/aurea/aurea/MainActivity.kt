@@ -13,9 +13,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.lifecycleScope
 import com.aurea.aurea.ads.AureaAds
 import com.aurea.aurea.ads.AureaAdsManager
+import com.aurea.aurea.conta.ContaEstado
+import com.aurea.aurea.conta.ContaViewModel
+import com.aurea.aurea.diagnostics.CrashReporter
 import com.aurea.aurea.state.Screen
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.AureaApp
 import com.aurea.aurea.ui.i18n.AppLanguage
@@ -28,6 +33,9 @@ import com.aurea.aurea.ui.i18n.AppLanguage
 class MainActivity : ComponentActivity() {
 
     private val store: EditorStore by viewModels()
+
+    /** A conta obrigatória: sem ela a UI inteira é a tela de cadastro/entrada. */
+    private val conta: ContaViewModel by viewModels()
 
     /**
      * O idioma escolhido entra AQUI — antes de qualquer recurso ser lido.
@@ -42,6 +50,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Antes de tudo: a pilha de um crash Java precisa ser gravada mesmo que
+        // ele aconteça no primeiro quadro.
+        CrashReporter.instalar(this)
         super.onCreate(savedInstanceState)
         // Barras do sistema escuras (o app antigo tinha o véu #0B0F13 sobre o fundo).
         enableEdgeToEdge(
@@ -50,7 +61,23 @@ class MainActivity : ComponentActivity() {
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         com.aurea.aurea.home.HomeViewModel.loadTheme(this)
-        setContent { AureaApp(store) }
+        setContent { AureaApp(store, conta) }
+
+        if (savedInstanceState == null) {
+            // Número de cadastrados + revalidação da sessão (com rede; offline, segue dentro).
+            conta.aoAbrir()
+            // Crash: coleta o que sobrou da sessão anterior; envia quando houver
+            // conta (o cadastro avisa do envio antes). Longe da subida do motor.
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay(3000)
+                withContext(Dispatchers.IO) { CrashReporter.coletar(applicationContext) }
+                snapshotFlow { conta.estado }.collect { estado ->
+                    if (estado is ContaEstado.Dentro) {
+                        withContext(Dispatchers.IO) { CrashReporter.enviar(applicationContext, conta.sessao()) }
+                    }
+                }
+            }
+        }
 
         // Debug-only, locally supplied media. No test intent is accepted by release builds.
         if (BuildConfig.DEBUG && intent.hasExtra("aureaPlaybackTest")) {
@@ -126,11 +153,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** No editor ou exportando: nenhum App Open. */
-    private fun trabalhando(): Boolean = store.screen == Screen.Editor || store.exporter.busy
+    /** No editor, exportando ou na tela de conta: nenhum App Open. */
+    private fun trabalhando(): Boolean = store.screen == Screen.Editor || store.exporter.busy || !conta.logado
 
     override fun onStart() {
         super.onStart()
+        CrashReporter.primeiroPlano(this, true)
+        conta.revalidarSeVencido()
         store.onEnterForeground()
         AureaAdsManager.onForeground(this, trabalhando())
     }
@@ -148,6 +177,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         store.onEnterBackground()
         AureaAdsManager.onBackground()
+        CrashReporter.primeiroPlano(this, false)
         super.onStop()
     }
 

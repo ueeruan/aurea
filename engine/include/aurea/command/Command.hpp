@@ -172,6 +172,10 @@ enum class CommandType : u16 {
     LayerLayoutTransform, ///< ShapeParamPayload: transform property 0..14, target at playhead; preserves animation key times/count.
     LayerSetLightParam,    ///< ShapeParamPayload: layer, LightData field 0..9, value.
     LayerSetMaterialParam, ///< MaterialParamPayload: per-instance material override.
+    /// ShapeParamPayload: lente da câmera — 0 distância focal (mm), 1 DOF
+    /// ligado (0/1), 2 distância de foco (px do mundo), 3 abertura (f/), 4
+    /// força do desfoque (×). Trilha com keyframe = keyframe no cabeçote.
+    LayerSetCameraParam,
 };
 
 /// Alvo de um comando que mexe em uma propriedade animável.

@@ -1005,4 +1005,36 @@
     <string name="fx_trocar_lado">Сменить сторону</string>
     <string name="fx_tipo">Тип</string>
     <string name="donation_launch_question">Пожертвование помогает приложению оставаться бесплатным — поддержите автора :)</string>
+
+    <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
+    <string name="conta_titulo_cadastro">Создайте аккаунт</string>
+    <string name="conta_titulo_entrar">Войдите в аккаунт</string>
+    <string name="conta_subtitulo">Укажите почту и собственный пароль. После входа Aurea остаётся подключённым на этом устройстве.</string>
+    <string name="conta_email">Эл. почта</string>
+    <string name="conta_senha">Пароль</string>
+    <string name="conta_senha_dica">Не менее 8 символов</string>
+    <string name="conta_mostrar">Показать</string>
+    <string name="conta_ocultar">Скрыть</string>
+    <string name="conta_criar">Создать аккаунт</string>
+    <string name="conta_entrar">Войти</string>
+    <string name="conta_ir_entrar">У меня есть аккаунт · Войти</string>
+    <string name="conta_ir_cadastro">У меня нет аккаунта · Создать</string>
+    <string name="conta_privacidade">Если Aurea закроется сам или зависнет, технический отчёт об ошибке (версия приложения, модель устройства, система и трассировка ошибки, вместе с почтой аккаунта) автоматически отправится разработчику для исправления. Ваши проекты и медиафайлы никогда не отправляются.</string>
+    <string name="conta_erro_email">Введите корректный адрес почты.</string>
+    <string name="conta_erro_senha">Пароль должен содержать от 8 до 128 символов.</string>
+    <string name="conta_erro_credenciais">Неверная почта или пароль.</string>
+    <string name="conta_erro_em_uso">Для этой почты уже есть аккаунт. Войдите со своим паролем.</string>
+    <string name="conta_erro_limite">Слишком много попыток. Подождите несколько минут и попробуйте снова.</string>
+    <string name="conta_erro_rede">Нет подключения. Проверьте интернет и попробуйте снова.</string>
+    <string name="conta_erro_servico">Не удалось связаться с сервером. Попробуйте позже.</string>
+    <string name="conta_erro_expirada">Сеанс завершён. Войдите снова с почтой и паролем.</string>
+    <string name="conta_sair">Выйти из аккаунта</string>
+    <string name="conta_sair_mensagem">Чтобы вернуться, понадобятся почта и пароль. Ваши проекты останутся на этом устройстве.</string>
+    <string name="conta_conectado">Вход выполнен: %1$s</string>
+    <plurals name="conta_usuarios">
+        <item quantity="one">%1$s зарегистрированный пользователь</item>
+        <item quantity="few">%1$s зарегистрированных пользователя</item>
+        <item quantity="many">%1$s зарегистрированных пользователей</item>
+        <item quantity="other">%1$s зарегистрированного пользователя</item>
+    </plurals>
 </resources>

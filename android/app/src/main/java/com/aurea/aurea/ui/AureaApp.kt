@@ -20,6 +20,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
 import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.conta.ContaScreen
+import com.aurea.aurea.conta.ContaViewModel
 import com.aurea.aurea.editor.EditorScreen
 import com.aurea.aurea.home.HomeScreen
 import com.aurea.aurea.state.EditorStore
@@ -33,10 +35,11 @@ import com.aurea.aurea.ui.theme.AureaTheme
  * do app antigo (a nova entra da direita, a de baixo recua um terço, 500 ms).
  */
 @Composable
-fun AureaApp(store: EditorStore) {
+fun AureaApp(store: EditorStore, conta: ContaViewModel) {
     AureaTheme {
         Box(Modifier.fillMaxSize().background(AureaColors.Background)) {
-            AnimatedContent(
+            // Conta obrigatória: sem sessão guardada, o app inteiro é a tela de conta.
+            if (!conta.logado) ContaScreen(conta) else AnimatedContent(
                 targetState = store.screen,
                 transitionSpec = {
                     if (targetState == Screen.Editor) {

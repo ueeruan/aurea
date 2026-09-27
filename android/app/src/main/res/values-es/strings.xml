@@ -1003,4 +1003,34 @@ para editar la curva.</string>
     <string name="fx_trocar_lado">Cambiar de lado</string>
     <string name="fx_tipo">Tipo</string>
     <string name="donation_launch_question">Donar mantiene la app gratuita, ¡ayuda al creador! :)</string>
+
+    <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
+    <string name="conta_titulo_cadastro">Crea tu cuenta</string>
+    <string name="conta_titulo_entrar">Entra en tu cuenta</string>
+    <string name="conta_subtitulo">Usa tu correo y una contraseña solo tuya. Después de entrar, Aurea queda conectado en este dispositivo.</string>
+    <string name="conta_email">Correo electrónico</string>
+    <string name="conta_senha">Contraseña</string>
+    <string name="conta_senha_dica">Al menos 8 caracteres</string>
+    <string name="conta_mostrar">Mostrar</string>
+    <string name="conta_ocultar">Ocultar</string>
+    <string name="conta_criar">Crear cuenta</string>
+    <string name="conta_entrar">Entrar</string>
+    <string name="conta_ir_entrar">Ya tengo cuenta · Entrar</string>
+    <string name="conta_ir_cadastro">Aún no tengo cuenta · Crear</string>
+    <string name="conta_privacidade">Si Aurea se cierra solo o se congela, se envía automáticamente al desarrollador un informe técnico del error (versión de la app, modelo del dispositivo, sistema y rastro del error, con el correo de tu cuenta) para corregirlo. Tus proyectos y archivos nunca se envían.</string>
+    <string name="conta_erro_email">Escribe un correo válido.</string>
+    <string name="conta_erro_senha">La contraseña debe tener de 8 a 128 caracteres.</string>
+    <string name="conta_erro_credenciais">Correo o contraseña incorrectos.</string>
+    <string name="conta_erro_em_uso">Este correo ya tiene cuenta. Entra con tu contraseña.</string>
+    <string name="conta_erro_limite">Demasiados intentos. Espera unos minutos y vuelve a intentarlo.</string>
+    <string name="conta_erro_rede">Sin conexión. Revisa internet y vuelve a intentarlo.</string>
+    <string name="conta_erro_servico">No se pudo contactar con el servidor ahora. Inténtalo más tarde.</string>
+    <string name="conta_erro_expirada">Tu sesión terminó. Entra de nuevo con tu correo y contraseña.</string>
+    <string name="conta_sair">Cerrar sesión</string>
+    <string name="conta_sair_mensagem">Para volver necesitarás tu correo y tu contraseña. Tus proyectos siguen en este dispositivo.</string>
+    <string name="conta_conectado">Conectado como %1$s</string>
+    <plurals name="conta_usuarios">
+        <item quantity="one">%1$s persona registrada</item>
+        <item quantity="other">%1$s personas registradas</item>
+    </plurals>
 </resources>

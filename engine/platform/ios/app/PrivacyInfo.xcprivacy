@@ -8,6 +8,10 @@
     abuso). O servidor guarda apenas um HMAC dele. Não liga à pessoa, não rastreia.
   - Prompt de texto e, no modo imagem→vídeo, a imagem escolhida: vão ao
     servidor do Aurea e ao provedor de geração (8Scale) para gerar o vídeo.
+  - E-mail da conta obrigatória (Conta.swift): cadastro e login. A senha só
+    viaja no HTTPS; o servidor guarda um hash PBKDF2, nunca a senha.
+  - Relatório de crash (CrashReporter.swift): versão, aparelho, motivo e pilha,
+    ligado ao e-mail da conta, enviado ao desenvolvedor para correção.
 
   APIs de "motivo obrigatório" usadas pelo app:
   - UserDefaults (CA92.1): preferências e estado do próprio app.
@@ -39,6 +43,30 @@
 			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
 			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeCrashData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
 			<false/>
 			<key>NSPrivacyCollectedDataTypePurposes</key>

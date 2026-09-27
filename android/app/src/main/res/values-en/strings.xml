@@ -1873,4 +1873,34 @@ to edit the curve.</string>
     <string name="fx_base">Bottom</string>
     <string name="fx_trocar_lado">Flip side</string>
     <string name="fx_tipo">Type</string>
+
+    <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
+    <string name="conta_titulo_cadastro">Create your account</string>
+    <string name="conta_titulo_entrar">Sign in to your account</string>
+    <string name="conta_subtitulo">Use your email and a password of your own. Once you sign in, Aurea stays signed in on this device.</string>
+    <string name="conta_email">Email</string>
+    <string name="conta_senha">Password</string>
+    <string name="conta_senha_dica">At least 8 characters</string>
+    <string name="conta_mostrar">Show</string>
+    <string name="conta_ocultar">Hide</string>
+    <string name="conta_criar">Create account</string>
+    <string name="conta_entrar">Sign in</string>
+    <string name="conta_ir_entrar">I already have an account · Sign in</string>
+    <string name="conta_ir_cadastro">I do not have an account yet · Create</string>
+    <string name="conta_privacidade">If Aurea closes by itself or freezes, a technical error report (app version, device model, system and error trace, with your account email) is sent automatically to the developer so it can be fixed. Your projects and media are never sent.</string>
+    <string name="conta_erro_email">Enter a valid email.</string>
+    <string name="conta_erro_senha">The password must have 8 to 128 characters.</string>
+    <string name="conta_erro_credenciais">Incorrect email or password.</string>
+    <string name="conta_erro_em_uso">This email already has an account. Sign in with your password.</string>
+    <string name="conta_erro_limite">Too many attempts. Wait a few minutes and try again.</string>
+    <string name="conta_erro_rede">No connection. Check your internet and try again.</string>
+    <string name="conta_erro_servico">Could not reach the server right now. Try again later.</string>
+    <string name="conta_erro_expirada">Your session ended. Sign in again with your email and password.</string>
+    <string name="conta_sair">Sign out</string>
+    <string name="conta_sair_mensagem">To come back you will need your email and password. Your projects stay on this device.</string>
+    <string name="conta_conectado">Signed in as %1$s</string>
+    <plurals name="conta_usuarios">
+        <item quantity="one">%1$s registered person</item>
+        <item quantity="other">%1$s registered people</item>
+    </plurals>
 </resources>

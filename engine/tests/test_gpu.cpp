@@ -6771,6 +6771,123 @@ AUREA_TEST(Gpu, Particles3DFollowTheCamera) {
     AUREA_CHECK(a60.w() >= 9 && a60.w() <= 12);
 }
 
+namespace {
+void lens_param(Engine& e, u64 cam, u32 param, f32 value) {
+    Command c;
+    c.type = CommandType::LayerSetCameraParam;
+    c.shape_param = ShapeParamPayload{LayerId::unpack(cam), param, value};
+    AUREA_CHECK(e.apply_command(c).ok());
+}
+/// Pixels de BORDA de um canal (nem fundo, nem cheio): cresce com o desfoque.
+u32 partial_pixels(const Image8& img, u32 channel, u32 x0, u32 x1) {
+    u32 n = 0;
+    for (u32 y = 0; y < img.height; ++y)
+        for (u32 x = x0; x < x1 && x < img.width; ++x) {
+            const u8 v = img.at(x, y)[channel];
+            n += v > 20 && v < 235 ? 1u : 0u;
+        }
+    return n;
+}
+} // namespace
+
+AUREA_TEST(Gpu, Scene3DLensFocalLengthZoomsTheRenderedProjection) {
+    AUREA_REQUIRE_GPU();
+    // A distância focal muda a PROJEÇÃO: com a câmera parada, o modelo no
+    // plano Z=0 dobra de tamanho de 24 para 48 mm; o keyframe de mm chega no
+    // mesmo quadro que o valor parado.
+    Scene3DRig rig(320, 180);
+    ModelImport mi;
+    mi.path = write_triangle_gltf(true, 1.0f, 0.0f, 0.0f);
+    const Result<u64> model = rig.e.import_model(mi);
+    AUREA_CHECK(model.ok());
+    if (!model.ok()) return;
+    current_comp(rig.e)->layer(LayerId::unpack(*model))->transform.scale = Vec3{0.35f, 0.35f, 0.35f};
+    const Result<u64> cam = rig.e.add_camera();
+    AUREA_CHECK(cam.ok());
+    if (!cam.ok()) return;
+    lens_param(rig.e, *cam, 0, 24.0f);
+    const Box8 w24 = lit_box(rig.capture(320));
+    lens_param(rig.e, *cam, 0, 48.0f);
+    const Box8 w48 = lit_box(rig.capture(320));
+    Command k;
+    k.type = CommandType::KeyframeInsert;
+    k.keyframe.track = TrackRef{LayerId::unpack(*cam), TrackProperty::FocalLength, kInvalidIndex, 0};
+    k.keyframe.time = FrameIndex{0};
+    k.keyframe.value = 24.0f;
+    AUREA_CHECK(rig.e.apply_command(k).ok());
+    k.keyframe.time = FrameIndex{60};
+    k.keyframe.value = 48.0f;
+    AUREA_CHECK(rig.e.apply_command(k).ok());
+    seek_frame(rig.e, 0);
+    const Box8 k0 = lit_box(rig.capture(320));
+    seek_frame(rig.e, 60);
+    const Box8 k60 = lit_box(rig.capture(320));
+    std::printf("    lente: 24mm %ux%u, 48mm %ux%u; keyframes q0 %u / q60 %u px\n", w24.w(), w24.h(), w48.w(), w48.h(), k0.w(), k60.w());
+    AUREA_CHECK(w24.w() > 10);
+    const f32 ratio = static_cast<f32>(w48.w()) / static_cast<f32>(std::max(1u, w24.w()));
+    AUREA_CHECK_NEAR(ratio, 2.0f, 0.12f);
+    AUREA_CHECK(k0.w() + 1 >= w24.w() && k0.w() <= w24.w() + 1);
+    AUREA_CHECK(k60.w() + 1 >= w48.w() && k60.w() <= w48.w() + 1);
+}
+
+AUREA_TEST(Gpu, Scene3DDepthOfFieldBlursOutOfFocusAndKeepsTheFocusPlaneSharp) {
+    AUREA_REQUIRE_GPU();
+    // Vermelho no plano de foco (Z=0, 432 px da câmera), verde 1200 px atrás,
+    // os dois do mesmo tamanho na tela. 50 mm f/1.4, força 2.
+    Scene3DRig rig(640, 360);
+    ModelImport red;
+    red.path = write_triangle_gltf(true, 1.0f, 0.0f, 0.0f);
+    const Result<u64> near = rig.e.import_model(red);
+    ModelImport green;
+    green.path = write_triangle_gltf(true, 0.0f, 1.0f, 0.0f);
+    const Result<u64> far = rig.e.import_model(green);
+    AUREA_CHECK(near.ok() && far.ok());
+    if (!near.ok() || !far.ok()) return;
+    Layer* n = current_comp(rig.e)->layer(LayerId::unpack(*near));
+    n->transform.scale = Vec3{0.4f, 0.4f, 0.4f};
+    n->transform.position.x -= 90.0f;
+    Layer* f = current_comp(rig.e)->layer(LayerId::unpack(*far));
+    const f32 grow = 0.4f * (432.0f + 1200.0f) / 432.0f;
+    f->transform.scale = Vec3{grow, grow, grow};
+    f->transform.position.x += 341.0f;
+    f->transform.position.z += 1200.0f;
+    const Result<u64> cam = rig.e.add_camera();
+    AUREA_CHECK(cam.ok());
+    if (!cam.ok()) return;
+    lens_param(rig.e, *cam, 0, 50.0f);
+    lens_param(rig.e, *cam, 3, 1.4f);
+    lens_param(rig.e, *cam, 4, 2.0f);
+    const Image8 sharp = rig.capture(640);
+    lens_param(rig.e, *cam, 1, 1.0f);
+    const Image8 dof = rig.capture(640);
+    (void)write_png("scene3d_dof_off.png", sharp);
+    (void)write_png("scene3d_dof_on.png", dof);
+    const u32 redOff = partial_pixels(sharp, 0, 0, 320), redOn = partial_pixels(dof, 0, 0, 320);
+    const u32 greenOff = partial_pixels(sharp, 1, 320, 640), greenOn = partial_pixels(dof, 1, 320, 640);
+    // Entre os dois (fundo transparente): nem halo do nítido, nem vazamento.
+    u32 between = 0;
+    for (u32 y = 150; y < 210; ++y) for (u32 x = 300; x < 340; ++x) between = std::max<u32>(between, dof.at(x, y)[0] + dof.at(x, y)[1]);
+    const Box8 redBox = lit_box(sharp);
+    std::printf("    DOF: borda do vermelho (foco) %u -> %u px; do verde (longe) %u -> %u px; entre %u; vermelho x %u..%u\n",
+                redOff, redOn, greenOff, greenOn, between, redBox.x0, redBox.x1);
+    AUREA_CHECK(redOff > 50 && greenOff > 50);
+    // O plano de foco continua nítido (a borda quase não muda)...
+    AUREA_CHECK(redOn <= redOff + redOff / 3 + 20);
+    AUREA_CHECK(redOn + redOff / 3 + 20 >= redOff);
+    // ...e o que está longe desfoca de verdade (a borda vira uma faixa larga).
+    AUREA_CHECK(greenOn > 4 * greenOff);
+    AUREA_CHECK(between < 16);
+    // O miolo do verde continua cheio (o desfoque espalha a borda, não apaga).
+    AUREA_CHECK(dof.at(477, 200)[1] > 200);
+    // Foco no verde: agora o vermelho (perto) é que desfoca.
+    lens_param(rig.e, *cam, 2, 1632.0f);
+    const Image8 swapped = rig.capture(640);
+    const u32 redSwapped = partial_pixels(swapped, 0, 0, 320), greenSwapped = partial_pixels(swapped, 1, 320, 640);
+    std::printf("    DOF com foco no verde: vermelho %u px, verde %u px\n", redSwapped, greenSwapped);
+    AUREA_CHECK(redSwapped > 3 * redOff);
+    AUREA_CHECK(greenSwapped <= greenOff + greenOff / 3 + 20);
+}
+
 AUREA_TEST(Gpu, Scene3DMorphShadowsMatchDeformedGeometry) {
     AUREA_REQUIRE_GPU();
     auto capture = [&](bool morph, bool shadows, bool large) {

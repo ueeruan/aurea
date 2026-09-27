@@ -249,6 +249,8 @@ enum HomeTabKind: Int, CaseIterable, Identifiable {
 // =============================================================================
 struct HomeView: View {
     @EnvironmentObject private var model: AureaModel
+    @EnvironmentObject private var conta: ContaModel
+    @State private var confirmLogout: Bool = false
     @StateObject private var library = HomeLibrary()
     @StateObject private var defaults = HomeDefaults()
     @StateObject private var backdrop = HomeBackdrop()
@@ -280,7 +282,10 @@ struct HomeView: View {
         VStack(spacing: 0) {
             LiveNoticeBanners()
             HStack {
-                Text("aurea").font(.aurea(size: 32, weight: .bold)).tracking(-1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("aurea").font(.aurea(size: 32, weight: .bold)).tracking(-1)
+                    if let usuarios: Int = conta.usuarios { HomeRegisteredUsers(count: usuarios) }
+                }
                 Spacer()
                 Button(AureaText.t("release_notes_title")) { showReleaseNotes = true }
                     .font(.aurea(size: 13)).frame(minHeight: 44)
@@ -318,6 +323,15 @@ struct HomeView: View {
             Button(AureaText.t("home_tab_settings")) { select(.settings) }
             Button(AureaText.t("settings_group_about")) { homeInfo = "settings_group_about" }
             Button(AureaText.t("licenses_title")) { homeInfo = "licenses_title" }
+            Button(AureaText.t("conta_sair"), role: .destructive) { confirmLogout = true }
+        } message: {
+            if let email: String = conta.email { Text(AureaText.t("conta_conectado", email)) }
+        }
+        .alert(AureaText.t("conta_sair"), isPresented: $confirmLogout) {
+            Button(AureaText.t("conta_sair"), role: .destructive) { conta.sair() }
+            Button(AureaText.t("common_cancel"), role: .cancel) {}
+        } message: {
+            Text(AureaText.t("conta_sair_mensagem"))
         }
         .sheet(isPresented: Binding(get: { homeInfo != nil }, set: { if !$0 { homeInfo = nil } })) {
             NavigationStack {
@@ -652,7 +666,26 @@ private enum HomeCommunityAPI {
 }
 
 #Preview {
-    HomeView().environmentObject(AureaModel())
+    HomeView().environmentObject(AureaModel()).environmentObject(ContaModel())
+}
+
+/// "N pessoas cadastradas" sob o título (home/HomeScreen.kt: RegisteredUsersLine).
+struct HomeRegisteredUsers: View {
+    let count: Int
+
+    var body: some View {
+        let formatador: NumberFormatter = NumberFormatter()
+        formatador.numberStyle = .decimal
+        formatador.locale = Locale(identifier: AureaText.language.resolved.rawValue)
+        let numero: String = formatador.string(from: NSNumber(value: count)) ?? String(count)
+        return HStack(spacing: 6) {
+            Circle().fill(AureaColors.success).frame(width: 6, height: 6)
+            Text(AureaText.plural("conta_usuarios", count, numero))
+                .font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home.registeredUsers")
+    }
 }
 
 struct NewProjectDraft { let width: UInt32; let height: UInt32; let fps: Double; let title: String }

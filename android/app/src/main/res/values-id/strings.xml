@@ -1002,4 +1002,33 @@ untuk mengedit kurvanya.</string>
     <string name="fx_trocar_lado">Tukar sisi</string>
     <string name="fx_tipo">Jenis</string>
     <string name="donation_launch_question">Donasi membuat aplikasi tetap gratis, bantu pembuatnya :)</string>
+
+    <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
+    <string name="conta_titulo_cadastro">Buat akun Anda</string>
+    <string name="conta_titulo_entrar">Masuk ke akun Anda</string>
+    <string name="conta_subtitulo">Gunakan email dan kata sandi milik Anda sendiri. Setelah masuk, Aurea tetap terhubung di perangkat ini.</string>
+    <string name="conta_email">Email</string>
+    <string name="conta_senha">Kata sandi</string>
+    <string name="conta_senha_dica">Minimal 8 karakter</string>
+    <string name="conta_mostrar">Tampilkan</string>
+    <string name="conta_ocultar">Sembunyikan</string>
+    <string name="conta_criar">Buat akun</string>
+    <string name="conta_entrar">Masuk</string>
+    <string name="conta_ir_entrar">Saya sudah punya akun · Masuk</string>
+    <string name="conta_ir_cadastro">Saya belum punya akun · Buat</string>
+    <string name="conta_privacidade">Jika Aurea tertutup sendiri atau macet, laporan teknis kesalahan (versi aplikasi, model perangkat, sistem, dan jejak kesalahan, beserta email akun Anda) dikirim otomatis ke pengembang untuk diperbaiki. Proyek dan media Anda tidak pernah dikirim.</string>
+    <string name="conta_erro_email">Masukkan email yang valid.</string>
+    <string name="conta_erro_senha">Kata sandi harus terdiri dari 8 hingga 128 karakter.</string>
+    <string name="conta_erro_credenciais">Email atau kata sandi salah.</string>
+    <string name="conta_erro_em_uso">Email ini sudah punya akun. Masuk dengan kata sandi Anda.</string>
+    <string name="conta_erro_limite">Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi.</string>
+    <string name="conta_erro_rede">Tidak ada koneksi. Periksa internet lalu coba lagi.</string>
+    <string name="conta_erro_servico">Tidak dapat menghubungi server saat ini. Coba lagi nanti.</string>
+    <string name="conta_erro_expirada">Sesi Anda berakhir. Masuk lagi dengan email dan kata sandi.</string>
+    <string name="conta_sair">Keluar dari akun</string>
+    <string name="conta_sair_mensagem">Untuk kembali, Anda perlu email dan kata sandi. Proyek Anda tetap di perangkat ini.</string>
+    <string name="conta_conectado">Masuk sebagai %1$s</string>
+    <plurals name="conta_usuarios">
+        <item quantity="other">%1$s orang terdaftar</item>
+    </plurals>
 </resources>

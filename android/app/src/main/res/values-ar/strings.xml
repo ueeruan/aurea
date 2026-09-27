@@ -1017,4 +1017,38 @@
     <string name="fx_trocar_lado">تبديل الجانب</string>
     <string name="fx_tipo">النوع</string>
     <string name="donation_launch_question">تبرعك يبقي التطبيق مجانيًا، ساعد المطوّر :)</string>
+
+    <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
+    <string name="conta_titulo_cadastro">أنشئ حسابك</string>
+    <string name="conta_titulo_entrar">سجّل الدخول إلى حسابك</string>
+    <string name="conta_subtitulo">استخدم بريدك الإلكتروني وكلمة مرور خاصة بك. بعد تسجيل الدخول يبقى Aurea متصلًا على هذا الجهاز.</string>
+    <string name="conta_email">البريد الإلكتروني</string>
+    <string name="conta_senha">كلمة المرور</string>
+    <string name="conta_senha_dica">8 أحرف على الأقل</string>
+    <string name="conta_mostrar">إظهار</string>
+    <string name="conta_ocultar">إخفاء</string>
+    <string name="conta_criar">إنشاء حساب</string>
+    <string name="conta_entrar">تسجيل الدخول</string>
+    <string name="conta_ir_entrar">لدي حساب · تسجيل الدخول</string>
+    <string name="conta_ir_cadastro">ليس لدي حساب · إنشاء</string>
+    <string name="conta_privacidade">إذا أُغلق Aurea من تلقاء نفسه أو توقف عن الاستجابة، يُرسَل تلقائيًا إلى المطوّر تقرير تقني عن الخطأ (إصدار التطبيق وطراز الجهاز والنظام وتتبّع الخطأ، مع البريد الإلكتروني لحسابك) لإصلاحه. لا تُرسَل مشاريعك ووسائطك أبدًا.</string>
+    <string name="conta_erro_email">أدخل بريدًا إلكترونيًا صالحًا.</string>
+    <string name="conta_erro_senha">يجب أن تتكون كلمة المرور من 8 إلى 128 حرفًا.</string>
+    <string name="conta_erro_credenciais">البريد الإلكتروني أو كلمة المرور غير صحيحة.</string>
+    <string name="conta_erro_em_uso">هذا البريد لديه حساب بالفعل. سجّل الدخول بكلمة المرور.</string>
+    <string name="conta_erro_limite">محاولات كثيرة. انتظر بضع دقائق ثم حاول مجددًا.</string>
+    <string name="conta_erro_rede">لا يوجد اتصال. تحقّق من الإنترنت وحاول مجددًا.</string>
+    <string name="conta_erro_servico">تعذّر الوصول إلى الخادم الآن. حاول لاحقًا.</string>
+    <string name="conta_erro_expirada">انتهت جلستك. سجّل الدخول مجددًا ببريدك وكلمة المرور.</string>
+    <string name="conta_sair">تسجيل الخروج</string>
+    <string name="conta_sair_mensagem">للعودة ستحتاج إلى بريدك الإلكتروني وكلمة المرور. تبقى مشاريعك على هذا الجهاز.</string>
+    <string name="conta_conectado">تم تسجيل الدخول باسم %1$s</string>
+    <plurals name="conta_usuarios">
+        <item quantity="zero">%1$s شخص مسجّل</item>
+        <item quantity="one">%1$s شخص مسجّل</item>
+        <item quantity="two">%1$s شخصان مسجّلان</item>
+        <item quantity="few">%1$s أشخاص مسجّلين</item>
+        <item quantity="many">%1$s شخصًا مسجّلًا</item>
+        <item quantity="other">%1$s شخص مسجّل</item>
+    </plurals>
 </resources>

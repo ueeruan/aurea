@@ -14,6 +14,11 @@
 // =============================================================================
 
 import { rotaDeVideo } from "./ai_video.js";
+import { captionRoute } from "./caption_community.js";
+export { CaptionCommunity } from "./caption_community.js";
+// Contas obrigatórias (/api/auth/*, /api/stats/users) e crash (/api/crash).
+import { rotaDeContas } from "./contas.js";
+import { rotaDeCrash } from "./crash.js";
 
 export { CofreDeVideo } from "./cofre.js";
 
@@ -48,6 +53,12 @@ function segredoConfere(recebido, esperado) {
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    const captions = await captionRoute(req, env, url);
+    if (captions) return captions;
+    const contas = await rotaDeContas(req, env, ctx, url);
+    if (contas) return contas;
+    const crash = await rotaDeCrash(req, env, ctx, url);
+    if (crash) return crash;
 
     // Geração de vídeo paga (8Scale): tudo sob /api/ai/video.
     const video = await rotaDeVideo(req, env, ctx, url);

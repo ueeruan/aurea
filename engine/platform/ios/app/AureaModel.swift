@@ -2595,7 +2595,7 @@ final class AureaModel: ObservableObject {
     func parentSelectionToNewNull(_ ids: [Int64]) {
         guard !ids.isEmpty else { return }
         let numbers: [NSNumber] = ids.map { NSNumber(value: $0) }
-        let created: Int64 = engine.parentToNewNull(numbers)
+        let created: Int64 = engine.parent(toNewNull: numbers)
         if created < 0 {
             toast = AureaText.t("msg_nao_foi_possivel_criar_o_nulo", String(-created))
             return

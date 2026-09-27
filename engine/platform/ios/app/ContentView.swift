@@ -10,19 +10,25 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AureaModel
+    @EnvironmentObject private var conta: ContaModel
     @State private var pageWidth = UIScreen.main.bounds.width
 
     var body: some View {
         ZStack {
             AureaColors.background.ignoresSafeArea()
 
-            switch model.screen {
-            case .home:
-                HomeView()
-                    .transition(.offset(x: -pageWidth / 3)).zIndex(0)
-            case .editor:
-                EditorView()
-                    .transition(.offset(x: pageWidth)).zIndex(1)
+            // Conta obrigatória: sem sessão guardada, o app inteiro é a ContaView.
+            if !conta.logado {
+                ContaView().zIndex(2)
+            } else {
+                switch model.screen {
+                case .home:
+                    HomeView()
+                        .transition(.offset(x: -pageWidth / 3)).zIndex(0)
+                case .editor:
+                    EditorView()
+                        .transition(.offset(x: pageWidth)).zIndex(1)
+                }
             }
 
             if model.importingMedia {
@@ -119,5 +125,5 @@ struct AureaActivityIndicator: View {
 }
 
 #Preview {
-    { let m = AureaModel(); return ContentView().environmentObject(m).environmentObject(m.playheadClock) }()
+    { let m = AureaModel(); return ContentView().environmentObject(m).environmentObject(ContaModel()).environmentObject(m.playheadClock) }()
 }

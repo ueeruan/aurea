@@ -123,6 +123,25 @@ Mat4 reverse_z_perspective(f32 fovY, f32 aspect, f32 nearZ) noexcept {
     return m;
 }
 
+DofLens dof_lens(const SceneCamera& c, u32 imageHeight) noexcept {
+    DofLens lens;
+    if (!c.dof || imageHeight == 0 || !(c.focusDistance > 0.0f) || !(c.fStop > 0.0f) || !(c.blurAmount > 0.0f)
+        || !std::isfinite(c.focusDistance) || !std::isfinite(c.fStop) || !std::isfinite(c.blurAmount)) return lens;
+    const f32 H = static_cast<f32>(imageHeight);
+    // Focal equivalente do FOV vertical no sensor full frame (24 mm de altura).
+    const f32 f = 0.5f * kCameraSensorHeightMm / std::tan(std::clamp(c.fovY, 1e-3f, 3.1f) * 0.5f);
+    const f32 ppm = std::max(1e-3f, c.pixelsPerMeter);
+    // Foco antes da focal não forma imagem real: o plano mais perto possível
+    // fica logo depois dela.
+    const f32 s1 = std::max(c.focusDistance / ppm * 1000.0f, f * 1.05f);
+    const f32 diameterMm = f * f / (std::max(c.fStop, 0.1f) * (s1 - f));
+    lens.cocScale = 0.5f * diameterMm / kCameraSensorHeightMm * H * c.blurAmount;
+    lens.focusOverNear = (s1 / 1000.0f * ppm) / std::max(c.nearZ, 1e-3f);
+    lens.maxRadius = std::min(0.02f * H * std::max(1.0f, c.blurAmount), 0.05f * H);
+    if (!std::isfinite(lens.cocScale) || !std::isfinite(lens.focusOverNear)) return DofLens{};
+    return lens;
+}
+
 SceneCamera default_camera(u32 compWidth, u32 compHeight) noexcept {
     SceneCamera c;
     const f32 h = static_cast<f32>(std::max(1u, compHeight));
@@ -774,6 +793,12 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     out.push_back(PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_post_bloom_up_frag,
                                         SurfaceFormat::RGBA16F, true, BlendMode::Add));
     out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_fxaa_frag, SurfaceFormat::RGBA16F));
+    {
+        out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_dof_coc_frag, SurfaceFormat::RGBA16F));
+        auto dof = PipelineKey::fullscreen(ShaderId::scene3d_post_dof_frag, SurfaceFormat::RGBA16F);
+        dof.hasColor1 = true;
+        out.push_back(dof);
+    }
     self->passSamples_ = savedSamples;
     self->passMrt_ = savedMrt;
     self->passA2C_ = savedA2C;
@@ -811,6 +836,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                       && !(particles && particleCount);
     passSamples_ = skyOnly ? 1u : pass_samples();
     passMrt_ = wants_hdr(frame) && !skyOnly;
+    // Profundidade de campo da lente: precisa da profundidade de 1 amostra.
+    // Com MSAA ela sai do resolve da amostra 0; aparelho SEM resolve de
+    // profundidade desenha este quadro sem MSAA (o FXAA cobre as bordas, e o
+    // DOF desfoca o que está fora do foco de qualquer jeito) em vez de perder
+    // o efeito — preview e export iguais em todo aparelho.
+    const bool dofOn = passMrt_ && dofTaps_ > 0 && dof_lens(frame.camera, height).active();
+    if (dofOn && passSamples_ > 1 && !gpu_->capabilities().depthResolveSampleZero) passSamples_ = 1;
     passA2C_ = passSamples_ > 1 && gpu_->capabilities().alphaToOne;
     const bool msaa = passSamples_ > 1;
     TextureDesc cd;
@@ -830,7 +862,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     dd.transient = true;
     // Profundidade para quem lê depois: de 1 amostra direto (sem MSAA) ou pelo
     // resolve da amostra 0 (com MSAA, onde o aparelho resolve profundidade).
-    const bool depthOut = outDepth && (!msaa || gpu_->capabilities().depthResolveSampleZero);
+    const bool depthOut = (outDepth || dofOn) && (!msaa || gpu_->capabilities().depthResolveSampleZero);
     if (depthOut && !msaa) {
         dd.sampled = true;
         dd.transient = false;
@@ -1823,7 +1855,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     });
     if (passMrt_) graph.set_color1(pbrPass, msaa ? sceneMs : sceneHdr);
     if (msaa) graph.set_resolve(pbrPass, color, passMrt_ ? sceneHdr : FGTexture{}, depthResolved);
-    if (outDepth && depthOut) *outDepth = msaa ? depthResolved : depth;
+    const FGTexture depth1x = depthOut ? (msaa ? depthResolved : depth) : FGTexture{};
+    if (outDepth) *outDepth = depth1x;
     if (shadowTex.valid()) graph.read(pbrPass, shadowTex);
     ground_reads(graph, pbrPass, groundDraw);   // chão
     for (u32 k = 0; k < planeCount; ++k) graph.read(pbrPass, planeList[k].texture);
@@ -1838,8 +1871,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // --- Pós do grupo --------------------------------------------------------
     // Com luz de cena: exposição → bloom → tone map → + 2D. Sem (só planos e
     // partículas): o alvo de exibição já é a saída, como sempre foi.
-    FGTexture result = passMrt_ ? build_post(graph, frame, width, height, color, sceneHdr) : color;
-    if (!result.valid()) result = color;
+    FGTexture display = color, scene = sceneHdr;
+    if (dofOn && depth1x.valid()) (void)build_dof(graph, frame, width, height, display, scene, depth1x);
+    FGTexture result = passMrt_ ? build_post(graph, frame, width, height, display, scene) : color;
+    if (!result.valid()) result = display;
     // Sem MSAA (GLES, nível BAIXO): FXAA na imagem já em espaço de exibição.
     // FXAA: nível BAIXO, ou o aparelho não tem o MSAA pedido (GLES).
     if (!msaa && (postFxaa_ || postMsaa_ > 1) && antialias_) {
@@ -1959,6 +1994,64 @@ FGTexture SceneRenderer::build_post(FrameGraph& graph, const SceneFrame& frame, 
     graph.read(pass, display);
     if (levelCount) graph.read(pass, levels[0]);
     return out;
+}
+
+bool SceneRenderer::build_dof(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
+                              FGTexture& display, FGTexture& scene, FGTexture depth) noexcept {
+    const DofLens lens = dof_lens(frame.camera, height);
+    if (!lens.active() || !depth.valid() || !scene.valid() || !display.valid()) return false;
+    auto cocPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_dof_coc_frag, SurfaceFormat::RGBA16F));
+    PipelineKey key = PipelineKey::fullscreen(ShaderId::scene3d_post_dof_frag, SurfaceFormat::RGBA16F);
+    key.hasColor1 = true;
+    auto pipe = shaders_->pipeline(key);
+    if (!pipe.ok() || !cocPipe.ok()) return false;
+    TextureDesc d;
+    d.width = width;
+    d.height = height;
+    d.format = SurfaceFormat::RGBA16F;
+    d.sampled = true;
+    d.renderTarget = true;
+    const FGTexture coc = graph.create_texture("3d-dof-coc", d);
+    const FGTexture outDisplay = graph.create_texture("3d-dof-2d", d);
+    const FGTexture outScene = graph.create_texture("3d-dof-hdr", d);
+    const u64 nearest = shaders_->sampler(CommonSampler::NearestClamp).id;
+    const Vec4 texel{1.0f / static_cast<f32>(width), 1.0f / static_cast<f32>(height), lens.maxRadius, 0.0f};
+    // 1) Raio do círculo de confusão por pixel (profundidade mais perto do 3×3).
+    {
+        struct Params { Vec4 texel; Vec4 lens; };
+        const Params u{texel, Vec4{lens.cocScale, lens.focusOverNear, 0, 0}};
+        struct Cap { PipelineHandle p; FGTexture depth; u64 sampler; Params u; } cap{*cocPipe, depth, nearest, u};
+        const u32 pass = graph.add_raster_pass("3d-dof-coc", PassStage::PostProcess, coc, LoadOp::DontCare, Vec4{0, 0, 0, 0},
+                                               [cap](PassContext& pc) {
+            pc.cmds.bind_pipeline(cap.p);
+            pc.cmds.bind_texture(0, pc.texture(cap.depth), SamplerHandle{cap.sampler});
+            pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
+            pc.cmds.draw(3);
+        });
+        graph.read(pass, depth);
+    }
+    // 2) Gather no disco. Amostras: ~1 a cada 9 px² do maior disco (passo
+    // ~3 px), no teto do nível (preview poucas, export muitas).
+    const u32 taps = std::clamp(static_cast<u32>(lens.maxRadius * lens.maxRadius * 0.35f), 8u, std::max(8u, dofTaps_));
+    const Vec4 u{texel.x, texel.y, texel.z, static_cast<f32>(taps)};
+    struct Cap { PipelineHandle p; FGTexture scene, display, coc; u64 sampler; Vec4 u; }
+        cap{*pipe, scene, display, coc, nearest, u};
+    const u32 pass = graph.add_raster_pass("3d-dof", PassStage::PostProcess, outDisplay, LoadOp::DontCare, Vec4{0, 0, 0, 0},
+                                           [cap](PassContext& pc) {
+        pc.cmds.bind_pipeline(cap.p);
+        pc.cmds.bind_texture(0, pc.texture(cap.scene), SamplerHandle{cap.sampler});
+        pc.cmds.bind_texture(1, pc.texture(cap.display), SamplerHandle{cap.sampler});
+        pc.cmds.bind_texture(2, pc.texture(cap.coc), SamplerHandle{cap.sampler});
+        pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
+        pc.cmds.draw(3);
+    });
+    graph.set_color1(pass, outScene);
+    graph.read(pass, scene);
+    graph.read(pass, display);
+    graph.read(pass, coc);
+    display = outDisplay;
+    scene = outScene;
+    return true;
 }
 
 FGTexture SceneRenderer::build_fxaa(FrameGraph& graph, u32 width, u32 height, FGTexture src) noexcept {

@@ -1003,4 +1003,34 @@
     <string name="fx_trocar_lado">पक्ष बदलें</string>
     <string name="fx_tipo">प्रकार</string>
     <string name="donation_launch_question">दान करने से ऐप मुफ़्त रहता है, निर्माता की मदद करें :)</string>
+
+    <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
+    <string name="conta_titulo_cadastro">अपना खाता बनाएँ</string>
+    <string name="conta_titulo_entrar">अपने खाते में साइन इन करें</string>
+    <string name="conta_subtitulo">अपना ईमेल और केवल आपका पासवर्ड इस्तेमाल करें। साइन इन के बाद Aurea इस डिवाइस पर जुड़ा रहता है।</string>
+    <string name="conta_email">ईमेल</string>
+    <string name="conta_senha">पासवर्ड</string>
+    <string name="conta_senha_dica">कम से कम 8 अक्षर</string>
+    <string name="conta_mostrar">दिखाएँ</string>
+    <string name="conta_ocultar">छिपाएँ</string>
+    <string name="conta_criar">खाता बनाएँ</string>
+    <string name="conta_entrar">साइन इन करें</string>
+    <string name="conta_ir_entrar">मेरा खाता है · साइन इन</string>
+    <string name="conta_ir_cadastro">मेरा खाता नहीं है · बनाएँ</string>
+    <string name="conta_privacidade">अगर Aurea अपने आप बंद हो जाए या अटक जाए, तो त्रुटि की तकनीकी रिपोर्ट (ऐप वर्ज़न, डिवाइस मॉडल, सिस्टम और त्रुटि का ट्रेस, आपके खाते के ईमेल के साथ) सुधार के लिए डेवलपर को अपने आप भेजी जाती है। आपके प्रोजेक्ट और मीडिया कभी नहीं भेजे जाते।</string>
+    <string name="conta_erro_email">मान्य ईमेल दर्ज करें।</string>
+    <string name="conta_erro_senha">पासवर्ड में 8 से 128 अक्षर होने चाहिए।</string>
+    <string name="conta_erro_credenciais">ईमेल या पासवर्ड गलत है।</string>
+    <string name="conta_erro_em_uso">इस ईमेल का खाता पहले से है। अपने पासवर्ड से साइन इन करें।</string>
+    <string name="conta_erro_limite">बहुत अधिक प्रयास। कुछ मिनट रुककर फिर कोशिश करें।</string>
+    <string name="conta_erro_rede">कनेक्शन नहीं है। इंटरनेट जाँचकर फिर कोशिश करें।</string>
+    <string name="conta_erro_servico">अभी सर्वर से संपर्क नहीं हो सका। बाद में कोशिश करें।</string>
+    <string name="conta_erro_expirada">आपका सत्र समाप्त हो गया। ईमेल और पासवर्ड से फिर साइन इन करें।</string>
+    <string name="conta_sair">साइन आउट करें</string>
+    <string name="conta_sair_mensagem">वापस आने के लिए आपको ईमेल और पासवर्ड चाहिए होंगे। आपके प्रोजेक्ट इसी डिवाइस पर रहेंगे।</string>
+    <string name="conta_conectado">%1$s के रूप में साइन इन</string>
+    <plurals name="conta_usuarios">
+        <item quantity="one">%1$s पंजीकृत व्यक्ति</item>
+        <item quantity="other">%1$s पंजीकृत लोग</item>
+    </plurals>
 </resources>

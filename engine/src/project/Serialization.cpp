@@ -825,6 +825,9 @@ void write_layer(ByteWriter& w, const Layer& l) {
     if(l.cameraTrack)for(const auto& c:l.cameraTrack->sceneCalibration.col)w.vec4(c);
     if(l.cameraTrack)w.u64v(l.cameraTrack->sourceSignature);
     if(l.motionTrack)w.u64v(l.motionTrack->sourceSignature);
+    // v33: lente da câmera 3D (profundidade de campo e força do desfoque).
+    w.boolv(l.camera.dofEnabled);
+    w.f32v(l.camera.blurAmount);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -846,7 +849,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
 // v28 also persists camera observations; generated layers refer back to this
 // analysis after reopening instead of relying on an in-memory worker result.
 // v32: ambiente de estúdio procedural e o chão do grupo 3D (FloorSettings).
-constexpr u32 kTimelineSectionVersion = 32;
+// v33: lente da câmera (DOF ligado e força do desfoque) no fim da camada.
+constexpr u32 kTimelineSectionVersion = 33;
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -1289,6 +1293,11 @@ void read_layer(ByteReader& r, Layer& l) {
     if (g_readingTimelineVersion >= 30) {
         if(l.cameraTrack){auto data=std::make_shared<tracking::CameraTrackData>(*l.cameraTrack);data->sourceSignature=r.u64v();l.cameraTrack=std::move(data);}
         if(l.motionTrack){auto data=std::make_shared<tracking::MotionTrackData>(*l.motionTrack);data->sourceSignature=r.u64v();l.motionTrack=std::move(data);}
+    }
+    if (g_readingTimelineVersion >= 33) {
+        l.camera.dofEnabled = r.boolv();
+        const f32 blur = r.f32v();
+        l.camera.blurAmount = std::isfinite(blur) ? std::clamp(blur, 0.0f, 4.0f) : 1.0f;
     }
 }
 

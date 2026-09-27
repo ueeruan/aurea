@@ -63,6 +63,16 @@ struct Layer;
 [[nodiscard]] bool wants_layer_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept;
 /// Mundo 3D da camada com a cadeia de pais (o mesmo dos modelos/luzes).
 [[nodiscard]] Mat4 layer_world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept;
+/// FOV vertical (graus) de uma camada de câmera no instante LOCAL: a trilha de
+/// distância focal (mm) manda quando tem keyframe; senão a de FOV; senão o
+/// valor parado. É a MESMA conta da projeção do render (preview e export).
+[[nodiscard]] f32 camera_fov_deg_at(const Layer& camera, f64 localFrame) noexcept;
+/// Foco por toque (Pick Focus): o ponto do mundo da superfície 3D mais perto
+/// sob o ponto (px da composição), visto pela câmera ativa. Raio na CPU contra
+/// os triângulos dos modelos na pose do quadro (skin incluída). Falso = nada.
+[[nodiscard]] bool pick_scene_point(const Composition& comp, FrameIndex time, f32 compX, f32 compY,
+                                    std::shared_ptr<const scene3d::SceneAsset> (*lookup)(void* ctx, AssetId id),
+                                    void* ctx, Vec3& outWorld) noexcept;
 
 /// Um glifo na GPU (std430, espelho de shaders/text/glyph.vert).
 struct GlyphInstance {

@@ -204,6 +204,7 @@ enum class TrackProperty : u16 {
     ShapeParam,        ///< parâmetro da forma (paramIndex = o mesmo de ShapeSetParam: 1 raio, 2 lados, 3 raio interno, 4 contorno, 5 largura, 6 altura)
     ParticleParam,     ///< parâmetro do Aurea Particular (paramIndex = ParticleParam)
     MaterialParam,     ///< imported material: effectIndex=materialIndex, paramIndex=RGBA/metallic/roughness
+    CameraBlur,        ///< lente: força do desfoque de profundidade (× o círculo de confusão físico)
     _Count,
 };
 

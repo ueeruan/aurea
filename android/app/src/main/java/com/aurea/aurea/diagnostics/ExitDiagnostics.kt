@@ -17,7 +17,12 @@ object ExitDiagnostics {
     // No URI, project name or media contents in the OS process-state marker.
     enum class Phase { ENGINE_START, ENGINE_READY, VIDEO_PERMISSION, VIDEO_NATIVE, VIDEO_READY, VIDEO_FAILED, VIDEO_CANCELLED }
 
+    /** A última etapa marcada, em memória: o handler de crash Java a grava junto da pilha. */
+    @Volatile var ultimaEtapa: String? = null
+        private set
+
     fun mark(context: Context, phase: Phase) {
+        ultimaEtapa = "Aurea build=${BuildConfig.VERSION_CODE} phase=${phase.name}"
         if (Build.VERSION.SDK_INT < 30) return
         runCatching {
             context.getSystemService(ActivityManager::class.java)?.setProcessStateSummary(

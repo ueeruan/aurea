@@ -1906,4 +1906,34 @@
     <string name="fx_base">Base</string>
     <string name="fx_trocar_lado">Trocar o lado</string>
     <string name="fx_tipo">Tipo</string>
+
+    <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
+    <string name="conta_titulo_cadastro">Crie sua conta</string>
+    <string name="conta_titulo_entrar">Entre na sua conta</string>
+    <string name="conta_subtitulo">Use seu e-mail e uma senha só sua. Depois de entrar, o Aurea fica conectado neste aparelho.</string>
+    <string name="conta_email">E-mail</string>
+    <string name="conta_senha">Senha</string>
+    <string name="conta_senha_dica">Pelo menos 8 caracteres</string>
+    <string name="conta_mostrar">Mostrar</string>
+    <string name="conta_ocultar">Ocultar</string>
+    <string name="conta_criar">Criar conta</string>
+    <string name="conta_entrar">Entrar</string>
+    <string name="conta_ir_entrar">Já tenho conta · Entrar</string>
+    <string name="conta_ir_cadastro">Ainda não tenho conta · Criar</string>
+    <string name="conta_privacidade">Se o Aurea fechar sozinho ou travar, um relatório técnico do erro (versão do app, modelo do aparelho, sistema e rastro do erro, com o e-mail da sua conta) é enviado automaticamente ao desenvolvedor para correção. Seus projetos e mídias nunca são enviados.</string>
+    <string name="conta_erro_email">Digite um e-mail válido.</string>
+    <string name="conta_erro_senha">A senha precisa ter de 8 a 128 caracteres.</string>
+    <string name="conta_erro_credenciais">E-mail ou senha incorretos.</string>
+    <string name="conta_erro_em_uso">Este e-mail já tem conta. Entre com a sua senha.</string>
+    <string name="conta_erro_limite">Muitas tentativas. Espere alguns minutos e tente de novo.</string>
+    <string name="conta_erro_rede">Sem conexão. Confira a internet e tente de novo.</string>
+    <string name="conta_erro_servico">Não foi possível falar com o servidor agora. Tente mais tarde.</string>
+    <string name="conta_erro_expirada">Sua sessão terminou. Entre de novo com seu e-mail e senha.</string>
+    <string name="conta_sair">Sair da conta</string>
+    <string name="conta_sair_mensagem">Para voltar, você vai precisar do seu e-mail e da senha. Seus projetos continuam neste aparelho.</string>
+    <string name="conta_conectado">Conectado como %1$s</string>
+    <plurals name="conta_usuarios">
+        <item quantity="one">%1$s pessoa cadastrada</item>
+        <item quantity="other">%1$s pessoas cadastradas</item>
+    </plurals>
 </resources>

@@ -1548,6 +1548,50 @@ bool Engine::query_light(u64 layerId, f32* values) noexcept {
     return true;
 }
 
+bool Engine::query_camera_lens(u64 layerId, f32* values) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    auto* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Camera || !values) return false;
+    const FrameIndex local = layer->local_time(playback_.current());
+    const CameraData& cam = layer->camera;
+    // A MESMA conta da projeção: mm com keyframe manda; senão o FOV (parado
+    // ou animado) vira o mm equivalente.
+    const f32 fov = camera_fov_deg_at(*layer, static_cast<f64>(local.value));
+    const Track* focal = layer->tracks.find(TrackProperty::FocalLength);
+    values[0] = focal && focal->driven() ? std::clamp(focal->value_or(local, cam.focalLength), kCameraFocalMinMm, kCameraFocalMaxMm)
+                                         : camera_focal_from_fov(fov);
+    values[1] = fov;
+    values[2] = cam.dofEnabled ? 1.0f : 0.0f;
+    values[3] = layer->tracks.sample_or(TrackProperty::FocusDistance, local, cam.focusDistance);
+    values[4] = layer->tracks.sample_or(TrackProperty::Aperture, local, cam.aperture);
+    values[5] = layer->tracks.sample_or(TrackProperty::CameraBlur, local, cam.blurAmount);
+    values[6] = scene3d::scene_pixels_per_meter(comp->height());
+    u32 mask = 0;
+    const TrackProperty props[4]{TrackProperty::FocalLength, TrackProperty::FocusDistance, TrackProperty::Aperture, TrackProperty::CameraBlur};
+    for (u32 i = 0; i < 4; ++i) if (const Track* t = layer->tracks.find(props[i]); t && !t->keys.empty()) mask |= 1u << i;
+    values[7] = static_cast<f32>(mask);
+    values[8] = cam.active ? 1.0f : 0.0f;
+    return true;
+}
+
+f32 Engine::pick_focus_distance(u64 layerId, f32 compX, f32 compY) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Camera) return -1.0f;
+    const FrameIndex now = playback_.current();
+    Vec3 hit{};
+    if (!pick_scene_point(*comp, now, compX, compY, &Engine::model_lookup, this, hit)) return -1.0f;
+    // Plano de foco perpendicular ao eixo ótico DESTA câmera (a mesma
+    // profundidade que o DOF lê do Z da cena).
+    const Mat4 wm = layer_world_3d(*comp, *layer, now);
+    Vec3 forward = Vec3{wm.col[2].x, wm.col[2].y, wm.col[2].z}.normalized();
+    if (forward.length_sq() < kEpsilon) forward = Vec3{0, 0, 1};
+    const f32 distance = (hit - Vec3{wm.col[3].x, wm.col[3].y, wm.col[3].z}).dot(forward);
+    return std::isfinite(distance) && distance > 0.01f ? distance : -1.0f;
+}
+
 Result<u64> Engine::add_camera() noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -1563,6 +1607,9 @@ Result<u64> Engine::add_camera() noexcept {
     camera->transform.position = fallback.position;
     camera->transform.anchor = Vec3{0, 0, 0};
     camera->camera.fov = fallback.fovY / kDeg2Rad;
+    // Lente sincronizada com a projeção; o foco nasce no plano da composição.
+    camera->camera.focalLength = camera_focal_from_fov(camera->camera.fov);
+    camera->camera.focusDistance = std::max(1.0f, -fallback.position.z);
     camera->camera.nearPlane = fallback.nearZ;
     camera->camera.active = true;
     for (u32 i = 0; i < comp->order().size(); ++i) {
@@ -2624,6 +2671,7 @@ Result<u64> Engine::apply_camera_track(i64 selectionFrame, Vec4 selectionRect, u
     cam->camera.active = true;
     cam->cameraTrackSource = LayerId::unpack(job->layerId); cam->cameraTrackKey = job->cacheKey;
     cam->camera.fov = s.fovY / kDeg2Rad;
+    cam->camera.focalLength = camera_focal_from_fov(cam->camera.fov);
     cam->camera.trackingSourceSize = {static_cast<f32>(source->video.width), static_cast<f32>(source->video.height)};
     cam->camera.nearPlane = std::max(1.0f, dist * 0.01f);
     cam->transform.anchor = Vec3{0, 0, 0};
@@ -4015,7 +4063,7 @@ u32 Engine::query_scene_guides(f32* lines, u32 capacity) noexcept {
         const Vec3 forward = Vec3{world.col[2].x, world.col[2].y, world.col[2].z}.normalized();
         const Vec3 right = Vec3{world.col[1].x, world.col[1].y, world.col[1].z}.cross(forward).normalized();
         const Vec3 down = forward.cross(right).normalized();
-        const f32 fov = layer->tracks.sample_or(TrackProperty::Fov, layer->local_time(time), layer->camera.fov);
+        const f32 fov = camera_fov_deg_at(*layer, static_cast<f64>(layer->local_time(time).value));
         const f32 length = height * 0.4f, halfY = length * std::tan(std::clamp(fov, 1.0f, 170.0f) * kDeg2Rad * 0.5f);
         const f32 halfX = halfY * width / std::max(1.0f, height);
         const Vec3 center = origin + forward * length;
@@ -8698,7 +8746,8 @@ bool Engine::mutates_model(CommandType type) noexcept {
         || type == CommandType::AudioSetVolume || type == CommandType::AudioSetPan
         || type == CommandType::LayerSetSpeed || type == CommandType::LayerSetReversed
         || type == CommandType::ShapeSetFill || type == CommandType::ShapeSetStroke
-        || type == CommandType::ShapeSetParam || type == CommandType::LayerLayoutTransform || type == CommandType::LayerSetLightParam || type == CommandType::LayerSetMaterialParam;
+        || type == CommandType::ShapeSetParam || type == CommandType::LayerLayoutTransform || type == CommandType::LayerSetLightParam || type == CommandType::LayerSetMaterialParam
+        || type == CommandType::LayerSetCameraParam;
 }
 
 void Engine::record_history_locked(CommandType type) noexcept {
@@ -8798,6 +8847,7 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::ShapeSetParam:        return finite(c.shape_param.value);
         case CommandType::LayerSetMaterialParam: return c.material_param.param < 6 && finite(c.material_param.value) && c.material_param.value >= 0 && c.material_param.value <= 1;
         case CommandType::LayerSetLightParam: return c.shape_param.param < 10 && finite(c.shape_param.value);
+        case CommandType::LayerSetCameraParam: return c.shape_param.param < 5 && finite(c.shape_param.value);
         case CommandType::LayerLayoutTransform: return c.shape_param.param < 15 && finite(c.shape_param.value);
         case CommandType::ShapeSetFill:
         case CommandType::ShapeSetStroke:
@@ -9219,6 +9269,51 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 *field += delta;
             } else *field = v;
             return OkStatus;
+        }
+        case CommandType::LayerSetCameraParam: {
+            // LENTE (mesma semântica do transform): trilha com keyframe → o
+            // keyframe no cabeçote (cria ou atualiza); sem → o valor parado.
+            Layer* l = need_layer(cmd.shape_param.layer);
+            if (!l || l->kind != LayerKind::Camera) return Errc::NotFound;
+            if (l->locked) return Errc::InvalidState;
+            const u32 p = cmd.shape_param.param;
+            const f32 v = cmd.shape_param.value;
+            const FrameIndex local = l->local_time(playback_.current());
+            if (p == 1) { l->camera.dofEnabled = v >= 0.5f; return OkStatus; }
+            auto keyed = [&](TrackProperty property, f32 value, f32& field) -> Status {
+                Track* track = l->tracks.find(property);
+                if (track && track->has_expression()) return Status{Errc::InvalidState, "lente controlada por expressao"};
+                if (track && !track->keys.empty()) track->set(local, value);
+                else field = value;
+                return OkStatus;
+            };
+            if (p == 0) {
+                if (v < kCameraFocalMinMm || v > kCameraFocalMaxMm) return Errc::InvalidArgument;
+                // A distância focal manda na projeção: FOV = 2·atan(24 / 2f).
+                // Trilha de mm com keyframe → keyframe; FOV animado (projeto
+                // antigo, script) → keyframe de FOV equivalente; o parado
+                // (fov + mm) acompanha sempre.
+                Track* focal = l->tracks.find(TrackProperty::FocalLength);
+                Track* fov = l->tracks.find(TrackProperty::Fov);
+                const bool focalKeyed = focal && !focal->keys.empty();
+                if ((focal && focal->has_expression()) || (!focalKeyed && fov && fov->has_expression()))
+                    return Status{Errc::InvalidState, "lente controlada por expressao"};
+                if (focalKeyed) { focal->set(local, v); return OkStatus; }
+                if (fov && !fov->keys.empty()) fov->set(local, camera_fov_from_focal(v));
+                l->camera.focalLength = v;
+                l->camera.fov = camera_fov_from_focal(v);
+                return OkStatus;
+            }
+            if (p == 2) {
+                if (v < 0.01f || v > 1.0e7f) return Errc::InvalidArgument;
+                return keyed(TrackProperty::FocusDistance, v, l->camera.focusDistance);
+            }
+            if (p == 3) {
+                if (v < 0.5f || v > 64.0f) return Errc::InvalidArgument;
+                return keyed(TrackProperty::Aperture, v, l->camera.aperture);
+            }
+            if (v < 0.0f || v > 4.0f) return Errc::InvalidArgument;
+            return keyed(TrackProperty::CameraBlur, v, l->camera.blurAmount);
         }
         case CommandType::LayerLayoutTransform: {
             Layer* l = need_layer(cmd.shape_param.layer);

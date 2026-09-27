@@ -162,7 +162,35 @@ struct SceneCamera {
     Vec3 position{0, 0, 0};
     f32  fovY = 0.785f;                ///< radianos
     f32  nearZ = 1.0f;                 ///< px
+    // --- Lente: profundidade de campo (CameraData, no instante) --------------
+    bool dof = false;                  ///< falso = imagem toda nítida (câmera padrão/editor)
+    f32  focusDistance = 0.0f;         ///< px do mundo, ao longo do eixo ótico
+    f32  fStop = 2.8f;
+    f32  blurAmount = 1.0f;            ///< × o círculo de confusão físico
+    f32  pixelsPerMeter = 1.0f;        ///< scene_pixels_per_meter(altura da composição)
 };
+
+/// Profundidade de campo pela LENTE FINA. Diâmetro do círculo de confusão no
+/// sensor de um ponto a S2 com foco em S1 (tudo em mm):
+///     c = f² / (N·(S1 − f)) · |S2 − S1| / S2
+/// f = a focal equivalente do FOV vertical no sensor de 24 mm (12/tan(fovY/2),
+/// vale também com FOV animado), N = f-stop; distâncias do mundo em px viram
+/// mm pela escala física da cena. No quadro: c / 24 mm × altura (px); o raio
+/// é a metade. Como S2 = nearZ / d (profundidade Z reversa de far infinito),
+///     raio(d) = cocScale · (1 − focusOverNear · d)
+/// — linear em d: negativo = antes do foco (perto), positivo = depois.
+struct DofLens {
+    f32 cocScale = 0.0f;       ///< px (raio no infinito, já × blurAmount)
+    f32 focusOverNear = 0.0f;  ///< S1 / nearZ
+    f32 maxRadius = 0.0f;      ///< teto do raio (px): o desfoque é limitado
+    [[nodiscard]] bool active() const noexcept { return cocScale > 0.05f && maxRadius >= 0.5f; }
+    /// Raio (px, com sinal) de um ponto a `depth` px do mundo no eixo ótico.
+    [[nodiscard]] f32 radius_at_depth(f32 depth, f32 nearZ) const noexcept {
+        const f32 d = nearZ / std::max(depth, 1e-3f);
+        return std::clamp(cocScale * (1.0f - focusOverNear * d), -maxRadius, maxRadius);
+    }
+};
+[[nodiscard]] DofLens dof_lens(const SceneCamera& camera, u32 imageHeight) noexcept;
 
 /// Tudo que um grupo 3D precisa para um frame. Montado no prepare (com o
 /// modelo travado), consumido no render (sem trava).
@@ -318,6 +346,9 @@ public:
     }
     /// Amostras que o passe da cena usa de fato (pedido ∩ aparelho).
     [[nodiscard]] u32 pass_samples() const noexcept;
+    /// Profundidade de campo: amostras do disco por pixel (o preview usa
+    /// poucas, o export muitas). 0 = desligada mesmo com a lente pedindo.
+    void set_dof_quality(u32 taps) noexcept { dofTaps_ = std::min(taps, 256u); }
     [[nodiscard]] PipelineKey plane_key() const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.
@@ -401,6 +432,13 @@ private:
     [[nodiscard]] FGTexture build_post(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
                                        FGTexture display, FGTexture scene) noexcept;
     [[nodiscard]] FGTexture build_fxaa(FrameGraph& graph, u32 width, u32 height, FGTexture src) noexcept;
+    /// Profundidade de campo ANTES do bloom e do tone map (luz HDR linear: o
+    /// realce vira bokeh). Dois passes: raio do círculo de confusão por pixel
+    /// (da profundidade de 1 amostra) e o gather no disco, que devolve cena e
+    /// 2D de exibição desfocados (MRT). Falso = segue sem DOF.
+    [[nodiscard]] bool build_dof(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
+                                 FGTexture& display, FGTexture& scene, FGTexture depth) noexcept;
+    u32 dofTaps_ = 32;
     [[nodiscard]] PipelineKey shadow_key(bool skinned) const noexcept;
     u32 shadowSize_ = 2048;
     u32 shadowFilter_ = 2;

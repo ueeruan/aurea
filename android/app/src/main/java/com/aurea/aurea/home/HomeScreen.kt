@@ -30,15 +30,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aurea.aurea.BuildConfig
+import androidx.compose.ui.res.pluralStringResource
 import com.aurea.aurea.R
+import com.aurea.aurea.conta.ContaEstado
+import com.aurea.aurea.conta.ContaViewModel
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaActionSheet
+import com.aurea.aurea.ui.ds.AureaAlert
 import com.aurea.aurea.ui.ds.SheetAction
 import com.aurea.aurea.ui.theme.*
 
 @Composable
 fun HomeScreen(store: EditorStore) {
     val vm: HomeViewModel = viewModel()
+    // O mesmo ViewModel da MainActivity (mesmo dono, mesma chave).
+    val conta: ContaViewModel = viewModel()
+    var confirmLogout by remember { mutableStateOf(false) }
     val projects = rememberTabListState(vm, HomeViewModel.PROJECTS_TAB)
     val settings = rememberTabListState(vm, HomeViewModel.SETTINGS_TAB)
     var menu by remember { mutableStateOf(false) }
@@ -52,7 +59,10 @@ fun HomeScreen(store: EditorStore) {
     Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()) {
         LiveNoticeBanners(vm.notices)
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("aurea", style = AureaType.HeadlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-1).sp), modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text("aurea", style = AureaType.HeadlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-1).sp))
+                RegisteredUsersLine(conta.usuarios)
+            }
             ReleaseNotesEntry()
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -69,17 +79,41 @@ fun HomeScreen(store: EditorStore) {
             })
     }
     if (newProject) NewProjectSheetFor(store, vm, store.projects) { newProject = false }
-    if (menu) AureaActionSheet(title = "Aurea", onDismiss = { menu = false }, actions = listOf(
+    val signedIn = (conta.estado as? ContaEstado.Dentro)?.email
+    if (menu) AureaActionSheet(title = "Aurea",
+        message = signedIn?.let { stringResource(R.string.conta_conectado, it) },
+        onDismiss = { menu = false }, actions = listOf(
         SheetAction(stringResource(R.string.home_tab_settings)) { vm.selectTab(HomeViewModel.SETTINGS_TAB) },
         SheetAction(stringResource(R.string.settings_group_about)) { about = true },
         SheetAction(stringResource(R.string.licenses_title)) { licenses = true },
+        SheetAction(stringResource(R.string.conta_sair), destructive = true) { confirmLogout = true },
     ))
+    if (confirmLogout) AureaAlert(
+        title = stringResource(R.string.conta_sair),
+        message = stringResource(R.string.conta_sair_mensagem),
+        confirmLabel = stringResource(R.string.conta_sair),
+        destructive = true,
+        onConfirm = { confirmLogout = false; conta.sair() },
+        onDismiss = { confirmLogout = false },
+    )
     if (about || licenses) AlertDialog(onDismissRequest = { about = false; licenses = false },
         title = { Text(stringResource(if (licenses) R.string.licenses_title else R.string.settings_group_about)) },
         text = { Text(if (licenses) stringResource(R.string.licenses_ai_body) else
             "Aurea ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n\n" + stringResource(R.string.settings_technology_value) + "\n\n" + stringResource(R.string.settings_made_by),
             modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) },
         confirmButton = { TextButton(onClick = { about = false; licenses = false }) { Text(stringResource(R.string.editor_fechar)) } })
+}
+
+/** "N pessoas cadastradas" sob o título (do Worker; guardado para abrir offline). */
+@Composable
+internal fun RegisteredUsersLine(count: Int?) {
+    if (count == null) return
+    val formatted = remember(count) { java.text.NumberFormat.getIntegerInstance().format(count) }
+    Row(Modifier.testTag("home.registeredUsers").padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(6.dp).background(AureaColors.Success, CircleShape))
+        Text(pluralStringResource(R.plurals.conta_usuarios, count, formatted), style = AureaType.Note)
+    }
 }
 
 /** Equal side groups keep Create precisely centered at every phone width. */

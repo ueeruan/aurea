@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CA2127000000000000000001 /* Conta.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000002 /* Conta.swift */; };
+		CA2127000000000000000003 /* ContaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000004 /* ContaView.swift */; };
+		CA2127000000000000000005 /* CrashReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000006 /* CrashReporter.swift */; };
 		DA2121000000000000000001 /* CommandSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000002 /* CommandSearch.swift */; };
 		DA2121000000000000000003 /* editor_commands.json in Resources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000004 /* editor_commands.json */; };
 		DA2113000000000000000001 /* PerformanceTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2113000000000000000002 /* PerformanceTest.swift */; };
@@ -95,6 +98,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		CA2127000000000000000002 /* Conta.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conta.swift; sourceTree = "<group>"; };
+		CA2127000000000000000004 /* ContaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContaView.swift; sourceTree = "<group>"; };
+		CA2127000000000000000006 /* CrashReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReporter.swift; sourceTree = "<group>"; };
 		DA2121000000000000000002 /* CommandSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSearch.swift; sourceTree = "<group>"; };
 		DA2121000000000000000004 /* editor_commands.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Resources/editor_commands.json; sourceTree = "<group>"; };
 		DA2113000000000000000002 /* PerformanceTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTest.swift; sourceTree = "<group>"; };
@@ -226,6 +232,9 @@
 			children = (
 				AE0000000000000000000001 /* AureaApp.swift */,
 				AE0000000000000000000002 /* ContentView.swift */,
+				CA2127000000000000000002 /* Conta.swift */,
+				CA2127000000000000000004 /* ContaView.swift */,
+				CA2127000000000000000006 /* CrashReporter.swift */,
 				AE0000000000000000000003 /* HomeView.swift */,
 				AE0000000000000000000120 /* HomeBackdrop.swift */,
 				AE0000000000000000000004 /* EditorView.swift */,
@@ -483,6 +492,9 @@
 			files = (
 				AE0000000000000000000039 /* AureaApp.swift in Sources */,
 				AE000000000000000000003A /* ContentView.swift in Sources */,
+				CA2127000000000000000001 /* Conta.swift in Sources */,
+				CA2127000000000000000003 /* ContaView.swift in Sources */,
+				CA2127000000000000000005 /* CrashReporter.swift in Sources */,
 				AE000000000000000000003B /* HomeView.swift in Sources */,
 				AE0000000000000000000121 /* HomeBackdrop.swift in Sources */,
 				AE000000000000000000003C /* EditorView.swift in Sources */,

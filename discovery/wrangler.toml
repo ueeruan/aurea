@@ -64,3 +64,44 @@ AI_VIDEO_GLOBAL_DAILY_LIMIT = "60"
 AI_VIDEO_DEVICE_CONCURRENT = "1"
 AI_VIDEO_GLOBAL_CONCURRENT = "6"
 AI_VIDEO_TICKETS_PER_HOUR = "12"
+# Crash do app → e-mail do desenvolvedor (crash.js / email.js). Ver
+# docs/architecture/CONTAS_E_CRASH_2026-09-27.md. Secrets (NUNCA aqui):
+#   RESEND_API_KEY      chave da Resend (caminho "resend")
+#   CRASH_ADMIN_TOKEN   token do GET /api/crash/list e /api/crash/item
+CRASH_EMAIL_TO = "ruanpablombl@gmail.com"
+# "auto" | "cloudflare" | "resend" | "none"
+CRASH_EMAIL_PROVIDER = "auto"
+# Remetente do caminho "cloudflare": endereço de um domínio com Email Routing.
+# CRASH_EMAIL_FROM = "crash@seu-dominio.com"
+CRASH_EMAIL_DAILY_LIMIT = "50"
+CRASH_TTL_DAYS = "30"
+
+[[durable_objects.bindings]]
+name = "CAPTION_COMMUNITY"
+class_name = "CaptionCommunity"
+
+[[migrations]]
+tag = "v2-caption-community"
+new_sqlite_classes = ["CaptionCommunity"]
+
+# -----------------------------------------------------------------------------
+# Contas obrigatórias — /api/auth/* e /api/stats/users (contas.js)
+#
+# O D1 guarda os usuários (e-mail ÚNICO) e o contador de cadastrados, somado na
+# mesma transação do cadastro. Antes do primeiro deploy com isto:
+#   npx wrangler d1 create aurea-contas          # cole o database_id abaixo
+#   npx wrangler d1 migrations apply aurea-contas --remote
+# Sem o id verdadeiro o `wrangler deploy` recusa — de propósito.
+# -----------------------------------------------------------------------------
+[[d1_databases]]
+binding = "AUREA_DB"
+database_name = "aurea-contas"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# Caminho "cloudflare" do e-mail de crash (Email Workers). Só descomente depois
+# de ativar o Email Routing num domínio da conta e VERIFICAR o destino nele —
+# com o destino não verificado o deploy falha.
+# [[send_email]]
+# name = "CRASH_EMAIL"
+# destination_address = "ruanpablombl@gmail.com"

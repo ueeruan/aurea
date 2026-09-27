@@ -541,6 +541,18 @@ public:
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
     [[nodiscard]] Status set_material_param(u64 layer, u32 material, u32 param, f32 value) noexcept;
     [[nodiscard]] bool query_light(u64 layer, f32* values) noexcept;
+    /// Lente da câmera 3D no cabeçote (9 valores): [0] distância focal (mm,
+    /// a que a projeção usa), [1] FOV vertical (°) calculado dela (sensor full
+    /// frame 36×24, altura 24 mm), [2] DOF ligado, [3] distância de foco (px do
+    /// mundo), [4] abertura (f/), [5] força do desfoque (×), [6] px por metro
+    /// da cena, [7] máscara de trilhas com keyframe (bit 0 mm, 1 foco,
+    /// 2 abertura, 3 desfoque), [8] câmera ativa. Falso = não é câmera.
+    [[nodiscard]] bool query_camera_lens(u64 layer, f32* values) noexcept;
+    /// Pick Focus: distância AO LONGO DO EIXO ÓTICO da câmera `layer` até a
+    /// superfície 3D sob o ponto (px da composição), com o raio da câmera
+    /// ativa (a que o palco mostra). Só mede; a UI grava com
+    /// LayerSetCameraParam (um passo de desfazer). < 0 = nada 3D ali.
+    [[nodiscard]] f32 pick_focus_distance(u64 layer, f32 compX, f32 compY) noexcept;
     // Diagnostic source playback: transient, never changes the project or export.
     bool set_raw_playback(bool enabled) noexcept;
     std::string playback_report() noexcept;

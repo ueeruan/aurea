@@ -385,6 +385,17 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
     inst.morphWeights = std::move(pose.morphWeights);
 }
 
+/// FOV vertical (graus) da câmera no instante local: a trilha de distância
+/// focal (mm) manda quando tem keyframe — uma zoom 24→85 mm interpola em mm,
+/// como uma lente de verdade, e a projeção sai de FOV = 2·atan(24 / 2f);
+/// senão a trilha de FOV; senão o valor parado (sincronizado com o mm).
+f32 camera_fov_frac(const Layer& l, f64 local) noexcept {
+    if (const Track* focal = l.tracks.find(TrackProperty::FocalLength); focal && focal->driven())
+        return camera_fov_from_focal(sample_frac(*focal, local, l.camera.focalLength));
+    const Track* fov = l.tracks.find(TrackProperty::Fov);
+    return fov ? sample_frac(*fov, local, l.camera.fov) : l.camera.fov;
+}
+
 /// Câmera da composição no instante: a camada de câmera ATIVA visível; sem
 /// ela, a padrão (plano Z=0 em escala 1:1 com a composição).
 scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, u32 h) noexcept {
@@ -418,10 +429,21 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
         v.col[3] = Vec4{-x.dot(t), -y.dot(t), -z.dot(t), 1};
         cam.view = v;
         cam.position = t;
-        const Track* fov = l->tracks.find(TrackProperty::Fov);
-        const f32 deg = fov ? sample_frac(*fov, local, l->camera.fov) : l->camera.fov;
-        cam.fovY = std::clamp(deg, 1.0f, 170.0f) * kDeg2Rad;
+        cam.fovY = std::clamp(camera_fov_frac(*l, local), 1.0f, 170.0f) * kDeg2Rad;
         cam.nearZ = std::max(0.1f, l->camera.nearPlane);
+        // Lente: profundidade de campo no instante (preview e export iguais).
+        if (l->camera.dofEnabled) {
+            auto lens = [&](TrackProperty p, f32 fallback) {
+                const Track* t = l->tracks.find(p);
+                const f32 v = t ? sample_frac(*t, local, fallback) : fallback;
+                return std::isfinite(v) ? v : fallback;
+            };
+            cam.dof = true;
+            cam.focusDistance = std::max(0.01f, lens(TrackProperty::FocusDistance, l->camera.focusDistance));
+            cam.fStop = std::clamp(lens(TrackProperty::Aperture, l->camera.aperture), 0.5f, 64.0f);
+            cam.blurAmount = std::clamp(lens(TrackProperty::CameraBlur, l->camera.blurAmount), 0.0f, 4.0f);
+            cam.pixelsPerMeter = scene3d::scene_pixels_per_meter(comp.height());
+        }
         const Vec2 sourceSize = l->camera.trackingSourceSize;
         const Layer* source = comp.layer(l->cameraTrackSource);
         if (source && sourceSize.x > 0 && sourceSize.y > 0) {
@@ -450,6 +472,122 @@ Mat4 comp_view_projection_frac(const Composition& comp, f64 time, u32 w, u32 h) 
 }
 
 } // namespace
+
+f32 camera_fov_deg_at(const Layer& camera, f64 localFrame) noexcept { return camera_fov_frac(camera, localFrame); }
+
+namespace {
+/// Raio × caixa (slab): entra antes de `limit`?
+bool ray_hits_box(Vec3 o, Vec3 d, const scene3d::Aabb& b, f32 limit) noexcept {
+    if (!b.valid()) return false;
+    f32 t0 = 0.0f, t1 = limit;
+    const f32 oo[3]{o.x, o.y, o.z}, dd[3]{d.x, d.y, d.z};
+    const f32 lo[3]{b.min.x, b.min.y, b.min.z}, hi[3]{b.max.x, b.max.y, b.max.z};
+    for (int a = 0; a < 3; ++a) {
+        if (std::fabs(dd[a]) < 1e-12f) {
+            if (oo[a] < lo[a] || oo[a] > hi[a]) return false;
+            continue;
+        }
+        f32 n = (lo[a] - oo[a]) / dd[a], f = (hi[a] - oo[a]) / dd[a];
+        if (n > f) std::swap(n, f);
+        t0 = std::max(t0, n);
+        t1 = std::min(t1, f);
+        if (t0 > t1) return false;
+    }
+    return true;
+}
+/// Möller-Trumbore, dos dois lados (a face de trás também serve ao foco).
+bool ray_hits_triangle(Vec3 o, Vec3 d, Vec3 a, Vec3 b, Vec3 c, f32& t) noexcept {
+    const Vec3 e1 = b - a, e2 = c - a;
+    const Vec3 p = d.cross(e2);
+    const f32 det = e1.dot(p);
+    if (std::fabs(det) < 1e-12f) return false;
+    const f32 inv = 1.0f / det;
+    const Vec3 s = o - a;
+    const f32 u = s.dot(p) * inv;
+    if (u < 0.0f || u > 1.0f) return false;
+    const Vec3 q = s.cross(e1);
+    const f32 v = d.dot(q) * inv;
+    if (v < 0.0f || u + v > 1.0f) return false;
+    t = e2.dot(q) * inv;
+    return t > 0.0f;
+}
+} // namespace
+
+bool pick_scene_point(const Composition& comp, FrameIndex time, f32 compX, f32 compY,
+                      std::shared_ptr<const scene3d::SceneAsset> (*lookup)(void* ctx, AssetId id), void* ctx,
+                      Vec3& outWorld) noexcept {
+    if (!lookup || !std::isfinite(compX) || !std::isfinite(compY)) return false;
+    const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
+    const scene3d::SceneCamera cam = camera_for(comp, time, w, h);
+    // px da composição → clip, desfazendo o enquadramento da fonte rastreada
+    // (afim no plano x/y do clip; identidade numa câmera comum).
+    f32 nx = 2.0f * compX / static_cast<f32>(w) - 1.0f, ny = 2.0f * compY / static_cast<f32>(h) - 1.0f;
+    {
+        const Mat4& m = cam.imageTransform;
+        const f32 a = m.col[0].x, b = m.col[1].x, c = m.col[0].y, d = m.col[1].y;
+        const f32 det = a * d - b * c;
+        if (std::fabs(det) < 1e-9f) return false;
+        const f32 px = nx - m.col[3].x, py = ny - m.col[3].y;
+        nx = (d * px - b * py) / det;
+        ny = (-c * px + a * py) / det;
+    }
+    const f32 aspect = static_cast<f32>(w) / static_cast<f32>(h);
+    const f32 t = std::tan(cam.fovY * 0.5f);
+    const Mat4& v = cam.view;
+    const Vec3 ax{v.col[0].x, v.col[1].x, v.col[2].x}, ay{v.col[0].y, v.col[1].y, v.col[2].y},
+               az{v.col[0].z, v.col[1].z, v.col[2].z};
+    const Vec3 dir = (ax * (nx * aspect * t) + ay * (ny * t) + az).normalized();
+    const Vec3 origin = cam.position;
+    f32 best = std::numeric_limits<f32>::max();
+    const OrderedIds<LayerId>& order = comp.order();
+    std::vector<Vec3> pts;
+    for (u32 i = 0; i < order.size(); ++i) {
+        const Layer* l = comp.layer(order.at(i));
+        if (!l || !l->visible || !l->contains_time(time) || l->kind != LayerKind::Model3D) continue;
+        const std::shared_ptr<const scene3d::SceneAsset> asset = lookup(ctx, l->model.scene);
+        if (!asset) continue;
+        scene3d::SceneInstance inst;
+        place_model(comp, *l, *asset, static_cast<f64>(time.value), inst);
+        for (usize n = 0; n < asset->nodes.size(); ++n) {
+            const scene3d::Node& node = asset->nodes[n];
+            if (node.mesh < 0 || static_cast<usize>(node.mesh) >= asset->meshes.size()) continue;
+            const Mat4 m = inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
+            const bool skinNode = node.skin >= 0 && static_cast<usize>(node.skin) < inst.skinJointOffset.size();
+            for (const scene3d::Primitive& prim : asset->meshes[static_cast<usize>(node.mesh)].primitives) {
+                const bool sk = skinNode && prim.skinned() && prim.joints.size() >= prim.positions.size() * 4
+                             && prim.weights.size() >= prim.positions.size();
+                if (!sk && !ray_hits_box(origin, dir, prim.bounds.transformed(m), best)) continue;
+                // Pose do quadro: skin na CPU (as mesmas matrizes do render);
+                // morph fica na forma base (aproximação do foco).
+                pts.resize(prim.positions.size());
+                const usize first = sk ? inst.skinJointOffset[static_cast<usize>(node.skin)] : 0;
+                for (usize k = 0; k < prim.positions.size(); ++k) {
+                    const Vec3 pos = prim.positions[k];
+                    if (!sk) { pts[k] = m.transform_point(pos); continue; }
+                    const Vec4 wt = prim.weights[k];
+                    const f32 ws[4]{wt.x, wt.y, wt.z, wt.w};
+                    Vec3 acc{0, 0, 0};
+                    for (usize j = 0; j < 4; ++j) {
+                        const usize joint = first + prim.joints[k * 4 + j];
+                        if (ws[j] <= 0.0f || joint >= inst.jointMatrices.size()) continue;
+                        acc = acc + inst.jointMatrices[joint].transform_point(pos) * ws[j];
+                    }
+                    pts[k] = inst.world.transform_point(acc);
+                }
+                const usize tris = prim.indices.size() / 3;
+                for (usize k = 0; k < tris; ++k) {
+                    const u32 i0 = prim.indices[k * 3], i1 = prim.indices[k * 3 + 1], i2 = prim.indices[k * 3 + 2];
+                    if (i0 >= pts.size() || i1 >= pts.size() || i2 >= pts.size()) continue;
+                    f32 hit = 0.0f;
+                    if (ray_hits_triangle(origin, dir, pts[i0], pts[i1], pts[i2], hit) && hit < best) best = hit;
+                }
+            }
+        }
+    }
+    if (!(best < std::numeric_limits<f32>::max())) return false;
+    outWorld = origin + dir * best;
+    return true;
+}
 
 scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& editor) noexcept {
     scene3d::SceneCamera cam = scene3d::default_camera(width, height);
@@ -2522,6 +2660,10 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             apply_scene3d_quality(q, static_cast<Scene3DQuality>(group.post.quality));
             scene3d_.set_quality(q.shadowMapSize, q.shadowFilter, heavyQ_.lodBias, !heavyQ_.exportFrame);
             scene3d_.set_post_quality(q.msaaSamples, q.fxaa, q.bloomStartDiv, q.bloomLevels);
+            // Profundidade de campo: o preview é simplificado (poucas amostras
+            // do disco, menos ainda no BAIXO); o export usa muitas.
+            scene3d_.set_dof_quality(heavyQ_.exportFrame ? 96u
+                : static_cast<Scene3DQuality>(group.post.quality) == Scene3DQuality::Low ? 16u : 32u);
             // IBL do preview pelo nível: BAIXO gera mapas menores (especular
             // 128², fundo 256²), ULTRA já usa os do export; AUTO/MÉDIO/ALTO o
             // padrão. Fixo por nível (não pela escala do AUTO): regerar o IBL

@@ -808,25 +808,31 @@ private suspend fun PointerInputScope.stageGestures(
                 val zCollapsed = axis == 2 && kotlin.math.hypot(ax, ay) * 80.dp.toPx() / max(rawExtent, 0.0001f) < zOff * 0.6f
                 var last = down.position
                 store.beginGesture("mover no eixo ${"XYZ"[axis]}")
-                do {
-                    val e = awaitPointerEvent()
-                    if (e.changes.count { it.pressed } > 1) break
-                    val c = e.changes.firstOrNull { it.id == down.id } ?: break
-                    c.consume()
-                    val dx = c.position.x - last.x
-                    val dy = c.position.y - last.y
-                    last = c.position
-                    val amount = if (zCollapsed) {
-                        // Olhando reto para Z: arrastar para cima afasta (Z+ é para dentro).
-                        -dy / m.fit * 2f
-                    } else if (len2 > 1f) {
-                        (dx * ax + dy * ay) / len2 * GIZMO_LENGTH
-                    } else {
-                        0f
-                    }
-                    if (amount != 0f) store.gizmoDrag(axis, amount)
-                } while (c.pressed)
-                store.endGesture()
+                try {
+                    do {
+                        val e = awaitPointerEvent()
+                        if (e.changes.count { it.pressed } > 1) break
+                        val c = e.changes.firstOrNull { it.id == down.id } ?: break
+                        c.consume()
+                        val dx = c.position.x - last.x
+                        val dy = c.position.y - last.y
+                        last = c.position
+                        val amount = if (zCollapsed) {
+                            // Olhando reto para Z: arrastar para cima afasta (Z+ é para dentro).
+                            -dy / m.fit * 2f
+                        } else if (len2 > 1f) {
+                            (dx * ax + dy * ay) / len2 * GIZMO_LENGTH
+                        } else {
+                            0f
+                        }
+                        if (amount != 0f) store.gizmoDrag(axis, amount)
+                    } while (c.pressed)
+                } finally {
+                    // Pointer input is cancelled when the stage leaves composition.
+                    // Always close history grouping so later edits and autosave
+                    // do not remain part of this interrupted drag.
+                    store.endGesture()
+                }
                 return@awaitEachGesture
             }
         }

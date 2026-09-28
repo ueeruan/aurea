@@ -663,6 +663,18 @@ final class AureaModel: ObservableObject {
                             engine.seek(toFrame: 0); refreshModel(force: true)
                         }
                         panel = .transform
+                    case "curve-isolation-2d":
+                        // Nulo 2D: Posição X e Y são trilhas independentes (sem grupo XYZ).
+                        addNull(threeD: false)
+                        if let id = primarySelection {
+                            for time in [Int32(0), Int32(30), Int32(60)] {
+                                for property in UInt32(0)...UInt32(1) {
+                                    engine.insertKeyframe(forLayer: id, property: property, time: time, value: Float(200 + time))
+                                }
+                            }
+                            engine.seek(toFrame: 0); refreshModel(force: true)
+                        }
+                        panel = .transform
                     case "timeline-keys":
                         // Posição X em 0 e 30; Escala X em 15 e 45 (seleção entre propriedades).
                         addNull(threeD: false)

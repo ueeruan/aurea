@@ -176,7 +176,8 @@ class ManualEditingWorkflowTest {
         val reopenedNull = store.layers.first { it.name == "AMV controller" }.id
         select(reopenedNull); compose.runOnIdle { assertEquals(2, store.keyframes[reopenedNull].orEmpty().size) }
         val reopenedCamera=store.layers.first { it.name=="AMV camera" }.id
-        select(reopenedCamera); compose.runOnIdle { assertEquals(2,store.keyframes[reopenedCamera].orEmpty().size) }
+        // Câmera 3D: X em 0 e o grupo XYZ em 120 (keyframes XYZ agrupados do build 2125).
+        select(reopenedCamera); compose.runOnIdle { assertEquals(4,store.keyframes[reopenedCamera].orEmpty().size) }
         val output = File(context.filesDir,"manual-editing-acceptance.mp4")
         val progress = ExportProgress()
         val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())

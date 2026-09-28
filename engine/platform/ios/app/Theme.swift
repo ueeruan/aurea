@@ -935,7 +935,9 @@ enum EditorLayout {
     private static let panelFraction: CGFloat = 0.46
     private static let addBody: CGFloat = 280
     private static let sheetHandle: CGFloat = 12
-    private static let batchBody: CGFloat = 124
+    /// Lote: 4 + tempo 52 + 8 + tela 48 + 8 + escalonar 48 + 8 de respiro. Com
+    /// 124 a fileira de escalonar ficava espremida (14 pt, abaixo do alvo de 44).
+    private static let batchBody: CGFloat = 180
     private static let hintBody: CGFloat = 30
     /// A barra fixa de adicionar (sem camada escolhida): ícone 23 + nome 11.
     static let addBar: CGFloat = 64

@@ -165,6 +165,11 @@ struct CommandSearchView: View {
     private func execute(_ hit: CommandHit) {
         if let effect = hit.effect {
             let targets = model.layers.filter { model.selection.contains($0.id) && !$0.locked }
+            // A pilha que já existia fica "vista": o painel de efeitos que abre
+            // agora reconhece o NOVO, abre o cartão dele e rola até lá (como o
+            // toque no catálogo). Sem isso, numa camada que já tinha efeitos e
+            // o painel fechado, o efeito entrava fechado no fim da pilha.
+            if let layer = model.primarySelection { model.seenEffectIds[layer] = Set(model.effects.map(\.effectId)) }
             model.mutate { engine in
                 engine.beginUndoGroup()
                 for layer in targets { engine.addEffect(effect, toLayer: layer.id, at: UInt32.max) }

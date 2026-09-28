@@ -547,6 +547,37 @@ import XCTest
         XCTAssertEqual(after.layerStarts, cleared.layerStarts)
     }
 
+    /// Camada escolhida com a doca aberta: a timeline é a fileira única dela,
+    /// "sem ficar impossível de mexer" (par do Timeline.kt/EditorScreen.kt).
+    /// Arrastar na barra compacta só rola (nunca desmarca) e o ícone do tipo na
+    /// calha ABRE as trilhas da camada em vez de sair.
+    func testCompactDockRowScrollsWithoutDeselectingAndGutterOpensTracks() throws {
+        let before = try launch("layer-dock")
+        _ = try awaitSnapshot("The layer opens with its dock") { $0.sheet == "dock" && $0.selectionCount == 1 }
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let frame = timeline.frame
+        // A barra compacta (régua 38; barra de 30), longe das alças e das setas.
+        let start = CGPoint(x: frame.midX + 60, y: frame.minY + 50)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x - 60, y: start.y)),
+                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        let swiped = try snapshot()
+        XCTAssertEqual(swiped.selectionCount, 1, "A horizontal drag on the compact row must never deselect")
+        XCTAssertEqual(swiped.sheet, "dock")
+        XCTAssertEqual(swiped.primaryID, before.primaryID)
+        XCTAssertEqual(swiped.layerStarts, before.layerStarts, "A plain drag only scrolls; it does not move the clip")
+        // O ícone do tipo (calha de 40 pt, glifo em x 17): abre as trilhas, não sai.
+        coordinate(CGPoint(x: frame.minX + 17, y: frame.minY + 51)).tap()
+        let deadline = Date().addingTimeInterval(0.8)
+        repeat {
+            let state = try snapshot()
+            XCTAssertEqual(state.selectionCount, 1, "The gutter icon opens the tracks instead of leaving the layer")
+            XCTAssertEqual(state.sheet, "dock")
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+    }
+
     func testHoldingLayerToMoveDoesNotOpenOptionsButTapDoes() throws {
         _ = try launch("layer-dock")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
@@ -601,63 +632,111 @@ import XCTest
         _ = try awaitSnapshot("Undo restores all three rotation tracks") { $0.curveKeys == before.curveKeys }
     }
 
+    /// Os componentes que o gráfico edita juntos. Camada/nulo/câmera 3D: o grupo
+    /// XYZ da propriedade (posição, escala, rotação, pivô) — decisão do build 2125
+    /// ("Keyframes XYZ agrupados… o gráfico sincroniza curvas e arrastos do grupo
+    /// XYZ", `graphKeyGroup` no iOS e no EditorStore.kt). Nulo 2D: só o componente
+    /// escolhido (Posição X e Y são trilhas independentes).
+    private func curveGroup(_ property: Int, threeD: Bool) -> Set<Int> {
+        guard threeD, property < 12 else { return [property] }
+        let base = property / 3 * 3
+        return [base, base + 1, base + 2]
+    }
+    /// "curve-isolation": nulo 3D com X/Y/Z em 0/30/60; "curve-isolation-2d": nulo 2D com X/Y.
+    private let curveScenes: [(scene: String, threeD: Bool)] = [("curve-isolation", true), ("curve-isolation-2d", false)]
+
     func testCurvePresetChangesOnlySelectedComponentAndSegment() throws {
-        let before = try launch("curve-isolation")
-        let open = app.buttons["Edit the property curve"].firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 5)); open.tap()
-        let selected = try awaitSnapshot("Independent component curve opens") { $0.sheet == "curve" }
-        let preset = app.buttons["curve.preset.in"].firstMatch
-        XCTAssertTrue(preset.waitForExistence(timeout: 5)); XCTAssertTrue(preset.isHittable); preset.tap()
-        let changed = try awaitSnapshot("Preset changes the selected outgoing segment") {
-            $0.curveKeys.contains { $0.property == Int(selected.curveProperty) && $0.time == 0 && $0.interpolation == 2 }
+        for (scene, threeD) in curveScenes {
+            let before = try launch(scene)
+            let open = app.buttons["Edit the property curve"].firstMatch
+            XCTAssertTrue(open.waitForExistence(timeout: 5)); open.tap()
+            let selected = try awaitSnapshot("Independent component curve opens") { $0.sheet == "curve" }
+            let group: Set<Int> = curveGroup(Int(selected.curveProperty), threeD: threeD)
+            XCTAssertEqual(group.count, threeD ? 3 : 1)
+            let preset = app.buttons["curve.preset.in"].firstMatch
+            XCTAssertTrue(preset.waitForExistence(timeout: 5)); XCTAssertTrue(preset.isHittable); preset.tap()
+            // O segmento que SAI do keyframe 0: o componente (ou o grupo XYZ inteiro no 3D).
+            let changed = try awaitSnapshot("Preset changes the selected outgoing segment (\(scene))") { state in
+                group.allSatisfy { property in
+                    state.curveKeys.contains { $0.property == property && $0.time == 0 && $0.interpolation == 2 }
+                }
+            }
+            // Nenhum outro segmento, componente fora do grupo, tempo ou valor muda.
+            let untouched: (CurveKey) -> Bool = { !group.contains($0.property) || $0.time != 0 }
+            XCTAssertEqual(before.curveKeys.filter(untouched), changed.curveKeys.filter(untouched))
+            XCTAssertEqual(before.curveKeys.map(\.time), changed.curveKeys.map(\.time))
+            XCTAssertEqual(before.curveKeys.map(\.value), changed.curveKeys.map(\.value))
+            try undo()
+            _ = try awaitSnapshot("One undo restores all original curves (\(scene))") { $0.curveKeys == before.curveKeys }
+            app.terminate()
         }
-        let untouched: (CurveKey) -> Bool = { $0.property != Int(selected.curveProperty) || $0.time != 0 }
-        XCTAssertEqual(before.curveKeys.filter(untouched), changed.curveKeys.filter(untouched))
-        try undo()
-        _ = try awaitSnapshot("One undo restores all original curves") { $0.curveKeys == before.curveKeys }
     }
 
     func testValueGraphDragsTimeAndValueWithoutChangingOtherTracks() throws {
-        let before = try launch("curve-isolation")
-        app.buttons["Edit the property curve"].firstMatch.tap()
-        let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
-        app.buttons["curve.mode.1"].tap()
-        let graph = app.otherElements["curve.trackGraph"].firstMatch
-        XCTAssertTrue(graph.waitForExistence(timeout: 5))
-        let frame = graph.frame
-        let start = CGPoint(x: frame.midX, y: frame.midY)
-        let end = CGPoint(x: start.x + 20, y: start.y - 15)
-        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
-        let moved = try awaitSnapshot("Value graph changes both frame and value") {
-            $0.curveKeys.contains { $0.property == Int(selected.curveProperty) && $0.time > 30 && $0.time < 60 && $0.value > 230 }
+        for (scene, threeD) in curveScenes {
+            let before = try launch(scene)
+            app.buttons["Edit the property curve"].firstMatch.tap()
+            let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
+            let property = Int(selected.curveProperty)
+            let group: Set<Int> = curveGroup(property, threeD: threeD)
+            app.buttons["curve.mode.1"].tap()
+            let graph = app.otherElements["curve.trackGraph"].firstMatch
+            XCTAssertTrue(graph.waitForExistence(timeout: 5))
+            let frame = graph.frame
+            let start = CGPoint(x: frame.midX, y: frame.midY)
+            let end = CGPoint(x: start.x + 20, y: start.y - 15)
+            coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
+            let moved = try awaitSnapshot("Value graph changes both frame and value (\(scene))") {
+                $0.curveKeys.contains { $0.property == property && $0.time > 30 && $0.time < 60 && $0.value > 230 }
+            }
+            let other: (CurveKey) -> Bool = { !group.contains($0.property) }
+            XCTAssertEqual(before.curveKeys.filter(other), moved.curveKeys.filter(other))
+            XCTAssertEqual(moved.curveKeys.count, before.curveKeys.count)
+            let target: Int = moved.curveKeys.first { $0.property == property && $0.time > 30 && $0.time < 60 }?.time ?? -1
+            for peer in group {
+                // O grupo anda junto no tempo; só o componente arrastado muda de valor.
+                if peer != property {
+                    XCTAssertTrue(moved.curveKeys.contains { $0.property == peer && $0.time == target && $0.value == 230 },
+                                  "XYZ peer \(peer) follows the dragged key in time and keeps its value")
+                }
+                // Os keyframes 0 e 60 do grupo ficam onde estavam.
+                XCTAssertEqual(moved.curveKeys.filter { $0.property == peer && $0.time != target },
+                               before.curveKeys.filter { $0.property == peer && $0.time != 30 })
+            }
+            try undo()
+            _ = try awaitSnapshot("One undo restores time and value (\(scene))") { $0.curveKeys == before.curveKeys }
+            app.terminate()
         }
-        let other: (CurveKey) -> Bool = { $0.property != Int(selected.curveProperty) }
-        XCTAssertEqual(before.curveKeys.filter(other), moved.curveKeys.filter(other))
-        XCTAssertEqual(moved.curveKeys.count, before.curveKeys.count)
-        try undo()
-        _ = try awaitSnapshot("One undo restores time and value") { $0.curveKeys == before.curveKeys }
     }
 
     func testSpeedGraphHandleEditsOnlyOutgoingIntervalAndUndoesOnce() throws {
-        let before = try launch("curve-isolation")
-        app.buttons["Edit the property curve"].firstMatch.tap()
-        let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
-        app.buttons["curve.mode.2"].tap()
-        let graph = app.otherElements["curve.trackGraph"].firstMatch
-        XCTAssertTrue(graph.waitForExistence(timeout:5))
-        let frame = graph.frame
-        let start = CGPoint(x:frame.minX+frame.width*0.2024,y:frame.minY+frame.height*0.0968)
-        let end = CGPoint(x:start.x+12,y:frame.minY+frame.height*0.4)
-        coordinate(start).press(forDuration:0.05,thenDragTo:coordinate(end),withVelocity:.slow,thenHoldForDuration:0.1)
-        let changed = try awaitSnapshot("Speed handle changes the selected interval") {
-            $0.curveKeys != before.curveKeys
+        for (scene, threeD) in curveScenes {
+            let before = try launch(scene)
+            app.buttons["Edit the property curve"].firstMatch.tap()
+            let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
+            let group: Set<Int> = curveGroup(Int(selected.curveProperty), threeD: threeD)
+            app.buttons["curve.mode.2"].tap()
+            let graph = app.otherElements["curve.trackGraph"].firstMatch
+            XCTAssertTrue(graph.waitForExistence(timeout:5))
+            let frame = graph.frame
+            let start = CGPoint(x:frame.minX+frame.width*0.2024,y:frame.minY+frame.height*0.0968)
+            let end = CGPoint(x:start.x+12,y:frame.minY+frame.height*0.4)
+            coordinate(start).press(forDuration:0.05,thenDragTo:coordinate(end),withVelocity:.slow,thenHoldForDuration:0.1)
+            let changed = try awaitSnapshot("Speed handle changes the selected interval (\(scene))") {
+                $0.curveKeys != before.curveKeys
+            }
+            let untouched: (CurveKey) -> Bool = { !group.contains($0.property) || $0.time != 0 }
+            XCTAssertEqual(before.curveKeys.filter(untouched),changed.curveKeys.filter(untouched))
+            XCTAssertEqual(before.curveKeys.map(\.time),changed.curveKeys.map(\.time))
+            XCTAssertEqual(before.curveKeys.map(\.value),changed.curveKeys.map(\.value))
+            // O intervalo que sai do keyframe 0 ganha a curva de velocidade no grupo inteiro.
+            let outgoing: [CurveKey] = changed.curveKeys.filter { group.contains($0.property) && $0.time == 0 }
+            XCTAssertEqual(outgoing.count, group.count)
+            XCTAssertTrue(outgoing.allSatisfy { $0.interpolation == 2 }, "Speed handle writes a Bezier segment on every grouped axis")
+            try undo()
+            _ = try awaitSnapshot("Undo restores speed curve (\(scene))") { $0.curveKeys == before.curveKeys }
+            app.terminate()
         }
-        let untouched: (CurveKey) -> Bool = { $0.property != Int(selected.curveProperty) || $0.time != 0 }
-        XCTAssertEqual(before.curveKeys.filter(untouched),changed.curveKeys.filter(untouched))
-        XCTAssertEqual(before.curveKeys.map(\.time),changed.curveKeys.map(\.time))
-        XCTAssertEqual(before.curveKeys.map(\.value),changed.curveKeys.map(\.value))
-        try undo()
-        _ = try awaitSnapshot("Undo restores speed curve") { $0.curveKeys == before.curveKeys }
     }
 
     func testGraphMovesSelectedKeysTogetherAndUndoesOnce() throws {
@@ -708,8 +787,9 @@ import XCTest
         func has(_ state: Snapshot, _ property: Int, _ time: Int) -> Bool {
             state.curveKeys.contains { $0.property == property && $0.time == time }
         }
-        // Abrir as trilhas pela pílula da camada.
-        coordinate(CGPoint(x: frame.minX + 50, y: frame.minY + 56)).tap()
+        // Abrir as trilhas pelo ícone do tipo na calha (40 pt; o glifo mora em x 17,
+        // o olho no canto de baixo à direita). x 50 já é o corpo do clipe.
+        coordinate(CGPoint(x: frame.minX + 17, y: frame.minY + 51)).tap()
         func selectPositionAndScale() throws {
             // Toque simples: só a Posição X @30 (abre a curva; timeline compacta).
             coordinate(CGPoint(x: keyX(30), y: positionY)).tap()
@@ -1213,6 +1293,9 @@ import XCTest
         let interpolation: Int
         let value: Double
     }
+    /// Sem camada escolhida o probe manda `detail` vazio ({}): os campos voltam
+    /// com o padrão para o resto do snapshot (seleção, pilha, keyframes) ainda
+    /// ser lido. `launch` segue exigindo a geometria real da camada escolhida.
     private struct Detail: Decodable {
         let animatedMask: UInt64
         let kind: UInt32
@@ -1225,5 +1308,22 @@ import XCTest
         let corners: [Double]
         let sourceSize: [Double]
         let anchor: [Double]
+        private enum CodingKeys: String, CodingKey {
+            case animatedMask, kind, startFrame, endFrame, localPlayhead, position, scale, rotation, corners, sourceSize, anchor
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            animatedMask = try c.decodeIfPresent(UInt64.self, forKey: .animatedMask) ?? 0
+            kind = try c.decodeIfPresent(UInt32.self, forKey: .kind) ?? 0
+            startFrame = try c.decodeIfPresent(Int64.self, forKey: .startFrame) ?? 0
+            endFrame = try c.decodeIfPresent(Int64.self, forKey: .endFrame) ?? 0
+            localPlayhead = try c.decodeIfPresent(Int64.self, forKey: .localPlayhead) ?? 0
+            position = try c.decodeIfPresent([Double].self, forKey: .position) ?? []
+            scale = try c.decodeIfPresent([Double].self, forKey: .scale) ?? []
+            rotation = try c.decodeIfPresent([Double].self, forKey: .rotation) ?? []
+            corners = try c.decodeIfPresent([Double].self, forKey: .corners) ?? []
+            sourceSize = try c.decodeIfPresent([Double].self, forKey: .sourceSize) ?? []
+            anchor = try c.decodeIfPresent([Double].self, forKey: .anchor) ?? []
+        }
     }
 }

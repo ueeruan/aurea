@@ -854,6 +854,15 @@ enum TimelinePress {
     static func stackEdit(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dy) >= editRatio * abs(dx) }
 }
 
+/// A timeline vira a fileira única da camada? (par do `timelineCompact` do
+/// Android). Painel aberto: sempre. Doca aberta: só sem trilhas de propriedade
+/// abertas e fora do modo de escolher keyframes — senão fica inteira, para
+/// dar para mexer nas trilhas e nos losangos.
+func timelineCompact(panel: Bool, dock: Bool, tracksOpen: Bool, selectingKeys: Bool) -> Bool {
+    if panel { return true }
+    return dock && !tracksOpen && !selectingKeys
+}
+
 /// "Escalonar": a conta da UI antes do motor (par do `Stagger` do Android).
 enum StaggerPlan {
     static let minStep: Int = -120

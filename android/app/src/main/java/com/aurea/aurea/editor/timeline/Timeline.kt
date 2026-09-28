@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -54,6 +56,9 @@ import com.aurea.aurea.ui.theme.tocavel
  *
  * @param compact modo compacto da A.01 (painel aberto): uma linha, setas
  *   ‹ › trocam de camada, cabeçote vermelho.
+ * @param compactDock camada escolhida com a doca aberta: a mesma fileira
+ *   única, mas só enquanto não há trilhas de propriedade abertas nem escolha
+ *   de keyframes ([timelineCompact]); o ícone do tipo abre as trilhas.
  * @param onEmptyTap toque no vazio (a casca fecha o painel ou desseleciona).
  * @param onKeyframeTap toque num losango: a timeline já chamou
  *   `store.selectKeyframe`; a casca decide se abre o editor de curva.
@@ -64,6 +69,7 @@ fun Timeline(
     compact: Boolean,
     onEmptyTap: () -> Unit,
     modifier: Modifier = Modifier,
+    compactDock: Boolean = false,
     onTrackTap: (layer: Long, property: Int, effect: Int) -> Unit = { _, _, _ -> },
     onKeyframeTap: (layer: Long, key: KeyframeRow) -> Unit = { _, _ -> },
 ) {
@@ -75,6 +81,11 @@ fun Timeline(
     val state = remember { TimelineState() }
     val controller = remember(store) { TimelineController(store, state, scope) }
     val painter = remember(metrics, measurer) { TimelinePainter(metrics, measurer) }
+    // Trilhas abertas de uma camada que ainda existe (só o booleano recompõe).
+    val tracksOpen by remember(controller) {
+        derivedStateOf { controller.expandedLayer.value?.let { id -> store.layers.any { it.id == id } } == true }
+    }
+    val shownCompact = timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode)
 
     // Parâmetros entram depois da composição (o desenho e os gestos leem daqui).
     SideEffect {
@@ -83,7 +94,8 @@ fun Timeline(
         controller.onKeyframeTap = onKeyframeTap
         controller.onTrackTap = onTrackTap
         controller.haptics = haptics
-        state.compact = compact
+        state.compact = shownCompact
+        state.compactByDock = shownCompact && !compact
     }
     // Saiu da tela no meio de um gesto: scrub e passo de desfazer fecham em par.
     DisposableEffect(controller) { onDispose { controller.dispose() } }
@@ -109,7 +121,7 @@ fun Timeline(
         )
         // Irmã (não filha) da superfície de gestos: o toque num botão da barra
         // não chega à timeline embaixo dele.
-        KeyActionBar(store, compact, Modifier.align(if (compact) Alignment.TopEnd else Alignment.BottomCenter))
+        KeyActionBar(store, shownCompact, Modifier.align(if (shownCompact) Alignment.TopEnd else Alignment.BottomCenter))
     }
 }
 

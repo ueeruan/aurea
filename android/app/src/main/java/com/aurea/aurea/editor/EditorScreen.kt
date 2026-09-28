@@ -318,7 +318,8 @@ private fun NarrowEditor(
         if (!ui.fullscreen) {
             // Camada escolhida (doca aberta): a timeline vira a fileira única dela,
             // como com painel aberto — as setas trocam de camada e tocar na barra
-            // volta à timeline inteira.
+            // volta à timeline inteira. O ícone do tipo abre as trilhas da camada
+            // (e a timeline fica inteira enquanto estão abertas); arrastar só rola.
             KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp), compactDock = content == SheetContent.Dock) }
             if (content != SheetContent.None) {
                 ContextArea(store, ui, content, Modifier.fillMaxWidth().height(m.sheet.dp))
@@ -385,7 +386,10 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
     LaunchedEffect(selectingKeys) { if (selectingKeys) ui.panel = null }
     Timeline(
         store = store,
-        compact = ui.panel != null || compactDock,
+        compact = ui.panel != null,
+        // Doca aberta: fileira única só sem trilhas abertas nem escolha de
+        // keyframes; o ícone do tipo abre as trilhas (timeline inteira).
+        compactDock = compactDock,
         onEmptyTap = {
             // Tocar no vazio: com painel aberto só fecha o painel; adicionando,
             // fecha o adicionar; senão desseleciona.

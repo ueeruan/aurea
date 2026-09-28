@@ -471,6 +471,11 @@ internal class TimelineController(
                     // (senão do primeiro); tocar de novo fecha, seja qual for o aberto.
                     val open = expandedLayer.value
                     expandedLayer.value = if (open != null && r.segment(open) != null) null else expandTarget(r).id
+                } else if (state.compactByDock) {
+                    // Fileira compacta da doca: o ícone do tipo ABRE as trilhas da
+                    // camada (a timeline volta inteira enquanto estão abertas) em vez de sair.
+                    tick()
+                    expandedLayer.value = expandTarget(r).id
                 } else selectTap(r)
             }
             HitKind.BODY, HitKind.TRIM_START, HitKind.TRIM_END -> if (r != null) {

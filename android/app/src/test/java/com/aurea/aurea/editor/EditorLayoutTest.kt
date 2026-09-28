@@ -34,6 +34,16 @@ class EditorLayoutTest {
             assertEquals(height * 0.54f - 32f, overview.preview, 0.01f)
         }
     }
+    @Test fun batchSheetFitsTheStaggerRowAtFingerSize() {
+        // Puxador 12 + 4 + tempo 52 + 8 + tela 48 + 8 + escalonar 48: nada espremido.
+        val content = 12f + 4f + 52f + 8f + 48f + 8f + 48f
+        for (height in listOf(568f, 640f, 720f, 780f, 840f, 960f)) {
+            val batch = EditorLayout.solve(height, SheetContent.Batch, false)
+            assertTrue("batch at $height: ${batch.sheet}", batch.sheet >= content)
+            assertTrue(batch.timeline >= 110f)
+            assertEquals(height, batch.topBar + batch.preview + batch.strip + batch.transport + batch.timeline + batch.sheet, 0.01f)
+        }
+    }
     @Test fun dockRowsPutTheLargerHalfBelow() {
         assertEquals(listOf(4), dockRows(4))
         assertEquals(listOf(2, 3), dockRows(5))

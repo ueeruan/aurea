@@ -30,6 +30,8 @@ internal class TimelineState {
      */
     var heldView by mutableDoubleStateOf(Double.NaN)
     var compact by mutableStateOf(false)
+    /** Compacta só por causa da doca: tocar no ícone do tipo abre as trilhas em vez de sair. */
+    var compactByDock by mutableStateOf(false)
     /** Fio do ímã (frame), [Snap.NONE] sem guia. */
     var guideFrame by mutableIntStateOf(Snap.NONE)
     /** Reordenar: linha segurada e destino sob o dedo (−1 = sem reordenar). */

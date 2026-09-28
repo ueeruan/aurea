@@ -124,7 +124,21 @@ struct TimelineView: View {
         var sentFrame: Int64 = -1
         var undoOpen = false
     }
-    private var compact: Bool { model.sheetContent == .panel || model.sheetContent == .curve || (compactDock && model.sheetContent == .dock) }
+    /// Painel aberto: sempre a fileira única. Doca aberta: a fileira única SÓ
+    /// sem trilhas de propriedade abertas e fora do modo de escolher keyframes —
+    /// senão a timeline volta inteira e dá para mexer (par do Timeline.kt).
+    private var compact: Bool {
+        timelineCompact(panel: model.sheetContent == .panel || model.sheetContent == .curve,
+                        dock: compactDock && model.sheetContent == .dock,
+                        tracksOpen: tracksOpen, selectingKeys: model.timelineKeySelectMode)
+    }
+    /// Compacta só por causa da doca (a calha abre as trilhas em vez de sair).
+    private var compactByDock: Bool { compact && compactDock && model.sheetContent == .dock }
+    /// Trilhas abertas de uma camada que ainda existe.
+    private var tracksOpen: Bool {
+        guard let id = expandedLayer else { return false }
+        return model.layers.contains { $0.id == id }
+    }
     private var fps: Float { TimeAxis.safeFps(Float(model.compositionFps)) }
     private var ppf: CGFloat { TimeAxis.pxPerFrame(pps: pps, density: 1, fps: fps) }
     private var viewFrame: Double { heldView ?? Double(clock.frame) }
@@ -174,7 +188,7 @@ struct TimelineView: View {
             .background(AureaColors.stage)
             .overlay {
                 TimelineGestureSurface(
-                    tap: { tap($0, width: size.width) },
+                    tap: { point, origin in tap(point, width: size.width, origin: origin) },
                     pan: { state, start, point, velocity in pan(state, start: start, point: point, velocity: velocity, size: size) },
                     hold: { state, start, point in hold(state, start: start, point: point, size: size) },
                     pinch: { state, scale, focus in pinch(state, scale: scale, focus: focus, width: size.width) }
@@ -794,12 +808,20 @@ struct TimelineView: View {
         result.index = index
         return (chosen.row, result)
     }
-    private func tap(_ point: CGPoint, width: CGFloat) {
+    /// `origin`: onde o dedo pousou (nil = o próprio ponto, toque sintetizado).
+    private func tap(_ point: CGPoint, width: CGFloat, origin: CGPoint? = nil) {
         // Toque que só PAROU a rolagem inércia não é toque (igual ao Android).
         let stoppedFling = abs(scrollVelocity) > 1
         scrollVelocity = 0
         if stoppedFling { return }
         let (row, touched) = hit(point, width: width)
+        // Na fileira compacta, sair (tirar a seleção) só com toque de verdade: um
+        // arrasto curto que o pan não chegou a pegar passa do slop do Android
+        // (8) e não desmarca — arrastar na barra compacta só rola.
+        if compact, let origin, hypot(point.x - origin.x, point.y - origin.y) > m.axisSlop,
+           [TimelineHit.Kind.none, .body, .trimStart, .trimEnd].contains(touched.kind) {
+            return
+        }
         switch touched.kind {
         case .ruler:
             // Régua = buscar. Não cria marca: ela divide a faixa com o relógio
@@ -871,10 +893,12 @@ struct TimelineView: View {
                 }
                 return
             }
-            if touched.kind == .header && !compact {
+            if touched.kind == .header && (!compact || compactByDock) {
                 // Fileira compartilhada: abre as trilhas do trecho escolhido nela
                 // (senão do primeiro); tocar de novo fecha, seja qual for o aberto.
-                if let open = expandedLayer, row.segment(open) != nil { expandedLayer = nil }
+                // Na fileira compacta da doca o ícone do tipo ABRE as trilhas (e a
+                // timeline volta inteira) em vez de sair.
+                if !compact, let open = expandedLayer, row.segment(open) != nil { expandedLayer = nil }
                 else { expandedLayer = (row.segments.first { model.selection.contains($0.id) } ?? row.segments[0]).id }
                 UISelectionFeedbackGenerator().selectionChanged()
                 return
@@ -1298,7 +1322,8 @@ private struct TimelineHit {
 /// point space as Canvas; it neither stores nor edits the project.
 @MainActor
 private struct TimelineGestureSurface: UIViewRepresentable {
-    var tap: (CGPoint) -> Void
+    /// (onde soltou, onde pousou)
+    var tap: (CGPoint, CGPoint) -> Void
     var pan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGPoint) -> Void
     var hold: (UIGestureRecognizer.State, CGPoint, CGPoint) -> Void
     var pinch: (UIGestureRecognizer.State, CGFloat, CGPoint) -> Void
@@ -1329,12 +1354,18 @@ private struct TimelineGestureSurface: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: TimelineGestureSurface
         private var holdStart = CGPoint.zero
+        private var tapStart = CGPoint.zero
         init(_ parent: TimelineGestureSurface) { self.parent = parent }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             gestureRecognizer is UIPinchGestureRecognizer || otherGestureRecognizer is UIPinchGestureRecognizer
         }
+        /// Onde o dedo pousou: o toque que andou além do slop não é toque.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            if gestureRecognizer is UITapGestureRecognizer { tapStart = touch.location(in: gestureRecognizer.view) }
+            return true
+        }
         @objc func tapped(_ sender: UITapGestureRecognizer) {
-            if sender.state == .ended { parent.tap(sender.location(in: sender.view)) }
+            if sender.state == .ended { parent.tap(sender.location(in: sender.view), tapStart) }
         }
         @objc func panned(_ sender: UIPanGestureRecognizer) {
             let point = sender.location(in: sender.view), translation = sender.translation(in: sender.view)

@@ -71,7 +71,7 @@ class GraphGesturesTest {
         compose.waitUntil(5000) { store.queryKeyframeEasing(id,first)?.toList()==original }
     }
 
-    @Test fun editingRotationXDoesNotCreateKeysForOtherAxes() {
+    @Test fun editingRotationXKeysOnlyItsXYZGroup() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))
         lateinit var store: EditorStore
@@ -98,11 +98,16 @@ class GraphGesturesTest {
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().singleOrNull()?.value == 0f }
         compose.onNodeWithText("Auto-Key: Off").performClick()
         compose.runOnIdle { store.setTransform(6, 45f) }
-        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size >= 2 }
+        // Camada 3D: o grupo XYZ da rotação ganha keyframe junto no cabeçote
+        // (decisão do build 2125, igual ao iOS); só o eixo editado muda de valor
+        // e nada fora do grupo é marcado.
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.time == 15 } == 3 }
         compose.runOnIdle {
-            assertEquals(2, store.keyframes[id].orEmpty().size)
-            assertTrue(store.keyframes[id].orEmpty().all { it.property == 6 })
-            assertEquals(45f, store.keyframes[id].orEmpty().single { it.time == 15 }.value)
+            val keys = store.keyframes[id].orEmpty()
+            assertTrue(keys.all { it.property in 6..8 })
+            assertEquals(45f, keys.single { it.time == 15 && it.property == 6 }.value)
+            assertEquals(0f, keys.single { it.time == 15 && it.property == 7 }.value)
+            assertEquals(0f, keys.single { it.time == 15 && it.property == 8 }.value)
             store.undo()
         }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 1 }
@@ -112,11 +117,17 @@ class GraphGesturesTest {
         compose.runOnIdle { store.seek(15) }
         compose.waitUntil(5000) { store.playhead == 15 }
         val beforeGizmo = store.keyframes[id].orEmpty()
+        val positionBefore = store.detail!!.position.toList()
         compose.runOnIdle { store.gizmoDrag(0, 20f) }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 15 } }
         compose.runOnIdle {
-            assertEquals(beforeGizmo.size + 1, store.keyframes[id].orEmpty().size)
-            assertTrue(store.keyframes[id].orEmpty().none { it.property == 1 || it.property == 2 })
+            // Grupo XYZ da posição (build 2125): X, Y e Z ganham keyframe no
+            // cabeçote, mas só X muda de valor; a rotação não é tocada.
+            val keys = store.keyframes[id].orEmpty()
+            assertEquals(beforeGizmo.size + 3, keys.size)
+            assertEquals(positionBefore[1], keys.single { it.property == 1 && it.time == 15 }.value, .001f)
+            assertEquals(positionBefore[2], keys.single { it.property == 2 && it.time == 15 }.value, .001f)
+            assertEquals(beforeGizmo.filter { it.property in 6..8 }, keys.filter { it.property in 6..8 })
             store.undo()
         }
         compose.waitUntil(5000) { store.keyframes[id] == beforeGizmo }

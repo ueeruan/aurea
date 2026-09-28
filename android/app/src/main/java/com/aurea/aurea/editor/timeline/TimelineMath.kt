@@ -261,6 +261,15 @@ internal object Press {
     }
 }
 
+/**
+ * A timeline vira a fileira única da camada? Painel aberto: sempre. Doca
+ * aberta: só sem trilhas de propriedade abertas e fora do modo de escolher
+ * keyframes — senão fica inteira, para dar para mexer nas trilhas e nos
+ * losangos (o dono pediu a fileira única "sem ficar impossível de mexer").
+ */
+internal fun timelineCompact(panel: Boolean, dock: Boolean, tracksOpen: Boolean, selectingKeys: Boolean): Boolean =
+    panel || (dock && !tracksOpen && !selectingKeys)
+
 /** Instantes de keyframe de uma camada, em frames da timeline. */
 internal object Keyframes {
     /** Tempo local → frame da timeline (`t + start − offset`). */

@@ -360,8 +360,16 @@ def validate_home_backdrop(state, documents, output, record, frame_checker):
     record['homeBackdrop'] = backdrop
     if not backdrop.get('sourceOnly') or not backdrop.get('scrollCompleted') or backdrop.get('failedSnapshots') != 0:
         raise RuntimeError('Home backdrop did not complete a real list-only scroll capture')
+    # Since the build 2123 Home dock the tab bar is its own row without glass:
+    # only the batch bar floats over the Projects list. It is required; a tab
+    # glass, when one is on screen again, is validated with the same rigor.
+    bars = backdrop.get('bars', {})
+    if 'batch' not in bars:
+        raise RuntimeError('Home batch backdrop was not captured over the Projects list')
     for kind, sigma in (('tab', 24), ('batch', 20)):
-        bar = backdrop.get('bars', {}).get(kind, {})
+        if kind not in bars:
+            continue
+        bar = bars.get(kind, {})
         target_sigma = sigma * bar.get('scale', 0)
         if (bar.get('captureCount', 0) < 2 or bar.get('sigmaPoints') != sigma
                 or target_sigma <= 0 or abs(bar.get('measuredSigmaPixels', 0) - target_sigma) > target_sigma * 0.05):

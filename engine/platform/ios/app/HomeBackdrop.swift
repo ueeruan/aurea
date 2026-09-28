@@ -330,7 +330,14 @@ private struct HomeBlurOutput {
         }
     }
     private func writeDebugIfReady(_ outputs: [HomeBlurOutput]) {
-        guard isDebugScene, debugScrollCompleted, !debugWritten, outputs.count == 2 else { return }
+        // Desde a doca da Home (build 2123) a barra de abas é uma fileira própria,
+        // sem vidro: sobre a lista de Projetos só passa o vidro do LOTE. Exigir
+        // os dois vidros deixava o relatório sem nunca ser gravado. Cada vidro
+        // que ESTÁ na tela entra no relatório.
+        let present = Set(glasses.compactMap { $0.value.view?.window != nil ? $0.key : nil })
+        guard isDebugScene, debugScrollCompleted, !debugWritten,
+              outputs.contains(where: { $0.input.kind == .batch }),
+              Set(outputs.map(\.input.kind)).isSuperset(of: present) else { return }
         let folder = AureaPaths.documents
         var bars: [String: Any] = [:]
         for output in outputs {

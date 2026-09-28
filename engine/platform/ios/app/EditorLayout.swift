@@ -572,7 +572,7 @@ enum PivotMath {
 }
 
 /// Um arrasto do pivô: valores do COMEÇO e escrita absoluta (nada acumula).
-struct PivotDragSession {
+@MainActor struct PivotDragSession {
     let layer: Int64
     let start: SIMD2<Float>
     private let position: [Float], anchor: [Float], rotation: [Float], scale: [Float], affine: [Float]

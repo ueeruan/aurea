@@ -180,6 +180,7 @@ internal fun shellBack(store: EditorStore, ui: EditorUi) {
 @Composable
 fun EditorScreen(store: EditorStore) {
     val ui = rememberSaveable(saver = EditorUi.Saver) { EditorUi() }
+    StagePrefs.load(androidx.compose.ui.platform.LocalContext.current)
     val selectionSize by remember { derivedStateOf { store.selection.size } }
     val hasLayers by remember { derivedStateOf { store.layers.isNotEmpty() } }
 
@@ -412,6 +413,7 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
                 35 -> EditorPanel.Shape
                 36 -> EditorPanel.Particles
                 37 -> EditorPanel.Element3D
+                39 -> EditorPanel.Speed
                 else -> EditorPanel.Transform
             })
         },

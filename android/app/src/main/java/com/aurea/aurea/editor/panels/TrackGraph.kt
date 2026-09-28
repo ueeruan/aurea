@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -34,8 +35,13 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.abs
 
-/** Actual track values from the shared evaluator. Value dragging writes the
- * original track; speed is a finite frame-interval derivative, in units/s. */
+/**
+ * O gráfico de valor/velocidade da trilha escolhida e das IRMÃS dela (X/Y/Z,
+ * componentes do mesmo parâmetro), desenhado com a mesma conta do motor
+ * ([graphCurve]): nos frames inteiros o traço passa pelo valor renderizado.
+ * Arrastar valor escreve a trilha original; a velocidade é a derivada da
+ * curva, em unidades/s, e as alças encostam nela.
+ */
 @Composable
 internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow>, speed: Boolean) {
     val first = track.firstOrNull() ?: return
@@ -43,24 +49,40 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     val revision = store.curveRevision
     val handles = remember(layer, track, revision, speed, fps) { if (speed) speedHandles(store, layer, track, fps) else emptyList() }
     val currentHandles by rememberUpdatedState(handles)
-    val fullFrom = first.time
-    val fullTo = max(fullFrom + 1, track.last().time)
-    val full = remember(layer, first.property, first.effectIndex, first.paramIndex, fullFrom, fullTo, revision, speed, fps) {
-        graphSamples(store.queryTrackCurve(layer, first, fullFrom, fullTo), fullFrom, fullTo, fps, speed)
-    }
+    val layerKeys = store.keyframes[layer].orEmpty()
+    // O grupo inteiro aparece; a trilha escolhida vai por último (por cima) e é a editável.
+    val group = remember(layerKeys, track) { graphGroup(layerKeys, track).sortedBy { if (it[0].sameTrack(first)) 1 else 0 } }
+    val curves = remember(group, revision) { group.map { t -> curveKeys(t) { easeOf(store, layer, it) } } }
+    val currentGroup by rememberUpdatedState(group)
+    val groupId = remember(group) { group.joinToString { "${it[0].property}:${it[0].effectIndex}:${it[0].paramIndex}" } }
+    val fullFrom = group.minOf { it.first().time }
+    val fullTo = max(fullFrom + 1, group.maxOf { it.last().time })
     fun fit(): GraphViewport {
-        val values = if (speed) full.map { it.value } + handles.map { it.velocity } + 0f else full.map { it.value } + track.map { it.value }
+        val values = ArrayList<Float>()
+        curves.forEach { keys -> graphCurve(keys, fullFrom.toDouble(), fullTo.toDouble(), 2.0, speed, fps).forEach { values += it.value } }
+        if (speed) { handles.forEach { values += it.velocity }; values += 0f } else group.forEach { t -> t.forEach { values += it.value } }
         val low = values.minOrNull() ?: 0f
         val high = values.maxOrNull() ?: 1f
         val margin = max(0.1f, max(high - low, abs(high) * 0.05f) * 0.12f)
         val timeMargin = max(1f, (fullTo.toLong() - fullFrom).toFloat() * 0.06f)
         return GraphViewport(fullFrom - timeMargin, fullTo + timeMargin, low - margin, high + margin)
     }
-    var view by remember(layer, first.property, first.effectIndex, first.paramIndex, speed) { mutableStateOf(fit()) }
+    var view by remember(layer, groupId, speed) { mutableStateOf(fit()) }
     val from = floor(view.from).toInt()
     val to = max(from + 1, ceil(view.to).toInt())
-    val samples = remember(layer, first.property, first.effectIndex, first.paramIndex, from, to, revision, speed, fps) {
-        graphSamples(store.queryTrackCurve(layer, first, from, to), from, to, fps, speed)
+    var widthPx by remember { mutableIntStateOf(0) }
+    val samples = remember(curves, view, widthPx, speed, fps) {
+        val perFrame = if (widthPx > 0) widthPx / view.duration.toDouble() / 2.0 else 1.0
+        curves.map { graphCurve(it, view.from.toDouble(), view.to.toDouble(), perFrame, speed, fps) }
+    }
+    // O cabeçote saiu da janela (scrub, play, outro trecho): a janela vai atrás dele.
+    LaunchedEffect(layer, groupId) {
+        snapshotFlow { store.detail?.localPlayhead }.collect { frame ->
+            if (frame != null && (frame < view.from || frame > view.to)) {
+                val half = view.duration / 2f
+                view = view.copy(from = frame - half, to = frame + half)
+            }
+        }
     }
     val currentTrack by rememberUpdatedState(track)
     var multi by remember(layer, first.property, first.effectIndex, first.paramIndex) { mutableStateOf(false) }
@@ -90,7 +112,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             TextButton(onClick = { store.pasteKeyframes(listOf(layer)) }) { Text("Paste", fontSize = 11.sp) }
             TextButton(onClick = { if (store.editSelectedKeys(layer, track.filter { it.time in picked }, 0, true)) picked = emptySet() }, enabled = picked.isNotEmpty()) { Text("Delete", fontSize = 11.sp) }
         }
-        Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("curve.trackGraph").pointerInput(layer, first.property, first.effectIndex, first.paramIndex, speed) {
+        Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged { widthPx = it.width }.testTag("curve.trackGraph").pointerInput(layer, first.property, first.effectIndex, first.paramIndex, speed) {
             awaitEachGesture {
                 val down = awaitFirstDown()
                 down.consume()
@@ -106,6 +128,17 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 var key = if (speed) null else currentTrack.minByOrNull { (point(it) - down.position).getDistanceSquared() }
                     ?.takeIf { (point(it) - down.position).getDistanceSquared() <= radius * radius }
                 if (key != null) store.selectKeyframe(layer, key)
+                // Losango de uma trilha IRMÃ: tocar troca a trilha editável (sem arrastar).
+                if (key == null && handle == null && !speed) {
+                    val sibling = currentGroup.flatten().filter { !it.sameTrack(first) }
+                        .minByOrNull { (point(it) - down.position).getDistanceSquared() }
+                        ?.takeIf { (point(it) - down.position).getDistanceSquared() <= radius * radius }
+                    if (sibling != null) {
+                        store.selectKeyframe(layer, sibling)
+                        do { val e = awaitPointerEvent(); e.changes.forEach { it.consume() } } while (e.changes.any { it.pressed })
+                        return@awaitEachGesture
+                    }
+                }
                 val originalGroup = key?.let { store.graphKeyGroup(layer, it) }.orEmpty()
                 var currentTime = key?.time ?: 0
                 val groupTrack = store.keyframes[layer].orEmpty().filter { candidate -> originalGroup.any {
@@ -179,12 +212,19 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             }
             val zero = point(view.from, 0f).y
             if (zero in 0f..size.height) drawLine(Color.White.copy(alpha = 0.3f), Offset(0f, zero), Offset(size.width, zero))
-            val path = Path()
-            samples.forEachIndexed { i, sample ->
-                val p = point(sample.frame, sample.value)
-                if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
+            samples.forEachIndexed { index, curve ->
+                val active = index == samples.lastIndex
+                val path = Path()
+                curve.forEachIndexed { i, sample ->
+                    val p = point(sample.frame, sample.value)
+                    if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
+                }
+                val color = if (active) AureaColors.Accent else axisColor(group[index][0]).copy(alpha = .55f)
+                drawPath(path, color, style = Stroke((if (active) 2f else 1.5f).dp.toPx()))
+                if (!active && !speed) group[index].forEach { key ->
+                    drawCircle(color, 4.dp.toPx(), point(key.time.toFloat(), key.value))
+                }
             }
-            drawPath(path, AureaColors.Accent, style = Stroke(2.dp.toPx()))
             handles.forEach { h ->
                 val p = point(h.frame, h.velocity)
                 drawLine(AureaColors.Muted, point((if(h.incoming) h.end.time else h.key.time).toFloat(), h.velocity), p)
@@ -203,4 +243,13 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             Text("${from}–${to} f", fontSize = 10.sp, color = AureaColors.Muted)
         }
     }
+}
+
+/** Cor do eixo de uma trilha irmã (X vermelho, Y verde, Z azul; o resto neutro). */
+private fun axisColor(key: KeyframeRow): Color = when {
+    key.property >= com.aurea.aurea.engine.TrackProperty.EFFECT_PARAM -> when (key.paramIndex % 4) {
+        0 -> Color(0xFFFF6B6B); 1 -> Color(0xFF6BD67A); 2 -> Color(0xFF5B9BFF); else -> AureaColors.Muted
+    }
+    key.property in 0..11 -> when (key.property % 3) { 0 -> Color(0xFFFF6B6B); 1 -> Color(0xFF6BD67A); else -> Color(0xFF5B9BFF) }
+    else -> AureaColors.Muted
 }

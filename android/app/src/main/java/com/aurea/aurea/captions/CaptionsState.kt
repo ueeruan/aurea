@@ -6,7 +6,9 @@ import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.aurea.aurea.R
 import com.aurea.aurea.engine.AureaEngine
+import com.aurea.aurea.ui.i18n.AppText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -50,12 +52,12 @@ class CaptionsState(
     fun capturePreset(name: String): String = track?.let { engine.saveCaptionBundle(it.layer, name) }.orEmpty()
     fun applyPreset(data: String) {
         val current = track ?: return
-        error = if (engine.applyCaptionBundle(current.layer, data)) null else "Preset incompatível com esta versão do Aurea."
+        error = if (engine.applyCaptionBundle(current.layer, data)) null else AppText.get(app, R.string.app_caption_preset_incompatible)
         onModelChanged()
     }
     fun editBlocks(command: org.json.JSONObject) {
         val current = track ?: return
-        if (!engine.editCaptionTrack(current.layer, command.toString())) { error = "A edição sobrepõe outro bloco ou possui tempos inválidos."; return }
+        if (!engine.editCaptionTrack(current.layer, command.toString())) { error = AppText.get(app, R.string.app_caption_edit_overlap); return }
         error = null
         track = parseCaptionTracks(engine.captionTracks()).firstOrNull { it.layer == current.layer }
         onModelChanged()
@@ -161,14 +163,14 @@ class CaptionsState(
     fun transcribe(language: String?, thenGenerate: Boolean = true) {
         if (busy != null) return
         val id = layer ?: return
-        if (engine.layerMediaPath(id) == null) { error = "Esta camada não tem mídia com som."; return }
-        busy = "Preparando Whisper local…"; error = null
+        if (engine.layerMediaPath(id) == null) { error = AppText.get(app, R.string.app_caption_no_audio_layer); return }
+        busy = AppText.get(app, R.string.app_caption_preparing_whisper); error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val model = WhisperModels.prepare(app) { stage -> scope.launch(Dispatchers.Main) { busy = stage } }
-                    withContext(Dispatchers.Main) { busy = "Transcrevendo no aparelho…" }
-                    val ticker = scope.launch { while (true) { kotlinx.coroutines.delay(400); busy = "Whisper local: ${engine.captionProgress()}%" } }
+                    withContext(Dispatchers.Main) { busy = AppText.get(app, R.string.app_caption_transcribing) }
+                    val ticker = scope.launch { while (true) { kotlinx.coroutines.delay(400); busy = AppText.get(app, R.string.app_caption_whisper_progress, engine.captionProgress()) } }
                     try {
                         engine.transcribeLocal(id, model.absolutePath, language.orEmpty()).lineSequence().mapNotNull { line ->
                             val fields = line.split('\t', limit = 3)
@@ -180,9 +182,9 @@ class CaptionsState(
             busy = null
             if (layer != id) return@launch
             result.onSuccess { list ->
-                if (list.isEmpty()) error = "Nenhuma fala encontrada."
+                if (list.isEmpty()) error = AppText.get(app, R.string.app_caption_no_speech)
                 else { setWords(list, "Whisper local"); persist(); if (thenGenerate) generate() }
-            }.onFailure { error = it.message ?: "Falha na transcrição local." }
+            }.onFailure { error = it.message ?: AppText.get(app, R.string.app_caption_transcription_failed) }
         }
     }
 
@@ -201,7 +203,7 @@ class CaptionsState(
                 ?.toList()
                 .orEmpty()
             if (parsed.isEmpty()) {
-                error = "Esse arquivo não tem legendas SRT legíveis."
+                error = AppText.get(app, R.string.app_caption_srt_unreadable)
                 return@launch
             }
             error = null
@@ -244,11 +246,11 @@ class CaptionsState(
         val floats = floatArrayOf(s.pauseSec, s.posY, s.sizeFrac, s.highlightColor[0], s.highlightColor[1], s.highlightColor[2])
         // Fase 8D: milhares de palavras viram milhares de camadas (texto medido
         // uma a uma): fora da thread da UI, com aviso enquanto faz.
-        busy = "Criando legendas…"
+        busy = AppText.get(app, R.string.app_caption_creating)
         scope.launch {
             val n = withContext(Dispatchers.Default) { engine.createCaptions(id, texts, times, ints, floats) }
             busy = null
-            if (n < 0) error = "Não foi possível criar as legendas (erro ${-n})." else error = null
+            if (n < 0) error = AppText.get(app, R.string.app_caption_create_failed, -n) else error = null
             captionCount = engine.captionCount(id)
             onModelChanged()
         }

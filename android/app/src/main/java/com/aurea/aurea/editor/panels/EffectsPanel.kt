@@ -500,7 +500,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 store.catalog.firstOrNull { it.typeId == e.typeId }?.let { entry ->
                     add(SheetAction(stringResource(R.string.effects_about)) { aboutEntry = entry })
                 }
-                add(SheetAction("Copiar este efeito") { store.copyEffects(e.effectId) })
+                add(SheetAction(stringResource(R.string.fx_copy_this_effect)) { store.copyEffects(e.effectId) })
                 add(SheetAction(stringResource(R.string.fx_save_as_preset)) { savingPreset = e })
                 if (index > 0) add(SheetAction(stringResource(R.string.panel_mover_cima)) { store.reorderEffect(e.effectId, index - 1) })
                 if (index in 0 until effects.lastIndex) add(SheetAction(stringResource(R.string.panel_mover_baixo)) { store.reorderEffect(e.effectId, index + 1) })
@@ -545,7 +545,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         val d = slot?.let { paramDisplay(store.typeOf(t.effectId), it) }
         AureaActionSheet(
             title = t.label,
-            message = if (p != null && d != null) "Padrão: ${defaultText(p, slot, d)}" else null,
+            message = if (p != null && d != null) {
+                stringResource(R.string.fx_default_value, defaultText(p, slot, d, stringResource(R.string.common_on), stringResource(R.string.common_off)))
+            } else {
+                null
+            },
             actions = buildList {
                 add(SheetAction(stringResource(R.string.panel_redefinir), enabled = p != null) { resetParam(store, t.effectId, t.param) })
                 if (slot?.animatable == true) {
@@ -559,10 +563,10 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
 }
 
 /** O valor padrão como a linha mostraria ("100%", "0°", "Ligado", a opção). */
-private fun defaultText(p: EffectParam, s: ParamSlot, d: ParamDisplay): String {
+private fun defaultText(p: EffectParam, s: ParamSlot, d: ParamDisplay, on: String, off: String): String {
     val v = p.defaultValue
     return when (s.type) {
-        ParamType.BOOL -> if (v[0] >= 0.5f) "ligado" else "desligado"
+        ParamType.BOOL -> if (v[0] >= 0.5f) on else off
         ParamType.ENUM -> s.enumLabels.getOrNull(v[0].roundToInt()) ?: "${v[0].roundToInt() + 1}"
         ParamType.COLOR -> rgbaColor(engineToDisplay(v)).let { "RGB ${(it.red * 255).roundToInt()} ${(it.green * 255).roundToInt()} ${(it.blue * 255).roundToInt()}" }
         ParamType.POINT2D, ParamType.POINT3D -> (0 until s.components).joinToString(" × ") {
@@ -707,12 +711,14 @@ private fun androidx.compose.foundation.layout.RowScope.TabSegment(label: String
  */
 @Composable
 private fun ListRail(onBack: () -> Unit, onMore: () -> Unit) {
+    val back = stringResource(R.string.panel_voltar_ferramentas)
+    val moreOptions = stringResource(R.string.panel_mais_opcoes_efeitos)
     Column(Modifier.width(46.dp).fillMaxHeight()) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .semantics { contentDescription = "Voltar às ferramentas" }
+                .semantics { contentDescription = back }
                 .tocavel(shrink = 1f, onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
@@ -723,7 +729,7 @@ private fun ListRail(onBack: () -> Unit, onMore: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .semantics { contentDescription = "Mais opções dos efeitos" }
+                .semantics { contentDescription = moreOptions }
                 .tocavel(shrink = 1f, onClick = onMore),
             contentAlignment = Alignment.Center,
         ) {
@@ -789,7 +795,7 @@ private fun EffectCardItem(
             return@EffectStackCard
         }
         if (effect.typeId == effectTypeId("aurea.time.remap")) {
-            TimeRemapEffectEditor(store)
+            TimeRemapEffectEditor(store, id)
             return@EffectStackCard
         }
         val visible = slots.filter { !it.hidden }
@@ -1108,10 +1114,11 @@ internal val OpacityKeys = listOf(TrackKey(TrackProperty.OPACITY))
 internal fun OpacityRow(env: PanelEnv, opacity: Float, selected: Boolean, keyframe: KeyframeLook = KeyframeLook.None) {
     val store = env.store
     val exprLook by remember(store) { derivedStateOf { store.expressionLook(OpacityKeys) } }
+    val opacityLabel = stringResource(R.string.panel_opacidade)
     PropertyRow(
         expression = exprLook,
-        onExpression = { store.openExpression("Opacidade", OpacityKeys, 100f, "%") },
-        label = stringResource(R.string.panel_opacidade),
+        onExpression = { store.openExpression(opacityLabel, OpacityKeys, 100f, "%") },
+        label = opacityLabel,
         value = opacity,
         unitsPerDp = 0.35f,
         min = 0f,
@@ -1124,7 +1131,7 @@ internal fun OpacityRow(env: PanelEnv, opacity: Float, selected: Boolean, keyfra
         onValue = { store.setTransform(TrackProperty.OPACITY, it.coerceIn(0f, 100f) / 100f) },
         onGestureEnd = { store.endGesture() },
         onTapValue = {
-            env.openKeypad(KeypadRequest("Opacidade", opacity, "%", 0f, 100f, 0) { store.setTransform(TrackProperty.OPACITY, it / 100f) })
+            env.openKeypad(KeypadRequest(opacityLabel, opacity, "%", 0f, 100f, 0) { store.setTransform(TrackProperty.OPACITY, it / 100f) })
         },
     )
 }

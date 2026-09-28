@@ -1,5 +1,8 @@
 package com.aurea.aurea.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
@@ -67,6 +70,20 @@ fun AureaApp(store: EditorStore, conta: ContaViewModel) {
                 ) {
                     Text(msg, style = AureaType.Body)
                 }
+            }
+            // "Importar texturas": o modelo procura arquivos que não vieram junto.
+            // O seletor fica fora do diálogo: o diálogo fecha antes do retorno.
+            val pickTextures = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+                if (uris.isNotEmpty()) store.importModelTextures(uris)
+            }
+            store.missingModelTextures?.let { req ->
+                AureaAlert(
+                    title = stringResource(R.string.model_textures_title),
+                    message = stringResource(R.string.model_textures_message, req.names.take(8).joinToString("\n") + if (req.names.size > 8) "\n…" else ""),
+                    confirmLabel = stringResource(R.string.model_textures_choose),
+                    onConfirm = { pickTextures.launch(arrayOf("image/*", "application/octet-stream", "*/*")) },
+                    onDismiss = { store.dismissModelTextures() },
+                )
             }
             store.errorMessage?.let { msg ->
                 AureaAlert(

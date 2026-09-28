@@ -65,7 +65,7 @@ private fun MotionTrackSection(env: PanelEnv) {
     if (s[0].toInt() != 1 && store.pointPick == null) {
         listOf("Point", "Two Points", "Planar", "Corner Pin", "Stabilizer").forEachIndexed { i, name ->
             Spacer(Modifier.height(6.dp))
-            Action(name, if (i == 4) "Movimento global com vários pontos" else "Escolha os pontos no preview, no frame atual") { store.beginMotionPick(i) }
+            Action(name, stringResource(if (i == 4) R.string.edt_track_global_motion else R.string.edt_track_pick_points)) { store.beginMotionPick(i) }
         }
         androidx.compose.material3.TextButton(onClick = { store.motionBackward = !store.motionBackward }) { Text(if (store.motionBackward) "Direction: Backward" else "Direction: Forward") }
         androidx.compose.material3.TextButton(onClick = { store.motionModel = (store.motionModel + 1) % 4 }) { Text("Motion: " + listOf("Auto", "Position", "Position / Rotation / Scale", "Perspective")[store.motionModel]) }
@@ -76,11 +76,11 @@ private fun MotionTrackSection(env: PanelEnv) {
         androidx.compose.material3.TextButton(onClick = store::restoreMotion) { Text("Restore saved analysis") }
     }
     if (store.pointPick != null) {
-        Text("Pontos selecionados: ${store.motionPicked}. Toque no preview.")
+        Text(stringResource(R.string.edt_track_points_selected, store.motionPicked))
         androidx.compose.material3.TextButton(onClick = store::cancelMotionPick) { Text("Cancel selection") }
     }
     if (s[0].toInt() == 1) {
-        Text("Analisando… ${(s[1] * 100).toInt()}%")
+        Text(stringResource(R.string.edt_track_analyzing, (s[1] * 100).toInt()))
         androidx.compose.material3.TextButton(onClick = store::cancelMotion) { Text("Cancel") }
     }
     if (store.motionMessage.isNotEmpty()) Text(store.motionMessage, color = AureaColors.Muted, fontSize = 12.sp)
@@ -96,9 +96,9 @@ private fun MotionTrackSection(env: PanelEnv) {
                 Text("Maximum zoom: ${((zoom - 1) * 100).toInt()}%")
                 androidx.compose.material3.Slider(value = zoom, onValueChange = { zoom = it }, valueRange = 1f..1.5f)
                 androidx.compose.material3.TextButton(onClick = { crop = (crop + 1) % 3 }) { Text("Crop: " + listOf("None", "Static", "Dynamic")[crop]) }
-                Action("Apply stabilization", "Um passo de desfazer; preserva os transforms do vídeo") { store.applyMotion(3, lock, smooth, zoom, crop) }
+                Action("Apply stabilization", stringResource(R.string.edt_track_stabilize_note)) { store.applyMotion(3, lock, smooth, zoom, crop) }
             } else {
-                Action("Create Null", "Vincule uma camada ao nulo para seguir o movimento") { store.applyMotion(0) }
+                Action("Create Null", stringResource(R.string.edt_track_null_note)) { store.applyMotion(0) }
                 // Alvo escolhido AQUI: a camada que recebe o rastreio não tem o
                 // painel de Rastreio (é do vídeo), então "a camada selecionada"
                 // era sempre o próprio vídeo e o motor recusava.
@@ -224,7 +224,7 @@ private fun CameraTrackSection(env: PanelEnv) {
         else -> {
             if (s != null && (s.state == 3 || s.state == 4)) {
                 Text(
-                    if (s.state == 4) stringResource(R.string.panel_analise_cancelada) else "Não deu para resolver: ${s.message}",
+                    if (s.state == 4) stringResource(R.string.panel_analise_cancelada) else stringResource(R.string.edt_track_solve_failed, s.message),
                     style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
                 )
                 Spacer(Modifier.height(8.dp))

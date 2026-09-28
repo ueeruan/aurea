@@ -1809,3 +1809,47 @@ AUREA_TEST(MediaLab, FiveEffectsSaveReopenKeysAndUndo) {
     const f32 before=layer()->effects[0].params[0].constant.v[0];AUREA_CHECK(e.apply_command(change).ok());AUREA_CHECK_NEAR(layer()->effects[0].params[0].constant.v[0],75,.001f);
     Command undo;undo.type=CommandType::Undo;AUREA_CHECK(e.apply_command(undo).ok());AUREA_CHECK_NEAR(layer()->effects[0].params[0].constant.v[0],before,.001f);
 }
+
+// "Adicionar um marcador faz o áudio ou vídeo começar do início": marcar (ou
+// desmarcar, editar, apagar) nunca mexe no transporte. Tocando, a marca cai no
+// relógio e o play segue de onde estava; parado, o cabeçote fica onde está.
+AUREA_TEST(Engine, MarkersNeverMoveOrRestartPlayback) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    auto apply = [&](CommandType type, i64 frame = 0) {
+        Command c;
+        c.type = type;
+        c.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.apply_command(c).ok());
+    };
+    apply(CommandType::PlaybackSeek, 60);
+    apply(CommandType::PlaybackPlay);
+    const u64 t0 = monotonic_ns();
+    while (monotonic_ns() - t0 < 80'000'000ull) {}
+    AUREA_CHECK(e.render_frame().ok());
+    const i64 before = e.project()->timeline().playhead().value;
+    AUREA_CHECK(before >= 60);
+    // A UI com status atrasado pede "toggle" no cabeçote velho (0): tocando,
+    // vale o relógio — nada de pausa, seek ou marca no começo.
+    AUREA_CHECK(e.toggle_marker(0));
+    AUREA_CHECK(e.read_status().playing);
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK(e.project()->timeline().playhead().value >= before);
+    i64 marks[3 * 8] = {};
+    AUREA_CHECK_EQ(e.query_markers(marks, 8), 1u);
+    AUREA_CHECK(marks[0] >= 60);
+
+    apply(CommandType::PlaybackPause);
+    apply(CommandType::PlaybackSeek, 45);
+    AUREA_CHECK(e.render_frame().ok());
+    const EngineStatus status = e.read_status();
+    AUREA_CHECK(e.toggle_marker(45));
+    AUREA_CHECK(e.edit_marker(45, 50, 0xFF00FF00u, "refrao"));
+    AUREA_CHECK(e.delete_marker(50));
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK(!e.read_status().playing);
+    AUREA_CHECK_EQ(e.project()->timeline().playhead().value, static_cast<i64>(45));
+    AUREA_CHECK_EQ(e.read_status().playhead.value, status.playhead.value);
+    e.shutdown();
+}

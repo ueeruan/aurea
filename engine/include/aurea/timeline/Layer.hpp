@@ -668,9 +668,93 @@ struct Layer {
             const f64 b = timeRemap.sample(FrameIndex{static_cast<i64>(f) + 1});
             return a + (b - a) * (local - f);
         }
+        if (const Track* st = speed_track()) {
+            // Velocidade com keyframes: a fonte anda a INTEGRAL da velocidade
+            // desde a entrada (keyframes no tempo local, como os de transform).
+            const f64 l0 = static_cast<f64>(offset.value);
+            const f64 lt = timelineTime - static_cast<f64>(start.value) + l0;
+            if (reversed) {
+                const f64 lastLocal = static_cast<f64>(end.value - 1 - start.value) + l0;
+                return l0 + speed_integral(*st, lastLocal) - speed_integral(*st, lt);
+            }
+            return l0 + speed_integral(*st, lt) - speed_integral(*st, l0);
+        }
         const f64 elapsed = reversed ? static_cast<f64>(end.value - 1) - timelineTime
                                      : timelineTime - static_cast<f64>(start.value);
         return static_cast<f64>(offset.value) + elapsed * static_cast<f64>(speed);
+    }
+
+    /// Trilha de velocidade com keyframe (nula = a velocidade parada `speed`).
+    /// Com a curva de tempo ligada, ela manda e a velocidade não conta.
+    [[nodiscard]] const Track* speed_track() const noexcept {
+        if (timeRemapEnabled && !timeRemap.keys.empty()) return nullptr;
+        const Track* t = tracks.find(TrackProperty::Speed);
+        return t && !t->keys.empty() ? t : nullptr;
+    }
+    /// O tempo da fonte não é uma reta (curva de tempo ou velocidade animada):
+    /// áudio, forma de onda e cortes usam a conta quadro a quadro.
+    [[nodiscard]] bool source_time_varies() const noexcept {
+        return (timeRemapEnabled && !timeRemap.keys.empty()) || speed_track() != nullptr;
+    }
+    /// Velocidade efetiva no instante `timelineTime` (a animada, se houver).
+    [[nodiscard]] f32 speed_at(FrameIndex timelineTime) const noexcept {
+        if (const Track* st = speed_track())
+            return static_cast<f32>(speed_value(*st, static_cast<f64>(local_time(timelineTime).value)));
+        return speed;
+    }
+
+    /// Velocidade do trecho a→b num instante LOCAL fracionário: a mesma curva
+    /// dos keyframes (easing do trecho), presa em [0, 16] (0 = parado).
+    [[nodiscard]] static f64 speed_segment(const Keyframe& a, const Keyframe& b, f64 local) noexcept {
+        auto clampv = [](f64 v) { return std::isfinite(v) ? std::clamp(v, 0.0, 16.0) : 1.0; };
+        const f64 span = static_cast<f64>(b.time.value - a.time.value);
+        if (a.interp == Interpolation::Hold || span <= 0.0) return clampv(a.value);
+        const f32 u = static_cast<f32>(std::clamp((local - static_cast<f64>(a.time.value)) / span, 0.0, 1.0));
+        return clampv(lerpf(a.value, b.value, apply_easing(a.interp, u, a.bx1, a.by1, a.bx2, a.by2)));
+    }
+    [[nodiscard]] static f64 speed_value(const Track& t, f64 local) noexcept {
+        const usize n = t.keys.size();
+        auto clampv = [](f64 v) { return std::isfinite(v) ? std::clamp(v, 0.0, 16.0) : 1.0; };
+        if (n == 0) return clampv(t.staticValue);
+        if (n == 1 || local <= static_cast<f64>(t.keys[0].time.value)) return clampv(t.keys[0].value);
+        if (local >= static_cast<f64>(t.keys[n - 1].time.value)) return clampv(t.keys[n - 1].value);
+        usize i = 0;
+        while (i + 1 < n && static_cast<f64>(t.keys[i + 1].time.value) <= local) ++i;
+        return speed_segment(t.keys[i], t.keys[i + 1], local);
+    }
+
+    /// ∫ velocidade dτ do primeiro keyframe até `local` (negativo antes dele).
+    /// Antes do primeiro e depois do último a velocidade é a da ponta (reta
+    /// exata); entre keyframes, linear = trapézio exato, o resto Simpson com 32
+    /// passos por trecho (o easing mais torto erra muito abaixo de um quadro).
+    [[nodiscard]] static f64 speed_integral(const Track& t, f64 local) noexcept {
+        const usize n = t.keys.size();
+        if (n == 0) return local * speed_value(t, local);
+        const f64 t0 = static_cast<f64>(t.keys[0].time.value);
+        if (n == 1 || local <= t0) return (local - t0) * speed_value(t, t0);
+        auto piece = [](const Keyframe& a, const Keyframe& b, f64 x) {
+            const f64 ta = static_cast<f64>(a.time.value);
+            const f64 w = x - ta;
+            if (w <= 0.0) return 0.0;
+            const f64 va = speed_segment(a, b, ta), vx = speed_segment(a, b, x);
+            if (a.interp == Interpolation::Hold) return w * va;
+            if (a.interp == Interpolation::Linear) return w * 0.5 * (va + vx);
+            constexpr int kSteps = 32;
+            const f64 h = w / kSteps;
+            f64 sum = va + vx;
+            for (int k = 1; k < kSteps; ++k) sum += (k & 1 ? 4.0 : 2.0) * speed_segment(a, b, ta + h * k);
+            return sum * h / 3.0;
+        };
+        f64 acc = 0.0;
+        for (usize i = 0; i + 1 < n; ++i) {
+            const Keyframe& a = t.keys[i];
+            const Keyframe& b = t.keys[i + 1];
+            const f64 tb = static_cast<f64>(b.time.value);
+            if (local <= tb) return acc + piece(a, b, local);
+            acc += piece(a, b, tb);
+        }
+        const f64 tn = static_cast<f64>(t.keys[n - 1].time.value);
+        return acc + (local - tn) * speed_value(t, tn);
     }
 
     /// Source distance traversed during a centered shutter, in composition

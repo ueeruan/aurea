@@ -47,8 +47,9 @@ import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 
-private val PATH_KINDS = listOf("Caminho livre", "Retângulo", "Elipse", "Polígono", "Estrela")
-private val VECTOR_TABS = listOf("Forma", "Preenchimento", "Borda", "Caminho", "Transformar", "Operadores", "Efeitos")
+private val PATH_KINDS = listOf(R.string.edt_vec_free_path, R.string.editor_retangulo, R.string.editor_elipse, R.string.editor_poligono, R.string.editor_estrela)
+private val VECTOR_TABS = listOf(R.string.target_shape, R.string.panel_preenchimento, R.string.panel_borda, R.string.panel_caminho,
+    R.string.panel_transformar, R.string.edt_vec_operators, R.string.panel_efeitos)
 
 /** Alvo do losango do trilho: um VParam (≥ 0), a forma do caminho, ou nada. */
 private const val SEL_NONE = -1
@@ -102,7 +103,7 @@ internal fun VectorPanel(env: PanelEnv) {
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             PathPicker(store)
-            ScrollTabs(VECTOR_TABS, tab, onSelect = { tab = it; sel = SEL_NONE })
+            ScrollTabs(VECTOR_TABS.map { stringResource(it) }, tab, onSelect = { tab = it; sel = SEL_NONE })
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 4.dp, end = 10.dp, bottom = 16.dp)) {
                 if (g == null) {
                     KitHint(stringResource(R.string.panel_esta_camada_ainda_nao_tem_grupos))
@@ -154,7 +155,7 @@ private fun PathPicker(store: EditorStore) {
     ChipRow {
         doc.groups.forEachIndexed { gi, grp ->
             grp.paths.forEachIndexed { pi, p ->
-                val name = PATH_KINDS.getOrElse(p.kind) { "Caminho" } + if (grp.paths.size > 1) " ${pi + 1}" else ""
+                val name = stringResource(PATH_KINDS.getOrElse(p.kind) { R.string.panel_caminho }) + if (grp.paths.size > 1) " ${pi + 1}" else ""
                 KitChip(if (many) "${grp.name} · $name" else name, gi == store.vectorGroup && pi == store.vectorPath) {
                     store.selectVectorPath(gi, pi)
                 }
@@ -165,7 +166,7 @@ private fun PathPicker(store: EditorStore) {
     if (adding) {
         ChipRow {
             PATH_KINDS.forEachIndexed { k, name ->
-                KitChip(name, false) {
+                KitChip(stringResource(name), false) {
                     if (k == 0) VectorStageState.pointTool = PointTool.ADD
                     store.addVectorPath(k)
                     adding = false
@@ -222,7 +223,7 @@ private fun ShapeTab(env: PanelEnv, s: Sel) {
         }
         PropertyCustomRow(stringResource(R.string.panel_forma_animada), selected = s.value == SEL_SHAPE, onSelect = { s.set(SEL_SHAPE) }, keyframe = look) {
             Text(
-                if (path.keys.isEmpty()) stringResource(R.string.panel_parada_toque_trilho_animar) else "${path.keys.size} keyframes — editar no cabeçote grava ali",
+                if (path.keys.isEmpty()) stringResource(R.string.panel_parada_toque_trilho_animar) else stringResource(R.string.edt_vec_shape_keys, path.keys.size),
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
             )
         }
@@ -252,7 +253,7 @@ private fun ShapeTab(env: PanelEnv, s: Sel) {
         KitTitle(stringResource(R.string.panel_novo_grupo_preenchimento_borda_proprios))
         ChipRow {
             PATH_KINDS.forEachIndexed { k, name ->
-                KitChip("+ $name", false) {
+                KitChip("+ ${stringResource(name)}", false) {
                     if (k == 0) VectorStageState.pointTool = PointTool.ADD
                     store.addVectorGroup(k)
                 }
@@ -264,7 +265,7 @@ private fun ShapeTab(env: PanelEnv, s: Sel) {
             Spacer(Modifier.height(6.dp))
         }
         if ((store.vectorDoc?.groups?.size ?: 0) > 1) {
-            ActionCard("Apagar o grupo \"${g.name}\"", null, danger = true) { store.removeVectorGroup(store.vectorGroup) }
+            ActionCard(stringResource(R.string.edt_vec_delete_group, g.name), null, danger = true) { store.removeVectorGroup(store.vectorGroup) }
         }
     }
 }
@@ -279,7 +280,7 @@ private fun FillTab(env: PanelEnv, g: VGroup, s: Sel) {
     var adv by remember { mutableStateOf(false) }
     ToggleLine(stringResource(R.string.panel_preencher), g.fillOn) { on -> store.editVectorGroup { it.fillOn = on } }
     if (!g.fillOn) return
-    PaintEditor(env, g.fill, stringResource(R.string.panel_preenchimento_6e8f)) { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.fill) } }
+    PaintEditor(env, g.fill, stringResource(R.string.edt_vec_fill_color)) { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.fill) } }
     ParamRow(env, s, stringResource(R.string.panel_opacidade), VParam.FILL_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
     AdvancedSection(adv, { adv = !adv }) {
         KitTitle(stringResource(R.string.panel_onde_caminhos_cruzam))
@@ -294,7 +295,7 @@ private fun StrokeTab(env: PanelEnv, g: VGroup, s: Sel) {
     var adv by remember { mutableStateOf(false) }
     ToggleLine(stringResource(R.string.panel_borda), g.strokeOn) { on -> store.editVectorGroup { it.strokeOn = on } }
     if (!g.strokeOn) return
-    PaintEditor(env, g.stroke, "borda") { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.stroke) } }
+    PaintEditor(env, g.stroke, stringResource(R.string.edt_vec_stroke_color)) { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.stroke) } }
     ParamRow(env, s, stringResource(R.string.panel_largura), VParam.STROKE_WIDTH, 0.2f, 0f, 2000f, "px", 1, 6f)
     ParamRow(env, s, stringResource(R.string.panel_opacidade), VParam.STROKE_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
     AdvancedSection(adv, { adv = !adv }) {
@@ -312,7 +313,7 @@ private fun StrokeTab(env: PanelEnv, g: VGroup, s: Sel) {
  * Os pontos do degradê e as paradas extras ficam no Avançado ([PaintAdvanced]).
  */
 @Composable
-private fun PaintEditor(env: PanelEnv, paint: VPaint, what: String, edit: (Pair<Boolean, (VPaint) -> Unit>) -> Unit) {
+private fun PaintEditor(env: PanelEnv, paint: VPaint, colorLabel: String, edit: (Pair<Boolean, (VPaint) -> Unit>) -> Unit) {
     val store = env.store
     fun ensureStops(p: VPaint) {
         if (p.stops.size < 2) {
@@ -333,7 +334,7 @@ private fun PaintEditor(env: PanelEnv, paint: VPaint, what: String, edit: (Pair<
         })
     })
     if (paint.type == 0) {
-        ColorLine("Cor da $what", Color(paint.r, paint.g, paint.b)) {
+        ColorLine(colorLabel, Color(paint.r, paint.g, paint.b)) {
             val live = BooleanArray(1)
             env.openColor(ColorRequest(floatArrayOf(paint.r, paint.g, paint.b, paint.a),
                 onChange = { r, g, b, a ->
@@ -344,7 +345,7 @@ private fun PaintEditor(env: PanelEnv, paint: VPaint, what: String, edit: (Pair<
         }
     } else {
         paint.stops.forEachIndexed { i, st ->
-            ColorLine(if (i == 0) stringResource(R.string.panel_cor_inicial) else if (i == paint.stops.size - 1) stringResource(R.string.panel_cor_final) else "Cor ${i + 1}", Color(st.r, st.g, st.b)) {
+            ColorLine(if (i == 0) stringResource(R.string.panel_cor_inicial) else if (i == paint.stops.size - 1) stringResource(R.string.panel_cor_final) else stringResource(R.string.edt_color_n, i + 1), Color(st.r, st.g, st.b)) {
                 val live = BooleanArray(1)
                 env.openColor(ColorRequest(floatArrayOf(st.r, st.g, st.b, st.a),
                     onChange = { r, g, b, a ->
@@ -360,7 +361,7 @@ private fun PaintEditor(env: PanelEnv, paint: VPaint, what: String, edit: (Pair<
 @Composable
 private fun PaintAdvanced(env: PanelEnv, paint: VPaint, edit: (Pair<Boolean, (VPaint) -> Unit>) -> Unit) {
     if (paint.type == 0) return
-    KitTitle("Degradê")
+    KitTitle(stringResource(R.string.edt_vec_gradient))
     ChipRow {
         if (paint.stops.size < 8) KitChip(stringResource(R.string.panel_cor_meio), false) {
             edit(false to { p: VPaint ->
@@ -371,10 +372,10 @@ private fun PaintAdvanced(env: PanelEnv, paint: VPaint, edit: (Pair<Boolean, (VP
         }
         if (paint.stops.size > 2) KitChip(stringResource(R.string.panel_cor_meio_dd59), false) { edit(false to { p: VPaint -> p.stops.removeAt(p.stops.size - 2) }) }
     }
-    PaintRow(env, paint, if (paint.type == 1) "Início X" else "Centro X", { it.sx }, { p, v -> p.sx = v }, -100f, edit)
-    PaintRow(env, paint, if (paint.type == 1) "Início Y" else "Centro Y", { it.sy }, { p, v -> p.sy = v }, 0f, edit)
-    PaintRow(env, paint, if (paint.type == 1) "Fim X" else "Raio", { it.ex }, { p, v -> p.ex = v }, 100f, edit)
-    if (paint.type == 1) PaintRow(env, paint, "Fim Y", { it.ey }, { p, v -> p.ey = v }, 0f, edit)
+    PaintRow(env, paint, stringResource(if (paint.type == 1) R.string.edt_start_x else R.string.fx_centro_x), { it.sx }, { p, v -> p.sx = v }, -100f, edit)
+    PaintRow(env, paint, stringResource(if (paint.type == 1) R.string.edt_start_y else R.string.fx_centro_y), { it.sy }, { p, v -> p.sy = v }, 0f, edit)
+    PaintRow(env, paint, stringResource(if (paint.type == 1) R.string.edt_end_x else R.string.panel_raio), { it.ex }, { p, v -> p.ex = v }, 100f, edit)
+    if (paint.type == 1) PaintRow(env, paint, stringResource(R.string.edt_end_y), { it.ey }, { p, v -> p.ey = v }, 0f, edit)
 }
 
 @Composable

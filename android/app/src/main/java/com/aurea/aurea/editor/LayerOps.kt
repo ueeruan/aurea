@@ -1,5 +1,8 @@
 package com.aurea.aurea.editor
 
+import com.aurea.aurea.ui.i18n.AppText
+import com.aurea.aurea.R
+import android.app.Application
 import com.aurea.aurea.engine.LayerDetail
 import com.aurea.aurea.engine.LayerRow
 import com.aurea.aurea.engine.TrackProperty
@@ -150,8 +153,8 @@ internal object LayerOps {
         if (free.isNotEmpty()) store.deleteLayers(free)
         if (locked.isNotEmpty()) {
             store.showToast(
-                if (locked.size == 1) "Camada bloqueada: desbloqueie para apagar"
-                else "${locked.size} camadas bloqueadas: desbloqueie para apagar",
+                if (locked.size == 1) AppText.get(store.getApplication<Application>(), R.string.edt_layer_locked_delete)
+                else AppText.get(store.getApplication<Application>(), R.string.edt_layers_locked_delete, locked.size),
             )
         }
     }

@@ -1,0 +1,1259 @@
+{
+ "4 cores": {
+  "en": "4 colors"
+ },
+ "4:2:0": {
+  "en": "4:2:0"
+ },
+ "4:2:2": {
+  "en": "4:2:2"
+ },
+ "4:4:4": {
+  "en": "4:4:4"
+ },
+ "ACES": {
+  "en": "ACES"
+ },
+ "Abaixo": {
+  "en": "Bottom"
+ },
+ "Abrir": {
+  "en": "Open"
+ },
+ "Acima": {
+  "en": "Top"
+ },
+ "Add": {
+  "en": "Add",
+  "pt": "Adicionar"
+ },
+ "Adicionar": {
+  "en": "Add"
+ },
+ "Aleatória": {
+  "en": "Random"
+ },
+ "Alfa": {
+  "en": "Alpha"
+ },
+ "Alta": {
+  "en": "High"
+ },
+ "Altura do bloco": {
+  "en": "Block height"
+ },
+ "Amount": {
+  "en": "Amount",
+  "pt": "Intensidade"
+ },
+ "Angle": {
+  "en": "Angle",
+  "pt": "Ângulo"
+ },
+ "Arrows": {
+  "en": "Arrows",
+  "pt": "Setas"
+ },
+ "As duas": {
+  "en": "Both"
+ },
+ "Aspect Ratio": {
+  "en": "Aspect ratio",
+  "pt": "Proporção"
+ },
+ "Automático": {
+  "en": "Automatic"
+ },
+ "Balanced": {
+  "en": "Balanced",
+  "pt": "Equilibrada"
+ },
+ "Balanced (96)": {
+  "en": "Balanced (96)",
+  "pt": "Equilibrada (96)"
+ },
+ "Barras": {
+  "en": "Bars"
+ },
+ "Blend": {
+  "en": "Blend",
+  "pt": "Mistura"
+ },
+ "Blue X": {
+  "en": "Blue X",
+  "pt": "Azul X"
+ },
+ "Blue Y": {
+  "en": "Blue Y",
+  "pt": "Azul Y"
+ },
+ "Boa": {
+  "en": "Good"
+ },
+ "Bottom left X": {
+  "en": "Bottom left X",
+  "pt": "Inferior esquerdo X"
+ },
+ "Bottom left Y": {
+  "en": "Bottom left Y",
+  "pt": "Inferior esquerdo Y"
+ },
+ "Bottom right X": {
+  "en": "Bottom right X",
+  "pt": "Inferior direito X"
+ },
+ "Bottom right Y": {
+  "en": "Bottom right Y",
+  "pt": "Inferior direito Y"
+ },
+ "Box Fill": {
+  "en": "Box fill",
+  "pt": "Preenchimento da caixa"
+ },
+ "Box Padding": {
+  "en": "Box padding",
+  "pt": "Margem da caixa"
+ },
+ "Box Stroke": {
+  "en": "Box stroke",
+  "pt": "Contorno da caixa"
+ },
+ "Branco de saída": {
+  "en": "Output white"
+ },
+ "Campo de visão": {
+  "en": "Field of view"
+ },
+ "Canto": {
+  "en": "Corner"
+ },
+ "Center": {
+  "en": "Center",
+  "pt": "Centro"
+ },
+ "Center X": {
+  "en": "Center X",
+  "pt": "Centro X"
+ },
+ "Center Y": {
+  "en": "Center Y",
+  "pt": "Centro Y"
+ },
+ "Changes per Second": {
+  "en": "Changes per second",
+  "pt": "Mudanças por segundo"
+ },
+ "Channel Glitch": {
+  "en": "Channel glitch",
+  "pt": "Glitch de canal"
+ },
+ "Channel Scale Center": {
+  "en": "Channel scale center",
+  "pt": "Centro da escala dos canais"
+ },
+ "Channel Scale Y": {
+  "en": "Channel scale Y",
+  "pt": "Escala dos canais Y"
+ },
+ "Channel Split Y": {
+  "en": "Channel split Y",
+  "pt": "Separação de canais Y"
+ },
+ "Chroma Bandwidth": {
+  "en": "Chroma bandwidth",
+  "pt": "Banda do croma"
+ },
+ "Chroma Delay": {
+  "en": "Chroma delay",
+  "pt": "Atraso do croma"
+ },
+ "Chroma Gain": {
+  "en": "Chroma gain",
+  "pt": "Ganho do croma"
+ },
+ "Chroma Phase": {
+  "en": "Chroma phase",
+  "pt": "Fase do croma"
+ },
+ "Chroma Subsampling": {
+  "en": "Chroma subsampling",
+  "pt": "Subamostragem de croma"
+ },
+ "Chromatic Radius": {
+  "en": "Chromatic radius",
+  "pt": "Raio cromático"
+ },
+ "Cintilação": {
+  "en": "Flicker"
+ },
+ "Clamp": {
+  "en": "Clamp",
+  "pt": "Prender"
+ },
+ "Coefficient Damage": {
+  "en": "Coefficient damage",
+  "pt": "Dano nos coeficientes"
+ },
+ "Color": {
+  "en": "Color",
+  "pt": "Cor"
+ },
+ "Color Glitch": {
+  "en": "Color glitch",
+  "pt": "Glitch de cor"
+ },
+ "Color Tolerance": {
+  "en": "Color tolerance",
+  "pt": "Tolerância de cor"
+ },
+ "Composite": {
+  "en": "Composite",
+  "pt": "Composição"
+ },
+ "Composição": {
+  "en": "Composite"
+ },
+ "Connections": {
+  "en": "Connections",
+  "pt": "Conexões"
+ },
+ "Coordinates": {
+  "en": "Coordinates",
+  "pt": "Coordenadas"
+ },
+ "Cor adicional do limite": {
+  "en": "Extra threshold color"
+ },
+ "Cor da varredura": {
+  "en": "Sweep color"
+ },
+ "Cor do OSD": {
+  "en": "OSD color"
+ },
+ "Cor do halo": {
+  "en": "Halo color"
+ },
+ "Cor do holograma": {
+  "en": "Hologram color"
+ },
+ "Cor do papel": {
+  "en": "Paper color"
+ },
+ "Cor do risco": {
+  "en": "Scratch color"
+ },
+ "Cor dos raios": {
+  "en": "Ray color"
+ },
+ "Cores": {
+  "en": "Colors"
+ },
+ "Cores e transparência": {
+  "en": "Colors and alpha"
+ },
+ "Corner Length": {
+  "en": "Corner length",
+  "pt": "Comprimento do canto"
+ },
+ "Count": {
+  "en": "Count",
+  "pt": "Quantidade"
+ },
+ "Cristas": {
+  "en": "Ridged"
+ },
+ "Crop Wiggle": {
+  "en": "Crop wiggle",
+  "pt": "Tremor do recorte"
+ },
+ "Crop to layer": {
+  "en": "Crop to layer",
+  "pt": "Recortar na camada"
+ },
+ "Cross": {
+  "en": "Cross",
+  "pt": "Cruz"
+ },
+ "Cruz": {
+  "en": "Cross"
+ },
+ "Curva": {
+  "en": "Curve"
+ },
+ "Cutout": {
+  "en": "Cutout",
+  "pt": "Recorte"
+ },
+ "Cylinder Bend": {
+  "en": "Cylinder bend",
+  "pt": "Curvatura em cilindro"
+ },
+ "Cópias": {
+  "en": "Copies"
+ },
+ "DC Drift": {
+  "en": "DC drift",
+  "pt": "Deriva DC"
+ },
+ "Damage Strength": {
+  "en": "Damage strength",
+  "pt": "Força do dano"
+ },
+ "Decaimento óptico": {
+  "en": "Optical falloff"
+ },
+ "Delay per Letter": {
+  "en": "Delay per letter",
+  "pt": "Atraso por letra"
+ },
+ "Dente de serra": {
+  "en": "Sawtooth"
+ },
+ "Dentro": {
+  "en": "Inside"
+ },
+ "Desfoque de entrada": {
+  "en": "Input blur"
+ },
+ "Desfoque vertical": {
+  "en": "Vertical blur"
+ },
+ "Deslocamento dos blocos": {
+  "en": "Block offset"
+ },
+ "Detalhes de cabelo e borda": {
+  "en": "Hair and edge detail"
+ },
+ "Detection Blur": {
+  "en": "Detection blur",
+  "pt": "Desfoque da detecção"
+ },
+ "Detection Resolution": {
+  "en": "Detection resolution",
+  "pt": "Resolução da detecção"
+ },
+ "Diagonal": {
+  "en": "Diagonal"
+ },
+ "Digital": {
+  "en": "Digital"
+ },
+ "Dilatar": {
+  "en": "Dilate"
+ },
+ "Direction": {
+  "en": "Direction",
+  "pt": "Direção"
+ },
+ "Direito": {
+  "en": "Right"
+ },
+ "Dither Amount": {
+  "en": "Dither amount",
+  "pt": "Intensidade do pontilhado"
+ },
+ "Dot": {
+  "en": "Dot",
+  "pt": "Ponto"
+ },
+ "Draft": {
+  "en": "Draft",
+  "pt": "Rascunho"
+ },
+ "Draft (64)": {
+  "en": "Draft (64)",
+  "pt": "Rascunho (64)"
+ },
+ "Drop": {
+  "en": "Drop",
+  "pt": "Projetada"
+ },
+ "Dropouts": {
+  "en": "Dropouts",
+  "pt": "Falhas"
+ },
+ "EP": {
+  "en": "EP"
+ },
+ "Edge Intensity": {
+  "en": "Edge intensity",
+  "pt": "Intensidade da borda"
+ },
+ "Edge Thickness": {
+  "en": "Edge thickness",
+  "pt": "Espessura da borda"
+ },
+ "Edges": {
+  "en": "Edges",
+  "pt": "Bordas"
+ },
+ "Edit Quantization Table": {
+  "en": "Edit quantization table",
+  "pt": "Editar tabela de quantização"
+ },
+ "Eixo X": {
+  "en": "X axis"
+ },
+ "Eixo Y": {
+  "en": "Y axis"
+ },
+ "Empurrar": {
+  "en": "Push"
+ },
+ "Envolver": {
+  "en": "Wrap"
+ },
+ "Erodir": {
+  "en": "Erode"
+ },
+ "Escala RGB": {
+  "en": "RGB scale"
+ },
+ "Esfera": {
+  "en": "Sphere"
+ },
+ "Esquerdo": {
+  "en": "Left"
+ },
+ "Esta camada": {
+  "en": "This layer"
+ },
+ "Estender bordas": {
+  "en": "Extend edges"
+ },
+ "Esticar": {
+  "en": "Stretch"
+ },
+ "Exponential": {
+  "en": "Exponential",
+  "pt": "Exponencial"
+ },
+ "Exposure": {
+  "en": "Exposure",
+  "pt": "Exposição"
+ },
+ "Falloff": {
+  "en": "Falloff",
+  "pt": "Decaimento"
+ },
+ "Far Color": {
+  "en": "Far color",
+  "pt": "Cor distante"
+ },
+ "Feather": {
+  "en": "Feather",
+  "pt": "Suavizar borda"
+ },
+ "Fechar": {
+  "en": "Close"
+ },
+ "Filmic": {
+  "en": "Filmic",
+  "pt": "Fílmico"
+ },
+ "First Frequency": {
+  "en": "First frequency",
+  "pt": "Primeira frequência"
+ },
+ "First Letter": {
+  "en": "First letter",
+  "pt": "Primeira letra"
+ },
+ "Fixar bordas": {
+  "en": "Pin edges"
+ },
+ "Fora": {
+  "en": "Outside"
+ },
+ "Freeze": {
+  "en": "Freeze",
+  "pt": "Congelar"
+ },
+ "Frequência da interferência": {
+  "en": "Interference frequency"
+ },
+ "Full Mesh (16 regions)": {
+  "en": "Full mesh (16 regions)",
+  "pt": "Malha completa (16 regiões)"
+ },
+ "Giro": {
+  "en": "Spin"
+ },
+ "Glitchify Amount": {
+  "en": "Glitchify amount",
+  "pt": "Intensidade do glitch"
+ },
+ "Glitchify Speed": {
+  "en": "Glitchify speed",
+  "pt": "Velocidade do glitch"
+ },
+ "Glow Input": {
+  "en": "Glow input",
+  "pt": "Entrada do brilho"
+ },
+ "Glow Only": {
+  "en": "Glow only",
+  "pt": "Só o brilho"
+ },
+ "Green X": {
+  "en": "Green X",
+  "pt": "Verde X"
+ },
+ "Green Y": {
+  "en": "Green Y",
+  "pt": "Verde Y"
+ },
+ "Head Switching": {
+  "en": "Head switching",
+  "pt": "Troca de cabeça"
+ },
+ "High": {
+  "en": "High",
+  "pt": "Alta"
+ },
+ "High (128)": {
+  "en": "High (128)",
+  "pt": "Alta (128)"
+ },
+ "Horizontal": {
+  "en": "Horizontal"
+ },
+ "Horizontal Bend": {
+  "en": "Horizontal bend",
+  "pt": "Curvatura horizontal"
+ },
+ "Horizontal e vertical": {
+  "en": "Horizontal and vertical"
+ },
+ "Image Glitch": {
+  "en": "Image glitch",
+  "pt": "Glitch de imagem"
+ },
+ "Index": {
+  "en": "Index",
+  "pt": "Índice"
+ },
+ "Inherit Rotation": {
+  "en": "Inherit rotation",
+  "pt": "Herdar rotação"
+ },
+ "Inherit Scale": {
+  "en": "Inherit scale",
+  "pt": "Herdar escala"
+ },
+ "Inner Shadow": {
+  "en": "Inner shadow",
+  "pt": "Sombra interna"
+ },
+ "Inner Tint": {
+  "en": "Inner tint",
+  "pt": "Tom interno"
+ },
+ "Inverse Direction": {
+  "en": "Inverse direction",
+  "pt": "Direção inversa"
+ },
+ "Inverter a transparência": {
+  "en": "Invert transparency"
+ },
+ "Inverter as cores": {
+  "en": "Invert colors"
+ },
+ "Inverter direção": {
+  "en": "Reverse direction"
+ },
+ "Inverter distorção": {
+  "en": "Reverse distortion"
+ },
+ "JPEG Quality": {
+  "en": "JPEG quality",
+  "pt": "Qualidade do JPEG"
+ },
+ "Jumpy": {
+  "en": "Jumpy",
+  "pt": "Saltado"
+ },
+ "Key Color": {
+  "en": "Key color",
+  "pt": "Cor-chave"
+ },
+ "LP": {
+  "en": "LP"
+ },
+ "Labels": {
+  "en": "Labels",
+  "pt": "Rótulos"
+ },
+ "Lado A": {
+  "en": "Side A"
+ },
+ "Lado B": {
+  "en": "Side B"
+ },
+ "Lados A e B": {
+  "en": "Sides A and B"
+ },
+ "Largura do bloco": {
+  "en": "Block width"
+ },
+ "Largura dos blocos": {
+  "en": "Block width"
+ },
+ "Last Frequency": {
+  "en": "Last frequency",
+  "pt": "Última frequência"
+ },
+ "Last Letter": {
+  "en": "Last letter",
+  "pt": "Última letra"
+ },
+ "Length": {
+  "en": "Length",
+  "pt": "Comprimento"
+ },
+ "Letter Rotation X": {
+  "en": "Letter rotation X",
+  "pt": "Rotação das letras X"
+ },
+ "Letter Rotation Y": {
+  "en": "Letter rotation Y",
+  "pt": "Rotação das letras Y"
+ },
+ "Letter Rotation Z": {
+  "en": "Letter rotation Z",
+  "pt": "Rotação das letras Z"
+ },
+ "Letter Spacing": {
+  "en": "Letter spacing",
+  "pt": "Espaçamento das letras"
+ },
+ "Ligado": {
+  "en": "On"
+ },
+ "Light Color": {
+  "en": "Light color",
+  "pt": "Cor da luz"
+ },
+ "Light Position": {
+  "en": "Light position",
+  "pt": "Posição da luz"
+ },
+ "Light Reception": {
+  "en": "Light reception",
+  "pt": "Recepção da luz"
+ },
+ "Limite das luzes": {
+  "en": "Highlight threshold"
+ },
+ "Limpar fundo": {
+  "en": "Clean background"
+ },
+ "Linear": {
+  "en": "Linear"
+ },
+ "Linha": {
+  "en": "Line"
+ },
+ "Linhas": {
+  "en": "Lines"
+ },
+ "Linhas analógicas": {
+  "en": "Analog lines"
+ },
+ "Linhas de varredura": {
+  "en": "Scanlines"
+ },
+ "Linhas finas": {
+  "en": "Fine lines"
+ },
+ "Long": {
+  "en": "Long",
+  "pt": "Longa"
+ },
+ "Losango": {
+  "en": "Diamond"
+ },
+ "Luminância": {
+  "en": "Luminance"
+ },
+ "Luz": {
+  "en": "Brightness"
+ },
+ "Luz e transparência": {
+  "en": "Brightness and alpha"
+ },
+ "Marker": {
+  "en": "Marker",
+  "pt": "Marcador"
+ },
+ "Marker Size": {
+  "en": "Marker size",
+  "pt": "Tamanho do marcador"
+ },
+ "Maximum Random Value": {
+  "en": "Maximum random value",
+  "pt": "Valor aleatório máximo"
+ },
+ "Maximum Regions": {
+  "en": "Maximum regions",
+  "pt": "Máximo de regiões"
+ },
+ "Minimum Area": {
+  "en": "Minimum area",
+  "pt": "Área mínima"
+ },
+ "Minimum Spanning Tree": {
+  "en": "Minimum spanning tree",
+  "pt": "Árvore geradora mínima"
+ },
+ "Mix": {
+  "en": "Mix",
+  "pt": "Mistura"
+ },
+ "Mode": {
+  "en": "Mode",
+  "pt": "Modo"
+ },
+ "Mono": {
+  "en": "Mono"
+ },
+ "Mostrar tempo": {
+  "en": "Show time"
+ },
+ "Motion blur": {
+  "en": "Motion blur"
+ },
+ "Multiply": {
+  "en": "Multiply",
+  "pt": "Multiplicar"
+ },
+ "Máscara": {
+  "en": "Matte"
+ },
+ "NTSC": {
+  "en": "NTSC"
+ },
+ "Near Color": {
+  "en": "Near color",
+  "pt": "Cor próxima"
+ },
+ "Nenhuma": {
+  "en": "None"
+ },
+ "None": {
+  "en": "None",
+  "pt": "Nenhum"
+ },
+ "None (HDR)": {
+  "en": "None (HDR)",
+  "pt": "Nenhum (HDR)"
+ },
+ "Normal": {
+  "en": "Normal"
+ },
+ "Nível do efeito": {
+  "en": "Effect level"
+ },
+ "Opacity": {
+  "en": "Opacity",
+  "pt": "Opacidade"
+ },
+ "Ordenação de pixels": {
+  "en": "Pixel sorting"
+ },
+ "Os dois lados": {
+  "en": "Both sides"
+ },
+ "Outer Tint": {
+  "en": "Outer tint",
+  "pt": "Tom externo"
+ },
+ "Overlay Color": {
+  "en": "Overlay color",
+  "pt": "Cor da sobreposição"
+ },
+ "Overlay Only": {
+  "en": "Overlay only",
+  "pt": "Só a sobreposição"
+ },
+ "Overlay Opacity": {
+  "en": "Overlay opacity",
+  "pt": "Opacidade da sobreposição"
+ },
+ "PAL": {
+  "en": "PAL"
+ },
+ "PAUSE": {
+  "en": "PAUSE"
+ },
+ "PLAY": {
+  "en": "PLAY"
+ },
+ "Passa-alta": {
+  "en": "High-pass"
+ },
+ "Passa-baixa": {
+  "en": "Low-pass"
+ },
+ "Perlin": {
+  "en": "Perlin"
+ },
+ "Phase": {
+  "en": "Phase",
+  "pt": "Fase"
+ },
+ "Pixel Streak": {
+  "en": "Pixel streak",
+  "pt": "Rastro de pixels"
+ },
+ "Pixelização": {
+  "en": "Pixelation"
+ },
+ "Plus": {
+  "en": "Plus",
+  "pt": "Mais"
+ },
+ "Ponto": {
+  "en": "Point"
+ },
+ "Pontos": {
+  "en": "Dots"
+ },
+ "Pontos analógicos": {
+  "en": "Analog dots"
+ },
+ "Position Wiggle": {
+  "en": "Position wiggle",
+  "pt": "Tremor da posição"
+ },
+ "Preencher primeiro plano": {
+  "en": "Fill foreground"
+ },
+ "Preservar núcleo": {
+  "en": "Preserve core"
+ },
+ "Preto de saída": {
+  "en": "Output black"
+ },
+ "Preto e branco": {
+  "en": "Black and white"
+ },
+ "Primeira com som": {
+  "en": "First with audio"
+ },
+ "Proteger cores do primeiro plano": {
+  "en": "Protect foreground colors"
+ },
+ "Puxar": {
+  "en": "Pull"
+ },
+ "Quadrada": {
+  "en": "Square"
+ },
+ "Quadrado": {
+  "en": "Square"
+ },
+ "Quadros": {
+  "en": "Frames"
+ },
+ "Quality": {
+  "en": "Quality",
+  "pt": "Qualidade"
+ },
+ "REC": {
+  "en": "REC"
+ },
+ "RGB 2": {
+  "en": "RGB 2"
+ },
+ "RGB 3": {
+  "en": "RGB 3"
+ },
+ "RGB 4": {
+  "en": "RGB 4"
+ },
+ "Radial": {
+  "en": "Radial"
+ },
+ "Radius": {
+  "en": "Radius",
+  "pt": "Raio"
+ },
+ "Random Table Entries": {
+  "en": "Random table entries",
+  "pt": "Entradas aleatórias"
+ },
+ "Randomness": {
+  "en": "Randomness",
+  "pt": "Aleatoriedade"
+ },
+ "Rascunho": {
+  "en": "Draft"
+ },
+ "Rasgos horizontais": {
+  "en": "Horizontal tears"
+ },
+ "Rays": {
+  "en": "Rays",
+  "pt": "Raios"
+ },
+ "Recortar": {
+  "en": "Clip"
+ },
+ "Red X": {
+  "en": "Red X",
+  "pt": "Vermelho X"
+ },
+ "Red Y": {
+  "en": "Red Y",
+  "pt": "Vermelho Y"
+ },
+ "Reflect": {
+  "en": "Reflect",
+  "pt": "Refletir"
+ },
+ "Reflexos internos": {
+  "en": "Internal reflections"
+ },
+ "Reforço de borda": {
+  "en": "Edge boost"
+ },
+ "Reinhard": {
+  "en": "Reinhard"
+ },
+ "Repeat Edge Pixels": {
+  "en": "Repeat edge pixels",
+  "pt": "Repetir pixels da borda"
+ },
+ "Repeat edges": {
+  "en": "Repeat edges",
+  "pt": "Repetir bordas"
+ },
+ "Repetir": {
+  "en": "Repeat"
+ },
+ "Rotation Variation": {
+  "en": "Rotation variation",
+  "pt": "Variação da rotação"
+ },
+ "Rótulo": {
+  "en": "Label"
+ },
+ "SP": {
+  "en": "SP"
+ },
+ "Sangramento de cor": {
+  "en": "Color bleed"
+ },
+ "Saturation Bias": {
+  "en": "Saturation bias",
+  "pt": "Viés de saturação"
+ },
+ "Scale Wiggle": {
+  "en": "Scale wiggle",
+  "pt": "Tremor da escala"
+ },
+ "Scanlines": {
+  "en": "Scanlines",
+  "pt": "Linhas de varredura"
+ },
+ "Screen": {
+  "en": "Screen",
+  "pt": "Tela"
+ },
+ "Seed": {
+  "en": "Seed",
+  "pt": "Semente"
+ },
+ "Segundos": {
+  "en": "Seconds"
+ },
+ "Segurar": {
+  "en": "Hold"
+ },
+ "Seno": {
+  "en": "Sine"
+ },
+ "Sequential": {
+  "en": "Sequential",
+  "pt": "Sequencial"
+ },
+ "Shadow Only": {
+  "en": "Shadow only",
+  "pt": "Só a sombra"
+ },
+ "Shadow Spread": {
+  "en": "Shadow spread",
+  "pt": "Espalhamento da sombra"
+ },
+ "Shape": {
+  "en": "Shape",
+  "pt": "Forma"
+ },
+ "Sharp": {
+  "en": "Sharp",
+  "pt": "Nítido"
+ },
+ "Show Detection Mask": {
+  "en": "Show detection mask",
+  "pt": "Mostrar máscara de detecção"
+ },
+ "Signal Noise": {
+  "en": "Signal noise",
+  "pt": "Ruído do sinal"
+ },
+ "Simplex": {
+  "en": "Simplex"
+ },
+ "Smooth": {
+  "en": "Smooth",
+  "pt": "Suave"
+ },
+ "Sobrepor": {
+  "en": "Overlay"
+ },
+ "Sobreposição": {
+  "en": "Overlay"
+ },
+ "Softness": {
+  "en": "Softness",
+  "pt": "Suavidade"
+ },
+ "Source Color": {
+  "en": "Source color",
+  "pt": "Cor da origem"
+ },
+ "Speed": {
+  "en": "Speed",
+  "pt": "Velocidade"
+ },
+ "Spread": {
+  "en": "Spread",
+  "pt": "Espalhamento"
+ },
+ "Standard": {
+  "en": "Standard",
+  "pt": "Padrão"
+ },
+ "Star": {
+  "en": "Star",
+  "pt": "Estrela"
+ },
+ "Stretch Y": {
+  "en": "Stretch Y",
+  "pt": "Esticar Y"
+ },
+ "Style": {
+  "en": "Style",
+  "pt": "Estilo"
+ },
+ "Suave": {
+  "en": "Smooth"
+ },
+ "Suave no fim": {
+  "en": "Ease out"
+ },
+ "Suave no início": {
+  "en": "Ease in"
+ },
+ "Suavidade do limite": {
+  "en": "Threshold softness"
+ },
+ "Supressão de cor": {
+  "en": "Spill suppression"
+ },
+ "Sweep Intensity": {
+  "en": "Sweep intensity",
+  "pt": "Intensidade da varredura"
+ },
+ "Só na horizontal": {
+  "en": "Horizontal only"
+ },
+ "Só o desfoque": {
+  "en": "Blur only"
+ },
+ "Só o detalhe": {
+  "en": "Detail only"
+ },
+ "Só o halo": {
+  "en": "Halo only"
+ },
+ "Table Position": {
+  "en": "Table position",
+  "pt": "Posição na tabela"
+ },
+ "Table Value": {
+  "en": "Table value",
+  "pt": "Valor da tabela"
+ },
+ "Tamanho do OSD": {
+  "en": "OSD size"
+ },
+ "Tela": {
+  "en": "Screen"
+ },
+ "Texture Noise": {
+  "en": "Texture noise",
+  "pt": "Ruído da textura"
+ },
+ "Texture Seed": {
+  "en": "Texture seed",
+  "pt": "Semente da textura"
+ },
+ "Threshold": {
+  "en": "Threshold",
+  "pt": "Limite"
+ },
+ "Threshold Smooth": {
+  "en": "Threshold smoothness",
+  "pt": "Suavidade do limite"
+ },
+ "Tile": {
+  "en": "Tile",
+  "pt": "Ladrilhar"
+ },
+ "Tingir o halo": {
+  "en": "Tint halo"
+ },
+ "Tingir o núcleo": {
+  "en": "Tint core"
+ },
+ "Tint Amount": {
+  "en": "Tint amount",
+  "pt": "Intensidade do tom"
+ },
+ "Tirar claros": {
+  "en": "Key out brights"
+ },
+ "Tirar escuros": {
+  "en": "Key out darks"
+ },
+ "Todas": {
+  "en": "All"
+ },
+ "Tolerância": {
+  "en": "Tolerance"
+ },
+ "Tone Mapping": {
+  "en": "Tone mapping",
+  "pt": "Mapeamento de tons"
+ },
+ "Top left X": {
+  "en": "Top left X",
+  "pt": "Superior esquerdo X"
+ },
+ "Top left Y": {
+  "en": "Top left Y",
+  "pt": "Superior esquerdo Y"
+ },
+ "Top right X": {
+  "en": "Top right X",
+  "pt": "Superior direito X"
+ },
+ "Top right Y": {
+  "en": "Top right Y",
+  "pt": "Superior direito Y"
+ },
+ "Torcer": {
+  "en": "Twist"
+ },
+ "Tracking": {
+  "en": "Tracking"
+ },
+ "Transition Completion": {
+  "en": "Transition completion",
+  "pt": "Progresso da transição"
+ },
+ "Transition Softness": {
+  "en": "Transition softness",
+  "pt": "Suavidade da transição"
+ },
+ "Transparent": {
+  "en": "Transparent",
+  "pt": "Transparente"
+ },
+ "Transparência": {
+  "en": "Alpha"
+ },
+ "Triângulo": {
+  "en": "Triangle"
+ },
+ "Twist": {
+  "en": "Twist",
+  "pt": "Torção"
+ },
+ "Twitchy": {
+  "en": "Twitchy",
+  "pt": "Nervoso"
+ },
+ "Valor": {
+  "en": "Value"
+ },
+ "Variation Seed": {
+  "en": "Variation seed",
+  "pt": "Semente da variação"
+ },
+ "Velocidade da emenda": {
+  "en": "Splice speed"
+ },
+ "Vertical": {
+  "en": "Vertical"
+ },
+ "Vertical Roll": {
+  "en": "Vertical roll",
+  "pt": "Rolagem vertical"
+ },
+ "Vertical Sort": {
+  "en": "Vertical sort",
+  "pt": "Ordenação vertical"
+ },
+ "View": {
+  "en": "View",
+  "pt": "Visualização"
+ },
+ "Visualização": {
+  "en": "View"
+ },
+ "Wave": {
+  "en": "Wave",
+  "pt": "Onda"
+ },
+ "Width": {
+  "en": "Width",
+  "pt": "Largura"
+ },
+ "X": {
+  "en": "X"
+ },
+ "XY": {
+  "en": "XY"
+ },
+ "XYZ": {
+  "en": "XYZ"
+ },
+ "XZ": {
+  "en": "XZ"
+ },
+ "Y": {
+  "en": "Y"
+ },
+ "Y/C Crosstalk": {
+  "en": "Y/C crosstalk",
+  "pt": "Interferência Y/C"
+ },
+ "YZ": {
+  "en": "YZ"
+ },
+ "Z": {
+  "en": "Z"
+ },
+ "Zoom": {
+  "en": "Zoom"
+ },
+ "fBm": {
+  "en": "fBm"
+ },
+ "Ângulo inicial": {
+  "en": "Start angle"
+ }
+}

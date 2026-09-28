@@ -648,6 +648,95 @@ AUREA_TEST(ClipTime, RemapSmoothFreezeAndReversePresetsChangeSourceTime) {
     AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{150}), 150.0, 0.001);
 }
 
+// O Remapear tempo simplificado (um "Tempo" + facilidade por chave + atalhos)
+// não muda o dado: um projeto salvo com o efeito antigo — parâmetros
+// {Tempo, Interpolação 0/1/2} e a curva com Bézier do gráfico, Segurar e
+// Suave — tem que abrir mostrando exatamente os mesmos quadros da fonte.
+AUREA_TEST(ClipTime, RemapOldProjectKeepsFrameTimesAndSimpleControls) {
+    TimeRig r(cfg_with_audio());
+    Layer* l = r.L();
+    EffectInstance fx;
+    fx.id = l->alloc_effect_id();
+    fx.type = effect_type_id(effect_keys::kTimeRemap);
+    fx.params.resize(2);
+    fx.params[0].constant.v[0] = 2.5f;   // o "Tempo" guardado pelo efeito antigo
+    fx.params[1].constant.v[0] = 2.0f;   // "Segurar" no enum antigo de 3 itens
+    l->effects.push_back(fx);
+    Track& t = l->timeRemap;
+    t.property = TrackProperty::TimeRemap;
+    t.set(FrameIndex{0}, 0.0f, Interpolation::Bezier);
+    t.keys[0].bx1 = 0.2f; t.keys[0].by1 = 0.6f; t.keys[0].bx2 = 0.7f; t.keys[0].by2 = 0.9f;
+    t.set(FrameIndex{40}, 90.0f, Interpolation::Hold);
+    t.set(FrameIndex{80}, 90.0f, Interpolation::EaseInOut);
+    t.set(FrameIndex{120}, 30.0f, Interpolation::Linear);
+    t.set(FrameIndex{150}, 150.0f, Interpolation::Linear);
+    l->timeRemapEnabled = true;
+    std::vector<f64> before;
+    for (i64 f = 0; f <= 150; ++f) before.push_back(l->source_frame_f(static_cast<f64>(f) + 0.25));
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_remap_antigo.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    std::remove(path.c_str());
+    r.comp()->layers().for_each([&](LayerId id, const Layer&) { r.layer = id; });
+    l = r.L();
+    AUREA_CHECK(l && l->timeRemapEnabled);
+    if (!l) return;
+    f64 worst = 0;
+    for (i64 f = 0; f <= 150; ++f)
+        worst = std::max(worst, std::fabs(l->source_frame_f(static_cast<f64>(f) + 0.25) - before[static_cast<usize>(f)]));
+    std::printf("    remap antigo reaberto: pior diferenca %.6f quadros\n", worst);
+    AUREA_CHECK(worst < 1e-4);
+
+    // A leitura da facilidade: os números antigos continuam dizendo o mesmo.
+    const u32 effect = l->effects.back().id;
+    auto seek = [&](i64 frame) {
+        Command c; c.type = CommandType::PlaybackSeek; c.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(r.e.apply_command(c).ok());
+    };
+    auto ease_here = [&]() {
+        bridge::EffectParamRow rows[4]{}; char blob[512]{};
+        AUREA_CHECK(r.e.query_effect_params(r.layer.pack(), effect, rows, 4, blob, sizeof blob) >= 2u);
+        return rows[1].value[0];
+    };
+    seek(40); AUREA_CHECK_NEAR(ease_here(), 2.0f, 1e-6f);   // Segurar
+    seek(80); AUREA_CHECK_NEAR(ease_here(), 1.0f, 1e-6f);   // Suave
+    seek(0);  AUREA_CHECK_NEAR(ease_here(), 1.0f, 1e-6f);   // Bézier do gráfico lê "Suave"
+
+    // Facilidades novas por chave (3 = começa devagar, 4 = termina devagar)
+    // sem tocar no gráfico, e o arrasto do Tempo mantém a escolhida.
+    Command param; param.type = CommandType::EffectSetParam; param.effect_param.layer = r.layer;
+    param.effect_param.effect = EffectId{effect, 0};
+    seek(120);
+    param.effect_param.paramIndex = 1; param.effect_param.value = 3.0f;
+    AUREA_CHECK(r.e.apply_command(param).ok());
+    AUREA_CHECK(l->timeRemap.keys[l->timeRemap.find_exact(FrameIndex{120})].interp == Interpolation::EaseIn);
+    AUREA_CHECK_NEAR(ease_here(), 3.0f, 1e-6f);
+    AUREA_CHECK(l->source_frame(FrameIndex{135}) < 30.0 + 60.0);   // começa devagar: abaixo da reta
+    param.effect_param.paramIndex = 0; param.effect_param.value = 2.0f;   // 2 s da fonte
+    AUREA_CHECK(r.e.apply_command(param).ok());
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{120}), 60.0, 1e-3);
+    AUREA_CHECK(l->timeRemap.keys[l->timeRemap.find_exact(FrameIndex{120})].interp == Interpolation::EaseIn);
+    param.effect_param.value = 999.0f;   // o dedo passou do fim: preso ao último quadro
+    AUREA_CHECK(r.e.apply_command(param).ok());
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{120}), 299.0, 1e-3);
+    param.effect_param.paramIndex = 1; param.effect_param.value = 4.0f;
+    AUREA_CHECK(r.e.apply_command(param).ok());
+    AUREA_CHECK(l->timeRemap.keys[l->timeRemap.find_exact(FrameIndex{120})].interp == Interpolation::EaseOut);
+
+    // Congelar aqui: 1 s parado no quadro do cabeçote, depois segue a 1×; o
+    // que vem antes do cabeçote não muda.
+    AUREA_CHECK(r.e.apply_speed_ramp(r.layer.pack(), 0));
+    seek(60);
+    const f64 at60 = l->source_frame(FrameIndex{60});
+    const f64 at20 = l->source_frame(FrameIndex{20});
+    AUREA_CHECK(r.e.apply_speed_ramp(r.layer.pack(), 7));
+    for (i64 f : {60LL, 75LL, 90LL}) AUREA_CHECK_NEAR(l->source_frame(FrameIndex{f}), at60, 1e-3);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{100}), at60 + 10.0, 1e-3);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{20}), at20, 1e-3);
+    seek(300);   // no fim do clipe não há o que segurar
+    AUREA_CHECK(!r.e.apply_speed_ramp(r.layer.pack(), 7));
+}
+
 AUREA_TEST(ClipTime, MoveVideoToTwoSecondPlayheadPreservesSourceAndUndo) {
     TimeRig r(cfg_with_audio());
     const FrameIndex oldEnd = r.L()->end;
@@ -677,4 +766,136 @@ AUREA_TEST(ClipTime, MoveVideoToTwoSecondPlayheadPreservesSourceAndUndo) {
     AUREA_CHECK_EQ(r.L()->start.value, 0LL);
     AUREA_CHECK_EQ(r.L()->end.value, oldEnd.value);
     AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{60}), 60.0, 0.001);
+}
+
+// =============================================================================
+//  Velocidade com keyframes: a fonte anda a INTEGRAL da velocidade. Sem
+//  keyframe, a conta antiga (byte a byte); com, vídeo, áudio, forma de onda,
+//  corte e arquivo seguem a mesma integral.
+// =============================================================================
+namespace {
+void speed_key(TimeRig& r, i64 local, f32 v) {
+    Command c;
+    c.type = CommandType::KeyframeInsert;
+    c.keyframe.track.layer = r.layer;
+    c.keyframe.track.property = TrackProperty::Speed;
+    c.keyframe.time = FrameIndex{local};
+    c.keyframe.value = v;
+    AUREA_CHECK(r.e.apply_command(c).ok());
+}
+} // namespace
+
+AUREA_TEST(ClipTime, SpeedWithoutKeysIsByteIdenticalToConstantSpeed) {
+    TimeRig r(cfg_with_audio());
+    r.speed(2.0f);
+    std::vector<f64> before;
+    for (i64 f = 0; f < 150; ++f) before.push_back(r.L()->source_frame_f(static_cast<f64>(f) + 0.25));
+    // Trilha vazia (criada, sem keyframe): nada muda, nem no último bit.
+    (void)r.L()->tracks.get_or_create(TrackProperty::Speed);
+    AUREA_CHECK(r.L()->speed_track() == nullptr);
+    bool same = true;
+    for (i64 f = 0; f < 150; ++f)
+        same = same && r.L()->source_frame_f(static_cast<f64>(f) + 0.25) == before[static_cast<usize>(f)];
+    AUREA_CHECK(same);
+    // Um keyframe só, no valor parado: a mesma reta (a menos do arredondamento).
+    speed_key(r, 0, 2.0f);
+    f64 worst = 0;
+    for (i64 f = 0; f < 150; ++f)
+        worst = std::max(worst, std::fabs(r.L()->source_frame_f(static_cast<f64>(f) + 0.25) - before[static_cast<usize>(f)]));
+    AUREA_CHECK(worst < 1e-9);
+}
+
+AUREA_TEST(ClipTime, SpeedKeyframesIntegrateSourceTimeAndAudioFollows) {
+    TimeRig r(cfg_with_audio());
+    // 1× no quadro 0 → 3× no quadro 20 (linear), 3× depois:
+    // fonte(u) = u + u²/20 até 20 (= 40), depois 40 + 3·(u − 20).
+    speed_key(r, 0, 1.0f);
+    speed_key(r, 20, 3.0f);
+    const Layer* l = r.L();
+    AUREA_CHECK(l->speed_track() != nullptr);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{0}), 0.0, 1e-9);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{10}), 15.0, 1e-9);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{20}), 40.0, 1e-9);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{30}), 70.0, 1e-9);
+    AUREA_CHECK_NEAR(l->source_frame_f(10.5), 10.5 + 10.5 * 10.5 / 20.0, 1e-6);
+    AUREA_CHECK_NEAR(l->speed_at(FrameIndex{10}), 2.0, 1e-6);
+    // Facilidade (não linear): a integral continua monótona e contínua.
+    Command ease;
+    ease.type = CommandType::KeyframeSetInterpolation;
+    ease.keyframe_interp.track.layer = r.layer;
+    ease.keyframe_interp.track.property = TrackProperty::Speed;
+    ease.keyframe_interp.time = FrameIndex{0};
+    ease.keyframe_interp.interp = Interpolation::EaseInOut;
+    ease.keyframe_interp.bx1 = 0.42f; ease.keyframe_interp.by1 = 0.0f;
+    ease.keyframe_interp.bx2 = 0.58f; ease.keyframe_interp.by2 = 1.0f;
+    AUREA_CHECK(r.e.apply_command(ease).ok());
+    bool monotonic = true;
+    for (i64 f = 1; f < 60; ++f) monotonic = monotonic && l->source_frame(FrameIndex{f}) > l->source_frame(FrameIndex{f - 1});
+    AUREA_CHECK(monotonic);
+    // EaseInOut simétrico: a área do trecho é a mesma da reta (média 2×).
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{20}), 40.0, 0.05);
+    ease.keyframe_interp.interp = Interpolation::Linear;
+    AUREA_CHECK(r.e.apply_command(ease).ok());
+
+    // Áudio pelo caminho quadro a quadro, no instante da fonte da integral.
+    auto snap = audio::build_snapshot(*r.comp(), *r.e.project(), nullptr, nullptr, nullptr);
+    AUREA_CHECK_EQ(snap->clips.size(), usize{1});
+    if (snap->clips.empty()) return;
+    AUREA_CHECK(!snap->clips[0].srcByFrame.empty());
+    audio::AudioBlockCache cache(&r.factory, 16ull << 20, false);
+    cache.register_asset(snap->clips[0].asset, audio::AudioAssetRef{"s", 10 * 48000});
+    Fetch f(cache);
+    std::vector<f32> out(2);
+    audio::mix(*snap, audio::frame_to_sample(30, 30.0), 1, f, out.data());
+    AUREA_CHECK_NEAR(out[0], synthetic_audio_value(cfg_with_audio(), 0, 70.0 / 30.0), 2e-3);
+
+    // Detalhe da camada: a velocidade no cabeçote e o bit "animada".
+    Command seek; seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{10}, 30.0);
+    AUREA_CHECK(r.e.apply_command(seek).ok());
+    bridge::LayerDetailPOD d{};
+    AUREA_CHECK(r.e.query_layer_detail(r.layer.pack(), d));
+    AUREA_CHECK_NEAR(d.speed, 2.0f, 1e-4);
+    AUREA_CHECK((d.timeFlags & 64u) != 0);
+
+    // Salvar e reabrir mantém a integral.
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_speedkeys.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    const Layer* back = nullptr;
+    r.comp()->layers().for_each([&](LayerId, const Layer& x) { back = &x; });
+    AUREA_CHECK(back && back->speed_track() != nullptr);
+    AUREA_CHECK(back && std::fabs(back->source_frame(FrameIndex{30}) - 70.0) < 1e-6);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(ClipTime, SplitAndReverseKeepTheIntegratedSpeedTime) {
+    TimeRig r(cfg_with_audio());
+    speed_key(r, 0, 1.0f);
+    speed_key(r, 20, 3.0f);
+    std::vector<f64> before;
+    for (i64 f = 0; f < 60; ++f) before.push_back(r.L()->source_frame(FrameIndex{f}));
+    // Corte no quadro 25: as duas metades mostram a MESMA fonte de antes.
+    Command split; split.type = CommandType::LayerSplit;
+    split.layer_split.layer = r.layer;
+    split.layer_split.at = FrameIndex{25};
+    AUREA_CHECK(r.e.apply_command(split).ok());
+    f64 worst = 0;
+    r.comp()->layers().for_each([&](LayerId, const Layer& x) {
+        for (i64 f = std::max<i64>(0, x.start.value); f < std::min<i64>(60, x.end.value); ++f)
+            worst = std::max(worst, std::fabs(x.source_frame(FrameIndex{f}) - before[static_cast<usize>(f)]));
+    });
+    std::printf("    corte com velocidade animada: erro maximo %.6f quadro\n", worst);
+    AUREA_CHECK(worst < 0.01);
+
+    // Reverso com keyframes: o último quadro mostra a entrada, sempre recuando.
+    TimeRig q(cfg_with_audio());
+    speed_key(q, 0, 1.0f);
+    speed_key(q, 20, 3.0f);
+    q.reverse(true);
+    const Layer* l = q.L();
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{l->end.value - 1}), 0.0, 1e-9);
+    bool down = true;
+    for (i64 f = 1; f < l->end.value; ++f) down = down && l->source_frame(FrameIndex{f}) < l->source_frame(FrameIndex{f - 1});
+    AUREA_CHECK(down);
 }

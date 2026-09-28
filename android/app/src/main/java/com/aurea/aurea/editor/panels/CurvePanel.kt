@@ -30,6 +30,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.drop
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -249,6 +252,16 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     androidx.compose.runtime.DisposableEffect(store, focusKey?.property, focusKey?.effectIndex, focusKey?.paramIndex) {
         store.timelineFocus = focusKey?.let { listOf(com.aurea.aurea.engine.TrackKey(it.property, it.effectIndex, it.paramIndex)) }
         onDispose { store.timelineFocus = null }
+    }
+    // O gráfico segue o que a pessoa olha, não o que estava aberto quando o
+    // painel abriu: outra camada escolhida (toque, setas ‹ ›, arrasto vertical
+    // da fileira compacta) traz a trilha animada dela; o cabeçote parado noutro
+    // trecho (scrub, rolar a timeline) escolhe esse trecho.
+    LaunchedEffect(store) { snapshotFlow { store.primary }.collect { followGraphLayer(store) } }
+    LaunchedEffect(store) {
+        // O primeiro valor é o de quando o painel abriu: o trecho tocado vale.
+        snapshotFlow { store.playhead to store.playing }.drop(1)
+            .collect { (_, playing) -> if (!playing) followGraphPlayhead(store) }
     }
     val segment by remember(store) {
         derivedStateOf {
@@ -665,4 +678,31 @@ private fun PresetThumb(e: Ease, selected: Boolean, modifier: Modifier) {
         drawCircle(dot, 2.5.dp.toPx(), Offset(pad, pad + hh))
         drawCircle(dot, 2.5.dp.toPx(), Offset(pad + w, pad))
     }
+}
+
+/** Instante LOCAL do cabeçote na camada [layer] (o tempo das marcas dela). */
+private fun localPlayhead(store: EditorStore, layer: Long): Int? {
+    val row = store.layers.firstOrNull { it.id == layer } ?: return null
+    return store.playhead - row.startFrame + row.offsetFrames
+}
+
+/** Outra camada escolhida: o gráfico passa para a trilha animada dela (a mesma, se houver). */
+private fun followGraphLayer(store: EditorStore) {
+    val layer = store.primary ?: return
+    val current = store.selectedKeyframe
+    if (current?.first == layer) return
+    val track = graphTrackFor(store.keyframes[layer].orEmpty(), current?.second)
+    if (track.isEmpty()) { if (current != null) store.clearSelectedKeyframe(); return }
+    val i = localPlayhead(store, layer)?.let { segmentIndexAt(track, it) } ?: 0
+    store.selectKeyframe(layer, track[i.coerceAtLeast(0)])
+}
+
+/** Cabeçote parado noutro trecho da trilha mostrada: o painel mostra esse trecho. */
+private fun followGraphPlayhead(store: EditorStore) {
+    val (layer, sel) = store.selectedKeyframe ?: return
+    if (layer != store.primary) return
+    val track = store.keyframes[layer].orEmpty().track(sel)
+    val local = localPlayhead(store, layer) ?: return
+    val want = segmentIndexAt(track, local)
+    if (want >= 0 && want != segmentIndexOf(track, sel.time)) store.selectKeyframe(layer, track[want])
 }

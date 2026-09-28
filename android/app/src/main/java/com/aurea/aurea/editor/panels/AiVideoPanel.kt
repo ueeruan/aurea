@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ai.AureaAiEstado
 import com.aurea.aurea.ai.SessaoStatus
 import com.aurea.aurea.ai.Pedido
@@ -119,18 +120,18 @@ internal fun AiVideoPanel(env: PanelEnv) {
             try {
                 val par = lerImagemParaEnvio(app, uri)
                 if (par == null) {
-                    erroImagem = "Escolha uma imagem PNG, JPEG ou WebP de até 8 MB."
+                    erroImagem = AppText.get(app, R.string.edt_ai_image_invalid)
                     return@launch
                 }
                 val id = ai.enviarImagem(par.first, par.second)
                 if (id != null) {
                     assetId = id
-                    nomeImagem = uri.lastPathSegment?.takeLast(28) ?: "imagem"
+                    nomeImagem = uri.lastPathSegment?.takeLast(28) ?: AppText.get(app, R.string.target_image)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                erroImagem = "Não foi possível abrir ou enviar a imagem. Tente novamente."
+                erroImagem = AppText.get(app, R.string.edt_ai_image_failed)
             } finally {
                 enviandoImagem = false
             }
@@ -183,7 +184,7 @@ internal fun AiVideoPanel(env: PanelEnv) {
                             Spacer(Modifier.height(10.dp))
                             Text(stringResource(R.string.ai_falhou_titulo), style = AureaType.Base.merge(
                                 TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Danger)))
-                            Nota(explicarFalhaDeVideo(s.erro), AureaColors.Muted)
+                            Nota(explicarFalhaDeVideo(LocalContext.current, s.erro), AureaColors.Muted)
                             Spacer(Modifier.height(6.dp))
                             // Falha técnica depois da recompensa: tenta de novo SEM outro anúncio.
                             Botao(
@@ -421,10 +422,11 @@ internal fun AiVideoPanel(env: PanelEnv) {
     }
 }
 
+@Composable
 private fun nomeDaResolucao(r: String) = when (r) {
-    "preview" -> "Rascunho"
-    "standard" -> "Padrão"
-    "high" -> "Alta"
+    "preview" -> stringResource(R.string.edt_ai_res_draft)
+    "standard" -> stringResource(R.string.common_default)
+    "high" -> stringResource(R.string.editor_alta)
     else -> r
 }
 

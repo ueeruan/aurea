@@ -87,6 +87,30 @@ struct EditorView: View {
         .overlay { if model.showAddLayer && !model.sceneEditor { ShellAddCategoryDialog() } }
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
+        .modifier(ModelTexturesPrompt())
+    }
+}
+
+/// "Importar texturas": o modelo FBX/OBJ procura arquivos que não vieram junto.
+/// O seletor abre depois que o alerta fecha (o alvo fica guardado no modelo).
+private struct ModelTexturesPrompt: ViewModifier {
+    @EnvironmentObject private var model: AureaModel
+    @State private var picking = false
+    func body(content: Content) -> some View {
+        content
+            .alert(AureaText.t("model_textures_title"), isPresented: Binding(
+                get: { model.missingModelTextures != nil },
+                set: { if !$0 { model.missingModelTextures = nil } })) {
+                Button(AureaText.t("model_textures_choose")) { model.missingModelTextures = nil; picking = true }
+                Button(AureaText.t("common_cancel"), role: .cancel) { model.missingModelTextures = nil }
+            } message: {
+                let names = model.missingModelTextures?.names ?? []
+                Text(AureaText.t("model_textures_message", names.prefix(8).joined(separator: "\n") + (names.count > 8 ? "\n…" : "")))
+            }
+            .fileImporter(isPresented: $picking, allowedContentTypes: [.image, .data], allowsMultipleSelection: true) { result in
+                guard case .success(let urls) = result else { return }
+                model.importModelTextures(urls: urls)
+            }
     }
 }
 
@@ -310,12 +334,13 @@ private struct ShellStageBanner: View {
                 var data: [Float] = []; guard StageGeom.corners(detail, &data) else { return [] }
                 return stride(from: 0, to: 8, by: 2).map { screen(data[$0], data[$0 + 1]) }
             }
-            for row in model.layers where model.selection.count > 1 && model.selection.contains(row.id) && row.id != model.primarySelection && active(row) {
+            let chrome = !model.hideSelectionBox   // caixa escondida: sem contorno (a seleção continua)
+            for row in model.layers where chrome && model.selection.count > 1 && model.selection.contains(row.id) && row.id != model.primarySelection && active(row) {
                 if let detail = model.engine.layerDetail(row.id) { outline(&context, corners(detail), under: 2.5, over: 1.5, color: AureaColors.accent) }
             }
             guard let selected = model.selectedLayer, active(selected) else { return }
             let points = corners(model.detail)
-            outline(&context, points, under: 3.5, over: 2, color: selected.locked ? AureaColors.muted : AureaColors.accent)
+            if chrome { outline(&context, points, under: 3.5, over: 2, color: selected.locked ? AureaColors.muted : AureaColors.accent) }
             // Só o centro e as setas dos eixos: alça de canto (giro/escala) em
             // camada pequena ficava em cima do corpo e roubava o arrasto. Girar
             // e escalar é pela pinça (e, no 3D, pela ferramenta do gizmo).
@@ -1138,11 +1163,12 @@ private struct AddLayerSheet: View {
             if tab == 0 { shapeGrid } else { cards }
         }
         .background(AureaColors.editorPanel)
-        .fileImporter(isPresented: $showingImporter, allowedContentTypes: fileTypes) { result in
-            guard case .success(let url) = result else { return }
+        .fileImporter(isPresented: $showingImporter, allowedContentTypes: fileTypes, allowsMultipleSelection: fileKind == .model) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
             switch fileKind {
             case .audio: model.importMedia(url: url, kind: .audio)
-            case .model: model.importMedia(url: url, kind: .model)
+            // Seleção múltipla/pasta: o FBX/OBJ vem com as texturas e o .mtl.
+            case .model: model.importModelFiles(urls: urls)
             case .svg: model.importSvg(url: url)
             }
             close()
@@ -1243,7 +1269,7 @@ private struct AddLayerSheet: View {
         switch fileKind {
         case .audio: return [.audio]
         case .svg: return [UTType(filenameExtension: "svg") ?? .data]
-        case .model: return [.data] // glTF/GLB/OBJ/FBX: o importador do motor valida a extensão.
+        case .model: return [.data, .folder] // glTF/GLB/OBJ/FBX (+ texturas, ou a pasta): o motor valida a extensão.
         }
     }
     private func card(_ label: String, glyph: Character, accent: Bool = false, color: Color? = nil, action: @escaping () -> Void) -> some View {

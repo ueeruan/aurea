@@ -736,6 +736,13 @@ class AureaEngine private constructor() {
         nativeImportModel(nativeHandle, path, name, detail)
     /** Etapa × 1000 + fração × 1000 (ImportPhase do motor). */
     fun importModelProgress(): Int = nativeImportModelProgress(nativeHandle)
+    /** Texturas (e o .mtl do OBJ) que o modelo 3D da layer referencia e não achou: só o nome do arquivo. */
+    fun modelMissingTextures(layer: Long): List<String> =
+        nativeModelMissingTextures(nativeHandle, layer).lines().filter { it.isNotBlank() }
+    /** Pasta absoluta do arquivo do modelo (com a barra no fim); vazio = não é modelo importado. */
+    fun modelFolder(layer: Long): String = nativeModelFolder(nativeHandle, layer)
+    /** Relê o modelo com as texturas copiadas para a pasta dele. ≥ 0 = quantas ainda faltam; < 0 = −código. Bloqueia. */
+    fun reloadModelTextures(layer: Long, detail: Array<String?>): Int = nativeReloadModelTextures(nativeHandle, layer, detail)
     fun cancelModelImport() = nativeCancelModelImport(nativeHandle)
     fun exportProgress(out: ByteBuffer): Boolean = nativeExportProgress(nativeHandle, out)
 
@@ -969,6 +976,9 @@ class AureaEngine private constructor() {
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>): Long
     private external fun nativeImportModelProgress(handle: Long): Int
+    private external fun nativeModelMissingTextures(handle: Long, layer: Long): String
+    private external fun nativeModelFolder(handle: Long, layer: Long): String
+    private external fun nativeReloadModelTextures(handle: Long, layer: Long, detail: Array<String?>): Int
     private external fun nativeCancelModelImport(handle: Long)
     private external fun nativeExportProgress(handle: Long, out: ByteBuffer): Boolean
 

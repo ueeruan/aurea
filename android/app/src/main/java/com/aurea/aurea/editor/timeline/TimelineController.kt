@@ -1,5 +1,8 @@
 package com.aurea.aurea.editor.timeline
 
+import com.aurea.aurea.ui.i18n.AppText
+import com.aurea.aurea.R
+import android.app.Application
 import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.animateDecay
 import androidx.compose.animation.splineBasedDecay
@@ -676,7 +679,29 @@ internal class TimelineController(
             r != null && edit && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
             horizontal -> scrub(down.id, slopAt, tracker)
             !state.compact -> scroll(down.id, slopAt, tracker)
-            else -> consumeUntilUp()
+            else -> compactStep(down.id, slopAt)
+        }
+    }
+
+    /**
+     * Fileira compacta: não há lista para rolar, então o arrasto vertical passa
+     * pelas camadas como uma roda (o mesmo que as setas ‹ ›) — a timeline não
+     * fica "presa" numa camada. Dedo para cima = a camada de baixo.
+     */
+    private suspend fun AwaitPointerEventScope.compactStep(id: PointerId, start: Offset) {
+        var anchor = start.y
+        while (true) {
+            val ev = awaitPointerEvent()
+            if (pressedCount(ev) >= 2) return pinch()
+            val ch = changeOf(ev, id)
+            if (ch == null || !ch.pressed) return
+            ch.consume()
+            val steps = Press.compactSteps(anchor - ch.position.y, metrics.row)
+            if (steps == 0) continue
+            anchor -= steps * metrics.row
+            val before = store.primary
+            store.selectNeighbor(if (steps > 0) 1 else -1)
+            if (store.primary != before) tick()
         }
     }
 
@@ -755,7 +780,7 @@ internal class TimelineController(
         }
         if (locked) {
             light()
-            store.showToast(if (group.size > 1) "Há camada bloqueada na seleção: desbloqueie para mover" else "Camada bloqueada: desbloqueie para editar")
+            store.showToast(AppText.get(store.getApplication<Application>(), if (group.size > 1) R.string.edt_selection_locked_move else R.string.editor_camada_bloqueada_desbloqueie_editar))
             return consumeUntilUp()
         }
         if (group.isEmpty()) return consumeUntilUp()
@@ -868,7 +893,7 @@ internal class TimelineController(
         if (index !in r.instants.indices) return consumeUntilUp()
         if (r.locked) {
             light()
-            store.showToast("Camada bloqueada: desbloqueie para mover o keyframe")
+            store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_layer_locked_move_key))
             return consumeUntilUp()
         }
         // Losango ESCOLHIDO (lote de 2+ ou modo de escolha): a seleção inteira anda junta.
@@ -957,7 +982,7 @@ internal class TimelineController(
         for (s in r.segments) if (s.locked) locked = true
         if (locked) {
             light()
-            store.showToast("Camada bloqueada: desbloqueie para editar")
+            store.showToast(AppText.get(store.getApplication<Application>(), R.string.editor_camada_bloqueada_desbloqueie_editar))
             return consumeUntilUp()
         }
         heavy()

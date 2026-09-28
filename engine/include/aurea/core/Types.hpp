@@ -209,6 +209,7 @@ enum class TrackProperty : u16 {
     ParticleParam,     ///< parâmetro do Aurea Particular (paramIndex = ParticleParam)
     MaterialParam,     ///< imported material: effectIndex=materialIndex, paramIndex=RGBA/metallic/roughness
     CameraBlur,        ///< lente: força do desfoque de profundidade (× o círculo de confusão físico)
+    Speed,             ///< velocidade do conteúdo animada (quadros da fonte por quadro); a fonte = integral dela
     _Count,
 };
 

@@ -1698,6 +1698,32 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return static_cast<long long>(*r);
 }
 
+- (NSArray<NSString*>*)modelMissingTextures:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    for (const std::string& name : e->model_missing_textures(static_cast<aurea::u64>(layerId))) [out addObject:to_ns(name)];
+    return out;
+}
+
+- (NSString*)modelFolder:(long long)layerId {
+    auto* e = self.engine;
+    return e ? to_ns(e->model_folder(static_cast<aurea::u64>(layerId))) : @"";
+}
+
+- (int)reloadModelTextures:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return -static_cast<int>(aurea::Errc::InvalidState);
+    std::string detail;
+    const aurea::Result<aurea::u32> r = e->reload_model_textures(static_cast<aurea::u64>(layerId), &detail);
+    if (!r.ok()) {
+        _lastImportError = to_ns(detail.empty() ? std::string(r.status().message()) : detail);
+        return -static_cast<int>(r.status().code());
+    }
+    _lastImportError = @"";
+    return static_cast<int>(*r);
+}
+
 - (long long)importObjectHDRI:(NSString*)path layer:(long long)layer {
     auto* e = self.engine; if (!e) return -1;
     const auto result = e->import_hdri(path.UTF8String, layer);

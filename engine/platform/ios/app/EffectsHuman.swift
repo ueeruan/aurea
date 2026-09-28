@@ -1626,3 +1626,31 @@ final class FxEffectPrefs: ObservableObject {
         UserDefaults.standard.removeObject(forKey: recentsKey)
     }
 }
+
+// MARK: - Texto que o motor publica no efeito, no idioma do app
+
+/// Unidades que o motor escreve em português; "%", "px", "Hz", "°"... ficam como estão.
+private let FxUnitKeys: [String: String] = ["quadros": "fxu_frames", "px/quadro": "fxu_px_per_frame", "oitavas": "fxu_octaves", "voltas": "fxu_turns"]
+
+/// Rótulo, opções e unidade de um parâmetro no idioma do app, pela IDENTIDADE
+/// (typeId + índice → tabela gerada `EffectI18nTable`). Sem entrada, o texto do motor.
+func fxLocalizedParam(_ typeId: UInt32, index: Int, label: String, unit: String, options: [String]) -> (label: String, unit: String, options: [String]) {
+    let entry = EffectI18nTable.entries["\(typeId)#\(index)"]
+    let localizedUnit = FxUnitKeys[unit].map { AureaText.t($0) } ?? unit
+    guard let entry else { return (label, localizedUnit, options) }
+    // Opções só pela identidade completa: se o motor mudou a lista, fica a dele.
+    let localizedOptions = entry.options.count == options.count ? entry.options.map { AureaText.t($0) } : options
+    return (AureaText.t(entry.label), localizedUnit, localizedOptions)
+}
+
+/// A ficha de um parâmetro do catálogo (`effectSpecs`) com rótulo, opções e unidade traduzidos.
+func fxLocalizedSpec(_ typeId: UInt32, _ spec: [String: Any]) -> [String: Any] {
+    let index = (spec["index"] as? NSNumber)?.intValue ?? -1
+    let text = fxLocalizedParam(typeId, index: index, label: spec["label"] as? String ?? "", unit: spec["unit"] as? String ?? "",
+                                options: spec["enumLabels"] as? [String] ?? [])
+    var out = spec
+    out["label"] = text.label
+    out["unit"] = text.unit
+    out["enumLabels"] = text.options
+    return out
+}

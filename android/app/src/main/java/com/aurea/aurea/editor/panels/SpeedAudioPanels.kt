@@ -1,6 +1,14 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,8 +83,8 @@ internal fun ClipEditPanel(env: PanelEnv) {
     val enabled = !row.locked && frames != null && (!needsLeft || left != 0L) && (!needsRight || right != 0L)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(row.name, color = AureaColors.Text, fontSize = 15.sp)
-        Text("${row.startFrame} → ${row.endFrame} · ${row.durationFrames} quadros", color = AureaColors.Muted, fontSize = 12.sp)
-        listOf(2 to "Slip", 3 to "Roll início", 4 to "Roll fim", 5 to "Slide").chunked(2).forEach { choices ->
+        Text(stringResource(R.string.edt_clip_range, row.startFrame, row.endFrame, row.durationFrames), color = AureaColors.Muted, fontSize = 12.sp)
+        listOf(2 to "Slip", 3 to stringResource(R.string.edt_clip_roll_start), 4 to stringResource(R.string.edt_clip_roll_end), 5 to "Slide").chunked(2).forEach { choices ->
             Row(Modifier.fillMaxWidth()) {
                 choices.forEach { (value, name) ->
                     TextButton(onClick = { mode = value }, modifier = Modifier.weight(1f).height(48.dp)) {
@@ -85,24 +93,25 @@ internal fun ClipEditPanel(env: PanelEnv) {
                 }
             }
         }
-        Text(when(mode) {
-            2 -> "Troca o trecho da mídia. A posição, a duração e a animação da camada ficam no lugar."
-            3, 4 -> "Move o corte entre dois clipes. A duração total permanece igual."
-            else -> "Move este clipe e apara os dois vizinhos, preservando o conteúdo e a duração deste clipe."
-        }, color = AureaColors.Muted, fontSize = 13.sp)
-        if (needsLeft) ClipNeighbour("Anterior", before.map { it.id to it.name }, left) { previous = it }
-        if (needsRight) ClipNeighbour("Próximo", after.map { it.id to it.name }, right) { next = it }
+        Text(stringResource(when(mode) {
+            2 -> R.string.edt_clip_slip_desc
+            3, 4 -> R.string.edt_clip_roll_desc
+            else -> R.string.edt_clip_slide_desc
+        }), color = AureaColors.Muted, fontSize = 13.sp)
+        if (needsLeft) ClipNeighbour(stringResource(R.string.edt_clip_previous), before.map { it.id to it.name }, left) { previous = it }
+        if (needsRight) ClipNeighbour(stringResource(R.string.edt_clip_next), after.map { it.id to it.name }, right) { next = it }
         OutlinedTextField(value = step, onValueChange = { value -> if (value.length <= 4 && value.all(Char::isDigit)) step = value },
-            label = { Text("Passo em quadros (1–3600)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            label = { Text(stringResource(R.string.edt_clip_step)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            listOf(-1 to "Recuar", 1 to "Avançar").forEach { (sign, title) ->
+            listOf(-1 to stringResource(R.string.edt_clip_back), 1 to stringResource(R.string.edt_clip_forward)).forEach { (sign, title) ->
+                val editLabel = stringResource(R.string.edt_clip_edit_desc, title)
                 TextButton(onClick = { store.editClipTime(mode, sign * (frames ?: 1), left, right) }, enabled = enabled,
-                    modifier = Modifier.weight(1f).height(48.dp).semantics { contentDescription = "$title edição do clipe" }) {
+                    modifier = Modifier.weight(1f).height(48.dp).semantics { contentDescription = editLabel }) {
                     Text("${if(sign < 0) "−" else "+"}${frames ?: 0} · $title")
                 }
             }
         }
-        if (!enabled) Text(if(row.locked) "Desbloqueie a camada para editar." else "Escolha clipes encostados na borda e um passo válido.", color = AureaColors.Muted, fontSize = 12.sp)
+        if (!enabled) Text(stringResource(if(row.locked) R.string.edt_clip_unlock else R.string.edt_clip_pick), color = AureaColors.Muted, fontSize = 12.sp)
     }
 }
 
@@ -111,7 +120,7 @@ private fun ClipNeighbour(title: String, items: List<Pair<Long, String>>, select
     var expanded by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-            Text("$title: ${items.firstOrNull { it.first == selected }?.second ?: "Escolher clipe"}")
+            Text("$title: ${items.firstOrNull { it.first == selected }?.second ?: stringResource(R.string.edt_clip_choose)}")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             items.forEach { (id, name) -> DropdownMenuItem(text = { Text(name) }, onClick = { select(id); expanded = false }) }
@@ -140,6 +149,13 @@ internal fun SpeedPanel(env: PanelEnv) {
     val speed by remember(store) { derivedStateOf { store.detail?.speed ?: 1f } }
     val reversed by remember(store) { derivedStateOf { store.detail?.reversed ?: false } }
     val frameBlend by remember(store) { derivedStateOf { store.detail?.frameBlendMode ?: 0 } }
+    val animated by remember(store) { derivedStateOf { store.detail?.speedAnimated ?: false } }
+    val keyHere by remember(store) {
+        derivedStateOf {
+            val d = store.detail
+            d != null && store.keyframes[d.id].orEmpty().any { it.property == TrackProperty.SPEED && it.time == d.localPlayhead }
+        }
+    }
     val media = kind == LayerType.Video.kind || kind == LayerType.Audio.kind
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 14.dp, end = 18.dp, bottom = 24.dp)) {
         if (!media) {
@@ -149,8 +165,8 @@ internal fun SpeedPanel(env: PanelEnv) {
             )
             return@Column
         }
-        if (speed == 0f) {
-            Text("Quadro congelado · ${clock(frames, store.project.fps)}", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
+        if (speed == 0f && !animated) {
+            Text(stringResource(R.string.edt_freeze_frame, clock(frames, store.project.fps)), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
             Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.panel_este_trecho_quadro_parado_apare_bordas),
@@ -162,11 +178,20 @@ internal fun SpeedPanel(env: PanelEnv) {
         Spacer(Modifier.height(10.dp))
         // O que a mudança de velocidade faz com a barra: o início fica onde está
         // e o fim acompanha (é o que o motor faz — nada de escolha falsa aqui).
+        // Com keyframes a barra não muda de tamanho: a velocidade varia dentro dela.
         Text(
-            stringResource(R.string.panel_inicio_camada_fica_lugar_fim_acompanha),
+            stringResource(if (animated) R.string.panel_velocidade_keyframes_duracao_fica else R.string.panel_inicio_camada_fica_lugar_fim_acompanha),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
         )
         Spacer(Modifier.height(12.dp))
+        // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote (a
+        // curva aparece nas trilhas e no gráfico como qualquer propriedade).
+        PropertyCustomRow(
+            stringResource(R.string.editor_velocidade),
+            selected = animated,
+            onSelect = { store.toggleSpeedKeyframe() },
+            keyframe = when { keyHere -> KeyframeLook.KeyHere; animated -> KeyframeLook.Animated; else -> KeyframeLook.None },
+        ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CupertinoIcon(CupertinoGlyph.Tortoise, 20.dp, AureaColors.Muted)
             Spacer(Modifier.width(6.dp))
@@ -192,6 +217,7 @@ internal fun SpeedPanel(env: PanelEnv) {
             CupertinoIcon(CupertinoGlyph.Hare, 20.dp, AureaColors.Muted)
             Spacer(Modifier.width(8.dp))
             ValueBox(speedLabel(speed), width = 64.dp, onTap = null)
+        }
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -268,7 +294,7 @@ internal fun AudioPanel(env: PanelEnv) {
             Text(stringResource(R.string.panel_som), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
             Spacer(Modifier.weight(1f))
             Text(
-                if (detail.audioMuted || level <= 0f) "mudo" else db(level),
+                if (detail.audioMuted || level <= 0f) stringResource(R.string.panel_mudo).lowercase() else db(level),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)),
             )
         }
@@ -333,12 +359,13 @@ private fun db(linear: Float): String {
     return (if (r > 0f) "+" else if (r < 0f) "−" else "") + "%.1f".format(abs(r)).replace('.', ',') + " dB"
 }
 
+@Composable
 private fun pan(p: Float): String {
     val v = (p * 100f).roundToInt()
     return when {
-        v == 0 -> "Centro"
-        v < 0 -> "E ${-v}"
-        else -> "D $v"
+        v == 0 -> stringResource(R.string.panel_centro)
+        v < 0 -> stringResource(R.string.edt_pan_left, -v)
+        else -> stringResource(R.string.edt_pan_right, v)
     }
 }
 
@@ -397,39 +424,181 @@ private fun AudioRuler(
     }
 }
 
-/** The effect edits the canonical source-time curve used by preview and export. */
+/**
+ * REMAPEAR TEMPO, versão simples: sem gráfico. Uma régua do "momento do vídeo"
+ * em segundos da fonte — arrastar mostra, ao vivo na prévia, o quadro que toca
+ * no cabeçote e grava a chave ali. Congelar = dois pontos iguais; ao contrário
+ * = tempo diminuindo; lento/rápido = distância entre os pontos. Por chave, só a
+ * suavidade em quatro palavras; e os atalhos criam os pontos pela pessoa.
+ * O dado é a MESMA curva da camada (prévia, exportação e som seguem ela).
+ */
 @Composable
-internal fun TimeRemapEffectEditor(store: EditorStore) {
+internal fun TimeRemapEffectEditor(store: EditorStore, effectId: Int) {
+    val q by remember(store) { derivedStateOf { store.timeRemap } }
+    val local by remember(store) { derivedStateOf { store.detail?.localPlayhead ?: 0 } }
+    val seconds by remember(store, effectId) { derivedStateOf { store.paramOf(effectId, 0)?.value?.getOrNull(0) ?: 0f } }
+    val ease by remember(store, effectId) { derivedStateOf { store.paramOf(effectId, 1)?.value?.getOrNull(0)?.roundToInt() ?: 0 } }
+    val data = q
+    val muted = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted))
+    val heading = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted))
     Column(Modifier.fillMaxWidth()) {
-
-        val remap by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
-        androidx.compose.material3.TextButton(onClick = store::enableManualTimeRemap) {
-            Text("Edit time curve")
+        if (data == null || data.size < 5) {
+            Text(stringResource(R.string.remap_ligue_efeito), style = muted)
+            return@Column
         }
-        Text(stringResource(R.string.panel_acelerar_desacelerar_tempo), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.W700, color = AureaColors.Muted)))
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(0 to stringResource(R.string.panel_linear), 1 to stringResource(R.string.panel_suave), 2 to stringResource(R.string.panel_lento_meio), 3 to stringResource(R.string.panel_acelerar), 4 to stringResource(R.string.panel_desacelerar), 5 to stringResource(R.string.panel_congelar), 6 to stringResource(R.string.panel_passar_tras_frente)).forEach { (preset, label) ->
-                val on = false
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                        .tocavel(onClick = { store.applySpeedRamp(preset) })
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+        val fps = store.project.fps.takeIf { it > 0f } ?: 30f
+        val lo = data[1].toInt()
+        val hi = data[2].toInt()
+        val maxSec = max(1f, if (data[3] > 0f) data[3] else data[2]) / fps
+        val keyTimes = (0 until data[0].toInt()).mapNotNull { i -> data.getOrNull(5 + i * 7)?.toInt() }
+        val keyHere = keyTimes.indexOf(local)
+        val inside = local in lo..hi
+        val speed = data[4]
+        // Linha do tempo do vídeo: losango (marca/tira o ponto aqui) e setas entre pontos.
+        PropertyCustomRow(
+            label = stringResource(R.string.remap_momento_video),
+            selected = keyHere >= 0,
+            onSelect = {
+                if (inside) {
+                    if (keyHere >= 0) store.remapRemove(keyHere) else store.remapInsert(local.toLong())
+                }
+            },
+            keyframe = if (keyHere >= 0) KeyframeLook.KeyHere else KeyframeLook.Animated,
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when {
+                        abs(speed) < 0.005f -> stringResource(R.string.remap_vel_congelado)
+                        speed < 0f -> stringResource(R.string.remap_vel_reverso, com.aurea.aurea.ui.ds.numeroPtBr(-speed, 2))
+                        else -> stringResource(R.string.remap_vel_aqui, com.aurea.aurea.ui.ds.numeroPtBr(speed, 2))
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)),
+                )
+                val prev = keyTimes.lastOrNull { it < local }
+                val next = keyTimes.firstOrNull { it > local }
+                RemapStep(CupertinoGlyph.ChevronLeft, stringResource(R.string.remap_ponto_anterior), prev != null) {
+                    prev?.let { t -> store.detail?.let { d -> store.seek(d.timelineFrame(t)) } }
+                }
+                RemapStep(CupertinoGlyph.ChevronRight, stringResource(R.string.remap_proximo_ponto), next != null) {
+                    next?.let { t -> store.detail?.let { d -> store.seek(d.timelineFrame(t)) } }
                 }
             }
         }
-        if (remap) {
-            Spacer(Modifier.height(8.dp))
-            TimeRemapGraph(store)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                stringResource(R.string.panel_rampa_ligada_som_video_seguem_mesma),
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
+        var drag by remember { mutableStateOf<Float?>(null) }
+        val shown = drag ?: (seconds / maxSec).coerceIn(0f, 1f)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            RemapTimeBar(
+                fraction = shown,
+                enabled = inside,
+                modifier = Modifier.weight(1f),
+                onStart = { store.beginGesture("tempo do vídeo") },
+                onFraction = { f -> drag = f; store.setRemapTime(effectId, f * maxSec) },
+                onEnd = { drag = null; store.endGesture() },
             )
+            Spacer(Modifier.width(8.dp))
+            ValueBox(secs(shown * maxSec), width = 72.dp, onTap = null)
         }
+        if (!inside) Text(stringResource(R.string.remap_fora_clipe), style = muted)
+        Spacer(Modifier.height(10.dp))
+        // Suavidade da chave no cabeçote (o trecho que sai dela até a próxima).
+        Text(stringResource(R.string.remap_suavidade), style = heading)
+        Spacer(Modifier.height(6.dp))
+        if (keyHere < 0) {
+            Text(stringResource(R.string.remap_sem_ponto), style = muted)
+        } else {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    0 to R.string.remap_ease_linear, 3 to R.string.remap_ease_in,
+                    4 to R.string.remap_ease_out, 1 to R.string.remap_ease_in_out,
+                ).forEach { (mode, label) ->
+                    RemapChip(stringResource(label), on = ease == mode) { store.setRemapEase(effectId, mode) }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(stringResource(R.string.remap_atalhos), style = heading)
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(
+                7 to R.string.remap_congelar_aqui, 2 to R.string.remap_camera_lenta, 3 to R.string.remap_acelerar,
+                6 to R.string.remap_inverter, 0 to R.string.remap_normal,
+            ).forEach { (preset, label) ->
+                RemapChip(stringResource(label), on = false) { store.applySpeedRamp(preset) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(stringResource(R.string.remap_dica), style = muted)
     }
+}
+
+@Composable
+private fun RemapChip(label: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.height(36.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+            .tocavel(onClick = onClick).padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+    }
+}
+
+@Composable
+private fun RemapStep(glyph: Char, description: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.width(40.dp).height(40.dp).semantics { contentDescription = description }
+            .tocavel(onClick = { if (enabled) onClick() }),
+        contentAlignment = Alignment.Center,
+    ) {
+        CupertinoIcon(glyph, 18.dp, if (enabled) AureaColors.Text else AureaColors.Muted.copy(alpha = 0.4f))
+    }
+}
+
+/**
+ * Régua absoluta do momento do vídeo: tocar pula para ali, arrastar segue o
+ * dedo (um gesto = um passo de desfazer). 0 à esquerda, fim da fonte à direita.
+ */
+@Composable
+private fun RemapTimeBar(
+    fraction: Float,
+    enabled: Boolean,
+    modifier: Modifier,
+    onStart: () -> Unit,
+    onFraction: (Float) -> Unit,
+    onEnd: () -> Unit,
+) {
+    val accent = if (enabled) AureaColors.Accent else AureaColors.Muted
+    val track = AureaColors.Chip
+    Box(
+        modifier.height(44.dp)
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    down.consume()
+                    onStart()
+                    try {
+                        onFraction((down.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
+                        while (true) {
+                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            change.consume()
+                            onFraction((change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
+                        }
+                    } finally {
+                        onEnd()
+                    }
+                }
+            }
+            .drawBehind {
+                val y = size.height / 2f
+                val r = 4.dp.toPx()
+                drawRoundRect(track, topLeft = Offset(0f, y - r), size = Size(size.width, r * 2), cornerRadius = CornerRadius(r, r))
+                val x = size.width * fraction.coerceIn(0f, 1f)
+                drawRoundRect(accent, topLeft = Offset(0f, y - r), size = Size(x, r * 2), cornerRadius = CornerRadius(r, r))
+                drawCircle(Color.Black.copy(alpha = 0.35f), radius = 12.dp.toPx(), center = Offset(x, y + 1.dp.toPx()))
+                drawCircle(Color.White, radius = 11.dp.toPx(), center = Offset(x, y))
+            },
+    )
 }

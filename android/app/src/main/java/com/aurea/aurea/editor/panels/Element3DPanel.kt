@@ -127,6 +127,14 @@ private fun ImportedMaterialSection(store: EditorStore) {
     val materials = remember(detail, revision) { store.queryMaterials() }
     var selected by remember(store.primary) { mutableStateOf(0) }
     var dragging by remember(store.primary) { mutableStateOf(false) }
+    // FBX/OBJ com textura/.mtl que não veio junto: o mesmo "Importar texturas" do import.
+    val missingTextures = remember(detail, revision) { store.selectedModelMissingTextures() }
+    if (missingTextures > 0) {
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.model_textures_missing, missingTextures), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Chip(stringResource(R.string.model_textures_title), on = false) { store.askModelTextures() }
+        }
+    }
     if (materials.isEmpty()) return
     val current = materials.firstOrNull { it[0].toInt() == selected } ?: materials.first()
     val index = current[0].toInt()

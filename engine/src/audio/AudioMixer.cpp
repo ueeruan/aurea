@@ -214,7 +214,7 @@ struct Flatten {
             // Remapeamento por curva ainda não chega ao áudio; quadro
             // congelado não tem som. Um som fora de sincronia é pior que silêncio.
             // (O Tom é gerado: não depende do tempo da fonte.)
-            if (!tone && (!l.timeRemapEnabled && l.speed <= 0.0f)) return;
+            if (!tone && (!l.source_time_varies() && l.speed <= 0.0f)) return;
             const i64 ls = frame_to_sample(l.start.value, fps);
             const i64 le = frame_to_sample(l.end.value, fps);
             if (le <= ls) return;
@@ -253,8 +253,9 @@ struct Flatten {
             // Amostra da fonte em `ls` (início da layer) = offset do conteúdo.
             const i64 srcAtLs = frame_to_sample(l.offset.value, fps);
             c.sourceAt0 = srcAtLs + (c.start - shift - ls);
-            if (c.asset && l.timeRemapEnabled && !l.timeRemap.keys.empty()) {
-                // Curva de tempo: posição da fonte quadro a quadro (a MESMA
+            if (c.asset && l.source_time_varies()) {
+                // Curva de tempo ou velocidade com keyframes: posição da fonte
+                // quadro a quadro (a MESMA
                 // função do vídeo), interpolada amostra a amostra no mix.
                 c.srcFrame0 = l.start.value;
                 const i64 nf = l.end.value - l.start.value + 1;

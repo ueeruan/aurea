@@ -98,6 +98,12 @@ public:
     [[nodiscard]] f32 scrub_velocity() const noexcept { return scrubVelocity_; }
     /// Muda a cada descontinuidade (seek, salto de scrub, loop).
     [[nodiscard]] u64 generation() const noexcept { return generation_; }
+    /// Época do DECODE: muda no seek, no play do fim e no loop — NÃO a cada
+    /// passo do scrub. Trocar a época aborta o decode em curso; se cada passo
+    /// do dedo trocasse, nenhum quadro chegaria enquanto o dedo anda (a tela
+    /// ficava preta no scrub). Os passos do scrub são alvos novos do mesmo
+    /// decoder, que já coalesce/segue andando sozinho.
+    [[nodiscard]] u64 media_epoch() const noexcept { return mediaEpoch_; }
 
     [[nodiscard]] PlaybackClock& clock() noexcept { return clock_; }
 
@@ -120,6 +126,7 @@ private:
     FrameIndex lastScrubFrame_{0};
     bool wasPlayingBeforeScrub_ = false;
     u64 generation_ = 1;
+    u64 mediaEpoch_ = 1;
 };
 
 /// Conta frames perdidos e decide se há o que desenhar.

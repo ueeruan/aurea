@@ -1789,3 +1789,63 @@ AUREA_TEST(EffectPack, MotionBehaviorInTheMiddleOfTheStackGetsItsOwnPass) {
     AUREA_CHECK(!plan.hasFold);
     AUREA_CHECK_EQ(plan.stages.size(), static_cast<usize>(2));
 }
+
+// Split de um vídeo, tocando por cima do corte: o pedaço seguinte já tem o
+// decoder aberto e o 1º quadro pronto ANTES do corte. No quadro do corte a
+// camada entra com o quadro exato — nunca some (preto) esperando o decoder.
+AUREA_TEST(Renderer, PlaybackPrerollsTheNextClipSoTheCutNeverFlashesBlack) {
+    RenderFixture f;
+    aurea::test::SyntheticConfig config;
+    config.decodeCostUs = 2000;
+    aurea::test::SyntheticFactory factory(config);
+    MemoryManager memory;
+    memory.set_budget(MemoryClass::DecodedFrames, 64ull * 1024 * 1024);
+    MediaManager media;
+    media.set_factory(&factory);
+    media.set_memory(&memory);
+    Asset asset;
+    asset.kind = AssetKind::Video;
+    asset.video.width = config.width; asset.video.height = config.height; asset.video.fps = config.fps;
+    asset.video.frameCount = FrameIndex{config.frameCount};
+    const AssetId aid = f.project.add_asset(std::move(asset));
+    auto clip = [&](i64 start, i64 end) {
+        const LayerId id = f.comp->add_layer(LayerKind::Video, "pedaco");
+        Layer* l = f.comp->layer(id);
+        l->source = aid; l->start = FrameIndex{start}; l->end = FrameIndex{end}; l->offset = FrameIndex{start};
+        l->transform.position = Vec3{960, 540, 0};
+        return id;
+    };
+    (void)clip(0, 60);
+    const LayerId second = clip(60, 120);
+    RenderSettings settings;
+    settings.mediaGeneration = 7;
+    FrameSnapshot snapshot;
+    // Tocando, meio segundo antes do corte.
+    const auto t0 = std::chrono::steady_clock::now();
+    u64 frame = 1;
+    bool prepared = false;
+    while (!prepared && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(3)) {
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{45}, &media, nullptr, nullptr,
+                           settings, frame++, 1, DecodeMode::Playback, 1.0f, snapshot);
+        snapshot.release_video_frames();
+        if (factory.opened.load() >= 2) {
+            if (VideoSource* src = media.source_for(second, aid, *f.project.asset(aid), frame, false)) {
+                bool exact = false;
+                (void)src->frame_for(2000000, &exact);
+                prepared = exact;
+            }
+        }
+        if (!prepared) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    AUREA_CHECK(prepared);
+    // O quadro do corte: só a segunda camada, já com o quadro exato.
+    f.renderer.prepare(*f.comp, f.project, FrameIndex{60}, &media, nullptr, nullptr,
+                       settings, frame++, 1, DecodeMode::Playback, 1.0f, snapshot);
+    AUREA_CHECK_EQ(snapshot.missingVideoFrames, 0u);
+    AUREA_CHECK_EQ(snapshot.layers.size(), static_cast<usize>(1));
+    if (!snapshot.layers.empty()) {
+        AUREA_CHECK(static_cast<bool>(snapshot.layers[0].source.frame));
+        AUREA_CHECK(snapshot.layers[0].source.frameExact);
+    }
+    snapshot.release_video_frames();
+}

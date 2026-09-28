@@ -320,6 +320,10 @@ struct SceneAsset {
     /// Avisos que não impedem o import (extensão de material ignorada,
     /// normais geradas…). A UI mostra; nunca silencioso.
     std::vector<std::string> warnings;
+    /// Arquivos externos (texturas, .mtl do OBJ) que o modelo referencia e
+    /// que não estão na pasta dele: só o nome, sem pasta. A UI oferece
+    /// "Importar texturas" com esta lista; vazio = nada faltando.
+    std::vector<std::string> missingTextures;
 
     /// Matrizes de mundo em repouso (sem animação), uma por nó.
     [[nodiscard]] std::vector<Mat4> rest_world_matrices() const;

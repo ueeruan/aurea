@@ -564,7 +564,9 @@ public:
     bool set_time_remap(u64 layerId, bool on) noexcept;
     /// Rampa de velocidade pronta sobre o trecho da fonte atual: 0 linear,
     /// 1 suave (entrada e saída), 2 herói (rápido-lento-rápido), 3 acelerar,
-    /// 4 desacelerar. Liga o remapeamento.
+    /// 4 desacelerar, 5 congelar o clipe inteiro no cabeçote, 6 de trás para
+    /// frente, 7 congelar aqui (1 s parado no cabeçote e segue normal; as
+    /// chaves antes do cabeçote ficam). Liga o remapeamento.
     bool apply_speed_ramp(u64 layerId, u32 preset) noexcept;
     /// Curva de tempo para o editor de gráfico. `out` = {nº de pontos, início
     /// e fim locais da camada, último quadro da fonte (quadros da composição),
@@ -935,6 +937,9 @@ public:
 
     // --- Marcas e batidas -------------------------------------------------------
     /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
+    /// Tocando, vira `mark_beat_live` (o quadro do relógio mestre, sem alternar):
+    /// marcar NUNCA pausa, faz seek nem recomeça o som/vídeo — mesmo quando a
+    /// UI ainda acha que está parado (o status chega atrasado).
     bool toggle_marker(i64 frame) noexcept;
     /// Tap de batida ao ouvir a música: marca o instante que está SOANDO
     /// (relógio mestre do áudio quando tocando; o cabeçote quando parado).
@@ -970,6 +975,20 @@ public:
     /// Asset 3D carregado (nulo = ausente/ilegível). Compartilhado: a layer
     /// apagada não invalida quem ainda desenha.
     [[nodiscard]] std::shared_ptr<const scene3d::SceneAsset> model_asset(u64 assetId) const noexcept;
+    /// Texturas (e o .mtl do OBJ) que o modelo 3D da layer referencia e que
+    /// não estão na pasta dele — só o nome do arquivo. Vazio = nada faltando
+    /// (ou a layer não é um modelo importado).
+    [[nodiscard]] std::vector<std::string> model_missing_textures(u64 layerId) noexcept;
+    /// Pasta (absoluta, com a barra no fim) do arquivo do modelo 3D da layer:
+    /// é para lá que a plataforma copia as texturas escolhidas depois. Vazio =
+    /// a layer não é um modelo importado (texto 3D, outra camada).
+    [[nodiscard]] std::string model_folder(u64 layerId) noexcept;
+    /// Relê o modelo da layer do MESMO arquivo, depois que a plataforma copiou
+    /// texturas para a pasta dele. O modelo relido entra como asset novo (a
+    /// GPU sobe as texturas de novo) e toda layer que usava o antigo passa a
+    /// usar o novo; desfazer volta ao anterior. Devolve quantos arquivos
+    /// ainda faltam.
+    [[nodiscard]] Result<u32> reload_model_textures(u64 layerId, std::string* detail = nullptr) noexcept;
 
     /// Texto 3D: malha extrudada dos contornos da fonte, numa camada de
     /// modelo 3D centrada. Devolve a layer.
@@ -1278,6 +1297,11 @@ private:
     /// Liga/desliga o som conforme o playback (play, pausa, seek tocando,
     /// loop, velocidade ≠ 1). Sob o lock do modelo.
     void sync_audio_locked(const Composition& comp) noexcept;
+    /// Sobe `modelRevision_` numa edição que não muda o SOM (marcas). O
+    /// snapshot de áudio continua valendo: reconstruí-lo tocando descartava o
+    /// anel e re-ancorava o relógio mestre (tranco no som e no vídeo). Sob o
+    /// lock do modelo.
+    void bump_revision_without_audio_locked() noexcept;
     static std::string audio_path_resolver(void* self, const std::string& stored);
     FrameScheduler     frameScheduler_;
     FrameSnapshot      snapshot_;

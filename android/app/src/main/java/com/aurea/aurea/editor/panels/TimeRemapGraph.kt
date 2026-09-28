@@ -192,15 +192,15 @@ internal fun TimeRemapGraph(store: EditorStore, expanded: Boolean = false) {
             val speed = q[4]
             val label = when {
                 kotlin.math.abs(speed) < 0.005f -> stringResource(R.string.panel_congelado_cabecote)
-                speed < 0f -> "Velocidade no cabeçote: ${"%.2f".format(-speed)}× ao contrário"
-                else -> "Velocidade no cabeçote: ${"%.2f".format(speed)}×"
+                speed < 0f -> stringResource(R.string.edt_remap_speed_reverse, "%.2f".format(-speed))
+                else -> stringResource(R.string.edt_remap_speed, "%.2f".format(speed))
             }
             Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
         }
         if (selected in 0 until n) {
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Ponto ${selected + 1}", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+                Text(stringResource(R.string.edt_point_n, selected + 1), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
                 val cur = keys[selected][2].toInt()
                 listOf(Interp.LINEAR to stringResource(R.string.panel_linear), Interp.EASE_IN_OUT to stringResource(R.string.panel_suave), Interp.HOLD to stringResource(R.string.panel_congelar)).forEach { (m, text) ->
                     val on = cur == m

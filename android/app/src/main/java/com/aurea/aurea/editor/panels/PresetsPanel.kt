@@ -1,5 +1,8 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.ui.i18n.AppText
+import androidx.annotation.StringRes
+import android.app.Application
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -77,14 +80,14 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** Abas do navegador: favoritos, recentes e uma por tipo de preset. */
-private enum class PresetTab(val label: String, val kind: PresetKind?) {
-    Favorites("★ Favoritos", null),
-    Recents("Recentes", null),
-    Animation("Animação", PresetKind.Animation),
-    Effects("Efeitos", PresetKind.Effects),
-    Text("Texto", PresetKind.Text),
-    Caption("Legenda", PresetKind.Caption),
-    Curve("Curva", PresetKind.Curve),
+private enum class PresetTab(@StringRes val label: Int, val kind: PresetKind?, val prefix: String = "") {
+    Favorites(R.string.edt_cmd_favorites, null, "★ "),
+    Recents(R.string.effect_recentes, null),
+    Animation(R.string.panel_animacao, PresetKind.Animation),
+    Effects(R.string.panel_efeitos, PresetKind.Effects),
+    Text(R.string.panel_texto, PresetKind.Text),
+    Caption(R.string.pn_caption, PresetKind.Caption),
+    Curve(R.string.panel_curva, PresetKind.Curve),
 }
 
 /**
@@ -152,7 +155,8 @@ internal fun PresetsPanel(env: PanelEnv) {
                 )
             }
             if (query.isNotEmpty()) {
-                Box(Modifier.size(34.dp).semantics { contentDescription = "Limpar busca" }.tocavel { query = "" }, contentAlignment = Alignment.Center) {
+                val clearLabel = stringResource(R.string.panel_limpar_busca)
+                Box(Modifier.size(34.dp).semantics { contentDescription = clearLabel }.tocavel { query = "" }, contentAlignment = Alignment.Center) {
                     CupertinoIcon(CupertinoGlyph.XmarkCircleFill, 16.dp, AureaColors.Muted)
                 }
             }
@@ -162,7 +166,7 @@ internal fun PresetsPanel(env: PanelEnv) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            tabs.forEach { t -> Chip(t.label, t == tab) { picked = t } }
+            tabs.forEach { t -> Chip(t.prefix + stringResource(t.label), t == tab) { picked = t } }
         }
         if (tab == PresetTab.Effects) {
             Text(stringResource(R.string.cc_preset_hint), modifier = Modifier.padding(bottom = 8.dp),
@@ -178,7 +182,7 @@ internal fun PresetsPanel(env: PanelEnv) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text(
                     when {
-                        q.isNotEmpty() -> "Nenhum preset com \"$q\"."
+                        q.isNotEmpty() -> stringResource(R.string.edt_presets_none_matching, q)
                         tab == PresetTab.Favorites -> stringResource(R.string.panel_toque_preset_guardar_aqui)
                         else -> stringResource(R.string.panel_ultimos_10_presets_aplicados_aparecem_aqui)
                     },
@@ -213,7 +217,7 @@ internal fun PresetsPanel(env: PanelEnv) {
     saving?.let { k -> SavePresetDialog(store, k, onDismiss = { saving = null }) }
     deleting?.let { e ->
         AureaAlert(
-            title = "Apagar \"${e.name}\"?",
+            title = stringResource(R.string.edt_preset_delete_title, e.name),
             message = stringResource(R.string.panel_preset_sai_deste_aparelho),
             confirmLabel = stringResource(R.string.panel_apagar),
             destructive = true,
@@ -230,17 +234,17 @@ private fun apply(store: EditorStore, e: PresetEntry, stretch: Boolean) {
         return
     }
     val (layer, sel) = store.selectedKeyframe ?: run {
-        store.showToast("Toque num keyframe da timeline para aplicar a curva")
+        store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_curve_tap_keyframe))
         return
     }
     val v = store.curveOfPreset(e) ?: run {
-        store.showToast("Preset de curva inválido")
+        store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_curve_invalid))
         return
     }
     val track = (store.keyframes[layer] ?: emptyList()).track(sel)
     var i = track.indexOfFirst { it.time == sel.time }
     if (i < 0 || track.size < 2) {
-        store.showToast("Crie pelo menos 2 keyframes para aplicar a curva")
+        store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_curve_need_two))
         return
     }
     if (i == track.lastIndex) i--
@@ -248,7 +252,7 @@ private fun apply(store: EditorStore, e: PresetEntry, stretch: Boolean) {
     applyEase(store, layer, track[i], Ease(v[0].toInt(), v[1], v[2], v[3], v[4]))
     store.endGesture()
     store.presets.markUsed(e)
-    store.showToast("Curva \"${e.name}\" aplicada")
+    store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_curve_applied, e.name))
 }
 
 /** Nome do preset (+ o que salvar, no texto). Curva: a do keyframe escolhido. */
@@ -271,7 +275,7 @@ private fun SavePresetDialog(store: EditorStore, kind: PresetKind, onDismiss: ()
         onConfirm = {
             val n = name.trim()
             if (n.isEmpty()) {
-                store.showToast("Dê um nome ao preset")
+                store.showToast(AppText.get(store.getApplication<Application>(), R.string.panel_nome_preset))
                 return@AureaAlert
             }
             val json = when (kind) {
@@ -279,7 +283,7 @@ private fun SavePresetDialog(store: EditorStore, kind: PresetKind, onDismiss: ()
                 PresetKind.Text -> {
                     val parts = (if (style) 1 else 0) or (if (anim) 2 else 0)
                     if (parts == 0) {
-                        store.showToast("Escolha estilo e/ou animação")
+                        store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_preset_pick_parts))
                         return@AureaAlert
                     }
                     store.capturePreset(kind, n, parts)
@@ -344,11 +348,15 @@ private fun PresetCard(
     onFavorite: () -> Unit,
     onDelete: (() -> Unit)?,
 ) {
+    val applyLabel = stringResource(R.string.edt_apply_named, e.name)
+    val favoriteLabel = stringResource(R.string.panel_favoritar)
+    val unfavoriteLabel = stringResource(R.string.panel_tirar_favoritos)
+    val deleteLabel = stringResource(R.string.panel_apagar_preset)
     Column(
         Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(AureaColors.Chip)
-            .semantics { contentDescription = "Aplicar ${e.name}" }
+            .semantics { contentDescription = applyLabel }
             .tocavel(onClick = onApply)
             .padding(6.dp),
     ) {
@@ -356,7 +364,7 @@ private fun PresetCard(
             PresetPreview(store, e, Modifier.fillMaxSize())
             Box(
                 Modifier.align(Alignment.TopEnd).size(34.dp)
-                    .semantics { contentDescription = if (favorite) "Tirar dos favoritos" else "Favoritar" }
+                    .semantics { contentDescription = if (favorite) unfavoriteLabel else favoriteLabel }
                     .tocavel(onClick = onFavorite),
                 contentAlignment = Alignment.Center,
             ) {
@@ -364,7 +372,7 @@ private fun PresetCard(
             }
             if (onDelete != null) {
                 Box(
-                    Modifier.align(Alignment.TopStart).size(34.dp).semantics { contentDescription = "Apagar preset" }.tocavel(onClick = onDelete),
+                    Modifier.align(Alignment.TopStart).size(34.dp).semantics { contentDescription = deleteLabel }.tocavel(onClick = onDelete),
                     contentAlignment = Alignment.Center,
                 ) {
                     CupertinoIcon(CupertinoGlyph.Trash, 14.dp, AureaColors.Danger)
@@ -386,11 +394,12 @@ private fun PresetCard(
 /** O último cartão: guardar o que está na camada como preset deste tipo. */
 @Composable
 private fun SaveCard(onClick: () -> Unit) {
+    val saveLabel = stringResource(R.string.edt_preset_save_from_layer)
     Column(
         Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(AureaColors.AccentDim)
-            .semantics { contentDescription = "Salvar o da camada como preset" }
+            .semantics { contentDescription = saveLabel }
             .tocavel(onClick = onClick)
             .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -430,7 +439,7 @@ private fun PresetPreview(store: EditorStore, e: PresetEntry, modifier: Modifier
         }
         PresetKind.Effects -> {
             val keys = remember(json) { json?.let { effectKeys(it) }.orEmpty() }
-            GlyphPreview(effectGlyph(keys.firstOrNull()), modifier, badge = if (keys.size > 1) "${keys.size} efeitos" else null)
+            GlyphPreview(effectGlyph(keys.firstOrNull()), modifier, badge = if (keys.size > 1) stringResource(R.string.edt_effects_count, keys.size) else null)
         }
         PresetKind.Text -> TextMotionPreview(e.textPreset, modifier)
     }

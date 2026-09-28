@@ -81,7 +81,8 @@ fun numeroPtBr(v: Float, casas: Int = 1): String {
     val c = casas.coerceIn(0, 6)
     var s = String.format(Locale.ROOT, "%.${c}f", n)
     if (s.startsWith("-") && s.drop(1).all { it == '0' || it == '.' }) s = s.drop(1)
-    return s.replace('.', ',')
+    // Vírgula só nos idiomas que usam vírgula decimal (pt, es, ru, id); em inglês "1.5".
+    return if (java.text.DecimalFormatSymbols.getInstance(Locale.getDefault()).decimalSeparator == ',') s.replace('.', ',') else s
 }
 
 /**

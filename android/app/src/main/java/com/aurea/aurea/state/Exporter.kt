@@ -7,12 +7,15 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.aurea.aurea.R
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.engine.directBuffer
+import com.aurea.aurea.ui.i18n.AppText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -125,10 +128,10 @@ class Exporter internal constructor(
                 if (!progress.finished) continue
                 when (progress.result) {
                     0 -> publish(file)
-                    CANCELLED -> state = state.copy(phase = ExportPhase.Cancelled, message = "Exportação cancelada.")
+                    CANCELLED -> state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
                     else -> state = state.copy(
                         phase = ExportPhase.Failed,
-                        message = "Não deu para exportar: ${progress.message.ifBlank { "erro ${progress.result}" }}.",
+                        message = text(R.string.app_export_failed, progress.message.ifBlank { text(R.string.app_error_code, progress.result) }),
                     )
                 }
                 // Temporário com dono (Fase 8B §52): falhou ou cancelou, o
@@ -157,7 +160,7 @@ class Exporter internal constructor(
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }.let { Intent.createChooser(it, "Compartilhar vídeo").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        }.let { Intent.createChooser(it, text(R.string.app_share_video)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
     }
 
     fun viewIntent(): Intent? {
@@ -180,7 +183,7 @@ class Exporter internal constructor(
                 state = pronto
                 com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { }
             },
-            onFailure = { state = state.copy(phase = ExportPhase.Failed, message = "O vídeo foi gerado, mas não consegui salvar na galeria.") },
+            onFailure = { state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_gallery_failed)) },
         )
     }
 
@@ -203,13 +206,13 @@ class Exporter internal constructor(
                 resolver.delete(uri, null, null)
                 throw e
             }
-            return uri to "Salvo na galeria, em Filmes › Aurea."
+            return uri to text(R.string.app_saved_to_gallery)
         }
         // Android 8–9: sem permissão de armazenamento, fica na pasta do app.
         val dir = File(app.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Aurea").apply { mkdirs() }
         val dst = File(dir, file.name)
         file.copyTo(dst, overwrite = true)
-        return Uri.fromFile(dst) to "Salvo em ${dst.absolutePath}."
+        return Uri.fromFile(dst) to text(R.string.app_saved_to_path, dst.absolutePath)
     }
 
     /**
@@ -220,22 +223,23 @@ class Exporter internal constructor(
         val lines = ArrayList<String>(2)
         if (p.softwareEncoder) {
             val codec = if (options.hevc) "HEVC" else "H.264"
-            lines += "Este aparelho não tem encoder de hardware $codec para esta resolução: " +
-                "exportando por software (mais lento, mesma qualidade)."
+            lines += text(R.string.app_export_software_encoder, codec)
         }
         if (p.thermalReduced) {
-            lines += "Aparelho quente: a exportação desacelerou para esfriar. A qualidade não muda."
+            lines += text(R.string.app_export_thermal)
         }
         return lines.joinToString("\n")
     }
 
     private fun startError(code: Int, options: ExportOptions): String = when (code) {
-        NOT_SUPPORTED -> if (options.hevc) "Este aparelho não exporta HEVC nesta resolução. Tente H.264."
-                         else "Este aparelho não exporta nesta resolução."
-        OUT_OF_MEMORY -> "Sem memória de vídeo para exportar nesta resolução."
-        INVALID_STATE -> "Já existe uma exportação em andamento."
-        else -> "Não deu para começar a exportação (erro $code)."
+        NOT_SUPPORTED -> text(if (options.hevc) R.string.app_export_no_hevc else R.string.app_export_unsupported_res)
+        OUT_OF_MEMORY -> text(R.string.app_export_no_vram)
+        INVALID_STATE -> text(R.string.app_export_busy)
+        else -> text(R.string.app_export_start_failed, code)
     }
+
+    /** Texto do catálogo no idioma do app (o `Application` sozinho resolveria no do sistema). */
+    private fun text(@StringRes id: Int, vararg args: Any): String = AppText.get(app, id, *args)
 
     private companion object {
         // aurea::Errc (Result.hpp).

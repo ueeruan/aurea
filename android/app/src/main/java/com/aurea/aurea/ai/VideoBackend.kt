@@ -1,6 +1,8 @@
 package com.aurea.aurea.ai
 
 import android.content.Context
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -295,30 +297,33 @@ class AureaBackendVideoProvider(
 }
 
 /** Código do backend → frase para quem usa. O prompt nunca se perde por causa disso. */
-fun explicarFalhaDeVideo(codigo: String?): String = when (codigo) {
-    null -> "Não foi possível gerar o vídeo."
-    "sem_conexao" -> "Sem internet. Confira a conexão e tente de novo."
-    "tempo_esgotado", "provedor_timeout" -> "O servidor demorou para responder. Tente de novo."
-    "provedor_indisponivel", "provedor_erro", "resposta_invalida" -> "O serviço de geração está indisponível agora. Tente de novo em instantes."
-    "provedor_ocupado", "servidor_ocupado" -> "Muita gente gerando agora. Tente de novo em alguns minutos."
-    "provedor_auth", "provedor_nao_configurado", "saldo_insuficiente", "modelo_indisponivel",
-    "ia_nao_configurada", "recompensa_nao_configurada" -> "A geração por IA está em manutenção. Tente mais tarde."
-    "ia_desligada" -> "A geração por IA está pausada no momento."
-    "orcamento_diario", "limite_global_diario" -> "O limite de gerações de hoje foi atingido. Volte amanhã."
-    "limite_diario" -> "Você usou suas 5 gerações de IA de hoje. Volte amanhã para gerar mais."
-    "muitos_pedidos" -> "Muitos pedidos seguidos. Espere um pouco e tente de novo."
-    "job_em_andamento", "em_andamento" -> "Já existe uma geração sua em andamento."
-    "conteudo_bloqueado" -> "Esse pedido foi bloqueado pela política de conteúdo. Mude o texto e tente de novo."
-    "pedido_recusado" -> "O pedido foi recusado pelo modelo. Mude o texto e tente de novo."
-    "prompt_vazio" -> "Escreva o que você quer ver no vídeo."
-    "prompt_longo" -> "O texto está longo demais."
-    "geracao_falhou" -> "A geração falhou do lado do servidor."
-    "resultado_invalido", "resultado_nao_e_video" -> "O servidor devolveu um arquivo que não é vídeo."
-    "resultado_expirado" -> "O vídeo expirou no servidor (fica guardado 24 h)."
-    "download_interrompido", "download_falhou" -> "O download foi interrompido. Toque para baixar de novo."
-    "recompensa_pendente" -> "O anúncio ainda não foi confirmado. Tente de novo em instantes."
-    "ticket_expirado", "ticket_invalido", "ticket_usado" -> "Este pedido expirou. Toque em gerar de novo."
-    "imagem_expirada", "imagem_invalida", "imagem_grande" -> "Escolha a imagem de novo (PNG, JPEG ou WebP, até 8 MB)."
-    "cancelado" -> "Geração cancelada."
-    else -> "Não foi possível gerar o vídeo ($codigo)."
+fun explicarFalhaDeVideo(context: Context, codigo: String?): String {
+    val id = when (codigo) {
+        null -> R.string.app_ai_err_generic
+        "sem_conexao" -> R.string.app_ai_err_no_connection
+        "tempo_esgotado", "provedor_timeout" -> R.string.app_ai_err_timeout
+        "provedor_indisponivel", "provedor_erro", "resposta_invalida" -> R.string.app_ai_err_unavailable
+        "provedor_ocupado", "servidor_ocupado" -> R.string.app_ai_err_busy
+        "provedor_auth", "provedor_nao_configurado", "saldo_insuficiente", "modelo_indisponivel",
+        "ia_nao_configurada", "recompensa_nao_configurada" -> R.string.app_ai_err_maintenance
+        "ia_desligada" -> R.string.app_ai_err_paused
+        "orcamento_diario", "limite_global_diario" -> R.string.app_ai_err_daily_global
+        "limite_diario" -> R.string.app_ai_err_daily_user
+        "muitos_pedidos" -> R.string.app_ai_err_too_many
+        "job_em_andamento", "em_andamento" -> R.string.app_ai_err_in_progress
+        "conteudo_bloqueado" -> R.string.app_ai_err_blocked
+        "pedido_recusado" -> R.string.app_ai_err_refused
+        "prompt_vazio" -> R.string.app_ai_err_prompt_empty
+        "prompt_longo" -> R.string.app_ai_err_prompt_long
+        "geracao_falhou" -> R.string.app_ai_err_gen_failed
+        "resultado_invalido", "resultado_nao_e_video" -> R.string.app_ai_err_not_video
+        "resultado_expirado" -> R.string.app_ai_err_result_expired
+        "download_interrompido", "download_falhou" -> R.string.app_ai_err_download_interrupted
+        "recompensa_pendente" -> R.string.app_ai_err_reward_pending
+        "ticket_expirado", "ticket_invalido", "ticket_usado" -> R.string.app_ai_err_ticket_expired
+        "imagem_expirada", "imagem_invalida", "imagem_grande" -> R.string.app_ai_err_image_again
+        "cancelado" -> R.string.app_ai_err_cancelled
+        else -> return AppText.get(context, R.string.app_ai_err_generic_code, codigo)
+    }
+    return AppText.get(context, id)
 }

@@ -40,31 +40,42 @@ struct CommandSearchView: View {
     private func unavailable(_ requirement: String) -> String? {
         let selected = model.layers.filter { model.selection.contains($0.id) }
         if requirement == "any" { return nil }
-        if requirement == "layers" { return model.layers.isEmpty ? "Adicione uma camada" : nil }
-        if requirement == "undo" { return model.status.canUndo == 0 ? "Nenhuma edição para desfazer" : nil }
-        if requirement == "redo" { return model.status.canRedo == 0 ? "Nenhuma edição para refazer" : nil }
-        if selected.isEmpty { return "Selecione uma camada" }
-        if selected.contains(where: { $0.locked }) { return "Desbloqueie a seleção para editar" }
+        if requirement == "layers" { return model.layers.isEmpty ? AureaText.t("edt_cmd_need_layer") : nil }
+        if requirement == "undo" { return model.status.canUndo == 0 ? AureaText.t("edt_cmd_no_undo") : nil }
+        if requirement == "redo" { return model.status.canRedo == 0 ? AureaText.t("edt_cmd_no_redo") : nil }
+        if selected.isEmpty { return AureaText.t("edt_cmd_select_layer") }
+        if selected.contains(where: { $0.locked }) { return AureaText.t("edt_cmd_unlock_selection") }
         if requirement == "selection" { return nil }
         if requirement == "inside" {
-            return selected.contains { model.status.playhead > Int64($0.startFrame) && model.status.playhead < Int64($0.endFrame) } ? nil : "Posicione o cabeçote dentro do clipe"
+            return selected.contains { model.status.playhead > Int64($0.startFrame) && model.status.playhead < Int64($0.endFrame) } ? nil : AureaText.t("edt_cmd_playhead_in_clip")
         }
-        guard selected.count == 1, let layer = selected.first else { return "Selecione apenas uma camada" }
+        guard selected.count == 1, let layer = selected.first else { return AureaText.t("edt_cmd_single_layer") }
         switch requirement {
         case "single": return nil
-        case "inside_single": return model.status.playhead > Int64(layer.startFrame) && model.status.playhead < Int64(layer.endFrame) ? nil : "Posicione o cabeçote dentro do clipe"
+        case "inside_single": return model.status.playhead > Int64(layer.startFrame) && model.status.playhead < Int64(layer.endFrame) ? nil : AureaText.t("edt_cmd_playhead_in_clip")
         case "video", "video_inside":
-            if layer.kind != 1 { return "Selecione um vídeo" }
-            return requirement == "video_inside" && (model.status.playhead < Int64(layer.startFrame) || model.status.playhead >= Int64(layer.endFrame)) ? "Posicione o cabeçote dentro do vídeo" : nil
-        case "media": return [1, 3].contains(layer.kind) ? nil : "Selecione vídeo ou áudio"
-        case "text": return layer.kind == 4 ? nil : "Selecione um texto"
-        case "visual": return layer.kind != 3 ? nil : "Selecione uma camada visual"
-        case "text3d": return model.engine.text3D(forLayer: layer.id) != nil ? nil : "Selecione um texto 3D"
-        case "model3d": return layer.kind == 10 ? nil : "Selecione um modelo 3D"
-        case "particles": return layer.kind == 11 ? nil : "Selecione partículas"
-        case "vector": return model.isVectorLayer ? nil : "Selecione um vetor"
-        case "precomp": return layer.kind == 12 ? nil : "Selecione uma pré-composição"
-        default: return "Ação indisponível neste contexto"
+            if layer.kind != 1 { return AureaText.t("edt_cmd_select_video") }
+            return requirement == "video_inside" && (model.status.playhead < Int64(layer.startFrame) || model.status.playhead >= Int64(layer.endFrame)) ? AureaText.t("edt_cmd_playhead_in_video") : nil
+        case "media": return [1, 3].contains(layer.kind) ? nil : AureaText.t("edt_cmd_select_media")
+        case "text": return layer.kind == 4 ? nil : AureaText.t("edt_cmd_select_text")
+        case "visual": return layer.kind != 3 ? nil : AureaText.t("edt_cmd_select_visual")
+        case "text3d": return model.engine.text3D(forLayer: layer.id) != nil ? nil : AureaText.t("edt_cmd_select_text3d")
+        case "model3d": return layer.kind == 10 ? nil : AureaText.t("edt_cmd_select_model3d")
+        case "particles": return layer.kind == 11 ? nil : AureaText.t("edt_cmd_select_particles")
+        case "vector": return model.isVectorLayer ? nil : AureaText.t("edt_cmd_select_vector")
+        case "precomp": return layer.kind == 12 ? nil : AureaText.t("edt_cmd_select_precomp")
+        default: return AureaText.t("edt_cmd_unavailable")
+        }
+    }
+
+    private func categoryLabel(_ id: String) -> String {
+        switch id {
+        case "Tudo": return AureaText.t("edt_cmd_all")
+        case "Favoritos": return AureaText.t("edt_cmd_favorites")
+        case "Ações": return AureaText.t("edt_cmd_actions")
+        case "Efeitos": return AureaText.t("panel_efeitos")
+        case "Presets": return AureaText.t("panel_presets")
+        default: return id
         }
     }
 
@@ -88,11 +99,11 @@ struct CommandSearchView: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("Ferramentas").font(.aurea(size: 20, weight: .semibold))
+                Text(AureaText.t("edt_cmd_title")).font(.aurea(size: 20, weight: .semibold))
                 Spacer()
-                Button("Fechar") { dismiss() }.frame(minWidth: 44, minHeight: 44)
+                Button(AureaText.t("common_close")) { dismiss() }.frame(minWidth: 44, minHeight: 44)
             }
-            TextField("Buscar ação, efeito ou preset", text: $query)
+            TextField(AureaText.t("edt_cmd_search_hint"), text: $query)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .padding(12).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
                 .accessibilityIdentifier("commandSearchField")
@@ -100,14 +111,14 @@ struct CommandSearchView: View {
                 HStack(spacing: 8) {
                     ForEach(["Tudo", "Favoritos", "Ações", "Efeitos", "Presets"], id: \.self) { name in
                         Button { category = name } label: {
-                            Text(name).font(.aurea(size: 13)).padding(.horizontal, 12).frame(minHeight: 44)
+                            Text(categoryLabel(name)).font(.aurea(size: 13)).padding(.horizontal, 12).frame(minHeight: 44)
                                 .background(category == name ? AureaColors.accentDim : AureaColors.chip, in: Capsule())
                         }.buttonStyle(.plain)
                     }
                 }
             }
             if results.isEmpty {
-                Text(category == "Favoritos" ? "Toque na estrela de uma ferramenta para guardar aqui." : "Nenhuma ferramenta encontrada.")
+                Text(category == "Favoritos" ? AureaText.t("edt_cmd_fav_empty") : AureaText.t("edt_cmd_none"))
                     .foregroundStyle(AureaColors.muted).padding(.vertical, 20)
             }
             ScrollView {
@@ -135,7 +146,7 @@ struct CommandSearchView: View {
             }.buttonStyle(.plain).disabled(reason != nil).accessibilityIdentifier("command:\(hit.id)")
             Button { toggleFavorite(hit) } label: {
                 Image(systemName: favorite(hit) ? "star.fill" : "star").foregroundStyle(AureaColors.accent).frame(width: 48, height: 48)
-            }.buttonStyle(.plain).accessibilityLabel("\(favorite(hit) ? "Remover dos" : "Adicionar aos") favoritos: \(hit.title)")
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t(favorite(hit) ? "edt_cmd_fav_remove" : "edt_cmd_fav_add", hit.title))
         }
     }
 
@@ -144,10 +155,10 @@ struct CommandSearchView: View {
             CommandHit(id: $0.id, title: $0.title, detail: $0.detail, search: fxNormalizeSearch("\($0.title) \($0.detail) \($0.keywords)"), category: "Ações", requires: $0.requires)
         }
         hits += model.effectCatalog.map {
-            CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: "Adicionar efeito · \($0.category)", search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : "selection", effect: $0.typeId)
+            CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: AureaText.t("edt_cmd_add_effect", $0.category), search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : "selection", effect: $0.typeId)
         }
         hits += PanelPresetEntry.loadAll().map {
-            CommandHit(id: "preset:\($0.id)", title: $0.name, detail: "Abrir preset · \($0.kind.rawValue)", search: fxNormalizeSearch("\($0.name) \($0.kind.rawValue) preset"), category: "Presets", requires: $0.kind == .text ? "text" : "single", preset: $0)
+            CommandHit(id: "preset:\($0.id)", title: $0.name, detail: AureaText.t("edt_cmd_open_preset", $0.kind.label), search: fxNormalizeSearch("\($0.name) \($0.kind.rawValue) preset"), category: "Presets", requires: $0.kind == .text ? "text" : "single", preset: $0)
         }
     }
 

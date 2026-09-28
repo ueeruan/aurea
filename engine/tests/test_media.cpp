@@ -968,3 +968,66 @@ AUREA_TEST(VideoSource, SeekEpochRejectsFramesFromOutstandingDecode) {
     AUREA_CHECK(exact);
     source.stop();
 }
+
+// Scrub: cada passo do dedo é um alvo novo do MESMO decode. Se cada passo
+// trocasse a época, o decode em curso morria a cada evento de toque e nenhum
+// quadro chegava enquanto o dedo andava (preview preto no scrub).
+AUREA_TEST(Playback, ScrubStepsKeepTheMediaEpochSeekAndLoopChangeIt) {
+    PlaybackController pc;
+    pc.configure(30.0, FrameIndex{300});
+    const u64 epoch = pc.media_epoch();
+    const u64 generation = pc.generation();
+    pc.begin_scrub(0);
+    pc.scrub(FrameIndex{50}, 10'000'000ull);
+    pc.scrub(FrameIndex{40}, 20'000'000ull);
+    pc.scrub(FrameIndex{90}, 30'000'000ull);
+    pc.end_scrub(40'000'000ull);
+    AUREA_CHECK(pc.generation() != generation);   // o som ainda vê os saltos
+    AUREA_CHECK_EQ(pc.media_epoch(), epoch);
+    pc.seek(FrameIndex{10}, 50'000'000ull);
+    AUREA_CHECK(pc.media_epoch() != epoch);
+    const u64 afterSeek = pc.media_epoch();
+    pc.set_loop(true);
+    pc.play(0);
+    (void)pc.update(20'000'000'000ull);   // passa do fim: dá a volta
+    AUREA_CHECK(pc.media_epoch() != afterSeek);
+}
+
+// Seek/loop/marca: a época nova aborta o decode em curso, mas os quadros já
+// decodificados continuam na tela (o mais próximo) até o alvo novo chegar.
+AUREA_TEST(VideoSource, NewEpochKeepsDecodedFramesAsTheFallbackPicture) {
+    SyntheticConfig config; config.decodeCostUs = 20000;
+    VideoSource source(std::make_unique<SyntheticDecoder>(config), MediaPriority::Preview);
+    source.start(); source.set_epoch(1);
+    source.request(DecodeRequest{1000000, DecodeMode::Still, 0, 1});
+    AUREA_CHECK(source.wait_for(1000000, 3000));
+    source.set_epoch(2);
+    bool exact = false;
+    AUREA_CHECK(static_cast<bool>(source.frame_for(1000000, &exact)));
+    AUREA_CHECK(exact);
+    source.request(DecodeRequest{5000000, DecodeMode::Still, 0, 1});
+    // O alvo novo ainda não saiu: a camada NÃO fica sem imagem.
+    AUREA_CHECK(static_cast<bool>(source.frame_for(5000000, &exact)));
+    AUREA_CHECK(source.wait_for(5000000, 3000));
+    source.stop();
+}
+
+// Scrub com GOP longo: o keyframe do seek aparece na hora; o quadro exato
+// chega depois, sem a tela esperar a decodificação inteira até o alvo.
+AUREA_TEST(VideoSource, ScrubSeekShowsTheKeyframeBeforeTheExactFrame) {
+    SyntheticConfig config; config.decodeCostUs = 25000; config.gop = 30;
+    VideoSource source(std::make_unique<SyntheticDecoder>(config), MediaPriority::Preview);
+    source.start(); source.set_epoch(1);
+    const i64 target = 29 * 1000000 / 30;   // último quadro do GOP: ~29 decodes
+    source.request(DecodeRequest{target, DecodeMode::Scrub, -1, 1});
+    FrameRef shown;
+    const auto t0 = std::chrono::steady_clock::now();
+    while (!shown && std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(300)) {
+        shown = source.frame_for(target, nullptr);
+        if (!shown) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    AUREA_CHECK(static_cast<bool>(shown));
+    if (shown) AUREA_CHECK(shown->ptsUs < target);   // o keyframe, antes do alvo
+    AUREA_CHECK(source.wait_for(target, 5000));
+    source.stop();
+}

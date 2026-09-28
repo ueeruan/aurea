@@ -1,5 +1,7 @@
 package com.aurea.aurea.captions
 import android.content.Context
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -23,13 +25,13 @@ class CaptionPresetStore(private val context: Context) {
         try {
             if (body != null) {
                 val bytes = body.toString().toByteArray(Charsets.UTF_8)
-                require(bytes.size <= 132 * 1024) { "Preset muito grande" }
+                require(bytes.size <= 132 * 1024) { AppText.get(context, R.string.app_preset_too_large) }
                 connection.requestMethod = "POST"; connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json"); connection.setFixedLengthStreamingMode(bytes.size)
                 connection.outputStream.use { it.write(bytes) }
             }
             val code = connection.responseCode
-            if (code !in 200..299) throw IOException(if (code == 429) "Limite da comunidade atingido. Tente mais tarde." else "Comunidade indisponível (HTTP $code). Seus presets locais continuam disponíveis.")
+            if (code !in 200..299) throw IOException(if (code == 429) AppText.get(context, R.string.app_community_limit) else AppText.get(context, R.string.app_community_unavailable, code))
             val bytes = connection.inputStream.use { it.readBytesLimited(5 * 1024 * 1024) }
             return JSONObject(bytes.toString(Charsets.UTF_8))
         } finally { connection.disconnect() }
@@ -48,7 +50,7 @@ class CaptionPresetStore(private val context: Context) {
     private fun write(entry: JSONObject, mine: Boolean) {
         val id = entry.getString("id"); require(id.matches(Regex("[a-f0-9-]{36}")))
         val target = File(directory(mine), "$id.json"); val temporary = File(directory(mine), "$id.part")
-        temporary.writeText(entry.toString()); if (!temporary.renameTo(target)) throw IOException("Não foi possível guardar o preset")
+        temporary.writeText(entry.toString()); if (!temporary.renameTo(target)) throw IOException(AppText.get(context, R.string.app_preset_save_failed))
     }
     fun download(entry: JSONObject): JSONObject {
         if (entry.has("preset")) return entry
@@ -62,7 +64,7 @@ class CaptionPresetStore(private val context: Context) {
     fun publish(entry: JSONObject, author: String): JSONObject = api("/presets",JSONObject().put("id",entry.getString("id")).put("author",author).put("preset",entry.getJSONObject("preset")),true)
     private fun java.io.InputStream.readBytesLimited(limit: Int): ByteArray {
         val output=java.io.ByteArrayOutputStream();val bytes=ByteArray(8192)
-        while(true){val n=read(bytes);if(n<0)break;if(output.size()+n>limit)throw IOException("Resposta grande demais");output.write(bytes,0,n)}
+        while(true){val n=read(bytes);if(n<0)break;if(output.size()+n>limit)throw IOException(AppText.get(context, R.string.app_response_too_large));output.write(bytes,0,n)}
         return output.toByteArray()
     }
 }

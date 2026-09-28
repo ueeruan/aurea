@@ -118,21 +118,15 @@ public:
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        // Os três modos do After Effects, na ordem dele.
-        static const char* const kInterp[] = {"Linear", "Suave", "Segurar"};
+        // Facilidade da chave no cabeçote (o trecho que sai dela). Os três
+        // primeiros ficam nos números de sempre — projetos antigos guardaram
+        // 0 Linear, 1 Suave, 2 Segurar — e os dois novos entram no fim.
+        static const char* const kInterp[] = {"Linear", "Suave", "Segurar", "Suave no início", "Suave no fim"};
         // O teto é o da fonte inteira (o motor prende no último quadro dela).
         p.add_float("time", "Tempo", 0.0f, 0.0f, 86400.0f, kParamAnimatable, "s");
-        p.add_enum("interpolation", "Interpolação do tempo", kInterp, 3, 0);
+        p.add_enum("interpolation", "Interpolação do tempo", kInterp, 5, 0);
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
-
-    /// O modo do AE (0 Linear, 1 Suave, 2 Segurar) na interpolação do motor.
-    [[nodiscard]] static Interpolation interp_of(u32 mode) noexcept {
-        return mode == 2 ? Interpolation::Hold : mode == 1 ? Interpolation::EaseInOut : Interpolation::Linear;
-    }
-    [[nodiscard]] static u32 mode_of(Interpolation i) noexcept {
-        return i == Interpolation::Hold ? 2u : i == Interpolation::Linear ? 0u : 1u;
-    }
 };
 
 void register_temporal_effects(EffectRegistry& r) {

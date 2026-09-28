@@ -180,7 +180,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 if (!store.sceneEditor) androidx.compose.material3.TextButton(
                     onClick = {
                         store.autoKeyTransforms = !store.autoKeyTransforms
-                        store.showToast(if (store.autoKeyTransforms) "Auto-Key: edita tracks animadas no cabeçote" else "Auto-Key desligado: desloca toda a animação sem criar keys")
+                        store.showToast(AppText.get(store.getApplication<Application>(), if (store.autoKeyTransforms) R.string.edt_autokey_on_hint else R.string.edt_autokey_off_hint))
                     },
                     modifier = Modifier.heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp)),
                 ) { Text(if (store.autoKeyTransforms) "Auto-Key: On" else "Auto-Key: Off", color = if (store.autoKeyTransforms) AureaColors.Accent else AureaColors.Text) }
@@ -467,9 +467,12 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     if (selection.isEmpty()) return
     val playhead = store.playhead
 
+    // Caixa escondida (StagePrefs): nada de contorno, centro nem setas — a
+    // camada segue escolhida e os gestos continuam valendo.
+    val chrome = !StagePrefs.hideSelectionBox
     // Outras do lote: traço de fundo 2,5 + traço 1,5 em destaque. Ler
     // `layers` aqui faz o desenho acompanhar quando SÓ elas mudam (alinhar).
-    if (selection.size > 1 && store.layers.isNotEmpty()) {
+    if (chrome && selection.size > 1 && store.layers.isNotEmpty()) {
         for (id in selection) {
             if (id == d.id) continue
             val od = store.queryDetail(id) ?: continue
@@ -479,7 +482,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     }
     if (!activeAt(d, playhead) || !toScreenCorners(d, m, m.corners)) return
     // Principal: escuro 55 % em 3,5 e destaque em 2 (travada: secundário).
-    outline(m, m.corners, m.outlineUnder, m.outlineOver, if (d.locked) AureaColors.Muted else AureaColors.Accent)
+    if (chrome) outline(m, m.corners, m.outlineUnder, m.outlineOver, if (d.locked) AureaColors.Muted else AureaColors.Accent)
     if (selection.size != 1 || d.locked || masking) return   // no modo de máscara o toque é do caminho
     // Editar forma: alças de tamanho e raio da silhueta no lugar de escala/giro.
     if (shapeEditMode(store, ui)) {
@@ -491,7 +494,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     // pela pinça (e, no 3D, pela ferramenta do gizmo).
     // Camada no espaço 3D: as setas do mundo (têm prioridade no toque).
     store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
-    if (store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
+    if (!chrome || store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
     val anchor = m.scratch
     val gizmo = store.gizmo
     if (gizmo != null) { anchor[0] = gizmo[0]; anchor[1] = gizmo[1] }
@@ -1503,7 +1506,7 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
             val current = store.preview.scaleLabel
             ShellPopupMenu(
                 items = listOf(
-                    PopupItem(if (store.rawPlayback) "Voltar ao compositor" else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() },
+                    PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() },
                     PopupItem("AUTO", current == "AUTO") { store.setPreviewScale(true) },
                     PopupItem("Full", current == "FULL") { store.setPreviewScale(false, 1, 1) },
                     PopupItem("1/2", current == "1/2") { store.setPreviewScale(false, 1, 2) },

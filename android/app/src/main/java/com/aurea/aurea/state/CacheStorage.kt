@@ -1,6 +1,8 @@
 package com.aurea.aurea.state
 
 import android.content.Context
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import java.io.File
 
 // =============================================================================
@@ -35,6 +37,7 @@ data class CacheKind(
 
 class CacheStorage(private val context: Context) {
 
+    private fun text(id: Int) = AppText.get(context, id)
     private val motor get() = File(context.cacheDir, "motor")
     private val previews get() = File(motor, "previas")
     private val export get() = File(context.cacheDir, "export")
@@ -55,17 +58,17 @@ class CacheStorage(private val context: Context) {
         var otherFiles = 0
         others.forEach { f -> measure(f).let { otherBytes += it.first; otherFiles += it.second } }
         return listOf(
-            CacheKind(PIPELINES, "Cache de gráficos", "Shaders já compilados para esta GPU; refeito sozinho",
+            CacheKind(PIPELINES, text(R.string.app_cache_pipelines_title), text(R.string.app_cache_pipelines_detail),
                 pipeBytes, pipeFiles, PIPELINE_LIMIT),
-            CacheKind(PREVIEWS, "Prévias de efeitos", "Imagens do navegador de efeitos",
+            CacheKind(PREVIEWS, text(R.string.app_cache_previews_title), text(R.string.app_cache_previews_detail),
                 prevBytes, prevFiles, PREVIEW_LIMIT),
-            CacheKind(EXPORT, "Exportação temporária", "Vídeo sendo gerado antes de ir para a galeria",
+            CacheKind(EXPORT, text(R.string.app_cache_export_title), text(R.string.app_cache_export_detail),
                 expBytes, expFiles, if (exporting) Long.MAX_VALUE else 0L),
-            CacheKind(CAPTIONS, "Áudio de legendas", "Áudio separado para transcrever",
+            CacheKind(CAPTIONS, text(R.string.app_cache_captions_title), text(R.string.app_cache_captions_detail),
                 capBytes, capFiles, 0L),
-            CacheKind(ORPHAN_THUMBS, "Capas de projetos apagados", "Miniaturas da Home sem projeto",
+            CacheKind(ORPHAN_THUMBS, text(R.string.app_cache_orphans_title), text(R.string.app_cache_orphans_detail),
                 orphans.sumOf { it.length() }, orphans.size, 0L),
-            CacheKind(OTHER, "Outros temporários", "Arquivos temporários do sistema no app",
+            CacheKind(OTHER, text(R.string.app_cache_other_title), text(R.string.app_cache_other_detail),
                 otherBytes, otherFiles, OTHER_LIMIT),
         )
     }

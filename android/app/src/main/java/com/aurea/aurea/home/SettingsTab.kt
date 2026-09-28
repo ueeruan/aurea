@@ -244,7 +244,7 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                     TileRow(
                         leading = { CupertinoIcon(CupertinoGlyph.Wrench, 21.dp, AureaColors.Accent) },
                         title = stringResource(R.string.settings_dev_tools),
-                        subtitle = "Versão ${version.name} · build ${version.build}",
+                        subtitle = stringResource(R.string.app_settings_version_build, version.name, version.build),
                     )
                 }
             }
@@ -267,7 +267,7 @@ private fun DeviceRow(store: EditorStore) {
     val report = store.deviceReport
     TapRow(
         stringResource(R.string.settings_device_auto),
-        report?.summary() ?: stringResource(R.string.settings_device_auto),
+        report?.summary(context) ?: stringResource(R.string.settings_device_auto),
     ) {
         DeviceProfile.forget(context)
         store.showToast(context.getString(R.string.settings_device_analysed))

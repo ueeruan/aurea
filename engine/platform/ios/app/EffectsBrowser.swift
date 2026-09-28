@@ -491,7 +491,7 @@ struct EffectAboutSheet: View {
     private var favorite: Bool { prefs.isFavorite(entry.typeId) }
 
     var body: some View {
-        let specs = model.engine.effectSpecs(entry.typeId)
+        let specs = model.engine.effectSpecs(entry.typeId).map { fxLocalizedSpec(entry.typeId, $0) }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 EffectBrowserPreview(entry: entry, store: model.effectPreviews)
@@ -543,7 +543,7 @@ struct EffectAboutSheet: View {
         let enums = spec["enumLabels"] as? [String] ?? []
         if !enums.isEmpty { return enums.prefix(3).joined(separator: ", ") + (enums.count > 3 ? "…" : "") }
         switch (spec["type"] as? NSNumber)?.intValue {
-        case fxParamColor: return "Cor" // The source's parameter summary is literal.
+        case fxParamColor: return AureaText.t("ds_cor")
         case fxParamBool: return AureaText.t("effect_param_bool")
         case fxParamPoint2D: return AureaText.t("effect_param_point")
         default:
@@ -551,7 +551,7 @@ struct EffectAboutSheet: View {
             let high = (spec["max"] as? NSNumber)?.floatValue ?? 0
             let unit = spec["unit"] as? String ?? ""
             return low.isFinite && high.isFinite && high > low
-                ? "\(trimNumber(low)) a \(trimNumber(high))" + (unit.isEmpty ? "" : " " + unit) : unit
+                ? AureaText.t("fx_param_range", trimNumber(low), trimNumber(high)) + (unit.isEmpty ? "" : " " + unit) : unit
         }
     }
     private func trimNumber(_ value: Float) -> String {

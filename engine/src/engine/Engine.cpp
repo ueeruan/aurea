@@ -60,6 +60,7 @@ bool is_remap_time_alias(const Layer& l, const TrackRef& ref) noexcept {
 
 const Track* read_command_track(const Layer& l, const TrackRef& ref) noexcept {
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) return &l.timeRemap;
+    if (ref.property == TrackProperty::Speed) return l.tracks.find(ref.property);
     return l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
 }
 
@@ -68,6 +69,9 @@ Track* command_track(Layer& l, const TrackRef& ref, bool create) noexcept {
         if (create) enable_time_remap_curve(l);
         return &l.timeRemap;
     }
+    // A velocidade é uma trilha só da layer (`Layer::speed_track` busca sem
+    // índices): um comando que traga índice 0 não pode criar outra.
+    if (ref.property == TrackProperty::Speed) return create ? &l.tracks.get_or_create(ref.property) : l.tracks.find(ref.property);
     if (create) return &l.tracks.get_or_create(ref.property, ref.effectIndex, ref.effectParamIndex);
     return l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
 }
@@ -80,6 +84,32 @@ void write_time_remap(Layer& l, FrameIndex local, f32 sourceFrames, Interpolatio
     else {
         l.timeRemap.keys[at].value = sourceFrames;
         l.timeRemap.keys[at].interp = interp;
+    }
+}
+
+/// "Facilidade" do Remapear tempo (o enum do efeito) ↔ interpolação da chave.
+/// 0 Linear · 1 Suave (entrada e saída) · 2 Segurar · 3 Suave no início ·
+/// 4 Suave no fim. Os três primeiros são os números que os projetos antigos
+/// gravaram — continuam querendo dizer a mesma coisa.
+[[nodiscard]] Interpolation remap_interp_of_mode(f32 mode) noexcept {
+    const i32 m = std::isfinite(mode) ? static_cast<i32>(std::lround(mode)) : 0;
+    switch (m) {
+        case 1: return Interpolation::EaseInOut;
+        case 2: return Interpolation::Hold;
+        case 3: return Interpolation::EaseIn;
+        case 4: return Interpolation::EaseOut;
+        default: return Interpolation::Linear;
+    }
+}
+/// O caminho inverso. Curvas de Bézier feitas no gráfico antigo leem "Suave":
+/// é o mais perto que a lista curta tem, e a curva só muda se alguém tocar.
+[[nodiscard]] f32 remap_mode_of_interp(Interpolation i) noexcept {
+    switch (i) {
+        case Interpolation::Linear: return 0.0f;
+        case Interpolation::Hold: return 2.0f;
+        case Interpolation::EaseIn: return 3.0f;
+        case Interpolation::EaseOut: return 4.0f;
+        default: return 1.0f;
     }
 }
 
@@ -3758,9 +3788,44 @@ bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || preset > 6) return false;
+    if (!l || preset > 7) return false;
     const i64 dur = l->end.value - l->start.value;
     if (dur < 2) return false;
+    if (preset == 7) {
+        // Congelar aqui: o quadro do cabeçote fica parado 1 s e depois o
+        // vídeo segue na velocidade normal da camada. As chaves ANTES do
+        // cabeçote ficam (dá para congelar em vários pontos, da esquerda para
+        // a direita); as depois dele dão lugar ao congelamento.
+        const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
+        const i64 t0 = std::clamp(l->local_time(playback_.current()).value, lo, hi);
+        if (t0 >= hi) return false;   // no último quadro não há o que segurar
+        history_.before_mutation(*comp, project_->timeline().current(), "congelar aqui");
+        modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+        // Velocidade normal = a da camada sem a curva (velocidade/reverso).
+        const bool had = l->timeRemapEnabled;
+        l->timeRemapEnabled = false;
+        const f64 rate = (l->source_frame(l->end) - l->source_frame(l->start)) / static_cast<f64>(dur);
+        l->timeRemapEnabled = had;
+        enable_time_remap_curve(*l);
+        Track& t = l->timeRemap;
+        const f32 v0 = t.sample_keys(FrameIndex{t0});
+        std::erase_if(t.keys, [&](const Keyframe& k) { return k.time.value > t0; });
+        t.lastIndex = 0;
+        write_time_remap(*l, FrameIndex{t0}, v0, Interpolation::Linear);
+        const i64 t1 = std::min(hi, t0 + std::max<i64>(1, std::llround(fps)));
+        write_time_remap(*l, FrameIndex{t1}, v0, Interpolation::Linear);
+        if (t1 < hi) {
+            const f64 last = source_last_frame(*project_, *l, fps);
+            f64 v = static_cast<f64>(v0) + rate * static_cast<f64>(hi - t1);
+            v = last > 0.0 ? std::clamp(v, 0.0, last) : std::max(0.0, v);
+            write_time_remap(*l, FrameIndex{hi}, static_cast<f32>(v), Interpolation::Linear);
+        }
+        t.lastIndex = 0;
+        project_->mark_dirty();
+        request_render();
+        return true;
+    }
     history_.before_mutation(*comp, project_->timeline().current(), "rampa de velocidade");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     // O trecho da fonte que a camada mostra agora (sem a curva antiga).
@@ -3783,7 +3848,9 @@ bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
     };
     switch (preset) {
         case 0: key(0, 0, Interpolation::Linear); key(1, 1, Interpolation::Linear); break;
-        case 1: key(0, 0, Interpolation::Bezier, 0.42f, 0.0f, 0.58f, 1.0f); key(1, 1, Interpolation::Linear); break;
+        // Suave / acelerar / desacelerar usam as facilidades puras — as mesmas
+        // que o efeito Remapear tempo mostra por chave, sem gráfico.
+        case 1: key(0, 0, Interpolation::EaseInOut); key(1, 1, Interpolation::Linear); break;
         case 2:
             // Rápido (1,5× a média) → lento (0,25×) → rápido; cantos suavizados.
             key(0.0, 0.00, Interpolation::Bezier, 0.33f, 0.33f, 0.80f, 0.95f);
@@ -3791,8 +3858,8 @@ bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
             key(0.7, 0.55, Interpolation::Bezier, 0.20f, 0.05f, 0.67f, 0.67f);
             key(1.0, 1.00, Interpolation::Linear);
             break;
-        case 3: key(0, 0, Interpolation::Bezier, 0.42f, 0.0f, 1.0f, 1.0f); key(1, 1, Interpolation::Linear); break;
-        case 4: key(0, 0, Interpolation::Bezier, 0.0f, 0.0f, 0.58f, 1.0f); key(1, 1, Interpolation::Linear); break;
+        case 3: key(0, 0, Interpolation::EaseIn); key(1, 1, Interpolation::Linear); break;
+        case 4: key(0, 0, Interpolation::EaseOut); key(1, 1, Interpolation::Linear); break;
         case 5:
             t.set(FrameIndex{k0}, freezeFrame, Interpolation::Hold);
             t.set(FrameIndex{k0 + dur}, freezeFrame, Interpolation::Hold);
@@ -4565,7 +4632,7 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
         || std::fabs(P->tracks.sample_or(TrackProperty::Opacity, pLocal, P->transform.opacity) - 1.0f) > 1e-4f)
         return refuse("a camada do grupo tem opacidade");
     if (P->threeD) return refuse("a camada do grupo esta em 3D");
-    if (P->timeRemapEnabled || P->speed != 1.0f || P->reversed) return refuse("o tempo do grupo foi alterado");
+    if (P->timeRemapEnabled || P->speed != 1.0f || P->reversed || P->speed_track()) return refuse("o tempo do grupo foi alterado");
     if (P->transitionIn || P->transitionOut || P->echoCount || P->rgbDelay > 0.0f) return refuse("o grupo tem transicao ou eco");
     if (!C->transparent_background()) return refuse("o grupo tem fundo proprio");
     bool camOrLight = false;
@@ -5248,7 +5315,46 @@ f64 clip_source_limit(const Project& project, const Composition& comp, const Lay
     return -1.0;
 }
 
+/// Velocidade com keyframes → curva de tempo equivalente (a integral amostrada
+/// quadro a quadro, que é como a curva de tempo é lida). O `offset` também é o
+/// relógio dos keyframes, então a entrada não pode mudar sem isto.
+void materialize_speed_curve(Layer& l, i64 start, i64 end, f64 sourceLimit) noexcept {
+    const i64 lo = std::min(start, l.start.value), hi = std::max(end, l.end.value);
+    const i64 step = std::max<i64>(1, (hi - lo) / 4000);
+    Track remap;
+    remap.property = TrackProperty::TimeRemap;
+    for (i64 f = lo; f < hi; f += step)
+        remap.set(l.local_time(FrameIndex{f}), static_cast<f32>(l.source_frame(FrameIndex{f})));
+    remap.set(l.local_time(FrameIndex{hi}), static_cast<f32>(l.source_frame(FrameIndex{hi})));
+    // Alças da fonte: as pontas seguem na velocidade da ponta, para esticar o
+    // trecho depois não congelar na borda antiga.
+    if (sourceLimit >= 0) {
+        constexpr f64 maxFrame = static_cast<f64>(i64{1} << 40);
+        const f64 dir = l.reversed ? -1.0 : 1.0;
+        const f64 v0 = l.speed_at(FrameIndex{lo}) * dir, v1 = l.speed_at(FrameIndex{hi}) * dir;
+        const f64 s0 = l.source_frame(FrameIndex{lo}), s1 = l.source_frame(FrameIndex{hi});
+        if (std::fabs(v0) > 1e-6) {
+            const f64 t = std::clamp(static_cast<f64>(lo) + ((v0 > 0 ? 0.0 : sourceLimit) - s0) / v0, -maxFrame, maxFrame);
+            if (std::isfinite(t) && t < static_cast<f64>(lo) - 1.0) {
+                const i64 tf = static_cast<i64>(std::floor(t)) - 1;
+                remap.set(l.local_time(FrameIndex{tf}), static_cast<f32>(s0 + static_cast<f64>(tf - lo) * v0));
+            }
+        }
+        if (std::fabs(v1) > 1e-6) {
+            const f64 t = std::clamp(static_cast<f64>(hi) + ((v1 > 0 ? sourceLimit : 0.0) - s1) / v1, -maxFrame, maxFrame);
+            if (std::isfinite(t) && t > static_cast<f64>(hi) + 1.0) {
+                const i64 tf = static_cast<i64>(std::ceil(t)) + 1;
+                remap.set(l.local_time(FrameIndex{tf}), static_cast<f32>(s1 + static_cast<f64>(tf - hi) * v1));
+            }
+        }
+    }
+    l.timeRemap = std::move(remap);
+    l.timeRemapEnabled = true;
+    l.tracks.remove_if([](const Track& t) { return t.property == TrackProperty::Speed; });
+}
+
 void materialize_clip_time(Layer& l, i64 start, i64 end, f64 sourceLimit) noexcept {
+    if (l.speed_track()) { materialize_speed_curve(l, start, end, sourceLimit); return; }
     i64 lo = std::min(start, l.start.value), hi = std::max(end, l.end.value);
     if (sourceLimit >= 0 && l.speed > 0) {
         const f64 slope = l.reversed ? -l.speed : l.speed;
@@ -5277,7 +5383,7 @@ void trim_clip_copy(Layer& l, i64 start, i64 end, f64 sourceLimit = -1) noexcept
     const i64 oldStart = l.start.value, oldEnd = l.end.value;
     const i64 ds = start - oldStart;
     if (has_clip_source(l) && !l.timeRemapEnabled &&
-        ((l.reversed && (ds != 0 || end != oldEnd)) || (!l.reversed && ds != 0 && l.speed != 1.0f))) {
+        ((l.reversed && (ds != 0 || end != oldEnd)) || (!l.reversed && ds != 0 && (l.speed != 1.0f || l.speed_track())))) {
         materialize_clip_time(l, start, end, sourceLimit);
     }
     l.offset.value += ds;
@@ -5488,7 +5594,26 @@ bool Engine::trim_composition(i64 frame) noexcept {
     return true;
 }
 
+void Engine::bump_revision_without_audio_locked() noexcept {
+    const u32 before = modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    if (audioRevision_ == before) audioRevision_ = before + 1;
+}
+
 bool Engine::toggle_marker(i64 frame) noexcept {
+    bool playing = false;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        // Comandos na fila (play/pausa recém-pedidos) valem antes da decisão.
+        if (project_) drain_commands_locked();
+        playing = playback_.playing();
+    }
+    if (playing) {
+        // Tocando: marca no ouvido, sem alternar e sem tocar no transporte.
+        if (mark_beat_live() >= 0) return true;
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        const Composition* comp = project_ ? current_composition() : nullptr;
+        return comp && !comp->markers().empty();
+    }
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
@@ -5496,7 +5621,7 @@ bool Engine::toggle_marker(i64 frame) noexcept {
     const bool had = std::any_of(comp->markers().begin(), comp->markers().end(),
                                  [f](const Marker& m) { return m.frame.value == f; });
     history_.before_mutation(*comp, project_->timeline().current(), had ? "remover marca" : "adicionar marca");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_revision_without_audio_locked();
     if (had) comp->remove_marker_at(FrameIndex{f});
     else comp->put_marker(Marker{FrameIndex{f}, 0xFFF7C34Fu, kMarkerManual, {}});
     project_->mark_dirty();
@@ -5520,7 +5645,7 @@ i64 Engine::mark_beat_live() noexcept {
     if (std::any_of(comp->markers().begin(), comp->markers().end(),
                     [f](const Marker& m) { return m.frame.value == f; })) return -1;
     history_.before_mutation(*comp, project_->timeline().current(), "marcar batida");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_revision_without_audio_locked();
     comp->put_marker(Marker{FrameIndex{f}, 0xFFF7C34Fu, kMarkerManual, {}});
     project_->mark_dirty();
     return f;
@@ -5540,7 +5665,7 @@ bool Engine::move_marker(i64 from, i64 to) noexcept {
                     [target](const Marker& marker) { return marker.frame.value == target; })) return false;
     Marker m = *it;
     history_.before_mutation(*comp, project_->timeline().current(), "mover marca");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_revision_without_audio_locked();
     comp->remove_marker_at(FrameIndex{from});
     m.frame = FrameIndex{target};
     comp->put_marker(std::move(m));
@@ -5565,7 +5690,7 @@ bool Engine::edit_marker(i64 from, i64 to, u32 color, const std::string& label) 
     history_.before_mutation(*comp, project_->timeline().current(), from < 0 ? "adicionar marca" : "editar marca");
     if (from >= 0) comp->remove_marker_at(FrameIndex{from});
     comp->put_marker(Marker{FrameIndex{to}, color, kind, label});
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_revision_without_audio_locked();
     project_->mark_dirty();
     request_render();
     return true;
@@ -5578,7 +5703,7 @@ bool Engine::delete_marker(i64 frame) noexcept {
                              [frame](const Marker& m) { return m.frame.value == frame; })) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "remover marca");
     comp->remove_marker_at(FrameIndex{frame});
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_revision_without_audio_locked();
     project_->mark_dirty();
     request_render();
     return true;
@@ -6754,6 +6879,78 @@ std::shared_ptr<const scene3d::SceneAsset> Engine::model_asset(u64 assetId) cons
     return it == models_.end() ? nullptr : it->second;
 }
 
+std::vector<std::string> Engine::model_missing_textures(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D) return {};
+    const auto it = models_.find(l->model.scene.pack());
+    if (it == models_.end() || !it->second) return {};
+    return it->second->missingTextures;
+}
+
+std::string Engine::model_folder(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D) return {};
+    const Asset* a = project_->asset(l->model.scene);
+    scene3d::Text3DSpec spec;
+    if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec)) return {};
+    const std::string path = resolve_asset_path(a->sourcePath);
+    const usize slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? std::string{} : path.substr(0, slash + 1);
+}
+
+Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noexcept {
+    AssetId old{};
+    Asset copy;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        const Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!l || l->kind != LayerKind::Model3D) return Status{Errc::InvalidArgument, "selecione um modelo 3D"};
+        const Asset* a = project_->asset(l->model.scene);
+        scene3d::Text3DSpec spec;
+        if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec))
+            return Status{Errc::InvalidArgument, "selecione um modelo 3D importado"};
+        old = l->model.scene;
+        copy = *a;
+    }
+    // Parse e texturas FORA do lock, como no import.
+    scene3d::ImportOptions options;
+    options.maxTextureSize = model_texture_cap();
+    scene3d::ImportResult r = scene3d::import_scene_file(resolve_asset_path(copy.sourcePath), options);
+    if (!r.ok()) {
+        if (detail) *detail = r.detail;
+        return Status{r.error == scene3d::ImportError::FileNotFound ? Errc::NotFound : Errc::AssetCorrupted,
+                      scene3d::to_string(r.error)};
+    }
+    std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
+    if (detail) {
+        detail->clear();
+        for (const std::string& w : scene->warnings) *detail += w + "\n";
+    }
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "projeto fechado durante o import"};
+    history_.before_mutation(*comp, project_->timeline().current(), "importar texturas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // Asset novo com o mesmo caminho guardado: a GPU guarda o modelo pelo id
+    // do asset, então o id novo faz as texturas subirem sem mexer no render.
+    const AssetId fresh = project_->add_asset(std::move(copy));
+    models_[fresh.pack()] = scene;
+    project_->timeline().for_each_composition([&](CompositionId, Composition& c) {
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            Layer* l = c.layer(c.order().at(i));
+            if (l && l->kind == LayerKind::Model3D && l->model.scene == old) l->model.scene = fresh;
+        }
+    });
+    project_->mark_dirty();
+    request_render();
+    return static_cast<u32>(scene->missingTextures.size());
+}
+
 std::shared_ptr<const scene3d::SceneAsset> Engine::model_lookup(void* self, AssetId id) {
     // Chamado pelo renderer DENTRO do prepare (modelo já travado).
     Engine* e = static_cast<Engine*>(self);
@@ -6835,7 +7032,7 @@ void Engine::drain_commands_locked() noexcept {
 RenderSettings Engine::current_render_settings() noexcept {
     RenderSettings rs;
     rs.sceneEditor = sceneEditor_;
-    rs.mediaGeneration = playback_.generation();
+    rs.mediaGeneration = playback_.media_epoch();
     if (rawPlaybackLayer_.valid()) {
         rs.rawPlayback = true;
         rs.gpuTimers = true;
@@ -6971,8 +7168,12 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     FrameStats stats;
     RenderTimings timings;
     timings.cpuPrepareMs = static_cast<f32>(static_cast<f64>(tPrepared - frameStart) * 1e-6);
+    // Também TOCANDO: uma camada de vídeo sem quadro nenhum (decoder abrindo
+    // no corte, primeiro quadro a caminho) segura a última imagem inteira em
+    // vez de apresentar a composição sem ela — preto no meio do play. A
+    // espera é limitada (PreviewRefill); o relógio segue, nada atrasa o som.
     const bool refill = previewRefill_.hold(snapshot_.missingVideoFrames > 0,
-        !playing && !rs.rawPlayback && lastRenderedFrame_ >= 0, frameStart);
+        !rs.rawPlayback && lastRenderedFrame_ >= 0, frameStart);
     if (refill) {
         snapshot_.release_video_frames();
         nextFrameDueNs_ = frameStart + static_cast<u64>(1e9 / std::max(1.0f, config_.displayRefreshRate));
@@ -7750,6 +7951,17 @@ u32 Engine::query_waveform(u64 layerId, f64 startFrame, f64 framesPerBucket, u32
             remapCopy->timeRemapEnabled = true;
             remapLayer = &*remapCopy;
             remapFps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+        } else if (const Track* st = l->speed_track()) {
+            // Velocidade com keyframes: a mesma integral do vídeo, balde a balde.
+            remapCopy.emplace();
+            remapCopy->start = l->start;
+            remapCopy->end = l->end;
+            remapCopy->offset = l->offset;
+            remapCopy->reversed = l->reversed;
+            remapCopy->speed = l->speed;
+            remapCopy->tracks.get_or_create(TrackProperty::Speed) = *st;
+            remapLayer = &*remapCopy;
+            remapFps = comp->fps() > 0.0 ? comp->fps() : 30.0;
         } else if (l->speed <= 0.0f) {
             return 0;   // quadro congelado: sem som
         }
@@ -7960,8 +8172,8 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     out.audioPan = l->pan;
     out.audioFadeIn = static_cast<i32>(l->fadeIn.value);
     out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
-    out.speed = l->speed;
-    out.timeFlags = (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u) | (l->timeRemapEnabled ? 4u : 0u)
+    out.speed = l->speed_at(playback_.current());
+    out.timeFlags = (l->speed_track() ? 64u : 0u) | (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u) | (l->timeRemapEnabled ? 4u : 0u)
                   | (l->frameBlend == 1 ? 8u : 0u) | (l->frameBlend == 2 ? 16u : 0u) | (l->vectorBlur > 0.0f ? 32u : 0u);
     // Transições: tipo entrada (4 bits) | saída (4) | quadros entrada (12) | saída (12).
     out.reserved0 = (l->transitionIn & 0xFu) | ((l->transitionOut & 0xFu) << 4)
@@ -8206,7 +8418,7 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
                 row.animated = l->timeRemap.keys.size() > 1 ? 1u : 0u;
             } else if (i == 1) {
                 const u32 at = l->timeRemap.find_exact(local);
-                row.value[0] = at == kInvalidIndex ? 0.0f : l->timeRemap.keys[at].interp == Interpolation::Hold ? 2.0f : l->timeRemap.keys[at].interp == Interpolation::Linear ? 0.0f : 1.0f;
+                row.value[0] = at == kInvalidIndex ? 0.0f : remap_mode_of_interp(l->timeRemap.keys[at].interp);
             }
         }
         out[written++] = row;
@@ -9589,6 +9801,19 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             Track* track = command_track(*l, cmd.keyframe.track, true);
             const f32 scale = is_remap_time_alias(*l, cmd.keyframe.track) ? static_cast<f32>(comp->fps()) : 1.0f;
+            // Na curva de tempo, regravar uma chave que já existe mantém a
+            // facilidade escolhida nela (arrastar o Tempo não desfaz o "Suave").
+            if (track == &l->timeRemap && track->find_exact(cmd.keyframe.time) != kInvalidIndex) {
+                track->keys[track->find_exact(cmd.keyframe.time)].value = cmd.keyframe.value * scale;
+                return OkStatus;
+            }
+            if (track->property == TrackProperty::Speed) {
+                // Velocidade: presa em [0, 16]; regravar mantém a facilidade.
+                const f32 v = clampf(cmd.keyframe.value, 0.0f, 16.0f);
+                if (const u32 at = track->find_exact(cmd.keyframe.time); at != kInvalidIndex) track->keys[at].value = v;
+                else (void)track->set(cmd.keyframe.time, v, Interpolation::Linear);
+                return OkStatus;
+            }
             (void)track->set(cmd.keyframe.time, cmd.keyframe.value * scale, Interpolation::Linear);
             return OkStatus;
         }
@@ -9615,6 +9840,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const u32 idx = track->find_exact(cmd.keyframe.time);
             if (idx == kInvalidIndex) return Errc::NotFound;
             track->keys[idx].value = cmd.keyframe.value * (is_remap_time_alias(*l, cmd.keyframe.track) ? static_cast<f32>(comp->fps()) : 1.0f);
+            if (track->property == TrackProperty::Speed) track->keys[idx].value = clampf(track->keys[idx].value, 0.0f, 16.0f);
             return OkStatus;
         }
         case CommandType::KeyframeSetInterpolation:
@@ -9794,8 +10020,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 enable_time_remap_curve(*l);
                 const u32 at = l->timeRemap.find_exact(local);
                 if (p == 0) {
-                    // "Tempo" em segundos da fonte; a curva guarda quadros.
-                    const f32 frames = static_cast<f32>(cmd.effect_param.value * compFps);
+                    // "Tempo" em segundos da fonte; a curva guarda quadros,
+                    // presos à fonte (o dedo pode passar do fim da régua).
+                    const f64 last = project_ ? source_last_frame(*project_, *l, compFps) : 0.0;
+                    f64 want = std::isfinite(cmd.effect_param.value) ? cmd.effect_param.value * compFps : 0.0;
+                    want = last > 0.0 ? std::clamp(want, 0.0, last) : std::max(0.0, want);
+                    const f32 frames = static_cast<f32>(want);
                     // A chave nova nasce linear; a que já existe mantém a sua.
                     const Interpolation interp = at == kInvalidIndex ? Interpolation::Linear : l->timeRemap.keys[at].interp;
                     write_time_remap(*l, local, frames, interp);
@@ -9803,9 +10033,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     return OkStatus;
                 }
                 if (p == 1) {
-                    // Modos do AE: 0 Linear, 1 Suave, 2 Segurar.
-                    const Interpolation mode = cmd.effect_param.value >= 1.5f ? Interpolation::Hold :
-                        cmd.effect_param.value >= 0.5f ? Interpolation::EaseInOut : Interpolation::Linear;
+                    // Facilidade da chave no cabeçote (cria a chave se não houver).
+                    const Interpolation mode = remap_interp_of_mode(cmd.effect_param.value);
                     const f32 value = l->timeRemap.sample_keys(local);
                     write_time_remap(*l, local, value, mode);
                     e->params[1].constant.v[0] = cmd.effect_param.value;

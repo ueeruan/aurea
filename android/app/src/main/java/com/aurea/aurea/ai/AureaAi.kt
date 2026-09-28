@@ -10,7 +10,9 @@ import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.aurea.aurea.R
 import com.aurea.aurea.ads.AureaAdsManager
+import com.aurea.aurea.ui.i18n.AppText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job as CoroutineJob
@@ -152,7 +154,7 @@ class AureaAiState(
                 if (s.status == SessaoStatus.Liberado || s.status == SessaoStatus.Falhou || s.status == SessaoStatus.Gerando) atualizarCota()
                 when (s.status) {
                     SessaoStatus.Liberado -> liberar(s)
-                    SessaoStatus.Falhou -> { erro = explicarFalhaDeVideo(s.erro); job = job?.copy(status = "failed", etapa = "Falhou") }
+                    SessaoStatus.Falhou -> { erro = explicarFalhaDeVideo(app, s.erro); job = job?.copy(status = "failed", etapa = AppText.get(app, R.string.app_ai_stage_failed)) }
                     else -> Unit
                 }
             }
@@ -204,7 +206,7 @@ class AureaAiState(
             }
             if (cfg == null) {
                 estado = if (tentativa == 0) AureaAiEstado.Reconnecting else AureaAiEstado.Disconnected
-                mensagem = explicarFalhaDeVideo("sem_conexao")
+                mensagem = explicarFalhaDeVideo(app, "sem_conexao")
                 delay(recuo(tentativa) * 1000)
                 tentativa++
                 continue
@@ -218,13 +220,13 @@ class AureaAiState(
                 jobsSimultaneos = 1, fila = 0,
             )
             if (cfg.ligado) {
-                if (mensagem == explicarFalhaDeVideo("sem_conexao") || mensagem == explicarFalhaDeVideo("ia_desligada")) mensagem = ""
+                if (mensagem == explicarFalhaDeVideo(app, "sem_conexao") || mensagem == explicarFalhaDeVideo(app, "ia_desligada")) mensagem = ""
                 estado = if (sessao?.status == SessaoStatus.Gerando) AureaAiEstado.Generating else AureaAiEstado.Connected
                 runCatching { withContext(Dispatchers.IO) { provedor.cota() } }.onSuccess { cota = it }
                 retomarSePreciso()
             } else {
                 estado = AureaAiEstado.Disconnected
-                mensagem = explicarFalhaDeVideo("ia_desligada")
+                mensagem = explicarFalhaDeVideo(app, "ia_desligada")
             }
             delay(60_000)
         }
@@ -279,7 +281,7 @@ class AureaAiState(
     fun gerarComRecompensa(pedido: Pedido) {
         if (!estado.podeGerar() || sessaoOcupada) return
         // O servidor recusaria de qualquer jeito; aqui só evita o anúncio à toa.
-        if (cota?.esgotada == true) { erro = explicarFalhaDeVideo("limite_diario"); return }
+        if (cota?.esgotada == true) { erro = explicarFalhaDeVideo(app, "limite_diario"); return }
         erro = ""
         mensagem = ""
         ultimoArquivo = null
@@ -340,7 +342,7 @@ class AureaAiState(
             //    chegou ao servidor: espera, sem mostrar outro anúncio.
             var jobId = s.jobId
             if (jobId == null) {
-                job = etapa("sending", "Enviando…")
+                job = etapa("sending", AppText.get(app, R.string.app_ai_stage_sending))
                 while (jobId == null) {
                     jobId = try {
                         withContext(Dispatchers.IO) { provedor.gerar(ticket) }
@@ -371,9 +373,9 @@ class AureaAiState(
                 job = Job(
                     id = j.id, status = j.status, progresso = 0.0,
                     etapa = when (j.status) {
-                        "queued" -> "Enviando…"
-                        "generating" -> "Gerando vídeo…"
-                        "completed" -> "Finalizando…"
+                        "queued" -> AppText.get(app, R.string.app_ai_stage_sending)
+                        "generating" -> AppText.get(app, R.string.app_ai_stage_generating)
+                        "completed" -> AppText.get(app, R.string.app_ai_stage_finishing)
                         else -> j.etapa
                     },
                     posicaoNaFila = 0, segundos = j.segundos, erro = j.erro, resultado = null,
@@ -402,7 +404,7 @@ class AureaAiState(
             Log.i(TAG, "[AUREA AI] download = ${arquivo.length()} bytes")
             val meta = withContext(Dispatchers.IO) { metadataDoVideo(arquivo) }
                 ?: throw FalhaDeVideo("resultado_nao_e_video")
-            job = job?.copy(status = "completed", etapa = "Concluído", resultado = meta)
+            job = job?.copy(status = "completed", etapa = AppText.get(app, R.string.app_ai_stage_done), resultado = meta)
             estado = AureaAiEstado.Connected
             aoTerminar(arquivo, null, false)
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -432,9 +434,9 @@ class AureaAiState(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: FalhaDeVideo) {
-                if (sessao?.jobId == id) erro = explicarFalhaDeVideo(e.codigo)
+                if (sessao?.jobId == id) erro = explicarFalhaDeVideo(app, e.codigo)
             } catch (e: Exception) {
-                if (sessao?.jobId == id) erro = explicarFalhaDeVideo("sem_conexao")
+                if (sessao?.jobId == id) erro = explicarFalhaDeVideo(app, "sem_conexao")
             }
         }
     }
@@ -453,7 +455,7 @@ class AureaAiState(
     fun adicionarNaTimeline() {
         val arquivo = ultimoArquivo ?: return
         if (!arquivo.isFile || arquivo.length() == 0L) {
-            erro = "O arquivo baixado está vazio"
+            erro = AppText.get(app, R.string.app_ai_file_empty)
             return
         }
         aoAdicionarNaTimeline(arquivo, ultimoTitulo.ifBlank { "Aurea AI" })
@@ -464,7 +466,7 @@ class AureaAiState(
         val arquivo = ultimoArquivo ?: return
         escopo.launch {
             val r = withContext(Dispatchers.IO) { runCatching { copiarParaGaleria(arquivo) } }
-            r.onSuccess { mensagem = it }.onFailure { erro = "Não consegui salvar na galeria: ${it.message}" }
+            r.onSuccess { mensagem = it }.onFailure { erro = AppText.get(app, R.string.app_ai_gallery_failed, it.message.orEmpty()) }
         }
     }
 
@@ -486,12 +488,12 @@ class AureaAiState(
                 resolver.delete(uri, null, null)
                 throw e
             }
-            return "Salvo na galeria, em Filmes › Aurea"
+            return AppText.get(app, R.string.app_saved_to_gallery)
         }
         val dir = File(app.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Aurea").apply { mkdirs() }
         val dst = File(dir, "aurea_ai_${arquivo.name}")
         arquivo.copyTo(dst, overwrite = true)
-        return "Salvo em ${dst.absolutePath}"
+        return AppText.get(app, R.string.app_saved_to_path, dst.absolutePath)
     }
 
     fun atualizarHistorico() = conectar()
@@ -509,7 +511,7 @@ class AureaAiState(
     suspend fun enviarImagem(bytes: ByteArray, tipo: String): String? = try {
         withContext(Dispatchers.IO) { provedor.enviarImagem(bytes, tipo) }
     } catch (e: FalhaDeVideo) {
-        erro = explicarFalhaDeVideo(e.codigo)
+        erro = explicarFalhaDeVideo(app, e.codigo)
         null
     }
 

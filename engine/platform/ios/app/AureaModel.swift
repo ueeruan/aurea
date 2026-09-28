@@ -258,7 +258,7 @@ final class AureaModel: ObservableObject {
     @Published var sort: ProjectSort = .recent
     @Published private(set) var openingProject = false
     @Published private(set) var importingMedia = false
-    @Published private(set) var operationMessage = "Importando mídia…"
+    @Published private(set) var operationMessage = AureaText.t("ios_importing_media")
     @Published var pointPick: Bool?
     /// Pick Focus da lente armado: o próximo toque no palco mede a distância de foco.
     @Published var focusPick: Bool = false
@@ -642,9 +642,9 @@ final class AureaModel: ObservableObject {
                 if scene != "editor-empty" {
                     switch scene {
                     case "text-2d": addText(); textContentRequest = nil; panel = .text
-                    case "text-3d": addText3D(content: "Texto", depth: 0.25); textContentRequest = nil; panel = .layer3D
+                    case "text-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25); textContentRequest = nil; panel = .layer3D
                     case "text-edit-2d": addText()
-                    case "text-edit-3d": addText3D(content: "Texto", depth: 0.25)
+                    case "text-edit-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25)
                     case "curve-null": addNull(threeD: true); panel = .transform
                     case "rotation-isolation":
                         addNull(threeD: true)
@@ -965,7 +965,7 @@ final class AureaModel: ObservableObject {
             observeMemoryWarnings()
         } else {
             started = false
-            startError = (error as String?) ?? "o motor não subiu"
+            startError = (error as String?) ?? AureaText.t("ios_engine_not_started")
         }
     }
 
@@ -1084,7 +1084,7 @@ final class AureaModel: ObservableObject {
                     self.autosaveFailureShown = false
                 } else {
                     self.autosaveRetryAfter = ProcessInfo.processInfo.systemUptime + 30
-                    if !self.autosaveFailureShown { self.toast = "falha ao salvar" }
+                    if !self.autosaveFailureShown { self.toast = AureaText.t("ios_save_failed") }
                     self.autosaveFailureShown = true
                 }
             }
@@ -1217,6 +1217,7 @@ final class AureaModel: ObservableObject {
 
     func loadParams(layerId: Int64, effectId: UInt32) {
         if selectedEffectId != effectId { selectedEffectId = effectId }
+        let typeId = effects.first { $0.effectId == effectId }?.typeId ?? 0
         let nextParams = engine.effectParams(forLayer: layerId, effectId: effectId).map { row in
             let value = (row["value"] as? [NSNumber])?.map(\.floatValue) ?? [0, 0, 0, 0]
             let def = (row["defaultValue"] as? [NSNumber])?.map(\.floatValue) ?? [0, 0, 0, 0]
@@ -1227,10 +1228,14 @@ final class AureaModel: ObservableObject {
             let rawHardMax: Float = (row["hardMax"] as? NSNumber)?.floatValue ?? hi
             let hardLo: Float = rawHardMin.isNaN ? lo : Swift.min(rawHardMin, lo)
             let hardHi: Float = rawHardMax.isNaN ? hi : Swift.max(rawHardMax, hi)
-            return EffectParamItem(flags: (row["flags"] as? NSNumber)?.uint32Value ?? 0, index: (row["index"] as? NSNumber)?.uint32Value ?? 0,
+            // O motor fala pt-BR: rótulo, opções e unidade saem traduzidos pela identidade.
+            let index = (row["index"] as? NSNumber)?.uint32Value ?? 0
+            let text = fxLocalizedParam(typeId, index: Int(index), label: row["label"] as? String ?? "", unit: row["unit"] as? String ?? "",
+                                        options: row["enumLabels"] as? [String] ?? [])
+            return EffectParamItem(flags: (row["flags"] as? NSNumber)?.uint32Value ?? 0, index: index,
                                    type: (row["type"] as? NSNumber)?.uint32Value ?? 0,
-                                   label: row["label"] as? String ?? "",
-                                   unit: row["unit"] as? String ?? "",
+                                   label: text.label,
+                                   unit: text.unit,
                                    paramId: row["id"] as? String ?? "",
                                    value: value,
                                    defaultValue: def,
@@ -1239,7 +1244,7 @@ final class AureaModel: ObservableObject {
                                    hardMin: hardLo,
                                    hardMax: hardHi,
                                    animated: row["animated"] as? Bool ?? false,
-                                   enumLabels: row["enumLabels"] as? [String] ?? [])
+                                   enumLabels: text.options)
         }
         if nextParams != effectParams { effectParams = nextParams }
     }
@@ -1355,7 +1360,7 @@ final class AureaModel: ObservableObject {
         let ids = layers.filter { selection.contains($0.id) }.map { NSNumber(value: $0.id) }
         let created = engine.precomposeLayers(ids, name: nil)
         if created < 0 {
-            toast = "nao deu para agrupar"
+            toast = AureaText.t("msg_nao_foi_possivel_agrupar_erro", String(-created))
             return
         }
         selection = [created]
@@ -1477,7 +1482,7 @@ final class AureaModel: ObservableObject {
             points = [cx,cy-ry,-kx,0,kx,0, cx+rx,cy,0,-ky,0,ky, cx,cy+ry,kx,0,-kx,0, cx-rx,cy,0,ky,0,-ky]
         } else { points = [] }
         let mask = engine.addMask(id, points: points.map { NSNumber(value: $0) }, closed: shape != 2)
-        guard mask >= 0 else { toast = "Não foi possível adicionar a máscara"; return }
+        guard mask >= 0 else { toast = AureaText.t("ios_mask_add_failed"); return }
         refreshModel(force: true); refreshMasks(); selectedMask = UInt32(mask); maskDrawing = shape == 2; selectedMaskPoint = nil
     }
 
@@ -1589,18 +1594,18 @@ final class AureaModel: ObservableObject {
     @discardableResult
     func newProject(width: UInt32, height: UInt32, fps: Double, title: String) -> Bool {
         guard started else {
-            toast = startError ?? "o motor ainda não está pronto"
+            toast = startError ?? AureaText.t("engine_not_ready")
             return false
         }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = trimmed.isEmpty ? "Projeto \(projects.count + 1)" : trimmed
+        let name = trimmed.isEmpty ? AureaText.t("project_new", projects.count + 1) : trimmed
         guard engine.newProjectWidth(width, height: height, fps: fps, title: name) else {
-            toast = "não foi possível criar o projeto"
+            toast = AureaText.t("msg_nao_foi_possivel_criar_o_projeto")
             return false
         }
         let url = uniqueProjectURL(name)
         guard engine.saveProject(url.path) else {
-            toast = "não foi possível salvar o projeto"
+            toast = AureaText.t("ios_project_save_failed")
             return false
         }
         projectURL = url
@@ -1615,7 +1620,7 @@ final class AureaModel: ObservableObject {
         openingProject = true
         defer { openingProject = false }
         guard engine.loadProject(project.url.path) else {
-            toast = "não foi possível abrir o projeto"
+            toast = AureaText.t("msg_nao_foi_possivel_abrir_o_projeto", "")
             return
         }
         projectURL = project.url
@@ -1625,10 +1630,10 @@ final class AureaModel: ObservableObject {
             // A UI AVISA em vez de esconder (o mesmo critério do Android: §55,
             // §120, §124).
             var parts: [String] = []
-            if notice & 1 != 0 { parts.append("aberto de uma cópia de recuperação") }
-            if notice & 2 != 0 { parts.append("algumas seções faltando") }
-            if notice & 4 != 0 { parts.append("formato antigo") }
-            if notice & 8 != 0 { parts.append("\(engine.lastLoadMissingAssets) mídia(s) ausente(s)") }
+            if notice & 1 != 0 { parts.append(AureaText.t("ios_load_notice_recovery")) }
+            if notice & 2 != 0 { parts.append(AureaText.t("ios_load_notice_missing_sections")) }
+            if notice & 4 != 0 { parts.append(AureaText.t("ios_load_notice_old_format")) }
+            if notice & 8 != 0 { parts.append(AureaText.t("ios_load_notice_missing_media", Int(engine.lastLoadMissingAssets))) }
             toast = parts.joined(separator: " · ")
         }
         refreshModel(force: true)
@@ -1657,7 +1662,7 @@ final class AureaModel: ObservableObject {
     func saveProject(writeThumbnail: Bool) -> Bool {
         guard let url = projectURL else { return false }
         guard engine.saveProject(url.path) else {
-            toast = "falha ao salvar"
+            toast = AureaText.t("ios_save_failed")
             return false
         }
         if writeThumbnail { writeProjectThumbnail(name: url.deletingPathExtension().lastPathComponent) }
@@ -1701,7 +1706,7 @@ final class AureaModel: ObservableObject {
     func rename(_ project: ProjectFile, to newName: String) {
         let target = AureaPaths.documents.appendingPathComponent(newName + ".aurea")
         guard !FileManager.default.fileExists(atPath: target.path) else {
-            toast = "já existe um projeto com esse nome"
+            toast = AureaText.t("ios_project_name_exists")
             return
         }
         try? FileManager.default.moveItem(at: project.url, to: target)
@@ -1761,7 +1766,7 @@ final class AureaModel: ObservableObject {
         guard !importingMedia else { return }
         let performanceStart = ProcessInfo.processInfo.systemUptime
         IPhonePerformanceTest.shared.event("import_start", values: ["kind": String(describing: kind)])
-        operationMessage = "Importando mídia…"
+        operationMessage = AureaText.t("ios_importing_media")
         importingMedia = true
         if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
         let scoped = url.startAccessingSecurityScopedResource()
@@ -1785,10 +1790,10 @@ final class AureaModel: ObservableObject {
                 }
                 if result < 0 {
                     failure = importer.lastImportError
-                    if failure.isEmpty { failure = "Importação falhou (\(-result))" }
+                    if failure.isEmpty { failure = AureaText.t("ios_import_failed_code", String(-result)) }
                     try? FileManager.default.removeItem(at: destination)
                 }
-            } catch { failure = "Não deu para copiar o arquivo: \(error.localizedDescription)" }
+            } catch { failure = AureaText.t("ios_import_copy_failed", error.localizedDescription) }
             let importedId = result, importFailure = failure
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -1799,6 +1804,136 @@ final class AureaModel: ObservableObject {
                 else { self.engine.selectLayers([NSNumber(value: importedId)]); self.selection = [importedId] }
                 self.refreshModel(force: true)
                 if atPlayhead && kind != .hdri { self.moveToPlayhead(importedId) }
+                _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    /// "Importar texturas": a layer do modelo e os arquivos que ele referencia e não achou (só o nome).
+    struct MissingModelTextures: Identifiable { let id = UUID(); let layer: Int64; let names: [String] }
+    @Published var missingModelTextures: MissingModelTextures?
+    /// O modelo do último pedido: o alerta fecha antes de o seletor devolver os arquivos.
+    private var texturesTarget: MissingModelTextures?
+
+    /// Modelo 3D com as texturas/.mtl escolhidos JUNTO (seleção múltipla) ou uma
+    /// pasta. FBX/OBJ ganham a pasta `Media/Modelos/<nome>/`, com tudo ao lado do
+    /// modelo e o nome do seletor: o motor acha a textura pelo nome do arquivo, sem
+    /// a pasta gravada e sem diferenciar maiúsculas. glTF/GLB sozinho segue o caminho antigo.
+    func importModelFiles(urls: [URL]) {
+        guard !importingMedia, !urls.isEmpty else { return }
+        let modelExts: Set<String> = ["glb", "gltf", "fbx", "obj"]
+        var scoped: [URL] = []
+        var files: [URL] = []
+        for url in urls {
+            if url.startAccessingSecurityScopedResource() { scoped.append(url) }
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue,
+               let walk = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil) {
+                for case let f as URL in walk where !f.hasDirectoryPath && !f.lastPathComponent.hasPrefix(".") { files.append(f) }
+            } else { files.append(url) }
+        }
+        guard let modelURL = files.first(where: { modelExts.contains($0.pathExtension.lowercased()) }) else {
+            scoped.forEach { $0.stopAccessingSecurityScopedResource() }
+            toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo"); return
+        }
+        let ext = modelURL.pathExtension.lowercased()
+        if ext != "fbx" && ext != "obj" {
+            scoped.forEach { $0.stopAccessingSecurityScopedResource() }
+            importMedia(url: modelURL, kind: .model); return
+        }
+        operationMessage = AureaText.t("ios_importing_media")
+        importingMedia = true
+        if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
+        let name = modelURL.deletingPathExtension().lastPathComponent
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
+            var result: Int64 = -1
+            var failure = ""
+            var missing: [String] = []
+            let root = AureaPaths.media.appendingPathComponent("Modelos", isDirectory: true)
+            var folder = root.appendingPathComponent(name, isDirectory: true)
+            var counter = 1
+            while FileManager.default.fileExists(atPath: folder.path) {
+                folder = root.appendingPathComponent("\(name)-\(counter)", isDirectory: true); counter += 1
+            }
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                for f in files {
+                    let target = folder.appendingPathComponent(f.lastPathComponent)
+                    if FileManager.default.fileExists(atPath: target.path) { continue }
+                    try FileManager.default.copyItem(at: f, to: target)
+                }
+                result = importer.importModel(folder.appendingPathComponent(modelURL.lastPathComponent).path, name: name)
+                if result < 0 {
+                    failure = importer.lastImportError
+                    if failure.isEmpty { failure = AureaText.t("ios_import_failed_code", String(-result)) }
+                    try? FileManager.default.removeItem(at: folder)
+                } else { missing = importer.modelMissingTextures(result) }
+            } catch { failure = AureaText.t("ios_import_copy_failed", error.localizedDescription) }
+            let importedId = result, importFailure = failure, stillMissing = missing
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if !importFailure.isEmpty { self.toast = importFailure; return }
+                self.engine.selectLayers([NSNumber(value: importedId)]); self.selection = [importedId]
+                self.refreshModel(force: true)
+                if !stillMissing.isEmpty { self.promptModelTextures(layer: importedId, names: stillMissing) }
+                _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    func promptModelTextures(layer: Int64, names: [String]) {
+        let req = MissingModelTextures(layer: layer, names: names)
+        texturesTarget = req; missingModelTextures = req
+    }
+
+    /// Abre "Importar texturas" para o modelo selecionado (o painel oferece quando falta algo).
+    func askModelTextures() {
+        guard let id = primarySelection else { return }
+        let names = engine.modelMissingTextures(id)
+        if !names.isEmpty && !engine.modelFolder(id).isEmpty { promptModelTextures(layer: id, names: names) }
+    }
+
+    /// As imagens (e o .mtl) escolhidas: copiadas para a pasta do modelo — com o
+    /// nome que o MODELO grava quando o do seletor bate sem diferenciar
+    /// maiúsculas — e o modelo é relido. O que ainda faltar reabre o pedido.
+    func importModelTextures(urls: [URL]) {
+        guard let req = texturesTarget, !urls.isEmpty, !importingMedia else { return }
+        texturesTarget = nil; missingModelTextures = nil
+        let folderPath = engine.modelFolder(req.layer)
+        guard !folderPath.isEmpty else { return }
+        let folder = URL(fileURLWithPath: folderPath, isDirectory: true)
+        var wanted: [String: String] = [:]
+        for n in req.names { wanted[n.lowercased()] = n }
+        operationMessage = AureaText.t("msg_texturas") + "…"
+        importingMedia = true
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            for url in urls {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let picked = url.lastPathComponent
+                let named = wanted[picked.lowercased()]
+                let target = folder.appendingPathComponent(named ?? picked)
+                // Fora da lista: entra, mas nunca por cima de um arquivo da pasta.
+                if FileManager.default.fileExists(atPath: target.path) {
+                    if named == nil { continue }
+                    try? FileManager.default.removeItem(at: target)
+                }
+                try? FileManager.default.copyItem(at: url, to: target)
+            }
+            let left = importer.reloadModelTextures(req.layer)
+            let failure = left < 0 ? importer.lastImportError : ""
+            let still = left > 0 ? importer.modelMissingTextures(req.layer) : []
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                self.refreshModel(force: true)
+                if !failure.isEmpty { self.toast = failure; return }
+                if still.isEmpty { self.toast = AureaText.t("model_textures_done") }
+                else { self.promptModelTextures(layer: req.layer, names: still) }
                 _ = self.saveProject(writeThumbnail: false)
             }
         }
@@ -1847,12 +1982,12 @@ final class AureaModel: ObservableObject {
         cameraSelection = nil; refreshCameraTrackPoints()
     }
     func calibrateCamera(_ operation: UInt32, distance: Float = 100) {
-        guard engine.calibrateCameraScene(operation, distance: distance) else { toast = "Crie a câmera e selecione pontos válidos; distância exige 2 pontos e chão exige 3"; return }
-        refreshModel(force: true); refreshCameraTrackPoints(); toast = "Referência atualizada; você pode desfazer"
+        guard engine.calibrateCameraScene(operation, distance: distance) else { toast = AureaText.t("ios_camera_calibrate_invalid"); return }
+        refreshModel(force: true); refreshCameraTrackPoints(); toast = AureaText.t("ios_camera_reference_updated")
     }
     func placeTrackedModel(_ id: Int64) {
-        guard engine.placeModelOnTrack(id) else { toast = "Crie a câmera e selecione a superfície antes de posicionar o modelo"; return }
-        refreshModel(force: true); toast = "Modelo colocado na superfície rastreada"
+        guard engine.placeModelOnTrack(id) else { toast = AureaText.t("ios_camera_place_needs_surface"); return }
+        refreshModel(force: true); toast = AureaText.t("ios_camera_model_placed")
     }
     func selectCameraPoint(_ location: CGPoint, radius: CGFloat) {
         engine.pause()
@@ -1924,7 +2059,7 @@ final class AureaModel: ObservableObject {
         motionTool = tool; motionSource = id; motionSeeds = []; motionPicked = 0
         if tool == 4 { startPickedMotion(); return }
         pointPick = false
-        toast = tool >= 2 ? "Toque nos cantos: superior esquerdo, direito, inferior direito e esquerdo" : "Toque no detalhe a seguir no preview"
+        toast = tool >= 2 ? AureaText.t("ios_motion_tap_corners") : AureaText.t("ios_motion_tap_detail")
     }
     func cancelMotionPick() { pointPick = nil; motionSeeds = []; motionPicked = 0; motionAutoApply = -1 }
     /// -1 nada; 0 cria o Nulo; 3 estabiliza pelo ponto — quando a análise do menu termina.
@@ -1940,7 +2075,7 @@ final class AureaModel: ObservableObject {
         motionSeeds += [NSNumber(value: (a[3] * x - a[2] * y) / det), NSNumber(value: (-a[1] * x + a[0] * y) / det)]
         motionPicked += 1
         let needed = motionTool == 0 ? 1 : motionTool == 1 ? 2 : 4
-        if motionPicked < needed { toast = "Ponto \(motionPicked)/\(needed). Toque no próximo"; return }
+        if motionPicked < needed { toast = AureaText.t("ios_motion_point_next", motionPicked, needed); return }
         pointPick = nil; startPickedMotion()
     }
     private func startPickedMotion() {
@@ -1975,7 +2110,7 @@ final class AureaModel: ObservableObject {
     }
     func applyMotion(_ apply: UInt32, lock: Bool = false, smooth: Float = 0.5, maxScale: Float = 1.15, crop: UInt32 = 1, target: Int64? = nil) {
         let error = engine.applyMotionTrack(target ?? primarySelection ?? 0, apply: apply, lock: lock, smooth: smooth, maxScale: maxScale, crop: crop)
-        toast = error.isEmpty ? "Rastreio aplicado. Você pode desfazer" : error
+        toast = error.isEmpty ? AureaText.t("ios_motion_applied") : error
         refreshModel(force: true); motionStatus = engine.motionTrackStatus()
     }
 
@@ -2078,7 +2213,7 @@ final class AureaModel: ObservableObject {
 
     func addVector(_ preset: UInt32, freehand: Bool = false) {
         let id = engine.addVector(preset)
-        guard id >= 0 else { toast = "Não foi possível criar o vetor"; return }
+        guard id >= 0 else { toast = AureaText.t("ios_vector_create_failed"); return }
         selection = [id]; engine.selectLayers([NSNumber(value: id)]); showAddLayer = false
         syncAfterEdit(); openPanel(.vector); maskDrawing = preset == 0; vectorFreehand = freehand
     }
@@ -2090,7 +2225,7 @@ final class AureaModel: ObservableObject {
         if added >= 0 {
             vectorGroup = UInt32(max(0, engine.vectorGroups(id).count - 1)); vectorPath = 0
             refreshModel(force: true); refreshMasks()
-        } else { toast = "Não foi possível adicionar o desenho" }
+        } else { toast = AureaText.t("ios_drawing_add_failed") }
     }
 
     @Published var sceneEditor = false
@@ -2347,7 +2482,7 @@ final class AureaModel: ObservableObject {
                                     audioBitrateKbps: exportOptions.audioBitrateKbps,
                                     aiUpscale: exportOptions.aiUpscale)
         guard ok else {
-            exportMessage = "o export não pôde começar"
+            exportMessage = AureaText.t("ios_export_could_not_start")
             toast = exportMessage
             return
         }
@@ -2385,7 +2520,7 @@ final class AureaModel: ObservableObject {
                         self.exporting = false
                         if !self.exportCancelled {
                             let message = self.exportProgress["message"] as? String ?? ""
-                            self.exportMessage = message.isEmpty ? "o export falhou" : message
+                            self.exportMessage = message.isEmpty ? AureaText.t("ios_export_failed") : message
                             self.toast = self.exportMessage
                         }
                     }
@@ -2404,7 +2539,7 @@ final class AureaModel: ObservableObject {
             guard status == .authorized || status == .limited else {
                 Task { @MainActor in
                     self?.exportPublishing = false; self?.exporting = false
-                    self?.exportMessage = "Vídeo salvo no Aurea. Permita adicionar ao Fotos para salvar na galeria."
+                    self?.exportMessage = AureaText.t("ios_export_saved_allow_photos")
                     self?.toast = AureaText.t("editor_video_pronto")
                     // Ponto seguro: o render acabou e o vídeo já está salvo. Não segura nada.
                     AureaAdsManager.shared.showExportInterstitialIfAvailable {}
@@ -2415,7 +2550,7 @@ final class AureaModel: ObservableObject {
                 Task { @MainActor in
                     self?.exportSavedToPhotos = saved
                     self?.exportPublishing = false; self?.exporting = false
-                    self?.exportMessage = saved ? nil : (error?.localizedDescription ?? "Não foi possível adicionar o vídeo ao Fotos.")
+                    self?.exportMessage = saved ? nil : (error?.localizedDescription ?? AureaText.t("ios_export_photos_failed"))
                     self?.toast = AureaText.t("editor_video_pronto")
                     AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }
@@ -2469,6 +2604,13 @@ final class AureaModel: ObservableObject {
     }
     @Published var markerEditingFrame: MarkerEditingFrame?
 
+    /// Caixa da seleção escondida no preview (preferência do aparelho, como
+    /// StagePrefs.kt): some o contorno, o centro e as setas X/Y; a camada segue
+    /// escolhida e os gestos continuam valendo. O gizmo 3D fica.
+    @Published var hideSelectionBox: Bool = UserDefaults.standard.bool(forKey: "aurea.stage.hideSelectionBox") {
+        didSet { UserDefaults.standard.set(hideSelectionBox, forKey: "aurea.stage.hideSelectionBox") }
+    }
+
     /// Composition-space anchor shared by the overlay and touch hit test.
     var previewMarkerAnchor: SIMD2<Float>? {
         guard selection.count == 1, let row = selectedLayer, row.visible, !row.locked,
@@ -2477,6 +2619,7 @@ final class AureaModel: ObservableObject {
               !ShapeStageGeometry.enabled(self) else { return nil }
         let gizmo = engine.gizmo(row.id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
         if gizmo.count == 8, gizmo[0].isFinite, gizmo[1].isFinite { return SIMD2(gizmo[0], gizmo[1]) }
+        if hideSelectionBox { return nil }   // sem centro nem setas: nada a tocar
         let position = StageGeom.floats(detail["position"])
         guard position.count >= 2 else { return nil }
         let parent = StageGeom.floats(detail["parentAffine"])
@@ -2512,7 +2655,7 @@ final class AureaModel: ObservableObject {
     @Published private(set) var rawPlayback = false
     func toggleRawPlayback() {
         let next = !rawPlayback
-        guard engine.setRawPlayback(next) else { toast = "Importe um vídeo para o teste RAW."; return }
+        guard engine.setRawPlayback(next) else { toast = AureaText.t("ios_raw_test_needs_video"); return }
         rawPlayback = next
         hudVisible = true
     }
@@ -2526,9 +2669,10 @@ final class AureaModel: ObservableObject {
             markBeatLive()
             return
         }
+        // Sem pause/seek: o cabeçote já está no frame, e o seek era uma
+        // descontinuidade (decoder e som re-preparados) que, com o status
+        // atrasado, voltava ao cabeçote VELHO. Tocando, o motor marca no relógio.
         let target = min(max(0, frame), max(0, compositionDuration - 1))
-        engine.run { $0.pause() }
-        seek(toFrame: target)
         engine.toggleMarker(target)
         refreshModel(force: true)
         refreshMarkers()
@@ -2759,7 +2903,7 @@ final class AureaModel: ObservableObject {
         guard let id = primarySelection else { return }
         if status.playing != 0 { playPause() }
         if !engine.editClipTime(id, operation: operation, amount: amount, previous: previous, next: next) {
-            toast = "Sem margem na mídia, vizinho inválido ou camada bloqueada."
+            toast = AureaText.t("ios_clip_edit_failed")
         }
         refreshModel(force: true)
     }

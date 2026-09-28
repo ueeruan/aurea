@@ -196,7 +196,7 @@ struct LayerDetailPOD {
     i32 audioFadeOut      = 0;    // +152 frames
     u32 audioFlags        = 0;    // +156 kAudioFlag*
     f32 speed             = 1.0f; // +160 velocidade do conteúdo (0 = congelado)
-    u32 timeFlags         = 0;    // +164 bit0 = reverso
+    u32 timeFlags         = 0;    // +164 bit0 = reverso … bit6 = velocidade com keyframe (speed = a do cabeçote)
     u32 shapeTypePoints   = 0;    // +168 tipo | pontas << 16
     u32 shapeFill         = 0;    // +172 RGBA8 sRGB
     u32 shapeStroke       = 0;    // +176 RGBA8 sRGB

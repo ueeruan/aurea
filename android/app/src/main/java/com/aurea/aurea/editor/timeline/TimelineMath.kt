@@ -229,6 +229,15 @@ internal object Press {
     fun stackEdit(dx: Float, dy: Float): Boolean = abs(dy) >= EDIT_RATIO * abs(dx)
 
     /**
+     * Fileira compacta (uma camada só): o arrasto vertical passa pelas camadas
+     * como uma roda — cada altura de linha percorrida é uma camada. [travel] é
+     * quanto o dedo SUBIU (positivo = a de baixo, como rolar a lista). Só
+     * linhas inteiras contam; o resto fica para o próximo passo.
+     */
+    fun compactSteps(travel: Float, row: Float): Int =
+        if (!travel.isFinite() || !row.isFinite() || row <= 0f) 0 else (travel / row).toInt()
+
+    /**
      * Quietude do dedo antes do toque longo. O prazo de 500 ms corria mesmo com
      * o dedo rastejando (menos que o slop) e, vencido, o primeiro movimento
      * virava mover/reordenar — a rolagem que começava devagar levantava a

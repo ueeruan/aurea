@@ -20,6 +20,7 @@
 
 #include "ImageIO.hpp"
 #include "SyntheticVideo.hpp"
+#include "ModelTextureFixtures.hpp"
 #if defined(AUREA_TEST_GLES)
 #include "GlesBackend.hpp"
 namespace aurea { namespace vk = gles; }
@@ -614,6 +615,24 @@ AUREA_TEST(Gpu, SdrVideoRoundTripsItsCodes) {
         const f32 code = (static_cast<f32>(frame_gray_code(frame)) - 16.0f) / 219.0f;
         const f32 encoded = srgb_encode(img.v(32, 18).x);
         AUREA_CHECK_NEAR(encoded, code, 0.002);
+    }
+}
+
+AUREA_TEST(Gpu, AnimatedSpeedShowsTheIntegratedSourceFrame) {
+    // O render (o mesmo do preview e do export) decodifica o quadro da fonte
+    // da INTEGRAL da velocidade: 1× → 3× em 20 quadros = fonte u + u²/20.
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 36);
+    SyntheticConfig cfg;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    const LayerId id = s.video(cfg, 32, 18);
+    Track& t = s.comp->layer(id)->tracks.get_or_create(TrackProperty::Speed);
+    t.set(FrameIndex{0}, 1.0f);
+    t.set(FrameIndex{20}, 3.0f);
+    for (auto [frame, source] : {std::pair<u32, u32>{10, 15}, {20, 40}, {30, 70}}) {
+        const FloatImage img = s.render(FrameIndex{frame});
+        const f32 code = (static_cast<f32>(frame_gray_code(source)) - 16.0f) / 219.0f;
+        AUREA_CHECK_NEAR(srgb_encode(img.v(20, 20).y), code, 0.002);
     }
 }
 
@@ -1398,6 +1417,50 @@ AUREA_TEST(Gpu, Scene3DFrontFaceIsVisibleAndBackFaceIsCulled) {
         AUREA_CHECK(rig.e.import_model(mi).ok());
         // Face de trás, material de um lado só: nada desenhado.
         AUREA_CHECK_NEAR(coverage(rig.capture(256)), 0.0f, 1e-6f);
+    }
+}
+
+AUREA_TEST(Gpu, Scene3DPickedTexturesChangeTheRender) {
+    AUREA_REQUIRE_GPU();
+    namespace fx = aurea::test_fixtures;
+    // O fluxo do app: importa o FBX/OBJ sozinho (texturas ausentes, lista
+    // com os nomes), copia as escolhidas para a pasta do modelo e relê.
+    for (int format = 0; format < 2; ++format) {
+        const std::string folder = fx::fresh_model_folder(format == 0 ? "aurea_teste_render_tex_obj" : "aurea_teste_render_tex_fbx");
+        std::string path;
+        if (format == 0) {
+            path = fx::write_textured_obj(folder);
+            fx::write_picked_mtl(folder, "Verde.png");
+        } else {
+            path = fx::write_textured_fbx(folder, "Verde.png");
+        }
+        Scene3DRig rig;
+        ModelImport mi;
+        mi.path = path;
+        const Result<u64> id = rig.e.import_model(mi);
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) continue;
+        const std::vector<std::string> missing = rig.e.model_missing_textures(*id);
+        AUREA_CHECK_EQ(missing.size(), 1u);
+        if (!missing.empty()) AUREA_CHECK(missing[0] == "Verde.png");
+        const std::string target = rig.e.model_folder(*id);
+        AUREA_CHECK(!target.empty());
+        const Image8 before = rig.capture(256);
+        AUREA_CHECK(fx::write_solid_png(target + missing.at(0), 0, 255, 0));
+        const Result<u32> left = rig.e.reload_model_textures(*id);
+        AUREA_CHECK(left.ok() && *left == 0u);
+        AUREA_CHECK(rig.e.model_missing_textures(*id).empty());
+        const Image8 after = rig.capture(256);
+        // Branco sem textura → verde com textura: o vermelho do centro cai.
+        const u8* b = before.at(before.width / 2, before.height / 2);
+        const u8* a = after.at(after.width / 2, after.height / 2);
+        std::printf("\n    %s centro antes %u,%u,%u depois %u,%u,%u", format == 0 ? "OBJ" : "FBX", b[0], b[1], b[2], a[0], a[1], a[2]);
+        AUREA_CHECK(b[0] > 60);
+        AUREA_CHECK(a[1] > 40 && a[0] + 40 < b[0] && a[0] * 2 < a[1]);
+        // Desfazer volta ao modelo sem textura (o asset antigo continua lá).
+        Command undo; undo.type = CommandType::Undo;
+        AUREA_CHECK(rig.e.apply_command(undo).ok());
+        AUREA_CHECK_EQ(rig.e.model_missing_textures(*id).size(), 1u);
     }
 }
 

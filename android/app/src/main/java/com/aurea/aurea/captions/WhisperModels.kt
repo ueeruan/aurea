@@ -3,6 +3,8 @@ package com.aurea.aurea.captions
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Process
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -26,23 +28,23 @@ object WhisperModels {
             return md.digest().joinToString("") { "%02x".format(it) }
         }
         if (target.length() == size && digest(target) == hash) return target
-        if (dir.usableSpace < size * 2) throw IOException("Libere espaço para baixar o modelo Whisper ($name).")
+        if (dir.usableSpace < size * 2) throw IOException(AppText.get(context, R.string.app_whisper_no_space, name))
         val partial = File(dir, target.name + ".part")
         val connection = URL("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${target.name}").openConnection() as HttpURLConnection
         connection.connectTimeout = 20000; connection.readTimeout = 30000
         try {
-            if (connection.responseCode != 200) throw IOException("Não foi possível baixar o modelo Whisper. Conecte à internet na primeira utilização.")
+            if (connection.responseCode != 200) throw IOException(AppText.get(context, R.string.app_whisper_download_failed))
             connection.inputStream.use { input -> partial.outputStream().use { output ->
                 val buffer = ByteArray(65536); var received = 0L
                 while (true) {
-                    if (Thread.currentThread().isInterrupted) throw IOException("Download cancelado")
+                    if (Thread.currentThread().isInterrupted) throw IOException(AppText.get(context, R.string.app_download_cancelled))
                     val n = input.read(buffer); if (n < 0) break
-                    received += n; if (received > size) throw IOException("Modelo inválido")
-                    output.write(buffer, 0, n); progress("Baixando Whisper $name: ${received * 100 / size}%")
+                    received += n; if (received > size) throw IOException(AppText.get(context, R.string.app_whisper_invalid_model))
+                    output.write(buffer, 0, n); progress(AppText.get(context, R.string.app_whisper_downloading, name, received * 100 / size))
                 }
             } }
-            if (partial.length() != size || digest(partial) != hash) throw IOException("Falha na verificação do modelo Whisper")
-            if (!partial.renameTo(target)) throw IOException("Não foi possível guardar o modelo")
+            if (partial.length() != size || digest(partial) != hash) throw IOException(AppText.get(context, R.string.app_whisper_verify_failed))
+            if (!partial.renameTo(target)) throw IOException(AppText.get(context, R.string.app_whisper_save_failed))
             return target
         } finally { connection.disconnect(); partial.delete() }
     }

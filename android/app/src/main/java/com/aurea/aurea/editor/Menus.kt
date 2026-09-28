@@ -27,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.engine.LayerRow
 import com.aurea.aurea.ui.ds.AureaNamePrompt
 import com.aurea.aurea.ui.ds.ColorPickerSheet
 import com.aurea.aurea.ui.theme.AureaColors
@@ -260,58 +263,82 @@ private fun LabelRow(current: Int, onPick: (Int) -> Unit) {
 }
 
 /**
- * Busca de camadas: nome ou texto, sem diferença de maiúscula nem de acento
- * (a busca é do motor, `search_layers`). Tocar num resultado seleciona a
- * camada e fecha a folha.
+ * Linhas do "Selecionar uma camada": sem busca, TODAS as camadas na ordem da
+ * timeline (a da frente primeiro); com busca, os acertos do motor (nome ou
+ * texto, sem maiúscula nem acento) na mesma ordem.
+ */
+internal fun layerPickerRows(layers: List<LayerRow>, query: String, hits: List<Long>): List<LayerRow> {
+    if (query.isBlank()) return layers
+    val byId = layers.associateBy { it.id }
+    return hits.mapNotNull { byId[it] }
+}
+
+/** A busca só aparece quando a lista não cabe de uma olhada. */
+internal const val LAYER_PICKER_SEARCH_FROM = 7
+
+/**
+ * SELECIONAR UMA CAMADA: a lista das camadas do projeto (miniatura ou selo do
+ * tipo + nome). Tocar numa escolhe SÓ ela (a seleção anterior sai) e fecha a
+ * folha. Com muitas camadas, a busca do motor filtra por nome ou texto; o
+ * teclado não abre sozinho, para a lista ficar à vista.
  */
 @Composable
 internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
-    val focus = remember { FocusRequester() }
     val hits = remember(query, store.layers) { store.searchLayers(query) }
+    val rows = layerPickerRows(store.layers, query, hits)
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.7f) {
-        MenuSection(stringResource(R.string.sh_menu_search_layers))
-        Box(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                .heightIn(min = 40.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-        ) {
-            BasicTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                textStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)),
-                cursorBrush = SolidColor(AureaColors.Accent),
-                modifier = Modifier.fillMaxWidth().focusRequester(focus),
-            )
-            if (query.isEmpty()) Text(stringResource(R.string.editor_nome_ou_texto_camada), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
+        MenuSection(stringResource(R.string.editor_selecionar_uma_camada))
+        if (store.layers.size >= LAYER_PICKER_SEARCH_FROM || query.isNotEmpty()) {
+            Box(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    .heightIn(min = 40.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                BasicTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    textStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)),
+                    cursorBrush = SolidColor(AureaColors.Accent),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (query.isEmpty()) Text(stringResource(R.string.editor_nome_ou_texto_camada), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
+            }
         }
-        LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-        if (query.isNotBlank() && hits.isEmpty()) {
+        if (query.isNotBlank() && rows.isEmpty()) {
             Text(
                 stringResource(R.string.sh_menu_no_layer_matches, query.trim()),
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
         }
-        hits.forEach { id ->
-            val row = store.layers.firstOrNull { it.id == id } ?: return@forEach
+        rows.forEach { row ->
             Row(
-                Modifier.fillMaxWidth().height(44.dp)
-                    .tocavel(onClick = { store.select(id); onDismiss() })
-                    .padding(horizontal = 20.dp),
+                Modifier.fillMaxWidth().height(56.dp)
+                    .tocavel(onClick = { store.select(row.id); onDismiss() })
+                    .semantics { contentDescription = row.name }
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val label = row.label
-                val dot = if (label in 1..ShellColors.LabelPalette.size) ShellColors.LabelPalette[label - 1] else AureaColors.Muted
-                Box(Modifier.size(10.dp).background(dot, CircleShape))
+                LayerThumb(store, row)
                 Spacer(Modifier.width(12.dp))
                 Text(
                     row.name.ifBlank { stringResource(R.string.editor_camada) },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                     style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = if (row.selected) AureaColors.Accent else AureaColors.Text)),
                 )
+                val label = row.label
+                if (label in 1..ShellColors.LabelPalette.size) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.size(10.dp).background(ShellColors.LabelPalette[label - 1], CircleShape))
+                }
+                if (row.selected) {
+                    Spacer(Modifier.width(8.dp))
+                    CupertinoIcon(CupertinoGlyph.CheckmarkAlt, 16.dp, AureaColors.Accent)
+                }
             }
         }
     }
@@ -343,7 +370,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         MenuSection(stringResource(R.string.sh_menu_selection))
         MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
         MenuItemRow(CupertinoGlyph.Square, stringResource(R.string.editor_limpar_selecao), act { store.clearSelection() })
-        MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.editor_buscar_camadas), if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
+        MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
 
         MenuSection(stringResource(R.string.editor_reproducao_previa))
         MenuItemRow(CupertinoGlyph.Repeat, stringResource(R.string.editor_reproducao_loop), act { store.setLoop(!store.looping) }, checked = store.looping)

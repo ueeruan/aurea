@@ -2245,6 +2245,45 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         out.layers.push_back(std::move(rl));
         ++used;
     }
+    // PRÉ-ROLAGEM DO CORTE: tocando, a camada de vídeo que entra logo adiante
+    // (o pedaço seguinte de um split, o próximo clipe) já abre o decoder e
+    // decodifica o 1º quadro dela ANTES do corte. Sem isto o decoder só abria
+    // no quadro do corte (abrir + seek + decode) e o preview mostrava a
+    // composição sem a camada: o preto que piscava ao passar por um split. O
+    // export não passa aqui: ele espera o quadro exato de cada camada.
+    if (media && !settings.finalQuality && playDirection > 0 && decodeMode == DecodeMode::Playback) {
+        const i64 ahead = static_cast<i64>(std::ceil(fps * 1.5 * std::max(1.0f, speed)));
+        for (u32 i = 0; i < n; ++i) {
+            const LayerId id = order.at(i);
+            const Layer* l = comp.layer(id);
+            if (!l || l->kind != LayerKind::Video || !l->visible) continue;
+            if (l->start.value <= time.value || l->start.value > time.value + ahead) continue;
+            const Asset* asset = project.asset(l->source);
+            if (!asset) continue;
+            VideoSource* src = media->source_for(render_id(id), l->source, *asset, frameNumber, false);
+            if (!src) continue;   // abrindo: o callback da fonte acorda o render, que volta aqui
+            // A mesma época do playback: no corte, o caminho normal não
+            // invalida o decoder que já está posicionado.
+            src->set_epoch(settings.mediaGeneration);
+            const VideoStreamInfo info = src->info();
+            i64 us = static_cast<i64>(std::llround(l->source_frame(l->start) * 1e6 / fps));
+            if (info.fps > 0.0 && !info.preciseFrameTiming) {
+                const f64 idx = std::floor(static_cast<f64>(us) * info.fps / 1e6 + 1e-3);
+                us = static_cast<i64>(std::llround(idx * 1e6 / info.fps));
+            }
+            if (info.durationUs > 0) us = std::clamp<i64>(us, 0, last_source_timestamp(info, src->frame_duration_us()));
+            bool ready = false;
+            (void)src->frame_for(us, &ready);
+            if (ready) continue;
+            src->cache().set_required_times(&us, 1, src->frame_duration_us() / 2);
+            DecodeRequest req;
+            req.targetUs = us;
+            req.mode = DecodeMode::Still;
+            req.direction = 0;
+            req.speed = 1.0f;
+            src->request(req);
+        }
+    }
     for (u32 k = used; k < out.plans.size(); ++k) out.plans[k].clear();
     // Track matte: a matte de cada camada neste snapshot (ausente = −1).
     for (RenderLayer& rl : out.layers) {

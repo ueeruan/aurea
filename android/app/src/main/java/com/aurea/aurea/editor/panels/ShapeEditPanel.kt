@@ -83,19 +83,20 @@ internal object ShapeEditState {
 /** As formas simples (SDF do motor, `shape.frag`) na ordem da troca ‹ ›. */
 internal val SimpleShapes = intArrayOf(0, 1, 3, 4, 5, 6, 7, 8, 9, 10)
 
-internal fun shapeName(type: Int): String = when (type) {
-    0 -> "Retângulo"
-    1 -> "Elipse"
-    3 -> "Polígono"
-    4 -> "Estrela"
-    5 -> "Cruz"
-    6 -> "Anel"
-    7 -> "Fatia"
-    8 -> "Flor"
-    9 -> "Seta"
-    10 -> "Triângulo"
-    else -> "Forma"
-}
+@Composable
+internal fun shapeName(type: Int): String = stringResource(when (type) {
+    0 -> R.string.editor_retangulo
+    1 -> R.string.editor_elipse
+    3 -> R.string.editor_poligono
+    4 -> R.string.editor_estrela
+    5 -> R.string.sh_shape_cross
+    6 -> R.string.sh_shape_ring
+    7 -> R.string.sh_shape_slice
+    8 -> R.string.sh_shape_flower
+    9 -> R.string.sh_shape_arrow
+    10 -> R.string.panel_triangulo
+    else -> R.string.target_shape
+})
 
 /**
  * EDITAR FORMA (ref18): trilho ‹ ◇ curva; em cima a troca de forma ‹▢› e a
@@ -174,7 +175,7 @@ internal fun ShapeEditPanel(env: PanelEnv) {
             }
             Spacer(Modifier.height(6.dp))
             KitHint(
-                stringResource(R.string.panel_arraste_alcas_palco_mudar_tamanho) + (if (type == 0) "; a alça azul arredonda os cantos. " else ". ") +
+                stringResource(R.string.panel_arraste_alcas_palco_mudar_tamanho) + (if (type == 0) stringResource(R.string.edt_shape_corner_hint) + " " else ". ") +
                     stringResource(R.string.panel_losango_trilho_grava_keyframe_linha_acesa),
             )
         }
@@ -195,9 +196,13 @@ private fun ShapeSwitcher(store: EditorStore, type: Int) {
         store.setShapeParam(0, next.toFloat())
         store.endGesture()
     }
+    val prevLabel = stringResource(R.string.panel_forma_anterior)
+    val nextLabel = stringResource(R.string.panel_proxima_forma)
+    val keepRatioLabel = stringResource(R.string.panel_manter_proporcao)
+    val freeRatioLabel = stringResource(R.string.panel_soltar_proporcao)
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
-            Modifier.size(44.dp).semantics { contentDescription = "Forma anterior" }.tocavel(shrink = 1f) { go(-1) },
+            Modifier.size(44.dp).semantics { contentDescription = prevLabel }.tocavel(shrink = 1f) { go(-1) },
             contentAlignment = Alignment.Center,
         ) { CupertinoIcon(CupertinoGlyph.ChevronLeft, 18.dp, AureaColors.Text) }
         Box(
@@ -207,7 +212,7 @@ private fun ShapeSwitcher(store: EditorStore, type: Int) {
             Canvas(Modifier.size(26.dp)) { drawShapeGlyph(type, AureaColors.Text) }
         }
         Box(
-            Modifier.size(44.dp).semantics { contentDescription = "Próxima forma" }.tocavel(shrink = 1f) { go(1) },
+            Modifier.size(44.dp).semantics { contentDescription = nextLabel }.tocavel(shrink = 1f) { go(1) },
             contentAlignment = Alignment.Center,
         ) { CupertinoIcon(CupertinoGlyph.ChevronRight, 18.dp, AureaColors.Text) }
         Spacer(Modifier.width(6.dp))
@@ -219,7 +224,7 @@ private fun ShapeSwitcher(store: EditorStore, type: Int) {
                 .clip(RoundedCornerShape(8.dp))
                 .background(if (linked) AureaColors.AccentDim else AureaColors.Chip)
                 .then(if (linked) Modifier.border(1.5.dp, AureaColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
-                .semantics { contentDescription = if (linked) "Soltar proporção" else "Manter proporção" }
+                .semantics { contentDescription = if (linked) freeRatioLabel else keepRatioLabel }
                 .tocavel(shrink = 1f) { ShapeEditState.linked = !linked },
             contentAlignment = Alignment.Center,
         ) {
@@ -292,6 +297,7 @@ private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
         Spacer(Modifier.width(6.dp))
         for (a in 0..1) {
             val v = if (a == axis && dragging) live else if (a == 0) w else h
+            val keypadLabel = stringResource(if (a == 0) R.string.panel_largura else R.string.panel_altura)
             ValueBox(
                 numeroPtBr(v, 0),
                 width = 58.dp,
@@ -301,7 +307,7 @@ private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
                     if (axis != a) {
                         axis = a
                     } else {
-                        env.openKeypad(KeypadRequest(if (a == 0) "Largura" else "Altura", v, "px", 1f, 16384f, 0) {
+                        env.openKeypad(KeypadRequest(keypadLabel, v, "px", 1f, 16384f, 0) {
                             store.beginGesture("tamanho da forma")
                             write(it, w, h)
                             store.endGesture()

@@ -234,7 +234,7 @@ struct EffectsView: View {
                 }.buttonStyle(AureaPressStyle(shrink: 1))
                 if expanded {
                     cardButton(CupertinoGlyph.Ellipsis) { effectMenu(effect) }
-                        .accessibilityLabel("Mais opções de " + fxEffectDisplayName(effect.typeId,effect.name))
+                        .accessibilityLabel(AureaText.t("app_a11y_more_options", fxEffectDisplayName(effect.typeId,effect.name)))
                     cardButton(CupertinoGlyph.Trash) { remove(effect) }
                 } else {
                     cardButton(effect.enabled ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, tint: effect.enabled ? AureaColors.text : AureaColors.muted) { enable(effect, !effect.enabled) }
@@ -246,7 +246,7 @@ struct EffectsView: View {
             if expanded {
                 VStack(spacing: 0) {
                     if !effect.known { PanelNotice(AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao")) }
-                    else if effect.typeId == fxEffectTypeId("aurea.time.remap") { TimeRemapEffectEditor() }
+                    else if effect.typeId == fxEffectTypeId("aurea.time.remap") { TimeRemapEffectEditor(effectId: effect.effectId) }
                     else {
                         let groups = parameterGroups(effect.effectId)
                         if groups.main.isEmpty && groups.rest.isEmpty { PanelNotice(AureaText.t("panel_este_efeito_nao_tem_ajustes")) }
@@ -577,7 +577,7 @@ struct EffectsView: View {
         var actions: [(String, () -> Void)] = []
         if effect.known {
             if effect.typeId == fxEffectTypeId("aurea.distort.turbulence") {
-                actions.append(("Preset Turbulência dinâmica", {
+                actions.append((AureaText.t("app_preset_fx_turbulence"), {
                     guard let layer = model.primarySelection, model.selectedLayer?.locked != true else { return }
                     model.beginGesture("Preset Turbulência dinâmica")
                     for (param, value) in [(UInt32(0), Float(15)), (1, 15), (2, 1), (3, 0), (4, 0), (5, 0), (6, 0)] {
@@ -593,7 +593,7 @@ struct EffectsView: View {
             if let entry = model.effectCatalog.first(where: { $0.typeId == effect.typeId }) {
                 actions.append((AureaText.t("effects_about"), { about = entry }))
             }
-            actions.append(("Copiar este efeito", {
+            actions.append((AureaText.t("fx_copy_this_effect"), {
                 if let layer = model.primarySelection { model.engine.copyEffect(effect.effectId, fromLayer:layer) }
             }))
             actions.append((AureaText.t("fx_save_as_preset"), {

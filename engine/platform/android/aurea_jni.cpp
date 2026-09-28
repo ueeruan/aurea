@@ -2408,6 +2408,38 @@ AUREA_JNI jlong AUREA_FN(nativeImportModel)(JNIEnv* env, jclass, jlong handle, j
     return static_cast<jlong>(*r);
 }
 
+/// Texturas/.mtl que o modelo da layer referencia e não achou, uma por linha.
+AUREA_JNI jstring AUREA_FN(nativeModelMissingTextures)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    std::string joined;
+    if (c) {
+        for (const std::string& name : c->engine.model_missing_textures(static_cast<u64>(layer))) joined += name + "\n";
+    }
+    return env->NewStringUTF(joined.c_str());
+}
+
+/// Pasta do arquivo do modelo (com a barra no fim); vazio = não é modelo importado.
+AUREA_JNI jstring AUREA_FN(nativeModelFolder)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    const std::string dir = c ? c->engine.model_folder(static_cast<u64>(layer)) : std::string{};
+    return env->NewStringUTF(dir.c_str());
+}
+
+/// Relê o modelo depois das texturas copiadas: ≥ 0 = quantas ainda faltam; < 0 = −código.
+AUREA_JNI jint AUREA_FN(nativeReloadModelTextures)(JNIEnv* env, jclass, jlong handle, jlong layer, jobjectArray detailOut) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jint>(Errc::InvalidState);
+    std::string detail;
+    const Result<u32> r = c->engine.reload_model_textures(static_cast<u64>(layer), &detail);
+    if (detailOut && env->GetArrayLength(detailOut) > 0) {
+        jstring d = env->NewStringUTF(detail.c_str());
+        env->SetObjectArrayElement(detailOut, 0, d);
+        env->DeleteLocalRef(d);
+    }
+    if (!r.ok()) return -static_cast<jint>(r.status().code());
+    return static_cast<jint>(*r);
+}
+
 /// Etapa (ImportPhase) × 1000 + fração × 1000 da etapa.
 AUREA_JNI jint AUREA_FN(nativeImportModelProgress)(JNIEnv*, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);

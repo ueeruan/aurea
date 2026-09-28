@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.timeline
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -73,5 +74,15 @@ class TimelinePressTest {
         late.move(103f, 100f, 200L)
         late.move(106f, 100f, 400L)        // ainda andava 100 ms antes do prazo
         assertFalse(late.still(TimelineController.LONG_PRESS_MS))
+    }
+
+    @Test
+    fun `fileira compacta troca de camada a cada linha inteira do arrasto vertical`() {
+        assertEquals(0, Press.compactSteps(45f, 46f))
+        assertEquals(1, Press.compactSteps(46f, 46f))
+        assertEquals(2, Press.compactSteps(100f, 46f))
+        assertEquals(-1, Press.compactSteps(-50f, 46f))
+        assertEquals(0, Press.compactSteps(Float.NaN, 46f))
+        assertEquals(0, Press.compactSteps(100f, 0f))
     }
 }

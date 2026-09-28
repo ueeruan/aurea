@@ -503,9 +503,10 @@ private fun ElementTab(store: EditorStore, close: () -> Unit) {
 private fun Model3DTab(store: EditorStore, close: () -> Unit) {
     // glTF/GLB/FBX/OBJ do aparelho. O tipo MIME de modelo 3D varia por
     // gerenciador de arquivos; o filtro real é a extensão, no store.
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            store.importModel(uri)
+    // Seleção múltipla: o FBX/OBJ vem com as texturas e o .mtl (ou um .zip).
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            store.importModel(uris)
             close()
         }
     }

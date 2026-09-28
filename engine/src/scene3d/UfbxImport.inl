@@ -28,6 +28,85 @@ Mat4 to_mat4(const ufbx_matrix& m) noexcept {
     return r;
 }
 
+/// Só o nome do arquivo de um caminho gravado no modelo (tira pastas de
+/// qualquer sistema: "C:\tex\a.png", "../tex/a.png" → "a.png").
+std::string file_name_only(const std::string& full) {
+    const usize slash = full.find_last_of("/\\");
+    return slash == std::string::npos ? full : full.substr(slash + 1);
+}
+
+std::string lower_ascii(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+/// Arquivos da pasta do modelo, pelo nome em minúsculas. Texturas escolhidas
+/// junto com o modelo no celular chegam aqui com o nome do seletor, que pode
+/// não bater em maiúsculas com o que o FBX/MTL grava ("Wood.PNG" × "wood.png");
+/// o sistema de arquivos do aparelho diferencia — a busca aqui não.
+struct FolderIndex {
+    std::string dir;
+    bool listed = false;
+    std::unordered_map<std::string, std::string> byLower;   ///< nome minúsculo → caminho real
+    std::vector<std::string> mtl;                           ///< .mtl da pasta
+
+    void list() {
+        if (listed) return;
+        listed = true;
+        if (dir.empty()) return;
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        for (fs::directory_iterator it(fs::u8path(dir), ec), end; !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            const auto u8 = it->path().filename().u8string();
+            const std::string name(u8.begin(), u8.end());
+            const std::string low = lower_ascii(name);
+            byLower.emplace(low, dir + name);
+            if (low.size() > 4 && low.compare(low.size() - 4, 4, ".mtl") == 0) mtl.push_back(dir + name);
+        }
+        std::sort(mtl.begin(), mtl.end());
+    }
+    /// Caminho real do arquivo com esse nome (sem pasta, sem diferenciar
+    /// maiúsculas). Vazio = não está na pasta.
+    std::string find(const std::string& anyPath) {
+        list();
+        const std::string name = file_name_only(anyPath);
+        if (name.empty()) return {};
+        const auto it = byLower.find(lower_ascii(name));
+        return it == byLower.end() ? std::string{} : it->second;
+    }
+};
+
+/// Abre os arquivos externos do OBJ (.mtl) pela ufbx: o caminho gravado
+/// primeiro; senão o mesmo nome na pasta do modelo sem diferenciar
+/// maiúsculas; senão o ÚNICO .mtl da pasta (o app guarda o .obj com outro
+/// nome, e o .mtl escolhido junto é o dele).
+struct ExternalOpener {
+    FolderIndex* folder = nullptr;
+    std::vector<std::string> mtlRequested;   ///< nomes pedidos (para o aviso)
+    bool mtlOpened = false;
+
+    static bool open(void* user, ufbx_stream* stream, const char* path, size_t pathLen, const ufbx_open_file_info* info) {
+        auto* self = static_cast<ExternalOpener*>(user);
+        const bool mtl = info && info->type == UFBX_OPEN_FILE_OBJ_MTL;
+        if (ufbx_open_file_ctx(stream, info ? info->context : 0, path, pathLen, nullptr, nullptr)) {
+            if (mtl) self->mtlOpened = true;
+            return true;
+        }
+        if (!mtl || !self->folder) return false;
+        const std::string wanted(path, pathLen);
+        const std::string name = file_name_only(wanted);
+        if (std::find(self->mtlRequested.begin(), self->mtlRequested.end(), name) == self->mtlRequested.end())
+            self->mtlRequested.push_back(name);
+        std::string real = self->folder->find(wanted);
+        if (real.empty() && self->folder->mtl.size() == 1) real = self->folder->mtl.front();
+        if (real.empty()) return false;
+        if (!ufbx_open_file_ctx(stream, info->context, real.c_str(), real.size(), nullptr, nullptr)) return false;
+        self->mtlOpened = true;
+        return true;
+    }
+};
+
 /// Vértice achatado para soldar cantos iguais (meshopt remap).
 struct FlatVertex {
     Vec3 p;
@@ -46,6 +125,8 @@ struct UfbxBuild {
     std::unordered_map<const ufbx_texture*, i32> images;
     u32 imagesUsed = 0;
     std::vector<std::string> warnings;
+    FolderIndex* folder = nullptr;
+    std::vector<std::string> missing;   ///< nomes (sem pasta) das texturas não achadas
 
     i32 image_for(const ufbx_texture* t) {
         if (!t) return -1;
@@ -68,8 +149,27 @@ struct UfbxBuild {
                 const usize slash = full.find_last_of("/\\");
                 tries.push_back(baseDir + (slash == std::string::npos ? full : full.substr(slash + 1)));
             }
+            bool found = false;
             for (const std::string& f : tries) {
-                if (read_file(f, bytes)) break;
+                if (read_file(f, bytes)) { found = true; break; }
+            }
+            // Mesmo nome na pasta do modelo, sem diferenciar maiúsculas.
+            if (!found && folder) {
+                for (const ufbx_string* s : {&t->relative_filename, &t->filename, &t->absolute_filename}) {
+                    if (!s->length) continue;
+                    const std::string real = folder->find(std::string(s->data, s->length));
+                    if (!real.empty() && read_file(real, bytes)) { found = true; break; }
+                }
+            }
+            if (!found) {
+                // O nome que o usuário precisa escolher: só o arquivo.
+                std::string want;
+                for (const ufbx_string* s : {&t->relative_filename, &t->filename, &t->absolute_filename}) {
+                    if (s->length) want = file_name_only(std::string(s->data, s->length));
+                    if (!want.empty()) break;
+                }
+                if (!want.empty() && std::find(missing.begin(), missing.end(), want) == missing.end())
+                    missing.push_back(want);
             }
             data = bytes.data();
             size = bytes.size();
@@ -151,6 +251,12 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
     opts.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_MODIFY_GEOMETRY;
     opts.load_external_files = true;             // .mtl do OBJ
     opts.ignore_missing_external_files = true;   // .mtl ausente: cinza + aviso, não recusa
+    FolderIndex folder;
+    folder.dir = dir_of(path);
+    ExternalOpener opener;
+    opener.folder = &folder;
+    opts.open_file_cb.fn = &ExternalOpener::open;
+    opts.open_file_cb.user = &opener;
     ufbx_error err{};
     ufbx_scene* scene = ufbx_load_file(path.c_str(), &opts, &err);
     if (!scene) {
@@ -167,6 +273,7 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
     UfbxBuild b;
     b.scene = scene;
     b.baseDir = dir_of(path);
+    b.folder = &folder;
     b.options = &options;
     b.A = &A;
 
@@ -353,6 +460,12 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
     }
 
     A.warnings.insert(A.warnings.end(), b.warnings.begin(), b.warnings.end());
+    // .mtl pedido e nenhum aberto: o material inteiro está faltando.
+    if (!opener.mtlOpened && !opener.mtlRequested.empty()) {
+        A.missingTextures.push_back(opener.mtlRequested.front());
+        A.warnings.push_back("material ausente: " + opener.mtlRequested.front());
+    }
+    A.missingTextures.insert(A.missingTextures.end(), b.missing.begin(), b.missing.end());
     ImportResult r = finalize_asset(std::move(asset), options, progress, b.imagesUsed);
     if (r.ok()) {
         const usize slash = path.find_last_of("/\\");

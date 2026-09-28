@@ -1,5 +1,9 @@
 package com.aurea.aurea.engine
 
+import android.content.Context
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
+
 /**
  * O que o MOTOR decidiu para este aparelho, em números.
  *
@@ -110,12 +114,28 @@ class DeviceReport(private val v: LongArray) {
         }
     }
 
+    /** [exportLimitReason] no idioma do app — é esta que a tela mostra. */
+    fun exportLimitReason(context: Context): String? {
+        if (maxExportHeight <= 0 || maxExportHeight >= 2160) return null
+        val top = shortLabel(maxExportHeight)
+        return when (exportLimit) {
+            2 -> AppText.get(context, R.string.app_device_export_limit_encoder, top, maxExportWidth, maxExportHeight)
+            3 -> AppText.get(context, R.string.app_device_export_limit_memory, top)
+            4 -> AppText.get(context, R.string.app_device_export_limit_h264, top)
+            else -> AppText.get(context, R.string.app_device_export_limit, top)
+        }
+    }
+
     /** HEVC dá para escolher no export? Sem tabela de codecs (não medido), não se esconde nada. */
     val hevcExportAvailable: Boolean get() = !codecsKnown || encodeHevc
 
     /** A frase do HEVC indisponível, ou nulo. */
     fun hevcExportReason(): String? =
         if (hevcExportAvailable) null else "HEVC indisponível neste aparelho: ele não tem codificador HEVC. O vídeo sai em H.264."
+
+    /** [hevcExportReason] no idioma do app — é esta que a tela mostra. */
+    fun hevcExportReason(context: Context): String? =
+        if (hevcExportAvailable) null else AppText.get(context, R.string.app_device_no_hevc_export)
 
     /**
      * Tudo o que este aparelho NÃO faz, ou faz reduzido, em frases (§109). A
@@ -139,16 +159,16 @@ class DeviceReport(private val v: LongArray) {
     }
 
     /** "8 núcleos (4+4) · 5,8 GB · orçamento 1,2 GB" — a linha dos Ajustes. */
-    fun summary(): String {
-        val cores = if (efficiencyCores > 0) "$totalCores núcleos ($performanceCores+$efficiencyCores)"
-        else "$totalCores núcleos"
+    fun summary(context: Context): String {
+        val cores = if (efficiencyCores > 0) AppText.get(context, R.string.app_device_cores_split, totalCores, performanceCores, efficiencyCores)
+        else AppText.get(context, R.string.app_device_cores, totalCores)
         return buildString {
             append(cores)
-            if (maxFrequencyMhz > 0) append(" até ").append("%.1f GHz".format(maxFrequencyMhz / 1000f))
+            if (maxFrequencyMhz > 0) append(' ').append(AppText.get(context, R.string.app_device_max_freq, "%.1f GHz".format(maxFrequencyMhz / 1000f)))
             append(" · ")
             append(gb(totalMemoryMb))
-            append(" · orçamento ")
-            append(gb(budgetMb))
+            append(" · ")
+            append(AppText.get(context, R.string.app_device_budget, gb(budgetMb)))
         }
     }
 

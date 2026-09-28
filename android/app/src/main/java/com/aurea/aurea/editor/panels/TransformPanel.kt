@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.annotation.StringRes
 import com.aurea.aurea.engine.TrackKey
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -92,15 +93,15 @@ import kotlin.math.sin
  * para o cabeçalho ("Transformar · Posição"); [props] é o grupo que o losango do
  * trilho crava (vazio = face sem keyframe).
  */
-enum class TransformTab(val title: String, val icon: ImageVector, val railLabel: String, val props: IntArray) {
-    Mover("Posição", Icons.Rounded.OpenWith, "Posição", intArrayOf(TrackProperty.POSITION_X, TrackProperty.POSITION_Y)),
-    Escalar("Escala", Icons.Rounded.AspectRatio, "Escala", intArrayOf(TrackProperty.SCALE_X, TrackProperty.SCALE_Y)),
-    Girar("Rotação", Icons.AutoMirrored.Rounded.RotateRight, "Rotação", intArrayOf(TrackProperty.ROTATION_Z)),
-    Opacidade("Opacidade", Icons.Rounded.Opacity, "Opacidade", intArrayOf(TrackProperty.OPACITY)),
-    Pivo("Pivô", Icons.Rounded.FilterCenterFocus, "Pivô (ponto de giro)", intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y)),
-    Desfoque("Desfoque de movimento", Icons.Rounded.BlurOn, "Desfoque de movimento", intArrayOf()),
+enum class TransformTab(@StringRes val title: Int, val icon: ImageVector, @StringRes val railLabel: Int, val props: IntArray) {
+    Mover(R.string.fx_posicao, Icons.Rounded.OpenWith, R.string.fx_posicao, intArrayOf(TrackProperty.POSITION_X, TrackProperty.POSITION_Y)),
+    Escalar(R.string.panel_escala, Icons.Rounded.AspectRatio, R.string.panel_escala, intArrayOf(TrackProperty.SCALE_X, TrackProperty.SCALE_Y)),
+    Girar(R.string.panel_rotacao, Icons.AutoMirrored.Rounded.RotateRight, R.string.panel_rotacao, intArrayOf(TrackProperty.ROTATION_Z)),
+    Opacidade(R.string.panel_opacidade, Icons.Rounded.Opacity, R.string.panel_opacidade, intArrayOf(TrackProperty.OPACITY)),
+    Pivo(R.string.fx_pivo, Icons.Rounded.FilterCenterFocus, R.string.edt_pivot_rail, intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y)),
+    Desfoque(R.string.panel_desfoque_movimento, Icons.Rounded.BlurOn, R.string.panel_desfoque_movimento, intArrayOf()),
     /** Só câmera 3D: distância focal, profundidade de campo e Pick Focus (◇ por linha). */
-    Lente("Lente", Icons.Rounded.CameraAlt, "Lente", intArrayOf()),
+    Lente(R.string.lens_title, Icons.Rounded.CameraAlt, R.string.lens_title, intArrayOf()),
 }
 
 /**
@@ -179,7 +180,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val exprKeys = props.map { TrackKey(it) }
     val exprLook by remember(store, tab, axis, show3D) { derivedStateOf { store.expressionLook(exprKeys) } }
     // Expressão na unidade da tela: escala e opacidade em %, ângulo em °, o resto em px.
-    val exprTitle = if (tab == TransformTab.Girar) "Rotação ${"XYZ"[axis]}" else tab.title
+    val exprTitle = if (tab == TransformTab.Girar) stringResource(R.string.edt_rotation_axis, "XYZ"[axis].toString()) else stringResource(tab.title)
     val exprScale = if (tab == TransformTab.Escalar || tab == TransformTab.Opacidade) 100f else 1f
     val exprUnit = when (tab) {
         TransformTab.Escalar, TransformTab.Opacidade -> "%"
@@ -234,7 +235,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             Spacer(Modifier.height(10.dp))
         }
         RightRail(
-            modes = tabs.map { RailMode(it.icon, it.railLabel) },
+            modes = tabs.map { RailMode(it.icon, stringResource(it.railLabel)) },
             selected = tabs.indexOf(tab).coerceAtLeast(0),
             onSelect = { i -> onTab(tabs[i]) },
         )
@@ -340,6 +341,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.OpacityFace(env: Pane
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: PanelEnv) {
     val store = env.store
+    val blurStrengthLabel = stringResource(R.string.panel_intensidade_desfoque)
     val d = store.detail ?: return
     val on = d.motionBlur && store.compMotionBlur
     val strength = store.shutterAngle / 3.6f
@@ -368,7 +370,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
                 onValue = { store.changeShutterAngle(it.coerceIn(0f, 200f) * 3.6f) },
                 onGestureEnd = { store.endGesture() },
                 onTapValue = {
-                    env.openKeypad(KeypadRequest("Intensidade do desfoque", strength, "%", 0f, 200f, 0) { store.changeShutterAngle(it * 3.6f) })
+                    env.openKeypad(KeypadRequest(blurStrengthLabel, strength, "%", 0f, 200f, 0) { store.changeShutterAngle(it * 3.6f) })
                 },
             )
             Text(
@@ -582,6 +584,10 @@ private fun BlurToggleRow(label: String, hint: String, checked: Boolean, onChang
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEnv, pivot: Boolean, depth: Boolean) {
     val store = env.store
+    val xLabel = stringResource(if (pivot) R.string.panel_pivo_x else R.string.panel_posicao_x)
+    val yLabel = stringResource(if (pivot) R.string.panel_pivo_y else R.string.panel_posicao_y)
+    val pivotZLabel = stringResource(R.string.edt_pivot_z)
+    val depthZLabel = stringResource(R.string.panel_profundidade_z)
     var zPicked by rememberSaveable { mutableStateOf(false) }
     // Sem 3D não há profundidade: o arrasto é sempre X/Y.
     val zMode = zPicked && depth
@@ -599,7 +605,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
             ValueBox("${numeroPtBr(x, 0)}px", width = 64.dp, label = "x", onTap = {
                 val d = store.detail ?: return@ValueBox
                 env.openKeypad(
-                    KeypadRequest(if (pivot) "Pivô em X" else "Posição X", x, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                    KeypadRequest(xLabel, x, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                         if (pivot) store.setTransform(TrackProperty.ANCHOR_X, it + d.sourceWidth / 2f)
                         else store.setTransform(TrackProperty.POSITION_X, it)
                     },
@@ -609,7 +615,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
             ValueBox("${numeroPtBr(y, 0)}px", width = 64.dp, label = "y", onTap = {
                 val d = store.detail ?: return@ValueBox
                 env.openKeypad(
-                    KeypadRequest(if (pivot) "Pivô em Y" else "Posição Y", y, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                    KeypadRequest(yLabel, y, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                         if (pivot) store.setTransform(TrackProperty.ANCHOR_Y, it + d.sourceHeight / 2f)
                         else store.setTransform(TrackProperty.POSITION_Y, it)
                     },
@@ -619,7 +625,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                 Spacer(Modifier.width(6.dp))
                 val az = store.detail?.anchor?.get(2) ?: 0f
                 ValueBox("${numeroPtBr(az, 0)}px", width = 64.dp, label = "z", onTap = {
-                    env.openKeypad(KeypadRequest("Pivô Z", az, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                    env.openKeypad(KeypadRequest(pivotZLabel, az, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                         store.setTransform(TrackProperty.ANCHOR_Z, it)
                     })
                 })
@@ -648,7 +654,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                     label = "z",
                     color = if (zMode) AureaColors.Accent else Color.White,
                     onLongPress = {
-                        env.openKeypad(KeypadRequest("Profundidade Z", z, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                        env.openKeypad(KeypadRequest(depthZLabel, z, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                             store.setTransform(TrackProperty.POSITION_Z, it)
                         })
                     },
@@ -804,6 +810,7 @@ private fun AxisRow(axis: Int, onAxis: (Int) -> Unit) {
 @Composable
 private fun RotationDial(env: PanelEnv, axis: Int) {
     val store = env.store
+    val rotationLabel = stringResource(R.string.edt_rotation_axis, "XYZ"[axis].toString())
     val prop = RotationProps[axis]
     val angle by remember(store, axis) { derivedStateOf { store.detail?.rotation?.get(axis) ?: 0f } }
     val current by rememberUpdatedState(angle)
@@ -889,7 +896,7 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
                 .clip(RoundedCornerShape(8.dp))
                 .background(AureaColors.DialValueBox)
                 .tocavel(shrink = 1f) {
-                    env.openKeypad(KeypadRequest("Rotação ${"XYZ"[axis]}", angle, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                    env.openKeypad(KeypadRequest(rotationLabel, angle, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                         store.setTransform(prop, it)
                     })
                 }
@@ -917,6 +924,9 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
     val store = env.store
+    val widthLabel = stringResource(R.string.panel_largura)
+    val heightLabel = stringResource(R.string.panel_altura)
+    val scaleZLabel = stringResource(R.string.edt_scale_z)
     val locked = store.scaleAxesLinked
     val sx by remember(store) { derivedStateOf { (store.detail?.scale?.get(0) ?: 1f) * 100f } }
     val sy by remember(store) { derivedStateOf { (store.detail?.scale?.get(1) ?: 1f) * 100f } }
@@ -939,7 +949,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
 
     Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         ValueBox("${numeroPtBr(sx, 1)}%", width = 61.dp, label = stringResource(R.string.panel_largura), onTap = {
-            env.openKeypad(KeypadRequest("Largura", sx, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(false, it, sx, sy, sz) })
+            env.openKeypad(KeypadRequest(widthLabel, sx, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(false, it, sx, sy, sz) })
         })
         Box(
             Modifier
@@ -953,13 +963,13 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
             Icon(if (locked) Icons.Rounded.Link else Icons.Rounded.LinkOff, contentDescription = if (locked) stringResource(R.string.panel_soltar_largura_altura) else stringResource(R.string.panel_travar_largura_altura), tint = Color.White, modifier = Modifier.size(16.dp))
         }
         ValueBox("${numeroPtBr(sy, 1)}%", width = 61.dp, label = stringResource(R.string.panel_altura), color = Color.White, onTap = {
-            env.openKeypad(KeypadRequest("Altura", sy, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(true, it, sx, sy, sz) })
+            env.openKeypad(KeypadRequest(heightLabel, sy, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(true, it, sx, sy, sz) })
         })
     }
     if (depth) {
         Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
             ValueBox("${numeroPtBr(sz, 1)}%", width = 80.dp, label = "z", onTap = {
-                env.openKeypad(KeypadRequest("Escala Z", sz, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                env.openKeypad(KeypadRequest(scaleZLabel, sz, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                     if (lockNow) store.setScale3(com.aurea.aurea.state.linkedScale(floatArrayOf(sx, sy, sz), 2, it).map { v -> v / 100f }.toFloatArray())
                     else store.setTransform(TrackProperty.SCALE_Z, it / 100f)
                 })

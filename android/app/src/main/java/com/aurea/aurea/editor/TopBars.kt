@@ -117,7 +117,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             InlineName(
                 key = h.id,
                 name = h.name,
-                placeholder = "(Camada sem nome)",
+                placeholder = stringResource(R.string.edt_unnamed_layer),
                 maxLength = Int.MAX_VALUE,
                 onRename = { store.renameLayer(h.id, it) },
             )
@@ -136,6 +136,15 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             )
             if (linking) LinkMenu(store, listOf(h.id)) { linking = false }
         }
+        // Esconder/mostrar a caixa da seleção no preview (ela tampa o que está por baixo).
+        ChromeButton(
+            if (StagePrefs.hideSelectionBox) CupertinoGlyph.EyeSlash else CupertinoGlyph.Square,
+            if (StagePrefs.hideSelectionBox) stringResource(R.string.editor_mostrar_caixa_selecao) else stringResource(R.string.editor_esconder_caixa_selecao),
+            onClick = { StagePrefs.toggleSelectionBox() },
+            size = 19.dp,
+            width = 44.dp,
+            tint = if (StagePrefs.hideSelectionBox) AureaColors.Accent else AureaColors.Text,
+        )
         ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
         ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp, width = 44.dp)
         ChromeVectorButton(Icons.Filled.MoreHoriz, stringResource(R.string.editor_mais_acoes_camada), onClick = { openSheet(store, ui, ShellSheet.LayerMenu) }, size = 22.dp, width = 44.dp)
@@ -269,7 +278,7 @@ private fun LinkRow(
  * da timeline; enquanto não chega, o selo do tipo); o resto é o selo colorido.
  */
 @Composable
-private fun LayerThumb(store: EditorStore, row: LayerRow) {
+internal fun LayerThumb(store: EditorStore, row: LayerRow) {
     val type = LayerType.of(row.kind)
     val media = type == LayerType.Video || type == LayerType.Image
     val px = with(LocalDensity.current) { 44.dp.roundToPx() }.coerceIn(16, 256)
@@ -352,12 +361,15 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                 InlineName(
                     key = 0L,
                     name = title,
-                    placeholder = "(Sem título)",
+                    placeholder = stringResource(R.string.edt_untitled),
                     maxLength = 320,
                     onRename = { store.renameProject(it) },
                 )
             }
         }
+        // Selecionar UMA camada pela lista (sem ter de achar o clipe na timeline).
+        val hasLayers by remember { derivedStateOf { store.layers.isNotEmpty() } }
+        if (hasLayers) ChromeButton(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), onClick = { openSheet(store, ui, ShellSheet.SearchLayers) }, size = 19.dp, width = 44.dp)
         ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
         ChromeVectorButton(Icons.Filled.MoreVert, stringResource(R.string.editor_mais_linha_tempo), onClick = { openSheet(store, ui, ShellSheet.TimelineMenu) })
         ChromeButton(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_projeto_cbe9), onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) }, size = 19.dp)
@@ -457,12 +469,14 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
     ) {
         ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_cancelar_selecao), onClick = { store.clearSelection() }, size = 18.dp, width = 44.dp, tint = ink)
         Text(
-            if (count >= 2) "$count camadas selecionadas" else stringResource(R.string.editor_selecione_menos_duas_camadas),
+            if (count >= 2) stringResource(R.string.edt_layers_selected, count) else stringResource(R.string.editor_selecione_menos_duas_camadas),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = ink)),
             modifier = Modifier.weight(1f),
         )
+        // Ficar com UMA só: a lista troca o lote por ela num toque.
+        ChromeButton(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), onClick = { openSheet(store, ui, ShellSheet.SearchLayers) }, size = 19.dp, width = 40.dp, tint = ink)
         ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp, tint = ink)
         Box {
             ChromeButton(CupertinoGlyph.Link, stringResource(R.string.editor_vincular_escolhidas_camada), onClick = {

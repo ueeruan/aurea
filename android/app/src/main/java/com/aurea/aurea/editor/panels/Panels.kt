@@ -98,7 +98,7 @@ fun PanelContent(
     val hasLayer by remember(store) { derivedStateOf { store.detail != null } }
 
     val title = when (panel) {
-        EditorPanel.Transform -> stringResource(R.string.pn_transform_title_tab, transformTab.title)
+        EditorPanel.Transform -> stringResource(R.string.pn_transform_title_tab, stringResource(transformTab.title))
         EditorPanel.Effects -> stringResource(R.string.panel_efeitos)
         EditorPanel.Curve -> stringResource(R.string.panel_easing_curve)
         EditorPanel.Appearance -> stringResource(R.string.panel_mistura_opacidade)

@@ -839,6 +839,8 @@ object TrackProperty {
     const val MATERIAL_PARAM = 37
     /** Lente: força do desfoque de profundidade (× o círculo de confusão). */
     const val CAMERA_BLUR = 38
+    /** Velocidade animada do conteúdo (a fonte anda a integral dela). */
+    const val SPEED = 39
 }
 
 /**
@@ -922,6 +924,8 @@ data class LayerDetail(
     val timeRemap: Boolean get() = (timeFlags and 4) != 0
     /** 0 repete o quadro, 1 mistura, 2 movimento de pixels (optical flow). */
     val vectorBlur: Boolean get() = (timeFlags and 32) != 0
+    /** A velocidade tem keyframe: `speed` é a do cabeçote e mexer grava keyframe. */
+    val speedAnimated: Boolean get() = (timeFlags and 64) != 0
     val frameBlendMode: Int get() = if ((timeFlags and 16) != 0) 2 else if ((timeFlags and 8) != 0) 1 else 0
 
     val audioMuted: Boolean get() = (audioFlags and 1) != 0

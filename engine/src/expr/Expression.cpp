@@ -1001,6 +1001,7 @@ f64 static_base(const PropDesc& d, u32 c) noexcept {
         case TP::LightPenumbra: return l->light.penumbra;
         case TP::TextTracking: return l->text.tracking;
         case TP::AudioVolume: return tr ? tr->staticValue : 1.0;
+        case TP::Speed: return l->speed;
         default: return tr ? tr->staticValue : 0.0;
     }
 }

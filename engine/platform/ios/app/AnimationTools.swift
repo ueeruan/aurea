@@ -364,6 +364,34 @@ struct NativeCurvePanel: View {
         .onChange(of: model.status.modelRevision) { _ in load() }
         .onChange(of: segment?.id) { _ in load() }
         .onChange(of: layer) { _ in load() }
+        // O gráfico segue o que a pessoa olha, não o que estava aberto quando o
+        // painel abriu: outra camada escolhida traz a trilha animada dela; o
+        // cabeçote parado noutro trecho (scrub, rolar a timeline) escolhe esse trecho.
+        .onChange(of: model.primarySelection) { _ in followLayer() }
+        .onChange(of: model.status.playhead) { _ in if model.status.playing == 0 { followPlayhead() } }
+        .onChange(of: model.status.playing) { playing in if playing == 0 { followPlayhead() } }
+    }
+    private func followLayer() {
+        guard model.primarySelection != nil else { return }
+        let current = track
+        if current.count >= 2 {
+            // A mesma trilha anima aqui: fica nela, no trecho do cabeçote (se a marca escolhida não é desta camada).
+            if let time = model.curveSelectedTime, current.contains(where: { $0.time == time }) { return }
+            model.curveSelectedTime = current[max(0, graphSegmentIndexAt(current, model.localPlayhead))].time
+            return
+        }
+        let like = KeyframeItem(property: model.curveProperty, paramIndex: model.curveParam, effectIndex: model.curveEffect,
+                                time: 0, value: 0, interpolation: 1)
+        let next = graphTrackFor(model.keyframes[layer] ?? [], like: like)
+        guard let head = next.first else { model.curveSelectedTime = nil; return }
+        model.curveProperty = head.property; model.curveEffect = head.effectIndex; model.curveParam = head.paramIndex
+        model.curveSelectedTime = next[max(0, graphSegmentIndexAt(next, model.localPlayhead))].time
+    }
+    private func followPlayhead() {
+        let keys = track
+        guard let time = model.curveSelectedTime, keys.count >= 2 else { return }
+        let want = graphSegmentIndexAt(keys, model.localPlayhead)
+        if want >= 0 && want != graphSegmentIndexOf(keys, time) { model.curveSelectedTime = keys[want].time }
     }
     private func back() { if expanded { dismissExpanded() } else { model.openPanel(model.curveReturnPanel == .curve ? .none : model.curveReturnPanel) } }
     private func load() {
@@ -561,33 +589,163 @@ struct ExpressionEditor: View {
     }
 }
 
+/// REMAPEAR TEMPO, versão simples (par do TimeRemapEffectEditor do Android):
+/// sem gráfico. Uma régua do "momento do vídeo" em segundos da fonte — arrastar
+/// mostra ao vivo na prévia o quadro do cabeçote e grava a chave ali. Congelar =
+/// dois pontos iguais; ao contrário = momento diminuindo; lento/rápido =
+/// distância entre os pontos. Por chave, só a suavidade; os atalhos criam os
+/// pontos. O dado é a MESMA curva da camada (prévia, exportação e som).
 struct TimeRemapEffectEditor: View {
     @EnvironmentObject private var model: AureaModel
+    let effectId: UInt32
+    @State private var values: [Float] = []
+    @State private var drag: Float?
+    @State private var dragging = false
+    private var id: Int64 { model.primarySelection ?? 0 }
+    private var fps: Float { Float(model.compositionFps > 0 ? model.compositionFps : 30) }
+    private var keyTimes: [Int32] {
+        guard values.count >= 5 else { return [] }
+        let count = min(max(0, Int(values[0])), (values.count - 5) / 7)
+        return (0..<count).map { Int32(values[5 + $0 * 7]) }
+    }
+    private var maxSeconds: Float {
+        guard values.count >= 5 else { return 1 }
+        return max(1, values[3] > 0 ? values[3] : values[2]) / fps
+    }
+    private var inside: Bool {
+        guard values.count >= 5 else { return false }
+        let local = Float(model.localPlayhead)
+        return local >= values[1] && local <= values[2]
+    }
+    private var seconds: Float { model.effectParams.first { $0.index == 0 }?.scalar ?? 0 }
+    private var ease: Int { Int((model.effectParams.first { $0.index == 1 }?.scalar ?? 0).rounded()) }
+    private var keyHere: Int? { keyTimes.firstIndex(of: model.localPlayhead) }
+    private var speedText: String {
+        let speed = values.count >= 5 ? values[4] : 1
+        if abs(speed) < 0.005 { return AureaText.t("remap_vel_congelado") }
+        if speed < 0 { return AureaText.t("remap_vel_reverso", numeroPtBr(-speed, casas: 2)) }
+        return AureaText.t("remap_vel_aqui", numeroPtBr(speed, casas: 2))
+    }
+    private func load() { values = model.engine.timeRemap(id).map(\.floatValue) }
+    private func refresh() { model.refreshModel(force: true); load() }
+    private func seekLocal(_ local: Int32) {
+        guard let layer = model.selectedLayer else { return }
+        model.seek(toFrame: Int64(local) + Int64(layer.startFrame) - Int64(layer.offsetFrames))
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button("Edit time curve") {
-                guard let id = model.primarySelection else { return }
-                let flags = (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0
-                if flags & 4 == 0 { model.engine.setTimeRemap(true, forLayer: id) }
-                model.refreshModel(force: true)
-            }.frame(minHeight: 44)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(["panel_linear", "panel_suave", "panel_lento_meio", "panel_acelerar", "panel_desacelerar", "panel_congelar", "panel_passar_tras_frente"].enumerated()), id: \.offset) { index, label in
-                        Button {
-                            guard let id = model.primarySelection else { return }
-                            model.engine.applySpeedRamp(UInt32(index), forLayer: id)
-                            model.refreshModel(force: true)
-                        } label: {
-                            Text(AureaText.t(label)).font(.aurea(size: 12))
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                        }.buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 6) {
+            if values.count < 5 {
+                PanelNotice(AureaText.t("remap_ligue_efeito"))
+            } else {
+                PropertyCustomRow(AureaText.t("remap_momento_video"), selected: keyHere != nil, onSelect: toggleKey,
+                                  keyframe: keyHere != nil ? .keyHere : .animated) {
+                    HStack(spacing: 0) {
+                        Text(speedText).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+                        Spacer(minLength: 4)
+                        stepButton(CupertinoGlyph.ChevronLeft, "remap_ponto_anterior", keyTimes.last { $0 < model.localPlayhead })
+                        stepButton(CupertinoGlyph.ChevronRight, "remap_proximo_ponto", keyTimes.first { $0 > model.localPlayhead })
                     }
                 }
+                HStack(spacing: 8) {
+                    timeBar
+                    ValueBox(String(format: "%.2f s", Double(shownFraction * maxSeconds)).replacingOccurrences(of: ".", with: ","), width: 72)
+                }
+                if !inside {
+                    Text(AureaText.t("remap_fora_clipe")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(AureaText.t("remap_suavidade")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+                if keyHere == nil {
+                    Text(AureaText.t("remap_sem_ponto")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach([(0, "remap_ease_linear"), (3, "remap_ease_in"), (4, "remap_ease_out"), (1, "remap_ease_in_out")], id: \.0) { mode, label in
+                                chip(label, on: ease == mode) {
+                                    model.engine.setEffect(effectId, forLayer: id, paramIndex: 1, value: Float(mode))
+                                    refresh()
+                                }
+                            }
+                        }
+                    }
+                }
+                Text(AureaText.t("remap_atalhos")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach([(7, "remap_congelar_aqui"), (2, "remap_camera_lenta"), (3, "remap_acelerar"), (6, "remap_inverter"), (0, "remap_normal")], id: \.0) { preset, label in
+                            chip(label, on: false) {
+                                model.engine.applySpeedRamp(UInt32(preset), forLayer: id)
+                                refresh()
+                            }
+                        }
+                    }
+                }
+                Text(AureaText.t("remap_dica")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 2)
             }
-            TimeRemapEditor()
+        }.frame(maxWidth: .infinity, alignment: .leading)
+            .onAppear(perform: load)
+            .onChange(of: model.status.modelRevision) { _ in load() }
+            .onChange(of: model.status.playhead) { _ in load() }
+            .onChange(of: id) { _ in load() }
+            .onDisappear { if dragging { dragging = false; drag = nil; model.endGesture() } }
+    }
+
+    private var shownFraction: Float { drag ?? min(1, max(0, seconds / maxSeconds)) }
+
+    /// Régua absoluta: tocar pula para ali, arrastar segue o dedo (um gesto = um desfazer).
+    private var timeBar: some View {
+        GeometryReader { geometry in
+            let width = max(1, geometry.size.width)
+            let x = CGFloat(shownFraction) * width
+            ZStack(alignment: .leading) {
+                Capsule().fill(AureaColors.chip).frame(height: 8)
+                Capsule().fill(inside ? AureaColors.accent : AureaColors.muted).frame(width: max(0, x), height: 8)
+                Circle().fill(Color.white).frame(width: 22, height: 22)
+                    .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+                    .offset(x: x - 11)
+            }.frame(maxHeight: .infinity).contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    guard inside else { return }
+                    if !dragging { dragging = true; model.beginGesture("tempo do vídeo") }
+                    let fraction = Float(min(1, max(0, value.location.x / width)))
+                    drag = fraction
+                    model.engine.setEffect(effectId, forLayer: id, paramIndex: 0, value: fraction * maxSeconds)
+                }.onEnded { _ in
+                    guard dragging else { return }
+                    dragging = false; drag = nil
+                    model.endGesture()
+                    load()
+                })
+        }.frame(height: 44)
+    }
+
+    private func toggleKey() {
+        guard inside else { return }
+        if let index = keyHere {
+            if keyTimes.count > 2 { model.engine.removeTimeRemap(id, index: UInt32(index)) }
+        } else {
+            _ = model.engine.editTimeRemap(id, index: -1, time: Int64(model.localPlayhead), value: 0, interpolation: -1)
         }
+        refresh()
+    }
+
+    private func stepButton(_ glyph: Character, _ label: String, _ target: Int32?) -> some View {
+        Button { if let target { seekLocal(target) } } label: {
+            CupertinoGlyph.text(glyph, size: 18, color: target == nil ? AureaColors.muted.opacity(0.4) : AureaColors.text)
+                .frame(width: 40, height: 40).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle()).disabled(target == nil)
+            .accessibilityLabel(AureaText.t(label))
+    }
+
+    private func chip(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+                .padding(.horizontal, 12).frame(height: 36)
+                .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(AureaPressStyle())
     }
 }
 
@@ -624,7 +782,7 @@ struct TimeRemapEditor: View {
         let speed = values.count >= 5 ? values[4] : 0
         if abs(speed) < 0.005 { return AureaText.t("panel_congelado_cabecote") }
         let number = String(format: "%.2f", abs(speed))
-        return "Velocidade no cabeçote: \(number)×" + (speed < 0 ? " ao contrário" : "")
+        return AureaText.t(speed < 0 ? "ios_speed_at_playhead_reversed" : "ios_speed_at_playhead", number)
     }
     private func load() {
         values = model.engine.timeRemap(id).map(\.floatValue)
@@ -1047,6 +1205,167 @@ private struct ExpressionTextInput: UIViewRepresentable {
 }
 
 // Value/speed graph uses the core track evaluator, not the easing thumbnail.
+// Par do GraphCurve.kt: o gráfico de valor/velocidade desenha a MESMA conta do
+// motor (`Track::sample_keys` + `apply_easing`), não os 160 valores de
+// `trackCurve` — numa trilha longa eles pulavam frames (o "manter" virava
+// rampa) e a velocidade saía de diferenças entre frames, longe das alças.
+// Nos frames inteiros (os únicos que o motor pede) o traço passa pelo valor
+// renderizado; os frames da janela entram como vértices.
+struct CurveKey { let time: Int32; let value: Float; let ease: CurveEase }
+
+func graphCurveKeys(_ track: [KeyframeItem], ease: (KeyframeItem) -> CurveEase) -> [CurveKey] {
+    track.sorted { $0.time < $1.time }.map { CurveKey(time: $0.time, value: $0.value, ease: ease($0)) }
+}
+
+private func curveBefore(_ keys: [CurveKey], _ frame: Double) -> Int {
+    var lo = 0, hi = keys.count - 1, best = -1
+    while lo <= hi {
+        let mid = (lo + hi) / 2
+        if Double(keys[mid].time) <= frame { best = mid; lo = mid + 1 } else { hi = mid - 1 }
+    }
+    return best
+}
+
+private func curveSegmentValue(_ a: CurveKey, _ b: CurveKey, _ frame: Double) -> Float {
+    if a.ease.interpolation == 0 { return a.value }
+    let span = Int64(b.time) - Int64(a.time)
+    if span <= 0 { return b.value }
+    let t01 = Float((frame - Double(a.time)) / Double(span))
+    return a.value + (b.value - a.value) * a.ease.transform(t01)
+}
+
+private func curveSegmentVelocity(_ a: CurveKey, _ b: CurveKey, _ frame: Double, fps: Float) -> Float {
+    let span = Double(Int64(b.time) - Int64(a.time))
+    if span <= 0 || a.ease.interpolation == 0 || a.ease.interpolation == 9 { return 0 }
+    let t = Float(min(1, max(0, (frame - Double(a.time)) / span)))
+    let h: Float = 1e-3
+    let lo = max(0, t - h), hi = min(1, t + h)
+    let slope = (a.ease.transform(hi) - a.ease.transform(lo)) / (hi - lo)
+    return Float(Double((b.value - a.value) * slope * fps) / span)
+}
+
+/// `Track::sample_keys` num instante qualquer (nos inteiros, o valor do motor).
+func sampleCurve(_ keys: [CurveKey], _ frame: Double) -> Float {
+    guard let first = keys.first else { return 0 }
+    if keys.count == 1 { return first.value }
+    let i = curveBefore(keys, frame)
+    if i < 0 { return first.value }
+    if i >= keys.count - 1 { return keys[keys.count - 1].value }
+    return curveSegmentValue(keys[i], keys[i + 1], frame)
+}
+
+/// Velocidade (unidades/s): a derivada da mesma conta; fora da animação, zero.
+func sampleCurveVelocity(_ keys: [CurveKey], _ frame: Double, fps: Float) -> Float {
+    guard keys.count >= 2 else { return 0 }
+    let i = curveBefore(keys, frame)
+    if i < 0 || i >= keys.count - 1 { return 0 }
+    return curveSegmentVelocity(keys[i], keys[i + 1], frame, fps: fps)
+}
+
+/// O traço em from...to (frames): subdividido pela tela e SEMPRE com os frames
+/// inteiros como vértices; manter/degraus viram degraus retos (dois vértices no
+/// mesmo x). Par exato do `graphCurve` do Android.
+func graphCurve(_ keys: [CurveKey], from: Double, to: Double, pointsPerFrame: Double, speed: Bool, fps: Float) -> [CGPoint] {
+    guard !keys.isEmpty, from.isFinite, to.isFinite, to > from else { return [] }
+    var out: [CGPoint] = []
+    func add(_ frame: Double, _ value: Float) { if value.isFinite { out.append(CGPoint(x: frame, y: Double(value))) } }
+    let density: Double = pointsPerFrame.isFinite && pointsPerFrame > 0 ? pointsPerFrame : 1
+    add(from, speed ? 0 : sampleCurve(keys, from))
+    for i in 0..<(keys.count - 1) {
+        let a = keys[i], b = keys[i + 1]
+        let t0 = Double(a.time), t1 = Double(b.time)
+        if t1 <= from || t0 >= to || t1 <= t0 { continue }
+        let lo = max(t0, from), hi = min(t1, to)
+        if speed && i == 0 && t0 > from { add(t0, 0) }
+        switch a.ease.interpolation {
+        case 0:
+            add(lo, speed ? 0 : a.value); add(hi, speed ? 0 : a.value)
+        case 9:
+            for k in 0..<4 {
+                let s = t0 + (t1 - t0) * Double(k) / 4, e = t0 + (t1 - t0) * Double(k + 1) / 4
+                if e <= lo || s >= hi { continue }
+                let v: Float = speed ? 0 : a.value + (b.value - a.value) * Float(k) / 4
+                add(max(s, lo), v); add(min(e, hi), v)
+            }
+        default:
+            let n = min(2048, max(8, Int(ceil((hi - lo) * density))))
+            var frames: [Double] = (0...n).map { lo + (hi - lo) * Double($0) / Double(n) }
+            let first = Int64(ceil(lo)), last = Int64(floor(hi))
+            if last >= first && last - first <= 4096 { frames += (first...last).map { Double($0) } }
+            frames.sort()
+            var previous = Double.nan
+            for f in frames where f != previous {
+                previous = f
+                add(f, speed ? curveSegmentVelocity(a, b, f, fps: fps) : curveSegmentValue(a, b, f))
+            }
+        }
+        if !speed && t1 <= to { add(t1, b.value) }
+        if speed && i + 1 == keys.count - 1 && t1 < to { add(t1, 0) }
+    }
+    add(to, speed ? 0 : sampleCurve(keys, to))
+    return out
+}
+
+/// Trilhas IRMÃS (par do `sameGroup` do Android): X/Y/Z de uma propriedade,
+/// componentes de um parâmetro de efeito, largura/altura da forma.
+func graphSameGroup(_ a: KeyframeItem, _ b: KeyframeItem) -> Bool {
+    if a.property == 31 || b.property == 31 {
+        return a.property == b.property && a.effectIndex == b.effectIndex && a.paramIndex / 4 == b.paramIndex / 4
+    }
+    if a.property == 35 && b.property == 35 {
+        return a.paramIndex == b.paramIndex || ((5...6).contains(a.paramIndex) && (5...6).contains(b.paramIndex))
+    }
+    if a.property > 31 || b.property > 31 {
+        return a.property == b.property && a.effectIndex == b.effectIndex && a.paramIndex == b.paramIndex
+    }
+    func group(_ p: UInt32) -> UInt32 { p < 12 ? p / 3 : (p == 13 || p == 14 ? 4 : 100 + p) }
+    return group(a.property) == group(b.property)
+}
+
+/// Trilhas animadas (2+ marcas) da camada, em ordem estável.
+func graphAnimatedTracks(_ keys: [KeyframeItem]) -> [[KeyframeItem]] {
+    var tracks: [[KeyframeItem]] = []
+    for key in keys {
+        if let i = tracks.firstIndex(where: { curveSameTrack($0[0], key) }) { tracks[i].append(key) } else { tracks.append([key]) }
+    }
+    func order(_ k: KeyframeItem) -> (UInt32, UInt32, UInt32) { (k.property, k.property < 31 ? 0 : k.effectIndex, k.paramIndex) }
+    return tracks.map { track in track.sorted { $0.time < $1.time } }
+        .filter { $0.count >= 2 }
+        .sorted { order($0[0]) < order($1[0]) }
+}
+
+/// O que o gráfico mostra numa camada: a mesma trilha de `like` se ela anima
+/// ali, senão uma irmã, senão a primeira animada ([] = nada para mostrar).
+func graphTrackFor(_ keys: [KeyframeItem], like: KeyframeItem?) -> [KeyframeItem] {
+    let tracks = graphAnimatedTracks(keys)
+    if let like {
+        if let same = tracks.first(where: { curveSameTrack($0[0], like) }) { return same }
+        let sibling = preferredCurveTrack(tracks.filter { graphSameGroup($0[0], like) })
+        if sibling.count >= 2 { return sibling }
+    }
+    return preferredCurveTrack(tracks)
+}
+
+/// O grupo inteiro de `track` na camada (a escolhida sempre entra).
+func graphGroup(_ keys: [KeyframeItem], _ track: [KeyframeItem]) -> [[KeyframeItem]] {
+    guard let head = track.first else { return [] }
+    let group = graphAnimatedTracks(keys).filter { graphSameGroup($0[0], head) }
+    return group.contains(where: { curveSameTrack($0[0], head) }) ? group : [track] + group
+}
+
+/// O trecho sob o cabeçote (a última marca abre o trecho que chega nela); −1 = nenhum.
+func graphSegmentIndexAt(_ track: [KeyframeItem], _ local: Int32) -> Int {
+    guard track.count >= 2 else { return -1 }
+    return min(track.count - 2, max(0, track.lastIndex(where: { $0.time <= local }) ?? 0))
+}
+
+/// O trecho que o painel mostra para a marca escolhida em `time`.
+func graphSegmentIndexOf(_ track: [KeyframeItem], _ time: Int32) -> Int {
+    guard track.count >= 2 else { return -1 }
+    let i = track.firstIndex(where: { $0.time == time }) ?? max(0, track.lastIndex(where: { $0.time <= time }) ?? 0)
+    return min(i, track.count - 2)
+}
+
 private struct TrackGraphViewport: Equatable {
     var from: Double, to: Double, low: Double, high: Double
     var duration: Double { max(1, to - from) }
@@ -1067,7 +1386,9 @@ private struct NativeTrackGraph: View {
     let keys: [KeyframeItem]
     let speed: Bool
     @State private var viewport = TrackGraphViewport(from: 0, to: 100, low: 0, high: 1)
-    @State private var samples: [CGPoint] = []
+    /// Um traço por trilha do grupo; a escolhida (editável) é a última.
+    @State private var samples: [[CGPoint]] = []
+    @State private var width: CGFloat = 0
     @State private var drag: GraphDrag?
     @State private var multi = false
     @State private var picked = Set<Int32>()
@@ -1122,6 +1443,8 @@ private struct NativeTrackGraph: View {
         var originalPeers: [KeyframeItem] = []
         var groupDelta: Int32 = 0
         var handle: SpeedHandle?
+        /// Tocou num losango de trilha irmã: o toque só troca a trilha editável.
+        var picked = false
     }
     private var start: Int32 { Int32(floor(viewport.from)) }
     private var end: Int32 { max(start + 1, Int32(ceil(viewport.to))) }
@@ -1129,36 +1452,41 @@ private struct NativeTrackGraph: View {
         guard let first = keys.first else { return "" }
         return "\(layer):\(first.property):\(first.effectIndex):\(first.paramIndex):\(speed)"
     }
-    private func read(from: Int32, to: Int32) -> [CGPoint] {
-        guard let first = keys.first, to > from else { return [] }
-        let values = model.engine.trackCurve(layer, property: first.property, effect: first.effectIndex,
-            param: first.paramIndex, from: from, to: to)
-        var result: [CGPoint] = []
-        for (index, number) in values.enumerated() {
-            let frame = Double(Int64(Double(from) + (Double(to) - Double(from)) * Double(index) / Double(max(1, values.count - 1))))
-            let value = number.doubleValue
-            if value.isFinite && (result.last == nil || result.last!.x != CGFloat(frame)) {
-                result.append(CGPoint(x: frame, y: value))
-            }
-        }
-        if !speed { return result }
-        let fps = max(1, Double(model.status.compFps))
-        return zip(result, result.dropFirst()).compactMap { a, b in
-            let velocity = Double(b.y - a.y) * fps / Double(b.x - a.x)
-            return velocity.isFinite ? CGPoint(x: (a.x + b.x) * 0.5, y: velocity) : nil
-        }
+    /// O grupo inteiro (X/Y/Z, componentes) com a trilha escolhida por último.
+    private var group: [[KeyframeItem]] {
+        guard let first = keys.first else { return [] }
+        let all = graphGroup(model.keyframes[layer] ?? [], keys)
+        return all.filter { !curveSameTrack($0[0], first) } + all.filter { curveSameTrack($0[0], first) }
     }
-    private func reload() { samples = read(from: start, to: end) }
+    private func ease(_ key: KeyframeItem) -> CurveEase {
+        let h = model.engine.trackEasing(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time).map(\.floatValue)
+        return CurveEase(interpolation: key.interpolation, x1: h.count == 4 ? h[0] : 0.33, y1: h.count == 4 ? h[1] : 0,
+            x2: h.count == 4 ? h[2] : 0.67, y2: h.count == 4 ? h[3] : 1)
+    }
+    /// A mesma conta do motor (`graphCurve`), não uma amostra de frames.
+    private func read(from: Double, to: Double, perFrame: Double? = nil) -> [[CGPoint]] {
+        guard to > from else { return [] }
+        let fps = Float(max(1, Double(model.status.compFps)))
+        let density = perFrame ?? (width > 0 ? Double(width) / max(1, to - from) / 2 : 1)
+        return group.map { graphCurve(graphCurveKeys($0, ease: ease), from: from, to: to, pointsPerFrame: density, speed: speed, fps: fps) }
+    }
+    private func reload() { samples = read(from: viewport.from, to: viewport.to) }
     private func fit() {
-        guard let first = keys.first, let last = keys.last else { return }
-        let to = max(first.time + 1, last.time)
-        let full = read(from: first.time, to: to)
-        let values = full.map { Double($0.y) } + (speed ? speedHandles.map(\.velocity) + [0] : keys.map { Double($0.value) })
-        let low = values.min() ?? 0, high = values.max() ?? 1
-        let margin = max(0.1, max(high - low, abs(high) * 0.05) * 0.12)
-        let timeMargin = max(1, (Double(to) - Double(first.time)) * 0.06)
-        viewport = TrackGraphViewport(from: Double(first.time) - timeMargin, to: Double(to) + timeMargin, low: low - margin, high: high + margin)
+        let tracks = group
+        guard let low = tracks.compactMap({ $0.first?.time }).min(), let high = tracks.compactMap({ $0.last?.time }).max() else { return }
+        let to = max(low + 1, high)
+        let full = read(from: Double(low), to: Double(to), perFrame: 2).flatMap { $0 }
+        let values = full.map { Double($0.y) } + (speed ? speedHandles.map(\.velocity) + [0] : tracks.flatMap { $0 }.map { Double($0.value) })
+        let bottom = values.min() ?? 0, top = values.max() ?? 1
+        let margin = max(0.1, max(top - bottom, abs(top) * 0.05) * 0.12)
+        let timeMargin = max(1, (Double(to) - Double(low)) * 0.06)
+        viewport = TrackGraphViewport(from: Double(low) - timeMargin, to: Double(to) + timeMargin, low: bottom - margin, high: top + margin)
         reload()
+    }
+    /// Cor de uma trilha irmã: X vermelho, Y verde, Z azul.
+    private func axisColor(_ key: KeyframeItem) -> Color {
+        let axis = key.property == 31 ? Int(key.paramIndex % 4) : (key.property < 12 ? Int(key.property % 3) : 3)
+        return [Color(red: 1, green: 0.42, blue: 0.42), Color(red: 0.42, green: 0.84, blue: 0.48), Color(red: 0.36, green: 0.61, blue: 1), AureaColors.muted][axis]
     }
     private func point(_ frame: Double, _ value: Double, _ size: CGSize, _ view: TrackGraphViewport) -> CGPoint {
         CGPoint(x: (frame - view.from) / view.duration * Double(size.width),
@@ -1219,12 +1547,23 @@ private struct NativeTrackGraph: View {
                     }
                     let zero = plot(viewport.from, 0).y
                     if zero >= 0 && zero <= size.height { line(CGPoint(x: 0, y: zero), CGPoint(x: size.width, y: zero), color: .white.opacity(0.3)) }
-                    var path = Path()
-                    for (index, sample) in samples.enumerated() {
-                        let p = plot(Double(sample.x), Double(sample.y))
-                        if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                    let tracks = group
+                    for (curveIndex, curve) in samples.enumerated() {
+                        let active = curveIndex == samples.count - 1
+                        var path = Path()
+                        for (index, sample) in curve.enumerated() {
+                            let p = plot(Double(sample.x), Double(sample.y))
+                            if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                        }
+                        let tint = active || !tracks.indices.contains(curveIndex) ? AureaColors.accent : axisColor(tracks[curveIndex][0]).opacity(0.55)
+                        context.stroke(path, with: .color(tint), lineWidth: active ? 2 : 1.5)
+                        if !active && !speed && tracks.indices.contains(curveIndex) {
+                            for key in tracks[curveIndex] {
+                                let p = plot(Double(key.time), Double(key.value))
+                                context.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(tint))
+                            }
+                        }
                     }
-                    context.stroke(path, with: .color(AureaColors.accent), lineWidth: 2)
                     for handle in speedHandles {
                         let p = plot(handle.frame, handle.velocity)
                         line(plot(Double(handle.incoming ? handle.end.time : handle.key.time), handle.velocity), p, color: AureaColors.muted)
@@ -1245,6 +1584,8 @@ private struct NativeTrackGraph: View {
                     .updating($touching) { _, active, _ in active = true }
                     .onChanged { move($0, size: geometry.size) }
                     .onEnded { _ in finish(toggle: true) })
+                .onAppear { width = geometry.size.width }
+                .onChange(of: geometry.size.width) { value in width = value; reload() }
             }
             HStack {
                 Text(String(format: "%.3g%@", viewport.low, speed ? " /s" : ""))
@@ -1255,6 +1596,14 @@ private struct NativeTrackGraph: View {
         .onAppear { fit() }
         .onChange(of: signature) { _ in finish(); multi = false; picked.removeAll(); fit() }
         .onChange(of: viewport) { _ in reload() }
+        // O cabeçote saiu da janela (scrub, play, outro trecho): a janela vai atrás dele.
+        .onChange(of: model.localPlayhead) { frame in
+            let f = Double(frame)
+            if drag == nil && (f < viewport.from || f > viewport.to) {
+                let half = viewport.duration / 2
+                viewport = TrackGraphViewport(from: f - half, to: f + half, low: viewport.low, high: viewport.high)
+            }
+        }
         .onChange(of: model.status.modelRevision) { _ in reload(); picked.formIntersection(Set(keys.map(\.time))) }
         .onChange(of: touching) { active in if !active && drag?.began == true { finish() } }
         .onDisappear { finish() }
@@ -1290,10 +1639,26 @@ private struct NativeTrackGraph: View {
                     if d <= distance { drag?.handle = handle; distance = d }
                 }
             }
+            // Losango de uma trilha IRMÃ: tocar troca a trilha editável (sem arrastar).
+            if nearest == nil && !speed, let first = keys.first {
+                var sibling: KeyframeItem?
+                var best = CGFloat(24 * 24)
+                for key in group.flatMap({ $0 }) where !curveSameTrack(key, first) {
+                    let p = point(Double(key.time), Double(key.value), size, viewport)
+                    let dx = p.x - value.startLocation.x, dy = p.y - value.startLocation.y
+                    if dx * dx + dy * dy <= best { sibling = key; best = dx * dx + dy * dy }
+                }
+                if let sibling {
+                    drag?.picked = true
+                    model.curveProperty = sibling.property; model.curveEffect = sibling.effectIndex
+                    model.curveParam = sibling.paramIndex; model.curveSelectedTime = sibling.time
+                    return
+                }
+            }
             if multi, let nearest { drag?.group = picked.contains(nearest.time) ? keys.filter { picked.contains($0.time) } : [nearest] }
             if let nearest { model.curveSelectedTime = nearest.time }
         }
-        guard var current = drag else { return }
+        guard var current = drag, !current.picked else { return }
         if let handle = current.handle {
             guard current.began || hypot(value.translation.width,value.translation.height) >= 4 else { return }
             let h = handle.changed(frame:handle.frame+Double(value.translation.width/size.width)*current.initial.duration,

@@ -386,3 +386,68 @@ AUREA_TEST(I18n, CyrillicTextLayerRendersOnGpu) {
 }
 
 #endif // AUREA_TEST_VULKAN
+
+// -----------------------------------------------------------------------------
+// Todo texto que o motor publica num efeito tem inglês na interface
+// -----------------------------------------------------------------------------
+#include <fstream>
+#include <map>
+#include <sstream>
+
+// A UI traduz rótulo e opções pela IDENTIDADE (chave + índice + id) com a tabela
+// gerada `tools/effect_i18n.tsv` (tools/i18n_effect_catalog.py). Parâmetro ou
+// opção novos no motor sem linha na tabela — ou com recurso sem texto em inglês
+// em values-en/strings.xml — aparecem em português para quem usa o app em
+// inglês: o teste falha e pede para regerar a tabela.
+AUREA_TEST(I18n, EveryEffectTextHasEnglish) {
+    const std::string root = std::string(AUREA_TEST_DATA_DIR) + "/../../..";
+    std::ifstream tsv(root + "/tools/effect_i18n.tsv");
+    std::ifstream xml(root + "/android/app/src/main/res/values-en/strings.xml");
+    AUREA_CHECK_MSG(tsv.good(), "tools/effect_i18n.tsv ausente");
+    AUREA_CHECK_MSG(xml.good(), "values-en/strings.xml ausente");
+    if (!tsv.good() || !xml.good()) return;
+    std::stringstream en;
+    en << xml.rdbuf();
+    const std::string english = en.str();
+    // (chave, índice, opção) → (id, recurso); opção -1 = rótulo.
+    std::map<std::string, std::pair<std::string, std::string>> table;
+    std::string line;
+    while (std::getline(tsv, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::vector<std::string> f;
+        std::stringstream ss(line);
+        for (std::string cell; std::getline(ss, cell, '\t');) f.push_back(cell);
+        if (f.size() != 5) continue;
+        table[f[0] + "#" + f[1] + "#" + f[3]] = {f[2], f[4]};
+    }
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    u32 missing = 0, checked = 0;
+    auto has_english = [&](const std::string& res) {
+        const std::string tag = "<string name=\"" + res + "\">";
+        const usize at = english.find(tag);
+        return at != std::string::npos && english.compare(at + tag.size(), 9, "</string>") != 0;
+    };
+    auto need = [&](const EffectInfo& info, u32 index, const char* id, int option, const char* text) {
+        ++checked;
+        const auto it = table.find(std::string(info.key) + "#" + std::to_string(index) + "#" + std::to_string(option));
+        const bool ok = it != table.end() && it->second.first == (id ? id : "") && has_english(it->second.second);
+        if (!ok) {
+            ++missing;
+            if (missing <= 20) std::printf("    sem ingles: %s #%u %s opcao %d \"%s\"\n", info.key, index, id ? id : "", option, text ? text : "");
+        }
+    };
+    for (u32 i = 0; i < reg.count(); ++i) {
+        const EffectInfo& info = reg.at(i).info();
+        const ParameterRegistry& p = reg.params_at(i);
+        for (u32 j = 0; j < p.count(); ++j) {
+            const ParamSpec& s = p.at(j);
+            if (s.flags & kParamHidden) continue;
+            need(info, j, s.id, -1, s.label);
+            for (u32 k = 0; k < s.enumCount && s.enumLabels; ++k) need(info, j, s.id, static_cast<int>(k), s.enumLabels[k]);
+        }
+    }
+    std::printf("    textos de efeito conferidos: %u; sem ingles: %u (regere: python tools/i18n_effect_catalog.py)\n", checked, missing);
+    AUREA_CHECK(checked > 0);
+    AUREA_CHECK(missing == 0);
+}

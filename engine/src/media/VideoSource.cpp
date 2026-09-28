@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 
 namespace aurea {
 
@@ -65,7 +66,11 @@ void VideoSource::set_epoch(u64 epoch) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     if (epoch_ == epoch) return;
     epoch_ = epoch;
-    cache_.clear();
+    // A época nova só aborta o decode em curso (e o que ele ainda entregaria).
+    // Os quadros JÁ decodificados continuam valendo — são da mesma fonte, pelo
+    // pts — e são eles que ficam na tela (o mais próximo) enquanto o alvo novo
+    // decodifica. Limpar aqui deixava a camada sem quadro nenhum depois de
+    // cada seek/loop/marca: o preview piscava preto.
     // The following request wakes the worker with the NEW target atomically.
 }
 
@@ -313,7 +318,12 @@ void VideoSource::thread_main() noexcept {
         if (durationUs > 0 && need > durationUs - half) need = std::max<i64>(0, durationUs - frameUs_);
         if (eos_ && need > decoderPosUs_) continue;   // pedido além do fim: o último frame já está no cache
 
+        // SCRUB com seek: o 1º quadro que sai (o keyframe) já vai para o cache
+        // e para a tela enquanto o decoder anda até o alvo exato. Com GOP
+        // longo, o dedo vê a imagem mudar na hora em vez de esperar o alvo.
+        bool showKeyframe = false;
         if (!reachable_forward(need)) {
+            showKeyframe = req.mode == DecodeMode::Scrub;
             if (const Status s = backend_->seek_to_keyframe(need); !s.ok()) {
                 AUREA_LOG_ERROR("seek falhou em %lld us", static_cast<long long>(need));
                 decoderValid_ = false;
@@ -370,9 +380,11 @@ void VideoSource::thread_main() noexcept {
                 }
             }
 
-            const i64 deliverFrom = deliverStart >= 0                ? deliverStart - half
+            const i64 deliverFrom = showKeyframe                    ? std::numeric_limits<i64>::min() / 4
+                                 : deliverStart >= 0                ? deliverStart - half
                                  : (req.mode == DecodeMode::Playback) ? req.targetUs - half
                                                                       : need - half;
+            showKeyframe = false;
             FrameRef frame;
             i64 pts = 0;
             bool eos = false;

@@ -635,6 +635,66 @@ AUREA_TEST(Scene3D, ObjAndFbxImportThroughUfbx) {
 }
 
 // -----------------------------------------------------------------------------
+// Texturas escolhidas junto com o modelo (FBX/OBJ)
+// -----------------------------------------------------------------------------
+#include "ModelTextureFixtures.hpp"
+
+AUREA_TEST(Scene3D, UfbxTexturesFromPickedFilesResolveByName) {
+    namespace fx = aurea::test_fixtures;
+    ImportOptions o;
+    // OBJ: sem .mtl na pasta, o material inteiro falta — e a UI sabe o nome.
+    {
+        const std::string folder = fx::fresh_model_folder("aurea_teste_texturas_obj");
+        const std::string obj = fx::write_textured_obj(folder);
+        ImportResult r = import_scene_file(obj, o);
+        AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+        if (r.ok()) {
+            AUREA_CHECK_EQ(r.asset->missingTextures.size(), 1u);
+            if (!r.asset->missingTextures.empty()) AUREA_CHECK(r.asset->missingTextures[0] == "Original.mtl");
+        }
+        // O .mtl escolhido (pasta gravada "Materiais/" ignorada), sem a imagem.
+        fx::write_picked_mtl(folder, "Tijolo.png");
+        r = import_scene_file(obj, o);
+        AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+        if (r.ok()) {
+            AUREA_CHECK(!r.asset->materials.empty() && !r.asset->materials[0].baseColorTex.valid());
+            AUREA_CHECK_EQ(r.asset->missingTextures.size(), 1u);
+            if (!r.asset->missingTextures.empty()) AUREA_CHECK(r.asset->missingTextures[0] == "Tijolo.png");
+        }
+        // A imagem escolhida depois: resolve pelo nome (sem "C:\Artista\texturas\").
+        AUREA_CHECK(fx::write_solid_png(folder + "Tijolo.png", 0, 255, 0));
+        r = import_scene_file(obj, o);
+        AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+        if (r.ok()) {
+            AUREA_CHECK(r.asset->missingTextures.empty());
+            AUREA_CHECK_EQ(r.asset->images.size(), 1u);
+            AUREA_CHECK(!r.asset->materials.empty() && r.asset->materials[0].baseColorTex.valid());
+        }
+    }
+    // FBX com textura externa em "textures\Tijolo.png": a imagem escolhida
+    // fica ao lado do modelo.
+    {
+        const std::string folder = fx::fresh_model_folder("aurea_teste_texturas_fbx");
+        const std::string fbx = fx::write_textured_fbx(folder, "Tijolo.png");
+        ImportResult r = import_scene_file(fbx, o);
+        AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+        if (r.ok()) {
+            AUREA_CHECK(!r.asset->materials.empty() && !r.asset->materials[0].baseColorTex.valid());
+            AUREA_CHECK_EQ(r.asset->missingTextures.size(), 1u);
+            if (!r.asset->missingTextures.empty()) AUREA_CHECK(r.asset->missingTextures[0] == "Tijolo.png");
+        }
+        AUREA_CHECK(fx::write_solid_png(folder + "Tijolo.png", 0, 255, 0));
+        r = import_scene_file(fbx, o);
+        AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+        if (r.ok()) {
+            AUREA_CHECK(r.asset->missingTextures.empty());
+            AUREA_CHECK_EQ(r.asset->images.size(), 1u);
+            AUREA_CHECK(!r.asset->materials.empty() && r.asset->materials[0].baseColorTex.valid());
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Texto 3D
 // -----------------------------------------------------------------------------
 #include "aurea/scene3d/Text3D.hpp"

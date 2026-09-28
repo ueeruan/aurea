@@ -1,5 +1,6 @@
 package com.aurea.aurea.state
 
+import com.aurea.aurea.effects.localizeEffectParams
 import android.app.Application
 import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.R
@@ -245,7 +246,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_importar_o_video, humanError(3))
             return
         }
-        busyMessage = "Importando vídeo gerado…"
+        busyMessage = appText(R.string.app_importing_generated_video)
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
                 engine.importVideo(arquivo.absolutePath, titulo)
@@ -1517,7 +1518,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
 
     fun addText3D(): Long {
-        val id = engine.addText3d("Texto", Text3DInfo("Texto", 0.25f, 1, floatArrayOf(1f, 1f, 1f, 1f)).toFields())
+        val label = appText(R.string.target_text)
+        val id = engine.addText3d(label, Text3DInfo(label, 0.25f, 1, floatArrayOf(1f, 1f, 1f, 1f)).toFields())
         if (id < 0) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_texto, -id)
             return -1
@@ -1616,10 +1618,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * camada aberta: é o que o navegador mostra na ficha (§68). Fica em cache
      * porque a declaração de um tipo nunca muda enquanto o motor está de pé.
      */
-    fun effectSpecs(typeId: Int): List<EffectParam> = specCache.getOrPut(typeId) {
-        val n = engine.queryEffectSpecs(typeId, specRows, 64, specBlob)
-        List(max(0, n)) { EffectParam.read(specRows, it, specBlob) }
+    fun effectSpecs(typeId: Int): List<EffectParam> {
+        // O cache guarda o texto já traduzido: trocar o idioma do app o invalida.
+        val res = getApplication<Application>().resources
+        val locale = res.configuration.locales[0]
+        if (locale != specLocale) {
+            specCache.clear()
+            specLocale = locale
+        }
+        return specCache.getOrPut(typeId) {
+            val n = engine.queryEffectSpecs(typeId, specRows, 64, specBlob)
+            localizeEffectParams(res, typeId, List(max(0, n)) { EffectParam.read(specRows, it, specBlob) })
+        }
     }
+    private var specLocale: java.util.Locale? = null
 
     /** Read-only timeline expansion snapshot; does not select the layer or open its dock. */
     private val englishEffectResources by lazy {
@@ -1650,9 +1662,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun refreshEffectParams() {
         val id = primary ?: return
+        val res = getApplication<Application>().resources
         effectParams = effects.associate { e ->
             val n = engine.queryEffectParams(id, e.effectId, rowBuffer, 64, textBlob)
-            e.effectId to List(max(0, n)) { EffectParam.read(rowBuffer, it, textBlob) }
+            e.effectId to localizeEffectParams(res, e.typeId, List(max(0, n)) { EffectParam.read(rowBuffer, it, textBlob) })
         }
     }
 
@@ -1869,7 +1882,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return
         }
         engine.setLayerAdjustment(id, true)
-        renameLayer(id, "Camada de ajuste")
+        renameLayer(id, appText(R.string.target_adjust))
         refreshNow()
         select(id)
         showToast(appText(R.string.msg_camada_de_ajuste_adicione_efeitos_nela))
@@ -1970,7 +1983,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         if (playing) pause()
         if (!engine.editClipTime(id, operation, amount.toLong(), previous, next))
-            showToast("Sem margem na mídia, vizinho inválido ou camada bloqueada.")
+            showToast(appText(R.string.app_slip_blocked))
         refreshNow()
     }
 
@@ -2426,13 +2439,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Vídeo do seletor do sistema. O motor guarda a URI e abre descritores por ela. */
     fun importVideo(uri: Uri) {
         val app = getApplication<Application>()
-        busyMessage = "Importando vídeo…"
+        busyMessage = appText(R.string.app_importing_video)
         viewModelScope.launch {
             try {
                 val id = withContext(Dispatchers.IO) {
                     ExitDiagnostics.mark(app, Phase.VIDEO_PERMISSION)
                     takePermission(uri)
-                    val name = displayName(uri) ?: "Vídeo"
+                    val name = displayName(uri) ?: appText(R.string.target_video)
                     ExitDiagnostics.mark(app, Phase.VIDEO_NATIVE)
                     engine.importVideo(uri.toString(), name).also { imported ->
                         ExitDiagnostics.mark(app, if (imported < 0) Phase.VIDEO_FAILED else Phase.VIDEO_READY)
@@ -2464,16 +2477,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun importAudio(uri: Uri) {
         takePermission(uri)
-        val name = displayName(uri)?.substringBeforeLast('.') ?: "Áudio"
-        busyMessage = "Importando áudio…"
+        val name = displayName(uri)?.substringBeforeLast('.') ?: appText(R.string.target_audio)
+        busyMessage = appText(R.string.app_importing_audio)
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) { engine.importAudio(uri.toString(), name) }
             busyMessage = null
             if (id < 0) {
                 errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) {
-                    "Esse arquivo não tem som que este aparelho consiga ler."
+                    appText(R.string.app_audio_unreadable)
                 } else {
-                    "Não foi possível importar o áudio. ${humanError((-id).toInt())}"
+                    appText(R.string.app_audio_import_failed, humanError((-id).toInt()))
                 }
                 return@launch
             }
@@ -2507,7 +2520,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // --- Texto ------------------------------------------------------------------
     /** Botão "Texto": camada nova no centro, já escolhida. */
     fun addText(): Long {
-        val id = engine.addText("Texto")
+        val id = engine.addText(appText(R.string.target_text))
         if (id < 0) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_texto_2, -id)
             return -1
@@ -2778,7 +2791,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             errorMessage = appText(R.string.msg_use_um_hdri_hdr_radiance)
             return
         }
-        busyMessage = "Carregando o HDRI…"
+        busyMessage = appText(R.string.app_loading_hdri)
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
                 val file = copyModelToSandbox(uri, "hdr") ?: return@withContext -1_000L
@@ -2822,7 +2835,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             errorMessage = appText(R.string.msg_use_um_hdri_hdr_radiance)
             return
         }
-        busyMessage = "Carregando o HDRI…"
+        busyMessage = appText(R.string.app_loading_hdri)
         viewModelScope.launch {
             val asset = withContext(Dispatchers.IO) {
                 val file = copyModelToSandbox(uri, "hdr") ?: return@withContext -1_000L
@@ -2936,20 +2949,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (layers.firstOrNull { it.id == id }?.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
             showToast(appText(R.string.msg_escolha_uma_camada_de_video)); return
         }
-        if (motionStatus[0].toInt() == 1) { showToast("Cancele a análise atual primeiro"); return }
+        if (motionStatus[0].toInt() == 1) { showToast(appText(R.string.app_track_cancel_first)); return }
         pause()
         motionAutoApply = -1
         motionTool = tool; motionSource = id; motionSeeds.clear(); motionPicked = 0
         if (tool == 4) { startPickedMotion(); return }
         pointPick = false
-        showToast(if (tool >= 2) "Toque nos cantos: superior esquerdo, direito, inferior direito e esquerdo" else "Toque no detalhe a seguir no preview")
+        showToast(appText(if (tool >= 2) R.string.app_track_tap_corners else R.string.app_track_tap_detail))
     }
     fun cancelMotionPick() { pointPick = null; motionSeeds.clear(); motionPicked = 0; pickCursor = null; motionAutoApply = -1 }
     fun finishPointPick(x: Float, y: Float) {
         if (pointPick == null || motionSource != primary) { cancelMotionPick(); return }
         motionSeeds.add(x); motionSeeds.add(y); motionPicked++
         val needed = if (motionTool == 0) 1 else if (motionTool == 1) 2 else 4
-        if (motionPicked < needed) { showToast("Ponto $motionPicked/$needed. Toque no próximo"); return }
+        if (motionPicked < needed) { showToast(appText(R.string.app_track_point_n, motionPicked, needed)); return }
         pointPick = null; pickCursor = null; startPickedMotion()
     }
     /** -1 nada; 0 cria o Nulo; 3 estabiliza pelo ponto — quando a análise do menu termina. */
@@ -2988,10 +3001,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun cancelMotion() { engine.cancelMotionTrack(); cancelMotionPick(); refreshMotionStatus() }
     fun applyMotion(apply: Int, lock: Boolean = false, smooth: Float = .5f, maxScale: Float = 1.15f, crop: Int = 1, target: Long = primary ?: 0) {
         val result = engine.applyMotionTrack(target, apply, lock, smooth, maxScale, crop)
-        if (result < 0) { showToast("Confira a análise e escolha uma camada 2D sem pai para receber o rastreio"); return }
+        if (result < 0) { showToast(appText(R.string.app_track_check_analysis)); return }
         refreshNow(); refreshMotionStatus()
         if (apply == 0 || apply == 4 || apply == 5) select(result)
-        showToast("Rastreio aplicado. Você pode desfazer")
+        showToast(appText(R.string.app_track_applied))
     }
 
     // --- Máscaras (roto) e track matte ----------------------------------------------------------
@@ -3352,10 +3365,24 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (detail?.timeRemap != true) engine.setTimeRemap(id, true)
         refreshNow()
     }
-    /** Rampa pronta (0 linear, 1 suave, 2 herói, 3 acelerar, 4 desacelerar); −1 = sem rampa. */
+    /** Rampa pronta (0 linear, 1 suave, 2 herói, 3 acelerar, 4 desacelerar, 5 congelar tudo, 6 ao contrário, 7 congelar aqui); −1 = sem rampa. */
     fun applySpeedRamp(preset: Int) {
         val id = primary ?: return
         if (preset < 0) engine.setTimeRemap(id, false) else engine.applySpeedRamp(id, preset)
+        refreshNow()
+    }
+
+    /** Remapear tempo: o momento do vídeo (segundos da fonte) na chave do cabeçote. */
+    fun setRemapTime(effectId: Int, seconds: Float) {
+        val id = primary ?: return
+        send { setEffectParam(id, effectId, 0, seconds) }
+        refreshNow()
+    }
+
+    /** Suavidade da chave do cabeçote: 0 linear, 1 nos dois, 3 no início, 4 no fim. */
+    fun setRemapEase(effectId: Int, mode: Int) {
+        val id = primary ?: return
+        send { setEffectParam(id, effectId, 1, mode.toFloat()) }
         refreshNow()
     }
 
@@ -3457,12 +3484,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         cameraSelection = null; refreshCameraFeatures(true)
     }
     fun calibrateCamera(operation: Int, distance: Float = 100f) {
-        if (!engine.calibrateCameraScene(operation, distance)) { showToast("Crie a câmera e selecione pontos válidos; distância exige 2 pontos e chão exige 3"); return }
-        refreshNow(); refreshCameraFeatures(true); showToast("Referência da cena atualizada; você pode desfazer")
+        if (!engine.calibrateCameraScene(operation, distance)) { showToast(appText(R.string.app_cam_calibrate_failed)); return }
+        refreshNow(); refreshCameraFeatures(true); showToast(appText(R.string.app_cam_reference_updated))
     }
     fun placeTrackedModel(id: Long) {
-        if (!engine.placeModelOnTrack(id)) { showToast("Crie a câmera e selecione a superfície antes de posicionar o modelo"); return }
-        refreshNow(); showToast("Modelo colocado na superfície rastreada")
+        if (!engine.placeModelOnTrack(id)) { showToast(appText(R.string.app_cam_place_failed)); return }
+        refreshNow(); showToast(appText(R.string.app_cam_model_placed))
     }
 
     fun selectCameraPoint(x: Float, y: Float, radius: Float) {
@@ -3503,7 +3530,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun refineCamera(remove: Boolean, motion: Int, fov: Float) {
-        if (!engine.refineCameraTrack(remove, motion, fov)) { showToast("Selecione pontos e aguarde o fim da análise"); return }
+        if (!engine.refineCameraTrack(remove, motion, fov)) { showToast(appText(R.string.app_cam_refine_failed)); return }
         cameraTrackPoll?.cancel(); cameraSelectedCount = 0
         cameraTrackPoll = viewModelScope.launch {
             while (true) { cameraTrack = readCameraTrack(); if (cameraTrack?.state != 1) break; kotlinx.coroutines.delay(150) }
@@ -3787,7 +3814,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun addTextAnimator(props: Int) {
         val id = primary ?: return
         if (engine.addTextAnimator(id, props) < 0) {
-            showToast("Não foi possível adicionar a animação de texto.")
+            showToast(appText(R.string.app_text_anim_add_failed))
             return
         }
         refreshNow()
@@ -4240,9 +4267,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             markBeatLive()
             return
         }
+        // Nada de pause/seek: o cabeçote já está no frame, e um seek aqui era
+        // uma descontinuidade (decoder re-posicionado, som re-preparado) — e,
+        // com o status atrasado, voltava ao cabeçote VELHO (o "começa do
+        // início"). Se o motor já estiver tocando, ele marca no relógio.
         val f = frame.coerceIn(0, max(0, project.durationFrames - 1))
-        pause()
-        seek(f)
         val on = engine.toggleMarker(f.toLong())
         refreshNow()
         showToast(if (on) appText(R.string.msg_marca_adicionada) else appText(R.string.msg_marca_removida))
@@ -4532,7 +4561,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // --- Tempo do clipe --------------------------------------------------------
     fun setLayerSpeed(speed: Float) {
         val id = primary ?: return
-        send { setLayerSpeed(id, speed.coerceIn(0.05f, 16f)) }
+        val d = detail
+        val v = speed.coerceIn(0.05f, 16f)
+        // Com keyframe, mexer grava/atualiza o keyframe no cabeçote (como o volume).
+        if (d != null && d.speedAnimated) send { insertKeyframe(id, TrackProperty.SPEED, -1, 0, d.localPlayhead, v) }
+        else send { setLayerSpeed(id, v) }
+        refreshNow()
+    }
+
+    /** Liga/desliga keyframe de velocidade no cabeçote. */
+    fun toggleSpeedKeyframe() {
+        val id = primary ?: return
+        val d = detail ?: return
+        val at = keyframes[id].orEmpty().any { it.property == TrackProperty.SPEED && it.time == d.localPlayhead }
+        if (at) send { deleteKeyframe(id, TrackProperty.SPEED, -1, 0, d.localPlayhead) }
+        else send { insertKeyframe(id, TrackProperty.SPEED, -1, 0, d.localPlayhead, d.speed.coerceIn(0.05f, 16f)) }
         refreshNow()
     }
 
@@ -4615,24 +4658,51 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    private val MODEL_EXTS = setOf("glb", "gltf", "fbx", "obj")
+
+    /** "Importar texturas": a layer do modelo e os arquivos que ele referencia e não achou (só o nome). */
+    data class MissingModelTextures(val layer: Long, val names: List<String>)
+
+    /** Não nulo = o pedido "Importar texturas" está aberto (AureaApp mostra). */
+    var missingModelTextures by mutableStateOf<MissingModelTextures?>(null)
+        private set
+
+    /** O modelo do último pedido: o diálogo fecha ANTES de o seletor devolver os arquivos. */
+    private var texturesTarget: MissingModelTextures? = null
+
+    private fun promptModelTextures(req: MissingModelTextures) {
+        texturesTarget = req
+        missingModelTextures = req
+    }
+
     /**
      * Modelo 3D (glTF/GLB, FBX ou OBJ) do seletor de arquivos. O arquivo é COPIADO para o
-     * sandbox do app (`files/projetos/modelos/<hash>.glb`): a permissão de uma URI
+     * sandbox do app (`files/projetos/modelos/…`): a permissão de uma URI
      * `content://` pode sumir, e o projeto guarda só o caminho relativo — o
      * mesmo .aurea abre no Android e no iOS. Dois imports do mesmo arquivo
      * reaproveitam a cópia (hash do conteúdo).
      *
+     * FBX/OBJ: as texturas e o .mtl podem vir JUNTO (seleção múltipla) ou dentro
+     * de um .zip. Tudo vai para a pasta do modelo (`modelos/<hash>/`) com o nome
+     * do seletor; o motor acha a textura pelo nome do arquivo, sem a pasta
+     * gravada e sem diferenciar maiúsculas. O que ainda faltar abre "Importar
+     * texturas" (e a pasta viaja com o projeto: mesmo caminho relativo no iOS).
+     *
      * O motor valida de verdade (buffers, acessores, texturas): falha mostra o
      * MOTIVO, nunca "importado" com a tela preta.
      */
-    fun importModel(uri: Uri) {
-        val name = displayName(uri) ?: "Modelo 3D"
-        val ext = name.substringAfterLast('.', "").lowercase()
-        if (ext !in setOf("glb", "gltf", "fbx", "obj")) {
+    fun importModel(uri: Uri) = importModel(listOf(uri))
+
+    fun importModel(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val picks = uris.map { it to (displayName(it) ?: "") }
+        val modelPick = picks.firstOrNull { it.second.substringAfterLast('.', "").lowercase() in MODEL_EXTS }
+        val zipPick = picks.firstOrNull { it.second.substringAfterLast('.', "").lowercase() == "zip" }
+        if (modelPick == null && zipPick == null) {
             errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
             return
         }
-        busyMessage = "Importando modelo 3D…"
+        busyMessage = appText(R.string.app_importing_model)
         viewModelScope.launch {
             val poll = launch {
                 while (true) {
@@ -4651,24 +4721,164 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             val detail = arrayOfNulls<String>(1)
             val id = withContext(Dispatchers.IO) {
-                val file = copyModelToSandbox(uri, ext) ?: return@withContext -1_000L
-                engine.importModel(file.absolutePath, name.substringBeforeLast('.'), detail)
+                val staged = stageModel(picks) ?: return@withContext -1_000L
+                if (staged.first == null) return@withContext -1_001L
+                engine.importModel(staged.first!!.absolutePath, staged.second, detail)
             }
             poll.cancel()
             busyMessage = null
             when {
                 id == -1_000L -> errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                id == -1_001L -> errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
                 id < 0 -> errorMessage = appText(R.string.msg_model_import_failed, detail[0]?.trim()?.ifBlank { null } ?: humanError((-id).toInt()))
                 else -> {
                     refreshNow()
                     select(id)
+                    val missing = engine.modelMissingTextures(id)
                     val warnings = detail[0]?.lines()?.filter { it.isNotBlank() }.orEmpty()
-                    if (warnings.isNotEmpty()) showToast(appText(R.string.msg_modelo_importado_aviso_s, warnings.size, warnings.first()))
+                    if (missing.isNotEmpty() && engine.modelFolder(id).isNotEmpty()) promptModelTextures(MissingModelTextures(id, missing))
+                    else if (warnings.isNotEmpty()) showToast(appText(R.string.msg_modelo_importado_aviso_s, warnings.size, warnings.first()))
                 }
             }
         }
     }
 
+    /** Abre "Importar texturas" para o modelo selecionado (o painel do objeto 3D oferece quando falta algo). */
+    fun askModelTextures() {
+        val id = primary ?: return
+        val missing = engine.modelMissingTextures(id)
+        if (missing.isNotEmpty() && engine.modelFolder(id).isNotEmpty()) promptModelTextures(MissingModelTextures(id, missing))
+    }
+
+    /** Quantos arquivos o modelo selecionado ainda procura (0 = nada, ou não é modelo importado). */
+    fun selectedModelMissingTextures(): Int = primary?.let { engine.modelMissingTextures(it).size } ?: 0
+
+    fun dismissModelTextures() { missingModelTextures = null }
+
+    /**
+     * As imagens (e o .mtl) escolhidas para o modelo do pedido aberto: copiadas
+     * para a pasta dele — com o nome que o MODELO grava quando o do seletor bate
+     * sem diferenciar maiúsculas — e o modelo é relido. O que ainda faltar
+     * reabre o pedido com a lista nova.
+     */
+    fun importModelTextures(uris: List<Uri>) {
+        val req = texturesTarget ?: return
+        texturesTarget = null
+        missingModelTextures = null
+        if (uris.isEmpty()) return
+        busyMessage = appText(R.string.msg_texturas) + "…"
+        viewModelScope.launch {
+            val detail = arrayOfNulls<String>(1)
+            val left = withContext(Dispatchers.IO) {
+                val folder = engine.modelFolder(req.layer).takeIf { it.isNotEmpty() }?.let(::File) ?: return@withContext -1_000
+                val wanted = req.names.associateBy { it.lowercase() }
+                var copied = 0
+                for (uri in uris) {
+                    val picked = displayName(uri) ?: continue
+                    val named = wanted[picked.lowercase()]
+                    val target = named ?: safeModelFileName(picked) ?: continue
+                    // Fora da lista (a textura que o .mtl escolhido agora vai pedir):
+                    // entra, mas nunca por cima de um arquivo que já está na pasta.
+                    if (named == null && File(folder, target).exists()) { copied++; continue }
+                    if (copyUriTo(uri, File(folder, target))) copied++
+                }
+                if (copied == 0) return@withContext -1_000
+                engine.reloadModelTextures(req.layer, detail)
+            }
+            busyMessage = null
+            when {
+                left == -1_000 -> errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                left < 0 -> errorMessage = appText(R.string.msg_model_import_failed, detail[0]?.trim()?.ifBlank { null } ?: humanError(-left))
+                else -> {
+                    refreshNow()
+                    val still = engine.modelMissingTextures(req.layer)
+                    if (still.isEmpty()) showToast(appText(R.string.model_textures_done))
+                    else promptModelTextures(MissingModelTextures(req.layer, still))
+                }
+            }
+        }
+    }
+
+    /**
+     * Copia o que veio do seletor para o sandbox. Devolve (arquivo do modelo,
+     * nome da layer); modelo nulo = nenhum modelo entre os arquivos (nem no .zip);
+     * null = a cópia falhou. glTF/GLB continuam em `modelos/<hash>.<ext>`;
+     * FBX/OBJ ganham a pasta `modelos/<hash>/` com as texturas ao lado.
+     */
+    private fun stageModel(picks: List<Pair<Uri, String>>): Pair<File?, String>? {
+        val app = getApplication<Application>()
+        val root = File(File(app.filesDir, "projetos"), "modelos").apply { mkdirs() }
+        val unzipDir = File(root, "importando-zip")
+        try {
+            // (nome, abrir) de cada arquivo: os escolhidos e o conteúdo dos .zip.
+            val sources = mutableListOf<Pair<String, () -> java.io.InputStream?>>()
+            for ((uri, name) in picks) {
+                if (name.substringAfterLast('.', "").lowercase() != "zip") {
+                    sources += name to { app.contentResolver.openInputStream(uri) }
+                    continue
+                }
+                unzipDir.deleteRecursively()
+                unzipDir.mkdirs()
+                app.contentResolver.openInputStream(uri)?.use { raw ->
+                    java.util.zip.ZipInputStream(raw).use { zip ->
+                        while (true) {
+                            val entry = zip.nextEntry ?: break
+                            // Só o nome (a pasta do zip não importa; "../" nunca sai daqui).
+                            val file = safeModelFileName(entry.name.substringAfterLast('/').substringAfterLast('\\'))
+                            if (entry.isDirectory || file == null || entry.name.contains("__MACOSX")) continue
+                            val out = File(unzipDir, file)
+                            if (out.exists()) continue
+                            FileOutputStream(out).use { zip.copyTo(it) }
+                            sources += file to { out.inputStream() }
+                        }
+                    }
+                } ?: throw IllegalStateException("sem stream")
+            }
+            val model = sources.firstOrNull { it.first.substringAfterLast('.', "").lowercase() in MODEL_EXTS }
+                ?: return null to ""
+            val ext = model.first.substringAfterLast('.').lowercase()
+            val tmp = File(root, "importando.$ext")
+            val digest = java.security.MessageDigest.getInstance("SHA-1")
+            (model.second() ?: throw IllegalStateException("sem stream")).use { input ->
+                FileOutputStream(tmp).use { out ->
+                    val buf = ByteArray(1 shl 16)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        digest.update(buf, 0, n)
+                        out.write(buf, 0, n)
+                    }
+                }
+            }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            val name = model.first.substringBeforeLast('.').ifBlank { "Modelo 3D" }
+            if (ext != "fbx" && ext != "obj") {
+                val dst = File(root, "$hash.$ext")
+                if (dst.exists()) tmp.delete() else tmp.renameTo(dst)
+                return dst to name
+            }
+            val folder = File(root, hash).apply { mkdirs() }
+            val dst = File(folder, "$hash.$ext")
+            if (dst.exists()) tmp.delete() else if (!tmp.renameTo(dst)) throw IllegalStateException("rename")
+            for (companion in sources) {
+                if (companion === model) continue
+                val cext = companion.first.substringAfterLast('.', "").lowercase()
+                if (cext in MODEL_EXTS || cext == "zip") continue
+                val target = safeModelFileName(companion.first) ?: continue
+                (companion.second() ?: continue).use { input -> FileOutputStream(File(folder, target)).use { input.copyTo(it) } }
+            }
+            return dst to name
+        } catch (e: Exception) {
+            // Temporário tem dono (§52): a cópia pela metade (disco cheio, stream cortado) sai.
+            Log.w(TAG, "copia do modelo 3D para o app falhou: ${e.javaClass.simpleName}: ${e.message}")
+            root.listFiles { f -> f.name.startsWith("importando.") }?.forEach { it.delete() }
+            return null
+        } finally {
+            unzipDir.deleteRecursively()
+        }
+    }
+
+    /** Cópia de um arquivo único para `projetos/modelos/<hash>.<ext>` (o HDRI usa; o modelo passa por [stageModel]). */
     private fun copyModelToSandbox(uri: Uri, ext: String): File? = try {
         val dir = File(File(getApplication<Application>().filesDir, "projetos"), "modelos").apply { mkdirs() }
         val tmp = File(dir, "importando.$ext")
@@ -4695,11 +4905,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         null
     }
 
+    private fun copyUriTo(uri: Uri, dst: File): Boolean = try {
+        getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(dst).use { input.copyTo(it) }
+        } != null
+    } catch (e: Exception) {
+        Log.w(TAG, "copia da textura falhou: ${e.javaClass.simpleName}: ${e.message}")
+        dst.delete()
+        false
+    }
+
+    /** Nome de arquivo seguro para a pasta do modelo (sem pasta, sem oculto); null = inválido. */
+    private fun safeModelFileName(name: String): String? {
+        val base = name.substringAfterLast('/').substringAfterLast('\\').trim()
+        if (base.isEmpty() || base.startsWith('.') || base.length > 200) return null
+        return base
+    }
+
     /** Imagem do seletor do sistema: decodificada aqui (RGBA8) e entregue ao motor. */
     fun importImage(uri: Uri) {
         takePermission(uri)
-        val name = displayName(uri) ?: "Imagem"
-        busyMessage = "Importando imagem…"
+        val name = displayName(uri) ?: appText(R.string.target_image)
+        busyMessage = appText(R.string.app_importing_image)
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
                 val bmp = AureaEngine.decodeBitmapRgba(getApplication(), uri) ?: return@withContext -1L
@@ -4775,10 +5002,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val notice = engine.loadNotice()
             val missing = notice ushr 16
             val parts = buildList {
-                if (notice and 1 != 0) add("o arquivo principal estava danificado; abrimos a última cópia válida")
-                if (notice and 2 != 0) add("o projeto abriu com partes faltando (o arquivo original foi guardado)")
-                if (notice and 4 != 0) add("projeto de versão anterior: uma cópia do original foi guardada")
-                if (notice and 8 != 0) add("$missing mídia(s)/fonte(s)/modelo(s) não encontrada(s) — o espaço fica marcado para religar")
+                if (notice and 1 != 0) add(appText(R.string.app_open_notice_damaged))
+                if (notice and 2 != 0) add(appText(R.string.app_open_notice_partial))
+                if (notice and 4 != 0) add(appText(R.string.app_open_notice_old_version))
+                if (notice and 8 != 0) add(appText(R.string.app_open_notice_missing, missing))
             }
             if (parts.isNotEmpty()) {
                 Log.w(TAG, "abertura com avisos: 0x${Integer.toHexString(notice)}")
@@ -4950,7 +5177,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val src = File(path)
             val meta = readMeta(src)
-            val title = (meta?.title ?: src.nameWithoutExtension) + " (cópia)"
+            val title = appText(R.string.app_project_copy_title, meta?.title ?: src.nameWithoutExtension)
             val dst = File(directories().projects, "${uniqueName(title)}.aurea")
             // Disco cheio no meio da cópia derrubava o app (exceção sem dono na
             // corrotina). Agora: o que foi copiado pela metade sai, e a pessoa é avisada.

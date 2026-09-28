@@ -689,6 +689,7 @@ func expandedTimelineRows(_ base: [TimelineRow], expanded: Int64?, keys: [Int64:
             else {
                 switch track.property {
                 case 30: name = "Time remap"
+                case 39: name = "Speed"
                 case 31: name = (effects.first { $0.effectId == track.effect }?.name ?? "Effect") + " · \(UInt64(track.param) + 1)"
                 case 32: name = "Audio · \(UInt64(track.param) + 1)"
                 case 33: name = "Text animation \(UInt64(track.effect) + 1) · \(UInt64(track.param) + 1)"
@@ -852,6 +853,13 @@ enum TimelinePress {
     static func timeEdit(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dx) >= editRatio * abs(dy) }
     /// Claramente na pilha: reordenar.
     static func stackEdit(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dy) >= editRatio * abs(dx) }
+    /// Fileira compacta: o arrasto vertical passa pelas camadas como uma roda —
+    /// cada altura de linha é uma camada; `travel` = quanto o dedo SUBIU
+    /// (positivo = a de baixo). Par do `Press.compactSteps` do Android.
+    static func compactSteps(_ travel: CGFloat, row: CGFloat) -> Int {
+        guard travel.isFinite, row.isFinite, row > 0 else { return 0 }
+        return Int(travel / row)
+    }
 }
 
 /// A timeline vira a fileira única da camada? (par do `timelineCompact` do

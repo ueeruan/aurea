@@ -101,6 +101,7 @@ fun EffectDetailSheet(
                     }
                 }
                 Spacer(Modifier.height(AureaDims.S4))
+                val favoriteDesc = stringResource(if (favorite) R.string.effect_tirar_favoritos else R.string.effect_nos_favoritos)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(name, style = AureaType.of(22f, FontWeight.W700, -0.4f))
@@ -110,7 +111,7 @@ fun EffectDetailSheet(
                     Box(
                         Modifier
                             .size(AureaDims.MinTap)
-                            .semantics { contentDescription = if (favorite) "Tirar dos favoritos" else "Pôr nos favoritos" }
+                            .semantics { contentDescription = favoriteDesc }
                             .tocavel(onClick = onFavorite),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -171,12 +172,12 @@ private fun paramSummary(p: com.aurea.aurea.engine.EffectParam): String {
         return if (p.enumLabels.size > 3) "$shown…" else shown
     }
     return when (p.type) {
-        com.aurea.aurea.engine.ParamType.COLOR -> "Cor"
+        com.aurea.aurea.engine.ParamType.COLOR -> stringResource(R.string.ds_cor)
         com.aurea.aurea.engine.ParamType.BOOL -> stringResource(R.string.effect_param_bool)
         com.aurea.aurea.engine.ParamType.POINT2D -> stringResource(R.string.effect_param_point)
         else -> {
             val unit = if (p.unit.isNotEmpty()) " ${p.unit}" else ""
-            if (p.min.isFinite() && p.max.isFinite() && p.max > p.min) "${trimNumber(p.min)} a ${trimNumber(p.max)}$unit" else unit.trim()
+            if (p.min.isFinite() && p.max.isFinite() && p.max > p.min) stringResource(R.string.fx_param_range, trimNumber(p.min), trimNumber(p.max)) + unit else unit.trim()
         }
     }
 }

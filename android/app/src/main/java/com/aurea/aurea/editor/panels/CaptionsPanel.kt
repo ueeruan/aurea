@@ -96,8 +96,8 @@ internal fun CaptionsPanel(env: PanelEnv) {
                 CaptionPresetBrowser(cap)
                 cap.busy?.let { Note(it, AureaColors.Accent) }
                 cap.error?.let { Note(it, AureaColors.Danger) }
-                Note("Whisper no aparelho. O primeiro uso baixa o modelo; seu áudio permanece local.", AureaColors.Muted)
-                if (cap.busy != null) Action("Cancelar") { cap.cancelTranscription() }
+                Note(stringResource(R.string.edt_captions_whisper_note), AureaColors.Muted)
+                if (cap.busy != null) Action(stringResource(R.string.common_cancel)) { cap.cancelTranscription() }
                 Label(stringResource(R.string.panel_idioma_fala))
                 Chips(Languages.map { it.second ?: stringResource(R.string.pn_caption_lang_auto) }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

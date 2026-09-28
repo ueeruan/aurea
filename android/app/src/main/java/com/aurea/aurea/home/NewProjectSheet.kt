@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -173,8 +174,12 @@ internal fun NewProjectSheet(
             if (over != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    (over.exportLimitReason() ?: "Este aparelho exporta até ${com.aurea.aurea.engine.DeviceReport.shortLabel(over.maxExportHeight)}.") +
-                        " Dá para editar em ${frame.width} × ${frame.height}; a exportação sai em no máximo ${com.aurea.aurea.engine.DeviceReport.shortLabel(over.maxExportHeight)}.",
+                    stringResource(
+                        R.string.app_new_project_export_cap,
+                        over.exportLimitReason(LocalContext.current)
+                            ?: stringResource(R.string.app_device_export_limit, com.aurea.aurea.engine.DeviceReport.shortLabel(over.maxExportHeight)),
+                        frame.width, frame.height, com.aurea.aurea.engine.DeviceReport.shortLabel(over.maxExportHeight),
+                    ),
                     style = AureaType.Note,
                 )
             }

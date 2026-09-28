@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cctype>
 #include <cstring>
+#include <filesystem>
 #include <unordered_map>
 
 // Implementações de terceiros: os avisos deles não são nossos.

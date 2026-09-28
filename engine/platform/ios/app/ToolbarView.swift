@@ -46,6 +46,8 @@ struct TopBarView: View {
                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_projetos"))
                 ShellInlineName(name: model.projectName, placeholder: "(Sem título)", limit: 320) { model.renameCurrentProject(to: $0) }
             }
+            // Selecionar UMA camada pela lista (sem ter de achar o clipe na timeline).
+            if !model.layers.isEmpty { pickLayerButton(tint: AureaColors.text, width: 44) }
             searchButton
             Button { open(.timelineMenu) } label: { MaterialGlyph("filled.MoreVert", size: 21, color: AureaColors.text).frame(width: 40, height: 44) }
                 .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_linha_tempo"))
@@ -62,6 +64,11 @@ struct TopBarView: View {
                 model.mutate { $0.setLayer(row.id, name: value) }; model.refreshModel(force: true)
             }
             .id(row.id)
+            // Esconder/mostrar a caixa da seleção no preview (ela tampa o que está por baixo).
+            ShellBarButton(glyph: model.hideSelectionBox ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Square,
+                           description: AureaText.t(model.hideSelectionBox ? "editor_mostrar_caixa_selecao" : "editor_esconder_caixa_selecao"),
+                           size: 19, width: 44, tint: model.hideSelectionBox ? AureaColors.accent : AureaColors.text) { model.hideSelectionBox.toggle() }
+                .accessibilityIdentifier("stage.selectionBox")
             searchButton
             linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 44) { removeSelection() }
@@ -74,6 +81,8 @@ struct TopBarView: View {
             ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 44, tint: AureaColors.onAccent) { model.clearSelection() }
             Text("\(count) camadas selecionadas").font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.onAccent)
                 .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            // Ficar com UMA só: a lista troca o lote por ela num toque.
+            pickLayerButton(tint: AureaColors.onAccent, width: 40)
             searchButton
             linkMenuButton(tint: AureaColors.onAccent)
             ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, tint: AureaColors.onAccent) { model.groupSelection() }
@@ -86,6 +95,10 @@ struct TopBarView: View {
             ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
                            description: AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"), size: 20, tint: AureaColors.onAccent) { model.playPause() }
         }.padding(.trailing, 2)
+    }
+    private func pickLayerButton(tint: Color, width: CGFloat) -> some View {
+        ShellBarButton(glyph: CupertinoGlyph.RectangleStack, description: AureaText.t("editor_selecionar_uma_camada"), size: 19, width: width, tint: tint) { open(.searchLayers) }
+            .accessibilityIdentifier("layerPicker.open")
     }
     private func linkMenuButton(tint: Color, width: CGFloat = 40) -> some View {
         GeometryReader { bounds in
@@ -511,7 +524,7 @@ private struct ShellMenuRow: View {
         ShellMenuSection("sh_menu_selection")
         ShellMenuRow(CupertinoGlyph.CheckmarkSquare, "editor_selecionar_todas_camadas", enabled: model.layers.count >= 2) { act { for row in model.layers { model.select(layerId: row.id, additive: true) } } }
         ShellMenuRow(CupertinoGlyph.Square, "editor_limpar_selecao") { act { model.clearSelection() } }
-        ShellMenuRow(CupertinoGlyph.Search, "editor_buscar_camadas", enabled: !model.layers.isEmpty) { shell.sheet = .searchLayers }
+        ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_selecionar_uma_camada", enabled: !model.layers.isEmpty) { shell.sheet = .searchLayers }
         ShellMenuSection("editor_reproducao_previa")
         ShellMenuRow(CupertinoGlyph.Repeat, "editor_reproducao_loop", checked: model.looping) { act { model.setLooping(!model.looping) } }
         ShellMenuRow(CupertinoGlyph.Fullscreen, model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia") { act { model.fullscreen.toggle() } }
@@ -535,22 +548,30 @@ private struct ShellMenuRow: View {
         ShellMenuSection("editor_mais")
         ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas", enabled: !model.selection.isEmpty) { act { model.groupSelection() } }
     }
+    /// SELECIONAR UMA CAMADA (Menus.kt SearchLayersSheet): todas as camadas
+    /// (miniatura ou selo do tipo + nome); tocar escolhe SÓ ela e fecha. A busca
+    /// só aparece com muitas camadas e o teclado não abre sozinho.
     @ViewBuilder private var searchMenu: some View {
-        ShellMenuSection("sh_menu_search_layers")
-        TextField(AureaText.t("editor_nome_ou_texto_camada"), text: $search).font(.aurea(size: 14)).foregroundStyle(AureaColors.text).tint(AureaColors.accent)
-            .focused($searchFocused).padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 40)
-            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 16).padding(.vertical, 4)
-            .onAppear { searchFocused = true }
+        ShellMenuSection("editor_selecionar_uma_camada")
+        if model.layers.count >= 7 || !search.isEmpty {
+            TextField(AureaText.t("editor_nome_ou_texto_camada"), text: $search).font(.aurea(size: 14)).foregroundStyle(AureaColors.text).tint(AureaColors.accent)
+                .focused($searchFocused).padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 40)
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 16).padding(.vertical, 4)
+        }
         if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && searchHits.isEmpty {
             Text(AureaText.t("sh_menu_no_layer_matches", search.trimmingCharacters(in: .whitespacesAndNewlines))).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.horizontal, 20).padding(.vertical, 12)
         }
         ForEach(searchHits) { row in
-            Button { act { model.select(layerId: row.id) } } label: {
+            Button { act { model.select(layerId: row.id, additive: false) } } label: {
                 HStack(spacing: 12) {
-                    Circle().fill(row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count ? AureaColors.labelPalette[Int(row.label) - 1] : AureaColors.muted).frame(width: 10, height: 10)
+                    ShellLayerThumbnail(row: row)
                     Text(row.name.isEmpty ? AureaText.t("editor_camada") : row.name).font(.aurea(size: 15)).foregroundStyle(row.selected ? AureaColors.accent : AureaColors.text).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                }.padding(.horizontal, 20).frame(height: 44)
-            }.buttonStyle(AureaPressStyle(shrink: 1))
+                    if row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count {
+                        Circle().fill(AureaColors.labelPalette[Int(row.label) - 1]).frame(width: 10, height: 10)
+                    }
+                    if row.selected { CupertinoGlyph.text(CupertinoGlyph.CheckmarkAlt, size: 16, color: AureaColors.accent) }
+                }.padding(.horizontal, 16).frame(height: 56)
+            }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(row.name)
         }
     }
 

@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,12 +12,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.editor.panels.*
+import com.aurea.aurea.R
 import com.aurea.aurea.presets.PresetEntry
 import com.aurea.aurea.presets.PresetKind
 import com.aurea.aurea.state.EditorStore
@@ -35,30 +38,31 @@ internal fun readEditorCommands(context: Context): List<EditorCommand> {
     } }
 }
 
-private fun commandUnavailable(requirement: String, store: EditorStore): String? {
+@StringRes
+private fun commandUnavailable(requirement: String, store: EditorStore): Int? {
     val selected = store.layers.filter { it.id in store.selection }
     if (requirement == "any") return null
-    if (requirement == "layers") return if (store.layers.isNotEmpty()) null else "Adicione uma camada"
-    if (requirement == "undo") return if (store.project.canUndo) null else "Nenhuma edição para desfazer"
-    if (requirement == "redo") return if (store.project.canRedo) null else "Nenhuma edição para refazer"
-    if (selected.isEmpty()) return "Selecione uma camada"
-    if (selected.any { it.locked }) return "Desbloqueie a seleção para editar"
+    if (requirement == "layers") return if (store.layers.isNotEmpty()) null else R.string.edt_cmd_need_layer
+    if (requirement == "undo") return if (store.project.canUndo) null else R.string.edt_cmd_no_undo
+    if (requirement == "redo") return if (store.project.canRedo) null else R.string.edt_cmd_no_redo
+    if (selected.isEmpty()) return R.string.edt_cmd_select_layer
+    if (selected.any { it.locked }) return R.string.edt_cmd_unlock_selection
     if (requirement == "selection") return null
-    if (requirement == "inside") return if (selected.any { store.playhead > it.startFrame && store.playhead < it.endFrame }) null else "Posicione o cabeçote dentro do clipe"
-    val layer = selected.singleOrNull() ?: return "Selecione apenas uma camada"
+    if (requirement == "inside") return if (selected.any { store.playhead > it.startFrame && store.playhead < it.endFrame }) null else R.string.edt_cmd_playhead_in_clip
+    val layer = selected.singleOrNull() ?: return R.string.edt_cmd_single_layer
     return when (requirement) {
         "single" -> null
-        "inside_single" -> if (store.playhead > layer.startFrame && store.playhead < layer.endFrame) null else "Posicione o cabeçote dentro do clipe"
-        "video", "video_inside" -> if (layer.kind != 1) "Selecione um vídeo" else if (requirement == "video_inside" && store.playhead !in layer.startFrame until layer.endFrame) "Posicione o cabeçote dentro do vídeo" else null
-        "media" -> if (layer.kind in listOf(1, 3)) null else "Selecione vídeo ou áudio"
-        "text" -> if (layer.kind == 4) null else "Selecione um texto"
-        "visual" -> if (layer.kind != 3) null else "Selecione uma camada visual"
-        "text3d" -> if (store.text3d != null) null else "Selecione um texto 3D"
-        "model3d" -> if (layer.kind == 10) null else "Selecione um modelo 3D"
-        "particles" -> if (layer.kind == 11) null else "Selecione partículas"
-        "vector" -> if (store.isVectorLayer) null else "Selecione um vetor"
-        "precomp" -> if (layer.kind == 12) null else "Selecione uma pré-composição"
-        else -> "Ação indisponível neste contexto"
+        "inside_single" -> if (store.playhead > layer.startFrame && store.playhead < layer.endFrame) null else R.string.edt_cmd_playhead_in_clip
+        "video", "video_inside" -> if (layer.kind != 1) R.string.edt_cmd_select_video else if (requirement == "video_inside" && store.playhead !in layer.startFrame until layer.endFrame) R.string.edt_cmd_playhead_in_video else null
+        "media" -> if (layer.kind in listOf(1, 3)) null else R.string.edt_cmd_select_media
+        "text" -> if (layer.kind == 4) null else R.string.edt_cmd_select_text
+        "visual" -> if (layer.kind != 3) null else R.string.edt_cmd_select_visual
+        "text3d" -> if (store.text3d != null) null else R.string.edt_cmd_select_text3d
+        "model3d" -> if (layer.kind == 10) null else R.string.edt_cmd_select_model3d
+        "particles" -> if (layer.kind == 11) null else R.string.edt_cmd_select_particles
+        "vector" -> if (store.isVectorLayer) null else R.string.edt_cmd_select_vector
+        "precomp" -> if (layer.kind == 12) null else R.string.edt_cmd_select_precomp
+        else -> R.string.edt_cmd_unavailable
     }
 }
 
@@ -72,11 +76,13 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf("Tudo") }
     val presets = store.presets.all()
+    val addEffectDetail = stringResource(R.string.edt_cmd_add_effect)
+    val openPresetDetail = stringResource(R.string.edt_cmd_open_preset)
     // Reuse existing catalogs and preference stores; no duplicate effect/preset system.
     val hits = commands.map { CommandHit(it.id, it.title, it.detail, normalizeSearch("${it.title} ${it.keywords} ${it.detail}"), "Ações", it.requires) } +
-        store.catalog.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), "Adicionar efeito · ${it.category}",
+        store.catalog.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(it.category),
             effectSearchText(it.typeId, it.name, it.category), "Efeitos", if (it.typeId == effectTypeId("aurea.text3d.layout")) "text3d" else "selection", effect = it.typeId) } +
-        presets.map { CommandHit("preset:${it.key}", it.name, "Abrir preset · ${it.kind.dir}", normalizeSearch("${it.name} ${it.kind.dir} preset"),
+        presets.map { CommandHit("preset:${it.key}", it.name, openPresetDetail.format(it.kind.dir), normalizeSearch("${it.name} ${it.kind.dir} preset"),
             "Presets", if (it.kind == PresetKind.Text) "text" else "single", preset = it) }
     fun isFavorite(hit: CommandHit) = hit.effect?.let { store.effectPrefs.isFavorite(it) }
         ?: hit.preset?.let { it.key in store.presets.favorites } ?: (hit.id in favorites)
@@ -90,18 +96,22 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = AureaColors.EditorPanel) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.88f).padding(horizontal = 16.dp).imePadding()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Ferramentas", color = AureaColors.Text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                TextButton(onClick = onDismiss) { Text("Fechar") }
+                Text(stringResource(R.string.edt_cmd_title), color = AureaColors.Text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
             }
-            OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Buscar ferramentas" },
-                singleLine = true, placeholder = { Text("Buscar ação, efeito ou preset") })
+            val searchDescription = stringResource(R.string.edt_cmd_search_desc)
+            OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = searchDescription },
+                singleLine = true, placeholder = { Text(stringResource(R.string.edt_cmd_search_hint)) })
             androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(listOf("Tudo", "Favoritos", "Ações", "Efeitos", "Presets")) { name -> FilterChip(selected = category == name, onClick = { category = name }, label = { Text(name) }) }
+                items(listOf("Tudo" to R.string.edt_cmd_all, "Favoritos" to R.string.edt_cmd_favorites, "Ações" to R.string.edt_cmd_actions,
+                    "Efeitos" to R.string.panel_efeitos, "Presets" to R.string.panel_presets)) { (name, label) ->
+                    FilterChip(selected = category == name, onClick = { category = name }, label = { Text(stringResource(label)) }) }
             }
-            if (filtered.isEmpty()) Text(if (category == "Favoritos") "Toque na estrela de uma ferramenta para guardar aqui." else "Nenhuma ferramenta encontrada.", color = AureaColors.Muted, modifier = Modifier.padding(vertical = 20.dp))
+            if (filtered.isEmpty()) Text(stringResource(if (category == "Favoritos") R.string.edt_cmd_fav_empty else R.string.edt_cmd_none), color = AureaColors.Muted, modifier = Modifier.padding(vertical = 20.dp))
             LazyColumn(Modifier.weight(1f)) {
                 items(filtered, key = { it.id }) { hit ->
-                    val reason = commandUnavailable(hit.requires, store)
+                    val reason = commandUnavailable(hit.requires, store)?.let { stringResource(it) }
+                    val favoriteDescription = stringResource(if (isFavorite(hit)) R.string.edt_cmd_fav_remove else R.string.edt_cmd_fav_add, hit.title)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f).heightIn(min = 64.dp).clickable(enabled = reason == null) {
                             // Resolve against the current selection, never a captured layer ID.
@@ -123,7 +133,7 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
                                 hit.preset != null -> store.presets.toggleFavorite(hit.preset)
                                 else -> { favorites = if (hit.id in favorites) favorites - hit.id else favorites + hit.id; preferences.edit().putStringSet("favorites", favorites).apply() }
                             }
-                        }, modifier = Modifier.size(48.dp).semantics { contentDescription = "${if (isFavorite(hit)) "Remover dos" else "Adicionar aos"} favoritos: ${hit.title}" }) {
+                        }, modifier = Modifier.size(48.dp).semantics { contentDescription = favoriteDescription }) {
                             Text(if (isFavorite(hit)) "★" else "☆", color = AureaColors.Accent, fontSize = 24.sp)
                         }
                     }

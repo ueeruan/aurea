@@ -66,6 +66,7 @@ void PlaybackController::play(u64 nowNs) noexcept {
     if (current_.value >= duration_.value - 1) {
         current_ = FrameIndex{0};
         ++generation_;
+        ++mediaEpoch_;
     }
     currentNs_ = frame_to_ns(current_);
     clock_.start(currentNs_, nowNs, speed_);
@@ -94,6 +95,7 @@ void PlaybackController::seek(FrameIndex frame, u64 nowNs) noexcept {
     currentNs_ = frame_to_ns(current_);
     clock_.seek(currentNs_, nowNs);
     ++generation_;
+    ++mediaEpoch_;
 }
 
 void PlaybackController::begin_scrub(u64 nowNs) noexcept {
@@ -155,6 +157,7 @@ FrameIndex PlaybackController::update(u64 nowNs) noexcept {
             ns = ns % endNs;
             clock_.start(ns, nowNs, speed_);
             ++generation_;
+            ++mediaEpoch_;
         } else {
             current_ = FrameIndex{duration_.value - 1};
             currentNs_ = frame_to_ns(current_);

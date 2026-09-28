@@ -493,6 +493,13 @@ NS_SWIFT_NAME(AureaEngine)
 /// é necessário: use `-importImageFile:` para o caminho sem cópia de ida).
 - (long long)importImageFile:(NSString*)path name:(NSString*)name;
 - (long long)importModel:(NSString*)path name:(NSString*)name;
+/// Texturas (e o .mtl do OBJ) que o modelo 3D da layer referencia e não achou: só o nome do arquivo.
+- (NSArray<NSString*>*)modelMissingTextures:(long long)layerId;
+/// Pasta absoluta do arquivo do modelo (com a barra no fim); vazio = não é modelo importado.
+- (NSString*)modelFolder:(long long)layerId;
+/// Relê o modelo com as texturas copiadas para a pasta dele. ≥ 0 = quantas ainda faltam; < 0 = −código
+/// (motivo em lastImportError). Bloqueia: chamar fora da thread principal.
+- (int)reloadModelTextures:(long long)layerId;
 - (long long)importHdri:(NSString*)path;
 - (long long)importObjectHDRI:(NSString*)path layer:(long long)layer;
 - (void)clearHdri;

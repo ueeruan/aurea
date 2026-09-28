@@ -399,6 +399,28 @@ class TimelineGesturesTest {
         trimPastEnd(openTransform = false)
     }
 
+    /** Fileira compacta (camada escolhida, doca aberta): o arrasto vertical troca de camada, sem mover nada. */
+    @Test fun verticalSwipeOnCompactRowStepsThroughLayers() {
+        launch(5)
+        val before = store.layers.map { Triple(it.id, it.startFrame, it.endFrame) }
+        compose.runOnIdle { store.select(before[2].first) }
+        compose.waitForIdle()
+        val x = compose.onNodeWithTag("editor.timeline").fetchSemanticsNode().size.width * .72f
+        timeline().performTouchInput { swipe(Offset(x, height - 4 * density), Offset(x, 4 * density), 300) }
+        compose.runOnIdle {
+            val index = before.indexOfFirst { it.first == store.primary }
+            assertTrue("Swipe up should choose a layer below, index=$index", index > 2)
+            assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
+        }
+        val middle = before.indexOfFirst { it.first == store.primary }
+        timeline().performTouchInput { swipe(Offset(x, 4 * density), Offset(x, height - 4 * density), 300) }
+        compose.runOnIdle {
+            val index = before.indexOfFirst { it.first == store.primary }
+            assertTrue("Swipe down should go back up, index=$index", index < middle)
+            assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
+        }
+    }
+
     @Test fun compactTimelineKeepsTrimHandlesUsableWithTransformPanelOpen() {
         trimPastEnd(openTransform = true)
     }

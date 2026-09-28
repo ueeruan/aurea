@@ -102,7 +102,8 @@ struct TimelineView: View {
     private struct MediaTile { var localFrame: Double; var width: CGFloat; var image: UIImage }
     private struct Marker { var frame: Int32; var packedColor: UInt32; var kind: UInt32 }
     /// `.keys`: arrasto de um losango ESCOLHIDO — a seleção de keyframes inteira anda junta.
-    private enum Mode { case scrub, scroll, move, trimStart, trimEnd, key, keys, reorder, hold, blocked }
+    /// `.step`: fileira compacta — o arrasto vertical passa pelas camadas (roda).
+    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked }
     private struct Interaction {
         var mode: Mode
         var start: CGPoint
@@ -889,6 +890,7 @@ struct TimelineView: View {
                 case 35: model.openPanel(.shape)
                 case 36: model.openPanel(.particles)
                 case 37: model.openPanel(.layer3D)
+                case 39: model.openPanel(.speed)
                 default: model.openPanel(.transform)
                 }
                 return
@@ -930,6 +932,7 @@ struct TimelineView: View {
         var selected = model.layers.filter { model.selection.contains($0.id) }
         if mode == .move, let row, !selected.contains(where: { $0.id == row.id }), let item = model.layers.first(where: { $0.id == row.id }) { selected = [item] }
         var next = Interaction(mode: mode, start: start, view: viewFrame, scroll: scrollY, row: row, hit: touched, selection: selected, snapTargets: [])
+        if mode == .step { next.scroll = 0 }
         let excluded = Set(mode == .move ? selected.map(\.id) : row.map { [$0.id] } ?? [])
         next.snapTargets = targets(excluding: excluded, own: row, edges: mode == .key, keys: mode == .trimStart || mode == .trimEnd)
         // Reordenar na vertical leva a FILEIRA inteira (numa linha compartilhada,
@@ -979,7 +982,7 @@ struct TimelineView: View {
                 model.select(layerId: row.id, additive: false, openOptions: false)
             }
         }
-        if next.mode != .hold && next.mode != .blocked && next.mode != .scroll { pause() }
+        if next.mode != .hold && next.mode != .blocked && next.mode != .scroll && next.mode != .step { pause() }
         if next.mode == .scrub {
             heldView = next.view; model.engine.run { $0.scrubBegin() }
         }
@@ -998,7 +1001,7 @@ struct TimelineView: View {
             if edit && touched.kind == .key { mode = .key }
             else if edit && touched.kind == .trimStart { mode = .trimStart }
             else if edit && touched.kind == .trimEnd { mode = .trimEnd }
-            else { mode = horizontal || compact ? .scrub : .scroll }
+            else { mode = horizontal ? .scrub : (compact ? .step : .scroll) }
             begin(mode, start: start, width: size.width)
         }
         if state == .began || state == .changed { lastPointer = point; pendingPointer = true }
@@ -1023,7 +1026,7 @@ struct TimelineView: View {
                 // Só um eixo CLARO edita: tempo 2:1 move, pilha 2:1 reordena; a diagonal só rola.
                 let time = TimelinePress.timeEdit(dx, dy), stack = TimelinePress.stackEdit(dx, dy)
                 let mode: Mode
-                if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal || compact ? .scrub : .scroll }
+                if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal ? .scrub : (compact ? .step : .scroll) }
                 else if g.hit.kind == .key { mode = time ? .key : (compact ? .blocked : .scroll) }
                 else if g.hit.kind == .header { mode = !time && !compact ? .reorder : .blocked }
                 else if time || compact { mode = .move }
@@ -1068,6 +1071,20 @@ struct TimelineView: View {
             holdView(desired)
         case .scroll:
             scrollY = min(maxScroll(size.height), max(0, g.scroll - (point.y - g.start.y)))
+        case .step:
+            // Fileira compacta: sem lista para rolar, o arrasto vertical troca de
+            // camada como as setas ‹ › (dedo para cima = a de baixo). `scroll`
+            // guarda quanto do arrasto já virou passo.
+            let steps = TimelinePress.compactSteps(g.start.y - point.y - g.scroll, row: m.row)
+            guard steps != 0 else { return }
+            g.scroll += CGFloat(steps) * m.row
+            gesture = g
+            guard let selected = model.primarySelection, let index = model.layers.firstIndex(where: { $0.id == selected }) else { return }
+            let neighbor = index + (steps > 0 ? 1 : -1)
+            if model.layers.indices.contains(neighbor) {
+                model.select(layerId: model.layers[neighbor].id, additive: false)
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
         case .reorder:
             reorderTop = point.y - reorderGrabOffset
             reorderTarget = min(max(0, rowIndex(point.y - m.rowsTop + scrollY)), max(0, rows.count - 1))

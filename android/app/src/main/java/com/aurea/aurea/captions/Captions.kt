@@ -8,6 +8,8 @@ import android.media.MediaMuxer
 import android.net.Uri
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
@@ -102,10 +104,10 @@ object AudioExtractor {
                 val mime = ex.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: ""
                 if (mime.startsWith("audio/")) { track = i; break }
             }
-            if (track < 0) throw IOException("Esta mídia não tem som.")
+            if (track < 0) throw IOException(AppText.get(context, R.string.app_media_no_audio))
             val format = ex.getTrackFormat(track)
             val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-            if (mime != MediaFormat.MIMETYPE_AUDIO_AAC) throw IOException("Formato de som não suportado para transcrição ($mime).")
+            if (mime != MediaFormat.MIMETYPE_AUDIO_AAC) throw IOException(AppText.get(context, R.string.app_audio_format_unsupported, mime))
             ex.selectTrack(track)
             out.parentFile?.mkdirs()
             val mux = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)

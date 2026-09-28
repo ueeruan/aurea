@@ -431,7 +431,9 @@ struct PresetsPanel: View {
     }
     private func tabLabel(_ value: String) -> String {
         // PresetTab labels are literals in the Android source.
-        ["favoritos": "★ Favoritos", "recentes": "Recentes", "animacao": "Animação", "efeitos": "Efeitos", "texto": "Texto", "legenda": "Legenda", "curva": "Curva"][value] ?? value
+        if value == "favoritos" { return "★ " + AureaText.t("edt_cmd_favorites") }
+        if value == "recentes" { return AureaText.t("effect_recentes") }
+        return PanelPresetKind(rawValue: value)?.label ?? value
     }
     private func load() {
         favorites = Set(UserDefaults.standard.stringArray(forKey: "presetFavorites") ?? [])
@@ -1013,6 +1015,18 @@ struct SpeedPanel: View {
     private var flags: UInt32 { (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0 }
     private var kind: UInt32 { model.selectedLayer?.kind ?? 0 }
     private var remap: Bool { flags & 4 != 0 }
+    /// Velocidade com keyframe (bit 6): `speed` é a do cabeçote e mexer grava keyframe.
+    private var animated: Bool { flags & 64 != 0 }
+    private var speedKeyHere: Bool {
+        (model.keyframes[id] ?? []).contains { $0.property == 39 && $0.effectIndex == .max && $0.time == model.localPlayhead }
+    }
+    private var speedKeyLook: KeyframeLook { speedKeyHere ? .keyHere : animated ? .animated : .none }
+    private func toggleSpeedKey() {
+        change { core in
+            if speedKeyHere { core.deleteKeyframe(forLayer: id, property: 39, time: model.localPlayhead) }
+            else { core.insertKeyframe(forLayer: id, property: 39, time: model.localPlayhead, value: speed.clamped(to: 0.05...16)) }
+        }
+    }
     private var clock: String {
         let seconds = Int((Double(model.selectedLayer?.duration ?? 0) / max(1, model.compositionFps)).rounded())
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
@@ -1020,7 +1034,12 @@ struct SpeedPanel: View {
     private var logarithm: Float { log2(speed.clamped(to: 0.05...16)) * 100 }
     private func change(_ action: (AureaEngine) -> Void) { model.mutate(action); model.refreshModel(force: true) }
     private func speedText(_ value: Float) -> String { String(format: "%.2f", value).replacingOccurrences(of: ".", with: ",") + "x" }
-    private func setSpeed(_ value: Float) { change { $0.setLayer(id, speed: value.clamped(to: 0.05...16)) } }
+    private func setSpeed(_ value: Float) {
+        let v = value.clamped(to: 0.05...16)
+        // Com keyframe, mexer grava/atualiza o keyframe no cabeçote (como o volume).
+        if animated { change { $0.insertKeyframe(forLayer: id, property: 39, time: model.localPlayhead, value: v) } }
+        else { change { $0.setLayer(id, speed: v) } }
+    }
     private func snap(_ value: Float) -> Float {
         for tick: Float in [0.25, 0.5, 1, 2, 4] where abs(value - tick) / tick < 0.03 { return tick }
         return (value * 100).rounded() / 100
@@ -1032,20 +1051,23 @@ struct SpeedPanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if kind != 1 && kind != 3 {
                         hint("panel_velocidade_vale_video_audio_nas_outras", size: 13)
-                    } else if speed == 0 {
+                    } else if speed == 0 && !animated {
                         Text("Quadro congelado · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
                         hint("panel_este_trecho_quadro_parado_apare_bordas", size: 13).padding(.top, 8)
                     } else {
                         Text(speedText(speed) + " · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                        hint("panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
-                        HStack(spacing: 6) {
-                            CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
-                            TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
-                                .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
-                                    onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
-                                    onEnd: { model.engine.endUndoGroup() })
-                            CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
-                            ValueBox(speedText(speed), width: 64).padding(.leading, 2)
+                        hint(animated ? "panel_velocidade_keyframes_duracao_fica" : "panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
+                        // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote.
+                        PropertyCustomRow(AureaText.t("editor_velocidade"), selected: animated, onSelect: toggleSpeedKey, keyframe: speedKeyLook) {
+                            HStack(spacing: 6) {
+                                CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
+                                TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
+                                    .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
+                                        onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
+                                        onEnd: { model.engine.endUndoGroup() })
+                                CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
+                                ValueBox(speedText(speed), width: 64).padding(.leading, 2)
+                            }
                         }.padding(.top, 12)
                         HStack(spacing: 6) {
                             ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in

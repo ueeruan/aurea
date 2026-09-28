@@ -64,6 +64,7 @@
 		AE00000000000000000000A1 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000A0 /* DesignSystem.swift */; };
 		AE00000000000000000000A3 /* EditorLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000A2 /* EditorLayout.swift */; };
 		AE00000000000000000000A5 /* EffectsHuman.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000A4 /* EffectsHuman.swift */; };
+		AE00000000000000000001E1 /* EffectI18nTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000001E0 /* EffectI18nTable.swift */; };
 		AE00000000000000000000A7 /* PanelParticles.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000A6 /* PanelParticles.swift */; };
 		AE00000000000000000000A9 /* ProjectCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000A8 /* ProjectCards.swift */; };
 		AE00000000000000000000AB /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000AA /* Sheets.swift */; };
@@ -162,6 +163,7 @@
 		AE00000000000000000000A0 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		AE00000000000000000000A2 /* EditorLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorLayout.swift; sourceTree = "<group>"; };
 		AE00000000000000000000A4 /* EffectsHuman.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectsHuman.swift; sourceTree = "<group>"; };
+		AE00000000000000000001E0 /* EffectI18nTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectI18nTable.swift; sourceTree = "<group>"; };
 		AE00000000000000000000A6 /* PanelParticles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelParticles.swift; sourceTree = "<group>"; };
 		AE00000000000000000000A8 /* ProjectCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCards.swift; sourceTree = "<group>"; };
 		AE00000000000000000000AA /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
@@ -274,6 +276,7 @@
 				AE00000000000000000000A0 /* DesignSystem.swift */,
 				AE00000000000000000000A2 /* EditorLayout.swift */,
 				AE00000000000000000000A4 /* EffectsHuman.swift */,
+				AE00000000000000000001E0 /* EffectI18nTable.swift */,
 				AE00000000000000000000A6 /* PanelParticles.swift */,
 				AE00000000000000000000A8 /* ProjectCards.swift */,
 				AE00000000000000000000AA /* Sheets.swift */,
@@ -529,6 +532,7 @@
 				AE00000000000000000000A1 /* DesignSystem.swift in Sources */,
 				AE00000000000000000000A3 /* EditorLayout.swift in Sources */,
 				AE00000000000000000000A5 /* EffectsHuman.swift in Sources */,
+				AE00000000000000000001E1 /* EffectI18nTable.swift in Sources */,
 				AE00000000000000000000A7 /* PanelParticles.swift in Sources */,
 				AE00000000000000000000A9 /* ProjectCards.swift in Sources */,
 				AE00000000000000000000AB /* Sheets.swift in Sources */,

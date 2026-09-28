@@ -1,3 +1,15 @@
+# Aurea 2125 — atualização de 28/09/2026
+
+- Adicionar marcador não reinicia mais o áudio nem o vídeo.
+- Arrastar a timeline mostra o vídeo em tempo real, sem tela preta.
+- Sem tela preta ao passar por um corte entre clipes (o próximo clipe é preparado antes).
+- Keyframes de velocidade na aba Tempo e velocidade (valem no preview, export e áudio).
+- Time Remap simples: "Momento do vídeo" com keyframes e atalhos (Congelar aqui, Câmera lenta, Acelerar, Ao contrário); projetos antigos iguais.
+- Gráfico acompanha a camada atual, desenha X/Y/Z juntos e usa a mesma conta do motor.
+- Botão para esconder a caixa de seleção no preview; lista "Selecionar uma camada".
+- FBX e OBJ: importar modelo e texturas juntos; "Importar texturas" para as que faltarem.
+- Mais telas e todos os efeitos (incluindo opções de lista) traduzidos para inglês e outros idiomas.
+
 # Aurea 2125
 
 - Auto-Key em X/Y e gizmos também na cena 3D; regressão de câmera com tempo local e órbita separada.

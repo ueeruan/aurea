@@ -654,33 +654,33 @@ final class AureaBackendVideoProvider: VideoGenerationProvider {
 
 /// Código do backend → frase para quem usa. O prompt nunca se perde por causa disso.
 func explainVideoFailure(_ code: String?) -> String {
-    guard let code else { return "Não foi possível gerar o vídeo." }
+    guard let code else { return AureaText.t("ios_ai_err_generic") }
     switch code {
-    case "sem_conexao": return "Sem internet. Confira a conexão e tente de novo."
-    case "tempo_esgotado", "provedor_timeout": return "O servidor demorou para responder. Tente de novo."
+    case "sem_conexao": return AureaText.t("ios_ai_err_offline")
+    case "tempo_esgotado", "provedor_timeout": return AureaText.t("ios_ai_err_timeout")
     case "provedor_indisponivel", "provedor_erro", "resposta_invalida":
-        return "O serviço de geração está indisponível agora. Tente de novo em instantes."
-    case "provedor_ocupado", "servidor_ocupado": return "Muita gente gerando agora. Tente de novo em alguns minutos."
+        return AureaText.t("ios_ai_err_unavailable")
+    case "provedor_ocupado", "servidor_ocupado": return AureaText.t("ios_ai_err_busy")
     case "provedor_auth", "provedor_nao_configurado", "saldo_insuficiente", "modelo_indisponivel",
          "ia_nao_configurada", "recompensa_nao_configurada":
-        return "A geração por IA está em manutenção. Tente mais tarde."
-    case "ia_desligada": return "A geração por IA está pausada no momento."
-    case "orcamento_diario", "limite_global_diario": return "O limite de gerações de hoje foi atingido. Volte amanhã."
-    case "limite_diario": return "Você usou suas 5 gerações de IA de hoje. Volte amanhã para gerar mais."
-    case "muitos_pedidos": return "Muitos pedidos seguidos. Espere um pouco e tente de novo."
-    case "job_em_andamento", "em_andamento": return "Já existe uma geração sua em andamento."
-    case "conteudo_bloqueado": return "Esse pedido foi bloqueado pela política de conteúdo. Mude o texto e tente de novo."
-    case "pedido_recusado": return "O pedido foi recusado pelo modelo. Mude o texto e tente de novo."
-    case "prompt_vazio": return "Escreva o que você quer ver no vídeo."
-    case "prompt_longo": return "O texto está longo demais."
-    case "geracao_falhou": return "A geração falhou do lado do servidor."
-    case "resultado_invalido", "resultado_nao_e_video": return "O servidor devolveu um arquivo que não é vídeo."
-    case "resultado_expirado": return "O vídeo expirou no servidor (fica guardado 24 h)."
-    case "download_interrompido", "download_falhou": return "O download foi interrompido. Toque para baixar de novo."
-    case "recompensa_pendente": return "O anúncio ainda não foi confirmado. Tente de novo em instantes."
-    case "ticket_expirado", "ticket_invalido", "ticket_usado": return "Este pedido expirou. Toque em gerar de novo."
-    case "imagem_expirada", "imagem_invalida", "imagem_grande": return "Escolha a imagem de novo (PNG, JPEG ou WebP, até 8 MB)."
-    case "cancelado": return "Geração cancelada."
-    default: return "Não foi possível gerar o vídeo (\(code))."
+        return AureaText.t("ios_ai_err_maintenance")
+    case "ia_desligada": return AureaText.t("ios_ai_err_paused")
+    case "orcamento_diario", "limite_global_diario": return AureaText.t("ios_ai_err_global_limit")
+    case "limite_diario": return AureaText.t("app_ai_err_daily_user")
+    case "muitos_pedidos": return AureaText.t("ios_ai_err_too_many")
+    case "job_em_andamento", "em_andamento": return AureaText.t("ios_ai_err_in_progress")
+    case "conteudo_bloqueado": return AureaText.t("ios_ai_err_blocked")
+    case "pedido_recusado": return AureaText.t("ios_ai_err_refused")
+    case "prompt_vazio": return AureaText.t("ios_ai_err_empty_prompt")
+    case "prompt_longo": return AureaText.t("ios_ai_err_long_prompt")
+    case "geracao_falhou": return AureaText.t("ios_ai_err_server_failed")
+    case "resultado_invalido", "resultado_nao_e_video": return AureaText.t("ios_ai_err_not_video")
+    case "resultado_expirado": return AureaText.t("ios_ai_err_expired")
+    case "download_interrompido", "download_falhou": return AureaText.t("ios_ai_err_download")
+    case "recompensa_pendente": return AureaText.t("ios_ai_err_reward_pending")
+    case "ticket_expirado", "ticket_invalido", "ticket_usado": return AureaText.t("ios_ai_err_ticket")
+    case "imagem_expirada", "imagem_invalida", "imagem_grande": return AureaText.t("ios_ai_err_image")
+    case "cancelado": return AureaText.t("ios_ai_err_cancelled")
+    default: return AureaText.t("ios_ai_err_code", code)
     }
 }

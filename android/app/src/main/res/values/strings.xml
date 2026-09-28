@@ -3034,4 +3034,10 @@
     <string name="edt_vec_delete_group">Apagar o grupo \"%1$s\"</string>
     <string name="fxo_ease_in">Suave no início</string>
     <string name="fxo_ease_out">Suave no fim</string>
+    <string name="ios_curve_applied">Curva \"%1$s\" aplicada</string>
+    <string name="ios_delete_named_q">Apagar \"%1$s\"?</string>
+    <string name="ios_apply_named">Aplicar %1$s</string>
+    <string name="ios_vector_delete_group">Apagar o grupo \"%1$s\"</string>
+    <string name="ios_vector_keyframes_n">%1$d keyframes — editar no cabeçote grava ali</string>
+    <string name="ios_rotation_axis">Rotação %1$s</string>
 </resources>

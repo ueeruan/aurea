@@ -152,7 +152,7 @@ struct ExportView: View {
                 model.exportOptions.codec = $0 == "HEVC" ? .hevc : .h264
             }
             Text(hevcAvailable ? AureaText.t(model.exportOptions.codec == .hevc ? "editor_hevc_arquivo_menor_mesma_qualidade_alguns" : "editor_h_264_abre_qualquer_aparelho_rede")
-                 : "HEVC indisponível neste aparelho: ele não tem codificador HEVC. O vídeo sai em H.264.")
+                 : AureaText.t("ios_export_hevc_unavailable"))
                 .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
         }
     }
@@ -289,10 +289,10 @@ struct ExportView: View {
         let w = model.deviceReport["maxExportWidth"]?.intValue ?? 0
         guard h > 0, h < 2160 else { return nil }
         switch model.deviceReport["exportLimit"]?.intValue ?? 0 {
-        case 2: return "Este aparelho exporta até \(h)p: o codificador de vídeo dele não passa de \(w) × \(h)."
-        case 3: return "Este aparelho exporta até \(h)p: a memória não comporta os quadros de uma exportação maior."
-        case 4: return "Este aparelho exporta até \(h)p: o sistema não informou codificador H.264."
-        default: return "Este aparelho exporta até \(h)p."
+        case 2: return AureaText.t("ios_export_limit_encoder", h, w, h)
+        case 3: return AureaText.t("ios_export_limit_memory", h)
+        case 4: return AureaText.t("ios_export_limit_no_h264", h)
+        default: return AureaText.t("ios_export_limit", h)
         }
     }
     private var estimatedSize: String {
@@ -300,9 +300,9 @@ struct ExportView: View {
         return megabytes >= 1000 ? AureaText.t("unit_gigabyte", format(megabytes / 1000)) : AureaText.t("unit_megabyte", Int(megabytes.rounded()))
     }
     private var failureNotice: String? {
-        if model.exportCancelled || cancelled { return "Exportação cancelada." }
+        if model.exportCancelled || cancelled { return AureaText.t("ios_export_cancelled") }
         let result = (model.exportProgress["result"] as? NSNumber)?.intValue ?? 0
-        if result != 0 { return "Não deu para exportar: \(model.exportProgress["message"] as? String ?? "erro \(result)")." }
+        if result != 0 { return AureaText.t("ios_export_failed_detail", model.exportProgress["message"] as? String ?? AureaText.t("ios_error_code", "\(result)")) }
         return model.exportMessage
     }
     private var progressNotice: String {
@@ -312,9 +312,9 @@ struct ExportView: View {
             notices.append(message)
         }
         if flags & AureaExportFlag.softwareEncoder.rawValue != 0 {
-            notices.append("Este aparelho não tem encoder de hardware \(codec) para esta resolução: exportando por software (mais lento, mesma qualidade).")
+            notices.append(AureaText.t("ios_export_software_encoder", codec))
         }
-        if flags & AureaExportFlag.thermalReduced.rawValue != 0 { notices.append("Aparelho quente: a exportação desacelerou para esfriar. A qualidade não muda.") }
+        if flags & AureaExportFlag.thermalReduced.rawValue != 0 { notices.append(AureaText.t("ios_export_thermal")) }
         return notices.joined(separator: "\n")
     }
     private func format(_ value: Double) -> String {

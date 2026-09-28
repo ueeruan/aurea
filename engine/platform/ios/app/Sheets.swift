@@ -372,7 +372,7 @@ struct NumericKeypadSheet: View {
     private var hint: String {
         guard let result, let value else { return text.isEmpty ? "" : AureaText.t("ds_conta_incompleta") }
         let formatted = comUnidade(numeroPtBr(value, casas: request.decimals), request.unit)
-        if Double(value) != result { return "Fica em " + formatted }
+        if Double(value) != result { return AureaText.t("ios_keypad_result", formatted) }
         return !selectedAll && (text.dropFirst().contains(where: KeypadExpression.isOperator) || text.contains("%") || text.contains(":")) ? "= " + formatted : ""
     }
     var body: some View {

@@ -90,7 +90,7 @@ final class AureaAiState: ObservableObject {
             case .unlocked: self.unlock(s)
             case .failed:
                 self.error = explainVideoFailure(s.error)
-                if var j = self.job { j.status = "failed"; j.stage = "Falhou"; self.job = j }
+                if var j = self.job { j.status = "failed"; j.stage = AureaText.t("ios_ai_stage_failed"); self.job = j }
             default: break
             }
         })
@@ -227,7 +227,7 @@ final class AureaAiState: ObservableObject {
         do {
             var jobId = s.jobId
             if jobId == nil {
-                job = step("sending", "Enviando…")
+                job = step("sending", AureaText.t("ios_ai_stage_sending"))
                 while jobId == nil {
                     do {
                         jobId = try await provider.generate(ticket: ticket)
@@ -257,9 +257,9 @@ final class AureaAiState: ObservableObject {
                 status = .generating
                 let stage: String
                 switch j.status {
-                case "queued": stage = "Enviando…"
-                case "generating": stage = "Gerando vídeo…"
-                case "completed": stage = "Finalizando…"
+                case "queued": stage = AureaText.t("ios_ai_stage_sending")
+                case "generating": stage = AureaText.t("ios_ai_stage_generating")
+                case "completed": stage = AureaText.t("ios_ai_stage_finalizing")
                 default: stage = j.stage
                 }
                 job = AiJob(id: j.id, status: j.status, progress: 0, stage: stage, queuePosition: 0,
@@ -279,7 +279,7 @@ final class AureaAiState: ObservableObject {
             defer { downloading = false }
             let file = try await provider.download(id, to: Self.folder.appendingPathComponent("\(id).mp4"))
             guard let meta = await Self.metadata(file) else { throw VideoFailure("resultado_nao_e_video") }
-            job = step("completed", "Concluído", id: id, result: meta)
+            job = step("completed", AureaText.t("ios_ai_stage_done"), id: id, result: meta)
             status = .connected
             finish(file, nil, false)
         } catch is CancellationError {
@@ -340,7 +340,7 @@ final class AureaAiState: ObservableObject {
     func addToTimeline(_ model: AureaModel) {
         guard let file = lastFile else { return }
         let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
-        guard size > 0 else { error = "O arquivo baixado está vazio"; return }
+        guard size > 0 else { error = AureaText.t("ios_ai_file_empty"); return }
         model.importMedia(url: file, kind: .video, atPlayhead: true)
     }
 
@@ -349,15 +349,15 @@ final class AureaAiState: ObservableObject {
         guard let file = lastFile else { return }
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] st in
             guard st == .authorized || st == .limited else {
-                Task { @MainActor in self?.error = "Não consegui salvar na galeria: permissão negada" }
+                Task { @MainActor in self?.error = AureaText.t("ios_ai_gallery_denied") }
                 return
             }
             PHPhotoLibrary.shared().performChanges({
                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file)
             }) { saved, e in
                 Task { @MainActor in
-                    if saved { self?.message = "Salvo na galeria" }
-                    else { self?.error = "Não consegui salvar na galeria: \(e?.localizedDescription ?? "?")" }
+                    if saved { self?.message = AureaText.t("ios_ai_saved_gallery") }
+                    else { self?.error = AureaText.t("ios_ai_gallery_failed", e?.localizedDescription ?? "?") }
                 }
             }
         }

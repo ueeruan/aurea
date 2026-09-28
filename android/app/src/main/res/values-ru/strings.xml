@@ -2971,4 +2971,10 @@
     <string name="edt_end_x">Конец X</string>
     <string name="edt_end_y">Конец Y</string>
     <string name="edt_vec_delete_group">Удалить группу \"%1$s\"</string>
+    <string name="ios_curve_applied">Кривая «%1$s» применена</string>
+    <string name="ios_delete_named_q">Удалить «%1$s»?</string>
+    <string name="ios_apply_named">Применить %1$s</string>
+    <string name="ios_vector_delete_group">Удалить группу «%1$s»</string>
+    <string name="ios_vector_keyframes_n">Ключевых кадров: %1$d — правка на указателе записывается туда</string>
+    <string name="ios_rotation_axis">Вращение %1$s</string>
 </resources>

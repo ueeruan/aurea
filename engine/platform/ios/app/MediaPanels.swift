@@ -24,11 +24,11 @@ struct CaptionBlockEditor: View {
         var value = fields; value["op"] = op; value["ids"] = Array(selected)
         guard let data = try? JSONSerialization.data(withJSONObject: value), let command = String(data: data, encoding: .utf8) else { return }
         if model.engine.editCaptionTrack(track.layer, command: command) { error = nil; model.refreshModel(force: true) }
-        else { error = "A edição sobrepõe outro bloco ou possui tempos inválidos." }
+        else { error = AureaText.t("ios_caption_edit_invalid") }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Faixa de legendas · selecione um ou vários blocos")
+            Text(AureaText.t("ios_caption_track_hint"))
             ScrollView(.horizontal) {
                 HStack {
                     ForEach(track.segments) { block in
@@ -42,17 +42,17 @@ struct CaptionBlockEditor: View {
                 HStack {
                     Button("← 1") { edit("move", ["delta": -1]) }
                     Button("1 →") { edit("move", ["delta": 1]) }
-                    Button("Dividir") { edit("split", ["frame": model.status.playhead]) }.disabled(selected.count != 1)
-                    Button("Unir") { edit("merge"); selected.removeAll() }.disabled(selected.count < 2)
-                    Button("Excluir") { edit("delete"); selected.removeAll() }
+                    Button(AureaText.t("dock_short_split")) { edit("split", ["frame": model.status.playhead]) }.disabled(selected.count != 1)
+                    Button(AureaText.t("panel_unir")) { edit("merge"); selected.removeAll() }.disabled(selected.count < 2)
+                    Button(AureaText.t("common_delete")) { edit("delete"); selected.removeAll() }
                 }
                 if selected.count == 1 {
-                    TextField("Texto", text: $text).textFieldStyle(.roundedBorder)
-                    Button("Aplicar texto mantendo os tempos") { edit("text", ["text": text]) }
-                    HStack { TextField("Início · quadro", text: $start); TextField("Fim · quadro", text: $end) }.textFieldStyle(.roundedBorder).keyboardType(.numberPad)
-                    Button("Ajustar duração") { if let a = Int(start), let b = Int(end) { edit("trim", ["start": a, "end": b]) } }
+                    TextField(AureaText.t("panel_texto"), text: $text).textFieldStyle(.roundedBorder)
+                    Button(AureaText.t("ios_caption_apply_text")) { edit("text", ["text": text]) }
+                    HStack { TextField(AureaText.t("ios_caption_start_frame"), text: $start); TextField(AureaText.t("ios_caption_end_frame"), text: $end) }.textFieldStyle(.roundedBorder).keyboardType(.numberPad)
+                    Button(AureaText.t("ios_caption_adjust_duration")) { if let a = Int(start), let b = Int(end) { edit("trim", ["start": a, "end": b]) } }
                 }
-                Button("Limpar seleção") { selected.removeAll() }
+                Button(AureaText.t("editor_limpar_selecao")) { selected.removeAll() }
             }
             if let error { Text(error).foregroundStyle(.red) }
         }.padding(.vertical, 10)
@@ -102,7 +102,7 @@ struct TrackingPanel: View {
         Spacer().frame(height: 8)
         if state == 1 {
             let progress = number("progress").clamped(to: 0...1)
-            Text("Analisando o movimento… \(Int(progress * 100))%").font(.aurea(size: 13))
+            Text(AureaText.t("ios_analyzing_motion_pct", Int(progress * 100))).font(.aurea(size: 13))
             Spacer().frame(height: 6)
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
@@ -159,7 +159,7 @@ struct TrackingPanel: View {
             action("panel_analisar_novo", "panel_modo_escolhido_acima", run: analyze)
         } else {
             if state == 3 || state == 4 {
-                note(state == 4 ? AureaText.t("panel_analise_cancelada") : "Não deu para resolver: \(status["message"] as? String ?? "")")
+                note(state == 4 ? AureaText.t("panel_analise_cancelada") : AureaText.t("ios_camera_solve_failed", status["message"] as? String ?? ""))
                 Spacer().frame(height: 8)
             }
             action("panel_analisar_camera", "panel_acha_movimento_camera_video_roda_segundo", run: analyze)
@@ -223,12 +223,12 @@ private struct MotionTrackingSection: View {
                 button("Restore saved analysis") { model.restoreMotion() }
             }
             if model.pointPick != nil {
-                Text("Pontos selecionados: \(model.motionPicked). Toque no preview.")
+                Text(AureaText.t("ios_motion_points_selected", model.motionPicked))
                 button("Cancel selection") { model.cancelMotionPick() }
             }
             if n("state") == 1 {
                 ProgressView(value: n("progress"))
-                Text("Analisando… \(Int(n("progress") * 100))%")
+                Text(AureaText.t("ios_analyzing_pct", Int(n("progress") * 100)))
                 button("Cancel") { model.engine.cancelMotionTrack() }
             }
             if let message = model.motionStatus["message"] as? String, !message.isEmpty { Text(message).foregroundStyle(AureaColors.muted) }
@@ -343,7 +343,7 @@ enum CaptionTranscriber {
         let remote = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(target.lastPathComponent)")!
         let (temporary, response) = try await URLSession.shared.download(from: remote)
         defer { try? FileManager.default.removeItem(at: temporary) }
-        guard (response as? HTTPURLResponse)?.statusCode == 200, try valid(temporary) else { throw Failure(message: "Falha na verificação do modelo Whisper") }
+        guard (response as? HTTPURLResponse)?.statusCode == 200, try valid(temporary) else { throw Failure(message: AureaText.t("ios_whisper_verify_failed")) }
         try Task.checkCancellation()
         if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
         try FileManager.default.moveItem(at: temporary, to: target)
@@ -451,8 +451,8 @@ struct CaptionsPanel: View {
             if let captionTrack { CaptionBlockEditor(track: captionTrack) }
             if let busy { note(busy, color: AureaColors.accent) }
             if let error { note(error, color: AureaColors.danger) }
-            note("Whisper no aparelho. O primeiro uso baixa o modelo; seu áudio permanece local.", color: AureaColors.muted)
-            if busy != nil { CaptionAction(label: "Cancelar") { _ = model.engine.captionProgress(true); job?.cancel() } }
+            note(AureaText.t("ios_whisper_note"), color: AureaColors.muted)
+            if busy != nil { CaptionAction(label: AureaText.t("common_cancel")) { _ = model.engine.captionProgress(true); job?.cancel() } }
             label("panel_idioma_fala")
             CaptionChips(options: languages, selected: languageCodes.firstIndex(of: language) ?? 0) { language = languageCodes[$0] }
             HStack(spacing: 8) {
@@ -586,7 +586,7 @@ struct CaptionsPanel: View {
                 }.value
                 let parsed = engine.parseSRT(text).compactMap(CaptionWord.init)
                 guard !Task.isCancelled, model.primarySelection == sourceId else { return }
-                if parsed.isEmpty { error = "Esse arquivo não tem legendas SRT legíveis."; return }
+                if parsed.isEmpty { error = AureaText.t("ios_srt_unreadable"); return }
                 error = nil; setWords(parsed, from: "SRT"); persist()
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
@@ -594,13 +594,13 @@ struct CaptionsPanel: View {
     private func transcribe() {
         guard busy == nil else { return }
         let sourceId = id, engine = model.engine, selectedLanguage = language
-        guard !path.isEmpty else { error = "Esta camada não tem mídia com som."; return }
-        busy = "Preparando modelo Whisper local…"; error = nil
+        guard !path.isEmpty else { error = AureaText.t("ios_no_audio_media"); return }
+        busy = AureaText.t("ios_whisper_preparing"); error = nil
         job = Task {
             do {
                 let modelFile = try await Task.detached(priority: .utility) { try await CaptionTranscriber.prepareModel() }.value
                 try Task.checkCancellation()
-                busy = "Transcrevendo no aparelho…"
+                busy = AureaText.t("ios_transcribing_on_device")
                 let ticker = Task { @MainActor in
                     while !Task.isCancelled { try? await Task.sleep(nanoseconds: 400_000_000); if !Task.isCancelled { busy = "Whisper local: \(engine.captionProgress(false))%" } }
                 }
@@ -619,9 +619,9 @@ struct CaptionsPanel: View {
     private func apply() {
         guard busy == nil, !words.isEmpty else { return }
         guard words.allSatisfy({ $0.start.isFinite && $0.end.isFinite && $0.start >= 0 && $0.end > $0.start && !$0.word.isEmpty }) else {
-            error = "Confira os tempos das palavras antes de aplicar."; return
+            error = AureaText.t("ios_check_word_times"); return
         }
-        persist(); model.captionOptions = options; busy = "Criando legendas…"; error = nil
+        persist(); model.captionOptions = options; busy = AureaText.t("ios_creating_captions"); error = nil
         let sourceId = id, engine = model.engine, snapshot = words.map(\.native), settings = options
         job = Task {
             let result = await Task.detached(priority: .userInitiated) {

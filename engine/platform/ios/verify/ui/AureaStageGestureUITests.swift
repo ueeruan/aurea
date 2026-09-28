@@ -35,9 +35,9 @@ import XCTest
         let effect = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@","command:effect:")).firstMatch
         XCTAssertTrue(effect.waitForExistence(timeout:5)); effect.tap()
         _ = try awaitSnapshot("Existing Android stack is editable on iOS") { $0.effectCount == 7 }
-        let menu = app.buttons["Mais opções de Chromatic Aberration"].firstMatch
+        let menu = app.buttons["More options for Chromatic Aberration"].firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout:5)); menu.tap()
-        app.buttons["Copiar este efeito"].tap()
+        app.buttons["Copy this effect"].tap()
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
         app.buttons["Copy and paste"].firstMatch.tap()
@@ -132,13 +132,13 @@ import XCTest
         _ = try awaitSnapshot("Search effect is a reversible edit") { $0.effectCount == before.effectCount }
 
         try openCommandSearch("magnetica")
-        let add = app.buttons["Adicionar aos favoritos: Alternar edição magnética"]
+        let add = app.buttons["Add to favourites: Alternar edição magnética"]
         if add.exists { add.tap() }
-        app.buttons["Fechar"].tap()
+        app.buttons["Close"].tap()
         try openCommandSearch("")
-        app.buttons["Favoritos"].tap()
+        app.buttons["Favourites"].tap()
         XCTAssertTrue(app.buttons["command:magnetic"].waitForExistence(timeout: 5))
-        app.buttons["Fechar"].tap()
+        app.buttons["Close"].tap()
         XCTAssertEqual(try snapshot().editMode, before.editMode, "Favoriting must not execute the command")
     }
 
@@ -155,7 +155,7 @@ import XCTest
         try openCommandSearch("slip")
         let command = app.buttons["command:clip_edit"]
         XCTAssertTrue(command.waitForExistence(timeout: 5)); command.tap()
-        let advance = app.buttons["Avançar edição do clipe"]
+        let advance = app.buttons["clipEdit.forward"]
         XCTAssertTrue(advance.waitForExistence(timeout: 5)); XCTAssertTrue(advance.isEnabled)
         advance.tap()
         let changed = try awaitSnapshot("Slip creates an editable remap in the native layer") {
@@ -167,7 +167,7 @@ import XCTest
         assertTransform(changed, equals: before)
         try undo()
         _ = try awaitSnapshot("One undo restores the original clip timing") { $0.clipTimeRemap == before.clipTimeRemap && $0.canRedo }
-        let roll = app.buttons["Roll fim"]
+        let roll = app.buttons["clipEdit.mode.4"]
         XCTAssertTrue(roll.exists); roll.tap()
         XCTAssertFalse(advance.isEnabled, "Roll needs an explicit adjacent clip")
     }
@@ -297,7 +297,7 @@ import XCTest
         let onStack = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: appliedTab)
         XCTAssertEqual(XCTWaiter.wait(for: [onStack], timeout: 5), .completed)
         XCTAssertTrue(app.staticTexts["Deep Glow"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Mais opções de Deep Glow"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["More options for Deep Glow"].firstMatch.waitForExistence(timeout: 5))
 
         // O rodapé "Add effect" da pilha leva de volta ao catálogo, com o recente à vista.
         let stack = app.scrollViews["aurea.effects.stack"].firstMatch

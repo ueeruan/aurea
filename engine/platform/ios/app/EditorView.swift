@@ -169,7 +169,7 @@ private struct ModelTexturesPrompt: ViewModifier {
                     if !model.sceneEditor {
                         Button {
                             model.autoKeyTransforms.toggle()
-                            model.toast = model.autoKeyTransforms ? "Auto-Key: edita tracks animadas no cabeçote" : "Auto-Key desligado: desloca toda a animação sem criar keys"
+                            model.toast = AureaText.t(model.autoKeyTransforms ? "ios_autokey_on" : "ios_autokey_off")
                         } label: {
                             Text(model.autoKeyTransforms ? "Auto-Key: On" : "Auto-Key: Off")
                                 .foregroundStyle(model.autoKeyTransforms ? AureaColors.accent : AureaColors.text)
@@ -1233,7 +1233,7 @@ private struct AddLayerSheet: View {
                     case 5:
                         card("scene_workspace", glyph: CupertinoGlyph.Cube, accent: true) { close(); model.enterSceneEditor() }
                         card("sh_add_model_3d", glyph: CupertinoGlyph.Cube, accent: true) { files(.model) }
-                        card("sh_add_text_3d", glyph: ShellGlyph.TextformatAlt, color: ShellColors.text3D) { model.addText3D(content: "Texto", depth: 0.25); close() }
+                        card("sh_add_text_3d", glyph: ShellGlyph.TextformatAlt, color: ShellColors.text3D) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close() }
                         card("panel_camera_3d", glyph: CupertinoGlyph.CameraFill, accent: true) { model.addCamera(); close() }
                         drawnCard("sh_add_null_3d", kind: -1) { model.addNull(threeD: true); close() }
                     case 6:
@@ -1376,7 +1376,7 @@ private struct ShellMediaPicker: UIViewControllerRepresentable {
                 }
                 HStack(spacing: 8) {
                     Menu {
-                        Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: "Texto", depth: 0.25) }
+                        Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25) }
                         Button(AureaText.t("panel_camera_3d")) { model.addCamera() }
                         Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
                         Button(AureaText.t("scene_light_directional")) { model.addLight(0) }

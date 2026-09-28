@@ -83,7 +83,7 @@ func uniqueHomeProjectName(_ title: String) -> String {
     let invalid = CharacterSet(charactersIn: "/\\:").union(.controlCharacters)
     let base = title.components(separatedBy: invalid).joined(separator: "-")
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    let safe = base.isEmpty ? "Projeto" : base
+    let safe = base.isEmpty ? AureaText.t("editor_projeto_cbe9") : base
     let fm = FileManager.default
     var name = safe
     var index = 2
@@ -98,7 +98,7 @@ func uniqueHomeProjectName(_ title: String) -> String {
 @discardableResult
 func duplicateHomeProject(_ entry: HomeProjectEntry) -> Bool {
     let fm = FileManager.default
-    let title = entry.title + " (cópia)"
+    let title = AureaText.t("ios_copy_suffix", entry.title)
     let name = uniqueHomeProjectName(title)
     let target = AureaPaths.documents.appendingPathComponent(name + ".aurea")
     let temporary = URL(fileURLWithPath: target.path + ".tmp")

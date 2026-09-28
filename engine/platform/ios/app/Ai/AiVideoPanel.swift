@@ -293,16 +293,16 @@ struct AiVideoPanel: View {
         imageError = ""
         defer { uploadingImage = false; pickedImage = nil }
         guard let file = try? await item.loadTransferable(type: GenerationImageFile.self) else {
-            imageError = "Escolha uma imagem de até 8 MB."; return
+            imageError = AureaText.t("ios_ai_image_too_big"); return
         }
         defer { try? FileManager.default.removeItem(at: file.url) }
         guard let handle = try? FileHandle(forReadingFrom: file.url) else {
-            imageError = "Não foi possível abrir a imagem."; return
+            imageError = AureaText.t("ios_ai_image_open_failed"); return
         }
         defer { try? handle.close() }
         guard let data = try? handle.read(upToCount: 8 * 1024 * 1024 + 1), !data.isEmpty,
               data.count <= 8 * 1024 * 1024 else {
-            imageError = "Escolha uma imagem de até 8 MB."; return
+            imageError = AureaText.t("ios_ai_image_too_big"); return
         }
         // Só PNG/JPEG/WebP passam (o servidor recusa o resto); o resto vira JPEG.
         let type: String
@@ -318,7 +318,7 @@ struct AiVideoPanel: View {
                 ] as CFDictionary),
                 let jpeg = UIImage(cgImage: image).jpegData(compressionQuality: 0.92), jpeg.count <= 8 * 1024 * 1024 {
             type = "image/jpeg"; bytes = jpeg
-        } else { imageError = "Não foi possível preparar a imagem."; return }
+        } else { imageError = AureaText.t("ios_ai_image_prepare_failed"); return }
         let ref = await ai.uploadImage(bytes, type: type)
         if let ref { imageRef = ref; imageName = String(ref.suffix(28)) }
     }
@@ -335,9 +335,9 @@ struct AiVideoPanel: View {
 
     private func resolutionName(_ r: String) -> String {
         switch r {
-        case "preview": return "Rascunho"
-        case "standard": return "Padrão"
-        case "high": return "Alta"
+        case "preview": return AureaText.t("ios_ai_res_draft")
+        case "standard": return AureaText.t("fxl_standard")
+        case "high": return AureaText.t("fxo_high")
         default: return r
         }
     }

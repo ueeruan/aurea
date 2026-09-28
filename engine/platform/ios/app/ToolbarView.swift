@@ -29,7 +29,7 @@ struct TopBarView: View {
             if model.status.playing != 0 { model.playPause() }
             commandSearch = true
         } label: { Image(systemName: "magnifyingglass").frame(width: 44, height: 44) }
-            .buttonStyle(.plain).accessibilityLabel("Buscar ferramentas").accessibilityIdentifier("commandSearchOpen")
+            .buttonStyle(.plain).accessibilityLabel(AureaText.t("edt_cmd_search_desc")).accessibilityIdentifier("commandSearchOpen")
     }
 
     private var projectBar: some View {
@@ -44,7 +44,7 @@ struct TopBarView: View {
                 Button { model.editorBack() } label: {
                     MaterialGlyph("automirrored.filled.Logout", size: 20, color: AureaColors.text).scaleEffect(x: -1, y: 1).frame(width: 44, height: 44)
                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_projetos"))
-                ShellInlineName(name: model.projectName, placeholder: "(Sem título)", limit: 320) { model.renameCurrentProject(to: $0) }
+                ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320) { model.renameCurrentProject(to: $0) }
             }
             // Selecionar UMA camada pela lista (sem ter de achar o clipe na timeline).
             if !model.layers.isEmpty { pickLayerButton(tint: AureaColors.text, width: 44) }
@@ -53,14 +53,14 @@ struct TopBarView: View {
                 .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_linha_tempo"))
             ShellBarButton(glyph: CupertinoGlyph.GearAltFill, description: AureaText.t("editor_projeto_cbe9"), size: 19) { open(.projectSettings) }
             Button { performanceTest = true } label: { Image(systemName: "speedometer").frame(width: 40, height: 44) }
-                .buttonStyle(.plain).accessibilityLabel("Teste de desempenho no iPhone")
+                .buttonStyle(.plain).accessibilityLabel(AureaText.t("ios_perf_test_a11y"))
             ShellBarButton(glyph: CupertinoGlyph.SquareArrowUp, description: AureaText.t("editor_exportar"), tint: AureaColors.accent) { model.openExport() }
         }.padding(.trailing, 6)
     }
     private func layerBar(_ row: LayerItem) -> some View {
         HStack(spacing: 0) {
             ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_tirar_selecao"), width: 44) { model.editorBack() }
-            ShellInlineName(name: row.name, placeholder: "(Camada sem nome)", enabled: !row.locked) { value in
+            ShellInlineName(name: row.name, placeholder: AureaText.t("ios_unnamed_layer"), enabled: !row.locked) { value in
                 model.mutate { $0.setLayer(row.id, name: value) }; model.refreshModel(force: true)
             }
             .id(row.id)
@@ -79,7 +79,7 @@ struct TopBarView: View {
     private var batchBar: some View {
         HStack(spacing: 0) {
             ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 44, tint: AureaColors.onAccent) { model.clearSelection() }
-            Text("\(count) camadas selecionadas").font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.onAccent)
+            Text(AureaText.t("ios_layers_selected_n", count)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.onAccent)
                 .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             // Ficar com UMA só: a lista troca o lote por ela num toque.
             pickLayerButton(tint: AureaColors.onAccent, width: 40)
@@ -416,7 +416,7 @@ private struct ShellMenuRow: View {
     }
     private var resolutionPopup: some View {
         VStack(spacing: 0) {
-            Button(model.rawPlayback ? "Voltar ao compositor" : "AUREA RAW PLAYBACK TEST") {
+            Button(model.rawPlayback ? AureaText.t("ios_raw_back_to_compositor") : "AUREA RAW PLAYBACK TEST") {
                 shell.resolutionAnchor = nil; model.toggleRawPlayback()
             }.font(.aurea(size: 11)).padding(8).accessibilityIdentifier("rawPlaybackToggle")
             ForEach(Array(["AUTO", "Full", "1/2", "1/4", "1/8"].enumerated()), id: \.offset) { index, name in

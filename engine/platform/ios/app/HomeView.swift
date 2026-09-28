@@ -464,7 +464,7 @@ struct HomeView: View {
         guard created, let url = model.projectURL else {
             // Antes daqui saia calado: o usuario tocava, nada acontecia, e nao
             // havia nem projeto nem explicacao.
-            if (model.toast ?? "").isEmpty { model.toast = "não foi possível criar o projeto" }
+            if (model.toast ?? "").isEmpty { model.toast = AureaText.t("msg_nao_foi_possivel_criar_o_projeto") }
             return
         }
         // A capa e a ficha nascem com o projeto (o Android grava as duas no
@@ -865,7 +865,7 @@ struct NewProjectSheet: View {
         let long = device["maxExportWidth"]?.intValue ?? 0
         guard short > 0, min(frame.width, frame.height) > short || (long > 0 && max(frame.width, frame.height) > long) else { return nil }
         // Android NewProjectSheet's same informational note. Editing remains available.
-        return "Este aparelho exporta até \(short == 2160 ? "4K" : "\(short)p"). Dá para editar em \(frame.width) × \(frame.height); a exportação sai em no máximo \(short == 2160 ? "4K" : "\(short)p")."
+        return AureaText.t("ios_home_export_limit_note", short == 2160 ? "4K" : "\(short)p", Int(frame.width), Int(frame.height))
     }
 
     private func create() {
@@ -984,7 +984,7 @@ struct HomeSettingsTab: View {
                 groupHeader("settings_group_device", top: true)
                 group {
                     tapRow("settings_device_auto", subtitle: deviceSummary) { model.analyseDeviceAgain() }
-                    Button("Desempenho no iPhone · testes e relatório") { performanceTest = true }.padding(16)
+                    Button(AureaText.t("ios_perf_test_button")) { performanceTest = true }.padding(16)
                 }
                 groupNote("settings_device_auto_note")
                 groupHeader("settings_group_general", top: true)
@@ -1009,7 +1009,7 @@ struct HomeSettingsTab: View {
                 betaBanner.padding(.top, HomeDims.s4)
                 if developerTools {
                     group {
-                        tileRow(CupertinoGlyph.Wrench, title: "settings_dev_tools", subtitle: "Versão \(version) · build \(build)")
+                        tileRow(CupertinoGlyph.Wrench, title: "settings_dev_tools", subtitle: AureaText.t("ios_version_build", "\(version)", "\(build)"))
                     }.padding(.top, HomeDims.s4)
                 }
                 Text(AureaText.t("settings_made_by")).aureaFont(.footer).foregroundStyle(AureaColors.subtle)
@@ -1137,8 +1137,8 @@ struct HomeSettingsTab: View {
         let budget = Double(report["budgetMb"]?.intValue ?? 0) / 1024
         let mhz = report["maxFrequencyMhz"]?.intValue ?? 0
         let topology = efficiency > 0 ? " (\(performance)+\(efficiency))" : ""
-        let clock = mhz > 0 ? " até \(String(format: "%.1f GHz", Double(mhz) / 1000))" : ""
-        return "\(cores) núcleos\(topology)\(clock) · \(String(format: "%.1f GB", ram)) · orçamento \(String(format: "%.1f GB", budget))"
+        let clock = mhz > 0 ? " " + AureaText.t("ios_device_clock_up_to", String(format: "%.1f GHz", Double(mhz) / 1000)) : ""
+        return AureaText.t("ios_device_summary", cores, topology, clock, String(format: "%.1f GB", ram), String(format: "%.1f GB", budget))
     }
     private var groqDialog: some View {
         ZStack {
@@ -1163,7 +1163,7 @@ struct HomeSettingsTab: View {
     }
     private func saveGroqKey(_ value: String) {
         if CaptionKeychain.save(value) { hasGroqKey = !value.isEmpty; groqKey = ""; keyDialog = false }
-        else { model.toast = "Não foi possível salvar a chave neste aparelho." }
+        else { model.toast = AureaText.t("ios_key_save_failed") }
     }
 }
 
@@ -1349,7 +1349,7 @@ private struct HomeMediaPicker: UIViewControllerRepresentable {
             let identifier = provider.registeredTypeIdentifiers.first { UTType($0)?.conforms(to: target) == true } ?? target.identifier
             provider.loadFileRepresentation(forTypeIdentifier: identifier) { [parent] url, error in
                 guard let url else {
-                    DispatchQueue.main.async { parent.onError(error?.localizedDescription ?? "Não foi possível abrir a mídia escolhida.") }
+                    DispatchQueue.main.async { parent.onError(error?.localizedDescription ?? AureaText.t("ios_media_open_failed")) }
                     return
                 }
                 do {

@@ -2985,4 +2985,10 @@
     <string name="edt_end_x">النهاية X</string>
     <string name="edt_end_y">النهاية Y</string>
     <string name="edt_vec_delete_group">حذف المجموعة \"%1$s\"</string>
+    <string name="ios_curve_applied">تم تطبيق المنحنى \"%1$s\"</string>
+    <string name="ios_delete_named_q">حذف \"%1$s\"؟</string>
+    <string name="ios_apply_named">تطبيق %1$s</string>
+    <string name="ios_vector_delete_group">حذف المجموعة \"%1$s\"</string>
+    <string name="ios_vector_keyframes_n">%1$d إطارات مفتاحية — التعديل عند رأس التشغيل يُسجَّل هناك</string>
+    <string name="ios_rotation_axis">الدوران %1$s</string>
 </resources>

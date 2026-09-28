@@ -10,8 +10,8 @@ struct VectorPanel: View {
     @State private var adding = false
     @State private var advanced = Set<Int>()
     @State private var pathFlags = 0
-    private let pathKinds = ["Caminho livre", "Retângulo", "Elipse", "Polígono", "Estrela"]
-    private let tabs = ["Forma", "Preenchimento", "Borda", "Caminho", "Transformar", "Operadores", "Efeitos"]
+    private var pathKinds: [String] { ["ios_vector_free_path", "panel_retangulo", "panel_elipse", "editor_poligono", "editor_estrela"].map { AureaText.t($0) } }
+    private var tabs: [String] { ["target_shape", "panel_preenchimento", "panel_borda", "panel_caminho", "panel_transformar", "ios_vector_operators", "panel_efeitos"].map { AureaText.t($0) } }
     private var id: Int64 { model.primarySelection ?? 0 }
     private var group: [String: Any] { groups.indices.contains(Int(model.vectorGroup)) ? groups[Int(model.vectorGroup)] : [:] }
     private var params: [Float] { floats(group["params"]) }
@@ -114,7 +114,7 @@ struct VectorPanel: View {
                 PropertyCustomRow(AureaText.t("panel_forma_animada"), selected: selected == -2, onSelect: { selected = -2 }) {
                     let counts = group["pathKeyCounts"] as? [NSNumber] ?? []
                     let keyCount = counts.indices.contains(Int(model.vectorPath)) ? counts[Int(model.vectorPath)].intValue : 0
-                    Text(keyCount == 0 ? AureaText.t("panel_parada_toque_trilho_animar") : "\(keyCount) keyframes — editar no cabeçote grava ali")
+                    Text(keyCount == 0 ? AureaText.t("panel_parada_toque_trilho_animar") : AureaText.t("ios_vector_keyframes_n", keyCount))
                         .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 }.aureaSelectedProperty(selected == -2 ? AureaText.t("panel_forma_animada") : nil)
             } else if kind == 1 || kind == 2 {
@@ -140,7 +140,7 @@ struct VectorPanel: View {
                     HStack(spacing: 6) { ForEach(pathKinds.indices, id: \.self) { n in VectorChip("+ " + pathKinds[n], selected: false) { addGroup(n) } } }.padding(.vertical, 4)
                 }
                 if paths.count > 1 { VectorAction("panel_apagar_este_caminho", danger: true) { _ = model.engine.removeVectorPath(id, group: model.vectorGroup, path: model.vectorPath); refresh() }.padding(.vertical, 6) }
-                if groups.count > 1 { VectorAction("", title: "Apagar o grupo \"\(group["name"] as? String ?? "")\"", danger: true) { _ = model.engine.removeVectorGroup(id, group: model.vectorGroup); refresh() } }
+                if groups.count > 1 { VectorAction("", title: AureaText.t("ios_vector_delete_group", group["name"] as? String ?? ""), danger: true) { _ = model.engine.removeVectorGroup(id, group: model.vectorGroup); refresh() } }
             }
         }
     }
@@ -240,10 +240,10 @@ struct VectorPanel: View {
             if type > 0 && points.count == 4 && points[0] == -100 && points[2] == 100 && path.count >= 6 && !free { edit(field + 2, [path[2] - path[4] / 2, path[3], path[2] + path[4] / 2, path[3]]) }
             edit(field, [Float(type)]); model.endGesture()
         }
-        if type == 0 { colorLine("Cor da " + what, rgba: rgba) { edit(field + 1, $0) } }
+        if type == 0 { colorLine(AureaText.t(key == "fill" ? "ios_fill_color" : "ios_stroke_color"), rgba: rgba) { edit(field + 1, $0) } }
         else {
             ForEach(stops.indices, id: \.self) { n in
-                colorLine(n == 0 ? AureaText.t("panel_cor_inicial") : n == stops.count - 1 ? AureaText.t("panel_cor_final") : "Cor \(n + 1)", rgba: Array(stops[n].dropFirst())) { rgba in
+                colorLine(n == 0 ? AureaText.t("panel_cor_inicial") : n == stops.count - 1 ? AureaText.t("panel_cor_final") : AureaText.t("ios_color_n", n + 1), rgba: Array(stops[n].dropFirst())) { rgba in
                     var next = stops; next[n] = [next[n][0]] + rgba; edit(field + 3, next.flatMap { $0 })
                 }
             }
@@ -255,7 +255,7 @@ struct VectorPanel: View {
         let points = floats(paint["points"])
         let stops = (paint["stops"] as? [[NSNumber]] ?? []).map { $0.map(\.floatValue) }
         if type != 0 {
-            Text("Degradê").font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8).padding(.bottom, 4)
+            Text(AureaText.t("ios_gradient")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8).padding(.bottom, 4)
             HStack(spacing: 6) {
                 if stops.count >= 2 && stops.count < 8 { VectorChip(AureaText.t("panel_cor_meio"), selected: false) {
                     var next = stops; let a = next[next.count - 2], b = next[next.count - 1]
@@ -266,7 +266,7 @@ struct VectorPanel: View {
             }.padding(.vertical, 4)
             if points.count == 4 {
                 ForEach(0..<(type == 1 ? 4 : 3), id: \.self) { n in
-                    let labels = type == 1 ? ["Início X", "Início Y", "Fim X", "Fim Y"] : ["Centro X", "Centro Y", "Raio"]
+                    let labels = (type == 1 ? ["ios_start_x", "ios_start_y", "ios_end_x", "ios_end_y"] : ["fx_centro_x", "fx_centro_y", "panel_raio"]).map { AureaText.t($0) }
                     VectorHumanRow(label: labels[n], value: points[n], step: 0.5, range: -100000...100000, unit: "px", reset: n == 0 ? -100 : n == 2 ? 100 : 0) { v in var next = points; next[n] = v; edit(field + 2, next) }
                 }
             }

@@ -17,7 +17,7 @@ struct TransformView: View {
     @State private var dialTotal: Float = 0
     @State private var dialWalked: CGFloat = 0
     @State private var dialLast: CGPoint?
-    private let baseNames = ["Posição", "Escala", "Rotação", "Opacidade", "Pivô", "Desfoque de movimento"]
+    private var baseNames: [String] { ["fx_posicao", "panel_escala", "panel_rotacao", "panel_opacidade", "fx_pivo", "panel_desfoque_movimento"].map { AureaText.t($0) } }
     private let baseIcons = ["material:rounded.OpenWith", "material:rounded.AspectRatio", "material:automirrored.rounded.RotateRight",
                              "material:rounded.Opacity", "material:rounded.FilterCenterFocus", "material:rounded.BlurOn"]
     private var id: Int64 { model.primarySelection ?? 0 }
@@ -170,18 +170,18 @@ struct TransformView: View {
         let y = value(pivot ? 10 : 1) - (pivot ? sourceSize[1] / 2 : 0)
         return HStack(alignment: .top, spacing: 0) {
             field(number(x, decimals: 0) + "px", label: "x", width: 64) {
-                keypad(pivot ? "Pivô em X" : "Posição X", x, unit: "px", decimals: 1) {
+                keypad(AureaText.t(pivot ? "panel_pivo_x" : "panel_posicao_x"), x, unit: "px", decimals: 1) {
                     write([(pivot ? 9 : 0): $0 + (pivot ? sourceSize[0] / 2 : 0)])
                 }
             }
             field(number(y, decimals: 0) + "px", label: "y", width: 64) {
-                keypad(pivot ? "Pivô em Y" : "Posição Y", y, unit: "px", decimals: 1) {
+                keypad(AureaText.t(pivot ? "panel_pivo_y" : "panel_posicao_y"), y, unit: "px", decimals: 1) {
                     write([(pivot ? 10 : 1): $0 + (pivot ? sourceSize[1] / 2 : 0)])
                 }
             }.padding(.leading, 6)
             if pivot && threeD {
                 field(number(value(11), decimals: 0) + "px", label: "z", width: 64) {
-                    keypad("Pivô Z", value(11), unit: "px", decimals: 1) { write([11: $0]) }
+                    keypad(AureaText.t("edt_pivot_z"), value(11), unit: "px", decimals: 1) { write([11: $0]) }
                 }.padding(.leading, 6)
             }
             if pivot {
@@ -192,7 +192,7 @@ struct TransformView: View {
             } else if threeD {
                 field(number(value(2), decimals: 0) + "px", label: "z", width: 64,
                       color: zPicked ? AureaColors.accent : .white, onLongPress: {
-                    keypad("Profundidade Z", value(2), unit: "px", decimals: 1) { write([2: $0]) }
+                    keypad(AureaText.t("panel_profundidade_z"), value(2), unit: "px", decimals: 1) { write([2: $0]) }
                 }) { zPicked.toggle() }.padding(.leading, 14)
             } else { Spacer().frame(width: 14) }
         }.frame(maxWidth: .infinity)
@@ -254,7 +254,7 @@ struct TransformView: View {
                             dialLast = nil; previousAngle = nil
                         })
                     Button {
-                        keypad("Rotação \(["X", "Y", "Z"][rotationAxis])", angle, unit: "°", decimals: 1) { write([property: $0]) }
+                        keypad(AureaText.t("ios_rotation_axis", ["X", "Y", "Z"][rotationAxis]), angle, unit: "°", decimals: 1) { write([property: $0]) }
                     } label: {
                         Text(number(angle, decimals: (angle * 10).rounded() / 10 == angle.rounded() ? 0 : 1) + "°")
                             .font(.aurea(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.accent)
@@ -274,7 +274,7 @@ struct TransformView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 field(number(value(3) * 100, decimals: 1) + "%", label: AureaText.t("panel_largura"), width: 61) {
-                    keypad("Largura", value(3) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: false, amount: $0, original: [value(3) * 100, value(4) * 100, value(5) * 100]) }
+                    keypad(AureaText.t("panel_largura"), value(3) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: false, amount: $0, original: [value(3) * 100, value(4) * 100, value(5) * 100]) }
                 }
                 Button { model.scaleAxesLinked.toggle() } label: {
                     MaterialGlyph(linked ? "rounded.Link" : "rounded.LinkOff", size: 16, color: .white)
@@ -282,12 +282,12 @@ struct TransformView: View {
                 }.buttonStyle(.plain).padding(.horizontal, 5)
                     .accessibilityLabel(AureaText.t(linked ? "panel_soltar_largura_altura" : "panel_travar_largura_altura"))
                 field(number(value(4) * 100, decimals: 1) + "%", label: AureaText.t("panel_altura"), width: 61, color: .white) {
-                    keypad("Altura", value(4) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: true, amount: $0, original: [value(3) * 100, value(4) * 100, value(5) * 100]) }
+                    keypad(AureaText.t("panel_altura"), value(4) * 100, unit: "%", decimals: 1) { scaleWrite(axisY: true, amount: $0, original: [value(3) * 100, value(4) * 100, value(5) * 100]) }
                 }
             }.frame(height: 44).frame(maxWidth: .infinity)
             if threeD {
                 field(number(value(5) * 100, decimals: 1) + "%", label: "z", width: 80) {
-                    keypad("Escala Z", value(5) * 100, unit: "%", decimals: 1) { amount in
+                    keypad(AureaText.t("edt_scale_z"), value(5) * 100, unit: "%", decimals: 1) { amount in
                         if linked {
                             let from = value(5) * 100, factor = from != 0 ? amount / from : 1
                             write([3: from != 0 ? value(3) * factor : amount / 100,
@@ -344,7 +344,7 @@ struct TransformView: View {
         VStack(spacing: 6) {
             scalarRow(AureaText.t("panel_opacidade"), amount: value(12) * 100, speed: 0.35, limit: 100, keyframe: look,
                       onValue: { write([12: $0 / 100]) }, onTap: {
-                keypad("Opacidade", value(12) * 100, unit: "%", min: 0, max: 100, decimals: 0) { write([12: $0 / 100]) }
+                keypad(AureaText.t("panel_opacidade"), value(12) * 100, unit: "%", min: 0, max: 100, decimals: 0) { write([12: $0 / 100]) }
             })
             GeometryReader { bounds in
                 TickRuler(value: { value(12) * 100 }, unitsPerDp: 0.35, active: true, height: bounds.size.height)
@@ -365,7 +365,7 @@ struct TransformView: View {
                 if on {
                     scalarRow(AureaText.t("panel_intensidade"), amount: model.shutterAngle / 3.6, speed: 0.5, limit: 200,
                               onValue: { model.changeShutterAngle($0 * 3.6) }, onTap: {
-                        keypad("Intensidade do desfoque", model.shutterAngle / 3.6, unit: "%", min: 0, max: 200, decimals: 0) { model.changeShutterAngle($0 * 3.6) }
+                        keypad(AureaText.t("panel_intensidade_desfoque"), model.shutterAngle / 3.6, unit: "%", min: 0, max: 200, decimals: 0) { model.changeShutterAngle($0 * 3.6) }
                     })
                     Text(AureaText.t("panel_intensidade_vale_todas_camadas_desfoque_neste")).font(.aurea(size: 11.5))
                         .foregroundStyle(AureaColors.muted).padding(.top, 4).padding(.leading, 4)
@@ -561,7 +561,7 @@ struct TransformView: View {
     }
     private func openExpression() {
         guard !props.isEmpty else { return }
-        let title = tab == 2 ? "Rotação \(["X", "Y", "Z"][rotationAxis])" : tabName
+        let title = tab == 2 ? AureaText.t("ios_rotation_axis", ["X", "Y", "Z"][rotationAxis]) : tabName
         model.expressionSheet = ExpressionRequest(layer: id, label: title,
             tracks: props.map { ExpressionTrack(property: $0) },
             scale: tab == 1 || tab == 3 ? 100 : 1,

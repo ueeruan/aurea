@@ -2967,4 +2967,10 @@ para editar la curva.</string>
     <string name="edt_end_x">Fin X</string>
     <string name="edt_end_y">Fin Y</string>
     <string name="edt_vec_delete_group">Borrar el grupo \"%1$s\"</string>
+    <string name="ios_curve_applied">Curva \"%1$s\" aplicada</string>
+    <string name="ios_delete_named_q">¿Eliminar \"%1$s\"?</string>
+    <string name="ios_apply_named">Aplicar %1$s</string>
+    <string name="ios_vector_delete_group">Eliminar el grupo \"%1$s\"</string>
+    <string name="ios_vector_keyframes_n">%1$d keyframes — editar en el cabezal graba ahí</string>
+    <string name="ios_rotation_axis">Rotación %1$s</string>
 </resources>

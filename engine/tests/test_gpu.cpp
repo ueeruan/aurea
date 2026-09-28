@@ -10781,3 +10781,44 @@ AUREA_TEST(Gpu, GroupCameraPassThroughLetsTheOuterCameraReachInside) {
     AUREA_CHECK(diff(through, direct) < 0.02f);   // a câmera de fora vê o quadrado de dentro
     AUREA_CHECK(diff(sealed, direct) > 0.3f);     // fechado: outra imagem
 }
+
+// Particular em 3D: girar a camada gira o ESPAÇO das partículas (emissor e
+// física), não a folha. Uma folha girada 90° em Y ou X ficaria de perfil e
+// sumiria; as partículas continuam de frente para a câmera e o quadro muda
+// de forma (o fogo de lado).
+AUREA_TEST(Gpu, ParticularLayerRotationIsThreeDimensional) {
+    AUREA_REQUIRE_GPU();
+    auto shot = [](f32 rx, f32 ry, i64 frame) {
+        Scene3DRig rig(320, 180);
+        auto id = rig.e.add_particles(particular::kPresetBase + 3);   // fogo
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return Image8{};
+        Layer* l = current_comp(rig.e)->layer(LayerId::unpack(*id));
+        l->transform.rotation.x = rx;
+        l->transform.rotation.y = ry;
+        seek_frame(rig.e, frame);
+        return rig.capture(320);
+    };
+    const Image8 flat = shot(0, 0, 30);
+    const Image8 turnedY = shot(0, 90, 30);
+    const Image8 turnedX = shot(90, 0, 30);
+    const f32 c0 = coverage(flat), cy = coverage(turnedY), cx = coverage(turnedX);
+    const Box8 b0 = lit_box(flat), by = lit_box(turnedY), bx = lit_box(turnedX);
+    std::printf("    particular 3D: cobertura 0°=%.4f Y90=%.4f X90=%.4f; caixa 0° %ux%u, Y90 %ux%u, X90 %ux%u\n",
+                c0, cy, cx, b0.w(), b0.h(), by.w(), by.h(), bx.w(), bx.h());
+    // A folha girada sumiria de perfil; as partículas continuam visíveis.
+    AUREA_CHECK(cy > 0.0005f && cx > 0.0005f);
+    // E o quadro é outro: o emissor largo em X fica de perfil em Y90, e em
+    // X90 o jato vem na direção da câmera (as chamas perto dela crescem pela
+    // perspectiva e cobrem bem mais do quadro).
+    AUREA_CHECK(turnedY.rgba != flat.rgba);
+    AUREA_CHECK(turnedX.rgba != flat.rgba);
+    AUREA_CHECK(cx > c0 * 1.5f);
+    if (const char* dir = std::getenv("AUREA_FX_DUMP"); dir && *dir) {
+        (void)write_png(std::string(dir) + "/particular_rot_0.png", flat);
+        (void)write_png(std::string(dir) + "/particular_rot_y90.png", turnedY);
+        (void)write_png(std::string(dir) + "/particular_rot_x90.png", turnedX);
+    }
+    // Determinístico com rotação: o mesmo quadro de novo.
+    AUREA_CHECK(shot(0, 90, 30).rgba == turnedY.rgba);
+}

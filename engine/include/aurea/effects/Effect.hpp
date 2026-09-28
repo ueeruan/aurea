@@ -95,6 +95,18 @@ struct LayerPlacement {
     /// região que o efeito devolve — o brilho (que depende dela) saía 1x1 e a
     /// camada 3D sumia.
     bool inScene3d = false;
+    /// Camada do Particular (ParticleEmitter::Particular): a folha é desenhada
+    /// SEM a rotação da camada e as partículas vivem no espaço 3D dela.
+    /// `worldFromLayer` leva px da camada (z para longe) ao mundo, com a
+    /// rotação X/Y/Z, a orientação, a posição Z e os pais; `compFromWorld` é a
+    /// câmera da composição (a ativa, ou a padrão de 40°) até px da composição
+    /// (homogêneo); `camRight`/`camUp` são os eixos da câmera no mundo — os
+    /// sprites ficam de frente para ela.
+    bool particleSpace = false;
+    Mat4 worldFromLayer = Mat4::identity();
+    Mat4 compFromWorld = Mat4::identity();
+    Vec3 camRight{1.0f, 0.0f, 0.0f};
+    Vec3 camUp{0.0f, 1.0f, 0.0f};
 };
 
 /// Retângulo, em pixels da layer, que o quadro inteiro da composição cobre

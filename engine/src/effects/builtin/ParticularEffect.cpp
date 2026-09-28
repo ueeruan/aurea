@@ -48,8 +48,10 @@ constexpr f32 kMaxRate = 1000.0f;
 
 struct ParticularUniforms {
     Vec4 region, view, clock, frame, emitPos, emitSize, launch, cone, forces, motion, lifeSize, look, color0, color1;
+    Mat4 worldFromLayer, compFromWorld;   // camada do Particular (LayerPlacement::particleSpace)
+    Vec4 camRight, camUp;                 // camRight.w = 1 liga o espaço 3D
 };
-static_assert(sizeof(ParticularUniforms) == 224, "layout std140 do particular.vert");
+static_assert(sizeof(ParticularUniforms) == 384, "layout std140 do particular.vert");
 
 Vec4 linear(Vec4 c) noexcept {
     return Vec4{Color::srgb_to_linear(std::clamp(c.x, 0.0f, 1.0f)), Color::srgb_to_linear(std::clamp(c.y, 0.0f, 1.0f)),
@@ -202,6 +204,14 @@ public:
         u.color0.w = pct(e, kColorRandom, 0.0f, 100.0f);
         u.color1 = linear(e.color(kColorEnd));
         u.color1.w = 0.0f;
+        if (e.placement && e.placement->particleSpace) {
+            // Camada do Particular: a rotação da camada gira o espaço das
+            // partículas; a câmera é a da composição.
+            u.worldFromLayer = e.placement->worldFromLayer;
+            u.compFromWorld = e.placement->compFromWorld;
+            u.camRight = Vec4{e.placement->camRight.x, e.placement->camRight.y, e.placement->camRight.z, 1.0f};
+            u.camUp = Vec4{e.placement->camUp.x, e.placement->camUp.y, e.placement->camUp.z, 0.0f};
+        }
 
         const bool additive = e.b(kAddMode);
         const FGTexture sprites = ctx.texture("particular-particulas", w, h);

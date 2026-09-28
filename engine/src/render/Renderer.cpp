@@ -1315,6 +1315,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // câmera daqui (com o transform do grupo dentro dela) — a camada entra
         // chapada, sem transform próprio.
         bool cameraThrough = false;
+        bool particularSheet = false;   // camada do Particular (ver LayerPlacement::particleSpace)
         switch (l->kind) {
             case LayerKind::Video: {
                 const Asset* asset = project.asset(l->source);
@@ -1714,6 +1715,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // parado do campo.
                 const ParticleData pd = sampled_particles(*l, local);
                 if (pd.emitterType == static_cast<u32>(ParticleEmitter::Particular)) {
+                    particularSheet = true;
                     // Particular (o sistema do app antigo): a camada é uma
                     // folha transparente do tamanho da composição e o efeito
                     // `aurea.generate.particular` desenha as partículas nela.
@@ -1853,7 +1855,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
 
         // Transform da layer, com a cadeia de pais (cada pai no próprio tempo).
         Mat4 m = cameraThrough ? Mat4::identity() : world_2d_frac(comp, *l, static_cast<f64>(time.value));
-        const bool inScene3d = !cameraThrough && wants_3d(comp, *l, time);
+        // Particular: a rotação (X/Y/Z, orientação), a posição Z e os pais vão
+        // para o espaço 3D das partículas; a folha fica parada na composição.
+        const bool inScene3d = !cameraThrough && !particularSheet && wants_3d(comp, *l, time);
+        Mat4 particularWorld = Mat4::identity();
+        if (particularSheet) {
+            particularWorld = world_3d(comp, *l, time);
+            m = Mat4::identity();
+        }
         if (inScene3d) {
             // Rotação X/Y, profundidade, nulo 3D na cadeia: a MESMA câmera dos
             // modelos 3D (padrão = plano Z=0 1:1 com a composição).
@@ -2067,6 +2076,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // Vai para a cena 3D (plano no mundo): o corte pela área visível da
             // composição não se aplica — ver LayerPlacement::inScene3d.
             placement.inScene3d = inScene3d;
+            if (particularSheet) {
+                placement.particleSpace = true;
+                placement.worldFromLayer = particularWorld;
+                placement.compFromWorld = compFromClip * viewProj3d;
+                // Linhas da vista = eixos da câmera no mundo.
+                const Mat4& v = cam3d.view;
+                placement.camRight = Vec3{v.col[0].x, v.col[1].x, v.col[2].x};
+                placement.camUp = Vec3{v.col[0].y, v.col[1].y, v.col[2].y};
+                rl.blurMatrices.clear();   // a folha não se move: o movimento é das partículas
+                rl.temporal.clear();
+            }
             EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used], fps);
         }
         // FORA DA TELA: a caixa da camada (com o Transform dobrado) não toca a

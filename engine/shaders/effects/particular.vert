@@ -34,6 +34,11 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 look;      // tamanho final (×), opacidade, surgir, sumir (frações da vida)
     vec4 color0;    // cor inicial (linear), cor aleatória 0..1
     vec4 color1;    // cor final (linear)
+    // Camada do Particular: o espaço 3D da camada e a câmera da composição.
+    mat4 worldFromLayer;   // px da camada (z para longe) -> mundo
+    mat4 compFromWorld;    // mundo -> px da composição (homogêneo)
+    vec4 camRight;         // xyz = eixo da câmera no mundo; w = 1 liga este modo
+    vec4 camUp;
 } p;
 
 layout(location = 0) out vec2 v_corner;   // -1..1 no quadrado da partícula
@@ -166,6 +171,38 @@ void main() {
             axisU = vec2(-axisV.y, axisV.x);
             sizeV = size * clamp(1.0 + p.cone.z * vlen / max(p.launch.x, 1.0), 1.0, 1.0 + p.cone.z * 6.0);
         }
+    }
+
+    if (p.camRight.w > 0.5) {
+        // Espaço 3D da camada: a rotação/orientação da camada gira o emissor e
+        // a física; os sprites continuam de frente para a câmera (eixos dela
+        // no mundo) e a perspectiva é a da câmera da composição.
+        const vec3 R = p.camRight.xyz, U = p.camUp.xyz;
+        const vec3 center = (p.worldFromLayer * vec4(pos, 1.0)).xyz;
+        const vec4 cc = p.compFromWorld * vec4(center, 1.0);
+        if (cc.w < max(p.frame.y, 1.0) * 1e-3) {
+            cull();
+            return;
+        }
+        vec3 wu = R, wv = U;
+        float sv = size;
+        if (p.cone.z > 0.0) {
+            const vec3 vel = dir * speed * exp(-max(p.motion.x, 0.0) * age) + p.forces.yzw + vec3(0.0, p.forces.x, 0.0) * age;
+            const vec3 vw = mat3(p.worldFromLayer) * vel;
+            const vec2 vs = vec2(dot(vw, R), dot(vw, U));
+            const float vlen = length(vs);
+            if (vlen > 1e-3) {
+                const vec2 d = vs / vlen;
+                wv = R * d.x + U * d.y;
+                wu = R * -d.y + U * d.x;
+                sv = size * clamp(1.0 + p.cone.z * vlen / max(p.launch.x, 1.0), 1.0, 1.0 + p.cone.z * 6.0);
+            }
+        }
+        const vec3 world = center + wu * (corner.x * size * 0.5) + wv * (corner.y * sv * 0.5);
+        const vec4 c = p.compFromWorld * vec4(world, 1.0);
+        const vec2 at3 = c.xy / max(c.w, 1e-6);
+        gl_Position = vec4((at3 - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0, 0.5, 1.0);
+        return;
     }
 
     // Perspectiva da câmera padrão: distância focal F diante do plano z = 0.

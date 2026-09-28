@@ -849,6 +849,12 @@ enum KeyframeVisibility {
 enum TimelinePress {
     static let editRatio: CGFloat = 2
     static func horizontal(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dx) >= abs(dy) }
+    /// Rolar a pilha ganha cedo: |dy| ≥ 0,6·|dx| (≈ 31° da horizontal) — o dedo
+    /// que sobe um pouco torto quer ver as outras camadas. Só na lista inteira;
+    /// na fileira compacta vale o empate de 45° (`horizontal`). Par do
+    /// `Press.scrollWins` do Android.
+    static let scrollRatio: CGFloat = 0.6
+    static func scrollWins(_ dx: CGFloat, _ dy: CGFloat) -> Bool { dy != 0 && abs(dy) >= scrollRatio * abs(dx) }
     /// Claramente no eixo do tempo: mover, aparar, arrastar losango.
     static func timeEdit(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dx) >= editRatio * abs(dy) }
     /// Claramente na pilha: reordenar.

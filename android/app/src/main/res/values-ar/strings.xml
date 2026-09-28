@@ -2991,4 +2991,5 @@
     <string name="ios_vector_delete_group">حذف المجموعة \"%1$s\"</string>
     <string name="ios_vector_keyframes_n">%1$d إطارات مفتاحية — التعديل عند رأس التشغيل يُسجَّل هناك</string>
     <string name="ios_rotation_axis">الدوران %1$s</string>
+    <string name="panel_pivo_arraste_preview">اسحب على المعاينة لتحريك نقطة المحور</string>
 </resources>

@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -119,9 +120,13 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
         else -> cubicBezier(x1, y1, x2, y2, t)
     }
 
-    /** As alças mostradas: as da bézier; a reta tem as alças nas pontas. */
+    /**
+     * As alças mostradas: as da bézier. A reta mostra a bézier equivalente
+     * (⅓,⅓)(⅔,⅔) — nas pontas as alças ficavam em cima das marcas, sem ter
+     * onde pôr o dedo.
+     */
     fun handles(): FloatArray = when (interp) {
-        Interp.LINEAR -> floatArrayOf(0f, 0f, 1f, 1f)
+        Interp.LINEAR -> floatArrayOf(1f / 3f, 1f / 3f, 2f / 3f, 2f / 3f)
         Interp.EASE_IN -> floatArrayOf(1f / 3f, 0f, 2f / 3f, 1f / 3f)
         Interp.EASE_OUT -> floatArrayOf(1f / 3f, 2f / 3f, 2f / 3f, 1f)
         Interp.EASE_IN_OUT -> floatArrayOf(0.5f, 0f, 0.5f, 1f)
@@ -186,12 +191,6 @@ private fun nameOf(e: Ease): Int {
         Interp.EASE_IN_OUT -> R.string.pn_ease_in_out
         else -> R.string.pn_ease_bezier_custom
     }
-}
-
-private fun familyOf(e: Ease): Int = when (e.interp) {
-    Interp.BOUNCE, Interp.ELASTIC -> 1
-    Interp.HOLD, Interp.STEPS -> 2
-    else -> 0
 }
 
 /** Área de transferência da curva (Copiar curva / Colar curva). */
@@ -398,22 +397,35 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                 Box(Modifier.size(48.dp).tocavel { jump(1) }, contentAlignment = Alignment.Center) {
                     CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, Color.White)
                 }
+                // O único preset pronto que fica: Bounce (a bézier se faz nas
+                // alças). Tocar de novo volta a uma bézier suave, com alças.
+                if (graphMode == 0) {
+                    val bouncing = ease.interp == Interp.BOUNCE
+                    val bounceName = stringResource(R.string.pn_textpreset_bounce)
+                    Box(
+                        Modifier.padding(start = 4.dp, end = 8.dp).height(48.dp)
+                            .testTag("curve.preset.bounce")
+                            .semantics { contentDescription = bounceName }
+                            .tocavel {
+                                store.beginGesture("curva")
+                                applyEase(store, layer, start, if (bouncing) bez(0.42f, 0f, 0.58f, 1f) else Ease(Interp.BOUNCE, 0f, 0f, 1f, 1f))
+                                store.endGesture()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            bounceName, maxLines = 1,
+                            modifier = Modifier.clip(RoundedCornerShape(14.dp))
+                                .background(if (bouncing) CurveGreen.copy(alpha = .18f) else CurveRailFill)
+                                .border(1.dp, if (bouncing) CurveGreen else Color.White.copy(alpha = .18f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600,
+                                color = if (bouncing) CurveGreen else Color.White)),
+                        )
+                    }
+                }
             }
         }
-        // Presets de curva (nativos + os salvos): a aba ★ das famílias.
-        val saved = remember(store.presets.user) { store.presets.entries(com.aurea.aurea.presets.PresetKind.Curve).mapNotNull { entry ->
-            store.curveOfPreset(entry)?.let { v -> CurvePreset(null, Ease(v[0].toInt(), v[1], v[2], v[3], v[4]), entry) }
-        } }
-        if (graphMode == 0) CurveFamilies(
-            current = ease,
-            saved = saved,
-            onPick = { p ->
-                store.beginGesture("curva")
-                applyEase(store, layer, start, p.ease)
-                store.endGesture()
-                p.entry?.let { store.presets.markUsed(it) }
-            },
-        )
     }
     }
 
@@ -480,6 +492,8 @@ private fun CurveGraph(
 ) {
     val h = ease.handles()
     var activeRange by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    /** A alça no dedo (0 saída, 1 chegada, −1 nenhuma): ganha o halo. */
+    var activeHandle by remember { mutableIntStateOf(-1) }
     val yMin = activeRange?.first ?: min(if (overshoot) -0.5f else -0.12f, min(h[1], h[3]) - 0.12f)
     val yMax = activeRange?.second ?: max(if (overshoot || ease.interp == Interp.ELASTIC) 1.5f else 1.12f, max(h[1], h[3]) + 0.12f)
     val current by rememberUpdatedState(ease)
@@ -493,25 +507,33 @@ private fun CurveGraph(
     Box(
         Modifier
             .fillMaxSize()
+            .testTag("curve.easingGraph")
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     val e0 = current
                     if (!e0.hasHandles || size.width <= 0 || size.height <= 0) return@awaitEachGesture
                     val (lo, hi) = range
-                    val inset = 24.dp.toPx()
+                    val inset = CURVE_INSET.toPx()
                     val width = max(1f, size.width - 2 * inset)
                     fun plot(x: Float, y: Float) = Offset(inset + x * width, size.height - (y - lo) / (hi - lo) * size.height)
                     val hh = e0.handles()
                     val p1 = plot(hh[0], hh[1])
                     val p2 = plot(hh[2], hh[3])
-                    val d1 = (down.position - p1).getDistanceSquared()
-                    val d2 = (down.position - p2).getDistanceSquared()
-                    val radius = 24.dp.toPx()
-                    if (min(d1, d2) > radius * radius) return@awaitEachGesture
+                    val k0 = plot(0f, 0f)
+                    val k1 = plot(1f, 1f)
+                    // O toque procura as alças ONDE ELAS ESTÃO DESENHADAS (afastadas
+                    // se coincidem), num raio de dedo; a mais perto vence.
+                    val shown = separatedHandles(p1.x, p1.y, p2.x, p2.y, k0.x, k0.y, k1.x, k1.y, HANDLE_SEPARATION.toPx())
+                    val which = nearestHandle(down.position.x, down.position.y, shown, HANDLE_HIT.toPx())
+                    if (which < 0) return@awaitEachGesture
                     down.consume()
-                    val first = d1 <= d2
-                    val grabOffset = (if (first) p1 else p2) - down.position
+                    val first = which == 0
+                    activeHandle = which
+                    // Arrasto RELATIVO: a alça parte de onde está e anda o que o
+                    // dedo andar depois da folga — nada salta no toque.
+                    val real = if (first) p1 else p2
+                    var anchor = down.position
                     var began = false
                     var e = Ease(Interp.BEZIER, hh[0], hh[1], hh[2], hh[3])
                     try {
@@ -520,22 +542,24 @@ private fun CurveGraph(
                         val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
                         if (!ch.pressed) break
                         ch.consume()
-                        if (!began && (ch.position - down.position).getDistance() < viewConfiguration.touchSlop) continue
-                        val position = ch.position + grabOffset
+                        if (!began) {
+                            if ((ch.position - down.position).getDistance() < viewConfiguration.touchSlop) continue
+                            began = true
+                            anchor = ch.position
+                            activeRange = Pair(lo, hi)
+                            begin()
+                        }
+                        val position = real + (ch.position - anchor)
                         val x = ((position.x - inset) / width).coerceIn(0f, 1f)
                         var y = lo + (size.height - position.y) / size.height * (hi - lo)
                         if (!over) y = y.coerceIn(0f, 1f)
                         if (!x.isFinite() || !y.isFinite()) continue
-                        if (!began) {
-                            began = true
-                            activeRange = Pair(lo, hi)
-                            begin()
-                        }
                         e = if (first) e.copy(x1 = x, y1 = y) else e.copy(x2 = x, y2 = y)
                         change(e)
                       }
                     } finally {
                         activeRange = null
+                        activeHandle = -1
                         if (began) end()
                     }
                 }
@@ -543,7 +567,7 @@ private fun CurveGraph(
     ) {
         // A curva, a grade e as alças só mudam com o easing: redesenham raramente.
         Canvas(Modifier.fillMaxSize()) {
-            val inset = 24.dp.toPx()
+            val inset = CURVE_INSET.toPx()
             fun pt(x: Float, y: Float) = Offset(inset + x * max(1f, size.width - 2 * inset), size.height - (y - yMin) / (yMax - yMin) * size.height)
             drawGrid(pt(0f, 0f).y, pt(0f, 1f).y)
             val base = pt(0f, 0f).y
@@ -563,8 +587,11 @@ private fun CurveGraph(
             val p1 = pt(1f, 1f)
             if (ease.hasHandles) {
                 val hh = ease.handles()
-                val h1 = pt(hh[0], hh[1])
-                val h2 = pt(hh[2], hh[3])
+                val real1 = pt(hh[0], hh[1])
+                val real2 = pt(hh[2], hh[3])
+                val shown = separatedHandles(real1.x, real1.y, real2.x, real2.y, p0.x, p0.y, p1.x, p1.y, HANDLE_SEPARATION.toPx())
+                val h1 = Offset(shown[0], shown[1])
+                val h2 = Offset(shown[2], shown[3])
                 val dash = Color.White.copy(alpha = 0.30f)
                 fun drop(hp: Offset) {
                     var y = min(hp.y, base)
@@ -576,24 +603,35 @@ private fun CurveGraph(
                 }
                 drop(h1)
                 drop(h2)
+                // Cada alça ligada à SUA marca: a de saída (cheia) à primeira,
+                // a de chegada (anel) à segunda — dá para saber qual é qual.
                 drawLine(Color.White, p0, h1, 2.5.dp.toPx())
-                drawLine(Color.White, p1, h2, 2.5.dp.toPx())
+                drawLine(Color.White.copy(alpha = .7f), p1, h2, 2.5.dp.toPx())
+                if (activeHandle >= 0) drawCircle(CurveGreen.copy(alpha = .22f), HANDLE_HIT.toPx() * .85f, if (activeHandle == 0) h1 else h2)
                 drawCircle(Color.White, 11.dp.toPx(), h1)
-                drawCircle(Color.White, 11.dp.toPx(), h2)
+                drawCircle(CurvePanelFill, 9.dp.toPx(), h2)
+                drawCircle(Color.White, 9.dp.toPx(), h2, style = Stroke(3.dp.toPx()))
             }
-            drawCircle(CurveGreen, 4.5.dp.toPx(), p0)
-            drawCircle(CurveGreen, 4.5.dp.toPx(), p1)
+            drawCircle(CurveGreen, 5.dp.toPx(), p0)
+            drawCircle(CurveGreen, 5.dp.toPx(), p1)
         }
         // Guia do cabeçote em camada própria, sem cobrir os pontos da curva.
         Canvas(Modifier.fillMaxSize()) {
             val f = progress() ?: return@Canvas
-            val inset = 24.dp.toPx()
+            val inset = CURVE_INSET.toPx()
             val p = Offset(inset + f * max(1f, size.width - 2 * inset), size.height - (ease.transform(f) - yMin) / (yMax - yMin) * size.height)
             drawLine(Color.White.copy(alpha = 0.4f), Offset(p.x, 0f), Offset(p.x, size.height),
                 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 4.dp.toPx())))
         }
     }
 }
+
+/** Margem lateral do gráfico da curva: as pontas e as alças em x = 0 / 1 ficam tocáveis. */
+private val CURVE_INSET = 28.dp
+/** Raio de toque das alças: 56 dp de diâmetro, acima do alvo mínimo de 48. */
+private val HANDLE_HIT = 28.dp
+/** Distância mínima entre as alças DESENHADAS (as bolas nunca se sobrepõem). */
+private val HANDLE_SEPARATION = 30.dp
 
 private fun DrawScope.drawGrid(y0: Float, y1: Float) {
     val w = 0.6.dp.toPx()
@@ -608,75 +646,6 @@ private fun DrawScope.drawGrid(y0: Float, y1: Float) {
     for (py in floatArrayOf(y0, y1)) {
         var x = 0f
         while (x < size.width) { drawLine(lim, Offset(x, py), Offset(x + 4.5.dp.toPx(), py), w); x += 9.dp.toPx() }
-    }
-}
-
-/**
- * OS PRESETS À DIREITA [A] (`_FamiliasDaCurva`, 132 dp): grade de miniaturas
- * 38 × 38 da família aberta + abas verticais das famílias (34 dp, `#151C24`).
- * A aba nasce na família do trecho.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun CurveFamilies(current: Ease, saved: List<CurvePreset>, onPick: (CurvePreset) -> Unit) {
-    // As famílias fixas + a aba ★ dos presets de curva (nativos e salvos).
-    val families = Families + CurveFamily(R.string.panel_presets, CupertinoGlyph.Star, saved)
-    var tab by rememberSaveable { mutableIntStateOf(familyOf(current)) }
-    val family = families[tab.coerceIn(0, families.lastIndex)]
-    Row(Modifier.width(96.dp).fillMaxHeight()) {
-        Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 2.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                family.presets.forEach { p ->
-                    val on = current.same(p.ease)
-                    val presetName = stringResource(p.name ?: nameOf(p.ease))
-                    Box(
-                        Modifier
-                            .size(48.dp)
-                            .semantics { contentDescription = presetName }
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(CurveRailFill)
-                            .border(if (on) 1.8.dp else 0.dp, if (on) CurveGreen else Color.Transparent, RoundedCornerShape(8.dp))
-                            .tocavel { onPick(p) },
-                    ) {
-                        PresetThumb(p.ease, on, Modifier.fillMaxSize())
-                    }
-                }
-            }
-        }
-        Column(
-            Modifier.width(48.dp).fillMaxHeight().background(CurveRailFill).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            families.forEachIndexed { i, f ->
-                val familyName = stringResource(f.name)
-                Box(Modifier.size(48.dp, 48.dp).semantics { contentDescription = familyName }.tocavel(shrink = 1f) { tab = i }, contentAlignment = Alignment.Center) {
-                    PresetThumb(f.presets.firstOrNull()?.ease ?: Ease(Interp.BEZIER, .5f, 0f, .5f, 1f), i == tab, Modifier.size(40.dp))
-                }
-            }
-        }
-    }
-}
-
-/** A miniatura de um preset (`_PresetThumbPainter`): a curva e as duas pontas. */
-@Composable
-private fun PresetThumb(e: Ease, selected: Boolean, modifier: Modifier) {
-    Canvas(modifier) {
-        val pad = 6.dp.toPx()
-        val w = size.width - pad * 2
-        val hh = size.height - pad * 2
-        val color = if (selected) CurveGreen else Color.White.copy(alpha = 0.7f)
-        val p = Path()
-        for (i in 0..40) {
-            val t = i / 40f
-            val v = e.transform(t).coerceIn(-0.3f, 1.3f)
-            val o = Offset(pad + t * w, pad + hh - v * hh)
-            if (i == 0) p.moveTo(o.x, o.y) else p.lineTo(o.x, o.y)
-        }
-        drawPath(p, color, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
-        val dot = if (selected) CurveGreen else Color.White
-        drawCircle(dot, 2.5.dp.toPx(), Offset(pad, pad + hh))
-        drawCircle(dot, 2.5.dp.toPx(), Offset(pad + w, pad))
     }
 }
 

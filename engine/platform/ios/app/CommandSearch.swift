@@ -102,6 +102,7 @@ struct CommandSearchView: View {
                 Text(AureaText.t("edt_cmd_title")).font(.aurea(size: 20, weight: .semibold))
                 Spacer()
                 Button(AureaText.t("common_close")) { dismiss() }.frame(minWidth: 44, minHeight: 44)
+                    .accessibilityIdentifier("commandSearchClose")
             }
             TextField(AureaText.t("edt_cmd_search_hint"), text: $query)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -113,7 +114,7 @@ struct CommandSearchView: View {
                         Button { category = name } label: {
                             Text(categoryLabel(name)).font(.aurea(size: 13)).padding(.horizontal, 12).frame(minHeight: 44)
                                 .background(category == name ? AureaColors.accentDim : AureaColors.chip, in: Capsule())
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.plain).accessibilityIdentifier("commandSearch.category." + fxEffectCategoryId(name))
                     }
                 }
             }
@@ -147,6 +148,8 @@ struct CommandSearchView: View {
             Button { toggleFavorite(hit) } label: {
                 Image(systemName: favorite(hit) ? "star.fill" : "star").foregroundStyle(AureaColors.accent).frame(width: 48, height: 48)
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t(favorite(hit) ? "edt_cmd_fav_remove" : "edt_cmd_fav_add", hit.title))
+                .accessibilityIdentifier("commandSearch.favorite:\(hit.id)")
+                .accessibilityAddTraits(favorite(hit) ? .isSelected : [])
         }
     }
 

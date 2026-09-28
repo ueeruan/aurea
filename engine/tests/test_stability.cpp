@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <string>
 #include <thread>
@@ -1543,4 +1544,166 @@ AUREA_TEST(Stability, ExtremeProjectOpensSavesAndRenders) {
                 static_cast<f64>(st.lastBytes) / (1024.0 * 1024.0), loadMs, rendered,
                 worstMs > 0.0 ? "1920x1080 GPU" : "sem GPU", renderMs / rendered, worstMs);
     remove_family(path);
+}
+
+// =============================================================================
+// Sair do app / atualizar o app sem perder projeto
+// =============================================================================
+
+// Ir para segundo plano grava QUALQUER mudança (mesmo tocando ou com gesto
+// aberto — o processo pode morrer logo depois) e não reescreve um projeto limpo
+// (o .bak continua sendo a gravação anterior de verdade).
+AUREA_TEST(Stability, BackgroundSaveIgnoresIdleRulesAndSkipsCleanProjects) {
+    const std::string path = test_path("fundo");
+    remove_family(path);
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, "Fundo").ok());
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.add_text("v2").ok());
+    AUREA_CHECK(e.save_project().ok());
+    const auto main1 = read_file(path);
+    const auto bak1 = read_file(path + ".bak");
+    const auto saves = e.save_stats().saves;
+
+    bool saved = true;
+    AUREA_CHECK(e.save_project_if_dirty(&saved).ok());
+    AUREA_CHECK(!saved);
+    AUREA_CHECK_EQ(e.save_stats().saves, saves);
+    AUREA_CHECK(read_file(path) == main1);
+    AUREA_CHECK(read_file(path + ".bak") == bak1);
+
+    // Edição ainda na fila + tocando + grupo de desfazer aberto: o autosave
+    // espera; sair do app não.
+    AUREA_CHECK(e.add_text("v3").ok());
+    Command cmds[2];
+    cmds[0].type = CommandType::PlaybackPlay;
+    cmds[1].type = CommandType::UndoBeginGroup;
+    AUREA_CHECK_EQ(e.submit_commands(cmds, 2), 2u);
+    AUREA_CHECK(e.autosave_project().ok());
+    AUREA_CHECK_EQ(e.save_stats().saves, saves);
+    AUREA_CHECK(e.save_project_if_dirty(&saved).ok());
+    AUREA_CHECK(saved);
+    AUREA_CHECK(!e.read_status().dirty);
+    AUREA_CHECK(read_file(path + ".bak") == main1);   // a anterior vira .bak
+    e.shutdown();
+
+    Engine f;   // "processo morto em segundo plano" e reaberto
+    AUREA_CHECK(f.initialize(headless()).ok());
+    AUREA_CHECK(f.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(layer_count(f), 2u);
+    AUREA_CHECK_EQ(f.last_load_notice(), 0u);
+    f.shutdown();
+    remove_family(path);
+}
+
+// Sem espaço para a cópia de segurança, o projeto antigo NÃO abre — e fica
+// byte a byte como estava (a primeira gravação no formato novo seria o fim dele).
+AUREA_TEST(Stability, OldFormatWithoutRoomForTheCopyIsRefusedAndUntouched) {
+    const std::string path = test_path("antigo_cheio");
+    remove_family(path);
+    const std::vector<u8> original(kOldProjectTimelineV2, kOldProjectTimelineV2 + sizeof(kOldProjectTimelineV2));
+    AUREA_CHECK(write_raw(path, original));
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, "aberto antes").ok());
+    const Project* before = e.project();
+    fileio::FaultInjection fault;
+    fault.kind = fileio::Fault::DiskFullAfter;
+    fault.afterBytes = 0;
+    fault.pathContains = ".v2.bak";
+    fileio::set_fault_injection(fault);
+    const Status s = e.load_project(path.c_str());
+    fileio::clear_fault_injection();
+    AUREA_CHECK_EQ(s.code(), Errc::StorageFull);
+    AUREA_CHECK(e.project() == before);
+    AUREA_CHECK(read_file(path) == original);
+    AUREA_CHECK(!fileio::exists(path + ".v2.bak"));
+    // Com espaço de novo, abre e guarda a cópia.
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK(read_file(path + ".v2.bak") == original);
+    e.shutdown();
+    remove_family(path);
+}
+
+// Um `.corrompido` de uma abertura anterior nunca é sobrescrito; sem espaço
+// para guardar o principal ruim, a abertura é recusada.
+AUREA_TEST(Stability, BadMainCopyNeverOverwritesAnOlderOneAndIsRequired) {
+    const std::string path = test_path("corrompido2");
+    remove_family(path);
+    std::remove((path + ".corrompido2").c_str());
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, "Bom").ok());
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.add_text("x").ok());
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    e.shutdown();
+    const std::vector<u8> full = read_file(path);
+    const std::vector<u8> bad(full.begin(), full.begin() + 40);
+    const std::vector<u8> older{1, 2, 3, 4};
+    AUREA_CHECK(write_raw(path, bad));
+    AUREA_CHECK(write_raw(path + ".corrompido", older));
+
+    Engine f;
+    AUREA_CHECK(f.initialize(headless()).ok());
+    fileio::FaultInjection fault;
+    fault.kind = fileio::Fault::DiskFullAfter;
+    fault.pathContains = ".corrompido";
+    fileio::set_fault_injection(fault);
+    const Status refused = f.load_project(path.c_str());
+    fileio::clear_fault_injection();
+    AUREA_CHECK_EQ(refused.code(), Errc::StorageFull);
+    AUREA_CHECK(read_file(path) == bad);
+    AUREA_CHECK(f.load_project(path.c_str()).ok());
+    AUREA_CHECK((f.last_load_notice() & Engine::kLoadRecoveredCopy) != 0);
+    AUREA_CHECK(read_file(path + ".corrompido") == older);
+    AUREA_CHECK(read_file(path + ".corrompido2") == bad);
+    f.shutdown();
+    std::remove((path + ".corrompido2").c_str());
+    remove_family(path);
+}
+
+// iOS: a atualização do app muda a pasta `…/Data/Application/<UUID>/Documents`.
+// A mídia gravada com o caminho absoluto antigo volta a apontar para a cópia
+// que está na Documents de agora (e só se ela existir).
+AUREA_TEST(Stability, MediaFromAPreviousAppContainerIsRelinkedAfterUpdate) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path root = fs::temp_directory_path() / ("aurea_container_" + std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count()));
+    const fs::path docs = root / "NEW-UUID" / "Documents";
+    fs::create_directories(docs / "Media", ec);
+    AUREA_CHECK(write_raw((docs / "Media" / "som.m4a").string(), std::vector<u8>{1, 2, 3}));
+    const std::string oldAbs = "/var/mobile/Containers/Data/Application/OLD-UUID/Documents/Media/som.m4a";
+    const std::string gone = "/var/mobile/Containers/Data/Application/OLD-UUID/Documents/Media/sumiu.m4a";
+    const std::string path = (root / "p.aurea").string();
+    {
+        Engine e;
+        AUREA_CHECK(e.initialize(headless()).ok());
+        AUREA_CHECK(e.new_project(320, 180, 30, "Container").ok());
+        AUREA_CHECK(e.save_project(path.c_str()).ok());
+        e.shutdown();
+        Project p;
+        AUREA_CHECK(ProjectSerializer::load(p, path, LoadOptions{}).ok());
+        Asset a; a.kind = AssetKind::Audio; a.name = "som"; a.sourcePath = oldAbs;
+        (void)p.add_asset(a);
+        Asset b = a; b.name = "sumiu"; b.sourcePath = gone;
+        (void)p.add_asset(b);
+        AUREA_CHECK(ProjectSerializer::save(p, path, SaveOptions{}).ok());
+    }
+    Engine f;
+    auto cfg = headless();
+    cfg.documentsDirectory = docs.string();
+    AUREA_CHECK(f.initialize(cfg).ok());
+    AUREA_CHECK(f.load_project(path.c_str()).ok());
+    u32 relinked = 0, kept = 0;
+    f.project()->for_each_asset([&](AssetId, const Asset& a) {
+        if (a.name == "som" && fs::equivalent(fs::u8path(a.sourcePath), docs / "Media" / "som.m4a", ec)) ++relinked;
+        if (a.name == "sumiu" && a.sourcePath == gone) ++kept;
+    });
+    AUREA_CHECK_EQ(relinked, 1u);
+    AUREA_CHECK_EQ(kept, 1u);
+    f.shutdown();
+    fs::remove_all(root, ec);
 }

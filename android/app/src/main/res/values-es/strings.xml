@@ -2973,4 +2973,5 @@ para editar la curva.</string>
     <string name="ios_vector_delete_group">Eliminar el grupo \"%1$s\"</string>
     <string name="ios_vector_keyframes_n">%1$d keyframes — editar en el cabezal graba ahí</string>
     <string name="ios_rotation_axis">Rotación %1$s</string>
+    <string name="panel_pivo_arraste_preview">Arrastra en la vista previa para mover el pivote</string>
 </resources>

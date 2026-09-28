@@ -60,6 +60,18 @@ if(NOT aurea_ncnn_POPULATED)
             set(WITH_LAYER_${name} OFF CACHE BOOL "" FORCE)
         endif()
     endforeach()
+    # ncnn divide por subgroupSize ANTES de consultá-lo (instância Vulkan 1.1
+    # sem VK_EXT_subgroup_size_control): vale 0 ali. No ARM a divisão inteira
+    # por zero dá 0; no x86 (emulador, Chromebook) é SIGFPE e derrubava o app
+    # ao abrir a prévia do Mapa de profundidade. Remendo idempotente.
+    set(ai_gpu_cpp "${aurea_ncnn_SOURCE_DIR}/src/gpu.cpp")
+    file(READ "${ai_gpu_cpp}" ai_gpu_src)
+    string(REPLACE "maxComputeWorkGroupInvocations / querySubgroupProperties.subgroupSize, 1u)"
+                   "maxComputeWorkGroupInvocations / std::max(querySubgroupProperties.subgroupSize, 1u), 1u)"
+                   ai_gpu_patched "${ai_gpu_src}")
+    if(NOT ai_gpu_patched STREQUAL ai_gpu_src)
+        file(WRITE "${ai_gpu_cpp}" "${ai_gpu_patched}")
+    endif()
     add_subdirectory("${aurea_ncnn_SOURCE_DIR}" "${aurea_ncnn_BINARY_DIR}" EXCLUDE_FROM_ALL)
 endif()
 if(MSVC)

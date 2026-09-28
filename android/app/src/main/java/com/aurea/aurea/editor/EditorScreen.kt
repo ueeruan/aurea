@@ -9,6 +9,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -53,6 +55,8 @@ import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -239,6 +243,10 @@ fun EditorScreen(store: EditorStore) {
         movableContentOf { modifier: Modifier -> PreviewStage(store, ui, modifier) }
     }
 
+    // A altura do palco que a pessoa escolheu arrastando a divisa (0 = automática),
+    // guardada no aparelho.
+    val previewPrefs = androidx.compose.ui.platform.LocalContext.current.let { context -> remember { context.getSharedPreferences(PREVIEW_PREFS, android.content.Context.MODE_PRIVATE) } }
+    val previewPreference = remember { mutableFloatStateOf(previewPrefs.getFloat(PREVIEW_HEIGHT_KEY, 0f)) }
     Box(Modifier.fillMaxSize().background(AureaColors.EditorTopBar)) {
         Column(Modifier.fillMaxSize()) {
             // As barras do sistema são tratadas UMA vez, aqui: véu escuro na de
@@ -254,13 +262,20 @@ fun EditorScreen(store: EditorStore) {
                 val h = maxHeight.value
                 val wide = !ui.fullscreen && ui.panel != EditorPanel.Curve && EditorLayout.isWide(w, h)
                 val sheetWidth = EditorLayout.wideSheetWidth(w)
-                val m = EditorLayout.solve(h, content, ui.fullscreen)
+                val aspect = if (store.project.width > 0 && store.project.height > 0) store.project.width.toFloat() / store.project.height else 0f
+                val m = EditorLayout.solve(h, content, ui.fullscreen, w, aspect, previewPreference.floatValue)
                 if (store.sceneEditor) {
                     SceneLayoutWorkspace(store, ui, stage)
                 } else if (wide) {
                     WideEditor(store, ui, content, h, sheetWidth, stage)
                 } else {
-                    NarrowEditor(store, ui, content, m, stage)
+                    NarrowEditor(store, ui, content, m, stage, EditorLayout.maxPreview(h),
+                        onPreviewResize = { previewPreference.floatValue = it },
+                        onPreviewCommit = { previewPrefs.edit().putFloat(PREVIEW_HEIGHT_KEY, previewPreference.floatValue).apply() },
+                        onPreviewReset = {
+                            previewPreference.floatValue = 0f
+                            previewPrefs.edit().remove(PREVIEW_HEIGHT_KEY).apply()
+                        })
                 }
 
                 // O "+" saiu: adicionar mora na barra fixa de baixo ([AddBar]).
@@ -303,6 +318,10 @@ private fun NarrowEditor(
     content: SheetContent,
     m: EditorMetrics,
     stage: @Composable (Modifier) -> Unit,
+    maxPreview: Float,
+    onPreviewResize: (Float) -> Unit,
+    onPreviewCommit: () -> Unit,
+    onPreviewReset: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(AureaColors.Background)) {
         if (!ui.fullscreen) TopBarHost(store, ui)
@@ -312,10 +331,38 @@ private fun NarrowEditor(
         KeepLtr { stage(Modifier.fillMaxWidth().height(previewH.dp)) }
         if (ui.fullscreen) {
             FullscreenTimeBar(store)
+            TransportBar(store, ui)
         } else {
-            PreviewStrip(ui)
+            // A divisa palco/transporte: arrastar na vertical (na faixa ou no
+            // transporte fora dos botões) troca palco por timeline; toque duplo
+            // volta à altura automática.
+            val preview by rememberUpdatedState(m.preview)
+            val max by rememberUpdatedState(maxPreview)
+            val resize by rememberUpdatedState(onPreviewResize)
+            val commit by rememberUpdatedState(onPreviewCommit)
+            val reset by rememberUpdatedState(onPreviewReset)
+            Column(
+                Modifier.fillMaxWidth().testTag("editor.previewDivider")
+                    .pointerInput(Unit) {
+                        var start = 0f
+                        var travel = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { start = preview; travel = 0f },
+                            onDragEnd = { commit() },
+                            onDragCancel = { commit() },
+                            onVerticalDrag = { change, dy ->
+                                change.consume()
+                                travel += dy / density
+                                resize((start + travel).coerceIn(EditorLayout.PREVIEW_MIN, max))
+                            },
+                        )
+                    }
+                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { reset() }) },
+            ) {
+                PreviewStrip(ui)
+                TransportBar(store, ui)
+            }
         }
-        TransportBar(store, ui)
         if (!ui.fullscreen) {
             // Camada escolhida (doca aberta): a timeline vira a fileira única dela,
             // como com painel aberto — as setas trocam de camada e tocar na barra
@@ -373,11 +420,19 @@ private fun TopBarHost(store: EditorStore, ui: EditorUi) {
     }
 }
 
-/** A faixa de 8 dp entre prévia e transporte (a tela cheia mora no transporte, um botão só). */
+/**
+ * A faixa de 8 dp entre prévia e transporte (a tela cheia mora no transporte,
+ * um botão só). O traço no meio diz que ela se arrasta (ver NarrowEditor).
+ */
 @Composable
 private fun PreviewStrip(@Suppress("UNUSED_PARAMETER") ui: EditorUi) {
-    Box(Modifier.fillMaxWidth().height(ShellDims.Strip).background(AureaColors.EditorPanelHigh))
+    Box(Modifier.fillMaxWidth().height(ShellDims.Strip).background(AureaColors.EditorPanelHigh), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp, 3.dp).background(AureaColors.Muted.copy(alpha = .55f), CircleShape))
+    }
 }
+
+private const val PREVIEW_PREFS = "aurea.editor.layout"
+private const val PREVIEW_HEIGHT_KEY = "preview_height_dp"
 
 @Composable
 private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, compactDock: Boolean = false) {

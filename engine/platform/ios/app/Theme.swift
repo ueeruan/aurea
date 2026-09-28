@@ -947,18 +947,32 @@ enum EditorLayout {
     static let dockTile: CGFloat = 64
     static let dock: CGFloat = 8 + dockQuick + 2 * (8 + dockTile) + 10
 
+    /// Folga do palco em volta do quadro ajustado (as fichas ficam por cima do quadro).
+    static let previewFitMargin: CGFloat = 16
+
     static func workspace(_ totalHeight: CGFloat) -> CGFloat {
         max(0, totalHeight - topBar - transport - strip)
     }
 
-    static func solve(total: CGFloat, content: SheetContent, fullscreen: Bool) -> EditorMetrics {
+    /// O palco mais alto possível: a timeline nunca fica abaixo do piso.
+    static func maxPreview(_ total: CGFloat) -> CGFloat { max(previewMin, workspace(total) - timelineMin) }
+
+    /// `width`/`aspect` (largura ÷ altura do projeto): o palco nunca é mais alto
+    /// que o quadro na largura da tela + a folga — num projeto deitado as faixas
+    /// vazias roubavam a timeline; em pé fica como sempre. `preferred` > 0: a
+    /// altura escolhida arrastando a divisa palco/transporte (vale sobre as duas).
+    /// Par do `EditorLayout.solve` do Android.
+    static func solve(total: CGFloat, content: SheetContent, fullscreen: Bool,
+                      width: CGFloat = 0, aspect: CGFloat = 0, preferred: CGFloat = 0) -> EditorMetrics {
         if fullscreen {
             return EditorMetrics(topBar: 0, preview: max(0, total - transport), strip: 0,
                                  transport: transport, timeline: 0, sheet: 0)
         }
         let ws = workspace(total)
-        var preview = (total * 0.54 - 32)
-            .clamped(to: previewMin...(max(previewMin, ws - timelineMin)))
+        let natural = total * 0.54 - 32
+        let fitted = width > 0 && aspect > 0 && aspect.isFinite ? min(natural, width / aspect + previewFitMargin) : natural
+        var preview = (preferred > 0 && preferred.isFinite ? preferred : fitted)
+            .clamped(to: previewMin...maxPreview(total))
 
         var sheetFraction: CGFloat = 0
         switch content {

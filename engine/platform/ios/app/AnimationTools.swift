@@ -24,7 +24,8 @@ struct CurveEase: Equatable {
     var hasHandles: Bool { isBezier || interpolation == 1 || interpolation == 3 || interpolation == 4 || interpolation == 5 }
     var handles: [Float] {
         switch interpolation {
-        case 1: return [0, 0, 1, 1]
+        // A reta mostra a bézier equivalente: nas pontas as alças ficavam em cima das marcas.
+        case 1: return [1 / 3, 1 / 3, 2 / 3, 2 / 3]
         case 3: return [1 / 3, 0, 2 / 3, 1 / 3]
         case 4: return [1 / 3, 2 / 3, 2 / 3, 1]
         case 5: return [0.5, 0, 0.5, 1]
@@ -135,6 +136,39 @@ func curveSameTrack(_ a: KeyframeItem, _ b: KeyframeItem) -> Bool {
         (a.effectIndex == b.effectIndex && a.paramIndex == b.paramIndex))
 }
 
+/// Onde as duas alças são DESENHADAS e tocadas (CurveMath.kt `separatedHandles`):
+/// as posições reais, afastadas quando ficam mais perto que `minimum` — a alça de
+/// saída e a de chegada nunca viram um borrão só. Coincidentes, abrem na direção
+/// primeira marca → segunda, cada uma para o lado da própria marca.
+func curveSeparatedHandles(_ first: CGPoint, _ second: CGPoint, start: CGPoint, end: CGPoint, minimum: CGFloat) -> (CGPoint, CGPoint) {
+    var dx = second.x - first.x, dy = second.y - first.y
+    var distance = hypot(dx, dy)
+    if distance >= minimum { return (first, second) }
+    var gap = distance
+    if distance < 0.5 {
+        dx = end.x - start.x; dy = end.y - start.y
+        distance = hypot(dx, dy)
+        if distance < 0.001 { dx = 1; dy = 0; distance = 1 }
+        gap = 0
+    }
+    let push = (minimum - gap) / 2, ux = dx / distance, uy = dy / distance
+    return (CGPoint(x: first.x - ux * push, y: first.y - uy * push), CGPoint(x: second.x + ux * push, y: second.y + uy * push))
+}
+
+/// A alça sob o dedo: 0 (saída), 1 (chegada) ou −1; a mais perto vence, dentro de `radius`.
+func curveNearestHandle(_ location: CGPoint, _ shown: (CGPoint, CGPoint), radius: CGFloat) -> Int {
+    let d1 = pow(location.x - shown.0.x, 2) + pow(location.y - shown.0.y, 2)
+    let d2 = pow(location.x - shown.1.x, 2) + pow(location.y - shown.1.y, 2)
+    if min(d1, d2) > radius * radius { return -1 }
+    return d1 <= d2 ? 0 : 1
+}
+
+private let curveInset: CGFloat = 28
+/// Raio de toque das alças: 56 pt de diâmetro, acima do alvo mínimo de 44.
+private let curveHandleHit: CGFloat = 28
+/// Distância mínima entre as alças DESENHADAS (as bolas nunca se sobrepõem).
+private let curveHandleSeparation: CGFloat = 30
+
 private struct NativeCurveGraph: View {
     let ease: CurveEase
     let overshoot: Bool
@@ -149,7 +183,10 @@ private struct NativeCurveGraph: View {
         var low: Float
         var high: Float
         var ease: CurveEase
-        var grabOffset: CGPoint
+        /// Onde a alça estava no toque (a posição REAL, não a desenhada).
+        var origin: CGPoint
+        /// O dedo quando a folga acabou: o arrasto é relativo a ele (nada salta).
+        var anchor: CGPoint = .zero
         var began = false
     }
     private var low: Float { drag?.low ?? min(overshoot ? -0.5 : -0.12, min(ease.handles[1], ease.handles[3]) - 0.12) }
@@ -165,7 +202,7 @@ private struct NativeCurveGraph: View {
                         context.stroke(line, with: .color(.white.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                     }
                 }
-            }.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0)
+            }.contentShape(Rectangle()).accessibilityIdentifier("curve.easingGraph").gesture(DragGesture(minimumDistance: 0)
                 .updating($touching) { _, active, _ in active = true }
                 .onChanged { value in move(value, size: geometry.size) }
                 .onEnded { _ in finish() })
@@ -174,7 +211,7 @@ private struct NativeCurveGraph: View {
         .onDisappear { finish() }
     }
     private func plot(_ x: Float, _ y: Float, _ size: CGSize, _ lo: Float, _ hi: Float) -> CGPoint {
-        CGPoint(x: 24 + CGFloat(x) * max(1, size.width - 48), y: size.height - CGFloat((y - lo) / (hi - lo)) * size.height)
+        CGPoint(x: curveInset + CGFloat(x) * max(1, size.width - 2 * curveInset), y: size.height - CGFloat((y - lo) / (hi - lo)) * size.height)
     }
     private func draw(_ context: GraphicsContext, _ size: CGSize) {
         func point(_ x: Float, _ y: Float) -> CGPoint { plot(x, y, size, low, high) }
@@ -203,14 +240,20 @@ private struct NativeCurveGraph: View {
         context.stroke(curve, with: .color(curveGreen), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
         let start = point(0, 0), end = point(1, 1)
         if ease.hasHandles {
-            let h = ease.handles, first = point(h[0], h[1]), second = point(h[2], h[3])
+            let h = ease.handles
+            let (first, second) = curveSeparatedHandles(point(h[0], h[1]), point(h[2], h[3]), start: start, end: end, minimum: curveHandleSeparation)
             for p in [first, second] {
                 line(CGPoint(x: p.x, y: min(p.y, base)), CGPoint(x: p.x, y: max(p.y, base)), .white.opacity(0.3), 1, [3, 3])
             }
-            line(start, first, .white, 2.5); line(end, second, .white, 2.5)
-            dot(first, radius: 11, color: .white); dot(second, radius: 11, color: .white)
+            // Cada alça ligada à SUA marca: a de saída (cheia) à primeira, a de
+            // chegada (anel) à segunda — dá para saber qual é qual.
+            line(start, first, .white, 2.5); line(end, second, .white.opacity(0.7), 2.5)
+            if let drag { dot(drag.first ? first : second, radius: curveHandleHit * 0.85, color: curveGreen.opacity(0.22)) }
+            dot(first, radius: 11, color: .white)
+            dot(second, radius: 9, color: curvePanelFill)
+            context.stroke(Path(ellipseIn: CGRect(x: second.x - 9, y: second.y - 9, width: 18, height: 18)), with: .color(.white), lineWidth: 3)
         }
-        dot(start, radius: 4.5, color: curveGreen); dot(end, radius: 4.5, color: curveGreen)
+        dot(start, radius: 5, color: curveGreen); dot(end, radius: 5, color: curveGreen)
     }
     private func move(_ value: DragGesture.Value, size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
@@ -218,21 +261,21 @@ private struct NativeCurveGraph: View {
             guard ease.hasHandles else { return }
             let h = ease.handles
             let a = plot(h[0], h[1], size, low, high), b = plot(h[2], h[3], size, low, high)
-            func distance(_ p: CGPoint) -> CGFloat {
-                let dx = value.startLocation.x - p.x, dy = value.startLocation.y - p.y
-                return dx * dx + dy * dy
-            }
-            let d1 = distance(a), d2 = distance(b)
-            guard min(d1, d2) <= 24 * 24 else { return }
-            let first = d1 <= d2, point = first ? a : b
-            drag = HandleDrag(first: first, low: low, high: high,
-                ease: CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3]),
-                grabOffset: CGPoint(x: point.x - value.startLocation.x, y: point.y - value.startLocation.y))
+            // O toque procura as alças ONDE ELAS ESTÃO DESENHADAS, num raio de dedo; a mais perto vence.
+            let shown = curveSeparatedHandles(a, b, start: plot(0, 0, size, low, high), end: plot(1, 1, size, low, high), minimum: curveHandleSeparation)
+            let which = curveNearestHandle(value.startLocation, shown, radius: curveHandleHit)
+            guard which >= 0 else { return }
+            drag = HandleDrag(first: which == 0, low: low, high: high,
+                ease: CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3]), origin: which == 0 ? a : b)
         }
         guard var current = drag else { return }
-        guard current.began || hypot(value.translation.width, value.translation.height) >= 3 else { return }
-        let location = CGPoint(x: value.location.x + current.grabOffset.x, y: value.location.y + current.grabOffset.y)
-        let x = Float((location.x - 24) / max(1, size.width - 48)).clamped(to: 0...1)
+        if !current.began {
+            guard hypot(value.translation.width, value.translation.height) >= 3 else { return }
+            current.anchor = value.location
+        }
+        // Arrasto RELATIVO: a alça parte de onde está e anda o que o dedo andar depois da folga.
+        let location = CGPoint(x: current.origin.x + value.location.x - current.anchor.x, y: current.origin.y + value.location.y - current.anchor.y)
+        let x = Float((location.x - curveInset) / max(1, size.width - 2 * curveInset)).clamped(to: 0...1)
         var y = current.low + Float((size.height - location.y) / size.height) * (current.high - current.low)
         if !overshoot { y = y.clamped(to: 0...1) }
         guard x.isFinite, y.isFinite else { return }
@@ -246,28 +289,6 @@ private struct NativeCurveGraph: View {
     }
 }
 
-private struct CurvePresetThumb: View {
-    let ease: CurveEase
-    let selected: Bool
-    var body: some View {
-        Canvas { context, size in
-            let pad: CGFloat = 6, width = size.width - 12, height = size.height - 12
-            var path = Path()
-            for index in 0...40 {
-                let t = Float(index) / 40, value = ease.transform(t).clamped(to: -0.3...1.3)
-                let p = CGPoint(x: pad + CGFloat(t) * width, y: pad + height - CGFloat(value) * height)
-                if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
-            }
-            let color = selected ? curveGreen : Color.white.opacity(0.7)
-            context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            for p in [CGPoint(x: pad, y: pad + height), CGPoint(x: pad + width, y: pad)] {
-                context.fill(Path(ellipseIn: CGRect(x: p.x - 2.5, y: p.y - 2.5, width: 5, height: 5)),
-                    with: .color(selected ? curveGreen : .white))
-            }
-        }
-    }
-}
-
 @MainActor
 struct NativeCurvePanel: View {
     @EnvironmentObject private var model: AureaModel
@@ -276,9 +297,7 @@ struct NativeCurvePanel: View {
     @State private var fullscreen = false
     @State private var ease = CurveEase.linear
     @State private var overshoot = false
-    @State private var family = 0
     private var graphMode: Int { model.curveGraphMode }
-    @State private var saved: [CurvePresetItem] = []
     private struct Segment {
         let start: KeyframeItem
         let end: KeyframeItem
@@ -331,7 +350,6 @@ struct NativeCurvePanel: View {
                         }
                         segmentNavigation(segment)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if graphMode == 0 { families }
                 }.frame(maxHeight: .infinity)
             } else {
                 VStack(spacing: 12) {
@@ -360,7 +378,7 @@ struct NativeCurvePanel: View {
             }
         }
         .fullScreenCover(isPresented: $fullscreen) { NativeCurvePanel(expanded: true).environmentObject(model).interactiveDismissDisabled() }
-        .onAppear { load(); family = [7,8].contains(ease.interpolation) ? 1 : [0,9].contains(ease.interpolation) ? 2 : 0; loadPresets() }
+        .onAppear { load() }
         .onChange(of: model.status.modelRevision) { _ in load() }
         .onChange(of: segment?.id) { _ in load() }
         .onChange(of: layer) { _ in load() }
@@ -441,7 +459,25 @@ struct NativeCurvePanel: View {
                 .font(.aurea(size: 10)).foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1).truncationMode(.tail).multilineTextAlignment(.center)
             glyphButton(CupertinoGlyph.ChevronRight, size: 16, target: 44, label: AureaText.t("panel_proximo_keyframe")) { jump(1) }
+            if graphMode == 0 { bounceButton(segment) }
         }.frame(maxWidth: .infinity).frame(height: 44)
+    }
+    /// O único preset pronto que fica: Bounce (a bézier se faz nas alças).
+    /// Tocar de novo volta a uma bézier suave, com alças.
+    private func bounceButton(_ segment: Segment) -> some View {
+        let bouncing = ease.interpolation == 7
+        return Button {
+            set(bouncing ? CurveEase(interpolation: 2, x1: 0.42, y1: 0, x2: 0.58, y2: 1)
+                         : CurveEase(interpolation: 7, x1: 0, y1: 0, x2: 1, y2: 1), to: segment.start)
+        } label: {
+            Text(AureaText.t("pn_textpreset_bounce")).font(.aurea(size: 12, weight: .semibold)).lineLimit(1)
+                .foregroundStyle(bouncing ? curveGreen : .white)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(bouncing ? curveGreen.opacity(0.18) : curveRailFill, in: Capsule())
+                .overlay(Capsule().stroke(bouncing ? curveGreen : .white.opacity(0.18), lineWidth: 1))
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle(shrink: 1)).padding(.leading, 4).padding(.trailing, 8)
+            .accessibilityLabel(AureaText.t("pn_textpreset_bounce")).accessibilityIdentifier("curve.preset.bounce")
     }
     private func jump(_ direction: Int) {
         guard let segment else { return }
@@ -452,62 +488,6 @@ struct NativeCurvePanel: View {
         let local = Int64(keys[target].time) + (Int64(keys[target + 1].time) - Int64(keys[target].time)) / 2
         model.seek(toFrame: local + Int64(model.selectedLayer?.startFrame ?? 0) - Int64(model.selectedLayer?.offsetFrames ?? 0))
         load()
-    }
-    private var presets: [CurvePresetItem] {
-        switch family {
-        case 1: return [CurvePresetItem(id: "bounce", name: AureaText.t("pn_textpreset_bounce"), ease: CurveEase(interpolation: 7,x1: 0,y1: 0,x2: 1,y2: 1)),
-                        CurvePresetItem(id: "elastic", name: AureaText.t("pn_textpreset_elastic"), ease: CurveEase(interpolation: 8,x1: 0,y1: 0,x2: 1,y2: 1))]
-        case 2: return [CurvePresetItem(id: "steps4", name: AureaText.t("pn_curve_steps4"), ease: CurveEase(interpolation: 9,x1: 0,y1: 0,x2: 1,y2: 1))] + Array(CurvePresetItem.builtins.suffix(1))
-        case 3: return saved
-        default: return Array(CurvePresetItem.builtins.prefix(4))
-        }
-    }
-    private var families: some View {
-        HStack(spacing: 0) {
-            GeometryReader { geometry in
-                ScrollView(showsIndicators: false) {
-                    LazyVStack(spacing: 2) {
-                        ForEach(presets) { preset in presetTile(preset) }
-                    }.padding(.horizontal, 2).padding(.vertical, 6)
-                        .frame(minHeight: geometry.size.height, alignment: .center)
-                }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
-            }.frame(width: 44)
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                familyTab(0, glyph: CupertinoGlyph.Scribble, title: "pn_curve_family_bezier")
-                familyTab(1, glyph: CupertinoGlyph.Scribble, title: "pn_textpreset_bounce")
-                familyTab(2, glyph: CupertinoGlyph.ChartBarAltFill, title: "pn_curve_steps4")
-                familyTab(3, glyph: CupertinoGlyph.Star, title: "panel_presets")
-                Spacer(minLength: 0)
-            }.frame(width: 44).background(curveRailFill, ignoresSafeAreaEdges: [])
-        }.frame(width: 88).frame(maxHeight: .infinity)
-    }
-    private func presetTile(_ preset: CurvePresetItem) -> some View {
-        Button {
-            guard let key = segment?.start else { return }
-            set(preset.ease, to: key)
-            if preset.stored {
-                var recents = UserDefaults.standard.stringArray(forKey: "presetRecents") ?? []
-                recents.removeAll { $0 == preset.id }; recents.insert(preset.id, at: 0)
-                UserDefaults.standard.set(Array(recents.prefix(10)), forKey: "presetRecents")
-            }
-        } label: {
-            CurvePresetThumb(ease: preset.ease, selected: ease.same(preset.ease))
-                .frame(width: 44, height: 44)
-                .background(curveRailFill, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ease.same(preset.ease) ? curveGreen : .clear,
-                    lineWidth: ease.same(preset.ease) ? 1.8 : 1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(preset.name)
-            .accessibilityIdentifier("curve.preset.\(preset.id)")
-    }
-    private func familyTab(_ index: Int, glyph: Character, title: String) -> some View {
-        Button { family = index } label: {
-            Group {
-                if index == 3 { CupertinoGlyph.text(glyph, size: 20, color: family == index ? curveGreen : .white) }
-                else { CurvePresetThumb(ease: index == 0 ? CurveEase(interpolation: 2, x1: 0.5, y1: 0, x2: 0.5, y2: 1) : CurveEase(interpolation: index == 1 ? 7 : 9, x1: 0, y1: 0, x2: 1, y2: 1), selected: family == index) }
-            }.frame(width: 44, height: 44).contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t(title))
     }
     private func showMenu(_ segment: Segment) {
         let value = ease
@@ -533,22 +513,6 @@ struct NativeCurvePanel: View {
         ]
         model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_curva"), actions: actions)
     }
-    private func loadPresets() {
-        var result: [CurvePresetItem] = []
-        if let url = Bundle.main.url(forResource: "curva", withExtension: "json", subdirectory: "presets"),
-           let data = try? Data(contentsOf: url), let objects = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
-            for (index, object) in objects.enumerated() {
-                if let entry = CurvePresetItem.read(object, id: "b:curva:\(index)") { result.append(entry) }
-            }
-        }
-        let directory = AureaPaths.documents.appendingPathComponent("presets/curva", isDirectory: true)
-        let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where url.pathExtension == "json" {
-            if let data = try? Data(contentsOf: url), let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-               let entry = CurvePresetItem.read(object, id: "user:curva:\(url.lastPathComponent)") { result.append(entry) }
-        }
-        saved = result
-    }
     private func savePreset(name: String, ease: CurveEase) {
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
@@ -566,7 +530,6 @@ struct NativeCurvePanel: View {
             // que nenhum, porque aparece na lista e nao abre. Ver AureaJSON.h.
             guard let data = AureaJSONData(object, false) else { throw CocoaError(.fileWriteInvalidFileName) }
             try data.write(to: url, options: .atomic)
-            loadPresets()
         } catch { model.toast = error.localizedDescription }
     }
 }
@@ -1393,6 +1356,11 @@ private struct NativeTrackGraph: View {
     @State private var multi = false
     @State private var picked = Set<Int32>()
     @GestureState private var touching = false
+    /// Pinça em curso: a janela do começo dela e o arrasto do dedo naquele instante
+    /// (o arrasto que segue move a janela junto: zoom e pan de dois dedos).
+    @State private var pinchBase: TrackGraphViewport?
+    @State private var pinchTranslation: CGSize = .zero
+    @State private var lastTranslation: CGSize = .zero
     private struct SpeedHandle {
         let key: KeyframeItem
         let end: KeyframeItem
@@ -1505,6 +1473,7 @@ private struct NativeTrackGraph: View {
                 Button("−") { viewport = viewport.transformed(zoom: 1 / 1.5) }.frame(width: 44, height: 44)
                 Button("+") { viewport = viewport.transformed(zoom: 1.5) }.frame(width: 44, height: 44)
                 Button(AureaText.t("panel_ajustar")) { fit() }.font(.aurea(size: 11))
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle()).accessibilityIdentifier("curve.fit")
             }.foregroundStyle(AureaColors.accent)
             if multi && !speed {
                 ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 16) {
@@ -1567,13 +1536,13 @@ private struct NativeTrackGraph: View {
                     for handle in speedHandles {
                         let p = plot(handle.frame, handle.velocity)
                         line(plot(Double(handle.incoming ? handle.end.time : handle.key.time), handle.velocity), p, color: AureaColors.muted)
-                        let dot = Path(ellipseIn: CGRect(x:p.x-7,y:p.y-7,width:14,height:14))
-                        context.stroke(dot, with:.color(AureaColors.accent),lineWidth:2)
+                        let dot = Path(ellipseIn: CGRect(x:p.x-9,y:p.y-9,width:18,height:18))
+                        context.stroke(dot, with:.color(AureaColors.accent),lineWidth:2.5)
                     }
                     if !speed {
                         for key in keys {
                             let p = plot(Double(key.time), Double(key.value))
-                            let dot = Path(ellipseIn: CGRect(x: p.x - 6, y: p.y - 6, width: 12, height: 12))
+                            let dot = Path(ellipseIn: CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16))
                             context.fill(dot, with: .color((multi ? picked.contains(key.time) : key.time == model.curveSelectedTime) ? .white : AureaColors.accent))
                         }
                     }
@@ -1584,6 +1553,10 @@ private struct NativeTrackGraph: View {
                     .updating($touching) { _, active, _ in active = true }
                     .onChanged { move($0, size: geometry.size) }
                     .onEnded { _ in finish(toggle: true) })
+                // Pinça: zoom no tempo e no valor; o dedo que anda leva a janela junto.
+                .simultaneousGesture(MagnificationGesture()
+                    .onChanged { scale in pinch(Double(scale), size: geometry.size) }
+                    .onEnded { _ in pinchBase = nil })
                 .onAppear { width = geometry.size.width }
                 .onChange(of: geometry.size.width) { value in width = value; reload() }
             }
@@ -1608,11 +1581,33 @@ private struct NativeTrackGraph: View {
         .onChange(of: touching) { active in if !active && drag?.began == true { finish() } }
         .onDisappear { finish() }
     }
+    private func pinch(_ scale: Double, size: CGSize) {
+        guard size.width > 0, size.height > 0, scale.isFinite, scale > 0 else { return }
+        if pinchBase == nil {
+            // O segundo dedo transforma o gesto em zoom: a edição da marca (se
+            // começou) fecha aqui e o resto do arrasto não agarra nada.
+            if drag?.began == true { finish() }
+            pinchBase = drag?.initial ?? viewport
+            pinchTranslation = lastTranslation
+            drag = GraphDrag(initial: viewport, key: nil, picked: true)
+        }
+        guard let base = pinchBase else { return }
+        viewport = base.transformed(zoom: scale,
+            dx: Double((lastTranslation.width - pinchTranslation.width) / size.width),
+            dy: Double((lastTranslation.height - pinchTranslation.height) / size.height))
+    }
     private func move(_ value: DragGesture.Value, size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
+        lastTranslation = value.translation
+        if let base = pinchBase {
+            viewport = base.transformed(zoom: max(0.25, min(4, base.duration / viewport.duration)),
+                dx: Double((lastTranslation.width - pinchTranslation.width) / size.width),
+                dy: Double((lastTranslation.height - pinchTranslation.height) / size.height))
+            return
+        }
         if drag == nil {
             var nearest: KeyframeItem?
-            var distance = CGFloat(24 * 24)
+            var distance = CGFloat(28 * 28) // 56 pt de alvo: o dedo acerta a marca sem mirar
             if !speed {
                 for key in keys {
                     let p = point(Double(key.time), Double(key.value), size, viewport)
@@ -1642,7 +1637,7 @@ private struct NativeTrackGraph: View {
             // Losango de uma trilha IRMÃ: tocar troca a trilha editável (sem arrastar).
             if nearest == nil && !speed, let first = keys.first {
                 var sibling: KeyframeItem?
-                var best = CGFloat(24 * 24)
+                var best = CGFloat(28 * 28)
                 for key in group.flatMap({ $0 }) where !curveSameTrack(key, first) {
                     let p = point(Double(key.time), Double(key.value), size, viewport)
                     let dx = p.x - value.startLocation.x, dy = p.y - value.startLocation.y
@@ -1725,7 +1720,7 @@ private struct NativeTrackGraph: View {
         if toggle && multi, let current = drag, !current.began, let key = current.key {
             if picked.contains(key.time) { picked.remove(key.time) } else { picked.insert(key.time) }
         }
-        let began = drag?.began == true; drag = nil
+        let began = drag?.began == true; drag = nil; pinchBase = nil
         if began { model.endGesture() }
     }
 }

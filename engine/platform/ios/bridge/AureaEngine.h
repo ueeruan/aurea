@@ -303,6 +303,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)saveProject:(NSString*)path;
 /// Flush UI commands before dispatching. Safe to execute on an IO queue.
 - (BOOL)autosaveProject;
+/// Sair do app / segundo plano: grava QUALQUER mudança (drena os comandos),
+/// sem as regras do autosave. -1 = já estava gravado (nada escrito);
+/// 0 = gravou; outro = código Errc da falha (o arquivo anterior segue intacto).
+- (NSInteger)saveProjectIfDirty;
 - (BOOL)recoverSession;
 - (void)discardRecovery;
 /// Nome da composição aberta ("" quando não há projeto).

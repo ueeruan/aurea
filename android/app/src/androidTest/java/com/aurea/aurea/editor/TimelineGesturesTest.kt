@@ -141,12 +141,40 @@ class TimelineGesturesTest {
         compose.runOnIdle { assertEquals(before.first().first, store.primary) }
     }
 
+    /** Dedo torto (≈ 40°) subindo sobre os clipes: rola a pilha, não faz scrub nem move nada. */
+    @Test fun slightlyDiagonalSwipeUpScrollsRowsInsteadOfScrubbing() {
+        launch(24)
+        val before = store.layers.map { Triple(it.id, it.startFrame, it.endFrame) }
+        val playhead = store.playhead
+        timeline().performTouchInput {
+            val x = width * .72f
+            val y = height - 18 * density
+            down(Offset(x, y))
+            advanceEventTime(60)
+            moveTo(Offset(x - 11 * density, y - 9 * density), 40)
+            moveTo(Offset(x - 60 * density, 54 * density), 250)
+            advanceEventTime(120)
+            up()
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(playhead, store.playhead)
+            assertTrue(store.selection.isEmpty())
+            assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
+        }
+        timeline().performTouchInput { click(Offset(width * .72f, 54 * density)) }
+        compose.runOnIdle {
+            val index = before.indexOfFirst { it.first == store.primary }
+            assertTrue("A tilted swipe up should reveal lower layers, index=$index", index >= 2)
+        }
+    }
+
     /**
      * "Às vezes a camada é escolhida e vai junto": (1) o dedo rasteja abaixo do
      * slop enquanto o prazo do toque longo corre e então rola — o prazo vencia e
      * o movimento seguinte levantava a camada (reordenar); (2) uma rolagem um
      * pouco torta (dx > dy por pouco) sobre um clipe não escolhido era "mover".
-     * Nenhuma das duas escolhe, move ou reordena: a 1ª rola, a 2ª faz scrub.
+     * Nenhuma das duas escolhe, move ou reordena: a 1ª rola, a 2ª (bem deitada) faz scrub.
      */
     @Test fun creepingOrSlightlyDiagonalSwipesOnClipsNeverSelectMoveOrReorder() {
         launch(24)
@@ -180,14 +208,15 @@ class TimelineGesturesTest {
             swipe(Offset(width * .72f, 55 * density), Offset(width * .72f, height - 5 * density), 300)
         }
         compose.waitForIdle()
-        // (2) Rolagem um pouco torta sobre o corpo da 1ª camada: 7:6 além do slop, para a esquerda.
+        // (2) Scrub um pouco torto sobre o corpo da 1ª camada (≈ 23°, abaixo do
+        // limiar de rolagem Press.SCROLL_RATIO): scrub, sem escolher nem mover.
         timeline().performTouchInput {
             val x = width / 2f + 30 * density
             val y = 52 * density
             down(Offset(x, y))
             advanceEventTime(60)
-            moveTo(Offset(x - 14 * density, y + 12 * density), 40)
-            moveTo(Offset(x - 60 * density, y + 40 * density), 200)
+            moveTo(Offset(x - 14 * density, y + 6 * density), 40)
+            moveTo(Offset(x - 60 * density, y + 25 * density), 200)
             advanceEventTime(60)
             up()
         }

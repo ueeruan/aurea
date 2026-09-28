@@ -16,6 +16,18 @@ class TimelinePressTest {
     private val m = TimelineMetrics(1f)
 
     @Test
+    fun `rolar a pilha ganha cedo mesmo com o dedo torto`() {
+        // 40° da horizontal (dx 9, dy 7.5): antes era scrub; agora rola.
+        assertTrue(Press.scrollWins(9f, 7.5f))
+        assertTrue(Press.scrollWins(6f, 7f))
+        assertTrue(Press.scrollWins(0f, 9f))
+        // Deitado de fato (≈ 20°) continua scrub; parado não decide nada.
+        assertFalse(Press.scrollWins(10f, 3.6f))
+        assertFalse(Press.scrollWins(9f, 0f))
+        assertFalse(Press.scrollWins(0f, 0f))
+    }
+
+    @Test
     fun `rolagem um pouco torta sobre o clipe nao move o clipe`() {
         // 1ª amostra além do slop de 8 dp: dx 7, dy 6. A regra antiga (|dx| ≥ |dy|)
         // escolhia o clipe e o movia; agora é scrub (horizontal, mas não edição).

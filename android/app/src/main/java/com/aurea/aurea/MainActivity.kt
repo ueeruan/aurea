@@ -181,6 +181,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        // Grava já no onPause (fora da main): arrastar o app para fora dos
+        // recentes mata o processo sem esperar pelo onStop.
+        store.onLeaving()
         AureaAdsManager.detach(this)
         super.onPause()
     }

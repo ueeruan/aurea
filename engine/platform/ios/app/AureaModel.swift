@@ -219,6 +219,10 @@ final class AureaModel: ObservableObject {
     @Published var screen: Screen = .home
     @Published var fullscreen = false
     @Published var panel: PanelKind = .none
+    /// Face Pivô do Transformar aberta: o arrasto no palco move o PIVÔ.
+    @Published var pivotStageEdit = false
+    /// Pivô no palco: só com a face aberta, fora da cena 3D solta.
+    var pivotStageActive: Bool { pivotStageEdit && panel == .transform && !sceneEditor && pointPick == nil }
     @Published var showAddLayer = false
     @Published var showExport = false
     /// Busca da aba de efeitos aberta em tela cheia. Apresentada pela RAIZ do
@@ -448,6 +452,8 @@ final class AureaModel: ObservableObject {
     private var pendingExportURL: URL?
     private let mediaQueue = DispatchQueue(label: "com.aurea.media-import", qos: .userInitiated)
     private let autosaveQueue = DispatchQueue(label: "com.aurea.autosave", qos: .utility)
+    /// Capa da Home atrasada em relação ao `.aurea` (o autosave não a grava).
+    private var homeCardStale = false
     private var lastAutosaveActivity = ProcessInfo.processInfo.systemUptime
     private var autosaveRetryAfter = 0.0
     private var unsavedSince = 0.0
@@ -971,11 +977,41 @@ final class AureaModel: ObservableObject {
 
     func enterBackground() {
         guard started else { return }
+        // Grava ANTES de suspender (o motor ainda renderiza a capa) e dentro de
+        // uma tarefa de segundo plano: o iOS pode congelar o app logo depois do
+        // `.background`, e quem arrasta o app para fora do seletor mata o
+        // processo. O motor drena os comandos e decide se há o que gravar — o
+        // `status.dirty` da UI chega atrasado e deixava a última edição de fora.
+        if screen == .editor, projectURL != nil {
+            let app = UIApplication.shared
+            var task = UIBackgroundTaskIdentifier.invalid
+            task = app.beginBackgroundTask(withName: "aurea-salvar") {
+                if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+            }
+            saveOnLeave(forceThumbnail: false)
+            if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+        }
         _ = engine.flush()
         engine.suspend()
-        if screen == .editor, projectURL != nil {
-            _ = saveProject(writeThumbnail: false)
+    }
+
+    /// Sair do editor / do app: grava só o que mudou (um projeto limpo não é
+    /// reescrito — o `.bak` segue sendo a gravação anterior de verdade) e refaz
+    /// a capa da Home quando gravou, quando ela estava atrasada ou se pedida.
+    @discardableResult
+    private func saveOnLeave(forceThumbnail: Bool) -> Bool {
+        guard let url = projectURL else { return false }
+        let code = engine.saveProjectIfDirty()
+        if code != 0 && code != -1 {
+            toast = AureaText.t("ios_save_failed")
+            return false
         }
+        if code == 0 || homeCardStale || forceThumbnail {
+            writeProjectThumbnail(name: url.deletingPathExtension().lastPathComponent)
+            homeCardStale = false
+        }
+        dirty = false
+        return true
     }
 
     func enterForeground() {
@@ -1079,6 +1115,7 @@ final class AureaModel: ObservableObject {
                 self.autosaving = false
                 guard self.projectURL == url else { return }
                 if saved {
+                    self.homeCardStale = true
                     self.autosaveRetryAfter = 0
                     self.unsavedSince = ProcessInfo.processInfo.systemUptime
                     self.autosaveFailureShown = false
@@ -1650,7 +1687,7 @@ final class AureaModel: ObservableObject {
         textContentRequest = nil
         if exporting { toast = AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"); return }
         if sceneEditor { exitSceneEditor() }
-        guard saveProject(writeThumbnail: true) else { return }
+        guard saveOnLeave(forceThumbnail: true) else { return }
         engine.clearSelection()
         screen = .home
         fullscreen = false
@@ -1665,7 +1702,12 @@ final class AureaModel: ObservableObject {
             toast = AureaText.t("ios_save_failed")
             return false
         }
-        if writeThumbnail { writeProjectThumbnail(name: url.deletingPathExtension().lastPathComponent) }
+        if writeThumbnail {
+            writeProjectThumbnail(name: url.deletingPathExtension().lastPathComponent)
+            homeCardStale = false
+        } else {
+            homeCardStale = true
+        }
         dirty = false
         return true
     }
@@ -1697,8 +1739,20 @@ final class AureaModel: ObservableObject {
         return url
     }
 
+    /// `.aurea.bak`, `.aurea.tmp`, `.aurea.corrompido`, `.aurea.vN.bak`: as
+    /// cópias de recuperação do motor andam com o projeto (um projeto novo com o
+    /// mesmo nome nunca pode "recuperar" a cópia de outro).
+    private func recoveryFamily(of url: URL) -> [URL] {
+        let prefix = url.lastPathComponent + "."
+        let siblings = (try? FileManager.default.contentsOfDirectory(at: url.deletingLastPathComponent(),
+                                                                      includingPropertiesForKeys: nil)) ?? []
+        return siblings.filter { $0.lastPathComponent.hasPrefix(prefix) }
+    }
+
     func delete(_ project: ProjectFile) {
+        let family = recoveryFamily(of: project.url)
         try? FileManager.default.removeItem(at: project.url)
+        for url in family { try? FileManager.default.removeItem(at: url) }
         try? FileManager.default.removeItem(at: project.thumbnailURL)
         refreshProjectList()
     }
@@ -1709,7 +1763,16 @@ final class AureaModel: ObservableObject {
             toast = AureaText.t("ios_project_name_exists")
             return
         }
-        try? FileManager.default.moveItem(at: project.url, to: target)
+        let family = recoveryFamily(of: project.url)
+        do { try FileManager.default.moveItem(at: project.url, to: target) } catch {
+            toast = AureaText.t("msg_nao_foi_possivel_renomear", error.localizedDescription)
+            return
+        }
+        for url in family {
+            let suffix = String(url.lastPathComponent.dropFirst(project.url.lastPathComponent.count))
+            try? FileManager.default.moveItem(at: url, to: target.deletingLastPathComponent()
+                .appendingPathComponent(target.lastPathComponent + suffix))
+        }
         if let from = try? Data(contentsOf: project.thumbnailURL) {
             try? from.write(to: AureaPaths.thumbs.appendingPathComponent(newName + ".jpg"))
             try? FileManager.default.removeItem(at: project.thumbnailURL)
@@ -3034,6 +3097,32 @@ final class AureaModel: ObservableObject {
         }
         refreshSelectedLayer()
         return true
+    }
+
+    /// Mover o pivô (par do EditorStore.setPivot): âncora XYZ e posição XYZ de
+    /// uma vez — a posição compensa a âncora e a imagem não pula.
+    func setPivot(_ layer: Int64, anchor: [Float], position: [Float]) {
+        guard anchor.count == 3, position.count == 3, (anchor + position).allSatisfy(\.isFinite),
+              let d = engine.layerDetail(layer) else { return }
+        let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
+        let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        for (base, values) in [(UInt32(9), anchor), (UInt32(0), position)] {
+            let changes = Dictionary(uniqueKeysWithValues: (0..<3).map { (base + UInt32($0), values[$0]) })
+            if keyTransformGroup(layer, detail: d, changes: changes) { continue }
+            let keyed = (0..<3).contains { animated & (UInt32(1) << (base + UInt32($0))) != 0 }
+            mutate { core in
+                if transformLayout(animated: keyed) {
+                    for axis in 0..<3 { core.layoutTransform(layer, property: base + UInt32(axis), value: values[axis]) }
+                } else if keyed {
+                    for axis in 0..<3 { core.insertKeyframe(forLayer: layer, property: base + UInt32(axis), time: local, value: values[axis]) }
+                } else if base == 9 {
+                    core.setAnchor(forLayer: layer, x: values[0], y: values[1], z: values[2])
+                } else {
+                    core.setPosition(forLayer: layer, x: values[0], y: values[1], z: values[2])
+                }
+            }
+        }
+        refreshSelectedLayer()
     }
 
     func setTransform(_ property: UInt32, value: Float, layer: Int64) {

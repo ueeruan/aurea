@@ -19,11 +19,16 @@ import Combine
 struct EditorView: View {
     @EnvironmentObject private var model: AureaModel
     @StateObject private var shell = ShellPresentation()
+    /// A altura do palco escolhida arrastando a divisa (0 = automática), guardada no aparelho.
+    @AppStorage("editor.previewHeight") private var previewPreference: Double = 0
+    @State private var dividerStart: CGFloat?
     var body: some View {
         GeometryReader { geometry in
             let wide = !model.fullscreen && model.panel != .curve && EditorLayout.isWide(geometry.size.width, geometry.size.height)
             let sideWidth = (geometry.size.width * 0.4).clamped(to: 280...380)
-            let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent, fullscreen: model.fullscreen)
+            let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
+            let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent, fullscreen: model.fullscreen,
+                                             width: geometry.size.width, aspect: aspect, preferred: CGFloat(previewPreference))
             Group {
                 if model.sceneEditor {
                     SceneLayoutWorkspace(height: geometry.size.height)
@@ -47,9 +52,33 @@ struct EditorView: View {
                     VStack(spacing: 0) {
                         if !model.fullscreen { TopBarView().frame(height: metrics.topBar) }
                         PreviewStage(height: max(0, metrics.preview - (model.fullscreen ? StageDim.fullscreenTimeBar : 0)))
-                        if model.fullscreen { FullscreenTimeBar() }
-                        else { Rectangle().fill(AureaColors.editorPanelHigh).frame(height: metrics.strip) }
-                        TransportView().frame(height: metrics.transport)
+                        if model.fullscreen {
+                            FullscreenTimeBar()
+                            TransportView().frame(height: metrics.transport)
+                        } else {
+                            // A divisa palco/transporte: arrastar na vertical (na faixa ou
+                            // no transporte fora dos botões) troca palco por timeline;
+                            // toque duplo volta à altura automática.
+                            VStack(spacing: 0) {
+                                Rectangle().fill(AureaColors.editorPanelHigh).frame(height: metrics.strip)
+                                    .overlay(Capsule().fill(AureaColors.muted.opacity(0.55)).frame(width: 36, height: 3))
+                                TransportView().frame(height: metrics.transport)
+                            }
+                            .contentShape(Rectangle())
+                            .accessibilityIdentifier("editor.previewDivider")
+                            .simultaneousGesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                                .onChanged { value in
+                                    if dividerStart == nil {
+                                        guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                                        dividerStart = metrics.preview
+                                    }
+                                    guard let start = dividerStart else { return }
+                                    previewPreference = Double((start + value.translation.height)
+                                        .clamped(to: EditorLayout.previewMin...EditorLayout.maxPreview(geometry.size.height)))
+                                }
+                                .onEnded { _ in dividerStart = nil })
+                            .simultaneousGesture(TapGesture(count: 2).onEnded { previewPreference = 0 })
+                        }
                         if metrics.timeline > 0 { TimelineView(compactDock: true).frame(height: metrics.timeline) }
                         if metrics.sheet > 0 {
                             if model.sheetContent == .addBar { ShellAddBar().frame(height: metrics.sheet) }
@@ -341,6 +370,22 @@ private struct ShellStageBanner: View {
             guard let selected = model.selectedLayer, active(selected) else { return }
             let points = corners(model.detail)
             if chrome { outline(&context, points, under: 3.5, over: 2, color: selected.locked ? AureaColors.muted : AureaColors.accent) }
+            // Face Pivô aberta: só a mira do pivô (o arrasto move ELE, não a camada).
+            if model.pivotStageActive && model.selection.count == 1 && !selected.locked {
+                if let pivot = PivotDragSession.pivotPoint(model) {
+                    let p = screen(pivot.x, pivot.y)
+                    var cross = Path()
+                    cross.move(to: CGPoint(x: p.x - 22, y: p.y)); cross.addLine(to: CGPoint(x: p.x + 22, y: p.y))
+                    cross.move(to: CGPoint(x: p.x, y: p.y - 22)); cross.addLine(to: CGPoint(x: p.x, y: p.y + 22))
+                    let ring = Path(ellipseIn: CGRect(x: p.x - 12, y: p.y - 12, width: 24, height: 24))
+                    context.stroke(cross, with: .color(StageInk.outlineUnder), lineWidth: 4)
+                    context.stroke(ring, with: .color(StageInk.outlineUnder), lineWidth: 4.5)
+                    context.stroke(cross, with: .color(AureaColors.accent), lineWidth: 1.5)
+                    context.stroke(ring, with: .color(AureaColors.accent), lineWidth: 2)
+                    circle(&context, p, 3.5, StageInk.outlineUnder); circle(&context, p, 2.5, .white)
+                }
+                return
+            }
             // Só o centro e as setas dos eixos: alça de canto (giro/escala) em
             // camada pequena ficava em cima do corpo e roubava o arrasto. Girar
             // e escalar é pela pinça (e, no 3D, pela ferramenta do gizmo).

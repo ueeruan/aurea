@@ -792,6 +792,52 @@ void Engine::set_last_error(Status s, const char* context) noexcept {
 
 namespace {
 
+/// iOS: a pasta do app (`…/Data/Application/<UUID>/Documents`) pode mudar de
+/// nome numa atualização. Um caminho absoluto gravado pela instalação antiga
+/// que não existe mais vira o MESMO `<relativo>` dentro da Documents atual —
+/// só se o arquivo existir lá. Vazio = não se aplica (fica como estava e a UI
+/// avisa "mídia ausente"). Nunca sai da Documents atual.
+std::string rebase_moved_documents(const std::string& stored, const std::string& docs) {
+    if (docs.empty() || stored.size() < 2 || stored[0] != '/') return {};
+    constexpr std::string_view kContainer = "/Data/Application/";
+    constexpr std::string_view kDocuments = "/Documents/";
+    const usize at = stored.find(kContainer);
+    if (at == std::string::npos) return {};
+    const usize docsAt = stored.find(kDocuments, at + kContainer.size());
+    if (docsAt == std::string::npos) return {};
+    const std::string rel = stored.substr(docsAt + kDocuments.size());
+    if (rel.empty() || rel.find("..") != std::string::npos) return {};
+    std::string candidate = docs;
+    if (candidate.back() != '/') candidate += '/';
+    candidate += rel;
+    if (candidate == stored) return {};
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (fs::exists(fs::u8path(stored), ec)) return {};
+    ec.clear();
+    if (!fs::is_regular_file(fs::u8path(candidate), ec) || ec) return {};
+    return candidate;
+}
+
+/// Aplica [rebase_moved_documents] a toda mídia e fonte do projeto aberto.
+u32 rebase_project_paths(Project& project, const std::string& docs) {
+    if (docs.empty()) return 0;
+    u32 moved = 0;
+    project.for_each_asset([&](AssetId, Asset& a) {
+        std::string r = rebase_moved_documents(a.sourcePath, docs);
+        if (!r.empty()) { a.sourcePath = std::move(r); ++moved; }
+    });
+    project.timeline().for_each_composition([&](CompositionId, Composition& c) {
+        for (u32 i = 0; i < c.order().size(); ++i) {
+            Layer* l = c.layer(c.order().at(i));
+            if (!l || l->kind != LayerKind::Text) continue;
+            std::string r = rebase_moved_documents(l->text.fontPath, docs);
+            if (!r.empty()) { l->text.fontPath = std::move(r); ++moved; }
+        }
+    });
+    return moved;
+}
+
 /// Abertura estrita: só vale se TODAS as seções vieram (checksum, versão).
 bool load_strict(const std::string& path, Project& out, LoadReport& report, Status& status) {
     LoadOptions o;
@@ -878,8 +924,20 @@ Status Engine::load_project(const char* path) noexcept {
 
     // O principal ruim NÃO é apagado nem sobrescrito às cegas: vai para
     // `.corrompido` (uma cópia) antes que a próxima gravação o substitua.
+    //    Sem essa cópia a abertura é recusada: a próxima gravação substituiria
+    //    o único original (disco cheio aqui = disco cheio no salvar também).
+    //    Nunca sobrescreve um `.corrompido` anterior.
     if ((notice & (kLoadRecoveredCopy | kLoadPartial)) && fileio::exists(main)) {
-        (void)fileio::copy_file(main, main + ".corrompido");
+        std::string keep = main + ".corrompido";
+        for (int i = 2; fileio::exists(keep) && i < 100; ++i) keep = main + ".corrompido" + std::to_string(i);
+        const Status c = fileio::copy_file(main, keep);
+        if (!c.ok()) {
+            AUREA_LOG_WARN("copia do principal ruim nao gravada (%d): abertura recusada", c.raw());
+            const Status err{c.code() == Errc::StorageFull ? Errc::StorageFull : Errc::IoError,
+                             "sem espaco para guardar o original antes de abrir"};
+            set_last_error(err, "abrir projeto");
+            return err;
+        }
     }
     // Formato antigo (§123–124): cópia de recuperação ANTES de qualquer
     // regravação no formato novo. Uma por versão de origem; não sobrescreve.
@@ -887,10 +945,22 @@ Status Engine::load_project(const char* path) noexcept {
         notice |= kLoadOlderFormat;
         const std::string copy = main + ".v" + std::to_string(report.timelineVersion) + ".bak";
         if (!fileio::exists(copy)) {
+            // Sem a cópia, a primeira gravação no formato novo seria o fim do
+            // original: recusa abrir (o arquivo fica intocado) em vez de arriscar.
             const Status c = fileio::copy_file(openedFrom, copy);
-            if (!c.ok()) AUREA_LOG_WARN("copia do formato antigo nao gravada (%d)", c.raw());
-            else AUREA_LOG_INFO("formato antigo (timeline v%u): copia de recuperacao guardada", report.timelineVersion);
+            if (!c.ok()) {
+                AUREA_LOG_WARN("copia do formato antigo nao gravada (%d): abertura recusada", c.raw());
+                const Status err{c.code() == Errc::StorageFull ? Errc::StorageFull : Errc::IoError,
+                                 "sem espaco para guardar o formato antigo antes de abrir"};
+                set_last_error(err, "abrir projeto");
+                return err;
+            }
+            AUREA_LOG_INFO("formato antigo (timeline v%u): copia de recuperacao guardada", report.timelineVersion);
         }
+    }
+
+    if (const u32 moved = rebase_project_paths(loaded, config_.documentsDirectory)) {
+        AUREA_LOG_INFO("projeto: %u caminho(s) da instalacao anterior religados a pasta atual", moved);
     }
 
     join_camera_track();
@@ -1044,7 +1114,8 @@ Status Engine::save_project(const char* path) noexcept {
     return save_project_impl(path);
 }
 
-Status Engine::save_project_impl(const char* requestedPath, bool idleOnly) noexcept {
+Status Engine::save_project_impl(const char* requestedPath, bool idleOnly, bool dirtyOnly, bool* saved) noexcept {
+    if (saved) *saved = false;
     u64 session;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -1075,6 +1146,7 @@ Status Engine::save_project_impl(const char* requestedPath, bool idleOnly) noexc
         drain_commands_locked();
         if (idleOnly && (!project_->dirty() || playback_.mode() != PlaybackMode::Paused || history_.in_group()))
             return OkStatus;
+        if (dirtyOnly && !project_->dirty()) return OkStatus;
         project_->metadata().modifiedUnixMs = wall_clock_ms();
         if (const Status s = ProjectSerializer::encode(*project_, options, bytes); !s.ok()) {
             set_last_error(s, "salvar projeto");
@@ -1107,6 +1179,7 @@ Status Engine::save_project_impl(const char* requestedPath, bool idleOnly) noexc
         set_last_error(s, "salvar projeto");
         return s;
     }
+    if (saved) *saved = true;
 
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_ || session != projectSession_) return OkStatus;
@@ -1129,6 +1202,10 @@ Status Engine::save_project() noexcept {
 
 Status Engine::autosave_project() noexcept {
     return save_project_impl(nullptr, true);
+}
+
+Status Engine::save_project_if_dirty(bool* saved) noexcept {
+    return save_project_impl(nullptr, false, true, saved);
 }
 
 const AutosaveState& Engine::autosave_state() const noexcept {
@@ -8723,7 +8800,13 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // não trava. O lock do render só vale para preparar e gravar: esperando o
     // decoder, a GPU fica livre para quem precisar (captura, prévia de efeito).
     const u64 t0 = monotonic_ns();
-    const u64 deadline = t0 + 4'000'000'000ull;
+    // O prazo de 4 s conta SEM PROGRESSO do decoder: efeito que lê outros
+    // instantes (RGB no tempo, mistura de quadros) pode precisar de vários
+    // quadros por quadro de saída — e com GOP longo isso passa de 4 s sem que
+    // nada esteja quebrado. Teto absoluto de 60 s por quadro.
+    u64 deadline = t0 + 4'000'000'000ull;
+    const u64 hardDeadline = t0 + 60'000'000'000ull;
+    u64 lastGen = mediaReadyGen_.load(std::memory_order_acquire);
     bool drainedGpu = false;
     std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
     auto prepare = [&]() -> Status {
@@ -8742,7 +8825,9 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         if (const Status s = prepare(); !s.ok()) return s;
         if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) break;
         snapshot_.release_video_frames();
-        if (monotonic_ns() > deadline)
+        const u64 now = monotonic_ns();
+        if (gen != lastGen) { lastGen = gen; deadline = std::min<u64>(now + 4'000'000'000ull, hardDeadline); }
+        if (now > deadline)
             return Status{Errc::Timeout, "quadros de video indisponiveis para exportacao"};
         // Waiting for decode must not pin completed external images behind GPU
         // retirement callbacks that would otherwise run only on a new submission.

@@ -97,7 +97,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             Text(if (speed) "${"%.3g".format(view.high)} /s" else "%.3g".format(view.high), fontSize = 10.sp, color = AureaColors.Muted, modifier = Modifier.weight(1f))
             Text("−", Modifier.size(48.dp).tocavel { view = view.transform(1 / 1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
             Text("+", Modifier.size(48.dp).tocavel { view = view.transform(1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
-            Text(stringResource(R.string.panel_ajustar), Modifier.tocavel { view = fit() }.padding(8.dp), fontSize = 11.sp, color = AureaColors.Accent)
+            Text(stringResource(R.string.panel_ajustar), Modifier.heightIn(min = 48.dp).tocavel { view = fit() }.wrapContentHeight().padding(horizontal = 12.dp), fontSize = 11.sp, color = AureaColors.Accent)
         }
         if (multi && !speed) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
             TextButton(onClick = { picked = track.map { it.time }.toSet() }) { Text("All", fontSize = 11.sp) }
@@ -120,7 +120,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 val initial = view
                 fun point(key: KeyframeRow) = Offset((key.time - initial.from) / initial.duration * size.width,
                     size.height - (key.value - initial.low) / initial.range * size.height)
-                val radius = 24.dp.toPx()
+                val radius = 28.dp.toPx() // 56 dp de alvo: o dedo acerta a marca sem mirar
                 fun handlePoint(h: SpeedHandle) = Offset((h.frame - initial.from) / initial.duration * size.width,
                     size.height - (h.velocity - initial.low) / initial.range * size.height)
                 var handle = currentHandles.minByOrNull { (handlePoint(it) - down.position).getDistanceSquared() }
@@ -228,10 +228,10 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             handles.forEach { h ->
                 val p = point(h.frame, h.velocity)
                 drawLine(AureaColors.Muted, point((if(h.incoming) h.end.time else h.key.time).toFloat(), h.velocity), p)
-                drawCircle(AureaColors.Accent, 7.dp.toPx(), p, style = Stroke(2.dp.toPx()))
+                drawCircle(AureaColors.Accent, 9.dp.toPx(), p, style = Stroke(2.5.dp.toPx()))
             }
             if (!speed) track.forEach { key ->
-                drawCircle(if ((multi && key.time in picked) || (!multi && key.time == selected)) Color.White else AureaColors.Accent, 6.dp.toPx(), point(key.time.toFloat(), key.value))
+                drawCircle(if ((multi && key.time in picked) || (!multi && key.time == selected)) Color.White else AureaColors.Accent, 8.dp.toPx(), point(key.time.toFloat(), key.value))
             }
             store.detail?.localPlayhead?.let { frame ->
                 val x = point(frame.toFloat(), 0f).x

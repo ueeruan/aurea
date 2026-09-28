@@ -222,6 +222,16 @@ internal object Press {
 
     fun horizontal(dx: Float, dy: Float): Boolean = abs(dx) >= abs(dy)
 
+    /**
+     * Rolar a pilha ganha cedo: basta |dy| ≥ SCROLL_RATIO·|dx| (≈ 31° da
+     * horizontal). O dedo que sobe um pouco torto quer ver as outras camadas,
+     * não arrastar o tempo; o scrub continua com o arrasto de fato deitado.
+     * Só para a lista inteira — na fileira compacta o vertical troca de
+     * camada, e lá o empate de 45° ([horizontal]) continua valendo.
+     */
+    const val SCROLL_RATIO = 0.6f
+    fun scrollWins(dx: Float, dy: Float): Boolean = dy != 0f && abs(dy) >= SCROLL_RATIO * abs(dx)
+
     /** Claramente no eixo do tempo: mover, aparar, arrastar losango. */
     fun timeEdit(dx: Float, dy: Float): Boolean = abs(dx) >= EDIT_RATIO * abs(dy)
 

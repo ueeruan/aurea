@@ -3040,4 +3040,5 @@
     <string name="ios_vector_delete_group">Apagar o grupo \"%1$s\"</string>
     <string name="ios_vector_keyframes_n">%1$d keyframes — editar no cabeçote grava ali</string>
     <string name="ios_rotation_axis">Rotação %1$s</string>
+    <string name="panel_pivo_arraste_preview">Arraste no preview para mover o pivô</string>
 </resources>

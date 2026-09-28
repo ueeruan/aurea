@@ -35,9 +35,10 @@ import XCTest
         let effect = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@","command:effect:")).firstMatch
         XCTAssertTrue(effect.waitForExistence(timeout:5)); effect.tap()
         _ = try awaitSnapshot("Existing Android stack is editable on iOS") { $0.effectCount == 7 }
-        let menu = app.buttons["More options for Chromatic Aberration"].firstMatch
+        let menu = app.buttons["effects.more.\(effectCardId("aurea.color.chromatic_aberration"))"].firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout:5)); menu.tap()
-        app.buttons["Copy this effect"].tap()
+        let copy = app.buttons["Copy this effect"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 5)); copy.tap()
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
         app.buttons["Copy and paste"].firstMatch.tap()
@@ -132,13 +133,14 @@ import XCTest
         _ = try awaitSnapshot("Search effect is a reversible edit") { $0.effectCount == before.effectCount }
 
         try openCommandSearch("magnetica")
-        let add = app.buttons["Add to favourites: Alternar edição magnética"]
-        if add.exists { add.tap() }
-        app.buttons["Close"].tap()
+        let add = app.buttons["commandSearch.favorite:magnetic"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        if !add.isSelected { add.tap() }
+        app.buttons["commandSearchClose"].firstMatch.tap()
         try openCommandSearch("")
-        app.buttons["Favourites"].tap()
+        app.buttons["commandSearch.category.favoritos"].firstMatch.tap()
         XCTAssertTrue(app.buttons["command:magnetic"].waitForExistence(timeout: 5))
-        app.buttons["Close"].tap()
+        app.buttons["commandSearchClose"].firstMatch.tap()
         XCTAssertEqual(try snapshot().editMode, before.editMode, "Favoriting must not execute the command")
     }
 
@@ -297,7 +299,7 @@ import XCTest
         let onStack = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: appliedTab)
         XCTAssertEqual(XCTWaiter.wait(for: [onStack], timeout: 5), .completed)
         XCTAssertTrue(app.staticTexts["Deep Glow"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["More options for Deep Glow"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["effects.more.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
 
         // O rodapé "Add effect" da pilha leva de volta ao catálogo, com o recente à vista.
         let stack = app.scrollViews["aurea.effects.stack"].firstMatch
@@ -655,12 +657,12 @@ import XCTest
             let selected = try awaitSnapshot("Independent component curve opens") { $0.sheet == "curve" }
             let group: Set<Int> = curveGroup(Int(selected.curveProperty), threeD: threeD)
             XCTAssertEqual(group.count, threeD ? 3 : 1)
-            let preset = app.buttons["curve.preset.in"].firstMatch
+            let preset = app.buttons["curve.preset.bounce"].firstMatch
             XCTAssertTrue(preset.waitForExistence(timeout: 5)); XCTAssertTrue(preset.isHittable); preset.tap()
             // O segmento que SAI do keyframe 0: o componente (ou o grupo XYZ inteiro no 3D).
             let changed = try awaitSnapshot("Preset changes the selected outgoing segment (\(scene))") { state in
                 group.allSatisfy { property in
-                    state.curveKeys.contains { $0.property == property && $0.time == 0 && $0.interpolation == 2 }
+                    state.curveKeys.contains { $0.property == property && $0.time == 0 && $0.interpolation == 7 }
                 }
             }
             // Nenhum outro segmento, componente fora do grupo, tempo ou valor muda.

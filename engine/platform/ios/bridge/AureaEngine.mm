@@ -666,6 +666,16 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     return e && e->autosave_project().ok() ? YES : NO;
 }
 
+- (NSInteger)saveProjectIfDirty {
+    [self flush];
+    auto* e = self.engine;
+    if (!e) return static_cast<NSInteger>(aurea::Errc::InvalidState);
+    bool saved = false;
+    const aurea::Status s = e->save_project_if_dirty(&saved);
+    if (s.ok() && !saved) return -1;
+    return static_cast<NSInteger>(s.raw());
+}
+
 - (BOOL)recoverSession {
     auto* e = self.engine;
     return e && e->recover_session().ok() ? YES : NO;

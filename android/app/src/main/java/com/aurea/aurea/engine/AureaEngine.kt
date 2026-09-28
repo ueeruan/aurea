@@ -26,6 +26,9 @@ import java.nio.ByteBuffer
 class AureaEngine private constructor() {
 
     companion object {
+        /** [saveProjectIfDirty]: o projeto já estava gravado, nada foi escrito. */
+        const val SAVE_CLEAN = -1
+
         /** Tamanho de um `Command` no C++ (`static_assert` do lado nativo). */
         const val COMMAND_SIZE_BYTES = 128
 
@@ -709,6 +712,8 @@ class AureaEngine private constructor() {
     fun loadProject(path: String): Int = nativeLoadProject(nativeHandle, path)
     fun saveProject(path: String): Int = nativeSaveProject(nativeHandle, path)
     fun autosaveProject(): Int = nativeSaveProject(nativeHandle, null)
+    /** Sair do app: grava qualquer mudança (fila drenada). [SAVE_CLEAN] = nada a gravar. */
+    fun saveProjectIfDirty(): Int = nativeSaveProjectIfDirty(nativeHandle)
     /**
      * O que a última abertura precisou fazer (Engine::LoadNotice): bits 0–15 =
      * 1 abriu da cópia (.bak/.tmp), 2 parcial, 4 formato antigo (cópia
@@ -969,6 +974,7 @@ class AureaEngine private constructor() {
     private external fun nativeNewProject(handle: Long, width: Int, height: Int, fps: Float, title: String): Boolean
     private external fun nativeLoadProject(handle: Long, path: String): Int
     private external fun nativeSaveProject(handle: Long, path: String?): Int
+    private external fun nativeSaveProjectIfDirty(handle: Long): Int
     private external fun nativeLoadNotice(handle: Long): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int

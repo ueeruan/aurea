@@ -131,7 +131,9 @@ struct PreviewMetalView: UIViewRepresentable {
         private var gizmoLastAngle: CGFloat = 0
         private var gizmoDownTime: CFTimeInterval = 0
         private var pinchThreeD = false
-        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, scene }
+        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, scene, pivot }
+        // Face Pivô aberta: o arrasto move o pivô (PivotDragSession).
+        private var pivotSession: PivotDragSession?
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
         private var sceneMode = 0
         private var scenePicked: Int64?
@@ -445,6 +447,10 @@ struct PreviewMetalView: UIViewRepresentable {
                 stageMode = .pending; handle = -1; shapeHandle = -1; gizmoAxis = -1; targetLayer = nil
                 axisLock = 0; sweptAngle = 0; pinchRotationActive = false
                 model.refreshSelectedLayer()
+                if model.pivotStageActive && editableSelection(), let pivot = PivotDragSession.pivotPoint(model),
+                   let session = PivotDragSession(model: model, pivot: pivot) {
+                    pivotSession = session; stageMode = .pivot; return
+                }
                 if !model.sceneEditor && startShape(at: first.position, view: view) { stageMode = .shape }
                 else if startGizmo(at: first.position, view: view) { stageMode = .gizmo }
                 else if model.sceneEditor {
@@ -473,6 +479,10 @@ struct PreviewMetalView: UIViewRepresentable {
                     }
                 }
                 if pressed.count < 2 { return }
+            }
+            if stageMode == .pivot {
+                pivotEvent(pressed, view: view)
+                return
             }
             if stageMode == .scene {
                 sceneEvent(pressed, view: view)
@@ -546,6 +556,27 @@ struct PreviewMetalView: UIViewRepresentable {
                 stepPinch(a.position, b.position)
             default: break
             }
+        }
+        /// Pivô: anda o mesmo que o dedo (relativo: o dedo não cobre a mira) e
+        /// a posição compensa, a imagem fica. Toque parado leva o pivô ao ponto.
+        /// Um arrasto = UM passo de desfazer.
+        private func pivotEvent(_ pressed: [StageTouchPoint], view: UIView) {
+            guard let session = pivotSession else { finishStageEdit(); stageFinger = nil; stageMode = .idle; return }
+            if pressed.isEmpty {
+                if !editBegan && !hadMultipleTouches {
+                    beginEdit("mover pivô"); session.move(to: compositionPoint(stageDown, view: view), model: model)
+                    snapFeedback.selectionChanged()
+                }
+                finishStageEdit(); pivotSession = nil; stageFinger = nil; stageMode = .idle; return
+            }
+            if pressed.count >= 2 { hadMultipleTouches = true }
+            guard let first = pressed.first(where: { $0.id == stageFinger }) else { return }
+            if !editBegan && hypot(first.position.x - stageDown.x, first.position.y - stageDown.y) > 8 {
+                engage(); beginEdit("mover pivô")
+            }
+            guard editBegan else { return }
+            let delta = compositionPoint(first.position, view: view) - compositionPoint(stageDown, view: view)
+            session.move(to: session.start + delta, model: model)
         }
         private func recordTarget(_ point: CGPoint, view: UIView) {
             // Setas X/Y do 2D (a camada 3D tem o gizmo, que já pegou o toque).

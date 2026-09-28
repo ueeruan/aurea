@@ -492,6 +492,15 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     // Só o centro e as setas dos eixos: alça de canto (giro/escala) em camada
     // pequena ficava em cima do corpo e roubava o arrasto. Girar e escalar é
     // pela pinça (e, no 3D, pela ferramenta do gizmo).
+    // Face Pivô aberta: só a mira do pivô (o arrasto move ELE, não a camada).
+    if (pivotMode(store, ui)) {
+        val p = m.scratch
+        val g = store.gizmo
+        if (g != null && g.size >= 2 && g[0].isFinite() && g[1].isFinite()) { p[0] = g[0]; p[1] = g[1] }
+        else d.parentToComp(d.position[0], d.position[1], p)
+        drawPivotCrosshair(Offset(m.sx(p[0]), m.sy(p[1])))
+        return
+    }
     // Camada no espaço 3D: as setas do mundo (têm prioridade no toque).
     store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
     if (!chrome || store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
@@ -513,6 +522,80 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     drawCircle(color, radius, center, style = m.ring15)
     drawLine(color, center - Offset(radius + 3.dp.toPx(), 0f), center + Offset(radius + 3.dp.toPx(), 0f), 1.dp.toPx())
     drawLine(color, center - Offset(0f, radius + 3.dp.toPx()), center + Offset(0f, radius + 3.dp.toPx()), 1.dp.toPx())
+}
+
+/** A face Pivô do Transformar manda no palco (fora da cena 3D solta). */
+internal fun pivotMode(store: EditorStore, ui: EditorUi): Boolean =
+    PivotStage.active && ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Transform &&
+        !store.sceneEditor && store.vectorTool == 0 && store.pointPick == null
+
+/** Mira do pivô: anel em destaque, cruz que passa do anel e ponto no centro. */
+private fun DrawScope.drawPivotCrosshair(c: Offset) {
+    val ring = 12.dp.toPx()
+    val arm = 22.dp.toPx()
+    val under = ShellColors.OutlineUnder
+    drawLine(under, c - Offset(arm, 0f), c + Offset(arm, 0f), 4.dp.toPx())
+    drawLine(under, c - Offset(0f, arm), c + Offset(0f, arm), 4.dp.toPx())
+    drawCircle(under, ring, c, style = Stroke(4.5.dp.toPx()))
+    drawLine(AureaColors.Accent, c - Offset(arm, 0f), c + Offset(arm, 0f), 1.5.dp.toPx())
+    drawLine(AureaColors.Accent, c - Offset(0f, arm), c + Offset(0f, arm), 1.5.dp.toPx())
+    drawCircle(AureaColors.Accent, ring, c, style = Stroke(2.dp.toPx()))
+    drawCircle(under, 3.5.dp.toPx(), c)
+    drawCircle(Color.White, 2.5.dp.toPx(), c)
+}
+
+/**
+ * Arrastar com a face Pivô aberta: o pivô anda o mesmo que o dedo (relativo,
+ * o dedo não cobre a mira) e a posição compensa — a imagem não sai do lugar.
+ * Tocar sem arrastar leva o pivô ao ponto tocado. UM passo de desfazer.
+ */
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.pivotGesture(
+    store: EditorStore,
+    ui: EditorUi,
+    m: StageMapper,
+    d: LayerDetail,
+    down: androidx.compose.ui.input.pointer.PointerInputChange,
+    slop: Float,
+    haptic: HapticFeedback,
+) {
+    val start = FloatArray(2)
+    val g = store.gizmo
+    if (g != null && g.size >= 2 && g[0].isFinite() && g[1].isFinite()) { start[0] = g[0]; start[1] = g[1] }
+    else d.parentToComp(d.position[0], d.position[1], start)
+    val session = PivotDragSession(store, d, start[0], start[1])
+    val downX = down.position.x
+    val downY = down.position.y
+    var dragging = false
+    var lifted = false
+    try {
+        while (true) {
+            val ev = awaitPointerEvent()
+            val ch = ev.changes.firstOrNull { it.id == down.id }
+            for (c in ev.changes) c.consume()
+            if (ch == null) break
+            if (!ch.pressed) { lifted = true; break }
+            val x = ch.position.x
+            val y = ch.position.y
+            if (!dragging && hypot(x - downX, y - downY) > slop) {
+                dragging = true
+                if (store.playing) store.pause()
+                ui.manipulating = true
+                store.beginGesture("mover pivô")
+            }
+            if (dragging) session.moveTo(session.startX + m.cx(x) - m.cx(downX), session.startY + m.cy(y) - m.cy(downY))
+        }
+    } finally {
+        if (dragging) {
+            store.endGesture()
+            ui.manipulating = false
+        }
+    }
+    if (!dragging && lifted) {
+        store.beginGesture("mover pivô")
+        session.moveTo(m.cx(downX), m.cy(downY))
+        store.endGesture()
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
 }
 
 private val TrackSolved = Color(0xFFFFD34D)
@@ -895,6 +978,15 @@ private suspend fun PointerInputScope.stageGestures(
         if (store.vectorTool != 0) {
             vectorGesture(store, m, down)
             return@awaitEachGesture
+        }
+
+        // Face Pivô aberta: o dedo move o PIVÔ (a imagem fica parada).
+        if (m.valid && pivotMode(store, ui)) {
+            val d = store.detail
+            if (d != null && store.selection.size == 1 && !d.locked && activeAt(d, store.playhead)) {
+                pivotGesture(store, ui, m, d, down, 8.dp.toPx(), haptic)
+                return@awaitEachGesture
+            }
         }
 
         // Editar forma: as alças da silhueta (tamanho/raio) têm a vez.

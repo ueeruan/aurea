@@ -46,16 +46,38 @@ internal object EditorLayout {
     /** Altura inteira da doca: 8 + rápida + 2 × (8 + ficha) + 10 de respiro. */
     const val DOCK = 8f + DOCK_QUICK + 2f * (8f + DOCK_TILE) + 10f
 
+    /** Folga do palco em volta do quadro ajustado (as fichas ficam por cima do quadro). */
+    const val PREVIEW_FIT_MARGIN = 16f
+
     fun workspace(totalHeight: Float) = max(0f, totalHeight - TOP_BAR - TRANSPORT - STRIP)
 
-    fun solve(totalHeight: Float, content: SheetContent, fullscreen: Boolean): EditorMetrics {
+    /** O palco mais alto possível: a timeline nunca fica abaixo do piso. */
+    fun maxPreview(totalHeight: Float) = max(PREVIEW_MIN, workspace(totalHeight) - TIMELINE_MIN)
+
+    /**
+     * [width]/[aspect] (largura ÷ altura do projeto): o palco nunca é mais alto
+     * que o quadro na largura da tela + a folga — num projeto deitado as faixas
+     * vazias acima e abaixo do quadro roubavam a timeline. Em pé (o quadro já
+     * passa da fração) fica como sempre. [preferred] > 0: a altura que a pessoa
+     * escolheu arrastando a divisa palco/transporte (vale sobre as duas).
+     */
+    fun solve(
+        totalHeight: Float,
+        content: SheetContent,
+        fullscreen: Boolean,
+        width: Float = 0f,
+        aspect: Float = 0f,
+        preferred: Float = 0f,
+    ): EditorMetrics {
         if (fullscreen) {
             return EditorMetrics(0f, max(0f, totalHeight - TRANSPORT), 0f, TRANSPORT, 0f, 0f)
         }
         val ws = workspace(totalHeight)
         // Stable preview height while floating add controls open and close.
-        var preview = (totalHeight * 0.54f - 32f)
-            .coerceIn(PREVIEW_MIN, max(PREVIEW_MIN, ws - TIMELINE_MIN))
+        val natural = totalHeight * 0.54f - 32f
+        val fitted = if (width > 0f && aspect > 0f && aspect.isFinite()) min(natural, width / aspect + PREVIEW_FIT_MARGIN) else natural
+        var preview = (if (preferred > 0f && preferred.isFinite()) preferred else fitted)
+            .coerceIn(PREVIEW_MIN, maxPreview(totalHeight))
 
         val sheetFraction = when (content) {
             SheetContent.None -> 0f

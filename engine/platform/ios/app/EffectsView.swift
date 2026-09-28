@@ -235,6 +235,7 @@ struct EffectsView: View {
                 if expanded {
                     cardButton(CupertinoGlyph.Ellipsis) { effectMenu(effect) }
                         .accessibilityLabel(AureaText.t("app_a11y_more_options", fxEffectDisplayName(effect.typeId,effect.name)))
+                        .accessibilityIdentifier("effects.more." + fxEffectCardId(effect.typeId))
                     cardButton(CupertinoGlyph.Trash) { remove(effect) }
                 } else {
                     cardButton(effect.enabled ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, tint: effect.enabled ? AureaColors.text : AureaColors.muted) { enable(effect, !effect.enabled) }

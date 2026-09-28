@@ -592,6 +592,13 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
     // Sem 3D não há profundidade: o arrasto é sempre X/Y.
     val zMode = zPicked && depth
     var dragging by remember { mutableStateOf(false) }
+    // Face Pivô aberta: o palco passa a mover o pivô (Stage.kt `pivotGesture`).
+    if (pivot) {
+        androidx.compose.runtime.DisposableEffect(Unit) {
+            com.aurea.aurea.editor.PivotStage.active = true
+            onDispose { com.aurea.aurea.editor.PivotStage.active = false }
+        }
+    }
     val x by remember(store, pivot) {
         derivedStateOf { store.detail?.let { if (pivot) it.anchor[0] - it.sourceWidth / 2f else it.position[0] } ?: 0f }
     }
@@ -666,6 +673,12 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
 
     if (pivot) {
         Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) { fields() }
+        Text(
+            stringResource(R.string.panel_pivo_arraste_preview),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)),
+        )
     }
     val hint = when {
         pivot -> stringResource(R.string.panel_deslize_ponto_giro_botao_centro_devolve)
@@ -684,6 +697,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                 var startZ = 0f
                 var acc = Offset.Zero
                 var gain = 1f
+                var pivotDrag: com.aurea.aurea.editor.PivotDragSession? = null
                 detectDragGestures(
                     onDragStart = {
                         val d = store.detail
@@ -691,6 +705,11 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                             startX = if (pivot) d.anchor[0] else d.position[0]
                             startY = if (pivot) d.anchor[1] else d.position[1]
                             startZ = d.position[2]
+                            pivotDrag = if (pivot) {
+                                val p = FloatArray(2)
+                                d.parentToComp(d.position[0], d.position[1], p)
+                                com.aurea.aurea.editor.PivotDragSession(store, d, p[0], p[1])
+                            } else null
                         }
                         acc = Offset.Zero
                         // O GANHO da A.01: 360 dp de dedo atravessam a largura da composição.
@@ -704,7 +723,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                     change.consume()
                     acc += Offset(delta.x / density, delta.y / density)
                     if (pivot) {
-                        store.setTransform2(TrackProperty.ANCHOR_X, startX + acc.x * gain, TrackProperty.ANCHOR_Y, startY + acc.y * gain)
+                        // O pivô anda na composição e a posição compensa: a imagem fica.
+                        pivotDrag?.let { it.moveTo(it.startX + acc.x * gain, it.startY + acc.y * gain) }
                         return@detectDragGestures
                     }
                     if (zNow) {

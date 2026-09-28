@@ -3007,4 +3007,5 @@ to edit the curve.</string>
     <string name="ios_vector_delete_group">Delete the group \"%1$s\"</string>
     <string name="ios_vector_keyframes_n">%1$d keyframes — editing at the playhead records there</string>
     <string name="ios_rotation_axis">Rotation %1$s</string>
+    <string name="panel_pivo_arraste_preview">Drag on the preview to move the pivot</string>
 </resources>

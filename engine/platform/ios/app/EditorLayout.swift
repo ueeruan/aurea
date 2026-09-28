@@ -541,3 +541,77 @@ enum StageGeom {
         return ((a[3] * dx - a[2] * dy) / det, (-a[1] * dx + a[0] * dy) / det)
     }
 }
+
+/// Mover o pivô sem a imagem pular (par do PivotDrag.kt). O motor desenha
+/// `posição · R · S · (p − âncora)` (R = Rz no 2D, Rz·Ry·Rx no 3D): a posição
+/// anda Δ e a âncora anda `(R·S)⁻¹·Δ`, e todo pixel fica onde estava.
+enum PivotMath {
+    /// Δâncora XYZ que compensa a posição andar (dx, dy, 0) no espaço do pai;
+    /// nil quando a escala zera um eixo.
+    static func anchorDelta(dx: Float, dy: Float, rotation: [Float], scale: [Float], threeD: Bool, depthFollowsWidth: Bool) -> [Float]? {
+        func at(_ v: [Float], _ i: Int, _ fallback: Float) -> Float { v.count > i ? v[i] : fallback }
+        let sx = at(scale, 0, 1), sy = at(scale, 1, 1)
+        let sz: Float = !threeD ? 1 : depthFollowsWidth ? at(scale, 2, 1) * sx : at(scale, 2, 1)
+        let rad = Double.pi / 180
+        let x = threeD ? Double(at(rotation, 0, 0)) * rad : 0, y = threeD ? Double(at(rotation, 1, 0)) * rad : 0
+        let z = Double(at(rotation, 2, 0)) * rad
+        let (cx, sxr, cy, syr, cz, szr) = (cos(x), sin(x), cos(y), sin(y), cos(z), sin(z))
+        // Linhas 0 e 1 de Rz·Ry·Rx; Rᵀ·(dx, dy, 0).
+        let r0 = [cz * cy, cz * syr * sxr - szr * cx, cz * syr * cx + szr * sxr]
+        let r1 = [szr * cy, szr * syr * sxr + cz * cx, szr * syr * cx - cz * sxr]
+        var out = (0..<3).map { Float(r0[$0] * Double(dx) + r1[$0] * Double(dy)) }
+        let s = [sx, sy, sz]
+        for i in 0..<3 {
+            if abs(out[i]) < 1e-9 { out[i] = 0; continue }
+            if abs(s[i]) < 1e-6 { return nil }
+            out[i] /= s[i]
+        }
+        if !threeD { out[2] = 0 }
+        return out
+    }
+}
+
+/// Um arrasto do pivô: valores do COMEÇO e escrita absoluta (nada acumula).
+struct PivotDragSession {
+    let layer: Int64
+    let start: SIMD2<Float>
+    private let position: [Float], anchor: [Float], rotation: [Float], scale: [Float], affine: [Float]
+    private let threeD: Bool, depthFollowsWidth: Bool
+    private let parentStart: (Float, Float)
+
+    init?(model: AureaModel, pivot: SIMD2<Float>) {
+        guard let id = model.primarySelection, let row = model.selectedLayer, row.id == id else { return nil }
+        let d = model.detail
+        position = StageGeom.floats(d["position"]); anchor = StageGeom.floats(d["anchor"])
+        rotation = StageGeom.floats(d["rotation"]); scale = StageGeom.floats(d["scale"])
+        affine = StageGeom.floats(d["parentAffine"])
+        guard position.count >= 2, anchor.count >= 2 else { return nil }
+        layer = id; start = pivot
+        threeD = row.threeD || [UInt32(8), 9, 10].contains(row.kind)
+        depthFollowsWidth = row.kind != 8 && row.kind != 9
+        parentStart = StageGeom.invertAffine(affine, pivot.x, pivot.y) ?? (pivot.x, pivot.y)
+    }
+
+    /// Onde o pivô está na composição: a origem do gizmo (3D) ou a posição
+    /// levada pelo pai (2D — a âncora cai exatamente na posição).
+    static func pivotPoint(_ model: AureaModel) -> SIMD2<Float>? {
+        guard let id = model.primarySelection else { return nil }
+        let g = model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
+        if g.count == 8, g[0].isFinite, g[1].isFinite { return SIMD2(g[0], g[1]) }
+        let p = StageGeom.floats(model.detail["position"])
+        guard p.count >= 2 else { return nil }
+        let c = StageGeom.applyAffine(StageGeom.floats(model.detail["parentAffine"]), p[0], p[1])
+        return c.0.isFinite && c.1.isFinite ? SIMD2(c.0, c.1) : nil
+    }
+
+    /// Leva o pivô ao ponto da composição `to`; a posição compensa a âncora.
+    func move(to target: SIMD2<Float>, model: AureaModel) {
+        let p = StageGeom.invertAffine(affine, target.x, target.y) ?? (target.x, target.y)
+        let dx = p.0 - parentStart.0, dy = p.1 - parentStart.1
+        guard let da = PivotMath.anchorDelta(dx: dx, dy: dy, rotation: rotation, scale: scale,
+                                             threeD: threeD, depthFollowsWidth: depthFollowsWidth) else { return }
+        func at(_ v: [Float], _ i: Int) -> Float { v.count > i ? v[i] : 0 }
+        model.setPivot(layer, anchor: (0..<3).map { at(anchor, $0) + da[$0] },
+                       position: [at(position, 0) + dx, at(position, 1) + dy, at(position, 2)])
+    }
+}

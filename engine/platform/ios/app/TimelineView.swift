@@ -994,8 +994,10 @@ struct TimelineView: View {
         if state == .began {
             let (row, touched) = hit(start, width: size.width)
             let dx = point.x - start.x, dy = point.y - start.y
-            let horizontal = TimelinePress.horizontal(dx, dy)
-            // Editar (losango, alça, mover) exige eixo claro, 2:1; scrub e rolagem ficam nos 45°.
+            // Lista inteira: a rolagem vertical ganha já em ~31° (scrollWins);
+            // fileira compacta: o empate de 45° (o vertical ali troca de camada).
+            let horizontal = compact ? TimelinePress.horizontal(dx, dy) : !TimelinePress.scrollWins(dx, dy)
+            // Editar (losango, alça, mover) exige eixo claro, 2:1.
             let edit = TimelinePress.timeEdit(dx, dy)
             let mode: Mode
             if edit && touched.kind == .key { mode = .key }
@@ -1022,7 +1024,7 @@ struct TimelineView: View {
         if state == .changed, let g = gesture, g.mode == .hold {
             let dx = point.x - start.x, dy = point.y - start.y
             if hypot(dx, dy) >= m.axisSlop {
-                let horizontal = TimelinePress.horizontal(dx, dy)
+                let horizontal = compact ? TimelinePress.horizontal(dx, dy) : !TimelinePress.scrollWins(dx, dy)
                 // Só um eixo CLARO edita: tempo 2:1 move, pilha 2:1 reordena; a diagonal só rola.
                 let time = TimelinePress.timeEdit(dx, dy), stack = TimelinePress.stackEdit(dx, dy)
                 let mode: Mode
@@ -1275,7 +1277,12 @@ struct TimelineView: View {
             }
         } else if abs(scrollVelocity) > 1 {
             let next = min(maxScroll(size.height), max(0, scrollY + scrollVelocity * dt))
-            if next == scrollY { scrollVelocity = 0 } else { scrollY = next; scrollVelocity *= CGFloat(pow(0.94, Double(dt) * 60)) }
+            // Inércia com a desaceleração do UIScrollView (0,998 por ms): a lista
+            // desliza como qualquer lista do iOS; 0,94 por quadro parava seco.
+            if next == scrollY { scrollVelocity = 0 } else {
+                scrollY = next; scrollVelocity *= CGFloat(pow(0.998, Double(dt) * 1000))
+                if abs(scrollVelocity) < 12 { scrollVelocity = 0 }
+            }
         }
         if mediaNeedsRefresh || thumbCache.starved {
             mediaNeedsRefresh = false

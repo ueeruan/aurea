@@ -2977,4 +2977,5 @@
     <string name="ios_vector_delete_group">Удалить группу «%1$s»</string>
     <string name="ios_vector_keyframes_n">Ключевых кадров: %1$d — правка на указателе записывается туда</string>
     <string name="ios_rotation_axis">Вращение %1$s</string>
+    <string name="panel_pivo_arraste_preview">Перетащите в превью, чтобы сдвинуть опорную точку</string>
 </resources>

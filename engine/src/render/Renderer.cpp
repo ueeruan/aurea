@@ -2060,7 +2060,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const i64 dur = streamInfo.durationUs;
                 if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, last_source_timestamp(streamInfo,src->frame_duration_us()));
                 DecodeRequest req;
-                i64 requiredTimes[5] = {mediaUs};
+                i64 requiredTimes[6] = {mediaUs};
                 u32 requiredCount = 1;
                 if (nextUs >= 0) requiredTimes[requiredCount++] = nextUs;
                 // Com mistura: primeiro o quadro atual; com ele no cache, o
@@ -2122,6 +2122,16 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (dur2 > 0) us = std::clamp<f64>(us, 0.0, static_cast<f64>(last_source_timestamp(streamInfo,src->frame_duration_us())));
                         chanUs[c] = static_cast<i64>(std::llround(us));
                         requiredTimes[requiredCount++] = chanUs[c];
+                    }
+                    // O canal MAIS ANTIGO do próximo quadro (um quadro da fonte
+                    // adiante) já passou pelo decoder; sem esta reserva o cache
+                    // o despejava (o mais longe do foco, que está no canal mais
+                    // novo) e TODO quadro do export voltava ao keyframe para
+                    // buscá-lo: ~90x mais lento, e em aparelho com GOP longo o
+                    // prazo de 4 s estourava ("quadros de video indisponiveis").
+                    if (requiredCount < 6) {
+                        const i64 oldest = std::min(chanUs[0], std::min(chanUs[1], chanUs[2]));
+                        requiredTimes[requiredCount++] = oldest + src->frame_duration_us();
                     }
                     // One decoder has one active target. Submitting A/R/G/B
                     // every prepare cancelled earlier channels before delivery.

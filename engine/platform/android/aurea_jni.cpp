@@ -2480,6 +2480,17 @@ AUREA_JNI jint AUREA_FN(nativeSaveProject)(JNIEnv* env, jclass, jlong handle, js
     return static_cast<jint>(c->engine.save_project(p.c_str()).raw());
 }
 
+/// Sair do app / segundo plano: grava se houver qualquer mudança, sem as regras
+/// do autosave. -1 = já estava limpo (nada escrito); senão o código Errc.
+AUREA_JNI jint AUREA_FN(nativeSaveProjectIfDirty)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
+    bool saved = false;
+    const Status s = c->engine.save_project_if_dirty(&saved);
+    if (s.ok() && !saved) return -1;
+    return static_cast<jint>(s.raw());
+}
+
 /// Bits de Engine::LoadNotice da última abertura (0 = abriu limpo); nos 16
 /// bits de cima, quantos assets faltaram. A UI avisa em vez de esconder.
 AUREA_JNI jint AUREA_FN(nativeLoadNotice)(JNIEnv*, jclass, jlong handle) {

@@ -13,6 +13,7 @@ struct TransformView: View {
     @State private var zPicked = false
     @State private var gestureOpen = false
     @State private var gestureValues: [Float] = []
+    @State private var pivotDrag: PivotDragSession?
     @State private var previousAngle: Float?
     @State private var dialTotal: Float = 0
     @State private var dialWalked: CGFloat = 0
@@ -113,7 +114,9 @@ struct TransformView: View {
             }
         }
         .foregroundStyle(AureaColors.text)
-        .onAppear { text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; updateTimelineFocus() }
+        .onAppear { text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; updateTimelineFocus(); model.pivotStageEdit = tab == 4 }
+        // Face Pivô aberta: o arrasto no palco move o pivô (PreviewMetalView.pivotEvent).
+        .onChange(of: tab) { model.pivotStageEdit = $0 == 4 }
         .onChange(of: id) { _ in
             text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; wholeText = false
             // A face Lente só existe na câmera 3D: trocou de camada com ela aberta → Posição.
@@ -121,7 +124,7 @@ struct TransformView: View {
         }
         .onChange(of: wholeText) { _ in updateTimelineFocus() }
         .onChange(of: keyProps) { _ in updateTimelineFocus() }
-        .onDisappear { endGesture(); model.timelineFocus = nil }
+        .onDisappear { endGesture(); model.timelineFocus = nil; model.pivotStageEdit = false }
     }
 
     private func updateTimelineFocus() {
@@ -132,7 +135,13 @@ struct TransformView: View {
     // Fields are part of the touch pad for Position, above it for Pivot.
     private func moveFace(pivot: Bool) -> some View {
         VStack(spacing: 0) {
-            if pivot { moveFields(pivot: true).frame(height: 44) }
+            if pivot {
+                moveFields(pivot: true).frame(height: 44)
+                Text(AureaText.t("panel_pivo_arraste_preview")).font(.aurea(size: 12.5, weight: .semibold))
+                    .foregroundStyle(AureaColors.accent).multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity).padding(.horizontal, 16).padding(.vertical, 2)
+                    .accessibilityIdentifier("transform.pivot.hint")
+            }
             GeometryReader { bounds in
                 ZStack(alignment: .top) {
                     TransformCornerMarks()
@@ -145,12 +154,19 @@ struct TransformView: View {
                 .gesture(DragGesture(minimumDistance: 8).onChanged { event in
                     if !gestureOpen {
                         gestureValues = pivot ? [value(9), value(10), value(2)] : [value(0), value(1), value(2)]
+                        pivotDrag = pivot ? PivotDragSession.pivotPoint(model).flatMap { PivotDragSession(model: model, pivot: $0) } : nil
                         beginGesture()
                     }
                     guard gestureValues.count >= 3 else { return }
                     let gain = Float(max(1, model.compositionWidth)) / 360
                     let dx = Float(event.translation.width), dy = Float(event.translation.height)
-                    if pivot { write([9: gestureValues[0] + dx * gain, 10: gestureValues[1] + dy * gain]); return }
+                    // O pivô anda na composição e a posição compensa: a imagem fica.
+                    if pivot {
+                        if let drag = pivotDrag, !(model.selectedLayer?.locked ?? false) {
+                            drag.move(to: drag.start + SIMD2(dx * gain, dy * gain), model: model)
+                        }
+                        return
+                    }
                     if zPicked && threeD { write([2: gestureValues[2] - dy * gain]); return }
                     var x = gestureValues[0] + dx * gain, y = gestureValues[1] + dy * gain
                     if abs(dx) > 12 && abs(dy) < 6 { y = gestureValues[1] }
@@ -625,7 +641,7 @@ struct TransformView: View {
     }
     private func endGesture() {
         if gestureOpen { model.engine.run { $0.endUndoGroup() }; gestureOpen = false }
-        gestureValues = []
+        gestureValues = []; pivotDrag = nil
     }
     private func keypad(_ title: String, _ value: Float, unit: String, min: Float = -.infinity, max: Float = .infinity,
                         decimals: Int, onValue: @escaping (Float) -> Void) {

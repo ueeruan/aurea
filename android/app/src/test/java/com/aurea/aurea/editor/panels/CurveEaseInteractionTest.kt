@@ -53,4 +53,30 @@ class CurveEaseInteractionTest {
             assertTrue(Ease(kind, .2f, 0f, .8f, 1f).hasHandles)
         }
     }
+    @Test fun linearShowsGrabbableHandlesAwayFromItsKeys() {
+        val h = Ease(Interp.LINEAR, 0f, 0f, 1f, 1f).handles()
+        assertArrayEquals(floatArrayOf(1f / 3f, 1f / 3f, 2f / 3f, 2f / 3f), h, 1e-6f)
+        // A bézier equivalente é a mesma reta: puxar a alça não muda nada antes do arrasto.
+        val asBezier = Ease(Interp.BEZIER, h[0], h[1], h[2], h[3])
+        for (t in listOf(.1f, .25f, .5f, .8f)) assertEquals(t, asBezier.transform(t), 1e-4f)
+    }
+
+    @Test fun coincidentHandlesAreDrawnApartAndEachStaysGrabbable() {
+        // As duas alças no mesmo ponto (o canto de cima à esquerda).
+        val shown = separatedHandles(40f, 20f, 40f, 20f, 28f, 300f, 372f, 20f, 60f)
+        val gap = kotlin.math.hypot(shown[2] - shown[0], shown[3] - shown[1])
+        assertEquals(60f, gap, 0.01f)
+        // A de saída vai para o lado da primeira marca, a de chegada para o da segunda.
+        assertTrue(shown[0] < shown[2])
+        assertEquals(0, nearestHandle(shown[0], shown[1], shown, 56f))
+        assertEquals(1, nearestHandle(shown[2], shown[3], shown, 56f))
+        // Longe das duas, nenhuma é agarrada.
+        assertEquals(-1, nearestHandle(200f, 200f, shown, 56f))
+        // Afastadas o bastante, ficam onde estão.
+        val apart = separatedHandles(10f, 10f, 200f, 10f, 0f, 0f, 1f, 1f, 60f)
+        assertArrayEquals(floatArrayOf(10f, 10f, 200f, 10f), apart, 0f)
+        // Perto (mas não iguais): abrem ao longo da própria separação.
+        val near = separatedHandles(100f, 100f, 110f, 100f, 0f, 0f, 1f, 1f, 60f)
+        assertArrayEquals(floatArrayOf(75f, 100f, 135f, 100f), near, 1e-4f)
+    }
 }

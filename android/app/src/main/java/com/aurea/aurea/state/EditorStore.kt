@@ -822,20 +822,63 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (ready) startStatusLoop()
     }
 
+    /**
+     * `onPause`: a primeira notícia de que a pessoa pode estar saindo (HOME,
+     * app recentes, tela apagando). Grava já — quem arrasta o app para fora
+     * dos recentes mata o processo logo depois, e esperar o `onStop` perdia a
+     * edição. Sem suspender (um diálogo por cima também pausa).
+     */
+    fun onLeaving() = flushOnLeave(suspendAfter = false)
+
     fun onEnterBackground() {
         stopStatusLoop()
-        // A gravação sai da main (antes travava a UI no onStop pelo tempo do
-        // encode + fsync + miniatura) e vai para a thread de ciclo de vida,
-        // ANTES do suspend na mesma fila: o motor ainda está de pé quando grava.
-        val path = if (screen == Screen.Editor && project.dirty) project.path else null
+        flushOnLeave(suspendAfter = true)
+    }
+
+    /**
+     * A gravação sai da main (antes travava a UI no onStop pelo tempo do
+     * encode + fsync + miniatura) e vai para a thread de ciclo de vida, ANTES
+     * do suspend na mesma fila: o motor ainda está de pé quando grava.
+     *
+     * Quem decide se há o que gravar é o MOTOR (drena a fila de comandos e olha
+     * o "sujo" dele), não o `project.dirty` da UI: esse é uma cópia publicada
+     * pelo laço de estado e chegava atrasada — a última edição antes do HOME
+     * ficava de fora e morria com o processo.
+     */
+    private fun flushOnLeave(suspendAfter: Boolean) {
+        val path = if (screen == Screen.Editor) project.path else null
         lifecycleThread.execute {
-            if (path != null) {
+            if (path != null && ready) {
                 val t0 = System.nanoTime()
-                val code = saveBlocking(path)
-                Log.i(TAG, "gravacao ao ir para segundo plano: codigo $code, ${(System.nanoTime() - t0) / 1_000_000} ms fora da main")
+                val code = saveOnLeave(path, forceCard = false)
+                Log.i(TAG, "gravacao ao sair (suspende=$suspendAfter): codigo $code, ${(System.nanoTime() - t0) / 1_000_000} ms fora da main")
+                if (code != 0) main.post { errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code)) }
             }
-            synchronized(lifecycleLock) { if (ready) engine.suspend() }
+            if (suspendAfter) synchronized(lifecycleLock) { if (ready) engine.suspend() }
         }
+    }
+
+    /**
+     * Capa e sidecar da Home atrasados em relação ao `.aurea`: o autosave não os
+     * grava (a miniatura é a parte cara) e renomear só muda o título na memória.
+     * Sair do editor / ir para segundo plano os refaz.
+     */
+    @Volatile private var homeCardStale = false
+
+    /**
+     * Grava o que mudou (sem reescrever um projeto limpo — o `.bak` continua
+     * sendo a gravação anterior de verdade) e refaz a capa/sidecar quando o
+     * projeto foi gravado agora, quando estavam atrasados ou com [forceCard].
+     * 0 = tudo certo; senão o código Errc (o arquivo anterior segue intacto).
+     */
+    private fun saveOnLeave(path: String, forceCard: Boolean): Int {
+        val code = engine.saveProjectIfDirty()
+        if (code != 0 && code != AureaEngine.SAVE_CLEAN) {
+            Log.w(TAG, "gravar ao sair falhou: codigo $code (o arquivo anterior segue intacto)")
+            return code
+        }
+        if (code == AureaEngine.SAVE_CLEAN && !homeCardStale && !forceCard) return 0
+        return writeHomeCard(path, withThumbnail = true)
     }
 
     /**
@@ -895,6 +938,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stopThermalWatch()
+        // Pode haver um flushOnLeave na fila: espera ele (a mesma thread) antes de desligar.
+        runCatching { lifecycleThread.submit {}.get(5, java.util.concurrent.TimeUnit.SECONDS) }
         saveIfDirty()
         shutdown()
         super.onCleared()
@@ -1136,6 +1181,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             } else {
                 autosaveRetryAfterNs = 0L
                 unsavedSinceNs = System.nanoTime()
+                homeCardStale = true   // o autosave não refaz capa/sidecar; sair do editor refaz
             }
             lastAutosaveError = code
         }
@@ -2040,6 +2086,32 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 TransformWrite.Static -> setScale(id, values[0], values[1], values[2])
             }
         }
+    }
+
+    /**
+     * Mover o pivô: âncora XYZ e posição XYZ de uma vez (a posição compensa a
+     * âncora e a imagem não pula; ver `PivotMath`). Valores ABSOLUTOS, vindos
+     * do começo do gesto — dentro dele o `detail` só relê no próximo quadro.
+     */
+    fun setPivot(anchor: FloatArray, position: FloatArray, layer: Long? = primary) {
+        val id = layer ?: return
+        if (anchor.size != 3 || position.size != 3 || anchor.any { !it.isFinite() } || position.any { !it.isFinite() }) return
+        val d = (if (id == primary) detail else detailOf(id)) ?: return
+        for ((base, values) in listOf(TrackProperty.ANCHOR_X to anchor, TrackProperty.POSITION_X to position)) {
+            if (keyTransformGroup(id, d, (0..2).associate { base + it to values[it] })) continue
+            val animated = (0..2).any { d.isAnimated(base + it) }
+            send {
+                when (transformWrite(sceneEditor, autoKeyTransforms, animated)) {
+                    // Como `setScale3`: o vetor inteiro no cabeçote (Z incluso).
+                    TransformWrite.Keyframe -> (0..2).forEach { insertKeyframe(id, base + it, NO_EFFECT, 0, d.localPlayhead, values[it]) }
+                    TransformWrite.Layout -> (0..2).forEach { engine.layoutTransform(id, base + it, values[it]) }
+                    TransformWrite.Static ->
+                        if (base == TrackProperty.ANCHOR_X) setAnchor(id, values[0], values[1], values[2])
+                        else setPosition(id, values[0], values[1], values[2])
+                }
+            }
+        }
+        refreshNow()
     }
 
     fun setTransform(property: Int, value: Float, layer: Long? = primary) {
@@ -5041,6 +5113,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             Log.w(TAG, "salvar projeto falhou: codigo $code (o arquivo anterior segue intacto)")
             return code
         }
+        return writeHomeCard(path, withThumbnail)
+    }
+
+    /** Miniatura + sidecar `.meta.json` que a Home lê (o `.aurea` já gravado). */
+    private fun writeHomeCard(path: String, withThumbnail: Boolean): Int {
         val file = File(path)
         val thumbFile = File(directories().thumbs, file.nameWithoutExtension + ".jpg")
         // Miniatura e sidecar são derivados: falhar neles (disco cheio) não
@@ -5057,8 +5134,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             writeTextAtomic(File(path + META_SUFFIX), meta.toString())
         } catch (e: java.io.IOException) {
             Log.w(TAG, "miniatura/sidecar do projeto nao gravados: ${e.message}")
+            homeCardStale = true
             return if (e.message?.contains("ENOSPC") == true) ERRC_STORAGE_FULL else ERRC_IO
         }
+        if (withThumbnail) homeCardStale = false
         return 0
     }
 
@@ -5089,9 +5168,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun saveIfDirty() {
-        if (screen != Screen.Editor || !project.dirty) return
+        if (screen != Screen.Editor || !ready) return
         val path = project.path ?: return
-        saveBlocking(path)
+        saveOnLeave(path, forceCard = false)
     }
 
     /** Sai do editor: salva (se mudou) e volta à Home. */
@@ -5109,7 +5188,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             if (path != null) {
                 // Save also drains the final queued edit (status.dirty may lag).
                 // Deleting the last layer is a real edit that must survive closing.
-                val code = withContext(Dispatchers.IO) { saveBlocking(path) }
+                // Limpo = não reescreve (o .bak segue sendo a versão anterior);
+                // a capa da Home sai sempre, no quadro do cabeçote de agora.
+                val code = withContext(Dispatchers.IO) { saveOnLeave(path, forceCard = true) }
                 if (code != 0) {
                     errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code))
                     return@launch
@@ -5131,6 +5212,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun renameProject(title: String) {
         if (title.isBlank()) return
         project = project.copy(title = title.trim())
+        // O título mora no sidecar: grava já (sem a capa), senão só ao sair.
+        val path = project.path ?: return
+        if (screen == Screen.Editor) lifecycleThread.execute { if (ready) writeHomeCard(path, withThumbnail = false) }
     }
 
     /**

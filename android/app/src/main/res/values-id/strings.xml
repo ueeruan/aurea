@@ -2971,4 +2971,5 @@ untuk mengedit kurvanya.</string>
     <string name="ios_vector_delete_group">Hapus grup \"%1$s\"</string>
     <string name="ios_vector_keyframes_n">%1$d keyframe — mengedit di playhead merekam di sana</string>
     <string name="ios_rotation_axis">Rotasi %1$s</string>
+    <string name="panel_pivo_arraste_preview">Seret di pratinjau untuk memindahkan pivot</string>
 </resources>

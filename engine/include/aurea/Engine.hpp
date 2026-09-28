@@ -295,6 +295,12 @@ public:
     [[nodiscard]] Status save_project(const char* path) noexcept;
     [[nodiscard]] Status save_project() noexcept;
     [[nodiscard]] Status autosave_project() noexcept;
+    /// Sair do app / ir para segundo plano: drena a fila e grava se houver
+    /// QUALQUER mudança — sem as condições do autosave (tocando, gesto aberto),
+    /// porque depois disso o processo pode morrer. Limpo = OkStatus sem tocar
+    /// no disco (o `.bak` continua sendo a gravação anterior de verdade).
+    /// `saved` diz se escreveu (a plataforma refaz a capa só nesse caso).
+    [[nodiscard]] Status save_project_if_dirty(bool* saved = nullptr) noexcept;
 
     /// Bits do que a última abertura precisou fazer (0 = abriu limpo). A UI
     /// avisa em vez de esconder (§55, §120, §124).
@@ -1267,7 +1273,8 @@ private:
     // --- Gravação / abertura (Fase 8G) ---------------------------------------
     std::mutex         saveMutex_;              ///< uma gravação por vez
     u64                projectSession_ = 0;     ///< under modelMutex_; changes on replacement
-    [[nodiscard]] Status save_project_impl(const char* path, bool idleOnly = false) noexcept;
+    [[nodiscard]] Status save_project_impl(const char* path, bool idleOnly = false, bool dirtyOnly = false,
+                                           bool* saved = nullptr) noexcept;
     mutable std::mutex saveStatsMutex_;
     SaveStats          saveStats_{};
     /// O arquivo principal do projeto aberto estava ruim (abriu da cópia ou

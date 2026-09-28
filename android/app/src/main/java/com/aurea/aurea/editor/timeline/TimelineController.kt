@@ -669,7 +669,9 @@ internal class TimelineController(
     // --- Arrasto ---------------------------------------------------------------------
     private suspend fun AwaitPointerEventScope.drag(hit: Hit, down: PointerInputChange, slopAt: Offset, tracker: VelocityTracker) {
         val d = slopAt - down.position
-        val horizontal = Press.horizontal(d.x, d.y)
+        // Lista inteira: a rolagem vertical ganha já em ~31° (Press.scrollWins);
+        // fileira compacta: o empate de 45° (o vertical ali troca de camada).
+        val horizontal = if (state.compact) Press.horizontal(d.x, d.y) else !Press.scrollWins(d.x, d.y)
         // Editar (losango, alça, mover) exige eixo claro, 2:1; scrub e rolagem ficam nos 45°.
         val edit = Press.timeEdit(d.x, d.y)
         val r = hit.row

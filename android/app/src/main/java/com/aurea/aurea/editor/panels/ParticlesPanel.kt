@@ -51,7 +51,12 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.roundToInt
 
-/** Particle World: compact controls shared with the native iOS panel. */
+/**
+ * Partículas. Camada nova = o Particular (o sistema do app antigo, efeito
+ * `aurea.generate.particular`): os presets dele em cima e os controles do
+ * efeito embaixo, no painel de efeitos do Aurea. Camada antiga: os controles
+ * compactos de antes, com os presets do Particular para converter.
+ */
 @Composable
 internal fun ParticlesPanel(env: PanelEnv) {
     val store = env.store
@@ -59,6 +64,13 @@ internal fun ParticlesPanel(env: PanelEnv) {
     val p = v ?: run {
         Text(stringResource(R.string.panel_selecione_camada_particulas), modifier = Modifier.padding(18.dp),
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
+        return
+    }
+    if ((p.getOrNull(P.EmitterType) ?: 0f).roundToInt() == P.ParticularEmitter) {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 4.dp)) { PresetRow(store) }
+            Box(Modifier.weight(1f)) { EffectsPanel(env, focusedType = effectTypeId(PARTICULAR_KEY)) }
+        }
         return
     }
     // A linha escolhida é o alvo do losango do trilho (mesmo caminho dos efeitos).
@@ -101,9 +113,9 @@ private fun ParticleBody(env: PanelEnv, p: List<Float>) {
     val store = env.store
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
         PresetRow(store)
-        if (p[P.EmitterType] < 10f) {
-            Text(stringResource(R.string.world_legacy), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
-        } else {
+        Spacer(Modifier.height(8.dp))
+        Text(stringResource(R.string.particular_convert_note), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        if (p[P.EmitterType] >= 10f) {
         Group(stringResource(R.string.particular_group_emitter))
         if (p[P.EmitterType] >= 13f) {
             Dim(store, stringResource(R.string.particular_width), P.EmitterWidth, p, 10f, 0f, 8000f, " px")
@@ -159,7 +171,14 @@ private object P {
     const val CollisionX = 62; const val CollisionZ = 63; const val CollisionRadius = 64
     const val CollisionWidth = 65; const val CollisionHeight = 66; const val CollisionDepth = 67
     const val MeshScale = 68; const val MeshLit = 69
+    /** `ParticleEmitter::Particular`: a camada é do Particular (o efeito desenha). */
+    const val ParticularEmitter = 14
 }
+
+/** O efeito do Particular (`effect_keys::kParticular`). */
+private const val PARTICULAR_KEY = "aurea.generate.particular"
+/** Preset 0 do Particular na API do motor (`particular::kPresetBase`). */
+private const val PARTICULAR_PRESET_BASE = 20
 
 /** Escolha de uma camada do projeto (fonte, imagem, modelo), com "Nenhuma". */
 
@@ -208,14 +227,17 @@ private fun LifeGradient(env: PanelEnv) {
 
 @Composable
 private fun PresetRow(store: EditorStore) {
-    val names = listOf(R.string.world_explosive, R.string.world_jet, R.string.world_vortex, R.string.world_box_lights, R.string.world_embers, R.string.world_snow, R.string.world_bokeh, R.string.world_fountain, R.string.world_purple_crystals)
+    // Os presets do Particular (ordem = `particular::apply_preset`).
+    val names = listOf(R.string.particular_preset_default, R.string.particular_preset_rain, R.string.particular_preset_snow,
+        R.string.particular_preset_fire, R.string.particular_preset_sparks, R.string.particular_preset_fireworks,
+        R.string.particular_preset_dust, R.string.particular_preset_bokeh)
     Column {
         Text(stringResource(R.string.particular_presets), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)))
         Spacer(Modifier.height(5.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             names.forEachIndexed { preset, res ->
                 Box(Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
-                    .tocavel(onClick = { store.applyParticlePreset(preset + 10) }).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    .tocavel(onClick = { store.applyParticlePreset(preset + PARTICULAR_PRESET_BASE) }).padding(horizontal = 12.dp, vertical = 6.dp)) {
                     Text(stringResource(res), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
                 }
             }

@@ -201,6 +201,9 @@ struct RenderLayer {
     i32  matteIndex = -1;
     /// Usada como matte por outra camada: não desenha por conta própria.
     bool matteOnly = false;
+    /// Camada de ajuste: 0 = vale para tudo abaixo, 1 = só para a camada logo
+    /// abaixo (um grupo conta como uma camada).
+    u8   adjustScope = 0;
     /// Partículas (8.2): cena 3D, espaço mundo, histórico e desfoque por tempo.
     ParticleSpace particle;
 };

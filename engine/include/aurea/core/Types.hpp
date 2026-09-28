@@ -210,6 +210,7 @@ enum class TrackProperty : u16 {
     MaterialParam,     ///< imported material: effectIndex=materialIndex, paramIndex=RGBA/metallic/roughness
     CameraBlur,        ///< lente: força do desfoque de profundidade (× o círculo de confusão físico)
     Speed,             ///< velocidade do conteúdo animada (quadros da fonte por quadro); a fonte = integral dela
+    LayerAnimParam,    ///< parâmetro de animador de camada (effectIndex = animador, paramIndex = LayerAnimParam)
     _Count,
 };
 

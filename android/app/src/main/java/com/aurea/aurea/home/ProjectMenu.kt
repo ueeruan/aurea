@@ -1,5 +1,7 @@
 package com.aurea.aurea.home
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -44,6 +46,8 @@ internal sealed interface ProjectDialog {
     data class Menu(val entry: ProjectEntry) : ProjectDialog
     data class ConfirmDelete(val entry: ProjectEntry) : ProjectDialog
     data class Rename(val entry: ProjectEntry) : ProjectDialog
+    /** "Exportar arquivo do projeto": com ou sem a mídia. */
+    data class ExportFile(val entry: ProjectEntry) : ProjectDialog
     data object DeleteAll : ProjectDialog
     data class BatchDelete(val paths: Set<String>) : ProjectDialog
     data object Sort : ProjectDialog
@@ -67,6 +71,14 @@ internal fun ProjectDialogs(
     onOpen: (ProjectEntry) -> Unit,
 ) {
     val close = { state.current = null }
+    // Destino do arquivo do projeto: o documento que a pessoa escolhe (o
+    // lançador vive aqui, fora da folha, para o retorno achar quem pediu).
+    var pendingExport by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    val exportTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val p = pendingExport
+        pendingExport = null
+        if (uri != null && p != null) store.exportProjectFile(p.first, p.second, uri)
+    }
     when (val d = state.current) {
         null -> Unit
         is ProjectDialog.Menu -> AureaActionSheet(
@@ -76,6 +88,7 @@ internal fun ProjectDialogs(
                 SheetAction(stringResource(R.string.common_open)) { onOpen(d.entry) },
                 SheetAction(stringResource(R.string.common_duplicate)) { store.duplicateProject(d.entry.path) },
                 SheetAction(stringResource(R.string.common_rename)) { state.current = ProjectDialog.Rename(d.entry) },
+                SheetAction(stringResource(R.string.project_file_export)) { state.current = ProjectDialog.ExportFile(d.entry) },
                 SheetAction(stringResource(R.string.project_delete), destructive = true) { state.current = ProjectDialog.ConfirmDelete(d.entry) },
                 SheetAction(stringResource(R.string.project_delete_all), destructive = true) { if (all.isNotEmpty()) state.current = ProjectDialog.DeleteAll },
             ),
@@ -86,6 +99,21 @@ internal fun ProjectDialogs(
         is ProjectDialog.ConfirmDelete -> AureaActionSheet(
             title = d.entry.title,
             actions = listOf(SheetAction(stringResource(R.string.project_delete), destructive = true) { store.deleteProjects(listOf(d.entry.path)) }),
+            onDismiss = close,
+        )
+        is ProjectDialog.ExportFile -> AureaActionSheet(
+            title = stringResource(R.string.project_file_export),
+            message = stringResource(R.string.project_file_export_message),
+            actions = listOf(
+                SheetAction(stringResource(R.string.project_file_include_media)) {
+                    pendingExport = d.entry.path to true
+                    exportTarget.launch(store.projectFileName(d.entry.path))
+                },
+                SheetAction(stringResource(R.string.project_file_without_media)) {
+                    pendingExport = d.entry.path to false
+                    exportTarget.launch(store.projectFileName(d.entry.path))
+                },
+            ),
             onDismiss = close,
         )
         is ProjectDialog.Rename -> RenameProjectDialog(

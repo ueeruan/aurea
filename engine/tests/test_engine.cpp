@@ -1794,6 +1794,43 @@ AUREA_TEST(Engine, LegacyEffectControlsExpandOnLoadWithoutLosingKeys) {
     for(u32 i=0;i<4;++i)AUREA_CHECK_NEAR(layer()->effects[i].params.back().constant.v[0],1,.0001f);
 }
 
+AUREA_TEST(Engine, OldMotionTileProjectLoadsInTheNewLayout) {
+    // Projeto gravado com o Motion Tile anterior (9 slots): abre com a mesma
+    // chave, convertido para os controles novos, keyframes junto, e desenha.
+    Engine e; AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, "old motion tile").ok());
+    const auto added = e.add_shape(0); AUREA_CHECK(added.ok()); if (!added.ok()) return;
+    const auto id = LayerId::unpack(*added);
+    auto layer = [&]() { return e.project()->timeline().composition(e.project()->timeline().current())->layer(id); };
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = id;
+    add.effect_add.effectType = effect_type_id(effect_keys::kMotionTile); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(e.apply_command(add).ok());
+    auto& fx = layer()->effects.back();
+    AUREA_CHECK_EQ(fx.params.size(), 10u);
+    fx.params.resize(9);                            // a disposição anterior
+    fx.params[1].constant.v[0] = 50.0f;             // ladrilho 50%
+    fx.params[3].constant.v[0] = 300.0f;            // saída 300% (só ampliava)
+    fx.params[7].constant.v[0] = 180.0f;            // tijolo (colunas alternadas)
+    const u32 fxId = fx.id;
+    layer()->tracks.get_or_create(TrackProperty::EffectParam, fxId, param_track_key(7, 0)).set(FrameIndex{12}, 90.0f);
+    const char* path = "build/prompt03/old-motion-tile.aurea";
+    AUREA_CHECK(e.save_project(path).ok()); AUREA_CHECK(e.load_project(path).ok());
+    auto& back = layer()->effects.back();
+    AUREA_CHECK_EQ(back.type, effect_type_id(effect_keys::kMotionTile));
+    AUREA_CHECK_EQ(back.params.size(), 10u);
+    AUREA_CHECK_NEAR(back.params[1].constant.v[0], 50.0f, 1e-4f);
+    AUREA_CHECK_NEAR(back.params[3].constant.v[0], 100.0f, 1e-4f);
+    AUREA_CHECK_NEAR(back.params[7].constant.v[0], -180.0f, 1e-4f);
+    AUREA_CHECK(back.params[8].constant.as_bool());
+    const Track* phase = layer()->tracks.find(TrackProperty::EffectParam, back.id, param_track_key(7, 0));
+    AUREA_CHECK(phase && phase->keys.size() == 1 && std::fabs(phase->keys[0].value + 90.0f) < 1e-4f);
+    AUREA_CHECK(e.render_frame().ok());
+    // Salvo de novo, não converte duas vezes.
+    AUREA_CHECK(e.save_project(path).ok()); AUREA_CHECK(e.load_project(path).ok());
+    AUREA_CHECK_NEAR(layer()->effects.back().params[7].constant.v[0], -180.0f, 1e-4f);
+    AUREA_CHECK(layer()->effects.back().params[8].constant.as_bool());
+}
+
 AUREA_TEST(MediaLab, FiveEffectsSaveReopenKeysAndUndo) {
     Engine e;AUREA_CHECK(e.initialize(headless_config()).ok());AUREA_CHECK(e.new_project(320,180,30,"Media Lab").ok());
     const auto added=e.add_shape(0);AUREA_CHECK(added.ok());if(!added.ok())return;const auto id=LayerId::unpack(*added);

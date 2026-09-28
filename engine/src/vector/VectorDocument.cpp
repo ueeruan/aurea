@@ -11,7 +11,7 @@
 //            transform (pos x/y, âncora x/y, escala x/y, giro, opacidade),
 //            preencher (liga, regra, tinta),
 //            contorno (liga, largura, ponta, junta, miter, desloc. do traço,
-//                      nº de traços, traços…, tinta),
+//                      nº de traços, traços…, tinta, [v2] afinar início/fim/suavidade),
 //            aparar (liga, início, fim, deslocamento, modo),
 //            repetidor (liga, cópias, desloc., âncora x/y, posição x/y,
 //                       escala, giro, opac. inicial/final, por cima),
@@ -30,7 +30,7 @@
 
 namespace aurea::vector {
 namespace {
-constexpr f32 kDocVersion = 1.0f;
+constexpr f32 kDocVersion = 2.0f;   // v2: afinar do contorno
 
 struct In {
     const f32* d;
@@ -109,6 +109,7 @@ void encode_document(const VectorData& data, std::vector<f32>& o, std::string& n
                            static_cast<f32>(s.dashes.size())});
         o.insert(o.end(), s.dashes.begin(), s.dashes.end());
         put_paint(s.paint, o);
+        o.insert(o.end(), {s.taperStart, s.taperEnd, s.taperEase});
         const VectorTrim& t = g.trim;
         o.insert(o.end(), {t.enabled ? 1.0f : 0.0f, t.start, t.end, t.offset, static_cast<f32>(t.mode)});
         const VectorRepeater& r = g.repeater;
@@ -166,6 +167,11 @@ bool decode_document(const f32* data, usize count, const std::string& names, Vec
         s.dashes.resize(nd);
         for (f32& x : s.dashes) x = std::max(0.0f, in.f());
         if (!get_paint(in, s.paint)) return false;
+        if (version >= 2.0f) {
+            s.taperStart = std::clamp(in.f(), 0.0f, 100.0f);
+            s.taperEnd = std::clamp(in.f(), 0.0f, 100.0f);
+            s.taperEase = std::clamp(in.f(), 0.0f, 100.0f);
+        }
         VectorTrim& t = g.trim;
         t.enabled = in.b();
         t.start = in.f();

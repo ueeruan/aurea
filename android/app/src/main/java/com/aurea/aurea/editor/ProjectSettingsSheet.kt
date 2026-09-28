@@ -216,6 +216,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
         ColorPickerSheet(
             initial = initial,
             withAlpha = false,
+            pickFromPreview = { store.captureBitmap(720) },
             onChange = { r, g, b, _ -> store.setCompositionBackground(r, g, b, 1f) },
             onDone = { pickingBackground = false },
         )

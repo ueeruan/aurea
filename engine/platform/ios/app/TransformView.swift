@@ -11,6 +11,7 @@ struct TransformView: View {
     @State private var text3D = false
     @State private var wholeText = false
     @State private var zPicked = false
+    @State private var fineMove = false
     @State private var gestureOpen = false
     @State private var gestureValues: [Float] = []
     @State private var pivotDrag: PivotDragSession?
@@ -18,9 +19,9 @@ struct TransformView: View {
     @State private var dialTotal: Float = 0
     @State private var dialWalked: CGFloat = 0
     @State private var dialLast: CGPoint?
-    private var baseNames: [String] { ["fx_posicao", "panel_escala", "panel_rotacao", "panel_opacidade", "fx_pivo", "panel_desfoque_movimento"].map { AureaText.t($0) } }
+    private var baseNames: [String] { ["fx_posicao", "panel_escala", "panel_rotacao", "panel_opacidade", "fx_pivo", "panel_desfoque_movimento", "la_animators"].map { AureaText.t($0) } }
     private let baseIcons = ["material:rounded.OpenWith", "material:rounded.AspectRatio", "material:automirrored.rounded.RotateRight",
-                             "material:rounded.Opacity", "material:rounded.FilterCenterFocus", "material:rounded.BlurOn"]
+                             "material:rounded.Opacity", "material:rounded.FilterCenterFocus", "material:rounded.BlurOn", "sparkles"]
     private var id: Int64 { model.primarySelection ?? 0 }
     private var animatedMask: UInt32 { (model.detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0 }
     private var keyMask: UInt32 { (model.detail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0 }
@@ -105,6 +106,7 @@ struct TransformView: View {
                     case 3: opacityFace
                     case 4: moveFace(pivot: true)
                     case 5: motionBlurFace
+                    case 6: ScrollView { LayerAnimatorSection().padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 16) }
                     default: lensFace
                     }
                     Spacer().frame(height: 10)
@@ -158,7 +160,7 @@ struct TransformView: View {
                         beginGesture()
                     }
                     guard gestureValues.count >= 3 else { return }
-                    let gain = Float(max(1, model.compositionWidth)) / 360
+                    let gain = Float(max(1, model.compositionWidth)) / 360 * (fineMove && !pivot ? 0.25 : 1)
                     let dx = Float(event.translation.width), dy = Float(event.translation.height)
                     // O pivô anda na composição e a posição compensa: a imagem fica.
                     if pivot {
@@ -177,6 +179,16 @@ struct TransformView: View {
                 }.onEnded { _ in endGesture() })
                 .overlay(alignment: .top) {
                     if !pivot { moveFields(pivot: false).padding(.top, 10).padding(.horizontal, 16) }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    // Preciso (app antigo): o dedo anda 4× mais para o mesmo deslocamento.
+                    if !pivot {
+                        Button { fineMove.toggle() } label: {
+                            Text(AureaText.t("panel_mover_preciso")).font(.aurea(size: 12, weight: .semibold))
+                                .foregroundStyle(fineMove ? AureaColors.accent : AureaColors.text).padding(.horizontal, 12).frame(height: 28)
+                                .background(fineMove ? AureaColors.accent.opacity(0.18) : AureaColors.railModeFill, in: Capsule())
+                        }.buttonStyle(.plain).padding(.trailing, 14).padding(.bottom, 10)
+                    }
                 }
             }
         }
@@ -205,6 +217,8 @@ struct TransformView: View {
                     Text(AureaText.t("panel_centro")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 14).frame(height: 30).background(AureaColors.controlButton, in: RoundedRectangle(cornerRadius: 8))
                 }.buttonStyle(.plain).padding(.leading, 14)
+                // Âncora predefinida (app antigo): 9 pontos da mídia; a camada fica no lugar.
+                AnchorPresetGrid { fx, fy in model.presetAnchor(id, fx: fx, fy: fy) }.padding(.leading, 10)
             } else if threeD {
                 field(number(value(2), decimals: 0) + "px", label: "z", width: 64,
                       color: zPicked ? AureaColors.accent : .white, onLongPress: {
@@ -312,7 +326,7 @@ struct TransformView: View {
                     }
                 }.frame(height: 44)
             }
-            if [UInt32(1), 2].contains(model.selectedLayer?.kind ?? 0), sourceSize[0] > 0, sourceSize[1] > 0 {
+            if (model.selectedLayer?.kind ?? 0) != 3, let d = model.selectedLayer.flatMap({ model.queryDetail($0.id) }), StageGeom.hasSize(d) {
                 fitChips.padding(.bottom, 6)
             }
             scaleTape(axisY: false)
@@ -340,15 +354,18 @@ struct TransformView: View {
         } else { write([(axisY ? 4 : 3): amount / 100]) }
     }
     private var fitChips: some View {
-        let ratios = [Float(model.compositionWidth) / max(1, sourceSize[0]), Float(model.compositionHeight) / max(1, sourceSize[1])]
+        let size: [Float] = model.selectedLayer.flatMap { model.queryDetail($0.id) }.map { [StageGeom.width($0), StageGeom.height($0)] } ?? sourceSize
+        let ratios = [Float(model.compositionWidth) / max(1, size[0]), Float(model.compositionHeight) / max(1, size[1])]
         let choices = [max(ratios[0], ratios[1]), min(ratios[0], ratios[1])]
         return HStack(spacing: 8) {
-            ForEach(0..<2) { index in
-                let scale = choices[index], selected = abs(value(3) - scale) < 0.001 && abs(value(4) - scale) < 0.001
+            // Preencher / Ajustar e, do app antigo, "Tamanho da composição".
+            ForEach(0..<3) { index in
+                let scale = index < 2 ? choices[index] : -1, selected = index < 2 && abs(abs(value(3)) - scale) < 0.001 && abs(abs(value(4)) - scale) < 0.001
                 Button {
-                    beginGesture(); write([3: scale, 4: scale]); write([0: Float(model.compositionWidth) / 2, 1: Float(model.compositionHeight) / 2]); endGesture()
+                    endGesture()
+                    if index == 2 { model.makeCompositionSize(id) } else { model.fitToCanvas([id], fill: index == 0) }
                 } label: {
-                    Text(AureaText.t(index == 0 ? "panel_preencher" : "panel_ajustar")).font(.aurea(size: 12, weight: .semibold))
+                    Text(AureaText.t(["panel_preencher", "panel_ajustar", "panel_tamanho_composicao"][index])).font(.aurea(size: 12, weight: .semibold))
                         .foregroundStyle(selected ? AureaColors.accent : AureaColors.text).padding(.horizontal, 14).frame(height: 30)
                         .background(selected ? AureaColors.accent.opacity(0.18) : AureaColors.railModeFill, in: Capsule())
                 }.buttonStyle(.plain)
@@ -384,6 +401,16 @@ struct TransformView: View {
                         keypad(AureaText.t("panel_intensidade_desfoque"), model.shutterAngle / 3.6, unit: "%", min: 0, max: 200, decimals: 0) { model.changeShutterAngle($0 * 3.6) }
                     })
                     Text(AureaText.t("panel_intensidade_vale_todas_camadas_desfoque_neste")).font(.aurea(size: 11.5))
+                        .foregroundStyle(AureaColors.muted).padding(.top, 4).padding(.leading, 4)
+                    // Comprimento do rastro SÓ desta camada (× o obturador do projeto).
+                    let length = model.engine.layerMotionBlurLength(id) * 100
+                    scalarRow(AureaText.t("la_motion_blur_length"), amount: length, speed: 0.5, limit: 400,
+                              onValue: { model.engine.setLayerMotionBlurLength(min(400, max(0, $0)) / 100, forLayer: id); model.refreshModel(force: true) }, onTap: {
+                        keypad(AureaText.t("la_motion_blur_length"), length, unit: "%", min: 0, max: 400, decimals: 0) {
+                            model.engine.setLayerMotionBlurLength($0 / 100, forLayer: id); model.refreshModel(force: true)
+                        }
+                    })
+                    Text(AureaText.t("la_motion_blur_length_hint")).font(.aurea(size: 11.5))
                         .foregroundStyle(AureaColors.muted).padding(.top, 4).padding(.leading, 4)
                 }
                 if model.selectedLayer?.kind == 1 {
@@ -552,7 +579,7 @@ struct TransformView: View {
             HomeSheetAction(AureaText.t("panel_keyframe_anterior")) { model.engine.run { $0.pause() }; _ = model.stepToKeyframe(-1) },
             HomeSheetAction(AureaText.t("panel_proximo_keyframe")) { model.engine.run { $0.pause() }; _ = model.stepToKeyframe(1) },
         ]
-        if tab != 5 { items.append(HomeSheetAction(AureaText.t("panel_voltar_padrao"), action: reset)) }
+        if tab < 5 { items.append(HomeSheetAction(AureaText.t("panel_voltar_padrao"), action: reset)) }
         if !props.isEmpty { items.append(HomeSheetAction(AureaText.t(expressionLook == .none ? "panel_adicionar_expressao" : "panel_editar_expressao"), action: openExpression)) }
         if !uses3D {
             items.append(HomeSheetAction(AureaText.t(expand3D ? "panel_esconder_x_y_z_3d" : "panel_mostrar_x_y_z_3d")) { expand3D.toggle() })
@@ -700,5 +727,30 @@ private struct TransformMiniDiamond: View {
             if filled { context.fill(path, with: .color(AureaColors.keyframe)) }
             else { context.stroke(path, with: .color(AureaColors.keyframe), lineWidth: 1) }
         }
+    }
+}
+
+/// 3 × 3 pontos da caixa da mídia (âncora predefinida); o toque escolhe a célula.
+struct AnchorPresetGrid: View {
+    let onPick: (Float, Float) -> Void
+    var body: some View {
+        GeometryReader { geo in
+            Canvas { context, size in
+                for i in 0..<3 { for j in 0..<3 {
+                    let r: CGFloat = (i == 1 && j == 1) ? 2.2 : 1.6
+                    let c = CGPoint(x: size.width * (CGFloat(i) + 0.5) / 3, y: size.height * (CGFloat(j) + 0.5) / 3)
+                    context.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)), with: .color(.white))
+                } }
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onEnded { e in
+                let cx = min(2, max(0, Int(e.location.x / max(1, geo.size.width) * 3)))
+                let cy = min(2, max(0, Int(e.location.y / max(1, geo.size.height) * 3)))
+                onPick(Float(cx) * 0.5, Float(cy) * 0.5)
+            })
+        }
+        .frame(width: 30, height: 30)
+        .background(AureaColors.controlButton, in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityLabel(AureaText.t("panel_ancora_predefinida"))
     }
 }

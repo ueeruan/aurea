@@ -24,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.CameraAlt
@@ -61,6 +62,9 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -100,6 +104,8 @@ enum class TransformTab(@StringRes val title: Int, val icon: ImageVector, @Strin
     Opacidade(R.string.panel_opacidade, Icons.Rounded.Opacity, R.string.panel_opacidade, intArrayOf(TrackProperty.OPACITY)),
     Pivo(R.string.fx_pivo, Icons.Rounded.FilterCenterFocus, R.string.edt_pivot_rail, intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y)),
     Desfoque(R.string.panel_desfoque_movimento, Icons.Rounded.BlurOn, R.string.panel_desfoque_movimento, intArrayOf()),
+    /** Animadores da camada (entrada/saída/wiggle; ◇ por linha, dentro do cartão). */
+    Animadores(R.string.la_animators, Icons.Rounded.Animation, R.string.la_animators, intArrayOf()),
     /** Só câmera 3D: distância focal, profundidade de campo e Pick Focus (◇ por linha). */
     Lente(R.string.lens_title, Icons.Rounded.CameraAlt, R.string.lens_title, intArrayOf()),
 }
@@ -230,6 +236,9 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                 TransformTab.Opacidade -> OpacityFace(env, look)
                 TransformTab.Pivo -> MoveFace(env, pivot = true, depth = show3D)
                 TransformTab.Desfoque -> MotionBlurFace(env)
+                TransformTab.Animadores -> Column(
+                    Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp),
+                ) { LayerAnimSection(env) }
                 TransformTab.Lente -> LensFace(env)
             }
             Spacer(Modifier.height(10.dp))
@@ -247,7 +256,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             actions = buildList {
                 add(SheetAction(stringResource(R.string.panel_keyframe_anterior)) { store.pause(); store.stepToKeyframe(-1) })
                 add(SheetAction(stringResource(R.string.panel_proximo_keyframe)) { store.pause(); store.stepToKeyframe(1) })
-                if (tab != TransformTab.Desfoque && tab != TransformTab.Lente) add(SheetAction(stringResource(R.string.panel_voltar_padrao)) { resetTab(env, tab, axis) })
+                if (tab != TransformTab.Desfoque && tab != TransformTab.Lente && tab != TransformTab.Animadores) add(SheetAction(stringResource(R.string.panel_voltar_padrao)) { resetTab(env, tab, axis) })
                 if (canKey) add(SheetAction(if (exprLook == com.aurea.aurea.engine.ExpressionLook.None) stringResource(R.string.panel_adicionar_expressao) else stringResource(R.string.panel_editar_expressao)) {
                     store.openExpression(exprTitle, exprKeys, exprScale, exprUnit)
                 })
@@ -275,6 +284,7 @@ private fun resetTab(env: PanelEnv, tab: TransformTab, axis: Int) {
             TrackProperty.ANCHOR_X, d.sourceWidth / 2f, TrackProperty.ANCHOR_Y, d.sourceHeight / 2f,
         )
         TransformTab.Desfoque -> Unit
+        TransformTab.Animadores -> Unit
         TransformTab.Lente -> Unit
     }
 }
@@ -375,6 +385,30 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
             )
             Text(
                 stringResource(R.string.panel_intensidade_vale_todas_camadas_desfoque_neste),
+                modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
+            )
+            // Comprimento do rastro SÓ desta camada (× o obturador do projeto).
+            val lengthLabel = stringResource(R.string.la_motion_blur_length)
+            val length = store.layerMotionBlurLength * 100f
+            com.aurea.aurea.ui.ds.PropertyRow(
+                label = lengthLabel,
+                value = length,
+                unitsPerDp = 0.5f,
+                min = 0f,
+                max = 400f,
+                format = { "${numeroPtBr(it, 0)}%" },
+                selected = false,
+                onSelect = {},
+                onGestureStart = { store.beginGesture("comprimento do desfoque") },
+                onValue = { store.changeLayerMotionBlurLength(it.coerceIn(0f, 400f) / 100f) },
+                onGestureEnd = { store.endGesture() },
+                onTapValue = {
+                    env.openKeypad(KeypadRequest(lengthLabel, length, "%", 0f, 400f, 0) { store.changeLayerMotionBlurLength(it / 100f) })
+                },
+            )
+            Text(
+                stringResource(R.string.la_motion_blur_length_hint),
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
             )
@@ -653,6 +687,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                 ) {
                     Text(stringResource(R.string.panel_centro), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = Color.White)))
                 }
+                Spacer(Modifier.width(10.dp))
+                // Âncora predefinida (app antigo): 9 pontos da mídia; a camada fica no lugar.
+                AnchorPresetGrid { fx, fy -> store.primary?.let { com.aurea.aurea.editor.LayerOps.presetAnchor(store, it, fx, fy) } }
             } else if (depth) {
                 // z: o toque ESCOLHE a profundidade para o arrasto; segurar digita.
                 ValueBox(
@@ -687,6 +724,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
         else -> stringResource(R.string.panel_deslize_mover_camada)
     }
     val zNow by rememberUpdatedState(zMode)
+    // Preciso (app antigo): o dedo anda 4× mais para o mesmo deslocamento.
+    var fine by rememberSaveable { mutableStateOf(false) }
+    val fineNow by rememberUpdatedState(fine)
     Box(
         Modifier
             .weight(1f)
@@ -713,7 +753,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                         }
                         acc = Offset.Zero
                         // O GANHO da A.01: 360 dp de dedo atravessam a largura da composição.
-                        gain = max(1, store.project.width) / 360f
+                        gain = max(1, store.project.width) / 360f * (if (fineNow) 0.25f else 1f)
                         dragging = true
                         store.beginGesture(if (pivot) "mover pivô" else "mover")
                     },
@@ -757,6 +797,51 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
             // A instrução some enquanto o dedo arrasta (pela cor: nada é remedido).
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (dragging) Color.Transparent else AureaColors.Muted)),
         )
+        if (!pivot) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 14.dp, bottom = 10.dp)
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (fine) AureaColors.Accent.copy(alpha = 0.18f) else AureaColors.RailModeFill)
+                    .tocavel { fine = !fine }
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(R.string.panel_mover_preciso),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = if (fine) AureaColors.Accent else AureaColors.Text)),
+                )
+            }
+        }
+    }
+}
+
+/** 3 × 3 pontos da caixa da mídia (âncora predefinida); o toque escolhe a célula. */
+@Composable
+private fun AnchorPresetGrid(onPick: (Float, Float) -> Unit) {
+    val label = stringResource(R.string.panel_ancora_predefinida)
+    Box(
+        Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(AureaColors.ControlButton)
+            .semantics { contentDescription = label }
+            .pointerInput(Unit) {
+                detectTapGestures { p ->
+                    val cx = (p.x / size.width * 3f).toInt().coerceIn(0, 2)
+                    val cy = (p.y / size.height * 3f).toInt().coerceIn(0, 2)
+                    onPick(cx * 0.5f, cy * 0.5f)
+                }
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val r = 1.6.dp.toPx()
+            for (i in 0..2) for (j in 0..2) {
+                drawCircle(Color.White, if (i == 1 && j == 1) r * 1.4f else r, Offset(size.width * (i + 0.5f) / 3f, size.height * (j + 0.5f) / 3f))
+            }
+        }
     }
 }
 
@@ -996,7 +1081,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
             })
         }
     }
-    if (kind == LayerType.Video.kind || kind == LayerType.Image.kind) {
+    val sized by remember(store) { derivedStateOf { store.detail?.let { com.aurea.aurea.editor.LayerGeometry.hasSize(it) } == true } }
+    if (sized && kind != LayerType.Audio.kind) {
         MediaFitChips(env)
         Spacer(Modifier.height(6.dp))
     }
@@ -1059,19 +1145,22 @@ private fun MediaFitChips(env: PanelEnv) {
             val d = store.detail
             val cw = store.project.width.toFloat()
             val ch = store.project.height.toFloat()
-            if (d == null || d.sourceWidth <= 0 || d.sourceHeight <= 0 || cw <= 0f || ch <= 0f) {
+            val w = d?.let { com.aurea.aurea.editor.LayerGeometry.width(it) } ?: 0f
+            val h = d?.let { com.aurea.aurea.editor.LayerGeometry.height(it) } ?: 0f
+            if (d == null || w <= 0f || h <= 0f || cw <= 0f || ch <= 0f) {
                 null
             } else {
-                val cover = max(cw / d.sourceWidth, ch / d.sourceHeight)
-                val contain = min(cw / d.sourceWidth, ch / d.sourceHeight)
+                val cover = max(cw / w, ch / h)
+                val contain = min(cw / w, ch / h)
                 val s = d.scale
-                Triple(cover, contain, if (abs(s[0] - cover) < 1e-3f && abs(s[1] - cover) < 1e-3f) 0 else if (abs(s[0] - contain) < 1e-3f && abs(s[1] - contain) < 1e-3f) 1 else -1)
+                Triple(cover, contain, if (abs(abs(s[0]) - cover) < 1e-3f && abs(abs(s[1]) - cover) < 1e-3f) 0 else if (abs(abs(s[0]) - contain) < 1e-3f && abs(abs(s[1]) - contain) < 1e-3f) 1 else -1)
             }
         }
     }
     val f = fit ?: return
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-        listOf(stringResource(R.string.panel_preencher) to f.first, stringResource(R.string.panel_ajustar) to f.second).forEachIndexed { i, (label, scale) ->
+        // Preencher / Ajustar à tela e, do app antigo, "Tamanho da composição" (a composição vira o quadro da camada).
+        listOf(stringResource(R.string.panel_preencher), stringResource(R.string.panel_ajustar), stringResource(R.string.panel_tamanho_composicao)).forEachIndexed { i, label ->
             val on = f.third == i
             Box(
                 Modifier
@@ -1080,10 +1169,9 @@ private fun MediaFitChips(env: PanelEnv) {
                     .clip(RoundedCornerShape(15.dp))
                     .background(if (on) AureaColors.Accent.copy(alpha = 0.18f) else AureaColors.RailModeFill)
                     .tocavel {
-                        store.beginGesture(label.lowercase())
-                        store.setTransform2(TrackProperty.SCALE_X, scale, TrackProperty.SCALE_Y, scale)
-                        store.setTransform2(TrackProperty.POSITION_X, store.project.width / 2f, TrackProperty.POSITION_Y, store.project.height / 2f)
-                        store.endGesture()
+                        val id = store.primary ?: return@tocavel
+                        if (i == 2) com.aurea.aurea.editor.LayerOps.makeCompositionSize(store, id)
+                        else com.aurea.aurea.editor.LayerOps.fitToCanvas(store, listOf(id), fill = i == 0)
                     }
                     .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center,

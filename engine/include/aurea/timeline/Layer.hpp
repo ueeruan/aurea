@@ -147,6 +147,40 @@ struct TextAnimator {
     Vec4 stroke{0.0f, 0.0f, 0.0f, 1.0f};
 };
 
+/// Animador de CAMADA (qualquer tipo): entrada "a partir de" — a camada (ou
+/// cada letra/palavra/linha do texto) sai do estado `from*` e chega no próprio
+/// transform conforme o PROGRESSO (0..100 %, keyframes na trilha
+/// LayerAnimParam/kProgress). Cada unidade anda atrasada `delayMs` da anterior;
+/// `strength` escala o quanto do "from" vale. Saída = o progresso vai de 100 a
+/// 0 no FIM da camada e a ordem das unidades se inverte. Wiggle = ruído
+/// suave por unidade, somado por cima. Avaliação: timeline/LayerAnimator.hpp.
+struct LayerAnimator {
+    std::string name;
+    bool enabled = true;
+    u8   unit = 0;              ///< 0 camada inteira, 1 letra, 2 palavra, 3 linha (só texto)
+    bool exit = false;          ///< animação de saída (keyframes no fim, 100 → 0; ordem invertida)
+    u8   ease = 1;              ///< 0 linear, 1 suave (sai rápido), 2 entra e sai, 3 passa do ponto
+    bool scaleSeparated = false;///< escala Y própria (senão Y = X)
+    u32  wiggleSeed = 0;
+    f32  progress = 100.0f;     ///< % (valor parado, sem keyframe)
+    f32  strength = 100.0f;     ///< %
+    f32  delayMs = 80.0f;       ///< entre unidades
+    f32  fromOpacity = 0.0f;    ///< %
+    f32  fromPosX = 0.0f, fromPosY = 0.0f;       ///< px
+    f32  fromScale = 100.0f, fromScaleY = 100.0f;///< %
+    f32  fromRotation = 0.0f, fromRotX = 0.0f, fromRotY = 0.0f;   ///< graus
+    f32  fromTracking = 0.0f;   ///< px entre letras (texto)
+    f32  wigglePosX = 0.0f, wigglePosY = 0.0f;   ///< px
+    f32  wiggleScale = 0.0f;    ///< %
+    f32  wiggleRotation = 0.0f; ///< graus
+    f32  wiggleSpeed = 2.0f;    ///< variações por segundo
+    f32  wiggleHold = 0.0f;     ///< % de cada variação parado
+
+    [[nodiscard]] bool has_wiggle() const noexcept {
+        return wigglePosX != 0.0f || wigglePosY != 0.0f || wiggleScale != 0.0f || wiggleRotation != 0.0f;
+    }
+};
+
 /// Trecho com estilo próprio (rich text): caracteres [start, end) do texto.
 struct TextSpan {
     u32  start = 0, end = 0;
@@ -213,7 +247,9 @@ struct TextData {
 struct ShapeData {
     /// 0 retângulo (cantos arredondados), 1 elipse, 2 caminho, 3 polígono
     /// regular, 4 estrela, 5 cruz, 6 anel, 7 fatia, 8 flor, 9 seta,
-    /// 10 triângulo retângulo (shaders/shape/shape.frag), 11 vetorial
+    /// 10 triângulo retângulo, 12 trapézio, 13 paralelogramo, 14 engrenagem
+    /// (pontas = dentes, innerRadius = cubo), 15 seta dupla
+    /// (shaders/shape/shape.frag), 11 vetorial
     /// (kShapeVector: grupos em `vector`, vector/Vector.hpp).
     u32  shapeType = 0;
     Rect bounds{0.0f, 0.0f, 200.0f, 200.0f};
@@ -327,6 +363,11 @@ enum class ParticleEmitter : u32 {
     WorldJet,       ///< spherical producer, directional 3D cone
     WorldVortex,    ///< spherical producer, rotating 3D flow
     WorldBox,       ///< box producer with scattered light trails
+    /// Camada de partículas do Particular (o sistema do app antigo, efeito
+    /// `aurea.generate.particular`): a camada não desenha nada por si — a
+    /// imagem dela é transparente e o efeito desenha as partículas. Ver
+    /// effects/Particular.hpp.
+    Particular,
     Count,
 };
 
@@ -495,6 +536,10 @@ struct ParticleData {
 struct CompositionRef {
     CompositionId composition{};
     bool          collapsed = false;   ///< exibição colapsada na timeline
+    /// A câmera da composição de fora alcança as camadas 3D de dentro do grupo
+    /// (o grupo não vira um "quadro" chapado: a cena atravessa). Só vale com o
+    /// grupo do mesmo tamanho da composição e uma câmera ativa lá fora.
+    bool          cameraPassThrough = false;
 };
 
 /// Etiquetas de cor: 0 = nenhuma + as 12 cores da paleta da UI (4 bits nas
@@ -587,6 +632,9 @@ struct Layer {
     /// para a composição de TUDO o que está abaixo (no trecho de tempo dela),
     /// no quadro inteiro, misturados pela opacidade da camada.
     bool     adjustment = false;
+    /// Camadas afetadas pelo ajuste: 0 = todas abaixo, 1 = só a camada logo
+    /// abaixo (um grupo conta como UMA camada: o ajuste vale só para ele).
+    u8       adjustmentScope = 0;
     /// Guia: aparece no preview do editor e nunca sai no export.
     bool     guide = false;
     /// Etiqueta de cor da camada (0 = nenhuma; 1..kLayerLabelCount-1 = paleta
@@ -613,6 +661,8 @@ struct Layer {
 
     std::vector<EffectInstance> effects;
     std::vector<Mask>   masks;
+    /// Animadores de camada (entrada/saída/wiggle), em qualquer tipo de camada.
+    std::vector<LayerAnimator> layerAnimators;
 
     // --- Específico de tipo --------------------------------------------------
     TextData      text;
@@ -710,7 +760,7 @@ struct Layer {
         const f64 span = static_cast<f64>(b.time.value - a.time.value);
         if (a.interp == Interpolation::Hold || span <= 0.0) return clampv(a.value);
         const f32 u = static_cast<f32>(std::clamp((local - static_cast<f64>(a.time.value)) / span, 0.0, 1.0));
-        return clampv(lerpf(a.value, b.value, apply_easing(a.interp, u, a.bx1, a.by1, a.bx2, a.by2)));
+        return clampv(lerpf(a.value, b.value, keyframe_ease(a, u)));
     }
     [[nodiscard]] static f64 speed_value(const Track& t, f64 local) noexcept {
         const usize n = t.keys.size();

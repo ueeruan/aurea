@@ -1,6 +1,8 @@
 package com.aurea.aurea.editor.panels
 
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 /** Same safeguarded inverse as the shared core: flat time tangents need
  * parameter convergence, not an absolute x-error early exit. */
@@ -66,4 +68,75 @@ internal fun nearestHandle(x: Float, y: Float, shown: FloatArray, radius: Float)
     val d2 = (x - shown[2]) * (x - shown[2]) + (y - shown[3]) * (y - shown[3])
     if (kotlin.math.min(d1, d2) > radius * radius) return -1
     return if (d1 <= d2) 0 else 1
+}
+
+// --- Editor da curva do trecho (como no app antigo) ---------------------------
+// A alça vai para ONDE O DEDO ESTÁ (a mais perto do toque, em qualquer ponto do
+// gráfico), encaixa em 0 e 1 perto das bordas, pode passar de 0..1 na vertical
+// (−2..3, antecipação e overshoot) e a faixa vertical se ajusta à curva.
+
+/** Faixa vertical das alças: além de 0..1 dá antecipação e overshoot. */
+internal const val EASE_Y_MIN = -2f
+internal const val EASE_Y_MAX = 3f
+
+/** A alça que o toque pega: a mais perto das duas (0 saída, 1 chegada), sempre uma. */
+internal fun grabHandle(x: Float, y: Float, shown: FloatArray): Int {
+    val d1 = (x - shown[0]) * (x - shown[0]) + (y - shown[1]) * (y - shown[1])
+    val d2 = (x - shown[2]) * (x - shown[2]) + (y - shown[3]) * (y - shown[3])
+    return if (d1 <= d2) 0 else 1
+}
+
+/**
+ * Faixa vertical do gráfico: a curva inteira (com a força) e as alças, sempre
+ * contendo 0..1, com 8 % de folga em cima e embaixo.
+ */
+internal fun easeRange(ease: Ease): Pair<Float, Float> {
+    var lo = 0f
+    var hi = 1f
+    for (i in 0..40) {
+        val v = ease.transform(i / 40f)
+        if (v.isFinite()) { lo = min(lo, v); hi = max(hi, v) }
+    }
+    if (ease.hasHandles) {
+        val h = ease.handles()
+        lo = min(lo, min(h[1], h[3])); hi = max(hi, max(h[1], h[3]))
+    }
+    val pad = (hi - lo) * 0.08f
+    return (lo - pad) to (hi + pad)
+}
+
+/** Encosta em 0 ou 1 quando está a menos de [tolerance] (na mesma unidade). */
+internal fun snapUnit(v: Float, tolerance: Float): Float = when {
+    abs(v) < tolerance -> 0f
+    abs(v - 1f) < tolerance -> 1f
+    else -> v
+}
+
+/**
+ * A posição da alça (x 0..1, y −2..3) para o dedo em ([px], [py]) px do gráfico
+ * de [width]×[height] com margem lateral [inset], faixa vertical [lo]..[hi] e
+ * encaixe de [snapPx] px nas linhas 0 e 1.
+ */
+internal fun handleAt(px: Float, py: Float, inset: Float, width: Float, height: Float, lo: Float, hi: Float, snapPx: Float): FloatArray {
+    val w = max(1f, width - 2 * inset)
+    val h = max(1f, height)
+    val span = if (hi - lo > 1e-3f) hi - lo else 1e-3f
+    val x = snapUnit(((px - inset) / w).coerceIn(0f, 1f), snapPx / w)
+    val y = snapUnit((lo + (h - py) / h * span).coerceIn(EASE_Y_MIN, EASE_Y_MAX), snapPx / h * span)
+    return floatArrayOf(x, y)
+}
+
+/** O texto do trecho: `cubic-bezier(x1, y1, x2, y2)` e a força (×2, ×3) quando há. */
+internal fun cubicBezierLabel(e: Ease): String {
+    val h = e.handles()
+    fun f(v: Float) = String.format(java.util.Locale.ROOT, "%.2f", v)
+    val label = "cubic-bezier(${f(h[0])}, ${f(h[1])}, ${f(h[2])}, ${f(h[3])})"
+    return if (e.isBezier && e.power > 1) "$label ×${e.power}" else label
+}
+
+/** Próxima força ao tocar no texto (×1 → ×2 → ×3 → ×1); vira bézier com as alças que se vê. */
+internal fun nextPower(e: Ease): Ease {
+    val h = e.handles()
+    val next = if (e.isBezier) e.power % 3 + 1 else 2
+    return Ease(Interp.BEZIER, h[0], h[1], h[2], h[3], next)
 }

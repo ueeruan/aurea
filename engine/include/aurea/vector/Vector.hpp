@@ -106,8 +106,16 @@ void trim(std::vector<Contour>& contours, f32 start, f32 end, f32 offset, bool s
 /// Tracejado (padrão em px, deslocamento em px).
 void dash(std::vector<Contour>& contours, const std::vector<f32>& pattern, f32 offset);
 /// Contorno → anéis limpos (peças unidas em não-zero).
+/// Afinar: frações (0..1) do comprimento de cada contorno em que a largura
+/// cresce a partir de zero (começo) e morre em zero (fim); `ease` 0..1.
+struct StrokeTaper {
+    f32 start = 0.0f, end = 0.0f, ease = 0.0f;
+    [[nodiscard]] bool active() const noexcept { return start > 1e-4f || end > 1e-4f; }
+};
+/// Fator da largura (0..1) na fração `u` (0..1) do comprimento.
+[[nodiscard]] f32 taper_factor(const StrokeTaper& t, f32 u) noexcept;
 void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8 join, f32 miterLimit,
-                     f32 tolerance, std::vector<Contour>& out);
+                     f32 tolerance, std::vector<Contour>& out, const StrokeTaper& taper = {});
 
 // --- Avaliação e malha ---------------------------------------------------------
 

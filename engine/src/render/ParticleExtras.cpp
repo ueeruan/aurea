@@ -246,6 +246,40 @@ f32 sd_triangle(Vec2 q, Vec2 p0, Vec2 p1, Vec2 p2) {
     dx = std::min(dx, dot(pq2, pq2)); dy = std::min(dy, s * (v2.x * e2.y - v2.y * e2.x));
     return -std::sqrt(dx) * (dy > 0.0f ? 1.0f : (dy < 0.0f ? -1.0f : 0.0f));
 }
+f32 sd_trapezoid(Vec2 q, f32 top, f32 bottom, f32 he) {
+    auto dot = [](Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; };
+    const Vec2 k1{bottom, he}, k2{bottom - top, 2.0f * he};
+    q.x = std::fabs(q.x);
+    const Vec2 ca{q.x - std::min(q.x, q.y < 0.0f ? top : bottom), std::fabs(q.y) - he};
+    const Vec2 cb = q - k1 + k2 * std::clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0f, 1.0f);
+    const f32 s = (cb.x < 0.0f && ca.y < 0.0f) ? -1.0f : 1.0f;
+    return s * std::sqrt(std::min(dot(ca, ca), dot(cb, cb)));
+}
+f32 sd_parallelogram(Vec2 q, f32 wi, f32 he, f32 sk) {
+    auto dot = [](Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; };
+    const Vec2 e{sk, he};
+    if (q.y < 0.0f) q = Vec2{-q.x, -q.y};
+    Vec2 w = q - e;
+    w.x -= std::clamp(w.x, -wi, wi);
+    f32 dx = dot(w, w), dy = -w.y;
+    const f32 s = q.x * e.y - q.y * e.x;
+    if (s < 0.0f) q = Vec2{-q.x, -q.y};
+    Vec2 v = q - Vec2{wi, 0.0f};
+    v = v - e * std::clamp(dot(v, e) / dot(e, e), -1.0f, 1.0f);
+    dx = std::min(dx, dot(v, v));
+    dy = std::min(dy, wi * he - std::fabs(s));
+    return std::sqrt(dx) * (dy > 0.0f ? -1.0f : (dy < 0.0f ? 1.0f : 0.0f));
+}
+f32 sd_gear(Vec2 q, f32 r, f32 n, f32 hub) {
+    const f32 root = r * 0.78f;
+    const f32 sector = 2.0f * kPi / n;
+    const f32 a = glsl_mod(std::atan2(q.x, -q.y) + sector * 0.5f, sector) - sector * 0.5f;
+    const f32 L = q.length();
+    const Vec2 f{L * std::sin(a), L * std::cos(a)};
+    const f32 tw = root * std::sin(sector * 0.25f);
+    const f32 tooth = sd_round_box(f - Vec2{0.0f, (root + r) * 0.5f}, Vec2{tw, (r - root) * 0.5f + 1e-3f}, 0.0f);
+    return std::max(std::min(L - root, tooth), hub * root - L);
+}
 f32 shape_sd(const ShapeData& sh, Vec2 q, Vec2 half) {
     const u32 type = sh.shapeType;
     const f32 m = std::min(half.x, half.y);
@@ -278,6 +312,19 @@ f32 shape_sd(const ShapeData& sh, Vec2 q, Vec2 half) {
             return std::min(shaft, head);
         }
         case 10: return sd_triangle(q, Vec2{-half.x, -half.y}, Vec2{-half.x, half.y}, Vec2{half.x, half.y});
+        case 12: return sd_trapezoid(q, half.x * inner, half.x, half.y);
+        case 13: {
+            const f32 sk = half.x * inner * 0.5f;
+            return sd_parallelogram(Vec2{q.x, -q.y}, half.x - sk, half.y, sk);
+        }
+        case 14: return sd_gear(Vec2{q.x / st.x, q.y / st.y}, m, std::max(3.0f, sh.points), inner) * mst;
+        case 15: {
+            const f32 t = half.y * inner;
+            const f32 shaft = sd_round_box(q, Vec2{half.x * 0.6f, t}, 0.0f);
+            const f32 right = sd_triangle(q, Vec2{half.x * 0.45f, -half.y}, Vec2{half.x, 0.0f}, Vec2{half.x * 0.45f, half.y});
+            const f32 left = sd_triangle(q, Vec2{-half.x * 0.45f, half.y}, Vec2{-half.x, 0.0f}, Vec2{-half.x * 0.45f, -half.y});
+            return std::min(shaft, std::min(left, right));
+        }
         default: return sd_round_box(q, half, 0.0f);
     }
 }

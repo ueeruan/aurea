@@ -298,6 +298,12 @@ private fun StrokeTab(env: PanelEnv, g: VGroup, s: Sel) {
     PaintEditor(env, g.stroke, stringResource(R.string.edt_vec_stroke_color)) { (cont, change) -> store.editVectorGroup(cont) { gr -> change(gr.stroke) } }
     ParamRow(env, s, stringResource(R.string.panel_largura), VParam.STROKE_WIDTH, 0.2f, 0f, 2000f, "px", 1, 6f)
     ParamRow(env, s, stringResource(R.string.panel_opacidade), VParam.STROKE_OPACITY, 0.5f, 0f, 100f, "%", 0, 100f)
+    // Afinar (app antigo): a largura nasce e morre em ponta ao longo do caminho.
+    GroupRow(env, stringResource(R.string.panel_afinar_inicio), { it.taperStart }, { gr, x -> gr.taperStart = x }, 0.3f, 0f, 100f, "%", 0, 0f)
+    GroupRow(env, stringResource(R.string.panel_afinar_fim), { it.taperEnd }, { gr, x -> gr.taperEnd = x }, 0.3f, 0f, 100f, "%", 0, 0f)
+    if (g.taperStart > 0f || g.taperEnd > 0f) {
+        GroupRow(env, stringResource(R.string.panel_afinar_suavidade), { it.taperEase }, { gr, x -> gr.taperEase = x }, 0.3f, 0f, 100f, "%", 0, 0f)
+    }
     AdvancedSection(adv, { adv = !adv }) {
         KitTitle(stringResource(R.string.panel_pontas))
         ChoiceChips(listOf(stringResource(R.string.panel_retas), stringResource(R.string.panel_redondas), stringResource(R.string.panel_quadradas)), g.cap, onSelect = { c -> store.editVectorGroup { it.cap = c } })

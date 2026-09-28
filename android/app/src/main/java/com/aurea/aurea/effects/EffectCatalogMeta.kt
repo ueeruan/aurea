@@ -169,6 +169,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.motion.oscillate", EffectMeta(R.string.fx_desc_motion_oscillate, AllTargets))
     put("aurea.motion.swing", EffectMeta(R.string.fx_desc_motion_swing, AllTargets))
     put("aurea.motion.wiggle", EffectMeta(R.string.fx_desc_motion_wiggle, AllTargets))
+    put("aurea.motion.twitch", EffectMeta(R.string.fx_desc_motion_twitch, AllTargets))
     put("aurea.transition.iris_wipe", EffectMeta(R.string.fx_desc_transition_iris_wipe, AllTargets))
     put("aurea.transition.box_wipe", EffectMeta(R.string.fx_desc_transition_box_wipe, AllTargets))
     put("aurea.transition.venetian_blinds", EffectMeta(R.string.fx_desc_transition_venetian_blinds, AllTargets))
@@ -236,6 +237,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.stylize.ball_grid", EffectMeta(R.string.afx_desc_balls,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao),
         "bolas esferas balls spheres grade particulas explodir dispersar"))
+    put("aurea.generate.particular", EffectMeta(R.string.afx_desc_particular, AllTargets,
+        "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh"))
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", EffectMeta(R.string.fx_desc_ai_depth_map, listOf(EffectTarget.Imagem, EffectTarget.Video),
         "profundidade depth mapa ia ai midas distancia perto longe z matte fundo"))

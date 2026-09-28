@@ -20,7 +20,7 @@ bool near(f32 a, f32 b) noexcept { return std::fabs(a - b) < 1e-5f; }
 // -----------------------------------------------------------------------------
 class Exposure final : public Effect {
 public:
-    enum : u32 { kExposure = 0, kOffset, kGamma };
+    enum : u32 { kExposure = 0, kOffset, kGamma, kSpace };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kExposure, "Exposição", "Cor", EffectClass::PerPixel};
@@ -36,6 +36,11 @@ public:
         // O mínimo 0.1 fica: gama menor eleva luz HDR a potências que estouram.
         p.add_float("gamma", "Correção de gama", 1.0f, 0.1f, 10.0f);
         p.typed_range(0.1f, 100.0f);
+        // Onde a conta roda. "Valor codificado" é o Gamma e exposição do app
+        // antigo: sobre o valor que se vê (0..1), com o resultado preso em 0..1.
+        // No fim da lista: projetos antigos abrem com o padrão, luz linear.
+        static const char* const kSpaces[] = {"Luz linear", "Valor codificado"};
+        p.add_enum("space", "Aplicar em", kSpaces, 2, 0);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kExposure] = ParamValue::scalar(1.0f);      // um ponto de luz já se vê
@@ -49,6 +54,7 @@ public:
         op.p[1] = e.f(kExposure);
         op.p[2] = e.f(kOffset);
         op.p[3] = e.f(kGamma) > 0.01f ? e.f(kGamma) : 0.01f;
+        op.p[4] = e.e(kSpace) == 1u ? 1.0f : 0.0f;
         return true;
     }
 };

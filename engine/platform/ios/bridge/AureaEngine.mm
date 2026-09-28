@@ -1240,6 +1240,16 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     (void)e->paste_keyframes(ids.data(), static_cast<aurea::u32>(ids.size()), frame);
 }
 
+- (uint32_t)copyAnimation:(long long)layerId {
+    auto* e = self.engine;
+    return e ? e->copy_animation(static_cast<aurea::u64>(layerId)) : 0;
+}
+
+- (uint32_t)optimizeKeyframes:(long long)layerId property:(int32_t)property tolerance:(float)tolerance {
+    auto* e = self.engine;
+    return e ? e->optimize_keyframes(static_cast<aurea::u64>(layerId), property, tolerance) : 0;
+}
+
 - (void)copyLayers:(NSArray<NSNumber*>*)layerIds {
     auto* e = self.engine;
     if (!e) return;
@@ -2418,6 +2428,75 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     auto* e = self.engine; if (!e) return @"";
     const auto p = e->layer_media_path(layerId); return [NSString stringWithUTF8String:p.c_str()] ?: @"";
 }
+- (long long)replaceLayer:(long long)layerId withVideo:(NSString*)path name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    aurea::VideoImport request;
+    request.sourcePath = to_std(path);
+    request.displayName = to_std(name);
+    const aurea::Result<aurea::u64> r = e->replace_layer_video(static_cast<aurea::u64>(layerId), request);
+    if (!r.ok()) {
+        _lastImportError = to_ns(std::string(r.status().message()));
+        return -static_cast<long long>(r.status().code());
+    }
+    _lastImportError = @"";
+    return static_cast<long long>(*r);
+}
+- (long long)replaceLayer:(long long)layerId withImageFile:(NSString*)path name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    aurea::ImagePixels pixels;
+    const std::string source = to_std(path);
+    if (!aurea::ios::ios_load_image(source.c_str(), pixels, nullptr)) {
+        _lastImportError = @"imagem ilegivel";
+        return -static_cast<long long>(aurea::Errc::UnsupportedFormat);
+    }
+    const std::string display = to_std(name);
+    const aurea::Result<aurea::u64> r = e->replace_layer_image(static_cast<aurea::u64>(layerId), pixels.rgba.data(),
+                                                               pixels.width, pixels.height,
+                                                               display.empty() ? source.c_str() : display.c_str(), source.c_str());
+    if (!r.ok()) {
+        _lastImportError = to_ns(std::string(r.status().message()));
+        return -static_cast<long long>(r.status().code());
+    }
+    _lastImportError = @"";
+    return static_cast<long long>(*r);
+}
+- (NSString*)layerSourcePath:(long long)layerId {
+    auto* e = self.engine; if (!e) return @"";
+    const auto p = e->layer_source_path(static_cast<aurea::u64>(layerId));
+    return [NSString stringWithUTF8String:p.c_str()] ?: @"";
+}
+- (NSArray<NSString*>*)projectFileMedia:(NSString*)path {
+    auto* e = self.engine; if (!e) return nil;
+    std::vector<aurea::package::MediaRef> refs;
+    if (!e->project_file_media(to_std(path).c_str(), refs).ok()) return nil;
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithCapacity:refs.size() * 4];
+    for (const auto& m : refs) {
+        [out addObject:to_ns(m.stored)];
+        [out addObject:to_ns(m.resolved)];
+        [out addObject:to_ns(m.name)];
+        [out addObject:[NSString stringWithFormat:@"%d", static_cast<int>(m.kind)]];
+    }
+    return out;
+}
++ (NSArray<NSNumber*>*)exportProjectPackage:(NSString*)projectPath to:(NSString*)outPath title:(NSString*)title
+                                  appVersion:(NSString*)appVersion media:(NSArray<NSString*>*)media {
+    std::vector<aurea::package::MediaFile> files;
+    for (NSUInteger i = 0; i + 2 < media.count; i += 3) {
+        files.push_back({to_std(media[i]), to_std(media[i + 1]), to_std(media[i + 2])});
+    }
+    aurea::package::ExportResult r;
+    const aurea::Status s = aurea::package::write_package(to_std(projectPath), to_std(outPath), to_std(title),
+                                                          to_std(appVersion), files, &r);
+    return @[@(static_cast<int>(s.code())), @(r.included), @(r.skipped)];
+}
++ (NSArray<NSString*>*)importProjectPackage:(NSString*)packagePath project:(NSString*)projectOut mediaDir:(NSString*)mediaDir {
+    aurea::package::ImportResult r;
+    const aurea::Status s = aurea::package::read_package(to_std(packagePath), to_std(projectOut), to_std(mediaDir), r);
+    return @[[NSString stringWithFormat:@"%d", static_cast<int>(s.code())], to_ns(r.title), to_ns(r.appVersion),
+             [NSString stringWithFormat:@"%u", r.relinked], [NSString stringWithFormat:@"%u", r.missing]];
+}
 - (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt {
     NSMutableArray* out = [NSMutableArray array];
     for (const auto& word : aurea::text::parse_srt(to_std(srt))) {
@@ -2475,9 +2554,11 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return floats_to_array(v, n);
 }
 - (NSArray<NSNumber*>*)trackEasing:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time {
-    auto* e = self.engine; float v[4]{};
-    if (!e || !e->query_keyframe_easing(layerId, property, effect, param, time, v)) return @[];
-    return floats_to_array(v, 4);
+    // [x1, y1, x2, y2, força 1..3]
+    auto* e = self.engine; float v[5]{}; aurea::u8 power = 1;
+    if (!e || !e->query_keyframe_easing(layerId, property, effect, param, time, v, &power)) return @[];
+    v[4] = static_cast<float>(power);
+    return floats_to_array(v, 5);
 }
 - (void)editTrackKey:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time action:(uint32_t)action value:(float)value targetTime:(int32_t)targetTime interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles {
     if (property >= static_cast<u32>(aurea::TrackProperty::_Count) || action > 4) return;
@@ -2492,7 +2573,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         else {
             c->keyframe_interp.track = track; c->keyframe_interp.time = aurea::FrameIndex{time};
             c->keyframe_interp.interp = static_cast<aurea::Interpolation>(interpolation);
-            if (handles.count == 4) { c->keyframe_interp.bx1 = handles[0].floatValue; c->keyframe_interp.by1 = handles[1].floatValue; c->keyframe_interp.bx2 = handles[2].floatValue; c->keyframe_interp.by2 = handles[3].floatValue; }
+            if (handles.count >= 4) { c->keyframe_interp.bx1 = handles[0].floatValue; c->keyframe_interp.by1 = handles[1].floatValue; c->keyframe_interp.bx2 = handles[2].floatValue; c->keyframe_interp.by2 = handles[3].floatValue; }
+            // Quinto número = força da bézier (1..3); sem ele a força do keyframe fica.
+            if (handles.count >= 5) c->keyframe_interp.power = static_cast<aurea::u8>(std::clamp(handles[4].intValue, 0, 3));
         }
     }
     [self flush];
@@ -2563,7 +2646,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         for (const auto& p : g.paths) [paths addObject:@[@(static_cast<u32>(p.kind)), @(p.reversed), @(p.center.x), @(p.center.y), @(p.size.x), @(p.size.y), @(p.roundness), @(p.points), @(p.outerRadius), @(p.innerRadius), @(p.outerRoundness), @(p.innerRoundness), @(p.rotation)]];
         [groups addObject:@{@"id": @(index), @"name": to_ns(g.name), @"visible": @(g.visible), @"merge": @(g.merge), @"params": floats_to_array(params, aurea::Engine::kVectorParamFloats), @"pathKeyCounts": pathKeyCounts,
             @"fillEnabled": @(g.fill.enabled), @"fillRule": @(g.fill.rule), @"fill": paint(g.fill.paint),
-            @"strokeEnabled": @(g.stroke.enabled), @"stroke": paint(g.stroke.paint), @"cap": @(g.stroke.cap), @"join": @(g.stroke.join), @"miter": @(g.stroke.miterLimit), @"dashes": floats_to_array(g.stroke.dashes.data(), static_cast<u32>(g.stroke.dashes.size())),
+            @"strokeEnabled": @(g.stroke.enabled), @"stroke": paint(g.stroke.paint), @"cap": @(g.stroke.cap), @"join": @(g.stroke.join), @"miter": @(g.stroke.miterLimit), @"taperStart": @(g.stroke.taperStart), @"taperEnd": @(g.stroke.taperEnd), @"taperEase": @(g.stroke.taperEase), @"dashes": floats_to_array(g.stroke.dashes.data(), static_cast<u32>(g.stroke.dashes.size())),
             @"trimEnabled": @(g.trim.enabled), @"trimMode": @(g.trim.mode), @"repeatEnabled": @(g.repeater.enabled), @"repeatAbove": @(g.repeater.above), @"repeatAnchor": @[@(g.repeater.anchor.x), @(g.repeater.anchor.y)], @"anchor": @[@(g.anchor.x), @(g.anchor.y)], @"paths": paths}];
     }
     return groups;
@@ -2606,6 +2689,10 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
             p.center = {v[3],v[4]}; p.size = {v[5],v[6]}; p.roundness = v[7]; p.points = v[8];
             p.outerRadius = v[9]; p.innerRadius = v[10]; p.outerRoundness = v[11]; p.innerRoundness = v[12]; p.rotation = v[13]; break;
         }
+        // Afinar do contorno (%): início, fim, suavidade.
+        case 24: g.stroke.taperStart = std::clamp(v[0], 0.f, 100.f); break;
+        case 25: g.stroke.taperEnd = std::clamp(v[0], 0.f, 100.f); break;
+        case 26: g.stroke.taperEase = std::clamp(v[0], 0.f, 100.f); break;
         default: return NO;
     }
     aurea::vector::encode_document(doc, data, names);
@@ -2716,6 +2803,91 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     float raw[40];
     for (NSUInteger i = 0; i < 40; ++i) raw[i] = values[i].floatValue;
     return e->set_text_animator(layerId, index, raw);
+}
+// --- Animadores de camada, desfoque por camada e escopo de grupo -------------
+- (NSArray<NSNumber*>*)layerAnimators:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    constexpr aurea::u32 k = aurea::Engine::kLayerAnimFloats;
+    std::vector<float> values(k * 32);
+    const auto count = e->query_layer_animators(static_cast<aurea::u64>(layerId), values.data(), static_cast<aurea::u32>(values.size()));
+    return floats_to_array(values.data(), std::min<size_t>(count, 32) * k);
+}
+- (NSInteger)addLayerAnimator:(long long)layerId {
+    if (auto* e = self.engine) return e->add_layer_animator(static_cast<aurea::u64>(layerId));
+    return -1;
+}
+- (void)removeLayerAnimator:(long long)layerId index:(uint32_t)index {
+    if (auto* e = self.engine) (void)e->remove_layer_animator(static_cast<aurea::u64>(layerId), index);
+}
+- (BOOL)setLayerAnimator:(long long)layerId index:(uint32_t)index values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine;
+    constexpr aurea::u32 k = aurea::Engine::kLayerAnimFloats;
+    if (!e || values.count != k) return NO;
+    float raw[k];
+    for (NSUInteger i = 0; i < k; ++i) raw[i] = values[i].floatValue;
+    return e->set_layer_animator(static_cast<aurea::u64>(layerId), index, raw);
+}
+- (void)setLayerAnimParam:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value {
+    if (auto* e = self.engine) (void)e->set_layer_anim_param(static_cast<aurea::u64>(layerId), index, param, value);
+}
+- (void)toggleLayerAnimKey:(long long)layerId index:(uint32_t)index param:(uint32_t)param {
+    if (auto* e = self.engine) (void)e->toggle_layer_anim_key(static_cast<aurea::u64>(layerId), index, param);
+}
+- (uint32_t)copyLayerAnimators:(long long)layerId {
+    if (auto* e = self.engine) return e->copy_layer_animators(static_cast<aurea::u64>(layerId));
+    return 0;
+}
+- (uint32_t)pasteLayerAnimators:(NSArray<NSNumber*>*)layerIds {
+    auto* e = self.engine;
+    if (!e) return 0;
+    std::vector<aurea::u64> ids;
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    return ids.empty() ? 0 : e->paste_layer_animators(ids.data(), static_cast<aurea::u32>(ids.size()));
+}
+- (uint32_t)layerAnimatorClipboard {
+    if (auto* e = self.engine) return e->layer_animator_clipboard();
+    return 0;
+}
+- (void)setLayerMotionBlurLength:(float)factor forLayer:(long long)layerId {
+    if (auto* e = self.engine) (void)e->set_layer_motion_blur_length(static_cast<aurea::u64>(layerId), factor);
+}
+- (float)layerMotionBlurLength:(long long)layerId {
+    if (auto* e = self.engine) return e->query_layer_motion_blur_length(static_cast<aurea::u64>(layerId));
+    return 1.0f;
+}
+- (void)setAdjustmentScope:(uint32_t)scope forLayer:(long long)layerId {
+    if (auto* e = self.engine) (void)e->set_adjustment_scope(static_cast<aurea::u64>(layerId), scope);
+}
+- (uint32_t)adjustmentScope:(long long)layerId {
+    if (auto* e = self.engine) return e->query_adjustment_scope(static_cast<aurea::u64>(layerId));
+    return 0;
+}
+- (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->set_group_camera_pass_through(static_cast<aurea::u64>(layerId), on != NO);
+    return NO;
+}
+- (int32_t)groupCameraPassThrough:(long long)layerId {
+    if (auto* e = self.engine) return e->query_group_camera_pass_through(static_cast<aurea::u64>(layerId));
+    return -1;
+}
+- (NSString*)addLayers:(NSArray<NSNumber*>*)layerIds toGroup:(long long)groupId {
+    auto* e = self.engine;
+    if (!e) return @"motor indisponivel";
+    std::vector<aurea::u64> ids;
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    std::string why;
+    const aurea::Result<aurea::u32> r = e->add_layers_to_group(ids.data(), static_cast<aurea::u32>(ids.size()), static_cast<aurea::u64>(groupId), &why);
+    if (r.ok()) return @"";
+    return to_ns(why.empty() ? std::string("nao deu para agrupar") : why);
+}
+- (NSString*)removeLayerFromGroup:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @"motor indisponivel";
+    std::string why;
+    const aurea::Result<aurea::u64> r = e->remove_layer_from_group(static_cast<aurea::u64>(layerId), &why);
+    if (r.ok()) return @"";
+    return to_ns(why.empty() ? std::string("nao deu para tirar do grupo") : why);
 }
 - (NSArray<NSNumber*>*)textStyle:(long long)layerId {
     auto* e = self.engine;

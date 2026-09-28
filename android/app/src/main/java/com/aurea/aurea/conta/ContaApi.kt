@@ -36,6 +36,9 @@ object ContaApi {
 
     fun usuarios(): Resposta = chamar("GET", "/api/stats/users", null, null)
 
+    /** "Relatar um problema" (discovery/relato.js). Sessão opcional: dá o e-mail da conta ao relato. */
+    fun relatar(corpo: JSONObject, token: String?): Resposta = chamar("POST", "/api/report", corpo, token)
+
     /** O que a revalidação significa para o estado (só 401 derruba). */
     fun revalidacao(r: Resposta): Revalidacao = when {
         r.ok -> Revalidacao.VALIDA

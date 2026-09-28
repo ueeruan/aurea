@@ -440,13 +440,29 @@ void arc_points(Vec2 c, f32 r, f32 a0, f32 a1, f32 tol, std::vector<Vec2>& out) 
 }
 } // namespace
 
+f32 taper_factor(const StrokeTaper& t, f32 u) noexcept {
+    // Rampa de 0 a 1; `ease` puxa a reta para um quarto de círculo (bojuda).
+    auto ramp = [&](f32 x) {
+        x = std::clamp(x, 0.0f, 1.0f);
+        const f32 round = std::sqrt(std::max(0.0f, 1.0f - (1.0f - x) * (1.0f - x)));
+        return x + (round - x) * std::clamp(t.ease, 0.0f, 1.0f);
+    };
+    f32 f = 1.0f;
+    const f32 a = std::clamp(t.start, 0.0f, 1.0f), b = std::clamp(t.end, 0.0f, 1.0f);
+    if (a > 1e-4f && u < a) f = std::min(f, ramp(u / a));
+    if (b > 1e-4f && u > 1.0f - b) f = std::min(f, ramp((1.0f - u) / b));
+    return f;
+}
+
 void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8 join, f32 miterLimit, f32 tolerance,
-                     std::vector<Contour>& out) {
+                     std::vector<Contour>& out, const StrokeTaper& taper) {
     out.clear();
-    const f32 hw = width * 0.5f;
-    if (hw <= 0.0f) return;
+    const f32 hw0 = width * 0.5f;
+    if (hw0 <= 0.0f) return;
     const f32 tol = std::max(0.01f, tolerance);
+    const bool tapered = taper.active();
     std::vector<Contour> pieces;
+    std::vector<f32> H;   // meia largura em cada vértice (constante sem afinar)
     for (const Contour& src : contours) {
         std::vector<Vec2> P;
         P.reserve(src.pts.size());
@@ -454,8 +470,32 @@ void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8
         bool closed = src.closed;
         if (closed && P.size() > 2 && (P.back() - P.front()).length_sq() <= 1e-8f) P.pop_back();
         if (closed && P.size() < 3) closed = false;
+        if (tapered && P.size() >= 2) {
+            // Afinado: o fechado vira aberto (começo e fim são pontas) e os
+            // segmentos se dividem para a largura variar liso ao longo deles.
+            if (closed) { P.push_back(P.front()); closed = false; }
+            f64 L = 0.0;
+            for (usize i = 1; i < P.size(); ++i) L += (P[i] - P[i - 1]).length();
+            const f64 maxSeg = std::max(0.5, L / 96.0);
+            std::vector<Vec2> R{P[0]};
+            for (usize i = 1; i < P.size(); ++i) {
+                const Vec2 a = P[i - 1], b = P[i];
+                const int k = std::clamp(static_cast<int>(std::ceil((b - a).length() / maxSeg)), 1, 512);
+                for (int j = 1; j <= k; ++j) R.push_back(a + (b - a) * (static_cast<f32>(j) / static_cast<f32>(k)));
+            }
+            P.swap(R);
+            H.assign(P.size(), 0.0f);
+            f64 s = 0.0;
+            for (usize i = 0; i < P.size(); ++i) {
+                if (i) s += (P[i] - P[i - 1]).length();
+                H[i] = hw0 * taper_factor(taper, L > 0.0 ? static_cast<f32>(s / L) : 0.0f);
+            }
+        } else {
+            H.assign(P.size(), hw0);
+        }
         if (P.size() == 1) {
             // Ponto isolado: só a ponta (redonda = círculo, quadrada = quadrado).
+            const f32 hw = hw0;
             if (cap == 1) { std::vector<Vec2> c; arc_points(P[0], hw, 0.0f, 2.0f * kPi, tol, c); c.pop_back(); push_piece(pieces, c); }
             else if (cap == 2) push_piece(pieces, {P[0] + Vec2{-hw, -hw}, P[0] + Vec2{hw, -hw}, P[0] + Vec2{hw, hw}, P[0] + Vec2{-hw, hw}});
             continue;
@@ -466,13 +506,15 @@ void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8
         for (usize i = 0; i < segs; ++i) {
             const Vec2 a = P[i], b = P[(i + 1) % n];
             const Vec2 d = (b - a).normalized();
-            const Vec2 nn = left_normal(d) * hw;
-            push_piece(pieces, {a + nn, b + nn, b - nn, a - nn});
+            const Vec2 na = left_normal(d) * H[i], nb = left_normal(d) * H[(i + 1) % n];
+            push_piece(pieces, {a + na, b + nb, b - nb, a - na});
         }
         // Juntas.
         const usize first = closed ? 0 : 1, last = closed ? n : n - 1;
         for (usize i = first; i < last; ++i) {
             const Vec2 v = P[i];
+            const f32 hw = H[i];
+            if (hw <= 1e-4f) continue;
             const Vec2 d0 = (v - P[(i + n - 1) % n]).normalized(), d1 = (P[(i + 1) % n] - v).normalized();
             const f32 cr = cross2(d0, d1), dt = d0.dot(d1);
             if (std::fabs(cr) < 1e-6f && dt > 0.0f) continue;   // reto
@@ -500,6 +542,8 @@ void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8
         if (!closed && cap != 0) {
             for (int end = 0; end < 2; ++end) {
                 const Vec2 p = end == 0 ? P[0] : P[n - 1];
+                const f32 hw = end == 0 ? H[0] : H[n - 1];
+                if (hw <= 1e-4f) continue;
                 const Vec2 d = end == 0 ? (P[0] - P[1]).normalized() : (P[n - 1] - P[n - 2]).normalized();   // para fora
                 const Vec2 nn = left_normal(d) * hw;
                 if (cap == 2) {
@@ -622,7 +666,8 @@ void group_geometry(const VectorGroup& g, f64 frame, f32 tol, GroupGeometry& out
     if (stroke) {
         std::vector<Contour> s = lines;
         if (!g.stroke.dashes.empty()) dash(s, g.stroke.dashes, g.stroke.dashOffset);
-        stroke_to_rings(s, g.stroke.width, g.stroke.cap, g.stroke.join, g.stroke.miterLimit, tol, out.stroke);
+        const StrokeTaper taper{g.stroke.taperStart * 0.01f, g.stroke.taperEnd * 0.01f, g.stroke.taperEase * 0.01f};
+        stroke_to_rings(s, g.stroke.width, g.stroke.cap, g.stroke.join, g.stroke.miterLimit, tol, out.stroke, taper);
     }
     out.lines = std::move(lines);
 }
@@ -958,6 +1003,7 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame) noexcept {
         H.u(g.fill.enabled); H.u(g.fill.rule); H.paint(g.fill.paint);
         const VectorStroke& s = g.stroke;
         H.u(s.enabled); H.paint(s.paint); H.f(s.width); H.u(s.cap); H.u(s.join); H.f(s.miterLimit); H.f(s.dashOffset);
+        H.f(s.taperStart); H.f(s.taperEnd); H.f(s.taperEase);
         H.u(s.dashes.size());
         for (f32 d : s.dashes) H.f(d);
         const VectorTrim& t = g.trim;

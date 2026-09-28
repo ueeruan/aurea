@@ -9,6 +9,7 @@
 #include "TestFramework.hpp"
 #include "SyntheticVideo.hpp"
 #include "OldProjects.hpp"
+#include "OldKeyframeProject.hpp"
 
 #include "aurea/Engine.hpp"
 #include "aurea/command/History.hpp"
@@ -812,6 +813,72 @@ AUREA_TEST(Stability, OldFormatProjectsOpenAndKeepARecoveryCopy) {
         std::printf("(v%u: %u camadas) ", fx.version, layers);
         remove_family(path);
     }
+}
+
+// Keyframes de projeto gravado antes da força da bézier (v35): abrem com força 1
+// e cada trilha dá EXATAMENTE a conta de antes (easing do trecho + lerp), quadro
+// a quadro — a troca do avaliador não mexe em animação já salva.
+AUREA_TEST(Stability, OldProjectKeyframesEvaluateExactlyAsBefore) {
+    struct Fixture { const u8* data; usize size; u32 version; };
+    const Fixture fixtures[] = {
+        {kOldProjectTimelineV2, sizeof(kOldProjectTimelineV2), 2},
+        {kOldProjectTimelineV12, sizeof(kOldProjectTimelineV12), 12},
+        {kOldProjectTimelineV34Keys, sizeof(kOldProjectTimelineV34Keys), 34},
+    };
+    auto legacy = [](const Track& t, i64 f) -> f32 {
+        const auto& k = t.keys;
+        if (k.empty()) return t.staticValue;
+        if (k.size() == 1 || f <= k.front().time.value) return k.front().value;
+        if (f >= k.back().time.value) return k.back().value;
+        usize i = 0;
+        while (i + 1 < k.size() && k[i + 1].time.value <= f) ++i;
+        const Keyframe& a = k[i];
+        const Keyframe& b = k[i + 1];
+        if (a.interp == Interpolation::Hold) return a.value;
+        const i64 span = b.time.value - a.time.value;
+        const f32 u = static_cast<f32>(static_cast<f64>(f - a.time.value) / static_cast<f64>(span));
+        return lerpf(a.value, b.value, apply_easing(a.interp, u, a.bx1, a.by1, a.bx2, a.by2));
+    };
+    u32 keyed = 0;
+    u32 samples = 0;
+    for (const Fixture& fx : fixtures) {
+        const std::string path = test_path("curva_antiga");
+        remove_family(path);
+        AUREA_CHECK(write_raw(path, std::vector<u8>(fx.data, fx.data + fx.size)));
+        Project p;
+        LoadReport r;
+        AUREA_CHECK(ProjectSerializer::load(p, path, LoadOptions{}, &r).ok());
+        AUREA_CHECK(r.olderFormat);
+        AUREA_CHECK_EQ(r.timelineVersion, fx.version);
+        p.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+            c.layers().for_each([&](LayerId, const Layer& l) {
+                for (u32 i = 0; i < l.tracks.size(); ++i) {
+                    const Track& t = l.tracks.at(i);
+                    if (t.keys.empty()) continue;
+                    ++keyed;
+                    for (const Keyframe& k : t.keys) AUREA_CHECK_EQ(static_cast<u32>(k.easePower), 1u);
+                    const i64 from = t.keys.front().time.value - 5;
+                    const i64 to = t.keys.back().time.value + 5;
+                    for (i64 f = from; f <= to; ++f) {
+                        AUREA_CHECK_EQ(t.sample_keys(FrameIndex{f}), legacy(t, f));
+                        ++samples;
+                    }
+                }
+            });
+        });
+        remove_family(path);
+    }
+    // O projeto v34 tem de fato trilhas animadas (senão o teste não provaria nada).
+    AUREA_CHECK(keyed >= 2);
+    // Um projeto novo com a curva de v34 (força 1) também não muda ao regravar.
+    Track t;
+    t.set(FrameIndex{0}, -40.f);
+    t.set(FrameIndex{48}, 260.f);
+    t.set(FrameIndex{90}, 10.f);
+    t.set_interpolation(FrameIndex{0}, Interpolation::Bezier, .7f, -.4f, .2f, 1.3f);
+    t.set_interpolation(FrameIndex{48}, Interpolation::EaseInOut, 0.f, 0.f, 1.f, 1.f);
+    for (i64 f = -3; f <= 95; ++f) { AUREA_CHECK_EQ(t.sample_keys(FrameIndex{f}), legacy(t, f)); ++samples; }
+    std::printf("(%u trilhas com keyframe, %u amostras) ", keyed, samples);
 }
 
 // =============================================================================

@@ -851,6 +851,8 @@ enum HomeProjectDialog: Equatable {
     case menu(HomeProjectEntry)
     case confirmDelete(HomeProjectEntry)
     case rename(HomeProjectEntry)
+    /// "Exportar arquivo do projeto": com ou sem a mídia.
+    case exportFile(HomeProjectEntry)
     case deleteAll
     case batchDelete(Set<String>)
     case sort
@@ -864,8 +866,14 @@ struct HomeProjectDialogs: View {
     @ObservedObject var defaults: HomeDefaults
     @Binding var selection: Set<String>
     let onOpen: (HomeProjectEntry) -> Void
+    @EnvironmentObject private var model: AureaModel
+    @State private var shared: SharedProjectFile?
 
     var body: some View {
+        dialogs.sheet(item: $shared) { file in ProjectFileShareSheet(url: file.url) }
+    }
+
+    @ViewBuilder private var dialogs: some View {
         switch state {
         case .none:
             EmptyView()
@@ -880,11 +888,24 @@ struct HomeProjectDialogs: View {
                         library.refresh()
                     },
                     HomeSheetAction(AureaText.t("common_rename")) { state = .rename(entry) },
+                    HomeSheetAction(AureaText.t("project_file_export")) { state = .exportFile(entry) },
                     HomeSheetAction(AureaText.t("project_delete"), destructive: true) { state = .confirmDelete(entry) },
                     HomeSheetAction(AureaText.t("project_delete_all"), destructive: true) {
                         if !library.all.isEmpty { state = .deleteAll }
                     },
                 ],
+                onDismiss: close)
+        case .exportFile(let entry):
+            HomeActionSheet(
+                title: AureaText.t("project_file_export"),
+                message: AureaText.t("project_file_export_message"),
+                actions: [true, false].map { withMedia in
+                    HomeSheetAction(AureaText.t(withMedia ? "project_file_include_media" : "project_file_without_media")) {
+                        model.exportProjectFile(path: entry.id, title: entry.title, includeMedia: withMedia) { url in
+                            if let url { shared = SharedProjectFile(url: url) }
+                        }
+                    }
+                },
                 onDismiss: close)
         case .confirmDelete(let entry):
             // "Apagar todos" fica só no menu: ao lado da exclusão unitária o

@@ -314,12 +314,59 @@ struct ShellShapeGlyph: View {
                     petal.rotate(by: .radians(Double(a + .pi / 2)))
                     petal.fill(Path(ellipseIn: CGRect(x: -s * 0.12, y: -s * 0.26, width: s * 0.24, height: s * 0.52)), with: fill)
                 }
+            // Formas vindas do app antigo (presets 15..22 do motor).
+            case 15: context.fill(radial(8, 0.5), with: fill)
+            case 16: context.fill(radial(5, 0.5, cy: 0.53), with: fill)
+            case 17: context.fill(polygon([0.2, 0.2, 0.8, 0.2, 1, 0.8, 0, 0.8]), with: fill)
+            case 18: context.fill(polygon([0.25, 0.25, 1, 0.25, 0.75, 0.75, 0, 0.75]), with: fill)
+            case 19: context.fill(radial(8, 0.5, 0.2), with: fill)
+            case 20: context.fill(radial(12, 0.5, 0.28), with: fill)
+            case 21: context.fill(ShapeGlyphPaths.gear(center: p(0.5, 0.5), radius: s / 2, teeth: 10, hub: 0.3), with: fill, style: FillStyle(eoFill: true))
+            case 22: context.fill(ShapeGlyphPaths.doubleArrow(center: p(0.5, 0.5), radius: s / 2), with: fill)
             default:
                 var stem = Path(); stem.move(to: p(0.04, 0.5)); stem.addLine(to: p(0.66, 0.5))
                 context.stroke(stem, with: fill, lineWidth: s * 0.2)
                 context.fill(polygon([0.6, 0.2, 0.98, 0.5, 0.6, 0.8]), with: fill)
             }
         }
+    }
+}
+
+/// Silhuetas compartilhadas (grade de formas e troca de forma): engrenagem com
+/// raiz 0,78 e furo do cubo (preencher em par-ímpar), seta dupla.
+enum ShapeGlyphPaths {
+    static func gear(center c: CGPoint, radius r: CGFloat, teeth: Int, hub: CGFloat) -> Path {
+        var path = Path()
+        let root = r * 0.78, steps = teeth * 4
+        for i in 0..<steps {
+            let a0 = -CGFloat.pi / 2 + CGFloat(i) * 2 * .pi / CGFloat(steps), a1 = a0 + 2 * .pi / CGFloat(steps)
+            let rr = (i % 4 == 1 || i % 4 == 2) ? r : root
+            let p0 = CGPoint(x: c.x + rr * cos(a0), y: c.y + rr * sin(a0))
+            if i == 0 { path.move(to: p0) } else { path.addLine(to: p0) }
+            path.addLine(to: CGPoint(x: c.x + rr * cos(a1), y: c.y + rr * sin(a1)))
+        }
+        path.closeSubpath()
+        path.addEllipse(in: CGRect(x: c.x - root * hub, y: c.y - root * hub, width: 2 * root * hub, height: 2 * root * hub))
+        return path
+    }
+    static func doubleArrow(center c: CGPoint, radius r: CGFloat) -> Path {
+        let pts: [(CGFloat, CGFloat)] = [(-1, 0), (-0.45, -0.8), (-0.45, -0.22), (0.45, -0.22), (0.45, -0.8), (1, 0), (0.45, 0.8), (0.45, 0.22), (-0.45, 0.22), (-0.45, 0.8)]
+        var path = Path()
+        for (i, q) in pts.enumerated() {
+            let point = CGPoint(x: c.x + r * q.0, y: c.y + r * q.1)
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        return path
+    }
+    static func quad(center c: CGPoint, radius r: CGFloat, _ xy: [CGFloat]) -> Path {
+        var path = Path()
+        for i in stride(from: 0, to: xy.count - 1, by: 2) {
+            let point = CGPoint(x: c.x + xy[i] * r, y: c.y + xy[i + 1] * r)
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        return path
     }
 }
 

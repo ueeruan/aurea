@@ -81,7 +81,7 @@ internal object ShapeEditState {
 }
 
 /** As formas simples (SDF do motor, `shape.frag`) na ordem da troca ‹ ›. */
-internal val SimpleShapes = intArrayOf(0, 1, 3, 4, 5, 6, 7, 8, 9, 10)
+internal val SimpleShapes = intArrayOf(0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15)
 
 @Composable
 internal fun shapeName(type: Int): String = stringResource(when (type) {
@@ -95,6 +95,10 @@ internal fun shapeName(type: Int): String = stringResource(when (type) {
     8 -> R.string.sh_shape_flower
     9 -> R.string.sh_shape_arrow
     10 -> R.string.panel_triangulo
+    12 -> R.string.sh_shape_trapezoid
+    13 -> R.string.sh_shape_parallelogram
+    14 -> R.string.sh_shape_gear
+    15 -> R.string.sh_shape_double_arrow
     else -> R.string.target_shape
 })
 
@@ -163,7 +167,7 @@ internal fun ShapeEditPanel(env: PanelEnv) {
             val h = detail.sourceHeight.toFloat()
             when (type) {
                 0 -> ShapeRow(env, 1, stringResource(R.string.panel_raio), detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
-                3, 4, 8 -> ShapeRow(env, 2, when (type) { 3 -> stringResource(R.string.panel_lados); 8 -> stringResource(R.string.panel_petalas); else -> stringResource(R.string.panel_pontas) }, points.toFloat(), 0.06f, 3f, 64f, "", 0, 5f, "pontas") {
+                3, 4, 8, 14 -> ShapeRow(env, 2, when (type) { 3 -> stringResource(R.string.panel_lados); 8 -> stringResource(R.string.panel_petalas); 14 -> stringResource(R.string.panel_dentes); else -> stringResource(R.string.panel_pontas) }, points.toFloat(), 0.06f, 3f, 64f, "", 0, 5f, "pontas") {
                     store.setShapeParam(2, it.roundToInt().toFloat())
                 }
             }
@@ -172,6 +176,10 @@ internal fun ShapeEditPanel(env: PanelEnv) {
                 5 -> ShapeRow(env, 3, stringResource(R.string.panel_espessura), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, it / 100f) }
                 // Anel: o motor guarda o FURO; a pessoa pensa na espessura do aro.
                 6 -> ShapeRow(env, 3, stringResource(R.string.panel_espessura), (1f - detail.shapeInner) * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, 1f - it / 100f) }
+                12 -> ShapeRow(env, 3, stringResource(R.string.panel_largura_topo), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 60f, "topo") { store.setShapeParam(3, it / 100f) }
+                13 -> ShapeRow(env, 3, stringResource(R.string.panel_inclinacao), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "inclinacao") { store.setShapeParam(3, it / 100f) }
+                14 -> ShapeRow(env, 3, stringResource(R.string.panel_cubo), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 30f, "cubo") { store.setShapeParam(3, it / 100f) }
+                15 -> ShapeRow(env, 3, stringResource(R.string.panel_espessura), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 22f, "espessura") { store.setShapeParam(3, it / 100f) }
             }
             Spacer(Modifier.height(6.dp))
             KitHint(
@@ -407,9 +415,41 @@ internal fun DrawScope.drawShapeGlyph(type: Int, color: Color) {
             p.close()
             drawPath(p, color)
         }
+        12 -> drawPath(quad(c, r, -0.6f, -0.7f, 0.6f, -0.7f, 1f, 0.7f, -1f, 0.7f), color)
+        13 -> drawPath(quad(c, r, -0.5f, -0.7f, 1f, -0.7f, 0.5f, 0.7f, -1f, 0.7f), color)
+        14 -> drawPath(gearGlyph(c, r, 10, 0.3f), color)
+        15 -> drawPath(doubleArrowGlyph(c, r), color)
         else -> drawRect(color, Offset(c.x - r, c.y - r), Size(2 * r, 2 * r))
     }
 }
+
+/** Quadrilátero em frações de `r` em volta de `c` (trapézio, paralelogramo). */
+internal fun quad(c: Offset, r: Float, vararg xy: Float): Path = Path().apply {
+    moveTo(c.x + xy[0] * r, c.y + xy[1] * r)
+    var i = 2
+    while (i + 1 < xy.size) { lineTo(c.x + xy[i] * r, c.y + xy[i + 1] * r); i += 2 }
+    close()
+}
+
+/** Engrenagem (mesma proporção do motor: raiz 0,78; cubo = furo). */
+internal fun gearGlyph(c: Offset, r: Float, teeth: Int, hub: Float): Path {
+    val root = r * 0.78f
+    val p = Path()
+    val steps = teeth * 4
+    for (i in 0 until steps) {
+        val a0 = -PI.toFloat() / 2f + i * 2f * PI.toFloat() / steps
+        val rr = if (i % 4 == 1 || i % 4 == 2) r else root
+        val a1 = a0 + 2f * PI.toFloat() / steps
+        if (i == 0) p.moveTo(c.x + rr * cos(a0), c.y + rr * sin(a0)) else p.lineTo(c.x + rr * cos(a0), c.y + rr * sin(a0))
+        p.lineTo(c.x + rr * cos(a1), c.y + rr * sin(a1))
+    }
+    p.close()
+    val hole = Path().apply { addOval(androidx.compose.ui.geometry.Rect(c, root * hub)) }
+    return Path().apply { op(p, hole, androidx.compose.ui.graphics.PathOperation.Difference) }
+}
+
+internal fun doubleArrowGlyph(c: Offset, r: Float): Path =
+    quad(c, r, -1f, 0f, -0.45f, -0.8f, -0.45f, -0.22f, 0.45f, -0.22f, 0.45f, -0.8f, 1f, 0f, 0.45f, 0.8f, 0.45f, 0.22f, -0.45f, 0.22f, -0.45f, 0.8f)
 
 private fun polygon(c: Offset, r: Float, n: Int, inner: Float): Path {
     val p = Path()

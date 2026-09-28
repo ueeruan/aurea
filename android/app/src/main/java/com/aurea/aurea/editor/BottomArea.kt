@@ -451,6 +451,9 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
             BatchTool(CupertinoGlyph.ArrowUpDownSquare, stringResource(R.string.editor_distribuir_vertical_vaos_iguais), 18, enabled = three) {
                 LayerOps.distribute(store, store.selection, horizontal = false)
             }
+            // Ajustar / preencher a tela (app antigo), junto dos alinhamentos.
+            BatchTool(CupertinoGlyph.FullscreenExit, stringResource(R.string.editor_ajustar_tela), 18) { LayerOps.fitToCanvas(store, store.selection, fill = false) }
+            BatchTool(CupertinoGlyph.Fullscreen, stringResource(R.string.editor_preencher_tela), 18) { LayerOps.fitToCanvas(store, store.selection, fill = true) }
         }
         Spacer(Modifier.height(8.dp))
         StaggerRow(store)

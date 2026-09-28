@@ -235,7 +235,7 @@ public:
 // -----------------------------------------------------------------------------
 class Mosaic final : public Effect {
 public:
-    enum : u32 { kCell = 0, kGap, kRound, kShade, kCellVignette, kBackground };
+    enum : u32 { kCell = 0, kGap, kRound, kShade, kCellVignette, kBackground, kStyle, kVignette };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kMosaic, "Mosaico / LED", "Estilizar", EffectClass::Neighborhood};
@@ -251,6 +251,15 @@ public:
         p.add_float("shade", "Sombreado", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("cell_vignette", "Vinheta da célula", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_color("background", "Cor do fundo", Vec4{0.0f, 0.0f, 0.0f, 0.0f});
+        // Os três looks do Pixelar / LED do app antigo. "Livre" é o de sempre
+        // (os controles acima valem); os outros fixam vão, forma, sombreado e
+        // fundo do look e deixam o tamanho da célula, a cor do fundo (a placa
+        // da Parede de LED) e a vinheta com o usuário. No fim da lista:
+        // projetos antigos abrem em "Livre", idênticos.
+        static const char* const kStyles[] = {"Livre", "Mosaico de blocos", "Parede de LED", "Matriz de pontos"};
+        p.add_enum("style", "Estilo", kStyles, 4, 0);
+        // Vinheta sobre a caixa da camada (só a cor, nunca o alfa).
+        p.add_float("vignette", "Vinheta", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kCell] = ParamValue::scalar(8.0f);
@@ -276,6 +285,9 @@ public:
                     std::clamp(finite_or(e.f(kShade), 0.0f) / 100.0f, 0.0f, 1.0f)};
         u.p1 = Vec4{std::clamp(finite_or(e.f(kCellVignette), 0.0f) / 100.0f, 0.0f, 1.0f), 1.0f / k, 0.0f, 0.0f};
         u.p2 = region_vec(input.region);
+        const Vec2 box = layer_size(e, input);
+        u.p3 = Vec4{static_cast<f32>(std::min(e.e(kStyle), 3u)),
+                    std::clamp(finite_or(e.f(kVignette), 0.0f) / 100.0f, 0.0f, 1.0f), box.x, box.y};
         u.color = e.color(kBackground);
         return single_pass(ctx, ShaderId::effects_mosaic_cells_frag, input, u, "mosaico", out);
     }

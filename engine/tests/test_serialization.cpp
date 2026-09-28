@@ -162,6 +162,7 @@ AUREA_TEST(Serialization, KeyframesSurviveRoundTrip) {
     opacity.keys[1].by1 = 0.22f;
     opacity.keys[1].bx2 = 0.33f;
     opacity.keys[1].by2 = 0.44f;
+    opacity.keys[1].easePower = 3;   // v35: a força da bézier vai junto
 
     std::string error;
     AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}, &error).ok());
@@ -181,6 +182,9 @@ AUREA_TEST(Serialization, KeyframesSurviveRoundTrip) {
     AUREA_CHECK_EQ(t->keys[2].interp, Interpolation::Hold);
     AUREA_CHECK_NEAR(t->keys[1].bx1, 0.11f, 1e-6);
     AUREA_CHECK_NEAR(t->keys[1].by2, 0.44f, 1e-6);
+    AUREA_CHECK_EQ(static_cast<u32>(t->keys[1].easePower), 3u);
+    AUREA_CHECK_EQ(static_cast<u32>(t->keys[0].easePower), 1u);
+    AUREA_CHECK_EQ(t->sample(FrameIndex{45}), opacity.sample(FrameIndex{45}));
 
     std::remove(path.c_str());
 }

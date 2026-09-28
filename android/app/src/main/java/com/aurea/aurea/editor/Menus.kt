@@ -1,5 +1,9 @@
 package com.aurea.aurea.editor
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -89,6 +93,17 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
     fun timeAct(block: () -> Unit): () -> Unit = act {
         if (row.locked) store.showToast(lockedMsg) else block()
     }
+    // "Substituir mídia" abre o seletor SEM fechar a folha (o retorno do
+    // seletor precisa deste lançador vivo); o retorno troca e fecha.
+    val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri != null) store.replaceMedia(id, uri)
+        onDismiss()
+    }
+    var showInfo by remember { mutableStateOf(false) }
+    if (showInfo) {
+        MediaInfoSheet(store, id) { showInfo = false; onDismiss() }
+        return
+    }
 
     ShellMenuSheet(onDismiss) {
         MenuSection(stringResource(R.string.editor_camada))
@@ -136,6 +151,17 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
                 checked = row.adjustment,
                 detail = stringResource(R.string.editor_efeitos_desta_camada_valem_todas_baixo),
             )
+            if (row.adjustment) {
+                // Camadas afetadas: todas abaixo ↔ só a logo abaixo (um grupo conta como uma).
+                val onlyBelow = store.adjustmentScope == 1
+                MenuItemRow(
+                    CupertinoGlyph.SliderHorizontal3,
+                    stringResource(R.string.la_affected) + " · " +
+                        stringResource(if (onlyBelow) R.string.la_affected_below else R.string.la_affected_all),
+                    { store.changeAdjustmentScope(if (onlyBelow) 0 else 1) },
+                    detail = stringResource(R.string.la_affected_hint),
+                )
+            }
             MenuItemRow(
                 CupertinoGlyph.Grid,
                 stringResource(R.string.editor_guia_nao_exporta),
@@ -166,10 +192,34 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             } else {
                 MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_editar_grupo), act { store.openPrecomp(id) })
                 MenuItemRow(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), act { store.ungroupPrecomp(id) })
+                MenuItemRow(
+                    CupertinoGlyph.Camera,
+                    stringResource(R.string.la_group_camera),
+                    { store.changeGroupCameraPassThrough(store.groupCameraPassThrough != 1) },
+                    checked = store.groupCameraPassThrough == 1,
+                    detail = stringResource(R.string.la_group_camera_hint),
+                )
+            }
+            // Pôr esta camada num grupo que já existe aqui / tirar do grupo aberto.
+            val addToGroup = stringResource(R.string.la_add_to_group)
+            store.layers.filter { it.id != id && LayerType.of(it.kind) == LayerType.Group }.forEach { g ->
+                MenuItemRow(CupertinoGlyph.RectangleStack, "$addToGroup · ${g.name}", act { store.addToGroup(g.id, listOf(id)) })
+            }
+            if (store.precompDepth > 0) {
+                MenuItemRow(CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.la_remove_from_group), act { store.removeFromGroup(id) })
             }
         }
-        if (type == LayerType.Video || type == LayerType.Audio) {
+        if (media || type == LayerType.Audio) {
             MenuSection(stringResource(R.string.sh_menu_media))
+            if (media) {
+                MenuItemRow(
+                    CupertinoGlyph.Arrow2Squarepath,
+                    stringResource(R.string.layer_replace_media),
+                    if (row.locked) null else ({ replacePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }),
+                    detail = stringResource(R.string.layer_replace_media_detail),
+                )
+            }
+            MenuItemRow(CupertinoGlyph.InfoCircle, stringResource(R.string.media_info_title), { showInfo = true })
             if (type == LayerType.Video) {
                 MenuItemRow(
                     CupertinoGlyph.MusicNote2,
@@ -369,6 +419,13 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
         MenuSection(stringResource(R.string.sh_menu_selection))
         MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
+        MenuItemRow(
+            CupertinoGlyph.RectangleStack,
+            stringResource(R.string.edt_tl_pick_layers),
+            if (count > 0) act { store.changeLayerSelectMode(!store.layerSelectMode) } else null,
+            checked = store.layerSelectMode,
+            detail = stringResource(R.string.edt_tl_pick_layers_detail),
+        )
         MenuItemRow(CupertinoGlyph.Square, stringResource(R.string.editor_limpar_selecao), act { store.clearSelection() })
         MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
 

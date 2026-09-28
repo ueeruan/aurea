@@ -24,7 +24,8 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 p0;   // x = célula (px da camada), y = vão 0..0.9, z = 1 redonda, w = sombreado 0..1
     vec4 p1;   // x = vinheta por célula 0..1, y = 1 px de saída em px da camada
     vec4 p2;   // região da imagem (px da camada)
-    vec4 p3;
+    vec4 p3;   // x = estilo (0 livre, 1 mosaico, 2 parede de LED, 3 matriz de pontos),
+               // y = vinheta da caixa 0..1, zw = caixa da camada (px)
     vec4 color;   // fundo dos vãos (linear, direta; alfa 0 = transparente)
 } p;
 
@@ -48,11 +49,40 @@ void main() {
     avg /= 9.0;
 
     const vec2 local = (point - cellCenter) / (cellSize * 0.5);   // -1..1 dentro da célula
+    const int style = int(p.p3.x + 0.5);
+    const float aa = max(p.p1.y, 1e-3) / (cellSize * 0.5);
+
+    // Vinheta sobre a caixa da camada: só a cor, o alfa fica.
+    const vec2 halfBox = max(p.p3.zw * 0.5, vec2(1e-3));
+    const float boxVig = 1.0 - clamp(p.p3.y, 0.0, 1.0)
+                       * smoothstep(0.5, 1.35, length((point - halfBox) / halfBox));
+
+    if (style != 0) {
+        // Os looks prontos: vão, forma e sombreado do look; a borda da lâmpada
+        // escurece em direção à placa (ou some, sem placa).
+        const float sGap = style == 1 ? 0.0 : (style == 2 ? 0.15 : 0.3);
+        const bool sRound = style == 3;
+        const float sShade = style == 1 ? 0.0 : (style == 2 ? 0.4 : 0.5);
+        const float sDist = sRound ? length(local) : max(abs(local.x), abs(local.y));
+        const float sIn = 1.0 - sGap;
+        const float shape = (style == 1) ? 1.0 : 1.0 - smoothstep(sIn - aa, sIn + aa, sDist);
+        const float rr = clamp(sDist / max(sIn, 1e-3), 0.0, 1.0);
+        const float glow = shape * (1.0 - sShade * rr * rr);
+        vec4 outc;
+        if (style == 2) {
+            // A placa atrás das lâmpadas, dentro da silhueta (pela cobertura da célula).
+            outc = vec4(mix(p.color.rgb * avg.a, avg.rgb, glow), avg.a);
+        } else {
+            outc = avg * glow;
+        }
+        o_color = vec4(outc.rgb * boxVig, outc.a);
+        return;
+    }
+
     const bool round = p.p0.z > 0.5;
     const float gap = clamp(p.p0.y, 0.0, 0.9);
     const float dist = round ? length(local) : max(abs(local.x), abs(local.y));
     const float halfIn = 1.0 - gap;
-    const float aa = max(p.p1.y, 1e-3) / (cellSize * 0.5);
     // Sem vão e quadrada, a célula cobre tudo: nenhuma costura entre vizinhas.
     const float cover = (!round && gap <= 0.0) ? 1.0 : 1.0 - smoothstep(halfIn - aa, halfIn + aa, dist);
 
@@ -63,4 +93,5 @@ void main() {
 
     const vec4 background = vec4(p.color.rgb * p.color.a, p.color.a);
     o_color = mix(background, lit, cover);
+    o_color.rgb *= boxVig;
 }

@@ -494,6 +494,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             keySelectMode = false
             return
         }
+        layerSelectMode = false
         val sel = keySelection
             ?: selectedKeyframe?.let { KeySelection.single(it.first, it.second) }
             ?: primary?.let { KeySelection(it) }
@@ -506,16 +507,24 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /**
      * Modo de escolha: alterna o grupo do losango tocado (1 keyframe numa
-     * trilha; todos do instante no resumo). Outra camada começa outra seleção.
+     * trilha; todos do instante no resumo). No modo "Selecionar", losangos de
+     * OUTRA camada somam à seleção (várias camadas, como no app antigo) sem
+     * trocar a camada escolhida; fora dele, outra camada começa outra seleção.
      */
     fun toggleTimelineKeys(layer: Long, group: List<KeyframeRow>) {
         if (group.isEmpty()) return
         val mode = keySelectMode
+        val sel = keySelection
+        if (mode && sel != null && sel.layer != layer) {
+            val next = sel.toggleGroupOn(layer, group)
+            keySelection = next
+            return
+        }
         // Outra camada: ela vira a escolhida (só na timeline, sem doca) e a seleção recomeça nela.
         if (primary != layer || selection.size != 1) select(layer, openOptions = false)
         keySelectMode = mode
         val base = keySelection?.takeIf { it.layer == layer } ?: KeySelection(layer)
-        val next = base.toggleGroup(group)
+        val next = base.toggleGroupOn(layer, group)
         keySelection = next
         val first = group.first()
         val current = selectedKeyframe
@@ -530,7 +539,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** "Todos": todos os keyframes que a timeline mostra da camada da seleção. */
     fun selectAllTimelineKeys() {
         val layer = keySelection?.layer ?: selectedKeyframe?.first ?: primary ?: return
+        // As outras camadas já escolhidas continuam na seleção.
         keySelection = KeySelection.all(layer, keyframes[layer].orEmpty(), timelineFocus)
+            .copy(others = keySelection?.takeIf { it.layer == layer }?.others.orEmpty())
     }
 
     /**
@@ -541,7 +552,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun shiftTimelineKeys(delta: Int): Boolean {
         val sel = keySelection ?: return false
         if (sel.isEmpty() || delta == 0) return false
-        if (engine.editKeyframeSelection(sel.layer, sel.references(), delta, false) <= 0) return false
+        // Várias camadas: cada uma é atômica no motor; se uma recusa (colisão),
+        // as que já andaram voltam — tudo ou nada, no mesmo passo de desfazer.
+        val moved = ArrayList<Long>()
+        for (id in sel.layers()) {
+            if (engine.editKeyframeSelection(id, sel.references(id), delta, false) > 0) {
+                moved.add(id)
+                continue
+            }
+            val back = sel.shifted(delta)
+            for (m in moved) engine.editKeyframeSelection(m, back.references(m), -delta, false)
+            if (moved.isNotEmpty()) refreshNow()
+            return false
+        }
         keySelection = sel.shifted(delta)
         selectedKeyframe?.let { (l, k) ->
             if (l == sel.layer && k in sel) selectedKeyframe = l to k.copy(time = k.time + delta)
@@ -591,7 +614,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun deleteTimelineKeys(): Boolean {
         val sel = keySelection ?: return false
         if (sel.isEmpty()) return false
-        if (engine.editKeyframeSelection(sel.layer, sel.references(), 0, true) <= 0) return false
+        var removed = 0
+        val many = sel.crossLayer
+        if (many) beginGesture("excluir keyframes")
+        for (id in sel.layers()) removed += maxOf(0, engine.editKeyframeSelection(id, sel.references(id), 0, true))
+        if (many) endGesture()
+        if (removed <= 0) return false
         selectedKeyframe?.let { (l, k) -> if (l == sel.layer && k in sel) selectedKeyframe = null }
         clearKeySelection()
         refreshNow()
@@ -601,7 +629,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** A seleção some se a camada sumiu ou algum keyframe referido deixou de existir. */
     private fun validateKeySelection() {
         val sel = keySelection ?: return
-        if (layers.none { it.id == sel.layer } || sel.validated(keyframes[sel.layer].orEmpty()) == null) clearKeySelection()
+        if (layers.none { it.id == sel.layer } || sel.validatedAll { id -> if (layers.any { it.id == id }) keyframes[id].orEmpty() else null } == null) clearKeySelection()
     }
 
     // =========================================================================
@@ -1319,6 +1347,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             textStyle = null
             textAnimators = emptyList()
         }
+        // Animadores de camada (qualquer tipo), comprimento do desfoque e escopo.
+        if (id != null) {
+            val la = engine.queryLayerAnimators(id)?.let { a -> List(a.size / 32) { i -> a.copyOfRange(i * 32, i * 32 + 32) } } ?: emptyList()
+            val oldLa = layerAnimators
+            if (la.size != oldLa.size || la.indices.any { !la[it].contentEquals(oldLa[it]) }) layerAnimators = la
+            layerMotionBlurLength = engine.queryLayerMotionBlurLength(id)
+            adjustmentScope = engine.queryAdjustmentScope(id)
+            groupCameraPassThrough = engine.queryGroupCameraPassThrough(id)
+        } else {
+            layerAnimators = emptyList()
+            groupCameraPassThrough = -1
+        }
         shapeParams = same(shapeParams, if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && !isVectorLayer) engine.queryShapeParams(id) else null)
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
@@ -1808,6 +1848,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshEffects()
     }
 
+    /**
+     * Modo "Selecionar várias camadas" (do app antigo): enquanto ligado, o
+     * toque num clipe da timeline soma/tira ele da seleção em vez de trocar,
+     * e a timeline fica inteira (nunca a fileira compacta). Desligar
+     * ("Concluir") mantém o que foi escolhido. Liga fora da escolha de keyframes.
+     */
+    var layerSelectMode by mutableStateOf(false)
+        private set
+
+    fun changeLayerSelectMode(on: Boolean) {
+        if (on) clearKeySelection()
+        layerSelectMode = on
+    }
+
+    /** Toque num clipe no modo de escolha: soma/tira, com a doca/lote da seleção. */
+    fun toggleLayerPick(layer: Long) {
+        select(layer, additive = true)
+    }
+
     fun selectAll() {
         timelineOnlySelection = emptySet()
         clearKeySelection()
@@ -2293,9 +2352,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return keyframes[layer].orEmpty().filter { it.effectIndex == NO_EFFECT && it.property in base..base + (if (threeD) 2 else 1) && it.time == key.time }.ifEmpty { listOf(key) }
     }
 
-    fun setKeyframeEasing(layer: Long, key: KeyframeRow, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float) {
+    /** [power]: força da bézier 1..3; 0 = cada keyframe mantém a sua. */
+    fun setKeyframeEasing(layer: Long, key: KeyframeRow, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float, power: Int = 0) {
         val peers = graphKeyGroup(layer, key)
-        group("curve XYZ") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2) } }
+        group("curve XYZ") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2, power) } }
         refreshNow()
     }
 
@@ -3700,6 +3760,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Animadores da camada de texto (40 floats cada; ver `query_text_animators`). */
     var textAnimators by mutableStateOf<List<FloatArray>>(emptyList())
+    /** Animadores de camada da escolhida (32 floats cada — Engine::kLayerAnimFloats). */
+    var layerAnimators by mutableStateOf<List<FloatArray>>(emptyList())
+    /** Comprimento do rastro do desfoque desta camada (× o obturador do projeto). */
+    var layerMotionBlurLength by mutableStateOf(1f)
+    /** Ajuste: 0 = todas abaixo, 1 = só a camada logo abaixo. */
+    var adjustmentScope by mutableStateOf(0)
+    /** Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo). */
+    var groupCameraPassThrough by mutableStateOf(-1)
         private set
 
     fun applyTextPreset(preset: Int) {
@@ -3918,6 +3986,120 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         engine.toggleTextAnimKey(id, index, param)
         refreshDetail()
+    }
+
+    // --- Animadores de camada -------------------------------------------------
+
+    fun addLayerAnimator() {
+        val id = primary ?: return
+        if (engine.addLayerAnimator(id) < 0) {
+            showToast(appText(R.string.app_layer_anim_add_failed))
+            return
+        }
+        refreshNow()
+        refreshDetail()
+    }
+
+    fun removeLayerAnimator(index: Int) {
+        val id = primary ?: return
+        engine.removeLayerAnimator(id, index)
+        refreshNow()
+        refreshDetail()
+    }
+
+    /** Ajuste não animável (0..5) do animador de camada. */
+    fun setLayerAnimatorValues(index: Int, values: Map<Int, Float>) {
+        val id = primary ?: return
+        val v = layerAnimators.getOrNull(index)?.copyOf() ?: return
+        values.forEach { (k, x) -> v[k] = x }
+        engine.setLayerAnimator(id, index, v)
+        refreshNow()
+        refreshDetail()
+    }
+
+    /** Nova semente do wiggle: outro movimento aleatório, mesma amplitude. */
+    fun rerollLayerAnimator(index: Int) {
+        val seed = (1..999_999).random().toFloat()
+        setLayerAnimatorValues(index, mapOf(5 to seed))
+    }
+
+    fun setLayerAnimParam(index: Int, param: Int, value: Float) {
+        val id = primary ?: return
+        engine.setLayerAnimParam(id, index, param, value)
+        refreshDetail()
+    }
+
+    fun toggleLayerAnimKey(index: Int, param: Int) {
+        val id = primary ?: return
+        engine.toggleLayerAnimKey(id, index, param)
+        refreshNow()
+        refreshDetail()
+    }
+
+    fun copyLayerAnimators() {
+        val id = primary ?: return
+        val n = engine.copyLayerAnimators(id)
+        showToast(appText(if (n > 0) R.string.app_layer_anim_copied else R.string.app_layer_anim_none))
+    }
+
+    fun pasteLayerAnimators() {
+        val ids = selection.ifEmpty { listOfNotNull(primary) }
+        if (ids.isEmpty()) return
+        if (engine.pasteLayerAnimators(ids.toLongArray()) == 0) {
+            showToast(appText(R.string.app_layer_anim_paste_failed))
+            return
+        }
+        refreshNow()
+        refreshDetail()
+    }
+
+    fun hasLayerAnimatorClipboard(): Boolean = engine.layerAnimatorClipboard() > 0
+
+    fun changeLayerMotionBlurLength(factor: Float) {
+        val id = primary ?: return
+        engine.setLayerMotionBlurLength(id, factor)
+        refreshDetail()
+    }
+
+    fun changeAdjustmentScope(scope: Int) {
+        val id = primary ?: return
+        engine.setAdjustmentScope(id, scope)
+        refreshNow()
+        refreshDetail()
+    }
+
+    fun changeGroupCameraPassThrough(on: Boolean) {
+        val id = primary ?: return
+        if (engine.setGroupCameraPassThrough(id, on)) {
+            showToast(appText(if (on) R.string.app_group_camera_reaches else R.string.app_group_camera_sealed))
+        }
+        refreshNow()
+        refreshDetail()
+    }
+
+    /** Põe as camadas escolhidas (ou [layer]) dentro do grupo [group]. */
+    fun addToGroup(group: Long, layers: Collection<Long> = selection.ifEmpty { listOfNotNull(primary) }) {
+        val ids = layers.filter { it != group }
+        if (ids.isEmpty()) return
+        val why = engine.addLayersToGroup(ids.toLongArray(), group)
+        if (why != null) {
+            errorMessage = appText(R.string.app_group_add_failed, why)
+            return
+        }
+        selection = LinkedHashSet()
+        refreshNow()
+        select(group)
+    }
+
+    /** Dentro de um grupo aberto: tira a camada dele (a timeline volta para fora). */
+    fun removeFromGroup(layer: Long) {
+        val why = engine.removeLayerFromGroup(layer)
+        if (why != null) {
+            errorMessage = appText(R.string.app_group_remove_failed, why)
+            return
+        }
+        selection = LinkedHashSet()
+        refreshNow()
     }
 
     // =========================================================================
@@ -4180,6 +4362,30 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val n = engine.pasteKeyframes(ids.toLongArray(), playhead.toLong())
         refreshNow()
         showToast(if (n > 0) appText(R.string.msg_keyframe_s_colado_s_no_cabecote, n) else appText(R.string.msg_nenhuma_propriedade_compativel))
+    }
+
+    /** Copiar animação (app antigo): TODOS os keyframes da camada; colar = [pasteKeyframes] no cabeçote. */
+    fun copyAnimation() {
+        val id = primary ?: return
+        val n = engine.copyAnimation(id)
+        afterClipboard()
+        showToast(if (n > 0) appText(R.string.msg_keyframe_s_copiado_s, n) else appText(R.string.msg_camada_sem_keyframes))
+    }
+
+    /**
+     * Otimizar keyframes da camada escolhida — só da propriedade dos keyframes
+     * escolhidos na timeline, se forem todos de uma; senão de todas. Tolerância:
+     * 1 % da amplitude de cada propriedade. Um passo de desfazer.
+     */
+    fun optimizeKeyframes() {
+        val id = primary ?: return
+        val props = keySelection?.takeIf { it.layer == id && !it.isEmpty() }?.keys?.map { it.property }?.distinct()
+        val property = props?.singleOrNull() ?: -1
+        if (playing) pause()
+        val n = engine.optimizeKeyframes(id, property, 0.01f)
+        if (n > 0) keySelection = null
+        refreshNow()
+        showToast(if (n > 0) appText(R.string.msg_keyframes_otimizados, n) else appText(R.string.msg_nada_otimizar))
     }
 
     // --- Modo Edição (timeline magnética) -------------------------------------------
@@ -5020,6 +5226,44 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * "Substituir mídia": foto ou vídeo novo na MESMA camada (transform,
+     * keyframes, efeitos, máscaras e tempo ficam; vídeo mais curto encurta o
+     * fim). Um passo de desfazer, feito pelo motor.
+     */
+    fun replaceMedia(layer: Long, uri: Uri) {
+        takePermission(uri)
+        val app = getApplication<Application>()
+        val mime = runCatching { app.contentResolver.getType(uri) }.getOrNull().orEmpty()
+        val name = displayName(uri) ?: appText(if (mime.startsWith("video/")) R.string.target_video else R.string.target_image)
+        busyMessage = appText(R.string.layer_replacing_media)
+        viewModelScope.launch {
+            val id = withContext(Dispatchers.IO) {
+                if (mime.startsWith("video/")) {
+                    engine.replaceLayerVideo(layer, uri.toString(), name)
+                } else {
+                    val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -ERRC_UNSUPPORTED_FORMAT
+                    val buf = directBuffer(bmp.width * bmp.height * 4)
+                    bmp.copyPixelsToBuffer(buf)
+                    buf.rewind()
+                    engine.replaceLayerImage(layer, buf, bmp.width, bmp.height, name, uri.toString()).also { bmp.recycle() }
+                }
+            }
+            busyMessage = null
+            if (id < 0) {
+                errorMessage = appText(R.string.layer_replace_failed, humanError((-id).toInt()))
+                return@launch
+            }
+            thumbnails.clear()
+            refreshNow()
+            select(id)
+            showToast(appText(R.string.layer_media_replaced, name))
+        }
+    }
+
+    /** Arquivo de origem da camada (para "Informações da mídia"); null = sem arquivo. */
+    fun layerSourcePath(layer: Long): String? = if (ready) engine.layerSourcePath(layer) else null
+
     private fun takePermission(uri: Uri) {
         try {
             getApplication<Application>().contentResolver
@@ -5088,6 +5332,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun enterEditor() {
         timelineOnlySelection = emptySet()
+        layerSelectMode = false
         selection = emptySet()
         detail = null
         effects = emptyList()
@@ -5294,6 +5539,70 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             withContext(Dispatchers.Main) { refreshProjects() }
         }
+    }
+
+    // =========================================================================
+    // Arquivo do projeto (ProjectFile.kt + motor: ProjectPackage.cpp)
+    // =========================================================================
+    /** Nome sugerido para o documento do "Exportar arquivo do projeto". */
+    fun projectFileName(path: String): String {
+        val title = readMeta(File(path))?.title ?: File(path).nameWithoutExtension
+        val base = title.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifEmpty { "Projeto" }
+        return "$base.${ProjectFile.EXTENSION}"
+    }
+
+    /** Grava o projeto (e, com `includeMedia`, a mídia) num arquivo só em `target`. */
+    fun exportProjectFile(path: String, includeMedia: Boolean, target: Uri) {
+        val app = getApplication<Application>()
+        busyMessage = appText(R.string.project_file_exporting)
+        viewModelScope.launch {
+            // O projeto aberto no editor sai como está agora.
+            if (ready && project.path == path) withContext(Dispatchers.IO) { saveBlocking(path, withThumbnail = false) }
+            val title = readMeta(File(path))?.title ?: File(path).nameWithoutExtension
+            val r = withContext(Dispatchers.IO) { ProjectFile.export(app, engine, path, title, includeMedia, target) }
+            busyMessage = null
+            when {
+                r.code != 0 -> errorMessage = appText(R.string.project_file_export_failed, projectFileError(r.code))
+                r.skipped > 0 -> showToast(appText(R.string.project_file_exported_skipped, r.skipped))
+                else -> showToast(appText(R.string.project_file_exported))
+            }
+        }
+    }
+
+    /** Lê um arquivo do projeto (ou um `.aurea`) como projeto NOVO — nunca por cima de outro. */
+    fun importProjectFile(uri: Uri) {
+        val app = getApplication<Application>()
+        busyMessage = appText(R.string.project_file_importing)
+        viewModelScope.launch {
+            val fallback = (displayName(uri) ?: appText(R.string.project_file_imported_title))
+                .substringBeforeLast('.').ifBlank { appText(R.string.project_file_imported_title) }
+            val r = withContext(Dispatchers.IO) {
+                val out = ProjectFile.import(app, engine, uri, directories().projects, fallback) { uniqueName(it) }
+                if (out.code == 0) {
+                    // Sidecar com o título (Home); tamanho e duração vêm na primeira abertura.
+                    runCatching { writeTextAtomic(File(out.path + META_SUFFIX), JSONObject().put("title", out.title).toString()) }
+                }
+                out
+            }
+            busyMessage = null
+            if (r.code != 0) {
+                errorMessage = projectFileError(r.code)
+                return@launch
+            }
+            refreshProjects()
+            showToast(
+                if (r.missing > 0) appText(R.string.project_file_imported_missing, r.title, r.missing)
+                else appText(R.string.project_file_imported, r.title),
+            )
+        }
+    }
+
+    private fun projectFileError(code: Int): String = when (code) {
+        ProjectFile.ERR_NOT_PROJECT -> appText(R.string.project_file_err_not_project)
+        ProjectFile.ERR_NEWER -> appText(R.string.project_file_err_newer)
+        ProjectFile.ERR_CORRUPT, ProjectFile.ERR_CHECKSUM -> appText(R.string.project_file_err_corrupt)
+        ProjectFile.ERR_IO -> appText(R.string.project_file_err_unreadable)
+        else -> humanError(code)
     }
 
     fun refreshProjects() {

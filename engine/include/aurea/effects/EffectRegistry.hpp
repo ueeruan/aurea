@@ -181,6 +181,14 @@ namespace effect_keys {
     inline constexpr const char* kAudioWaveform         = "aurea.generate.audio_waveform";
     inline constexpr const char* kAudioSpectrumAnalyzer = "aurea.generate.spectrum_analyzer";
     inline constexpr const char* kBallGrid              = "aurea.stylize.ball_grid";
+
+    // --- Do app antigo: tremor em trancos (ver MotionBehaviorEffects.cpp) ---
+    inline constexpr const char* kTwitch                = "aurea.motion.twitch";
+
+    // --- Particular (o sistema de partículas do app antigo, nativo) ---
+    // Motor das camadas de partículas novas (ParticleEmitter::Particular) e
+    // também um efeito comum de Gerar. Ver ParticularEffect.cpp.
+    inline constexpr const char* kParticular            = "aurea.generate.particular";
 }
 
 } // namespace aurea

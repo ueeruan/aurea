@@ -101,6 +101,10 @@ struct VectorStroke {
     f32  miterLimit = 4.0f;
     std::vector<f32> dashes;             ///< traço, vão, traço, vão… (px); vazio = contínuo
     f32  dashOffset = 0.0f;
+    /// Afinar (como no app antigo): % do comprimento em que a largura sai de
+    /// zero no começo / volta a zero no fim; `taperEase` (0..100 %) arredonda
+    /// a rampa (0 = reta, 100 = bojuda). 0/0 = largura constante.
+    f32  taperStart = 0.0f, taperEnd = 0.0f, taperEase = 0.0f;
     friend bool operator==(const VectorStroke&, const VectorStroke&) noexcept = default;
 };
 

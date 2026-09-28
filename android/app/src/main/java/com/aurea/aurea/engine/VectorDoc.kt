@@ -70,6 +70,8 @@ data class VGroup(
     var strokeOn: Boolean = false, var strokeWidth: Float = 6f, var cap: Int = 0, var join: Int = 0,
     var miter: Float = 4f, var dashOffset: Float = 0f, val dashes: MutableList<Float> = mutableListOf(),
     var stroke: VPaint = VPaint(),
+    /** Afinar do contorno (v2 do documento): % do começo, % do fim, suavidade %. */
+    var taperStart: Float = 0f, var taperEnd: Float = 0f, var taperEase: Float = 0f,
     var trimOn: Boolean = false, var trimStart: Float = 0f, var trimEnd: Float = 100f, var trimOffset: Float = 0f, var trimMode: Int = 0,
     var repOn: Boolean = false, var repCopies: Float = 3f, var repOffset: Float = 0f,
     var repAx: Float = 0f, var repAy: Float = 0f, var repPx: Float = 120f, var repPy: Float = 0f,
@@ -96,7 +98,7 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
 
     fun encode(): FloatArray {
         val o = ArrayList<Float>(256)
-        o += 1f
+        o += DOC_VERSION
         o += groups.size.toFloat()
         for (g in groups) {
             o += if (g.visible) 1f else 0f; o += g.merge.toFloat()
@@ -106,6 +108,7 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
             o += if (g.strokeOn) 1f else 0f; o += g.strokeWidth; o += g.cap.toFloat(); o += g.join.toFloat(); o += g.miter; o += g.dashOffset
             o += g.dashes.size.toFloat(); o.addAll(g.dashes)
             putPaint(g.stroke, o)
+            o += g.taperStart; o += g.taperEnd; o += g.taperEase
             o += if (g.trimOn) 1f else 0f; o += g.trimStart; o += g.trimEnd; o += g.trimOffset; o += g.trimMode.toFloat()
             o += if (g.repOn) 1f else 0f; o += g.repCopies; o += g.repOffset; o += g.repAx; o += g.repAy; o += g.repPx; o += g.repPy
             o += g.repScale; o += g.repRotation; o += g.repStartOpacity; o += g.repEndOpacity; o += g.repAbove.toFloat()
@@ -124,6 +127,9 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
     fun names(): String = groups.joinToString("\n") { it.name.replace('\n', ' ') }
 
     companion object {
+        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno. */
+        const val DOC_VERSION = 2f
+
         private fun putPaint(p: VPaint, o: MutableList<Float>) {
             o += p.type.toFloat(); o += p.r; o += p.g; o += p.b; o += p.a; o += p.sx; o += p.sy; o += p.ex; o += p.ey; o += p.opacity
             o += p.stops.size.toFloat()
@@ -141,7 +147,8 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
             if (d == null || d.size < 2) return null
             return try {
                 val r = VReader(d)
-                if (r.f() != 1f) return null
+                val version = r.f()
+                if (version != 1f && version != DOC_VERSION) return null
                 val nm = names?.split('\n') ?: emptyList()
                 val n = r.i()
                 val doc = VectorDoc()
@@ -153,6 +160,7 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
                     g.strokeOn = r.b(); g.strokeWidth = r.f(); g.cap = r.i(); g.join = r.i(); g.miter = r.f(); g.dashOffset = r.f()
                     repeat(r.i()) { g.dashes += r.f() }
                     g.stroke = getPaint(r)
+                    if (version >= 2f) { g.taperStart = r.f(); g.taperEnd = r.f(); g.taperEase = r.f() }
                     g.trimOn = r.b(); g.trimStart = r.f(); g.trimEnd = r.f(); g.trimOffset = r.f(); g.trimMode = r.i()
                     g.repOn = r.b(); g.repCopies = r.f(); g.repOffset = r.f(); g.repAx = r.f(); g.repAy = r.f(); g.repPx = r.f(); g.repPy = r.f()
                     g.repScale = r.f(); g.repRotation = r.f(); g.repStartOpacity = r.f(); g.repEndOpacity = r.f(); g.repAbove = r.i()

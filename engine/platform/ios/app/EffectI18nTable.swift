@@ -25,6 +25,7 @@ enum EffectI18nTable {
     aurea.color.exposure|0|exposure|fxl_exposure|
     aurea.color.exposure|1|offset|fx_compensacao|
     aurea.color.exposure|2|gamma|fx_tons_medios|
+    aurea.color.exposure|3|space|fx_aplicar_em|fxo_linear_light,fxo_encoded_value
     aurea.color.brightness_contrast|0|brightness|fx_brilho|
     aurea.color.brightness_contrast|1|contrast|fx_contraste|
     aurea.color.saturation|0|saturation|fx_saturacao|
@@ -67,14 +68,13 @@ enum EffectI18nTable {
     aurea.light.glow|2|intensity|fxl_amount|
     aurea.light.glow|3|color|fxl_color|
     aurea.stylize.motion_tile|0|tile_center|fx_centro|
-    aurea.stylize.motion_tile|1|tile_width|fx_largura|
-    aurea.stylize.motion_tile|2|tile_height|fx_altura|
-    aurea.stylize.motion_tile|3|output_width|fx_largura_total|
-    aurea.stylize.motion_tile|4|output_height|fx_altura_total|
-    aurea.stylize.motion_tile|5|mirror_edges|fx_espelhar|
-    aurea.stylize.motion_tile|6|clamp_edges|fx_esticar_bordas|
-    aurea.stylize.motion_tile|7|phase|fx_deslocamento|
-    aurea.stylize.motion_tile|8|horizontal_phase_shift|fx_deslocar_horizontal|
+    aurea.stylize.motion_tile|1|tile_width|fx_mt_largura_ladrilho|
+    aurea.stylize.motion_tile|2|tile_height|fx_mt_altura_ladrilho|
+    aurea.stylize.motion_tile|3|output_width|fx_mt_largura_saida|
+    aurea.stylize.motion_tile|4|output_height|fx_mt_altura_saida|
+    aurea.stylize.motion_tile|5|mirror_edges|fx_mt_espelhar_bordas|
+    aurea.stylize.motion_tile|7|phase|fx_fase|
+    aurea.stylize.motion_tile|8|horizontal_phase_shift|fx_mt_fase_horizontal|
     aurea.key.luma|0|key_type|fx_remover|fxo_key_out_darks,fxo_key_out_brights
     aurea.key.luma|1|threshold|fx_limite|
     aurea.key.luma|2|softness|fxl_softness|
@@ -701,6 +701,8 @@ enum EffectI18nTable {
     aurea.stylize.mosaic|3|shade|fx_sombreado|
     aurea.stylize.mosaic|4|cell_vignette|fx_vinheta_celula|
     aurea.stylize.mosaic|5|background|fx_cor_fundo|
+    aurea.stylize.mosaic|6|style|fx_estilo|fxo_free,fxo_block_mosaic,fxo_led_wall,fxo_dot_matrix
+    aurea.stylize.mosaic|7|vignette|fx_vinheta|
     aurea.stylize.find_edges|0|intensity|fx_intensidade|
     aurea.stylize.find_edges|1|width|fx_largura|
     aurea.stylize.find_edges|2|invert|fx_inverter|
@@ -899,5 +901,50 @@ enum EffectI18nTable {
     aurea.stylize.ball_grid|6|ball_size|afx_p_ball_size|
     aurea.stylize.ball_grid|7|instability_state|afx_p_instability_state|
     aurea.stylize.ball_grid|8|instability|afx_p_instability|
+    aurea.motion.twitch|0|frequency|fx_frequencia|
+    aurea.motion.twitch|1|strength|fx_intensidade|
+    aurea.motion.twitch|2|rotation|fx_rotacao|
+    aurea.motion.twitch|3|scale|fx_escala|
+    aurea.motion.twitch|4|soften|fx_suavizar|
+    aurea.motion.twitch|5|decay|fx_decaimento|
+    aurea.motion.twitch|6|seed|fx_semente|
+    aurea.generate.particular|0|rate|fxl_particles_sec|
+    aurea.generate.particular|1|pre_roll|fxl_pre_roll|
+    aurea.generate.particular|2|position_x|fx_posicao_x|
+    aurea.generate.particular|3|position_y|fx_posicao_y|
+    aurea.generate.particular|4|position_z|fxl_position_z|
+    aurea.generate.particular|5|emitter_size_x|fxl_emitter_size_x|
+    aurea.generate.particular|6|emitter_size_y|fxl_emitter_size_y|
+    aurea.generate.particular|7|emitter_size_z|fxl_emitter_size_z|
+    aurea.generate.particular|8|emitter_sphere|fxl_sphere_emitter|
+    aurea.generate.particular|9|velocity|fxl_speed|
+    aurea.generate.particular|10|velocity_random|fxl_velocity_random|
+    aurea.generate.particular|11|direction_tilt|fxl_direction_tilt|
+    aurea.generate.particular|12|direction_spin|fxl_direction_spin|
+    aurea.generate.particular|13|spread|fxl_spread_2|
+    aurea.generate.particular|14|outwards|fxl_outwards|
+    aurea.generate.particular|15|gravity|fxl_gravity|
+    aurea.generate.particular|16|wind_x|fxl_wind_x|
+    aurea.generate.particular|17|wind_y|fxl_wind_y|
+    aurea.generate.particular|18|wind_z|fxl_wind_z|
+    aurea.generate.particular|19|air_drag|fxl_air_drag|
+    aurea.generate.particular|20|turbulence|fx_name_turbulence|
+    aurea.generate.particular|21|turbulence_speed|fxl_turbulence_speed|
+    aurea.generate.particular|22|life|fxl_life|
+    aurea.generate.particular|23|life_random|fxl_life_random|
+    aurea.generate.particular|24|size|fx_tamanho|
+    aurea.generate.particular|25|size_random|fxl_size_random|
+    aurea.generate.particular|26|size_end|fxl_end_size|
+    aurea.generate.particular|27|opacity|fxl_opacity|
+    aurea.generate.particular|28|fade_in|fxl_fade_in|
+    aurea.generate.particular|29|fade_out|fxl_fade_out|
+    aurea.generate.particular|30|feather|fx_suavidade_borda|
+    aurea.generate.particular|31|stretch|fxl_motion_stretch|
+    aurea.generate.particular|32|color|fxl_particle_color|
+    aurea.generate.particular|33|color_end|fx_cor_final|
+    aurea.generate.particular|34|color_random|fxl_color_random|
+    aurea.generate.particular|35|add_mode|fxl_add_mode|
+    aurea.generate.particular|36|show_source|fxl_show_layer|
+    aurea.generate.particular|37|seed|fxl_seed|
     """
 }

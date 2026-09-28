@@ -485,6 +485,10 @@ final class AureaModel: ObservableObject {
     @Published var timelineKeySelection: TimelineKeySelection? = nil
     /// Modo "Selecionar": tocar num losango soma/tira em vez de trocar.
     @Published var timelineKeySelectMode = false
+    /// Modo "Selecionar várias camadas" (do app antigo): tocar num clipe da
+    /// timeline soma/tira da seleção; a timeline fica inteira. Par do
+    /// `layerSelectMode` do EditorStore.kt.
+    @Published private(set) var timelineLayerSelectMode = false
     private var pendingPlayhead: Int64?
     private var pendingPlayheadUntil: TimeInterval = 0
     enum ProjectSort: String, CaseIterable, Identifiable {
@@ -1679,6 +1683,7 @@ final class AureaModel: ObservableObject {
 
     func enterEditor() {
         timelineOnlySelection = []
+        timelineLayerSelectMode = false
         panel = .none
         screen = .editor
     }
@@ -3261,6 +3266,7 @@ extension AureaModel {
     /// alta, com as trilhas abertas) e deixa a camada escolhida só na timeline.
     func changeTimelineKeySelectMode(_ on: Bool) {
         if !on { timelineKeySelectMode = false; return }
+        timelineLayerSelectMode = false
         let base: TimelineKeySelection
         if let current = timelineKeySelection { base = current }
         else if let id = primarySelection { base = TimelineKeySelection(layer: id) }
@@ -3271,11 +3277,32 @@ extension AureaModel {
         timelineKeySelectMode = true
     }
 
+    /// Liga/desliga "Selecionar várias camadas". Ligar fecha o painel e a
+    /// escolha de keyframes; desligar ("Concluir") mantém a seleção.
+    func changeTimelineLayerSelectMode(_ on: Bool) {
+        if on {
+            clearTimelineKeySelection()
+            panel = .none
+        }
+        timelineLayerSelectMode = on
+    }
+
+    /// Toque num clipe no modo de escolha: soma/tira (com a doca/lote da seleção).
+    func toggleTimelineLayerPick(_ layer: Int64) {
+        select(layerId: layer, additive: true)
+    }
+
     /// Modo de escolha: alterna o grupo do losango (1 keyframe numa trilha; o
-    /// instante inteiro no resumo). Outra camada começa outra seleção.
+    /// instante inteiro no resumo). No modo "Selecionar", losangos de OUTRA
+    /// camada somam à seleção (várias camadas, como no app antigo) sem trocar a
+    /// escolhida; fora dele, outra camada começa outra seleção.
     func toggleTimelineKeys(_ layer: Int64, _ group: [KeyframeItem]) {
         if group.isEmpty { return }
         let mode = timelineKeySelectMode
+        if mode, let current = timelineKeySelection, current.layer != layer {
+            timelineKeySelection = current.toggledGroup(on: layer, group)
+            return
+        }
         if primarySelection != layer || selection.count != 1 {
             select(layerId: layer, additive: false, openOptions: false)
         }
@@ -3288,7 +3315,10 @@ extension AureaModel {
     func selectAllTimelineKeys() {
         guard let layer = timelineKeySelection?.layer ?? primarySelection else { return }
         let keys: [KeyframeItem] = keyframes[layer] ?? []
-        timelineKeySelection = TimelineKeySelection.all(layer, keys, focus: timelineFocus)
+        // As outras camadas já escolhidas continuam na seleção.
+        var next = TimelineKeySelection.all(layer, keys, focus: timelineFocus)
+        if let current = timelineKeySelection, current.layer == layer { next.others = current.others }
+        timelineKeySelection = next
     }
 
     /// Move a seleção inteira (atômico no motor: recusa colisão com keyframe
@@ -3296,11 +3326,42 @@ extension AureaModel {
     @discardableResult
     func shiftTimelineKeys(_ delta: Int32) -> Bool {
         guard let sel = timelineKeySelection, !sel.isEmpty, delta != 0 else { return false }
-        let changed: UInt32 = engine.keyframeSelection(sel.layer, references: sel.references(), action: 1, delta: delta)
-        if changed == 0 { return false }
-        timelineKeySelection = sel.shifted(delta)
+        // Várias camadas: cada uma é atômica no motor; se uma recusa (colisão),
+        // as que já andaram voltam — tudo ou nada, no mesmo passo de desfazer.
+        let back = sel.shifted(delta)
+        var moved: [Int64] = []
+        for id in sel.layerIds {
+            let changed: UInt32 = engine.keyframeSelection(id, references: sel.references(on: id), action: 1, delta: delta)
+            if changed > 0 { moved.append(id); continue }
+            for done in moved { _ = engine.keyframeSelection(done, references: back.references(on: done), action: 1, delta: -delta) }
+            if !moved.isEmpty { refreshModel(force: true) }
+            return false
+        }
+        timelineKeySelection = back
         refreshModel(force: true)
         return true
+    }
+
+    /// Copiar animação (app antigo): todos os keyframes da camada escolhida.
+    func copyAnimation() {
+        guard let id = primarySelection else { return }
+        let copied = engine.copyAnimation(id)
+        toast = copied > 0 ? AureaText.t("msg_keyframe_s_copiado_s", NSString(string: String(copied))) : AureaText.t("msg_camada_sem_keyframes")
+    }
+
+    /// Otimizar keyframes: só a propriedade dos keyframes escolhidos (se for
+    /// uma), senão todas; 1 % da amplitude de cada uma. Um passo de desfazer.
+    func optimizeKeyframes() {
+        guard let id = primarySelection else { return }
+        var property: Int32 = -1
+        if let sel = timelineKeySelection, sel.layer == id, !sel.isEmpty {
+            let props = Set(sel.keys.map(\.property))
+            if props.count == 1, let only = props.first { property = Int32(only) }
+        }
+        let removed = engine.optimizeKeyframes(id, property: property, tolerance: 0.01)
+        if removed > 0 { timelineKeySelection = nil }
+        refreshModel(force: true)
+        toast = removed > 0 ? AureaText.t("msg_keyframes_otimizados", NSString(string: String(removed))) : AureaText.t("msg_nada_otimizar")
     }
 
     func copyTimelineKeys() {
@@ -3336,7 +3397,13 @@ extension AureaModel {
     /// Excluir a seleção inteira (um passo de desfazer); a barra fecha.
     func deleteTimelineKeys() {
         guard let sel = timelineKeySelection, !sel.isEmpty else { return }
-        let removed: UInt32 = engine.keyframeSelection(sel.layer, references: sel.references(), action: 2, delta: 0)
+        let many: Bool = sel.crossLayer
+        if many { engine.run { $0.beginUndoGroup() } }
+        var removed: UInt32 = 0
+        for id in sel.layerIds {
+            removed += engine.keyframeSelection(id, references: sel.references(on: id), action: 2, delta: 0)
+        }
+        if many { engine.run { $0.endUndoGroup() } }
         if removed == 0 { return }
         if let time = curveSelectedTime {
             let primary = TimelineKeyRef(property: curveProperty, effect: curveEffect, param: curveParam, time: time)
@@ -3350,7 +3417,208 @@ extension AureaModel {
     func validateTimelineKeySelection() {
         guard let sel = timelineKeySelection else { return }
         let alive: Bool = layers.contains { $0.id == sel.layer }
-        let keys: [KeyframeItem] = keyframes[sel.layer] ?? []
-        if !alive || sel.validated(keys) == nil { clearTimelineKeySelection() }
+        let ids = Set(layers.map(\.id))
+        let valid = sel.validatedAll { id in ids.contains(id) ? (self.keyframes[id] ?? []) : nil }
+        if !alive || valid == nil { clearTimelineKeySelection() }
+    }
+}
+
+// =============================================================================
+// Substituir mídia e arquivo do projeto (motor: EngineMedia.cpp e
+// ProjectPackage.cpp; telas em ProjectTransfer.swift). Mesmo comportamento do
+// Android (EditorStore.replaceMedia / exportProjectFile / importProjectFile).
+// =============================================================================
+extension AureaModel {
+    /// "Substituir mídia": copia para Media/ e troca a fonte da camada. Um desfazer.
+    func replaceMedia(layer: Int64, url: URL, video: Bool) {
+        let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
+        let name = url.deletingPathExtension().lastPathComponent
+        let importer = engine
+        if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var result: Int64 = -1
+            var failure = ""
+            do {
+                try FileManager.default.copyItem(at: url, to: destination)
+                result = video ? importer.replaceLayer(layer, withVideo: destination.path, name: name)
+                               : importer.replaceLayer(layer, withImageFile: destination.path, name: name)
+                if result < 0 {
+                    failure = importer.lastImportError
+                    try? FileManager.default.removeItem(at: destination)
+                }
+            } catch { failure = error.localizedDescription }
+            let replaced = result, reason = failure
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if replaced < 0 {
+                    self.toast = AureaText.t("layer_replace_failed", reason.isEmpty ? String(-replaced) : reason)
+                    return
+                }
+                self.refreshModel(force: true)
+                self.select(layerId: replaced, openOptions: false)
+                self.toast = AureaText.t("layer_media_replaced", name)
+                _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    /// Arquivo de origem da camada (para "Informações da mídia"); "" = nenhum.
+    func layerSourcePath(_ layer: Int64) -> String { engine.layerSourcePath(layer) }
+
+    /// Mensagem de erro do arquivo do projeto pelo código do motor (`aurea::Errc`).
+    static func projectFileError(_ code: Int) -> String {
+        switch code {
+        case 17: return AureaText.t("project_file_err_not_project")
+        case 12: return AureaText.t("project_file_err_newer")
+        case 11, 13: return AureaText.t("project_file_err_corrupt")
+        case 28: return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
+        default: return AureaText.t("project_file_err_unreadable")
+        }
+    }
+
+    /// "Exportar arquivo do projeto": grava o pacote numa pasta temporária e
+    /// devolve o arquivo para a folha de compartilhar (nil = falhou; o motivo vai no toast).
+    func exportProjectFile(path: String, title: String, includeMedia: Bool, done: @escaping (URL?) -> Void) {
+        if projectURL?.path == path { _ = saveProject(writeThumbnail: false) }
+        let importer = engine
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let invalid = CharacterSet(charactersIn: "/\\:").union(.controlCharacters)
+        let safe = title.components(separatedBy: invalid).joined(separator: "-").trimmingCharacters(in: .whitespaces)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArquivoProjeto", isDirectory: true)
+        let out = directory.appendingPathComponent((safe.isEmpty ? "Aurea" : safe) + ".aureaproj")
+        toast = AureaText.t("project_file_exporting")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var code = 0, skipped = 0
+            var media: [String] = []
+            if includeMedia {
+                if let refs = importer.projectFileMedia(path) {
+                    var i = 0
+                    while i + 3 < refs.count {
+                        let resolved = refs[i + 1].hasPrefix("file://") ? String(refs[i + 1].dropFirst(7)) : refs[i + 1]
+                        media += [refs[i], resolved, refs[i + 2]]
+                        i += 4
+                    }
+                } else { code = 11 }
+            }
+            if code == 0 {
+                try? FileManager.default.removeItem(at: directory)
+                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let r = AureaEngine.exportProjectPackage(path, to: out.path, title: title, appVersion: version, media: media)
+                code = r.first?.intValue ?? 10
+                skipped = r.count > 2 ? r[2].intValue : 0
+            }
+            let finalCode = code, finalSkipped = skipped
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if finalCode != 0 {
+                    self.toast = AureaText.t("project_file_export_failed", AureaModel.projectFileError(finalCode))
+                    done(nil)
+                    return
+                }
+                self.toast = finalSkipped > 0 ? AureaText.t("project_file_exported_skipped", finalSkipped) : AureaText.t("project_file_exported")
+                done(out)
+            }
+        }
+    }
+
+    /// "Importar arquivo do projeto": sempre um projeto NOVO (nome livre), a
+    /// mídia do pacote em Media/Projetos/<nome>/. `done` roda na thread principal.
+    func importProjectFile(_ url: URL, done: @escaping () -> Void) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        let fallback = url.deletingPathExtension().lastPathComponent
+        let name = uniqueHomeProjectName(fallback.isEmpty ? AureaText.t("project_file_imported_title") : fallback)
+        let project = AureaPaths.documents.appendingPathComponent(name + ".aurea")
+        let mediaDir = AureaPaths.media.appendingPathComponent("Projetos", isDirectory: true).appendingPathComponent(name, isDirectory: true)
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("entrada-\(UUID().uuidString).aureaproj")
+        toast = AureaText.t("project_file_importing")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            var r: [String] = ["10", "", "", "0", "0"]
+            do {
+                try FileManager.default.copyItem(at: url, to: temporary)
+                r = AureaEngine.importProjectPackage(temporary.path, project: project.path, mediaDir: mediaDir.path)
+            } catch {}
+            try? FileManager.default.removeItem(at: temporary)
+            let code = Int(r.first ?? "10") ?? 10
+            let title = (r.count > 1 && !r[1].isEmpty) ? r[1] : name
+            let missing = r.count > 4 ? Int(r[4]) ?? 0 : 0
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if code == 0 {
+                    // Sidecar com o título (Home); tamanho e duração vêm na primeira abertura.
+                    writeHomeProjectMeta(url: project, title: title, width: 0, height: 0, fps: 30, durationFrames: 0)
+                }
+                if code != 0 { self.toast = AureaModel.projectFileError(code) }
+                else if missing > 0 { self.toast = AureaText.t("project_file_imported_missing", title, missing) }
+                else { self.toast = AureaText.t("project_file_imported", title) }
+                done()
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Ajustar / preencher a tela, tamanho da composição e âncora predefinida
+// (ferramentas do app antigo — LayerOps.kt no Android, mesma conta)
+// =============================================================================
+extension AureaModel {
+    private struct FitGeom { let w: Float; let h: Float; let anchor: [Float]; let position: [Float]; let scale: [Float]; let rad: Float; let centered: Bool }
+
+    private func fitGeom(_ id: Int64) -> FitGeom? {
+        guard let d = queryDetail(id) else { return nil }
+        let w = StageGeom.width(d), h = StageGeom.height(d)
+        let anchor = StageGeom.floats(d["anchor"]), position = StageGeom.floats(d["position"]), scale = StageGeom.floats(d["scale"])
+        let rotation = StageGeom.floats(d["rotation"])
+        guard w > 0, h > 0, anchor.count >= 3, position.count >= 3, scale.count >= 2 else { return nil }
+        return FitGeom(w: w, h: h, anchor: anchor, position: position, scale: scale,
+                       rad: (rotation.count > 2 ? rotation[2] : 0) * .pi / 180, centered: StageGeom.layerKind(d) == 10)
+    }
+
+    /// Posição que põe o CENTRO da mídia em (cx, cy) com a escala (sx, sy) e o giro atual.
+    private func positionForCenter(_ g: FitGeom, sx: Float, sy: Float, cx: Float, cy: Float) -> (Float, Float) {
+        let ax = g.anchor[0] + (g.centered ? g.w * 0.5 : 0), ay = g.anchor[1] + (g.centered ? g.h * 0.5 : 0)
+        let dx = (g.w * 0.5 - ax) * sx, dy = (g.h * 0.5 - ay) * sy
+        let c = cos(g.rad), s = sin(g.rad)
+        return (cx - (dx * c - dy * s), cy - (dx * s + dy * c))
+    }
+
+    /// Ajustar à tela (cabe inteira) ou Preencher (cobre): escala uniforme,
+    /// espelho preservado, centro da mídia no centro. Um passo de desfazer.
+    func fitToCanvas(_ ids: [Int64], fill: Bool) {
+        let cw = Float(compositionWidth), ch = Float(compositionHeight)
+        let targets = ids.filter { id in !(layers.first { $0.id == id }?.locked ?? false) }.compactMap { id in fitGeom(id).map { (id, $0) } }
+        guard cw > 0, ch > 0, !targets.isEmpty else { return }
+        beginGesture(fill ? "preencher a tela" : "ajustar à tela")
+        for (id, g) in targets {
+            let k = fill ? max(cw / g.w, ch / g.h) : min(cw / g.w, ch / g.h)
+            let sx = g.scale[0] < 0 ? -k : k, sy = g.scale[1] < 0 ? -k : k
+            let p = positionForCenter(g, sx: sx, sy: sy, cx: cw / 2, cy: ch / 2)
+            setTransform2(3, sx, 4, sy, layer: id)
+            setTransform2(0, p.0, 1, p.1, layer: id)
+        }
+        endGesture()
+    }
+
+    /// Tamanho da composição = o da camada (mídia × escala, pares); a camada vai para o centro.
+    func makeCompositionSize(_ id: Int64) {
+        guard let g = fitGeom(id), let comp = (composition["id"] as? NSNumber)?.uint64Value else { return }
+        func even(_ v: Float) -> Int { max(2, Int((v / 2).rounded()) * 2) }
+        let w = even(g.w * abs(g.scale[0])), h = even(g.h * abs(g.scale[1]))
+        beginGesture("tamanho da composição")
+        mutate { $0.setComposition(comp, width: UInt32(w), height: UInt32(h)) }
+        let p = positionForCenter(g, sx: g.scale[0], sy: g.scale[1], cx: Float(w) / 2, cy: Float(h) / 2)
+        setTransform2(0, p.0, 1, p.1, layer: id)
+        endGesture()
+    }
+
+    /// Âncora predefinida: um dos 9 pontos (fx, fy ∈ 0, ½, 1) da mídia; a posição compensa.
+    func presetAnchor(_ id: Int64, fx: Float, fy: Float) {
+        guard let g = fitGeom(id) else { return }
+        let ax = fx * g.w - (g.centered ? g.w * 0.5 : 0), ay = fy * g.h - (g.centered ? g.h * 0.5 : 0)
+        let dx = (ax - g.anchor[0]) * g.scale[0], dy = (ay - g.anchor[1]) * g.scale[1]
+        let c = cos(g.rad), s = sin(g.rad)
+        beginGesture("âncora predefinida")
+        setPivot(id, anchor: [ax, ay, g.anchor[2]], position: [g.position[0] + dx * c - dy * s, g.position[1] + dx * s + dy * c, g.position[2]])
+        endGesture()
     }
 }

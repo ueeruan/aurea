@@ -46,6 +46,7 @@ add_executable(aurea_tests
     test_keyframe_shape.cpp
     test_vector.cpp
     test_vector_gpu.cpp
+    test_editing_tools.cpp
     test_export.cpp
     test_perf.cpp
     test_timeline_scale.cpp
@@ -56,6 +57,8 @@ add_executable(aurea_tests
     test_startup.cpp
     test_heavy.cpp
     test_i18n.cpp
+    test_project_package.cpp
+    test_layer_anim.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

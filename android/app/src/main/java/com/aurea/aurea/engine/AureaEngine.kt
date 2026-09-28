@@ -84,7 +84,9 @@ class AureaEngine private constructor() {
         @JvmStatic
         fun decodeImage(source: String): ByteArray? {
             val ctx = appContext ?: return null
-            val bmp = decodeBitmapRgba(ctx, Uri.parse(source)) ?: return null
+            // Caminho solto (mídia restaurada de um arquivo do projeto) vira file://.
+            val uri = if (source.startsWith("/")) Uri.fromFile(java.io.File(source)) else Uri.parse(source)
+            val bmp = decodeBitmapRgba(ctx, uri) ?: return null
             val w = bmp.width
             val h = bmp.height
             val out = ByteArray(8 + w * h * 4)
@@ -292,8 +294,9 @@ class AureaEngine private constructor() {
      * concatenadas. Devolve `(camadas shl 32) or total`; se não coube, nada
      * foi escrito e quem chama cresce os buffers.
      */
+    /** [x1, y1, x2, y2, força 1..3] do trecho que sai do keyframe. */
     fun queryKeyframeEasing(layer: Long, property: Int, effect: Int, param: Int, time: Int): FloatArray? {
-        val handles = FloatArray(4)
+        val handles = floatArrayOf(0f, 0f, 0f, 0f, 1f)
         return if (nativeQueryKeyframeEasing(nativeHandle, layer, property, effect, param, time, handles)) handles else null
     }
 
@@ -395,6 +398,10 @@ class AureaEngine private constructor() {
     fun editKeyframeSelection(layer: Long, references: LongArray, delta: Int, remove: Boolean = false): Int =
         nativeKeyframeSelection(nativeHandle, layer, references, if (remove) 2 else 1, delta)
     fun pasteKeyframes(ids: LongArray, frame: Long): Int = nativePasteKeyframes(nativeHandle, ids, frame)
+    /** Todos os keyframes da camada (tempo relativo ao primeiro); cola com [pasteKeyframes]. */
+    fun copyAnimation(layer: Long): Int = nativeCopyAnimation(nativeHandle, layer)
+    /** Tira keyframes redundantes (`property` < 0 = todas); tolerância = fração da amplitude. */
+    fun optimizeKeyframes(layer: Long, property: Int, tolerance: Float): Int = nativeOptimizeKeyframes(nativeHandle, layer, property, tolerance)
     /** Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes. */
     fun clipboardState(): Int = nativeClipboardState(nativeHandle)
 
@@ -527,6 +534,23 @@ class AureaEngine private constructor() {
     fun clearTextSpans(layer: Long, start: Int, end: Int): Boolean = nativeClearTextSpans(nativeHandle, layer, start, end)
     fun queryTextAnimators(layer: Long): FloatArray? = nativeQueryTextAnimators(nativeHandle, layer)
     fun layerMediaPath(layer: Long): String? = nativeLayerMediaPath(nativeHandle, layer)
+
+    /** "Substituir mídia": troca a fonte da camada de vídeo/imagem por um vídeo. id ou −código. */
+    fun replaceLayerVideo(layer: Long, source: String, name: String): Long =
+        nativeReplaceLayerVideo(nativeHandle, layer, source, name)
+    /** "Substituir mídia" por uma foto (RGBA8 em buffer direto, como [importImage]). */
+    fun replaceLayerImage(layer: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String): Long =
+        nativeReplaceLayerImage(nativeHandle, layer, rgba, width, height, name, source)
+    /** Arquivo de origem da camada de vídeo, áudio ou imagem (caminho ou URI); null = nenhum. */
+    fun layerSourcePath(layer: Long): String? = nativeLayerSourcePath(nativeHandle, layer)
+    /** Mídias de um `.aurea` fechado: 4 strings por mídia (gravado, legível, nome, tipo). null = não abre. */
+    fun projectFileMedia(path: String): Array<String>? = nativeProjectFileMedia(nativeHandle, path)
+    /** Arquivo do projeto: [erro (0 = ok), incluídas, puladas]. `media` = 3 strings por mídia. */
+    fun exportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>): IntArray =
+        nativeExportProjectPackage(project, out, title, appVersion, media) ?: intArrayOf(10, 0, 0)   // 10 = Errc::IoError
+    /** [erro (0 = ok), título, versão do app, religadas, ausentes]. */
+    fun importProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String> =
+        nativeImportProjectPackage(pkg, projectOut, mediaDir) ?: arrayOf("10", "", "", "0", "0")
     fun createCaptions(layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int =
         nativeCreateCaptions(nativeHandle, layer, texts, times, ints, floats)
     fun removeCaptions(layer: Long): Int = nativeRemoveCaptions(nativeHandle, layer)
@@ -552,6 +576,27 @@ class AureaEngine private constructor() {
     fun setTextAnimParam(layer: Long, index: Int, param: Int, value: Float): Boolean = nativeSetTextAnimParam(nativeHandle, layer, index, param, value)
     fun toggleTextAnimKey(layer: Long, index: Int, param: Int): Boolean = nativeToggleTextAnimKey(nativeHandle, layer, index, param)
     fun applyTextPreset(layer: Long, preset: Int): Boolean = nativeApplyTextPreset(nativeHandle, layer, preset)
+
+    /** Animadores de camada: 32 floats cada (ver Engine::kLayerAnimFloats). */
+    fun queryLayerAnimators(layer: Long): FloatArray? = nativeQueryLayerAnimators(nativeHandle, layer)
+    fun addLayerAnimator(layer: Long): Int = nativeAddLayerAnimator(nativeHandle, layer)
+    fun removeLayerAnimator(layer: Long, index: Int): Boolean = nativeRemoveLayerAnimator(nativeHandle, layer, index)
+    fun setLayerAnimator(layer: Long, index: Int, v: FloatArray): Boolean = nativeSetLayerAnimator(nativeHandle, layer, index, v)
+    fun setLayerAnimParam(layer: Long, index: Int, param: Int, value: Float): Boolean = nativeSetLayerAnimParam(nativeHandle, layer, index, param, value)
+    fun toggleLayerAnimKey(layer: Long, index: Int, param: Int): Boolean = nativeToggleLayerAnimKey(nativeHandle, layer, index, param)
+    fun copyLayerAnimators(layer: Long): Int = nativeCopyLayerAnimators(nativeHandle, layer)
+    fun pasteLayerAnimators(ids: LongArray): Int = nativePasteLayerAnimators(nativeHandle, ids)
+    fun layerAnimatorClipboard(): Int = nativeLayerAnimatorClipboard(nativeHandle)
+    fun setLayerMotionBlurLength(layer: Long, factor: Float): Boolean = nativeSetLayerMotionBlurLength(nativeHandle, layer, factor)
+    fun queryLayerMotionBlurLength(layer: Long): Float = nativeQueryLayerMotionBlurLength(nativeHandle, layer)
+    fun setAdjustmentScope(layer: Long, scope: Int): Boolean = nativeSetAdjustmentScope(nativeHandle, layer, scope)
+    fun queryAdjustmentScope(layer: Long): Int = nativeQueryAdjustmentScope(nativeHandle, layer)
+    fun setGroupCameraPassThrough(layer: Long, on: Boolean): Boolean = nativeSetGroupCameraPassThrough(nativeHandle, layer, on)
+    /** −1 = não é grupo. */
+    fun queryGroupCameraPassThrough(layer: Long): Int = nativeQueryGroupCameraPassThrough(nativeHandle, layer)
+    /** Nulo = deu certo; senão o motivo da recusa. */
+    fun addLayersToGroup(ids: LongArray, group: Long): String? = nativeAddLayersToGroup(nativeHandle, ids, group)
+    fun removeLayerFromGroup(layer: Long): String? = nativeRemoveLayerFromGroup(nativeHandle, layer)
 
     // Presets (JSON do motor, formato em engine/include/aurea/project/Presets.hpp).
     /** kind 0 efeitos, 1 texto, 2 animação; parts (texto) 1 estilo, 2 animadores. Nulo = nada a salvar. */
@@ -846,6 +891,14 @@ class AureaEngine private constructor() {
     private external fun nativeClearTextSpans(handle: Long, layer: Long, start: Int, end: Int): Boolean
     private external fun nativeQueryTextAnimators(handle: Long, layer: Long): FloatArray?
     private external fun nativeLayerMediaPath(handle: Long, layer: Long): String?
+    private external fun nativeReplaceLayerVideo(handle: Long, layer: Long, source: String, name: String): Long
+    private external fun nativeReplaceLayerImage(
+        handle: Long, layer: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
+    ): Long
+    private external fun nativeLayerSourcePath(handle: Long, layer: Long): String?
+    private external fun nativeProjectFileMedia(handle: Long, path: String): Array<String>?
+    private external fun nativeExportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>): IntArray?
+    private external fun nativeImportProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String>?
     private external fun nativeCreateCaptions(handle: Long, layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int
     private external fun nativeRemoveCaptions(handle: Long, layer: Long): Int
     private external fun nativeCaptionCount(handle: Long, layer: Long): Int
@@ -857,6 +910,23 @@ class AureaEngine private constructor() {
     private external fun nativeSetTextAnimParam(handle: Long, layer: Long, index: Int, param: Int, value: Float): Boolean
     private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
     private external fun nativeApplyTextPreset(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeQueryLayerAnimators(handle: Long, layer: Long): FloatArray?
+    private external fun nativeAddLayerAnimator(handle: Long, layer: Long): Int
+    private external fun nativeRemoveLayerAnimator(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeSetLayerAnimator(handle: Long, layer: Long, index: Int, v: FloatArray): Boolean
+    private external fun nativeSetLayerAnimParam(handle: Long, layer: Long, index: Int, param: Int, value: Float): Boolean
+    private external fun nativeToggleLayerAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
+    private external fun nativeCopyLayerAnimators(handle: Long, layer: Long): Int
+    private external fun nativePasteLayerAnimators(handle: Long, ids: LongArray): Int
+    private external fun nativeLayerAnimatorClipboard(handle: Long): Int
+    private external fun nativeSetLayerMotionBlurLength(handle: Long, layer: Long, factor: Float): Boolean
+    private external fun nativeQueryLayerMotionBlurLength(handle: Long, layer: Long): Float
+    private external fun nativeSetAdjustmentScope(handle: Long, layer: Long, scope: Int): Boolean
+    private external fun nativeQueryAdjustmentScope(handle: Long, layer: Long): Int
+    private external fun nativeSetGroupCameraPassThrough(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeQueryGroupCameraPassThrough(handle: Long, layer: Long): Int
+    private external fun nativeAddLayersToGroup(handle: Long, ids: LongArray, group: Long): String?
+    private external fun nativeRemoveLayerFromGroup(handle: Long, layer: Long): String?
     private external fun nativeSavePreset(handle: Long, layer: Long, kind: Int, name: ByteArray, parts: Int): ByteArray?
     private external fun nativeSaveEffectPreset(handle: Long, layer: Long, effectId: Int, name: ByteArray): ByteArray?
     private external fun nativeImportAlightMotion(handle: Long, data: ByteArray): ByteArray?
@@ -947,6 +1017,8 @@ class AureaEngine private constructor() {
     private external fun nativeCopyKeyframes(handle: Long, layer: Long, frame: Long): Int
     private external fun nativeKeyframeSelection(handle: Long, layer: Long, references: LongArray, action: Int, delta: Int): Int
     private external fun nativePasteKeyframes(handle: Long, ids: LongArray, frame: Long): Int
+    private external fun nativeCopyAnimation(handle: Long, layer: Long): Int
+    private external fun nativeOptimizeKeyframes(handle: Long, layer: Long, property: Int, tolerance: Float): Int
     private external fun nativeClipboardState(handle: Long): Int
     private external fun nativeEditMode(handle: Long): Boolean
     private external fun nativeRippleDelete(handle: Long, ids: LongArray): Boolean

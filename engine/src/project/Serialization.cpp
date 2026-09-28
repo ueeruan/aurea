@@ -168,6 +168,9 @@ private:
 // Gravação de filhos — helpers que percorrem o modelo.
 // -----------------------------------------------------------------------------
 
+/// Versão da seção Timeline que está sendo LIDA (ver o histórico em read_layer).
+thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
+
 void write_track(ByteWriter& w, const Track& t) {
     w.u16v(static_cast<u16>(t.property));
     w.u32v(t.effectIndex);
@@ -181,6 +184,7 @@ void write_track(ByteWriter& w, const Track& t) {
         w.f32v(k.bx1); w.f32v(k.by1); w.f32v(k.bx2); w.f32v(k.by2);
         w.f32v(k.tangentIn); w.f32v(k.tangentOut);
         w.u16v(k.easingPreset);
+        w.u8v(clamp_ease_power(k.easePower));   // v35
     }
 }
 
@@ -213,6 +217,7 @@ void read_track(ByteReader& r, Track& t) {
         k.bx1 = r.f32v(); k.by1 = r.f32v(); k.bx2 = r.f32v(); k.by2 = r.f32v();
         k.tangentIn = r.f32v(); k.tangentOut = r.f32v();
         k.easingPreset = r.u16v();
+        k.easePower = g_readingTimelineVersion >= 35 ? clamp_ease_power(r.u8v()) : u8{1};
         t.keys.push_back(k);
     }
     // Projetos antigos podem trazer tempos repetidos ou fora de ordem.
@@ -832,6 +837,21 @@ void write_layer(ByteWriter& w, const Layer& l) {
     // que o trecho pertence — o split dá a MESMA linha aos dois pedaços.
     w.boolv(l.magneticTrack);
     w.u32v(l.trackId);
+    // v36: animadores de camada (entrada/saída/wiggle), camadas afetadas pelo
+    // ajuste e a câmera que atravessa o grupo.
+    w.u32v(static_cast<u32>(l.layerAnimators.size()));
+    for (const LayerAnimator& a : l.layerAnimators) {
+        w.str(a.name);
+        w.boolv(a.enabled);
+        w.u8v(a.unit); w.boolv(a.exit); w.u8v(a.ease); w.boolv(a.scaleSeparated);
+        w.u32v(a.wiggleSeed);
+        for (f32 v : {a.progress, a.strength, a.delayMs, a.fromOpacity, a.fromPosX, a.fromPosY, a.fromScale, a.fromScaleY,
+                      a.fromRotation, a.fromRotX, a.fromRotY, a.fromTracking, a.wigglePosX, a.wigglePosY, a.wiggleScale,
+                      a.wiggleRotation, a.wiggleSpeed, a.wiggleHold})
+            w.f32v(v);
+    }
+    w.u8v(l.adjustmentScope);
+    w.boolv(l.nested.cameraPassThrough);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -856,9 +876,14 @@ void write_layer(ByteWriter& w, const Layer& l) {
 // v33: lente da câmera (DOF ligado e força do desfoque) no fim da camada.
 // v34: linha magnética da camada, no fim da camada. Projeto anterior a ela lê
 //      com a opção DESLIGADA e continua com o modo Edição da composição.
+// v36: animadores de camada, escopo do ajuste e câmera que atravessa o grupo,
+//      no fim da camada. Antes dela: nenhum animador, ajuste em tudo abaixo e
+//      grupo fechado para a câmera (o render de sempre).
+// v35: força da bézier (Keyframe::easePower) depois de cada keyframe; antes
+//      dela todo keyframe lê com força 1 — a mesma curva de sempre.
 // O número vive no cabeçalho público (Serialization.hpp) para os testes o
-// compararem sem escrever um literal que envelhece.
-thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
+// compararem sem escrever um literal que envelhece (declarado lá em cima, com
+// read_track, que é quem mais o consulta).
 
 void read_layer(ByteReader& r, Layer& l) {
     l.kind = checked_enum(r.u8v(), LayerKind::Composition, LayerKind::Unknown);
@@ -1314,6 +1339,33 @@ void read_layer(ByteReader& r, Layer& l) {
         // Edição da composição, que é o comportamento com que ela foi montada.
         l.magneticTrack = false;
         l.trackId = 0;   // sem linha: cada trecho antigo é a linha dele
+    }
+    if (g_readingTimelineVersion >= 36) {
+        const u32 n = r.u32v();
+        if (n > 1024 || r.remaining() < static_cast<u64>(n) * 80) { r.fail(); return; }
+        l.layerAnimators.resize(n);
+        auto fin = [&](f32 v, f32 fallback) { return std::isfinite(v) ? v : fallback; };
+        for (LayerAnimator& a : l.layerAnimators) {
+            a.name = r.str();
+            a.enabled = r.boolv();
+            a.unit = std::min<u8>(r.u8v(), 3);
+            a.exit = r.boolv();
+            a.ease = std::min<u8>(r.u8v(), 3);
+            a.scaleSeparated = r.boolv();
+            a.wiggleSeed = r.u32v();
+            for (f32* v : {&a.progress, &a.strength, &a.delayMs, &a.fromOpacity, &a.fromPosX, &a.fromPosY, &a.fromScale,
+                           &a.fromScaleY, &a.fromRotation, &a.fromRotX, &a.fromRotY, &a.fromTracking, &a.wigglePosX,
+                           &a.wigglePosY, &a.wiggleScale, &a.wiggleRotation, &a.wiggleSpeed, &a.wiggleHold})
+                *v = fin(r.f32v(), *v);
+        }
+        l.adjustmentScope = std::min<u8>(r.u8v(), 1);
+        l.nested.cameraPassThrough = r.boolv();
+    } else {
+        // Projeto anterior: nenhum animador de camada, o ajuste vale para tudo
+        // abaixo e o grupo é fechado para a câmera — o mesmo quadro de antes.
+        l.layerAnimators.clear();
+        l.adjustmentScope = 0;
+        l.nested.cameraPassThrough = false;
     }
 }
 

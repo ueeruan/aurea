@@ -252,3 +252,31 @@ AUREA_TEST(Track, BounceElasticAndFourStepsHaveRealDistinctMotion) {
         }
     }
 }
+
+// Força da bézier (easePower, como no app antigo): ×1 é a bézier de sempre;
+// ×2/×3 aplicam a MESMA curva de novo sobre o resultado, sem mexer nas alças.
+AUREA_TEST(Track, BezierPowerRepeatsTheSameCurveOnItsOwnResult) {
+    Track t; t.set(FrameIndex{0}, 0.f); t.set(FrameIndex{100}, 200.f);
+    t.set_interpolation(FrameIndex{0}, Interpolation::Bezier, .42f, 0.f, .58f, 1.f);
+    AUREA_CHECK_EQ(static_cast<u32>(t.keys[0].easePower), 1u);
+    for (int f = 0; f <= 100; f += 5) {
+        const f32 u = static_cast<f32>(f) / 100.f;
+        // Força 1: exatamente a conta anterior ao campo (projetos antigos não mudam).
+        AUREA_CHECK_EQ(t.sample(FrameIndex{f}), lerpf(0.f, 200.f, cubic_bezier(.42f, 0.f, .58f, 1.f, u)));
+    }
+    t.set_interpolation(FrameIndex{0}, Interpolation::Bezier, .42f, 0.f, .58f, 1.f, 2);
+    AUREA_CHECK_EQ(static_cast<u32>(t.keys[0].easePower), 2u);
+    const f32 once = cubic_bezier(.42f, 0.f, .58f, 1.f, .25f);
+    AUREA_CHECK_NEAR(t.sample(FrameIndex{25}), 200.f * cubic_bezier(.42f, 0.f, .58f, 1.f, once), 1e-4);
+    AUREA_CHECK(t.sample(FrameIndex{25}) < 200.f * once);          // acentua o ease-in
+    AUREA_CHECK_NEAR(t.sample(FrameIndex{100}), 200.f, 1e-6);       // as pontas não mudam
+    // 0 = mantém a força; mudar só a curva não zera o ×2.
+    t.set_interpolation(FrameIndex{0}, Interpolation::Bezier, .1f, .9f, .2f, 1.f, 0);
+    AUREA_CHECK_EQ(static_cast<u32>(t.keys[0].easePower), 2u);
+    // Fora da faixa é presa a 1..3; nomeados ignoram a força.
+    t.set_interpolation(FrameIndex{0}, Interpolation::Bezier, .42f, 0.f, .58f, 1.f, 9);
+    AUREA_CHECK_EQ(static_cast<u32>(t.keys[0].easePower), 3u);
+    t.set_interpolation(FrameIndex{0}, Interpolation::EaseIn, 0.f, 0.f, 1.f, 1.f);
+    AUREA_CHECK_NEAR(t.sample(FrameIndex{50}), 50.f, 1e-4);
+    static_assert(sizeof(Keyframe) == 48);
+}

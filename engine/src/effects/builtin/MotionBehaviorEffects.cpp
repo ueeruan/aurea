@@ -300,6 +300,105 @@ protected:
     }
 };
 
+
+// -----------------------------------------------------------------------------
+// Tremor em trancos (Twitch) — o do app antigo, refeito nativo.
+//
+// Um valor novo a cada tranco (Frequência trancos por segundo), SEGURO até o
+// próximo; Suavizar mistura com o seguinte numa curva suave. Quatro fluxos da
+// mesma semente — X, Y, rotação e escala — bem separados para nunca andarem
+// juntos. O sorteio é um hash aritmético em float (sem seno), o mesmo em toda
+// GPU e na CPU: a prévia e o export tremem igual.
+//
+// Intensidade é fração da ALTURA DO QUADRO (como no app antigo): a mesma
+// intensidade anda a mesma distância em qualquer resolução. Gira e aproxima em
+// volta do meio da camada.
+// -----------------------------------------------------------------------------
+class Twitch final : public MotionBehavior {
+public:
+    enum : u32 { kFrequency = 0, kStrength, kRotation, kScale, kSoften, kDecay, kSeed };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kTwitch, "Tremor em trancos", "Distorcer", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("frequency", "Frequência", 14.0f, 1.0f, 40.0f, kParamAnimatable, "Hz");
+        p.typed_range(0.0f, kMaxFrequency);
+        p.add_float("strength", "Intensidade", 1.5f, 0.0f, 50.0f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(0.0f, 1000.0f);
+        p.add_angle("rotation", "Rotação", 2.0f);
+        p.add_float("scale", "Escala", 2.0f, 0.0f, 50.0f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(0.0f, 1000.0f);
+        p.add_float("soften", "Suavizar", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("decay", "Decaimento", 0.0f, 0.0f, 5.0f, kParamAnimatable, "1/s");
+        p.typed_range(0.0f, kMaxDecay);
+        p.add_int("seed", "Semente", 0, 0, 100);
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        // O "Impacto" do app antigo, sem o decaimento (a prévia é um instante só).
+        v[kFrequency] = ParamValue::scalar(20.0f);
+        v[kStrength] = ParamValue::scalar(5.0f);
+        v[kRotation] = ParamValue::scalar(6.0f);
+        v[kScale] = ParamValue::scalar(6.0f);
+        return true;
+    }
+
+    /// Hash sem seno em [0, 1): aritmética de float igual à do shader antigo.
+    static f32 hash(f32 x) noexcept {
+        f32 q = x * 0.1031f;
+        q -= std::floor(q);
+        q *= q + 33.33f;
+        q *= q + q;
+        return q - std::floor(q);
+    }
+    /// Um fluxo em [-1, 1]: o valor do tranco, levado ao próximo por `ease`.
+    static f32 jolt(f32 stream, f32 tick, f32 f, f32 soften) noexcept {
+        const f32 a = hash(tick + stream);
+        const f32 b = hash(tick + 1.0f + stream);
+        const f32 fc = std::clamp(f, 0.0f, 1.0f);
+        const f32 k = fc * fc * (3.0f - 2.0f * fc) * std::clamp(soften, 0.0f, 1.0f);
+        return (a + (b - a) * k) * 2.0f - 1.0f;
+    }
+
+protected:
+    Pose pose(const EffectEval& e, f64 seconds) const noexcept override {
+        const f64 t = std::max(0.0, seconds);
+        const f64 freq = std::clamp(static_cast<f64>(finite_or(e.f(kFrequency), 0.0f)), 0.0,
+                                    static_cast<f64>(kMaxFrequency));
+        const f64 ticks = std::min(t * freq, 1e7);
+        const f64 tickD = std::floor(ticks);
+        const f32 tick = static_cast<f32>(tickD);
+        const f32 f = static_cast<f32>(ticks - tickD);
+        const f32 soften = finite_or(e.f(kSoften), 0.0f) / 100.0f;
+        const f32 seed = static_cast<f32>(std::clamp(e.value(kSeed).as_int(), 0, 100)) * 37.0f;
+        const f32 fall = falloff(e.f(kDecay), seconds);
+        const f32 strength = std::clamp(finite_or(e.f(kStrength), 0.0f), 0.0f, 1000.0f) / 100.0f * fall;
+
+        // Altura do quadro em px da camada, eixo a eixo (a camada pode estar escalada).
+        f32 frameH = e.placement ? static_cast<f32>(e.placement->layerHeight) : 1.0f;
+        f32 sx = 1.0f, sy = 1.0f;
+        if (e.placement && !e.placement->inScene3d && e.placement->compHeight > 0) {
+            const Mat4& m = e.placement->compFromLayer;
+            sx = std::hypot(m.col[0].x, m.col[0].y);
+            sy = std::hypot(m.col[1].x, m.col[1].y);
+            if (!(sx > 1e-6f) || !std::isfinite(sx)) sx = 1.0f;
+            if (!(sy > 1e-6f) || !std::isfinite(sy)) sy = 1.0f;
+            frameH = static_cast<f32>(e.placement->compHeight);
+        }
+
+        Pose p;
+        // O y do app antigo sobe; o da camada desce. O giro dele é anti-horário.
+        p.offset = Vec2{jolt(seed, tick, f, soften) * strength * frameH / sx,
+                        -jolt(seed + 11.0f, tick, f, soften) * strength * frameH / sy};
+        p.rotation = -jolt(seed + 23.0f, tick, f, soften) * finite_or(e.f(kRotation), 0.0f) * fall;
+        p.scale = 1.0f + jolt(seed + 41.0f, tick, f, soften)
+                       * std::clamp(finite_or(e.f(kScale), 0.0f), 0.0f, 1000.0f) / 100.0f * fall;
+        p.pivot = layer_point(e, Vec2{0.5f, 0.5f});
+        return p;
+    }
+};
+
 } // namespace
 
 void register_motion_behavior_effects(EffectRegistry& r) {
@@ -307,5 +406,7 @@ void register_motion_behavior_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Swing>());
     (void)r.add(std::make_unique<Wiggle>());
 }
+
+void register_twitch_effect(EffectRegistry& r) { (void)r.add(std::make_unique<Twitch>()); }
 
 } // namespace aurea::builtin

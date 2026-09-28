@@ -71,13 +71,16 @@ set(AUREA_CORE_SOURCES
     src/platform/DeviceCapabilities.cpp
     src/animation/Curve.cpp
     src/animation/Track.cpp
+    src/animation/KeyframeOptimize.cpp
     src/timeline/Composition.cpp
+    src/timeline/LayerAnimator.cpp
     src/timeline/Timeline.cpp
     src/project/Project.cpp
     src/project/Serialization.cpp
     src/project/FileIO.cpp
     src/project/Presets.cpp
     src/project/AlightMotion.cpp
+    src/project/ProjectPackage.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
@@ -119,6 +122,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/VhsLookEffect.cpp
     src/effects/builtin/DepthEffects.cpp
     src/effects/builtin/AudioPackEffects.cpp
+    src/effects/builtin/ParticularEffect.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -149,6 +153,8 @@ set(AUREA_CORE_SOURCES
     src/vector/Svg.cpp
     src/vector/VectorDocument.cpp
     src/engine/EngineVector.cpp
+    src/engine/EngineMedia.cpp
+    src/engine/EngineLayerAnim.cpp
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp
     src/scene3d/SceneRenderer.cpp

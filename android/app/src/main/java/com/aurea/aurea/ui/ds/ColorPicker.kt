@@ -48,7 +48,25 @@ import androidx.compose.ui.unit.sp
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
+import android.content.Context
+import android.graphics.Bitmap
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.ui.theme.CupertinoIcon
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
@@ -132,9 +150,21 @@ private val QuickColors = listOf(
 fun ColorPickerSheet(
     initial: FloatArray,
     withAlpha: Boolean = true,
+    /** Conta-gotas (app antigo): o quadro do cabeçote renderizado; nulo = sem o botão. */
+    pickFromPreview: (() -> Bitmap?)? = null,
     onChange: (r: Float, g: Float, b: Float, a: Float) -> Unit,
     onDone: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var palette by remember { mutableStateOf(SavedPalette.load(context)) }
+    var picking by remember { mutableStateOf(false) }
+    var frame by remember { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(picking) {
+        if (picking && frame == null && pickFromPreview != null) {
+            frame = withContext(Dispatchers.Default) { runCatching { pickFromPreview() }.getOrNull() }
+            if (frame == null) picking = false
+        }
+    }
     val original = remember { rgbaColor(initial) }
     val hsv0 = remember {
         FloatArray(3).also { android.graphics.Color.colorToHSV(original.copy(alpha = 1f).toArgb(), it) }
@@ -188,6 +218,11 @@ fun ColorPickerSheet(
                 )
             }
             Spacer(Modifier.height(10.dp))
+            val shot = frame
+            if (picking && shot != null) {
+                // Conta-gotas: arrastar a lupa sobre a prévia amostra a cor da composição.
+                PreviewEyedropper(shot) { c -> setColor(c.copy(alpha = a)) }
+            } else {
             // Quadro saturação × brilho.
             val hueColor = Color(android.graphics.Color.HSVToColor(floatArrayOf(h, 1f, 1f)))
             Box(
@@ -217,6 +252,7 @@ fun ColorPickerSheet(
                     val c = Offset(s * size.width, (1f - v) * size.height)
                     drawCircle(Color.White, 9.dp.toPx(), c, style = Stroke(2.5.dp.toPx()))
                 }
+            }
             }
             Spacer(Modifier.height(14.dp))
             Strip(
@@ -263,6 +299,58 @@ fun ColorPickerSheet(
                     style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
                 )
             }
+            if (pickFromPreview != null) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(if (picking) AureaColors.Accent.copy(alpha = 0.18f) else AureaColors.Chip)
+                        .tocavel { picking = !picking; if (!picking) frame = null }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CupertinoIcon(CupertinoGlyph.Eyedropper, 15.dp, if (picking) AureaColors.Accent else AureaColors.Text)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        stringResource(if (picking) R.string.ds_arraste_para_pegar else R.string.ds_pegar_da_previa),
+                        style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = if (picking) AureaColors.Accent else AureaColors.Text)),
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            // Paleta salva (por aparelho): + guarda a cor atual, toque reusa, segurar apaga.
+            Text(stringResource(R.string.ds_paleta_salva), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+            Spacer(Modifier.height(8.dp))
+            val saveLabel = stringResource(R.string.ds_salvar_cor)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(AureaColors.Chip)
+                        .border(1.dp, AureaColors.Border, CircleShape)
+                        .semantics { contentDescription = saveLabel }
+                        .tocavel { palette = SavedPalette.add(context, palette, current().toArgb()) },
+                    contentAlignment = Alignment.Center,
+                ) { CupertinoIcon(CupertinoGlyph.Plus, 14.dp, AureaColors.Text) }
+                palette.forEach { argb ->
+                    val q = Color(argb)
+                    Box(
+                        Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, AureaColors.Border, CircleShape)
+                            .pointerInput(argb) {
+                                detectTapGestures(
+                                    onTap = { setColor(q) },
+                                    onLongPress = { palette = SavedPalette.remove(context, palette, argb) },
+                                )
+                            },
+                    ) {
+                        Canvas(Modifier.fillMaxWidth().fillMaxHeight()) { drawChecker(); drawRect(q) }
+                    }
+                }
+            }
             Spacer(Modifier.height(12.dp))
             Text(stringResource(R.string.ds_rapidas), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             Spacer(Modifier.height(8.dp))
@@ -278,6 +366,110 @@ fun ColorPickerSheet(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Paleta salva, POR APARELHO (SharedPreferences): cores ARGB sRGB, a mais nova
+ * primeiro, sem repetir, até 24.
+ */
+internal object SavedPalette {
+    private const val PREFS = "aurea_palette"
+    private const val KEY = "colors"
+    private const val MAX = 24
+
+    fun load(context: Context): List<Int> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "").orEmpty()
+            .split(',').mapNotNull { it.trim().toLongOrNull()?.toInt() }.take(MAX)
+
+    private fun save(context: Context, colors: List<Int>): List<Int> {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY, colors.joinToString(",") { (it.toLong() and 0xFFFFFFFFL).toString() }).apply()
+        return colors
+    }
+
+    fun add(context: Context, current: List<Int>, argb: Int): List<Int> = save(context, (listOf(argb) + current.filter { it != argb }).take(MAX))
+    fun remove(context: Context, current: List<Int>, argb: Int): List<Int> = save(context, current.filter { it != argb })
+}
+
+/** Pixel da imagem encaixada (centralizada, escala `k`) sob o ponto `p` da caixa. */
+private fun framePixel(frame: Bitmap, boxW: Float, boxH: Float, p: Offset): Pair<Int, Int> {
+    val k = min(boxW / frame.width, boxH / frame.height)
+    val ox = (boxW - frame.width * k) / 2f
+    val oy = (boxH - frame.height * k) / 2f
+    return ((p.x - ox) / k).toInt().coerceIn(0, frame.width - 1) to ((p.y - oy) / k).toInt().coerceIn(0, frame.height - 1)
+}
+
+/**
+ * O CONTA-GOTAS: a prévia (o quadro do cabeçote) numa caixa de 200 dp;
+ * arrastar mostra a lupa (pixels ampliados, mira e anel da cor) e manda a cor
+ * ao vivo; tocar pega na hora.
+ */
+@Composable
+private fun PreviewEyedropper(frame: Bitmap, onColor: (Color) -> Unit) {
+    val image = remember(frame) { frame.asImageBitmap() }
+    var touch by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var picked by remember { mutableStateOf(Color.Transparent) }
+    val send by rememberUpdatedState(onColor)
+    val label = stringResource(R.string.ds_arraste_para_pegar)
+    fun pick(px: Int, py: Int) {
+        picked = Color(frame.getPixel(px, py)).copy(alpha = 1f)
+        send(picked)
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(200.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Black)
+            .semantics { contentDescription = label }
+            .pointerInput(frame) {
+                detectDragGestures(
+                    onDragStart = { p -> framePixel(frame, size.width.toFloat(), size.height.toFloat(), p).also { touch = it; pick(it.first, it.second) } },
+                    onDragEnd = { touch = null },
+                    onDragCancel = { touch = null },
+                ) { change, _ ->
+                    change.consume()
+                    framePixel(frame, size.width.toFloat(), size.height.toFloat(), change.position).also { touch = it; pick(it.first, it.second) }
+                }
+            }
+            .pointerInput(frame) {
+                detectTapGestures { p -> framePixel(frame, size.width.toFloat(), size.height.toFloat(), p).also { pick(it.first, it.second) } }
+            },
+    ) {
+        Canvas(Modifier.fillMaxWidth().fillMaxHeight()) {
+            val k = min(size.width / frame.width, size.height / frame.height)
+            val dw = (frame.width * k).roundToInt()
+            val dh = (frame.height * k).roundToInt()
+            val ox = ((size.width - dw) / 2f).roundToInt()
+            val oy = ((size.height - dh) / 2f).roundToInt()
+            drawImage(image, dstOffset = IntOffset(ox, oy), dstSize = IntSize(dw, dh))
+            val (px, py) = touch ?: return@Canvas
+            // Lupa acima do dedo: 11 × 11 pixels ampliados, mira no centro, anel da cor.
+            val tx = ox + (px + 0.5f) * k
+            val ty = oy + (py + 0.5f) * k
+            val r = 34.dp.toPx()
+            val c = Offset(tx.coerceIn(r, size.width - r), (ty - r - 18.dp.toPx()).coerceAtLeast(r))
+            val n = 11
+            val sx = (px - n / 2).coerceIn(0, max(0, frame.width - n))
+            val sy = (py - n / 2).coerceIn(0, max(0, frame.height - n))
+            val lens = androidx.compose.ui.graphics.Path().apply { addOval(androidx.compose.ui.geometry.Rect(c, r)) }
+            clipPath(lens) {
+                drawRect(Color.Black, Offset(c.x - r, c.y - r), Size(2 * r, 2 * r))
+                drawImage(
+                    image,
+                    srcOffset = IntOffset(sx, sy),
+                    srcSize = IntSize(min(n, frame.width), min(n, frame.height)),
+                    dstOffset = IntOffset((c.x - r).roundToInt(), (c.y - r).roundToInt()),
+                    dstSize = IntSize((2 * r).roundToInt(), (2 * r).roundToInt()),
+                    filterQuality = FilterQuality.None,
+                )
+                val cell = 2 * r / n
+                drawRect(Color.White, Offset(c.x - cell / 2, c.y - cell / 2), Size(cell, cell), style = Stroke(1.5.dp.toPx()))
+            }
+            drawCircle(picked, r, c, style = Stroke(5.dp.toPx()))
+            drawCircle(Color.White, r + 2.5.dp.toPx(), c, style = Stroke(1.5.dp.toPx()))
         }
     }
 }

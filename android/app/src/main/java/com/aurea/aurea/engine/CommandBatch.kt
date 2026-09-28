@@ -241,10 +241,13 @@ class CommandBatch(private val engine: AureaEngine) {
         layer: Long, property: Int, effectIndex: Int, effectParam: Int,
         timeFrame: Int, interp: Int,
         bx1: Float, by1: Float, bx2: Float, by2: Float,
+        power: Int = 0,
     ) = emit(CommandType.KEYFRAME_SET_INTERPOLATION) { b ->
         writeTrackRef(b, layer, property, effectIndex, effectParam)
         b.putLong(Off.KEYFRAME_TIME, timeFrame.toLong())
         b.put(Off.KEYFRAME_TIME + 8, interp.toByte())
+        // Força da bézier (1..3) no byte seguinte; 0 = o keyframe mantém a dele.
+        b.put(Off.KEYFRAME_TIME + 9, power.coerceIn(0, 3).toByte())
         // Os control points vêm logo depois do enum, alinhados em 4.
         b.putFloat(Off.KEYFRAME_TIME + 12, bx1)
         b.putFloat(Off.KEYFRAME_TIME + 16, by1)

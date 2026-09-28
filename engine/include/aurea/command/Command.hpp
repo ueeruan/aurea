@@ -222,7 +222,9 @@ struct SkewPayload { LayerId layer; f32 skewX, skewY; };
 struct TransformPayload { LayerId layer; f32 x,y,z, sx,sy,sz, rx,ry,rz, ax,ay,az, opacity; };
 struct KeyframePayload { TrackRef track; FrameIndex time; f32 value; };
 struct KeyframeMovePayload { TrackRef track; FrameIndex fromTime; FrameIndex toTime; };
-struct KeyframeInterpPayload { TrackRef track; FrameIndex time; Interpolation interp; f32 bx1, by1, bx2, by2; };
+/// `power`: força da bézier (1..3); 0 = mantém a do keyframe. Ocupa o byte que
+/// já era preenchimento depois de `interp`: os floats não mudam de lugar.
+struct KeyframeInterpPayload { TrackRef track; FrameIndex time; Interpolation interp; u8 power; f32 bx1, by1, bx2, by2; };
 struct MaskOpPayload { LayerId layer; MaskId mask; MaskOperation op; };
 struct MaskScalarPayload { LayerId layer; MaskId mask; f32 value; };
 struct MaskPointPayload { LayerId layer; MaskId mask; u32 pointIndex; f32 x, y; f32 inX, inY, outX, outY; };
@@ -527,6 +529,9 @@ static_assert(offsetof(Command, preview_scale.automatic) == cmd_layout::kPreview
 // deles crescer perto do teto da união, o próximo campo não caberia.
 static_assert(sizeof(Command::transform) <= cmd_layout::kMaxPayload);
 static_assert(sizeof(Command::keyframe_interp) <= cmd_layout::kMaxPayload);
+// CommandBatch.kt grava interp em time+8, a força em time+9 e as alças a partir de time+12.
+static_assert(offsetof(KeyframeInterpPayload, power) == offsetof(KeyframeInterpPayload, time) + 9);
+static_assert(offsetof(KeyframeInterpPayload, bx1) == offsetof(KeyframeInterpPayload, time) + 12);
 
 /// Um bloco de comandos produzido pela UI em um frame.
 struct CommandBatch {

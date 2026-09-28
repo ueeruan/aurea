@@ -44,6 +44,10 @@ void register_vhs_look_effect(EffectRegistry& r);
 void register_depth_effects(EffectRegistry& r);
 // Pacote de áudio (efeitos de som + Forma de onda, Espectro e Bolas). Depois de todos.
 void register_audio_pack_effects(EffectRegistry& r);
+// Particular (as partículas do app antigo). Depois do pacote de áudio.
+void register_particular_effect(EffectRegistry& r);
+// Tremor em trancos (do app antigo). Depois de todos.
+void register_twitch_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

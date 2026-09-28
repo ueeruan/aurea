@@ -19,6 +19,8 @@ struct CurveEase: Equatable {
     var y1: Float
     var x2: Float
     var y2: Float
+    /// Força da bézier 1..3 (`Keyframe::easePower`): a mesma curva repetida sobre o resultado.
+    var power: Int = 1
     static let linear = CurveEase(interpolation: 1, x1: 0, y1: 0, x2: 1, y2: 1)
     var isBezier: Bool { interpolation == 2 || interpolation == 6 }
     var hasHandles: Bool { isBezier || interpolation == 1 || interpolation == 3 || interpolation == 4 || interpolation == 5 }
@@ -50,6 +52,13 @@ struct CurveEase: Equatable {
             return Float((1-exp(-6*Double(t))*cos(6*Double.pi*Double(t)))/(1-exp(-6)))
         case 9: return floor(min(1,max(0,t))*4)/4
         default:
+            // `keyframe_ease` (Curve.hpp): a força repete a MESMA bézier sobre o resultado.
+            var u = bezierOnce(t)
+            for _ in 1..<min(3, max(1, power)) { u = bezierOnce(u) }
+            return u
+        }
+    }
+    private func bezierOnce(_ t: Float) -> Float {
             if t <= 0 { return 0 }
             if t >= 1 { return 1 }
             func bezier(_ p: Float, _ q: Float, _ m: Double) -> Double {
@@ -71,18 +80,17 @@ struct CurveEase: Equatable {
                 parameter = next
             }
             return Float(bezier(y1, y2, parameter))
-        }
     }
     func same(_ other: CurveEase) -> Bool {
-        interpolation == other.interpolation && (!isBezier ||
-            (abs(x1 - other.x1) < 0.01 && abs(y1 - other.y1) < 0.01 && abs(x2 - other.x2) < 0.01 && abs(y2 - other.y2) < 0.01))
+        interpolation == other.interpolation && (!isBezier || (power == other.power &&
+            abs(x1 - other.x1) < 0.01 && abs(y1 - other.y1) < 0.01 && abs(x2 - other.x2) < 0.01 && abs(y2 - other.y2) < 0.01))
     }
     var inverted: CurveEase? {
         switch interpolation {
         case 3: var result = self; result.interpolation = 4; return result
         case 4: var result = self; result.interpolation = 3; return result
         case 2, 6:
-            let result = CurveEase(interpolation: 2, x1: 1 - x2, y1: 1 - y2, x2: 1 - x1, y2: 1 - y1)
+            let result = CurveEase(interpolation: 2, x1: 1 - x2, y1: 1 - y2, x2: 1 - x1, y2: 1 - y1, power: power)
             if abs(result.x1 - x1) < 0.01 && abs(result.y1 - y1) < 0.01 && abs(result.x2 - x2) < 0.01 && abs(result.y2 - y2) < 0.01 { return nil }
             return result
         default: return nil
@@ -163,15 +171,71 @@ func curveNearestHandle(_ location: CGPoint, _ shown: (CGPoint, CGPoint), radius
     return d1 <= d2 ? 0 : 1
 }
 
+/// A alça que o toque pega (CurveMath.kt `grabHandle`): a mais perto das duas, sempre uma.
+func curveGrabHandle(_ location: CGPoint, _ shown: (CGPoint, CGPoint)) -> Int {
+    let d1 = pow(location.x - shown.0.x, 2) + pow(location.y - shown.0.y, 2)
+    let d2 = pow(location.x - shown.1.x, 2) + pow(location.y - shown.1.y, 2)
+    return d1 <= d2 ? 0 : 1
+}
+
+/// Faixa vertical das alças (CurveMath.kt): além de 0..1 dá antecipação e overshoot.
+let curveEaseYMin: Float = -2
+let curveEaseYMax: Float = 3
+
+/// Faixa vertical do gráfico (CurveMath.kt `easeRange`): curva e alças, contendo 0..1, com 8 % de folga.
+func curveEaseRange(_ ease: CurveEase) -> (Float, Float) {
+    var lo: Float = 0, hi: Float = 1
+    for index in 0...40 {
+        let v = ease.transform(Float(index) / 40)
+        if v.isFinite { lo = min(lo, v); hi = max(hi, v) }
+    }
+    if ease.hasHandles {
+        let h = ease.handles
+        lo = min(lo, min(h[1], h[3])); hi = max(hi, max(h[1], h[3]))
+    }
+    let pad = (hi - lo) * 0.08
+    return (lo - pad, hi + pad)
+}
+
+/// Encosta em 0 ou 1 quando está a menos de `tolerance` (CurveMath.kt `snapUnit`).
+func curveSnapUnit(_ v: Float, _ tolerance: Float) -> Float {
+    if abs(v) < tolerance { return 0 }
+    if abs(v - 1) < tolerance { return 1 }
+    return v
+}
+
+/// A posição da alça para o dedo (CurveMath.kt `handleAt`): x 0..1, y −2..3, encaixe em 0 e 1.
+func curveHandleAt(_ point: CGPoint, inset: CGFloat, size: CGSize, low: Float, high: Float, snap: CGFloat) -> (Float, Float) {
+    let w = max(1, size.width - 2 * inset), h = max(1, size.height)
+    let span = high - low > 0.001 ? high - low : 0.001
+    let x = curveSnapUnit(Float((point.x - inset) / w).clamped(to: 0...1), Float(snap / w))
+    let y = curveSnapUnit((low + Float((h - point.y) / h) * span).clamped(to: curveEaseYMin...curveEaseYMax), Float(snap / h) * span)
+    return (x, y)
+}
+
+/// O texto do trecho (CurveMath.kt `cubicBezierLabel`).
+func cubicBezierLabel(_ ease: CurveEase) -> String {
+    let h = ease.handles
+    let label = "cubic-bezier(" + h.map { String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), $0) }.joined(separator: ", ") + ")"
+    return ease.isBezier && ease.power > 1 ? label + " ×\(ease.power)" : label
+}
+
+/// Próxima força ao tocar no texto (CurveMath.kt `nextPower`): ×1 → ×2 → ×3 → ×1.
+func curveNextPower(_ ease: CurveEase) -> CurveEase {
+    let h = ease.handles
+    return CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3], power: ease.isBezier ? ease.power % 3 + 1 : 2)
+}
+
 private let curveInset: CGFloat = 28
-/// Raio de toque das alças: 56 pt de diâmetro, acima do alvo mínimo de 44.
+/// Raio do halo da alça no dedo.
 private let curveHandleHit: CGFloat = 28
 /// Distância mínima entre as alças DESENHADAS (as bolas nunca se sobrepõem).
 private let curveHandleSeparation: CGFloat = 30
+/// Encaixe da alça nas linhas 0 e 1 (x e y).
+private let curveHandleSnap: CGFloat = 10
 
 private struct NativeCurveGraph: View {
     let ease: CurveEase
-    let overshoot: Bool
     let progress: Float?
     let onBegin: () -> Void
     let onChange: (CurveEase) -> Void
@@ -183,23 +247,22 @@ private struct NativeCurveGraph: View {
         var low: Float
         var high: Float
         var ease: CurveEase
-        /// Onde a alça estava no toque (a posição REAL, não a desenhada).
-        var origin: CGPoint
-        /// O dedo quando a folga acabou: o arrasto é relativo a ele (nada salta).
-        var anchor: CGPoint = .zero
         var began = false
     }
-    private var low: Float { drag?.low ?? min(overshoot ? -0.5 : -0.12, min(ease.handles[1], ease.handles[3]) - 0.12) }
-    private var high: Float { drag?.high ?? max(overshoot || ease.interpolation == 8 ? 1.5 : 1.12, max(ease.handles[1], ease.handles[3]) + 0.12) }
+    // Faixa vertical ajustada à curva e às alças; parada enquanto o dedo arrasta.
+    private var low: Float { drag?.low ?? curveEaseRange(ease).0 }
+    private var high: Float { drag?.high ?? curveEaseRange(ease).1 }
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 Canvas { context, size in draw(context, size) }
                 Canvas { context, size in
                     if let progress {
+                        // A linha do cabeçote e o ponto onde ele está NA curva.
                         let p = plot(progress, ease.transform(progress), size, low, high)
                         var line = Path(); line.move(to: CGPoint(x: p.x, y: 0)); line.addLine(to: CGPoint(x: p.x, y: size.height))
                         context.stroke(line, with: .color(.white.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
+                        context.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(.white))
                     }
                 }
             }.contentShape(Rectangle()).accessibilityIdentifier("curve.easingGraph").gesture(DragGesture(minimumDistance: 0)
@@ -261,23 +324,17 @@ private struct NativeCurveGraph: View {
             guard ease.hasHandles else { return }
             let h = ease.handles
             let a = plot(h[0], h[1], size, low, high), b = plot(h[2], h[3], size, low, high)
-            // O toque procura as alças ONDE ELAS ESTÃO DESENHADAS, num raio de dedo; a mais perto vence.
+            // Qualquer toque no gráfico pega a alça mais perto de onde ela está
+            // DESENHADA (afastadas se coincidem) — como no app antigo.
             let shown = curveSeparatedHandles(a, b, start: plot(0, 0, size, low, high), end: plot(1, 1, size, low, high), minimum: curveHandleSeparation)
-            let which = curveNearestHandle(value.startLocation, shown, radius: curveHandleHit)
-            guard which >= 0 else { return }
-            drag = HandleDrag(first: which == 0, low: low, high: high,
-                ease: CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3]), origin: which == 0 ? a : b)
+            drag = HandleDrag(first: curveGrabHandle(value.startLocation, shown) == 0, low: low, high: high,
+                ease: CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3], power: ease.isBezier ? ease.power : 1))
         }
         guard var current = drag else { return }
-        if !current.began {
-            guard hypot(value.translation.width, value.translation.height) >= 3 else { return }
-            current.anchor = value.location
-        }
-        // Arrasto RELATIVO: a alça parte de onde está e anda o que o dedo andar depois da folga.
-        let location = CGPoint(x: current.origin.x + value.location.x - current.anchor.x, y: current.origin.y + value.location.y - current.anchor.y)
-        let x = Float((location.x - curveInset) / max(1, size.width - 2 * curveInset)).clamped(to: 0...1)
-        var y = current.low + Float((size.height - location.y) / size.height) * (current.high - current.low)
-        if !overshoot { y = y.clamped(to: 0...1) }
+        // Um toque sem arrasto não mexe em nada.
+        if !current.began { guard hypot(value.translation.width, value.translation.height) >= 3 else { return } }
+        // A alça vai para o dedo (x 0..1, y −2..3), encaixando em 0 e 1.
+        let (x, y) = curveHandleAt(value.location, inset: curveInset, size: size, low: current.low, high: current.high, snap: curveHandleSnap)
         guard x.isFinite, y.isFinite else { return }
         if !current.began { current.began = true; onBegin() }
         if current.first { current.ease.x1 = x; current.ease.y1 = y } else { current.ease.x2 = x; current.ease.y2 = y }
@@ -296,7 +353,6 @@ struct NativeCurvePanel: View {
     var expanded = false
     @State private var fullscreen = false
     @State private var ease = CurveEase.linear
-    @State private var overshoot = false
     private var graphMode: Int { model.curveGraphMode }
     private struct Segment {
         let start: KeyframeItem
@@ -340,7 +396,7 @@ struct NativeCurvePanel: View {
                     leftRail(segment)
                     VStack(spacing: 0) {
                         if graphMode == 0 {
-                            NativeCurveGraph(ease: ease, overshoot: overshoot, progress: progress(segment),
+                            NativeCurveGraph(ease: ease, progress: progress(segment),
                                 onBegin: { model.beginGesture("curva") },
                                 onChange: { apply($0, to: segment.start); model.refreshModel(force: true) },
                                 onEnd: { model.endGesture() })
@@ -415,15 +471,17 @@ struct NativeCurvePanel: View {
     private func load() {
         guard let key = segment?.start else { return }
         let h = model.engine.trackEasing(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time).map(\.floatValue)
-        ease = CurveEase(interpolation: key.interpolation, x1: h.count == 4 ? h[0] : 0.33,
-            y1: h.count == 4 ? h[1] : 0, x2: h.count == 4 ? h[2] : 0.67, y2: h.count == 4 ? h[3] : 1)
+        ease = CurveEase(interpolation: key.interpolation, x1: h.count >= 4 ? h[0] : 0.33,
+            y1: h.count >= 4 ? h[1] : 0, x2: h.count >= 4 ? h[2] : 0.67, y2: h.count >= 4 ? h[3] : 1,
+            power: h.count >= 5 ? min(3, max(1, Int(h[4]))) : 1)
     }
     private func apply(_ value: CurveEase, to key: KeyframeItem) {
         // 3D transform axes share easing; effect components remain independent.
         for sibling in model.graphKeyGroup(layer, key) {
             model.engine.editTrackKey(layer, property: sibling.property, effect: sibling.effectIndex, param: sibling.paramIndex,
                 time: sibling.time, action: 3, value: sibling.value, targetTime: sibling.time,
-                interpolation: value.interpolation, handles: [value.x1, value.y1, value.x2, value.y2].map { NSNumber(value: $0) })
+                interpolation: value.interpolation,
+                handles: [value.x1, value.y1, value.x2, value.y2, Float(value.power)].map { NSNumber(value: $0) })
         }
         ease = value
     }
@@ -441,7 +499,7 @@ struct NativeCurvePanel: View {
             }.disabled(!(1...6).contains(ease.interpolation))
                 .opacity((1...6).contains(ease.interpolation) ? 1 : 0.35)
             Spacer().frame(height: 4)
-            RailMoreButton(active: overshoot) { showMenu(segment) }
+            RailMoreButton(active: false) { showMenu(segment) }
             Spacer().frame(height: 8)
         }.frame(width: 44).frame(maxHeight: .infinity).background(curveRailFill, ignoresSafeAreaEdges: [])
     }
@@ -454,10 +512,14 @@ struct NativeCurvePanel: View {
     private func segmentNavigation(_ segment: Segment) -> some View {
         HStack(spacing: 4) {
             glyphButton(CupertinoGlyph.ChevronLeft, size: 16, target: 44, label: AureaText.t("panel_keyframe_anterior")) { jump(-1) }
-            Text(graphMode == 0 ? ((ease.interpolation == 0 || (7...9).contains(ease.interpolation)) ? ease.name : "Cubic Bezier Easing")
+            // A curva do trecho em números; tocar troca a força (×1 → ×2 → ×3).
+            Text(graphMode == 0 ? (ease.hasHandles ? cubicBezierLabel(ease) : ease.name)
                  : AureaText.t(graphMode == 1 ? "particular_curve_value" : "panel_velocidade"))
                 .font(.aurea(size: 10)).foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1).truncationMode(.tail).multilineTextAlignment(.center)
+                .frame(minHeight: 44).contentShape(Rectangle())
+                .onTapGesture { if graphMode == 0 && ease.hasHandles { set(curveNextPower(ease), to: segment.start, label: "força da curva") } }
+                .accessibilityIdentifier("curve.power")
             glyphButton(CupertinoGlyph.ChevronRight, size: 16, target: 44, label: AureaText.t("panel_proximo_keyframe")) { jump(1) }
             if graphMode == 0 { bounceButton(segment) }
         }.frame(maxWidth: .infinity).frame(height: 44)
@@ -508,8 +570,7 @@ struct NativeCurvePanel: View {
                 model.beginGesture("curva em todos")
                 for key in track.dropLast() { apply(value, to: key) }
                 model.endGesture()
-            },
-            SheetAction(AureaText.t(overshoot ? "panel_overshoot_9678" : "panel_overshoot")) { overshoot.toggle() }
+            }
         ]
         model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_curva"), actions: actions)
     }
@@ -1389,8 +1450,8 @@ private struct NativeTrackGraph: View {
             let difference: Double = Double(b.value) - Double(a.value)
             let base: Double = difference * fps / duration
             let raw = model.engine.trackEasing(layer, property: a.property, effect: a.effectIndex, param: a.paramIndex, time: a.time).map(\.floatValue)
-            guard raw.count == 4, base.isFinite, abs(base) > 0.000001 else { continue }
-            let ease = CurveEase(interpolation: a.interpolation, x1: raw[0], y1: raw[1], x2: raw[2], y2: raw[3])
+            guard raw.count >= 4, base.isFinite, abs(base) > 0.000001 else { continue }
+            let ease = CurveEase(interpolation: a.interpolation, x1: raw[0], y1: raw[1], x2: raw[2], y2: raw[3], power: raw.count >= 5 ? Int(raw[4]) : 1)
             guard ease.hasHandles else { continue }
             var h: [Float] = ease.handles
             if a.interpolation == 1 { h = [0.33333334,0.33333334,0.6666667,0.6666667] }
@@ -1428,8 +1489,8 @@ private struct NativeTrackGraph: View {
     }
     private func ease(_ key: KeyframeItem) -> CurveEase {
         let h = model.engine.trackEasing(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time).map(\.floatValue)
-        return CurveEase(interpolation: key.interpolation, x1: h.count == 4 ? h[0] : 0.33, y1: h.count == 4 ? h[1] : 0,
-            x2: h.count == 4 ? h[2] : 0.67, y2: h.count == 4 ? h[3] : 1)
+        return CurveEase(interpolation: key.interpolation, x1: h.count >= 4 ? h[0] : 0.33, y1: h.count >= 4 ? h[1] : 0,
+            x2: h.count >= 4 ? h[2] : 0.67, y2: h.count >= 4 ? h[3] : 1, power: h.count >= 5 ? Int(h[4]) : 1)
     }
     /// A mesma conta do motor (`graphCurve`), não uma amostra de frames.
     private func read(from: Double, to: Double, perFrame: Double? = nil) -> [[CGPoint]] {

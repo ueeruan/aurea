@@ -27,6 +27,7 @@
 #include "aurea/text/Captions.hpp"
 #include "aurea/project/AlightMotion.hpp"
 #include "aurea/project/Presets.hpp"
+#include "aurea/project/ProjectPackage.hpp"
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/Text3D.hpp"
@@ -342,6 +343,20 @@ public:
     /// topo, a partir do início. Sendo o primeiro conteúdo, a composição adota
     /// a duração do som.
     [[nodiscard]] Result<u64> import_audio(const VideoImport& request) noexcept;
+    /// "Substituir mídia" (EngineMedia.cpp): troca a fonte da camada de vídeo
+    /// ou imagem por outro vídeo/foto, mantendo transform, keyframes, efeitos,
+    /// máscaras e tempo. A mídia nova ocupa a MESMA caixa na tela (cabe dentro
+    /// da antiga; âncora e máscaras acompanham na proporção). Vídeo novo mais
+    /// curto que o trecho encurta o fim. Um passo de desfazer. Devolve o id.
+    [[nodiscard]] Result<u64> replace_layer_video(u64 layerId, const VideoImport& request) noexcept;
+    [[nodiscard]] Result<u64> replace_layer_image(u64 layerId, const u8* rgba, u32 width, u32 height,
+                                                  const char* name, const char* sourcePath) noexcept;
+    /// Arquivo de origem da camada de vídeo, áudio ou imagem (caminho legível
+    /// neste aparelho ou URI). Vazio = sem arquivo. É o "Informações da mídia".
+    [[nodiscard]] std::string layer_source_path(u64 layerId) noexcept;
+    /// Mídias de um `.aurea` fechado, já com o caminho legível (`resolved`).
+    /// É o "Exportar arquivo do projeto" (ProjectPackage.hpp).
+    [[nodiscard]] Status project_file_media(const char* path, std::vector<package::MediaRef>& out) noexcept;
     /// "Extrair o áudio": o som de um vídeo vira uma camada própria (mesmo
     /// tempo, mesmo corte) e o vídeo fica mudo. Uma ação de desfazer.
     [[nodiscard]] Result<u64> extract_audio(u64 videoLayerId) noexcept;
@@ -465,6 +480,55 @@ public:
     bool toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept;
     /// Preset nativo (substitui os animadores), a partir do início da camada.
     bool apply_text_preset(u64 layerId, u32 preset) noexcept;
+
+    // --- Animadores de CAMADA (qualquer tipo; timeline/LayerAnimator.hpp) -------
+    /// Cada animador = 32 floats (kLayerAnimFloats): 0 ativo, 1 unidade (0
+    /// camada inteira, 1 letra, 2 palavra, 3 linha), 2 saída, 3 curva (0
+    /// linear, 1 suave, 2 entra e sai, 3 passa do ponto), 4 escala Y própria,
+    /// 5 semente do wiggle, 6..23 = os LayerAnimParam 0..17 avaliados no
+    /// playhead, 24 bits animados (1 << param), 25 bits com keyframe no
+    /// playhead, 26 = 1 se a camada é texto (unidades valem).
+    static constexpr u32 kLayerAnimFloats = 32;
+    u32 query_layer_animators(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Novo animador (entra desbotando em 1 s a partir do começo da camada);
+    /// devolve o índice (−1 = falhou).
+    i32 add_layer_animator(u64 layerId) noexcept;
+    bool remove_layer_animator(u64 layerId, u32 index) noexcept;
+    /// Ajustes não animáveis (0..5). Ligar/desligar a saída espelha os
+    /// keyframes do progresso para o fim (ou volta para o começo).
+    bool set_layer_animator(u64 layerId, u32 index, const f32* v32) noexcept;
+    /// Valor de um parâmetro (LayerAnimParam): com keyframes, grava no playhead.
+    bool set_layer_anim_param(u64 layerId, u32 index, u32 param, f32 value) noexcept;
+    /// Liga/desliga o keyframe do parâmetro no playhead (losango).
+    bool toggle_layer_anim_key(u64 layerId, u32 index, u32 param) noexcept;
+    /// Copia os animadores (com keyframes) da camada; devolve quantos.
+    u32 copy_layer_animators(u64 layerId) noexcept;
+    /// Cola ACRESCENTANDO nas camadas; devolve em quantas colou.
+    u32 paste_layer_animators(const u64* ids, u32 count) noexcept;
+    /// Quantos animadores estão na área de transferência.
+    [[nodiscard]] u32 layer_animator_clipboard() noexcept;
+
+    /// Comprimento do rastro do desfoque de movimento desta camada (× o
+    /// obturador da composição; 1 = o do projeto, 0..4).
+    bool set_layer_motion_blur_length(u64 layerId, f32 factor) noexcept;
+    [[nodiscard]] f32 query_layer_motion_blur_length(u64 layerId) noexcept;
+
+    /// Camadas que um ajuste afeta: 0 = todas abaixo, 1 = só a logo abaixo.
+    bool set_adjustment_scope(u64 layerId, u32 scope) noexcept;
+    [[nodiscard]] u32 query_adjustment_scope(u64 layerId) noexcept;
+    /// Grupo (pré-composição): a câmera de fora alcança as camadas 3D de dentro.
+    bool set_group_camera_pass_through(u64 layerId, bool on) noexcept;
+    /// −1 = não é grupo; 0/1.
+    [[nodiscard]] i32 query_group_camera_pass_through(u64 layerId) noexcept;
+    /// Põe as camadas dentro do grupo `groupLayerId` (mesma composição), com
+    /// os mesmos tempos na tela. Recusa (motivo em `why`) grupo com o tempo
+    /// alterado. Desfazível num passo. Devolve quantas entraram.
+    [[nodiscard]] Result<u32> add_layers_to_group(const u64* ids, u32 count, u64 groupLayerId, std::string* why = nullptr) noexcept;
+    /// Dentro de um grupo aberto: tira a camada dele — ela volta para a
+    /// composição de fora, logo acima do grupo, com os mesmos tempos (e presa
+    /// ao grupo como pai se ele tem transform). A timeline volta para fora.
+    /// Devolve a camada nova.
+    [[nodiscard]] Result<u64> remove_layer_from_group(u64 layerId, std::string* why = nullptr) noexcept;
 
     // =========================================================================
     // Expressões (expr/Expression.hpp). A trilha é (property, effectIndex,
@@ -886,6 +950,15 @@ public:
     u32 edit_keyframe_selection(u64 layerId, const i64* references, u32 count,
                                i64 delta, bool remove) noexcept;
     u32 paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept;
+    /// Copiar animação (app antigo): TODOS os keyframes de todas as
+    /// propriedades, com o tempo relativo ao primeiro deles. `paste_keyframes`
+    /// cola no cabeçote de outras camadas. Devolve quantos keyframes.
+    u32 copy_animation(u64 layerId) noexcept;
+    /// Otimizar keyframes: tira os redundantes sem mudar o movimento
+    /// (animation/KeyframeOptimize.hpp). `property` < 0 = todas as tracks;
+    /// senão só as dessa TrackProperty. `tolerance` = fração da amplitude de
+    /// cada track (0.01 = 1 %). Um passo de desfazer; devolve quantos saíram.
+    u32 optimize_keyframes(u64 layerId, i32 property, f32 tolerance) noexcept;
     /// Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes.
     [[nodiscard]] u32 clipboard_state() noexcept;
 
@@ -1128,7 +1201,7 @@ public:
     u32 query_track_curve(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
                           i32 startFrame, i32 endFrame, f32* outValues, u32 sampleCount) noexcept;
     bool query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
-                               i32 frame, f32* out4) noexcept;
+                               i32 frame, f32* out4, u8* outPower = nullptr) noexcept;
     /// Waveform da camada: `count` baldes a partir do frame `startFrame` da
     /// timeline (fracionário), `framesPerBucket` frames cada; valor u8 com
     /// compansão raiz (ver audio::WaveformCache). Devolve os baldes escritos,
@@ -1333,6 +1406,8 @@ private:
         std::vector<Track> effectTracks;            ///< EffectParam dos efeitos copiados
         struct Key { TrackProperty property; u32 effectIndex; u32 effectParamIndex; EffectTypeId effectType; Keyframe key; u32 effectOrdinal = 0; };
         std::vector<Key> keys;                       ///< tempo relativo ao instante copiado (0)
+        std::vector<LayerAnimator> layerAnimators;   ///< animadores de camada copiados
+        std::vector<Track> layerAnimTracks;          ///< trilhas deles (effectIndex = posição na cópia)
     } clipboard_;
     std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado
     /// Modelos 3D carregados, por AssetId. Um por asset, qualquer número de

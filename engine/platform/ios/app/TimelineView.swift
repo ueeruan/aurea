@@ -131,7 +131,8 @@ struct TimelineView: View {
     private var compact: Bool {
         timelineCompact(panel: model.sheetContent == .panel || model.sheetContent == .curve,
                         dock: compactDock && model.sheetContent == .dock,
-                        tracksOpen: tracksOpen, selectingKeys: model.timelineKeySelectMode)
+                        tracksOpen: tracksOpen,
+                        selectingKeys: model.timelineKeySelectMode || model.timelineLayerSelectMode)
     }
     /// Compacta só por causa da doca (a calha abre as trilhas em vez de sair).
     private var compactByDock: Bool { compact && compactDock && model.sheetContent == .dock }
@@ -197,6 +198,7 @@ struct TimelineView: View {
             }
             // Por cima da superfície de gestos: o toque num botão não chega à timeline.
             .overlay(alignment: keyBarAlignment) { keyActionBar }
+            .overlay(alignment: .bottom) { layerPickBar }
             .onAppear {
                 let seconds = CGFloat(model.compositionDuration) / CGFloat(fps)
                 if seconds >= Zoom.autoFitMinSeconds { pps = Zoom.autoFit(availableDp: size.width - 32, seconds: seconds) }
@@ -251,9 +253,9 @@ struct TimelineView: View {
                     HStack(spacing: 0) {
                         keyAction(title, id: "timeline.keys.select", active: mode) { model.changeTimelineKeySelectMode(!mode) }
                         keyAction(AureaText.t("common_all"), id: "timeline.keys.all") { model.selectAllTimelineKeys() }
-                        keyAction(AureaText.t("common_copy"), id: "timeline.keys.copy", enabled: count > 0) { model.copyTimelineKeys() }
+                        keyAction(AureaText.t("common_copy"), id: "timeline.keys.copy", enabled: count > 0 && !selection.crossLayer) { model.copyTimelineKeys() }
                         keyAction(AureaText.t("common_paste"), id: "timeline.keys.paste", enabled: canPaste) { model.pasteTimelineKeys() }
-                        keyAction(AureaText.t("common_duplicate"), id: "timeline.keys.duplicate", enabled: count > 0) { model.duplicateTimelineKeys() }
+                        keyAction(AureaText.t("common_duplicate"), id: "timeline.keys.duplicate", enabled: count > 0 && !selection.crossLayer) { model.duplicateTimelineKeys() }
                         keyAction(AureaText.t("common_delete"), id: "timeline.keys.delete", enabled: count > 0, danger: true) { model.deleteTimelineKeys() }
                         keyAction(AureaText.t("editor_concluir"), id: "timeline.keys.done") { model.clearTimelineKeySelection() }
                     }
@@ -264,6 +266,28 @@ struct TimelineView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
             }
+        }
+    }
+
+    // MARK: Barra do modo "Selecionar várias camadas" (par do LayerPickBar do Android)
+    /// Mesmo desenho da barra dos keyframes: contador, Todas, Limpar e Concluir.
+    /// Some quando há keyframes escolhidos (a barra deles manda).
+    @ViewBuilder private var layerPickBar: some View {
+        if model.timelineLayerSelectMode && model.timelineKeySelection == nil {
+            let count: Int = model.selection.count
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    keyAction(AureaText.t("panel_selecionar") + " · \(count)", id: "timeline.layers.select", active: true) { model.changeTimelineLayerSelectMode(false) }
+                    keyAction(AureaText.t("common_all"), id: "timeline.layers.all", enabled: model.layers.count >= 2) { model.selectAll() }
+                    keyAction(AureaText.t("editor_limpar_selecao"), id: "timeline.layers.clear", enabled: count > 0) { model.clearSelection() }
+                    keyAction(AureaText.t("editor_concluir"), id: "timeline.layers.done") { model.changeTimelineLayerSelectMode(false) }
+                }
+                .padding(.horizontal, 4)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.8)))
+            .padding(.horizontal, 8)
+            .padding(.bottom, 6)
         }
     }
 
@@ -302,10 +326,10 @@ struct TimelineView: View {
 
     /// Instantes da linha com algum keyframe da seleção (paralelo a `instants`); nil = nenhum.
     private func pickedInstants(_ row: TimelineRow) -> [Bool]? {
-        guard let selection = model.timelineKeySelection, selection.layer == row.id, !selection.isEmpty else { return nil }
+        guard let selection = model.timelineKeySelection, !selection.on(row.id).isEmpty else { return nil }
         var out = [Bool](repeating: false, count: row.keysAt.count)
         var any = false
-        for index in 0..<row.keysAt.count where selection.containsAny(row.keysAt[index]) {
+        for index in 0..<row.keysAt.count where selection.containsAny(on: row.id, row.keysAt[index]) {
             out[index] = true
             any = true
         }
@@ -834,7 +858,9 @@ struct TimelineView: View {
             if let marker { model.openMarkerEditor(marker) }
             UISelectionFeedbackGenerator().selectionChanged()
         case .none:
-            selectedKey = nil; model.clearTimelineKeySelection(); model.editorBackFromTimeline()
+            selectedKey = nil; model.clearTimelineKeySelection()
+            // Escolhendo várias camadas, errar o clipe não desfaz o lote (sai-se pelo "Concluir").
+            if !model.timelineLayerSelectMode { model.editorBackFromTimeline() }
         case .eye:
             guard let row else { return }
             // Numa fileira compartilhada o olho vale para a LINHA toda, num passo de desfazer.
@@ -851,6 +877,12 @@ struct TimelineView: View {
             if model.layers.indices.contains(neighbor) { model.select(layerId: model.layers[neighbor].id, additive: false) }
         case .key:
             guard let row, row.keysAt.indices.contains(touched.key) else { return }
+            // No modo de escolher camadas o losango do resumo é parte do clipe.
+            if model.timelineLayerSelectMode && row.track == nil && !model.timelineKeySelectMode {
+                model.toggleTimelineLayerPick(row.id)
+                UISelectionFeedbackGenerator().selectionChanged()
+                return
+            }
             pause()
             let key = row.keysAt[touched.key][0]
             let track = TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
@@ -905,8 +937,19 @@ struct TimelineView: View {
                 UISelectionFeedbackGenerator().selectionChanged()
                 return
             }
-            if compact { selectedKey = nil; model.editorBackFromTimeline() }
-            else { pause(); selectedKey = nil; model.select(layerId: row.id, additive: model.selection.count >= 2) }
+            let timelineOnly: Bool = !model.selection.isEmpty && model.selection == model.timelineOnlySelection
+            switch timelineLayerTap(picking: model.timelineLayerSelectMode, compact: compact, selected: model.selection.count,
+                                    tappedSelected: model.selection.contains(row.id), timelineOnly: timelineOnly) {
+            case .leaveCompact: selectedKey = nil; model.editorBackFromTimeline()
+            case .toggle:
+                selectedKey = nil
+                if model.timelineLayerSelectMode { model.toggleTimelineLayerPick(row.id) }
+                else { model.select(layerId: row.id, additive: true) }
+                UISelectionFeedbackGenerator().selectionChanged()
+            case .replace: pause(); selectedKey = nil; model.select(layerId: row.id, additive: false)
+            // Tocar de novo na escolhida a solta (a doca fecha: volta a barra de adicionar).
+            case .deselect: selectedKey = nil; model.clearSelection()
+            }
         }
     }
 
@@ -945,18 +988,17 @@ struct TimelineView: View {
         }
         // Losango ESCOLHIDO (lote de 2+ ou modo de escolha): a seleção inteira anda junta.
         if next.mode == .key, let row, row.instants.indices.contains(touched.key),
-           let keys = model.timelineKeySelection, keys.layer == row.id,
-           keys.count >= 2 || model.timelineKeySelectMode, keys.containsAny(row.keysAt[touched.key]) {
+           let keys = model.timelineKeySelection,
+           keys.count >= 2 || model.timelineKeySelectMode, keys.containsAny(on: row.id, row.keysAt[touched.key]) {
             next.mode = .keys
             next.keyIndex = touched.key
             next.grabFrame = row.instants[touched.key]
             next.keyFrame = next.grabFrame
-            // A seleção inteira fica dentro da camada, como o losango sozinho.
-            let first: Int64 = Int64(Keyframes.toTimeline(keys.minTime, row.start, row.offset))
-            let last: Int64 = Int64(Keyframes.toTimeline(keys.maxTime, row.start, row.offset))
-            let lo: Int64 = min(0, Int64(row.start) - first)
-            let hi: Int64 = max(0, Int64(row.end) - last)
-            next.keyLimits = (lo: Int32(clamping: lo), hi: Int32(clamping: hi))
+            // Cada camada da seleção (pode abranger várias) fica dentro do próprio clipe.
+            next.keyLimits = keys.shiftLimits { id in
+                guard let clip = segmentRow(id) else { return nil }
+                return (start: clip.start, end: clip.end, offset: clip.offset)
+            }
         }
         if next.mode == .key, let row, row.instants.indices.contains(touched.key) {
             next.keyIndex = touched.key; next.keyFrame = row.instants[touched.key]
@@ -1056,7 +1098,9 @@ struct TimelineView: View {
                     model.refreshModel(force: true)
                 } else if g.hit.kind == .key { tap(start, width: size.width) }
                 else if !compact && g.hit.kind != .eye && g.hit.kind != .none {
-                    if model.selection.isEmpty { model.select(layerId: row.id, additive: false, openOptions: false) }
+                    // Escolhendo várias camadas, segurar parado vale o mesmo que tocar.
+                    if model.timelineLayerSelectMode { model.toggleTimelineLayerPick(row.id) }
+                    else if model.selection.isEmpty { model.select(layerId: row.id, additive: false, openOptions: false) }
                     else if !(model.selection.count == 1 && model.selection.contains(row.id)) { model.select(layerId: row.id, additive: true, openOptions: false) }
                 }
             }

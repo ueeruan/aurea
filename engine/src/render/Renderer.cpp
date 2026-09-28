@@ -10,6 +10,7 @@
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/timeline/LayerAnimator.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -123,18 +124,21 @@ f32 sample_frac(const Track& tr, f64 t, f32 fallback) noexcept {
     return a + (tr.value_or(FrameIndex{static_cast<i64>(f) + 1}, fallback) - a) * k;
 }
 
-/// `layer_matrix` num tempo local fracionário.
-Mat4 layer_matrix_frac(const Layer& l, f64 local) noexcept {
+/// `layer_matrix` num tempo local fracionário. Os animadores de camada (entrada,
+/// saída, wiggle) somam por cima do transform — é por aqui que preview e export
+/// os veem iguais.
+Mat4 layer_matrix_frac(const Layer& l, f64 local, f64 fps) noexcept {
     const TrackSet& t = l.tracks;
     auto s = [&](TrackProperty p, f32 fallback) noexcept {
         const Track* tr = t.find(p);
         return tr ? sample_frac(*tr, local, fallback) : fallback;
     };
-    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x),
-                   s(TrackProperty::PositionY, l.transform.position.y), 0.0f};
-    const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x),
-                     s(TrackProperty::ScaleY, l.transform.scale.y), 1.0f};
-    const f32 rot = s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad;
+    const layeranim::Offset an = layeranim::whole_offset(l, local, fps);
+    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x) + an.translate.x,
+                   s(TrackProperty::PositionY, l.transform.position.y) + an.translate.y, 0.0f};
+    const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x) * an.scale.x,
+                     s(TrackProperty::ScaleY, l.transform.scale.y) * an.scale.y, 1.0f};
+    const f32 rot = (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad;
     const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x),
                       s(TrackProperty::AnchorY, l.transform.anchor.y), 0.0f};
     return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
@@ -143,38 +147,37 @@ Mat4 layer_matrix_frac(const Layer& l, f64 local) noexcept {
 
 /// Transform 3D completo da layer (posição/rotação/escala/âncora em XYZ),
 /// num tempo local fracionário (inteiro = o próprio quadro).
-Mat4 layer_matrix_3d_frac(const Layer& l, f64 local) noexcept {
+Mat4 layer_matrix_3d_frac(const Layer& l, f64 local, f64 fps) noexcept {
     const TrackSet& t = l.tracks;
     auto s = [&](TrackProperty p, f32 fallback) noexcept {
         const Track* tr = t.find(p);
         return tr ? sample_frac(*tr, local, fallback) : fallback;
     };
-    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x), s(TrackProperty::PositionY, l.transform.position.y),
+    const layeranim::Offset an = layeranim::whole_offset(l, local, fps);
+    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x) + an.translate.x,
+                   s(TrackProperty::PositionY, l.transform.position.y) + an.translate.y,
                    s(TrackProperty::PositionZ, l.transform.position.z)};
-    Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x), s(TrackProperty::ScaleY, l.transform.scale.y),
+    Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x) * an.scale.x, s(TrackProperty::ScaleY, l.transform.scale.y) * an.scale.y,
                s(TrackProperty::ScaleZ, l.transform.scale.z)};
     // A profundidade acompanha a largura (Z multiplica X) em tudo que não é
     // câmera/luz: os controles de escala da UI mexem só em X/Y. Sem isto,
     // escalar um modelo — ou o NULO pai dele — o achataria em profundidade
     // (perfil e sombreamento esticam em vez de dar zoom).
     if (l.kind != LayerKind::Camera && l.kind != LayerKind::Light) scale.z *= scale.x;
-    const Vec3 rot{s(TrackProperty::RotationX, l.transform.rotation.x) * kDeg2Rad,
-                   s(TrackProperty::RotationY, l.transform.rotation.y) * kDeg2Rad,
-                   s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad};
+    const Vec3 rot{(s(TrackProperty::RotationX, l.transform.rotation.x) + an.rotation.x) * kDeg2Rad,
+                   (s(TrackProperty::RotationY, l.transform.rotation.y) + an.rotation.y) * kDeg2Rad,
+                   (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad};
     const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x), s(TrackProperty::AnchorY, l.transform.anchor.y),
                       s(TrackProperty::AnchorZ, l.transform.anchor.z)};
     return Mat4::translation(pos) * Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z)) * Mat4::scale(scale)
          * Mat4::translation(-anchor);
 }
 
-Mat4 layer_matrix_3d(const Layer& l, FrameIndex local) noexcept {
-    return layer_matrix_3d_frac(l, static_cast<f64>(local.value));
-}
-
-f32 layer_opacity(const Layer& l, FrameIndex local) noexcept {
+f32 layer_opacity(const Layer& l, FrameIndex local, f64 fps) noexcept {
     const Track* tr = l.tracks.find(TrackProperty::Opacity);
     const f32 v = tr ? tr->value_or(local, l.transform.opacity) : l.transform.opacity;
-    return std::clamp(v, 0.0f, 1.0f);
+    const f32 an = layeranim::has_whole(l) ? layeranim::whole_offset(l, static_cast<f64>(local.value), fps).opacity : 1.0f;
+    return std::clamp(v * an, 0.0f, 1.0f);
 }
 
 /// Matriz clip ← composição: pixels da composição (y para baixo) → NDC do
@@ -229,6 +232,11 @@ bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept
             || s(TrackProperty::RotationY, p->transform.rotation.y) != 0.0f
             || s(TrackProperty::PositionZ, p->transform.position.z) != 0.0f) {
             return true;
+        }
+        // Animador de camada girando em X/Y (entrada "de pé", "virando"): 3D.
+        if (layeranim::has_whole(*p)) {
+            const layeranim::Offset an = layeranim::whole_offset(*p, static_cast<f64>(local.value), comp.fps() > 0.0 ? comp.fps() : 30.0);
+            if (an.rotation.x != 0.0f || an.rotation.y != 0.0f) return true;
         }
         p = p->parent.valid() ? comp.layer(p->parent) : nullptr;
     }
@@ -300,7 +308,8 @@ Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool th
     }
     auto ownMatrix = [&](const Layer& node) {
         const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
-        const Mat4 own = threeD ? layer_matrix_3d_frac(node, local) : layer_matrix_frac(node, local);
+        const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+        const Mat4 own = threeD ? layer_matrix_3d_frac(node, local, fps) : layer_matrix_frac(node, local, fps);
         return node.hasParentBasis ? node.parentBasis * own : own;
     };
     bool helper = false;
@@ -398,9 +407,56 @@ f32 camera_fov_frac(const Layer& l, f64 local) noexcept {
     return fov ? sample_frac(*fov, local, l.camera.fov) : l.camera.fov;
 }
 
+/// Grupo que deixa a câmera de fora atravessar (CompositionRef::cameraPassThrough):
+/// enquanto a composição de DENTRO é preparada, a câmera dela é a de fora,
+/// levada para o espaço do grupo (vista × mundo do grupo). Vale só durante o
+/// `prepare` da filha (salvo e restaurado em volta dele).
+struct CameraPassThrough {
+    const Composition* child = nullptr;
+    const Composition* parent = nullptr;
+    const Layer* group = nullptr;
+    f64 parentTime0 = 0.0, childTime0 = 0.0, rate = 1.0;   ///< tempo de fora = t0 + (tempo de dentro − c0) × rate
+};
+thread_local CameraPassThrough g_cameraPassThrough;
+
+/// Inversa de uma matriz afim (3×3 + translação); singular = identidade.
+Mat4 affine_inverse(const Mat4& m) noexcept {
+    const f32 a = m.col[0].x, b = m.col[1].x, c = m.col[2].x;
+    const f32 d = m.col[0].y, e = m.col[1].y, f = m.col[2].y;
+    const f32 g = m.col[0].z, h = m.col[1].z, k = m.col[2].z;
+    const f32 A = e * k - f * h, B = -(d * k - f * g), C = d * h - e * g;
+    const f32 det = a * A + b * B + c * C;
+    if (std::fabs(det) < 1e-12f) return Mat4::identity();
+    const f32 inv = 1.0f / det;
+    Mat4 r;
+    r.col[0] = Vec4{A * inv, B * inv, C * inv, 0};
+    r.col[1] = Vec4{-(b * k - c * h) * inv, (a * k - c * g) * inv, -(a * h - b * g) * inv, 0};
+    r.col[2] = Vec4{(b * f - c * e) * inv, -(a * f - c * d) * inv, (a * e - b * d) * inv, 0};
+    const Vec3 t{m.col[3].x, m.col[3].y, m.col[3].z};
+    const Vec3 rt = r.transform_point(t);
+    r.col[3] = Vec4{-rt.x, -rt.y, -rt.z, 1};
+    return r;
+}
+
+scene3d::SceneCamera camera_for_frac_own(const Composition& comp, f64 timeF, u32 w, u32 h) noexcept;
+
 /// Câmera da composição no instante: a camada de câmera ATIVA visível; sem
-/// ela, a padrão (plano Z=0 em escala 1:1 com a composição).
+/// ela, a padrão (plano Z=0 em escala 1:1 com a composição). Dentro de um
+/// grupo que a câmera atravessa, a câmera de fora.
 scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, u32 h) noexcept {
+    const CameraPassThrough pt = g_cameraPassThrough;
+    if (pt.child != &comp || !pt.parent || !pt.group) return camera_for_frac_own(comp, timeF, w, h);
+    const f64 outer = pt.parentTime0 + (timeF - pt.childTime0) * pt.rate;
+    g_cameraPassThrough = CameraPassThrough{};   // a de fora com as regras dela
+    scene3d::SceneCamera cam = camera_for_frac(*pt.parent, outer, w, h);
+    g_cameraPassThrough = pt;
+    const Mat4 group = world_3d_frac(*pt.parent, *pt.group, outer);
+    cam.view = cam.view * group;
+    cam.position = affine_inverse(group).transform_point(cam.position);
+    return cam;
+}
+
+scene3d::SceneCamera camera_for_frac_own(const Composition& comp, f64 timeF, u32 w, u32 h) noexcept {
     const FrameIndex time{static_cast<i64>(std::floor(timeF))};
     scene3d::SceneCamera cam = scene3d::default_camera(w, h);
     const OrderedIds<LayerId>& order = comp.order();
@@ -1222,7 +1278,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         Vec2 srcShift{0.0f, 0.0f};
         rl.id = rid;
         rl.blend = l->blendMode;
-        rl.opacity = layer_opacity(*l, local);
+        rl.opacity = layer_opacity(*l, local, fps);
         if (rl.opacity <= 0.0f) continue;   // invisível: nenhum passe, nenhum decode
 
         if (l->adjustment) {
@@ -1231,6 +1287,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // efeitos são planejados como os de qualquer camada; a montagem
             // acontece na composição, quando o fundo já existe.
             rl.source.kind = LayerSource::Kind::Adjustment;
+            rl.adjustScope = l->adjustmentScope;
             rl.source.width = out.compWidth;
             rl.source.height = out.compHeight;
             rl.compFromLayer = Mat4::identity();
@@ -1254,6 +1311,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             continue;
         }
 
+        // Grupo que a câmera de fora atravessa: a filha já sai projetada pela
+        // câmera daqui (com o transform do grupo dentro dela) — a camada entra
+        // chapada, sem transform próprio.
+        bool cameraThrough = false;
         switch (l->kind) {
             case LayerKind::Video: {
                 const Asset* asset = project.asset(l->source);
@@ -1433,7 +1494,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const auto font = text::FontManager::instance().font_for(*textData);
                 if (!font || textData->content.empty() || (textData->color.w <= 0.0f && textData->strokeWidth <= 0.0f)) continue;
                 const TextData& T = *textData;
-                const bool animated = text::has_animators(T);
+                // Animadores de CAMADA por letra/palavra/linha entram no mesmo GlyphAnim.
+                const bool unitAnim = layeranim::has_units(*l);
+                const bool animated = text::has_animators(T) || unitAnim;
                 // O contorno cabe na distância do atlas (16 px da base × escala).
                 const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, T.size) / text::kGlyphBasePx - 1.0f;
                 const f32 stroke = std::clamp(T.strokeWidth, 0.0f, std::max(0.0f, strokeMax));
@@ -1466,6 +1529,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                     pad += std::min(extra, 4000.0f);
                 }
+                if (unitAnim) pad += layeranim::glyph_padding(*l, T.size, T.content.size());
                 // Deslocamento de caractere troca as letras antes do layout.
                 TextData shaped;
                 const TextData* src = &T;
@@ -1497,7 +1561,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     sets = std::clamp<u32>(settings.finalQuality ? mb.samples
                                                                  : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
                                            2u, 16u);
-                    open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
+                    open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0
+                         * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
                 }
                 // Texto no caminho: cada letra vai para o seu ponto do caminho-guia
                 // (pelo centro do avanço), girada pela tangente. O animador age
@@ -1541,6 +1606,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 for (u32 si = 0; si < sets; ++si) {
                     const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? ((static_cast<f64>(si) + 0.5) / static_cast<f64>(sets) - 0.5) * open : 0.0);
                     text::evaluate_text_animators(T, *textTracks, lt, fps, units, L.chars, L.words, L.lines, anim);
+                    if (unitAnim) {
+                        const f32 align = T.alignment == 1 ? 0.5f : T.alignment == 2 ? 1.0f : 0.0f;
+                        layeranim::apply_to_glyphs(*l, lt, fps, units, L.chars, L.words, L.lines, align, anim);
+                    }
                     auto glyphMatrix = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
                         f32 x0 = q.x0, x1 = q.x1, y0 = q.y0, y1 = q.y1;
                         const Vec4* group = a.anchorGrouping == 1 && q.wordIndex < wordBounds.size() ? &wordBounds[q.wordIndex]
@@ -1644,6 +1713,16 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // Os keyframes de ParticleParam ja entraram: sem trilha, o valor
                 // parado do campo.
                 const ParticleData pd = sampled_particles(*l, local);
+                if (pd.emitterType == static_cast<u32>(ParticleEmitter::Particular)) {
+                    // Particular (o sistema do app antigo): a camada é uma
+                    // folha transparente do tamanho da composição e o efeito
+                    // `aurea.generate.particular` desenha as partículas nela.
+                    rl.source.kind = LayerSource::Kind::Solid;
+                    rl.source.solid = Vec4{0, 0, 0, 0};
+                    rl.source.width = comp.width();
+                    rl.source.height = comp.height();
+                    break;
+                }
                 const f32 lw = static_cast<f32>(comp.width()), lh = static_cast<f32>(comp.height());
                 const f32 tsec = static_cast<f32>(static_cast<f64>(local.value) / fps);
                 const f32 rate = std::clamp(pd.rate, 0.1f, 1000000.0f);   // o shader analítico aceita milhões
@@ -1729,8 +1808,22 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 ++prepareDepth_;
                 RenderSettings childSettings = settings;
                 childSettings.sceneEditor.enabled = false;
+                const CameraPassThrough savedThrough = g_cameraPassThrough;
+                cameraThrough = l->nested.cameraPassThrough && child->width() == comp.width() && child->height() == comp.height()
+                             && !(settings.sceneEditor.enabled && !settings.finalQuality);
+                if (cameraThrough) {
+                    CameraPassThrough pt;
+                    pt.child = child;
+                    pt.parent = &comp;
+                    pt.group = l;
+                    pt.parentTime0 = static_cast<f64>(time.value);
+                    pt.childTime0 = static_cast<f64>(cf);
+                    pt.rate = childFps > 0.0 ? fps / childFps / std::max(1e-3, std::fabs(static_cast<f64>(l->speed_at(time)))) : 1.0;
+                    g_cameraPassThrough = pt;
+                }
                 prepare(*child, project, FrameIndex{cf}, media, imageLookup, imageCtx, childSettings, frameNumber,
                         playDirection, decodeMode, speed, *snapChild);
+                g_cameraPassThrough = savedThrough;
                 --prepareDepth_;
                 nestSalt_ = savedSalt;
                 frameNumber_ = frameNumber;
@@ -1759,8 +1852,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
 
         // Transform da layer, com a cadeia de pais (cada pai no próprio tempo).
-        Mat4 m = world_2d_frac(comp, *l, static_cast<f64>(time.value));
-        const bool inScene3d = wants_3d(comp, *l, time);
+        Mat4 m = cameraThrough ? Mat4::identity() : world_2d_frac(comp, *l, static_cast<f64>(time.value));
+        const bool inScene3d = !cameraThrough && wants_3d(comp, *l, time);
         if (inScene3d) {
             // Rotação X/Y, profundidade, nulo 3D na cadeia: a MESMA câmera dos
             // modelos 3D (padrão = plano Z=0 1:1 com a composição).
@@ -1850,13 +1943,15 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
 
         // Desfoque de movimento (transform 2D, com pais): K amostras no
         // obturador centrado no quadro. Camada parada no intervalo = nada.
-        if (l->motionBlur && comp.motion_blur().enabled) {
+        if (l->motionBlur && comp.motion_blur().enabled && !cameraThrough) {
             const bool in3d = wants_3d(comp, *l, time);
             const MotionBlurSettings& mb = comp.motion_blur();
             const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples
                                                                : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
                                           2u, 64u);
-            const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
+            // Comprimento do rastro desta camada (× o obturador da composição).
+            const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0
+                           * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
             if (open > 0.0) {
                 rl.blurMatrices.resize(k);
                 bool moves = false;
@@ -3735,6 +3830,44 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         const RenderLayer& layer = snap.layers[i];
         if (layer.planeGroup >= 0 || layer.matteOnly || layer.particle.inScene) continue;   // na cena 3D / só recorta
         CompositeDraw draw;
+        if (layer.source.kind == LayerSource::Kind::Adjustment && layer.adjustScope == 1) {
+            // Ajuste SÓ na camada logo abaixo (um grupo conta como uma): ela vai
+            // sozinha para um alvo do tamanho da composição, os efeitos rodam
+            // nela e o resultado toma o lugar dela na pilha. A opacidade do
+            // ajuste mistura o original com o ajustado.
+            if (draws.empty() || draws.back().adjustPlan != kInvalidIndex) continue;
+            const CompositeDraw below = draws.back();
+            const FGTexture lc = draw_to_comp(below, compDesc, compW, compH, "ajuste-camada-abaixo");
+            if (!lc.valid()) continue;
+            LayerImage in;
+            in.texture = lc;
+            in.region = Rect{0.0f, 0.0f, compW, compH};
+            in.width = compDesc.width;
+            in.height = compDesc.height;
+            LayerImage fin = in;
+            const EffectPlan& plan = snap.plans[i];
+            (void)EffectGraph::build(plan, ctx, in, fin);
+            if (!fin.valid()) continue;
+            CompositeDraw orig;
+            orig.texture = lc;
+            orig.region = Rect{0.0f, 0.0f, compW, compH};
+            orig.blend = below.blend;
+            orig.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
+            CompositeDraw fx = orig;
+            fx.texture = fin.texture;
+            fx.region = fin.region;
+            if (plan.hasFold) fx.compFromLayer = plan.foldMatrix;
+            const f32 op = std::clamp(layer.opacity * (plan.hasFold ? plan.foldOpacity : 1.0f), 0.0f, 1.0f);
+            if (op >= 0.999f) {
+                draws.back() = fx;
+            } else {
+                orig.opacity = 1.0f - op;
+                fx.opacity = op;
+                draws.back() = orig;
+                draws.push_back(fx);
+            }
+            continue;
+        }
         if (layer.source.kind == LayerSource::Kind::Adjustment) {
             // Camada de ajuste: montada na composição, sobre o fundo acumulado.
             draw.adjustPlan = i;

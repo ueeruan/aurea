@@ -582,6 +582,9 @@ private struct BatchToolsView: View {
                 tool(CupertinoGlyph.ArrowDownToLine, "editor_alinhar_base_tela", size: 18) { align(5) }
                 tool(CupertinoGlyph.ArrowLeftRightSquare, "editor_distribuir_horizontal_vaos_iguais", size: 18, enabled: selected.count >= 3) { distribute(horizontal: true) }
                 tool(CupertinoGlyph.ArrowUpDownSquare, "editor_distribuir_vertical_vaos_iguais", size: 18, enabled: selected.count >= 3) { distribute(horizontal: false) }
+                // Ajustar / preencher a tela (app antigo), junto dos alinhamentos.
+                tool(CupertinoGlyph.FullscreenExit, "editor_ajustar_tela", size: 18) { pause(); model.fitToCanvas(selected.map(\.id), fill: false) }
+                tool(CupertinoGlyph.Fullscreen, "editor_preencher_tela", size: 18) { pause(); model.fitToCanvas(selected.map(\.id), fill: true) }
             }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
             staggerRow
             Spacer(minLength: 0)
@@ -1194,7 +1197,9 @@ private struct AddLayerSheet: View {
     private let shapes: [(Int, String)] = [
         (0, "sh_shape_circle"), (10, "sh_shape_square"), (1, "sh_shape_rounded"), (12, "sh_shape_capsule"),
         (4, "sh_shape_triangle"), (14, "sh_shape_right_triangle"), (6, "editor_poligono"), (11, "editor_estrela"),
-        (2, "sh_shape_cross"), (3, "sh_shape_ring"), (5, "sh_shape_slice"), (7, "sh_shape_flower"), (8, "sh_shape_arrow")
+        (2, "sh_shape_cross"), (3, "sh_shape_ring"), (5, "sh_shape_slice"), (7, "sh_shape_flower"), (8, "sh_shape_arrow"),
+        (16, "sh_shape_pentagon"), (15, "sh_shape_octagon"), (17, "sh_shape_trapezoid"), (18, "sh_shape_parallelogram"),
+        (19, "sh_shape_star4"), (20, "sh_shape_star6"), (21, "sh_shape_gear"), (22, "sh_shape_double_arrow")
     ]
 
     var body: some View {
@@ -1269,7 +1274,7 @@ private struct AddLayerSheet: View {
                         }
                     case 4:
                         drawnCard("sh_add_null", kind: -1) { model.addNull(threeD: false); close() }
-                        card("particular_title", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(10); close() }
+                        card("particular_title", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(20); close() }   // 20 = Particular (preset Padrão)
                         card("editor_camada_ajuste", glyph: CupertinoGlyph.WandStars) { close(); model.addAdjustmentLayer() }
                         card("sh_add_group_selection", glyph: CupertinoGlyph.Folder) {
                             if model.selection.isEmpty { model.toast = AureaText.t("sh_add_pick_layers_to_group") }
@@ -1340,7 +1345,7 @@ private struct AddLayerSheet: View {
 /// Seletor de fotos do sistema, equivalente ao Photo Picker do Android.
 /// `loadFileRepresentation` copia o arquivo temporário sem carregar um vídeo
 /// inteiro em Data no processo da interface.
-private struct ShellMediaPicker: UIViewControllerRepresentable {
+struct ShellMediaPicker: UIViewControllerRepresentable {
     let filter: PHPickerFilter
     let picked: (URL?, Bool) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(picked: picked) }

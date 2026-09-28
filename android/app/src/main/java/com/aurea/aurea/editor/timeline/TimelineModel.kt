@@ -351,6 +351,7 @@ internal fun expandedRows(base: List<RowModel>, expanded: Long?, keys: Map<Long,
                     35 -> "Shape · ${track.param + 1}"
                     36 -> "Particles · ${track.param + 1}"
                     39 -> "Speed"
+                    40 -> "Animator ${track.effect + 1} · ${track.param + 1}"
                     37 -> "Material ${track.effect + 1} · ${listOf("R", "G", "B", "Alpha", "Metallic", "Roughness").getOrNull(track.param) ?: track.param}"
                     else -> "3D · ${track.property}"
                 }

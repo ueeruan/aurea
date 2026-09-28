@@ -1,4 +1,6 @@
-// Particle World: ten controls, two colors and three motion presets.
+// Partículas. Camada nova = o Particular (efeito aurea.generate.particular):
+// presets em cima, controles do efeito no painel de efeitos. Camada antiga
+// (Particle World): os controles compactos de antes + presets para converter.
 // Parameter IDs remain compatible with existing saved projects.
 import SwiftUI
 
@@ -35,6 +37,13 @@ private enum PPP {
 /// projetos salvos.
 private let particleProperty: UInt32 = 36
 
+/// `ParticleEmitter::Particular`: a camada é do Particular (o efeito desenha).
+private let particularEmitter = 14
+/// O efeito do Particular (`effect_keys::kParticular`).
+private let particularKey = "aurea.generate.particular"
+/// Preset 0 do Particular na API do motor (`particular::kPresetBase`).
+private let particularPresetBase = 20
+
 struct ParticlesPanel: View {
     @EnvironmentObject private var model: AureaModel
     @State private var values: [Float] = []
@@ -43,10 +52,23 @@ struct ParticlesPanel: View {
 
     private var id: Int64 { model.primarySelection ?? 0 }
 
+    /// Camada do Particular (o sistema do app antigo, `ParticleEmitter::Particular`).
+    private var isParticular: Bool { !values.isEmpty && Int(value(PPP.emitterType).rounded()) == particularEmitter }
+
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_particulas"), onBack: { model.panel = .none })
-            panelBody
+            if isParticular {
+                // Os presets do Particular em cima; os controles do efeito
+                // embaixo, no painel de efeitos do Aurea.
+                presetRow.padding(.init(top: 12, leading: 18, bottom: 4, trailing: 18))
+                EffectsView(focusedType: fxEffectTypeId(particularKey), embedded: true)
+                    .onAppear(perform: load)
+                    .onChange(of: model.status.modelRevision) { _ in load() }
+                    .onChange(of: id) { _ in selected = nil; load() }
+            } else {
+                panelBody
+            }
         }
     }
 
@@ -79,9 +101,8 @@ struct ParticlesPanel: View {
 
     // =========================================================================
     @ViewBuilder private var parameterGroups: some View {
-        if value(PPP.emitterType) < 10 {
-            PanelNotice(AureaText.t("world_legacy"))
-        } else {
+        PanelNotice(AureaText.t("particular_convert_note"))
+        if value(PPP.emitterType) >= 10 {
         group(AureaText.t("particular_group_emitter"))
         if value(PPP.emitterType) >= 13 {
             dim(AureaText.t("particular_width"), PPP.emitterWidth, 10, 0, 8000, " px")
@@ -178,7 +199,7 @@ struct ParticlesPanel: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(presetKeys.enumerated()), id: \.offset) { entry in
-                        Button { applyPreset(entry.offset + 10) } label: {
+                        Button { applyPreset(entry.offset + particularPresetBase) } label: {
                             Text(AureaText.t(entry.element))
                                 .font(.aurea(size: 12))
                                 .foregroundStyle(AureaColors.text)
@@ -193,7 +214,10 @@ struct ParticlesPanel: View {
         }
     }
 
-    private let presetKeys = ["world_explosive", "world_jet", "world_vortex", "world_box_lights", "world_embers", "world_snow", "world_bokeh", "world_fountain", "world_purple_crystals"]
+    // Os presets do Particular (ordem = `particular::apply_preset`).
+    private let presetKeys = ["particular_preset_default", "particular_preset_rain", "particular_preset_snow",
+                              "particular_preset_fire", "particular_preset_sparks", "particular_preset_fireworks",
+                              "particular_preset_dust", "particular_preset_bokeh"]
 
     private func group(_ title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {

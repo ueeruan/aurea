@@ -105,7 +105,7 @@ f32 Track::sample_keys(FrameIndex t) const noexcept {
     const f32 t01 = static_cast<f32>(
         static_cast<f64>(t.value - a.time.value) / static_cast<f64>(span));
 
-    const f32 eased = apply_easing(a.interp, t01, a.bx1, a.by1, a.bx2, a.by2);
+    const f32 eased = keyframe_ease(a, t01);
     return lerpf(a.value, b.value, eased);
 }
 
@@ -187,10 +187,11 @@ u32 Track::move(FrameIndex from, FrameIndex to) noexcept {
 }
 
 void Track::set_interpolation(FrameIndex t, Interpolation in, f32 bx1, f32 by1,
-                              f32 bx2, f32 by2) noexcept {
+                              f32 bx2, f32 by2, u8 power) noexcept {
     const u32 i = find_exact(t);
     if (i == kInvalidIndex) return;
     keys[i].interp = in;
+    if (power != 0) keys[i].easePower = clamp_ease_power(power);
     // Só grava os control points quando a curva é de fato bezier, para não
     // sobrescrever uma curva configurada por um clique acidental em "linear".
     if (in == Interpolation::Bezier || in == Interpolation::CustomCurve) {

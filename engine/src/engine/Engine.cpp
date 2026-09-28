@@ -12,6 +12,7 @@
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/vector/Vector.hpp"
+#include "aurea/animation/KeyframeOptimize.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/core/Thread.hpp"
@@ -20,6 +21,8 @@
 #include "aurea/ai/Upscaler.hpp"
 #include "aurea/ai/TemporalStabilizer.hpp"
 #include "aurea/export/UpscaleColor.hpp"
+#include "aurea/effects/MotionTile.hpp"
+#include "aurea/effects/Particular.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -991,6 +994,8 @@ Status Engine::load_project(const char* path) noexcept {
                 Layer* layer = c.layer(c.order().at(i));
                 if (!layer) continue;
                 for (auto& effect : layer->effects) {
+                    // Motion Tile na disposição anterior: converte antes de completar.
+                    (void)motion_tile::upgrade_legacy_layout(*layer, effect);
                     const auto* specs = effectRegistry_.params(effect.type);
                     if (!specs || effect.params.size() >= specs->count()) continue;
                     EffectInstance defaults;
@@ -3351,6 +3356,33 @@ void logo_burst_from_text(const Composition& comp, LayerId self, ParticleData& p
     }
 }
 
+/// Particular (o sistema de partículas do app antigo): a camada vira folha
+/// transparente (ParticleEmitter::Particular) e o efeito, o PRIMEIRO da
+/// pilha, desenha as partículas com o preset `preset` (0..kPresetCount-1).
+/// Numa camada antiga, é a conversão: o motor antigo sai, o Particular entra.
+bool make_particular(Layer& l, const EffectRegistry& registry, u32 preset) noexcept {
+    const EffectTypeId type = registry.find_key(effect_keys::kParticular);
+    const ParameterRegistry* params = registry.params(type);
+    if (!params || preset >= particular::kPresetCount) return false;
+    auto it = std::find_if(l.effects.begin(), l.effects.end(), [&](const EffectInstance& e) { return e.type == type; });
+    if (it == l.effects.end()) {
+        if (l.effects.size() >= kMaxEffectCount) return false;
+        EffectInstance e;
+        e.id = l.alloc_effect_id();
+        e.type = type;
+        initialize_instance(e, *params);
+        e.params[particular::kSeed].constant = ParamValue::scalar(static_cast<f32>(l.particles.seed % 10000u));
+        it = l.effects.insert(l.effects.begin(), std::move(e));
+    } else {
+        // Preset é ponto de partida: os keyframes do efeito saem com ele.
+        const u32 id = it->id;
+        l.tracks.remove_if([id](const Track& t) { return t.property == TrackProperty::EffectParam && t.effectIndex == id; });
+    }
+    l.particles.emitterType = static_cast<u32>(ParticleEmitter::Particular);
+    l.tracks.remove_if([](const Track& t) { return t.property == TrackProperty::ParticleParam; });
+    return particular::apply_preset(*it, *params, preset);
+}
+
 } // namespace
 
 Result<u64> Engine::add_particles(u32 preset) noexcept {
@@ -3362,14 +3394,28 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     // UM sistema, UM nome. Os tres nomes antigos viraram preset: criar uma
     // camada chamada "Neve" sugeria um motor de neve, e nao existe motor de
     // neve — e o Particular com os parametros da neve.
-    const LayerId lid = comp->add_layer(LayerKind::ParticleSystem, preset >= 10 ? "Particle World" : "Aurea Particular");
+    // Presets `particular::kPresetBase + i`: o Particular (o sistema do app
+    // antigo), que é o que a interface cria. 0..18: o motor antigo, mantido
+    // só para projetos e testes que ainda pedem esses números.
+    const bool particularPreset = preset >= particular::kPresetBase
+                               && preset < particular::kPresetBase + particular::kPresetCount;
+    const LayerId lid = comp->add_layer(LayerKind::ParticleSystem,
+                                        particularPreset ? "Particular" : preset >= 10 ? "Particle World" : "Aurea Particular");
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
-    particle_preset(l->particles, preset, w, h);
-    if (preset >= 10 && preset <= 18) l->threeD = true;
-    if (preset == 9) logo_burst_from_text(*comp, lid, l->particles);
     l->particles.seed = lid.index * 7919u + 1u;
+    if (particularPreset) {
+        if (!make_particular(*l, effectRegistry_, preset - particular::kPresetBase)) {
+            (void)comp->remove_layer(lid);
+            return Status{Errc::InvalidState, "particular indisponivel"};
+        }
+    } else {
+        particle_preset(l->particles, preset, w, h);
+        if (preset >= 10 && preset <= 18) l->threeD = true;
+        if (preset == 9) logo_burst_from_text(*comp, lid, l->particles);
+        l->particles.seed = lid.index * 7919u + 1u;
+    }
     // O cursor pode estar DEPOIS do fim da composição (a timeline não trava
     // mais no fim): a camada nasce onde ele está e a duração acompanha, senão
     // ela nasceria fora do projeto e não apareceria.
@@ -3392,6 +3438,17 @@ bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::ParticleSystem) return false;
+    if (preset >= particular::kPresetBase && preset < particular::kPresetBase + particular::kPresetCount) {
+        // Particular: numa camada antiga é a conversão para o sistema novo
+        // (a camada fica 2D — a perspectiva é a do próprio Particular).
+        history_.before_mutation(*comp, project_->timeline().current(), "preset de particulas");
+        modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        if (l->particles.emitterType != static_cast<u32>(ParticleEmitter::Particular)) l->threeD = false;
+        const bool ok = make_particular(*l, effectRegistry_, preset - particular::kPresetBase);
+        project_->mark_dirty();
+        request_render();
+        return ok;
+    }
     history_.before_mutation(*comp, project_->timeline().current(), "preset de particulas");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const u32 seed = l->particles.seed;
@@ -5203,6 +5260,66 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
     return placed;
 }
 
+u32 Engine::copy_animation(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return 0;
+    i64 anchor = INT64_MAX;
+    for (u32 i = 0; i < l->tracks.size(); ++i)
+        for (const Keyframe& k : l->tracks.at(i).keys) anchor = std::min(anchor, k.time.value);
+    if (anchor == INT64_MAX) return 0;
+    std::vector<Clipboard::Key> copied;
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        const Track& t = l->tracks.at(i);
+        EffectTypeId type = 0;
+        u32 ordinal = 0;
+        if (t.property == TrackProperty::EffectParam) {
+            for (const EffectInstance& e : l->effects) if (e.id == t.effectIndex) { type = e.type; break; }
+            for (const EffectInstance& e : l->effects) {
+                if (e.id == t.effectIndex) break;
+                if (e.type == type) ++ordinal;
+            }
+        }
+        for (Keyframe key : t.keys) {
+            key.time.value -= anchor;
+            copied.push_back(Clipboard::Key{t.property, t.effectIndex, t.effectParamIndex, type, key, ordinal});
+        }
+    }
+    clipboard_.keys = std::move(copied);
+    return static_cast<u32>(clipboard_.keys.size());
+}
+
+u32 Engine::optimize_keyframes(u64 layerId, i32 property, f32 tolerance) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || !(tolerance >= 0.0f)) return 0;
+    // Tudo calculado em cópias: o desfazer só abre se algo sair.
+    std::vector<std::pair<u32, Track>> changed;
+    u32 removed = 0;
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        const Track& t = l->tracks.at(i);
+        if (t.keys.size() < 3) continue;
+        if (property >= 0 && static_cast<i32>(t.property) != property) continue;
+        Track next = t;
+        const f32 tol = std::max(1e-5f, tolerance * animation::value_range(t));
+        const u32 n = animation::optimize_track(next, tol);
+        if (n == 0) continue;
+        removed += n;
+        changed.emplace_back(i, std::move(next));
+    }
+    if (removed == 0) return 0;
+    history_.before_mutation(*comp, project_->timeline().current(), "otimizar keyframes");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    for (auto& entry : changed) l->tracks.at(entry.first) = std::move(entry.second);
+    project_->mark_dirty();
+    request_render();
+    return removed;
+}
+
 u32 Engine::clipboard_state() noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     return (clipboard_.layers.empty() ? 0u : 1u) | (clipboard_.hasStyle ? 2u : 0u)
@@ -5906,6 +6023,11 @@ Result<u64> Engine::add_shape(u32 preset) noexcept {
         {"Quadrado", 0, 0, 5, 0.5f, 1.0f},         {"Estrela", 4, 0, 5, 0.45f, 1.0f},
         {"Cápsula", 0, 0.5f, 5, 0.5f, 3.0f},       {"Retângulo arredondado", 0, 0.12f, 5, 0.5f, 1.0f},
         {"Triângulo retângulo", 10, 0, 3, 0.5f, 1.0f},
+        // Formas trazidas do app antigo (índices novos no fim: a grade já gravada não muda).
+        {"Octógono", 3, 0, 8, 0.5f, 1.0f},        {"Pentágono", 3, 0, 5, 0.5f, 1.0f},
+        {"Trapézio", 12, 0, 5, 0.6f, 1.3f},       {"Paralelogramo", 13, 0, 5, 0.5f, 1.4f},
+        {"Estrela de 4 pontas", 4, 0, 4, 0.4f, 1.0f}, {"Estrela de 6 pontas", 4, 0, 6, 0.55f, 1.0f},
+        {"Engrenagem", 14, 0, 12, 0.3f, 1.0f},     {"Seta dupla", 15, 0, 5, 0.22f, 1.6f},
     };
     const Preset& pr = kPresets[std::min<u32>(preset, static_cast<u32>(std::size(kPresets) - 1))];
     const LayerId lid = comp->add_layer(LayerKind::Shape, pr.name);
@@ -8338,7 +8460,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
 }
 
 bool Engine::query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
-                                   i32 frame, f32* out4) noexcept {
+                                   i32 frame, f32* out4, u8* outPower) noexcept {
     if (!out4 || property >= static_cast<u32>(TrackProperty::_Count)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     const Composition* comp = current_composition();
@@ -8350,6 +8472,7 @@ bool Engine::query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u
     if (index == kInvalidIndex) return false;
     const auto& key = track->keys[index];
     out4[0] = key.bx1; out4[1] = key.by1; out4[2] = key.bx2; out4[3] = key.by2;
+    if (outPower) *outPower = clamp_ease_power(key.easePower);
     return true;
 }
 
@@ -9316,6 +9439,7 @@ bool command_valid(const Command& c) noexcept {
             const KeyframeInterpPayload& k = c.keyframe_interp;
             return track_ok(k.track) && frame_ok(k.time)
                 && static_cast<u8>(k.interp) <= static_cast<u8>(Interpolation::Steps)
+                && k.power <= 3
                 && finite_all({k.bx1, k.by1, k.bx2, k.by2});
         }
         case CommandType::MaskSetOperation:
@@ -9937,7 +10061,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!track) return Errc::NotFound;
             track->set_interpolation(cmd.keyframe_interp.time, cmd.keyframe_interp.interp,
                                      cmd.keyframe_interp.bx1, cmd.keyframe_interp.by1,
-                                     cmd.keyframe_interp.bx2, cmd.keyframe_interp.by2);
+                                     cmd.keyframe_interp.bx2, cmd.keyframe_interp.by2,
+                                     cmd.keyframe_interp.power);
             return OkStatus;
         }
 
@@ -10209,7 +10334,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const f32 v = cmd.shape_param.value;
             ShapeData& sh = l->shape;
             switch (cmd.shape_param.param) {
-                case 0: sh.shapeType = static_cast<u32>(std::clamp(v, 0.0f, 10.0f)); break;
+                case 0: {
+                    // 0..10 e 12..15 são SDF; 11 é a camada vetorial (não se troca por aqui).
+                    const u32 t = static_cast<u32>(std::clamp(v, 0.0f, 15.0f));
+                    sh.shapeType = t == kShapeVector ? 10u : t;
+                    break;
+                }
                 case 1: sh.cornerRadius = std::max(0.0f, v); break;
                 case 2: sh.points = std::clamp(std::round(v), 3.0f, 64.0f); break;
                 case 3: sh.innerRadius = clampf(v, 0.05f, 0.95f); break;

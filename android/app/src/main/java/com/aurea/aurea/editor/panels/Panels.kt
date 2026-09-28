@@ -160,6 +160,7 @@ fun PanelContent(
         DisposableEffect(r) { onDispose { r.finish() } }
         ColorPickerSheet(
             initial = r.initial,
+            pickFromPreview = { store.captureBitmap(720) },
             onChange = r.onChange,
             onDone = {
                 color = null

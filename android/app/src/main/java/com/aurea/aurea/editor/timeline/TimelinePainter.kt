@@ -285,7 +285,7 @@ internal class TimelinePainter(
         val selFrame = if (selKey != null && selKey.first == r.id) r.selectedFrame(selKey.second) else Snap.NONE
         val dragFrame = if (st.dragKeyLayer == r.id) st.dragKeyFrame else Snap.NONE
         // Seleção de keyframes da timeline: quais instantes desta linha têm keyframe escolhido.
-        val picked = if (keySel != null && keySel.layer == r.id && !keySel.isEmpty()) pickedInstants(r, keySel) else null
+        val picked = if (keySel != null && keySel.on(r.id).isNotEmpty()) pickedInstants(r, keySel) else null
         val keysShown = KeyframeVisibility.visible(c.store.showAllKeyframes, r.track != null, selected)
         drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked, keysShown, arrows)
     }
@@ -569,7 +569,7 @@ internal class TimelinePainter(
      */
     private fun pickedInstants(r: RowModel, sel: KeySelection): BooleanArray? {
         var any = false
-        val out = BooleanArray(r.instants.size) { i -> sel.containsAny(r.keysAt[i]).also { if (it) any = true } }
+        val out = BooleanArray(r.instants.size) { i -> sel.containsAnyOn(r.id, r.keysAt[i]).also { if (it) any = true } }
         return if (any) out else null
     }
 

@@ -85,7 +85,8 @@ fun Timeline(
     val tracksOpen by remember(controller) {
         derivedStateOf { controller.expandedLayer.value?.let { id -> store.layers.any { it.id == id } } == true }
     }
-    val shownCompact = timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode)
+    // Escolhendo keyframes ou várias camadas, a timeline fica inteira.
+    val shownCompact = timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode || store.layerSelectMode)
 
     // Parâmetros entram depois da composição (o desenho e os gestos leem daqui).
     SideEffect {
@@ -122,6 +123,31 @@ fun Timeline(
         // Irmã (não filha) da superfície de gestos: o toque num botão da barra
         // não chega à timeline embaixo dele.
         KeyActionBar(store, shownCompact, Modifier.align(if (shownCompact) Alignment.TopEnd else Alignment.BottomCenter))
+        LayerPickBar(store, Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/**
+ * Barra do modo "Selecionar várias camadas" (mesmo desenho da barra dos
+ * keyframes): o contador, Todas, Limpar e Concluir. Some quando há
+ * keyframes escolhidos (a barra deles manda) ou o modo desliga.
+ */
+@Composable
+private fun LayerPickBar(store: EditorStore, modifier: Modifier) {
+    if (!store.layerSelectMode || store.keySelection != null) return
+    val count = store.selection.size
+    Row(
+        modifier
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .background(ShellColors.FloatingDark, RoundedCornerShape(14.dp))
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        KeyAction("${stringResource(R.string.panel_selecionar)} · $count", "timeline.layers.select", active = true) { store.changeLayerSelectMode(false) }
+        KeyAction(stringResource(R.string.common_all), "timeline.layers.all", enabled = store.layers.size >= 2) { store.selectAll() }
+        KeyAction(stringResource(R.string.editor_limpar_selecao), "timeline.layers.clear", enabled = count > 0) { store.clearSelection() }
+        KeyAction(stringResource(R.string.editor_concluir), "timeline.layers.done") { store.changeLayerSelectMode(false) }
     }
 }
 
@@ -131,7 +157,8 @@ fun Timeline(
  * "Selecionar" cabe, por cima da régua; ligar o modo fecha o painel e a
  * timeline volta alta com a barra inteira embaixo.
  *
- * Selecionar liga/desliga o modo (toque soma/tira); Todos = todos os
+ * Selecionar liga/desliga o modo (toque soma/tira, também em losangos de
+ * outras camadas); Copiar/Duplicar valem só com uma camada; Todos = todos os
  * keyframes da camada que a timeline mostra; Colar = no cabeçote; Duplicar =
  * cópia 1 frame depois do último escolhido; Concluir fecha a barra.
  */
@@ -158,9 +185,9 @@ private fun KeyActionBar(store: EditorStore, compact: Boolean, modifier: Modifie
     ) {
         KeyAction(select, "timeline.keys.select", active = mode) { store.changeKeySelectMode(!mode) }
         KeyAction(stringResource(R.string.common_all), "timeline.keys.all") { store.selectAllTimelineKeys() }
-        KeyAction(stringResource(R.string.common_copy), "timeline.keys.copy", enabled = count > 0) { store.copyTimelineKeys() }
+        KeyAction(stringResource(R.string.common_copy), "timeline.keys.copy", enabled = count > 0 && !sel.crossLayer) { store.copyTimelineKeys() }
         KeyAction(stringResource(R.string.common_paste), "timeline.keys.paste", enabled = (store.clipboard and 8) != 0) { store.pasteTimelineKeys() }
-        KeyAction(stringResource(R.string.common_duplicate), "timeline.keys.duplicate", enabled = count > 0) { store.duplicateTimelineKeys() }
+        KeyAction(stringResource(R.string.common_duplicate), "timeline.keys.duplicate", enabled = count > 0 && !sel.crossLayer) { store.duplicateTimelineKeys() }
         KeyAction(stringResource(R.string.common_delete), "timeline.keys.delete", enabled = count > 0, danger = true) { store.deleteTimelineKeys() }
         KeyAction(stringResource(R.string.editor_concluir), "timeline.keys.done") { store.clearKeySelection() }
     }

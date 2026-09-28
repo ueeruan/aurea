@@ -96,6 +96,9 @@ object CrashReporter {
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /** O mesmo id aleatório da instalação que vai nos crashes (relato de problema). */
+    internal fun installationId(context: Context): String = instalacao(context.applicationContext ?: context)
+
     private fun instalacao(context: Context): String {
         val p = prefs(context)
         p.getString(KEY_INSTALACAO, null)?.let { return it }

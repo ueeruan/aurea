@@ -964,9 +964,7 @@ private suspend fun PointerInputScope.stageGestures(
     val axisTarget = ShellDims.AxisHandleTarget.toPx()
     val edit = StageEdit(
         store, ui, m, haptic,
-        lockMajor = 24.dp.toPx(),
-        lockMinor = 12.dp.toPx(),
-        snapTol = ShellDims.SnapTolerance.toPx(),
+        snapTol = STAGE_ANCHOR_SNAP.toPx(),
     )
 
     awaitEachGesture {
@@ -1270,28 +1268,16 @@ private class StageEdit(
     private val ui: EditorUi,
     private val m: StageMapper,
     private val haptic: HapticFeedback,
-    private val lockMajor: Float,
-    private val lockMinor: Float,
     private val snapTol: Float,
 ) {
     private var began = false
-    private val scratch = FloatArray(8)
-    private val box = FloatArray(4)
 
     // Mover
     private var pos0x = 0f
     private var pos0y = 0f
-    private var downX = 0f
-    private var downY = 0f
     private var downCx = 0f
     private var downCy = 0f
-    private var lastCx = 0f
-    private var lastCy = 0f
-    private var axisLock = 0              // 1 = só horizontal, 2 = só vertical
-    private val offX = FloatArray(3)      // esquerda, centro, direita da caixa − posição
-    private val offY = FloatArray(3)
-    private var targetsX = FloatArray(0)
-    private var targetsY = FloatArray(0)
+    private var axisLock = 0              // 1 = só horizontal, 2 = só vertical (setas de eixo)
 
     // Escala / giro (pinça)
     private var sx0 = 1f
@@ -1363,22 +1349,10 @@ private class StageEdit(
         d.parentToComp(d.position[0], d.position[1], pt)
         pos0x = pt[0]
         pos0y = pt[1]
-        downX = x
-        downY = y
         downCx = m.cx(x)
         downCy = m.cy(y)
-        lastCx = downCx
-        lastCy = downCy
         axisLock = axis
         if (axis != 0) ui.grabbedHandle = axis - 1
-        if (LayerGeometry.bounds(d, scratch, box)) {
-            offX[0] = box[0] - pos0x; offX[1] = (box[0] + box[2]) / 2 - pos0x; offX[2] = box[2] - pos0x
-            offY[0] = box[1] - pos0y; offY[1] = (box[1] + box[3]) / 2 - pos0y; offY[2] = box[3] - pos0y
-        } else {
-            offX.fill(0f)
-            offY.fill(0f)
-        }
-        collectSnapTargets(d.id)
         engage()
     }
 
@@ -1398,38 +1372,20 @@ private class StageEdit(
     private fun move(x: Float, y: Float) {
         val cx = m.cx(x)
         val cy = m.cy(y)
+        // Absoluto desde o toque (nada acumula por evento) e LIVRE nos dois
+        // eixos, como no app antigo: só as setas de eixo travam um lado.
         var nx = pos0x + (cx - downCx)
         var ny = pos0y + (cy - downCy)
-        // Trava de eixo: > 24 num eixo com < 12 no outro → o outro fica fixo.
-        val sdx = abs(x - downX)
-        val sdy = abs(y - downY)
-        if (axisLock == 0) {
-            if (sdx > lockMajor && sdy < lockMinor) axisLock = 1
-            else if (sdy > lockMajor && sdx < lockMinor) axisLock = 2
-        }
         if (axisLock == 1) ny = pos0y
         if (axisLock == 2) nx = pos0x
-        // Encaixe de 10 dp de tela; passo maior que a tolerância não encaixa
-        // ("quem passa correndo não está mirando").
+        // Encaixe do app antigo: o PONTO DA CAMADA (a âncora, onde fica a
+        // posição) no centro da composição, a poucos dp de tela. Um alvo só:
+        // nada de ímãs nas bordas e nas outras camadas puxando o dedo.
         val tol = if (m.fit > 0f) snapTol / m.fit else 0f
-        var snapX = Float.NaN
-        var snapY = Float.NaN
-        if (axisLock != 2 && abs(cx - lastCx) <= tol) {
-            val t = nearestTarget(nx, offX, targetsX, tol)
-            if (!t.isNaN()) {
-                nx += deltaTo(nx, offX, t, tol)
-                snapX = t
-            }
-        }
-        if (axisLock != 1 && abs(cy - lastCy) <= tol) {
-            val t = nearestTarget(ny, offY, targetsY, tol)
-            if (!t.isNaN()) {
-                ny += deltaTo(ny, offY, t, tol)
-                snapY = t
-            }
-        }
-        lastCx = cx
-        lastCy = cy
+        val snapX = if (axisLock != 2) anchorSnap(nx, m.compW / 2, tol) else Float.NaN
+        val snapY = if (axisLock != 1) anchorSnap(ny, m.compH / 2, tol) else Float.NaN
+        if (!snapX.isNaN()) nx = snapX
+        if (!snapY.isNaN()) ny = snapY
         if ((!snapX.isNaN() && snapX != ui.snapX) || (!snapY.isNaN() && snapY != ui.snapY)) {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
@@ -1461,34 +1417,6 @@ private class StageEdit(
         else store.setTransform2(TrackProperty.SCALE_X, sx0 * f, TrackProperty.SCALE_Y, sy0 * f)
         if (rotActive) store.setTransform(TrackProperty.ROTATION_Z, rot0 + deg - rotOffset)
     }
-
-    /**
-     * Alvos do encaixe: centro e bordas da composição, e centro e bordas das
-     * outras camadas ativas e visíveis. Uma vez, no começo do arrasto.
-     */
-    private fun collectSnapTargets(self: Long) {
-        val t = store.playhead
-        var n = 3
-        for (row in store.layers) if (row.id != self && row.visible && LayerGeometry.activeAt(row, t)) n += 3
-        if (targetsX.size < n) {
-            targetsX = FloatArray(n)
-            targetsY = FloatArray(n)
-        }
-        targetsX.fill(Float.NaN)
-        targetsY.fill(Float.NaN)
-        targetsX[0] = 0f; targetsX[1] = m.compW / 2; targetsX[2] = m.compW
-        targetsY[0] = 0f; targetsY[1] = m.compH / 2; targetsY[2] = m.compH
-        var i = 3
-        for (row in store.layers) {
-            if (row.id == self || !row.visible || !LayerGeometry.activeAt(row, t)) continue
-            val d = store.queryDetail(row.id) ?: continue
-            if (!LayerGeometry.bounds(d, scratch, box)) continue
-            if (i + 3 > targetsX.size) break
-            targetsX[i] = box[0]; targetsX[i + 1] = (box[0] + box[2]) / 2; targetsX[i + 2] = box[2]
-            targetsY[i] = box[1]; targetsY[i + 1] = (box[1] + box[3]) / 2; targetsY[i + 2] = box[3]
-            i += 3
-        }
-    }
 }
 
 private fun wrapRad(a: Float): Float {
@@ -1499,37 +1427,16 @@ private fun wrapRad(a: Float): Float {
     return v
 }
 
-/** O alvo (px da composição) mais perto de uma das bordas/centro, ou NaN. */
-private fun nearestTarget(pos: Float, offsets: FloatArray, targets: FloatArray, tol: Float): Float {
-    var best = Float.NaN
-    var bestAbs = tol
-    for (o in offsets) {
-        val v = pos + o
-        for (t in targets) {
-            if (t.isNaN()) continue
-            val d = abs(t - v)
-            if (d <= bestAbs) {
-                bestAbs = d
-                best = t
-            }
-        }
-    }
-    return best
-}
+/**
+ * Encaixe do mover (app antigo): [pos] (px da composição) vira [centre] quando
+ * está a menos de [tol]; senão NaN. Sem filtro de velocidade — o dedo que
+ * passa pelo centro sente o encaixe, e sai dele puxando além da tolerância.
+ */
+internal fun anchorSnap(pos: Float, centre: Float, tol: Float): Float =
+    if (tol > 0f && abs(pos - centre) < tol) centre else Float.NaN
 
-/** Quanto andar para a borda/centro mais próxima encostar em [target]. */
-private fun deltaTo(pos: Float, offsets: FloatArray, target: Float, tol: Float): Float {
-    var bestD = 0f
-    var bestAbs = Float.MAX_VALUE
-    for (o in offsets) {
-        val d = target - (pos + o)
-        if (abs(d) <= tol && abs(d) < bestAbs) {
-            bestAbs = abs(d)
-            bestD = d
-        }
-    }
-    return bestD
-}
+/** Tolerância do encaixe no centro, em dp de tela (a do app antigo). */
+private val STAGE_ANCHOR_SNAP = 6.dp
 
 /** Seta de eixo sob o dedo (a mais próxima dentro do raio de toque), ou −1. */
 private fun pickHandle(m: StageMapper, x: Float, y: Float, r: Float): Int {

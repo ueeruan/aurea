@@ -259,6 +259,9 @@ struct HomeView: View {
     @State private var homeMenu = false
     @State private var homeInfo: String?
     @State private var importing = false
+    /// "Importar arquivo do projeto" e "Relatar um problema" (ProjectTransfer.swift).
+    @State private var importingProjectFile = false
+    @State private var reportingProblem = false
     /// Busca aberta em cada aba (o Android tem uma bandeira por aba).
     @State private var startSearching = false
     @State private var projectsSearching = false
@@ -321,6 +324,8 @@ struct HomeView: View {
         .environment(\.homeBackdrop, backdrop)
         .confirmationDialog("Aurea", isPresented: $homeMenu, titleVisibility: .visible) {
             Button(AureaText.t("home_tab_settings")) { select(.settings) }
+            Button(AureaText.t("project_file_import")) { importingProjectFile = true }
+            Button(AureaText.t("report_title")) { reportingProblem = true }
             Button(AureaText.t("settings_group_about")) { homeInfo = "settings_group_about" }
             Button(AureaText.t("licenses_title")) { homeInfo = "licenses_title" }
             Button(AureaText.t("conta_sair"), role: .destructive) { confirmLogout = true }
@@ -346,6 +351,14 @@ struct HomeView: View {
                         Button(AureaText.t("editor_fechar")) { homeInfo = nil }
                     } }
             }
+        }
+        // O .aureaproj não tem tipo registrado: qualquer arquivo; o motor diz se é projeto.
+        .fileImporter(isPresented: $importingProjectFile, allowedContentTypes: [.data, .item]) { result in
+            guard case .success(let url) = result else { return }
+            model.importProjectFile(url) { library.refresh() }
+        }
+        .sheet(isPresented: $reportingProblem) {
+            ReportProblemView(sessao: conta.sessao()) { model.toast = $0 }
         }
         .sheet(isPresented: $importing) {
             HomeMediaPicker(onDismiss: { importing = false }, onPick: { url, kind in

@@ -53,11 +53,36 @@ struct Keyframe {
     /// mostrar o que o usuário escolheu. Não participa da avaliação.
     u16 easingPreset = 0;
 
+    /// Força da bézier de saída (1..3): a mesma curva aplicada de novo sobre o
+    /// próprio resultado — ×2 e ×3 acentuam o ease sem mexer nas alças (como no
+    /// app antigo). 1 = a bézier simples, que é o que todo projeto gravado antes
+    /// deste campo tem. Só vale para Bezier/CustomCurve. Mora no preenchimento
+    /// do fim da struct: o tamanho continua 48 bytes.
+    u8 easePower = 1;
+
     [[nodiscard]] bool operator<(FrameIndex other) const noexcept { return time < other; }
     [[nodiscard]] bool operator<(const Keyframe& o) const noexcept { return time < o.time; }
 };
 
 static_assert(std::is_trivially_copyable_v<Keyframe>, "Keyframe vai cru para o .aurea");
+static_assert(sizeof(Keyframe) == 48, "easePower cabe no preenchimento");
+
+/// Força válida (1..3); 0 ou lixo de arquivo viram 1.
+[[nodiscard]] constexpr u8 clamp_ease_power(u32 power) noexcept {
+    return power < 1 ? u8{1} : (power > 3 ? u8{3} : static_cast<u8>(power));
+}
+
+/// A mistura do trecho que SAI de `a` no progresso `t01` (0..1): o easing do
+/// keyframe e, se for bézier, repetido `easePower` vezes. É a única conta de
+/// trecho — `Track::sample_keys`, a velocidade do clipe e os gráficos da UI
+/// (CurveMath.kt / AnimationTools.swift) usam esta mesma regra.
+[[nodiscard]] inline f32 keyframe_ease(const Keyframe& a, f32 t01) noexcept {
+    f32 u = apply_easing(a.interp, t01, a.bx1, a.by1, a.bx2, a.by2);
+    if (a.interp == Interpolation::Bezier || a.interp == Interpolation::CustomCurve) {
+        for (u8 i = 1; i < clamp_ease_power(a.easePower); ++i) u = cubic_bezier(a.bx1, a.by1, a.bx2, a.by2, u);
+    }
+    return u;
+}
 
 /// Uma propriedade animável de uma layer — ou uma propriedade estática, se
 /// tiver zero ou um keyframe.
@@ -134,8 +159,9 @@ struct Track {
     /// índice, ou kInvalidIndex.
     u32 move(FrameIndex from, FrameIndex to) noexcept;
 
+    /// `power` 0 = mantém a força atual do keyframe; 1..3 = nova força.
     void set_interpolation(FrameIndex t, Interpolation in, f32 bx1, f32 by1,
-                           f32 bx2, f32 by2) noexcept;
+                           f32 bx2, f32 by2, u8 power = 0) noexcept;
 
     /// Primeiro e último tempo com keyframe. Usados para desenhar a barra de
     /// keyframes na timeline sem varrer tudo a cada quadro.

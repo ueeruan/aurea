@@ -111,8 +111,16 @@ void main() {
         if (op == OP_EXPOSURE) {
             // Linear: 1 stop = 2x a luz. Offset e gamma seguem a convenção de
             // um "exposure" de pós-produção (offset nas sombras, gamma no meio).
-            c = c * exp2(a.y) + a.z;
-            c = pow(max(c, vec3(0.0)), vec3(1.0 / max(a.w, 1e-3)));
+            if (b.x > 0.5) {
+                // Valor codificado (o do app antigo): a conta sobre o que se
+                // vê, entrada e saída presas em 0..1.
+                vec3 v = clamp(linear_to_srgb(max(c, vec3(0.0))), 0.0, 1.0) * exp2(a.y) + a.z;
+                v = clamp(pow(max(v, vec3(0.0)), vec3(1.0 / max(a.w, 1e-3))), 0.0, 1.0);
+                c = srgb_to_linear(v);
+            } else {
+                c = c * exp2(a.y) + a.z;
+                c = pow(max(c, vec3(0.0)), vec3(1.0 / max(a.w, 1e-3)));
+            }
         } else if (op == OP_BRIGHT_CONT) {
             // Brilho e contraste são definidos no valor CODIFICADO (é como o
             // olho julga "metade do brilho"); contraste gira em torno do cinza

@@ -34,7 +34,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.flow.drop
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,7 +93,7 @@ internal object Interp {
  * (EaseIn t² = bézier (⅓,0)(⅔,⅓) exata).
  */
 @Immutable
-internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: Float, val y2: Float) {
+internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: Float, val y2: Float, val power: Int = 1) {
     val isBezier get() = interp == Interp.BEZIER || interp == Interp.CUSTOM
 
     /** Tem alças arrastáveis (bézier ou reta, que vira bézier ao ser puxada). */
@@ -117,7 +116,12 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
         }
         Interp.ELASTIC -> if (t <= 0f) 0f else if (t >= 1f) 1f else ((1-kotlin.math.exp(-6.0*t)*kotlin.math.cos(6*Math.PI*t))/(1-kotlin.math.exp(-6.0))).toFloat()
         Interp.STEPS -> kotlin.math.floor(t.coerceIn(0f,1f)*4f)/4f
-        else -> cubicBezier(x1, y1, x2, y2, t)
+        // `keyframe_ease` (Curve.hpp): a força repete a MESMA bézier sobre o resultado.
+        else -> {
+            var u = cubicBezier(x1, y1, x2, y2, t)
+            repeat(power.coerceIn(1, 3) - 1) { u = cubicBezier(x1, y1, x2, y2, u) }
+            u
+        }
     }
 
     /**
@@ -138,7 +142,7 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
         Interp.EASE_IN -> copy(interp = Interp.EASE_OUT)
         Interp.EASE_OUT -> copy(interp = Interp.EASE_IN)
         Interp.BEZIER, Interp.CUSTOM -> {
-            val m = Ease(Interp.BEZIER, 1f - x2, 1f - y2, 1f - x1, 1f - y1)
+            val m = Ease(Interp.BEZIER, 1f - x2, 1f - y2, 1f - x1, 1f - y1, power)
             if (abs(m.x1 - x1) < 0.01f && abs(m.y1 - y1) < 0.01f && abs(m.x2 - x2) < 0.01f && abs(m.y2 - y2) < 0.01f) null else m
         }
         else -> null
@@ -147,7 +151,7 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
     fun same(o: Ease): Boolean {
         if (interp != o.interp) return false
         if (!isBezier) return true
-        return abs(x1 - o.x1) < 0.01f && abs(y1 - o.y1) < 0.01f && abs(x2 - o.x2) < 0.01f && abs(y2 - o.y2) < 0.01f
+        return power == o.power && abs(x1 - o.x1) < 0.01f && abs(y1 - o.y1) < 0.01f && abs(x2 - o.x2) < 0.01f && abs(y2 - o.y2) < 0.01f
     }
 }
 
@@ -202,7 +206,7 @@ private object CurveClipboard {
 internal fun easeOf(store: EditorStore, layer: Long, k: KeyframeRow): Ease {
     val h = store.queryKeyframeEasing(layer, k)
     return Ease(k.interpolation, h?.get(0) ?: 0.33f, h?.get(1) ?: 0f,
-        h?.get(2) ?: 0.67f, h?.get(3) ?: 1f)
+        h?.get(2) ?: 0.67f, h?.get(3) ?: 1f, h?.getOrNull(4)?.toInt()?.coerceIn(1, 3) ?: 1)
 }
 
 /**
@@ -212,7 +216,7 @@ internal fun easeOf(store: EditorStore, layer: Long, k: KeyframeRow): Ease {
 internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease) {
     val keys = store.keyframes[layer] ?: return
     keys.filter { it.time == start.time && it.sameTrack(start) }.forEach { k ->
-        store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2)
+        store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2, e.power)
     }
 }
 
@@ -295,7 +299,6 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     }
     val (layer, start, end) = seg
     val ease = remember(layer, start, store.curveRevision) { easeOf(store, layer, start) }
-    var overshoot by rememberSaveable { mutableStateOf(false) }
     val graphMode = store.curveGraphMode
     var menu by remember { mutableStateOf(false) }
     var savePrompt by remember { mutableStateOf(false) }
@@ -359,7 +362,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             }
             Spacer(Modifier.height(4.dp))
             Box(Modifier.size(48.dp).tocavel { menu = true }, contentAlignment = Alignment.Center) {
-                CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, if (overshoot) CurveGreen else Color.White)
+                CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, Color.White)
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -369,7 +372,6 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     TrackGraph(store, layer, (store.keyframes[layer] ?: emptyList()).track(start), graphMode == 2)
                 } else CurveGraph(
                     ease = ease,
-                    overshoot = overshoot,
                     progress = progress,
                     onBegin = { store.beginGesture("curva") },
                     onChange = { applyEase(store, layer, start, it) },
@@ -383,14 +385,23 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                 Spacer(Modifier.width(4.dp))
                 val track = (store.keyframes[layer] ?: emptyList()).track(start)
                 val n = track.indexOfFirst { it.time == start.time }
+                // A curva do trecho em números; tocar troca a força (×1 → ×2 → ×3).
+                val powered = graphMode == 0 && ease.hasHandles
                 Text(
                     if (graphMode == 0) {
-                        if (ease.interp == Interp.HOLD || ease.interp in Interp.BOUNCE..Interp.STEPS) stringResource(nameOf(ease))
-                        else "Cubic Bezier Easing"
+                        if (!ease.hasHandles) stringResource(nameOf(ease))
+                        else cubicBezierLabel(ease)
                     } else stringResource(if (graphMode == 1) R.string.particular_curve_value else R.string.panel_velocidade),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.weight(1f, fill = false)
+                        .testTag("curve.power")
+                        .tocavel(enabled = powered) {
+                            store.beginGesture("força da curva")
+                            applyEase(store, layer, start, nextPower(ease))
+                            store.endGesture()
+                        }
+                        .padding(vertical = 14.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, fontWeight = FontWeight.W400, color = Color.White.copy(alpha = .6f), textAlign = TextAlign.Center)),
                 )
                 Spacer(Modifier.width(4.dp))
@@ -465,7 +476,6 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     track.dropLast(1).forEach { applyEase(store, layer, it, ease) }
                     store.endGesture()
                 },
-                SheetAction(if (overshoot) stringResource(R.string.panel_overshoot_9678) else stringResource(R.string.panel_overshoot)) { overshoot = !overshoot },
             ),
             onDismiss = { menu = false },
         )
@@ -484,20 +494,19 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
 @Composable
 private fun CurveGraph(
     ease: Ease,
-    overshoot: Boolean,
     progress: () -> Float?,
     onBegin: () -> Unit,
     onChange: (Ease) -> Unit,
     onEnd: () -> Unit,
 ) {
-    val h = ease.handles()
     var activeRange by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     /** A alça no dedo (0 saída, 1 chegada, −1 nenhuma): ganha o halo. */
     var activeHandle by remember { mutableIntStateOf(-1) }
-    val yMin = activeRange?.first ?: min(if (overshoot) -0.5f else -0.12f, min(h[1], h[3]) - 0.12f)
-    val yMax = activeRange?.second ?: max(if (overshoot || ease.interp == Interp.ELASTIC) 1.5f else 1.12f, max(h[1], h[3]) + 0.12f)
+    // Faixa vertical ajustada à curva e às alças; parada enquanto o dedo arrasta.
+    val fitted = remember(ease) { easeRange(ease) }
+    val yMin = activeRange?.first ?: fitted.first
+    val yMax = activeRange?.second ?: fitted.second
     val current by rememberUpdatedState(ease)
-    val over by rememberUpdatedState(overshoot)
     val range by rememberUpdatedState(Pair(yMin, yMax))
     // O gesto vive entre composições: trocar de trecho (‹ ›) troca o keyframe
     // que recebe a curva, e o gesto tem de escrever no NOVO.
@@ -522,39 +531,33 @@ private fun CurveGraph(
                     val p2 = plot(hh[2], hh[3])
                     val k0 = plot(0f, 0f)
                     val k1 = plot(1f, 1f)
-                    // O toque procura as alças ONDE ELAS ESTÃO DESENHADAS (afastadas
-                    // se coincidem), num raio de dedo; a mais perto vence.
+                    // Qualquer toque no gráfico pega a alça mais perto de onde ela
+                    // está DESENHADA (afastadas se coincidem) — como no app antigo.
                     val shown = separatedHandles(p1.x, p1.y, p2.x, p2.y, k0.x, k0.y, k1.x, k1.y, HANDLE_SEPARATION.toPx())
-                    val which = nearestHandle(down.position.x, down.position.y, shown, HANDLE_HIT.toPx())
-                    if (which < 0) return@awaitEachGesture
+                    val which = grabHandle(down.position.x, down.position.y, shown)
                     down.consume()
                     val first = which == 0
                     activeHandle = which
-                    // Arrasto RELATIVO: a alça parte de onde está e anda o que o
-                    // dedo andar depois da folga — nada salta no toque.
-                    val real = if (first) p1 else p2
-                    var anchor = down.position
+                    activeRange = Pair(lo, hi)
                     var began = false
-                    var e = Ease(Interp.BEZIER, hh[0], hh[1], hh[2], hh[3])
+                    var e = Ease(Interp.BEZIER, hh[0], hh[1], hh[2], hh[3], if (e0.isBezier) e0.power else 1)
+                    val snap = CURVE_SNAP.toPx()
                     try {
                       while (true) {
                         val ev = awaitPointerEvent()
                         val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
                         if (!ch.pressed) break
                         ch.consume()
+                        // Um toque sem arrasto não mexe em nada.
                         if (!began) {
                             if ((ch.position - down.position).getDistance() < viewConfiguration.touchSlop) continue
                             began = true
-                            anchor = ch.position
-                            activeRange = Pair(lo, hi)
                             begin()
                         }
-                        val position = real + (ch.position - anchor)
-                        val x = ((position.x - inset) / width).coerceIn(0f, 1f)
-                        var y = lo + (size.height - position.y) / size.height * (hi - lo)
-                        if (!over) y = y.coerceIn(0f, 1f)
-                        if (!x.isFinite() || !y.isFinite()) continue
-                        e = if (first) e.copy(x1 = x, y1 = y) else e.copy(x2 = x, y2 = y)
+                        // A alça vai para o dedo (x 0..1, y −2..3), encaixando em 0 e 1.
+                        val p = handleAt(ch.position.x, ch.position.y, inset, size.width.toFloat(), size.height.toFloat(), lo, hi, snap)
+                        if (!p[0].isFinite() || !p[1].isFinite()) continue
+                        e = if (first) e.copy(x1 = p[0], y1 = p[1]) else e.copy(x2 = p[0], y2 = p[1])
                         change(e)
                       }
                     } finally {
@@ -615,23 +618,27 @@ private fun CurveGraph(
             drawCircle(CurveGreen, 5.dp.toPx(), p0)
             drawCircle(CurveGreen, 5.dp.toPx(), p1)
         }
-        // Guia do cabeçote em camada própria, sem cobrir os pontos da curva.
+        // Guia do cabeçote em camada própria, sem cobrir os pontos da curva: a
+        // linha e o ponto onde o cabeçote está NA curva.
         Canvas(Modifier.fillMaxSize()) {
             val f = progress() ?: return@Canvas
             val inset = CURVE_INSET.toPx()
             val p = Offset(inset + f * max(1f, size.width - 2 * inset), size.height - (ease.transform(f) - yMin) / (yMax - yMin) * size.height)
             drawLine(Color.White.copy(alpha = 0.4f), Offset(p.x, 0f), Offset(p.x, size.height),
                 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 4.dp.toPx())))
+            drawCircle(Color.White, 4.dp.toPx(), p)
         }
     }
 }
 
 /** Margem lateral do gráfico da curva: as pontas e as alças em x = 0 / 1 ficam tocáveis. */
 private val CURVE_INSET = 28.dp
-/** Raio de toque das alças: 56 dp de diâmetro, acima do alvo mínimo de 48. */
+/** Raio do halo da alça no dedo. */
 private val HANDLE_HIT = 28.dp
 /** Distância mínima entre as alças DESENHADAS (as bolas nunca se sobrepõem). */
 private val HANDLE_SEPARATION = 30.dp
+/** Encaixe da alça nas linhas 0 e 1 (x e y). */
+private val CURVE_SNAP = 10.dp
 
 private fun DrawScope.drawGrid(y0: Float, y1: Float) {
     val w = 0.6.dp.toPx()

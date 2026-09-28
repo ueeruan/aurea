@@ -32,6 +32,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/media/YuvLayout.hpp"
 #include "aurea/effects/MotionTile.hpp"
+#include "aurea/effects/Particular.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
@@ -3352,6 +3353,194 @@ AUREA_TEST(Gpu, MotionTileLeavesNoHoleInAnyCombination) {
     }
     AUREA_CHECK_EQ(cases, 36u);
     AUREA_CHECK_EQ(holes, 0u);
+}
+
+// -----------------------------------------------------------------------------
+// Motion Tile contra a conta do shader do app antigo, transcrita em CPU.
+// -----------------------------------------------------------------------------
+namespace {
+
+/// A conta do app antigo, escrita à parte do motor: ponto 0..1 da layer que o
+/// ponto "local" (0..1 da layer) mostra, já com a trava de meio texel.
+struct OldAppTile {
+    Vec2 centre{0.5f, 0.5f};
+    Vec2 tile{1.0f, 1.0f};
+    f32  phaseDegrees = 0.0f;
+    bool horizontalShift = false;
+    bool mirror = false;
+    Vec2 lookup(Vec2 local, Vec2 inset) const {
+        const f32 tx = std::fmax(tile.x, 1e-4f), ty = std::fmax(tile.y, 1e-4f);
+        f32 px = (local.x - centre.x) / tx, py = (local.y - centre.y) / ty;
+        const f32 phase = phaseDegrees / 360.0f;
+        if (horizontalShift) py += phase * std::floor(px + 0.5f);
+        else                 px += phase * std::floor(py + 0.5f);
+        const f32 cx = std::floor(px + 0.5f), cy = std::floor(py + 0.5f);
+        f32 fx = px - cx, fy = py - cy;
+        if (mirror) {
+            if (std::fmod(std::fabs(cx), 2.0f) >= 0.5f) fx = -fx;
+            if (std::fmod(std::fabs(cy), 2.0f) >= 0.5f) fy = -fy;
+        }
+        return Vec2{std::clamp(0.5f + fx, inset.x, 1.0f - inset.x), std::clamp(0.5f + fy, inset.y, 1.0f - inset.y)};
+    }
+};
+
+/// Degradês suaves (o filtro linear da GPU e o da CPU concordam).
+ImagePixels smooth_image(u32 w, u32 h) {
+    ImagePixels px = uniform_image(w, h, 0, 0, 0);
+    for (u32 y = 0; y < h; ++y) {
+        for (u32 x = 0; x < w; ++x) {
+            u8* p = &px.rgba[(static_cast<usize>(y) * w + x) * 4];
+            p[0] = static_cast<u8>(20 + x * 215 / (w - 1));
+            p[1] = static_cast<u8>(20 + y * 215 / (h - 1));
+            p[2] = static_cast<u8>(235 - (x + y) * 215 / (w + h - 2));
+        }
+    }
+    return px;
+}
+
+/// Amostra bilinear (linear, borda presa) da imagem sRGB em "uv".
+Vec4 bilinear(const ImagePixels& img, Vec2 uv) {
+    const f32 fx = uv.x * img.width - 0.5f, fy = uv.y * img.height - 0.5f;
+    const i32 x0 = static_cast<i32>(std::floor(fx)), y0 = static_cast<i32>(std::floor(fy));
+    const f32 ax = fx - x0, ay = fy - y0;
+    auto texel = [&](i32 x, i32 y) {
+        x = std::clamp(x, 0, static_cast<i32>(img.width) - 1);
+        y = std::clamp(y, 0, static_cast<i32>(img.height) - 1);
+        const u8* p = &img.rgba[(static_cast<usize>(y) * img.width + static_cast<usize>(x)) * 4];
+        return Vec4{srgb_decode(p[0] / 255.0f), srgb_decode(p[1] / 255.0f), srgb_decode(p[2] / 255.0f), 1.0f};
+    };
+    const Vec4 a = texel(x0, y0), b = texel(x0 + 1, y0), c = texel(x0, y0 + 1), d = texel(x0 + 1, y0 + 1);
+    auto mix = [](Vec4 u, Vec4 v, f32 t) {
+        return Vec4{u.x + (v.x - u.x) * t, u.y + (v.y - u.y) * t, u.z + (v.z - u.z) * t, 1.0f};
+    };
+    return mix(mix(a, b, ax), mix(c, d, ax), ay);
+}
+
+struct TileMatch { f32 worst = 0.0f; f64 sum = 0.0; u32 compared = 0, black = 0; };
+
+/// Compara o quadro com a conta de referência, pixel a pixel. A layer está em
+/// 1:1 com o canto em (x0, y0). "window" = meia janela de saída no quadro (ou
+/// >= 1 = sem corte). Pixels numa emenda (vizinhos a mais de 2 texels) e na
+/// borda da janela ficam de fora: ali um arredondamento decide o ladrilho.
+template <class Lookup>
+TileMatch compare_tiles(const FloatImage& img, const ImagePixels& src, f32 x0, f32 y0, Vec2 window, Lookup lookup) {
+    TileMatch m;
+    const Vec2 inset{0.5f / src.width, 0.5f / src.height};
+    const f32 sw = static_cast<f32>(src.width), sh = static_cast<f32>(src.height);
+    for (u32 y = 0; y < img.height; ++y) {
+        for (u32 x = 0; x < img.width; ++x) {
+            const f32 cu = (x + 0.5f) / img.width - 0.5f, cv = (y + 0.5f) / img.height - 0.5f;
+            const f32 ex = window.x - std::fabs(cu), ey = window.y - std::fabs(cv);
+            if (std::fabs(ex) * img.width < 1.5f || std::fabs(ey) * img.height < 1.5f) continue;
+            const Vec4 got = img.v(x, y);
+            if (ex < 0.0f || ey < 0.0f) {
+                const f32 e = std::fmax(got.x, std::fmax(got.y, got.z));
+                m.worst = std::fmax(m.worst, e);
+                m.sum += e;
+                ++m.compared;
+                ++m.black;
+                continue;
+            }
+            const Vec2 local{(x + 0.5f - x0) / sw, (y + 0.5f - y0) / sh};
+            const Vec2 at = lookup(local, inset);
+            bool seam = false;
+            for (Vec2 d : {Vec2{0.5f, 0}, Vec2{-0.5f, 0}, Vec2{0, 0.5f}, Vec2{0, -0.5f}}) {
+                const Vec2 n = lookup(Vec2{local.x + d.x / sw, local.y + d.y / sh}, inset);
+                if (std::fabs(n.x - at.x) * sw > 2.0f || std::fabs(n.y - at.y) * sh > 2.0f) seam = true;
+            }
+            if (seam) continue;
+            const Vec4 want = bilinear(src, at);
+            const f32 e = std::fmax(std::fabs(got.x - want.x), std::fmax(std::fabs(got.y - want.y), std::fabs(got.z - want.z)));
+            m.worst = std::fmax(m.worst, e);
+            m.sum += e;
+            ++m.compared;
+        }
+    }
+    return m;
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, MotionTileMatchesTheOldAppShaderMath) {
+    // O efeito novo, pixel a pixel, contra a conta do shader do app antigo:
+    // ladrilho, centro, fase nos dois sentidos, espelho e a janela de saída.
+    AUREA_REQUIRE_GPU();
+    struct Case { f32 tw, th, cx, cy, phase; bool horizontal, mirror; f32 ow, oh; };
+    const Case cases[] = {
+        {34, 34, 0.50f, 0.50f, 0, false, true, 100, 100},     // a miniatura: 34% espelhado
+        {60, 45, 0.30f, 0.60f, 90, false, false, 100, 100},   // escada em X
+        {50, 70, 0.50f, 0.50f, -120, true, true, 100, 100},   // fase por coluna, espelhada
+        {40, 40, 0.55f, 0.45f, 180, false, true, 70, 60},     // tijolo numa janela 70% x 60%
+        {150, 150, 0.50f, 0.50f, 0, false, false, 100, 100},  // ladrilho maior que a layer
+    };
+    const u32 W = 192, H = 108;
+    const ImagePixels src = smooth_image(W, H);
+    u32 index = 0;
+    for (const Case& c : cases) {
+        Scene s(W, H);
+        const LayerId id = s.image(src, W * 0.5f, H * 0.5f);
+        EffectInstance& mt = s.add_effect(id, effect_keys::kMotionTile);
+        mt.params[motion_tile::kCenter].constant.v[0] = c.cx;
+        mt.params[motion_tile::kCenter].constant.v[1] = c.cy;
+        mt.params[motion_tile::kTileWidth].constant.v[0] = c.tw;
+        mt.params[motion_tile::kTileHeight].constant.v[0] = c.th;
+        mt.params[motion_tile::kPhase].constant.v[0] = c.phase;
+        mt.params[motion_tile::kHorizontalPhase].constant = ParamValue::boolean(c.horizontal);
+        mt.params[motion_tile::kMirror].constant = ParamValue::boolean(c.mirror);
+        mt.params[motion_tile::kOutputWidth].constant.v[0] = c.ow;
+        mt.params[motion_tile::kOutputHeight].constant.v[0] = c.oh;
+        OldAppTile ref;
+        ref.centre = Vec2{c.cx, c.cy};
+        ref.tile = Vec2{c.tw / 100.0f, c.th / 100.0f};
+        ref.phaseDegrees = c.phase;
+        ref.horizontalShift = c.horizontal;
+        ref.mirror = c.mirror;
+        const Vec2 window{c.ow >= 100 ? 10.0f : c.ow / 200.0f, c.oh >= 100 ? 10.0f : c.oh / 200.0f};
+        const TileMatch m = compare_tiles(s.render(), src, 0.0f, 0.0f, window,
+                                          [&](Vec2 l, Vec2 inset) { return ref.lookup(l, inset); });
+        const f64 mean = m.compared ? m.sum / m.compared : 1.0;
+        if (m.worst >= 0.02f || mean >= 0.004) {
+            std::printf("\n    caso %u: pior %.4f, media %.5f em %u pixels\n", index, m.worst, mean, m.compared);
+        }
+        AUREA_CHECK(m.compared > W * H / 2);
+        AUREA_CHECK(m.worst < 0.02f);
+        AUREA_CHECK(mean < 0.004);
+        if (c.ow < 100) AUREA_CHECK(m.black > 1000);
+        ++index;
+    }
+}
+
+AUREA_TEST(Gpu, MotionTileOldProjectRendersAsBefore) {
+    // Um Motion Tile gravado na disposição anterior (9 slots: saída 300% que
+    // só ampliava, colunas alternadas descendo meio ladrilho) abre convertido
+    // e desenha o mesmo tijolo, cobrindo o quadro inteiro.
+    AUREA_REQUIRE_GPU();
+    const u32 W = 128, H = 72;
+    const ImagePixels src = smooth_image(W, H);
+    Scene s(256, 144);
+    const LayerId id = s.image(src, 128, 72);
+    EffectInstance& mt = s.add_effect(id, effect_keys::kMotionTile);
+    mt.params.resize(motion_tile::kLegacyParamCount);
+    mt.params[motion_tile::kTileWidth].constant.v[0] = 50.0f;
+    mt.params[motion_tile::kTileHeight].constant.v[0] = 50.0f;
+    mt.params[motion_tile::kOutputWidth].constant.v[0] = 300.0f;
+    mt.params[motion_tile::kOutputHeight].constant.v[0] = 300.0f;
+    mt.params[motion_tile::kPhase].constant.v[0] = 180.0f;
+    AUREA_CHECK(motion_tile::upgrade_legacy_layout(*s.comp->layer(id), mt));
+    const FloatImage img = s.render();
+    // A conta ANTERIOR do Aurea, na mão: q = (p - centro)/ladrilho + 0,5; as
+    // colunas ímpares descem a fase; o ladrilho mostra fract(q).
+    auto before = [](Vec2 local, Vec2 inset) {
+        f32 qx = (local.x - 0.5f) / 0.5f + 0.5f, qy = (local.y - 0.5f) / 0.5f + 0.5f;
+        qy -= std::fmod(std::floor(qx) + 1000.0f, 2.0f) * 0.5f;
+        return Vec2{std::clamp(qx - std::floor(qx), inset.x, 1.0f - inset.x),
+                    std::clamp(qy - std::floor(qy), inset.y, 1.0f - inset.y)};
+    };
+    const TileMatch m = compare_tiles(img, src, 64.0f, 36.0f, Vec2{10.0f, 10.0f}, before);
+    const f64 mean = m.compared ? m.sum / m.compared : 1.0;
+    AUREA_CHECK(m.compared > 256u * 144u / 2u);
+    AUREA_CHECK(m.worst < 0.02f);
+    AUREA_CHECK(mean < 0.004);
 }
 
 // -----------------------------------------------------------------------------
@@ -10388,4 +10577,207 @@ AUREA_TEST(EffectPackGpu, BallGridTurnsTheLayerIntoShadedBalls) {
     b.params[kTwistAngle].constant = ParamValue::scalar(40.0f);
     b.params[kScatter].constant = ParamValue::scalar(6.0f);
     fx_dump_png("12_bolas", demo.render());
+}
+
+// -----------------------------------------------------------------------------
+// Particular: o sistema de partículas do app antigo (efeito
+// aurea.generate.particular) é o que a interface cria. Cada preset desenha,
+// o quadro é função do tempo (ida e volta idênticas) e uma camada antiga
+// vira Particular pelo preset, sem perder a camada.
+// -----------------------------------------------------------------------------
+AUREA_TEST(Gpu, ParticularLayerPresetsDrawDeterministically) {
+    AUREA_REQUIRE_GPU();
+    auto seekTo = [](Engine& e, i64 f) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{f}, 30.0);
+        AUREA_CHECK(e.apply_command(c).ok());
+    };
+    std::vector<Image8> shots;
+    for (u32 preset = 0; preset < particular::kPresetCount; ++preset) {
+        Scene3DRig rig(320, 180);
+        auto id = rig.e.add_particles(particular::kPresetBase + preset);
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return;
+        f32 p[70]{};
+        AUREA_CHECK(rig.e.query_particles(*id, p));
+        AUREA_CHECK_EQ(static_cast<u32>(p[0]), static_cast<u32>(ParticleEmitter::Particular));
+        seekTo(rig.e, 30);
+        const Image8 a = rig.capture(320);
+        seekTo(rig.e, 75);
+        (void)rig.capture(320);
+        seekTo(rig.e, 30);
+        const Image8 b = rig.capture(320);
+        u32 worst = 0;
+        for (usize i = 0; i < a.rgba.size() && i < b.rgba.size(); ++i)
+            worst = std::max<u32>(worst, static_cast<u32>(std::abs(a.rgba[i] - b.rgba[i])));
+        const f32 cov = coverage(a);
+        std::printf("    particular preset %u: cobertura %.4f, ida e volta %u\n", preset, cov, worst);
+        AUREA_CHECK(cov > 0.0005f);
+        AUREA_CHECK(worst == 0);
+        if (const char* dir = std::getenv("AUREA_FX_DUMP"); dir && *dir)
+            (void)write_png(std::string(dir) + "/particular_" + std::to_string(preset) + ".png", a);
+        shots.push_back(a);
+    }
+    // Presets diferentes, quadros diferentes.
+    for (usize i = 1; i < shots.size(); ++i) AUREA_CHECK(shots[i].rgba != shots[0].rgba);
+
+    // Camada antiga (Particle World) → Particular pelo preset: mesma camada,
+    // motor novo.
+    Scene3DRig rig(320, 180);
+    auto old = rig.e.add_particles(10);
+    AUREA_CHECK(old.ok());
+    if (!old.ok()) return;
+    AUREA_CHECK(rig.e.apply_particle_preset(*old, particular::kPresetBase + 3));
+    f32 p[70]{};
+    AUREA_CHECK(rig.e.query_particles(*old, p));
+    AUREA_CHECK_EQ(static_cast<u32>(p[0]), static_cast<u32>(ParticleEmitter::Particular));
+    seekTo(rig.e, 30);
+    AUREA_CHECK(coverage(rig.capture(320)) > 0.0005f);
+}
+
+// =============================================================================
+// Animadores de camada, ajuste só na camada de baixo e comprimento do rastro
+// (recursos do app antigo, avaliados no motor: prévia = export)
+// =============================================================================
+AUREA_TEST(Gpu, LayerAnimatorEntryMovesAndFadesTheWholeLayer) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    const LayerId id = s.solid(16, 16, Vec4{1, 1, 1, 1}, 32, 32);   // x 24..40
+    s.comp->layer(id)->end = FrameIndex{120};
+    const FloatImage still = s.render(FrameIndex{60});
+    Layer* l = s.comp->layer(id);
+    LayerAnimator a;
+    a.ease = 0;
+    a.fromOpacity = 0.0f;
+    a.fromPosX = -10.0f;
+    l->layerAnimators.push_back(a);
+    Track& p = l->tracks.get_or_create(TrackProperty::LayerAnimParam, 0, 0 /* progresso */);
+    (void)p.set(FrameIndex{0}, 0.0f);
+    (void)p.set(FrameIndex{30}, 100.0f);
+    const FloatImage f0 = s.render(FrameIndex{0});
+    AUREA_CHECK(f0.v(32, 32).x < 0.004f);   // opacidade 0
+    const FloatImage f15 = s.render(FrameIndex{15});   // meio: 50 %, 5 px à esquerda (x 19..35)
+    std::printf("    meio: dentro %.3f, borda que saiu %.3f\n", f15.v(21, 32).x, f15.v(38, 32).x);
+    AUREA_CHECK(near4(f15.v(21, 32), Vec4{0.5f, 0.5f, 0.5f, 1}, 0.02f));
+    AUREA_CHECK(f15.v(38, 32).x < 0.004f);
+    const FloatImage f60 = s.render(FrameIndex{60});
+    f32 worst = 0.0f;
+    for (usize i = 0; i < f60.px.size() && i < still.px.size(); ++i) worst = std::max(worst, std::fabs(f60.px[i] - still.px[i]));
+    AUREA_CHECK(worst <= 1e-5f);   // depois da entrada: exatamente a camada parada
+    // Desligado = nenhuma diferença, em qualquer quadro.
+    l->layerAnimators[0].enabled = false;
+    const FloatImage off = s.render(FrameIndex{0});
+    worst = 0.0f;
+    for (usize i = 0; i < off.px.size() && i < still.px.size(); ++i) worst = std::max(worst, std::fabs(off.px[i] - still.px[i]));
+    AUREA_CHECK(worst <= 1e-5f);
+}
+
+AUREA_TEST(Gpu, AdjustmentScopeOnlyTheLayerBelow) {
+    AUREA_REQUIRE_GPU();
+    const Vec3 a = lin3(0.4f, 0.3f, 0.2f), c = lin3(0.2f, 0.25f, 0.3f);
+    Scene s(64, 64);
+    s.solid(64, 64, Vec4{0.4f, 0.3f, 0.2f, 1}, 32, 32);                 // fundo (NÃO afetado)
+    s.solid(16, 16, Vec4{0.2f, 0.25f, 0.3f, 1}, 16, 16);                // logo abaixo do ajuste
+    const LayerId adj = s.solid(8, 8, Vec4{1, 0, 1, 1}, 4, 4);
+    s.comp->layer(adj)->adjustment = true;
+    s.comp->layer(adj)->adjustmentScope = 1;
+    s.add_effect(adj, effect_keys::kExposure).params[0].constant.v[0] = 1.0f;   // ×2 linear
+    const FloatImage img = s.render();
+    std::printf("    camada de baixo %.4f (esperado %.4f), fundo %.4f (esperado %.4f)\n", img.v(16, 16).x, c.x * 2, img.v(48, 48).x, a.x);
+    AUREA_CHECK(near4(img.v(16, 16), Vec4{c.x * 2, c.y * 2, c.z * 2, 1}, 0.006f));
+    AUREA_CHECK(near4(img.v(48, 48), Vec4{a.x, a.y, a.z, 1}, 0.004f));
+    // Todas abaixo (o padrão de sempre): o fundo também.
+    s.comp->layer(adj)->adjustmentScope = 0;
+    const FloatImage all = s.render();
+    AUREA_CHECK(near4(all.v(48, 48), Vec4{a.x * 2, a.y * 2, a.z * 2, 1}, 0.006f));
+}
+
+AUREA_TEST(Gpu, MotionBlurLengthScalesOnlyThisLayersTrail) {
+    AUREA_REQUIRE_GPU();
+    auto trail = [](f32 length) {
+        Scene s(96, 48);
+        const LayerId id = s.solid(8, 8, Vec4{1, 1, 1, 1}, 20, 24);
+        Layer* l = s.comp->layer(id);
+        Track& x = l->tracks.get_or_create(TrackProperty::PositionX);
+        (void)x.set(FrameIndex{0}, 20.0f);
+        (void)x.set(FrameIndex{10}, 80.0f);   // 6 px por quadro
+        l->motionBlur = true;
+        l->transform.motionBlurAmount = length;
+        MotionBlurSettings& mb = s.comp->motion_blur();
+        mb.enabled = true;
+        mb.shutterAngle = 180.0f;
+        mb.samples = 16;
+        mb.previewSamples = 16;
+        const FloatImage img = s.render(FrameIndex{5}, 1, true);
+        u32 lit = 0;
+        for (u32 xx = 0; xx < img.width; ++xx) lit += img.v(xx, 24).x > 0.01f ? 1u : 0u;
+        return lit;
+    };
+    const u32 none = trail(0.0f), one = trail(1.0f), two = trail(2.0f);
+    std::printf("    rastro: 0x %u px, 1x %u px, 2x %u px\n", none, one, two);
+    AUREA_CHECK(none >= 7 && none <= 9);    // sem rastro: o quadrado
+    AUREA_CHECK(one >= none + 2);           // obturador de 180°: ~3 px a mais
+    AUREA_CHECK(two >= one + 2);            // o dobro do rastro
+}
+
+AUREA_TEST(Gpu, GroupCameraPassThroughLetsTheOuterCameraReachInside) {
+    AUREA_REQUIRE_GPU();
+    // Um quadrado 3D visto por uma câmera ativa aproximada e girada: direto na
+    // composição, dentro de um grupo com a câmera atravessando e num grupo
+    // fechado (a câmera padrão lá dentro, o grupo chapado aqui fora).
+    auto build = [](bool grouped, bool through) {
+        Scene s(128, 72);
+        const LayerId cam = s.comp->add_layer(LayerKind::Camera, "camera");
+        Layer* c = s.comp->layer(cam);
+        c->start = FrameIndex{0};
+        c->end = s.comp->duration();
+        c->transform.anchor = Vec3{0, 0, 0};
+        c->transform.position = Vec3{64, 36, -90};
+        c->transform.rotation = Vec3{0, 12, 0};
+        c->camera.fov = 50.0f;
+        c->camera.active = true;
+        Composition* target = s.comp;
+        if (grouped) {
+            Timeline& tl = s.project.timeline();
+            const CompositionId cid = tl.create_composition("grupo", 128, 72, 30.0);
+            s.comp = tl.composition(tl.root());   // a criação pode ter realocado
+            target = tl.composition(cid);
+            target->set_duration(FrameIndex{300});
+            target->set_transparent_background(true);
+            target->set_nesting_depth(1);
+            const LayerId g = s.comp->add_layer(LayerKind::Composition, "grupo");
+            Layer* gl = s.comp->layer(g);
+            gl->nested.composition = cid;
+            gl->start = FrameIndex{0};
+            gl->end = FrameIndex{300};
+            gl->transform.anchor = Vec3{64, 36, 0};
+            gl->transform.position = Vec3{64, 36, 0};
+            gl->nested.cameraPassThrough = through;
+        }
+        const LayerId q = target->add_layer(LayerKind::Shape, "quadrado");
+        Layer* ql = target->layer(q);
+        ql->start = FrameIndex{0};
+        ql->end = FrameIndex{300};
+        ql->shape.bounds = Rect{0, 0, 32, 32};
+        ql->shape.fillColor = Vec4{1, 1, 1, 1};
+        ql->transform.anchor = Vec3{16, 16, 0};
+        ql->transform.position = Vec3{64, 36, 0};
+        ql->threeD = true;
+        return s.render(FrameIndex{0});
+    };
+    const FloatImage direct = build(false, false);
+    const FloatImage through = build(true, true);
+    const FloatImage sealed = build(true, false);
+    auto diff = [](const FloatImage& a, const FloatImage& b) {
+        f32 worst = 0.0f;
+        for (usize i = 0; i < a.px.size() && i < b.px.size(); ++i) worst = std::max(worst, std::fabs(a.px[i] - b.px[i]));
+        return worst;
+    };
+    u32 lit = 0;
+    for (usize i = 0; i < direct.px.size(); i += 4) lit += direct.px[i] > 0.5f ? 1u : 0u;
+    std::printf("    direto %u px acesos; atravessa x direto %.4f; fechado x direto %.4f\n", lit, diff(through, direct), diff(sealed, direct));
+    AUREA_CHECK(lit > 200);
+    AUREA_CHECK(diff(through, direct) < 0.02f);   // a câmera de fora vê o quadrado de dentro
+    AUREA_CHECK(diff(sealed, direct) > 0.3f);     // fechado: outra imagem
 }

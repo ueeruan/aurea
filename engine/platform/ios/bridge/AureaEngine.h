@@ -412,6 +412,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)copyKeyframes:(long long)layerId atFrame:(int32_t)frame;
 - (uint32_t)keyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references action:(uint32_t)action delta:(int32_t)delta;
 - (void)pasteKeyframes:(NSArray<NSNumber*>*)layerIds atFrame:(int32_t)frame;
+/// Copiar animação: todos os keyframes da camada (Engine::copy_animation).
+- (uint32_t)copyAnimation:(long long)layerId;
+/// Otimizar keyframes (Engine::optimize_keyframes): property < 0 = todas.
+- (uint32_t)optimizeKeyframes:(long long)layerId property:(int32_t)property tolerance:(float)tolerance;
 - (void)copyLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)pasteLayers:(int64_t)frame;
 /// Bits: 1 camadas, 2 estilo, 4 efeitos, 8 keyframes (Engine::clipboard_state).
@@ -435,6 +439,28 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setTextAnimParam:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value;
 - (void)toggleTextAnimKey:(long long)layerId index:(uint32_t)index param:(uint32_t)param;
 - (BOOL)applyTextPreset:(long long)layerId preset:(uint32_t)preset;
+// --- Animadores de camada (32 floats cada — Engine::kLayerAnimFloats) --------
+- (NSArray<NSNumber*>*)layerAnimators:(long long)layerId;
+- (NSInteger)addLayerAnimator:(long long)layerId;
+- (void)removeLayerAnimator:(long long)layerId index:(uint32_t)index;
+- (BOOL)setLayerAnimator:(long long)layerId index:(uint32_t)index values:(NSArray<NSNumber*>*)values;
+- (void)setLayerAnimParam:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value;
+- (void)toggleLayerAnimKey:(long long)layerId index:(uint32_t)index param:(uint32_t)param;
+- (uint32_t)copyLayerAnimators:(long long)layerId;
+- (uint32_t)pasteLayerAnimators:(NSArray<NSNumber*>*)layerIds;
+- (uint32_t)layerAnimatorClipboard;
+/// Comprimento do rastro do desfoque desta camada (× o obturador do projeto).
+- (void)setLayerMotionBlurLength:(float)factor forLayer:(long long)layerId;
+- (float)layerMotionBlurLength:(long long)layerId;
+/// Ajuste: 0 = todas abaixo, 1 = só a logo abaixo.
+- (void)setAdjustmentScope:(uint32_t)scope forLayer:(long long)layerId;
+- (uint32_t)adjustmentScope:(long long)layerId;
+/// Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo).
+- (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId;
+- (int32_t)groupCameraPassThrough:(long long)layerId;
+/// "" = deu certo; senão o motivo da recusa.
+- (NSString*)addLayers:(NSArray<NSNumber*>*)layerIds toGroup:(long long)groupId;
+- (NSString*)removeLayerFromGroup:(long long)layerId;
 - (void)setShape:(long long)layerId param:(uint32_t)param value:(float)value;
 - (void)setShape:(long long)layerId fillR:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)setShape:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a;
@@ -611,6 +637,20 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)applyCameraSelectionAtFrame:(long long)frame x0:(float)x0 y0:(float)y0 x1:(float)x1 y1:(float)y1 NS_SWIFT_NAME(applyCameraSelection(atFrame:x0:y0:x1:y1:));
 - (NSString*)trackMask:(long long)layerId mask:(uint32_t)mask mode:(uint32_t)mode;
 - (NSString*)layerMediaPath:(long long)layerId;
+/// "Substituir mídia" (EngineMedia.cpp): vídeo ou foto novo na MESMA camada
+/// (transform, keyframes, efeitos, máscaras e tempo ficam). Id ou −Errc.
+- (long long)replaceLayer:(long long)layerId withVideo:(NSString*)path name:(NSString*)name;
+- (long long)replaceLayer:(long long)layerId withImageFile:(NSString*)path name:(NSString*)name;
+/// Arquivo de origem da camada de vídeo/áudio/imagem ("" = nenhum).
+- (NSString*)layerSourcePath:(long long)layerId;
+/// Mídias de um `.aurea` fechado: 4 strings por mídia (gravado, legível, nome, tipo). nil = não abre.
+- (nullable NSArray<NSString*>*)projectFileMedia:(NSString*)path;
+/// Arquivo do projeto (ProjectPackage.cpp): [erro (0 = ok), incluídas, puladas].
+/// `media` = 3 strings por mídia (gravado, legível agora, nome).
++ (NSArray<NSNumber*>*)exportProjectPackage:(NSString*)projectPath to:(NSString*)outPath title:(NSString*)title
+                                  appVersion:(NSString*)appVersion media:(NSArray<NSString*>*)media;
+/// [erro (0 = ok), título, versão do app, religadas, ausentes]. Nunca sobrescreve `projectOut`.
++ (NSArray<NSString*>*)importProjectPackage:(NSString*)packagePath project:(NSString*)projectOut mediaDir:(NSString*)mediaDir;
 - (NSArray<NSDictionary<NSString*, id>*>*)parseSRT:(NSString*)srt;
 - (BOOL)isFillerWord:(NSString*)word NS_SWIFT_NAME(isFillerWord(_:));
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options;

@@ -1,6 +1,7 @@
 // Port of editor/TopBars.kt, Transport.kt and ChromeKit.kt.
 import SwiftUI
 import UIKit
+import PhotosUI
 
 struct TopBarView: View {
     @EnvironmentObject private var model: AureaModel
@@ -265,7 +266,7 @@ private struct CopyPasteMenu: View {
             ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_camada", enabled: !ids.isEmpty) { act { model.engine.copyLayers(ids) } }
             ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_camada_cabecote", enabled: model.engine.clipboardState & 1 != 0) { act { model.engine.pasteLayers(model.status.playhead); model.refreshModel(force: true) } }
             ShellMenuRow(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar_camada", enabled: !ids.isEmpty) { act { model.engine.duplicateLayers(ids); model.refreshModel(force: true) } }
-            ShellMenuRow(CupertinoGlyph.CheckmarkSquare, "editor_selecionar_todas_camadas", enabled: model.layers.count >= 2) { act { for row in model.layers { model.select(layerId: row.id, additive: true) } } }
+            ShellMenuRow(CupertinoGlyph.CheckmarkSquare, "editor_selecionar_todas_camadas", enabled: model.layers.count >= 2) { act { model.selectAll() } }
             ShellMenuRow(CupertinoGlyph.Square, "editor_limpar_selecao") { act { model.clearSelection() } }
             ShellMenuSection("editor_estilo_efeitos")
             ShellMenuRow(CupertinoGlyph.Paintbrush, "editor_copiar_estilo", enabled: !ids.isEmpty) { act { if let id = model.primarySelection { model.engine.copyStyle(id) } } }
@@ -275,6 +276,9 @@ private struct CopyPasteMenu: View {
             ShellMenuSection("editor_keyframes")
             ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_keyframes_cabecote", enabled: !ids.isEmpty) { act { if let id = model.primarySelection { model.engine.copyKeyframes(id, atFrame: Int32(clamping: model.status.playhead)) } } }
             ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_keyframes_cabecote", enabled: !ids.isEmpty && model.engine.clipboardState & 8 != 0) { act { model.engine.pasteKeyframes(ids, atFrame: Int32(clamping: model.status.playhead)); model.refreshModel(force: true) } }
+            ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_animacao", enabled: !ids.isEmpty, detail: "editor_copiar_animacao_detalhe") { act { model.copyAnimation() } }
+            ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_animacao", enabled: !ids.isEmpty && model.engine.clipboardState & 8 != 0) { act { model.engine.pasteKeyframes(ids, atFrame: Int32(clamping: model.status.playhead)); model.refreshModel(force: true) } }
+            ShellMenuRow(CupertinoGlyph.WandStars, "editor_otimizar_keyframes", enabled: !ids.isEmpty, detail: "editor_otimizar_keyframes_detalhe") { act { model.optimizeKeyframes() } }
         }
     }
     private func act(_ action: () -> Void) { dismiss(); action() }
@@ -360,6 +364,9 @@ private struct ShellMenuRow: View {
     @State private var search = ""
     @State private var linkHeight: CGFloat = 420
     @FocusState private var searchFocused: Bool
+    /// "Substituir mídia" / "Informações da mídia" (ProjectTransfer.swift).
+    @State private var replaceTarget: LayerRef?
+    @State private var infoTarget: LayerRef?
     private var layer: LayerItem? { model.selectedLayer }
     private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
     private var searchHits: [LayerItem] {
@@ -406,6 +413,13 @@ private struct ShellMenuRow: View {
             }.onChange(of: shell.sheet) { sheet in if sheet == .searchLayers { search = "" } }
         }
         .allowsHitTesting(shell.sheet != nil || shell.linkAnchor != nil || shell.resolutionAnchor != nil)
+        .sheet(item: $replaceTarget) { target in
+            ShellMediaPicker(filter: .any(of: [.images, .videos])) { url, video in
+                replaceTarget = nil
+                if let url { model.replaceMedia(layer: target.id, url: url, video: video) }
+            }
+        }
+        .sheet(item: $infoTarget) { target in MediaInfoSheetView(path: model.layerSourcePath(target.id)) }
     }
     private func popupPosition(_ anchor: CGRect, _ size: CGSize, _ geometry: GeometryProxy, gap: CGFloat, flip: Bool) -> CGPoint {
         let origin = geometry.frame(in: .global).origin
@@ -457,6 +471,13 @@ private struct ShellMenuRow: View {
             }
             if row.kind != 3 {
                 ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "editor_camada_ajuste", checked: row.adjustment, detail: "editor_efeitos_desta_camada_valem_todas_baixo") { model.mutate { $0.setLayer(row.id, adjustment: !row.adjustment) }; model.refreshModel(force: true) }
+                if row.adjustment {
+                    // Camadas afetadas: todas abaixo ↔ só a logo abaixo (um grupo conta como uma).
+                    let onlyBelow = model.engine.adjustmentScope(row.id) == 1
+                    ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "la_affected",
+                                 title: AureaText.t("la_affected") + " · " + AureaText.t(onlyBelow ? "la_affected_below" : "la_affected_all"),
+                                 detail: "la_affected_hint") { model.engine.setAdjustmentScope(onlyBelow ? 0 : 1, forLayer: row.id); model.refreshModel(force: true) }
+                }
                 ShellMenuRow(CupertinoGlyph.Grid, "editor_guia_nao_exporta", checked: row.guide, detail: "editor_aparece_aqui_editor_fica_fora_video") { model.mutate { $0.setLayer(row.id, guide: !row.guide) }; model.refreshModel(force: true) }
             }
             ShellMenuRow(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar") { act { model.engine.duplicateLayers(ids); model.refreshModel(force: true) } }
@@ -483,14 +504,45 @@ private struct ShellMenuRow: View {
                 if row.kind == 12 {
                     ShellMenuRow(CupertinoGlyph.ArrowDownRightSquare, "editor_editar_grupo") { act { model.openGroup(row.id) } }
                     ShellMenuRow(ShellGlyph.SquareSplit2x2, "editor_desagrupar") { act { model.ungroup(row.id) } }
+                    let through = model.engine.groupCameraPassThrough(row.id) == 1
+                    ShellMenuRow(CupertinoGlyph.Camera, "la_group_camera", checked: through, detail: "la_group_camera_hint") {
+                        if model.engine.setGroupCameraPassThrough(!through, forLayer: row.id) {
+                            model.toast = AureaText.t(through ? "app_group_camera_sealed" : "app_group_camera_reaches")
+                        }
+                        model.refreshModel(force: true)
+                    }
                 } else { ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_converter_grupo") { act { model.groupSelection() } } }
+                // Pôr esta camada num grupo que já existe aqui / tirar do grupo aberto.
+                ForEach(model.layers.filter { $0.kind == 12 && $0.id != row.id }) { group in
+                    ShellMenuRow(CupertinoGlyph.RectangleStack, "la_add_to_group", title: AureaText.t("la_add_to_group") + " · " + group.name) {
+                        act {
+                            let why = model.engine.addLayers([NSNumber(value: row.id)], toGroup: group.id)
+                            if !why.isEmpty { model.toast = AureaText.t("app_group_add_failed", why) }
+                            model.refreshModel(force: true)
+                        }
+                    }
+                }
+                if model.engine.precompDepth > 0 {
+                    ShellMenuRow(CupertinoGlyph.ArrowUturnLeft, "la_remove_from_group") {
+                        act {
+                            let why = model.engine.removeLayerFromGroup(row.id)
+                            if !why.isEmpty { model.toast = AureaText.t("app_group_remove_failed", why) }
+                            model.refreshModel(force: true)
+                        }
+                    }
+                }
             }
-            if row.kind == 1 || row.kind == 3 {
+            if row.kind == 1 || row.kind == 2 || row.kind == 3 {
                 ShellMenuSection("sh_menu_media")
+                if row.kind == 1 || row.kind == 2 {
+                    ShellMenuRow(CupertinoGlyph.Arrow2Squarepath, "layer_replace_media", enabled: !row.locked,
+                                 detail: "layer_replace_media_detail") { act { replaceTarget = LayerRef(id: row.id) } }
+                }
+                ShellMenuRow(CupertinoGlyph.InfoCircle, "media_info_title") { act { infoTarget = LayerRef(id: row.id) } }
                 if row.kind == 1 {
                     ShellMenuRow(CupertinoGlyph.MusicNote2, "editor_extrair_audio", detail: "editor_som_vira_camada_propria_video_fica") { act { _ = model.engine.extractAudio(fromLayer: row.id); model.refreshModel(force: true) } }
                 }
-                ShellMenuRow(CupertinoGlyph.Speaker2, "sh_menu_volume") { act { model.openPanel(.audio) } }
+                if row.kind == 1 || row.kind == 3 { ShellMenuRow(CupertinoGlyph.Speaker2, "sh_menu_volume") { act { model.openPanel(.audio) } } }
             }
             ShellMenuSection("editor_movimento")
             let timeFlags = (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0
@@ -522,7 +574,8 @@ private struct ShellMenuRow: View {
     }
     @ViewBuilder private var timelineMenu: some View {
         ShellMenuSection("sh_menu_selection")
-        ShellMenuRow(CupertinoGlyph.CheckmarkSquare, "editor_selecionar_todas_camadas", enabled: model.layers.count >= 2) { act { for row in model.layers { model.select(layerId: row.id, additive: true) } } }
+        ShellMenuRow(CupertinoGlyph.CheckmarkSquare, "editor_selecionar_todas_camadas", enabled: model.layers.count >= 2) { act { model.selectAll() } }
+        ShellMenuRow(CupertinoGlyph.RectangleStack, "edt_tl_pick_layers", enabled: !model.layers.isEmpty, checked: model.timelineLayerSelectMode, detail: "edt_tl_pick_layers_detail") { act { model.changeTimelineLayerSelectMode(!model.timelineLayerSelectMode) } }
         ShellMenuRow(CupertinoGlyph.Square, "editor_limpar_selecao") { act { model.clearSelection() } }
         ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_selecionar_uma_camada", enabled: !model.layers.isEmpty) { shell.sheet = .searchLayers }
         ShellMenuSection("editor_reproducao_previa")

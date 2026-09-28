@@ -55,6 +55,12 @@ fun HomeScreen(store: EditorStore) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) vm.createFromMedia(store, uri)
     }
+    // "Importar arquivo do projeto": qualquer tipo (o .aureaproj não tem MIME
+    // registrado); o motor diz se é projeto do Aurea.
+    val projectFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.afterEngine(store) { store.importProjectFile(uri) }
+    }
+    var reportProblem by rememberSaveable { mutableStateOf(false) }
     BackHandler(vm.tab != HomeViewModel.PROJECTS_TAB) { vm.selectTab(HomeViewModel.PROJECTS_TAB) }
     Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()) {
         LiveNoticeBanners(vm.notices)
@@ -84,10 +90,13 @@ fun HomeScreen(store: EditorStore) {
         message = signedIn?.let { stringResource(R.string.conta_conectado, it) },
         onDismiss = { menu = false }, actions = listOf(
         SheetAction(stringResource(R.string.home_tab_settings)) { vm.selectTab(HomeViewModel.SETTINGS_TAB) },
+        SheetAction(stringResource(R.string.project_file_import)) { projectFilePicker.launch(arrayOf("*/*")) },
+        SheetAction(stringResource(R.string.report_title)) { reportProblem = true },
         SheetAction(stringResource(R.string.settings_group_about)) { about = true },
         SheetAction(stringResource(R.string.licenses_title)) { licenses = true },
         SheetAction(stringResource(R.string.conta_sair), destructive = true) { confirmLogout = true },
     ))
+    if (reportProblem) ReportProblemSheet(sessao = { conta.sessao() }, onResult = { store.showToast(it) }) { reportProblem = false }
     if (confirmLogout) AureaAlert(
         title = stringResource(R.string.conta_sair),
         message = stringResource(R.string.conta_sair_mensagem),

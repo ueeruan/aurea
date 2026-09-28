@@ -516,7 +516,7 @@ struct PresetsPanel: View {
         if kind == .curve {
             guard let key = curveKey else { model.toast = kind.noData; return }
             let h = model.engine.trackEasing(layerId, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time)
-            guard h.count == 4 else { model.toast = kind.noData; return }
+            guard h.count >= 4 else { model.toast = kind.noData; return }
             let ease = CurveEase(interpolation: key.interpolation, x1: h[0].floatValue, y1: h[1].floatValue, x2: h[2].floatValue, y2: h[3].floatValue)
             json = model.engine.makeCurvePreset(name, interpolation: key.interpolation, handles: ease.handles.map { NSNumber(value: $0) })
         } else if kind == .caption {
@@ -1219,7 +1219,7 @@ struct ShapePanel: View {
     private var selected: Int { model.shapeSelectedParam }
     private var fill: [Float] { rgba(1) }
     private var stroke: [Float] { rgba(2) }
-    private let types = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10]
+    private let types = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15]
     private var track: [KeyframeItem] {
         preferredCurveTrack(([selected] + [5, 6, 1, 2, 3, 4].filter { $0 != selected }).map { param in
             (model.keyframes[id] ?? []).filter { $0.property == 35 && $0.paramIndex == UInt32(param) }.sorted { $0.time < $1.time }
@@ -1287,13 +1287,18 @@ struct ShapePanel: View {
                     if shapeType == 0 {
                         shapeRow(1, "panel_raio", value: value(1), step: 0.3, range: 0...max(0, min(value(5), value(6)) / 2), unit: "px", reset: 0, gesture: "raio") { write(1, $0) }
                     }
-                    if [3, 4, 8].contains(shapeType) {
-                        shapeRow(2, shapeType == 3 ? "panel_lados" : shapeType == 8 ? "panel_petalas" : "panel_pontas", value: value(2), step: 0.06, range: 3...64, reset: 5, gesture: "pontas") { write(2, $0.rounded()) }
+                    if [3, 4, 8, 14].contains(shapeType) {
+                        shapeRow(2, shapeType == 3 ? "panel_lados" : shapeType == 8 ? "panel_petalas" : shapeType == 14 ? "panel_dentes" : "panel_pontas", value: value(2), step: 0.06, range: 3...64, reset: 5, gesture: "pontas") { write(2, $0.rounded()) }
                     }
                     if shapeType == 4 {
                         shapeRow(3, "panel_raio_interno", value: value(3) * 100, step: 0.3, range: 5...95, unit: "%", reset: 50, gesture: AureaText.t("panel_raio_interno_75cf")) { write(3, $0 / 100) }
                     } else if shapeType == 5 || shapeType == 6 {
                         shapeRow(3, "panel_espessura", value: (shapeType == 6 ? 1 - value(3) : value(3)) * 100, step: 0.3, range: 5...95, unit: "%", reset: 50, gesture: "espessura") { write(3, shapeType == 6 ? 1 - $0 / 100 : $0 / 100) }
+                    } else if [12, 13, 14, 15].contains(shapeType) {
+                        // Trapézio: largura do topo; paralelogramo: inclinação; engrenagem: cubo; seta dupla: haste.
+                        let key = ["panel_largura_topo", "panel_inclinacao", "panel_cubo", "panel_espessura"][shapeType - 12]
+                        let reset: Float = [60, 50, 30, 22][shapeType - 12]
+                        shapeRow(3, key, value: value(3) * 100, step: 0.3, range: 5...95, unit: "%", reset: reset, gesture: key) { write(3, $0 / 100) }
                     }
                     Color.clear.frame(height: 6)
                     kitHint(AureaText.t("panel_arraste_alcas_palco_mudar_tamanho") + (shapeType == 0 ? "; " + AureaText.t("ios_shape_blue_handle_rounds") + ". " : ". ") + AureaText.t("panel_losango_trilho_grava_keyframe_linha_acesa"))
@@ -1332,7 +1337,9 @@ struct ShapePanel: View {
         switch shapeType {
         case 0: return AureaText.t("panel_retangulo"); case 1: return AureaText.t("panel_elipse"); case 3: return AureaText.t("editor_poligono"); case 4: return AureaText.t("editor_estrela")
         case 5: return AureaText.t("sh_shape_cross"); case 6: return AureaText.t("sh_shape_ring"); case 7: return AureaText.t("sh_shape_slice"); case 8: return AureaText.t("sh_shape_flower")
-        case 9: return AureaText.t("sh_shape_arrow"); case 10: return AureaText.t("sh_shape_triangle"); default: return AureaText.t("target_shape")
+        case 9: return AureaText.t("sh_shape_arrow"); case 10: return AureaText.t("sh_shape_triangle")
+        case 12: return AureaText.t("sh_shape_trapezoid"); case 13: return AureaText.t("sh_shape_parallelogram")
+        case 14: return AureaText.t("sh_shape_gear"); case 15: return AureaText.t("sh_shape_double_arrow"); default: return AureaText.t("target_shape")
         }
     }
     private var sizeRow: some View {
@@ -1516,6 +1523,11 @@ private struct ShapeEditGlyph: View {
                 }; path.closeSubpath()
             case 10:
                 path.move(to: CGPoint(x: c.x - r, y: c.y - r)); path.addLine(to: CGPoint(x: c.x - r, y: c.y + r)); path.addLine(to: CGPoint(x: c.x + r, y: c.y + r)); path.closeSubpath()
+            case 12: path = ShapeGlyphPaths.quad(center: c, radius: r, [-0.6, -0.7, 0.6, -0.7, 1, 0.7, -1, 0.7])
+            case 13: path = ShapeGlyphPaths.quad(center: c, radius: r, [-0.5, -0.7, 1, -0.7, 0.5, 0.7, -1, 0.7])
+            case 14:
+                context.fill(ShapeGlyphPaths.gear(center: c, radius: r, teeth: 10, hub: 0.3), with: .color(AureaColors.text), style: FillStyle(eoFill: true)); return
+            case 15: path = ShapeGlyphPaths.doubleArrow(center: c, radius: r)
             default: path.addRect(CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
             }
             context.fill(path, with: .color(AureaColors.text))
@@ -1860,5 +1872,151 @@ private struct NativeTextAnimRuler: View {
             }, expression: expression, onExpression: {
                 model.expressionSheet = ExpressionRequest(layer: id, label: param.label, tracks: [ExpressionTrack(property: 33, effect: index, param: UInt32(param.id))], unit: param.unit)
             }, compactUnit: true) { model.engine.setTextAnimParam(id, index: index, param: UInt32(param.id), value: $0); model.refreshModel(force: true) }
+    }
+}
+
+// MARK: - Animadores de camada (qualquer tipo) — porta de editor/panels/LayerAnimSection.kt
+
+/// ANIMADORES DA CAMADA: entrada "começa de", saída, força e atraso entre
+/// letras, curva e wiggle — o mesmo cartão, régua e losango da animação de
+/// texto. O motor avalia (prévia = export). 32 floats por animador.
+struct LayerAnimatorSection: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var animators: [[Float]] = []
+    @State private var failed = false
+    private var id: Int64 { model.primarySelection ?? 0 }
+    private func load() {
+        let flat = model.engine.layerAnimators(id).map(\.floatValue)
+        animators = stride(from: 0, to: flat.count - flat.count % 32, by: 32).map { Array(flat[$0..<($0 + 32)]) }
+    }
+    private func refresh() { model.refreshModel(force: true); load() }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(AureaText.t("la_animators")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+            if animators.isEmpty {
+                Text(AureaText.t("la_empty")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+            }
+            ForEach(animators.indices, id: \.self) { index in
+                NativeLayerAnimatorCard(index: UInt32(index), values: animators[index], reload: refresh).padding(.top, 8)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    NativePanelChip(AureaText.t("la_add")) { failed = model.engine.addLayerAnimator(id) < 0; refresh() }
+                    if !animators.isEmpty { NativePanelChip(AureaText.t("la_copy")) { _ = model.engine.copyLayerAnimators(id) } }
+                    NativePanelChip(AureaText.t("la_paste")) {
+                        let ids = model.selection.isEmpty ? [id] : Array(model.selection)
+                        _ = model.engine.pasteLayerAnimators(ids.map { NSNumber(value: $0) }); refresh()
+                    }
+                }.frame(height: 44)
+            }.padding(.top, 6)
+        }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
+            .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
+            .alert(AureaText.t("la_animators"), isPresented: $failed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(AureaText.t("app_layer_anim_add_failed"))
+            }
+    }
+}
+
+private struct NativeLayerAnimParam: Identifiable {
+    var id: Int
+    var label: String
+    var unit: String
+    var step: Float
+    var range: ClosedRange<Float>
+    var slot: Int { 6 + id }
+    static var strength: [NativeLayerAnimParam] { [
+        NativeLayerAnimParam(id: 0, label: AureaText.t("la_progress"), unit: "%", step: 0.5, range: 0...100),
+        NativeLayerAnimParam(id: 1, label: AureaText.t("la_strength"), unit: "%", step: 0.5, range: 0...100)
+    ] }
+    static var delay: NativeLayerAnimParam { NativeLayerAnimParam(id: 2, label: AureaText.t("la_delay"), unit: "ms", step: 2, range: 0...10000) }
+    static var from: [NativeLayerAnimParam] { [
+        NativeLayerAnimParam(id: 3, label: AureaText.t("panel_opacidade"), unit: "%", step: 0.5, range: 0...100),
+        NativeLayerAnimParam(id: 4, label: AureaText.t("panel_posicao_x"), unit: "px", step: 1, range: -20000...20000),
+        NativeLayerAnimParam(id: 5, label: AureaText.t("panel_posicao_y"), unit: "px", step: 1, range: -20000...20000),
+        NativeLayerAnimParam(id: 6, label: AureaText.t("panel_escala"), unit: "%", step: 1, range: 0...5000),
+        NativeLayerAnimParam(id: 7, label: AureaText.t("fx_escala_y"), unit: "%", step: 1, range: 0...5000),
+        NativeLayerAnimParam(id: 8, label: AureaText.t("panel_rotacao"), unit: "°", step: 1, range: -3600...3600),
+        NativeLayerAnimParam(id: 9, label: AureaText.t("edt_rotation_x"), unit: "°", step: 1, range: -3600...3600),
+        NativeLayerAnimParam(id: 10, label: AureaText.t("edt_rotation_y"), unit: "°", step: 1, range: -3600...3600),
+        NativeLayerAnimParam(id: 11, label: AureaText.t("ios_spacing"), unit: "px", step: 0.5, range: -20000...20000)
+    ] }
+    static var wiggle: [NativeLayerAnimParam] { [
+        NativeLayerAnimParam(id: 12, label: AureaText.t("panel_posicao_x"), unit: "px", step: 1, range: -20000...20000),
+        NativeLayerAnimParam(id: 13, label: AureaText.t("panel_posicao_y"), unit: "px", step: 1, range: -20000...20000),
+        NativeLayerAnimParam(id: 14, label: AureaText.t("panel_escala"), unit: "%", step: 0.5, range: 0...1000),
+        NativeLayerAnimParam(id: 15, label: AureaText.t("panel_rotacao"), unit: "°", step: 0.5, range: -3600...3600),
+        NativeLayerAnimParam(id: 16, label: AureaText.t("la_wiggle_speed"), unit: "/s", step: 0.05, range: 0...60),
+        NativeLayerAnimParam(id: 17, label: AureaText.t("la_wiggle_hold"), unit: "%", step: 0.5, range: 0...100)
+    ] }
+}
+
+private struct NativeLayerAnimatorCard: View {
+    @EnvironmentObject private var model: AureaModel
+    let index: UInt32
+    let values: [Float]
+    let reload: () -> Void
+    private var id: Int64 { model.primarySelection ?? 0 }
+    private var isText: Bool { values[26] > 0.5 }
+    private var unit: Int { Int(values[1]) }
+    private func set(_ updates: [Int: Float]) {
+        var next = values
+        for (slot, value) in updates { next[slot] = value }
+        _ = model.engine.setLayerAnimator(id, index: index, values: next.map { NSNumber(value: $0) })
+        reload()
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text(AureaText.t("la_animator_n", Int(index) + 1)).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
+                NativePanelChip(AureaText.t("panel_remover")) { model.engine.removeLayerAnimator(id, index: index); reload() }
+                AureaToggle(checked: values[0] > 0.5) { set([0: $0 ? 1 : 0]) }
+            }.frame(height: 40)
+            if isText { choices("la_unit", ["la_unit_whole", "panel_letra", "panel_palavra", "panel_linha"], slot: 1) }
+            toggleLine("la_exit", hint: "la_exit_hint", checked: values[2] > 0.5) { set([2: $0 ? 1 : 0]) }
+            choices("la_ease", ["la_ease_linear", "la_ease_smooth", "la_ease_inout", "la_ease_back"], slot: 3)
+            groupLabel("la_strength_delay")
+            ForEach(NativeLayerAnimParam.strength) { ruler($0) }
+            if isText && unit != 0 { ruler(NativeLayerAnimParam.delay) }
+            groupLabel("la_from")
+            ForEach(NativeLayerAnimParam.from.filter { ($0.id != 7 || values[4] > 0.5) && ($0.id != 11 || (isText && unit != 0)) }) { ruler($0) }
+            toggleLine("la_scale_separate", hint: nil, checked: values[4] > 0.5) { set([4: $0 ? 1 : 0]) }
+            groupLabel("la_wiggle")
+            ForEach(NativeLayerAnimParam.wiggle) { ruler($0) }
+            HStack(spacing: 8) {
+                Text(AureaText.t("la_wiggle_seed")).font(.aurea(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(Int(values[5]))").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                NativePanelChip(AureaText.t("la_reroll")) { set([5: Float(Int.random(in: 1...999_999))]) }
+            }.frame(height: 44)
+        }.padding(8).background(AureaColors.chip.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+    }
+    private func groupLabel(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 12, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 10).padding(.bottom, 2)
+    }
+    private func toggleLine(_ key: String, hint: String?, checked: Bool, onChange: @escaping (Bool) -> Void) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(AureaText.t(key)).font(.aurea(size: 12))
+                if let hint { Text(AureaText.t(hint)).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted) }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            AureaToggle(checked: checked) { onChange($0) }
+        }.padding(.vertical, 4)
+    }
+    private func choices(_ label: String, _ keys: [String], slot: Int) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                ForEach(Array(keys.enumerated()), id: \.offset) { n, key in NativePanelChip(AureaText.t(key), selected: Int(values[slot]) == n) { set([slot: Float(n)]) } }
+            }.frame(height: 40)
+        }
+    }
+    private func ruler(_ param: NativeLayerAnimParam) -> some View {
+        let bit = 1 << param.id
+        let look: KeyframeLook = Int(values[25]) & bit != 0 ? .keyHere : (Int(values[24]) & bit != 0 ? .animated : .none)
+        return NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit,
+            decimals: param.step < 0.5 ? 2 : 0, look: look, toggleKey: {
+                model.engine.toggleLayerAnimKey(id, index: index, param: UInt32(param.id)); reload()
+            }, compactUnit: true) { model.engine.setLayerAnimParam(id, index: index, param: UInt32(param.id), value: $0); reload() }
     }
 }

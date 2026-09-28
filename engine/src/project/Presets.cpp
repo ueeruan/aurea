@@ -351,6 +351,8 @@ void write_keys(json::Writer& w, const Track& t) {
         w.value(k.time.value).value(k.value).value(static_cast<u32>(k.interp));
         w.value(k.bx1).value(k.by1).value(k.bx2).value(k.by2);
         w.value(k.tangentIn).value(k.tangentOut).value(static_cast<u32>(k.easingPreset));
+        // Força 1 não se escreve: o preset continua abrindo em versões sem ela.
+        if (clamp_ease_power(k.easePower) != 1) w.value(static_cast<u32>(clamp_ease_power(k.easePower)));
         w.end_array();
     }
     w.end_array();
@@ -606,8 +608,9 @@ struct Reader {
         if (ks) {
             t.keys.reserve(ks->array.size());
             for (const json::Value& kv : ks->array) {
-                if (!kv.is_array() || kv.array.size() < 2 || kv.array.size() > 10) return fail("keyframe invalido");
-                f64 a[10] = {0, 0, 1, 0.33, 0.0, 0.67, 1.0, 0, 0, 0};
+                if (!kv.is_array() || kv.array.size() < 2 || kv.array.size() > 11) return fail("keyframe invalido");
+                // [10] = força da bézier; preset gravado antes dela tem 10 números (força 1).
+                f64 a[11] = {0, 0, 1, 0.33, 0.0, 0.67, 1.0, 0, 0, 0, 1};
                 for (usize i = 0; i < kv.array.size(); ++i) {
                     if (!kv.array[i].is_number()) return fail("keyframe invalido");
                     a[i] = kv.array[i].number;
@@ -625,6 +628,7 @@ struct Reader {
                 k.bx2 = static_cast<f32>(a[5]); k.by2 = static_cast<f32>(a[6]);
                 k.tangentIn = static_cast<f32>(a[7]); k.tangentOut = static_cast<f32>(a[8]);
                 k.easingPreset = static_cast<u16>(a[9]);
+                k.easePower = clamp_ease_power(static_cast<u32>(std::clamp(a[10], 0.0, 3.0)));
                 t.keys.push_back(k);
             }
         }

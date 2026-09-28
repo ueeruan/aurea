@@ -13,7 +13,8 @@
 //    0 retângulo (cantos arredondados)  1 elipse       3 polígono regular
 //    4 estrela                          5 cruz         6 anel
 //    7 fatia (pizza)                    8 flor         9 seta
-//    10 triângulo retângulo
+//    10 triângulo retângulo             12 trapézio    13 paralelogramo
+//    14 engrenagem                      15 seta dupla
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -93,6 +94,45 @@ float sd_triangle(vec2 q, vec2 p0, vec2 p1, vec2 p2) {
     return -sqrt(d.x) * sign(d.y);
 }
 
+// Trapézio isósceles: meia largura `top` em cima (y < 0), `bottom` embaixo.
+float sd_trapezoid(vec2 q, float top, float bottom, float he) {
+    vec2 k1 = vec2(bottom, he);
+    vec2 k2 = vec2(bottom - top, 2.0 * he);
+    q.x = abs(q.x);
+    vec2 ca = vec2(q.x - min(q.x, q.y < 0.0 ? top : bottom), abs(q.y) - he);
+    vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+    float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+    return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+}
+
+// Paralelogramo (y para cima): base de meia largura `wi`, topo deslocado `sk`.
+float sd_parallelogram(vec2 q, float wi, float he, float sk) {
+    vec2 e = vec2(sk, he);
+    q = q.y < 0.0 ? -q : q;
+    vec2 w = q - e;
+    w.x -= clamp(w.x, -wi, wi);
+    vec2 d = vec2(dot(w, w), -w.y);
+    float s = q.x * e.y - q.y * e.x;
+    q = s < 0.0 ? -q : q;
+    vec2 v = q - vec2(wi, 0.0);
+    v -= e * clamp(dot(v, e) / dot(e, e), -1.0, 1.0);
+    d = min(d, vec2(dot(v, v), wi * he - abs(s)));
+    return sqrt(d.x) * sign(-d.y);
+}
+
+// Engrenagem: disco da raiz + `n` dentes retos + furo do cubo (fração da raiz).
+float sd_gear(vec2 q, float r, float n, float hub) {
+    float root = r * 0.78;
+    float sector = 2.0 * PI / n;
+    float a = mod(atan(q.x, -q.y) + sector * 0.5, sector) - sector * 0.5;
+    float L = length(q);
+    vec2 f = L * vec2(sin(a), cos(a));                 // y = raio, x = de lado
+    float tw = root * sin(sector * 0.25);
+    float tooth = sd_round_box(f - vec2(0.0, (root + r) * 0.5), vec2(tw, (r - root) * 0.5 + 1e-3), 0.0);
+    float d = min(L - root, tooth);
+    return max(d, hub * root - L);
+}
+
 float shape_sd(vec2 q, vec2 half_) {
     int type = int(p.size.w + 0.5);
     float m = min(half_.x, half_.y);
@@ -127,6 +167,20 @@ float shape_sd(vec2 q, vec2 half_) {
         return min(shaft, head);
     }
     if (type == 10) return sd_triangle(q, vec2(-half_.x, -half_.y), vec2(-half_.x, half_.y), vec2(half_.x, half_.y));
+    if (type == 12) return sd_trapezoid(q, half_.x * clamp(p.shape.z, 0.05, 0.95), half_.x, half_.y);
+    if (type == 13) {
+        float sk = half_.x * clamp(p.shape.z, 0.05, 0.95) * 0.5;
+        return sd_parallelogram(vec2(q.x, -q.y), half_.x - sk, half_.y, sk);
+    }
+    if (type == 14) return sd_gear(q / st, m, max(3.0, p.shape.y), clamp(p.shape.z, 0.05, 0.95)) * min(st.x, st.y);
+    if (type == 15) {
+        // Seta dupla: haste de espessura `z` e uma ponta em cada lado.
+        float t = half_.y * clamp(p.shape.z, 0.05, 0.95);
+        float shaft = sd_round_box(q, vec2(half_.x * 0.6, t), 0.0);
+        float right = sd_triangle(q, vec2(half_.x * 0.45, -half_.y), vec2(half_.x, 0.0), vec2(half_.x * 0.45, half_.y));
+        float left = sd_triangle(q, vec2(-half_.x * 0.45, half_.y), vec2(-half_.x, 0.0), vec2(-half_.x * 0.45, -half_.y));
+        return min(shaft, min(left, right));
+    }
     return sd_round_box(q, half_, 0.0);
 }
 

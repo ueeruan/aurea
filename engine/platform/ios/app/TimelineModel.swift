@@ -690,6 +690,7 @@ func expandedTimelineRows(_ base: [TimelineRow], expanded: Int64?, keys: [Int64:
                 switch track.property {
                 case 30: name = "Time remap"
                 case 39: name = "Speed"
+                case 40: name = "Animator \(UInt64(track.effect) + 1) · \(UInt64(track.param) + 1)"
                 case 31: name = (effects.first { $0.effectId == track.effect }?.name ?? "Effect") + " · \(UInt64(track.param) + 1)"
                 case 32: name = "Audio · \(UInt64(track.param) + 1)"
                 case 33: name = "Text animation \(UInt64(track.effect) + 1) · \(UInt64(track.param) + 1)"
@@ -739,9 +740,77 @@ extension TimelineKeyRef {
 struct TimelineKeySelection: Equatable {
     let layer: Int64
     var keys: Set<TimelineKeyRef> = []
+    /// Keyframes escolhidos em OUTRAS camadas (do app antigo: no modo
+    /// "Selecionar" losangos de outra fileira somam). `layer` continua a
+    /// principal (Copiar/Colar/Duplicar); mover e excluir valem para todas.
+    var others: [Int64: Set<TimelineKeyRef>] = [:]
 
-    var count: Int { keys.count }
-    var isEmpty: Bool { keys.isEmpty }
+    var count: Int { others.values.reduce(keys.count) { $0 + $1.count } }
+    var isEmpty: Bool { count == 0 }
+    var crossLayer: Bool { !others.isEmpty }
+
+    /// As referências de uma camada (vazio se ela não tem nada escolhido).
+    func on(_ id: Int64) -> Set<TimelineKeyRef> { id == layer ? keys : (others[id] ?? []) }
+
+    /// Camadas com algum keyframe escolhido (a principal primeiro, as outras em ordem de id).
+    var layerIds: [Int64] {
+        var out: [Int64] = keys.isEmpty ? [] : [layer]
+        for id in others.keys.sorted() where !(others[id] ?? []).isEmpty { out.append(id) }
+        return out
+    }
+
+    func containsAny(on id: Int64, _ group: [KeyframeItem]) -> Bool {
+        let refs = on(id)
+        if refs.isEmpty { return false }
+        for key in group where refs.contains(TimelineKeyRef(key)) { return true }
+        return false
+    }
+
+    /// Alterna o grupo na camada dada: na principal ou numa das outras.
+    func toggledGroup(on id: Int64, _ group: [KeyframeItem]) -> TimelineKeySelection {
+        if id == layer { return toggledGroup(group) }
+        if group.isEmpty { return self }
+        var refs = Set<TimelineKeyRef>()
+        for key in group { refs.insert(TimelineKeyRef(key)) }
+        var current = others[id] ?? []
+        if refs.isSubset(of: current) { current.subtract(refs) } else { current.formUnion(refs) }
+        var next = self
+        next.others[id] = current.isEmpty ? nil : current
+        return next
+    }
+
+    /// Quanto a seleção inteira pode andar para cada camada ficar no próprio
+    /// clipe; `clip` dá (início, fim, deslocamento) de cada camada. O mais
+    /// restritivo de todas (par do `shiftLimits` do Android).
+    func shiftLimits(_ clip: (Int64) -> (start: Int32, end: Int32, offset: Int32)?) -> (lo: Int32, hi: Int32) {
+        var lo = Int64.min
+        var hi = Int64.max
+        for id in layerIds {
+            guard let c = clip(id) else { continue }
+            let refs = on(id)
+            let minT = refs.map(\.time).min() ?? 0
+            let maxT = refs.map(\.time).max() ?? 0
+            let first = Int64(Keyframes.toTimeline(minT, c.start, c.offset))
+            let last = Int64(Keyframes.toTimeline(maxT, c.start, c.offset))
+            lo = max(lo, min(0, Int64(c.start) - first))
+            hi = min(hi, max(0, Int64(c.end) - last))
+        }
+        return (lo == Int64.min ? 0 : Int32(clamping: lo), hi == Int64.max ? 0 : Int32(clamping: hi))
+    }
+
+    /// Todas as camadas continuam válidas? `current` nil = a camada sumiu.
+    func validatedAll(_ current: (Int64) -> [KeyframeItem]?) -> TimelineKeySelection? {
+        for id in layerIds {
+            guard let rows = current(id) else { return nil }
+            var present = Set<TimelineKeyRef>()
+            for key in rows { present.insert(TimelineKeyRef(key)) }
+            if !on(id).isSubset(of: present) { return nil }
+        }
+        return self
+    }
+
+    /// Empacotado para o motor, só das referências de uma camada.
+    func references(on id: Int64) -> [NSNumber] { Self.pack(on(id)) }
 
     func contains(_ key: KeyframeItem) -> Bool { keys.contains(TimelineKeyRef(key)) }
 
@@ -763,12 +832,15 @@ struct TimelineKeySelection: Equatable {
     /// Todas as referências andam `delta` frames (depois que o motor aceitou o mesmo delta).
     func shifted(_ delta: Int32) -> TimelineKeySelection {
         if delta == 0 { return self }
-        var moved = Set<TimelineKeyRef>()
-        for ref in keys {
-            let time = Int32(clamping: Int64(ref.time) + Int64(delta))
-            moved.insert(TimelineKeyRef(property: ref.property, effect: ref.effect, param: ref.param, time: time))
+        func move(_ refs: Set<TimelineKeyRef>) -> Set<TimelineKeyRef> {
+            var moved = Set<TimelineKeyRef>()
+            for ref in refs {
+                let time = Int32(clamping: Int64(ref.time) + Int64(delta))
+                moved.insert(TimelineKeyRef(property: ref.property, effect: ref.effect, param: ref.param, time: time))
+            }
+            return moved
         }
-        return TimelineKeySelection(layer: layer, keys: moved)
+        return TimelineKeySelection(layer: layer, keys: move(keys), others: others.mapValues(move))
     }
 
     /// Continua valendo só se TODA referência ainda existe; senão nil.
@@ -792,10 +864,12 @@ struct TimelineKeySelection: Equatable {
     }
 
     /// Empacotado para o motor: propriedade, efeito, componente, tempo local.
-    func references() -> [NSNumber] {
+    func references() -> [NSNumber] { Self.pack(keys) }
+
+    private static func pack(_ refs: Set<TimelineKeyRef>) -> [NSNumber] {
         var out: [NSNumber] = []
-        out.reserveCapacity(keys.count * 4)
-        for ref in keys {
+        out.reserveCapacity(refs.count * 4)
+        for ref in refs {
             out.append(NSNumber(value: ref.property))
             out.append(NSNumber(value: ref.effect))
             out.append(NSNumber(value: ref.param))
@@ -875,6 +949,24 @@ enum TimelinePress {
 func timelineCompact(panel: Bool, dock: Bool, tracksOpen: Bool, selectingKeys: Bool) -> Bool {
     if panel { return true }
     return dock && !tracksOpen && !selectingKeys
+}
+
+/// O que um toque no corpo de um clipe faz com a seleção de camadas (par do
+/// `layerTap` do Android). Modo "Selecionar várias camadas" (do app antigo):
+/// soma/tira, antes de tudo. Fora dele: compacto = sai do painel; lote de 2+
+/// = soma/tira; senão troca a escolhida.
+/// Tocar de novo na única escolhida (com as opções abertas) a solta, como no
+/// app antigo; escolhida só "na mão" da timeline (`timelineOnly`), o toque abre
+/// as opções. Outra camada troca direto.
+enum TimelineLayerTap: Equatable { case leaveCompact, toggle, replace, deselect }
+
+func timelineLayerTap(picking: Bool, compact: Bool, selected: Int,
+                      tappedSelected: Bool = false, timelineOnly: Bool = false) -> TimelineLayerTap {
+    if picking { return .toggle }
+    if compact { return .leaveCompact }
+    if selected >= 2 { return .toggle }
+    if selected == 1 && tappedSelected && !timelineOnly { return .deselect }
+    return .replace
 }
 
 /// "Escalonar": a conta da UI antes do motor (par do `Stagger` do Android).

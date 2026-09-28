@@ -93,12 +93,13 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.color.exposure", FxEffectHuman(
         name: "fx_name_exposure",
-        keywords: "exposure luz clarear escurecer",
+        keywords: "exposure luz clarear escurecer gama gamma",
         principal: [0],
         params: [
             0: FxParamHuman(suffix: "", decimals: 2),
             1: FxParamHuman(label: "fx_compensacao", scale: 100, suffix: "%", decimals: 0),
             2: FxParamHuman(label: "fx_tons_medios", decimals: 2),
+            3: FxParamHuman(label: "fx_aplicar_em"),
         ])),
     ("aurea.color.brightness_contrast", FxEffectHuman(
         name: "fx_name_brightness_contrast",
@@ -157,18 +158,17 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.stylize.motion_tile", FxEffectHuman(
         name: "fx_name_motion_tile",
-        keywords: "motion tile azulejos repetir ladrilho",
+        keywords: "motion tile azulejos repetir ladrilho mosaico tijolo fase espelhar parede de video",
         principal: [1, 2, 5, 7],
         params: [
             0: FxParamHuman(label: "fx_centro"),
-            1: FxParamHuman(label: "fx_largura"),
-            2: FxParamHuman(label: "fx_altura"),
-            3: FxParamHuman(label: "fx_largura_total"),
-            4: FxParamHuman(label: "fx_altura_total"),
-            5: FxParamHuman(label: "fx_espelhar"),
-            6: FxParamHuman(label: "fx_esticar_bordas"),
-            7: FxParamHuman(label: "fx_deslocamento"),
-            8: FxParamHuman(label: "fx_deslocar_horizontal"),
+            1: FxParamHuman(label: "fx_mt_largura_ladrilho"),
+            2: FxParamHuman(label: "fx_mt_altura_ladrilho"),
+            3: FxParamHuman(label: "fx_mt_largura_saida"),
+            4: FxParamHuman(label: "fx_mt_altura_saida"),
+            5: FxParamHuman(label: "fx_mt_espelhar_bordas"),
+            7: FxParamHuman(label: "fx_fase"),
+            8: FxParamHuman(label: "fx_mt_fase_horizontal"),
         ])),
     ("aurea.key.luma", FxEffectHuman(
         name: "fx_name_luma_key",
@@ -630,6 +630,19 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             8: FxParamHuman(label: "fx_semente"),
             9: FxParamHuman(label: "fx_pivo"),
         ])),
+    ("aurea.motion.twitch", FxEffectHuman(
+        name: "fx_name_twitch",
+        keywords: "tremor trancos twitch shake tremer impacto camera na mao glitch sacudir",
+        principal: [0, 1, 2, 3, 4, 5],
+        params: [
+            0: FxParamHuman(label: "fx_frequencia", suffix: "Hz", decimals: 1),
+            1: FxParamHuman(label: "fx_intensidade", decimals: 1),
+            2: FxParamHuman(label: "fx_rotacao"),
+            3: FxParamHuman(label: "fx_escala", decimals: 1),
+            4: FxParamHuman(label: "fx_suavizar", decimals: 0),
+            5: FxParamHuman(label: "fx_decaimento", suffix: "1/s", decimals: 2),
+            6: FxParamHuman(label: "fx_semente"),
+        ])),
     ("aurea.transition.iris_wipe", FxEffectHuman(
         name: "fx_name_iris_wipe",
         keywords: "iris wipe circulo poligono transicao revelar abrir fechar",
@@ -706,7 +719,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.stylize.mosaic", FxEffectHuman(
         name: "fx_name_mosaic",
-        keywords: "mosaico mosaic pixelar pixelate led painel celulas pixel",
+        keywords: "mosaico mosaic pixelar pixelate led painel celulas pixel parede de led matriz de pontos dot matrix",
+        principal: [6, 0, 1, 2, 3, 5],
         params: [
             0: FxParamHuman(label: "fx_tamanho_celula", suffix: "px", decimals: 0),
             1: FxParamHuman(label: "fx_vao_celulas", decimals: 0),
@@ -714,6 +728,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             3: FxParamHuman(label: "fx_sombreado", decimals: 0),
             4: FxParamHuman(label: "fx_vinheta_celula", decimals: 0),
             5: FxParamHuman(label: "fx_cor_fundo"),
+            6: FxParamHuman(label: "fx_estilo"),
+            7: FxParamHuman(label: "fx_vinheta", decimals: 0),
         ])),
     ("aurea.stylize.find_edges", FxEffectHuman(
         name: "fx_name_find_edges",
@@ -1085,6 +1101,11 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             7: FxParamHuman(label: "afx_p_instability_state"),
             8: FxParamHuman(label: "afx_p_instability", suffix: "px", decimals: 1),
         ])),
+    // Particular: as partículas do app antigo.
+    ("aurea.generate.particular", FxEffectHuman(
+        name: "afx_name_particular",
+        keywords: "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh",
+        principal: [0, 9, 13, 15, 22, 24, 27, 32, 33, 35])),
 ]
 
 /// A tabela indexada pelo `typeId`, e a posição declarada (para ordenar sem
@@ -1423,6 +1444,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.motion.oscillate", "fx_desc_motion_oscillate")
     put("aurea.motion.swing", "fx_desc_motion_swing")
     put("aurea.motion.wiggle", "fx_desc_motion_wiggle")
+    put("aurea.motion.twitch", "fx_desc_motion_twitch")
     put("aurea.transition.iris_wipe", "fx_desc_transition_iris_wipe")
     put("aurea.transition.box_wipe", "fx_desc_transition_box_wipe")
     put("aurea.transition.venetian_blinds", "fx_desc_transition_venetian_blinds")
@@ -1463,6 +1485,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.generate.audio_waveform", "afx_desc_audio_waveform", FxAllTargets, "forma de onda waveform audio osciloscopio som visualizador")
     put("aurea.generate.spectrum_analyzer", "afx_desc_spectrum", FxAllTargets, "espectro spectrum audio barras frequencias visualizador equalizador")
     put("aurea.stylize.ball_grid", "afx_desc_balls", FxVisualTargets, "bolas esferas balls spheres grade particulas explodir dispersar")
+    put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")
     return out

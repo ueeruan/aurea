@@ -440,6 +440,9 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
     // com as trilhas abertas e a barra de ações inteira.
     val selectingKeys = store.keySelectMode
     LaunchedEffect(selectingKeys) { if (selectingKeys) ui.panel = null }
+    // Modo "Selecionar várias camadas": o painel fecha e a timeline fica inteira.
+    val pickingLayers = store.layerSelectMode
+    LaunchedEffect(pickingLayers) { if (pickingLayers) ui.panel = null }
     Timeline(
         store = store,
         compact = ui.panel != null,

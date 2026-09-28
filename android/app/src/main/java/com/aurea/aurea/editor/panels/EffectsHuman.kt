@@ -113,12 +113,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.color.exposure",
         EffectHuman(
             name = R.string.fx_name_exposure,
-            keywords = "exposure luz clarear escurecer",
+            keywords = "exposure luz clarear escurecer gama gamma",
             principal = listOf(0),
             params = mapOf(
                 0 to ParamHuman(suffix = "", decimals = 2),
                 1 to ParamHuman(label = R.string.fx_compensacao, scale = 100f, suffix = "%", decimals = 0),
                 2 to ParamHuman(label = R.string.fx_tons_medios, decimals = 2),
+                3 to ParamHuman(label = R.string.fx_aplicar_em),
             ),
         ),
     )
@@ -197,18 +198,17 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.stylize.motion_tile",
         EffectHuman(
             name = R.string.fx_name_motion_tile,
-            keywords = "motion tile azulejos repetir ladrilho",
+            keywords = "motion tile azulejos repetir ladrilho mosaico tijolo fase espelhar parede de video",
             principal = listOf(1, 2, 5, 7),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_centro),
-                1 to ParamHuman(label = R.string.fx_largura),
-                2 to ParamHuman(label = R.string.fx_altura),
-                3 to ParamHuman(label = R.string.fx_largura_total),
-                4 to ParamHuman(label = R.string.fx_altura_total),
-                5 to ParamHuman(label = R.string.fx_espelhar),
-                6 to ParamHuman(label = R.string.fx_esticar_bordas),
-                7 to ParamHuman(label = R.string.fx_deslocamento),
-                8 to ParamHuman(label = R.string.fx_deslocar_horizontal),
+                1 to ParamHuman(label = R.string.fx_mt_largura_ladrilho),
+                2 to ParamHuman(label = R.string.fx_mt_altura_ladrilho),
+                3 to ParamHuman(label = R.string.fx_mt_largura_saida),
+                4 to ParamHuman(label = R.string.fx_mt_altura_saida),
+                5 to ParamHuman(label = R.string.fx_mt_espelhar_bordas),
+                7 to ParamHuman(label = R.string.fx_fase),
+                8 to ParamHuman(label = R.string.fx_mt_fase_horizontal),
             ),
         ),
     )
@@ -784,6 +784,19 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             8 to ParamHuman(label = R.string.fx_semente),
             9 to ParamHuman(label = R.string.fx_pivo),
         )))
+    put("aurea.motion.twitch", EffectHuman(
+        name = R.string.fx_name_twitch,
+        keywords = "tremor trancos twitch shake tremer impacto camera na mao glitch sacudir",
+        principal = listOf(0, 1, 2, 3, 4, 5),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_frequencia, suffix = "Hz", decimals = 1),
+            1 to ParamHuman(label = R.string.fx_intensidade, decimals = 1),
+            2 to ParamHuman(label = R.string.fx_rotacao),
+            3 to ParamHuman(label = R.string.fx_escala, decimals = 1),
+            4 to ParamHuman(label = R.string.fx_suavizar, decimals = 0),
+            5 to ParamHuman(label = R.string.fx_decaimento, suffix = "1/s", decimals = 2),
+            6 to ParamHuman(label = R.string.fx_semente),
+        )))
     put("aurea.transition.iris_wipe", EffectHuman(
         name = R.string.fx_name_iris_wipe,
         keywords = "iris wipe circulo poligono transicao revelar abrir fechar",
@@ -860,7 +873,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.stylize.mosaic", EffectHuman(
         name = R.string.fx_name_mosaic,
-        keywords = "mosaico mosaic pixelar pixelate led painel celulas pixel",
+        keywords = "mosaico mosaic pixelar pixelate led painel celulas pixel parede de led matriz de pontos dot matrix",
+        principal = listOf(6, 0, 1, 2, 3, 5),
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_tamanho_celula, suffix = "px", decimals = 0),
             1 to ParamHuman(label = R.string.fx_vao_celulas, decimals = 0),
@@ -868,6 +882,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             3 to ParamHuman(label = R.string.fx_sombreado, decimals = 0),
             4 to ParamHuman(label = R.string.fx_vinheta_celula, decimals = 0),
             5 to ParamHuman(label = R.string.fx_cor_fundo),
+            6 to ParamHuman(label = R.string.fx_estilo),
+            7 to ParamHuman(label = R.string.fx_vinheta, decimals = 0),
         )))
     put("aurea.stylize.find_edges", EffectHuman(
         name = R.string.fx_name_find_edges,
@@ -1250,6 +1266,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             7 to ParamHuman(label = R.string.afx_p_instability_state),
             8 to ParamHuman(label = R.string.afx_p_instability, suffix = "px", decimals = 1),
         ),
+    ))
+    // Particular: as partículas do app antigo. Principais: taxa, velocidade,
+    // abertura, gravidade, vida, tamanho, opacidade, cores e mistura.
+    put("aurea.generate.particular", EffectHuman(
+        name = R.string.afx_name_particular,
+        keywords = "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh",
+        principal = listOf(0, 9, 13, 15, 22, 24, 27, 32, 33, 35),
     ))
 }
 

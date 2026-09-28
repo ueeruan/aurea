@@ -289,6 +289,39 @@ internal object Press {
 internal fun timelineCompact(panel: Boolean, dock: Boolean, tracksOpen: Boolean, selectingKeys: Boolean): Boolean =
     panel || (dock && !tracksOpen && !selectingKeys)
 
+/**
+ * O que um toque no corpo de um clipe faz com a seleção de camadas.
+ *
+ * Modo "Selecionar várias camadas" (veio do app antigo): o toque SOMA ou
+ * TIRA o clipe da seleção, sem trocar — é assim que se junta um lote sem
+ * precisar segurar cada clipe. Ele vale antes de tudo (o modo deixa a
+ * timeline inteira, nunca compacta). Fora dele: no compacto o toque sai do
+ * painel; com lote de 2+ o toque também soma/tira; senão troca a escolhida.
+ */
+internal enum class LayerTap { LEAVE_COMPACT, TOGGLE, REPLACE, DESELECT }
+
+/**
+ * @param tappedSelected o clipe tocado é a camada escolhida.
+ * @param timelineOnly ela foi escolhida só "na mão" da timeline (segurada,
+ *   sem opções abertas): aí o toque ABRE as opções em vez de soltar.
+ *
+ * Tocar de novo na única camada escolhida (com as opções abertas) a solta,
+ * como no app antigo — a doca fecha junto. Outra camada troca direto.
+ */
+internal fun layerTap(
+    picking: Boolean,
+    compact: Boolean,
+    selected: Int,
+    tappedSelected: Boolean = false,
+    timelineOnly: Boolean = false,
+): LayerTap = when {
+    picking -> LayerTap.TOGGLE
+    compact -> LayerTap.LEAVE_COMPACT
+    selected >= 2 -> LayerTap.TOGGLE
+    selected == 1 && tappedSelected && !timelineOnly -> LayerTap.DESELECT
+    else -> LayerTap.REPLACE
+}
+
 /** Instantes de keyframe de uma camada, em frames da timeline. */
 internal object Keyframes {
     /** Tempo local → frame da timeline (`t + start − offset`). */

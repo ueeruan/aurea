@@ -1255,5 +1255,285 @@
  },
  "Ângulo inicial": {
   "en": "Start angle"
+ },
+ "Partículas/seg": {
+  "en": "Particles/sec",
+  "es": "Partículas/seg",
+  "ru": "Частиц/с",
+  "hi": "कण/सेकंड",
+  "id": "Partikel/dtk",
+  "ar": "جسيمات/ث"
+ },
+ "Pré-rolagem": {
+  "en": "Pre-roll",
+  "es": "Pre-roll",
+  "ru": "Предпрокрутка",
+  "hi": "प्री-रोल",
+  "id": "Pra-putar",
+  "ar": "تشغيل مسبق"
+ },
+ "Posição Z": {
+  "en": "Position Z",
+  "es": "Posición Z",
+  "ru": "Позиция Z",
+  "hi": "स्थिति Z",
+  "id": "Posisi Z",
+  "ar": "الموضع Z"
+ },
+ "Tamanho do emissor X": {
+  "en": "Emitter size X",
+  "es": "Tamaño del emisor X",
+  "ru": "Размер излучателя X",
+  "hi": "एमिटर आकार X",
+  "id": "Ukuran emitor X",
+  "ar": "حجم الباعث X"
+ },
+ "Tamanho do emissor Y": {
+  "en": "Emitter size Y",
+  "es": "Tamaño del emisor Y",
+  "ru": "Размер излучателя Y",
+  "hi": "एमिटर आकार Y",
+  "id": "Ukuran emitor Y",
+  "ar": "حجم الباعث Y"
+ },
+ "Tamanho do emissor Z": {
+  "en": "Emitter size Z",
+  "es": "Tamaño del emisor Z",
+  "ru": "Размер излучателя Z",
+  "hi": "एमिटर आकार Z",
+  "id": "Ukuran emitor Z",
+  "ar": "حجم الباعث Z"
+ },
+ "Emissor esférico": {
+  "en": "Sphere emitter",
+  "es": "Emisor esférico",
+  "ru": "Сферический излучатель",
+  "hi": "गोलाकार एमिटर",
+  "id": "Emitor bola",
+  "ar": "باعث كروي"
+ },
+ "Variação da velocidade": {
+  "en": "Velocity random",
+  "es": "Variación de velocidad",
+  "ru": "Разброс скорости",
+  "hi": "वेग में भिन्नता",
+  "id": "Variasi kecepatan",
+  "ar": "تباين السرعة"
+ },
+ "Inclinação da direção": {
+  "en": "Direction tilt",
+  "es": "Inclinación de dirección",
+  "ru": "Наклон направления",
+  "hi": "दिशा झुकाव",
+  "id": "Kemiringan arah",
+  "ar": "ميل الاتجاه"
+ },
+ "Giro da direção": {
+  "en": "Direction spin",
+  "es": "Giro de dirección",
+  "ru": "Поворот направления",
+  "hi": "दिशा घुमाव",
+  "id": "Putaran arah",
+  "ar": "دوران الاتجاه"
+ },
+ "Abertura": {
+  "en": "Spread",
+  "es": "Apertura",
+  "ru": "Разброс",
+  "hi": "फैलाव",
+  "id": "Sebaran",
+  "ar": "الانتشار"
+ },
+ "Para fora": {
+  "en": "Outwards",
+  "es": "Hacia fuera",
+  "ru": "Наружу",
+  "hi": "बाहर की ओर",
+  "id": "Ke luar",
+  "ar": "للخارج"
+ },
+ "Gravidade": {
+  "en": "Gravity",
+  "es": "Gravedad",
+  "ru": "Гравитация",
+  "hi": "गुरुत्व",
+  "id": "Gravitasi",
+  "ar": "الجاذبية"
+ },
+ "Vento X": {
+  "en": "Wind X",
+  "es": "Viento X",
+  "ru": "Ветер X",
+  "hi": "हवा X",
+  "id": "Angin X",
+  "ar": "الرياح X"
+ },
+ "Vento Y": {
+  "en": "Wind Y",
+  "es": "Viento Y",
+  "ru": "Ветер Y",
+  "hi": "हवा Y",
+  "id": "Angin Y",
+  "ar": "الرياح Y"
+ },
+ "Vento Z": {
+  "en": "Wind Z",
+  "es": "Viento Z",
+  "ru": "Ветер Z",
+  "hi": "हवा Z",
+  "id": "Angin Z",
+  "ar": "الرياح Z"
+ },
+ "Resistência do ar": {
+  "en": "Air drag",
+  "es": "Resistencia del aire",
+  "ru": "Сопротивление воздуха",
+  "hi": "वायु प्रतिरोध",
+  "id": "Hambatan udara",
+  "ar": "مقاومة الهواء"
+ },
+ "Velocidade da turbulência": {
+  "en": "Turbulence speed",
+  "es": "Velocidad de turbulencia",
+  "ru": "Скорость турбулентности",
+  "hi": "टर्बुलेंस गति",
+  "id": "Kecepatan turbulensi",
+  "ar": "سرعة الاضطراب"
+ },
+ "Vida": {
+  "en": "Life",
+  "es": "Vida",
+  "ru": "Время жизни",
+  "hi": "जीवनकाल",
+  "id": "Umur",
+  "ar": "العمر"
+ },
+ "Variação da vida": {
+  "en": "Life random",
+  "es": "Variación de vida",
+  "ru": "Разброс жизни",
+  "hi": "जीवनकाल में भिन्नता",
+  "id": "Variasi umur",
+  "ar": "تباين العمر"
+ },
+ "Variação do tamanho": {
+  "en": "Size random",
+  "es": "Variación de tamaño",
+  "ru": "Разброс размера",
+  "hi": "आकार में भिन्नता",
+  "id": "Variasi ukuran",
+  "ar": "تباين الحجم"
+ },
+ "Tamanho final": {
+  "en": "End size",
+  "es": "Tamaño final",
+  "ru": "Конечный размер",
+  "hi": "अंतिम आकार",
+  "id": "Ukuran akhir",
+  "ar": "الحجم النهائي"
+ },
+ "Surgir": {
+  "en": "Fade in",
+  "es": "Aparecer",
+  "ru": "Появление",
+  "hi": "फ़ेड इन",
+  "id": "Muncul",
+  "ar": "ظهور تدريجي"
+ },
+ "Sumir": {
+  "en": "Fade out",
+  "es": "Desvanecer",
+  "ru": "Исчезание",
+  "hi": "फ़ेड आउट",
+  "id": "Menghilang",
+  "ar": "اختفاء تدريجي"
+ },
+ "Esticar no movimento": {
+  "en": "Motion stretch",
+  "es": "Estirar con el movimiento",
+  "ru": "Растяжение в движении",
+  "hi": "गति में खिंचाव",
+  "id": "Regang saat bergerak",
+  "ar": "تمدد مع الحركة"
+ },
+ "Cor da partícula": {
+  "en": "Particle color",
+  "es": "Color de partícula",
+  "ru": "Цвет частицы",
+  "hi": "कण का रंग",
+  "id": "Warna partikel",
+  "ar": "لون الجسيم"
+ },
+ "Cor aleatória": {
+  "en": "Color random",
+  "es": "Color aleatorio",
+  "ru": "Случайный цвет",
+  "hi": "यादृच्छिक रंग",
+  "id": "Warna acak",
+  "ar": "لون عشوائي"
+ },
+ "Mistura aditiva": {
+  "en": "Add mode",
+  "es": "Mezcla aditiva",
+  "ru": "Аддитивное смешивание",
+  "hi": "योगात्मक मिश्रण",
+  "id": "Campuran aditif",
+  "ar": "مزج إضافي"
+ },
+ "Mostrar camada": {
+  "en": "Show layer",
+  "es": "Mostrar capa",
+  "ru": "Показать слой",
+  "hi": "लेयर दिखाएँ",
+  "id": "Tampilkan layer",
+  "ar": "إظهار الطبقة"
+ },
+ "Luz linear": {
+  "en": "Linear light",
+  "es": "Luz lineal",
+  "ru": "Линейный свет",
+  "hi": "लीनियर लाइट",
+  "id": "Cahaya linear",
+  "ar": "ضوء خطي"
+ },
+ "Valor codificado": {
+  "en": "Encoded value",
+  "es": "Valor codificado",
+  "ru": "Закодированное значение",
+  "hi": "एन्कोडेड मान",
+  "id": "Nilai terenkode",
+  "ar": "القيمة المرمّزة"
+ },
+ "Livre": {
+  "en": "Free",
+  "es": "Libre",
+  "ru": "Свободно",
+  "hi": "मुक्त",
+  "id": "Bebas",
+  "ar": "حر"
+ },
+ "Parede de LED": {
+  "en": "LED wall",
+  "es": "Pared LED",
+  "ru": "LED-стена",
+  "hi": "LED दीवार",
+  "id": "Dinding LED",
+  "ar": "جدار LED"
+ },
+ "Matriz de pontos": {
+  "en": "Dot matrix",
+  "es": "Matriz de puntos",
+  "ru": "Точечная матрица",
+  "hi": "डॉट मैट्रिक्स",
+  "id": "Matriks titik",
+  "ar": "مصفوفة نقطية"
+ },
+ "Mosaico de blocos": {
+  "en": "Block mosaic",
+  "es": "Mosaico de bloques",
+  "ru": "Блочная мозаика",
+  "hi": "ब्लॉक मोज़ेक",
+  "id": "Mosaik blok",
+  "ar": "فسيفساء كتل"
  }
 }

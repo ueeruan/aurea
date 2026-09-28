@@ -301,5 +301,14 @@ internal fun CopyPasteSheet(store: EditorStore, onDismiss: () -> Unit) {
         MenuSection(stringResource(R.string.editor_keyframes))
         MenuItemRow(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_keyframes_cabecote), if (primary != null) act { store.copyKeyframes() } else null)
         MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_keyframes_cabecote), if (primary != null && clip and 8 != 0) act { store.pasteKeyframes() } else null)
+        MenuItemRow(
+            CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_animacao), if (primary != null) act { store.copyAnimation() } else null,
+            detail = stringResource(R.string.editor_copiar_animacao_detalhe),
+        )
+        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_animacao), if (primary != null && clip and 8 != 0) act { store.pasteKeyframes() } else null)
+        MenuItemRow(
+            CupertinoGlyph.WandStars, stringResource(R.string.editor_otimizar_keyframes), if (primary != null) act { store.optimizeKeyframes() } else null,
+            detail = stringResource(R.string.editor_otimizar_keyframes_detalhe),
+        )
     }
 }

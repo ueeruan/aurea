@@ -294,9 +294,13 @@ public:
     /// e, com `depth`, teste/escrita de profundidade (Z reverso, textura
     /// transitória do tamanho do alvo). É o das bolas: uma instância por
     /// célula da grade, desenhada como um quadrado que o fragmento arredonda.
+    /// Com `blend`, o pipeline mistura pré-multiplicado no alvo (`BlendMode::Add`
+    /// = soma; qualquer outro = "sobre"), para geometria que se sobrepõe sem
+    /// profundidade (as partículas do Particular).
     u32 geometry_pass(const char* name, PassStage stage, FGTexture target, ShaderId vertex, ShaderId fragment,
                       std::initializer_list<PassTexture> textures, const void* uniforms, u32 uniformBytes,
-                      u32 vertexCount, bool depth) noexcept;
+                      u32 vertexCount, bool depth, bool blend = false,
+                      BlendMode blendMode = BlendMode::Normal) noexcept;
 
     /// Resolução de uma região em texels na escala pedida, limitada ao máximo
     /// do aparelho (a escala é reduzida uniformemente se passar).

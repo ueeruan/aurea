@@ -173,7 +173,7 @@ private fun AnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
 }
 
 @Composable
-private fun ChipRow(label: String, options: List<String>, selected: Int, onPick: (Int) -> Unit) {
+internal fun ChipRow(label: String, options: List<String>, selected: Int, onPick: (Int) -> Unit) {
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).height(40.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -185,7 +185,7 @@ private fun ChipRow(label: String, options: List<String>, selected: Int, onPick:
 }
 
 @Composable
-private fun AnimChip(label: String, on: Boolean, onClick: () -> Unit) {
+internal fun AnimChip(label: String, on: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
             .tocavel(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),

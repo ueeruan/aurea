@@ -122,9 +122,10 @@ u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTex
 
 u32 EffectBuildContext::geometry_pass(const char* name, PassStage stage, FGTexture target, ShaderId vertex,
                                         ShaderId fragment, std::initializer_list<PassTexture> textures,
-                                        const void* uniforms, u32 uniformBytes, u32 vertexCount, bool depth) noexcept {
+                                        const void* uniforms, u32 uniformBytes, u32 vertexCount, bool depth,
+                                        bool blend, BlendMode blendMode) noexcept {
     const TextureDesc& td = graph_.desc(target);
-    PipelineKey key = PipelineKey::graphics(vertex, fragment, td.format);
+    PipelineKey key = PipelineKey::graphics(vertex, fragment, td.format, blend, blendMode);
     if (depth) {
         key.hasDepth = true;
         key.depthTest = true;

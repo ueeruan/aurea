@@ -12,6 +12,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -217,6 +218,102 @@ internal object LayerOps {
             if (horizontal) Triple(it.id, it.x + delta, it.y) else Triple(it.id, it.x, it.y + delta)
         }
         applyPositions(store, moves, "distribuir")
+    }
+
+    // --- Ajustar / preencher / tamanho da composição / âncora (app antigo) ----------
+
+    /** Centro da mídia menos a âncora (px da camada, sem escala). */
+    private fun centerFromAnchor(d: LayerDetail, w: Float, h: Float): Pair<Float, Float> {
+        val centered = d.kind == LayerType.Model3D.kind
+        val ax = d.anchor[0] + if (centered) w * 0.5f else 0f
+        val ay = d.anchor[1] + if (centered) h * 0.5f else 0f
+        return (w * 0.5f - ax) to (h * 0.5f - ay)
+    }
+
+    /** Posição que põe o CENTRO da mídia em (cx, cy) com escala (sx, sy) e o giro atual. */
+    private fun positionForCenter(d: LayerDetail, w: Float, h: Float, sx: Float, sy: Float, cx: Float, cy: Float): Pair<Float, Float> {
+        val (ox, oy) = centerFromAnchor(d, w, h)
+        val rad = Math.toRadians(d.rotation[2].toDouble())
+        val c = cos(rad).toFloat()
+        val s = sin(rad).toFloat()
+        val dx = ox * sx
+        val dy = oy * sy
+        return (cx - (dx * c - dy * s)) to (cy - (dx * s + dy * c))
+    }
+
+    /**
+     * Ajustar à tela (a camada inteira cabe) ou Preencher a tela (cobre a
+     * composição): escala uniforme, espelho preservado, centro da mídia no
+     * centro da composição. Tudo num passo de desfazer.
+     */
+    fun fitToCanvas(store: EditorStore, ids: Collection<Long>, fill: Boolean) {
+        val cw = store.project.width.toFloat()
+        val ch = store.project.height.toFloat()
+        if (cw <= 0f || ch <= 0f) return
+        val targets = ids.mapNotNull { id ->
+            if (store.layers.firstOrNull { it.id == id }?.locked == true) return@mapNotNull null
+            val d = store.queryDetail(id) ?: return@mapNotNull null
+            val w = LayerGeometry.width(d)
+            val h = LayerGeometry.height(d)
+            if (w <= 0f || h <= 0f) null else Triple(id, d, w to h)
+        }
+        if (targets.isEmpty()) return
+        store.beginGesture(if (fill) "preencher a tela" else "ajustar à tela")
+        for ((id, d, size) in targets) {
+            val (w, h) = size
+            val k = if (fill) max(cw / w, ch / h) else min(cw / w, ch / h)
+            val sx = if (d.scale[0] < 0f) -k else k
+            val sy = if (d.scale[1] < 0f) -k else k
+            val (px, py) = positionForCenter(d, w, h, sx, sy, cw / 2f, ch / 2f)
+            store.setTransform2(TrackProperty.SCALE_X, sx, TrackProperty.SCALE_Y, sy, id)
+            store.setTransform2(TrackProperty.POSITION_X, px, TrackProperty.POSITION_Y, py, id)
+        }
+        store.endGesture()
+    }
+
+    /**
+     * Tamanho da composição = o da camada (mídia × escala, pares), e a camada
+     * vai para o centro — ela passa a ser o quadro inteiro.
+     */
+    fun makeCompositionSize(store: EditorStore, id: Long) {
+        val d = store.queryDetail(id) ?: return
+        val w = LayerGeometry.width(d)
+        val h = LayerGeometry.height(d)
+        if (w <= 0f || h <= 0f) return
+        fun even(v: Float) = max(2, (v / 2f).roundToInt() * 2)
+        val nw = even(w * abs(d.scale[0]))
+        val nh = even(h * abs(d.scale[1]))
+        store.beginGesture("tamanho da composição")
+        store.setCompositionSize(nw, nh)
+        val (px, py) = positionForCenter(d, w, h, d.scale[0], d.scale[1], nw / 2f, nh / 2f)
+        store.setTransform2(TrackProperty.POSITION_X, px, TrackProperty.POSITION_Y, py, id)
+        store.endGesture()
+    }
+
+    /**
+     * Âncora predefinida: um dos 9 pontos (fx, fy ∈ 0, ½, 1) da mídia. A
+     * posição compensa, então a camada não sai do lugar na tela.
+     */
+    fun presetAnchor(store: EditorStore, id: Long, fx: Float, fy: Float) {
+        val d = store.queryDetail(id) ?: return
+        val w = LayerGeometry.width(d)
+        val h = LayerGeometry.height(d)
+        if (w <= 0f || h <= 0f) return
+        val centered = d.kind == LayerType.Model3D.kind
+        val nax = fx * w - if (centered) w * 0.5f else 0f
+        val nay = fy * h - if (centered) h * 0.5f else 0f
+        val dx = (nax - d.anchor[0]) * d.scale[0]
+        val dy = (nay - d.anchor[1]) * d.scale[1]
+        val rad = Math.toRadians(d.rotation[2].toDouble())
+        val c = cos(rad).toFloat()
+        val s = sin(rad).toFloat()
+        store.beginGesture("âncora predefinida")
+        store.setPivot(
+            floatArrayOf(nax, nay, d.anchor[2]),
+            floatArrayOf(d.position[0] + dx * c - dy * s, d.position[1] + dx * s + dy * c, d.position[2]),
+            id,
+        )
+        store.endGesture()
     }
 
     private fun applyPositions(store: EditorStore, moves: List<Triple<Long, Float, Float>>, label: String) {

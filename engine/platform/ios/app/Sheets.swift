@@ -597,6 +597,11 @@ private struct AureaSheetTopShape: Shape {
 struct ColorPickerSheet: View {
     let request: ColorSheetRequest
     let onDismiss: () -> Void
+    @EnvironmentObject private var model: AureaModel
+    // Conta-gotas (app antigo): o quadro do cabeçote renderizado; e a paleta salva do aparelho.
+    @State private var picking = false
+    @State private var shot: PreviewShot?
+    @State private var palette: [UInt32] = SavedPalette.load()
     @State private var hue: Float = 0
     @State private var saturation: Float = 0
     @State private var brightness: Float = 0
@@ -617,7 +622,10 @@ struct ColorPickerSheet: View {
                     Button(AureaText.t("ds_pronto"), action: onDismiss).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.accent)
                         .padding(.vertical, 6).padding(.horizontal, 4).buttonStyle(AureaPressStyle())
                 }.padding(.bottom, 10)
-                board.padding(.bottom, 14)
+                Group {
+                    if picking, let shot { PreviewEyedropper(shot: shot) { rgb in setColor(rgb + [alpha]) } }
+                    else { board }
+                }.padding(.bottom, 14)
                 hueStrip
                 if request.withAlpha {
                     HStack(spacing: 8) {
@@ -638,6 +646,31 @@ struct ColorPickerSheet: View {
                     Text("H \(Int(hue.rounded()))°  S \(Int((saturation * 100).rounded()))%  V \(Int((brightness * 100).rounded()))%")
                         .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.leading, 4)
                 }.padding(.top, 12)
+                Button { togglePicking() } label: {
+                    HStack(spacing: 6) {
+                        CupertinoGlyph.text(CupertinoGlyph.Eyedropper, size: 15, color: picking ? AureaColors.accent : AureaColors.text)
+                        Text(AureaText.t(picking ? "ds_arraste_para_pegar" : "ds_pegar_da_previa")).font(.aurea(size: 12, weight: .semibold))
+                            .foregroundStyle(picking ? AureaColors.accent : AureaColors.text)
+                    }.padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(picking ? AureaColors.accent.opacity(0.18) : AureaColors.chip, in: Capsule())
+                }.buttonStyle(.plain).padding(.top, 10)
+                // Paleta salva (por aparelho): + guarda a cor atual, toque reusa, segurar apaga.
+                Text(AureaText.t("ds_paleta_salva")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 12).padding(.bottom, 8)
+                AureaFlowLayout(hGap: 10, vGap: 10) {
+                    Button { palette = SavedPalette.add(palette, SavedPalette.pack(rgba)) } label: {
+                        CupertinoGlyph.text(CupertinoGlyph.Plus, size: 14, color: AureaColors.text)
+                            .frame(width: 30, height: 30).background(AureaColors.chip, in: Circle())
+                            .overlay(Circle().stroke(AureaColors.border, lineWidth: 1))
+                    }.buttonStyle(.plain).accessibilityLabel(AureaText.t("ds_salvar_cor"))
+                    ForEach(palette, id: \.self) { packed in
+                        let c = SavedPalette.unpack(packed)
+                        AureaColorSwatch(color: AureaColorSpace.color(c)).frame(width: 30, height: 30).clipShape(Circle())
+                            .overlay(Circle().stroke(AureaColors.border, lineWidth: 1))
+                            .contentShape(Circle())
+                            .onTapGesture { setColor(c) }
+                            .onLongPressGesture { palette = SavedPalette.remove(palette, packed) }
+                    }
+                }
                 Text(AureaText.t("ds_rapidas")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 12).padding(.bottom, 8)
                 AureaFlowLayout(hGap: 10, vGap: 10) {
                     ForEach(quick, id: \.self) { rgb in
@@ -669,10 +702,91 @@ struct ColorPickerSheet: View {
             LinearGradient(colors: (0...6).map { AureaColorSpace.color(AureaColorSpace.rgba(h: Float($0) * 60, s: 1, v: 1, a: 1)) }, startPoint: .leading, endPoint: .trailing)
         }
     }
+    private func togglePicking() {
+        if picking { picking = false; shot = nil; return }
+        var width: UInt32 = 0, height: UInt32 = 0
+        guard let data = model.engine.captureFrame(720, outWidth: &width, outHeight: &height), width > 0, height > 0,
+              let image = UIImage.fromRGBA(data, width: Int(width), height: Int(height)) else { return }
+        shot = PreviewShot(image: image, rgba: data, width: Int(width), height: Int(height))
+        picking = true
+    }
     private func load(_ rgba: [Float]) { let hsv = AureaColorSpace.hsv(rgba); hue = hsv.h; saturation = hsv.s; brightness = hsv.v; alpha = hsv.a }
     private func setColor(_ rgba: [Float]) { load(rgba); push() }
     private func push() { let c = rgba; request.onChange(c[0], c[1], c[2], c[3]) }
 }
+/// Paleta salva POR APARELHO (UserDefaults): RGBA 8 bits sRGB empacotado,
+/// a mais nova primeiro, sem repetir, até 24 (SavedPalette do Android).
+enum SavedPalette {
+    private static let key = "aurea.palette"
+    static func load() -> [UInt32] { ((UserDefaults.standard.array(forKey: key) as? [NSNumber]) ?? []).map(\.uint32Value).prefix(24).map { $0 } }
+    private static func save(_ colors: [UInt32]) -> [UInt32] { UserDefaults.standard.set(colors.map { NSNumber(value: $0) }, forKey: key); return colors }
+    static func add(_ current: [UInt32], _ packed: UInt32) -> [UInt32] { save(Array(([packed] + current.filter { $0 != packed }).prefix(24))) }
+    static func remove(_ current: [UInt32], _ packed: UInt32) -> [UInt32] { save(current.filter { $0 != packed }) }
+    static func pack(_ c: [Float]) -> UInt32 {
+        func b(_ i: Int) -> UInt32 { UInt32((min(max(c.count > i ? c[i] : 1, 0), 1) * 255).rounded()) }
+        return (b(0) << 24) | (b(1) << 16) | (b(2) << 8) | b(3)
+    }
+    static func unpack(_ v: UInt32) -> [Float] { [Float((v >> 24) & 255) / 255, Float((v >> 16) & 255) / 255, Float((v >> 8) & 255) / 255, Float(v & 255) / 255] }
+}
+
+/// O quadro do cabeçote para o conta-gotas (RGBA8 sRGB, alfa reto).
+struct PreviewShot {
+    let image: UIImage
+    let rgba: Data
+    let width: Int
+    let height: Int
+    func color(_ x: Int, _ y: Int) -> [Float] {
+        let i = (min(max(y, 0), height - 1) * width + min(max(x, 0), width - 1)) * 4
+        guard i + 3 < rgba.count else { return [0, 0, 0] }
+        let s = rgba.startIndex + i
+        return [Float(rgba[s]) / 255, Float(rgba[s + 1]) / 255, Float(rgba[s + 2]) / 255]
+    }
+}
+
+/// O CONTA-GOTAS: a prévia numa caixa de 200 pt; arrastar mostra a lupa
+/// (pixels ampliados, mira e anel da cor) e manda a cor ao vivo.
+private struct PreviewEyedropper: View {
+    let shot: PreviewShot
+    let onColor: ([Float]) -> Void
+    @State private var touch: (Int, Int)?
+    @State private var picked: [Float] = [0, 0, 0]
+    var body: some View {
+        GeometryReader { geo in
+            let k = min(geo.size.width / CGFloat(shot.width), geo.size.height / CGFloat(shot.height))
+            let ox = (geo.size.width - CGFloat(shot.width) * k) / 2, oy = (geo.size.height - CGFloat(shot.height) * k) / 2
+            Canvas { context, size in
+                let image = context.resolve(Image(uiImage: shot.image).interpolation(.none))
+                context.draw(image, in: CGRect(x: ox, y: oy, width: CGFloat(shot.width) * k, height: CGFloat(shot.height) * k))
+                guard let at = touch else { return }
+                let px = at.0, py = at.1
+                // Lupa acima do dedo: ~11 pixels ampliados, mira no centro, anel da cor.
+                let r: CGFloat = 34, zoom = 2 * r / 11
+                let tx = ox + (CGFloat(px) + 0.5) * k, ty = oy + (CGFloat(py) + 0.5) * k
+                let c = CGPoint(x: min(max(tx, r), size.width - r), y: max(ty - r - 18, r))
+                var lens = context
+                lens.clip(to: Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)))
+                lens.fill(Path(CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)), with: .color(.black))
+                lens.draw(image, in: CGRect(x: c.x - (CGFloat(px) + 0.5) * zoom, y: c.y - (CGFloat(py) + 0.5) * zoom,
+                                            width: CGFloat(shot.width) * zoom, height: CGFloat(shot.height) * zoom))
+                lens.stroke(Path(CGRect(x: c.x - zoom / 2, y: c.y - zoom / 2, width: zoom, height: zoom)), with: .color(.white), lineWidth: 1.5)
+                context.stroke(Path(ellipseIn: CGRect(x: c.x - r + 2.5, y: c.y - r + 2.5, width: 2 * r - 5, height: 2 * r - 5)),
+                               with: .color(AureaColorSpace.color(picked + [1])), lineWidth: 5)
+                context.stroke(Path(ellipseIn: CGRect(x: c.x - r - 2.5, y: c.y - r - 2.5, width: 2 * r + 5, height: 2 * r + 5)), with: .color(.white), lineWidth: 1.5)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { e in
+                let px = Int((e.location.x - ox) / k), py = Int((e.location.y - oy) / k)
+                let cx = min(max(px, 0), shot.width - 1), cy = min(max(py, 0), shot.height - 1)
+                touch = (cx, cy)
+                picked = shot.color(cx, cy)
+                onColor(picked)
+            }.onEnded { _ in touch = nil })
+        }
+        .frame(height: 200).background(Color.black).clipShape(RoundedRectangle(cornerRadius: 10))
+        .accessibilityLabel(AureaText.t("ds_arraste_para_pegar"))
+    }
+}
+
 private struct ColorValueStrip<Background: View>: View {
     let value: Float
     let onValue: (Float) -> Void

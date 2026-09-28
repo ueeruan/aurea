@@ -162,6 +162,12 @@ struct VectorPanel: View {
             paintEditor("stroke", field: 9, what: "borda")
             param(3, "panel_largura", step: 0.2, range: 0...2000, unit: "px", decimals: 1, reset: 6)
             param(6, "panel_opacidade", step: 0.5, range: 0...100, unit: "%", reset: 100)
+            // Afinar (app antigo): a largura nasce e morre em ponta ao longo do caminho.
+            human("panel_afinar_inicio", value: number("taperStart"), step: 0.3, range: 0...100, unit: "%", reset: 0) { edit(24, [$0]) }
+            human("panel_afinar_fim", value: number("taperEnd"), step: 0.3, range: 0...100, unit: "%", reset: 0) { edit(25, [$0]) }
+            if number("taperStart") > 0 || number("taperEnd") > 0 {
+                human("panel_afinar_suavidade", value: number("taperEase"), step: 0.3, range: 0...100, unit: "%", reset: 0) { edit(26, [$0]) }
+            }
             advancedSection {
                 title("panel_pontas"); choices(["panel_retas", "panel_redondas", "panel_quadradas"], value: Int(number("cap"))) { edit(13, [Float($0)]) }
                 title("panel_cantos"); choices(["panel_vivos", "panel_redondos", "panel_chanfrados"], value: Int(number("join"))) { edit(14, [Float($0)]) }

@@ -19,6 +19,8 @@ export { CaptionCommunity } from "./caption_community.js";
 // Contas obrigatórias (/api/auth/*, /api/stats/users) e crash (/api/crash).
 import { rotaDeContas } from "./contas.js";
 import { rotaDeCrash } from "./crash.js";
+// "Relatar um problema" (/api/report): o texto que a pessoa escreve no app.
+import { rotaDeRelato } from "./relato.js";
 
 export { CofreDeVideo } from "./cofre.js";
 
@@ -59,6 +61,8 @@ export default {
     if (contas) return contas;
     const crash = await rotaDeCrash(req, env, ctx, url);
     if (crash) return crash;
+    const relato = await rotaDeRelato(req, env, ctx, url);
+    if (relato) return relato;
 
     // Geração de vídeo paga (8Scale): tudo sob /api/ai/video.
     const video = await rotaDeVideo(req, env, ctx, url);

@@ -3,27 +3,33 @@
 //
 //  A geometria do Motion Tile, exposta para teste.
 //
-//  PORTE do Aurea antigo (`motion_tile_pass.dart`): `ParametrosDoMotionTile` e
-//  `fatoresQueCobremMotionTile`. A regra que custou caro para acertar, e que
-//  estes testes travam:
+//  O visual e os controles são os do app antigo (o editor anterior do dono):
 //
-//    A CÓPIA CENTRAL É A PRÓPRIA LAYER — MESMO TAMANHO, MESMO LUGAR. Os
-//    controles de saída e a cobertura automática mudam a ÁREA ladrilhada, e
-//    NUNCA a escala nem a posição da layer. As cópias nascem para fora.
+//    - a grade é presa à LAYER: cada ladrilho é a layer INTEIRA reduzida por
+//      Largura/Altura do ladrilho, e o centro do ladrilho está em "Centro";
+//    - a fase desloca cada LINHA na horizontal (fase × índice da linha — com
+//      180° vira tijolo); com "Deslocamento de fase horizontal" ligado, desloca
+//      cada COLUNA na vertical;
+//    - "Espelhar bordas" vira os ladrilhos ímpares, para as emendas casarem;
+//    - Largura/Altura da SAÍDA são uma janela centrada no QUADRO (fração da
+//      composição, 0%..500%): fora dela não se desenha nada. Em 100% ou mais a
+//      janela é o quadro inteiro.
 //
-//  Os três defeitos antigos que isto impede de voltar:
-//    - "dá zoom para baixo": a região crescia e a layer encolhia junto;
-//    - "não ladrilha no preview": a repetição cobria só a caixa da layer, e
-//      com a layer reduzida o quadro ficava com moldura vazia;
-//    - "muda a posição da layer": a região expandida era ancorada no canto.
+//  E a regra do Aurea que continua valendo: A CÓPIA CENTRAL É A PRÓPRIA LAYER —
+//  mesmo tamanho, mesmo lugar — e a região ladrilhada cresce para fora até
+//  cobrir o quadro, qualquer que seja o transform da layer.
 //
-//  O porte generaliza um ponto: o antigo supunha a âncora no centro da layer
-//  (posição = centro). Aqui a conta inverte a matriz completa da layer, então
-//  vale para qualquer âncora — e com a âncora no centro dá o mesmo número.
+//  Projetos gravados com o Motion Tile ANTERIOR do Aurea (9 slots de
+//  parâmetro; saída como múltiplo da layer; fase alternada por coluna; "esticar
+//  bordas") são convertidos ao abrir por `upgrade_legacy_layout`.
 // =============================================================================
 #pragma once
 
 #include "aurea/effects/Effect.hpp"
+
+namespace aurea {
+struct Layer;
+}
 
 namespace aurea::motion_tile {
 
@@ -31,20 +37,27 @@ namespace aurea::motion_tile {
 struct Params {
     f32  tileX = 1.0f, tileY = 1.0f;      ///< fração da fonte (1 = a layer inteira)
     f32  centerX = 0.5f, centerY = 0.5f;  ///< fração da fonte
-    f32  outputX = 1.0f, outputY = 1.0f;  ///< saída pedida (fração da layer)
+    f32  outputX = 1.0f, outputY = 1.0f;  ///< janela de saída (fração do QUADRO)
     bool mirror = false;
-    bool clamp = false;                   ///< "esticar bordas" (vence o espelho)
-    bool horizontalPhase = false;
+    bool horizontalPhase = false;         ///< fase por coluna (em Y) em vez de por linha (em X)
     f32  phaseTurns = 0.0f;               ///< graus / 360
+    /// "Esticar bordas" do Motion Tile anterior do Aurea. Sem controle na tela:
+    /// só um projeto antigo que o tinha ligado o traz (e continua igual).
+    bool legacyClamp = false;
 
     [[nodiscard]] bool identity_params() const noexcept;
 };
 
-/// Índices dos parâmetros do efeito (ordem de declaração).
+/// Índices dos parâmetros do efeito (ordem de declaração). Os slots 0..8 são
+/// os do Motion Tile anterior (keyframes e expressões continuam endereçados);
+/// o 6 ficou oculto e o 9 marca a disposição nova.
 enum ParamIndex : u32 {
     kCenter = 0, kTileWidth, kTileHeight, kOutputWidth, kOutputHeight,
-    kMirror, kClampEdges, kPhase, kHorizontalPhase,
+    kMirror, kLegacyClamp, kPhase, kHorizontalPhase, kLayout,
 };
+
+/// Quantos slots tinha o Motion Tile anterior (sem `kLayout`).
+inline constexpr u32 kLegacyParamCount = 9;
 
 [[nodiscard]] Params params_from(const EffectEval& eval) noexcept;
 
@@ -52,14 +65,17 @@ enum ParamIndex : u32 {
 /// por quadro. 24x a layer cobre uma composição com a layer em 1/24.
 inline constexpr f32 kMaxCoverage = 24.0f;
 
-/// Teto do ladrilho digitado (10x a layer). O slider vai só a 3x; acima disso
-/// cada cópia é maior que a layer — é amostragem, não custo nem memória.
+/// Teto do ladrilho digitado (10x a layer). O slider vai a 5x, como no app
+/// antigo; acima disso é amostragem, não custo nem memória.
 inline constexpr f32 kMaxTileScale = 10.0f;
+
+/// Teto da janela de saída (500% do quadro, a faixa do app antigo).
+inline constexpr f32 kMaxOutput = 5.0f;
 
 /// Fatores (largura, altura, em múltiplos da layer) que fazem a região
 /// ladrilhada cobrir o quadro inteiro da composição DEPOIS do transform da
-/// layer — o maior entre isso e o que a pessoa pediu em "Largura/Altura da
-/// saída". Nunca NaN, nunca infinito, nunca abaixo de 0.01.
+/// layer. Nunca menor que a layer (1), nunca NaN, nunca infinito, nunca acima
+/// de kMaxCoverage. A janela de saída não mexe nisto: ela só recorta.
 [[nodiscard]] Vec2 coverage_factors(const Params& p, const LayerPlacement& placement) noexcept;
 
 /// A região ladrilhada, em pixels da layer: centrada no CENTRO da layer, do
@@ -69,8 +85,23 @@ inline constexpr f32 kMaxTileScale = 10.0f;
 
 /// Avaliação de referência em CPU da grade (mesma conta do shader, sem a
 /// trava de meio texel). Devolve a coordenada normalizada da fonte que o pixel
-/// na posição `pos` (normalizada na fonte) mostra. Usada pelos testes para
-/// conferir o shader contra uma conta independente.
+/// na posição `pos` (normalizada na fonte) mostra.
 [[nodiscard]] Vec2 reference_lookup(const Params& p, Vec2 pos) noexcept;
+
+/// A janela de saída contém o ponto `compUv` (0..1 no quadro)?
+[[nodiscard]] bool inside_output(const Params& p, Vec2 compUv) noexcept;
+
+/// Converte, NO LUGAR, um Motion Tile gravado na disposição anterior (menos de
+/// `kLayout + 1` slots) para a atual, junto com os keyframes dele na layer:
+///   - saída: antes múltiplo da layer que só ampliava a cobertura automática
+///     (abaixo de 100% não fazia nada) → agora janela no quadro; todo valor
+///     antigo vira no mínimo 100% (o quadro inteiro, como era desenhado);
+///   - fase: antes deslocava colunas alternadas na vertical (ou linhas, com o
+///     "horizontal") no sentido oposto → agora linhas em X (ou colunas em Y,
+///     com a opção): o eixo troca e o sinal inverte, e a coluna/linha vizinha
+///     fica onde estava (em 180°, o tijolo, o desenho é o mesmo);
+///   - acrescenta o slot `kLayout`, que marca a conversão como feita.
+/// Devolve true se converteu. Outro tipo de efeito ou já convertido: nada.
+bool upgrade_legacy_layout(Layer& layer, EffectInstance& effect) noexcept;
 
 } // namespace aurea::motion_tile

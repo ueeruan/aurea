@@ -259,6 +259,10 @@ private val SHAPES = listOf(
     12 to R.string.sh_shape_capsule, 4 to R.string.sh_shape_triangle, 14 to R.string.sh_shape_right_triangle,
     6 to R.string.editor_poligono, 11 to R.string.editor_estrela, 2 to R.string.sh_shape_cross,
     3 to R.string.sh_shape_ring, 5 to R.string.sh_shape_slice, 7 to R.string.sh_shape_flower, 8 to R.string.sh_shape_arrow,
+    // Formas vindas do app antigo (presets 15..22 do motor).
+    16 to R.string.sh_shape_pentagon, 15 to R.string.sh_shape_octagon, 17 to R.string.sh_shape_trapezoid,
+    18 to R.string.sh_shape_parallelogram, 19 to R.string.sh_shape_star4, 20 to R.string.sh_shape_star6,
+    21 to R.string.sh_shape_gear, 22 to R.string.sh_shape_double_arrow,
 )
 
 /** Tocar põe a forma no centro da cena, já escolhida (e fecha o adicionar). */
@@ -377,6 +381,25 @@ private fun DrawScope.drawShapePreset(preset: Int) {
             drawOval(fill, r.topLeft, r.size)
             drawContext.transform.rotate(-deg, c)
         }
+        15 -> drawPath(regular(8, 0.5f), fill)
+        16 -> drawPath(regular(5, 0.5f, 0.53f), fill)
+        17 -> drawPath(poly(0.2f, 0.2f, 0.8f, 0.2f, 1f, 0.8f, 0f, 0.8f), fill)
+        18 -> drawPath(poly(0.25f, 0.25f, 1f, 0.25f, 0.75f, 0.75f, 0f, 0.75f), fill)
+        19, 20 -> {
+            val n = if (preset == 19) 4 else 6
+            val inner = if (preset == 19) 0.2f else 0.28f
+            val star = Path()
+            for (k in 0 until n * 2) {
+                val r = if (k % 2 == 0) 0.5f else inner
+                val a = -Math.PI / 2 + k * Math.PI / n
+                val q = p(0.5f + r * cos(a).toFloat(), 0.5f + r * sin(a).toFloat())
+                if (k == 0) star.moveTo(q.x, q.y) else star.lineTo(q.x, q.y)
+            }
+            star.close()
+            drawPath(star, fill)
+        }
+        21 -> drawPath(com.aurea.aurea.editor.panels.gearGlyph(p(0.5f, 0.5f), s * 0.5f, 10, 0.3f), fill)
+        22 -> drawPath(com.aurea.aurea.editor.panels.doubleArrowGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
         else -> {   // 8: seta (camada nasce 1,6 : 1)
             drawLine(fill, p(0.04f, 0.5f), p(0.66f, 0.5f), s * 0.2f, StrokeCap.Butt)
             drawPath(poly(0.6f, 0.2f, 0.98f, 0.5f, 0.6f, 0.8f), fill)
@@ -484,7 +507,7 @@ private fun ElementTab(store: EditorStore, close: () -> Unit) {
             // UM sistema, nao tres. Faiscas/Neve/Poeira de luz viraram preset
             // do mesmo motor — listar os tres aqui prometia tres motores.
             AddItem(stringResource(R.string.particular_title), CupertinoGlyph.Sparkles, ShellColors.Text3D) {
-                close(); store.addParticles(10)
+                close(); store.addParticles(20)   // 20 = Particular (preset Padrão)
             },
             AddItem(stringResource(R.string.editor_camada_ajuste), CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
             AddItem(stringResource(R.string.sh_add_group_selection), CupertinoGlyph.Folder) {

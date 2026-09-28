@@ -155,11 +155,7 @@ struct PreviewMetalView: UIViewRepresentable {
         private var moveDown = SIMD2<Float>.zero
         private var moveLast = SIMD2<Float>.zero
         private var moveAffine: [Float] = []
-        private var axisLock = 0
-        private var moveOffsetsX: [Float] = []
-        private var moveOffsetsY: [Float] = []
-        private var snapTargetsX: [Float] = []
-        private var snapTargetsY: [Float] = []
+        private var axisLock = 0              // 1 = só X, 2 = só Y (setas de eixo)
         private var pinchSpan: CGFloat = 1
         private var pinchRotationActive = false
         private var pinchRotationOffset: Float = 0
@@ -609,11 +605,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 moveDown = compositionPoint(stageDown, view: view); moveLast = moveDown
                 axisLock = handle >= 0 ? handle + 1 : 0
                 if handle >= 0 { shell.grabbedHandle = handle }
-                if let b = StageGeom.bounds(model.detail) {
-                    moveOffsetsX = [b.0 - moveWorld.x, (b.0 + b.2) / 2 - moveWorld.x, b.2 - moveWorld.x]
-                    moveOffsetsY = [b.1 - moveWorld.y, (b.1 + b.3) / 2 - moveWorld.y, b.3 - moveWorld.y]
-                } else { moveOffsetsX = [0, 0, 0]; moveOffsetsY = [0, 0, 0] }
-                collectSnapTargets(id); engage(); stageMode = .move
+                engage(); stageMode = .move
             } else { stageMode = .idle }
         }
         private func clampScale(_ value: Float) -> Float {
@@ -644,41 +636,18 @@ struct PreviewMetalView: UIViewRepresentable {
             else { model.setTransform2(3, startScale.x * f, 4, startScale.y * f, layer: id) }
             if pinchRotationActive { model.setTransform(8, value: startRotation.z + degrees - pinchRotationOffset, layer: id) }
         }
-        private func collectSnapTargets(_ own: Int64) {
-            snapTargetsX = [0, Float(compositionSize.width / 2), Float(compositionSize.width)]
-            snapTargetsY = [0, Float(compositionSize.height / 2), Float(compositionSize.height)]
-            for row in model.layers where row.id != own && row.visible && active(row) {
-                guard let detail = model.engine.layerDetail(row.id), let b = StageGeom.bounds(detail) else { continue }
-                snapTargetsX += [b.0, (b.0 + b.2) / 2, b.2]; snapTargetsY += [b.1, (b.1 + b.3) / 2, b.3]
-            }
-        }
-        private func nearestTarget(_ value: Float, offsets: [Float], targets: [Float], tolerance: Float) -> (target: Float, delta: Float)? {
-            var target: Float?, closest = tolerance
-            for offset in offsets { for candidate in targets {
-                let distance = abs(candidate - value - offset)
-                if distance <= closest { closest = distance; target = candidate }
-            }}
-            guard let target else { return nil }
-            var delta: Float = 0; closest = .greatestFiniteMagnitude
-            for offset in offsets {
-                let d = target - (value + offset)
-                if abs(d) <= tolerance && abs(d) < closest { closest = abs(d); delta = d }
-            }
-            return (target, delta)
-        }
         private func stepMove(_ point: CGPoint, view: UIView, id: Int64) {
             let c = compositionPoint(point, view: view)
+            // Absoluto desde o toque e LIVRE nos dois eixos (app antigo, Stage.kt
+            // `move`): só as setas de eixo travam um lado.
             var next = moveWorld + c - moveDown
-            let dx = abs(point.x - stageDown.x), dy = abs(point.y - stageDown.y)
-            if axisLock == 0 {
-                if dx > 24 && dy < 12 { axisLock = 1 }
-                else if dy > 24 && dx < 12 { axisLock = 2 }
-            }
             if axisLock == 1 { next.y = moveWorld.y }; if axisLock == 2 { next.x = moveWorld.x }
-            let tolerance = scaleFactor(view) * 10
+            // Encaixe único: o ponto da camada (a âncora) no centro da composição,
+            // a 6 pt de tela (Stage.kt `anchorSnap`).
+            let tolerance = scaleFactor(view) * 6
             var snapX: Float?, snapY: Float?
-            if axisLock != 2 && abs(c.x - moveLast.x) <= tolerance, let snap = nearestTarget(next.x, offsets: moveOffsetsX, targets: snapTargetsX, tolerance: tolerance) { next.x += snap.delta; snapX = snap.target }
-            if axisLock != 1 && abs(c.y - moveLast.y) <= tolerance, let snap = nearestTarget(next.y, offsets: moveOffsetsY, targets: snapTargetsY, tolerance: tolerance) { next.y += snap.delta; snapY = snap.target }
+            if axisLock != 2, let snap = stageAnchorSnap(next.x, centre: Float(compositionSize.width / 2), tolerance: tolerance) { next.x = snap; snapX = snap }
+            if axisLock != 1, let snap = stageAnchorSnap(next.y, centre: Float(compositionSize.height / 2), tolerance: tolerance) { next.y = snap; snapY = snap }
             moveLast = c
             if (snapX != nil && snapX != shell.snapX) || (snapY != nil && snapY != shell.snapY) { snapFeedback.selectionChanged() }
             shell.snapX = snapX; shell.snapY = snapY
@@ -885,6 +854,12 @@ struct PreviewMetalView: UIViewRepresentable {
             } else if (model.panel == .mask || (model.panel == .vector && model.vectorEditingPoints)) && model.editingMask != nil { handleMaskPan(gesture, view: view) }
         }
     }
+}
+
+/// Encaixe do mover (app antigo; Stage.kt `anchorSnap`): `pos` vira `centre`
+/// quando está a menos de `tolerance`; sem filtro de velocidade.
+func stageAnchorSnap(_ pos: Float, centre: Float, tolerance: Float) -> Float? {
+    tolerance > 0 && abs(pos - centre) < tolerance ? centre : nil
 }
 
 struct StageTouchPoint {

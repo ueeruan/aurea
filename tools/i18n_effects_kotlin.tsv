@@ -35,7 +35,7 @@ fx_desc_color_curves	A curva de tom: controle fino de luz e de cada canal de cor
 fx_desc_blur_gaussian	Desfoque suave e ajustável, com direção — dá para desfocar só num eixo.
 fx_desc_blur_sharpen	Realça os detalhes e as bordas sem inventar textura.
 fx_desc_light_glow	Espalha a luz das partes claras: o brilho que sai da tela.
-fx_desc_stylize_motion_tile	Repete a imagem em mosaico até cobrir o quadro, com espelho e fase opcionais.
+fx_desc_stylize_motion_tile	Repete a camada inteira em ladrilhos presos a ela até cobrir o quadro. A fase desloca linhas (ou colunas) como tijolos, o espelho casa as emendas e a saída recorta uma janela no centro do quadro.
 fx_desc_key_luma	Remove o preto (ou o branco) da camada e deixa o resto aparecer.
 fx_desc_key_chroma	Tira o fundo verde ou azul e limpa o derramamento da cor na borda.
 fx_desc_time_echo	Deixa rastro: cópias da própria imagem atrasadas no tempo, com desvanecimento.

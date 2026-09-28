@@ -451,7 +451,9 @@ internal class TimelineController(
             HitKind.RULER -> rulerTap(p.x)
             HitKind.NONE -> {
                 store.clearSelectedKeyframe()
-                onEmptyTap()
+                // Escolhendo várias camadas, errar o clipe não desfaz o lote
+                // montado (sai-se pelo "Concluir" da barra).
+                if (!store.layerSelectMode) onEmptyTap()
             }
             HitKind.HEADER_EYE -> if (r != null) {
                 light()
@@ -466,7 +468,11 @@ internal class TimelineController(
                 tick()
                 store.selectNeighbor(-1)
             }
-            HitKind.KEYFRAME -> if (r != null) keyframeTap(r, hit.keyIndex)
+            HitKind.KEYFRAME -> if (r != null) {
+                // No modo de escolher camadas o losango do resumo é parte do clipe.
+                if (store.layerSelectMode && r.track == null && !store.keySelectMode) selectTap(r)
+                else keyframeTap(r, hit.keyIndex)
+            }
             HitKind.HEADER -> if (r != null) {
                 if (!state.compact) {
                     tick()
@@ -526,16 +532,17 @@ internal class TimelineController(
 
     private fun selectTap(r: RowModel) {
         tick()
-        // A.01: no compacto, tocar na barra sai do painel (a casca decide pelo toque no vazio).
-        if (state.compact) {
-            onEmptyTap()
-            return
-        }
-        if (multi()) {
-            store.select(r.id, additive = true)
-        } else {
-            pauseIfPlaying()
-            store.select(r.id)
+        val timelineOnly = store.selection.isNotEmpty() && store.selection == store.timelineOnlySelection
+        when (layerTap(store.layerSelectMode, state.compact, selectionSize(), isSelected(r.id), timelineOnly)) {
+            // A.01: no compacto, tocar na barra sai do painel (a casca decide pelo toque no vazio).
+            LayerTap.LEAVE_COMPACT -> onEmptyTap()
+            LayerTap.TOGGLE -> if (store.layerSelectMode) store.toggleLayerPick(r.id) else store.select(r.id, additive = true)
+            LayerTap.REPLACE -> {
+                pauseIfPlaying()
+                store.select(r.id)
+            }
+            // Tocar de novo na escolhida a solta (a doca fecha: sem seleção, volta a barra de adicionar).
+            LayerTap.DESELECT -> store.clearSelection()
         }
     }
 
@@ -646,6 +653,8 @@ internal class TimelineController(
                 if (state.compact || stoppedFling) return
                 tick()
                 when {
+                    // Escolhendo várias camadas, segurar parado vale o mesmo que tocar.
+                    store.layerSelectMode -> store.toggleLayerPick(r.id)
                     selectionSize() == 0 -> store.select(r.id, openOptions = false)
                     selectionSize() == 1 && isSelected(r.id) -> {}   // segurar a única escolhida não a solta
                     else -> store.select(r.id, additive = true, openOptions = false)
@@ -900,7 +909,8 @@ internal class TimelineController(
         }
         // Losango ESCOLHIDO (lote de 2+ ou modo de escolha): a seleção inteira anda junta.
         val sel = store.keySelection
-        if (sel != null && sel.layer == r.id && (sel.size >= 2 || store.keySelectMode) && sel.containsAny(r.keysAt[index])) {
+        // Vale em qualquer camada da seleção (ela pode abranger várias).
+        if (sel != null && (sel.size >= 2 || store.keySelectMode) && sel.containsAnyOn(r.id, r.keysAt[index])) {
             return selectionDrag(r, index, down)
         }
         light()
@@ -947,11 +957,10 @@ internal class TimelineController(
         light()
         pauseIfPlaying()
         val grabbed = r.instants[index]
-        // A seleção inteira fica dentro da camada, como o losango sozinho.
-        val first = Keyframes.toTimeline(sel.minTime(), r.start, r.offset)
-        val last = Keyframes.toTimeline(sel.maxTime(), r.start, r.offset)
-        val lo = minOf(0, r.start - first)
-        val hi = max(0, r.end - last)
+        // Cada camada da seleção fica dentro do próprio clipe, como o losango sozinho.
+        val limits = sel.shiftLimits { id -> rowById(id)?.let { intArrayOf(it.start, it.end, it.offset) } }
+        val lo = limits[0]
+        val hi = limits[1]
         val targets = snapTargets(longArrayOf(r.id), own = r, ownEdges = true, ownKeys = false)
         val grab = grabbed - frameAt(down.position.x)
         var applied = 0

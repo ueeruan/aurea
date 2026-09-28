@@ -794,7 +794,9 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // + o pacote de áudio (12): Reverso, Atraso, Flange e chorus, Passa-alta/
     //   baixa, Mixer estéreo, Modulador, EQ paramétrico, Reverb, Tom; Forma de
     //   onda de áudio, Espectro de áudio (bandas) e Bolas.
-    AUREA_CHECK_EQ(before, static_cast<u32>(116));
+    // + o Tremor em trancos do app antigo (1).
+    // + o Particular (as partículas do app antigo) (1).
+    AUREA_CHECK_EQ(before, static_cast<u32>(118));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {
@@ -858,13 +860,32 @@ AUREA_TEST(MotionTile, EnlargedLayerDoesNotShrinkTheRegion) {
     AUREA_CHECK_NEAR(f.y, 1.0f, 1e-4);
 }
 
-AUREA_TEST(MotionTile, RequestedOutputWinsWhenLarger) {
+AUREA_TEST(MotionTile, OutputWindowNeverChangesTheCoverage) {
+    // A saída é uma janela no QUADRO: recorta, não amplia nem encolhe a região.
     motion_tile::Params p;
-    p.outputX = 3.0f;
-    p.outputY = 1.5f;
-    const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 1.0f));
-    AUREA_CHECK_NEAR(f.x, 3.0f, 1e-4);
-    AUREA_CHECK_NEAR(f.y, 1.5f, 1e-4);
+    for (f32 o : {0.0f, 0.4f, 1.0f, 3.0f}) {
+        p.outputX = o;
+        p.outputY = o;
+        const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 1.0f));
+        AUREA_CHECK_NEAR(f.x, 1.0f, 1e-4);
+        AUREA_CHECK_NEAR(f.y, 1.0f, 1e-4);
+        const Vec2 g = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 0.5f));
+        AUREA_CHECK_NEAR(g.x, 2.0f, 1e-3);
+    }
+}
+
+AUREA_TEST(MotionTile, OutputWindowIsCentredOnTheFrame) {
+    motion_tile::Params p;
+    AUREA_CHECK(motion_tile::inside_output(p, Vec2{0.0f, 1.0f}));
+    AUREA_CHECK(motion_tile::inside_output(p, Vec2{-0.3f, 1.4f}));   // 100%: sem corte (a margem segue)
+    p.outputX = 0.5f;
+    p.outputY = 0.8f;
+    AUREA_CHECK(motion_tile::inside_output(p, Vec2{0.26f, 0.5f}));
+    AUREA_CHECK(!motion_tile::inside_output(p, Vec2{0.24f, 0.5f}));
+    AUREA_CHECK(motion_tile::inside_output(p, Vec2{0.5f, 0.89f}));
+    AUREA_CHECK(!motion_tile::inside_output(p, Vec2{0.5f, 0.91f}));
+    p.outputX = 0.0f;
+    AUREA_CHECK(!motion_tile::inside_output(p, Vec2{0.49f, 0.5f}));
 }
 
 AUREA_TEST(MotionTile, DisplacedLayerAsksForMoreOnTheFarSide) {
@@ -1020,20 +1041,77 @@ AUREA_TEST(MotionTile, MirrorFlipsTheNeighbor) {
     AUREA_CHECK_NEAR(b.x, 1.0f - a.x, 1e-5);
 }
 
-AUREA_TEST(MotionTile, PhaseShiftsAlternateColumns) {
+AUREA_TEST(MotionTile, PhaseShiftsEachRowByThePhaseTimesItsIndex) {
+    // A fase do app antigo: a linha n anda n × fase em X (180° = tijolo; 90° =
+    // escada de quarto em quarto). Com a opção horizontal, a coluna n anda em Y.
     motion_tile::Params p;
     p.tileX = p.tileY = 0.5f;
-    p.phaseTurns = 0.5f;   // 180°
-    const Vec2 even = motion_tile::reference_lookup(p, Vec2{0.3f, 0.3f});
-    const Vec2 odd = motion_tile::reference_lookup(p, Vec2{0.8f, 0.3f});
-    AUREA_CHECK_NEAR(std::fabs(odd.y - even.y), 0.5f, 1e-5);
-    AUREA_CHECK_NEAR(odd.x, even.x, 1e-5);
+    p.phaseTurns = 0.25f;   // 90°
+    const Vec2 row0 = motion_tile::reference_lookup(p, Vec2{0.30f, 0.40f});
+    const Vec2 row1 = motion_tile::reference_lookup(p, Vec2{0.30f, 0.90f});
+    const Vec2 row2 = motion_tile::reference_lookup(p, Vec2{0.30f, 1.40f});
+    AUREA_CHECK_NEAR(row1.x - row0.x, 0.25f, 1e-5);
+    AUREA_CHECK_NEAR(row2.x - row0.x, 0.50f, 1e-5);
+    AUREA_CHECK_NEAR(row1.y, row0.y, 1e-5);
+    p.horizontalPhase = true;
+    const Vec2 col0 = motion_tile::reference_lookup(p, Vec2{0.40f, 0.30f});
+    const Vec2 col1 = motion_tile::reference_lookup(p, Vec2{0.90f, 0.30f});
+    AUREA_CHECK_NEAR(col1.y - col0.y, 0.25f, 1e-5);
+    AUREA_CHECK_NEAR(col1.x, col0.x, 1e-5);
+}
+
+AUREA_TEST(MotionTile, LegacyLayoutUpgradesOnceWithItsKeyframes) {
+    // Motion Tile gravado na disposição anterior (9 slots): saída que só
+    // ampliava vira a janela no quadro inteiro; a fase troca de eixo e de
+    // sentido (a coluna vizinha fica onde estava); o slot 9 marca a conversão.
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    Layer l;
+    EffectInstance fx = make_effect(reg, effect_keys::kMotionTile, 7);
+    AUREA_CHECK_EQ(fx.params.size(), static_cast<usize>(motion_tile::kLayout + 1));
+    AUREA_CHECK(!motion_tile::upgrade_legacy_layout(l, fx));          // já é a atual
+    fx.params.resize(motion_tile::kLegacyParamCount);
+    fx.params[motion_tile::kTileWidth].constant.v[0] = 50.0f;
+    fx.params[motion_tile::kOutputWidth].constant.v[0] = 300.0f;
+    fx.params[motion_tile::kOutputHeight].constant.v[0] = 40.0f;
+    fx.params[motion_tile::kPhase].constant.v[0] = 90.0f;
+    l.tracks.get_or_create(TrackProperty::EffectParam, 7, param_track_key(motion_tile::kPhase, 0)).set(FrameIndex{10}, 45.0f);
+    l.tracks.get_or_create(TrackProperty::EffectParam, 7, param_track_key(motion_tile::kOutputWidth, 0)).set(FrameIndex{10}, 250.0f);
+    AUREA_CHECK(motion_tile::upgrade_legacy_layout(l, fx));
+    AUREA_CHECK_EQ(fx.params.size(), static_cast<usize>(motion_tile::kLayout + 1));
+    AUREA_CHECK_NEAR(fx.params[motion_tile::kTileWidth].constant.v[0], 50.0f, 1e-6);
+    AUREA_CHECK_NEAR(fx.params[motion_tile::kOutputWidth].constant.v[0], 100.0f, 1e-6);
+    AUREA_CHECK_NEAR(fx.params[motion_tile::kOutputHeight].constant.v[0], 100.0f, 1e-6);
+    AUREA_CHECK_NEAR(fx.params[motion_tile::kPhase].constant.v[0], -90.0f, 1e-6);
+    AUREA_CHECK(fx.params[motion_tile::kHorizontalPhase].constant.as_bool());
+    const Track* ph = l.tracks.find(TrackProperty::EffectParam, 7, param_track_key(motion_tile::kPhase, 0));
+    AUREA_CHECK(ph && ph->keys.size() == 1 && std::fabs(ph->keys[0].value + 45.0f) < 1e-6f);
+    AUREA_CHECK(!l.tracks.find(TrackProperty::EffectParam, 7, param_track_key(motion_tile::kOutputWidth, 0)));
+    AUREA_CHECK(!motion_tile::upgrade_legacy_layout(l, fx));          // uma vez só
+
+    // A coluna vizinha do tijolo (180°) cai no mesmo ponto nas duas contas.
+    motion_tile::Params oldGrid;
+    oldGrid.tileX = oldGrid.tileY = 0.5f;
+    motion_tile::Params newGrid = oldGrid;
+    newGrid.horizontalPhase = true;
+    newGrid.phaseTurns = -0.5f;
+    for (f32 x : {0.1f, 0.3f, 0.6f, 0.8f}) {
+        for (f32 y : {0.05f, 0.35f, 0.65f, 0.95f}) {
+            // Conta anterior: colunas ímpares descem meio ladrilho.
+            f32 qx = (x - 0.5f) / 0.5f + 0.5f, qy = (y - 0.5f) / 0.5f + 0.5f;
+            qy -= std::fmod(std::floor(qx) + 1000.0f, 2.0f) * 0.5f;
+            const Vec2 before{qx - std::floor(qx), qy - std::floor(qy)};
+            const Vec2 after = motion_tile::reference_lookup(newGrid, Vec2{x, y});
+            AUREA_CHECK_NEAR(after.x, before.x, 1e-5);
+            AUREA_CHECK_NEAR(after.y, before.y, 1e-5);
+        }
+    }
 }
 
 AUREA_TEST(MotionTile, ClampStretchesTheEdgeAndBeatsMirror) {
     motion_tile::Params p;
     p.tileX = p.tileY = 0.5f;
-    p.clamp = true;
+    p.legacyClamp = true;
     p.mirror = true;
     const Vec2 f = motion_tile::reference_lookup(p, Vec2{0.95f, 0.05f});
     AUREA_CHECK_NEAR(f.x, 1.0f, 1e-5);

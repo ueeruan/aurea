@@ -841,6 +841,8 @@ object TrackProperty {
     const val CAMERA_BLUR = 38
     /** Velocidade animada do conteúdo (a fonte anda a integral dela). */
     const val SPEED = 39
+    /** Animador de camada (effect = animador, param = LayerAnimParam). */
+    const val LAYER_ANIM_PARAM = 40
 }
 
 /**

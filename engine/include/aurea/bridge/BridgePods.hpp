@@ -73,6 +73,12 @@ struct LayerRow {
     u32 blendMode     = 0;    // +52
     u32 parentIndex   = 0;    // +56  kInvalidIndex = sem pai
     i32 offsetFrames  = 0;    // +60  deslocamento do conteúdo (in-point); keyframe na timeline = t + start - offset
+    /// +64 A LINHA da timeline (`Layer::trackId`). Trechos com o mesmo número
+    /// dividem a MESMA fileira na UI, lado a lado no tempo (o split dá o mesmo
+    /// número aos dois pedaços). 0 = projeto antigo sem linha: cada camada é a
+    /// linha dela.
+    u32 trackId       = 0;
+    u32 reserved0     = 0;    // +68  alinhamento de 8 (o id é u64)
 };
 
 inline constexpr u32 kLayerRowFlagVisible  = 1u << 0;
@@ -86,11 +92,14 @@ inline constexpr u32 kLayerRowFlagGuide    = 1u << 7;     ///< guia (não export
 /// Faixa de legendas: a UI desenha os blocos na MESMA linha, não um clipe só.
 /// Blocos (id/tempo/texto) vêm de `caption_tracks`.
 inline constexpr u32 kLayerRowFlagCaptions = 1u << 12;
+/// Linha magnética: os cortes desta camada andam como faixa de montagem de
+/// vídeo (aparar e apagar puxam os vizinhos da MESMA linha).
+inline constexpr u32 kLayerRowFlagMagnetic = 1u << 13;
 /// Etiqueta de cor (0 = nenhuma) nos bits 8..11.
 inline constexpr u32 kLayerRowLabelShift   = 8;
 inline constexpr u32 kLayerRowLabelMask    = 0xFu << kLayerRowLabelShift;
 
-static_assert(sizeof(LayerRow) == 64, "LayerRow e contrato de ABI com a UI");
+static_assert(sizeof(LayerRow) == 72, "LayerRow e contrato de ABI com a UI");
 static_assert(offsetof(LayerRow, id) == 0);
 static_assert(offsetof(LayerRow, kind) == 8);
 static_assert(offsetof(LayerRow, zIndex) == 12);
@@ -105,6 +114,8 @@ static_assert(offsetof(LayerRow, nameOffset) == 44);
 static_assert(offsetof(LayerRow, nameLength) == 48);
 static_assert(offsetof(LayerRow, blendMode) == 52);
 static_assert(offsetof(LayerRow, parentIndex) == 56);
+static_assert(offsetof(LayerRow, offsetFrames) == 60);
+static_assert(offsetof(LayerRow, trackId) == 64);
 
 // -----------------------------------------------------------------------------
 // KeyframeRow — um keyframe na barra da timeline.

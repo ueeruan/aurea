@@ -39,25 +39,25 @@ struct TimelineMetrics {
     var track: CGFloat { dp(11) }
     /// Começo da faixa dos losangos (medido do topo da barra).
     var trackTop: CGFloat { bar - track }
-    /// Folga abaixo das linhas: o "+" da casca cobre a ponta de baixo.
-    var bottomPad: CGFloat { dp(56) }
+    /// Folga abaixo das linhas (a última não cola na borda).
+    var bottomPad: CGFloat { dp(24) }
 
-    // --- Coluna das pílulas (olho + quadradinho) -------------------------------
-    var headerColumn: CGFloat { dp(66) }
-    var pillLeft: CGFloat { dp(4) }
-    var pillWidth: CGFloat { dp(58) }
-    var pillHeight: CGFloat { dp(24) }
-    var pillRadius: CGFloat { pillHeight / 2 }
-    var eyeSlot: CGFloat { dp(26) }
-    let eyeGlyph: CGFloat = 16
-    var swatch: CGFloat { dp(18) }
-    var swatchRadius: CGFloat { dp(4) }
-    /// `spaceEvenly` do Row da A.01: três vãos iguais entre olho (26) e quadradinho (18).
-    private var pillGap: CGFloat { (pillWidth - eyeSlot - swatch) / 3 }
-    var eyeCenterX: CGFloat { pillLeft + pillGap + eyeSlot / 2 }
-    var swatchLeft: CGFloat { pillLeft + pillGap * 2 + eyeSlot }
-    /// O olho responde até o meio do vão que o separa do quadradinho.
-    var eyeHitRight: CGFloat { pillLeft + pillGap * 1.5 + eyeSlot }
+    // --- Calha da fileira (glifo do tipo + olho pequeno) -----------------------
+    /// Largura da calha; as barras passam por baixo dela.
+    var headerColumn: CGFloat { dp(AureaTimeline.headerColumn) }
+    let gutterIcon: CGFloat = AureaTimeline.gutterIconSize
+    var gutterIconCx: CGFloat { dp(17) }
+    /// Centro do glifo do tipo, medido do topo da linha (um pouco acima do meio da barra).
+    var gutterIconCy: CGFloat { dp(13) }
+    let gutterEye: CGFloat = AureaTimeline.gutterEyeSize
+    /// O olho mora no canto de baixo, à direita do glifo.
+    var gutterEyeCx: CGFloat { dp(31) }
+    var gutterEyeCy: CGFloat { dp(25) }
+    let gutterLock: CGFloat = 10
+    var gutterLockCy: CGFloat { dp(6) }
+    /// Toque do olho: o quadrante de baixo à direita da calha; o resto é do glifo do tipo.
+    var eyeHitLeft: CGFloat { dp(24) }
+    var eyeHitTop: CGFloat { dp(16) }
 
     // --- Régua ------------------------------------------------------------------
     var tickMajorTop: CGFloat { dp(2) }
@@ -68,13 +68,13 @@ struct TimelineMetrics {
     var tickLabelGap: CGFloat { dp(3) }
 
     // --- Conteúdo da barra --------------------------------------------------------
-    var stripe: CGFloat { dp(4) }
-    var padL: CGFloat { dp(14) }
+    var stripe: CGFloat { dp(AureaTimeline.clipStripe) }
+    var padL: CGFloat { dp(10) }
     var padR: CGFloat { dp(10) }
-    var padLNarrow: CGFloat { dp(7) }
+    var padLNarrow: CGFloat { dp(6) }
     var padRNarrow: CGFloat { dp(3) }
     var narrowBar: CGFloat { dp(46) }
-    let typeIcon: CGFloat = 11
+    let typeIcon: CGFloat = AureaTimeline.clipIcon
     var iconGap: CGFloat { dp(6) }
     let lockIcon: CGFloat = 10
     var lockGap: CGFloat { dp(5) }
@@ -88,8 +88,8 @@ struct TimelineMetrics {
     var lockGapMinBar: CGFloat { dp(70) }
     var rhombusMinBar: CGFloat { dp(120) }
     var menuMinBar: CGFloat { dp(150) }
-    var selStroke: CGFloat { dp(1.5) }
-    var multiStroke: CGFloat { dp(1.2) }
+    var selStroke: CGFloat { dp(AureaTimeline.clipSelStroke) }
+    var multiStroke: CGFloat { dp(AureaTimeline.clipSelStroke) }
     var lightLine: CGFloat { dp(1) }
     /// Toque do corpo vai um pouco abaixo da barra (os 10 dp que sobram na linha são do vazio).
     var bodyHitBottom: CGFloat { bar + dp(4) }
@@ -217,6 +217,8 @@ struct TimelineRow {
     let offset: Int32
     let visible: Bool
     let locked: Bool
+    /// LINHA MAGNÉTICA: os cortes desta camada andam como faixa de montagem.
+    let magnetic: Bool
     let animated: Bool
     let name: String
     /// Etiqueta de cor (0 = nenhuma; i = `labelPalette[i - 1]`).
@@ -226,6 +228,22 @@ struct TimelineRow {
     /// Keyframes de cada instante (todas as trilhas que têm marca ali), paralelo a `instants`.
     let keysAt: [[KeyframeItem]]
     var track: TimelineTrack? = nil
+    /// A LINHA da timeline (`LayerItem.trackId`); 0 = sem linha (projeto antigo: a camada é a linha dela).
+    var line: UInt32 = 0
+    /// FILEIRA COMPARTILHADA: os trechos da MESMA linha que dividem esta
+    /// fileira, lado a lado, em ordem de tempo. nil = fileira de um trecho só
+    /// (ela mesma). Os campos desta fileira são só o resumo dela (pílula,
+    /// altura); quem se desenha, se toca e se edita é cada trecho de `segments`.
+    var shared: [TimelineRow]? = nil
+
+    /// Os trechos desenhados e tocados nesta fileira: os da linha, ou só ela.
+    var segments: [TimelineRow] { shared ?? [self] }
+
+    /// O trecho `id` desta fileira (nil = não mora aqui).
+    func segment(_ id: Int64) -> TimelineRow? {
+        guard let shared else { return self.id == id ? self : nil }
+        return shared.first { $0.id == id }
+    }
 
     /// Vídeo e imagem têm miniatura no motor; o resto é só a cor.
     var hasThumbs: Bool { track == nil && (type == .video || type == .image) }
@@ -254,11 +272,130 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
                        offset: l.offsetFrames,
                        visible: l.visible,
                        locked: l.locked,
+                       magnetic: l.magnetic,
                        animated: l.animated || !keys.isEmpty,
                        name: l.name,
                        label: l.label,
                        instants: instants,
-                       keysAt: groups)
+                       keysAt: groups,
+                       line: l.trackId)
+}
+
+/**
+ * Fileiras por LINHA (`trackId`) — o mesmo do Android (`sharedRows`): trechos
+ * da mesma linha dividem UMA fileira, lado a lado no tempo. A fileira fica na
+ * posição do trecho MAIS ALTO da linha na ordem de desenho. Camada sem par
+ * (linha só dela, ou linha 0 de projeto antigo) volta como estava. Trechos da
+ * mesma linha que se SOBREPÕEM no tempo não se escondem: o que não cabe desce
+ * para uma fileira logo abaixo, da mesma linha.
+ */
+func timelineSharedRows(_ rows: [TimelineRow]) -> [TimelineRow] {
+    var byLine: [UInt32: [TimelineRow]] = [:]
+    var anyShared = false
+    for row in rows where row.line != 0 && row.track == nil {
+        byLine[row.line, default: []].append(row)
+        if byLine[row.line]!.count >= 2 { anyShared = true }
+    }
+    guard anyShared else { return rows }
+    var out: [TimelineRow] = []
+    out.reserveCapacity(rows.count)
+    var emitted = Set<UInt32>()
+    for row in rows {
+        guard row.line != 0, row.track == nil, let group = byLine[row.line], group.count >= 2 else {
+            out.append(row)
+            continue
+        }
+        // Já saiu inteira com o trecho mais alto dela.
+        if !emitted.insert(row.line).inserted { continue }
+        let ordered = group.sorted {
+            if $0.start != $1.start { return $0.start < $1.start }
+            if $0.end != $1.end { return $0.end < $1.end }
+            return $0.id < $1.id
+        }
+        var packed: [[TimelineRow]] = []
+        var ends: [Int32] = []
+        for segment in ordered {
+            var k = 0
+            while k < packed.count && ends[k] > segment.start { k += 1 }
+            if k == packed.count {
+                packed.append([segment])
+                ends.append(segment.end)
+            } else {
+                packed[k].append(segment)
+                ends[k] = max(ends[k], segment.end)
+            }
+        }
+        for segments in packed {
+            out.append(segments.count == 1 ? segments[0] : timelineSharedRow(line: row.line, segments))
+        }
+    }
+    return out
+}
+
+/// O resumo de uma fileira compartilhada: a pílula acende se algum trecho aparece e trava se todos travam.
+private func timelineSharedRow(line: UInt32, _ segments: [TimelineRow]) -> TimelineRow {
+    let head = segments[0]
+    var start = head.start, end = head.end
+    var visible = false, locked = true, magnetic = false, animated = false
+    for s in segments {
+        start = min(start, s.start); end = max(end, s.end)
+        visible = visible || s.visible
+        locked = locked && s.locked
+        magnetic = magnetic || s.magnetic
+        animated = animated || s.animated
+    }
+    return TimelineRow(id: head.id, type: head.type, start: start, end: end, offset: 0,
+                       visible: visible, locked: locked, magnetic: magnetic, animated: animated,
+                       name: head.name, label: head.label, instants: [], keysAt: [],
+                       line: line, shared: segments)
+}
+
+/// Chave de GRUPO de cada fileira para reordenar na vertical (o mesmo do
+/// Android): fileiras seguidas com a mesma chave andam juntas. Trilha de
+/// propriedade aberta anda com a camada dona; as fileiras de uma linha andam
+/// juntas; o resto é a própria camada.
+func timelineGroupKeys(_ rows: [TimelineRow]) -> [Int64] {
+    var keys = [Int64](repeating: 0, count: rows.count)
+    for (i, row) in rows.enumerated() {
+        if row.track != nil && i > 0 { keys[i] = keys[i - 1] }
+        else if row.line != 0 { keys[i] = Int64.min + Int64(row.line) }
+        else { keys[i] = row.id }
+    }
+    return keys
+}
+
+/// Reordenar na vertical um GRUPO de camadas (os trechos de uma linha andam
+/// juntos) com o comando de sempre, que leva UMA camada a uma posição da lista
+/// (0 = topo). O grupo vai inteiro para logo ACIMA da camada mais alta do
+/// destino (subindo) ou logo ABAIXO dela (descendo). Devolve os passos
+/// (camada, posição final); uma camada sozinha dá UM passo, o mesmo de antes.
+enum TimelineRowOrder {
+    static func moves(order: [Int64], block: Set<Int64>, anchor: Int64, up: Bool) -> [(id: Int64, index: Int)] {
+        guard !block.isEmpty, !block.contains(anchor) else { return [] }
+        let rest = order.filter { !block.contains($0) }
+        let moving = order.filter { block.contains($0) }
+        guard let at = rest.firstIndex(of: anchor), !moving.isEmpty else { return [] }
+        let p = up ? at : at + 1
+        let target = Array(rest[0..<p]) + moving + Array(rest[p...])
+        var current = order
+        var out: [(id: Int64, index: Int)] = []
+        func move(_ id: Int64, _ to: Int) {
+            guard let from = current.firstIndex(of: id), from != to else { return }
+            current.remove(at: from)
+            current.insert(id, at: to)
+            out.append((id: id, index: to))
+        }
+        // Subindo, de cima para baixo; descendo, de baixo para cima.
+        let steps: [Int] = up ? Array(moving.indices) : Array(moving.indices.reversed())
+        for j in steps { move(moving[j], p + j) }
+        if current != target {
+            // Rede de segurança: posição a posição.
+            current = order
+            out.removeAll()
+            for k in target.indices where current[k] != target[k] { move(target[k], k) }
+        }
+        return out
+    }
 }
 
 /**
@@ -283,8 +420,26 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
             self.keys == keys && kind == l.kind && row.id == l.id &&
                 start == l.startFrame && end == l.endFrame && offset == l.offsetFrames &&
                 visible == l.visible && locked == l.locked && animated == l.animated &&
-                name == l.name && row.label == l.label
+                name == l.name && row.label == l.label &&
+                row.magnetic == l.magnetic && row.line == l.trackId
         }
+    }
+
+    private var sharedGeneration: UInt64 = .max
+    private var sharedFocusID: Int64?
+    private var sharedTracks: [TimelineTrack]?
+    private var sharedResult: [TimelineRow] = []
+
+    /// Uma fileira por LINHA, refeita só quando as linhas por camada mudam
+    /// (mesma chave do `focused`: revisão das camadas + foco de trilhas).
+    func shared(_ rows: [TimelineRow], focus: Int64?, tracks: [TimelineTrack]?) -> [TimelineRow] {
+        let focusID: Int64? = tracks == nil ? nil : focus
+        if sharedGeneration == generation && sharedFocusID == focusID && sharedTracks == tracks { return sharedResult }
+        sharedGeneration = generation; sharedFocusID = focusID; sharedTracks = tracks
+        sharedResult = timelineSharedRows(rows)
+        // As trilhas abertas entram por baixo destas fileiras: refaz também.
+        expandedRevision = .max
+        return sharedResult
     }
 
     private var expandedRevision: UInt32 = .max
@@ -508,18 +663,20 @@ struct TimelineTrack: Hashable {
 func expandedTimelineRows(_ base: [TimelineRow], expanded: Int64?, keys: [Int64: [KeyframeItem]], effects: [EffectItem]) -> [TimelineRow] {
     guard let expanded else { return base }
     return base.flatMap { row -> [TimelineRow] in
-        guard row.id == expanded else { return [row] }
+        // Numa fileira compartilhada, as trilhas abertas são do TRECHO aberto
+        // (tempo e keyframes dele) e entram logo abaixo da fileira.
+        guard let owner = row.segment(expanded) else { return [row] }
         var lanes = [row]
         func lane(_ track: TimelineTrack, _ name: String, _ values: [KeyframeItem] = []) {
             let groups = Dictionary(grouping: values, by: { $0.time })
             let times = groups.keys.sorted()
-            lanes.append(TimelineRow(id: row.id, type: row.type, start: row.start, end: row.end, offset: row.offset,
-                visible: row.visible, locked: row.locked, animated: !values.isEmpty, name: "  " + name, label: row.label,
-                instants: times.map { Keyframes.toTimeline($0, row.start, row.offset) }, keysAt: times.map { groups[$0]! }, track: track))
+            lanes.append(TimelineRow(id: owner.id, type: owner.type, start: owner.start, end: owner.end, offset: owner.offset,
+                visible: owner.visible, locked: owner.locked, magnetic: owner.magnetic, animated: !values.isEmpty, name: "  " + name, label: owner.label,
+                instants: times.map { Keyframes.toTimeline($0, owner.start, owner.offset) }, keysAt: times.map { groups[$0]! }, track: track))
         }
         lane(TimelineTrack(property: -1), AureaText.t("panel_transformar"))
         for effect in effects { lane(TimelineTrack(property: 31, effect: effect.effectId, param: .max), fxEffectDisplayName(effect.typeId, effect.name)) }
-        let tracks = Dictionary(grouping: keys[row.id] ?? [], by: { TimelineTrack(property: Int($0.property), effect: $0.effectIndex, param: $0.paramIndex) })
+        let tracks = Dictionary(grouping: keys[owner.id] ?? [], by: { TimelineTrack(property: Int($0.property), effect: $0.effectIndex, param: $0.paramIndex) })
         let ordered = tracks.keys.sorted {
             if $0.property != $1.property { return $0.property < $1.property }
             if $0.effect != $1.effect { return $0.effect < $1.effect }

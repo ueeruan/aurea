@@ -704,6 +704,8 @@ public:
     };
     /// Analisa o vídeo da camada em segundo plano (0 rápido, 1 equilibrado,
     /// 2 alta qualidade). Uma análise por vez; a UI continua navegando.
+    /// Camada acima de tracking::kMaxCameraTrackFrames: devolve true com o
+    /// estado 3 e a mensagem do porquê (dividir o clipe).
     bool start_camera_track(u64 layerId, u32 mode, u32 motion = 0, f32 knownFov = 0) noexcept;
     /// Remove selected feature tracks and re-solve the saved observations.
     /// No decode, no UI blocking; previous camera/objects stay until applied.
@@ -716,7 +718,10 @@ public:
     /// Place an already-imported GLB/3D object at the selected tracked surface.
     bool place_model_on_track(u64 layer) noexcept;
     /// Point / 2 Point / Planar / Corner Pin / Stabilizer. Seeds are source
-    /// pixels, analysis starts at the playhead (stabilizer uses the full clip).
+    /// pixels, analysis starts at the playhead (stabilizer uses the full clip),
+    /// up to tracking::kMaxMotionTrackFrames. A cancelled job still exiting
+    /// does not block a new start. Frames without a measurement stay invalid
+    /// (counted in `lost`) and never block applying.
     bool start_motion_track(u64 layerId, u32 tool, u32 model, bool backward,
                             const f32* pointsXY, u32 count, f32 featureRadius = 12, f32 searchRadius = 48) noexcept;
     bool restore_motion_track(u64 layerId) noexcept;
@@ -731,7 +736,9 @@ public:
     /// x,y,confidence for the chosen source points, in composition pixels.
     u32 motion_track_features(i64 frame, f32* out3, u32 capacity) noexcept;
     /// Apply: 0 new Null, 1 target transform, 2 target Corner Pin,
-    /// 3 stabilize source, 4 new Shape, 5 new Text. One undo operation.
+    /// 3 stabilize source (Stabilizer = global motion; Point / 2 Point = the
+    /// tracked detail stays still), 4 new Shape, 5 new Text. One undo
+    /// operation. Lost frames get no keyframe (interpolated by the curve).
     [[nodiscard]] Result<u64> apply_motion_track(u64 target, u32 apply, bool lock = false,
         f32 smoothSeconds = .5f, f32 maxScale = 1.15f, u32 crop = 1) noexcept;
     /// Load an existing analysis without starting decoding/analysis.
@@ -896,8 +903,23 @@ public:
     bool apply_preset(u64 layerId, const std::string& json, i64 durationFrames = 0, std::string* error = nullptr) noexcept;
 
     // --- Modo Edição (timeline magnética) ------------------------------------------
+    /// Ligar/desligar o modo Edição da COMPOSIÇÃO. Ele é o PADRÃO das camadas
+    /// novas: cada camada nasce com a Linha Magnética no estado do modo. Quem
+    /// já existe não muda — a opção de cada uma manda.
     void set_edit_mode(bool on) noexcept;
     [[nodiscard]] bool edit_mode() noexcept;
+
+    /// LINHA MAGNÉTICA da camada (um passo de desfazer). Ligada, os cortes
+    /// dela se comportam como uma faixa de montagem: aparar e apagar mexem só
+    /// nos vizinhos DA MESMA LINHA (mesmo zOrder) — texto, overlay e 3D em
+    /// outras linhas não andam. Desligada, a camada fica solta no tempo.
+    bool set_layer_magnetic_track(u64 layerId, bool on) noexcept;
+    [[nodiscard]] bool layer_magnetic_track(u64 layerId) noexcept;
+
+    /// Arrasta um trecho para outro ponto DA MESMA LINHA, com os vizinhos
+    /// abrindo espaço e a fita fechando em seguida — reordenar os cortes
+    /// arrastando. Só vale em linha magnética, em trecho com fonte e destravado.
+    bool reorder_clip(u64 layerId, i64 targetFrame) noexcept;
     /// Exclui as camadas e fecha só os buracos que a exclusão criou (um passo
     /// de desfazer). Vale em qualquer modo.
     bool ripple_delete(const u64* ids, u32 count) noexcept;
@@ -1377,6 +1399,9 @@ private:
     void export_encoder_main() noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status write_export_audio(i64 untilSample) noexcept;
+    /// Uma linha no log com o custo do export (telemetria): CPU do 1º quadro e
+    /// dos demais, GPU por quadro e os passes mais caros.
+    void log_export_profile() noexcept;
     /// Âncora da camada de texto no centro da caixa atual (depois de editar).
     void recenter_text(Layer& l) noexcept;
 };

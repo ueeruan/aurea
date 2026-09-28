@@ -263,51 +263,88 @@ import XCTest
         XCTAssertEqual(app.state, .runningForeground)
     }
 
-    func testAddingEffectClosesBrowserAndShowsAppliedCard() throws {
+    func testEffectsPanelAddsWithOneTapAndKeepsTheStackAtHand() throws {
         _ = try launch("effects")
-        let add = app.buttons["aurea.effects.add"].firstMatch
-        XCTAssertTrue(add.waitForExistence(timeout: 5))
-        XCTAssertEqual(add.label, "Add effect")
-        XCTAssertTrue(add.isHittable)
-        add.tap()
-        let search = app.textFields.firstMatch
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
-        search.tap(); search.typeText("Deep Glow")
-        let tile = app.buttons["Ver Deep Glow"].firstMatch
-        XCTAssertTrue(tile.waitForExistence(timeout: 5))
-        tile.tap()
-        let apply = app.buttons["Add to the selection"].firstMatch
-        XCTAssertTrue(apply.waitForExistence(timeout: 5))
-        if !apply.isHittable { app.swipeUp() }
-        apply.tap()
-        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: search)
+        // Camada sem efeito: o painel abre direto na aba "Adicionar", com a busca
+        // no topo e as fichas de categoria — nada de navegador em outra tela.
+        let addTab = app.buttons["effects.tab.add"].firstMatch
+        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
+        XCTAssertTrue(addTab.isSelected)
+        let search = app.buttons["effects.search"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
+        XCTAssertGreaterThanOrEqual(search.frame.height, 44)
+        let all = app.buttons["effects.category.all"].firstMatch
+        XCTAssertTrue(all.exists); XCTAssertGreaterThanOrEqual(all.frame.height, 44)
+
+        // Busca: o campo abre focado acima do teclado; um toque no resultado adiciona.
+        search.tap()
+        let field = app.textFields["effects.search.field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText("deep glow")
+        let deepGlow = effectCardId("aurea.light.deep_glow")
+        let result = app.buttons["effects.result.\(deepGlow)"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        result.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
+        _ = try awaitSnapshot("One tap on a search result adds the effect") { $0.effectCount == 1 }
+
+        // O efeito novo aparece aberto na aba "Na camada".
+        let appliedTab = app.buttons["effects.tab.applied"].firstMatch
+        XCTAssertTrue(appliedTab.waitForExistence(timeout: 5))
+        let onStack = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: appliedTab)
+        XCTAssertEqual(XCTWaiter.wait(for: [onStack], timeout: 5), .completed)
         XCTAssertTrue(app.staticTexts["Deep Glow"].firstMatch.waitForExistence(timeout: 5))
-        // New effects expand their real parameter card. The Add button is its
-        // scroll footer, so reveal it before checking that the modal is gone.
+        XCTAssertTrue(app.buttons["Mais opções de Deep Glow"].firstMatch.waitForExistence(timeout: 5))
+
+        // O rodapé "Add effect" da pilha leva de volta ao catálogo, com o recente à vista.
         let stack = app.scrollViews["aurea.effects.stack"].firstMatch
         XCTAssertTrue(stack.exists)
+        let add = app.buttons["aurea.effects.add"].firstMatch
         for _ in 0..<8 {
             if add.isHittable { break }
             stack.swipeUp()
         }
         XCTAssertTrue(add.isHittable)
-        // A second interaction proves the editor did not remain under a stale modal.
+        XCTAssertEqual(add.label, "Add effect")
+        add.tap()
+        let backOnAdd = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: addTab)
+        XCTAssertEqual(XCTWaiter.wait(for: [backOnAdd], timeout: 5), .completed)
+        XCTAssertTrue(app.buttons["effects.recent.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
+
+        // Categoria de um toque e cartão de um toque, sem ficha no meio.
+        let glitch = app.buttons["effects.category.glitch"].firstMatch
+        XCTAssertTrue(glitch.waitForExistence(timeout: 5)); glitch.tap()
+        let vhs = app.buttons["effects.card.\(effectCardId("aurea.glitch.vhs"))"].firstMatch
+        XCTAssertTrue(vhs.waitForExistence(timeout: 5))
+        vhs.tap()
+        _ = try awaitSnapshot("One tap on a grid card adds the effect") { $0.effectCount == 2 }
+        XCTAssertTrue(app.staticTexts["VHS"].firstMatch.waitForExistence(timeout: 5))
+
         try undo()
-        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["Deep Glow"].firstMatch)
-        XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 5), .completed)
+        _ = try awaitSnapshot("Grid add is one undo step") { $0.effectCount == 1 }
+        try undo()
+        _ = try awaitSnapshot("Search add is one undo step") { $0.effectCount == 0 }
+    }
+
+    /// O id do cartão (`effects.card.<id>`): FNV-1a 32 da chave, sem sinal — o
+    /// mesmo `typeId` do motor (o teste não liga no app, então refaz a conta).
+    private func effectCardId(_ key: String) -> String {
+        var h: UInt32 = 0x811C_9DC5
+        for byte in key.utf8 { h ^= UInt32(byte); h = h &* 16_777_619 }
+        return String(h)
     }
 
     func testFloatingAddRestoresPreviewAndClosesAfterSelection() throws {
         let before = try launch("layer-dock")
         let frame = stage.frame
-        let add = app.buttons["Add layer"].firstMatch
-        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
+        // O "+" saiu: sem camada escolhida, a barra fixa de adicionar fica embaixo.
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
         let category = app.buttons["aurea.add.category.0"].firstMatch
         XCTAssertTrue(category.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(stage.frame.height, frame.height - 1)
         let bubbles = XCTAttachment(screenshot: app.screenshot())
-        bubbles.name = "Floating add categories"; bubbles.lifetime = .keepAlways; self.add(bubbles)
+        bubbles.name = "Add bar categories"; bubbles.lifetime = .keepAlways; self.add(bubbles)
         category.tap()
         let circle = app.buttons["Circle"].firstMatch
         XCTAssertTrue(circle.waitForExistence(timeout: 5))
@@ -338,7 +375,8 @@ import XCTest
 
     func testCaptionsOpenFromAddMenuWithNonAudioSelection() throws {
         let before = try launch("layer-dock")
-        app.buttons["Add layer"].firstMatch.tap()
+        // Sem o "+", adicionar mora na barra fixa, que aparece ao desmarcar.
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
         let text = app.buttons["aurea.add.category.3"].firstMatch
         XCTAssertTrue(text.waitForExistence(timeout: 5)); text.tap()
         let captions = app.buttons["Captions from speech"].firstMatch
@@ -521,7 +559,7 @@ import XCTest
         coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(end),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
         let moved = try awaitSnapshot("Long press moves the unselected layer without opening its options") {
-            $0.detail.startFrame > 0 && $0.sheet == "none"
+            $0.detail.startFrame > 0 && $0.sheet == "addBar"
         }
         XCTAssertEqual(timeline.frame.height, frame.height, accuracy: 1)
         XCTAssertEqual(moved.selectionCount, 1)
@@ -735,7 +773,7 @@ import XCTest
         coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(end),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
         let moved = try awaitSnapshot("Layer body hold changes stacking order") {
-            $0.layerOrder != before.layerOrder && $0.sheet == "none"
+            $0.layerOrder != before.layerOrder && $0.sheet == "addBar"
         }
         XCTAssertEqual(Set(moved.layerOrder), Set(before.layerOrder))
         XCTAssertEqual(moved.primaryID, before.layerOrder.first)

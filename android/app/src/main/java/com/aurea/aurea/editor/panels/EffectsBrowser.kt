@@ -3,41 +3,33 @@ package com.aurea.aurea.editor.panels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.aurea.aurea.effects.EffectDetailSheet
-import com.aurea.aurea.effects.EffectFilter
-import com.aurea.aurea.effects.EffectsCatalogGrid
-import com.aurea.aurea.effects.arrangeCatalog
-import com.aurea.aurea.effects.catalogHaystack
-import com.aurea.aurea.effects.effectCategories
-import com.aurea.aurea.engine.EffectCatalogEntry
+import com.aurea.aurea.effects.EffectPicker
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaDims
@@ -52,44 +44,31 @@ internal fun normalizeSearch(s: String): String =
     Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase().trim()
 
 /**
- * O NAVEGADOR DE EFEITOS DO EDITOR (Fase 7.3 §11–§20): TELA CHEIA.
+ * O NAVEGADOR DE EFEITOS EM TELA CHEIA.
  *
- * A folha de 72 % da Fase 7.2 virou uma tela: o catálogo cresceu, ganhou
- * prévia visual, ficha e parâmetros, e num aparelho de 6" uma folha parcial
- * deixava duas colunas de cartão — o espaço não cabia o que o navegador faz.
- *
- * A grade, a busca e as fichas são `EffectsCatalogGrid` / `EffectDetailSheet`.
- * O toque no cartão abre a FICHA, e é a ficha que aplica — assim dá para ler o
- * que o efeito faz antes de sujar a pilha. Favoritos e recentes são do aparelho.
+ * O caminho normal é a aba "Adicionar" do próprio painel Efeitos; esta tela é
+ * o mesmo escolhedor ([EffectPicker]) para quem a pede de fora do painel. Um
+ * toque no cartão adiciona às camadas escolhidas e fecha; segurar favorita.
  */
 @Composable
 internal fun EffectsBrowser(store: EditorStore, onDismiss: () -> Unit) {
-    val prefs = remember(store) { store.effectPrefs }
-    var filter by remember { mutableStateOf<EffectFilter>(EffectFilter.All) }
-    var query by remember { mutableStateOf("") }
-    var detail by remember { mutableStateOf<EffectCatalogEntry?>(null) }
-
-    val catalog = store.catalog
-    val categories = remember(catalog) { effectCategories(catalog) }
-    val sorted = remember(catalog, categories) { arrangeCatalog(catalog, categories) }
-    val haystack = catalogHaystack(catalog)   // já memoizado por idioma lá dentro
-    // Os recentes que a lista mostra são os de ANTES desta sessão: aplicar um
-    // efeito não reordena a lista debaixo do dedo de quem tocou.
-    val recents = remember(prefs.recents) { prefs.recents }
-
+    val hasAudio by remember(store) { derivedStateOf { store.detail?.hasAudio == true } }
+    val back = stringResource(R.string.editor_voltar_editor)
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier
                 .fillMaxSize()
                 .background(AureaColors.EditorPanel)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .imePadding(),
+                .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
             Row(
                 Modifier.fillMaxWidth().height(AureaDims.EditorTopBar).padding(start = AureaDims.S2, end = AureaDims.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.tocavel(shrink = 1f, onClick = onDismiss).padding(AureaDims.S2), Alignment.Center) {
+                Box(
+                    Modifier.semantics { contentDescription = back }.tocavel(shrink = 1f, onClick = onDismiss).padding(AureaDims.S2),
+                    Alignment.Center,
+                ) {
                     CupertinoIcon(CupertinoGlyph.ChevronBack, AureaDims.IconLg, AureaColors.Text)
                 }
                 Spacer(Modifier.padding(horizontal = 2.dp))
@@ -99,44 +78,21 @@ internal fun EffectsBrowser(store: EditorStore, onDismiss: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    stringResource(R.string.effect_count, catalog.size),
+                    stringResource(R.string.effect_count, store.catalog.size),
                     style = AureaType.CardSpec,
                     modifier = Modifier.padding(end = AureaDims.S3),
                 )
             }
-            EffectsCatalogGrid(
-                catalog = catalog,
-                sorted = sorted,
-                haystack = haystack,
-                categories = categories,
-                previews = store.effectPreviews,
-                favorites = prefs.favorites,
-                recents = recents,
-                query = query,
-                onQuery = { query = it },
-                filter = filter,
-                onFilter = { filter = it },
-                onFavorite = { prefs.toggleFavorite(it) },
-                onClick = { detail = it },
-                contentPadding = PaddingValues(start = AureaDims.S3, end = AureaDims.S3, bottom = AureaDims.S5),
+            EffectPicker(
+                store = store,
+                layerHasAudio = hasAudio,
+                onPick = { e ->
+                    store.addEffect(e.typeId)
+                    store.effectPrefs.addRecent(e.typeId)
+                    onDismiss()
+                },
+                modifier = Modifier.weight(1f),
             )
         }
-    }
-
-    detail?.let { entry ->
-        EffectDetailSheet(
-            store = store,
-            entry = entry,
-            previews = store.effectPreviews,
-            favorite = prefs.isFavorite(entry.typeId),
-            onFavorite = { prefs.toggleFavorite(entry.typeId) },
-            onApply = {
-                store.addEffect(entry.typeId)
-                prefs.addRecent(entry.typeId)
-                detail = null
-                onDismiss()
-            },
-            onDismiss = { detail = null },
-        )
     }
 }

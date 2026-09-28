@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -630,41 +631,74 @@ private fun DrawScope.drawVectorIcon(kind: Int) {
     }
 }
 
-/** Floating category buttons never reserve or cover a whole timeline panel. */
+/**
+ * O painel da categoria escolhida na barra de adicionar: o mesmo
+ * [AddLayerPanel] de antes, numa janela no meio da tela.
+ */
 @Composable
-internal fun AddLayerOverlay(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier) {
-    val close = { ui.adding = false; ui.addCategoryOpen = false }
-    val closeLabel = stringResource(R.string.editor_fechar_adicionar)
-    if (ui.addCategoryOpen) {
-        Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            BoxWithConstraints(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.widthIn(max = 380.dp).fillMaxWidth().height((maxHeight * .55f).coerceIn(180.dp, 390.dp))
-                    .clip(RoundedCornerShape(20.dp)).border(1.dp, AureaColors.Action, RoundedCornerShape(20.dp))) {
-                    AddLayerPanel(store, ui)
-                }
+internal fun AddLayerOverlay(store: EditorStore, ui: EditorUi) {
+    val close = { ui.adding = false }
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.widthIn(max = 380.dp).fillMaxWidth().height((maxHeight * .55f).coerceIn(180.dp, 390.dp))
+                .clip(RoundedCornerShape(20.dp)).border(1.dp, AureaColors.Action, RoundedCornerShape(20.dp))) {
+                AddLayerPanel(store, ui)
             }
         }
-    } else {
-        Column(modifier.padding(18.dp).width(132.dp), horizontalAlignment = Alignment.End) {
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AddTab.entries.chunked(2).forEach { pair ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pair.forEach { tab ->
-                            Column(Modifier.width(62.dp)
-                                .tocavel { ui.addTab = tab; ui.addCategoryOpen = true }, horizontalAlignment = Alignment.CenterHorizontally) {
-                                Box(Modifier.size(44.dp).background(ShellColors.Fab, CircleShape).border(1.dp, AureaColors.Action, CircleShape), contentAlignment = Alignment.Center) {
-                                    CupertinoIcon(tab.glyph, 23.dp, AureaColors.Text)
-                                }
-                                Text(stringResource(tab.label), fontSize = 10.sp, color = AureaColors.Text, maxLines = 1)
-                            }
-                        }
-                    }
+    }
+}
+
+/**
+ * A barra fixa de adicionar, na base do editor, no lugar do "+": as mesmas
+ * categorias ([AddTab], mesmos glifos e nomes). Sempre à vista sem camada
+ * escolhida; tocar abre o painel da categoria. A aberta ganha a pílula de
+ * destaque. Sem espaço para todas, a barra rola de lado (a seguinte aparece
+ * cortada: dá para ver que há mais).
+ */
+@Composable
+internal fun AddBar(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier) {
+    BoxWithConstraints(
+        modifier
+            .background(AureaColors.EditorPanelHigh)
+            .drawTopHairline()
+            .testTag("editor.addBar"),
+    ) {
+        val count = AddTab.entries.size
+        val fits = maxWidth / count >= ShellDims.AddBarItemMin
+        val itemWidth = if (fits) maxWidth / count else ShellDims.AddBarItem
+        Row(
+            Modifier
+                .fillMaxSize()
+                .then(if (fits) Modifier else Modifier.horizontalScroll(rememberScrollState()))
+                .padding(horizontal = if (fits) 0.dp else 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AddTab.entries.forEach { tab ->
+                val on = ui.adding && ui.addTab == tab
+                val label = stringResource(tab.label)
+                val color = if (on) AureaColors.Accent else AureaColors.Text
+                Column(
+                    Modifier
+                        .width(itemWidth)
+                        .fillMaxHeight()
+                        .padding(horizontal = 2.dp, vertical = 5.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (on) AureaColors.Chip else Color.Transparent)
+                        .semantics { contentDescription = label }
+                        .testTag("addBar.${tab.name}")
+                        .tocavel(shrink = 1f, haptic = true) { openAdd(store, ui, tab) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    CupertinoIcon(tab.glyph, 23.dp, color)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, fontWeight = FontWeight.W500, color = color)),
+                    )
                 }
-            }
-            Spacer(Modifier.height(10.dp))
-            Box(Modifier.size(ShellDims.Fab).background(ShellColors.Fab, CircleShape).border(2.dp, AureaColors.Action, CircleShape)
-                .semantics { contentDescription = closeLabel }.tocavel(onClick = close), contentAlignment = Alignment.Center) {
-                CupertinoIcon(CupertinoGlyph.Xmark, 28.dp, AureaColors.Text)
             }
         }
     }

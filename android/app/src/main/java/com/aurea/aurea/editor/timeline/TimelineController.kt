@@ -64,13 +64,20 @@ internal class TimelineController(
     private var expandedRevision = -1
     private var expandedId: Long? = null
     private var expandedResult: List<RowModel> = emptyList()
+    private var sharedInput: List<RowModel>? = null
+    private var sharedResult: List<RowModel> = emptyList()
     val rows = derivedStateOf {
         val focus = store.timelineFocus
         val cached = rowCache.build(store.layers, store.keyframes)
-        val base = if (focus == null) cached else cached.map { row ->
+        val perLayer = if (focus == null) cached else cached.map { row ->
             val layer = if (row.id == store.primary) store.layers.firstOrNull { it.id == row.id } else null
             if (row.id != store.primary || layer == null) row else buildRow(layer,
                 focusedKeys(store.keyframes[row.id].orEmpty(), focus))
+        }
+        // Uma fileira por LINHA: refeita só quando as linhas por camada mudam.
+        val base = if (sharedInput === perLayer) sharedResult else sharedRows(perLayer).also {
+            sharedInput = perLayer
+            sharedResult = it
         }
         val id = expandedLayer.value?.takeUnless { state.compact }
         val revision = store.curveRevision
@@ -119,16 +126,25 @@ internal class TimelineController(
         if (index >= 0) index else -index - 2
     }
 
+    /** No compacto aparece só o TRECHO escolhido, mesmo quando ele divide a fileira com outros. */
     private fun compactRow(list: List<RowModel>): RowModel? {
         val p = primaryId.value
-        for (i in list.indices) if (list[i].id == p) return list[i]
+        for (i in list.indices) list[i].segment(p)?.let { return it }
         return null
     }
 
+    /** O trecho [id], esteja ele sozinho na fileira ou dividindo a linha. */
     private fun rowById(id: Long): RowModel? {
         val list = rows.value
-        for (i in list.indices) if (list[i].id == id) return list[i]
+        for (i in list.indices) list[i].segment(id)?.let { return it }
         return null
+    }
+
+    /** Índice da fileira onde o trecho [id] mora (a última, como antes); −1 se nenhuma. */
+    private fun rowIndexOf(list: List<RowModel>, id: Long): Int {
+        var idx = -1
+        for (i in list.indices) if (list[i].segment(id) != null) idx = i
+        return idx
     }
 
     private fun maxScroll(n: Int): Float =
@@ -219,12 +235,31 @@ internal class TimelineController(
     // =========================================================================
     private class Hit {
         var kind = HitKind.NONE
+        /** O TRECHO atingido; na pílula de uma fileira compartilhada, a fileira ([lane]). */
         var row: RowModel? = null
+        /** A fileira inteira sob o dedo (reordenar na vertical leva a linha toda). */
+        var lane: RowModel? = null
         var rowIndex = -1
         var keyIndex = -1
     }
 
     private val hitOut = IntArray(1)
+
+    /** Hit-test de UM trecho na fileira (a mesma geometria do pintor); o losango vai em `hitOut[0]`. */
+    private fun hitSegment(s: RowModel, x: Float, y: Float): HitKind {
+        val m = metrics
+        val x0 = xOf(s.start)
+        val x1 = max(xOf(s.end), x0 + m.barMinWidth)
+        return RowHit.hit(
+            m, x, y, state.width.toFloat(), x0, x1, handlesOn(s), state.compact,
+            keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)),
+            instants = s.instants,
+            view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,
+        )
+    }
+
+    /** Alças de aparar: só no trecho que é a ÚNICA escolha. */
+    private fun handlesOn(s: RowModel) = s.track == null && selectionSize() == 1 && isSelected(s.id) && !s.locked
 
     private fun hitAt(p: Offset): Hit {
         val hit = Hit()
@@ -240,19 +275,52 @@ internal class TimelineController(
         if (i !in 0 until n) return hit
         val r = rowAt(list, i) ?: return hit
         val top = m.rowsTop + rowTop(i) - scroll
-        val x0 = xOf(r.start)
-        val x1 = max(xOf(r.end), x0 + m.barMinWidth)
-        val handles = r.track == null && selectionSize() == 1 && isSelected(r.id) && !r.locked
-        hit.kind = RowHit.hit(
-            m, p.x, if (r.track == null) p.y - top else m.diamondCyNormal, state.width.toFloat(), x0, x1, handles, state.compact,
-            keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, r.track != null, isSelected(r.id)),
-            instants = r.instants,
-            view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,
-        )
-        if (r.track != null && hit.kind != HitKind.KEYFRAME) hit.kind = HitKind.BODY
-        hit.row = r
+        val y = if (r.track == null) p.y - top else m.diamondCyNormal
+        hit.lane = r
         hit.rowIndex = i
-        hit.keyIndex = hitOut[0]
+        val segs = r.segments
+        if (segs.size == 1) {
+            val s = segs[0]
+            hit.kind = hitSegment(s, p.x, y)
+            if (s.track != null && hit.kind != HitKind.KEYFRAME) hit.kind = HitKind.BODY
+            hit.row = s
+            hit.keyIndex = hitOut[0]
+            return hit
+        }
+        // FILEIRA COMPARTILHADA: a pílula é da fileira; o resto é de UM trecho.
+        if (p.x < m.headerColumn) {
+            hit.kind = hitSegment(segs[0], p.x, y)
+            hit.row = r
+            return hit
+        }
+        // Prioridade entre os trechos: alça/losango do trecho escolhido (as alças
+        // ficam por cima do vizinho encostado) > o trecho sob o dedo (o escolhido,
+        // se as barras mínimas se cruzam; senão o de cima no desenho) > qualquer
+        // folga de toque que responda (losango na borda, alça por fora da barra).
+        var best: RowModel? = null
+        var bestKind = HitKind.NONE
+        var bestKey = -1
+        var bestScore = 0
+        for (s in segs) {
+            val kind = hitSegment(s, p.x, y)
+            if (kind == HitKind.NONE) continue
+            val x0 = xOf(s.start)
+            val x1 = max(xOf(s.end), x0 + m.barMinWidth)
+            val score = when {
+                handlesOn(s) && (kind == HitKind.TRIM_START || kind == HitKind.TRIM_END || kind == HitKind.KEYFRAME) -> 4
+                p.x >= x0 && p.x <= x1 -> if (isSelected(s.id)) 3 else 2
+                else -> 1
+            }
+            if (score > bestScore || (score == 2 && bestScore == 2)) {
+                best = s
+                bestKind = kind
+                bestKey = hitOut[0]
+                bestScore = score
+            }
+        }
+        hit.row = best ?: segs[0]
+        hit.kind = bestKind
+        hit.keyIndex = bestKey
         return hit
     }
 
@@ -384,7 +452,7 @@ internal class TimelineController(
             }
             HitKind.HEADER_EYE -> if (r != null) {
                 light()
-                store.setLayerVisible(r.id, !r.visible)
+                setRowVisible(r, !r.visible)
             }
             // A.01: ‹ = selectNeighbor(+1), › = selectNeighbor(−1).
             HitKind.ARROW_PREV -> {
@@ -399,7 +467,10 @@ internal class TimelineController(
             HitKind.HEADER -> if (r != null) {
                 if (!state.compact) {
                     tick()
-                    expandedLayer.value = if (expandedLayer.value == r.id) null else r.id
+                    // Fileira compartilhada: abre as trilhas do trecho escolhido nela
+                    // (senão do primeiro); tocar de novo fecha, seja qual for o aberto.
+                    val open = expandedLayer.value
+                    expandedLayer.value = if (open != null && r.segment(open) != null) null else expandTarget(r).id
                 } else selectTap(r)
             }
             HitKind.BODY, HitKind.TRIM_START, HitKind.TRIM_END -> if (r != null) {
@@ -409,6 +480,40 @@ internal class TimelineController(
                 if (r.track != null) onTrackTap(r.id, r.track.property, r.track.effect) else selectTap(r)
             }
         }
+    }
+
+    /** O trecho cujas trilhas a pílula abre: o escolhido na fileira, senão o primeiro. */
+    private fun expandTarget(r: RowModel): RowModel {
+        for (s in r.segments) if (isSelected(s.id)) return s
+        return r.segments[0]
+    }
+
+    /**
+     * Olho da pílula: numa fileira compartilhada vale para a LINHA toda (todos
+     * os trechos), num passo de desfazer; numa fileira comum, a camada, como
+     * sempre foi.
+     */
+    private fun setRowVisible(r: RowModel, visible: Boolean) {
+        val segs = r.segments
+        if (segs.size == 1) {
+            store.setLayerVisible(segs[0].id, visible)
+            return
+        }
+        openUndo("visibilidade")
+        for (s in segs) if (s.visible != visible) store.setLayerVisible(s.id, visible)
+        closeUndo()
+    }
+
+    /** Segurar a pílula trava/destrava: a linha toda numa fileira compartilhada. */
+    private fun setRowLocked(r: RowModel, locked: Boolean) {
+        val segs = r.segments
+        if (segs.size == 1) {
+            store.setLayerLocked(segs[0].id, locked)
+            return
+        }
+        openUndo("travar")
+        for (s in segs) if (s.locked != locked) store.setLayerLocked(s.id, locked)
+        closeUndo()
     }
 
     private fun selectTap(r: RowModel) {
@@ -506,12 +611,13 @@ internal class TimelineController(
             when (kind) {
                 HitKind.KEYFRAME -> if (time) keyframeDrag(r, hit.keyIndex, down)
                     else if (!state.compact) scroll(down.id, ch.position, tracker) else consumeUntilUp()
-                HitKind.HEADER -> if (!time && !state.compact) reorderDrag(r, hit.rowIndex, down) else consumeUntilUp()
-                // Segurar de propósito levanta a camada: claramente na pilha reordena,
-                // claramente no tempo move; o resto rola.
+                HitKind.HEADER -> if (!time && !state.compact) reorderDrag(hit.lane ?: r, hit.rowIndex, down, grabbed = null) else consumeUntilUp()
+                // Segurar de propósito levanta a camada: claramente na pilha reordena
+                // (a fileira inteira — numa linha compartilhada, a linha toda),
+                // claramente no tempo move o trecho; o resto rola.
                 else -> when {
                     time || state.compact -> longPressMove(r, down)
-                    Press.stackEdit(d.x, d.y) -> reorderDrag(r, hit.rowIndex, down)
+                    Press.stackEdit(d.x, d.y) -> reorderDrag(hit.lane ?: r, hit.rowIndex, down, grabbed = r)
                     else -> scroll(down.id, ch.position, tracker)
                 }
             }
@@ -524,7 +630,7 @@ internal class TimelineController(
             // A.01: segurar o quadradinho trava/destrava.
             HitKind.HEADER -> {
                 tick()
-                store.setLayerLocked(r.id, !r.locked)
+                setRowLocked(r, !r.locked)
             }
             HitKind.KEYFRAME -> keyframeTap(r, hit.keyIndex)
             else -> {
@@ -649,6 +755,14 @@ internal class TimelineController(
         }
         if (group.isEmpty()) return consumeUntilUp()
         pauseIfPlaying()
+        // LINHA MAGNÉTICA: arrastar na horizontal REORDENA a fita em vez de
+        // soltar o trecho no tempo. Os vizinhos abrem espaço e a linha volta a
+        // ficar encostada — é o gesto do Premiere e do CapCut. Com a linha
+        // desligada vale o movimento livre de sempre.
+        if (r.magnetic && group.size == 1) {
+            reorderDrag(r, down)
+            return
+        }
         val length = r.end - r.start
         // O lote para inteiro no zero: nenhuma distância entre as camadas encolhe.
         val floorStart = r.start - minStart
@@ -683,6 +797,30 @@ internal class TimelineController(
                 sent = delta
             }
             setGuide(if (target == out[0]) out[1] else Snap.NONE)
+        }
+    }
+
+    // --- Reordenar a linha magnética -----------------------------------------------------
+    /**
+     * O trecho segue o dedo e o motor o encaixa na fita: quem estava no lugar
+     * anda, e no fim a linha fica lado a lado, sem buraco. O alvo é ABSOLUTO
+     * (o ponto do dedo mais o que se agarrou no começo), então o gesto não
+     * depende de reler a linha a cada passo.
+     */
+    private suspend fun AwaitPointerEventScope.reorderDrag(r: RowModel, down: PointerInputChange) {
+        light()
+        val grab = r.start - frameAt(down.position.x)
+        val targets = snapTargets(longArrayOf(r.id), own = r, ownEdges = false, ownKeys = false)
+        var sent = Int.MIN_VALUE
+        dragLoop(down.id, down.position, horizontal = true) { p ->
+            val desired = (frameAt(p.x) + grab).toFrame()
+            val snapped = if (store.snapping) Snap.nearest(targets, desired.toDouble(), playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble()) else Snap.NONE
+            val target = max(0, if (snapped != Snap.NONE) snapped else desired)
+            if (target != sent) {
+                openUndo("reordenar")
+                if (store.reorderClip(r.id, target.toLong())) sent = target
+            }
+            setGuide(snapped)
         }
     }
 
@@ -804,16 +942,28 @@ internal class TimelineController(
     }
 
     // --- Reordenar ---------------------------------------------------------------------------
-    /** Lift a whole layer, preview the gap, then commit one engine order command. */
-    private suspend fun AwaitPointerEventScope.reorderDrag(r: RowModel, index: Int, down: PointerInputChange) {
-        if (r.locked) {
+    /**
+     * Lift a whole row, preview the gap, then commit the engine order. Numa
+     * fileira compartilhada sobe a LINHA toda (todos os trechos andam juntos na
+     * ordem de desenho); [grabbed] é o trecho sob o dedo (null = pela pílula).
+     */
+    private suspend fun AwaitPointerEventScope.reorderDrag(r: RowModel, index: Int, down: PointerInputChange, grabbed: RowModel?) {
+        var locked = false
+        for (s in r.segments) if (s.locked) locked = true
+        if (locked) {
             light()
             store.showToast("Camada bloqueada: desbloqueie para editar")
             return consumeUntilUp()
         }
         heavy()
         pauseIfPlaying()
-        if (!isSelected(r.id)) store.select(r.id, openOptions = false)
+        if (grabbed != null) {
+            if (!isSelected(grabbed.id)) store.select(grabbed.id, openOptions = false)
+        } else {
+            var any = false
+            for (s in r.segments) if (isSelected(s.id)) any = true
+            if (!any) store.select(r.segments[0].id, openOptions = false)
+        }
         state.reorderSource = index
         state.reorderTarget = index
         state.reorderTop = metrics.rowsTop + rowTop(index) - clampedScroll(rowCount(rows.value))
@@ -827,15 +977,42 @@ internal class TimelineController(
                 state.reorderTarget = t
             }
         }
-        val target = state.reorderTarget
-        val targetId = rows.value.getOrNull(target)?.id
-        val targetIndex = store.layers.indexOfFirst { it.id == targetId }
-        if (released && targetIndex >= 0 && targetId != r.id) {
-            openUndo("reordenar")
-            store.reorderLayer(r.id, targetIndex)
-            closeUndo()
-            light()
+        if (released && commitReorder(rows.value, index, state.reorderTarget)) light()
+    }
+
+    /**
+     * Solta a fileira [source] sobre a fileira [target]: o grupo dela (a camada,
+     * ou a linha inteira) vai para logo acima/abaixo do grupo do destino, num
+     * passo de desfazer. Uma camada sozinha manda o MESMO comando de sempre.
+     */
+    private fun commitReorder(list: List<RowModel>, source: Int, target: Int): Boolean {
+        val keys = timelineGroupKeys(list)
+        if (source !in keys.indices || target !in keys.indices) return false
+        val from = keys[source]
+        val to = keys[target]
+        if (from == to) return false
+        val block = LinkedHashSet<Long>()
+        val anchors = HashSet<Long>()
+        for (i in list.indices) {
+            val row = list[i]
+            if (row.track != null) continue
+            when (keys[i]) {
+                from -> for (s in row.segments) block.add(s.id)
+                to -> for (s in row.segments) anchors.add(s.id)
+            }
         }
+        val layers = store.layers
+        val order = LongArray(layers.size) { layers[it].id }
+        // A fileira do destino está onde está a camada MAIS ALTA dela.
+        var anchor = NO_ID
+        for (id in order) if (id in anchors) { anchor = id; break }
+        if (anchor == NO_ID) return false
+        val moves = RowOrder.moves(order, block, anchor, up = target < source)
+        if (moves.isEmpty()) return false
+        openUndo("reordenar")
+        for ((id, displayIndex) in moves) store.reorderLayer(id, displayIndex)
+        closeUndo()
+        return true
     }
 
     /**
@@ -977,8 +1154,8 @@ internal class TimelineController(
         // No compacto as outras camadas não aparecem: grudar nelas pareceria aleatório.
         if (!state.compact) {
             val list = rows.value
-            for (i in list.indices) {
-                val row = list[i]
+            // Cada TRECHO é um alvo (o vizinho na mesma fileira também).
+            for (i in list.indices) for (row in list[i].segments) {
                 if (Arrays.binarySearch(sorted, row.id) >= 0) continue
                 add(row.start)
                 add(row.end)
@@ -1001,10 +1178,7 @@ internal class TimelineController(
     /** Chave do revelar: muda quando a principal muda ou troca de linha. */
     fun revealKey(): Long {
         val p = primaryId.value
-        val list = rows.value
-        var idx = -1
-        for (i in list.indices) if (list[i].id == p) idx = i
-        return p * 31 + idx
+        return p * 31 + rowIndexOf(rows.value, p)
     }
 
     fun reveal() {
@@ -1012,8 +1186,7 @@ internal class TimelineController(
         val p = primaryId.value
         if (p == NO_ID) return
         val list = rows.value
-        var idx = -1
-        for (i in list.indices) if (list[i].id == p) idx = i
+        val idx = rowIndexOf(list, p)
         if (idx < 0) return
         val viewport = state.height - metrics.rowsTop
         if (viewport <= 0f) return

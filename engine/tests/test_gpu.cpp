@@ -34,6 +34,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/project/Project.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/audio/AudioEffects.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/render/ParticleExtras.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
@@ -5179,6 +5180,8 @@ struct BlendRef {
             case BlendMode::Darken: return std::min(b, s);
             case BlendMode::Lighten: return std::max(b, s);
             case BlendMode::Difference: return std::fabs(b - s);
+            case BlendMode::LinearDodge: return std::min(b + s, 1.0f);
+            case BlendMode::LinearBurn: return std::max(b + s - 1.0f, 0.0f);
             default: break;
         }
         b = std::clamp(b, 0.0f, 1.0f);
@@ -5188,6 +5191,10 @@ struct BlendRef {
             case BlendMode::Screen: return b + s - b * s;
             case BlendMode::Overlay: return hard(s, b);
             case BlendMode::HardLight: return hard(b, s);
+            case BlendMode::Divide: return s <= 1e-6f ? 1.0f : std::min(b / s, 1.0f);
+            case BlendMode::VividLight: return s <= 0.5f
+                ? (b >= 1 ? 1.0f : (2 * s <= 0 ? 0.0f : 1 - std::min(1.0f, (1 - b) / (2 * s))))
+                : (b <= 0 ? 0.0f : (2 * s - 1 >= 1 ? 1.0f : std::min(1.0f, b / (1 - (2 * s - 1)))));
             case BlendMode::ColorDodge: return b <= 0 ? 0.0f : s >= 1 ? 1.0f : std::min(1.0f, b / (1 - s));
             case BlendMode::ColorBurn: return b >= 1 ? 1.0f : s <= 0 ? 0.0f : 1 - std::min(1.0f, (1 - b) / s);
             case BlendMode::SoftLight: {
@@ -5216,7 +5223,8 @@ Vec3 lin3(f32 r, f32 g, f32 b) { return Vec3{srgb_decode(r), srgb_decode(g), srg
 const char* blend_name(BlendMode m) {
     static const char* const k[] = {"Normal", "Add", "Subtract", "Multiply", "Screen", "Overlay", "Darken", "Lighten",
                                     "ColorDodge", "ColorBurn", "HardLight", "SoftLight", "Difference", "Exclusion",
-                                    "Hue", "Saturation", "Color", "Luminosity"};
+                                    "Hue", "Saturation", "Color", "Luminosity",
+                                    "Divide", "VividLight", "LinearDodge", "LinearBurn"};
     return k[static_cast<u16>(m)];
 }
 
@@ -5236,7 +5244,7 @@ AUREA_TEST(Gpu, EveryBlendModeMatchesTheFormulaPixelForPixel) {
     for (const auto& pc : pairs) {
         const Vec3 cb = lin3(pc[0], pc[1], pc[2]);
         const Vec3 cs = lin3(pc[3], pc[4], pc[5]);
-        for (u16 mi = 0; mi <= static_cast<u16>(BlendMode::Luminosity); ++mi) {
+        for (u16 mi = 0; mi <= static_cast<u16>(BlendMode::LinearBurn); ++mi) {
             const BlendMode m = static_cast<BlendMode>(mi);
             Scene s(64, 64);
             s.solid(64, 64, Vec4{pc[0], pc[1], pc[2], 1}, 32, 32);
@@ -5268,7 +5276,8 @@ AUREA_TEST(Gpu, EveryBlendModeMatchesTheFormulaPixelForPixel) {
             AUREA_CHECK_MSG(near4(corner, Vec4{cb.x, cb.y, cb.z, 1}, tol), blend_name(m));
         }
     }
-    std::printf("    18 modos x 2 pares, pior erro %.5f (%.2f/255) em %s ", worst, worst * 255.0f, blend_name(worstMode));
+    std::printf("    %u modos x 2 pares, pior erro %.5f (%.2f/255) em %s ",
+                static_cast<u32>(BlendMode::LinearBurn) + 1u, worst, worst * 255.0f, blend_name(worstMode));
 }
 
 AUREA_TEST(Gpu, BlendModesChainAndLandInTheOffscreenTarget) {
@@ -6979,12 +6988,18 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         if (fx.type_id() == effect_type_id(effect_keys::kText3DLayout)) continue;
         const bool parenting = fx.type_id() == effect_type_id(effect_keys::kParentingHelper);
         const bool shadow = fx.type_id() == effect_type_id(effect_keys::kShadowStudio3);
+        // Sombra projetada e Borda desenham FORA da caixa da camada: com a
+        // imagem cobrindo o quadro inteiro não sobra lugar para elas — a foto
+        // fica menor e o fundo claro, como no Shadow Studio.
+        const bool outside = shadow ||
+                             fx.type_id() == effect_type_id(effect_keys::kDropShadow) ||
+                             fx.type_id() == effect_type_id(effect_keys::kBorder);
         const ParameterRegistry& params = gpu().effects.params_at(i);
         Scene s(96, 96);
         // Black shadows need exposed, lit background; a full opaque image
         // covering a black canvas cannot reveal them.
-        if (shadow) s.comp->set_background(Color{1, 1, 1, 1});
-        const u32 size = shadow || parenting ? 40u : 96u;
+        if (outside) s.comp->set_background(Color{1, 1, 1, 1});
+        const u32 size = outside || parenting ? 40u : 96u;
         const LayerId id = s.image(reference_image(size, size), 48, 48);
         if (parenting) {
             const LayerId parent = s.comp->add_layer(LayerKind::Null, "rotated parent");
@@ -9933,4 +9948,381 @@ AUREA_TEST(Gpu, DetachSurfaceIsNotBlockedByAThumbnailCaptureWaitingForVideo) {
     AUREA_CHECK(detachMs < 500.0);   // antes: preso até a captura terminar (segundos)
     capture.join();
     e.shutdown();
+}
+
+#if defined(AUREA_TEST_VULKAN)
+// =============================================================================
+// Mapa de profundidade (IA): o efeito de verdade, num quadro renderizado.
+// =============================================================================
+namespace {
+/// A foto das prévias do app (pessoa perto, fundo escuro longe), RGBA8 reta.
+bool depth_photo(ImagePixels& out) {
+    const std::string path = std::string(AUREA_APP_PRESETS_DIR) + "/../previa_efeitos.jpg";
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    const std::vector<u8> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    int w = 0, h = 0, c = 0;
+    u8* px = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &c, 4);
+    if (!px) return false;
+    out.width = static_cast<u32>(w);
+    out.height = static_cast<u32>(h);
+    out.rgba.assign(px, px + static_cast<usize>(w) * h * 4);
+    stbi_image_free(px);
+    return true;
+}
+/// Média do valor CODIFICADO (o cinza que a pessoa vê) do canal vermelho.
+f32 encoded_mean(const FloatImage& img, u32 x0, u32 y0, u32 x1, u32 y1) {
+    f64 s = 0;
+    for (u32 y = y0; y < y1; ++y) for (u32 x = x0; x < x1; ++x) s += srgb_encode(img.at(x, y)[0]);
+    return static_cast<f32>(s / ((x1 - x0) * (y1 - y0)));
+}
+f32 depth_max_diff(const FloatImage& a, const FloatImage& b) {
+    f32 worst = 0;
+    for (usize i = 0; i < a.px.size() && i < b.px.size(); ++i) worst = std::max(worst, std::fabs(a.px[i] - b.px[i]));
+    return worst;
+}
+}
+
+// Qual lado é perto, NO QUADRO: a pessoa (primeiro plano) sai clara e o fundo
+// escuro; Inverter troca; Mistura 0 devolve a foto. AUREA_DEPTH_PNG=<pasta>
+// grava o antes e o depois.
+AUREA_TEST(Gpu, DepthMapEffectPaintsTheNearSideBright) {
+    AUREA_REQUIRE_GPU();
+    ImagePixels photo;
+    AUREA_CHECK(depth_photo(photo));
+    if (photo.rgba.empty()) return;
+    Scene s(160, 160);
+    const LayerId id = s.image(photo, 80, 80, 160.0f / static_cast<f32>(photo.width));
+    const FloatImage before = s.render();
+    s.add_effect(id, effect_keys::kDepthMap);
+    ai::DepthMapService* svc = nullptr;
+    const FloatImage after = s.render();
+    svc = gpu().renderer.depth_service();
+    AUREA_CHECK(svc != nullptr);
+    const f32 person = encoded_mean(after, 60, 60, 100, 120);
+    const f32 background = 0.5f * (encoded_mean(after, 0, 0, 20, 20) + encoded_mean(after, 140, 0, 160, 20));
+    std::printf("    pessoa %.2f fundo %.2f (0 preto, 1 branco)", person, background);
+    AUREA_CHECK(person > background + 0.3f);
+    // Um mapa é cinza.
+    f32 chroma = 0;
+    for (u32 y = 0; y < after.height; ++y) for (u32 x = 0; x < after.width; ++x) {
+        const f32* p = after.at(x, y);
+        chroma = std::max({chroma, std::fabs(p[0] - p[1]), std::fabs(p[1] - p[2])});
+    }
+    AUREA_CHECK(chroma < 1e-3f);
+    if (const char* dir = std::getenv("AUREA_DEPTH_PNG"); dir && *dir) {
+        AUREA_CHECK(write_png(std::string(dir) + "/depth_antes.png", before.encoded()));
+        AUREA_CHECK(write_png(std::string(dir) + "/depth_depois.png", after.encoded()));
+    }
+    const u64 inferences = svc ? svc->stats().inferences : 0;
+
+    s.comp->layer(id)->effects.back().params[1].constant = ParamValue::boolean(true);   // Inverter
+    const FloatImage inverted = s.render();
+    AUREA_CHECK(encoded_mean(inverted, 60, 60, 100, 120) + 0.3f
+                < 0.5f * (encoded_mean(inverted, 0, 0, 20, 20) + encoded_mean(inverted, 140, 0, 160, 20)));
+    s.comp->layer(id)->effects.back().params[1].constant = ParamValue::boolean(false);
+    s.comp->layer(id)->effects.back().params[0].constant = ParamValue::scalar(0.0f);    // Mistura 0
+    AUREA_CHECK(depth_max_diff(s.render(), before) < 1e-3f);
+    s.comp->layer(id)->effects.back().params[0].constant = ParamValue::scalar(50.0f);
+    const FloatImage half = s.render();
+    const f32 mid = encoded_mean(half, 60, 60, 100, 120);
+    AUREA_CHECK(mid > std::min(encoded_mean(before, 60, 60, 100, 120), person) - 0.02f);
+    AUREA_CHECK(mid < std::max(encoded_mean(before, 60, 60, 100, 120), person) + 0.02f);
+    // Três quadros a mais da mesma foto: a rede não rodou de novo.
+    if (svc) AUREA_CHECK_EQ(svc->stats().inferences, inferences);
+    // A rede solta os buffers Vulkan AGORA: o ncnn destrói o dispositivo dele
+    // num atexit, antes do Gpu estático deste arquivo.
+    gpu().renderer.release_project_resources();
+}
+
+// A prévia do catálogo usa a foto das prévias: o cartão mostra o mapa (cinza,
+// pessoa clara), não a foto intacta. Sem foto, a cartela passa como está.
+AUREA_TEST(Gpu, DepthMapCatalogPreviewShowsTheMapOfThePhoto) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    ImagePixels photo;
+    AUREA_CHECK(depth_photo(photo));
+    if (photo.rgba.empty()) return;
+    g.renderer.set_effect_preview_source(photo.rgba, photo.width, photo.height);
+    std::vector<u8> card;
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kDepthMap), 160, 100, card).ok());
+    g.renderer.set_effect_preview_source({}, 0, 0);
+    if (card.size() != static_cast<usize>(160) * 100 * 4) return;
+    auto mean = [&](u32 x0, u32 y0, u32 x1, u32 y1) {
+        f64 sum = 0;
+        for (u32 y = y0; y < y1; ++y) for (u32 x = x0; x < x1; ++x) sum += card[(y * 160 + x) * 4];
+        return static_cast<f32>(sum / ((x1 - x0) * (y1 - y0) * 255.0));
+    };
+    u32 colored = 0;
+    for (usize i = 0; i < card.size(); i += 4)
+        colored += std::abs(static_cast<int>(card[i]) - card[i + 1]) > 3 || std::abs(static_cast<int>(card[i + 1]) - card[i + 2]) > 3;
+    const f32 person = mean(64, 30, 96, 90), corner = mean(0, 0, 12, 12);
+    std::printf("    cartao: pessoa %.2f canto %.2f, pixels coloridos %u", person, corner, colored);
+    AUREA_CHECK_EQ(colored, 0u);
+    AUREA_CHECK(person > corner + 0.3f);
+    g.renderer.release_project_resources();
+}
+
+// Vídeo: o export espera o mapa do quadro; o preview do MESMO quadro usa o
+// cache (a rede não roda de novo); um quadro novo no preview não bloqueia —
+// o worker calcula e o render seguinte o usa.
+AUREA_TEST(Gpu, DepthMapOnVideoRunsOncePerSourceFrame) {
+    AUREA_REQUIRE_GPU();
+    SyntheticConfig cfg;
+    cfg.width = 128;
+    cfg.height = 72;
+    cfg.pattern = SyntheticPattern::MovingSquare;
+    Scene s(128, 72);
+    const LayerId id = s.video(cfg, 64, 36);
+    const FloatImage plain = s.render(FrameIndex{5}, 1, true);
+    s.add_effect(id, effect_keys::kDepthMap);
+    const FloatImage exported = s.render(FrameIndex{5}, 1, true);
+    ai::DepthMapService* svc = gpu().renderer.depth_service();
+    AUREA_CHECK(svc != nullptr);
+    if (!svc) return;
+    const u64 base = svc->stats().inferences;
+    AUREA_CHECK(base >= 1);
+    AUREA_CHECK(depth_max_diff(plain, exported) > 0.05f);
+    const FloatImage preview = s.render(FrameIndex{5}, 1, false);
+    AUREA_CHECK_EQ(svc->stats().inferences, base);
+    AUREA_CHECK(depth_max_diff(preview, exported) < 2e-3f);
+
+    (void)gpu().renderer.take_incomplete();
+    (void)s.render(FrameIndex{40}, 1, false);
+    AUREA_CHECK(gpu().renderer.take_incomplete());   // agendado, não esperado
+    for (int i = 0; i < 2000 && svc->stats().inferences == base; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    AUREA_CHECK_EQ(svc->stats().inferences, base + 1);
+    const FloatImage later = s.render(FrameIndex{40}, 1, false);
+    AUREA_CHECK(!gpu().renderer.take_incomplete());
+    AUREA_CHECK_EQ(svc->stats().inferences, base + 1);
+    AUREA_CHECK(depth_max_diff(later, preview) > 1e-3f);   // outro quadro, outro mapa
+    gpu().renderer.release_project_resources();
+}
+#endif
+
+// -----------------------------------------------------------------------------
+// Pacote de áudio: Forma de onda de áudio, Espectro de áudio (bandas) e Bolas.
+// AUREA_FX_DUMP=<pasta> grava um PNG de cada um lá.
+// -----------------------------------------------------------------------------
+namespace {
+
+void fx_dump_png(const char* name, const FloatImage& img) {
+    const char* dir = std::getenv("AUREA_FX_DUMP");
+    if (dir && *dir) (void)write_png(std::string(dir) + "/" + name + ".png", img.encoded());
+}
+
+/// Vídeo com senoide (L em `hz`, R no dobro) e o asset marcado com som.
+LayerId tone_video(Scene& s, f64 hz, u32 w, u32 h, f64 bpm = 0.0) {
+    SyntheticConfig cfg;
+    cfg.width = w;
+    cfg.height = h;
+    cfg.audioRate = 48000;
+    cfg.audioFreq = hz;
+    cfg.audioSeconds = 10.0;
+    cfg.audioBpm = bpm;
+    const LayerId id = s.video(cfg, w * 0.5f, h * 0.5f);
+    if (Asset* a = s.project.asset(s.comp->layer(id)->source)) {
+        a->audio.channels = 2;
+        a->audio.sampleRate = 48000;
+        a->audio.sampleCount = FrameIndex{480000};
+    }
+    return id;
+}
+
+f32 alpha_sum(const FloatImage& img, u32 x0, u32 y0, u32 x1, u32 y1) {
+    f32 a = 0.0f;
+    for (u32 y = y0; y < y1 && y < img.height; ++y)
+        for (u32 x = x0; x < x1 && x < img.width; ++x) a += img.v(x, y).w;
+    return a;
+}
+
+} // namespace
+
+AUREA_TEST(EffectPackGpu, AudioWaveformDrawsTheChosenLayersSound) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 64);
+    s.comp->set_transparent_background(true);
+    const LayerId video = tone_video(s, 250.0, 128, 64);
+    s.comp->layer(video)->visible = false;
+    const LayerId host = s.solid(128, 64, Vec4{0, 0, 0, 1}, 64, 32);
+    auto& fx = s.add_effect(host, effect_keys::kAudioWaveform);
+    enum : u32 { kLayer = 0, kStart, kEnd, kSamples, kHeight, kDuration, kOffset, kThickness, kSoftness, kSeed,
+                 kInside, kOutside, kChannel, kDisplay, kComposite };
+    fx.params[kStart].constant = ParamValue::vec2(0.0f, 0.5f);
+    fx.params[kEnd].constant = ParamValue::vec2(1.0f, 0.5f);
+    fx.params[kSamples].constant = ParamValue::scalar(128.0f);
+    fx.params[kHeight].constant = ParamValue::scalar(40.0f);        // 0,5 de amplitude → ±20 px
+    fx.params[kDuration].constant = ParamValue::scalar(8.0f);       // 2 ciclos de 250 Hz
+    fx.params[kThickness].constant = ParamValue::scalar(2.0f);
+    fx.params[kSoftness].constant = ParamValue::scalar(0.0f);
+    fx.params[kDisplay].constant = ParamValue::scalar(1.0f);        // linhas
+    // Sem camada de áudio (o sólido não tem som): linha reta no caminho.
+    const FloatImage flat = s.render(FrameIndex{30});
+    AUREA_CHECK(all_finite(flat));
+    AUREA_CHECK(alpha_sum(flat, 0, 30, 128, 34) > 100.0f);
+    AUREA_CHECK(alpha_sum(flat, 0, 0, 128, 20) < 0.5f);
+    // Apontando para o vídeo (canal esquerdo, 250 Hz): a senoide sobe e desce ~20 px.
+    fx.params[kLayer].constant.ref = video.pack();
+    fx.params[kChannel].constant = ParamValue::scalar(1.0f);
+    const FloatImage wave = s.render(FrameIndex{30});
+    AUREA_CHECK(all_finite(wave));
+    AUREA_CHECK(alpha_sum(wave, 0, 10, 128, 16) > 3.0f);    // topos perto de y = 12
+    AUREA_CHECK(alpha_sum(wave, 0, 48, 128, 54) > 3.0f);    // vales perto de y = 52
+    AUREA_CHECK(alpha_sum(wave, 0, 0, 128, 8) < 0.5f);      // nada além da altura
+    // O canal direito (500 Hz) cruza o caminho duas vezes mais que o esquerdo.
+    auto crossings = [](const FloatImage& img) {
+        u32 n = 0;
+        for (u32 x = 0; x < img.width; ++x) if (img.v(x, 32).w > 0.5f) ++n;
+        return n;
+    };
+    fx.params[kChannel].constant = ParamValue::scalar(2.0f);
+    const FloatImage right = s.render(FrameIndex{30});
+    AUREA_CHECK(crossings(right) > crossings(wave));
+    // Digital e pontos também desenham; determinístico no mesmo quadro.
+    for (const f32 mode : {0.0f, 2.0f}) {
+        fx.params[kDisplay].constant = ParamValue::scalar(mode);
+        const FloatImage img = s.render(FrameIndex{30});
+        AUREA_CHECK(all_finite(img));
+        AUREA_CHECK(alpha_sum(img, 0, 0, 128, 64) > 30.0f);
+        AUREA_CHECK(max_abs_diff(s.render(FrameIndex{30}), img) < 1e-4f);
+    }
+    // Retrato para conferir a olho.
+    Scene demo(480, 270);
+    const LayerId dv = tone_video(demo, 110.0, 480, 270, 100.0);
+    demo.comp->layer(dv)->visible = false;
+    const LayerId bg = demo.solid(480, 270, Vec4{0.02f, 0.02f, 0.05f, 1}, 240, 135);
+    auto& w = demo.add_effect(bg, effect_keys::kAudioWaveform);
+    w.params[kLayer].constant.ref = dv.pack();
+    w.params[kSamples].constant = ParamValue::scalar(300.0f);
+    w.params[kHeight].constant = ParamValue::scalar(220.0f);
+    w.params[kDuration].constant = ParamValue::scalar(60.0f);
+    w.params[kThickness].constant = ParamValue::scalar(4.0f);
+    w.params[kComposite].constant = ParamValue::boolean(true);
+    fx_dump_png("10_forma_de_onda", demo.render(FrameIndex{36}));
+}
+
+AUREA_TEST(EffectPackGpu, SpectrumAnalyzerShowsTheToneBand) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 64);
+    s.comp->set_transparent_background(true);
+    const LayerId video = tone_video(s, 1050.0, 128, 64);   // L 1050 Hz, R 2100 Hz
+    s.comp->layer(video)->visible = false;
+    const LayerId host = s.solid(128, 64, Vec4{0, 0, 0, 1}, 64, 32);
+    auto& fx = s.add_effect(host, effect_keys::kAudioSpectrumAnalyzer);
+    enum : u32 { kLayer = 0, kStart, kEnd, kPolar, kStartHz, kEndHz, kBands, kHeight, kDuration, kOffset, kThickness,
+                 kSoftness, kInside, kOutside, kBlend, kHueInterp, kDynamicHue, kSymmetry, kDisplay, kSide,
+                 kAveraging, kComposite };
+    fx.params[kLayer].constant.ref = video.pack();
+    fx.params[kStart].constant = ParamValue::vec2(0.0f, 0.95f);
+    fx.params[kEnd].constant = ParamValue::vec2(1.0f, 0.95f);
+    fx.params[kStartHz].constant = ParamValue::scalar(0.0f);
+    fx.params[kEndHz].constant = ParamValue::scalar(3200.0f);
+    fx.params[kBands].constant = ParamValue::scalar(16.0f);         // 200 Hz e 8 px por faixa
+    fx.params[kHeight].constant = ParamValue::scalar(80.0f);        // mono 0,25 por tom → ~20 px
+    fx.params[kDuration].constant = ParamValue::scalar(90.0f);
+    fx.params[kThickness].constant = ParamValue::scalar(6.0f);
+    fx.params[kSoftness].constant = ParamValue::scalar(0.0f);
+    fx.params[kSide].constant = ParamValue::scalar(0.0f);           // só lado A (para cima)
+    const FloatImage img = s.render(FrameIndex{30});
+    AUREA_CHECK(all_finite(img));
+    // 1050 Hz na faixa 5 (x ≈ 44), 2100 Hz na faixa 10 (x ≈ 84); a faixa 2 fica quieta.
+    AUREA_CHECK(img.v(44, 55).w > 0.9f);
+    AUREA_CHECK(img.v(84, 55).w > 0.9f);
+    AUREA_CHECK(img.v(20, 55).w < 0.05f);
+    AUREA_CHECK(img.v(44, 20).w < 0.05f);      // além da altura
+    // Lados A e B espelham; polar desenha raios; tudo finito.
+    fx.params[kSide].constant = ParamValue::scalar(2.0f);
+    fx.params[kStart].constant = ParamValue::vec2(0.0f, 0.5f);
+    fx.params[kEnd].constant = ParamValue::vec2(1.0f, 0.5f);
+    const FloatImage both = s.render(FrameIndex{30});
+    AUREA_CHECK(both.v(44, 26).w > 0.9f && both.v(44, 38).w > 0.9f);
+    fx.params[kPolar].constant = ParamValue::boolean(true);
+    fx.params[kStart].constant = ParamValue::vec2(0.5f, 0.5f);
+    fx.params[kHueInterp].constant = ParamValue::scalar(180.0f);
+    fx.params[kDynamicHue].constant = ParamValue::boolean(true);
+    for (const f32 mode : {0.0f, 1.0f, 2.0f}) {
+        fx.params[kDisplay].constant = ParamValue::scalar(mode);
+        const FloatImage polar = s.render(FrameIndex{30});
+        AUREA_CHECK(all_finite(polar));
+        AUREA_CHECK(alpha_sum(polar, 0, 0, 128, 64) > 20.0f);
+    }
+    // Retrato: a fonte é um SÓLIDO com o Tom (quadrada de 110 Hz: os
+    // harmônicos ímpares descendo 1/3, 1/5, 1/7...) — a camada de áudio sem
+    // mídia nenhuma, escolhida pela referência.
+    Scene demo(480, 270);
+    const LayerId toneLayer = demo.solid(16, 16, Vec4{0, 0, 0, 1}, 8, 8);
+    demo.comp->layer(toneLayer)->visible = false;
+    demo.comp->layer(toneLayer)->end = FrameIndex{300};
+    auto& tone = demo.add_effect(toneLayer, audio::fx_keys::kTone);
+    tone.params[audio::fxp::kWaveform].constant = ParamValue::scalar(3.0f);
+    tone.params[audio::fxp::kFreq1].constant = ParamValue::scalar(110.0f);
+    for (u32 k = 1; k < 5; ++k) tone.params[audio::fxp::kFreq1 + k].constant = ParamValue::scalar(0.0f);
+    tone.params[audio::fxp::kToneLevel].constant = ParamValue::scalar(60.0f);
+    const LayerId bg = demo.solid(480, 270, Vec4{0.02f, 0.02f, 0.05f, 1}, 240, 135);
+    auto& sp = demo.add_effect(bg, effect_keys::kAudioSpectrumAnalyzer);
+    sp.params[kLayer].constant.ref = toneLayer.pack();
+    sp.params[kStart].constant = ParamValue::vec2(0.05f, 0.8f);
+    sp.params[kEnd].constant = ParamValue::vec2(0.95f, 0.8f);
+    sp.params[kEndHz].constant = ParamValue::scalar(2000.0f);
+    sp.params[kBands].constant = ParamValue::scalar(96.0f);
+    sp.params[kHeight].constant = ParamValue::scalar(260.0f);
+    sp.params[kThickness].constant = ParamValue::scalar(3.0f);
+    sp.params[kSide].constant = ParamValue::scalar(0.0f);
+    sp.params[kHueInterp].constant = ParamValue::scalar(270.0f);
+    sp.params[kComposite].constant = ParamValue::boolean(true);
+    const FloatImage spectrum = demo.render(FrameIndex{33});
+    // O Tom do sólido chega ao espectro: a fundamental (110 Hz, faixa 5) sobe.
+    AUREA_CHECK(alpha_sum(spectrum, 0, 0, 480, 270) > 200.0f);
+    fx_dump_png("11_espectro_de_audio", spectrum);
+}
+
+AUREA_TEST(EffectPackGpu, BallGridTurnsTheLayerIntoShadedBalls) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    s.comp->set_transparent_background(true);
+    const LayerId id = s.image(quadrants(64, 64), 32, 32);
+    auto& fx = s.add_effect(id, effect_keys::kBallGrid);
+    enum : u32 { kScatter = 0, kAxis, kRotation, kTwistProperty, kTwistAngle, kSpacing, kBallSize,
+                 kInstabilityState, kInstability };
+    fx.params[kSpacing].constant = ParamValue::scalar(8.0f);
+    const FloatImage balls = s.render();
+    AUREA_CHECK(all_finite(balls));
+    // Centro de uma célula: a bola, com a cor do quadrante (vermelho em cima
+    // à esquerda, sombreada); o canto da célula fica vazio.
+    const Vec4 c = balls.v(12, 12);
+    AUREA_CHECK(c.w > 0.95f && c.x > 0.3f && c.y < 0.15f);
+    AUREA_CHECK(balls.v(16, 16).w < 0.2f);
+    // Sombreado: o lado da luz (em cima à esquerda) mais claro que o oposto.
+    AUREA_CHECK(balls.v(10, 10).x > balls.v(14, 14).x);
+    // Girar 180° no eixo X vira a grade de cabeça para baixo: em cima à
+    // esquerda passa a ser o azul de baixo.
+    fx.params[kRotation].constant = ParamValue::scalar(180.0f);
+    const FloatImage flipped = s.render();
+    AUREA_CHECK(flipped.v(12, 12).z > 0.3f && flipped.v(12, 12).x < 0.15f);
+    // Dispersão e instabilidade mexem nas bolas; tamanho 0 apaga.
+    fx.params[kRotation].constant = ParamValue::scalar(0.0f);
+    fx.params[kScatter].constant = ParamValue::scalar(6.0f);
+    AUREA_CHECK(max_abs_diff(s.render(), balls) > 0.2f);
+    fx.params[kScatter].constant = ParamValue::scalar(0.0f);
+    fx.params[kInstability].constant = ParamValue::scalar(4.0f);
+    fx.params[kInstabilityState].constant = ParamValue::scalar(90.0f);
+    AUREA_CHECK(max_abs_diff(s.render(), balls) > 0.2f);
+    fx.params[kInstability].constant = ParamValue::scalar(0.0f);
+    fx.params[kTwistAngle].constant = ParamValue::scalar(120.0f);
+    fx.params[kAxis].constant = ParamValue::scalar(1.0f);
+    AUREA_CHECK(max_abs_diff(s.render(), balls) > 0.2f);
+    fx.params[kTwistAngle].constant = ParamValue::scalar(0.0f);
+    fx.params[kBallSize].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK(alpha_sum(s.render(), 0, 0, 64, 64) < 0.5f);
+    Scene demo(480, 270);
+    const LayerId photo = demo.image(reference_image(480, 270), 240, 135);
+    auto& b = demo.add_effect(photo, effect_keys::kBallGrid);
+    b.params[kSpacing].constant = ParamValue::scalar(10.0f);
+    b.params[kAxis].constant = ParamValue::scalar(6.0f);
+    b.params[kRotation].constant = ParamValue::scalar(20.0f);
+    b.params[kTwistProperty].constant = ParamValue::scalar(4.0f);
+    b.params[kTwistAngle].constant = ParamValue::scalar(40.0f);
+    b.params[kScatter].constant = ParamValue::scalar(6.0f);
+    fx_dump_png("12_bolas", demo.render());
 }

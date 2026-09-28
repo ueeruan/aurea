@@ -431,6 +431,13 @@ private struct ShellMenuRow: View {
                          detail: row.locked ? "editor_volta_aceitar_movimento_edicao" : "editor_nao_aceita_movimento_corte_nem_edicao") { model.mutate { $0.setLayer(row.id, locked: !row.locked) }; model.refreshModel(force: true) }
             ShellMenuRow(row.visible ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, row.visible ? "editor_ocultar_camada" : "editor_mostrar_camada") { model.mutate { $0.setLayer(row.id, visible: !row.visible) }; model.refreshModel(force: true) }
             ShellMenuRow(CupertinoGlyph.Speaker2, "editor_solo", checked: row.solo, detail: "editor_alguma_camada_solo_previa_som_so") { model.mutate { $0.setLayer(row.id, solo: !row.solo) }; model.refreshModel(force: true) }
+            // Linha Magnética: só em trecho com FONTE (vídeo, imagem, áudio ou
+            // pré-composição). Texto, forma, nulo, ajuste, câmera e partículas
+            // são composição, não montagem.
+            if row.kind == 1 || row.kind == 2 || row.kind == 3 || row.kind == 12 {
+                ShellMenuRow(CupertinoGlyph.Link, "editor_linha_magnetica", checked: row.magnetic,
+                             detail: "editor_linha_magnetica_detalhe") { act { model.setLayerMagneticTrack(row.id, !row.magnetic) } }
+            }
             if row.kind != 3 {
                 ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "editor_camada_ajuste", checked: row.adjustment, detail: "editor_efeitos_desta_camada_valem_todas_baixo") { model.mutate { $0.setLayer(row.id, adjustment: !row.adjustment) }; model.refreshModel(force: true) }
                 ShellMenuRow(CupertinoGlyph.Grid, "editor_guia_nao_exporta", checked: row.guide, detail: "editor_aparece_aqui_editor_fica_fora_video") { model.mutate { $0.setLayer(row.id, guide: !row.guide) }; model.refreshModel(force: true) }
@@ -489,8 +496,8 @@ private struct ShellMenuRow: View {
             if row.kind == 1 {
                 ShellMenuRow(ShellGlyph.Snow, "sh_menu_freeze_frame", enabled: inside) { act { let created = model.engine.freezeFrame(forLayer: row.id, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3))); model.refreshModel(force: true); if created >= 0 { model.select(layerId: created) } } }
                 ShellMenuSection("editor_rastreio")
-                ShellMenuRow(ShellGlyph.Viewfinder, "editor_rastrear_ponto", detail: "editor_cria_nulo_segue_ponto_ligue_outras") { act { model.beginPointPick(stabilize: false) } }
-                ShellMenuRow(ShellGlyph.Viewfinder, "editor_estabilizar_pelo_ponto", detail: "editor_move_video_ponto_ficar_parado_tela") { act { model.beginPointPick(stabilize: true) } }
+                ShellMenuRow(ShellGlyph.Viewfinder, "editor_rastrear_ponto", detail: "editor_cria_nulo_segue_ponto_ligue_outras") { act { model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: false) } }
+                ShellMenuRow(ShellGlyph.Viewfinder, "editor_estabilizar_pelo_ponto", detail: "editor_move_video_ponto_ficar_parado_tela") { act { model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: true) } }
             }
             ShellMenuSection("editor_mais")
             ShellMenuRow(CupertinoGlyph.Trash, "editor_excluir_camada", danger: true) { act { removeSelection() } }

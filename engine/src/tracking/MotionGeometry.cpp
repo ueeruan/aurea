@@ -172,63 +172,129 @@ std::vector<MotionFrame> estimate_path(const Tracks2D& tracks,MotionModel model,
     if(!tracks.frames || !tracks.width || !tracks.height || (!polygon.empty()&&polygon.size()<3))return {};
     for(const auto& row:tracks.pos)if(row.size()!=tracks.frames)return {};
     std::vector<MotionFrame> path(tracks.frames);path[0].valid=true;path[0].confidence=1;
+    // Quadro sem medida (borrão, lente tapada, corte): ele fica INVÁLIDO (sem
+    // movimento inventado), mas a análise não para ali — antes um único quadro
+    // ruim invalidava o resto do clipe e nada podia ser aplicado. O caminho
+    // atravessa o buraco pelo último valor conhecido; a referência do 1º
+    // quadro, quando visível, reancora o caminho exato. Numa região (planar)
+    // os quadros depois do buraco só voltam a valer quando reancorados.
+    bool anchored=true;
     for(u32 f=1;f<tracks.frames;++f) {
         if(cancel&&cancel->load())return {};
-        if(!path[f-1].valid)break; // Stop at a lost frame. Never generate a fabricated path.
-        Homography inv;if(!path[f-1].path.inverse(inv))break;
+        const Homography previous=path[f-1].path;
+        path[f].path=previous;
+        Homography inv;const bool invertible=previous.inverse(inv);
         std::vector<Vec2> a,b,reference,current;
         for(const auto& row:tracks.pos) {
-            if(!Tracks2D::present(row[f])||!Tracks2D::present(row[f-1]))continue;
+            if(Tracks2D::present(row[0])&&Tracks2D::present(row[f])&&inside(row[0],polygon)){reference.push_back(row[0]);current.push_back(row[f]);}
+            if(!invertible||!Tracks2D::present(row[f])||!Tracks2D::present(row[f-1]))continue;
             if(!inside(inv.project(row[f-1]),polygon))continue;
             a.push_back(row[f-1]);b.push_back(row[f]);
-            if(Tracks2D::present(row[0])&&inside(row[0],polygon)){reference.push_back(row[0]);current.push_back(row[f]);}
         }
         MotionEstimate fit=estimate_motion(a,b,model);
-        if(!fit.valid)break;
-        path[f]={fit.transform*path[f-1].path,fit.confidence,fit.rms,fit.count,true};
+        if(fit.valid) path[f]={fit.transform*previous,fit.confidence,fit.rms,fit.count,anchored||polygon.empty()};
+        else anchored=false;
         if(reference.size()>=12) {
             auto absolute=estimate_motion(reference,current,model);
-            if(absolute.valid && absolute.count>=reference.size()*.6)
+            if(absolute.valid && absolute.count>=reference.size()*.6) {
                 path[f]={absolute.transform,absolute.confidence,absolute.rms,absolute.count,true};
+                anchored=true;
+            }
         }
     }
     return path;
+}
+
+namespace {
+/// Envelope no tempo de uma exigência por quadro: máximo (ou mínimo) numa
+/// janela e média gaussiana por cima. Continua satisfazendo cada quadro e muda
+/// devagar — aplicada quadro a quadro, a exigência (que vem do próprio tremor)
+/// devolvia o tremor à imagem.
+std::vector<f64> envelope(const std::vector<f64>& v,const std::vector<u8>& ok,int radius,f64 sigma,bool upper) {
+    const int n=static_cast<int>(v.size());
+    std::vector<f64> extreme(v),out(v);
+    for(int i=0;i<n;++i) {
+        if(!ok[i])continue;
+        for(int j=std::max(0,i-radius);j<=std::min(n-1,i+radius);++j)
+            if(ok[j])extreme[i]=upper?std::max(extreme[i],v[j]):std::min(extreme[i],v[j]);
+    }
+    for(int i=0;i<n;++i) {
+        if(!ok[i])continue;
+        f64 sum=0,total=0;
+        for(int j=std::max(0,i-radius);j<=std::min(n-1,i+radius);++j) {
+            if(!ok[j])continue;
+            const f64 w=std::exp(-static_cast<f64>((j-i)*(j-i))/(2*sigma*sigma));sum+=w*extreme[j];total+=w;
+        }
+        out[i]=total>0?sum/total:extreme[i];
+    }
+    return out;
+}
 }
 
 std::vector<StabilizedFrame> stabilize_path(const std::vector<MotionFrame>& path,u32 width,u32 height,f64 fps,const StabilizationOptions& opt) {
     if(path.empty()||!width||!height||!std::isfinite(fps)||fps<=0)return {};
     const int radius=std::clamp(static_cast<int>(std::ceil(std::clamp(opt.smoothSeconds,0.02f,3.f)*fps)),1,360);
     const f64 sigma=std::max(1.0,radius/2.0),maxScale=std::clamp(opt.maxScale,1.f,1.5f);
-    std::vector<StabilizedFrame> out(path.size());
-    for(usize i=0;i<path.size();++i) {
-        if(!path[i].valid)continue;
-        Homography smooth;
-        if(!opt.lock) {
-            smooth.m.fill(0);f64 total=0;
-            for(int j=std::max(0,static_cast<int>(i)-radius);j<=std::min(static_cast<int>(path.size())-1,static_cast<int>(i)+radius);++j) {
-                if(!path[j].valid)continue;
-                const f64 delta=j-static_cast<f64>(i),weight=std::exp(-delta*delta/(2*sigma*sigma));
-                for(int k=0;k<9;++k)smooth.m[k]+=weight*path[j].path.m[k];total+=weight;
-            }
-            if(total<=0)continue;
-            for(auto& value:smooth.m)value/=total;
+    const usize n=path.size();
+    std::vector<StabilizedFrame> out(n);
+    // 1. Caminho suave (gaussiana sobre os quadros medidos) e o inverso do medido.
+    std::vector<Homography> smooth(n),inverse(n);
+    std::vector<u8> ok(n,0);
+    for(usize i=0;i<n;++i) {
+        if(!path[i].valid||!path[i].path.inverse(inverse[i]))continue;
+        smooth[i].m.fill(0);f64 total=0;
+        for(int j=std::max(0,static_cast<int>(i)-radius);j<=std::min(static_cast<int>(n)-1,static_cast<int>(i)+radius);++j) {
+            if(!path[j].valid)continue;
+            const f64 delta=j-static_cast<f64>(i),weight=std::exp(-delta*delta/(2*sigma*sigma));
+            for(int k=0;k<9;++k)smooth[i].m[k]+=weight*path[j].path.m[k];total+=weight;
         }
-        Homography inv;if(!path[i].path.inverse(inv))continue;
-        const Homography raw=smooth*inv;
-        f64 strength=std::clamp(opt.strength,0.f,1.f);
-        Homography correction=blend(raw,strength);
-        f64 scale=1;
+        if(total<=0)continue;
+        for(auto& value:smooth[i].m)value/=total;
+        ok[i]=1;
+    }
+    // 2. Alvo de cada quadro: travar = identidade (alfa 0), suavizar = caminho
+    //    suave (alfa 1). Se o zoom máximo não cobre a correção, travar desliza
+    //    para o suave (o tremor continua fora; só a panorâmica lenta passa) e,
+    //    só se nem o suave cabe, a força cai (beta < 1). Antes a força caía
+    //    direto, quadro a quadro: "travar" numa panorâmica devolvia o tremor.
+    auto correction_for=[&](usize i,f64 alpha,f64 beta){return blend(blend(smooth[i],alpha)*inverse[i],beta);};
+    const f64 strength=std::clamp(static_cast<f64>(opt.strength),0.0,1.0);
+    std::vector<f64> alpha(n,opt.lock?0.0:1.0),beta(n,strength);
+    if(opt.crop!=CropMode::None) {
+        for(usize i=0;i<n;++i) {
+            if(!ok[i])continue;
+            if(opt.lock&&!covered(correction_for(i,0,strength),maxScale,width,height)) {
+                if(covered(correction_for(i,1,strength),maxScale,width,height)) {
+                    f64 lo=0,hi=1;
+                    for(int k=0;k<20;++k){const f64 mid=(lo+hi)/2;if(covered(correction_for(i,mid,strength),maxScale,width,height))hi=mid;else lo=mid;}
+                    alpha[i]=hi;
+                } else alpha[i]=1;
+            }
+            if(!covered(correction_for(i,alpha[i],beta[i]),maxScale,width,height)) {
+                f64 lo=0,hi=beta[i];
+                for(int k=0;k<20;++k){const f64 mid=(lo+hi)/2;if(covered(correction_for(i,alpha[i],mid),maxScale,width,height))lo=mid;else hi=mid;}
+                beta[i]=lo;
+            }
+        }
+        if(opt.lock)alpha=envelope(alpha,ok,radius,sigma,true);
+        beta=envelope(beta,ok,radius,sigma,false);
+    }
+    // 3. Correção final e o zoom que esconde as bordas.
+    for(usize i=0;i<n;++i) {
+        if(!ok[i])continue;
+        Homography correction=correction_for(i,alpha[i],beta[i]);
+        f64 scale=1,used=beta[i];
         if(opt.crop!=CropMode::None) {
             if(!covered(correction,maxScale,width,height)) {
-                f64 lo=0,hi=strength;
-                for(int k=0;k<20;++k){const f64 mid=(lo+hi)/2;if(covered(blend(raw,mid),maxScale,width,height))lo=mid;else hi=mid;}
-                strength=lo;correction=blend(raw,strength);
+                f64 lo=0,hi=used;
+                for(int k=0;k<20;++k){const f64 mid=(lo+hi)/2;if(covered(correction_for(i,alpha[i],mid),maxScale,width,height))lo=mid;else hi=mid;}
+                used=lo;correction=correction_for(i,alpha[i],used);
             }
             f64 lo=1,hi=maxScale;
             for(int k=0;k<20;++k){const f64 mid=(lo+hi)/2;if(covered(correction,mid,width,height))hi=mid;else lo=mid;}
             scale=hi;
         }
-        out[i]={correction,static_cast<f32>(scale),static_cast<f32>(strength),true};
+        out[i]={correction,static_cast<f32>(scale),static_cast<f32>(used),true};
     }
     if(opt.crop==CropMode::Static) {
         f32 peak=1;for(const auto& f:out)if(f.valid)peak=std::max(peak,f.scale);

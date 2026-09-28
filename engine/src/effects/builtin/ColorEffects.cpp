@@ -284,6 +284,84 @@ public:
     }
 };
 
+// -----------------------------------------------------------------------------
+// Preencher — tinta a camada inteira com uma cor chapada. A opacidade é o
+// quanto a cor cobre a imagem: 0 não faz nada, 100 troca tudo pela cor. O alfa
+// da camada não muda — quem era transparente continua transparente.
+// -----------------------------------------------------------------------------
+class Fill final : public Effect {
+public:
+    enum : u32 { kColor = 0, kOpacity };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kFill, "Preencher", "Cor", EffectClass::PerPixel};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_color("color", "Cor", Vec4{1.0f, 0.85f, 0.20f, 1.0f});
+        p.add_float("opacity", "Opacidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        // Alfa 0 na cor = "sem tinta": o efeito não desenha, mesmo com
+        // opacidade em 100%. É o que deixa a cor guardar o próprio "ligado".
+        return e.f(kOpacity) <= 0.0f || e.color(kColor).w <= 0.0f;
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kColor] = ParamValue::color(0.95f, 0.35f, 0.10f, 1.0f);
+        return true;
+    }
+    bool color_op(const EffectEval& e, ColorOp& op) const noexcept override {
+        const Vec4 c = e.color(kColor);
+        op.code = ColorOpCode::Fill;
+        op.p[1] = c.x;
+        op.p[2] = c.y;
+        op.p[3] = c.z;
+        op.p[4] = std::clamp(e.f(kOpacity) * 0.01f, 0.0f, 1.0f) * std::clamp(c.w, 0.0f, 1.0f);
+        return true;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Equilíbrio de cor (HLS) — matiz, luz e saturação num só controle, como o
+// painel do editor antigo: girar o matiz, clarear até o branco ou escurecer
+// até o preto, e saturar sem lavar a luz.
+// -----------------------------------------------------------------------------
+class ColorBalanceHls final : public Effect {
+public:
+    enum : u32 { kHue = 0, kLightness, kSaturation };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kColorBalanceHls, "Equilíbrio de cor (HLS)", "Cor",
+                                  EffectClass::PerPixel};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        // O matiz em graus (-180..180) é o que a pessoa vê; o shader recebe
+        // voltas (-0.5..0.5), que é como o HSL conta.
+        p.add_angle("hue", "Matiz", 0.0f, -180.0f, 180.0f);
+        p.add_float("lightness", "Luminosidade", 0.0f, -100.0f, 100.0f,
+                    kParamAnimatable | kParamPercent, "%");
+        p.add_float("saturation", "Saturação", 0.0f, -100.0f, 100.0f,
+                    kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return std::fabs(e.f(kHue)) < 1e-4f && std::fabs(e.f(kLightness)) < 1e-4f &&
+               std::fabs(e.f(kSaturation)) < 1e-4f;
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kHue] = ParamValue::scalar(-40.0f);      // esfria o quadro para o azul
+        v[kSaturation] = ParamValue::scalar(35.0f);
+        return true;
+    }
+    bool color_op(const EffectEval& e, ColorOp& op) const noexcept override {
+        op.code = ColorOpCode::BalanceHls;
+        op.p[1] = e.f(kHue) / 360.0f;
+        op.p[2] = std::clamp(e.f(kLightness) * 0.01f, -1.0f, 1.0f);
+        op.p[3] = std::clamp(e.f(kSaturation) * 0.01f, -1.0f, 1.0f);
+        return true;
+    }
+};
+
 } // namespace
 
 void register_color_effects(EffectRegistry& r) {
@@ -294,6 +372,10 @@ void register_color_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<ColorMatrix>());
     (void)r.add(std::make_unique<Levels>());
     (void)r.add(std::make_unique<Curves>());
+    // Preencher e Equilíbrio de cor: os dois por pixel entram na MESMA pilha
+    // fundida dos outros de cor — sem passe a mais.
+    (void)r.add(std::make_unique<Fill>());
+    (void)r.add(std::make_unique<ColorBalanceHls>());
 }
 
 } // namespace aurea::builtin

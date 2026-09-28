@@ -234,6 +234,24 @@ public:
     /// total de frames removidos.
     i64 close_gaps(FrameIndex from, FrameIndex to) noexcept;
 
+    // --- Ripple por LINHA (modo Edição de vídeo) ------------------------------
+    /// Uma LINHA é o `zOrder`: os trechos que a pessoa vê lado a lado na mesma
+    /// faixa da timeline. O ripple de edição de vídeo anda só dentro dela —
+    /// texto, imagem e overlay em outras linhas ficam parados no tempo, que é
+    /// o contrário do `shift_from`, que empurra a composição inteira.
+
+    /// Desloca no tempo os trechos DA LINHA `track` que começam em `from` ou
+    /// depois (menos `except`). Não toca em marcas nem em outras linhas.
+    void shift_track(FrameIndex from, i64 delta, u32 track, LayerId except = LayerId{}) noexcept;
+
+    /// A linha de um trecho: o `zOrder` dele. `kInvalidIndex` se ele não existe.
+    [[nodiscard]] u32 track_of(LayerId id) const noexcept;
+
+    /// Fecha os buracos DENTRO DE UMA LINHA em [from, to). Os vizinhos de
+    /// faixa andam para trás; o resto da composição não. Devolve os frames
+    /// removidos.
+    i64 close_gaps_in_track(FrameIndex from, FrameIndex to, u32 track) noexcept;
+
     // --- Marcas ----------------------------------------------------------------
     /// Sempre em ordem de frame; no máximo uma marca por frame.
     [[nodiscard]] const std::vector<Marker>& markers() const noexcept { return markers_; }
@@ -298,6 +316,9 @@ private:
     Scene3DId           scene_{};
     std::vector<Marker> markers_;
     bool                editMode_ = false;
+    /// Próxima LINHA livre. Cresce e nunca é reaproveitada: um trecho que
+    /// ficou sozinho na linha dele não passa a dividi-la com um trecho novo.
+    u32                 nextTrackId_ = 1;
 
     u64 revision_       = 1;
     u64 formatRevision_ = 1;

@@ -104,9 +104,41 @@ LayerId Composition::add_layer(LayerKind kind, std::string name) {
     Layer layer;
     layer.kind = kind;
     layer.name = std::move(name);
+    // A linha magnética nasce ligada quando o modo Edição da composição está
+    // ligado: quem monta vídeo longo não quer ligar isso camada por camada. A
+    // camada pode discordar depois, no inspetor dela.
+    layer.magneticTrack = editMode_;
     layer.start = FrameIndex{0};
     layer.end = duration_;
     layer.zOrder = order_.size();
+    // Um projeto aberto do disco pode trazer linhas com número acima do nosso
+    // contador (o do arquivo é outra sessão). Sem este ajuste, um trecho novo
+    // cairia numa linha que já existe e o ripple mexeria no vizinho errado.
+    layers_.for_each([&](LayerId, const Layer& other) {
+        if (other.trackId >= nextTrackId_) nextTrackId_ = other.trackId + 1;
+    });
+    layer.trackId = nextTrackId_++;
+
+    // LINHA MAGNÉTICA já montada + modo Edição: um trecho novo com FONTE entra
+    // ENCOSTADO no fim dessa linha, em vez de abrir uma linha só para ele.
+    // É o que CapCut e Premiere fazem ao importar mais um clipe, e é o que faz
+    // a sequência ficar lado a lado em vez de virar uma pilha de camadas.
+    // Sem modo Edição — ou sem nenhuma linha magnética — cada camada nova abre
+    // a linha dela, como sempre foi.
+    if (editMode_ && (kind == LayerKind::Video || kind == LayerKind::Audio || kind == LayerKind::Composition)) {
+        u32 lastTrack = kInvalidIndex;
+        i64 trackEnd = 0;
+        layers_.for_each([&](LayerId, const Layer& other) {
+            if (!other.magneticTrack) return;
+            if (lastTrack == kInvalidIndex || other.trackId > lastTrack) { lastTrack = other.trackId; trackEnd = 0; }
+            if (other.trackId == lastTrack) trackEnd = std::max(trackEnd, other.end.value);
+        });
+        if (lastTrack != kInvalidIndex) {
+            layer.trackId = lastTrack;
+            layer.start = FrameIndex{trackEnd};
+            layer.end = FrameIndex{trackEnd + duration_.value};
+        }
+    }
 
     const LayerId id = layers_.create(std::move(layer));
     order_.push_back(id);
@@ -290,6 +322,57 @@ void Composition::shift_from(FrameIndex from, i64 delta, LayerId except) noexcep
                                [](const Marker& a, const Marker& b) { return a.frame.value == b.frame.value; }),
                    markers_.end());
     touch();
+}
+
+u32 Composition::track_of(LayerId id) const noexcept {
+    const Layer* l = layer(id);
+    return l ? l->trackId : kInvalidIndex;
+}
+
+void Composition::shift_track(FrameIndex from, i64 delta, u32 track, LayerId except) noexcept {
+    if (delta == 0 || track == kInvalidIndex) return;
+    // Mesma proteção do ripple global: um trecho TRAVADO não pode ser movido
+    // por tabela. Quem chama decide o que fazer (o motor recusa a edição
+    // inteira), aqui só não se mexe nele.
+    layers_.for_each([&](LayerId id, Layer& l) {
+        if (id == except || l.locked || l.trackId != track || l.start.value < from.value) return;
+        l.start = FrameIndex{std::max<i64>(0, l.start.value + delta)};
+        l.end = FrameIndex{std::max<i64>(l.start.value + 1, l.end.value + delta)};
+    });
+    touch();
+}
+
+i64 Composition::close_gaps_in_track(FrameIndex from, FrameIndex to, u32 track) noexcept {
+    if (track == kInvalidIndex) return 0;
+    std::vector<std::pair<i64, i64>> busy;
+    layers_.for_each([&](LayerId, const Layer& l) {
+        if (l.trackId == track) busy.emplace_back(l.start.value, l.end.value);
+    });
+    if (busy.empty()) return 0;
+    std::sort(busy.begin(), busy.end());
+    std::vector<std::pair<i64, i64>> merged;
+    for (const auto& b : busy) {
+        if (!merged.empty() && b.first <= merged.back().second) merged.back().second = std::max(merged.back().second, b.second);
+        else merged.push_back(b);
+    }
+    std::vector<std::pair<i64, i64>> gaps;
+    i64 cursor = 0;
+    for (const auto& m : merged) {
+        const i64 a = std::max(cursor, from.value), b = std::min(m.first, to.value);
+        if (b > a) gaps.emplace_back(a, b);
+        cursor = std::max(cursor, m.second);
+    }
+    i64 removed = 0;
+    for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
+        bool anchored = false;
+        layers_.for_each([&](LayerId, const Layer& l) {
+            if (l.locked && l.trackId == track && l.start.value >= it->second) anchored = true;
+        });
+        if (anchored) continue;
+        shift_track(FrameIndex{it->second}, -(it->second - it->first), track);
+        removed += it->second - it->first;
+    }
+    return removed;
 }
 
 i64 Composition::close_gaps(FrameIndex from, FrameIndex to) noexcept {

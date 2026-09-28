@@ -2,6 +2,10 @@
 #include "aurea/tracking/MotionGeometry.hpp"
 
 namespace aurea::tracking {
+/// Quadros por análise de movimento (20 min a 30 fps). Ponto/dois pontos
+/// guardam ~150 bytes por quadro; o estabilizador/planar analisa em trechos
+/// de memória limitada. Antes eram 1800 (1 min) e um clipe longo era recusado.
+inline constexpr u32 kMaxMotionTrackFrames = 36000;
 enum class MotionTool : u32 { Point, TwoPoint, Planar, CornerPin, Stabilizer };
 struct MotionTrackData {
     MotionTool tool = MotionTool::Point;

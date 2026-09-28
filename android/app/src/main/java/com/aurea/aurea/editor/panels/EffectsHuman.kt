@@ -878,6 +878,93 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             2 to ParamHuman(label = R.string.fx_inverter),
             3 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
         )))
+    // --- Pacote do editor antigo: o que só ele tinha ---
+    put("aurea.color.fill", EffectHuman(
+        name = R.string.fx_name_fill,
+        keywords = "preencher fill cor chapada tinta solido",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_cor),
+            1 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+        )))
+    put("aurea.color.balance_hls", EffectHuman(
+        name = R.string.fx_name_color_balance_hls,
+        keywords = "equilibrio balanco cor hls matiz luz saturacao",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_matiz, suffix = "°", decimals = 0),
+            1 to ParamHuman(label = R.string.fx_luminosidade, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_saturacao, decimals = 0),
+        )))
+    put("aurea.blur.zoom", EffectHuman(
+        name = R.string.fx_name_zoom_blur,
+        keywords = "zoom rastro radial lente empurrar desfoque",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_centro),
+            1 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_esticar_bordas),
+            3 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+        )))
+    put("aurea.distort.bulge", EffectHuman(
+        name = R.string.fx_name_bulge,
+        keywords = "bojo bulge pinca estufar puxar lente centro",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_centro),
+            1 to ParamHuman(label = R.string.fx_raio, suffix = "%", decimals = 0),
+            2 to ParamHuman(label = R.string.fx_altura, suffix = "%", decimals = 0),
+            3 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+        )))
+    put("aurea.pattern.checkerboard", EffectHuman(
+        name = R.string.fx_name_checkerboard,
+        keywords = "xadrez checkerboard quadriculado tabuleiro celulas padrao",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_largura_celula, suffix = "px", decimals = 0),
+            1 to ParamHuman(label = R.string.fx_altura_celula, suffix = "px", decimals = 0),
+            2 to ParamHuman(label = R.string.fx_ancora),
+            3 to ParamHuman(label = R.string.fx_rotacao, suffix = "°", decimals = 0),
+            4 to ParamHuman(label = R.string.fx_suavidade_borda, suffix = "px", decimals = 0),
+            5 to ParamHuman(label = R.string.fx_inverter),
+            6 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+            7 to ParamHuman(label = R.string.fx_cor),
+        )))
+    put("aurea.pattern.hexagonal", EffectHuman(
+        name = R.string.fx_name_hexagonal,
+        keywords = "hexagonal favos abelha painel led malha matriz",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_tamanho_celula, suffix = "px", decimals = 0),
+            1 to ParamHuman(label = R.string.fx_ancora),
+            2 to ParamHuman(label = R.string.fx_rotacao, suffix = "°", decimals = 0),
+            3 to ParamHuman(label = R.string.fx_espessura, suffix = "px", decimals = 0),
+            4 to ParamHuman(label = R.string.fx_suavidade_borda, suffix = "px", decimals = 0),
+            5 to ParamHuman(label = R.string.fx_inverter),
+            6 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+            7 to ParamHuman(label = R.string.fx_cor),
+        )))
+    put("aurea.stylize.drop_shadow", EffectHuman(
+        name = R.string.fx_name_drop_shadow,
+        keywords = "sombra projetada drop shadow atras texto caixa distancia",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_cor_sombra),
+            1 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+            2 to ParamHuman(label = R.string.fx_direcao, suffix = "°", decimals = 0),
+            3 to ParamHuman(label = R.string.fx_distancia, suffix = "px", decimals = 0),
+            4 to ParamHuman(label = R.string.fx_suavidade, suffix = "px", decimals = 0),
+        )))
+    put("aurea.stylize.border", EffectHuman(
+        name = R.string.fx_name_border,
+        keywords = "borda contorno moldura traco outline",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_cor),
+            1 to ParamHuman(label = R.string.fx_largura, suffix = "px", decimals = 0),
+            2 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+        )))
+    // --- IA ---
+    put("aurea.ai.depth_map", EffectHuman(
+        name = R.string.fx_name_depth_map,
+        keywords = "profundidade depth mapa ia ai midas distancia perto longe z matte fundo",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+            1 to ParamHuman(label = R.string.fx_inverter),
+            2 to ParamHuman(label = R.string.fx_suavizacao, decimals = 0),
+        )))
     put("aurea.color.hue_saturation", EffectHuman(
         name = R.string.fx_name_hue_saturation,
         keywords = "matiz saturacao hue saturation luminosidade colorir tom cor",
@@ -987,6 +1074,183 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             1 to ParamHuman(label = R.string.fx_suavizar_borda, suffix = "px", decimals = 1),
             2 to ParamHuman(label = R.string.fx_mostrar_mascara),
         )))
+    // --- Pacote de áudio: efeitos de SOM (categoria Áudio) e os visuais ---
+    put("aurea.audio.backwards", EffectHuman(
+        name = R.string.afx_name_backwards,
+        keywords = "reverso backwards tras para frente inverter som trocar canais",
+        params = mapOf(0 to ParamHuman(label = R.string.afx_p_swap_channels)),
+    ))
+    put("aurea.audio.delay", EffectHuman(
+        name = R.string.afx_name_delay,
+        keywords = "atraso delay eco echo repeticao realimentacao feedback",
+        principal = listOf(0, 1, 2, 3, 4),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_delay_time, decimals = 0),
+            1 to ParamHuman(label = R.string.afx_p_delay_amount, decimals = 0),
+            2 to ParamHuman(label = R.string.afx_p_feedback, decimals = 0),
+            3 to ParamHuman(label = R.string.afx_p_dry_out, decimals = 0),
+            4 to ParamHuman(label = R.string.afx_p_wet_out, decimals = 0),
+        ),
+    ))
+    put("aurea.audio.flange_chorus", EffectHuman(
+        name = R.string.afx_name_flange_chorus,
+        keywords = "flange flanger chorus coro vozes modulacao",
+        principal = listOf(0, 1, 2, 3, 7, 8),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_voice_separation, decimals = 1),
+            1 to ParamHuman(label = R.string.afx_p_voices),
+            2 to ParamHuman(label = R.string.afx_p_mod_rate, decimals = 2),
+            3 to ParamHuman(label = R.string.afx_p_mod_depth, decimals = 0),
+            4 to ParamHuman(label = R.string.afx_p_voice_phase, decimals = 0),
+            5 to ParamHuman(label = R.string.afx_p_invert_phase),
+            6 to ParamHuman(label = R.string.afx_p_stereo_voices),
+            7 to ParamHuman(label = R.string.afx_p_dry_out, decimals = 0),
+            8 to ParamHuman(label = R.string.afx_p_wet_out, decimals = 0),
+        ),
+    ))
+    put("aurea.audio.high_low_pass", EffectHuman(
+        name = R.string.afx_name_high_low_pass,
+        keywords = "passa alta passa baixa high low pass filtro corte graves agudos",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_filter_options),
+            1 to ParamHuman(label = R.string.afx_p_cutoff, decimals = 0),
+            2 to ParamHuman(label = R.string.afx_p_dry_out, decimals = 0),
+            3 to ParamHuman(label = R.string.afx_p_wet_out, decimals = 0),
+        ),
+    ))
+    put("aurea.audio.stereo_mixer", EffectHuman(
+        name = R.string.afx_name_stereo_mixer,
+        keywords = "mixer estereo stereo pan balanco nivel fase canais",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_left_level, decimals = 0),
+            1 to ParamHuman(label = R.string.afx_p_right_level, decimals = 0),
+            2 to ParamHuman(label = R.string.afx_p_left_pan, decimals = 0),
+            3 to ParamHuman(label = R.string.afx_p_right_pan, decimals = 0),
+            4 to ParamHuman(label = R.string.afx_p_invert_phase),
+        ),
+    ))
+    put("aurea.audio.modulator", EffectHuman(
+        name = R.string.afx_name_modulator,
+        keywords = "modulador modulator vibrato tremolo",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_mod_type),
+            1 to ParamHuman(label = R.string.afx_p_mod_rate, decimals = 2),
+            2 to ParamHuman(label = R.string.afx_p_mod_depth, decimals = 1),
+            3 to ParamHuman(label = R.string.afx_p_amp_mod, decimals = 0),
+        ),
+    ))
+    put("aurea.audio.parametric_eq", EffectHuman(
+        name = R.string.afx_name_parametric_eq,
+        keywords = "eq equalizador parametrico parametric bandas graves agudos",
+        principal = (0 until 12).toList(),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_band1_enable),
+            1 to ParamHuman(label = R.string.afx_p_band1_freq, decimals = 0),
+            2 to ParamHuman(label = R.string.afx_p_band1_width, decimals = 1),
+            3 to ParamHuman(label = R.string.afx_p_band1_gain, decimals = 1),
+            4 to ParamHuman(label = R.string.afx_p_band2_enable),
+            5 to ParamHuman(label = R.string.afx_p_band2_freq, decimals = 0),
+            6 to ParamHuman(label = R.string.afx_p_band2_width, decimals = 1),
+            7 to ParamHuman(label = R.string.afx_p_band2_gain, decimals = 1),
+            8 to ParamHuman(label = R.string.afx_p_band3_enable),
+            9 to ParamHuman(label = R.string.afx_p_band3_freq, decimals = 0),
+            10 to ParamHuman(label = R.string.afx_p_band3_width, decimals = 1),
+            11 to ParamHuman(label = R.string.afx_p_band3_gain, decimals = 1),
+        ),
+    ))
+    put("aurea.audio.room_reverb", EffectHuman(
+        name = R.string.afx_name_reverb,
+        keywords = "reverb reverberacao sala eco ambiencia",
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_reverb_time, decimals = 0),
+            1 to ParamHuman(label = R.string.afx_p_diffusion, decimals = 0),
+            2 to ParamHuman(label = R.string.afx_p_decay, decimals = 0),
+            3 to ParamHuman(label = R.string.afx_p_brightness, decimals = 0),
+            4 to ParamHuman(label = R.string.afx_p_dry_out, decimals = 0),
+            5 to ParamHuman(label = R.string.afx_p_wet_out, decimals = 0),
+        ),
+    ))
+    put("aurea.audio.tone", EffectHuman(
+        name = R.string.afx_name_tone,
+        keywords = "tom tone gerador seno onda quadrada bip nota acorde",
+        principal = listOf(0, 1, 2, 3, 4, 5, 6),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_waveform),
+            1 to ParamHuman(label = R.string.afx_p_freq1, decimals = 2),
+            2 to ParamHuman(label = R.string.afx_p_freq2, decimals = 2),
+            3 to ParamHuman(label = R.string.afx_p_freq3, decimals = 2),
+            4 to ParamHuman(label = R.string.afx_p_freq4, decimals = 2),
+            5 to ParamHuman(label = R.string.afx_p_freq5, decimals = 2),
+            6 to ParamHuman(label = R.string.afx_p_level, decimals = 0),
+        ),
+    ))
+    put("aurea.generate.audio_waveform", EffectHuman(
+        name = R.string.afx_name_audio_waveform,
+        keywords = "forma de onda waveform audio osciloscopio som visualizador",
+        principal = listOf(0, 1, 2, 4, 7, 10, 11, 13),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_audio_layer),
+            1 to ParamHuman(label = R.string.fx_ponto_inicial),
+            2 to ParamHuman(label = R.string.fx_ponto_final),
+            3 to ParamHuman(label = R.string.afx_p_displayed_samples),
+            4 to ParamHuman(label = R.string.fx_altura_maxima, suffix = "px", decimals = 0),
+            5 to ParamHuman(label = R.string.afx_p_audio_duration, decimals = 0),
+            6 to ParamHuman(label = R.string.afx_p_audio_offset, decimals = 0),
+            7 to ParamHuman(label = R.string.fx_espessura, suffix = "px", decimals = 1),
+            8 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+            9 to ParamHuman(label = R.string.afx_p_random_seed),
+            10 to ParamHuman(label = R.string.afx_p_inside_color),
+            11 to ParamHuman(label = R.string.afx_p_outside_color),
+            12 to ParamHuman(label = R.string.afx_p_waveform_options),
+            13 to ParamHuman(label = R.string.afx_p_display_options),
+            14 to ParamHuman(label = R.string.fx_compor_original),
+        ),
+    ))
+    put("aurea.generate.spectrum_analyzer", EffectHuman(
+        name = R.string.afx_name_spectrum,
+        keywords = "espectro de audio audio spectrum som musica barras visualizador equalizador frequencias",
+        principal = listOf(0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 18, 19),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_audio_layer),
+            1 to ParamHuman(label = R.string.fx_ponto_inicial),
+            2 to ParamHuman(label = R.string.fx_ponto_final),
+            3 to ParamHuman(label = R.string.afx_p_polar),
+            4 to ParamHuman(label = R.string.afx_p_start_freq, decimals = 0),
+            5 to ParamHuman(label = R.string.afx_p_end_freq, decimals = 0),
+            6 to ParamHuman(label = R.string.afx_p_freq_bands),
+            7 to ParamHuman(label = R.string.fx_altura_maxima, suffix = "px", decimals = 0),
+            8 to ParamHuman(label = R.string.afx_p_audio_duration, decimals = 0),
+            9 to ParamHuman(label = R.string.afx_p_audio_offset, decimals = 0),
+            10 to ParamHuman(label = R.string.fx_espessura, suffix = "px", decimals = 1),
+            11 to ParamHuman(label = R.string.fx_suavidade, decimals = 0),
+            12 to ParamHuman(label = R.string.afx_p_inside_color),
+            13 to ParamHuman(label = R.string.afx_p_outside_color),
+            14 to ParamHuman(label = R.string.afx_p_blend_overlap),
+            15 to ParamHuman(label = R.string.afx_p_hue_interp),
+            16 to ParamHuman(label = R.string.afx_p_dynamic_hue),
+            17 to ParamHuman(label = R.string.afx_p_color_symmetry),
+            18 to ParamHuman(label = R.string.afx_p_display_options),
+            19 to ParamHuman(label = R.string.afx_p_side_options),
+            20 to ParamHuman(label = R.string.afx_p_duration_averaging),
+            21 to ParamHuman(label = R.string.fx_compor_original),
+        ),
+    ))
+    put("aurea.stylize.ball_grid", EffectHuman(
+        name = R.string.afx_name_balls,
+        keywords = "bolas esferas balls spheres grade particulas explodir dispersar torcer",
+        principal = listOf(0, 1, 2, 3, 4, 5, 6),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.afx_p_scatter, suffix = "px", decimals = 0),
+            1 to ParamHuman(label = R.string.afx_p_rotation_axis),
+            2 to ParamHuman(label = R.string.afx_p_rotation),
+            3 to ParamHuman(label = R.string.afx_p_twist_property),
+            4 to ParamHuman(label = R.string.afx_p_twist_angle),
+            5 to ParamHuman(label = R.string.afx_p_grid_spacing, suffix = "px", decimals = 1),
+            6 to ParamHuman(label = R.string.afx_p_ball_size, decimals = 0),
+            7 to ParamHuman(label = R.string.afx_p_instability_state),
+            8 to ParamHuman(label = R.string.afx_p_instability, suffix = "px", decimals = 1),
+        ),
+    ))
 }
 
 /**
@@ -1028,6 +1292,7 @@ internal fun categoryGlyph(category: String): Char = when (normalizeSearch(categ
     "recorte" -> CupertinoGlyph.Scissors
     "tempo" -> CupertinoGlyph.Timer
     "controles de expressao" -> CupertinoGlyph.SliderHorizontal3
+    "audio" -> CupertinoGlyph.MusicNote
     else -> CupertinoGlyph.WandStars
 }
 

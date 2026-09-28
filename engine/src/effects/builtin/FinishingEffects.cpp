@@ -372,6 +372,212 @@ public:
     }
 };
 
+// -----------------------------------------------------------------------------
+// Sombra projetada — a silhueta da camada deslocada, borrada e pintada ATRÁS
+// dela. É o efeito mais usado de qualquer editor e o único que faltava para
+// separar texto e forma do fundo.
+//
+// Dois passes separáveis: o primeiro desloca e borra pela DIREÇÃO, o segundo
+// fecha o borrão na PERPENDICULAR e compõe. O eixo é convertido em uv aqui
+// (direção em graus × distância em px ÷ tamanho da região em cada eixo), o que
+// é o que faz uma sombra na diagonal ter o mesmo comprimento de uma na
+// vertical.
+//
+// A região cresce por distância + suavidade e é recortada ao quadro: uma
+// camada deslocada para fora continua com a sombra desenhada, sem alocar uma
+// textura do tamanho da soma.
+// -----------------------------------------------------------------------------
+class DropShadow final : public Effect {
+public:
+    enum : u32 { kShadowColor = 0, kOpacity, kDirection, kDistance, kSoftness };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kDropShadow, "Sombra projetada", "Estilizar",
+                                  EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_color("shadow_color", "Cor da sombra", Vec4{0.0f, 0.0f, 0.0f, 1.0f});
+        p.add_float("opacity", "Opacidade", 70.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_angle("direction", "Direção", 135.0f);
+        p.add_float("distance", "Distância", 18.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, 5000.0f);
+        p.add_float("softness", "Suavidade", 12.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, 5000.0f);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return !(e.color(kShadowColor).w > 0.0f) || !(e.f(kOpacity) > 0.01f);
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kShadowColor] = ParamValue::color(0.0f, 0.0f, 0.0f, 1.0f);
+        v[kOpacity] = ParamValue::scalar(85.0f);
+        v[kDistance] = ParamValue::scalar(34.0f);
+        v[kSoftness] = ParamValue::scalar(22.0f);
+        return true;
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        return std::clamp(finite_or(e.f(kDistance), 0.0f), 0.0f, 5000.0f) +
+               std::clamp(finite_or(e.f(kSoftness), 0.0f), 0.0f, 5000.0f);
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_drop_shadow_blur_frag, work));
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_drop_shadow_combine_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        const f32 distance = std::clamp(finite_or(e.f(kDistance), 0.0f), 0.0f, 5000.0f);
+        const f32 softness = std::clamp(finite_or(e.f(kSoftness), 0.0f), 0.0f, 5000.0f);
+        const f32 reach = distance + softness;
+        const Rect region = spread_region(input.region, reach, reach, e.placement, margin);
+        if (region.w <= 0.0f || region.h <= 0.0f) return Errc::InvalidArgument;
+
+        u32 w = 0, h = 0;
+        ctx.region_size(region, input.texel_scale_x(), w, h);
+
+        // Direção em graus. Os passos vão em PIXELS DA CAMADA e o shader os
+        // converte para uv com a densidade do que ele amostra — é o que faz a
+        // mesma distância deslocar o mesmo tanto na horizontal e na vertical.
+        const f32 ang = e.f(kDirection) * kDeg2Rad;
+        const f32 dx = std::cos(ang), dy = std::sin(ang);
+        const f32 perStep = softness / (2.0f * 8.0f);
+
+        const Vec4 toInput = EffectBuildContext::uv_map(region, input.region);
+        struct {
+            Vec4 uvMap; Vec4 texel; Vec4 p0; Vec4 p1; Vec4 p2; Vec4 p3; Vec4 color;
+        } u{};
+        u.uvMap = toInput;
+        u.texel = Vec4{region.w > 0.0f ? 1.0f / region.w : 0.0f, region.h > 0.0f ? 1.0f / region.h : 0.0f,
+                       input.texel_scale_x(), input.texel_scale_y()};
+
+        // 1. Silhueta deslocada e borrada pela direção. A amostra é a textura
+        // da entrada, então a densidade é a da região DELA.
+        u.p0 = Vec4{dx * perStep, dy * perStep, 0.0f, 0.0f};
+        u.p1 = Vec4{dx * distance, dy * distance, 0.0f, 0.0f};
+        u.p3 = Vec4{std::max(input.region.w, 1e-4f), std::max(input.region.h, 1e-4f), 0.0f, 0.0f};
+        const FGTexture alpha = ctx.texture("sombra-alfa", w, h);
+        if (ctx.fullscreen_pass("sombra-alfa", PassStage::Effects, alpha,
+                                ShaderId::effects_drop_shadow_blur_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
+                                &u, sizeof(u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+
+        // 2. Fecha o borrão na perpendicular e compõe atrás da camada.
+        // A perpendicular é a direção girada 90°: (-dy, dx). Agora a amostra é
+        // a silhueta, que já está na região do efeito — a densidade é a dela e
+        // o mapa é identidade.
+        u.p0 = Vec4{-dy * perStep, dx * perStep, 0.0f,
+                    std::clamp(finite_or(e.f(kOpacity), 0.0f) / 100.0f, 0.0f, 1.0f)};
+        u.p1 = Vec4{0.0f, 0.0f, 0.0f, 0.0f};
+        u.p2 = toInput;                 // só a camada usa este mapa
+        u.p3 = Vec4{std::max(region.w, 1e-4f), std::max(region.h, 1e-4f), 0.0f, 0.0f};
+        u.color = e.color(kShadowColor);
+        u.uvMap = Vec4{1.0f, 1.0f, 0.0f, 0.0f};
+
+        const FGTexture result = ctx.texture("sombra-projetada", w, h);
+        if (ctx.fullscreen_pass("sombra-projetada", PassStage::Effects, result,
+                                ShaderId::effects_drop_shadow_combine_frag,
+                                {PassTexture{alpha, {}, CommonSampler::LinearClamp},
+                                 PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                &u, sizeof(u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        out = LayerImage{result, region, w, h};
+        return OkStatus;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Borda — o contorno sólido em volta da silhueta da camada. Dilatação por
+// máximo (não por média: a borda não pode desbotar) em dois passes separáveis,
+// com o traço em pixels da camada.
+//
+// O anel é o que a dilatação ganhou MENOS o que a camada já cobria — é o que
+// impede o traço de invadir a imagem e escurecê-la por dentro. Ele é composto
+// por baixo da camada, então uma franja semitransparente ganha a cor sem
+// apagar o que estava lá.
+// -----------------------------------------------------------------------------
+class Border final : public Effect {
+public:
+    enum : u32 { kColor = 0, kWidth, kOpacity };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kBorder, "Borda", "Estilizar", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_color("color", "Cor", Vec4{1.0f, 1.0f, 1.0f, 1.0f});
+        p.add_float("width", "Largura", 8.0f, 0.5f, 200.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.1f, 2000.0f);
+        p.add_float("opacity", "Opacidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return !(e.color(kColor).w > 0.0f) || !(e.f(kOpacity) > 0.01f) || !(e.f(kWidth) > 0.05f);
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kColor] = ParamValue::color(0.10f, 0.65f, 0.95f, 1.0f);
+        v[kWidth] = ParamValue::scalar(14.0f);
+        return true;
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        return std::clamp(finite_or(e.f(kWidth), 0.0f), 0.0f, 2000.0f);
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_border_dilate_frag, work));
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_border_combine_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        const f32 width = std::clamp(finite_or(e.f(kWidth), 8.0f), 0.1f, 2000.0f);
+        const Rect region = spread_region(input.region, width, width, e.placement, margin);
+        if (region.w <= 0.0f || region.h <= 0.0f) return Errc::InvalidArgument;
+
+        u32 w = 0, h = 0;
+        ctx.region_size(region, input.texel_scale_x(), w, h);
+
+        const Vec4 toInput = EffectBuildContext::uv_map(region, input.region);
+        struct {
+            Vec4 uvMap; Vec4 texel; Vec4 p0; Vec4 p1; Vec4 p2; Vec4 p3; Vec4 color;
+        } u{};
+        u.texel = Vec4{region.w > 0.0f ? 1.0f / region.w : 0.0f, region.h > 0.0f ? 1.0f / region.h : 0.0f,
+                       input.texel_scale_x(), input.texel_scale_y()};
+
+        // 1. Dilata na horizontal. O passo é a meia-largura dividida pelas
+        // amostras: a caixa cobre exatamente `width` px. A amostra é a textura
+        // da entrada, então a densidade é a da região dela.
+        const f32 perStep = width / 8.0f;
+        u.uvMap = toInput;
+        u.p0 = Vec4{perStep, 0.0f, 0.0f, 0.0f};
+        u.p3 = Vec4{std::max(input.region.w, 1e-4f), std::max(input.region.h, 1e-4f), 0.0f, 0.0f};
+        const FGTexture dilated = ctx.texture("borda-dilata", w, h);
+        if (ctx.fullscreen_pass("borda-dilata", PassStage::Effects, dilated,
+                                ShaderId::effects_border_dilate_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
+                                &u, sizeof(u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+
+        // 2. Dilata na vertical e compõe o anel por baixo da camada. Agora a
+        // amostra é a silhueta dilatada, na região do efeito.
+        u.uvMap = Vec4{1.0f, 1.0f, 0.0f, 0.0f};
+        u.p0 = Vec4{0.0f, perStep, 0.0f,
+                    std::clamp(finite_or(e.f(kOpacity), 0.0f) / 100.0f, 0.0f, 1.0f)};
+        u.p2 = toInput;
+        u.p3 = Vec4{std::max(region.w, 1e-4f), std::max(region.h, 1e-4f), 0.0f, 0.0f};
+        u.color = e.color(kColor);
+
+        const FGTexture result = ctx.texture("borda", w, h);
+        if (ctx.fullscreen_pass("borda", PassStage::Effects, result, ShaderId::effects_border_combine_frag,
+                                {PassTexture{dilated, {}, CommonSampler::LinearClamp},
+                                 PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                &u, sizeof(u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        out = LayerImage{result, region, w, h};
+        return OkStatus;
+    }
+};
+
 } // namespace
 
 void register_finishing_effects(EffectRegistry& r) {
@@ -382,6 +588,8 @@ void register_finishing_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Mosaic>());
     (void)r.add(std::make_unique<FindEdges>());
     (void)r.add(std::make_unique<HueSaturation>());
+    (void)r.add(std::make_unique<DropShadow>());
+    (void)r.add(std::make_unique<Border>());
 }
 
 } // namespace aurea::builtin

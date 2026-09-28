@@ -11,7 +11,7 @@ class TimelinePropertyIsolationTest {
     private val position = key(0, 10)
     private val rotation = key(8, 10)
     private val scale = key(3, 11)
-    private fun row() = RowModel(1, LayerType.Image, 20, 100, 5, true, false, true, "clip", 0,
+    private fun row() = RowModel(1, LayerType.Image, 20, 100, 5, true, false, false, true, "clip", 0,
         intArrayOf(25, 26, 45), arrayOf(listOf(position, rotation), listOf(scale), listOf(key(0, 30))))
 
     @Test fun overviewDragDoesNotMoveCoincidentRotation() {

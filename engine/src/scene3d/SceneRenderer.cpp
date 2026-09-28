@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <new>
 
 namespace aurea::scene3d {
 namespace {
@@ -613,16 +614,90 @@ void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
     else { envKey_ = key; envSpecTier_ = spec; envBgTier_ = bg; }
 }
 
+std::shared_ptr<SceneRenderer::UploadPool> SceneRenderer::make_upload_pool(BufferUsage usage, usize minBytes, const char* name) {
+    auto pool = std::make_shared<UploadPool>();
+    pool->usage = usage;
+    pool->minBytes = minBytes;
+    pool->name = name;
+    return pool;
+}
+
+namespace {
+/// Um buffer emprestado a um build; volta ao pool quando a GPU termina o quadro.
+struct UploadTicket {
+    std::shared_ptr<SceneRenderer::UploadPool> pool;
+    SceneRenderer::UploadPool::Buf buf;
+    u32 generation = 0;
+};
+} // namespace
+
+BufferHandle SceneRenderer::take_upload(const std::shared_ptr<UploadPool>& pool, usize bytes) noexcept {
+    UploadPool::Buf buf{};
+    BufferHandle retire{};
+    {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        // O menor livre que cabe (em regime as capacidades ficam parecidas).
+        usize pick = pool->free.size();
+        for (usize i = 0; i < pool->free.size(); ++i) {
+            if (pool->free[i].cap >= bytes && (pick == pool->free.size() || pool->free[i].cap < pool->free[pick].cap)) pick = i;
+        }
+        if (pick < pool->free.size()) {
+            buf = pool->free[pick];
+            pool->free[pick] = pool->free.back();
+            pool->free.pop_back();
+        } else if (!pool->free.empty()) {
+            // Nenhum cabe: um pequeno sai, para o pool não acumular sobras.
+            retire = pool->free.back().handle;
+            pool->free.pop_back();
+            pool->all.erase(std::remove(pool->all.begin(), pool->all.end(), retire), pool->all.end());
+        }
+    }
+    if (retire.valid()) gpu_->destroy_buffer(retire);
+    if (!buf.handle.valid()) {
+        BufferDesc bd;
+        bd.bytes = std::max<usize>(bytes * 2, pool->minBytes);
+        bd.usage = pool->usage;
+        bd.access = MemoryAccess::Upload;
+        bd.debugName = pool->name;
+        auto b = gpu_->create_buffer(bd);
+        if (!b.ok()) return BufferHandle{};
+        buf = UploadPool::Buf{*b, bd.bytes};
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        pool->all.push_back(buf.handle);
+    }
+    u32 generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        generation = pool->generation;
+    }
+    // Sem memória para o bilhete o buffer só não volta à fila (o shutdown o
+    // destrói pela lista `all`): nunca é reusado antes da GPU terminar.
+    if (auto* ticket = new (std::nothrow) UploadTicket{pool, buf, generation}) {
+        gpu_->defer_until_gpu_done([](void* p) {
+            std::unique_ptr<UploadTicket> t(static_cast<UploadTicket*>(p));
+            std::lock_guard<std::mutex> lock(t->pool->mutex);
+            if (t->generation == t->pool->generation) t->pool->free.push_back(t->buf);
+        }, ticket);
+    }
+    return buf.handle;
+}
+
+void SceneRenderer::drop_upload_pools(bool destroy) noexcept {
+    for (const std::shared_ptr<UploadPool>& pool : {jointPool_, morphPool_, instPool_}) {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        if (destroy && gpu_) {
+            for (BufferHandle b : pool->all) gpu_->destroy_buffer(b);
+        }
+        pool->all.clear();
+        pool->free.clear();
+        ++pool->generation;
+    }
+}
+
 void SceneRenderer::shutdown() noexcept {
     if (pendingEnv_.valid()) pendingEnv_.wait();
     if (!gpu_) return;
-    for (u32 i = 0; i < kJointRing; ++i) {
-        if (jointBuf_[i].valid()) gpu_->destroy_buffer(jointBuf_[i]);
-        if (morphBuf_[i].valid()) gpu_->destroy_buffer(morphBuf_[i]);
-        if (instBuf_[i].valid()) gpu_->destroy_buffer(instBuf_[i]);
-        jointBuf_[i] = morphBuf_[i] = instBuf_[i] = BufferHandle{};
-        jointCap_[i] = morphCap_[i] = instCap_[i] = 0;
-    }
+    drop_upload_pools(true);
     release_all();
     release_environment();
     for (TextureHandle* t : {&white_, &flatNormal_, &black_, &envCube_, &brdfLut_}) {
@@ -636,10 +711,7 @@ void SceneRenderer::shutdown() noexcept {
 
 void SceneRenderer::forget_device() noexcept {
     models_.clear();
-    for (u32 i = 0; i < kJointRing; ++i) {
-        jointBuf_[i] = morphBuf_[i] = instBuf_[i] = BufferHandle{};
-        jointCap_[i] = morphCap_[i] = instCap_[i] = 0;
-    }
+    drop_upload_pools(false);
     irradiance_ = prefiltered_ = iblLut_ = background_ = TextureHandle{};
     white_ = flatNormal_ = black_ = envCube_ = brdfLut_ = TextureHandle{};
     cubeSampler_ = SamplerHandle{};
@@ -1088,28 +1160,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             total += frame.instances[i].jointMatrices.size();
         }
         if (total > 0) {
-            const u32 slot = jointSlot_++ % kJointRing;
-            const usize bytes = total * sizeof(Mat4);
-            if (jointCap_[slot] < bytes) {
-                if (jointBuf_[slot].valid()) gpu_->destroy_buffer(jointBuf_[slot]);
-                BufferDesc bd;
-                bd.bytes = std::max<usize>(bytes * 2, 64 * sizeof(Mat4));
-                bd.usage = BufferUsage::Storage;
-                bd.access = MemoryAccess::Upload;
-                bd.debugName = "3d-juntas";
-                auto b = gpu_->create_buffer(bd);
-                jointBuf_[slot] = b.ok() ? *b : BufferHandle{};
-                jointCap_[slot] = b.ok() ? bd.bytes : 0;
-            }
+            const BufferHandle buf = take_upload(jointPool_, total * sizeof(Mat4));
             void* ptr = nullptr;
-            if (jointBuf_[slot].valid() && gpu_->map_buffer(jointBuf_[slot], ptr).ok() && ptr) {
+            if (buf.valid() && gpu_->map_buffer(buf, ptr).ok() && ptr) {
                 auto* dst = static_cast<Mat4*>(ptr);
                 for (usize i = 0; i < frame.instances.size(); ++i) {
                     const auto& jm = frame.instances[i].jointMatrices;
                     std::copy(jm.begin(), jm.end(), dst + instJointBase[i]);
                 }
-                gpu_->unmap_buffer(jointBuf_[slot]);
-                joints = jointBuf_[slot];
+                gpu_->unmap_buffer(buf);
+                joints = buf;
             }
         }
     }
@@ -1154,20 +1214,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             }
         }
         if (bytes > 0) {
-            const u32 slot = morphSlot_++ % kJointRing;
-            if (morphCap_[slot] < bytes) {
-                if (morphBuf_[slot].valid()) gpu_->destroy_buffer(morphBuf_[slot]);
-                BufferDesc bd;
-                bd.bytes = bytes * 2;
-                bd.usage = BufferUsage::Vertex;
-                bd.access = MemoryAccess::Upload;
-                bd.debugName = "3d-morph";
-                auto b = gpu_->create_buffer(bd);
-                morphBuf_[slot] = b.ok() ? *b : BufferHandle{};
-                morphCap_[slot] = b.ok() ? bd.bytes : 0;
-            }
+            const BufferHandle buf = take_upload(morphPool_, bytes);
             void* ptr = nullptr;
-            if (morphBuf_[slot].valid() && gpu_->map_buffer(morphBuf_[slot], ptr).ok() && ptr) {
+            if (buf.valid() && gpu_->map_buffer(buf, ptr).ok() && ptr) {
                 u8* base = static_cast<u8*>(ptr);
                 for (MorphJob& j : morphJobs) {
                     const Primitive& p = *j.src;
@@ -1200,8 +1249,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                         sh[v] = s;
                     }
                 }
-                gpu_->unmap_buffer(morphBuf_[slot]);
-                morphBuf = morphBuf_[slot];
+                gpu_->unmap_buffer(buf);
+                morphBuf = buf;
             } else {
                 morphJobs.clear();
             }
@@ -1531,24 +1580,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     }
     BufferHandle instBuf{};
     if (!instData.empty()) {
-        const u32 slot = instSlot_++ % kJointRing;
-        const usize bytes = instData.size() * sizeof(Mat4);
-        if (instCap_[slot] < bytes) {
-            if (instBuf_[slot].valid()) gpu_->destroy_buffer(instBuf_[slot]);
-            BufferDesc bd;
-            bd.bytes = std::max<usize>(bytes * 2, 64 * sizeof(Mat4));
-            bd.usage = BufferUsage::Storage;
-            bd.access = MemoryAccess::Upload;
-            bd.debugName = "3d-instancias";
-            auto b = gpu_->create_buffer(bd);
-            instBuf_[slot] = b.ok() ? *b : BufferHandle{};
-            instCap_[slot] = b.ok() ? bd.bytes : 0;
-        }
+        const BufferHandle buf = take_upload(instPool_, instData.size() * sizeof(Mat4));
         void* ptr = nullptr;
-        if (instBuf_[slot].valid() && gpu_->map_buffer(instBuf_[slot], ptr).ok() && ptr) {
+        if (buf.valid() && gpu_->map_buffer(buf, ptr).ok() && ptr) {
             std::copy(instData.begin(), instData.end(), static_cast<Mat4*>(ptr));
-            gpu_->unmap_buffer(instBuf_[slot]);
-            instBuf = instBuf_[slot];
+            gpu_->unmap_buffer(buf);
+            instBuf = buf;
         }
         // Sem o buffer (memória de GPU): o grupo não desenha — melhor faltar
         // um quadro do que desenhar todas as instâncias no lugar da primeira.

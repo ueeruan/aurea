@@ -368,7 +368,7 @@ std::shared_ptr<const tracking::MotionTrackData> read_motion_track(ByteReader& r
     const auto tool=r.u32v(),model=r.u32v();d->tool=static_cast<tracking::MotionTool>(tool);d->model=static_cast<tracking::MotionModel>(model);
     d->sourceW=r.u32v();d->sourceH=r.u32v();d->analysisW=r.u32v();d->analysisH=r.u32v();
     d->lost=r.u32v();d->reacquired=r.u32v();d->pointCount=r.u32v();d->fps=r.f64v();const auto n=r.u32v();
-    if(tool>4||model>3||d->pointCount!=(tool==0?1u:tool==1?2u:tool==4?0u:4u)||n<2||n>1800||d->lost>n||!std::isfinite(d->fps)||d->fps<=0||d->fps>1000||
+    if(tool>4||model>3||d->pointCount!=(tool==0?1u:tool==1?2u:tool==4?0u:4u)||n<2||n>tracking::kMaxMotionTrackFrames||d->lost>n||!std::isfinite(d->fps)||d->fps<=0||d->fps>1000||
        !d->sourceW||!d->sourceH||d->sourceW>65536||d->sourceH>65536||!d->analysisW||!d->analysisH||d->analysisW>d->sourceW||d->analysisH>d->sourceH||r.remaining()<static_cast<u64>(n)*133){r.fail();return {};}
     d->path.resize(n);d->localFrames.resize(n);d->sourceUs.resize(n);d->points.resize(n);
     for(u32 i=0;i<n;++i){
@@ -828,6 +828,10 @@ void write_layer(ByteWriter& w, const Layer& l) {
     // v33: lente da câmera 3D (profundidade de campo e força do desfoque).
     w.boolv(l.camera.dofEnabled);
     w.f32v(l.camera.blurAmount);
+    // v34: linha magnética da camada (edição de vídeo por faixa) e a linha a
+    // que o trecho pertence — o split dá a MESMA linha aos dois pedaços.
+    w.boolv(l.magneticTrack);
+    w.u32v(l.trackId);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -850,7 +854,10 @@ void write_layer(ByteWriter& w, const Layer& l) {
 // analysis after reopening instead of relying on an in-memory worker result.
 // v32: ambiente de estúdio procedural e o chão do grupo 3D (FloorSettings).
 // v33: lente da câmera (DOF ligado e força do desfoque) no fim da camada.
-constexpr u32 kTimelineSectionVersion = 33;
+// v34: linha magnética da camada, no fim da camada. Projeto anterior a ela lê
+//      com a opção DESLIGADA e continua com o modo Edição da composição.
+// O número vive no cabeçalho público (Serialization.hpp) para os testes o
+// compararem sem escrever um literal que envelhece.
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
 
 void read_layer(ByteReader& r, Layer& l) {
@@ -865,7 +872,7 @@ void read_layer(ByteReader& r, Layer& l) {
 
     l.parent = LayerId::unpack(r.u64v());
     l.zOrder = r.u32v();
-    l.blendMode = checked_enum(r.u16v(), BlendMode::Luminosity, BlendMode::Normal);
+    l.blendMode = checked_enum(r.u16v(), BlendMode::LinearBurn, BlendMode::Normal);
     l.visible = r.boolv();
     l.locked = r.boolv();
     l.solo = r.boolv();
@@ -1298,6 +1305,15 @@ void read_layer(ByteReader& r, Layer& l) {
         l.camera.dofEnabled = r.boolv();
         const f32 blur = r.f32v();
         l.camera.blurAmount = std::isfinite(blur) ? std::clamp(blur, 0.0f, 4.0f) : 1.0f;
+    }
+    if (g_readingTimelineVersion >= 34) {
+        l.magneticTrack = r.boolv();
+        l.trackId = r.u32v();
+    } else {
+        // Projeto gravado antes da linha magnética: a camada segue o modo
+        // Edição da composição, que é o comportamento com que ela foi montada.
+        l.magneticTrack = false;
+        l.trackId = 0;   // sem linha: cada trecho antigo é a linha dele
     }
 }
 
@@ -1778,6 +1794,18 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
                 dst->cameraTrackSource = remap(dst->cameraTrackSource);
                 dst->text.captionSource = remapPack(dst->text.captionSource);
                 dst->text.pathLayer = remapPack(dst->text.pathLayer);
+                // Parâmetro de efeito que aponta para outra camada ("Camada de
+                // áudio" da Forma de onda / do Espectro): o mesmo mapa.
+                for (EffectInstance& fx : dst->effects) {
+                    const ParameterRegistry* specs = expr::builtin_effects().params(fx.type);
+                    if (!specs) continue;
+                    for (u32 k = 0; k < specs->count() && k < fx.params.size(); ++k) {
+                        if (specs->at(k).type != ParamType::LayerReference) continue;
+                        ParamValue& v = fx.params[k].constant;
+                        v.ref = remapPack(v.ref);
+                        v.v[0] = v.ref ? static_cast<f32>(LayerId::unpack(v.ref).index) : -1.0f;
+                    }
+                }
             }
         }
         c->set_active_camera(remap(LayerId::unpack(activeCamPack)));

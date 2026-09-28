@@ -267,11 +267,72 @@ public:
     }
 };
 
+// -----------------------------------------------------------------------------
+// Desfoque de zoom — rastro radial: cada pixel é a média de amostras tiradas
+// ao longo da reta que liga o pixel ao centro. É o "empurrar a lente": as
+// bordas correm mais que o centro, porque o passo é proporcional à distância
+// até ele.
+// -----------------------------------------------------------------------------
+class ZoomBlur final : public Effect {
+public:
+    enum : u32 { kCenter = 0, kAmount, kRepeat, kMix };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kZoomBlur, "Desfoque de zoom", "Desfoque",
+                                  EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.0f, 2.0f, kParamAnimatable | kParamRelative);
+        p.typed_range(-10.0f, 10.0f);
+        // O rastro é uma fração da distância ao centro: 1.0 atravessa o quadro
+        // inteiro até o centro. O sinal troca o sentido.
+        p.add_float("amount", "Intensidade", 20.0f, -100.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(-400.0f, 400.0f);
+        p.add_bool("repeat_edge", "Repetir a borda", false);
+        p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return std::fabs(e.f(kAmount)) < 0.01f || e.f(kMix) < 0.01f;
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kAmount] = ParamValue::scalar(35.0f);
+        return true;
+    }
+    // Sem margem: o rastro é medido dentro da própria imagem (a amostra anda
+    // ENTRE o pixel e o centro, nunca além deles), e a região ficar do mesmo
+    // tamanho mantém a conta em uv — sem conversão de espaço de região.
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_zoom_blur_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        EffectUniforms u = base_uniforms(input);
+        const Vec2 c = e.p2(kCenter);
+        u.p0 = Vec4{c.x, c.y, std::clamp(e.f(kAmount) * 0.01f, -4.0f, 4.0f) * 0.5f,
+                    e.b(kRepeat) ? 1.0f : 0.0f};
+        // A mistura com o original: o rastro nunca é o único resultado.
+        const f32 k = std::clamp(e.f(kMix) * 0.01f, 0.0f, 1.0f);
+        u.p1 = Vec4{k, 0, 0, 0};
+        const CommonSampler sampler = e.b(kRepeat) ? CommonSampler::LinearRepeat : CommonSampler::LinearClamp;
+        out = input;
+        out.texture = ctx.texture("desfoque-zoom", input.width, input.height);
+        if (ctx.fullscreen_pass("desfoque-zoom", PassStage::Effects, out.texture,
+                                ShaderId::effects_zoom_blur_frag,
+                                {PassTexture{input.texture, {}, sampler}},
+                                &u, sizeof(u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        return OkStatus;
+    }
+};
+
 } // namespace
 
 void register_blur_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<GaussianBlur>());
     (void)r.add(std::make_unique<Sharpen>());
+    (void)r.add(std::make_unique<ZoomBlur>());
 }
 
 } // namespace aurea::builtin

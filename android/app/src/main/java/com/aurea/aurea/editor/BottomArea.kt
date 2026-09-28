@@ -163,13 +163,20 @@ private fun sectionsFor(l: DockLayer): List<DockSection> {
     }
 }
 
-/** Colunas da grade: 3 fichas grandes (ref15) e 4 quando o tipo tem mais de seis. */
-private fun columnsFor(count: Int): Int = if (count <= 6) 3 else 4
+/**
+ * No máximo duas fileiras, a de baixo com a metade maior (7 → 3 + 4, 8 → 4 + 4,
+ * 6 → 3 + 3): a doca tem sempre a mesma altura, e cada fileira reparte a
+ * largura inteira entre as suas fichas.
+ */
+internal fun dockRows(count: Int): List<Int> =
+    if (count <= 4) listOf(count) else listOf(count / 2, count - count / 2)
 
 /**
- * Doca da camada sem painel: a fileira rápida (velocidade · aparar início ·
- * dividir · aparar fim · mudo, só o que se aplica ao tipo) e a grade de fichas
- * grandes do tipo.
+ * Doca da camada sem painel, compacta: a fileira rápida só de ícones
+ * (velocidade · aparar início | dividir | aparar fim | puxar · mudo, só o que
+ * se aplica ao tipo) e as fichas do tipo em até duas fileiras baixas.
+ * A altura é a do conteúdo (`EditorLayout.DOCK`), não uma fração da tela:
+ * o que sobra fica para a timeline.
  */
 @Composable
 internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
@@ -195,83 +202,105 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
     val l = layer ?: return
     val type = LayerType.of(l.kind)
     val sections = sectionsFor(l)
-    val columns = columnsFor(sections.size)
-    val rows = sections.chunked(columns)
-    BoxWithConstraints(Modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
-        // Fileira rápida (44 + 16 de respiro) e os vãos de 8 entre fileiras.
-        val tileHeight = ((maxHeight.value - 60f - 8f * rows.size) / rows.size.coerceAtLeast(1)).coerceIn(64f, 96f)
-        Column(Modifier.fillMaxSize()) {
+    val rows = buildList {
+        var at = 0
+        for (n in dockRows(sections.size)) { add(sections.subList(at, at + n)); at += n }
+    }
+    Column(Modifier.fillMaxSize().background(AureaColors.EditorPanel).padding(horizontal = 10.dp)) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth().height(EditorLayout.DOCK_QUICK.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Velocidade: só quem tem tempo de mídia (o painel é de vídeo e áudio).
+            if (type == LayerType.Video || type == LayerType.Audio) {
+                DockSquare {
+                    DockTool(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 21) { openPanel(store, ui, EditorPanel.Speed) }
+                }
+            }
+            // As portas do grupo: entrar e desagrupar.
+            if (type == LayerType.Group) {
+                DockSquare {
+                    DockTool(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), 20) { store.openPrecomp(l.id) }
+                }
+                DockSquare {
+                    DockTool(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), 20) { store.ungroupPrecomp(l.id) }
+                }
+            }
+            // O tempo num bloco só: aparar início | dividir | aparar fim | puxar.
             Row(
                 Modifier
-                    .padding(start = 10.dp, top = 8.dp, end = 10.dp, bottom = 8.dp)
-                    .fillMaxWidth()
-                    .height(54.dp)
+                    .weight(1f)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(10.dp))
                     .background(ShellColors.DockRow),
-                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Velocidade: só quem tem tempo de mídia (o painel é de vídeo e áudio).
-                if (type == LayerType.Video || type == LayerType.Audio) {
-                    DockTool(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 21, label = stringResource(R.string.editor_velocidade)) { openPanel(store, ui, EditorPanel.Speed) }
-                }
-                // As portas do grupo: entrar e desagrupar.
-                if (type == LayerType.Group) {
-                    DockTool(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), 20, label = stringResource(R.string.dock_short_enter)) { store.openPrecomp(l.id) }
-                    DockTool(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), 20, label = stringResource(R.string.editor_desagrupar)) { store.ungroupPrecomp(l.id) }
-                }
-                DockTool(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote), 19, label = stringResource(R.string.dock_short_trim_start)) {
+                DockTool(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote), 19) {
                     timeEdit(store, l) { store.trimStart(l.id, store.playhead) }
                 }
-                DockTool(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), 19, label = stringResource(R.string.dock_short_split)) {
+                DockDivider()
+                DockTool(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), 19) {
                     timeEdit(store, l) { store.splitAtPlayhead(listOf(l.id)) }
                 }
-                DockTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), 19, label = stringResource(R.string.dock_short_trim_end)) {
+                DockDivider()
+                DockTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), 19) {
                     timeEdit(store, l) { store.trimEnd(l.id, store.playhead) }
                 }
+                DockDivider()
                 // Puxar para o cabeçote: o clipe inteiro anda até o cabeçote, a
                 // duração não muda. Não usa o `timeEdit` (que exige o cabeçote
                 // DENTRO da camada) — é justamente para quem está fora dele.
-                DockTool(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_puxar_cabecote), 19, label = stringResource(R.string.dock_short_pull)) {
+                DockTool(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_puxar_cabecote), 19) {
                     if (l.locked) store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar)
                     else {
                         if (store.playing) store.pause()
                         store.moveToPlayhead(l.id)
                     }
                 }
-                // Mudo: toque liga/desliga; segurar abre o volume.
-                if (l.hasAudio) {
+            }
+            // Mudo: toque liga/desliga; segurar abre o volume.
+            if (l.hasAudio) {
+                DockSquare {
                     DockTool(
                         if (l.muted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2,
                         if (l.muted) stringResource(R.string.editor_som_desligado_toque_ligar_segure_volume) else stringResource(R.string.editor_desligar_som_segure_volume),
                         20,
                         tint = if (l.muted) AureaColors.Accent else AureaColors.Text,
-                        label = stringResource(R.string.dock_short_sound),
                         onLongClick = { openPanel(store, ui, EditorPanel.Audio) },
                     ) { store.setAudioMuted(!l.muted) }
                 }
             }
-            Column(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-            ) {
-                rows.forEach { row ->
-                    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { s -> DockTile(s, tileHeight) {
-                            if (s == DockSection.EditText) store.openTextContentEditor()
-                            else openPanel(store, ui, panelFor(store, s))
-                        } }
-                        // A coluna vazia guarda o lugar: sem ela a última ficha
-                        // de uma fileira incompleta esticava.
-                        repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
-                }
+        }
+        rows.forEach { row ->
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { s -> DockTile(s, EditorLayout.DOCK_TILE) {
+                    if (s == DockSection.EditText) store.openTextContentEditor()
+                    else openPanel(store, ui, panelFor(store, s))
+                } }
             }
         }
     }
+}
+
+/** Quadrado da fileira rápida para uma ferramenta sozinha (velocidade, mudo, grupo). */
+@Composable
+private fun DockSquare(content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier
+            .size(EditorLayout.DOCK_QUICK.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(ShellColors.DockRow),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+@Composable
+private fun DockDivider() {
+    Box(Modifier.width(1.dp).height(20.dp).background(AureaColors.Border))
 }
 
 /** Ferramenta de tempo: cadeado e cabeçote fora da camada dizem por que não. */
@@ -308,26 +337,20 @@ private fun RowScope.DockTool(
     description: String,
     size: Int,
     tint: Color = AureaColors.Text,
-    label: String? = null,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    // Ícone sozinho obrigava a adivinhar (→| e |← parecem iguais): um nome
-    // curto embaixo diz o que o toque faz; a descrição completa fica no leitor.
-    Column(
+    // Só o ícone, como na fileira de tempo do editor antigo; a descrição
+    // completa fica no leitor de tela.
+    Box(
         Modifier
             .weight(1f)
             .fillMaxHeight()
-            .semantics(mergeDescendants = true) { contentDescription = description }
+            .semantics { contentDescription = description }
             .tocavel(haptic = true, onLongClick = onLongClick, onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        contentAlignment = Alignment.Center,
     ) {
         CupertinoIcon(glyph, size.dp, tint)
-        if (label != null) {
-            Text(label, color = tint.copy(alpha = .78f), fontSize = 10.sp, maxLines = 1,
-                modifier = Modifier.padding(top = 3.dp).clearAndSetSemantics { })
-        }
     }
 }
 

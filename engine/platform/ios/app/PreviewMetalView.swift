@@ -112,8 +112,6 @@ struct PreviewMetalView: UIViewRepresentable {
         private var maskOppositeLength: Float = 0
         private var maskDragOffset = SIMD2<Float>.zero
         private var handle = -1
-        private var pivot = CGPoint.zero
-        private var initialDistance: CGFloat = 1
         private var lastAngle: CGFloat = 0
         private var sweptAngle: CGFloat = 0
         private var gizmoAxis = -1
@@ -133,7 +131,7 @@ struct PreviewMetalView: UIViewRepresentable {
         private var gizmoLastAngle: CGFloat = 0
         private var gizmoDownTime: CFTimeInterval = 0
         private var pinchThreeD = false
-        private enum StageMode { case pending, move, scale, rotate, pinch, idle, gizmo, shape, scene }
+        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, scene }
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
         private var sceneMode = 0
         private var scenePicked: Int64?
@@ -537,7 +535,7 @@ struct PreviewMetalView: UIViewRepresentable {
                     startDrag(view: view)
                     stepEdit(first.position, view: view)
                 }
-            case .move, .scale, .rotate:
+            case .move:
                 if let first = pressed.first(where: { $0.id == stageFinger }) { stepEdit(first.position, view: view) }
                 else { stageMode = .idle }
             case .pinch:
@@ -550,12 +548,14 @@ struct PreviewMetalView: UIViewRepresentable {
             }
         }
         private func recordTarget(_ point: CGPoint, view: UIView) {
-            if editableSelection() && !ShapeStageGeometry.enabled(model) {
-                let handles = ShellStageGeometry.handles(screenCorners(view: view), size: view.bounds.size)
+            // Setas X/Y do 2D (a camada 3D tem o gizmo, que já pegou o toque).
+            if editableSelection() && !ShapeStageGeometry.enabled(model), let anchor = model.previewMarkerAnchor,
+               let id = model.primarySelection, model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty {
+                let tips = ShellStageGeometry.axisHandles(screenPoint(anchor.x, anchor.y, view: view), size: view.bounds.size)
                 var closest = CGFloat.greatestFiniteMagnitude
-                for i in handles.indices {
-                    let distance = hypot(point.x - handles[i].x, point.y - handles[i].y)
-                    if distance <= (i == 0 ? 22 : 26) && distance < closest { handle = i; closest = distance }
+                for i in tips.indices {
+                    let distance = hypot(point.x - tips[i].x, point.y - tips[i].y)
+                    if distance <= AureaDims.axisHandleTarget && distance < closest { handle = i; closest = distance }
                 }
                 if handle >= 0 { return }
             }
@@ -564,21 +564,20 @@ struct PreviewMetalView: UIViewRepresentable {
             else { targetLayer = hitLayer(c, slack: 0, includeLocked: true) }
         }
         private func startDrag(view: UIView) {
+            // Seta do eixo: o mesmo mover, travado em X (0) ou Y (1) desde o toque.
             if handle >= 0 {
                 guard editableSelection() else { stageMode = .idle; return }
-                keepTransform()
-                let world = worldPosition(startPosition, affine: StageGeom.floats(model.detail["parentAffine"]))
-                pivot = screenPoint(world.x, world.y, view: view)
-                initialDistance = max(8, hypot(stageDown.x - pivot.x, stageDown.y - pivot.y))
-                lastAngle = atan2(stageDown.y - pivot.y, stageDown.x - pivot.x); sweptAngle = 0
-                shell.grabbedHandle = handle; engage(); stageMode = handle == 0 ? .rotate : .scale
-            } else if let id = targetLayer {
+                targetLayer = model.primarySelection
+            }
+            if let id = targetLayer {
                 if model.primarySelection != id || model.selection.count != 1 { model.select(layerId: id, additive: false) }
                 guard let row = model.selectedLayer, row.id == id else { stageMode = .idle; return }
                 guard !row.locked else { model.toast = AureaText.t("sh_layer_locked_unlock_to_move"); stageMode = .idle; return }
                 keepTransform(); moveAffine = StageGeom.floats(model.detail["parentAffine"])
                 moveWorld = worldPosition(startPosition, affine: moveAffine)
-                moveDown = compositionPoint(stageDown, view: view); moveLast = moveDown; axisLock = 0
+                moveDown = compositionPoint(stageDown, view: view); moveLast = moveDown
+                axisLock = handle >= 0 ? handle + 1 : 0
+                if handle >= 0 { shell.grabbedHandle = handle }
                 if let b = StageGeom.bounds(model.detail) {
                     moveOffsetsX = [b.0 - moveWorld.x, (b.0 + b.2) / 2 - moveWorld.x, b.2 - moveWorld.x]
                     moveOffsetsY = [b.1 - moveWorld.y, (b.1 + b.3) / 2 - moveWorld.y, b.3 - moveWorld.y]
@@ -600,12 +599,6 @@ struct PreviewMetalView: UIViewRepresentable {
             guard let id = model.primarySelection else { return }
             switch stageMode {
             case .move: stepMove(point, view: view, id: id)
-            case .scale:
-                let f = clampScale(Float(hypot(point.x - pivot.x, point.y - pivot.y) / initialDistance))
-                beginEdit("escala"); model.setTransform2(3, startScale.x * f, 4, startScale.y * f, layer: id)
-            case .rotate:
-                sweep(atan2(point.y - pivot.y, point.x - pivot.x))
-                beginEdit("girar"); model.setTransform(8, value: startRotation.z + Float(sweptAngle * 180 / .pi), layer: id)
             default: break
             }
         }

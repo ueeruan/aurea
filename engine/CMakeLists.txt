@@ -86,6 +86,8 @@ set(AUREA_CORE_SOURCES
     src/render/MaskRaster.cpp
     src/render/ParticleExtras.cpp
     src/render/ParticleScene.cpp
+    src/render/RendererDepth.cpp
+    src/render/RendererAudio.cpp
     src/effects/Parameter.cpp
     src/effects/EffectGraph.cpp
     src/effects/builtin/ColorEffects.cpp
@@ -115,6 +117,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/GenerateEffects.cpp
     src/effects/builtin/MatteEffects.cpp
     src/effects/builtin/VhsLookEffect.cpp
+    src/effects/builtin/DepthEffects.cpp
+    src/effects/builtin/AudioPackEffects.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -122,9 +126,11 @@ set(AUREA_CORE_SOURCES
     src/media/MediaManager.cpp
     src/media/ThumbnailService.cpp
     src/media/PreviewProxy.cpp
+    src/ai/DepthMapService.cpp
     src/audio/AudioCore.cpp
     src/audio/AudioBlockCache.cpp
     src/audio/AudioMixer.cpp
+    src/audio/AudioFx.cpp
     src/audio/AudioEngine.cpp
     src/audio/Waveform.cpp
     src/audio/Beats.cpp

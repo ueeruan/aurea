@@ -1778,11 +1778,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Camadas ------------------------------------------------------------
-    fun deleteLayers(ids: Collection<Long> = selection, ripple: Boolean = editMode) {
+    fun deleteLayers(ids: Collection<Long> = selection, ripple: Boolean? = null) {
         val targets = layers.filter { it.id in ids && !it.locked }.map { it.id }
         if (targets.isEmpty()) return
         if (playing) pause()
-        if (ripple) {
+        // A LINHA MAGNÉTICA manda: apagar um trecho dela fecha o buraco mesmo
+        // no modo Composição. Sem nenhum trecho magnético na seleção, vale o
+        // modo Edição de sempre.
+        val closes = ripple ?: (editMode || layers.any { it.id in ids && it.magnetic })
+        if (closes) {
             // Modo Edição: some e o buraco fecha (um passo de desfazer).
             engine.rippleDelete(targets.toLongArray())
             refreshNow()
@@ -1820,6 +1824,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setLayerLocked(layer: Long, locked: Boolean) {
         send { setLayerLocked(layer, locked) }
         refreshNow()
+    }
+
+    /**
+     * LINHA MAGNÉTICA da camada: ligada, os cortes dela andam como uma faixa de
+     * montagem de vídeo (aparar e apagar puxam os vizinhos DA MESMA linha;
+     * texto e overlay em outras linhas ficam parados). Um passo de desfazer.
+     */
+    fun setLayerMagneticTrack(layer: Long, on: Boolean) {
+        if (!engine.setLayerMagneticTrack(layer, on)) return
+        refreshNow()
+        showToast(appText(if (on) R.string.msg_linha_magnetica_ligada else R.string.msg_linha_magnetica_desligada))
+    }
+
+    /**
+     * Arrasta um trecho para outro ponto DA MESMA linha, com os vizinhos
+     * abrindo espaço e a fita voltando a ficar encostada — reordenar os cortes.
+     * Só vale em linha magnética; false = o motor recusou (nada mudou).
+     */
+    fun reorderClip(layer: Long, targetFrame: Long): Boolean {
+        val ok = engine.reorderClip(layer, targetFrame)
+        if (ok) refreshNow()
+        return ok
     }
 
     /**
@@ -2895,7 +2921,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var pickCursor by mutableStateOf<androidx.compose.ui.geometry.Offset?>(null)
     var pickBoxes by mutableStateOf(floatArrayOf(17f, 65f))
 
-    fun beginPointPick(stabilize: Boolean) { beginMotionPick(if (stabilize) 4 else 0) }
+    /**
+     * Menu da camada: "Rastrear um ponto" (cria um Nulo que segue o ponto) e
+     * "Estabilizar pelo ponto" (o ponto fica parado na tela). Escolhe o ponto
+     * no palco, analisa em segundo plano e APLICA sozinho ao terminar — antes
+     * a análise rodava e o resultado nunca era aplicado (nem o painel abria).
+     */
+    fun beginPointPick(stabilize: Boolean) {
+        beginMotionPick(0)
+        if (pointPick != null) motionAutoApply = if (stabilize) 3 else 0
+    }
     fun beginMotionPick(tool: Int) {
         val id = primary ?: return
         if (layers.firstOrNull { it.id == id }?.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
@@ -2903,12 +2938,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         if (motionStatus[0].toInt() == 1) { showToast("Cancele a análise atual primeiro"); return }
         pause()
+        motionAutoApply = -1
         motionTool = tool; motionSource = id; motionSeeds.clear(); motionPicked = 0
         if (tool == 4) { startPickedMotion(); return }
         pointPick = false
         showToast(if (tool >= 2) "Toque nos cantos: superior esquerdo, direito, inferior direito e esquerdo" else "Toque no detalhe a seguir no preview")
     }
-    fun cancelMotionPick() { pointPick = null; motionSeeds.clear(); motionPicked = 0; pickCursor = null }
+    fun cancelMotionPick() { pointPick = null; motionSeeds.clear(); motionPicked = 0; pickCursor = null; motionAutoApply = -1 }
     fun finishPointPick(x: Float, y: Float) {
         if (pointPick == null || motionSource != primary) { cancelMotionPick(); return }
         motionSeeds.add(x); motionSeeds.add(y); motionPicked++
@@ -2916,11 +2952,33 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (motionPicked < needed) { showToast("Ponto $motionPicked/$needed. Toque no próximo"); return }
         pointPick = null; pickCursor = null; startPickedMotion()
     }
+    /** -1 nada; 0 cria o Nulo; 3 estabiliza pelo ponto — quando a análise do menu termina. */
+    private var motionAutoApply = -1
+    private var motionPoll: kotlinx.coroutines.Job? = null
     private fun startPickedMotion() {
         val id = motionSource ?: return
-        if (!engine.startMotionTrack(id, motionTool, motionModel, motionBackward, motionSeeds.toFloatArray(), motionFeature, motionSearch))
-            showToast("Não foi possível iniciar. Confira os pontos e use um trecho de até 1800 frames")
+        if (!engine.startMotionTrack(id, motionTool, motionModel, motionBackward, motionSeeds.toFloatArray(), motionFeature, motionSearch)) {
+            motionAutoApply = -1
+            showToast(appText(R.string.track_start_failed))
+        }
         refreshMotionStatus()
+        // Acompanha a análise mesmo com o painel fechado (progresso, fim, aplicar).
+        motionPoll?.cancel()
+        motionPoll = viewModelScope.launch {
+            while (true) {
+                refreshMotionStatus()
+                if (motionStatus[0].toInt() != 1) break
+                kotlinx.coroutines.delay(200)
+            }
+            val auto = motionAutoApply
+            motionAutoApply = -1
+            if (motionStatus[0].toInt() != 2) {
+                if (auto >= 0 && motionMessage.isNotEmpty() && motionStatus[0].toInt() == 3) showToast(motionMessage)
+                return@launch
+            }
+            if (auto == 3) applyMotion(3, lock = true, smooth = .5f, maxScale = 1f, crop = 0)
+            else if (auto == 0) applyMotion(0)
+        }
     }
     fun refreshMotionStatus() {
         val values = FloatArray(12); motionMessage = engine.motionTrackStatus(values); motionStatus = values
@@ -2928,8 +2986,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
     fun restoreMotion() { primary?.let { if (engine.restoreMotionTrack(it)) { motionSource = it; refreshMotionStatus() } } }
     fun cancelMotion() { engine.cancelMotionTrack(); cancelMotionPick(); refreshMotionStatus() }
-    fun applyMotion(apply: Int, lock: Boolean = false, smooth: Float = .5f, maxScale: Float = 1.15f, crop: Int = 1) {
-        val result = engine.applyMotionTrack(primary ?: 0, apply, lock, smooth, maxScale, crop)
+    fun applyMotion(apply: Int, lock: Boolean = false, smooth: Float = .5f, maxScale: Float = 1.15f, crop: Int = 1, target: Long = primary ?: 0) {
+        val result = engine.applyMotionTrack(target, apply, lock, smooth, maxScale, crop)
         if (result < 0) { showToast("Confira a análise e escolha uma camada 2D sem pai para receber o rastreio"); return }
         refreshNow(); refreshMotionStatus()
         if (apply == 0 || apply == 4 || apply == 5) select(result)

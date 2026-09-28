@@ -66,6 +66,8 @@ enum class ColorOpCode : u32 {
     LumaKey = 8,     ///< mexe no alfa (Chave de luma)
     ChromaKey = 9,   ///< mexe no alfa e tira o derramamento (Chave de croma)
     Invert = 10,     ///< negativo do valor codificado (Inverter)
+    Fill = 11,       ///< tinge a camada com uma cor chapada (Preencher)
+    BalanceHls = 12, ///< matiz/luz/saturação no HSL (Equilíbrio de cor)
 };
 
 /// Uma operação de cor: 16 floats (4 vec4 no shader). `p[0]` é reservado para
@@ -139,6 +141,49 @@ struct AudioSpectrumRequest {
 /// Teto de faixas de um espectro (uma textura `bands`×1).
 inline constexpr u32 kAudioSpectrumMaxBands = 128;
 
+/// O que o Mapa de profundidade (IA) pede ao renderer no planejamento.
+struct DepthMapRequest {
+    /// A camada dona (só no planejamento). Nula = a prévia do catálogo, que
+    /// usa a foto das prévias recortada como a cartela.
+    const Layer* host = nullptr;
+    const EffectInstance* instance = nullptr; ///< a instância (estado da suavização)
+    FrameIndex localTime{0};
+    /// Suavização no tempo dos limites (percentis 2º/98º): 0 = cada quadro com
+    /// os seus; perto de 1 = os limites andam devagar e o mapa não "respira".
+    f32 smoothing = 0.7f;
+};
+
+/// A disparidade 256×256 da FONTE da camada (R: normalizada pelos percentis
+/// do próprio quadro, maior = mais perto) e os limites suavizados no MESMO
+/// espaço: o shader prende em [lo, hi].
+struct DepthMapResult {
+    TextureHandle texture{};
+    f32 lo = 0.0f;
+    f32 hi = 1.0f;
+};
+
+/// O que a Forma de onda e o Espectro de áudio pedem ao renderer: o som de
+/// UMA camada (com os efeitos de áudio dela) numa janela em volta do quadro.
+struct AudioAnalysisRequest {
+    const Layer* host = nullptr;          ///< a camada dona (só no planejamento)
+    const EffectInstance* instance = nullptr;
+    u64 layer = 0;                        ///< a camada escolhida (LayerId empacotado); 0 = a própria
+    bool spectrum = false;                ///< false = forma de onda
+    u32 count = 0;                        ///< amostras exibidas / faixas
+    f32 durationMs = 200.0f;
+    f32 offsetMs = 0.0f;
+    u32 channel = 0;                      ///< forma de onda: 0 mono, 1 esquerdo, 2 direito
+    f32 startHz = 20.0f, endHz = 1000.0f; ///< espectro
+    bool averaging = false;               ///< espectro: média de janelas ao longo da duração
+};
+
+/// Textura `count`×1 (forma de onda: R = amostra com sinal; espectro: R =
+/// magnitude linear) e a faixa mais forte (0..1 do caminho).
+struct AudioAnalysisResult {
+    TextureHandle texture{};
+    f32 peak = 0.0f;
+};
+
 /// Recursos persistentes de efeito (LUTs de curva). Implementado pelo renderer.
 class EffectResources {
 public:
@@ -156,6 +201,21 @@ public:
     [[nodiscard]] virtual TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept {
         (void)request;
         return TextureHandle{};
+    }
+    /// Mapa de profundidade da fonte da camada neste quadro (ai/DepthMapService:
+    /// um cálculo por quadro-fonte, o mesmo no preview e no export). Textura
+    /// nula = camada sem foto/vídeo, rede indisponível ou, no preview de um
+    /// vídeo, ainda calculando — o efeito devolve a entrada.
+    [[nodiscard]] virtual DepthMapResult depth_map(const DepthMapRequest& request) noexcept {
+        (void)request;
+        return DepthMapResult{};
+    }
+    /// O som da camada escolhida no quadro do planejamento, analisado (ver
+    /// `AudioAnalysisRequest`). Textura nula = sem som / sem GPU: o efeito
+    /// desenha o repouso (linha reta).
+    [[nodiscard]] virtual AudioAnalysisResult audio_analysis(const AudioAnalysisRequest& request) noexcept {
+        (void)request;
+        return AudioAnalysisResult{};
     }
 };
 
@@ -228,6 +288,15 @@ public:
                         std::initializer_list<PassTexture> textures,
                         const void* uniforms, u32 uniformBytes,
                         LoadOp load = LoadOp::DontCare) noexcept;
+
+    /// Passe de GEOMETRIA gerada no vértice (sem vertex buffer): `vertexCount`
+    /// vértices pelo pipeline (vertex, fragment), cor limpa para transparente
+    /// e, com `depth`, teste/escrita de profundidade (Z reverso, textura
+    /// transitória do tamanho do alvo). É o das bolas: uma instância por
+    /// célula da grade, desenhada como um quadrado que o fragmento arredonda.
+    u32 geometry_pass(const char* name, PassStage stage, FGTexture target, ShaderId vertex, ShaderId fragment,
+                      std::initializer_list<PassTexture> textures, const void* uniforms, u32 uniformBytes,
+                      u32 vertexCount, bool depth) noexcept;
 
     /// Resolução de uma região em texels na escala pedida, limitada ao máximo
     /// do aparelho (a escala é reduzida uniformemente se passar).

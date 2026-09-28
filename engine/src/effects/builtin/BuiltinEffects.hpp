@@ -40,6 +40,10 @@ void register_generate_effects(EffectRegistry& r);
 void register_matte_effects(EffectRegistry& r);
 // O VHS de Estilizar (o look de fita com OSD). Também no fim.
 void register_vhs_look_effect(EffectRegistry& r);
+// Mapa de profundidade (IA). O último de todos.
+void register_depth_effects(EffectRegistry& r);
+// Pacote de áudio (efeitos de som + Forma de onda, Espectro e Bolas). Depois de todos.
+void register_audio_pack_effects(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

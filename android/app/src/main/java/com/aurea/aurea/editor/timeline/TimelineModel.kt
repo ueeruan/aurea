@@ -4,6 +4,8 @@ import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.engine.LayerRow
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.ui.theme.LayerType
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Uma linha da timeline, derivada do que o store LEU do motor (não é cópia
@@ -19,6 +21,11 @@ internal class RowModel(
     val offset: Int,
     val visible: Boolean,
     val locked: Boolean,
+    /**
+     * LINHA MAGNÉTICA: os cortes desta camada andam como faixa de montagem de
+     * vídeo. A timeline usa isto para decidir se o arrasto reordena a fita.
+     */
+    val magnetic: Boolean,
     val animated: Boolean,
     val name: String,
     /** Etiqueta de cor (0 = nenhuma; i = `ShellColors.LabelPalette[i - 1]`). */
@@ -28,7 +35,25 @@ internal class RowModel(
     /** Keyframes de cada instante (todas as trilhas que têm marca ali), paralelo a [instants]. */
     val keysAt: Array<List<KeyframeRow>>,
     val track: TimelineTrack? = null,
+    /** A LINHA da timeline (`LayerRow.trackId`); 0 = sem linha (projeto antigo: a camada é a linha dela). */
+    val line: Int = 0,
+    /**
+     * FILEIRA COMPARTILHADA: os trechos da MESMA linha que dividem esta fileira,
+     * lado a lado, em ordem de tempo. Null = fileira de um trecho só (ela mesma).
+     * Os campos desta fileira são só o resumo dela (pílula, altura); quem se
+     * desenha, se toca e se edita é cada trecho de [segments].
+     */
+    val shared: Array<RowModel>? = null,
 ) {
+    /** Os trechos desenhados e tocados nesta fileira: os da linha, ou só ela. */
+    val segments: Array<RowModel> = shared ?: arrayOf(this)
+
+    /** O trecho [id] desta fileira (null = não mora aqui). */
+    fun segment(id: Long): RowModel? {
+        for (s in segments) if (s.id == id) return s
+        return null
+    }
+
     /** Vídeo e imagem têm miniatura no motor; o resto é só a cor. */
     val hasThumbs: Boolean get() = track == null && (type == LayerType.Video || type == LayerType.Image)
 
@@ -74,7 +99,7 @@ internal class RowCache {
         fun matches(l: LayerRow, keys: List<KeyframeRow>): Boolean =
             this.keys === keys && flags == l.flags && kind == l.kind && row.id == l.id &&
                 row.start == l.startFrame && row.end == l.endFrame && row.offset == l.offsetFrames &&
-                l.nameEquals(nameUtf8)
+                row.line == l.trackId && l.nameEquals(nameUtf8)
     }
 
     private var byId = HashMap<Long, Cached>()
@@ -140,12 +165,159 @@ internal fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name
         offset = l.offsetFrames,
         visible = l.visible,
         locked = l.locked,
+        magnetic = l.magnetic,
         animated = l.animated || keys.isNotEmpty(),
         name = name,
         label = l.label,
         instants = times.toIntArray(),
         keysAt = groups.toTypedArray(),
+        line = l.trackId,
     )
+}
+
+/**
+ * Fileiras por LINHA (`trackId`): trechos da mesma linha dividem UMA fileira,
+ * lado a lado no tempo — os dois pedaços de um split ficam onde estavam, não
+ * em duas fileiras. A fileira fica na posição do trecho MAIS ALTO da linha na
+ * ordem de desenho (estável: é a ordem que o motor manda). Camada sem par
+ * (linha só dela, ou linha 0 de projeto antigo) volta como estava: o MESMO
+ * objeto, e a lista inteira volta a mesma quando ninguém divide linha.
+ *
+ * Trechos da mesma linha que se SOBREPÕEM no tempo (duplicar no cabeçote,
+ * mover solto por cima do vizinho) não se escondem um atrás do outro: o que
+ * não cabe desce para uma fileira logo abaixo, da mesma linha.
+ */
+internal fun sharedRows(rows: List<RowModel>): List<RowModel> {
+    val byLine = HashMap<Int, ArrayList<RowModel>>()
+    var anyShared = false
+    for (r in rows) {
+        if (r.line == 0 || r.track != null) continue
+        val group = byLine.getOrPut(r.line) { ArrayList(2) }
+        group.add(r)
+        if (group.size >= 2) anyShared = true
+    }
+    if (!anyShared) return rows
+    val out = ArrayList<RowModel>(rows.size)
+    for (r in rows) {
+        val group = if (r.line == 0 || r.track != null) null else byLine[r.line]
+        if (group == null || group.size == 1) {
+            out.add(r)
+            continue
+        }
+        // Vazio = a linha já saiu inteira com o trecho mais alto dela.
+        if (group.isEmpty()) continue
+        val ordered = group.sortedWith(SEGMENT_ORDER)
+        group.clear()
+        val packed = ArrayList<ArrayList<RowModel>>(1)
+        val ends = ArrayList<Int>(1)
+        for (s in ordered) {
+            var k = 0
+            while (k < packed.size && ends[k] > s.start) k++
+            if (k == packed.size) {
+                packed.add(ArrayList(ordered.size))
+                ends.add(s.end)
+            } else {
+                ends[k] = max(ends[k], s.end)
+            }
+            packed[k].add(s)
+        }
+        for (segs in packed) out.add(if (segs.size == 1) segs[0] else sharedRow(r.line, segs.toTypedArray()))
+    }
+    return out
+}
+
+private val SEGMENT_ORDER = compareBy<RowModel>({ it.start }, { it.end }, { it.id })
+
+/** O resumo de uma fileira compartilhada: a pílula acende se algum trecho aparece e trava se todos travam. */
+private fun sharedRow(line: Int, segs: Array<RowModel>): RowModel {
+    val head = segs[0]
+    var start = head.start
+    var end = head.end
+    var visible = false
+    var locked = true
+    var magnetic = false
+    var animated = false
+    for (s in segs) {
+        start = min(start, s.start)
+        end = max(end, s.end)
+        visible = visible || s.visible
+        locked = locked && s.locked
+        magnetic = magnetic || s.magnetic
+        animated = animated || s.animated
+    }
+    return RowModel(
+        id = head.id, type = head.type, start = start, end = end, offset = 0,
+        visible = visible, locked = locked, magnetic = magnetic, animated = animated,
+        name = head.name, label = head.label, instants = IntArray(0), keysAt = emptyArray(),
+        line = line, shared = segs,
+    )
+}
+
+/**
+ * Chave de GRUPO de cada fileira para reordenar na vertical: fileiras seguidas
+ * com a mesma chave andam juntas. Trilha de propriedade aberta anda com a
+ * camada dona; as fileiras de uma linha (inclusive a de baixo, de trechos que
+ * se sobrepõem) andam juntas; o resto é a própria camada.
+ */
+internal fun timelineGroupKeys(rows: List<RowModel>): LongArray {
+    val keys = LongArray(rows.size)
+    for (i in rows.indices) {
+        val r = rows[i]
+        keys[i] = when {
+            r.track != null && i > 0 -> keys[i - 1]
+            r.line != 0 -> LINE_KEY_BASE + r.line
+            else -> r.id
+        }
+    }
+    return keys
+}
+
+/** Chaves de linha longe dos ids de camada (handle empacotado, sempre positivo). */
+private const val LINE_KEY_BASE = Long.MIN_VALUE
+
+/**
+ * Reordenar na vertical um GRUPO de camadas (os trechos de uma linha andam
+ * juntos) com o comando de sempre, que leva UMA camada a uma posição da lista
+ * (0 = topo, a da frente). O grupo vai inteiro para logo ACIMA da camada mais
+ * alta do destino (subindo) ou logo ABAIXO dela (descendo) — a fileira do
+ * destino fica onde a pessoa a viu. Devolve os passos (camada, posição final)
+ * na ordem de aplicar; uma camada sozinha dá UM passo, o mesmo de antes.
+ */
+internal object RowOrder {
+    fun moves(order: LongArray, block: Set<Long>, anchor: Long, up: Boolean): List<Pair<Long, Int>> {
+        if (block.isEmpty() || anchor in block) return emptyList()
+        val rest = ArrayList<Long>(order.size)
+        val moving = ArrayList<Long>(block.size)
+        for (id in order) if (id in block) moving.add(id) else rest.add(id)
+        val at = rest.indexOf(anchor)
+        if (at < 0 || moving.isEmpty()) return emptyList()
+        val p = if (up) at else at + 1
+        val target = ArrayList<Long>(order.size)
+        target.addAll(rest.subList(0, p))
+        target.addAll(moving)
+        target.addAll(rest.subList(p, rest.size))
+        val current = order.toMutableList()
+        val out = ArrayList<Pair<Long, Int>>()
+        fun move(id: Long, to: Int) {
+            val from = current.indexOf(id)
+            if (from == to) return
+            current.removeAt(from)
+            current.add(to, id)
+            out.add(id to to)
+        }
+        // Subindo, de cima para baixo; descendo, de baixo para cima: cada passo
+        // põe uma camada no lugar final sem tirar do lugar as que já foram.
+        if (up) for (j in moving.indices) move(moving[j], p + j)
+        else for (j in moving.indices.reversed()) move(moving[j], p + j)
+        if (current != target) {
+            // Rede de segurança: posição a posição (sempre chega na ordem pedida).
+            current.clear()
+            current.addAll(order.toList())
+            out.clear()
+            for (k in target.indices) if (current[k] != target[k]) move(target[k], k)
+        }
+        return out
+    }
 }
 
 /** A real engine track, or a property section (property -1) without synthetic keys. */
@@ -153,15 +325,18 @@ internal data class TimelineTrack(val property: Int, val effect: Int = -1, val p
 internal fun expandedRows(base: List<RowModel>, expanded: Long?, keys: Map<Long, List<KeyframeRow>>, effects: List<Pair<Int, String>>): List<RowModel> {
     if (expanded == null) return base
     return base.flatMap { row ->
-        if (row.id != expanded) listOf(row) else {
-            val all = keys[row.id].orEmpty()
+        // Numa fileira compartilhada, as trilhas abertas são do TRECHO aberto
+        // (tempo e keyframes dele) e entram logo abaixo da fileira.
+        val owner = row.segment(expanded)
+        if (owner == null) listOf(row) else {
+            val all = keys[owner.id].orEmpty()
             val tracks = all.groupBy { TimelineTrack(it.property, it.effectIndex, it.paramIndex) }
             val lanes = arrayListOf(row)
             fun lane(track: TimelineTrack, name: String, values: List<KeyframeRow> = emptyList()) {
                 val groups = values.groupBy { it.time }.toSortedMap()
-                lanes += RowModel(row.id, row.type, row.start, row.end, row.offset, row.visible, row.locked,
-                    values.isNotEmpty(), "  $name", row.label,
-                    groups.keys.map { Keyframes.toTimeline(it, row.start, row.offset) }.toIntArray(), groups.values.toTypedArray(), track)
+                lanes += RowModel(owner.id, owner.type, owner.start, owner.end, owner.offset, owner.visible, owner.locked,
+                    owner.magnetic, values.isNotEmpty(), "  $name", owner.label,
+                    groups.keys.map { Keyframes.toTimeline(it, owner.start, owner.offset) }.toIntArray(), groups.values.toTypedArray(), track)
             }
             lane(TimelineTrack(-1), "Transform")
             effects.forEach { (id, name) -> lane(TimelineTrack(31, id, -1), name) }
@@ -186,8 +361,27 @@ internal fun expandedRows(base: List<RowModel>, expanded: Long?, keys: Map<Long,
 }
 
 /** Shared by paint, hit testing, scroll bounds and layer-reorder geometry. */
-internal fun timelineRowHeight(row: RowModel, layerHeight: Float, density: Float): Float =
-    if (row.track == null) layerHeight else 28f * density
+/**
+ * Altura de uma linha. Propriedade (uma trilha aberta) é baixa; camada é a
+ * altura normal — EXCETO um trecho em LINHA MAGNÉTICA, que é a faixa de
+ * montagem do vídeo: ele cresce para a forma de onda do som caber legível, que
+ * é o que se olha o tempo todo ao cortar. Os vizinhos e a régua acompanham,
+ * porque as posições saem de `rowOffsets`, não de um múltiplo fixo.
+ */
+private const val MAGNETIC_ROW_SCALE = 1.9f
+
+internal fun timelineRowHeight(row: RowModel, layerHeight: Float, density: Float): Float {
+    // Fileira compartilhada: a altura do trecho mais alto dela.
+    val shared = row.shared
+    if (shared != null) {
+        var h = 0f
+        for (s in shared) h = max(h, timelineRowHeight(s, layerHeight, density))
+        return h
+    }
+    return if (row.track != null) 28f * density
+    else if (row.magnetic && row.type == LayerType.Video) layerHeight * MAGNETIC_ROW_SCALE
+    else layerHeight
+}
 internal fun timelineRowTop(rows: List<RowModel>, index: Int, layerHeight: Float, density: Float): Float {
     var top = 0f
     for (i in 0 until index.coerceIn(0, rows.size)) top += timelineRowHeight(rows[i], layerHeight, density)

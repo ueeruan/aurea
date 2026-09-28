@@ -52,9 +52,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import com.aurea.aurea.effects.EffectDetailSheet
+import com.aurea.aurea.effects.EffectPicker
+import com.aurea.aurea.effects.EffectsTab
+import com.aurea.aurea.effects.initialEffectsTab
+import com.aurea.aurea.engine.EffectCatalogEntry
 import com.aurea.aurea.engine.EffectParam
 import com.aurea.aurea.engine.LayerEffect
 import com.aurea.aurea.engine.ParamType
@@ -204,21 +213,29 @@ private class ReorderState {
 }
 
 /**
- * O PAINEL "EFEITOS" (ref16/ref17, Fase 7.2).
+ * O PAINEL "EFEITOS" (ref16/ref17, Fase 7.2; abas em 2026-09-28).
  *
- * - LISTA (nenhum aberto): trilho estreito `‹` em cima e `⋯` embaixo; cada efeito
- *   um cartão `▶ Nome · 👁 · ≡` (≡ arrasta para reordenar) e "+ Adicionar efeito".
+ * - CABEÇALHO: `‹ · [Na camada N | Adicionar] · ⋯` — as duas abas no lugar do
+ *   título. Camada com efeito abre em "Na camada"; sem efeito, em "Adicionar".
+ * - ADICIONAR: busca no topo, fichas de categoria, Recentes/Favoritos e a grade
+ *   ([EffectPicker]). UM toque adiciona e volta para "Na camada" com o efeito aberto.
+ * - NA CAMADA (nenhum aberto): cada efeito um cartão `▶ Nome · 👁 · ≡` (≡ arrasta
+ *   para reordenar) e "+ Adicionar efeito".
  * - EFEITO ABERTO: cartão `▼ Nome · ⋯ · 🗑`; os PRINCIPAIS primeiro e
  *   "Avançado ▾" com o resto; trilho `‹ · ◇ · curva · =` mirando a linha escolhida.
  * - Acordeão: UM cartão aberto; efeito recém-adicionado abre sozinho; entrar pelo
  *   losango de um parâmetro de efeito na timeline abre aquele efeito naquela linha.
  * - Toque longo no rótulo: Redefinir (e Expressão). Tocar no valor: teclado.
+ *
+ * [focusedType] (as letras do texto 3D, dentro de Transformar) mostra só aquele
+ * efeito, sem abas: é um editor embutido, não o navegador.
  */
 @Composable
 internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     val store = env.store
     val layerId = store.primary
     val effects = store.effects.filter { focusedType == null || it.typeId == focusedType }
+    val tabbed = focusedType == null
     // `detail` muda a cada quadro da reprodução; o painel só quer o TIPO.
     val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
 
@@ -227,7 +244,14 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         store.selectedKeyframe?.takeIf { it.first == layerId && it.second.property == TrackProperty.EFFECT_PARAM }?.second
             ?.takeIf { k -> effects.any { it.effectId == k.effectIndex } }
     }
-    var openId by remember(layerId, focusedType) { mutableStateOf(entry?.effectIndex ?: effects.firstOrNull { it.typeId == focusedType }?.effectId) }
+    // Entrar pelo losango de um parâmetro é editar: abre na pilha mesmo assim.
+    var tab by remember(layerId) { mutableStateOf(if (entry != null) EffectsTab.Applied else initialEffectsTab(effects.size)) }
+    val hasAudio by remember(store) { derivedStateOf { store.detail?.hasAudio == true } }
+    var aboutEntry by remember { mutableStateOf<EffectCatalogEntry?>(null) }
+    // Um efeito só na camada já abre com os controles à vista (um toque a menos).
+    var openId by remember(layerId, focusedType) {
+        mutableStateOf(entry?.effectIndex ?: effects.firstOrNull { it.typeId == focusedType }?.effectId ?: effects.singleOrNull()?.effectId?.takeIf { tabbed })
+    }
     var known by remember(layerId) { mutableStateOf(effects.map { it.effectId }.toSet()) }
     var selected by remember(layerId) {
         mutableStateOf(entry?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) })
@@ -279,6 +303,13 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         if (added.isNotEmpty()) {
             val index = effects.indexOfLast { it.effectId in added }
             openId = effects[index].effectId
+            // Adicionou (pelo catálogo, pela busca geral, colando): os controles
+            // do efeito novo aparecem na pilha. A lista entra nesta mesma
+            // recomposição; espera o quadro dela antes de rolar.
+            if (tab != EffectsTab.Applied) {
+                tab = EffectsTab.Applied
+                androidx.compose.runtime.withFrameNanos { }
+            }
             listState.animateScrollToItem(index)
         }
         else if (openId != null && openId !in ids) openId = null
@@ -320,81 +351,108 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
 
     val byId = effects.associateBy { it.effectId }
     val order = (reorder.order ?: effects.map { it.effectId }).mapNotNull { byId[it] }
+    val openAdd: () -> Unit = { if (tabbed) tab = EffectsTab.Add else env.onOpenEffectsBrowser() }
 
-    Row(Modifier.fillMaxSize()) {
-        if (openId == null) {
-            ListRail(onBack = env.onClose, onMore = { railMenu = true })
-        } else {
-            LeftRail(
-                // Com um efeito aberto, o ‹ volta para a LISTA (ref17 → ref16).
-                onBack = { openId = null },
-                keyframeLook = railLook,
-                onKeyframe = if (railAnimatable) {
-                    {
-                        // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
-                        selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
-                    }
-                } else {
-                    null
-                },
-                curveAnimated = railLook != KeyframeLook.None,
-                onCurve = if (curveTrackReady) {
-                    {
-                        val k = selected
-                        val layer = store.primary
-                        val t = store.detail?.localPlayhead
-                        if (k != null && layer != null && t != null) {
-                            store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
-                                store.selectKeyframe(layer, key)
-                                env.onOpenPanel(EditorPanel.Curve)
-                            }
-                        }
-                    }
-                } else {
-                    null
-                },
-                expression = railExpr,
-                onExpression = if (railAnimatable) {
-                    { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { p -> openParamExpression(store, k.effectId, ParamSlot.of(p), railParamLabel) } } }
-                } else {
-                    null
-                },
+    Column(Modifier.fillMaxSize()) {
+        if (tabbed) {
+            EffectsTabsHeader(
+                tab = tab,
+                count = effects.size,
+                onTab = { tab = it },
+                onBack = env.onClose,
+                onMore = { railMenu = true },
             )
         }
-        LazyColumn(
-            Modifier.weight(1f).fillMaxHeight(),
-            state = listState,
-            contentPadding = PaddingValues(start = 2.dp, top = 8.dp, end = 12.dp, bottom = 16.dp),
-        ) {
-            items(order, key = { it.effectId }) { e ->
-                val dragged = reorder.dragging == e.effectId
-                EffectCardItem(
-                    env = env,
-                    effect = e,
-                    expanded = openId == e.effectId,
-                    selected = selected?.takeIf { it.effectId == e.effectId },
-                    advanced = e.effectId in advancedOpen,
-                    lifted = dragged,
-                    onToggle = { openId = if (openId == e.effectId) null else e.effectId },
-                    onToggleAdvanced = {
-                        advancedOpen = if (e.effectId in advancedOpen) advancedOpen - e.effectId else advancedOpen + e.effectId
-                    },
-                    onSelect = { selected = it },
-                    onParamMenu = { paramMenu = it },
-                    onMenu = { menuFor = e },
-                    onRemove = { store.removeEffect(e.effectId) },
-                    dragHandle = Modifier.reorderHandle(e.effectId, reorder, listState, store),
-                    modifier = if (dragged) {
-                        Modifier.zIndex(1f).graphicsLayer { translationY = reorder.offset }
+        if (tabbed && tab == EffectsTab.Add) {
+            EffectPicker(
+                store = store,
+                layerHasAudio = hasAudio,
+                onPick = { e ->
+                    store.addEffect(e.typeId)
+                    store.effectPrefs.addRecent(e.typeId)
+                },
+                modifier = Modifier.weight(1f),
+            )
+        } else Row(Modifier.fillMaxWidth().weight(1f)) {
+            if (openId == null) {
+                // Com abas, o ‹ e o ⋯ moram no cabeçalho: a lista ganha a largura toda.
+                if (!tabbed) ListRail(onBack = env.onClose, onMore = { railMenu = true })
+            } else {
+                LeftRail(
+                    // Com um efeito aberto, o ‹ volta para a LISTA (ref17 → ref16).
+                    onBack = { openId = null },
+                    keyframeLook = railLook,
+                    onKeyframe = if (railAnimatable) {
+                        {
+                            // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
+                            selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
+                        }
                     } else {
-                        Modifier.animateItem()
+                        null
+                    },
+                    curveAnimated = railLook != KeyframeLook.None,
+                    onCurve = if (curveTrackReady) {
+                        {
+                            val k = selected
+                            val layer = store.primary
+                            val t = store.detail?.localPlayhead
+                            if (k != null && layer != null && t != null) {
+                                store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
+                                    store.selectKeyframe(layer, key)
+                                    env.onOpenPanel(EditorPanel.Curve)
+                                }
+                            }
+                        }
+                    } else {
+                        null
+                    },
+                    expression = railExpr,
+                    onExpression = if (railAnimatable) {
+                        { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { p -> openParamExpression(store, k.effectId, ParamSlot.of(p), railParamLabel) } } }
+                    } else {
+                        null
                     },
                 )
             }
-            item(key = "rodape") {
-                if (focusedType == null) EffectsFooter(env, kind)
-                else if (effects.isEmpty()) androidx.compose.material3.TextButton(onClick = { store.addEffect(focusedType) }) {
-                    Text(stringResource(R.string.t3d_enable_letters))
+            LazyColumn(
+                Modifier.weight(1f).fillMaxHeight().testTag("aurea.effects.stack"),
+                state = listState,
+                // Sem o trilho à esquerda (abas, nenhum aberto), a lista respira como a direita.
+                contentPadding = PaddingValues(start = if (tabbed && openId == null) 12.dp else 2.dp, top = 8.dp, end = 12.dp, bottom = 16.dp),
+            ) {
+                if (tabbed && effects.isEmpty()) {
+                    item(key = "vazio") { PanelNotice(stringResource(R.string.effects_applied_empty)) }
+                }
+                items(order, key = { it.effectId }) { e ->
+                    val dragged = reorder.dragging == e.effectId
+                    EffectCardItem(
+                        env = env,
+                        effect = e,
+                        expanded = openId == e.effectId,
+                        selected = selected?.takeIf { it.effectId == e.effectId },
+                        advanced = e.effectId in advancedOpen,
+                        lifted = dragged,
+                        onToggle = { openId = if (openId == e.effectId) null else e.effectId },
+                        onToggleAdvanced = {
+                            advancedOpen = if (e.effectId in advancedOpen) advancedOpen - e.effectId else advancedOpen + e.effectId
+                        },
+                        onSelect = { selected = it },
+                        onParamMenu = { paramMenu = it },
+                        onMenu = { menuFor = e },
+                        onRemove = { store.removeEffect(e.effectId) },
+                        dragHandle = Modifier.reorderHandle(e.effectId, reorder, listState, store),
+                        modifier = if (dragged) {
+                            Modifier.zIndex(1f).graphicsLayer { translationY = reorder.offset }
+                        } else {
+                            Modifier.animateItem()
+                        },
+                    )
+                }
+                item(key = "rodape") {
+                    if (focusedType == null) EffectsFooter(env, kind, onAdd = openAdd)
+                    else if (effects.isEmpty()) androidx.compose.material3.TextButton(onClick = { store.addEffect(focusedType) }) {
+                        Text(stringResource(R.string.t3d_enable_letters))
+                    }
                 }
             }
         }
@@ -405,7 +463,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         AureaActionSheet(
             title = stringResource(R.string.panel_efeitos_camada),
             actions = buildList {
-                add(SheetAction(stringResource(R.string.panel_adicionar_efeito)) { env.onOpenEffectsBrowser() })
+                add(SheetAction(stringResource(R.string.panel_adicionar_efeito)) { openAdd() })
                 add(SheetAction(stringResource(R.string.fx_my_presets)) {
                     store.presetsOpenKind = com.aurea.aurea.presets.PresetKind.Effects
                     env.onOpenPanel(EditorPanel.Presets)
@@ -439,6 +497,9 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             buildList {
                 add(SheetAction(if (e.enabled) stringResource(R.string.panel_desligar_efeito) else stringResource(R.string.panel_ligar_efeito)) { store.setEffectEnabled(e.effectId, !e.enabled) })
                 add(SheetAction(stringResource(R.string.panel_redefinir_efeito)) { resetEffect(env, e.effectId) })
+                store.catalog.firstOrNull { it.typeId == e.typeId }?.let { entry ->
+                    add(SheetAction(stringResource(R.string.effects_about)) { aboutEntry = entry })
+                }
                 add(SheetAction("Copiar este efeito") { store.copyEffects(e.effectId) })
                 add(SheetAction(stringResource(R.string.fx_save_as_preset)) { savingPreset = e })
                 if (index > 0) add(SheetAction(stringResource(R.string.panel_mover_cima)) { store.reorderEffect(e.effectId, index - 1) })
@@ -461,6 +522,20 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             initial = effectDisplayName(e.typeId, e.name),
             onConfirm = { name -> store.saveEffectPreset(e.effectId, name.take(60)) },
             onDismiss = { savingPreset = null },
+        )
+    }
+
+    aboutEntry?.let { entry ->
+        // "Sobre o efeito" (⋯ do cartão): a ficha — o que ele faz, onde funciona,
+        // custo e parâmetros. Sem botão de aplicar: ele já está na camada.
+        EffectDetailSheet(
+            store = store,
+            entry = entry,
+            previews = store.effectPreviews,
+            favorite = store.effectPrefs.isFavorite(entry.typeId),
+            onFavorite = { store.effectPrefs.toggleFavorite(entry.typeId) },
+            onApply = null,
+            onDismiss = { aboutEntry = null },
         )
     }
 
@@ -543,8 +618,92 @@ private fun Modifier.reorderHandle(id: Int, state: ReorderState, list: LazyListS
     )
 
 /**
+ * O CABEÇALHO COM ABAS (no lugar do "‹ Efeitos" da moldura): `‹` volta às
+ * ferramentas da camada; as abas "Na camada N" (`effects.tab.applied`) e
+ * "Adicionar" (`effects.tab.add`) dividem o meio; `⋯` abre copiar/colar/
+ * presets/ligar todos. Cada aba é alvo da altura inteira da faixa (44 dp).
+ */
+@Composable
+private fun EffectsTabsHeader(
+    tab: EffectsTab,
+    count: Int,
+    onTab: (EffectsTab) -> Unit,
+    onBack: () -> Unit,
+    onMore: () -> Unit,
+) {
+    val backDesc = stringResource(R.string.pn_back_to_layer_tools)
+    val moreDesc = stringResource(R.string.panel_efeitos_camada)
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.Border))
+        Row(
+            Modifier.fillMaxWidth().height(44.dp).background(AureaColors.Surface),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(48.dp, 44.dp).semantics { contentDescription = backDesc }.tocavel(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp))
+            }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                // O trilho da chave: a pílula de 36 no meio da faixa de 44.
+                Box(Modifier.matchParentSize().padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip))
+                Row(Modifier.fillMaxSize().padding(horizontal = 3.dp)) {
+                    TabSegment(stringResource(R.string.effects_tab_applied), count, tab == EffectsTab.Applied, "effects.tab.applied") { onTab(EffectsTab.Applied) }
+                    TabSegment(stringResource(R.string.effects_tab_add), null, tab == EffectsTab.Add, "effects.tab.add") { onTab(EffectsTab.Add) }
+                }
+            }
+            Box(
+                Modifier.size(44.dp).semantics { contentDescription = moreDesc }.tocavel(onClick = onMore),
+                contentAlignment = Alignment.Center,
+            ) {
+                CupertinoIcon(CupertinoGlyph.Ellipsis, 22.dp, AureaColors.Text)
+            }
+        }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.TabSegment(label: String, count: Int?, on: Boolean, tag: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .testTag(tag)
+            .semantics { selected = on }
+            .tocavel(shrink = 1f, role = Role.Tab, onClick = onClick)
+            .padding(vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else androidx.compose.ui.graphics.Color.Transparent).padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val color = if (on) AureaColors.Accent else AureaColors.Text
+            Text(
+                label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W500, color = color)),
+            )
+            if (count != null && count > 0) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    count.toString(),
+                    maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.Accent else AureaColors.ChipHigh).padding(horizontal = 6.dp),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, fontWeight = FontWeight.W700, color = if (on) AureaColors.OnAccent else AureaColors.Text)),
+                )
+            }
+        }
+    }
+}
+
+/**
  * O TRILHO DA LISTA (ref16): estreito, `‹` em cima (volta às ferramentas da
- * camada) e `⋯` embaixo (copiar/colar/ligar todos).
+ * camada) e `⋯` embaixo (copiar/colar/ligar todos). Só no modo embutido (sem abas).
  */
 @Composable
 private fun ListRail(onBack: () -> Unit, onMore: () -> Unit) {
@@ -639,6 +798,8 @@ private fun EffectCardItem(
             return@EffectStackCard
         }
         val (main, rest) = remember(visible, effect.typeId) { splitPrincipal(effect.typeId, visible) }
+        // EQ paramétrico: o gráfico da resposta em cima das bandas.
+        if (effect.typeId == effectTypeId("aurea.audio.parametric_eq")) EqResponseGraph(env, id)
         main.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
         if (rest.isNotEmpty()) {
             AdvancedToggle(open = advanced, count = rest.size, onToggle = onToggleAdvanced)
@@ -670,7 +831,9 @@ private fun ParamRows(
         ParamType.BOOL -> EffectToggleRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         ParamType.ENUM -> EffectChoiceRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         ParamType.COLOR -> EffectColorRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
-        // Curva/degradê/referência: o motor tem, o app ainda não edita — sem botão falso.
+        // Outra camada ("Camada de áudio"): escolhe na lista das camadas.
+        ParamType.LAYER_REFERENCE -> EffectLayerRow(env, id, s, label, menu)
+        // Curva/degradê/textura: o motor tem, o app ainda não edita — sem botão falso.
         else -> PropertyCustomRow(label = label, selected = false, onSelect = {}) {
             Text(
                 stringResource(R.string.panel_ainda_nao_editavel_app),
@@ -881,10 +1044,11 @@ private fun EffectColorRow(
 
 /**
  * O RODAPÉ: intensidade da camada de ajuste (é a opacidade) e o botão largo
- * "+ Adicionar efeito" (ref16: texto sublinhado num cartão escuro).
+ * "+ Adicionar efeito" (ref16: texto sublinhado num cartão escuro), que leva à
+ * aba "Adicionar".
  */
 @Composable
-private fun EffectsFooter(env: PanelEnv, kind: Int) {
+private fun EffectsFooter(env: PanelEnv, kind: Int, onAdd: () -> Unit) {
     Column(Modifier.fillMaxWidth()) {
         if (kind == LayerType.Adjustment.kind) AdjustmentIntensity(env)
         Row(
@@ -893,7 +1057,8 @@ private fun EffectsFooter(env: PanelEnv, kind: Int) {
                 .height(52.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(AureaColors.Surface)
-                .tocavel(haptic = true, onClick = env.onOpenEffectsBrowser),
+                .testTag("aurea.effects.add")
+                .tocavel(haptic = true, onClick = onAdd),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {

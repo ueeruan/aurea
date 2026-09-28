@@ -31,12 +31,14 @@ add_executable(aurea_tests
     test_scene_param_keys.cpp
     test_effect3d_sweep.cpp
     test_audio.cpp
+    test_audio_fx.cpp
     test_captions.cpp
     test_cliptime.cpp
     test_beats.cpp
     test_edit.cpp
     test_tracking.cpp
     test_motion_geometry.cpp
+    test_tracking_flow.cpp
     test_text.cpp
     test_presets.cpp
     test_alight_motion.cpp

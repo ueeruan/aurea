@@ -67,7 +67,7 @@ private class BlendCategory(@StringRes val name: Int, val modes: List<BlendChoic
  * são `aurea::BlendMode` (Types.hpp): Normal 0, Add 1, Subtract 2, Multiply 3,
  * Screen 4, Overlay 5, Darken 6, Lighten 7, ColorDodge 8, ColorBurn 9, HardLight
  * 10, SoftLight 11, Difference 12, Exclusion 13, Hue 14, Saturation 15, Color 16,
- * Luminosity 17.
+ * Luminosity 17, Divide 18, VividLight 19, LinearDodge 20, LinearBurn 21.
  */
 private val BlendCategories = listOf(
     BlendCategory(R.string.panel_normal, listOf(BlendChoice(R.string.panel_normal, 0, BlendMode.SrcOver))),
@@ -76,6 +76,8 @@ private val BlendCategories = listOf(
         listOf(
             BlendChoice(R.string.pn_blend_darken, 6, BlendMode.Darken), BlendChoice(R.string.pn_blend_multiply, 3, BlendMode.Multiply),
             BlendChoice(R.string.pn_blend_color_burn, 9, BlendMode.ColorBurn),
+            BlendChoice(R.string.pn_blend_linear_burn, 21, BlendMode.SrcOver),
+            BlendChoice(R.string.pn_blend_divide, 18, BlendMode.SrcOver),
         ),
     ),
     BlendCategory(
@@ -83,6 +85,7 @@ private val BlendCategories = listOf(
         listOf(
             BlendChoice(R.string.pn_blend_lighten, 7, BlendMode.Lighten), BlendChoice(R.string.pn_blend_screen, 4, BlendMode.Screen),
             BlendChoice(R.string.pn_blend_color_dodge, 8, BlendMode.ColorDodge), BlendChoice(R.string.pn_blend_add, 1, BlendMode.Plus),
+            BlendChoice(R.string.pn_blend_linear_dodge, 20, BlendMode.Plus),
         ),
     ),
     BlendCategory(
@@ -90,13 +93,7 @@ private val BlendCategories = listOf(
         listOf(
             BlendChoice(R.string.pn_blend_overlay, 5, BlendMode.Overlay), BlendChoice(R.string.pn_blend_soft_light, 11, BlendMode.Softlight),
             BlendChoice(R.string.pn_blend_hard_light, 10, BlendMode.Hardlight),
-        ),
-    ),
-    BlendCategory(
-        R.string.pn_blend_difference,
-        listOf(
-            BlendChoice(R.string.pn_blend_difference, 12, BlendMode.Difference), BlendChoice(R.string.pn_blend_exclusion, 13, BlendMode.Exclusion),
-            BlendChoice(R.string.pn_blend_subtract, 2, BlendMode.SrcOver),
+            BlendChoice(R.string.pn_blend_vivid_light, 19, BlendMode.SrcOver),
         ),
     ),
     BlendCategory(
@@ -113,7 +110,7 @@ private val BlendCategories = listOf(
  * blend de hardware; os outros num passe que lê o fundo). Só entra na lista o
  * modo que o motor desenha: nada de chip que não faz nada.
  */
-private val RenderedBlendModes = (0..17).toSet()
+private val RenderedBlendModes = (0..21).toSet()
 
 /**
  * MESCLAGEM E OPACIDADE [A] (`BlendingPanel`): trilho com ◇ e curva da opacidade,

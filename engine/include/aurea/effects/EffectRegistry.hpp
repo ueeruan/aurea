@@ -154,6 +154,33 @@ namespace effect_keys {
     inline constexpr const char* kAudioSpectrum      = "aurea.generate.audio_spectrum";
     // O look de fita pronto (ver VhsLookEffect.cpp); o de Glitch é o defeito.
     inline constexpr const char* kVhsLook            = "aurea.stylize.vhs";
+
+    // --- Pacote do editor antigo (2026-09-27): o que só ele tinha ---
+    // Cor
+    inline constexpr const char* kFill               = "aurea.color.fill";
+    inline constexpr const char* kColorBalanceHls    = "aurea.color.balance_hls";
+    // Desfoque
+    inline constexpr const char* kZoomBlur           = "aurea.blur.zoom";
+    // Distorção
+    inline constexpr const char* kBulge              = "aurea.distort.bulge";
+    // Padrões
+    inline constexpr const char* kCheckerboard       = "aurea.pattern.checkerboard";
+    inline constexpr const char* kHexagonalArray     = "aurea.pattern.hexagonal";
+    // Acabamento
+    inline constexpr const char* kDropShadow         = "aurea.stylize.drop_shadow";
+    inline constexpr const char* kBorder             = "aurea.stylize.border";
+
+    // --- IA ---
+    /// Mapa de profundidade estimado por rede (MiDaS v2.1 small; ver
+    /// ai/DepthEstimator.hpp e engine/assets/ai/README.md).
+    inline constexpr const char* kDepthMap           = "aurea.ai.depth_map";
+
+    // --- Pacote de áudio ---
+    // Os nove efeitos de SOM têm as chaves em audio/AudioEffects.hpp
+    // (audio::fx_keys, prefixo "aurea.audio."). Os visuais:
+    inline constexpr const char* kAudioWaveform         = "aurea.generate.audio_waveform";
+    inline constexpr const char* kAudioSpectrumAnalyzer = "aurea.generate.spectrum_analyzer";
+    inline constexpr const char* kBallGrid              = "aurea.stylize.ball_grid";
 }
 
 } // namespace aurea

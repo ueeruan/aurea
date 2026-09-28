@@ -832,13 +832,18 @@ struct AppearancePanel: View {
         if (info["enabled"] as? NSNumber)?.boolValue == false { return .off }
         return (info["error"] as? String ?? "").isEmpty ? .ok : .error
     }
-    private static let groups: [[Int]] = [[0], [6, 3, 9], [7, 4, 8, 1], [5, 11, 10], [12, 13, 2], [14, 15, 16, 17]]
+    // Divide 18, Vivid Light 19, Linear Dodge 20 e Linear Burn 21 vieram do
+    // editor antigo; entram nos mesmos grupos do AE (escurecer / clarear /
+    // contraste) e a lista `modes` segue indexada pelo valor de BlendMode.
+    private static let groups: [[Int]] = [[0], [6, 3, 9, 21, 18], [7, 4, 8, 1, 20], [5, 11, 10, 19], [12, 13, 2], [14, 15, 16, 17]]
     private static let titles = ["panel_normal", "pn_blend_darken", "pn_blend_lighten", "pn_blend_cat_contrast", "pn_blend_difference", "pn_blend_color"]
     static let modes = ["panel_normal", "pn_blend_add", "pn_blend_subtract", "pn_blend_multiply", "pn_blend_screen", "pn_blend_overlay",
         "pn_blend_darken", "pn_blend_lighten", "pn_blend_color_dodge", "pn_blend_color_burn", "pn_blend_hard_light", "pn_blend_soft_light",
-        "pn_blend_difference", "pn_blend_exclusion", "pn_blend_hue", "pn_blend_saturation", "pn_blend_color", "pn_blend_luminosity"]
+        "pn_blend_difference", "pn_blend_exclusion", "pn_blend_hue", "pn_blend_saturation", "pn_blend_color", "pn_blend_luminosity",
+        "pn_blend_divide", "pn_blend_vivid_light", "pn_blend_linear_dodge", "pn_blend_linear_burn"]
     private static let previews: [GraphicsContext.BlendMode] = [.normal, .plusLighter, .normal, .multiply, .screen, .overlay, .darken, .lighten,
-        .colorDodge, .colorBurn, .hardLight, .softLight, .difference, .exclusion, .hue, .saturation, .color, .luminosity]
+        .colorDodge, .colorBurn, .hardLight, .softLight, .difference, .exclusion, .hue, .saturation, .color, .luminosity,
+        .normal, .normal, .plusLighter, .normal]
     private func write(_ value: Float) { model.editTransform(12, value: value.clamped(to: 0...100) / 100) }
     private func key() {
         model.mutate { core in

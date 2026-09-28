@@ -120,6 +120,75 @@ u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTex
     return pass;
 }
 
+u32 EffectBuildContext::geometry_pass(const char* name, PassStage stage, FGTexture target, ShaderId vertex,
+                                        ShaderId fragment, std::initializer_list<PassTexture> textures,
+                                        const void* uniforms, u32 uniformBytes, u32 vertexCount, bool depth) noexcept {
+    const TextureDesc& td = graph_.desc(target);
+    PipelineKey key = PipelineKey::graphics(vertex, fragment, td.format);
+    if (depth) {
+        key.hasDepth = true;
+        key.depthTest = true;
+        key.depthWrite = true;
+        key.depthCompare = CompareOp::GreaterOrEqual;   // Z reverso: limpa em 0
+        key.depthFormat = SurfaceFormat::Depth32F;
+    }
+    auto pipe = shaders_.pipeline(key);
+    if (!pipe.ok()) return kInvalidIndex;
+    void* u = nullptr;
+    if (uniforms && uniformBytes) {
+        u = arena_.alloc(uniformBytes, 16);
+        if (!u) return kInvalidIndex;
+        std::memcpy(u, uniforms, uniformBytes);
+    }
+    constexpr u32 kGeometryTextures = 4;
+    struct Bind { FGTexture graph; u64 raw; u64 sampler; };
+    struct Capture {
+        PipelineHandle pipeline;
+        Bind binds[kGeometryTextures];
+        u32 count;
+        const void* uniforms;
+        u32 uniformBytes;
+        u32 vertices;
+    } cap{};
+    cap.pipeline = *pipe;
+    cap.uniforms = u;
+    cap.uniformBytes = uniformBytes;
+    cap.vertices = vertexCount;
+    for (const PassTexture& t : textures) {
+        if (cap.count >= kGeometryTextures) break;
+        cap.binds[cap.count++] = Bind{t.graph, t.raw.id, shaders_.sampler(t.sampler).id};
+    }
+    auto record = [cap](PassContext& pc) {
+        pc.cmds.bind_pipeline(cap.pipeline);
+        for (u32 i = 0; i < cap.count; ++i) {
+            const Bind& b = cap.binds[i];
+            const TextureHandle tex = b.graph.valid() ? pc.texture(b.graph) : TextureHandle{b.raw};
+            if (tex.valid()) pc.cmds.bind_texture(i, tex, SamplerHandle{b.sampler});
+        }
+        if (cap.uniforms) pc.cmds.set_uniforms(cap.uniforms, cap.uniformBytes);
+        if (cap.vertices) pc.cmds.draw(cap.vertices);
+    };
+    u32 pass = kInvalidIndex;
+    if (depth) {
+        TextureDesc dd;
+        dd.width = td.width;
+        dd.height = td.height;
+        dd.format = SurfaceFormat::Depth32F;
+        dd.sampled = false;
+        dd.renderTarget = true;
+        dd.transient = true;
+        const FGTexture z = graph_.create_texture("geometria-prof", dd);
+        pass = graph_.add_raster_pass_depth(name, stage, target, LoadOp::Clear, Vec4{0, 0, 0, 0}, z, LoadOp::Clear,
+                                            false, 0.0f, record);
+    } else {
+        pass = graph_.add_raster_pass(name, stage, target, LoadOp::Clear, Vec4{0, 0, 0, 0}, record);
+    }
+    for (const PassTexture& t : textures) {
+        if (t.graph.valid()) graph_.read(pass, t.graph);
+    }
+    return pass;
+}
+
 // =============================================================================
 // EffectPlan
 // =============================================================================

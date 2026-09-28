@@ -28,6 +28,7 @@
 #pragma once
 
 #include "aurea/animation/Curve.hpp"
+#include "aurea/audio/AudioEffects.hpp"
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Types.hpp"
 #include "aurea/memory/MemoryManager.hpp"
@@ -251,7 +252,25 @@ struct AudioClip {
     /// da layer a partir de `srcFrame0` (inclusive o do fim). Vazio = `rate`.
     std::vector<f64> srcByFrame;
     i64 srcFrame0 = 0;
+
+    // --- Efeitos de áudio da camada (AudioEffects.hpp) -------------------------
+    /// A cadeia: os efeitos da camada, o `Envelope` (volume, fades, balanço)
+    /// e os efeitos das pré-composições que a contêm. Vazia = o caminho de
+    /// sempre (sem estado, envelope aplicado direto).
+    std::vector<FxStage> chain;
+    /// Reverso: a amostra que toca em `t` é a de `revFrom + revTo − 1 − t`
+    /// (in/out da camada na régua da raiz).
+    bool reverse = false;
+    i64 revFrom = 0, revTo = 0;
+    /// Pré-rolagem da cadeia (amostras): o estado de um salto no tempo.
+    i64 preroll = 0;
+    /// Identidade do clipe entre snapshots (caminho de pré-comps + camada) e
+    /// o hash do que ele toca: o fluxo continua enquanto os dois batem.
+    u64 streamKey = 0;
+    u64 fxHash = 0;
 };
+
+class MixState;
 
 struct AudioMixSnapshot {
     std::vector<AudioClip> clips;
@@ -267,6 +286,14 @@ using AssetPathResolver = std::string (*)(void* ctx, const std::string& stored);
 [[nodiscard]] std::shared_ptr<AudioMixSnapshot> build_snapshot(const Composition& comp, const Project& project,
                                                                AudioBlockCache* cache, AssetPathResolver resolve,
                                                                void* resolveCtx);
+/// O som de UMA camada de `comp` (com os efeitos de áudio dela e, se for
+/// pré-composição, o que há dentro): o que a Forma de onda e o Espectro de
+/// áudio analisam. Ignora mudo/solo — a camada escolhida é a fonte.
+[[nodiscard]] std::shared_ptr<AudioMixSnapshot> build_layer_snapshot(const Composition& comp, const Project& project,
+                                                                     u64 layerId, AudioBlockCache* cache,
+                                                                     AssetPathResolver resolve, void* resolveCtx);
+
+
 
 /// De onde o mixer tira os blocos.
 class BlockSource {
@@ -281,10 +308,39 @@ struct MixStats {
     f32 peak = 0.0f;
 };
 
+/// Estado dos efeitos de áudio entre chamadas do `mix` (um por consumidor:
+/// o mixer do preview, o export, cada análise visual). Uma thread só.
+class MixState {
+public:
+    MixState();
+    ~MixState();
+    MixState(const MixState&) = delete;
+    MixState& operator=(const MixState&) = delete;
+    void clear() noexcept;
+    /// Fluxos recomeçados (com pré-rolagem) desde a criação — teste/telemetria.
+    [[nodiscard]] u64 restarts() const noexcept { return restarts_; }
+
+    struct Stream;
+    /// Uso interno do mixer (AudioFx.cpp): o fluxo de um clipe.
+    [[nodiscard]] Stream& slot(u64 key, u64 epoch);
+    void count_restart() noexcept { ++restarts_; }
+    [[nodiscard]] u64 next_epoch() noexcept { return ++epoch_; }
+    /// Solta os fluxos sem uso há muitas chamadas (clipes que saíram).
+    void sweep(u64 epoch) noexcept;
+private:
+    std::unordered_map<u64, std::unique_ptr<Stream>> streams_;
+    u64 epoch_ = 0;
+    u64 restarts_ = 0;
+};
 /// Mixa `frames` amostras a partir de `start` (amostra da timeline) em
 /// `outStereo`. Pura e determinística: mesma entrada, mesmos bits.
+///
+/// Clipes com efeitos de áudio (`chain`) guardam o fluxo em `state` entre
+/// chamadas; sem `state`, cada chamada recomeça com pré-rolagem (certo, só
+/// mais caro). Faltou bloco: o fluxo daquele clipe é descartado e a próxima
+/// chamada (a repetição do mixer) recomeça do mesmo jeito.
 void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& blocks, f32* outStereo,
-         MixStats* stats = nullptr) noexcept;
+         MixStats* stats = nullptr, MixState* state = nullptr) noexcept;
 
 /// Blocos que o trecho [start, start+frames) vai precisar (para pedir antes).
 void blocks_needed(const AudioMixSnapshot& snap, i64 start, i64 frames,

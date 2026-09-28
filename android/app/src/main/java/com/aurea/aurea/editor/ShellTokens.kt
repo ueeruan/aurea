@@ -63,12 +63,15 @@ internal object ShellDims {
     val StageInset = 8.dp            // compositionRect: min(8, lado/4)
     val Fab = 52.dp
     val FabMargin = 18.dp
+    /** A barra fixa de adicionar (no lugar do "+"): altura e largura de cada categoria. */
+    val AddBar = 64.dp
+    val AddBarItem = 64.dp
+    val AddBarItemMin = 56.dp
     val TouchSlop = 18.dp            // kTouchSlop do Flutter: tocar nunca move
     val HandleSlop = 4.dp
     val SnapTolerance = 10.dp
     val HitSlack = 12.dp
-    val ScaleHandleTarget = 26.dp
-    val RotateHandleTarget = 22.dp
+    val AxisHandleTarget = 26.dp     // raio de toque das setas X/Y do palco
 }
 
 /**

@@ -67,6 +67,11 @@ struct SectionHeader {
     u32 flags   = 0;          ///< bit 0 = comprimido (deflate)
 };
 
+/// Versão da seção Timeline — o mesmo número que `LoadReport::timelineVersion`
+/// devolve ao abrir. Público de propósito: um teste que confere a versão de um
+/// projeto recém-gravado compara com ISTO, nunca com um literal que envelhece.
+constexpr u32 kTimelineSectionVersion = 34;
+
 /// Cabeçalho do arquivo.
 struct FileHeader {
     /// 'AURE' — recusa qualquer coisa que não seja um projeto do Aurea.

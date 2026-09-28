@@ -32,6 +32,8 @@
 #define OP_LUMA_KEY      8
 #define OP_CHROMA_KEY    9
 #define OP_INVERT       10
+#define OP_FILL         11
+#define OP_BALANCE_HLS  12
 
 #define MAX_OPS 12
 
@@ -69,6 +71,27 @@ vec3 from_ycc709(float y, vec2 cc) {
     float b = y + 1.8556 * cc.x;
     float g = (y - 0.2126 * r - 0.0722 * b) / 0.7152;
     return vec3(r, g, b);
+}
+
+// HSL sobre valor CODIFICADO. Mesma matemática de hue_saturation.frag, e aqui
+// porque o Equilíbrio de cor entra na MESMA pilha fundida dos outros de cor.
+vec3 rgb_to_hsl(vec3 c) {
+    float mx = max(c.r, max(c.g, c.b));
+    float mn = min(c.r, min(c.g, c.b));
+    float l = (mx + mn) * 0.5;
+    float d = mx - mn;
+    if (d < 1e-6) return vec3(0.0, 0.0, l);
+    float s = l > 0.5 ? d / max(2.0 - mx - mn, 1e-6) : d / max(mx + mn, 1e-6);
+    float h;
+    if (mx == c.r)      h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+    else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+    else                h = (c.r - c.g) / d + 4.0;
+    return vec3(h / 6.0, s, l);
+}
+vec3 hsl_to_rgb(vec3 hsl) {
+    vec3 k = clamp(abs(mod(hsl.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+    float chroma = (1.0 - abs(2.0 * hsl.z - 1.0)) * hsl.y;
+    return hsl.z + chroma * (k - 0.5);
 }
 
 void main() {
@@ -173,6 +196,21 @@ void main() {
                 }
             }
             if (d.z > .5 && d.z < 1.5) c = vec3(matte);
+        } else if (op == OP_FILL) {
+            // Preencher: a cor chapada entra pela opacidade (já com o alfa da
+            // própria cor dobrado nela, no C++). A mistura é no LINEAR (o
+            // espaço de trabalho), então 50% de uma cor quente sobre uma fria
+            // dá a média de LUZ das duas — sem o cinza de misturar código.
+            c = mix(c, a.yzw, clamp(b.x, 0.0, 1.0));
+        } else if (op == OP_BALANCE_HLS) {
+            // Equilíbrio de cor (HLS): matiz, luz e saturação no HSL — o mesmo
+            // espaço do Matiz e saturação, sobre o valor CODIFICADO (é onde
+            // "girar o matiz" leva o vermelho ao ciano que o olho espera).
+            vec3 hsl = rgb_to_hsl(linear_to_srgb(c));
+            hsl.x = fract(hsl.x + a.y);
+            hsl.z = a.z >= 0.0 ? mix(hsl.z, 1.0, min(a.z, 1.0)) : mix(hsl.z, 0.0, min(-a.z, 1.0));
+            hsl.y = clamp(hsl.y * (1.0 + a.w), 0.0, 1.0);
+            c = srgb_to_linear(max(hsl_to_rgb(hsl), vec3(0.0)));
         }
     }
 

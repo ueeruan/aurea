@@ -1,4 +1,6 @@
 // Port of EffectsPanel.kt and EffectStackCard. Project data stays in the core.
+// Abas "Na camada | Adicionar" (2026-09-28): a aba Adicionar é EffectPickerView
+// (EffectsBrowser.swift); camada sem efeito abre nela, com efeito abre na pilha.
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -8,7 +10,10 @@ struct EffectsView: View {
     var focusedType: UInt32? = nil
     var embedded = false
     @EnvironmentObject private var model: AureaModel
-    @State private var browsing = false
+    @StateObject private var prefs = FxEffectPrefs()
+    @State private var tab: FxEffectsTab = .add
+    @State private var about: EffectCatalogItem?
+    @State private var pendingPick: UInt32?
     @State private var importingAM = false
     @State private var importTask: Task<Void, Never>?
     @State private var openId: UInt32?
@@ -31,6 +36,9 @@ struct EffectsView: View {
         guard let selected, selected.effect == openId else { return nil }
         return model.effectParams.first { $0.index == selected.param }
     }
+    /// Sem [focusedType] é o painel inteiro, com abas; com ele, o editor embutido.
+    private var tabbed: Bool { focusedType == nil }
+    private var hasAudio: Bool { ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0 }
     private var canAnimate: Bool { selectedParam.map { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 } ?? false }
     private var railLook: KeyframeLook {
         guard let selected else { return .none }
@@ -42,12 +50,18 @@ struct EffectsView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            if !embedded { PanelHeader(title: AureaText.t("panel_efeitos"), onBack: { model.panel = .none }) }
+            if !embedded {
+                if tabbed { tabsHeader } else { PanelHeader(title: AureaText.t("panel_efeitos"), onBack: { model.panel = .none }) }
+            }
+            if tabbed && tab == .add {
+                EffectPickerView(prefs: prefs, layerHasAudio: hasAudio, onPick: pick).frame(maxHeight: .infinity)
+            } else {
             HStack(spacing: 0) {
                 rail
                 ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
+                        if tabbed && ordered.isEmpty { PanelNotice(AureaText.t("effects_applied_empty")) }
                         ForEach(ordered) { effect in
                             card(effect).padding(.bottom, 8).id(effect.effectId)
                                 .background(GeometryReader { geometry in
@@ -63,7 +77,7 @@ struct EffectsView: View {
                                 model.mutate { $0.addEffect(type, toLayer: layer, at: UInt32.max) }
                             }.frame(minHeight: 48)
                         }
-                    }.padding(.init(top: 8, leading: 2, bottom: 16, trailing: 12))
+                    }.padding(.init(top: 8, leading: tabbed && openId == nil ? 12 : 2, bottom: 16, trailing: 12))
                 }.coordinateSpace(name: "effect-stack")
                     .accessibilityIdentifier("aurea.effects.stack")
                     .onPreferenceChange(EffectCardFrames.self) { cardFrames = $0 }
@@ -71,6 +85,7 @@ struct EffectsView: View {
                     .onChange(of: ordered.map(\.effectId)) { ids in revealAdded(ids, proxy: proxy) }
                 }
             }.frame(maxHeight: .infinity)
+            }
         }
         .background(AureaColors.editorPanel)
         .onAppear { enterLayer(); model.refreshSelectedLayer(); refreshExpressions() }
@@ -80,12 +95,26 @@ struct EffectsView: View {
         .onDisappear { model.timelineFocus = nil }
         .onChange(of: model.effects.map(\.effectId)) { ids in
             let added = Set(ids).subtracting(known); known = Set(ids)
-            if let id = ids.last(where: { added.contains($0) }) { open(id) }
+            if let id = ids.last(where: { added.contains($0) }) {
+                // Adicionou (catálogo, busca geral, colar): os controles do novo
+                // efeito aparecem na pilha.
+                pendingPick = nil
+                if tabbed { tab = .applied }
+                open(id)
+            }
             else if let openId, !ids.contains(openId) { closeCard() }
         }
+        .task(id: pendingPick) {
+            // Render lento não é recusa: depois de 3 s relê o modelo e libera
+            // um novo toque (sem isso, dois toques rápidos adicionariam dois).
+            guard pendingPick != nil else { return }
+            do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
+            model.refreshModel(force: true)
+            pendingPick = nil
+        }
+        .sheet(item: $about) { entry in EffectAboutSheet(prefs: prefs, entry: entry).environmentObject(model) }
         .onChange(of: model.status.modelRevision) { _ in refreshExpressions() }
         .onChange(of: model.status.playhead) { _ in refreshExpressions() }
-        .fullScreenCover(isPresented: $browsing) { EffectsBrowser(onDismiss: { browsing = false }).environmentObject(model) }
         // Alight Motion: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
         .fileImporter(isPresented: $importingAM, allowedContentTypes: [.data, .xml, .zip]) { result in
             guard case .success(let url) = result else { return }
@@ -117,11 +146,14 @@ struct EffectsView: View {
     }
     @ViewBuilder private var rail: some View {
         if openId == nil {
-            VStack(spacing: 0) {
-                Button { model.panel = .none } label: { MaterialGlyph("rounded.ChevronLeft", size: 24).frame(width: 46, height: 56) }.buttonStyle(AureaPressStyle(shrink: 1))
-                Spacer(minLength: 0)
-                Button { listMenu() } label: { CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 24, color: AureaColors.text).frame(width: 46, height: 56) }.buttonStyle(AureaPressStyle(shrink: 1))
-            }.frame(width: 46).frame(maxHeight: .infinity)
+            // Com abas, o ‹ e o ⋯ moram no cabeçalho: a lista ganha a largura toda.
+            if !tabbed {
+                VStack(spacing: 0) {
+                    Button { model.panel = .none } label: { MaterialGlyph("rounded.ChevronLeft", size: AureaDims.iconLg).frame(width: AureaDims.railW, height: EffectsViewLayout.railCell) }.buttonStyle(AureaPressStyle(shrink: 1))
+                    Spacer(minLength: 0)
+                    Button { listMenu() } label: { CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: AureaDims.iconLg, color: AureaColors.text).frame(width: AureaDims.railW, height: EffectsViewLayout.railCell) }.buttonStyle(AureaPressStyle(shrink: 1))
+                }.frame(width: AureaDims.railW).frame(maxHeight: .infinity)
+            }
         } else {
             LeftRail(keyframeLook: railLook,
                      onKeyframe: canAnimate ? { toggleSelectedKey() } : nil,
@@ -135,12 +167,19 @@ struct EffectsView: View {
     private func enterLayer() {
         guard loadedLayer != model.primarySelection else { return }
         loadedLayer = model.primarySelection; known = Set(model.effects.map(\.effectId))
-        closeCard(); advanced = []; expressionLooks = [:]
+        closeCard(); advanced = []; expressionLooks = [:]; pendingPick = nil
+        tab = fxInitialEffectsTab(model.effects.count)
         if let type = focusedType, let effect = model.effects.first(where: { $0.typeId == type }) {
             open(effect.effectId); return
         }
         guard model.curveProperty == 31, model.curveSelectedTime != nil,
-              model.effects.contains(where: { $0.effectId == model.curveEffect }) else { return }
+              model.effects.contains(where: { $0.effectId == model.curveEffect }) else {
+            // Um efeito só na camada já abre com os controles à vista (um toque a menos).
+            if tabbed, model.effects.count == 1, let only = model.effects.first { open(only.effectId) }
+            return
+        }
+        // Entrar pelo losango de um parâmetro é editar: abre na pilha.
+        tab = .applied
         let entry = EffectParamSelection(effect: model.curveEffect, param: model.curveParam / 4, component: Int(model.curveParam % 4))
         selected = entry; open(entry.effect)
         if parameterGroups(entry.effect).rest.contains(where: { $0.index == entry.param }) { advanced.insert(entry.effect) }
@@ -211,6 +250,10 @@ struct EffectsView: View {
                     else {
                         let groups = parameterGroups(effect.effectId)
                         if groups.main.isEmpty && groups.rest.isEmpty { PanelNotice(AureaText.t("panel_este_efeito_nao_tem_ajustes")) }
+                        // EQ paramétrico: o gráfico da resposta em cima das bandas.
+                        if effect.typeId == fxEffectTypeId("aurea.audio.parametric_eq") {
+                            FxEqResponseGraph(values: (0..<12).map { i in model.effectParams.first { $0.index == UInt32(i) }?.scalar ?? 0 })
+                        }
                         ForEach(groups.main) { param in parameter(param, effect: effect.effectId) }
                         if !groups.rest.isEmpty {
                             AdvancedToggle(open: advanced.contains(effect.effectId), count: groups.rest.count) {
@@ -264,9 +307,41 @@ struct EffectsView: View {
                     Spacer().frame(width: 4)
                 }
             }
+        case fxParamLayerRef:
+            // Outra camada ("Camada de áudio"): o menu lista as camadas da
+            // composição; o motor recebe o ÍNDICE da camada (−1 = nenhuma).
+            customRow(param, effect: effect) {
+                HStack { Spacer(minLength: 0)
+                    Menu {
+                        Button(AureaText.t("afx_layer_none")) { writeLayerRef(param.index, effect: effect, layerIndex: -1) }
+                        ForEach(model.layers.filter { $0.id != model.primarySelection }) { layer in
+                            Button(layer.name.isEmpty ? "#\(fxLayerIndex(layer.id))" : layer.name) {
+                                writeLayerRef(param.index, effect: effect, layerIndex: fxLayerIndex(layer.id))
+                            }
+                        }
+                    } label: {
+                        Text(layerRefName(param)).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent).lineLimit(1)
+                            .padding(.horizontal, 6).padding(.vertical, 8)
+                    }
+                    Spacer().frame(width: 4)
+                }
+            }
         default:
             customRow(param, effect: effect) { Text(AureaText.t("panel_ainda_nao_editavel_app")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
         }
+    }
+    private func layerRefName(_ param: EffectParamItem) -> String {
+        let chosen = Int(param.scalar.rounded())
+        guard chosen >= 0, let layer = model.layers.first(where: { fxLayerIndex($0.id) == chosen }), !layer.name.isEmpty else {
+            return AureaText.t("afx_layer_none")
+        }
+        return layer.name
+    }
+    private func writeLayerRef(_ index: UInt32, effect: UInt32, layerIndex: Int) {
+        guard let layer = model.primarySelection, model.selectedLayer?.locked != true else { return }
+        selected = EffectParamSelection(effect: effect, param: index, component: 0)
+        model.engine.setEffect(effect, forLayer: layer, paramIndex: index, value: Float(layerIndex))
+        model.commitPendingCommands(); model.refreshSelectedLayer()
     }
     private func enumOptions(_ param: EffectParamItem) -> [String] {
         if !param.enumLabels.isEmpty { return param.enumLabels }
@@ -412,8 +487,73 @@ struct EffectsView: View {
         for param in params where param.flags & 16 == 0 { writeVector(param.index, effect: effect.effectId, values: param.defaultValue) }
         model.endGesture(); model.refreshSelectedLayer()
     }
+    /// Mostra o catálogo: a aba Adicionar; no editor embutido, o painel Efeitos.
+    private func showAdd() {
+        if tabbed { tab = .add } else { model.openPanel(.effects) }
+    }
+    /// UM toque no cartão: adiciona às camadas escolhidas; a mudança na pilha
+    /// (onChange acima) leva à aba "Na camada" com o efeito aberto.
+    private func pick(_ entry: EffectCatalogItem) {
+        let targets = model.layers.filter { model.selection.contains($0.id) && !$0.locked }
+        guard model.started, !targets.isEmpty, pendingPick == nil else { return }
+        if let layer = model.primarySelection { model.seenEffectIds[layer] = Set(model.effects.map(\.effectId)) }
+        pendingPick = entry.typeId
+        prefs.addRecent(entry.typeId)
+        model.mutate { engine in
+            engine.beginUndoGroup()
+            for layer in targets { engine.addEffect(entry.typeId, toLayer: layer.id, at: UInt32.max) }
+            engine.endUndoGroup()
+        }
+        model.refreshModel(force: true)
+    }
+    /// O cabeçalho com abas (no lugar do título): ‹ · [Na camada N | Adicionar] · ⋯.
+    private var tabsHeader: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(AureaColors.border).frame(height: AureaDims.hairline)
+            HStack(spacing: 0) {
+                Button { model.panel = .none } label: {
+                    MaterialGlyph("filled.ChevronLeft", size: AureaDims.panelBackIcon)
+                        .frame(width: AureaDims.panelBackTarget, height: AureaDims.panelHeader).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("pn_back_to_layer_tools"))
+                ZStack {
+                    // O trilho da chave: a pílula de 36 no meio da faixa de 44.
+                    RoundedRectangle(cornerRadius: AureaDims.radiusChip).fill(AureaColors.chip).padding(.vertical, AureaDims.s1)
+                    HStack(spacing: 0) {
+                        tabButton(AureaText.t("effects_tab_applied"), count: model.effects.count, .applied, id: "effects.tab.applied")
+                        tabButton(AureaText.t("effects_tab_add"), count: nil, .add, id: "effects.tab.add")
+                    }.padding(.horizontal, EffectsViewLayout.tabInset)
+                }.frame(maxWidth: .infinity).frame(height: AureaDims.panelHeader)
+                Button { listMenu() } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: EffectsViewLayout.headerGlyph, color: AureaColors.text)
+                        .frame(width: AureaDims.minTap, height: AureaDims.panelHeader).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_efeitos_camada"))
+            }.frame(height: AureaDims.panelHeader).background(AureaColors.surface)
+        }
+    }
+    private func tabButton(_ label: String, count: Int?, _ value: FxEffectsTab, id: String) -> some View {
+        let on = tab == value
+        return Button { tab = value } label: {
+            HStack(spacing: EffectsViewLayout.badgeGap) {
+                Text(label).font(.aurea(size: 13, weight: on ? .bold : .medium)).lineLimit(1)
+                    .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+                if let count, count > 0 {
+                    Text(String(count)).font(.aurea(size: 11, weight: .bold))
+                        .foregroundStyle(on ? AureaColors.onAccent : AureaColors.text)
+                        .padding(.horizontal, EffectsViewLayout.badgeGap)
+                        .background(on ? AureaColors.accent : AureaColors.chipHigh, in: Capsule())
+                }
+            }.padding(.horizontal, EffectsViewLayout.badgeGap)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(on ? AureaColors.accentDim : .clear, in: RoundedRectangle(cornerRadius: AureaDims.radiusSm))
+                .padding(.vertical, EffectsViewLayout.tabPillInset)
+                // O alvo é a faixa inteira (44); a pílula desenhada fica no meio.
+                .frame(maxWidth: .infinity).frame(height: AureaDims.panelHeader).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityAddTraits(on ? .isSelected : [])
+            .accessibilityIdentifier(id)
+    }
     private func listMenu() {
-        var actions: [(String, () -> Void)] = [(AureaText.t("panel_adicionar_efeito"), { browsing = true })]
+        var actions: [(String, () -> Void)] = [(AureaText.t("panel_adicionar_efeito"), { showAdd() })]
         actions.append((AureaText.t("fx_my_presets"), { model.presetsOpenKind = "efeitos"; model.openPanel(.presets) }))
         actions.append((AureaText.t("am_import_action"), { importingAM = true }))
         if !model.effects.isEmpty { actions.append((AureaText.t("panel_copiar_efeitos"), { if let layer = model.primarySelection { model.engine.copyEffects(layer) } })) }
@@ -450,6 +590,9 @@ struct EffectsView: View {
             }
             actions.append((AureaText.t(effect.enabled ? "panel_desligar_efeito" : "panel_ligar_efeito"), { enable(effect, !effect.enabled) }))
             actions.append((AureaText.t("panel_redefinir_efeito"), { reset(effect) }))
+            if let entry = model.effectCatalog.first(where: { $0.typeId == effect.typeId }) {
+                actions.append((AureaText.t("effects_about"), { about = entry }))
+            }
             actions.append(("Copiar este efeito", {
                 if let layer = model.primarySelection { model.engine.copyEffect(effect.effectId, fromLayer:layer) }
             }))
@@ -497,7 +640,7 @@ struct EffectsView: View {
     private var footer: some View {
         VStack(spacing: 0) {
             if model.selectedLayer?.adjustment == true { adjustmentIntensity.padding(.bottom, 8) }
-            Button { browsing = true } label: {
+            Button { showAdd() } label: {
                 HStack(spacing: 8) {
                     CupertinoGlyph.text(CupertinoGlyph.Plus, size: 17, color: AureaColors.accent)
                         .accessibilityHidden(true)
@@ -542,6 +685,13 @@ struct EffectsView: View {
         else { model.engine.keyParameter(layer, property: 12, effect: UInt32.max, param: 0, time: model.localPlayhead, value: (model.detail["opacity"] as? NSNumber)?.floatValue ?? 1) }
         model.commitPendingCommands(); model.refreshModel(force: true)
     }
+}
+private enum EffectsViewLayout {
+    static let railCell: CGFloat = 56
+    static let headerGlyph: CGFloat = 22
+    static let tabInset: CGFloat = 3
+    static let tabPillInset: CGFloat = 7
+    static let badgeGap: CGFloat = 6
 }
 private struct EffectParamSelection: Identifiable, Equatable {
     let effect: UInt32
@@ -627,5 +777,49 @@ private struct EffectPropertyLabel: View {
             }
             .overlay(alignment: .topTrailing) { if expression != .none { ExpressionBadge(look: expression).offset(x: 4) } }
             .contentShape(Rectangle()).onTapGesture(perform: onSelect).onLongPressGesture(minimumDuration: 0.5, perform: onMenu)
+    }
+}
+
+/// Índice de camada (parte baixa do id empacotado) — o que a "Camada de áudio" guarda.
+func fxLayerIndex(_ id: Int64) -> Int { Int(truncatingIfNeeded: id & 0xFFFF_FFFF) }
+
+/// O gráfico da resposta do EQ paramétrico: dB (±24) × frequência (20 Hz–20 kHz,
+/// log), com a MESMA conta do filtro que toca (`fxEqResponseDb`).
+struct FxEqResponseGraph: View {
+    let values: [Float]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(AureaText.t("afx_eq_response")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            Canvas { context, size in
+                let mid = size.height / 2
+                let range = 24.0
+                for db in [-12.0, 0.0, 12.0] {
+                    let y = mid - CGFloat(db / range) * mid
+                    var line = Path()
+                    line.move(to: CGPoint(x: 0, y: y))
+                    line.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(line, with: .color(AureaColors.hairline), lineWidth: db == 0 ? 1.5 : 1)
+                }
+                for hz in [100.0, 1000.0, 10000.0] {
+                    let x = CGFloat(log10(hz / 20.0) / 3.0) * size.width
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: 0))
+                    line.addLine(to: CGPoint(x: x, y: size.height))
+                    context.stroke(line, with: .color(AureaColors.hairline), lineWidth: 1)
+                }
+                var curve = Path()
+                let steps = 160
+                for i in 0...steps {
+                    let t = Double(i) / Double(steps)
+                    let db = min(max(fxEqResponseDb(values, 20.0 * pow(1000.0, t)), -range), range)
+                    let point = CGPoint(x: CGFloat(t) * size.width, y: mid - CGFloat(db / range) * mid)
+                    if i == 0 { curve.move(to: point) } else { curve.addLine(to: point) }
+                }
+                context.stroke(curve, with: .color(AureaColors.accent), lineWidth: 2)
+            }
+            .frame(height: 96)
+            .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)
     }
 }

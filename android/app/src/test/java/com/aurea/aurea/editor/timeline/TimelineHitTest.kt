@@ -34,15 +34,22 @@ class TimelineHitTest {
         assertEquals(36f, m.row, 0f)
         assertEquals(30f, m.bar, 0f)
         assertEquals(19f, m.trackTop, 0f)
-        // Pílula 58 a 4 da borda; olho centrado em ≈ 21,7 e quadradinho em 39,3 (print: 13,7–29,3 e 39,2–57,1).
-        assertEquals(21.67f, m.eyeCenterX, 0.01f)
-        assertEquals(39.33f, m.swatchLeft, 0.01f)
+        // Calha de 40 (sai a pílula de 58): glifo do tipo em (17, 13), olho pequeno no canto de baixo (31, 25).
+        assertEquals(40f, m.headerColumn, 0f)
+        assertEquals(17f, m.gutterIconCx, 0f)
+        assertEquals(31f, m.gutterEyeCx, 0f)
+        assertEquals(25f, m.gutterEyeCy, 0f)
+        assertEquals(3f, m.stripe, 0f)
     }
 
     @Test
-    fun `pilula ganha de tudo e o olho e a metade esquerda`() {
+    fun `calha ganha de tudo - olho no canto de baixo, o resto e o glifo do tipo`() {
         assertEquals(HitKind.HEADER_EYE, hit(30f, 20f))
-        assertEquals(HitKind.HEADER, hit(50f, 20f))
+        assertEquals(HitKind.HEADER_EYE, hit(38f, 32f))
+        assertEquals(HitKind.HEADER, hit(12f, 20f))          // o glifo do tipo abre/fecha as trilhas
+        assertEquals(HitKind.HEADER, hit(30f, 8f))           // alto da calha: ainda o glifo
+        assertEquals(HitKind.HEADER, hit(12f, 32f))
+        assertEquals(HitKind.NONE, hit(50f, 20f))            // fora da calha e fora do clipe
         assertEquals(HitKind.NONE, hit(250f, -1f))
         assertEquals(HitKind.NONE, hit(250f, 46f))
     }
@@ -88,7 +95,7 @@ class TimelineHitTest {
 
     @Test
     fun `setas do compacto`() {
-        // contentLeft = 200 + 14 → ‹ em 214..236; contentRight = 300 − 10 → › em 268..290.
+        // contentLeft = 200 + 10 → ‹ em 210..232; contentRight = 300 − 10 → › em 268..290.
         assertEquals(HitKind.ARROW_PREV, hit(220f, 10f, handles = false, compact = true))
         assertEquals(HitKind.ARROW_NEXT, hit(285f, 10f, handles = false, compact = true))
         assertEquals(HitKind.BODY, hit(250f, 10f, handles = false, compact = true))
@@ -97,10 +104,10 @@ class TimelineHitTest {
     }
 
     @Test
-    fun `ponta escondida sob a coluna das pilulas nao tem alca`() {
-        // Início no frame 30 → x = 60, embaixo da coluna (66).
-        assertEquals(HitKind.HEADER, hit(62f, 10f, start = 30))
-        assertEquals(HitKind.BODY, hit(70f, 10f, start = 30))
+    fun `ponta escondida sob a calha nao tem alca`() {
+        // Início no frame 15 → x = 30, embaixo da calha (40).
+        assertEquals(HitKind.HEADER, hit(36f, 10f, start = 15))
+        assertEquals(HitKind.BODY, hit(45f, 10f, start = 15))
     }
 
     @Test

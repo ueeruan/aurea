@@ -416,6 +416,65 @@ public:
     }
 };
 
+// -----------------------------------------------------------------------------
+// Bojo — o raio estufa (+) ou pinça (-) em volta de um centro. Irmão pobre da
+// Lente, e é de propósito que os dois existem: a Lente empurra/puxa/espelha uma
+// calota com brilho, o Bojo é só o remapeamento radial puro, com a mesma curva
+// contínua na borda do antigo.
+// -----------------------------------------------------------------------------
+class Bulge final : public Effect {
+public:
+    enum : u32 { kCenter = 0, kRadius, kHeight, kMix };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kBulge, "Bojo", "Distorcer", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.0f, 2.0f, kParamAnimatable | kParamRelative);
+        p.typed_range(-10.0f, 10.0f);
+        // O raio em fração da ALTURA do quadro: ele é um círculo, não uma
+        // elipse esticada com a largura.
+        p.add_float("radius", "Raio", 30.0f, 1.0f, 200.0f, kParamAnimatable | kParamPercent, "%");
+        p.typed_range(0.1f, 2000.0f);
+        // -95% pinça (o centro encolhe), +95% estufa (o centro cresce).
+        p.add_float("height", "Altura", 50.0f, -95.0f, 95.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return std::fabs(e.f(kHeight)) < 0.01f || e.f(kMix) < 0.01f || e.f(kRadius) <= 0.0f;
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kRadius] = ParamValue::scalar(38.0f);
+        v[kHeight] = ParamValue::scalar(75.0f);
+        return true;
+    }
+    f32 input_margin(const EffectEval&) const noexcept override { return 0.0f; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_bulge_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        EffectUniforms u = base_uniforms(input);
+        const Vec2 c = e.p2(kCenter);
+        // O raio chega em % da ALTURA da camada e vira uv de altura: em uv, a
+        // altura é 1, então 30% = 0.30. O shader cuida da razão de aspecto.
+        u.p0 = Vec4{c.x, c.y, std::clamp(e.f(kRadius) * 0.01f, 1e-4f, 20.0f), 0.0f};
+        u.p1 = Vec4{std::clamp(e.f(kHeight) * 0.01f, -0.95f, 0.95f),
+                    std::clamp(e.f(kMix) * 0.01f, 0.0f, 1.0f), 0.0f, 0.0f};
+        out = input;
+        out.texture = ctx.texture("bojo", input.width, input.height);
+        // Borda transparente: o que a deformação puxa de fora do quadro some,
+        // em vez de esticar a última linha de pixels.
+        if (ctx.fullscreen_pass("bojo", PassStage::Transform, out.texture, ShaderId::effects_bulge_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
+                                &u, sizeof(u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        return OkStatus;
+    }
+};
+
 } // namespace
 
 void register_distort_effects(EffectRegistry& r) {
@@ -424,6 +483,7 @@ void register_distort_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<WaveWarp>());
     (void)r.add(std::make_unique<Warp>());
     (void)r.add(std::make_unique<RippleDissolve>());
+    (void)r.add(std::make_unique<Bulge>());
 }
 
 } // namespace aurea::builtin

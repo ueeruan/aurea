@@ -724,6 +724,93 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             2: FxParamHuman(label: "fx_inverter"),
             3: FxParamHuman(label: "fx_mistura", decimals: 0),
         ])),
+    // --- Pacote do editor antigo: o que só ele tinha ---
+    ("aurea.color.fill", FxEffectHuman(
+        name: "fx_name_fill",
+        keywords: "preencher fill cor chapada tinta solido",
+        params: [
+            0: FxParamHuman(label: "fx_cor"),
+            1: FxParamHuman(label: "fx_opacidade", decimals: 0),
+        ])),
+    ("aurea.color.balance_hls", FxEffectHuman(
+        name: "fx_name_color_balance_hls",
+        keywords: "equilibrio balanco cor hls matiz luz saturacao",
+        params: [
+            0: FxParamHuman(label: "fx_matiz", suffix: "°", decimals: 0),
+            1: FxParamHuman(label: "fx_luminosidade", decimals: 0),
+            2: FxParamHuman(label: "fx_saturacao", decimals: 0),
+        ])),
+    ("aurea.blur.zoom", FxEffectHuman(
+        name: "fx_name_zoom_blur",
+        keywords: "zoom rastro radial lente empurrar desfoque",
+        params: [
+            0: FxParamHuman(label: "fx_centro"),
+            1: FxParamHuman(label: "fx_intensidade", decimals: 0),
+            2: FxParamHuman(label: "fx_esticar_bordas"),
+            3: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    ("aurea.distort.bulge", FxEffectHuman(
+        name: "fx_name_bulge",
+        keywords: "bojo bulge pinca estufar puxar lente centro",
+        params: [
+            0: FxParamHuman(label: "fx_centro"),
+            1: FxParamHuman(label: "fx_raio", suffix: "%", decimals: 0),
+            2: FxParamHuman(label: "fx_altura", suffix: "%", decimals: 0),
+            3: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    ("aurea.pattern.checkerboard", FxEffectHuman(
+        name: "fx_name_checkerboard",
+        keywords: "xadrez checkerboard quadriculado tabuleiro celulas padrao",
+        params: [
+            0: FxParamHuman(label: "fx_largura_celula", suffix: "px", decimals: 0),
+            1: FxParamHuman(label: "fx_altura_celula", suffix: "px", decimals: 0),
+            2: FxParamHuman(label: "fx_ancora"),
+            3: FxParamHuman(label: "fx_rotacao", suffix: "°", decimals: 0),
+            4: FxParamHuman(label: "fx_suavidade_borda", suffix: "px", decimals: 0),
+            5: FxParamHuman(label: "fx_inverter"),
+            6: FxParamHuman(label: "fx_opacidade", decimals: 0),
+            7: FxParamHuman(label: "fx_cor"),
+        ])),
+    ("aurea.pattern.hexagonal", FxEffectHuman(
+        name: "fx_name_hexagonal",
+        keywords: "hexagonal favos abelha painel led malha matriz",
+        params: [
+            0: FxParamHuman(label: "fx_tamanho_celula", suffix: "px", decimals: 0),
+            1: FxParamHuman(label: "fx_ancora"),
+            2: FxParamHuman(label: "fx_rotacao", suffix: "°", decimals: 0),
+            3: FxParamHuman(label: "fx_espessura", suffix: "px", decimals: 0),
+            4: FxParamHuman(label: "fx_suavidade_borda", suffix: "px", decimals: 0),
+            5: FxParamHuman(label: "fx_inverter"),
+            6: FxParamHuman(label: "fx_opacidade", decimals: 0),
+            7: FxParamHuman(label: "fx_cor"),
+        ])),
+    ("aurea.stylize.drop_shadow", FxEffectHuman(
+        name: "fx_name_drop_shadow",
+        keywords: "sombra projetada drop shadow atras texto caixa distancia",
+        params: [
+            0: FxParamHuman(label: "fx_cor_sombra"),
+            1: FxParamHuman(label: "fx_opacidade", decimals: 0),
+            2: FxParamHuman(label: "fx_direcao", suffix: "°", decimals: 0),
+            3: FxParamHuman(label: "fx_distancia", suffix: "px", decimals: 0),
+            4: FxParamHuman(label: "fx_suavidade", suffix: "px", decimals: 0),
+        ])),
+    ("aurea.stylize.border", FxEffectHuman(
+        name: "fx_name_border",
+        keywords: "borda contorno moldura traco outline",
+        params: [
+            0: FxParamHuman(label: "fx_cor"),
+            1: FxParamHuman(label: "fx_largura", suffix: "px", decimals: 0),
+            2: FxParamHuman(label: "fx_opacidade", decimals: 0),
+        ])),
+    // --- IA ---
+    ("aurea.ai.depth_map", FxEffectHuman(
+        name: "fx_name_depth_map",
+        keywords: "profundidade depth mapa ia ai midas distancia perto longe z matte fundo",
+        params: [
+            0: FxParamHuman(label: "fx_mistura", decimals: 0),
+            1: FxParamHuman(label: "fx_inverter"),
+            2: FxParamHuman(label: "fx_suavizacao", decimals: 0),
+        ])),
     ("aurea.color.hue_saturation", FxEffectHuman(
         name: "fx_name_hue_saturation",
         keywords: "matiz saturacao hue saturation luminosidade colorir tom cor",
@@ -833,6 +920,171 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             1: FxParamHuman(label: "fx_suavizar_borda", suffix: "px", decimals: 1),
             2: FxParamHuman(label: "fx_mostrar_mascara"),
         ])),
+    // --- Pacote de áudio: efeitos de SOM (categoria Áudio) e os visuais ---
+    ("aurea.audio.backwards", FxEffectHuman(
+        name: "afx_name_backwards",
+        keywords: "reverso backwards tras para frente inverter som trocar canais",
+        params: [0: FxParamHuman(label: "afx_p_swap_channels")])),
+    ("aurea.audio.delay", FxEffectHuman(
+        name: "afx_name_delay",
+        keywords: "atraso delay eco echo repeticao realimentacao feedback",
+        principal: [0, 1, 2, 3, 4],
+        params: [
+            0: FxParamHuman(label: "afx_p_delay_time", decimals: 0),
+            1: FxParamHuman(label: "afx_p_delay_amount", decimals: 0),
+            2: FxParamHuman(label: "afx_p_feedback", decimals: 0),
+            3: FxParamHuman(label: "afx_p_dry_out", decimals: 0),
+            4: FxParamHuman(label: "afx_p_wet_out", decimals: 0),
+        ])),
+    ("aurea.audio.flange_chorus", FxEffectHuman(
+        name: "afx_name_flange_chorus",
+        keywords: "flange flanger chorus coro vozes modulacao",
+        principal: [0, 1, 2, 3, 7, 8],
+        params: [
+            0: FxParamHuman(label: "afx_p_voice_separation", decimals: 1),
+            1: FxParamHuman(label: "afx_p_voices"),
+            2: FxParamHuman(label: "afx_p_mod_rate", decimals: 2),
+            3: FxParamHuman(label: "afx_p_mod_depth", decimals: 0),
+            4: FxParamHuman(label: "afx_p_voice_phase", decimals: 0),
+            5: FxParamHuman(label: "afx_p_invert_phase"),
+            6: FxParamHuman(label: "afx_p_stereo_voices"),
+            7: FxParamHuman(label: "afx_p_dry_out", decimals: 0),
+            8: FxParamHuman(label: "afx_p_wet_out", decimals: 0),
+        ])),
+    ("aurea.audio.high_low_pass", FxEffectHuman(
+        name: "afx_name_high_low_pass",
+        keywords: "passa alta passa baixa high low pass filtro corte graves agudos",
+        params: [
+            0: FxParamHuman(label: "afx_p_filter_options"),
+            1: FxParamHuman(label: "afx_p_cutoff", decimals: 0),
+            2: FxParamHuman(label: "afx_p_dry_out", decimals: 0),
+            3: FxParamHuman(label: "afx_p_wet_out", decimals: 0),
+        ])),
+    ("aurea.audio.stereo_mixer", FxEffectHuman(
+        name: "afx_name_stereo_mixer",
+        keywords: "mixer estereo stereo pan balanco nivel fase canais",
+        params: [
+            0: FxParamHuman(label: "afx_p_left_level", decimals: 0),
+            1: FxParamHuman(label: "afx_p_right_level", decimals: 0),
+            2: FxParamHuman(label: "afx_p_left_pan", decimals: 0),
+            3: FxParamHuman(label: "afx_p_right_pan", decimals: 0),
+            4: FxParamHuman(label: "afx_p_invert_phase"),
+        ])),
+    ("aurea.audio.modulator", FxEffectHuman(
+        name: "afx_name_modulator",
+        keywords: "modulador modulator vibrato tremolo",
+        params: [
+            0: FxParamHuman(label: "afx_p_mod_type"),
+            1: FxParamHuman(label: "afx_p_mod_rate", decimals: 2),
+            2: FxParamHuman(label: "afx_p_mod_depth", decimals: 1),
+            3: FxParamHuman(label: "afx_p_amp_mod", decimals: 0),
+        ])),
+    ("aurea.audio.parametric_eq", FxEffectHuman(
+        name: "afx_name_parametric_eq",
+        keywords: "eq equalizador parametrico parametric bandas graves agudos",
+        principal: Array(0..<12),
+        params: [
+            0: FxParamHuman(label: "afx_p_band1_enable"),
+            1: FxParamHuman(label: "afx_p_band1_freq", decimals: 0),
+            2: FxParamHuman(label: "afx_p_band1_width", decimals: 1),
+            3: FxParamHuman(label: "afx_p_band1_gain", decimals: 1),
+            4: FxParamHuman(label: "afx_p_band2_enable"),
+            5: FxParamHuman(label: "afx_p_band2_freq", decimals: 0),
+            6: FxParamHuman(label: "afx_p_band2_width", decimals: 1),
+            7: FxParamHuman(label: "afx_p_band2_gain", decimals: 1),
+            8: FxParamHuman(label: "afx_p_band3_enable"),
+            9: FxParamHuman(label: "afx_p_band3_freq", decimals: 0),
+            10: FxParamHuman(label: "afx_p_band3_width", decimals: 1),
+            11: FxParamHuman(label: "afx_p_band3_gain", decimals: 1),
+        ])),
+    ("aurea.audio.room_reverb", FxEffectHuman(
+        name: "afx_name_reverb",
+        keywords: "reverb reverberacao sala eco ambiencia",
+        params: [
+            0: FxParamHuman(label: "afx_p_reverb_time", decimals: 0),
+            1: FxParamHuman(label: "afx_p_diffusion", decimals: 0),
+            2: FxParamHuman(label: "afx_p_decay", decimals: 0),
+            3: FxParamHuman(label: "afx_p_brightness", decimals: 0),
+            4: FxParamHuman(label: "afx_p_dry_out", decimals: 0),
+            5: FxParamHuman(label: "afx_p_wet_out", decimals: 0),
+        ])),
+    ("aurea.audio.tone", FxEffectHuman(
+        name: "afx_name_tone",
+        keywords: "tom tone gerador seno onda quadrada bip nota acorde",
+        principal: [0, 1, 2, 3, 4, 5, 6],
+        params: [
+            0: FxParamHuman(label: "afx_p_waveform"),
+            1: FxParamHuman(label: "afx_p_freq1", decimals: 2),
+            2: FxParamHuman(label: "afx_p_freq2", decimals: 2),
+            3: FxParamHuman(label: "afx_p_freq3", decimals: 2),
+            4: FxParamHuman(label: "afx_p_freq4", decimals: 2),
+            5: FxParamHuman(label: "afx_p_freq5", decimals: 2),
+            6: FxParamHuman(label: "afx_p_level", decimals: 0),
+        ])),
+    ("aurea.generate.audio_waveform", FxEffectHuman(
+        name: "afx_name_audio_waveform",
+        keywords: "forma de onda waveform audio osciloscopio som visualizador",
+        principal: [0, 1, 2, 4, 7, 10, 11, 13],
+        params: [
+            0: FxParamHuman(label: "afx_p_audio_layer"),
+            1: FxParamHuman(label: "fx_ponto_inicial"),
+            2: FxParamHuman(label: "fx_ponto_final"),
+            3: FxParamHuman(label: "afx_p_displayed_samples"),
+            4: FxParamHuman(label: "fx_altura_maxima", suffix: "px", decimals: 0),
+            5: FxParamHuman(label: "afx_p_audio_duration", decimals: 0),
+            6: FxParamHuman(label: "afx_p_audio_offset", decimals: 0),
+            7: FxParamHuman(label: "fx_espessura", suffix: "px", decimals: 1),
+            8: FxParamHuman(label: "fx_suavidade", decimals: 0),
+            9: FxParamHuman(label: "afx_p_random_seed"),
+            10: FxParamHuman(label: "afx_p_inside_color"),
+            11: FxParamHuman(label: "afx_p_outside_color"),
+            12: FxParamHuman(label: "afx_p_waveform_options"),
+            13: FxParamHuman(label: "afx_p_display_options"),
+            14: FxParamHuman(label: "fx_compor_original"),
+        ])),
+    ("aurea.generate.spectrum_analyzer", FxEffectHuman(
+        name: "afx_name_spectrum",
+        keywords: "espectro de audio audio spectrum som musica barras visualizador equalizador frequencias",
+        principal: [0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 18, 19],
+        params: [
+            0: FxParamHuman(label: "afx_p_audio_layer"),
+            1: FxParamHuman(label: "fx_ponto_inicial"),
+            2: FxParamHuman(label: "fx_ponto_final"),
+            3: FxParamHuman(label: "afx_p_polar"),
+            4: FxParamHuman(label: "afx_p_start_freq", decimals: 0),
+            5: FxParamHuman(label: "afx_p_end_freq", decimals: 0),
+            6: FxParamHuman(label: "afx_p_freq_bands"),
+            7: FxParamHuman(label: "fx_altura_maxima", suffix: "px", decimals: 0),
+            8: FxParamHuman(label: "afx_p_audio_duration", decimals: 0),
+            9: FxParamHuman(label: "afx_p_audio_offset", decimals: 0),
+            10: FxParamHuman(label: "fx_espessura", suffix: "px", decimals: 1),
+            11: FxParamHuman(label: "fx_suavidade", decimals: 0),
+            12: FxParamHuman(label: "afx_p_inside_color"),
+            13: FxParamHuman(label: "afx_p_outside_color"),
+            14: FxParamHuman(label: "afx_p_blend_overlap"),
+            15: FxParamHuman(label: "afx_p_hue_interp"),
+            16: FxParamHuman(label: "afx_p_dynamic_hue"),
+            17: FxParamHuman(label: "afx_p_color_symmetry"),
+            18: FxParamHuman(label: "afx_p_display_options"),
+            19: FxParamHuman(label: "afx_p_side_options"),
+            20: FxParamHuman(label: "afx_p_duration_averaging"),
+            21: FxParamHuman(label: "fx_compor_original"),
+        ])),
+    ("aurea.stylize.ball_grid", FxEffectHuman(
+        name: "afx_name_balls",
+        keywords: "bolas esferas balls spheres grade particulas explodir dispersar torcer",
+        principal: [0, 1, 2, 3, 4, 5, 6],
+        params: [
+            0: FxParamHuman(label: "afx_p_scatter", suffix: "px", decimals: 0),
+            1: FxParamHuman(label: "afx_p_rotation_axis"),
+            2: FxParamHuman(label: "afx_p_rotation"),
+            3: FxParamHuman(label: "afx_p_twist_property"),
+            4: FxParamHuman(label: "afx_p_twist_angle"),
+            5: FxParamHuman(label: "afx_p_grid_spacing", suffix: "px", decimals: 1),
+            6: FxParamHuman(label: "afx_p_ball_size", decimals: 0),
+            7: FxParamHuman(label: "afx_p_instability_state"),
+            8: FxParamHuman(label: "afx_p_instability", suffix: "px", decimals: 1),
+        ])),
 ]
 
 /// A tabela indexada pelo `typeId`, e a posição declarada (para ordenar sem
@@ -934,6 +1186,47 @@ let fxParamPoint2D = 4
 let fxParamPoint3D = 5
 let fxParamAngle = 6
 let fxParamEnum = 7
+/// Outra camada da composição ("Camada de áudio"). O valor é o ÍNDICE da
+/// camada (parte baixa do id); −1 = nenhuma.
+let fxParamLayerRef = 10
+
+// -----------------------------------------------------------------------------
+// EQ paramétrico: a resposta do gráfico, com a MESMA conta do filtro que toca
+// (`audio::eq_band` no motor: pico/vale RBJ, Q = 100 / largura %).
+// -----------------------------------------------------------------------------
+private func fxEqBand(_ hz: Double, _ widthPercent: Double, _ gainDb: Double) -> [Double] {
+    let rate = 48000.0
+    let f = min(max(hz, 10.0), rate * 0.49)
+    let q = 100.0 / min(max(widthPercent, 0.5), 1000.0)
+    let a = pow(10.0, min(max(gainDb, -60.0), 60.0) / 40.0)
+    let w0 = 2.0 * Double.pi * f / rate
+    let alpha = sin(w0) / (2.0 * q)
+    let c = cos(w0)
+    let a0 = 1.0 + alpha / a
+    return [(1.0 + alpha * a) / a0, -2.0 * c / a0, (1.0 - alpha * a) / a0, -2.0 * c / a0, (1.0 - alpha / a) / a0]
+}
+
+private func fxBiquadDb(_ b: [Double], _ hz: Double) -> Double {
+    let w = 2.0 * Double.pi * min(max(hz, 0.0), 24000.0) / 48000.0
+    let c1 = cos(w), s1 = -sin(w), c2 = cos(2 * w), s2 = -sin(2 * w)
+    let nr = b[0] + b[1] * c1 + b[2] * c2
+    let ni = b[1] * s1 + b[2] * s2
+    let dr = 1.0 + b[3] * c1 + b[4] * c2
+    let di = b[3] * s1 + b[4] * s2
+    let mag = (nr * nr + ni * ni).squareRoot() / max((dr * dr + di * di).squareRoot(), 1e-30)
+    return 20.0 * log10(max(mag, 1e-12))
+}
+
+/// Resposta somada das bandas ligadas (12 valores: ativar, Hz, largura %, dB × 3).
+func fxEqResponseDb(_ values: [Float], _ hz: Double) -> Double {
+    var db = 0.0
+    for band in 0..<3 {
+        let o = band * 4
+        guard values.count > o + 3, values[o] >= 0.5 else { continue }
+        db += fxBiquadDb(fxEqBand(Double(values[o + 1]), Double(values[o + 2]), Double(values[o + 3])), hz)
+    }
+    return db
+}
 
 /// Espelho de `aurea::component_count`.
 func fxComponentCount(_ type: Int) -> Int {
@@ -1025,6 +1318,8 @@ func fxEffectCategoryLabel(_ category: String) -> String {
     case "gerar": return AureaText.t("cat_generate")
     case "utilitario": return AureaText.t("cat_utility")
     case "controles de expressao": return AureaText.t("cat_expr")
+    case "pattern": return AureaText.t("cat_pattern")
+    case "audio": return AureaText.t("cat_audio")
     default: return category
     }
 }
@@ -1040,6 +1335,7 @@ func fxCategoryGlyph(_ category: String) -> Character {
     case "recorte": return CupertinoGlyph.Scissors
     case "tempo": return CupertinoGlyph.Timer
     case "controles de expressao": return CupertinoGlyph.SliderHorizontal3
+    case "audio": return CupertinoGlyph.MusicNote
     default: return CupertinoGlyph.WandStars
     }
 }
@@ -1144,6 +1440,31 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.generate.audio_spectrum", "fx_desc_generate_audio_spectrum", FxAllTargets, "audio spectrum espectro som musica barras visualizador")
     put("aurea.stylize.stroke_outline", "fx_desc_stylize_stroke_outline", FxAllTargets, "stroke contorno traco borda silhueta outline")
     put("aurea.key.matte_refine", "fx_desc_key_matte_refine", [.imagem, .video, .preComposicao, .texto, .forma], "choke feather encolher suavizar mascara matte recorte")
+    // --- Pacote do editor antigo: o que só ele tinha ---
+    put("aurea.color.fill", "fx_desc_color_fill", FxAllTargets, "preencher fill cor chapada tinta solido")
+    put("aurea.color.balance_hls", "fx_desc_color_balance_hls", FxAllTargets, "equilibrio balanco cor hls matiz luz saturacao")
+    put("aurea.blur.zoom", "fx_desc_blur_zoom", FxAllTargets, "zoom rastro radial lente empurrar desfoque")
+    put("aurea.distort.bulge", "fx_desc_distort_bulge", FxAllTargets, "bojo bulge pinca estufar puxar lente centro")
+    put("aurea.pattern.checkerboard", "fx_desc_pattern_checkerboard", FxAllTargets, "xadrez checkerboard quadriculado tabuleiro celulas padrao")
+    put("aurea.pattern.hexagonal", "fx_desc_pattern_hexagonal", FxAllTargets, "hexagonal favos abelha painel led malha matriz")
+    put("aurea.stylize.drop_shadow", "fx_desc_stylize_drop_shadow", FxAllTargets, "sombra projetada drop shadow atras texto caixa distancia")
+    put("aurea.stylize.border", "fx_desc_stylize_border", FxAllTargets, "borda contorno moldura traco outline")
+    // --- Pacote de áudio: efeitos de SOM (categoria Áudio) e os visuais ---
+    let sound: [FxTarget] = [.video, .preComposicao]
+    put("aurea.audio.backwards", "afx_desc_backwards", sound, "reverso backwards tras para frente inverter som audio trocar canais")
+    put("aurea.audio.delay", "afx_desc_delay", sound, "atraso delay eco echo repeticao realimentacao feedback audio")
+    put("aurea.audio.flange_chorus", "afx_desc_flange_chorus", sound, "flange flanger chorus coro vozes modulacao audio")
+    put("aurea.audio.high_low_pass", "afx_desc_high_low_pass", sound, "passa alta passa baixa high low pass filtro corte graves agudos audio")
+    put("aurea.audio.stereo_mixer", "afx_desc_stereo_mixer", sound, "mixer estereo stereo pan balanco nivel fase canais audio")
+    put("aurea.audio.modulator", "afx_desc_modulator", sound, "modulador modulator vibrato tremolo audio")
+    put("aurea.audio.parametric_eq", "afx_desc_parametric_eq", sound, "eq equalizador parametrico parametric bandas graves agudos audio")
+    put("aurea.audio.room_reverb", "afx_desc_reverb", sound, "reverb reverberacao sala eco ambiencia audio")
+    put("aurea.audio.tone", "afx_desc_tone", FxAllTargets, "tom tone gerador seno onda quadrada bip nota acorde audio")
+    put("aurea.generate.audio_waveform", "afx_desc_audio_waveform", FxAllTargets, "forma de onda waveform audio osciloscopio som visualizador")
+    put("aurea.generate.spectrum_analyzer", "afx_desc_spectrum", FxAllTargets, "espectro spectrum audio barras frequencias visualizador equalizador")
+    put("aurea.stylize.ball_grid", "afx_desc_balls", FxVisualTargets, "bolas esferas balls spheres grade particulas explodir dispersar")
+    // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
+    put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")
     return out
 }()
 

@@ -66,8 +66,7 @@ enum StageDim {
     static let handleSlop: CGFloat = 4
     static let snapTolerance: CGFloat = 10
     static let hitSlack: CGFloat = 12
-    static let scaleHandleTarget: CGFloat = 26
-    static let rotateHandleTarget: CGFloat = 22
+    static let axisHandleTarget: CGFloat = 26
 
     /// Alvo dos botões das barras (N×44, sem enfeite próprio).
     static let barButtonWidth: CGFloat = 40
@@ -95,11 +94,8 @@ enum StageDim {
     static let pinchDeadZone: CGFloat = 4       // graus
 
     // --- Doca e adicionar (BottomArea.kt / AddLayerPanel.kt) ---
-    static let dockRowHeight: CGFloat = 54   // ícone + nome curto (Android: 54 dp)
     static let dockRowPad: CGFloat = 10
     static let dockRowGap: CGFloat = 8
-    static let dockTileMin: CGFloat = 64
-    static let dockTileMax: CGFloat = 96
     static let dockTileIcon: CGFloat = 27
     static let dockTileIconSmall: CGFloat = 22
     static let batchRowHeight: CGFloat = 52
@@ -109,6 +105,13 @@ enum StageDim {
     static let addCardHeight: CGFloat = 80
     static let addCardIcon: CGFloat = 28
     static let addShapeInset: CGFloat = 12
+    /// A barra fixa de adicionar (no lugar do "+"): `ShellDims.AddBar*` do Android.
+    static let addBar: CGFloat = EditorLayout.addBar
+    static let addBarItem: CGFloat = 64
+    static let addBarItemMin: CGFloat = 56
+    static let addBarIcon: CGFloat = 23
+    static let addBarItemInset: CGFloat = 4
+    static let hairline: CGFloat = 1
 }
 
 // =============================================================================
@@ -222,6 +225,8 @@ final class ShellPresentation: ObservableObject {
     @Published var sheet: ShellSheet?
     @Published var linkAnchor: CGRect?
     @Published var linkIds: [Int64] = []
+    /// Categoria aberta pela barra de adicionar (índice das `ShellAddCategories`).
+    @Published var addCategory = 0
     @Published var resolutionAnchor: CGRect?
     @Published var timeInput = ""
     @Published var grabbedHandle = -1
@@ -233,20 +238,13 @@ final class ShellPresentation: ObservableObject {
 
 enum ShellStageGeometry {
     static let gizmoLength: Float = 320
-    static func handles(_ corners: [CGPoint], size: CGSize) -> [CGPoint] {
-        guard corners.count == 4 else { return [] }
-        let center = CGPoint(x: corners.map(\.x).reduce(0, +) / 4, y: corners.map(\.y).reduce(0, +) / 4)
-        var result = [1, 2, 0, 3].map { k -> CGPoint in
-            var dx = corners[k].x - center.x, dy = corners[k].y - center.y, distance = hypot(corners[k].x - center.x, corners[k].y - center.y)
-            if distance >= 30 { return corners[k] }
-            if distance < 0.001 { dx = k == 1 || k == 2 ? 1 : -1; dy = k >= 2 ? 1 : -1; distance = hypot(dx, dy) }
-            return CGPoint(x: center.x + dx / distance * 30, y: center.y + dy / distance * 30)
-        }
-        if hypot(result[0].x - result[1].x, result[0].y - result[1].y) < 60 {
-            let mid = (result[0].y + result[1].y) / 2; result[0].y = mid - 30; result[1].y = mid + 30
-        }
-        // The Metal view already has the original eight-point stage inset.
-        return result.map { CGPoint(x: $0.x.clamped(to: 14...max(14, size.width - 14)), y: $0.y.clamped(to: 14...max(14, size.height - 14))) }
+    /// Setas do 2D a partir do centro (Stage.kt placeAxisHandles): 0 = X à
+    /// direita, 1 = Y para cima, 56 pt. Perto da borda do palco a seta vira
+    /// para o outro lado (continua tocável). A Metal view já tem o recuo de 8 pt.
+    static func axisHandles(_ center: CGPoint, size: CGSize) -> [CGPoint] {
+        let length: CGFloat = 56, edge: CGFloat = 14
+        return [CGPoint(x: center.x + length > size.width - edge ? center.x - length : center.x + length, y: center.y),
+                CGPoint(x: center.x, y: center.y - length < edge ? center.y + length : center.y - length)]
     }
     static func gizmoTips(_ points: [CGPoint]) -> [CGPoint] {
         guard points.count == 4 else { return [] }; var result = points

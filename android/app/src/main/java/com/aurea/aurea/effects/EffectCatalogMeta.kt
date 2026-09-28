@@ -40,6 +40,7 @@ val EffectCategoryOrder = listOf(
     "Transição",
     "Recorte",
     "Gerar",
+    "Áudio",
     "Utilitário",
     "Controles de expressão",
 )
@@ -68,6 +69,8 @@ enum class EffectTarget(@StringRes val label: Int) {
     Cena3D(R.string.target_3d),
     PreComposicao(R.string.target_precomp),
     Ajuste(R.string.target_adjust),
+    /** Camada com som (vídeo com trilha ou áudio): os efeitos de SOM. */
+    Audio(R.string.target_audio),
 }
 
 /**
@@ -79,6 +82,13 @@ enum class EffectTarget(@StringRes val label: Int) {
  * motor entrega seria esconder recurso que funciona.
  */
 private val AllTargets = EffectTarget.entries.toList()
+
+/**
+ * Onde os efeitos de som valem: o que tem trilha (e a pré-comp, que mixa as
+ * dela). Declarada ANTES da tabela: propriedades de topo iniciam na ordem do
+ * arquivo.
+ */
+private val SoundTargets = listOf(EffectTarget.Audio, EffectTarget.Video, EffectTarget.PreComposicao)
 
 private val Table: Map<Int, EffectMeta> = buildMap {
     fun put(key: String, meta: EffectMeta) = put(effectTypeId(key), meta)
@@ -183,7 +193,68 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.key.matte_refine", EffectMeta(R.string.fx_desc_key_matte_refine,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Texto, EffectTarget.Forma),
         "choke feather encolher suavizar mascara matte recorte"))
+    // --- Pacote do editor antigo: o que só ele tinha ---
+    put("aurea.color.fill", EffectMeta(R.string.fx_desc_color_fill, AllTargets,
+        "preencher fill cor chapada tinta solido"))
+    put("aurea.color.balance_hls", EffectMeta(R.string.fx_desc_color_balance_hls, AllTargets,
+        "equilibrio balanco cor hls matiz luz saturacao"))
+    put("aurea.blur.zoom", EffectMeta(R.string.fx_desc_blur_zoom, AllTargets,
+        "zoom rastro radial lente empurrar desfoque"))
+    put("aurea.distort.bulge", EffectMeta(R.string.fx_desc_distort_bulge, AllTargets,
+        "bojo bulge pinca estufar puxar lente centro"))
+    put("aurea.pattern.checkerboard", EffectMeta(R.string.fx_desc_pattern_checkerboard, AllTargets,
+        "xadrez checkerboard quadriculado tabuleiro celulas padrao"))
+    put("aurea.pattern.hexagonal", EffectMeta(R.string.fx_desc_pattern_hexagonal, AllTargets,
+        "hexagonal favos abelha painel led malha matriz"))
+    put("aurea.stylize.drop_shadow", EffectMeta(R.string.fx_desc_stylize_drop_shadow, AllTargets,
+        "sombra projetada drop shadow atras texto caixa distancia"))
+    put("aurea.stylize.border", EffectMeta(R.string.fx_desc_stylize_border, AllTargets,
+        "borda contorno moldura traco outline"))
+    // --- Pacote de áudio: efeitos de SOM (categoria Áudio) e os visuais ---
+    put(AudioFxKeys.Backwards, EffectMeta(R.string.afx_desc_backwards, SoundTargets,
+        "reverso backwards tras para frente inverter som audio trocar canais"))
+    put(AudioFxKeys.Delay, EffectMeta(R.string.afx_desc_delay, SoundTargets,
+        "atraso delay eco echo repeticao realimentacao feedback audio"))
+    put(AudioFxKeys.FlangeChorus, EffectMeta(R.string.afx_desc_flange_chorus, SoundTargets,
+        "flange flanger chorus coro vozes modulacao audio"))
+    put(AudioFxKeys.HighLowPass, EffectMeta(R.string.afx_desc_high_low_pass, SoundTargets,
+        "passa alta passa baixa high low pass filtro corte graves agudos audio"))
+    put(AudioFxKeys.StereoMixer, EffectMeta(R.string.afx_desc_stereo_mixer, SoundTargets,
+        "mixer estereo stereo pan balanco nivel fase canais audio"))
+    put(AudioFxKeys.Modulator, EffectMeta(R.string.afx_desc_modulator, SoundTargets,
+        "modulador modulator vibrato tremolo audio"))
+    put(AudioFxKeys.ParametricEq, EffectMeta(R.string.afx_desc_parametric_eq, SoundTargets,
+        "eq equalizador parametrico parametric bandas graves agudos audio"))
+    put(AudioFxKeys.Reverb, EffectMeta(R.string.afx_desc_reverb, SoundTargets,
+        "reverb reverberacao sala eco ambiencia audio"))
+    put(AudioFxKeys.Tone, EffectMeta(R.string.afx_desc_tone, AllTargets,
+        "tom tone gerador seno onda quadrada bip nota acorde audio"))
+    put("aurea.generate.audio_waveform", EffectMeta(R.string.afx_desc_audio_waveform, AllTargets,
+        "forma de onda waveform audio osciloscopio som visualizador"))
+    put("aurea.generate.spectrum_analyzer", EffectMeta(R.string.afx_desc_spectrum, AllTargets,
+        "espectro spectrum audio barras frequencias visualizador equalizador"))
+    put("aurea.stylize.ball_grid", EffectMeta(R.string.afx_desc_balls,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao),
+        "bolas esferas balls spheres grade particulas explodir dispersar"))
+    // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
+    put("aurea.ai.depth_map", EffectMeta(R.string.fx_desc_ai_depth_map, listOf(EffectTarget.Imagem, EffectTarget.Video),
+        "profundidade depth mapa ia ai midas distancia perto longe z matte fundo"))
 }
+
+/** As chaves dos efeitos de SOM (espelho de `audio::fx_keys`). */
+object AudioFxKeys {
+    const val Backwards = "aurea.audio.backwards"
+    const val Delay = "aurea.audio.delay"
+    const val FlangeChorus = "aurea.audio.flange_chorus"
+    const val HighLowPass = "aurea.audio.high_low_pass"
+    const val StereoMixer = "aurea.audio.stereo_mixer"
+    const val Modulator = "aurea.audio.modulator"
+    const val ParametricEq = "aurea.audio.parametric_eq"
+    const val Reverb = "aurea.audio.room_reverb"
+    const val Tone = "aurea.audio.tone"
+}
+
+
 
 /** Descrição, alvos e palavras extras de um efeito. */
 class EffectMeta(
@@ -249,6 +320,8 @@ fun effectCategoryLabel(category: String): String = when (normalizeSearch(catego
     "gerar" -> stringResource(R.string.cat_generate)
     "utilitario" -> stringResource(R.string.cat_utility)
     "controles de expressao" -> stringResource(R.string.cat_expr)
+    "pattern" -> stringResource(R.string.cat_pattern)
+    "audio" -> stringResource(R.string.cat_audio)
     else -> category
 }
 
@@ -287,6 +360,7 @@ fun categoryGlyph(category: String): Char = when (normalizeSearch(category)) {
     "glitch" -> CupertinoGlyph.Bolt
     "gerar" -> CupertinoGlyph.WandStars
     "controles de expressao" -> CupertinoGlyph.SliderHorizontal3
+    "audio" -> CupertinoGlyph.MusicNote
     else -> CupertinoGlyph.WandStars
 }
 

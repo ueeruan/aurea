@@ -23,7 +23,7 @@ internal data class EditorMetrics(
 )
 
 /** O que ocupa a zona do painel contextual (define a fração e o piso). */
-internal enum class SheetContent { None, Hint, Dock, Panel, Curve, Batch, Adding }
+internal enum class SheetContent { None, Hint, Dock, Panel, Curve, Batch, Adding, AddBar }
 
 internal object EditorLayout {
     const val TOP_BAR = 44f
@@ -32,12 +32,18 @@ internal object EditorLayout {
     const val TIMELINE_MIN = 110f
     const val PREVIEW_MIN = 96f
     private const val PREVIEW_FRACTION_MAX = 0.50f   // EditorSession.alturaDoPreview
-    private const val DOCK_FRACTION = 0.40f          // EditorSession.alturaDaFolha
     private const val PANEL_FRACTION = 0.46f
     private const val ADD_BODY = 280f                // abas 54 + 3 fileiras de ladrilhos + paginação
     private const val SHEET_HANDLE = 12f             // ContextSheet.handleHeight
     private const val BATCH_BODY = 124f
     private const val HINT_BODY = 30f
+    /** A barra fixa de adicionar (sem camada escolhida): ícone 23 + nome 11. */
+    const val ADD_BAR = 64f
+    /** Doca da camada, compacta: fileira rápida de ícones e fichas baixas. */
+    const val DOCK_QUICK = 44f
+    const val DOCK_TILE = 64f
+    /** Altura inteira da doca: 8 + rápida + 2 × (8 + ficha) + 10 de respiro. */
+    const val DOCK = 8f + DOCK_QUICK + 2f * (8f + DOCK_TILE) + 10f
 
     fun workspace(totalHeight: Float) = max(0f, totalHeight - TOP_BAR - TRANSPORT - STRIP)
 
@@ -54,10 +60,11 @@ internal object EditorLayout {
             SheetContent.None -> 0f
             SheetContent.Hint -> if (ws > 0f) (SHEET_HANDLE + HINT_BODY) / ws else 0f
             SheetContent.Batch -> if (ws > 0f) (SHEET_HANDLE + BATCH_BODY) / ws else 0f
-            SheetContent.Dock -> DOCK_FRACTION
+            SheetContent.Dock -> if (ws > 0f) DOCK / ws else 0f
             SheetContent.Panel -> PANEL_FRACTION
             SheetContent.Curve -> if (ws > 0f) 280f / ws else 0f
             SheetContent.Adding -> if (ws > 0f) (SHEET_HANDLE + ADD_BODY) / ws else 0f
+            SheetContent.AddBar -> if (ws > 0f) ADD_BAR / ws else 0f
         }
         var sheet = if (content != SheetContent.None) ws * sheetFraction.coerceIn(0f, 0.60f) else 0f
         // Camada escolhida ou painel: piso de 90 (uma linha de camada viva).
@@ -70,7 +77,6 @@ internal object EditorLayout {
         // the tall preview. Never shrink every button to preserve the preview.
         sheet = max(sheet, when (content) {
             SheetContent.Panel -> 336f
-            SheetContent.Dock -> 240f
             else -> 0f
         }).coerceAtMost(max(0f, ws - PREVIEW_MIN - floor))
         preview = min(preview, max(PREVIEW_MIN, ws - sheet - floor))

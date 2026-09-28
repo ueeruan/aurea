@@ -817,6 +817,8 @@ void Renderer::forget_device() noexcept {
     images_.clear();
     luts_.clear();
     spectra_.clear();
+    depthTex_.clear();
+    depthState_.clear();
     uploads_.clear();
     particleExtraBufs_.forget();
     particleStatics_.clear();
@@ -846,8 +848,12 @@ void Renderer::release_project_resources() noexcept {
     images_.clear();
     luts_.clear();
     spectra_.clear();
-    // Projeto fechado: os blocos de som eram dele.
+    // Projeto fechado: os blocos de som eram dele. Os mapas de profundidade também.
     spectrumBlocks_.reset();
+    ownAudio_.reset();
+    audioViz_.clear();
+    audioPeaks_.clear();
+    release_depth(true);
     spectrumFactory_ = nullptr;
     uploads_.clear();
     particleExtraBufs_.release(*backend_);
@@ -1061,6 +1067,19 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
         ~PlanScope() { r.planComp_ = comp; r.planProject_ = project; r.planMedia_ = media; r.planTime_ = time; }
     } planScope{*this, comp, project, media, time};
+    // O mapa de profundidade (RendererDepth.cpp) lê os pixels das imagens e
+    // precisa saber se o quadro é de export; numa pré-composição, o mesmo.
+    struct DepthScope {
+        Renderer& r;
+        const ImagePixels* (*lookup)(void*, AssetId);
+        void* ctx;
+        bool final;
+        DepthScope(Renderer& self, const ImagePixels* (*l)(void*, AssetId), void* c, bool f)
+            : r(self), lookup(self.planImageLookup_), ctx(self.planImageCtx_), final(self.planFinal_) {
+            r.planImageLookup_ = l; r.planImageCtx_ = c; r.planFinal_ = f;
+        }
+        ~DepthScope() { r.planImageLookup_ = lookup; r.planImageCtx_ = ctx; r.planFinal_ = final; }
+    } depthScope{*this, imageLookup, imageCtx, settings.finalQuality};
     if (prepareDepth_ == 0) quality_ = effective_quality(settings);
     // Fora do playback contínuo (parado, scrub, export): o que o projeto usa e
     // ainda não foi compilado entra na fila; render() compila antes do grafo.
@@ -4347,6 +4366,9 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     eval.localTime = FrameIndex{0};
     eval.texelScale = 1.0f;
     eval.placement = &placement;
+    // Recurso resolvido fora do grafo (o mapa de profundidade da foto das
+    // prévias); sem camada nem projeto, os outros devolvem vazio.
+    effect->resolve_resources(eval);
 
     const LayerImage input{plate, Rect{0.0f, 0.0f, static_cast<f32>(width), static_cast<f32>(height)}, width, height};
     LayerImage result;
@@ -4568,6 +4590,8 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
             ++it;
         }
     }
+    // Mapas de profundidade: como os espectros, uma textura por quadro-fonte.
+    (void)collect_depth(frameNumber, 60);
     // Versões lineares de imagens que saíram de cena (a RGBA8 original fica).
     for (auto& [k, img] : images_) {
         for (ImageTexture::Linear& L : img.linear) {
@@ -4621,6 +4645,9 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
         if (unused(it->second.lastFrame)) it = vectorCache_.erase(it);
         else ++it;
     }
+    // Mapas de profundidade fora do quadro; a rede (~66 MB) e o decoder dela saem.
+    n += collect_depth(frameNumber, 0);
+    if (depth_) depth_->trim();
     particleStatics_.collect(frameNumber, 0);
     particleExtraBufs_.collect(*backend_, frameNumber, 1);
     // Entre quadros nada do pool está em uso: tudo volta a nascer sob demanda.
@@ -4634,6 +4661,7 @@ void Renderer::read_timings(RenderTimings& t) noexcept {
     f32 total = 0.0f;
     const u32 n = backend_->read_gpu_timings(timingScratch_.data(),
                                              static_cast<u32>(timingScratch_.size()), &total);
+    lastGpuPasses_ = n;
     t.gpuMeasured = n > 0;
     if (!t.gpuMeasured) return;
     t.gpuTotalMs = total;

@@ -469,7 +469,7 @@ AUREA_TEST(Tracking, EngineTracksVideoAndPointsStayPinned) {
     const auto loadStatus = ProjectSerializer::load(direct, savedPath, LoadOptions{}, &report, &loadError);
     std::printf("    strict tracking load: version=%u ok=%d partial=%d error=%s\n", report.timelineVersion, loadStatus.ok(), report.partial, loadError.c_str());
     AUREA_CHECK(loadStatus.ok());
-    AUREA_CHECK_EQ(report.timelineVersion, 32u);
+    AUREA_CHECK_EQ(report.timelineVersion, kTimelineSectionVersion);
     AUREA_CHECK(e.load_project(savedPath).ok());
     comp = e.project()->timeline().composition(e.project()->timeline().current());
     u64 reopenedVideo = 0;

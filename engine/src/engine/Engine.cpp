@@ -7,6 +7,7 @@
 #include "aurea/tracking/CameraTracker.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
 #include "aurea/tracking/TrackingValidation.hpp"
+#include "../tracking/AnalysisDecode.hpp"
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
@@ -166,6 +167,8 @@ struct Engine::ExportContext {
     // na hora (o export não disputa decoder com o preview).
     std::unique_ptr<audio::AudioBlockCache> audioCache;
     std::shared_ptr<audio::AudioMixSnapshot> audioSnap;
+    /// Estado dos efeitos de áudio (atraso, reverb...) entre os pedaços.
+    audio::MixState audioFx;
     i64 audioWritten = 0;
     std::vector<f32> audioMix;
     std::vector<i16> audioPcm;
@@ -192,6 +195,12 @@ struct Engine::ExportContext {
     // Medição (ns acumulados na sessão; cada lado escreve só os seus).
     // Atômicos: o encoder publica as médias do produtor no progresso.
     std::atomic<u64> decodeNs{0}, renderNs{0}, readNs{0};   // produtor
+    // Perfil (telemetria ligada): o que custa cada quadro, para medir no
+    // aparelho de verdade. Só o produtor escreve; vai para o log no fim.
+    struct PassSum { const char* label; f64 ms; };
+    std::vector<PassSum> gpuPasses;    ///< ms somados por rótulo
+    u32 gpuFrames = 0, profiledFrames = 0;
+    f64 recordMs = 0.0, firstFrameMs = 0.0;
     std::atomic<u64> writeNs{0}, audioNs{0};                // encoder
     u64 startNs = 0;
     u32 thermalReducedFrames = 0;
@@ -348,6 +357,8 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     // relógio mestre do playback.
     audio_.initialize(config.mediaFactory, config.audioOutput, memory_.budget(MemoryClass::Audio));
     playback_.clock().set_master(&audio_);
+    // Forma de onda / Espectro de áudio leem os MESMOS blocos que tocam.
+    renderer_.set_audio_source(audio_.cache(), &Engine::audio_path_resolver, this);
     waveforms_ = std::make_unique<audio::WaveformCache>(config.mediaFactory);
     // Picos guardados em disco: reabrir o projeto não decodifica o áudio de novo (8D).
     if (!config_.cacheDirectory.empty()) waveforms_->set_disk_directory(config_.cacheDirectory + "/waveform");
@@ -418,6 +429,7 @@ void Engine::shutdown() noexcept {
     thumbs_.clear();
     thumbs_.attach(nullptr);
     playback_.clock().set_master(nullptr);
+    renderer_.set_audio_source(nullptr, nullptr, nullptr);
     audio_.shutdown();
     waveforms_.reset();
     media_.close_all();
@@ -2331,8 +2343,11 @@ bool Engine::restore_camera_track(u64 layerId) noexcept {
 bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov) noexcept {
     if (motion_track_status().state == 1) return false;
     if (mode > 2 || motion > 2 || !std::isfinite(knownFov) || knownFov < 0 || knownFov > 150) return false;
-    if (cameraTrack_ && !cameraTrack_->finished.load()) return false;
+    // Uma análise por vez; uma CANCELADA ainda saindo não bloqueia a próxima
+    // (decode e solve olham o cancelamento a cada quadro/iteração).
+    if (cameraTrack_ && !cameraTrack_->finished.load() && !cameraTrack_->cancel.load()) return false;
     join_camera_track();
+    bool tooLong = false;
     Asset asset;
     std::vector<i64> targetUs;
     i64 start = 0;
@@ -2348,7 +2363,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Video) return false;
-        if (l->duration().value > tracking::kMaxCameraTrackFrames) return false;
+        tooLong = l->duration().value > tracking::kMaxCameraTrackFrames;
         source = l->source;
         const Asset* a = project_->asset(l->source);
         if (!a || !a->has_video() || a->video.height == 0) return false;
@@ -2384,6 +2399,16 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
     if (targetUs.size() < 10) return false;
     cameraTrack_ = std::make_unique<CameraTrackJob>();
     CameraTrackJob* job = cameraTrack_.get();
+    if (tooLong) {
+        // Antes: recusa muda e a UI dizia "precisa de 10 quadros". O solve
+        // cresce com os quadros; a câmera cobre a camada inteira. Diz o porquê.
+        job->layerId = layerId; job->session = session; job->composition = composition; job->source = source;
+        job->message = "Clipe longo demais para a câmera 3D (até " + std::to_string(tracking::kMaxCameraTrackFrames) +
+                       " quadros por análise). Divida o clipe no cabeçote e analise cada parte.";
+        job->state.store(3u);
+        job->progress.store(1.0f);
+        return true;
+    }
     job->layerId = layerId;
     job->start = start;
     job->cacheKey = key;
@@ -2412,36 +2437,22 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
         const tracking::TrackMode tm = mode == 0 ? tracking::TrackMode::Fast : (mode == 2 ? tracking::TrackMode::High : tracking::TrackMode::Balanced);
         tracking::FeatureTracker ft(tm);
         const f64 fps = asset.timebaseFps > 0.0 ? asset.timebaseFps : 30.0;
-        const i64 halfFrame = static_cast<i64>(5e5 / fps);
-        i64 lastPts = std::numeric_limits<i64>::min();
-        FrameRef previousFrame;
+        // O mesmo quadro que o preview mostra em cada instante (VFR incluso) e
+        // luma por área (sem o serrilhado da miniatura por vizinho mais próximo).
+        tracking::AnalysisFramePicker picker(*dec, fps, job->cancel);
         u32 aw = 0, ah = 0;
         for (usize i = 0; i < targetUs.size(); ++i) {
             if (job->cancel.load()) return fail("cancelado");
-            const i64 want = targetUs[i];
-            if (i == 0 || want < lastPts - halfFrame) {
-                if (!dec->seek_to_keyframe(want).ok()) break;
-                lastPts = std::numeric_limits<i64>::min();
-                previousFrame = {};
-            }
             FrameRef frame;
-            bool eos = false;
-            if (previousFrame && std::abs(lastPts - want) <= halfFrame) frame = previousFrame;
-            for (int guard = 0; !frame && guard < 600 && !eos; ++guard) {
-                FrameRef f;
-                i64 pts = 0;
-                if (!dec->next_frame(want - halfFrame, f, pts, eos).ok()) { eos = true; break; }
-                if (!f) continue;
-                lastPts = pts;
-                if (pts >= want - halfFrame) { frame = std::move(f); break; }
-            }
-            if (!frame) break;
-            previousFrame = frame;
-            ThumbnailService::Image img;
-            if (!frame_to_thumbnail(*frame.get(), analysisH, img)) break;
-            aw = img.width;
-            ah = img.height;
-            ft.add_frame(tracking::to_gray(img.rgba.data(), img.width, img.height));
+            const auto picked = picker.pick(targetUs[i], frame);
+            if (picked == tracking::AnalysisFramePicker::Result::Cancelled) return fail("cancelado");
+            if (picked != tracking::AnalysisFramePicker::Result::Ok || !frame) break;
+            tracking::Gray gray;
+            if (!tracking::frame_to_gray(*frame.get(), analysisH, gray)) break;
+            frame = {};
+            aw = gray.width;
+            ah = gray.height;
+            ft.add_frame(gray);
             if (static_cast<u64>(ft.tracks().pos.size()) * targetUs.size() > tracking::kMaxCameraTrackCells)
                 return fail("trecho excede o limite de memoria de analise; escolha um trecho menor");
             job->progress.store(0.5f * static_cast<f32>(i + 1) / static_cast<f32>(targetUs.size()));
@@ -5151,6 +5162,26 @@ bool Engine::edit_mode() noexcept {
     return comp && comp->edit_mode();
 }
 
+bool Engine::set_layer_magnetic_track(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* current = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!current || current->locked || current->magneticTrack == on) return false;
+    Command cmd;
+    cmd.type = CommandType::LayerSetMagnetic;
+    cmd.layer_magnetic.layer = LayerId::unpack(layerId);
+    cmd.layer_magnetic.magnetic = on;
+    const Status s = apply_command_internal(cmd, nullptr, true);
+    return s.ok();
+}
+
+bool Engine::layer_magnetic_track(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    return l && l->magneticTrack;
+}
+
 bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
     if (!ids || count == 0) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
@@ -5165,6 +5196,22 @@ bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
         }
     }
     if (hi <= 0) return false;
+    // Cada trecho fecha o buraco na PRÓPRIA linha quando ela é magnética; fora
+    // disso o buraco fica (é o que a pessoa pediu ao desligar). Uma linha
+    // magnética nunca puxa os vizinhos de outra linha.
+    std::vector<std::pair<u32, i64>> tracks;   // (linha, menor início dos trechos)
+    for (u32 i = 0; i < count; ++i) {
+        const Layer* l = comp->layer(LayerId::unpack(ids[i]));
+        if (!l || l->locked || !l->magneticTrack) continue;
+        const auto it = std::find_if(tracks.begin(), tracks.end(),
+                                     [&](const std::pair<u32, i64>& t) { return t.first == l->trackId; });
+        if (it == tracks.end()) tracks.emplace_back(l->trackId, l->start.value);
+        else it->second = std::min(it->second, l->start.value);
+    }
+    // Fechar o buraco é o que ESTA ação faz desde sempre — a linha magnética
+    // muda só o ALCANCE: com trechos magnéticos, cada um fecha a faixa dele;
+    // sem nenhum, vale o comportamento de composição de sempre.
+    const bool closeAll = tracks.empty();
     history_.before_mutation(*comp, project_->timeline().current(), "excluir e fechar o espaco");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     for (u32 i = 0; i < count; ++i) {
@@ -5175,7 +5222,11 @@ bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
         comp->remove_layer(id);
         selection_.erase(std::remove(selection_.begin(), selection_.end(), ids[i]), selection_.end());
     }
-    comp->close_gaps(FrameIndex{lo}, FrameIndex{hi});
+    if (closeAll) {
+        comp->close_gaps(FrameIndex{lo}, FrameIndex{hi});
+    } else {
+        for (const auto& t : tracks) comp->close_gaps_in_track(FrameIndex{t.second}, FrameIndex{hi}, t.first);
+    }
     comp->rebuild_draw_order();
     project_->mark_dirty();
     request_render();
@@ -5258,11 +5309,15 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     Layer left, right;
     if (before) left = *before;
     if (after) right = *after;
+    // A LINHA MAGNÉTICA da camada comanda o ripple, e o modo Edição da
+    // composição continua valendo como antes para as camadas que não têm a
+    // opção ligada (projetos já montados não mudam de comportamento).
+    const bool magnetic = layer->magneticTrack || comp->edit_mode();
     i64 ripple = 0;
     const auto trim = [&](Layer& item, i64 s, i64 e) { trim_clip_copy(item, s, e, clip_source_limit(*project_, *comp, item)); };
     if (operation <= 1) {
         trim(edited, operation == 0 ? target : start, operation == 1 ? target : end);
-        if (comp->edit_mode()) {
+        if (magnetic) {
             ripple = operation == 0 ? start - target : target - end;
             if (operation == 0) { edited.start.value += ripple; edited.end.value += ripple; }
         }
@@ -5301,10 +5356,16 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
         return true;
     };
     if (!valid(edited) || (before && !valid(left)) || (after && !valid(right))) return false;
-    // Ripple never silently moves a locked downstream clip or overlaps it.
+    // O ripple da LINHA só olha para os vizinhos DAQUELA faixa; o global
+    // continua olhando a composição inteira. A proteção do travado segue a
+    // mesma regra — é o que impede um trecho travado de ser arrastado junto.
+    const bool trackScoped = layer->magneticTrack;
+    const u32 track = layer->trackId;
     bool blocked = false;
     if (ripple) comp->layers().for_each([&](LayerId id, const Layer& item) {
-        if (id.pack() != layerId && item.locked && item.start.value >= end) blocked = true;
+        if (id.pack() == layerId || !item.locked || item.start.value < end) return;
+        if (trackScoped && item.trackId != track) return;
+        blocked = true;
     });
     if (blocked) return false;
     const char* labels[] = {"aparar inicio", "aparar fim", "slip", "roll inicio", "roll fim", "slide"};
@@ -5312,7 +5373,10 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     *layer = std::move(edited);
     if (before) *before = std::move(left);
     if (after) *after = std::move(right);
-    if (ripple) comp->shift_from(FrameIndex{end}, ripple, LayerId::unpack(layerId));
+    if (ripple) {
+        if (trackScoped) comp->shift_track(FrameIndex{end}, ripple, track, LayerId::unpack(layerId));
+        else comp->shift_from(FrameIndex{end}, ripple, LayerId::unpack(layerId));
+    }
     i64 duration = comp->duration().value;
     comp->layers().for_each([&](LayerId, const Layer& item) { duration = std::max(duration, item.end.value); });
     if (duration != comp->duration().value) { comp->set_duration(FrameIndex{duration}); playback_.configure(comp->fps(), comp->duration()); }
@@ -5322,15 +5386,78 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     return true;
 }
 
+bool Engine::reorder_clip(u64 layerId, i64 targetFrame) noexcept {
+    constexpr i64 limit = i64{1} << 31;
+    if (targetFrame < 0 || targetFrame >= limit) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    Layer* layer = comp->layer(LayerId::unpack(layerId));
+    if (!layer || layer->locked || !layer->magneticTrack || !has_clip_source(*layer)) return false;
+    const u32 track = layer->trackId;
+    const i64 start = layer->start.value;
+    const i64 length = layer->end.value - start;
+    if (length <= 0 || targetFrame == start) return false;
+    // Toda a linha anda junta: um vizinho travado recusaria o movimento no
+    // meio do caminho, então a edição inteira é recusada antes de começar.
+    bool blocked = false;
+    comp->layers().for_each([&](LayerId id, const Layer& other) {
+        if (id.pack() != layerId && other.trackId == track && other.locked) blocked = true;
+    });
+    if (blocked) return false;
+
+    history_.before_mutation(*comp, project_->timeline().current(), "reordenar a linha");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const LayerId id = LayerId::unpack(layerId);
+    // 1. Tira o trecho da fita: o buraco que ele deixou fecha sozinho.
+    comp->shift_track(FrameIndex{start + length}, -length, track, id);
+    // 2. Abre espaço no ponto de soltura. O alvo já está no tempo DEPOIS do
+    //    passo 1, e o que estava à frente andou para trás com o fechamento.
+    const i64 target = targetFrame >= start + length ? targetFrame - length : targetFrame;
+    comp->shift_track(FrameIndex{target}, length, track, id);
+    if (Layer* moved = comp->layer(id)) {
+        moved->start = FrameIndex{target};
+        moved->end = FrameIndex{target + length};
+    }
+    // 3. A fita encosta de novo: os trechos ficam lado a lado, sem buraco.
+    i64 first = target;
+    comp->layers().for_each([&](LayerId, const Layer& other) {
+        if (other.trackId == track) first = std::min(first, other.start.value);
+    });
+    comp->close_gaps_in_track(FrameIndex{first}, FrameIndex{target + length}, track);
+    comp->rebuild_draw_order();
+    i64 duration = comp->duration().value;
+    comp->layers().for_each([&](LayerId, const Layer& item) { duration = std::max(duration, item.end.value); });
+    if (duration != comp->duration().value) { comp->set_duration(FrameIndex{duration}); playback_.configure(comp->fps(), comp->duration()); }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 i64 Engine::remove_gaps() noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return 0;
+    // As linhas magnéticas fecham os buracos DELAS; as outras ficam como estão
+    // (é o que a pessoa pediu ao desligar a opção). Sem nenhuma linha
+    // magnética, vale o comportamento de sempre: a composição inteira.
+    std::vector<u32> tracks;
+    comp->layers().for_each([&](LayerId, const Layer& l) {
+        if (l.magneticTrack && std::find(tracks.begin(), tracks.end(), l.trackId) == tracks.end())
+            tracks.push_back(l.trackId);
+    });
+    const auto close = [&](Composition& c) {
+        i64 total = 0;
+        if (tracks.empty()) return c.close_gaps(FrameIndex{0}, c.duration());
+        for (u32 t : tracks) total += c.close_gaps_in_track(FrameIndex{0}, c.duration(), t);
+        return total;
+    };
     // Ensaio numa cópia: sem buraco, nada entra no histórico.
-    if (comp->clone()->close_gaps(FrameIndex{0}, comp->duration()) == 0) return 0;
+    if (close(*comp->clone()) == 0) return 0;
     history_.before_mutation(*comp, project_->timeline().current(), "remover espacos vazios");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    const i64 removed = comp->close_gaps(FrameIndex{0}, comp->duration());
+    const i64 removed = close(*comp);
     project_->mark_dirty();
     request_render();
     return removed;
@@ -7480,6 +7607,7 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         row.startFrame = static_cast<i32>(l->start.value);
         row.endFrame = static_cast<i32>(l->end.value);
         row.offsetFrames = static_cast<i32>(l->offset.value);
+        row.trackId = l->trackId;   // a LINHA: a UI junta na mesma fileira quem a divide
         row.opacity = l->transform.opacity;
         row.effectCount = static_cast<u32>(l->effects.size());
         row.maskCount = static_cast<u32>(l->masks.size());
@@ -7497,6 +7625,7 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         if (l->adjustment) flags |= bridge::kLayerRowFlagAdjustment;
         if (l->guide)   flags |= bridge::kLayerRowFlagGuide;
         if (!l->captions.empty()) flags |= bridge::kLayerRowFlagCaptions;
+        if (l->magneticTrack) flags |= bridge::kLayerRowFlagMagnetic;
         flags |= (static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask;
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
@@ -7801,6 +7930,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
               | (l->adjustment ? bridge::kLayerRowFlagAdjustment : 0u) | (l->guide ? bridge::kLayerRowFlagGuide : 0u)
               | (l->threeD ? bridge::kLayerRowFlagThreeD : 0u)
               | (l->captions.empty() ? 0u : bridge::kLayerRowFlagCaptions)
+              | (l->magneticTrack ? bridge::kLayerRowFlagMagnetic : 0u)
               | ((static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask);
     out.startFrame = static_cast<i32>(l->start.value);
     out.endFrame = static_cast<i32>(l->end.value);
@@ -7961,9 +8091,17 @@ u32 Engine::query_track_curve(u64 layerId, u32 property, u32 effectIndex, u32 pa
 u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, char* blob,
                                  u32 blobCapacity) noexcept {
     if (!out) return 0;
+    // Aposentados do CATÁLOGO (não do registro): projetos antigos abrem e tocam
+    // igual, mas quem adiciona um efeito recebe as versões completas do pacote
+    // de áudio — os envios de reverb/flanger/eco sem estado e o espectro antigo.
+    static const EffectTypeId kRetired[] = {
+        effect_type_id("aurea.audio.reverb"), effect_type_id("aurea.audio.flanger"),
+        effect_type_id("aurea.audio.echo"), effect_type_id(effect_keys::kAudioSpectrum),
+    };
     u32 cursor = 0, written = 0;
     for (u32 i = 0; i < effectRegistry_.count() && written < capacity; ++i) {
         const Effect& e = effectRegistry_.at(i);
+        if (std::find(std::begin(kRetired), std::end(kRetired), e.type_id()) != std::end(kRetired)) continue;
         bridge::EffectCatalogRow row;
         row.typeId = e.type_id();
         row.effectClass = static_cast<u32>(e.effect_class());
@@ -8030,6 +8168,13 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         for (int c = 0; c < 4; ++c) {
             row.value[c] = v.v[c];
             row.defaultValue[c] = spec.defaultValue.v[c];
+        }
+        // Referência a camada: o valor é o ÍNDICE da camada escolhida (−1 =
+        // nenhuma, ou a que sumiu). É o mesmo número que a UI escreve.
+        if (spec.type == ParamType::LayerReference) {
+            const u64 ref = i < inst->params.size() ? inst->params[i].constant.ref : 0;
+            row.value[0] = ref && comp->layer(LayerId::unpack(ref)) ? static_cast<f32>(LayerId::unpack(ref).index) : -1.0f;
+            row.defaultValue[0] = -1.0f;
         }
         (void)put_string(blob, blobCapacity, cursor, spec.label, row.labelOffset, row.labelLength);
         (void)put_string(blob, blobCapacity, cursor, spec.unit, row.unitOffset, row.unitLength);
@@ -8358,7 +8503,7 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     gpuFrame = 0;
     RenderSettings rs;
     rs.dither = false;
-    rs.gpuTimers = false;
+    rs.gpuTimers = config_.enableTelemetry;
     rs.finalQuality = true;
     // Quadros EXATOS de vídeo, em sequência (o modo Playback decodifica
     // adiante). Falta quadro: espera o decoder AVISAR que entregou (antes era
@@ -8405,6 +8550,21 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // A GPU NÃO é esperada aqui (o produtor espera o quadro anterior depois).
     const Status s = renderer_.render(snapshot_, rs, &target, stats, timings);
     gpuFrame = gpu_->last_submitted_frame();
+    if (rs.gpuTimers) {
+        // O 1º quadro separado: é onde caem o IBL final e os pipelines do export.
+        if (c.profiledFrames++ == 0) c.firstFrameMs = timings.cpuRecordMs;
+        else c.recordMs += timings.cpuRecordMs;
+        const GpuTiming* passes = nullptr;
+        const u32 n = renderer_.last_gpu_passes(passes);
+        if (n > 0) ++c.gpuFrames;
+        for (u32 i = 0; i < n; ++i) {
+            const char* label = passes[i].label ? passes[i].label : "?";
+            auto it = std::find_if(c.gpuPasses.begin(), c.gpuPasses.end(),
+                                   [&](const ExportContext::PassSum& p) { return std::strcmp(p.label, label) == 0; });
+            if (it == c.gpuPasses.end()) c.gpuPasses.push_back({label, passes[i].ms});
+            else it->ms += passes[i].ms;
+        }
+    }
     c.decodeNs.fetch_add(t1 - t0, std::memory_order_relaxed);
     c.renderNs.fetch_add(monotonic_ns() - t1, std::memory_order_relaxed);
     return s;
@@ -8445,13 +8605,34 @@ Status Engine::write_export_audio(i64 untilSample) noexcept {
     ctx.audioPcm.resize(ctx.audioMix.size());
     while (ctx.audioWritten < untilSample) {
         const u32 n = static_cast<u32>(std::min<i64>(kChunk, untilSample - ctx.audioWritten));
-        audio::mix(*ctx.audioSnap, ctx.audioWritten, n, blocks, ctx.audioMix.data());
+        audio::mix(*ctx.audioSnap, ctx.audioWritten, n, blocks, ctx.audioMix.data(), nullptr, &ctx.audioFx);
         audio::to_pcm16(ctx.audioMix.data(), static_cast<usize>(n) * audio::kMixChannels, ctx.audioPcm.data());
         const i64 ptsUs = audio::sample_to_ns(ctx.audioWritten) / 1000;
         if (const Status s = ctx.sink->write_audio(ctx.audioPcm.data(), n, ptsUs); !s.ok()) return s;
         ctx.audioWritten += n;
     }
     return OkStatus;
+}
+
+void Engine::log_export_profile() noexcept {
+    ExportContext& ctx = *exportCtx_;
+    if (ctx.profiledFrames == 0) return;
+    std::sort(ctx.gpuPasses.begin(), ctx.gpuPasses.end(),
+              [](const ExportContext::PassSum& a, const ExportContext::PassSum& b) { return a.ms > b.ms; });
+    const f64 kg = ctx.gpuFrames ? 1.0 / static_cast<f64>(ctx.gpuFrames) : 0.0;
+    f64 gpuTotal = 0.0;
+    for (const ExportContext::PassSum& p : ctx.gpuPasses) gpuTotal += p.ms;
+    char top[512] = {};
+    usize used = 0;
+    for (usize i = 0; i < ctx.gpuPasses.size() && i < 8 && used < sizeof(top); ++i) {
+        const int w = std::snprintf(top + used, sizeof(top) - used, "%s%s %.2f", i ? ", " : "",
+                                    ctx.gpuPasses[i].label, ctx.gpuPasses[i].ms * kg);
+        if (w <= 0) break;
+        used += static_cast<usize>(w);
+    }
+    const f64 steady = ctx.profiledFrames > 1 ? ctx.recordMs / static_cast<f64>(ctx.profiledFrames - 1) : 0.0;
+    AUREA_LOG_INFO("export perfil: %u q %ux%u | 1o quadro %.0f ms de CPU, depois %.2f ms/q | GPU %.2f ms/q: %s",
+                   ctx.profiledFrames, ctx.width, ctx.height, ctx.firstFrameMs, steady, gpuTotal * kg, top);
 }
 
 void Engine::export_thread_main() noexcept {
@@ -8558,6 +8739,7 @@ void Engine::export_thread_main() noexcept {
         ctx.sink->abort();
     }
     ctx.sink.reset();
+    log_export_profile();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_) {
@@ -8759,7 +8941,8 @@ bool Engine::mutates_model(CommandType type) noexcept {
         || type == CommandType::LayerSetSpeed || type == CommandType::LayerSetReversed
         || type == CommandType::ShapeSetFill || type == CommandType::ShapeSetStroke
         || type == CommandType::ShapeSetParam || type == CommandType::LayerLayoutTransform || type == CommandType::LayerSetLightParam || type == CommandType::LayerSetMaterialParam
-        || type == CommandType::LayerSetCameraParam;
+        || type == CommandType::LayerSetCameraParam
+        || type == CommandType::LayerSetMagnetic;
 }
 
 void Engine::record_history_locked(CommandType type) noexcept {
@@ -8806,7 +8989,7 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::LayerCreate:
             return static_cast<u16>(c.layer_create.kind) <= static_cast<u16>(LayerKind::Composition);
         case CommandType::LayerSetBlendMode:
-            return static_cast<u16>(c.layer_blend.mode) <= static_cast<u16>(BlendMode::Luminosity);
+            return static_cast<u16>(c.layer_blend.mode) <= static_cast<u16>(BlendMode::LinearBurn);
         case CommandType::LayerSetTimeRange:
             // `offset` só conta com `setOffset` (a UI e os testes deixam o resto do payload sem valor).
             return frame_ok(c.layer_range.start) && frame_ok(c.layer_range.end)
@@ -9042,6 +9225,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.layer_locked.layer);
             if (!l) return Errc::NotFound;
             l->locked = cmd.layer_locked.locked;
+            return OkStatus;
+        }
+
+        case CommandType::LayerSetMagnetic: {
+            Layer* l = need_layer(cmd.layer_magnetic.layer);
+            if (!l) return Errc::NotFound;
+            l->magneticTrack = cmd.layer_magnetic.magnetic;
             return OkStatus;
         }
 
@@ -9621,6 +9811,24 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     e->params[1].constant.v[0] = cmd.effect_param.value;
                     return OkStatus;
                 }
+            }
+            // Referência a camada ("Camada de áudio"): o valor que chega é o
+            // ÍNDICE da camada (a parte baixa do LayerId; −1 = nenhuma) — um
+            // float carrega o índice exato, não o id inteiro com a geração.
+            if (const ParameterRegistry* specs = effectRegistry_.params(e->type);
+                specs && p < specs->count() && specs->at(p).type == ParamType::LayerReference) {
+                u64 ref = 0;
+                const f32 v = cmd.effect_param.value;
+                if (comp && std::isfinite(v) && v >= 0.0f) {
+                    const u32 index = static_cast<u32>(v + 0.5f);
+                    const OrderedIds<LayerId>& order = comp->order();
+                    for (u32 k = 0; k < order.size(); ++k) {
+                        if (order.at(k).index == index) { ref = order.at(k).pack(); break; }
+                    }
+                }
+                e->params[p].constant.ref = ref;
+                e->params[p].constant.v[0] = ref ? static_cast<f32>(LayerId::unpack(ref).index) : -1.0f;
+                return OkStatus;
             }
             e->params[p].constant.v[0] = cmd.effect_param.value;
             return OkStatus;

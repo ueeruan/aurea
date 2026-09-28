@@ -103,6 +103,9 @@ extern NSString* const AureaLayerSolo;
 extern NSString* const AureaLayerAnimated;
 extern NSString* const AureaLayerThreeD;
 extern NSString* const AureaLayerLabel;
+/// A LINHA da timeline (`LayerRow::trackId`): mesma linha = mesma fileira.
+/// 0 = projeto antigo sem linha (a camada é a linha dela).
+extern NSString* const AureaLayerTrackId;
 
 /// Chaves de um keyframe (`-keyframesForLayer:` / `-allKeyframes`).
 extern NSString* const AureaKeyframeProperty;
@@ -355,6 +358,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)rippleDeleteLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)setEditMode:(BOOL)on;
 @property(nonatomic, readonly) BOOL timelineEditMode;
+/// LINHA MAGNÉTICA da camada: cortes dela andam como faixa de montagem.
+- (BOOL)setLayer:(long long)layerId magneticTrack:(BOOL)on;
+- (BOOL)layerMagneticTrack:(long long)layerId;
+/// Arrasta o trecho para outro ponto da mesma linha, reordenando a fita.
+- (BOOL)reorderClip:(long long)layerId toFrame:(int64_t)targetFrame;
 
 // --- Transform --------------------------------------------------------------
 - (void)setTransformForLayer:(long long)layerId

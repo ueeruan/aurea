@@ -787,7 +787,14 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     //   Degradê de 4 cores, Espectro de áudio; Contorno da silhueta,
     //   Refinar recorte.
     // + o VHS de Estilizar (1): look de fita com OSD do videocassete.
-    AUREA_CHECK_EQ(before, static_cast<u32>(95));
+    // + o pacote do editor antigo (8): Preencher, Equilíbrio de cor (HLS),
+    //   Desfoque de zoom, Bojo, Xadrez, Matriz hexagonal; Sombra projetada,
+    //   Borda.
+    // + o Mapa de profundidade (IA) (1).
+    // + o pacote de áudio (12): Reverso, Atraso, Flange e chorus, Passa-alta/
+    //   baixa, Mixer estéreo, Modulador, EQ paramétrico, Reverb, Tom; Forma de
+    //   onda de áudio, Espectro de áudio (bandas) e Bolas.
+    AUREA_CHECK_EQ(before, static_cast<u32>(116));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

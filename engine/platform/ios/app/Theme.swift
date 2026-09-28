@@ -590,8 +590,7 @@ enum AureaDims {
     static let handleSlop: CGFloat = 4
     static let snapTolerance: CGFloat = 10
     static let hitSlack: CGFloat = 12
-    static let scaleHandleTarget: CGFloat = 26
-    static let rotateHandleTarget: CGFloat = 22
+    static let axisHandleTarget: CGFloat = 26
 
     // --- Régua de riscos (AmTickRuler) ----------------------------------------
     static let tickStep: CGFloat = 9
@@ -732,7 +731,7 @@ enum AureaDims {
     static let FullscreenTimeBar = fullscreenTimeBar, StageInset = stageInset
     static let Fab = fab, FabMargin = fabMargin, TouchSlop = touchSlop, HandleSlop = handleSlop
     static let SnapTolerance = snapTolerance, HitSlack = hitSlack
-    static let ScaleHandleTarget = scaleHandleTarget, RotateHandleTarget = rotateHandleTarget
+    static let AxisHandleTarget = axisHandleTarget
     // Régua e linha de propriedade
     static let TickStep = tickStep, TickFade = tickFade
     static let PropertyRowHeight = propertyRowHeight, LabelChipW = labelChipW, LabelChipH = labelChipH
@@ -765,14 +764,13 @@ enum ShellDims {
     static let handleSlop: CGFloat = AureaDims.handleSlop
     static let snapTolerance: CGFloat = AureaDims.snapTolerance
     static let hitSlack: CGFloat = AureaDims.hitSlack
-    static let scaleHandleTarget: CGFloat = AureaDims.scaleHandleTarget
-    static let rotateHandleTarget: CGFloat = AureaDims.rotateHandleTarget
+    static let axisHandleTarget: CGFloat = AureaDims.axisHandleTarget
 
     static let TopBar = topBar, Transport = transport, Strip = strip, SheetHandle = sheetHandle
     static let FullscreenTimeBar = fullscreenTimeBar, StageInset = stageInset
     static let Fab = fab, FabMargin = fabMargin, TouchSlop = touchSlop, HandleSlop = handleSlop
     static let SnapTolerance = snapTolerance, HitSlack = hitSlack
-    static let ScaleHandleTarget = scaleHandleTarget, RotateHandleTarget = rotateHandleTarget
+    static let AxisHandleTarget = axisHandleTarget
 }
 
 /// Raios prontos (AureaShape.kt).
@@ -843,6 +841,39 @@ enum AureaTimeline {
     static let Swatch = swatch, SwatchGlyph = swatchGlyph, KeyframeOn = keyframeOn
     static let TrimHandle = trimHandle
 
+    // --- Fileiras (visual aprovado: calha + clipe no tom do tipo) -------------
+    /// Glifo do tipo na calha (tom muted).
+    static let gutterIcon = Color(hex: 0x8B97A5)
+    /// O olho pequeno no canto do glifo: mais apagado ainda.
+    static let gutterEye = Color(hex: 0x998B97A5)
+    /// Contorno do clipe escolhido e as alças de aparar.
+    static let clipSelected = Color(hex: 0xFFFFFF)
+    /// Clipes de camada oculta: a fileira inteira a 40 %.
+    static let hiddenAlpha: Double = 0.4
+
+    static let amber = ClipTone(body: Color(hex: 0x3A2A12), stripe: Color(hex: 0xEF9F27), text: Color(hex: 0xFAC775), wave: Color(hex: 0xEF9F27))
+    static let teal = ClipTone(body: Color(hex: 0x0C3A2E), stripe: Color(hex: 0x1D9E75), text: Color(hex: 0x9FE1CB), wave: Color(hex: 0x5DCAA5))
+    static let purple = ClipTone(body: Color(hex: 0x2A2656), stripe: Color(hex: 0x7F77DD), text: Color(hex: 0xCECBF6), wave: Color(hex: 0x7F77DD))
+    static let gray = ClipTone(body: Color(hex: 0x232A33), stripe: Color(hex: 0x888780), text: Color(hex: 0xD3D1C7), wave: Color(hex: 0x888780))
+    static let blue = ClipTone(body: Color(hex: 0x0F2A45), stripe: Color(hex: 0x378ADD), text: Color(hex: 0xB5D4F4), wave: Color(hex: 0x378ADD))
+    static let pink = ClipTone(body: Color(hex: 0x3A1826), stripe: Color(hex: 0xD4537E), text: Color(hex: 0xF4C0D1), wave: Color(hex: 0xD4537E))
+    static let green = ClipTone(body: Color(hex: 0x1F2E0F), stripe: Color(hex: 0x639922), text: Color(hex: 0xC0DD97), wave: Color(hex: 0x639922))
+
+    /// Tom do clipe por tipo (o mesmo `AureaTimeline.tone` do Android): 3D âmbar,
+    /// áudio teal, partículas roxo, vídeo e imagem azul, texto rosa, forma verde,
+    /// o resto cinza.
+    static func tone(_ type: TimelineLayerType) -> ClipTone {
+        switch type {
+        case .model3D: return amber
+        case .audio: return teal
+        case .particles: return purple
+        case .video, .image: return blue
+        case .text: return pink
+        case .shape: return green
+        case .adjustment, .camera, .light, .null, .group: return gray
+        }
+    }
+
     // --- Medidas (dp) --------------------------------------------------------
     static let rulerTicks: CGFloat = 20
     static let rulerGap: CGFloat = 18
@@ -851,16 +882,27 @@ enum AureaTimeline {
     static let barRadius: CGFloat = 8
     static let barMinWidth: CGFloat = 40
     static let keyframeTrack: CGFloat = 11
-    static let headerColumn: CGFloat = 66
-    static let pillWidth: CGFloat = 58
-    static let pillHeight: CGFloat = 24
+    static let headerColumn: CGFloat = 40
+    static let gutterIconSize: CGFloat = 17
+    static let gutterEyeSize: CGFloat = 12
+    static let clipStripe: CGFloat = 3
+    static let clipSelStroke: CGFloat = 2
+    static let clipIcon: CGFloat = 12
     static let playhead: CGFloat = 1.6
     static let playheadKnob: CGFloat = 8
 
     static let RulerTicks = rulerTicks, RulerGap = rulerGap, Row = row, Bar = bar
     static let BarRadius = barRadius, BarMinWidth = barMinWidth, KeyframeTrack = keyframeTrack
-    static let HeaderColumn = headerColumn, PillWidth = pillWidth, PillHeight = pillHeight
+    static let HeaderColumn = headerColumn
     static let Playhead = playhead, PlayheadKnob = playheadKnob
+}
+
+/// Fundo escuro, faixa sólida, texto claro e forma de onda de um tipo de clipe.
+struct ClipTone {
+    let body: Color
+    let stripe: Color
+    let text: Color
+    let wave: Color
 }
 
 // =============================================================================
@@ -872,7 +914,7 @@ enum AureaTimeline {
 //  mesmo tamanho durante um arrasto (redimensionar o drawable a cada gesto
 //  custaria uma recriação de swapchain).
 // =============================================================================
-enum SheetContent { case none, hint, dock, panel, curve, batch, adding }
+enum SheetContent { case none, hint, dock, panel, curve, batch, adding, addBar }
 
 struct EditorMetrics {
     var topBar: CGFloat
@@ -890,12 +932,18 @@ enum EditorLayout {
     static let timelineMin: CGFloat = 110
     static let previewMin: CGFloat = 96
     private static let previewFractionMax: CGFloat = 0.50
-    private static let dockFraction: CGFloat = 0.40
     private static let panelFraction: CGFloat = 0.46
     private static let addBody: CGFloat = 280
     private static let sheetHandle: CGFloat = 12
     private static let batchBody: CGFloat = 124
     private static let hintBody: CGFloat = 30
+    /// A barra fixa de adicionar (sem camada escolhida): ícone 23 + nome 11.
+    static let addBar: CGFloat = 64
+    /// Doca da camada, compacta (EditorLayout.kt `DOCK`): fileira rápida de
+    /// ícones e fichas baixas; a altura é a do conteúdo.
+    static let dockQuick: CGFloat = 44
+    static let dockTile: CGFloat = 64
+    static let dock: CGFloat = 8 + dockQuick + 2 * (8 + dockTile) + 10
 
     static func workspace(_ totalHeight: CGFloat) -> CGFloat {
         max(0, totalHeight - topBar - transport - strip)
@@ -915,10 +963,11 @@ enum EditorLayout {
         case .none: sheetFraction = 0
         case .hint: sheetFraction = ws > 0 ? (sheetHandle + hintBody) / ws : 0
         case .batch: sheetFraction = ws > 0 ? (sheetHandle + batchBody) / ws : 0
-        case .dock: sheetFraction = dockFraction
+        case .dock: sheetFraction = ws > 0 ? dock / ws : 0
         case .panel: sheetFraction = panelFraction
         case .curve: sheetFraction = ws > 0 ? 280 / ws : 0
         case .adding: sheetFraction = ws > 0 ? (sheetHandle + addBody) / ws : 0
+        case .addBar: sheetFraction = ws > 0 ? addBar / ws : 0
         }
         var sheet = content == .none ? 0 : ws * min(max(sheetFraction, 0), 0.60)
 
@@ -928,7 +977,7 @@ enum EditorLayout {
         default: floor = 120
         }
         // Make room for editing controls instead of compressing their targets.
-        let requiredSheet: CGFloat = content == .panel ? 336 : (content == .dock ? 240 : 0)
+        let requiredSheet: CGFloat = content == .panel ? 336 : 0
         sheet = min(max(sheet, requiredSheet), max(0, ws - previewMin - floor))
         preview = min(preview, max(previewMin, ws - sheet - floor))
         var timeline = ws - preview - sheet

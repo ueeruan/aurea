@@ -124,6 +124,10 @@ u32 ParameterRegistry::add_gradient(const char* id, const char* label) {
 u32 ParameterRegistry::add_layer_ref(const char* id, const char* label) {
     ParamSpec s;
     s.id = id; s.label = label; s.type = ParamType::LayerReference; s.flags = kParamNone;
+    // v[0] espelha o ÍNDICE da camada escolhida (a UI escreve e lê por ele);
+    // −1 = nenhuma. A identidade de verdade mora em `ref`.
+    s.defaultValue = ParamValue::scalar(-1.0f);
+    s.minValue = -1.0f; s.maxValue = 1.0e6f;
     return add(s);
 }
 

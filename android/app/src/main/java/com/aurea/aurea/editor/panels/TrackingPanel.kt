@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 
 /**
@@ -85,7 +86,9 @@ private fun MotionTrackSection(env: PanelEnv) {
     if (store.motionMessage.isNotEmpty()) Text(store.motionMessage, color = AureaColors.Muted, fontSize = 12.sp)
     if (s[0].toInt() == 2) {
         Text("${s[3].toInt()}/${s[2].toInt()} frames · confidence ${(s[7] * 100).toInt()}% · RMS ${"%.2f".format(s[8])} px", fontSize = 12.sp)
-        if (s[5] == 0f) {
+        // Quadros perdidos não escondem mais as ações: ficam sem key (interpolados).
+        if (s[5] > 0f) Text(stringResource(R.string.track_lost_frames_note, s[5].toInt()), color = AureaColors.Muted, fontSize = 12.sp)
+        run {
             if (s[4].toInt() == 4) {
                 androidx.compose.material3.TextButton(onClick = { lock = !lock }) { Text(if (lock) "Lock camera" else "Smooth motion") }
                 Text("Smoothness: ${"%.1f".format(smooth)} s")
@@ -96,11 +99,31 @@ private fun MotionTrackSection(env: PanelEnv) {
                 Action("Apply stabilization", "Um passo de desfazer; preserva os transforms do vídeo") { store.applyMotion(3, lock, smooth, zoom, crop) }
             } else {
                 Action("Create Null", "Vincule uma camada ao nulo para seguir o movimento") { store.applyMotion(0) }
+                // Alvo escolhido AQUI: a camada que recebe o rastreio não tem o
+                // painel de Rastreio (é do vídeo), então "a camada selecionada"
+                // era sempre o próprio vídeo e o motor recusava.
+                val source = store.primary
+                val targets = store.layers.filter {
+                    it.id != source && !it.isThreeD && !it.hasParent && !it.adjustment &&
+                        it.kind in listOf(LayerType.Video.kind, LayerType.Image.kind, LayerType.Text.kind, LayerType.Shape.kind,
+                            LayerType.Null.kind, LayerType.Particles.kind, LayerType.Group.kind)
+                }
                 Spacer(Modifier.height(6.dp))
-                Action("Apply to selected layer", "Selecione uma camada 2D sem pai") { store.applyMotion(1) }
+                if (targets.isEmpty()) Text(stringResource(R.string.track_no_target), color = AureaColors.Muted, fontSize = 12.sp)
+                targets.forEach { layer ->
+                    androidx.compose.material3.TextButton(onClick = { store.applyMotion(1, target = layer.id) }) { Text(stringResource(R.string.track_apply_to, layer.name)) }
+                }
+                if (s[4].toInt() <= 1) {
+                    Spacer(Modifier.height(6.dp))
+                    Action(stringResource(R.string.editor_estabilizar_pelo_ponto), stringResource(R.string.editor_move_video_ponto_ficar_parado_tela)) {
+                        store.applyMotion(3, lock = true, smooth = .5f, maxScale = 1f, crop = 0)
+                    }
+                }
                 if (s[4].toInt() >= 2) {
                     Spacer(Modifier.height(6.dp))
-                    Action("Apply Corner Pin", "Selecione a imagem ou vídeo que deve ocupar a superfície") { store.applyMotion(2) }
+                    targets.filter { it.kind == LayerType.Video.kind || it.kind == LayerType.Image.kind }.forEach { layer ->
+                        androidx.compose.material3.TextButton(onClick = { store.applyMotion(2, target = layer.id) }) { Text(stringResource(R.string.track_corner_pin_to, layer.name)) }
+                    }
                 }
             }
         }

@@ -1004,7 +1004,7 @@ struct HomeSettingsTab: View {
                     tileRow(CupertinoGlyph.PersonCropCircle, title: "settings_creator",
                             subtitle: AureaText.t("home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo"))
                     groupDivider
-                    tapRow("licenses_title", subtitle: "Real-ESRGAN · Tencent/ncnn") { licenses = true }
+                    tapRow("licenses_title", subtitle: "Real-ESRGAN · MiDaS · Tencent/ncnn") { licenses = true }
                 }
                 betaBanner.padding(.top, HomeDims.s4)
                 if developerTools {

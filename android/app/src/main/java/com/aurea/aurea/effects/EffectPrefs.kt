@@ -32,15 +32,15 @@ class EffectPrefs(context: Context) {
     /** Marca/desmarca e grava. Devolve o estado novo. */
     fun toggleFavorite(typeId: Int): Boolean {
         val on = typeId !in favorites
-        favorites = if (on) favorites + typeId else favorites - typeId
+        favorites = toggleFavorite(favorites, typeId)
         prefs.edit().putStringSet(KEY_FAVORITES, favorites.mapTo(HashSet()) { it.toString() }).apply()
         return on
     }
 
     /** Põe o efeito na frente dos recentes (sem repetir, no máximo [RECENTS_MAX]). */
     fun addRecent(typeId: Int) {
-        recents = (listOf(typeId) + recents.filter { it != typeId }).take(RECENTS_MAX)
-        prefs.edit().putString(KEY_RECENTS, recents.joinToString(",")).apply()
+        recents = pushRecent(recents, typeId, RECENTS_MAX)
+        prefs.edit().putString(KEY_RECENTS, formatRecents(recents)).apply()
     }
 
     fun clearRecents() {
@@ -52,7 +52,7 @@ class EffectPrefs(context: Context) {
         prefs.getStringSet(KEY_FAVORITES, emptySet()).orEmpty().mapNotNullTo(HashSet()) { it.toIntOrNull() }
 
     private fun readRecents(): List<Int> =
-        prefs.getString(KEY_RECENTS, "").orEmpty().split(',').mapNotNull { it.toIntOrNull() }
+        parseRecents(prefs.getString(KEY_RECENTS, ""))
 
     companion object {
         const val RECENTS_MAX = 12

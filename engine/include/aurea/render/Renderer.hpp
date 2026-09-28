@@ -21,6 +21,7 @@
 // =============================================================================
 #pragma once
 
+#include "aurea/ai/DepthMapService.hpp"
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/memory/Arena.hpp"
@@ -40,7 +41,7 @@
 namespace aurea {
 
 class Project;
-namespace audio { class AudioBlockCache; }
+namespace audio { class AudioBlockCache; class MixState; }
 
 /// Pixels de uma imagem importada (RGBA8, sRGB, alfa reto).
 struct ImagePixels {
@@ -437,10 +438,32 @@ public:
     /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
     [[nodiscard]] TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept override;
+    /// Mapa de profundidade da fonte da camada no instante do `prepare` em
+    /// curso (render/RendererDepth.cpp). Imagem: síncrono, uma vez. Vídeo: o
+    /// export espera o quadro; o preview agenda e mostra o último pronto.
+    [[nodiscard]] DepthMapResult depth_map(const DepthMapRequest& request) noexcept override;
+    /// Forma de onda / Espectro de áudio (render/RendererAudio.cpp): o som da
+    /// camada escolhida, com os efeitos de áudio dela, numa janela em volta do
+    /// quadro. Preview: blocos que faltam são pedidos e o quadro volta
+    /// (incompleto); export: decodifica na hora.
+    [[nodiscard]] AudioAnalysisResult audio_analysis(const AudioAnalysisRequest& request) noexcept override;
+    /// O cache de blocos do mixer (os mesmos blocos que tocam) e o resolvedor
+    /// de caminhos do motor. Sem ele (testes), um cache próprio.
+    void set_audio_source(audio::AudioBlockCache* shared, std::string (*resolve)(void*, const std::string&),
+                          void* ctx) noexcept {
+        sharedAudio_ = shared;
+        audioResolve_ = resolve;
+        audioResolveCtx_ = ctx;
+    }
+    /// O serviço dos mapas (testes e HUD); nulo até o primeiro pedido.
+    [[nodiscard]] ai::DepthMapService* depth_service() noexcept { return depth_.get(); }
 
     // --- Consultas -------------------------------------------------------------
     [[nodiscard]] const FrameGraph::Stats& graph_stats() const noexcept { return graph_.stats(); }
     [[nodiscard]] const TransientTexturePool::Stats& pool_stats() const noexcept { return pool_.stats(); }
+    /// Tempos de GPU por passe lidos no último `render` com `gpuTimers`
+    /// (rótulos estáticos; os de um quadro já concluído pela GPU).
+    [[nodiscard]] u32 last_gpu_passes(const GpuTiming*& out) const noexcept { out = timingScratch_.data(); return lastGpuPasses_; }
     [[nodiscard]] ShaderLibrary& shaders() noexcept { return shaders_; }
     [[nodiscard]] u32 pipelines_prewarmed() const noexcept { return prewarmed_; }
     /// Pipelines de efeito/3D compilados pela varredura do projeto (fora do
@@ -689,6 +712,43 @@ private:
     std::unordered_map<u64, LutTexture> spectra_;
     std::unique_ptr<audio::AudioBlockCache> spectrumBlocks_;
     VideoSourceFactory* spectrumFactory_ = nullptr;
+    // --- Forma de onda / Espectro de áudio (EffectResources::audio_analysis) --
+    // Texturas em `spectra_` (a mesma vida). O fluxo dos efeitos de áudio de
+    // cada instância continua de um quadro para o seguinte (sem pré-rolagem
+    // a cada quadro tocando); preview e export em estados separados.
+    audio::AudioBlockCache* sharedAudio_ = nullptr;
+    std::string (*audioResolve_)(void*, const std::string&) = nullptr;
+    void* audioResolveCtx_ = nullptr;
+    std::unique_ptr<audio::AudioBlockCache> ownAudio_;
+    VideoSourceFactory* ownAudioFactory_ = nullptr;
+    struct AudioVizState {
+        std::shared_ptr<audio::MixState> mix;
+        u64 lastFrame = 0;
+    };
+    std::unordered_map<u64, AudioVizState> audioViz_;
+    std::unordered_map<u64, f32> audioPeaks_;   ///< faixa mais forte de cada espectro guardado
+    // --- Mapa de profundidade (EffectResources::depth_map) ------------------
+    // O serviço calcula uma vez por quadro-fonte; aqui ficam a textura R16F
+    // 256×256 de cada quadro (como os espectros) e, por instância do efeito,
+    // os limites suavizados no tempo (preview e export em estados separados).
+    struct DepthState {
+        u64 frameKey = 0;       ///< quadro-fonte que o estado já absorveu
+        u64 asset = 0;
+        i64 frame = 0;
+        f32 lo = 0.0f, hi = 1.0f;         ///< limites crus, suavizados
+        f32 texLo = 0.0f, texHi = 1.0f;   ///< os mesmos, no espaço da textura de `frameKey`
+        u64 lastFrame = 0;
+    };
+    std::unique_ptr<ai::DepthMapService> depth_;
+    std::unordered_map<u64, LutTexture> depthTex_;     ///< por quadro-fonte
+    std::unordered_map<u64, DepthState> depthState_;   ///< por (camada, efeito, export?)
+    void release_depth(bool destroyTextures) noexcept;
+    [[nodiscard]] DepthMapResult depth_map_preview() noexcept;
+    u32 collect_depth(u64 frameNumber, u64 idleFrames) noexcept;
+    /// O `prepare` em curso: de onde vêm os pixels das imagens e se é export.
+    const ImagePixels* (*planImageLookup_)(void*, AssetId) = nullptr;
+    void* planImageCtx_ = nullptr;
+    bool planFinal_ = false;
     /// A composição, o projeto, a mídia e o instante do `prepare` em curso
     /// (aninhado numa pré-composição, os dela). Só valem durante o prepare.
     const Composition* planComp_ = nullptr;
@@ -699,6 +759,7 @@ private:
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
     std::vector<GpuTiming> timingScratch_;
+    u32 lastGpuPasses_ = 0;
 
     const std::vector<scene3d::SceneFrame>* currentScenes_ = nullptr;
     const FrameSnapshot* currentSnap_ = nullptr;   ///< dono das pré-composições da composição em curso

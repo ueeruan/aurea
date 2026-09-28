@@ -324,8 +324,8 @@ class TimelineGesturesTest {
         // A vista É o cabeçote (30): 80 dp/s = 8/3 dp por frame a partir do centro.
         fun keyX(width: Int, frame: Int) = width / 2f + (frame - 30) * 80f / 30f * density
 
-        // Abrir as trilhas pela pílula da camada.
-        timeline().performTouchInput { click(Offset(50 * density, 56 * density)) }
+        // Abrir as trilhas pelo glifo do tipo na calha da camada.
+        timeline().performTouchInput { click(Offset(14 * density, 50 * density)) }
         compose.waitForIdle()
 
         fun selectPositionAndScale() {

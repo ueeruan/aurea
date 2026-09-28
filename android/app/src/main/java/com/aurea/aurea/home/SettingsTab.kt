@@ -227,7 +227,7 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                     subtitle = stringResource(R.string.home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo),
                 )
                 GroupDivider()
-                TapRow(stringResource(R.string.licenses_title), "Real-ESRGAN · Tencent/ncnn") { licenses = true }
+                TapRow(stringResource(R.string.licenses_title), "Real-ESRGAN · MiDaS · Tencent/ncnn") { licenses = true }
             }
             Spacer(Modifier.height(AureaDims.S4))
             BetaBanner(version, onTap = {

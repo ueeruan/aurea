@@ -89,6 +89,7 @@ NSString* const AureaLayerSolo          = @"solo";
 NSString* const AureaLayerAnimated      = @"animated";
 NSString* const AureaLayerThreeD        = @"threeD";
 NSString* const AureaLayerLabel         = @"label";
+NSString* const AureaLayerTrackId       = @"trackId";
 
 NSString* const AureaKeyframeProperty      = @"property";
 NSString* const AureaKeyframeEffectIndex   = @"effectIndex";
@@ -223,6 +224,7 @@ NSDictionary<NSString*, id>* layer_row_dict(const aurea::bridge::LayerRow& r, NS
         AureaLayerAnimated:      @((flags & kLayerRowFlagAnimated) != 0),
         AureaLayerThreeD:        @((flags & kLayerRowFlagThreeD) != 0),
         AureaLayerLabel:         @((flags & kLayerRowLabelMask) >> kLayerRowLabelShift),
+        AureaLayerTrackId:       @(r.trackId),
     };
 }
 
@@ -945,6 +947,21 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 - (BOOL)timelineEditMode {
     auto* e = self.engine;
     return e && e->edit_mode();
+}
+
+- (BOOL)setLayer:(long long)layerId magneticTrack:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_layer_magnetic_track(static_cast<aurea::u64>(layerId), on != NO);
+}
+
+- (BOOL)layerMagneticTrack:(long long)layerId {
+    auto* e = self.engine;
+    return e && e->layer_magnetic_track(static_cast<aurea::u64>(layerId));
+}
+
+- (BOOL)reorderClip:(long long)layerId toFrame:(int64_t)targetFrame {
+    auto* e = self.engine;
+    return e && e->reorder_clip(static_cast<aurea::u64>(layerId), static_cast<aurea::i64>(targetFrame));
 }
 
 // =============================================================================

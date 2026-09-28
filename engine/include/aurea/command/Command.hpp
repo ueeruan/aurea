@@ -176,6 +176,9 @@ enum class CommandType : u16 {
     /// ligado (0/1), 2 distância de foco (px do mundo), 3 abertura (f/), 4
     /// força do desfoque (×). Trilha com keyframe = keyframe no cabeçote.
     LayerSetCameraParam,
+    /// LINHA MAGNÉTICA da camada (LayerMagneticPayload). No fim do enum de
+    /// propósito: o valor numérico dos tipos anteriores não muda.
+    LayerSetMagnetic,
 };
 
 /// Alvo de um comando que mexe em uma propriedade animável.
@@ -208,6 +211,8 @@ struct LayerBlendPayload { LayerId layer; BlendMode mode; };
 struct LayerCompPayload { LayerId layer; CompositionId comp; };
 struct LayerVisiblePayload { LayerId layer; bool visible; };
 struct LayerLockedPayload { LayerId layer; bool locked; };
+/// Liga/desliga a LINHA MAGNÉTICA da camada (edição de vídeo por faixa).
+struct LayerMagneticPayload { LayerId layer; bool magnetic; };
 struct PositionPayload { LayerId layer; f32 x, y, z; };
 struct ScalePayload { LayerId layer; f32 sx, sy, sz; };
 struct RotationPayload { LayerId layer; f32 rx, ry, rz; };
@@ -303,6 +308,7 @@ struct Command {
         LayerCompPayload layer_comp;
         LayerVisiblePayload layer_visible;
         LayerLockedPayload layer_locked;
+        LayerMagneticPayload layer_magnetic;
         PositionPayload position;
         ScalePayload scale;
         RotationPayload rotation;

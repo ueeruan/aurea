@@ -2175,6 +2175,21 @@ AUREA_JNI jboolean AUREA_FN(nativeEditClipTime)(JNIEnv*, jclass, jlong handle, j
     return c && c->engine.edit_clip_time(layer, static_cast<u32>(operation), amount, previous, next) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerMagneticTrack)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_magnetic_track(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeLayerMagneticTrack)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.layer_magnetic_track(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeReorderClip)(JNIEnv*, jclass, jlong handle, jlong layer, jlong targetFrame) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.reorder_clip(static_cast<u64>(layer), targetFrame) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeTrimComposition)(JNIEnv*, jclass, jlong handle, jlong frame) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.trim_composition(frame) ? JNI_TRUE : JNI_FALSE;

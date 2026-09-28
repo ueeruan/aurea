@@ -234,7 +234,9 @@ private struct MotionTrackingSection: View {
             if let message = model.motionStatus["message"] as? String, !message.isEmpty { Text(message).foregroundStyle(AureaColors.muted) }
             if n("state") == 2 {
                 Text("\(Int(n("validFrames")))/\(Int(n("frames"))) frames · confidence \(Int(n("confidence") * 100))% · RMS \(String(format: "%.2f", n("error"))) px")
-                if n("lost") == 0 {
+                // Quadros perdidos não escondem mais as ações: ficam sem key (interpolados).
+                if n("lost") > 0 { Text(AureaText.t("track_lost_frames_note", Int(n("lost")))).foregroundStyle(AureaColors.muted) }
+                if n("frames") > 0 {
                     if n("tool") == 4 {
                         Toggle("Lock camera", isOn: $lock)
                         Text("Smoothness: \(String(format: "%.1f", smooth)) s")
@@ -245,8 +247,19 @@ private struct MotionTrackingSection: View {
                         button("Apply stabilization") { model.applyMotion(3, lock: lock, smooth: smooth, maxScale: zoom, crop: crop) }
                     } else {
                         button("Create Null") { model.applyMotion(0) }
-                        button("Apply to selected layer") { model.applyMotion(1) }
-                        if n("tool") >= 2 { button("Apply Corner Pin") { model.applyMotion(2) } }
+                        // Alvo escolhido aqui: a camada que recebe o rastreio não tem
+                        // este painel (é do vídeo), então "a selecionada" era o próprio vídeo.
+                        let targets = model.layers.filter { $0.id != model.primarySelection && !$0.threeD && $0.parentIndex < 0 && !$0.adjustment && [1, 2, 4, 5, 6, 11, 12].contains($0.kind) }
+                        if targets.isEmpty { Text(AureaText.t("track_no_target")).foregroundStyle(AureaColors.muted) }
+                        ForEach(targets) { layer in
+                            Button(AureaText.t("track_apply_to", layer.name)) { model.applyMotion(1, target: layer.id) }.padding(.vertical, 6)
+                        }
+                        if n("tool") <= 1 { button(AureaText.t("editor_estabilizar_pelo_ponto")) { model.applyMotion(3, lock: true, smooth: 0.5, maxScale: 1, crop: 0) } }
+                        if n("tool") >= 2 {
+                            ForEach(targets.filter { $0.kind == 1 || $0.kind == 2 }) { layer in
+                                Button(AureaText.t("track_corner_pin_to", layer.name)) { model.applyMotion(2, target: layer.id) }.padding(.vertical, 6)
+                            }
+                        }
                     }
                 }
             }

@@ -218,6 +218,12 @@ void MediaManager::set_ready_callback(void (*fn)(void*), void* ctx) noexcept {
     for (Entry& e : entries_) if (e.source) e.source->set_ready_callback(fn, ctx);
 }
 
+void MediaManager::ready_callback(void (*&fn)(void*), void*& ctx) const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    fn = readyFn_;
+    ctx = readyCtx_;
+}
+
 MediaManager::Stats MediaManager::stats() const {
     std::lock_guard<std::mutex> lock(mutex_);
     Stats s;

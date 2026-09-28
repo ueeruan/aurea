@@ -7,7 +7,6 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -33,9 +32,6 @@ import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -56,7 +52,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
@@ -99,7 +94,6 @@ internal enum class ShellSheet { LayerMenu, RenameLayer, TimelineMenu, ProjectSe
 internal class EditorUi {
     var panel by mutableStateOf<EditorPanel?>(null)
     var adding by mutableStateOf(false)
-    var addCategoryOpen by mutableStateOf(false)
     var addTab by mutableStateOf(AddTab.Shape)
     var fullscreen by mutableStateOf(false)
     var effectsBrowser by mutableStateOf(false)
@@ -143,7 +137,6 @@ internal fun openAdd(store: EditorStore, ui: EditorUi, tab: AddTab = AddTab.Shap
     if (store.playing) store.pause()
     ui.panel = null
     ui.addTab = tab
-    ui.addCategoryOpen = false
     ui.adding = true
 }
 
@@ -217,7 +210,14 @@ fun EditorScreen(store: EditorStore) {
         }
     }
 
+    // A barra de adicionar fica embaixo sem camada escolhida — e também com a
+    // camada só "na mão" da timeline (segurada/arrastada sem abrir as opções):
+    // a geometria não muda no meio do gesto. Escolhendo keyframes, a timeline
+    // fica alta (sem barra).
+    val timelineOnly = store.selection.isNotEmpty() && store.selection == store.timelineOnlySelection
+    val addBarState = selectionSize == 0 || (timelineOnly && !store.keySelectMode)
     val content = when {
+        ui.adding && addBarState -> SheetContent.AddBar
         ui.adding -> SheetContent.None
         // O painel da Aurea AI CRIA a camada: abrir sem nada selecionado é o
         // caso normal do projeto novo, então ele não passa pelo portão do
@@ -225,10 +225,10 @@ fun EditorScreen(store: EditorStore) {
         ui.panel == EditorPanel.AiVideo || ui.panel == EditorPanel.Captions -> SheetContent.Panel
         ui.panel == EditorPanel.Curve && selectionSize == 1 -> SheetContent.Curve
         ui.panel != null && selectionSize == 1 -> SheetContent.Panel
-        store.selection.isNotEmpty() && store.selection == store.timelineOnlySelection -> SheetContent.None
+        timelineOnly -> if (store.keySelectMode) SheetContent.None else SheetContent.AddBar
         selectionSize >= 2 -> SheetContent.Batch
         selectionSize == 1 -> SheetContent.Dock
-        else -> SheetContent.None
+        else -> SheetContent.AddBar
     }
     // Keep the native surface across normal narrow/wide/fullscreen layouts.
     // A workspace transition must dispose its whole layout instead: moving the
@@ -262,29 +262,8 @@ fun EditorScreen(store: EditorStore) {
                     NarrowEditor(store, ui, content, m, stage)
                 }
 
-                if (ui.adding && !store.sceneEditor) AddLayerOverlay(store, ui, Modifier.align(Alignment.BottomEnd).padding(end = if (wide) sheetWidth.dp else 0.dp))
-                // O "+": escondido em tela cheia, adicionando ou com painel aberto.
-                // Com a barra de keyframes aberta o "+" sairia por cima dela.
-                if (!store.sceneEditor && !ui.fullscreen && !ui.adding && content != SheetContent.Panel && content != SheetContent.Curve &&
-                    store.keySelection == null) {
-                    // Camada escolhida com a timeline baixa: o "+" cobria justamente o
-                    // clipe escolhido. Sobe para o canto do palco, acima do transporte.
-                    val lifted = !wide && content == SheetContent.Dock && m.timeline < 170f
-                    val bottom = when {
-                        wide || content == SheetContent.None -> 0f
-                        lifted -> m.sheet + m.timeline + m.transport + m.strip
-                        else -> m.sheet
-                    }
-                    AddFab(
-                        onClick = { openAdd(store, ui) },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(
-                                end = (if (lifted) 10.dp else ShellDims.FabMargin) + (if (wide) sheetWidth.dp else 0.dp),
-                                bottom = (if (lifted) 10.dp else ShellDims.FabMargin) + bottom.dp,
-                            ),
-                    )
-                }
+                // O "+" saiu: adicionar mora na barra fixa de baixo ([AddBar]).
+                if (ui.adding && !store.sceneEditor) AddLayerOverlay(store, ui)
                 // A.01: o círculo "Voltar ao editor" no canto (a HEAD perdeu — bug 1).
                 if (ui.fullscreen) {
                     val backLabel = stringResource(R.string.editor_voltar_editor)
@@ -337,7 +316,10 @@ private fun NarrowEditor(
         }
         TransportBar(store, ui)
         if (!ui.fullscreen) {
-            KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp)) }
+            // Camada escolhida (doca aberta): a timeline vira a fileira única dela,
+            // como com painel aberto — as setas trocam de camada e tocar na barra
+            // volta à timeline inteira.
+            KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp), compactDock = content == SheetContent.Dock) }
             if (content != SheetContent.None) {
                 ContextArea(store, ui, content, Modifier.fillMaxWidth().height(m.sheet.dp))
             }
@@ -365,10 +347,12 @@ private fun WideEditor(
                     TransportBar(store, ui)
                     TimelineHost(store, ui, Modifier.fillMaxWidth().height(EditorLayout.wideTimeline(totalHeight).dp))
                 }
+                // A barra de adicionar na base da coluna do palco.
+                if (content == SheetContent.AddBar) AddBar(store, ui, Modifier.fillMaxWidth().height(ShellDims.AddBar))
             }
             // No largo a folha fica sempre à direita; sem nada escolhido ela
             // mostra a dica do palco.
-            val c = if (content == SheetContent.None) SheetContent.Hint else content
+            val c = if (content == SheetContent.None || content == SheetContent.AddBar) SheetContent.Hint else content
             ContextArea(store, ui, c, Modifier.width(sheetWidth.dp).fillMaxHeight())
         }
     }
@@ -394,14 +378,14 @@ private fun PreviewStrip(@Suppress("UNUSED_PARAMETER") ui: EditorUi) {
 }
 
 @Composable
-private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier) {
+private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, compactDock: Boolean = false) {
     // Modo "Selecionar keyframes": o painel fecha para a timeline voltar alta,
     // com as trilhas abertas e a barra de ações inteira.
     val selectingKeys = store.keySelectMode
     LaunchedEffect(selectingKeys) { if (selectingKeys) ui.panel = null }
     Timeline(
         store = store,
-        compact = ui.panel != null,
+        compact = ui.panel != null || compactDock,
         onEmptyTap = {
             // Tocar no vazio: com painel aberto só fecha o painel; adicionando,
             // fecha o adicionar; senão desseleciona.
@@ -449,6 +433,10 @@ private fun onKeyframeTapped(store: EditorStore, ui: EditorUi, layer: Long, key:
  */
 @Composable
 private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent, modifier: Modifier) {
+    if (content == SheetContent.AddBar) {
+        AddBar(store, ui, modifier)
+        return
+    }
     val panel = ui.panel
     Column(
         modifier
@@ -484,25 +472,6 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
 @Composable
 private fun ColumnScope.SheetBody(content: @Composable () -> Unit) {
     Box(Modifier.weight(1f).fillMaxWidth()) { content() }
-}
-
-/** O "+" da A.01: 52 dp, fundo #1E2130, anel 2,2 `acao`, sombra 45 %. */
-@Composable
-private fun AddFab(onClick: () -> Unit, modifier: Modifier) {
-    val label = stringResource(R.string.editor_adicionar_camada)
-    Box(
-        modifier
-            .size(ShellDims.Fab)
-            .shadow(6.dp, CircleShape, ambientColor = ShellColors.FabShadow, spotColor = ShellColors.FabShadow)
-            .background(ShellColors.Fab, CircleShape)
-            .border(2.2.dp, AureaColors.Action, CircleShape)
-            .semantics { contentDescription = label }
-            .tocavel(haptic = true, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        // O "+" em destaque: `acao` (#245D8C) sobre #1E2130 dava 2,3:1 (bug 27).
-        Icon(Icons.Filled.Add, contentDescription = null, tint = AureaColors.Accent, modifier = Modifier.size(32.dp))
-    }
 }
 
 /** Véu de trabalho (importando…): bloqueia o toque e diz o que está havendo. */

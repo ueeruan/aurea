@@ -39,7 +39,7 @@ internal object PodLayout {
     // =========================================================================
     // LayerRow — lido pela UI para desenhar a timeline.
     // =========================================================================
-    const val LAYER_ROW_BYTES = 64
+    const val LAYER_ROW_BYTES = 72
     const val LAYER_OFF_ID = 0            // u64
     const val LAYER_OFF_KIND = 8          // u32
     const val LAYER_OFF_Z_INDEX = 12      // u32
@@ -55,6 +55,8 @@ internal object PodLayout {
     const val LAYER_OFF_BLEND_MODE = 52   // u32
     const val LAYER_OFF_PARENT_INDEX = 56 // u32
     const val LAYER_OFF_OFFSET = 60       // i32 deslocamento do conteúdo
+    /** u32 A LINHA da timeline (`Layer::trackId`): mesma linha = mesma fileira. */
+    const val LAYER_OFF_TRACK_ID = 64
 
     /** Bits de `LayerRow::flags`, na ordem definida em BridgePods.hpp. */
     const val FLAG_VISIBLE = 1 shl 0
@@ -65,6 +67,12 @@ internal object PodLayout {
     const val FLAG_THREE_D = 1 shl 5
     const val FLAG_ADJUSTMENT = 1 shl 6
     const val FLAG_GUIDE = 1 shl 7
+    const val FLAG_CAPTIONS = 1 shl 12
+    /**
+     * Linha magnética: os cortes desta camada andam como faixa de montagem de
+     * vídeo — aparar e apagar puxam os vizinhos da MESMA linha.
+     */
+    const val FLAG_MAGNETIC = 1 shl 13
     /** Etiqueta de cor (0 = nenhuma) nos bits 8..11 (`kLayerRowLabelShift`). */
     const val LABEL_SHIFT = 8
     const val LABEL_MASK = 0xF
@@ -190,6 +198,12 @@ class LayerRow internal constructor(
     val parentIndex: Int,
     /** Deslocamento do conteúdo: keyframe local `t` fica na timeline em `t + startFrame - offsetFrames`. */
     val offsetFrames: Int,
+    /**
+     * A LINHA da timeline (`Layer::trackId`). Trechos com o mesmo número dividem
+     * a mesma fileira, lado a lado no tempo (o split dá o mesmo aos dois
+     * pedaços). 0 = projeto antigo sem linha: a camada é a linha dela.
+     */
+    val trackId: Int,
     private val nameOffset: Int,
     private val nameLength: Int,
     private val nameBlob: ByteBuffer,
@@ -202,6 +216,7 @@ class LayerRow internal constructor(
     val isThreeD: Boolean get() = (flags and PodLayout.FLAG_THREE_D) != 0
     val adjustment: Boolean get() = (flags and PodLayout.FLAG_ADJUSTMENT) != 0
     val guide: Boolean get() = (flags and PodLayout.FLAG_GUIDE) != 0
+    val magnetic: Boolean get() = (flags and PodLayout.FLAG_MAGNETIC) != 0
     /** Etiqueta de cor: 0 = nenhuma, 1..12 = `ShellColors.LabelPalette[label - 1]`. */
     val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
@@ -245,6 +260,7 @@ class LayerRow internal constructor(
                 blendMode = buffer.getInt(b + PodLayout.LAYER_OFF_BLEND_MODE),
                 parentIndex = buffer.getInt(b + PodLayout.LAYER_OFF_PARENT_INDEX),
                 offsetFrames = buffer.getInt(b + PodLayout.LAYER_OFF_OFFSET),
+                trackId = buffer.getInt(b + PodLayout.LAYER_OFF_TRACK_ID),
                 nameOffset = buffer.getInt(b + PodLayout.LAYER_OFF_NAME_OFFSET),
                 nameLength = buffer.getInt(b + PodLayout.LAYER_OFF_NAME_LENGTH),
                 nameBlob = nameBlob,
@@ -928,6 +944,7 @@ data class LayerDetail(
     val solo: Boolean get() = (flags and PodLayout.FLAG_SOLO) != 0
     val adjustment: Boolean get() = (flags and PodLayout.FLAG_ADJUSTMENT) != 0
     val guide: Boolean get() = (flags and PodLayout.FLAG_GUIDE) != 0
+    val magnetic: Boolean get() = (flags and PodLayout.FLAG_MAGNETIC) != 0
     val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
     companion object {

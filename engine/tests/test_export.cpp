@@ -499,6 +499,37 @@ AUREA_TEST(Export, PipelinedOutputIsByteIdenticalToSerial) {
     AUREA_CHECK_EQ(maxDiff, 0);
 }
 
+/// Desfoque de movimento 3D: 32 cenas por quadro, cada uma com as suas juntas e
+/// instâncias em buffers de upload. Com o anel fixo de 8 as cenas de um quadro
+/// (e as do quadro seguinte, em voo) sobrescreviam poses que a GPU ainda ia
+/// ler: o arquivo mudava a cada export. Serial e em voo têm de dar o mesmo byte.
+AUREA_TEST(Export, MotionBlur3DPipelinedIsByteIdenticalToSerial) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 320;
+    cfg.height = 180;
+    cfg.frameCount = 20;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    u64 hashes[2]{};
+    const u32 depths[2] = {1, 3};
+    for (int k = 0; k < 2; ++k) {
+        Rig r(cfg, 30.0, 8, depths[k]);
+        AUREA_CHECK(r.ok);
+        if (!r.ok) return;
+        if (!build_3d_scene(r)) { std::printf("(sem modelos glTF: pulado) "); return; }
+        (void)r.e.set_composition_motion_blur(true);
+        const OrderedIds<LayerId>& order = r.comp()->order();
+        for (u32 i = 0; i < order.size(); ++i) (void)r.e.set_motion_blur(order.at(i).pack(), true);
+        const Outcome o = run_export(r, 180, 0.0, false, 120);
+        AUREA_CHECK(o.finished);
+        AUREA_CHECK_EQ(o.p.result, Errc::Ok);
+        AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(8));
+        hashes[k] = combined_hash(r.cap);
+        if (k == 1) AUREA_CHECK(o.p.pipelineDepth > 1);
+    }
+    AUREA_CHECK_EQ(hashes[0], hashes[1]);
+}
+
 AUREA_TEST(Export, TemporalRgbReleasesFiniteDecoderImages) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;
@@ -707,12 +738,14 @@ AUREA_TEST(ExportBench, Resolutions) {
 
 AUREA_TEST(ExportBench, EffectsAnd3D) {
     if (!bench_enabled() || !gpu_ok()) { std::printf("(AUREA_BENCH_EXPORT=1 para rodar) "); return; }
-    struct Case { const char* name; u32 w, h; f64 fps; i64 frames; bool fx; };
+    struct Case { const char* name; u32 w, h; f64 fps; i64 frames; bool fx; bool blur = false; };
     const Case cases[] = {
         {"efeitos 1080p30", 1920, 1080, 30.0, 120, true},
         {"efeitos 4K30", 3840, 2160, 30.0, 60, true},
         {"3D 1080p30", 1920, 1080, 30.0, 120, false},
         {"3D 4K30", 3840, 2160, 30.0, 60, false},
+        // Desfoque de movimento da composição: o export usa as amostras cheias.
+        {"3D desfoque 1080p30", 1920, 1080, 30.0, 30, false, true},
     };
     for (const Case& c : cases) {
         SyntheticConfig cfg;
@@ -727,6 +760,12 @@ AUREA_TEST(ExportBench, EffectsAnd3D) {
         if (!r.ok) { AUREA_CHECK(r.ok); continue; }
         if (c.fx) build_effects_scene(r);
         else if (!build_3d_scene(r)) { std::printf("\n    %-22s sem modelos glTF (AUREA_BENCH_GLTF): pulado", c.name); continue; }
+        if (c.blur) {
+            // Composição E camadas (a chave por camada, como no editor).
+            (void)r.e.set_composition_motion_blur(true);
+            const OrderedIds<LayerId>& order = r.comp()->order();
+            for (u32 k = 0; k < order.size(); ++k) (void)r.e.set_motion_blur(order.at(k).pack(), true);
+        }
         const Outcome o = run_export(r, c.h, 0.0);
         AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
         print_line(c.name, r, o);

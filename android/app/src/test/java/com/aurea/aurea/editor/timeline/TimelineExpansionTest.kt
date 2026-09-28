@@ -6,7 +6,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TimelineExpansionTest {
-    private fun row(id: Long, track: TimelineTrack? = null) = RowModel(id, LayerType.Video, 100, 200, 20, true, false, true, "Clip", 0, intArrayOf(110), emptyArray(), track)
+    private fun row(id: Long, track: TimelineTrack? = null) = RowModel(id, LayerType.Video, 100, 200, 20, true, false, false, true, "Clip", 0, intArrayOf(110), emptyArray(), track)
     @Test fun expandedKeysPreserveTrackIdentityAndLocalTime() {
         val position = KeyframeRow(0, -1, 30, 10f, 1, 0)
         val effect = KeyframeRow(31, 7, 30, 20f, 1, 2)

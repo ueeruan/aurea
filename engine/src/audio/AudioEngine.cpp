@@ -241,6 +241,10 @@ void AudioEngine::mixer_main() {
     std::vector<std::pair<u64, i64>> need;
     u32 sincePrefetch = 1000;
     std::vector<f32> ratePcm; // mixer thread only; bounded by rate <= 16
+    // Efeitos de áudio (atraso, reverb...): o fluxo de cada clipe vive aqui,
+    // só nesta thread. Pedidos repetidos e sobrepostos saem do que já foi
+    // processado; salto no tempo recomeça com pré-rolagem.
+    MixState fx;
     std::unique_lock<std::mutex> lock(mutex_);
     bool outputStarted = false;
     while (!quit_) {
@@ -283,12 +287,12 @@ void AudioEngine::mixer_main() {
         MixStats ms;
         blocks.reset();
         if (snap) {
-            if (rate == 1.0) mix(*snap, pos, kChunkFrames, blocks, c.pcm, &ms);
+            if (rate == 1.0) mix(*snap, pos, kChunkFrames, blocks, c.pcm, &ms, &fx);
             else {
                 const i64 margin = resample_half_width(rate) + 1;
                 const u32 count = static_cast<u32>(std::ceil(kChunkFrames * rate)) + 2 * static_cast<u32>(margin) + 2;
                 ratePcm.resize(static_cast<usize>(count) * 2);
-                mix(*snap, pos - margin, count, blocks, ratePcm.data(), &ms);
+                mix(*snap, pos - margin, count, blocks, ratePcm.data(), &ms, &fx);
                 if (!ms.missingBlocks) resample_to_mix(ratePcm.data(), count, margin + position - pos, rate, c.pcm, kChunkFrames);
             }
             // Pede adiante: 3 s, os mais próximos primeiro.

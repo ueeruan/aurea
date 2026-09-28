@@ -45,7 +45,9 @@ layout(set = 0, binding = AUREA_TEX1) uniform sampler2D u_dst;
 
 const int kAdd = 1, kSubtract = 2, kMultiply = 3, kScreen = 4, kOverlay = 5, kDarken = 6, kLighten = 7,
           kColorDodge = 8, kColorBurn = 9, kHardLight = 10, kSoftLight = 11, kDifference = 12,
-          kExclusion = 13, kHue = 14, kSaturation = 15, kColor = 16, kLuminosity = 17, kAdjustMix = 100;
+          kExclusion = 13, kHue = 14, kSaturation = 15, kColor = 16, kLuminosity = 17,
+          // Os quatro do editor antigo (ver BlendMode em Types.hpp).
+          kDivide = 18, kVividLight = 19, kLinearDodge = 20, kLinearBurn = 21, kAdjustMix = 100;
 
 const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
 
@@ -72,6 +74,22 @@ vec3 soft_light(vec3 b, vec3 s) {
     return mix(hi, lo, lessThanEqual(s, vec3(0.5)));
 }
 
+// Vivid Light: abaixo de meio-cinza é um Color Burn com o dobro do peso,
+// acima é um Color Dodge com o resto. O `burn`/`dodge` já tratam os extremos.
+vec3 vivid_light(vec3 b, vec3 s) {
+    const vec3 lo = vec3(burn(b.r, 2.0 * s.r), burn(b.g, 2.0 * s.g), burn(b.b, 2.0 * s.b));
+    const vec3 hi = vec3(dodge(b.r, 2.0 * s.r - 1.0), dodge(b.g, 2.0 * s.g - 1.0),
+                         dodge(b.b, 2.0 * s.b - 1.0));
+    return mix(hi, lo, lessThanEqual(s, vec3(0.5)));
+}
+// Divide: o inverso do Multiply. Sobre preto não há resposta (a divisão
+// estoura), e o que o Photoshop devolve ali é branco — o mesmo aqui.
+vec3 divide(vec3 b, vec3 s) {
+    return vec3(s.r <= 1e-6 ? 1.0 : min(b.r / s.r, 1.0),
+                s.g <= 1e-6 ? 1.0 : min(b.g / s.g, 1.0),
+                s.b <= 1e-6 ? 1.0 : min(b.b / s.b, 1.0));
+}
+
 float lum(vec3 c) { return dot(c, kLuma); }
 vec3 clip_color(vec3 c) {
     const float l = lum(c);
@@ -94,17 +112,21 @@ vec3 set_sat(vec3 c, float s) {
 
 vec3 blend(int mode, vec3 b, vec3 s) {
     switch (mode) {
-        case kAdd:        return b + s;   // HDR: sem teto (a soma de luz)
-        case kSubtract:   return max(b - s, vec3(0.0));
-        case kMultiply:   return b * s;
-        case kDarken:     return min(b, s);
-        case kLighten:    return max(b, s);
-        case kDifference: return abs(b - s);
+        case kAdd:         return b + s;   // HDR: sem teto (a soma de luz)
+        case kSubtract:    return max(b - s, vec3(0.0));
+        case kMultiply:    return b * s;
+        case kDarken:      return min(b, s);
+        case kLighten:     return max(b, s);
+        case kDifference:  return abs(b - s);
+        case kLinearDodge: return min(b + s, vec3(1.0));       // o Add preso em 1
+        case kLinearBurn:  return max(b + s - 1.0, vec3(0.0)); // o inverso do Linear Dodge
         default: break;
     }
     b = clamp(b, 0.0, 1.0);
     s = clamp(s, 0.0, 1.0);
     switch (mode) {
+        case kDivide:     return divide(b, s);
+        case kVividLight: return vivid_light(b, s);
         case kScreen:     return b + s - b * s;
         case kOverlay:    return hard_light(s, b);
         case kColorDodge: return vec3(dodge(b.r, s.r), dodge(b.g, s.g), dodge(b.b, s.b));

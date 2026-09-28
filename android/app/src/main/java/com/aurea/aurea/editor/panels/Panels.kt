@@ -120,7 +120,8 @@ fun PanelContent(
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
-        if (panel != EditorPanel.Curve) PanelHeader(title, onBack = onClose)
+        // Efeitos desenha o próprio cabeçalho (as abas "Na camada | Adicionar").
+        if (panel != EditorPanel.Curve && !(panel == EditorPanel.Effects && hasLayer)) PanelHeader(title, onBack = onClose)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             // O painel da Aurea AI gera um video e o poe na timeline: nao ha
             // camada escolhida para ele consultar, entao fica FORA do

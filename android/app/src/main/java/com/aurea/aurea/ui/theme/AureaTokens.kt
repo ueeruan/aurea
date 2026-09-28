@@ -621,6 +621,35 @@ object AureaTimeline {
     val KeyframeOn = Color(0xFFFFC107)     // losango escolhido (âmbar)
     val TrimHandle = Color(0xFFF2F5F9)     // alça de trim (dentro das pontas)
 
+    // --- Fileiras (visual aprovado: calha + clipe no tom do tipo) -------------
+    /** Glifo do tipo na calha (tom muted). */
+    val GutterIcon = Color(0xFF8B97A5)
+    /** O olho pequeno no canto do glifo: mais apagado ainda. */
+    val GutterEye = Color(0x998B97A5)
+    /** Contorno do clipe escolhido e as alças de aparar. */
+    val ClipSelected = Color(0xFFFFFFFF)
+    /** Clipes de camada oculta: a fileira inteira a 40 %. */
+    const val HiddenAlpha = 0.4f
+
+    val Amber = ClipTone(Color(0xFF3A2A12), Color(0xFFEF9F27), Color(0xFFFAC775), Color(0xFFEF9F27))
+    val Teal = ClipTone(Color(0xFF0C3A2E), Color(0xFF1D9E75), Color(0xFF9FE1CB), Color(0xFF5DCAA5))
+    val Purple = ClipTone(Color(0xFF2A2656), Color(0xFF7F77DD), Color(0xFFCECBF6), Color(0xFF7F77DD))
+    val Gray = ClipTone(Color(0xFF232A33), Color(0xFF888780), Color(0xFFD3D1C7), Color(0xFF888780))
+    val Blue = ClipTone(Color(0xFF0F2A45), Color(0xFF378ADD), Color(0xFFB5D4F4), Color(0xFF378ADD))
+    val Pink = ClipTone(Color(0xFF3A1826), Color(0xFFD4537E), Color(0xFFF4C0D1), Color(0xFFD4537E))
+    val Green = ClipTone(Color(0xFF1F2E0F), Color(0xFF639922), Color(0xFFC0DD97), Color(0xFF639922))
+
+    /** Tom do clipe por tipo: 3D/modelo/texto 3D âmbar, áudio teal, partículas roxo, vídeo e imagem azul, texto rosa, forma verde, o resto cinza. */
+    fun tone(type: LayerType): ClipTone = when (type) {
+        LayerType.Model3D -> Amber
+        LayerType.Audio -> Teal
+        LayerType.Particles -> Purple
+        LayerType.Video, LayerType.Image -> Blue
+        LayerType.Text -> Pink
+        LayerType.Shape -> Green
+        LayerType.Adjustment, LayerType.Camera, LayerType.Light, LayerType.Null, LayerType.Group -> Gray
+    }
+
     // --- Medidas (dp) --------------------------------------------------------
     val RulerTicks = 20.dp                 // faixa dos riscos
     val RulerGap = 18.dp                   // respiro até a 1ª linha (o relógio mora aqui)
@@ -629,9 +658,15 @@ object AureaTimeline {
     val BarRadius = 8.dp
     val BarMinWidth = 40.dp
     val KeyframeTrack = 11.dp              // faixa de baixo da barra, dos losangos
-    val HeaderColumn = 66.dp               // coluna das pílulas (gradiente por cima das barras)
-    val PillWidth = 58.dp
-    val PillHeight = 24.dp
+    val HeaderColumn = 40.dp               // calha: glifo do tipo + olho (as barras passam por baixo)
+    val GutterIconSize = 17.dp
+    val GutterEyeSize = 12.dp
+    val ClipStripe = 3.dp                  // faixa sólida da cor do tipo na borda esquerda
+    val ClipSelStroke = 2.dp
+    val ClipIcon = 12.dp
     val Playhead = 1.6.dp
     val PlayheadKnob = 8.dp
 }
+
+/** Fundo escuro, faixa sólida, texto claro e forma de onda de um tipo de clipe. */
+data class ClipTone(val body: Color, val stripe: Color, val text: Color, val wave: Color)

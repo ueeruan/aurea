@@ -562,6 +562,26 @@ struct Layer {
     /// Solo: com QUALQUER camada em solo, o preview só desenha as que estão
     /// (o áudio já seguia a mesma chave). O export ignora o solo.
     bool     solo    = false;
+    /// A LINHA da timeline a que este trecho pertence. Não é o `zOrder`: ele é
+    /// derivado da ordem de desenho (cada camada tem o seu, sempre único) e
+    /// dois trechos da mesma linha continuam sendo duas camadas.
+    ///
+    /// Trechos da mesma linha são o que a pessoa vê lado a lado numa faixa. O
+    /// split dá aos dois pedaços a MESMA linha (a cópia herda este número), e
+    /// é por ele que o ripple magnético anda: aparar e apagar mexem só nos
+    /// vizinhos de `trackId`, nunca em quem está em outra linha.
+    u32      trackId = 0;
+    /// LINHA MAGNÉTICA: os cortes desta camada se comportam como uma faixa de
+    /// montagem de vídeo, não como uma camada solta no tempo.
+    ///
+    ///   - aparar o começo ou o fim puxa o que vem depois NA MESMA LINHA;
+    ///   - apagar o trecho fecha o buraco, também só na linha;
+    ///   - nada disso toca em quem está em outra linha (texto, overlay, 3D).
+    ///
+    /// É o que separa EDIÇÃO (trechos em sequência numa faixa) de COMPOSIÇÃO
+    /// (camadas empilhadas). Nasce ligado quando o modo Edição da composição
+    /// está ligado, e cada camada pode discordar depois.
+    bool     magneticTrack = false;
     bool     threeD  = false;  ///< participa da cena 3D da composição
     /// Camada de ajuste: não desenha conteúdo próprio; os efeitos dela valem
     /// para a composição de TUDO o que está abaixo (no trecho de tempo dela),

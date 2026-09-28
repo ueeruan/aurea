@@ -36,7 +36,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -72,13 +71,11 @@ import com.aurea.aurea.ui.theme.tocavel
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.hypot
 import androidx.compose.foundation.gestures.detectDragGestures
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sign
-import kotlin.math.sin
 
 /**
  * A prévia (palco): a superfície do motor (com o respiro de 8 dp da A.01), o
@@ -318,8 +315,8 @@ internal class StageMapper {
     /** Cantos da camada principal na tela (TL, TR, BR, BL). */
     val corners = FloatArray(8)
 
-    /** Alças na tela: 0 = giro (sup-dir), 1 = escala inf-dir, 2 = sup-esq, 3 = inf-esq. */
-    val handles = FloatArray(8)
+    /** Setas na tela (ponta, x/y): 0 = eixo X, 1 = eixo Y. Só no 2D. */
+    val handles = FloatArray(4)
     var handlesValid = false
     var markerAnchorValid = false
     var markerAnchorX = 0f
@@ -328,7 +325,6 @@ internal class StageMapper {
     val scratch = FloatArray(8)
     val path = Path()
     val maskPath = Path()
-    val arrow = Path()
 
     // Traços do overlay, recriados só quando a densidade muda (o desenho roda
     // a cada quadro durante a reprodução e não deve alocar).
@@ -338,8 +334,6 @@ internal class StageMapper {
     var batchUnder = Stroke(1f)
     var batchOver = Stroke(1f)
     var ring15 = Stroke(1f)
-    var ring1 = Stroke(1f)
-    var arc = Stroke(1f)
 
     fun strokesFor(density: Float) {
         if (density == strokeDensity) return
@@ -349,8 +343,6 @@ internal class StageMapper {
         batchUnder = Stroke(2.5f * density, join = StrokeJoin.Round)
         batchOver = Stroke(1.5f * density, join = StrokeJoin.Round)
         ring15 = Stroke(1.5f * density)
-        ring1 = Stroke(1f * density)
-        arc = Stroke(1.6f * density, cap = StrokeCap.Round)
     }
 
     fun update(w: Float, h: Float, inset: Float, cw: Int, ch: Int, fill: Boolean) {
@@ -494,18 +486,10 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawShapeEditHandles(store, m)
         return
     }
-    placeHandles(m)
-    m.handlesValid = true
-    val grabbed = ui.grabbedHandle
-    for (i in 1..3) {
-        val r = (if (grabbed == i) 6.dp else 5.dp).toPx()
-        val c = Offset(m.handles[i * 2], m.handles[i * 2 + 1])
-        drawCircle(ShellColors.OutlineUnder, r + 1.5.dp.toPx(), c)
-        drawCircle(Color.White, r, c)
-        drawCircle(AureaColors.Accent, r, c, style = m.ring15)
-    }
-    drawRotateHandle(m, grabbed == 0)
-    // Camada no espaço 3D: as setas do mundo por cima (têm prioridade no toque).
+    // Só o centro e as setas dos eixos: alça de canto (giro/escala) em camada
+    // pequena ficava em cima do corpo e roubava o arrasto. Girar e escalar é
+    // pela pinça (e, no 3D, pela ferramenta do gizmo).
+    // Camada no espaço 3D: as setas do mundo (têm prioridade no toque).
     store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
     if (store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
     val anchor = m.scratch
@@ -514,6 +498,11 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     else d.parentToComp(d.position[0], d.position[1], anchor)
     m.markerAnchorX = m.sx(anchor[0]); m.markerAnchorY = m.sy(anchor[1])
     m.markerAnchorValid = store.pointPick == null
+    if (gizmo == null) {
+        placeAxisHandles(m)
+        m.handlesValid = true
+        drawAxisHandles(m, ui.grabbedHandle)
+    }
     val center = Offset(m.markerAnchorX, m.markerAnchorY)
     val color = if (store.markers.frames.binarySearch(playhead) >= 0) Color(0xFFFFD34D) else Color.White
     val radius = 7.dp.toPx()
@@ -827,85 +816,33 @@ private fun DrawScope.outline(m: StageMapper, pts: FloatArray, under: Stroke, ov
 }
 
 /** Alça → canto: giro = TR(1), escala = BR(2), TL(0), BL(3). */
-private val HANDLE_CORNER = intArrayOf(1, 2, 0, 3)
-
 /**
- * Posição das alças (`alcas_do_palco.dart`): cada uma a ≥ 30 dp do centro;
- * se giro (sup-dir) e escala inf-dir ficam a < 60 dp, separam ±30 dp em Y a
- * partir do meio; todas presas 22 dp para dentro do palco.
+ * Setas do 2D a partir do centro: X para a direita, Y para cima, 56 dp. Perto
+ * da borda do palco a seta vira para o outro lado (continua tocável).
  */
-private fun DrawScope.placeHandles(m: StageMapper) {
-    val c = m.corners
-    val cx = (c[0] + c[2] + c[4] + c[6]) / 4
-    val cy = (c[1] + c[3] + c[5] + c[7]) / 4
-    val minR = 30.dp.toPx()
-    for (i in 0 until 4) {
-        val k = HANDLE_CORNER[i]
-        var hx = c[k * 2]
-        var hy = c[k * 2 + 1]
-        var dx = hx - cx
-        var dy = hy - cy
-        var dist = hypot(dx, dy)
-        if (dist < minR) {
-            if (dist < 1e-3f) {
-                dx = if (k == 1 || k == 2) 1f else -1f
-                dy = if (k >= 2) 1f else -1f
-                dist = hypot(dx, dy)
-            }
-            hx = cx + dx / dist * minR
-            hy = cy + dy / dist * minR
-        }
-        m.handles[i * 2] = hx
-        m.handles[i * 2 + 1] = hy
-    }
-    val sep = 60.dp.toPx()
-    if (hypot(m.handles[0] - m.handles[2], m.handles[1] - m.handles[3]) < sep) {
-        val mid = (m.handles[1] + m.handles[3]) / 2
-        m.handles[1] = mid - sep / 2
-        m.handles[3] = mid + sep / 2
-    }
+private fun DrawScope.placeAxisHandles(m: StageMapper) {
+    val len = 56.dp.toPx()
     val edge = 22.dp.toPx()
-    for (i in 0 until 4) {
-        m.handles[i * 2] = m.handles[i * 2].coerceIn(edge, max(edge, m.boxW - edge))
-        m.handles[i * 2 + 1] = m.handles[i * 2 + 1].coerceIn(edge, max(edge, m.boxH - edge))
-    }
+    val cx = m.markerAnchorX
+    val cy = m.markerAnchorY
+    m.handles[0] = if (cx + len > m.boxW - edge) cx - len else cx + len
+    m.handles[1] = cy
+    m.handles[2] = cx
+    m.handles[3] = if (cy - len < edge) cy + len else cy - len
 }
 
-/** Pegador de giro: disco, arco de 270° com ponta de seta, anel em destaque. */
-private fun DrawScope.drawRotateHandle(m: StageMapper, grabbed: Boolean) {
-    val c = Offset(m.handles[0], m.handles[1])
-    val r = (35f / 2f * (if (grabbed) 0.62f else 0.55f)).dp.toPx()
-    drawCircle(ShellColors.OutlineUnder, r + 1.5.dp.toPx(), c)
-    drawCircle(if (grabbed) AureaColors.Accent else AureaColors.EditorPanelHigh, r, c)
-    if (!grabbed) drawCircle(AureaColors.Accent, r, c, style = m.ring1)
-    val ar = r * 0.52f
-    val start = -162f
-    val sweep = 270f
-    drawArc(
-        color = Color.White,
-        startAngle = start,
-        sweepAngle = sweep,
-        useCenter = false,
-        topLeft = Offset(c.x - ar, c.y - ar),
-        size = androidx.compose.ui.geometry.Size(ar * 2, ar * 2),
-        style = m.arc,
-    )
-    // Ponta de seta no fim do arco, apontando no sentido do giro (horário).
-    val end = Math.toRadians((start + sweep).toDouble())
-    val ex = c.x + ar * cos(end).toFloat()
-    val ey = c.y + ar * sin(end).toFloat()
-    val tx = -sin(end).toFloat()   // tangente horária
-    val ty = cos(end).toFloat()
-    val nx = cos(end).toFloat()    // normal (para fora)
-    val ny = sin(end).toFloat()
-    val s = r * 0.34f
-    val a = m.arrow
-    a.reset()
-    a.moveTo(ex + tx * s, ey + ty * s)
-    a.lineTo(ex - tx * s * 0.2f + nx * s * 0.8f, ey - ty * s * 0.2f + ny * s * 0.8f)
-    a.lineTo(ex - tx * s * 0.2f - nx * s * 0.8f, ey - ty * s * 0.2f - ny * s * 0.8f)
-    a.close()
-    drawPath(a, Color.White)
+/** Seta de eixo: traço e bola nas cores do gizmo 3D (X vermelho, Y verde). */
+private fun DrawScope.drawAxisHandles(m: StageMapper, grabbed: Int) {
+    val o = Offset(m.markerAnchorX, m.markerAnchorY)
+    for (i in 0..1) {
+        val tip = Offset(m.handles[i * 2], m.handles[i * 2 + 1])
+        val color = if (i == 0) GizmoX else GizmoY
+        drawLine(ShellColors.OutlineUnder, o, tip, 5.dp.toPx())
+        drawLine(color, o, tip, 2.5.dp.toPx())
+        val r = (if (grabbed == i) 9f else 7.5f).dp.toPx()
+        drawCircle(ShellColors.OutlineUnder, r + 1.5.dp.toPx(), tip)
+        drawCircle(color, r, tip)
+    }
 }
 
 // =============================================================================
@@ -918,16 +855,14 @@ private const val TARGET_LAYER = 2
 
 private const val MODE_PENDING = 0
 private const val MODE_MOVE = 1
-private const val MODE_SCALE = 2
-private const val MODE_ROTATE = 3
 private const val MODE_PINCH = 4
 private const val MODE_IDLE = 5      // gesto recusado ou pinça encerrada: espera todos subirem
 
 /**
- * O árbitro do palco. No toque: alça (giro r 22 / escala r 26, a mais
- * próxima) > dentro da camada JÁ escolhida > camada de cima visível > vazio.
- * Solta sem andar = toque (escolhe a de cima; vazio desseleciona). Anda
- * 18 dp (4 numa alça) = arrasto do alvo. 2º dedo = pinça da camada
+ * O árbitro do palco. No toque: seta de eixo (r 26, a mais próxima; mover
+ * travado em X ou Y) > dentro da camada JÁ escolhida > camada de cima visível
+ * > vazio. Solta sem andar = toque (escolhe a de cima; vazio desseleciona).
+ * Anda 18 dp (4 numa seta) = arrasto do alvo. 2º dedo = pinça da camada
  * escolhida (escala + giro, zona morta de 4°, nunca posição). Cada gesto
  * contínuo é UM passo de desfazer.
  */
@@ -940,13 +875,11 @@ private suspend fun PointerInputScope.stageGestures(
     val slop = ShellDims.TouchSlop.toPx()
     val handleSlop = ShellDims.HandleSlop.toPx()
     val hitSlack = ShellDims.HitSlack.toPx()
-    val rotateTarget = ShellDims.RotateHandleTarget.toPx()
-    val scaleTarget = ShellDims.ScaleHandleTarget.toPx()
+    val axisTarget = ShellDims.AxisHandleTarget.toPx()
     val edit = StageEdit(
         store, ui, m, haptic,
         lockMajor = 24.dp.toPx(),
         lockMinor = 12.dp.toPx(),
-        minPivot = 8.dp.toPx(),
         snapTol = ShellDims.SnapTolerance.toPx(),
     )
 
@@ -1021,6 +954,19 @@ private suspend fun PointerInputScope.stageGestures(
             val q = FloatArray(8)
             var upX = downX
             var upY = downY
+            // Mira = o bloco MÍNIMO seguido e a janela de busca do rastreio de
+            // ponto (raios do painel, na análise de até 720 linhas / 1280
+            // colunas, como o motor) → px da composição. O motor aumenta o
+            // bloco até caber o objeto tocado. Calculada no toque.
+            if (d != null && LayerGeometry.corners(d, q)) {
+                val layerW = LayerGeometry.width(d).coerceAtLeast(1f)
+                val layerH = LayerGeometry.height(d).coerceAtLeast(1f)
+                val thumb = layerH / minOf(720f, layerH, kotlin.math.floor(1280f * layerH / layerW)).coerceAtLeast(1f)
+                val compPerLayer = kotlin.math.hypot(q[2] - q[0], q[3] - q[1]) / layerW
+                val inner = (2f * kotlin.math.round(store.motionFeature / thumb).coerceAtLeast(3f) + 1f) * thumb
+                val outer = inner + 2f * (store.motionSearch / thumb).coerceIn(4f, 160f) * thumb
+                store.pickBoxes = floatArrayOf(inner * compPerLayer, outer * compPerLayer)
+            }
             if (m.valid) store.pickCursor = Offset(m.cx(downX), m.cy(downY))
             do {
                 val ev = awaitPointerEvent()
@@ -1033,12 +979,6 @@ private suspend fun PointerInputScope.stageGestures(
             if (d != null && m.valid && LayerGeometry.corners(d, q)) {
                 val cx = m.cx(upX)
                 val cy = m.cy(upY)
-                // Bloco (17 px) e janela de busca (17 + 2·24 px) do rastreio, que roda
-                // numa miniatura de até 360 px de altura → px da camada → composição.
-                val layerH = LayerGeometry.height(d).coerceAtLeast(1f)
-                val thumb = layerH / kotlin.math.min(360f, layerH)
-                val compPerLayer = kotlin.math.hypot(q[2] - q[0], q[3] - q[1]) / LayerGeometry.width(d).coerceAtLeast(1f)
-                store.pickBoxes = floatArrayOf(17f * thumb * compPerLayer, 65f * thumb * compPerLayer)
                 // Afim pelos cantos TL, TR, BL: p = TL + u·(TR − TL) + v·(BL − TL).
                 val ax = q[2] - q[0]; val ay = q[3] - q[1]
                 val bx = q[6] - q[0]; val by = q[7] - q[1]
@@ -1071,7 +1011,7 @@ private suspend fun PointerInputScope.stageGestures(
         var handle = -1
         var targetLayer = 0L
         if (m.valid) {
-            handle = pickHandle(m, downX, downY, rotateTarget, scaleTarget)
+            handle = pickHandle(m, downX, downY, axisTarget)
             if (handle >= 0) {
                 target = TARGET_HANDLE
             } else {
@@ -1154,7 +1094,7 @@ private suspend fun PointerInputScope.stageGestures(
                             }
                         }
                     }
-                    MODE_MOVE, MODE_SCALE, MODE_ROTATE -> {
+                    MODE_MOVE -> {
                         val c = event.changes.firstOrNull { it.id == down.id }
                         if (c == null || !c.pressed) mode = MODE_IDLE
                         else edit.step(mode, c.position.x, c.position.y)
@@ -1198,9 +1138,10 @@ private suspend fun PointerInputScope.stageGestures(
 private fun startDrag(store: EditorStore, edit: StageEdit, target: Int, handle: Int, layer: Long, downX: Float, downY: Float): Int {
     return when (target) {
         TARGET_HANDLE -> {
+            // Seta do eixo: o mesmo mover, travado em X (0) ou Y (1) desde o toque.
             val d = store.detail ?: return MODE_IDLE
-            edit.startHandle(d, handle, downX, downY)
-            if (handle == 0) MODE_ROTATE else MODE_SCALE
+            edit.startMove(d, downX, downY, axis = handle + 1)
+            MODE_MOVE
         }
         TARGET_LAYER -> {
             // Arrastar escolhe a camada no COMEÇO do gesto.
@@ -1236,7 +1177,6 @@ private class StageEdit(
     private val haptic: HapticFeedback,
     private val lockMajor: Float,
     private val lockMinor: Float,
-    private val minPivot: Float,
     private val snapTol: Float,
 ) {
     private var began = false
@@ -1258,15 +1198,12 @@ private class StageEdit(
     private var targetsX = FloatArray(0)
     private var targetsY = FloatArray(0)
 
-    // Escala / giro (alça e pinça)
+    // Escala / giro (pinça)
     private var sx0 = 1f
     private var sy0 = 1f
     private var sz0 = 1f
     private var threeD = false
     private var rot0 = 0f
-    private var pivotX = 0f
-    private var pivotY = 0f
-    private var dist0 = 1f
     private var lastAngle = 0f
     private var accAngle = 0f
     private var span0 = 1f
@@ -1324,7 +1261,8 @@ private class StageEdit(
         return if (lo <= hi) f.coerceIn(lo, hi) else f
     }
 
-    fun startMove(d: LayerDetail, x: Float, y: Float) {
+    /** [axis]: 0 = livre (trava sozinho pelo gesto), 1 = só X, 2 = só Y (seta). */
+    fun startMove(d: LayerDetail, x: Float, y: Float, axis: Int = 0) {
         // Tudo em px da composição (mundo); só no fim volta ao espaço do pai.
         moveDetail = d
         d.parentToComp(d.position[0], d.position[1], pt)
@@ -1336,7 +1274,8 @@ private class StageEdit(
         downCy = m.cy(y)
         lastCx = downCx
         lastCy = downCy
-        axisLock = 0
+        axisLock = axis
+        if (axis != 0) ui.grabbedHandle = axis - 1
         if (LayerGeometry.bounds(d, scratch, box)) {
             offX[0] = box[0] - pos0x; offX[1] = (box[0] + box[2]) / 2 - pos0x; offX[2] = box[2] - pos0x
             offY[0] = box[1] - pos0y; offY[1] = (box[1] + box[3]) / 2 - pos0y; offY[2] = box[3] - pos0y
@@ -1345,18 +1284,6 @@ private class StageEdit(
             offY.fill(0f)
         }
         collectSnapTargets(d.id)
-        engage()
-    }
-
-    fun startHandle(d: LayerDetail, handle: Int, x: Float, y: Float) {
-        keepTransform(d)
-        d.parentToComp(d.position[0], d.position[1], pt)
-        pivotX = m.sx(pt[0])
-        pivotY = m.sy(pt[1])
-        dist0 = max(minPivot, hypot(x - pivotX, y - pivotY))
-        lastAngle = atan2(y - pivotY, x - pivotX)
-        accAngle = 0f
-        ui.grabbedHandle = handle
         engage()
     }
 
@@ -1370,25 +1297,7 @@ private class StageEdit(
     }
 
     fun step(mode: Int, x: Float, y: Float) {
-        when (mode) {
-            MODE_MOVE -> move(x, y)
-            MODE_SCALE -> {
-                // Fator = distância(dedo, pivô) / distância inicial; preserva a
-                // proporção X/Y e o espelhamento.
-                val f = clampFactor(hypot(x - pivotX, y - pivotY) / dist0)
-                begin("escala")
-                if (threeD) store.setScale3(floatArrayOf(sx0 * f, sy0 * f, sz0 * f))
-                else store.setTransform2(TrackProperty.SCALE_X, sx0 * f, TrackProperty.SCALE_Y, sy0 * f)
-            }
-            MODE_ROTATE -> {
-                // Giro relativo (ângulo varrido em volta do pivô), sem salto.
-                val angle = atan2(y - pivotY, x - pivotX)
-                accAngle += wrapRad(angle - lastAngle)
-                lastAngle = angle
-                begin("girar")
-                store.setTransform(TrackProperty.ROTATION_Z, rot0 + Math.toDegrees(accAngle.toDouble()).toFloat())
-            }
-        }
+        if (mode == MODE_MOVE) move(x, y)
     }
 
     private fun move(x: Float, y: Float) {
@@ -1527,14 +1436,13 @@ private fun deltaTo(pos: Float, offsets: FloatArray, target: Float, tol: Float):
     return bestD
 }
 
-/** Alça sob o dedo (a mais próxima dentro do raio de toque), ou −1. */
-private fun pickHandle(m: StageMapper, x: Float, y: Float, rotateR: Float, scaleR: Float): Int {
+/** Seta de eixo sob o dedo (a mais próxima dentro do raio de toque), ou −1. */
+private fun pickHandle(m: StageMapper, x: Float, y: Float, r: Float): Int {
     if (!m.handlesValid) return -1
     var best = -1
     var bestD = Float.MAX_VALUE
-    for (i in 0 until 4) {
+    for (i in 0 until 2) {
         val d = hypot(x - m.handles[i * 2], y - m.handles[i * 2 + 1])
-        val r = if (i == 0) rotateR else scaleR
         if (d <= r && d < bestD) {
             bestD = d
             best = i

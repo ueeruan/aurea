@@ -795,3 +795,158 @@ AUREA_TEST(Stagger, KeysOnlyShiftsEveryAnimationButKeepsTheBars) {
     // Uma camada só não escalona.
     AUREA_CHECK(!r.e.stagger_layers(ids, 1, 6, true).ok());
 }
+
+// =============================================================================
+// LINHA MAGNÉTICA (2026-09-27): edição de vídeo POR FAIXA.
+//
+// Uma linha é o `zOrder`. O split já põe as duas metades na mesma linha (a
+// cópia mantém o zOrder do original); estes testes provam que o ripple de uma
+// linha NÃO arrasta quem está em outra — que é a diferença entre editar vídeo
+// e compor camadas.
+// =============================================================================
+namespace {
+
+/// Três trechos em fila na LINHA 0 e um overlay solto na LINHA 1.
+struct MagneticRig {
+    EditRig r;
+    u64 overlay = 0;
+    MagneticRig() {
+        clip_source(r, r.a); clip_source(r, r.b); clip_source(r, r.c);
+        // Mesma linha para os três: é o que o split produz.
+        const u32 row = r.comp()->layer(LayerId::unpack(r.a))->trackId;
+        r.comp()->layer(LayerId::unpack(r.b))->trackId = row;
+        r.comp()->layer(LayerId::unpack(r.c))->trackId = row;
+        overlay = *r.e.add_null(false);
+        range(overlay, 40, 70);
+    }
+    void range(u64 id, i64 s, i64 en) { r.range(id, s, en); }
+    void magnetic(bool on) {
+        for (u64 id : {r.a, r.b, r.c}) (void)r.e.set_layer_magnetic_track(id, on);
+    }
+    i64 start_of(u64 id) { return r.L(id)->start.value; }
+    i64 end_of(u64 id) { return r.L(id)->end.value; }
+};
+
+} // namespace
+
+AUREA_TEST(MagneticTrack, DeleteClosesTheHoleOnlyOnItsOwnTrack) {
+    MagneticRig m;
+    m.magnetic(true);
+    AUREA_CHECK(m.r.e.ripple_delete(&m.r.b, 1));
+    // A linha fecha: o C encosta no fim do A.
+    AUREA_CHECK_EQ(m.start_of(m.r.a), 0);
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 30);
+    AUREA_CHECK_EQ(m.end_of(m.r.c), 60);
+    // O overlay de OUTRA linha não se move: é composição, não montagem.
+    AUREA_CHECK_EQ(m.start_of(m.overlay), 40);
+    AUREA_CHECK_EQ(m.end_of(m.overlay), 70);
+    m.r.undo();
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 60);
+}
+
+AUREA_TEST(MagneticTrack, DeletingWithoutMagneticLeavesTheHoleAlone) {
+    MagneticRig m;
+    m.magnetic(false);
+    // Apagar de verdade (LayerDelete) nunca fechou buraco nenhum: quem fecha
+    // é a ação "excluir e fechar o espaço" ou o ripple da linha magnética.
+    Command del;
+    del.type = CommandType::LayerDelete;
+    del.layer_ref.layer = LayerId::unpack(m.r.b);
+    AUREA_CHECK(m.r.e.apply_command(del).ok());
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 60);
+    AUREA_CHECK_EQ(m.start_of(m.overlay), 40);
+
+    // "Remover espaços vazios" continua sendo a ação de COMPOSIÇÃO de sempre:
+    // sem nenhuma linha magnética, ela fecha a composição inteira.
+    // O buraco é [30,40) — o vão entre o A e o overlay que segura [40,70).
+    AUREA_CHECK_EQ(m.r.e.remove_gaps(), 10);
+    AUREA_CHECK_EQ(m.start_of(m.overlay), 30);
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 50);
+}
+
+AUREA_TEST(MagneticTrack, RippleTrimPullsOnlyTheNeighboursOfTheSameRow) {
+    MagneticRig m;
+    m.magnetic(true);
+    // Apara o começo do B em 8 frames: ele fica parado e o C vem junto.
+    AUREA_CHECK(m.r.e.edit_clip_time(m.r.b, 0, 38));
+    AUREA_CHECK_EQ(m.start_of(m.r.b), 30);
+    AUREA_CHECK_EQ(m.end_of(m.r.b), 52);
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 52);
+    AUREA_CHECK_EQ(m.start_of(m.overlay), 40);
+}
+
+AUREA_TEST(MagneticTrack, ReorderPutsTheCutWhereItWasDroppedAndKeepsTheRowPacked) {
+    MagneticRig m;
+    m.magnetic(true);
+    // Arrasta o C para o começo da linha: ele vira o primeiro.
+    AUREA_CHECK(m.r.e.reorder_clip(m.r.c, 0));
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 0);
+    AUREA_CHECK_EQ(m.start_of(m.r.a), 30);
+    AUREA_CHECK_EQ(m.start_of(m.r.b), 60);
+    // Sem buraco: 0..30, 30..60, 60..90.
+    AUREA_CHECK_EQ(m.end_of(m.r.b), 90);
+    AUREA_CHECK_EQ(m.start_of(m.overlay), 40);
+    m.r.undo();
+    AUREA_CHECK_EQ(m.start_of(m.r.a), 0);
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 60);
+}
+
+AUREA_TEST(MagneticTrack, ReorderRefusesOnALooseClipAndOnALockedRow) {
+    MagneticRig m;
+    m.magnetic(false);
+    AUREA_CHECK(!m.r.e.reorder_clip(m.r.c, 0));      // sem linha magnética
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 60);
+    m.magnetic(true);
+    m.r.comp()->layer(LayerId::unpack(m.r.a))->locked = true;
+    AUREA_CHECK(!m.r.e.reorder_clip(m.r.c, 0));      // vizinho travado
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 60);
+}
+
+AUREA_TEST(MagneticTrack, NewClipLandsAtTheEndOfTheMagneticRow) {
+    MagneticRig m;
+    m.magnetic(true);
+    m.r.e.set_edit_mode(true);                        // modo Edição: a linha manda
+    // Um trecho NOVO com FONTE: nasce encostado no fim da linha magnética.
+    const LayerId added = m.r.comp()->add_layer(LayerKind::Video, "novo");
+    const Layer* l = m.r.comp()->layer(added);
+    AUREA_CHECK(l != nullptr);
+    AUREA_CHECK_EQ(l->trackId, m.r.comp()->layer(LayerId::unpack(m.r.a))->trackId);
+    AUREA_CHECK_EQ(l->start.value, 90);               // encostado no fim do C
+}
+
+AUREA_TEST(MagneticTrack, QueryLayersCarriesTheRowToTheUi) {
+    MagneticRig m;
+    // A UI junta na MESMA fileira os trechos de uma linha: o número da linha
+    // tem de atravessar a ponte, e o split tem de dar o mesmo aos dois pedaços.
+    Command split;
+    split.type = CommandType::LayerSplit;
+    split.layer_ref.layer = LayerId::unpack(m.r.a);
+    split.layer_split.at = FrameIndex{10};
+    AUREA_CHECK(m.r.e.apply_command(split).ok());
+    bridge::LayerRow rows[8]{};
+    const u32 n = m.r.e.query_layers(rows, 8, nullptr, 0);
+    AUREA_CHECK_EQ(n, 5u);
+    const u32 row = m.r.comp()->layer(LayerId::unpack(m.r.a))->trackId;
+    AUREA_CHECK(row != 0u);
+    u32 sameRow = 0;
+    for (u32 i = 0; i < n; ++i) {
+        const Layer* l = m.r.comp()->layer(LayerId::unpack(rows[i].id));
+        AUREA_CHECK(l != nullptr);
+        AUREA_CHECK_EQ(rows[i].trackId, l->trackId);
+        if (rows[i].trackId == row) ++sameRow;
+    }
+    AUREA_CHECK_EQ(sameRow, 4u);                      // os dois pedaços do A, o B e o C
+    AUREA_CHECK(m.r.L(m.overlay)->trackId != row);    // o overlay é outra linha
+}
+
+AUREA_TEST(MagneticTrack, TheFlagSurvivesSaveAndLoad) {
+    MagneticRig m;
+    m.magnetic(true);
+    const char* path = "aurea_test_magnetic.aurea";
+    AUREA_CHECK(m.r.e.save_project(path).ok());
+    AUREA_CHECK(m.r.e.load_project(path).ok());
+    AUREA_CHECK(m.r.e.layer_magnetic_track(m.r.a));
+    AUREA_CHECK(m.r.e.layer_magnetic_track(m.r.c));
+    AUREA_CHECK(!m.r.e.layer_magnetic_track(m.overlay));
+    std::remove(path);
+}

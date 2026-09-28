@@ -24,25 +24,25 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val track = dp(AureaTimeline.KeyframeTrack.value)
     /** Começo da faixa dos losangos (medido do topo da barra). */
     val trackTop = bar - track
-    /** Folga abaixo das linhas: o "+" da casca cobre a ponta de baixo. */
-    val bottomPad = dp(56f)
+    /** Folga abaixo das linhas (a última não cola na borda). */
+    val bottomPad = dp(24f)
 
-    // --- Coluna das pílulas (olho + quadradinho) -------------------------------
+    // --- Calha da fileira (glifo do tipo + olho pequeno) -----------------------
+    /** Largura da calha; as barras passam por baixo dela. */
     val headerColumn = dp(AureaTimeline.HeaderColumn.value)
-    val pillLeft = dp(4f)
-    val pillWidth = dp(AureaTimeline.PillWidth.value)
-    val pillHeight = dp(AureaTimeline.PillHeight.value)
-    val pillRadius = pillHeight / 2f
-    val eyeSlot = dp(26f)
-    val eyeGlyph = 16f
-    val swatch = dp(18f)
-    val swatchRadius = dp(4f)
-    /** `spaceEvenly` do Row da A.01: três vãos iguais entre olho (26) e quadradinho (18). */
-    private val pillGap = (pillWidth - eyeSlot - swatch) / 3f
-    val eyeCenterX = pillLeft + pillGap + eyeSlot / 2f
-    val swatchLeft = pillLeft + pillGap * 2f + eyeSlot
-    /** O olho responde até o meio do vão que o separa do quadradinho. */
-    val eyeHitRight = pillLeft + pillGap * 1.5f + eyeSlot
+    val gutterIcon = AureaTimeline.GutterIconSize.value
+    val gutterIconCx = dp(17f)
+    /** Centro do glifo do tipo, medido do topo da linha (um pouco acima do meio da barra). */
+    val gutterIconCy = dp(13f)
+    val gutterEye = AureaTimeline.GutterEyeSize.value
+    /** O olho mora no canto de baixo, à direita do glifo. */
+    val gutterEyeCx = dp(31f)
+    val gutterEyeCy = dp(25f)
+    val gutterLock = 10f
+    val gutterLockCy = dp(6f)
+    /** Toque do olho: o quadrante de baixo à direita da calha; o resto é do glifo do tipo. */
+    val eyeHitLeft = dp(24f)
+    val eyeHitTop = dp(16f)
 
     // --- Régua ------------------------------------------------------------------
     val tickMajorTop = dp(2f)
@@ -53,13 +53,13 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val tickLabelGap = dp(3f)
 
     // --- Conteúdo da barra --------------------------------------------------------
-    val stripe = dp(4f)
-    val padL = dp(14f)
+    val stripe = dp(AureaTimeline.ClipStripe.value)
+    val padL = dp(10f)
     val padR = dp(10f)
-    val padLNarrow = dp(7f)
+    val padLNarrow = dp(6f)
     val padRNarrow = dp(3f)
     val narrowBar = dp(46f)
-    val typeIcon = 11f
+    val typeIcon = AureaTimeline.ClipIcon.value
     val iconGap = dp(6f)
     val lockIcon = 10f
     val lockGap = dp(5f)
@@ -73,8 +73,8 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val lockGapMinBar = dp(70f)
     val rhombusMinBar = dp(120f)
     val menuMinBar = dp(150f)
-    val selStroke = dp(1.5f)
-    val multiStroke = dp(1.2f)
+    val selStroke = dp(AureaTimeline.ClipSelStroke.value)
+    val multiStroke = dp(AureaTimeline.ClipSelStroke.value)
     val lightLine = dp(1f)
     /** Toque do corpo vai um pouco abaixo da barra (os 10 dp que sobram na linha são do vazio). */
     val bodyHitBottom = bar + dp(4f)

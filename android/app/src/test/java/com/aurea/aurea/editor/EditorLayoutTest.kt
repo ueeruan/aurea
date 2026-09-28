@@ -23,13 +23,32 @@ class EditorLayoutTest {
             val editing = EditorLayout.solve(height, SheetContent.Panel, false)
             val dock = EditorLayout.solve(height, SheetContent.Dock, false)
             assertTrue("panel at $height", editing.sheet >= 336f)
-            assertTrue("dock at $height", dock.sheet >= 240f)
+            // Doca compacta: a altura do conteúdo, o resto fica para a timeline.
+            assertEquals("dock at $height", EditorLayout.DOCK, dock.sheet, 0.01f)
+            assertTrue(dock.timeline >= 110f)
             assertTrue(editing.preview >= 96f)
             assertTrue(editing.preview < overview.preview)
             assertTrue(editing.timeline >= 110f)
             assertEquals(height, editing.topBar + editing.preview + editing.strip +
                 editing.transport + editing.timeline + editing.sheet, 0.01f)
             assertEquals(height * 0.54f - 32f, overview.preview, 0.01f)
+        }
+    }
+    @Test fun dockRowsPutTheLargerHalfBelow() {
+        assertEquals(listOf(4), dockRows(4))
+        assertEquals(listOf(2, 3), dockRows(5))
+        assertEquals(listOf(3, 3), dockRows(6))
+        assertEquals(listOf(3, 4), dockRows(7))
+        assertEquals(listOf(4, 4), dockRows(8))
+    }
+    @Test fun addBarSitsUnderTheTimelineWithoutMovingThePreview() {
+        for (height in listOf(640f, 720f, 780f, 840f, 960f)) {
+            val overview = EditorLayout.solve(height, SheetContent.None, false)
+            val bar = EditorLayout.solve(height, SheetContent.AddBar, false)
+            assertEquals("bar at $height", EditorLayout.ADD_BAR, bar.sheet, 0.01f)
+            assertEquals(overview.preview, bar.preview, 0.01f)
+            assertTrue(bar.timeline >= 110f)
+            assertEquals(height, bar.topBar + bar.preview + bar.strip + bar.transport + bar.timeline + bar.sheet, 0.01f)
         }
     }
 }

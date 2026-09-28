@@ -111,6 +111,20 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             checked = row.solo,
             detail = stringResource(R.string.editor_alguma_camada_solo_previa_som_so),
         )
+        // Linha Magnética: só faz sentido em trecho com FONTE (vídeo, áudio ou
+        // pré-composição) — é o que se corta e se arrasta em sequência. Não
+        // aparece em texto, forma, nulo, ajuste, câmera ou partículas, que são
+        // composição, não montagem.
+        val clip = media || type == LayerType.Audio || type == LayerType.Group
+        if (clip) {
+            MenuItemRow(
+                CupertinoGlyph.Link,
+                stringResource(R.string.editor_linha_magnetica),
+                { store.setLayerMagneticTrack(id, !row.magnetic) },
+                checked = row.magnetic,
+                detail = stringResource(R.string.editor_linha_magnetica_detalhe),
+            )
+        }
         if (visual) {
             MenuItemRow(
                 CupertinoGlyph.SliderHorizontal3,
@@ -195,9 +209,9 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         if (type == LayerType.Video) {
             MenuItemRow(ShellGlyph.Snow, stringResource(R.string.sh_menu_freeze_frame), if (inside) act { store.freezeFrame(id) } else null)
             MenuSection(stringResource(R.string.editor_rastreio))
-            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_rastrear_ponto), act { store.select(id); store.beginPointPick(false) },
+            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_rastrear_ponto), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking); store.beginPointPick(false) },
                 detail = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras))
-            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_estabilizar_pelo_ponto), act { store.select(id); store.beginPointPick(true) },
+            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_estabilizar_pelo_ponto), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking); store.beginPointPick(true) },
                 detail = stringResource(R.string.editor_move_video_ponto_ficar_parado_tela))
         }
 

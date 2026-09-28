@@ -644,6 +644,16 @@ class AureaEngine private constructor() {
         nativeEditClipTime(nativeHandle, layer, operation, amount, previous, next)
     fun trimComposition(frame: Long): Boolean = nativeTrimComposition(nativeHandle, frame)
 
+    /**
+     * LINHA MAGNÉTICA da camada: os cortes dela viram uma faixa de montagem de
+     * vídeo (aparar e apagar puxam os vizinhos DA MESMA linha; quem está em
+     * outra linha não anda). Nasce no estado do modo Edição da composição.
+     */
+    fun setLayerMagneticTrack(layer: Long, on: Boolean): Boolean = nativeSetLayerMagneticTrack(nativeHandle, layer, on)
+    fun layerMagneticTrack(layer: Long): Boolean = nativeLayerMagneticTrack(nativeHandle, layer)
+    /** Arrasta o trecho para outro ponto da mesma linha, com reordenação. */
+    fun reorderClip(layer: Long, targetFrame: Long): Boolean = nativeReorderClip(nativeHandle, layer, targetFrame)
+
     /** Liga/desliga a marca no frame. true = ficou marcada. */
     fun toggleMarker(frame: Long): Boolean = nativeToggleMarker(nativeHandle, frame)
     /** Tap de batida tocando: marca o instante que soa, sem pausar nem alternar. Quadro ou -1. */
@@ -931,6 +941,9 @@ class AureaEngine private constructor() {
     private external fun nativeRemoveGaps(handle: Long): Long
     private external fun nativeEditClipTime(handle: Long, layer: Long, operation: Int, amount: Long, previous: Long, next: Long): Boolean
     private external fun nativeTrimComposition(handle: Long, frame: Long): Boolean
+    private external fun nativeSetLayerMagneticTrack(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeLayerMagneticTrack(handle: Long, layer: Long): Boolean
+    private external fun nativeReorderClip(handle: Long, layer: Long, targetFrame: Long): Boolean
     private external fun nativeMoveMarker(handle: Long, from: Long, to: Long): Boolean
     private external fun nativeEditMarker(handle: Long, from: Long, to: Long, color: Int, label: ByteArray): Boolean
     private external fun nativeDeleteMarker(handle: Long, frame: Long): Boolean

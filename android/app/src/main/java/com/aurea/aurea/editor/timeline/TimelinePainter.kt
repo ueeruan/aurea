@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.aurea.aurea.editor.ShellColors
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaTimeline
+import com.aurea.aurea.ui.theme.ClipTone
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIconsFont
 import com.aurea.aurea.ui.theme.LayerType
@@ -102,26 +103,11 @@ internal class TimelinePainter(
         endX = m.headerColumn,
     )
 
-    /**
-     * Corpo da barra: `lerp(#151C24, cor do tipo, .46 normal / .66 escolhida /
-     * .22 oculta)` em sRGB linear por canal, como o `Color.lerp` do Flutter
-     * (confere com o print: imagem escolhida = #2F539B).
-     */
-    private val bodyColors: Array<Color> = Array(LayerType.entries.size * 3) { i ->
-        val type = LayerType.entries[i / 3]
-        val t = when (i % 3) {
-            STATE_HIDDEN -> 0.22f
-            STATE_SELECTED -> 0.66f
-            else -> 0.46f
-        }
-        lerpSrgb(AureaColors.Surface, type.color, t)
-    }
-
     // --- Texto ------------------------------------------------------------------------
     private val nameStyle = TextStyle(
         color = Color.White,
         fontSize = 12.sp,
-        fontWeight = FontWeight.W600,
+        fontWeight = FontWeight.W500,
         letterSpacing = (-0.1).sp,
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
@@ -203,12 +189,10 @@ internal class TimelinePainter(
         val last = min(n - 1, c.rowIndexAt(scroll + h - m.rowsTop))
         val selCount = c.selectionSize()
         val multi = selCount >= 2
-        val selKey = c.store.selectedKeyframe
-        val keySel = c.store.keySelection
         val generation = c.store.thumbnailGeneration
         val cache = c.store.thumbnails
         val preview = if (st.reorderSource >= 0 && !compact) Reorder.preview(
-            FloatArray(n + 1) { c.rowTop(it) }, LongArray(n) { rows[it].id },
+            FloatArray(n + 1) { c.rowTop(it) }, timelineGroupKeys(rows),
             st.reorderSource, st.reorderTarget, st.reorderTop - m.rowsTop + scroll,
         ) else null
         val indices = if (preview != null) 0 until n else first..last
@@ -227,26 +211,54 @@ internal class TimelinePainter(
                 drawRect(AureaColors.Stage, Offset(0f, top), Size(w, c.rowHeight(r)))
                 drawRect(AureaColors.Accent.copy(alpha = 0.14f), Offset(0f, top), Size(w, c.rowHeight(r)))
             }
-            val selected = c.isSelected(r.id)
-            val handles = selCount == 1 && selected && !r.locked
-            val selFrame = if (selKey != null && selKey.first == r.id) r.selectedFrame(selKey.second) else Snap.NONE
-            val dragFrame = if (st.dragKeyLayer == r.id) st.dragKeyFrame else Snap.NONE
-            // Seleção de keyframes da timeline: quais instantes desta linha têm keyframe escolhido.
-            val picked = if (keySel != null && keySel.layer == r.id && !keySel.isEmpty()) pickedInstants(r, keySel) else null
-            val keysShown = KeyframeVisibility.visible(c.store.showAllKeyframes, r.track != null, selected)
-            drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked, keysShown)
+            val segs = r.segments
+            if (segs.size == 1) {
+                drawSegment(c, segs[0], top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = true)
+                continue
+            }
+            // FILEIRA COMPARTILHADA: cada trecho da linha no seu tempo, lado a
+            // lado. Os escolhidos por cima — contorno e alças passam por cima do
+            // vizinho encostado, que é onde o dedo os pega.
+            var onScreen = false
+            var offLeft = false
+            var offRight = false
+            for (s in segs) {
+                val x0 = TimeAxis.xOf(s.start.toDouble(), view, ppf, cx)
+                val x1 = max(TimeAxis.xOf(s.end.toDouble(), view, ppf, cx), x0 + m.barMinWidth)
+                when {
+                    x1 >= -m.barRadius && x0 <= w + m.barRadius -> onScreen = true
+                    x0 > w -> offRight = true
+                    else -> offLeft = true
+                }
+            }
+            for (pass in 0..1) for (s in segs) {
+                if (c.isSelected(s.id) != (pass == 1)) continue
+                drawSegment(c, s, top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = false)
+            }
+            // Linha inteira fora da janela: UMA seta por lado (não uma por trecho).
+            // Legenda desenha os blocos dela e nunca teve seta.
+            if (!onScreen && c.store.captionTracks.none { t -> t.layer == segs[0].id }) {
+                val color = AureaTimeline.tone(r.type).stripe.copy(alpha = if (r.visible) 0.9f else 0.45f)
+                if (offRight) drawEdgeArrow(true, top, w, color)
+                if (offLeft) drawEdgeArrow(false, top, w, color)
+            }
         }
 
-        // Coluna das pílulas por cima das barras.
+        // Calha por cima das barras: glifo do tipo + olho pequeno.
         drawRect(headerShade, Offset(0f, m.rowsTop), Size(m.headerColumn, h - m.rowsTop))
         for (pass in passes) for (i in indices) {
             val lifted = preview != null && i in preview.sourceStart until preview.sourceEnd
             if (preview != null && lifted != (pass == 1)) continue
             val r = c.rowAt(rows, i) ?: continue
-            val cy = m.rowsTop + c.rowTop(i) - scroll + (preview?.offsets?.get(i) ?: 0f) + c.rowHeight(r) / 2f
-            if (cy + c.rowHeight(r) / 2f < m.rowsTop || cy - c.rowHeight(r) / 2f > h) continue
+            val rowTop = m.rowsTop + c.rowTop(i) - scroll + (preview?.offsets?.get(i) ?: 0f)
+            if (rowTop + c.rowHeight(r) < m.rowsTop || rowTop > h) continue
             if (r.track != null) continue
-            drawHeaderPill(r, cy, multi && c.isSelected(r.id), c.expandedLayer.value == r.id)
+            // A calha é da FILEIRA: no lote se algum trecho dela está no lote;
+            // aberta se as trilhas abertas são de um trecho dela.
+            var inBatch = false
+            if (multi) for (s in r.segments) if (c.isSelected(s.id)) inBatch = true
+            val open = c.expandedLayer.value
+            drawGutter(r, rowTop, inBatch, open != null && r.segment(open) != null)
         }
 
         // Fio do ímã.
@@ -259,12 +271,46 @@ internal class TimelinePainter(
         }
     }
 
+    /** Um TRECHO na fileira (a fileira inteira, quando ela tem um só): estado de seleção e keyframes dele. */
+    private fun DrawScope.drawSegment(
+        c: TimelineController, r: RowModel, top: Float, w: Float, view: Double, ppf: Float, cx: Float, fps: Float,
+        compact: Boolean, selCount: Int, multi: Boolean, cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
+        arrows: Boolean,
+    ) {
+        val st = c.state
+        val selKey = c.store.selectedKeyframe
+        val keySel = c.store.keySelection
+        val selected = c.isSelected(r.id)
+        val handles = selCount == 1 && selected && !r.locked
+        val selFrame = if (selKey != null && selKey.first == r.id) r.selectedFrame(selKey.second) else Snap.NONE
+        val dragFrame = if (st.dragKeyLayer == r.id) st.dragKeyFrame else Snap.NONE
+        // Seleção de keyframes da timeline: quais instantes desta linha têm keyframe escolhido.
+        val picked = if (keySel != null && keySel.layer == r.id && !keySel.isEmpty()) pickedInstants(r, keySel) else null
+        val keysShown = KeyframeVisibility.visible(c.store.showAllKeyframes, r.track != null, selected)
+        drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked, keysShown, arrows)
+    }
+
+    /** Seta na borda: o clipe está para aquele lado (linha vazia parecia camada quebrada). */
+    private fun DrawScope.drawEdgeArrow(right: Boolean, top: Float, w: Float, color: Color) {
+        val tip = if (right) w - 10f * m.density else m.headerColumn + 10f * m.density
+        val back = if (right) tip - 7f * m.density else tip + 7f * m.density
+        val cy = top + m.bar / 2f
+        val arrow = androidx.compose.ui.graphics.Path().apply {
+            moveTo(tip, cy)
+            lineTo(back, cy - 6f * m.density)
+            lineTo(back, cy + 6f * m.density)
+            close()
+        }
+        drawPath(arrow, color)
+    }
+
     private fun DrawScope.drawRow(
         r: RowModel, top: Float, w: Float, view: Double, ppf: Float, cx: Float, fps: Float,
         compact: Boolean, selected: Boolean, multi: Boolean, handles: Boolean,
         selFrame: Int, dragFrame: Int, cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
         picked: BooleanArray?,
         keysShown: Boolean = true,
+        arrows: Boolean = true,
     ) {
         if (r.track != null) {
             val cy = top + 20f * m.density
@@ -286,10 +332,11 @@ internal class TimelinePainter(
                 if (right < 0 || left > w) continue
                 val x = max(0f, left); val end = min(w, right - 2f)
                 if (end <= x) continue
-                drawRoundRect(if (selected) AureaColors.Accent.copy(alpha = .7f) else r.type.color.copy(alpha = .5f), Offset(x, top), Size(end - x, m.bar), CornerRadius(m.barRadius))
+                val tone = AureaTimeline.tone(r.type)
+                drawRoundRect(if (selected) tone.stripe.copy(alpha = .7f) else tone.body, Offset(x, top), Size(end - x, m.bar), CornerRadius(m.barRadius))
                 if (end - x > 20f) {
                     val layout = measurer.measure(block.text, nameStyle, overflow = TextOverflow.Ellipsis, maxLines = 1, constraints = Constraints(maxWidth = (end - x - 10f).toInt().coerceAtLeast(1)))
-                    clipRect(x, top, end, top + m.bar) { drawText(layout, topLeft = Offset(x + 5f, top + 5f)) }
+                    clipRect(x, top, end, top + m.bar) { drawText(layout, color = tone.text, topLeft = Offset(x + 5f, top + 5f)) }
                 }
             }
             return
@@ -297,45 +344,47 @@ internal class TimelinePainter(
         val x0 = TimeAxis.xOf(r.start.toDouble(), view, ppf, cx)
         val x1 = max(TimeAxis.xOf(r.end.toDouble(), view, ppf, cx), x0 + m.barMinWidth)
         val barW = x1 - x0
+        val tone = AureaTimeline.tone(r.type)
+        // Camada oculta: os clipes da fileira a 40 %.
+        val alpha = if (r.visible) 1f else AureaTimeline.HiddenAlpha
         if (x1 >= -m.barRadius && x0 <= w + m.barRadius) {
             // Barra cortada perto da tela: um clipe de minutos não vira um retângulo de 100 mil px.
             val left = max(x0, -m.barRadius * 2f)
             val right = min(x1, w + m.barRadius * 2f)
             val bottom = top + m.bar
-            val state = if (!r.visible) STATE_HIDDEN else if (selected) STATE_SELECTED else STATE_NORMAL
             val canvas = drawContext.canvas.nativeCanvas
             rectF.set(left, top, right, bottom)
             barClip.reset()
             barClip.addRoundRect(rectF, m.barRadius, m.barRadius, android.graphics.Path.Direction.CW)
             canvas.save()
             canvas.clipPath(barClip)
-            drawRect(bodyColors[r.type.ordinal * 3 + state], Offset(left, top), Size(right - left, m.bar))
+            // Bloco escuro no tom do tipo.
+            drawRect(tone.body, Offset(left, top), Size(right - left, m.bar), alpha = alpha)
+            bitmapPaint.alpha = (alpha * 255f).roundToInt()
             if (r.hasThumbs && drawThumbs(canvas, r, top, x0, x1, w, view, ppf, cx, fps, cache, generation)) {
                 withTransform({
                     translate(x0, top)
                     scale(barW, 1f, pivot = Offset.Zero)
-                }) { drawRect(thumbShade, size = Size(1f, m.bar)) }
+                }) { drawRect(thumbShade, size = Size(1f, m.bar), alpha = alpha) }
             }
-            // Trilho dos losangos, a faixa da cor do tipo e o fio de luz no alto.
-            drawRect(TRACK_SHADE, Offset(left, top + m.trackTop), Size(right - left, m.track))
-            if (r.track == null && (r.type == LayerType.Audio || r.type == LayerType.Video)) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx)
-            // A faixa da ponta: a cor da etiqueta, quando a camada tem uma; senão a do tipo.
-            val stripe = ShellColors.LabelPalette.getOrNull(r.label - 1) ?: r.type.color
-            drawRect(if (r.visible) stripe else stripe.copy(alpha = 0.5f), Offset(x0, top), Size(m.stripe, m.bar))
-            drawLine(
-                Color.White.copy(alpha = if (selected) 0.24f else 0.10f),
-                Offset(max(x0 + m.stripe, left), top + m.lightLine / 2f),
-                Offset(right, top + m.lightLine / 2f),
-                strokeWidth = m.lightLine,
-            )
+            // Trilho dos losangos só quando a linha tem keyframe à vista.
+            if (keysShown && r.instants.isNotEmpty()) {
+                drawRect(TRACK_SHADE, Offset(left, top + m.trackTop), Size(right - left, m.track), alpha = alpha)
+            }
+            if (r.track == null && (r.type == LayerType.Audio || r.type == LayerType.Video)) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx, tone, alpha)
+            // Faixa sólida de 3 dp na borda esquerda, dentro da forma do clipe: a
+            // cor da etiqueta, quando a camada tem uma; senão a do tipo.
+            val stripe = ShellColors.LabelPalette.getOrNull(r.label - 1) ?: tone.stripe
+            drawRect(stripe, Offset(x0, top), Size(m.stripe, m.bar), alpha = alpha)
             canvas.restore()
 
-            clipRect(left, top, right, bottom) { drawBarContent(r, top, x0, x1, w, compact) }
+            clipRect(left, top, right, bottom) { drawBarContent(r, top, x0, x1, w, compact, tone, alpha) }
 
             if (selected) {
-                val s = if (multi) m.multiStroke else m.selStroke
+                // Escolhido: contorno branco de 2 dp (no lote também).
+                val s = m.selStroke
                 drawRoundRect(
-                    Color.White,
+                    AureaTimeline.ClipSelected,
                     Offset(left + s / 2f, top + s / 2f),
                     Size(right - left - s, m.bar - s),
                     CornerRadius(m.barRadius - s / 2f),
@@ -346,20 +395,11 @@ internal class TimelinePainter(
                 if (RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - m.trimInsetStart, top)
                 if (RowHit.endHandleVisible(x1, w)) drawTrimHandle(x1 - m.trimInsetEnd, top)
             }
-        } else if (r.track == null) {
+        } else if (r.track == null && arrows) {
             // Clipe fora da janela: uma seta na borda diz para que lado ele
-            // está (linha vazia parecia camada quebrada).
-            val right = x0 > w
-            val tip = if (right) w - 10f * m.density else m.headerColumn + 10f * m.density
-            val back = if (right) tip - 7f * m.density else tip + 7f * m.density
-            val cy = top + m.bar / 2f
-            val arrow = androidx.compose.ui.graphics.Path().apply {
-                moveTo(tip, cy)
-                lineTo(back, cy - 6f * m.density)
-                lineTo(back, cy + 6f * m.density)
-                close()
-            }
-            drawPath(arrow, r.type.color.copy(alpha = if (r.visible) 0.9f else 0.45f))
+            // está (linha vazia parecia camada quebrada). Na fileira
+            // compartilhada quem decide a seta é a fileira (uma por lado).
+            drawEdgeArrow(x0 > w, top, w, tone.stripe.copy(alpha = if (r.visible) 0.9f else 0.45f))
         }
         // "Keyframes: só as escolhidas" (menu da timeline): as outras linhas ficam limpas.
         if (keysShown) {
@@ -367,26 +407,33 @@ internal class TimelinePainter(
         }
     }
 
-    /** Conteúdo da barra (A.01): [‹] · ícone do tipo · cadeado · nome · ◇ · [›] ou ≡. */
-    private fun DrawScope.drawBarContent(r: RowModel, top: Float, x0: Float, x1: Float, w: Float, compact: Boolean) {
+    /**
+     * Conteúdo do clipe: [‹] · glifo do tipo · cadeado · nome · ◇ · [›] ou ≡, no
+     * tom claro do tipo (peso 500). Clipe curto mostra só o glifo.
+     */
+    private fun DrawScope.drawBarContent(
+        r: RowModel, top: Float, x0: Float, x1: Float, w: Float, compact: Boolean, tone: ClipTone, alpha: Float,
+    ) {
         val barW = x1 - x0
         val cl = RowHit.contentLeft(m, x0, x1)
         val cr = RowHit.contentRight(m, x0, x1, w)
         if (cr <= cl) return
-        val cy = top + m.trackTop / 2f
+        // Sem losangos o conteúdo centra na barra; com eles, sobe para a faixa de cima.
+        val cy = if (r.instants.isEmpty()) top + m.bar / 2f else top + m.trackTop / 2f
         val d = m.density
+        val ink = tone.text.copy(alpha = alpha)
+        val arrowInk = ARROW_TINT.copy(alpha = ARROW_TINT.alpha * alpha)
         var x = cl
         if (compact) {
-            drawGlyph(CupertinoGlyph.ChevronLeft, m.arrowGlyph, ARROW_TINT, x + m.arrowSlot / 2f, cy)
+            drawGlyph(CupertinoGlyph.ChevronLeft, m.arrowGlyph, arrowInk, x + m.arrowSlot / 2f, cy)
             x += m.arrowSlot
         }
         if (barW > m.iconMinBar) {
-            val a = if (r.visible) 0.85f else 0.45f
-            drawGlyph(r.type.glyph, m.typeIcon, Color.White.copy(alpha = a), x + m.typeIcon * d / 2f, cy)
+            drawGlyph(r.type.glyph, m.typeIcon, ink, x + m.typeIcon * d / 2f, cy)
             x += m.typeIcon * d + m.iconGap
         }
         if (r.locked) {
-            drawGlyph(CupertinoGlyph.LockFill, m.lockIcon, Color.White, x + m.lockIcon * d / 2f, cy)
+            drawGlyph(CupertinoGlyph.LockFill, m.lockIcon, ink, x + m.lockIcon * d / 2f, cy)
             x += m.lockIcon * d + if (barW > m.lockGapMinBar) m.lockGap else 0f
         }
         // O ≡ mora na ponta REAL da barra (A.01); as setas do compacto grudam na parte visível (print t2).
@@ -401,24 +448,24 @@ internal class TimelinePainter(
             val avail = right - rhombusW - x
             if (avail > NAME_MIN_DP * d) {
                 val layout = nameLayout(r, avail)
-                drawText(layout, topLeft = Offset(x, cy - layout.size.height / 2f))
+                drawText(layout, color = tone.text, alpha = alpha, topLeft = Offset(x, cy - layout.size.height / 2f))
                 x += layout.size.width
             }
         }
         if (rhombusW > 0f && x + rhombusW <= right + 1f) {
-            drawGlyph(CupertinoGlyph.Rhombus, m.rhombusIcon, Color.White, x + m.rhombusGap + m.rhombusIcon * d / 2f, cy)
+            drawGlyph(CupertinoGlyph.Rhombus, m.rhombusIcon, ink, x + m.rhombusGap + m.rhombusIcon * d / 2f, cy)
         }
         if (compact) {
-            drawGlyph(CupertinoGlyph.ChevronRight, m.arrowGlyph, ARROW_TINT, cr - m.arrowSlot / 2f, cy)
+            drawGlyph(CupertinoGlyph.ChevronRight, m.arrowGlyph, arrowInk, cr - m.arrowSlot / 2f, cy)
         } else if (barW > m.menuMinBar && menuRight <= w + m.menuGlyph * d) {
-            drawGlyph(CupertinoGlyph.LineHorizontal3, m.menuGlyph, ARROW_TINT, menuRight - m.menuGlyph * d / 2f, cy)
+            drawGlyph(CupertinoGlyph.LineHorizontal3, m.menuGlyph, arrowInk, menuRight - m.menuGlyph * d / 2f, cy)
         }
     }
 
     /** Alça de trim da A.01: 16 × 32 branca DENTRO da ponta, risco central escuro. */
     private fun DrawScope.drawTrimHandle(left: Float, top: Float) {
         drawRoundRect(
-            AureaTimeline.TrimHandle,
+            AureaTimeline.ClipSelected,
             Offset(left, top + m.trimTop),
             Size(m.trimWidth, m.bar - m.trimTop * 2f),
             CornerRadius(m.trimRadius),
@@ -473,7 +520,7 @@ internal class TimelinePainter(
      */
     private fun drawWaveform(
         canvas: android.graphics.Canvas, r: RowModel, top: Float, x0: Float, x1: Float, w: Float,
-        view: Double, ppf: Float, cx: Float,
+        view: Double, ppf: Float, cx: Float, tone: ClipTone, alpha: Float,
     ) {
         val store = waveStore ?: return
         val visL = max(x0 + m.stripe, 0f)
@@ -506,7 +553,12 @@ internal class TimelinePainter(
             waveLines[k++] = mid + v
         }
         if (k == 0) return
-        wavePaint.color = android.graphics.Color.argb(if (audio) 170 else 150, 255, 255, 255)
+        // Onda no tom médio do tipo (a do áudio mais forte que a do vídeo).
+        val c = tone.wave
+        wavePaint.color = android.graphics.Color.argb(
+            ((if (audio) 0.9f else 0.6f) * alpha * 255f).roundToInt(),
+            (c.red * 255f).roundToInt(), (c.green * 255f).roundToInt(), (c.blue * 255f).roundToInt(),
+        )
         wavePaint.strokeWidth = max(1f, step * 0.72f)
         canvas.drawLines(waveLines, 0, k, wavePaint)
     }
@@ -628,31 +680,31 @@ internal class TimelinePainter(
         drawText(layout, topLeft = Offset(left + m.balloonPadH, top + m.balloonPadV))
     }
 
-    /** Pílula 58×28 da A.01: olho + quadradinho (cadeado se travada, visto se no lote). */
-    private fun DrawScope.drawHeaderPill(r: RowModel, cy: Float, inBatch: Boolean, expanded: Boolean) {
+    /**
+     * Calha da fileira (sai a pílula olho + quadradinho): o glifo do TIPO em tom
+     * muted (claro com as trilhas abertas, em destaque com a fileira no lote), o
+     * OLHO pequeno e apagado no canto de baixo (riscado se oculta) e o cadeado no
+     * alto quando travada.
+     */
+    private fun DrawScope.drawGutter(r: RowModel, top: Float, inBatch: Boolean, expanded: Boolean) {
         if (r.track != null) {
-            drawGlyph(CupertinoGlyph.ChevronRight, 10f, EYE_TINT, m.swatchLeft + m.swatch / 2f, cy)
+            drawGlyph(CupertinoGlyph.ChevronRight, 10f, AureaTimeline.GutterEye, m.gutterIconCx, top + m.gutterIconCy)
             return
         }
-        drawRoundRect(
-            AureaTimeline.HeaderPill,
-            Offset(m.pillLeft, cy - m.pillHeight / 2f),
-            Size(m.pillWidth, m.pillHeight),
-            CornerRadius(m.pillRadius),
-        )
-        drawGlyph(if (r.visible) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash, m.eyeGlyph, EYE_TINT, m.eyeCenterX, cy)
-        drawRoundRect(
-            AureaTimeline.Swatch,
-            Offset(m.swatchLeft, cy - m.swatch / 2f),
-            Size(m.swatch, m.swatch),
-            CornerRadius(m.swatchRadius),
-        )
-        val sx = m.swatchLeft + m.swatch / 2f
-        when {
-            r.locked -> drawGlyph(CupertinoGlyph.LockFill, 11f, AureaTimeline.SwatchGlyph, sx, cy)
-            inBatch -> drawGlyph(CupertinoGlyph.CheckmarkAlt, 13f, AureaTimeline.SwatchGlyph, sx, cy)
-            else -> drawGlyph(if (expanded) CupertinoGlyph.ChevronDown else CupertinoGlyph.ChevronRight, 11f, AureaTimeline.SwatchGlyph, sx, cy)
+        val tint = when {
+            inBatch -> AureaColors.Accent
+            expanded -> AureaColors.Text
+            else -> AureaTimeline.GutterIcon
         }
+        drawGlyph(r.type.glyph, m.gutterIcon, tint, m.gutterIconCx, top + m.gutterIconCy)
+        drawGlyph(
+            if (r.visible) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash,
+            m.gutterEye,
+            if (r.visible) AureaTimeline.GutterEye else AureaTimeline.GutterIcon,
+            m.gutterEyeCx,
+            top + m.gutterEyeCy,
+        )
+        if (r.locked) drawGlyph(CupertinoGlyph.LockFill, m.gutterLock, AureaTimeline.GutterIcon, m.gutterEyeCx, top + m.gutterLockCy)
     }
 
     // --- Régua --------------------------------------------------------------------------
@@ -843,9 +895,6 @@ internal class TimelinePainter(
     }
 
     private companion object {
-        const val STATE_NORMAL = 0
-        const val STATE_SELECTED = 1
-        const val STATE_HIDDEN = 2
         const val THUMB_MAX_PX = 512
         /** Perguntas de miniatura ao motor por quadro (o resto no quadro seguinte). */
         const val THUMB_QUERIES_PER_FRAME = 6
@@ -858,19 +907,11 @@ internal class TimelinePainter(
         val TRACK_SHADE = Color.Black.copy(alpha = 0.22f)
         val GRIP = Color.Black.copy(alpha = 0.38f)
         val ARROW_TINT = Color.White.copy(alpha = 0.7f)
-        val EYE_TINT = Color.White.copy(alpha = 0.7f)
         val KEY_OFF = Color.White.copy(alpha = 0.9f)
         val KEY_BORDER = Color.Black.copy(alpha = 0.85f)
         /** Keyframe na seleção da timeline (não principal): azul com anel branco — o mesmo no iOS. */
         val KEY_PICKED = Color(0xFF4DA3FF)
         val KEY_PICKED_RING = Color.White
         val BALLOON = Color.Black.copy(alpha = 0.82f)
-
-        fun lerpSrgb(a: Color, b: Color, t: Float) = Color(
-            red = a.red + (b.red - a.red) * t,
-            green = a.green + (b.green - a.green) * t,
-            blue = a.blue + (b.blue - a.blue) * t,
-            alpha = 1f,
-        )
     }
 }

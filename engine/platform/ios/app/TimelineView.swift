@@ -64,6 +64,9 @@ struct MarkerEditorSheet: View {
 @MainActor
 struct TimelineView: View {
     @EnvironmentObject private var model: AureaModel
+    /// Camada escolhida com a doca aberta (layout de celular): a timeline vira a
+    /// fileira única dela, como com painel aberto (EditorScreen.kt `compactDock`).
+    var compactDock = false
     /// O cabeçote a cada quadro da tela durante o play (ver `PlayheadClock`).
     @EnvironmentObject private var clock: PlayheadClock
     @State private var pps = Zoom.defaultPPS
@@ -116,9 +119,12 @@ struct TimelineView: View {
         /// `.keys`: instante do losango pego no começo (keyFrame = grabFrame + sentDelta).
         var grabFrame: Int32 = 0
         var sentDelta: Int32 = 0
+        /// `.move` numa linha magnética: último ALVO absoluto já enviado ao
+        /// motor (a reordenação é medida em frame, não em deslocamento).
+        var sentFrame: Int64 = -1
         var undoOpen = false
     }
-    private var compact: Bool { model.sheetContent == .panel || model.sheetContent == .curve }
+    private var compact: Bool { model.sheetContent == .panel || model.sheetContent == .curve || (compactDock && model.sheetContent == .dock) }
     private var fps: Float { TimeAxis.safeFps(Float(model.compositionFps)) }
     private var ppf: CGFloat { TimeAxis.pxPerFrame(pps: pps, density: 1, fps: fps) }
     private var viewFrame: Double { heldView ?? Double(clock.frame) }
@@ -128,7 +134,10 @@ struct TimelineView: View {
     private var rows: [TimelineRow] {
         let cached = rowCache.build(model.layers, model.keyframes)
         let all = rowCache.focused(cached, id: model.primarySelection, tracks: focusTracks, layers: model.layers, keys: model.keyframes)
-        return compact ? all.filter { $0.id == model.primarySelection } : rowCache.expanded(all, id: expandedLayer, revision: model.status.modelRevision, keys: model.keyframes, effects: {
+        // No compacto aparece só o TRECHO escolhido; fora dele, uma fileira por LINHA.
+        if compact { return all.filter { $0.id == model.primarySelection } }
+        let shared = rowCache.shared(all, focus: model.primarySelection, tracks: focusTracks)
+        return rowCache.expanded(shared, id: expandedLayer, revision: model.status.modelRevision, keys: model.keyframes, effects: {
             guard let id = expandedLayer else { return [] }
             return model.engine.effects(forLayer: id).map { row in
                 EffectItem(effectId: (row["effectId"] as? NSNumber)?.uint32Value ?? 0,
@@ -187,7 +196,7 @@ struct TimelineView: View {
             .onChange(of: size) { _ in scrollY = min(scrollY, maxScroll(size.height)); mediaNeedsRefresh = true }
             .onChange(of: model.primarySelection) { _ in revealSelection(size: size); mediaNeedsRefresh = true }
             .onChange(of: model.curveSelectedTime) { time in
-                if gesture?.mode != .key, let time, let id = model.primarySelection, let row = rows.first(where: { $0.id == id }) {
+                if gesture?.mode != .key, let time, let id = model.primarySelection, let row = segmentRow(id) {
                     selectedKey = (id, Keyframes.toTimeline(time, row.start, row.offset),
                         TimelineTrack(property: Int(model.curveProperty), effect: model.curveEffect, param: model.curveParam))
                     // Fora do modo de escolha, a seleção da barra acompanha o keyframe do gráfico.
@@ -368,7 +377,7 @@ struct TimelineView: View {
         var acc: CGFloat = 0
         for row in visibleRows { tops.append(acc); acc += rowHeight(row) }
         tops.append(acc)
-        let preview = reorderSource >= 0 && !compact ? Reorder.preview(tops: tops, ids: visibleRows.map(\.id), source: reorderSource, target: reorderTarget, dragTop: reorderTop - m.rowsTop + scrollY) : nil
+        let preview = reorderSource >= 0 && !compact ? Reorder.preview(tops: tops, ids: timelineGroupKeys(visibleRows), source: reorderSource, target: reorderTarget, dragTop: reorderTop - m.rowsTop + scrollY) : nil
         var paintIndices = Array(visibleRows.indices)
         if let preview, preview.sourceStart >= 0 {
             paintIndices.removeSubrange(preview.sourceStart..<preview.sourceEnd)
@@ -385,27 +394,50 @@ struct TimelineView: View {
                 c.fill(rect, with: .color(AureaColors.stage))
                 c.fill(rect, with: .color(AureaColors.accent.opacity(0.14)))
             }
-            drawRow(&c, row: row, top: top, width: size.width)
+            guard let shared = row.shared else {
+                drawRow(&c, row: row, top: top, width: size.width)
+                continue
+            }
+            // FILEIRA COMPARTILHADA: cada trecho da linha no seu tempo, lado a
+            // lado. Os escolhidos por cima — contorno e alças passam por cima do
+            // vizinho encostado, que é onde o dedo os pega.
+            var onScreen = false, offLeft = false, offRight = false
+            for segment in shared {
+                let x0 = x(Double(segment.start), width: size.width), x1 = max(x(Double(segment.end), width: size.width), x0 + m.barMinWidth)
+                if x1 >= -m.barRadius && x0 <= size.width + m.barRadius { onScreen = true }
+                else if x0 > size.width { offRight = true }
+                else { offLeft = true }
+            }
+            for segment in shared where !model.selection.contains(segment.id) { drawRow(&c, row: segment, top: top, width: size.width, arrows: false) }
+            for segment in shared where model.selection.contains(segment.id) { drawRow(&c, row: segment, top: top, width: size.width, arrows: false) }
+            // Linha inteira fora da janela: UMA seta por lado (legenda nunca teve seta).
+            if !onScreen && !model.captionTracks.contains(where: { $0.layer == shared[0].id }) {
+                let tint = AureaTimeline.tone(row.type).stripe.opacity(row.visible ? 0.9 : 0.45)
+                if offRight { drawEdgeArrow(&c, toRight: true, top: top, width: size.width, tint: tint) }
+                if offLeft { drawEdgeArrow(&c, toRight: false, top: top, width: size.width, tint: tint) }
+            }
         }
         let shade = Gradient(stops: [.init(color: AureaColors.stage, location: 0), .init(color: AureaColors.stage.opacity(0.95), location: 0.78), .init(color: AureaColors.stage.opacity(0), location: 1)])
         c.fill(Path(CGRect(x: 0, y: m.rowsTop, width: m.headerColumn, height: max(0, size.height - m.rowsTop))), with: .linearGradient(shade, startPoint: .zero, endPoint: CGPoint(x: m.headerColumn, y: 0)))
         for index in paintIndices {
             let row = visibleRows[index]
-            let cy = m.rowsTop + tops[index] - (compact ? 0 : scrollY) + (preview?.offsets[index] ?? 0) + rowHeight(row) / 2
-            guard cy + m.row / 2 >= m.rowsTop && cy - m.row / 2 <= size.height else { continue }
+            let rowTop = m.rowsTop + tops[index] - (compact ? 0 : scrollY) + (preview?.offsets[index] ?? 0)
+            guard rowTop + rowHeight(row) >= m.rowsTop && rowTop <= size.height else { continue }
             if row.track != nil {
-                glyph(&c, CupertinoGlyph.ChevronRight, size: 10, tint: .white.opacity(0.6), x: m.swatchLeft + m.swatch / 2, y: cy)
+                glyph(&c, CupertinoGlyph.ChevronRight, size: 10, tint: AureaTimeline.gutterEye, x: m.gutterIconCx, y: rowTop + m.gutterIconCy)
                 continue
             }
-            c.fill(Path(roundedRect: CGRect(x: m.pillLeft, y: cy - m.pillHeight / 2, width: m.pillWidth, height: m.pillHeight), cornerRadius: m.pillRadius), with: .color(AureaTimeline.headerPill))
-            glyph(&c, row.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: m.eyeGlyph, tint: .white.opacity(0.7), x: m.eyeCenterX, y: cy)
-            c.fill(Path(roundedRect: CGRect(x: m.swatchLeft, y: cy - m.swatch / 2, width: m.swatch, height: m.swatch), cornerRadius: m.swatchRadius), with: .color(AureaTimeline.swatch))
+            // Calha da FILEIRA (sai a pílula olho + quadradinho): glifo do tipo em
+            // tom muted — claro com as trilhas abertas, em destaque no lote —, o
+            // olho pequeno no canto de baixo (riscado se oculta) e o cadeado no alto.
+            let inBatch = model.selection.count >= 2 && row.segments.contains { model.selection.contains($0.id) }
+            let open = expandedLayer.map { row.segment($0) != nil } ?? false
+            let tint = inBatch ? AureaColors.accent : open ? AureaColors.text : AureaTimeline.gutterIcon
+            glyph(&c, row.type.glyph, size: m.gutterIcon, tint: tint, x: m.gutterIconCx, y: rowTop + m.gutterIconCy)
+            glyph(&c, row.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: m.gutterEye,
+                  tint: row.visible ? AureaTimeline.gutterEye : AureaTimeline.gutterIcon, x: m.gutterEyeCx, y: rowTop + m.gutterEyeCy)
             if row.locked {
-                glyph(&c, CupertinoGlyph.LockFill, size: 11, tint: AureaTimeline.swatchGlyph, x: m.swatchLeft + m.swatch / 2, y: cy)
-            } else if model.selection.count >= 2 && model.selection.contains(row.id) {
-                glyph(&c, CupertinoGlyph.CheckmarkAlt, size: 13, tint: AureaTimeline.swatchGlyph, x: m.swatchLeft + m.swatch / 2, y: cy)
-            } else {
-                glyph(&c, expandedLayer == row.id ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 11, tint: AureaTimeline.swatchGlyph, x: m.swatchLeft + m.swatch / 2, y: cy)
+                glyph(&c, CupertinoGlyph.LockFill, size: m.gutterLock, tint: AureaTimeline.gutterIcon, x: m.gutterEyeCx, y: rowTop + m.gutterLockCy)
             }
         }
         if guide != Snap.none {
@@ -416,7 +448,18 @@ struct TimelineView: View {
         }
     }
 
-    private func drawRow(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, width: CGFloat) {
+    /// Seta na borda: o clipe está para aquele lado (linha vazia parecia camada quebrada).
+    private func drawEdgeArrow(_ context: inout GraphicsContext, toRight: Bool, top: CGFloat, width: CGFloat, tint: Color) {
+        let tip = toRight ? width - 10 : m.headerColumn + 10, back = toRight ? tip - 7 : tip + 7
+        let cy = top + m.bar / 2
+        var arrow = Path(); arrow.move(to: CGPoint(x: tip, y: cy))
+        arrow.addLine(to: CGPoint(x: back, y: cy - 6)); arrow.addLine(to: CGPoint(x: back, y: cy + 6)); arrow.closeSubpath()
+        context.fill(arrow, with: .color(tint))
+    }
+
+    /// Um TRECHO (a fileira inteira, quando ela tem um só). `arrows` = falso na
+    /// fileira compartilhada: quem decide a seta da borda é a fileira.
+    private func drawRow(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, width: CGFloat, arrows: Bool = true) {
         if row.track != nil {
             var line = Path(); line.move(to: CGPoint(x: m.headerColumn, y: top + 20)); line.addLine(to: CGPoint(x: width, y: top + 20))
             context.stroke(line, with: .color(.white.opacity(0.08)), lineWidth: 1)
@@ -435,8 +478,9 @@ struct TimelineView: View {
                 let rect = CGRect(x: max(0, left), y: top, width: min(width, right) - max(0, left), height: m.bar)
                 var clipped = context
                 clipped.clip(to: Path(rect))
-                clipped.fill(Path(roundedRect: rect, cornerRadius: m.barRadius), with: .color(model.selection.contains(row.id) ? AureaColors.accent.opacity(0.7) : row.type.color.opacity(0.5)))
-                clipped.draw(Text(block.text).font(.aurea(size: 11)).foregroundColor(.white), at: CGPoint(x: rect.minX + 5, y: top + 7), anchor: .topLeading)
+                let tone = AureaTimeline.tone(row.type)
+                clipped.fill(Path(roundedRect: rect, cornerRadius: m.barRadius), with: .color(model.selection.contains(row.id) ? tone.stripe.opacity(0.7) : tone.body))
+                clipped.draw(Text(block.text).font(.aurea(size: 11)).foregroundColor(tone.text), at: CGPoint(x: rect.minX + 5, y: top + 7), anchor: .topLeading)
             }
             return
         }
@@ -446,13 +490,11 @@ struct TimelineView: View {
             let left = max(x0, -m.barRadius * 2), right = min(x1, width + m.barRadius * 2)
             let rect = CGRect(x: left, y: top, width: right - left, height: m.bar)
             let shape = Path(roundedRect: rect, cornerRadius: m.barRadius)
+            // Bloco escuro no tom do tipo; camada oculta: a fileira inteira a 40 %.
+            let tone = AureaTimeline.tone(row.type)
             var bar = context; bar.clip(to: shape)
-            // Channel-wise sRGB interpolation, matching TimelinePainter.lerpSrgb.
-            let amount: CGFloat = !row.visible ? 0.22 : selected ? 0.66 : 0.46
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            UIColor(row.type.color).getRed(&r, green: &g, blue: &b, alpha: &a)
-            let fill = Color(.sRGB, red: Double(21.0 / 255 + (r - 21.0 / 255) * amount), green: Double(28.0 / 255 + (g - 28.0 / 255) * amount), blue: Double(36.0 / 255 + (b - 36.0 / 255) * amount), opacity: 1)
-            bar.fill(shape, with: .color(fill))
+            bar.opacity = row.visible ? 1 : AureaTimeline.hiddenAlpha
+            bar.fill(shape, with: .color(tone.body))
             if row.track == nil, let tiles = thumbnails[row.id], !tiles.isEmpty {
                 for tile in tiles {
                     let px = x(Double(row.start) - Double(row.offset) + tile.localFrame, width: width)
@@ -461,30 +503,29 @@ struct TimelineView: View {
                 let shade = Gradient(stops: [.init(color: .black.opacity(0.62), location: 0), .init(color: .black.opacity(0.22), location: 0.45)])
                 bar.fill(shape, with: .linearGradient(shade, startPoint: CGPoint(x: x0, y: top), endPoint: CGPoint(x: x1, y: top)))
             }
-            bar.fill(Path(CGRect(x: left, y: top + m.trackTop, width: right - left, height: m.track)), with: .color(.black.opacity(0.22)))
-            if row.track == nil { drawWave(&bar, row: row, top: top, x0: x0, x1: x1, width: width) }
-            let stripe = row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count ? AureaColors.labelPalette[Int(row.label) - 1] : row.type.color
-            bar.fill(Path(CGRect(x: x0, y: top, width: m.stripe, height: m.bar)), with: .color(stripe.opacity(row.visible ? 1 : 0.5)))
-            var light = Path(); light.move(to: CGPoint(x: max(x0 + m.stripe, left), y: top + m.lightLine / 2)); light.addLine(to: CGPoint(x: right, y: top + m.lightLine / 2))
-            bar.stroke(light, with: .color(.white.opacity(selected ? 0.24 : 0.1)), lineWidth: m.lightLine)
-            drawContent(&bar, row: row, top: top, x0: x0, x1: x1, width: width)
+            // Trilho dos losangos só quando a linha tem keyframe à vista.
+            let keysShown = KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: false, selected: selected)
+            if keysShown && !row.instants.isEmpty {
+                bar.fill(Path(CGRect(x: left, y: top + m.trackTop, width: right - left, height: m.track)), with: .color(.black.opacity(0.22)))
+            }
+            if row.track == nil { drawWave(&bar, row: row, top: top, x0: x0, x1: x1, width: width, tone: tone) }
+            // Faixa sólida de 3 pt na borda esquerda, dentro da forma do clipe: a
+            // cor da etiqueta, quando a camada tem uma; senão a do tipo.
+            let stripe = row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count ? AureaColors.labelPalette[Int(row.label) - 1] : tone.stripe
+            bar.fill(Path(CGRect(x: x0, y: top, width: m.stripe, height: m.bar)), with: .color(stripe))
+            drawContent(&bar, row: row, top: top, x0: x0, x1: x1, width: width, tone: tone)
             if selected {
                 let stroke = model.selection.count >= 2 ? m.multiStroke : m.selStroke
-                context.stroke(Path(roundedRect: rect.insetBy(dx: stroke / 2, dy: stroke / 2), cornerRadius: m.barRadius - stroke / 2), with: .color(.white), lineWidth: stroke)
+                context.stroke(Path(roundedRect: rect.insetBy(dx: stroke / 2, dy: stroke / 2), cornerRadius: m.barRadius - stroke / 2), with: .color(AureaTimeline.clipSelected), lineWidth: stroke)
             }
             if row.track == nil && model.selection.count == 1 && selected && !row.locked {
                 if x0 >= m.headerColumn { drawHandle(&context, left: x0 - m.trimInsetStart, top: top) }
                 if x1 <= width { drawHandle(&context, left: x1 - m.trimInsetEnd, top: top) }
             }
-        } else if row.track == nil {
+        } else if row.track == nil && arrows {
             // Clipe fora da janela: seta na borda para o lado dele (par do
             // TimelinePainter) — linha vazia parecia camada quebrada.
-            let toRight = x0 > width
-            let tip = toRight ? width - 10 : m.headerColumn + 10, back = toRight ? tip - 7 : tip + 7
-            let cy = top + m.bar / 2
-            var arrow = Path(); arrow.move(to: CGPoint(x: tip, y: cy))
-            arrow.addLine(to: CGPoint(x: back, y: cy - 6)); arrow.addLine(to: CGPoint(x: back, y: cy + 6)); arrow.closeSubpath()
-            context.fill(arrow, with: .color(row.type.color.opacity(row.visible ? 0.9 : 0.45)))
+            drawEdgeArrow(&context, toRight: x0 > width, top: top, width: width, tint: AureaTimeline.tone(row.type).stripe.opacity(row.visible ? 0.9 : 0.45))
         }
         // "Keyframes de todas as camadas" desligado: só as escolhidas mostram os losangos.
         if KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: false, selected: model.selection.contains(row.id)) {
@@ -492,19 +533,22 @@ struct TimelineView: View {
         }
     }
 
-    private func drawContent(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat) {
+    /// Conteúdo do clipe: [‹] · glifo do tipo · cadeado · nome · ◇ · [›] ou ≡, no
+    /// tom claro do tipo (peso 500). Clipe curto mostra só o glifo.
+    private func drawContent(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat, tone: ClipTone) {
         let barWidth = x1 - x0
         let cl = TimelineHit.contentLeft(m, x0, x1), cr = TimelineHit.contentRight(m, x0, x1, width)
         guard cr > cl else { return }
-        let cy = top + m.trackTop / 2
+        // Sem losangos o conteúdo centra na barra; com eles, sobe para a faixa de cima.
+        let cy = row.instants.isEmpty ? top + m.bar / 2 : top + m.trackTop / 2
         var px = cl
         if compact { glyph(&context, CupertinoGlyph.ChevronLeft, size: m.arrowGlyph, tint: .white.opacity(0.7), x: px + m.arrowSlot / 2, y: cy); px += m.arrowSlot }
         if barWidth > m.iconMinBar {
-            glyph(&context, row.type.glyph, size: m.typeIcon, tint: .white.opacity(row.visible ? 0.85 : 0.45), x: px + m.typeIcon / 2, y: cy)
+            glyph(&context, row.type.glyph, size: m.typeIcon, tint: tone.text, x: px + m.typeIcon / 2, y: cy)
             px += m.typeIcon + m.iconGap
         }
         if row.locked {
-            glyph(&context, CupertinoGlyph.LockFill, size: m.lockIcon, tint: .white, x: px + m.lockIcon / 2, y: cy)
+            glyph(&context, CupertinoGlyph.LockFill, size: m.lockIcon, tint: tone.text, x: px + m.lockIcon / 2, y: cy)
             px += m.lockIcon + (barWidth > m.lockGapMinBar ? m.lockGap : 0)
         }
         let menuRight = x1 - (barWidth < m.narrowBar ? m.padRNarrow : m.padR)
@@ -513,12 +557,12 @@ struct TimelineView: View {
         let avail = right - rhombusWidth - px
         if barWidth > m.nameMinBar && !row.name.isEmpty && avail > 8 {
             let name = fittedName(row.name, width: floor(avail / 12) * 12)
-            let resolved = context.resolve(Text(name).font(.aurea(size: 12, weight: .semibold)).tracking(-0.1).foregroundColor(.white))
+            let resolved = context.resolve(Text(name).font(.aurea(size: 12, weight: .medium)).tracking(-0.1).foregroundColor(tone.text))
             context.draw(resolved, at: CGPoint(x: px, y: cy), anchor: .leading)
             px += resolved.measure(in: CGSize(width: avail, height: m.trackTop)).width
         }
         if rhombusWidth > 0 && px + rhombusWidth <= right + 1 {
-            glyph(&context, CupertinoGlyph.Rhombus, size: m.rhombusIcon, tint: .white, x: px + m.rhombusGap + m.rhombusIcon / 2, y: cy)
+            glyph(&context, CupertinoGlyph.Rhombus, size: m.rhombusIcon, tint: tone.text, x: px + m.rhombusGap + m.rhombusIcon / 2, y: cy)
         }
         if compact {
             glyph(&context, CupertinoGlyph.ChevronRight, size: m.arrowGlyph, tint: .white.opacity(0.7), x: cr - m.arrowSlot / 2, y: cy)
@@ -528,7 +572,7 @@ struct TimelineView: View {
     }
 
     private func drawHandle(_ context: inout GraphicsContext, left: CGFloat, top: CGFloat) {
-        context.fill(Path(roundedRect: CGRect(x: left, y: top + m.trimTop, width: m.trimWidth, height: m.bar - m.trimTop * 2), cornerRadius: m.trimRadius), with: .color(AureaTimeline.trimHandle))
+        context.fill(Path(roundedRect: CGRect(x: left, y: top + m.trimTop, width: m.trimWidth, height: m.bar - m.trimTop * 2), cornerRadius: m.trimRadius), with: .color(AureaTimeline.clipSelected))
         context.fill(Path(CGRect(x: left + (m.trimWidth - m.gripWidth) / 2, y: top + (m.bar - m.gripHeight) / 2, width: m.gripWidth, height: m.gripHeight)), with: .color(.black.opacity(0.38)))
     }
 
@@ -588,7 +632,7 @@ struct TimelineView: View {
         }
     }
 
-    private func drawWave(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat) {
+    private func drawWave(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat, tone: ClipTone) {
         guard let wave = waves[row.id] else { return }
         let left = max(x0 + m.stripe, 0), right = min(x1, width)
         guard right > left else { return }
@@ -605,14 +649,15 @@ struct TimelineView: View {
                 path.move(to: CGPoint(x: px, y: mid - amplitude)); path.addLine(to: CGPoint(x: px, y: mid + amplitude))
             }
         }
-        context.stroke(path, with: .color(.white.opacity(Double(audio ? 170 : 150) / 255)), lineWidth: max(1, CGFloat(wave.fpb) * ppf * 0.72))
+        // Onda no tom médio do tipo (a do áudio mais forte que a do vídeo).
+        context.stroke(path, with: .color(tone.wave.opacity(audio ? 0.9 : 0.6)), lineWidth: max(1, CGFloat(wave.fpb) * ppf * 0.72))
     }
 
     private func glyph(_ context: inout GraphicsContext, _ glyph: Character, size: CGFloat, tint: Color, x: CGFloat, y: CGFloat) {
         context.draw(Text(String(glyph)).font(CupertinoFont.font(size)).foregroundColor(tint), at: CGPoint(x: x, y: y))
     }
     private func fittedName(_ name: String, width: CGFloat) -> String {
-        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 12, weight: .semibold), .kern: -0.1]
+        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 12, weight: .medium), .kern: -0.1]
         if (name as NSString).size(withAttributes: attributes).width <= width { return name }
         let letters = Array(name)
         var lo = 0, hi = letters.count
@@ -629,7 +674,8 @@ struct TimelineView: View {
         let first = max(0, rowIndex(scrollY))
         let visible = rows.dropFirst(first).prefix(Int(size.height / 28) + 2)
         var next: [Int64: [MediaTile]] = [:], nextWaves: [Int64: TimelineWaveStrip.Entry] = [:]
-        for row in visible where row.track == nil {
+        // Miniaturas e som são de cada TRECHO (a fileira compartilhada tem vários).
+        for row in visible.flatMap({ $0.segments }) where row.track == nil {
             let x0 = x(Double(row.start), width: size.width), x1 = max(x(Double(row.end), width: size.width), x0 + m.barMinWidth)
             let left = max(x0, 0), right = min(x1, size.width)
             guard right > left else { continue }
@@ -668,7 +714,16 @@ struct TimelineView: View {
     }
 
     // MARK: Android controller and hit priorities
-    private func rowHeight(_ row: TimelineRow) -> CGFloat { row.track == nil ? m.row : 28 }
+    /// LINHA MAGNÉTICA é a faixa de montagem do vídeo: ela cresce para a forma
+    /// de onda do som caber legível, que é o que se olha ao cortar. Os vizinhos
+    /// acompanham, porque as posições saem de `rowTop`, não de um múltiplo fixo.
+    private func rowHeight(_ row: TimelineRow) -> CGFloat {
+        // Fileira compartilhada: a altura do trecho mais alto dela.
+        if let shared = row.shared { return shared.reduce(0) { max($0, rowHeight($1)) } }
+        if row.track != nil { return 28 }
+        if row.magnetic, row.type == .video { return m.row * 1.9 }
+        return m.row
+    }
     private func rowTop(_ index: Int) -> CGFloat { rowTop(index, in: rows) }
     private func rowTop(_ index: Int, in list: [TimelineRow]) -> CGFloat { list.prefix(max(0, index)).reduce(0) { $0 + rowHeight($1) } }
     private func rowIndex(_ y: CGFloat) -> Int {
@@ -681,6 +736,24 @@ struct TimelineView: View {
         return rows.count
     }
 
+    /// O trecho `id`, esteja ele sozinho na fileira ou dividindo a linha.
+    private func segmentRow(_ id: Int64) -> TimelineRow? {
+        for row in rows { if let segment = row.segment(id) { return segment } }
+        return nil
+    }
+    /// Alças de aparar: só no trecho que é a ÚNICA escolha.
+    private func handlesOn(_ row: TimelineRow) -> Bool {
+        row.track == nil && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
+    }
+    /// Hit-test de UM trecho na fileira (a mesma geometria do pintor).
+    private func hitSegment(_ row: TimelineRow, x px: CGFloat, y: CGFloat, width: CGFloat) -> TimelineHit {
+        let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
+        let keysShown: Bool = KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: row.track != nil, selected: model.selection.contains(row.id))
+        let touchable: [Int32] = keysShown ? row.instants : []
+        return TimelineHit.test(m, point: CGPoint(x: px, y: y), width: width, x0: x0, x1: x1, handles: handlesOn(row), compact: compact, instants: touchable, view: viewFrame, ppf: ppf)
+    }
+    /// O que o dedo pegou: o TRECHO (na pílula de uma fileira compartilhada, a
+    /// fileira); `index` do resultado é a fileira inteira sob o dedo.
     private func hit(_ point: CGPoint, width: CGFloat) -> (TimelineRow?, TimelineHit) {
         if point.y < m.rowsTop { return (nil, TimelineHit(kind: .ruler)) }
         let index = rowIndex(point.y - m.rowsTop + (compact ? 0 : scrollY))
@@ -688,13 +761,38 @@ struct TimelineView: View {
         guard current.indices.contains(index) else { return (nil, TimelineHit(kind: .none)) }
         let row = current[index]
         let y = point.y - m.rowsTop - rowTop(index) + (compact ? 0 : scrollY)
-        let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
-        let handles = row.track == nil && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
-        let keysShown: Bool = KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: row.track != nil, selected: model.selection.contains(row.id))
-        let touchable: [Int32] = keysShown ? row.instants : []
-        var result = TimelineHit.test(m, point: CGPoint(x: point.x, y: row.track == nil ? y : m.diamondCyNormal), width: width, x0: x0, x1: x1, handles: handles, compact: compact, instants: touchable, view: viewFrame, ppf: ppf)
-        if row.track != nil && result.kind != .key { result = TimelineHit(kind: .body) }
-        return (row, result)
+        let localY = row.track == nil ? y : m.diamondCyNormal
+        guard let shared = row.shared else {
+            var result = hitSegment(row, x: point.x, y: localY, width: width)
+            if row.track != nil && result.kind != .key { result = TimelineHit(kind: .body) }
+            result.index = index
+            return (row, result)
+        }
+        // FILEIRA COMPARTILHADA: a pílula é da fileira; o resto é de UM trecho.
+        if point.x < m.headerColumn {
+            var result = hitSegment(shared[0], x: point.x, y: localY, width: width)
+            result.index = index
+            return (row, result)
+        }
+        // Prioridade (a mesma do Android): alça/losango do trecho escolhido >
+        // o trecho sob o dedo (o escolhido, se as barras mínimas se cruzam;
+        // senão o de cima no desenho) > qualquer folga de toque que responda.
+        var best: (row: TimelineRow, hit: TimelineHit, score: Int)?
+        for segment in shared {
+            let result = hitSegment(segment, x: point.x, y: localY, width: width)
+            if result.kind == .none { continue }
+            let x0 = x(Double(segment.start), width: width), x1 = max(x(Double(segment.end), width: width), x0 + m.barMinWidth)
+            let score: Int
+            if handlesOn(segment) && (result.kind == .trimStart || result.kind == .trimEnd || result.kind == .key) { score = 4 }
+            else if point.x >= x0 && point.x <= x1 { score = model.selection.contains(segment.id) ? 3 : 2 }
+            else { score = 1 }
+            let bestScore: Int = best?.score ?? 0
+            if score > bestScore || (score == 2 && bestScore == 2) { best = (row: segment, hit: result, score: score) }
+        }
+        guard let chosen = best else { return (shared[0], TimelineHit(kind: .none, index: index)) }
+        var result = chosen.hit
+        result.index = index
+        return (chosen.row, result)
     }
     private func tap(_ point: CGPoint, width: CGFloat) {
         // Toque que só PAROU a rolagem inércia não é toque (igual ao Android).
@@ -716,7 +814,14 @@ struct TimelineView: View {
             selectedKey = nil; model.clearTimelineKeySelection(); model.editorBackFromTimeline()
         case .eye:
             guard let row else { return }
-            model.engine.setLayer(row.id, visible: !row.visible); model.refreshModel(force: true)
+            // Numa fileira compartilhada o olho vale para a LINHA toda, num passo de desfazer.
+            let visible = !row.visible
+            if row.shared != nil { model.engine.run { $0.beginUndoGroup() } }
+            for segment in row.segments where segment.visible != visible || row.shared == nil {
+                model.engine.setLayer(segment.id, visible: visible)
+            }
+            if row.shared != nil { model.engine.run { $0.endUndoGroup() } }
+            model.refreshModel(force: true)
         case .previous, .next:
             guard let selected = model.primarySelection, let index = model.layers.firstIndex(where: { $0.id == selected }) else { return }
             let neighbor = index + (touched.kind == .previous ? 1 : -1)
@@ -767,7 +872,10 @@ struct TimelineView: View {
                 return
             }
             if touched.kind == .header && !compact {
-                expandedLayer = expandedLayer == row.id ? nil : row.id
+                // Fileira compartilhada: abre as trilhas do trecho escolhido nela
+                // (senão do primeiro); tocar de novo fecha, seja qual for o aberto.
+                if let open = expandedLayer, row.segment(open) != nil { expandedLayer = nil }
+                else { expandedLayer = (row.segments.first { model.selection.contains($0.id) } ?? row.segments[0]).id }
                 UISelectionFeedbackGenerator().selectionChanged()
                 return
             }
@@ -780,7 +888,8 @@ struct TimelineView: View {
     private func targets(excluding: Set<Int64>, own: TimelineRow?, edges: Bool, keys: Bool) -> [Int32] {
         var result = [Int32(0)] + markers.map(\.frame)
         if !compact {
-            for row in rows where !excluding.contains(row.id) { result += [row.start, row.end] + row.instants }
+            // Cada TRECHO é um alvo (o vizinho na mesma fileira também).
+            for row in rows.flatMap({ $0.segments }) where !excluding.contains(row.id) { result += [row.start, row.end] + row.instants }
         }
         if let own {
             if edges { result += [own.start, own.end] }
@@ -799,7 +908,11 @@ struct TimelineView: View {
         var next = Interaction(mode: mode, start: start, view: viewFrame, scroll: scrollY, row: row, hit: touched, selection: selected, snapTargets: [])
         let excluded = Set(mode == .move ? selected.map(\.id) : row.map { [$0.id] } ?? [])
         next.snapTargets = targets(excluding: excluded, own: row, edges: mode == .key, keys: mode == .trimStart || mode == .trimEnd)
-        if mode == .move && selected.contains(where: \.locked) || (mode == .key || mode == .trimStart || mode == .trimEnd || mode == .reorder) && row?.locked == true {
+        // Reordenar na vertical leva a FILEIRA inteira (numa linha compartilhada,
+        // todos os trechos): basta um trecho travado para recusar.
+        let lane: TimelineRow? = rows.indices.contains(touched.index) ? rows[touched.index] : row
+        let laneLocked = lane?.segments.contains(where: \.locked) ?? false
+        if mode == .move && selected.contains(where: \.locked) || (mode == .key || mode == .trimStart || mode == .trimEnd) && row?.locked == true || mode == .reorder && laneLocked {
             next.mode = .blocked
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
         }
@@ -829,10 +942,18 @@ struct TimelineView: View {
             model.select(layerId: row.id, additive: false, openOptions: false)
         }
         if next.mode == .reorder, let row {
-            reorderSource = rows.firstIndex(where: { $0.id == row.id }) ?? -1; reorderTarget = reorderSource
+            reorderSource = rows.indices.contains(touched.index) ? touched.index : (rows.firstIndex(where: { $0.id == row.id }) ?? -1)
+            reorderTarget = reorderSource
             reorderTop = m.rowsTop + rowTop(max(0, reorderSource)) - scrollY
             reorderGrabOffset = start.y - reorderTop
-            if !model.selection.contains(row.id) { model.select(layerId: row.id, additive: false, openOptions: false) }
+            if touched.kind == .header, let lane {
+                // Pela pílula: escolhe o primeiro trecho só se nenhum da fileira está escolhido.
+                if !lane.segments.contains(where: { model.selection.contains($0.id) }) {
+                    model.select(layerId: lane.segments[0].id, additive: false, openOptions: false)
+                }
+            } else if !model.selection.contains(row.id) {
+                model.select(layerId: row.id, additive: false, openOptions: false)
+            }
         }
         if next.mode != .hold && next.mode != .blocked && next.mode != .scroll { pause() }
         if next.mode == .scrub {
@@ -896,7 +1017,14 @@ struct TimelineView: View {
                 if g.row?.track != nil {
                     tap(start, width: size.width)
                 } else if g.hit.kind == .header {
-                    model.engine.setLayer(row.id, locked: !row.locked); model.refreshModel(force: true)
+                    // Segurar a pílula trava/destrava: a linha toda numa fileira compartilhada.
+                    let locked = !row.locked
+                    if row.shared != nil { model.engine.run { $0.beginUndoGroup() } }
+                    for segment in row.segments where segment.locked != locked || row.shared == nil {
+                        model.engine.setLayer(segment.id, locked: locked)
+                    }
+                    if row.shared != nil { model.engine.run { $0.endUndoGroup() } }
+                    model.refreshModel(force: true)
                 } else if g.hit.kind == .key { tap(start, width: size.width) }
                 else if !compact && g.hit.kind != .eye && g.hit.kind != .none {
                     if model.selection.isEmpty { model.select(layerId: row.id, additive: false, openOptions: false) }
@@ -921,6 +1049,21 @@ struct TimelineView: View {
             reorderTarget = min(max(0, rowIndex(point.y - m.rowsTop + scrollY)), max(0, rows.count - 1))
         case .move:
             guard let row = g.row, let earliest = g.selection.map(\.startFrame).min(), let latest = g.selection.map(\.endFrame).max() else { return }
+            // LINHA MAGNÉTICA: arrastar na horizontal REORDENA a fita em vez de
+            // soltar o trecho no tempo — os vizinhos abrem espaço e a linha
+            // volta a ficar encostada. Com a linha desligada vale o movimento
+            // livre de sempre.
+            if row.magnetic, g.selection.count == 1 {
+                let desired = Double(row.start) + delta
+                let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : Snap.none
+                let target = max(0, snapped == Snap.none ? timelineFrame(desired) : snapped)
+                if target != g.sentFrame {
+                    openUndo(&g)
+                    if model.reorderClip(row.id, toFrame: target) { g.sentFrame = target }
+                }
+                guide = snapped
+                return
+            }
             let desired = timelineFrame(Double(row.start) + delta)
             let snapped = model.snapping ? Snap.span(g.snapTargets, start: desired, length: row.end - row.start, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : (start: desired, guide: Snap.none)
             let change = Int32(clamping: max(-Int64(earliest), min(Int64(Int32.max) - Int64(latest), Int64(snapped.start) - Int64(row.start))))
@@ -1015,12 +1158,39 @@ struct TimelineView: View {
     private func finish(cancelled: Bool) {
         pendingPointer = false
         guard let g = gesture else { return }
-        if g.mode == .reorder && !cancelled, let row = g.row, rows.indices.contains(reorderTarget), reorderTarget != reorderSource {
-            model.engine.run { $0.beginUndoGroup() }; model.reorderLayer(row.id, displayIndex: model.layers.firstIndex { $0.id == rows[reorderTarget].id } ?? 0); model.engine.run { $0.endUndoGroup() }
+        if g.mode == .reorder && !cancelled, g.row != nil, rows.indices.contains(reorderTarget), reorderTarget != reorderSource {
+            commitReorder(source: reorderSource, target: reorderTarget)
         }
         if g.mode == .scrub { model.engine.run { $0.scrubEnd() } }
         if g.undoOpen { model.engine.run { $0.endUndoGroup() } }
         gesture = nil; heldView = nil; guide = Snap.none; reorderSource = -1; reorderTarget = -1
+    }
+
+    /// Solta a fileira `source` sobre a fileira `target` (o mesmo do Android):
+    /// o grupo dela (a camada, ou a linha inteira) vai para logo acima/abaixo
+    /// do grupo do destino, num passo de desfazer. Uma camada sozinha manda o
+    /// MESMO comando de sempre.
+    private func commitReorder(source: Int, target: Int) {
+        let list = rows
+        let keys = timelineGroupKeys(list)
+        guard keys.indices.contains(source), keys.indices.contains(target), keys[source] != keys[target] else { return }
+        var block = Set<Int64>(), anchors = Set<Int64>()
+        for (i, row) in list.enumerated() where row.track == nil {
+            if keys[i] == keys[source] { for s in row.segments { block.insert(s.id) } }
+            else if keys[i] == keys[target] { for s in row.segments { anchors.insert(s.id) } }
+        }
+        let order = model.layers.map(\.id)
+        // A fileira do destino está onde está a camada MAIS ALTA dela.
+        guard let anchor = order.first(where: { anchors.contains($0) }) else { return }
+        let moves = TimelineRowOrder.moves(order: order, block: block, anchor: anchor, up: target < source)
+        guard !moves.isEmpty else { return }
+        let count = order.count
+        model.engine.run { $0.beginUndoGroup() }
+        for move in moves {
+            model.engine.run { $0.setLayerOrder(move.id, newIndex: UInt32(count - 1 - move.index)) }
+        }
+        model.engine.run { $0.endUndoGroup() }
+        model.refreshModel(force: true)
     }
 
     private func pinch(_ state: UIGestureRecognizer.State, scale: CGFloat, focus: CGPoint, width: CGFloat) {
@@ -1072,7 +1242,7 @@ struct TimelineView: View {
         }
     }
     private func revealSelection(size: CGSize) {
-        guard !compact, gesture == nil, let id = model.primarySelection, let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        guard !compact, gesture == nil, let id = model.primarySelection, let index = rows.firstIndex(where: { $0.segment(id) != nil }) else { return }
         let top = rowTop(index), bottom = top + rowHeight(rows[index])
         let visibleHeight = max(0, size.height - m.rowsTop)
         if top < scrollY { scrollY = top }
@@ -1086,6 +1256,8 @@ private struct TimelineHit {
     enum Kind { case none, ruler, eye, header, key, trimStart, trimEnd, previous, next, body }
     var kind: Kind
     var key = -1
+    /// A fileira sob o dedo (numa fileira compartilhada, a linha inteira); −1 = nenhuma.
+    var index = -1
     static func contentLeft(_ m: TimelineMetrics, _ x0: CGFloat, _ x1: CGFloat) -> CGFloat {
         max(x0, m.headerColumn) + (x1 - x0 < m.narrowBar ? m.padLNarrow : m.padL)
     }
@@ -1095,7 +1267,9 @@ private struct TimelineHit {
     static func test(_ m: TimelineMetrics, point: CGPoint, width: CGFloat, x0: CGFloat, x1: CGFloat, handles: Bool, compact: Bool, instants: [Int32], view: Double, ppf: CGFloat) -> TimelineHit {
         let x = point.x, y = point.y
         guard y >= 0 && y < m.row else { return TimelineHit(kind: .none) }
-        if x < m.headerColumn { return TimelineHit(kind: x < m.eyeHitRight ? .eye : .header) }
+        // Calha: o olho pequeno no canto de baixo à direita; o resto é o glifo do
+        // tipo (tocar abre/fecha as trilhas, segurar trava/reordena).
+        if x < m.headerColumn { return TimelineHit(kind: x >= m.eyeHitLeft && y >= m.eyeHitTop ? .eye : .header) }
         var key = -1, keyX: CGFloat = 0
         if y >= m.keyTouchTop && !instants.isEmpty {
             let i = Keyframes.nearestIndex(instants, TimeAxis.frameAt(x: x, view: view, pxPerFrame: ppf, centerX: width / 2))

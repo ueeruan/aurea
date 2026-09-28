@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -300,8 +301,23 @@ struct SceneStats {
 [[nodiscard]] SceneCamera default_camera(u32 compWidth, u32 compHeight) noexcept;
 
 class SceneRenderer {
-    static constexpr u32 kJointRingDecl = 8;
 public:
+    /// Buffers de upload por build (juntas, morph, instâncias). Cada build pega
+    /// um livre, e ele só volta à fila quando a GPU conclui o quadro que o leu
+    /// (`defer_until_gpu_done`). Era um anel fixo de 8: o desfoque de movimento
+    /// grava até 64 cenas por quadro, e a 9ª sobrescrevia as poses que a 1ª
+    /// ainda ia ler — export com desfoque errado e diferente a cada execução.
+    struct UploadPool {
+        struct Buf { BufferHandle handle{}; usize cap = 0; };
+        BufferUsage usage = BufferUsage::Storage;
+        usize minBytes = 0;
+        const char* name = "";
+        std::mutex mutex;                  ///< a devolução pode vir de outra thread (Metal)
+        std::vector<Buf> free;
+        std::vector<BufferHandle> all;     ///< vivos (livres ou em voo), para o shutdown
+        u32 generation = 0;                ///< muda no shutdown/perda do device: devolução velha é descartada
+    };
+
     [[nodiscard]] Status initialize(GPUBackend& gpu, ShaderLibrary& shaders) noexcept;
     void shutdown() noexcept;
     void forget_device() noexcept;
@@ -451,26 +467,22 @@ private:
     /// quando o tamanho na tela oscila em cima dele).
     struct LodState { u8 level = 0; u64 lastFrame = 0; };
     std::unordered_map<u64, LodState> lodState_;
-    /// Instâncias por quadro (instancing): mat4 do mundo + matriz de normais
-    /// (PBR) e luz ← local (sombra), no anel dos buffers de junta.
-    BufferHandle instBuf_[kJointRingDecl]{};
-    usize instCap_[kJointRingDecl]{};
-    u32 instSlot_ = 0;
 
     GPUBackend* gpu_ = nullptr;
     ShaderLibrary* shaders_ = nullptr;
     std::unordered_map<u64, Entry> models_;
-    // Matrizes de junta: um buffer mapeado por chamada de build, num anel
-    // (a GPU ainda pode estar lendo os de frames anteriores).
-    static constexpr u32 kJointRing = kJointRingDecl;
-    BufferHandle jointBuf_[kJointRing]{};
-    usize jointCap_[kJointRing]{};
-    u32 jointSlot_ = 0;
-    // Morph: vértices deformados na CPU por quadro (posição + shading), no
-    // mesmo esquema de anel.
-    BufferHandle morphBuf_[kJointRing]{};
-    usize morphCap_[kJointRing]{};
-    u32 morphSlot_ = 0;
+    // Um buffer mapeado por chamada de build: matrizes de junta, vértices de
+    // morph deformados na CPU (posição + shading) e instâncias (mat4 do mundo
+    // + normais para o PBR e luz ← local para a sombra).
+    std::shared_ptr<UploadPool> jointPool_ = make_upload_pool(BufferUsage::Storage, 64 * sizeof(Mat4), "3d-juntas");
+    std::shared_ptr<UploadPool> morphPool_ = make_upload_pool(BufferUsage::Vertex, 0, "3d-morph");
+    std::shared_ptr<UploadPool> instPool_ = make_upload_pool(BufferUsage::Storage, 64 * sizeof(Mat4), "3d-instancias");
+    static std::shared_ptr<UploadPool> make_upload_pool(BufferUsage usage, usize minBytes, const char* name);
+    /// Buffer de upload mapeável com ≥ `bytes`, devolvido ao pool quando a GPU
+    /// concluir o quadro em gravação. Inválido = sem memória de GPU.
+    [[nodiscard]] BufferHandle take_upload(const std::shared_ptr<UploadPool>& pool, usize bytes) noexcept;
+    /// Destrói (ou, com o device perdido, só esquece) os buffers dos pools.
+    void drop_upload_pools(bool destroy) noexcept;
     TextureHandle white_{}, flatNormal_{}, black_{}, envCube_{}, brdfLut_{};
     TextureHandle irradiance_{}, prefiltered_{}, iblLut_{}, background_{};
     u32 prefilteredMips_ = 1;

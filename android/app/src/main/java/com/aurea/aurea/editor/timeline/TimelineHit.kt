@@ -9,7 +9,7 @@ internal enum class HitKind { NONE, RULER, HEADER_EYE, HEADER, KEYFRAME, TRIM_ST
 
 /**
  * Hit-test de UMA linha, com a mesma geometria do pintor. Prioridade (spec
- * 03 §5.1): pílula > losango > alça de trim > setas ‹ › > corpo > vazio.
+ * 03 §5.1): calha > losango > alça de trim > setas ‹ › > corpo > vazio.
  *
  * Pura: recebe tudo em px (coordenadas da timeline; `y` relativo ao topo da
  * linha) e devolve o tipo; o índice do losango vai em `out[0]` (−1 se nenhum).
@@ -47,7 +47,9 @@ internal object RowHit {
     ): HitKind {
         out[0] = -1
         if (y < 0f || y >= m.row) return HitKind.NONE
-        if (x < m.headerColumn) return if (x < m.eyeHitRight) HitKind.HEADER_EYE else HitKind.HEADER
+        // Calha: o olho pequeno no canto de baixo à direita; o resto é o ícone do
+        // tipo (tocar abre/fecha as trilhas, segurar trava/reordena).
+        if (x < m.headerColumn) return if (x >= m.eyeHitLeft && y >= m.eyeHitTop) HitKind.HEADER_EYE else HitKind.HEADER
 
         // Losango mais perto do dedo (faixa de baixo da barra e o respiro abaixo dela).
         var key = -1

@@ -88,6 +88,9 @@ public:
 
     /// Callback de frame pronto, repassado a toda fonte.
     void set_ready_callback(void (*fn)(void*), void* ctx) noexcept;
+    /// O mesmo callback, para outro trabalho de fundo que o quadro espera (o
+    /// mapa de profundidade de um vídeo) acordar o render do mesmo jeito.
+    void ready_callback(void (*&fn)(void*), void*& ctx) const noexcept;
 
     struct Stats {
         u32 sources = 0;

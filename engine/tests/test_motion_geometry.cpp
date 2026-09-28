@@ -67,7 +67,7 @@ AUREA_TEST(MotionGeometry, EngineCacheApplyUndoAndTimingInvalidation) {
     AUREA_CHECK_EQ(layer->effects.size(),1u);AUREA_CHECK_EQ(layer->effects[0].id,effectId);
     Command undoRepeat;undoRepeat.type=CommandType::Undo;AUREA_CHECK(e.apply_command(undoRepeat).ok());
     Command undo;undo.type=CommandType::Undo;AUREA_CHECK(e.apply_command(undo).ok());layer=comp->layer(LayerId::unpack(*source));AUREA_CHECK(layer->effects.empty());AUREA_CHECK(layer->motionTrack!=nullptr);
-    const char* file="aurea_test_motion_cache.aurea";AUREA_CHECK(e.save_project(file).ok());Project saved;LoadReport report;AUREA_CHECK(ProjectSerializer::load(saved,file,LoadOptions{},&report).ok());AUREA_CHECK_EQ(report.timelineVersion,32u);
+    const char* file="aurea_test_motion_cache.aurea";AUREA_CHECK(e.save_project(file).ok());Project saved;LoadReport report;AUREA_CHECK(ProjectSerializer::load(saved,file,LoadOptions{},&report).ok());AUREA_CHECK_EQ(report.timelineVersion,kTimelineSectionVersion);
     AUREA_CHECK(e.load_project(file).ok());comp=e.project()->timeline().composition(e.project()->timeline().current());u64 restored=0;comp->layers().for_each([&](LayerId id,const Layer& l){if(l.kind==LayerKind::Video)restored=id.pack();});AUREA_CHECK(e.restore_motion_track(restored));
     layer=comp->layer(LayerId::unpack(restored));layer->speed=2;AUREA_CHECK(!e.apply_motion_track(restored,3).ok());AUREA_CHECK(!e.restore_motion_track(restored));
     AUREA_CHECK(e.new_project(320,180,30,"new").ok());AUREA_CHECK_EQ(e.motion_track_status().state,0u);AUREA_CHECK(!e.apply_motion_track(restored,3).ok());e.shutdown();std::remove(file);
@@ -112,7 +112,27 @@ AUREA_TEST(MotionGeometry, DegenerateAndLostTracksDoNotInventMotion) {
     for(auto p:grid()) {std::vector<Vec2> row(30);for(int f=0;f<30;++f)row[f]=f==15?Vec2{NAN,NAN}:movement(f*.5,2*std::sin(f)).project(p);t.pos.push_back(row);}
     auto path=estimate_path(t,MotionModel::Similarity);
     AUREA_CHECK_EQ(path.size(),30u);for(int i=0;i<15;++i)AUREA_CHECK(path[i].valid);
-    for(int i=15;i<30;++i)AUREA_CHECK(!path[i].valid);
+    // O quadro sem medida fica inválido (nada inventado), mas a análise não
+    // para ali: a referência do 1º quadro reancora o caminho EXATO depois do
+    // buraco. Antes um quadro ruim invalidava o resto do clipe (e o
+    // estabilizador/Corner Pin recusavam aplicar).
+    AUREA_CHECK(!path[15].valid);
+    for(int i=16;i<30;++i){AUREA_CHECK(path[i].valid);const auto q=path[i].path.project({320,180}),r=movement(i*.5,2*std::sin(i)).project({320,180});AUREA_CHECK_NEAR(q.x,r.x,.01);AUREA_CHECK_NEAR(q.y,r.y,.01);}
+    // Sem referência visível depois do buraco: o movimento global (estabilizar)
+    // atravessa pelo último caminho conhecido; numa REGIÃO (planar) os quadros
+    // seguintes só valem quando reancorados — ali ficam inválidos.
+    Tracks2D gap;gap.frames=30;gap.width=640;gap.height=360;
+    for(auto p:grid()){
+        std::vector<Vec2> early(30,Vec2{NAN,NAN}),late(30,Vec2{NAN,NAN});
+        for(int f=0;f<30;++f){const auto q=movement(f*.5,0).project(p);if(f<15)early[f]=q;if(f>=10&&f!=15)late[f]=q;}
+        gap.pos.push_back(early);gap.pos.push_back(late);
+    }
+    auto global=estimate_path(gap,MotionModel::Similarity);
+    auto region=estimate_path(gap,MotionModel::Similarity,{{0,0},{640,0},{640,360},{0,360}});
+    AUREA_CHECK(!global[15].valid&&!global[16].valid&&!region[15].valid);
+    for(int i=17;i<30;++i){AUREA_CHECK(global[i].valid);AUREA_CHECK(!region[i].valid);}
+    // Atravessou sem inventar giro/escala: só o deslocamento perdido no buraco.
+    AUREA_CHECK_NEAR(global[29].path.project({320,180}).x-global[17].path.project({320,180}).x,6.0,.01);
 }
 AUREA_TEST(MotionGeometry, PlaneRegionSeparatesIndependentObjectFromBackground) {
     Tracks2D t;t.frames=60;t.width=640;t.height=360;

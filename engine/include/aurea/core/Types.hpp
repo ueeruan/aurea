@@ -144,11 +144,15 @@ enum class LayerKind : u16 {
     Composition = 12,   // composição aninhada (pre-comp)
 };
 
+/// Modos de mesclagem. A ORDEM É O VALOR GRAVADO no projeto e o que o shader
+/// de blend lê no uniform — um modo novo entra SEMPRE no fim, nunca no meio.
 enum class BlendMode : u16 {
     Normal = 0,
     Add, Subtract, Multiply, Screen, Overlay, Darken, Lighten,
     ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion,
     Hue, Saturation, Color, Luminosity,
+    // Bloco do editor antigo (2026-09-27): os quatro que faltavam da lista dele.
+    Divide, VividLight, LinearDodge, LinearBurn,
 };
 
 enum class Interpolation : u8 {

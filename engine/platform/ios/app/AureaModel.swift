@@ -49,6 +49,13 @@ struct LayerItem: Identifiable, Equatable {
     var label: UInt32
     var adjustment: Bool
     var guide: Bool
+    /// LINHA MAGNÉTICA: os cortes desta camada andam como faixa de montagem
+    /// de vídeo (aparar e apagar puxam os vizinhos DA MESMA linha).
+    var magnetic: Bool
+    /// A LINHA da timeline (`LayerRow::trackId`): trechos com o mesmo número
+    /// dividem a mesma fileira, lado a lado no tempo. 0 = projeto antigo sem
+    /// linha (a camada é a linha dela).
+    var trackId: UInt32 = 0
 
     var duration: Int32 { max(0, endFrame - startFrame) }
 }
@@ -224,11 +231,16 @@ final class AureaModel: ObservableObject {
     /// doca, e não uma tela sem folha — foi o que a casca A.01 fixou, e cada
     /// ladrilho aberto é que decide a fração da folha.
     var sheetContent: SheetContent {
-        if showAddLayer { return .none }
+        // A barra de adicionar fica embaixo sem camada escolhida — e também com a
+        // camada só "na mão" da timeline (segurada/arrastada sem abrir as
+        // opções): a geometria não muda no meio do gesto. Escolhendo keyframes, a
+        // timeline fica alta (sem barra). Igual ao EditorScreen.kt.
+        let timelineOnly = !selection.isEmpty && selection == timelineOnlySelection
+        if showAddLayer { return selection.isEmpty || (timelineOnly && !timelineKeySelectMode) ? .addBar : .none }
         // O painel da Aurea AI CRIA a camada: abre sem nada selecionado (igual ao Android).
         if panel == .aiVideo || panel == .captions { return .panel }
-        if selection.isEmpty { return .none }
-        if selection == timelineOnlySelection && (panel == .none || panel == .dock) { return .none }
+        if selection.isEmpty { return .addBar }
+        if timelineOnly && (panel == .none || panel == .dock) { return timelineKeySelectMode ? .none : .addBar }
         if selection.count > 1 { return .batch }
         if panel == .curve { return .curve }
         return panel == .none || panel == .dock ? .dock : .panel
@@ -1118,7 +1130,9 @@ final class AureaModel: ObservableObject {
                       threeD: row["threeD"] as? Bool ?? false,
                       label: (row["label"] as? NSNumber)?.uint32Value ?? 0,
                       adjustment: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 6) != 0,
-                      guide: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 7) != 0)
+                      guide: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 7) != 0,
+                      magnetic: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 13) != 0,
+                      trackId: (row["trackId"] as? NSNumber)?.uint32Value ?? 0)
         }
         if nextLayers != layers { layers = nextLayers }
         if let data = engine.captionTracks().data(using: .utf8), let tracks = try? JSONDecoder().decode([NativeCaptionTrack].self, from: data), tracks != captionTracks { captionTracks = tracks }
@@ -1879,17 +1893,28 @@ final class AureaModel: ObservableObject {
     @Published var motionPicked = 0
     private var motionSeeds: [NSNumber] = []
     private var motionSource: Int64?
-    func beginPointPick(stabilize: Bool) { beginMotionPick(stabilize ? 4 : 0) }
+    /// Menu da camada: "Rastrear um ponto" (cria um Nulo que segue o ponto) e
+    /// "Estabilizar pelo ponto" (o ponto fica parado na tela). Escolhe o ponto,
+    /// analisa em segundo plano e APLICA sozinho ao terminar — antes a análise
+    /// rodava e o resultado nunca era aplicado (nem o painel abria).
+    func beginPointPick(stabilize: Bool) {
+        beginMotionPick(0)
+        if pointPick != nil { motionAutoApply = stabilize ? 3 : 0 }
+    }
     func beginMotionPick(_ tool: UInt32) {
         guard let layer = selectedLayer, layer.kind == 1, !layer.locked, let id = primarySelection else { return }
         guard (motionStatus["state"] as? NSNumber)?.intValue != 1 else { return }
         engine.run { $0.pause() }
+        motionAutoApply = -1
         motionTool = tool; motionSource = id; motionSeeds = []; motionPicked = 0
         if tool == 4 { startPickedMotion(); return }
         pointPick = false
         toast = tool >= 2 ? "Toque nos cantos: superior esquerdo, direito, inferior direito e esquerdo" : "Toque no detalhe a seguir no preview"
     }
-    func cancelMotionPick() { pointPick = nil; motionSeeds = []; motionPicked = 0 }
+    func cancelMotionPick() { pointPick = nil; motionSeeds = []; motionPicked = 0; motionAutoApply = -1 }
+    /// -1 nada; 0 cria o Nulo; 3 estabiliza pelo ponto — quando a análise do menu termina.
+    private var motionAutoApply = -1
+    private var motionPoll: Task<Void, Never>?
     func finishPointPick(_ point: CGPoint) {
         guard pointPick != nil, let id = primarySelection, id == motionSource else { cancelMotionPick(); return }
         let a = engine.maskData(id).prefix(6).map(\.floatValue)
@@ -1906,15 +1931,35 @@ final class AureaModel: ObservableObject {
     private func startPickedMotion() {
         guard let id = motionSource else { return }
         if !engine.startMotionTrack(id, tool: motionTool, model: motionModel, backward: motionBackward, points: motionSeeds, feature: motionFeature, search: motionSearch) {
-            toast = "Confira os pontos e use um trecho de até 1800 frames"
+            motionAutoApply = -1
+            toast = AureaText.t("track_start_failed")
         }
         motionStatus = engine.motionTrackStatus()
+        // Acompanha a análise mesmo com o painel fechado (progresso, fim, aplicar).
+        motionPoll?.cancel()
+        motionPoll = Task { @MainActor in
+            while !Task.isCancelled {
+                self.motionStatus = self.engine.motionTrackStatus()
+                if (self.motionStatus["state"] as? NSNumber)?.intValue != 1 { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            if Task.isCancelled { return }
+            let auto = self.motionAutoApply
+            self.motionAutoApply = -1
+            let state = (self.motionStatus["state"] as? NSNumber)?.intValue ?? 0
+            guard state == 2 else {
+                if auto >= 0, state == 3, let message = self.motionStatus["message"] as? String, !message.isEmpty { self.toast = message }
+                return
+            }
+            if auto == 3 { self.applyMotion(3, lock: true, smooth: 0.5, maxScale: 1, crop: 0) }
+            else if auto == 0 { self.applyMotion(0) }
+        }
     }
     func restoreMotion() {
         if let id = primarySelection, engine.restoreMotionTrack(id) { motionSource = id; motionStatus = engine.motionTrackStatus() }
     }
-    func applyMotion(_ apply: UInt32, lock: Bool = false, smooth: Float = 0.5, maxScale: Float = 1.15, crop: UInt32 = 1) {
-        let error = engine.applyMotionTrack(primarySelection ?? 0, apply: apply, lock: lock, smooth: smooth, maxScale: maxScale, crop: crop)
+    func applyMotion(_ apply: UInt32, lock: Bool = false, smooth: Float = 0.5, maxScale: Float = 1.15, crop: UInt32 = 1, target: Int64? = nil) {
+        let error = engine.applyMotionTrack(target ?? primarySelection ?? 0, apply: apply, lock: lock, smooth: smooth, maxScale: maxScale, crop: crop)
         toast = error.isEmpty ? "Rastreio aplicado. Você pode desfazer" : error
         refreshModel(force: true); motionStatus = engine.motionTrackStatus()
     }
@@ -2544,12 +2589,33 @@ final class AureaModel: ObservableObject {
         refreshModel(force: true)
     }
 
+    /// LINHA MAGNÉTICA da camada: ligada, os cortes dela andam como faixa de
+    /// montagem (aparar e apagar puxam os vizinhos DA MESMA linha; quem está em
+    /// outra linha não anda). Um passo de desfazer.
+    func setLayerMagneticTrack(_ id: Int64, _ on: Bool) {
+        mutate { engine in _ = engine.setLayer(id, magneticTrack: on) }
+        refreshModel(force: true)
+        toast = AureaText.t(on ? "msg_linha_magnetica_ligada" : "msg_linha_magnetica_desligada")
+    }
+
+    /// Arrasta o trecho para outro ponto da mesma linha, com os vizinhos
+    /// abrindo espaço e a fita voltando a ficar encostada — reordenar os cortes.
+    @discardableResult
+    func reorderClip(_ id: Int64, toFrame frame: Int64) -> Bool {
+        var ok = false
+        mutate { engine in ok = engine.reorderClip(id, toFrame: frame) }
+        if ok { refreshModel(force: true) }
+        return ok
+    }
+
     func deleteSelectedLayers(ripple: Bool? = nil) {
         let targets = layers.filter { selection.contains($0.id) && !$0.locked }
         guard !targets.isEmpty else { toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
         if status.playing != 0 { playPause() }
         let ids = targets.map { NSNumber(value: $0.id) }
-        if ripple ?? engine.timelineEditMode { engine.rippleDeleteLayers(ids) }
+        // A LINHA MAGNÉTICA manda: apagar um trecho dela fecha o buraco mesmo
+        // no modo Composição. Sem nenhum trecho magnético, vale o modo Edição.
+        if ripple ?? (engine.timelineEditMode || targets.contains { $0.magnetic }) { engine.rippleDeleteLayers(ids) }
         else { engine.deleteLayers(ids) }
         clearSelection()
         refreshModel(force: true)

@@ -460,7 +460,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)groupCameraPassThrough:(long long)layerId;
 /// "" = deu certo; senão o motivo da recusa.
 - (NSString*)addLayers:(NSArray<NSNumber*>*)layerIds toGroup:(long long)groupId;
-- (NSString*)removeLayerFromGroup:(long long)layerId;
+- (NSString*)removeLayerFromGroup:(long long)layerId NS_SWIFT_NAME(removeLayerFromGroup(_:));
 - (void)setShape:(long long)layerId param:(uint32_t)param value:(float)value;
 - (void)setShape:(long long)layerId fillR:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)setShape:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a;

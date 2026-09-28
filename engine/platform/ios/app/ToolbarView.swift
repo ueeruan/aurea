@@ -332,6 +332,10 @@ private struct ShellMenuRow: View {
                 if checked == true { CupertinoGlyph.text(CupertinoGlyph.CheckmarkAlt, size: 18, color: AureaColors.accent) }
             }.padding(.horizontal, 20).padding(.vertical, 8).frame(minHeight: 48)
         }.buttonStyle(.plain).disabled(!enabled)
+            // O glifo da fonte de ícones entrava no rótulo como vazio (", Colar efeitos").
+            .accessibilityLabel(title ?? AureaText.t(key))
+            .accessibilityHint(detail.map { AureaText.t($0) } ?? "")
+            .accessibilityAddTraits(checked == true ? .isSelected : [])
     }
     private var color: Color { !enabled ? StageInk.disabledMuted : danger ? AureaColors.danger : AureaColors.text }
 }

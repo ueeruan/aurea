@@ -142,17 +142,21 @@ export function erroDaSenha(senha) {
   return null;
 }
 
-/** Limite por janela fixa em KV. Qualquer falha do KV conta como "estourou". */
+/** Limite por janela fixa no D1 (o KV grátis só grava 1 000 vezes por dia na
+ *  conta inteira). Falha do armazenamento DEIXA PASSAR: o limite é proteção,
+ *  não pode trancar todo mundo para fora como em 28/09/2026. */
 export async function dentroDoLimite(env, escopo, id, { max, janela }, agoraMs = Date.now()) {
   const bloco = Math.floor(agoraMs / 1000 / janela);
   const chave = `rl:${escopo}:${await sha256hex("aurea-rl:" + id)}:${bloco}`;
   try {
-    const atual = Number(await env.AUREA_KV.get(chave)) || 0;
-    if (atual >= max) return false;
-    await env.AUREA_KV.put(chave, String(atual + 1), { expirationTtl: Math.max(60, janela * 2) });
+    const r = await env.AUREA_DB.prepare(
+      "INSERT INTO rate_limits (key, count, expires_at) VALUES (?, 1, ?) " +
+      "ON CONFLICT(key) DO UPDATE SET count = count + 1 RETURNING count")
+      .bind(chave, agoraMs + janela * 2000).first();
+    return Number(r?.count ?? 1) <= max;
+  } catch (e) {
+    console.error("contas: limite indisponível", String(e?.message ?? e).slice(0, 200));
     return true;
-  } catch {
-    return false;
   }
 }
 
@@ -198,18 +202,26 @@ function tokenDoCabecalho(req) {
 async function criarSessao(env, usuario) {
   const token = b64url(aleatorio(32));
   const registro = { uid: usuario.id, email: usuario.email, criado: Date.now() };
-  await env.AUREA_KV.put("sess:" + (await sha256hex(token)), JSON.stringify(registro), { expirationTtl: SESSAO_TTL_S });
+  await env.AUREA_DB.prepare("INSERT INTO sessions (token_hash, uid, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)")
+    .bind(await sha256hex(token), usuario.id, usuario.email, registro.criado, registro.criado + SESSAO_TTL_S * 1000).run();
   return token;
 }
 
 /** A sessão do cabeçalho Authorization, ou null. Usada também pelo crash.js. */
 export async function lerSessao(env, req) {
   const token = tokenDoCabecalho(req);
-  if (!token || !env.AUREA_KV) return null;
+  if (!token) return null;
+  const hash = await sha256hex(token);
   try {
-    const chave = "sess:" + (await sha256hex(token));
-    const s = await env.AUREA_KV.get(chave, "json");
-    return s && typeof s.email === "string" ? { ...s, chave } : null;
+    const d = await env.AUREA_DB.prepare("SELECT uid, email FROM sessions WHERE token_hash = ? AND expires_at > ?")
+      .bind(hash, Date.now()).first();
+    if (d) return { uid: d.uid, email: d.email, hash };
+  } catch { /* D1 fora: tenta a sessão antiga do KV */ }
+  // Sessões criadas antes de 28/09/2026 moram no KV (ler não gasta a cota de gravação).
+  try {
+    const chave = "sess:" + hash;
+    const s = env.AUREA_KV ? await env.AUREA_KV.get(chave, "json") : null;
+    return s && typeof s.email === "string" ? { ...s, chave, hash } : null;
   } catch {
     return null;
   }
@@ -301,7 +313,7 @@ async function sessao(req, env) {
   try {
     const linha = await env.AUREA_DB.prepare("SELECT email FROM users WHERE id = ?").bind(s.uid).first();
     if (!linha) {
-      await env.AUREA_KV.delete(s.chave).catch(() => {});
+      await apagarSessao(env, s);
       return json({ error: "nao_autorizado" }, 401);
     }
     return json({ email: linha.email });
@@ -313,8 +325,13 @@ async function sessao(req, env) {
 
 async function sair(req, env) {
   const s = await lerSessao(env, req);
-  if (s) await env.AUREA_KV.delete(s.chave).catch(() => {});
+  if (s) await apagarSessao(env, s);
   return json({ ok: true });
+}
+
+async function apagarSessao(env, s) {
+  await env.AUREA_DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(s.hash).run().catch(() => {});
+  if (s.chave && env.AUREA_KV) await env.AUREA_KV.delete(s.chave).catch(() => {});
 }
 
 async function estatisticas(env) {
@@ -335,7 +352,7 @@ export async function rotaDeContas(req, env, ctx, url) {
   const conhecida = rota === "/api/stats/users" || rota.startsWith("/api/auth/");
   if (!conhecida) return null;
   if (!localOuHttps(url)) return json({ error: "https_obrigatorio" }, 403);
-  if (!env.AUREA_DB || !env.AUREA_KV) return json({ error: "contas_indisponiveis" }, 503);
+  if (!env.AUREA_DB) return json({ error: "contas_indisponiveis" }, 503);
 
   if (rota === "/api/stats/users" && (req.method === "GET" || req.method === "HEAD")) return estatisticas(env);
   if (rota === "/api/auth/signup" && req.method === "POST") return cadastrar(req, env);

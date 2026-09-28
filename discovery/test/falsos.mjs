@@ -40,6 +40,7 @@ export function kvFalso(relogio = () => Date.now()) {
 export function d1Falso() {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync(new URL("../migrations/0001_contas.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../migrations/0002_sessoes_limites.sql", import.meta.url), "utf8"));
   const limpar = (r) => (r === undefined ? null : { ...r });
   const declaracao = (sql, params = []) => ({
     bind: (...p) => declaracao(sql, p),

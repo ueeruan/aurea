@@ -161,7 +161,7 @@ test("e-mail da conta vem da SESSAO; o do corpo sem sessao entra marcado", async
 });
 
 test("limites: por instalacao, tamanho do corpo e teto diario de e-mails", async () => {
-  const env = { AUREA_KV: kvFalso(), RESEND_API_KEY: "k", CRASH_EMAIL_DAILY_LIMIT: "2" };
+  const env = { AUREA_KV: kvFalso(), AUREA_DB: d1Falso(), RESEND_API_KEY: "k", CRASH_EMAIL_DAILY_LIMIT: "2" };
   const f = fetchFalso();
   try {
     for (let i = 0; i < LIMITES_CRASH.instalacaoHora.max; i++) {

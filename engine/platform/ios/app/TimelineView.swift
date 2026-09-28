@@ -1056,7 +1056,7 @@ struct TimelineView: View {
             if row.magnetic, g.selection.count == 1 {
                 let desired = Double(row.start) + delta
                 let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : Snap.none
-                let target = max(0, snapped == Snap.none ? timelineFrame(desired) : snapped)
+                let target = Int64(max(0, snapped == Snap.none ? timelineFrame(desired) : snapped))
                 if target != g.sentFrame {
                     openUndo(&g)
                     if model.reorderClip(row.id, toFrame: target) { g.sentFrame = target }

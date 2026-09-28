@@ -41,7 +41,9 @@ import XCTest
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
         app.buttons["Copy and paste"].firstMatch.tap()
-        app.buttons["Paste effects"].firstMatch.tap()
+        // A folha de copiar/colar anima ao abrir: espera a linha existir.
+        let paste = app.buttons["Paste effects"].firstMatch
+        XCTAssertTrue(paste.waitForExistence(timeout: 5)); paste.tap()
         _ = try awaitSnapshot("Only the chosen effect is pasted, not the whole stack") { $0.effectCount == 7 }
         try undo()
         _ = try awaitSnapshot("Pasted effect is reversible") { $0.effectCount == 6 }

@@ -192,7 +192,6 @@ struct EffectPickerView: View {
     let layerHasAudio: Bool
     let onPick: (EffectCatalogItem) -> Void
     @State private var chosen: String?
-    @State private var searching = false
 
     private var pickable: [EffectCatalogItem] { fxPickableEffects(model.effectCatalog, layerHasAudio: layerHasAudio) }
 
@@ -236,16 +235,16 @@ struct EffectPickerView: View {
                 .onChange(of: category) { _ in proxy.scrollTo("topo", anchor: .top) }
             }.frame(maxHeight: .infinity)
         }
-        .fullScreenCover(isPresented: $searching) {
-            EffectPickerSearch(prefs: prefs, sorted: sorted, onPick: { entry in searching = false; onPick(entry) },
-                               onFavorite: toggleFavorite, onDismiss: { searching = false })
-                .environmentObject(model)
-        }
     }
 
     /// Parece o campo; abre a busca em tela cheia, acima do teclado.
     private var searchLauncher: some View {
-        Button { searching = true } label: {
+        Button {
+            let pick = onPick
+            let pickable = self.pickable
+            let sorted = fxArrangeCatalog(pickable, fxEffectCategories(pickable))
+            model.effectSearch = EffectSearchRequest(prefs: prefs, sorted: sorted, onPick: pick, onFavorite: toggleFavorite)
+        } label: {
             HStack(spacing: EffectPickerLayout.fieldGap) {
                 CupertinoGlyph.text(CupertinoGlyph.Search, size: AureaDims.iconSm, color: AureaColors.muted)
                 Text(AureaText.t("effect_buscar_glitch_vhs_desfoque_cor")).font(EffectPickerLayout.description)
@@ -323,13 +322,32 @@ struct EffectPickerView: View {
 
 /// A BUSCA em tela cheia: o campo já focado e a grade filtrando a cada letra.
 /// Um toque no resultado (`effects.result.<id>`) adiciona e fecha.
-private struct EffectPickerSearch: View {
+/// Pedido de busca: o que o painel sabe (catálogo filtrado, favoritos e o
+/// que fazer ao escolher) levado até a raiz do editor, que apresenta.
+struct EffectSearchRequest: Identifiable {
+    let id = UUID()
+    let prefs: FxEffectPrefs
+    let sorted: [EffectCatalogItem]
+    let onPick: (EffectCatalogItem) -> Void
+    let onFavorite: (EffectCatalogItem) -> Void
+}
+
+struct EffectPickerSearch: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject var prefs: FxEffectPrefs
     let sorted: [EffectCatalogItem]
     let onPick: (EffectCatalogItem) -> Void
     let onFavorite: (EffectCatalogItem) -> Void
     let onDismiss: () -> Void
+
+    init(prefs: FxEffectPrefs, sorted: [EffectCatalogItem], onPick: @escaping (EffectCatalogItem) -> Void,
+         onFavorite: @escaping (EffectCatalogItem) -> Void, onDismiss: @escaping () -> Void) {
+        _prefs = ObservedObject(wrappedValue: prefs)
+        self.sorted = sorted
+        self.onPick = onPick
+        self.onFavorite = onFavorite
+        self.onDismiss = onDismiss
+    }
     @State private var query = ""
     @State private var docs: [UInt32: FxSearchDoc] = [:]
     @FocusState private var focused: Bool

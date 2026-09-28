@@ -62,6 +62,12 @@ struct EditorView: View {
             // O "+" saiu: adicionar mora na barra fixa de baixo (`ShellAddBar`).
         }
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
+        .fullScreenCover(item: $model.effectSearch) { request in
+            EffectPickerSearch(prefs: request.prefs, sorted: request.sorted,
+                               onPick: { entry in model.effectSearch = nil; request.onPick(entry) },
+                               onFavorite: request.onFavorite, onDismiss: { model.effectSearch = nil })
+                .environmentObject(model)
+        }
         .sheet(item: $model.textContentRequest) { request in
             TextContentEditor(request: request).environmentObject(model)
                 .presentationDetents([.large]).interactiveDismissDisabled()
@@ -528,11 +534,15 @@ private struct BatchToolsView: View {
         }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
     }
     private func staggerApply(_ key: String, id: String, action: @escaping () -> Void) -> some View {
+        // Alvo de dedo: a altura mínima mora no próprio botão (só o texto media
+        // 14 pt, e o toque/leitor de tela usavam essa caixa).
         Button(action: action) {
             Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.accent).lineLimit(1)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 44, maxHeight: .infinity)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).accessibilityLabel(AureaText.t(key)).accessibilityIdentifier(id)
+        .buttonStyle(.plain).frame(maxWidth: .infinity, minHeight: 44)
+        .accessibilityLabel(AureaText.t(key)).accessibilityIdentifier(id)
     }
     private func tool(_ glyph: Character, _ key: String, size: CGFloat = 20, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) { CupertinoGlyph.text(glyph, size: size, color: enabled ? AureaColors.text : AureaColors.disabled).frame(maxWidth: .infinity, maxHeight: .infinity) }

@@ -55,6 +55,11 @@ def validate_face_fixture(fixture, audit):
 
 
 READY_TIMEOUT = 90
+# The first launches after `simctl bootstatus` share the simulator with its
+# post-boot work (dyld/Metal caches): the first scene took 86 s of 90 s on a
+# green run and 166 s on the next one while every later scene took ~10 s.
+COLD_START_LAUNCHES = 2
+COLD_START_TIMEOUT = 210
 POLL_INTERVAL = 0.25
 
 
@@ -387,7 +392,7 @@ def validate_home_backdrop(state, documents, output, record, frame_checker):
             raise RuntimeError(f'{kind} backdrop filter left its input unchanged')
 
 
-def capture_scene(scene, app, output, udid, console_option, report, frame_checker):
+def capture_scene(scene, app, output, udid, console_option, report, frame_checker, cold=False):
     started = time.monotonic()
     record = {'scene': scene, 'status': 'running', 'startedAt': time.time(),
               'stdout': f'{scene}.stdout.log', 'stderr': f'{scene}.stderr.log'}
@@ -450,7 +455,9 @@ def capture_scene(scene, app, output, udid, console_option, report, frame_checke
             environment['SIMCTL_CHILD_AUREA_PARITY_EXPORT'] = '1'
         process = subprocess.Popen(argv, stdout=stdout, stderr=stderr, env=environment)
         record['launch']['hostProcessPid'] = process.pid
-        state = wait_ready(ready, process, record, timeout=210 if scene == 'export-render' else READY_TIMEOUT)
+        record['coldStart'] = cold
+        state = wait_ready(ready, process, record,
+                           timeout=210 if scene == 'export-render' else COLD_START_TIMEOUT if cold else READY_TIMEOUT)
         record['state'] = state
         save_json(output / f'{scene}.json', state)
         report['screens'].append(state)
@@ -624,8 +631,9 @@ def main(argv=None):
         startup_failures = 0
         scenes = requested_scenes()
         report['requestedScenes'] = list(scenes)
-        for scene in scenes:
-            record = capture_scene(scene, app, output, udid, console_option, report, frame_checker)
+        for index, scene in enumerate(scenes):
+            record = capture_scene(scene, app, output, udid, console_option, report, frame_checker,
+                                   cold=index < COLD_START_LAUNCHES)
             print(f'{scene}: {record["status"]} ({record["durationSeconds"]:.1f}s)', flush=True)
             if record['status'] != 'captured':
                 print(record.get('error', 'capture interrupted'), file=sys.stderr, flush=True)

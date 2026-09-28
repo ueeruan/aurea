@@ -221,6 +221,9 @@ final class AureaModel: ObservableObject {
     @Published var panel: PanelKind = .none
     @Published var showAddLayer = false
     @Published var showExport = false
+    /// Busca da aba de efeitos aberta em tela cheia. Apresentada pela RAIZ do
+    /// editor (EditorView): de dentro do painel o fullScreenCover não abria.
+    @Published var effectSearch: EffectSearchRequest?
     @Published var showProjectSettings = false
     @Published var showSettings = false
     @Published var donationPromptPending = true

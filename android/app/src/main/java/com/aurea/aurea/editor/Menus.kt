@@ -34,6 +34,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.aurea.aurea.R
+import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -442,6 +443,23 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         block()
     }
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
+        // Redesenho 2026-09-29: a engrenagem do topo abre este menu, e o que
+        // morava no topo e no transporte antigos (ajustes, busca, copiar e
+        // colar, marcador, lupa) fica aqui em cima — nada se perdeu.
+        MenuSection(stringResource(R.string.editor_projeto_cbe9))
+        MenuItemRow(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_ajustes_projeto), act { ui.sheet = ShellSheet.ProjectSettings })
+        MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), act { ui.sheet = ShellSheet.CommandSearch })
+        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), act { ui.sheet = ShellSheet.CopyPaste })
+        val marked = store.markers.frames.binarySearch(store.playhead) >= 0
+        MenuItemRow(CupertinoGlyph.Bookmark, stringResource(R.string.editor_marcar_ou_desmarcar_este_instante), act { store.toggleMarker() }, checked = marked)
+        MenuItemRow(
+            CupertinoGlyph.Search,
+            stringResource(R.string.stage_zoom_view_off),
+            { StageView.zoomLock = !StageView.zoomLock },
+            checked = StageView.zoomLock,
+            icon = androidx.compose.material.icons.Icons.Rounded.ZoomIn,
+        )
+
         MenuSection(stringResource(R.string.sh_menu_selection))
         MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
         MenuItemRow(
@@ -519,7 +537,9 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         )
 
         MenuSection(stringResource(R.string.editor_marcas_ritmo))
-        MenuItemRow(CupertinoGlyph.Bookmark, stringResource(R.string.editor_marcar_ou_desmarcar_este_instante), act { store.toggleMarker() })
+        // Marcar/desmarcar subiu para a seção "Projeto"; aqui fica editar a marca
+        // do cabeçote (o que o toque longo do marcador antigo do transporte fazia).
+        MenuItemRow(CupertinoGlyph.Pencil, stringResource(R.string.marker_edit), if (marked) act { store.editMarkerAtPlayhead() } else null)
         MenuItemRow(ShellGlyph.BookmarkSolid, stringResource(R.string.editor_ir_proxima_marca), if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
 
         MenuSection(stringResource(R.string.editor_mais))

@@ -31,13 +31,15 @@ class TimelineExpansionTest {
         val rows = listOf(row(5), lane, row(5, TimelineTrack(31, 7, 2)), row(6))
         for (density in listOf(1f, 2.5f)) {
             val layerHeight = 56f * density
-            val tops = listOf(0f, 56f, 84f, 112f, 168f)
+            // Trilhas baixas (LANE_HEIGHT_DP = 16): 56, 72, 88, 144.
+            val lane = LANE_HEIGHT_DP
+            val tops = listOf(0f, 56f, 56f + lane, 56f + 2 * lane, 112f + 2 * lane)
             tops.forEachIndexed { index, top ->
                 assertEquals(top * density, timelineRowTop(rows, index, layerHeight, density), 0.001f)
                 assertEquals(index, timelineRowIndex(rows, top * density, layerHeight, density))
             }
-            assertEquals(1, timelineRowIndex(rows, 83.9f * density, layerHeight, density))
-            assertEquals(2, timelineRowIndex(rows, 111.9f * density, layerHeight, density))
+            assertEquals(1, timelineRowIndex(rows, (56f + lane - 0.1f) * density, layerHeight, density))
+            assertEquals(2, timelineRowIndex(rows, (56f + 2 * lane - 0.1f) * density, layerHeight, density))
             assertEquals(-1, timelineRowIndex(rows, -1f, layerHeight, density))
         }
     }

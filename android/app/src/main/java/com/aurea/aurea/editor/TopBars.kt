@@ -79,6 +79,8 @@ import com.aurea.aurea.ui.theme.tocavel
 private data class LayerHeader(val id: Long, val name: String, val kind: Int, val locked: Boolean, val parent: Long)
 
 private val TitleStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600))
+/** Nome do projeto no topo redesenhado: 17 sp bold, uma linha com reticências. */
+private val ProjectTitleStyle = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700))
 
 /** Pai da linha na lista de camadas (0 = solta): `parentIndex` é índice na mesma lista. */
 private fun parentOf(rows: List<LayerRow>, row: LayerRow): Long = rows.getOrNull(row.parentIndex)?.id ?: 0L
@@ -107,7 +109,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
         Modifier
             .fillMaxWidth()
             .height(ShellDims.TopBar)
-            .background(AureaColors.EditorTopBar)
+            .background(AureaColors.EditorCanvas)
             .padding(end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -325,8 +327,11 @@ private class LinkMenuPosition(private val margin: Int) : PopupPositionProvider 
 // =============================================================================
 
 /**
- * sair · título editável · tempo "m:ss.cc" (toque: ir para o tempo) · ⋮ da
- * linha do tempo · ⚙ projeto · exportar.
+ * Topo do editor (redesenho 2026-09-29, 64 dp): ‹ · nome do projeto (17 sp
+ * bold, toque renomeia) · engrenagem · Exportar (quadrado de 46 cheio no
+ * destaque). A engrenagem abre o menu da linha do tempo, que agora começa
+ * pela seção "Projeto" (ajustes, buscar ferramentas, copiar e colar,
+ * marcador, lupa) — o que morava nesta barra continua a um toque dali.
  */
 @Composable
 internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
@@ -334,28 +339,22 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
         Modifier
             .fillMaxWidth()
             .height(ShellDims.TopBar)
-            .background(AureaColors.EditorTopBar)
-            .padding(end = 6.dp),
+            .background(AureaColors.EditorCanvas)
+            .padding(start = 6.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val nested by remember { derivedStateOf { store.precompDepth > 0 } }
         if (nested) {
             // Dentro de um grupo: ‹ volta para a composição de cima.
-            ChromeButton(CupertinoGlyph.ChevronLeft, stringResource(R.string.editor_voltar_composicao_principal), onClick = { store.closePrecomp() }, width = 44.dp)
+            ChromeButton(CupertinoGlyph.ChevronLeft, stringResource(R.string.editor_voltar_composicao_principal), onClick = { store.closePrecomp() }, size = 24.dp, width = 44.dp)
+            Spacer(Modifier.width(6.dp))
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.editor_editando_grupo), style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Accent)))
-                Text(store.compositionName, maxLines = 1, style = TitleStyle)
+                Text(store.compositionName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = ProjectTitleStyle)
             }
         } else {
-            // A porta com a seta (Icons.logout espelhado): sair do projeto.
-            ChromeVectorButton(
-                Icons.AutoMirrored.Filled.Logout,
-                stringResource(R.string.editor_projetos),
-                onClick = { shellBack(store, ui) },
-                size = 20.dp,
-                width = 44.dp,
-                mirror = true,
-            )
+            ChromeButton(CupertinoGlyph.ChevronLeft, stringResource(R.string.editor_projetos), onClick = { shellBack(store, ui) }, size = 24.dp, width = 44.dp)
+            Spacer(Modifier.width(6.dp))
             Box(Modifier.weight(1f)) {
                 val title by remember { derivedStateOf { store.project.title } }
                 InlineName(
@@ -364,21 +363,37 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                     placeholder = stringResource(R.string.edt_untitled),
                     maxLength = 320,
                     onRename = { store.renameProject(it) },
+                    style = ProjectTitleStyle,
                 )
             }
         }
-        // Selecionar UMA camada pela lista (sem ter de achar o clipe na timeline).
-        val hasLayers by remember { derivedStateOf { store.layers.isNotEmpty() } }
-        if (hasLayers) ChromeButton(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), onClick = { openSheet(store, ui, ShellSheet.SearchLayers) }, size = 19.dp, width = 44.dp)
-        ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
-        ChromeVectorButton(Icons.Filled.MoreVert, stringResource(R.string.editor_mais_linha_tempo), onClick = { openSheet(store, ui, ShellSheet.TimelineMenu) })
-        ChromeButton(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_projeto_cbe9), onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) }, size = 19.dp)
-        // Exportar em destaque: a A.01 pintava em `acao` (#245D8C), 2,6:1
-        // sobre o cromo (bug 27).
-        ChromeButton(CupertinoGlyph.SquareArrowUp, stringResource(R.string.editor_exportar), onClick = {
-            if (store.playing) store.pause()
-            ui.exporting = true
-        }, tint = AureaColors.Accent)
+        Spacer(Modifier.width(6.dp))
+        ChromeButton(
+            CupertinoGlyph.Gear,
+            stringResource(R.string.editor_ajustes_projeto_mais),
+            onClick = { openSheet(store, ui, ShellSheet.TimelineMenu) },
+            size = 22.dp,
+            width = 44.dp,
+            modifier = Modifier.testTag("editor.projectMenu"),
+        )
+        Spacer(Modifier.width(6.dp))
+        // Exportar: quadrado de 46 cheio no destaque, ícone escuro.
+        val exportLabel = stringResource(R.string.editor_exportar)
+        Box(
+            Modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(AureaColors.Accent)
+                .semantics { contentDescription = exportLabel }
+                .testTag("editor.export")
+                .tocavel(haptic = true) {
+                    if (store.playing) store.pause()
+                    ui.exporting = true
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            CupertinoIcon(CupertinoGlyph.SquareArrowUp, 22.dp, AureaColors.OnAccent)
+        }
     }
 }
 
@@ -393,6 +408,7 @@ private fun InlineName(
     placeholder: String,
     maxLength: Int,
     onRename: (String) -> Unit,
+    style: TextStyle = TitleStyle,
 ) {
     var editing by remember(key) { mutableStateOf(false) }
     if (!editing) {
@@ -401,7 +417,7 @@ private fun InlineName(
             if (empty) placeholder else name,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            style = TitleStyle.merge(TextStyle(color = if (empty) ShellColors.White40 else AureaColors.Text)),
+            style = style.merge(TextStyle(color = if (empty) ShellColors.White40 else AureaColors.Text)),
             modifier = Modifier
                 .fillMaxWidth()
                 .tocavel(shrink = 1f) { editing = true }
@@ -424,7 +440,7 @@ private fun InlineName(
         value = value,
         onValueChange = { if (it.text.length <= maxLength) value = it },
         singleLine = true,
-        textStyle = TitleStyle,
+        textStyle = style.merge(TextStyle(color = AureaColors.Text)),
         cursorBrush = SolidColor(AureaColors.Accent),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { confirm() }),

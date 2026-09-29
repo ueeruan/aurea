@@ -177,6 +177,21 @@ internal fun graphGroup(keys: List<KeyframeRow>, track: List<KeyframeRow>): List
     return if (group.any { it[0].sameTrack(head) }) group else listOf(track) + group
 }
 
+/** Curva só existe entre 2 marcas: com menos, o editor não abre (avisa). */
+internal fun curveEditable(track: List<KeyframeRow>): Boolean = track.size >= 2
+
+/**
+ * "Aplicar a todos os keyframes desta propriedade": o início de CADA trecho
+ * de cada trilha do grupo (X/Y/Z, componentes do mesmo parâmetro de efeito,
+ * largura/altura da forma) — a última marca de cada trilha não abre trecho.
+ * Vazio = a trilha escolhida tem menos de 2 marcas.
+ */
+internal fun propertySegmentStarts(keys: List<KeyframeRow>, track: List<KeyframeRow>): List<KeyframeRow> {
+    if (!curveEditable(track)) return emptyList()
+    return graphGroup(keys, track).flatMap { t -> t.sortedBy { it.time }.dropLast(1) }
+        .distinctBy { listOf(it.property, it.effectIndex, it.paramIndex, it.time) }
+}
+
 /**
  * O trecho que o cabeçote pede: o índice da marca que abre o trecho sob
  * [localPlayhead] (a última marca abre o trecho que chega nela). −1 = nenhum.

@@ -406,6 +406,14 @@
     <string name="panel_aplicar">Apply</string>
     <string name="panel_aplicar_sem_texto_remove_expressao">Applying with no text removes the expression.</string>
     <string name="panel_aplicar_todos_segmentos">Apply to all segments</string>
+    <string name="panel_curve_apply_property">Apply to all keyframes of this property</string>
+    <string name="pn_curve_need_two_keys">You need at least 2 keyframes to edit the curve</string>
+    <string name="pn_curve_save">Save curve</string>
+    <string name="pn_curve_std_smooth">Smooth</string>
+    <string name="pn_curve_std_in">Ease in</string>
+    <string name="pn_curve_std_out">Ease out</string>
+    <string name="pn_curve_std_overshoot">Overshoot</string>
+    <string name="pn_curve_std_anticipate">Anticipate</string>
     <string name="panel_arraste_alcas_palco_mudar_tamanho">Drag the handles on the stage to change the size</string>
     <string name="panel_arraste_pontos_palco_toque_num_ponto">Drag the points on the stage; tap a point to see the curve handles.</string>
     <string name="panel_arredondar_pontas">Round the ends</string>
@@ -2575,6 +2583,8 @@ to edit the curve.</string>
     <string name="fxu_octaves">octaves</string>
     <string name="fxu_turns">turns</string>
     <string name="fx_copy_this_effect">Copy this effect</string>
+    <string name="fx_back_to_effects">Back to effects</string>
+    <string name="fx_param_expression">Expression for %1$s</string>
     <string name="fx_default_value">Default: %1$s</string>
     <string name="fx_param_range">%1$s to %2$s</string>
     <string name="app_importing_generated_video">Importing generated video…</string>
@@ -3305,4 +3315,9 @@ to edit the curve.</string>
     <string name="shape3d_layout_hint">Per-part rotation, delay, random, bend, twist and spread — the same as 3D text letters.</string>
     <string name="fx_desc_shape3d_layout">Rotates, delays, spreads and randomizes the parts of a 3D shape, like 3D text letters.</string>
     <string name="edt_cmd_select_shape3d">Select a 3D shape</string>
+    <string name="editor_ir_inicio_segure_anterior">Go to start · hold: previous marker, keyframe or frame</string>
+    <string name="editor_ir_fim_segure_proximo">Go to end · hold: next marker, keyframe or frame</string>
+    <string name="editor_ajustes_projeto">Project settings</string>
+    <string name="editor_ajustes_projeto_mais">Project settings and more options</string>
+    <string name="editor_duplicar_camada_segure_copiar">Duplicate layer · hold to copy and paste</string>
 </resources>

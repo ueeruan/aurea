@@ -27,8 +27,10 @@ struct EditorView: View {
             let wide = !model.fullscreen && model.panel != .curve && EditorLayout.isWide(geometry.size.width, geometry.size.height)
             let sideWidth = (geometry.size.width * 0.4).clamped(to: 280...380)
             let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
+            // Fora da tela cheia o palco tem 8 pt de margem de cada lado.
+            let sideMargin: CGFloat = model.fullscreen ? 0 : EditorLayout.previewSideMargin
             let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent, fullscreen: model.fullscreen,
-                                             width: geometry.size.width, aspect: aspect, preferred: CGFloat(previewPreference))
+                                             width: max(0, geometry.size.width - sideMargin * 2), aspect: aspect, preferred: CGFloat(previewPreference))
             Group {
                 if model.sceneEditor {
                     SceneLayoutWorkspace(height: geometry.size.height)
@@ -39,9 +41,10 @@ struct EditorView: View {
                             VStack(spacing: 0) {
                                 PreviewStage(height: max(96, geometry.size.height - EditorLayout.topBar - EditorLayout.transport - EditorLayout.strip - EditorLayout.wideTimeline(geometry.size.height)
                                                          - (model.sheetContent == .addBar ? StageDim.addBar : 0)))
-                                Rectangle().fill(AureaColors.editorPanelHigh).frame(height: EditorLayout.strip)
+                                    .padding(.horizontal, sideMargin)
+                                if EditorLayout.strip > 0 { Rectangle().fill(AureaColors.editorCanvas).frame(height: EditorLayout.strip) }
                                 TransportView().frame(height: EditorLayout.transport)
-                                TimelineView().frame(height: EditorLayout.wideTimeline(geometry.size.height))
+                                TimelineView(timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: EditorLayout.wideTimeline(geometry.size.height))
                                 // A barra de adicionar na base da coluna do palco.
                                 if model.sheetContent == .addBar { ShellAddBar().frame(height: StageDim.addBar) }
                             }.frame(maxWidth: .infinity)
@@ -52,16 +55,19 @@ struct EditorView: View {
                     VStack(spacing: 0) {
                         if !model.fullscreen { TopBarView().frame(height: metrics.topBar) }
                         PreviewStage(height: max(0, metrics.preview - (model.fullscreen ? StageDim.fullscreenTimeBar : 0)))
+                            .padding(.horizontal, sideMargin)
                         if model.fullscreen {
                             FullscreenTimeBar()
                             TransportView().frame(height: metrics.transport)
                         } else {
-                            // A divisa palco/transporte: arrastar na vertical (na faixa ou
-                            // no transporte fora dos botões) troca palco por timeline;
-                            // toque duplo volta à altura automática.
+                            // A divisa palco/transporte: arrastar na vertical no transporte
+                            // (fora dos botões) troca palco por timeline; toque duplo volta à
+                            // altura automática. A faixa de 8 saiu (strip 0) — o gesto ficou.
                             VStack(spacing: 0) {
-                                Rectangle().fill(AureaColors.editorPanelHigh).frame(height: metrics.strip)
-                                    .overlay(Capsule().fill(AureaColors.muted.opacity(0.55)).frame(width: 36, height: 3))
+                                if metrics.strip > 0 {
+                                    Rectangle().fill(AureaColors.editorCanvas).frame(height: metrics.strip)
+                                        .overlay(Capsule().fill(AureaColors.muted.opacity(0.55)).frame(width: 36, height: 3))
+                                }
                                 TransportView().frame(height: metrics.transport)
                             }
                             .contentShape(Rectangle())
@@ -79,7 +85,7 @@ struct EditorView: View {
                                 .onEnded { _ in dividerStart = nil })
                             .simultaneousGesture(TapGesture(count: 2).onEnded { previewPreference = 0 })
                         }
-                        if metrics.timeline > 0 { TimelineView(compactDock: true).frame(height: metrics.timeline) }
+                        if metrics.timeline > 0 { TimelineView(compactDock: true, timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: metrics.timeline) }
                         if metrics.sheet > 0 {
                             if model.sheetContent == .addBar { ShellAddBar().frame(height: metrics.sheet) }
                             else { ContextSheet(metrics: metrics).frame(height: metrics.sheet) }
@@ -87,7 +93,7 @@ struct EditorView: View {
                     }
                 }
             }
-            .background(AureaColors.background.ignoresSafeArea())
+            .background(AureaColors.editorCanvas.ignoresSafeArea())
             // O "+" saiu: adicionar mora na barra fixa de baixo (`ShellAddBar`).
         }
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
@@ -207,7 +213,7 @@ private struct ModelTexturesPrompt: ViewModifier {
     private var compositionSize: CGSize { CGSize(width: CGFloat(model.compositionWidth), height: CGFloat(model.compositionHeight)) }
     var body: some View {
         ZStack {
-            AureaColors.editorTopBar
+            AureaColors.previewBackdrop
             PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen && !model.rawPlayback)
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageOverlay().allowsHitTesting(false) } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageInteractionOverlay().allowsHitTesting(false) } }
@@ -271,6 +277,8 @@ private struct ModelTexturesPrompt: ViewModifier {
             if model.hudVisible { ShellPerfHud().padding(.leading, 8).padding(.top, 6).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).allowsHitTesting(false) }
             // Zoom da vista: "250 %" só com a prévia ampliada; tocar volta a 100 %.
             StageZoomChip().padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
+            if !model.rawPlayback { StageZoomCornerButton().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading) }
         }.frame(height: height).clipped()
         .onAppear { StageViewZoom.shared.resetIfProjectChanged(model.projectURL, engine: model.engine) }
         .onChange(of: model.projectURL) { url in StageViewZoom.shared.resetIfProjectChanged(url, engine: model.engine) }
@@ -1590,41 +1598,46 @@ enum ShellAddCategories {
 
 /// A barra fixa de adicionar, na base do editor, no lugar do "+" (par do
 /// `AddBar` do Android): sempre à vista sem camada escolhida; tocar abre o
-/// painel da categoria. A aberta ganha a pílula de destaque. Sem espaço para
-/// todas, a barra rola de lado.
+/// painel da categoria. A aberta ganha a pílula de destaque. Itens de 64 × 64
+/// (ícone 23, 4 de vão, nome 11): espalhados quando todos cabem; senão a barra
+/// rola de lado. O fundo desce pela área segura de baixo.
 @MainActor private struct ShellAddBar: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     var body: some View {
         GeometryReader { geometry in
             let count = CGFloat(ShellAddCategories.all.count)
-            let fits = geometry.size.width / count >= StageDim.addBarItemMin
-            let item = fits ? geometry.size.width / count : StageDim.addBarItem
+            let fits = geometry.size.width / count >= StageDim.addBarItem
+            let slot = fits ? geometry.size.width / count : StageDim.addBarItem
+            let side = min(StageDim.addBarItem, geometry.size.height)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(ShellAddCategories.all.indices, id: \.self) { index in
-                        let on = model.showAddLayer && shell.addCategory == index
-                        let tint = on ? AureaColors.accent : AureaColors.text
-                        Button { open(index) } label: {
-                            VStack(spacing: StageDim.addBarItemInset) {
-                                CupertinoGlyph.text(ShellAddCategories.all[index].1, size: StageDim.addBarIcon, color: tint)
-                                Text(AureaText.t(ShellAddCategories.all[index].0)).font(.aurea(size: 11, weight: .medium))
-                                    .foregroundStyle(tint).lineLimit(1)
-                            }
-                            .frame(width: max(0, item - StageDim.addBarItemInset), height: max(0, geometry.size.height - StageDim.addBarItemInset * 2.5))
-                            .background(on ? AureaColors.chip : Color.clear, in: RoundedRectangle(cornerRadius: AureaDims.radiusCard))
-                            .frame(width: item, height: geometry.size.height)
-                            .contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                            .accessibilityLabel(AureaText.t(ShellAddCategories.all[index].0))
-                            .accessibilityIdentifier("aurea.add.category.\(index)")
+                        item(index, slot: slot, side: side, height: geometry.size.height)
                     }
                 }.padding(.horizontal, fits ? 0 : StageDim.addBarItemInset)
             }.scrollDisabled(fits)
         }
-        .background(AureaColors.editorPanelHigh)
-        .overlay(alignment: .top) { Rectangle().fill(AureaColors.border).frame(height: StageDim.hairline) }
+        .background(AureaColors.editorBar.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) { Rectangle().fill(AureaColors.editorBarLine).frame(height: StageDim.hairline) }
         .accessibilityIdentifier("editor.addBar")
+    }
+    private func item(_ index: Int, slot: CGFloat, side: CGFloat, height: CGFloat) -> some View {
+        let on = model.showAddLayer && shell.addCategory == index
+        let tint = on ? AureaColors.accent : AureaColors.text
+        return Button { open(index) } label: {
+            VStack(spacing: StageDim.addBarItemInset) {
+                CupertinoGlyph.text(ShellAddCategories.all[index].1, size: StageDim.addBarIcon, color: tint)
+                Text(AureaText.t(ShellAddCategories.all[index].0)).font(.aurea(size: 11, weight: .medium))
+                    .foregroundStyle(tint).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(width: side, height: side)
+            .background(on ? AureaColors.chip : Color.clear, in: RoundedRectangle(cornerRadius: AureaDims.radiusCard))
+            .frame(width: slot, height: height)
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .accessibilityLabel(AureaText.t(ShellAddCategories.all[index].0))
+            .accessibilityIdentifier("aurea.add.category.\(index)")
     }
     private func open(_ index: Int) {
         shell.addCategory = index

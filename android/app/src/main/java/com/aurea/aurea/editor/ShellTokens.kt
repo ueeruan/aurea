@@ -55,16 +55,18 @@ internal object ShellColors {
 
 /** Medidas da casca A.01 (`EditorLayoutMetrics`, `CromoEditor`, `ContextSheet`). */
 internal object ShellDims {
-    val TopBar = 44.dp
-    val Transport = 46.dp
-    val Strip = 8.dp
+    val TopBar = EditorLayout.TOP_BAR.dp
+    val Transport = EditorLayout.TRANSPORT.dp
+    val Strip = EditorLayout.STRIP.dp
+    /** Margem da prévia dos lados (redesenho: largura toda menos 8 + 8). */
+    val PreviewMargin = 8.dp
     val SheetHandle = 12.dp          // faixa vazia do ContextSheet sem título
     val FullscreenTimeBar = 44.dp
     val StageInset = 8.dp            // compositionRect: min(8, lado/4)
     val Fab = 52.dp
     val FabMargin = 18.dp
     /** A barra fixa de adicionar (no lugar do "+"): altura e largura de cada categoria. */
-    val AddBar = 64.dp
+    val AddBar = EditorLayout.ADD_BAR.dp
     val AddBarItem = 64.dp
     val AddBarItemMin = 56.dp
     val TouchSlop = 18.dp            // kTouchSlop do Flutter: tocar nunca move

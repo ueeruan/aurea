@@ -160,6 +160,8 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         RigModeBar(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
         StageZoomChip(store, Modifier.align(Alignment.BottomEnd).padding(8.dp))
+        // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
+        if (!store.rawPlayback) StageZoomButton(Modifier.align(Alignment.TopStart))
         if (store.selection.size == 1 && !store.rawPlayback) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
                 if (store.gizmo != null) {
@@ -1221,7 +1223,12 @@ private suspend fun PointerInputScope.stageGestures(
                     target = TARGET_LAYER
                     targetLayer = d.id
                 } else {
-                    hitLayer(store, cx, cy, 0f, includeLocked = true)?.let {
+                    // Seleção múltipla: dentro de uma das escolhidas vale ela
+                    // (o arrasto leva o grupo), mesmo com outra por cima.
+                    (if (store.selection.size >= 2) hitSelected(store, cx, cy) else null)?.let {
+                        target = TARGET_LAYER
+                        targetLayer = it
+                    } ?: hitLayer(store, cx, cy, 0f, includeLocked = true)?.let {
                         target = TARGET_LAYER
                         targetLayer = it
                     }
@@ -1356,6 +1363,41 @@ private suspend fun PointerInputScope.stageGestures(
     }
 }
 
+/**
+ * As camadas escolhidas que andam num mover em grupo, com o detalhe de
+ * PARTIDA: sem as travadas, sem as fora do tempo que têm posição animada
+ * (o keyframe cairia fora do clipe) e sem quem já é levado por um pai
+ * também escolhido.
+ */
+private fun groupMovers(store: EditorStore): List<LayerDetail> {
+    val t = store.playhead
+    val byId = LinkedHashMap<Long, LayerDetail>()
+    for (id in store.selection) {
+        val row = store.layers.firstOrNull { it.id == id } ?: continue
+        if (row.locked || row.kind == LayerType.Audio.kind) continue
+        val d = (if (id == store.primary) store.detail else null) ?: store.queryDetail(id) ?: continue
+        val animated = d.isAnimated(TrackProperty.POSITION_X) || d.isAnimated(TrackProperty.POSITION_Y)
+        if (animated && !activeAt(d, t)) continue
+        byId[id] = d
+    }
+    val parents = HashMap<Long, Long>()
+    val roots = StageMath.moveRoots(byId.keys) { id ->
+        byId[id]?.parentId ?: parents.getOrPut(id) { store.queryDetail(id)?.parentId ?: 0L }
+    }
+    return roots.mapNotNull { byId[it] }
+}
+
+/** A camada escolhida (de cima para baixo) sob o ponto, na seleção múltipla. */
+private fun hitSelected(store: EditorStore, cx: Float, cy: Float): Long? {
+    val t = store.playhead
+    for (row in store.layers) {
+        if (row.id !in store.selection || !row.visible || row.kind == LayerType.Audio.kind || !LayerGeometry.activeAt(row, t)) continue
+        val d = store.queryDetail(row.id) ?: continue
+        if (LayerGeometry.contains(d, cx, cy, 0f)) return row.id
+    }
+    return null
+}
+
 /** Começa o arrasto do alvo anotado no toque; devolve o modo. */
 private fun startDrag(store: EditorStore, edit: StageEdit, target: Int, handle: Int, layer: Long, downX: Float, downY: Float): Int {
     return when (target) {
@@ -1366,6 +1408,17 @@ private fun startDrag(store: EditorStore, edit: StageEdit, target: Int, handle: 
             MODE_MOVE
         }
         TARGET_LAYER -> {
+            // 2+ escolhidas e o dedo numa delas: o grupo inteiro anda junto
+            // (as travadas ficam), sem desfazer a seleção.
+            if (store.selection.size >= 2 && layer in store.selection) {
+                val movers = groupMovers(store)
+                if (movers.isEmpty()) {
+                    store.showToast(AppText.get(store.getApplication<Application>(), R.string.sh_layer_locked_unlock_to_move))
+                    return MODE_IDLE
+                }
+                edit.startGroupMove(movers, downX, downY)
+                return MODE_MOVE
+            }
             // Arrastar escolhe a camada no COMEÇO do gesto.
             if (store.primary != layer || store.selection.size != 1) store.select(layer)
             val row = store.layers.firstOrNull { it.id == layer }
@@ -1419,12 +1472,24 @@ private class StageEdit(
     private var span0 = 1f
     private var rotActive = false
     private var rotOffset = 0f
+    // Encaixes da pinça (NaN = solto): giro em múltiplos de 45°, escala em 100%.
+    private var rotSnap = Float.NaN
+    private var scaleSnap = Float.NaN
+
+    // Mover em grupo (2+ camadas escolhidas): o detalhe de PARTIDA de cada uma
+    // (posição local e pai → composição) e o centro da caixa que abraça todas.
+    private val group = ArrayList<LayerDetail>()
+    private var groupCx0 = Float.NaN
+    private var groupCy0 = Float.NaN
 
     fun reset() {
         began = false
         axisLock = 0
         rotActive = false
         accAngle = 0f
+        rotSnap = Float.NaN
+        scaleSnap = Float.NaN
+        group.clear()
     }
 
     /** Fecha o passo de desfazer (se houve mudança) e apaga o que o gesto desenhava. */
@@ -1482,6 +1547,28 @@ private class StageEdit(
         downCy = m.cy(y)
         axisLock = axis
         if (axis != 0) ui.grabbedHandle = axis - 1
+        group.clear()
+        engage()
+    }
+
+    /**
+     * Mover em grupo: todas as [layers] andam o MESMO delta da composição,
+     * cada uma no espaço do seu pai. O encaixe no centro usa o centro da
+     * caixa que abraça o grupo inteiro.
+     */
+    fun startGroupMove(layers: List<LayerDetail>, x: Float, y: Float) {
+        group.clear()
+        group.addAll(layers)
+        moveDetail = null
+        val q = FloatArray(8)
+        val sets = ArrayList<FloatArray>(layers.size)
+        for (d in layers) if (LayerGeometry.corners(d, q)) sets.add(q.copyOf())
+        val box = StageMath.unionBox(sets)
+        groupCx0 = if (box != null) (box[0] + box[2]) / 2 else Float.NaN
+        groupCy0 = if (box != null) (box[1] + box[3]) / 2 else Float.NaN
+        downCx = m.cx(x)
+        downCy = m.cy(y)
+        axisLock = 0
         engage()
     }
 
@@ -1491,11 +1578,41 @@ private class StageEdit(
         lastAngle = atan2(by - ay, bx - ax)
         accAngle = 0f
         rotActive = false
+        // Já parado num encaixe: fica preso sem tique até sair e voltar.
+        rotSnap = StageMath.snapStep(rot0, StageMath.ROT_STEP, Float.NaN, StageMath.ROT_ENTER, StageMath.ROT_EXIT)
+        scaleSnap = StageMath.snapTarget(abs(sx0), 1f, Float.NaN, StageMath.SCALE_ENTER, StageMath.SCALE_EXIT)
         engage()
     }
 
     fun step(mode: Int, x: Float, y: Float) {
-        if (mode == MODE_MOVE) move(x, y)
+        if (mode == MODE_MOVE) {
+            if (group.isNotEmpty()) moveGroup(x, y) else move(x, y)
+        }
+    }
+
+    private fun moveGroup(x: Float, y: Float) {
+        var dx = m.cx(x) - downCx
+        var dy = m.cy(y) - downCy
+        // O mesmo encaixe do mover de uma camada, no centro da caixa do grupo.
+        val tol = if (m.fit > 0f) snapTol / m.fit else 0f
+        var snapX = Float.NaN
+        var snapY = Float.NaN
+        if (!groupCx0.isNaN()) {
+            snapX = anchorSnap(groupCx0 + dx, m.compW / 2, tol)
+            snapY = anchorSnap(groupCy0 + dy, m.compH / 2, tol)
+            if (!snapX.isNaN()) dx = snapX - groupCx0
+            if (!snapY.isNaN()) dy = snapY - groupCy0
+        }
+        if ((!snapX.isNaN() && snapX != ui.snapX) || (!snapY.isNaN() && snapY != ui.snapY)) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        ui.snapX = snapX
+        ui.snapY = snapY
+        begin("mover")
+        for (d in group) {
+            StageMath.moveInParent(d.parentAffine, d.position[0], d.position[1], dx, dy, pt)
+            store.setTransform2(TrackProperty.POSITION_X, pt[0], TrackProperty.POSITION_Y, pt[1], layer = d.id)
+        }
     }
 
     private fun move(x: Float, y: Float) {
@@ -1531,7 +1648,7 @@ private class StageEdit(
     }
 
     fun pinch(ax: Float, ay: Float, bx: Float, by: Float) {
-        val f = clampFactor(hypot(ax - bx, ay - by) / span0)
+        var f = clampFactor(hypot(ax - bx, ay - by) / span0)
         val angle = atan2(by - ay, bx - ax)
         accAngle += wrapRad(angle - lastAngle)
         lastAngle = angle
@@ -1541,10 +1658,26 @@ private class StageEdit(
             rotActive = true
             rotOffset = 4f * sign(deg)
         }
+        // Escala 100%: a escala X (em módulo) prende em 1 perto dele.
+        val ref = abs(sx0)
+        if (ref > 1e-4f) {
+            val s = StageMath.snapTarget(ref * f, 1f, scaleSnap, StageMath.SCALE_ENTER, StageMath.SCALE_EXIT)
+            if (StageMath.snapEntered(scaleSnap, s)) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            scaleSnap = s
+            if (!s.isNaN()) f = clampFactor(1f / ref)
+        }
         begin("pinça")
         if (threeD) store.gizmoSetComponents(TrackProperty.SCALE_X, floatArrayOf(sx0 * f, sy0 * f, sz0 * f))
         else store.setTransform2(TrackProperty.SCALE_X, sx0 * f, TrackProperty.SCALE_Y, sy0 * f)
-        if (rotActive) store.setTransform(TrackProperty.ROTATION_Z, rot0 + deg - rotOffset)
+        if (rotActive) {
+            // Giro: prende nos múltiplos de 45° (0, 45, 90…) com um tique.
+            var r = rot0 + deg - rotOffset
+            val s = StageMath.snapStep(r, StageMath.ROT_STEP, rotSnap, StageMath.ROT_ENTER, StageMath.ROT_EXIT)
+            if (StageMath.snapEntered(rotSnap, s)) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            rotSnap = s
+            if (!s.isNaN()) r = s
+            store.setTransform(TrackProperty.ROTATION_Z, r)
+        }
     }
 }
 

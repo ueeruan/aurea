@@ -6,8 +6,6 @@ import PhotosUI
 struct TopBarView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
-    @State private var performanceTest = false
-    @State private var commandSearch = false
     private var layer: LayerItem? { model.selectedLayer }
     private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
     private var count: Int { model.selection.count }
@@ -16,47 +14,98 @@ struct TopBarView: View {
     var body: some View {
         Group {
             if count >= 2 { batchBar }
+            // Seção da camada aberta (redesenho 2026-09-29): `‹` + título centrado (SectionTopBar.kt).
+            else if layer != nil, let title = sectionTitle { sectionBar(title) }
             else if let layer { layerBar(layer) }
             else { projectBar }
         }
-        .frame(height: StageDim.barButtonHeight)
-        .background(count >= 2 ? AureaColors.accent : AureaColors.editorTopBar)
-        .sheet(isPresented: $performanceTest) { PerformanceTestPanel() }
-        .sheet(isPresented: $commandSearch) { CommandSearchView().environmentObject(model).environmentObject(shell) }
+        .frame(height: EditorLayout.topBar)
+        .background(AureaColors.editorCanvas)
+        // Abertos pelo menu da engrenagem (ShellOverlayHost) ou pela lupa das barras.
+        .sheet(isPresented: $shell.performanceTest) { PerformanceTestPanel() }
+        .sheet(isPresented: $shell.commandSearch) { CommandSearchView().environmentObject(model).environmentObject(shell) }
     }
 
-    private var searchButton: some View {
+    /// Título da seção aberta da camada (par do `panelSectionTitle` do Android);
+    /// nil sem seção (doca, nada aberto ou o painel de exportar).
+    private var sectionTitle: String? {
+        switch model.panel {
+        case .none, .dock, .exportPanel: return nil
+        case .transform: return AureaText.t("sh_dock_transform")
+        case .text: return AureaText.t("text_options")
+        case .effects: return AureaText.t("panel_efeitos")
+        case .layer3D: return AureaText.t("panel_material_ambiente")
+        case .appearance: return AureaText.t("panel_mistura_opacidade")
+        case .speed: return AureaText.t("panel_tempo_velocidade")
+        case .clipEdit: return "Slip · Roll · Slide"
+        case .audio: return AureaText.t("panel_som")
+        case .shape: return AureaText.t("panel_cor_preenchimento")
+        case .shapeEdit: return AureaText.t("panel_editar_forma")
+        case .mask: return AureaText.t("panel_mascara_recorte")
+        case .textAnimation: return AureaText.t("panel_animacao")
+        case .curve: return AureaText.t("panel_easing_curve")
+        case .presets: return AureaText.t("panel_presets")
+        case .particles: return AureaText.t("panel_particulas")
+        case .tracking: return AureaText.t("panel_rastreio")
+        case .captions: return AureaText.t("panel_legendas")
+        case .vector: return AureaText.t("panel_vetor")
+        case .aiVideo: return AureaText.t("panel_ai_video")
+        }
+    }
+
+    /// A BARRA DA SEÇÃO (Efeitos.dc.html, par do SectionTopBar.kt): só `‹` + o
+    /// título centrado (17 pt, negrito) no fundo #1E2636. O `‹` fecha a seção e
+    /// volta às ferramentas da camada (a doca), onde moram nome, vincular, lixeira e `⋯`.
+    private func sectionBar(_ title: String) -> some View {
+        ZStack {
+            Color(red: 0x1E / 255, green: 0x26 / 255, blue: 0x36 / 255)
+            Text(title)
+                .font(.aurea(size: 17, weight: .bold))
+                .foregroundStyle(AureaColors.text)
+                .lineLimit(1).truncationMode(.tail)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 56)
+            HStack(spacing: 0) {
+                ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("pn_back_to_layer_tools"), size: 24, width: 44, height: 44) { model.panel = .none }
+                Spacer(minLength: 0)
+            }.padding(.leading, 6)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("editor.sectionBar")
+    }
+
+    private func searchButton(tint: Color = AureaColors.text) -> some View {
         Button {
             if model.status.playing != 0 { model.playPause() }
-            commandSearch = true
-        } label: { Image(systemName: "magnifyingglass").frame(width: 44, height: 44) }
+            shell.commandSearch = true
+        } label: { Image(systemName: "magnifyingglass").foregroundStyle(tint).frame(width: 44, height: 44) }
             .buttonStyle(.plain).accessibilityLabel(AureaText.t("edt_cmd_search_desc")).accessibilityIdentifier("commandSearchOpen")
     }
 
+    /// Barra do PROJETO (nada escolhido), redesenho 2026-09-29: ‹ · nome · ⚙ · exportar.
+    /// Selecionar camada, buscar, o menu ⋮, os ajustes e o teste de desempenho
+    /// moram no menu da engrenagem (seção "Projeto" e as de sempre abaixo).
     private var projectBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             if model.engine.precompDepth > 0 {
-                ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_composicao_principal"), width: 44) { model.editorBack() }
+                ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_composicao_principal"), size: 24, width: 44, height: 44) { model.editorBack() }
                 VStack(alignment: .leading, spacing: 0) {
                     Text(AureaText.t("editor_editando_grupo")).font(.aurea(size: 11)).foregroundStyle(AureaColors.accent)
-                    Text(model.composition["name"] as? String ?? model.projectName).font(.aurea(size: 14, weight: .semibold)).lineLimit(1)
+                    Text(model.composition["name"] as? String ?? model.projectName).font(.aurea(size: 17, weight: .bold)).lineLimit(1).truncationMode(.tail)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Button { model.editorBack() } label: {
-                    MaterialGlyph("automirrored.filled.Logout", size: 20, color: AureaColors.text).scaleEffect(x: -1, y: 1).frame(width: 44, height: 44)
-                }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_projetos"))
-                ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320) { model.renameCurrentProject(to: $0) }
+                ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_projetos"), size: 24, width: 44, height: 44) { model.editorBack() }
+                ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320, size: 17, weight: .bold) { model.renameCurrentProject(to: $0) }
             }
-            // Selecionar UMA camada pela lista (sem ter de achar o clipe na timeline).
-            if !model.layers.isEmpty { pickLayerButton(tint: AureaColors.text, width: 44) }
-            searchButton
-            Button { open(.timelineMenu) } label: { MaterialGlyph("filled.MoreVert", size: 21, color: AureaColors.text).frame(width: 40, height: 44) }
-                .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_linha_tempo"))
-            ShellBarButton(glyph: CupertinoGlyph.GearAltFill, description: AureaText.t("editor_projeto_cbe9"), size: 19) { open(.projectSettings) }
-            Button { performanceTest = true } label: { Image(systemName: "speedometer").frame(width: 40, height: 44) }
-                .buttonStyle(.plain).accessibilityLabel(AureaText.t("ios_perf_test_a11y"))
-            ShellBarButton(glyph: CupertinoGlyph.SquareArrowUp, description: AureaText.t("editor_exportar"), tint: AureaColors.accent) { model.openExport() }
-        }.padding(.trailing, 6)
+            ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("editor_ajustes_projeto_mais"), size: 22, width: 44, height: 44) { open(.timelineMenu) }
+                .accessibilityIdentifier("editor.projectMenu")
+            Button { model.openExport() } label: {
+                CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 22, color: AureaColors.onAccent)
+                    .frame(width: 46, height: 46)
+                    .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("editor_exportar"))
+        }.padding(.leading, 6).padding(.trailing, 10)
     }
     private func layerBar(_ row: LayerItem) -> some View {
         HStack(spacing: 0) {
@@ -70,31 +119,33 @@ struct TopBarView: View {
                            description: AureaText.t(model.hideSelectionBox ? "editor_mostrar_caixa_selecao" : "editor_esconder_caixa_selecao"),
                            size: 19, width: 44, tint: model.hideSelectionBox ? AureaColors.accent : AureaColors.text) { model.hideSelectionBox.toggle() }
                 .accessibilityIdentifier("stage.selectionBox")
-            searchButton
+            searchButton()
             linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 44) { removeSelection() }
             Button { open(.layerMenu) } label: { MaterialGlyph("filled.MoreHoriz", size: 22, color: AureaColors.text).frame(width: 44, height: 44) }
                 .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_acoes_camada"))
         }.padding(.trailing, 4)
     }
+    /// Lote: o mesmo conteúdo de antes, agora sobre o fundo do editor (a
+    /// contagem no destaque diz que é um lote).
     private var batchBar: some View {
         HStack(spacing: 0) {
-            ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 44, tint: AureaColors.onAccent) { model.clearSelection() }
-            Text(AureaText.t("ios_layers_selected_n", count)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.onAccent)
+            ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 44, tint: AureaColors.text) { model.clearSelection() }
+            Text(AureaText.t("ios_layers_selected_n", count)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.accent)
                 .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             // Ficar com UMA só: a lista troca o lote por ela num toque.
-            pickLayerButton(tint: AureaColors.onAccent, width: 40)
-            searchButton
-            linkMenuButton(tint: AureaColors.onAccent)
-            ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, tint: AureaColors.onAccent) { model.groupSelection() }
+            pickLayerButton(tint: AureaColors.text, width: 40)
+            searchButton()
+            linkMenuButton(tint: AureaColors.text)
+            ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, tint: AureaColors.text) { model.groupSelection() }
             if model.layers.contains(where: { model.selection.contains($0.id) && $0.kind == 12 }) {
-                ShellBarButton(glyph: ShellGlyph.SquareSplit2x2, description: AureaText.t("editor_desagrupar"), size: 19, tint: AureaColors.onAccent) {
+                ShellBarButton(glyph: ShellGlyph.SquareSplit2x2, description: AureaText.t("editor_desagrupar"), size: 19, tint: AureaColors.text) {
                     for row in model.layers where model.selection.contains(row.id) && row.kind == 12 { model.ungroup(row.id) }
                 }
             }
-            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, tint: AureaColors.onAccent) { removeSelection() }
+            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, tint: AureaColors.text) { removeSelection() }
             ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
-                           description: AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"), size: 20, tint: AureaColors.onAccent) { model.playPause() }
+                           description: AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"), size: 20, tint: AureaColors.text) { model.playPause() }
         }.padding(.trailing, 2)
     }
     private func pickLayerButton(tint: Color, width: CGFloat) -> some View {
@@ -129,6 +180,8 @@ private struct ShellInlineName: View {
     let placeholder: String
     var limit = Int.max
     var enabled = true
+    var size: CGFloat = 14
+    var weight: Font.Weight = .semibold
     let rename: (String) -> Void
     @State private var editing = false
     @State private var value = ""
@@ -144,10 +197,11 @@ private struct ShellInlineName: View {
                     .onChange(of: value) { new in if new.count > limit { value = String(new.prefix(limit)) } }
             } else {
                 Text(name.isEmpty ? placeholder : name).foregroundStyle(name.isEmpty ? StageInk.white40 : AureaColors.text)
+                    .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12).contentShape(Rectangle())
                     .onTapGesture { if enabled { value = name; editing = true } }
             }
-        }.font(.aurea(size: 14, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+        }.font(.aurea(size: size, weight: weight)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
     }
     private func commit() {
         guard editing else { return }; editing = false
@@ -156,45 +210,84 @@ private struct ShellInlineName: View {
     }
 }
 
+/// Transporte do redesenho 2026-09-29: 7 botões espalhados (desfazer, refazer,
+/// início, play, fim, duplicar, tela cheia), alvos de 44 (o play, 48). Marca,
+/// copiar/colar e a lupa da prévia moram no menu da engrenagem; copiar/colar
+/// também no segurar do duplicar.
 struct TransportView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     var body: some View {
         Group {
-        if model.stageManipulating { StageInfoBar() } else {
-        GeometryReader { geometry in
-            let side = min(40, max(30, (geometry.size.width - 52) / 8))
-            let marked = model.markerFrames.contains(model.status.playhead)
-            HStack(spacing: 0) {
-                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), width: side, height: 46, enabled: model.status.canUndo != 0) { model.undo() }
-                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), width: side, height: 46, enabled: model.status.canRedo != 0) { model.redo() }
-                HStack(spacing: 0) {
-                    ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t(model.markerFrames.isEmpty ? "editor_keyframe_anterior_segure_inicio" : "editor_marca_anterior_segure_inicio"), width: side, height: 46,
-                                   onLongPress: { model.seek(toFrame: 0) }, action: { model.stepTransport(-1) })
-                    ZStack(alignment: .bottomTrailing) {
-                        ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
-                                       description: AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" : (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")),
-                                       size: 26, width: 52, height: 46, tint: model.looping ? AureaColors.accent : AureaColors.text,
-                                       onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
-                        if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 8).padding(.bottom, 8).allowsHitTesting(false) }
-                    }
-                    ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t(model.markerFrames.isEmpty ? "editor_proximo_keyframe_segure_fim" : "editor_proxima_marca_segure_fim"), width: side, height: 46,
-                                   onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { model.stepTransport(1) })
-                }.frame(maxWidth: .infinity)
-                ShellBarButton(glyph: marked ? CupertinoGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
-                               description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"),
-                               width: side, height: 46, tint: marked ? AureaColors.accent : AureaColors.text,
-                               onLongPress: { model.editMarkerAtPlayhead() },
-                               action: { model.toggleMarkerAt(model.status.playhead) })
-                ShellBarButton(glyph: CupertinoGlyph.DocOnClipboard, description: AureaText.t("editor_copiar_colar"), width: side, height: 46) { if model.status.playing != 0 { model.playPause() }; shell.sheet = .copyPaste }
-                // Lupa da prévia: ligada, a pinça no palco sempre amplia a VISTA.
-                StageZoomToggleButton(width: side, height: 46)
-                ShellBarButton(glyph: model.fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen,
-                               description: AureaText.t(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia"), width: side, height: 46) { model.fullscreen.toggle(); model.invalidatePreview() }
-            }
+            if model.stageManipulating { StageInfoBar() } else { buttons }
+        }.frame(height: EditorLayout.transport).background(AureaColors.editorCanvas)
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 0) {
+            undoButton
+            Spacer(minLength: 0)
+            redoButton
+            Spacer(minLength: 0)
+            startButton
+            Spacer(minLength: 0)
+            playButton
+            Spacer(minLength: 0)
+            endButton
+            Spacer(minLength: 0)
+            duplicateButton
+            Spacer(minLength: 0)
+            fullscreenButton
+        }.padding(.horizontal, 6)
+    }
+
+    private var undoButton: some View {
+        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 22, width: 44, height: 44,
+                       enabled: model.status.canUndo != 0, disabledTint: AureaColors.transportDisabled) { model.undo() }
+    }
+    private var redoButton: some View {
+        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 22, width: 44, height: 44,
+                       enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
+    }
+    /// Tocar vai ao quadro 0; segurar é o passo de antes (marca, keyframe ou quadro anterior).
+    private var startButton: some View {
+        ShellBarButton(glyph: CupertinoGlyph.ArrowLeftToLine, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 24, width: 44, height: 44,
+                       onLongPress: { model.stepTransport(-1) }, action: { model.seek(toFrame: 0) })
+    }
+    /// Tocar vai ao fim; segurar é o passo de antes (próxima marca, keyframe ou quadro).
+    private var endButton: some View {
+        ShellBarButton(glyph: CupertinoGlyph.ArrowRightToLine, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 24, width: 44, height: 44,
+                       onLongPress: { model.stepTransport(1) }, action: { model.seek(toFrame: model.compositionDuration) })
+    }
+    private var playButton: some View {
+        ZStack(alignment: .bottomTrailing) {
+            ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
+                           description: AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" : (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")),
+                           size: 26, width: 48, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
+                           onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
+            if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false) }
         }
+    }
+    /// Tocar duplica as camadas escolhidas (apagado sem nenhuma); segurar abre copiar e colar.
+    private var duplicateButton: some View {
+        let empty: Bool = model.selection.isEmpty
+        return ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada_segure_copiar"), size: 22, width: 44, height: 44,
+                              tint: empty ? AureaColors.transportDisabled : AureaColors.text,
+                              onLongPress: {
+                                  if model.status.playing != 0 { model.playPause() }
+                                  shell.sheet = .copyPaste
+                              }, action: {
+                                  guard !model.selection.isEmpty else { return }
+                                  model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) })
+                                  model.refreshModel(force: true)
+                              })
+            .accessibilityIdentifier("transport.duplicate")
+    }
+    private var fullscreenButton: some View {
+        ShellBarButton(glyph: model.fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen,
+                       description: AureaText.t(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia"), size: 22, width: 44, height: 44) {
+            model.fullscreen.toggle(); model.invalidatePreview()
         }
-        }.frame(height: 46).background(AureaColors.editorTopBar)
     }
 }
 
@@ -209,7 +302,7 @@ private struct StageInfoBar: View {
             pair("Y", String(Int((position.count > 1 ? position[1] : 0).rounded())))
             pair(AureaText.t("editor_escala"), "\(Int(((scale.first ?? 1) * 100).rounded()))%")
             pair(AureaText.t("editor_rotacao"), String(format: "%.1f°", rotation.count > 2 ? rotation[2] : 0).replacingOccurrences(of: ".", with: ","))
-        }.padding(.horizontal, 12).frame(height: 46).background(AureaColors.editorTopBar)
+        }.padding(.horizontal, 12).frame(height: EditorLayout.transport).background(AureaColors.editorCanvas)
     }
     private func pair(_ label: String, _ value: String) -> some View {
         VStack(spacing: 0) {
@@ -334,16 +427,22 @@ private struct ShellMenuRow: View {
     var checked: Bool? = nil
     var detail: String? = nil
     var danger = false
+    /// Símbolo do sistema no lugar do glifo (ex.: a lupa da prévia, a mesma do botão antigo).
+    var symbol: String? = nil
     let action: () -> Void
     init(_ glyph: Character, _ key: String, title: String? = nil, enabled: Bool = true, checked: Bool? = nil,
-         detail: String? = nil, danger: Bool = false, action: @escaping () -> Void) {
+         detail: String? = nil, danger: Bool = false, symbol: String? = nil, action: @escaping () -> Void) {
         self.glyph = glyph; self.key = key; self.title = title; self.enabled = enabled; self.checked = checked
-        self.detail = detail; self.danger = danger; self.action = action
+        self.detail = detail; self.danger = danger; self.symbol = symbol; self.action = action
     }
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                CupertinoGlyph.text(glyph, size: 20, color: color).frame(width: 20, height: 20)
+                if let symbol {
+                    Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(color).frame(width: 20, height: 20)
+                } else {
+                    CupertinoGlyph.text(glyph, size: 20, color: color).frame(width: 20, height: 20)
+                }
                 VStack(alignment: .leading, spacing: 0) {
                     Text(title ?? AureaText.t(key)).font(.aurea(size: 15)).foregroundStyle(color)
                     if let detail { Text(AureaText.t(detail)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
@@ -587,7 +686,10 @@ private struct ShellMenuRow: View {
             ShellMenuRow(CupertinoGlyph.Trash, "editor_excluir_camada", danger: true) { act { removeSelection() } }
         }
     }
+    /// Menu da ENGRENAGEM da barra do projeto: a seção "Projeto" nova primeiro
+    /// (ajustes, busca, copiar/colar, marca, lupa, aparar), depois o de sempre.
     @ViewBuilder private var timelineMenu: some View {
+        projectMenuSection
         ShellMenuSection("sh_menu_selection")
         ShellMenuRow(CupertinoGlyph.CheckmarkSquare, "editor_selecionar_todas_camadas", enabled: model.layers.count >= 2) { act { model.selectAll() } }
         ShellMenuRow(CupertinoGlyph.RectangleStack, "edt_tl_pick_layers", enabled: !model.layers.isEmpty, checked: model.timelineLayerSelectMode, detail: "edt_tl_pick_layers_detail") { act { model.changeTimelineLayerSelectMode(!model.timelineLayerSelectMode) } }
@@ -608,14 +710,29 @@ private struct ShellMenuRow: View {
         ShellMenuRow(CupertinoGlyph.SuitDiamond, "editor_keyframes_todas_camadas", checked: model.showAllKeyframes, detail: "editor_keyframes_todas_camadas_detalhe") { act { model.showAllKeyframes.toggle() } }
         ShellMenuRow(CupertinoGlyph.Link, "editor_timeline_magnetica_modo_edicao", checked: model.editMode, detail: "editor_aparar_empurra_camadas_seguintes_excluir_fecha") { act { model.toggleEditMode() } }
         ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_remover_espacos_vazios") { act { model.removeGaps() } }
-        ShellMenuSection("editor_projeto_cbe9")
-        ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_aparar_projeto_cabecote", enabled: model.status.playhead > 0) { act { model.trimProjectAtPlayhead() } }
         ShellMenuSection("editor_marcas_ritmo")
-        ShellMenuRow(CupertinoGlyph.Bookmark, "editor_marcar_ou_desmarcar_este_instante") { act { model.toggleMarkerAt(model.status.playhead) } }
+        // Editar a marca do cabeçote (o segurar do antigo botão da marca); tocar a
+        // régua em cima de uma marca também abre o editor dela.
+        ShellMenuRow(CupertinoGlyph.Pencil, "marker_edit", enabled: model.markerFrames.contains(model.status.playhead)) { act { model.editMarkerAtPlayhead() } }
         ShellMenuRow(ShellGlyph.BookmarkSolid, "editor_ir_proxima_marca", enabled: !model.markerFrames.isEmpty) { act { model.seekToNextMarker() } }
         ShellMenuSection("editor_mais")
         ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas", enabled: !model.selection.isEmpty) { act { model.groupSelection() } }
+        ShellMenuRow(CupertinoGlyph.Speedometer, "ios_perf_test_a11y") { act { shell.performanceTest = true } }
     }
+    /// A seção "Projeto" do menu da engrenagem (o que saiu da barra do topo e do transporte).
+    @ViewBuilder private var projectMenuSection: some View {
+        let marked: Bool = model.markerFrames.contains(model.status.playhead)
+        let zoomLock: Bool = StageViewZoom.shared.zoomLock
+        ShellMenuSection("editor_projeto_cbe9")
+        ShellMenuRow(CupertinoGlyph.Gear, "editor_ajustes_projeto") { act { pause(); model.showProjectSettings = true } }
+        ShellMenuRow(CupertinoGlyph.Search, "edt_cmd_search_desc") { act { pause(); shell.commandSearch = true } }
+            .accessibilityIdentifier("commandSearchOpen")
+        ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_copiar_colar") { shell.sheet = .copyPaste }
+        ShellMenuRow(marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark, "editor_marcar_ou_desmarcar_este_instante", checked: marked) { act { model.toggleMarkerAt(model.status.playhead) } }
+        ShellMenuRow(CupertinoGlyph.Search, zoomLock ? "stage_zoom_view_on" : "stage_zoom_view_off", checked: zoomLock, symbol: "plus.magnifyingglass") { act { StageViewZoom.shared.zoomLock.toggle() } }
+        ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_aparar_projeto_cabecote", enabled: model.status.playhead > 0) { act { model.trimProjectAtPlayhead() } }
+    }
+    private func pause() { if model.status.playing != 0 { model.playPause() } }
     /// SELECIONAR UMA CAMADA (Menus.kt SearchLayersSheet): todas as camadas
     /// (miniatura ou selo do tipo + nome); tocar escolhe SÓ ela e fecha. A busca
     /// só aparece com muitas camadas e o teclado não abre sozinho.

@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -47,12 +48,13 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // =============================================================================
-// Barra de reprodução A.01 (46 dp)
+// Transporte (redesenho 2026-09-29): 60 dp, sete botões espalhados por igual
 // =============================================================================
 
 /**
- * ↶ ↷ · [|◀ ▶ ▶|] · marcador · copiar/colar · tela cheia.
- * Sete alvos dividem a largura restante depois do Play (52 dp).
+ * ↶ ↷ · ⇤ ▶ ⇥ · duplicar · tela cheia (mockup `Editor.dc.html`). Nada da
+ * barra antiga se perdeu: segurar ⇤/⇥ anda de marca/keyframe/quadro, segurar
+ * duplicar abre Copiar e colar, e marcador + lupa moram no menu da engrenagem.
  * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
  */
 @Composable
@@ -61,70 +63,62 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
         InfoBar(store)
         return
     }
-    BoxWithConstraints(
+    val canUndo by remember { derivedStateOf { store.project.canUndo } }
+    val canRedo by remember { derivedStateOf { store.project.canRedo } }
+    val hasSelection by remember { derivedStateOf { store.selection.isNotEmpty() } }
+    val h = ShellDims.Transport
+    val side = 44.dp
+    Row(
         Modifier
             .fillMaxWidth()
-            .height(ShellDims.Transport)
-            .background(AureaColors.EditorTopBar),
+            .height(h)
+            .background(AureaColors.EditorCanvas)
+            .padding(horizontal = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        val side = ((maxWidth.value - 52f) / 8f).coerceIn(30f, 40f).dp
-        val canUndo by remember { derivedStateOf { store.project.canUndo } }
-        val canRedo by remember { derivedStateOf { store.project.canRedo } }
-        val marked by remember { derivedStateOf { store.markers.frames.binarySearch(store.playhead) >= 0 } }
-        // Composition markers precede layer keyframes.
-        val hasMarks by remember {
-            derivedStateOf { store.primary?.let { !store.keyframes[it].isNullOrEmpty() } ?: false }
-        }
-        Row(Modifier.fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
-            ChromeButton(CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer), onClick = if (canUndo) ({ store.undo() }) else null, width = side, height = ShellDims.Transport)
-            ChromeButton(CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer), onClick = if (canRedo) ({ store.redo() }) else null, width = side, height = ShellDims.Transport)
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                ChromeButton(
-                    CupertinoGlyph.BackwardEnd,
-                    if (store.markers.frames.isNotEmpty()) stringResource(R.string.editor_marca_anterior_segure_inicio) else if (hasMarks) stringResource(R.string.editor_keyframe_anterior_segure_inicio) else stringResource(R.string.editor_quadro_atras_segure_inicio),
-                    onClick = { store.stepTransport(-1) },
-                    width = side,
-                    height = ShellDims.Transport,
-                    onLongClick = { store.seek(0) },
-                )
-                PlayButton(store)
-                ChromeButton(
-                    CupertinoGlyph.ForwardEnd,
-                    if (store.markers.frames.isNotEmpty()) stringResource(R.string.editor_proxima_marca_segure_fim) else if (hasMarks) stringResource(R.string.editor_proximo_keyframe_segure_fim) else stringResource(R.string.editor_quadro_frente_segure_fim),
-                    onClick = { store.stepTransport(1) },
-                    width = side,
-                    height = ShellDims.Transport,
-                    onLongClick = { store.seek(store.project.durationFrames) },
-                )
-            }
-            ChromeButton(
-                if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
-                stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
-                onClick = { store.toggleMarker() },
-                onLongClick = { store.editMarkerAtPlayhead() },
-                tint = if (marked) AureaColors.Accent else AureaColors.Text,
-                width = side, height = ShellDims.Transport,
-            )
-            ChromeButton(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), onClick = { openSheet(store, ui, ShellSheet.CopyPaste) }, width = side, height = ShellDims.Transport)
-            // Lupa da prévia: ligada, a pinça no palco sempre amplia a VISTA
-            // (nunca a camada). Desligar não mexe no zoom atual (o chip de % volta a 100 %).
-            ChromeVectorButton(
-                androidx.compose.material.icons.Icons.Rounded.ZoomIn,
-                if (StageView.zoomLock) stringResource(R.string.stage_zoom_view_on) else stringResource(R.string.stage_zoom_view_off),
-                onClick = { StageView.zoomLock = !StageView.zoomLock },
-                size = 21.dp,
-                width = side,
-                height = ShellDims.Transport,
-                tint = if (StageView.zoomLock) AureaColors.Accent else AureaColors.Text,
-            )
-            ChromeButton(
-                if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen,
-                if (ui.fullscreen) stringResource(R.string.editor_sair_tela_cheia) else stringResource(R.string.editor_tela_cheia),
-                onClick = { ui.fullscreen = !ui.fullscreen },
-                width = side,
-                height = ShellDims.Transport,
-            )
-        }
+        ChromeButton(
+            CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
+            onClick = if (canUndo) ({ store.undo() }) else null,
+            size = 22.dp, width = side, height = side,
+            tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
+        )
+        ChromeButton(
+            CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
+            onClick = if (canRedo) ({ store.redo() }) else null,
+            size = 22.dp, width = side, height = side,
+            tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
+        )
+        ChromeButton(
+            CupertinoGlyph.ArrowLeftToLine,
+            stringResource(R.string.editor_ir_inicio_segure_anterior),
+            onClick = { store.seek(0) },
+            size = 24.dp, width = side, height = side,
+            onLongClick = { store.stepTransport(-1) },
+        )
+        PlayButton(store)
+        ChromeButton(
+            CupertinoGlyph.ArrowRightToLine,
+            stringResource(R.string.editor_ir_fim_segure_proximo),
+            onClick = { store.seek(store.project.durationFrames) },
+            size = 24.dp, width = side, height = side,
+            onLongClick = { store.stepTransport(1) },
+        )
+        ChromeButton(
+            CupertinoGlyph.PlusSquareOnSquare,
+            stringResource(R.string.editor_duplicar_camada_segure_copiar),
+            onClick = { if (store.selection.isNotEmpty()) store.duplicateLayers() },
+            size = 22.dp, width = side, height = side,
+            tint = if (hasSelection) AureaColors.Text else AureaColors.EditorIconDisabled,
+            onLongClick = { openSheet(store, ui, ShellSheet.CopyPaste) },
+            modifier = Modifier.testTag("transport.duplicate"),
+        )
+        ChromeButton(
+            if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen,
+            if (ui.fullscreen) stringResource(R.string.editor_sair_tela_cheia) else stringResource(R.string.editor_tela_cheia),
+            onClick = { ui.fullscreen = !ui.fullscreen },
+            size = 22.dp, width = side, height = side,
+        )
     }
 }
 
@@ -147,8 +141,8 @@ private fun PlayButton(store: EditorStore) {
             },
             onClick = { store.togglePlayback() },
             size = 26.dp,
-            width = 52.dp,
-            height = ShellDims.Transport,
+            width = 48.dp,
+            height = 48.dp,
             tint = if (loop) AureaColors.Accent else AureaColors.Text,
             onLongClick = { store.setLoop(!store.looping) },
         )
@@ -174,7 +168,7 @@ private fun InfoBar(store: EditorStore) {
         Modifier
             .fillMaxWidth()
             .height(ShellDims.Transport)
-            .background(AureaColors.EditorTopBar)
+            .background(AureaColors.EditorCanvas)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

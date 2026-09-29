@@ -216,11 +216,31 @@ enum Snap {
  * FOI desde o começo do gesto (pegar um clipe já perto da borda não sai rolando).
  */
 enum AutoScroll {
+    /// Dt máximo por quadro (s): um quadro atrasado não dá um salto.
+    static let maxDt: CGFloat = 0.05
+
     static func direction(pos: CGFloat, from: CGFloat, low: CGFloat, high: CGFloat, intent: CGFloat) -> Int {
         if pos < low && pos < from - intent { return -1 }
         if pos > high && pos > from + intent { return 1 }
         return 0
     }
+
+    /// Faixa da borda: `maxZone` (48 pt), mas nunca mais que 1/3 da janela.
+    static func zone(maxZone: CGFloat, viewport: CGFloat) -> CGFloat { max(0, min(maxZone, viewport / 3)) }
+
+    /// Rolagem em RAMPA (par do Android): fator com sinal em [−1, 1] — 0 fora da
+    /// faixa, crescendo com o quanto o dedo entrou nela; só o lado a que o dedo
+    /// FOI desde `from` conta.
+    static func speed(pos: CGFloat, from: CGFloat, start: CGFloat, end: CGFloat, zone: CGFloat, intent: CGFloat) -> CGFloat {
+        guard zone > 0, end > start, pos.isFinite else { return 0 }
+        let low = start + zone, high = end - zone
+        if pos < low && pos < from - intent { return -min(1, max(0, (low - pos) / zone)) }
+        if pos > high && pos > from + intent { return min(1, max(0, (pos - high) / zone)) }
+        return 0
+    }
+
+    /// Quanto andar neste quadro: fator × velocidade máxima × dt (dt ≤ `maxDt`).
+    static func step(factor: CGFloat, maxSpeed: CGFloat, dt: CGFloat) -> CGFloat { factor * maxSpeed * min(maxDt, max(0, dt)) }
 }
 
 /// Instantes de keyframe de uma camada, em frames da timeline.

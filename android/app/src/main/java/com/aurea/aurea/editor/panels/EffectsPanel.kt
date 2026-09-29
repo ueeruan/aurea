@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.aurea.aurea.engine.ExpressionLook
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -78,6 +79,8 @@ import com.aurea.aurea.ui.ds.ColorWell
 import com.aurea.aurea.ui.ds.EffectStackCard
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.KeypadRequest
+import com.aurea.aurea.ui.ds.ParamRowColors
+import com.aurea.aurea.ui.ds.ParamRowDims
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.ds.PropertyRow
 import com.aurea.aurea.ui.ds.SheetAction
@@ -249,9 +252,9 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     var tab by remember(layerId) { mutableStateOf(if (entry != null) EffectsTab.Applied else initialEffectsTab(effects.size)) }
     val hasAudio by remember(store) { derivedStateOf { store.detail?.hasAudio == true } }
     var aboutEntry by remember { mutableStateOf<EffectCatalogEntry?>(null) }
-    // Um efeito só na camada já abre com os controles à vista (um toque a menos).
+    // A pilha já abre com o primeiro cartão à vista (um toque a menos); os outros recolhidos.
     var openId by remember(layerId, focusedType) {
-        mutableStateOf(entry?.effectIndex ?: effects.firstOrNull { it.typeId == focusedType }?.effectId ?: effects.singleOrNull()?.effectId?.takeIf { tabbed })
+        mutableStateOf(entry?.effectIndex ?: effects.firstOrNull { it.typeId == focusedType }?.effectId ?: effects.firstOrNull()?.effectId?.takeIf { tabbed })
     }
     var known by remember(layerId) { mutableStateOf(effects.map { it.effectId }.toSet()) }
     var selected by remember(layerId) {
@@ -337,15 +340,6 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false
         }
     }
-    // O rótulo do parâmetro escolhido, no idioma do app: a folha de expressão
-    // abre com ele no título.
-    val railParamLabel: String = selected?.let { k ->
-        store.paramOf(k.effectId, k.param)?.let { p -> paramDisplay(store.typeOf(k.effectId), ParamSlot.of(p)).label() }
-    } ?: ""
-
-    val railExpr by remember(store) {
-        derivedStateOf { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.expressionLook(paramKeys(k.effectId, ParamSlot.of(it))) } } ?: ExpressionLook.None }
-    }
     val curveTrackReady by remember(store) {
         derivedStateOf { selected?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component).size >= 2 } ?: false }
     }
@@ -354,17 +348,10 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     val order = (reorder.order ?: effects.map { it.effectId }).mapNotNull { byId[it] }
     val openAdd: () -> Unit = { if (tabbed) tab = EffectsTab.Add else env.onOpenEffectsBrowser() }
 
-    Column(Modifier.fillMaxSize()) {
-        if (tabbed) {
-            EffectsTabsHeader(
-                tab = tab,
-                count = effects.size,
-                onTab = { tab = it },
-                onBack = env.onClose,
-                onMore = { railMenu = true },
-            )
-        }
+    Column(Modifier.fillMaxSize().background(ParamRowColors.Panel)) {
         if (tabbed && tab == EffectsTab.Add) {
+            // O catálogo: "‹ Adicionar efeito" volta para a pilha da camada.
+            AddEffectHeader(onBack = { tab = EffectsTab.Applied })
             EffectPicker(
                 store = store,
                 layerHasAudio = hasAudio,
@@ -375,51 +362,41 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 modifier = Modifier.weight(1f),
             )
         } else Row(Modifier.fillMaxWidth().weight(1f)) {
-            if (openId == null) {
-                // Com abas, o ‹ e o ⋯ moram no cabeçalho: a lista ganha a largura toda.
-                if (!tabbed) ListRail(onBack = env.onClose, onMore = { railMenu = true })
-            } else {
-                LeftRail(
-                    // Com um efeito aberto, o ‹ volta para a LISTA (ref17 → ref16).
-                    onBack = { openId = null },
-                    keyframeLook = railLook,
-                    onKeyframe = if (railAnimatable) {
-                        {
-                            // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
-                            selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
-                        }
-                    } else {
-                        null
-                    },
-                    curveAnimated = railLook != KeyframeLook.None,
-                    onCurve = if (curveTrackReady) {
-                        {
-                            val k = selected
-                            val layer = store.primary
-                            val t = store.detail?.localPlayhead
-                            if (k != null && layer != null && t != null) {
-                                store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
-                                    store.selectKeyframe(layer, key)
-                                    env.onOpenPanel(EditorPanel.Curve)
-                                }
+            // O TRILHO (redesenho 2026-09-29): ‹ volta às seções da camada; ◇+ e a
+            // curva miram o parâmetro escolhido; ⋯ no pé = ações da pilha inteira.
+            LeftRail(
+                onBack = env.onClose,
+                keyframeLook = railLook,
+                onKeyframe = if (railAnimatable) {
+                    {
+                        // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
+                        selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
+                    }
+                } else {
+                    null
+                },
+                curveAnimated = railLook != KeyframeLook.None,
+                onCurve = if (curveTrackReady) {
+                    {
+                        val k = selected
+                        val layer = store.primary
+                        val t = store.detail?.localPlayhead
+                        if (k != null && layer != null && t != null) {
+                            store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
+                                store.selectKeyframe(layer, key)
+                                env.onOpenPanel(EditorPanel.Curve)
                             }
                         }
-                    } else {
-                        null
-                    },
-                    expression = railExpr,
-                    onExpression = if (railAnimatable) {
-                        { selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { p -> openParamExpression(store, k.effectId, ParamSlot.of(p), railParamLabel) } } }
-                    } else {
-                        null
-                    },
-                )
-            }
+                    }
+                } else {
+                    null
+                },
+                more = { RailMoreButton(active = false) { railMenu = true } },
+            )
             LazyColumn(
                 Modifier.weight(1f).fillMaxHeight().testTag("aurea.effects.stack"),
                 state = listState,
-                // Sem o trilho à esquerda (abas, nenhum aberto), a lista respira como a direita.
-                contentPadding = PaddingValues(start = if (tabbed && openId == null) 12.dp else 2.dp, top = 8.dp, end = 12.dp, bottom = 16.dp),
+                contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 6.dp, bottom = 16.dp),
             ) {
                 if (tabbed && effects.isEmpty()) {
                     item(key = "vazio") { PanelNotice(stringResource(R.string.effects_applied_empty)) }
@@ -498,6 +475,12 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             buildList {
                 add(SheetAction(if (e.enabled) stringResource(R.string.panel_desligar_efeito) else stringResource(R.string.panel_ligar_efeito)) { store.setEffectEnabled(e.effectId, !e.enabled) })
                 add(SheetAction(stringResource(R.string.panel_redefinir_efeito)) { resetEffect(env, e.effectId) })
+                // A expressão do parâmetro escolhido deste efeito (o "=" saiu do trilho).
+                val exprTarget = selected?.takeIf { it.effectId == e.effectId }?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it) } }
+                if (exprTarget?.animatable == true) {
+                    val exprLabel = paramDisplay(e.typeId, exprTarget).label()
+                    add(SheetAction(stringResource(R.string.fx_param_expression, exprLabel)) { openParamExpression(store, e.effectId, exprTarget, exprLabel) })
+                }
                 store.catalog.firstOrNull { it.typeId == e.typeId }?.let { entry ->
                     add(SheetAction(stringResource(R.string.effects_about)) { aboutEntry = entry })
                 }
@@ -623,119 +606,28 @@ private fun Modifier.reorderHandle(id: Int, state: ReorderState, list: LazyListS
     )
 
 /**
- * O CABEÇALHO COM ABAS (no lugar do "‹ Efeitos" da moldura): `‹` volta às
- * ferramentas da camada; as abas "Na camada N" (`effects.tab.applied`) e
- * "Adicionar" (`effects.tab.add`) dividem o meio; `⋯` abre copiar/colar/
- * presets/ligar todos. Cada aba é alvo da altura inteira da faixa (44 dp).
+ * O CABEÇALHO DO CATÁLOGO (aba Adicionar): `‹ Adicionar efeito`. O título da
+ * seção ("Efeitos") mora na barra de cima; o ‹ daqui volta para a pilha.
  */
 @Composable
-private fun EffectsTabsHeader(
-    tab: EffectsTab,
-    count: Int,
-    onTab: (EffectsTab) -> Unit,
-    onBack: () -> Unit,
-    onMore: () -> Unit,
-) {
-    val backDesc = stringResource(R.string.pn_back_to_layer_tools)
-    val moreDesc = stringResource(R.string.panel_efeitos_camada)
-    Column(Modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.Border))
-        Row(
-            Modifier.fillMaxWidth().height(44.dp).background(AureaColors.Surface),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(48.dp, 44.dp).semantics { contentDescription = backDesc }.tocavel(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp))
-            }
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                // O trilho da chave: a pílula de 36 no meio da faixa de 44.
-                Box(Modifier.matchParentSize().padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip))
-                Row(Modifier.fillMaxSize().padding(horizontal = 3.dp)) {
-                    TabSegment(stringResource(R.string.effects_tab_applied), count, tab == EffectsTab.Applied, "effects.tab.applied") { onTab(EffectsTab.Applied) }
-                    TabSegment(stringResource(R.string.effects_tab_add), null, tab == EffectsTab.Add, "effects.tab.add") { onTab(EffectsTab.Add) }
-                }
-            }
-            Box(
-                Modifier.size(44.dp).semantics { contentDescription = moreDesc }.tocavel(onClick = onMore),
-                contentAlignment = Alignment.Center,
-            ) {
-                CupertinoIcon(CupertinoGlyph.Ellipsis, 22.dp, AureaColors.Text)
-            }
-        }
-    }
-}
-
-@Composable
-private fun androidx.compose.foundation.layout.RowScope.TabSegment(label: String, count: Int?, on: Boolean, tag: String, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .weight(1f)
-            .fillMaxHeight()
-            .testTag(tag)
-            .semantics { selected = on }
-            .tocavel(shrink = 1f, role = Role.Tab, onClick = onClick)
-            .padding(vertical = 7.dp),
-        contentAlignment = Alignment.Center,
+private fun AddEffectHeader(onBack: () -> Unit) {
+    val backDesc = stringResource(R.string.fx_back_to_effects)
+    Row(
+        Modifier.fillMaxWidth().height(44.dp).testTag("effects.tab.add"),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else androidx.compose.ui.graphics.Color.Transparent).padding(horizontal = 6.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val color = if (on) AureaColors.Accent else AureaColors.Text
-            Text(
-                label,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W500, color = color)),
-            )
-            if (count != null && count > 0) {
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    count.toString(),
-                    maxLines = 1,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.Accent else AureaColors.ChipHigh).padding(horizontal = 6.dp),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, fontWeight = FontWeight.W700, color = if (on) AureaColors.OnAccent else AureaColors.Text)),
-                )
-            }
-        }
-    }
-}
-
-/**
- * O TRILHO DA LISTA (ref16): estreito, `‹` em cima (volta às ferramentas da
- * camada) e `⋯` embaixo (copiar/colar/ligar todos). Só no modo embutido (sem abas).
- */
-@Composable
-private fun ListRail(onBack: () -> Unit, onMore: () -> Unit) {
-    val back = stringResource(R.string.panel_voltar_ferramentas)
-    val moreOptions = stringResource(R.string.panel_mais_opcoes_efeitos)
-    Column(Modifier.width(46.dp).fillMaxHeight()) {
         Box(
-            Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .semantics { contentDescription = back }
-                .tocavel(shrink = 1f, onClick = onBack),
+            Modifier.size(48.dp, 44.dp).semantics { contentDescription = backDesc }.tocavel(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp))
         }
-        Spacer(Modifier.weight(1f))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .semantics { contentDescription = moreOptions }
-                .tocavel(shrink = 1f, onClick = onMore),
-            contentAlignment = Alignment.Center,
-        ) {
-            CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, AureaColors.Text)
-        }
+        Text(
+            stringResource(R.string.panel_adicionar_efeito),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
+        )
     }
 }
 
@@ -981,7 +873,7 @@ private fun EffectNumberRow(
     )
 }
 
-/** Liga/desliga: valor ≥ 0,5 = ligado; escreve 1/0 num passo. */
+/** Liga/desliga: valor ≥ 0,5 = ligado; escreve 1/0 num passo. O interruptor mora no lugar da caixa de valor. */
 @Composable
 private fun EffectToggleRow(
     env: PanelEnv,
@@ -999,7 +891,7 @@ private fun EffectToggleRow(
         label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
         expression = rememberExpr(env, effectId, s), onExpression = onMenu,
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             AureaToggle(
                 checked = value >= 0.5f,
                 onCheckedChange = { on ->
@@ -1007,12 +899,15 @@ private fun EffectToggleRow(
                     store.paramOf(effectId, s.index)?.let { store.setEffectParam(effectId, it, if (on) 1f else 0f) }
                 },
             )
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(6.dp))
         }
     }
 }
 
-/** Escolha: chips à vista (a linha cresce se quebrar). Índice arredondado e preso. */
+/**
+ * Escolha: a caixa de valor (a opção + ▾) abre a lista das opções — a mesma folha
+ * de escolha das outras linhas (camada de referência). Índice arredondado e preso.
+ */
 @Composable
 private fun EffectChoiceRow(
     env: PanelEnv,
@@ -1027,14 +922,45 @@ private fun EffectChoiceRow(
     val value = rememberParamValue(env, effectId, s.index, 0)
     val look = rememberLook(env, effectId, s.index, null)
     val options = s.enumLabels.ifEmpty { List((s.max - s.min).roundToInt().coerceAtLeast(0) + 1) { "${it + 1}" } }
+    val current = value.roundToInt().coerceIn(0, max(0, options.lastIndex))
+    var picking by remember { mutableStateOf(false) }
     PropertyCustomRow(
         label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
         expression = rememberExpr(env, effectId, s), onExpression = onMenu,
     ) {
-        ChoiceChips(
-            options = options,
-            selected = value.roundToInt().coerceIn(0, max(0, options.lastIndex)),
-            onSelect = { i -> store.paramOf(effectId, s.index)?.let { store.setEffectParam(effectId, it, i.toFloat()) } },
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(ParamRowDims.LabelH)
+                .clip(RoundedCornerShape(ParamRowDims.Radius))
+                .background(ParamRowColors.ValueBox)
+                .testTag("effects.choice.$effectId.${s.index}")
+                .tocavel(shrink = 1f) {
+                    onSelect(ParamKey(effectId, s.index, 0))
+                    picking = true
+                }
+                .padding(start = 10.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                options.getOrElse(current) { "" },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Text)),
+            )
+            CupertinoIcon(CupertinoGlyph.ChevronDown, 12.dp, AureaColors.Muted)
+        }
+    }
+    if (picking) {
+        AureaActionSheet(
+            title = label,
+            actions = options.mapIndexed { i, o ->
+                SheetAction(if (i == current) "✓ $o" else o) {
+                    store.paramOf(effectId, s.index)?.let { store.setEffectParam(effectId, it, i.toFloat()) }
+                }
+            },
+            onDismiss = { picking = false },
         )
     }
 }
@@ -1057,25 +983,41 @@ private fun EffectColorRow(
         derivedStateOf { rgbaColor(engineToDisplay(store.paramOf(effectId, s.index)?.value ?: floatArrayOf(1f, 1f, 1f, 1f))) }
     }
     val look = rememberLook(env, effectId, s.index, null)
+    val pick = {
+        onSelect(ParamKey(effectId, s.index, 0))
+        store.beginGesture("cor $label")
+        env.openColor(
+            ColorRequest(
+                initial = floatArrayOf(color.red, color.green, color.blue, color.alpha),
+                onChange = { r, g, b, a ->
+                    store.paramOf(effectId, s.index)?.let { store.writeParamVector(effectId, it, displayToEngine(r, g, b, a)) }
+                },
+                onDone = { store.endGesture() },
+            ),
+        )
+    }
     PropertyCustomRow(
         label, selected, onSelect = { onSelect(ParamKey(effectId, s.index, 0)) }, keyframe = look,
         expression = rememberExpr(env, effectId, s), onExpression = onMenu,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            ColorWell(color) {
-                onSelect(ParamKey(effectId, s.index, 0))
-                store.beginGesture("cor $label")
-                env.openColor(
-                    ColorRequest(
-                        initial = floatArrayOf(color.red, color.green, color.blue, color.alpha),
-                        onChange = { r, g, b, a ->
-                            store.paramOf(effectId, s.index)?.let { store.writeParamVector(effectId, it, displayToEngine(r, g, b, a)) }
-                        },
-                        onDone = { store.endGesture() },
-                    ),
-                )
-            }
-            Spacer(Modifier.width(4.dp))
+            Text(
+                "${(color.red * 255).roundToInt()} ${(color.green * 255).roundToInt()} ${(color.blue * 255).roundToInt()}",
+                maxLines = 1,
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = ParamRowColors.RgbText, fontFeatureSettings = "tnum")),
+            )
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .size(34.dp, 30.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(color)
+                    .border(1.dp, ParamRowColors.SwatchBorder, RoundedCornerShape(5.dp))
+                    .semantics { contentDescription = label }
+                    .testTag("effects.color.$effectId.${s.index}")
+                    .tocavel(onClick = pick),
+            )
+            Spacer(Modifier.width(8.dp))
         }
     }
 }
@@ -1092,17 +1034,17 @@ private fun EffectsFooter(env: PanelEnv, kind: Int, onAdd: () -> Unit) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(52.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(AureaColors.Surface)
+                .height(48.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(ParamRowColors.Card)
                 .testTag("aurea.effects.add")
                 .tocavel(haptic = true, onClick = onAdd),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CupertinoIcon(CupertinoGlyph.Plus, 17.dp, AureaColors.Accent)
+            CupertinoIcon(CupertinoGlyph.Plus, 16.dp, AureaColors.Accent)
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.panel_adicionar_efeito), style = AureaType.Base.merge(TextStyle(fontSize = 16.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
+            Text(stringResource(R.string.panel_adicionar_efeito), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
         }
     }
 }
@@ -1117,8 +1059,8 @@ private fun AdjustmentIntensity(env: PanelEnv) {
         Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(AureaColors.Chip.copy(alpha = 0.55f))
+            .clip(RoundedCornerShape(10.dp))
+            .background(ParamRowColors.Card)
             .padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 4.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

@@ -32,6 +32,8 @@ internal class TimelineState {
     var compact by mutableStateOf(false)
     /** Compacta só por causa da doca: tocar no ícone do tipo abre as trilhas em vez de sair. */
     var compactByDock by mutableStateOf(false)
+    /** Relógio em caixa com borda (estado da camada escolhida / efeitos) em vez do sublinhado. */
+    var timecodeBox by mutableStateOf(false)
     /** Fio do ímã (frame), [Snap.NONE] sem guia. */
     var guideFrame by mutableIntStateOf(Snap.NONE)
     /** Reordenar: linha segurada e destino sob o dedo (−1 = sem reordenar). */
@@ -42,6 +44,15 @@ internal class TimelineState {
     /** Losango na mão (cresce e mostra o tempo). */
     var dragKeyLayer by mutableLongStateOf(0L)
     var dragKeyFrame by mutableIntStateOf(Snap.NONE)
+    /**
+     * Retângulo da seleção de losangos (modo "Selecionar"): cantos no CONTEÚDO
+     * — frame da timeline e y a partir do topo da 1ª fileira (com a rolagem).
+     */
+    var boxActive by mutableStateOf(false)
+    var boxFrame0 by mutableDoubleStateOf(0.0)
+    var boxFrame1 by mutableDoubleStateOf(0.0)
+    var boxY0 by mutableFloatStateOf(0f)
+    var boxY1 by mutableFloatStateOf(0f)
     /** Tamanho medido no layout (nunca escrito na composição; spec bug 10.24). */
     var width by mutableIntStateOf(0)
     var height by mutableIntStateOf(0)

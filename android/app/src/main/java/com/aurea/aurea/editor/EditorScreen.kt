@@ -71,6 +71,7 @@ import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.editor.panels.EffectsBrowserSheet
 import com.aurea.aurea.editor.panels.PanelContent
 import com.aurea.aurea.editor.timeline.Timeline
+import com.aurea.aurea.editor.timeline.TimecodeStyle
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
@@ -247,11 +248,12 @@ fun EditorScreen(store: EditorStore) {
     // guardada no aparelho.
     val previewPrefs = androidx.compose.ui.platform.LocalContext.current.let { context -> remember { context.getSharedPreferences(PREVIEW_PREFS, android.content.Context.MODE_PRIVATE) } }
     val previewPreference = remember { mutableFloatStateOf(previewPrefs.getFloat(PREVIEW_HEIGHT_KEY, 0f)) }
-    Box(Modifier.fillMaxSize().background(AureaColors.EditorTopBar)) {
+    Box(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
         Column(Modifier.fillMaxSize()) {
-            // As barras do sistema são tratadas UMA vez, aqui: véu escuro na de
-            // status (#070A0E, como nos prints) e preto na de navegação.
-            Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(AureaColors.StatusBarVeil))
+            // As barras do sistema são tratadas UMA vez, aqui: a de status no
+            // fundo do editor e a de navegação no tom da barra de adicionar
+            // (redesenho 2026-09-29: as duas emendam sem faixa preta).
+            Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(AureaColors.EditorCanvas))
             BoxWithConstraints(
                 Modifier
                     .weight(1f)
@@ -297,7 +299,7 @@ fun EditorScreen(store: EditorStore) {
                     }
                 }
             }
-            Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(ShellColors.NavigationBar))
+            Spacer(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(AureaColors.EditorBar))
         }
         BusyOverlay(store)
     }
@@ -323,19 +325,26 @@ private fun NarrowEditor(
     onPreviewCommit: () -> Unit,
     onPreviewReset: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().background(AureaColors.Background)) {
+    Column(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
         if (!ui.fullscreen) TopBarHost(store, ui)
         val previewH = if (ui.fullscreen) (m.preview - ShellDims.FullscreenTimeBar.value).coerceAtLeast(0f) else m.preview
         // O palco e a timeline NÃO espelham em árabe: o quadro 0 fica à
         // esquerda e o tempo anda para a direita em qualquer idioma.
-        KeepLtr { stage(Modifier.fillMaxWidth().height(previewH.dp)) }
+        // Redesenho: a prévia ocupa a largura toda com 8 dp de margem dos lados.
+        KeepLtr {
+            stage(
+                Modifier.fillMaxWidth()
+                    .padding(horizontal = if (ui.fullscreen) 0.dp else ShellDims.PreviewMargin)
+                    .height(previewH.dp),
+            )
+        }
         if (ui.fullscreen) {
             FullscreenTimeBar(store)
             TransportBar(store, ui)
         } else {
-            // A divisa palco/transporte: arrastar na vertical (na faixa ou no
-            // transporte fora dos botões) troca palco por timeline; toque duplo
-            // volta à altura automática.
+            // A divisa palco/transporte: arrastar na vertical no transporte (fora
+            // dos botões) troca palco por timeline; toque duplo volta à altura
+            // automática. A faixa de 8 dp saiu no redesenho (a divisa é o transporte).
             val preview by rememberUpdatedState(m.preview)
             val max by rememberUpdatedState(maxPreview)
             val resize by rememberUpdatedState(onPreviewResize)
@@ -359,7 +368,6 @@ private fun NarrowEditor(
                     }
                     .pointerInput(Unit) { detectTapGestures(onDoubleTap = { reset() }) },
             ) {
-                PreviewStrip(ui)
                 TransportBar(store, ui)
             }
         }
@@ -385,14 +393,13 @@ private fun WideEditor(
     sheetWidth: Float,
     stage: @Composable (Modifier) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().background(AureaColors.Background)) {
+    Column(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
         TopBarHost(store, ui)
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 // Palco e timeline em LTR mesmo em árabe (ver `KeepLtr`).
                 KeepLtr {
-                    stage(Modifier.fillMaxWidth().weight(1f))
-                    PreviewStrip(ui)
+                    stage(Modifier.fillMaxWidth().weight(1f).padding(horizontal = ShellDims.PreviewMargin))
                     TransportBar(store, ui)
                     TimelineHost(store, ui, Modifier.fillMaxWidth().height(EditorLayout.wideTimeline(totalHeight).dp))
                 }
@@ -413,21 +420,13 @@ private fun TopBarHost(store: EditorStore, ui: EditorUi) {
     val size by remember { derivedStateOf { store.selection.size } }
     val primary by remember { derivedStateOf { store.primary } }
     val id = primary
+    val section = ui.panel
     when {
         size >= 2 -> BatchTopBar(store, ui)
+        // Seção da camada aberta (redesenho 2026-09-29): `‹` + título centrado.
+        id != null && section != null -> SectionTopBar(store, section, onBack = { ui.panel = null })
         id != null -> LayerTopBar(store, ui, id)
         else -> ProjectTopBar(store, ui)
-    }
-}
-
-/**
- * A faixa de 8 dp entre prévia e transporte (a tela cheia mora no transporte,
- * um botão só). O traço no meio diz que ela se arrasta (ver NarrowEditor).
- */
-@Composable
-private fun PreviewStrip(@Suppress("UNUSED_PARAMETER") ui: EditorUi) {
-    Box(Modifier.fillMaxWidth().height(ShellDims.Strip).background(AureaColors.EditorPanelHigh), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(36.dp, 3.dp).background(AureaColors.Muted.copy(alpha = .55f), CircleShape))
     }
 }
 
@@ -449,6 +448,9 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
         // Doca aberta: fileira única só sem trilhas abertas nem escolha de
         // keyframes; o ícone do tipo abre as trilhas (timeline inteira).
         compactDock = compactDock,
+        // Redesenho 2026-09-29 (Efeitos.dc.html): uma camada escolhida = relógio
+        // em caixa (e cabeçote em destaque); sem seleção, o sublinhado.
+        timecodeStyle = if (store.selection.size == 1) TimecodeStyle.Box else TimecodeStyle.Underline,
         onEmptyTap = {
             // Tocar no vazio: com painel aberto só fecha o painel; adicionando,
             // fecha o adicionar; senão desseleciona.

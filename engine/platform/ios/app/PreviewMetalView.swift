@@ -159,6 +159,13 @@ struct PreviewMetalView: UIViewRepresentable {
         private var pinchSpan: CGFloat = 1
         private var pinchRotationActive = false
         private var pinchRotationOffset: Float = 0
+        // Encaixes da pinça (nil = solto): giro em múltiplos de 45°, escala em 100%.
+        private var rotationSnap: Float?
+        private var scaleSnap: Float?
+        // Mover em grupo (2+ escolhidas): posição local e pai → composição de
+        // PARTIDA de cada camada, e o centro da caixa que abraça o grupo.
+        private var groupMove: [(id: Int64, local: SIMD2<Float>, affine: [Float])] = []
+        private var groupCentre: SIMD2<Float>?
         private var shapeHandle = -1
         private var shapeWidth: Float = 1
         private var shapeHeight: Float = 1
@@ -475,6 +482,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 stageFinger = first.id; stageDown = first.position; hadMultipleTouches = false
                 stageMode = .pending; handle = -1; shapeHandle = -1; gizmoAxis = -1; targetLayer = nil
                 axisLock = 0; sweptAngle = 0; pinchRotationActive = false
+                rotationSnap = nil; scaleSnap = nil; groupMove = []; groupCentre = nil
                 model.refreshSelectedLayer()
                 if model.pivotStageActive && editableSelection(), let pivot = PivotDragSession.pivotPoint(model),
                    let session = PivotDragSession(model: model, pivot: pivot) {
@@ -563,6 +571,9 @@ struct PreviewMetalView: UIViewRepresentable {
                     pinchSpan = max(1, hypot(a.position.x - b.position.x, a.position.y - b.position.y))
                     lastAngle = atan2(b.position.y - a.position.y, b.position.x - a.position.x)
                     sweptAngle = 0; pinchRotationActive = false; pinchRotationOffset = 0
+                    // Já parado num encaixe: fica preso sem tique até sair e voltar.
+                    rotationSnap = StageMath.snapStep(startRotation.z, step: StageMath.rotStep, current: nil, enter: StageMath.rotEnter, exit: StageMath.rotExit)
+                    scaleSnap = StageMath.snapTarget(abs(startScale.x), target: 1, current: nil, enter: StageMath.scaleEnter, exit: StageMath.scaleExit)
                     engage(); stageMode = .pinch
                 } else {
                     pinchFingers = [a.id, b.id]; startView(a.position, b.position); stageMode = .view
@@ -640,13 +651,65 @@ struct PreviewMetalView: UIViewRepresentable {
             }
             let c = compositionPoint(point, view: view)
             if model.selection.count == 1, let row = model.selectedLayer, active(row), StageGeom.contains(model.detail, c.x, c.y, slack: 0) { targetLayer = row.id }
+            // Seleção múltipla: dentro de uma das escolhidas vale ela (o arrasto
+            // leva o grupo), mesmo com outra por cima.
+            else if model.selection.count >= 2, let hit = hitSelected(c) { targetLayer = hit }
             else { targetLayer = hitLayer(c, slack: 0, includeLocked: true) }
+        }
+        private func hitSelected(_ point: SIMD2<Float>) -> Int64? {
+            for row in model.layers where model.selection.contains(row.id) && row.visible && row.kind != 3 && active(row) {
+                if let detail = model.engine.layerDetail(row.id), StageGeom.contains(detail, point.x, point.y, slack: 0) { return row.id }
+            }
+            return nil
+        }
+        /// As escolhidas que andam no mover em grupo: sem as travadas, sem as
+        /// fora do tempo com posição animada (o keyframe cairia fora do clipe)
+        /// e sem quem já é levado por um pai também escolhido (Stage.kt `groupMovers`).
+        private func groupMovers() -> [(id: Int64, local: SIMD2<Float>, affine: [Float])] {
+            var details: [Int64: [String: Any]] = [:]
+            var order: [Int64] = []
+            for row in model.layers where model.selection.contains(row.id) && !row.locked && row.kind != 3 {
+                guard let d = model.engine.layerDetail(row.id) else { continue }
+                let mask = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+                if mask & 0b11 != 0 && !active(row) { continue }
+                details[row.id] = d; order.append(row.id)
+            }
+            var parents: [Int64: Int64] = [:]
+            let roots = StageMath.moveRoots(order) { (id: Int64) -> Int64 in
+                if let d = details[id] { return (d["parentId"] as? NSNumber)?.int64Value ?? 0 }
+                if let p = parents[id] { return p }
+                let p = (self.model.engine.layerDetail(id)?["parentId"] as? NSNumber)?.int64Value ?? 0
+                parents[id] = p; return p
+            }
+            return roots.compactMap { id -> (id: Int64, local: SIMD2<Float>, affine: [Float])? in
+                guard let d = details[id] else { return nil }
+                let p = self.vector(d["position"])
+                return (id, SIMD2(p.x, p.y), StageGeom.floats(d["parentAffine"]))
+            }
         }
         private func startDrag(view: UIView) {
             // Seta do eixo: o mesmo mover, travado em X (0) ou Y (1) desde o toque.
             if handle >= 0 {
                 guard editableSelection() else { stageMode = .idle; return }
                 targetLayer = model.primarySelection
+            }
+            // 2+ escolhidas e o dedo numa delas: o grupo inteiro anda junto (as
+            // travadas ficam), sem desfazer a seleção.
+            if handle < 0, let id = targetLayer, model.selection.count >= 2, model.selection.contains(id) {
+                let movers = groupMovers()
+                guard !movers.isEmpty else { model.toast = AureaText.t("sh_layer_locked_unlock_to_move"); stageMode = .idle; return }
+                groupMove = movers
+                var sets: [[Float]] = []
+                for mover in movers {
+                    var c: [Float] = []
+                    if let d = model.engine.layerDetail(mover.id), StageGeom.corners(d, &c) { sets.append(c) }
+                }
+                if let box = StageMath.unionBox(sets) { groupCentre = SIMD2((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2) }
+                else { groupCentre = nil }
+                moveDown = compositionPoint(stageDown, view: view); moveLast = moveDown
+                axisLock = 0
+                engage(); stageMode = .move
+                return
             }
             if let id = targetLayer {
                 if model.primarySelection != id || model.selection.count != 1 { model.select(layerId: id, additive: false) }
@@ -679,16 +742,53 @@ struct PreviewMetalView: UIViewRepresentable {
         }
         private func stepPinch(_ a: CGPoint, _ b: CGPoint) {
             guard let id = model.primarySelection else { return }
-            let f = clampScale(Float(hypot(a.x - b.x, a.y - b.y) / pinchSpan))
+            var f = clampScale(Float(hypot(a.x - b.x, a.y - b.y) / pinchSpan))
             sweep(atan2(b.y - a.y, b.x - a.x))
             let degrees = Float(sweptAngle * 180 / .pi)
             if !pinchRotationActive && abs(degrees) > 4 { pinchRotationActive = true; pinchRotationOffset = degrees < 0 ? -4 : 4 }
+            // Escala 100%: a escala X (em módulo) prende em 1 perto dele.
+            let ref = abs(startScale.x)
+            if ref > 0.0001 {
+                let s = StageMath.snapTarget(ref * f, target: 1, current: scaleSnap, enter: StageMath.scaleEnter, exit: StageMath.scaleExit)
+                if StageMath.snapEntered(scaleSnap, s) { snapFeedback.selectionChanged() }
+                scaleSnap = s
+                if s != nil { f = clampScale(1 / ref) }
+            }
             beginEdit("pinça")
             if pinchThreeD { model.gizmoSetComponents(id, base: 3, values: [startScale.x * f, startScale.y * f, startScale.z * f]) }
             else { model.setTransform2(3, startScale.x * f, 4, startScale.y * f, layer: id) }
-            if pinchRotationActive { model.setTransform(8, value: startRotation.z + degrees - pinchRotationOffset, layer: id) }
+            if pinchRotationActive {
+                // Giro: prende nos múltiplos de 45° (0, 45, 90…) com um tique.
+                var r = startRotation.z + degrees - pinchRotationOffset
+                let s = StageMath.snapStep(r, step: StageMath.rotStep, current: rotationSnap, enter: StageMath.rotEnter, exit: StageMath.rotExit)
+                if StageMath.snapEntered(rotationSnap, s) { snapFeedback.selectionChanged() }
+                rotationSnap = s
+                if let s { r = s }
+                model.setTransform(8, value: r, layer: id)
+            }
+        }
+        /// Mover em grupo: todas andam o MESMO delta da composição, cada uma no
+        /// espaço do seu pai; o encaixe no centro usa o centro da caixa do grupo.
+        private func stepGroupMove(_ point: CGPoint, view: UIView) {
+            let c = compositionPoint(point, view: view)
+            var delta = c - moveDown
+            let tolerance = scaleFactor(view) * 6
+            var snapX: Float?, snapY: Float?
+            if let centre = groupCentre {
+                if let snap = stageAnchorSnap(centre.x + delta.x, centre: Float(compositionSize.width / 2), tolerance: tolerance) { delta.x = snap - centre.x; snapX = snap }
+                if let snap = stageAnchorSnap(centre.y + delta.y, centre: Float(compositionSize.height / 2), tolerance: tolerance) { delta.y = snap - centre.y; snapY = snap }
+            }
+            moveLast = c
+            if (snapX != nil && snapX != shell.snapX) || (snapY != nil && snapY != shell.snapY) { snapFeedback.selectionChanged() }
+            shell.snapX = snapX; shell.snapY = snapY
+            beginEdit("mover")
+            for mover in groupMove {
+                let local = StageMath.moveInParent(mover.affine, local: mover.local, delta: delta)
+                model.setTransform2(0, local.x, 1, local.y, layer: mover.id)
+            }
         }
         private func stepMove(_ point: CGPoint, view: UIView, id: Int64) {
+            if !groupMove.isEmpty { stepGroupMove(point, view: view); return }
             let c = compositionPoint(point, view: view)
             // Absoluto desde o toque e LIVRE nos dois eixos (app antigo, Stage.kt
             // `move`): só as setas de eixo travam um lado.
@@ -912,6 +1012,75 @@ struct PreviewMetalView: UIViewRepresentable {
 /// quando está a menos de `tolerance`; sem filtro de velocidade.
 func stageAnchorSnap(_ pos: Float, centre: Float, tolerance: Float) -> Float? {
     tolerance > 0 && abs(pos - centre) < tolerance ? centre : nil
+}
+
+/// Contas puras dos gestos do palco (espelho de StageMath.kt, testado no JVM):
+/// mover várias camadas juntas e os encaixes da pinça.
+enum StageMath {
+    /// Giro: encaixa a cada 45°, entra a menos de 4° e só solta além de 6°.
+    static let rotStep: Float = 45, rotEnter: Float = 4, rotExit: Float = 6
+    /// Escala: encaixa em 100% a menos de 3%, solta além de 4,5%.
+    static let scaleEnter: Float = 0.03, scaleExit: Float = 0.045
+
+    /// Caixa que abraça todos os cantos (x, y, x, y… em px da composição).
+    static func unionBox(_ sets: [[Float]]) -> (minX: Float, minY: Float, maxX: Float, maxY: Float)? {
+        var x0 = Float.infinity, y0 = Float.infinity, x1 = -Float.infinity, y1 = -Float.infinity
+        for c in sets {
+            var i = 0
+            while i + 1 < c.count {
+                let x = c[i], y = c[i + 1]
+                if x.isFinite && y.isFinite { x0 = min(x0, x); y0 = min(y0, y); x1 = max(x1, x); y1 = max(y1, y) }
+                i += 2
+            }
+        }
+        return x0 <= x1 && y0 <= y1 ? (x0, y0, x1, y1) : nil
+    }
+
+    /// Anda `delta` px da COMPOSIÇÃO uma camada de posição `local` no espaço do
+    /// pai (`affine` = pai → composição, a b c d tx ty). Pai sem inversa: a
+    /// composição vale como local.
+    static func moveInParent(_ affine: [Float], local: SIMD2<Float>, delta: SIMD2<Float>) -> SIMD2<Float> {
+        let a: [Float] = affine.count >= 6 ? affine : [1, 0, 0, 1, 0, 0]
+        let wx = a[0] * local.x + a[2] * local.y + a[4] + delta.x
+        let wy = a[1] * local.x + a[3] * local.y + a[5] + delta.y
+        let det = a[0] * a[3] - a[2] * a[1]
+        guard abs(det) >= 1e-9 else { return SIMD2(wx, wy) }
+        let rx = wx - a[4], ry = wy - a[5]
+        return SIMD2((a[3] * rx - a[2] * ry) / det, (-a[1] * rx + a[0] * ry) / det)
+    }
+
+    /// Tira quem tem um ancestral (qualquer nível) também no conjunto: o pai já
+    /// leva o filho. `parentOf` devolve 0 sem pai. Mantém a ordem.
+    static func moveRoots(_ ids: [Int64], parentOf: (Int64) -> Int64) -> [Int64] {
+        let set = Set(ids)
+        return ids.filter { id in
+            var p = parentOf(id), depth = 0
+            while p != 0 && p != id && depth < 64 {
+                if set.contains(p) { return false }
+                p = parentOf(p); depth += 1
+            }
+            return true
+        }
+    }
+
+    /// Encaixe em múltiplos de `step` com histerese: preso em `current`
+    /// enquanto a até `exit` dele; senão prende no múltiplo mais próximo a
+    /// menos de `enter`. nil = solto.
+    static func snapStep(_ value: Float, step: Float, current: Float?, enter: Float, exit: Float) -> Float? {
+        guard value.isFinite, step > 0 else { return nil }
+        if let current, abs(value - current) <= exit { return current }
+        let k = (value / step).rounded() * step
+        return abs(value - k) < enter ? k : nil
+    }
+
+    static func snapTarget(_ value: Float, target: Float, current: Float?, enter: Float, exit: Float) -> Float? {
+        guard value.isFinite else { return nil }
+        if let current, abs(value - current) <= exit { return current }
+        return abs(value - target) < enter ? target : nil
+    }
+
+    /// Entrou num encaixe (ou trocou de alvo): hora do tique.
+    static func snapEntered(_ previous: Float?, _ next: Float?) -> Bool { next != nil && next != previous }
 }
 
 struct StageTouchPoint {

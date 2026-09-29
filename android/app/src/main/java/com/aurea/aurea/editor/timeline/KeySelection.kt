@@ -117,6 +117,23 @@ data class KeySelection(
         return if (keys.containsAll(refs)) copy(keys = keys - refs) else copy(keys = keys + refs)
     }
 
+    /**
+     * SOMA (sem alternar) os keyframes de cada camada — a seleção por
+     * retângulo: o que já estava escolhido continua; a principal fica a mesma.
+     */
+    fun plusAll(picked: Map<Long, List<KeyframeRow>>): KeySelection {
+        if (picked.isEmpty()) return this
+        var keys = this.keys
+        val others = LinkedHashMap(this.others)
+        for ((id, group) in picked) {
+            if (group.isEmpty()) continue
+            val refs = group.mapTo(LinkedHashSet()) { KeyRef.of(it) }
+            if (id == layer) keys = keys + refs
+            else others[id] = others[id].orEmpty() + refs
+        }
+        return copy(keys = keys, others = others)
+    }
+
     /** Todas as referências andam `delta` frames (depois que o motor aceitou o mesmo delta). */
     fun shifted(delta: Int): KeySelection =
         if (delta == 0) this else copy(

@@ -136,6 +136,42 @@ private struct CurvePresetItem: Identifiable {
     }
 }
 
+/// Presets prontos do menu "Presets" (CurvePanel.kt `StandardCurves`): menu
+/// compacto, não blocos. O Bounce segue no botão próprio.
+let curveStandardPresets: [(key: String, ease: CurveEase)] = [
+    ("pn_curve_std_smooth", CurveEase(interpolation: 2, x1: 0.33, y1: 0, x2: 0.66, y2: 1)),
+    ("pn_curve_std_in", CurveEase(interpolation: 2, x1: 0.42, y1: 0, x2: 1, y2: 1)),
+    ("pn_curve_std_out", CurveEase(interpolation: 2, x1: 0, y1: 0, x2: 0.58, y2: 1)),
+    ("pn_curve_std_overshoot", CurveEase(interpolation: 2, x1: 0.34, y1: 1.56, x2: 0.64, y2: 1)),
+    ("pn_curve_std_anticipate", CurveEase(interpolation: 2, x1: 0.36, y1: 0, x2: 0.66, y2: -0.56)),
+]
+
+/// [interp, x1, y1, x2, y2, força] do preset salvo (CurvePanel.kt `curvePresetValues`).
+func curvePresetValues(_ ease: CurveEase) -> [Float] {
+    let h = ease.handles
+    return [Float(ease.interpolation), h[0], h[1], h[2], h[3], Float(ease.isBezier ? ease.power : 1)]
+}
+
+/// O inverso (PresetsPanel.kt `curvePresetEase`); preset antigo sem força = ×1.
+func curvePresetEase(_ values: [Float]) -> CurveEase? {
+    guard values.count >= 5, values.allSatisfy({ $0.isFinite }), values[0] >= 0, values[0] <= 9 else { return nil }
+    let power = values.count >= 6 ? min(3, max(1, Int(values[5]))) : 1
+    return CurveEase(interpolation: UInt32(values[0]), x1: values[1], y1: values[2], x2: values[3], y2: values[4], power: power)
+}
+
+/// Curva só existe entre 2 marcas (GraphCurve.kt `curveEditable`).
+func curveEditable(_ track: [KeyframeItem]) -> Bool { track.count >= 2 }
+
+/// "Aplicar a todos os keyframes desta propriedade" (GraphCurve.kt
+/// `propertySegmentStarts`): o início de cada trecho de cada trilha do grupo
+/// (X/Y/Z, componentes do parâmetro); [] = menos de 2 marcas.
+func curvePropertySegmentStarts(_ keys: [KeyframeItem], _ track: [KeyframeItem]) -> [KeyframeItem] {
+    guard curveEditable(track) else { return [] }
+    var seen = Set<String>()
+    return graphGroup(keys, track).flatMap { lane in lane.sorted { $0.time < $1.time }.dropLast() }
+        .filter { seen.insert($0.id).inserted }
+}
+
 @MainActor
 private enum CurveClipboard { static var ease: CurveEase? }
 
@@ -368,6 +404,8 @@ struct NativeCurvePanel: View {
     var expanded = false
     @State private var fullscreen = false
     @State private var ease = CurveEase.linear
+    /// As curvas que a pessoa salvou (Presets › Curva).
+    @State private var saved: [(name: String, ease: CurveEase)] = []
     private var graphMode: Int { model.curveGraphMode }
     private struct Segment {
         let start: KeyframeItem
@@ -419,6 +457,7 @@ struct NativeCurvePanel: View {
                         } else {
                             NativeTrackGraph(layer: layer, keys: track, speed: graphMode == 2)
                         }
+                        if graphMode == 0 { presetRow(segment) }
                         segmentNavigation(segment)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }.frame(maxHeight: .infinity)
@@ -431,6 +470,12 @@ struct NativeCurvePanel: View {
                             .padding(.horizontal, 16).padding(.vertical, 8)
                     }.buttonStyle(AureaPressStyle(shrink: 1))
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Propriedade com menos de 2 keyframes: avisa e volta, venha de onde vier.
+                .onAppear {
+                    if model.curveSelectedTime != nil && !curveEditable(track) {
+                        model.toast = AureaText.t("pn_curve_need_two_keys"); back()
+                    }
+                }
             }
         }.clipped().contentShape(Rectangle())
         .background(curvePanelFill, ignoresSafeAreaEdges: [])
@@ -449,7 +494,7 @@ struct NativeCurvePanel: View {
             }
         }
         .fullScreenCover(isPresented: $fullscreen) { NativeCurvePanel(expanded: true).environmentObject(model).interactiveDismissDisabled() }
-        .onAppear { load() }
+        .onAppear { load(); loadSaved() }
         .onChange(of: model.status.modelRevision) { _ in load() }
         .onChange(of: segment?.id) { _ in load() }
         .onChange(of: layer) { _ in load() }
@@ -581,18 +626,70 @@ struct NativeCurvePanel: View {
             SheetAction(AureaText.t("panel_colar_curva"), enabled: copied != nil) {
                 if let copied { set(copied, to: segment.start, label: "colar curva") }
             },
-            SheetAction(AureaText.t("panel_aplicar_todos_segmentos")) {
-                model.beginGesture("curva em todos")
-                for key in track.dropLast() { apply(value, to: key) }
+            // Todos os trechos da propriedade (e dos eixos do grupo): um desfazer.
+            SheetAction(AureaText.t("panel_curve_apply_property")) {
+                let starts = curvePropertySegmentStarts(model.keyframes[layer] ?? [], track)
+                guard !starts.isEmpty else { model.toast = AureaText.t("pn_curve_need_two_keys"); return }
+                model.beginGesture("curva na propriedade")
+                for key in starts { apply(value, to: key) }
                 model.endGesture()
             }
         ]
         model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_curva"), actions: actions)
     }
+    /// Presets prontos (menu), salvar a curva e as curvas salvas numa fileira
+    /// fina que rola: o painel não cresce.
+    private func presetRow(_ segment: Segment) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                presetChip(AureaText.t("panel_presets") + " ▾", id: "curve.presets") { showStandardPresets(segment) }
+                presetChip("+ " + AureaText.t("pn_curve_save"), id: "curve.save") {
+                    let value = ease
+                    model.namePrompt = NamePromptRequest(title: AureaText.t("panel_salvar_curva_como_preset"), initial: value.name) { savePreset(name: $0, ease: value) }
+                }
+                ForEach(Array(saved.enumerated()), id: \.offset) { _, item in
+                    presetChip(item.name, active: ease.same(item.ease), id: "curve.saved") { set(item.ease, to: segment.start, label: "preset de curva") }
+                }
+            }.padding(.horizontal, 8)
+        }.frame(height: 40)
+    }
+    private func presetChip(_ label: String, active: Bool = false, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.aurea(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+                .foregroundStyle(active ? curveGreen : .white)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .frame(maxWidth: 140)
+                .background(active ? curveGreen.opacity(0.18) : curveRailFill, in: Capsule())
+                .overlay(Capsule().stroke(active ? curveGreen : .white.opacity(0.18), lineWidth: 1))
+                .frame(minHeight: 40).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier(id)
+    }
+    private func showStandardPresets(_ segment: Segment) {
+        let actions = curveStandardPresets.map { item in
+            SheetAction(AureaText.t(item.key)) { set(item.ease, to: segment.start, label: "preset de curva") }
+        }
+        model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_presets"), actions: actions)
+    }
+    /// Lê as curvas salvas (arquivos de Presets › Curva, validados pelo motor).
+    private func loadSaved() {
+        let directory = PanelPresetKind.curve.directory
+        let files = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent.lowercased() < $1.lastPathComponent.lowercased() }
+        saved = files.compactMap { url in
+            guard let source = try? String(contentsOf: url, encoding: .utf8),
+                  let value = curvePresetEase(model.engine.parseCurvePreset(source).map(\.floatValue)) else { return nil }
+            return (url.deletingPathExtension().lastPathComponent, value)
+        }
+    }
     private func savePreset(name: String, ease: CurveEase) {
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
+        defer { loadSaved() }
         let h = ease.handles
+        // O JSON do motor leva a força da bézier; sem ele, o formato antigo (×1).
+        let engineJSON = model.engine.makeCurvePreset(title, interpolation: ease.interpolation,
+            handles: curvePresetValues(ease).dropFirst().map { NSNumber(value: $0) })
         let object: [String: Any] = ["aurea_preset": 1, "kind": "curve", "name": title,
             "curve": ["interp": NSNumber(value: ease.interpolation), "x1": NSNumber(value: h[0]), "y1": NSNumber(value: h[1]),
                       "x2": NSNumber(value: h[2]), "y2": NSNumber(value: h[3])]]
@@ -604,7 +701,12 @@ struct NativeCurvePanel: View {
             while FileManager.default.fileExists(atPath: url.path) { url = directory.appendingPathComponent("\(safe) \(counter).json"); counter += 1 }
             // Sem dado nao se grava ARQUIVO VAZIO: um preset ilegivel e pior
             // que nenhum, porque aparece na lista e nao abre. Ver AureaJSON.h.
-            guard let data = AureaJSONData(object, false) else { throw CocoaError(.fileWriteInvalidFileName) }
+            let data: Data
+            if !engineJSON.isEmpty, let bytes = engineJSON.data(using: .utf8) { data = bytes }
+            else {
+                guard let fallback = AureaJSONData(object, false) else { throw CocoaError(.fileWriteInvalidFileName) }
+                data = fallback
+            }
             try data.write(to: url, options: .atomic)
         } catch { model.toast = error.localizedDescription }
     }

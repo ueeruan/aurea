@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Aba de efeitos</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;font-family:-apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;background:#161C2A;color:#F7F9FB}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #161C2A; display: flex; flex-direction: column; overflow: hidden; position: relative">
+
+<div style="height: 56px; flex-shrink: 0; display: flex; align-items: center; padding: 0 6px; background: #1E2636; position: relative">
+<button aria-label="Voltar" style="width: 44px; height: 44px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+<div style="position: absolute; left: 0; right: 0; text-align: center; font-size: 17px; font-weight: 700; pointer-events: none">Efeitos</div>
+</div>
+
+<div style="height: 360px; flex-shrink: 0; margin: 0 8px; background: #000000; position: relative; display: flex; align-items: center; justify-content: center">
+<button aria-label="Zoom da prévia" style="position: absolute; left: 0; top: 8px; width: 34px; height: 30px; border: 0; border-radius: 0 6px 6px 0; background: #2A3447; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M15 15l6 6M10 7v6M7 10h6"/></svg></button>
+<div style="width: 68px; height: 68px; border-radius: 34px; background: #4A7196; border: 2px solid #FFFFFF; box-shadow: 0 0 22px rgba(169,211,236,0.55)"></div>
+</div>
+
+<div style="height: 52px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 6px">
+<button aria-label="Desfazer" style="width: 44px; height: 44px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg></button>
+<button aria-label="Refazer" style="width: 44px; height: 44px; border: 0; background: transparent; color: #4C5566; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/></svg></button>
+<button aria-label="Ir para o início" style="width: 44px; height: 44px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14M19 12H8M13 7l-5 5 5 5"/></svg></button>
+<button aria-label="Reproduzir" style="width: 48px; height: 48px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg></button>
+<button aria-label="Ir para o fim" style="width: 44px; height: 44px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5v14M5 12h11M11 7l5 5-5 5"/></svg></button>
+<button aria-label="Duplicar camada" style="width: 44px; height: 44px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="12" height="12" rx="2"/><path d="M5 9v10a2 2 0 002 2h8"/><path d="M5 17v4M3 19h4"/></svg></button>
+<button aria-label="Tela cheia" style="width: 44px; height: 44px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><rect x="8" y="8" width="8" height="8"/></svg></button>
+</div>
+
+<div style="height: 22px; flex-shrink: 0; position: relative">
+<div style="position: absolute; left: 186px; top: 0; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 8px solid #6FAED9"></div>
+<div style="position: absolute; left: 196px; right: 0; bottom: 4px; display: flex; align-items: flex-end; gap: 6px">
+<span style="width: 1px; height: 12px; background: #6E7A8C"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 12px; background: #6E7A8C"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 7px; background: #4C5566"></span><span style="width: 1px; height: 12px; background: #6E7A8C"></span>
+</div>
+</div>
+<div style="height: 30px; flex-shrink: 0; display: flex; justify-content: center">
+<div style="height: 26px; padding: 0 6px; border: 1.5px solid #6FAED9; border-radius: 4px; box-sizing: border-box; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; display: flex; align-items: center">00:00:00</div>
+</div>
+
+<div style="height: 32px; flex-shrink: 0; position: relative; margin-top: 4px">
+<button aria-label="Camada: Círculo 1" style="position: absolute; left: 0; top: 2px; height: 28px; width: 78px; border: 0; border-radius: 0 14px 14px 0; background: #222B3B; display: flex; align-items: center; gap: 8px; padding: 0 0 0 8px; color: #F7F9FB"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span style="width: 20px; height: 20px; border-radius: 10px; background: #4A7196"></span></button>
+<div style="position: absolute; left: 160px; right: 0; top: 2px; height: 28px; border-radius: 14px 0 0 14px; border: 1.5px solid #F7F9FB; border-right: 0; box-sizing: border-box; background: #2E6E8E; display: flex; align-items: center; overflow: hidden">
+<div style="width: 34px; height: 100%; background: #F7F9FB; color: #161C2A; display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></div>
+<div style="padding-left: 10px; font-size: 13px; font-weight: 600; color: #F7F9FB">Círculo 1</div>
+</div>
+</div>
+
+<div style="position: absolute; left: 195px; top: 530px; height: 72px; width: 2px; background: #6FAED9"></div>
+
+<div style="flex-grow: 1; display: flex; margin-top: 8px; background: #121826; min-height: 0">
+
+<div style="width: 58px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 8px; border-right: 1px solid #222B3B">
+<button aria-label="Voltar aos efeitos" style="width: 44px; height: 44px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+<button aria-label="Adicionar keyframe" style="width: 44px; height: 44px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2l8 10-8 10-8-10z"/><path d="M12 8v8M8 12h8" stroke-linecap="round"/></svg></button>
+<button aria-label="Curva" style="width: 44px; height: 44px; border: 0; background: transparent; color: #3E4859; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3" stroke-dasharray="3 3"/><path d="M7 17C12 17 12 7 17 7"/></svg></button>
+</div>
+
+<div style="flex-grow: 1; padding: 8px 6px 0 8px; min-width: 0">
+<div style="border-radius: 10px; background: #252F43; display: flex; flex-direction: column; padding-bottom: 6px">
+
+<div style="height: 50px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="#F7F9FB"><path d="M4 7h16l-8 11z"/></svg>
+<div style="flex-grow: 1; font-size: 16px; font-weight: 600">Brilho de luz</div>
+<button aria-label="Mais opções" style="width: 40px; height: 40px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+<button aria-label="Apagar efeito" style="width: 40px; height: 40px; border: 0; background: transparent; color: #F7F9FB; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>
+</div>
+
+<div style="height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 6px">
+<button style="width: 70px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: #121826; color: #6FAED9; font-size: 13px; font-weight: 700; text-decoration: underline">Difusão</button>
+<div style="flex-grow: 1; height: 36px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; padding: 0 2px">
+<span style="width: 1px; height: 22px; background: #3C475C"></span><span style="width: 1px; height: 22px; background: #46526A"></span><span style="width: 1px; height: 22px; background: #53607A"></span><span style="width: 1px; height: 22px; background: #616F8B"></span><span style="width: 1px; height: 22px; background: #707E9A"></span><span style="width: 1px; height: 22px; background: #8390AA"></span><span style="width: 1px; height: 22px; background: #97A3BA"></span><span style="width: 1px; height: 22px; background: #97A3BA"></span><span style="width: 1px; height: 22px; background: #8390AA"></span><span style="width: 1px; height: 22px; background: #707E9A"></span><span style="width: 1px; height: 22px; background: #616F8B"></span><span style="width: 1px; height: 22px; background: #53607A"></span><span style="width: 1px; height: 22px; background: #46526A"></span><span style="width: 1px; height: 22px; background: #3C475C"></span>
+<div style="position: absolute; left: calc(50% - 1px); top: 2px; width: 2px; height: 32px; background: #6FAED9"></div>
+</div>
+<button style="width: 62px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: #1B2333; color: #F7F9FB; font-size: 13px; text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums">0,250</button>
+</div>
+
+<div style="height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 6px; margin-top: 4px">
+<button style="width: 70px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: #2B364B; color: #AAB6C3; font-size: 13px; text-decoration: underline">Limite</button>
+<div style="flex-grow: 1; height: 36px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; padding: 0 2px">
+<span style="width: 1px; height: 22px; background: #3C475C"></span><span style="width: 1px; height: 22px; background: #46526A"></span><span style="width: 1px; height: 22px; background: #53607A"></span><span style="width: 1px; height: 22px; background: #616F8B"></span><span style="width: 1px; height: 22px; background: #707E9A"></span><span style="width: 1px; height: 22px; background: #8390AA"></span><span style="width: 1px; height: 22px; background: #97A3BA"></span><span style="width: 1px; height: 22px; background: #97A3BA"></span><span style="width: 1px; height: 22px; background: #8390AA"></span><span style="width: 1px; height: 22px; background: #707E9A"></span><span style="width: 1px; height: 22px; background: #616F8B"></span><span style="width: 1px; height: 22px; background: #53607A"></span><span style="width: 1px; height: 22px; background: #46526A"></span><span style="width: 1px; height: 22px; background: #3C475C"></span>
+<div style="position: absolute; left: calc(50% - 1px); top: 2px; width: 2px; height: 32px; background: #6FAED9"></div>
+</div>
+<button style="width: 62px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: #1B2333; color: #F7F9FB; font-size: 13px; text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums">0,700</button>
+</div>
+
+<div style="height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 6px; margin-top: 4px">
+<button style="width: 70px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: #2B364B; color: #AAB6C3; font-size: 11px; text-decoration: underline">Intensidade</button>
+<div style="flex-grow: 1; height: 36px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; padding: 0 2px">
+<span style="width: 1px; height: 22px; background: #3C475C"></span><span style="width: 1px; height: 22px; background: #46526A"></span><span style="width: 1px; height: 22px; background: #53607A"></span><span style="width: 1px; height: 22px; background: #616F8B"></span><span style="width: 1px; height: 22px; background: #707E9A"></span><span style="width: 1px; height: 22px; background: #8390AA"></span><span style="width: 1px; height: 22px; background: #97A3BA"></span><span style="width: 1px; height: 22px; background: #97A3BA"></span><span style="width: 1px; height: 22px; background: #8390AA"></span><span style="width: 1px; height: 22px; background: #707E9A"></span><span style="width: 1px; height: 22px; background: #616F8B"></span><span style="width: 1px; height: 22px; background: #53607A"></span><span style="width: 1px; height: 22px; background: #46526A"></span><span style="width: 1px; height: 22px; background: #3C475C"></span>
+<div style="position: absolute; left: calc(50% - 1px); top: 2px; width: 2px; height: 32px; background: #6FAED9"></div>
+</div>
+<button style="width: 62px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: #1B2333; color: #F7F9FB; font-size: 13px; text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums">1,00</button>
+</div>
+
+<div style="height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 6px; margin-top: 4px">
+<button style="width: 70px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: #2B364B; color: #AAB6C3; font-size: 13px; text-decoration: underline">Cor</button>
+<div style="flex-grow: 1"></div>
+<div style="font-size: 12px; color: #6F8A9E; font-variant-numeric: tabular-nums">255 85 102</div>
+<button aria-label="Escolher cor" style="width: 34px; height: 30px; border: 1px solid #3C475C; border-radius: 5px; background: #FF5566; margin-right: 8px"></button>
+</div>
+
+</div>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -46,7 +46,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -107,14 +111,37 @@ enum class KeyframeLook { None, Animated, KeyHere }
 // Régua de riscos (fita)
 // =============================================================================
 
-/** Passo entre riscos, medido na referência (9 dp) — igual em toda régua. */
-val TickStep: Dp = 9.dp
+/** Passo entre riscos (redesenho 2026-09-29: 14 riscos na régua da linha de 40 dp). */
+val TickStep: Dp = 11.dp
 
-/** Um risco forte a cada 5 (índice ABSOLUTO no papel: anda junto com os fracos). */
-private const val TICKS_PER_STRONG = 5
+/**
+ * Cores e medidas da LINHA DE PARÂMETRO do redesenho aprovado em 2026-09-29
+ * (`docs/design/redesenho-2026-09-29/Efeitos.dc.html`): painel, cartão do
+ * efeito, rótulo, caixa de valor e riscos. O destaque vem do tema (#6FAED9).
+ */
+object ParamRowColors {
+    val Panel = Color(0xFF121826)
+    val Card = Color(0xFF252F43)
+    val LabelOn = Color(0xFF121826)
+    val LabelOff = Color(0xFF2B364B)
+    val LabelOffText = Color(0xFFAAB6C3)
+    val ValueBox = Color(0xFF1B2333)
+    val RailLine = Color(0xFF222B3B)
+    val RailDisabled = Color(0xFF3E4859)
+    val TickEdge = Color(0xFF3C475C)
+    val TickCenter = Color(0xFF97A3BA)
+    val RgbText = Color(0xFF6F8A9E)
+    val SwatchBorder = Color(0xFF3C475C)
+}
 
-/** Onde os riscos começam a sumir, contado de cada borda (a fita não termina: some). */
-private val TickFade: Dp = 24.dp
+object ParamRowDims {
+    val Row = 40.dp
+    val Gap = 6.dp
+    val LabelW = 70.dp
+    val LabelH = 36.dp
+    val ValueW = 62.dp
+    val Radius = 6.dp
+}
 
 /**
  * A RÉGUA DE RISCOS, pintada num Canvas só (trinta riscos como widgets seriam
@@ -123,7 +150,8 @@ private val TickFade: Dp = 24.dp
  * Os riscos SEGUEM O DEDO: a posição de cada um é `centro + valor/porDp`, então
  * arrastar para a direita aumenta o valor e os riscos andam para a direita —
  * a conta, os riscos e o número concordam. [value] é lido DENTRO do desenho:
- * mudar o valor só repinta, não recompõe.
+ * mudar o valor só repinta, não recompõe. Os riscos acendem perto do centro
+ * ([ParamRowMath.tickBrightness]) e a linha do meio é a do destaque.
  *
  * @param active centro aceso (a régua em edição); a outra do par fica branca.
  */
@@ -143,35 +171,26 @@ private fun DrawScope.drawTicks(value: Float, unitsPerDp: Float, active: Boolean
     val bottom = size.height - pad
     if (bottom <= top || size.width <= 0f) return
     val step = TickStep.toPx()
-    val fade = TickFade.toPx()
+    // Os riscos têm ~70 % da altura da linha do meio (22 de 32 na referência).
+    val inset = (bottom - top) * 0.155f
+    val w = 1.dp.toPx()
     val center = size.width / 2f
-    val weak = AureaColors.Muted.copy(alpha = 0.25f)
-    val strong = AureaColors.Muted.copy(alpha = 0.60f)
-    val weakW = 1.dp.toPx()
-    val strongW = 1.5.dp.toPx()
     // Onde o valor ZERO cai no papel, em px a partir da borda esquerda.
     val perPx = if (unitsPerDp > 0f) unitsPerDp / density else 1f
     val base = (if (value.isFinite()) value / perPx else 0f) + center
     val whole = floor(base / step)
-    val phase = base - whole * step
-    var x = phase - step
-    var k = 0
+    var x = base - whole * step - step
     while (x <= size.width) {
-        val fromEdge = min(x, size.width - x)
-        if (fromEdge > 0f) {
-            val f = if (fromEdge >= fade) 1f else fromEdge / fade
-            val index = k - 1 - whole.toInt()
-            val isStrong = Math.floorMod(index, TICKS_PER_STRONG) == 0
-            val c = if (isStrong) strong else weak
+        val b = ParamRowMath.tickBrightness(x, size.width)
+        if (b > 0f) {
             drawLine(
-                color = c.copy(alpha = c.alpha * f),
-                start = Offset(x, top),
-                end = Offset(x, bottom),
-                strokeWidth = if (isStrong) strongW else weakW,
+                color = lerp(ParamRowColors.TickEdge, ParamRowColors.TickCenter, b * b).copy(alpha = min(1f, b * 4f)),
+                start = Offset(x, top + inset),
+                end = Offset(x, bottom - inset),
+                strokeWidth = w,
             )
         }
         x += step
-        k++
     }
     drawLine(
         color = if (active) AureaColors.Accent else AureaColors.Playhead,
@@ -193,6 +212,9 @@ private fun DrawScope.drawTicks(value: Float, unitsPerDp: Float, active: Boolean
  * Valor já FORA da faixa da régua (digitado além do slider): a faixa do gesto
  * se estende até ele ([dragBounds]) — o primeiro toque não o puxa de volta, e o
  * arrasto continua do valor mostrado, sem salto.
+ *
+ * CONTROLE FINO ([ParamRowMath.scrubGain]): com dois dedos na régua o passo cai
+ * a 1/10; arrastando devagar, a 1/4 (e volta a 1:1 com a velocidade).
  */
 fun Modifier.valueDrag(
     enabled: Boolean,
@@ -210,43 +232,58 @@ fun Modifier.valueDrag(
     val send by rememberUpdatedState(onValue)
     val finish by rememberUpdatedState(onEnd)
     this.pointerInput(min, max) {
-        var from = 0f
-        var walked = 0f
-        var active = false
         val lo = if (min.isNaN()) Float.NEGATIVE_INFINITY else min
         val hi = if (max.isNaN()) Float.POSITIVE_INFINITY else max
-        var dragLo = lo
-        var dragHi = hi
-        detectHorizontalDragGestures(
-            onDragStart = {
-                val s = readStart()
-                from = if (s.isFinite()) s else 0f
-                val (l, h) = dragBounds(lo, hi, from)
-                dragLo = l
-                dragHi = h
-                walked = 0f
-                active = true
-                begin()
-            },
-            onDragEnd = {
-                if (active) {
-                    active = false
-                    finish()
-                }
-            },
-            onDragCancel = {
-                if (active) {
-                    active = false
-                    finish()
-                }
-            },
-            onHorizontalDrag = { change, dx ->
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var over = 0f
+            // Só o arrasto HORIZONTAL é da régua; o vertical fica para a rolagem.
+            val first = awaitHorizontalTouchSlopOrCancellation(down.id) { change, amount ->
                 change.consume()
-                walked += dx / density
-                val v = (from + walked * readUnits()).coerceIn(dragLo, dragHi)
+                over = amount
+            } ?: return@awaitEachGesture
+            val s = readStart()
+            val from = if (s.isFinite()) s else 0f
+            var walked = 0f
+            var pointer = first.id
+            var last = first.uptimeMillis
+            // Controle fino (ParamRowMath): dois dedos = 1/10; devagar = 1/4.
+            var speed = ParamRowMath.smoothSpeed(
+                ParamRowMath.FAST_SPEED,
+                (first.position.x - down.position.x) / density,
+                (first.uptimeMillis - down.uptimeMillis).toFloat(),
+            )
+            fun step(dxPx: Float, dtMs: Float, pointers: Int) {
+                val dxDp = dxPx / density
+                speed = ParamRowMath.smoothSpeed(speed, dxDp, dtMs)
+                walked += dxDp * ParamRowMath.scrubGain(pointers, speed)
+                val v = ParamRowMath.scrubValue(from, walked, readUnits(), lo, hi)
                 if (v.isFinite()) send(v)
-            },
-        )
+            }
+            begin()
+            try {
+                step(over, 16f, 1)
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val pressed = event.changes.filter { it.pressed }
+                    if (pressed.isEmpty()) break
+                    val main = pressed.firstOrNull { it.id == pointer }
+                    if (main == null) {
+                        // O dedo que arrastava saiu: segue com outro, sem salto.
+                        pointer = pressed.first().id
+                        last = pressed.first().uptimeMillis
+                        continue
+                    }
+                    val dx = main.position.x - main.previousPosition.x
+                    val dt = (main.uptimeMillis - last).toFloat()
+                    last = main.uptimeMillis
+                    event.changes.forEach { if (it.positionChange() != Offset.Zero) it.consume() }
+                    if (dx != 0f) step(dx, dt, pressed.size)
+                }
+            } finally {
+                finish()
+            }
+        }
     }
 }
 
@@ -341,9 +378,10 @@ fun ValueBox(
 // =============================================================================
 
 /**
- * O CHIP DO RÓTULO [A] (94 × 32): nome em ATÉ DUAS LINHAS, 12 sp w600, sem
- * encolher a fonte (o bug B-01 era o rótulo de uma linha que encolhia até ficar
- * ilegível). Escolhido = fundo `campo` e texto `destaque` sublinhado.
+ * O RÓTULO DA LINHA (redesenho 2026-09-29): botão 70 × 36, raio 6, SEMPRE
+ * sublinhado (a promessa de que toca). Escolhido = fundo escuro #121826 e texto
+ * no destaque em negrito; os outros #2B364B com texto apagado. Rótulo longo
+ * encolhe para 11 sp e quebra em duas linhas ([ParamRowMath.labelFontSp]).
  *
  * [keyframe] desenha um losango pequeno no canto quando a trilha anima (cheio =
  * marca no cabeçote) — é o que diz, linha a linha, o que o losango do trilho
@@ -351,8 +389,8 @@ fun ValueBox(
  * bug B-02).
  *
  * [expression] desenha um "=" no canto direito quando a trilha tem expressão
- * (destaque = ligada, apagado = desligada, vermelho = com erro); segurar o chip
- * ([onLongClick]) abre o editor de expressão da propriedade.
+ * (destaque = ligada, apagado = desligada, vermelho = com erro); segurar o
+ * rótulo ([onLongClick]) abre o menu do parâmetro.
  */
 @Composable
 fun PropertyLabelChip(
@@ -366,9 +404,9 @@ fun PropertyLabelChip(
 ) {
     Box(
         modifier
-            .size(width = 94.dp, height = 32.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) AureaColors.Chip else Color.Transparent)
+            .size(width = ParamRowDims.LabelW, height = ParamRowDims.LabelH)
+            .clip(RoundedCornerShape(ParamRowDims.Radius))
+            .background(if (selected) ParamRowColors.LabelOn else ParamRowColors.LabelOff)
             .then(
                 if (onClick != null || onLongClick != null) {
                     Modifier.tocavel(shrink = 1f, onLongClick = onLongClick, onClick = { onClick?.invoke() })
@@ -376,21 +414,21 @@ fun PropertyLabelChip(
                     Modifier
                 },
             )
-            .padding(horizontal = 6.dp),
+            .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
-            maxLines = 2,
+            maxLines = ParamRowMath.labelMaxLines(label),
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(
                 TextStyle(
-                    fontSize = 12.sp,
-                    lineHeight = 1.05.em,
-                    fontWeight = FontWeight.W600,
+                    fontSize = ParamRowMath.labelFontSp(label).sp,
+                    lineHeight = 1.1.em,
+                    fontWeight = if (selected) FontWeight.W700 else FontWeight.W400,
                     textAlign = TextAlign.Center,
-                    color = if (selected) AureaColors.Accent else AureaColors.Muted,
-                    textDecoration = if (selected) TextDecoration.Underline else TextDecoration.None,
+                    color = if (selected) AureaColors.Accent else ParamRowColors.LabelOffText,
+                    textDecoration = TextDecoration.Underline,
                 ),
             ),
         )
@@ -398,7 +436,7 @@ fun PropertyLabelChip(
             Canvas(
                 Modifier
                     .align(Alignment.TopStart)
-                    .offset(x = (-3).dp, y = 3.dp)
+                    .offset(x = (-1).dp, y = 3.dp)
                     .size(7.dp),
             ) {
                 val p = Path().apply {
@@ -415,7 +453,45 @@ fun PropertyLabelChip(
                 }
             }
         }
-        if (expression != ExpressionLook.None) ExpressionBadge(expression, Modifier.align(Alignment.TopEnd).offset(x = 4.dp))
+        if (expression != ExpressionLook.None) ExpressionBadge(expression, Modifier.align(Alignment.TopEnd).offset(x = 2.dp))
+    }
+}
+
+/**
+ * A CAIXA DE VALOR da linha (redesenho 2026-09-29): 62 × 36, raio 6, #1B2333,
+ * número 13 sp alinhado à DIREITA com algarismos tabulares (não dança durante o
+ * arrasto); encolhe antes de vazar. Tocar abre o teclado.
+ */
+@Composable
+fun ParamValueBox(
+    text: String,
+    modifier: Modifier = Modifier,
+    width: Dp = ParamRowDims.ValueW,
+    enabled: Boolean = true,
+    onTap: (() -> Unit)?,
+) {
+    Box(
+        modifier
+            .size(width = width, height = ParamRowDims.LabelH)
+            .clip(RoundedCornerShape(ParamRowDims.Radius))
+            .background(ParamRowColors.ValueBox)
+            .then(if (onTap != null) Modifier.tocavel(enabled = enabled, shrink = 1f, onClick = onTap) else Modifier)
+            .padding(start = 4.dp, end = 8.dp),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        BasicText(
+            text = text,
+            maxLines = 1,
+            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 13.sp, stepSize = 0.5.sp),
+            style = AureaType.Base.merge(
+                TextStyle(
+                    fontSize = 13.sp,
+                    color = if (enabled) AureaColors.Text else AureaColors.Muted,
+                    textAlign = TextAlign.End,
+                    fontFeatureSettings = "tnum",
+                ),
+            ),
+        )
     }
 }
 
@@ -439,12 +515,13 @@ fun ExpressionBadge(look: ExpressionLook, modifier: Modifier = Modifier) {
 }
 
 /**
- * A LINHA DE PROPRIEDADE [A] (`LinhaDeParametro`, t2): 48 dp =
- * `[chip 94] 8 [régua] 8 [caixa 68 × 24]`.
+ * A LINHA DE PARÂMETRO (redesenho 2026-09-29, Efeitos.dc.html): 40 dp =
+ * `[rótulo 70×36] 6 [régua] 6 [valor 62×36]`.
  *
  * O valor mostrado é o do MOTOR ([value]); enquanto o dedo arrasta, a linha
  * mostra o valor em voo (o motor recebe cada passo ao vivo) para a régua não
- * esperar a volta. Começar a arrastar também escolhe a linha.
+ * esperar a volta. Começar a arrastar também escolhe a linha. A régua aceita
+ * controle fino (dois dedos ou arrasto lento, ver [valueDrag]).
  */
 @Composable
 fun PropertyRow(
@@ -480,20 +557,20 @@ fun PropertyRow(
     Row(
         modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(ParamRowDims.Row)
             .alpha(if (enabled) 1f else 0.45f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PropertyLabelChip(label, selected, keyframe = keyframe, expression = expression, onLongClick = onExpression, onClick = onSelect)
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(ParamRowDims.Gap))
         TickRuler(
             value = { if (dragging) live else current },
             unitsPerDp = unitsPerDp,
-            active = selected,
+            active = true,
+            verticalPadding = 2.dp,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxHeight()
-                .padding(vertical = 4.dp)
+                .height(ParamRowDims.LabelH)
                 .valueDrag(
                     enabled = enabled,
                     start = { current },
@@ -516,14 +593,14 @@ fun PropertyRow(
                     },
                 ),
         )
-        Spacer(Modifier.width(8.dp))
-        ValueBox(format(shown), enabled = enabled, onTap = onTapValue)
+        Spacer(Modifier.width(ParamRowDims.Gap))
+        ParamValueBox(format(shown), enabled = enabled, onTap = onTapValue)
     }
 }
 
 /**
- * Linha "rótulo + controle livre" (interruptor, escolha, cor): o mesmo chip de
- * 94 à esquerda para a coluna dos nomes não pular entre tipos.
+ * Linha "rótulo + controle livre" (interruptor, escolha, cor): o mesmo rótulo
+ * de 70 à esquerda para a coluna dos nomes não pular entre tipos.
  */
 @Composable
 fun PropertyCustomRow(
@@ -532,7 +609,7 @@ fun PropertyCustomRow(
     onSelect: () -> Unit,
     modifier: Modifier = Modifier,
     keyframe: KeyframeLook = KeyframeLook.None,
-    minHeight: Dp = 48.dp,
+    minHeight: Dp = ParamRowDims.Row,
     expression: ExpressionLook = ExpressionLook.None,
     onExpression: (() -> Unit)? = null,
     content: @Composable () -> Unit,
@@ -544,7 +621,7 @@ fun PropertyCustomRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PropertyLabelChip(label, selected, keyframe = keyframe, expression = expression, onLongClick = onExpression, onClick = onSelect)
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(ParamRowDims.Gap))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { content() }
     }
 }

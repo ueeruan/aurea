@@ -28,36 +28,42 @@ class TimelineHitTest {
     }
 
     @Test
-    fun `a geometria da A01`() {
-        assertEquals(38f, m.rowsTop, 0f)
-        // Linha 36 / barra 30 (mais baixas que a A.01, 46/36: cabem mais camadas).
-        assertEquals(36f, m.row, 0f)
-        assertEquals(30f, m.bar, 0f)
-        assertEquals(19f, m.trackTop, 0f)
-        // Calha de 40 (sai a pílula de 58): glifo do tipo em (17, 13), olho pequeno no canto de baixo (31, 25).
-        assertEquals(40f, m.headerColumn, 0f)
+    fun `a geometria do redesenho`() {
+        // Mockup 2026-09-29: riscos 30 + relógio 30 + respiro 8, e a barra 2 dp abaixo do topo da pílula.
+        assertEquals(70f, m.rowsTop, 0f)
+        // Fileira 32 (pílula 28 + vão 4) / barra 24: as camadas eram grandes demais.
+        assertEquals(32f, m.row, 0f)
+        assertEquals(24f, m.bar, 0f)
+        assertEquals(13f, m.trackTop, 0f)
+        // Pílula de 78 colada à esquerda: olho em x 16, quadradinho de 22 de x 32 a 54.
+        assertEquals(78f, m.headerColumn, 0f)
+        assertEquals(28f, m.pillHeight, 0f)
+        assertEquals(2f, m.pillInset, 0f)
         assertEquals(17f, m.gutterIconCx, 0f)
-        assertEquals(31f, m.gutterEyeCx, 0f)
-        assertEquals(25f, m.gutterEyeCy, 0f)
+        assertEquals(16f, m.gutterEyeCx, 0f)
+        assertEquals(32f, m.glyphBoxLeft, 0f)
+        assertEquals(22f, m.glyphBox, 0f)
         assertEquals(3f, m.stripe, 0f)
+        assertEquals(3f, m.barRadius, 0f)
+        assertEquals(64f, m.playheadTop, 0f)
     }
 
     @Test
-    fun `calha ganha de tudo - olho no canto de baixo, o resto e o glifo do tipo`() {
-        assertEquals(HitKind.HEADER_EYE, hit(30f, 20f))
-        assertEquals(HitKind.HEADER_EYE, hit(38f, 32f))
-        assertEquals(HitKind.HEADER, hit(12f, 20f))          // o glifo do tipo abre/fecha as trilhas
-        assertEquals(HitKind.HEADER, hit(30f, 8f))           // alto da calha: ainda o glifo
-        assertEquals(HitKind.HEADER, hit(12f, 32f))
-        assertEquals(HitKind.NONE, hit(50f, 20f))            // fora da calha e fora do clipe
+    fun `pilula ganha de tudo - olho no comeco, o resto e a miniatura do tipo`() {
+        assertEquals(HitKind.HEADER_EYE, hit(10f, 10f))
+        assertEquals(HitKind.HEADER_EYE, hit(20f, 20f))
+        assertEquals(HitKind.HEADER, hit(40f, 10f))          // a miniatura do tipo abre/fecha as trilhas
+        assertEquals(HitKind.HEADER, hit(70f, 20f))          // ponta arredondada: ainda a pílula
+        assertEquals(HitKind.HEADER, hit(50f, 28f))
+        assertEquals(HitKind.NONE, hit(90f, 10f))            // fora da pílula e fora do clipe
         assertEquals(HitKind.NONE, hit(250f, -1f))
-        assertEquals(HitKind.NONE, hit(250f, 46f))
+        assertEquals(HitKind.NONE, hit(250f, 32f))
     }
 
     @Test
     fun `corpo e vazio`() {
         assertEquals(HitKind.BODY, hit(250f, 10f))
-        assertEquals(HitKind.NONE, hit(250f, 42f))          // os 10 dp abaixo da barra são do vazio
+        assertEquals(HitKind.NONE, hit(250f, 30f))          // o vão abaixo da barra é do vazio
         assertEquals(HitKind.NONE, hit(350f, 10f))
     }
 
@@ -75,39 +81,47 @@ class TimelineHitTest {
     @Test
     fun `keyframe em 0 nao rouba mais a alca de inicio - bug 10_2`() {
         val atStart = intArrayOf(100)                        // losango em x = 200, na ponta
-        assertEquals(HitKind.KEYFRAME, hit(203f, 30f, instants = atStart))   // no desenho, dentro da barra
+        assertEquals(HitKind.KEYFRAME, hit(203f, 20f, instants = atStart))   // no desenho, dentro da barra
         assertEquals(0, out[0])
-        assertEquals(HitKind.TRIM_START, hit(190f, 30f, instants = atStart)) // fora da barra: alça
-        assertEquals(HitKind.TRIM_START, hit(210f, 30f, instants = atStart)) // perto, mas fora do desenho
-        assertEquals(HitKind.TRIM_START, hit(203f, 10f, instants = atStart)) // metade de cima: alça
-        assertEquals(HitKind.KEYFRAME, hit(190f, 30f, instants = atStart, handles = false))
+        assertEquals(HitKind.TRIM_START, hit(190f, 20f, instants = atStart)) // fora da barra: alça
+        assertEquals(HitKind.TRIM_START, hit(210f, 20f, instants = atStart)) // perto, mas fora do desenho
+        assertEquals(HitKind.TRIM_START, hit(203f, 8f, instants = atStart))  // metade de cima: alça
+        assertEquals(HitKind.KEYFRAME, hit(190f, 20f, instants = atStart, handles = false))
     }
 
     @Test
     fun `losango na faixa de baixo ganha do corpo`() {
         val mid = intArrayOf(125)                            // x = 250
-        assertEquals(HitKind.KEYFRAME, hit(260f, 30f, instants = mid))
-        assertEquals(HitKind.KEYFRAME, hit(250f, 34f, instants = mid))       // abaixo da barra, ainda na linha
-        assertEquals(HitKind.BODY, hit(250f, 10f, instants = mid))
-        assertEquals(HitKind.BODY, hit(270f, 30f, instants = mid))
-        assertEquals(HitKind.BODY, hit(250f, 30f, instants = mid, keys = false))  // lote: o toque é da camada
+        assertEquals(HitKind.KEYFRAME, hit(260f, 20f, instants = mid))
+        assertEquals(HitKind.KEYFRAME, hit(250f, 30f, instants = mid))       // abaixo da barra, ainda na linha
+        assertEquals(HitKind.BODY, hit(250f, 8f, instants = mid))
+        assertEquals(HitKind.BODY, hit(270f, 20f, instants = mid))
+        assertEquals(HitKind.BODY, hit(250f, 20f, instants = mid, keys = false))  // lote: o toque é da camada
     }
 
     @Test
-    fun `setas do compacto`() {
-        // contentLeft = 200 + 10 → ‹ em 210..232; contentRight = 300 − 10 → › em 268..290.
-        assertEquals(HitKind.ARROW_PREV, hit(220f, 10f, handles = false, compact = true))
+    fun `tampa e setas do compacto`() {
+        // Tampa "‹" de 34 na ponta esquerda (200..234) = voltar.
+        assertEquals(HitKind.CAP_BACK, hit(205f, 10f, handles = false, compact = true))
+        assertEquals(HitKind.CAP_BACK, hit(230f, 10f, handles = false, compact = true))
+        // contentRight = 300 − 10 → › em 268..290 e ‹ em 246..268 (juntas na direita).
         assertEquals(HitKind.ARROW_NEXT, hit(285f, 10f, handles = false, compact = true))
-        assertEquals(HitKind.BODY, hit(250f, 10f, handles = false, compact = true))
+        assertEquals(HitKind.ARROW_PREV, hit(255f, 10f, handles = false, compact = true))
+        assertEquals(HitKind.BODY, hit(238f, 10f, start = 100, end = 200, handles = false, compact = true))
         // Barra passando da borda direita: a seta › fica à vista (print t2).
         assertEquals(HitKind.ARROW_NEXT, hit(385f, 10f, end = 400, handles = false, compact = true))
+        // Ponta esquerda embaixo da pílula: a tampa gruda depois dela (78..112).
+        assertEquals(HitKind.CAP_BACK, hit(100f, 10f, start = 30, end = 400, handles = false, compact = true))
+        // Clipe curto: só a tampa (sem espaço para as setas, o resto é corpo).
+        assertEquals(HitKind.CAP_BACK, hit(210f, 10f, end = 130, handles = false, compact = true))
+        assertEquals(HitKind.BODY, hit(250f, 10f, end = 130, handles = false, compact = true))
     }
 
     @Test
-    fun `ponta escondida sob a calha nao tem alca`() {
-        // Início no frame 15 → x = 30, embaixo da calha (40).
-        assertEquals(HitKind.HEADER, hit(36f, 10f, start = 15))
-        assertEquals(HitKind.BODY, hit(45f, 10f, start = 15))
+    fun `ponta escondida sob a pilula nao tem alca`() {
+        // Início no frame 30 → x = 60, embaixo da pílula (78).
+        assertEquals(HitKind.HEADER, hit(70f, 10f, start = 30))
+        assertEquals(HitKind.BODY, hit(85f, 10f, start = 30))
     }
 
     @Test

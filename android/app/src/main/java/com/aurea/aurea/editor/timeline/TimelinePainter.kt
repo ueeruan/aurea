@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.PlatformTextStyle
@@ -88,34 +89,53 @@ internal class TimelinePainter(
 
     /** Véu sobre a tira (A.01: preto .62 → .22 até 45 % da barra), em espaço 0..1 e escalado. */
     private val thumbShade = Brush.horizontalGradient(
-        0f to Color.Black.copy(alpha = 0.62f),
-        0.45f to Color.Black.copy(alpha = 0.22f),
+        0f to Color.Black.copy(alpha = 0.45f),
+        0.45f to Color.Black.copy(alpha = 0.12f),
         startX = 0f,
         endX = 1f,
     )
 
-    /** Coluna das pílulas: as barras passam POR BAIXO (A.01: bg → bg .95 a 78 % → transparente). */
-    private val headerShade = Brush.horizontalGradient(
-        0f to AureaColors.Stage,
-        0.78f to AureaColors.Stage.copy(alpha = 0.95f),
-        1f to AureaColors.Stage.copy(alpha = 0f),
-        startX = 0f,
-        endX = m.headerColumn,
-    )
+    /** Pílula da fileira: raio 14 só à direita (colada na borda esquerda). */
+    private val pillPath = Path()
+    private val pillRect = androidx.compose.ui.geometry.RoundRect(
+        0f, 0f, m.headerColumn, m.pillHeight,
+        topLeftCornerRadius = CornerRadius.Zero,
+        topRightCornerRadius = CornerRadius(m.pillRadius),
+        bottomRightCornerRadius = CornerRadius(m.pillRadius),
+        bottomLeftCornerRadius = CornerRadius.Zero,
+    ).also { pillPath.addRoundRect(it) }
+    private val glyphRing = Stroke(1.5f * m.density)
+    /** Triângulo do cabeçote (camada escolhida), reusado a cada quadro. */
+    private val marker = Path()
+    /** Contorno branco do clipe escolhido na fileira compacta (ponta esquerda redonda). */
+    private val capStroke = Stroke(m.capStroke)
+    private val capOutline = Path()
+    private val capRadii = FloatArray(8)
+    private var capName: NameLayout? = null
+    private val timecodeBoxLine = Stroke(m.timecodeBoxStroke)
+    private val dividerPaint = Paint().apply { color = android.graphics.Color.argb(64, 0, 0, 0); strokeWidth = 1f }
+    private val glyphSrc = android.graphics.Rect()
 
     // --- Texto ------------------------------------------------------------------------
     private val nameStyle = TextStyle(
         color = Color.White,
-        fontSize = 12.sp,
+        fontSize = 11.sp,
         fontWeight = FontWeight.W500,
         letterSpacing = (-0.1).sp,
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
-    private val digitStyle = TextStyle(
+    /** Nome do clipe escolhido na fileira compacta: 13 sp semibold (Efeitos.dc.html). */
+    private val capNameStyle = TextStyle(
         color = Color.White,
         fontSize = 13.sp,
+        fontWeight = FontWeight.W600,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+    )
+    private val digitStyle = TextStyle(
+        color = Color.White,
+        fontSize = 16.sp,
         fontWeight = FontWeight.W700,
-        letterSpacing = 0.5.sp,
+        letterSpacing = 0.3.sp,
         fontFeatureSettings = "tnum",
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
@@ -126,6 +146,14 @@ internal class TimelinePainter(
         fontFeatureSettings = "tnum",
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
+    /** O "T" da camada de texto no quadradinho da pílula. */
+    private val glyphTextStyle = TextStyle(
+        color = AureaTimeline.GlyphText,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.W700,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+    )
+    private var glyphT: TextLayoutResult? = null
     private val labelStyle = TextStyle(
         color = AureaTimeline.TickMajor,
         fontSize = 9.sp,
@@ -164,18 +192,30 @@ internal class TimelinePainter(
         thumbs.beginFrame(THUMB_QUERIES_PER_FRAME)
 
         if (n > 0) {
-            clipRect(top = m.rowsTop) {
+            // A pílula da 1ª fileira começa 2 dp acima da barra.
+            clipRect(top = m.rowsTop - m.pillInset) {
                 drawRows(c, rows, n, w, h, view, ppf, cx, fps, compact)
             }
         }
         drawRuler(w, view, ppf, cx, fps, st.pps)
         drawMarkers(store.markers, w, view, ppf, cx)
-        drawTimecode(cx, store.playhead, fps)
+        drawTimecode(cx, store.playhead, fps, st.timecodeBox)
         if (thumbs.starved) c.requestRedraw()
-        val color = if (compact) AureaColors.Danger else AureaColors.Playhead
-        drawRect(color, Offset(cx - m.playhead / 2f, 0f), Size(m.playhead, h))
-        // Cabeçote vermelho do compacto tem o "botão" 8×8 no alto (A.01, painel aberto).
-        if (compact) drawRoundRect(color, Offset(cx - m.knob / 2f, 0f), Size(m.knob, m.knob), CornerRadius(m.knobRadius))
+        // Redesenho 2026-09-29: camada escolhida (fileira compacta ou relógio em
+        // caixa) = cabeçote em destaque com o triângulo no alto da régua
+        // (Efeitos.dc.html); sem seleção, o fio branco do editor principal.
+        val chosen = compact || st.timecodeBox
+        val color = if (chosen) AureaColors.Accent else AureaColors.Playhead
+        // Fio de 2 dp do relógio para baixo (mockup): não risca a régua nem os dígitos.
+        drawRect(color, Offset(cx - m.playhead / 2f, m.playheadTop), Size(m.playhead, h - m.playheadTop))
+        if (chosen) {
+            marker.reset()
+            marker.moveTo(cx - m.markerWidth / 2f, 0f)
+            marker.lineTo(cx + m.markerWidth / 2f, 0f)
+            marker.lineTo(cx, m.markerHeight)
+            marker.close()
+            drawPath(marker, color)
+        }
     }
 
     // --- Linhas ---------------------------------------------------------------------------
@@ -208,7 +248,7 @@ internal class TimelinePainter(
             val top = m.rowsTop + c.rowTop(i) - scroll + (preview?.offsets?.get(i) ?: 0f)
             if (top + c.rowHeight(r) < m.rowsTop || top > h) continue
             if (lifted) {
-                drawRect(AureaColors.Stage, Offset(0f, top), Size(w, c.rowHeight(r)))
+                drawRect(AureaColors.EditorCanvas, Offset(0f, top), Size(w, c.rowHeight(r)))
                 drawRect(AureaColors.Accent.copy(alpha = 0.14f), Offset(0f, top), Size(w, c.rowHeight(r)))
             }
             val segs = r.segments
@@ -244,21 +284,35 @@ internal class TimelinePainter(
             }
         }
 
-        // Calha por cima das barras: glifo do tipo + olho pequeno.
-        drawRect(headerShade, Offset(0f, m.rowsTop), Size(m.headerColumn, h - m.rowsTop))
+        // Pílulas por cima das barras (as barras passam por baixo): olho + miniatura do tipo.
         for (pass in passes) for (i in indices) {
             val lifted = preview != null && i in preview.sourceStart until preview.sourceEnd
             if (preview != null && lifted != (pass == 1)) continue
             val r = c.rowAt(rows, i) ?: continue
             val rowTop = m.rowsTop + c.rowTop(i) - scroll + (preview?.offsets?.get(i) ?: 0f)
             if (rowTop + c.rowHeight(r) < m.rowsTop || rowTop > h) continue
-            if (r.track != null) continue
+            val track = r.track
+            if (track != null) {
+                drawLaneGutter(r, track, rowTop, c.rowHeight(r), c.openGroups.value)
+                continue
+            }
             // A calha é da FILEIRA: no lote se algum trecho dela está no lote;
             // aberta se as trilhas abertas são de um trecho dela.
             var inBatch = false
             if (multi) for (s in r.segments) if (c.isSelected(s.id)) inBatch = true
-            val open = c.expandedLayer.value
-            drawGutter(r, rowTop, inBatch, open != null && r.segment(open) != null)
+            drawGutter(c, r, rowTop, inBatch, c.isExpanded(r), fps)
+        }
+
+        // Retângulo da seleção de losangos (cantos presos ao conteúdo).
+        if (st.boxActive) {
+            val xa = TimeAxis.xOf(st.boxFrame0, view, ppf, cx)
+            val xb = TimeAxis.xOf(st.boxFrame1, view, ppf, cx)
+            val ya = m.rowsTop + st.boxY0 - scroll
+            val yb = m.rowsTop + st.boxY1 - scroll
+            val topLeft = Offset(min(xa, xb), min(ya, yb))
+            val boxSize = Size(abs(xb - xa), abs(yb - ya))
+            drawRect(AureaColors.Accent.copy(alpha = 0.14f), topLeft, boxSize)
+            drawRect(AureaColors.Accent, topLeft, boxSize, style = Stroke(m.guide))
         }
 
         // Fio do ímã.
@@ -313,15 +367,18 @@ internal class TimelinePainter(
         arrows: Boolean = true,
     ) {
         if (r.track != null) {
-            val cy = top + 20f * m.density
-            drawLine(Color.White.copy(alpha = 0.08f), Offset(m.headerColumn, cy), Offset(w, cy))
-            drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps, picked)
-            val labelWidth = min(w - m.headerColumn - 8f * m.density, 240f * m.density)
+            // Trilha BAIXA (16 dp): nome e losangos na mesma faixa, centrados;
+            // os losangos por cima do nome (o nome é só a legenda).
+            val laneH = LANE_HEIGHT_DP * m.density
+            val cy = top + laneH / 2f
+            drawLine(Color.White.copy(alpha = 0.06f), Offset(m.headerColumn, top + laneH), Offset(w, top + laneH))
+            val labelWidth = min(w - m.laneLabelLeft - 8f * m.density, 240f * m.density)
             if (labelWidth > 0f) {
                 val label = nameLayout(r, labelWidth)
-                val left = m.headerColumn + 4f * m.density
-                drawText(label, topLeft = Offset(left, top))
+                val left = m.laneLabelLeft
+                drawText(label, alpha = if (r.track.group) 0.9f else 0.6f, topLeft = Offset(left, cy - label.size.height / 2f))
             }
+            drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps, picked)
             return
         }
         val captionTrack = waveStore?.captionTracks?.firstOrNull { it.layer == r.id }
@@ -355,7 +412,17 @@ internal class TimelinePainter(
             val canvas = drawContext.canvas.nativeCanvas
             rectF.set(left, top, right, bottom)
             barClip.reset()
-            barClip.addRoundRect(rectF, m.barRadius, m.barRadius, android.graphics.Path.Direction.CW)
+            // Fileira compacta, clipe escolhido: ponta esquerda bem redonda (raio 14).
+            val capped = compact && selected
+            if (capped) {
+                val l = m.capRadius
+                val rr = m.barRadius
+                capRadii[0] = l; capRadii[1] = l; capRadii[2] = rr; capRadii[3] = rr
+                capRadii[4] = rr; capRadii[5] = rr; capRadii[6] = l; capRadii[7] = l
+                barClip.addRoundRect(rectF, capRadii, android.graphics.Path.Direction.CW)
+            } else {
+                barClip.addRoundRect(rectF, m.barRadius, m.barRadius, android.graphics.Path.Direction.CW)
+            }
             canvas.save()
             canvas.clipPath(barClip)
             // Bloco escuro no tom do tipo.
@@ -372,16 +439,39 @@ internal class TimelinePainter(
                 drawRect(TRACK_SHADE, Offset(left, top + m.trackTop), Size(right - left, m.track), alpha = alpha)
             }
             if (r.track == null && (r.type == LayerType.Audio || r.type == LayerType.Video)) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx, tone, alpha)
-            // Faixa sólida de 3 dp na borda esquerda, dentro da forma do clipe: a
-            // cor da etiqueta, quando a camada tem uma; senão a do tipo.
-            val stripe = ShellColors.LabelPalette.getOrNull(r.label - 1) ?: tone.stripe
-            drawRect(stripe, Offset(x0, top), Size(m.stripe, m.bar), alpha = alpha)
+            // Faixa sólida de 3 dp na borda esquerda só quando a camada tem etiqueta
+            // de cor (o mockup não tem faixa: a cor do clipe já diz o tipo).
+            val stripe = ShellColors.LabelPalette.getOrNull(r.label - 1)
+            if (stripe != null) drawRect(stripe, Offset(x0, top), Size(m.stripe, m.bar), alpha = alpha)
+            if (capped) {
+                // Tampa branca "‹" de 34 na ponta esquerda VISÍVEL (tocar = voltar).
+                val capL = RowHit.capLeft(m, x0)
+                val capR = min(capL + m.capWidth, right)
+                if (capR > capL) {
+                    drawRect(AureaTimeline.ClipSelected, Offset(capL, top), Size(capR - capL, m.bar))
+                    drawGlyph(CupertinoGlyph.ChevronLeft, m.capGlyph, CAP_INK, capL + m.capWidth / 2f, top + m.bar / 2f)
+                }
+            }
             canvas.restore()
 
             // Setas ‹ › do compacto só no trecho escolhido (os outros da linha também aparecem).
             clipRect(left, top, right, bottom) { drawBarContent(r, top, x0, x1, w, compact && selected, tone, alpha) }
 
-            if (selected) {
+            if (capped) {
+                // Fileira compacta: contorno branco de 1,5 com a mesma ponta redonda.
+                val s = m.capStroke / 2f
+                capOutline.reset()
+                capOutline.addRoundRect(
+                    androidx.compose.ui.geometry.RoundRect(
+                        left + s, top + s, right - s, bottom - s,
+                        topLeftCornerRadius = CornerRadius(m.capRadius - s),
+                        topRightCornerRadius = CornerRadius(m.barRadius - s),
+                        bottomRightCornerRadius = CornerRadius(m.barRadius - s),
+                        bottomLeftCornerRadius = CornerRadius(m.capRadius - s),
+                    ),
+                )
+                drawPath(capOutline, AureaTimeline.ClipSelected, style = capStroke)
+            } else if (selected) {
                 // Escolhido: contorno branco de 2 dp (no lote também).
                 val s = m.selStroke
                 drawRoundRect(
@@ -393,7 +483,8 @@ internal class TimelinePainter(
                 )
             }
             if (handles && r.track == null) {
-                if (RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - m.trimInsetStart, top)
+                // A tampa "‹" já é a alça branca da ponta esquerda (o dedo ali também apara).
+                if (!capped && RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - m.trimInsetStart, top)
                 if (RowHit.endHandleVisible(x1, w)) drawTrimHandle(x1 - m.trimInsetEnd, top)
             }
         } else if (r.track == null && arrows) {
@@ -424,23 +515,12 @@ internal class TimelinePainter(
         val d = m.density
         val ink = tone.text.copy(alpha = alpha)
         val arrowInk = ARROW_TINT.copy(alpha = ARROW_TINT.alpha * alpha)
+        if (compact) return drawCappedContent(r, cy, x0, x1, w, cr, arrowInk, alpha)
         var x = cl
-        if (compact) {
-            drawGlyph(CupertinoGlyph.ChevronLeft, m.arrowGlyph, arrowInk, x + m.arrowSlot / 2f, cy)
-            x += m.arrowSlot
-        }
-        if (barW > m.iconMinBar) {
-            drawGlyph(r.type.glyph, m.typeIcon, ink, x + m.typeIcon * d / 2f, cy)
-            x += m.typeIcon * d + m.iconGap
-        }
-        if (r.locked) {
-            drawGlyph(CupertinoGlyph.LockFill, m.lockIcon, ink, x + m.lockIcon * d / 2f, cy)
-            x += m.lockIcon * d + if (barW > m.lockGapMinBar) m.lockGap else 0f
-        }
+        // O tipo e o cadeado moram na pílula da fileira; a barra leva só o nome.
         // O ≡ mora na ponta REAL da barra (A.01); as setas do compacto grudam na parte visível (print t2).
         val menuRight = x1 - (if (barW < m.narrowBar) m.padRNarrow else m.padR)
         val right = when {
-            compact -> cr - m.arrowSlot
             barW > m.menuMinBar -> min(cr, menuRight - m.menuGlyph * d)
             else -> cr
         }
@@ -456,11 +536,43 @@ internal class TimelinePainter(
         if (rhombusW > 0f && x + rhombusW <= right + 1f) {
             drawGlyph(CupertinoGlyph.Rhombus, m.rhombusIcon, ink, x + m.rhombusGap + m.rhombusIcon * d / 2f, cy)
         }
-        if (compact) {
-            drawGlyph(CupertinoGlyph.ChevronRight, m.arrowGlyph, arrowInk, cr - m.arrowSlot / 2f, cy)
-        } else if (barW > m.menuMinBar && menuRight <= w + m.menuGlyph * d) {
-            drawGlyph(CupertinoGlyph.LineHorizontal3, m.menuGlyph, arrowInk, menuRight - m.menuGlyph * d / 2f, cy)
+        if (barW > m.menuMinBar && menuRight <= w + m.menuGlyph * d) {
+            drawGlyph(CupertinoGlyph.LineHorizontal3, m.menuGlyph, AureaTimeline.ClipGrip.copy(alpha = AureaTimeline.ClipGrip.alpha * alpha), menuRight - m.menuGlyph * d / 2f, top + m.bar / 2f)
         }
+    }
+
+    /**
+     * Conteúdo do clipe escolhido na fileira compacta (Efeitos.dc.html): depois
+     * da tampa "‹", o nome 13 sp semibold; as setas de trocar de camada ‹ ›
+     * juntas na ponta direita (mesma geometria do [RowHit]).
+     */
+    private fun DrawScope.drawCappedContent(
+        r: RowModel, cy: Float, x0: Float, x1: Float, w: Float, cr: Float, arrowInk: Color, alpha: Float,
+    ) {
+        val capEnd = RowHit.capLeft(m, x0) + m.capWidth
+        val next = RowHit.nextArrowLeft(m, x0, x1, w)
+        val prev = next - m.arrowSlot
+        val arrows = prev >= capEnd
+        if (arrows) {
+            drawGlyph(CupertinoGlyph.ChevronLeft, m.arrowGlyph, arrowInk, prev + m.arrowSlot / 2f, cy)
+            drawGlyph(CupertinoGlyph.ChevronRight, m.arrowGlyph, arrowInk, next + m.arrowSlot / 2f, cy)
+        }
+        val x = capEnd + m.capNameGap
+        val avail = (if (arrows) prev else cr) - x
+        if (r.name.isEmpty() || avail <= NAME_MIN_DP * m.density) return
+        val step = NAME_STEP_DP * m.density
+        val bucket = (avail / step).toInt()
+        val cached = capName
+        val layout = if (cached != null && cached.bucket == bucket && cached.name == r.name) cached.layout
+        else measurer.measure(
+            text = r.name,
+            style = capNameStyle,
+            overflow = TextOverflow.Ellipsis,
+            softWrap = false,
+            maxLines = 1,
+            constraints = Constraints(maxWidth = max(1, (bucket * step).toInt())),
+        ).also { capName = NameLayout(r.name, bucket, it) }
+        drawText(layout, alpha = alpha, topLeft = Offset(x, cy - layout.size.height / 2f))
     }
 
     /** Alça de trim da A.01: 16 × 32 branca DENTRO da ponta, risco central escuro. */
@@ -506,6 +618,8 @@ internal class TimelinePainter(
                 val l = origin + i * tile
                 rectF.set(l, top, l + tile, top + m.bar)
                 canvas.drawBitmap(bmp, null, rectF, bitmapPaint)
+                // Divisa fina entre os quadros da tira (mockup).
+                if (l > x0 + 1f) canvas.drawLine(l, top, l, top + m.bar, dividerPaint)
                 drew = true
             }
             i++
@@ -687,25 +801,99 @@ internal class TimelinePainter(
      * OLHO pequeno e apagado no canto de baixo (riscado se oculta) e o cadeado no
      * alto quando travada.
      */
-    private fun DrawScope.drawGutter(r: RowModel, top: Float, inBatch: Boolean, expanded: Boolean) {
-        if (r.track != null) {
-            drawGlyph(CupertinoGlyph.ChevronRight, 10f, AureaTimeline.GutterEye, m.gutterIconCx, top + m.gutterIconCy)
+    /**
+     * Calha de uma trilha: a de GRUPO mostra ▸/▾ (tocar abre/fecha os eixos),
+     * mais claro; um eixo sob o grupo aberto fica sem glifo (o recuo do nome
+     * já diz de quem ele é); as outras, o › apagado de sempre.
+     */
+    private fun DrawScope.drawLaneGutter(r: RowModel, track: TimelineTrack, top: Float, height: Float, open: Set<LaneGroupKey>) {
+        val cy = top + height / 2f
+        drawRect(AureaColors.EditorCanvas, Offset(0f, top), Size(m.laneLabelLeft - 2f * m.density, height))
+        if (track.group) {
+            val expanded = LaneGroupKey(r.id, track) in open
+            drawGlyph(if (expanded) CupertinoGlyph.ChevronDown else CupertinoGlyph.ChevronRight, 10f, AureaColors.Text, m.gutterIconCx, cy)
             return
         }
-        val tint = when {
-            inBatch -> AureaColors.Accent
-            expanded -> AureaColors.Text
-            else -> AureaTimeline.GutterIcon
+        val group = trackGroup(track)
+        if (group != null && LaneGroupKey(r.id, group) in open) return
+        drawGlyph(CupertinoGlyph.ChevronRight, 10f, AureaTimeline.GutterEye, m.gutterIconCx, cy)
+    }
+
+    /**
+     * PÍLULA da fileira (mockup 2026-09-29): 78 × 28 colada à esquerda, raio 14
+     * só à direita, com o olho (riscado se oculta) e o quadradinho de 22 com a
+     * miniatura/tipo: "T" no texto, ponto na forma, quadro na imagem/vídeo, nota
+     * no áudio, glifo nos outros. No lote a pílula ganha o contorno em destaque;
+     * com as trilhas abertas, o quadradinho. Travada: cadeado na ponta.
+     */
+    private fun DrawScope.drawGutter(c: TimelineController, r: RowModel, top: Float, inBatch: Boolean, expanded: Boolean, fps: Float) {
+        val pillTop = top - m.pillInset
+        translate(0f, pillTop) {
+            drawPath(pillPath, AureaColors.EditorRowPill)
+            if (inBatch) drawPath(pillPath, AureaColors.Accent, style = glyphRing)
         }
-        drawGlyph(r.type.glyph, m.gutterIcon, tint, m.gutterIconCx, top + m.gutterIconCy)
+        val cy = pillTop + m.pillHeight / 2f
         drawGlyph(
             if (r.visible) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash,
             m.gutterEye,
             if (r.visible) AureaTimeline.GutterEye else AureaTimeline.GutterIcon,
             m.gutterEyeCx,
-            top + m.gutterEyeCy,
+            cy,
         )
-        if (r.locked) drawGlyph(CupertinoGlyph.LockFill, m.gutterLock, AureaTimeline.GutterIcon, m.gutterEyeCx, top + m.gutterLockCy)
+        val box = m.glyphBox
+        val bl = m.glyphBoxLeft
+        val bt = cy - box / 2f
+        val radius = CornerRadius(m.glyphBoxRadius)
+        val boxAlpha = if (r.visible) 1f else AureaTimeline.HiddenAlpha
+        drawRoundRect(AureaColors.EditorGlyphBox, Offset(bl, bt), Size(box, box), radius)
+        val bcx = bl + box / 2f
+        when (r.type) {
+            LayerType.Text -> {
+                val layout = glyphT ?: measurer.measure("T", glyphTextStyle).also { glyphT = it }
+                drawText(layout, alpha = boxAlpha, topLeft = Offset(bcx - layout.size.width / 2f, cy - layout.size.height / 2f))
+            }
+            LayerType.Shape -> drawCircle(AureaTimeline.GlyphShape.copy(alpha = boxAlpha), m.glyphDot / 2f, Offset(bcx, cy))
+            LayerType.Audio -> drawGlyph(CupertinoGlyph.MusicNote, m.glyphIcon, AureaTimeline.GlyphAudio.copy(alpha = boxAlpha), bcx, cy)
+            LayerType.Video, LayerType.Image -> {
+                if (!drawPillThumb(c, r, bl, bt, box, fps, boxAlpha)) {
+                    drawRoundRect(AureaTimeline.tone(r.type).body, Offset(bl, bt), Size(box, box), radius, alpha = boxAlpha)
+                }
+            }
+            else -> drawGlyph(r.type.glyph, m.glyphIcon, AureaTimeline.GutterIcon.copy(alpha = boxAlpha), bcx, cy)
+        }
+        if (expanded) {
+            val s = glyphRing.width
+            drawRoundRect(AureaColors.Accent, Offset(bl + s / 2f, bt + s / 2f), Size(box - s, box - s), radius, style = glyphRing)
+        }
+        if (r.locked) drawGlyph(CupertinoGlyph.LockFill, m.gutterLock, AureaTimeline.GutterIcon, m.gutterLockCx, cy)
+    }
+
+    /**
+     * Miniatura da camada no quadradinho da pílula, recortada no centro. Usa a
+     * mesma tira em cache da barra (mesma altura, mesmo balde do começo da
+     * mídia): não custa pergunta extra ao motor quando a barra já está à vista.
+     */
+    private fun DrawScope.drawPillThumb(c: TimelineController, r: RowModel, left: Float, top: Float, box: Float, fps: Float, alpha: Float): Boolean {
+        val heightPx = m.bar.roundToInt().coerceIn(1, THUMB_MAX_PX)
+        val image = r.type == LayerType.Image
+        val bucket = if (image) -1 else Thumbs.bucketOf(r.offset.toDouble(), fps)
+        val frame = if (image) r.start else Keyframes.toTimeline(Thumbs.requestLocalFrame(bucket, fps), r.start, r.offset)
+        val bmp = thumbs.get(c.store.thumbnails, r.id, bucket, frame, heightPx, c.store.thumbnailGeneration) ?: return false
+        val bw = bmp.width
+        val bh = bmp.height
+        if (bw <= 0 || bh <= 0) return false
+        val side = min(bw, bh)
+        glyphSrc.set((bw - side) / 2, (bh - side) / 2, (bw + side) / 2, (bh + side) / 2)
+        rectF.set(left, top, left + box, top + box)
+        val canvas = drawContext.canvas.nativeCanvas
+        barClip.reset()
+        barClip.addRoundRect(rectF, m.glyphBoxRadius, m.glyphBoxRadius, android.graphics.Path.Direction.CW)
+        canvas.save()
+        canvas.clipPath(barClip)
+        bitmapPaint.alpha = (alpha * 255f).roundToInt()
+        canvas.drawBitmap(bmp, glyphSrc, rectF, bitmapPaint)
+        canvas.restore()
+        return true
     }
 
     // --- Régua --------------------------------------------------------------------------
@@ -803,7 +991,7 @@ internal class TimelinePainter(
      * Desenhado dígito a dígito com layouts em cache (algarismos tabulares têm
      * a mesma largura): o relógio repinta a cada quadro sem alocar.
      */
-    private fun DrawScope.drawTimecode(cx: Float, frame: Int, fps: Float) {
+    private fun DrawScope.drawTimecode(cx: Float, frame: Int, fps: Float, boxed: Boolean) {
         if (digits[0] == null) {
             for (dgt in 0..9) digits[dgt] = measurer.measure(dgt.toString(), digitStyle)
             digits[10] = measurer.measure(":", digitStyle)
@@ -822,6 +1010,18 @@ internal class TimelinePainter(
         val colons = if (hourDigits > 0) 3 else 2
         val total = (hourDigits + 4 + ffDigits) * digitWidth + colons * colonWidth
         val top = m.timecodeBaseline - digitBaseline
+        if (boxed) {
+            // Estilo caixa (camada escolhida / efeitos): borda em destaque em volta dos dígitos.
+            val bw = total + 2f * m.timecodeBoxPad
+            val s = m.timecodeBoxStroke
+            drawRoundRect(
+                AureaColors.Accent,
+                Offset(cx - bw / 2f + s / 2f, m.timecodeBoxTop + s / 2f),
+                Size(bw - s, m.timecodeBoxHeight - s),
+                CornerRadius(m.timecodeBoxRadius),
+                style = timecodeBoxLine,
+            )
+        }
         var x = cx - total / 2f
         if (hourDigits > 0) {
             x = drawNumber(tc[0], hourDigits, x, top)
@@ -832,7 +1032,7 @@ internal class TimelinePainter(
         x = drawNumber(tc[2], 2, x, top)
         x = drawColon(x, top)
         drawNumber(tc[3], ffDigits, x, top)
-        drawRect(Color.White, Offset(cx - m.underlineWidth / 2f, m.underlineTop), Size(m.underlineWidth, m.underlineHeight))
+        if (!boxed) drawRect(Color.White, Offset(cx - total / 2f, m.underlineTop), Size(total, m.underlineHeight))
     }
 
     private fun DrawScope.drawNumber(value: Int, count: Int, x0: Float, top: Float): Float {
@@ -908,6 +1108,8 @@ internal class TimelinePainter(
         val TRACK_SHADE = Color.Black.copy(alpha = 0.22f)
         val GRIP = Color.Black.copy(alpha = 0.38f)
         val ARROW_TINT = Color.White.copy(alpha = 0.7f)
+        /** Chevron escuro da tampa branca da fileira compacta (#161C2A do mockup). */
+        val CAP_INK = Color(0xFF161C2A)
         val KEY_OFF = Color.White.copy(alpha = 0.9f)
         val KEY_BORDER = Color.Black.copy(alpha = 0.85f)
         /** Keyframe na seleção da timeline (não principal): azul com anel branco — o mesmo no iOS. */

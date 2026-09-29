@@ -411,6 +411,14 @@
     <string name="panel_aplicar">تطبيق</string>
     <string name="panel_aplicar_sem_texto_remove_expressao">التطبيق بلا نص يحذف التعبير.</string>
     <string name="panel_aplicar_todos_segmentos">تطبيق على كل المقاطع</string>
+    <string name="panel_curve_apply_property">تطبيق على كل الإطارات المفتاحية لهذه الخاصية</string>
+    <string name="pn_curve_need_two_keys">تحتاج إلى إطارين مفتاحيين على الأقل لتعديل المنحنى</string>
+    <string name="pn_curve_save">حفظ المنحنى</string>
+    <string name="pn_curve_std_smooth">ناعم</string>
+    <string name="pn_curve_std_in">دخول</string>
+    <string name="pn_curve_std_out">خروج</string>
+    <string name="pn_curve_std_overshoot">تجاوز</string>
+    <string name="pn_curve_std_anticipate">استباق</string>
     <string name="panel_arraste_alcas_palco_mudar_tamanho">اسحب المقابض على المسرح لتغيير الحجم</string>
     <string name="panel_arraste_pontos_palco_toque_num_ponto">اسحب النقاط على المسرح؛ اضغط نقطة لرؤية مقابض الانحناء.</string>
     <string name="panel_arredondar_pontas">تدوير الأطراف</string>
@@ -2561,6 +2569,8 @@
     <string name="fxo_y_axis">المحور Y</string>
     <string name="fxo_alpha_2">ألفا</string>
     <string name="fx_copy_this_effect">نسخ هذا التأثير</string>
+    <string name="fx_back_to_effects">العودة إلى المؤثرات</string>
+    <string name="fx_param_expression">تعبير %1$s</string>
     <string name="fx_default_value">الافتراضي: %1$s</string>
     <string name="fx_param_range">%1$s إلى %2$s</string>
     <string name="app_importing_generated_video">جارٍ استيراد الفيديو المُنشأ…</string>
@@ -3289,4 +3299,9 @@
     <string name="shape3d_layout_hint">دوران لكل جزء، تأخير، عشوائية، انحناء، التواء وتفريق — مثل حروف النص ثلاثي الأبعاد.</string>
     <string name="fx_desc_shape3d_layout">يدوّر أجزاء الشكل ثلاثي الأبعاد ويؤخرها ويفرّقها ويخلطها، مثل حروف النص ثلاثي الأبعاد.</string>
     <string name="edt_cmd_select_shape3d">اختر شكلًا ثلاثي الأبعاد</string>
+    <string name="editor_ir_inicio_segure_anterior">الانتقال إلى البداية · اضغط مطوّلًا: العلامة أو الإطار المفتاحي أو الإطار السابق</string>
+    <string name="editor_ir_fim_segure_proximo">الانتقال إلى النهاية · اضغط مطوّلًا: العلامة أو الإطار المفتاحي أو الإطار التالي</string>
+    <string name="editor_ajustes_projeto">إعدادات المشروع</string>
+    <string name="editor_ajustes_projeto_mais">إعدادات المشروع والمزيد من الخيارات</string>
+    <string name="editor_duplicar_camada_segure_copiar">تكرار الطبقة · اضغط مطوّلًا للنسخ واللصق</string>
 </resources>

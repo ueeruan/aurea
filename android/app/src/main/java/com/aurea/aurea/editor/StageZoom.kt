@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FitScreen
+import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -170,5 +172,45 @@ internal fun StageZoomChip(store: EditorStore, modifier: Modifier) {
             stringResource(R.string.common_percent, pct),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
         )
+    }
+}
+
+/** Fundo do botão da lupa no canto da prévia (Efeitos.dc.html). */
+private val StageZoomButtonFill = androidx.compose.ui.graphics.Color(0xFF2A3447)
+
+/**
+ * Botão da LUPA no canto sup-esq da prévia (redesenho 2026-09-29): 34×30,
+ * colado à borda (raio 0/6/6/0), liga/desliga [StageView.zoomLock] — o mesmo
+ * item "Lupa da prévia" do menu da timeline. Ligado, o ícone fica em destaque.
+ * O alvo de toque é 48×44 (o desenho menor fica no canto dele).
+ */
+@Composable
+internal fun StageZoomButton(modifier: Modifier) {
+    val on = StageView.zoomLock
+    val description = stringResource(if (on) R.string.stage_zoom_view_on else R.string.stage_zoom_view_off)
+    androidx.compose.foundation.layout.Box(
+        modifier
+            .size(48.dp, 44.dp)
+            .semantics {
+                contentDescription = description
+                role = androidx.compose.ui.semantics.Role.Switch
+            }
+            .testTag("stage.zoom.toggle")
+            .tocavel(haptic = true) { StageView.zoomLock = !StageView.zoomLock },
+    ) {
+        androidx.compose.foundation.layout.Box(
+            Modifier
+                .padding(top = 8.dp)
+                .size(34.dp, 30.dp)
+                .background(StageZoomButtonFill, RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 6.dp, bottomEnd = 6.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                androidx.compose.material.icons.Icons.Rounded.ZoomIn,
+                contentDescription = null,
+                tint = if (on) AureaColors.Accent else AureaColors.Text,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }

@@ -5,11 +5,11 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** O que o dedo pegou. */
-internal enum class HitKind { NONE, RULER, HEADER_EYE, HEADER, KEYFRAME, TRIM_START, TRIM_END, ARROW_PREV, ARROW_NEXT, BODY }
+internal enum class HitKind { NONE, RULER, HEADER_EYE, HEADER, KEYFRAME, TRIM_START, TRIM_END, ARROW_PREV, ARROW_NEXT, CAP_BACK, BODY }
 
 /**
  * Hit-test de UMA linha, com a mesma geometria do pintor. Prioridade (spec
- * 03 §5.1): calha > losango > alça de trim > setas ‹ › > corpo > vazio.
+ * 03 §5.1): calha > losango > alça de trim > tampa ‹ / setas ‹ › > corpo > vazio.
  *
  * Pura: recebe tudo em px (coordenadas da timeline; `y` relativo ao topo da
  * linha) e devolve o tipo; o índice do losango vai em `out[0]` (−1 se nenhum).
@@ -29,6 +29,13 @@ internal object RowHit {
 
     fun endHandleVisible(x1: Float, width: Float): Boolean = x1 <= width
 
+    /** Tampa "‹" da fileira compacta: gruda na ponta esquerda VISÍVEL do clipe (depois da pílula). */
+    fun capLeft(m: TimelineMetrics, x0: Float): Float = max(x0, m.headerColumn)
+
+    /** Onde a seta › começa; a ‹ fica logo antes dela (as duas juntas na ponta direita). */
+    fun nextArrowLeft(m: TimelineMetrics, x0: Float, x1: Float, width: Float): Float =
+        contentRight(m, x0, x1, width) - m.arrowSlot
+
     fun hit(
         m: TimelineMetrics,
         x: Float,
@@ -47,9 +54,9 @@ internal object RowHit {
     ): HitKind {
         out[0] = -1
         if (y < 0f || y >= m.row) return HitKind.NONE
-        // Calha: o olho pequeno no canto de baixo à direita; o resto é o ícone do
+        // Pílula: o olho no começo (esconde/mostra); o resto é a miniatura do
         // tipo (tocar abre/fecha as trilhas, segurar trava/reordena).
-        if (x < m.headerColumn) return if (x >= m.eyeHitLeft && y >= m.eyeHitTop) HitKind.HEADER_EYE else HitKind.HEADER
+        if (x < m.headerColumn) return if (x < m.eyeHitRight) HitKind.HEADER_EYE else HitKind.HEADER
 
         // Losango mais perto do dedo (faixa de baixo da barra e o respiro abaixo dela).
         var key = -1
@@ -88,10 +95,17 @@ internal object RowHit {
         if (inEnd) return HitKind.TRIM_END
         if (overBar && x >= x0 && x <= x1) {
             if (compact) {
-                val cl = contentLeft(m, x0, x1)
-                val cr = contentRight(m, x0, x1, width)
-                if (x >= cl - m.arrowTouchPad && x <= cl + m.arrowSlot + m.arrowTouchPad) return HitKind.ARROW_PREV
-                if (x >= cr - m.arrowSlot - m.arrowTouchPad && x <= cr + m.arrowTouchPad) return HitKind.ARROW_NEXT
+                // Redesenho 2026-09-29: a tampa branca "‹" na ponta esquerda
+                // volta (sai da seção); as setas de trocar de camada ‹ › moram
+                // juntas na ponta direita (não disputam com a tampa).
+                val cap = capLeft(m, x0)
+                if (x <= cap + m.capWidth) return HitKind.CAP_BACK
+                val next = nextArrowLeft(m, x0, x1, width)
+                val prev = next - m.arrowSlot
+                if (prev >= cap + m.capWidth) {
+                    if (x >= next && x <= next + m.arrowSlot + m.arrowTouchPad) return HitKind.ARROW_NEXT
+                    if (x >= prev - m.arrowTouchPad && x < next) return HitKind.ARROW_PREV
+                }
             }
             return HitKind.BODY
         }

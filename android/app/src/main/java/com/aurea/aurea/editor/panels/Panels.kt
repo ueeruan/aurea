@@ -97,31 +97,17 @@ fun PanelContent(
     // Só a existência da camada importa aqui — não o detalhe que muda a cada quadro.
     val hasLayer by remember(store) { derivedStateOf { store.detail != null } }
 
-    val title = when (panel) {
-        EditorPanel.Transform -> stringResource(R.string.pn_transform_title_tab, stringResource(transformTab.title))
-        EditorPanel.Effects -> stringResource(R.string.panel_efeitos)
-        EditorPanel.Curve -> stringResource(R.string.panel_easing_curve)
-        EditorPanel.Appearance -> stringResource(R.string.panel_mistura_opacidade)
-        EditorPanel.Speed -> stringResource(R.string.panel_tempo_velocidade)
-        EditorPanel.ClipEdit -> "Slip · Roll · Slide"
-        EditorPanel.Audio -> stringResource(R.string.panel_som)
-        EditorPanel.Shape -> stringResource(R.string.panel_cor_preenchimento)
-        EditorPanel.Text -> stringResource(R.string.text_options)
-        EditorPanel.Font -> stringResource(R.string.panel_fonte)
-        EditorPanel.Particles -> stringResource(R.string.panel_particulas)
-        EditorPanel.Tracking -> stringResource(R.string.panel_rastreio)
-        EditorPanel.Element3D -> stringResource(if (store.text3d != null) R.string.text_options else R.string.panel_material_ambiente)
-        EditorPanel.Captions -> stringResource(R.string.panel_legendas)
-        EditorPanel.Presets -> stringResource(R.string.panel_presets)
-        EditorPanel.Mask -> stringResource(R.string.panel_mascara_recorte)
-        EditorPanel.Vector -> stringResource(R.string.panel_vetor)
-        EditorPanel.ShapeEdit -> stringResource(R.string.panel_editar_forma)
-        EditorPanel.AiVideo -> stringResource(R.string.panel_ai_video)
+    val title = if (panel == EditorPanel.Transform) {
+        stringResource(R.string.pn_transform_title_tab, stringResource(transformTab.title))
+    } else {
+        panelSectionTitle(store, panel)
     }
 
     Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
-        // Efeitos desenha o próprio cabeçalho (as abas "Na camada | Adicionar").
-        if (panel != EditorPanel.Curve && !(panel == EditorPanel.Effects && hasLayer)) PanelHeader(title, onBack = onClose)
+        // Com camada escolhida, o título da seção mora na barra de cima
+        // (SectionTopBar, redesenho 2026-09-29); o cabeçalho próprio só fica
+        // para o painel aberto sem camada (Aurea AI, legendas).
+        if (panel != EditorPanel.Curve && !hasLayer) PanelHeader(title, onBack = onClose)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             // O painel da Aurea AI gera um video e o poe na timeline: nao ha
             // camada escolhida para ele consultar, entao fica FORA do
@@ -174,4 +160,28 @@ fun PanelContent(
 @Composable
 fun EffectsBrowserSheet(store: EditorStore, onDismiss: () -> Unit) {
     EffectsBrowser(store, onDismiss)
+}
+
+/** O título da seção aberta (a barra de cima e o cabeçalho do painel sem camada). */
+@Composable
+internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String = when (panel) {
+    EditorPanel.Transform -> stringResource(R.string.sh_dock_transform)
+    EditorPanel.Effects -> stringResource(R.string.panel_efeitos)
+    EditorPanel.Curve -> stringResource(R.string.panel_easing_curve)
+    EditorPanel.Appearance -> stringResource(R.string.panel_mistura_opacidade)
+    EditorPanel.Speed -> stringResource(R.string.panel_tempo_velocidade)
+    EditorPanel.ClipEdit -> "Slip · Roll · Slide"
+    EditorPanel.Audio -> stringResource(R.string.panel_som)
+    EditorPanel.Shape -> stringResource(R.string.panel_cor_preenchimento)
+    EditorPanel.Text -> stringResource(R.string.text_options)
+    EditorPanel.Font -> stringResource(R.string.panel_fonte)
+    EditorPanel.Particles -> stringResource(R.string.panel_particulas)
+    EditorPanel.Tracking -> stringResource(R.string.panel_rastreio)
+    EditorPanel.Element3D -> stringResource(if (store.text3d != null) R.string.text_options else R.string.panel_material_ambiente)
+    EditorPanel.Captions -> stringResource(R.string.panel_legendas)
+    EditorPanel.Presets -> stringResource(R.string.panel_presets)
+    EditorPanel.Mask -> stringResource(R.string.panel_mascara_recorte)
+    EditorPanel.Vector -> stringResource(R.string.panel_vetor)
+    EditorPanel.ShapeEdit -> stringResource(R.string.panel_editar_forma)
+    EditorPanel.AiVideo -> stringResource(R.string.panel_ai_video)
 }

@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor.timeline
 
 import com.aurea.aurea.ui.theme.AureaTimeline
+import kotlin.math.min
 
 /**
  * Geometria da timeline em PX — a MESMA conta serve para pintar e para tocar
@@ -15,7 +16,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
 
     // --- Régua e linhas -------------------------------------------------------
     val rulerTicks = dp(AureaTimeline.RulerTicks.value)
-    /** Topo da 1ª linha: 20 de riscos + 18 de respiro (o relógio mora no respiro). */
+    /** Topo da 1ª BARRA: 30 de riscos + 30 do relógio + 8 de respiro + 2 (a pílula começa 2 dp acima da barra). */
     val rowsTop = dp(AureaTimeline.RulerTicks.value + AureaTimeline.RulerGap.value)
     val row = dp(AureaTimeline.Row.value)
     val bar = dp(AureaTimeline.Bar.value)
@@ -27,34 +28,44 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     /** Folga abaixo das linhas (a última não cola na borda). */
     val bottomPad = dp(24f)
 
-    // --- Calha da fileira (glifo do tipo + olho pequeno) -----------------------
-    /** Largura da calha; as barras passam por baixo dela. */
+    // --- Pílula da fileira (olho + miniatura/tipo), colada à esquerda -----------
+    /** Largura da pílula; as barras passam por baixo dela. */
     val headerColumn = dp(AureaTimeline.HeaderColumn.value)
-    val gutterIcon = AureaTimeline.GutterIconSize.value
+    /** A pílula: 28 de altura, começa 2 dp acima da barra, raio 14 só à direita. */
+    val pillInset = dp(AureaTimeline.RowPillInset.value)
+    val pillHeight = dp(AureaTimeline.RowPillHeight.value)
+    val pillRadius = pillHeight / 2f
+    /** Centro vertical da pílula, medido do topo da barra. */
+    val pillCy = pillHeight / 2f - pillInset
+    /** Chevron das trilhas de propriedade (coluna estreita à esquerda). */
     val gutterIconCx = dp(17f)
-    /** Centro do glifo do tipo, medido do topo da linha (um pouco acima do meio da barra). */
-    val gutterIconCy = dp(13f)
     val gutterEye = AureaTimeline.GutterEyeSize.value
-    /** O olho mora no canto de baixo, à direita do glifo. */
-    val gutterEyeCx = dp(31f)
-    val gutterEyeCy = dp(25f)
+    /** Olho de 16 com 8 de margem: centro em x 16. */
+    val gutterEyeCx = dp(16f)
+    /** Quadradinho de 22 (miniatura / "T" / ponto / nota) de x 32 a 54. */
+    val glyphBox = dp(AureaTimeline.GlyphBox.value)
+    val glyphBoxLeft = dp(32f)
+    val glyphBoxRadius = dp(3f)
+    val glyphIcon = 12f
+    val glyphDot = dp(10f)
     val gutterLock = 10f
-    val gutterLockCy = dp(6f)
-    /** Toque do olho: o quadrante de baixo à direita da calha; o resto é do glifo do tipo. */
-    val eyeHitLeft = dp(24f)
-    val eyeHitTop = dp(16f)
+    val gutterLockCx = dp(66f)
+    /** Toque do olho: o começo da pílula até antes do quadradinho; o resto é do tipo (abre as trilhas). */
+    val eyeHitRight = dp(28f)
+    /** Onde começa o nome de uma trilha de propriedade (depois do chevron). */
+    val laneLabelLeft = dp(30f)
 
     // --- Régua ------------------------------------------------------------------
-    val tickMajorTop = dp(2f)
-    val tickMinorTop = dp(9f)
-    val tickBottom = dp(18f)
-    val tickMajorWidth = dp(1.4f)
+    val tickMajorTop = dp(8f)
+    val tickMinorTop = dp(14f)
+    val tickBottom = dp(22f)
+    val tickMajorWidth = dp(1f)
     val tickMinorWidth = dp(1f)
     val tickLabelGap = dp(3f)
 
     // --- Conteúdo da barra --------------------------------------------------------
     val stripe = dp(AureaTimeline.ClipStripe.value)
-    val padL = dp(10f)
+    val padL = dp(8f)
     val padR = dp(10f)
     val padLNarrow = dp(6f)
     val padRNarrow = dp(3f)
@@ -72,22 +83,32 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val nameMinBar = dp(52f)
     val lockGapMinBar = dp(70f)
     val rhombusMinBar = dp(120f)
-    val menuMinBar = dp(150f)
+    val menuMinBar = dp(64f)
     val selStroke = dp(AureaTimeline.ClipSelStroke.value)
     val multiStroke = dp(AureaTimeline.ClipSelStroke.value)
     val lightLine = dp(1f)
     /** Toque do corpo vai um pouco abaixo da barra (os 10 dp que sobram na linha são do vazio). */
     val bodyHitBottom = bar + dp(4f)
     val arrowTouchPad = dp(6f)
+    /**
+     * Fileira compacta, clipe escolhido (Efeitos.dc.html): tampa branca "‹" de
+     * 34 na ponta esquerda visível (tocar = voltar), contorno branco 1,5 e a
+     * ponta esquerda arredondada (raio 14, preso à meia altura da barra).
+     */
+    val capWidth = dp(34f)
+    val capStroke = dp(1.5f)
+    val capRadius = min(dp(14f), bar / 2f)
+    val capGlyph = 14f
+    val capNameGap = dp(10f)
 
-    // --- Alça de trim (A.01: 16 × (36 − 4), top 2, DENTRO das pontas) --------------
+    // --- Alça de trim (16 × (24 − 4), top 2, DENTRO das pontas) -----------------------
     val trimWidth = dp(16f)
     val trimTop = dp(2f)
     val trimInsetStart = dp(3f)     // left = x0 − 3
     val trimInsetEnd = dp(13f)      // left = x1 − 13
     val trimRadius = dp(4f)
     val gripWidth = dp(2f)
-    val gripHeight = dp(14f)
+    val gripHeight = dp(10f)
     /** Folga de toque para FORA da barra, além do desenho (a alça de 16 é estreita para o dedo). */
     val trimTouchOut = dp(13f)
 
@@ -95,9 +116,9 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val diamond = dp(11f)
     val diamondRadius = dp(2f)
     val diamondStroke = dp(1.2f)
-    /** Centro do losango: A.01 `top 20, altura 17` (normal) e `top 23, altura 16` (compacto). */
-    val diamondCyNormal = dp(28.5f)
-    val diamondCyCompact = dp(31f)
+    /** Centro do losango medido do topo da barra (24): na borda de baixo dela, dentro da fileira de 32. */
+    val diamondCyNormal = dp(21f)
+    val diamondCyCompact = dp(22f)
     val keyTouchHalf = dp(14f)      // alvo de 28 da A.01
     val keyGlyphHalf = dp(7f)       // o próprio desenho (diagonal ≈ 15,5)
     val keyTouchTop = trackTop - dp(2f)
@@ -114,19 +135,34 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val playhead = dp(AureaTimeline.Playhead.value)
     val knob = dp(AureaTimeline.PlayheadKnob.value)
     val knobRadius = dp(2f)
-    /** Linha de base do relógio: topo dos glifos em y ≈ 11,8 no print (13 sp bold). */
-    val timecodeBaseline = dp(21f)
-    val underlineTop = dp(28.2f)
-    val underlineWidth = dp(58f)
-    val underlineHeight = dp(1.5f)
+    /** Triângulo do cabeçote no alto da régua (camada escolhida): 10 × 8, em destaque. */
+    val markerWidth = dp(10f)
+    val markerHeight = dp(8f)
+    /** Relógio 16 sp bold na faixa de 30 abaixo dos riscos; sublinhado branco de 2 na base (y 52). */
+    val timecodeTop = dp(30f)
+    val timecodeBaseline = dp(46f)
+    val underlineTop = dp(52f)
+    val underlineHeight = dp(2f)
+    /** Estilo caixa (camada escolhida / efeitos): 26 de altura, borda 1,5 em destaque, raio 4. */
+    val timecodeBoxTop = dp(31f)
+    val timecodeBoxHeight = dp(26f)
+    val timecodeBoxPad = dp(6f)
+    val timecodeBoxStroke = dp(1.5f)
+    val timecodeBoxRadius = dp(4f)
     /** Rótulo da régua perto do relógio some (não disputa leitura com ele). */
-    val timecodeZoneHalf = dp(36f)
+    val timecodeZoneHalf = dp(44f)
+    /** O fio do cabeçote começa logo abaixo do relógio e desce até a barra de adicionar. */
+    val playheadTop = dp(64f)
 
     // --- Gestos -------------------------------------------------------------------------
     val snapClip = dp(12f)          // ímã de clipe e alça
     val snapKey = dp(8f)            // ímã de losango
-    val autoEdge = dp(38f)
-    val autoSpeed = dp(120f)        // px/s, constante
+    /** Faixa da auto-rolagem: 48 dp no máximo (menos numa janela baixa, ver `AutoScroll.zone`). */
+    val autoEdge = dp(48f)
+    /** Velocidade no fundo da faixa (px/s); a rampa começa em 0 na entrada dela. */
+    val autoSpeed = dp(360f)
+    /** Trilha baixa: a vizinha também responde até este tanto do centro dela (alvo ≥ 32 dp). */
+    val laneTouchReach = dp(16f)
     val autoIntent = dp(4f)
     val axisSlop = dp(8f)           // depois do toque longo, o eixo se decide com 8 dp
     val holdJitter = dp(2f)         // tremor de um dedo parado (mais que isto é movimento)

@@ -64,7 +64,27 @@ struct AureaPalette: Identifiable {
     let tickStrong: Color
     let railModeFill: Color
     let fieldFilled: Color
-    static let aurea = AureaPalette(id: "aurea", brandDeep: Color(hex: 0xFF123A63), brand: Color(hex: 0xFF245D8C), accent: Color(hex: 0xFF6FAED9), keyframe: Color(hex: 0xFFA9D3EC), background: Color(hex: 0xFF0F141A), surface: Color(hex: 0xFF151C24), surfaceHigh: Color(hex: 0xFF1B2530), chip: Color(hex: 0xFF212D3A), chipHigh: Color(hex: 0xFF323D49), border: Color(hex: 0xFF273442), muted: Color(hex: 0xFFAAB6C3), subtle: Color(hex: 0xFF7C8A99), onAccent: Color(hex: 0xFF0B1117), accentDim: Color(hex: 0xFF1D3A55), keyframeDim: Color(hex: 0xFF22405A), stage: Color(hex: 0xFF0A0E13), hairline: Color(hex: 0xB8273442), editorTopBar: Color(hex: 0xFF0F141A), editorPanel: Color(hex: 0xFF0F141A), editorPanelHigh: Color(hex: 0xFF151C24), pill: Color(hex: 0xFF1B2530), actionDim: Color(hex: 0xFF16304A), statusBarVeil: Color(hex: 0xFF070A0E), systemBarVeil: Color(hex: 0xFF0B0F13), tickWeak: Color(hex: 0xFF43516A), tickStrong: Color(hex: 0xFF7485A3), railModeFill: Color(hex: 0xFF1E222D), fieldFilled: Color(hex: 0xFF272B33))
+    // --- Editor principal (redesenho 2026-09-29) --------------------------------
+    // Opcionais com padrão derivado dos campos acima: as paletas que não dizem
+    // nada continuam compilando e ganham um tom coerente com o resto delas.
+    /// Fundo do editor, barra do topo, transporte e timeline.
+    var editorCanvasOverride: Color? = nil
+    /// Barra de adicionar (e a área segura de baixo, sob ela).
+    var editorBarOverride: Color? = nil
+    /// Traço de 1 pt no topo da barra de adicionar.
+    var editorBarLineOverride: Color? = nil
+    /// Pílula da fileira da camada na timeline.
+    var editorRowPillOverride: Color? = nil
+    /// Quadradinho de 22 pt do glifo dentro da pílula.
+    var editorGlyphBoxOverride: Color? = nil
+    var editorCanvas: Color { editorCanvasOverride ?? editorPanelHigh }
+    var editorBar: Color { editorBarOverride ?? surfaceHigh }
+    var editorBarLine: Color { editorBarLineOverride ?? border }
+    var editorRowPill: Color { editorRowPillOverride ?? chip }
+    var editorGlyphBox: Color { editorGlyphBoxOverride ?? chipHigh }
+    static let aurea = AureaPalette(id: "aurea", brandDeep: Color(hex: 0xFF123A63), brand: Color(hex: 0xFF245D8C), accent: Color(hex: 0xFF6FAED9), keyframe: Color(hex: 0xFFA9D3EC), background: Color(hex: 0xFF0F141A), surface: Color(hex: 0xFF151C24), surfaceHigh: Color(hex: 0xFF1B2530), chip: Color(hex: 0xFF212D3A), chipHigh: Color(hex: 0xFF323D49), border: Color(hex: 0xFF273442), muted: Color(hex: 0xFFAAB6C3), subtle: Color(hex: 0xFF7C8A99), onAccent: Color(hex: 0xFF0B1117), accentDim: Color(hex: 0xFF1D3A55), keyframeDim: Color(hex: 0xFF22405A), stage: Color(hex: 0xFF0A0E13), hairline: Color(hex: 0xB8273442), editorTopBar: Color(hex: 0xFF0F141A), editorPanel: Color(hex: 0xFF0F141A), editorPanelHigh: Color(hex: 0xFF151C24), pill: Color(hex: 0xFF1B2530), actionDim: Color(hex: 0xFF16304A), statusBarVeil: Color(hex: 0xFF070A0E), systemBarVeil: Color(hex: 0xFF0B0F13), tickWeak: Color(hex: 0xFF43516A), tickStrong: Color(hex: 0xFF7485A3), railModeFill: Color(hex: 0xFF1E222D), fieldFilled: Color(hex: 0xFF272B33),
+                                    editorCanvasOverride: Color(hex: 0xFF161C2A), editorBarOverride: Color(hex: 0xFF1B2330), editorBarLineOverride: Color(hex: 0xFF2A3444),
+                                    editorRowPillOverride: Color(hex: 0xFF222B3B), editorGlyphBoxOverride: Color(hex: 0xFF2E3B4E))
     static let midnight = AureaPalette(id: "midnight", brandDeep: Color(hex: 0xFF15325A), brand: Color(hex: 0xFF2C66A0), accent: Color(hex: 0xFF7DB8E6), keyframe: Color(hex: 0xFFB3D9F0), background: Color(hex: 0xFF000000), surface: Color(hex: 0xFF0B0D10), surfaceHigh: Color(hex: 0xFF14171C), chip: Color(hex: 0xFF1A1E24), chipHigh: Color(hex: 0xFF2A2F37), border: Color(hex: 0xFF1E232A), muted: Color(hex: 0xFFA7B0BA), subtle: Color(hex: 0xFF77818C), onAccent: Color(hex: 0xFF05080B), accentDim: Color(hex: 0xFF15283C), keyframeDim: Color(hex: 0xFF1A3247), stage: Color(hex: 0xFF000000), hairline: Color(hex: 0xB81E232A), editorTopBar: Color(hex: 0xFF000000), editorPanel: Color(hex: 0xFF000000), editorPanelHigh: Color(hex: 0xFF0B0D10), pill: Color(hex: 0xFF14171C), actionDim: Color(hex: 0xFF102438), statusBarVeil: Color(hex: 0xFF000000), systemBarVeil: Color(hex: 0xFF000000), tickWeak: Color(hex: 0xFF3A4250), tickStrong: Color(hex: 0xFF6C788C), railModeFill: Color(hex: 0xFF15181E), fieldFilled: Color(hex: 0xFF1A1D22))
     static let graphite = AureaPalette(id: "graphite", brandDeep: Color(hex: 0xFF3A4250), brand: Color(hex: 0xFF566273), accent: Color(hex: 0xFFB7C4D3), keyframe: Color(hex: 0xFFD6DEE8), background: Color(hex: 0xFF16181C), surface: Color(hex: 0xFF1D2025), surfaceHigh: Color(hex: 0xFF25292F), chip: Color(hex: 0xFF2B3037), chipHigh: Color(hex: 0xFF3A4048), border: Color(hex: 0xFF33383F), muted: Color(hex: 0xFFB0B6BE), subtle: Color(hex: 0xFF838A94), onAccent: Color(hex: 0xFF101215), accentDim: Color(hex: 0xFF2E343C), keyframeDim: Color(hex: 0xFF343B45), stage: Color(hex: 0xFF111316), hairline: Color(hex: 0xB833383F), editorTopBar: Color(hex: 0xFF16181C), editorPanel: Color(hex: 0xFF16181C), editorPanelHigh: Color(hex: 0xFF1D2025), pill: Color(hex: 0xFF25292F), actionDim: Color(hex: 0xFF2A3038), statusBarVeil: Color(hex: 0xFF0D0E10), systemBarVeil: Color(hex: 0xFF121417), tickWeak: Color(hex: 0xFF4A515C), tickStrong: Color(hex: 0xFF7F8896), railModeFill: Color(hex: 0xFF23272D), fieldFilled: Color(hex: 0xFF2A2E34))
     static let emerald = AureaPalette(id: "emerald", brandDeep: Color(hex: 0xFF0F4A3A), brand: Color(hex: 0xFF1C7A5E), accent: Color(hex: 0xFF5BD6A8), keyframe: Color(hex: 0xFFA6ECD2), background: Color(hex: 0xFF0B1411), surface: Color(hex: 0xFF111D19), surfaceHigh: Color(hex: 0xFF172722), chip: Color(hex: 0xFF1D302A), chipHigh: Color(hex: 0xFF2C403A), border: Color(hex: 0xFF223A33), muted: Color(hex: 0xFFA6BDB5), subtle: Color(hex: 0xFF789088), onAccent: Color(hex: 0xFF06110D), accentDim: Color(hex: 0xFF163A30), keyframeDim: Color(hex: 0xFF1D4539), stage: Color(hex: 0xFF080F0C), hairline: Color(hex: 0xB8223A33), editorTopBar: Color(hex: 0xFF0B1411), editorPanel: Color(hex: 0xFF0B1411), editorPanelHigh: Color(hex: 0xFF111D19), pill: Color(hex: 0xFF172722), actionDim: Color(hex: 0xFF123326), statusBarVeil: Color(hex: 0xFF060B09), systemBarVeil: Color(hex: 0xFF09100D), tickWeak: Color(hex: 0xFF3B5249), tickStrong: Color(hex: 0xFF6C8C80), railModeFill: Color(hex: 0xFF18251F), fieldFilled: Color(hex: 0xFF1F2B27))
@@ -120,6 +140,16 @@ enum AureaColors {
     static var editorPanel: Color { AureaTheme.palette.editorPanel }
     static var editorPanelHigh: Color { AureaTheme.palette.editorPanelHigh }
     static var pill: Color { AureaTheme.palette.pill }
+    // Editor principal (redesenho 2026-09-29).
+    static var editorCanvas: Color { AureaTheme.palette.editorCanvas }
+    static var editorBar: Color { AureaTheme.palette.editorBar }
+    static var editorBarLine: Color { AureaTheme.palette.editorBarLine }
+    static var editorRowPill: Color { AureaTheme.palette.editorRowPill }
+    static var editorGlyphBox: Color { AureaTheme.palette.editorGlyphBox }
+    /// Ícone do transporte sem efeito (desfazer sem histórico, duplicar sem camada).
+    static let transportDisabled = Color(hex: 0x4C5566)
+    /// Fundo atrás do quadro da prévia.
+    static let previewBackdrop = Color(hex: 0x0B0F16)
     static var action: Color { brand }
     static let onAction        = text
     static var actionDim: Color { AureaTheme.palette.actionDim }
@@ -859,36 +889,57 @@ enum AureaTimeline {
     static let pink = ClipTone(body: Color(hex: 0x3A1826), stripe: Color(hex: 0xD4537E), text: Color(hex: 0xF4C0D1), wave: Color(hex: 0xD4537E))
     static let green = ClipTone(body: Color(hex: 0x1F2E0F), stripe: Color(hex: 0x639922), text: Color(hex: 0xC0DD97), wave: Color(hex: 0x639922))
 
-    /// Tom do clipe por tipo (o mesmo `AureaTimeline.tone` do Android): 3D âmbar,
-    /// áudio teal, partículas roxo, vídeo e imagem azul, texto rosa, forma verde,
-    /// o resto cinza.
+    // --- Barras do redesenho 2026-09-29 (tons médios; `text` = tinta do nome) ---
+    static let barText = ClipTone(body: Color(hex: 0x3B4E7A), stripe: Color(hex: 0x7F9BD6), text: Color(hex: 0xE8EEF8), wave: Color(hex: 0x9FB6E6))
+    static let barShape = ClipTone(body: Color(hex: 0x7A5A2B), stripe: Color(hex: 0xE8A33D), text: Color(hex: 0xF7ECD9), wave: Color(hex: 0xE8A33D))
+    static let barMedia = ClipTone(body: Color(hex: 0x4A7C3F), stripe: Color(hex: 0x8FCB7E), text: Color(hex: 0xE4F0DF), wave: Color(hex: 0xB9E0AE))
+    static let barAudio = ClipTone(body: Color(hex: 0x245247), stripe: Color(hex: 0x9FD3B8), text: Color(hex: 0xD6F0E3), wave: Color(hex: 0x9FD3B8))
+    static let bar3D = ClipTone(body: Color(hex: 0x7A4A24), stripe: Color(hex: 0xE89A5B), text: Color(hex: 0xF7E4D2), wave: Color(hex: 0xE89A5B))
+    static let barParticles = ClipTone(body: Color(hex: 0x5E3470), stripe: Color(hex: 0xC58BE0), text: Color(hex: 0xF0E2F6), wave: Color(hex: 0xC58BE0))
+    static let barOther = ClipTone(body: Color(hex: 0x3A4456), stripe: Color(hex: 0x9AA6B8), text: Color(hex: 0xE1E6EE), wave: Color(hex: 0x9AA6B8))
+    /// Tinta escura do ≡ perto do fim da barra.
+    static let barGrip = Color.black.opacity(0.45)
+    /// Divisória entre as miniaturas da tira de imagem/vídeo.
+    static let filmDivider = Color.black.opacity(0.25)
+    /// Glifo da forma na pílula (ponto âmbar) e o da música.
+    static let pillShapeDot = Color(hex: 0xE8A33D)
+    static let pillAudioNote = Color(hex: 0x9FD3B8)
+    /// Régua do redesenho: forte e fino.
+    static let rulerMajor = Color(hex: 0x6E7A8C)
+    static let rulerMinor = Color(hex: 0x4C5566)
+
+    /// Tom da barra por tipo (redesenho 2026-09-29, par do Android): texto azul,
+    /// forma âmbar, imagem/vídeo verde, áudio verde-água, 3D cobre, partículas
+    /// roxo, o resto cinza-azulado.
     static func tone(_ type: TimelineLayerType) -> ClipTone {
         switch type {
-        case .model3D: return amber
-        case .audio: return teal
-        case .particles: return purple
-        case .video, .image: return blue
-        case .text: return pink
-        case .shape: return green
-        case .adjustment, .camera, .light, .null, .group: return gray
+        case .text: return barText
+        case .shape: return barShape
+        case .video, .image: return barMedia
+        case .audio: return barAudio
+        case .model3D: return bar3D
+        case .particles: return barParticles
+        case .adjustment, .camera, .light, .null, .group: return barOther
         }
     }
 
     // --- Medidas (dp) --------------------------------------------------------
-    static let rulerTicks: CGFloat = 20
-    static let rulerGap: CGFloat = 18
-    static let row: CGFloat = 36
-    static let bar: CGFloat = 30
-    static let barRadius: CGFloat = 8
+    /// Régua 30; `rulerGap` = faixa do relógio (30) + 4 até a 1ª fileira.
+    static let rulerTicks: CGFloat = 30
+    static let rulerGap: CGFloat = 34
+    static let row: CGFloat = 32
+    static let bar: CGFloat = 24
+    static let barRadius: CGFloat = 3
     static let barMinWidth: CGFloat = 40
     static let keyframeTrack: CGFloat = 11
-    static let headerColumn: CGFloat = 40
+    /// A pílula da fileira (olho + glifo) cobre de 0 a 78; as barras passam por baixo.
+    static let headerColumn: CGFloat = 78
     static let gutterIconSize: CGFloat = 17
     static let gutterEyeSize: CGFloat = 12
     static let clipStripe: CGFloat = 3
     static let clipSelStroke: CGFloat = 2
     static let clipIcon: CGFloat = 12
-    static let playhead: CGFloat = 1.6
+    static let playhead: CGFloat = 2
     static let playheadKnob: CGFloat = 8
 
     static let RulerTicks = rulerTicks, RulerGap = rulerGap, Row = row, Bar = bar
@@ -926,9 +977,11 @@ struct EditorMetrics {
 }
 
 enum EditorLayout {
-    static let topBar: CGFloat = 44
-    static let transport: CGFloat = 46
-    static let strip: CGFloat = 8
+    /// Redesenho 2026-09-29: topo 64, transporte 60 e SEM a faixa de 8 entre
+    /// o palco e o transporte (arrastar a divisa continua no transporte).
+    static let topBar: CGFloat = 64
+    static let transport: CGFloat = 60
+    static let strip: CGFloat = 0
     static let timelineMin: CGFloat = 110
     static let previewMin: CGFloat = 96
     private static let previewFractionMax: CGFloat = 0.50
@@ -939,8 +992,9 @@ enum EditorLayout {
     /// 124 a fileira de escalonar ficava espremida (14 pt, abaixo do alvo de 44).
     private static let batchBody: CGFloat = 180
     private static let hintBody: CGFloat = 30
-    /// A barra fixa de adicionar (sem camada escolhida): ícone 23 + nome 11.
-    static let addBar: CGFloat = 64
+    /// A barra fixa de adicionar (sem camada escolhida): ícone 23 + nome 11,
+    /// itens de 64 e 3 de respiro em cima e embaixo (fora a área segura).
+    static let addBar: CGFloat = 70
     /// Doca da camada, compacta (EditorLayout.kt `DOCK`): fileira rápida de
     /// ícones e fichas baixas; a altura é a do conteúdo.
     static let dockQuick: CGFloat = 44
@@ -949,6 +1003,10 @@ enum EditorLayout {
 
     /// Folga do palco em volta do quadro ajustado (as fichas ficam por cima do quadro).
     static let previewFitMargin: CGFloat = 16
+    /// Fração da altura total que o palco ocupa quando ninguém arrastou a divisa.
+    static let naturalPreviewFraction: CGFloat = 0.45
+    /// Margem lateral do palco fora da tela cheia.
+    static let previewSideMargin: CGFloat = 8
 
     static func workspace(_ totalHeight: CGFloat) -> CGFloat {
         max(0, totalHeight - topBar - transport - strip)
@@ -969,7 +1027,8 @@ enum EditorLayout {
                                  transport: transport, timeline: 0, sheet: 0)
         }
         let ws = workspace(total)
-        let natural = total * 0.54 - 32
+        // Palco natural ≈ 45 % da altura do editor (360 num 844 do protótipo).
+        let natural = total * naturalPreviewFraction
         let fitted = width > 0 && aspect > 0 && aspect.isFinite ? min(natural, width / aspect + previewFitMargin) : natural
         var preview = (preferred > 0 && preferred.isFinite ? preferred : fitted)
             .clamped(to: previewMin...maxPreview(total))

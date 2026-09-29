@@ -42,6 +42,7 @@ import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -699,20 +700,25 @@ internal fun AddLayerOverlay(store: EditorStore, ui: EditorUi) {
  */
 @Composable
 internal fun AddBar(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier) {
+    // Redesenho 2026-09-29: barra fixa #1B2330 com fio #2A3444 no alto,
+    // categorias de 64 × 64 (ícone 23 + nome 11), sem "+" flutuante.
     BoxWithConstraints(
         modifier
-            .background(AureaColors.EditorPanelHigh)
-            .drawTopHairline()
+            .background(AureaColors.EditorBar)
+            .drawBehind { drawRect(AureaColors.EditorBarLine, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
+            .padding(top = 6.dp)
             .testTag("editor.addBar"),
     ) {
         val count = AddTab.entries.size
-        val fits = maxWidth / count >= ShellDims.AddBarItemMin
-        val itemWidth = if (fits) maxWidth / count else ShellDims.AddBarItem
+        val inner = maxWidth - 8.dp
+        val fits = inner / count >= ShellDims.AddBarItemMin
+        val itemWidth = if (fits) inner / count else ShellDims.AddBarItem
         Row(
             Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .height(ShellDims.AddBarItem)
                 .then(if (fits) Modifier else Modifier.horizontalScroll(rememberScrollState()))
-                .padding(horizontal = if (fits) 0.dp else 4.dp),
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AddTab.entries.forEach { tab ->
@@ -723,7 +729,6 @@ internal fun AddBar(store: EditorStore, ui: EditorUi, modifier: Modifier = Modif
                     Modifier
                         .width(itemWidth)
                         .fillMaxHeight()
-                        .padding(horizontal = 2.dp, vertical = 5.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(if (on) AureaColors.Chip else Color.Transparent)
                         .semantics { contentDescription = label }

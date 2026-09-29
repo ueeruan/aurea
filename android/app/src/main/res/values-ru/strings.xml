@@ -399,6 +399,14 @@
     <string name="panel_aplicar">Применить</string>
     <string name="panel_aplicar_sem_texto_remove_expressao">Применение без текста убирает выражение.</string>
     <string name="panel_aplicar_todos_segmentos">Применить ко всем сегментам</string>
+    <string name="panel_curve_apply_property">Применить ко всем ключевым кадрам этого свойства</string>
+    <string name="pn_curve_need_two_keys">Нужно минимум 2 ключевых кадра, чтобы изменить кривую</string>
+    <string name="pn_curve_save">Сохранить кривую</string>
+    <string name="pn_curve_std_smooth">Плавно</string>
+    <string name="pn_curve_std_in">Вход</string>
+    <string name="pn_curve_std_out">Выход</string>
+    <string name="pn_curve_std_overshoot">Перелёт</string>
+    <string name="pn_curve_std_anticipate">Предвосхищение</string>
     <string name="panel_arraste_alcas_palco_mudar_tamanho">Тяните маркеры на сцене, чтобы изменить размер</string>
     <string name="panel_arraste_pontos_palco_toque_num_ponto">Тяните точки на сцене; коснитесь точки, чтобы увидеть маркеры кривой.</string>
     <string name="panel_arredondar_pontas">Скруглить концы</string>
@@ -2547,6 +2555,8 @@
     <string name="fxo_y_axis">Ось Y</string>
     <string name="fxo_alpha_2">Альфа</string>
     <string name="fx_copy_this_effect">Копировать этот эффект</string>
+    <string name="fx_back_to_effects">Назад к эффектам</string>
+    <string name="fx_param_expression">Выражение: %1$s</string>
     <string name="fx_default_value">По умолчанию: %1$s</string>
     <string name="fx_param_range">от %1$s до %2$s</string>
     <string name="app_importing_generated_video">Импорт созданного видео…</string>
@@ -3275,4 +3285,9 @@
     <string name="shape3d_layout_hint">Вращение частей, задержка, случайность, изгиб, скручивание и разброс — как у букв 3D-текста.</string>
     <string name="fx_desc_shape3d_layout">Вращает, задерживает, разбрасывает и перемешивает части 3D-фигуры, как буквы 3D-текста.</string>
     <string name="edt_cmd_select_shape3d">Выберите 3D-фигуру</string>
+    <string name="editor_ir_inicio_segure_anterior">В начало · удерживайте: предыдущая метка, ключ или кадр</string>
+    <string name="editor_ir_fim_segure_proximo">В конец · удерживайте: следующая метка, ключ или кадр</string>
+    <string name="editor_ajustes_projeto">Настройки проекта</string>
+    <string name="editor_ajustes_projeto_mais">Настройки проекта и другие параметры</string>
+    <string name="editor_duplicar_camada_segure_copiar">Дублировать слой · удерживайте, чтобы копировать и вставить</string>
 </resources>

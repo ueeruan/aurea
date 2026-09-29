@@ -442,6 +442,14 @@
     <string name="panel_aplicar">Aplicar</string>
     <string name="panel_aplicar_sem_texto_remove_expressao">Aplicar sem texto remove a expressão.</string>
     <string name="panel_aplicar_todos_segmentos">Aplicar em todos os segmentos</string>
+    <string name="panel_curve_apply_property">Aplicar a todos os keyframes desta propriedade</string>
+    <string name="pn_curve_need_two_keys">Precisa de pelo menos 2 keyframes para editar a curva</string>
+    <string name="pn_curve_save">Salvar curva</string>
+    <string name="pn_curve_std_smooth">Suave</string>
+    <string name="pn_curve_std_in">Entrada</string>
+    <string name="pn_curve_std_out">Saída</string>
+    <string name="pn_curve_std_overshoot">Passar do ponto</string>
+    <string name="pn_curve_std_anticipate">Antecipar</string>
     <string name="panel_arraste_alcas_palco_mudar_tamanho">Arraste as alças no palco para mudar o tamanho</string>
     <string name="panel_arraste_pontos_palco_toque_num_ponto">Arraste os pontos no palco; toque num ponto para ver as alças de curva.</string>
     <string name="panel_arredondar_pontas">Arredondar pontas</string>
@@ -2608,6 +2616,8 @@
     <string name="fxu_octaves">oitavas</string>
     <string name="fxu_turns">voltas</string>
     <string name="fx_copy_this_effect">Copiar este efeito</string>
+    <string name="fx_back_to_effects">Voltar aos efeitos</string>
+    <string name="fx_param_expression">Expressão de %1$s</string>
     <string name="fx_default_value">Padrão: %1$s</string>
     <string name="fx_param_range">%1$s a %2$s</string>
     <string name="app_importing_generated_video">Importando vídeo gerado…</string>
@@ -3338,4 +3348,9 @@
     <string name="shape3d_layout_hint">Rotação por parte, atraso, aleatório, curvar, torcer e espalhar — o mesmo das letras do texto 3D.</string>
     <string name="fx_desc_shape3d_layout">Gira, atrasa, espalha e embaralha as partes de uma forma 3D, como as letras do texto 3D.</string>
     <string name="edt_cmd_select_shape3d">Selecione uma forma 3D</string>
+    <string name="editor_ir_inicio_segure_anterior">Ir para o início · segure: marca, keyframe ou quadro anterior</string>
+    <string name="editor_ir_fim_segure_proximo">Ir para o fim · segure: próxima marca, keyframe ou quadro</string>
+    <string name="editor_ajustes_projeto">Ajustes do projeto</string>
+    <string name="editor_ajustes_projeto_mais">Ajustes do projeto e mais opções</string>
+    <string name="editor_duplicar_camada_segure_copiar">Duplicar camada · segure para copiar e colar</string>
 </resources>

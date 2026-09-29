@@ -41,7 +41,8 @@ import XCTest
         XCTAssertTrue(copy.waitForExistence(timeout: 5)); copy.tap()
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
-        app.buttons["Copy and paste"].firstMatch.tap()
+        // Redesenho 2026-09-29: copiar e colar saiu do transporte; é o SEGURAR do duplicar.
+        app.buttons["transport.duplicate"].firstMatch.press(forDuration: 0.8)
         // A folha de copiar/colar anima ao abrir: espera a linha existir.
         let paste = app.buttons["Paste effects"].firstMatch
         XCTAssertTrue(paste.waitForExistence(timeout: 5)); paste.tap()
@@ -145,7 +146,13 @@ import XCTest
     }
 
     private func openCommandSearch(_ query: String) throws {
-        let open = app.buttons["commandSearchOpen"].firstMatch
+        var open = app.buttons["commandSearchOpen"].firstMatch
+        if !open.waitForExistence(timeout: 2) {
+            // Redesenho 2026-09-29: sem camada escolhida, a busca mora no menu da engrenagem.
+            let gear = app.buttons["editor.projectMenu"].firstMatch
+            XCTAssertTrue(gear.waitForExistence(timeout: 5)); gear.tap()
+            open = app.buttons["commandSearchOpen"].firstMatch
+        }
         XCTAssertTrue(open.waitForExistence(timeout: 5)); XCTAssertTrue(open.isHittable); open.tap()
         let field = app.textFields["commandSearchField"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
@@ -269,11 +276,10 @@ import XCTest
 
     func testEffectsPanelAddsWithOneTapAndKeepsTheStackAtHand() throws {
         _ = try launch("effects")
-        // Camada sem efeito: o painel abre direto na aba "Adicionar", com a busca
-        // no topo e as fichas de categoria — nada de navegador em outra tela.
+        // Camada sem efeito: o painel abre direto no catálogo ("‹ Adicionar efeito"),
+        // com a busca no topo e as fichas de categoria — nada de navegador em outra tela.
         let addTab = app.buttons["effects.tab.add"].firstMatch
         XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        XCTAssertTrue(addTab.isSelected)
         let search = app.buttons["effects.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
         XCTAssertGreaterThanOrEqual(search.frame.height, 44)
@@ -293,11 +299,10 @@ import XCTest
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
         _ = try awaitSnapshot("One tap on a search result adds the effect") { $0.effectCount == 1 }
 
-        // O efeito novo aparece aberto na aba "Na camada".
-        let appliedTab = app.buttons["effects.tab.applied"].firstMatch
-        XCTAssertTrue(appliedTab.waitForExistence(timeout: 5))
-        let onStack = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: appliedTab)
-        XCTAssertEqual(XCTWaiter.wait(for: [onStack], timeout: 5), .completed)
+        // O efeito novo aparece aberto na pilha (redesenho 2026-09-29: sem abas;
+        // o catálogo some e a pilha com o trilho toma o painel).
+        let leftCatalog = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: addTab)
+        XCTAssertEqual(XCTWaiter.wait(for: [leftCatalog], timeout: 5), .completed)
         XCTAssertTrue(app.staticTexts["Deep Glow"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["effects.more.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
 
@@ -312,8 +317,7 @@ import XCTest
         XCTAssertTrue(add.isHittable)
         XCTAssertEqual(add.label, "Add effect")
         add.tap()
-        let backOnAdd = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: addTab)
-        XCTAssertEqual(XCTWaiter.wait(for: [backOnAdd], timeout: 5), .completed)
+        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["effects.recent.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
 
         // Categoria de um toque e cartão de um toque, sem ficha no meio.
@@ -543,7 +547,8 @@ import XCTest
         let cleared = try awaitSnapshot("Selection cleared") { $0.selectionCount == 0 }
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
-        let start = CGPoint(x: timeline.frame.midX + 40, y: timeline.frame.minY + 50)
+        // Meio da 1ª barra: régua 30 + relógio 30 + 4, pílula em 68, barra 70..94.
+        let start = CGPoint(x: timeline.frame.midX + 40, y: timeline.frame.minY + 82)
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x - 60, y: start.y)), withVelocity: .slow, thenHoldForDuration: 0.1)
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         let after = try snapshot()
@@ -561,8 +566,8 @@ import XCTest
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let frame = timeline.frame
-        // A barra compacta (régua 38; barra de 30), longe das alças e das setas.
-        let start = CGPoint(x: frame.midX + 60, y: frame.minY + 50)
+        // A barra compacta (fileiras a partir de 64; barra de 24 em 70..94), longe das alças e das setas.
+        let start = CGPoint(x: frame.midX + 60, y: frame.minY + 82)
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x - 60, y: start.y)),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
@@ -571,8 +576,8 @@ import XCTest
         XCTAssertEqual(swiped.sheet, "dock")
         XCTAssertEqual(swiped.primaryID, before.primaryID)
         XCTAssertEqual(swiped.layerStarts, before.layerStarts, "A plain drag only scrolls; it does not move the clip")
-        // O ícone do tipo (calha de 40 pt, glifo em x 17): abre as trilhas, não sai.
-        coordinate(CGPoint(x: frame.minX + 17, y: frame.minY + 51)).tap()
+        // O quadradinho do tipo na pílula (x 32..54; o olho é x < 28): abre as trilhas, não sai.
+        coordinate(CGPoint(x: frame.minX + 43, y: frame.minY + 82)).tap()
         let deadline = Date().addingTimeInterval(0.8)
         repeat {
             let state = try snapshot()
@@ -588,8 +593,8 @@ import XCTest
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let frame = timeline.frame
-        // First row, inside the clip body, away from its trim handles.
-        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 50)
+        // First row, inside the clip body (bar at 70..94), away from its trim handles.
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 82)
         let end = CGPoint(x: start.x + 45, y: start.y)
         coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(end),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
@@ -778,11 +783,11 @@ import XCTest
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let frame = timeline.frame
-        // Geometria (pt): régua 38, linha 36, trilhas de 28 com o losango a 20 do topo.
-        // Abertas: Transform (74), Position X (102), Scale X (130). Cabeçote no frame 30
+        // Geometria (pt): fileiras a partir de 64, fileira 32, trilhas de 16 com o losango no meio.
+        // Abertas: Transform (96), Position X (112), Scale X (128). Cabeçote no frame 30
         // (a vista É o cabeçote): 80 pt/s = 8/3 pt por frame a partir do centro.
-        let positionY: CGFloat = frame.minY + 122
-        let scaleY: CGFloat = frame.minY + 150
+        let positionY: CGFloat = frame.minY + 120
+        let scaleY: CGFloat = frame.minY + 136
         // A vista é o cabeçote: lê o quadro REAL (a fixture pode não estar no 30).
         func keyX(_ f: Int) -> CGFloat {
             let playhead: Int64 = (try? snapshot())?.playhead ?? 30
@@ -791,9 +796,9 @@ import XCTest
         func has(_ state: Snapshot, _ property: Int, _ time: Int) -> Bool {
             state.curveKeys.contains { $0.property == property && $0.time == time }
         }
-        // Abrir as trilhas pelo ícone do tipo na calha (40 pt; o glifo mora em x 17,
-        // o olho no canto de baixo à direita). x 50 já é o corpo do clipe.
-        coordinate(CGPoint(x: frame.minX + 17, y: frame.minY + 51)).tap()
+        // Abrir as trilhas pelo quadradinho do tipo na pílula (x 32..54; o olho é
+        // x < 28; a pílula vai até 78, depois é o corpo do clipe).
+        coordinate(CGPoint(x: frame.minX + 43, y: frame.minY + 82)).tap()
         func selectPositionAndScale() throws {
             // Toque simples: só a Posição X @30 (abre a curva; timeline compacta).
             coordinate(CGPoint(x: keyX(30), y: positionY)).tap()
@@ -852,7 +857,8 @@ import XCTest
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let frame = timeline.frame
-        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 50)
+        // Meio da 1ª barra; 96 = 3 fileiras de 32.
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 82)
         let end = CGPoint(x: start.x, y: start.y + 96)
         coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(end),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
@@ -879,8 +885,8 @@ import XCTest
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let cleared = try awaitSnapshot("Selection is cleared before the swipe") { $0.selectionCount == 0 }
         let frame = timeline.frame
-        // First row, inside the clip body, away from its trim handles; ≈ 40° below horizontal.
-        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 50)
+        // First row, inside the clip body (bar at 70..94), away from its trim handles; ≈ 40° below horizontal.
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 82)
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x + 48, y: start.y + 40)),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))

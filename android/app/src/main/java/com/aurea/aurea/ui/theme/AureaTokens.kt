@@ -118,6 +118,22 @@ object AureaColors {
     val FieldPlaceholder = Color(0x4DEBEBF5)
     /** Campo preenchido (busca do navegador de efeitos, formulários). */
     val FieldFilled: Color get() = palette.fieldFilled
+
+    // --- Editor redesenhado (mockup 2026-09-29) ----------------------------------
+    /** Fundo do editor: topo, transporte e timeline (#161C2A no Aurea). */
+    val EditorCanvas: Color get() = palette.editorCanvas
+    /** Barras fixas (a de adicionar) e a faixa da navegação embaixo dela. */
+    val EditorBar: Color get() = palette.editorBar
+    /** Fio de 1 dp no alto das barras fixas. */
+    val EditorBarLine: Color get() = palette.editorBarLine
+    /** Pílula colada à esquerda de cada fileira da timeline (olho + miniatura). */
+    val EditorRowPill: Color get() = palette.editorRowPill
+    /** Quadradinho de 22 dp da miniatura/tipo dentro da pílula. */
+    val EditorGlyphBox: Color get() = palette.editorGlyphBox
+    /** Ícone do transporte sem ação (desfazer/refazer apagados). */
+    val EditorIconDisabled = Color(0xFF4C5566)
+    /** Fundo da caixa da prévia em volta do quadro. */
+    val PreviewBackdrop = Color(0xFF0B0F16)
     /** Campo do diálogo de nome (o mesmo de `AureaNamePrompt`). */
     val FieldDialog = Color(0xFF1C1C1E)
 
@@ -179,6 +195,13 @@ data class AureaPalette(
     val tickStrong: Color,
     val railModeFill: Color,
     val fieldFilled: Color,
+    // --- Editor redesenhado (2026-09-29): fundo, barras e pílula das fileiras.
+    // Os outros temas derivam dos tons que já têm; o Aurea usa os do mockup.
+    val editorCanvas: Color = editorPanelHigh,
+    val editorBar: Color = surfaceHigh,
+    val editorBarLine: Color = border,
+    val editorRowPill: Color = chip,
+    val editorGlyphBox: Color = chipHigh,
 ) {
     companion object {
         val Aurea = AureaPalette(
@@ -211,6 +234,11 @@ data class AureaPalette(
             tickStrong = Color(0xFF7485A3),
             railModeFill = Color(0xFF1E222D),
             fieldFilled = Color(0xFF272B33),
+            editorCanvas = Color(0xFF161C2A),
+            editorBar = Color(0xFF1B2330),
+            editorBarLine = Color(0xFF2A3444),
+            editorRowPill = Color(0xFF222B3B),
+            editorGlyphBox = Color(0xFF2E3B4E),
         )
         val Midnight = AureaPalette(
             id = "midnight",
@@ -613,58 +641,72 @@ object AureaElevation {
  */
 object AureaTimeline {
     // --- Cores ---------------------------------------------------------------
-    val TickMajor = Color(0xFF8A97AD)      // risco de segundo (e rótulo)
-    val TickMinor = Color(0xFF5A6880)      // risco de décimo / quadro
+    // Redesenho 2026-09-29 (mockup `docs/design/redesenho-2026-09-29/Editor.dc.html`).
+    val TickMajor = Color(0xFF6E7A8C)      // risco de segundo (e rótulo)
+    val TickMinor = Color(0xFF4C5566)      // risco de décimo / quadro
     val HeaderPill = Color(0xFF1E222D)     // pílula do olho + quadradinho
     val Swatch = Color(0xFFFFE899)         // quadradinho da camada sem etiqueta
     val SwatchGlyph = Color(0xFF0F141A)    // cadeado / visto dentro do quadradinho
     val KeyframeOn = Color(0xFFFFC107)     // losango escolhido (âmbar)
     val TrimHandle = Color(0xFFF2F5F9)     // alça de trim (dentro das pontas)
 
-    // --- Fileiras (visual aprovado: calha + clipe no tom do tipo) -------------
-    /** Glifo do tipo na calha (tom muted). */
+    // --- Fileiras (pílula à esquerda + clipe no tom do tipo) -------------------
+    /** Glifo do tipo na pílula (tom muted). */
     val GutterIcon = Color(0xFF8B97A5)
-    /** O olho pequeno no canto do glifo: mais apagado ainda. */
-    val GutterEye = Color(0x998B97A5)
+    /** O olho da pílula. */
+    val GutterEye = Color(0xFFF7F9FB)
     /** Contorno do clipe escolhido e as alças de aparar. */
     val ClipSelected = Color(0xFFFFFFFF)
+    /** O "T" da camada de texto no quadradinho da pílula. */
+    val GlyphText = Color(0xFFF7F9FB)
+    /** Ponto da forma no quadradinho da pílula. */
+    val GlyphShape = Color(0xFFE8A33D)
+    /** Nota do áudio no quadradinho (o mesmo tom da onda). */
+    val GlyphAudio = Color(0xFF9FD3B8)
+    /** O ≡ da ponta do clipe (tinta escura sobre o tom do tipo). */
+    val ClipGrip = Color(0x73000000)
+    /** Divisas da tira de miniaturas. */
+    val FilmDivider = Color(0x40000000)
     /** Clipes de camada oculta: a fileira inteira a 40 %. */
     const val HiddenAlpha = 0.4f
 
-    val Amber = ClipTone(Color(0xFF3A2A12), Color(0xFFEF9F27), Color(0xFFFAC775), Color(0xFFEF9F27))
-    val Teal = ClipTone(Color(0xFF0C3A2E), Color(0xFF1D9E75), Color(0xFF9FE1CB), Color(0xFF5DCAA5))
-    val Purple = ClipTone(Color(0xFF2A2656), Color(0xFF7F77DD), Color(0xFFCECBF6), Color(0xFF7F77DD))
-    val Gray = ClipTone(Color(0xFF232A33), Color(0xFF888780), Color(0xFFD3D1C7), Color(0xFF888780))
-    val Blue = ClipTone(Color(0xFF0F2A45), Color(0xFF378ADD), Color(0xFFB5D4F4), Color(0xFF378ADD))
-    val Pink = ClipTone(Color(0xFF3A1826), Color(0xFFD4537E), Color(0xFFF4C0D1), Color(0xFFD4537E))
-    val Green = ClipTone(Color(0xFF1F2E0F), Color(0xFF639922), Color(0xFFC0DD97), Color(0xFF639922))
+    val Amber = ClipTone(Color(0xFF7A4A24), Color(0xFFEF9F27), Color(0xFFF7E4D2), Color(0xFFEF9F27))
+    val Teal = ClipTone(Color(0xFF245247), Color(0xFF9FD3B8), Color(0xFFD6F0E3), Color(0xFF9FD3B8))
+    val Purple = ClipTone(Color(0xFF5E3470), Color(0xFFC18BD6), Color(0xFFF0E2F6), Color(0xFF9D95F0))
+    val Gray = ClipTone(Color(0xFF3A4456), Color(0xFF8B97A5), Color(0xFFE1E6EE), Color(0xFF8B97A5))
+    val Blue = ClipTone(Color(0xFF3B4E7A), Color(0xFF7F9AD6), Color(0xFFE8EEF8), Color(0xFF7F9AD6))
+    val Green = ClipTone(Color(0xFF4A7C3F), Color(0xFF8FC77F), Color(0xFFE4F0DF), Color(0xFFC9E8BF))
+    val Brown = ClipTone(Color(0xFF7A5A2B), Color(0xFFE8A33D), Color(0xFFF7ECD9), Color(0xFFE8A33D))
 
-    /** Tom do clipe por tipo: 3D/modelo/texto 3D âmbar, áudio teal, partículas roxo, vídeo e imagem azul, texto rosa, forma verde, o resto cinza. */
+    /** Tom do clipe por tipo (mockup): texto azul, forma marrom, imagem/vídeo verde (tira de miniaturas), áudio verde-água, 3D âmbar, partículas roxo, o resto cinza. */
     fun tone(type: LayerType): ClipTone = when (type) {
         LayerType.Model3D -> Amber
         LayerType.Audio -> Teal
         LayerType.Particles -> Purple
-        LayerType.Video, LayerType.Image -> Blue
-        LayerType.Text -> Pink
-        LayerType.Shape -> Green
+        LayerType.Video, LayerType.Image -> Green
+        LayerType.Text -> Blue
+        LayerType.Shape -> Brown
         LayerType.Adjustment, LayerType.Camera, LayerType.Light, LayerType.Null, LayerType.Group -> Gray
     }
 
     // --- Medidas (dp) --------------------------------------------------------
-    val RulerTicks = 20.dp                 // faixa dos riscos
-    val RulerGap = 18.dp                   // respiro até a 1ª linha (o relógio mora aqui)
-    val Row = 36.dp                        // mais baixa que a A.01 (46): cabem mais camadas
-    val Bar = 30.dp                        // barra colada no topo da linha
-    val BarRadius = 8.dp
+    val RulerTicks = 30.dp                 // faixa dos riscos (base dos riscos em 22)
+    val RulerGap = 40.dp                   // relógio (30) + respiro até o topo da 1ª barra
+    val Row = 32.dp                        // pílula 28 + 4 de vão (antes 36: camadas grandes demais)
+    val Bar = 24.dp                        // barra do clipe
+    val BarRadius = 3.dp
     val BarMinWidth = 40.dp
     val KeyframeTrack = 11.dp              // faixa de baixo da barra, dos losangos
-    val HeaderColumn = 40.dp               // calha: glifo do tipo + olho (as barras passam por baixo)
-    val GutterIconSize = 17.dp
-    val GutterEyeSize = 12.dp
-    val ClipStripe = 3.dp                  // faixa sólida da cor do tipo na borda esquerda
+    val HeaderColumn = 78.dp               // a pílula colada à esquerda (as barras passam por baixo)
+    val RowPillHeight = 28.dp
+    val RowPillInset = 2.dp                // a pílula começa 2 dp acima da barra
+    val GutterIconSize = 16.dp             // o olho da pílula
+    val GutterEyeSize = 16.dp
+    val GlyphBox = 22.dp
+    val ClipStripe = 3.dp                  // faixa da cor da etiqueta na borda esquerda
     val ClipSelStroke = 2.dp
     val ClipIcon = 12.dp
-    val Playhead = 1.6.dp
+    val Playhead = 2.dp
     val PlayheadKnob = 8.dp
 }
 

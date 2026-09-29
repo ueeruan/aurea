@@ -397,6 +397,14 @@
     <string name="panel_aplicar">Aplicar</string>
     <string name="panel_aplicar_sem_texto_remove_expressao">Aplicar sin texto quita la expresión.</string>
     <string name="panel_aplicar_todos_segmentos">Aplicar en todos los segmentos</string>
+    <string name="panel_curve_apply_property">Aplicar a todos los keyframes de esta propiedad</string>
+    <string name="pn_curve_need_two_keys">Necesitas al menos 2 keyframes para editar la curva</string>
+    <string name="pn_curve_save">Guardar curva</string>
+    <string name="pn_curve_std_smooth">Suave</string>
+    <string name="pn_curve_std_in">Entrada</string>
+    <string name="pn_curve_std_out">Salida</string>
+    <string name="pn_curve_std_overshoot">Pasarse</string>
+    <string name="pn_curve_std_anticipate">Anticipar</string>
     <string name="panel_arraste_alcas_palco_mudar_tamanho">Arrastra los manejadores en el escenario para cambiar el tamaño</string>
     <string name="panel_arraste_pontos_palco_toque_num_ponto">Arrastra los puntos en el escenario; toca un punto para ver los manejadores de curva.</string>
     <string name="panel_arredondar_pontas">Redondear las puntas</string>
@@ -2543,6 +2551,8 @@ para editar la curva.</string>
     <string name="fxo_y_axis">Eje Y</string>
     <string name="fxo_alpha_2">Alfa</string>
     <string name="fx_copy_this_effect">Copiar este efecto</string>
+    <string name="fx_back_to_effects">Volver a los efectos</string>
+    <string name="fx_param_expression">Expresión de %1$s</string>
     <string name="fx_default_value">Predeterminado: %1$s</string>
     <string name="fx_param_range">%1$s a %2$s</string>
     <string name="app_importing_generated_video">Importando el video generado…</string>
@@ -3271,4 +3281,9 @@ para editar la curva.</string>
     <string name="shape3d_layout_hint">Rotación por parte, retraso, aleatorio, curvar, torcer y esparcir: lo mismo que las letras del texto 3D.</string>
     <string name="fx_desc_shape3d_layout">Gira, retrasa, esparce y mezcla las partes de una forma 3D, como las letras del texto 3D.</string>
     <string name="edt_cmd_select_shape3d">Selecciona una forma 3D</string>
+    <string name="editor_ir_inicio_segure_anterior">Ir al inicio · mantén: marca, keyframe o fotograma anterior</string>
+    <string name="editor_ir_fim_segure_proximo">Ir al final · mantén: siguiente marca, keyframe o fotograma</string>
+    <string name="editor_ajustes_projeto">Ajustes del proyecto</string>
+    <string name="editor_ajustes_projeto_mais">Ajustes del proyecto y más opciones</string>
+    <string name="editor_duplicar_camada_segure_copiar">Duplicar capa · mantén para copiar y pegar</string>
 </resources>

@@ -204,12 +204,14 @@ struct ShellBarButton: View {
     var height: CGFloat = StageDim.barButtonHeight
     var tint: Color?
     var enabled = true
+    /// Cor do ícone apagado (nil = o `disabled` de sempre).
+    var disabledTint: Color? = nil
     var mirror = false
     var onLongPress: (() -> Void)?
     var action: () -> Void
 
     var body: some View {
-        CupertinoGlyph.text(glyph, size: size, color: enabled ? (tint ?? AureaColors.text) : AureaColors.disabled)
+        CupertinoGlyph.text(glyph, size: size, color: enabled ? (tint ?? AureaColors.text) : (disabledTint ?? AureaColors.disabled))
             .scaleEffect(x: mirror ? -1 : 1, y: 1)
             .frame(width: width, height: height)
             .contentShape(Rectangle())
@@ -227,6 +229,10 @@ final class ShellPresentation: ObservableObject {
     @Published var linkIds: [Int64] = []
     /// Categoria aberta pela barra de adicionar (índice das `ShellAddCategories`).
     @Published var addCategory = 0
+    /// Busca de ferramentas e teste de desempenho: abertos pela lupa das barras
+    /// ou pelo menu da engrenagem (apresentados pela barra do topo).
+    @Published var commandSearch = false
+    @Published var performanceTest = false
     @Published var resolutionAnchor: CGRect?
     @Published var timeInput = ""
     @Published var grabbedHandle = -1

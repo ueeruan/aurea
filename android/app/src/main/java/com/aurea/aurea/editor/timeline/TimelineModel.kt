@@ -320,46 +320,186 @@ internal object RowOrder {
     }
 }
 
-/** A real engine track, or a property section (property -1) without synthetic keys. */
-internal data class TimelineTrack(val property: Int, val effect: Int = -1, val param: Int = 0)
-internal fun expandedRows(base: List<RowModel>, expanded: Long?, keys: Map<Long, List<KeyframeRow>>, effects: List<Pair<Int, String>>): List<RowModel> {
-    if (expanded == null) return base
+/**
+ * Uma trilha real do motor, uma seção (property -1) sem keyframes sintéticos,
+ * ou — com [group] — a TRILHA DE GRUPO de uma propriedade de vários eixos
+ * (Posição X/Y/Z, Escala, Rotação, Âncora...): property/param são os do 1º
+ * eixo do grupo e a trilha junta os keyframes de todos os eixos. É só vista e
+ * gesto sobre as trilhas por eixo (o motor e o store continuam por eixo).
+ */
+internal data class TimelineTrack(val property: Int, val effect: Int = -1, val param: Int = 0, val group: Boolean = false)
+
+/**
+ * O grupo de eixos de uma trilha (a trilha-base dele, com `group`), ou null
+ * quando a propriedade é de um componente só. Transform: 0–2 Posição, 3–5
+ * Escala, 6–8 Rotação, 9–11 Âncora, 13–14 Inclinação; peça 3D (42): 0–2
+ * Posição, 3–5 Rotação, 6–8 Escala.
+ */
+internal fun trackGroup(t: TimelineTrack): TimelineTrack? = when {
+    t.group -> t
+    t.property in 0..11 -> TimelineTrack(t.property / 3 * 3, t.effect, t.param, group = true)
+    t.property == 13 || t.property == 14 -> TimelineTrack(13, t.effect, t.param, group = true)
+    t.property == 42 && t.param in 0..8 -> TimelineTrack(42, t.effect, t.param / 3 * 3, group = true)
+    else -> null
+}
+
+/** Um grupo de eixos aberto (▾) numa camada: as trilhas por eixo aparecem embaixo dele. */
+internal data class LaneGroupKey(val layer: Long, val track: TimelineTrack)
+
+private val AXIS_NAMES = listOf("Position X", "Position Y", "Position Z", "Scale X", "Scale Y", "Scale Z", "Rotation X", "Rotation Y", "Rotation Z", "Anchor X", "Anchor Y", "Anchor Z", "Opacity", "Skew X", "Skew Y")
+private val PART_AXES = listOf("Position X", "Position Y", "Position Z", "Rotation X", "Rotation Y", "Rotation Z", "Scale X", "Scale Y", "Scale Z")
+
+private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): String {
+    if (track.group) return when (track.property) {
+        0 -> "Position"
+        3 -> "Scale"
+        6 -> "Rotation"
+        9 -> "Anchor"
+        13 -> "Skew"
+        42 -> "Part ${track.effect + 1} · ${listOf("Position", "Rotation", "Scale").getOrNull(track.param / 3) ?: track.param}"
+        else -> "3D · ${track.property}"
+    }
+    return AXIS_NAMES.getOrNull(track.property) ?: when (track.property) {
+        30 -> "Time remap"
+        31 -> (effects.firstOrNull { it.first == track.effect }?.second ?: "Effect") + " · ${track.param + 1}"
+        32 -> "Audio · ${track.param + 1}"
+        33 -> "Text animation ${track.effect + 1} · ${track.param + 1}"
+        34 -> "Vector · ${track.param + 1}"
+        35 -> "Shape · ${track.param + 1}"
+        36 -> "Particles · ${track.param + 1}"
+        39 -> "Speed"
+        40 -> "Animator ${track.effect + 1} · ${track.param + 1}"
+        37 -> "Material ${track.effect + 1} · ${listOf("R", "G", "B", "Alpha", "Metallic", "Roughness").getOrNull(track.param) ?: track.param}"
+        42 -> "Part ${track.effect + 1} · ${PART_AXES.getOrNull(track.param) ?: track.param}"
+        else -> "3D · ${track.property}"
+    }
+}
+
+/** Compatível com a versão de UMA camada aberta (testes e chamadas antigas). */
+internal fun expandedRows(base: List<RowModel>, expanded: Long?, keys: Map<Long, List<KeyframeRow>>, effects: List<Pair<Int, String>>): List<RowModel> =
+    if (expanded == null) base else expandedRows(base, setOf(expanded), emptySet(), keys) { effects }
+
+/**
+ * Trilhas abertas de VÁRIAS camadas de uma vez (cada uma com o seu ▸/▾). Uma
+ * propriedade de vários eixos com 2+ eixos animados vira UMA trilha de grupo
+ * (um losango por instante, a união dos eixos); o grupo aberto em [openGroups]
+ * mostra as trilhas por eixo logo abaixo dele. Um eixo sozinho continua sendo
+ * a trilha dele.
+ */
+internal fun expandedRows(
+    base: List<RowModel>,
+    expanded: Set<Long>,
+    openGroups: Set<LaneGroupKey>,
+    keys: Map<Long, List<KeyframeRow>>,
+    effects: (Long) -> List<Pair<Int, String>>,
+): List<RowModel> {
+    if (expanded.isEmpty()) return base
     return base.flatMap { row ->
         // Numa fileira compartilhada, as trilhas abertas são do TRECHO aberto
         // (tempo e keyframes dele) e entram logo abaixo da fileira.
-        val owner = row.segment(expanded)
+        val owner = row.segments.firstOrNull { it.id in expanded }
         if (owner == null) listOf(row) else {
+            val fx = effects(owner.id)
             val all = keys[owner.id].orEmpty()
             val tracks = all.groupBy { TimelineTrack(it.property, it.effectIndex, it.paramIndex) }
             val lanes = arrayListOf(row)
             fun lane(track: TimelineTrack, name: String, values: List<KeyframeRow> = emptyList()) {
                 val groups = values.groupBy { it.time }.toSortedMap()
                 lanes += RowModel(owner.id, owner.type, owner.start, owner.end, owner.offset, owner.visible, owner.locked,
-                    owner.magnetic, values.isNotEmpty(), "  $name", owner.label,
+                    owner.magnetic, values.isNotEmpty(), name, owner.label,
                     groups.keys.map { Keyframes.toTimeline(it, owner.start, owner.offset) }.toIntArray(), groups.values.toTypedArray(), track)
             }
-            lane(TimelineTrack(-1), "Transform")
-            effects.forEach { (id, name) -> lane(TimelineTrack(31, id, -1), name) }
-            tracks.entries.sortedWith(compareBy({ it.key.property }, { it.key.effect }, { it.key.param })).forEach { (track, values) ->
-                val names = listOf("Position X", "Position Y", "Position Z", "Scale X", "Scale Y", "Scale Z", "Rotation X", "Rotation Y", "Rotation Z", "Anchor X", "Anchor Y", "Anchor Z", "Opacity", "Skew X", "Skew Y")
-                val name = names.getOrNull(track.property) ?: when (track.property) {
-                    30 -> "Time remap"
-                    31 -> (effects.firstOrNull { it.first == track.effect }?.second ?: "Effect") + " · ${track.param + 1}"
-                    32 -> "Audio · ${track.param + 1}"
-                    33 -> "Text animation ${track.effect + 1} · ${track.param + 1}"
-                    34 -> "Vector · ${track.param + 1}"
-                    35 -> "Shape · ${track.param + 1}"
-                    36 -> "Particles · ${track.param + 1}"
-                    39 -> "Speed"
-                    40 -> "Animator ${track.effect + 1} · ${track.param + 1}"
-                    37 -> "Material ${track.effect + 1} · ${listOf("R", "G", "B", "Alpha", "Metallic", "Roughness").getOrNull(track.param) ?: track.param}"
-                    42 -> "Part ${track.effect + 1} · ${listOf("Position X", "Position Y", "Position Z", "Rotation X", "Rotation Y", "Rotation Z", "Scale X", "Scale Y", "Scale Z").getOrNull(track.param) ?: track.param}"
-                    else -> "3D · ${track.property}"
+            lane(TimelineTrack(-1), "  Transform")
+            fx.forEach { (id, name) -> lane(TimelineTrack(31, id, -1), "  $name") }
+            val ordered = tracks.keys.sortedWith(compareBy({ it.property }, { it.effect }, { it.param }))
+            // Os eixos animados de cada grupo (só 2+ vira trilha de grupo).
+            val members = ordered.groupBy { trackGroup(it) }
+            val emitted = HashSet<TimelineTrack>()
+            for (track in ordered) {
+                val group = trackGroup(track)
+                val axes = if (group != null) members[group].orEmpty() else emptyList()
+                if (group == null || axes.size < 2) {
+                    lane(track, "  " + trackName(track, fx), tracks[track].orEmpty())
+                    continue
                 }
-                lane(track, name, values)
+                if (!emitted.add(group)) continue
+                lane(group, "  " + trackName(group, fx), axes.flatMap { tracks[it].orEmpty() })
+                if (LaneGroupKey(owner.id, group) in openGroups) {
+                    for (axis in axes) lane(axis, "      " + trackName(axis, fx), tracks[axis].orEmpty())
+                }
             }
             lanes
         }
+    }
+}
+
+/**
+ * Altura de uma trilha de propriedade: baixa (16 dp), para caberem muitas sob
+ * as camadas. O dedo não perde o alvo: um toque que não pega nada na trilha
+ * sob ele tenta a vizinha (ver [LaneTouch]), o que dá ≥ 32 dp a cada losango.
+ */
+internal const val LANE_HEIGHT_DP = 16f
+
+/**
+ * Folga vertical de toque das trilhas baixas: a ordem das fileiras a tentar
+ * para um dedo em [y] (coordenada de conteúdo) sobre a fileira [index] — ela
+ * mesma, depois a trilha vizinha cujo centro está a até [reach] px do dedo
+ * (a mais perto primeiro). Só trilhas de propriedade entram como vizinhas.
+ */
+internal object LaneTouch {
+    fun order(isLane: (Int) -> Boolean, tops: FloatArray, index: Int, y: Float, reach: Float): IntArray {
+        if (index < 0 || index + 1 >= tops.size) return intArrayOf(index)
+        val near = ArrayList<Pair<Int, Float>>(2)
+        for (j in intArrayOf(index - 1, index + 1)) {
+            if (j < 0 || j + 1 >= tops.size || !isLane(j)) continue
+            val d = kotlin.math.abs((tops[j] + tops[j + 1]) / 2f - y)
+            if (d <= reach) near.add(j to d)
+        }
+        near.sortBy { it.second }
+        return IntArray(1 + near.size) { if (it == 0) index else near[it - 1].first }
+    }
+}
+
+/**
+ * Seleção por RETÂNGULO (modo "Selecionar"): os keyframes cujos losangos têm
+ * o centro dentro de [frameLo, frameHi] × [yLo, yHi] (tempo da timeline e y de
+ * conteúdo), por camada — no resumo da camada, todos do instante; numa
+ * trilha, os dela. [tops] tem os topos das fileiras (`rows.size + 1`);
+ * [keyCy] dá o centro dos losangos medido do topo da fileira; [keysVisible]
+ * diz se o trecho mostra losangos (os escondidos não entram).
+ */
+internal object BoxSelect {
+    fun pick(
+        rows: List<RowModel>,
+        tops: FloatArray,
+        keyCy: (RowModel) -> Float,
+        frameLo: Double,
+        frameHi: Double,
+        yLo: Float,
+        yHi: Float,
+        keysVisible: (RowModel) -> Boolean,
+    ): Map<Long, List<KeyframeRow>> {
+        val out = LinkedHashMap<Long, ArrayList<KeyframeRow>>()
+        val lo = kotlin.math.ceil(min(frameLo, frameHi) - 1e-9)
+        val hi = kotlin.math.floor(max(frameLo, frameHi) + 1e-9)
+        val top = min(yLo, yHi)
+        val bottom = max(yLo, yHi)
+        for (i in rows.indices) {
+            if (i >= tops.size) break
+            val row = rows[i]
+            val cy = tops[i] + keyCy(row)
+            if (cy < top || cy > bottom) continue
+            for (s in row.segments) {
+                if (!keysVisible(s)) continue
+                for (k in s.instants.indices) {
+                    val t = s.instants[k]
+                    if (t < lo || t > hi) continue
+                    val list = out.getOrPut(s.id) { ArrayList() }
+                    for (key in s.keysAt[k]) if (list.none { KeyRef.of(it) == KeyRef.of(key) }) list.add(key)
+                }
+            }
+        }
+        return out
     }
 }
 
@@ -381,7 +521,7 @@ internal fun timelineRowHeight(row: RowModel, layerHeight: Float, density: Float
         for (s in shared) h = max(h, timelineRowHeight(s, layerHeight, density))
         return h
     }
-    return if (row.track != null) 28f * density
+    return if (row.track != null) LANE_HEIGHT_DP * density
     else if (row.magnetic && row.type == LayerType.Video) layerHeight * MAGNETIC_ROW_SCALE
     else layerHeight
 }

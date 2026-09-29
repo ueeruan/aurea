@@ -486,10 +486,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Toque simples num losango da timeline: só ele fica escolhido (e é o principal). */
-    fun tapTimelineKey(layer: Long, key: KeyframeRow) {
+    fun tapTimelineKey(layer: Long, key: KeyframeRow, group: List<KeyframeRow> = listOf(key)) {
         selectedKeyframe = layer to key
-        keySelection = KeySelection.single(layer, key)
+        // Trilha de GRUPO (Posição X/Y/Z...): todos os eixos do instante ficam escolhidos.
+        keySelection = if (group.size <= 1) KeySelection.single(layer, key) else KeySelection.all(layer, group)
         keySelectMode = false
+    }
+
+    /** Seleção por retângulo da timeline (só no modo "Selecionar"): a seleção inteira já somada. */
+    fun boxSelectTimelineKeys(next: KeySelection) {
+        if (keySelectMode && next != keySelection) keySelection = next
     }
 
     /**
@@ -2663,6 +2669,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val peers = graphKeyGroup(layer, key)
         group("curve XYZ") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2, power) } }
         refreshNow()
+    }
+
+    /**
+     * A MESMA curva em vários trechos (todos os keyframes de uma propriedade,
+     * com os eixos do grupo): os comandos de [setKeyframeEasing] num lote só —
+     * UM passo de desfazer.
+     */
+    fun setKeyframesEasing(layer: Long, starts: List<KeyframeRow>, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float, power: Int = 0) {
+        if (starts.isEmpty()) return
+        val peers = starts.flatMap { graphKeyGroup(layer, it) }
+            .distinctBy { listOf(it.property, it.effectIndex, it.paramIndex, it.time) }
+        group("curva na propriedade") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2, power) } }
     }
 
     // --- Efeitos -------------------------------------------------------------

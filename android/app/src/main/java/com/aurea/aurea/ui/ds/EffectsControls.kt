@@ -2,6 +2,7 @@ package com.aurea.aurea.ui.ds
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -43,11 +44,12 @@ import com.aurea.aurea.ui.theme.tocavel
 // =============================================================================
 
 /**
- * O CARTÃO DA PILHA DE EFEITOS (ref16/ref17). Recolhido: `▶ Nome · 👁 · ≡`
- * (o olho liga/desliga, o ≡ é a alça de arrastar — [dragHandle] recebe o gesto).
- * Aberto: `▼ Nome · ⋯ · 🗑` e o corpo. O corpo recolhido NEM É COMPOSTO (não
- * escuta o cabeçote). Desligado, nome e corpo a 45 %. [lifted] = sendo arrastado
- * (borda acesa, fundo mais alto).
+ * O CARTÃO DA PILHA DE EFEITOS (redesenho 2026-09-29, Efeitos.dc.html): raio 10,
+ * fundo #252F43. Aberto: cabeçalho de 50 `▾ Nome · ••• · 🗑` e o corpo — as
+ * linhas de 40 com vão de 4 ([ParamRowDims]). Recolhido: `▸ Nome · 👁 · ≡` (o
+ * olho liga/desliga, o ≡ é a alça de arrastar — [dragHandle] recebe o gesto).
+ * O corpo recolhido NEM É COMPOSTO (não escuta o cabeçote). Desligado, nome e
+ * corpo a 45 %. [lifted] = sendo arrastado (borda acesa, fundo mais alto).
  */
 @Composable
 fun EffectStackCard(
@@ -63,23 +65,24 @@ fun EffectStackCard(
     lifted: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(10.dp)
     Column(
         modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp)
             .clip(shape)
-            .background(if (lifted) AureaColors.SurfaceHigh else AureaColors.Surface)
+            .background(if (lifted) AureaColors.SurfaceHigh else ParamRowColors.Card)
             .then(if (lifted) Modifier.border(1.dp, AureaColors.Accent, shape) else Modifier)
-            .padding(start = 10.dp, end = 4.dp, bottom = if (expanded) 8.dp else 0.dp),
+            .padding(bottom = if (expanded) 6.dp else 0.dp),
     ) {
-        Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(50.dp).padding(end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(
                 Modifier
                     .weight(1f)
-                    .height(52.dp)
+                    .height(50.dp)
                     .semantics { contentDescription = if (expanded) "Fechar $name" else "Abrir $name" }
-                    .tocavel(shrink = 1f, onClick = onToggleExpanded),
+                    .tocavel(shrink = 1f, onClick = onToggleExpanded)
+                    .padding(start = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CupertinoIcon(
@@ -87,13 +90,13 @@ fun EffectStackCard(
                     13.dp,
                     AureaColors.Text,
                 )
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     name,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false).alpha(if (enabled) 1f else 0.45f),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600)),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 16.sp, fontWeight = FontWeight.W600)),
                 )
             }
             if (expanded) {
@@ -108,16 +111,20 @@ fun EffectStackCard(
                 )
                 Box(
                     dragHandle
-                        .size(48.dp)
+                        .size(40.dp)
                         .semantics { contentDescription = "Arrastar para reordenar" },
                     contentAlignment = Alignment.Center,
                 ) {
-                    CupertinoIcon(CupertinoGlyph.LineHorizontal3, 22.dp, if (lifted) AureaColors.Accent else AureaColors.Muted)
+                    CupertinoIcon(CupertinoGlyph.LineHorizontal3, 20.dp, if (lifted) AureaColors.Accent else AureaColors.Muted)
                 }
             }
         }
         if (expanded) {
-            Column(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.45f), content = content)
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 6.dp).alpha(if (enabled) 1f else 0.45f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                content = content,
+            )
         }
     }
 }
@@ -126,12 +133,12 @@ fun EffectStackCard(
 private fun CardButton(glyph: Char, label: String, tint: Color, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(48.dp)
+            .size(40.dp)
             .semantics { contentDescription = label }
             .tocavel(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        CupertinoIcon(glyph, 22.dp, tint)
+        CupertinoIcon(glyph, 20.dp, tint)
     }
 }
 

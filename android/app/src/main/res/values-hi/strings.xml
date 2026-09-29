@@ -397,6 +397,14 @@
     <string name="panel_aplicar">लागू करें</string>
     <string name="panel_aplicar_sem_texto_remove_expressao">बिना टेक्स्ट लागू करने पर एक्सप्रेशन हट जाता है।</string>
     <string name="panel_aplicar_todos_segmentos">सभी सेगमेंट पर लागू करें</string>
+    <string name="panel_curve_apply_property">इस प्रॉपर्टी के सभी कीफ़्रेम पर लागू करें</string>
+    <string name="pn_curve_need_two_keys">कर्व संपादित करने के लिए कम से कम 2 कीफ़्रेम चाहिए</string>
+    <string name="pn_curve_save">कर्व सहेजें</string>
+    <string name="pn_curve_std_smooth">स्मूद</string>
+    <string name="pn_curve_std_in">ईज़ इन</string>
+    <string name="pn_curve_std_out">ईज़ आउट</string>
+    <string name="pn_curve_std_overshoot">ओवरशूट</string>
+    <string name="pn_curve_std_anticipate">पूर्वाभास</string>
     <string name="panel_arraste_alcas_palco_mudar_tamanho">आकार बदलने के लिए स्टेज पर हैंडल खींचें</string>
     <string name="panel_arraste_pontos_palco_toque_num_ponto">स्टेज पर बिंदु खींचें; कर्व हैंडल देखने के लिए बिंदु दबाएँ।</string>
     <string name="panel_arredondar_pontas">सिरे गोल करें</string>
@@ -2543,6 +2551,8 @@
     <string name="fxo_y_axis">Y अक्ष</string>
     <string name="fxo_alpha_2">अल्फ़ा</string>
     <string name="fx_copy_this_effect">यह इफ़ेक्ट कॉपी करें</string>
+    <string name="fx_back_to_effects">इफ़ेक्ट्स पर वापस</string>
+    <string name="fx_param_expression">%1$s का एक्सप्रेशन</string>
     <string name="fx_default_value">डिफ़ॉल्ट: %1$s</string>
     <string name="fx_param_range">%1$s से %2$s</string>
     <string name="app_importing_generated_video">बनाया गया वीडियो इम्पोर्ट हो रहा है…</string>
@@ -3271,4 +3281,9 @@
     <string name="shape3d_layout_hint">हर भाग का घुमाव, देरी, रैंडम, मोड़, ट्विस्ट और फैलाव — 3D टेक्स्ट के अक्षरों जैसा।</string>
     <string name="fx_desc_shape3d_layout">3D आकार के भागों को घुमाता, देर करता, फैलाता और रैंडम करता है, 3D टेक्स्ट के अक्षरों की तरह।</string>
     <string name="edt_cmd_select_shape3d">एक 3D आकार चुनें</string>
+    <string name="editor_ir_inicio_segure_anterior">शुरुआत पर जाएँ · दबाए रखें: पिछला मार्कर, कीफ़्रेम या फ़्रेम</string>
+    <string name="editor_ir_fim_segure_proximo">अंत पर जाएँ · दबाए रखें: अगला मार्कर, कीफ़्रेम या फ़्रेम</string>
+    <string name="editor_ajustes_projeto">प्रोजेक्ट सेटिंग्स</string>
+    <string name="editor_ajustes_projeto_mais">प्रोजेक्ट सेटिंग्स और अधिक विकल्प</string>
+    <string name="editor_duplicar_camada_segure_copiar">लेयर की प्रतिलिपि · कॉपी और पेस्ट के लिए दबाए रखें</string>
 </resources>

@@ -1,6 +1,8 @@
 // Port of EffectsPanel.kt and EffectStackCard. Project data stays in the core.
-// Abas "Na camada | Adicionar" (2026-09-28): a aba Adicionar é EffectPickerView
-// (EffectsBrowser.swift); camada sem efeito abre nela, com efeito abre na pilha.
+// Redesenho 2026-09-29 (docs/design/redesenho-2026-09-29/Efeitos.dc.html): sem
+// cabeçalho de abas. A pilha é `[trilho ‹ ◇ curva … ⋯] [cartões]`; o catálogo
+// (EffectPickerView, EffectsBrowser.swift) abre com "‹ Adicionar efeito" no topo.
+// Camada sem efeito abre no catálogo; com efeito, na pilha com o 1º cartão aberto.
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -50,10 +52,13 @@ struct EffectsView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            if !embedded {
-                if tabbed { tabsHeader } else { PanelHeader(title: AureaText.t("panel_efeitos"), onBack: { model.panel = .none }) }
+            // O título da seção ("Efeitos") mora na barra de cima; o editor
+            // embutido fora dela (letras do texto 3D) mantém o próprio cabeçalho.
+            if !embedded && !tabbed {
+                PanelHeader(title: AureaText.t("panel_efeitos"), onBack: { model.panel = .none })
             }
             if tabbed && tab == .add {
+                addHeader
                 EffectPickerView(prefs: prefs, layerHasAudio: hasAudio, onPick: pick).frame(maxHeight: .infinity)
             } else {
             HStack(spacing: 0) {
@@ -77,7 +82,7 @@ struct EffectsView: View {
                                 model.mutate { $0.addEffect(type, toLayer: layer, at: UInt32.max) }
                             }.frame(minHeight: 48)
                         }
-                    }.padding(.init(top: 8, leading: tabbed && openId == nil ? 12 : 2, bottom: 16, trailing: 12))
+                    }.padding(.init(top: 8, leading: 8, bottom: 16, trailing: 6))
                 }.coordinateSpace(name: "effect-stack")
                     .accessibilityIdentifier("aurea.effects.stack")
                     .onPreferenceChange(EffectCardFrames.self) { cardFrames = $0 }
@@ -87,7 +92,7 @@ struct EffectsView: View {
             }.frame(maxHeight: .infinity)
             }
         }
-        .background(AureaColors.editorPanel)
+        .background(ParamRowColors.panel)
         .onAppear { enterLayer(); model.refreshSelectedLayer(); refreshExpressions() }
         .onChange(of: model.primarySelection) { _ in enterLayer() }
         .onChange(of: selected) { _ in updateTimelineFocus() }
@@ -144,25 +149,17 @@ struct EffectsView: View {
         }
         .onDisappear { importTask?.cancel(); importTask = nil; finishReorder(); model.endGesture() }
     }
-    @ViewBuilder private var rail: some View {
-        if openId == nil {
-            // Com abas, o ‹ e o ⋯ moram no cabeçalho: a lista ganha a largura toda.
-            if !tabbed {
-                VStack(spacing: 0) {
-                    Button { model.panel = .none } label: { MaterialGlyph("rounded.ChevronLeft", size: AureaDims.iconLg).frame(width: AureaDims.railW, height: EffectsViewLayout.railCell) }.buttonStyle(AureaPressStyle(shrink: 1))
-                    Spacer(minLength: 0)
-                    Button { listMenu() } label: { CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: AureaDims.iconLg, color: AureaColors.text).frame(width: AureaDims.railW, height: EffectsViewLayout.railCell) }.buttonStyle(AureaPressStyle(shrink: 1))
-                }.frame(width: AureaDims.railW).frame(maxHeight: .infinity)
-            }
-        } else {
-            LeftRail(keyframeLook: railLook,
-                     onKeyframe: canAnimate ? { toggleSelectedKey() } : nil,
-                     curveAnimated: railLook != .none,
-                     onCurve: selectedTrack.count >= 2 ? { openCurve() } : nil,
-                     expression: selected.map { expressionLooks[$0.param] ?? .none } ?? .none,
-                     onExpression: canAnimate ? { openExpression() } : nil,
-                     onBack: { closeCard() })
-        }
+    /// O TRILHO (redesenho 2026-09-29), sempre à vista na pilha: ‹ volta às seções
+    /// da camada; ◇+ e a curva miram o parâmetro escolhido (apagados sem cartão
+    /// aberto); ⋯ no pé = ações da pilha inteira. O "=" saiu do trilho: a
+    /// expressão mora no ••• do cartão e no toque longo do rótulo.
+    private var rail: some View {
+        LeftRail(keyframeLook: railLook,
+                 onKeyframe: canAnimate ? { toggleSelectedKey() } : nil,
+                 curveAnimated: railLook != .none,
+                 onCurve: selectedTrack.count >= 2 ? { openCurve() } : nil,
+                 onMore: { listMenu() },
+                 onBack: { model.panel = .none })
     }
     private func enterLayer() {
         guard loadedLayer != model.primarySelection else { return }
@@ -174,8 +171,9 @@ struct EffectsView: View {
         }
         guard model.curveProperty == 31, model.curveSelectedTime != nil,
               model.effects.contains(where: { $0.effectId == model.curveEffect }) else {
-            // Um efeito só na camada já abre com os controles à vista (um toque a menos).
-            if tabbed, model.effects.count == 1, let only = model.effects.first { open(only.effectId) }
+            // A pilha já abre com o primeiro cartão à vista (um toque a menos);
+            // os outros recolhidos (acordeão: um aberto por vez).
+            if tabbed, let first = model.effects.first { open(first.effectId) }
             return
         }
         // Entrar pelo losango de um parâmetro é editar: abre na pilha.
@@ -220,17 +218,20 @@ struct EffectsView: View {
     private func display(_ param: EffectParamItem, effectId: UInt32) -> FxParamDisplay {
         fxParamDisplay(model.effects.first { $0.effectId == effectId }?.typeId ?? 0, slot(param))
     }
+    /// O CARTÃO DA PILHA (`EffectStackCard`, redesenho 2026-09-29): raio 10, fundo
+    /// #252F43. Aberto: cabeçalho de 50 `▾ Nome · ••• · 🗑` e o corpo (linhas de 40
+    /// com vão de 4). Recolhido: `▸ Nome · 👁 · ≡` (o ≡ arrasta para reordenar).
     private func card(_ effect: EffectItem) -> some View {
         let expanded = openId == effect.effectId, lifted = dragId == effect.effectId
         return VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Button { expanded ? closeCard() : open(effect.effectId) } label: {
-                    HStack(spacing: 14) {
+                    HStack(spacing: 8) {
                         CupertinoGlyph.text(expanded ? CupertinoGlyph.ArrowtriangleDownFill : CupertinoGlyph.ArrowtriangleRightFill, size: 13, color: AureaColors.text)
-                        Text(fxEffectDisplayName(effect.typeId, effect.name)).font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.text)
+                        Text(fxEffectDisplayName(effect.typeId, effect.name)).font(.aurea(size: 16, weight: .semibold)).foregroundStyle(AureaColors.text)
                             .lineLimit(1).truncationMode(.tail).opacity(effect.enabled ? 1 : 0.45)
                         Spacer(minLength: 0)
-                    }.frame(maxWidth: .infinity).frame(height: 52).contentShape(Rectangle())
+                    }.padding(.leading, 12).frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
                 }.buttonStyle(AureaPressStyle(shrink: 1))
                 if expanded {
                     cardButton(CupertinoGlyph.Ellipsis) { effectMenu(effect) }
@@ -239,13 +240,13 @@ struct EffectsView: View {
                     cardButton(CupertinoGlyph.Trash) { remove(effect) }
                 } else {
                     cardButton(effect.enabled ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, tint: effect.enabled ? AureaColors.text : AureaColors.muted) { enable(effect, !effect.enabled) }
-                    CupertinoGlyph.text(CupertinoGlyph.LineHorizontal3, size: 22, color: lifted ? AureaColors.accent : AureaColors.muted)
-                        .frame(width: 48, height: 48).contentShape(Rectangle())
+                    CupertinoGlyph.text(CupertinoGlyph.LineHorizontal3, size: 20, color: lifted ? AureaColors.accent : AureaColors.muted)
+                        .frame(width: 40, height: 40).contentShape(Rectangle())
                         .highPriorityGesture(DragGesture(minimumDistance: 4).onChanged { reorder(effect, value: $0) }.onEnded { _ in finishReorder() })
                 }
-            }.frame(height: 52)
+            }.padding(.trailing, 6).frame(height: 50)
             if expanded {
-                VStack(spacing: 0) {
+                VStack(spacing: 4) {
                     if !effect.known { PanelNotice(AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao")) }
                     else if effect.typeId == fxEffectTypeId("aurea.time.remap") { TimeRemapEffectEditor(effectId: effect.effectId) }
                     else {
@@ -272,14 +273,14 @@ struct EffectsView: View {
                             if advanced.contains(effect.effectId) { ForEach(groups.rest) { param in parameter(param, effect: effect.effectId) } }
                         }
                     }
-                }.opacity(effect.enabled ? 1 : 0.45)
+                }.padding(.horizontal, 6).opacity(effect.enabled ? 1 : 0.45)
             }
-        }.padding(.leading, 10).padding(.trailing, 4).padding(.bottom, expanded ? 8 : 0)
-            .background(lifted ? AureaColors.surfaceHigh : AureaColors.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay { if lifted { RoundedRectangle(cornerRadius: 12).stroke(AureaColors.accent, lineWidth: 1) } }
+        }.padding(.bottom, expanded ? 6 : 0)
+            .background(lifted ? AureaColors.surfaceHigh : ParamRowColors.card, in: RoundedRectangle(cornerRadius: 10))
+            .overlay { if lifted { RoundedRectangle(cornerRadius: 10).stroke(AureaColors.accent, lineWidth: 1) } }
     }
     private func cardButton(_ glyph: Character, tint: Color = AureaColors.text, action: @escaping () -> Void) -> some View {
-        Button(action: action) { CupertinoGlyph.text(glyph, size: 22, color: tint).frame(width: 48, height: 48) }.buttonStyle(AureaPressStyle())
+        Button(action: action) { CupertinoGlyph.text(glyph, size: 20, color: tint).frame(width: 40, height: 40).contentShape(Rectangle()) }.buttonStyle(AureaPressStyle())
     }
     @ViewBuilder private func parameter(_ param: EffectParamItem, effect: UInt32) -> some View {
         switch Int(param.type) {
@@ -287,36 +288,17 @@ struct EffectsView: View {
         case fxParamPoint2D, fxParamPoint3D:
             ForEach(0..<fxComponentCount(Int(param.type)), id: \.self) { component in numberRow(param, effect: effect, component: component) }
         case fxParamBool:
+            // O interruptor mora no lugar da caixa de valor, à direita.
             customRow(param, effect: effect) {
-                HStack { Spacer(minLength: 0); AureaToggle(checked: param.scalar >= 0.5) { on in
+                HStack(spacing: 0) { Spacer(minLength: 0); AureaToggle(checked: param.scalar >= 0.5) { on in
                     selected = EffectParamSelection(effect: effect, param: param.index, component: 0)
                     writeComponent(param.index, effect: effect, component: 0, value: on ? 1 : 0)
-                }; Spacer().frame(width: 4) }
+                }; Spacer().frame(width: 6) }
             }
         case fxParamEnum:
-            customRow(param, effect: effect) {
-                let options = enumOptions(param)
-                ChoiceChips(options, selected: min(max(0, Int(param.scalar.rounded())), options.count - 1)) { index in
-                    selected = EffectParamSelection(effect: effect, param: param.index, component: 0)
-                    writeComponent(param.index, effect: effect, component: 0, value: Float(index))
-                }
-            }
+            customRow(param, effect: effect) { choiceBox(param, effect: effect) }
         case fxParamColor:
-            customRow(param, effect: effect) {
-                HStack { Spacer(minLength: 0)
-                    Button {
-                        let target = EffectParamSelection(effect: effect, param: param.index, component: 0)
-                        selected = target; model.beginGesture("cor")
-                        model.colorSheet = ColorSheetRequest(title: display(param, effectId: effect).label,
-                            initial: AureaColorSpace.engineToDisplay(param.value), onChange: { r, g, b, a in
-                                writeVector(param.index, effect: effect, values: AureaColorSpace.displayToEngine(r, g, b, a))
-                            }, onDone: { model.endGesture() })
-                    } label: {
-                        AureaColorSwatch(color: color(param.value)).frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6))
-                    }.buttonStyle(AureaPressStyle())
-                    Spacer().frame(width: 4)
-                }
-            }
+            customRow(param, effect: effect) { colorControl(param, effect: effect) }
         case fxParamLayerRef:
             // Outra camada ("Camada de áudio"): o menu lista as camadas da
             // composição; o motor recebe o ÍNDICE da camada (−1 = nenhuma).
@@ -338,6 +320,74 @@ struct EffectsView: View {
             }
         default:
             customRow(param, effect: effect) { Text(AureaText.t("panel_ainda_nao_editavel_app")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
+        }
+    }
+    /// Escolha (`EffectChoiceRow`): a caixa de valor (a opção + ▾) ocupa o resto da
+    /// linha e abre a lista das opções; a atual vem marcada com "✓".
+    private func choiceBox(_ param: EffectParamItem, effect: UInt32) -> some View {
+        let options = enumOptions(param)
+        let top = max(0, options.count - 1)
+        let current = param.scalar.isFinite ? Int(param.scalar.rounded().clamped(to: 0...Float(top))) : 0
+        let label = display(param, effectId: effect).label
+        return Button {
+            selected = EffectParamSelection(effect: effect, param: param.index, component: 0)
+            let items: [(String, () -> Void)] = options.enumerated().map { (index, option) -> (String, () -> Void) in
+                (index == current ? "✓ " + option : option, {
+                    writeComponent(param.index, effect: effect, component: 0, value: Float(index))
+                })
+            }
+            model.actionSheet = ActionSheetRequest(title: label, items: items)
+        } label: {
+            HStack(spacing: 6) {
+                Text(options.indices.contains(current) ? options[current] : "")
+                    .font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 12, color: AureaColors.muted)
+            }
+            .padding(.leading, 10).padding(.trailing, 8)
+            .frame(maxWidth: .infinity).frame(height: ParamRowDims.labelH)
+            .background(ParamRowColors.valueBox, in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityIdentifier("effects.choice.\(effect).\(param.index)")
+    }
+    /// Cor (`EffectColorRow`): "R G B" (0–255 da cor mostrada) + amostra que abre o
+    /// seletor; a folha inteira = UM passo de desfazer.
+    private func colorControl(_ param: EffectParamItem, effect: UInt32) -> some View {
+        let shown = AureaColorSpace.engineToDisplay(param.value)
+        let rgb = (0..<3).map { index -> String in
+            let v = index < shown.count && shown[index].isFinite ? shown[index].clamped(to: 0...1) : 0
+            return String(Int((v * 255).rounded()))
+        }.joined(separator: " ")
+        let label = display(param, effectId: effect).label
+        return HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Text(rgb)
+                .font(.aurea(size: 12).monospacedDigit())
+                .foregroundStyle(ParamRowColors.rgbText)
+                .lineLimit(1)
+            Spacer().frame(width: 8)
+            Button {
+                let target = EffectParamSelection(effect: effect, param: param.index, component: 0)
+                selected = target; model.beginGesture("cor")
+                model.colorSheet = ColorSheetRequest(title: label,
+                    initial: AureaColorSpace.engineToDisplay(param.value), onChange: { r, g, b, a in
+                        writeVector(param.index, effect: effect, values: AureaColorSpace.displayToEngine(r, g, b, a))
+                    }, onDone: { model.endGesture() })
+            } label: {
+                AureaColorSwatch(color: color(param.value))
+                    .frame(width: 34, height: 30)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(ParamRowColors.swatchBorder, lineWidth: 1))
+                    .frame(minHeight: ParamRowDims.row)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle())
+            .accessibilityLabel(label)
+            .accessibilityIdentifier("effects.color.\(effect).\(param.index)")
+            Spacer().frame(width: 8)
         }
     }
     private func layerRefName(_ param: EffectParamItem) -> String {
@@ -388,12 +438,12 @@ struct EffectsView: View {
     }
     private func customRow<Content: View>(_ param: EffectParamItem, effect: UInt32, @ViewBuilder content: () -> Content) -> some View {
         let key = EffectParamSelection(effect: effect, param: param.index, component: 0)
-        return HStack(spacing: 8) {
+        return HStack(spacing: ParamRowDims.gap) {
             EffectPropertyLabel(label: display(param, effectId: effect).label, selected: selected?.effect == effect && selected?.param == param.index,
                                 look: look(effect: effect, param: param.index), expression: expressionLooks[param.index] ?? .none,
                                 onSelect: { selected = key }, onMenu: { paramMenu(param, effect: effect) })
             content().frame(maxWidth: .infinity, alignment: .leading)
-        }.frame(minHeight: 48)
+        }.frame(minHeight: ParamRowDims.row)
     }
     private func axisLabel(_ label: String, component: Int) -> String {
         let cuts = [" do ", " da ", " dos ", " das "].compactMap { label.range(of: $0)?.lowerBound }
@@ -516,51 +566,23 @@ struct EffectsView: View {
         }
         model.refreshModel(force: true)
     }
-    /// O cabeçalho com abas (no lugar do título): ‹ · [Na camada N | Adicionar] · ⋯.
-    private var tabsHeader: some View {
-        VStack(spacing: 0) {
-            Rectangle().fill(AureaColors.border).frame(height: AureaDims.hairline)
-            HStack(spacing: 0) {
-                Button { model.panel = .none } label: {
-                    MaterialGlyph("filled.ChevronLeft", size: AureaDims.panelBackIcon)
-                        .frame(width: AureaDims.panelBackTarget, height: AureaDims.panelHeader).contentShape(Rectangle())
-                }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("pn_back_to_layer_tools"))
-                ZStack {
-                    // O trilho da chave: a pílula de 36 no meio da faixa de 44.
-                    RoundedRectangle(cornerRadius: AureaDims.radiusChip).fill(AureaColors.chip).padding(.vertical, AureaDims.s1)
-                    HStack(spacing: 0) {
-                        tabButton(AureaText.t("effects_tab_applied"), count: model.effects.count, .applied, id: "effects.tab.applied")
-                        tabButton(AureaText.t("effects_tab_add"), count: nil, .add, id: "effects.tab.add")
-                    }.padding(.horizontal, EffectsViewLayout.tabInset)
-                }.frame(maxWidth: .infinity).frame(height: AureaDims.panelHeader)
-                Button { listMenu() } label: {
-                    CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: EffectsViewLayout.headerGlyph, color: AureaColors.text)
-                        .frame(width: AureaDims.minTap, height: AureaDims.panelHeader).contentShape(Rectangle())
-                }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_efeitos_camada"))
-            }.frame(height: AureaDims.panelHeader).background(AureaColors.surface)
-        }
-    }
-    private func tabButton(_ label: String, count: Int?, _ value: FxEffectsTab, id: String) -> some View {
-        let on = tab == value
-        return Button { tab = value } label: {
-            HStack(spacing: EffectsViewLayout.badgeGap) {
-                Text(label).font(.aurea(size: 13, weight: on ? .bold : .medium)).lineLimit(1)
-                    .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                if let count, count > 0 {
-                    Text(String(count)).font(.aurea(size: 11, weight: .bold))
-                        .foregroundStyle(on ? AureaColors.onAccent : AureaColors.text)
-                        .padding(.horizontal, EffectsViewLayout.badgeGap)
-                        .background(on ? AureaColors.accent : AureaColors.chipHigh, in: Capsule())
-                }
-            }.padding(.horizontal, EffectsViewLayout.badgeGap)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(on ? AureaColors.accentDim : .clear, in: RoundedRectangle(cornerRadius: AureaDims.radiusSm))
-                .padding(.vertical, EffectsViewLayout.tabPillInset)
-                // O alvo é a faixa inteira (44); a pílula desenhada fica no meio.
-                .frame(maxWidth: .infinity).frame(height: AureaDims.panelHeader).contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityAddTraits(on ? .isSelected : [])
-            .accessibilityIdentifier(id)
+    /// O CABEÇALHO DO CATÁLOGO (`AddEffectHeader`): `‹ Adicionar efeito`. O título
+    /// da seção ("Efeitos") mora na barra de cima; o ‹ daqui volta para a pilha.
+    private var addHeader: some View {
+        HStack(spacing: 0) {
+            Button { tab = .applied } label: {
+                MaterialGlyph("rounded.ChevronLeft", size: AureaDims.iconLg)
+                    .frame(width: 48, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityLabel(AureaText.t("fx_back_to_effects"))
+            .accessibilityIdentifier("effects.tab.add")
+            Text(AureaText.t("panel_adicionar_efeito"))
+                .font(.aurea(size: 15, weight: .semibold))
+                .foregroundStyle(AureaColors.text)
+                .lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+        }.frame(height: 44)
     }
     private func listMenu() {
         var actions: [(String, () -> Void)] = [(AureaText.t("panel_adicionar_efeito"), { showAdd() })]
@@ -600,6 +622,12 @@ struct EffectsView: View {
             }
             actions.append((AureaText.t(effect.enabled ? "panel_desligar_efeito" : "panel_ligar_efeito"), { enable(effect, !effect.enabled) }))
             actions.append((AureaText.t("panel_redefinir_efeito"), { reset(effect) }))
+            // A expressão do parâmetro escolhido deste efeito (o "=" saiu do trilho).
+            if let chosen = selected, chosen.effect == effect.effectId, openId == effect.effectId,
+               let param = currentParam(chosen.param), param.flags & 1 != 0, fxComponentCount(Int(param.type)) > 0 {
+                let label = display(param, effectId: effect.effectId).label
+                actions.append((AureaText.t("fx_param_expression", label), { openExpression() }))
+            }
             if let entry = model.effectCatalog.first(where: { $0.typeId == effect.typeId }) {
                 actions.append((AureaText.t("effects_about"), { about = entry }))
             }
@@ -652,11 +680,11 @@ struct EffectsView: View {
             if model.selectedLayer?.adjustment == true { adjustmentIntensity.padding(.bottom, 8) }
             Button { showAdd() } label: {
                 HStack(spacing: 8) {
-                    CupertinoGlyph.text(CupertinoGlyph.Plus, size: 17, color: AureaColors.accent)
+                    CupertinoGlyph.text(CupertinoGlyph.Plus, size: 16, color: AureaColors.accent)
                         .accessibilityHidden(true)
-                    Text(AureaText.t("panel_adicionar_efeito")).font(.aurea(size: 16, weight: .semibold)).foregroundStyle(AureaColors.accent)
-                }.frame(maxWidth: .infinity).frame(height: 52)
-                    .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 12))
+                    Text(AureaText.t("panel_adicionar_efeito")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                }.frame(maxWidth: .infinity).frame(height: 48)
+                    .background(ParamRowColors.card, in: RoundedRectangle(cornerRadius: 10))
             }.buttonStyle(AureaPressStyle(shrink: 1))
                 .accessibilityLabel(AureaText.t("panel_adicionar_efeito"))
                 .accessibilityIdentifier("aurea.effects.add")
@@ -677,7 +705,7 @@ struct EffectsView: View {
                                 model.numericKeypad = KeypadRequest(title: AureaText.t("panel_opacidade"), value: value, unit: "%", min: 0, max: 100, decimals: 0, onValue: { setOpacity($0) })
                             })
         }.padding(.init(top: 8, leading: 8, bottom: 4, trailing: 8))
-            .background(AureaColors.chip.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+            .background(ParamRowColors.card, in: RoundedRectangle(cornerRadius: 10))
     }
     private var opacityLook: KeyframeLook {
         guard let layer = model.primarySelection else { return .none }
@@ -696,13 +724,6 @@ struct EffectsView: View {
         model.commitPendingCommands(); model.refreshModel(force: true)
     }
 }
-private enum EffectsViewLayout {
-    static let railCell: CGFloat = 56
-    static let headerGlyph: CGFloat = 22
-    static let tabInset: CGFloat = 3
-    static let tabPillInset: CGFloat = 7
-    static let badgeGap: CGFloat = 6
-}
 private struct EffectParamSelection: Identifiable, Equatable {
     let effect: UInt32
     let param: UInt32
@@ -713,7 +734,9 @@ private struct EffectCardFrames: PreferenceKey {
     static var defaultValue: [UInt32: CGRect] = [:]
     static func reduce(value: inout [UInt32: CGRect], nextValue: () -> [UInt32: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { _, next in next }) }
 }
-// PropertyControls.kt: 94×32 label, 8 gap, ruler, 8 gap, 68×24 value.
+// PropertyControls.kt `PropertyRow` (redesenho 2026-09-29): 40 de altura =
+// [rótulo 70×36] 6 [régua 36, centro aceso] 6 [valor 62×36]. O arrasto é o
+// `valueDrag` (acumula desde o início, faixa estendida, controle fino lento).
 private struct EffectNumberRow: View {
     let label: String
     let value: Float
@@ -733,36 +756,24 @@ private struct EffectNumberRow: View {
     let onKeypad: () -> Void
     @State private var dragging = false
     @State private var live: Float = 0
-    @State private var origin: Float = 0
-    @State private var vertical = false
-    @GestureState private var touching = false
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: ParamRowDims.gap) {
             EffectPropertyLabel(label: label, selected: selected, look: look, expression: expression, onSelect: onSelect, onMenu: onMenu)
-            TickRuler(value: { dragging ? live : value }, unitsPerDp: unitsPerPoint, active: selected)
+            // Valor já fora da régua (digitado além do slider): o `valueDrag`
+            // estende a faixa do gesto até ele — o toque não o puxa de volta.
+            TickRuler(value: { dragging ? live : value }, unitsPerDp: unitsPerPoint, active: true,
+                      height: ParamRowDims.labelH, verticalPadding: 2)
                 .frame(maxWidth: .infinity).contentShape(Rectangle())
-                .simultaneousGesture(DragGesture(minimumDistance: 8)
-                    .updating($touching) { _, active, _ in active = true }
-                    .onChanged { gesture in
-                    if !dragging && !vertical {
-                        if abs(gesture.translation.height) > abs(gesture.translation.width) { vertical = true; return }
-                        origin = value; live = value; dragging = true; onSelect(); onBegin()
-                    }
-                    guard dragging else { return }
-                    // Valor já fora da régua (digitado além do slider): a faixa do
-                    // gesto vai até ele — o toque não o puxa de volta, sem salto.
-                    let low: Float = origin.isFinite ? Swift.min(minimum, origin) : minimum
-                    let high: Float = origin.isFinite ? Swift.max(maximum, origin) : maximum
-                    let next = min(high, max(low, origin + Float(gesture.translation.width) * unitsPerPoint))
-                    if next.isFinite { live = next; onValue(next) }
-                }.onEnded { _ in finish() })
-            ValueBox(comUnidade(numeroPtBr(dragging ? live : value, casas: decimals), suffix), width: 68, onTap: onKeypad)
-        }.frame(height: 48)
-            .onChange(of: touching) { active in if !active { finish() } }
-            .onDisappear { finish() }
+                .valueDrag(enabled: true, start: { value }, unitsPerDp: { unitsPerPoint }, min: minimum, max: maximum,
+                           onStart: { live = value; dragging = true; onSelect(); onBegin() },
+                           onValue: { next in live = next; onValue(next) },
+                           onEnd: { dragging = false; onEnd() })
+            ParamValueBox(comUnidade(numeroPtBr(dragging ? live : value, casas: decimals), suffix), onTap: onKeypad)
+        }.frame(height: ParamRowDims.row)
     }
-    private func finish() { if dragging { dragging = false; onEnd() }; vertical = false }
 }
+/// O rótulo das linhas de Efeitos: o MESMO desenho do `PropertyLabelChip`
+/// (`ParamRowLabel`); tocar escolhe a linha, segurar abre o menu do parâmetro.
 private struct EffectPropertyLabel: View {
     let label: String
     let selected: Bool
@@ -771,21 +782,7 @@ private struct EffectPropertyLabel: View {
     let onSelect: () -> Void
     let onMenu: () -> Void
     var body: some View {
-        Text(label).font(.aurea(size: 12, weight: .semibold)).lineLimit(2).multilineTextAlignment(.center)
-            .foregroundStyle(selected ? AureaColors.accent : AureaColors.muted).underline(selected)
-            .padding(.horizontal, 6).frame(width: 94, height: 32)
-            .background(selected ? AureaColors.chip : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(alignment: .topLeading) {
-                if look != .none {
-                    Canvas { context, size in
-                        var path = Path(); path.move(to: CGPoint(x: size.width / 2, y: 0)); path.addLine(to: CGPoint(x: size.width, y: size.height / 2))
-                        path.addLine(to: CGPoint(x: size.width / 2, y: size.height)); path.addLine(to: CGPoint(x: 0, y: size.height / 2)); path.closeSubpath()
-                        if look == .keyHere { context.fill(path, with: .color(AureaColors.keyframe)) }
-                        else { context.stroke(path, with: .color(AureaColors.keyframe), lineWidth: 1) }
-                    }.frame(width: 7, height: 7).offset(x: 3, y: 3)
-                }
-            }
-            .overlay(alignment: .topTrailing) { if expression != .none { ExpressionBadge(look: expression).offset(x: 4) } }
+        ParamRowLabel(label: label, selected: selected, keyframe: look, expression: expression)
             .contentShape(Rectangle()).onTapGesture(perform: onSelect).onLongPressGesture(minimumDuration: 0.5, perform: onMenu)
     }
 }

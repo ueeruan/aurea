@@ -26,9 +26,14 @@ internal data class EditorMetrics(
 internal enum class SheetContent { None, Hint, Dock, Panel, Curve, Batch, Adding, AddBar }
 
 internal object EditorLayout {
-    const val TOP_BAR = 44f
-    const val TRANSPORT = 46f
-    const val STRIP = 8f
+    // Redesenho 2026-09-29 (mockup `docs/design/redesenho-2026-09-29/Editor.dc.html`):
+    // topo 64, transporte 60, sem a faixa entre prévia e transporte (a divisa
+    // arrastável mora no fundo do transporte).
+    const val TOP_BAR = 64f
+    const val TRANSPORT = 60f
+    const val STRIP = 0f
+    /** Prévia natural: 360 de 844 no mockup (fração da altura útil). */
+    const val PREVIEW_NATURAL_FRACTION = 0.45f
     const val TIMELINE_MIN = 110f
     const val PREVIEW_MIN = 96f
     private const val PREVIEW_FRACTION_MAX = 0.50f   // EditorSession.alturaDoPreview
@@ -38,8 +43,8 @@ internal object EditorLayout {
     /** Lote: 4 + tempo 52 + 8 + tela 48 + 8 + escalonar 48 + respiro (124 cortava o escalonar). */
     private const val BATCH_BODY = 180f
     private const val HINT_BODY = 30f
-    /** A barra fixa de adicionar (sem camada escolhida): ícone 23 + nome 11. */
-    const val ADD_BAR = 64f
+    /** A barra fixa de adicionar (sem camada escolhida): 6 + categorias de 64 (ícone 23 + nome 11). */
+    const val ADD_BAR = 70f
     /** Doca da camada, compacta: fileira rápida de ícones e fichas baixas. */
     const val DOCK_QUICK = 44f
     const val DOCK_TILE = 64f
@@ -74,7 +79,7 @@ internal object EditorLayout {
         }
         val ws = workspace(totalHeight)
         // Stable preview height while floating add controls open and close.
-        val natural = totalHeight * 0.54f - 32f
+        val natural = totalHeight * PREVIEW_NATURAL_FRACTION
         val fitted = if (width > 0f && aspect > 0f && aspect.isFinite()) min(natural, width / aspect + PREVIEW_FIT_MARGIN) else natural
         var preview = (if (preferred > 0f && preferred.isFinite()) preferred else fitted)
             .coerceIn(PREVIEW_MIN, maxPreview(totalHeight))

@@ -55,13 +55,15 @@ import com.aurea.aurea.ui.theme.tocavel
  * recompõe — a fase de desenho lê o tempo (spec §9.1).
  *
  * @param compact modo compacto da A.01 (painel aberto): uma linha, setas
- *   ‹ › trocam de camada, cabeçote vermelho.
+ *   tampa "‹" volta, setas ‹ › trocam de camada, cabeçote em destaque.
  * @param compactDock camada escolhida com a doca aberta: a mesma fileira
  *   única, mas só enquanto não há trilhas de propriedade abertas nem escolha
  *   de keyframes ([timelineCompact]); o ícone do tipo abre as trilhas.
  * @param onEmptyTap toque no vazio (a casca fecha o painel ou desseleciona).
  * @param onKeyframeTap toque num losango: a timeline já chamou
  *   `store.selectKeyframe`; a casca decide se abre o editor de curva.
+ * @param timecodeStyle relógio sublinhado (editor principal) ou em caixa com
+ *   borda (camada escolhida / efeitos) — a mesma timeline serve aos dois.
  */
 @Composable
 fun Timeline(
@@ -72,6 +74,7 @@ fun Timeline(
     compactDock: Boolean = false,
     onTrackTap: (layer: Long, property: Int, effect: Int) -> Unit = { _, _, _ -> },
     onKeyframeTap: (layer: Long, key: KeyframeRow) -> Unit = { _, _ -> },
+    timecodeStyle: TimecodeStyle = TimecodeStyle.Underline,
 ) {
     val density = LocalDensity.current
     val metrics = remember(density.density, density.fontScale) { TimelineMetrics(density.density, density.fontScale) }
@@ -83,7 +86,10 @@ fun Timeline(
     val painter = remember(metrics, measurer) { TimelinePainter(metrics, measurer) }
     // Trilhas abertas de uma camada que ainda existe (só o booleano recompõe).
     val tracksOpen by remember(controller) {
-        derivedStateOf { controller.expandedLayer.value?.let { id -> store.layers.any { it.id == id } } == true }
+        derivedStateOf {
+            val open = controller.expandedLayers.value
+            open.isNotEmpty() && store.layers.any { it.id in open }
+        }
     }
     // Escolhendo keyframes ou várias camadas, a timeline fica inteira.
     val shownCompact = timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode || store.layerSelectMode)
@@ -97,6 +103,7 @@ fun Timeline(
         controller.haptics = haptics
         state.compact = shownCompact
         state.compactByDock = shownCompact && !compact
+        state.timecodeBox = timecodeStyle == TimecodeStyle.Box
     }
     // Saiu da tela no meio de um gesto: scrub e passo de desfazer fecham em par.
     DisposableEffect(controller) { onDispose { controller.dispose() } }
@@ -112,7 +119,7 @@ fun Timeline(
         Box(
             Modifier
                 .fillMaxSize()
-                .background(AureaColors.Stage)
+                .background(AureaColors.EditorCanvas)
                 .onSizeChanged {
                     state.width = it.width
                     state.height = it.height
@@ -125,6 +132,14 @@ fun Timeline(
         KeyActionBar(store, shownCompact, Modifier.align(if (shownCompact) Alignment.TopEnd else Alignment.BottomCenter))
         LayerPickBar(store, Modifier.align(Alignment.BottomCenter))
     }
+}
+
+/** Como o relógio da timeline se desenha (mockup 2026-09-29). */
+enum class TimecodeStyle {
+    /** Editor principal: dígitos 16 sp com sublinhado branco de 2 dp. */
+    Underline,
+    /** Camada escolhida / efeitos: dígitos dentro de uma caixa com borda em destaque. */
+    Box,
 }
 
 /**

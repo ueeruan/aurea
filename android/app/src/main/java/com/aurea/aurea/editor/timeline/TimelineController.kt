@@ -58,14 +58,26 @@ internal class TimelineController(
     var onEmptyTap: () -> Unit = {}
     var onKeyframeTap: (Long, KeyframeRow) -> Unit = { _, _ -> }
     var onTrackTap: (Long, Int, Int) -> Unit = { _, _, _ -> }
-    val expandedLayer = mutableStateOf<Long?>(null)
+    /** Camadas com as trilhas abertas: VÁRIAS de uma vez, cada uma com o seu ▸/▾ na calha. */
+    val expandedLayers = mutableStateOf<Set<Long>>(emptySet())
+    /** Trilhas de grupo (Posição, Escala...) abertas nos eixos. */
+    val openGroups = mutableStateOf<Set<LaneGroupKey>>(emptySet())
     var haptics: HapticFeedback? = null
+
+    /** A fileira tem um trecho com as trilhas abertas? */
+    fun isExpanded(r: RowModel): Boolean {
+        val open = expandedLayers.value
+        if (open.isEmpty()) return false
+        for (s in r.segments) if (s.id in open) return true
+        return false
+    }
 
     /** Linhas derivadas do que o store leu; refeitas só as que mudaram (fase 8D). */
     private val rowCache = RowCache()
     private var expandedBase: List<RowModel>? = null
     private var expandedRevision = -1
-    private var expandedId: Long? = null
+    private var expandedId: Set<Long>? = null
+    private var expandedGroups: Set<LaneGroupKey>? = null
     private var expandedResult: List<RowModel> = emptyList()
     private var sharedInput: List<RowModel>? = null
     private var sharedResult: List<RowModel> = emptyList()
@@ -82,11 +94,14 @@ internal class TimelineController(
             sharedInput = perLayer
             sharedResult = it
         }
-        val id = expandedLayer.value?.takeUnless { state.compact }
+        val ids = expandedLayers.value.takeUnless { state.compact }.orEmpty()
+        val groups = openGroups.value
         val revision = store.curveRevision
-        if (id == null) base else if (expandedBase === base && expandedId == id && expandedRevision == revision) expandedResult else {
-            expandedBase = base; expandedId = id; expandedRevision = revision
-            expandedRows(base, id, store.keyframes, store.timelineEffects(id)).also { expandedResult = it }
+        if (ids.isEmpty()) base
+        else if (expandedBase === base && expandedId == ids && expandedGroups == groups && expandedRevision == revision) expandedResult
+        else {
+            expandedBase = base; expandedId = ids; expandedGroups = groups; expandedRevision = revision
+            expandedRows(base, ids, groups, store.keyframes) { store.timelineEffects(it) }.also { expandedResult = it }
         }
     }
     // Seleção como LongArray ordenado: `Set<Long>.contains` encaixotaria o id a cada linha pintada.
@@ -285,6 +300,7 @@ internal class TimelineController(
         val y = if (r.track == null) p.y - top else m.diamondCyNormal
         hit.lane = r
         hit.rowIndex = i
+        if (r.track != null && !state.compact) return laneHit(hit, list, i, p.x, p.y - m.rowsTop + scroll)
         val segs = r.segments
         if (segs.size == 1) {
             val s = segs[0]
@@ -328,6 +344,34 @@ internal class TimelineController(
         hit.row = best ?: segs[0]
         hit.kind = bestKind
         hit.keyIndex = bestKey
+        return hit
+    }
+
+    /**
+     * Toque numa TRILHA de propriedade (baixa, 16 dp): o losango da trilha sob
+     * o dedo; se ali não há nada, o da trilha vizinha mais perto (folga
+     * vertical — o alvo de cada losango fica com ≥ 32 dp). Na calha, a trilha
+     * de GRUPO devolve HEADER (abre/fecha os eixos); o resto da trilha é BODY.
+     */
+    private fun laneHit(hit: Hit, list: List<RowModel>, index: Int, x: Float, contentY: Float): Hit {
+        val order = LaneTouch.order({ rowAt(list, it)?.track != null }, offsets(), index, contentY, metrics.laneTouchReach)
+        for (j in order) {
+            val s = rowAt(list, j) ?: continue
+            val kind = hitSegment(s, x, metrics.diamondCyNormal)
+            val groupToggle = kind == HitKind.HEADER && s.track?.group == true
+            if (kind == HitKind.KEYFRAME || groupToggle) {
+                hit.kind = kind
+                hit.row = s
+                hit.lane = s
+                hit.rowIndex = j
+                hit.keyIndex = if (kind == HitKind.KEYFRAME) hitOut[0] else -1
+                return hit
+            }
+        }
+        val s = rowAt(list, index)
+        hit.row = s
+        hit.kind = if (s == null) HitKind.NONE else HitKind.BODY
+        hit.keyIndex = -1
         return hit
     }
 
@@ -472,23 +516,37 @@ internal class TimelineController(
                 tick()
                 store.selectNeighbor(-1)
             }
+            // Tampa branca "‹" da fileira compacta: o mesmo que tocar na barra
+            // escolhida — sai da seção (ou da doca), como sempre foi.
+            HitKind.CAP_BACK -> if (r != null) selectTap(r)
             HitKind.KEYFRAME -> if (r != null) {
                 // No modo de escolher camadas o losango do resumo é parte do clipe.
                 if (store.layerSelectMode && r.track == null && !store.keySelectMode) selectTap(r)
                 else keyframeTap(r, hit.keyIndex)
             }
             HitKind.HEADER -> if (r != null) {
-                if (!state.compact) {
+                val track = r.track
+                if (track != null) {
+                    // ▸/▾ da trilha de GRUPO: mostra/esconde as trilhas por eixo.
+                    if (track.group) {
+                        tick()
+                        val key = LaneGroupKey(r.id, track)
+                        val open = openGroups.value
+                        openGroups.value = if (key in open) open - key else open + key
+                    }
+                } else if (!state.compact) {
                     tick()
-                    // Fileira compartilhada: abre as trilhas do trecho escolhido nela
-                    // (senão do primeiro); tocar de novo fecha, seja qual for o aberto.
-                    val open = expandedLayer.value
-                    expandedLayer.value = if (open != null && r.segment(open) != null) null else expandTarget(r).id
+                    // Cada fileira tem o seu ▸/▾: abre/fecha só as trilhas DELA (as
+                    // outras camadas abertas continuam abertas). Fileira
+                    // compartilhada: abre o trecho escolhido nela (senão o primeiro);
+                    // tocar de novo fecha, seja qual for o trecho aberto.
+                    val open = expandedLayers.value
+                    expandedLayers.value = if (isExpanded(r)) open - r.segments.map { it.id }.toSet() else open + expandTarget(r).id
                 } else if (state.compactByDock) {
                     // Fileira compacta da doca: o ícone do tipo ABRE as trilhas da
                     // camada (a timeline volta inteira enquanto estão abertas) em vez de sair.
                     tick()
-                    expandedLayer.value = expandTarget(r).id
+                    expandedLayers.value = expandedLayers.value + expandTarget(r).id
                 } else selectTap(r)
             }
             HitKind.BODY, HitKind.TRIM_START, HitKind.TRIM_END -> if (r != null) {
@@ -568,7 +626,8 @@ internal class TimelineController(
         if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id)
         val key = r.keysAt[index].first()
         store.seek(r.instants[index])
-        store.tapTimelineKey(r.id, key)
+        // Trilha de grupo: todos os eixos daquele instante ficam escolhidos.
+        store.tapTimelineKey(r.id, key, if (r.track?.group == true) r.keysAt[index] else listOf(key))
         onKeyframeTap(r.id, key)
     }
 
@@ -692,6 +751,9 @@ internal class TimelineController(
             r != null && edit && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
             r != null && edit && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
             r != null && edit && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
+            // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha
+            // o retângulo e escolhe os losangos dentro; fora do modo, rola/scrub.
+            boxStarts(hit) -> boxSelect(down)
             horizontal -> scrub(down.id, slopAt, tracker)
             !state.compact -> scroll(down.id, slopAt, tracker)
             else -> compactStep(down.id, slopAt)
@@ -986,6 +1048,48 @@ internal class TimelineController(
         }
     }
 
+    // --- Seleção por retângulo ---------------------------------------------------------------
+    private fun boxStarts(hit: Hit): Boolean =
+        store.keySelectMode && store.keySelection != null && !state.compact &&
+            (hit.kind == HitKind.NONE || (hit.kind == HitKind.BODY && hit.row?.track != null))
+
+    /**
+     * Retângulo de seleção dos losangos (modo "Selecionar", veio do app antigo):
+     * os cantos ficam presos ao CONTEÚDO (tempo e y das fileiras), então a
+     * auto-rolagem nas bordas estende o retângulo. Tudo o que fica dentro SOMA
+     * à seleção que havia no começo do arrasto (vários trilhos e camadas).
+     */
+    private suspend fun AwaitPointerEventScope.boxSelect(down: PointerInputChange) {
+        val base = store.keySelection ?: return consumeUntilUp()
+        pauseIfPlaying()
+        val m = metrics
+        val f0 = frameAt(down.position.x)
+        val y0 = down.position.y - m.rowsTop + clampedScroll(rowCount(rows.value))
+        state.boxFrame0 = f0
+        state.boxY0 = y0
+        state.boxFrame1 = f0
+        state.boxY1 = y0
+        state.boxActive = true
+        try {
+            dragLoop(down.id, down.position, horizontal = true, vertical = true) { p ->
+                val list = rows.value
+                val f1 = frameAt(p.x)
+                val y1 = p.y - m.rowsTop + clampedScroll(rowCount(list))
+                state.boxFrame1 = f1
+                state.boxY1 = y1
+                val picked = BoxSelect.pick(
+                    list, offsets(),
+                    keyCy = { r -> if (r.track != null) rowHeight(r) / 2f else m.diamondCyNormal },
+                    frameLo = f0, frameHi = f1, yLo = y0, yHi = y1,
+                    keysVisible = { s -> KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)) },
+                )
+                store.boxSelectTimelineKeys(base.plusAll(picked))
+            }
+        } finally {
+            state.boxActive = false
+        }
+    }
+
     // --- Reordenar ---------------------------------------------------------------------------
     /**
      * Lift a whole row, preview the gap, then commit the engine order. Numa
@@ -1069,10 +1173,12 @@ internal class TimelineController(
         id: PointerId,
         origin: Offset,
         horizontal: Boolean,
+        vertical: Boolean = !horizontal,
         apply: (Offset) -> Unit,
     ): Boolean {
         autoApply = apply
         autoHorizontal = horizontal
+        autoVertical = vertical
         autoOrigin = origin
         while (true) {
             val ev = awaitPointerEvent()
@@ -1092,38 +1198,45 @@ internal class TimelineController(
     }
 
     // =========================================================================
-    // Auto-rolagem (borda 38 dp, 120 dp/s constante, intenção 4 dp)
+    // Auto-rolagem em RAMPA (faixa min(48 dp, 1/3 da janela), até 360 dp/s,
+    // dt ≤ 0,05 s por quadro, intenção 4 dp)
     // =========================================================================
     private var autoJob: Job? = null
-    private var autoDirX = 0
-    private var autoDirY = 0
+    /** Fatores com sinal em [−1, 1] (quanto o dedo entrou na faixa da borda). */
+    private var autoDirX = 0f
+    private var autoDirY = 0f
     private var autoApply: ((Offset) -> Unit)? = null
     private var autoHorizontal = true
+    private var autoVertical = false
     private var autoOrigin = Offset.Zero
     private var lastPointer = Offset.Zero
 
     private fun updateAutoScroll(p: Offset) {
         val m = metrics
         autoDirX = if (autoHorizontal) {
-            AutoScroll.direction(p.x, autoOrigin.x, m.headerColumn + m.autoEdge, state.width - m.autoEdge, m.autoIntent)
+            val start = m.headerColumn
+            val end = state.width.toFloat()
+            AutoScroll.speed(p.x, autoOrigin.x, start, end, AutoScroll.zone(m.autoEdge, end - start), m.autoIntent)
         } else {
-            0
+            0f
         }
-        autoDirY = if (!autoHorizontal && !state.compact) {
-            AutoScroll.direction(p.y, autoOrigin.y, m.rowsTop + m.autoEdge, state.height - m.autoEdge, m.autoIntent)
+        autoDirY = if (autoVertical && !state.compact) {
+            val start = m.rowsTop
+            val end = state.height.toFloat()
+            AutoScroll.speed(p.y, autoOrigin.y, start, end, AutoScroll.zone(m.autoEdge, end - start), m.autoIntent)
         } else {
-            0
+            0f
         }
-        if ((autoDirX != 0 || autoDirY != 0) && autoJob == null) {
+        if ((autoDirX != 0f || autoDirY != 0f) && autoJob == null) {
             autoJob = scope.launch {
                 var last = withFrameNanos { it }
-                while (autoDirX != 0 || autoDirY != 0) {
+                while (autoDirX != 0f || autoDirY != 0f) {
                     val now = withFrameNanos { it }
-                    val step = metrics.autoSpeed * ((now - last) / 1e9f).coerceAtMost(MAX_FRAME_S)
+                    val dt = (now - last) / 1e9f
                     last = now
                     // A auto-rolagem horizontal anda no tempo pelo scrub (o cabeçote segue a vista).
-                    if (autoDirX != 0) holdView(view() + autoDirX * step / pxPerFrame())
-                    if (autoDirY != 0) state.scrollY = clampScroll(clampedScroll(rowCount(rows.value)) + autoDirY * step)
+                    if (autoDirX != 0f) holdView(view() + AutoScroll.step(autoDirX, metrics.autoSpeed, dt) / pxPerFrame())
+                    if (autoDirY != 0f) state.scrollY = clampScroll(clampedScroll(rowCount(rows.value)) + AutoScroll.step(autoDirY, metrics.autoSpeed, dt))
                     autoApply?.invoke(lastPointer)
                 }
                 // Saiu da borda: a próxima entrada nela liga um laço novo.
@@ -1133,8 +1246,8 @@ internal class TimelineController(
     }
 
     private fun stopAutoScroll() {
-        autoDirX = 0
-        autoDirY = 0
+        autoDirX = 0f
+        autoDirY = 0f
         autoJob?.cancel()
         autoJob = null
         autoApply = null
@@ -1289,7 +1402,6 @@ internal class TimelineController(
         const val NO_ID = Long.MIN_VALUE
         /** Toque longo de 500 ms (a spec fixa; o padrão do Android é 400). */
         const val LONG_PRESS_MS = 500L
-        private const val MAX_FRAME_S = 0.05f
         private const val AUTO_FIT_MARGIN_DP = 32f
     }
 }

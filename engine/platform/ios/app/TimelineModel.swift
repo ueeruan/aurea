@@ -28,13 +28,21 @@ struct TimelineMetrics {
 
     private func dp(_ v: CGFloat) -> CGFloat { v * density }
 
-    // --- Régua e linhas -------------------------------------------------------
-    var rulerTicks: CGFloat { dp(20) }
-    /// Topo da 1ª linha: 20 de riscos + 18 de respiro (o relógio mora no respiro).
-    var rowsTop: CGFloat { dp(20 + 18) }
-    var row: CGFloat { dp(36) }
-    var bar: CGFloat { dp(30) }
-    var barRadius: CGFloat { dp(8) }
+    // --- Régua e linhas (redesenho 2026-09-29) -----------------------------------
+    /// Faixa da régua (0..30); o relógio mora na faixa de baixo (30..60).
+    var rulerTicks: CGFloat { dp(AureaTimeline.rulerTicks) }
+    /// Topo da 1ª linha: régua 30 + relógio 30 + 4 de respiro (a pílula começa em 68).
+    var rowsTop: CGFloat { dp(AureaTimeline.rulerTicks + AureaTimeline.rulerGap) }
+    /// Passo da fileira: pílula 28 + 4 de vão.
+    var row: CGFloat { dp(AureaTimeline.row) }
+    /// Topo da pílula dentro da fileira (o vão de 4 fica em cima).
+    var pillTop: CGFloat { dp(4) }
+    var pillHeight: CGFloat { dp(28) }
+    var pillRadius: CGFloat { dp(14) }
+    /// Topo da barra dentro da fileira: 2 abaixo do topo da pílula.
+    var barTop: CGFloat { pillTop + dp(2) }
+    var bar: CGFloat { dp(AureaTimeline.bar) }
+    var barRadius: CGFloat { dp(AureaTimeline.barRadius) }
     var barMinWidth: CGFloat { dp(40) }
     var track: CGFloat { dp(11) }
     /// Começo da faixa dos losangos (medido do topo da barra).
@@ -42,35 +50,42 @@ struct TimelineMetrics {
     /// Folga abaixo das linhas (a última não cola na borda).
     var bottomPad: CGFloat { dp(24) }
 
-    // --- Calha da fileira (glifo do tipo + olho pequeno) -----------------------
-    /// Largura da calha; as barras passam por baixo dela.
+    // --- Pílula da fileira (olho + quadradinho do glifo, colada à esquerda) -------
+    /// Largura da pílula; as barras passam por BAIXO dela (ela é opaca).
     var headerColumn: CGFloat { dp(AureaTimeline.headerColumn) }
-    let gutterIcon: CGFloat = AureaTimeline.gutterIconSize
-    var gutterIconCx: CGFloat { dp(17) }
-    /// Centro do glifo do tipo, medido do topo da linha (um pouco acima do meio da barra).
-    var gutterIconCy: CGFloat { dp(13) }
-    let gutterEye: CGFloat = AureaTimeline.gutterEyeSize
-    /// O olho mora no canto de baixo, à direita do glifo.
-    var gutterEyeCx: CGFloat { dp(31) }
-    var gutterEyeCy: CGFloat { dp(25) }
+    /// Olho de 16 centrado em x 16; x < 28 é o toque do olho.
+    let eyeIcon: CGFloat = 16
+    var eyeCx: CGFloat { dp(16) }
+    var eyeHitRight: CGFloat { dp(28) }
+    /// Quadradinho do glifo: 22 × 22, de x 32 a 54, raio 3.
+    var glyphBoxLeft: CGFloat { dp(32) }
+    var glyphBox: CGFloat { dp(22) }
+    var glyphBoxRadius: CGFloat { dp(3) }
+    var glyphBoxStroke: CGFloat { dp(1.5) }
+    let glyphText: CGFloat = 11
+    let glyphIcon: CGFloat = 12
+    var shapeDot: CGFloat { dp(10) }
+    /// Cadeado pequeno depois do quadradinho.
     let gutterLock: CGFloat = 10
-    var gutterLockCy: CGFloat { dp(6) }
-    /// Toque do olho: o quadrante de baixo à direita da calha; o resto é do glifo do tipo.
-    var eyeHitLeft: CGFloat { dp(24) }
-    var eyeHitTop: CGFloat { dp(16) }
+    var lockCx: CGFloat { dp(66) }
+    /// Trilhas de propriedade: ▸/▾ numa coluna de 28 e o nome a partir de x 30.
+    var laneChevronCx: CGFloat { dp(16) }
+    var laneHeader: CGFloat { dp(28) }
+    var laneLabelX: CGFloat { dp(30) }
 
     // --- Régua ------------------------------------------------------------------
-    var tickMajorTop: CGFloat { dp(2) }
-    var tickMinorTop: CGFloat { dp(9) }
-    var tickBottom: CGFloat { dp(18) }
-    var tickMajorWidth: CGFloat { dp(1.4) }
+    /// Riscos de 1 pt com a base em y 22: fortes de 14, finos de 8.
+    var tickMajorTop: CGFloat { dp(8) }
+    var tickMinorTop: CGFloat { dp(14) }
+    var tickBottom: CGFloat { dp(22) }
+    var tickMajorWidth: CGFloat { dp(1) }
     var tickMinorWidth: CGFloat { dp(1) }
     var tickLabelGap: CGFloat { dp(3) }
 
     // --- Conteúdo da barra --------------------------------------------------------
     var stripe: CGFloat { dp(AureaTimeline.clipStripe) }
-    var padL: CGFloat { dp(10) }
-    var padR: CGFloat { dp(10) }
+    var padL: CGFloat { dp(8) }
+    var padR: CGFloat { dp(8) }
     var padLNarrow: CGFloat { dp(6) }
     var padRNarrow: CGFloat { dp(3) }
     var narrowBar: CGFloat { dp(46) }
@@ -87,15 +102,23 @@ struct TimelineMetrics {
     var nameMinBar: CGFloat { dp(52) }
     var lockGapMinBar: CGFloat { dp(70) }
     var rhombusMinBar: CGFloat { dp(120) }
-    var menuMinBar: CGFloat { dp(150) }
+    var menuMinBar: CGFloat { dp(90) }
     var selStroke: CGFloat { dp(AureaTimeline.clipSelStroke) }
     var multiStroke: CGFloat { dp(AureaTimeline.clipSelStroke) }
     var lightLine: CGFloat { dp(1) }
     /// Toque do corpo vai um pouco abaixo da barra (os 10 dp que sobram na linha são do vazio).
     var bodyHitBottom: CGFloat { bar + dp(4) }
     var arrowTouchPad: CGFloat { dp(6) }
+    /// Fileira compacta, clipe escolhido (Efeitos.dc.html; par do TimelineMetrics.kt):
+    /// tampa branca "‹" de 34 na ponta esquerda visível (tocar = voltar), contorno
+    /// branco de 1,5 e a ponta esquerda arredondada (raio 14, preso à meia barra).
+    var capWidth: CGFloat { dp(34) }
+    var capStroke: CGFloat { dp(1.5) }
+    var capRadius: CGFloat { min(dp(14), bar / 2) }
+    let capGlyph: CGFloat = 14
+    var capNameGap: CGFloat { dp(10) }
 
-    // --- Alça de trim (A.01: 16 × (36 − 4), top 2, DENTRO das pontas) --------------
+    // --- Alça de trim (16 × (barra − 4), top 2, DENTRO das pontas) ------------------
     var trimWidth: CGFloat { dp(16) }
     var trimTop: CGFloat { dp(2) }
     var trimInsetStart: CGFloat { dp(3) }
@@ -110,9 +133,9 @@ struct TimelineMetrics {
     var diamond: CGFloat { dp(11) }
     var diamondRadius: CGFloat { dp(2) }
     var diamondStroke: CGFloat { dp(1.2) }
-    /// Centro do losango: A.01 `top 20, altura 17` (normal) e `top 23, altura 16` (compacto).
-    var diamondCyNormal: CGFloat { dp(28.5) }
-    var diamondCyCompact: CGFloat { dp(31) }
+    /// Centro do losango: 22 abaixo do topo da barra (pode passar um pouco da base dela).
+    var diamondCyNormal: CGFloat { dp(22) }
+    var diamondCyCompact: CGFloat { dp(22) }
     var keyTouchHalf: CGFloat { dp(14) }
     var keyGlyphHalf: CGFloat { dp(7) }
     var keyTouchTop: CGFloat { trackTop - dp(2) }
@@ -126,21 +149,39 @@ struct TimelineMetrics {
     var balloonGap: CGFloat { dp(3) }
 
     // --- Cabeçote e relógio ----------------------------------------------------------
-    var playhead: CGFloat { dp(1.6) }
+    /// Cabeçote branco de 2 pt, de y 64 (logo abaixo do relógio) até o fim.
+    var playhead: CGFloat { dp(AureaTimeline.playhead) }
+    var playheadTop: CGFloat { dp(64) }
+    /// Compacto (painel aberto): o cabeçote vermelho de antes, de cima a baixo.
+    var compactPlayhead: CGFloat { dp(1.6) }
     var knob: CGFloat { dp(8) }
     var knobRadius: CGFloat { dp(2) }
-    var timecodeBaseline: CGFloat { dp(21) }
-    var underlineTop: CGFloat { dp(28.2) }
-    var underlineWidth: CGFloat { dp(58) }
-    var underlineHeight: CGFloat { dp(1.5) }
-    /// Rótulo da régua perto do relógio some (não disputa leitura com ele).
-    var timecodeZoneHalf: CGFloat { dp(36) }
+    /// Triângulo do cabeçote no alto da régua (camada escolhida): 10 × 8, no destaque.
+    var markerWidth: CGFloat { dp(10) }
+    var markerHeight: CGFloat { dp(8) }
+    /// Faixa do relógio (MM:SS:FF), centrado no cabeçote.
+    var timecodeTop: CGFloat { dp(30) }
+    var timecodeBottom: CGFloat { dp(60) }
+    /// Estilo sublinhado: 16 pt, traço de 2 da largura do texto em y 52..54.
+    let timecodeFont: CGFloat = 16
+    var underlineTop: CGFloat { dp(52) }
+    var underlineHeight: CGFloat { dp(2) }
+    /// Estilo caixa: 26 de alto, borda de 1,5 no destaque, raio 4, 6 de lado, 15 pt.
+    let timecodeBoxFont: CGFloat = 15
+    var timecodeBoxHeight: CGFloat { dp(26) }
+    var timecodeBoxStroke: CGFloat { dp(1.5) }
+    var timecodeBoxRadius: CGFloat { dp(4) }
+    var timecodeBoxPad: CGFloat { dp(6) }
 
     // --- Gestos -------------------------------------------------------------------------
     var snapClip: CGFloat { dp(12) }
     var snapKey: CGFloat { dp(8) }
-    var autoEdge: CGFloat { dp(38) }
-    var autoSpeed: CGFloat { dp(120) }
+    /// Faixa da auto-rolagem: 48 pt no máximo (menos numa janela baixa, ver `AutoScroll.zone`).
+    var autoEdge: CGFloat { dp(48) }
+    /// Velocidade no fundo da faixa (pt/s); a rampa começa em 0 na entrada dela.
+    var autoSpeed: CGFloat { dp(360) }
+    /// Trilha baixa: a vizinha também responde até este tanto do centro dela (alvo ≥ 32 pt).
+    var laneTouchReach: CGFloat { dp(16) }
     var autoIntent: CGFloat { dp(4) }
     /// O `touchSlop` do Android e o eixo do toque longo (A.01) valem 8 dp.
     var axisSlop: CGFloat { dp(8) }
@@ -443,15 +484,16 @@ enum TimelineRowOrder {
     }
 
     private var expandedRevision: UInt32 = .max
-    private var expandedID: Int64?
-    private var expandedEffects: [EffectItem] = []
+    private var expandedIDs: Set<Int64> = []
+    private var expandedGroups: Set<TimelineLaneGroupKey> = []
     private var expandedResult: [TimelineRow] = []
 
-    func expanded(_ base: [TimelineRow], id: Int64?, revision: UInt32, keys: [Int64: [KeyframeItem]], effects: () -> [EffectItem]) -> [TimelineRow] {
-        guard id != nil else { return base }
-        if expandedID == id && expandedRevision == revision { return expandedResult }
-        expandedID = id; expandedRevision = revision; expandedEffects = effects()
-        expandedResult = expandedTimelineRows(base, expanded: id, keys: keys, effects: expandedEffects)
+    /// Trilhas abertas de VÁRIAS camadas (cada uma com o seu ▸/▾) e os grupos de eixos abertos.
+    func expanded(_ base: [TimelineRow], ids: Set<Int64>, groups: Set<TimelineLaneGroupKey>, revision: UInt32, keys: [Int64: [KeyframeItem]], effects: (Int64) -> [EffectItem]) -> [TimelineRow] {
+        guard !ids.isEmpty else { return base }
+        if expandedIDs == ids && expandedGroups == groups && expandedRevision == revision { return expandedResult }
+        expandedIDs = ids; expandedGroups = groups; expandedRevision = revision
+        expandedResult = expandedTimelineRows(base, expanded: ids, openGroups: groups, keys: keys, effects: effects)
         return expandedResult
     }
 
@@ -655,57 +697,165 @@ enum TimelineRowOrder {
     }
 }
 
+/// Uma trilha real do motor, uma seção (property −1) sem keyframes sintéticos,
+/// ou — com `group` — a TRILHA DE GRUPO de uma propriedade de vários eixos
+/// (Posição X/Y/Z, Escala, Rotação, Âncora...): property/param são os do 1º eixo
+/// e a trilha junta os keyframes de todos. Só vista e gesto (par do Android).
 struct TimelineTrack: Hashable {
     let property: Int
     var effect: UInt32 = .max
     var param: UInt32 = 0
+    var group: Bool = false
 }
+
+/// O grupo de eixos de uma trilha (a trilha-base, com `group`), ou nil quando a
+/// propriedade é de um componente só (par do `trackGroup` do Android).
+func timelineTrackGroup(_ t: TimelineTrack) -> TimelineTrack? {
+    if t.group { return t }
+    if (0...11).contains(t.property) { return TimelineTrack(property: t.property / 3 * 3, effect: t.effect, param: t.param, group: true) }
+    if t.property == 13 || t.property == 14 { return TimelineTrack(property: 13, effect: t.effect, param: t.param, group: true) }
+    if t.property == 42 && t.param <= 8 { return TimelineTrack(property: 42, effect: t.effect, param: t.param / 3 * 3, group: true) }
+    return nil
+}
+
+/// Um grupo de eixos aberto (▾) numa camada.
+struct TimelineLaneGroupKey: Hashable {
+    let layer: Int64
+    let track: TimelineTrack
+}
+
+private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) -> String {
+    if track.group {
+        switch track.property {
+        case 0: return "Position"
+        case 3: return "Scale"
+        case 6: return "Rotation"
+        case 9: return "Anchor"
+        case 13: return "Skew"
+        case 42:
+            let parts = ["Position", "Rotation", "Scale"]
+            let i = Int(track.param / 3)
+            return "Part \(UInt64(track.effect) &+ 1) · \(i < parts.count ? parts[i] : String(track.param))"
+        default: return "3D · \(track.property)"
+        }
+    }
+    let names = ["Position X", "Position Y", "Position Z", "Scale X", "Scale Y", "Scale Z", "Rotation X", "Rotation Y", "Rotation Z", "Anchor X", "Anchor Y", "Anchor Z", "Opacity", "Skew X", "Skew Y"]
+    if names.indices.contains(track.property) { return names[track.property] }
+    switch track.property {
+    case 30: return "Time remap"
+    case 39: return "Speed"
+    case 40: return "Animator \(UInt64(track.effect) &+ 1) · \(UInt64(track.param) + 1)"
+    case 31: return (effects.first { $0.effectId == track.effect }?.name ?? "Effect") + " · \(UInt64(track.param) + 1)"
+    case 32: return "Audio · \(UInt64(track.param) + 1)"
+    case 33: return "Text animation \(UInt64(track.effect) &+ 1) · \(UInt64(track.param) + 1)"
+    case 34: return "Vector · \(UInt64(track.param) + 1)"
+    case 35: return "Shape · \(UInt64(track.param) + 1)"
+    case 36: return "Particles · \(UInt64(track.param) + 1)"
+    case 37:
+        let labels = ["R", "G", "B", "Alpha", "Metallic", "Roughness"]
+        return "Material \(UInt64(track.effect) &+ 1) · \(Int(track.param) < labels.count ? labels[Int(track.param)] : String(track.param))"
+    case 42:
+        let axes = ["Position X", "Position Y", "Position Z", "Rotation X", "Rotation Y", "Rotation Z", "Scale X", "Scale Y", "Scale Z"]
+        return "Part \(UInt64(track.effect) &+ 1) · \(Int(track.param) < axes.count ? axes[Int(track.param)] : String(track.param))"
+    default: return "3D · \(track.property)"
+    }
+}
+
+/// Compatível com a versão de UMA camada aberta.
 func expandedTimelineRows(_ base: [TimelineRow], expanded: Int64?, keys: [Int64: [KeyframeItem]], effects: [EffectItem]) -> [TimelineRow] {
     guard let expanded else { return base }
+    return expandedTimelineRows(base, expanded: [expanded], openGroups: [], keys: keys, effects: { _ in effects })
+}
+
+/// Trilhas abertas de VÁRIAS camadas (par do `expandedRows` do Android): uma
+/// propriedade de vários eixos com 2+ eixos animados vira UMA trilha de grupo
+/// (um losango por instante, a união dos eixos); o grupo aberto mostra as
+/// trilhas por eixo logo abaixo. Um eixo sozinho continua sendo a trilha dele.
+func expandedTimelineRows(_ base: [TimelineRow], expanded: Set<Int64>, openGroups: Set<TimelineLaneGroupKey>, keys: [Int64: [KeyframeItem]], effects: (Int64) -> [EffectItem]) -> [TimelineRow] {
+    if expanded.isEmpty { return base }
     return base.flatMap { row -> [TimelineRow] in
         // Numa fileira compartilhada, as trilhas abertas são do TRECHO aberto
         // (tempo e keyframes dele) e entram logo abaixo da fileira.
-        guard let owner = row.segment(expanded) else { return [row] }
+        guard let owner = row.segments.first(where: { expanded.contains($0.id) }) else { return [row] }
+        let fx = effects(owner.id)
         var lanes = [row]
         func lane(_ track: TimelineTrack, _ name: String, _ values: [KeyframeItem] = []) {
             let groups = Dictionary(grouping: values, by: { $0.time })
             let times = groups.keys.sorted()
             lanes.append(TimelineRow(id: owner.id, type: owner.type, start: owner.start, end: owner.end, offset: owner.offset,
-                visible: owner.visible, locked: owner.locked, magnetic: owner.magnetic, animated: !values.isEmpty, name: "  " + name, label: owner.label,
+                visible: owner.visible, locked: owner.locked, magnetic: owner.magnetic, animated: !values.isEmpty, name: name, label: owner.label,
                 instants: times.map { Keyframes.toTimeline($0, owner.start, owner.offset) }, keysAt: times.map { groups[$0]! }, track: track))
         }
-        lane(TimelineTrack(property: -1), AureaText.t("panel_transformar"))
-        for effect in effects { lane(TimelineTrack(property: 31, effect: effect.effectId, param: .max), fxEffectDisplayName(effect.typeId, effect.name)) }
+        lane(TimelineTrack(property: -1), "  " + AureaText.t("panel_transformar"))
+        for effect in fx { lane(TimelineTrack(property: 31, effect: effect.effectId, param: .max), "  " + fxEffectDisplayName(effect.typeId, effect.name)) }
         let tracks = Dictionary(grouping: keys[owner.id] ?? [], by: { TimelineTrack(property: Int($0.property), effect: $0.effectIndex, param: $0.paramIndex) })
         let ordered = tracks.keys.sorted {
             if $0.property != $1.property { return $0.property < $1.property }
             if $0.effect != $1.effect { return $0.effect < $1.effect }
             return $0.param < $1.param
         }
-        let names = ["Position X", "Position Y", "Position Z", "Scale X", "Scale Y", "Scale Z", "Rotation X", "Rotation Y", "Rotation Z", "Anchor X", "Anchor Y", "Anchor Z", "Opacity", "Skew X", "Skew Y"]
+        // Os eixos animados de cada grupo (só 2+ vira trilha de grupo).
+        var members: [TimelineTrack: [TimelineTrack]] = [:]
+        for track in ordered { if let g = timelineTrackGroup(track) { members[g, default: []].append(track) } }
+        var emitted = Set<TimelineTrack>()
         for track in ordered {
-            let name: String
-            if names.indices.contains(track.property) { name = names[track.property] }
-            else {
-                switch track.property {
-                case 30: name = "Time remap"
-                case 39: name = "Speed"
-                case 40: name = "Animator \(UInt64(track.effect) + 1) · \(UInt64(track.param) + 1)"
-                case 31: name = (effects.first { $0.effectId == track.effect }?.name ?? "Effect") + " · \(UInt64(track.param) + 1)"
-                case 32: name = "Audio · \(UInt64(track.param) + 1)"
-                case 33: name = "Text animation \(UInt64(track.effect) + 1) · \(UInt64(track.param) + 1)"
-                case 34: name = "Vector · \(UInt64(track.param) + 1)"
-                case 35: name = "Shape · \(UInt64(track.param) + 1)"
-                case 36: name = "Particles · \(UInt64(track.param) + 1)"
-                case 37:
-                    let labels = ["R", "G", "B", "Alpha", "Metallic", "Roughness"]
-                    name = "Material \(UInt64(track.effect) + 1) · \(Int(track.param) < labels.count ? labels[Int(track.param)] : String(track.param))"
-                default: name = "3D · \(track.property)"
-                }
+            guard let group = timelineTrackGroup(track), let axes = members[group], axes.count >= 2 else {
+                lane(track, "  " + timelineTrackName(track, fx), tracks[track] ?? [])
+                continue
             }
-            lane(track, name, tracks[track] ?? [])
+            if !emitted.insert(group).inserted { continue }
+            lane(group, "  " + timelineTrackName(group, fx), axes.flatMap { tracks[$0] ?? [] })
+            if openGroups.contains(TimelineLaneGroupKey(layer: owner.id, track: group)) {
+                for axis in axes { lane(axis, "      " + timelineTrackName(axis, fx), tracks[axis] ?? []) }
+            }
         }
         return lanes
+    }
+}
+
+/// Altura de uma trilha de propriedade: baixa (16 pt), para caberem muitas.
+let timelineLaneHeight: CGFloat = 16
+
+/// Folga vertical de toque das trilhas baixas (par do `LaneTouch` do Android):
+/// a fileira sob o dedo e depois a trilha vizinha cujo centro está a até
+/// `reach` do dedo (a mais perto primeiro) — alvo de cada losango ≥ 32 pt.
+enum TimelineLaneTouch {
+    static func order(isLane: (Int) -> Bool, tops: [CGFloat], index: Int, y: CGFloat, reach: CGFloat) -> [Int] {
+        guard index >= 0, index + 1 < tops.count else { return [index] }
+        var near: [(Int, CGFloat)] = []
+        for j in [index - 1, index + 1] where j >= 0 && j + 1 < tops.count && isLane(j) {
+            let d = abs((tops[j] + tops[j + 1]) / 2 - y)
+            if d <= reach { near.append((j, d)) }
+        }
+        // Estável no empate (a de cima primeiro), como o Android.
+        if near.count == 2 && near[1].1 < near[0].1 { near.swapAt(0, 1) }
+        return [index] + near.map { $0.0 }
+    }
+}
+
+/// Seleção por RETÂNGULO no modo "Selecionar" (par do `BoxSelect` do Android):
+/// os keyframes cujos losangos têm o centro dentro de [frameLo, frameHi] ×
+/// [yLo, yHi] (tempo da timeline e y de conteúdo), por camada.
+enum TimelineBoxSelect {
+    static func pick(rows: [TimelineRow], tops: [CGFloat], keyCy: (TimelineRow) -> CGFloat,
+                     frameLo: Double, frameHi: Double, yLo: CGFloat, yHi: CGFloat,
+                     keysVisible: (TimelineRow) -> Bool) -> [Int64: [KeyframeItem]] {
+        var out: [Int64: [KeyframeItem]] = [:]
+        let lo = (min(frameLo, frameHi) - 1e-9).rounded(.up)
+        let hi = (max(frameLo, frameHi) + 1e-9).rounded(.down)
+        let top = min(yLo, yHi), bottom = max(yLo, yHi)
+        for (i, row) in rows.enumerated() where i < tops.count {
+            let cy = tops[i] + keyCy(row)
+            if cy < top || cy > bottom { continue }
+            for segment in row.segments where keysVisible(segment) {
+                for (k, t) in segment.instants.enumerated() where Double(t) >= lo && Double(t) <= hi {
+                    var list = out[segment.id] ?? []
+                    for key in segment.keysAt[k] where !list.contains(where: { TimelineKeyRef($0) == TimelineKeyRef(key) }) { list.append(key) }
+                    out[segment.id] = list
+                }
+            }
+        }
+        return out
     }
 }
 
@@ -826,6 +976,20 @@ struct TimelineKeySelection: Equatable {
         for key in group { refs.insert(TimelineKeyRef(key)) }
         var next = self
         if refs.isSubset(of: keys) { next.keys.subtract(refs) } else { next.keys.formUnion(refs) }
+        return next
+    }
+
+    /// SOMA (sem alternar) os keyframes de cada camada — a seleção por
+    /// retângulo; a principal fica a mesma (par do `plusAll` do Android).
+    func plusAll(_ picked: [Int64: [KeyframeItem]]) -> TimelineKeySelection {
+        if picked.isEmpty { return self }
+        var next = self
+        for (id, group) in picked where !group.isEmpty {
+            var refs = Set<TimelineKeyRef>()
+            for key in group { refs.insert(TimelineKeyRef(key)) }
+            if id == layer { next.keys.formUnion(refs) }
+            else { next.others[id, default: []].formUnion(refs) }
+        }
         return next
     }
 

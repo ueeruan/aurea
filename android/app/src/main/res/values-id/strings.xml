@@ -396,6 +396,14 @@
     <string name="panel_aplicar">Terapkan</string>
     <string name="panel_aplicar_sem_texto_remove_expressao">Menerapkan tanpa teks menghapus ekspresinya.</string>
     <string name="panel_aplicar_todos_segmentos">Terapkan ke semua segmen</string>
+    <string name="panel_curve_apply_property">Terapkan ke semua keyframe properti ini</string>
+    <string name="pn_curve_need_two_keys">Perlu minimal 2 keyframe untuk mengedit kurva</string>
+    <string name="pn_curve_save">Simpan kurva</string>
+    <string name="pn_curve_std_smooth">Halus</string>
+    <string name="pn_curve_std_in">Masuk</string>
+    <string name="pn_curve_std_out">Keluar</string>
+    <string name="pn_curve_std_overshoot">Lewat batas</string>
+    <string name="pn_curve_std_anticipate">Antisipasi</string>
     <string name="panel_arraste_alcas_palco_mudar_tamanho">Seret pegangan di panggung untuk mengubah ukuran</string>
     <string name="panel_arraste_pontos_palco_toque_num_ponto">Seret titik di panggung; ketuk titik untuk melihat pegangan kurva.</string>
     <string name="panel_arredondar_pontas">Bulatkan ujung</string>
@@ -2541,6 +2549,8 @@ untuk mengedit kurvanya.</string>
     <string name="fxo_y_axis">Sumbu Y</string>
     <string name="fxo_alpha_2">Alfa</string>
     <string name="fx_copy_this_effect">Salin efek ini</string>
+    <string name="fx_back_to_effects">Kembali ke efek</string>
+    <string name="fx_param_expression">Ekspresi %1$s</string>
     <string name="fx_default_value">Bawaan: %1$s</string>
     <string name="fx_param_range">%1$s hingga %2$s</string>
     <string name="app_importing_generated_video">Mengimpor video yang dibuat…</string>
@@ -3269,4 +3279,9 @@ untuk mengedit kurvanya.</string>
     <string name="shape3d_layout_hint">Rotasi per bagian, jeda, acak, lengkung, puntir dan sebar — sama seperti huruf teks 3D.</string>
     <string name="fx_desc_shape3d_layout">Memutar, menunda, menyebar dan mengacak bagian bentuk 3D, seperti huruf teks 3D.</string>
     <string name="edt_cmd_select_shape3d">Pilih bentuk 3D</string>
+    <string name="editor_ir_inicio_segure_anterior">Ke awal · tahan: penanda, keyframe atau frame sebelumnya</string>
+    <string name="editor_ir_fim_segure_proximo">Ke akhir · tahan: penanda, keyframe atau frame berikutnya</string>
+    <string name="editor_ajustes_projeto">Pengaturan proyek</string>
+    <string name="editor_ajustes_projeto_mais">Pengaturan proyek dan opsi lainnya</string>
+    <string name="editor_duplicar_camada_segure_copiar">Duplikat lapisan · tahan untuk salin dan tempel</string>
 </resources>

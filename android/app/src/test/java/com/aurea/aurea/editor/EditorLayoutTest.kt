@@ -56,7 +56,10 @@ class EditorLayoutTest {
             val overview = EditorLayout.solve(height, SheetContent.None, false)
             val editing = EditorLayout.solve(height, SheetContent.Panel, false)
             val dock = EditorLayout.solve(height, SheetContent.Dock, false)
-            assertTrue("panel at $height", editing.sheet >= 336f)
+            // Painel de 336 sempre que a tela deixa (topo 64 + transporte 60 do
+            // redesenho); numa tela baixa ele leva tudo o que sobra sobre os pisos.
+            val room = EditorLayout.workspace(height) - EditorLayout.PREVIEW_MIN - EditorLayout.TIMELINE_MIN
+            assertTrue("panel at $height", editing.sheet >= minOf(336f, room) - 0.01f)
             // Doca compacta: a altura do conteúdo, o resto fica para a timeline.
             assertEquals("dock at $height", EditorLayout.DOCK, dock.sheet, 0.01f)
             assertTrue(dock.timeline >= 110f)
@@ -65,7 +68,7 @@ class EditorLayoutTest {
             assertTrue(editing.timeline >= 110f)
             assertEquals(height, editing.topBar + editing.preview + editing.strip +
                 editing.transport + editing.timeline + editing.sheet, 0.01f)
-            assertEquals(height * 0.54f - 32f, overview.preview, 0.01f)
+            assertEquals(height * EditorLayout.PREVIEW_NATURAL_FRACTION, overview.preview, 0.01f)
         }
     }
     @Test fun batchSheetFitsTheStaggerRowAtFingerSize() {

@@ -200,11 +200,37 @@ internal object Snap {
  * FOI desde o começo do gesto (pegar um clipe já perto da borda não sai rolando).
  */
 internal object AutoScroll {
+    /** Dt máximo por quadro (s): um quadro atrasado não dá um salto. */
+    const val MAX_DT = 0.05f
+
     fun direction(pos: Float, from: Float, low: Float, high: Float, intent: Float): Int = when {
         pos < low && pos < from - intent -> -1
         pos > high && pos > from + intent -> 1
         else -> 0
     }
+
+    /** Faixa da borda: [maxZone] (48 dp), mas nunca mais que 1/3 da janela (timeline baixa). */
+    fun zone(maxZone: Float, viewport: Float): Float = max(0f, minOf(maxZone, viewport / 3f))
+
+    /**
+     * Rolagem em RAMPA (veio do app antigo): fator com sinal em [−1, 1] — 0 fora
+     * da faixa, crescendo com o quanto o dedo entrou nela (1 = na borda ou
+     * além). A janela vai de [start] a [end]; só conta o lado a que o dedo FOI
+     * desde [from] (pegar já perto da borda não sai rolando).
+     */
+    fun speed(pos: Float, from: Float, start: Float, end: Float, zone: Float, intent: Float): Float {
+        if (!(zone > 0f) || end <= start || !pos.isFinite()) return 0f
+        val low = start + zone
+        val high = end - zone
+        return when {
+            pos < low && pos < from - intent -> -((low - pos) / zone).coerceIn(0f, 1f)
+            pos > high && pos > from + intent -> ((pos - high) / zone).coerceIn(0f, 1f)
+            else -> 0f
+        }
+    }
+
+    /** Quanto andar neste quadro (px): fator × velocidade máxima × dt (dt limitado a [MAX_DT]). */
+    fun step(factor: Float, maxSpeed: Float, dt: Float): Float = factor * maxSpeed * dt.coerceIn(0f, MAX_DT)
 }
 
 /**

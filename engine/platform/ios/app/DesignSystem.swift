@@ -114,14 +114,141 @@ extension View {
 // Régua de riscos (a fita)
 // =============================================================================
 
-/// Passo entre riscos, medido na referência (9 dp) — igual em toda régua.
-let TickStep: CGFloat = AureaDims.tickStep
+/// Passo entre riscos (redesenho 2026-09-29: 14 riscos na régua da linha de 40).
+/// Constante local de propósito: o `AureaDims.tickStep` (9) mora no Theme.swift,
+/// que é da casca do editor; o Android usa o mesmo 11 (`TickStep` do PropertyControls.kt).
+let TickStep: CGFloat = 11
 
-/// Um risco forte a cada 5 (índice ABSOLUTO no papel: anda junto com os fracos).
-private let ticksPerStrong = 5
-
-/// Onde os riscos começam a sumir, contado de cada borda (a fita não termina: some).
+/// Onde os riscos começavam a sumir (régua antiga). A régua nova apaga pelo
+/// brilho (`FxParamRowMath.tickBrightness`); fica para quem ainda lê o token.
 let TickFade: CGFloat = AureaDims.tickFade
+
+// =============================================================================
+// A linha de parâmetro do redesenho 2026-09-29 (Efeitos.dc.html)
+// =============================================================================
+
+/// A CONTA da linha de parâmetro, espelho exato do `ParamRowMath.kt` (testado na
+/// JVM em `ParamRowMathTest.kt`):
+///  · rótulo: 13 pt até 8 letras; mais longo, 11 pt (numa linha até 12, depois duas);
+///  · régua: o valor ACUMULA desde o início do gesto (`início + andado × porDp`),
+///    preso na faixa estendida até o valor de partida (`dragBounds`);
+///  · controle fino: dois dedos = 1/10; arrasto lento = 1/4, subindo até 1 com a
+///    velocidade (o dedo rápido atravessa a faixa, o lento acerta o número);
+///  · riscos: mais claros no centro, apagando para as bordas.
+enum FxParamRowMath {
+    /// Fonte do rótulo cheio / encolhido (pt).
+    static let labelFullSize: CGFloat = 13
+    static let labelSmallSize: CGFloat = 11
+    /// Até quantas letras o rótulo cabe em 13 pt na caixa de 70.
+    static let labelFullMaxChars = 8
+    /// Até quantas letras o rótulo encolhido cabe numa linha só.
+    static let labelOneLineMaxChars = 12
+    /// Ganho com dois dedos na régua.
+    static let twoFingerGain: Float = 0.1
+    /// Ganho do arrasto lento (abaixo de `slowSpeed`).
+    static let slowGain: Float = 0.25
+    /// Velocidades (pt/ms) em que o ganho começa a subir e chega a 1.
+    static let slowSpeed: Float = 0.08
+    static let fastSpeed: Float = 0.35
+    /// Peso da amostra nova na média da velocidade.
+    static let speedSmoothing: Float = 0.35
+
+    static func labelFontSize(_ label: String) -> CGFloat {
+        label.trimmingCharacters(in: .whitespacesAndNewlines).count <= labelFullMaxChars ? labelFullSize : labelSmallSize
+    }
+
+    static func labelMaxLines(_ label: String) -> Int {
+        label.trimmingCharacters(in: .whitespacesAndNewlines).count <= labelOneLineMaxChars ? 1 : 2
+    }
+
+    /// Ganho do arrasto: dois dedos, lento (fino) ou rápido (1:1).
+    static func scrubGain(pointers: Int, speed: Float) -> Float {
+        if pointers >= 2 { return twoFingerGain }
+        let s = abs(speed)
+        if !s.isFinite || s >= fastSpeed { return 1 }
+        if s <= slowSpeed { return slowGain }
+        let t = (s - slowSpeed) / (fastSpeed - slowSpeed)
+        return slowGain + (1 - slowGain) * t
+    }
+
+    /// Velocidade suavizada (pt/ms) com a amostra `dx` em `dt`; `dt` inválido mantém a anterior.
+    static func smoothSpeed(previous: Float, dx: Float, dt: Float) -> Float {
+        if !(dt > 0) || !dx.isFinite { return previous }
+        let sample = abs(dx) / dt
+        return previous + (sample - previous) * speedSmoothing
+    }
+
+    /// Faixa de UM arrasto: `min...max`, estendida até o valor de partida `from`
+    /// quando ele está fora (valor digitado além do slider). Nunca troca os lados.
+    static func dragBounds(min lo: Float, max hi: Float, from: Float) -> (Float, Float) {
+        let a = Swift.min(lo, hi)
+        let b = Swift.max(lo, hi)
+        if !from.isFinite { return (a, b) }
+        return (Swift.min(a, from), Swift.max(b, from))
+    }
+
+    /// O valor do arrasto: `início + andado × porDp`, preso em `min...max`
+    /// estendida até o início (valor digitado além da régua não salta de volta).
+    /// Início não finito parte do zero; resultado nunca é NaN.
+    static func scrubValue(from: Float, walked: Float, unitsPerDp: Float, min: Float, max: Float) -> Float {
+        let start = from.isFinite ? from : 0
+        let lo = min.isNaN ? -Float.infinity : min
+        let hi = max.isNaN ? Float.infinity : max
+        let (l, h) = dragBounds(min: lo, max: hi, from: start)
+        let v = start + walked * (unitsPerDp.isFinite ? unitsPerDp : 0)
+        if v.isNaN { return start }
+        return Swift.min(Swift.max(v, l), h)
+    }
+
+    /// Brilho do risco em `x` numa régua de largura `width`: 1 no centro, 0 nas bordas.
+    static func tickBrightness(x: CGFloat, width: CGFloat) -> CGFloat {
+        if !(width > 0) { return 0 }
+        let half = width / 2
+        return Swift.min(Swift.max(1 - abs(x - half) / half, 0), 1)
+    }
+}
+
+/// Cores da LINHA DE PARÂMETRO (painel, cartão do efeito, rótulo, caixa de valor,
+/// trilho e riscos) — `ParamRowColors` do Android. O destaque continua sendo o
+/// do tema (`AureaColors.accent`, #6FAED9).
+enum ParamRowColors {
+    static let panel = Color(hex: 0x121826)
+    static let card = Color(hex: 0x252F43)
+    static let labelOn = Color(hex: 0x121826)
+    static let labelOff = Color(hex: 0x2B364B)
+    static let labelOffText = Color(hex: 0xAAB6C3)
+    static let valueBox = Color(hex: 0x1B2333)
+    static let railLine = Color(hex: 0x222B3B)
+    static let railDisabled = Color(hex: 0x3E4859)
+    static let tickEdge = Color(hex: tickEdgeHex)
+    static let tickCenter = Color(hex: tickCenterHex)
+    static let rgbText = Color(hex: 0x6F8A9E)
+    static let swatchBorder = Color(hex: 0x3C475C)
+
+    static let tickEdgeHex: UInt32 = 0x3C475C
+    static let tickCenterHex: UInt32 = 0x97A3BA
+
+    /// O risco entre a cor da borda e a do centro (`lerp(TickEdge, TickCenter, t)`).
+    static func tick(_ t: CGFloat) -> Color {
+        let k = Double(Swift.min(Swift.max(t, 0), 1))
+        func channel(_ shift: UInt32) -> Double {
+            let a = Double((tickEdgeHex >> shift) & 0xFF) / 255
+            let b = Double((tickCenterHex >> shift) & 0xFF) / 255
+            return a + (b - a) * k
+        }
+        return Color(.sRGB, red: channel(16), green: channel(8), blue: channel(0), opacity: 1)
+    }
+}
+
+/// Medidas da linha de parâmetro: `[rótulo 70×36] 6 [régua] 6 [valor 62×36]` em 40.
+enum ParamRowDims {
+    static let row: CGFloat = 40
+    static let gap: CGFloat = 6
+    static let labelW: CGFloat = 70
+    static let labelH: CGFloat = 36
+    static let valueW: CGFloat = 62
+    static let radius: CGFloat = 6
+}
 
 /// A RÉGUA DE RISCOS, pintada num `Canvas` só (trinta riscos como views seriam
 /// trinta nós refeitos a cada quadro do arrasto).
@@ -165,7 +292,8 @@ private func drawTicks(_ ctx: GraphicsContext, size: CGSize, value: Float,
     let bottom = size.height - pad
     if bottom <= top || size.width <= 0 { return }
     let step = TickStep
-    let fade = TickFade
+    // Os riscos têm ~70 % da altura da linha do meio (22 de 32 na referência).
+    let inset = (bottom - top) * 0.155
     let center = size.width / 2
     // Onde o valor ZERO cai no papel, em dp a partir da borda esquerda. No iOS
     // o desenho já está em pontos e 1 ponto é 1 dp — a mesma unidade do Android.
@@ -173,24 +301,18 @@ private func drawTicks(_ ctx: GraphicsContext, size: CGSize, value: Float,
     let v = value.isFinite ? value : 0
     let base = CGFloat(v / perDp) + center
     let whole = (base / step).rounded(.down)
-    let phase = base - whole * step
-    var x = phase - step
-    var k = 0
+    var x = base - whole * step - step
     while x <= size.width {
-        let fromEdge = min(x, size.width - x)
-        if fromEdge > 0 {
-            let f = fromEdge >= fade ? 1 : fromEdge / fade
-            let index = k - 1 - Int(whole)
-            let strong = ((index % ticksPerStrong) + ticksPerStrong) % ticksPerStrong == 0
-            // O Android multiplica o alfa do token pelo fade; aqui o mesmo.
-            let color = AureaColors.muted.opacity(f * (strong ? 0.60 : 0.25))
+        // Riscos uniformes de 1 pt que acendem perto do centro e somem nas bordas.
+        let b = FxParamRowMath.tickBrightness(x: x, width: size.width)
+        if b > 0 {
             var line = Path()
-            line.move(to: CGPoint(x: x, y: top))
-            line.addLine(to: CGPoint(x: x, y: bottom))
-            ctx.stroke(line, with: .color(color), lineWidth: strong ? 1.5 : 1)
+            line.move(to: CGPoint(x: x, y: top + inset))
+            line.addLine(to: CGPoint(x: x, y: bottom - inset))
+            ctx.stroke(line, with: .color(ParamRowColors.tick(b * b).opacity(Double(min(1, b * 4)))),
+                       lineWidth: 1)
         }
         x += step
-        k += 1
     }
     var centerLine = Path()
     centerLine.move(to: CGPoint(x: center, y: top))
@@ -210,6 +332,11 @@ private func drawTicks(_ ctx: GraphicsContext, size: CGSize, value: Float,
 ///
 /// O início e o fim do gesto são avisados para quem abre/fecha o passo de
 /// desfazer (um arrasto = um desfazer). Cancelamento também fecha.
+///
+/// CONTROLE FINO (`FxParamRowMath.scrubGain`): o andado soma cada passo do dedo
+/// multiplicado pelo ganho da velocidade suavizada — devagar = 1/4, rápido = 1:1.
+/// O "dois dedos = 1/10" do Android fica de fora: o `DragGesture` do SwiftUI é de
+/// um toque só; o arrasto lento já dá a precisão.
 private struct ValueDragModifier: ViewModifier {
     let enabled: Bool
     let start: () -> Float
@@ -220,15 +347,18 @@ private struct ValueDragModifier: ViewModifier {
     let onValue: (Float) -> Void
     let onEnd: () -> Void
 
-    /// A densidade da tela. O gesto entrega PONTOS e no iOS o ponto é a unidade
-    /// densidade-independente (o "dp" do Android) — a conta pontos → px → dp é o
-    /// mesmo `dx / density` do Kotlin, escrita com o displayScale do ambiente em
-    /// vez do `UIScreen.main` (que não existe em view alguma).
-    @Environment(\.displayScale) private var displayScale
+    // O gesto entrega PONTOS e no iOS o ponto é a unidade densidade-independente
+    // (o "dp" do Android): o `dx / density` do Kotlin já vem pronto.
     @State private var active = false
     @State private var from: Float = 0
     @GestureState private var dragging = false
     @State private var direction = 0
+    /// Andado (dp, já com o ganho) desde o início do gesto.
+    @State private var walked: Float = 0
+    /// Velocidade suavizada (pt/ms) e a última amostra do dedo.
+    @State private var speed: Float = FxParamRowMath.fastSpeed
+    @State private var lastX: CGFloat = 0
+    @State private var lastTime = Date()
 
     func body(content: Content) -> some View {
         content.simultaneousGesture(drag, including: enabled ? .all : .none)
@@ -247,14 +377,25 @@ private struct ValueDragModifier: ViewModifier {
                 if !active {
                     let s = start()
                     from = s.isFinite ? s : 0
+                    walked = 0
+                    speed = FxParamRowMath.fastSpeed
+                    lastX = 0
+                    // O primeiro passo (o limiar do gesto) conta como um quadro de 16 ms.
+                    lastTime = g.time.addingTimeInterval(-0.016)
                     active = true
                     onStart()
                 }
-                let px = Double(g.translation.width) * Double(displayScale)
-                let dp = px / Double(displayScale)
-                let lo = min.isNaN ? -Float.infinity : min
-                let hi = max.isNaN ? Float.infinity : max
-                let v = (from + Float(dp) * unitsPerDp()).clamped(to: lo...hi)
+                // Passo deste evento: delta da translação (pontos = dp, como o
+                // `dx / density` do Kotlin) e delta do tempo em ms.
+                let dx = Float(g.translation.width - lastX)
+                let dt = Float(g.time.timeIntervalSince(lastTime) * 1000)
+                lastX = g.translation.width
+                lastTime = g.time
+                guard dx != 0 else { return }
+                speed = FxParamRowMath.smoothSpeed(previous: speed, dx: dx, dt: dt)
+                walked += dx * FxParamRowMath.scrubGain(pointers: 1, speed: speed)
+                let v = FxParamRowMath.scrubValue(from: from, walked: walked, unitsPerDp: unitsPerDp(),
+                                                  min: min, max: max)
                 if v.isFinite { onValue(v) }
             }
             .onEnded { _ in
@@ -377,9 +518,56 @@ struct ExpressionBadge: View {
     }
 }
 
-/// O CHIP DO RÓTULO (94 × 32): nome em ATÉ DUAS LINHAS, 12 w600, sem encolher a
-/// fonte (o bug B-01 era o rótulo de uma linha que encolhia até ficar ilegível).
-/// Escolhido = fundo `campo` e texto `accent` sublinhado.
+/// O DESENHO do rótulo da linha (redesenho 2026-09-29), sem gesto: caixa 70 × 36,
+/// raio 6, SEMPRE sublinhado (a promessa de que toca). Escolhido = fundo escuro
+/// #121826 e texto no destaque em negrito; os outros #2B364B com texto apagado.
+/// Rótulo longo encolhe para 11 pt e quebra em duas linhas
+/// (`FxParamRowMath.labelFontSize`). O losango pequeno no canto diz que a trilha
+/// anima (cheio = marca no cabeçote); o "=" no outro canto, que tem expressão.
+/// `PropertyLabelChip` e o rótulo das linhas de Efeitos usam este mesmo desenho.
+struct ParamRowLabel: View {
+    let label: String
+    let selected: Bool
+    var keyframe: KeyframeLook = .none
+    var expression: ExpressionLook = .none
+
+    var body: some View {
+        Text(label)
+            .font(.aurea(size: FxParamRowMath.labelFontSize(label), weight: selected ? .bold : .regular))
+            .multilineTextAlignment(.center)
+            .lineLimit(FxParamRowMath.labelMaxLines(label))
+            .truncationMode(.tail)
+            .foregroundStyle(selected ? AureaColors.accent : ParamRowColors.labelOffText)
+            .underline(true)
+            .padding(.horizontal, 4)
+            .frame(width: ParamRowDims.labelW, height: ParamRowDims.labelH)
+            .background(selected ? ParamRowColors.labelOn : ParamRowColors.labelOff,
+                        in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
+            .overlay(alignment: .topTrailing) {
+                if expression != .none {
+                    ExpressionBadge(look: expression)
+                        .offset(x: 2)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if keyframe != .none {
+                    Canvas { context, size in
+                        var diamond = Path()
+                        diamond.move(to: CGPoint(x: size.width / 2, y: 0))
+                        diamond.addLine(to: CGPoint(x: size.width, y: size.height / 2))
+                        diamond.addLine(to: CGPoint(x: size.width / 2, y: size.height))
+                        diamond.addLine(to: CGPoint(x: 0, y: size.height / 2))
+                        diamond.closeSubpath()
+                        if keyframe == .keyHere { context.fill(diamond, with: .color(AureaColors.keyframe)) }
+                        else { context.stroke(diamond, with: .color(AureaColors.keyframe), lineWidth: 1) }
+                    }.frame(width: 7, height: 7).offset(x: -1, y: 3)
+                }
+            }
+    }
+}
+
+/// O RÓTULO DA LINHA tocável (`ParamRowLabel` + toque). A escolha vem do
+/// ambiente (`aureaSelectedProperty`) porque a API congelada não tem parâmetro.
 struct PropertyLabelChip: View {
     private let title: String
     private let expression: ExpressionLook
@@ -398,39 +586,45 @@ struct PropertyLabelChip: View {
     private var selected: Bool { selectedProperty == title }
 
     var body: some View {
-        Text(title)
-            .font(.aurea(size: 12, weight: .semibold))
-            .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .foregroundStyle(selected ? AureaColors.accent : AureaColors.muted)
-            .underline(selected)
-            .padding(.horizontal, AureaDims.labelChipPadH)
-            .frame(width: AureaDims.labelChipW, height: AureaDims.labelChipH)
-            .background(selected ? AureaColors.chip : Color.clear,
-                        in: RoundedRectangle(cornerRadius: AureaDims.chipRadius))
-            .overlay(alignment: .topTrailing) {
-                if expression != .none {
-                    ExpressionBadge(look: expression)
-                        .offset(x: AureaDims.s1)
-                }
-            }
-            .overlay(alignment: .topLeading) {
-                if keyframe != .none {
-                    Canvas { context, size in
-                        var diamond = Path()
-                        diamond.move(to: CGPoint(x: 3.5, y: 0)); diamond.addLine(to: CGPoint(x: 7, y: 3.5))
-                        diamond.addLine(to: CGPoint(x: 3.5, y: 7)); diamond.addLine(to: CGPoint(x: 0, y: 3.5)); diamond.closeSubpath()
-                        if keyframe == .keyHere { context.fill(diamond, with: .color(AureaColors.keyframe)) }
-                        else { context.stroke(diamond, with: .color(AureaColors.keyframe), lineWidth: 1) }
-                    }.frame(width: 7, height: 7).offset(x: -3, y: 3)
-                }
-            }
+        ParamRowLabel(label: title, selected: selected, keyframe: keyframe, expression: expression)
             .contentShape(Rectangle())
             .aureaTappable(shrink: 1, enabled: onTap != nil) { onTap?() }
     }
 }
 
-/// A LINHA DE PROPRIEDADE: 48 dp = `[chip 94] 8 [valor ...]`.
+/// A CAIXA DE VALOR da linha (redesenho 2026-09-29): 62 × 36, raio 6, #1B2333,
+/// número 13 pt alinhado à DIREITA com algarismos tabulares (não dança durante o
+/// arrasto); encolhe antes de vazar. Tocar abre o teclado.
+struct ParamValueBox: View {
+    private let text: String
+    private let width: CGFloat
+    private let enabled: Bool
+    private let onTap: (() -> Void)?
+
+    init(_ text: String, width: CGFloat = ParamRowDims.valueW, enabled: Bool = true, onTap: (() -> Void)? = nil) {
+        self.text = text
+        self.width = width
+        self.enabled = enabled
+        self.onTap = onTap
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.aurea(size: 13).monospacedDigit())
+            .foregroundStyle(enabled ? AureaColors.text : AureaColors.muted)
+            .lineLimit(1)
+            .minimumScaleFactor(0.62)
+            .multilineTextAlignment(.trailing)
+            .padding(.leading, 4)
+            .padding(.trailing, 8)
+            .frame(width: width, height: ParamRowDims.labelH, alignment: .trailing)
+            .background(ParamRowColors.valueBox, in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
+            .contentShape(Rectangle())
+            .aureaTappable(shrink: 1, enabled: onTap != nil && enabled) { onTap?() }
+    }
+}
+
+/// A LINHA DE PROPRIEDADE (texto): 40 = `[rótulo 70] 6 ... [valor 62]`.
 ///
 /// O valor é TEXTO já formatado por quem chama (o motor manda o número); quem
 /// arrasta é a régua ao lado, com o `valueDrag`.
@@ -460,23 +654,23 @@ struct PropertyRow: View {
     }
 
     var body: some View {
-        HStack(spacing: AureaDims.s2) {
+        HStack(spacing: ParamRowDims.gap) {
             PropertyLabelChip(label, expression: expression, onTap: onTap)
             Spacer(minLength: 0)
-            ValueBox(value, enabled: enabled, onTap: onTap)
+            ParamValueBox(value, enabled: enabled, onTap: onTap)
             if look != .none {
                 KeyframeDiamondIcon(look: look, enabled: enabled)
                     .contentShape(Rectangle())
                     .aureaTappable(shrink: 1, enabled: enabled && onKeyframe != nil) { onKeyframe?() }
             }
         }
-        .frame(height: AureaDims.propertyRowHeight)
+        .frame(height: ParamRowDims.row)
         .opacity(enabled ? 1 : 0.45)
     }
 }
 
-/// Linha "rótulo + controle livre" (interruptor, escolha, cor): o mesmo chip de
-/// 94 à esquerda para a coluna dos nomes não pular entre tipos.
+/// Linha "rótulo + controle livre" (interruptor, escolha, cor): o mesmo rótulo
+/// de 70 à esquerda para a coluna dos nomes não pular entre tipos.
 struct PropertyCustomRow<Content: View>: View {
     private let label: String
     private let selected: Bool
@@ -499,14 +693,14 @@ struct PropertyCustomRow<Content: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: AureaDims.s2) {
+        HStack(spacing: ParamRowDims.gap) {
             PropertyLabelChip(label, expression: expression, keyframe: keyframe, onTap: onSelect)
                 .aureaSelectedProperty(selected ? label : nil)
                 .onLongPressGesture { onExpression?() }
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(minHeight: AureaDims.propertyRowHeight)
+        .frame(minHeight: ParamRowDims.row)
     }
 }
 
@@ -738,9 +932,11 @@ struct PanelHeader: View {
     }
 }
 
-/// O TRILHO ESQUERDO (46 dp): `‹` voltar · ◇ keyframe · curva · ⋯ — células de
-/// alturas iguais, sempre nesta ordem (a mão aprende posição antes de ícone). O
-/// losango e a curva ficam apagados quando não há o que marcar ou curvar.
+/// O TRILHO ESQUERDO (redesenho 2026-09-29, 58 de largura com o cabelo de 1 à
+/// direita): botões de 44 empilhados do topo com vão de 6 — `‹` voltar · ◇+
+/// keyframe · curva · (=) — e o `⋯` preso no pé. Sempre nesta ordem (a mão
+/// aprende posição antes de ícone). O losango e a curva ficam apagados quando
+/// não há o que marcar ou curvar.
 struct LeftRail: View {
     private let keyframeLook: KeyframeLook
     private let onKeyframe: (() -> Void)?
@@ -765,7 +961,7 @@ struct LeftRail: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: LeftRailLayout.gap) {
             cell(label: AureaText.t("panel_voltar_ferramentas"), action: onBack) {
                 MaterialGlyph("rounded.ChevronLeft", size: AureaDims.iconLg)
             }
@@ -784,22 +980,28 @@ struct LeftRail: View {
                         .foregroundStyle(expression == .none ? AureaColors.text : AureaColors.accent)
                 }
             }
+            Spacer(minLength: 0)
             if let onMore {
-                VStack {
-                    RailMoreButton(active: false, onClick: onMore)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                RailMoreButton(active: false, onClick: onMore)
+                    .frame(width: LeftRailLayout.cell, height: LeftRailLayout.cell)
             }
         }
-        .frame(width: AureaDims.railW)
+        .padding(.top, LeftRailLayout.padTop)
+        .padding(.bottom, LeftRailLayout.padBottom)
+        .frame(width: LeftRailLayout.width)
         .frame(maxHeight: .infinity)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(ParamRowColors.railLine)
+                .frame(width: 1)
+        }
     }
 
     @ViewBuilder
     private func cell<Content: View>(label: String, action: (() -> Void)?,
                                      @ViewBuilder content: () -> Content) -> some View {
         let target = content()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: LeftRailLayout.cell, height: LeftRailLayout.cell)
             .contentShape(Rectangle())
         if let action {
             Button(action: action) { target }
@@ -809,6 +1011,15 @@ struct LeftRail: View {
             target
         }
     }
+}
+
+/// Medidas do trilho esquerdo (`LeftRail` do PanelChrome.kt, redesenho 2026-09-29).
+private enum LeftRailLayout {
+    static let width: CGFloat = 58
+    static let cell: CGFloat = 44
+    static let gap: CGFloat = 6
+    static let padTop: CGFloat = 8
+    static let padBottom: CGFloat = 4
 }
 
 /// O `⋯` DO TRILHO que não esconde um modo (`AmMenuIcon`): aceso e com um ponto

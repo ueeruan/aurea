@@ -119,3 +119,41 @@ struct StageZoomToggleButton: View {
             .accessibilityAddTraits(.isButton)
     }
 }
+
+/// Lupa no canto sup-esq da prévia (redesenho 2026-09-29, Efeitos.dc.html; par do
+/// `StageZoomButton` do Android): 34×30 colada à borda (raio 0/6/6/0, #2A3447),
+/// liga/desliga a mesma lupa do menu da engrenagem. O alvo de toque é 48×44.
+struct StageZoomCornerButton: View {
+    @ObservedObject private var view = StageViewZoom.shared
+    var body: some View {
+        Image(systemName: "plus.magnifyingglass")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundColor(view.zoomLock ? AureaColors.accent : AureaColors.text)
+            .frame(width: 34, height: 30)
+            .background(UnevenRoundedCorners(radius: 6).fill(Color(red: 0x2A / 255, green: 0x34 / 255, blue: 0x47 / 255)))
+            .padding(.top, 8)
+            .frame(width: 48, height: 44, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .onTapGesture { view.zoomLock.toggle() }
+            .accessibilityLabel(AureaText.t(view.zoomLock ? "stage_zoom_view_on" : "stage_zoom_view_off"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("stage.zoom.toggle")
+    }
+}
+
+/// Retângulo com só os cantos da DIREITA arredondados (iOS 15: sem `UnevenRoundedRectangle`).
+private struct UnevenRoundedCorners: Shape {
+    let radius: CGFloat
+    func path(in rect: CGRect) -> Path {
+        let r = min(radius, rect.height / 2, rect.width / 2)
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
+        p.addArc(center: CGPoint(x: rect.maxX - r, y: rect.minY + r), radius: r, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+        p.addArc(center: CGPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
+}

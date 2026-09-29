@@ -33,6 +33,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import com.aurea.aurea.ui.ds.ParamRowColors
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
@@ -128,10 +132,11 @@ internal fun PanelHeader(title: String, onBack: () -> Unit) {
 }
 
 /**
- * O TRILHO ESQUERDO [A] (`RailEsquerdo`, 46 dp): `‹` voltar · ◇ keyframe · curva
- * (e o `⋯` quando há). Células de alturas iguais, sempre nesta ordem — a mão
- * aprende posição antes de ícone. O losango e a curva ficam apagados quando não
- * há o que marcar ou curvar.
+ * O TRILHO ESQUERDO (redesenho 2026-09-29, Efeitos.dc.html): 58 dp com a
+ * divisa fina #222B3B à direita; botões de 44 empilhados do topo (vão 6):
+ * `‹` voltar · ◇+ keyframe · curva (e o `=` / `⋯` quando há). Sempre nesta
+ * ordem — a mão aprende posição antes de ícone. O losango e a curva ficam
+ * apagados quando não há o que marcar ou curvar. O `more` mora no pé.
  */
 @Composable
 internal fun LeftRail(
@@ -145,15 +150,26 @@ internal fun LeftRail(
     expression: ExpressionLook = ExpressionLook.None,
     onExpression: (() -> Unit)? = null,
 ) {
-    Column(modifier.width(46.dp).fillMaxHeight()) {
+    Column(
+        modifier
+            .width(58.dp)
+            .fillMaxHeight()
+            .drawBehind {
+                val w = 1.dp.toPx()
+                drawRect(ParamRowColors.RailLine, topLeft = Offset(size.width - w, 0f), size = Size(w, size.height))
+            }
+            .padding(top = 8.dp, bottom = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         RailCell(onBack, stringResource(R.string.panel_voltar_ferramentas)) {
             Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp))
         }
         RailCell(onKeyframe, if (keyframeLook == KeyframeLook.KeyHere) stringResource(R.string.panel_tirar_keyframe_daqui) else stringResource(R.string.panel_marcar_keyframe_aqui)) {
-            KeyframeDiamondIcon(keyframeLook, enabled = onKeyframe != null)
+            KeyframeDiamondIcon(keyframeLook, enabled = onKeyframe != null, modifier = Modifier.size(24.dp))
         }
         RailCell(onCurve, stringResource(R.string.panel_editar_curva_propriedade)) {
-            CurveRailIcon(enabled = onCurve != null, animated = curveAnimated)
+            CurveRailIcon(enabled = onCurve != null, animated = curveAnimated, modifier = Modifier.size(22.dp))
         }
         if (onExpression != null) {
             // "=": o editor de expressão da propriedade (acende quando há uma).
@@ -171,21 +187,21 @@ internal fun LeftRail(
             }
         }
         if (more != null) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { more() }
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { more() }
         }
     }
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.ColumnScope.RailCell(
+private fun RailCell(
     onClick: (() -> Unit)?,
     label: String,
     content: @Composable () -> Unit,
 ) {
     Box(
         Modifier
-            .weight(1f)
-            .fillMaxWidth()
+            .size(44.dp)
             .semantics { contentDescription = label }
             .then(if (onClick != null) Modifier.tocavel(shrink = 1f, onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -164,6 +166,28 @@ private class CurveFamily(@StringRes val name: Int, val glyph: Char, val presets
 private fun bez(x1: Float, y1: Float, x2: Float, y2: Float) = Ease(Interp.BEZIER, x1, y1, x2, y2)
 
 /**
+ * Os presets prontos do menu "Presets" do editor (do app antigo): um menu
+ * compacto, não blocos — o painel mantém o tamanho. O Bounce segue no botão.
+ */
+internal val StandardCurves: List<Pair<Int, Ease>> = listOf(
+    R.string.pn_curve_std_smooth to bez(0.33f, 0f, 0.66f, 1f),
+    R.string.pn_curve_std_in to bez(0.42f, 0f, 1f, 1f),
+    R.string.pn_curve_std_out to bez(0f, 0f, 0.58f, 1f),
+    R.string.pn_curve_std_overshoot to bez(0.34f, 1.56f, 0.64f, 1f),
+    R.string.pn_curve_std_anticipate to bez(0.36f, 0f, 0.66f, -0.56f),
+)
+
+/**
+ * O que vai para o preset de curva salvo ([interp, x1, y1, x2, y2, força]),
+ * o inverso de [curvePresetEase]: a interpolação como está, as alças
+ * mostradas e a força só na bézier.
+ */
+internal fun curvePresetValues(e: Ease): FloatArray {
+    val h = e.handles()
+    return floatArrayOf(e.interp.toFloat(), h[0], h[1], h[2], h[3], (if (e.isBezier) e.power else 1).toFloat())
+}
+
+/**
  * AS FAMÍLIAS DA CURVA [A] (`_familiasDaCurva`). As bézier da A.01 são as
  * mesmas alças (0,42 / 0,58); as famílias Bounce, Elastic e Steps usam
  * os avaliadores compartilhados reais (interp7/8/9), sem alças fictícias.
@@ -218,6 +242,18 @@ internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: E
     keys.filter { it.time == start.time && it.sameTrack(start) }.forEach { k ->
         store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2, e.power)
     }
+}
+
+/**
+ * A curva em TODOS os trechos da propriedade de [start] (e dos eixos do grupo),
+ * num passo de desfazer. Falso = menos de 2 keyframes (nada a aplicar).
+ */
+internal fun applyEaseToProperty(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease): Boolean {
+    val keys = store.keyframes[layer] ?: return false
+    val starts = propertySegmentStarts(keys, keys.track(start))
+    if (starts.isEmpty()) return false
+    store.setKeyframesEasing(layer, starts, e.interp, e.x1, e.y1, e.x2, e.y2, e.power)
+    return true
 }
 
 /**
@@ -282,6 +318,15 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     }
     val seg = segment
     if (seg == null) {
+        // Propriedade com menos de 2 keyframes: não há curva — avisa e volta,
+        // venha de onde vier (losango tocado, botão de curva de um painel).
+        if (store.selectedKeyframe != null) {
+            val needTwo = stringResource(R.string.pn_curve_need_two_keys)
+            LaunchedEffect(Unit) {
+                store.showToast(needTwo)
+                back()
+            }
+        }
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 if (store.selectedKeyframe == null) stringResource(R.string.panel_toque_num_keyframe_timeline_npara_editar) else stringResource(R.string.panel_crie_pelo_menos_2_keyframes_npara),
@@ -302,6 +347,17 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     val graphMode = store.curveGraphMode
     var menu by remember { mutableStateOf(false) }
     var savePrompt by remember { mutableStateOf(false) }
+    var presetMenu by remember { mutableStateOf(false) }
+    // As curvas que a pessoa salvou (Presets › Curva): lidas uma vez por lista.
+    val savedEntries = store.presets.user[com.aurea.aurea.presets.PresetKind.Curve].orEmpty()
+    val saved = remember(savedEntries) {
+        savedEntries.mapNotNull { e -> store.curveOfPreset(e)?.takeIf { it.size >= 5 }?.let { e to curvePresetEase(it) } }
+    }
+    fun setCurve(label: String, e: Ease) {
+        store.beginGesture(label)
+        applyEase(store, layer, start, e)
+        store.endGesture()
+    }
 
     // Onde o cabeçote está dentro do trecho (0..1), lido NO DESENHO: só repinta.
     val progress: () -> Float? = {
@@ -328,6 +384,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     }
 
     val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
+    val needTwoMsg = stringResource(R.string.pn_curve_need_two_keys)
     Column(Modifier.fillMaxSize().background(CurvePanelFill)) {
     Row(Modifier.fillMaxWidth().height(48.dp).background(CurveRailFill)) {
         listOf(R.string.panel_easing_curve, R.string.particular_curve_value, R.string.panel_velocidade).forEachIndexed { index, label ->
@@ -377,6 +434,24 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     onChange = { applyEase(store, layer, start, it) },
                     onEnd = { store.endGesture() },
                 )
+            }
+            // Presets prontos (menu), salvar a curva e as curvas salvas numa
+            // fileira fina que rola: o painel não cresce.
+            if (graphMode == 0) {
+                Row(
+                    Modifier.fillMaxWidth().height(40.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CurveChip(stringResource(R.string.panel_presets) + " ▾", tag = "curve.presets") { presetMenu = true }
+                    CurveChip("+ " + stringResource(R.string.pn_curve_save), tag = "curve.save") { savePrompt = true }
+                    saved.forEach { (entry, e) ->
+                        CurveChip(entry.name, active = ease.same(e), tag = "curve.saved") {
+                            setCurve("preset de curva", e)
+                            store.presets.markUsed(entry)
+                        }
+                    }
+                }
             }
             Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(48.dp).tocavel { jump(-1) }, contentAlignment = Alignment.Center) {
@@ -446,10 +521,20 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             initial = stringResource(nameOf(ease)),
             onConfirm = { name ->
                 // A interpolação vai como está (nomeada, reta, manter ou bézier com as alças).
-                val h = ease.handles()
-                store.savePreset(com.aurea.aurea.presets.PresetKind.Curve, name, store.curvePresetJson(name, ease.interp, h[0], h[1], h[2], h[3], if (ease.isBezier) ease.power else 1))
+                val v = curvePresetValues(ease)
+                store.savePreset(com.aurea.aurea.presets.PresetKind.Curve, name, store.curvePresetJson(name, v[0].toInt(), v[1], v[2], v[3], v[4], v[5].toInt()))
             },
             onDismiss = { savePrompt = false },
+        )
+    }
+
+    if (presetMenu) {
+        AureaActionSheet(
+            title = stringResource(R.string.panel_presets),
+            actions = StandardCurves.map { (name, e) ->
+                SheetAction(stringResource(name)) { setCurve("preset de curva", e) }
+            },
+            onDismiss = { presetMenu = false },
         )
     }
 
@@ -470,11 +555,9 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                         store.endGesture()
                     }
                 },
-                SheetAction(stringResource(R.string.panel_aplicar_todos_segmentos)) {
-                    val track = (store.keyframes[layer] ?: emptyList()).track(start)
-                    store.beginGesture("curva em todos")
-                    track.dropLast(1).forEach { applyEase(store, layer, it, ease) }
-                    store.endGesture()
+                // Todos os trechos da propriedade (e dos eixos do grupo): um desfazer.
+                SheetAction(stringResource(R.string.panel_curve_apply_property)) {
+                    if (!applyEaseToProperty(store, layer, start, ease)) store.showToast(needTwoMsg)
                 },
             ),
             onDismiss = { menu = false },
@@ -628,6 +711,22 @@ private fun CurveGraph(
                 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 4.dp.toPx())))
             drawCircle(Color.White, 4.dp.toPx(), p)
         }
+    }
+}
+
+/** Pastilha da fileira de presets (mesmo desenho do botão Bounce), alvo de 40 dp. */
+@Composable
+private fun CurveChip(label: String, active: Boolean = false, tag: String, onTap: () -> Unit) {
+    Box(Modifier.height(40.dp).testTag(tag).tocavel { onTap() }, contentAlignment = Alignment.Center) {
+        Text(
+            label, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 140.dp).clip(RoundedCornerShape(14.dp))
+                .background(if (active) CurveGreen.copy(alpha = .18f) else CurveRailFill)
+                .border(1.dp, if (active) CurveGreen else Color.White.copy(alpha = .18f), RoundedCornerShape(14.dp))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600,
+                color = if (active) CurveGreen else Color.White)),
+        )
     }
 }
 

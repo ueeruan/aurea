@@ -1288,6 +1288,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // acontece na composição, quando o fundo já existe.
             rl.source.kind = LayerSource::Kind::Adjustment;
             rl.adjustScope = l->adjustmentScope;
+            if (l->adjustmentScope == 2)
+                for (LayerId t : l->adjustmentTargets) rl.adjustTargets.push_back(render_id(t).pack());
             rl.source.width = out.compWidth;
             rl.source.height = out.compHeight;
             rl.compFromLayer = Mat4::identity();
@@ -2086,6 +2088,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 placement.camUp = Vec3{v.col[0].y, v.col[1].y, v.col[2].y};
                 rl.blurMatrices.clear();   // a folha não se move: o movimento é das partículas
                 rl.temporal.clear();
+                if (l->motionBlur && comp.motion_blur().enabled) {
+                    placement.shutterAngle = comp.motion_blur().shutterAngle
+                                           * std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f);
+                }
             }
             EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used], fps);
         }
@@ -3850,41 +3856,54 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         const RenderLayer& layer = snap.layers[i];
         if (layer.planeGroup >= 0 || layer.matteOnly || layer.particle.inScene) continue;   // na cena 3D / só recorta
         CompositeDraw draw;
-        if (layer.source.kind == LayerSource::Kind::Adjustment && layer.adjustScope == 1) {
-            // Ajuste SÓ na camada logo abaixo (um grupo conta como uma): ela vai
-            // sozinha para um alvo do tamanho da composição, os efeitos rodam
-            // nela e o resultado toma o lugar dela na pilha. A opacidade do
-            // ajuste mistura o original com o ajustado.
-            if (draws.empty() || draws.back().adjustPlan != kInvalidIndex) continue;
-            const CompositeDraw below = draws.back();
-            const FGTexture lc = draw_to_comp(below, compDesc, compW, compH, "ajuste-camada-abaixo");
-            if (!lc.valid()) continue;
-            LayerImage in;
-            in.texture = lc;
-            in.region = Rect{0.0f, 0.0f, compW, compH};
-            in.width = compDesc.width;
-            in.height = compDesc.height;
-            LayerImage fin = in;
-            const EffectPlan& plan = snap.plans[i];
-            (void)EffectGraph::build(plan, ctx, in, fin);
-            if (!fin.valid()) continue;
-            CompositeDraw orig;
-            orig.texture = lc;
-            orig.region = Rect{0.0f, 0.0f, compW, compH};
-            orig.blend = below.blend;
-            orig.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
-            CompositeDraw fx = orig;
-            fx.texture = fin.texture;
-            fx.region = fin.region;
-            if (plan.hasFold) fx.compFromLayer = plan.foldMatrix;
-            const f32 op = std::clamp(layer.opacity * (plan.hasFold ? plan.foldOpacity : 1.0f), 0.0f, 1.0f);
-            if (op >= 0.999f) {
-                draws.back() = fx;
-            } else {
-                orig.opacity = 1.0f - op;
-                fx.opacity = op;
-                draws.back() = orig;
-                draws.push_back(fx);
+        if (layer.source.kind == LayerSource::Kind::Adjustment && (layer.adjustScope == 1 || layer.adjustScope == 2)) {
+            // Ajuste SÓ em camadas escolhidas: a logo abaixo (escopo 1; um
+            // grupo conta como uma) ou as da lista (escopo 2, a do app
+            // antigo). Cada uma vai sozinha para um alvo do tamanho da
+            // composição, os efeitos rodam nela e o resultado toma o lugar
+            // dela na pilha. A opacidade do ajuste mistura original e ajustado.
+            auto adjust_draw = [&](usize at) {
+                const CompositeDraw below = draws[at];
+                const FGTexture lc = draw_to_comp(below, compDesc, compW, compH, "ajuste-camada-abaixo");
+                if (!lc.valid()) return;
+                LayerImage in;
+                in.texture = lc;
+                in.region = Rect{0.0f, 0.0f, compW, compH};
+                in.width = compDesc.width;
+                in.height = compDesc.height;
+                LayerImage fin = in;
+                const EffectPlan& plan = snap.plans[i];
+                (void)EffectGraph::build(plan, ctx, in, fin);
+                if (!fin.valid()) return;
+                CompositeDraw orig;
+                orig.texture = lc;
+                orig.region = Rect{0.0f, 0.0f, compW, compH};
+                orig.blend = below.blend;
+                orig.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
+                orig.layer = below.layer;
+                CompositeDraw fx = orig;
+                fx.texture = fin.texture;
+                fx.region = fin.region;
+                if (plan.hasFold) fx.compFromLayer = plan.foldMatrix;
+                const f32 op = std::clamp(layer.opacity * (plan.hasFold ? plan.foldOpacity : 1.0f), 0.0f, 1.0f);
+                if (op >= 0.999f) {
+                    draws[at] = fx;
+                } else {
+                    orig.opacity = 1.0f - op;
+                    fx.opacity = op;
+                    draws[at] = orig;
+                    draws.insert(draws.begin() + static_cast<std::ptrdiff_t>(at) + 1, fx);
+                }
+            };
+            if (layer.adjustScope == 1) {
+                if (!draws.empty() && draws.back().adjustPlan == kInvalidIndex) adjust_draw(draws.size() - 1);
+                continue;
+            }
+            for (usize at = draws.size(); at-- > 0;) {
+                const CompositeDraw& d = draws[at];
+                if (d.adjustPlan != kInvalidIndex || !d.layer) continue;
+                if (std::find(layer.adjustTargets.begin(), layer.adjustTargets.end(), d.layer) == layer.adjustTargets.end()) continue;
+                adjust_draw(at);
             }
             continue;
         }
@@ -3921,6 +3940,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         } else if (!make_draw(i, draw)) {
             continue;
         }
+        draw.layer = layer.id.pack();
         draws.push_back(draw);
     }
 

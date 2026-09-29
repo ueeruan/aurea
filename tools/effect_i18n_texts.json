@@ -1535,5 +1535,21 @@
   "hi": "ब्लॉक मोज़ेक",
   "id": "Mosaik blok",
   "ar": "فسيفساء كتل"
+ },
+ "Desfoque de movimento": {
+  "en": "Motion blur",
+  "es": "Desenfoque de movimiento",
+  "ru": "Размытие движения",
+  "hi": "मोशन ब्लर",
+  "id": "Blur gerak",
+  "ar": "ضبابية الحركة"
+ },
+ "Ângulo do obturador": {
+  "en": "Shutter angle",
+  "es": "Ángulo de obturación",
+  "ru": "Угол затвора",
+  "hi": "शटर कोण",
+  "id": "Sudut rana",
+  "ar": "زاوية الغالق"
  }
 }

@@ -233,7 +233,20 @@ final class ShellPresentation: ObservableObject {
     @Published var grabbedShapeHandle = -1
     @Published var snapX: Float?
     @Published var snapY: Float?
+    /// Seletor pedido pelo diálogo de adicionar. Quem APRESENTA é a raiz do
+    /// editor (`AddLayerPickers`), nunca o diálogo: ele some ao escolher, e um
+    /// seletor cujo dono sai da tela no meio do fechamento deixava a próxima
+    /// apresentação presa e invisível (foto/vídeo e depois modelo 3D: nada
+    /// entrava e nenhum toque respondia).
+    @Published var addPicker: ShellAddPicker?
     func dismiss() { sheet = nil; linkAnchor = nil; resolutionAnchor = nil }
+}
+
+/// Os seletores do diálogo de adicionar (galeria/foto/vídeo pelo seletor de
+/// fotos; áudio, modelo 3D e SVG pelo de arquivos).
+enum ShellAddPicker: Equatable {
+    case gallery, photo, video, audioFromVideo, audioFile, model, svg
+    var isFile: Bool { self == .audioFile || self == .model || self == .svg }
 }
 
 enum ShellStageGeometry {

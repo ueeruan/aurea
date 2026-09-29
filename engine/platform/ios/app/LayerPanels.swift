@@ -517,8 +517,11 @@ struct PresetsPanel: View {
             guard let key = curveKey else { model.toast = kind.noData; return }
             let h = model.engine.trackEasing(layerId, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time)
             guard h.count >= 4 else { model.toast = kind.noData; return }
-            let ease = CurveEase(interpolation: key.interpolation, x1: h[0].floatValue, y1: h[1].floatValue, x2: h[2].floatValue, y2: h[3].floatValue)
-            json = model.engine.makeCurvePreset(name, interpolation: key.interpolation, handles: ease.handles.map { NSNumber(value: $0) })
+            let ease = CurveEase(interpolation: key.interpolation, x1: h[0].floatValue, y1: h[1].floatValue, x2: h[2].floatValue, y2: h[3].floatValue,
+                                 power: h.count >= 5 ? min(3, max(1, h[4].intValue)) : 1)
+            // A força vai junto (5º número) quando é bézier.
+            json = model.engine.makeCurvePreset(name, interpolation: key.interpolation,
+                handles: (ease.handles + [Float(ease.isBezier ? ease.power : 1)]).map { NSNumber(value: $0) })
         } else if kind == .caption {
             var options: [String: NSNumber] = ["mode": 0, "maxWords": 4, "maxChars": 18, "maxLines": 2, "style": 2,
                 "highlight": true, "uppercase": false, "breakOnPause": true, "removeFillers": true,
@@ -646,7 +649,9 @@ private struct PresetCardView: View {
 
 private func presetCurve(_ values: [NSNumber]) -> CurveEase? {
     guard values.count >= 5, values.allSatisfy({ $0.floatValue.isFinite }), (0...6).contains(values[0].intValue) else { return nil }
-    return CurveEase(interpolation: values[0].uint32Value, x1: values[1].floatValue, y1: values[2].floatValue, x2: values[3].floatValue, y2: values[4].floatValue)
+    // [interp, x1, y1, x2, y2, força]; preset antigo não tem a força (×1).
+    let power = values.count >= 6 ? min(3, max(1, values[5].intValue)) : 1
+    return CurveEase(interpolation: values[0].uint32Value, x1: values[1].floatValue, y1: values[2].floatValue, x2: values[3].floatValue, y2: values[4].floatValue, power: power)
 }
 
 private struct PresetAnimationTrack {
@@ -2014,9 +2019,16 @@ private struct NativeLayerAnimatorCard: View {
     private func ruler(_ param: NativeLayerAnimParam) -> some View {
         let bit = 1 << param.id
         let look: KeyframeLook = Int(values[25]) & bit != 0 ? .keyHere : (Int(values[24]) & bit != 0 ? .animated : .none)
+        // Expressão no valor do animador (TrackProperty::LayerAnimParam = 40).
+        let info = model.engine.expression(id, property: 40, effect: index, param: UInt32(param.id))
+        let expression: ExpressionLook = (info["exists"] as? NSNumber)?.boolValue != true ? .none
+            : !((info["enabled"] as? NSNumber)?.boolValue ?? true) ? .off
+            : (info["error"] as? String ?? "").isEmpty ? .ok : .error
         return NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit,
             decimals: param.step < 0.5 ? 2 : 0, look: look, toggleKey: {
                 model.engine.toggleLayerAnimKey(id, index: index, param: UInt32(param.id)); reload()
+            }, expression: expression, onExpression: {
+                model.expressionSheet = ExpressionRequest(layer: id, label: param.label, tracks: [ExpressionTrack(property: 40, effect: index, param: UInt32(param.id))], unit: param.unit)
             }, compactUnit: true) { model.engine.setLayerAnimParam(id, index: index, param: UInt32(param.id), value: $0); reload() }
     }
 }

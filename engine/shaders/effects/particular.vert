@@ -29,7 +29,8 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 launch;    // velocidade (px/s), variação 0..1, inclinação (rad), giro (rad)
     vec4 cone;      // abertura (graus), para fora 0..1, esticar, suavidade da borda
     vec4 forces;    // gravidade (px/s², +y desce), vento x, y, z (px/s)
-    vec4 motion;    // arrasto (1/s), turbulência (px), velocidade da turbulência, -
+    vec4 motion;    // arrasto (1/s), turbulência (px), velocidade da turbulência,
+                    // MEIA janela do obturador (s; 0 = sem desfoque de movimento)
     vec4 lifeSize;  // vida (ms), variação 0..1, tamanho (px), variação 0..1
     vec4 look;      // tamanho final (×), opacidade, surgir, sumir (frações da vida)
     vec4 color0;    // cor inicial (linear), cor aleatória 0..1
@@ -149,6 +150,15 @@ void main() {
     const float speed = p.launch.x * max(0.0, 1.0 + (rD.x - 0.5) * 2.0 * p.launch.y);
     const vec3 start = vec3(p.emitPos.x * p.frame.x, p.emitPos.y * p.frame.y, p.emitPos.z * p.frame.y) + offset;
     const vec3 pos = vec3(p.frame.zw, 0.0) + start + flight(age, dir, speed) + wander(now, k, rC * TWO_PI, generation);
+    // Desfoque de movimento POR PARTÍCULA (o do app antigo): a folha não se
+    // move, o movimento está nas partículas. Onde ela estava meia janela do
+    // obturador atrás é só avaliar a mesma fórmula fechada de novo — a
+    // turbulência também, no instante anterior, para que só a VARIAÇÃO dela
+    // conte como trajeto (reusar a de agora viraria ruído de dezenas de px).
+    const float shutter = p.motion.w;
+    const float agePrev = max(age - shutter, 0.0);
+    const vec3 posPrev = vec3(p.frame.zw, 0.0) + start + flight(agePrev, dir, speed)
+                       + wander(now - shutter, agePrev / life, rC * TWO_PI, generation);
 
     float size = p.lifeSize.z * max(0.05, 1.0 + (rD.y - 0.5) * 2.0 * p.lifeSize.w) * mix(1.0, p.look.x, k);
     const float fin = p.look.z <= 0.0 ? 1.0 : smoothstep(0.0, p.look.z, k);
@@ -198,6 +208,34 @@ void main() {
                 sv = size * clamp(1.0 + p.cone.z * vlen / max(p.launch.x, 1.0), 1.0, 1.0 + p.cone.z * 6.0);
             }
         }
+        if (shutter > 0.0) {
+            // O trajeto medido NA TELA (entre a posição de meia janela atrás
+            // e a de agora, pela câmera) e trazido de volta a unidades do
+            // mundo nesta profundidade pelos eixos da câmera: um passo em R
+            // só mexe o x da tela e um passo em U só o y.
+            const vec4 cp = p.compFromWorld * vec4((p.worldFromLayer * vec4(posPrev, 1.0)).xyz, 1.0);
+            if (cp.w >= max(p.frame.y, 1.0) * 1e-3) {
+                const vec2 nNow = cc.xy / cc.w;
+                const vec2 dScr = (nNow - cp.xy / cp.w) * 2.0;   // meia janela -> janela inteira
+                const vec4 cu = p.compFromWorld * vec4(center + R, 1.0);
+                const vec4 cv = p.compFromWorld * vec4(center + U, 1.0);
+                const float perU = cu.x / max(cu.w, 1e-6) - nNow.x;
+                const float perV = cv.y / max(cv.w, 1e-6) - nNow.y;
+                const vec2 travel = vec2(dScr.x / (abs(perU) < 1e-9 ? 1e-9 : perU),
+                                         dScr.y / (abs(perV) < 1e-9 ? 1e-9 : perV));
+                // Teto de uma altura de quadro: além disso não é rastro, é um
+                // quadrado do tamanho da tela por partícula.
+                const float mbLen = min(length(travel), max(p.frame.y, 1.0));
+                if (mbLen > max(size, 1.0) * 0.05) {
+                    const vec2 a = normalize(travel);
+                    wv = R * a.x + U * a.y;
+                    wu = R * -a.y + U * a.x;
+                    sv += mbLen;
+                    // A mesma luz espalhada no rastro inteiro: mais longo = mais fraco.
+                    v_color.a *= size / (size + mbLen);
+                }
+            }
+        }
         const vec3 world = center + wu * (corner.x * size * 0.5) + wv * (corner.y * sv * 0.5);
         const vec4 c = p.compFromWorld * vec4(world, 1.0);
         const vec2 at3 = c.xy / max(c.w, 1e-6);
@@ -213,6 +251,21 @@ void main() {
         return;
     }
     const float scale = F / depth;
+    const float depthPrev = F + posPrev.z;
+    if (shutter > 0.0 && depthPrev >= 0.01 * F) {
+        // O trajeto na tela (perspectiva nos dois instantes), de volta ao
+        // tamanho no plano da partícula (o quadrado é escalado por `scale`).
+        const vec2 scrNow = p.view.xy + (pos.xy - p.view.xy) * scale;
+        const vec2 scrPrev = p.view.xy + (posPrev.xy - p.view.xy) * (F / depthPrev);
+        const vec2 travel = (scrNow - scrPrev) * 2.0 / scale;
+        const float mbLen = min(length(travel), max(p.frame.y, 1.0));
+        if (mbLen > max(size, 1.0) * 0.05) {
+            axisV = normalize(travel);
+            axisU = vec2(-axisV.y, axisV.x);
+            sizeV += mbLen;
+            v_color.a *= size / (size + mbLen);
+        }
+    }
     const vec2 at = p.view.xy + (pos.xy - p.view.xy) * scale
                   + (axisU * (corner.x * size * 0.5) + axisV * (corner.y * sizeV * 0.5)) * scale;
     const vec2 ndc = (at - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0;

@@ -591,6 +591,13 @@ class AureaEngine private constructor() {
     fun queryLayerMotionBlurLength(layer: Long): Float = nativeQueryLayerMotionBlurLength(nativeHandle, layer)
     fun setAdjustmentScope(layer: Long, scope: Int): Boolean = nativeSetAdjustmentScope(nativeHandle, layer, scope)
     fun queryAdjustmentScope(layer: Long): Int = nativeQueryAdjustmentScope(nativeHandle, layer)
+    /** Escopo 2 do ajuste: põe/tira a camada da lista (a lista marcada do app antigo). */
+    fun setAdjustmentTarget(layer: Long, target: Long, on: Boolean): Boolean = nativeSetAdjustmentTarget(nativeHandle, layer, target, on)
+    fun queryAdjustmentTargets(layer: Long): LongArray = nativeQueryAdjustmentTargets(nativeHandle, layer) ?: LongArray(0)
+    /** Presets do tipo de efeito: pares (id estável, nome do motor). */
+    fun effectPresets(typeId: Int): List<Pair<String, String>> =
+        (nativeEffectPresets(nativeHandle, typeId) ?: emptyArray()).toList().chunked(2).filter { it.size == 2 }.map { it[0] to it[1] }
+    fun applyEffectPreset(layer: Long, effectId: Int, preset: Int): Boolean = nativeApplyEffectPreset(nativeHandle, layer, effectId, preset)
     fun setGroupCameraPassThrough(layer: Long, on: Boolean): Boolean = nativeSetGroupCameraPassThrough(nativeHandle, layer, on)
     /** −1 = não é grupo. */
     fun queryGroupCameraPassThrough(layer: Long): Int = nativeQueryGroupCameraPassThrough(nativeHandle, layer)
@@ -619,8 +626,8 @@ class AureaEngine private constructor() {
     fun makeCaptionPreset(name: String, ints: IntArray, floats: FloatArray): String? =
         nativeMakeCaptionPreset(name.toByteArray(Charsets.UTF_8), ints, floats)?.toString(Charsets.UTF_8)
     fun parseCaptionPreset(json: String): FloatArray? = nativeParseCaptionPreset(json.toByteArray(Charsets.UTF_8))
-    fun makeCurvePreset(name: String, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float): String? =
-        nativeMakeCurvePreset(name.toByteArray(Charsets.UTF_8), interp, x1, y1, x2, y2)?.toString(Charsets.UTF_8)
+    fun makeCurvePreset(name: String, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int = 1): String? =
+        nativeMakeCurvePreset(name.toByteArray(Charsets.UTF_8), interp, x1, y1, x2, y2, power)?.toString(Charsets.UTF_8)
     /** [interp, x1, y1, x2, y2]; nulo = não é um preset de curva válido. */
     fun parseCurvePreset(json: String): FloatArray? = nativeParseCurvePreset(json.toByteArray(Charsets.UTF_8))
     // --- Expressões (motor: expr/Expression.hpp) ---------------------------------
@@ -923,6 +930,10 @@ class AureaEngine private constructor() {
     private external fun nativeQueryLayerMotionBlurLength(handle: Long, layer: Long): Float
     private external fun nativeSetAdjustmentScope(handle: Long, layer: Long, scope: Int): Boolean
     private external fun nativeQueryAdjustmentScope(handle: Long, layer: Long): Int
+    private external fun nativeSetAdjustmentTarget(handle: Long, layer: Long, target: Long, on: Boolean): Boolean
+    private external fun nativeQueryAdjustmentTargets(handle: Long, layer: Long): LongArray?
+    private external fun nativeEffectPresets(handle: Long, typeId: Int): Array<String>?
+    private external fun nativeApplyEffectPreset(handle: Long, layer: Long, effectId: Int, preset: Int): Boolean
     private external fun nativeSetGroupCameraPassThrough(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeQueryGroupCameraPassThrough(handle: Long, layer: Long): Int
     private external fun nativeAddLayersToGroup(handle: Long, ids: LongArray, group: Long): String?
@@ -933,7 +944,7 @@ class AureaEngine private constructor() {
     private external fun nativeApplyPreset(handle: Long, layer: Long, json: ByteArray, duration: Long): ByteArray?
     private external fun nativeMakeCaptionPreset(name: ByteArray, ints: IntArray, floats: FloatArray): ByteArray?
     private external fun nativeParseCaptionPreset(json: ByteArray): FloatArray?
-    private external fun nativeMakeCurvePreset(name: ByteArray, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float): ByteArray?
+    private external fun nativeMakeCurvePreset(name: ByteArray, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int): ByteArray?
     private external fun nativeParseCurvePreset(json: ByteArray): FloatArray?
     private external fun nativeSetExpression(handle: Long, layer: Long, keys: IntArray, source: ByteArray): ByteArray?
     private external fun nativeSetExpressionEnabled(handle: Long, layer: Long, keys: IntArray, enabled: Boolean): Boolean

@@ -3173,4 +3173,17 @@
     <string name="fxl_add_mode">مزج إضافي</string>
     <string name="fxl_show_layer">إظهار الطبقة</string>
     <string name="fxo_block_mosaic">فسيفساء كتل</string>
+    <string name="app_export_frame_fallback">تعذّرت قراءة بعض إطارات الفيديو الأصلي في الوقت المناسب؛ فاستُخدم أقرب إطار بدلًا منها. يستمر التصدير.</string>
+    <string name="ios_export_frame_fallback">تعذّرت قراءة بعض إطارات الفيديو الأصلي في الوقت المناسب؛ فاستُخدم أقرب إطار بدلًا منها. يستمر التصدير.</string>
+    <string name="fx_presets">إعدادات مسبقة</string>
+    <string name="fxp_impact">صدمة</string>
+    <string name="fxp_handheld">محمول باليد</string>
+    <string name="fxp_glitch">خلل</string>
+    <string name="la_affected_chosen">المختارة فقط</string>
+    <string name="la_affected_chosen_hint">تنطبق التأثيرات على الطبقات المحددة أدناه فقط.</string>
+    <string name="la_affected_none_below">لا توجد طبقة أسفل هذه</string>
+    <string name="la_toggle_group">تبديل المجموعة</string>
+    <string name="la_toggle_group_hint">يجمع الطبقات المختارة؛ وعلى مجموعة يفكّها.</string>
+    <string name="fxl_motion_blur_2">ضبابية الحركة</string>
+    <string name="fxl_shutter_angle">زاوية الغالق</string>
 </resources>

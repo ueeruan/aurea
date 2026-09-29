@@ -472,11 +472,22 @@ private struct ShellMenuRow: View {
             if row.kind != 3 {
                 ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "editor_camada_ajuste", checked: row.adjustment, detail: "editor_efeitos_desta_camada_valem_todas_baixo") { model.mutate { $0.setLayer(row.id, adjustment: !row.adjustment) }; model.refreshModel(force: true) }
                 if row.adjustment {
-                    // Camadas afetadas: todas abaixo ↔ só a logo abaixo (um grupo conta como uma).
-                    let onlyBelow = model.engine.adjustmentScope(row.id) == 1
+                    // Camadas afetadas: todas abaixo → só a logo abaixo (um grupo conta
+                    // como uma) → só as escolhidas (a lista marcada do app antigo).
+                    let scope = model.engine.adjustmentScope(row.id)
                     ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "la_affected",
-                                 title: AureaText.t("la_affected") + " · " + AureaText.t(onlyBelow ? "la_affected_below" : "la_affected_all"),
-                                 detail: "la_affected_hint") { model.engine.setAdjustmentScope(onlyBelow ? 0 : 1, forLayer: row.id); model.refreshModel(force: true) }
+                                 title: AureaText.t("la_affected") + " · " + AureaText.t(scope == 1 ? "la_affected_below" : scope == 2 ? "la_affected_chosen" : "la_affected_all"),
+                                 detail: scope == 2 ? "la_affected_chosen_hint" : "la_affected_hint") { model.engine.setAdjustmentScope((scope + 1) % 3, forLayer: row.id); model.refreshModel(force: true) }
+                    if scope == 2 {
+                        let below = Array(model.layers.dropFirst(index + 1)).filter { $0.kind != 3 }
+                        let chosen = Set(model.engine.adjustmentTargets(row.id).map(\.int64Value))
+                        if below.isEmpty { ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "la_affected_none_below", enabled: false) {} }
+                        ForEach(below) { b in
+                            ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "la_affected_chosen", title: b.name, checked: chosen.contains(b.id)) {
+                                model.engine.setAdjustmentTarget(b.id, on: !chosen.contains(b.id), forLayer: row.id); model.refreshModel(force: true)
+                            }
+                        }
+                    }
                 }
                 ShellMenuRow(CupertinoGlyph.Grid, "editor_guia_nao_exporta", checked: row.guide, detail: "editor_aparece_aqui_editor_fica_fora_video") { model.mutate { $0.setLayer(row.id, guide: !row.guide) }; model.refreshModel(force: true) }
             }
@@ -501,6 +512,8 @@ private struct ShellMenuRow: View {
             }.padding(.horizontal, 14).padding(.vertical, 4)
             if row.kind != 3 {
                 ShellMenuSection("editor_grupo")
+                // Alternar grupo (app antigo): agrupa as escolhidas; num grupo, desagrupa.
+                ShellMenuRow(ShellGlyph.SquareSplit2x2, "la_toggle_group", detail: "la_toggle_group_hint") { act { model.toggleGroup() } }
                 if row.kind == 12 {
                     ShellMenuRow(CupertinoGlyph.ArrowDownRightSquare, "editor_editar_grupo") { act { model.openGroup(row.id) } }
                     ShellMenuRow(ShellGlyph.SquareSplit2x2, "editor_desagrupar") { act { model.ungroup(row.id) } }

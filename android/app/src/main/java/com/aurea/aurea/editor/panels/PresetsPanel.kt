@@ -249,7 +249,7 @@ private fun apply(store: EditorStore, e: PresetEntry, stretch: Boolean) {
     }
     if (i == track.lastIndex) i--
     store.beginGesture("preset de curva")
-    applyEase(store, layer, track[i], Ease(v[0].toInt(), v[1], v[2], v[3], v[4]))
+    applyEase(store, layer, track[i], curvePresetEase(v))
     store.endGesture()
     store.presets.markUsed(e)
     store.showToast(AppText.get(store.getApplication<Application>(), R.string.edt_curve_applied, e.name))
@@ -322,6 +322,10 @@ private fun SavePresetDialog(store: EditorStore, kind: PresetKind, onDismiss: ()
     )
 }
 
+/** A curva de um preset lido ([interp, x1, y1, x2, y2, força]); preset antigo = força 1. */
+internal fun curvePresetEase(v: FloatArray): Ease =
+    Ease(v[0].toInt(), v[1], v[2], v[3], v[4], (v.getOrNull(5) ?: 1f).toInt().coerceIn(1, 3))
+
 /** JSON da curva do trecho que sai do keyframe escolhido (nulo = sem trecho). */
 private fun curveJson(store: EditorStore, name: String): String? {
     val (layer, sel) = store.selectedKeyframe ?: return null
@@ -331,7 +335,7 @@ private fun curveJson(store: EditorStore, name: String): String? {
     if (i == track.lastIndex) i--
     val e = easeOf(store, layer, track[i])
     val h = e.handles()
-    return store.curvePresetJson(name, e.interp, h[0], h[1], h[2], h[3])
+    return store.curvePresetJson(name, e.interp, h[0], h[1], h[2], h[3], if (e.isBezier) e.power else 1)
 }
 
 /** Fundo da prévia: o palco (a composição fica escura atrás do objeto). */
@@ -431,7 +435,7 @@ private fun PresetPreview(store: EditorStore, e: PresetEntry, modifier: Modifier
         PresetKind.Curve -> {
             val v = remember(json) { json?.let { store.curveOfPreset(e) } }
             if (v == null || v.size < 5) GlyphPreview(CupertinoGlyph.Scribble, modifier)
-            else CurvePreview(Ease(v[0].toInt(), v[1], v[2], v[3], v[4]), modifier)
+            else CurvePreview(curvePresetEase(v), modifier)
         }
         PresetKind.Caption -> {
             val c = remember(json) { json?.let { runCatching { JSONObject(it).optJSONObject("caption") }.getOrNull() } }

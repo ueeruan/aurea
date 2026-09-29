@@ -2332,13 +2332,15 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (NSArray<NSNumber*>*)parseCurvePreset:(NSString*)json {
     aurea::presets::Preset p;
     if (!aurea::presets::parse(to_std(json), p) || p.kind != aurea::presets::PresetKind::Curve) return @[];
-    return @[@(static_cast<uint32_t>(p.curveInterp)), @(p.x1), @(p.y1), @(p.x2), @(p.y2)];
+    return @[@(static_cast<uint32_t>(p.curveInterp)), @(p.x1), @(p.y1), @(p.x2), @(p.y2), @(static_cast<uint32_t>(p.curvePower))];
 }
 - (NSString*)makeCurvePreset:(NSString*)name interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles {
-    if (handles.count != 4) return @"";
+    // 4 alças (x1, y1, x2, y2) e, opcional, a força da bézier (1..3).
+    if (handles.count != 4 && handles.count != 5) return @"";
     for (NSNumber* n in handles) if (!std::isfinite(n.floatValue)) return @"";
     const auto interp = static_cast<aurea::Interpolation>(std::min<uint32_t>(interpolation, static_cast<uint32_t>(aurea::Interpolation::Steps)));
-    return to_ns(aurea::presets::make_curve_preset(to_std(name), interp, std::clamp(handles[0].floatValue, 0.f, 1.f), std::clamp(handles[1].floatValue, -2.f, 3.f), std::clamp(handles[2].floatValue, 0.f, 1.f), std::clamp(handles[3].floatValue, -2.f, 3.f)));
+    const uint32_t power = handles.count == 5 ? static_cast<uint32_t>(std::clamp(handles[4].floatValue, 1.f, 3.f) + 0.5f) : 1u;
+    return to_ns(aurea::presets::make_curve_preset(to_std(name), interp, std::clamp(handles[0].floatValue, 0.f, 1.f), std::clamp(handles[1].floatValue, -2.f, 3.f), std::clamp(handles[2].floatValue, 0.f, 1.f), std::clamp(handles[3].floatValue, -2.f, 3.f), power));
 }
 - (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize {
     auto* e = self.engine; if (!e) return @"Motor indisponível";
@@ -2862,6 +2864,32 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (uint32_t)adjustmentScope:(long long)layerId {
     if (auto* e = self.engine) return e->query_adjustment_scope(static_cast<aurea::u64>(layerId));
     return 0;
+}
+- (void)setAdjustmentTarget:(long long)targetId on:(BOOL)on forLayer:(long long)layerId {
+    if (auto* e = self.engine) (void)e->set_adjustment_target(static_cast<aurea::u64>(layerId), static_cast<aurea::u64>(targetId), on != NO);
+}
+- (NSArray<NSNumber*>*)adjustmentTargets:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    std::vector<aurea::u64> ids(e->query_adjustment_targets(static_cast<aurea::u64>(layerId), nullptr, 0));
+    if (!ids.empty()) ids.resize(e->query_adjustment_targets(static_cast<aurea::u64>(layerId), ids.data(), static_cast<aurea::u32>(ids.size())));
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:ids.size()];
+    for (aurea::u64 v : ids) [out addObject:@(static_cast<long long>(v))];
+    return out;
+}
+- (NSArray<NSString*>*)effectPresets:(uint32_t)typeId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    for (const auto& [pid, name] : e->effect_presets(typeId)) {
+        [out addObject:[NSString stringWithUTF8String:pid.c_str()] ?: @""];
+        [out addObject:[NSString stringWithUTF8String:name.c_str()] ?: @""];
+    }
+    return out;
+}
+- (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->apply_effect_preset(static_cast<aurea::u64>(layerId), effectId, preset) ? YES : NO;
+    return NO;
 }
 - (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId {
     if (auto* e = self.engine) return e->set_group_camera_pass_through(static_cast<aurea::u64>(layerId), on != NO);

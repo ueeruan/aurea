@@ -152,15 +152,33 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
                 detail = stringResource(R.string.editor_efeitos_desta_camada_valem_todas_baixo),
             )
             if (row.adjustment) {
-                // Camadas afetadas: todas abaixo ↔ só a logo abaixo (um grupo conta como uma).
-                val onlyBelow = store.adjustmentScope == 1
+                // Camadas afetadas: todas abaixo → só a logo abaixo (um grupo conta
+                // como uma) → só as escolhidas (a lista marcada do app antigo).
+                val scope = store.adjustmentScope
                 MenuItemRow(
                     CupertinoGlyph.SliderHorizontal3,
-                    stringResource(R.string.la_affected) + " · " +
-                        stringResource(if (onlyBelow) R.string.la_affected_below else R.string.la_affected_all),
-                    { store.changeAdjustmentScope(if (onlyBelow) 0 else 1) },
-                    detail = stringResource(R.string.la_affected_hint),
+                    stringResource(R.string.la_affected) + " · " + stringResource(when (scope) {
+                        1 -> R.string.la_affected_below
+                        2 -> R.string.la_affected_chosen
+                        else -> R.string.la_affected_all
+                    }),
+                    { store.changeAdjustmentScope((scope + 1) % 3) },
+                    detail = stringResource(if (scope == 2) R.string.la_affected_chosen_hint else R.string.la_affected_hint),
                 )
+                if (scope == 2) {
+                    val below = store.layers.drop(index + 1).filter { LayerType.of(it.kind) != LayerType.Audio }
+                    if (below.isEmpty()) {
+                        MenuItemRow(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.la_affected_none_below), null)
+                    }
+                    below.forEach { b ->
+                        MenuItemRow(
+                            CupertinoGlyph.SliderHorizontal3,
+                            b.name,
+                            { store.toggleAdjustmentTarget(b.id) },
+                            checked = b.id in store.adjustmentTargets,
+                        )
+                    }
+                }
             }
             MenuItemRow(
                 CupertinoGlyph.Grid,
@@ -187,6 +205,13 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
 
         if (visual) {
             MenuSection(stringResource(R.string.editor_grupo))
+            // Alternar grupo (app antigo): agrupa as escolhidas; num grupo, desagrupa.
+            MenuItemRow(
+                ShellGlyph.SquareSplit2x2,
+                stringResource(R.string.la_toggle_group),
+                act { store.toggleGroup(if (id in store.selection) store.selection.toList() else listOf(id)) },
+                detail = stringResource(R.string.la_toggle_group_hint),
+            )
             if (type != LayerType.Group) {
                 MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_converter_grupo), act { store.precompose(listOf(id)) })
             } else {

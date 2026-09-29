@@ -35,6 +35,7 @@ enum Param : u32 {
     kGravity, kWindX, kWindY, kWindZ, kAirDrag, kTurbulence, kTurbulenceSpeed,
     kLife, kLifeRandom, kSize, kSizeRandom, kSizeEnd, kOpacity, kFadeIn, kFadeOut,
     kFeather, kStretch, kColor, kColorEnd, kColorRandom, kAddMode, kShowSource, kSeed,
+    kMotionBlur, kShutterAngle,
     kParamCount,
 };
 

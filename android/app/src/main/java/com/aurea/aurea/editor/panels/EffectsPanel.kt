@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.aurea.aurea.engine.ExpressionLook
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -803,6 +804,10 @@ private fun EffectCardItem(
             PanelNotice(stringResource(R.string.panel_este_efeito_nao_tem_ajustes))
             return@EffectStackCard
         }
+        // Presets do efeito (o do app antigo: Impacto/Na mão/Glitch do Tremor):
+        // uma fileira de fichas no topo do cartão; tocar = um passo de desfazer.
+        val presets = remember(effect.typeId) { store.effectPresets(effect.typeId) }
+        if (presets.isNotEmpty()) EffectPresetRow(presets) { store.applyEffectPreset(id, it) }
         val (main, rest) = remember(visible, effect.typeId) { splitPrincipal(effect.typeId, visible) }
         // EQ paramétrico: o gráfico da resposta em cima das bandas.
         if (effect.typeId == effectTypeId("aurea.audio.parametric_eq")) EqResponseGraph(env, id)
@@ -810,6 +815,33 @@ private fun EffectCardItem(
         if (rest.isNotEmpty()) {
             AdvancedToggle(open = advanced, count = rest.size, onToggle = onToggleAdvanced)
             if (advanced) rest.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
+        }
+    }
+}
+
+/** Nome do preset de efeito pelo id estável (o motor fala pt-BR). */
+@androidx.annotation.StringRes
+private fun effectPresetLabel(id: String): Int? = when (id) {
+    "impact" -> R.string.fxp_impact
+    "handheld" -> R.string.fxp_handheld
+    "glitch" -> R.string.fxp_glitch
+    else -> null
+}
+
+/** Fichas dos presets do efeito, como a fileira de presets do Particular. */
+@Composable
+private fun EffectPresetRow(presets: List<Pair<String, String>>, onApply: (Int) -> Unit) {
+    Column(Modifier.padding(bottom = 6.dp)) {
+        Text(stringResource(R.string.fx_presets), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)))
+        Spacer(Modifier.height(5.dp))
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            presets.forEachIndexed { i, (pid, name) ->
+                val res = effectPresetLabel(pid)
+                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip).testTag("fx.preset.$pid")
+                    .tocavel(onClick = { onApply(i) }).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text(if (res != null) stringResource(res) else name, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
+                }
+            }
         }
     }
 }

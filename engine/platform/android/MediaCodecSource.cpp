@@ -379,8 +379,14 @@ public:
         if (!pendingEos_) {
             if (const Status s = next_raw_frame(next, nextPts, eos); !s.ok()) return s;
         }
-        if (next && next->ptsUs <= pendingFrame_->ptsUs)
-            return Status{Errc::DecodeFailed, "PTS de video fora de ordem"};
+        // PTS repetido/para trás (gravador de tela, remux ruim): o quadro
+        // duplicado sai, o vídeo segue — falhar aqui travava o export inteiro.
+        for (u32 dropped = 0; next && next->ptsUs <= pendingFrame_->ptsUs; ++dropped) {
+            if (dropped >= 64) return Status{Errc::DecodeFailed, "PTS de video fora de ordem"};
+            next.reset();
+            if (eos) break;
+            if (const Status s = next_raw_frame(next, nextPts, eos); !s.ok()) return s;
+        }
         FrameRef current = std::move(pendingFrame_);
         current->durationUs = next ? next->ptsUs - current->ptsUs
             : info_.durationUs > current->ptsUs ? info_.durationUs - current->ptsUs
@@ -462,13 +468,23 @@ public:
         if (!pendingEos_) {
             if (const Status status = next_raw_buffer(next, nextPts, eos); !status.ok()) return status;
         }
+        // PTS repetido/para trás (gravador de tela, remux ruim): o buffer
+        // duplicado volta ao codec sem render e o vídeo segue. Falhar aqui
+        // fazia o decoder repetir seek+erro no mesmo ponto até o export morrer.
+        for (u32 dropped = 0; next >= 0 && nextPts <= pendingPts_; ++dropped) {
+            if (dropped >= 64) {
+                AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(next), false);
+                return Status{Errc::DecodeFailed, "PTS de video fora de ordem"};
+            }
+            AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(next), false);
+            next = -1;
+            if (eos) break;
+            if (const Status status = next_raw_buffer(next, nextPts, eos); !status.ok()) return status;
+        }
+        if (next < 0) nextPts = pendingPts_;
         const ssize_t current = pendingOutput_;
         const i64 pts = pendingPts_;
         pendingOutput_ = next; pendingPts_ = nextPts; pendingEos_ = eos;
-        if (next >= 0 && nextPts <= pts) {
-            AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(current), false);
-            return Status{Errc::DecodeFailed, "PTS de video fora de ordem"};
-        }
         const i64 duration = next >= 0 ? nextPts - pts : info_.durationUs > pts ? info_.durationUs - pts
             : std::max<i64>(1, static_cast<i64>(1e6 / std::max(1.0, info_.fps)));
         outPtsUs = pts; nextDeliveryUs_ = pts + duration;

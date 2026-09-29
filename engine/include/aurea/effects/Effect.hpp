@@ -28,6 +28,8 @@
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
 
+#include <span>
+
 #include <initializer_list>
 #include <vector>
 
@@ -107,11 +109,29 @@ struct LayerPlacement {
     Mat4 compFromWorld = Mat4::identity();
     Vec3 camRight{1.0f, 0.0f, 0.0f};
     Vec3 camUp{0.0f, 1.0f, 0.0f};
+    /// Obturador (graus) do desfoque de movimento da camada: > 0 só com a
+    /// chave da camada e o desfoque da composição ligados. O Particular usa
+    /// para o rastro por partícula (a folha em si não se move).
+    f32 shutterAngle = 0.0f;
 };
 
 /// Retângulo, em pixels da layer, que o quadro inteiro da composição cobre
 /// (caixa da inversa dos quatro cantos). Vazio se a matriz é degenerada.
 [[nodiscard]] Rect visible_layer_rect(const LayerPlacement& placement) noexcept;
+
+/// Um valor de preset: parâmetro (índice da declaração) e valor parado
+/// (componente 0; bool = 0/1, enum = índice).
+struct EffectPresetValue {
+    u32 param;
+    f32 value;
+};
+/// Preset de um efeito (Effect::presets). `id` é estável — a interface traduz
+/// o nome por ele; `name` é o texto do motor (pt-BR).
+struct EffectPreset {
+    const char* id;
+    const char* name;
+    std::span<const EffectPresetValue> values;
+};
 
 /// Uma imagem no plano da layer: a textura e o retângulo (px da layer, em
 /// resolução cheia) que ela cobre. Com efeito que expande (blur sem repetir
@@ -369,6 +389,12 @@ public:
         (void)instance; (void)values;
         return false;
     }
+
+    /// Presets do efeito (o do app antigo: Impacto/Na mão/Glitch do Tremor
+    /// em trancos). Cada um escreve os valores parados dos parâmetros que
+    /// lista (Engine::apply_effect_preset, um passo de desfazer); a interface
+    /// mostra uma fileira de fichas no topo do cartão. Vazio = sem fileira.
+    [[nodiscard]] virtual std::span<const EffectPreset> presets() const noexcept { return {}; }
 
     /// Só efeitos por pixel: a operação que entra no passe de cor fundido.
     [[nodiscard]] virtual bool color_op(const EffectEval& eval, ColorOp& out) const noexcept {

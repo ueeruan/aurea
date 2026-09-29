@@ -3189,4 +3189,17 @@ to edit the curve.</string>
     <string name="fxl_add_mode">Add mode</string>
     <string name="fxl_show_layer">Show layer</string>
     <string name="fxo_block_mosaic">Block mosaic</string>
+    <string name="app_export_frame_fallback">Some frames of the original video couldn\'t be read in time; the nearest frame was used instead. The export continues.</string>
+    <string name="ios_export_frame_fallback">Some frames of the original video could not be read in time; the nearest frame was used instead. The export continues.</string>
+    <string name="fx_presets">Presets</string>
+    <string name="fxp_impact">Impact</string>
+    <string name="fxp_handheld">Handheld</string>
+    <string name="fxp_glitch">Glitch</string>
+    <string name="la_affected_chosen">Chosen layers only</string>
+    <string name="la_affected_chosen_hint">The effects apply only to the layers checked below.</string>
+    <string name="la_affected_none_below">No layer below this one</string>
+    <string name="la_toggle_group">Toggle group</string>
+    <string name="la_toggle_group_hint">Groups the selected layers; on a group, ungroups it.</string>
+    <string name="fxl_motion_blur_2">Motion blur</string>
+    <string name="fxl_shutter_angle">Shutter angle</string>
 </resources>

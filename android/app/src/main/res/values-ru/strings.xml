@@ -3159,4 +3159,17 @@
     <string name="fxl_add_mode">Аддитивное смешивание</string>
     <string name="fxl_show_layer">Показать слой</string>
     <string name="fxo_block_mosaic">Блочная мозаика</string>
+    <string name="app_export_frame_fallback">Некоторые кадры исходного видео не удалось прочитать вовремя; вместо них использован ближайший кадр. Экспорт продолжается.</string>
+    <string name="ios_export_frame_fallback">Некоторые кадры исходного видео не удалось прочитать вовремя; вместо них использован ближайший кадр. Экспорт продолжается.</string>
+    <string name="fx_presets">Пресеты</string>
+    <string name="fxp_impact">Удар</string>
+    <string name="fxp_handheld">С рук</string>
+    <string name="fxp_glitch">Глитч</string>
+    <string name="la_affected_chosen">Только выбранные</string>
+    <string name="la_affected_chosen_hint">Эффекты применяются только к отмеченным ниже слоям.</string>
+    <string name="la_affected_none_below">Под этим слоем нет слоёв</string>
+    <string name="la_toggle_group">Группировать / разгруппировать</string>
+    <string name="la_toggle_group_hint">Группирует выбранные слои; у группы — разгруппировывает.</string>
+    <string name="fxl_motion_blur_2">Размытие движения</string>
+    <string name="fxl_shutter_angle">Угол затвора</string>
 </resources>

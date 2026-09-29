@@ -202,8 +202,9 @@ struct RenderLayer {
     /// Usada como matte por outra camada: não desenha por conta própria.
     bool matteOnly = false;
     /// Camada de ajuste: 0 = vale para tudo abaixo, 1 = só para a camada logo
-    /// abaixo (um grupo conta como uma camada).
+    /// abaixo (um grupo conta como uma camada), 2 = só as de `adjustTargets`.
     u8   adjustScope = 0;
+    std::vector<u64> adjustTargets;   ///< escopo 2: ids (com sal) das camadas escolhidas
     /// Partículas (8.2): cena 3D, espaço mundo, histórico e desfoque por tempo.
     ParticleSpace particle;
 };
@@ -496,6 +497,8 @@ private:
         /// Camada de ajuste: índice do plano de efeitos em `FrameSnapshot::plans`
         /// (a textura só existe no passe, feita do fundo acumulado).
         u32       adjustPlan = kInvalidIndex;
+        /// Id (com sal) da camada que gerou o desenho (ajuste de escopo 2).
+        u64       layer = 0;
     };
     /// Os desenhos da pilha → alvo: lotes de blend de hardware (Normal, Add)
     /// no mesmo alvo; modo que lê o fundo ou camada de ajuste = ping-pong.

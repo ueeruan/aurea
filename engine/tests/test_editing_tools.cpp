@@ -220,3 +220,55 @@ AUREA_TEST(Vector, StrokeTaperThinsTheEndsAndRoundTrips) {
     AUREA_CHECK(decode_document(s.data(), s.size(), names, back));
     AUREA_CHECK(back == d);
 }
+
+// Copiar animação leva também os keyframes de FORMA (morph) da camada
+// vetorial: colam no mesmo caminho de outra camada vetorial, no cabeçote, num
+// passo de desfazer; numa camada sem esse caminho só as trilhas colam.
+AUREA_TEST(AnimationClipboard, CopiesVectorShapeMorphKeys) {
+    ToolsRig r;
+    const u64 a = *r.e.add_shape(0);
+    const u64 b = *r.e.add_shape(0);
+    const u64 c = *r.e.add_null(false);
+    auto make_vector = [&](u64 id, bool keyed) {
+        Layer* l = r.L(id);
+        l->shape.shapeType = kShapeVector;
+        VectorGroup g;
+        VectorPath p;
+        p.kind = VectorPathKind::Free;
+        p.path = vector::make_rect(Vec2{0, 0}, Vec2{100, 100}, 0.0f);
+        if (keyed) {
+            p.keys.push_back(PathKey{10, vector::make_rect(Vec2{0, 0}, Vec2{100, 100}, 0.0f), 1});
+            p.keys.push_back(PathKey{25, vector::make_ellipse(Vec2{0, 0}, Vec2{80, 80}), 0});
+        }
+        g.paths.push_back(p);
+        l->shape.vector.groups.assign(1, g);
+    };
+    make_vector(a, true);
+    make_vector(b, false);
+    r.L(a)->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{15}, 42.0f);
+    AUREA_CHECK_EQ(r.e.copy_animation(a), 3u);   // 1 de trilha + 2 de forma
+    AUREA_CHECK((r.e.clipboard_state() & 8u) != 0);
+    const u64 targets[] = {b, c};
+    AUREA_CHECK_EQ(r.e.paste_keyframes(targets, 2, 40), 4u);
+    const Layer* lb = r.L(b);
+    const i64 base = lb->local_time(FrameIndex{40}).value;   // o 1º keyframe (10) cai no cabeçote
+    const auto& keys = lb->shape.vector.groups[0].paths[0].keys;
+    AUREA_CHECK_EQ(keys.size(), usize{2});
+    if (keys.size() == 2) {
+        AUREA_CHECK_EQ(keys[0].frame, base);
+        AUREA_CHECK_EQ(keys[1].frame, base + 15);
+        AUREA_CHECK_EQ(keys[1].ease, u8{0});
+        AUREA_CHECK(keys[1].path == r.L(a)->shape.vector.groups[0].paths[0].keys[1].path);
+    }
+    const Track* px = lb->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(px && px->keys.size() == 1 && px->keys[0].time.value == base + 5);
+    const Track* pc = r.L(c)->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(pc && pc->keys.size() == 1);
+    r.undo();
+    AUREA_CHECK(r.L(b)->shape.vector.groups[0].paths[0].keys.empty());
+    // Copiar keyframes de um instante troca a área: a forma antiga não volta.
+    (void)r.e.copy_keyframes(a, r.L(a)->start.value + 15);
+    const u64 onlyB[] = {b};
+    (void)r.e.paste_keyframes(onlyB, 1, 40);
+    AUREA_CHECK(r.L(b)->shape.vector.groups[0].paths[0].keys.empty());
+}

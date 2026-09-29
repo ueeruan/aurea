@@ -344,6 +344,23 @@ public:
         return true;
     }
 
+    // Os presets do app antigo, nas unidades do Aurea (intensidade, escala e
+    // suavizar em %): todos os parâmetros, como lá.
+    std::span<const EffectPreset> presets() const noexcept override {
+        static constexpr EffectPresetValue kImpact[] = {{kFrequency, 20.0f}, {kStrength, 5.0f}, {kRotation, 6.0f},
+                                                        {kScale, 6.0f}, {kSoften, 0.0f}, {kDecay, 2.5f}, {kSeed, 0.0f}};
+        static constexpr EffectPresetValue kHandheld[] = {{kFrequency, 3.0f}, {kStrength, 1.2f}, {kRotation, 0.8f},
+                                                          {kScale, 1.0f}, {kSoften, 100.0f}, {kDecay, 0.0f}, {kSeed, 7.0f}};
+        static constexpr EffectPresetValue kGlitch[] = {{kFrequency, 32.0f}, {kStrength, 3.0f}, {kRotation, 0.0f},
+                                                        {kScale, 0.0f}, {kSoften, 0.0f}, {kDecay, 0.0f}, {kSeed, 23.0f}};
+        static constexpr EffectPreset kPresets[] = {
+            {"impact", "Impacto", kImpact},
+            {"handheld", "Na mão", kHandheld},
+            {"glitch", "Glitch", kGlitch},
+        };
+        return kPresets;
+    }
+
     /// Hash sem seno em [0, 1): aritmética de float igual à do shader antigo.
     static f32 hash(f32 x) noexcept {
         f32 q = x * 0.1031f;

@@ -3153,4 +3153,17 @@ untuk mengedit kurvanya.</string>
     <string name="fxl_add_mode">Campuran aditif</string>
     <string name="fxl_show_layer">Tampilkan layer</string>
     <string name="fxo_block_mosaic">Mosaik blok</string>
+    <string name="app_export_frame_fallback">Beberapa frame video asli tidak dapat dibaca tepat waktu; frame terdekat dipakai sebagai gantinya. Ekspor tetap berjalan.</string>
+    <string name="ios_export_frame_fallback">Beberapa frame video asli tidak dapat dibaca tepat waktu; frame terdekat dipakai sebagai gantinya. Ekspor tetap berjalan.</string>
+    <string name="fx_presets">Preset</string>
+    <string name="fxp_impact">Benturan</string>
+    <string name="fxp_handheld">Genggam</string>
+    <string name="fxp_glitch">Glitch</string>
+    <string name="la_affected_chosen">Hanya yang dipilih</string>
+    <string name="la_affected_chosen_hint">Efek hanya berlaku untuk layer yang dicentang di bawah.</string>
+    <string name="la_affected_none_below">Tidak ada layer di bawah ini</string>
+    <string name="la_toggle_group">Alihkan grup</string>
+    <string name="la_toggle_group_hint">Mengelompokkan layer yang dipilih; pada grup, memisahkannya.</string>
+    <string name="fxl_motion_blur_2">Blur gerak</string>
+    <string name="fxl_shutter_angle">Sudut rana</string>
 </resources>

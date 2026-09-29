@@ -1492,6 +1492,37 @@ AUREA_TEST(Gpu, Scene3DModelsAppearFramedWithPbr) {
     }
 }
 
+// Bug do dono: foto/vídeo no projeto e DEPOIS um modelo 3D → o modelo não
+// aparecia. O modelo importado por cima de uma mídia 2D tem de desenhar.
+AUREA_TEST(Gpu, Scene3DModelImportedAfterPhotoIsVisible) {
+    AUREA_REQUIRE_GPU();
+    const std::string path = gltf_data("Box.glb");
+    if (!file_exists(path)) { std::printf("\n    (modelo de amostra ausente: Box.glb)"); return; }
+    Scene3DRig rig(256, 144);
+    std::vector<u8> photo(256u * 144u * 4u);
+    for (usize i = 0; i < photo.size(); i += 4) { photo[i] = 40; photo[i + 1] = 90; photo[i + 2] = 160; photo[i + 3] = 255; }
+    AUREA_CHECK(rig.e.import_image(photo.data(), 256, 144, "foto", nullptr).ok());
+    const Image8 before = rig.capture(256);
+    ModelImport mi;
+    mi.path = path;
+    const Result<u64> id = rig.e.import_model(mi);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    const Image8 after = rig.capture(256);
+    AUREA_CHECK_EQ(after.width, before.width);
+    u32 changed = 0;
+    for (u32 y = 0; y < after.height; ++y) {
+        for (u32 x = 0; x < after.width; ++x) {
+            const u8* a = after.at(x, y);
+            const u8* b = before.at(x, y);
+            if (std::abs(int(a[0]) - int(b[0])) + std::abs(int(a[1]) - int(b[1])) + std::abs(int(a[2]) - int(b[2])) > 24) ++changed;
+        }
+    }
+    const f32 frac = static_cast<f32>(changed) / static_cast<f32>(after.width * after.height);
+    std::printf("\n    modelo sobre a foto: %.3f do quadro", frac);
+    AUREA_CHECK(frac > 0.03f && frac < 0.95f);
+}
+
 
 // Look-dev 3D (antes/depois): cenas em 1280x720 com a HDRI de estúdio, para
 // comparar AA, cor, reflexos e sombras e medir o custo por quadro. PNGs em
@@ -10693,6 +10724,32 @@ AUREA_TEST(Gpu, AdjustmentScopeOnlyTheLayerBelow) {
     AUREA_CHECK(near4(all.v(48, 48), Vec4{a.x * 2, a.y * 2, a.z * 2, 1}, 0.006f));
 }
 
+// Escopo 2 (a lista marcada do app antigo): só as camadas escolhidas, em
+// qualquer altura abaixo do ajuste — nem o fundo nem a vizinha de cima.
+AUREA_TEST(Gpu, AdjustmentScopeOnlyTheChosenLayers) {
+    AUREA_REQUIRE_GPU();
+    const Vec3 a = lin3(0.4f, 0.3f, 0.2f), c = lin3(0.2f, 0.25f, 0.3f), b = lin3(0.3f, 0.2f, 0.1f);
+    Scene s(64, 64);
+    s.solid(64, 64, Vec4{0.4f, 0.3f, 0.2f, 1}, 32, 32);                          // fundo
+    const LayerId chosen = s.solid(16, 16, Vec4{0.2f, 0.25f, 0.3f, 1}, 16, 16);   // escolhida
+    s.solid(16, 16, Vec4{0.3f, 0.2f, 0.1f, 1}, 48, 16);                          // logo abaixo, NÃO escolhida
+    const LayerId adj = s.solid(8, 8, Vec4{1, 0, 1, 1}, 4, 4);
+    s.comp->layer(adj)->adjustment = true;
+    s.comp->layer(adj)->adjustmentScope = 2;
+    s.comp->layer(adj)->adjustmentTargets = {chosen};
+    s.add_effect(adj, effect_keys::kExposure).params[0].constant.v[0] = 1.0f;   // ×2 linear
+    const FloatImage img = s.render();
+    std::printf("    escolhida %.4f (esperado %.4f), vizinha %.4f (esperado %.4f), fundo %.4f\n", img.v(16, 16).x, c.x * 2,
+                img.v(48, 16).x, b.x, img.v(48, 48).x);
+    AUREA_CHECK(near4(img.v(16, 16), Vec4{c.x * 2, c.y * 2, c.z * 2, 1}, 0.006f));
+    AUREA_CHECK(near4(img.v(48, 16), Vec4{b.x, b.y, b.z, 1}, 0.004f));
+    AUREA_CHECK(near4(img.v(48, 48), Vec4{a.x, a.y, a.z, 1}, 0.004f));
+    // Lista vazia: nada muda.
+    s.comp->layer(adj)->adjustmentTargets.clear();
+    const FloatImage none = s.render();
+    AUREA_CHECK(near4(none.v(16, 16), Vec4{c.x, c.y, c.z, 1}, 0.004f));
+}
+
 AUREA_TEST(Gpu, MotionBlurLengthScalesOnlyThisLayersTrail) {
     AUREA_REQUIRE_GPU();
     auto trail = [](f32 length) {
@@ -10821,4 +10878,49 @@ AUREA_TEST(Gpu, ParticularLayerRotationIsThreeDimensional) {
     }
     // Determinístico com rotação: o mesmo quadro de novo.
     AUREA_CHECK(shot(0, 90, 30).rgba == turnedY.rgba);
+}
+
+// Particular com desfoque de movimento por partícula (o do app antigo): cada
+// faísca vira um rastro na direção do movimento, do tamanho do trajeto no
+// obturador, mais fraco na mesma proporção. Fechado como o resto: o mesmo
+// quadro de novo. A chave de desfoque da camada liga o mesmo rastro com o
+// obturador da composição.
+AUREA_TEST(Gpu, ParticularPerParticleMotionBlurStreaks) {
+    AUREA_REQUIRE_GPU();
+    enum class Mode { Off, Effect, LayerSwitch };
+    auto shot = [](Mode mode) {
+        Scene3DRig rig(320, 180);
+        auto id = rig.e.add_particles(particular::kPresetBase + 4);   // faíscas
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return Image8{};
+        Composition* comp = current_comp(rig.e);
+        Layer* l = comp->layer(LayerId::unpack(*id));
+        AUREA_CHECK(!l->effects.empty());
+        if (l->effects.empty() || l->effects[0].params.size() <= particular::kShutterAngle) return Image8{};
+        EffectInstance& fx = l->effects[0];
+        fx.params[particular::kStretch].constant = ParamValue::scalar(0.0f);   // só o rastro do obturador
+        if (mode == Mode::Effect) {
+            fx.params[particular::kMotionBlur].constant = ParamValue::boolean(true);
+            fx.params[particular::kShutterAngle].constant = ParamValue::scalar(360.0f);
+        } else if (mode == Mode::LayerSwitch) {
+            l->motionBlur = true;
+            comp->motion_blur().enabled = true;
+            comp->motion_blur().shutterAngle = 360.0f;
+        }
+        seek_frame(rig.e, 30);
+        return rig.capture(320);
+    };
+    const Image8 off = shot(Mode::Off);
+    const Image8 fx = shot(Mode::Effect);
+    const Image8 sw = shot(Mode::LayerSwitch);
+    const f32 c0 = coverage(off), c1 = coverage(fx), c2 = coverage(sw);
+    std::printf("    particular desfoque: cobertura sem %.4f, efeito %.4f, chave da camada %.4f\n", c0, c1, c2);
+    AUREA_CHECK(c0 > 0.0005f);
+    AUREA_CHECK(c1 > c0 * 1.3f);          // os pontos viraram rastros
+    AUREA_CHECK(fx.rgba == sw.rgba);      // mesmo obturador, mesmo quadro
+    AUREA_CHECK(shot(Mode::Effect).rgba == fx.rgba);   // determinístico
+    if (const char* dir = std::getenv("AUREA_FX_DUMP"); dir && *dir) {
+        (void)write_png(std::string(dir) + "/particular_mb_off.png", off);
+        (void)write_png(std::string(dir) + "/particular_mb_on.png", fx);
+    }
 }

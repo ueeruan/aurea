@@ -3222,4 +3222,17 @@
     <string name="fxl_add_mode">Mistura aditiva</string>
     <string name="fxl_show_layer">Mostrar camada</string>
     <string name="fxo_block_mosaic">Mosaico de blocos</string>
+    <string name="app_export_frame_fallback">Alguns quadros do vídeo original não puderam ser lidos a tempo; o quadro mais próximo foi usado no lugar. A exportação continua.</string>
+    <string name="ios_export_frame_fallback">Alguns quadros do vídeo original não puderam ser lidos a tempo; o quadro mais próximo foi usado no lugar. A exportação continua.</string>
+    <string name="fx_presets">Presets</string>
+    <string name="fxp_impact">Impacto</string>
+    <string name="fxp_handheld">Na mão</string>
+    <string name="fxp_glitch">Glitch</string>
+    <string name="la_affected_chosen">Só as escolhidas</string>
+    <string name="la_affected_chosen_hint">Os efeitos valem só para as camadas marcadas abaixo.</string>
+    <string name="la_affected_none_below">Nenhuma camada abaixo desta</string>
+    <string name="la_toggle_group">Alternar grupo</string>
+    <string name="la_toggle_group_hint">Agrupa as camadas escolhidas; num grupo, desagrupa.</string>
+    <string name="fxl_motion_blur_2">Desfoque de movimento</string>
+    <string name="fxl_shutter_angle">Ângulo do obturador</string>
 </resources>

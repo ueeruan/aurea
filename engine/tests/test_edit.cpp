@@ -452,6 +452,76 @@ AUREA_TEST(Clipboard, SingleEffectPreservesOnlyItsAnimationAndSkipsLockedTargets
     r.undo();AUREA_CHECK(r.L(r.b)->effects.empty());
 }
 
+AUREA_TEST(Clipboard, PastedEffectsKeepKeyTimesRelativeToTheLayerStart) {
+    EditRig r;
+    // A aparada (entra na fonte em 12), B em 100, C sem aparo: keys guardadas
+    // em tempo local, então o início de cada camada é o `offset` dela.
+    r.range(r.a, 30, 90, 12);
+    r.range(r.b, 120, 180, 100);
+    r.range(r.c, 200, 260, 0);
+    for (const char* type : {effect_keys::kGlow, effect_keys::kGaussianBlur}) {
+        Command fx; fx.type = CommandType::EffectAdd; fx.effect_add.layer = LayerId::unpack(r.a);
+        fx.effect_add.effectType = effect_type_id(type); fx.effect_add.index = kInvalidIndex;
+        AUREA_CHECK(r.e.apply_command(fx).ok());
+    }
+    Layer* src = r.comp()->layer(LayerId::unpack(r.a));
+    const u32 glow = src->effects[0].id, blur = src->effects[1].id;
+    // Blur anima nos quadros 5 e 25 da camada A (timeline 35 e 55).
+    Track& bt = src->tracks.get_or_create(TrackProperty::EffectParam, blur, 0);
+    bt.set(src->local_time(FrameIndex{35}), 2.0f);
+    bt.set(src->local_time(FrameIndex{55}), 20.0f);
+    bt.keys[0].easePower = 3;
+    src->tracks.get_or_create(TrackProperty::EffectParam, glow, 0).set(src->local_time(FrameIndex{40}), 9.0f);
+    src->tracks.get_or_create(TrackProperty::Opacity).set(src->local_time(FrameIndex{35}), 0.25f);
+    auto keyAt = [&](u64 id, u32 fxIndex, u32 k) -> i64 {
+        const Layer* l = r.L(id);
+        const Track* t = l ? l->tracks.find(TrackProperty::EffectParam, l->effects[fxIndex].id, 0) : nullptr;
+        return t && k < t->keys.size() ? l->timeline_time(t->keys[k].time).value - l->start.value : -1;
+    };
+
+    // Todos os efeitos: mesma distância do início de B e de C.
+    AUREA_CHECK_EQ(r.e.copy_effects(r.a), 2u);
+    const u64 both[] = {r.b, r.c};
+    AUREA_CHECK_EQ(r.e.paste_effects(both, 2), 2u);
+    for (u64 id : both) {
+        AUREA_CHECK_EQ(r.L(id)->effects.size(), usize{2});
+        AUREA_CHECK_EQ(keyAt(id, 0, 0), 10);
+        AUREA_CHECK_EQ(keyAt(id, 1, 0), 5);
+        AUREA_CHECK_EQ(keyAt(id, 1, 1), 25);
+        const Track* t = r.L(id)->tracks.find(TrackProperty::EffectParam, r.L(id)->effects[1].id, 0);
+        AUREA_CHECK(t && t->keys[0].easePower == 3 && t->keys[1].value == 20.0f);
+    }
+    // A origem não mudou.
+    AUREA_CHECK_EQ(keyAt(r.a, 1, 0), 5);
+    r.undo();
+    AUREA_CHECK(r.L(r.b)->effects.empty() && r.L(r.c)->effects.empty());
+    AUREA_CHECK_EQ(r.L(r.b)->tracks.size(), 0u);
+
+    // Um efeito só ("Copiar este efeito").
+    AUREA_CHECK_EQ(r.e.copy_effects(r.a, blur), 1u);
+    AUREA_CHECK_EQ(r.e.paste_effects(&r.b, 1), 1u);
+    AUREA_CHECK_EQ(r.L(r.b)->effects.size(), usize{1});
+    AUREA_CHECK_EQ(keyAt(r.b, 0, 0), 5);
+    AUREA_CHECK_EQ(keyAt(r.b, 0, 1), 25);
+    // Colar de novo na própria origem não desloca.
+    AUREA_CHECK_EQ(r.e.paste_effects(&r.a, 1), 1u);
+    AUREA_CHECK_EQ(keyAt(r.a, 2, 0), 5);
+    r.undo();
+    AUREA_CHECK_EQ(r.L(r.a)->effects.size(), usize{2});
+    r.undo();
+    AUREA_CHECK(r.L(r.b)->effects.empty());
+
+    // Colar estilo leva efeitos e opacidade com a mesma regra.
+    AUREA_CHECK(r.e.copy_style(r.a));
+    AUREA_CHECK_EQ(r.e.paste_style(&r.c, 1), 1u);
+    AUREA_CHECK_EQ(keyAt(r.c, 1, 0), 5);
+    const Layer* c = r.L(r.c);
+    const Track* op = c->tracks.find(TrackProperty::Opacity);
+    AUREA_CHECK(op && op->keys.size() == 1 && c->timeline_time(op->keys[0].time).value == c->start.value + 5);
+    r.undo();
+    AUREA_CHECK(r.L(r.c)->effects.empty());
+}
+
 AUREA_TEST(Clipboard, ShiftedTrimmedLayersUseCompositionTime) {
     EditRig r;
     r.range(r.a, 30, 90, 12);

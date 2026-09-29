@@ -302,7 +302,7 @@ bool Engine::set_adjustment_scope(u64 layerId, u32 scope) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || scope > 1) return false;
+    if (!l || scope > 2) return false;
     if (l->adjustmentScope == scope) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "camadas afetadas");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
@@ -317,6 +317,79 @@ u32 Engine::query_adjustment_scope(u64 layerId) noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     return l ? l->adjustmentScope : 0u;
+}
+
+bool Engine::set_adjustment_target(u64 layerId, u64 targetId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const LayerId id = LayerId::unpack(layerId), target = LayerId::unpack(targetId);
+    Layer* l = comp ? comp->layer(id) : nullptr;
+    if (!l || id == target || !comp->layer(target)) return false;
+    auto& list = l->adjustmentTargets;
+    const auto it = std::find(list.begin(), list.end(), target);
+    if ((it != list.end()) == on && l->adjustmentScope == 2) return true;
+    if (on && it == list.end() && list.size() >= 256) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "camadas afetadas");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    if (on && it == list.end()) list.push_back(target);
+    if (!on && it != list.end()) list.erase(it);
+    l->adjustmentScope = 2;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+u32 Engine::query_adjustment_targets(u64 layerId, u64* out, u32 capacity) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return 0;
+    u32 n = 0;
+    for (LayerId t : l->adjustmentTargets) {
+        if (!comp->layer(t)) continue;   // apagada: some da lista mostrada
+        if (out && n < capacity) out[n] = t.pack();
+        ++n;
+    }
+    return out ? std::min(n, capacity) : n;
+}
+
+// =============================================================================
+// Presets de efeito (Effect::presets)
+// =============================================================================
+
+std::vector<std::pair<std::string, std::string>> Engine::effect_presets(u32 typeId) noexcept {
+    std::vector<std::pair<std::string, std::string>> out;
+    const Effect* fx = effectRegistry_.find(EffectTypeId{typeId});
+    if (!fx) return out;
+    for (const EffectPreset& p : fx->presets()) out.emplace_back(p.id ? p.id : "", p.name ? p.name : "");
+    return out;
+}
+
+bool Engine::apply_effect_preset(u64 layerId, u32 effectId, u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    EffectInstance* e = l ? l->find_effect(EffectId{effectId, 0}) : nullptr;
+    const Effect* fx = e ? effectRegistry_.find(e->type) : nullptr;
+    const ParameterRegistry* specs = e ? effectRegistry_.params(e->type) : nullptr;
+    if (!fx || !specs) return false;
+    const std::span<const EffectPreset> all = fx->presets();
+    if (preset >= all.size()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "preset do efeito");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    for (const EffectPresetValue& v : all[preset].values) {
+        if (v.param >= e->params.size() || v.param >= specs->count() || !std::isfinite(v.value)) continue;
+        const ParamSpec& spec = specs->at(v.param);
+        ParamValue& dst = e->params[v.param].constant;
+        switch (spec.type) {
+            case ParamType::Bool: dst = ParamValue::boolean(v.value >= 0.5f); break;
+            case ParamType::Int: case ParamType::Enum: dst.v[0] = std::round(v.value); break;
+            default: dst.v[0] = v.value; break;
+        }
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
 }
 
 bool Engine::set_group_camera_pass_through(u64 layerId, bool on) noexcept {

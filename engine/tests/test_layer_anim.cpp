@@ -236,7 +236,7 @@ AUREA_TEST(LayerAnim, EngineApiExitCopyPasteRemoveAndUndo) {
     AUREA_CHECK_NEAR(e.query_layer_motion_blur_length(*a), 4.0f, 1e-6f);
     AUREA_CHECK(e.set_adjustment_scope(*a, 1));
     AUREA_CHECK_EQ(e.query_adjustment_scope(*a), 1u);
-    AUREA_CHECK(!e.set_adjustment_scope(*a, 2));
+    AUREA_CHECK(!e.set_adjustment_scope(*a, 3));
     AUREA_CHECK_EQ(e.query_group_camera_pass_through(*a), -1);   // não é grupo
     e.shutdown();
 }
@@ -384,5 +384,110 @@ AUREA_TEST(LayerAnim, AddToGroupAndRemoveFromGroupKeepTimesAndUndo) {
         AUREA_CHECK(back && back->start.value == 12 && back->end.value == 80);
     }
     AUREA_CHECK(!e.remove_layer_from_group(*a).ok());   // fora de grupo: recusa
+    e.shutdown();
+}
+
+// Ajuste nas camadas escolhidas (a lista marcada do app antigo): marcar põe o
+// escopo em 2, desmarcar tira, um passo de desfazer cada, e o arquivo guarda.
+AUREA_TEST(LayerAnim, AdjustmentChosenLayersToggleUndoAndSave) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    const auto b = e.add_shape(10);
+    const auto adj = e.add_shape(10);
+    AUREA_CHECK(a.ok() && b.ok() && adj.ok());
+    if (!a.ok() || !b.ok() || !adj.ok()) return;
+    AUREA_CHECK(!e.set_adjustment_target(*adj, *adj, true));   // ela mesma não
+    AUREA_CHECK(e.set_adjustment_target(*adj, *a, true));
+    AUREA_CHECK_EQ(e.query_adjustment_scope(*adj), 2u);
+    AUREA_CHECK(e.set_adjustment_target(*adj, *b, true));
+    u64 ids[4]{};
+    AUREA_CHECK_EQ(e.query_adjustment_targets(*adj, ids, 4), 2u);
+    AUREA_CHECK(ids[0] == *a && ids[1] == *b);
+    AUREA_CHECK(e.set_adjustment_target(*adj, *a, false));
+    AUREA_CHECK_EQ(e.query_adjustment_targets(*adj, ids, 4), 1u);
+    AUREA_CHECK(ids[0] == *b);
+    undo(e);
+    AUREA_CHECK_EQ(e.query_adjustment_targets(*adj, nullptr, 0), 2u);
+    const std::string path = temp_file("aurea_adjust_targets.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    Project p;
+    LoadReport r;
+    AUREA_CHECK(ProjectSerializer::load(p, path, LoadOptions{}, &r).ok());
+    const Composition* c = p.timeline().composition(p.timeline().current());
+    const Layer* l = c ? c->layer(LayerId::unpack(*adj)) : nullptr;
+    AUREA_CHECK(l != nullptr);
+    if (l) {
+        AUREA_CHECK_EQ(l->adjustmentScope, u8{2});
+        AUREA_CHECK_EQ(l->adjustmentTargets.size(), usize{2});
+    }
+    std::remove(path.c_str());
+    e.shutdown();
+}
+
+// Presets de efeito (Tremor em trancos: Impacto / Na mão / Glitch do app
+// antigo): aplicar escreve todos os valores num passo de desfazer.
+AUREA_TEST(LayerAnim, EffectPresetAppliesAllValuesInOneUndo) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    AUREA_CHECK(a.ok());
+    if (!a.ok()) return;
+    const u32 type = e.effects().find_key(effect_keys::kTwitch);
+    const auto presets = e.effect_presets(type);
+    AUREA_CHECK_EQ(presets.size(), usize{3});
+    if (presets.size() != 3) return;
+    AUREA_CHECK(presets[0].first == "impact" && presets[1].first == "handheld" && presets[2].first == "glitch");
+    AUREA_CHECK(e.effect_presets(e.effects().find_key(effect_keys::kExposure)).empty());
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add = EffectAddPayload{LayerId::unpack(*a), type, 0};
+    AUREA_CHECK(e.apply_command(add).ok());
+    Layer* l = layer(e, *a);
+    AUREA_CHECK(l && l->effects.size() == 1);
+    if (!l || l->effects.empty()) return;
+    const u32 fx = l->effects[0].id;
+    AUREA_CHECK(e.apply_effect_preset(*a, fx, 1));   // Na mão
+    const auto& p = layer(e, *a)->effects[0].params;
+    AUREA_CHECK_NEAR(p[0].constant.v[0], 3.0f, 1e-6f);     // frequência
+    AUREA_CHECK_NEAR(p[1].constant.v[0], 1.2f, 1e-6f);     // intensidade %
+    AUREA_CHECK_NEAR(p[4].constant.v[0], 100.0f, 1e-6f);   // suavizar %
+    AUREA_CHECK_NEAR(p[6].constant.v[0], 7.0f, 1e-6f);     // semente
+    AUREA_CHECK(!e.apply_effect_preset(*a, fx, 3));
+    undo(e);
+    AUREA_CHECK_NEAR(layer(e, *a)->effects[0].params[0].constant.v[0], 14.0f, 1e-6f);   // padrão
+    e.shutdown();
+}
+
+// Expressão num valor do animador de camada: vale como keyframe (a conta da
+// entrada lê a trilha) e a interface a encontra pela mesma chave.
+AUREA_TEST(LayerAnim, ExpressionDrivesALayerAnimatorValue) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    AUREA_CHECK(a.ok());
+    if (!a.ok()) return;
+    AUREA_CHECK_EQ(e.add_layer_animator(*a), 0);
+    const u32 prop = static_cast<u32>(TrackProperty::LayerAnimParam);
+    AUREA_CHECK(e.set_expression(*a, prop, 0, layeranim::kWiggleRotation, "value + 30").ok());
+    AUREA_CHECK(!e.set_expression(*a, prop, 5, layeranim::kWiggleRotation, "1").ok());   // animador inexistente
+    Engine::ExpressionInfo info;
+    AUREA_CHECK(e.query_expression(*a, prop, 0, layeranim::kWiggleRotation, info));
+    AUREA_CHECK(info.exists && info.error.ok);
+    AUREA_CHECK_NEAR(info.value, 30.0f, 1e-4f);   // parado em 0 + 30
+    const Layer* l = layer(e, *a);
+    AUREA_CHECK(l != nullptr);
+    if (l) {
+        const expr::Scope scope(e.project()->timeline());
+        const f32 v = layeranim::param_at(l->tracks, 0, layeranim::kWiggleRotation, 10.0,
+                                          layeranim::param_static(l->layerAnimators[0], layeranim::kWiggleRotation));
+        AUREA_CHECK_NEAR(v, 30.0f, 1e-4f);
+    }
+    u32 rows[16]{};
+    AUREA_CHECK_EQ(e.query_expressions(*a, rows, 4), 1u);
+    AUREA_CHECK_EQ(rows[0], prop);
     e.shutdown();
 }

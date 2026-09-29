@@ -117,6 +117,54 @@ struct EditorView: View {
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
         .modifier(ModelTexturesPrompt())
+        .modifier(AddLayerPickers(shell: shell))
+    }
+}
+
+/// Os seletores do diálogo de adicionar, apresentados pela RAIZ do editor.
+/// Antes moravam no próprio diálogo, que some ao escolher: o seletor de fotos
+/// fechava junto com o dono e deixava a apresentação seguinte (o seletor de
+/// arquivos do modelo 3D) presa e invisível — o modelo não entrava e nenhum
+/// toque respondia. Aqui o dono fica na tela o tempo todo.
+private struct AddLayerPickers: ViewModifier {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject var shell: ShellPresentation
+    @State private var importing = false
+    @State private var fileKind = ShellAddPicker.model
+    @State private var choosingPhotos = false
+    @State private var photoKind = ShellAddPicker.gallery
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: shell.addPicker) { request in
+                guard let request else { return }
+                shell.addPicker = nil
+                if request.isFile { fileKind = request; importing = true }
+                else { photoKind = request; choosingPhotos = true }
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: fileTypes, allowsMultipleSelection: fileKind == .model) { result in
+                guard case .success(let urls) = result, let url = urls.first else { return }
+                switch fileKind {
+                // Seleção múltipla/pasta: o FBX/OBJ vem com as texturas e o .mtl.
+                case .model: model.importModelFiles(urls: urls)
+                case .svg: model.importSvg(url: url)
+                default: model.importMedia(url: url, kind: .audio)
+                }
+            }
+            .sheet(isPresented: $choosingPhotos) {
+                ShellMediaPicker(filter: photoKind == .photo ? .images : ((photoKind == .video || photoKind == .audioFromVideo) ? .videos : .any(of: [.images, .videos]))) { url, video in
+                    choosingPhotos = false
+                    guard let url else { return }
+                    let kind: AureaModel.ImportKind = photoKind == .audioFromVideo ? .audio : (video ? .video : .image)
+                    model.importMedia(url: url, kind: kind)
+                }
+            }
+    }
+    private var fileTypes: [UTType] {
+        switch fileKind {
+        case .svg: return [UTType(filenameExtension: "svg") ?? .data]
+        case .model: return [.data, .folder] // glTF/GLB/OBJ/FBX (+ texturas, ou a pasta): o motor valida a extensão.
+        default: return [.audio]
+        }
     }
 }
 
@@ -1180,14 +1228,10 @@ private struct NativeTextInput: UIViewRepresentable {
 // =============================================================================
 private struct AddLayerSheet: View {
     @EnvironmentObject private var model: AureaModel
+    @EnvironmentObject private var shell: ShellPresentation
     var tab = 0
-    @State private var showingImporter = false
-    @State private var fileKind = FileKind.audio
-    @State private var showingPhotos = false
-    @State private var photoKind = PhotoKind.gallery
-
-    private enum FileKind { case audio, model, svg }
-    private enum PhotoKind { case gallery, photo, video, audioFromVideo }
+    /// Aberto como `.sheet` (cena 3D): o seletor espera a folha fechar antes de subir.
+    var inSheet = false
     private let categories: [(String, Character)] = [
         ("sh_add_tab_shape", ShellGlyph.SquareOnCircle), ("sh_add_tab_media", CupertinoGlyph.PhotoOnRectangle),
         ("sh_add_tab_audio", CupertinoGlyph.MusicNote2), ("sh_add_tab_text", CupertinoGlyph.Textformat),
@@ -1213,25 +1257,7 @@ private struct AddLayerSheet: View {
             if tab == 0 { shapeGrid } else { cards }
         }
         .background(AureaColors.editorPanel)
-        .fileImporter(isPresented: $showingImporter, allowedContentTypes: fileTypes, allowsMultipleSelection: fileKind == .model) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            switch fileKind {
-            case .audio: model.importMedia(url: url, kind: .audio)
-            // Seleção múltipla/pasta: o FBX/OBJ vem com as texturas e o .mtl.
-            case .model: model.importModelFiles(urls: urls)
-            case .svg: model.importSvg(url: url)
-            }
-            close()
-        }
-        .sheet(isPresented: $showingPhotos) {
-            ShellMediaPicker(filter: photoKind == .photo ? .images : ((photoKind == .video || photoKind == .audioFromVideo) ? .videos : .any(of: [.images, .videos]))) { url, video in
-                showingPhotos = false
-                guard let url else { return }
-                let kind: AureaModel.ImportKind = photoKind == .audioFromVideo ? .audio : (video ? .video : .image)
-                model.importMedia(url: url, kind: kind)
-                close()
-            }
-        }
+        // Os seletores NÃO moram aqui: ver `AddLayerPickers` (raiz do editor).
     }
 
     private var shapeGrid: some View {
@@ -1264,7 +1290,7 @@ private struct AddLayerSheet: View {
                         card("editor_video", glyph: CupertinoGlyph.Videocam) { photos(.video) }
                         card("sh_add_ai_video", glyph: CupertinoGlyph.WandStars) { model.openPanel(.aiVideo) }
                     case 2:
-                        card("editor_musica_ou_som", glyph: CupertinoGlyph.MusicNote, accent: true) { files(.audio) }
+                        card("editor_musica_ou_som", glyph: CupertinoGlyph.MusicNote, accent: true) { files(.audioFile) }
                         card("sh_add_video_sound", glyph: CupertinoGlyph.Film) { photos(.audioFromVideo) }
                         card("sh_add_marker_at_playhead", glyph: CupertinoGlyph.Bookmark) { close(); model.toggleMarkerAt(model.status.playhead) }
                     case 3:
@@ -1313,13 +1339,18 @@ private struct AddLayerSheet: View {
         }
     }
     private func close() { model.showAddLayer = false }
-    private func photos(_ kind: PhotoKind) { photoKind = kind; showingPhotos = true }
-    private func files(_ kind: FileKind) { fileKind = kind; showingImporter = true }
-    private var fileTypes: [UTType] {
-        switch fileKind {
-        case .audio: return [.audio]
-        case .svg: return [UTType(filenameExtension: "svg") ?? .data]
-        case .model: return [.data, .folder] // glTF/GLB/OBJ/FBX (+ texturas, ou a pasta): o motor valida a extensão.
+    private func photos(_ kind: ShellAddPicker) { request(kind) }
+    private func files(_ kind: ShellAddPicker) { request(kind) }
+    /// Fecha o diálogo e pede o seletor à raiz do editor (que continua na tela
+    /// durante todo o abrir/fechar do seletor). Dentro de uma folha, espera ela
+    /// fechar: duas apresentações ao mesmo tempo, o sistema recusa a segunda.
+    private func request(_ kind: ShellAddPicker) {
+        close()
+        if inSheet {
+            let shell = shell
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.addPicker = kind }
+        } else {
+            shell.addPicker = kind
         }
     }
     private func card(_ label: String, glyph: Character, accent: Bool = false, color: Color? = nil, action: @escaping () -> Void) -> some View {
@@ -1385,6 +1416,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
 /// escolhido, material ou luz. A órbita é só da prévia.
 @MainActor private struct SceneLayoutWorkspace: View {
     @EnvironmentObject private var model: AureaModel
+    @EnvironmentObject private var shell: ShellPresentation
     let height: CGFloat
     @State private var materials = false
     @State private var lights = false
@@ -1445,7 +1477,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         }
         .frame(height: height)
         .task { try? await Task.sleep(nanoseconds: 7_000_000_000); withAnimation { hint = false } }
-        .sheet(isPresented: $model.showAddLayer) { AddLayerSheet(tab: 5).environmentObject(model) }
+        .sheet(isPresented: $model.showAddLayer) { AddLayerSheet(tab: 5, inSheet: true).environmentObject(model).environmentObject(shell) }
         .sheet(isPresented: $lights) { SceneLightControls().environmentObject(model) }
         .sheet(isPresented: $materials) { Panel3DView().environmentObject(model) }
         .onChange(of: model.panel) { panel in if panel == .none { materials = false } }

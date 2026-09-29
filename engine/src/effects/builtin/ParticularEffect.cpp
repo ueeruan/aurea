@@ -109,6 +109,12 @@ public:
         p.add_bool("add_mode", "Mistura aditiva", true);
         p.add_bool("show_source", "Mostrar camada", false);
         p.add_float("seed", "Semente", 0.0f, 0.0f, 9999.0f, kAnim);
+        // Desfoque de movimento por partícula (o do app antigo): rastro na
+        // direção do movimento visível, do tamanho do trajeto no obturador.
+        // Também liga sozinho com a chave de desfoque de movimento da camada
+        // (aí vale o obturador da composição).
+        p.add_bool("motion_blur", "Desfoque de movimento", false);
+        p.add_float("shutter_angle", "Ângulo do obturador", 180.0f, 0.0f, 720.0f, kAnim, "°");
     }
 
     bool is_identity(const EffectEval&) const noexcept override { return false; }
@@ -194,8 +200,14 @@ public:
                       pct(e, kStretch, 0.0f, 600.0f), pct(e, kFeather, 0.0f, 100.0f)};
         u.forces = Vec4{finite_or(e.f(kGravity), 0.0f), finite_or(e.f(kWindX), 0.0f), finite_or(e.f(kWindY), 0.0f),
                         finite_or(e.f(kWindZ), 0.0f)};
+        // Obturador: o do efeito, ou o da composição quando a camada está com
+        // a chave de desfoque de movimento ligada. Meia janela, em segundos.
+        f32 shutterDeg = 0.0f;
+        if (e.b(kMotionBlur)) shutterDeg = std::clamp(finite_or(e.f(kShutterAngle), 0.0f), 0.0f, 720.0f);
+        else if (e.placement) shutterDeg = std::clamp(finite_or(e.placement->shutterAngle, 0.0f), 0.0f, 720.0f);
+        const f32 halfShutter = shutterDeg / 360.0f / static_cast<f32>(fps) * 0.5f;
         u.motion = Vec4{pct(e, kAirDrag, 0.0f, 800.0f), std::clamp(finite_or(e.f(kTurbulence), 0.0f), 0.0f, 40000.0f),
-                        pct(e, kTurbulenceSpeed, 0.0f, 1000.0f), 0.0f};
+                        pct(e, kTurbulenceSpeed, 0.0f, 1000.0f), halfShutter};
         u.lifeSize = Vec4{lifeMs, lifeRandom, std::clamp(finite_or(e.f(kSize), 0.0f), 0.0f, 20000.0f),
                           pct(e, kSizeRandom, 0.0f, 100.0f)};
         u.look = Vec4{pct(e, kSizeEnd, 0.0f, 800.0f), pct(e, kOpacity, 0.0f, 100.0f), pct(e, kFadeIn, 0.0f, 100.0f),

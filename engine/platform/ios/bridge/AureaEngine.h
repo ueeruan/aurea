@@ -194,6 +194,7 @@ typedef NS_OPTIONS(uint32_t, AureaExportFlag) {
     AureaExportFlagHardwareEncoder = 1u << 0,
     AureaExportFlagSoftwareEncoder = 1u << 1,
     AureaExportFlagThermalReduced  = 1u << 2,
+    AureaExportFlagFrameFallback   = 1u << 3,
 };
 
 /// Códigos de codec de saída (ExportCodec).
@@ -452,9 +453,16 @@ NS_SWIFT_NAME(AureaEngine)
 /// Comprimento do rastro do desfoque desta camada (× o obturador do projeto).
 - (void)setLayerMotionBlurLength:(float)factor forLayer:(long long)layerId;
 - (float)layerMotionBlurLength:(long long)layerId;
-/// Ajuste: 0 = todas abaixo, 1 = só a logo abaixo.
+/// Ajuste: 0 = todas abaixo, 1 = só a logo abaixo, 2 = só as escolhidas.
 - (void)setAdjustmentScope:(uint32_t)scope forLayer:(long long)layerId;
 - (uint32_t)adjustmentScope:(long long)layerId;
+/// Escopo 2: põe/tira a camada `targetId` da lista do ajuste (a lista marcada do app antigo).
+- (void)setAdjustmentTarget:(long long)targetId on:(BOOL)on forLayer:(long long)layerId NS_SWIFT_NAME(setAdjustmentTarget(_:on:forLayer:));
+- (NSArray<NSNumber*>*)adjustmentTargets:(long long)layerId NS_SWIFT_NAME(adjustmentTargets(_:));
+/// Presets do tipo de efeito, achatados: [id estável, nome do motor, id, nome, …].
+- (NSArray<NSString*>*)effectPresets:(uint32_t)typeId NS_SWIFT_NAME(effectPresets(_:));
+/// Aplica o preset (todos os valores, um passo de desfazer).
+- (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(applyEffectPreset(_:effect:forLayer:));
 /// Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo).
 - (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId;
 - (int32_t)groupCameraPassThrough:(long long)layerId;

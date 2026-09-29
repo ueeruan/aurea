@@ -255,6 +255,15 @@ struct EffectsView: View {
                         if effect.typeId == fxEffectTypeId("aurea.audio.parametric_eq") {
                             FxEqResponseGraph(values: (0..<12).map { i in model.effectParams.first { $0.index == UInt32(i) }?.scalar ?? 0 })
                         }
+                        // Presets do efeito (o do app antigo: Impacto/Na mão/Glitch do
+                        // Tremor): fichas no topo do cartão; tocar = um passo de desfazer.
+                        let presets = model.engine.effectPresets(effect.typeId)
+                        if presets.count >= 2 {
+                            FxPresetRow(presets: presets) { preset in
+                                guard let layer = model.primarySelection else { return }
+                                if model.engine.applyEffectPreset(UInt32(preset), effect: effect.effectId, forLayer: layer) { model.refreshModel(force: true) }
+                            }
+                        }
                         ForEach(groups.main) { param in parameter(param, effect: effect.effectId) }
                         if !groups.rest.isEmpty {
                             AdvancedToggle(open: advanced.contains(effect.effectId), count: groups.rest.count) {
@@ -822,5 +831,42 @@ struct FxEqResponseGraph: View {
             .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 8))
         }
         .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)
+    }
+}
+
+/// Fichas dos presets de um efeito (EffectsPanel.kt `EffectPresetRow`), como a
+/// fileira de presets do Particular. `presets` = [id, nome do motor, id, nome, …].
+struct FxPresetRow: View {
+    let presets: [String]
+    let apply: (Int) -> Void
+    private func label(_ pid: String, _ fallback: String) -> String {
+        switch pid {
+        case "impact": return AureaText.t("fxp_impact")
+        case "handheld": return AureaText.t("fxp_handheld")
+        case "glitch": return AureaText.t("fxp_glitch")
+        default: return fallback
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(AureaText.t("fx_presets")).font(.aurea(size: 11.5)).foregroundStyle(AureaColors.muted)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(0..<(presets.count / 2), id: \.self) { i in
+                        let pid = presets[i * 2]
+                        Button { apply(i) } label: {
+                            Text(label(pid, presets[i * 2 + 1]))
+                                .font(.aurea(size: 12))
+                                .foregroundStyle(AureaColors.text)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("fx.preset." + pid)
+                    }
+                }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 6)
     }
 }

@@ -1409,6 +1409,12 @@ final class AureaModel: ObservableObject {
         refreshModel(force: true)
     }
 
+    /// Alternar grupo (app antigo): um grupo escolhido desagrupa; senão as escolhidas viram grupo.
+    func toggleGroup() {
+        if selection.count == 1, let only = selection.first, layers.first(where: { $0.id == only })?.kind == 12 { ungroup(only) }
+        else { groupSelection() }
+    }
+
     func ungroup(_ layerId: Int64) {
         let why = engine.ungroupPrecomp(layerId)
         if !why.isEmpty { toast = why }
@@ -2588,7 +2594,8 @@ final class AureaModel: ObservableObject {
                         self.exporting = false
                         if !self.exportCancelled {
                             let message = self.exportProgress["message"] as? String ?? ""
-                            self.exportMessage = message.isEmpty ? AureaText.t("ios_export_failed") : message
+                            self.exportMessage = result == 28 ? AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
+                                : message.isEmpty ? AureaText.t("ios_export_failed") : message
                             self.toast = self.exportMessage
                         }
                     }

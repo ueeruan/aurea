@@ -220,6 +220,21 @@ func cubicBezierLabel(_ ease: CurveEase) -> String {
     return ease.isBezier && ease.power > 1 ? label + " ×\(ease.power)" : label
 }
 
+/// s^power com o sinal de s (SpeedGraphHandles.kt `powered`).
+func curvePowered(_ s: Double, _ power: Int) -> Double {
+    var out = s
+    for _ in 1..<min(3, max(1, power)) { out *= s }
+    return out
+}
+
+/// A inversa: raiz `power` com sinal (par e negativo = o espelho positivo).
+func curveRooted(_ v: Double, _ power: Int) -> Double {
+    let p = min(3, max(1, power))
+    if p == 1 { return v }
+    let r = pow(abs(v), 1.0 / Double(p))
+    return v < 0 && p % 2 == 1 ? -r : r
+}
+
 /// Próxima força ao tocar no texto (CurveMath.kt `nextPower`): ×1 → ×2 → ×3 → ×1.
 func curveNextPower(_ ease: CurveEase) -> CurveEase {
     let h = ease.handles
@@ -1422,20 +1437,25 @@ private struct NativeTrackGraph: View {
     @State private var pinchBase: TrackGraphViewport?
     @State private var pinchTranslation: CGSize = .zero
     @State private var lastTranslation: CGSize = .zero
+    /// Alça de velocidade (SpeedGraphHandles.kt). Com a força ×power a
+    /// inclinação nas pontas vira inclinação^power; o arrasto desfaz a potência.
     private struct SpeedHandle {
         let key: KeyframeItem
         let end: KeyframeItem
         let incoming: Bool
         let handles: [Float]
         let base: Double
+        var power: Int = 1
         var influence: Double { Double(incoming ? 1 - handles[2] : handles[0]) }
-        var velocity: Double { base * Double(incoming ? 1 - handles[3] : handles[1]) / influence }
+        private var slope: Double { Double(incoming ? 1 - handles[3] : handles[1]) / influence }
+        var velocity: Double { base * curvePowered(slope, power) }
         var frame: Double { Double(key.time) + (Double(end.time) - Double(key.time)) * Double(incoming ? handles[2] : handles[0]) }
         func changed(frame: Double, velocity: Double) -> [Float] {
             var h = handles
             let fraction = min(0.99, max(0.01, (frame - Double(key.time)) / (Double(end.time) - Double(key.time))))
-            if incoming { h[2] = Float(fraction); h[3] = Float(1 - velocity / base * (1 - fraction)) }
-            else { h[0] = Float(fraction); h[1] = Float(velocity / base * fraction) }
+            let s = curveRooted(velocity / base, power)
+            if incoming { h[2] = Float(fraction); h[3] = Float(1 - s * (1 - fraction)) }
+            else { h[0] = Float(fraction); h[1] = Float(s * fraction) }
             return h
         }
     }
@@ -1456,8 +1476,9 @@ private struct NativeTrackGraph: View {
             var h: [Float] = ease.handles
             if a.interpolation == 1 { h = [0.33333334,0.33333334,0.6666667,0.6666667] }
             h[0] = min(0.99,max(0.01,h[0])); h[2] = min(0.99,max(0.01,h[2]))
-            result.append(SpeedHandle(key:a,end:b,incoming:false,handles:h,base:base))
-            result.append(SpeedHandle(key:a,end:b,incoming:true,handles:h,base:base))
+            let power = a.interpolation == 1 ? 1 : min(3, max(1, ease.power))
+            result.append(SpeedHandle(key:a,end:b,incoming:false,handles:h,base:base,power:power))
+            result.append(SpeedHandle(key:a,end:b,incoming:true,handles:h,base:base,power:power))
         }
         return result
     }

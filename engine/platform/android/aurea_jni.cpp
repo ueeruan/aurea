@@ -1996,6 +1996,45 @@ AUREA_JNI jint AUREA_FN(nativeQueryAdjustmentScope)(JNIEnv*, jclass, jlong handl
     return c ? static_cast<jint>(c->engine.query_adjustment_scope(static_cast<u64>(layer))) : 0;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetAdjustmentTarget)(JNIEnv*, jclass, jlong handle, jlong layer, jlong target, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_adjustment_target(static_cast<u64>(layer), static_cast<u64>(target), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jlongArray AUREA_FN(nativeQueryAdjustmentTargets)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<u64> ids;
+    if (c) {
+        ids.resize(c->engine.query_adjustment_targets(static_cast<u64>(layer), nullptr, 0));
+        if (!ids.empty()) ids.resize(c->engine.query_adjustment_targets(static_cast<u64>(layer), ids.data(), static_cast<u32>(ids.size())));
+    }
+    jlongArray arr = env->NewLongArray(static_cast<jsize>(ids.size()));
+    if (arr && !ids.empty()) {
+        std::vector<jlong> v(ids.begin(), ids.end());
+        env->SetLongArrayRegion(arr, 0, static_cast<jsize>(v.size()), v.data());
+    }
+    return arr;
+}
+
+/// Presets do tipo de efeito (Effect::presets): pares (id estável, nome do motor).
+AUREA_JNI jobjectArray AUREA_FN(nativeEffectPresets)(JNIEnv* env, jclass, jlong handle, jint typeId) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<std::string> flat;
+    if (c && typeId >= 0) {
+        for (auto& [id, name] : c->engine.effect_presets(static_cast<u32>(typeId))) {
+            flat.push_back(id);
+            flat.push_back(name);
+        }
+    }
+    return string_array(env, flat);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeApplyEffectPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId, jint preset) {
+    NativeContext* c = ctx_of(handle);
+    return c && effectId >= 0 && preset >= 0
+        && c->engine.apply_effect_preset(static_cast<u64>(layer), static_cast<u32>(effectId), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetGroupCameraPassThrough)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_group_camera_pass_through(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
@@ -2121,19 +2160,20 @@ AUREA_JNI jfloatArray AUREA_FN(nativeParseCaptionPreset)(JNIEnv* env, jclass, jb
     return out;
 }
 
-AUREA_JNI jbyteArray AUREA_FN(nativeMakeCurvePreset)(JNIEnv* env, jclass, jbyteArray name, jint interp, jfloat x1, jfloat y1, jfloat x2, jfloat y2) {
+AUREA_JNI jbyteArray AUREA_FN(nativeMakeCurvePreset)(JNIEnv* env, jclass, jbyteArray name, jint interp, jfloat x1, jfloat y1, jfloat x2, jfloat y2, jint power) {
     const jint i = std::clamp(interp, 0, static_cast<jint>(Interpolation::Steps));
     return bytes_of(env, presets::make_curve_preset(utf8_of(env, name), static_cast<Interpolation>(i), std::clamp(x1, 0.0f, 1.0f),
-                                                    std::clamp(y1, -2.0f, 3.0f), std::clamp(x2, 0.0f, 1.0f), std::clamp(y2, -2.0f, 3.0f)));
+                                                    std::clamp(y1, -2.0f, 3.0f), std::clamp(x2, 0.0f, 1.0f), std::clamp(y2, -2.0f, 3.0f),
+                                                    static_cast<u32>(std::clamp(power, 1, 3))));
 }
 
-/// Lê um preset de curva: [interp, x1, y1, x2, y2]. Nulo = inválido.
+/// Lê um preset de curva: [interp, x1, y1, x2, y2, força]. Nulo = inválido.
 AUREA_JNI jfloatArray AUREA_FN(nativeParseCurvePreset)(JNIEnv* env, jclass, jbyteArray json) {
     presets::Preset p;
     if (!presets::parse(utf8_of(env, json), p) || p.kind != presets::PresetKind::Curve) return nullptr;
-    const f32 v[5] = {static_cast<f32>(p.curveInterp), p.x1, p.y1, p.x2, p.y2};
-    jfloatArray out = env->NewFloatArray(5);
-    if (out) env->SetFloatArrayRegion(out, 0, 5, v);
+    const f32 v[6] = {static_cast<f32>(p.curveInterp), p.x1, p.y1, p.x2, p.y2, static_cast<f32>(p.curvePower)};
+    jfloatArray out = env->NewFloatArray(6);
+    if (out) env->SetFloatArrayRegion(out, 0, 6, v);
     return out;
 }
 

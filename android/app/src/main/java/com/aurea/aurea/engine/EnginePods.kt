@@ -459,6 +459,8 @@ class ExportProgress {
     val hardwareEncoder: Boolean get() = flags and FLAG_HARDWARE_ENCODER != 0
     val softwareEncoder: Boolean get() = flags and FLAG_SOFTWARE_ENCODER != 0
     val thermalReduced: Boolean get() = flags and FLAG_THERMAL_REDUCED != 0
+    /** Algum quadro saiu com o vídeo decodificado mais próximo (o exato não veio). */
+    val frameFallback: Boolean get() = flags and FLAG_FRAME_FALLBACK != 0
 
     internal fun readFrom(buffer: ByteBuffer) {
         running = buffer.getInt(PodLayout.EPD_OFF_RUNNING) != 0
@@ -481,6 +483,7 @@ class ExportProgress {
         const val FLAG_HARDWARE_ENCODER = 1 shl 0
         const val FLAG_SOFTWARE_ENCODER = 1 shl 1
         const val FLAG_THERMAL_REDUCED = 1 shl 2
+        const val FLAG_FRAME_FALLBACK = 1 shl 3
     }
 }
 

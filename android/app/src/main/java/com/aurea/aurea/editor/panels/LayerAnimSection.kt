@@ -182,7 +182,16 @@ private fun LayerAnimRuler(store: EditorStore, index: Int, p: LayerAnimParam, v:
         else -> KeyframeLook.None
     }
     val value = { store.layerAnimators.getOrNull(index)?.get(p.slot) ?: v[p.slot] }
-    PropertyCustomRow(stringResource(p.label), selected = false, onSelect = {}, keyframe = look) {
+    // Expressão no valor do animador (a mesma folha das outras propriedades).
+    val exprKeys = listOf(com.aurea.aurea.engine.TrackKey(com.aurea.aurea.engine.TrackProperty.LAYER_ANIM_PARAM, index, p.id))
+    val exprLook by androidx.compose.runtime.remember(store, index, p.id) {
+        androidx.compose.runtime.derivedStateOf { store.expressionLook(exprKeys) }
+    }
+    val label = stringResource(p.label)
+    PropertyCustomRow(
+        label, selected = false, onSelect = {}, keyframe = look,
+        expression = exprLook, onExpression = { store.openExpression(label, exprKeys, 1f, p.unit) },
+    ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {
                 TickRuler(

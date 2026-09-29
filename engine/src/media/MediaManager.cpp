@@ -7,6 +7,11 @@
 
 namespace aurea {
 
+namespace {
+constexpr u32 kOpenAttempts = 5;       ///< opens por camada antes de desistir
+constexpr u64 kOpenRetryFrames = 8;    ///< preparos entre uma tentativa e a próxima
+} // namespace
+
 std::string VideoSourceFactory::cache_identity(const char* sourcePath) {
     if (!sourcePath || !*sourcePath) return {};
     if (std::strncmp(sourcePath, "file://", 7) == 0) sourcePath += 7;
@@ -110,14 +115,36 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
             entries_[i] = std::move(entries_.back()); entries_.pop_back();
         } else ++i;
     }
-    for (Entry& e : entries_) {
+    u32 priorFailures = 0;
+    for (usize i = 0; i < entries_.size(); ++i) {
+        Entry& e = entries_[i];
         if (e.layer == layer && e.asset == assetId) {
             e.lastUsedFrame = frameNumber;
+            // Open que falhou não é para sempre: o motivo comum é o aparelho
+            // sem instância livre de decoder (outros clipes ainda fechando).
+            // Nova tentativa depois de um intervalo, poucas vezes — um arquivo
+            // que o aparelho não decodifica não pode reabrir o codec a cada quadro.
+            if (e.failed && e.failures < kOpenAttempts && frameNumber > e.failedFrame + kOpenRetryFrames && factory_) {
+                {
+                    // Mesma regra do open novo (abaixo): nada de codec novo
+                    // enquanto outro fecha. A entrada fica — e a contagem com ela.
+                    std::lock_guard<std::mutex> closing(retireMutex_);
+                    if (retiring_ || !retired_.empty()) return nullptr;
+                }
+                priorFailures = e.failures;
+                if (i + 1 != entries_.size()) entries_[i] = std::move(entries_.back());
+                entries_.pop_back();
+                break;
+            }
             if (e.opening && e.opening->ready.load(std::memory_order_acquire)) {
                 auto backend = std::move(e.opening->decoder);
                 e.opening.reset();
-                if (!backend) e.failed = true;
-                else {
+                if (!backend) {
+                    e.failed = true;
+                    e.failedFrame = frameNumber;
+                    ++e.failures;
+                    AUREA_LOG_WARN("decoder da camada nao abriu (tentativa %u de %u)", e.failures, kOpenAttempts);
+                } else {
                     e.source = std::make_unique<VideoSource>(std::move(backend), MediaPriority::Preview);
                     e.source->cache().attach(memory_);
                     e.source->set_ready_callback(readyFn_, readyCtx_);
@@ -140,6 +167,7 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     Entry e;
     e.layer = layer;
     e.asset = assetId;
+    e.failures = priorFailures;
     e.path = decodeAsset.sourcePath;
     e.lastUsedFrame = frameNumber;
     e.opening = std::make_unique<Opening>();

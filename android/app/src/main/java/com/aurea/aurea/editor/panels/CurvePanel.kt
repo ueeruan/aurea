@@ -447,7 +447,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             onConfirm = { name ->
                 // A interpolação vai como está (nomeada, reta, manter ou bézier com as alças).
                 val h = ease.handles()
-                store.savePreset(com.aurea.aurea.presets.PresetKind.Curve, name, store.curvePresetJson(name, ease.interp, h[0], h[1], h[2], h[3]))
+                store.savePreset(com.aurea.aurea.presets.PresetKind.Curve, name, store.curvePresetJson(name, ease.interp, h[0], h[1], h[2], h[3], if (ease.isBezier) ease.power else 1))
             },
             onDismiss = { savePrompt = false },
         )

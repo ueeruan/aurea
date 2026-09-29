@@ -11,6 +11,7 @@
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/timeline/LayerAnimator.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/animation/KeyframeOptimize.hpp"
 #include "aurea/core/Log.hpp"
@@ -177,6 +178,12 @@ bool put_string(char* blob, u32 capacity, u32& cursor, const char* s, u32& outOf
 // 37 MB em 4K) e é o que a temperatura reduz (1 = serial). A GPU só é esperada
 // no fence do quadro ANTERIOR, depois de submeter o atual.
 // -----------------------------------------------------------------------------
+namespace {
+/// Preparos sem aparecer até um decoder sair durante o export (ver collect em
+/// render_export_frame). Quem está na tela é tocado a cada preparo.
+constexpr u32 kExportIdleFrames = 2;
+} // namespace
+
 struct Engine::ExportContext {
     mutable std::mutex mutex;          ///< protege `progress`
     ExportProgress progress{};
@@ -237,6 +244,15 @@ struct Engine::ExportContext {
     std::atomic<u64> writeNs{0}, audioNs{0};                // encoder
     u64 startNs = 0;
     u32 thermalReducedFrames = 0;
+    /// Quadros gravados com o quadro decodificado MAIS PRÓXIMO (o exato não
+    /// veio a tempo). Só o produtor escreve.
+    u64 fallbackFrames = 0;
+    /// Depois de um fallback, a paciência cai até um quadro exato voltar: uma
+    /// fonte quebrada não pode custar 4 s por quadro num export de horas.
+    bool sourceDegraded = false;
+    /// Tamanho estimado do arquivo e a pasta dele (conferência de espaço).
+    u64 estimatedBytes = 0;
+    std::filesystem::path outputDir;
 
     void set_message(const char* m) {
         std::snprintf(progress.message, sizeof(progress.message), "%s", m);
@@ -4979,21 +4995,37 @@ bool Engine::copy_style(u64 layerId) noexcept {
 }
 
 namespace {
+/// Keys ficam em tempo LOCAL, e o início da camada é o `offset` (ponto de
+/// entrada na fonte). Levar uma trilha para outra camada mantém a distância do
+/// início dela: soma a diferença dos pontos de entrada. Sem isso, efeitos de um
+/// vídeo aparado em 10 s colavam com os keys 10 s adiante numa imagem.
+void rebase_track(Track& t, i64 delta) noexcept {
+    if (delta == 0) return;
+    for (Keyframe& k : t.keys) k.time.value += delta;
+    t.lastIndex = 0;
+}
 /// Troca a pilha de efeitos de `dst` pela de `src` (com os keyframes deles).
-void replace_effects(Layer& dst, const std::vector<EffectInstance>& effects, const TrackSet& srcTracks) {
+void replace_effects(Layer& dst, const std::vector<EffectInstance>& effects, const TrackSet& srcTracks, i64 delta) {
     dst.tracks.remove_if([](const Track& t) { return t.property == TrackProperty::EffectParam; });
     dst.effects = effects;
     for (const EffectInstance& e : effects) {
         if (e.id != kInvalidIndex) dst.nextEffectId = std::max(dst.nextEffectId, e.id + 1);
     }
     for (u32 i = 0; i < srcTracks.size(); ++i) {
-        if (srcTracks.at(i).property == TrackProperty::EffectParam) dst.tracks.add(srcTracks.at(i));
+        if (srcTracks.at(i).property != TrackProperty::EffectParam) continue;
+        Track t = srcTracks.at(i);
+        rebase_track(t, delta);
+        dst.tracks.add(std::move(t));
     }
 }
 /// Copia uma track de transform/aparência (valor e keyframes) de `src`.
 void copy_track(Layer& dst, const Layer& src, TrackProperty p) {
     dst.tracks.remove_if([p](const Track& t) { return t.property == p && t.effectIndex == kInvalidIndex; });
-    if (const Track* t = src.tracks.find(p)) dst.tracks.add(*t);
+    if (const Track* t = src.tracks.find(p)) {
+        Track c = *t;
+        rebase_track(c, dst.offset.value - src.offset.value);
+        dst.tracks.add(std::move(c));
+    }
 }
 } // namespace
 
@@ -5011,7 +5043,7 @@ u32 Engine::paste_style(const u64* ids, u32 count) noexcept {
         d->blendMode = s.blendMode;
         d->transform.opacity = s.transform.opacity;
         copy_track(*d, s, TrackProperty::Opacity);
-        replace_effects(*d, s.effects, s.tracks);
+        replace_effects(*d, s.effects, s.tracks, d->offset.value - s.offset.value);
         if (d->kind == LayerKind::Text && s.kind == LayerKind::Text) {
             const std::string content = d->text.content;
             d->text = s.text;
@@ -5039,6 +5071,7 @@ u32 Engine::copy_effects(u64 layerId, u32 effectId) noexcept {
     clipboard_.effects.clear();
     for (const auto& e : l->effects) if (effectId == kInvalidIndex || e.id == effectId) clipboard_.effects.push_back(e);
     clipboard_.effectTracks.clear();
+    clipboard_.effectsBase = l->offset.value;
     for (u32 i = 0; i < l->tracks.size(); ++i) {
         const auto& track = l->tracks.at(i);
         if (track.property == TrackProperty::EffectParam && (effectId == kInvalidIndex || track.effectIndex == effectId)) clipboard_.effectTracks.push_back(track);
@@ -5070,6 +5103,7 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
                 if (t.effectIndex != oldId) continue;
                 Track nt = t;
                 nt.effectIndex = c.id;
+                rebase_track(nt, d->offset.value - clipboard_.effectsBase);
                 d->tracks.add(std::move(nt));
             }
             d->effects.push_back(std::move(c));
@@ -5090,6 +5124,7 @@ u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
     if (!l) return 0;
     const FrameIndex local = l->local_time(FrameIndex{frame});
     clipboard_.keys.clear();
+    clipboard_.pathKeys.clear();
     for (u32 i = 0; i < l->tracks.size(); ++i) {
         const Track& t = l->tracks.at(i);
         const u32 k = t.find_exact(local);
@@ -5164,6 +5199,7 @@ u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noe
         copied.push_back({track.property, track.effectIndex, track.effectParamIndex, type, key, ordinal});
     }
     clipboard_.keys = std::move(copied);
+    clipboard_.pathKeys.clear();
     return static_cast<u32>(clipboard_.keys.size());
 }
 
@@ -5212,7 +5248,8 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
-    if (!comp || !ids || clipboard_.keys.empty() || frame < INT32_MIN || frame > INT32_MAX) return 0;
+    if (!comp || !ids || (clipboard_.keys.empty() && clipboard_.pathKeys.empty()) || frame < INT32_MIN || frame > INT32_MAX)
+        return 0;
     u32 placed = 0;
     for (u32 i = 0; i < count; ++i) {
         Layer* d = comp->layer(LayerId::unpack(ids[i]));
@@ -5222,6 +5259,13 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
             const i64 target = local.value + key.key.time.value;
             return target < INT32_MIN || target > INT32_MAX;
         })) continue;
+        const bool pathsOut = std::any_of(clipboard_.pathKeys.begin(), clipboard_.pathKeys.end(), [&](const auto& pk) {
+            return std::any_of(pk.keys.begin(), pk.keys.end(), [&](const PathKey& k) {
+                const i64 target = local.value + k.frame;
+                return target < INT32_MIN || target > INT32_MAX;
+            });
+        });
+        if (pathsOut) continue;
         for (const Clipboard::Key& ck : clipboard_.keys) {
             u32 effectIndex = ck.effectIndex;
             if (ck.property == TrackProperty::EffectParam) {
@@ -5252,6 +5296,29 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
             }
             ++placed;
         }
+        // Keyframes de forma (morph) da camada vetorial: no mesmo caminho
+        // (grupo, caminho) do destino, se ele existir. Um key no mesmo quadro
+        // é trocado; o caminho vira livre (o morph só existe no livre).
+        if (d->kind == LayerKind::Shape && d->shape.shapeType == kShapeVector) {
+            for (const Clipboard::PathKeys& pk : clipboard_.pathKeys) {
+                if (pk.group >= d->shape.vector.groups.size() || pk.path >= d->shape.vector.groups[pk.group].paths.size())
+                    continue;
+                if (placed == 0) {
+                    history_.before_mutation(*comp, project_->timeline().current(), "colar keyframes");
+                    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+                }
+                VectorPath& vp = d->shape.vector.groups[pk.group].paths[pk.path];
+                if (vp.kind != VectorPathKind::Free) vector::make_editable(vp);
+                for (PathKey k : pk.keys) {
+                    k.frame += local.value;
+                    auto at = std::lower_bound(vp.keys.begin(), vp.keys.end(), k.frame,
+                                               [](const PathKey& a, i64 f) { return a.frame < f; });
+                    if (at != vp.keys.end() && at->frame == k.frame) *at = std::move(k);
+                    else vp.keys.insert(at, std::move(k));
+                    ++placed;
+                }
+            }
+        }
     }
     if (placed != 0) {
         project_->mark_dirty();
@@ -5269,7 +5336,28 @@ u32 Engine::copy_animation(u64 layerId) noexcept {
     i64 anchor = INT64_MAX;
     for (u32 i = 0; i < l->tracks.size(); ++i)
         for (const Keyframe& k : l->tracks.at(i).keys) anchor = std::min(anchor, k.time.value);
+    // Os keyframes de forma (morph) da camada vetorial também são animação.
+    const bool vectorLayer = l->kind == LayerKind::Shape && l->shape.shapeType == kShapeVector;
+    if (vectorLayer)
+        for (const VectorGroup& g : l->shape.vector.groups)
+            for (const VectorPath& p : g.paths)
+                for (const PathKey& k : p.keys) anchor = std::min(anchor, k.frame);
     if (anchor == INT64_MAX) return 0;
+    std::vector<Clipboard::PathKeys> copiedPaths;
+    u32 pathCount = 0;
+    if (vectorLayer) {
+        const auto& groups = l->shape.vector.groups;
+        for (u32 gi = 0; gi < groups.size(); ++gi) {
+            for (u32 pi = 0; pi < groups[gi].paths.size(); ++pi) {
+                const auto& keys = groups[gi].paths[pi].keys;
+                if (keys.empty()) continue;
+                Clipboard::PathKeys pk{gi, pi, keys};
+                for (PathKey& k : pk.keys) k.frame -= anchor;
+                pathCount += static_cast<u32>(pk.keys.size());
+                copiedPaths.push_back(std::move(pk));
+            }
+        }
+    }
     std::vector<Clipboard::Key> copied;
     for (u32 i = 0; i < l->tracks.size(); ++i) {
         const Track& t = l->tracks.at(i);
@@ -5288,7 +5376,8 @@ u32 Engine::copy_animation(u64 layerId) noexcept {
         }
     }
     clipboard_.keys = std::move(copied);
-    return static_cast<u32>(clipboard_.keys.size());
+    clipboard_.pathKeys = std::move(copiedPaths);
+    return static_cast<u32>(clipboard_.keys.size()) + pathCount;
 }
 
 u32 Engine::optimize_keyframes(u64 layerId, i32 property, f32 tolerance) noexcept {
@@ -5323,7 +5412,7 @@ u32 Engine::optimize_keyframes(u64 layerId, i32 property, f32 tolerance) noexcep
 u32 Engine::clipboard_state() noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     return (clipboard_.layers.empty() ? 0u : 1u) | (clipboard_.hasStyle ? 2u : 0u)
-         | (clipboard_.effects.empty() ? 0u : 4u) | (clipboard_.keys.empty() ? 0u : 8u);
+         | (clipboard_.effects.empty() ? 0u : 4u) | (clipboard_.keys.empty() && clipboard_.pathKeys.empty() ? 0u : 8u);
 }
 
 // =============================================================================
@@ -6661,7 +6750,9 @@ Track* expression_track(Layer& l, u32 property, u32 effectIndex, u32 paramIndex,
     if (p == TrackProperty::TimeRemap) return &l.timeRemap;
     if (p == TrackProperty::EffectParam && !l.find_effect(EffectId{effectIndex, 0})) return nullptr;
     if (p == TrackProperty::TextAnimParam && effectIndex >= l.text.animators.size()) return nullptr;
-    const bool keyed = p == TrackProperty::EffectParam || p == TrackProperty::TextAnimParam;
+    if (p == TrackProperty::LayerAnimParam && (effectIndex >= l.layerAnimators.size() || paramIndex >= layeranim::kParamCount))
+        return nullptr;
+    const bool keyed = p == TrackProperty::EffectParam || p == TrackProperty::TextAnimParam || p == TrackProperty::LayerAnimParam;
     const u32 ei = keyed ? effectIndex : kInvalidIndex;
     const u32 pi = keyed ? paramIndex : 0u;
     if (Track* t = l.tracks.find(p, ei, pi)) return t;
@@ -6698,7 +6789,8 @@ Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const c
         if (!t && !remove) {
             const auto p = k[0] < static_cast<u32>(TrackProperty::_Count) ? static_cast<TrackProperty>(k[0]) : TrackProperty::_Count;
             if (p == TrackProperty::_Count || (p == TrackProperty::EffectParam && !l->find_effect(EffectId{k[1], 0}))
-                || (p == TrackProperty::TextAnimParam && k[1] >= l->text.animators.size())) {
+                || (p == TrackProperty::TextAnimParam && k[1] >= l->text.animators.size())
+                || (p == TrackProperty::LayerAnimParam && (k[1] >= l->layerAnimators.size() || k[2] >= layeranim::kParamCount))) {
                 return Status{Errc::InvalidArgument, "propriedade invalida"};
             }
         }
@@ -8799,6 +8891,30 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     ac.bitrateBps = std::clamp<u32>(settings.audioBitrateKbps, 64, 320) * 1000u;
     const bool withAudio = ctx->audioSnap && ctx->audioSnap->audible();
     if (!withAudio) ctx->audioSnap.reset();
+    // Espaço em disco ANTES de abrir encoder e GPU: um export de horas que
+    // enche o aparelho no meio perde o tempo todo. A estimativa é o bitrate
+    // PEDIDO (o encoder real costuma ficar abaixo, sobretudo em resolução
+    // baixa), então só recusa quando nem metade cabe; o resto o sink pega
+    // (ENOSPC → StorageFull) e o encoder confere a cada 300 quadros.
+    {
+        const f64 seconds = static_cast<f64>(ctx->frames) / ctx->fps;
+        const f64 bps = static_cast<f64>(vc.bitrateBps) + (withAudio ? static_cast<f64>(ac.bitrateBps) : 0.0);
+        const u64 estimate = static_cast<u64>(seconds * bps / 8.0 * 1.05) + (8ull << 20);
+        std::error_code ec;
+        std::filesystem::path dir = std::filesystem::u8path(outputPath).parent_path();
+        if (dir.empty()) dir = std::filesystem::current_path(ec);
+        const std::filesystem::space_info sp = std::filesystem::space(dir, ec);
+        ctx->estimatedBytes = estimate;
+        if (!ec && sp.available != static_cast<std::uintmax_t>(-1) && sp.available < estimate / 2 + (32ull << 20)) {
+            static thread_local char detail[160];   // Status guarda o ponteiro
+            std::snprintf(detail, sizeof(detail), "espaco livre insuficiente: o video precisa de ~%llu MB e ha %llu MB livres",
+                          static_cast<unsigned long long>(estimate >> 20),
+                          static_cast<unsigned long long>(sp.available >> 20));
+            AUREA_LOG_WARN("export: %s", detail);
+            return Status{Errc::StorageFull, detail};
+        }
+        ctx->outputDir = dir;
+    }
     if (const Status s = ctx->sink->open(outputPath, vc, withAudio ? &ac : nullptr); !s.ok()) return s;
 
     // O encoder que o sink REALMENTE abriu. Quando o sink não sabe dizer (host,
@@ -8927,7 +9043,14 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // instantes (RGB no tempo, mistura de quadros) pode precisar de vários
     // quadros por quadro de saída — e com GOP longo isso passa de 4 s sem que
     // nada esteja quebrado. Teto absoluto de 60 s por quadro.
-    u64 deadline = t0 + 4'000'000'000ull;
+    //
+    // Esgotado o prazo, o export NÃO aborta: grava com o quadro decodificado
+    // mais próximo (uma camada sem quadro nenhum fica de fora deste quadro),
+    // registra e segue. Um vídeo de horas não pode morrer por um quadro que o
+    // decoder do aparelho não entregou. Depois de um fallback a paciência cai
+    // para 1 s até um quadro exato voltar (fonte quebrada ≠ 4 s por quadro).
+    const u64 patience = c.sourceDegraded ? 1'000'000'000ull : 4'000'000'000ull;
+    u64 deadline = t0 + patience;
     const u64 hardDeadline = t0 + 60'000'000'000ull;
     u64 lastGen = mediaReadyGen_.load(std::memory_order_acquire);
     bool drainedGpu = false;
@@ -8946,12 +9069,25 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         const u64 gen = mediaReadyGen_.load(std::memory_order_acquire);
         rl.lock();
         if (const Status s = prepare(); !s.ok()) return s;
-        if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) break;
-        snapshot_.release_video_frames();
+        if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) { c.sourceDegraded = false; break; }
         const u64 now = monotonic_ns();
-        if (gen != lastGen) { lastGen = gen; deadline = std::min<u64>(now + 4'000'000'000ull, hardDeadline); }
-        if (now > deadline)
-            return Status{Errc::Timeout, "quadros de video indisponiveis para exportacao"};
+        if (gen != lastGen) { lastGen = gen; deadline = std::min<u64>(now + patience, hardDeadline); }
+        if (now > deadline) {
+            const u32 missing = snapshot_.missingVideoFrames, stale = snapshot_.staleVideoFrames;
+            c.sourceDegraded = true;
+            if (c.fallbackFrames++ < 8 || c.fallbackFrames % 300 == 0) {
+                AUREA_LOG_WARN("export: quadro %lld sem o video exato apos %.1f s (%u sem quadro, %u aproximados); "
+                               "gravando o mais proximo decodificado (%llu ate agora)",
+                               static_cast<long long>(t.value), static_cast<f64>(now - t0) / 1e9, missing, stale,
+                               static_cast<unsigned long long>(c.fallbackFrames));
+            }
+            if (c.fallbackFrames == 1) {
+                std::lock_guard<std::mutex> pl(c.mutex);
+                c.progress.flags |= kExportFrameFallback;
+            }
+            break;   // o snapshot já preparado vai para a GPU como está
+        }
+        snapshot_.release_video_frames();
         // Waiting for decode must not pin completed external images behind GPU
         // retirement callbacks that would otherwise run only on a new submission.
         if (!drainedGpu) { gpu_->wait_idle(); drainedGpu = true; }
@@ -8963,6 +9099,14 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
                 || c.cancelRequested.load(std::memory_order_acquire);
         });
     }
+    // Decoders de clipes que já passaram SAEM agora. Quem os aposentava era o
+    // preview (render_frame → collect), que não roda durante o export: numa
+    // timeline com vários clipes cada um deixava um codec de hardware aberto
+    // (buffers, ImageReader, cache) até o fim. O aparelho esgotava as
+    // instâncias de decoder, o clipe seguinte não abria e o export morria em
+    // "quadros de video indisponiveis". Quem está na tela neste quadro acabou
+    // de ser usado; só sai quem ficou 2 preparos sem aparecer.
+    media_.collect(frameCounter_, kExportIdleFrames);
     const u64 t1 = monotonic_ns();
     FrameStats stats;
     RenderTimings timings;
@@ -9294,6 +9438,24 @@ void Engine::export_encoder_main() noexcept {
         const f64 k = 1e-6 / static_cast<f64>(done);
         // Diagnóstico a cada 300 quadros: onde o tempo do export está indo.
         if (++sinceLog == 300 || done == ctx.frames) {
+            // Disco quase cheio: para com uma mensagem clara em vez de o
+            // muxer falhar no meio de uma escrita (ou o sistema apagar o
+            // temporário). 16 MB: o que o índice final do MP4 ainda precisa.
+            if (!ctx.outputDir.empty()) {
+                std::error_code ec;
+                const std::filesystem::space_info sp = std::filesystem::space(ctx.outputDir, ec);
+                if (!ec && sp.available != static_cast<std::uintmax_t>(-1) && sp.available < (16ull << 20)) {
+                    AUREA_LOG_ERROR("export: armazenamento cheio no quadro %u de %u", done, ctx.frames);
+                    {
+                        std::lock_guard<std::mutex> ql(ctx.qMutex);
+                        ctx.encoderFailed = true;
+                        ctx.encoderStatus = Status{Errc::StorageFull, "armazenamento cheio durante a exportacao"};
+                        ctx.stop = true;
+                    }
+                    ctx.qCv.notify_all();
+                    return;
+                }
+            }
             const u64 wr = ctx.writeNs.load(std::memory_order_relaxed), rd = ctx.readNs.load(std::memory_order_relaxed);
             const u64 rn = ctx.renderNs.load(std::memory_order_relaxed), dc = ctx.decodeNs.load(std::memory_order_relaxed);
             const f64 n = static_cast<f64>(sinceLog);

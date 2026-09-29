@@ -73,6 +73,7 @@ class Exporter internal constructor(
     private val progressBuffer = directBuffer(128)
     private val progress = ExportProgress()
     private var poll: Job? = null
+    @Volatile private var cancelPending = false
 
     val busy: Boolean get() = state.phase == ExportPhase.Running || state.phase == ExportPhase.Publishing
 
@@ -94,8 +95,7 @@ class Exporter internal constructor(
 
     fun start(title: String, compWidth: Int, compHeight: Int, compFps: Double, options: ExportOptions) {
         if (busy) return
-        val dir = File(app.cacheDir, "export").apply { mkdirs() }
-        dir.listFiles()?.forEach { it.delete() }   // sobra de export interrompido
+        val dir = File(app.cacheDir, "export")
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())
         val base = title.ifBlank { "Aurea" }.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifBlank { "Aurea" }
         val file = File(dir, "$base $stamp.mp4")
@@ -106,14 +106,23 @@ class Exporter internal constructor(
         val fps = if (options.fps > 0) options.fps else compFps
         val mbps = if (options.highQuality) estimatedMbps(w, h, fps, options).toInt().coerceAtLeast(1) else 0
 
-        val code = engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale)
-        if (code != 0) {
-            state = ExportUiState(ExportPhase.Failed, message = startError(code, options))
-            return
-        }
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension)
+        cancelPending = false
         poll?.cancel()
         poll = scope.launch {
+            // Abrir o encoder, o MP4 e os alvos de GPU leva segundos em aparelho
+            // lento (e no emulador): na main thread isso dava "Aurea não está
+            // respondendo" no toque de Exportar.
+            val code = withContext(Dispatchers.IO) {
+                dir.mkdirs()
+                dir.listFiles()?.forEach { it.delete() }   // sobra de export interrompido
+                engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale)
+            }
+            if (code != 0) {
+                state = ExportUiState(ExportPhase.Failed, message = startError(code, options))
+                return@launch
+            }
+            if (cancelPending) engine.cancelExport()
             while (true) {
                 delay(100)
                 if (!engine.exportProgress(progressBuffer)) continue
@@ -129,6 +138,7 @@ class Exporter internal constructor(
                 when (progress.result) {
                     0 -> publish(file)
                     CANCELLED -> state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+                    STORAGE_FULL -> state = state.copy(phase = ExportPhase.Failed, message = text(R.string.msg_sem_espaco_no_aparelho_libere_espaco))
                     else -> state = state.copy(
                         phase = ExportPhase.Failed,
                         message = text(R.string.app_export_failed, progress.message.ifBlank { text(R.string.app_error_code, progress.result) }),
@@ -144,7 +154,9 @@ class Exporter internal constructor(
     }
 
     fun cancel() {
-        if (state.phase == ExportPhase.Running) engine.cancelExport()
+        if (state.phase != ExportPhase.Running) return
+        cancelPending = true   // ainda abrindo: cancela assim que o motor começar
+        engine.cancelExport()
     }
 
     /** Volta ao estado inicial (tela reaberta ou fechada). */
@@ -228,6 +240,9 @@ class Exporter internal constructor(
         if (p.thermalReduced) {
             lines += text(R.string.app_export_thermal)
         }
+        if (p.frameFallback) {
+            lines += text(R.string.app_export_frame_fallback)
+        }
         return lines.joinToString("\n")
     }
 
@@ -235,6 +250,7 @@ class Exporter internal constructor(
         NOT_SUPPORTED -> text(if (options.hevc) R.string.app_export_no_hevc else R.string.app_export_unsupported_res)
         OUT_OF_MEMORY -> text(R.string.app_export_no_vram)
         INVALID_STATE -> text(R.string.app_export_busy)
+        STORAGE_FULL -> text(R.string.msg_sem_espaco_no_aparelho_libere_espaco)
         else -> text(R.string.app_export_start_failed, code)
     }
 
@@ -247,5 +263,6 @@ class Exporter internal constructor(
         const val NOT_SUPPORTED = 6
         const val OUT_OF_MEMORY = 8
         const val CANCELLED = 25
+        const val STORAGE_FULL = 28
     }
 }

@@ -74,7 +74,8 @@
 //                 uppercase, breakOnPause, pauseSec, posY, sizeFrac,
 //                 "highlightColor":[4], removeFillers }
 //
-//  "curve" — um easing: "curve": {"interp": 2, "x1", "y1", "x2", "y2"}.
+//  "curve" — um easing: "curve": {"interp": 2, "x1", "y1", "x2", "y2",
+//    "power"} (power = força ×1/×2/×3 da bézier; ausente = 1, o de antes).
 //    Aplicado pelo caminho de sempre (KeyframeSetBezier), keyframe a keyframe.
 //
 //  Leitura DEFENSIVA: arquivo malformado, versão futura, tipo errado ou número
@@ -201,6 +202,7 @@ struct Preset {
     // curve
     Interpolation curveInterp = Interpolation::Bezier;
     f32 x1 = 0.42f, y1 = 0.0f, x2 = 0.58f, y2 = 1.0f;
+    u8  curvePower = 1;   ///< força da bézier (Keyframe::easePower 1..3)
 };
 
 /// Preset → JSON. `registry` (opcional) dá as chaves/ids estáveis dos efeitos;
@@ -241,7 +243,8 @@ bool apply(const Preset& p, Layer& layer, i64 anchorLocal, i64 durationFrames, f
 
 /// Atalhos para os tipos que não moram na camada.
 [[nodiscard]] std::string make_caption_preset(const std::string& name, const text::CaptionOptions& o, bool removeFillers);
-[[nodiscard]] std::string make_curve_preset(const std::string& name, Interpolation interp, f32 x1, f32 y1, f32 x2, f32 y2);
+[[nodiscard]] std::string make_curve_preset(const std::string& name, Interpolation interp, f32 x1, f32 y1, f32 x2, f32 y2,
+                                            u32 power = 1);
 
 } // namespace presets
 } // namespace aurea

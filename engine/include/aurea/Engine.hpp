@@ -513,9 +513,21 @@ public:
     bool set_layer_motion_blur_length(u64 layerId, f32 factor) noexcept;
     [[nodiscard]] f32 query_layer_motion_blur_length(u64 layerId) noexcept;
 
-    /// Camadas que um ajuste afeta: 0 = todas abaixo, 1 = só a logo abaixo.
+    /// Camadas que um ajuste afeta: 0 = todas abaixo, 1 = só a logo abaixo,
+    /// 2 = só as camadas escolhidas (a lista do app antigo, abaixo do ajuste).
     bool set_adjustment_scope(u64 layerId, u32 scope) noexcept;
     [[nodiscard]] u32 query_adjustment_scope(u64 layerId) noexcept;
+    /// Escopo 2: põe/tira `targetId` da lista do ajuste (passa o escopo a 2).
+    bool set_adjustment_target(u64 layerId, u64 targetId, bool on) noexcept;
+    /// A lista do escopo 2 (ids das camadas); devolve quantas.
+    u32 query_adjustment_targets(u64 layerId, u64* out, u32 capacity) noexcept;
+
+    // --- Presets de efeito (Effect::presets) --------------------------------------
+    /// Os presets do tipo: (id estável, nome do motor). Vazio = sem presets.
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> effect_presets(u32 typeId) noexcept;
+    /// Aplica o preset `preset` ao efeito `effectId` da camada: escreve os
+    /// valores parados dos parâmetros dele num passo de desfazer.
+    bool apply_effect_preset(u64 layerId, u32 effectId, u32 preset) noexcept;
     /// Grupo (pré-composição): a câmera de fora alcança as camadas 3D de dentro.
     bool set_group_camera_pass_through(u64 layerId, bool on) noexcept;
     /// −1 = não é grupo; 0/1.
@@ -1269,6 +1281,7 @@ public:
         kExportHardwareEncoder = 1u << 0,   ///< o sink confirmou encoder de hardware
         kExportSoftwareEncoder = 1u << 1,   ///< caiu para encoder de software (mais lento)
         kExportThermalReduced  = 1u << 2,   ///< calor: menos quadros em voo (qualidade igual)
+        kExportFrameFallback   = 1u << 3,   ///< algum quadro de vídeo saiu com o decodificado mais próximo
     };
     [[nodiscard]] ExportProgress export_progress() const noexcept;
 
@@ -1404,8 +1417,13 @@ private:
         Layer style;
         std::vector<EffectInstance> effects;
         std::vector<Track> effectTracks;            ///< EffectParam dos efeitos copiados
+        i64 effectsBase = 0;                        ///< offset da camada de origem (início dela em tempo local)
         struct Key { TrackProperty property; u32 effectIndex; u32 effectParamIndex; EffectTypeId effectType; Keyframe key; u32 effectOrdinal = 0; };
         std::vector<Key> keys;                       ///< tempo relativo ao instante copiado (0)
+        /// Copiar animação: os keyframes de FORMA (morph) da camada vetorial,
+        /// por (grupo, caminho), com o tempo relativo como `keys`.
+        struct PathKeys { u32 group; u32 path; std::vector<PathKey> keys; };
+        std::vector<PathKeys> pathKeys;
         std::vector<LayerAnimator> layerAnimators;   ///< animadores de camada copiados
         std::vector<Track> layerAnimTracks;          ///< trilhas deles (effectIndex = posição na cópia)
     } clipboard_;

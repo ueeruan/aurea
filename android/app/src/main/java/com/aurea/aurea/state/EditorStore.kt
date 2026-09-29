@@ -1354,6 +1354,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             if (la.size != oldLa.size || la.indices.any { !la[it].contentEquals(oldLa[it]) }) layerAnimators = la
             layerMotionBlurLength = engine.queryLayerMotionBlurLength(id)
             adjustmentScope = engine.queryAdjustmentScope(id)
+            adjustmentTargets = if (adjustmentScope == 2) engine.queryAdjustmentTargets(id).toSet() else emptySet()
             groupCameraPassThrough = engine.queryGroupCameraPassThrough(id)
         } else {
             layerAnimators = emptyList()
@@ -3764,8 +3765,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var layerAnimators by mutableStateOf<List<FloatArray>>(emptyList())
     /** Comprimento do rastro do desfoque desta camada (× o obturador do projeto). */
     var layerMotionBlurLength by mutableStateOf(1f)
-    /** Ajuste: 0 = todas abaixo, 1 = só a camada logo abaixo. */
+    /** Ajuste: 0 = todas abaixo, 1 = só a camada logo abaixo, 2 = só as escolhidas. */
     var adjustmentScope by mutableStateOf(0)
+    /** Escopo 2: as camadas escolhidas (a lista marcada do app antigo). */
+    var adjustmentTargets by mutableStateOf<Set<Long>>(emptySet())
     /** Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo). */
     var groupCameraPassThrough by mutableStateOf(-1)
         private set
@@ -3809,8 +3812,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun curvePresetJson(name: String, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float): String? =
-        engine.makeCurvePreset(name, interp, x1, y1, x2, y2)
+    fun curvePresetJson(name: String, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int = 1): String? =
+        engine.makeCurvePreset(name, interp, x1, y1, x2, y2, power)
 
     /** [interp, x1, y1, x2, y2] do preset de curva; nulo = inválido. */
     fun curveOfPreset(e: com.aurea.aurea.presets.PresetEntry): FloatArray? = presets.jsonOf(e)?.let { engine.parseCurvePreset(it) }
@@ -4066,6 +4069,34 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         engine.setAdjustmentScope(id, scope)
         refreshNow()
         refreshDetail()
+    }
+
+    /** Escopo 2: marca/desmarca uma camada da lista do ajuste (um passo de desfazer). */
+    fun toggleAdjustmentTarget(target: Long) {
+        val id = primary ?: return
+        engine.setAdjustmentTarget(id, target, target !in adjustmentTargets)
+        refreshNow()
+        refreshDetail()
+    }
+
+    /** Presets do efeito (pares id → nome do motor), guardados por tipo. */
+    private val effectPresetCache = HashMap<Int, List<Pair<String, String>>>()
+    fun effectPresets(typeId: Int): List<Pair<String, String>> = effectPresetCache.getOrPut(typeId) { engine.effectPresets(typeId) }
+
+    /** Aplica o preset [preset] ao efeito: todos os valores num passo de desfazer. */
+    fun applyEffectPreset(effectId: Int, preset: Int) {
+        val id = primary ?: return
+        if (engine.applyEffectPreset(id, effectId, preset)) {
+            refreshNow()
+            refreshDetail()
+        }
+    }
+
+    /** Alternar grupo: um grupo escolhido desagrupa; senão as escolhidas viram grupo. */
+    fun toggleGroup(ids: Collection<Long> = selection) {
+        val only = ids.singleOrNull()
+        if (only != null && layers.firstOrNull { it.id == only }?.let { com.aurea.aurea.ui.theme.LayerType.of(it.kind) } == com.aurea.aurea.ui.theme.LayerType.Group) ungroupPrecomp(only)
+        else precompose(ids)
     }
 
     fun changeGroupCameraPassThrough(on: Boolean) {

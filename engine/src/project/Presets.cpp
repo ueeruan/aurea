@@ -916,9 +916,12 @@ bool read_curve(Reader& r, const json::Value& root, Preset& p) {
     const u32 interp = r.u(*c, "interp", static_cast<u32>(Interpolation::Bezier), static_cast<u32>(Interpolation::Steps));
     const f32 x1 = r.f(*c, "x1", 0.42f, 0.0, 1.0), y1 = r.f(*c, "y1", 0.0f, -2.0, 3.0);
     const f32 x2 = r.f(*c, "x2", 0.58f, 0.0, 1.0), y2 = r.f(*c, "y2", 1.0f, -2.0, 3.0);
+    // Força da bézier: preset de antes não tem o campo e lê ×1.
+    const u32 power = r.u(*c, "power", 1, 3);
     if (!r.ok()) return false;
     p.curveInterp = static_cast<Interpolation>(static_cast<u8>(interp));
     p.x1 = x1; p.y1 = y1; p.x2 = x2; p.y2 = y2;
+    p.curvePower = clamp_ease_power(power);
     return true;
 }
 
@@ -1023,6 +1026,7 @@ std::string write(const Preset& p, const EffectRegistry* registry) {
             w.key("curve").begin_object();
             w.key("interp").value(static_cast<u32>(p.curveInterp));
             w.key("x1").value(p.x1).key("y1").value(p.y1).key("x2").value(p.x2).key("y2").value(p.y2);
+            if (clamp_ease_power(p.curvePower) != 1) w.key("power").value(static_cast<u32>(clamp_ease_power(p.curvePower)));
             w.end_object();
             break;
         default: break;
@@ -1271,12 +1275,13 @@ std::string make_caption_preset(const std::string& name, const text::CaptionOpti
     return write(p);
 }
 
-std::string make_curve_preset(const std::string& name, Interpolation interp, f32 x1, f32 y1, f32 x2, f32 y2) {
+std::string make_curve_preset(const std::string& name, Interpolation interp, f32 x1, f32 y1, f32 x2, f32 y2, u32 power) {
     Preset p;
     p.kind = PresetKind::Curve;
     p.name = name;
     p.curveInterp = interp;
     p.x1 = x1; p.y1 = y1; p.x2 = x2; p.y2 = y2;
+    p.curvePower = clamp_ease_power(power);
     return write(p);
 }
 

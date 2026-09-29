@@ -302,6 +302,7 @@ struct ExportView: View {
     private var failureNotice: String? {
         if model.exportCancelled || cancelled { return AureaText.t("ios_export_cancelled") }
         let result = (model.exportProgress["result"] as? NSNumber)?.intValue ?? 0
+        if result == 28 { return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco") }
         if result != 0 { return AureaText.t("ios_export_failed_detail", model.exportProgress["message"] as? String ?? AureaText.t("ios_error_code", "\(result)")) }
         return model.exportMessage
     }
@@ -315,6 +316,7 @@ struct ExportView: View {
             notices.append(AureaText.t("ios_export_software_encoder", codec))
         }
         if flags & AureaExportFlag.thermalReduced.rawValue != 0 { notices.append(AureaText.t("ios_export_thermal")) }
+        if flags & AureaExportFlag.frameFallback.rawValue != 0 { notices.append(AureaText.t("ios_export_frame_fallback")) }
         return notices.joined(separator: "\n")
     }
     private func format(_ value: Double) -> String {

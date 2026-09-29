@@ -3155,4 +3155,17 @@ para editar la curva.</string>
     <string name="fxl_add_mode">Mezcla aditiva</string>
     <string name="fxl_show_layer">Mostrar capa</string>
     <string name="fxo_block_mosaic">Mosaico de bloques</string>
+    <string name="app_export_frame_fallback">Algunos fotogramas del video original no se pudieron leer a tiempo; se usó el fotograma más cercano. La exportación continúa.</string>
+    <string name="ios_export_frame_fallback">Algunos fotogramas del video original no se pudieron leer a tiempo; se usó el fotograma más cercano. La exportación continúa.</string>
+    <string name="fx_presets">Ajustes preestablecidos</string>
+    <string name="fxp_impact">Impacto</string>
+    <string name="fxp_handheld">En mano</string>
+    <string name="fxp_glitch">Glitch</string>
+    <string name="la_affected_chosen">Solo las elegidas</string>
+    <string name="la_affected_chosen_hint">Los efectos se aplican solo a las capas marcadas abajo.</string>
+    <string name="la_affected_none_below">Ninguna capa debajo de esta</string>
+    <string name="la_toggle_group">Alternar grupo</string>
+    <string name="la_toggle_group_hint">Agrupa las capas elegidas; en un grupo, lo desagrupa.</string>
+    <string name="fxl_motion_blur_2">Desenfoque de movimiento</string>
+    <string name="fxl_shutter_angle">Ángulo de obturación</string>
 </resources>

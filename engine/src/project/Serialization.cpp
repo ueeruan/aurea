@@ -852,6 +852,9 @@ void write_layer(ByteWriter& w, const Layer& l) {
     }
     w.u8v(l.adjustmentScope);
     w.boolv(l.nested.cameraPassThrough);
+    // v37: as camadas escolhidas do ajuste (escopo 2).
+    w.u32v(static_cast<u32>(l.adjustmentTargets.size()));
+    for (LayerId t : l.adjustmentTargets) w.u64v(t.pack());
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -879,6 +882,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
 // v36: animadores de camada, escopo do ajuste e câmera que atravessa o grupo,
 //      no fim da camada. Antes dela: nenhum animador, ajuste em tudo abaixo e
 //      grupo fechado para a câmera (o render de sempre).
+// v37: camadas escolhidas do ajuste (escopo 2), depois da câmera do grupo.
+//      Antes dela a lista é vazia (e o escopo só vai até 1).
 // v35: força da bézier (Keyframe::easePower) depois de cada keyframe; antes
 //      dela todo keyframe lê com força 1 — a mesma curva de sempre.
 // O número vive no cabeçalho público (Serialization.hpp) para os testes o
@@ -1358,8 +1363,15 @@ void read_layer(ByteReader& r, Layer& l) {
                            &a.wigglePosY, &a.wiggleScale, &a.wiggleRotation, &a.wiggleSpeed, &a.wiggleHold})
                 *v = fin(r.f32v(), *v);
         }
-        l.adjustmentScope = std::min<u8>(r.u8v(), 1);
+        l.adjustmentScope = std::min<u8>(r.u8v(), g_readingTimelineVersion >= 37 ? 2 : 1);
         l.nested.cameraPassThrough = r.boolv();
+        l.adjustmentTargets.clear();
+        if (g_readingTimelineVersion >= 37) {
+            const u32 n = r.u32v();
+            if (n > 256 || r.remaining() < static_cast<u64>(n) * 8) { r.fail(); return; }
+            l.adjustmentTargets.reserve(n);
+            for (u32 i = 0; i < n; ++i) l.adjustmentTargets.push_back(LayerId::unpack(r.u64v()));
+        }
     } else {
         // Projeto anterior: nenhum animador de camada, o ajuste vale para tudo
         // abaixo e o grupo é fechado para a câmera — o mesmo quadro de antes.

@@ -946,5 +946,7 @@ enum EffectI18nTable {
     aurea.generate.particular|35|add_mode|fxl_add_mode|
     aurea.generate.particular|36|show_source|fxl_show_layer|
     aurea.generate.particular|37|seed|fxl_seed|
+    aurea.generate.particular|38|motion_blur|fxl_motion_blur_2|
+    aurea.generate.particular|39|shutter_angle|fxl_shutter_angle|
     """
 }

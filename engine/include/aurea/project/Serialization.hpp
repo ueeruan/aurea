@@ -70,7 +70,7 @@ struct SectionHeader {
 /// Versão da seção Timeline — o mesmo número que `LoadReport::timelineVersion`
 /// devolve ao abrir. Público de propósito: um teste que confere a versão de um
 /// projeto recém-gravado compara com ISTO, nunca com um literal que envelhece.
-constexpr u32 kTimelineSectionVersion = 36;
+constexpr u32 kTimelineSectionVersion = 37;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

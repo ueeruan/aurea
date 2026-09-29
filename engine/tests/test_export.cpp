@@ -559,20 +559,245 @@ AUREA_TEST(Export, TemporalRgbReleasesFiniteDecoderImages) {
     AUREA_CHECK_EQ(factory.leases->live.load(), 0u);
 }
 
-AUREA_TEST(Export, MissingVideoFramesAbortInsteadOfEncodingFallback) {
+/// Decoder that never produces a frame (all image leases taken): the export
+/// must not die. The layer without any decoded frame is left out of those
+/// frames, the file is finished and the UI gets the fallback flag.
+AUREA_TEST(Export, MissingVideoFramesFallBackInsteadOfAborting) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;
     LeasedFactory factory(cfg);
     factory.leases->limit = 0;
-    Rig r(cfg, 30.0, 1, 3, &factory);
+    Rig r(cfg, 30.0, 3, 3, &factory);
     AUREA_CHECK(r.ok);
     if (!r.ok) return;
-    const Outcome o = run_export(r, 36, 30, false, 10);
+    const auto t0 = std::chrono::steady_clock::now();
+    const Outcome o = run_export(r, 36, 30, false, 30);
+    const f64 secs = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
     AUREA_CHECK(o.finished);
-    AUREA_CHECK_EQ(o.p.result, Errc::Timeout);
-    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
-    AUREA_CHECK(r.cap.hashes.empty());
+    AUREA_CHECK_EQ(o.p.result, Errc::Ok);
+    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(3));
+    AUREA_CHECK((o.p.flags & Engine::kExportFrameFallback) != 0);
     AUREA_CHECK(factory.leases->exhausted.load() > 0);
+    // 4 s for the first frame, then 1 s each while the source stays broken.
+    std::printf("fallback em %.1f s ", secs);
+    AUREA_CHECK(secs < 9.0);
+}
+
+namespace {
+/// Real decoder until `stallFromUs`, then DecodeFailed forever (corrupt tail,
+/// vendor codec that stops mid-file).
+class StallingDecoder final : public VideoDecoderBackend {
+public:
+    StallingDecoder(const SyntheticConfig& cfg, i64 stallFromUs) : decoder_(cfg), stallFromUs_(stallFromUs) {}
+    const VideoStreamInfo& info() const noexcept override { return decoder_.info(); }
+    Status seek_to_keyframe(i64 us) noexcept override { return decoder_.seek_to_keyframe(us); }
+    Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+        FrameRef frame;
+        const Status s = decoder_.next_frame(from, frame, pts, eos);
+        if (s.ok() && pts >= stallFromUs_) return Status{Errc::DecodeFailed, "decoder parou (teste)"};
+        out = std::move(frame);
+        return s;
+    }
+    u32 max_live_frames() const noexcept override { return 12; }
+    i64 keyframe_interval_us() const noexcept override { return decoder_.keyframe_interval_us(); }
+private:
+    SyntheticDecoder decoder_;
+    i64 stallFromUs_;
+};
+class StallingFactory final : public VideoSourceFactory {
+public:
+    StallingFactory(const SyntheticConfig& cfg, i64 stallFromUs) : cfg_(cfg), stallFromUs_(stallFromUs) {}
+    bool probe(const char* path, MediaProbe& out) override { return SyntheticFactory(cfg_).probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+        return std::make_unique<StallingDecoder>(cfg_, stallFromUs_);
+    }
+private:
+    SyntheticConfig cfg_;
+    i64 stallFromUs_;
+};
+
+/// Platform decoder instances are finite (hardware codecs: often 4-16, fewer
+/// at 4K). Opening past the limit fails exactly like a real device.
+struct DecoderSlots {
+    std::atomic<u32> live{0}, peak{0}, refused{0}, opened{0};
+    u32 limit = 3;
+};
+class SlotDecoder final : public VideoDecoderBackend {
+public:
+    SlotDecoder(const SyntheticConfig& cfg, std::shared_ptr<DecoderSlots> slots)
+        : decoder_(cfg), slots_(std::move(slots)) {
+        const u32 live = ++slots_->live;
+        u32 peak = slots_->peak.load();
+        while (peak < live && !slots_->peak.compare_exchange_weak(peak, live)) {}
+    }
+    ~SlotDecoder() override { --slots_->live; }
+    const VideoStreamInfo& info() const noexcept override { return decoder_.info(); }
+    Status seek_to_keyframe(i64 us) noexcept override { return decoder_.seek_to_keyframe(us); }
+    Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+        return decoder_.next_frame(from, out, pts, eos);
+    }
+    u32 max_live_frames() const noexcept override { return 12; }
+    i64 keyframe_interval_us() const noexcept override { return decoder_.keyframe_interval_us(); }
+private:
+    SyntheticDecoder decoder_;
+    std::shared_ptr<DecoderSlots> slots_;
+};
+class SlotFactory final : public VideoSourceFactory {
+public:
+    explicit SlotFactory(const SyntheticConfig& cfg) : cfg_(cfg) {}
+    bool probe(const char* path, MediaProbe& out) override { return SyntheticFactory(cfg_).probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+        if (slots->live.load() >= slots->limit) { ++slots->refused; return nullptr; }
+        ++slots->opened;
+        return std::make_unique<SlotDecoder>(cfg_, slots);
+    }
+    std::shared_ptr<DecoderSlots> slots = std::make_shared<DecoderSlots>();
+private:
+    SyntheticConfig cfg_;
+};
+} // namespace
+
+/// The decoder dies in the middle of the clip: the export keeps the nearest
+/// decoded frame for the rest instead of throwing the whole video away.
+AUREA_TEST(Export, DecoderStallUsesNearestDecodedFrameAndFinishes) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 64; cfg.height = 36;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    cfg.gop = 30;
+    const i64 stallUs = static_cast<i64>(std::llround(5 * 1e6 / 30.0));   // frames 0..4 decode
+    StallingFactory factory(cfg, stallUs);
+    Rig r(cfg, 30.0, 7, 3, &factory);
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    r.cap.keepFrames = true;
+    const Outcome o = run_export(r, 36, 30, false, 30);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::Ok);
+    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+    AUREA_CHECK_EQ(r.cap.frames.size(), static_cast<usize>(7));
+    AUREA_CHECK((o.p.flags & Engine::kExportFrameFallback) != 0);
+    if (r.cap.frames.size() == 7) {
+        // Frames before the stall are distinct; after it, the last good one repeats.
+        AUREA_CHECK(r.cap.frames[3] != r.cap.frames[4]);
+        AUREA_CHECK(r.cap.frames[5] == r.cap.frames[4]);
+        AUREA_CHECK(r.cap.frames[6] == r.cap.frames[4]);
+    }
+}
+
+/// Many clips in sequence, device with 3 decoder instances. The preview used to
+/// be the only one retiring idle decoders, and it does not run during export:
+/// every finished clip kept its codec until the end, the 4th clip could not
+/// open and the export died with "quadros de video indisponiveis".
+AUREA_TEST(Export, ManyClipsRetireDecodersDuringExport) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 64; cfg.height = 36;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    cfg.frameCount = 60;
+    SlotFactory factory(cfg);
+    constexpr i64 kClips = 12, kClipFrames = 10;
+    Rig r(cfg, 30.0, kClips * kClipFrames, 3, &factory);
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    std::vector<LayerId> clips{r.video_layer()};
+    for (i64 k = 1; k < kClips; ++k) {
+        VideoImport vi;
+        vi.sourcePath = "sintetico";
+        vi.displayName = "sintetico";
+        const auto id = r.e.import_video(vi);
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return;
+        clips.push_back(LayerId::unpack(*id));
+    }
+    for (i64 k = 0; k < kClips; ++k) {
+        Command cmd;
+        cmd.type = CommandType::LayerSetTimeRange;
+        cmd.layer_range.layer = clips[static_cast<usize>(k)];
+        cmd.layer_range.start = FrameIndex{k * kClipFrames};
+        cmd.layer_range.end = FrameIndex{(k + 1) * kClipFrames};
+        cmd.layer_range.offset = FrameIndex{0};
+        cmd.layer_range.setOffset = true;
+        AUREA_CHECK(r.e.apply_command(cmd).ok());
+    }
+    // The composition may have grown with the imports: pin it back.
+    Command d;
+    d.type = CommandType::CompositionSetDuration;
+    d.comp_duration.comp = r.e.project()->timeline().current();
+    d.comp_duration.duration = FrameIndex{kClips * kClipFrames};
+    AUREA_CHECK(r.e.apply_command(d).ok());
+    const Outcome o = run_export(r, 36, 30, false, 60);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(kClips * kClipFrames));
+    // Every frame was the exact one: no clip needed the fallback.
+    AUREA_CHECK((o.p.flags & Engine::kExportFrameFallback) == 0);
+    std::printf("decoders: pico %u vivos, %u abertos, %u recusados ", factory.slots->peak.load(),
+                factory.slots->opened.load(), factory.slots->refused.load());
+    AUREA_CHECK(factory.slots->peak.load() <= factory.slots->limit);
+}
+
+/// 10 hours of timeline (1,080,000 composition frames at 30 fps), exported at
+/// a very low output rate and tiny size so it runs in seconds: timestamps reach
+/// 36e9 us (past 2^32), and memory stays flat (nothing accumulates per frame
+/// in the engine).
+AUREA_TEST(Export, TenHourTimelineTimestampsAndFlatMemory) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    constexpr i64 kFrames = 10ll * 3600 * 30;
+    SyntheticConfig cfg;
+    cfg.width = 32; cfg.height = 18;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    cfg.frameCount = static_cast<u32>(kFrames + 30);
+    cfg.gop = 30;
+    Rig r(cfg, 30.0, kFrames, 3);
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    constexpr f64 kOutFps = 0.25;   // one output frame every 4 s of timeline: 9000 frames
+    const i64 outFrames = static_cast<i64>(std::ceil(10.0 * 3600 * kOutFps - 1e-6));
+    ExportSettings s;
+    s.height = 18;
+    s.fps = kOutFps;
+    s.dither = false;
+    const auto t0 = std::chrono::steady_clock::now();
+    AUREA_CHECK(r.e.start_export(s, "nao-usado.mp4").ok());
+    u64 at10 = 0, peakAfter10 = 0;
+    u32 lastDone = 0;
+    auto lastMove = std::chrono::steady_clock::now();
+    bool stalled = false;
+    for (;;) {
+        const Engine::ExportProgress p = r.e.export_progress();
+        if (p.finished) break;
+        if (p.framesDone != lastDone) { lastDone = p.framesDone; lastMove = std::chrono::steady_clock::now(); }
+        if (std::chrono::steady_clock::now() - lastMove > std::chrono::seconds(10)) { stalled = true; break; }
+        const ProcMem pm = proc_mem();
+        if (at10 == 0 && p.framesDone >= outFrames / 10) at10 = pm.privateBytes;
+        if (at10) peakAfter10 = std::max(peakAfter10, pm.privateBytes);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    AUREA_CHECK(!stalled);
+    if (stalled) { (void)r.e.cancel_export(); return; }
+    const f64 secs = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
+    const Engine::ExportProgress p = r.e.export_progress();
+    AUREA_CHECK_EQ(p.result, Errc::Ok);
+    AUREA_CHECK_EQ(static_cast<i64>(p.framesTotal), outFrames);
+    AUREA_CHECK_EQ(static_cast<i64>(r.cap.pts.size()), outFrames);
+    AUREA_CHECK(r.cap.ptsMonotonic);
+    AUREA_CHECK((p.flags & Engine::kExportFrameFallback) == 0);
+    if (!r.cap.pts.empty()) {
+        // Last frame at 9 h 59 min 56 s: 35,996,000,000 us, exact.
+        AUREA_CHECK_EQ(r.cap.pts.back(), static_cast<i64>(std::llround(static_cast<f64>(outFrames - 1) * 1e6 / kOutFps)));
+        AUREA_CHECK(r.cap.pts.back() > (i64{1} << 32));
+    }
+    // Distinct source frames up to the very end (the 10 h source is really read).
+    if (r.cap.hashes.size() > 2)
+        AUREA_CHECK(r.cap.hashes[r.cap.hashes.size() - 1] != r.cap.hashes[r.cap.hashes.size() - 2]);
+    std::printf("%lld q em %.1f s, memoria em 10%% %.0f MB, pico depois %.0f MB ", static_cast<long long>(outFrames), secs,
+                at10 / 1048576.0, peakAfter10 / 1048576.0);
+#if defined(_WIN32)
+    AUREA_CHECK(at10 > 0);
+    AUREA_CHECK(peakAfter10 < at10 + (32ull << 20));
+#endif
 }
 
 AUREA_TEST(Export, HeatReducesParallelismNeverQuality) {

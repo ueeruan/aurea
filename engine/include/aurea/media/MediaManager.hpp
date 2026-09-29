@@ -121,6 +121,8 @@ private:
         std::unique_ptr<Opening> opening;
         u64 lastUsedFrame = 0;
         bool failed = false;
+        u64 failedFrame = 0;   ///< quando o open falhou (nova tentativa depois de um intervalo)
+        u32 failures = 0;      ///< tentativas de open que falharam nesta camada
     };
 
     VideoSourceFactory* factory_ = nullptr;

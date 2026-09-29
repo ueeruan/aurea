@@ -1105,7 +1105,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.generate.particular", FxEffectHuman(
         name: "afx_name_particular",
         keywords: "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh",
-        principal: [0, 9, 13, 15, 22, 24, 27, 32, 33, 35])),
+        principal: [0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38])),
 ]
 
 /// A tabela indexada pelo `typeId`, e a posição declarada (para ordenar sem

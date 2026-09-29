@@ -1272,7 +1272,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.generate.particular", EffectHuman(
         name = R.string.afx_name_particular,
         keywords = "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh",
-        principal = listOf(0, 9, 13, 15, 22, 24, 27, 32, 33, 35),
+        principal = listOf(0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38),
     ))
 }
 

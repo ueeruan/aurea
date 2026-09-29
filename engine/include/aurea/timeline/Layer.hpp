@@ -633,8 +633,11 @@ struct Layer {
     /// no quadro inteiro, misturados pela opacidade da camada.
     bool     adjustment = false;
     /// Camadas afetadas pelo ajuste: 0 = todas abaixo, 1 = só a camada logo
-    /// abaixo (um grupo conta como UMA camada: o ajuste vale só para ele).
+    /// abaixo (um grupo conta como UMA camada: o ajuste vale só para ele),
+    /// 2 = só as camadas de `adjustmentTargets` que estão abaixo dele (a
+    /// lista marcada do app antigo; cada uma recebe os efeitos sozinha).
     u8       adjustmentScope = 0;
+    std::vector<LayerId> adjustmentTargets;
     /// Guia: aparece no preview do editor e nunca sai no export.
     bool     guide = false;
     /// Etiqueta de cor da camada (0 = nenhuma; 1..kLayerLabelCount-1 = paleta

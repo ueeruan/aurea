@@ -527,6 +527,15 @@ AUREA_TEST(Presets, CaptionAndCurvePresetsRoundTrip) {
     AUREA_CHECK(presets::parse(cv, q));
     AUREA_CHECK(q.kind == PresetKind::Curve && q.curveInterp == Interpolation::Bezier);
     AUREA_CHECK(q.x1 == 0.16f && q.y1 == 1.0f && q.x2 == 0.3f && q.y2 == 1.0f);
+    AUREA_CHECK_EQ(q.curvePower, u8{1});   // sem força gravada: ×1
+    AUREA_CHECK(cv.find("power") == std::string::npos);   // arquivo igual ao de antes
+    // Força ×3 (a bézier aplicada três vezes) volta do arquivo.
+    const std::string cv3 = presets::make_curve_preset("Saída forte ×3", Interpolation::Bezier, 0.16f, 1.0f, 0.3f, 1.0f, 3);
+    presets::Preset q3;
+    AUREA_CHECK(presets::parse(cv3, q3));
+    AUREA_CHECK_EQ(q3.curvePower, u8{3});
+    presets::Preset tooStrong;
+    AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"power":7}})", tooStrong));
     presets::Preset bad;
     AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"x1":4}})", bad));
     AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"caption","caption":{"style":99}})", bad));

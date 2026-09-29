@@ -1169,3 +1169,5 @@ aurea.generate.particular	34	color_random	-1	fxl_color_random
 aurea.generate.particular	35	add_mode	-1	fxl_add_mode
 aurea.generate.particular	36	show_source	-1	fxl_show_layer
 aurea.generate.particular	37	seed	-1	fxl_seed
+aurea.generate.particular	38	motion_blur	-1	fxl_motion_blur_2
+aurea.generate.particular	39	shutter_angle	-1	fxl_shutter_angle

@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(1858).apply {
+        HashMap<Long, IntArray>(1862).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -970,6 +970,8 @@ internal object EffectI18nTable {
         m.put("aurea.generate.particular", 35, /* add_mode */ intArrayOf(R.string.fxl_add_mode))
         m.put("aurea.generate.particular", 36, /* show_source */ intArrayOf(R.string.fxl_show_layer))
         m.put("aurea.generate.particular", 37, /* seed */ intArrayOf(R.string.fxl_seed))
+        m.put("aurea.generate.particular", 38, /* motion_blur */ intArrayOf(R.string.fxl_motion_blur_2))
+        m.put("aurea.generate.particular", 39, /* shutter_angle */ intArrayOf(R.string.fxl_shutter_angle))
     }
 
     private fun HashMap<Long, IntArray>.put(key: String, index: Int, ids: IntArray) {

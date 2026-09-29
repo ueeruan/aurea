@@ -14,6 +14,7 @@
 #include "aurea/jobs/JobSystem.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/platform/AndroidVideoCompatibility.hpp"
+#include "aurea/platform/AndroidVideoPath.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -42,6 +43,79 @@ AUREA_TEST(AndroidVideoCompatibility, EverySamsungReleaseUsesReadablePlanes) {
         AUREA_CHECK(!android::needs_readable_video_planes(vendor, 31));
         AUREA_CHECK(!android::needs_readable_video_planes(vendor, 32));
     }
+}
+
+AUREA_TEST(AndroidVideoPath, DriverGlIsTheDefaultAndFallsForwardOnly) {
+    using android::VideoPath;
+    using android::VideoPathInputs;
+    // Toda marca começa no GL do driver quando o backend importa RGBA (Samsung
+    // inclusive); miniatura e backend sem importação vão aos planos; modo seguro
+    // é o decoder de software.
+    VideoPathInputs in;
+    in.rgbaImport = true;
+    AUREA_CHECK(android::initial_video_path(in) == VideoPath::DriverGl);
+    in.thumbnail = true;
+    AUREA_CHECK(android::initial_video_path(in) == VideoPath::CpuPlanes);
+    in.thumbnail = false;
+    in.rgbaImport = false;
+    AUREA_CHECK(android::initial_video_path(in) == VideoPath::CpuPlanes);
+    in.rgbaImport = true;
+    in.safeMode = true;
+    AUREA_CHECK(android::initial_video_path(in) == VideoPath::SoftwarePlanes);
+
+    VideoPath next{};
+    // GL → planos (mesmo decoder de hardware) em falha do GL ou do codec PRIVATE.
+    for (Errc e : {Errc::UnsupportedFeature, Errc::UnsupportedFormat, Errc::InvalidState, Errc::Timeout,
+                   Errc::DecodeFailed, Errc::OutOfMemory}) {
+        AUREA_CHECK(android::next_video_path(VideoPath::DriverGl, e, true, true, next) && next == VideoPath::CpuPlanes);
+    }
+    // Contrapressão/cancelamento não trocam de caminho.
+    for (Errc e : {Errc::BudgetExceeded, Errc::Cancelled, Errc::Ok})
+        AUREA_CHECK(!android::next_video_path(VideoPath::DriverGl, e, true, true, next));
+    // Planos → software só com decoder de hardware e software existente; software é o fim.
+    AUREA_CHECK(android::next_video_path(VideoPath::CpuPlanes, Errc::Timeout, true, true, next) && next == VideoPath::SoftwarePlanes);
+    AUREA_CHECK(!android::next_video_path(VideoPath::CpuPlanes, Errc::Timeout, false, true, next));
+    AUREA_CHECK(!android::next_video_path(VideoPath::CpuPlanes, Errc::Timeout, true, false, next));
+    AUREA_CHECK(!android::next_video_path(VideoPath::CpuPlanes, Errc::BudgetExceeded, true, true, next));
+    AUREA_CHECK(!android::next_video_path(VideoPath::SoftwarePlanes, Errc::DecodeFailed, true, true, next));
+    AUREA_CHECK(std::string(android::video_path_name(VideoPath::DriverGl)) == "caminho GL do driver");
+}
+
+AUREA_TEST(AndroidVideoPath, ExternalQuadMapsTheCropWithoutBleedingThePadding) {
+    using android::ExternalQuad;
+    ExternalQuad q;
+    // 1080p num buffer 1920×1088: a sobra de 8 linhas fica de fora e as
+    // amostras param um texel antes dela; na borda do buffer, no centro do texel.
+    media::VisibleRegion v{0, 0, 1920, 1080};
+    AUREA_CHECK(android::external_quad(1920, 1088, v, 4096, q));
+    AUREA_CHECK(q.width == 1920 && q.height == 1080);
+    AUREA_CHECK_NEAR(q.u0, 0.0f, 1e-7f);
+    AUREA_CHECK_NEAR(q.u1, 1.0f, 1e-7f);
+    AUREA_CHECK_NEAR(q.v1, 1080.0f / 1088.0f, 1e-7f);
+    AUREA_CHECK_NEAR(q.minU, 0.5f / 1920.0f, 1e-7f);
+    AUREA_CHECK_NEAR(q.maxU, 1919.5f / 1920.0f, 1e-7f);
+    AUREA_CHECK_NEAR(q.maxV, 1079.0f / 1088.0f, 1e-7f);   // um texel antes da sobra
+    AUREA_CHECK(q.maxV < q.v1);
+    // Crop com deslocamento (720 num 736): esquerda/topo um texel para dentro.
+    v = media::VisibleRegion{8, 4, 720, 480};
+    AUREA_CHECK(android::external_quad(736, 496, v, 4096, q));
+    AUREA_CHECK_NEAR(q.u0, 8.0f / 736.0f, 1e-7f);
+    AUREA_CHECK_NEAR(q.minU, 9.0f / 736.0f, 1e-7f);
+    AUREA_CHECK_NEAR(q.maxU, 727.0f / 736.0f, 1e-7f);
+    AUREA_CHECK_NEAR(q.minV, 5.0f / 496.0f, 1e-7f);
+    // Teto de lado mantém a proporção.
+    v = media::VisibleRegion{0, 0, 7680, 4320};
+    AUREA_CHECK(android::external_quad(7680, 4320, v, 4096, q));
+    AUREA_CHECK(q.width == 4096 && q.height == 2304);
+    // Região fora do buffer ou vazia: recusada.
+    v = media::VisibleRegion{100, 0, 1920, 1080};
+    AUREA_CHECK(!android::external_quad(1920, 1080, v, 4096, q));
+    v = media::VisibleRegion{0, 0, 0, 1080};
+    AUREA_CHECK(!android::external_quad(1920, 1080, v, 4096, q));
+    // Alvos vivos: 1080p = 11, 4K = 6, pequeno = 12 (cache = N − 5).
+    AUREA_CHECK_EQ(android::driver_gl_live_frames(1920, 1080), 11u);
+    AUREA_CHECK_EQ(android::driver_gl_live_frames(3840, 2160), 6u);
+    AUREA_CHECK_EQ(android::driver_gl_live_frames(640, 360), 12u);
 }
 
 AUREA_TEST(AndroidVideoCompatibility, ReadablePlanesMappingFailureFallsBackToTheSoftwareDecoder) {

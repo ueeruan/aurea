@@ -27,7 +27,7 @@
 #include <vector>
 
 namespace aurea::text { class Font; }
-namespace aurea { struct Layer; }
+namespace aurea { struct Layer; struct LayerAnimator; }
 
 namespace aurea::scene3d {
 
@@ -131,5 +131,35 @@ bool triangulate_polygon(const std::vector<std::vector<Vec2>>& rings, std::vecto
 
 /// User-keyframed glyph transforms, shared by preview, shadows and export.
 void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<Mat4>& nodeWorld);
+
+// --- Animação de texto 3D ------------------------------------------------------
+// Não é um segundo sistema: são os ANIMADORES DE CAMADA (Layer::layerAnimators,
+// timeline/LayerAnimator.hpp) com unidade letra/palavra/linha — a mesma conta de
+// progresso, atraso entre unidades, curva e entrada/saída do texto 2D —
+// aplicados em cada nó de letra da malha (as letras precisam estar separadas,
+// Text3DSpec::separateGlyphs). Posição: 100 px do animador = 1 altura de letra;
+// Y do animador para baixo (como no 2D), Y da cena para cima.
+
+/// Aplica os animadores por unidade da camada nas letras (`nodeWorld`, pivô no
+/// centro de cada letra) e devolve a opacidade por nó (vazio = nada animado).
+/// Chamado no mesmo lugar do layout: preview, sombras e export.
+void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 localTime, f64 fps, std::vector<Mat4>& nodeWorld,
+                            std::vector<f32>& nodeOpacity);
+
+/// Presets (dados): 0 Fade, 1 Subir, 2 Cair, 3 Pop, 4 Giro Y, 5 Virar X,
+/// 6 Máquina de escrever, 7 Onda, 8 Cascata 3D, 9 Zoom, 10 Balanço.
+inline constexpr u32 kText3DAnimPresetCount = 11;
+/// Modo do preset: entrada, saída (no fim da camada, ordem invertida) e loop.
+enum Text3DAnimMode : u32 { kText3DAnimIn = 0, kText3DAnimOut = 1, kText3DAnimLoop = 2, kText3DAnimModeCount = 3 };
+
+/// Escreve o preset como animador de camada + keyframes do progresso,
+/// SUBSTITUINDO o preset do mesmo modo (entrada, saída e loop convivem).
+/// `preset` < 0 só remove o do modo. `unit` 1 letra, 2 palavra, 3 linha;
+/// `unitCount` = quantas unidades o texto tem (a saída termina a última no fim
+/// da camada); `durationSec` = cada unidade; `staggerMs` = atraso entre elas.
+bool apply_text3d_anim_preset(Layer& layer, i32 preset, u32 mode, u32 unit, u32 unitCount, f32 durationSec, f32 staggerMs,
+                              f64 fps);
+/// Preset que o animador aplica (−1 = animador do usuário) e o modo dele.
+[[nodiscard]] i32 text3d_anim_preset_of(const LayerAnimator& a, u32* mode = nullptr) noexcept;
 
 } // namespace aurea::scene3d

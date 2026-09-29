@@ -252,6 +252,9 @@ struct AudioClip {
     /// da layer a partir de `srcFrame0` (inclusive o do fim). Vazio = `rate`.
     std::vector<f64> srcByFrame;
     i64 srcFrame0 = 0;
+    /// Manter o tom (Layer::keepPitch) quando a fonte não anda a 1×: a mesma
+    /// posição da fonte, lida em grãos na velocidade natural (sem varispeed).
+    bool keepPitch = false;
 
     // --- Efeitos de áudio da camada (AudioEffects.hpp) -------------------------
     /// A cadeia: os efeitos da camada, o `Envelope` (volume, fades, balanço)

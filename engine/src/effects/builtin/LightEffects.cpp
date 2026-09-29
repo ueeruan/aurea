@@ -106,7 +106,9 @@ public:
         } ub{};
         ub.uvMap = EffectBuildContext::uv_map(region, input.region);
         ub.texel = Vec4{1.0f / static_cast<f32>(input.width), 1.0f / static_cast<f32>(input.height), 0, 0};
-        ub.knee = Vec4{t, knee, 1.0f / (4.0f * knee), 0.0f};
+        // w = 1: limiar pelo canal mais forte — pela luminância, cores fortes
+        // (vermelho, azul) não brilhavam, só as claras.
+        ub.knee = Vec4{t, knee, 1.0f / (4.0f * knee), 1.0f};
         if (ctx.fullscreen_pass(label, PassStage::Effects, tex, ShaderId::effects_bright_pass_frag,
                                 {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &ub, sizeof(ub)) == kInvalidIndex) {

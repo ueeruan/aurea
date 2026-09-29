@@ -34,6 +34,7 @@
 #include "aurea/scene3d/SceneRenderer.hpp"
 #include "aurea/timeline/Composition.hpp"
 
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -168,6 +169,14 @@ struct LayerSource {
     u32      vecFirst = 0;
     u32      vecCount = 0;       ///< vértices
     u32      paintFirst = 0;
+
+    // Rig 2D (imagem): triângulos deformados em FrameSnapshot::vec (1 vec4 por
+    // vértice: posição na textura da camada, uv na imagem) a partir de
+    // `rigFirst`. A textura da camada é a caixa da pose; a imagem tem o tamanho
+    // original `rigImageW × rigImageH`.
+    u32      rigFirst = 0;
+    u32      rigCount = 0;       ///< vértices (3 por triângulo); 0 = sem rig
+    u32      rigImageW = 0, rigImageH = 0;
 };
 
 struct RenderLayer {
@@ -406,6 +415,10 @@ public:
     /// Foto de base das prévias de efeito (RGBA8 sRGB, alfa reto). Vazia =
     /// a cartela de teste gerada no shader.
     void set_effect_preview_source(std::vector<u8> rgba, u32 width, u32 height) noexcept;
+    /// Rig 2D em MONTAGEM: esta camada (id sem sal) aparece sem deformação no
+    /// preview, para as juntas baterem com o desenho. 0 = nenhuma. O export
+    /// (finalQuality) ignora.
+    void set_rig_setup_layer(u64 layerId) noexcept { rigSetupLayer_.store(layerId, std::memory_order_relaxed); }
     [[nodiscard]] Status render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
                                                u32 width, u32 height, std::vector<u8>& outRgba) noexcept;
 
@@ -652,6 +665,7 @@ private:
     /// densidade) muda — camada parada não retriangula a cada quadro.
     struct VectorCacheEntry { u64 key = 0; u64 lastFrame = 0; std::vector<Vec4> verts, paints; Vec2 min{}, max{}; };
     std::unordered_map<u64, VectorCacheEntry> vectorCache_;
+    std::atomic<u64> rigSetupLayer_{0};
     /// Cache do optical flow por camada: duas texturas alternadas (a que um
     /// quadro em voo lê nunca é a que o próximo escreve), cada uma com o par
     /// de quadros da fonte que a gerou.

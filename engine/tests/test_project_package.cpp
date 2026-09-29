@@ -9,6 +9,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/project/ProjectPackage.hpp"
+#include "aurea/project/Serialization.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -276,4 +277,89 @@ AUREA_TEST(ProjectPackage, RejectsForeignNewerAndCorruptFiles) {
     const std::string pkgBad = s8(dir / "ruim.aureaproj");
     // write_package recusa mandar adiante um projeto que não abre.
     AUREA_CHECK(!package::write_package(bad, pkgBad, "R", "1", {}, nullptr).ok());
+}
+
+// Galaxy A32: "importei o arquivo do projeto e o app fechou". Pacote de outro
+// aparelho é entrada NÃO confiável: bytes trocados no diretório, no cabeçalho
+// local, no manifesto ou no fim cortado têm de virar um erro — nunca crash,
+// nunca arquivo fora da pasta de mídia, nunca projeto pela metade no lugar.
+AUREA_TEST(ProjectPackage, FuzzedPackagesFailCleanlyAndStayInsideTheMediaDir) {
+    const fs::path dir = scratch("fuzz");
+    const std::string media = s8(dir / "longo.mp4");
+    write_text(media, std::string(3000, 'v'));
+    const std::string aurea = s8(dir / "origem.aurea");
+    {
+        Rig r;
+        VideoImport vi;
+        vi.sourcePath = media;
+        vi.displayName = "longo.mp4";
+        AUREA_CHECK(r.e.import_video(vi).ok());
+        AUREA_CHECK(r.e.save_project(aurea.c_str()).ok());
+    }
+    std::vector<package::MediaRef> refs;
+    AUREA_CHECK(package::list_media(aurea, refs).ok());
+    std::vector<package::MediaFile> files;
+    for (const auto& m : refs) files.push_back({m.stored, m.stored, m.name});
+    const std::string pkg = s8(dir / "base.aureaproj");
+    AUREA_CHECK(package::write_package(aurea, pkg, "Base", "2.0", files, nullptr).ok());
+    const std::string base = read_text(pkg);
+    AUREA_CHECK(base.size() > 200);
+    if (base.size() <= 200) return;
+
+    const fs::path work = dir / "caso";
+    u64 state = 0xA32A32A32ull;
+    auto next = [&]() { state ^= state << 13; state ^= state >> 7; state ^= state << 17; return state; };
+    u32 opened = 0, refused = 0;
+    for (u32 it = 0; it < 400; ++it) {
+        std::error_code ec;
+        fs::remove_all(work, ec);
+        fs::create_directories(work, ec);
+        std::string bytes = base;
+        const u32 kind = static_cast<u32>(next() % 4);
+        if (kind == 3) {
+            bytes.resize(static_cast<usize>(next() % bytes.size()));   // arquivo cortado
+        } else {
+            const u32 mutations = 1 + static_cast<u32>(next() % 6);
+            for (u32 m = 0; m < mutations; ++m) {
+                // Metade das trocas no fim (diretório central + EOCD), onde
+                // moram contagens, tamanhos e deslocamentos.
+                const usize tail = std::min<usize>(bytes.size(), 160);
+                const usize at = (next() & 1) ? bytes.size() - 1 - static_cast<usize>(next() % tail)
+                                              : static_cast<usize>(next() % bytes.size());
+                switch (kind) {
+                    case 0: bytes[at] = static_cast<char>(bytes[at] ^ (1 << (next() % 8))); break;
+                    case 1: bytes[at] = static_cast<char>(next()); break;
+                    default: bytes[at] = static_cast<char>(0xFF); break;
+                }
+            }
+        }
+        const std::string casePkg = s8(work / "caso.aureaproj");
+        write_text(casePkg, bytes);
+        const fs::path out = work / "importado.aurea";
+        const fs::path mediaDir = work / "midia";
+        package::ImportResult res;
+        const Status s = package::read_package(casePkg, s8(out), s8(mediaDir), res);
+        if (s.ok()) {
+            ++opened;
+            Project p;
+            LoadReport report;
+            AUREA_CHECK(ProjectSerializer::load(p, s8(out), LoadOptions{}, &report, nullptr).ok());
+        } else {
+            ++refused;
+            // Recusado: nada de projeto pela metade.
+            AUREA_CHECK(!fs::exists(out));
+        }
+        // Nada fora de `work`: só o pacote, o projeto e a pasta de mídia.
+        for (const auto& entry : fs::directory_iterator(work, ec)) {
+            const fs::path name = entry.path().filename();
+            AUREA_CHECK(name == "caso.aureaproj" || name == "importado.aurea" || name == "midia");
+        }
+        for (const auto& entry : fs::directory_iterator(dir, ec)) {
+            const fs::path name = entry.path().filename();
+            AUREA_CHECK(name == "longo.mp4" || name == "origem.aurea" || name == "base.aureaproj" || name == "caso"
+                        || name.u8string().rfind(u8"origem.aurea.", 0) == 0);
+        }
+    }
+    AUREA_CHECK(refused > 0);
+    std::printf("(%u pacotes mutados: %u abriram, %u recusados) ", opened + refused, opened, refused);
 }

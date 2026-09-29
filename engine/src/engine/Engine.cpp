@@ -1109,8 +1109,13 @@ Status Engine::load_project(const char* path) noexcept {
             // Texto 3D: a origem é a receita; a malha é gerada de novo.
             scene3d::Text3DSpec spec;
             const auto font = scene3d::decode_text3d(src, spec) ? scene3d::text3d_font(spec) : nullptr;
+            // Forma 3D: também é receita (forma + cor/imagem por parte).
+            scene3d::Shape3DSpec shape;
+            const bool isShape = !font && scene3d::decode_shape3d(src, shape);
             scene3d::ImportResult r = font ? scene3d::build_text3d(*font, spec)
-                                           : scene3d::import_scene_file(resolve_asset_path(src), o);
+                                    : isShape ? scene3d::build_shape3d(shape, [this](const std::string& s) { return resolve_asset_path(s); },
+                                                                       o.maxTextureSize)
+                                              : scene3d::import_scene_file(resolve_asset_path(src), o);
             if (!r.ok()) {
                 ++missing;
                 AUREA_LOG_WARN("modelo 3D do projeto nao abriu (%s)", r.detail.c_str());
@@ -3934,6 +3939,85 @@ bool Engine::remove_time_remap_key(u64 layerId, u32 index) noexcept {
     return true;
 }
 
+namespace {
+/// O easing do trecho visto de trás para a frente: g(u) = 1 − f(1 − u). Exato
+/// para linear, entrada/saída e bézier (inclusive a força, que é composição e
+/// comuta com o espelho); Segurar/Quique/Elástico/Degraus ficam como estão.
+void mirror_remap_ease(Keyframe& k) noexcept {
+    switch (k.interp) {
+        case Interpolation::EaseIn: k.interp = Interpolation::EaseOut; break;
+        case Interpolation::EaseOut: k.interp = Interpolation::EaseIn; break;
+        case Interpolation::Bezier:
+        case Interpolation::CustomCurve: {
+            const f32 x1 = k.bx1, y1 = k.by1, x2 = k.bx2, y2 = k.by2;
+            k.bx1 = 1.0f - x2; k.by1 = 1.0f - y2;
+            k.bx2 = 1.0f - x1; k.by2 = 1.0f - y1;
+            break;
+        }
+        default: break;
+    }
+}
+} // namespace
+
+bool Engine::reverse_time_remap(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->end.value - l->start.value < 2 || l->timeRemap.has_expression()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "remapear ao contrário");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    enable_time_remap_curve(*l);
+    Track& t = l->timeRemap;
+    // O espelho vale para os quadros que APARECEM: [lo, hi − 1]. Se as chaves
+    // não cobrem o clipe inteiro, a curva está parada além delas: uma chave
+    // com esse mesmo valor na ponta é exata (não corta trecho nenhum).
+    const i64 lo = l->local_time(l->start).value, last = l->local_time(l->end).value - 1;
+    if (t.keys.empty() || t.keys.front().time.value > lo)
+        (void)t.set(FrameIndex{lo}, t.sample_keys(FrameIndex{lo}), Interpolation::Linear);
+    if (t.keys.back().time.value < last)
+        (void)t.set(FrameIndex{last}, t.sample_keys(FrameIndex{last}), Interpolation::Linear);
+    const std::vector<Keyframe> old = t.keys;
+    const usize n = old.size();
+    std::vector<Keyframe> out(n);
+    for (usize j = 0; j < n; ++j) {
+        const Keyframe& src = old[n - 1 - j];
+        Keyframe k = src;
+        k.time = FrameIndex{lo + last - src.time.value};
+        k.tangentIn = -src.tangentOut;
+        k.tangentOut = -src.tangentIn;
+        // O trecho que SAI desta chave era o que CHEGAVA nela: o easing mora
+        // na chave da esquerda, então vem da vizinha anterior (espelhado).
+        if (j + 1 < n) {
+            const Keyframe& seg = old[n - 2 - j];
+            k.interp = seg.interp;
+            k.bx1 = seg.bx1; k.by1 = seg.by1; k.bx2 = seg.bx2; k.by2 = seg.by2;
+            k.easePower = seg.easePower;
+            k.easingPreset = seg.easingPreset;
+            mirror_remap_ease(k);
+        }
+        out[j] = k;
+    }
+    t.keys = std::move(out);
+    t.lastIndex = 0;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::set_keep_pitch(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l) return false;
+    if (l->keepPitch == on) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), on ? "manter o tom do audio" : "tom segue a velocidade");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->keepPitch = on;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 bool Engine::apply_speed_ramp(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -5096,6 +5180,8 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
         for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
         for (const EffectInstance& e : clipboard_.effects) {
             if (e.type == effect_type_id(effect_keys::kText3DLayout) && !ensure_text3d_layout(*d).ok()) continue;
+            // O layout das partes só serve em forma 3D (as partes já são nós próprios).
+            if (e.type == effect_type_id(effect_keys::kShape3DLayout) && !is_shape3d_layer(*d)) continue;
             EffectInstance c = e;
             const u32 oldId = e.id;
             c.id = next++;
@@ -5466,6 +5552,13 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
     }
     if (l->locked) {
         if (error) *error = "camada bloqueada";
+        return false;
+    }
+    // O layout das partes (Shape 3D Layout) só existe em forma 3D.
+    if (!is_shape3d_layer(*l) && std::any_of(p.effects.begin(), p.effects.end(), [](const EffectInstance& effect) {
+        return effect.type == effect_type_id(effect_keys::kShape3DLayout);
+    })) {
+        if (error) *error = "este preset precisa de uma forma 3D";
         return false;
     }
     // A saved letter effect needs the same geometry preparation as EffectAdd.
@@ -7078,6 +7171,11 @@ std::string Engine::text_font(u64 layerId) noexcept {
          + (l->text.fontPath.empty() ? std::string{} : resolve_asset_path(l->text.fontPath));
 }
 
+bool Engine::is_shape3d_layer(const Layer& layer) const noexcept {
+    const Asset* a = layer.kind == LayerKind::Model3D && project_ ? project_->asset(layer.model.scene) : nullptr;
+    return a && scene3d::is_shape3d_source(a->sourcePath);
+}
+
 Status Engine::ensure_text3d_layout(Layer& layer) noexcept {
     if (layer.locked) return Status{Errc::InvalidState, "camada bloqueada"};
     const Asset* old = project_->asset(layer.model.scene);
@@ -7187,7 +7285,7 @@ std::string Engine::model_folder(u64 layerId) noexcept {
     if (!l || l->kind != LayerKind::Model3D) return {};
     const Asset* a = project_->asset(l->model.scene);
     scene3d::Text3DSpec spec;
-    if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec)) return {};
+    if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec) || scene3d::is_shape3d_source(a->sourcePath)) return {};
     const std::string path = resolve_asset_path(a->sourcePath);
     const usize slash = path.find_last_of("/\\");
     return slash == std::string::npos ? std::string{} : path.substr(0, slash + 1);
@@ -7203,7 +7301,7 @@ Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noex
         if (!l || l->kind != LayerKind::Model3D) return Status{Errc::InvalidArgument, "selecione um modelo 3D"};
         const Asset* a = project_->asset(l->model.scene);
         scene3d::Text3DSpec spec;
-        if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec))
+        if (!a || a->sourcePath.empty() || scene3d::decode_text3d(a->sourcePath, spec) || scene3d::is_shape3d_source(a->sourcePath))
             return Status{Errc::InvalidArgument, "selecione um modelo 3D importado"};
         old = l->model.scene;
         copy = *a;
@@ -8465,7 +8563,10 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
     out.audioFadeOut = static_cast<i32>(l->fadeOut.value);
     out.speed = l->speed_at(playback_.current());
     out.timeFlags = (l->speed_track() ? 64u : 0u) | (l->reversed ? 1u : 0u) | (l->motionBlur ? 2u : 0u) | (l->timeRemapEnabled ? 4u : 0u)
-                  | (l->frameBlend == 1 ? 8u : 0u) | (l->frameBlend == 2 ? 16u : 0u) | (l->vectorBlur > 0.0f ? 32u : 0u);
+                  | (l->frameBlend == 1 ? 8u : 0u) | (l->frameBlend == 2 ? 16u : 0u) | (l->vectorBlur > 0.0f ? 32u : 0u)
+                  | (l->keepPitch ? 128u : 0u)
+                  | (l->timeRemapEnabled && l->timeRemap.keys.size() >= 2
+                     && l->timeRemap.keys.back().value < l->timeRemap.keys.front().value ? 256u : 0u);
     // Transições: tipo entrada (4 bits) | saída (4) | quadros entrada (12) | saída (12).
     out.reserved0 = (l->transitionIn & 0xFu) | ((l->transitionOut & 0xFu) << 4)
                   | ((std::min<u32>(l->transitionInFrames, 4095u)) << 8) | ((std::min<u32>(l->transitionOutFrames, 4095u)) << 20);
@@ -8972,7 +9073,13 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
 
         // Slots de leitura (host-visible, mapeados de vez). Sem memória para os
         // três, o export segue com menos — mais lento, nunca pior.
-        const u32 want = std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth : 3u, 1u, 4u);
+        // Sem valor fixo na config, vale a política do APARELHO (DevicePolicy:
+        // 2 no perfil de entrada, 4 no topo, menos com calor). Antes o motor
+        // ignorava a tabela e usava 3 em todo celular: um aparelho de 4 GB
+        // segurava um slot de leitura a mais do que a política dele manda.
+        const u32 policyDepth = caps_.policy().exportPipelineDepth;
+        const u32 want = std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
+                                                                     : (policyDepth ? policyDepth : 3u), 1u, 4u);
         for (u32 k = 0; k < want; ++k) {
             BufferDesc bd;
             bd.usage = BufferUsage::TransferDst;
@@ -9106,6 +9213,22 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // instâncias de decoder, o clipe seguinte não abria e o export morria em
     // "quadros de video indisponiveis". Quem está na tela neste quadro acabou
     // de ser usado; só sai quem ficou 2 preparos sem aparecer.
+    //
+    // "Sem aparecer" não é "fora do trecho": o prepare pula a camada com
+    // opacidade 0 (fade, flash) ou fora da tela ANTES de pedir o decoder. Sem
+    // o toque abaixo, um fade de meio segundo fechava o codec no meio do clipe
+    // e o reabria na volta — seek do keyframe, espera de até 4 s por quadro
+    // (o "trava em 68%") e um fecha/abre de codec de hardware por fade, que é
+    // justamente o que decoders de aparelho de entrada aguentam pior. Camada
+    // de vídeo da composição principal ainda no seu trecho mantém o decoder.
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (const Composition* comp = project_ ? current_composition() : nullptr) {
+            comp->layers().for_each([&](LayerId id, const Layer& l) {
+                if (l.kind == LayerKind::Video && l.contains_time(t)) media_.touch(id, frameCounter_);
+            });
+        }
+    }
     media_.collect(frameCounter_, kExportIdleFrames);
     const u64 t1 = monotonic_ns();
     FrameStats stats;
@@ -9664,6 +9787,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         scene3d::Text3DSpec spec;
         if (!layer || layer->locked || !source || layer->kind != LayerKind::Model3D || !scene3d::decode_text3d(source->sourcePath, spec))
             return Status{Errc::InvalidArgument, "selecione texto 3D desbloqueado"};
+    }
+    if (cmd.type == CommandType::EffectAdd && cmd.effect_add.effectType == effect_type_id(effect_keys::kShape3DLayout)) {
+        const Layer* layer = need_layer(cmd.effect_add.layer);
+        if (!layer || layer->locked || !is_shape3d_layer(*layer))
+            return Status{Errc::InvalidArgument, "selecione uma forma 3D desbloqueada"};
     }
     // A lock protects timeline edits at the shared boundary, including queued
     // commands after a gesture has started. Reject before recording undo.

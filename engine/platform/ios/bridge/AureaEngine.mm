@@ -833,6 +833,17 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     [self flush];
 }
 
+- (void)setViewportZoom:(float)zoom panX:(float)panX panY:(float)panY {
+    if (auto* c = _batch.add(CommandType::ViewportSetZoom)) {
+        c->viewport_zoom.zoom = zoom;
+    }
+    if (auto* c = _batch.add(CommandType::ViewportSetPan)) {
+        c->viewport_pan.x = panX;
+        c->viewport_pan.y = panY;
+    }
+    [self flush];
+}
+
 // =============================================================================
 // Camadas
 // =============================================================================
@@ -1355,6 +1366,20 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e || !e->query_text3d(layerId, spec) ||
         !aurea::scene3d::apply_text3d_material_preset(spec, preset)) return NO;
     return e->set_text3d(layerId, spec).ok();
+}
+- (NSArray<NSNumber*>*)text3DAnim:(long long)layerId {
+    auto* e = self.engine;
+    constexpr aurea::u32 k = 3 * aurea::Engine::kText3DAnimFloats;
+    float v[k]{};
+    if (!e || !e->query_text3d_anim(static_cast<aurea::u64>(layerId), v)) return @[];
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:k];
+    for (aurea::u32 i = 0; i < k; ++i) [out addObject:@(v[i])];
+    return out;
+}
+- (BOOL)applyText3DAnim:(long long)layerId preset:(int32_t)preset mode:(uint32_t)mode unit:(uint32_t)unit
+               duration:(float)duration stagger:(float)stagger {
+    auto* e = self.engine;
+    return e && e->apply_text3d_anim(static_cast<aurea::u64>(layerId), preset, mode, unit, duration, stagger);
 }
 - (NSArray<NSNumber*>*)modelShadows:(long long)layerId {
     auto* e = self.engine; float v[2]{}; if (!e || !e->query_model_shadows(layerId, v)) return @[]; return @[@(v[0]), @(v[1])];
@@ -2791,6 +2816,96 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (BOOL)toggleMaskKey:(long long)layerId mask:(uint32_t)mask {
     auto* e = self.engine; return e && e->toggle_mask_path_key(layerId, mask);
 }
+- (NSArray<NSNumber*>*)rigJoints:(long long)layerId bind:(BOOL)bind {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const aurea::u32 need = e->query_rig(layerId, bind, nullptr, 0);
+    if (need == 0) return @[];
+    std::vector<float> v(need);
+    const aurea::u32 got = e->query_rig(layerId, bind, v.data(), need);
+    return got == need ? floats_to_array(v.data(), need) : @[];
+}
+- (int32_t)rigAddJoint:(long long)layerId parent:(int32_t)parent x:(float)x y:(float)y {
+    auto* e = self.engine; return e ? e->rig_add_joint(layerId, parent, x, y) : -1;
+}
+- (BOOL)rigMoveJoint:(long long)layerId joint:(int32_t)joint x:(float)x y:(float)y continuing:(BOOL)continuing {
+    auto* e = self.engine; return e && joint >= 0 && e->rig_move_joint(layerId, static_cast<aurea::u32>(joint), x, y, continuing);
+}
+- (BOOL)rigRemoveJoint:(long long)layerId joint:(int32_t)joint {
+    auto* e = self.engine; return e && joint >= 0 && e->rig_remove_joint(layerId, static_cast<aurea::u32>(joint));
+}
+- (int32_t)rigAutoHumanoid:(long long)layerId {
+    auto* e = self.engine; return e ? static_cast<int32_t>(e->rig_auto_humanoid(layerId)) : 0;
+}
+
+- (BOOL)rigClear:(long long)layerId {
+    auto* e = self.engine; return e && e->rig_clear(layerId);
+}
+- (BOOL)rigPoseJoint:(long long)layerId joint:(int32_t)joint x:(float)x y:(float)y continuing:(BOOL)continuing {
+    auto* e = self.engine; return e && joint >= 0 && e->rig_pose_joint(layerId, static_cast<aurea::u32>(joint), x, y, continuing);
+}
+- (void)setRigSetupLayer:(long long)layerId {
+    auto* e = self.engine; if (e) e->set_rig_setup_layer(layerId);
+}
+- (long long)addShape3D:(uint32_t)kind name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e) return -1;
+    const aurea::Result<aurea::u64> r = e->add_shape3d(kind, name ? name.UTF8String : nullptr);
+    return r.ok() ? static_cast<long long>(*r) : -1;
+}
+- (NSArray<NSNumber*>*)shape3D:(long long)layerId {
+    auto* e = self.engine;
+    aurea::scene3d::Shape3DSpec s;
+    if (!e || !e->query_shape3d(layerId, s)) return @[];
+    std::vector<float> v;
+    v.push_back(static_cast<float>(static_cast<aurea::u32>(s.kind)));
+    v.push_back(static_cast<float>(s.parts.size()));
+    for (const auto& p : s.parts) {
+        v.push_back(p.color.x); v.push_back(p.color.y); v.push_back(p.color.z); v.push_back(p.color.w);
+        v.push_back(p.image.empty() ? 0.0f : 1.0f);
+    }
+    return floats_to_array(v.data(), v.size());
+}
+- (BOOL)setShape3DPartStyle:(long long)layerId part:(int32_t)part color:(NSArray<NSNumber*>*)color image:(NSString*)image {
+    auto* e = self.engine;
+    if (!e) return NO;
+    float rgba[4]{};
+    const bool hasColor = color && color.count >= 4;
+    if (hasColor) for (NSUInteger i = 0; i < 4; ++i) rgba[i] = color[i].floatValue;
+    const std::string path = image ? std::string(image.UTF8String ?: "") : std::string();
+    return e->set_shape3d_part_style(layerId, part, hasColor ? rgba : nullptr, image ? path.c_str() : nullptr).ok();
+}
+- (NSArray<NSNumber*>*)shape3DParts:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const aurea::u32 need = e->query_shape3d_parts(layerId, nullptr, 0);
+    if (need == 0) return @[];
+    std::vector<float> v(need);
+    const aurea::u32 got = e->query_shape3d_parts(layerId, v.data(), need);
+    return got == need ? floats_to_array(v.data(), need) : @[];
+}
+- (BOOL)setShape3DPart:(long long)layerId part:(int32_t)part values:(NSArray<NSNumber*>*)values mask:(uint32_t)mask continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    if (!e || part < 0 || values.count < 9) return NO;
+    float v[9];
+    for (NSUInteger i = 0; i < 9; ++i) v[i] = values[i].floatValue;
+    return e->set_shape3d_part(layerId, static_cast<aurea::u32>(part), v, mask, continuing);
+}
+- (int32_t)toggleShape3DPartKey:(long long)layerId part:(int32_t)part {
+    auto* e = self.engine; return e && part >= 0 ? e->toggle_shape3d_part_key(layerId, static_cast<aurea::u32>(part)) : -1;
+}
+- (BOOL)resetShape3DPart:(long long)layerId part:(int32_t)part {
+    auto* e = self.engine; return e && e->reset_shape3d_part(layerId, part);
+}
+- (NSArray<NSNumber*>*)shape3DPartGizmo:(long long)layerId part:(int32_t)part length:(float)length localSpace:(BOOL)localSpace {
+    float points[8]{}; auto* e = self.engine;
+    return e && part >= 0 && e->query_shape3d_part_gizmo(layerId, static_cast<aurea::u32>(part), length, points, localSpace)
+        ? floats_to_array(points, 8) : @[];
+}
+- (NSArray<NSNumber*>*)shape3DPartMove:(long long)layerId part:(int32_t)part axis:(uint32_t)axis amount:(float)amount {
+    float xyz[3]{}; auto* e = self.engine;
+    return e && part >= 0 && e->shape3d_part_move(layerId, static_cast<aurea::u32>(part), axis, amount, xyz) ? floats_to_array(xyz, 3) : @[];
+}
 - (NSArray<NSNumber*>*)textAnimators:(long long)layerId {
     auto* e = self.engine;
     if (!e) return @[];
@@ -3023,6 +3138,15 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 
 - (void)setFrameBlendForLayer:(long long)layerId mode:(uint32_t)mode {
     if (auto* e = self.engine) (void)e->set_frame_blend(static_cast<aurea::u64>(layerId), mode);
+}
+
+- (BOOL)reverseTimeRemapForLayer:(long long)layerId {
+    auto* e = self.engine;
+    return e && e->reverse_time_remap(static_cast<aurea::u64>(layerId)) ? YES : NO;
+}
+
+- (void)setKeepPitchForLayer:(long long)layerId on:(BOOL)on {
+    if (auto* e = self.engine) (void)e->set_keep_pitch(static_cast<aurea::u64>(layerId), on != NO);
 }
 
 - (void)setVectorBlurForLayer:(long long)layerId amount:(float)amount {

@@ -83,8 +83,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         principal = listOf(0, 1, 2, 3, 4)))
     put("aurea.generate.tracery", EffectHuman(keywords = "tracery color detection boxes rastreio cor conexoes",
         principal = listOf(0, 1, 3, 7, 14), params = mapOf(2 to ParamHuman(decimals = 2))))
-    put("aurea.text3d.layout", EffectHuman(keywords = "letter rotation letras rotacao delay atraso cylinder twist",
-        principal = listOf(0, 1, 2, 9, 10)))
+    put("aurea.text3d.layout", EffectHuman(keywords = "letter rotation letras rotacao delay atraso cylinder twist random aleatorio",
+        principal = listOf(0, 1, 2, 12, 13, 9, 10)))
+    // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
+    put("aurea.shape3d.layout", EffectHuman(keywords = "shape parts partes forma 3d rotation rotacao delay atraso spread espalhar explodir twist random aleatorio",
+        principal = listOf(0, 1, 2, 12, 13, 9, 4)))
     put("aurea.stylize.omino_diffusion", EffectHuman(
         name = R.string.fx_name_omino_diffusion, keywords = "omino omine diffusion difusao glitch paleta faixas",
         principal = listOf(0, 1, 2, 5, 6), params = mapOf(

@@ -527,6 +527,8 @@ enum EffectI18nTable {
     aurea.text3d.layout|9|letter_delay|fxl_delay_per_letter|
     aurea.text3d.layout|10|rotation_variation|fxl_rotation_variation|
     aurea.text3d.layout|11|seed|fxl_variation_seed|
+    aurea.text3d.layout|12|random|fxl_letters_random|
+    aurea.text3d.layout|13|random_speed|fxl_letters_random_speed|
     aurea.pattern.checkerboard|0|width|fx_largura_celula|
     aurea.pattern.checkerboard|1|height|fx_altura_celula|
     aurea.pattern.checkerboard|2|anchor|fx_ancora|
@@ -948,5 +950,19 @@ enum EffectI18nTable {
     aurea.generate.particular|37|seed|fxl_seed|
     aurea.generate.particular|38|motion_blur|fxl_motion_blur_2|
     aurea.generate.particular|39|shutter_angle|fxl_shutter_angle|
+    aurea.shape3d.layout|0|rotation_x|fxl_part_rotation_x|
+    aurea.shape3d.layout|1|rotation_y|fxl_part_rotation_y|
+    aurea.shape3d.layout|2|rotation_z|fxl_part_rotation_z|
+    aurea.shape3d.layout|3|bend|fxl_shape_bend|
+    aurea.shape3d.layout|4|spread|fxl_spread|
+    aurea.shape3d.layout|5|twist|fxl_twist|
+    aurea.shape3d.layout|6|first|fxl_first_part|
+    aurea.shape3d.layout|7|last|fxl_last_part|
+    aurea.shape3d.layout|8|amount|fxl_amount|
+    aurea.shape3d.layout|9|part_delay|fxl_delay_per_part|
+    aurea.shape3d.layout|10|rotation_variation|fxl_rotation_variation|
+    aurea.shape3d.layout|11|seed|fxl_variation_seed|
+    aurea.shape3d.layout|12|random|fxl_letters_random|
+    aurea.shape3d.layout|13|random_speed|fxl_letters_random_speed|
     """
 }

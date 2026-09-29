@@ -27,6 +27,9 @@
 		AE000000000000000000003D /* PreviewMetalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000005 /* PreviewMetalView.swift */; };
 		AE000000000000000000003E /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000006 /* TimelineView.swift */; };
 		AE000000000000000000003F /* ToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000007 /* ToolbarView.swift */; };
+		AE00000000000000000001F1 /* StageZoom.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000001F0 /* StageZoom.swift */; };
+		AE0000000000000000000201 /* RigStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000200 /* RigStage.swift */; };
+		AE0000000000000000000211 /* Shape3DViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000210 /* Shape3DViews.swift */; };
 		AE0000000000000000000040 /* EffectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000008 /* EffectsView.swift */; };
 		AE0000000000000000000041 /* TransformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000009 /* TransformView.swift */; };
 		AE0000000000000000000042 /* Panel3DView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000A /* Panel3DView.swift */; };
@@ -122,6 +125,9 @@
 		AE0000000000000000000005 /* PreviewMetalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewMetalView.swift; sourceTree = "<group>"; };
 		AE0000000000000000000006 /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
 		AE0000000000000000000007 /* ToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarView.swift; sourceTree = "<group>"; };
+		AE00000000000000000001F0 /* StageZoom.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageZoom.swift; sourceTree = "<group>"; };
+		AE0000000000000000000200 /* RigStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RigStage.swift; sourceTree = "<group>"; };
+		AE0000000000000000000210 /* Shape3DViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shape3DViews.swift; sourceTree = "<group>"; };
 		AE0000000000000000000008 /* EffectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectsView.swift; sourceTree = "<group>"; };
 		AE0000000000000000000009 /* TransformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformView.swift; sourceTree = "<group>"; };
 		AE000000000000000000000A /* Panel3DView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panel3DView.swift; sourceTree = "<group>"; };
@@ -248,6 +254,9 @@
 				AE0000000000000000000110 /* ParityExportProbe.swift */,
 				AE0000000000000000000006 /* TimelineView.swift */,
 				AE0000000000000000000007 /* ToolbarView.swift */,
+				AE00000000000000000001F0 /* StageZoom.swift */,
+				AE0000000000000000000200 /* RigStage.swift */,
+				AE0000000000000000000210 /* Shape3DViews.swift */,
 				AE0000000000000000000008 /* EffectsView.swift */,
 				AE0000000000000000000009 /* TransformView.swift */,
 				AE0000000000000000000082 /* LayerPanels.swift */,
@@ -510,6 +519,9 @@
 				AE0000000000000000000111 /* ParityExportProbe.swift in Sources */,
 				AE000000000000000000003E /* TimelineView.swift in Sources */,
 				AE000000000000000000003F /* ToolbarView.swift in Sources */,
+				AE00000000000000000001F1 /* StageZoom.swift in Sources */,
+				AE0000000000000000000201 /* RigStage.swift in Sources */,
+				AE0000000000000000000211 /* Shape3DViews.swift in Sources */,
 				AE0000000000000000000040 /* EffectsView.swift in Sources */,
 				AE0000000000000000000041 /* TransformView.swift in Sources */,
 				AE0000000000000000000083 /* LayerPanels.swift in Sources */,

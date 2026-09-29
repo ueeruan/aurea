@@ -87,6 +87,38 @@ public:
         p.add_float("letter_delay", "Delay per Letter", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
         p.add_float("rotation_variation", "Rotation Variation", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
         p.add_int("seed", "Variation Seed", 1, 0, 9999);
+        // Anexados (os índices acima são os dos projetos salvos): cada letra
+        // gira e anda do SEU jeito, todas ao mesmo tempo; velocidade 0 = parado.
+        p.add_float("random", "Random", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("random_speed", "Random Speed", 1.f, 0.f, 10.f, kParamAnimatable);
+    }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
+// Shape 3D Layout: o MESMO sistema do Text 3D Layout (mesmos índices, a
+// mesma conta em scene3d::apply_node_layout), com cada PARTE da forma 3D no
+// papel de uma letra. "Espalhar" afasta as partes do centro nos três eixos.
+class Shape3DLayout final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kShape3DLayout, "Shape 3D Layout", "3D", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_angle("rotation_x", "Part Rotation X", 0.f);
+        p.add_angle("rotation_y", "Part Rotation Y", 0.f);
+        p.add_angle("rotation_z", "Part Rotation Z", 0.f);
+        p.add_angle("bend", "Bend", 0.f, -360.f, 360.f);
+        p.add_float("spread", "Spread", 100.f, 10.f, 500.f, kParamAnimatable | kParamPercent, "%");
+        p.add_angle("twist", "Twist", 0.f, -720.f, 720.f);
+        p.add_int("first", "First Part", 1, 1, 256);
+        p.add_int("last", "Last Part", 256, 1, 256);
+        p.add_float("amount", "Amount", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("part_delay", "Delay per Part", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
+        p.add_float("rotation_variation", "Rotation Variation", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_int("seed", "Variation Seed", 1, 0, 9999);
+        p.add_float("random", "Random", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("random_speed", "Random Speed", 1.f, 0.f, 10.f, kParamAnimatable);
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
@@ -208,5 +240,7 @@ void register_pattern_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Checkerboard>());
     (void)r.add(std::make_unique<HexagonalArray>());
 }
+
+void register_shape3d_layout_effect(EffectRegistry& r) { (void)r.add(std::make_unique<Shape3DLayout>()); }
 
 } // namespace aurea::builtin

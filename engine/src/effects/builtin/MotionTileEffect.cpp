@@ -349,6 +349,8 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_twitch_effect(registry);
     // Particular (as partículas do app antigo). Depois de todos.
     builtin::register_particular_effect(registry);
+    // Sempre no FIM (a ordem é a do catálogo salvo): o layout das partes das formas 3D.
+    builtin::register_shape3d_layout_effect(registry);
 }
 
 } // namespace aurea

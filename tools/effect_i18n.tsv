@@ -609,6 +609,8 @@ aurea.text3d.layout	8	amount	-1	fxl_amount
 aurea.text3d.layout	9	letter_delay	-1	fxl_delay_per_letter
 aurea.text3d.layout	10	rotation_variation	-1	fxl_rotation_variation
 aurea.text3d.layout	11	seed	-1	fxl_variation_seed
+aurea.text3d.layout	12	random	-1	fxl_letters_random
+aurea.text3d.layout	13	random_speed	-1	fxl_letters_random_speed
 aurea.pattern.checkerboard	0	width	-1	fx_largura_celula
 aurea.pattern.checkerboard	1	height	-1	fx_altura_celula
 aurea.pattern.checkerboard	2	anchor	-1	fx_ancora
@@ -1171,3 +1173,17 @@ aurea.generate.particular	36	show_source	-1	fxl_show_layer
 aurea.generate.particular	37	seed	-1	fxl_seed
 aurea.generate.particular	38	motion_blur	-1	fxl_motion_blur_2
 aurea.generate.particular	39	shutter_angle	-1	fxl_shutter_angle
+aurea.shape3d.layout	0	rotation_x	-1	fxl_part_rotation_x
+aurea.shape3d.layout	1	rotation_y	-1	fxl_part_rotation_y
+aurea.shape3d.layout	2	rotation_z	-1	fxl_part_rotation_z
+aurea.shape3d.layout	3	bend	-1	fxl_shape_bend
+aurea.shape3d.layout	4	spread	-1	fxl_spread
+aurea.shape3d.layout	5	twist	-1	fxl_twist
+aurea.shape3d.layout	6	first	-1	fxl_first_part
+aurea.shape3d.layout	7	last	-1	fxl_last_part
+aurea.shape3d.layout	8	amount	-1	fxl_amount
+aurea.shape3d.layout	9	part_delay	-1	fxl_delay_per_part
+aurea.shape3d.layout	10	rotation_variation	-1	fxl_rotation_variation
+aurea.shape3d.layout	11	seed	-1	fxl_variation_seed
+aurea.shape3d.layout	12	random	-1	fxl_letters_random
+aurea.shape3d.layout	13	random_speed	-1	fxl_letters_random_speed

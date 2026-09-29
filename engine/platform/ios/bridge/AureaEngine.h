@@ -344,6 +344,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setLoop:(BOOL)loop;
 - (void)setPlaybackSpeed:(float)speed;
 - (void)setPreviewScaleNumerator:(uint32_t)numerator denominator:(uint32_t)denominator automatic:(BOOL)automatic;
+/// Zoom/pan da VISTA da prévia (pan em px do drawable). Só o passe de saída:
+/// sem desfazer, nunca no render/export.
+- (void)setViewportZoom:(float)zoom panX:(float)panX panY:(float)panY;
 
 // --- Camadas ----------------------------------------------------------------
 - (void)setLayer:(long long)layerId name:(NSString*)name;
@@ -597,6 +600,28 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)setMaskProps:(long long)layerId mask:(uint32_t)mask operation:(uint32_t)operation inverted:(BOOL)inverted feather:(float)feather expansion:(float)expansion opacity:(float)opacity;
 - (BOOL)keyMask:(long long)layerId mask:(uint32_t)mask;
 - (BOOL)toggleMaskKey:(long long)layerId mask:(uint32_t)mask NS_SWIFT_NAME(toggleMaskKey(_:mask:));
+// Rig 2D (camada de imagem; Engine::query_rig e família). Juntas: 5 floats
+// cada (id, pai ou −1, x, y na composição, key no cabeçote).
+- (NSArray<NSNumber*>*)rigJoints:(long long)layerId bind:(BOOL)bind;
+- (int32_t)rigAddJoint:(long long)layerId parent:(int32_t)parent x:(float)x y:(float)y;
+- (BOOL)rigMoveJoint:(long long)layerId joint:(int32_t)joint x:(float)x y:(float)y continuing:(BOOL)continuing;
+- (BOOL)rigRemoveJoint:(long long)layerId joint:(int32_t)joint;
+- (BOOL)rigClear:(long long)layerId;
+- (int32_t)rigAutoHumanoid:(long long)layerId NS_SWIFT_NAME(rigAutoHumanoid(_:));
+- (BOOL)rigPoseJoint:(long long)layerId joint:(int32_t)joint x:(float)x y:(float)y continuing:(BOOL)continuing;
+- (void)setRigSetupLayer:(long long)layerId;
+// Formas 3D (Engine::add_shape3d e família; scene3d/Shape3D.hpp). Receita:
+// [forma, nº de partes, 5 por parte (RGBA sRGB, 1 = tem imagem)]. Partes no
+// cabeçote: 14 floats cada (Engine::kShapePartFloats).
+- (long long)addShape3D:(uint32_t)kind name:(NSString*)name NS_SWIFT_NAME(addShape3D(kind:name:));
+- (NSArray<NSNumber*>*)shape3D:(long long)layerId NS_SWIFT_NAME(shape3D(_:));
+- (BOOL)setShape3DPartStyle:(long long)layerId part:(int32_t)part color:(nullable NSArray<NSNumber*>*)color image:(nullable NSString*)image NS_SWIFT_NAME(setShape3DPartStyle(_:part:color:image:));
+- (NSArray<NSNumber*>*)shape3DParts:(long long)layerId NS_SWIFT_NAME(shape3DParts(_:));
+- (BOOL)setShape3DPart:(long long)layerId part:(int32_t)part values:(NSArray<NSNumber*>*)values mask:(uint32_t)mask continuing:(BOOL)continuing NS_SWIFT_NAME(setShape3DPart(_:part:values:mask:continuing:));
+- (int32_t)toggleShape3DPartKey:(long long)layerId part:(int32_t)part NS_SWIFT_NAME(toggleShape3DPartKey(_:part:));
+- (BOOL)resetShape3DPart:(long long)layerId part:(int32_t)part NS_SWIFT_NAME(resetShape3DPart(_:part:));
+- (NSArray<NSNumber*>*)shape3DPartGizmo:(long long)layerId part:(int32_t)part length:(float)length localSpace:(BOOL)localSpace NS_SWIFT_NAME(shape3DPartGizmo(_:part:length:localSpace:));
+- (NSArray<NSNumber*>*)shape3DPartMove:(long long)layerId part:(int32_t)part axis:(uint32_t)axis amount:(float)amount NS_SWIFT_NAME(shape3DPartMove(_:part:axis:amount:));
 - (NSArray<NSNumber*>*)textAnimators:(long long)layerId;
 - (BOOL)setTextAnimator:(long long)layerId index:(uint32_t)index values:(NSArray<NSNumber*>*)values;
 - (NSArray<NSNumber*>*)textStyle:(long long)layerId;
@@ -707,6 +732,13 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)clearTextSpans:(long long)layerId start:(uint32_t)start end:(uint32_t)end;
 - (BOOL)setText3DColor:(long long)layerId region:(uint32_t)region values:(NSArray<NSNumber*>*)values;
 - (BOOL)applyText3DPreset:(long long)layerId preset:(uint32_t)preset;
+/// Animação de texto 3D: 3 modos (entrada, saída, loop) × 5 floats — preset (−1
+/// nenhum), unidade (1 letra, 2 palavra, 3 linha), duração (s), atraso (ms),
+/// unidades do texto. Vazio = a camada não é texto 3D.
+- (NSArray<NSNumber*>*)text3DAnim:(long long)layerId;
+/// Um toque aplica o preset no modo (preset < 0 remove); as letras viram nós próprios.
+- (BOOL)applyText3DAnim:(long long)layerId preset:(int32_t)preset mode:(uint32_t)mode unit:(uint32_t)unit
+               duration:(float)duration stagger:(float)stagger;
 - (NSArray<NSNumber*>*)modelShadows:(long long)layerId;
 - (BOOL)setModelShadows:(long long)layerId cast:(BOOL)cast receive:(BOOL)receive;
 - (int64_t)removeGaps;
@@ -739,6 +771,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setTransitionForLayer:(long long)layerId out:(BOOL)out type:(uint32_t)type frames:(uint32_t)frames;
 - (void)setTrackMatteForLayer:(long long)layerId matte:(long long)matteLayerId mode:(uint32_t)mode;
 - (void)setFrameBlendForLayer:(long long)layerId mode:(uint32_t)mode;
+/// Ao contrário do Remapear tempo: espelha a curva no clipe (liga se preciso).
+- (BOOL)reverseTimeRemapForLayer:(long long)layerId NS_SWIFT_NAME(reverseTimeRemap(forLayer:));
+/// Manter o tom do áudio fora de 1× (velocidade/remapeamento).
+- (void)setKeepPitchForLayer:(long long)layerId on:(BOOL)on NS_SWIFT_NAME(setKeepPitch(forLayer:on:));
 - (void)setVectorBlurForLayer:(long long)layerId amount:(float)amount NS_SWIFT_NAME(setVectorBlur(forLayer:amount:));
 - (void)toggleMarker:(int64_t)frame;
 /// Tap de batida tocando: marca o instante que soa, sem pausar nem alternar. Quadro ou -1.

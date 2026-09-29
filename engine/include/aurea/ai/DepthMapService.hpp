@@ -74,6 +74,11 @@ public:
     /// O que já está no cache, sem pedir nada.
     [[nodiscard]] DepthMapPtr cached(u64 key);
 
+    /// O mapa de vídeo pronto mais recente desta fonte (chave e instante dele).
+    /// No play a rede leva mais que um quadro: quando o mapa do quadro N fica
+    /// pronto o preview já pede o N+5, e sem isto nunca havia mapa para mostrar.
+    [[nodiscard]] DepthMapPtr latest_video(u64 sourceKey, u64& key, i64& targetUs, i64& frameUs);
+
     /// Chamado (na thread do worker) quando um mapa agendado fica pronto.
     void set_ready_callback(void (*fn)(void*), void* ctx) noexcept;
 
@@ -109,6 +114,8 @@ private:
     mutable std::mutex mutex_;
     std::unordered_map<u64, std::list<std::pair<u64, DepthMapPtr>>::iterator> index_;
     std::list<std::pair<u64, DepthMapPtr>> lru_;
+    struct Latest { u64 key = 0; i64 targetUs = 0; i64 frameUs = 1; DepthMapPtr map; };
+    std::unordered_map<u64, Latest> latest_;   ///< por fonte (sourceKey)
     Stats stats_{};
 
     // Trabalho (work_): a rede e o decoder só são usados sob este lock.

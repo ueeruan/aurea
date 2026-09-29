@@ -36,6 +36,10 @@ public:
     void set_software_only(bool enabled) noexcept { softwareOnly_.store(enabled); }
     void set_zero_copy(bool enabled) noexcept { zeroCopy_.store(enabled); }
     [[nodiscard]] bool zero_copy() const noexcept { return zeroCopy_.load(); }
+    /// Caminho GL do driver (AndroidVideoPath.hpp): o padrão onde o backend
+    /// importa AHardwareBuffer RGBA. Vale para decoders abertos depois.
+    void set_driver_gl(bool enabled) noexcept { driverGl_.store(enabled); }
+    [[nodiscard]] bool driver_gl() const noexcept { return driverGl_.load(); }
 
     void set_fd_opener(FdOpener fn, void* ctx) noexcept {
         opener_ = fn;
@@ -51,6 +55,7 @@ public:
 private:
     std::atomic<bool> zeroCopy_{true};
     std::atomic<bool> softwareOnly_{false};
+    std::atomic<bool> driverGl_{false};
     FdOpener opener_ = nullptr;
     void* openerCtx_ = nullptr;
 };

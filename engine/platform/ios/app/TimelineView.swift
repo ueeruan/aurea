@@ -150,9 +150,14 @@ struct TimelineView: View {
     private var rows: [TimelineRow] {
         let cached = rowCache.build(model.layers, model.keyframes)
         let all = rowCache.focused(cached, id: model.primarySelection, tracks: focusTracks, layers: model.layers, keys: model.keyframes)
-        // No compacto aparece só o TRECHO escolhido; fora dele, uma fileira por LINHA.
-        if compact { return all.filter { $0.id == model.primarySelection } }
+        // Uma fileira por LINHA. No compacto, a linha inteira da escolhida: depois
+        // de um split os dois pedaços continuam à vista (só o trecho escolhido
+        // fazia a metade nova sumir, e o corte parecia não ter funcionado).
         let shared = rowCache.shared(all, focus: model.primarySelection, tracks: focusTracks)
+        if compact {
+            guard let primary = model.primarySelection else { return [] }
+            return shared.filter { $0.segment(primary) != nil }
+        }
         return rowCache.expanded(shared, id: expandedLayer, revision: model.status.modelRevision, keys: model.keyframes, effects: {
             guard let id = expandedLayer else { return [] }
             return model.engine.effects(forLayer: id).map { row in
@@ -581,6 +586,8 @@ struct TimelineView: View {
         // Sem losangos o conteúdo centra na barra; com eles, sobe para a faixa de cima.
         let cy = row.instants.isEmpty ? top + m.bar / 2 : top + m.trackTop / 2
         var px = cl
+        // Setas ‹ › do compacto só no trecho escolhido (os outros da linha também aparecem).
+        let compact = self.compact && model.selection.contains(row.id)
         if compact { glyph(&context, CupertinoGlyph.ChevronLeft, size: m.arrowGlyph, tint: .white.opacity(0.7), x: px + m.arrowSlot / 2, y: cy); px += m.arrowSlot }
         if barWidth > m.iconMinBar {
             glyph(&context, row.type.glyph, size: m.typeIcon, tint: tone.text, x: px + m.typeIcon / 2, y: cy)
@@ -789,7 +796,7 @@ struct TimelineView: View {
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
         let keysShown: Bool = KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: row.track != nil, selected: model.selection.contains(row.id))
         let touchable: [Int32] = keysShown ? row.instants : []
-        return TimelineHit.test(m, point: CGPoint(x: px, y: y), width: width, x0: x0, x1: x1, handles: handlesOn(row), compact: compact, instants: touchable, view: viewFrame, ppf: ppf)
+        return TimelineHit.test(m, point: CGPoint(x: px, y: y), width: width, x0: x0, x1: x1, handles: handlesOn(row), compact: compact && model.selection.contains(row.id), instants: touchable, view: viewFrame, ppf: ppf)
     }
     /// O que o dedo pegou: o TRECHO (na pílula de uma fileira compartilhada, a
     /// fileira); `index` do resultado é a fileira inteira sob o dedo.

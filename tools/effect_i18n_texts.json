@@ -1551,5 +1551,33 @@
   "hi": "शटर कोण",
   "id": "Sudut rana",
   "ar": "زاوية الغالق"
+ },
+ "Part Rotation X": {
+  "en": "Part rotation X",
+  "pt": "Rotação das partes X"
+ },
+ "Part Rotation Y": {
+  "en": "Part rotation Y",
+  "pt": "Rotação das partes Y"
+ },
+ "Part Rotation Z": {
+  "en": "Part rotation Z",
+  "pt": "Rotação das partes Z"
+ },
+ "First Part": {
+  "en": "First part",
+  "pt": "Primeira parte"
+ },
+ "Last Part": {
+  "en": "Last part",
+  "pt": "Última parte"
+ },
+ "Delay per Part": {
+  "en": "Delay per part",
+  "pt": "Atraso por parte"
+ },
+ "Bend": {
+  "en": "Bend",
+  "pt": "Curvar"
  }
 }

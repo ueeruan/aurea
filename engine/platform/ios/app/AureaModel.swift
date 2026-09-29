@@ -3629,3 +3629,97 @@ extension AureaModel {
         endGesture()
     }
 }
+
+// =============================================================================
+// Formas 3D (Engine::add_shape3d e família) — as views estão em Shape3DViews.swift.
+// =============================================================================
+extension AureaModel {
+    func addShape3D(kind: Int) {
+        let key = kind < Shape3DState.names.count ? Shape3DState.names[kind] : "shape3d_title"
+        let id = engine.addShape3D(kind: UInt32(kind), name: AureaText.t(key))
+        if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
+        else { toast = AureaText.t("shape3d_add_failed") }
+        showAddLayer = false
+        refreshModel(force: true)
+    }
+
+    func shape3DInfo(_ id: Int64) -> Shape3DInfo? { Shape3DInfo(engine.shape3D(id).map(\.floatValue)) }
+
+    /// Os 9 canais da parte no cabeçote (posição, rotação °, escala) + bits de keyframe.
+    func shapePartValues(_ id: Int64, part: Int) -> [Float]? {
+        let p = engine.shape3DParts(id).map(\.floatValue)
+        let o = part * Shape3DState.partFloats
+        guard part >= 0, o + Shape3DState.partFloats <= p.count else { return nil }
+        return Array(p[o..<(o + Shape3DState.partFloats)])
+    }
+
+    /// Grava os canais `mask` da parte (canal animado = keyframe no cabeçote).
+    func setShapePart(_ id: Int64, part: Int, values: [Float], mask: UInt32, inGesture: Bool) {
+        let state = Shape3DState.shared
+        let continuing = inGesture && state.gestureSent
+        if engine.setShape3DPart(id, part: Int32(part), values: values.map { NSNumber(value: $0) }, mask: mask, continuing: continuing), inGesture {
+            state.gestureSent = true
+        }
+        state.revision += 1
+        if !inGesture { refreshModel(force: true) }
+    }
+
+    func beginShapeGesture(_ label: String) { Shape3DState.shared.gestureSent = false; beginGesture(label) }
+    func endShapeGesture() { Shape3DState.shared.gestureSent = false; endGesture() }
+
+    /// Dedo no palco: a parte anda `dx`, `dy` px da composição no plano que a câmera vê de frente.
+    func shapePartDragScreen(_ id: Int64, part: Int, dx: Float, dy: Float) {
+        let g = engine.shape3DPartGizmo(id, part: Int32(part), length: ShellStageGeometry.gizmoLength, localSpace: false).map(\.floatValue)
+        guard g.count == 8 else { return }
+        let ax = (0..<3).map { g[($0 + 1) * 2] - g[0] }, ay = (0..<3).map { g[($0 + 1) * 2 + 1] - g[1] }
+        var u = 0, v = 1, area: Float = -1
+        for (i, j) in [(0, 1), (0, 2), (1, 2)] {
+            let a = abs(ax[i] * ay[j] - ay[i] * ax[j])
+            if a > area { area = a; u = i; v = j }
+        }
+        guard area >= 1 else { return }
+        let det = ax[u] * ay[v] - ay[u] * ax[v]
+        let a = (dx * ay[v] - dy * ax[v]) / det, b = (ax[u] * dy - ay[u] * dx) / det
+        let base = engine.shape3DPartMove(id, part: Int32(part), axis: UInt32(u), amount: 0).map(\.floatValue)
+        let pu = engine.shape3DPartMove(id, part: Int32(part), axis: UInt32(u), amount: a * ShellStageGeometry.gizmoLength).map(\.floatValue)
+        let pv = engine.shape3DPartMove(id, part: Int32(part), axis: UInt32(v), amount: b * ShellStageGeometry.gizmoLength).map(\.floatValue)
+        guard base.count == 3, pu.count == 3, pv.count == 3 else { return }
+        var out = [Float](repeating: 0, count: 9)
+        for i in 0..<3 { out[i] = pu[i] + pv[i] - base[i] }
+        setShapePart(id, part: part, values: out, mask: 0b111, inGesture: true)
+    }
+
+    /// Imagem da galeria na parte (−1 = a forma inteira): normalizada (EXIF,
+    /// HEIC → JPEG/PNG, até 2048 px) e gravada em Documentos/formas3d — o
+    /// projeto guarda o caminho relativo.
+    func setShapePartImage(_ id: Int64, part: Int, url: URL) {
+        let engine = self.engine
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var path: String?
+            if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
+                let longest = max(image.size.width * image.scale, image.size.height * image.scale)
+                let k = longest > 2048 ? 2048 / longest : 1
+                let size = CGSize(width: max(1, (image.size.width * image.scale * k).rounded()),
+                                  height: max(1, (image.size.height * image.scale * k).rounded()))
+                let format = UIGraphicsImageRendererFormat.default()
+                format.scale = 1
+                let info = image.cgImage?.alphaInfo ?? CGImageAlphaInfo.none
+                let alpha = info != CGImageAlphaInfo.none && info != .noneSkipFirst && info != .noneSkipLast
+                format.opaque = !alpha
+                let flat = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+                let bytes = alpha ? flat.pngData() : flat.jpegData(compressionQuality: 0.92)
+                let dir = AureaPaths.documents.appendingPathComponent("formas3d", isDirectory: true)
+                let file = dir.appendingPathComponent(UUID().uuidString + (alpha ? ".png" : ".jpg"))
+                if let bytes, (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil,
+                   (try? bytes.write(to: file)) != nil { path = file.path }
+            }
+            let ok = path.map { engine.setShape3DPartStyle(id, part: Int32(part), color: nil, image: $0) } ?? false
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if !ok { self.toast = AureaText.t("msg_nao_foi_possivel_importar_a_imagem") }
+                Shape3DState.shared.revision += 1
+                self.refreshModel(force: true)
+            }
+        }
+    }
+}

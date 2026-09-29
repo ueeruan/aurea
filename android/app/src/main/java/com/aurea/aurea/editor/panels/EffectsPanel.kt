@@ -796,7 +796,7 @@ private fun EffectCardItem(
             return@EffectStackCard
         }
         if (effect.typeId == effectTypeId("aurea.time.remap")) {
-            TimeRemapEffectEditor(store, id)
+            TimeRemapEffectEditor(env, id)
             return@EffectStackCard
         }
         val visible = slots.filter { !it.hidden }

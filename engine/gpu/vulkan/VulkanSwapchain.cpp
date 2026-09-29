@@ -166,6 +166,8 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     swapFormat_ = chosen.format;
     swapExtent_ = extent;
     swapTransform_ = transform;
+    swapCapsTransform_ = caps.currentTransform;
+    swapchainSuboptimal_ = false;
 
     u32 count = 0;
     vkGetSwapchainImagesKHR(device_, swapchain_, &count, nullptr);

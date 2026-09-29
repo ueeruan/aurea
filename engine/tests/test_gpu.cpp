@@ -988,6 +988,29 @@ AUREA_TEST(Gpu, DeepGlowOpticalHaloSurvivesTransparencyAndExposure) {
     for (f32 v : base.px) AUREA_CHECK(std::isfinite(v));
 }
 
+// Brilho profundo em cor forte: pela luminância um vermelho puro (0,21) não
+// passava do limite padrão (55%) e só as cores claras brilhavam.
+AUREA_TEST(Gpu, DeepGlowLightsSaturatedColorsLikeLightOnes) {
+    AUREA_REQUIRE_GPU();
+    auto glowOf = [](u8 r, u8 g, u8 b) {
+        Scene s(128, 128);
+        s.comp->set_background(Color{0, 0, 0, 0});
+        const LayerId id = s.image(uniform_image(16, 16, r, g, b), 64, 64);
+        auto& e = s.add_effect(id, effect_keys::kDeepGlow);   // limite padrão (55%)
+        e.params[10].constant = ParamValue::boolean(true);     // só o brilho
+        const FloatImage img = s.render();
+        const Vec4 halo = img.v(64 + 14, 64);
+        return halo.x + halo.y + halo.z;
+    };
+    const f32 red = glowOf(255, 0, 0), blue = glowOf(0, 0, 255), white = glowOf(255, 255, 255);
+    AUREA_CHECK(red > 0.01f);
+    AUREA_CHECK(blue > 0.01f);
+    // Mesma intensidade de canal: o vermelho acende como um terço do branco (um canal de três).
+    AUREA_CHECK(red > white * 0.2f);
+    // Escuro continua sem brilho.
+    AUREA_CHECK(glowOf(60, 0, 0) < 0.002f);
+}
+
 AUREA_TEST(Gpu, PixelSortOrdersRatherThanDuplicatesBrightPixels) {
     AUREA_REQUIRE_GPU();
     Scene s(64, 16);
@@ -7269,6 +7292,8 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         // Text 3D Layout is rejected on images. Its actual glyph geometry and
         // visible XYZ changes are covered by GpuText3DLayout, not this raster fixture.
         if (fx.type_id() == effect_type_id(effect_keys::kText3DLayout)) continue;
+        // Shape 3D Layout idem (só em forma 3D): coberto por Shape3DLayout.* em test_shape3d.cpp.
+        if (fx.type_id() == effect_type_id(effect_keys::kShape3DLayout)) continue;
         const bool parenting = fx.type_id() == effect_type_id(effect_keys::kParentingHelper);
         const bool shadow = fx.type_id() == effect_type_id(effect_keys::kShadowStudio3);
         // Sombra projetada e Borda desenham FORA da caixa da camada: com a
@@ -10380,6 +10405,38 @@ AUREA_TEST(Gpu, DepthMapOnVideoRunsOncePerSourceFrame) {
     AUREA_CHECK(!gpu().renderer.take_incomplete());
     AUREA_CHECK_EQ(svc->stats().inferences, base + 1);
     AUREA_CHECK(depth_max_diff(later, preview) > 1e-3f);   // outro quadro, outro mapa
+    gpu().renderer.release_project_resources();
+}
+
+// No play a rede leva mais que um quadro: quando o mapa pedido fica pronto o
+// preview já está noutro quadro. O efeito mostra o mapa pronto mais recente da
+// fonte (atrasado) em vez de nunca aparecer.
+AUREA_TEST(Gpu, DepthMapOnVideoShowsTheLatestReadyMapWhilePlaying) {
+    AUREA_REQUIRE_GPU();
+    gpu().renderer.release_project_resources();
+    SyntheticConfig cfg;
+    cfg.width = 128;
+    cfg.height = 72;
+    cfg.pattern = SyntheticPattern::MovingSquare;
+    Scene s(128, 72);
+    const LayerId id = s.video(cfg, 64, 36);
+    const FloatImage plainA = s.render(FrameIndex{20}, 1, false);
+    const FloatImage plainB = s.render(FrameIndex{26}, 1, false);
+    s.add_effect(id, effect_keys::kDepthMap);
+    (void)s.render(FrameIndex{20}, 1, false);          // pede o mapa do quadro 20
+    ai::DepthMapService* svc = gpu().renderer.depth_service();
+    AUREA_CHECK(svc != nullptr);
+    if (!svc) return;
+    const u64 base = svc->stats().inferences;
+    for (int i = 0; i < 2000 && svc->stats().inferences == base; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    AUREA_CHECK(svc->stats().inferences > base);
+    // O play já andou: o quadro 26 ainda não tem mapa, mas o do 20 está pronto.
+    (void)gpu().renderer.take_incomplete();
+    const FloatImage playing = s.render(FrameIndex{26}, 1, false);
+    AUREA_CHECK(gpu().renderer.take_incomplete());     // o do 26 continua agendado
+    AUREA_CHECK(depth_max_diff(playing, plainB) > 0.05f);
+    (void)plainA;
     gpu().renderer.release_project_resources();
 }
 #endif

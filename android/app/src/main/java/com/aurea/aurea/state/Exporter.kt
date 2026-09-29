@@ -12,6 +12,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.aurea.aurea.R
+import com.aurea.aurea.diagnostics.ExitDiagnostics
+import com.aurea.aurea.diagnostics.ProjectGuard
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.engine.directBuffer
@@ -19,6 +21,7 @@ import com.aurea.aurea.ui.i18n.AppText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,6 +69,8 @@ class Exporter internal constructor(
     private val app: Application,
     private val engine: AureaEngine,
     private val scope: CoroutineScope,
+    /** O projeto aberto (marcador do ProjectGuard durante o export). */
+    private val projectPath: () -> String? = { null },
 ) {
     var state by mutableStateOf(ExportUiState())
         private set
@@ -109,7 +114,21 @@ class Exporter internal constructor(
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension)
         cancelPending = false
         poll?.cancel()
+        val guarded = projectPath()
         poll = scope.launch {
+            // Galaxy A32 "fecha em 70%": o marcador diz no próximo crash que foi
+            // no export, e em que quadro (atualizado a cada 1% abaixo).
+            if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
+            try {
+                runExport(dir, file, options, mbps)
+            } finally {
+                if (guarded != null) withContext(NonCancellable + Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
+            }
+        }
+    }
+
+    private suspend fun runExport(dir: File, file: File, options: ExportOptions, mbps: Int) {
+        run {
             // Abrir o encoder, o MP4 e os alvos de GPU leva segundos em aparelho
             // lento (e no emulador): na main thread isso dava "Aurea não está
             // respondendo" no toque de Exportar.
@@ -120,13 +139,19 @@ class Exporter internal constructor(
             }
             if (code != 0) {
                 state = ExportUiState(ExportPhase.Failed, message = startError(code, options))
-                return@launch
+                return
             }
             if (cancelPending) engine.cancelExport()
+            var markedPercent = -1
             while (true) {
                 delay(100)
                 if (!engine.exportProgress(progressBuffer)) continue
                 progress.readFrom(progressBuffer)
+                val percent = if (progress.framesTotal > 0) (progress.framesDone.toLong() * 100 / progress.framesTotal).toInt() else 0
+                if (percent != markedPercent) {
+                    markedPercent = percent
+                    ExitDiagnostics.mark(app, ExitDiagnostics.Phase.PROJECT_EXPORT_VIDEO, "f=${progress.framesDone}/${progress.framesTotal}")
+                }
                 state = state.copy(
                     framesDone = progress.framesDone,
                     framesTotal = progress.framesTotal,

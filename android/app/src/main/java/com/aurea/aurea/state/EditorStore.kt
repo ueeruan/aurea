@@ -28,6 +28,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurea.aurea.diagnostics.ExitDiagnostics
 import com.aurea.aurea.diagnostics.ExitDiagnostics.Phase
+import com.aurea.aurea.diagnostics.ProjectGuard
 import com.aurea.aurea.effects.EffectPreviewStore
 import com.aurea.aurea.effects.EffectPrefs
 import com.aurea.aurea.editor.timeline.KeyRef
@@ -208,6 +209,13 @@ const val VECTOR_SHAPE_TYPE = 11
 class EditorStore(app: Application) : AndroidViewModel(app) {
     init { storeApp = app }
 
+    /**
+     * Caminhos em quarentena, para o `readMeta` (roda em IO, e a primeira vez
+     * ainda durante o construtor — por isso declarado ANTES do init que lista
+     * os projetos). O estado da UI é [quarantined].
+     */
+    @Volatile private var quarantinedPaths: Set<String> = emptySet()
+
     private val engine = AureaEngine.create(app)
 
     /**
@@ -266,7 +274,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
-    val exporter = Exporter(app, engine, viewModelScope)
+    val exporter = Exporter(app, engine, viewModelScope) { project.path }
 
     /**
      * O motor cru, só para o teste de estresse. Ele captura quadro por quadro e
@@ -738,6 +746,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         }
         refreshProjects()
+        // O app morreu com o motor num projeto na sessão anterior? Quarentena
+        // antes de qualquer toque nele (ver ProjectGuard).
+        checkQuarantineOnLaunch()
         // Limpeza automática (§51): tipo acima do teto perde os mais antigos;
         // sobra de export/legenda de uma sessão que morreu (crash, force kill)
         // sai aqui. Fora da main thread; nunca toca em projeto.
@@ -1298,7 +1309,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         gizmo = same(gizmo, if (id != null) {
             val out = FloatArray(8)
             // Girar/escala editam os eixos da PRÓPRIA camada: o gizmo mostra os locais.
-            if (engine.queryGizmo(id, GIZMO_LENGTH, out, gizmoLocalSpace || gizmoTool != GIZMO_MOVE)) out else null
+            val localAxes = gizmoLocalSpace || gizmoTool != GIZMO_MOVE
+            // Forma 3D com uma parte escolhida: o gizmo é o DELA (origem no centro da parte).
+            val part = shapePartOf(id)
+            if (part >= 0 && engine.queryShape3dPartGizmo(id, part, GIZMO_LENGTH, out, localAxes)) out
+            else if (engine.queryGizmo(id, GIZMO_LENGTH, out, localAxes)) out else null
         } else {
             null
         })
@@ -1329,6 +1344,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        refreshShape3d(id)
         modelShadows = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
             val sh = FloatArray(2)
             if (engine.queryModelShadows(id, sh)) (sh[0] >= 0.5f) to (sh[1] >= 0.5f) else null
@@ -1556,6 +1572,55 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    // --- Rig 2D (camada de imagem) — o palco em editor/RigStage.kt ------------
+    /** Muda a cada edição do rig: o overlay do palco lê para redesenhar. */
+    var rigRevision by mutableIntStateOf(0)
+        private set
+    private var rigBuf = FloatArray(5 * 16)
+
+    /** Juntas do rig da camada (5 floats cada: id, pai ou −1, x, y na composição, key no cabeçote). */
+    fun rigJoints(layer: Long, bind: Boolean): FloatArray {
+        var need = engine.queryRig(layer, bind, rigBuf)
+        if (need > rigBuf.size) {
+            rigBuf = FloatArray(need)
+            need = engine.queryRig(layer, bind, rigBuf)
+        }
+        return if (need <= 0) FloatArray(0) else rigBuf.copyOf(need)
+    }
+    fun rigAddJoint(layer: Long, parent: Int, x: Float, y: Float): Int {
+        val j = engine.rigAddJoint(layer, parent, x, y)
+        rigRevision++
+        refreshNow()
+        return j
+    }
+    /** Arrasto: [continuing] = o mesmo passo de desfazer; [rigGestureEnd] fecha. */
+    fun rigMoveJoint(layer: Long, joint: Int, x: Float, y: Float, continuing: Boolean) {
+        if (engine.rigMoveJoint(layer, joint, x, y, continuing)) rigRevision++
+    }
+    fun rigPoseJoint(layer: Long, joint: Int, x: Float, y: Float, continuing: Boolean) {
+        if (playing) pause()
+        if (engine.rigPoseJoint(layer, joint, x, y, continuing)) rigRevision++
+    }
+    fun rigGestureEnd() {
+        rigRevision++
+        refreshNow()
+    }
+    /** Esqueleto automático (troca o rig que houver); quantas juntas saíram. */
+    fun rigAutoHumanoid(layer: Long): Int {
+        val n = engine.rigAutoHumanoid(layer)
+        rigRevision++
+        refreshNow()
+        return n
+    }
+    fun rigRemoveJoint(layer: Long, joint: Int) {
+        if (engine.rigRemoveJoint(layer, joint)) { rigRevision++; refreshNow() }
+    }
+    /** Montagem aberta nesta camada: a prévia mostra o desenho sem deformação (0 = nenhuma). */
+    fun setRigSetupLayer(layer: Long) {
+        engine.setRigSetupLayer(layer)
+        rigRevision++
+    }
+
     /** Traço do dedo (px da composição) → caminho suave; os traços seguintes entram na mesma camada. */
     fun commitFreehand(xy: FloatArray) {
         if (xy.size < 8) return
@@ -1603,6 +1668,232 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Receita do texto 3D da camada principal (nulo = não é texto 3D). */
     var text3d by mutableStateOf<Text3DInfo?>(null)
         private set
+
+    // --- Formas 3D (motor: EngineShape3D.cpp; painel: Shape3DSection; palco: ShapePartStage) --
+    /** Receita da forma 3D da camada principal (nulo = não é forma 3D). */
+    var shape3d by mutableStateOf<Shape3DInfo?>(null)
+        private set
+    /** Partes no cabeçote ([Shape3DCatalog.PART_FLOATS] cada), relidas com o detalhe. */
+    var shapeParts by mutableStateOf<FloatArray?>(null)
+        private set
+    /** Parte escolhida (−1 = a forma inteira): o gizmo e o dedo no palco passam a mexer nela. */
+    var shapePart by mutableIntStateOf(-1)
+        private set
+    private var shapePartLayer by androidx.compose.runtime.mutableLongStateOf(0L)
+    /** O arrasto de parte em curso já abriu o passo de desfazer (o resto vai junto). */
+    private var shapeGestureSent = false
+    private var shapeGizmoStart: FloatArray? = null
+
+    private fun refreshShape3d(id: Long?) {
+        val info = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
+            val f = FloatArray(Shape3DInfo.FIELDS)
+            Shape3DInfo.of(engine.queryShape3d(id, f), f)
+        } else null
+        shape3d = if (info != null && info.sameAs(shape3d)) shape3d else info
+        shapeParts = if (id != null && info != null) {
+            val out = FloatArray(Shape3DCatalog.PART_FLOATS * 8)
+            val n = engine.queryShape3dParts(id, out)
+            val novo = if (n > 0 && n <= out.size) out.copyOf(n) else null
+            if (novo != null && shapeParts?.contentEquals(novo) == true) shapeParts else novo
+        } else null
+        if (info == null || id != shapePartLayer || shapePart >= info.partCount) shapePart = -1
+    }
+
+    /** A parte escolhida vale só para ESTA camada (outra camada = a forma inteira). */
+    fun shapePartOf(id: Long?): Int {
+        // Lê os três estados SEMPRE (sem curto-circuito): quem desenha fica inscrito em todos.
+        val part = shapePart
+        val layer = shapePartLayer
+        val info = shape3d
+        return if (id != null && id == layer && info != null) part else -1
+    }
+
+    /** Escolhe a parte (−1 = a forma inteira). */
+    fun chooseShapePart(part: Int) {
+        val id = primary ?: return
+        shapePartLayer = id
+        shapePart = part.coerceIn(-1, (shape3d?.partCount ?: 0) - 1)
+        refreshNow()
+    }
+
+    fun addShape3D(kind: Int): Long {
+        val name = appText(Shape3DCatalog.names.getOrElse(kind) { R.string.shape3d_title })
+        val id = engine.addShape3d(kind, name)
+        if (id < 0) {
+            errorMessage = appText(R.string.shape3d_add_failed)
+            return -1
+        }
+        refreshNow()
+        select(id)
+        return id
+    }
+
+    /** Os 9 canais da parte no cabeçote (posição, rotação °, escala). */
+    fun shapePartValues(part: Int): FloatArray? {
+        val p = shapeParts ?: return null
+        val o = part * Shape3DCatalog.PART_FLOATS
+        return if (part >= 0 && o + Shape3DCatalog.PART_FLOATS <= p.size) p.copyOfRange(o, o + 9) else null
+    }
+
+    /** Bits (canal) com keyframe e com key no cabeçote. */
+    fun shapePartKeyBits(part: Int): Pair<Int, Int> {
+        val p = shapeParts ?: return 0 to 0
+        val o = part * Shape3DCatalog.PART_FLOATS
+        return if (part >= 0 && o + Shape3DCatalog.PART_FLOATS <= p.size) p[o + 9].toInt() to p[o + 10].toInt() else 0 to 0
+    }
+
+    /** Grava os canais [mask] da parte (canal animado = keyframe no cabeçote). */
+    fun setShapePartTransform(part: Int, values: FloatArray, mask: Int) {
+        val id = primary ?: return
+        val continuing = gestureDepth > 0 && shapeGestureSent
+        if (engine.setShape3dPart(id, part, values, mask, continuing) && gestureDepth > 0) shapeGestureSent = true
+        refreshNow()
+    }
+
+    /** Base do gizmo na parte (rotação ou escala XYZ), congelada no começo do gesto. */
+    fun shapeGizmoBase(rotate: Boolean): FloatArray? {
+        val part = shapePartOf(primary)
+        if (part < 0) return null
+        val v = shapePartValues(part) ?: return null
+        shapeGizmoStart = v
+        val first = if (rotate) 3 else 6
+        return v.copyOfRange(first, first + 3)
+    }
+
+    private fun shapeGizmoComponents(base: Int, values: FloatArray) {
+        val part = shapePartOf(primary)
+        val start = shapeGizmoStart ?: shapePartValues(part) ?: return
+        if (part < 0 || values.size < 3 || values.any { !it.isFinite() }) return
+        val first = when (base) {
+            TrackProperty.ROTATION_X -> 3
+            TrackProperty.SCALE_X -> 6
+            else -> return
+        }
+        val out = start.copyOf()
+        for (i in 0..2) {
+            // O modelo tem Y para cima e Z para fora da tela; o gizmo fala em eixos
+            // da composição (Y para baixo, Z para dentro): giro em Y e Z troca o sinal.
+            out[first + i] = if (first == 3 && i > 0) start[first + i] - (values[i] - start[first + i]) else values[i]
+        }
+        setShapePartTransform(part, out, 0b111 shl first)
+    }
+
+    /** Dedo no palco: a parte anda [dx], [dy] px da composição no plano que a câmera vê de frente. */
+    fun shapePartDragScreen(dx: Float, dy: Float) {
+        val id = primary ?: return
+        val part = shapePartOf(id)
+        if (part < 0) return
+        val g = FloatArray(8)
+        if (!engine.queryShape3dPartGizmo(id, part, GIZMO_LENGTH, g, false)) return
+        val ax = FloatArray(3) { g[(it + 1) * 2] - g[0] }
+        val ay = FloatArray(3) { g[(it + 1) * 2 + 1] - g[1] }
+        var u = 0; var v = 1; var area = -1f
+        for ((i, j) in arrayOf(0 to 1, 0 to 2, 1 to 2)) {
+            val a = kotlin.math.abs(ax[i] * ay[j] - ay[i] * ax[j])
+            if (a > area) { area = a; u = i; v = j }
+        }
+        if (area < 1f) return
+        val det = ax[u] * ay[v] - ay[u] * ax[v]
+        val a = (dx * ay[v] - dy * ax[v]) / det
+        val b = (ax[u] * dy - ay[u] * dx) / det
+        val base = FloatArray(3); val pu = FloatArray(3); val pv = FloatArray(3)
+        if (!engine.shape3dPartMove(id, part, u, 0f, base) || !engine.shape3dPartMove(id, part, u, a * GIZMO_LENGTH, pu) ||
+            !engine.shape3dPartMove(id, part, v, b * GIZMO_LENGTH, pv)) return
+        setShapePartTransform(part, FloatArray(9) { if (it < 3) pu[it] + pv[it] - base[it] else 0f }, 0b111)
+    }
+
+    /** Pinça no palco: escala uniforme × [factor] e giro na tela [twistDeg] (horário), sobre a base do começo. */
+    fun shapePartPinch(start: FloatArray, factor: Float, twistDeg: Float) {
+        val part = shapePartOf(primary)
+        if (part < 0 || start.size < 9 || !factor.isFinite() || !twistDeg.isFinite()) return
+        val out = start.copyOf()
+        for (i in 6..8) out[i] = (start[i] * factor).let { if (kotlin.math.abs(it) < 0.01f) 0.01f else it.coerceIn(-100f, 100f) }
+        // Horário na tela = giro negativo em Z do modelo (Z aponta para quem olha).
+        out[5] = start[5] - twistDeg
+        setShapePartTransform(part, out, 0b111 shl 6 or (1 shl 5))
+    }
+
+    fun toggleShapePartKey(part: Int) {
+        val id = primary ?: return
+        if (engine.toggleShape3dPartKey(id, part) < 0) showToast(appText(R.string.shape3d_key_outside))
+        refreshNow()
+    }
+
+    fun resetShapePart(part: Int) {
+        val id = primary ?: return
+        engine.resetShape3dPart(id, part)
+        refreshNow()
+    }
+
+    private var pendingShapeColor: Pair<Int, FloatArray>? = null
+    private val applyShapeColor = Runnable {
+        val id = primary ?: return@Runnable
+        val (part, rgba) = pendingShapeColor ?: return@Runnable
+        pendingShapeColor = null
+        engine.setShape3dPartStyle(id, part, rgba, null)
+        refreshNow()
+    }
+
+    /** Cor da parte (−1 = todas). Arrasto na roda de cor: a malha acompanha em passos curtos. */
+    fun setShapePartColor(part: Int, rgba: FloatArray) {
+        val info = shape3d ?: return
+        shape3d = info.copy(colors = info.colors.mapIndexed { i, c -> if (part < 0 || i == part) rgba.copyOf() else c })
+        pendingShapeColor = part to rgba.copyOf()
+        typingHandler.removeCallbacks(applyShapeColor)
+        typingHandler.postDelayed(applyShapeColor, 90)
+    }
+
+    /**
+     * Imagem da galeria na parte (−1 = na forma inteira): decodificada aqui
+     * (qualquer formato que o Android lê, já girada pelo EXIF), reduzida a
+     * 2048 px e gravada em `projetos/formas3d/` — o projeto guarda o caminho
+     * relativo e a imagem viaja com ele.
+     */
+    fun setShapePartImage(part: Int, uri: Uri) {
+        val id = primary ?: return
+        busyMessage = appText(R.string.app_importing_image)
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                val file = saveShapeImage(uri) ?: return@withContext false
+                engine.setShape3dPartStyle(id, part, null, file.absolutePath)
+            }
+            busyMessage = null
+            if (!ok) errorMessage = appText(R.string.msg_nao_foi_possivel_importar_a_imagem)
+            refreshNow()
+        }
+    }
+
+    fun clearShapePartImage(part: Int) {
+        val id = primary ?: return
+        engine.setShape3dPartStyle(id, part, null, "")
+        refreshNow()
+    }
+
+    private fun saveShapeImage(uri: Uri): File? = try {
+        val app = getApplication<Application>()
+        var bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: throw IllegalStateException("imagem ilegivel")
+        val longest = maxOf(bmp.width, bmp.height)
+        if (longest > 2048) {
+            val k = 2048f / longest
+            val scaled = Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).toInt()), maxOf(1, (bmp.height * k).toInt()), true)
+            if (scaled !== bmp) bmp.recycle()
+            bmp = scaled
+        }
+        val alpha = bmp.hasAlpha()
+        val bytes = java.io.ByteArrayOutputStream().use { out ->
+            bmp.compress(if (alpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, 92, out)
+            out.toByteArray()
+        }
+        bmp.recycle()
+        val dir = File(File(app.filesDir, "projetos"), "formas3d").apply { mkdirs() }
+        val hash = java.security.MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }
+        val dst = File(dir, "$hash.${if (alpha) "png" else "jpg"}")
+        if (!dst.exists()) FileOutputStream(dst).use { it.write(bytes) }
+        dst
+    } catch (e: Exception) {
+        Log.w(TAG, "imagem da forma 3D falhou: ${e.javaClass.simpleName}: ${e.message}")
+        null
+    }
 
     fun addText3D(): Long {
         val label = appText(R.string.target_text)
@@ -1656,6 +1947,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         closeTyping.run()
         engine.applyText3dPreset(id, preset.ordinal)
         refreshNow()
+    }
+
+    /** Animação de texto 3D: 3 modos (entrada, saída, loop) × 5 floats — preset (−1 nenhum), unidade, duração s, atraso ms, unidades. */
+    fun queryText3DAnim(): FloatArray? = primary?.let { engine.queryText3dAnim(it) }
+
+    /** Um toque aplica o preset no modo (−1 remove); as letras viram nós próprios. Um desfazer. */
+    fun applyText3DAnim(preset: Int, mode: Int, unit: Int, durationSec: Float, staggerMs: Float) {
+        val id = primary ?: return
+        typingHandler.removeCallbacks(applyText3d)
+        if (text3dPending) text3d?.let { pushText3D(id, it) }
+        engine.applyText3dAnim(id, preset, mode, unit, durationSec, staggerMs)
+        refreshNow()
+        refreshDetail()
     }
 
     private fun pushText3D(id: Long, info: Text3DInfo) {
@@ -1792,6 +2096,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
     fun endGesture() {
         gestureDepth = max(0, gestureDepth - 1)
+        if (gestureDepth == 0) shapeGestureSent = false
         send { endUndoGroup() }
         refreshNow()
     }
@@ -2509,6 +2814,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setPreviewScale(automatic: Boolean, numerator: Int = 1, denominator: Int = 1) =
         send { setPreviewScale(automatic, numerator, denominator) }
 
+    /** Zoom/pan da VISTA da prévia (px da superfície): só o passe de saída, sem desfazer, nunca no export. */
+    fun setViewport(zoom: Float, panX: Float, panY: Float) =
+        send { setViewportZoom(zoom); setViewportPan(panX, panY) }
+
     var rawPlayback by mutableStateOf(false)
         private set
     fun toggleRawPlayback() {
@@ -2865,6 +3174,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Arrasto numa seta: anda `amount` unidades do mundo no eixo (0 X, 1 Y, 2 Z). */
     fun gizmoDrag(axis: Int, amount: Float) {
         val id = primary ?: return
+        val part = shapePartOf(id)
+        if (part >= 0) {
+            val out = FloatArray(3)
+            if (engine.shape3dPartMove(id, part, axis + if (gizmoLocalSpace) 3 else 0, amount, out)) {
+                setShapePartTransform(part, floatArrayOf(out[0], out[1], out[2], 0f, 0f, 0f, 1f, 1f, 1f), 0b111)
+            }
+            return
+        }
         val d = detail ?: return
         val out = FloatArray(3)
         if (!engine.gizmoMoveLocal(id, axis + if (gizmoLocalSpace) 3 else 0, amount, out)) return
@@ -2879,6 +3196,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun gizmoSetComponents(base: Int, values: FloatArray) {
         val id = primary ?: return
+        if (shapePartOf(id) >= 0) { shapeGizmoComponents(base, values); return }
         val d = detail ?: return
         val current = when (base) {
             TrackProperty.SCALE_X -> d.scale
@@ -3510,6 +3828,29 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         send { setEffectParam(id, effectId, 0, seconds) }
         refreshNow()
+    }
+
+    /** Manter o tom do áudio fora de 1× (velocidade ou curva de tempo). */
+    fun setKeepPitch(on: Boolean) {
+        val id = primary ?: return
+        engine.setKeepPitch(id, on)
+        refreshNow()
+    }
+
+    /** Ao contrário: espelha a curva de tempo no clipe (um passo de desfazer). */
+    fun reverseRemap() {
+        val id = primary ?: return
+        engine.reverseTimeRemap(id)
+        refreshNow()
+    }
+
+    /** Chave do remapeamento tocada na faixa: o cabeçote vai até ela e ela fica escolhida (para a curva). */
+    fun selectRemapKey(localFrame: Int) {
+        val id = primary ?: return
+        val d = detail ?: return
+        seek(d.timelineFrame(localFrame))
+        keyframes[id].orEmpty().firstOrNull { it.property == TrackProperty.TIME_REMAP && it.time == localFrame }
+            ?.let { selectKeyframe(id, it) }
     }
 
     /** Suavidade da chave do cabeçote: 0 linear, 1 nos dois, 3 no início, 4 no fim. */
@@ -4968,6 +5309,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private val MODEL_EXTS = setOf("glb", "gltf", "fbx", "obj")
+    /** O que acompanha um modelo (texturas, .mtl, .bin): nunca é "adivinhado" como modelo. */
+    private val MODEL_SIDE_EXTS = setOf("mtl", "bin", "png", "jpg", "jpeg", "webp", "tga", "bmp", "ktx2", "dds", "tif", "tiff")
 
     /** "Importar texturas": a layer do modelo e os arquivos que ele referencia e não achou (só o nome). */
     data class MissingModelTextures(val layer: Long, val names: List<String>)
@@ -5004,15 +5347,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun importModel(uris: List<Uri>) {
         if (uris.isEmpty()) return
-        val picks = uris.map { it to (displayName(it) ?: "") }
-        val modelPick = picks.firstOrNull { it.second.substringAfterLast('.', "").lowercase() in MODEL_EXTS }
-        val zipPick = picks.firstOrNull { it.second.substringAfterLast('.', "").lowercase() == "zip" }
-        if (modelPick == null && zipPick == null) {
-            errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
-            return
-        }
-        busyMessage = appText(R.string.app_importing_model)
         viewModelScope.launch {
+            // Nome sem extensão (WhatsApp, Drive, Telegram entregam "arquivo" ou
+            // um número): o conteúdo diz o formato — antes virava "não é modelo".
+            val picks = withContext(Dispatchers.IO) { uris.map { it to modelPickName(it) } }
+            val modelPick = picks.firstOrNull { it.second.substringAfterLast('.', "").lowercase() in MODEL_EXTS }
+            val zipPick = picks.firstOrNull { it.second.substringAfterLast('.', "").lowercase() == "zip" }
+            if (modelPick == null && zipPick == null) {
+                errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
+                return@launch
+            }
+            busyMessage = appText(R.string.app_importing_model)
             val poll = launch {
                 while (true) {
                     kotlinx.coroutines.delay(150)
@@ -5114,6 +5459,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * null = a cópia falhou. glTF/GLB continuam em `modelos/<hash>.<ext>`;
      * FBX/OBJ ganham a pasta `modelos/<hash>/` com as texturas ao lado.
      */
+    /** Nome do arquivo escolhido; sem extensão conhecida, ganha a do formato lido nos primeiros bytes. */
+    private fun modelPickName(uri: Uri): String {
+        val name = displayName(uri) ?: ""
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext in MODEL_EXTS || ext == "zip" || ext in MODEL_SIDE_EXTS) return name
+        val head = try {
+            getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                val buf = ByteArray(4096)
+                var n = 0
+                while (n < buf.size) { val r = input.read(buf, n, buf.size - n); if (r <= 0) break; n += r }
+                buf.copyOf(n)
+            }
+        } catch (_: Exception) { null } ?: return name
+        val sniffed = sniffModelFormat(head) ?: return name
+        return (name.ifBlank { "modelo" }) + "." + sniffed
+    }
+
     private fun stageModel(picks: List<Pair<Uri, String>>): Pair<File?, String>? {
         val app = getApplication<Application>()
         val root = File(File(app.filesDir, "projetos"), "modelos").apply { mkdirs() }
@@ -5335,12 +5697,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun openProject(path: String) {
+        // Projeto que já derrubou o app: só com a pessoa escolhendo "Recuperar".
+        quarantined.firstOrNull { it.path == path }?.let { quarantinePrompt = it; return }
+        val app = getApplication<Application>()
         viewModelScope.launch {
+            // Marcador ANTES de o motor tocar no projeto; sai alguns segundos
+            // depois de abrir (os primeiros quadros também são "abrir").
+            withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.OPEN, path) }
             val code = withContext(Dispatchers.Default) { engine.loadProject(path) }
             if (code != 0) {
+                withContext(Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.OPEN) }
                 Log.w(TAG, "abrir projeto falhou: codigo $code")
                 errorMessage = appText(R.string.msg_nao_foi_possivel_abrir_o_projeto, humanError(code))
                 return@launch
+            }
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(OPEN_GUARD_MS)
+                withContext(Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.OPEN) }
             }
             val meta = readMeta(File(path))
             project = ProjectState(title = meta?.title ?: File(path).nameWithoutExtension, path = path)
@@ -5636,6 +6009,65 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         else -> humanError(code)
     }
 
+    // =========================================================================
+    // Quarentena (ProjectGuard): projeto com que o app morreu ao abrir,
+    // importar ou exportar não é tocado de novo sem a pessoa escolher.
+    // =========================================================================
+    /** Projetos em quarentena (lidos na abertura). */
+    var quarantined by mutableStateOf<List<ProjectGuard.Quarantined>>(emptyList())
+        private set
+
+    private fun applyQuarantine(list: List<ProjectGuard.Quarantined>) {
+        quarantinedPaths = list.mapTo(HashSet()) { it.path }
+        quarantined = list
+    }
+
+    /** A pergunta Recuperar/Apagar aberta na Home (null = nenhuma). */
+    var quarantinePrompt by mutableStateOf<ProjectGuard.Quarantined?>(null)
+        private set
+
+    /** Título do projeto em quarentena, pelo sidecar (sem abrir o projeto). */
+    fun quarantineTitle(q: ProjectGuard.Quarantined): String =
+        projects.firstOrNull { it.path == q.path }?.title ?: File(q.path).nameWithoutExtension
+
+    private fun checkQuarantineOnLaunch() {
+        val app = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = ProjectGuard.onLaunch(app)
+            withContext(Dispatchers.Main) {
+                applyQuarantine(list)
+                if (list.isNotEmpty()) {
+                    Log.w(TAG, "projetos em quarentena: ${list.size}")
+                    quarantinePrompt = list.last()
+                    refreshProjects()   // a capa deles sai da lista
+                }
+            }
+        }
+    }
+
+    /** "Recuperar": sai da quarentena e abre (o marcador volta: se cair de novo, volta à quarentena). */
+    fun recoverQuarantined(path: String) {
+        val app = getApplication<Application>()
+        quarantinePrompt = null
+        viewModelScope.launch {
+            applyQuarantine(withContext(Dispatchers.IO) { ProjectGuard.release(app, path) })
+            refreshProjects()
+            openProject(path)
+        }
+    }
+
+    /** "Apagar": o projeto (e os arquivos de recuperação dele) sai do aparelho. */
+    fun deleteQuarantined(path: String) {
+        val app = getApplication<Application>()
+        quarantinePrompt = null
+        viewModelScope.launch {
+            applyQuarantine(withContext(Dispatchers.IO) { ProjectGuard.release(app, path) })
+            deleteProjects(listOf(path))
+        }
+    }
+
+    fun dismissQuarantinePrompt() { quarantinePrompt = null }
+
     fun refreshProjects() {
         viewModelScope.launch(Dispatchers.IO) {
             val dir = directories().projects
@@ -5653,24 +6085,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun readMeta(file: File): ProjectEntry? {
         if (!file.exists()) return null
         val metaFile = File(file.absolutePath + META_SUFFIX)
-        val j = try {
-            if (metaFile.exists()) JSONObject(metaFile.readText()) else null
+        // Sidecar ilegível ou com número inválido (NaN do import): o cartão sai
+        // com o nome do arquivo e os padrões — nunca uma exceção na Home.
+        val json = try {
+            if (metaFile.exists() && metaFile.length() in 1..(256 * 1024)) metaFile.readText() else null
         } catch (e: Exception) {
-            // Sidecar ilegível: o cartão sai com o nome do arquivo (o projeto em si não depende dele).
             Log.w(TAG, "sidecar ilegivel (${file.name}): ${e.message}")
             null
         }
-        val thumb = j?.optString("thumbnail")?.takeIf { it.isNotEmpty() && File(it).exists() }
-        return ProjectEntry(
-            path = file.absolutePath,
-            title = j?.optString("title")?.takeIf { it.isNotEmpty() } ?: file.nameWithoutExtension,
-            modifiedMs = file.lastModified(),
-            width = j?.optInt("width") ?: 0,
-            height = j?.optInt("height") ?: 0,
-            fps = (j?.optDouble("fps") ?: 30.0).toFloat(),
-            durationFrames = j?.optInt("durationFrames") ?: 0,
-            thumbnailPath = thumb,
-        )
+        val entry = ProjectMeta.entry(file.absolutePath, file.nameWithoutExtension, file.lastModified(), json) { File(it).exists() }
+        // Em quarentena (o app morreu com o motor nele): nem a capa é decodificada.
+        return if (entry.path in quarantinedPaths) entry.copy(thumbnailPath = null) else entry
     }
 
     private fun uniqueName(title: String): String {
@@ -5735,6 +6160,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         /** Espera depois de um autosave que falhou (ex.: armazenamento cheio). */
         const val AUTOSAVE_RETRY_NS = 30_000_000_000L
         const val META_SUFFIX = ".meta.json"
+        /** Quanto tempo depois de abrir um crash ainda conta como "ao abrir" (ProjectGuard). */
+        const val OPEN_GUARD_MS = 5_000L
         /** `kInvalidIndex` do C++: keyframe que não é de efeito. */
         const val NO_EFFECT = -1
         /** Índices de `LayerSetCameraParam` (ver Command.hpp). */

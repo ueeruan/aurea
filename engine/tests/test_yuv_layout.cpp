@@ -58,6 +58,105 @@ AUREA_TEST(DecodedPlaneBounds, OwnedCopyHandlesOddDimensionsAndTruncatedPadding)
     AUREA_CHECK(output == expected);
 }
 
+// Oppo A94: listras nas bordas e faixas de lixo em alguns vídeos. Um buffer de
+// decoder como o do aparelho — passo > largura, fatia > altura (1080 → 1088,
+// aqui em miniatura), croma NV12 (passo de pixel 2), NV21 e I420 (passo 1) —
+// com a sobra PREENCHIDA de 0xEE: nenhum byte da sobra pode chegar à cópia, e
+// o plano de croma começa em passo·fatia, não em largura·altura.
+AUREA_TEST(DecodedPlaneBounds, PaddedDecoderBuffersCopyOnlyVisibleSamples) {
+    constexpr uint32_t W = 10, H = 6, STRIDE = 16, SLICE = 8;   // 6 → 8 linhas, 10 → 16 bytes
+    constexpr uint32_t CW = W / 2, CH = H / 2;
+    auto luma = [](uint32_t x, uint32_t y) { return uint8_t(1 + y * W + x); };
+    auto cb = [](uint32_t x, uint32_t y) { return uint8_t(100 + y * CW + x); };
+    auto cr = [](uint32_t x, uint32_t y) { return uint8_t(180 + y * CW + x); };
+    std::vector<uint8_t> expected;
+    for (uint32_t y = 0; y < H; ++y) for (uint32_t x = 0; x < W; ++x) expected.push_back(luma(x, y));
+    for (uint32_t y = 0; y < CH; ++y) for (uint32_t x = 0; x < CW; ++x) expected.push_back(cb(x, y));
+    for (uint32_t y = 0; y < CH; ++y) for (uint32_t x = 0; x < CW; ++x) expected.push_back(cr(x, y));
+
+    for (int layout = 0; layout < 3; ++layout) {   // 0 NV12, 1 NV21, 2 I420
+        std::vector<uint8_t> buf(STRIDE * SLICE * 2, 0xEE);
+        for (uint32_t y = 0; y < H; ++y) for (uint32_t x = 0; x < W; ++x) buf[y * STRIDE + x] = luma(x, y);
+        const size_t chroma = size_t(STRIDE) * SLICE;   // NÃO W*H
+        const uint8_t* data[3]{};
+        int row[3]{}, pixel[3]{}, length[3]{};
+        data[0] = buf.data(); row[0] = STRIDE; pixel[0] = 1; length[0] = int(STRIDE * (H - 1) + W);
+        if (layout < 2) {
+            for (uint32_t y = 0; y < CH; ++y) {
+                for (uint32_t x = 0; x < CW; ++x) {
+                    buf[chroma + y * STRIDE + 2 * x + (layout == 0 ? 0 : 1)] = cb(x, y);
+                    buf[chroma + y * STRIDE + 2 * x + (layout == 0 ? 1 : 0)] = cr(x, y);
+                }
+            }
+            const uint8_t* u = buf.data() + chroma + (layout == 0 ? 0 : 1);
+            const uint8_t* v = buf.data() + chroma + (layout == 0 ? 1 : 0);
+            data[1] = u; data[2] = v;
+            row[1] = row[2] = STRIDE;
+            pixel[1] = pixel[2] = 2;
+            length[1] = length[2] = int(STRIDE * (CH - 1) + 2 * (CW - 1) + 1);
+        } else {
+            const uint32_t cStride = STRIDE / 2, cSlice = SLICE / 2;
+            const size_t vStart = chroma + size_t(cStride) * cSlice;
+            for (uint32_t y = 0; y < CH; ++y) {
+                for (uint32_t x = 0; x < CW; ++x) {
+                    buf[chroma + y * cStride + x] = cb(x, y);
+                    buf[vStart + y * cStride + x] = cr(x, y);
+                }
+            }
+            data[1] = buf.data() + chroma; data[2] = buf.data() + vStart;
+            row[1] = row[2] = int(cStride);
+            pixel[1] = pixel[2] = 1;
+            length[1] = length[2] = int(cStride * (CH - 1) + CW);
+        }
+        std::vector<uint8_t> out;
+        AUREA_CHECK(copy_decoded_yuv420(W, H, data, row, pixel, length, out));
+        AUREA_CHECK(out == expected);
+        for (uint8_t b : out) AUREA_CHECK(b != 0xEE);
+    }
+}
+
+// A região visível: crop do AImage ∩ crop do formato, e a sobra de alinhamento
+// além do tamanho da trilha sai. Nunca vazia, nunca fora do buffer.
+AUREA_TEST(DecodedPlaneBounds, VisibleRegionDropsDecoderAlignmentPadding) {
+    VisibleRegion v;
+    const int32_t none[4]{0, 0, 0, 0};
+    // Decoder que devolve o crop como o buffer inteiro (1920×1088) de um 1080p.
+    const int32_t whole[4]{0, 0, 1920, 1088};
+    AUREA_CHECK(visible_region(1920, 1088, whole, none, 1920, 1080, v));
+    AUREA_CHECK(v.left == 0 && v.top == 0 && v.width == 1920 && v.height == 1080);
+    // Crop do formato (inclusivo) mais justo que o do AImage: vale a interseção.
+    const int32_t fmt[4]{0, 0, 1919, 1079};
+    AUREA_CHECK(visible_region(1920, 1088, whole, fmt, 0, 0, v));
+    AUREA_CHECK(v.width == 1920 && v.height == 1080);
+    // Só o crop do formato (AImage sem crop): usado.
+    AUREA_CHECK(visible_region(1920, 1088, none, fmt, 0, 0, v));
+    AUREA_CHECK(v.width == 1920 && v.height == 1080);
+    // Largura alinhada (720 → 736) com deslocamento à esquerda/topo preservado.
+    const int32_t offset[4]{8, 4, 8 + 720, 4 + 480};
+    AUREA_CHECK(visible_region(736, 496, offset, none, 720, 480, v));
+    AUREA_CHECK(v.left == 8 && v.top == 4 && v.width == 720 && v.height == 480);
+    // Nenhum crop: o tamanho da trilha manda (regra de sempre), mesmo com folga grande.
+    AUREA_CHECK(visible_region(2048, 1088, none, none, 1920, 1080, v));
+    AUREA_CHECK(v.left == 0 && v.width == 1920 && v.height == 1080);
+    // Com crop, diferença grande NÃO é sobra: trilha com tamanho estranho não corta imagem.
+    const int32_t big[4]{0, 0, 1920, 1080};
+    AUREA_CHECK(visible_region(1920, 1080, big, none, 1280, 720, v));
+    AUREA_CHECK(v.width == 1920 && v.height == 1080);
+    // Crops incoerentes (interseção vazia): fica o do AImage.
+    const int32_t left[4]{0, 0, 100, 100}, farFmt[4]{500, 500, 600, 600};
+    AUREA_CHECK(visible_region(1920, 1080, left, farFmt, 0, 0, v));
+    AUREA_CHECK(v.width == 100 && v.height == 100);
+    // Crop fora do buffer / negativo: preso ao buffer, nunca vazio.
+    const int32_t wild[4]{-50, -50, 99999, 99999};
+    AUREA_CHECK(visible_region(640, 360, wild, none, 0, 0, v));
+    AUREA_CHECK(v.left == 0 && v.top == 0 && v.width == 640 && v.height == 360);
+    const int32_t past[4]{700, 400, 800, 500};
+    AUREA_CHECK(visible_region(640, 360, past, none, 0, 0, v));
+    AUREA_CHECK(v.width > 0 && v.height > 0 && v.left + v.width <= 640 && v.top + v.height <= 360);
+    AUREA_CHECK(!visible_region(0, 360, whole, none, 0, 0, v));
+    AUREA_CHECK(!visible_region(640, 0, whole, none, 0, 0, v));
+}
+
 namespace {
 
 /// Escreve o quadro no buffer como o plano manda (é o que o sink faz).

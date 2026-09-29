@@ -146,6 +146,9 @@ struct SceneInstance {
     std::vector<u32>  skinJointOffset; ///< início de cada skin em jointMatrices
     std::vector<std::vector<f32>> morphWeights;   ///< por nó (vazio = pesos da malha)
     std::vector<MaterialOverride> materials; ///< Per-instance factors; GPU/source assets remain shared.
+    /// Opacidade por nó (vazio = tudo 1): letras do texto 3D animadas. Abaixo
+    /// de 1 o nó mistura como transparente; perto de 0 nem desenha.
+    std::vector<f32> nodeOpacity;
     bool castShadows = true;
     u64  layerKey = 0;                 ///< camada de origem (sub-quadros do desfoque)
     bool motionBlur = false;           ///< a camada pede desfoque de movimento

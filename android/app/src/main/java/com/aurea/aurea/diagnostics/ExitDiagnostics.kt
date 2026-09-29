@@ -15,21 +15,36 @@ import java.util.zip.ZipOutputStream
 /** Local diagnostics; exported only when the user chooses a destination. */
 object ExitDiagnostics {
     // No URI, project name or media contents in the OS process-state marker.
-    enum class Phase { ENGINE_START, ENGINE_READY, VIDEO_PERMISSION, VIDEO_NATIVE, VIDEO_READY, VIDEO_FAILED, VIDEO_CANCELLED }
+    // PROJECT_*: etapas em que o motor lê/renderiza um projeto inteiro (abrir,
+    // importar o .aureaproj, exportar o vídeo, gravar o arquivo do projeto) —
+    // o crash que chega por e-mail diz em qual delas o app morreu.
+    enum class Phase {
+        ENGINE_START, ENGINE_READY, VIDEO_PERMISSION, VIDEO_NATIVE, VIDEO_READY, VIDEO_FAILED, VIDEO_CANCELLED,
+        PROJECT_OPEN, PROJECT_IMPORT, PROJECT_EXPORT_VIDEO, PROJECT_EXPORT_FILE,
+    }
 
     /** A última etapa marcada, em memória: o handler de crash Java a grava junto da pilha. */
     @Volatile var ultimaEtapa: String? = null
         private set
 
-    fun mark(context: Context, phase: Phase) {
-        ultimaEtapa = "Aurea build=${BuildConfig.VERSION_CODE} phase=${phase.name}"
+    /**
+     * `detail`: curto e sem dado do usuário (ex.: "f=1234/2000", o quadro do
+     * export). Vai no marcador do SO (≤ 128 bytes) e na pilha Java.
+     */
+    fun mark(context: Context, phase: Phase, detail: String = "") {
+        val extra = cleanDetail(detail)
+        ultimaEtapa = "Aurea build=${BuildConfig.VERSION_CODE} phase=${phase.name}" + (if (extra.isEmpty()) "" else " $extra")
         if (Build.VERSION.SDK_INT < 30) return
         runCatching {
             context.getSystemService(ActivityManager::class.java)?.setProcessStateSummary(
-                marker(phase, BuildConfig.VERSION_CODE, SystemClock.elapsedRealtime())
+                marker(phase, BuildConfig.VERSION_CODE, SystemClock.elapsedRealtime(), extra)
             )
         } // An OEM refusing/throttling diagnostics must never break import.
     }
+
+    /** Só [A-Za-z0-9=/._-], até 24 caracteres: nunca nome, caminho ou URI. */
+    internal fun cleanDetail(detail: String): String =
+        detail.filter { it.isLetterOrDigit() && it.code < 128 || it in "=/._-" }.take(24)
 
     private const val PREFS = "aurea_exit_diagnostics"
     private const val SAFE_VIDEO = "safe_video_planes"          // antigo (permanente): só é apagado
@@ -79,8 +94,12 @@ object ExitDiagnostics {
         return after in 0..VIDEO_READY_WINDOW_MS
     }
 
-    internal fun marker(phase: Phase, build: Int, uptimeMs: Long): ByteArray =
-        "Aurea build=$build phase=${phase.name} uptimeMs=$uptimeMs".toByteArray(Charsets.UTF_8)
+    // O detalhe vai ANTES de uptimeMs: crashedDuringVideo lê o número do fim.
+    internal fun marker(phase: Phase, build: Int, uptimeMs: Long, detail: String = ""): ByteArray {
+        val extra = cleanDetail(detail)
+        return ("Aurea build=$build phase=${phase.name} " + (if (extra.isEmpty()) "" else "$extra ") + "uptimeMs=$uptimeMs")
+            .toByteArray(Charsets.UTF_8)
+    }
 
     private fun exits(context: Context): List<ApplicationExitInfo> {
         if (Build.VERSION.SDK_INT < 30) return emptyList()
@@ -99,6 +118,7 @@ object ExitDiagnostics {
         appendLine("Samsung (todas as versoes): " +
             if (Build.MANUFACTURER.equals("samsung", ignoreCase = true))
                 "proteção de planos YUV ativa; confirmação no aparelho pendente" else "não se aplica")
+        appendLine(ProjectGuard.summary(context))
         appendLine("Decodificadores disponíveis (não necessariamente em uso):")
         runCatching {
             MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder }.forEach { codec ->

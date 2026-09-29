@@ -301,6 +301,13 @@ struct SceneAsset {
     u32 version = kSceneAssetVersion;
     std::string sourceName;
     bool textGlyphLayout = false;   ///< Generated text only; roots are visible letters in visual order.
+    /// Forma 3D gerada (Shape3D.hpp): o nó i é a parte i, e as trilhas
+    /// TrackProperty::ShapePart da camada movem cada uma.
+    bool shapeParts = false;
+    /// Texto 3D com letras separadas: 3 por nó (letra visível, palavra, linha)
+    /// — as unidades dos animadores de letra/palavra/linha (Text3D.hpp).
+    std::vector<u32> textUnits;
+    u32 textWords = 0, textLines = 0;
 
     std::vector<Node> nodes;
     std::vector<i32> roots;            ///< cena padrão

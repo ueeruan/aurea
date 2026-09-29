@@ -94,6 +94,11 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     // Pontos do rastreio de câmera no vídeo (painel de Rastreio aberto).
     val showTrack = ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking
     androidx.compose.runtime.LaunchedEffect(store.playhead, showTrack, store.cameraTrack, store.primary) { store.refreshCameraFeatures(showTrack) }
+    // Zoom da vista: cada projeto abre no encaixe (o motor pode trazer um zoom
+    // salvo no arquivo; aqui a vista e o motor voltam juntos a 100 %).
+    androidx.compose.runtime.LaunchedEffect(store) {
+        androidx.compose.runtime.snapshotFlow { store.project.path }.collect { StageView.reset(store) }
+    }
     Box(modifier.background(AureaColors.EditorTopBar).clipToBounds()) {
         PreviewSurface(store, Modifier.fillMaxSize())
         if (!store.rawPlayback) Spacer(
@@ -152,7 +157,9 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         }
         LockBanner(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
+        RigModeBar(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
+        StageZoomChip(store, Modifier.align(Alignment.BottomEnd).padding(8.dp))
         if (store.selection.size == 1 && !store.rawPlayback) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
                 if (store.gizmo != null) {
@@ -345,7 +352,14 @@ internal class StageMapper {
         ring15 = Stroke(1.5f * density)
     }
 
-    fun update(w: Float, h: Float, inset: Float, cw: Int, ch: Int, fill: Boolean) {
+    /** Encaixe em 1× (sem o zoom da vista) e o zoom/pan da vista em uso. */
+    var baseFit = 0f
+    var zoom = 1f
+    var panX = 0f
+    var panY = 0f
+
+    fun update(w: Float, h: Float, inset: Float, cw: Int, ch: Int, fill: Boolean,
+               zoom: Float = 1f, panX: Float = 0f, panY: Float = 0f) {
         boxW = w
         boxH = h
         val sw = w - 2 * inset
@@ -356,10 +370,30 @@ internal class StageMapper {
         }
         compW = cw.toFloat()
         compH = ch.toFloat()
-        fit = if (fill) max(sw / compW, sh / compH) else min(sw / compW, sh / compH)
-        ox = inset + (sw - compW * fit) / 2
-        oy = inset + (sh - compH * fit) / 2
+        baseFit = if (fill) max(sw / compW, sh / compH) else min(sw / compW, sh / compH)
+        // Zoom da vista (StageView): a mesma conta do passe de saída do motor,
+        // então alças, toque e arrasto seguem exatos com a prévia ampliada.
+        this.zoom = zoom
+        this.panX = panX
+        this.panY = panY
+        this.inset = inset
+        fit = baseFit * zoom
+        ox = StageZoomMath.origin(w, inset, compW, baseFit, zoom, panX)
+        oy = StageZoomMath.origin(h, inset, compH, baseFit, zoom, panY)
         valid = true
+    }
+
+    private var inset = 0f
+
+    /** Troca só o zoom/pan da vista (durante a pinça, antes do próximo desenho). */
+    fun applyView(zoom: Float, panX: Float, panY: Float) {
+        if (!valid) return
+        this.zoom = zoom
+        this.panX = panX
+        this.panY = panY
+        fit = baseFit * zoom
+        ox = StageZoomMath.origin(boxW, inset, compW, baseFit, zoom, panX)
+        oy = StageZoomMath.origin(boxH, inset, compH, baseFit, zoom, panY)
     }
 
     fun sx(cx: Float) = ox + cx * fit
@@ -374,7 +408,7 @@ internal class StageMapper {
 
 private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: StageMapper, inset: Float) {
     val project = store.project
-    m.update(size.width, size.height, inset, project.width, project.height, false)
+    m.update(size.width, size.height, inset, project.width, project.height, false, StageView.zoom, StageView.panX, StageView.panY)
     m.strokesFor(density)
     m.handlesValid = false
     m.markerAnchorValid = false
@@ -396,6 +430,13 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
         return
     }
+    // Rig 2D: o palco é do esqueleto (juntas e ossos), sem alças da camada.
+    if (rigActive(store)) {
+        drawRigOverlay(store, m)
+        return
+    }
+    // Forma 3D com parte escolhida: um ponto no centro de cada parte (o gizmo segue abaixo).
+    if (shapePartActive(store)) drawShapePartOverlay(store, m)
     // Modo vetorial (pontos / mão livre): o palco é do caminho, sem alças da camada.
     if (store.vectorTool != 0) {
         drawVectorOverlay(store, m)
@@ -686,7 +727,9 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.giz
     val hx = if (axis < 3) tips[(axis + 1) * 2] - ox else 0f
     val hy = if (axis < 3) tips[(axis + 1) * 2 + 1] - oy else 0f
     val hLen = max(hypot(hx, hy), 1f)
-    val base = when (tool) {
+    // Forma 3D com parte escolhida: girar/escalar partem dos valores DA PARTE.
+    val partBase = if (tool == GIZMO_ROTATE || tool == GIZMO_SCALE) store.shapeGizmoBase(tool == GIZMO_ROTATE) else null
+    val base = partBase ?: when (tool) {
         GIZMO_ROTATE -> d.rotation
         GIZMO_SCALE -> d.scale
         else -> d.position
@@ -943,6 +986,56 @@ private const val MODE_PENDING = 0
 private const val MODE_MOVE = 1
 private const val MODE_PINCH = 4
 private const val MODE_IDLE = 5      // gesto recusado ou pinça encerrada: espera todos subirem
+private const val MODE_VIEW = 6      // pinça da VISTA: zoom em torno dos dedos + pan de dois dedos
+private const val MODE_PAN = 7       // um dedo no vazio com a vista ampliada: passeia a vista
+
+/**
+ * Um gesto da vista (zoom/pan do palco): guarda o começo e escreve valores
+ * absolutos (nada acumula por evento), como o [StageEdit].
+ */
+private class ViewGesture(private val store: EditorStore, private val m: StageMapper) {
+    private var z0 = 1f
+    private var px0 = 0f
+    private var py0 = 0f
+    private var span0 = 1f
+    private var mx0 = 0f
+    private var my0 = 0f
+
+    fun start(ax: Float, ay: Float, bx: Float, by: Float) {
+        z0 = StageView.zoom
+        px0 = StageView.panX
+        py0 = StageView.panY
+        span0 = max(1f, hypot(ax - bx, ay - by))
+        mx0 = (ax + bx) / 2
+        my0 = (ay + by) / 2
+    }
+
+    /** Pinça: zoom pela razão da abertura, o ponto sob o meio dos dedos segue o meio. */
+    fun pinch(ax: Float, ay: Float, bx: Float, by: Float) {
+        val z = StageZoomMath.clampZoom(z0 * hypot(ax - bx, ay - by) / span0)
+        val mx = (ax + bx) / 2
+        val my = (ay + by) / 2
+        val px = StageZoomMath.pinchPan(px0, z0, z, mx0, mx, m.boxW / 2)
+        val py = StageZoomMath.pinchPan(py0, z0, z, my0, my, m.boxH / 2)
+        apply(z, px, py)
+    }
+
+    fun startPan() {
+        z0 = StageView.zoom
+        px0 = StageView.panX
+        py0 = StageView.panY
+    }
+
+    /** Um dedo: só o pan (o zoom fica). */
+    fun pan(dx: Float, dy: Float) = apply(z0, px0 + dx, py0 + dy)
+
+    private fun apply(z: Float, px: Float, py: Float) {
+        val cx = StageZoomMath.clampPan(px, z, m.compW * m.baseFit)
+        val cy = StageZoomMath.clampPan(py, z, m.compH * m.baseFit)
+        StageView.set(store, z, cx, cy)
+        m.applyView(StageView.zoom, StageView.panX, StageView.panY)
+    }
+}
 
 /**
  * O árbitro do palco. No toque: seta de eixo (r 26, a mais próxima; mover
@@ -966,12 +1059,18 @@ private suspend fun PointerInputScope.stageGestures(
         store, ui, m, haptic,
         snapTol = STAGE_ANCHOR_SNAP.toPx(),
     )
+    val view = ViewGesture(store, m)
 
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
         val downX = down.position.x
         val downY = down.position.y
 
+        // Rig 2D: criar/mover juntas (Montar) ou posar (Animar).
+        if (rigActive(store)) {
+            rigGesture(store, m, down)
+            return@awaitEachGesture
+        }
         // Modo vetorial: pontos do caminho ou traço da mão livre.
         if (store.vectorTool != 0) {
             vectorGesture(store, m, down)
@@ -1019,6 +1118,13 @@ private suspend fun PointerInputScope.stageGestures(
 
         if (store.sceneEditor) {
             if (m.valid) sceneGesture(store, m, down, slop, haptic)
+            return@awaitEachGesture
+        }
+
+        // Forma 3D com parte escolhida: tocar escolhe a parte, arrastar move,
+        // pinça escala e gira — só a parte (ShapePartStage.kt).
+        if (m.valid && shapePartActive(store)) {
+            shapePartGesture(store, m, down, slop)
             return@awaitEachGesture
         }
 
@@ -1149,7 +1255,7 @@ private suspend fun PointerInputScope.stageGestures(
                 if (pressed == 0) break
 
                 // --- Segundo dedo: vira pinça (fecha o arrasto antes).
-                if (pressed >= 2 && mode != MODE_PINCH && mode != MODE_IDLE) {
+                if (pressed >= 2 && mode != MODE_PINCH && mode != MODE_VIEW && mode != MODE_IDLE) {
                     multi = true
                     edit.end()
                     val a = event.changes.first { it.pressed }
@@ -1158,7 +1264,9 @@ private suspend fun PointerInputScope.stageGestures(
                     val slack = if (m.fit > 0f) hitSlack / m.fit else 0f
                     val midX = (a.position.x + b.position.x) / 2
                     val midY = (a.position.y + b.position.y) / 2
-                    if (d != null && m.valid && store.selection.size == 1 && !d.locked &&
+                    // Lupa ligada: a pinça é SEMPRE da vista. Senão, só é da
+                    // camada escolhida quando os dedos estão sobre ela.
+                    if (!StageView.zoomLock && d != null && m.valid && store.selection.size == 1 && !d.locked &&
                         activeAt(d, store.playhead) &&
                         (LayerGeometry.contains(d, m.cx(a.position.x), m.cy(a.position.y), slack) ||
                             LayerGeometry.contains(d, m.cx(b.position.x), m.cy(b.position.y), slack) ||
@@ -1168,8 +1276,13 @@ private suspend fun PointerInputScope.stageGestures(
                         p2 = b.id
                         edit.startPinch(d, a.position.x, a.position.y, b.position.x, b.position.y)
                         mode = MODE_PINCH
+                    } else if (m.valid) {
+                        // Pinça da vista: sem camada sob os dedos (ou lupa ligada).
+                        p1 = a.id
+                        p2 = b.id
+                        view.start(a.position.x, a.position.y, b.position.x, b.position.y)
+                        mode = MODE_VIEW
                     } else {
-                        // Pinça da vista: o store ainda não tem zoom de palco.
                         mode = MODE_IDLE
                     }
                 }
@@ -1180,7 +1293,12 @@ private suspend fun PointerInputScope.stageGestures(
                         if (c != null && c.pressed) {
                             val moved = hypot(c.position.x - downX, c.position.y - downY)
                             val threshold = if (target == TARGET_HANDLE) handleSlop else slop
-                            if (moved > threshold) {
+                            if (moved > threshold && target == TARGET_EMPTY && StageView.zoomed && m.valid) {
+                                // Vazio com a vista ampliada: um dedo passeia a vista.
+                                view.startPan()
+                                mode = MODE_PAN
+                                view.pan(c.position.x - downX, c.position.y - downY)
+                            } else if (moved > threshold) {
                                 mode = startDrag(store, edit, target, handle, targetLayer, downX, downY)
                                 // O 1º passo aplica a folga inteira: o objeto fica sob o dedo.
                                 edit.step(mode, c.position.x, c.position.y)
@@ -1198,6 +1316,17 @@ private suspend fun PointerInputScope.stageGestures(
                         // Saiu um dedo da pinça da camada: o que sobra não faz nada.
                         if (a == null || b == null || !a.pressed || !b.pressed) mode = MODE_IDLE
                         else edit.pinch(a.position.x, a.position.y, b.position.x, b.position.y)
+                    }
+                    MODE_VIEW -> {
+                        val a = event.changes.firstOrNull { it.id == p1 }
+                        val b = event.changes.firstOrNull { it.id == p2 }
+                        if (a == null || b == null || !a.pressed || !b.pressed) mode = MODE_IDLE
+                        else view.pinch(a.position.x, a.position.y, b.position.x, b.position.y)
+                    }
+                    MODE_PAN -> {
+                        val c = event.changes.firstOrNull { it.id == down.id }
+                        if (c == null || !c.pressed) mode = MODE_IDLE
+                        else view.pan(c.position.x - downX, c.position.y - downY)
                     }
                 }
                 for (c in event.changes) c.consume()
@@ -1254,7 +1383,7 @@ private fun startDrag(store: EditorStore, edit: StageEdit, target: Int, handle: 
                 }
             }
         }
-        else -> MODE_IDLE   // vazio: passear a vista pede zoom ≠ 1
+        else -> MODE_IDLE   // vazio em 1×: nada (ampliado, o arbitro já passeia a vista)
     }
 }
 

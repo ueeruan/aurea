@@ -26,6 +26,7 @@ add_executable(aurea_tests
     test_gpu.cpp
     test_scene3d.cpp
     test_text3d.cpp
+    test_text3d_anim.cpp
     test_transform3d_keys.cpp
     test_camera_lens.cpp
     test_scene_param_keys.cpp
@@ -58,7 +59,10 @@ add_executable(aurea_tests
     test_heavy.cpp
     test_i18n.cpp
     test_project_package.cpp
+    test_model_probe.cpp
     test_layer_anim.cpp
+    test_rig.cpp
+    test_shape3d.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

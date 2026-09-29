@@ -56,6 +56,9 @@ namespace effect_keys {
     inline constexpr const char* kGrid = "aurea.pattern.grid";
     inline constexpr const char* kParentingHelper = "aurea.transform.parenting_helper";
     inline constexpr const char* kText3DLayout = "aurea.text3d.layout";
+    /// Irmão do Text 3D Layout para as FORMAS 3D: mesmos índices de parâmetro,
+    /// cada parte da forma faz o papel de uma letra (scene3d::apply_shape3d_layout).
+    inline constexpr const char* kShape3DLayout = "aurea.shape3d.layout";
     inline constexpr const char* kBoxBlur = "aurea.blur.box";
     inline constexpr const char* kDirectionalBlur = "aurea.blur.directional";
     inline constexpr const char* kLensFlare = "aurea.light.lens_flare";

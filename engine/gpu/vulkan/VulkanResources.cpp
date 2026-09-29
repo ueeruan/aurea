@@ -1293,7 +1293,9 @@ Status Backend::submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*
 // =============================================================================
 Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& img) noexcept {
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
-    if (!hasAhb_ || !hasYcbcr_) return Status{Errc::UnsupportedFeature, "aparelho sem importacao de AHardwareBuffer"};
+    // A conversão YCbCr só é exigida para buffer YUV; o RGBA8 do caminho GL do
+    // driver (AndroidVideoPath.hpp) só precisa da importação de AHardwareBuffer.
+    if (!hasAhb_) return Status{Errc::UnsupportedFeature, "aparelho sem importacao de AHardwareBuffer"};
     auto* ahb = static_cast<AHardwareBuffer*>(img.nativeHandle);
     if (!ahb) return Status{Errc::InvalidArgument, "buffer nulo"};
 
@@ -1343,6 +1345,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         ? fmt.suggestedYcbcrModel == VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY
         : !ycbcrFormat;
     const bool needsConversion = externalFormat || ycbcrFormat;
+    if (needsConversion && !hasYcbcr_) return Status{Errc::UnsupportedFeature, "buffer YUV sem conversao YCbCr"};
 
     // Conversão YCbCr por (formato, matriz, faixa). A matriz e a faixa são as
     // DO ARQUIVO, não a sugestão do driver: o gralloc de muitos aparelhos (e o

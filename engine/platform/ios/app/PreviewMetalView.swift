@@ -131,7 +131,7 @@ struct PreviewMetalView: UIViewRepresentable {
         private var gizmoLastAngle: CGFloat = 0
         private var gizmoDownTime: CFTimeInterval = 0
         private var pinchThreeD = false
-        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, scene, pivot }
+        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, scene, pivot, view, viewPan }
         // Face Pivô aberta: o arrasto move o pivô (PivotDragSession).
         private var pivotSession: PivotDragSession?
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
@@ -185,21 +185,21 @@ struct PreviewMetalView: UIViewRepresentable {
         }
 
         /// px da tela → px da composição (a razão entre o quadro da composição e
-        /// o tamanho do palco). O motor trabalha em px da composição.
+        /// o tamanho do palco, dividida pelo zoom da vista). O motor trabalha em
+        /// px da composição; tolerâncias em pt × este fator ficam constantes na tela.
         private func scaleFactor(_ view: UIView) -> Float {
             let width = max(1, view.bounds.width)
             let height = max(1, view.bounds.height)
             let compWidth = max(1, compositionSize.width)
             let compHeight = max(1, compositionSize.height)
-            return Float(max(compWidth / width, compHeight / height))
+            return Float(max(compWidth / width, compHeight / height) / max(1, StageViewZoom.shared.zoom))
         }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard interactive, let view = gesture.view else { return }
             let factor = CGFloat(scaleFactor(view))
-            let p = gesture.location(in: view)
-            let point = CGPoint(x: (p.x - view.bounds.width / 2) * factor + compositionSize.width / 2,
-                                y: (p.y - view.bounds.height / 2) * factor + compositionSize.height / 2)
+            let c = compositionPoint(gesture.location(in: view), view: view)
+            let point = CGPoint(x: CGFloat(c.x), y: CGFloat(c.y))
             if model.focusPick { model.finishFocusPick(point); return }
             if model.pointPick != nil { model.finishPointPick(point); return }
             if model.panel == .vector && model.vectorFreehand { return }
@@ -321,9 +321,8 @@ struct PreviewMetalView: UIViewRepresentable {
             return true
         }
         private func handleMaskPan(_ gesture: UIPanGestureRecognizer, view: UIView) {
-            let factor = scaleFactor(view), p = gesture.location(in: view)
-            let comp = CGPoint(x: (p.x - view.bounds.width / 2) * CGFloat(factor) + compositionSize.width / 2,
-                               y: (p.y - view.bounds.height / 2) * CGFloat(factor) + compositionSize.height / 2)
+            let factor = scaleFactor(view), c = compositionPoint(gesture.location(in: view), view: view)
+            let comp = CGPoint(x: CGFloat(c.x), y: CGFloat(c.y))
             guard let local = maskLocal(comp), var mask = model.editingMask else { return }
             switch gesture.state {
             case .began:
@@ -370,15 +369,49 @@ struct PreviewMetalView: UIViewRepresentable {
             }
         }
 
+        // Com o zoom da vista: o centro da composição fica no centro do palco
+        // mais o pan (pt), e `scaleFactor` já vem dividido pelo zoom.
         private func compositionPoint(_ point: CGPoint, view: UIView) -> SIMD2<Float> {
-            let f = scaleFactor(view)
-            return SIMD2(Float(point.x - view.bounds.width / 2) * f + Float(compositionSize.width / 2),
-                         Float(point.y - view.bounds.height / 2) * f + Float(compositionSize.height / 2))
+            let f = scaleFactor(view), pan = StageViewZoom.shared.pan
+            return SIMD2(Float(point.x - view.bounds.width / 2 - pan.width) * f + Float(compositionSize.width / 2),
+                         Float(point.y - view.bounds.height / 2 - pan.height) * f + Float(compositionSize.height / 2))
         }
         private func screenPoint(_ x: Float, _ y: Float, view: UIView) -> CGPoint {
-            let f = CGFloat(scaleFactor(view))
-            return CGPoint(x: (CGFloat(x) - compositionSize.width / 2) / f + view.bounds.width / 2,
-                           y: (CGFloat(y) - compositionSize.height / 2) / f + view.bounds.height / 2)
+            let f = CGFloat(scaleFactor(view)), pan = StageViewZoom.shared.pan
+            return CGPoint(x: (CGFloat(x) - compositionSize.width / 2) / f + view.bounds.width / 2 + pan.width,
+                           y: (CGFloat(y) - compositionSize.height / 2) / f + view.bounds.height / 2 + pan.height)
+        }
+        // Gesto da vista (zoom/pan do palco): valores de PARTIDA, nada acumula.
+        private var viewZoom0: CGFloat = 1
+        private var viewPan0 = CGSize.zero
+        private var viewSpan0: CGFloat = 1
+        private var viewMid0 = CGPoint.zero
+        private func startView(_ a: CGPoint, _ b: CGPoint) {
+            let zoom = StageViewZoom.shared
+            viewZoom0 = zoom.zoom; viewPan0 = zoom.pan
+            viewSpan0 = max(1, hypot(a.x - b.x, a.y - b.y))
+            viewMid0 = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+        }
+        private func startViewPan() {
+            viewZoom0 = StageViewZoom.shared.zoom; viewPan0 = StageViewZoom.shared.pan
+        }
+        /// Pinça da vista: zoom pela abertura; o ponto sob o meio dos dedos segue o meio.
+        private func stepView(_ a: CGPoint, _ b: CGPoint, view: UIView) {
+            let z = StageZoomMath.clampZoom(viewZoom0 * hypot(a.x - b.x, a.y - b.y) / viewSpan0)
+            let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+            let px = StageZoomMath.pinchPan(viewPan0.width, zoom0: viewZoom0, zoom1: z, mid0: viewMid0.x, mid: mid.x, centre: view.bounds.width / 2)
+            let py = StageZoomMath.pinchPan(viewPan0.height, zoom0: viewZoom0, zoom1: z, mid0: viewMid0.y, mid: mid.y, centre: view.bounds.height / 2)
+            applyView(z, CGSize(width: px, height: py), view: view)
+        }
+        private func stepViewPan(_ point: CGPoint, view: UIView) {
+            applyView(viewZoom0, CGSize(width: viewPan0.width + point.x - stageDown.x, height: viewPan0.height + point.y - stageDown.y), view: view)
+        }
+        private func applyView(_ z: CGFloat, _ pan: CGSize, view: UIView) {
+            let base = StageZoomMath.fit(size: view.bounds.size, composition: compositionSize, zoom: 1, pan: .zero).scale
+            let clamped = CGSize(width: StageZoomMath.clampPan(pan.width, zoom: z, baseExtent: compositionSize.width * base),
+                                 height: StageZoomMath.clampPan(pan.height, zoom: z, baseExtent: compositionSize.height * base))
+            StageViewZoom.shared.set(zoom: z, pan: clamped, engine: model.engine,
+                                     pixelScale: view.window?.screen.scale ?? UIScreen.main.scale)
         }
         private func vector(_ value: Any?) -> SIMD3<Float> {
             let v = StageGeom.floats(value)
@@ -510,7 +543,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 else { stepGizmo(first.position, view: view) }
                 return
             }
-            if pressed.count >= 2 && stageMode != .pinch && stageMode != .idle {
+            if pressed.count >= 2 && stageMode != .pinch && stageMode != .view && stageMode != .idle {
                 hadMultipleTouches = true; finishStageEdit()
                 let a = pressed[0], b = pressed[pressed.count - 1]
                 let middle = CGPoint(x: (a.position.x + b.position.x) / 2, y: (a.position.y + b.position.y) / 2)
@@ -519,7 +552,9 @@ struct PreviewMetalView: UIViewRepresentable {
                     let c = compositionPoint(point, view: view)
                     return StageGeom.contains(model.detail, c.x, c.y, slack: slack)
                 }
-                if editableSelection() && over {
+                // Lupa ligada: a pinça é SEMPRE da vista. Senão, só é da camada
+                // escolhida quando os dedos estão sobre ela; no vazio amplia a vista.
+                if !StageViewZoom.shared.zoomLock && editableSelection() && over {
                     keepTransform(); pinchFingers = [a.id, b.id]
                     // Camada 3D (tem gizmo): a pinça escala X, Y e Z juntos.
                     if let id = model.primarySelection {
@@ -529,7 +564,9 @@ struct PreviewMetalView: UIViewRepresentable {
                     lastAngle = atan2(b.position.y - a.position.y, b.position.x - a.position.x)
                     sweptAngle = 0; pinchRotationActive = false; pinchRotationOffset = 0
                     engage(); stageMode = .pinch
-                } else { stageMode = .idle }
+                } else {
+                    pinchFingers = [a.id, b.id]; startView(a.position, b.position); stageMode = .view
+                }
             }
             switch stageMode {
             case .pending:
@@ -538,6 +575,12 @@ struct PreviewMetalView: UIViewRepresentable {
                     markerHold?.cancel(); markerHold = nil; markerAnchorLayer = nil
                 }
                 if hypot(first.position.x - stageDown.x, first.position.y - stageDown.y) > (handle >= 0 ? 4 : 18) {
+                    if handle < 0 && targetLayer == nil && StageViewZoom.shared.zoomed {
+                        // Vazio com a vista ampliada: um dedo passeia a vista.
+                        markerHold?.cancel(); markerHold = nil; markerAnchorLayer = nil
+                        startViewPan(); stageMode = .viewPan; stepViewPan(first.position, view: view)
+                        return
+                    }
                     startDrag(view: view)
                     stepEdit(first.position, view: view)
                 }
@@ -550,6 +593,15 @@ struct PreviewMetalView: UIViewRepresentable {
                     stageMode = .idle; return // The remaining finger stays idle until all lift.
                 }
                 stepPinch(a.position, b.position)
+            case .view:
+                guard pinchFingers.count == 2,
+                      let a = pressed.first(where: { $0.id == pinchFingers[0] }), let b = pressed.first(where: { $0.id == pinchFingers[1] }) else {
+                    stageMode = .idle; return
+                }
+                stepView(a.position, b.position, view: view)
+            case .viewPan:
+                if let first = pressed.first(where: { $0.id == stageFinger }) { stepViewPan(first.position, view: view) }
+                else { stageMode = .idle }
             default: break
             }
         }
@@ -926,10 +978,12 @@ struct StageTouchPoint {
 @MainActor struct StageInteractionOverlay: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
+    @ObservedObject private var viewZoom = StageViewZoom.shared
     var body: some View {
         Canvas { context, size in
             let cw = CGFloat(max(1, model.compositionWidth)), ch = CGFloat(max(1, model.compositionHeight))
-            let fit = min(size.width / cw, size.height / ch), ox = (size.width - cw * fit) / 2, oy = (size.height - ch * fit) / 2
+            let placed = StageZoomMath.fit(size: size, composition: CGSize(width: cw, height: ch), zoom: viewZoom.zoom, pan: viewZoom.pan)
+            let fit = placed.scale, ox = placed.origin.x, oy = placed.origin.y
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: CGFloat(x) * fit + ox, y: CGFloat(y) * fit + oy) }
             if let x = shell.snapX {
                 var p = Path(); p.move(to: screen(x, 0)); p.addLine(to: screen(x, Float(ch)))

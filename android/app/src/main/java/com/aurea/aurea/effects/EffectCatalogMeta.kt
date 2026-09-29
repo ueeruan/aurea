@@ -239,6 +239,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "bolas esferas balls spheres grade particulas explodir dispersar"))
     put("aurea.generate.particular", EffectMeta(R.string.afx_desc_particular, AllTargets,
         "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh"))
+    put("aurea.shape3d.layout", EffectMeta(R.string.fx_desc_shape3d_layout, listOf(EffectTarget.Cena3D),
+        "forma 3d shape partes parts girar espalhar explodir atraso aleatorio"))
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", EffectMeta(R.string.fx_desc_ai_depth_map, listOf(EffectTarget.Imagem, EffectTarget.Video),
         "profundidade depth mapa ia ai midas distancia perto longe z matte fundo"))

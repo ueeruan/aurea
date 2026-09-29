@@ -37,6 +37,16 @@ DepthMapPtr DepthMapService::cached(u64 key) {
     return it == index_.end() ? nullptr : it->second->second;
 }
 
+DepthMapPtr DepthMapService::latest_video(u64 sourceKey, u64& key, i64& targetUs, i64& frameUs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = latest_.find(sourceKey);
+    if (it == latest_.end() || !it->second.map) return nullptr;
+    key = it->second.key;
+    targetUs = it->second.targetUs;
+    frameUs = it->second.frameUs;
+    return it->second.map;
+}
+
 void DepthMapService::insert(u64 key, DepthMapPtr map) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (auto it = index_.find(key); it != index_.end()) {
@@ -233,6 +243,10 @@ void DepthMapService::thread_main() noexcept {
             done = cached(job.key);
             if (!done) done = run_video_locked(job);
         }
+        if (done) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            latest_[job.sourceKey] = Latest{job.key, job.targetUs, job.frameUs, done};
+        }
         void (*fn)(void*) = nullptr;
         void* ctx = nullptr;
         {
@@ -271,6 +285,7 @@ void DepthMapService::clear() noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     index_.clear();
     lru_.clear();
+    latest_.clear();
 }
 
 } // namespace aurea::ai

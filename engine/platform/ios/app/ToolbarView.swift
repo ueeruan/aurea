@@ -163,7 +163,7 @@ struct TransportView: View {
         Group {
         if model.stageManipulating { StageInfoBar() } else {
         GeometryReader { geometry in
-            let side = min(40, max(30, (geometry.size.width - 52) / 7))
+            let side = min(40, max(30, (geometry.size.width - 52) / 8))
             let marked = model.markerFrames.contains(model.status.playhead)
             HStack(spacing: 0) {
                 ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), width: side, height: 46, enabled: model.status.canUndo != 0) { model.undo() }
@@ -187,6 +187,8 @@ struct TransportView: View {
                                onLongPress: { model.editMarkerAtPlayhead() },
                                action: { model.toggleMarkerAt(model.status.playhead) })
                 ShellBarButton(glyph: CupertinoGlyph.DocOnClipboard, description: AureaText.t("editor_copiar_colar"), width: side, height: 46) { if model.status.playing != 0 { model.playPause() }; shell.sheet = .copyPaste }
+                // Lupa da prévia: ligada, a pinça no palco sempre amplia a VISTA.
+                StageZoomToggleButton(width: side, height: 46)
                 ShellBarButton(glyph: model.fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen,
                                description: AureaText.t(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia"), width: side, height: 46) { model.fullscreen.toggle(); model.invalidatePreview() }
             }

@@ -58,6 +58,7 @@ private fun commandUnavailable(requirement: String, store: EditorStore): Int? {
         "text" -> if (layer.kind == 4) null else R.string.edt_cmd_select_text
         "visual" -> if (layer.kind != 3) null else R.string.edt_cmd_select_visual
         "text3d" -> if (store.text3d != null) null else R.string.edt_cmd_select_text3d
+        "shape3d" -> if (store.shape3d != null) null else R.string.edt_cmd_select_shape3d
         "model3d" -> if (layer.kind == 10) null else R.string.edt_cmd_select_model3d
         "particles" -> if (layer.kind == 11) null else R.string.edt_cmd_select_particles
         "vector" -> if (store.isVectorLayer) null else R.string.edt_cmd_select_vector
@@ -81,7 +82,11 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
     // Reuse existing catalogs and preference stores; no duplicate effect/preset system.
     val hits = commands.map { CommandHit(it.id, it.title, it.detail, normalizeSearch("${it.title} ${it.keywords} ${it.detail}"), "Ações", it.requires) } +
         store.catalog.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(it.category),
-            effectSearchText(it.typeId, it.name, it.category), "Efeitos", if (it.typeId == effectTypeId("aurea.text3d.layout")) "text3d" else "selection", effect = it.typeId) } +
+            effectSearchText(it.typeId, it.name, it.category), "Efeitos", when (it.typeId) {
+                effectTypeId("aurea.text3d.layout") -> "text3d"
+                effectTypeId("aurea.shape3d.layout") -> "shape3d"
+                else -> "selection"
+            }, effect = it.typeId) } +
         presets.map { CommandHit("preset:${it.key}", it.name, openPresetDetail.format(it.kind.dir), normalizeSearch("${it.name} ${it.kind.dir} preset"),
             "Presets", if (it.kind == PresetKind.Text) "text" else "single", preset = it) }
     fun isFavorite(hit: CommandHit) = hit.effect?.let { store.effectPrefs.isFavorite(it) }

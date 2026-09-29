@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.rounded.ZoomIn
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
@@ -66,7 +67,7 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
             .height(ShellDims.Transport)
             .background(AureaColors.EditorTopBar),
     ) {
-        val side = ((maxWidth.value - 52f) / 7f).coerceIn(30f, 40f).dp
+        val side = ((maxWidth.value - 52f) / 8f).coerceIn(30f, 40f).dp
         val canUndo by remember { derivedStateOf { store.project.canUndo } }
         val canRedo by remember { derivedStateOf { store.project.canRedo } }
         val marked by remember { derivedStateOf { store.markers.frames.binarySearch(store.playhead) >= 0 } }
@@ -105,6 +106,17 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
                 width = side, height = ShellDims.Transport,
             )
             ChromeButton(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), onClick = { openSheet(store, ui, ShellSheet.CopyPaste) }, width = side, height = ShellDims.Transport)
+            // Lupa da prévia: ligada, a pinça no palco sempre amplia a VISTA
+            // (nunca a camada). Desligar não mexe no zoom atual (o chip de % volta a 100 %).
+            ChromeVectorButton(
+                androidx.compose.material.icons.Icons.Rounded.ZoomIn,
+                if (StageView.zoomLock) stringResource(R.string.stage_zoom_view_on) else stringResource(R.string.stage_zoom_view_off),
+                onClick = { StageView.zoomLock = !StageView.zoomLock },
+                size = 21.dp,
+                width = side,
+                height = ShellDims.Transport,
+                tint = if (StageView.zoomLock) AureaColors.Accent else AureaColors.Text,
+            )
             ChromeButton(
                 if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen,
                 if (ui.fullscreen) stringResource(R.string.editor_sair_tela_cheia) else stringResource(R.string.editor_tela_cheia),

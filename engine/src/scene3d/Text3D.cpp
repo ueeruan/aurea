@@ -8,8 +8,10 @@
 //  contrário e a fonte do aparelho pode ser qualquer uma.
 // =============================================================================
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/timeline/Layer.hpp"
+#include "aurea/timeline/LayerAnimator.hpp"
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
@@ -997,6 +999,8 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
 // porque o painel reenvia a receita a cada arrasto.
 struct GeomAsset {
     std::vector<Mesh> glyphMeshes;
+    std::vector<u32> glyphUnits;   ///< 3 por letra visível: letra, palavra, linha
+    u32 words = 0, lines = 0;
     std::vector<Primitive> primitives;
     Aabb bounds;        ///< caixa da malha (o `Engine` usa para enquadrar a layer)
     Aabb assetBounds;   ///< caixa da cena, já com o nó — é a que o asset expõe
@@ -1046,14 +1050,25 @@ std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3D
         text::shaped_glyphs(font, text, glyphs);
         if (glyphs.size() > 256) { detail = "Letter controls support up to 256 glyphs"; return nullptr; }
         auto result = std::make_shared<GeomAsset>();
+        // Unidades dos animadores: a letra conta só as visíveis (a máquina de
+        // escrever não para nos espaços); palavra nova depois de espaço ou de
+        // troca de linha.
+        bool gap = true;
+        u32 word = 0, lastLine = 0;
         for (u32 i = 0; i < glyphs.size(); ++i) {
             std::string glyphError;
             auto geometry = build_geom(font, spec, glyphError, static_cast<i32>(i));
             if (!geometry) {
-                if (glyphError == "texto sem letras visiveis") continue; // whitespace
+                if (glyphError == "texto sem letras visiveis") { gap = true; continue; } // whitespace
                 detail = glyphError;
                 return nullptr; // Do not silently omit a letter that failed triangulation.
             }
+            const u32 line = glyphs[i].line;
+            if (!result->glyphMeshes.empty() && (gap || line != lastLine)) ++word;
+            gap = false; lastLine = line;
+            result->glyphUnits.insert(result->glyphUnits.end(), {static_cast<u32>(result->glyphMeshes.size()), word, line});
+            result->words = word + 1;
+            result->lines = std::max(result->lines, line + 1);
             Mesh mesh; mesh.name = "Letter " + std::to_string(result->glyphMeshes.size() + 1);
             mesh.bounds = geometry->bounds; mesh.primitives = geometry->primitives;
             result->bounds.add(mesh.bounds);
@@ -1322,6 +1337,9 @@ ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
     if (spec.separateGlyphs) {
         asset->textGlyphLayout = true;
         asset->meshes = geom->glyphMeshes;
+        asset->textUnits = geom->glyphUnits;
+        asset->textWords = geom->words;
+        asset->textLines = geom->lines;
         for (u32 i = 0; i < asset->meshes.size(); ++i) {
             scene3d::Node node; node.name = asset->meshes[i].name; node.mesh = static_cast<i32>(i);
             asset->nodes.push_back(node); asset->roots.push_back(static_cast<i32>(i));
@@ -1344,16 +1362,41 @@ ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
 }
 
 
-void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<Mat4>& nodeWorld) {
-    if (!asset.textGlyphLayout || !asset.bounds.valid()) return;
+namespace {
+
+u32 text3d_hash(u32 a, u32 b, u32 c, u32 d) noexcept {
+    u32 h = a * 747796405u + b * 2891336453u + c * 1181783497u + d * 3266489917u;
+    h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+    return (h >> 22u) ^ h;
+}
+
+/// −1..1, liso no tempo (interpolação suave entre valores sorteados a cada 1 unidade).
+f32 text3d_smooth_noise(u32 letter, u32 channel, u32 seed, f64 t) noexcept {
+    const f64 k = std::floor(t);
+    const f32 f = static_cast<f32>(t - k);
+    const u32 ki = static_cast<u32>(static_cast<i64>(k));
+    const auto at = [&](u32 step) { return static_cast<f32>(text3d_hash(letter, channel, seed, step) & 65535u) / 32767.5f - 1.f; };
+    const f32 s = f * f * (3.f - 2.f * f);
+    return at(ki) + (at(ki + 1u) - at(ki)) * s;
+}
+
+/// Layout por NÓ, o mesmo para as letras do texto 3D e as partes das formas
+/// 3D (cada nó com malha = uma unidade, na ordem dos nós). `radial` (formas):
+/// o espaçamento vira "Espalhar", afastando cada parte do centro nos três
+/// eixos; no texto ele só abre as letras em X, como sempre.
+void apply_node_layout(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<Mat4>& nodeWorld,
+                       EffectTypeId type, bool radial) {
+    if (!asset.bounds.valid()) return;
     const f32 span = std::max(.01f, asset.bounds.extent().x);
     const f32 origin = asset.bounds.center().x;
+    const Vec3 origin3 = asset.bounds.center();
     for (const auto& effect : layer.effects) {
-        if (!effect.enabled || effect.type != effect_type_id(effect_keys::kText3DLayout)) continue;
-        static constexpr f32 defaults[] = {0, 0, 0, 0, 100, 0, 1, 256, 100, 0, 0, 1};
-        static constexpr f32 minima[] = {-36000, -36000, -36000, -360, 10, -720, 1, 1, 0, 0, 0, 0};
-        static constexpr f32 maxima[] = {36000, 36000, 36000, 360, 500, 720, 256, 256, 100, 30, 100, 9999};
-        f32 v[12];
+        if (!effect.enabled || effect.type != type) continue;
+        static constexpr f32 defaults[] = {0, 0, 0, 0, 100, 0, 1, 256, 100, 0, 0, 1, 0, 1};
+        static constexpr f32 minima[] = {-36000, -36000, -36000, -360, 10, -720, 1, 1, 0, 0, 0, 0, 0, 0};
+        static constexpr f32 maxima[] = {36000, 36000, 36000, 360, 500, 720, 256, 256, 100, 30, 100, 9999, 100, 10};
+        constexpr u32 kParams = 14;
+        f32 v[kParams];
         auto evaluate = [&](u32 i, f64 time) {
             const f64 floorTime = std::floor(time);
             f32 value = i < effect.params.size() ? effect.params[i].constant.as_float() : defaults[i];
@@ -1364,8 +1407,11 @@ void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localT
             }
             return std::isfinite(value) ? std::clamp(value, minima[i], maxima[i]) : defaults[i];
         };
-        for (u32 i = 0; i < 12; ++i) v[i] = evaluate(i, localTime);
+        for (u32 i = 0; i < kParams; ++i) v[i] = evaluate(i, localTime);
         const f32 amount = v[8] * .01f;
+        // Aleatório: até ±180° por eixo e ±0,6 altura de letra, por letra.
+        const f32 randomAmount = v[12] * .01f;
+        const f32 letterHeight = std::max(.01f, asset.bounds.extent().y);
         const f32 bend = v[3] * kDeg2Rad * amount;
         const f32 spacing = lerpf(1.f, v[4] * .01f, amount);
         for (u32 i = 0; i < asset.nodes.size() && i < nodeWorld.size(); ++i) {
@@ -1376,6 +1422,10 @@ void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localT
             const f32 x = (center.x - origin) * spacing;
             const f32 phase = x / span;
             Vec3 target{origin + x, center.y, center.z};
+            if (radial) {
+                target.y = origin3.y + (center.y - origin3.y) * spacing;
+                target.z = origin3.z + (center.z - origin3.z) * spacing;
+            }
             if (std::abs(bend) > 1e-5f) {
                 const f32 radius = span / bend;
                 target.x = origin + std::sin(phase * bend) * radius;
@@ -1387,13 +1437,163 @@ void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localT
             hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
             hash = (hash >> 22u) ^ hash;
             const f32 variation = 1.f + (static_cast<f32>(hash & 65535u) / 32767.5f - 1.f) * v[10] * .01f;
+            f32 rnd[6] = {0, 0, 0, 0, 0, 0};
+            if (randomAmount > 1e-5f) {
+                // Ruído liso por letra e canal: cada letra segue o SEU caminho,
+                // todas se mexendo juntas; o mesmo instante dá o mesmo valor
+                // (preview = export). Velocidade 0 = espalhadas e paradas.
+                const f64 phaseT = localTime / 30.0 * static_cast<f64>(v[13]);
+                for (u32 c = 0; c < 6; ++c) rnd[c] = text3d_smooth_noise(i + 1, c, static_cast<u32>(v[11]), phaseT);
+            }
             const Mat4 orient = Mat4::from_quat(Quat::from_euler_zyx(
-                (evaluate(0, letterTime) * variation + v[5] * phase) * kDeg2Rad * amount,
-                evaluate(1, letterTime) * variation * kDeg2Rad * amount + phase * bend,
-                evaluate(2, letterTime) * variation * kDeg2Rad * amount));
+                (evaluate(0, letterTime) * variation + v[5] * phase + rnd[0] * 180.f * randomAmount) * kDeg2Rad * amount,
+                (evaluate(1, letterTime) * variation + rnd[1] * 180.f * randomAmount) * kDeg2Rad * amount + phase * bend,
+                (evaluate(2, letterTime) * variation + rnd[2] * 180.f * randomAmount) * kDeg2Rad * amount));
+            target += Vec3{rnd[3], rnd[4], rnd[5]} * (0.6f * letterHeight * randomAmount);
             nodeWorld[i] = Mat4::translation(target) * orient * Mat4::translation(-center) * nodeWorld[i];
         }
     }
+}
+
+} // namespace
+
+void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<Mat4>& nodeWorld) {
+    if (!asset.textGlyphLayout) return;
+    apply_node_layout(asset, layer, localTime, nodeWorld, effect_type_id(effect_keys::kText3DLayout), false);
+}
+
+// Formas 3D (declarada em Shape3D.hpp): a mesma conta das letras, parte a parte.
+void apply_shape3d_layout(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<Mat4>& nodeWorld) {
+    if (!asset.shapeParts) return;
+    apply_node_layout(asset, layer, localTime, nodeWorld, effect_type_id(effect_keys::kShape3DLayout), true);
+}
+
+// =============================================================================
+// Animação de texto 3D: animadores de camada por letra/palavra/linha
+// =============================================================================
+
+void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 localTime, f64 fps, std::vector<Mat4>& nodeWorld,
+                            std::vector<f32>& nodeOpacity) {
+    nodeOpacity.clear();
+    // Formas 3D também: cada parte é uma unidade (textUnits = parte, parte, 0).
+    if ((!asset.textGlyphLayout && !asset.shapeParts) || !layeranim::has_units(layer)) return;
+    const usize n = std::min(asset.nodes.size(), nodeWorld.size());
+    if (n == 0 || asset.textUnits.size() < n * 3) return;
+    std::vector<text::GlyphUnits> units(n);
+    for (usize i = 0; i < n; ++i) units[i] = text::GlyphUnits{asset.textUnits[i * 3], asset.textUnits[i * 3 + 1], asset.textUnits[i * 3 + 2]};
+    std::vector<text::GlyphAnim> anim(n);
+    // A MESMA avaliação das letras do texto 2D (progresso, atraso, curva, saída, wiggle).
+    layeranim::apply_to_glyphs(layer, localTime, fps > 0.0 ? fps : 30.0, units, static_cast<u32>(n), std::max(1u, asset.textWords),
+                               std::max(1u, asset.textLines), 0.5f, anim);
+    constexpr f32 kPx = 0.01f;   // 100 px do animador = 1 altura de letra
+    nodeOpacity.assign(n, 1.0f);
+    for (usize i = 0; i < n; ++i) {
+        const text::GlyphAnim& g = anim[i];
+        const i32 mesh = asset.nodes[i].mesh;
+        if (mesh < 0 || static_cast<usize>(mesh) >= asset.meshes.size()) continue;
+        // Pivô = centro da letra onde o layout a pôs.
+        const Vec3 pivot = nodeWorld[i].transform_point(asset.meshes[static_cast<usize>(mesh)].bounds.center());
+        const Vec3 move{(g.translate.x + g.trackingShift) * kPx, -g.translate.y * kPx, g.translate.z * kPx};
+        // Y do 2D aponta para baixo: X e Z giram ao contrário na cena (Y para cima).
+        const Mat4 orient = Mat4::from_quat(Quat::from_euler_zyx(-g.rotation.x * kDeg2Rad, g.rotation.y * kDeg2Rad, -g.rotation.z * kDeg2Rad));
+        const Mat4 size = Mat4::scale(Vec3{g.scale.x, g.scale.y, (g.scale.x + g.scale.y) * 0.5f});
+        nodeWorld[i] = Mat4::translation(pivot + move) * orient * size * Mat4::translation(-pivot) * nodeWorld[i];
+        nodeOpacity[i] = std::isfinite(g.opacity) ? std::clamp(g.opacity, 0.0f, 1.0f) : 1.0f;
+    }
+}
+
+namespace {
+
+constexpr const char* kText3DAnimTag = "text3d:";
+
+/// O estado "de onde vem" de cada preset (px e graus no sentido do 2D).
+struct AnimRecipe {
+    f32 opacity = 0.0f, posY = 0.0f, scale = 100.0f, rotX = 0.0f, rotY = 0.0f, rotZ = 0.0f;
+    u8 ease = 1;
+};
+
+AnimRecipe recipe_of(u32 preset) noexcept {
+    AnimRecipe r;
+    switch (preset) {
+        case 0: break;                                                                   // fade
+        case 1: r.posY = 60.0f; break;                                                   // subir
+        case 2: r.posY = -90.0f; r.ease = 3; break;                                      // cair
+        case 3: r.scale = 0.0f; r.ease = 3; break;                                       // pop
+        case 4: r.rotY = 360.0f; break;                                                  // giro Y
+        case 5: r.rotX = 90.0f; r.ease = 3; break;                                       // virar X
+        case 6: r.ease = 0; break;                                                       // máquina de escrever
+        case 7: r.opacity = 100.0f; r.posY = 35.0f; r.ease = 2; break;                   // onda
+        case 8: r.posY = 70.0f; r.rotX = -100.0f; r.rotY = 25.0f; r.scale = 60.0f; r.ease = 3; break;   // cascata 3D
+        case 9: r.scale = 300.0f; break;                                                 // zoom
+        case 10: r.rotZ = -70.0f; r.ease = 3; break;                                     // balanço
+        default: break;
+    }
+    return r;
+}
+
+} // namespace
+
+i32 text3d_anim_preset_of(const LayerAnimator& a, u32* mode) noexcept {
+    const std::string tag = kText3DAnimTag;
+    if (a.name.rfind(tag, 0) != 0) return -1;
+    unsigned p = 0, m = 0;
+    if (std::sscanf(a.name.c_str() + tag.size(), "%u:%u", &p, &m) != 2 || p >= kText3DAnimPresetCount || m >= kText3DAnimModeCount) return -1;
+    if (mode) *mode = m;
+    return static_cast<i32>(p);
+}
+
+bool apply_text3d_anim_preset(Layer& layer, i32 preset, u32 mode, u32 unit, u32 unitCount, f32 durationSec, f32 staggerMs,
+                              f64 fps) {
+    if (mode >= kText3DAnimModeCount || preset >= static_cast<i32>(kText3DAnimPresetCount)) return false;
+    if (fps <= 0.0 || !std::isfinite(fps)) fps = 30.0;
+    // Sai o preset anterior deste modo (com as trilhas; as dos seguintes descem um índice).
+    for (u32 i = 0; i < layer.layerAnimators.size();) {
+        u32 m = 0;
+        if (text3d_anim_preset_of(layer.layerAnimators[i], &m) < 0 || m != mode) { ++i; continue; }
+        layer.layerAnimators.erase(layer.layerAnimators.begin() + i);
+        layer.tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::LayerAnimParam && t.effectIndex == i; });
+        for (u32 k = 0; k < layer.tracks.size(); ++k) {
+            Track& t = layer.tracks.at(k);
+            if (t.property == TrackProperty::LayerAnimParam && t.effectIndex > i && t.effectIndex != kInvalidIndex) --t.effectIndex;
+        }
+    }
+    if (preset < 0) return true;
+    if (layer.layerAnimators.size() >= 32) return false;
+    const AnimRecipe r = recipe_of(static_cast<u32>(preset));
+    LayerAnimator a;
+    a.name = std::string(kText3DAnimTag) + std::to_string(preset) + ":" + std::to_string(mode);
+    a.unit = static_cast<u8>(std::clamp<u32>(unit, 1, 3));
+    a.exit = mode == kText3DAnimOut;
+    a.loop = mode == kText3DAnimLoop;
+    a.ease = r.ease;
+    a.delayMs = layeranim::clamp_param(layeranim::kDelay, std::isfinite(staggerMs) ? staggerMs : 60.0f);
+    a.fromOpacity = r.opacity;
+    a.fromPosY = r.posY;
+    a.fromScale = a.fromScaleY = r.scale;
+    a.fromRotX = r.rotX; a.fromRotY = r.rotY; a.fromRotation = r.rotZ;
+    const u32 index = static_cast<u32>(layer.layerAnimators.size());
+    layer.tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::LayerAnimParam && t.effectIndex >= index; });
+    layer.layerAnimators.push_back(a);
+    // Progresso 0 -> 100 % em `durationSec` (a máquina de escrever: 1 quadro).
+    const i64 first = layer.local_time(layer.start).value;
+    const i64 last = layer.local_time(FrameIndex{std::max(layer.start.value, layer.end.value - 1)}).value;
+    const i64 span = std::max<i64>(1, last - first);
+    const f64 dur = std::isfinite(durationSec) ? std::clamp(static_cast<f64>(durationSec), 0.05, 30.0) : 0.6;
+    const i64 frames = preset == 6 ? 1 : std::clamp<i64>(static_cast<i64>(std::lround(dur * fps)), 1, span);
+    Track& tr = layer.tracks.get_or_create(TrackProperty::LayerAnimParam, index, layeranim::kProgress);
+    tr.clear();
+    if (a.exit) {
+        // A saída inverte a ordem: a última unidade a sair é a primeira do
+        // texto e ela precisa terminar no fim da camada.
+        const f64 stagger = static_cast<f64>(a.delayMs) * 0.001 * fps * static_cast<f64>(std::max(1u, unitCount) - 1);
+        const i64 end = std::max(first + frames, last - static_cast<i64>(std::lround(stagger)));
+        (void)tr.set(FrameIndex{end - frames}, 100.0f, Interpolation::Linear);
+        (void)tr.set(FrameIndex{end}, 0.0f, Interpolation::Linear);
+    } else {
+        (void)tr.set(FrameIndex{first}, 0.0f, Interpolation::Linear);
+        (void)tr.set(FrameIndex{first + frames}, 100.0f, Interpolation::Linear);
+    }
+    return true;
 }
 
 } // namespace aurea::scene3d

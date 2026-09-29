@@ -128,16 +128,52 @@ struct UfbxBuild {
     FolderIndex* folder = nullptr;
     std::vector<std::string> missing;   ///< nomes (sem pasta) das texturas não achadas
 
+    /// Decodifica uma imagem (PNG/JPG/TGA/BMP/PSD…) da memória para o asset.
+    i32 decode_image(const ufbx_texture* t, const u8* data, usize size) {
+        if (!data || size == 0 || size > static_cast<usize>(INT32_MAX)) return -1;
+        int w = 0, h = 0, comp = 0;
+        stbi_uc* px = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
+        if (!px) return -1;
+        Image img;
+        img.name = std::string(t->name.data, t->name.length);
+        img.width = static_cast<u32>(w);
+        img.height = static_cast<u32>(h);
+        img.rgba.assign(px, px + static_cast<usize>(w) * h * 4);
+        img.hasAlpha = comp == 2 || comp == 4;
+        stbi_image_free(px);
+        if (options->maxTextureSize) downscale_to(img, options->maxTextureSize);
+        const i32 index = static_cast<i32>(A->images.size());
+        A->images.push_back(std::move(img));
+        ++imagesUsed;
+        return index;
+    }
+
     i32 image_for(const ufbx_texture* t) {
         if (!t) return -1;
         if (auto it = images.find(t); it != images.end()) return it->second;
+        const ufbx_texture* const key = t;
+        // Textura em camadas (Layered): a primeira textura de arquivo dela.
+        const ufbx_texture* src = t;
+        if (src->type != UFBX_TEXTURE_FILE && src->file_textures.count > 0 && src->file_textures.data[0])
+            src = src->file_textures.data[0];
+        // Conteúdo EMBUTIDO no FBX binário ("Video" com Content): pode estar na
+        // própria textura, no vídeo ligado a ela ou no arquivo deduplicado da
+        // cena (o mesmo nome de arquivo usado por várias texturas guarda o
+        // conteúdo uma vez só). Decodificado da memória — o caminho gravado
+        // (pasta de outra máquina) nem é consultado quando há conteúdo.
+        i32 index = -1;
+        const ufbx_blob* blobs[3] = {&src->content, src->video ? &src->video->content : nullptr,
+                                     src->has_file && src->file_index < scene->texture_files.count
+                                         ? &scene->texture_files.data[src->file_index].content : nullptr};
+        for (const ufbx_blob* b : blobs) {
+            if (index >= 0) break;
+            if (b && b->size > 0) index = decode_image(t, static_cast<const u8*>(b->data), b->size);
+        }
+        t = src;
         std::vector<u8> bytes;
         const u8* data = nullptr;
         usize size = 0;
-        if (t->content.size > 0) {
-            data = static_cast<const u8*>(t->content.data);
-            size = t->content.size;
-        } else {
+        if (index < 0) {
             // Arquivo ao lado do modelo: o nome relativo primeiro, depois só o
             // nome do arquivo (caminho absoluto de outra máquina não existe aqui).
             std::vector<std::string> tries;
@@ -173,30 +209,13 @@ struct UfbxBuild {
             }
             data = bytes.data();
             size = bytes.size();
-        }
-        i32 index = -1;
-        if (data && size) {
-            int w = 0, h = 0, comp = 0;
-            stbi_uc* px = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
-            if (px) {
-                Image img;
-                img.name = std::string(t->name.data, t->name.length);
-                img.width = static_cast<u32>(w);
-                img.height = static_cast<u32>(h);
-                img.rgba.assign(px, px + static_cast<usize>(w) * h * 4);
-                img.hasAlpha = comp == 2 || comp == 4;
-                stbi_image_free(px);
-                if (options->maxTextureSize) downscale_to(img, options->maxTextureSize);
-                index = static_cast<i32>(A->images.size());
-                A->images.push_back(std::move(img));
-                ++imagesUsed;
-            }
+            index = decode_image(t, data, size);
         }
         if (index < 0) {
-            const std::string w = "textura ausente: " + std::string(t->relative_filename.data ? t->relative_filename.data : t->name.data);
+            const std::string w = "textura ausente: " + std::string(t->relative_filename.length ? t->relative_filename.data : t->name.data);
             if (std::find(warnings.begin(), warnings.end(), w) == warnings.end()) warnings.push_back(w);
         }
-        images.emplace(t, index);
+        images.emplace(key, index);
         return index;
     }
 
@@ -213,8 +232,18 @@ struct UfbxBuild {
         const f32 factor = p.base_factor.has_value ? static_cast<f32>(p.base_factor.value_real) : 1.0f;
         out.baseColor = Vec4{srgb_to_linear1(base.x) * factor, srgb_to_linear1(base.y) * factor,
                              srgb_to_linear1(base.z) * factor, base.w};
-        if (p.base_color.texture && p.base_color.texture_enabled) out.baseColorTex.image = image_for(p.base_color.texture);
-        else if (p.base_color.texture) out.baseColorTex.image = image_for(p.base_color.texture);
+        // Textura difusa: a do mapa PBR; senão a ligada direto ao "DiffuseColor"
+        // clássico (alguns exportadores não passam pelo mapeamento PBR).
+        const ufbx_texture* baseTex = p.base_color.texture ? p.base_color.texture : m->fbx.diffuse_color.texture;
+        if (baseTex) out.baseColorTex.image = image_for(baseTex);
+        const bool fbx = scene->metadata.file_format == UFBX_FILE_FORMAT_FBX;
+        if (fbx && out.baseColorTex.valid()) {
+            // No FBX a textura ligada ao DiffuseColor SUBSTITUI a cor (conexão
+            // do Maya; o Blender lê igual): muitos arquivos gravam cor preta ou
+            // 0.8 junto com a textura — multiplicar deixava o modelo escuro ou
+            // "sem textura". (No OBJ o .mtl manda multiplicar Kd: fica.)
+            out.baseColor.x = out.baseColor.y = out.baseColor.z = 1.0f;
+        }
         out.roughness = p.roughness.has_value ? std::clamp(static_cast<f32>(p.roughness.value_real), 0.0f, 1.0f) : 0.6f;
         out.metallic = p.metalness.has_value ? std::clamp(static_cast<f32>(p.metalness.value_real), 0.0f, 1.0f) : 0.0f;
         if (p.normal_map.texture) out.normalTex.image = image_for(p.normal_map.texture);
@@ -226,6 +255,12 @@ struct UfbxBuild {
                                 srgb_to_linear1(static_cast<f32>(p.emission_color.value_vec3.z))} * ef;
         }
         if (p.emission_color.texture) out.emissiveTex.image = image_for(p.emission_color.texture);
+        // Mesma regra da difusa: textura de emissão com cor preta gravada
+        // ficaria apagada (emissivo × textura = 0).
+        if (fbx && out.emissiveTex.valid() && out.emissive.x + out.emissive.y + out.emissive.z <= 0.0f) {
+            const f32 ef = p.emission_factor.has_value ? static_cast<f32>(p.emission_factor.value_real) : 1.0f;
+            out.emissive = Vec3{1.0f, 1.0f, 1.0f} * (ef > 0.0f ? ef : 1.0f);
+        }
         const f32 opacity = p.opacity.has_value ? static_cast<f32>(p.opacity.value_real) : 1.0f;
         if (opacity < 0.999f) {
             out.alphaMode = AlphaMode::Blend;
@@ -249,6 +284,17 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
     opts.target_unit_meters = 1.0f;
     opts.generate_missing_normals = true;
     opts.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_MODIFY_GEOMETRY;
+    // Herança de escala fora do padrão (Maya "Segment Scale Compensate", 3ds
+    // Max/Blender por componente) é comum em esqueletos. O Aurea monta o mundo
+    // como T·R·S encadeado (como o glTF); sem compensar, o osso filho herdava
+    // a escala do pai que o arquivo mandava ignorar — a pose deixava de bater
+    // com a de bind e o personagem saía com membros esticados/corpo torto.
+    // A ufbx compensa escalando os filhos (ou cria nós auxiliares de escala
+    // quando a escala é animada/não uniforme; os nós e a animação assada
+    // incluem esses auxiliares).
+    opts.inherit_mode_handling = UFBX_INHERIT_MODE_HANDLING_COMPENSATE;
+    opts.clean_skin_weights = true;          // pesos negativos/zero/NaN fora
+    opts.use_blender_pbr_material = true;    // rugosidade/metal do Blender
     opts.load_external_files = true;             // .mtl do OBJ
     opts.ignore_missing_external_files = true;   // .mtl ausente: cinza + aviso, não recusa
     FolderIndex folder;
@@ -309,13 +355,42 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
         const ufbx_mesh* m = scene->meshes.data[mi];
         tri.resize(m->max_face_triangles * 3);
         const ufbx_skin_deformer* skin = m->skin_deformers.count ? m->skin_deformers.data[0] : nullptr;
-        if (skin && skin->clusters.count) {
+        if (skin && skin->clusters.count == 0) skin = nullptr;
+        // Vértice sem peso nenhum fica PRESO AO NÓ DA MALHA (é o que o FBX
+        // faz). Antes ia inteiro para a junta 0 — um osso qualquer — e esticava
+        // a malha até ele. A junta extra "rígida" é o próprio nó da malha, com
+        // a inversa de bind = geometria→nó.
+        const ufbx_node* meshNode = m->instances.count ? m->instances.data[0] : nullptr;
+        u16 rigidJoint = 0;
+        if (skin) {
+            bool needRigid = skin->vertices.count < m->num_vertices;
+            for (usize v = 0; v < skin->vertices.count && !needRigid; ++v) {
+                const ufbx_skin_vertex& sv = skin->vertices.data[v];
+                f64 total = 0.0;
+                for (u32 w = 0; w < sv.num_weights; ++w) total += skin->weights.data[sv.weight_begin + w].weight;
+                if (!(total > 0.0)) needRigid = true;
+            }
             Skin s;
             s.name = std::string(m->name.data, m->name.length);
+            // Inversa de bind = geometry_to_bone da ufbx: já inclui a
+            // transformação geométrica do nó da malha e a pose de bind do
+            // arquivo (TransformLink/Transform), na mesma unidade da cena —
+            // a escala da conversão de unidade está na raiz e se cancela.
             for (usize c = 0; c < skin->clusters.count; ++c) {
                 const ufbx_skin_cluster* cl = skin->clusters.data[c];
-                s.joints.push_back(cl->bone_node ? static_cast<i32>(cl->bone_node->typed_id) : -1);
-                s.inverseBind.push_back(to_mat4(cl->geometry_to_bone));
+                if (cl->bone_node) {
+                    s.joints.push_back(static_cast<i32>(cl->bone_node->typed_id));
+                    s.inverseBind.push_back(to_mat4(cl->geometry_to_bone));
+                } else {
+                    // Osso quebrado: rígido no nó da malha, nunca na origem.
+                    s.joints.push_back(meshNode ? static_cast<i32>(meshNode->typed_id) : -1);
+                    s.inverseBind.push_back(meshNode ? to_mat4(meshNode->geometry_to_node) : Mat4::identity());
+                }
+            }
+            if (needRigid && meshNode && skin->clusters.count < 0xFFFFu) {
+                rigidJoint = static_cast<u16>(skin->clusters.count);
+                s.joints.push_back(static_cast<i32>(meshNode->typed_id));
+                s.inverseBind.push_back(to_mat4(meshNode->geometry_to_node));
             }
             skinOfMesh[m] = static_cast<i32>(A.skins.size());
             A.skins.push_back(std::move(s));
@@ -350,16 +425,24 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
                         if (vi < skin->vertices.count) {
                             const ufbx_skin_vertex sv = skin->vertices.data[vi];
                             f32 total = 0.0f;
-                            const u32 nw = std::min<u32>(4, sv.num_weights);   // já ordenados do maior peso
+                            // Mais de 4 influências: ficam as 4 maiores (a ufbx
+                            // já ordena do maior peso) e renormaliza para 1.
+                            const u32 nw = std::min<u32>(4, sv.num_weights);
                             for (u32 w = 0; w < nw; ++w) {
                                 const ufbx_skin_weight sw = skin->weights.data[sv.weight_begin + w];
                                 v.joints[w] = static_cast<u16>(sw.cluster_index);
                                 v.weights[w] = static_cast<f32>(sw.weight);
                                 total += v.weights[w];
                             }
-                            if (total > 0.0f) for (f32& w : v.weights) w /= total;
-                            else v.weights[0] = 1.0f;
+                            if (total > 0.0f) {
+                                for (f32& w : v.weights) w /= total;
+                            } else {
+                                for (u32 w = 0; w < 4; ++w) { v.joints[w] = 0; v.weights[w] = 0.0f; }
+                                v.joints[0] = rigidJoint;
+                                v.weights[0] = 1.0f;
+                            }
                         } else {
+                            v.joints[0] = rigidJoint;
                             v.weights[0] = 1.0f;
                         }
                     }
@@ -420,8 +503,17 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
         if (!baked) continue;
         Animation an;
         an.name = std::string(st->name.data, st->name.length);
-        an.duration = static_cast<f32>(baked->playback_duration);
-        const f64 t0 = baked->playback_time_begin;
+        // Duração do "take"; take sem intervalo gravado (LocalStart = LocalStop,
+        // comum em exportações de Mixamo/Blender por ação) usa o das chaves —
+        // antes a animação inteira era descartada por ter duração zero.
+        f64 t0 = baked->playback_time_begin;
+        f64 dur = baked->playback_duration;
+        if (!(dur > 1e-6) && baked->key_time_max > baked->key_time_min) {
+            t0 = baked->key_time_min;
+            dur = baked->key_time_max - baked->key_time_min;
+        }
+        an.duration = static_cast<f32>(dur);
+        if (an.name.empty()) an.name = "Take " + std::to_string(si + 1);
         auto add_vec3 = [&](i32 node, AnimPath path, const ufbx_baked_vec3_list& keys) {
             if (keys.count == 0) return;
             AnimSampler s;

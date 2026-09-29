@@ -97,6 +97,7 @@ fun HomeScreen(store: EditorStore) {
         SheetAction(stringResource(R.string.conta_sair), destructive = true) { confirmLogout = true },
     ))
     if (reportProblem) ReportProblemSheet(sessao = { conta.sessao() }, onResult = { store.showToast(it) }) { reportProblem = false }
+    store.quarantinePrompt?.let { q -> QuarantineDialog(store, q) }
     if (confirmLogout) AureaAlert(
         title = stringResource(R.string.conta_sair),
         message = stringResource(R.string.conta_sair_mensagem),
@@ -111,6 +112,37 @@ fun HomeScreen(store: EditorStore) {
             "Aurea ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n\n" + stringResource(R.string.settings_technology_value) + "\n\n" + stringResource(R.string.settings_made_by),
             modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) },
         confirmButton = { TextButton(onClick = { about = false; licenses = false }) { Text(stringResource(R.string.editor_fechar)) } })
+}
+
+/**
+ * "Projeto com problema": o app fechou com o motor neste projeto (abrir,
+ * importar, exportar). Ele não é aberto sozinho; a pessoa escolhe.
+ */
+@Composable
+private fun QuarantineDialog(store: EditorStore, q: com.aurea.aurea.diagnostics.ProjectGuard.Quarantined) {
+    val title = store.quarantineTitle(q)
+    val body = when (q.stage) {
+        com.aurea.aurea.diagnostics.ProjectGuard.Stage.OPEN -> R.string.quarantine_body_open
+        com.aurea.aurea.diagnostics.ProjectGuard.Stage.IMPORT -> R.string.quarantine_body_import
+        com.aurea.aurea.diagnostics.ProjectGuard.Stage.EXPORT_VIDEO -> R.string.quarantine_body_export
+        com.aurea.aurea.diagnostics.ProjectGuard.Stage.EXPORT_FILE -> R.string.quarantine_body_package
+    }
+    AlertDialog(
+        onDismissRequest = { store.dismissQuarantinePrompt() },
+        title = { Text(stringResource(R.string.quarantine_title)) },
+        text = { Text(stringResource(body, title)) },
+        confirmButton = {
+            TextButton(onClick = { store.recoverQuarantined(q.path) }) { Text(stringResource(R.string.quarantine_recover)) }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { store.deleteQuarantined(q.path) }) {
+                    Text(stringResource(R.string.quarantine_delete), color = AureaColors.Danger)
+                }
+                TextButton(onClick = { store.dismissQuarantinePrompt() }) { Text(stringResource(R.string.quarantine_later)) }
+            }
+        },
+    )
 }
 
 /** "N pessoas cadastradas" sob o título (do Worker; guardado para abrir offline). */

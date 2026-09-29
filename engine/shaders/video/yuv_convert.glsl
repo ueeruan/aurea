@@ -72,6 +72,21 @@ vec2 source_uv(vec2 dstUv) {
     return p.crop.xy + oriented * p.crop.zw;
 }
 
+// Nenhuma amostra sai da região visível. Onde o recorte termina DENTRO do
+// buffer (sobra de alinhamento do decoder à direita/embaixo, 1080 → 1088), o
+// filtro bilinear — e mais ainda a croma, com texel do dobro do tamanho, e as
+// quatro amostras da redução — puxava a sobra (lixo, ou verde de YUV zerado):
+// listras coloridas nas bordas (Oppo A94). Ali a margem é de um texel de luma
+// (meio texel de croma: peso zero no texel de fora). Na borda do próprio
+// buffer nada muda: o CLAMP_TO_EDGE do sampler já resolve e o resultado é
+// idêntico ao de antes.
+vec2 inside_crop(vec2 uv) {
+    vec2 hiEdge = p.crop.xy + p.crop.zw;
+    vec2 lo = p.crop.xy + step(vec2(1e-6), p.crop.xy) * p.texel.xy;
+    vec2 hi = hiEdge - step(vec2(1e-6), vec2(1.0) - hiEdge) * p.texel.xy;
+    return clamp(uv, lo, max(lo, hi));
+}
+
 void main() {
     vec2 uv = source_uv(v_uv);
     vec3 ycc;
@@ -80,10 +95,10 @@ void main() {
         // pula texels e o vídeo cintila. Quatro amostras bilineares nos
         // quartos do pixel de saída cobrem uma caixa de 4x4 texels.
         vec2 d = p.texel.zw * 0.25;
-        ycc = 0.25 * (fetch_ycc(uv + vec2(-d.x, -d.y)) + fetch_ycc(uv + vec2(d.x, -d.y))
-                    + fetch_ycc(uv + vec2(-d.x, d.y)) + fetch_ycc(uv + vec2(d.x, d.y)));
+        ycc = 0.25 * (fetch_ycc(inside_crop(uv + vec2(-d.x, -d.y))) + fetch_ycc(inside_crop(uv + vec2(d.x, -d.y)))
+                    + fetch_ycc(inside_crop(uv + vec2(-d.x, d.y))) + fetch_ycc(inside_crop(uv + vec2(d.x, d.y))));
     } else {
-        ycc = fetch_ycc(uv);
+        ycc = fetch_ycc(inside_crop(uv));
     }
 
     vec3 rgb = p.sampling.w > 0.5 ? ycc : ycbcr_to_rgb(ycc, p.coeffs.x, p.coeffs.y, p.coeffs.z > 0.5, p.coeffs.w);

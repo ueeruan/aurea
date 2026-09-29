@@ -60,6 +60,7 @@ struct CommandSearchView: View {
         case "text": return layer.kind == 4 ? nil : AureaText.t("edt_cmd_select_text")
         case "visual": return layer.kind != 3 ? nil : AureaText.t("edt_cmd_select_visual")
         case "text3d": return model.engine.text3D(forLayer: layer.id) != nil ? nil : AureaText.t("edt_cmd_select_text3d")
+        case "shape3d": return !model.engine.shape3D(layer.id).isEmpty ? nil : AureaText.t("edt_cmd_select_shape3d")
         case "model3d": return layer.kind == 10 ? nil : AureaText.t("edt_cmd_select_model3d")
         case "particles": return layer.kind == 11 ? nil : AureaText.t("edt_cmd_select_particles")
         case "vector": return model.isVectorLayer ? nil : AureaText.t("edt_cmd_select_vector")
@@ -158,7 +159,7 @@ struct CommandSearchView: View {
             CommandHit(id: $0.id, title: $0.title, detail: $0.detail, search: fxNormalizeSearch("\($0.title) \($0.detail) \($0.keywords)"), category: "Ações", requires: $0.requires)
         }
         hits += model.effectCatalog.map {
-            CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: AureaText.t("edt_cmd_add_effect", $0.category), search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : "selection", effect: $0.typeId)
+            CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: AureaText.t("edt_cmd_add_effect", $0.category), search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : $0.typeId == fxEffectTypeId("aurea.shape3d.layout") ? "shape3d" : "selection", effect: $0.typeId)
         }
         hits += PanelPresetEntry.loadAll().map {
             CommandHit(id: "preset:\($0.id)", title: $0.name, detail: AureaText.t("edt_cmd_open_preset", $0.kind.label), search: fxNormalizeSearch("\($0.name) \($0.kind.rawValue) preset"), category: "Presets", requires: $0.kind == .text ? "text" : "single", preset: $0)

@@ -487,6 +487,11 @@ void dry_at(const AudioClip& c, MixState::Stream& st, BlockSource& blocks, i64 t
         (void)source_frame(c, st, blocks, c.sourceAt0 + (tt - c.start), l, r, missing);
         return;
     }
+    if (c.keepPitch) {
+        auto read = [&](i64 idx, f32& a, f32& b) { return source_frame(c, st, blocks, idx, a, b, missing); };
+        keep_pitch_at(c, tt, read, l, r);
+        return;
+    }
     const f64 pos = clip_source_pos(c, tt);
     if (!(pos >= 0.0) || pos >= static_cast<f64>(c.sourceLength)) return;
     const i64 i0 = static_cast<i64>(pos);

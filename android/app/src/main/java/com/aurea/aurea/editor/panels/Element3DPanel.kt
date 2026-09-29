@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
@@ -78,8 +79,23 @@ internal fun Element3DPanel(env: PanelEnv) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
         SceneSettingsSection(store)
         if (store.detail?.kind != 8) {
-        t3?.let { Text3DSection(env, it) }
-        SectionTitle(stringResource(R.string.panel_material))
+        t3?.let { Text3DSection(env, it); Text3DAnimSection(env) }
+        // Forma 3D: partes, cor e imagem por parte (Shape3DSection.kt) no lugar do material importado.
+        val shape = store.shape3d
+        shape?.let {
+            Shape3DSection(env, it)
+            // O mesmo sistema das letras do texto 3D, parte a parte: o efeito
+            // Shape 3D Layout e a seção de animação por unidade.
+            Spacer(Modifier.height(10.dp))
+            TextButton(onClick = {
+                val type = effectTypeId("aurea.shape3d.layout")
+                if (store.effects.none { e -> e.typeId == type }) store.addEffect(type)
+                env.onOpenPanel(EditorPanel.Effects)
+            }, modifier = Modifier.testTag("shape3d.layout")) { Text(stringResource(R.string.shape3d_layout_effect)) }
+            Text(stringResource(R.string.shape3d_layout_hint), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)))
+            Text3DAnimSection(env, parts = true)
+        }
+        if (shape == null) SectionTitle(stringResource(R.string.panel_material))
         val info = t3
         if (info != null) {
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -92,7 +108,7 @@ internal fun Element3DPanel(env: PanelEnv) {
                 }
             }
             Text3DPbrSection(env, store)
-        } else ImportedMaterialSection(store)
+        } else if (shape == null) ImportedMaterialSection(store)
         LightingSection(store)
         Spacer(Modifier.height(16.dp))
         }

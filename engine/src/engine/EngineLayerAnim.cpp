@@ -52,6 +52,29 @@ bool time_altered(const Layer& g) noexcept {
     return g.timeRemapEnabled || g.speed != 1.0f || g.reversed || g.speed_track() != nullptr;
 }
 
+/// Camada de texto 3D (Model3D cuja receita é aurea-text3d:): tem letras,
+/// palavras e linhas como o texto 2D.
+bool is_text3d(const Project& p, const Layer& l) noexcept {
+    if (l.kind != LayerKind::Model3D) return false;
+    const Asset* a = p.asset(l.model.scene);
+    return a && a->sourcePath.rfind(scene3d::kText3DScheme, 0) == 0;
+}
+
+/// Forma 3D (receita aurea-shape3d:): cada PARTE é uma unidade, como as
+/// letras do texto 3D (a malha já traz textUnits = parte, parte, 0).
+bool is_shape3d(const Project& p, const Layer& l) noexcept {
+    if (l.kind != LayerKind::Model3D) return false;
+    const Asset* a = p.asset(l.model.scene);
+    return a && scene3d::is_shape3d_source(a->sourcePath);
+}
+
+/// Camada com layout por nó (texto 3D ou forma 3D): aceita a animação por unidade.
+bool has_node_units(const Project& p, const Layer& l) noexcept { return is_text3d(p, l) || is_shape3d(p, l); }
+
+bool has_units(const Project& p, const Layer& l) noexcept {
+    return l.kind == LayerKind::Text || has_node_units(p, l);
+}
+
 } // namespace
 
 // =============================================================================
@@ -89,7 +112,8 @@ u32 Engine::query_layer_animators(u64 layerId, f32* out, u32 capacity) noexcept 
         }
         v[24] = static_cast<f32>(animated);
         v[25] = static_cast<f32>(keyed);
-        v[26] = l->kind == LayerKind::Text ? 1.0f : 0.0f;
+        v[26] = has_units(*project_, *l) ? 1.0f : 0.0f;
+        v[27] = a.loop ? 1.0f : 0.0f;
     }
     return n;
 }
@@ -107,7 +131,12 @@ i32 Engine::add_layer_animator(u64 layerId) noexcept {
     l->tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::LayerAnimParam && t.effectIndex >= index; });
     LayerAnimator a;
     a.name = "Animador " + std::to_string(index + 1);
-    a.unit = l->kind == LayerKind::Text ? 1 : 0;   // texto: letra a letra, como no app antigo
+    // Texto (2D ou 3D): letra a letra, como no app antigo. Forma 3D continua
+    // começando pela camada inteira (por parte = escolher a unidade ou usar
+    // a seção Animação das partes).
+    a.unit = (l->kind == LayerKind::Text || is_text3d(*project_, *l)) ? 1 : 0;
+    // Texto 3D: as letras precisam ser nós próprios para andar cada uma.
+    if (is_text3d(*project_, *l)) (void)ensure_text3d_layout(*l);
     l->layerAnimators.push_back(a);
     seed_progress(*l, index, comp->fps());
     project_->mark_dirty();
@@ -149,6 +178,7 @@ bool Engine::set_layer_animator(u64 layerId, u32 index, const f32* v) noexcept {
     a.exit = exit;
     a.ease = static_cast<u8>(std::clamp(v[3], 0.0f, 3.0f));
     a.scaleSeparated = v[4] > 0.5f;
+    a.loop = std::isfinite(v[27]) && v[27] > 0.5f;
     a.wiggleSeed = static_cast<u32>(std::clamp(v[5], 0.0f, 1.0e6f));
     project_->mark_dirty();
     request_render();
@@ -249,7 +279,7 @@ u32 Engine::paste_layer_animators(const u64* ids, u32 count) noexcept {
         const i64 local0 = l->local_time(l->start).value;
         for (LayerAnimator a : clipboard_.layerAnimators) {
             // Letra/palavra/linha só existem no texto; noutra camada vira a camada inteira.
-            if (l->kind != LayerKind::Text) a.unit = 0;
+            if (!has_units(*project_, *l)) a.unit = 0;
             l->layerAnimators.push_back(std::move(a));
         }
         l->tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::LayerAnimParam && t.effectIndex >= base; });
@@ -271,6 +301,69 @@ u32 Engine::paste_layer_animators(const u64* ids, u32 count) noexcept {
 // =============================================================================
 // Desfoque de movimento por camada
 // =============================================================================
+
+// =============================================================================
+// Animação de texto 3D (presets de animador de camada por letra/palavra/linha)
+// =============================================================================
+
+bool Engine::query_text3d_anim(u64 layerId, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out || !has_node_units(*project_, *l)) return false;
+    const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
+    const auto it = models_.find(l->model.scene.pack());
+    const scene3d::SceneAsset* asset = it != models_.end() ? it->second.get() : nullptr;
+    auto units_of = [&](u32 unit) -> f32 {
+        if (!asset || (!asset->textGlyphLayout && !asset->shapeParts)) return 0.0f;
+        return static_cast<f32>(unit == 2 ? asset->textWords : unit == 3 ? asset->textLines : static_cast<u32>(asset->nodes.size()));
+    };
+    for (u32 m = 0; m < scene3d::kText3DAnimModeCount; ++m) {
+        f32* v = out + m * kText3DAnimFloats;
+        v[0] = -1.0f; v[1] = 1.0f; v[2] = 0.6f; v[3] = 60.0f; v[4] = units_of(1);
+    }
+    for (u32 i = 0; i < l->layerAnimators.size(); ++i) {
+        const LayerAnimator& a = l->layerAnimators[i];
+        u32 mode = 0;
+        const i32 preset = scene3d::text3d_anim_preset_of(a, &mode);
+        if (preset < 0) continue;
+        f32* v = out + mode * kText3DAnimFloats;
+        v[0] = static_cast<f32>(preset);
+        v[1] = static_cast<f32>(std::max<u8>(a.unit, 1));
+        if (const Track* tr = l->tracks.find(TrackProperty::LayerAnimParam, i, layeranim::kProgress); tr && tr->keys.size() >= 2)
+            v[2] = static_cast<f32>(static_cast<f64>(tr->keys.back().time.value - tr->keys.front().time.value) / fps);
+        v[3] = a.delayMs;
+        v[4] = units_of(a.unit);
+    }
+    return true;
+}
+
+bool Engine::apply_text3d_anim(u64 layerId, i32 preset, u32 mode, u32 unit, f32 durationSec, f32 staggerMs) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || !has_node_units(*project_, *l) || mode >= scene3d::kText3DAnimModeCount
+        || preset >= static_cast<i32>(scene3d::kText3DAnimPresetCount))
+        return false;
+    const bool shape = is_shape3d(*project_, *l);
+    // Forma 3D: a unidade é sempre a parte (palavra e linha não existem nela).
+    if (shape) unit = 1;
+    history_.before_mutation(*comp, project_->timeline().current(), shape ? "animação das partes" : "animação de texto 3D");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // As letras viram nós próprios (uma vez); o layout por letra continua
+    // valendo. As partes da forma já são nós: nada a preparar.
+    if (preset >= 0 && !shape && !ensure_text3d_layout(*l).ok()) return false;
+    const auto it = models_.find(l->model.scene.pack());
+    u32 count = 1;
+    if (it != models_.end() && it->second) {
+        const scene3d::SceneAsset& a = *it->second;
+        count = unit == 2 ? a.textWords : unit == 3 ? a.textLines : static_cast<u32>(a.nodes.size());
+    }
+    const bool ok = scene3d::apply_text3d_anim_preset(*l, preset, mode, unit, count, durationSec, staggerMs, comp->fps());
+    project_->mark_dirty();
+    request_render();
+    return ok;
+}
 
 bool Engine::set_layer_motion_blur_length(u64 layerId, f32 factor) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);

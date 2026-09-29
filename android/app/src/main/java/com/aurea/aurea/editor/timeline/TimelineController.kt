@@ -129,10 +129,14 @@ internal class TimelineController(
         if (index >= 0) index else -index - 2
     }
 
-    /** No compacto aparece só o TRECHO escolhido, mesmo quando ele divide a fileira com outros. */
+    /**
+     * No compacto aparece a LINHA inteira da escolhida: depois de um split os
+     * dois pedaços continuam à vista (só o trecho escolhido fazia a metade
+     * nova sumir, e o corte parecia não ter funcionado).
+     */
     private fun compactRow(list: List<RowModel>): RowModel? {
         val p = primaryId.value
-        for (i in list.indices) list[i].segment(p)?.let { return it }
+        for (i in list.indices) if (list[i].segment(p) != null) return list[i]
         return null
     }
 
@@ -254,7 +258,7 @@ internal class TimelineController(
         val x0 = xOf(s.start)
         val x1 = max(xOf(s.end), x0 + m.barMinWidth)
         return RowHit.hit(
-            m, x, y, state.width.toFloat(), x0, x1, handlesOn(s), state.compact,
+            m, x, y, state.width.toFloat(), x0, x1, handlesOn(s), state.compact && isSelected(s.id),
             keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)),
             instants = s.instants,
             view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,

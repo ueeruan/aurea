@@ -953,7 +953,8 @@ func timelineCompact(panel: Bool, dock: Bool, tracksOpen: Bool, selectingKeys: B
 
 /// O que um toque no corpo de um clipe faz com a seleção de camadas (par do
 /// `layerTap` do Android). Modo "Selecionar várias camadas" (do app antigo):
-/// soma/tira, antes de tudo. Fora dele: compacto = sai do painel; lote de 2+
+/// soma/tira, antes de tudo. Fora dele: compacto = sai do painel (noutro pedaço
+/// da linha, troca); lote de 2+
 /// = soma/tira; senão troca a escolhida.
 /// Tocar de novo na única escolhida (com as opções abertas) a solta, como no
 /// app antigo; escolhida só "na mão" da timeline (`timelineOnly`), o toque abre
@@ -963,7 +964,9 @@ enum TimelineLayerTap: Equatable { case leaveCompact, toggle, replace, deselect 
 func timelineLayerTap(picking: Bool, compact: Bool, selected: Int,
                       tappedSelected: Bool = false, timelineOnly: Bool = false) -> TimelineLayerTap {
     if picking { return .toggle }
-    if compact { return .leaveCompact }
+    // Na fileira compacta os outros pedaços da mesma linha aparecem: tocar num
+    // deles troca a escolhida; tocar na própria sai do painel.
+    if compact { return tappedSelected ? .leaveCompact : .replace }
     if selected >= 2 { return .toggle }
     if selected == 1 && tappedSelected && !timelineOnly { return .deselect }
     return .replace

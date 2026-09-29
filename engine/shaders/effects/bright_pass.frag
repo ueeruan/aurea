@@ -19,7 +19,8 @@ layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex0;
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 uvMap;    // uv de entrada = v_uv * xy + zw
     vec4 texel;    // xy = texel da entrada em uv
-    vec4 knee;     // x = limiar (linear), y = largura do joelho, z = 1/(4*joelho)
+    vec4 knee;     // x = limiar (linear), y = largura do joelho, z = 1/(4*joelho),
+                   // w = 1: mede pelo canal mais forte (Brilho profundo), 0: luminância (Glow)
 } p;
 
 vec4 fetch(vec2 uv) { return texture(u_tex0, uv); }
@@ -32,7 +33,10 @@ void main() {
 
     // Trabalha na cor pré-multiplicada: o brilho de uma borda
     // semitransparente é proporcional à cobertura dela, que é o certo.
-    float l = luminance709(c.rgb);
+    // Pela luminância um vermelho ou azul puro (0,21 / 0,07) nunca passa de um
+    // limiar médio: o Brilho profundo mede pelo canal mais forte, e qualquer
+    // cor saturada acende como uma clara do mesmo valor.
+    float l = p.knee.w > 0.5 ? max(c.r, max(c.g, c.b)) : luminance709(c.rgb);
     float t = p.knee.x;
     float k = p.knee.y;
     float soft = clamp(l - t + k, 0.0, 2.0 * k);

@@ -171,6 +171,7 @@ u64 clip_hash(const AudioClip& c) noexcept {
     h = hmix(h, hbits(c.volume));
     h = hmix(h, hbits(c.fps));
     h = hmix(h, c.reverse ? 1u : 0u);
+    h = hmix(h, c.keepPitch ? 1u : 0u);
     for (f32 v : c.volumeByFrame) h = hmix(h, hbits(v));
     for (f64 v : c.srcByFrame) h = hmix(h, hbits(v));
     for (const AudioSend& s : c.sends) {
@@ -271,6 +272,8 @@ struct Flatten {
                 const f64 srcFrameAtLs = l.source_frame(l.start);
                 c.sourceStartF = srcFrameAtLs * kMixRate / fps + static_cast<f64>(c.start - shift - ls) * c.rate;
             }
+            // Manter o tom só muda algo fora de 1× (a 1× o caminho é o de sempre).
+            c.keepPitch = c.asset && l.keepPitch && c.rate != 1.0;
             for (const auto& effect:l.effects) {
                 if(!effect.enabled || effect.params.size()<3 || c.sends.size()>=8) continue;
                 u32 kind=3;
@@ -528,6 +531,17 @@ void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& block
                 r = blk->pcm[off + 1];
                 return true;
             };
+            if (c.keepPitch) {
+                for (i64 t = s0; t < s1; ++t) {
+                    f32 l = 0, r = 0;
+                    detail::keep_pitch_at(c, t, sample_at, l, r);
+                    const f32 g = envelope(c, t);
+                    f32* o = out + static_cast<usize>(t - start) * 2;
+                    o[0] += l * g * balL;
+                    o[1] += r * g * balR;
+                }
+                continue;
+            }
             for (i64 t = s0; t < s1; ++t) {
                 const f64 pos = clip_pos(c, t);
                 if (pos < 0.0 || pos >= static_cast<f64>(c.sourceLength)) continue;

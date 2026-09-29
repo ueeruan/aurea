@@ -159,6 +159,10 @@ struct LayerAnimator {
     bool enabled = true;
     u8   unit = 0;              ///< 0 camada inteira, 1 letra, 2 palavra, 3 linha (só texto)
     bool exit = false;          ///< animação de saída (keyframes no fim, 100 → 0; ordem invertida)
+    /// Loop: o relógio de cada unidade vai e volta no trecho dos keyframes do
+    /// progresso (0 → 100 → 0…), com o atraso entre unidades — onda contínua.
+    /// Gravado no bit alto do byte de `ease` (sem mudar a versão do arquivo).
+    bool loop = false;
     u8   ease = 1;              ///< 0 linear, 1 suave (sai rápido), 2 entra e sai, 3 passa do ponto
     bool scaleSeparated = false;///< escala Y própria (senão Y = X)
     u32  wiggleSeed = 0;
@@ -546,6 +550,28 @@ struct CompositionRef {
 /// flags da linha da timeline).
 inline constexpr u8 kLayerLabelCount = 13;
 
+/// RIG 2D (personagem desenhado): uma junta do esqueleto. O osso é o trecho
+/// pai → junta; a ROTAÇÃO do osso (graus, 0 = montagem) é a trilha
+/// `TrackProperty::RigBone` com `effectParamIndex = id` desta junta e gira em
+/// volta da junta pai, levando todos os descendentes junto.
+struct RigJoint {
+    u32  id = 0;                   ///< estável (é a chave da trilha)
+    u32  parent = kInvalidIndex;   ///< id da junta pai; kInvalidIndex = raiz
+    Vec2 pos{0.0f, 0.0f};          ///< posição de MONTAGEM, px da imagem
+
+    [[nodiscard]] bool operator==(const RigJoint&) const noexcept = default;
+};
+
+/// O esqueleto de uma camada de imagem. Com 2 juntas ou mais, a imagem é
+/// deformada por uma malha presa aos ossos (timeline/Rig.hpp); sem ossos, a
+/// camada desenha como sempre.
+struct RigData {
+    std::vector<RigJoint> joints;
+    u32 nextJointId = 0;
+
+    [[nodiscard]] bool active() const noexcept { return joints.size() >= 2; }
+    [[nodiscard]] bool operator==(const RigData&) const noexcept = default;
+};
 
 struct Layer {
     LayerKind kind = LayerKind::Unknown;
@@ -570,6 +596,11 @@ struct Layer {
     /// entrada. `offset` continua sendo o ponto de entrada na fonte.
     f32   speed = 1.0f;
     bool  reversed = false;
+    /// Manter o tom do áudio quando o tempo da fonte não anda a 1× (velocidade,
+    /// curva de remapeamento): o som segue a MESMA posição da fonte, mas em
+    /// grãos tocados na velocidade natural — sem voz de esquilo nem de monstro.
+    /// Desligado (padrão e projetos antigos) = reamostra, o tom acompanha.
+    bool  keepPitch = false;
     /// Desfoque de movimento desta camada (a composição define o obturador).
     bool  motionBlur = false;
     /// Vídeo fora da grade da fonte (câmera lenta, velocidade quebrada):
@@ -666,6 +697,8 @@ struct Layer {
     std::vector<Mask>   masks;
     /// Animadores de camada (entrada/saída/wiggle), em qualquer tipo de camada.
     std::vector<LayerAnimator> layerAnimators;
+    /// Rig 2D (só camada de imagem): juntas + ossos; a pose mora nas trilhas.
+    RigData rig;
 
     // --- Específico de tipo --------------------------------------------------
     TextData      text;

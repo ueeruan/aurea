@@ -31,6 +31,7 @@
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/text/FontManager.hpp"
 
 #include "aurea/bridge/BridgePods.hpp"
@@ -487,7 +488,8 @@ public:
     /// linear, 1 suave, 2 entra e sai, 3 passa do ponto), 4 escala Y própria,
     /// 5 semente do wiggle, 6..23 = os LayerAnimParam 0..17 avaliados no
     /// playhead, 24 bits animados (1 << param), 25 bits com keyframe no
-    /// playhead, 26 = 1 se a camada é texto (unidades valem).
+    /// playhead, 26 = 1 se a camada é texto ou texto 3D (unidades valem),
+    /// 27 loop (vai e volta; também lido pelo set_layer_animator).
     static constexpr u32 kLayerAnimFloats = 32;
     u32 query_layer_animators(u64 layerId, f32* out, u32 capacity) noexcept;
     /// Novo animador (entra desbotando em 1 s a partir do começo da camada);
@@ -507,6 +509,17 @@ public:
     u32 paste_layer_animators(const u64* ids, u32 count) noexcept;
     /// Quantos animadores estão na área de transferência.
     [[nodiscard]] u32 layer_animator_clipboard() noexcept;
+
+    // --- Animação de TEXTO 3D (presets = animadores de camada por letra) --------
+    /// Por modo (entrada, saída, loop) kText3DAnimFloats floats: 0 preset (−1
+    /// nenhum), 1 unidade (1 letra, 2 palavra, 3 linha), 2 duração de cada
+    /// unidade (s), 3 atraso entre unidades (ms), 4 unidades do texto.
+    static constexpr u32 kText3DAnimFloats = 5;
+    /// Preenche 3 × kText3DAnimFloats; falso se a camada não é texto 3D.
+    bool query_text3d_anim(u64 layerId, f32* out) noexcept;
+    /// Um toque aplica: separa as letras (se preciso) e troca o preset do modo
+    /// (scene3d::apply_text3d_anim_preset). `preset` < 0 remove. Um desfazer.
+    bool apply_text3d_anim(u64 layerId, i32 preset, u32 mode, u32 unit, f32 durationSec, f32 staggerMs) noexcept;
 
     /// Comprimento do rastro do desfoque de movimento desta camada (× o
     /// obturador da composição; 1 = o do projeto, 0..4).
@@ -662,6 +675,13 @@ public:
     i32 edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sourceFrame, i32 interp) noexcept;
     /// Apaga um ponto (ficam pelo menos dois).
     bool remove_time_remap_key(u64 layerId, u32 index) noexcept;
+    /// "Ao contrário" do Remapear tempo: espelha a curva no tempo do clipe
+    /// (o primeiro quadro mostra o que o último mostrava e vice-versa), com o
+    /// easing de cada trecho espelhado — duas vezes volta exatamente ao que era.
+    /// Com o remapeamento desligado, liga antes (curva = o tempo de agora).
+    bool reverse_time_remap(u64 layerId) noexcept;
+    /// Manter o tom do áudio quando a fonte não anda a 1× (Layer::keepPitch).
+    bool set_keep_pitch(u64 layerId, bool on) noexcept;
 
     /// Transição de entrada (`out` = false) ou saída: tipo (0 nenhuma, 1
     /// dissolver, 2 deslizar p/ cima, 3 deslizar da esquerda, 4 zoom, 5 girar)
@@ -700,6 +720,33 @@ public:
     /// floats necessários; só escreve se `capacity` couber.
     static constexpr u32 kMaskHeaderFloats = 12;
     u32 query_masks(u64 layerId, f32* out, u32 capacity) noexcept;
+
+    // --- Rig 2D (personagem desenhado; camada de imagem) — timeline/Rig.hpp ----
+    /// Juntas no playhead: por junta kRigJointFloats floats (id, id do pai ou
+    /// −1, x, y na COMPOSIÇÃO, 1 se o osso tem keyframe no playhead). `bind` =
+    /// posições de montagem (senão, a pose). Devolve o nº de floats precisos
+    /// (0 = não é imagem); com `capacity` menor não escreve nada.
+    static constexpr u32 kRigJointFloats = 5;
+    u32 query_rig(u64 layerId, bool bind, f32* out, u32 capacity) noexcept;
+    /// Nova junta em (x, y) da composição ligada a `parentId` (−1 = raiz
+    /// solta). Devolve o id da junta (−1 = falhou). Um passo de desfazer.
+    i32 rig_add_joint(u64 layerId, i32 parentId, f32 compX, f32 compY) noexcept;
+    /// Move a junta na MONTAGEM. `continuing` = o mesmo arrasto (um desfazer).
+    bool rig_move_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool continuing) noexcept;
+    /// Apaga a junta (e os keyframes do osso dela); os filhos passam ao pai dela.
+    bool rig_remove_joint(u64 layerId, u32 jointId) noexcept;
+    /// Tira o rig inteiro da camada (juntas e keyframes dos ossos).
+    bool rig_clear(u64 layerId) noexcept;
+    /// Esqueleto automático de personagem sobre a parte visível da imagem
+    /// (quadril, coluna, pescoço, cabeça, braços; pernas quando o desenho é
+    /// de corpo inteiro). Troca o rig que houver. Devolve quantas juntas.
+    u32 rig_auto_humanoid(u64 layerId) noexcept;
+    /// ANIMAR: leva a junta até (x, y) da composição e grava keyframe no
+    /// playhead. Ponta de cadeia com avô = IK de 2 ossos (a mão puxa o braço);
+    /// junta com filhos ou só um osso acima = gira o osso dela (FK).
+    bool rig_pose_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool continuing) noexcept;
+    /// Montagem aberta nesta camada: o preview a mostra sem deformação (0 = nenhuma).
+    void set_rig_setup_layer(u64 layerId) noexcept;
     /// Rastreia a máscara no vídeo da camada do cabeçote em diante (NCC no
     /// centro e em 4 pontos por dentro dela) e grava um key de caminho por
     /// quadro. `mode` 0 = só posição; 1 = posição + escala + giro. Síncrono
@@ -1089,6 +1136,41 @@ public:
     /// Receita do texto 3D da camada (falso = não é texto 3D).
     bool query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept;
 
+    // --- Formas 3D (scene3d/Shape3D.hpp; API em EngineShape3D.cpp) --------------
+    /// Nova camada com a forma `kind` (Shape3DKind), centrada, uma cor por
+    /// parte. `name` = nome da camada (a UI manda traduzido). Devolve a layer.
+    [[nodiscard]] Result<u64> add_shape3d(u32 kind, const char* name = nullptr) noexcept;
+    /// Troca a receita (cor/imagem por parte). A malha é gerada de novo; desfazível.
+    Status set_shape3d(u64 layerId, const scene3d::Shape3DSpec& spec) noexcept;
+    /// Receita da forma 3D da camada (falso = não é forma 3D).
+    bool query_shape3d(u64 layerId, scene3d::Shape3DSpec& out) noexcept;
+    /// Cor (`rgba` sRGB; nulo = mantém) e/ou imagem (`image` = arquivo; "" tira;
+    /// nulo = mantém) da parte `part` (−1 = todas). Um passo de desfazer.
+    Status set_shape3d_part_style(u64 layerId, i32 part, const f32* rgba, const char* image) noexcept;
+    /// Partes no cabeçote, kShapePartFloats por parte: [0..8] canais (posição
+    /// XYZ em unidades da forma, Y para cima; rotação XYZ em graus; escala
+    /// XYZ), [9] bits dos canais com keyframe, [10] bits dos canais com key
+    /// no cabeçote, [11..12] centro da parte em px da composição (como o palco
+    /// mostra), [13] 1 = centro na frente da câmera. Devolve os floats
+    /// precisos (0 = não é forma 3D); com `capacity` menor não escreve nada.
+    static constexpr u32 kShapePartFloats = 14;
+    u32 query_shape3d_parts(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Grava os canais `mask` (bit c = canal c de `values9`) da parte. Canal
+    /// com keyframes grava a key no cabeçote; sem keyframe, o valor parado.
+    /// `continuing` = o mesmo arrasto (um passo de desfazer).
+    bool set_shape3d_part(u64 layerId, u32 part, const f32* values9, u32 mask, bool continuing) noexcept;
+    /// Losango da parte: com key no cabeçote tira as 9; senão marca as 9 com
+    /// os valores atuais. 1 = marcou, 0 = tirou, −1 = não deu.
+    i32 toggle_shape3d_part_key(u64 layerId, u32 part) noexcept;
+    /// Volta a parte (−1 = todas) ao lugar: apaga as trilhas dela. Desfazível.
+    bool reset_shape3d_part(u64 layerId, i32 part) noexcept;
+    /// Gizmo da PARTE, no formato do `query_gizmo` (origem no centro da parte).
+    bool query_shape3d_part_gizmo(u64 layerId, u32 part, f32 length, f32* out8, bool localSpace = false) noexcept;
+    /// Posição da parte (unidades da forma) que a leva `amount` unidades do
+    /// mundo no eixo (0..2 mundo, 3..5 os da parte). Só calcula; grava-se com
+    /// `set_shape3d_part`.
+    bool shape3d_part_move(u64 layerId, u32 part, u32 axis, f32 amount, f32* outXYZ) noexcept;
+
     // =========================================================================
     // A fronteira
     // =========================================================================
@@ -1206,6 +1288,9 @@ public:
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
 private:
     Status ensure_text3d_layout(Layer& layer) noexcept; // modelMutex_ held; caller owns undo.
+    /// Camada de forma 3D (receita aurea-shape3d:). As partes já são nós
+    /// próprios: não há preparo como o ensure_text3d_layout. modelMutex_ held.
+    [[nodiscard]] bool is_shape3d_layer(const Layer& layer) const noexcept;
     bool fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
 public:
     u32 query_curve(u64 layerId, u32 property, i32 startFrame, i32 endFrame,

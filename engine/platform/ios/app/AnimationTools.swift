@@ -628,43 +628,42 @@ struct ExpressionEditor: View {
     }
 }
 
-/// REMAPEAR TEMPO, versão simples (par do TimeRemapEffectEditor do Android):
-/// sem gráfico. Uma régua do "momento do vídeo" em segundos da fonte — arrastar
-/// mostra ao vivo na prévia o quadro do cabeçote e grava a chave ali. Congelar =
-/// dois pontos iguais; ao contrário = momento diminuindo; lento/rápido =
-/// distância entre os pontos. Por chave, só a suavidade; os atalhos criam os
-/// pontos. O dado é a MESMA curva da camada (prévia, exportação e som).
+/// REMAPEAR TEMPO em lista (par do TimeRemapEffectEditor do Android; UX
+/// inspirada no Node Video, com o tema do Aurea). Três linhas e o Ao contrário:
+///  1. Manter o tom do áudio.
+///  2. Remapear tempo — o MOMENTO DA FONTE no cabeçote em timecode: arrastar o
+///     valor para os lados (1 quadro a cada 4 pt) ou tocar para digitar grava a
+///     chave ali. O ◇ marca/tira a chave; a faixa fina mostra as chaves e o
+///     cabeçote (tocar numa chave vai até ela e a escolhe) e a curva abre o
+///     editor de curva NORMAL do Aurea para aquele trecho.
+///  3. Interpolação do tempo — Desligado / Mistura de quadros / Optical flow.
+/// O dado é a MESMA curva da camada (prévia, exportação e som).
 struct TimeRemapEffectEditor: View {
     @EnvironmentObject private var model: AureaModel
     let effectId: UInt32
     @State private var values: [Float] = []
     @State private var drag: Float?
-    @State private var dragging = false
+    @State private var dragStart: Float?
+    @State private var selectedKey: Int32?
     private var id: Int64 { model.primarySelection ?? 0 }
     private var fps: Float { Float(model.compositionFps > 0 ? model.compositionFps : 30) }
+    private var flags: UInt32 { (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0 }
+    private var isVideo: Bool { model.selectedLayer?.kind == 1 }
     private var keyTimes: [Int32] {
         guard values.count >= 5 else { return [] }
         let count = min(max(0, Int(values[0])), (values.count - 5) / 7)
         return (0..<count).map { Int32(values[5 + $0 * 7]) }
     }
-    private var maxSeconds: Float {
+    private var lo: Int32 { values.count >= 5 ? Int32(values[1]) : 0 }
+    private var hi: Int32 { values.count >= 5 ? Int32(values[2]) : 1 }
+    private var lastFrame: Float {
         guard values.count >= 5 else { return 1 }
-        return max(1, values[3] > 0 ? values[3] : values[2]) / fps
+        return max(1, values[3] > 0 ? values[3] : values[2])
     }
-    private var inside: Bool {
-        guard values.count >= 5 else { return false }
-        let local = Float(model.localPlayhead)
-        return local >= values[1] && local <= values[2]
-    }
+    private var inside: Bool { values.count >= 5 && model.localPlayhead >= lo && model.localPlayhead <= hi }
     private var seconds: Float { model.effectParams.first { $0.index == 0 }?.scalar ?? 0 }
-    private var ease: Int { Int((model.effectParams.first { $0.index == 1 }?.scalar ?? 0).rounded()) }
     private var keyHere: Int? { keyTimes.firstIndex(of: model.localPlayhead) }
-    private var speedText: String {
-        let speed = values.count >= 5 ? values[4] : 1
-        if abs(speed) < 0.005 { return AureaText.t("remap_vel_congelado") }
-        if speed < 0 { return AureaText.t("remap_vel_reverso", numeroPtBr(-speed, casas: 2)) }
-        return AureaText.t("remap_vel_aqui", numeroPtBr(speed, casas: 2))
-    }
+    private var shownFrames: Float { drag ?? seconds * fps }
     private func load() { values = model.engine.timeRemap(id).map(\.floatValue) }
     private func refresh() { model.refreshModel(force: true); load() }
     private func seekLocal(_ local: Int32) {
@@ -673,92 +672,101 @@ struct TimeRemapEffectEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
+            toggleRow("remap_manter_tom", checked: flags & 128 != 0) { on in
+                model.mutate { $0.setKeepPitch(forLayer: id, on: on) }
+                refresh()
+            }
             if values.count < 5 {
                 PanelNotice(AureaText.t("remap_ligue_efeito"))
             } else {
-                PropertyCustomRow(AureaText.t("remap_momento_video"), selected: keyHere != nil, onSelect: toggleKey,
+                PropertyCustomRow(AureaText.t("remap_linha_tempo"), selected: keyHere != nil, onSelect: toggleKey,
                                   keyframe: keyHere != nil ? .keyHere : .animated) {
                     HStack(spacing: 0) {
-                        Text(speedText).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+                        ValueBox(Self.timecode(Int(shownFrames.rounded()), fps: fps), enabled: inside, width: 112) { openKeypad() }
+                            .highPriorityGesture(DragGesture(minimumDistance: 6).onChanged { value in
+                                guard inside else { return }
+                                if dragStart == nil { dragStart = seconds * fps; model.beginGesture("tempo do vídeo") }
+                                let frames = min(lastFrame, max(0, (dragStart ?? 0) + Float(value.translation.width) * 0.25))
+                                drag = frames
+                                model.engine.setEffect(effectId, forLayer: id, paramIndex: 0, value: frames.rounded() / fps)
+                            }.onEnded { _ in finishDrag() })
                         Spacer(minLength: 4)
-                        stepButton(CupertinoGlyph.ChevronLeft, "remap_ponto_anterior", keyTimes.last { $0 < model.localPlayhead })
-                        stepButton(CupertinoGlyph.ChevronRight, "remap_proximo_ponto", keyTimes.first { $0 > model.localPlayhead })
+                        Button(action: openCurve) {
+                            CurveRailIcon(enabled: keyTimes.count >= 2, animated: selectedKey != nil || keyHere != nil)
+                                .frame(width: 44, height: 44).contentShape(Rectangle())
+                        }.buttonStyle(AureaPressStyle()).disabled(keyTimes.count < 2)
+                            .accessibilityLabel(AureaText.t("remap_editar_curva"))
                     }
                 }
-                HStack(spacing: 8) {
-                    timeBar
-                    ValueBox(String(format: "%.2f s", Double(shownFraction * maxSeconds)).replacingOccurrences(of: ".", with: ","), width: 72)
-                }
+                keyStrip.padding(.leading, 102).padding(.trailing, 4)
                 if !inside {
                     Text(AureaText.t("remap_fora_clipe")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(AureaText.t("remap_suavidade")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6)
-                if keyHere == nil {
-                    Text(AureaText.t("remap_sem_ponto")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
+                if isVideo {
+                    Text(AureaText.t("remap_interpolacao")).font(.aurea(size: 13)).padding(.top, 6)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach([(0, "remap_ease_linear"), (3, "remap_ease_in"), (4, "remap_ease_out"), (1, "remap_ease_in_out")], id: \.0) { mode, label in
-                                chip(label, on: ease == mode) {
-                                    model.engine.setEffect(effectId, forLayer: id, paramIndex: 1, value: Float(mode))
+                            ForEach([(0, "remap_interp_off"), (1, "remap_interp_blend"), (2, "remap_interp_flow")], id: \.0) { mode, label in
+                                chip(label, on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == mode) {
+                                    model.mutate { $0.setFrameBlendForLayer(id, mode: UInt32(mode)) }
                                     refresh()
                                 }
                             }
                         }
                     }
                 }
-                Text(AureaText.t("remap_atalhos")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach([(7, "remap_congelar_aqui"), (2, "remap_camera_lenta"), (3, "remap_acelerar"), (6, "remap_inverter"), (0, "remap_normal")], id: \.0) { preset, label in
-                            chip(label, on: false) {
-                                model.engine.applySpeedRamp(UInt32(preset), forLayer: id)
-                                refresh()
-                            }
-                        }
-                    }
+                toggleRow("remap_ao_contrario", checked: flags & 256 != 0) { _ in
+                    model.mutate { _ = $0.reverseTimeRemap(forLayer: id) }
+                    refresh()
                 }
-                Text(AureaText.t("remap_dica")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                Text(AureaText.t("remap_dica_lista")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 2)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
             .onAppear(perform: load)
             .onChange(of: model.status.modelRevision) { _ in load() }
             .onChange(of: model.status.playhead) { _ in load() }
-            .onChange(of: id) { _ in load() }
-            .onDisappear { if dragging { dragging = false; drag = nil; model.endGesture() } }
+            .onChange(of: id) { _ in load(); selectedKey = nil }
+            .onDisappear { finishDrag() }
     }
 
-    private var shownFraction: Float { drag ?? min(1, max(0, seconds / maxSeconds)) }
+    /// Timecode da fonte, H:MM:SS:QQ (quadros na taxa do projeto).
+    static func timecode(_ frames: Int, fps: Float) -> String {
+        let rate = max(1, Int(fps.rounded()))
+        let f = max(0, frames)
+        let total = f / rate
+        return String(format: "%d:%02d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60, f % rate)
+    }
 
-    /// Régua absoluta: tocar pula para ali, arrastar segue o dedo (um gesto = um desfazer).
-    private var timeBar: some View {
-        GeometryReader { geometry in
-            let width = max(1, geometry.size.width)
-            let x = CGFloat(shownFraction) * width
-            ZStack(alignment: .leading) {
-                Capsule().fill(AureaColors.chip).frame(height: 8)
-                Capsule().fill(inside ? AureaColors.accent : AureaColors.muted).frame(width: max(0, x), height: 8)
-                Circle().fill(Color.white).frame(width: 22, height: 22)
-                    .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
-                    .offset(x: x - 11)
-            }.frame(maxHeight: .infinity).contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                    guard inside else { return }
-                    if !dragging { dragging = true; model.beginGesture("tempo do vídeo") }
-                    let fraction = Float(min(1, max(0, value.location.x / width)))
-                    drag = fraction
-                    model.engine.setEffect(effectId, forLayer: id, paramIndex: 0, value: fraction * maxSeconds)
-                }.onEnded { _ in
-                    guard dragging else { return }
-                    dragging = false; drag = nil
-                    model.endGesture()
-                    load()
-                })
-        }.frame(height: 44)
+    private func finishDrag() {
+        guard dragStart != nil else { return }
+        dragStart = nil; drag = nil
+        model.endGesture()
+        load()
+    }
+
+    private func openKeypad() {
+        guard inside else { return }
+        let top = lastFrame / fps
+        model.numericKeypad = KeypadRequest(title: AureaText.t("remap_linha_tempo"), value: shownFrames / fps, unit: "s",
+                                            min: 0, max: top, decimals: 2) { s in
+            model.engine.setEffect(effectId, forLayer: id, paramIndex: 0, value: min(top, max(0, s)))
+            refresh()
+        }
+    }
+
+    /// Editor de curva NORMAL: a chave escolhida na faixa, senão a que abre o
+    /// trecho sob o cabeçote (TrackProperty::TimeRemap = 30).
+    private func openCurve() {
+        let keys = keyTimes
+        guard keys.count >= 2 else { return }
+        let time: Int32
+        if let s = selectedKey, keys.contains(s), s != keys.last { time = s }
+        else if let s = selectedKey, s == keys.last { time = keys[keys.count - 2] }
+        else { time = keys[max(0, min(keys.count - 2, keys.lastIndex { $0 <= model.localPlayhead } ?? 0))] }
+        model.openCurve(property: 30, effect: UInt32.max, param: 0, time: time)
     }
 
     private func toggleKey() {
@@ -771,12 +779,48 @@ struct TimeRemapEffectEditor: View {
         refresh()
     }
 
-    private func stepButton(_ glyph: Character, _ label: String, _ target: Int32?) -> some View {
-        Button { if let target { seekLocal(target) } } label: {
-            CupertinoGlyph.text(glyph, size: 18, color: target == nil ? AureaColors.muted.opacity(0.4) : AureaColors.text)
-                .frame(width: 40, height: 40).contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle()).disabled(target == nil)
-            .accessibilityLabel(AureaText.t(label))
+    /// Faixa fina das chaves: losangos, o escolhido aceso e o cabeçote. Tocar
+    /// perto de um losango vai até ele e o escolhe; o resto move o cabeçote.
+    private var keyStrip: some View {
+        GeometryReader { geometry in
+            let pad: CGFloat = 8
+            let width = max(1, geometry.size.width - pad * 2)
+            let span = CGFloat(max(1, hi - lo))
+            let xOf: (Int32) -> CGFloat = { t in pad + width * CGFloat(min(max(t, lo), hi) - lo) / span }
+            let frameAt: (CGFloat) -> Int32 = { x in lo + Int32((min(1, max(0, (x - pad) / width)) * span).rounded()) }
+            Canvas { ctx, size in
+                let y = size.height / 2
+                ctx.fill(Path(roundedRect: CGRect(x: pad, y: y - 1.5, width: width, height: 3), cornerRadius: 1.5), with: .color(AureaColors.chip))
+                let r: CGFloat = 5
+                for t in keyTimes where t >= lo - 1 && t <= hi + 1 {
+                    let x = xOf(t)
+                    var p = Path()
+                    p.move(to: CGPoint(x: x, y: y - r)); p.addLine(to: CGPoint(x: x + r, y: y))
+                    p.addLine(to: CGPoint(x: x, y: y + r)); p.addLine(to: CGPoint(x: x - r, y: y)); p.closeSubpath()
+                    ctx.fill(p, with: .color(t == selectedKey || t == model.localPlayhead ? AureaColors.accent : AureaColors.text))
+                }
+                let px = xOf(model.localPlayhead)
+                var line = Path()
+                line.move(to: CGPoint(x: px, y: 2)); line.addLine(to: CGPoint(x: px, y: size.height - 2))
+                ctx.stroke(line, with: .color(AureaColors.playhead), lineWidth: 2)
+            }.contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    let start = value.startLocation.x
+                    if let hit = keyTimes.min(by: { abs(xOf($0) - start) < abs(xOf($1) - start) }), abs(xOf(hit) - start) <= 14 {
+                        if selectedKey != hit { selectedKey = hit; seekLocal(hit) }
+                    } else {
+                        selectedKey = nil
+                        seekLocal(min(max(frameAt(value.location.x), lo), max(lo, hi - 1)))
+                    }
+                })
+        }.frame(height: 32).accessibilityLabel(AureaText.t("remap_faixa_chaves"))
+    }
+
+    private func toggleRow(_ key: String, checked: Bool, _ onChange: @escaping (Bool) -> Void) -> some View {
+        HStack {
+            Text(AureaText.t(key)).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+            AureaToggle(checked: checked, onCheckedChange: onChange)
+        }.frame(height: 48)
     }
 
     private func chip(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {

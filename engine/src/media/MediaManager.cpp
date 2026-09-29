@@ -203,6 +203,13 @@ void MediaManager::collect(u64 frameNumber, u32 idleFrames) {
     }
 }
 
+void MediaManager::touch(LayerId layer, u64 frameNumber) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (Entry& e : entries_) {
+        if (e.layer == layer && e.lastUsedFrame < frameNumber) e.lastUsedFrame = frameNumber;
+    }
+}
+
 void MediaManager::close_layer(LayerId layer) {
     {
         std::lock_guard<std::mutex> lock(mutex_);

@@ -378,7 +378,8 @@ internal class TimelinePainter(
             drawRect(stripe, Offset(x0, top), Size(m.stripe, m.bar), alpha = alpha)
             canvas.restore()
 
-            clipRect(left, top, right, bottom) { drawBarContent(r, top, x0, x1, w, compact, tone, alpha) }
+            // Setas ‹ › do compacto só no trecho escolhido (os outros da linha também aparecem).
+            clipRect(left, top, right, bottom) { drawBarContent(r, top, x0, x1, w, compact && selected, tone, alpha) }
 
             if (selected) {
                 // Escolhido: contorno branco de 2 dp (no lote também).

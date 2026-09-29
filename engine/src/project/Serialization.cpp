@@ -843,7 +843,9 @@ void write_layer(ByteWriter& w, const Layer& l) {
     for (const LayerAnimator& a : l.layerAnimators) {
         w.str(a.name);
         w.boolv(a.enabled);
-        w.u8v(a.unit); w.boolv(a.exit); w.u8v(a.ease); w.boolv(a.scaleSeparated);
+        // Loop no bit alto do byte da curva: leitor antigo lê curva 3 e segue.
+        w.u8v(a.unit); w.boolv(a.exit); w.u8v(static_cast<u8>(std::min<u8>(a.ease, 3) | (a.loop ? 0x80u : 0u)));
+        w.boolv(a.scaleSeparated);
         w.u32v(a.wiggleSeed);
         for (f32 v : {a.progress, a.strength, a.delayMs, a.fromOpacity, a.fromPosX, a.fromPosY, a.fromScale, a.fromScaleY,
                       a.fromRotation, a.fromRotX, a.fromRotY, a.fromTracking, a.wigglePosX, a.wigglePosY, a.wiggleScale,
@@ -855,6 +857,17 @@ void write_layer(ByteWriter& w, const Layer& l) {
     // v37: as camadas escolhidas do ajuste (escopo 2).
     w.u32v(static_cast<u32>(l.adjustmentTargets.size()));
     for (LayerId t : l.adjustmentTargets) w.u64v(t.pack());
+    // v38: rig 2D (juntas: id, pai, posição de montagem). A pose está nas
+    // trilhas RigBone, que já viajam com as outras.
+    w.u32v(l.rig.nextJointId);
+    w.u32v(static_cast<u32>(l.rig.joints.size()));
+    for (const RigJoint& j : l.rig.joints) {
+        w.u32v(j.id);
+        w.u32v(j.parent);
+        w.vec2(j.pos);
+    }
+    // v39: manter o tom do áudio (remapeamento/velocidade).
+    w.boolv(l.keepPitch);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -884,6 +897,10 @@ void write_layer(ByteWriter& w, const Layer& l) {
 //      grupo fechado para a câmera (o render de sempre).
 // v37: camadas escolhidas do ajuste (escopo 2), depois da câmera do grupo.
 //      Antes dela a lista é vazia (e o escopo só vai até 1).
+// v38: rig 2D da camada de imagem (juntas), no fim da camada. Antes dela: sem
+//      rig. A rotação dos ossos são trilhas (TrackProperty::RigBone).
+// v39: "Manter o tom do áudio" da camada, no fim dela. Antes dela: desligado
+//      (o som reamostra e o tom acompanha a velocidade, como sempre).
 // v35: força da bézier (Keyframe::easePower) depois de cada keyframe; antes
 //      dela todo keyframe lê com força 1 — a mesma curva de sempre.
 // O número vive no cabeçalho público (Serialization.hpp) para os testes o
@@ -1355,7 +1372,9 @@ void read_layer(ByteReader& r, Layer& l) {
             a.enabled = r.boolv();
             a.unit = std::min<u8>(r.u8v(), 3);
             a.exit = r.boolv();
-            a.ease = std::min<u8>(r.u8v(), 3);
+            const u8 ease = r.u8v();
+            a.loop = (ease & 0x80u) != 0;
+            a.ease = std::min<u8>(static_cast<u8>(ease & 0x7Fu), 3);
             a.scaleSeparated = r.boolv();
             a.wiggleSeed = r.u32v();
             for (f32* v : {&a.progress, &a.strength, &a.delayMs, &a.fromOpacity, &a.fromPosX, &a.fromPosY, &a.fromScale,
@@ -1379,6 +1398,23 @@ void read_layer(ByteReader& r, Layer& l) {
         l.adjustmentScope = 0;
         l.nested.cameraPassThrough = false;
     }
+    l.rig = RigData{};
+    if (g_readingTimelineVersion >= 38) {
+        // Projeto anterior: sem rig (a imagem desenha como sempre).
+        l.rig.nextJointId = r.u32v();
+        const u32 jointCount = r.u32v();
+        if (jointCount > 64 || r.remaining() < static_cast<u64>(jointCount) * 16) { r.fail(); return; }
+        l.rig.joints.resize(jointCount);
+        for (RigJoint& j : l.rig.joints) {
+            j.id = r.u32v();
+            j.parent = r.u32v();
+            j.pos = r.vec2();
+            if (!std::isfinite(j.pos.x) || !std::isfinite(j.pos.y)) j.pos = Vec2{0.0f, 0.0f};
+            l.rig.nextJointId = std::max(l.rig.nextJointId, j.id + 1);
+        }
+    }
+    // Projeto anterior à v39: o tom acompanha a velocidade (reamostra).
+    l.keepPitch = g_readingTimelineVersion >= 39 ? r.boolv() : false;
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap

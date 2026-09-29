@@ -2,8 +2,10 @@
 //  Aurea / platform / android / MediaCodecSource.cpp
 // =============================================================================
 #include "MediaCodecSource.hpp"
+#include "GlVideoBridge.hpp"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/platform/AndroidVideoPath.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/media/DecodedPlaneBounds.hpp"
 #include "aurea/platform/AndroidVideoCompatibility.hpp"
@@ -263,6 +265,13 @@ public:
     std::vector<u8> compact;   // só para layouts de plano que o renderer não lê direto
 };
 
+/// Quadro do caminho GL do driver: um alvo RGBA8 (AHardwareBuffer) já com a
+/// região visível; o AImage do decoder foi devolvido logo depois do passe GL.
+class GlFrame final : public DecodedFrame {
+public:
+    std::shared_ptr<const GlVideoBridge::Target> target;
+};
+
 // Nome do codec: AMediaCodec_getName é da API 28; resolvido em runtime.
 using GetNameFn = media_status_t (*)(AMediaCodec*, char**);
 using ReleaseNameFn = void (*)(AMediaCodec*, char*);
@@ -291,18 +300,43 @@ const char* software_decoder_for(const char* mime) {
 // -----------------------------------------------------------------------------
 class MediaCodecDecoder final : public VideoDecoderBackend {
 public:
-    MediaCodecDecoder(SourceFd fd, bool zeroCopy, bool thumbnail, bool softwareOnly)
-        : fd_(std::move(fd)), zeroCopy_(zeroCopy && !softwareOnly), thumbnail_(thumbnail), softwareFallback_(softwareOnly) {}
-    ~MediaCodecDecoder() override { destroy_codec(); }
+    MediaCodecDecoder(SourceFd fd, bool zeroCopy, bool thumbnail, bool softwareOnly, bool driverGl = false)
+        : fd_(std::move(fd)), zeroCopy_((zeroCopy || driverGl) && !softwareOnly), thumbnail_(thumbnail),
+          softwareFallback_(softwareOnly), glPath_(driverGl && !softwareOnly && !thumbnail) {}
+    ~MediaCodecDecoder() override {
+        destroy_codec();
+        bridge_.reset();
+    }
 
     Status open() {
+        if (glPath_) {
+            // Caminho GL do driver (o do app antigo): contexto EGL próprio. Sem
+            // ele (extensão ausente, EGL recusado), planos pela CPU desde já.
+            bridge_ = GlVideoBridge::create();
+            if (!bridge_) {
+                glPath_ = false;
+                zeroCopy_ = false;
+            }
+        }
         if (const Status s = create_codec(); !s.ok()) return s;
-        if (!thumbnail_) scan_keyframes();
+        if (bridge_) bridge_->set_max_live_targets(driver_gl_live_frames(info_.codedWidth, info_.codedHeight));
+        if (!thumbnail_) {
+            AUREA_LOG_INFO("video: %s (%s %ux%u, %s)", video_path_name(current_path()),
+                           info_.decoderName[0] ? info_.decoderName : "?", info_.codedWidth, info_.codedHeight,
+                           info_.hardwareDecoder ? "hardware" : "software");
+            scan_keyframes();
+        }
         return OkStatus;
     }
 
+    VideoPath current_path() const noexcept {
+        return glPath_ ? VideoPath::DriverGl : softwareFallback_ ? VideoPath::SoftwarePlanes : VideoPath::CpuPlanes;
+    }
+
     const VideoStreamInfo& info() const noexcept override { return info_; }
-    u32 max_live_frames() const noexcept override { return static_cast<u32>(kMaxImages); }
+    u32 max_live_frames() const noexcept override {
+        return bridge_ && glPath_ ? bridge_->max_live_targets() : static_cast<u32>(kMaxImages);
+    }
     i64 keyframe_interval_us() const noexcept override { return keyframeUs_; }
 
     Status seek_to_keyframe(i64 targetUs) noexcept override {
@@ -344,6 +378,25 @@ public:
             if (const Status status = create_codec(); !status.ok()) return status;
             if (const Status status = seek_to_keyframe(target); !status.ok()) return status;
             result = next_image_timed_frame(target, out, outPtsUs, endOfStream);
+        }
+        // Caminho GL do driver falhou neste vídeo (EGLImage recusado, FBO,
+        // codec que não anda com saída PRIVATE): planos pela CPU com o MESMO
+        // decoder de hardware, a partir do mesmo instante. Só para a frente.
+        VideoPath fallbackPath{};
+        if (!result.ok() && glPath_
+            && next_video_path(VideoPath::DriverGl, result.code(), info_.hardwareDecoder,
+                               software_decoder_for(info_.codec) != nullptr, fallbackPath)) {
+            const i64 target = std::max(deliverFromUs, nextDeliveryUs_);
+            AUREA_LOG_WARN("video: caminho GL do driver falhou (%s); %s em %lld us", result.message().data(),
+                           video_path_name(fallbackPath), static_cast<long long>(target));
+            glPath_ = false;
+            zeroCopy_ = false;
+            destroy_codec();
+            bridge_.reset();   // quadros ainda vivos seguram os próprios alvos
+            if (const Status opened = create_codec(); !opened.ok()) return opened;
+            if (const Status seek = seek_to_keyframe(target); !seek.ok()) return seek;
+            result = legacyLookahead_ ? next_image_timed_frame(target, out, outPtsUs, endOfStream)
+                                      : next_timed_frame(target, out, outPtsUs, endOfStream);
         }
         if (result.ok() || !software_decoder_for(info_.codec)
             || !android::video_software_fallback(result.code(), zeroCopy_, info_.hardwareDecoder, softwareFallback_)) {
@@ -628,7 +681,7 @@ private:
         inputEos_ = false;
         outputEos_ = false;
         AUREA_LOG_INFO("decoder %s (%s, %s) %ux%u rot %u, %s", info_.decoderName[0] ? info_.decoderName : "?",
-                       info_.hardwareDecoder ? "hardware" : "software", zeroCopy_ ? "zero-copy" : "planos na CPU",
+                       info_.hardwareDecoder ? "hardware" : "software", glPath_ ? "caminho GL do driver" : zeroCopy_ ? "zero-copy" : "planos na CPU",
                        info_.codedWidth, info_.codedHeight, info_.rotation, info_.codec);
         return OkStatus;
     }
@@ -655,6 +708,8 @@ private:
         // Frames in flight retain their ReaderState. A new codec must get a
         // new queue, never images or callback credits from the retired codec.
         reader_.reset();
+        // Os buffers do leitor antigo não voltam: as imagens EGL deles saem.
+        if (bridge_) bridge_->forget_sources();
     }
 
     /// Intervalo entre quadros-chave, pelas primeiras amostras de sync. Decide
@@ -773,7 +828,48 @@ private:
         }
     }
 
+    /// Caminho GL do driver: AImage PRIVATE → passe GL → alvo RGBA. O AImage
+    /// volta ao decoder aqui mesmo (em qualquer resultado).
+    Status wrap_driver_gl(AImage* image, i64 pts, FrameRef& out) {
+        AHardwareBuffer* hb = nullptr;
+        if (AImage_getHardwareBuffer(image, &hb) != AMEDIA_OK || !hb) {
+            AImage_delete(image);
+            return Status{Errc::UnsupportedFeature, "AImage sem AHardwareBuffer"};
+        }
+        AHardwareBuffer_Desc d{};
+        AHardwareBuffer_describe(hb, &d);
+        AImageCropRect crop{0, 0, 0, 0};
+        AImage_getCropRect(image, &crop);
+        const i32 imageCrop[4] = {crop.left, crop.top, crop.right, crop.bottom};
+        media::VisibleRegion vis;
+        ExternalQuad quad;
+        if (!media::visible_region(d.width, d.height, imageCrop, outCrop_, info_.codedWidth, info_.codedHeight, vis)
+            || !external_quad(d.width, d.height, vis, 4096, quad)) {
+            AImage_delete(image);
+            return Status{Errc::UnsupportedFormat, "crop fora do buffer decodificado"};
+        }
+        std::shared_ptr<const GlVideoBridge::Target> target;
+        const Status s = bridge_->convert(hb, quad, target);
+        AImage_delete(image);
+        if (!s.ok()) return s;
+        auto* f = new GlFrame();
+        f->target = target;
+        f->ptsUs = pts;
+        f->rotation = info_.rotation;
+        f->color = info_.color;
+        f->width = target->width;
+        f->height = target->height;
+        f->visibleWidth = target->width;
+        f->visibleHeight = target->height;
+        f->hardwareBuffer = target->buffer;
+        f->bufferId = reinterpret_cast<u64>(target->buffer);
+        f->format = PixelFormat::Opaque;
+        out = FrameRef::adopt(f);
+        return OkStatus;
+    }
+
     Status wrap(AImage* image, i64 pts, FrameRef& out) {
+        if (glPath_ && bridge_) return wrap_driver_gl(image, pts, out);
         auto* f = new CodecFrame();
         f->image = image;
         f->owner = reader_;
@@ -816,25 +912,19 @@ private:
             }
         }
 
-        // Região visível: o crop do buffer, senão o do formato de saída, senão tudo.
-        i32 l = crop.left, t = crop.top, r = crop.right, b = crop.bottom;
-        if (r <= l || b <= t) {
-            if (outCrop_[2] > outCrop_[0] && outCrop_[3] > outCrop_[1]) {
-                l = outCrop_[0]; t = outCrop_[1]; r = outCrop_[2] + 1; b = outCrop_[3] + 1;
-            } else {
-                l = 0; t = 0;
-                r = static_cast<i32>(info_.codedWidth ? std::min(info_.codedWidth, f->width) : f->width);
-                b = static_cast<i32>(info_.codedHeight ? std::min(info_.codedHeight, f->height) : f->height);
-            }
-        }
-        if (!f->width || !f->height || l >= static_cast<i32>(f->width) || t >= static_cast<i32>(f->height)) {
+        // Região visível: crop do AImage ∩ crop do formato de saída, sem a
+        // sobra de alinhamento além do tamanho da trilha (media::visible_region,
+        // testada no host). Oppo A94: listras nas bordas com a sobra à mostra.
+        const i32 imageCrop[4] = {crop.left, crop.top, crop.right, crop.bottom};
+        media::VisibleRegion vis;
+        if (!media::visible_region(f->width, f->height, imageCrop, outCrop_, info_.codedWidth, info_.codedHeight, vis)) {
             f->release();
             return Status{Errc::UnsupportedFormat, "crop fora do buffer decodificado"};
         }
-        f->cropLeft = static_cast<u32>(std::max(0, l));
-        f->cropTop = static_cast<u32>(std::max(0, t));
-        f->visibleWidth = std::min<u32>(static_cast<u32>(std::max(1, r - l)), f->width - f->cropLeft);
-        f->visibleHeight = std::min<u32>(static_cast<u32>(std::max(1, b - t)), f->height - f->cropTop);
+        f->cropLeft = vis.left;
+        f->cropTop = vis.top;
+        f->visibleWidth = vis.width;
+        f->visibleHeight = vis.height;
         out = FrameRef::adopt(f);
         return OkStatus;
     }
@@ -889,6 +979,9 @@ private:
     i64 pendingPts_ = 0; // Actual PTS lookahead preserves long VFR presentation intervals.
     bool pendingEos_ = false;
     bool softwareFallback_ = false;
+    /// Caminho GL do driver (padrão): o AImage PRIVATE vira RGBA num passe GL.
+    bool glPath_ = false;
+    std::unique_ptr<GlVideoBridge> bridge_;
     i64 nextDeliveryUs_ = 0;
     i64 keyframeUs_ = 2'000'000;
 };
@@ -1122,8 +1215,16 @@ std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& 
         AUREA_LOG_ERROR("midia do asset '%s' inacessivel", asset.name.c_str());
         return nullptr;
     }
+    // Caminho de partida (AndroidVideoPath.hpp): GL do driver em todo aparelho
+    // cujo backend importa AHardwareBuffer RGBA; modo seguro = software.
+    VideoPathInputs in;
+    in.rgbaImport = driverGl_.load();
+    in.safeMode = softwareOnly_.load();
+    in.thumbnail = priority == MediaPriority::Thumbnail;
+    const VideoPath path = initial_video_path(in);
     const bool zeroCopy = priority != MediaPriority::Thumbnail && zeroCopy_.load();
-    auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy, priority == MediaPriority::Thumbnail, softwareOnly_.load());
+    auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy, priority == MediaPriority::Thumbnail,
+                                                       softwareOnly_.load(), path == VideoPath::DriverGl);
     if (const Status s = decoder->open(); !s.ok()) {
         AUREA_LOG_ERROR("decoder nao abriu: %s", s.message().data());
         return nullptr;

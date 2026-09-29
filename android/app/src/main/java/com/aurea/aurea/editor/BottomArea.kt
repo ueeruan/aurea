@@ -120,6 +120,8 @@ private enum class DockSection(val glyph: Char, @StringRes val label: Int, val p
     Captions(CupertinoGlyph.CaptionsBubble, R.string.sh_dock_captions, EditorPanel.Captions),
     Presets(CupertinoGlyph.WandStars, R.string.sh_dock_presets, EditorPanel.Presets),
     Effects(CupertinoGlyph.Sparkles, R.string.sh_dock_effects, EditorPanel.Effects),
+    // Rig 2D: não abre painel — o palco vira o esqueleto (RigStage.kt).
+    Rig(CupertinoGlyph.PersonCropCircle, R.string.rig_dock, EditorPanel.Transform),
 }
 
 /**
@@ -151,7 +153,7 @@ private fun sectionsFor(l: DockLayer): List<DockSection> {
             add(DockSection.Presets)
             add(DockSection.Effects)
         }
-        LayerType.Image -> listOf(DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
+        LayerType.Image -> listOf(DockSection.Move, DockSection.Rig, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         LayerType.Audio -> listOf(DockSection.Audio, DockSection.Captions, DockSection.Presets, DockSection.Effects)
         LayerType.Model3D -> if (l.text3D) listOf(DockSection.EditText, DockSection.TextOptions, DockSection.Move, DockSection.Blend, DockSection.Presets, DockSection.Effects)
             else listOf(DockSection.Move, DockSection.Environment, DockSection.Blend, DockSection.Presets, DockSection.Effects)
@@ -278,6 +280,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { s -> DockTile(s, EditorLayout.DOCK_TILE) {
                     if (s == DockSection.EditText) store.openTextContentEditor()
+                    else if (s == DockSection.Rig) RigStage.open(store)
                     else openPanel(store, ui, panelFor(store, s))
                 } }
             }

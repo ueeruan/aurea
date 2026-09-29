@@ -81,8 +81,11 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.light.deep_glow_2", FxEffectHuman(keywords: "deep glow 2 brilho bloom halo", principal: [0, 1, 2, 3, 13])),
     ("aurea.light.shadow_studio_3", FxEffectHuman(keywords: "shadow studio 3 sombra long radial inner", principal: [0, 1, 2, 3, 4])),
     ("aurea.generate.tracery", FxEffectHuman(keywords: "tracery color detection boxes rastreio cor conexoes", principal: [0, 1, 3, 7, 14], params: [2: FxParamHuman(decimals: 2)])),
-    ("aurea.text3d.layout", FxEffectHuman(keywords: "letter rotation letras rotacao delay atraso cylinder twist",
-        principal: [0, 1, 2, 9, 10])),
+    ("aurea.text3d.layout", FxEffectHuman(keywords: "letter rotation letras rotacao delay atraso cylinder twist random aleatorio",
+        principal: [0, 1, 2, 12, 13, 9, 10])),
+    // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
+    ("aurea.shape3d.layout", FxEffectHuman(keywords: "shape parts partes forma 3d rotation rotacao delay atraso spread espalhar explodir twist random aleatorio",
+        principal: [0, 1, 2, 12, 13, 9, 4])),
     ("aurea.transform", FxEffectHuman(
         name: "fx_name_transform",
         keywords: "transform mover posicao escala girar rotacao opacidade",
@@ -1485,6 +1488,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.generate.audio_waveform", "afx_desc_audio_waveform", FxAllTargets, "forma de onda waveform audio osciloscopio som visualizador")
     put("aurea.generate.spectrum_analyzer", "afx_desc_spectrum", FxAllTargets, "espectro spectrum audio barras frequencias visualizador equalizador")
     put("aurea.stylize.ball_grid", "afx_desc_balls", FxVisualTargets, "bolas esferas balls spheres grade particulas explodir dispersar")
+    put("aurea.shape3d.layout", "fx_desc_shape3d_layout", [.cena3D], "forma 3d shape partes parts girar espalhar explodir atraso aleatorio")
     put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")

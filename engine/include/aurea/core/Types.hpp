@@ -211,6 +211,8 @@ enum class TrackProperty : u16 {
     CameraBlur,        ///< lente: força do desfoque de profundidade (× o círculo de confusão físico)
     Speed,             ///< velocidade do conteúdo animada (quadros da fonte por quadro); a fonte = integral dela
     LayerAnimParam,    ///< parâmetro de animador de camada (effectIndex = animador, paramIndex = LayerAnimParam)
+    RigBone,           ///< rotação do osso do rig 2D, graus (paramIndex = id da junta na ponta do osso)
+    ShapePart,         ///< parte da forma 3D (effectIndex = parte, paramIndex = canal 0..8: pos XYZ, rot XYZ °, escala XYZ)
     _Count,
 };
 

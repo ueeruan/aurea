@@ -1096,6 +1096,20 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
         materialCopies.emplace_back(&inst, index, source); return source;
     };
+    // Letra do texto 3D sumindo (SceneInstance::nodeOpacity): cópia do
+    // material com a opacidade multiplicada, misturada como transparente.
+    std::vector<std::tuple<const GpuMaterial*, u32, const GpuMaterial*>> fadedCopies;
+    auto faded = [&](const GpuMaterial* source, f32 alpha) -> const GpuMaterial* {
+        const u32 q = static_cast<u32>(std::lround(std::clamp(alpha, 0.0f, 1.0f) * 255.0f));
+        if (q >= 255) return source;
+        for (const auto& c : fadedCopies) if (std::get<0>(c) == source && std::get<1>(c) == q) return std::get<2>(c);
+        overriddenMaterials->push_back(*source);
+        auto& mat = overriddenMaterials->back();
+        mat.factors.baseColor.w *= static_cast<f32>(q) / 255.0f;
+        mat.factors.alphaMode = AlphaMode::Blend;
+        fadedCopies.emplace_back(source, q, &mat);
+        return &mat;
+    };
     std::vector<Draw> opaque, blended;
     // Chave = (material, ambiente): dois objetos com o mesmo material e
     // ambientes diferentes NÃO podem dividir o mesmo bloco.
@@ -1323,6 +1337,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             for (usize n = 0; n < nodes.size(); ++n) {
                 const i32 mi = nodes[n].mesh;
                 if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
+                if (n < inst.nodeOpacity.size() && inst.nodeOpacity[n] < 0.5f) continue;   // letra sumindo não projeta
                 const i32 skinIndex = nodes[n].skin;
                 const bool skinnedNode = joints.valid() && skinIndex >= 0
                                        && skinIndex < static_cast<i32>(inst.skinJointOffset.size()) && gm->skin.valid();
@@ -1433,6 +1448,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         for (usize n = 0; n < nodes.size(); ++n) {
             const i32 mi = nodes[n].mesh;
             if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
+            const f32 nodeAlpha = n < inst.nodeOpacity.size() ? inst.nodeOpacity[n] : 1.0f;
+            if (nodeAlpha <= 0.004f) continue;   // letra ainda invisível: nada a desenhar
             // Malha com skin: a pose vem das juntas (já no espaço da cena do
             // modelo); o nó da malha não entra (regra do glTF).
             const i32 skinIndex = nodes[n].skin;
@@ -1455,7 +1472,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     ++stats_.culledPrimitives;
                     continue;
                 }
-                const GpuMaterial* mat = material_for(inst, *gm, p.material);
+                const GpuMaterial* mat = faded(material_for(inst, *gm, p.material), nodeAlpha);
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:
                 // o que está atrás aparece e o reflexo continua inteiro.

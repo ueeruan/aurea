@@ -545,6 +545,13 @@ private:
     u32 imageIndex_ = 0;
     bool imageAcquired_ = false;
     bool swapchainDirty_ = false;
+    /// VK_SUBOPTIMAL_KHR visto (aquisição/apresentação). NÃO recria sozinho:
+    /// begin_frame confere se a superfície mudou de verdade (ver lá).
+    bool swapchainSuboptimal_ = false;
+    /// `currentTransform` da superfície quando o swapchain atual nasceu.
+    VkSurfaceTransformFlagBitsKHR swapCapsTransform_ = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    u64 suboptimalCheckFrame_ = 0;
+    u32 suboptimalIgnored_ = 0;
 
     // Medição
     std::vector<GpuTiming> timings_;

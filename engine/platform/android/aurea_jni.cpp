@@ -407,23 +407,27 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
         c->engine.shutdown();
         return JNI_FALSE;
     }
-    // Zero-copy só onde a GPU importa o AHardwareBuffer do decoder; senão os
-    // planos vêm pela CPU. Decidido uma vez, a partir das capacidades reais.
+    // Caminho do vídeo (aurea/platform/AndroidVideoPath.hpp): o GL do DRIVER em
+    // todo aparelho cujo backend importa AHardwareBuffer RGBA — Samsung, Mali,
+    // Immortalis, PowerVR, Adreno, emulador. O driver converte o YUV (como no
+    // app antigo); o Vulkan só amostra RGBA8. Por decoder, se o GL falhar:
+    // planos pela CPU (hardware) → decoder de software.
     //
-    // QUIRK: o emulador (gfxstream) anuncia VK_ANDROID_external_memory_android_
-    // hardware_buffer e a conversão YCbCr, mas amostra o buffer YUV externo como
-    // bytes crus (plano Y em cima, UV embaixo). Lá o caminho é o de planos.
-    const bool emulator = running_on_emulator();
+    // O zero-copy antigo (YCbCr externo no Vulkan) está aposentado: era ele o
+    // trecho dependente de driver (preview piscando no Immortalis-G715,
+    // listras no PowerVR GM9446, crash em Samsung, bytes crus no gfxstream).
     char manufacturer[PROP_VALUE_MAX]{}, sdk[PROP_VALUE_MAX]{};
     __system_property_get("ro.product.manufacturer", manufacturer);
     __system_property_get("ro.build.version.sdk", sdk);
-    const bool readablePlanes = android::needs_readable_video_planes(manufacturer, std::atoi(sdk));
-    const bool zeroCopy = gpu->capabilities().zero_copy_video() && !emulator && !readablePlanes;
-    c->media.set_software_only(android::needs_software_video(manufacturer, std::atoi(sdk)));
-    c->media.set_zero_copy(zeroCopy);
-    AUREA_LOG_INFO("video: %s%s", zeroCopy ? "zero-copy (AHardwareBuffer)" : "planos pela CPU",
-                   emulator ? " (emulador: YCbCr externo nao confiavel)" :
-                   readablePlanes ? " (compatibilidade Samsung; decoder de software)" : "");
+    const bool rgbaImport = gpu->capabilities().externalMemoryHardwareBuffer;
+    c->media.set_driver_gl(rgbaImport);
+    c->media.set_zero_copy(false);
+    // Sem o GL (backend GLES, sem importação): a regra de antes — Samsung no
+    // decoder de software, o resto em planos pela CPU.
+    c->media.set_software_only(!rgbaImport && android::needs_software_video(manufacturer, std::atoi(sdk)));
+    AUREA_LOG_INFO("video: %s%s", rgbaImport ? "caminho GL do driver (padrao)" : "planos pela CPU",
+                   rgbaImport ? "; queda por decoder: planos pela CPU -> decoder de software"
+                   : running_on_emulator() ? " (emulador sem importacao)" : " (backend sem importacao de AHardwareBuffer)");
     c->engine.start_render_thread();
     c->initialized = true;
     return JNI_TRUE;
@@ -435,6 +439,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
 AUREA_JNI void AUREA_FN(nativeUseReadableVideoPlanes)(JNIEnv*, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);
     if (!c) return;
+    c->media.set_driver_gl(false);
     c->media.set_software_only(true);
     c->media.set_zero_copy(false);
     AUREA_LOG_INFO("video: decoder de software e planos proprios (modo seguro)");
@@ -1235,6 +1240,56 @@ AUREA_JNI jint AUREA_FN(nativeQueryMasks)(JNIEnv* env, jclass, jlong handle, jlo
     return static_cast<jint>(need);
 }
 
+// --- Rig 2D (Engine::query_rig e família) ------------------------------------
+AUREA_JNI jint AUREA_FN(nativeQueryRig)(JNIEnv* env, jclass, jlong handle, jlong layer, jboolean bind, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    const jsize cap = out ? env->GetArrayLength(out) : 0;
+    std::vector<f32> v(static_cast<usize>(cap));
+    const u32 need = c->engine.query_rig(static_cast<u64>(layer), bind == JNI_TRUE, cap ? v.data() : nullptr, static_cast<u32>(cap));
+    if (need && need <= static_cast<u32>(cap)) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(need), v.data());
+    return static_cast<jint>(need);
+}
+
+AUREA_JNI jint AUREA_FN(nativeRigAddJoint)(JNIEnv*, jclass, jlong handle, jlong layer, jint parent, jfloat x, jfloat y) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.rig_add_joint(static_cast<u64>(layer), parent, x, y) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRigMoveJoint)(JNIEnv*, jclass, jlong handle, jlong layer, jint joint, jfloat x, jfloat y,
+                                                jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && joint >= 0 && c->engine.rig_move_joint(static_cast<u64>(layer), static_cast<u32>(joint), x, y, continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRigRemoveJoint)(JNIEnv*, jclass, jlong handle, jlong layer, jint joint) {
+    NativeContext* c = ctx_of(handle);
+    return c && joint >= 0 && c->engine.rig_remove_joint(static_cast<u64>(layer), static_cast<u32>(joint)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRigClear)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.rig_clear(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeRigAutoHumanoid)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.rig_auto_humanoid(static_cast<u64>(layer))) : 0;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRigPoseJoint)(JNIEnv*, jclass, jlong handle, jlong layer, jint joint, jfloat x, jfloat y,
+                                                jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && joint >= 0 && c->engine.rig_pose_joint(static_cast<u64>(layer), static_cast<u32>(joint), x, y, continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI void AUREA_FN(nativeSetRigSetupLayer)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (c) c->engine.set_rig_setup_layer(static_cast<u64>(layer));
+}
+
 /// Quadros rastreados, ou −Errc.
 AUREA_JNI jint AUREA_FN(nativeTrackMask)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint mode) {
     NativeContext* c = ctx_of(handle);
@@ -1408,6 +1463,101 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryModelShadows)(JNIEnv* env, jclass, jlong 
     f32 v[2]{};
     if (!c->engine.query_model_shadows(static_cast<u64>(layer), v)) return JNI_FALSE;
     env->SetFloatArrayRegion(out, 0, 2, v);
+    return JNI_TRUE;
+}
+
+// --- Formas 3D (Engine::add_shape3d e família; scene3d/Shape3D.hpp) -----------
+AUREA_JNI jlong AUREA_FN(nativeAddShape3d)(JNIEnv* env, jclass, jlong handle, jint kind, jstring name) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || kind < 0) return -static_cast<jlong>(Errc::InvalidState);
+    std::string label;
+    if (name) { const char* v = env->GetStringUTFChars(name, nullptr); if (v) { label = v; env->ReleaseStringUTFChars(name, v); } }
+    const Result<u64> r = c->engine.add_shape3d(static_cast<u32>(kind), label.c_str());
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
+/// Receita: out[0] forma, out[1] nº de partes, depois 5 por parte (RGBA sRGB,
+/// 1 = tem imagem). Devolve o nº de partes (−1 = não é forma 3D).
+AUREA_JNI jint AUREA_FN(nativeQueryShape3d)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    constexpr jsize kFloats = 2 + 5 * static_cast<jsize>(aurea::scene3d::kShape3DMaxParts);
+    if (!c || !out || env->GetArrayLength(out) < kFloats) return -1;
+    aurea::scene3d::Shape3DSpec s;
+    if (!c->engine.query_shape3d(static_cast<u64>(layer), s)) return -1;
+    f32 v[kFloats]{};
+    v[0] = static_cast<f32>(static_cast<u32>(s.kind));
+    v[1] = static_cast<f32>(s.parts.size());
+    for (usize i = 0; i < s.parts.size() && i < aurea::scene3d::kShape3DMaxParts; ++i) {
+        f32* o = v + 2 + i * 5;
+        o[0] = s.parts[i].color.x; o[1] = s.parts[i].color.y; o[2] = s.parts[i].color.z; o[3] = s.parts[i].color.w;
+        o[4] = s.parts[i].image.empty() ? 0.0f : 1.0f;
+    }
+    env->SetFloatArrayRegion(out, 0, kFloats, v);
+    return static_cast<jint>(s.parts.size());
+}
+
+/// Cor (nula = mantém) e imagem (nula = mantém, "" = tira) da parte (−1 = todas).
+AUREA_JNI jboolean AUREA_FN(nativeSetShape3dPartStyle)(JNIEnv* env, jclass, jlong handle, jlong layer, jint part, jfloatArray rgba,
+                                                       jstring image) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    f32 color[4]{};
+    const bool hasColor = rgba && env->GetArrayLength(rgba) >= 4;
+    if (hasColor) env->GetFloatArrayRegion(rgba, 0, 4, color);
+    std::string path;
+    if (image) { const char* v = env->GetStringUTFChars(image, nullptr); if (v) { path = v; env->ReleaseStringUTFChars(image, v); } }
+    return c->engine.set_shape3d_part_style(static_cast<u64>(layer), part, hasColor ? color : nullptr, image ? path.c_str() : nullptr).ok()
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryShape3dParts)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    const jsize cap = out ? env->GetArrayLength(out) : 0;
+    std::vector<f32> v(static_cast<usize>(cap));
+    const u32 need = c->engine.query_shape3d_parts(static_cast<u64>(layer), cap ? v.data() : nullptr, static_cast<u32>(cap));
+    if (need && need <= static_cast<u32>(cap)) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(need), v.data());
+    return static_cast<jint>(need);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetShape3dPart)(JNIEnv* env, jclass, jlong handle, jlong layer, jint part, jfloatArray values,
+                                                  jint mask, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || part < 0 || !values || env->GetArrayLength(values) < 9) return JNI_FALSE;
+    f32 v[9];
+    env->GetFloatArrayRegion(values, 0, 9, v);
+    return c->engine.set_shape3d_part(static_cast<u64>(layer), static_cast<u32>(part), v, static_cast<u32>(mask), continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeToggleShape3dPartKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint part) {
+    NativeContext* c = ctx_of(handle);
+    return c && part >= 0 ? c->engine.toggle_shape3d_part_key(static_cast<u64>(layer), static_cast<u32>(part)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeResetShape3dPart)(JNIEnv*, jclass, jlong handle, jlong layer, jint part) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.reset_shape3d_part(static_cast<u64>(layer), part) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeQueryShape3dPartGizmo)(JNIEnv* env, jclass, jlong handle, jlong layer, jint part, jfloat length,
+                                                         jfloatArray out, jboolean localSpace) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || part < 0 || !out || env->GetArrayLength(out) < 8) return JNI_FALSE;
+    f32 v[8];
+    if (!c->engine.query_shape3d_part_gizmo(static_cast<u64>(layer), static_cast<u32>(part), length, v, localSpace == JNI_TRUE)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 8, v);
+    return JNI_TRUE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeShape3dPartMove)(JNIEnv* env, jclass, jlong handle, jlong layer, jint part, jint axis, jfloat amount,
+                                                   jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || part < 0 || axis < 0 || !out || env->GetArrayLength(out) < 3) return JNI_FALSE;
+    f32 v[3];
+    if (!c->engine.shape3d_part_move(static_cast<u64>(layer), static_cast<u32>(part), static_cast<u32>(axis), amount, v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 3, v);
     return JNI_TRUE;
 }
 
@@ -1917,6 +2067,25 @@ AUREA_JNI jboolean AUREA_FN(nativeApplyTextPreset)(JNIEnv*, jclass, jlong handle
 
 // --- Animadores de camada, desfoque por camada e escopo de grupo --------------
 
+/// Animação de texto 3D: 3 modos × Engine::kText3DAnimFloats (nulo = não é texto 3D).
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryText3dAnim)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    f32 v[3 * Engine::kText3DAnimFloats] = {};
+    if (!c || !c->engine.query_text3d_anim(static_cast<u64>(layer), v)) return nullptr;
+    jfloatArray out = env->NewFloatArray(static_cast<jsize>(3 * Engine::kText3DAnimFloats));
+    if (out) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(3 * Engine::kText3DAnimFloats), v);
+    return out;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeApplyText3dAnim)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset, jint mode, jint unit,
+                                                   jfloat durationSec, jfloat staggerMs) {
+    NativeContext* c = ctx_of(handle);
+    return c && mode >= 0 && unit >= 0
+                   && c->engine.apply_text3d_anim(static_cast<u64>(layer), preset, static_cast<u32>(mode), static_cast<u32>(unit),
+                                                  durationSec, staggerMs)
+               ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jfloatArray AUREA_FN(nativeQueryLayerAnimators)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     if (!c) return nullptr;
@@ -2390,6 +2559,16 @@ AUREA_JNI jint AUREA_FN(nativeEditTimeRemapKey)(JNIEnv*, jclass, jlong handle, j
 AUREA_JNI jboolean AUREA_FN(nativeRemoveTimeRemapKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index) {
     NativeContext* c = ctx_of(handle);
     return c && index >= 0 && c->engine.remove_time_remap_key(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeReverseTimeRemap)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.reverse_time_remap(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetKeepPitch)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_keep_pitch(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeSetFrameBlend)(JNIEnv*, jclass, jlong handle, jlong layer, jint mode) {

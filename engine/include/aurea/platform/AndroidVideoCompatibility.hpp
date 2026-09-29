@@ -19,6 +19,14 @@ inline bool needs_readable_video_planes(std::string_view manufacturer, int sdk) 
     return true;
 }
 
+// O caminho padrão do vídeo no Android é o GL do DRIVER (AndroidVideoPath.hpp),
+// em toda marca e GPU. As decisões por fabricante abaixo valem só quando o
+// backend não importa AHardwareBuffer RGBA (GLES) e no modo seguro. O antigo
+// zero-copy com YCbCr externo no Vulkan saiu: era o trecho dependente de
+// driver — preview piscando no Immortalis-G715 (Xiaomi 13T Pro), listras nas
+// bordas no PowerVR GM9446 (Oppo A94), crash em Samsung, bytes crus no
+// gfxstream do emulador.
+
 inline bool needs_software_video(std::string_view manufacturer, int sdk, bool safeMode = false) noexcept {
     return safeMode || needs_readable_video_planes(manufacturer, sdk);
 }

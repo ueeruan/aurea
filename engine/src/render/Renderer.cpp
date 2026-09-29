@@ -6,11 +6,13 @@
 
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
+#include "aurea/timeline/Rig.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -390,6 +392,12 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
     }
     scene3d::evaluate_pose(asset, clip, t, pose);
     scene3d::apply_text3d_layout(asset, l, materialTime, pose.nodeWorld);
+    // Formas 3D: o layout das partes (Shape 3D Layout) antes das trilhas de cada parte.
+    scene3d::apply_shape3d_layout(asset, l, materialTime, pose.nodeWorld);
+    // Formas 3D: cada parte com o transform das trilhas dela (mesmo caminho no export).
+    scene3d::apply_shape3d_parts(asset, l, materialTime, pose.nodeWorld);
+    // Animação de texto 3D (animadores por letra/palavra/linha): mesmo caminho no export.
+    scene3d::apply_text3d_animators(asset, l, materialTime, comp.fps(), pose.nodeWorld, inst.nodeOpacity);
     inst.nodeWorld = std::move(pose.nodeWorld);
     inst.jointMatrices = std::move(pose.jointMatrices);
     inst.skinJointOffset = std::move(pose.skinJointOffset);
@@ -768,6 +776,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     keys.push_back(PipelineKey::fullscreen(ShaderId::video_rgba_to_linear_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::shape_shape_frag, kWorkFormat));
     keys.push_back(PipelineKey::graphics(ShaderId::vector_path_vert, ShaderId::vector_path_frag, kWorkFormat, true, BlendMode::Normal));
+    keys.push_back(PipelineKey::graphics(ShaderId::rig_mesh_vert, ShaderId::rig_mesh_frag, kWorkFormat, true, BlendMode::Normal));
     keys.push_back(PipelineKey::fullscreen(ShaderId::common_copy_frag, kWorkFormat));
     keys.push_back(PipelineKey::fullscreen(ShaderId::mask_raster_frag, SurfaceFormat::R8));
     keys.push_back(PipelineKey::fullscreen(ShaderId::mask_apply_frag, kWorkFormat));
@@ -1336,6 +1345,44 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.pixels = px;
                 rl.source.width = px->width;
                 rl.source.height = px->height;
+                // RIG 2D: a malha presa aos ossos, na pose do instante. Na
+                // montagem (todos os ângulos 0) a imagem sai intacta pelo
+                // caminho de sempre. A textura da camada vira a CAIXA da pose
+                // (um braço pode sair do retângulo da imagem) e a origem da
+                // camada não anda (srcShift, como na camada vetorial).
+                if (l->rig.active() && (settings.finalQuality || rigSetupLayer_.load(std::memory_order_relaxed) != id.pack())) {
+                    std::vector<f32> deg;
+                    rig::sample_angles(*l, local, deg);
+                    bool posed = false;
+                    for (f32 a : deg) posed = posed || std::fabs(a) > 1e-4f;
+                    if (posed) {
+                        std::vector<rig::Affine> bones;
+                        rig::pose(l->rig, deg, bones);
+                        rig::SkinMesh mesh;
+                        rig::build_skin(l->rig, static_cast<f32>(px->width), static_cast<f32>(px->height), 32, mesh);
+                        std::vector<Vec2> moved;
+                        rig::deform(mesh, bones, moved);
+                        Vec2 mn{1e30f, 1e30f}, mx{-1e30f, -1e30f};
+                        for (Vec2 q : moved) {
+                            mn = Vec2{std::min(mn.x, q.x), std::min(mn.y, q.y)};
+                            mx = Vec2{std::max(mx.x, q.x), std::max(mx.y, q.y)};
+                        }
+                        mn = mn - Vec2{1.0f, 1.0f};
+                        mx = mx + Vec2{1.0f, 1.0f};
+                        if (!mesh.tris.empty() && mx.x - mn.x < 16384.0f && mx.y - mn.y < 16384.0f) {
+                            rl.source.rigImageW = px->width;
+                            rl.source.rigImageH = px->height;
+                            rl.source.width = static_cast<u32>(std::max(1.0f, std::ceil(mx.x - mn.x)));
+                            rl.source.height = static_cast<u32>(std::max(1.0f, std::ceil(mx.y - mn.y)));
+                            srcShift = Vec2{-mn.x, -mn.y};
+                            rl.source.rigFirst = static_cast<u32>(out.vec.size());
+                            rl.source.rigCount = static_cast<u32>(mesh.tris.size());
+                            out.vec.reserve(out.vec.size() + mesh.tris.size());
+                            for (u32 vi : mesh.tris)
+                                out.vec.push_back(Vec4{moved[vi].x - mn.x, moved[vi].y - mn.y, mesh.uv[vi].x, mesh.uv[vi].y});
+                        }
+                    }
+                }
                 break;
             }
             case LayerKind::Shape: {
@@ -2303,10 +2350,15 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         if (rl.source.kind == LayerSource::Kind::Image && backend_ && l->kind == LayerKind::Image) {
             const u64 key = l->source.pack();
             auto it = images_.find(key);
+            // Rig posado: `width/height` viram a CAIXA da pose (maior que a
+            // foto); a textura é a foto, no tamanho dos pixels. Com a caixa, o
+            // envio lia além do fim dos pixels e o app fechava ao dobrar um osso.
+            const u32 imgW = rl.source.rigCount > 0 ? rl.source.rigImageW : rl.source.width;
+            const u32 imgH = rl.source.rigCount > 0 ? rl.source.rigImageH : rl.source.height;
             // Mesmo id com outro tamanho = outro conteúdo (projeto trocado
             // sem liberar, asset reimportado): a textura velha não serve.
             if (it != images_.end()
-                && (it->second.width != rl.source.width || it->second.height != rl.source.height)) {
+                && (it->second.width != imgW || it->second.height != imgH)) {
                 destroy_image_linear(it->second);
                 backend_->destroy_texture(it->second.texture);
                 images_.erase(it);
@@ -2314,20 +2366,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
             if (it == images_.end()) {
                 TextureDesc d;
-                d.width = rl.source.width;
-                d.height = rl.source.height;
+                d.width = imgW;
+                d.height = imgH;
                 d.format = SurfaceFormat::RGBA8;
                 d.sampled = true;
                 d.transferDst = true;
                 d.debugName = "imagem";
-                auto tex = backend_->create_texture(d);
+                const bool enough = rl.source.pixels->rgba.size() >= static_cast<usize>(imgW) * imgH * 4;
+                auto tex = enough ? backend_->create_texture(d) : Result<TextureHandle>{Status{Errc::InvalidArgument}};
                 if (tex.ok()) {
                     PendingUpload up;
                     up.texture = *tex;
-                    up.bytesPerRow = rl.source.width * 4;
+                    up.bytesPerRow = imgW * 4;
                     up.data = rl.source.pixels->rgba;
                     uploads_.push_back(std::move(up));
-                    images_[key] = ImageTexture{*tex, rl.source.width, rl.source.height, frameNumber};
+                    images_[key] = ImageTexture{*tex, imgW, imgH, frameNumber};
                 }
             } else {
                 it->second.lastFrame = frameNumber;
@@ -3262,6 +3315,37 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             return true;
         }
         case LayerSource::Kind::Image: {
+            if (layer.source.rigCount > 0) {
+                // Rig 2D: a imagem linear no tamanho dela (o mesmo caminho,
+                // com o cache de densidade) e depois a malha deformada, que
+                // amostra a imagem, na textura da caixa da pose.
+                if (!vecFrameBuf_.valid() || !currentSnap_) return false;
+                auto pipe = shaders_.pipeline(PipelineKey::graphics(ShaderId::rig_mesh_vert, ShaderId::rig_mesh_frag, kWorkFormat, true,
+                                                                    BlendMode::Normal));
+                if (!pipe.ok()) return false;
+                RenderLayer flat = layer;
+                flat.source.rigCount = 0;
+                flat.source.width = layer.source.rigImageW;
+                flat.source.height = layer.source.rigImageH;
+                LayerImage img;
+                if (!build_source(flat, layerIndex, hasEffects, img, framesUsed, frameNumber) || !img.texture.valid()) return false;
+                out.texture = graph_.create_texture("layer-rig", d);
+                struct Cap { PipelineHandle p; BufferHandle buf; FGTexture src; u64 sampler; Mat4 clip; Vec4 params; u32 count; } cap{
+                    *pipe, vecFrameBuf_, img.texture, shaders_.sampler(CommonSampler::LinearClamp).id,
+                    clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)),
+                    Vec4{static_cast<f32>(currentSnap_->vecBase + layer.source.rigFirst), 0, 0, 0}, layer.source.rigCount};
+                const u32 pass = graph_.add_raster_pass("rig", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                                        [cap](PassContext& pc) {
+                    pc.cmds.bind_pipeline(cap.p);
+                    pc.cmds.bind_storage_buffer(cap.buf);
+                    pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+                    struct { Mat4 m; Vec4 params; } push{cap.clip, cap.params};
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(cap.count);
+                });
+                graph_.read(pass, img.texture);
+                return true;
+            }
             auto it = images_.find(layer.source.image.pack());
             if (it == images_.end()) return false;
             // A imagem não muda: a versão linear nesta densidade, se já existe,

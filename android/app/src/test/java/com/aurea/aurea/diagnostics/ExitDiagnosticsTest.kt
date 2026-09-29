@@ -14,6 +14,24 @@ class ExitDiagnosticsTest {
         }
     }
 
+    @Test fun exportFrameDetailFitsAndNeverCarriesPathsOrNames() {
+        // O marcador do export leva o quadro ("fecha em 70%": em QUAL quadro).
+        for (phase in ExitDiagnostics.Phase.entries) {
+            val bytes = ExitDiagnostics.marker(phase, Int.MAX_VALUE, Long.MAX_VALUE, "f=4294967295/4294967295")
+            assertTrue(bytes.size <= 128)
+        }
+        val s = ExitDiagnostics.marker(ExitDiagnostics.Phase.PROJECT_EXPORT_VIDEO, 2126, 5_000, "f=1400/2000").toString(Charsets.UTF_8)
+        assertEquals("Aurea build=2126 phase=PROJECT_EXPORT_VIDEO f=1400/2000 uptimeMs=5000", s)
+        // Caminho, espaço, URI e nome saem.
+        assertEquals("f=1/2", ExitDiagnostics.cleanDetail("f=1/2"))
+        assertFalse(ExitDiagnostics.cleanDetail("/storage/emulated/0/Minha Viagem.mp4 content://x").contains(" "))
+        assertTrue(ExitDiagnostics.cleanDetail("x".repeat(100)).length <= 24)
+        assertEquals("", ExitDiagnostics.cleanDetail("çãé"))
+        // O detalhe não quebra a leitura do modo seguro de vídeo (uptimeMs no fim).
+        val video = ExitDiagnostics.marker(ExitDiagnostics.Phase.VIDEO_READY, 2126, 1_000, "f=1/2").toString(Charsets.UTF_8)
+        assertTrue(ExitDiagnostics.crashedDuringVideo(5, video, 2126, 2_000))
+    }
+
     @Test fun onlyCrashesDuringVideoImportOfThisBuildTurnOnSafeVideoMode() {
         val native = 5   // ApplicationExitInfo.REASON_CRASH_NATIVE
         val java = 4     // ApplicationExitInfo.REASON_CRASH

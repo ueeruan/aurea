@@ -1,0 +1,121 @@
+// =============================================================================
+//  Aurea / platform / ios / app / StageZoom.swift
+//
+//  Zoom da VISTA do palco (lupa da prévia), par do StageZoom.kt do Android: só
+//  muda como a composição aparece na tela, nunca o projeto, o render nem o
+//  export. O motor aplica o mesmo zoom/pan no passe de saída da prévia
+//  (`viewportZoom`/`viewportPan`, em px do drawable); o overlay e os gestos
+//  usam os mesmos números para desenhar as alças e converter o toque.
+// =============================================================================
+import SwiftUI
+import UIKit
+
+/// Contas puras (as mesmas do StageZoomMath.kt, testadas na JVM do Android).
+enum StageZoomMath {
+    static let minZoom: CGFloat = 1
+    static let maxZoom: CGFloat = 8
+
+    /// Zoom preso em [1×, 8×]; lixo (NaN/∞) volta ao encaixe.
+    static func clampZoom(_ z: CGFloat) -> CGFloat { z.isFinite ? min(maxZoom, max(minZoom, z)) : minZoom }
+
+    /// Pan máximo num eixo: a borda da composição vai até onde fica em 100 %.
+    static func maxPan(_ zoom: CGFloat, _ baseExtent: CGFloat) -> CGFloat { max(0, (zoom - 1) * baseExtent / 2) }
+
+    static func clampPan(_ pan: CGFloat, zoom: CGFloat, baseExtent: CGFloat) -> CGFloat {
+        guard pan.isFinite else { return 0 }
+        let limit = maxPan(zoom, baseExtent)
+        return min(limit, max(-limit, pan))
+    }
+
+    /// Pinça: o ponto sob o meio inicial dos dedos (`mid0`) fica sob `mid`.
+    static func pinchPan(_ pan0: CGFloat, zoom0: CGFloat, zoom1: CGFloat, mid0: CGFloat, mid: CGFloat, centre: CGFloat) -> CGFloat {
+        let z0 = zoom0 > 0 ? zoom0 : 1
+        return (mid - centre) - (mid0 - centre - pan0) * (zoom1 / z0)
+    }
+
+    static func isZoomed(_ zoom: CGFloat) -> Bool { zoom > minZoom + 0.005 }
+    static func percent(_ zoom: CGFloat) -> Int { Int((zoom * 100).rounded()) }
+
+    /// Encaixe da composição no palco com o zoom/pan da vista: escala (pt por
+    /// px da composição) e origem (canto sup-esq da composição, em pt).
+    static func fit(size: CGSize, composition: CGSize, zoom: CGFloat, pan: CGSize) -> (scale: CGFloat, origin: CGPoint) {
+        let cw = max(1, composition.width), ch = max(1, composition.height)
+        let base = min(size.width / cw, size.height / ch)
+        let scale = base * zoom
+        return (scale, CGPoint(x: (size.width - cw * scale) / 2 + pan.width, y: (size.height - ch * scale) / 2 + pan.height))
+    }
+}
+
+/// Estado da vista do palco (sessão do editor, nunca vai para o projeto).
+@MainActor final class StageViewZoom: ObservableObject {
+    static let shared = StageViewZoom()
+    @Published private(set) var zoom: CGFloat = 1
+    /// Pan em pt da tela (o motor recebe em px do drawable).
+    @Published private(set) var pan: CGSize = .zero
+    /// Lupa ligada: a pinça sempre amplia a VISTA, mesmo sobre a camada escolhida.
+    @Published var zoomLock = false
+    private var projectKey: URL??
+
+    var zoomed: Bool { StageZoomMath.isZoomed(zoom) }
+
+    /// Aplica e manda ao motor (só se mudou). `pixelScale` = pt → px do drawable.
+    func set(zoom z: CGFloat, pan p: CGSize, engine: AureaEngine, pixelScale: CGFloat) {
+        let nz = StageZoomMath.clampZoom(z)
+        let np = CGSize(width: p.width.isFinite ? p.width : 0, height: p.height.isFinite ? p.height : 0)
+        if abs(nz - zoom) < 0.00001 && abs(np.width - pan.width) < 0.01 && abs(np.height - pan.height) < 0.01 { return }
+        zoom = nz; pan = np
+        engine.run { $0.setViewportZoom(Float(nz), panX: Float(np.width * pixelScale), panY: Float(np.height * pixelScale)) }
+    }
+
+    /// De volta ao encaixe (100 %).
+    func reset(engine: AureaEngine) {
+        zoom = 1; pan = .zero
+        engine.run { $0.setViewportZoom(1, panX: 0, panY: 0) }
+    }
+
+    /// Cada projeto abre no encaixe (o arquivo pode trazer um zoom salvo).
+    func resetIfProjectChanged(_ url: URL?, engine: AureaEngine) {
+        if case .some(let key) = projectKey, key == url { return }
+        projectKey = .some(url)
+        reset(engine: engine)
+    }
+}
+
+/// Chip "250 %" no canto inf-dir do palco: só com a vista ampliada; tocar
+/// volta ao encaixe.
+struct StageZoomChip: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var view = StageViewZoom.shared
+    var body: some View {
+        if view.zoomed {
+            let pct = StageZoomMath.percent(view.zoom)
+            Button { view.reset(engine: model.engine) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 11, weight: .semibold)).foregroundColor(AureaColors.accent)
+                    Text(AureaText.t("common_percent", pct)).font(.aurea(size: 12, weight: .semibold)).foregroundColor(AureaColors.text)
+                }
+                .padding(.horizontal, 10).frame(minHeight: 36)
+                .background(Capsule().fill(Color.black.opacity(0.6)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(AureaText.t("stage_zoom_fit", pct))
+        }
+    }
+}
+
+/// A lupa da barra de transporte (ao lado da tela cheia).
+struct StageZoomToggleButton: View {
+    @ObservedObject private var view = StageViewZoom.shared
+    let width: CGFloat
+    let height: CGFloat
+    var body: some View {
+        Image(systemName: "plus.magnifyingglass")
+            .font(.system(size: 18, weight: .regular))
+            .foregroundColor(view.zoomLock ? AureaColors.accent : AureaColors.text)
+            .frame(width: width, height: height)
+            .contentShape(Rectangle())
+            .onTapGesture { view.zoomLock.toggle() }
+            .accessibilityLabel(AureaText.t(view.zoomLock ? "stage_zoom_view_on" : "stage_zoom_view_off"))
+            .accessibilityAddTraits(.isButton)
+    }
+}

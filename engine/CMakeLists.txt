@@ -75,6 +75,7 @@ set(AUREA_CORE_SOURCES
     src/timeline/Composition.cpp
     src/timeline/LayerAnimator.cpp
     src/timeline/Timeline.cpp
+    src/timeline/Rig.cpp
     src/project/Project.cpp
     src/project/Serialization.cpp
     src/project/FileIO.cpp
@@ -153,6 +154,8 @@ set(AUREA_CORE_SOURCES
     src/vector/Svg.cpp
     src/vector/VectorDocument.cpp
     src/engine/EngineVector.cpp
+    src/engine/EngineRig.cpp
+    src/engine/EngineShape3D.cpp
     src/engine/EngineMedia.cpp
     src/engine/EngineLayerAnim.cpp
     src/playback/Playback.cpp
@@ -162,6 +165,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/StudioEnvironment.cpp
     src/scene3d/Animation.cpp
     src/scene3d/Text3D.cpp
+    src/scene3d/Shape3D.cpp
     src/engine/Engine.cpp
     src/engine/EngineMotion.cpp
     src/engine/EngineMotion.cpp
@@ -343,9 +347,10 @@ if(AUREA_PLATFORM_ANDROID)
     endif()
     option(AUREA_ANDROID_MEDIA_PROBE "Build the on-device decoder regression executable" OFF)
     if(AUREA_ANDROID_MEDIA_PROBE)
-        add_executable(aurea_media_probe tests/android_media_probe.cpp platform/android/MediaCodecSource.cpp)
+        add_executable(aurea_media_probe tests/android_media_probe.cpp platform/android/MediaCodecSource.cpp
+                       platform/android/GlVideoBridge.cpp)
         target_include_directories(aurea_media_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
-        target_link_libraries(aurea_media_probe PRIVATE aurea_core android log mediandk)
+        target_link_libraries(aurea_media_probe PRIVATE aurea_core android log mediandk EGL GLESv2)
         add_executable(aurea_export_probe tests/android_export_probe.cpp platform/android/MediaCodecExport.cpp)
         target_include_directories(aurea_export_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
         target_link_libraries(aurea_export_probe PRIVATE aurea_core android log mediandk)
@@ -353,13 +358,15 @@ if(AUREA_PLATFORM_ANDROID)
     add_library(aurea SHARED
         platform/android/aurea_jni.cpp
         platform/android/MediaCodecSource.cpp
+        platform/android/GlVideoBridge.cpp
         platform/android/MediaCodecExport.cpp
         platform/android/AAudioOutput.cpp
     )
     target_include_directories(aurea PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
     # `mediandk` é o MediaCodec/MediaExtractor/ImageReader: sem ele não há
     # decode de hardware. `android` dá ANativeWindow e AHardwareBuffer.
-    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk aaudio)
+    # EGL + GLESv2: o caminho GL do driver do vídeo (GlVideoBridge).
+    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk aaudio EGL GLESv2)
     if(AUREA_GPU_GLES)
         target_link_libraries(aurea PRIVATE aurea_gles)
         target_compile_definitions(aurea PRIVATE AUREA_GPU_GLES=1)

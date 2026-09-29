@@ -796,7 +796,8 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     //   onda de áudio, Espectro de áudio (bandas) e Bolas.
     // + o Tremor em trancos do app antigo (1).
     // + o Particular (as partículas do app antigo) (1).
-    AUREA_CHECK_EQ(before, static_cast<u32>(118));
+    // + o Shape 3D Layout (o layout por parte das formas 3D) (1).
+    AUREA_CHECK_EQ(before, static_cast<u32>(119));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

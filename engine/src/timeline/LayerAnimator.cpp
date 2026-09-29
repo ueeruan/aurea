@@ -74,10 +74,23 @@ struct Accum {
     f32 op = 0, px = 0, py = 0, sx = 0, sy = 0, rz = 0, rx = 0, ry = 0, trk = 0;
 };
 
+/// Loop (vai e volta): o relógio da unidade dobra dentro do trecho dos
+/// keyframes do progresso. Antes do primeiro keyframe fica como está.
+f64 loop_time(const TrackSet& tracks, u32 ai, f64 t) noexcept {
+    const Track* tr = tracks.find(TrackProperty::LayerAnimParam, ai, kProgress);
+    if (!tr || tr->keys.size() < 2 || !std::isfinite(t)) return t;
+    const f64 a0 = static_cast<f64>(tr->keys.front().time.value);
+    const f64 span = static_cast<f64>(tr->keys.back().time.value) - a0;
+    if (span <= 0.0 || t <= a0) return t;
+    const f64 m = std::fmod(t - a0, 2.0 * span);
+    return a0 + (m <= span ? m : 2.0 * span - m);
+}
+
 void add_unit(const TrackSet& tracks, u32 ai, const LayerAnimator& a, const Frame& f, f64 local, f64 fps, u32 order,
               u32 noiseUnit, Accum& s) noexcept {
     const f64 delayFrames = static_cast<f64>(f.delay) * 0.001 * fps;
-    const f64 t = local - static_cast<f64>(order) * delayFrames;
+    f64 t = local - static_cast<f64>(order) * delayFrames;
+    if (a.loop) t = loop_time(tracks, ai, t);
     const f32 p = clamp_param(kProgress, param_at(tracks, ai, kProgress, t, a.progress)) / 100.0f;
     const f32 w = f.strength * (1.0f - shape(a.ease, p));
     if (w != 0.0f) {
@@ -166,8 +179,10 @@ f32 wiggle_noise(u32 seed, u32 unit, u32 channel, f64 t, f32 hold) noexcept {
     return a + (b - a) * (u * u * (3.0f - 2.0f * u));
 }
 
+// Texto 3D (Model3D com letras separadas) também tem unidades: letra, palavra
+// e linha viram os nós da malha (scene3d::apply_text3d_animators).
 bool acts_on_whole(const Layer& l, const LayerAnimator& a) noexcept {
-    return a.enabled && (l.kind != LayerKind::Text || a.unit == 0);
+    return a.enabled && ((l.kind != LayerKind::Text && l.kind != LayerKind::Model3D) || a.unit == 0);
 }
 
 bool has_whole(const Layer& l) noexcept {
@@ -176,7 +191,7 @@ bool has_whole(const Layer& l) noexcept {
 }
 
 bool has_units(const Layer& l) noexcept {
-    if (l.kind != LayerKind::Text) return false;
+    if (l.kind != LayerKind::Text && l.kind != LayerKind::Model3D) return false;
     for (const LayerAnimator& a : l.layerAnimators) if (a.enabled && a.unit != 0) return true;
     return false;
 }

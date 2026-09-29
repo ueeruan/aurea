@@ -47,6 +47,39 @@ AUREA_TEST(Text3DLayout, DelayedLetterXKeysKeepPivotsAndFinishWithoutAutomaticMo
     }
 }
 
+// Aleatório: cada letra gira e anda do seu jeito, todas juntas; o mesmo
+// instante dá a mesma pose (preview = export); velocidade 0 = parado.
+AUREA_TEST(Text3DLayout, RandomMovesEveryLetterDifferentlyAndDeterministically) {
+    const auto font = text::default_font(); AUREA_CHECK(font != nullptr); if (!font) return;
+    Text3DSpec spec; spec.content = "RANDOM"; spec.separateGlyphs = true;
+    auto result = build_text3d(*font, spec); AUREA_CHECK(result.ok()); if (!result.ok()) return;
+    EffectRegistry registry; register_builtin_effects(registry);
+    EffectInstance e; e.id = 1; e.type = effect_type_id(effect_keys::kText3DLayout);
+    initialize_instance(e, *registry.params(e.type));
+    AUREA_CHECK(e.params.size() >= 14u);
+    Layer layer; layer.effects.push_back(e);
+    const auto& asset = *result.asset;
+    // Padrão (aleatório 0): nada se mexe.
+    auto rest = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 10, rest);
+    for (u32 i = 0; i < rest.size(); ++i) AUREA_CHECK_NEAR(rest[i].col[1].y, 1.f, 1e-5f);
+    layer.effects[0].params[12].constant = ParamValue::scalar(100.f);
+    auto a = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 10, a);
+    auto again = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 10, again);
+    auto later = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 40, later);
+    u32 differentFromFirst = 0, moved = 0;
+    for (u32 i = 0; i < a.size(); ++i) {
+        for (u32 c = 0; c < 4; ++c) AUREA_CHECK_NEAR(a[i].col[c].x, again[i].col[c].x, 1e-6f);
+        if (i > 0 && std::fabs(a[i].col[1].y - a[0].col[1].y) > 0.05f) ++differentFromFirst;
+        if ((later[i].col[3] - a[i].col[3]).xyz().length() > 1e-3f || std::fabs(later[i].col[1].y - a[i].col[1].y) > 1e-3f) ++moved;
+    }
+    AUREA_CHECK(differentFromFirst >= 3u);   // letras separadas, não o bloco
+    AUREA_CHECK(moved >= 5u);                // e todas se mexem com o tempo
+    layer.effects[0].params[13].constant = ParamValue::scalar(0.f);
+    auto s0 = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 10, s0);
+    auto s1 = asset.rest_world_matrices(); apply_text3d_layout(asset, layer, 90, s1);
+    for (u32 i = 0; i < s0.size(); ++i) AUREA_CHECK_NEAR(s0[i].col[1].y, s1[i].col[1].y, 1e-6f);
+}
+
 AUREA_TEST(Text3D, FontAndLetterAnimationSurviveRecipeRoundTrip) {
     Text3DSpec spec;
     spec.content = "A;t=B\nC";

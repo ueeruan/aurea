@@ -299,6 +299,9 @@ internal class HomeThumbnails(private val resources: Resources) {
         BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sampleFor(bounds.outWidth, widthPx) })
     } catch (_: Exception) {
         null
+    } catch (_: OutOfMemoryError) {
+        // Capa enorme/corrompida num aparelho de 4 GB: sem capa, nunca a Home fechando.
+        null
     }
 
     /** Maior potência de 2 que ainda deixa a imagem com ≥ a largura pedida. */

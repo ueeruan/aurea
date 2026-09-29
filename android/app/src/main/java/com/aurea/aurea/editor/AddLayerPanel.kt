@@ -34,6 +34,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.annotation.StringRes
@@ -533,8 +535,24 @@ private fun Model3DTab(store: EditorStore, close: () -> Unit) {
             close()
         }
     }
+    // "Formas 3D": a grade das 10 formas prontas (motor: scene3d/Shape3D.hpp).
+    var shapes by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (shapes) {
+        CardGrid(
+            listOf(AddItem(stringResource(R.string.shape3d_back), CupertinoGlyph.ChevronLeft) { shapes = false }) +
+                (0 until com.aurea.aurea.state.Shape3DCatalog.COUNT).map { k ->
+                    AddItem(stringResource(com.aurea.aurea.state.Shape3DCatalog.names[k]), draw = { drawShape3DIcon(k) }) {
+                        store.addShape3D(k)
+                        close()
+                    }
+                },
+            hint = stringResource(R.string.shape3d_hint),
+        )
+        return
+    }
     CardGrid(
         listOf(
+            AddItem(stringResource(R.string.shape3d_title), draw = { drawShape3DIcon(0) }) { shapes = true },
             AddItem(stringResource(R.string.sh_add_model_3d), CupertinoGlyph.Cube, AureaColors.Accent) {
                 picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "application/octet-stream", "*/*"))
             },

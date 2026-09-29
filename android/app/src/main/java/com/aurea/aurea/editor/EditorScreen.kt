@@ -471,6 +471,7 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
                 35 -> EditorPanel.Shape
                 36 -> EditorPanel.Particles
                 37 -> EditorPanel.Element3D
+                42 -> EditorPanel.Element3D   // parte da forma 3D (TrackProperty::ShapePart)
                 39 -> EditorPanel.Speed
                 else -> EditorPanel.Transform
             })

@@ -35,12 +35,21 @@ struct Panel3DView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if model.selectedLayer?.kind != 8 {
-                    if !text3D.isEmpty { textSection }
-                    section("panel_material")
+                    if !text3D.isEmpty { textSection; Text3DAnimSection(layerId: layerId) }
+                    // Forma 3D: partes, cor e imagem por parte (Shape3DViews.swift) no lugar do material importado.
+                    let isShape = !model.engine.shape3D(layerId).isEmpty
+                    if isShape {
+                        Shape3DPanelSection(layerId: layerId)
+                        // O mesmo sistema das letras do texto 3D, parte a parte:
+                        // o efeito Shape 3D Layout e a animação por unidade.
+                        shapeLayoutButton
+                        Text3DAnimSection(layerId: layerId, parts: true)
+                    }
+                    if !isShape { section("panel_material") }
                     if !text3D.isEmpty {
                         colorRow("panel_cor", key: "color", region: 0, height: 48)
                         materialSection
-                    } else { importedMaterialSection }
+                    } else if !isShape { importedMaterialSection }
                     lightingSection
                     gap(16)
                     }
@@ -295,6 +304,23 @@ struct Panel3DView: View {
             .foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
     }
     private func gap(_ height: CGFloat) -> some View { Spacer().frame(height: height) }
+    /// "Efeito das partes" (forma 3D): põe o Shape 3D Layout (uma vez) e abre os efeitos.
+    private var shapeLayoutButton: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button(AureaText.t("shape3d_layout_effect")) {
+                let type = fxEffectTypeId("aurea.shape3d.layout")
+                let target = layerId
+                if !model.effects.contains(where: { $0.typeId == type }) {
+                    model.mutate { $0.addEffect(type, toLayer: target, at: UInt32.max) }
+                }
+                model.openPanel(.effects)
+            }
+            .font(.aurea(size: 14)).frame(minHeight: 44)
+            .accessibilityIdentifier("shape3d.layout")
+            Text(AureaText.t("shape3d_layout_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }.padding(.top, 10)
+    }
     private func chip(_ key: String, on: Bool = false, action: @escaping () -> Void) -> some View {
         T3DChip(label: AureaText.t(key), on: on, action: action)
     }
@@ -610,4 +636,94 @@ struct T3DFontSheet: View {
         }
         return false
     }
+}
+
+/// TextAnimSection / Text3DAnimSection.kt: animação de texto do texto 3D — grade
+/// de presets (um toque aplica), entrada / saída / loop, unidade, duração e
+/// atraso. São os animadores de camada por letra do motor (preview = export).
+/// `parts` = forma 3D: a mesma seção, cada parte no papel de uma letra (o
+/// motor força a unidade "parte").
+private struct Text3DAnimSection: View {
+    @EnvironmentObject private var model: AureaModel
+    let layerId: Int64
+    var parts = false
+    @State private var anim: [Float] = []
+    @State private var mode = 0
+    @State private var unit = 1
+    @State private var duration: Float = 0.6
+    @State private var stagger: Float = 60
+
+    private static let floats = 5   // Engine::kText3DAnimFloats
+    private let presetKeys = ["t3a_none", "t3a_fade", "t3a_rise", "t3a_drop", "t3a_pop", "t3a_spin_y", "t3a_flip_x",
+                              "t3a_typewriter", "t3a_wave", "t3a_cascade", "t3a_zoom", "t3a_swing"]
+    private var current: Int { anim.count >= 15 ? Int((anim[mode * Self.floats]).rounded()) : -1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Spacer().frame(height: 14)
+            Text(AureaText.t(parts ? "s3a_title" : "t3a_title")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+            Text(AureaText.t(parts ? "s3a_hint" : "t3a_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(["t3a_in", "t3a_out", "t3a_loop"].enumerated()), id: \.offset) { index, key in
+                        let used = anim.count >= 15 && anim[index * Self.floats] >= 0
+                        T3DChip(label: AureaText.t(key) + (used ? " \u{2022}" : ""), on: mode == index) { mode = index; sync() }
+                    }
+                }
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Text(AureaText.t("panel_anima_cada")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    if parts {
+                        T3DChip(label: AureaText.t("shape3d_parts"), on: true) {}
+                    } else {
+                        ForEach(Array(["panel_letra", "panel_palavra", "panel_linha"].enumerated()), id: \.offset) { index, key in
+                            T3DChip(label: AureaText.t(key), on: unit == index + 1) { unit = index + 1; reapply() }
+                        }
+                    }
+                }
+            }
+            // Grade de presets: três por linha; um toque aplica (ou troca) o do modo.
+            ForEach(0..<((presetKeys.count + 2) / 3), id: \.self) { row in
+                HStack(spacing: 6) {
+                    ForEach(row * 3..<min(presetKeys.count, row * 3 + 3), id: \.self) { index in
+                        T3DChip(label: AureaText.t(presetKeys[index]), on: current == index - 1) { apply(index - 1) }
+                    }
+                }
+            }
+            slider("t3a_duration", value: $duration, range: 0.1...3, shown: String(format: "%.1f s", duration))
+            slider("t3a_stagger", value: $stagger, range: 0...500, shown: "\(Int(stagger.rounded())) ms")
+        }
+        .onAppear { load() }
+        .onChange(of: layerId) { _ in load() }
+        .onChange(of: model.status.modelRevision) { _ in load() }
+    }
+
+    private func slider(_ key: String, value: Binding<Float>, range: ClosedRange<Float>, shown: String) -> some View {
+        HStack(spacing: 8) {
+            Text(AureaText.t(key)).font(.aurea(size: 12)).foregroundStyle(AureaColors.text).frame(width: 118, alignment: .leading)
+            Slider(value: value, in: range, onEditingChanged: { editing in if !editing { reapply() } })
+            Text(shown).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(width: 52, alignment: .trailing)
+        }.frame(height: 44)
+    }
+    private func load() {
+        anim = model.engine.text3DAnim(layerId).map(\.floatValue)
+        sync()
+    }
+    /// O modo escolhido mostra o que já está aplicado nele.
+    private func sync() {
+        guard anim.count >= 15, anim[mode * Self.floats] >= 0 else { return }
+        let row = mode * Self.floats
+        unit = min(3, max(1, Int(anim[row + 1].rounded())))
+        duration = min(3, max(0.1, anim[row + 2]))
+        stagger = min(500, max(0, anim[row + 3]))
+    }
+    private func apply(_ preset: Int) {
+        _ = model.engine.applyText3DAnim(layerId, preset: Int32(preset), mode: UInt32(mode), unit: UInt32(unit),
+                                          duration: duration, stagger: stagger)
+        model.refreshModel(force: true)
+        load()
+    }
+    private func reapply() { if current >= 0 { apply(current) } }
 }

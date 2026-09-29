@@ -38,6 +38,11 @@
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_HDR
+// Texturas de FBX (embutidas ou ao lado) vêm muito em TGA/BMP/PSD (Maya,
+// 3ds Max, pacotes de jogo): sem esses decodificadores a textura "sumia".
+#define STBI_ONLY_TGA
+#define STBI_ONLY_BMP
+#define STBI_ONLY_PSD
 #define STBI_FAILURE_USERMSG
 #include "stb_image.h"
 

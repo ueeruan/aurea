@@ -116,7 +116,7 @@ struct EditorView: View {
         .overlay { if model.showAddLayer && !model.sceneEditor { ShellAddCategoryDialog() } }
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
-        .modifier(ModelTexturesPrompt())
+        .modifier(ModelTexturesPrompt(shell: shell))
         .modifier(AddLayerPickers(shell: shell))
     }
 }
@@ -141,11 +141,15 @@ private struct AddLayerPickers: ViewModifier {
                 if request.isFile { fileKind = request; importing = true }
                 else { photoKind = request; choosingPhotos = true }
             }
-            .fileImporter(isPresented: $importing, allowedContentTypes: fileTypes, allowsMultipleSelection: fileKind == .model) { result in
+            // O ÚNICO `.fileImporter` da raiz: dois na mesma view e o SwiftUI só
+            // atende um — o do modelo 3D ficava mudo (as texturas vêm por aqui também).
+            .fileImporter(isPresented: $importing, allowedContentTypes: fileTypes,
+                          allowsMultipleSelection: fileKind == .model || fileKind == .modelTextures) { result in
                 guard case .success(let urls) = result, let url = urls.first else { return }
                 switch fileKind {
                 // Seleção múltipla/pasta: o FBX/OBJ vem com as texturas e o .mtl.
                 case .model: model.importModelFiles(urls: urls)
+                case .modelTextures: model.importModelTextures(urls: urls)
                 case .svg: model.importSvg(url: url)
                 default: model.importMedia(url: url, kind: .audio)
                 }
@@ -163,6 +167,7 @@ private struct AddLayerPickers: ViewModifier {
         switch fileKind {
         case .svg: return [UTType(filenameExtension: "svg") ?? .data]
         case .model: return [.data, .folder] // glTF/GLB/OBJ/FBX (+ texturas, ou a pasta): o motor valida a extensão.
+        case .modelTextures: return [.image, .data]
         default: return [.audio]
         }
     }
@@ -172,21 +177,22 @@ private struct AddLayerPickers: ViewModifier {
 /// O seletor abre depois que o alerta fecha (o alvo fica guardado no modelo).
 private struct ModelTexturesPrompt: ViewModifier {
     @EnvironmentObject private var model: AureaModel
-    @State private var picking = false
+    @ObservedObject var shell: ShellPresentation
     func body(content: Content) -> some View {
         content
             .alert(AureaText.t("model_textures_title"), isPresented: Binding(
                 get: { model.missingModelTextures != nil },
                 set: { if !$0 { model.missingModelTextures = nil } })) {
-                Button(AureaText.t("model_textures_choose")) { model.missingModelTextures = nil; picking = true }
+                Button(AureaText.t("model_textures_choose")) {
+                    model.missingModelTextures = nil
+                    // O seletor sobe pela raiz (`AddLayerPickers`) depois que o alerta fecha.
+                    let shell = shell
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { shell.addPicker = .modelTextures }
+                }
                 Button(AureaText.t("common_cancel"), role: .cancel) { model.missingModelTextures = nil }
             } message: {
                 let names = model.missingModelTextures?.names ?? []
                 Text(AureaText.t("model_textures_message", names.prefix(8).joined(separator: "\n") + (names.count > 8 ? "\n…" : "")))
-            }
-            .fileImporter(isPresented: $picking, allowedContentTypes: [.image, .data], allowsMultipleSelection: true) { result in
-                guard case .success(let urls) = result else { return }
-                model.importModelTextures(urls: urls)
             }
     }
 }
@@ -205,11 +211,16 @@ private struct ModelTexturesPrompt: ViewModifier {
             PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen && !model.rawPlayback)
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageOverlay().allowsHitTesting(false) } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageInteractionOverlay().allowsHitTesting(false) } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { RigStageOverlay() } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }
             if model.panel == .tracking && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
                 ShellStageBanner(label: AureaText.t("editor_camada_bloqueada"), button: AureaText.t("editor_desbloquear"), icon: CupertinoGlyph.LockFill) {
                     model.mutate { $0.setLayer(layer.id, locked: false) }; model.refreshModel(force: true)
                 }.padding(.top, 8).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .top)
+            }
+            if !model.fullscreen && !model.rawPlayback {
+                RigModeBar().padding(.top, 8).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .top)
             }
             if model.panel == .vector && (model.vectorFreehand || model.vectorEditingPoints) {
                 ShellStageBanner(label: vectorHint, button: AureaText.t("editor_concluir")) {
@@ -258,7 +269,11 @@ private struct ModelTexturesPrompt: ViewModifier {
                     .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
             if model.hudVisible { ShellPerfHud().padding(.leading, 8).padding(.top, 6).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).allowsHitTesting(false) }
+            // Zoom da vista: "250 %" só com a prévia ampliada; tocar volta a 100 %.
+            StageZoomChip().padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }.frame(height: height).clipped()
+        .onAppear { StageViewZoom.shared.resetIfProjectChanged(model.projectURL, engine: model.engine) }
+        .onChange(of: model.projectURL) { url in StageViewZoom.shared.resetIfProjectChanged(url, engine: model.engine) }
     }
     private var previewLabel: String {
         if model.rawPlayback { return "RAW" }
@@ -356,12 +371,16 @@ private struct ShellStageBanner: View {
     @EnvironmentObject private var model: AureaModel
     @Environment(\.displayScale) private var displayScale
     @EnvironmentObject private var shell: ShellPresentation
+    @ObservedObject private var viewZoom = StageViewZoom.shared
     var body: some View {
         Canvas { raw, size in
             var context = raw
-            let sx = size.width / CGFloat(max(1, model.compositionWidth)), sy = size.height / CGFloat(max(1, model.compositionHeight))
-            let fit = min(sx, sy)
-            let origin = CGPoint(x: (size.width - CGFloat(model.compositionWidth) * fit) / 2, y: (size.height - CGFloat(model.compositionHeight) * fit) / 2)
+            // Encaixe com o zoom/pan da vista (StageZoom.swift): o mesmo do passe
+            // de saída do motor; alças seguem em pt fixos na tela.
+            let placed = StageZoomMath.fit(size: size, composition: CGSize(width: CGFloat(model.compositionWidth), height: CGFloat(model.compositionHeight)),
+                                           zoom: viewZoom.zoom, pan: viewZoom.pan)
+            let fit = placed.scale
+            let origin = placed.origin
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: origin.x + CGFloat(x) * fit, y: origin.y + CGFloat(y) * fit) }
             // Borda do quadro: dá para ver onde a composição termina mesmo com
             // o fundo do projeto da cor da área de trabalho (só na prévia).
@@ -757,7 +776,7 @@ private struct DockView: View {
     @EnvironmentObject private var model: AureaModel
 
     private enum Section: String {
-        case color, shape, vector, editText, text, text3DOptions, particles, audio, move, blend, environment, mask, tracking, captions, presets, effects
+        case color, shape, vector, editText, text, text3DOptions, particles, audio, move, rig, blend, environment, mask, tracking, captions, presets, effects
         var label: String {
             switch self {
             case .color: return "sh_dock_color_fill"
@@ -768,6 +787,7 @@ private struct DockView: View {
             case .particles: return "sh_dock_particles"
             case .audio: return "sh_add_tab_audio"
             case .move: return "sh_dock_transform"
+            case .rig: return "rig_dock"
             case .blend: return "sh_dock_opacity_blend"
             case .environment: return "sh_dock_environment"
             case .mask: return "sh_dock_mask"
@@ -787,6 +807,7 @@ private struct DockView: View {
             case .particles, .effects: return CupertinoGlyph.Sparkles
             case .audio: return CupertinoGlyph.Speaker2
             case .move: return CupertinoGlyph.Move
+            case .rig: return CupertinoGlyph.PersonCropCircle
             case .blend: return CupertinoGlyph.CircleLefthalfFill
             case .environment: return CupertinoGlyph.Lightbulb
             case .tracking: return ShellGlyph.Viewfinder
@@ -803,7 +824,7 @@ private struct DockView: View {
             case .text3DOptions: return .layer3D
             case .particles: return .particles
             case .audio: return .audio
-            case .move: return .transform
+            case .move, .rig: return .transform   // rig: não abre painel (RigStage.swift)
             case .blend: return .appearance
             case .environment: return .layer3D
             case .mask: return .mask
@@ -824,7 +845,8 @@ private struct DockView: View {
         case 4: return [.editText, .text, .captions, .move, .blend, .mask, .presets, .effects]
         case 1:
             return [.move] + (hasAudio ? [.audio] : []) + [.mask, .blend, .tracking] + (hasAudio ? [.captions] : []) + [.presets, .effects]
-        case 2, 12: return [.move, .blend, .mask, .presets, .effects]
+        case 2: return [.move, .rig, .blend, .mask, .presets, .effects]
+        case 12: return [.move, .blend, .mask, .presets, .effects]
         case 3: return [.audio, .captions, .presets, .effects]
         case 10: return (model.engine.text3D(forLayer: layer.id) ?? [:]).isEmpty
             ? [.move, .environment, .blend, .presets, .effects]
@@ -897,6 +919,7 @@ private struct DockView: View {
                         ForEach(row, id: \.rawValue) { section in
                             Button {
                                 if section == .editText { model.openTextContentEditor() }
+                                else if section == .rig { RigStageState.shared.open(model) }
                                 else { model.openPanel(section.panel) }
                             } label: {
                                 VStack(spacing: 4) {
@@ -1232,6 +1255,8 @@ private struct AddLayerSheet: View {
     var tab = 0
     /// Aberto como `.sheet` (cena 3D): o seletor espera a folha fechar antes de subir.
     var inSheet = false
+    /// Aba 3D mostrando a grade "Formas 3D" (Shape3DViews.swift).
+    @State private var shapes3D = false
     private let categories: [(String, Character)] = [
         ("sh_add_tab_shape", ShellGlyph.SquareOnCircle), ("sh_add_tab_media", CupertinoGlyph.PhotoOnRectangle),
         ("sh_add_tab_audio", CupertinoGlyph.MusicNote2), ("sh_add_tab_text", CupertinoGlyph.Textformat),
@@ -1307,11 +1332,21 @@ private struct AddLayerSheet: View {
                             else { close(); model.groupSelection() }
                         }
                     case 5:
+                        if shapes3D {
+                            card("shape3d_back", glyph: CupertinoGlyph.ChevronLeft) { shapes3D = false }
+                            ForEach(0..<Shape3DState.names.count, id: \.self) { kind in
+                                cardBody(Shape3DState.names[kind], action: { model.addShape3D(kind: kind); close() }) {
+                                    Shape3DGlyph(kind: kind).frame(width: 30, height: 30)
+                                }.accessibilityIdentifier("shape3d.add.\(kind)")
+                            }
+                        } else {
+                        cardBody("shape3d_title", action: { shapes3D = true }) { Shape3DGlyph(kind: 0).frame(width: 30, height: 30) }
                         card("scene_workspace", glyph: CupertinoGlyph.Cube, accent: true) { close(); model.enterSceneEditor() }
                         card("sh_add_model_3d", glyph: CupertinoGlyph.Cube, accent: true) { files(.model) }
                         card("sh_add_text_3d", glyph: ShellGlyph.TextformatAlt, color: ShellColors.text3D) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close() }
                         card("panel_camera_3d", glyph: CupertinoGlyph.CameraFill, accent: true) { model.addCamera(); close() }
                         drawnCard("sh_add_null_3d", kind: -1) { model.addNull(threeD: true); close() }
+                        }
                     case 6:
                         card("editor_mao_livre", glyph: ShellGlyph.Scribble, accent: true) { close(); model.addVector(0, freehand: true) }
                     default:
@@ -1332,7 +1367,7 @@ private struct AddLayerSheet: View {
     }
     private var hint: String? {
         switch tab {
-        case 5: return "sh_add_model_3d_hint"
+        case 5: return shapes3D ? "shape3d_hint" : "sh_add_model_3d_hint"
         case 6: return "editor_desenhe_dedo_direto_palco_cada_traco"
         case 7: return "editor_vetor_contorno_pontos_voce_arrasta_curva"
         default: return nil
@@ -1618,11 +1653,13 @@ private struct ShellAddCategoryDialog: View {
 // Real solved features in composition coordinates; dragging selects a region.
 @MainActor private struct CameraTrackingOverlay: View {
     @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var viewZoom = StageViewZoom.shared
     var body: some View {
         GeometryReader { geometry in
             let cw = CGFloat(max(1, model.compositionWidth)), ch = CGFloat(max(1, model.compositionHeight))
-            let fit = min(geometry.size.width / cw, geometry.size.height / ch)
-            let ox = (geometry.size.width - cw * fit) / 2, oy = (geometry.size.height - ch * fit) / 2
+            let placed = StageZoomMath.fit(size: geometry.size, composition: CGSize(width: cw, height: ch), zoom: viewZoom.zoom, pan: viewZoom.pan)
+            let fit = placed.scale
+            let ox = placed.origin.x, oy = placed.origin.y
             Canvas { context, _ in
                 let points = model.cameraFeatures
                 let ring = model.cameraTarget

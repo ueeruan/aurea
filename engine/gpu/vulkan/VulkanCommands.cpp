@@ -686,6 +686,22 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     // da tela não é nossa, e apresentar daqui seria apresentar o quadro errado.
     if (!withSurface) return OkStatus;
     if (swapchain_ || swapchainDirty_) {
+        // SUBOPTIMAL não é "recrie já": o Android o devolve A CADA apresentação
+        // quando a pré-rotação escolhida difere da dica da janela (transform
+        // sem suporte, espelhado...). Recriar a cada quadro = vkDeviceWaitIdle
+        // + buffers novos e vazios por quadro — o preview PISCA. Recria só se a
+        // superfície mudou de fato (rotação); tamanho chega pelo resize_surface.
+        if (swapchainSuboptimal_ && !swapchainDirty_ && surface_ && frameNumber_ >= suboptimalCheckFrame_) {
+            swapchainSuboptimal_ = false;
+            suboptimalCheckFrame_ = frameNumber_ + 30;
+            VkSurfaceCapabilitiesKHR caps{};
+            if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps) == VK_SUCCESS
+                && caps.currentTransform != swapCapsTransform_) {
+                swapchainDirty_ = true;
+            } else if (suboptimalIgnored_++ == 0) {
+                AUREA_LOG_WARN("swapchain: SUBOPTIMAL sem mudanca na superficie; mantido (sem recriar a cada quadro)");
+            }
+        }
         if (swapchainDirty_ && surface_) {
             if (const Status s = recreate_swapchain(); !s.ok()) {
                 AUREA_LOG_WARN("swapchain nao recriado: %s", s.message().data());
@@ -702,7 +718,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
                 }
             }
             if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
-                if (r == VK_SUBOPTIMAL_KHR) swapchainDirty_ = true;
+                if (r == VK_SUBOPTIMAL_KHR) swapchainSuboptimal_ = true;
                 imageAcquired_ = true;
                 imageIndex_ = index;
                 Texture* t = textures_.get(swapTextures_[index]);
@@ -806,8 +822,10 @@ Status Backend::end_frame() noexcept {
         pi.pImageIndices = &imageIndex_;
         const VkResult pr = vkQueuePresentKHR(queue_, &pi);
         imageAcquired_ = false;
-        if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) {
+        if (pr == VK_ERROR_OUT_OF_DATE_KHR) {
             swapchainDirty_ = true;
+        } else if (pr == VK_SUBOPTIMAL_KHR) {
+            swapchainSuboptimal_ = true;   // conferido no próximo begin_frame
         } else if (pr == VK_ERROR_SURFACE_LOST_KHR) {
             swapchainDirty_ = true;
             return Status{Errc::SurfaceLost, "superficie perdida"};

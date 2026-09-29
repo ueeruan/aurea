@@ -81,10 +81,16 @@ class MainActivity : ComponentActivity() {
             // conta (o cadastro avisa do envio antes). Longe da subida do motor.
             lifecycleScope.launch {
                 kotlinx.coroutines.delay(3000)
-                withContext(Dispatchers.IO) { CrashReporter.coletar(applicationContext) }
+                // Coleta/envio nunca derrubam a abertura: um relatório ou
+                // tombstone estranho que lançasse aqui viraria um crash a cada
+                // abertura (o histórico do Android sobrevive a limpar o cache).
+                withContext(Dispatchers.IO) {
+                    runCatching { CrashReporter.coletar(applicationContext) }
+                        .onFailure { android.util.Log.w("AureaCrash", "coleta de crash falhou", it) }
+                }
                 snapshotFlow { conta.estado }.collect { estado ->
                     if (estado is ContaEstado.Dentro) {
-                        withContext(Dispatchers.IO) { CrashReporter.enviar(applicationContext, conta.sessao()) }
+                        withContext(Dispatchers.IO) { runCatching { CrashReporter.enviar(applicationContext, conta.sessao()) } }
                     }
                 }
             }

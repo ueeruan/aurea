@@ -460,6 +460,22 @@ class AureaEngine private constructor() {
     fun queryMasks(layer: Long, out: FloatArray): Int = nativeQueryMasks(nativeHandle, layer, out)
     /** Síncrono (decodifica): fora da UI. Quadros rastreados, ou −Errc. */
     fun trackMask(layer: Long, mask: Int, mode: Int): Int = nativeTrackMask(nativeHandle, layer, mask, mode)
+
+    // Rig 2D (camada de imagem): juntas em px da COMPOSIÇÃO (Engine::query_rig).
+    /** Floats necessários (5 por junta: id, pai ou −1, x, y, key no playhead); só escreve se couber. */
+    fun queryRig(layer: Long, bind: Boolean, out: FloatArray): Int = nativeQueryRig(nativeHandle, layer, bind, out)
+    /** Id da junta nova (−1 = falhou). [parent] −1 = raiz solta. */
+    fun rigAddJoint(layer: Long, parent: Int, x: Float, y: Float): Int = nativeRigAddJoint(nativeHandle, layer, parent, x, y)
+    fun rigMoveJoint(layer: Long, joint: Int, x: Float, y: Float, continuing: Boolean): Boolean =
+        nativeRigMoveJoint(nativeHandle, layer, joint, x, y, continuing)
+    fun rigRemoveJoint(layer: Long, joint: Int): Boolean = nativeRigRemoveJoint(nativeHandle, layer, joint)
+    fun rigClear(layer: Long): Boolean = nativeRigClear(nativeHandle, layer)
+    fun rigAutoHumanoid(layer: Long): Int = nativeRigAutoHumanoid(nativeHandle, layer)
+    /** Animar: leva a junta até (x, y) e grava keyframe no playhead (IK na ponta, FK no resto). */
+    fun rigPoseJoint(layer: Long, joint: Int, x: Float, y: Float, continuing: Boolean): Boolean =
+        nativeRigPoseJoint(nativeHandle, layer, joint, x, y, continuing)
+    /** Montagem aberta nesta camada (a prévia sem deformação); 0 = nenhuma. */
+    fun setRigSetupLayer(layer: Long) = nativeSetRigSetupLayer(nativeHandle, layer)
     fun setTrackMatte(layer: Long, matte: Long, mode: Int): Boolean = nativeSetTrackMatte(nativeHandle, layer, matte, mode)
     /** {matte, modo} (matte 0 = nenhuma). */
     fun queryTrackMatte(layer: Long, out: LongArray): Boolean = nativeQueryTrackMatte(nativeHandle, layer, out)
@@ -487,6 +503,25 @@ class AureaEngine private constructor() {
     fun setModelShadows(layer: Long, cast: Boolean, receive: Boolean): Boolean =
         nativeSetModelShadows(nativeHandle, layer, cast, receive)
     fun queryModelShadows(layer: Long, out: FloatArray): Boolean = nativeQueryModelShadows(nativeHandle, layer, out)
+
+    // --- Formas 3D (Engine::add_shape3d e família) -----------------------------------------
+    /** Nova camada de forma 3D ([kind] = Shape3DKind 0..9). Id da camada, ou −Errc. */
+    fun addShape3d(kind: Int, name: String): Long = nativeAddShape3d(nativeHandle, kind, name)
+    /** Receita: out[0] forma, out[1] partes, 5 por parte (RGBA sRGB, tem imagem). −1 = não é forma. */
+    fun queryShape3d(layer: Long, out: FloatArray): Int = nativeQueryShape3d(nativeHandle, layer, out)
+    /** Cor ([rgba] nula = mantém) e imagem ([image] nula = mantém, "" = tira) da parte (−1 = todas). */
+    fun setShape3dPartStyle(layer: Long, part: Int, rgba: FloatArray?, image: String?): Boolean =
+        nativeSetShape3dPartStyle(nativeHandle, layer, part, rgba, image)
+    /** Partes no cabeçote (Engine::kShapePartFloats cada). Devolve os floats precisos. */
+    fun queryShape3dParts(layer: Long, out: FloatArray): Int = nativeQueryShape3dParts(nativeHandle, layer, out)
+    fun setShape3dPart(layer: Long, part: Int, values: FloatArray, mask: Int, continuing: Boolean): Boolean =
+        nativeSetShape3dPart(nativeHandle, layer, part, values, mask, continuing)
+    fun toggleShape3dPartKey(layer: Long, part: Int): Int = nativeToggleShape3dPartKey(nativeHandle, layer, part)
+    fun resetShape3dPart(layer: Long, part: Int): Boolean = nativeResetShape3dPart(nativeHandle, layer, part)
+    fun queryShape3dPartGizmo(layer: Long, part: Int, length: Float, out: FloatArray, localSpace: Boolean): Boolean =
+        nativeQueryShape3dPartGizmo(nativeHandle, layer, part, length, out, localSpace)
+    fun shape3dPartMove(layer: Long, part: Int, axis: Int, amount: Float, out: FloatArray): Boolean =
+        nativeShape3dPartMove(nativeHandle, layer, part, axis, amount, out)
     fun applyParticlePreset(layer: Long, preset: Int): Boolean = nativeApplyParticlePreset(nativeHandle, layer, preset)
     fun setParticleParam(layer: Long, param: Int, value: Float): Boolean = nativeSetParticleParam(nativeHandle, layer, param, value)
     fun queryParticles(layer: Long, out: FloatArray): Boolean = nativeQueryParticles(nativeHandle, layer, out)
@@ -579,6 +614,10 @@ class AureaEngine private constructor() {
 
     /** Animadores de camada: 32 floats cada (ver Engine::kLayerAnimFloats). */
     fun queryLayerAnimators(layer: Long): FloatArray? = nativeQueryLayerAnimators(nativeHandle, layer)
+    /** Animação de texto 3D: 3 modos (entrada, saída, loop) × 5 (preset, unidade, duração s, atraso ms, unidades). */
+    fun queryText3dAnim(layer: Long): FloatArray? = nativeQueryText3dAnim(nativeHandle, layer)
+    fun applyText3dAnim(layer: Long, preset: Int, mode: Int, unit: Int, durationSec: Float, staggerMs: Float): Boolean =
+        nativeApplyText3dAnim(nativeHandle, layer, preset, mode, unit, durationSec, staggerMs)
     fun addLayerAnimator(layer: Long): Int = nativeAddLayerAnimator(nativeHandle, layer)
     fun removeLayerAnimator(layer: Long, index: Int): Boolean = nativeRemoveLayerAnimator(nativeHandle, layer, index)
     fun setLayerAnimator(layer: Long, index: Int, v: FloatArray): Boolean = nativeSetLayerAnimator(nativeHandle, layer, index, v)
@@ -683,6 +722,9 @@ class AureaEngine private constructor() {
     fun editTimeRemapKey(layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int =
         nativeEditTimeRemapKey(nativeHandle, layer, index, frame, value, interp)
     fun removeTimeRemapKey(layer: Long, index: Int): Boolean = nativeRemoveTimeRemapKey(nativeHandle, layer, index)
+    /** Ao contrário: espelha a curva de tempo no clipe (liga o remapeamento se preciso). */
+    fun reverseTimeRemap(layer: Long): Boolean = nativeReverseTimeRemap(nativeHandle, layer)
+    fun setKeepPitch(layer: Long, on: Boolean): Boolean = nativeSetKeepPitch(nativeHandle, layer, on)
     fun setCompositionMotionBlur(on: Boolean) = nativeSetCompositionMotionBlur(nativeHandle, on)
     fun setShutterAngle(degrees: Float) = nativeSetShutterAngle(nativeHandle, degrees)
     /** > 0 = ligado; |valor| − 1 = obturador em graus; 0 = sem projeto. */
@@ -918,6 +960,8 @@ class AureaEngine private constructor() {
     private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
     private external fun nativeApplyTextPreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeQueryLayerAnimators(handle: Long, layer: Long): FloatArray?
+    private external fun nativeQueryText3dAnim(handle: Long, layer: Long): FloatArray?
+    private external fun nativeApplyText3dAnim(handle: Long, layer: Long, preset: Int, mode: Int, unit: Int, durationSec: Float, staggerMs: Float): Boolean
     private external fun nativeAddLayerAnimator(handle: Long, layer: Long): Int
     private external fun nativeRemoveLayerAnimator(handle: Long, layer: Long, index: Int): Boolean
     private external fun nativeSetLayerAnimator(handle: Long, layer: Long, index: Int, v: FloatArray): Boolean
@@ -966,6 +1010,8 @@ class AureaEngine private constructor() {
     private external fun nativeQueryTimeRemap(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
+    private external fun nativeSetKeepPitch(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
@@ -975,6 +1021,15 @@ class AureaEngine private constructor() {
     private external fun nativeQueryText3d(handle: Long, layer: Long, out: FloatArray): String?
     private external fun nativeSetModelShadows(handle: Long, layer: Long, cast: Boolean, receive: Boolean): Boolean
     private external fun nativeQueryModelShadows(handle: Long, layer: Long, out: FloatArray): Boolean
+    private external fun nativeAddShape3d(handle: Long, kind: Int, name: String): Long
+    private external fun nativeQueryShape3d(handle: Long, layer: Long, out: FloatArray): Int
+    private external fun nativeSetShape3dPartStyle(handle: Long, layer: Long, part: Int, rgba: FloatArray?, image: String?): Boolean
+    private external fun nativeQueryShape3dParts(handle: Long, layer: Long, out: FloatArray): Int
+    private external fun nativeSetShape3dPart(handle: Long, layer: Long, part: Int, values: FloatArray, mask: Int, continuing: Boolean): Boolean
+    private external fun nativeToggleShape3dPartKey(handle: Long, layer: Long, part: Int): Int
+    private external fun nativeResetShape3dPart(handle: Long, layer: Long, part: Int): Boolean
+    private external fun nativeQueryShape3dPartGizmo(handle: Long, layer: Long, part: Int, length: Float, out: FloatArray, localSpace: Boolean): Boolean
+    private external fun nativeShape3dPartMove(handle: Long, layer: Long, part: Int, axis: Int, amount: Float, out: FloatArray): Boolean
     private external fun nativeSetTransition(handle: Long, layer: Long, out: Boolean, type: Int, frames: Int): Boolean
     private external fun nativeSetEcho(handle: Long, layer: Long, count: Int, delay: Float, decay: Float): Boolean
     private external fun nativeAddMask(handle: Long, layer: Long, pts: FloatArray?, count: Int, closed: Boolean): Int
@@ -984,6 +1039,14 @@ class AureaEngine private constructor() {
     private external fun nativeToggleMaskPathKey(handle: Long, layer: Long, mask: Int): Int
     private external fun nativeQueryMasks(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeTrackMask(handle: Long, layer: Long, mask: Int, mode: Int): Int
+    private external fun nativeQueryRig(handle: Long, layer: Long, bind: Boolean, out: FloatArray): Int
+    private external fun nativeRigAddJoint(handle: Long, layer: Long, parent: Int, x: Float, y: Float): Int
+    private external fun nativeRigMoveJoint(handle: Long, layer: Long, joint: Int, x: Float, y: Float, continuing: Boolean): Boolean
+    private external fun nativeRigRemoveJoint(handle: Long, layer: Long, joint: Int): Boolean
+    private external fun nativeRigClear(handle: Long, layer: Long): Boolean
+    private external fun nativeRigAutoHumanoid(handle: Long, layer: Long): Int
+    private external fun nativeRigPoseJoint(handle: Long, layer: Long, joint: Int, x: Float, y: Float, continuing: Boolean): Boolean
+    private external fun nativeSetRigSetupLayer(handle: Long, layer: Long)
     private external fun nativeSetTrackMatte(handle: Long, layer: Long, matte: Long, mode: Int): Boolean
     private external fun nativeQueryTrackMatte(handle: Long, layer: Long, out: LongArray): Boolean
     private external fun nativeTrackPoint(handle: Long, layer: Long, x: Float, y: Float, stabilize: Boolean, tracked: IntArray): Long

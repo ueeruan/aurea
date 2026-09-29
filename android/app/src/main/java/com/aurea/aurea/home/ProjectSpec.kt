@@ -56,6 +56,9 @@ internal fun frameFor(ratio: Float, resolution: Int): Frame =
 
 /** fps como o app mostra: inteiro quando é inteiro (30), senão uma casa (29,97 → "29.97"). */
 internal fun formatFps(fps: Float): String {
+    // NaN/infinito (sidecar do import sem fps) derrubava a Home a cada
+    // abertura: `roundToInt` lança. Aqui nunca lança.
+    if (!fps.isFinite() || fps <= 0f) return "30"
     val whole = fps.roundToInt()
     return if (abs(fps - whole) < 0.01f) whole.toString()
     else String.format(Locale.ROOT, "%.2f", fps).trimEnd('0').trimEnd('.')

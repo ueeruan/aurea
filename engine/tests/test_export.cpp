@@ -738,6 +738,39 @@ AUREA_TEST(Export, ManyClipsRetireDecodersDuringExport) {
     AUREA_CHECK(factory.slots->peak.load() <= factory.slots->limit);
 }
 
+/// Galaxy A32: "trava em 68% e fecha em 70%, com qualquer ajuste". O prepare
+/// pula a camada com opacidade 0 antes de pedir o decoder; com o collect de 2
+/// preparos do export, um fade no MEIO do clipe fechava o codec e o reabria na
+/// volta (seek do keyframe, espera, um fecha/abre de codec por fade). Camada
+/// ainda no seu trecho mantém o decoder: abre uma vez só.
+AUREA_TEST(Export, InvisibleStretchInsideTheClipKeepsItsDecoder) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 64; cfg.height = 36;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    cfg.frameCount = 60;
+    SlotFactory factory(cfg);
+    Rig r(cfg, 30.0, 40, 3, &factory);
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    Layer* l = r.comp()->layer(r.video_layer());
+    AUREA_CHECK(l != nullptr);
+    if (!l) return;
+    // Visível 0..9, invisível 10..29 (opacidade 0, a camada nem entra no
+    // prepare), visível de novo 30..39.
+    Track& op = l->tracks.get_or_create(TrackProperty::Opacity);
+    op.set(l->local_time(FrameIndex{9}), 1.0f);
+    op.set(l->local_time(FrameIndex{10}), 0.0f);
+    op.set(l->local_time(FrameIndex{29}), 0.0f);
+    op.set(l->local_time(FrameIndex{30}), 1.0f);
+    const Outcome o = run_export(r, 36, 30, false, 60);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(40));
+    AUREA_CHECK_EQ(factory.slots->opened.load(), 1u);
+    AUREA_CHECK((o.p.flags & Engine::kExportFrameFallback) == 0);
+}
+
 /// 10 hours of timeline (1,080,000 composition frames at 30 fps), exported at
 /// a very low output rate and tiny size so it runs in seconds: timestamps reach
 /// 36e9 us (past 2^32), and memory stays flat (nothing accumulates per frame

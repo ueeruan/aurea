@@ -932,6 +932,10 @@ data class LayerDetail(
     /** A velocidade tem keyframe: `speed` é a do cabeçote e mexer grava keyframe. */
     val speedAnimated: Boolean get() = (timeFlags and 64) != 0
     val frameBlendMode: Int get() = if ((timeFlags and 16) != 0) 2 else if ((timeFlags and 8) != 0) 1 else 0
+    /** Manter o tom do áudio fora de 1× (velocidade/remapeamento). */
+    val keepPitch: Boolean get() = (timeFlags and 128) != 0
+    /** A curva de remapeamento anda para trás (Ao contrário ligado). */
+    val remapReversed: Boolean get() = (timeFlags and 256) != 0
 
     val audioMuted: Boolean get() = (audioFlags and 1) != 0
     val audioSolo: Boolean get() = (audioFlags and 2) != 0

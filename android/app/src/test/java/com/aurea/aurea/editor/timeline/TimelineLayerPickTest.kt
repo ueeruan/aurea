@@ -19,7 +19,8 @@ class TimelineLayerPickTest {
 
     @Test
     fun `fora do modo vale a regra de sempre`() {
-        assertEquals(LayerTap.LEAVE_COMPACT, layerTap(picking = false, compact = true, selected = 1))
+        // Outro pedaço da linha (depois do split) na fileira compacta: troca a escolhida.
+        assertEquals(LayerTap.REPLACE, layerTap(picking = false, compact = true, selected = 1))
         assertEquals(LayerTap.REPLACE, layerTap(picking = false, compact = false, selected = 0))
         assertEquals(LayerTap.REPLACE, layerTap(picking = false, compact = false, selected = 1))
         assertEquals(LayerTap.TOGGLE, layerTap(picking = false, compact = false, selected = 2))

@@ -77,6 +77,11 @@ public:
     /// Retira fontes ociosas; a fila de encerramento fecha codecs fora do render.
     void collect(u64 frameNumber, u32 idleFrames = 180);
 
+    /// Marca a fonte (se já existe) da layer como usada agora, sem abrir nada:
+    /// uma camada ainda no seu trecho da timeline mas invisível neste quadro
+    /// (opacidade 0, fora da tela) não pode perder o decoder no `collect`.
+    void touch(LayerId layer, u64 frameNumber);
+
     /// Retira a fonte de uma layer sem esperar pelo decoder na thread da UI.
     void close_layer(LayerId layer);
     /// Fecha e espera todas as fontes, inclusive as já retiradas, antes de

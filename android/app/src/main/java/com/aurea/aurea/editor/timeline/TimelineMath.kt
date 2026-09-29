@@ -295,8 +295,8 @@ internal fun timelineCompact(panel: Boolean, dock: Boolean, tracksOpen: Boolean,
  * Modo "Selecionar várias camadas" (veio do app antigo): o toque SOMA ou
  * TIRA o clipe da seleção, sem trocar — é assim que se junta um lote sem
  * precisar segurar cada clipe. Ele vale antes de tudo (o modo deixa a
- * timeline inteira, nunca compacta). Fora dele: no compacto o toque sai do
- * painel; com lote de 2+ o toque também soma/tira; senão troca a escolhida.
+ * timeline inteira, nunca compacta). Fora dele: no compacto o toque na
+ * escolhida sai do painel (noutro pedaço da linha, troca); com lote de 2+ o toque também soma/tira; senão troca a escolhida.
  */
 internal enum class LayerTap { LEAVE_COMPACT, TOGGLE, REPLACE, DESELECT }
 
@@ -316,7 +316,9 @@ internal fun layerTap(
     timelineOnly: Boolean = false,
 ): LayerTap = when {
     picking -> LayerTap.TOGGLE
-    compact -> LayerTap.LEAVE_COMPACT
+    // Na fileira compacta os outros pedaços da mesma linha aparecem: tocar num
+    // deles troca a escolhida; tocar na própria sai do painel.
+    compact -> if (tappedSelected) LayerTap.LEAVE_COMPACT else LayerTap.REPLACE
     selected >= 2 -> LayerTap.TOGGLE
     selected == 1 && tappedSelected && !timelineOnly -> LayerTap.DESELECT
     else -> LayerTap.REPLACE

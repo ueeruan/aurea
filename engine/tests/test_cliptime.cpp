@@ -7,6 +7,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/audio/Audio.hpp"
+#include "aurea/project/Serialization.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
 
@@ -898,4 +899,243 @@ AUREA_TEST(ClipTime, SplitAndReverseKeepTheIntegratedSpeedTime) {
     bool down = true;
     for (i64 f = 1; f < l->end.value; ++f) down = down && l->source_frame(FrameIndex{f}) < l->source_frame(FrameIndex{f - 1});
     AUREA_CHECK(down);
+}
+
+// =============================================================================
+//  Remapear tempo "de lista" (três linhas: manter o tom, o momento da fonte no
+//  cabeçote com chave, interpolação) + Ao contrário. O dado é o de sempre:
+//  a curva Layer::timeRemap, com o easing padrão (editor de curva normal).
+// =============================================================================
+namespace {
+struct RemapPanel {
+    TimeRig& r;
+    u32 effect = 0;
+    explicit RemapPanel(TimeRig& rig) : r(rig) {
+        Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = r.layer;
+        add.effect_add.effectType = effect_type_id(effect_keys::kTimeRemap); add.effect_add.index = kInvalidIndex;
+        AUREA_CHECK(r.e.apply_command(add).ok());
+        effect = r.L()->effects.back().id;
+    }
+    void seek(i64 frame) {
+        Command c; c.type = CommandType::PlaybackSeek; c.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(r.e.apply_command(c).ok());
+    }
+    /// O que o painel faz ao arrastar/digitar o valor: o momento da fonte (s)
+    /// no cabeçote — grava a chave ali.
+    void at(i64 frame, f32 seconds) {
+        seek(frame);
+        Command p; p.type = CommandType::EffectSetParam; p.effect_param.layer = r.layer;
+        p.effect_param.effect = EffectId{effect, 0}; p.effect_param.paramIndex = 0; p.effect_param.value = seconds;
+        AUREA_CHECK(r.e.apply_command(p).ok());
+    }
+    u32 flags() {
+        bridge::LayerDetailPOD d{};
+        AUREA_CHECK(r.e.query_layer_detail(r.layer.pack(), d));
+        return d.timeFlags;
+    }
+};
+
+/// Cruzamentos por zero do canal esquerdo em [start, start + n) da timeline.
+u32 zero_crossings(const audio::AudioMixSnapshot& snap, audio::BlockSource& f, i64 start, u32 n, f32* peak = nullptr) {
+    std::vector<f32> out(static_cast<usize>(n) * 2);
+    audio::mix(snap, start, n, f, out.data());
+    u32 z = 0;
+    f32 top = 0.0f;
+    for (u32 i = 0; i < n; ++i) {
+        top = std::max(top, std::fabs(out[i * 2]));
+        if (i > 0 && (out[(i - 1) * 2] < 0.0f) != (out[i * 2] < 0.0f)) ++z;
+    }
+    if (peak) *peak = top;
+    return z;
+}
+} // namespace
+
+AUREA_TEST(ClipTime, RemapPanelKeysMapTimelineToSourceFreezeAndEase) {
+    TimeRig r(cfg_with_audio());   // 300 quadros a 30 fps, 1×
+    RemapPanel p(r);
+    p.at(0, 0.0f);
+    p.at(60, 4.0f);     // no quadro 60 da timeline: 4 s (120) da fonte
+    p.at(90, 4.0f);     // 60..90 parado (congelado)
+    p.at(150, 2.0f);    // e volta para 2 s: toca ao contrário
+    const Layer* l = r.L();
+    AUREA_CHECK(l->timeRemapEnabled);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{60}), 120.0, 1e-6);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{30}), 60.0, 1e-6);     // entre chaves: interpolado
+    AUREA_CHECK_NEAR(l->source_frame_f(30.5), 61.0, 1e-6);
+    for (i64 f = 60; f <= 90; ++f) AUREA_CHECK_NEAR(l->source_frame(FrameIndex{f}), 120.0, 1e-6);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{120}), 90.0, 1e-6);    // descendo de 120 para 60
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{150}), 60.0, 1e-6);
+    // O valor que a linha mostra (segundos da fonte no cabeçote).
+    p.seek(120);
+    bridge::EffectParamRow rows[4]{}; char blob[512]{};
+    AUREA_CHECK(r.e.query_effect_params(r.layer.pack(), p.effect, rows, 4, blob, sizeof blob) >= 1u);
+    AUREA_CHECK_NEAR(rows[0].value[0], 3.0f, 1e-5f);
+    // Easing pelo editor de curva NORMAL: o mesmo comando de qualquer trilha.
+    Command ease; ease.type = CommandType::KeyframeSetInterpolation;
+    ease.keyframe_interp.track = TrackRef{r.layer, TrackProperty::TimeRemap, kInvalidIndex, 0};
+    ease.keyframe_interp.time = FrameIndex{0};
+    ease.keyframe_interp.interp = Interpolation::Bezier;
+    ease.keyframe_interp.bx1 = 0.42f; ease.keyframe_interp.by1 = 0.0f;
+    ease.keyframe_interp.bx2 = 1.0f; ease.keyframe_interp.by2 = 1.0f;
+    AUREA_CHECK(r.e.apply_command(ease).ok());
+    AUREA_CHECK(l->timeRemap.keys[0].interp == Interpolation::Bezier);
+    const f64 want = 120.0 * keyframe_ease(l->timeRemap.keys[0], 0.5f);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{30}), want, 1e-4);
+    AUREA_CHECK(l->source_frame(FrameIndex{30}) < 55.0);                // começa devagar
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{60}), 120.0, 1e-6);    // as chaves não mexem
+    // Arrastar o valor numa chave que já existe mantém o easing escolhido.
+    p.at(0, 0.5f);
+    AUREA_CHECK(l->timeRemap.keys[0].interp == Interpolation::Bezier);
+    AUREA_CHECK_NEAR(l->source_frame(FrameIndex{0}), 15.0, 1e-5);
+}
+
+AUREA_TEST(ClipTime, RemapReverseMirrorsTheCurveExactlyAndUndoes) {
+    TimeRig r(cfg_with_audio());
+    RemapPanel p(r);
+    p.at(0, 0.0f);
+    p.at(60, 4.0f);
+    p.at(90, 4.0f);
+    Command ease; ease.type = CommandType::KeyframeSetInterpolation;
+    ease.keyframe_interp.track = TrackRef{r.layer, TrackProperty::TimeRemap, kInvalidIndex, 0};
+    ease.keyframe_interp.time = FrameIndex{0};
+    ease.keyframe_interp.interp = Interpolation::Bezier;
+    ease.keyframe_interp.bx1 = 0.3f; ease.keyframe_interp.by1 = 0.1f;
+    ease.keyframe_interp.bx2 = 0.9f; ease.keyframe_interp.by2 = 0.6f;
+    AUREA_CHECK(r.e.apply_command(ease).ok());
+    ease.keyframe_interp.time = FrameIndex{90};
+    ease.keyframe_interp.interp = Interpolation::EaseIn;
+    AUREA_CHECK(r.e.apply_command(ease).ok());
+    const i64 last = r.L()->end.value - 1;
+    std::vector<f64> before;
+    for (i64 f = 0; f <= last; ++f) before.push_back(r.L()->source_frame(FrameIndex{f}));
+    AUREA_CHECK((p.flags() & 256u) == 0);
+    AUREA_CHECK(r.e.reverse_time_remap(r.layer.pack()));
+    f64 worst = 0;
+    for (i64 f = 0; f <= last; ++f)
+        worst = std::max(worst, std::fabs(r.L()->source_frame(FrameIndex{f}) - before[static_cast<usize>(last - f)]));
+    std::printf("    ao contrario: pior diferenca %.6f quadros\n", worst);
+    AUREA_CHECK(worst < 0.02);
+    AUREA_CHECK((p.flags() & 256u) != 0);
+    // De novo: volta exatamente ao que era.
+    AUREA_CHECK(r.e.reverse_time_remap(r.layer.pack()));
+    worst = 0;
+    for (i64 f = 0; f <= last; ++f)
+        worst = std::max(worst, std::fabs(r.L()->source_frame(FrameIndex{f}) - before[static_cast<usize>(f)]));
+    AUREA_CHECK(worst < 1e-3);
+    AUREA_CHECK((p.flags() & 256u) == 0);
+    // Um passo de desfazer por toque.
+    AUREA_CHECK(r.e.reverse_time_remap(r.layer.pack()));
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    worst = 0;
+    for (i64 f = 0; f <= last; ++f)
+        worst = std::max(worst, std::fabs(r.L()->source_frame(FrameIndex{f}) - before[static_cast<usize>(f)]));
+    AUREA_CHECK(worst < 1e-3);
+
+    // Remapeamento desligado: Ao contrário liga (curva do tempo de agora) e inverte.
+    TimeRig plain(cfg_with_audio());
+    AUREA_CHECK(plain.e.reverse_time_remap(plain.layer.pack()));
+    AUREA_CHECK(plain.L()->timeRemapEnabled);
+    AUREA_CHECK_NEAR(plain.L()->source_frame(FrameIndex{0}), 299.0, 1e-6);
+    AUREA_CHECK_NEAR(plain.L()->source_frame(FrameIndex{299}), 0.0, 1e-6);
+    AUREA_CHECK_NEAR(plain.L()->source_frame(FrameIndex{100}), 199.0, 1e-6);
+}
+
+AUREA_TEST(ClipTime, KeepPitchHoldsToneWhileTheSourceFollowsTheRemap) {
+    TimeRig r(cfg_with_audio());   // seno de 440 Hz no canal esquerdo
+    audio::AudioBlockCache cache(&r.factory, 32ull << 20, false);
+    auto crossings = [&](i64 fromFrame, f32* peak = nullptr) {
+        auto snap = audio::build_snapshot(*r.comp(), *r.e.project(), nullptr, nullptr, nullptr);
+        AUREA_CHECK_EQ(snap->clips.size(), usize{1});
+        if (snap->clips.empty()) return 0u;
+        cache.register_asset(snap->clips[0].asset, audio::AudioAssetRef{"s", 10 * 48000});
+        Fetch f(cache);
+        return zero_crossings(*snap, f, audio::frame_to_sample(fromFrame, 30.0), 24000, peak);   // 0,5 s
+    };
+    const u32 natural = crossings(30);
+    std::printf("    cruzamentos em 0,5 s: 1x %u\n", natural);
+    AUREA_CHECK(natural >= 430 && natural <= 450);
+    // 2× sem manter o tom: o tom dobra (varispeed, como sempre).
+    r.speed(2.0f);
+    const u32 fast = crossings(30);
+    AUREA_CHECK(fast >= 860 && fast <= 900);
+    // 2× mantendo o tom: a mesma nota.
+    AUREA_CHECK(r.e.set_keep_pitch(r.layer.pack(), true));
+    const u32 kept = crossings(30);
+    std::printf("    2x: varispeed %u, tom mantido %u\n", fast, kept);
+    AUREA_CHECK(kept >= 420 && kept <= 475);
+    // Câmera lenta pela curva (0,5×) mantendo o tom: nota igual, não grave.
+    r.speed(1.0f);
+    RemapPanel p(r);
+    p.at(0, 0.0f);
+    p.at(150, 2.5f);
+    const u32 slow = crossings(30);
+    AUREA_CHECK(slow >= 420 && slow <= 475);
+    AUREA_CHECK(r.e.set_keep_pitch(r.layer.pack(), false));
+    const u32 low = crossings(30);
+    std::printf("    0,5x pela curva: tom mantido %u, varispeed %u\n", slow, low);
+    AUREA_CHECK(low >= 200 && low <= 240);
+    AUREA_CHECK(r.e.set_keep_pitch(r.layer.pack(), true));
+
+    // A 1× (curva igual ao tempo) os grãos reconstroem a fonte exatamente, e
+    // Ao contrário a −1× também (lê para trás na mesma posição).
+    AUREA_CHECK(r.e.apply_speed_ramp(r.layer.pack(), 0));
+    auto sample_at = [&](i64 frame) {
+        auto snap = audio::build_snapshot(*r.comp(), *r.e.project(), nullptr, nullptr, nullptr);
+        if (snap->clips.empty()) return 0.0f;
+        AUREA_CHECK(snap->clips[0].keepPitch);
+        cache.register_asset(snap->clips[0].asset, audio::AudioAssetRef{"s", 10 * 48000});
+        Fetch f(cache);
+        std::vector<f32> out(2);
+        audio::mix(*snap, audio::frame_to_sample(frame, 30.0) + 123, 1, f, out.data());
+        return out[0];
+    };
+    const f64 t1 = (r.L()->source_frame_f(40.0) * 1600.0 + 123.0) / 48000.0;
+    AUREA_CHECK_NEAR(sample_at(40), synthetic_audio_value(cfg_with_audio(), 0, t1), 2e-3);
+    AUREA_CHECK(r.e.reverse_time_remap(r.layer.pack()));
+    const f64 t2 = (r.L()->source_frame_f(40.0) * 1600.0 - 123.0) / 48000.0;
+    AUREA_CHECK_NEAR(sample_at(40), synthetic_audio_value(cfg_with_audio(), 0, t2), 2e-3);
+    // Congelado mantendo o tom = silêncio (nada de zumbido de grão repetido).
+    p.seek(60);
+    AUREA_CHECK(r.e.apply_speed_ramp(r.layer.pack(), 5));
+    f32 peak = 1.0f;
+    (void)crossings(30, &peak);
+    AUREA_CHECK(peak < 1e-6f);
+}
+
+AUREA_TEST(ClipTime, KeepPitchAndInterpolationSurviveSaveAndOldProjectsStayOff) {
+    TimeRig r(cfg_with_audio());
+    const u64 id = r.layer.pack();
+    AUREA_CHECK(r.e.set_keep_pitch(id, true));
+    AUREA_CHECK(r.e.set_frame_blend(id, 2));
+    RemapPanel p(r);
+    p.at(0, 1.0f);
+    AUREA_CHECK(r.e.reverse_time_remap(id));
+    AUREA_CHECK((p.flags() & 128u) != 0);
+    const f64 at40 = r.L()->source_frame(FrameIndex{40});
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_remap_lista.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    std::remove(path.c_str());
+    r.comp()->layers().for_each([&](LayerId lid, const Layer&) { r.layer = lid; });
+    const Layer* l = r.L();
+    AUREA_CHECK(l && l->keepPitch && l->frameBlend == 2 && l->timeRemapEnabled);
+    AUREA_CHECK(l && std::fabs(l->source_frame(FrameIndex{40}) - at40) < 1e-4);
+    AUREA_CHECK((p.flags() & (128u | 256u | 16u)) == (128u | 256u | 16u));
+    // Desfazer o "manter o tom" é um passo.
+    AUREA_CHECK(r.e.set_keep_pitch(r.layer.pack(), false));
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK(r.L()->keepPitch);
+
+    // Projeto gravado antes do campo (seção Timeline < 39): tom acompanha.
+    Project old;
+    LoadReport report;
+    const std::string fixture = std::string(AUREA_TEST_DATA_DIR) + "/manual-editing/manual-editing.aurea";
+    AUREA_CHECK(ProjectSerializer::load(old, fixture, LoadOptions{}, &report).ok());
+    AUREA_CHECK(report.timelineVersion < 39u);
+    const Composition* c = old.timeline().composition(old.timeline().root());
+    u32 layers = 0;
+    if (c) c->layers().for_each([&](LayerId, const Layer& x) { ++layers; AUREA_CHECK(!x.keepPitch); });
+    AUREA_CHECK(layers > 0u);
 }

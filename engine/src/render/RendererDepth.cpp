@@ -132,11 +132,26 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     DepthState& st = depthState_[stateKey];
     st.lastFrame = frameNumber_;
 
+    if (!map && video && !planFinal_) {
+        // Preview de vídeo ainda calculando: o render volta quando o worker
+        // terminar. No PLAY a rede leva mais que um quadro — quando o mapa do
+        // quadro N fica pronto o preview já pede o N+5 —, então vale o mapa
+        // pronto mais recente DESTA fonte (atrasado alguns quadros), não só o
+        // último que esta instância já mostrou: no play esse era nenhum, e o
+        // efeito nunca aparecia.
+        incomplete_ = true;
+        u64 latestKey = 0;
+        i64 latestUs = 0, latestFrameUs = 1;
+        if (ai::DepthMapPtr latest = depth_->latest_video(sourceKey, latestKey, latestUs, latestFrameUs);
+            latest && latestKey != st.frameKey) {
+            map = std::move(latest);
+            frameKey = latestKey;
+            frameIndex = latestFrameUs > 0 ? (latestUs + latestFrameUs / 2) / latestFrameUs : frameIndex;
+        }
+    }
     if (!map) {
-        // Preview de vídeo ainda calculando: o último mapa pronto desta
-        // instância segura o quadro (melhor atrasado que piscando o original),
-        // e o render volta quando o worker terminar.
-        if (video && !planFinal_) incomplete_ = true;
+        // O último mapa pronto desta instância segura o quadro (melhor
+        // atrasado que piscando o original).
         if (auto it = depthTex_.find(st.frameKey); st.frameKey && it != depthTex_.end()) {
             it->second.lastFrame = frameNumber_;
             return DepthMapResult{it->second.texture, st.texLo, st.texHi};

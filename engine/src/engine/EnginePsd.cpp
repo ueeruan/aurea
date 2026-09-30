@@ -70,6 +70,15 @@ Result<u64> Engine::import_psd(const std::string& path, const char* name, bool* 
     std::lock_guard<std::mutex> lock(modelMutex_);
     auto* parent = project_ ? current_composition() : nullptr;
     if (!parent) {cleanup();return Status{Errc::InvalidState};}
+    std::vector<u32> depths(doc.layers.size());u32 groupCount=0,maxDepth=0;
+    for(usize i=0;i<doc.layers.size();++i){const auto& layer=doc.layers[i];
+        depths[i]=(layer.parent<0?0:depths[static_cast<usize>(layer.parent)])+(layer.group?1u:0u);
+        maxDepth=std::max(maxDepth,depths[i]);if(layer.group)++groupCount;
+    }
+    if(parent->layers().count()>=kMaxLayerCount || project_->timeline().composition_count()+groupCount+1>256
+       || parent->nesting_depth()+maxDepth+1>kMaxNestingDepth) {
+        cleanup();return Status{Errc::BudgetExceeded};
+    }
     // Parse and validate the entire file before modifying the project.
     history_.before_mutation(*parent, project_->timeline().current(), "importar PSD");
     auto& timeline = project_->timeline();
@@ -77,11 +86,13 @@ Result<u64> Engine::import_psd(const std::string& path, const char* name, bool* 
     const auto root = timeline.create_composition(title, doc.width, doc.height, parent->fps());
     const auto duration = parent->duration();
     timeline.composition(root)->set_duration(duration);
+    timeline.composition(root)->set_nesting_depth(parent->nesting_depth()+1);
     timeline.composition(root)->set_transparent_background(true);
     std::vector<CompositionId> groups(doc.layers.size());
     for (usize i=0;i<doc.layers.size();++i) if (doc.layers[i].group) {
         groups[i] = timeline.create_composition(doc.layers[i].name, doc.width, doc.height, parent->fps());
         timeline.composition(groups[i])->set_duration(duration);
+        timeline.composition(groups[i])->set_nesting_depth(parent->nesting_depth()+depths[i]+1);
         timeline.composition(groups[i])->set_transparent_background(true);
     }
     for (usize i=doc.layers.size();i-- > 0;) {

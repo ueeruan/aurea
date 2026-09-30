@@ -46,3 +46,12 @@ AUREA_TEST(GridLayout, LayoutsMorphProximityAndIndividualAnimation) {
     AUREA_CHECK_NEAR(grid::evaluate(*comp,*item,15).matrix.col[3].x,65,.001f);
     e.shutdown();fileio::remove_file("aurea_test_grid.aurea");
 }
+AUREA_TEST(GridLayout, FullCompositionRefusesWithoutMutation) {
+    Engine e;EngineConfig cfg;cfg.disableAutosave=true;cfg.workerCount=2;
+    AUREA_CHECK(e.initialize(cfg).ok());AUREA_CHECK(e.new_project(100,100,30,nullptr).ok());
+    auto* comp=e.project()->timeline().composition(e.project()->timeline().root());
+    for(u32 i=0;i<kMaxLayerCount;++i)(void)comp->add_layer(LayerKind::Shape,"layer");
+    const u64 id=comp->order().at(0).pack();
+    AUREA_CHECK(!e.create_grid(&id,1).ok());AUREA_CHECK_EQ(comp->order().size(),kMaxLayerCount);
+    AUREA_CHECK(!comp->layer(LayerId::unpack(id))->parent.valid());e.shutdown();
+}

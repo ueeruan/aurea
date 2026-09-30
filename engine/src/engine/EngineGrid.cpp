@@ -6,6 +6,7 @@ Result<u64> Engine::create_grid(const u64* ids,u32 count) noexcept {
     if(!ids||!count||count>512)return Status{Errc::InvalidArgument};
     std::lock_guard<std::mutex> lock(modelMutex_);
     auto* comp=project_?current_composition():nullptr;if(!comp)return Status{Errc::InvalidState};
+    if(comp->layers().count()>=kMaxLayerCount)return Status{Errc::OutOfRange};
     std::vector<LayerId> members;
     for(u32 i=0;i<count;++i){const auto id=LayerId::unpack(ids[i]);const auto* l=comp->layer(id);
         if(!l||l->locked||l->parent.valid()||l->kind==LayerKind::Camera||l->kind==LayerKind::Light||l->kind==LayerKind::Audio||l->effects.size()>=kMaxEffectCount)return Status{Errc::InvalidArgument};

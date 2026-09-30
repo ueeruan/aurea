@@ -71,3 +71,15 @@ AUREA_TEST(Psd, GroupsMaskUnicodeZipAnd16BitTaggedLayers) {
         AUREA_CHECK_EQ(child.rgba[0],255);AUREA_CHECK_EQ(child.rgba[3],128);AUREA_CHECK_EQ(child.rgba[7],0);AUREA_CHECK_EQ(child.rgba[15],128);
     }
 }
+AUREA_TEST(Psd, CompositionAndNestingLimitsRefuseWithoutMutation) {
+    Engine e;EngineConfig cfg;cfg.disableAutosave=true;cfg.workerCount=2;
+    PSD_REQUIRE(e.initialize(cfg).ok());PSD_REQUIRE(e.new_project(8,4,30,nullptr).ok());
+    auto& timeline=e.project()->timeline();auto* root=timeline.composition(timeline.root());
+    const auto path="engine/tests/fixtures/psd/groups-mask-8-2.psd";
+    root->set_nesting_depth(kMaxNestingDepth-1);
+    AUREA_CHECK(!e.import_psd(path,"too deep").ok());AUREA_CHECK(root->order().empty());
+    root->set_nesting_depth(0);
+    while(timeline.composition_count()<255)(void)timeline.create_composition("full",8,4,30);
+    AUREA_CHECK(!e.import_psd(path,"too many groups").ok());
+    AUREA_CHECK_EQ(timeline.composition_count(),255u);AUREA_CHECK(root->order().empty());e.shutdown();
+}

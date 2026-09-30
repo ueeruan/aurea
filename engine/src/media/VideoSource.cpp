@@ -22,6 +22,12 @@ VideoSource::VideoSource(std::unique_ptr<VideoDecoderBackend> backend, MediaPrio
     DecodedFrameCache::Config cfg;
     const u32 live = backend_->max_live_frames();
     cfg.maxFrames = live > 5 ? live - 5 : 1;
+    // A 4K decoder can expose only six RGBA buffers: the ordinary cache then
+    // holds one frame. Flow needs A and B together (temporal RGB needs three).
+    // Borrow reserved slots ONLY for required samples, leaving three leases
+    // for presentation and decoder progress. Export drains completed GPU work
+    // before waiting for decode; clearing required times restores the small cap.
+    cfg.requiredFrameLimit = live > 3 ? live - 3 : 1;
     cache_.configure(cfg);
     // Janela para trás: cabe no cache com o atual e um de folga (o que acabou
     // de ser mostrado), no máximo 6 — o decoder de hardware tem 12 buffers.
@@ -52,6 +58,7 @@ void VideoSource::stop() noexcept {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!running_) return;
         running_ = false;
+        reverseDisplay_ = {};
     }
     wake_.notify_all();
     delivered_.notify_all();
@@ -66,6 +73,8 @@ void VideoSource::set_epoch(u64 epoch) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     if (epoch_ == epoch) return;
     epoch_ = epoch;
+    reverseDisplay_ = {};
+    reverseDisplayTargetUs_ = -1;
     // A época nova só aborta o decode em curso (e o que ele ainda entregaria).
     // Os quadros JÁ decodificados continuam valendo — são da mesma fonte, pelo
     // pts — e são eles que ficam na tela (o mais próximo) enquanto o alvo novo
@@ -77,6 +86,10 @@ void VideoSource::set_epoch(u64 epoch) noexcept {
 void VideoSource::request(const DecodeRequest& r) noexcept {
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (r.mode != DecodeMode::Playback || r.direction >= 0) {
+            reverseDisplay_ = {};
+            reverseDisplayTargetUs_ = -1;
+        }
         // Coalesce vsync repeats, but never reuse completion after invalidation.
         const u32 cacheVersion = cache_.stats().version;
         if (requestGen_ != 0 && r.targetUs == request_.targetUs && r.mode == request_.mode
@@ -101,8 +114,22 @@ void VideoSource::request(const DecodeRequest& r) noexcept {
     wake_.notify_one();
 }
 
-FrameRef VideoSource::frame_for(i64 targetUs, bool* exact) noexcept {
-    return cache_.find(targetUs, frameUs_ / 2, exact);
+FrameRef VideoSource::frame_for(i64 targetUs, bool* exact, i32 playbackDirection) noexcept {
+    if (playbackDirection >= 0) return cache_.find(targetUs, frameUs_ / 2, exact);
+    std::lock_guard<std::mutex> lock(mutex_);
+    bool found = false;
+    FrameRef frame = cache_.find(targetUs, frameUs_ / 2, &found, true);
+    if (exact) *exact = found;
+    // The decoder fills a backward window in ascending PTS order. Presenting
+    // those partial results made every reverse window appear to play forward.
+    // Hold one display buffer even if a tight cache evicts it during refill.
+    if (!found && reverseDisplay_ && targetUs <= reverseDisplayTargetUs_
+        && (!frame || frame->ptsUs > reverseDisplay_->ptsUs)) {
+        frame = reverseDisplay_;
+    }
+    reverseDisplay_ = frame;
+    reverseDisplayTargetUs_ = targetUs;
+    return frame;
 }
 
 void VideoSource::set_ready_callback(void (*fn)(void*), void* ctx) noexcept {
@@ -123,6 +150,8 @@ void VideoSource::suspend() noexcept {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         suspended_ = true;
+        reverseDisplay_ = {};
+        reverseDisplayTargetUs_ = -1;
     }
     wake_.notify_all();
 }

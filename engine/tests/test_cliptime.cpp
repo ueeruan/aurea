@@ -989,6 +989,43 @@ AUREA_TEST(ClipTime, RemapPanelKeysMapTimelineToSourceFreezeAndEase) {
     AUREA_CHECK_NEAR(l->source_frame(FrameIndex{0}), 15.0, 1e-5);
 }
 
+AUREA_TEST(ClipTime, ThreeRemapKeysGoForwardThenBackwardWithCurvesAndReload) {
+    TimeRig r(cfg_with_audio());
+    RemapPanel p(r);
+    p.at(0, 0);
+    p.at(150, 5);
+    p.at(300, 0);
+    AUREA_CHECK_EQ(r.L()->timeRemap.keys.size(), usize{3});
+    for (i64 frame : {0LL, 30LL, 75LL, 149LL, 150LL, 180LL, 225LL, 299LL, 300LL}) {
+        const f64 want = frame <= 150 ? frame : 300 - frame;
+        AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{frame}), want, .001);
+    }
+    Command ease; ease.type = CommandType::KeyframeSetBezier;
+    ease.keyframe_interp.track = TrackRef{r.layer, TrackProperty::TimeRemap, kInvalidIndex, 0};
+    ease.keyframe_interp.time = FrameIndex{150};
+    ease.keyframe_interp.interp = Interpolation::Bezier;
+    ease.keyframe_interp.bx1 = .42f; ease.keyframe_interp.by1 = 0;
+    ease.keyframe_interp.bx2 = 1; ease.keyframe_interp.by2 = 1;
+    AUREA_CHECK(r.e.apply_command(ease).ok());
+    std::vector<f64> before;
+    for (i64 frame = 0; frame < 300; ++frame) {
+        const f64 value = r.L()->source_frame(FrameIndex{frame});
+        if (frame > 150) AUREA_CHECK(value <= before.back());
+        before.push_back(value);
+    }
+    AUREA_CHECK_NEAR(before[75], 75., .001);
+    AUREA_CHECK(before[225] > 75.); // easing slows the return, never changes its sign
+    const char* path = "remap_three_keys_test.aurea";
+    AUREA_CHECK(r.e.save_project(path).ok());
+    AUREA_CHECK(r.e.load_project(path).ok());
+    for (i64 frame = 0; frame < 300; ++frame)
+        AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{frame}), before[frame], .001);
+    AUREA_CHECK(r.e.reverse_time_remap(r.layer.pack()));
+    for (i64 frame = 0; frame < 300; ++frame)
+        AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{frame}), before[299 - frame], .02);
+    std::remove(path);
+}
+
 AUREA_TEST(ClipTime, RemapReverseMirrorsTheCurveExactlyAndUndoes) {
     TimeRig r(cfg_with_audio());
     RemapPanel p(r);

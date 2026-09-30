@@ -847,6 +847,7 @@ private fun EffectNumberRow(
     PropertyRow(
         label = label,
         value = shown,
+        modifier = Modifier.testTag("effects.param.$effectId.${s.index}.$component"),
         unitsPerDp = s.unitsPerDp * d.scale,
         min = min(shownLo, shownHi),
         max = max(shownLo, shownHi),

@@ -123,7 +123,7 @@ fun Timeline(
         Box(
             Modifier
                 .fillMaxSize()
-                .background(AureaColors.EditorCanvas)
+                .background(com.aurea.aurea.ui.theme.AureaTimeline.Background)
                 .onSizeChanged {
                     state.width = it.width
                     state.height = it.height

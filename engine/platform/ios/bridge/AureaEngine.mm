@@ -27,6 +27,7 @@
 #import "AureaBridge.h"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/core/GestureMath.hpp"
 #include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
@@ -296,6 +297,10 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 #if DEBUG
     NSDictionary<NSString*, id>* _lastCaptureDiagnostics;
 #endif
+}
+
+- (float)clampPinchFactor:(float)factor scaleX:(float)x scaleY:(float)y scaleZ:(float)z threeD:(BOOL)threeD {
+    return aurea::clamp_pinch_factor(factor, x, y, z, threeD);
 }
 
 - (instancetype)initWithCacheDirectory:(NSString*)cacheDirectory

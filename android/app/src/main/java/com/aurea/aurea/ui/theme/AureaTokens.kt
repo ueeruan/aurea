@@ -640,11 +640,12 @@ object AureaElevation {
  * (`docs/migration/ui_spec/03_timeline.md` §1.B). Só a timeline usa.
  */
 object AureaTimeline {
+    val Background = Color(0xFF1A1C28)
     // --- Cores ---------------------------------------------------------------
     // Redesenho 2026-09-29 (mockup `docs/design/redesenho-2026-09-29/Editor.dc.html`).
     val TickMajor = Color(0xFF6E7A8C)      // risco de segundo (e rótulo)
     val TickMinor = Color(0xFF4C5566)      // risco de décimo / quadro
-    val HeaderPill = Color(0xFF1E222D)     // pílula do olho + quadradinho
+    val HeaderPill = Color(0xFF292D3D)     // pílula do olho + quadradinho
     val Swatch = Color(0xFFFFE899)         // quadradinho da camada sem etiqueta
     val SwatchGlyph = Color(0xFF0F141A)    // cadeado / visto dentro do quadradinho
     val KeyframeOn = Color(0xFFFFC107)     // losango escolhido (âmbar)
@@ -690,23 +691,23 @@ object AureaTimeline {
     }
 
     // --- Medidas (dp) --------------------------------------------------------
-    val RulerTicks = 30.dp                 // faixa dos riscos (base dos riscos em 22)
-    val RulerGap = 40.dp                   // relógio (30) + respiro até o topo da 1ª barra
+    val RulerTicks = 18.dp                 // faixa dos riscos (fortes 16, finos 6)
+    val RulerGap = 34.dp                   // relógio + respiro até a primeira barra em 52
     val Row = 32.dp                        // pílula 28 + 4 de vão (antes 36: camadas grandes demais)
-    val Bar = 24.dp                        // barra do clipe
-    val BarRadius = 3.dp
+    val Bar = 26.dp                        // barra do clipe
+    val BarRadius = 0.dp
     val BarMinWidth = 40.dp
     val KeyframeTrack = 11.dp              // faixa de baixo da barra, dos losangos
-    val HeaderColumn = 78.dp               // a pílula colada à esquerda (as barras passam por baixo)
+    val HeaderColumn = 70.dp               // a pílula colada à esquerda (as barras passam por baixo)
     val RowPillHeight = 28.dp
     val RowPillInset = 2.dp                // a pílula começa 2 dp acima da barra
     val GutterIconSize = 16.dp             // o olho da pílula
-    val GutterEyeSize = 16.dp
-    val GlyphBox = 22.dp
+    val GutterEyeSize = 20.dp
+    val GlyphBox = 20.dp
     val ClipStripe = 3.dp                  // faixa da cor da etiqueta na borda esquerda
     val ClipSelStroke = 2.dp
     val ClipIcon = 12.dp
-    val Playhead = 2.dp
+    val Playhead = 1.dp
     val PlayheadKnob = 8.dp
 }
 

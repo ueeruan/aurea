@@ -1002,7 +1002,7 @@ private const val MODE_PAN = 7       // um dedo no vazio com a vista ampliada: p
  * Um gesto da vista (zoom/pan do palco): guarda o começo e escreve valores
  * absolutos (nada acumula por evento), como o [StageEdit].
  */
-private class ViewGesture(private val store: EditorStore, private val m: StageMapper) {
+private class ViewGesture(private val store: EditorStore, private val m: StageMapper, private val minimumSpan: Float) {
     private var z0 = 1f
     private var px0 = 0f
     private var py0 = 0f
@@ -1021,12 +1021,19 @@ private class ViewGesture(private val store: EditorStore, private val m: StageMa
 
     /** Pinça: zoom pela razão da abertura, o ponto sob o meio dos dedos segue o meio. */
     fun pinch(ax: Float, ay: Float, bx: Float, by: Float) {
-        val z = StageZoomMath.clampZoom(z0 * hypot(ax - bx, ay - by) / span0)
+        if (!ax.isFinite() || !ay.isFinite() || !bx.isFinite() || !by.isFinite()) return
+        val span = hypot(ax - bx, ay - by)
+        val z = if (span >= minimumSpan && span0 >= minimumSpan)
+            StageZoomMath.clampZoom(z0 * span / span0) else z0
         val mx = (ax + bx) / 2
         val my = (ay + by) / 2
         val px = StageZoomMath.pinchPan(px0, z0, z, mx0, mx, m.boxW / 2)
         val py = StageZoomMath.pinchPan(py0, z0, z, my0, my, m.boxH / 2)
         apply(z, px, py)
+        // Rebase on the clamped result: reversing at 1×/8× or a pan edge
+        // responds immediately, without having to undo finger overshoot.
+        z0 = StageView.zoom; px0 = StageView.panX; py0 = StageView.panY
+        span0 = span; mx0 = mx; my0 = my
     }
 
     fun startPan() {
@@ -1068,7 +1075,7 @@ private suspend fun PointerInputScope.stageGestures(
         store, ui, m, haptic,
         snapTol = STAGE_ANCHOR_SNAP.toPx(),
     )
-    val view = ViewGesture(store, m)
+    val view = ViewGesture(store, m, 16.dp.toPx())
 
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
@@ -1328,7 +1335,7 @@ private suspend fun PointerInputScope.stageGestures(
                         val a = event.changes.firstOrNull { it.id == p1 }
                         val b = event.changes.firstOrNull { it.id == p2 }
                         // Saiu um dedo da pinça da camada: o que sobra não faz nada.
-                        if (a == null || b == null || !a.pressed || !b.pressed) mode = MODE_IDLE
+                        if (a == null || b == null || !a.pressed || !b.pressed) { edit.end(); mode = MODE_IDLE }
                         else edit.pinch(a.position.x, a.position.y, b.position.x, b.position.y)
                     }
                     MODE_VIEW -> {
@@ -1474,9 +1481,8 @@ private class StageEdit(
     private var sz0 = 1f
     private var threeD = false
     private var rot0 = 0f
-    private var lastAngle = 0f
-    private var accAngle = 0f
-    private var span0 = 1f
+    private val pinchTracker = StagePinchTracker()
+    private var pinchLayer = 0L
     private var rotActive = false
     private var rotOffset = 0f
     // Encaixes da pinça (NaN = solto): giro em múltiplos de 45°, escala em 100%.
@@ -1493,7 +1499,6 @@ private class StageEdit(
         began = false
         axisLock = 0
         rotActive = false
-        accAngle = 0f
         rotSnap = Float.NaN
         scaleSnap = Float.NaN
         group.clear()
@@ -1534,13 +1539,9 @@ private class StageEdit(
         rot0 = d.rotation[2]
     }
 
-    /** Fator de escala preso para que |escala| fique em [0,001; 100] nos dois eixos. */
+    /** Mesmo fator para todos os eixos, com os limites definidos no motor. */
     private fun clampFactor(f: Float): Float {
-        val ax = max(abs(sx0), 1e-4f)
-        val ay = max(abs(sy0), 1e-4f)
-        val lo = max(0.001f / ax, 0.001f / ay)
-        val hi = min(100f / ax, 100f / ay)
-        return if (lo <= hi) f.coerceIn(lo, hi) else f
+        return com.aurea.aurea.engine.AureaEngine.clampPinchFactor(f, sx0, sy0, sz0, threeD)
     }
 
     /** [axis]: 0 = livre (trava sozinho pelo gesto), 1 = só X, 2 = só Y (seta). */
@@ -1581,9 +1582,8 @@ private class StageEdit(
 
     fun startPinch(d: LayerDetail, ax: Float, ay: Float, bx: Float, by: Float) {
         keepTransform(d)
-        span0 = max(1f, hypot(ax - bx, ay - by))
-        lastAngle = atan2(by - ay, bx - ax)
-        accAngle = 0f
+        pinchLayer = d.id
+        pinchTracker.start(ax, ay, bx, by, snapTol * (16f / 6f))
         rotActive = false
         // Já parado num encaixe: fica preso sem tique até sair e voltar.
         rotSnap = StageMath.snapStep(rot0, StageMath.ROT_STEP, Float.NaN, StageMath.ROT_ENTER, StageMath.ROT_EXIT)
@@ -1655,11 +1655,10 @@ private class StageEdit(
     }
 
     fun pinch(ax: Float, ay: Float, bx: Float, by: Float) {
-        var f = clampFactor(hypot(ax - bx, ay - by) / span0)
-        val angle = atan2(by - ay, bx - ax)
-        accAngle += wrapRad(angle - lastAngle)
-        lastAngle = angle
-        val deg = Math.toDegrees(accAngle.toDouble()).toFloat()
+        if (store.primary != pinchLayer || store.detail?.locked != false) return
+        if (!pinchTracker.update(ax, ay, bx, by, ::clampFactor)) return
+        var f = pinchTracker.factor
+        val deg = pinchTracker.degrees
         // Zona morta de 4°: sem ela toda pinça de escala entortava a camada.
         if (!rotActive && abs(deg) > 4f) {
             rotActive = true

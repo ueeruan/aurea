@@ -129,7 +129,9 @@ public:
     void set_epoch(u64 epoch) noexcept;
 
     /// Melhor frame disponível agora para `targetUs`. Nunca bloqueia.
-    [[nodiscard]] FrameRef frame_for(i64 targetUs, bool* exact) noexcept;
+    /// playbackDirection < 0 keeps the last displayed frame while reverse
+    /// preroll is incomplete. Pass 0 for still/export/auxiliary samples.
+    [[nodiscard]] FrameRef frame_for(i64 targetUs, bool* exact, i32 playbackDirection = 0) noexcept;
 
     /// Chamado (na thread de decode) quando chega um frame novo. O motor usa
     /// para acordar o render quando estava esperando por ele.
@@ -185,6 +187,12 @@ private:
     /// Alvo do último preenchimento para trás tentado: um por alvo, senão um
     /// começo de mídia sem frame em 0 viraria laço de seek.
     i64 backfillAttemptUs_ = -1;
+
+    // One presentation buffer, within the five buffers reserved outside the
+    // decode cache (three GPU frames, presentation fallback, decoder output).
+    // Protected by mutex_; released on forward/still requests and suspension.
+    FrameRef reverseDisplay_;
+    i64 reverseDisplayTargetUs_ = -1;
 
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;

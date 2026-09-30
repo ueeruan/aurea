@@ -29,9 +29,9 @@ struct TimelineMetrics {
     private func dp(_ v: CGFloat) -> CGFloat { v * density }
 
     // --- Régua e linhas (redesenho 2026-09-29) -----------------------------------
-    /// Faixa da régua (0..30); o relógio mora na faixa de baixo (30..60).
+    /// Riscos em 0..18; relógio e sublinhado logo abaixo.
     var rulerTicks: CGFloat { dp(AureaTimeline.rulerTicks) }
-    /// Topo da 1ª linha: régua 30 + relógio 30 + 4 de respiro (a pílula começa em 68).
+    /// Primeira linha em 46; pílula em 50 e barra em 52, como no Android.
     var rowsTop: CGFloat { dp(AureaTimeline.rulerTicks + AureaTimeline.rulerGap) }
     /// Passo da fileira: pílula 28 + 4 de vão.
     var row: CGFloat { dp(AureaTimeline.row) }
@@ -53,13 +53,13 @@ struct TimelineMetrics {
     // --- Pílula da fileira (olho + quadradinho do glifo, colada à esquerda) -------
     /// Largura da pílula; as barras passam por BAIXO dela (ela é opaca).
     var headerColumn: CGFloat { dp(AureaTimeline.headerColumn) }
-    /// Olho de 16 centrado em x 16; x < 28 é o toque do olho.
-    let eyeIcon: CGFloat = 16
+    /// Olho de 20 centrado em x 16; x < 28 é o toque do olho.
+    let eyeIcon: CGFloat = 20
     var eyeCx: CGFloat { dp(16) }
     var eyeHitRight: CGFloat { dp(28) }
-    /// Quadradinho do glifo: 22 × 22, de x 32 a 54, raio 3.
-    var glyphBoxLeft: CGFloat { dp(32) }
-    var glyphBox: CGFloat { dp(22) }
+    /// Miniatura de 20 × 20, de x 38 a 58, raio 3.
+    var glyphBoxLeft: CGFloat { dp(38) }
+    var glyphBox: CGFloat { dp(20) }
     var glyphBoxRadius: CGFloat { dp(3) }
     var glyphBoxStroke: CGFloat { dp(1.5) }
     let glyphText: CGFloat = 11
@@ -74,10 +74,11 @@ struct TimelineMetrics {
     var laneLabelX: CGFloat { dp(30) }
 
     // --- Régua ------------------------------------------------------------------
-    /// Riscos de 1 pt com a base em y 22: fortes de 14, finos de 8.
-    var tickMajorTop: CGFloat { dp(8) }
-    var tickMinorTop: CGFloat { dp(14) }
-    var tickBottom: CGFloat { dp(22) }
+    /// Riscos de 1 pt: fortes de 16, finos de 6.
+    var tickMajorTop: CGFloat { 0 }
+    var tickMinorTop: CGFloat { 0 }
+    var tickBottom: CGFloat { dp(16) }
+    var tickMinorBottom: CGFloat { dp(6) }
     var tickMajorWidth: CGFloat { dp(1) }
     var tickMinorWidth: CGFloat { dp(1) }
     var tickLabelGap: CGFloat { dp(3) }
@@ -103,7 +104,7 @@ struct TimelineMetrics {
     var selStroke: CGFloat { dp(AureaTimeline.clipSelStroke) }
     var multiStroke: CGFloat { dp(AureaTimeline.clipSelStroke) }
     var lightLine: CGFloat { dp(1) }
-    /// Toque do corpo vai um pouco abaixo da barra (os 10 dp que sobram na linha são do vazio).
+    /// O toque do corpo inclui mais 4 pt abaixo da barra.
     var bodyHitBottom: CGFloat { bar + dp(4) }
     var arrowTouchPad: CGFloat { dp(6) }
     /// Fileira compacta, clipe escolhido (Efeitos.dc.html; par do TimelineMetrics.kt):
@@ -146,9 +147,9 @@ struct TimelineMetrics {
     var balloonGap: CGFloat { dp(3) }
 
     // --- Cabeçote e relógio ----------------------------------------------------------
-    /// Cabeçote branco de 2 pt, de y 64 (logo abaixo do relógio) até o fim.
+    /// Cabeçote branco de 1 pt, de y 40 (abaixo do relógio) até o fim.
     var playhead: CGFloat { dp(AureaTimeline.playhead) }
-    var playheadTop: CGFloat { dp(64) }
+    var playheadTop: CGFloat { dp(40) }
     /// Compacto (painel aberto): o cabeçote vermelho de antes, de cima a baixo.
     var compactPlayhead: CGFloat { dp(1.6) }
     var knob: CGFloat { dp(8) }
@@ -157,12 +158,12 @@ struct TimelineMetrics {
     var markerWidth: CGFloat { dp(10) }
     var markerHeight: CGFloat { dp(8) }
     /// Faixa do relógio (MM:SS:FF), centrado no cabeçote.
-    var timecodeTop: CGFloat { dp(30) }
-    var timecodeBottom: CGFloat { dp(60) }
-    /// Estilo sublinhado: 16 pt, traço de 2 da largura do texto em y 52..54.
+    var timecodeTop: CGFloat { dp(18) }
+    var timecodeBottom: CGFloat { dp(40) }
+    /// Relógio de 16 pt, sublinhado de 1,5 pt da largura do texto em y 34.
     let timecodeFont: CGFloat = 16
-    var underlineTop: CGFloat { dp(52) }
-    var underlineHeight: CGFloat { dp(2) }
+    var underlineTop: CGFloat { dp(34) }
+    var underlineHeight: CGFloat { dp(1.5) }
     /// Estilo caixa: 26 de alto, borda de 1,5 no destaque, raio 4, 6 de lado, 15 pt.
     let timecodeBoxFont: CGFloat = 15
     var timecodeBoxHeight: CGFloat { dp(26) }

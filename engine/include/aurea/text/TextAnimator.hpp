@@ -56,6 +56,7 @@ struct GlyphAnim {
     f32  strokeAdd = 0.0f;    ///< px
     f32  trackingShift = 0.0f;
     Vec4 fill{0, 0, 0, 0};    ///< a = peso da mistura com a cor do animador (sRGB)
+    f32 fillOpacity = 1.0f;   ///< alpha da cor de preenchimento, separado do peso da mistura
     Vec4 stroke{0, 0, 0, 0};
 };
 

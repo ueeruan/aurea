@@ -1224,7 +1224,7 @@ std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& 
     const VideoPath path = initial_video_path(in);
     const bool zeroCopy = priority != MediaPriority::Thumbnail && zeroCopy_.load();
     auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy, priority == MediaPriority::Thumbnail,
-                                                       softwareOnly_.load(), path == VideoPath::DriverGl);
+                                                       path == VideoPath::SoftwarePlanes, path == VideoPath::DriverGl);
     if (const Status s = decoder->open(); !s.ok()) {
         AUREA_LOG_ERROR("decoder nao abriu: %s", s.message().data());
         return nullptr;

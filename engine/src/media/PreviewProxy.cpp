@@ -175,7 +175,15 @@ void PreviewProxyService::set_pause_reason(PauseReason reason, bool paused) noex
     wake_.notify_all();
 }
 void PreviewProxyService::clear() noexcept { std::lock_guard<std::mutex> lock(mutex_); ++generation_; queue_.clear(); records_.clear(); retryAt_.clear(); wake_.notify_all(); }
-void PreviewProxyService::stop() noexcept { stopping_.store(true); wake_.notify_all(); if (worker_.joinable()) worker_.join(); clear(); }
+void PreviewProxyService::stop() noexcept {
+    // Publish with the same mutex as wait_for's predicate. Otherwise stop can
+    // notify between its predicate check and sleep, leaving join blocked for
+    // the entire pacing interval.
+    { std::lock_guard<std::mutex> lock(mutex_); stopping_.store(true); }
+    wake_.notify_all();
+    if (worker_.joinable()) worker_.join();
+    clear();
+}
 bool PreviewProxyService::cancelled(u64 generation) const noexcept { return stopping_.load() || paused_.load() || generation != generation_.load(); }
 std::shared_ptr<const PreviewProxy> PreviewProxyService::request(const Asset& asset) {
     const u32 target = shortSide_.load();
@@ -271,9 +279,20 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
     u32 empty = 0;
     bool eos = false, success = false;
     while (!cancelled(request.generation) && result->times.size() < kMaxFrames) {
+        const auto started = std::chrono::steady_clock::now();
+        auto pace = [&] {
+            // Proxy preparation is optional background work. A fixed 1 ms gap
+            // lets a costly 4K resample consume a core continuously (iOS CPU
+            // exception); allow at most 25% wall-time duty for this worker.
+            const auto work = std::chrono::steady_clock::now() - started;
+            const auto floor = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::milliseconds(std::max(1u, pacingMs_.load())));
+            std::unique_lock<std::mutex> lock(mutex_);
+            wake_.wait_for(lock, std::max(work * 3, floor), [&] { return cancelled(request.generation); });
+        };
         FrameRef frame; i64 pts = 0;
         if (!decoder->next_frame(-1, frame, pts, eos).ok()) break;
-        if (!frame) { if (eos) { success = !result->times.empty(); break; } if (++empty > 500) break; continue; }
+        if (!frame) { if (eos) { success = !result->times.empty(); break; } if (++empty > 500) break; pace(); continue; }
         empty = 0;
         if (!result->times.empty() && pts <= result->times.back()) break;
         if (!sink) {
@@ -313,8 +332,7 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
             if (!ec && size > diskBudget_) break;
             ec.clear();
         }
-        std::unique_lock<std::mutex> lock(mutex_);
-        wake_.wait_for(lock, std::chrono::milliseconds(std::max(1u, pacingMs_.load())), [&] { return cancelled(request.generation); });
+        pace();
     }
     if (success && sink && !cancelled(request.generation)) {
         if (result->durations.back() <= 0) result->durations.back() = result->original.durationUs > result->times.back()

@@ -105,14 +105,11 @@ internal class TimelinePainter(
         bottomLeftCornerRadius = CornerRadius.Zero,
     ).also { pillPath.addRoundRect(it) }
     private val glyphRing = Stroke(1.5f * m.density)
-    /** Triângulo do cabeçote (camada escolhida), reusado a cada quadro. */
-    private val marker = Path()
     /** Contorno branco do clipe escolhido na fileira compacta (ponta esquerda redonda). */
     private val capStroke = Stroke(m.capStroke)
     private val capOutline = Path()
     private val capRadii = FloatArray(8)
     private var capName: NameLayout? = null
-    private val timecodeBoxLine = Stroke(m.timecodeBoxStroke)
     private val dividerPaint = Paint().apply { color = android.graphics.Color.argb(64, 0, 0, 0); strokeWidth = 1f }
     private val glyphSrc = android.graphics.Rect()
 
@@ -200,23 +197,13 @@ internal class TimelinePainter(
         }
         drawRuler(w, view, ppf, cx, fps, st.pps)
         drawMarkers(store.markers, w, view, ppf, cx)
-        drawTimecode(cx, store.playhead, fps, st.timecodeBox)
+        drawTimecode(cx, store.playhead, fps)
         if (thumbs.starved) c.requestRedraw()
-        // Redesenho 2026-09-29: camada escolhida (fileira compacta ou relógio em
-        // caixa) = cabeçote em destaque com o triângulo no alto da régua
-        // (Efeitos.dc.html); sem seleção, o fio branco do editor principal.
-        val chosen = compact || st.timecodeBox
-        val color = if (chosen) AureaColors.Accent else AureaColors.Playhead
-        // Fio de 2 dp do relógio para baixo (mockup): não risca a régua nem os dígitos.
+        // Uma origem temporal para clipes, losangos e fio, inclusive na seleção.
+        val color = AureaColors.Playhead
+        // Fio de 1 dp interrompido apenas na faixa do relógio.
         drawRect(color, Offset(playheadX - m.playhead / 2f, m.playheadTop), Size(m.playhead, h - m.playheadTop))
-        if (chosen) {
-            marker.reset()
-            marker.moveTo(playheadX - m.markerWidth / 2f, 0f)
-            marker.lineTo(playheadX + m.markerWidth / 2f, 0f)
-            marker.lineTo(playheadX, m.markerHeight)
-            marker.close()
-            drawPath(marker, color)
-        }
+        drawRect(color, Offset(playheadX - m.playhead / 2f, 0f), Size(m.playhead, m.rulerTicks))
     }
 
     // --- Linhas ---------------------------------------------------------------------------
@@ -942,7 +929,7 @@ internal class TimelinePainter(
                     val xm = TimeAxis.xOf((t + j * major / s.subdivisions) * fps, view, ppf, cx)
                     if (xm < -1f || xm > w + 1f) continue
                     minorPath.moveTo(xm, m.tickMinorTop)
-                    minorPath.lineTo(xm, m.tickBottom)
+                    minorPath.lineTo(xm, m.tickMinorBottom)
                 }
             }
             if (s.labels) drawRulerLabel(t.roundToInt(), x, cx)
@@ -957,7 +944,7 @@ internal class TimelinePainter(
                 if (abs(sec - nearMajor) * fps >= 0.5) {
                     val x = TimeAxis.xOf(f.toDouble(), view, ppf, cx)
                     minorPath.moveTo(x, m.tickMinorTop)
-                    minorPath.lineTo(x, m.tickBottom)
+                    minorPath.lineTo(x, m.tickMinorBottom)
                 }
                 f++
             }
@@ -1007,7 +994,7 @@ internal class TimelinePainter(
      * Desenhado dígito a dígito com layouts em cache (algarismos tabulares têm
      * a mesma largura): o relógio repinta a cada quadro sem alocar.
      */
-    private fun DrawScope.drawTimecode(cx: Float, frame: Int, fps: Float, boxed: Boolean) {
+    private fun DrawScope.drawTimecode(cx: Float, frame: Int, fps: Float) {
         if (digits[0] == null) {
             for (dgt in 0..9) digits[dgt] = measurer.measure(dgt.toString(), digitStyle)
             digits[10] = measurer.measure(":", digitStyle)
@@ -1026,18 +1013,6 @@ internal class TimelinePainter(
         val colons = if (hourDigits > 0) 3 else 2
         val total = (hourDigits + 4 + ffDigits) * digitWidth + colons * colonWidth
         val top = m.timecodeBaseline - digitBaseline
-        if (boxed) {
-            // Estilo caixa (camada escolhida / efeitos): borda em destaque em volta dos dígitos.
-            val bw = total + 2f * m.timecodeBoxPad
-            val s = m.timecodeBoxStroke
-            drawRoundRect(
-                AureaColors.Accent,
-                Offset(cx - bw / 2f + s / 2f, m.timecodeBoxTop + s / 2f),
-                Size(bw - s, m.timecodeBoxHeight - s),
-                CornerRadius(m.timecodeBoxRadius),
-                style = timecodeBoxLine,
-            )
-        }
         var x = cx - total / 2f
         if (hourDigits > 0) {
             x = drawNumber(tc[0], hourDigits, x, top)
@@ -1048,7 +1023,7 @@ internal class TimelinePainter(
         x = drawNumber(tc[2], 2, x, top)
         x = drawColon(x, top)
         drawNumber(tc[3], ffDigits, x, top)
-        if (!boxed) drawRect(Color.White, Offset(cx - total / 2f, m.underlineTop), Size(total, m.underlineHeight))
+        drawRect(Color.White, Offset(cx - total / 2f, m.underlineTop), Size(total, m.underlineHeight))
     }
 
     private fun DrawScope.drawNumber(value: Int, count: Int, x0: Float, top: Float): Float {

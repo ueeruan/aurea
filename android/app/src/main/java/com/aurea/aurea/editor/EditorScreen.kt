@@ -280,7 +280,7 @@ fun EditorScreen(store: EditorStore) {
                         })
                 }
 
-                // O "+" saiu: adicionar mora na barra fixa de baixo ([AddBar]).
+                // Adicionar continua na barra fixa de categorias.
                 if (ui.adding && !store.sceneEditor) AddLayerOverlay(store, ui)
                 // A.01: o círculo "Voltar ao editor" no canto (a HEAD perdeu — bug 1).
                 if (ui.fullscreen) {

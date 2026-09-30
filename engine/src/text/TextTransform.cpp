@@ -135,6 +135,9 @@ void evaluate_transform_effects(const Layer& layer, const EffectRegistry& regist
             if (v[kOverrideFill].as_bool()) {
                 const Vec4 color = v[kFillColor].as_color();
                 const f32 a = std::clamp(weight, 0.f, 1.f), previous = style.fill.w * (1.f - a), total = a + previous;
+                // fill.w is the selector's color-mix weight, not color alpha.
+                // Keep alpha independent so its slider/keys affect the rendered fill.
+                style.fillOpacity += (std::clamp(color.w, 0.f, 1.f) - style.fillOpacity) * a;
                 style.fill = total > 0 ? Vec4{(color.x * a + style.fill.x * previous) / total,
                     (color.y * a + style.fill.y * previous) / total, (color.z * a + style.fill.z * previous) / total, total} : Vec4{};
             }

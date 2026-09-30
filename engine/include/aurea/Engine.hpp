@@ -1571,6 +1571,7 @@ private:
     // parado, um quadro na melhor resolução permitida substitui o reduzido.
     bool refinePending_ = false;              ///< último quadro saiu reduzido
     bool refineNow_ = false;                  ///< este quadro é o refino
+    u64 refineDueNs_ = 0;                     ///< prazo absoluto; vsync sem mudança não o adia
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};
     std::atomic<bool> playingHint_{false};
@@ -1579,6 +1580,7 @@ private:
     std::atomic<u64>  renderWakeups_{0};
 
     SurfaceDesc surface_{};
+    std::atomic<u64> pendingSurfaceSize_{0}; ///< UI publishes; render applies between frames
 
     // --- Métricas ---------------------------------------------------------------
     mutable std::mutex perfMutex_;

@@ -39,6 +39,9 @@ public:
     struct Config {
         u32 maxFrames = 6;
         u64 maxBytes = 192ull * 1024 * 1024;
+        /// Decoder-safe ceiling for explicitly required temporal samples.
+        /// Zero keeps maxFrames as a hard limit; ordinary prefetch never grows.
+        u32 requiredFrameLimit = 0;
     };
 
     struct Stats {
@@ -77,7 +80,9 @@ public:
     /// Melhor frame para `targetUs`: o exato (|pts - alvo| ≤ meio frame) ou, se
     /// não houver, o mais próximo ANTERIOR (o que um player mostraria), e na
     /// falta dele o mais próximo de qualquer lado. `exact` diz qual foi.
-    [[nodiscard]] FrameRef find(i64 targetUs, i64 halfFrameUs, bool* exact) noexcept;
+    /// During reverse playback, missing targets may only fall back to later
+    /// frames. Earlier preroll is decoded forward and must not be displayed.
+    [[nodiscard]] FrameRef find(i64 targetUs, i64 halfFrameUs, bool* exact, bool reverseFallback = false) noexcept;
 
     [[nodiscard]] bool contains(i64 targetUs, i64 halfFrameUs) const noexcept;
 
@@ -107,6 +112,7 @@ private:
     [[nodiscard]] f64 cost_locked(i64 ptsUs, i64 durationUs = 0) const noexcept;
     [[nodiscard]] bool over_shared_budget_locked() const noexcept;
     [[nodiscard]] bool required_locked(i64 pts, i64 duration) const noexcept;
+    [[nodiscard]] u32 frame_limit_locked() const noexcept;
 
     mutable std::mutex mutex_;
     std::vector<FrameRef> frames_;   ///< ordenado por pts

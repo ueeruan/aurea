@@ -279,7 +279,7 @@ public:
         if (frame) out = FrameRef::adopt(new LeasedFrame(std::move(frame), leases_));
         return status;
     }
-    u32 max_live_frames() const noexcept override { return 12; }
+    u32 max_live_frames() const noexcept override { return leases_->limit; }
     i64 keyframe_interval_us() const noexcept override { return decoder_.keyframe_interval_us(); }
 private:
     SyntheticDecoder decoder_;
@@ -599,6 +599,47 @@ AUREA_TEST(Export, MotionBlur3DPipelinedIsByteIdenticalToSerial) {
         if (k == 1) AUREA_CHECK(o.p.pipelineDepth > 1);
     }
     AUREA_CHECK_EQ(hashes[0], hashes[1]);
+}
+
+AUREA_TEST(Export, VectorAndTransformMotionBlurFinishEveryFrame) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 128; cfg.height = 72; cfg.frameCount = 24;
+    cfg.pattern = SyntheticPattern::FastSquare;
+    cfg.decodeCostUs = 2000;
+    for (u32 playback : {0u, 1u, 2u}) for (u32 mode : {1u, 2u, 3u}) {
+        LeasedFactory factory(cfg);
+        factory.leases->limit = 6; // Android DriverGl's bounded pool for 4K input
+        Rig r(cfg, 30, 24, 3, &factory);
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        const auto id = r.video_layer();
+        auto* layer = r.comp()->layer(id);
+        layer->reversed = playback == 1;
+        if (playback == 2) {
+            layer->timeRemapEnabled = true;
+            layer->timeRemap.set(FrameIndex{0}, 0);
+            layer->timeRemap.set(FrameIndex{12}, 20);
+            layer->timeRemap.set(FrameIndex{23}, 0);
+        }
+        auto& position = layer->tracks.get_or_create(TrackProperty::PositionX);
+        position.set(FrameIndex{0}, 40); position.set(FrameIndex{23}, 80);
+        AUREA_CHECK(r.e.set_vector_blur(id.pack(), mode & 1u ? 1.f : 0.f));
+        AUREA_CHECK(r.e.set_motion_blur(id.pack(), (mode & 2u) != 0));
+        AUREA_CHECK(r.e.set_composition_motion_blur(true));
+        const auto result = run_export(r, 72, 30, false, 20);
+        AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+        if (!result.finished) return; // Rig teardown joins the worker before capture is destroyed.
+        std::printf("    blur mode=%u playback=%u frames=%zu elapsed=%.2fs flags=%u\n", mode, playback, r.cap.hashes.size(), result.seconds, result.p.flags);
+        AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+        AUREA_CHECK_EQ(r.cap.hashes.size(), usize{24});
+        AUREA_CHECK_EQ(result.p.flags & Engine::kExportFrameFallback, 0u);
+        AUREA_CHECK_EQ(factory.leases->exhausted.load(), 0u);
+        if (mode & 1u) {
+            u32 hits = 0, misses = 0;
+            r.e.flow_cache_stats(hits, misses);
+            AUREA_CHECK(misses > 0);
+        }
+    }
 }
 
 AUREA_TEST(Export, TemporalRgbReleasesFiniteDecoderImages) {

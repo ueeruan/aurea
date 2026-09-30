@@ -4911,6 +4911,20 @@ AUREA_TEST(Gpu, TimeRemapGraphEditsPointsAndTheVideoFollows) {
     AUREA_CHECK_NEAR(halfway, frame_gray_code(20), 0.5);
     AUREA_CHECK_NEAR(frozen, frame_gray_code(0), 0.5);
     AUREA_CHECK_NEAR(removed, frame_gray_code(150), 0.5);
+    // Three-key ping-pong: export/still sampling uses the same source clock.
+    const i32 peak = e.edit_time_remap_key(*layer, -1, 150, 0.f, -1);
+    AUREA_CHECK_EQ(peak, 1);
+    AUREA_CHECK_EQ(e.edit_time_remap_key(*layer, 2, 300, 0.f, -1), 2);
+    for (i64 frame : {0LL, 30LL, 75LL, 149LL, 150LL, 180LL, 225LL, 299LL}) {
+        const u32 source = static_cast<u32>(frame <= 150 ? frame : 300 - frame);
+        AUREA_CHECK_NEAR(shown(frame), frame_gray_code(source), .5);
+    }
+    AUREA_CHECK(e.reverse_time_remap(*layer));
+    for (i64 frame : {0LL, 30LL, 75LL, 149LL, 150LL, 180LL, 225LL, 299LL}) {
+        const i64 mirrored = 299 - frame;
+        const u32 source = static_cast<u32>(mirrored <= 150 ? mirrored : 300 - mirrored);
+        AUREA_CHECK_NEAR(shown(frame), frame_gray_code(source), .5);
+    }
     e.gpu()->destroy_texture(target);
     e.shutdown();
 }

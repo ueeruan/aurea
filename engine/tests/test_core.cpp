@@ -3,6 +3,8 @@
 #include "TestFramework.hpp"
 
 #include "aurea/core/Handle.hpp"
+#include "aurea/core/GestureMath.hpp"
+#include <limits>
 #include "aurea/memory/Arena.hpp"
 #include "aurea/memory/MemoryManager.hpp"
 #include "aurea/command/CommandQueue.hpp"
@@ -17,6 +19,28 @@
 #include <thread>
 
 using namespace aurea;
+
+AUREA_TEST(PreviewGesture, UniformScaleLimitsIncludeDepthAndMirrors) {
+    const f32 f = clamp_pinch_factor(10.f, -2.f, 4.f, 50.f, true);
+    AUREA_CHECK_NEAR(f, 2.f, 1e-6f);
+    AUREA_CHECK_NEAR(-2.f * f, -4.f, 1e-6f);
+    AUREA_CHECK_NEAR(4.f * f, 8.f, 1e-6f);
+    AUREA_CHECK_NEAR(50.f * f, 100.f, 1e-6f);
+    AUREA_CHECK_NEAR(clamp_pinch_factor(10.f, -2.f, 4.f, 50.f, false), 10.f, 1e-6f);
+    AUREA_CHECK_NEAR(clamp_pinch_factor(.001f, .05f, .1f, .15f, true), .02f, 1e-6f);
+}
+
+AUREA_TEST(PreviewGesture, LegacyScalesDoNotJumpAndInvalidInputStaysFinite) {
+    AUREA_CHECK_NEAR(clamp_pinch_factor(1.f, .00001f, 200.f, 1.f, false), 1.f, 0.f);
+    AUREA_CHECK_NEAR(clamp_pinch_factor(2.f, 200.f, 200.f, 1.f, false), 1.f, 0.f);
+    AUREA_CHECK_NEAR(clamp_pinch_factor(.9f, 200.f, 200.f, 1.f, false), .9f, 1e-6f);
+    AUREA_CHECK_NEAR(clamp_pinch_factor(.5f, .00001f, .00001f, 1.f, false), 1.f, 0.f);
+    AUREA_CHECK_NEAR(clamp_pinch_factor(2.f, 0.f, 5.f, 0.f, true), 2.f, 0.f);
+    AUREA_CHECK_NEAR(clamp_pinch_factor(2.f, 0.f, 0.f, 0.f, true), 1.f, 0.f);
+    for (f32 invalid : {0.f, -1.f, std::numeric_limits<f32>::quiet_NaN(), std::numeric_limits<f32>::infinity()})
+        AUREA_CHECK_EQ(clamp_pinch_factor(invalid, 1.f, 1.f, 1.f, true), 1.f);
+    AUREA_CHECK_EQ(clamp_pinch_factor(2.f, std::numeric_limits<f32>::quiet_NaN(), 1.f, 1.f, true), 1.f);
+}
 
 // -----------------------------------------------------------------------------
 // Handles

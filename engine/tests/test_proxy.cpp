@@ -1,4 +1,5 @@
 #include "TestFramework.hpp"
+#include "SyntheticVideo.hpp"
 #include "aurea/media/PreviewProxy.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include <cmath>
@@ -6,8 +7,71 @@
 #include <thread>
 #include <cstdlib>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <future>
 
 using namespace aurea;
+
+namespace {
+struct ProxyTestSink final : ExportSink {
+    std::ofstream file;
+    std::promise<void>* opened = nullptr;
+    Status open(const char* path, const VideoStreamConfig&, const AudioStreamConfig*) noexcept override {
+        file.open(path, std::ios::binary);
+        if (opened) opened->set_value();
+        return file ? OkStatus : Status{Errc::IoError};
+    }
+    Status write_video(const u8* y, u32, const u8*, u32, i64) noexcept override {
+        file.put(static_cast<char>(*y)); return OkStatus;
+    }
+    Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
+    Status finish() noexcept override { file.close(); return OkStatus; }
+    void abort() noexcept override { file.close(); }
+};
+std::unique_ptr<ExportSink> proxy_test_sink(void* context) {
+    auto sink = std::make_unique<ProxyTestSink>();
+    sink->opened = static_cast<std::promise<void>*>(context);
+    return sink;
+}
+}
+
+AUREA_TEST(PreviewProxy, ExpensivePreparationYieldsAndCancellationInterruptsPacing) {
+    test::SyntheticConfig config;
+    config.width = 64; config.height = 36; config.frameCount = 6; config.decodeCostUs = 40'000;
+    test::SyntheticFactory factory(config);
+    const auto dir = std::filesystem::temp_directory_path() /
+        ("aurea-proxy-duty-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Asset asset; asset.kind = AssetKind::Video; asset.sourcePath = "synthetic";
+    asset.video.width = 64; asset.video.height = 36;
+    PreviewProxyService service;
+    service.configure(&factory, proxy_test_sink, nullptr, dir.generic_string());
+    service.set_policy(18);
+    const auto start = std::chrono::steady_clock::now();
+    std::shared_ptr<const PreviewProxy> proxy;
+    while (!(proxy = service.request(asset)) && std::chrono::steady_clock::now() - start < std::chrono::seconds(8))
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    AUREA_CHECK(proxy != nullptr);
+    // Six costly frames may not run back-to-back and monopolize the worker.
+    AUREA_CHECK(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(800));
+    if (proxy) {
+        AUREA_CHECK_EQ(proxy->times.size(), 6u);
+        for (usize i = 1; i < proxy->times.size(); ++i) AUREA_CHECK(proxy->times[i] > proxy->times[i-1]);
+    }
+    service.stop();
+    std::promise<void> opened;
+    auto ready = opened.get_future();
+    service.configure(&factory, proxy_test_sink, &opened, dir.generic_string());
+    service.set_policy(16, 10'000);
+    (void)service.request(asset);
+    AUREA_CHECK(ready.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+    const auto cancel = std::chrono::steady_clock::now();
+    service.stop();
+    std::printf(" cancel=%.1fms ", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cancel).count());
+    AUREA_CHECK(std::chrono::steady_clock::now() - cancel < std::chrono::seconds(1));
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
 
 AUREA_TEST(PreviewProxy, AreaResamplingPreservesCropRotationAndChromaOrder) {
     DecodedFrame frame;
@@ -77,6 +141,7 @@ AUREA_TEST(PreviewProxy, RealCodecVfrRoundTripAndExportUsesOriginal) {
     auto decoded = proxy_decoder(factory.open_video(encoded, MediaPriority::Thumbnail), proxy);
     AUREA_CHECK(original && decoded);
     if (!original || !decoded) return;
+    AUREA_CHECK(!original->info().hardwareDecoder && !decoded->info().hardwareDecoder);
     AUREA_CHECK(original->seek_to_keyframe(0).ok() && decoded->seek_to_keyframe(0).ok());
     usize count = 0;
     for (;;) {

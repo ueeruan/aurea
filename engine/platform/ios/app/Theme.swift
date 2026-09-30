@@ -858,10 +858,11 @@ enum AureaElevation {
 
 /// Timeline da A.01 (`am_timeline.dart@aba36bb`). Só a timeline usa.
 enum AureaTimeline {
+    static let background = Color(hex: 0x1A1C28)
     // --- Cores ---------------------------------------------------------------
     static let tickMajor  = Color(hex: 0x8A97AD)
     static let tickMinor  = Color(hex: 0x5A6880)
-    static let headerPill = Color(hex: 0x1E222D)
+    static let headerPill = Color(hex: 0x292D3D)
     static let swatch     = Color(hex: 0xFFE899)
     static let swatchGlyph = Color(hex: 0x0F141A)
     static let keyframeOn = Color(hex: 0xFFC107)
@@ -925,21 +926,21 @@ enum AureaTimeline {
 
     // --- Medidas (dp) --------------------------------------------------------
     /// Régua 30; `rulerGap` = faixa do relógio (30) + 4 até a 1ª fileira.
-    static let rulerTicks: CGFloat = 30
-    static let rulerGap: CGFloat = 34
+    static let rulerTicks: CGFloat = 18
+    static let rulerGap: CGFloat = 28
     static let row: CGFloat = 32
-    static let bar: CGFloat = 24
-    static let barRadius: CGFloat = 3
+    static let bar: CGFloat = 26
+    static let barRadius: CGFloat = 0
     static let barMinWidth: CGFloat = 40
     static let keyframeTrack: CGFloat = 11
     /// A pílula da fileira (olho + glifo) cobre de 0 a 78; as barras passam por baixo.
-    static let headerColumn: CGFloat = 78
+    static let headerColumn: CGFloat = 70
     static let gutterIconSize: CGFloat = 17
     static let gutterEyeSize: CGFloat = 12
     static let clipStripe: CGFloat = 3
     static let clipSelStroke: CGFloat = 2
     static let clipIcon: CGFloat = 12
-    static let playhead: CGFloat = 2
+    static let playhead: CGFloat = 1
     static let playheadKnob: CGFloat = 8
 
     static let RulerTicks = rulerTicks, RulerGap = rulerGap, Row = row, Bar = bar

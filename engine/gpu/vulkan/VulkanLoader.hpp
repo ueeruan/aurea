@@ -22,7 +22,18 @@
 #ifndef VK_NO_PROTOTYPES
     #define VK_NO_PROTOTYPES 1
 #endif
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
+    #include <windows.h>
+#endif
 #include <vulkan/vulkan.h>
+
+// Windows headers also enter the headless GPU test build. Keep legacy macros
+// from rewriting camera near/far values and our DeviceCapabilities type.
+#if defined(_WIN32)
+    #undef near
+    #undef far
+    #undef DeviceCapabilities
+#endif
 
 namespace aurea::vk {
 
@@ -56,6 +67,9 @@ namespace aurea::vk {
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
     #define AUREA_VK_PLATFORM_INSTANCE_FUNCTIONS(X) X(vkCreateAndroidSurfaceKHR)
     #define AUREA_VK_PLATFORM_DEVICE_FUNCTIONS(X) X(vkGetAndroidHardwareBufferPropertiesANDROID)
+#elif defined(VK_USE_PLATFORM_WIN32_KHR)
+    #define AUREA_VK_PLATFORM_INSTANCE_FUNCTIONS(X) X(vkCreateWin32SurfaceKHR)
+    #define AUREA_VK_PLATFORM_DEVICE_FUNCTIONS(X)
 #else
     #define AUREA_VK_PLATFORM_INSTANCE_FUNCTIONS(X)
     #define AUREA_VK_PLATFORM_DEVICE_FUNCTIONS(X)

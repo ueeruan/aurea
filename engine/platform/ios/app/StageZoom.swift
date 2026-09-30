@@ -19,7 +19,10 @@ enum StageZoomMath {
     static func clampZoom(_ z: CGFloat) -> CGFloat { z.isFinite ? min(maxZoom, max(minZoom, z)) : minZoom }
 
     /// Pan máximo num eixo: a borda da composição vai até onde fica em 100 %.
-    static func maxPan(_ zoom: CGFloat, _ baseExtent: CGFloat) -> CGFloat { max(0, (zoom - 1) * baseExtent / 2) }
+    static func maxPan(_ zoom: CGFloat, _ baseExtent: CGFloat) -> CGFloat {
+        guard baseExtent.isFinite && baseExtent > 0 else { return 0 }
+        return max(0, (clampZoom(zoom) - 1) * baseExtent / 2)
+    }
 
     static func clampPan(_ pan: CGFloat, zoom: CGFloat, baseExtent: CGFloat) -> CGFloat {
         guard pan.isFinite else { return 0 }
@@ -43,6 +46,38 @@ enum StageZoomMath {
         let base = min(size.width / cw, size.height / ch)
         let scale = base * zoom
         return (scale, CGPoint(x: (size.width - cw * scale) / 2 + pan.width, y: (size.height - ch * scale) / 2 + pan.height))
+    }
+}
+
+/// Same pointer state machine as Android: stable IDs are owned by the arbiter.
+/// Rebase at scale limits and discard angle changes while fingers cross.
+struct StagePinchTracker {
+    private(set) var factor: Float = 1
+    private(set) var degrees: Float = 0
+    private var span: CGFloat = 0
+    private var angle: CGFloat = 0
+    private var minimumSpan: CGFloat = 16
+    private var ready = false
+    mutating func start(_ a: CGPoint, _ b: CGPoint, minimum: CGFloat = 16) {
+        factor = 1; degrees = 0; minimumSpan = max(1, minimum)
+        span = hypot(a.x - b.x, a.y - b.y); angle = atan2(b.y - a.y, b.x - a.x)
+        ready = span.isFinite && span >= minimumSpan
+    }
+    mutating func update(_ a: CGPoint, _ b: CGPoint, clamp: (Float) -> Float) -> Bool {
+        guard a.x.isFinite && a.y.isFinite && b.x.isFinite && b.y.isFinite else { return false }
+        let nextSpan = hypot(a.x - b.x, a.y - b.y), nextAngle = atan2(b.y - a.y, b.x - a.x)
+        guard nextSpan.isFinite && nextAngle.isFinite else { return false }
+        if !ready || nextSpan < minimumSpan {
+            span = nextSpan; angle = nextAngle; ready = nextSpan >= minimumSpan
+            return false
+        }
+        var delta = nextAngle - angle
+        if delta > .pi { delta -= 2 * .pi }; if delta < -.pi { delta += 2 * .pi }
+        let next = clamp(factor * Float(nextSpan / span))
+        guard next.isFinite && next > 0 else { return false }
+        let changed = abs(next - factor) > 0.000001 || abs(delta) > 0.000001
+        factor = next; degrees += Float(delta * 180 / .pi); span = nextSpan; angle = nextAngle
+        return changed
     }
 }
 

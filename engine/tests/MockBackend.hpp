@@ -11,6 +11,7 @@
 #include "aurea/render/GPUBackend.hpp"
 
 #include <vector>
+#include <functional>
 
 namespace aurea::test {
 
@@ -48,6 +49,7 @@ public:
     bool surfaceAttached = false;
     bool frameOpen = false;
     bool failPipelines = false;
+    std::function<void()> beforeBeginFrame;
     GPUCapabilities caps;
 
     MockBackend() {
@@ -74,6 +76,7 @@ public:
     bool has_surface() const noexcept override { return surfaceAttached; }
 
     Status begin_frame(FrameBegin& out) noexcept override {
+        if (beforeBeginFrame) beforeBeginFrame();
         out = FrameBegin{};
         out.commands = this;
         out.frameNumber = ++frame_;

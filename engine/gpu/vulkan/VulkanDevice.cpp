@@ -164,6 +164,12 @@ Status Backend::create_instance(bool validation) noexcept {
             enabled.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
             hasSurfaceExt_ = true;
         }
+#elif defined(VK_USE_PLATFORM_WIN32_KHR)
+        if (has_extension(exts, VK_KHR_WIN32_SURFACE_EXTENSION_NAME)) {
+            enabled.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+            enabled.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+            hasSurfaceExt_ = true;
+        }
 #endif
     }
     debugUtils_ = has_extension(exts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);

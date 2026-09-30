@@ -257,6 +257,7 @@ void Host::detach_surface() noexcept {
 
 void Host::resize_surface(u32 width, u32 height) noexcept {
     if (!engine_ || width == 0 || height == 0) return;
+    // UIKit layout only publishes the size; the render thread updates the GPU.
     (void)engine_->resize_surface(width, height);
 }
 

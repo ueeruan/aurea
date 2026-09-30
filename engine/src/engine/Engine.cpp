@@ -596,6 +596,7 @@ void Engine::invalidate() noexcept {
 Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
     if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
+    pendingSurfaceSize_.store(0, std::memory_order_release);
     surface_.nativeWindow = nativeWindow;
     surface_.width = width;
     surface_.height = height;
@@ -614,19 +615,18 @@ Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcep
 void Engine::detach_surface() noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
     surfaceAttached_ = false;
+    pendingSurfaceSize_.store(0, std::memory_order_release);
     if (gpu_) gpu_->detach_surface();
     surface_.nativeWindow = nullptr;
 }
 
 Status Engine::resize_surface(u32 width, u32 height) noexcept {
-    std::lock_guard<std::mutex> rl(renderMutex_);
-    surface_.width = width;
-    surface_.height = height;
-    if (!gpu_ || !surfaceAttached_) return OkStatus;
-    const Status s = gpu_->resize_surface(width, height);
-    forceRender_.store(true, std::memory_order_release);
+    if (!width || !height) return Errc::InvalidArgument;
+    // SurfaceView/layout callbacks run on the UI thread. Never wait there
+    // for an in-flight render, decoder or GPU fence; coalesce to the latest size.
+    pendingSurfaceSize_.store((static_cast<u64>(width) << 32) | height, std::memory_order_release);
     request_render();
-    return s;
+    return OkStatus;
 }
 
 // =============================================================================
@@ -704,12 +704,16 @@ void Engine::render_thread_main() noexcept {
                 // 500 ms só para ver que não havia superfície (§38).
                 wakeCv_.wait(lock, [this] { return !renderRunning_ || wakeFlag_; });
             } else if (refinePending_) {
-                // Parado com o último quadro reduzido: se nada acordar em
-                // 250 ms, redesenha na melhor resolução (refino).
-                const bool woke = wakeCv_.wait_for(lock, std::chrono::milliseconds(250), [this] {
+                // CADisplayLink wakes us every vsync on iOS. A relative wait
+                // restarted by each wake would prevent refinement forever.
+                const u64 now = monotonic_ns();
+                const u64 remaining = refineDueNs_ > now ? refineDueNs_ - now : 0;
+                wakeCv_.wait_for(lock, std::chrono::nanoseconds(remaining), [this] {
                     return !renderRunning_ || wakeFlag_ || playingHint_.load();
                 });
-                if (!woke) refineNow_ = true;
+                // Actual edits restart the settling interval; an idle vsync doesn't.
+                if (!playingHint_.load() && !forceRender_.load(std::memory_order_acquire)
+                    && monotonic_ns() >= refineDueNs_) refineNow_ = true;
             } else {
                 // Parado: dorme até ter o que mostrar. O teto de 500 ms é a
                 // rede das mudanças do modelo que sobem `modelRevision_` sem
@@ -764,6 +768,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
         project_ = std::make_unique<Project>(std::move(*result));
     }
     ++projectSession_;
+    compStack_.clear();
     images_.clear();
     models_.clear();
     hdris_.clear();
@@ -1012,6 +1017,11 @@ Status Engine::load_project(const char* path) noexcept {
             project_ = std::make_unique<Project>(std::move(loaded));
         }
         ++projectSession_;
+        // The saved current composition is only an editor view. Its navigation
+        // stack is not serialized, so reopening it would strand the user in a
+        // child and make the rest of the project appear lost after a crash.
+        compStack_.clear();
+        project_->timeline().set_current(project_->timeline().root());
         project_->set_path(main);
         mainFileSuspect_ = (notice & (kLoadRecoveredCopy | kLoadPartial)) != 0;
         migrate_echo_to_effect();
@@ -7623,8 +7633,9 @@ u32 Engine::submit_commands(const Command* commands, u32 count,
         if (c.stringLength > 0 && stringBlob && stringBlobSize) {
             // Sem estouro de u32: offset e comprimento vêm da UI (e do fuzz).
             if (!haveBlob || c.stringOffset > stringBlobSize || c.stringLength > stringBlobSize - c.stringOffset) {
-                c.stringLength = 0;   // string perdida: o comando chega sem ela (nunca com a de outro)
-                c.stringOffset = 0;
+                // A lost text payload must never become an edit to empty text.
+                // Reject this command and leave the previous content intact.
+                continue;
             } else {
                 c.stringOffset += base;
             }
@@ -7639,24 +7650,28 @@ u32 Engine::submit_commands(const Command* commands, u32 count,
 
 void Engine::drain_commands_locked() noexcept {
     if (!project_) return;
-    const u32 n = commandQueue_->drain([this](const Command& cmd) {
+    commandQueue_->drain([this](const Command& cmd) {
         // O blob da fila guarda as strings coladas, SEM terminador: cópia com o
         // comprimento exato (lida até o NUL, um texto novo levava junto os
         // anteriores — "Texto ATexto AuTexto…").
         std::string owned;
-        const char* str = nullptr;
+        const char* str = cmd.type == CommandType::TextSetContent && cmd.stringLength == 0 ? "" : nullptr;
         if (cmd.stringLength > 0) {
             if (const char* raw = commandQueue_->string_at(cmd.stringOffset, cmd.stringLength)) {
                 owned.assign(raw, cmd.stringLength);
                 str = owned.c_str();
+            } else {
+                AUREA_LOG_WARN("comando %u recusado: string fora do lote", static_cast<unsigned>(cmd.type));
+                return;
             }
         }
         const Status s = apply_command_internal(cmd, str, true);
         if (!s.ok()) {
             AUREA_LOG_WARN("comando %u recusado: %s", static_cast<unsigned>(cmd.type), s.message().data());
+        } else if (mutates_model(cmd.type) || cmd.type == CommandType::CompositionCreate || cmd.type == CommandType::CompositionDelete) {
+            project_->mark_dirty();
         }
     });
-    if (n > 0) project_->mark_dirty();
 }
 
 RenderSettings Engine::current_render_settings() noexcept {
@@ -7716,6 +7731,23 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     const u64 frameStart = monotonic_ns();
     std::lock_guard<std::mutex> rl(renderMutex_);
     lastSkipped_ = false;
+
+    if (const u64 size = pendingSurfaceSize_.exchange(0, std::memory_order_acq_rel)) {
+        const u32 width = static_cast<u32>(size >> 32), height = static_cast<u32>(size);
+        if (width != surface_.width || height != surface_.height) {
+            if (gpu_ && surfaceAttached_) {
+                if (const Status s = gpu_->resize_surface(width, height); !s.ok()) {
+                    set_last_error(s, "redimensionar preview");
+                    u64 empty = 0;
+                    pendingSurfaceSize_.compare_exchange_strong(empty, size, std::memory_order_acq_rel);
+                    return s;
+                }
+            }
+            surface_.width = width;
+            surface_.height = height;
+        }
+        forceRender_.store(true, std::memory_order_release);
+    }
 
     RenderSettings rs;
     FrameIndex t{0};
@@ -7916,6 +7948,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     refinePending_ = !playing && ((!snapshot_.scenes.empty() && renderer_.environment_pending())
         || (!refineNow_ && (rs.previewDenominator > adapt().still_denominator(caps_.thermal())
             || adapt().state().heavyLevel > adapt().still_heavy_level(caps_.thermal()))));
+    refineDueNs_ = refinePending_ ? monotonic_ns() + 250'000'000ull : 0;
     media_.collect(frameCounter_);
     if (frameCounter_ % 120 == 0) (void)memory_.balance();
     update_perf(stats, timings, snapshot_, frameStart);
@@ -9871,6 +9904,7 @@ Engine::ExportProgress Engine::export_progress() const noexcept {
 Status Engine::apply_command(const Command& cmd, const char* stringData) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     const Status s = apply_command_internal(cmd, stringData, true);
+    if (s.ok() && (mutates_model(cmd.type) || cmd.type == CommandType::CompositionCreate || cmd.type == CommandType::CompositionDelete)) project_->mark_dirty();
     request_render();
     return s;
 }

@@ -14,6 +14,11 @@
 #include <chrono>
 #include <thread>
 
+#if defined(AUREA_PLATFORM_ANDROID)
+#include "MediaCodecSource.hpp"
+#include <cstdlib>
+#endif
+
 using namespace aurea;
 using namespace aurea::test;
 
@@ -58,6 +63,171 @@ AUREA_TEST(VideoSource, TightCacheDoesNotDecodeAndSeekForever) {
     AUREA_CHECK(source.wait_for(raw->pts_of(31), 3000));
     source.stop();
 }
+
+AUREA_TEST(VideoSource, ReversePlaybackNeverShowsForwardPreroll) {
+    for (u32 capacity : {1u, 7u}) {
+        SyntheticConfig cfg;
+        cfg.decodeCostUs = 2000;
+        auto decoder = std::make_unique<SyntheticDecoder>(cfg);
+        auto* raw = decoder.get();
+        VideoSource source(std::move(decoder), MediaPriority::Preview);
+        source.cache().configure({capacity, 192ull * 1024 * 1024});
+        source.start();
+        const i64 initial = raw->pts_of(90);
+        source.request({initial, DecodeMode::Still, 0, 1.f});
+        AUREA_CHECK(source.wait_for(initial, 3000));
+        bool initialExact = false;
+        AUREA_CHECK(source.frame_for(initial, &initialExact, -1));
+        AUREA_CHECK(initialExact);
+        // Reverse decode must still run forward from a preceding codec keyframe.
+        // None of that preroll may be presented as if it were reverse playback.
+        for (i64 index : {60LL, 40LL, 20LL, 0LL}) {
+            const i64 target = raw->pts_of(index);
+            source.request({target, DecodeMode::Playback, -1, 1.f});
+            bool exact = false;
+            u32 premature = 0, forwardSteps = 0;
+            i64 previous = initial;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (!exact && std::chrono::steady_clock::now() < deadline) {
+                const FrameRef shown = source.frame_for(target, &exact, -1);
+                AUREA_CHECK(shown);
+                if (shown) {
+                    if (!exact && shown->ptsUs < target - source.frame_duration_us() / 2) ++premature;
+                    if (shown->ptsUs > previous) ++forwardSteps;
+                    previous = shown->ptsUs;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            std::printf("    reverse target=%lld premature=%u forward=%u\n", static_cast<long long>(target), premature, forwardSteps);
+            AUREA_CHECK(exact);
+            AUREA_CHECK_EQ(premature, 0u);
+            AUREA_CHECK_EQ(forwardSteps, 0u);
+        }
+        source.stop();
+    }
+}
+
+AUREA_TEST(DecodedFrameCache, ReverseFallbackPreservesVfrCoverage) {
+    DecodedFrameCache cache;
+    auto previous = frame_at(0); previous->durationUs = 100'000;
+    auto later = frame_at(200'000); later->durationUs = 80'000;
+    AUREA_CHECK(cache.insert(std::move(previous)));
+    AUREA_CHECK(cache.insert(std::move(later)));
+    bool exact = false;
+    auto frame = cache.find(75'000, 16'667, &exact, true);
+    AUREA_CHECK(frame && frame->ptsUs == 0 && exact);
+    frame = cache.find(150'000, 16'667, &exact, true);
+    AUREA_CHECK(frame && frame->ptsUs == 200'000 && !exact);
+    frame = cache.find(300'000, 16'667, &exact, true);
+    AUREA_CHECK(!frame && !exact);
+    frame = cache.find(150'000, 16'667, &exact);
+    AUREA_CHECK(frame && frame->ptsUs == 0 && !exact);
+}
+
+AUREA_TEST(DecodedFrameCache, TemporalSamplesBorrowBoundedSlotsAndReleaseThem) {
+    DecodedFrameCache cache;
+    const auto bytes = frame_at(0)->approx_bytes();
+    cache.configure({1, bytes, 3});
+    const i64 needed[] = {0, kFrame, 2 * kFrame, 3 * kFrame};
+    cache.set_required_times(needed, 2, kFrame / 2);
+    AUREA_CHECK(cache.insert(frame_at(needed[0])));
+    AUREA_CHECK(cache.insert(frame_at(needed[1])));
+    AUREA_CHECK_EQ(cache.stats().frames, 2u);
+    AUREA_CHECK_EQ(cache.prefetch_capacity(), 0u);
+    cache.set_required_times(needed, 4, kFrame / 2);
+    AUREA_CHECK(cache.insert(frame_at(needed[2])));
+    AUREA_CHECK(!cache.insert(frame_at(needed[3])));
+    AUREA_CHECK_EQ(cache.stats().frames, 3u);
+    cache.set_required_times(needed, 1, kFrame / 2);
+    AUREA_CHECK_EQ(cache.stats().frames, 1u);
+    AUREA_CHECK_EQ(cache.stats().bytes, bytes);
+    AUREA_CHECK(cache.contains(0, kFrame / 2));
+}
+
+AUREA_TEST(VideoSource, ReverseDisplayBufferIsReleasedOnDirectionChangeAndSuspension) {
+    SyntheticConfig cfg;
+    VideoSource source(std::make_unique<SyntheticDecoder>(cfg), MediaPriority::Preview);
+    for (int reset = 0; reset < 3; ++reset) {
+        AUREA_CHECK(source.cache().insert(frame_at(200'000)));
+        bool exact = false;
+        AUREA_CHECK(source.frame_for(200'000, &exact, -1));
+        source.cache().clear();
+        auto held = source.frame_for(150'000, &exact, -1);
+        AUREA_CHECK(held && held->ptsUs == 200'000 && !exact);
+        if (reset == 0) source.request({150'000, DecodeMode::Playback, 1, 1.f});
+        if (reset == 1) source.set_epoch(1);
+        if (reset == 2) source.suspend();
+        AUREA_CHECK(!source.frame_for(150'000, &exact, -1));
+    }
+}
+
+#if defined(AUREA_PLATFORM_ANDROID)
+AUREA_TEST(MediaCodecRemap, ForwardReturnAndReverseMatchStillFrames) {
+    const char* path = std::getenv("AUREA_REMAP_MEDIA");
+    if (!path) { std::printf("(set AUREA_REMAP_MEDIA to validate the production decoder) "); return; }
+    android::MediaCodecFactory factory;
+    factory.set_zero_copy(false); factory.set_software_only(true);
+    Asset asset; asset.kind = AssetKind::Video; asset.sourcePath = path;
+    const std::vector<i64> targets{0, 400'000, 900'000, 1'500'000, 1'200'000, 600'000, 0};
+    auto checksum = [](const FrameRef& frame) {
+        u64 hash = 14695981039346656037ull;
+        if (!frame || !frame->planes[0]) return u64{0};
+        for (u32 y = 0; y < frame->height; ++y) for (u32 x = 0; x < frame->width; ++x) {
+            hash ^= frame->planes[0][static_cast<usize>(y) * frame->strides[0] + x];
+            hash *= 1099511628211ull;
+        }
+        return hash;
+    };
+    std::vector<u64> hashes;
+    std::vector<i64> timestamps;
+    {
+        auto decoder = factory.open_video(asset, MediaPriority::Preview);
+        AUREA_CHECK(decoder != nullptr); if (!decoder) return;
+        VideoSource source(std::move(decoder), MediaPriority::Preview);
+        source.start();
+        for (i64 target : targets) {
+            source.request({target, DecodeMode::Still, 0, 1.f});
+            AUREA_CHECK(source.wait_for(target, 3000));
+            bool exact = false;
+            const auto frame = source.frame_for(target, &exact);
+            AUREA_CHECK(frame && exact); if (!frame) return;
+            hashes.push_back(checksum(frame)); timestamps.push_back(frame->ptsUs);
+        }
+    }
+    for (bool reverseAll : {false, true}) {
+        auto decoder = factory.open_video(asset, MediaPriority::Preview);
+        AUREA_CHECK(decoder != nullptr); if (!decoder) return;
+        VideoSource source(std::move(decoder), MediaPriority::Preview);
+        source.cache().configure({1, 192ull * 1024 * 1024});
+        source.start();
+        i64 lastPts = -1;
+        for (usize step = 0; step < targets.size(); ++step) {
+            const usize i = reverseAll ? targets.size() - 1 - step : step;
+            const usize prev = step ? (reverseAll ? i + 1 : i - 1) : i;
+            const i32 direction = targets[i] < targets[prev] ? -1 : 1;
+            source.request({targets[i], DecodeMode::Playback, direction, 1.f});
+            bool exact = false;
+            u32 forwardSteps = 0;
+            FrameRef shown;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (!exact && std::chrono::steady_clock::now() < deadline) {
+                shown = source.frame_for(targets[i], &exact, direction);
+                if (shown) {
+                    if (step && direction < 0 && lastPts >= 0 && shown->ptsUs > lastPts) ++forwardSteps;
+                    lastPts = shown->ptsUs;
+                }
+                if (!exact) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            AUREA_CHECK(exact && shown);
+            AUREA_CHECK_EQ(forwardSteps, 0u);
+            if (shown && exact) {
+                AUREA_CHECK_EQ(shown->ptsUs, timestamps[i]);
+                AUREA_CHECK_EQ(checksum(shown), hashes[i]);
+            }
+        }
+    }
+}
+#endif
 
 AUREA_TEST(VideoSource, SingleFrameBudgetPlaybackDoesNotSeekForEveryFrame) {
     for (int budgetKind = 0; budgetKind < 3; ++budgetKind) {

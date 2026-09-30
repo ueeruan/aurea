@@ -1291,6 +1291,57 @@ AUREA_TEST(Renderer, TemporalRgbVideoResolvesAllThreeDistantFrames) {
     }
 }
 
+AUREA_TEST(Renderer, RemapPlaybackChangesDirectionWithoutShowingForwardPreroll) {
+    RenderFixture f;
+    aurea::test::SyntheticConfig config;
+    config.decodeCostUs = 2000;
+    aurea::test::SyntheticFactory factory(config);
+    MemoryManager memory;
+    memory.set_budget(MemoryClass::DecodedFrames, config.width * config.height * 3 / 2);
+    MediaManager media;
+    media.set_factory(&factory); media.set_memory(&memory);
+    Asset asset; asset.kind = AssetKind::Video;
+    asset.video.width = config.width; asset.video.height = config.height; asset.video.fps = config.fps;
+    const AssetId aid = f.project.add_asset(std::move(asset));
+    const LayerId id = f.comp->add_layer(LayerKind::Video, "remap forward and return");
+    Layer* layer = f.comp->layer(id);
+    layer->source = aid; layer->start = FrameIndex{40}; layer->end = FrameIndex{340}; layer->offset = FrameIndex{12};
+    layer->transform.position = Vec3{960, 540, 0};
+    layer->timeRemapEnabled = true;
+    layer->timeRemap.set(FrameIndex{12}, 0);
+    layer->timeRemap.set(FrameIndex{162}, 150);
+    layer->timeRemap.set(FrameIndex{312}, 0);
+    RenderSettings settings; settings.mediaGeneration = 1;
+    FrameSnapshot snapshot;
+    u64 render = 1;
+    i64 lastShown = -1;
+    for (i64 local : {0LL, 75LL, 150LL, 180LL, 210LL, 240LL, 270LL, 299LL}) {
+        const i64 wanted = std::llround((local <= 150 ? local : 300 - local) * 1e6 / 30.);
+        bool ready = false;
+        u32 forwardSteps = 0, premature = 0;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (!ready && std::chrono::steady_clock::now() < deadline) {
+            f.renderer.prepare(*f.comp, f.project, FrameIndex{40 + local}, &media, nullptr, nullptr,
+                               settings, render++, 1, DecodeMode::Playback, 1.f, snapshot);
+            if (!snapshot.layers.empty() && snapshot.layers[0].source.frame) {
+                const auto& shown = snapshot.layers[0].source;
+                if (local > 150) {
+                    if (lastShown >= 0 && shown.frame->ptsUs > lastShown) ++forwardSteps;
+                    if (shown.frame->ptsUs < wanted - 16667) ++premature;
+                }
+                lastShown = shown.frame->ptsUs;
+                ready = shown.frameExact;
+                if (ready) AUREA_CHECK_NEAR(lastShown, wanted, 1);
+            }
+            snapshot.release_video_frames();
+            if (!ready) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        AUREA_CHECK(ready);
+        AUREA_CHECK_EQ(forwardSteps, 0u);
+        AUREA_CHECK_EQ(premature, 0u);
+    }
+}
+
 AUREA_TEST(EffectPreview, NeverTouchesTheSwapchain) {
     RenderFixture f;
     AUREA_CHECK(f.backend.attach_surface(SurfaceDesc{}).ok());

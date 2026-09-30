@@ -682,3 +682,28 @@ AUREA_TEST(TextTransform, RandomOrderIsStableAcrossSeeksAndOverlapRemainsFinite)
         for (const auto& m : r.matrices) AUREA_CHECK(std::isfinite(m.col[3].x) && m.col[3].x >= 0 && m.col[3].x <= 30);
     }
 }
+
+AUREA_TEST(TextTransform, FillAlphaFollowsRangeKeysAndEffectStackWithoutChangingStrokeOpacity) {
+    TransformRig r;
+    r.at(kOverrideFill) = ParamValue::boolean(true);
+    r.at(kFillColor) = ParamValue::color(1, 0, 0, 0);
+    r.at(kRangeEnd) = ParamValue::scalar(50);
+    r.evaluate();
+    for (usize i = 0; i < 4; ++i) {
+        AUREA_CHECK_NEAR(r.styles[i].fillOpacity, i < 2 ? 0 : 1, .001);
+        AUREA_CHECK_NEAR(r.styles[i].opacity, 1, .001);
+    }
+    auto& alpha = r.layer.tracks.get_or_create(TrackProperty::EffectParam, 17, param_track_key(kFillColor, 3));
+    alpha.set(FrameIndex{0}, 0.f); alpha.set(FrameIndex{30}, 1.f);
+    for (auto& k : alpha.keys) k.interp = Interpolation::Linear;
+    r.evaluate(15);
+    AUREA_CHECK_NEAR(r.styles[0].fillOpacity, .5, .001);
+    AUREA_CHECK_NEAR(r.styles[2].fillOpacity, 1, .001);
+    auto opaque = r.layer.effects[0]; opaque.id = 42;
+    opaque.params[kFillColor].constant = ParamValue::color(0, 1, 0, 1);
+    r.layer.effects.push_back(opaque);
+    r.evaluate(0);
+    AUREA_CHECK_NEAR(r.styles[0].fillOpacity, 1, .001);
+    r.layer.effects[1].enabled = false; r.evaluate(0);
+    AUREA_CHECK_NEAR(r.styles[0].fillOpacity, 0, .001);
+}

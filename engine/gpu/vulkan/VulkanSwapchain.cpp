@@ -19,17 +19,24 @@ namespace aurea::vk {
 Status Backend::attach_surface(const SurfaceDesc& desc) noexcept {
     if (!initialized_) return Status{Errc::InvalidState, "backend nao inicializado"};
     if (!desc.nativeWindow) return Status{Errc::InvalidArgument, "janela nula"};
-#if defined(VK_USE_PLATFORM_ANDROID_KHR)
-    if (!hasSurfaceExt_) return Status{Errc::UnsupportedFeature, "sem VK_KHR_android_surface"};
+#if defined(VK_USE_PLATFORM_ANDROID_KHR) || defined(VK_USE_PLATFORM_WIN32_KHR)
+    if (!hasSurfaceExt_) return Status{Errc::UnsupportedFeature, "sem extensao de superficie"};
     detach_surface();
     surfaceDesc_ = desc;
 
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
+    VkWin32SurfaceCreateInfoKHR info{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
+    info.hwnd = static_cast<HWND>(desc.nativeWindow);
+    info.hinstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(info.hwnd, GWLP_HINSTANCE));
+    const Status created = check(vkCreateWin32SurfaceKHR(instance_, &info, nullptr, &surface_), "vkCreateWin32SurfaceKHR");
+#else
     VkAndroidSurfaceCreateInfoKHR info{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
     info.window = static_cast<ANativeWindow*>(desc.nativeWindow);
-    if (const Status s = check(vkCreateAndroidSurfaceKHR(instance_, &info, nullptr, &surface_),
-                               "vkCreateAndroidSurfaceKHR"); !s.ok()) {
+    const Status created = check(vkCreateAndroidSurfaceKHR(instance_, &info, nullptr, &surface_), "vkCreateAndroidSurfaceKHR");
+#endif
+    if (!created.ok()) {
         surface_ = VK_NULL_HANDLE;
-        return s;
+        return created;
     }
     VkBool32 supported = VK_FALSE;
     vkGetPhysicalDeviceSurfaceSupportKHR(physical_, graphicsFamily_, surface_, &supported);

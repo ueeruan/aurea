@@ -59,6 +59,8 @@ test_output/
 *.mkv
 *.webm
 !engine/tests/golden/**
+# Pequeno vídeo sintético VFR usado pelo teste de exportação Android.
+!android/app/src/androidTest/assets/preview-vfr.mp4
 
 # ---- Android: assinatura e caminhos locais ----
 # A keystore e o key.properties NUNCA vão para o repositório. Ver

@@ -896,6 +896,7 @@ void Renderer::forget_device() noexcept {
 
 void Renderer::release_project_resources() noexcept {
     if (!backend_) return;
+    pool_.clear();
     for (auto& [k, p] : planar_) {
         for (TextureHandle& t : p.plane) if (t.valid()) backend_->destroy_texture(t);
     }
@@ -1730,7 +1731,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             const Vec4 as = lin(Vec4{a.stroke.x, a.stroke.y, a.stroke.z, 1});
                             sc = Vec4{sc.x + (as.x - sc.x) * a.stroke.w, sc.y + (as.y - sc.y) * a.stroke.w, sc.z + (as.z - sc.z) * a.stroke.w, sc.w};
                         }
-                        fill.w *= a.opacity * w;
+                        fill.w *= a.opacity * a.fillOpacity * w;
                         sc.w *= a.opacity * w;
                         gi.fill = fill;
                         gi.stroke = sc;
@@ -2258,7 +2259,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 req.speed = speed * std::max(0.0f, l->speed);
                 bool exact = false;
-                rl.source.frame = src->frame_for(mediaUs, &exact);
+                rl.source.frame = src->frame_for(mediaUs, &exact,
+                    decodeMode == DecodeMode::Playback && !settings.finalQuality ? req.direction : 0);
                 if (nextUs >= 0) {
                     bool exactB = false;
                     FrameRef b = src->frame_for(nextUs, &exactB);
@@ -4929,6 +4931,23 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
     if (!backend_ || stage < 4) return 0;
     u32 n = 0;
     auto unused = [frameNumber](u64 lastFrame) { return lastFrame < frameNumber; };
+    // Original image uploads and their linear copies are recreatable caches
+    // too. Keeping every image visited on the timeline defeats OS memory trims.
+    for (auto it = images_.begin(); it != images_.end();) {
+        auto& img = it->second;
+        const bool remove = unused(img.lastFrame);
+        for (auto& linear : img.linear) {
+            if (linear.tex.valid() && (remove || unused(linear.lastFrame))) {
+                backend_->destroy_texture(linear.tex);
+                linear = ImageTexture::Linear{};
+                ++n;
+            }
+        }
+        if (remove) {
+            if (img.texture.valid()) { backend_->destroy_texture(img.texture); ++n; }
+            it = images_.erase(it);
+        } else ++it;
+    }
     for (auto it = planar_.begin(); it != planar_.end();) {
         if (!unused(it->second.lastFrame)) { ++it; continue; }
         for (TextureHandle& t : it->second.plane) if (t.valid()) { backend_->destroy_texture(t); ++n; }

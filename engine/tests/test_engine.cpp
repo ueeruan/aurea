@@ -5,6 +5,7 @@
 // gráfico, e é o que permite testá-los no CI.
 #include "TestFramework.hpp"
 #include "SyntheticVideo.hpp"
+#include "MockBackend.hpp"
 
 #include "aurea/Engine.hpp"
 #include "aurea/render/Renderer.hpp"
@@ -17,6 +18,7 @@
 #include <tuple>
 #include <filesystem>
 #include <chrono>
+#include <future>
 
 using namespace aurea;
 
@@ -62,6 +64,85 @@ AUREA_TEST(Engine, DuplicateSelectsOnlyCopiesAndMovingThemPreservesOriginals) {
         AUREA_CHECK_NEAR(comp->layer(original)->tracks.sample_or(TrackProperty::PositionY, FrameIndex{0}, 0), 120.f, 0.001f);
         AUREA_CHECK_NEAR(comp->layer(LayerId::unpack(created))->tracks.sample_or(TrackProperty::PositionY, FrameIndex{0}, 0), 40.f, 0.001f);
     }
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, SurfaceResizeDoesNotWaitForABlockedRenderAndUsesLatestSize) {
+    auto* mock = new aurea::test::MockBackend();
+    Engine e;
+    auto cfg = headless_config();
+    cfg.backend = mock;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(320, 240, 30.0, nullptr).ok());
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 320, 240).ok());
+    std::promise<void> rendering, release;
+    auto entered = rendering.get_future();
+    auto unblock = release.get_future();
+    mock->beforeBeginFrame = [&] { rendering.set_value(); unblock.wait(); };
+    auto render = std::async(std::launch::async, [&] { return e.render_frame(); });
+    const bool started = entered.wait_for(std::chrono::seconds(3)) == std::future_status::ready;
+    AUREA_CHECK(started);
+    auto resize = std::async(std::launch::async, [&] {
+        (void)e.resize_surface(480, 320);
+        return e.resize_surface(720, 480);
+    });
+    const bool responsive = resize.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready;
+    release.set_value(); // Always unblock, including when the regression fails.
+    AUREA_CHECK(render.get().ok());
+    AUREA_CHECK(resize.get().ok());
+    AUREA_CHECK(responsive);
+    mock->beforeBeginFrame = {};
+    AUREA_CHECK(e.render_frame(true).ok());
+    AUREA_CHECK_EQ(mock->surfaceWidth, 720u);
+    AUREA_CHECK_EQ(mock->surfaceHeight, 480u);
+    AUREA_CHECK(!e.resize_surface(0, 480).ok());
+    // A queued resize from the old view must not resize a replacement view.
+    AUREA_CHECK(e.resize_surface(900, 600).ok());
+    e.detach_surface();
+    AUREA_CHECK(e.attach_surface(&window, 720, 480).ok());
+    AUREA_CHECK(e.render_frame(true).ok());
+    AUREA_CHECK_EQ(mock->surfaceWidth, 720u);
+    AUREA_CHECK_EQ(mock->surfaceHeight, 480u);
+    e.shutdown();
+}
+
+AUREA_TEST(Engine, MemoryWarningReleasesHiddenImageUploadsAndRebuildsThem) {
+    auto* mock = new aurea::test::MockBackend();
+    Engine e;
+    auto cfg = headless_config(); cfg.backend = mock;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(320, 240, 30.0, nullptr).ok());
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 320, 240).ok());
+    std::vector<u8> pixels(96 * 64 * 4, 255);
+    const auto imported = e.import_image(pixels.data(), 96, 64, "Image");
+    AUREA_CHECK(imported.ok());
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().root());
+    comp->layer(LayerId::unpack(*imported))->end = FrameIndex{2};
+    auto imageUploads = [&] {
+        u32 alive = 0;
+        for (usize i = 0; i < mock->textures.size(); ++i) {
+            const auto& d = mock->textures[i];
+            if (mock->textureAlive[i] && d.width == 96 && d.height == 64 && d.format == SurfaceFormat::RGBA8) ++alive;
+        }
+        return alive;
+    };
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK_EQ(imageUploads(), 1u);
+    (void)e.trim_memory(15);
+    AUREA_CHECK_EQ(imageUploads(), 1u); // The visible image stays available.
+    Command seek{}; seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{10}, 30.0);
+    AUREA_CHECK(e.apply_command(seek).ok());
+    AUREA_CHECK(e.render_frame().ok());
+    (void)e.trim_memory(15);
+    AUREA_CHECK_EQ(imageUploads(), 0u);
+    AUREA_CHECK_EQ(comp->order().size(), 1u); // Only cache was discarded.
+    seek.seek.time = tick_at(FrameIndex{0}, 30.0);
+    AUREA_CHECK(e.apply_command(seek).ok());
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK_EQ(imageUploads(), 1u);
     e.shutdown();
 }
 
@@ -1573,6 +1654,35 @@ AUREA_TEST(Engine, BatchStringBlobOffsetsAreRebasedIntoTheQueue) {
     TextData t;
     AUREA_CHECK(e.query_text(*id, t));
     AUREA_CHECK_EQ(t.content, std::string("Texto Aurea"));
+    e.shutdown();
+}
+
+AUREA_TEST(PreviewGesture, InvalidQueuedTextPayloadDoesNotEraseTheLayer) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    auto id = e.add_text("Keep this text");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    Command c;
+    c.type = CommandType::TextSetContent;
+    c.layer_ref.layer = LayerId::unpack(*id);
+    c.stringOffset = 20;
+    c.stringLength = 4;
+    AUREA_CHECK_EQ(e.submit_commands(&c, 1, "oops", 4), 0u);
+    // Arena offsets (without a batch blob) must also be checked at consumption.
+    c.stringOffset = 0xFFFFFFF0u;
+    AUREA_CHECK_EQ(e.submit_commands(&c, 1), 1u);
+    AUREA_CHECK(e.render_frame().ok());
+    TextData text;
+    AUREA_CHECK(e.query_text(*id, text));
+    AUREA_CHECK_EQ(text.content, std::string("Keep this text"));
+    // Intentional empty input still works.
+    c.stringOffset = 0; c.stringLength = 0;
+    AUREA_CHECK_EQ(e.submit_commands(&c, 1), 1u);
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK(e.query_text(*id, text));
+    AUREA_CHECK(text.content.empty());
     e.shutdown();
 }
 

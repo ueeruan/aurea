@@ -64,10 +64,11 @@ struct VideoPathInputs {
 };
 
 /// O caminho com que um decoder NOVO começa. Todas as marcas começam no GL do
-/// driver (Samsung inclusive); só o modo seguro e a falta de importação mudam.
+/// driver (Samsung inclusive). CPU readback for thumbnails/proxies uses a
+/// software decoder: some vendor YUV planes fault even with valid bounds.
 inline VideoPath initial_video_path(const VideoPathInputs& in) noexcept {
-    if (in.safeMode) return VideoPath::SoftwarePlanes;
-    if (in.thumbnail || !in.rgbaImport) return VideoPath::CpuPlanes;
+    if (in.safeMode || in.thumbnail) return VideoPath::SoftwarePlanes;
+    if (!in.rgbaImport) return VideoPath::CpuPlanes;
     return VideoPath::DriverGl;
 }
 

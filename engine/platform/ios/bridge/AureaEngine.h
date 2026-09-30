@@ -243,6 +243,7 @@ static const uint32_t AureaTrackPropertyInvalidEffectIndex = 0xFFFFFFFFu;
 /// antes de morrer.
 NS_SWIFT_NAME(AureaEngine)
 @interface AureaEngine : NSObject
+- (float)clampPinchFactor:(float)factor scaleX:(float)x scaleY:(float)y scaleZ:(float)z threeD:(BOOL)threeD;
 
 /// `cache` e `documents` são as pastas do app. `documents` é onde o .aurea e a
 /// mídia importada moram — o MESMO formato de arquivo do Android.

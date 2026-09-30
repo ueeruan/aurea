@@ -112,8 +112,6 @@ struct PreviewMetalView: UIViewRepresentable {
         private var maskOppositeLength: Float = 0
         private var maskDragOffset = SIMD2<Float>.zero
         private var handle = -1
-        private var lastAngle: CGFloat = 0
-        private var sweptAngle: CGFloat = 0
         private var gizmoAxis = -1
         private var gizmoVector = CGPoint.zero
         private var gizmoCollapsed = false
@@ -131,6 +129,8 @@ struct PreviewMetalView: UIViewRepresentable {
         private var gizmoLastAngle: CGFloat = 0
         private var gizmoDownTime: CFTimeInterval = 0
         private var pinchThreeD = false
+        private var pinchTracker = StagePinchTracker()
+        private var pinchLayer: Int64?
         private enum StageMode { case pending, move, pinch, idle, gizmo, shape, scene, pivot, view, viewPan }
         // Face Pivô aberta: o arrasto move o pivô (PivotDragSession).
         private var pivotSession: PivotDragSession?
@@ -156,7 +156,6 @@ struct PreviewMetalView: UIViewRepresentable {
         private var moveLast = SIMD2<Float>.zero
         private var moveAffine: [Float] = []
         private var axisLock = 0              // 1 = só X, 2 = só Y (setas de eixo)
-        private var pinchSpan: CGFloat = 1
         private var pinchRotationActive = false
         private var pinchRotationOffset: Float = 0
         // Encaixes da pinça (nil = solto): giro em múltiplos de 45°, escala em 100%.
@@ -404,11 +403,15 @@ struct PreviewMetalView: UIViewRepresentable {
         }
         /// Pinça da vista: zoom pela abertura; o ponto sob o meio dos dedos segue o meio.
         private func stepView(_ a: CGPoint, _ b: CGPoint, view: UIView) {
-            let z = StageZoomMath.clampZoom(viewZoom0 * hypot(a.x - b.x, a.y - b.y) / viewSpan0)
+            guard a.x.isFinite && a.y.isFinite && b.x.isFinite && b.y.isFinite else { return }
+            let span = hypot(a.x - b.x, a.y - b.y)
+            let z = span >= 16 && viewSpan0 >= 16 ? StageZoomMath.clampZoom(viewZoom0 * span / viewSpan0) : viewZoom0
             let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
             let px = StageZoomMath.pinchPan(viewPan0.width, zoom0: viewZoom0, zoom1: z, mid0: viewMid0.x, mid: mid.x, centre: view.bounds.width / 2)
             let py = StageZoomMath.pinchPan(viewPan0.height, zoom0: viewZoom0, zoom1: z, mid0: viewMid0.y, mid: mid.y, centre: view.bounds.height / 2)
             applyView(z, CGSize(width: px, height: py), view: view)
+            viewZoom0 = StageViewZoom.shared.zoom; viewPan0 = StageViewZoom.shared.pan
+            viewSpan0 = span; viewMid0 = mid
         }
         private func stepViewPan(_ point: CGPoint, view: UIView) {
             applyView(viewZoom0, CGSize(width: viewPan0.width + point.x - stageDown.x, height: viewPan0.height + point.y - stageDown.y), view: view)
@@ -481,7 +484,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 guard let first = pressed.first else { return }
                 stageFinger = first.id; stageDown = first.position; hadMultipleTouches = false
                 stageMode = .pending; handle = -1; shapeHandle = -1; gizmoAxis = -1; targetLayer = nil
-                axisLock = 0; sweptAngle = 0; pinchRotationActive = false
+                axisLock = 0; pinchRotationActive = false
                 rotationSnap = nil; scaleSnap = nil; groupMove = []; groupCentre = nil
                 model.refreshSelectedLayer()
                 if model.pivotStageActive && editableSelection(), let pivot = PivotDragSession.pivotPoint(model),
@@ -563,14 +566,13 @@ struct PreviewMetalView: UIViewRepresentable {
                 // Lupa ligada: a pinça é SEMPRE da vista. Senão, só é da camada
                 // escolhida quando os dedos estão sobre ela; no vazio amplia a vista.
                 if !StageViewZoom.shared.zoomLock && editableSelection() && over {
-                    keepTransform(); pinchFingers = [a.id, b.id]
+                    keepTransform(); pinchFingers = [a.id, b.id]; pinchLayer = model.primarySelection
+                    pinchTracker.start(a.position, b.position)
                     // Camada 3D (tem gizmo): a pinça escala X, Y e Z juntos.
                     if let id = model.primarySelection {
                         pinchThreeD = !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty
                     } else { pinchThreeD = false }
-                    pinchSpan = max(1, hypot(a.position.x - b.position.x, a.position.y - b.position.y))
-                    lastAngle = atan2(b.position.y - a.position.y, b.position.x - a.position.x)
-                    sweptAngle = 0; pinchRotationActive = false; pinchRotationOffset = 0
+                    pinchRotationActive = false; pinchRotationOffset = 0
                     // Já parado num encaixe: fica preso sem tique até sair e voltar.
                     rotationSnap = StageMath.snapStep(startRotation.z, step: StageMath.rotStep, current: nil, enter: StageMath.rotEnter, exit: StageMath.rotExit)
                     scaleSnap = StageMath.snapTarget(abs(startScale.x), target: 1, current: nil, enter: StageMath.scaleEnter, exit: StageMath.scaleExit)
@@ -601,7 +603,7 @@ struct PreviewMetalView: UIViewRepresentable {
             case .pinch:
                 guard pinchFingers.count == 2,
                       let a = pressed.first(where: { $0.id == pinchFingers[0] }), let b = pressed.first(where: { $0.id == pinchFingers[1] }) else {
-                    stageMode = .idle; return // The remaining finger stays idle until all lift.
+                    finishStageEdit(); stageMode = .idle; return // The remaining finger stays idle until all lift.
                 }
                 stepPinch(a.position, b.position)
             case .view:
@@ -724,14 +726,7 @@ struct PreviewMetalView: UIViewRepresentable {
             } else { stageMode = .idle }
         }
         private func clampScale(_ value: Float) -> Float {
-            let ax = max(abs(startScale.x), 0.0001), ay = max(abs(startScale.y), 0.0001)
-            let low = max(0.001 / ax, 0.001 / ay), high = min(100 / ax, 100 / ay)
-            return low <= high ? value.clamped(to: low...high) : value
-        }
-        private func sweep(_ angle: CGFloat) {
-            var delta = angle - lastAngle
-            while delta > .pi { delta -= 2 * .pi }; while delta < -.pi { delta += 2 * .pi }
-            sweptAngle += delta; lastAngle = angle
+            model.engine.clampPinchFactor(value, scaleX: startScale.x, scaleY: startScale.y, scaleZ: startScale.z, threeD: pinchThreeD)
         }
         private func stepEdit(_ point: CGPoint, view: UIView) {
             guard let id = model.primarySelection else { return }
@@ -741,10 +736,12 @@ struct PreviewMetalView: UIViewRepresentable {
             }
         }
         private func stepPinch(_ a: CGPoint, _ b: CGPoint) {
-            guard let id = model.primarySelection else { return }
-            var f = clampScale(Float(hypot(a.x - b.x, a.y - b.y) / pinchSpan))
-            sweep(atan2(b.y - a.y, b.x - a.x))
-            let degrees = Float(sweptAngle * 180 / .pi)
+            guard let id = pinchLayer, id == model.primarySelection, editableSelection() else { return }
+            // Capture values outside the mutating tracker call (Swift exclusivity).
+            let engine = model.engine, scale = startScale, threeD = pinchThreeD
+            guard pinchTracker.update(a, b, clamp: { engine.clampPinchFactor($0, scaleX: scale.x, scaleY: scale.y, scaleZ: scale.z, threeD: threeD) }) else { return }
+            var f = pinchTracker.factor
+            let degrees = pinchTracker.degrees
             if !pinchRotationActive && abs(degrees) > 4 { pinchRotationActive = true; pinchRotationOffset = degrees < 0 ? -4 : 4 }
             // Escala 100%: a escala X (em módulo) prende em 1 perto dele.
             let ref = abs(startScale.x)

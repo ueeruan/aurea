@@ -83,6 +83,10 @@ bool DecodedFrameCache::required_locked(i64 pts, i64 duration) const noexcept {
     return false;
 }
 
+u32 DecodedFrameCache::frame_limit_locked() const noexcept {
+    return std::max(config_.maxFrames, std::min(requiredCount_, config_.requiredFrameLimit));
+}
+
 void DecodedFrameCache::set_required_times(const i64* times, u32 count, i64 toleranceUs) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     count = times ? std::min<u32>(count, static_cast<u32>(requiredTimes_.size())) : 0;
@@ -144,7 +148,7 @@ bool DecodedFrameCache::insert(FrameRef frame) noexcept {
         return true;
     }
 
-    if (frames_.size() >= config_.maxFrames) {
+    if (frames_.size() >= frame_limit_locked()) {
         // Cheio: só entra se não for ele o pior de todos.
         f64 worst = cost_locked(pts, frame->durationUs);
         bool newIsWorst = true;
@@ -168,11 +172,12 @@ void DecodedFrameCache::evict_locked() noexcept {
     // COMPARTILHADO da categoria. Com o compartilhado estourado, a fonte que
     // insere devolve os próprios piores — mas nunca o último frame: a tela
     // precisa de algo para mostrar.
+    const u32 frameLimit = frame_limit_locked();
     while (!frames_.empty()
-           && (frames_.size() > config_.maxFrames || (frames_.size() > 1 && stats_.bytes > config_.maxBytes)
+           && (frames_.size() > frameLimit || (frames_.size() > 1 && stats_.bytes > config_.maxBytes)
                || (frames_.size() > 1 && over_shared_budget_locked()))) {
         const usize worst = worst_locked();
-        if (frames_.size() <= config_.maxFrames && required_locked(frames_[worst]->ptsUs, frames_[worst]->durationUs)) break;
+        if (frames_.size() <= frameLimit && required_locked(frames_[worst]->ptsUs, frames_[worst]->durationUs)) break;
         erase_locked(worst);
     }
     stats_.frames = static_cast<u32>(frames_.size());
@@ -208,7 +213,7 @@ bool DecodedFrameCache::metrics(CacheMetrics& out) const noexcept {
     return true;
 }
 
-FrameRef DecodedFrameCache::find(i64 targetUs, i64 halfFrameUs, bool* exact) noexcept {
+FrameRef DecodedFrameCache::find(i64 targetUs, i64 halfFrameUs, bool* exact, bool reverseFallback) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     if (exact) *exact = false;
     if (frames_.empty()) { ++stats_.misses; return FrameRef{}; }
@@ -233,6 +238,7 @@ FrameRef DecodedFrameCache::find(i64 targetUs, i64 halfFrameUs, bool* exact) noe
     // Mais próximo anterior; na falta dele, o mais próximo de qualquer lado.
     auto after = std::upper_bound(frames_.begin(), frames_.end(), targetUs,
                                   [](i64 v, const FrameRef& f) { return v < f->ptsUs; });
+    if (reverseFallback) return after != frames_.end() ? *after : FrameRef{};
     if (after != frames_.begin()) return *(after - 1);
     return frames_.front();
 }

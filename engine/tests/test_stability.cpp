@@ -746,6 +746,62 @@ AUREA_TEST(Stability, LayerReferencesSurviveReopenAfterReorderAndDelete) {
     remove_family(path);
 }
 
+AUREA_TEST(Stability, AutosaveInsideNestedPrecompReopensTheWholeProject) {
+    const std::string path = test_path("precomp_interrupted");
+    remove_family(path);
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, "Main").ok());
+    AUREA_CHECK(e.add_text("Outside").ok());
+    const u64 inside = *e.add_text("Inside");
+    const u64 group = *e.precompose(&inside, 1, "Group");
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.open_precomp(group));
+    const u64 nestedText = *e.add_text("Nested");
+    const u64 nested = *e.precompose(&nestedText, 1, "Nested group");
+    AUREA_CHECK(e.open_precomp(nested));
+    AUREA_CHECK(e.add_text("Last saved edit").ok());
+    AUREA_CHECK(e.autosave_project().ok());
+    AUREA_CHECK_EQ(e.precomp_depth(), 2u);
+
+    // Read the on-disk snapshot with a fresh engine, without close_precomp or
+    // a lifecycle save. This is the state left behind by a process being killed.
+    Engine reopened;
+    AUREA_CHECK(reopened.initialize(headless()).ok());
+    AUREA_CHECK(reopened.load_project(path.c_str()).ok());
+    auto verify = [](Engine& engine) {
+        const auto& tl = engine.project()->timeline();
+        AUREA_CHECK(tl.current() == tl.root());
+        AUREA_CHECK_EQ(engine.precomp_depth(), 0u);
+        const auto* root = tl.composition(tl.current());
+        AUREA_CHECK(root && root->order().size() == 2);
+        u32 texts = 0;
+        tl.for_each_composition([&](CompositionId, const Composition& c) {
+            c.layers().for_each([&](LayerId, const Layer& l) {
+                if (l.kind == LayerKind::Text) ++texts;
+            });
+        });
+        AUREA_CHECK_EQ(texts, 4u);
+        AUREA_CHECK(!engine.close_precomp());
+    };
+    verify(reopened);
+    // Reusing an engine must also discard the previous navigation stack.
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    verify(e);
+    auto* root = e.project()->timeline().composition(e.project()->timeline().root());
+    u64 restoredGroup = 0;
+    root->layers().for_each([&](LayerId id, const Layer& l) {
+        if (l.kind == LayerKind::Composition) restoredGroup = id.pack();
+    });
+    AUREA_CHECK(e.open_precomp(restoredGroup));
+    AUREA_CHECK(e.new_project(320, 240, 30.0, "New").ok());
+    AUREA_CHECK_EQ(e.precomp_depth(), 0u);
+    AUREA_CHECK(!e.close_precomp());
+    reopened.shutdown();
+    e.shutdown();
+    remove_family(path);
+}
+
 AUREA_TEST(Stability, PrecompLinksSurviveReopenAfterACompositionIsDeleted) {
     // Mesmo defeito, nível de composição: apagar uma composição deixa buraco
     // de slot; ao reabrir, as seguintes mudavam de id e a pré-composição
@@ -1694,6 +1750,53 @@ AUREA_TEST(Stability, BackgroundSaveIgnoresIdleRulesAndSkipsCleanProjects) {
     AUREA_CHECK_EQ(layer_count(f), 2u);
     AUREA_CHECK_EQ(f.last_load_notice(), 0u);
     f.shutdown();
+    remove_family(path);
+}
+
+AUREA_TEST(PreviewGesture, ViewingAndRejectedEditsPreserveSavedProjectAndBackup) {
+    const std::string path = test_path("preview_clean");
+    remove_family(path);
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, "Preview").ok());
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    auto id = e.add_text("Saved content");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); remove_family(path); return; }
+    AUREA_CHECK(e.save_project().ok());
+    const auto original = read_file(path), backup = read_file(path + ".bak");
+    Command cmds[4];
+    cmds[0].type = CommandType::ViewportSetZoom; cmds[0].viewport_zoom.zoom = 3;
+    cmds[1].type = CommandType::ViewportSetPan; cmds[1].viewport_pan.x = 80; cmds[1].viewport_pan.y = -30;
+    cmds[2].type = CommandType::PlaybackSeek; cmds[2].seek.time = tick_at(FrameIndex{12}, 30.0);
+    cmds[3].type = CommandType::LayerSetOpacity;
+    cmds[3].opacity.layer = LayerId::unpack(*id);
+    cmds[3].opacity.opacity = std::numeric_limits<f32>::quiet_NaN();
+    AUREA_CHECK_EQ(e.submit_commands(cmds, 4), 4u);
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK(!e.read_status().dirty);
+    bool saved = true;
+    AUREA_CHECK(e.save_project_if_dirty(&saved).ok());
+    AUREA_CHECK(!saved);
+    AUREA_CHECK(read_file(path) == original);
+    AUREA_CHECK(read_file(path + ".bak") == backup);
+    // A real edit through either entry point must still be persisted.
+    Command edit;
+    edit.type = CommandType::TextSetContent; edit.layer_ref.layer = LayerId::unpack(*id);
+    AUREA_CHECK(e.apply_command(edit, "Direct edit").ok());
+    AUREA_CHECK(e.read_status().dirty);
+    AUREA_CHECK(e.save_project_if_dirty(&saved).ok()); AUREA_CHECK(saved);
+    edit.stringLength = 11;
+    AUREA_CHECK_EQ(e.submit_commands(&edit, 1, "Queued edit", 11), 1u);
+    AUREA_CHECK(e.save_project_if_dirty(&saved).ok()); AUREA_CHECK(saved);
+    e.shutdown();
+    Engine reopened;
+    AUREA_CHECK(reopened.initialize(headless()).ok());
+    AUREA_CHECK(reopened.load_project(path.c_str()).ok());
+    TextData text;
+    AUREA_CHECK(reopened.query_text(*id, text));
+    AUREA_CHECK_EQ(text.content, std::string("Queued edit"));
+    reopened.shutdown();
     remove_family(path);
 }
 

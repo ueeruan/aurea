@@ -203,7 +203,7 @@ struct TimelineView: View {
                 drawRuler(&context, size: canvasSize)
                 drawPlayhead(&context, size: canvasSize)
             }
-            .background(AureaColors.editorCanvas)
+            .background(AureaTimeline.background)
             .overlay {
                 TimelineGestureSurface(
                     tap: { point, origin in tap(point, width: size.width, origin: origin) },
@@ -356,7 +356,7 @@ struct TimelineView: View {
     /// Régua (0..30): riscos de 1 pt do zero (no cabeçote fixo) para a direita,
     /// base em y 22; rótulos pequenos e apagados; as marcas por cima.
     private func drawRuler(_ context: inout GraphicsContext, size: CGSize) {
-        context.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: m.rowsTop)), with: .color(AureaColors.editorCanvas))
+        context.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: m.rowsTop)), with: .color(AureaTimeline.background))
         let steps = RulerSteps.of(pps: pps, fps: fps)
         let t0 = frame(0, width: size.width) / Double(fps)
         let t1 = frame(size.width, width: size.width) / Double(fps)
@@ -372,7 +372,7 @@ struct TimelineView: View {
                     for j in 1..<steps.subdivisions {
                         let sx = x((seconds + Double(j) * steps.majorSeconds / Double(steps.subdivisions)) * Double(fps), width: size.width)
                         if sx >= -1 && sx <= size.width + 1 {
-                            minor.move(to: CGPoint(x: sx, y: m.tickMinorTop)); minor.addLine(to: CGPoint(x: sx, y: m.tickBottom))
+                            minor.move(to: CGPoint(x: sx, y: m.tickMinorTop)); minor.addLine(to: CGPoint(x: sx, y: m.tickMinorBottom))
                         }
                     }
                 }
@@ -389,7 +389,7 @@ struct TimelineView: View {
                         let sec = Double(f) / Double(fps)
                         if abs(sec - (sec / steps.majorSeconds).rounded() * steps.majorSeconds) * Double(fps) >= 0.5 {
                             let px = x(Double(f), width: size.width)
-                            minor.move(to: CGPoint(x: px, y: m.tickMinorTop)); minor.addLine(to: CGPoint(x: px, y: m.tickBottom))
+                            minor.move(to: CGPoint(x: px, y: m.tickMinorTop)); minor.addLine(to: CGPoint(x: px, y: m.tickMinorBottom))
                         }
                     }
                 }
@@ -418,45 +418,22 @@ struct TimelineView: View {
     private func drawTimecode(_ context: inout GraphicsContext, size: CGSize) {
         let text = Timecode.format(Int32(clamping: self.clock.frame), fps)
         let cx = size.width / 2
-        switch timecodeStyle {
-        case .underline:
-            let clock = Text(text).font(.aurea(size: m.timecodeFont, weight: .bold)).monospacedDigit().foregroundColor(.white)
-            let resolved = context.resolve(clock)
-            let measured = resolved.measure(in: CGSize(width: size.width, height: m.timecodeBottom))
-            let midY = (m.timecodeTop + m.underlineTop) / 2
-            context.draw(resolved, at: CGPoint(x: cx, y: midY), anchor: .center)
-            context.fill(Path(CGRect(x: cx - measured.width / 2, y: m.underlineTop, width: measured.width, height: m.underlineHeight)), with: .color(.white))
-        case .box:
-            let clock = Text(text).font(.aurea(size: m.timecodeBoxFont, weight: .bold)).monospacedDigit().foregroundColor(.white)
-            let resolved = context.resolve(clock)
-            let measured = resolved.measure(in: CGSize(width: size.width, height: m.timecodeBottom))
-            let midY = (m.timecodeTop + m.timecodeBottom) / 2
-            let box = CGRect(x: cx - measured.width / 2 - m.timecodeBoxPad, y: midY - m.timecodeBoxHeight / 2,
-                             width: measured.width + m.timecodeBoxPad * 2, height: m.timecodeBoxHeight)
-            let inset = box.insetBy(dx: m.timecodeBoxStroke / 2, dy: m.timecodeBoxStroke / 2)
-            context.stroke(Path(roundedRect: inset, cornerRadius: m.timecodeBoxRadius), with: .color(AureaColors.accent), lineWidth: m.timecodeBoxStroke)
-            context.draw(resolved, at: CGPoint(x: cx, y: midY), anchor: .center)
-        }
+        let clock = Text(text).font(.aurea(size: m.timecodeFont, weight: .bold)).monospacedDigit().foregroundColor(.white)
+        let resolved = context.resolve(clock)
+        let measured = resolved.measure(in: CGSize(width: size.width, height: m.timecodeBottom))
+        let midY = (m.timecodeTop + m.underlineTop) / 2
+        context.draw(resolved, at: CGPoint(x: cx, y: midY), anchor: .center)
+        context.fill(Path(CGRect(x: cx - measured.width / 2, y: m.underlineTop, width: measured.width, height: m.underlineHeight)), with: .color(.white))
     }
 
-    /// Cabeçote: fio de 2 pt a partir de y 64 (abaixo do relógio). Redesenho
-    /// 2026-09-29: camada escolhida (fileira compacta ou relógio em caixa) = no
-    /// destaque, com o triângulo no alto da régua (Efeitos.dc.html); sem
-    /// seleção, o branco do editor principal (par do TimelinePainter).
+    /// Fio branco de 1 pt, com a mesma origem temporal dos clipes e losangos.
+    /// A faixa do relógio interrompe o fio; a seleção não muda sua posição.
     private func drawPlayhead(_ context: inout GraphicsContext, size: CGSize) {
         let cx = x(Double(clock.frame), width: size.width)
-        let chosen = compact || timecodeStyle == .box
-        let tint = chosen ? AureaColors.accent : AureaColors.playhead
+        let tint = AureaColors.playhead
         let top = min(m.playheadTop, size.height)
         context.fill(Path(CGRect(x: cx - m.playhead / 2, y: top, width: m.playhead, height: size.height - top)), with: .color(tint))
-        if chosen {
-            var marker = Path()
-            marker.move(to: CGPoint(x: cx - m.markerWidth / 2, y: 0))
-            marker.addLine(to: CGPoint(x: cx + m.markerWidth / 2, y: 0))
-            marker.addLine(to: CGPoint(x: cx, y: m.markerHeight))
-            marker.closeSubpath()
-            context.fill(marker, with: .color(tint))
-        }
+        context.fill(Path(CGRect(x: cx - m.playhead / 2, y: 0, width: m.playhead, height: m.rulerTicks)), with: .color(tint))
     }
 
     private func drawRows(_ context: inout GraphicsContext, size: CGSize) {
@@ -484,7 +461,7 @@ struct TimelineView: View {
             if top + rowHeight(row) < m.rowsTop || top > size.height { continue }
             if let preview, index >= preview.sourceStart && index < preview.sourceEnd {
                 let rect = Path(CGRect(x: 0, y: top, width: size.width, height: rowHeight(row)))
-                c.fill(rect, with: .color(AureaColors.editorCanvas))
+                c.fill(rect, with: .color(AureaTimeline.background))
                 c.fill(rect, with: .color(AureaColors.accent.opacity(0.14)))
             }
             guard let shared = row.shared else {
@@ -1008,7 +985,7 @@ struct TimelineView: View {
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
         let keysShown: Bool = KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: row.track != nil, selected: model.selection.contains(row.id))
         let touchable: [Int32] = keysShown ? row.instants : []
-        // Trilha: só a coluna do ▸/▾ (28) é cabeçalho; fileira: a pílula (78), com o olho em x < 28.
+        // Trilha: só a coluna do ▸/▾ (28) é cabeçalho; fileira: a pílula (70), com o olho em x < 28.
         let lane: Bool = row.track != nil
         return TimelineHit.test(m, point: CGPoint(x: px, y: y), width: width, x0: x0, x1: x1, handles: handlesOn(row), compact: compact && model.selection.contains(row.id), instants: touchable, view: viewFrame, ppf: ppf,
                                 header: lane ? m.laneHeader : m.headerColumn, eyeRight: lane ? 0 : m.eyeHitRight)

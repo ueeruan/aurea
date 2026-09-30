@@ -46,6 +46,44 @@ class EditorUiCaptureTest {
         settle()
     }
 
+    @Test fun compactTimelineKeepsTheAddMenuAccessible() {
+        assertTrue(context.packageName.endsWith(".uitest"))
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
+        compose.runOnIdle { store.newProject(720, 720, 30f, "AUREA · Timeline") }
+        compose.waitUntil(10000) { store.project.title == "AUREA · Timeline" }
+        val video = File(context.filesDir, "timeline-reference.mp4")
+        instrumentation.context.assets.open("motion-fixture.mp4").use { input -> video.outputStream().use { input.copyTo(it) } }
+        compose.runOnIdle { store.importVideo(android.net.Uri.fromFile(video)) }
+        compose.waitUntil(20000) { store.layers.any { it.kind == 1 } }
+        compose.runOnIdle { store.clearSelection(); store.seek(0) }
+        // A codec may need to fall back before its first frame is ready. Verify
+        // the actual preview before capturing it, rather than saving a black frame.
+        compose.waitUntil(20000) {
+            val bounds = compose.onNodeWithTag("editor.stage").fetchSemanticsNode().boundsInRoot
+            val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+            var colored = 0
+            for (y in bounds.center.y.toInt()-80 until bounds.center.y.toInt()+80 step 8)
+                for (x in bounds.center.x.toInt()-80 until bounds.center.x.toInt()+80 step 8) {
+                    val p = bitmap.getPixel(x,y)
+                    if (android.graphics.Color.red(p) + android.graphics.Color.green(p) + android.graphics.Color.blue(p) > 100) colored++
+                }
+            bitmap.recycle()
+            colored > 200
+        }
+        compose.onNodeWithTag("timeline.add").assertDoesNotExist()
+        compose.onNodeWithTag("editor.addBar").assertIsDisplayed()
+        capture("timeline-reference")
+        compose.onNodeWithTag("addBar.Text").performScrollTo().performClick()
+        compose.onNodeWithContentDescription(context.getString(R.string.editor_fechar_adicionar)).assertIsDisplayed()
+        back()
+        compose.onNodeWithTag("editor.addBar").assertIsDisplayed()
+        compose.onNodeWithTag("timeline.add").assertDoesNotExist()
+    }
+
     @Test fun captureOscillateAndEditableBounceInTheProductionEditor() {
         assertTrue(context.packageName.endsWith(".uitest"))
         compose.setContent {

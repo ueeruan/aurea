@@ -210,10 +210,8 @@ private struct ShellInlineName: View {
     }
 }
 
-/// Transporte do redesenho 2026-09-29: 7 botões espalhados (desfazer, refazer,
-/// início, play, fim, duplicar, tela cheia), alvos de 44 (o play, 48). Marca,
-/// copiar/colar e a lupa da prévia moram no menu da engrenagem; copiar/colar
-/// também no segurar do duplicar.
+/// Transporte de 60 pt, com marcador ao lado do play.
+/// Segurar duplicar também abre copiar e colar.
 struct TransportView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation

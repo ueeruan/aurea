@@ -49,13 +49,12 @@ AUREA_TEST(AndroidVideoPath, DriverGlIsTheDefaultAndFallsForwardOnly) {
     using android::VideoPath;
     using android::VideoPathInputs;
     // Toda marca começa no GL do driver quando o backend importa RGBA (Samsung
-    // inclusive); miniatura e backend sem importação vão aos planos; modo seguro
-    // é o decoder de software.
+    // inclusive); miniaturas/proxies e modo seguro usam planos de software.
     VideoPathInputs in;
     in.rgbaImport = true;
     AUREA_CHECK(android::initial_video_path(in) == VideoPath::DriverGl);
     in.thumbnail = true;
-    AUREA_CHECK(android::initial_video_path(in) == VideoPath::CpuPlanes);
+    AUREA_CHECK(android::initial_video_path(in) == VideoPath::SoftwarePlanes);
     in.thumbnail = false;
     in.rgbaImport = false;
     AUREA_CHECK(android::initial_video_path(in) == VideoPath::CpuPlanes);

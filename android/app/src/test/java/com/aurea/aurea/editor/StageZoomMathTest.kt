@@ -25,6 +25,9 @@ class StageZoomMathTest {
         assertEquals(0f, StageZoomMath.maxPan(1f, 800f), 0f)
         assertEquals(0f, StageZoomMath.clampPan(300f, 1f, 800f), 0f)
         assertEquals(0f, StageZoomMath.clampPan(Float.NaN, 4f, 800f), 0f)
+        assertEquals(0f, StageZoomMath.clampPan(50f, Float.NaN, 800f), 0f)
+        assertEquals(0f, StageZoomMath.clampPan(50f, 4f, Float.NaN), 0f)
+        assertEquals(0f, StageZoomMath.clampPan(50f, 4f, -800f), 0f)
     }
 
     @Test fun panIsLimitedSoTheEdgeStopsWhereItSitsAtFit() {

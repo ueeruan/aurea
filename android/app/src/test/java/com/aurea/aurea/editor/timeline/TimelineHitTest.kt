@@ -30,24 +30,24 @@ class TimelineHitTest {
     @Test
     fun `a geometria do redesenho`() {
         // Mockup 2026-09-29: riscos 30 + relógio 30 + respiro 8, e a barra 2 dp abaixo do topo da pílula.
-        assertEquals(70f, m.rowsTop, 0f)
+        assertEquals(52f, m.rowsTop, 0f)
         // Fileira 32 (pílula 28 + vão 4) / barra 24: as camadas eram grandes demais.
         assertEquals(32f, m.row, 0f)
-        assertEquals(24f, m.bar, 0f)
+        assertEquals(26f, m.bar, 0f)
         assertEquals(m.bar / 2, m.diamondCyNormal, 0f)
         assertEquals(m.bar / 2, m.diamondCyCompact, 0f)
-        assertEquals(13f, m.trackTop, 0f)
+        assertEquals(15f, m.trackTop, 0f)
         // Pílula de 78 colada à esquerda: olho em x 16, quadradinho de 22 de x 32 a 54.
-        assertEquals(78f, m.headerColumn, 0f)
+        assertEquals(70f, m.headerColumn, 0f)
         assertEquals(28f, m.pillHeight, 0f)
         assertEquals(2f, m.pillInset, 0f)
         assertEquals(17f, m.gutterIconCx, 0f)
         assertEquals(16f, m.gutterEyeCx, 0f)
-        assertEquals(32f, m.glyphBoxLeft, 0f)
-        assertEquals(22f, m.glyphBox, 0f)
+        assertEquals(38f, m.glyphBoxLeft, 0f)
+        assertEquals(20f, m.glyphBox, 0f)
         assertEquals(3f, m.stripe, 0f)
-        assertEquals(3f, m.barRadius, 0f)
-        assertEquals(64f, m.playheadTop, 0f)
+        assertEquals(0f, m.barRadius, 0f)
+        assertEquals(40f, m.playheadTop, 0f)
     }
 
     @Test
@@ -55,7 +55,7 @@ class TimelineHitTest {
         assertEquals(HitKind.HEADER_EYE, hit(10f, 10f))
         assertEquals(HitKind.HEADER_EYE, hit(20f, 20f))
         assertEquals(HitKind.HEADER, hit(40f, 10f))          // a miniatura do tipo abre/fecha as trilhas
-        assertEquals(HitKind.HEADER, hit(70f, 20f))          // ponta arredondada: ainda a pílula
+        assertEquals(HitKind.HEADER, hit(68f, 20f))          // ponta arredondada: ainda a pílula
         assertEquals(HitKind.HEADER, hit(50f, 28f))
         assertEquals(HitKind.NONE, hit(90f, 10f))            // fora da pílula e fora do clipe
         assertEquals(HitKind.NONE, hit(250f, -1f))
@@ -137,7 +137,7 @@ class TimelineHitTest {
     @Test
     fun `ponta escondida sob a pilula nao tem alca`() {
         // Início no frame 30 → x = 60, embaixo da pílula (78).
-        assertEquals(HitKind.HEADER, hit(70f, 10f, start = 30))
+        assertEquals(HitKind.HEADER, hit(68f, 10f, start = 30))
         assertEquals(HitKind.BODY, hit(85f, 10f, start = 30))
     }
 

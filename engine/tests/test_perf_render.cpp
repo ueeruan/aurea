@@ -997,3 +997,39 @@ AUREA_TEST(Perf8C, PausedReducedPreviewRefinesOnce) {
     AUREA_CHECK_EQ(e.read_telemetry().previewDenominator, den);   // o refino não mexe no AUTO
     e.shutdown();
 }
+
+// CADisplayLink keeps waking the iOS render thread even while the project is
+// idle. Those wakes must not restart the deadline for restoring preview detail.
+AUREA_TEST(PreviewGesture, IdleVsyncCannotStarvePreviewRefinement) {
+    auto* mock = new MockBackend();
+    Engine e;
+    EngineConfig ec;
+    ec.backend = mock; ec.workerCount = 1; ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(1920, 1080, 30.0, "vsync refinement").ok());
+    int dummyWindow = 0;
+    AUREA_CHECK(e.attach_surface(&dummyWindow, 1920, 1080).ok());
+    for (u32 i = 0; i < 6; ++i) {
+        FrameStats heavy;
+        heavy.cpuMs = 120; heavy.gpuMs = 120;
+        heavy.passesExecuted = 10; heavy.layersRendered = 1;
+        e.debug_feed_frame_stats(heavy);
+    }
+    Command seek;
+    seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{3}, 30.0);
+    AUREA_CHECK_EQ(e.submit_commands(&seek, 1), 1u);
+    AUREA_CHECK(e.render_frame(true).ok());
+    const u32 denominator = e.read_telemetry().previewDenominator;
+    const u32 first = mock->presents;
+    AUREA_CHECK(denominator > 1);
+    e.start_render_thread();
+    for (u32 i = 0; i < 90; ++i) {
+        e.wake_render();
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+    }
+    e.stop_render_thread();
+    AUREA_CHECK_EQ(mock->presents, first + 1);
+    AUREA_CHECK_EQ(e.read_telemetry().previewDenominator, denominator);
+    e.shutdown();
+}

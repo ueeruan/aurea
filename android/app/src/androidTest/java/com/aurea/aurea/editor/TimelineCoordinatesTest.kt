@@ -102,7 +102,7 @@ class TimelineCoordinatesTest {
         val row = (cy - 2 * metrics.density).roundToInt()
         fun near(a: Color, b: Color) = abs(a.red - b.red) < .04f && abs(a.green - b.green) < .04f && abs(a.blue - b.blue) < .04f
         val diamond = (0 until pixels.width).filter { near(pixels[it, row], AureaTimeline.KeyframeOn) }
-        val line = (0 until pixels.width).filter { near(pixels[it, (cy + 35 * metrics.density).roundToInt()], AureaColors.Accent) }
+        val line = (0 until pixels.width).filter { near(pixels[it, (cy + 35 * metrics.density).roundToInt()], AureaColors.Playhead) }
         assertTrue("$message: diamond must be drawn", diamond.size >= 2)
         assertTrue("$message: playhead must be drawn", line.isNotEmpty())
         val center = (diamond.first() + diamond.last() + 1) / 2.0

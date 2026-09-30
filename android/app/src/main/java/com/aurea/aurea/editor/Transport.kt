@@ -48,13 +48,13 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // =============================================================================
-// Transporte (redesenho 2026-09-29): 60 dp, sete botões espalhados por igual
+// Transporte de 60 dp, com marcador ao lado do play.
 // =============================================================================
 
 /**
  * ↶ ↷ · ⇤ ▶ ⇥ · duplicar · tela cheia (mockup `Editor.dc.html`). Nada da
  * barra antiga se perdeu: tocar ⇤/⇥ anda de marca/keyframe/quadro e segurar
- * vai ao início/fim. Segurar duplicar abre Copiar e colar; o marcador fica junto ao relógio.
+ * vai ao início/fim. Segurar duplicar abre Copiar e colar.
  * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
  */
 @Composable

@@ -60,7 +60,8 @@ internal object StageZoomMath {
      * no encaixe (100 %). Em 1× não há pan. [baseExtent] = tamanho da
      * composição na tela em 1× (px).
      */
-    fun maxPan(zoom: Float, baseExtent: Float): Float = ((zoom - 1f) * baseExtent / 2f).coerceAtLeast(0f)
+    fun maxPan(zoom: Float, baseExtent: Float): Float =
+        if (baseExtent.isFinite() && baseExtent > 0f) ((clampZoom(zoom) - 1f) * baseExtent / 2f).coerceAtLeast(0f) else 0f
 
     fun clampPan(pan: Float, zoom: Float, baseExtent: Float): Float {
         if (!pan.isFinite()) return 0f
@@ -106,6 +107,47 @@ internal object StageZoomMath {
 
     /** "250" para 2,5×. */
     fun percent(zoom: Float): Int = (zoom * 100f).roundToInt()
+}
+
+/** Tracks a stable pair of pointers. Crossing fingers must not flip the layer
+ * by 180 degrees; reversing at a limit must react on the very next event. */
+internal class StagePinchTracker {
+    var factor = 1f
+        private set
+    var degrees = 0f
+        private set
+    private var span = 0f
+    private var angle = 0f
+    private var minimumSpan = 16f
+    private var ready = false
+
+    fun start(ax: Float, ay: Float, bx: Float, by: Float, minimum: Float) {
+        factor = 1f; degrees = 0f; minimumSpan = maxOf(1f, minimum)
+        span = kotlin.math.hypot(ax - bx, ay - by)
+        angle = kotlin.math.atan2(by - ay, bx - ax)
+        ready = span.isFinite() && span >= minimumSpan
+    }
+
+    fun update(ax: Float, ay: Float, bx: Float, by: Float, clamp: (Float) -> Float): Boolean {
+        if (!ax.isFinite() || !ay.isFinite() || !bx.isFinite() || !by.isFinite()) return false
+        val nextSpan = kotlin.math.hypot(ax - bx, ay - by)
+        val nextAngle = kotlin.math.atan2(by - ay, bx - ax)
+        if (!nextSpan.isFinite() || !nextAngle.isFinite()) return false
+        if (!ready || nextSpan < minimumSpan) {
+            span = nextSpan; angle = nextAngle; ready = nextSpan >= minimumSpan
+            return false
+        }
+        var delta = nextAngle - angle
+        val pi = Math.PI.toFloat()
+        if (delta > pi) delta -= 2 * pi
+        if (delta < -pi) delta += 2 * pi
+        val next = clamp(factor * (nextSpan / span))
+        if (!next.isFinite() || next <= 0f) return false
+        val changed = abs(next - factor) > 1e-6f || abs(delta) > 1e-6f
+        factor = next; degrees += Math.toDegrees(delta.toDouble()).toFloat()
+        span = nextSpan; angle = nextAngle
+        return changed
+    }
 }
 
 /**

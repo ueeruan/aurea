@@ -120,6 +120,8 @@ class AureaEngine private constructor() {
         }
 
         @JvmStatic external fun nativeCreate(): Long
+        /** Shared limits for a proportional 2D/3D pinch; no render/model lock. */
+        @JvmStatic external fun clampPinchFactor(factor: Float, x: Float, y: Float, z: Float, threeD: Boolean): Float
         @JvmStatic external fun nativeDestroy(handle: Long)
     }
 

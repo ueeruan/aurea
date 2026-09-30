@@ -98,7 +98,6 @@ struct EditorView: View {
                 }
             }
             .background(AureaColors.editorCanvas.ignoresSafeArea())
-            // O "+" saiu: adicionar mora na barra fixa de baixo (`ShellAddBar`).
         }
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
         .fullScreenCover(item: $model.effectSearch) { request in

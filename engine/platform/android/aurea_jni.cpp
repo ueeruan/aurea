@@ -31,6 +31,7 @@
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
+#include "aurea/core/GestureMath.hpp"
 
 #include <cstdio>
 #include <algorithm>
@@ -212,6 +213,10 @@ void release_window_locked(NativeContext& c) noexcept {
 
 #define AUREA_JNI extern "C" JNIEXPORT
 #define AUREA_FN(name) JNICALL Java_com_aurea_aurea_engine_AureaEngine_##name
+
+AUREA_JNI jfloat AUREA_FN(clampPinchFactor)(JNIEnv*, jclass, jfloat factor, jfloat x, jfloat y, jfloat z, jboolean threeD) {
+    return aurea::clamp_pinch_factor(factor, x, y, z, threeD == JNI_TRUE);
+}
 
 AUREA_JNI jint JNI_OnLoad(JavaVM* vm, void*) {
     g_vm = vm;
@@ -419,15 +424,18 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     char manufacturer[PROP_VALUE_MAX]{}, sdk[PROP_VALUE_MAX]{};
     __system_property_get("ro.product.manufacturer", manufacturer);
     __system_property_get("ro.build.version.sdk", sdk);
-    const bool rgbaImport = gpu->capabilities().externalMemoryHardwareBuffer;
+    // Goldfish/gfxstream may advertise RGBA import while its external video
+    // texture is black. Use readable software frames in the Android emulator.
+    const bool emulatorVideo = running_on_emulator();
+    const bool rgbaImport = gpu->capabilities().externalMemoryHardwareBuffer && !emulatorVideo;
     c->media.set_driver_gl(rgbaImport);
     c->media.set_zero_copy(false);
     // Sem o GL (backend GLES, sem importação): a regra de antes — Samsung no
     // decoder de software, o resto em planos pela CPU.
-    c->media.set_software_only(!rgbaImport && android::needs_software_video(manufacturer, std::atoi(sdk)));
+    c->media.set_software_only(emulatorVideo || (!rgbaImport && android::needs_software_video(manufacturer, std::atoi(sdk))));
     AUREA_LOG_INFO("video: %s%s", rgbaImport ? "caminho GL do driver (padrao)" : "planos pela CPU",
                    rgbaImport ? "; queda por decoder: planos pela CPU -> decoder de software"
-                   : running_on_emulator() ? " (emulador sem importacao)" : " (backend sem importacao de AHardwareBuffer)");
+                   : emulatorVideo ? " (decoder de software no emulador)" : " (backend sem importacao de AHardwareBuffer)");
     c->engine.start_render_thread();
     c->initialized = true;
     return JNI_TRUE;
@@ -531,12 +539,13 @@ AUREA_JNI void AUREA_FN(nativeDetachSurface)(JNIEnv*, jclass, jlong handle) {
 
 AUREA_JNI void AUREA_FN(nativeResizeSurface)(JNIEnv*, jclass, jlong handle, jint width, jint height) {
     NativeContext* c = ctx_of(handle);
-    if (!c) return;
+    if (!c || width <= 0 || height <= 0) return;
     // Mesmo lock do attach/detach: um surfaceChanged que chega enquanto a
     // janela está sendo solta/trocada não pode redimensionar uma superfície
     // que já não existe (Galaxy S24 FE: SIGSEGV no resize pela thread de render).
     std::lock_guard<std::mutex> lock(c->surfaceMutex);
     if (!c->window) return;
+    // Publishes the latest size only; GPU work happens on the render thread.
     (void)c->engine.resize_surface(static_cast<u32>(width), static_cast<u32>(height));
 }
 

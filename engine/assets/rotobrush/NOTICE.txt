@@ -1,0 +1,19 @@
+AUREA Rotobrush local foreground model
+
+U2-Net / U2NETP, Xuebin Qin and contributors.
+Source: https://github.com/xuebinqin/U-2-Net
+License: Apache-2.0, included as LICENSE-U2Net.txt.
+Paper: U2-Net: Going Deeper with Nested U-Structure for Salient Object Detection.
+
+The ONNX conversion is distributed by the rembg project:
+https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx
+Original ONNX MD5: 8e83ca70e441ab06c318d82300c84806.
+
+Modified for AUREA: converted ONNX to ncnn at 320x320 with pnnx 20260526,
+then compressed weights to fp16 with ncnnoptimize (flag 65536).
+Training weights were not changed. Runtime inference is float32 on CPU.
+The model estimates salient foreground. It is not Adobe Roto Brush and
+does not provide SAM-style arbitrary-object prompting or video tracking.
+
+u2netp.param SHA256 ab9567c0bfebecf51e8bb1292e2b4ca1bfb09006122a01bbba38a429ca94a4b0
+u2netp.bin SHA256 e9cbc6a779f02490ac16ef87e6b800d3b8dc29fe8cd65226318c089c5d21fd2e

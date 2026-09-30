@@ -4,8 +4,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CurveEaseInteractionTest {
+    @Test fun configurableBounceMatchesLandingsAndMirrorsWithoutChangingStrength() {
+        val bounce = Ease(Interp.BOUNCE,.375f,.5f,1f,-10f)
+        assertEquals(1f,bounce.transform(1f/2.75f),.00001f)
+        assertEquals(.75f,bounce.transform(1.5f/2.75f),.00001f)
+        assertTrue(bounce.supportsInversion)
+        assertFalse(bounce.same(bounce.bounce(count=4)))
+        for (count in 1..8) for (strength in listOf(.1f,.5f,.9f)) {
+            val curve=bounce.bounce(count,strength)
+            val reverse=curve.inverted()!!
+            for (i in 0..1000) {
+                val t=i/1000f
+                assertEquals(curve.transform(t),1f-reverse.transform(1f-t),.00001f)
+                assertTrue(curve.transform(t) in 0f..1f)
+            }
+        }
+    }
     @Test fun unsupportedInversionIsDistinctFromSymmetricCurves() {
-        for (kind in listOf(Interp.HOLD, Interp.BOUNCE, Interp.ELASTIC, Interp.STEPS)) {
+        for (kind in listOf(Interp.HOLD, Interp.ELASTIC, Interp.STEPS)) {
             assertFalse(Ease(kind, 0f, 0f, 1f, 1f).supportsInversion)
         }
         for (kind in listOf(Interp.LINEAR, Interp.EASE_IN_OUT)) {

@@ -28,6 +28,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.alpha
@@ -91,6 +92,8 @@ internal fun HumanRow(
     selected: Boolean = false,
     onSelect: (() -> Unit)? = null,
     keyframe: KeyframeLook = KeyframeLook.None,
+    onKeyframe: (() -> Unit)? = null,
+    keyTag: String = "",
 ) {
     var dragging by remember { mutableStateOf(false) }
     var live by remember { mutableFloatStateOf(value) }
@@ -140,6 +143,12 @@ internal fun HumanRow(
         })
         ResetButton(visible = default != null && abs(shown - default) > 1e-3f * maxOf(1f, abs(default))) {
             if (default != null) onCommit(default)
+        }
+        if (onKeyframe != null) {
+            val action = stringResource(if (keyframe == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
+            Box(Modifier.size(40.dp, 44.dp).testTag(keyTag).semantics { contentDescription = "$action · $label" }.tocavel(onClick = onKeyframe), contentAlignment = Alignment.Center) {
+                com.aurea.aurea.ui.ds.KeyframeDiamondIcon(keyframe, enabled = true)
+            }
         }
     }
 }

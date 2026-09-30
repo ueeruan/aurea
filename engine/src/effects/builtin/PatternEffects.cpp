@@ -1,4 +1,5 @@
 #include "BuiltinEffects.hpp"
+#include "aurea/text/TextTransform.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -65,6 +66,17 @@ public:
         p.add_float("rotation", "Inherit Rotation", 100.f, -200.f, 200.f, kParamAnimatable | kParamPercent, "%");
         p.add_float("scale", "Inherit Scale", 100.f, 0.f, 200.f, kParamAnimatable | kParamPercent, "%");
     }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
+class TextTransform final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{text::kTransformEffect, "Text Transform", "Text", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override { text::declare_transform_params(p); }
+    // Applied to glyph geometry by the text renderer, before the raster stack.
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
 
@@ -237,6 +249,7 @@ void register_pattern_effects(EffectRegistry& r) {
     for (u32 mode = 0; mode < 3; ++mode) (void)r.add(std::make_unique<Pattern>(mode));
     (void)r.add(std::make_unique<ParentingHelper>());
     (void)r.add(std::make_unique<Text3DLayout>());
+    (void)r.add(std::make_unique<TextTransform>());
     (void)r.add(std::make_unique<Checkerboard>());
     (void)r.add(std::make_unique<HexagonalArray>());
 }

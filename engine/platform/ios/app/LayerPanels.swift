@@ -215,6 +215,8 @@ private struct NativePanelRuler: View {
     var toggleKey: (() -> Void)? = nil
     var expression: ExpressionLook = .none
     var onExpression: (() -> Void)? = nil
+    var selected = false
+    var onSelect: (() -> Void)? = nil
     var compactUnit = false
     let set: (Float) -> Void
     @State private var dragging = false
@@ -224,7 +226,8 @@ private struct NativePanelRuler: View {
         HStack(spacing: 0) {
             if let plainLabelWidth { Text(label).font(.aurea(size: 13)).frame(width: plainLabelWidth, alignment: .leading) }
             else {
-                PropertyLabelChip(label, expression: expression, keyframe: look, onTap: {})
+                PropertyLabelChip(label, expression: expression, keyframe: look, onTap: { onSelect?() })
+                    .transformEnvironment(\.aureaSelectedProperty) { if onSelect != nil { $0 = selected ? label : nil } }
                     .onLongPressGesture(minimumDuration: 0.5) { onExpression?() }
             }
             Color.clear.frame(width: plainLabelWidth != nil ? 0 : keypad ? 6 : 8)
@@ -237,7 +240,11 @@ private struct NativePanelRuler: View {
                 Button { set(reset) } label: { CupertinoGlyph.text(CupertinoGlyph.ArrowCounterclockwise, size: 16, color: AureaColors.muted).frame(width: 34, height: 44) }
                     .buttonStyle(.plain).opacity(abs(shown - reset) > 0.001 * max(1, abs(reset)) ? 1 : 0).disabled(abs(shown - reset) <= 0.001 * max(1, abs(reset)))
             }
-            if let toggleKey { Color.clear.frame(width: 4); Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: true).padding(4) }.buttonStyle(.plain) }
+            if let toggleKey {
+                Color.clear.frame(width: 4)
+                Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: true).frame(width: 40, height: 44) }.buttonStyle(.plain)
+                    .accessibilityLabel(AureaText.t(look == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui") + " · " + label)
+            }
         }.frame(height: 48).onDisappear { if dragging { dragging = false; model.endGesture() } }
     }
     private func openKeypad() { model.numericKeypad = KeypadRequest(title: label, value: value, unit: unit, min: range.lowerBound, max: range.upperBound, decimals: decimals) { set($0.clamped(to: range)) } }
@@ -1571,12 +1578,18 @@ struct MaskPanel: View {
                         VStack(alignment: .leading, spacing: 0) {
                             if tab == 0 { masksBody } else { matteBody }
                         }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
-                    }
+                    }.accessibilityIdentifier("mask.scroll")
                 }
             }
-        }.foregroundStyle(AureaColors.text).onAppear { load() }
+        }.foregroundStyle(AureaColors.text).onAppear {
+            load()
+            if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { step = 2 }
+        }
             .onChange(of: id) { _ in adding = false; step = 0; load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
+            .onChange(of: model.timelineFocus) { focus in
+                if focus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { tab = 0; step = 2 }
+            }
     }
     @ViewBuilder private var masksBody: some View {
         if model.masks.isEmpty {
@@ -1635,16 +1648,19 @@ struct MaskPanel: View {
             }
             Color.clear.frame(height: 10)
             NativePanelAction("panel_apagar_mascara", danger: true) {
-                _ = model.engine.removeMask(id, mask: m.id); model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false; model.refreshModel(force: true)
+                guard model.engine.removeMask(id, mask: m.id) else { return }
+                if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == m.id }) == true { model.timelineFocus = nil }
+                if model.curveProperty == 43 && model.curveEffect == m.id { model.curveSelectedTime = nil }
+                model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false; model.refreshModel(force: true)
             }
         case 1:
             title("panel_como_esta_mascara_combina_outras")
             ChoiceChips(["panel_somar", "panel_subtrair", "panel_intersecao", "panel_diferenca", "panel_desligada"].map { AureaText.t($0) }, selected: Int(m.operation)) { update(m, operation: UInt32($0)) }
             NativePanelToggle(AureaText.t("panel_inverter_mostrar_lado_fora"), checked: m.inverted) { update(m, inverted: $0) }
         case 2:
-            NativePanelRuler(label: AureaText.t("panel_suavizar"), value: m.feather, step: 0.5, range: 0...500, unit: "px", reset: 0, keypad: true) { update(m, feather: $0) }
-            NativePanelRuler(label: AureaText.t("panel_expandir"), value: m.expansion, step: 0.5, range: -500...500, unit: "px", reset: 0, keypad: true) { update(m, expansion: $0) }
-            NativePanelRuler(label: AureaText.t("panel_opacidade"), value: m.opacity * 100, step: 0.5, range: 0...100, unit: "%", reset: 100, keypad: true) { update(m, opacity: $0 / 100) }
+            maskRuler(m, param: 0, label: "panel_suavizar", value: m.feather, range: 0...500, unit: "px", reset: 0)
+            maskRuler(m, param: 1, label: "panel_expandir", value: m.expansion, range: -500...500, unit: "px", reset: 0)
+            maskRuler(m, param: 2, label: "panel_opacidade", value: m.opacity * 100, range: 0...100, unit: "%", reset: 100)
         default:
             if model.importingMedia { hint("panel_rastreando") }
             else {
@@ -1654,6 +1670,22 @@ struct MaskPanel: View {
                 Color.clear.frame(height: 6)
                 NativePanelAction("panel_seguir_posicao_tamanho_giro", detail: AureaText.t("panel_objetos_aproximam_ou_giram")) { track(m.id, mode: 1) }
             }
+        }
+    }
+    private func maskRuler(_ mask: MaskItem, param: UInt32, label: String, value: Float, range: ClosedRange<Float>, unit: String, reset: Float) -> some View {
+        let track = TimelineTrack(property: 43, effect: mask.id, param: param)
+        let keys = (model.keyframes[id] ?? []).filter { $0.property == 43 && $0.effectIndex == mask.id && $0.paramIndex == param }
+        let look: KeyframeLook = keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
+        let selected = model.timelineFocus == [track]
+        return VStack(spacing: 0) {
+            NativePanelRuler(label: AureaText.t(label), value: value, step: 0.5, range: range, unit: unit, decimals: 1, reset: reset, keypad: true, look: look, toggleKey: {
+                model.timelineFocus = [track]
+                _ = model.engine.toggleMaskParamKey(id, mask: mask.id, param: param); model.refreshModel(force: true)
+            }, selected: selected, onSelect: { model.timelineFocus = [track] }) {
+                model.timelineFocus = [track]
+                _ = model.engine.setMaskParam(id, mask: mask.id, param: param, value: param == 2 ? $0 / 100 : $0); model.refreshModel(force: true)
+            }.accessibilityIdentifier("mask.\(mask.id).param.\(param)")
+            if selected { NativeAnimationTrackActions(track: track, curveTag: "mask.\(mask.id).curve.\(param)") }
         }
     }
     private var matteBody: some View {
@@ -1708,7 +1740,7 @@ struct TextAnimationPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_animacao")) { model.openPanel(.text) }
-            ScrollView { TextAnimationSection().padding(.horizontal, 18).padding(.bottom, 24) }
+            ScrollView { TextAnimationSection().padding(.horizontal, 18).padding(.bottom, 24) }.accessibilityIdentifier("text.anim.scroll")
         }
     }
 }
@@ -1737,11 +1769,11 @@ struct TextAnimationSection: View {
                     }
                 }.frame(height: 44)
             }
-            ForEach(animators.indices, id: \.self) { index in NativeTextAnimatorCard(index: UInt32(index), values: animators[index]).padding(.top, 8) }
-            NativePanelChip(AureaText.t("panel_adicionar_animacao")) {
-                animationError = model.engine.addTextAnimator(id, props: 8) < 0
+            NativePanelChip(AureaText.t("text_transform_add")) {
+                model.engine.run { engine in engine.addEffect(fxEffectTypeId("aurea.text.transform"), toLayer: id, at: UInt32.max) }
                 refresh()
-            }.padding(.top, 4)
+                model.openPanel(.effects)
+            }.padding(.top, 4).accessibilityIdentifier("text.transform.add")
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
             .alert(AureaText.t("ios_text_anim_title"), isPresented: $animationError) {
@@ -1752,131 +1784,30 @@ struct TextAnimationSection: View {
     }
 }
 
-private struct NativeAnimParam: Identifiable {
-    var id: Int
-    var slot: Int
-    var bit: Int
-    var label: String
-    var unit: String
-    var step: Float
-    var range: ClosedRange<Float>
-    static var selectors: [NativeAnimParam] { [
-        NativeAnimParam(id: 0, slot: 7, bit: 0, label: AureaText.t("panel_inicio"), unit: "%", step: 0.5, range: 0...100),
-        NativeAnimParam(id: 1, slot: 8, bit: 0, label: AureaText.t("panel_fim"), unit: "%", step: 0.5, range: 0...100),
-        NativeAnimParam(id: 2, slot: 9, bit: 0, label: AureaText.t("ios_anim_delay_between"), unit: "%", step: 0.5, range: -1000...1000),
-        NativeAnimParam(id: 3, slot: 10, bit: 0, label: AureaText.t("panel_intensidade"), unit: "%", step: 0.5, range: -100...100)
-    ] }
-    static var properties: [NativeAnimParam] { [
-        NativeAnimParam(id: 10, slot: 14, bit: 0, label: AureaText.t("panel_posicao_x"), unit: "px", step: 1, range: -5000...5000),
-        NativeAnimParam(id: 11, slot: 15, bit: 0, label: AureaText.t("panel_posicao_y"), unit: "px", step: 1, range: -5000...5000),
-        NativeAnimParam(id: 12, slot: 16, bit: 0, label: AureaText.t("pn_depth"), unit: "px", step: 1, range: -5000...5000),
-        NativeAnimParam(id: 13, slot: 17, bit: 1, label: AureaText.t("fx_escala_x"), unit: "%", step: 1, range: -2000...2000),
-        NativeAnimParam(id: 14, slot: 18, bit: 1, label: AureaText.t("fx_escala_y"), unit: "%", step: 1, range: -2000...2000),
-        NativeAnimParam(id: 15, slot: 19, bit: 2, label: AureaText.t("edt_rotation_x"), unit: "°", step: 1, range: -3600...3600),
-        NativeAnimParam(id: 16, slot: 20, bit: 2, label: AureaText.t("edt_rotation_y"), unit: "°", step: 1, range: -3600...3600),
-        NativeAnimParam(id: 17, slot: 21, bit: 2, label: AureaText.t("edt_rotation_z"), unit: "°", step: 1, range: -3600...3600),
-        NativeAnimParam(id: 18, slot: 22, bit: 3, label: AureaText.t("panel_opacidade"), unit: "%", step: 0.5, range: 0...100),
-        NativeAnimParam(id: 19, slot: 23, bit: 4, label: AureaText.t("ios_spacing"), unit: "px", step: 0.5, range: -500...500),
-        NativeAnimParam(id: 20, slot: 24, bit: 5, label: AureaText.t("panel_desfoque"), unit: "px", step: 0.2, range: 0...200),
-        NativeAnimParam(id: 21, slot: 25, bit: 6, label: AureaText.t("ios_skew"), unit: "°", step: 0.5, range: -80...80),
-        NativeAnimParam(id: 22, slot: 26, bit: 7, label: AureaText.t("panel_contorno"), unit: "px", step: 0.1, range: -50...50),
-        NativeAnimParam(id: 23, slot: 27, bit: 8, label: AureaText.t("ios_scramble_letter"), unit: "", step: 0.1, range: -1000...1000)
-    ] }
-}
-
-private struct NativeTextAnimatorCard: View {
+private struct NativeAnimationTrackActions: View {
     @EnvironmentObject private var model: AureaModel
-    let index: UInt32
-    let values: [Float]
+    let track: TimelineTrack
+    let curveTag: String
     private var id: Int64 { model.primarySelection ?? 0 }
-    // Portuguese names stay as the undo labels sent to the engine; the screen shows `titles`.
-    private let names = ["Posição", "Escala", "Rotação", "Opacidade", "Espaçamento", "Desfoque", "Inclinação", "Contorno", "Embaralhar letra", "Cor", "Cor do contorno"]
-    private var titles: [String] { ["fx_posicao", "panel_escala", "panel_rotacao", "panel_opacidade", "ios_spacing", "panel_desfoque", "ios_skew", "panel_contorno", "ios_scramble_letter", "panel_cor", "panel_cor_contorno"].map { AureaText.t($0) } }
-    private func set(_ updates: [Int: Float]) {
-        let flat = model.engine.textAnimators(id).map(\.floatValue), start = Int(index) * 40
-        guard flat.count >= start + 40 else { return }
-        var next = Array(flat[start..<(start + 40)])
-        for (slot, value) in updates { next[slot] = value }
-        _ = model.engine.setTextAnimator(id, index: index, values: next.map { NSNumber(value: $0) }); model.refreshModel(force: true)
-    }
+    private var keys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { Int($0.property) == track.property && $0.effectIndex == track.effect && $0.paramIndex == track.param }.sorted { $0.time < $1.time } }
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(AureaText.t("ios_animation_n", Int(index) + 1)).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-                NativePanelChip(AureaText.t("panel_remover")) { model.engine.removeTextAnimator(id, index: index); model.refreshModel(force: true) }
-                AureaToggle(checked: values[0] > 0.5) { set([0: $0 ? 1 : 0]) }
-            }.frame(height: 40)
-            choices("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha"], slot: 2)
-            choices("panel_escolhe", ["panel_ordem", "panel_sorteado", "ios_range_ae"], slot: 3)
-            selectorControls
-            ForEach(NativeAnimParam.properties.filter { Int(values[1]) & (1 << $0.bit) != 0 }) { param in NativeTextAnimRuler(index: index, param: param, values: values) }
-            ForEach([9, 10], id: \.self) { bit in if Int(values[1]) & (1 << bit) != 0 { colorRow(bit) } }
+            let previous = keys.last { $0.time < model.localPlayhead }
+            let next = keys.first { $0.time > model.localPlayhead }
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(names.enumerated()), id: \.offset) { bit, name in
-                        NativePanelChip(titles[bit], selected: Int(values[1]) & (1 << bit) != 0) { set([1: Float(Int(values[1]) ^ (1 << bit))]) }
-                    }
-                }.frame(height: 44)
+                HStack(spacing: 12) {
+                    Button(AureaText.t("panel_keyframe_anterior")) { if let previous { seek(previous) } }.disabled(previous == nil)
+                    Button(AureaText.t("panel_proximo_keyframe")) { if let next { seek(next) } }.disabled(next == nil)
+                    Button(AureaText.t("panel_curva")) {
+                        let key = keys.dropLast().last { $0.time <= model.localPlayhead } ?? keys.first
+                        model.openCurve(property: UInt32(track.property), effect: track.effect, param: track.param, time: key?.time)
+                    }.disabled(keys.count < 2).accessibilityIdentifier(curveTag)
+                }.buttonStyle(.borderless).frame(minHeight: 44)
             }
-        }.padding(8).background(AureaColors.chip.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
     }
-    @ViewBuilder private var selectorControls: some View {
-        if Int(values[3]) != 1 {
-            choices("panel_passagem", ["panel_seco", "panel_sobe", "panel_desce", "panel_triangulo", "panel_redondo", "panel_suave"], slot: 4)
-            HStack {
-                Text(AureaText.t("panel_ordem_aleatoria")).font(.aurea(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
-                AureaToggle(checked: values[5] > 0.5) { set([5: $0 ? 1 : 0]) }
-            }.frame(height: 40)
-            ForEach(NativeAnimParam.selectors) { param in NativeTextAnimRuler(index: index, param: param, values: values) }
-        } else {
-            NativeTextAnimRuler(index: index, param: NativeAnimParam(id: 25, slot: 13, bit: 0, label: AureaText.t("panel_trocas_segundo"), unit: "", step: 0.05, range: 0...60), values: values)
-            NativeTextAnimRuler(index: index, param: NativeAnimParam.selectors[3], values: values)
-        }
-    }
-    private func choices(_ label: String, _ keys: [String], slot: Int) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                ForEach(Array(keys.enumerated()), id: \.offset) { n, key in NativePanelChip(AureaText.t(key), selected: Int(values[slot]) == n) { set([slot: Float(n)]) } }
-            }.frame(height: 40)
-        }
-    }
-    private func colorRow(_ bit: Int) -> some View {
-        let base = bit == 9 ? 28 : 32
-        return HStack {
-            Text(titles[bit]).font(.aurea(size: 12)); Spacer()
-            NativePanelColorWell(values: [values[base], values[base + 1], values[base + 2], 1]) {
-                model.beginGesture(names[bit])
-                model.colorSheet = ColorSheetRequest(title: titles[bit], initial: [values[base], values[base + 1], values[base + 2], 1], onChange: { r, g, b, _ in set([base: r, base + 1: g, base + 2: b]) }, onDone: { model.endGesture() })
-            }
-        }.frame(height: 44)
-    }
-}
-
-private struct NativeTextAnimRuler: View {
-    @EnvironmentObject private var model: AureaModel
-    let index: UInt32
-    let param: NativeAnimParam
-    let values: [Float]
-    private var id: Int64 { model.primarySelection ?? 0 }
-    private var look: KeyframeLook {
-        let bit = 1 << (param.id < 10 ? param.id : param.id - 10)
-        if Int(values[param.id < 10 ? 38 : 39]) & bit != 0 { return .keyHere }
-        return Int(values[param.id < 10 ? 36 : 37]) & bit != 0 ? .animated : .none
-    }
-    private var expression: ExpressionLook {
-        let info = model.engine.expression(id, property: 33, effect: index, param: UInt32(param.id))
-        guard (info["exists"] as? NSNumber)?.boolValue == true else { return .none }
-        guard (info["enabled"] as? NSNumber)?.boolValue ?? true else { return .off }
-        return (info["error"] as? String ?? "").isEmpty ? .ok : .error
-    }
-    var body: some View {
-        NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit, decimals: param.step < 0.5 ? 1 : 0,
-            look: look, toggleKey: {
-                model.engine.toggleTextAnimKey(id, index: index, param: UInt32(param.id)); model.refreshModel(force: true)
-            }, expression: expression, onExpression: {
-                model.expressionSheet = ExpressionRequest(layer: id, label: param.label, tracks: [ExpressionTrack(property: 33, effect: index, param: UInt32(param.id))], unit: param.unit)
-            }, compactUnit: true) { model.engine.setTextAnimParam(id, index: index, param: UInt32(param.id), value: $0); model.refreshModel(force: true) }
+    private func seek(_ key: KeyframeItem) {
+        guard let detail = model.engine.layerDetail(id), let start = (detail["startFrame"] as? NSNumber)?.int64Value,
+              let offset = (detail["offsetFrames"] as? NSNumber)?.int64Value else { return }
+        model.seek(toFrame: Int64(key.time) + start - offset)
     }
 }
 
@@ -2024,11 +1955,19 @@ private struct NativeLayerAnimatorCard: View {
         let expression: ExpressionLook = (info["exists"] as? NSNumber)?.boolValue != true ? .none
             : !((info["enabled"] as? NSNumber)?.boolValue ?? true) ? .off
             : (info["error"] as? String ?? "").isEmpty ? .ok : .error
-        return NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit,
-            decimals: param.step < 0.5 ? 2 : 0, look: look, toggleKey: {
+        let track = TimelineTrack(property: 40, effect: index, param: UInt32(param.id))
+        let selected = model.timelineFocus == [track]
+        return VStack(spacing: 0) {
+        NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit,
+            decimals: param.step < 0.1 ? 2 : param.step < 1 ? 1 : 0, keypad: true, look: look, toggleKey: {
+                model.timelineFocus = [track]
                 model.engine.toggleLayerAnimKey(id, index: index, param: UInt32(param.id)); reload()
             }, expression: expression, onExpression: {
                 model.expressionSheet = ExpressionRequest(layer: id, label: param.label, tracks: [ExpressionTrack(property: 40, effect: index, param: UInt32(param.id))], unit: param.unit)
-            }, compactUnit: true) { model.engine.setLayerAnimParam(id, index: index, param: UInt32(param.id), value: $0); reload() }
+            }, selected: selected, onSelect: { model.timelineFocus = [track] }, compactUnit: true) {
+                model.timelineFocus = [track]; model.engine.setLayerAnimParam(id, index: index, param: UInt32(param.id), value: $0); reload()
+            }.accessibilityIdentifier("layer.anim.\(index).param.\(param.id)")
+        if selected { NativeAnimationTrackActions(track: track, curveTag: "layer.anim.\(index).curve.\(param.id)") }
+        }
     }
 }

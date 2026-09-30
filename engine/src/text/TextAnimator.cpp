@@ -124,6 +124,8 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
         const f32 skewAxis = P(kSkewAxis, 0) * kDeg2Rad;
         const u32 anchorGrouping = static_cast<u32>(std::clamp(P(kAnchorGrouping, 0), 0.0f, 2.0f));
         const f32 sw = P(kStrokeWidth, a.strokeWidth);
+        const Vec3 fill{P(kFillR, a.fill.x), P(kFillG, a.fill.y), P(kFillB, a.fill.z)};
+        const Vec3 stroke{P(kStrokeR, a.stroke.x), P(kStrokeG, a.stroke.y), P(kStrokeB, a.stroke.z)};
         std::vector<f32> weight(units.size(), 0.0f);
         for (usize g = 0; g < units.size(); ++g) {
             u32 unit = unit_of(s, units[g]);
@@ -152,8 +154,8 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
                 o.skew += w * skew;
             }
             if (a.props & kTextPropStrokeWidth) o.strokeAdd += w * sw;
-            if (a.props & kTextPropFill) o.fill = Vec4{a.fill.x, a.fill.y, a.fill.z, std::clamp(std::fabs(w), 0.0f, 1.0f)};
-            if (a.props & kTextPropStroke) o.stroke = Vec4{a.stroke.x, a.stroke.y, a.stroke.z, std::clamp(std::fabs(w), 0.0f, 1.0f)};
+            if (a.props & kTextPropFill) o.fill = Vec4{fill.x, fill.y, fill.z, std::clamp(std::fabs(w), 0.0f, 1.0f)};
+            if (a.props & kTextPropStroke) o.stroke = Vec4{stroke.x, stroke.y, stroke.z, std::clamp(std::fabs(w), 0.0f, 1.0f)};
         }
         if (a.props & kTextPropTracking) {
             // Tracking empurra os glifos seguintes da mesma linha (ordem visual).
@@ -207,8 +209,12 @@ std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 loc
         if (!a.enabled || !(a.props & kTextPropCharOffset)) continue;
         const f32 amt = anim_param(tracks, ai, kCharOffset, local, a.charOffset);
         const u32 count = a.selector.basedOn == 1 ? word + 1 : a.selector.basedOn == 2 ? line + 1 : static_cast<u32>(cps.size());
-        for (usize i = 0; i < cps.size(); ++i)
-            shift[i] += amt * selector_weight(a, ai, tracks, local, timeSec, unit_of(a.selector, units[i]), count);
+        const auto perm = a.selector.randomOrder ? shuffled(std::max<u32>(1, count), a.selector.seed) : std::vector<u32>{};
+        for (usize i = 0; i < cps.size(); ++i) {
+            u32 unit = unit_of(a.selector, units[i]);
+            if (unit < perm.size()) unit = perm[unit];
+            shift[i] += amt * selector_weight(a, ai, tracks, local, timeSec, unit, count);
+        }
     }
     auto roll = [](u32 cp, i32 d, u32 lo, u32 n) { return lo + static_cast<u32>(((static_cast<i32>(cp - lo) + d) % static_cast<i32>(n) + static_cast<i32>(n)) % static_cast<i32>(n)); };
     std::string out;

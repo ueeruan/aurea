@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -413,7 +414,7 @@ private fun DockVector(icon: ImageVector, size: androidx.compose.ui.unit.Dp) {
 internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER") ui: EditorUi) {
     val count by remember { derivedStateOf { store.selection.size } }
     val intoLayers = stringResource(R.string.editor_leve_cabecote_dentro_camadas)
-    Column(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp)) {
         Spacer(Modifier.height(4.dp))
         Row(
             Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
@@ -432,10 +433,12 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
             }
             BatchTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote)) { batchTrim(store, start = false) }
             Box(Modifier.width(1.dp).height(24.dp).background(AureaColors.Border))
-            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignLeft, stringResource(R.string.editor_alinhar_inicios)) { timeAlign(store, TimeAlign.Start) }
-            BatchTool(Icons.Rounded.Stairs, stringResource(R.string.editor_escada_comeca_quando_cima_termina)) { timeAlign(store, TimeAlign.Cascade) }
-            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignRight, stringResource(R.string.editor_alinhar_fins)) { timeAlign(store, TimeAlign.End) }
+            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignLeft, stringResource(R.string.editor_alinhar_inicios)) { store.arrangeLayerTimes(0) }
+            BatchTool(Icons.Rounded.Stairs, stringResource(R.string.editor_escada_comeca_quando_cima_termina)) { store.arrangeLayerTimes(1) }
+            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignRight, stringResource(R.string.editor_alinhar_fins)) { store.arrangeLayerTimes(2) }
         }
+        Spacer(Modifier.height(8.dp))
+        TimelineArrangementRow(store)
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
@@ -542,53 +545,39 @@ private fun batchTrim(store: EditorStore, start: Boolean) {
     store.endGesture()
 }
 
-private enum class TimeAlign { Start, Cascade, End }
-
 /** Toast fora do Compose: no idioma escolhido no app (ver [AppText]). */
 private fun EditorStore.appText(@StringRes id: Int): String = AppText.get(getApplication<Application>(), id)
 
 private fun EditorStore.toastRes(@StringRes id: Int) = showToast(appText(id))
 
-/**
- * Arruma as escolhidas no TEMPO, sem mudar a duração de nenhuma: inícios
- * juntos, fins juntos ou em escada (na ordem da timeline, de cima para baixo;
- * a primeira fica onde está). Bloqueadas não andam.
- */
-private fun timeAlign(store: EditorStore, mode: TimeAlign) {
-    val rows = store.layers.filter { it.id in store.selection && !it.locked }
-    if (rows.size < 2) {
-        store.toastRes(R.string.sh_pick_two_unlocked_layers)
-        return
-    }
-    if (store.playing) store.pause()
-    val moves: List<Pair<Long, Int>> = when (mode) {
-        TimeAlign.Start -> {
-            val s = rows.minOf { it.startFrame }
-            rows.map { it.id to s - it.startFrame }
-        }
-        TimeAlign.End -> {
-            val e = rows.maxOf { it.endFrame }
-            rows.map { it.id to e - it.endFrame }
-        }
-        TimeAlign.Cascade -> {
-            var cursor = rows.first().startFrame
-            rows.map { r ->
-                val d = cursor - r.startFrame
-                cursor += r.endFrame - r.startFrame
-                r.id to d
+/** Visible labels and scroll preserve 48 dp targets on narrow phones. */
+@Composable
+private fun TimelineArrangementRow(store: EditorStore) {
+    val unlocked = store.layers.count { it.id in store.selection && !it.locked }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow)
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf(
+            3 to R.string.timeline_distribute_starts,
+            4 to R.string.timeline_distribute_gaps,
+            5 to R.string.timeline_starts_at_playhead,
+            6 to R.string.timeline_ends_at_playhead,
+        ).forEach { (mode, title) ->
+            val enabled = unlocked >= if (mode <= 4) 3 else 1
+            val label = stringResource(title)
+            Box(
+                Modifier.height(48.dp).testTag("timeline.arrange.$mode")
+                    .tocavel(enabled = enabled, haptic = true) { store.arrangeLayerTimes(mode) }
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, fontSize = 12.sp, maxLines = 1,
+                    color = if (enabled) AureaColors.Accent else AureaColors.Disabled)
             }
         }
-    }.filter { it.second != 0 }
-    if (moves.isEmpty()) return
-    store.beginGesture(
-        when (mode) {
-            TimeAlign.Start -> "alinhar inícios"
-            TimeAlign.End -> "alinhar fins"
-            TimeAlign.Cascade -> "escada"
-        },
-    )
-    moves.forEach { (id, d) -> store.moveLayers(listOf(id), d) }
-    store.endGesture()
+    }
 }
 
 @Composable

@@ -6,6 +6,7 @@
 
 #include "aurea/scene3d/Animation.hpp"
 #include "aurea/scene3d/Text3D.hpp"
+#include "aurea/text/TextTransform.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/text/Text.hpp"
@@ -1546,7 +1547,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const TextData& T = *textData;
                 // Animadores de CAMADA por letra/palavra/linha entram no mesmo GlyphAnim.
                 const bool unitAnim = layeranim::has_units(*l);
-                const bool animated = text::has_animators(T) || unitAnim;
+                const bool textEffect = effects_ && text::has_transform_effect(*l);
+                const bool animated = text::has_animators(T) || unitAnim || textEffect;
                 // O contorno cabe na distância do atlas (16 px da base × escala).
                 const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, T.size) / text::kGlyphBasePx - 1.0f;
                 const f32 stroke = std::clamp(T.strokeWidth, 0.0f, std::max(0.0f, strokeMax));
@@ -1580,6 +1582,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     pad += std::min(extra, 4000.0f);
                 }
                 if (unitAnim) pad += layeranim::glyph_padding(*l, T.size, T.content.size());
+                if (textEffect) {
+                    const auto extent = text::measure(*font, T);
+                    pad += text::transform_padding(*l, *effects_, static_cast<f64>(local.value), std::max(extent.width, extent.height));
+                }
                 // Deslocamento de caractere troca as letras antes do layout.
                 TextData shaped;
                 const TextData* src = &T;
@@ -1660,6 +1666,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         const f32 align = T.alignment == 1 ? 0.5f : T.alignment == 2 ? 1.0f : 0.0f;
                         layeranim::apply_to_glyphs(*l, lt, fps, units, L.chars, L.words, L.lines, align, anim);
                     }
+                    std::vector<Mat4> textTransforms;
+                    if (textEffect) text::evaluate_transform_effects(*l, *effects_, lt, L, anim, textTransforms);
                     auto glyphMatrix = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
                         f32 x0 = q.x0, x1 = q.x1, y0 = q.y0, y1 = q.y1;
                         const Vec4* group = a.anchorGrouping == 1 && q.wordIndex < wordBounds.size() ? &wordBounds[q.wordIndex]
@@ -1699,7 +1707,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             gi.fill.w *= a.opacity * w;
                             gi.stroke = sc;
                             gi.stroke.w *= a.opacity * w;
-                            gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * pathM(g) * glyphMatrix(q, a);
+                            gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * pathM(g)
+                                * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
                             gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
                             gi.extra = Vec4{std::max(0.0f, T.shadowBlur) * 0.5f + a.blur, 0, 0, 0};
                             out.glyphs.push_back(gi);
@@ -1725,7 +1734,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         sc.w *= a.opacity * w;
                         gi.fill = fill;
                         gi.stroke = sc;
-                        gi.xform = pathM(g) * glyphMatrix(q, a);
+                        gi.xform = pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
                         gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
                         gi.extra = Vec4{a.blur, 0, 0, 0};
                         out.glyphs.push_back(gi);

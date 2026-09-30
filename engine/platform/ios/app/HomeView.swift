@@ -217,7 +217,7 @@ enum HomeType {
 // As três abas
 // =============================================================================
 enum HomeTabKind: Int, CaseIterable, Identifiable {
-    case start, projects, settings
+    case start, projects, settings, profile
     var id: Int { rawValue }
 
     var label: String {
@@ -225,6 +225,7 @@ enum HomeTabKind: Int, CaseIterable, Identifiable {
         case .start: return AureaText.t("home_tab_start")
         case .projects: return AureaText.t("home_tab_projects")
         case .settings: return AureaText.t("home_tab_settings")
+        case .profile: return AureaText.t("social_profile")
         }
     }
     var icon: Character {
@@ -232,6 +233,7 @@ enum HomeTabKind: Int, CaseIterable, Identifiable {
         case .start: return CupertinoGlyph.House
         case .projects: return CupertinoGlyph.RectangleStack
         case .settings: return CupertinoGlyph.SliderHorizontal3
+        case .profile: return CupertinoGlyph.PersonCropCircle
         }
     }
     /// O ícone cheio da aba acesa (`CupertinoGlyph.HouseFill`).
@@ -240,6 +242,7 @@ enum HomeTabKind: Int, CaseIterable, Identifiable {
         case .start: return CupertinoGlyph.HouseFill
         case .projects: return CupertinoGlyph.RectangleStack
         case .settings: return CupertinoGlyph.SliderHorizontal3
+        case .profile: return CupertinoGlyph.PersonCropCircle
         }
     }
 }
@@ -303,7 +306,8 @@ struct HomeView: View {
                 HomeSettingsTab(library: library, defaults: defaults, modalActive: $settingsModalActive)
                     .opacity(tab == .settings ? 1 : 0).allowsHitTesting(tab == .settings)
                     .accessibilityHidden(tab != .settings)
-                if tab == .start { HomeCommunityPresets() }
+                if tab == .start { CommunityView(profileMode: false) }
+                if tab == .profile { CommunityView(profileMode: true) }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             HomeDock(selected: tab, onSelect: select, onCreate: { showNewProject = true },
                      onMenu: { homeMenu = true }, onImport: { importing = true })
@@ -324,6 +328,7 @@ struct HomeView: View {
         .environment(\.homeBackdrop, backdrop)
         .confirmationDialog("Aurea", isPresented: $homeMenu, titleVisibility: .visible) {
             Button(AureaText.t("home_tab_settings")) { select(.settings) }
+            Button(AureaText.t("home_import_media")) { importing = true }
             Button(AureaText.t("project_file_import")) { importingProjectFile = true }
             Button(AureaText.t("report_title")) { reportingProblem = true }
             Button(AureaText.t("settings_group_about")) { homeInfo = "settings_group_about" }
@@ -508,8 +513,8 @@ private struct HomeDock: View {
                     .contentShape(Circle())
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t("home_new_project"))
                 .accessibilityIdentifier("home.create")
-            tab(.start, CupertinoGlyph.Sparkles, "home_presets_short", "home.community")
-            utility(CupertinoGlyph.PhotoOnRectangle, "home_import_media", "home.import", onImport)
+            tab(.start, CupertinoGlyph.CaptionsBubble, "social_community", "home.community")
+            tab(.profile, CupertinoGlyph.PersonCropCircle, "social_profile", "home.profile")
         }.padding(.horizontal, 4).padding(.vertical, 10)
             .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 28))
             .overlay { RoundedRectangle(cornerRadius: 28).stroke(AureaColors.border, lineWidth: 1).allowsHitTesting(false) }
@@ -536,7 +541,7 @@ private struct HomeDock: View {
 }
 
 @MainActor
-private struct HomeCommunityPresets: View {
+struct HomeCommunityPresets: View {
     @State private var entries: [HomeCommunityEntry] = []
     @State private var offline = false
     @State private var query = ""

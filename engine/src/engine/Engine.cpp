@@ -11,6 +11,7 @@
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/text/TextTransform.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/animation/KeyframeOptimize.hpp"
@@ -69,6 +70,8 @@ const Track* read_command_track(const Layer& l, const TrackRef& ref) noexcept {
 }
 
 Track* command_track(Layer& l, const TrackRef& ref, bool create) noexcept {
+    if (ref.property == TrackProperty::MaskParam && (ref.effectParamIndex > 2 ||
+        std::none_of(l.masks.begin(), l.masks.end(), [&](const Mask& m) { return m.id == ref.effectIndex; }))) return nullptr;
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) {
         if (create) enable_time_remap_curve(l);
         return &l.timeRemap;
@@ -498,7 +501,7 @@ void Engine::shutdown() noexcept {
         }
     }
 
-    commandQueue_->reset();
+    { std::lock_guard<std::mutex> commands(commandSubmitMutex_); commandQueue_->reset(); }
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         project_.reset();
@@ -753,7 +756,13 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
     rawPlaybackLayer_ = {};
-    project_ = std::make_unique<Project>(std::move(*result));
+    // Handles are reused by the new project. Edits queued for the previous
+    // session must never be replayed against its layers.
+    {
+        std::lock_guard<std::mutex> commands(commandSubmitMutex_);
+        commandQueue_->reset();
+        project_ = std::make_unique<Project>(std::move(*result));
+    }
     ++projectSession_;
     images_.clear();
     models_.clear();
@@ -997,7 +1006,11 @@ Status Engine::load_project(const char* path) noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         rawPlaybackLayer_ = {};
-        project_ = std::make_unique<Project>(std::move(loaded));
+        {
+            std::lock_guard<std::mutex> commands(commandSubmitMutex_);
+            commandQueue_->reset();
+            project_ = std::make_unique<Project>(std::move(loaded));
+        }
         ++projectSession_;
         project_->set_path(main);
         mainFileSuspect_ = (notice & (kLoadRecoveredCopy | kLoadPartial)) != 0;
@@ -1926,6 +1939,95 @@ Result<u32> Engine::stagger_layers(const u64* layerIds, u32 count, i64 stepFrame
     return moved;
 }
 
+Result<u32> Engine::arrange_layer_times(const u64* layerIds, u32 count,
+                                      LayerTimeArrangement mode, i64 playhead) noexcept {
+    constexpr i64 limit = i64{1} << 31;
+    if (!layerIds || count == 0 || count > 4096 || static_cast<u32>(mode) > 6)
+        return Status{Errc::InvalidArgument, "arranjo de tempo invalido"};
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return Status{Errc::InvalidState, "nenhuma composicao"};
+    struct Item { LayerId id; i64 start, length, target; };
+    std::vector<Item> items;
+    for (u32 i = 0; i < count; ++i) {
+        const LayerId id = LayerId::unpack(layerIds[i]);
+        const Layer* layer = comp->layer(id);
+        if (!layer || layer->locked || std::any_of(items.begin(), items.end(),
+                [&](const Item& item) { return item.id == id; })) continue;
+        if (layer->start.value < 0 || layer->end.value <= layer->start.value || layer->end.value >= limit)
+            return Status{Errc::OutOfRange, "intervalo de camada invalido"};
+        items.push_back({id, layer->start.value, layer->end.value - layer->start.value, layer->start.value});
+    }
+    const bool atPlayhead = mode == LayerTimeArrangement::StartsAtPlayhead || mode == LayerTimeArrangement::EndsAtPlayhead;
+    const bool distribution = mode == LayerTimeArrangement::DistributeStarts || mode == LayerTimeArrangement::DistributeGaps;
+    const usize minimum = atPlayhead ? 1 : distribution ? 3 : 2;
+    if (items.size() < minimum) return Status{Errc::InvalidArgument, "camadas desbloqueadas insuficientes"};
+    if (atPlayhead && (playhead < 0 || playhead >= limit)) return Status{Errc::OutOfRange, "cabecote fora do intervalo"};
+    i64 firstStart = limit, lastEnd = 0;
+    for (const Item& item : items) {
+        firstStart = std::min(firstStart, item.start);
+        lastEnd = std::max(lastEnd, item.start + item.length);
+    }
+    if (distribution) {
+        std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.start < b.start; });
+        const i64 intervals = static_cast<i64>(items.size() - 1);
+        if (mode == LayerTimeArrangement::DistributeStarts) {
+            const i64 span = items.back().start - items.front().start;
+            for (usize i = 0; i < items.size(); ++i)
+                items[i].target = firstStart + (span * static_cast<i64>(i) + intervals / 2) / intervals;
+        } else {
+            // Anchor the earliest and latest starts. Integer rounding is
+            // cumulative so there is no drift; neighbouring gaps differ by <=1f.
+            i64 occupied = 0;
+            for (usize i = 0; i + 1 < items.size(); ++i) occupied += items[i].length;
+            const i64 free = items.back().start - firstStart - occupied;
+            if (free < 0) return Status{Errc::OutOfRange, "sem espaco para intervalos iguais"};
+            i64 elapsed = 0;
+            for (usize i = 0; i < items.size(); ++i) {
+                items[i].target = firstStart + elapsed + (free * static_cast<i64>(i) + intervals / 2) / intervals;
+                elapsed += items[i].length;
+            }
+        }
+    } else {
+        i64 cursor = items.front().start;
+        for (Item& item : items) {
+            switch (mode) {
+                case LayerTimeArrangement::AlignStarts: item.target = firstStart; break;
+                case LayerTimeArrangement::AlignEnds: item.target = lastEnd - item.length; break;
+                case LayerTimeArrangement::Sequence: item.target = cursor; cursor += item.length; break;
+                case LayerTimeArrangement::StartsAtPlayhead: item.target = playhead; break;
+                case LayerTimeArrangement::EndsAtPlayhead: item.target = playhead - item.length; break;
+                default: break;
+            }
+        }
+    }
+    u32 moved = 0;
+    i64 duration = comp->duration().value;
+    for (const Item& item : items) {
+        if (item.target < 0 || item.target + item.length >= limit)
+            return Status{Errc::OutOfRange, "arranjo fora dos limites da timeline"};
+        moved += item.target != item.start;
+        duration = std::max(duration, item.target + item.length);
+    }
+    if (!moved) return u32{0};
+    history_.before_mutation(*comp, project_->timeline().current(), "organizar camadas no tempo");
+    for (const Item& item : items) {
+        Layer* layer = comp->layer(item.id);
+        layer->start = FrameIndex{item.target};
+        layer->end = FrameIndex{item.target + item.length};
+    }
+    comp->touch();
+    if (duration > comp->duration().value) {
+        comp->set_duration(FrameIndex{duration});
+        playback_.configure(comp->fps(), comp->duration());
+    }
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return moved;
+}
+
 namespace {
 
 /// Segue `pts` (px da camada, no 1º quadro de `targetUs`) quadro a quadro por
@@ -2112,6 +2214,25 @@ Mask* mask_by_id(Layer& l, u32 id) noexcept {
     return nullptr;
 }
 
+/// Canais escalares da máscara: suavização, expansão e opacidade.
+f32* mask_param_ref(Mask& m, u32 param) noexcept {
+    switch (param) { case 0: return &m.feather; case 1: return &m.expansion; case 2: return &m.opacity; default: return nullptr; }
+}
+
+void write_mask_param(Layer& l, Mask& m, u32 param, f32 value, FrameIndex time) noexcept {
+    f32* base = mask_param_ref(m, param);
+    if (!base || !std::isfinite(value)) return;
+    value = std::clamp(value, param == 1 ? -2000.f : 0.f, param == 2 ? 1.f : 2000.f);
+    Track* tr = l.tracks.find(TrackProperty::MaskParam, m.id, param);
+    if (tr && !tr->keys.empty()) {
+        const FrameIndex local = l.local_time(time);
+        const u32 at = tr->find_exact(local);
+        if (at != kInvalidIndex) tr->keys[at].value = value;
+        else (void)tr->set(local, value, Interpolation::Bezier);
+    } else *base = value;
+    m.cacheKey = 0;
+}
+
 /// Key do caminho no instante local (índice), ou −1.
 i32 path_key_at(const Mask& m, i64 local) noexcept {
     for (usize i = 0; i < m.pathKeys.size(); ++i) if (m.pathKeys[i].frame == local) return static_cast<i32>(i);
@@ -2134,6 +2255,7 @@ void put_path_key(Mask& m, i64 local, const std::vector<MaskPoint>& pts) {
 
 i32 Engine::add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->masks.size() >= kMaxMaskCount || count > 4096 || (count > 0 && !pts6)) return -1;
@@ -2152,6 +2274,7 @@ i32 Engine::add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexc
 
 bool Engine::remove_mask(u64 layerId, u32 maskId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || !mask_by_id(*l, maskId)) return false;
@@ -2159,6 +2282,7 @@ bool Engine::remove_mask(u64 layerId, u32 maskId) noexcept {
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     l->masks.erase(std::remove_if(l->masks.begin(), l->masks.end(), [maskId](const Mask& m) { return m.id == maskId; }),
                    l->masks.end());
+    l->tracks.remove_if([&](const Track& tr) { return tr.property == TrackProperty::MaskParam && tr.effectIndex == maskId; });
     project_->mark_dirty();
     request_render();
     return true;
@@ -2166,6 +2290,7 @@ bool Engine::remove_mask(u64 layerId, u32 maskId) noexcept {
 
 bool Engine::set_mask_path(u64 layerId, u32 maskId, const f32* pts6, u32 count, bool closed, bool undo) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
@@ -2186,6 +2311,7 @@ bool Engine::set_mask_path(u64 layerId, u32 maskId, const f32* pts6, u32 count, 
 
 bool Engine::set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 feather, f32 expansion, f32 opacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
@@ -2194,17 +2320,56 @@ bool Engine::set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     m->operation = static_cast<MaskOperation>(op);
     m->inverted = inverted;
-    m->feather = std::clamp(std::isfinite(feather) ? feather : 0.0f, 0.0f, 2000.0f);
-    m->expansion = std::clamp(std::isfinite(expansion) ? expansion : 0.0f, -2000.0f, 2000.0f);
-    m->opacity = std::clamp(std::isfinite(opacity) ? opacity : 1.0f, 0.0f, 1.0f);
+    const Vec3 current = mask::evaluate_props(*l, *m, static_cast<f64>(l->local_time(playback_.current()).value));
+    if (feather != current.x) write_mask_param(*l, *m, 0, feather, playback_.current());
+    if (expansion != current.y) write_mask_param(*l, *m, 1, expansion, playback_.current());
+    if (opacity != current.z) write_mask_param(*l, *m, 2, opacity, playback_.current());
     m->cacheKey = 0;
     project_->mark_dirty();
     request_render();
     return true;
 }
 
+bool Engine::set_mask_param(u64 layerId, u32 maskId, u32 param, f32 value) noexcept {
+    if (param > 2 || !std::isfinite(value)) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m || l->locked) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "valor da mascara");
+    write_mask_param(*l, *m, param, value, playback_.current());
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty(); request_render();
+    return true;
+}
+
+bool Engine::toggle_mask_param_key(u64 layerId, u32 maskId, u32 param) noexcept {
+    if (param > 2) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m || l->locked) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "keyframe da mascara");
+    f32* base = mask_param_ref(*m, param);
+    const FrameIndex local = l->local_time(playback_.current());
+    Track& tr = l->tracks.get_or_create(TrackProperty::MaskParam, maskId, param);
+    const u32 at = tr.find_exact(local);
+    if (at != kInvalidIndex) {
+        if (tr.keys.size() == 1) *base = tr.keys[0].value;
+        (void)tr.remove(local);
+    } else (void)tr.set(local, tr.keys.empty() ? *base : tr.sample_keys(local), Interpolation::Bezier);
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    m->cacheKey = 0; project_->mark_dirty(); request_render();
+    return true;
+}
+
 bool Engine::ensure_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
@@ -2226,6 +2391,7 @@ bool Engine::ensure_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexc
 
 bool Engine::toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
@@ -2277,9 +2443,10 @@ u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
         h[0] = static_cast<f32>(m.id);
         h[1] = static_cast<f32>(static_cast<u8>(m.operation));
         h[2] = m.inverted ? 1.0f : 0.0f;
-        h[3] = m.feather;
-        h[4] = m.expansion;
-        h[5] = m.opacity;
+        const Vec3 props = mask::evaluate_props(*l, m, static_cast<f64>(local));
+        h[3] = props.x;
+        h[4] = props.y;
+        h[5] = props.z;
         h[6] = m.closed ? 1.0f : 0.0f;
         h[7] = static_cast<f32>(pts.size());
         h[8] = static_cast<f32>(m.pathKeys.size());
@@ -3945,6 +4112,7 @@ namespace {
 /// comuta com o espelho); Segurar/Quique/Elástico/Degraus ficam como estão.
 void mirror_remap_ease(Keyframe& k) noexcept {
     switch (k.interp) {
+        case Interpolation::Bounce: if (k.by2 == -10.f) k.bx2 = k.bx2 < .5f ? 1.f : 0.f; break;
         case Interpolation::EaseIn: k.interp = Interpolation::EaseOut; break;
         case Interpolation::EaseOut: k.interp = Interpolation::EaseIn; break;
         case Interpolation::Bezier:
@@ -5354,6 +5522,7 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
         if (pathsOut) continue;
         for (const Clipboard::Key& ck : clipboard_.keys) {
             u32 effectIndex = ck.effectIndex;
+            if (ck.property == TrackProperty::MaskParam && (ck.effectParamIndex > 2 || !mask_by_id(*d, effectIndex))) continue;
             if (ck.property == TrackProperty::EffectParam) {
                 // Match the same occurrence, so two Glows do not overwrite
                 // each other's animation. Missing occurrences are skipped.
@@ -6656,11 +6825,19 @@ f32* text_param_ref(TextAnimator& a, u32 p) noexcept {
         case text::kSkew: return &a.skew;
         case text::kStrokeWidth: return &a.strokeWidth;
         case text::kCharOffset: return &a.charOffset;
+        case text::kFillR: return &a.fill.x;
+        case text::kFillG: return &a.fill.y;
+        case text::kFillB: return &a.fill.z;
+        case text::kStrokeR: return &a.stroke.x;
+        case text::kStrokeG: return &a.stroke.y;
+        case text::kStrokeB: return &a.stroke.z;
         default: return nullptr;
     }
 }
 f32 clamp_text_param(u32 p, f32 v) noexcept {
     switch (p) {
+        case text::kFillR: case text::kFillG: case text::kFillB:
+        case text::kStrokeR: case text::kStrokeG: case text::kStrokeB: return std::clamp(v, 0.0f, 1.0f);
         case text::kSelStart: case text::kSelEnd: return std::clamp(v, 0.0f, 100.0f);
         case text::kSelOffset: return std::clamp(v, -1000.0f, 1000.0f);
         case text::kSelAmount: return std::clamp(v, -100.0f, 100.0f);
@@ -6687,7 +6864,7 @@ u32 Engine::query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept {
         TextAnimator a = l->text.animators[i];
         f32* v = out + i * kTextAnimFloats;
         u32 animSel = 0, animProp = 0, keySel = 0, keyProp = 0;
-        for (u32 p = 0; p <= text::kWiggleRate; ++p) {
+        for (u32 p = 0; p <= text::kStrokeB; ++p) {
             f32* r = text_param_ref(a, p);
             if (!r) continue;
             const Track* tr = l->tracks.find(TrackProperty::TextAnimParam, i, p);
@@ -6712,6 +6889,7 @@ u32 Engine::query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept {
 
 i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || l->text.animators.size() >= 64) return -1;
@@ -6744,6 +6922,7 @@ i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
 
 bool Engine::remove_text_animator(u64 layerId, u32 index) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
@@ -6761,8 +6940,62 @@ bool Engine::remove_text_animator(u64 layerId, u32 index) noexcept {
     return true;
 }
 
+i32 Engine::duplicate_text_animator(u64 layerId, u32 index) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || l->kind != LayerKind::Text || index >= l->text.animators.size() || l->text.animators.size() >= 64) return -1;
+    const u32 target = index + 1;
+    TextAnimator copy = l->text.animators[index];
+    std::vector<Track> tracks;
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        const Track& t = l->tracks.at(i);
+        if (t.property == TrackProperty::TextAnimParam && t.effectIndex == index) {
+            tracks.push_back(t);
+            tracks.back().effectIndex = target;
+        }
+    }
+    history_.before_mutation(*comp, project_->timeline().current(), "duplicar animador de texto");
+    l->text.animators.insert(l->text.animators.begin() + target, std::move(copy));
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        Track& t = l->tracks.at(i);
+        if (t.property == TrackProperty::TextAnimParam && t.effectIndex >= target) ++t.effectIndex;
+    }
+    for (Track& t : tracks) l->tracks.add(std::move(t));
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return static_cast<i32>(target);
+}
+
+bool Engine::move_text_animator(u64 layerId, u32 from, u32 to) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || l->kind != LayerKind::Text || from >= l->text.animators.size() || to >= l->text.animators.size()) return false;
+    if (from == to) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "ordenar animadores de texto");
+    auto& animators = l->text.animators;
+    if (from < to) std::rotate(animators.begin() + from, animators.begin() + from + 1, animators.begin() + to + 1);
+    else std::rotate(animators.begin() + to, animators.begin() + from, animators.begin() + from + 1);
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        Track& t = l->tracks.at(i);
+        if (t.property != TrackProperty::TextAnimParam) continue;
+        if (t.effectIndex == from) t.effectIndex = to;
+        else if (from < to && t.effectIndex > from && t.effectIndex <= to) --t.effectIndex;
+        else if (from > to && t.effectIndex >= to && t.effectIndex < from) ++t.effectIndex;
+    }
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 bool Engine::set_text_animator(u64 layerId, u32 index, const f32* v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || !v || index >= l->text.animators.size()) return false;
@@ -6784,7 +7017,9 @@ bool Engine::set_text_animator(u64 layerId, u32 index, const f32* v) noexcept {
 }
 
 bool Engine::set_text_anim_param(u64 layerId, u32 index, u32 param, f32 value) noexcept {
+    if (!std::isfinite(value)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
@@ -6810,6 +7045,7 @@ bool Engine::set_text_anim_param(u64 layerId, u32 index, u32 param, f32 value) n
 
 bool Engine::toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
@@ -6843,9 +7079,10 @@ Track* expression_track(Layer& l, u32 property, u32 effectIndex, u32 paramIndex,
     if (p == TrackProperty::TimeRemap) return &l.timeRemap;
     if (p == TrackProperty::EffectParam && !l.find_effect(EffectId{effectIndex, 0})) return nullptr;
     if (p == TrackProperty::TextAnimParam && effectIndex >= l.text.animators.size()) return nullptr;
+    if (p == TrackProperty::MaskParam && (paramIndex > 2 || !mask_by_id(l, effectIndex))) return nullptr;
     if (p == TrackProperty::LayerAnimParam && (effectIndex >= l.layerAnimators.size() || paramIndex >= layeranim::kParamCount))
         return nullptr;
-    const bool keyed = p == TrackProperty::EffectParam || p == TrackProperty::TextAnimParam || p == TrackProperty::LayerAnimParam;
+    const bool keyed = p == TrackProperty::EffectParam || p == TrackProperty::TextAnimParam || p == TrackProperty::LayerAnimParam || p == TrackProperty::MaskParam;
     const u32 ei = keyed ? effectIndex : kInvalidIndex;
     const u32 pi = keyed ? paramIndex : 0u;
     if (Track* t = l.tracks.find(p, ei, pi)) return t;
@@ -6883,6 +7120,7 @@ Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const c
             const auto p = k[0] < static_cast<u32>(TrackProperty::_Count) ? static_cast<TrackProperty>(k[0]) : TrackProperty::_Count;
             if (p == TrackProperty::_Count || (p == TrackProperty::EffectParam && !l->find_effect(EffectId{k[1], 0}))
                 || (p == TrackProperty::TextAnimParam && k[1] >= l->text.animators.size())
+                || (p == TrackProperty::MaskParam && (k[2] > 2 || !mask_by_id(*l, k[1])))
                 || (p == TrackProperty::LayerAnimParam && (k[1] >= l->layerAnimators.size() || k[2] >= layeranim::kParamCount))) {
                 return Status{Errc::InvalidArgument, "propriedade invalida"};
             }
@@ -7359,6 +7597,9 @@ const ImagePixels* Engine::image_lookup(void* self, AssetId id) {
 u32 Engine::submit_commands(const Command* commands, u32 count,
                             const char* stringBlob, u32 stringBlobSize) noexcept {
     if (!commands || count == 0) return 0;
+    // Serialize publication with project replacement / queue reset, including
+    // the string arena, without blocking the UI on rendering's model lock.
+    std::lock_guard<std::mutex> lock(commandSubmitMutex_);
     const EngineState s = state_;
     if (s != EngineState::Ready && s != EngineState::Rendering && s != EngineState::Suspended) return 0;
 
@@ -9843,6 +10084,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // ordem que a composição desenha (teste de regressão em test_engine).
             const LayerId id = comp->duplicate_layer(cmd.layer_ref.layer, timeline.playhead());
             if (!id.valid()) return Errc::OutOfMemory;
+            // The next gesture belongs to the copy. Update selection with creation,
+            // before either native UI has had time to refresh its layer snapshot.
+            const auto source = std::find(selection_.begin(), selection_.end(), cmd.layer_ref.layer.pack());
+            if (source != selection_.end()) *source = id.pack();
+            else selection_.assign(1, id.pack());
+            std::sort(selection_.begin(), selection_.end());
             return OkStatus;
         }
 
@@ -10373,7 +10620,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.mask_scalar.layer);
             if (!l) return Errc::NotFound;
             for (auto it = l->masks.begin(); it != l->masks.end(); ++it) {
-                if (it->id == cmd.mask_scalar.mask.index) { l->masks.erase(it); return OkStatus; }
+                if (it->id == cmd.mask_scalar.mask.index) {
+                    l->tracks.remove_if([&](const Track& tr) { return tr.property == TrackProperty::MaskParam && tr.effectIndex == it->id; });
+                    l->masks.erase(it); return OkStatus;
+                }
             }
             return Errc::NotFound;
         }
@@ -10394,11 +10644,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Mask* m = l->find_mask(cmd.mask_scalar.mask);
             if (!m) return Errc::NotFound;
             m->cacheKey = 0;
-            switch (cmd.type) {
-                case CommandType::MaskSetFeather:   m->feather   = cmd.mask_scalar.value; break;
-                case CommandType::MaskSetExpansion: m->expansion = cmd.mask_scalar.value; break;
-                default:                            m->opacity   = clampf(cmd.mask_scalar.value, 0.0f, 1.0f); break;
-            }
+            const u32 param = cmd.type == CommandType::MaskSetFeather ? 0 : cmd.type == CommandType::MaskSetExpansion ? 1 : 2;
+            write_mask_param(*l, *m, param, cmd.mask_scalar.value, playback_.current());
             return OkStatus;
         }
         case CommandType::MaskSetPath: {
@@ -10437,6 +10684,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             if (l->effects.size() >= kMaxEffectCount) return Errc::OutOfRange;
             const EffectTypeId type = cmd.effect_add.effectType;
+            if (type == effect_type_id(text::kTransformEffect) && l->kind != LayerKind::Text) return Errc::InvalidArgument;
             const ParameterRegistry* params = effectRegistry_.params(type);
             if (!params) return Errc::NotSupported;
             if (type == effect_type_id(effect_keys::kText3DLayout)) {

@@ -34,6 +34,8 @@ class TimelineHitTest {
         // Fileira 32 (pílula 28 + vão 4) / barra 24: as camadas eram grandes demais.
         assertEquals(32f, m.row, 0f)
         assertEquals(24f, m.bar, 0f)
+        assertEquals(m.bar / 2, m.diamondCyNormal, 0f)
+        assertEquals(m.bar / 2, m.diamondCyCompact, 0f)
         assertEquals(13f, m.trackTop, 0f)
         // Pílula de 78 colada à esquerda: olho em x 16, quadradinho de 22 de x 32 a 54.
         assertEquals(78f, m.headerColumn, 0f)
@@ -81,40 +83,55 @@ class TimelineHitTest {
     @Test
     fun `keyframe em 0 nao rouba mais a alca de inicio - bug 10_2`() {
         val atStart = intArrayOf(100)                        // losango em x = 200, na ponta
-        assertEquals(HitKind.KEYFRAME, hit(203f, 20f, instants = atStart))   // no desenho, dentro da barra
+        assertEquals(HitKind.KEYFRAME, hit(203f, 12f, instants = atStart))   // no desenho, dentro da barra
         assertEquals(0, out[0])
         assertEquals(HitKind.TRIM_START, hit(190f, 20f, instants = atStart)) // fora da barra: alça
         assertEquals(HitKind.TRIM_START, hit(210f, 20f, instants = atStart)) // perto, mas fora do desenho
-        assertEquals(HitKind.TRIM_START, hit(203f, 8f, instants = atStart))  // metade de cima: alça
+        assertEquals(HitKind.TRIM_START, hit(203f, 2f, instants = atStart))  // metade de cima: alça
         assertEquals(HitKind.KEYFRAME, hit(190f, 20f, instants = atStart, handles = false))
     }
 
     @Test
-    fun `losango na faixa de baixo ganha do corpo`() {
+    fun `losango centralizado ganha do corpo e nao invade a proxima linha`() {
         val mid = intArrayOf(125)                            // x = 250
         assertEquals(HitKind.KEYFRAME, hit(260f, 20f, instants = mid))
-        assertEquals(HitKind.KEYFRAME, hit(250f, 30f, instants = mid))       // abaixo da barra, ainda na linha
-        assertEquals(HitKind.BODY, hit(250f, 8f, instants = mid))
+        assertEquals(HitKind.NONE, hit(250f, 30f, instants = mid))       // abaixo da barra, ainda na linha
+        assertEquals(HitKind.KEYFRAME, hit(250f, 8f, instants = mid))
         assertEquals(HitKind.BODY, hit(270f, 20f, instants = mid))
         assertEquals(HitKind.BODY, hit(250f, 20f, instants = mid, keys = false))  // lote: o toque é da camada
     }
 
     @Test
     fun `tampa e setas do compacto`() {
-        // Tampa "‹" de 34 na ponta esquerda (200..234) = voltar.
-        assertEquals(HitKind.CAP_BACK, hit(205f, 10f, handles = false, compact = true))
-        assertEquals(HitKind.CAP_BACK, hit(230f, 10f, handles = false, compact = true))
+        // Tampa externa em 166..200; o corpo continua começando exatamente em 200.
+        assertEquals(HitKind.NONE, hit(165f, 10f, handles = false, compact = true))
+        assertEquals(HitKind.CAP_BACK, hit(170f, 10f, handles = false, compact = true))
+        assertEquals(HitKind.CAP_BACK, hit(199f, 10f, handles = false, compact = true))
+        assertEquals(HitKind.BODY, hit(200f, 10f, handles = false, compact = true))
+        assertEquals(HitKind.BODY, hit(230f, 10f, handles = false, compact = true))
         // contentRight = 300 − 10 → › em 268..290 e ‹ em 246..268 (juntas na direita).
         assertEquals(HitKind.ARROW_NEXT, hit(285f, 10f, handles = false, compact = true))
         assertEquals(HitKind.ARROW_PREV, hit(255f, 10f, handles = false, compact = true))
         assertEquals(HitKind.BODY, hit(238f, 10f, start = 100, end = 200, handles = false, compact = true))
         // Barra passando da borda direita: a seta › fica à vista (print t2).
         assertEquals(HitKind.ARROW_NEXT, hit(385f, 10f, end = 400, handles = false, compact = true))
-        // Ponta esquerda embaixo da pílula: a tampa gruda depois dela (78..112).
-        assertEquals(HitKind.CAP_BACK, hit(100f, 10f, start = 30, end = 400, handles = false, compact = true))
-        // Clipe curto: só a tampa (sem espaço para as setas, o resto é corpo).
-        assertEquals(HitKind.CAP_BACK, hit(210f, 10f, end = 130, handles = false, compact = true))
-        assertEquals(HitKind.BODY, hit(250f, 10f, end = 130, handles = false, compact = true))
+        // Ponta escondida: a tampa sai junto com ela, sem reaparecer ao lado do cabeçalho.
+        assertEquals(HitKind.BODY, hit(100f, 10f, start = 30, end = 400, handles = false, compact = true))
+        // Clipe curto: a tampa não consome a duração nem o espaço das setas.
+        assertEquals(HitKind.CAP_BACK, hit(180f, 10f, end = 105, handles = false, compact = true))
+        assertEquals(HitKind.BODY, hit(210f, 10f, end = 105, handles = false, compact = true))
+        assertEquals(HitKind.ARROW_NEXT, hit(250f, 10f, end = 130, handles = false, compact = true))
+    }
+
+    @Test
+    fun `tampa externa preserva trim e as duas metades do keyframe na borda`() {
+        val keys = intArrayOf(100)
+        assertEquals(HitKind.CAP_BACK, hit(180f, 10f, compact = true, instants = keys))
+        assertEquals(HitKind.TRIM_START, hit(190f, 10f, compact = true, instants = keys))
+        assertEquals(HitKind.KEYFRAME, hit(197f, 12f, compact = true, instants = keys))
+        assertEquals(HitKind.KEYFRAME, hit(203f, 12f, compact = true, instants = keys))
+        // Mesmo quando somente a tampa entra pela borda direita da janela.
+        assertEquals(HitKind.CAP_BACK, hit(390f, 10f, start = 205, end = 250, compact = true))
     }
 
     @Test

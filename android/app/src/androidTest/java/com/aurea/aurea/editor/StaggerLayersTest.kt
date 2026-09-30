@@ -46,7 +46,7 @@ class StaggerLayersTest {
         compose.waitUntil(5000) { store.selection.size == 3 && store.layers.all { it.startFrame == 0 } }
 
         compose.onNodeWithTag("stagger_step").assertTextContains("3", substring = true)
-        compose.onNodeWithTag("stagger_layers").performClick()
+        compose.onNodeWithTag("stagger_layers").performScrollTo().performClick()
         compose.waitUntil(5000) { store.layers.map { it.startFrame }.toSet().size == 3 }
         compose.runOnIdle {
             val starts = ids.map { id -> store.layers.first { it.id == id }.startFrame }
@@ -59,7 +59,7 @@ class StaggerLayersTest {
         compose.waitUntil(5000) { store.layers.all { it.startFrame == 0 } }
 
         // Só a animação: as barras ficam.
-        compose.onNodeWithTag("stagger_keys").performClick()
+        compose.onNodeWithTag("stagger_keys").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(store.layers.all { it.startFrame == 0 }) }
 
         // Keyframes só das escolhidas (padrão: todas).

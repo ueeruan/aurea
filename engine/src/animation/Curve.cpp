@@ -194,7 +194,7 @@ void Track::set_interpolation(FrameIndex t, Interpolation in, f32 bx1, f32 by1,
     if (power != 0) keys[i].easePower = clamp_ease_power(power);
     // Só grava os control points quando a curva é de fato bezier, para não
     // sobrescrever uma curva configurada por um clique acidental em "linear".
-    if (in == Interpolation::Bezier || in == Interpolation::CustomCurve) {
+    if (in == Interpolation::Bezier || in == Interpolation::CustomCurve || in == Interpolation::Bounce) {
         keys[i].bx1 = bx1;
         keys[i].by1 = by1;
         keys[i].bx2 = bx2;

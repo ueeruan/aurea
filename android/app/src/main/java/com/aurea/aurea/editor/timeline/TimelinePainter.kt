@@ -184,6 +184,7 @@ internal class TimelinePainter(
         val ppf = TimeAxis.pxPerFrame(st.pps, m.density, fps)
         val view = c.view()
         val cx = w / 2f
+        val playheadX = TimeAxis.xOf(store.playhead.toDouble(), view, ppf, cx)
         val compact = st.compact
         waveStore = store
         val rows = c.rows.value
@@ -207,12 +208,12 @@ internal class TimelinePainter(
         val chosen = compact || st.timecodeBox
         val color = if (chosen) AureaColors.Accent else AureaColors.Playhead
         // Fio de 2 dp do relógio para baixo (mockup): não risca a régua nem os dígitos.
-        drawRect(color, Offset(cx - m.playhead / 2f, m.playheadTop), Size(m.playhead, h - m.playheadTop))
+        drawRect(color, Offset(playheadX - m.playhead / 2f, m.playheadTop), Size(m.playhead, h - m.playheadTop))
         if (chosen) {
             marker.reset()
-            marker.moveTo(cx - m.markerWidth / 2f, 0f)
-            marker.lineTo(cx + m.markerWidth / 2f, 0f)
-            marker.lineTo(cx, m.markerHeight)
+            marker.moveTo(playheadX - m.markerWidth / 2f, 0f)
+            marker.lineTo(playheadX + m.markerWidth / 2f, 0f)
+            marker.lineTo(playheadX, m.markerHeight)
             marker.close()
             drawPath(marker, color)
         }
@@ -404,16 +405,18 @@ internal class TimelinePainter(
         val tone = AureaTimeline.tone(r.type)
         // Camada oculta: os clipes da fileira a 40 %.
         val alpha = if (r.visible) 1f else AureaTimeline.HiddenAlpha
-        if (x1 >= -m.barRadius && x0 <= w + m.barRadius) {
+        val capped = compact && selected
+        val visualLeft = if (capped) RowHit.capLeft(m, x0) else x0
+        if (x1 >= -m.barRadius && visualLeft <= w + m.barRadius) {
             // Barra cortada perto da tela: um clipe de minutos não vira um retângulo de 100 mil px.
-            val left = max(x0, -m.barRadius * 2f)
+            val left = max(visualLeft, -m.capRadius * 2f)
             val right = min(x1, w + m.barRadius * 2f)
+            val bodyLeft = min(max(x0, left), right)
             val bottom = top + m.bar
             val canvas = drawContext.canvas.nativeCanvas
             rectF.set(left, top, right, bottom)
             barClip.reset()
             // Fileira compacta, clipe escolhido: ponta esquerda bem redonda (raio 14).
-            val capped = compact && selected
             if (capped) {
                 val l = m.capRadius
                 val rr = m.barRadius
@@ -425,8 +428,11 @@ internal class TimelinePainter(
             }
             canvas.save()
             canvas.clipPath(barClip)
+            canvas.save()
+            // A decoração externa não muda a origem de miniaturas, ondas ou keyframes.
+            canvas.clipRect(bodyLeft, top, right, bottom)
             // Bloco escuro no tom do tipo.
-            drawRect(tone.body, Offset(left, top), Size(right - left, m.bar), alpha = alpha)
+            drawRect(tone.body, Offset(bodyLeft, top), Size(right - bodyLeft, m.bar), alpha = alpha)
             bitmapPaint.alpha = (alpha * 255f).roundToInt()
             if (r.hasThumbs && drawThumbs(canvas, r, top, x0, x1, w, view, ppf, cx, fps, cache, generation)) {
                 withTransform({
@@ -443,10 +449,11 @@ internal class TimelinePainter(
             // de cor (o mockup não tem faixa: a cor do clipe já diz o tipo).
             val stripe = ShellColors.LabelPalette.getOrNull(r.label - 1)
             if (stripe != null) drawRect(stripe, Offset(x0, top), Size(m.stripe, m.bar), alpha = alpha)
+            canvas.restore()
             if (capped) {
-                // Tampa branca "‹" de 34 na ponta esquerda VISÍVEL (tocar = voltar).
+                // A borda direita da tampa coincide com o início temporal do clipe.
                 val capL = RowHit.capLeft(m, x0)
-                val capR = min(capL + m.capWidth, right)
+                val capR = min(x0, right)
                 if (capR > capL) {
                     drawRect(AureaTimeline.ClipSelected, Offset(capL, top), Size(capR - capL, m.bar))
                     drawGlyph(CupertinoGlyph.ChevronLeft, m.capGlyph, CAP_INK, capL + m.capWidth / 2f, top + m.bar / 2f)
@@ -455,7 +462,7 @@ internal class TimelinePainter(
             canvas.restore()
 
             // Setas ‹ › do compacto só no trecho escolhido (os outros da linha também aparecem).
-            clipRect(left, top, right, bottom) { drawBarContent(r, top, x0, x1, w, compact && selected, tone, alpha) }
+            clipRect(bodyLeft, top, right, bottom) { drawBarContent(r, top, x0, x1, w, capped, tone, alpha) }
 
             if (capped) {
                 // Fileira compacta: contorno branco de 1,5 com a mesma ponta redonda.
@@ -513,10 +520,9 @@ internal class TimelinePainter(
         // Sem losangos o conteúdo centra na barra; com eles, sobe para a faixa de cima.
         val cy = if (r.instants.isEmpty()) top + m.bar / 2f else top + m.trackTop / 2f
         val d = m.density
-        val ink = tone.text.copy(alpha = alpha)
         val arrowInk = ARROW_TINT.copy(alpha = ARROW_TINT.alpha * alpha)
         if (compact) return drawCappedContent(r, cy, x0, x1, w, cr, arrowInk, alpha)
-        var x = cl
+        val x = cl
         // O tipo e o cadeado moram na pílula da fileira; a barra leva só o nome.
         // O ≡ mora na ponta REAL da barra (A.01); as setas do compacto grudam na parte visível (print t2).
         val menuRight = x1 - (if (barW < m.narrowBar) m.padRNarrow else m.padR)
@@ -524,17 +530,12 @@ internal class TimelinePainter(
             barW > m.menuMinBar -> min(cr, menuRight - m.menuGlyph * d)
             else -> cr
         }
-        val rhombusW = if (r.animated && barW > m.rhombusMinBar) m.rhombusGap + m.rhombusIcon * d else 0f
         if (barW > m.nameMinBar && r.name.isNotEmpty()) {
-            val avail = right - rhombusW - x
+            val avail = right - x
             if (avail > NAME_MIN_DP * d) {
                 val layout = nameLayout(r, avail)
                 drawText(layout, color = tone.text, alpha = alpha, topLeft = Offset(x, cy - layout.size.height / 2f))
-                x += layout.size.width
             }
-        }
-        if (rhombusW > 0f && x + rhombusW <= right + 1f) {
-            drawGlyph(CupertinoGlyph.Rhombus, m.rhombusIcon, ink, x + m.rhombusGap + m.rhombusIcon * d / 2f, cy)
         }
         if (barW > m.menuMinBar && menuRight <= w + m.menuGlyph * d) {
             drawGlyph(CupertinoGlyph.LineHorizontal3, m.menuGlyph, AureaTimeline.ClipGrip.copy(alpha = AureaTimeline.ClipGrip.alpha * alpha), menuRight - m.menuGlyph * d / 2f, top + m.bar / 2f)
@@ -549,15 +550,15 @@ internal class TimelinePainter(
     private fun DrawScope.drawCappedContent(
         r: RowModel, cy: Float, x0: Float, x1: Float, w: Float, cr: Float, arrowInk: Color, alpha: Float,
     ) {
-        val capEnd = RowHit.capLeft(m, x0) + m.capWidth
+        val contentStart = max(x0, m.headerColumn)
         val next = RowHit.nextArrowLeft(m, x0, x1, w)
         val prev = next - m.arrowSlot
-        val arrows = prev >= capEnd
+        val arrows = prev >= contentStart
         if (arrows) {
             drawGlyph(CupertinoGlyph.ChevronLeft, m.arrowGlyph, arrowInk, prev + m.arrowSlot / 2f, cy)
             drawGlyph(CupertinoGlyph.ChevronRight, m.arrowGlyph, arrowInk, next + m.arrowSlot / 2f, cy)
         }
-        val x = capEnd + m.capNameGap
+        val x = contentStart + m.capNameGap
         val avail = (if (arrows) prev else cr) - x
         if (r.name.isEmpty() || avail <= NAME_MIN_DP * m.density) return
         val step = NAME_STEP_DP * m.density
@@ -719,7 +720,22 @@ internal class TimelinePainter(
                 if (dragging) dragX = kx
                 drawDiamond(kx, cy, fill, on, if (dragging) m.keyDragScale else 1f, inSelection)
             } else {
-                drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, fill, inSelection)
+                drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, if (inSelection) KEY_PICKED else KEY_OFF, inSelection)
+                // A faixa resume chaves densas, mas nunca substitui a posição
+                // temporal da chave no cabeçote, escolhida ou sendo arrastada.
+                val focus = intArrayOf(waveStore?.playhead ?: Snap.NONE, selFrame, dragFrame)
+                for (f in focus.indices) {
+                    val frame = focus[f]
+                    if ((0 until f).any { focus[it] == frame } || !Keyframes.groupHas(inst, i, j, frame)) continue
+                    val index = java.util.Arrays.binarySearch(inst, frame)
+                    val keyX = TimeAxis.xOf(frame.toDouble(), view, ppf, cx)
+                    val chosen = frame == selFrame
+                    val keyPicked = picked?.get(index) == true
+                    val dragging = frame == dragFrame
+                    if (dragging) dragX = keyX
+                    drawDiamond(keyX, cy, if (chosen) AureaTimeline.KeyframeOn else if (keyPicked) KEY_PICKED else KEY_OFF,
+                        chosen, if (dragging) m.keyDragScale else 1f, keyPicked)
+                }
             }
         }
         if (!dragX.isNaN()) drawBalloon(dragX, cy, dragFrame, fps)

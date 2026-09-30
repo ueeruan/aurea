@@ -213,6 +213,7 @@ enum class TrackProperty : u16 {
     LayerAnimParam,    ///< parâmetro de animador de camada (effectIndex = animador, paramIndex = LayerAnimParam)
     RigBone,           ///< rotação do osso do rig 2D, graus (paramIndex = id da junta na ponta do osso)
     ShapePart,         ///< parte da forma 3D (effectIndex = parte, paramIndex = canal 0..8: pos XYZ, rot XYZ °, escala XYZ)
+    MaskParam,         ///< máscara: effectIndex = id estável, paramIndex = 0 feather, 1 expansão, 2 opacidade
     _Count,
 };
 

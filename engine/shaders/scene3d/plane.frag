@@ -14,7 +14,7 @@ layout(push_constant) uniform Push {
     mat4 clipFromLayer;
     vec4 region;
     vec4 uvRect;
-    vec4 params;   // x = opacidade
+    vec4 params;   // x = opacidade; y = 0 opacos com depth, 1 transparência sem escrita de depth
 } pc;
 
 layout(location = 0) in vec2 v_uv;
@@ -28,7 +28,13 @@ layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex0;
 
 void main() {
     const vec4 c = texture(u_tex0, v_uv) * pc.params.x;
-    if (c.a < 0.02) discard;
+    // Alpha clip only for the depth-writing pass. Keep low-alpha fades in the
+    // blended pass instead of cutting them off at a fixed visible threshold.
+    if (pc.params.y < 0.5) {
+        if (c.a < 0.999) discard;
+    } else {
+        if (c.a <= 0.000001 || c.a >= 0.999) discard;
+    }
     o_color = c;
     o_scene = vec4(0.0, 0.0, 0.0, c.a);
 }

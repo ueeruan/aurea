@@ -725,6 +725,40 @@ final class AureaModel: ObservableObject {
                             select(layerId: first, additive: false)
                             select(layerId: last, additive: true)
                         }
+                    case "mask-animation":
+                        addShape(1); addMask(0)
+                        if let id = primarySelection, let mask = selectedMask {
+                            _ = engine.toggleMaskParamKey(id, mask: mask, param: 2)
+                            engine.run { $0.seek(toFrame: 30) }
+                            _ = engine.setMaskParam(id, mask: mask, param: 2, value: 0.25)
+                            engine.run { $0.seek(toFrame: 0) }
+                            panel = .mask; refreshModel(force: true)
+                        }
+                    case "text-animator-editing":
+                        let textId = engine.addText("AUREA")
+                        if textId >= 0 { refreshModel(force: true); select(layerId: textId, additive: false) }
+                        if let id = primarySelection {
+                            _ = engine.addTextAnimator(id, props: 1 << 9)
+                            engine.setTextAnimParam(id, index: 0, param: 6, value: 1)
+                            engine.toggleTextAnimKey(id, index: 0, param: 6)
+                            engine.run { $0.seek(toFrame: 30) }
+                            engine.setTextAnimParam(id, index: 0, param: 6, value: 0)
+                            engine.run { $0.seek(toFrame: 0) }
+                            refreshModel(force: true)
+                            panel = .textAnimation
+                        }
+                    case "timeline-arrangement":
+                        addShape(1); addShape(1); addShape(1)
+                        refreshModel(force: true)
+                        let ranges: [(Int32, Int32)] = [(10, 20), (12, 37), (71, 78)]
+                        engine.run { commands in
+                            for (index, row) in layers.enumerated() {
+                                commands.setLayer(row.id, startFrame: ranges[index].0, endFrame: ranges[index].1,
+                                                  offsetFrames: 0, setOffset: false)
+                            }
+                        }
+                        refreshModel(force: true)
+                        for (index, row) in layers.enumerated() { select(layerId: row.id, additive: index > 0) }
                     case "stagger":
                         // Três formas no mesmo início, todas escolhidas: o teste escalona pela barra de lote.
                         addShape(1); addShape(1); addShape(1)
@@ -1549,7 +1583,11 @@ final class AureaModel: ObservableObject {
     }
 
     var localPlayhead: Int32 {
-        guard let layer = selectedLayer else { return Int32(clamping: status.playhead) }
+        localFrame(for: primarySelection)
+    }
+
+    func localFrame(for id: Int64?) -> Int32 {
+        guard let layer = layers.first(where: { $0.id == id }) else { return Int32(clamping: status.playhead) }
         return Int32(clamping: status.playhead - Int64(layer.startFrame) + Int64(layer.offsetFrames))
     }
 
@@ -1889,62 +1927,61 @@ final class AureaModel: ObservableObject {
     /// O modelo do último pedido: o alerta fecha antes de o seletor devolver os arquivos.
     private var texturesTarget: MissingModelTextures?
 
-    /// Modelo 3D com as texturas/.mtl escolhidos JUNTO (seleção múltipla) ou uma
-    /// pasta. FBX/OBJ ganham a pasta `Media/Modelos/<nome>/`, com tudo ao lado do
-    /// modelo e o nome do seletor: o motor acha a textura pelo nome do arquivo, sem
-    /// a pasta gravada e sem diferenciar maiúsculas. glTF/GLB sozinho segue o caminho antigo.
+    /// Copy provider files while their security scope is held. Folder imports retain
+    /// relative paths, so glTF buffers and model textures remain beside the model.
     func importModelFiles(urls: [URL]) {
         guard !importingMedia, !urls.isEmpty else { return }
-        let modelExts: Set<String> = ["glb", "gltf", "fbx", "obj"]
-        var scoped: [URL] = []
-        var files: [URL] = []
-        for url in urls {
-            if url.startAccessingSecurityScopedResource() { scoped.append(url) }
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue,
-               let walk = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil) {
-                for case let f as URL in walk where !f.hasDirectoryPath && !f.lastPathComponent.hasPrefix(".") { files.append(f) }
-            } else { files.append(url) }
-        }
-        guard let modelURL = files.first(where: { modelExts.contains($0.pathExtension.lowercased()) }) else {
-            scoped.forEach { $0.stopAccessingSecurityScopedResource() }
-            toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo"); return
-        }
-        let ext = modelURL.pathExtension.lowercased()
-        if ext != "fbx" && ext != "obj" {
-            scoped.forEach { $0.stopAccessingSecurityScopedResource() }
-            importMedia(url: modelURL, kind: .model); return
-        }
+        let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
         operationMessage = AureaText.t("ios_importing_media")
         importingMedia = true
         if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
-        let name = modelURL.deletingPathExtension().lastPathComponent
         let importer = engine
         mediaQueue.async { [weak self] in
             defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
-            var result: Int64 = -1
-            var failure = ""
-            var missing: [String] = []
+            let fm = FileManager.default
+            let modelExts: Set<String> = ["glb", "gltf", "fbx", "obj"]
+            let name = urls[0].deletingPathExtension().lastPathComponent
             let root = AureaPaths.media.appendingPathComponent("Modelos", isDirectory: true)
             var folder = root.appendingPathComponent(name, isDirectory: true)
             var counter = 1
-            while FileManager.default.fileExists(atPath: folder.path) {
+            while fm.fileExists(atPath: folder.path) {
                 folder = root.appendingPathComponent("\(name)-\(counter)", isDirectory: true); counter += 1
             }
+            var result: Int64 = -1
+            var failure = ""
+            var missing: [String] = []
             do {
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                for f in files {
-                    let target = folder.appendingPathComponent(f.lastPathComponent)
-                    if FileManager.default.fileExists(atPath: target.path) { continue }
-                    try FileManager.default.copyItem(at: f, to: target)
+                try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+                var candidates: [URL] = []
+                for source in urls {
+                    let target = folder.appendingPathComponent(source.lastPathComponent)
+                    guard !fm.fileExists(atPath: target.path) else { continue }
+                    var coordinationError: NSError?
+                    var copyError: Error?
+                    // File providers (including iCloud) materialize the content for this read.
+                    NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
+                        do { try fm.copyItem(at: readable, to: target) }
+                        catch { copyError = error }
+                    }
+                    if let error = coordinationError { throw error }
+                    if let error = copyError { throw error }
+                    var isDir: ObjCBool = false
+                    if fm.fileExists(atPath: target.path, isDirectory: &isDir), isDir.boolValue {
+                        if let walk = fm.enumerator(at: target, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+                            let files = walk.allObjects.compactMap { $0 as? URL }.filter { modelExts.contains($0.pathExtension.lowercased()) }
+                            candidates.append(contentsOf: files.sorted { $0.path < $1.path })
+                        }
+                    } else if modelExts.contains(target.pathExtension.lowercased()) { candidates.append(target) }
                 }
-                result = importer.importModel(folder.appendingPathComponent(modelURL.lastPathComponent).path, name: name)
-                if result < 0 {
-                    failure = importer.lastImportError
-                    if failure.isEmpty { failure = AureaText.t("ios_import_failed_code", String(-result)) }
-                    try? FileManager.default.removeItem(at: folder)
-                } else { missing = importer.modelMissingTextures(result) }
+                if let modelURL = candidates.first {
+                    result = importer.importModel(modelURL.path, name: modelURL.deletingPathExtension().lastPathComponent)
+                    if result < 0 {
+                        failure = importer.lastImportError
+                        if failure.isEmpty { failure = AureaText.t("ios_import_failed_code", String(-result)) }
+                    } else { missing = importer.modelMissingTextures(result) }
+                } else { failure = AureaText.t("msg_esse_arquivo_nao_e_um_modelo") }
             } catch { failure = AureaText.t("ios_import_copy_failed", error.localizedDescription) }
+            if result < 0 { try? fm.removeItem(at: folder) }
             let importedId = result, importFailure = failure, stillMissing = missing
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -2385,13 +2422,14 @@ final class AureaModel: ObservableObject {
     func gizmoSetComponents(_ id: Int64, base: UInt32, values: [Float]) {
         let key = base == 3 ? "scale" : base == 6 ? "rotation" : ""
         guard !key.isEmpty else { return }
-        applyGizmoComponents(id, base: base, previous: StageGeom.floats(detail[key]), next: values)
+        guard let current = engine.layerDetail(id) else { return }
+        applyGizmoComponents(id, base: base, previous: StageGeom.floats(current[key]), next: values)
     }
 
     private func applyGizmoComponents(_ id: Int64, base: UInt32, previous: [Float], next: [Float]) {
         guard next.count == 3, previous.count >= 3, next.allSatisfy({ $0.isFinite }) else { return }
-        guard let layerDetail = engine.layerDetail(id),
-              let local = (layerDetail["localPlayhead"] as? NSNumber)?.int32Value else { return }
+        guard let layerDetail = engine.layerDetail(id) else { return }
+        let local = localFrame(for: id)
         guard (0..<3).contains(where: { abs(next[$0] - previous[$0]) >= 0.00001 }) else { return }
         let changes = Dictionary(uniqueKeysWithValues: (0..<3).map { (base + UInt32($0), next[$0]) })
         if keyTransformGroup(id, detail: layerDetail, changes: changes) { return }
@@ -2920,6 +2958,15 @@ final class AureaModel: ObservableObject {
         toast = AureaText.t(key, String(Int(moved) + 1), String(abs(step)))
     }
 
+    /// Shared C++ timing rules, identical to Android's multi-selection actions.
+    func arrangeLayerTimes(_ mode: UInt32) {
+        let ids = layers.filter { selection.contains($0.id) && !$0.locked }.map { NSNumber(value: $0.id) }
+        if status.playing != 0 { playPause() }
+        let moved = engine.arrangeLayerTimes(ids, mode: mode, playhead: status.playhead)
+        if moved < 0 { toast = AureaText.t("timeline_arrange_failed") }
+        else { refreshModel(force: true) }
+    }
+
     /// Move camadas no tempo (o conteúdo anda junto). Um passo de desfazer.
     func moveLayers(_ ids: [Int64], deltaFrames: Int) {
         guard deltaFrames != 0 else { return }
@@ -3097,8 +3144,8 @@ final class AureaModel: ObservableObject {
         let threeD = row?.threeD == true || [8, 9, 10].contains(row?.kind ?? 0) ||
             (position.count >= 3 && abs(position[2]) > 0.01) ||
             (rotation.count >= 2 && (abs(rotation[0]) > 0.01 || abs(rotation[1]) > 0.01)) || mask & ((1 << 2) | (1 << 6) | (1 << 7)) != 0
-        guard threeD, mask & (UInt32(7) << base) != 0,
-              let local = (d["localPlayhead"] as? NSNumber)?.int32Value else { return false }
+        guard threeD, mask & (UInt32(7) << base) != 0 else { return false }
+        let local = localFrame(for: id)
         let current = StageGeom.floats(d[["position", "scale", "rotation", "anchor"][Int(base / 3)]])
         guard current.count >= 3 else { return false }
         let values = (0..<3).map { changes[base + UInt32($0)] ?? current[$0] }
@@ -3116,7 +3163,7 @@ final class AureaModel: ObservableObject {
     func setPivot(_ layer: Int64, anchor: [Float], position: [Float]) {
         guard anchor.count == 3, position.count == 3, (anchor + position).allSatisfy(\.isFinite),
               let d = engine.layerDetail(layer) else { return }
-        let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
+        let local = localFrame(for: layer)
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
         for (base, values) in [(UInt32(9), anchor), (UInt32(0), position)] {
             let changes = Dictionary(uniqueKeysWithValues: (0..<3).map { (base + UInt32($0), values[$0]) })
@@ -3145,7 +3192,7 @@ final class AureaModel: ObservableObject {
             mutate { $0.layoutTransform(layer, property: property, value: value) }
             refreshSelectedLayer(); return
         }
-        let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
+        let local = localFrame(for: layer)
         let position = StageGeom.floats(d["position"])
         let scale = StageGeom.floats(d["scale"])
         let rotation = StageGeom.floats(d["rotation"])
@@ -3186,7 +3233,7 @@ final class AureaModel: ObservableObject {
             mutate { $0.layoutTransform(layer, property: pa, value: va); $0.layoutTransform(layer, property: pb, value: vb) }
             refreshSelectedLayer(); return
         }
-        let local = (d["localPlayhead"] as? NSNumber)?.int32Value ?? Int32(clamping: status.playhead)
+        let local = localFrame(for: layer)
         let position = StageGeom.floats(d["position"])
         let scale = StageGeom.floats(d["scale"])
         func component(_ values: [Float], _ index: Int) -> Float { values.count > index ? values[index] : 0 }
@@ -3485,7 +3532,7 @@ extension AureaModel {
 
     /// "Exportar arquivo do projeto": grava o pacote numa pasta temporária e
     /// devolve o arquivo para a folha de compartilhar (nil = falhou; o motivo vai no toast).
-    func exportProjectFile(path: String, title: String, includeMedia: Bool, done: @escaping (URL?) -> Void) {
+    func exportProjectFile(path: String, title: String, includeMedia: Bool, requireComplete: Bool = false, done: @escaping (URL?) -> Void) {
         if projectURL?.path == path { _ = saveProject(writeThumbnail: false) }
         let importer = engine
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
@@ -3515,10 +3562,12 @@ extension AureaModel {
                 skipped = r.count > 2 ? r[2].intValue : 0
             }
             let finalCode = code, finalSkipped = skipped
+            if requireComplete && skipped > 0 { try? FileManager.default.removeItem(at: out) }
             DispatchQueue.main.async {
                 guard let self else { return }
-                if finalCode != 0 {
-                    self.toast = AureaText.t("project_file_export_failed", AureaModel.projectFileError(finalCode))
+                if finalCode != 0 || (requireComplete && finalSkipped > 0) {
+                    let reason = finalCode != 0 ? AureaModel.projectFileError(finalCode) : AureaText.t("project_file_err_unreadable")
+                    self.toast = AureaText.t("project_file_export_failed", reason)
                     done(nil)
                     return
                 }
@@ -3569,7 +3618,7 @@ extension AureaModel {
 // (ferramentas do app antigo — LayerOps.kt no Android, mesma conta)
 // =============================================================================
 extension AureaModel {
-    private struct FitGeom { let w: Float; let h: Float; let anchor: [Float]; let position: [Float]; let scale: [Float]; let rad: Float; let centered: Bool }
+    private struct FitGeom { let w: Float; let h: Float; let anchor: [Float]; let position: [Float]; let scale: [Float]; let rad: Float; let centered: Bool; let threeD: Bool }
 
     private func fitGeom(_ id: Int64) -> FitGeom? {
         guard let d = queryDetail(id) else { return nil }
@@ -3577,8 +3626,12 @@ extension AureaModel {
         let anchor = StageGeom.floats(d["anchor"]), position = StageGeom.floats(d["position"]), scale = StageGeom.floats(d["scale"])
         let rotation = StageGeom.floats(d["rotation"])
         guard w > 0, h > 0, anchor.count >= 3, position.count >= 3, scale.count >= 2 else { return nil }
+        let mask = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let threeD = [8, 9, 10].contains(StageGeom.layerKind(d)) || layers.first(where: { $0.id == id })?.threeD == true ||
+            abs(position[2]) > 0.01 || (rotation.count >= 2 && (abs(rotation[0]) > 0.01 || abs(rotation[1]) > 0.01)) ||
+            mask & ((1 << 2) | (1 << 6) | (1 << 7)) != 0
         return FitGeom(w: w, h: h, anchor: anchor, position: position, scale: scale,
-                       rad: (rotation.count > 2 ? rotation[2] : 0) * .pi / 180, centered: StageGeom.layerKind(d) == 10)
+                       rad: (rotation.count > 2 ? rotation[2] : 0) * .pi / 180, centered: StageGeom.layerKind(d) == 10, threeD: threeD)
     }
 
     /// Posição que põe o CENTRO da mídia em (cx, cy) com a escala (sx, sy) e o giro atual.
@@ -3600,7 +3653,9 @@ extension AureaModel {
             let k = fill ? max(cw / g.w, ch / g.h) : min(cw / g.w, ch / g.h)
             let sx = g.scale[0] < 0 ? -k : k, sy = g.scale[1] < 0 ? -k : k
             let p = positionForCenter(g, sx: sx, sy: sy, cx: cw / 2, cy: ch / 2)
-            setTransform2(3, sx, 4, sy, layer: id)
+            if g.threeD {
+                gizmoSetComponents(id, base: 3, values: [sx, sy, g.scale.count > 2 && g.scale[2] < 0 ? -k : k])
+            } else { setTransform2(3, sx, 4, sy, layer: id) }
             setTransform2(0, p.0, 1, p.1, layer: id)
         }
         endGesture()

@@ -31,8 +31,9 @@ import Foundation
 }
 
 /**
- * Tempo ↔ px com o cabeçote FIXO no centro da timeline inteira: quem anda é o
- * conteúdo. `view` é o frame sob o cabeçote.
+ * Tempo da composição ↔ X absoluto da timeline. `view` é o tempo no centro
+ * da janela, inclusive durante scroll/zoom fracionário. O cabeçote também
+ * passa por xOf: seu frame inteiro pode não coincidir com `view` durante um gesto.
  */
 enum TimeAxis {
     static func safeFps(_ fps: Float) -> Float { fps > 0 ? fps : 30 }

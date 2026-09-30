@@ -5,11 +5,9 @@
 
   O QUE ESTE ARQUIVO NÃO TEM, E POR QUÊ:
 
-   · NSMicrophoneUsageDescription / NSPhotoLibraryUsageDescription: o Android
-     NÃO pede RECORD_AUDIO nem CAMERA (o manifest diz explicitamente "saiu
-     CAMERA, RECORD_AUDIO: não há captura no editor"), e a mídia entra pelo
-     seletor do sistema, que não pede permissão. Declarar uma permissão que o
-     app não usa é promessa falsa — na loja e para quem lê o Info.plist.
+   · NSMicrophoneUsageDescription: não há captura de áudio no editor.
+     A galeria integrada usa NSPhotoLibraryUsageDescription para mostrar as
+     fotos e os vídeos aos quais a pessoa concedeu acesso.
    · Dados de assinatura (Team ID, provisioning): quem assina é o dono, com a
      conta dele. Ver README.
 
@@ -38,6 +36,10 @@
     <!-- Build iOS do porte do editor Android atual. -->
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Mostrar suas fotos e vídeos dentro do Aurea para escolher o que importar no projeto.</string>
+    <key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+    <true/>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Salvar o vídeo exportado pelo Aurea na sua galeria.</string>
     <key>UIAppFonts</key>

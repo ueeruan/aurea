@@ -81,6 +81,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.light.deep_glow_2", FxEffectHuman(keywords: "deep glow 2 brilho bloom halo", principal: [0, 1, 2, 3, 13])),
     ("aurea.light.shadow_studio_3", FxEffectHuman(keywords: "shadow studio 3 sombra long radial inner", principal: [0, 1, 2, 3, 4])),
     ("aurea.generate.tracery", FxEffectHuman(keywords: "tracery color detection boxes rastreio cor conexoes", principal: [0, 1, 3, 7, 14], params: [2: FxParamHuman(decimals: 2)])),
+    ("aurea.text.transform", FxEffectHuman(name: "text_transform_name", keywords: "text transform animador texto transformar letras palavras linhas intervalo fase", principal: Array(0...17))),
     ("aurea.text3d.layout", FxEffectHuman(keywords: "letter rotation letras rotacao delay atraso cylinder twist random aleatorio",
         principal: [0, 1, 2, 12, 13, 9, 10])),
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
@@ -590,6 +591,11 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.control.color", FxEffectHuman(name: "fx_name_color_control", keywords: "expressao cor controle")),
     ("aurea.control.point", FxEffectHuman(name: "fx_name_point_control", keywords: "expressao ponto controle")),
     // --- Pacote de paridade: movimento, transições por forma e acabamento ---
+    ("aurea.motion.oscillate.cycles", FxEffectHuman(
+        name: "fx_name_oscillate", keywords: "oscilar oscillate seno triangulo fase orbita",
+        principal: [0, 1, 2, 3, 4, 5],
+        params: [2: FxParamHuman(suffix: "Hz", decimals: 2), 3: FxParamHuman(suffix: "px", decimals: 0),
+                 5: FxParamHuman(decimals: 2)])),
     ("aurea.motion.oscillate", FxEffectHuman(
         name: "fx_name_oscillate",
         keywords: "oscilar oscillate vai e vem pendular onda seno movimento decaimento balanco",
@@ -1445,6 +1451,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.control.point", "fx_desc_control_point")
     // --- Pacote de paridade: movimento, transições por forma e acabamento ---
     put("aurea.motion.oscillate", "fx_desc_motion_oscillate")
+    put("aurea.motion.oscillate.cycles", "fx_desc_oscillate_cycles")
     put("aurea.motion.swing", "fx_desc_motion_swing")
     put("aurea.motion.wiggle", "fx_desc_motion_wiggle")
     put("aurea.motion.twitch", "fx_desc_motion_twitch")

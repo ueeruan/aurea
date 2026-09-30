@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CC2130000000000000000001 /* CommunityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2130000000000000000002 /* CommunityView.swift */; };
 		CA2127000000000000000001 /* Conta.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000002 /* Conta.swift */; };
 		CA2127000000000000000003 /* ContaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000004 /* ContaView.swift */; };
 		CA2128000000000000000001 /* ProjectTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2128000000000000000002 /* ProjectTransfer.swift */; };
@@ -103,6 +104,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		CC2130000000000000000002 /* CommunityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityView.swift; sourceTree = "<group>"; };
 		CA2127000000000000000002 /* Conta.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conta.swift; sourceTree = "<group>"; };
 		CA2127000000000000000004 /* ContaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContaView.swift; sourceTree = "<group>"; };
 		CA2128000000000000000002 /* ProjectTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTransfer.swift; sourceTree = "<group>"; };
@@ -243,6 +245,7 @@
 				AE0000000000000000000001 /* AureaApp.swift */,
 				AE0000000000000000000002 /* ContentView.swift */,
 				CA2127000000000000000002 /* Conta.swift */,
+				CC2130000000000000000002 /* CommunityView.swift */,
 				CA2127000000000000000004 /* ContaView.swift */,
 				CA2128000000000000000002 /* ProjectTransfer.swift */,
 				CA2127000000000000000006 /* CrashReporter.swift */,
@@ -508,6 +511,7 @@
 				AE0000000000000000000039 /* AureaApp.swift in Sources */,
 				AE000000000000000000003A /* ContentView.swift in Sources */,
 				CA2127000000000000000001 /* Conta.swift in Sources */,
+				CC2130000000000000000001 /* CommunityView.swift in Sources */,
 				CA2127000000000000000003 /* ContaView.swift in Sources */,
 				CA2128000000000000000001 /* ProjectTransfer.swift in Sources */,
 				CA2127000000000000000005 /* CrashReporter.swift in Sources */,

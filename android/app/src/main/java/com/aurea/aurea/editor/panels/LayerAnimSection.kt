@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,7 +23,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import com.aurea.aurea.ui.ds.KeypadRequest
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -89,7 +94,7 @@ internal fun LayerAnimSection(env: PanelEnv) {
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
         )
     }
-    list.forEachIndexed { index, v -> LayerAnimatorCard(store, index, v) }
+    list.forEachIndexed { index, v -> LayerAnimatorCard(env, index, v) }
     Spacer(Modifier.height(6.dp))
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).height(44.dp),
@@ -103,7 +108,8 @@ internal fun LayerAnimSection(env: PanelEnv) {
 }
 
 @Composable
-private fun LayerAnimatorCard(store: EditorStore, index: Int, v: FloatArray) {
+private fun LayerAnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
+    val store = env.store
     val isText = v[26] > 0.5f
     val unit = v[1].toInt()
     Spacer(Modifier.height(8.dp))
@@ -132,20 +138,20 @@ private fun LayerAnimatorCard(store: EditorStore, index: Int, v: FloatArray) {
         ) { store.setLayerAnimatorValues(index, mapOf(3 to it.toFloat())) }
 
         GroupLabel(stringResource(R.string.la_strength_delay))
-        StrengthParams.forEach { LayerAnimRuler(store, index, it, v) }
-        if (isText && unit != 0) LayerAnimRuler(store, index, DelayParam, v)
+        StrengthParams.forEach { LayerAnimRuler(env, index, it, v) }
+        if (isText && unit != 0) LayerAnimRuler(env, index, DelayParam, v)
 
         GroupLabel(stringResource(R.string.la_from))
         val separate = v[4] > 0.5f
         FromParams.forEach { p ->
             if (p.id == 7 && !separate) return@forEach
             if (p.id == 11 && !(isText && unit != 0)) return@forEach
-            LayerAnimRuler(store, index, p, v)
+            LayerAnimRuler(env, index, p, v)
         }
         ToggleLine(stringResource(R.string.la_scale_separate), null, separate) { store.setLayerAnimatorValues(index, mapOf(4 to if (it) 1f else 0f)) }
 
         GroupLabel(stringResource(R.string.la_wiggle))
-        WiggleParams.forEach { LayerAnimRuler(store, index, it, v) }
+        WiggleParams.forEach { LayerAnimRuler(env, index, it, v) }
         Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.la_wiggle_seed), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp)))
             ValueBox(v[5].toLong().toString(), onTap = null)
@@ -174,7 +180,8 @@ private fun ToggleLine(label: String, hint: String?, checked: Boolean, onChange:
 
 /** Régua de um valor do animador, com o losango de keyframe (grava no cabeçote). */
 @Composable
-private fun LayerAnimRuler(store: EditorStore, index: Int, p: LayerAnimParam, v: FloatArray) {
+private fun LayerAnimRuler(env: PanelEnv, index: Int, p: LayerAnimParam, v: FloatArray) {
+    val store = env.store
     val bit = 1 shl p.id
     val look = when {
         v[25].toInt() and bit != 0 -> KeyframeLook.KeyHere
@@ -188,8 +195,11 @@ private fun LayerAnimRuler(store: EditorStore, index: Int, p: LayerAnimParam, v:
         androidx.compose.runtime.derivedStateOf { store.expressionLook(exprKeys) }
     }
     val label = stringResource(p.label)
+    val selected = store.timelineFocus == exprKeys
+    val select = { store.timelineFocus = exprKeys }
     PropertyCustomRow(
-        label, selected = false, onSelect = {}, keyframe = look,
+        label, selected = selected, onSelect = select, keyframe = look,
+        modifier = Modifier.testTag("layer.anim.$index.param.${p.id}"),
         expression = exprLook, onExpression = { store.openExpression(label, exprKeys, 1f, p.unit) },
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -204,7 +214,7 @@ private fun LayerAnimRuler(store: EditorStore, index: Int, p: LayerAnimParam, v:
                         unitsPerDp = { p.step },
                         min = p.min,
                         max = p.max,
-                        onStart = { store.beginGesture("animador") },
+                        onStart = { select(); store.beginGesture("animador") },
                         onValue = { store.setLayerAnimParam(index, p.id, it) },
                         onEnd = { store.endGesture() },
                     ),
@@ -212,11 +222,17 @@ private fun LayerAnimRuler(store: EditorStore, index: Int, p: LayerAnimParam, v:
             }
             Spacer(Modifier.width(8.dp))
             val shown = v[p.slot]
-            ValueBox(if (p.step < 0.5f) "${com.aurea.aurea.ui.ds.numeroPtBr(shown, 2)}${p.unit}" else "${shown.roundToInt()}${p.unit}", onTap = null)
+            val decimals = if (p.step < 0.1f) 2 else if (p.step < 1f) 1 else 0
+            ValueBox("${com.aurea.aurea.ui.ds.numeroPtBr(shown, decimals)}${p.unit}", onTap = {
+                select()
+                env.openKeypad(KeypadRequest(label, value(), p.unit, p.min, p.max, decimals) { store.setLayerAnimParam(index, p.id, it) })
+            })
             Spacer(Modifier.width(4.dp))
-            Box(Modifier.tocavel(onClick = { store.toggleLayerAnimKey(index, p.id) }).padding(4.dp)) {
+            val keyAction = stringResource(if (look == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
+            Box(Modifier.size(40.dp, 44.dp).testTag("layer.anim.$index.key.${p.id}").semantics { contentDescription = "$keyAction · $label" }.tocavel(onClick = { select(); store.toggleLayerAnimKey(index, p.id) }), contentAlignment = Alignment.Center) {
                 KeyframeDiamondIcon(look, enabled = true)
             }
         }
     }
+    if (selected) AnimationTrackActions(env, exprKeys.single(), "layer.anim.$index.curve.${p.id}")
 }

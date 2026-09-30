@@ -23,7 +23,7 @@ struct AureaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            CreatorWelcome { ContentView() }
+            LanguageWelcome { CreatorWelcome { ContentView() } }
                 .id(model.themeId)
                 .environmentObject(model)
                 .environmentObject(conta)
@@ -60,6 +60,38 @@ struct AureaApp: App {
                 if phase == .background { CrashReporter.shared.primeiroPlano(false, etapa: "") }
             @unknown default: break
             }
+        }
+    }
+}
+
+private struct LanguageWelcome<Content: View>: View {
+    @AppStorage("aurea.languageChosen") private var chosen = false
+    @EnvironmentObject private var model: AureaModel
+    @ViewBuilder var content: () -> Content
+    private var testing: Bool {
+#if DEBUG
+        return ProcessInfo.processInfo.environment["AUREA_PARITY_SCENE"] != nil
+#else
+        return false
+#endif
+    }
+    var body: some View {
+        if chosen || testing { content() }
+        else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("AUREA").font(.title).bold()
+                    Text("Choose your language · Escolha seu idioma").font(.title2)
+                    ForEach(AureaLanguage.allCases) { language in
+                        Button {
+                            model.language = language
+                            chosen = true
+                        } label: {
+                            Text(language.label).frame(maxWidth: .infinity, minHeight: 48)
+                        }.buttonStyle(.bordered).accessibilityIdentifier("welcome.language.\(language.rawValue)")
+                    }
+                }.padding(24)
+            }.background(AureaColors.background)
         }
     }
 }

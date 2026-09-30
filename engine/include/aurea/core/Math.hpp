@@ -431,6 +431,32 @@ struct Color {
         case Interpolation::Bounce: {
             if (t <= 0.f) return 0.f;
             if (t >= 1.f) return 1.f;
+            // Versioned parameters share the curve payload, preserving old
+            // projects: by2=-10 opts into configurable ballistic rebounds.
+            // The marker lies outside the editable Bezier range (-2..3).
+            if (by2 == -10.f) {
+                const int count = std::clamp(int(std::round(bx1 * 8.f)), 1, 8);
+                const f32 restitution = clampf(by1, 0.1f, 0.9f);
+                const bool reverse = bx2 < 0.5f;
+                const f32 time = reverse ? 1.f-t : t;
+                f32 total = 1.f, r = restitution;
+                for (int i=0; i<count; ++i, r*=restitution) total += 2.f*r;
+                const f32 landing = 1.f/total;
+                f32 value = (time/landing)*(time/landing);
+                if (time >= landing) {
+                    f32 start = landing; r = restitution;
+                    value = 1.f;
+                    for (int i=0; i<count; ++i, r*=restitution) {
+                        const f32 span = 2.f*landing*r;
+                        if (time <= start+span || i+1==count) {
+                            const f32 u = clampf((time-start)/span,0.f,1.f);
+                            value = 1.f-4.f*r*r*u*(1.f-u); break;
+                        }
+                        start += span;
+                    }
+                }
+                return reverse ? 1.f-value : value;
+            }
             if (t < 0.5f) return 4.f*t*t;
             // Three shrinking ballistic rebounds after the first landing.
             const f32 start = t < 0.75f ? 0.5f : (t < 0.9f ? 0.75f : 0.9f);

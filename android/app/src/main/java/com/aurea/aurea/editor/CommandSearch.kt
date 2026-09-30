@@ -81,7 +81,7 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
     val openPresetDetail = stringResource(R.string.edt_cmd_open_preset)
     // Reuse existing catalogs and preference stores; no duplicate effect/preset system.
     val hits = commands.map { CommandHit(it.id, it.title, it.detail, normalizeSearch("${it.title} ${it.keywords} ${it.detail}"), "Ações", it.requires) } +
-        store.catalog.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(it.category),
+        store.catalog.filter { it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.motion.oscillate") }.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(it.category),
             effectSearchText(it.typeId, it.name, it.category), "Efeitos", when (it.typeId) {
                 effectTypeId("aurea.text3d.layout") -> "text3d"
                 effectTypeId("aurea.shape3d.layout") -> "shape3d"

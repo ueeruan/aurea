@@ -2441,7 +2441,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (properties.isEmpty() || changes.keys.any { it !in properties }) return false
         val values = properties.map { changes[it] ?: transformValue(d, it) }
         group("keyframe XYZ") { properties.forEachIndexed { axis, property ->
-            insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, values[axis])
+            insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), values[axis])
         } }
         return true
     }
@@ -2452,8 +2452,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = (if (id == primary) detail else detailOf(id)) ?: return
         group("scale XYZ") {
             when (transformWrite(sceneEditor, autoKeyTransforms, (3..5).any { d.isAnimated(it) })) {
-                TransformWrite.Keyframe -> (0..2).forEach { insertKeyframe(id, 3 + it, NO_EFFECT, 0, d.localPlayhead, values[it]) }
-                TransformWrite.Layout -> (0..2).forEach { engine.layoutTransform(id, 3 + it, values[it]) }
+                TransformWrite.Keyframe -> (0..2).forEach { insertKeyframe(id, 3 + it, NO_EFFECT, 0, d.localFrame(playhead), values[it]) }
+                TransformWrite.Layout -> (0..2).forEach { layoutTransform(id, 3 + it, values[it]) }
                 TransformWrite.Static -> setScale(id, values[0], values[1], values[2])
             }
         }
@@ -2474,8 +2474,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             send {
                 when (transformWrite(sceneEditor, autoKeyTransforms, animated)) {
                     // Como `setScale3`: o vetor inteiro no cabeçote (Z incluso).
-                    TransformWrite.Keyframe -> (0..2).forEach { insertKeyframe(id, base + it, NO_EFFECT, 0, d.localPlayhead, values[it]) }
-                    TransformWrite.Layout -> (0..2).forEach { engine.layoutTransform(id, base + it, values[it]) }
+                    TransformWrite.Keyframe -> (0..2).forEach { insertKeyframe(id, base + it, NO_EFFECT, 0, d.localFrame(playhead), values[it]) }
+                    TransformWrite.Layout -> (0..2).forEach { layoutTransform(id, base + it, values[it]) }
                     TransformWrite.Static ->
                         if (base == TrackProperty.ANCHOR_X) setAnchor(id, values[0], values[1], values[2])
                         else setPosition(id, values[0], values[1], values[2])
@@ -2492,11 +2492,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (d != null && keyTransformGroup(id, d, mapOf(property to value))) return
         // Trilha animada com Auto-Key marca keyframe TAMBÉM na cena 3D (ver `transformWrite`).
         if (property in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, d?.isAnimated(property) == true) == TransformWrite.Layout) {
-            send { engine.layoutTransform(id, property, value) }; refreshNow(); return
+            send { layoutTransform(id, property, value) }; refreshNow(); return
         }
         d ?: return
         if (d.isAnimated(property)) {
-            send { insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, value) }
+            send { insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), value) }
         } else {
             send {
                 when (property) {
@@ -2528,14 +2528,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (d != null && keyTransformGroup(id, d, mapOf(pa to va, pb to vb))) return
         val animated = d?.isAnimated(pa) == true || d?.isAnimated(pb) == true
         if (pa in 0..14 && pb in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, animated) == TransformWrite.Layout) {
-            send { engine.layoutTransform(id, pa, va); engine.layoutTransform(id, pb, vb) }
+            send { layoutTransform(id, pa, va); layoutTransform(id, pb, vb) }
             refreshNow(); return
         }
         d ?: return
         send {
             if (animated) {
-                insertKeyframe(id, pa, NO_EFFECT, 0, d.localPlayhead, va)
-                insertKeyframe(id, pb, NO_EFFECT, 0, d.localPlayhead, vb)
+                insertKeyframe(id, pa, NO_EFFECT, 0, d.localFrame(playhead), va)
+                insertKeyframe(id, pb, NO_EFFECT, 0, d.localFrame(playhead), vb)
             } else if (pa == TrackProperty.POSITION_X && pb == TrackProperty.POSITION_Y) {
                 setPosition(id, va, vb, d.position[2])
             } else if (pa == TrackProperty.SCALE_X && pb == TrackProperty.SCALE_Y) {
@@ -2715,9 +2715,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setEffectParam(effectId: Int, param: EffectParam, value: Float, component: Int = 0) {
         val id = primary ?: return
         val d = detail ?: return
+        val local = d.localFrame(playhead)
         send {
             if (param.animated) {
-                insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4 + component, d.localPlayhead, value)
+                insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4 + component, local, value)
             } else if (ParamType.componentCount(param.type) > 1) {
                 val v = param.value.copyOf()
                 v[component] = value
@@ -2733,17 +2734,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleEffectKeyframe(effectId: Int, param: EffectParam) {
         val id = primary ?: return
         val d = detail ?: return
+        // The visible playhead moves before the asynchronous detail query catches up.
+        val local = d.localFrame(playhead)
         val comps = max(1, ParamType.componentCount(param.type))
         val here = (keyframes[id] ?: emptyList()).filter {
             it.property == TrackProperty.EFFECT_PARAM && it.effectIndex == effectId &&
-                it.paramIndex / 4 == param.index && it.time == d.localPlayhead
+                it.paramIndex / 4 == param.index && it.time == local
         }
         group(if (here.isNotEmpty()) "remover keyframe" else "adicionar keyframe") {
             if (here.isNotEmpty()) {
                 here.forEach { deleteKeyframe(id, it.property, it.effectIndex, it.paramIndex, it.time) }
             } else {
                 for (c in 0 until comps) {
-                    insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4 + c, d.localPlayhead, param.value[c])
+                    insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4 + c, local, param.value[c])
                 }
             }
         }
@@ -3237,8 +3240,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val property = base + axis
                 // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote.
                 if (transformWrite(sceneEditor, autoKeyTransforms, d.isAnimated(property)) == TransformWrite.Keyframe) {
-                    insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, out[axis])
-                } else engine.layoutTransform(id, property, out[axis])
+                    insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), out[axis])
+                } else layoutTransform(id, property, out[axis])
             }
         }
         refreshNow()
@@ -3646,8 +3649,22 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         if (engine.removeMask(id, mask)) {
             if (maskEdit == mask) { maskEdit = null; maskDrawing = false; maskPoint = -1 }
+            if (selectedKeyframe?.second?.let { it.property == TrackProperty.MASK_PARAM && it.effectIndex == mask } == true) clearSelectedKeyframe()
+            if (timelineFocus?.any { it.property == TrackProperty.MASK_PARAM && it.effectIndex == mask } == true) timelineFocus = null
             refreshNow()
         }
+    }
+
+    fun setMaskParam(mask: Int, param: Int, value: Float) {
+        val id = primary ?: return
+        engine.setMaskParam(id, mask, param, value)
+        refreshNow()
+    }
+
+    fun toggleMaskParamKey(mask: Int, param: Int) {
+        val id = primary ?: return
+        engine.toggleMaskParamKey(id, mask, param)
+        refreshNow()
     }
 
     fun toggleMaskKey(mask: Int) {
@@ -3714,7 +3731,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         val d = detail ?: return
         if (particleKeyed(id, param)) {
-            send { insertKeyframe(id, TrackProperty.PARTICLE_PARAM, NO_EFFECT, param, d.localPlayhead, value) }
+            send { insertKeyframe(id, TrackProperty.PARTICLE_PARAM, NO_EFFECT, param, d.localFrame(playhead), value) }
         } else {
             engine.setParticleParam(id, param, value)
         }
@@ -3776,13 +3793,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         val d = detail ?: return
         val here = (keyframes[id] ?: emptyList()).filter {
-            it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param && it.time == d.localPlayhead
+            it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param && it.time == d.localFrame(playhead)
         }
         group(if (here.isNotEmpty()) "remover keyframe" else "adicionar keyframe") {
             if (here.isNotEmpty()) {
                 here.forEach { deleteKeyframe(id, it.property, it.effectIndex, it.paramIndex, it.time) }
             } else {
-                insertKeyframe(id, TrackProperty.PARTICLE_PARAM, NO_EFFECT, param, d.localPlayhead,
+                insertKeyframe(id, TrackProperty.PARTICLE_PARAM, NO_EFFECT, param, d.localFrame(playhead),
                     particles?.getOrNull(param) ?: 0f)
             }
         }
@@ -3793,7 +3810,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return false
         val d = detail ?: return false
         return (keyframes[id] ?: emptyList()).any {
-            it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param && it.time == d.localPlayhead
+            it.property == TrackProperty.PARTICLE_PARAM && it.paramIndex == param && it.time == d.localFrame(playhead)
         }
     }
 
@@ -3819,10 +3836,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         val d = detail ?: return
         val here = (keyframes[id] ?: emptyList()).filter {
-            it.property == TrackProperty.MATERIAL_PARAM && it.effectIndex == material && it.paramIndex == param && it.time == d.localPlayhead
+            it.property == TrackProperty.MATERIAL_PARAM && it.effectIndex == material && it.paramIndex == param && it.time == d.localFrame(playhead)
         }
         group("keyframe de material") {
-            if (here.isEmpty()) insertKeyframe(id, TrackProperty.MATERIAL_PARAM, material, param, d.localPlayhead, value)
+            if (here.isEmpty()) insertKeyframe(id, TrackProperty.MATERIAL_PARAM, material, param, d.localFrame(playhead), value)
             else here.forEach { deleteKeyframe(id, it.property, it.effectIndex, it.paramIndex, it.time) }
         }
         refreshNow()
@@ -4326,7 +4343,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun removeTextAnimator(index: Int) {
         val id = primary ?: return
         engine.removeTextAnimator(id, index)
-        refreshDetail()
+        clearSelectedKeyframe()
+        timelineFocus = null
+        refreshNow()
+    }
+
+    fun duplicateTextAnimator(index: Int) {
+        val id = primary ?: return
+        if (engine.duplicateTextAnimator(id, index) < 0) showToast(appText(R.string.app_text_anim_add_failed))
+        clearSelectedKeyframe()
+        timelineFocus = null
+        refreshNow()
+    }
+
+    fun moveTextAnimator(from: Int, to: Int) {
+        val id = primary ?: return
+        if (!engine.moveTextAnimator(id, from, to)) return
+        clearSelectedKeyframe()
+        timelineFocus = null
+        refreshNow()
     }
 
     /** Ajuste não animável (0..6, cores 28..35) do animador. */
@@ -4341,13 +4376,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setTextAnimParam(index: Int, param: Int, value: Float) {
         val id = primary ?: return
         engine.setTextAnimParam(id, index, param, value)
-        refreshDetail()
+        refreshNow()
     }
 
     fun toggleTextAnimKey(index: Int, param: Int) {
         val id = primary ?: return
         engine.toggleTextAnimKey(id, index, param)
-        refreshDetail()
+        refreshNow()
     }
 
     // --- Animadores de camada -------------------------------------------------
@@ -4388,7 +4423,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setLayerAnimParam(index: Int, param: Int, value: Float) {
         val id = primary ?: return
         engine.setLayerAnimParam(id, index, param, value)
-        refreshDetail()
+        refreshNow()
     }
 
     fun toggleLayerAnimKey(index: Int, param: Int) {
@@ -4812,6 +4847,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
         showToast(appText(if (keysOnly) R.string.msg_keyframes_escalonados else R.string.msg_camadas_escalonadas, moved + 1, kotlin.math.abs(stepFrames)))
     }
+    /** Shared C++ timing rules, identical to the iOS multi-selection actions. */
+    fun arrangeLayerTimes(mode: Int) {
+        val ids = layers.filter { it.id in selection && !it.locked }.map { it.id }.toLongArray()
+        if (playing) pause()
+        val moved = engine.arrangeLayerTimes(ids, mode, playhead.toLong())
+        if (moved < 0) showToast(appText(R.string.timeline_arrange_failed))
+        else refreshNow()
+    }
+
     var editMode by mutableStateOf(false)
         private set
 
@@ -5006,8 +5050,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = detail ?: return
         val property = when (param) { in 1..4 -> 20 + param; 6 -> 25; 7 -> 26; else -> return }
         send {
-            if (d.hasKeyAtPlayhead(property)) deleteKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead)
-            else insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, value)
+            if (keyframes[id].orEmpty().any { it.property == property && it.effectIndex == NO_EFFECT && it.time == d.localFrame(playhead) }) deleteKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead))
+            else insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), value)
         }
         refreshNow()
     }
@@ -5055,10 +5099,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             CAMERA_LENS_APERTURE -> lens[4]
             else -> lens[5]
         }
-        val here = keyframes[id].orEmpty().any { it.property == property && it.effectIndex == NO_EFFECT && it.time == d.localPlayhead }
+        val here = keyframes[id].orEmpty().any { it.property == property && it.effectIndex == NO_EFFECT && it.time == d.localFrame(playhead) }
         group(if (here) "remover keyframe" else "adicionar keyframe") {
-            if (here) deleteKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead)
-            else insertKeyframe(id, property, NO_EFFECT, 0, d.localPlayhead, value)
+            if (here) deleteKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead))
+            else insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), value)
         }
     }
 
@@ -5232,7 +5276,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = detail
         val v = speed.coerceIn(0.05f, 16f)
         // Com keyframe, mexer grava/atualiza o keyframe no cabeçote (como o volume).
-        if (d != null && d.speedAnimated) send { insertKeyframe(id, TrackProperty.SPEED, -1, 0, d.localPlayhead, v) }
+        if (d != null && d.speedAnimated) send { insertKeyframe(id, TrackProperty.SPEED, -1, 0, d.localFrame(playhead), v) }
         else send { setLayerSpeed(id, v) }
         refreshNow()
     }
@@ -5241,9 +5285,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleSpeedKeyframe() {
         val id = primary ?: return
         val d = detail ?: return
-        val at = keyframes[id].orEmpty().any { it.property == TrackProperty.SPEED && it.time == d.localPlayhead }
-        if (at) send { deleteKeyframe(id, TrackProperty.SPEED, -1, 0, d.localPlayhead) }
-        else send { insertKeyframe(id, TrackProperty.SPEED, -1, 0, d.localPlayhead, d.speed.coerceIn(0.05f, 16f)) }
+        val at = keyframes[id].orEmpty().any { it.property == TrackProperty.SPEED && it.time == d.localFrame(playhead) }
+        if (at) send { deleteKeyframe(id, TrackProperty.SPEED, -1, 0, d.localFrame(playhead)) }
+        else send { insertKeyframe(id, TrackProperty.SPEED, -1, 0, d.localFrame(playhead), d.speed.coerceIn(0.05f, 16f)) }
         refreshNow()
     }
 
@@ -5286,7 +5330,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = detail ?: return
         val v = volume.coerceIn(0f, 2f)
         if (d.volumeAnimated) {
-            send { insertKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localPlayhead, v) }
+            send { insertKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localFrame(playhead), v) }
         } else {
             send { setAudioVolume(id, v) }
         }
@@ -5297,11 +5341,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun toggleVolumeKeyframe() {
         val id = primary ?: return
         val d = detail ?: return
-        val at = keyframes[id].orEmpty().any { it.property == TrackProperty.AUDIO_VOLUME && it.time == d.localPlayhead }
+        val at = keyframes[id].orEmpty().any { it.property == TrackProperty.AUDIO_VOLUME && it.time == d.localFrame(playhead) }
         if (at) {
-            send { deleteKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localPlayhead) }
+            send { deleteKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localFrame(playhead)) }
         } else {
-            send { insertKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localPlayhead, d.audioVolume) }
+            send { insertKeyframe(id, TrackProperty.AUDIO_VOLUME, -1, 0, d.localFrame(playhead), d.audioVolume) }
         }
         refreshNow()
     }
@@ -5971,6 +6015,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val title = readMeta(File(path))?.title ?: File(path).nameWithoutExtension
         val base = title.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifEmpty { "Projeto" }
         return "$base.${ProjectFile.EXTENSION}"
+    }
+
+    /** Package the saved project for a community draft, with the same media resolver as export. */
+    internal suspend fun prepareCommunityProject(path: String, target: Uri): ProjectFile.ExportOutcome {
+        if (ready && project.path == path) withContext(Dispatchers.IO) { saveBlocking(path, withThumbnail = false) }
+        return withContext(Dispatchers.IO) {
+            val title = readMeta(File(path))?.title ?: File(path).nameWithoutExtension
+            ProjectFile.export(getApplication(), engine, path, title, true, target)
+        }
     }
 
     /** Grava o projeto (e, com `includeMedia`, a mídia) num arquivo só em `target`. */

@@ -5208,6 +5208,44 @@ AUREA_TEST(Gpu, TwoDLayersInSceneOccludeAndAreOccludedByModels) {
 
 
 
+AUREA_TEST(Gpu, RotatedPlaneAlphaDoesNotEraseTheOpaquePlaneBehindIt) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 128);
+    const auto blue = s.image(uniform_image(96, 96, 0, 0, 255), 64, 64);
+    s.comp->layer(blue)->threeD = true;
+    const FloatImage reference = s.render();
+    auto pixels = uniform_image(96, 96, 255, 0, 0, 64);
+    // Transparent hole and border must not write depth, either.
+    for (u32 y = 0; y < 96; ++y) for (u32 x = 0; x < 96; ++x)
+        if (x < 8 || y < 8 || x >= 88 || y >= 88 || (x > 40 && x < 56 && y > 40 && y < 56))
+            pixels.rgba[(y * 96 + x) * 4 + 3] = 0;
+    const auto red = s.image(std::move(pixels), 64, 64);
+    s.comp->layer(red)->threeD = true;
+    s.comp->layer(red)->transform.position.z = 5;
+    for (const f32 angle : {-60.f, 60.f, 120.f}) {
+        s.comp->layer(red)->transform.rotation.y = angle;
+        const FloatImage crossed = s.render();
+        u32 blended = 0, holes = 0, erased = 0;
+        for (u32 y = 24; y < 104; ++y) for (u32 x = 24; x < 104; ++x) {
+            if (reference.v(x, y).z < .99f) continue;
+            const auto p = crossed.v(x, y);
+            if (p.x > .1f) { ++blended; if (p.z < .65f) ++erased; }
+            if (p.x < .001f && p.z > .99f) ++holes;
+        }
+        std::printf("    plane angle %.0f: %u blended, %u clear, %u erased background pixels\n", angle, blended, holes, erased);
+        AUREA_CHECK(blended > 20u);
+        AUREA_CHECK(holes > 100u);
+        AUREA_CHECK_EQ(erased, 0u);
+    }
+    s.comp->layer(blue)->visible = false;
+    s.comp->layer(red)->transform.rotation.y = 35;
+    s.comp->layer(red)->transform.opacity = .04f; // final alpha ~1%, a visible fade
+    const FloatImage fading = s.render();
+    f32 energy = 0;
+    for (u32 y = 0; y < 128; ++y) for (u32 x = 0; x < 128; ++x) energy += fading.v(x, y).x;
+    AUREA_CHECK(energy > 5.f);
+}
+
 AUREA_TEST(Gpu, ZoomingANullZoomsItsModelUniformly) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");
@@ -5868,6 +5906,30 @@ AUREA_TEST(Gpu, MaskFeatherIsAGaussianRampOfTheExpectedWidth) {
     AUREA_CHECK(std::fabs(x50e - 55.0f) < 0.5f);
 }
 
+AUREA_TEST(Gpu, AnimatedMaskScalarsReachPixelsAndInvalidateCoverageCache) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 96);
+    const LayerId id = white_full(s);
+    Layer* l = s.comp->layer(id);
+    l->masks.push_back(rect_mask(7, 20, 16, 100, 80));
+    for (u32 p = 0; p < 3; ++p) {
+        auto& tr = l->tracks.get_or_create(TrackProperty::MaskParam, 7, p);
+        (void)tr.set(FrameIndex{0}, p == 2 ? 1.f : 0.f, Interpolation::Linear);
+        (void)tr.set(FrameIndex{10}, p == 0 ? 16.f : p == 1 ? 10.f : .5f, Interpolation::Linear);
+    }
+    const auto before = s.render(FrameIndex{0});
+    const auto middle = s.render(FrameIndex{5});
+    const auto after = s.render(FrameIndex{10});
+    const auto again = s.render(FrameIndex{5});
+    AUREA_CHECK_NEAR(before.v(64, 48).x, 1, .01);
+    AUREA_CHECK_NEAR(middle.v(64, 48).x, .75, .01);
+    AUREA_CHECK_NEAR(after.v(64, 48).x, .5, .01);
+    AUREA_CHECK(before.v(16, 48).x < .01);
+    AUREA_CHECK(after.v(16, 48).x > .3);
+    AUREA_CHECK_NEAR(again.v(16, 48).x, middle.v(16, 48).x, .001);
+    AUREA_CHECK_NEAR(again.v(64, 48).x, middle.v(64, 48).x, .001);
+}
+
 AUREA_TEST(Gpu, AnimatedMaskPathMovesAndIsCached) {
     AUREA_REQUIRE_GPU();
     Scene s(128, 64);
@@ -6218,6 +6280,25 @@ AUREA_TEST(EffectPackGpu, ShapeWipesHaveExactEndpointsAndReverseIsTheComplement)
     const auto img = s.render();
     AUREA_CHECK(img.v(32, 32).w > .99f);
     AUREA_CHECK(img.v(1, 1).w < .01f);
+}
+
+AUREA_TEST(EffectPackGpu, OscillateCyclesMovesPixelsAndMatchesFinalRender) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64,64);
+    const auto id=s.image(uniform_image(16,16,255,255,255),32,32);
+    auto& fx=s.add_effect(id,effect_keys::kOscillateCycles);
+    fx.params[1].constant=ParamValue::scalar(0);
+    fx.params[2].constant=ParamValue::scalar(1);
+    fx.params[3].constant=ParamValue::scalar(12);
+    fx.params[5].constant=ParamValue::scalar(.25f);
+    const auto right=s.render(FrameIndex{0});
+    AUREA_CHECK(right.v(26,32).x<.01f);
+    AUREA_CHECK(right.v(44,32).x>.9f);
+    const auto left=s.render(FrameIndex{15});
+    AUREA_CHECK(left.v(20,32).x>.9f);
+    AUREA_CHECK(left.v(38,32).x<.01f);
+    AUREA_CHECK(max_abs_diff(left,s.render(FrameIndex{15},1,true))<.001f);
+    AUREA_CHECK(max_abs_diff(right,s.render(FrameIndex{0}))<.001f);
 }
 
 AUREA_TEST(EffectPackGpu, OscillateMovesTheLayerAndSettlesBackExactly) {
@@ -9431,6 +9512,33 @@ AUREA_TEST(Gpu, HalationAnimationSurvivesSaveReopenAndReverseSeek) {
     AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
     AUREA_CHECK(max_diff(middle, capture(15)) == 0);
     AUREA_CHECK(max_diff(end, capture(30)) == 0);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Gpu, TextAnimatorColorKeysReachPixelsAndReopen) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    const auto id = rig.e.add_text("AUREA");
+    AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    AUREA_CHECK_EQ(rig.e.add_text_animator(*id, kTextPropFill), 0);
+    auto seek = [&](i64 f) { Command c; c.type = CommandType::PlaybackSeek; c.seek.time = tick_at(FrameIndex{f}, 30); AUREA_CHECK(rig.e.apply_command(c).ok()); };
+    const u32 params[] = {text::kFillR, text::kFillG, text::kFillB};
+    for (u32 channel = 0; channel < 3; ++channel) {
+        AUREA_CHECK(rig.e.set_text_anim_param(*id, 0, params[channel], channel == 0 ? 1.f : 0.f));
+        AUREA_CHECK(rig.e.toggle_text_anim_key(*id, 0, params[channel]));
+    }
+    const Image8 red = rig.capture(640);
+    seek(30);
+    for (u32 channel = 0; channel < 3; ++channel) AUREA_CHECK(rig.e.set_text_anim_param(*id, 0, params[channel], channel == 2 ? 1.f : 0.f));
+    const Image8 blue = rig.capture(640);
+    auto energy = [](const Image8& image, u32 channel) { u64 sum = 0; for (usize i = channel; i < image.rgba.size(); i += 4) sum += image.rgba[i]; return sum; };
+    AUREA_CHECK(energy(red, 0) > energy(red, 2) + 10000);
+    AUREA_CHECK(energy(blue, 2) > energy(blue, 0) + 10000);
+    seek(15); const Image8 middle = rig.capture(640);
+    AUREA_CHECK(max_diff(red, middle) > 40); AUREA_CHECK(max_diff(blue, middle) > 40);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_text_color_pixels.aurea";
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok()); AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    seek(15); AUREA_CHECK(max_diff(middle, rig.capture(640)) <= 3);
     std::remove(path.c_str());
 }
 

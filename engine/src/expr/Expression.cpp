@@ -938,6 +938,12 @@ f32 text_anim_base(const TextAnimator& a, u32 p) noexcept {
         case text::kSkew: return a.skew;
         case text::kStrokeWidth: return a.strokeWidth;
         case text::kCharOffset: return a.charOffset;
+        case text::kFillR: return a.fill.x;
+        case text::kFillG: return a.fill.y;
+        case text::kFillB: return a.fill.z;
+        case text::kStrokeR: return a.stroke.x;
+        case text::kStrokeG: return a.stroke.y;
+        case text::kStrokeB: return a.stroke.z;
         default: return 0.0f;
     }
 }
@@ -950,6 +956,7 @@ const Track* find_track(const PropDesc& d, u32 c) noexcept {
         case 2: return d.single;
         case 3: return d.layer->tracks.find(TrackProperty::TextAnimParam, d.effectIndex, d.key0 + c);
         case 4: return d.layer->tracks.find(TrackProperty::LayerAnimParam, d.effectIndex, d.key0 + c);
+        case 5: return d.layer->tracks.find(TrackProperty::MaskParam, d.effectIndex, d.key0 + c);
         default: return nullptr;
     }
 }
@@ -976,6 +983,12 @@ f64 static_base(const PropDesc& d, u32 c) noexcept {
                  ? layeranim::param_static(l->layerAnimators[d.effectIndex], d.key0 + c) : 0.0;
     }
     if (d.kind == 2) return tr ? tr->staticValue : 0.0;
+    if (d.kind == 5) {
+        for (const Mask& mask : l->masks) if (mask.id == d.effectIndex) {
+            switch (d.key0 + c) { case 0: return mask.feather; case 1: return mask.expansion; case 2: return mask.opacity; default: return 0; }
+        }
+        return 0;
+    }
     const Transform& tf = l->transform;
     using TP = TrackProperty;
     switch (static_cast<TP>(static_cast<u16>(d.prop) + c)) {
@@ -1066,6 +1079,9 @@ PropDesc desc_for_track(const Layer* l, LayerId id, const Track& t, f64 fps, u32
             d.kind = 3;
             d.effectIndex = t.effectIndex;
             d.key0 = t.effectParamIndex;
+            break;
+        case TP::MaskParam:
+            d.kind = 5; d.effectIndex = t.effectIndex; d.key0 = t.effectParamIndex;
             break;
         case TP::LayerAnimParam:   // animador de camada: um valor por trilha
             d.kind = 4;

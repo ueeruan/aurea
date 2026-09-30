@@ -808,12 +808,12 @@ PipelineKey SceneRenderer::key_for(AlphaMode mode, bool doubleSided, bool skinne
     return k;
 }
 
-PipelineKey SceneRenderer::plane_key() const noexcept {
+PipelineKey SceneRenderer::plane_key(bool translucent) const noexcept {
     PipelineKey k = PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F, true,
                                           BlendMode::Normal);
     k.hasDepth = true;
     k.depthTest = true;
-    k.depthWrite = true;                       // o descarte do alfa baixo evita tapar o que está atrás
+    k.depthWrite = !translucent;               // só pixels opacos podem bloquear o fundo
     k.depthCompare = CompareOp::GreaterOrEqual;
     k.depthFormat = SurfaceFormat::Depth32F;
     k.cull = CullMode::None;                   // camada vista de costas continua visível
@@ -852,8 +852,10 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     out.push_back(shadow_key(false));
     out.push_back(shadow_key(true));
     out.push_back(plane_key());
+    out.push_back(plane_key(true));
     self->passMrt_ = false;
     out.push_back(plane_key());
+    out.push_back(plane_key(true));
     auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
     sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
     sky.sampleCount = static_cast<u8>(passSamples_);
@@ -1651,13 +1653,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // mais perto, antes dos modelos transparentes.
     u32 planeCount = 0;
     ScenePlane* planeList = nullptr;
-    PipelineHandle planePipe{};
+    PipelineHandle planePipe{}, planeBlendPipe{};
     if (planes && !planes->empty()) {
         auto pp = shaders_->pipeline(plane_key());
-        if (pp.ok()) {
+        auto blend = shaders_->pipeline(plane_key(true));
+        if (pp.ok() && blend.ok()) {
             planePipe = *pp;
+            planeBlendPipe = *blend;
             planeCount = static_cast<u32>(planes->size());
             planeList = arena.alloc_array<ScenePlane>(planeCount);
+            if (!planeList) return false;
             for (u32 i = 0; i < planeCount; ++i) planeList[i] = (*planes)[i];
             std::sort(planeList, planeList + planeCount, [](const ScenePlane& a, const ScenePlane& b) { return a.viewDepth > b.viewDepth; });
         }
@@ -1698,14 +1703,14 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         ScenePlane* planes;
         u32 planeCount;
         u32 opaqueCount;
-        PipelineHandle planePipe;
+        PipelineHandle planePipe, planeBlendPipe;
         SceneParticleDraw* parts;
         u32 partCount;
         EnvSlot sceneEnv;             ///< o ambiente do grupo (d.env nulo)
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
-          shaders_->sampler(CommonSampler::NearestClamp).id, shaders_->sampler(CommonSampler::ShadowCompare).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe,
+          shaders_->sampler(CommonSampler::NearestClamp).id, shaders_->sampler(CommonSampler::ShadowCompare).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe, planeBlendPipe,
           partList, partList ? particleCount : 0u, envSlots[0]};
 
     // ===== CHÃO DO GRUPO 3D (Ground.cpp) =========================================
@@ -1816,13 +1821,18 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
         auto drawPlanes = [&]() {
             if (!cap.planeCount) return;
-            c.bind_pipeline(cap.planePipe);
-            for (u32 k = 0; k < cap.planeCount; ++k) {
-                const ScenePlane& p = cap.planes[k];
-                c.bind_texture(0, pc.texture(p.texture), SamplerHandle{p.sampler});
-                struct { Mat4 m; Vec4 region; Vec4 uv; Vec4 params; } push{p.clipFromLayer, p.region, Vec4{0, 0, 1, 1}, Vec4{p.opacity, 0, 0, 0}};
-                c.push_constants(&push, sizeof(push));
-                c.draw(6);
+            // Establish solid depth for every plane before blending any edges/fades.
+            // A tilted translucent pixel must blend over the already drawn background,
+            // even when the plane centers sort in the opposite depth order.
+            for (u32 phase = 0; phase < 2; ++phase) {
+                c.bind_pipeline(phase ? cap.planeBlendPipe : cap.planePipe);
+                for (u32 k = 0; k < cap.planeCount; ++k) {
+                    const ScenePlane& p = cap.planes[k];
+                    c.bind_texture(0, pc.texture(p.texture), SamplerHandle{p.sampler});
+                    struct { Mat4 m; Vec4 region; Vec4 uv; Vec4 params; } push{p.clipFromLayer, p.region, Vec4{0, 0, 1, 1}, Vec4{p.opacity, static_cast<f32>(phase), 0, 0}};
+                    c.push_constants(&push, sizeof(push));
+                    c.draw(6);
+                }
             }
             bound = PipelineHandle{};
             boundMat = nullptr;

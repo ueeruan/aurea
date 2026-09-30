@@ -28,6 +28,9 @@ enum class AppLanguage(val tag: String?, val display: String) {
     companion object {
         private const val PREFS = "aurea.settings"
         private const val KEY = "idioma"
+        private const val CHOSEN = "language_chosen"
+
+        fun needsChoice(context: Context): Boolean = !prefs(context).getBoolean(CHOSEN, false)
 
         /** O que está escolhido neste aparelho. */
         fun current(context: Context): AppLanguage {
@@ -38,6 +41,7 @@ enum class AppLanguage(val tag: String?, val display: String) {
         fun select(context: Context, language: AppLanguage) {
             prefs(context).edit {
                 if (language.tag == null) remove(KEY) else putString(KEY, language.tag)
+                putBoolean(CHOSEN, true)
             }
         }
 

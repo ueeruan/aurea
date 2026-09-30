@@ -99,6 +99,11 @@ database_name = "aurea-contas"
 database_id = "89dcf8de-9102-4a1a-a50d-1126174632b2"
 migrations_dir = "migrations"
 
+# Create once with `wrangler r2 bucket create aurea-community-files` before deployment.
+[[r2_buckets]]
+binding = "COMMUNITY_FILES"
+bucket_name = "aurea-community-files"
+
 # Caminho "cloudflare" do e-mail de crash (Email Workers). Só descomente depois
 # de ativar o Email Routing num domínio da conta e VERIFICAR o destino nele —
 # com o destino não verificado o deploy falha.

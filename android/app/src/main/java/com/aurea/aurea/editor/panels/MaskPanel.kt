@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,6 +31,8 @@ import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.ChoiceChips
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.PropertyCustomRow
+import com.aurea.aurea.engine.TrackKey
+import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.LayerType
@@ -136,6 +139,9 @@ private fun MaskSteps(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean) 
         if (isVideo) add(stringResource(R.string.panel_4_rastrear))
     }
     var step by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(store.timelineFocus, m.id) {
+        if (store.timelineFocus?.any { it.property == TrackProperty.MASK_PARAM && it.effectIndex == m.id } == true) step = 2
+    }
     if (step >= steps.size) step = 0
     ScrollTabs(steps, step, onSelect = { step = it })
     when (step) {
@@ -194,16 +200,16 @@ private fun MaskSteps(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean) 
 @Composable
 private fun MaskRow(env: PanelEnv, label: String, mask: Int, prop: Int, value: Float, step: Float, min: Float, max: Float, unit: String, default: Float) {
     val store = env.store
+    val target = TrackKey(TrackProperty.MASK_PARAM, mask, prop)
+    val keys = store.primaryKeys().filter { it.property == target.property && it.effectIndex == mask && it.paramIndex == prop }
+    val local = store.detail?.localPlayhead
+    val look = when { keys.any { it.time == local } -> KeyframeLook.KeyHere; keys.isNotEmpty() -> KeyframeLook.Animated; else -> KeyframeLook.None }
     fun write(v: Float) {
-        val m = store.masks?.find(mask) ?: return
-        when (prop) {
-            0 -> store.setMaskProps(mask, m.op, m.inverted, v, m.expansion, m.opacity)
-            1 -> store.setMaskProps(mask, m.op, m.inverted, m.feather, v, m.opacity)
-            else -> store.setMaskProps(mask, m.op, m.inverted, m.feather, m.expansion, v / 100f)
-        }
+        store.timelineFocus = listOf(target)
+        store.setMaskParam(mask, prop, if (prop == 2) v / 100f else v)
     }
     HumanRow(
-        env, label, value, step, min, max, unit, 0, default,
+        env, label, value, step, min, max, unit, 1, default,
         onStart = { store.beginGesture("máscara") },
         onValue = { write(it) },
         onEnd = { store.endGesture() },
@@ -212,7 +218,13 @@ private fun MaskRow(env: PanelEnv, label: String, mask: Int, prop: Int, value: F
             write(v)
             store.endGesture()
         },
+        selected = store.timelineFocus == listOf(target),
+        onSelect = { store.timelineFocus = listOf(target) },
+        keyframe = look,
+        onKeyframe = { store.timelineFocus = listOf(target); store.toggleMaskParamKey(mask, prop) },
+        keyTag = "mask.$mask.key.$prop",
     )
+    if (store.timelineFocus == listOf(target)) AnimationTrackActions(env, target, "mask.$mask.curve.$prop")
 }
 
 /**

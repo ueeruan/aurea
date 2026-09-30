@@ -444,7 +444,7 @@ struct TimelineView: View {
     /// destaque, com o triângulo no alto da régua (Efeitos.dc.html); sem
     /// seleção, o branco do editor principal (par do TimelinePainter).
     private func drawPlayhead(_ context: inout GraphicsContext, size: CGSize) {
-        let cx = size.width / 2
+        let cx = x(Double(clock.frame), width: size.width)
         let chosen = compact || timecodeStyle == .box
         let tint = chosen ? AureaColors.accent : AureaColors.playhead
         let top = min(m.playheadTop, size.height)
@@ -656,15 +656,19 @@ struct TimelineView: View {
         }
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
         let selected = model.selection.contains(row.id)
-        if x1 >= -m.barRadius && x0 <= width + m.barRadius {
-            let left = max(x0, -m.barRadius * 2), right = min(x1, width + m.barRadius * 2)
+        let capped = compact && selected
+        let visualLeft = capped ? TimelineHit.capLeft(m, x0) : x0
+        if x1 >= -m.barRadius && visualLeft <= width + m.barRadius {
+            let left = max(visualLeft, -m.capRadius * 2), right = min(x1, width + m.barRadius * 2)
+            let bodyLeft = min(max(x0, left), right)
             let rect = CGRect(x: left, y: top, width: right - left, height: m.bar)
             // Fileira compacta, clipe escolhido: ponta esquerda bem redonda (raio 14).
-            let capped = compact && selected
             let shape = capped ? cappedShape(rect) : Path(roundedRect: rect, cornerRadius: m.barRadius)
             // Bloco no tom médio do tipo; camada oculta: a fileira inteira a 40 %.
             let tone = AureaTimeline.tone(row.type)
             var bar = context; bar.clip(to: shape)
+            // A decoração externa não muda a origem de miniaturas, ondas ou keyframes.
+            bar.clip(to: Path(CGRect(x: bodyLeft, y: top, width: right - bodyLeft, height: m.bar)))
             bar.opacity = row.visible ? 1 : AureaTimeline.hiddenAlpha
             bar.fill(shape, with: .color(tone.body))
             if row.track == nil, let tiles = thumbnails[row.id], !tiles.isEmpty {
@@ -681,10 +685,10 @@ struct TimelineView: View {
                 bar.fill(Path(CGRect(x: x0, y: top, width: m.stripe, height: m.bar)), with: .color(AureaColors.labelPalette[Int(row.label) - 1]))
             }
             if capped {
-                // Tampa branca "‹" de 34 na ponta esquerda VISÍVEL (tocar = voltar).
-                let capL = TimelineHit.capLeft(m, x0), capR = min(capL + m.capWidth, right)
+                // A borda direita da tampa coincide com o início temporal do clipe.
+                let capL = TimelineHit.capLeft(m, x0), capR = min(x0, right)
                 if capR > capL {
-                    var cap = bar; cap.opacity = 1
+                    var cap = context; cap.clip(to: shape)
                     cap.fill(Path(CGRect(x: capL, y: top, width: capR - capL, height: m.bar)), with: .color(AureaTimeline.clipSelected))
                     glyph(&cap, CupertinoGlyph.ChevronLeft, size: m.capGlyph, tint: Color(red: 0x16 / 255, green: 0x1C / 255, blue: 0x2A / 255), x: capL + m.capWidth / 2, y: top + m.bar / 2)
                 }
@@ -751,16 +755,11 @@ struct TimelineView: View {
         }
         let menuRight = x1 - (barWidth < m.narrowBar ? m.padRNarrow : m.padR)
         let right = barWidth > m.menuMinBar ? min(cr, menuRight - m.menuGlyph) : cr
-        let rhombusWidth = row.animated && barWidth > m.rhombusMinBar ? m.rhombusGap + m.rhombusIcon : 0
-        let avail = right - rhombusWidth - px
+        let avail = right - px
         if barWidth > m.nameMinBar && !row.name.isEmpty && avail > 8 {
             let name = fittedName(row.name, width: floor(avail / 12) * 12)
             let resolved = context.resolve(Text(name).font(.aurea(size: 11, weight: .medium)).tracking(-0.1).foregroundColor(tone.text))
             context.draw(resolved, at: CGPoint(x: px, y: cy), anchor: .leading)
-            px += resolved.measure(in: CGSize(width: avail, height: m.trackTop)).width
-        }
-        if rhombusWidth > 0 && px + rhombusWidth <= right + 1 {
-            glyph(&context, CupertinoGlyph.Rhombus, size: m.rhombusIcon, tint: tone.text, x: px + m.rhombusGap + m.rhombusIcon / 2, y: cy)
         }
         if barWidth > m.menuMinBar && menuRight <= width + m.menuGlyph {
             glyph(&context, CupertinoGlyph.LineHorizontal3, size: m.menuGlyph, tint: AureaTimeline.barGrip, x: menuRight - m.menuGlyph / 2, y: top + m.bar / 2)
@@ -788,14 +787,14 @@ struct TimelineView: View {
     /// da tampa "‹", o nome 13 pt semibold; as setas ‹ › de trocar de camada juntas
     /// na ponta direita (mesma geometria do `TimelineHit`).
     private func drawCappedContent(_ context: inout GraphicsContext, row: TimelineRow, cy: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat, cr: CGFloat) {
-        let capEnd = TimelineHit.capLeft(m, x0) + m.capWidth
+        let contentStart = max(x0, m.headerColumn)
         let next = TimelineHit.nextArrowLeft(m, x0, x1, width), prev = next - m.arrowSlot
-        let arrows = prev >= capEnd
+        let arrows = prev >= contentStart
         if arrows {
             glyph(&context, CupertinoGlyph.ChevronLeft, size: m.arrowGlyph, tint: .white.opacity(0.7), x: prev + m.arrowSlot / 2, y: cy)
             glyph(&context, CupertinoGlyph.ChevronRight, size: m.arrowGlyph, tint: .white.opacity(0.7), x: next + m.arrowSlot / 2, y: cy)
         }
-        let px = capEnd + m.capNameGap
+        let px = contentStart + m.capNameGap
         let avail = (arrows ? prev : cr) - px
         guard !row.name.isEmpty && avail > 8 else { return }
         let name = fittedName(row.name, width: floor(avail / 12) * 12, size: 13, weight: .semibold)
@@ -821,6 +820,8 @@ struct TimelineView: View {
         // Seleção de keyframes da timeline: azul com anel branco (o principal segue âmbar).
         let picked: [Bool]? = pickedInstants(row)
         let dragMode: Bool = gesture?.mode == .key || gesture?.mode == .keys
+        let dragTrackMatches = row.track == nil || gesture?.row?.track == nil || gesture?.row?.track == row.track
+        let dragFrame = dragMode && gesture?.row?.id == row.id && dragTrackMatches ? gesture?.keyFrame ?? Snap.none : Snap.none
         for group in 0..<count {
             let i = Int(groups[group * 2]), j = Int(groups[group * 2 + 1])
             let px = x(Double(row.instants[i]), width: width)
@@ -831,36 +832,47 @@ struct TimelineView: View {
             }
             let fill: Color = on ? AureaTimeline.keyframeOn : (inSelection ? Color(hex: 0x4DA3FF) : Color.white.opacity(0.9))
             if i == j {
-                let dragTrackMatches = row.track == nil || gesture?.row?.track == nil || gesture?.row?.track == row.track
-                let dragging = dragMode && gesture?.row?.id == row.id && dragTrackMatches && gesture?.keyFrame == row.instants[i]
-                let side = m.diamond * (dragging ? m.keyDragScale : 1)
-                var diamond = context; diamond.translateBy(x: px, y: cy); diamond.rotate(by: .degrees(45))
-                let glow = side / 2 * 1.3
-                diamond.fill(Path(roundedRect: CGRect(x: -glow, y: -glow, width: glow * 2, height: glow * 2), cornerRadius: m.diamondRadius * 1.5), with: .color(on ? AureaTimeline.keyframeOn.opacity(0.35) : .black.opacity(0.3)))
-                diamond.fill(Path(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side), cornerRadius: m.diamondRadius), with: .color(fill))
-                diamond.stroke(Path(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side).insetBy(dx: m.diamondStroke / 2, dy: m.diamondStroke / 2), cornerRadius: m.diamondRadius), with: .color(.black.opacity(0.85)), lineWidth: m.diamondStroke)
-                if inSelection {
-                    // Anel branco POR FORA do contorno: escolhido se lê em qualquer fundo.
-                    let ring: CGFloat = 2
-                    let outer: CGFloat = side / 2 + ring / 2 + m.diamondStroke / 2
-                    let ringRect = CGRect(x: -outer, y: -outer, width: outer * 2, height: outer * 2)
-                    diamond.stroke(Path(roundedRect: ringRect, cornerRadius: m.diamondRadius + ring), with: .color(.white), lineWidth: ring)
-                }
-                if dragging {
-                    let text = context.resolve(Text(Timecode.format(row.instants[i], fps)).font(.aurea(size: 10, weight: .bold)).monospacedDigit().foregroundColor(.white))
-                    let measured = text.measure(in: CGSize(width: 180, height: 20))
-                    let rect = CGRect(x: px - measured.width / 2 - m.balloonPadH, y: cy - side * 1.4142135 / 2 - m.balloonGap - measured.height - m.balloonPadV * 2, width: measured.width + m.balloonPadH * 2, height: measured.height + m.balloonPadV * 2)
-                    context.fill(Path(roundedRect: rect, cornerRadius: m.balloonRadius), with: .color(.black.opacity(0.82)))
-                    context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY))
-                }
+                drawKeyDiamond(&context, frame: row.instants[i], px: px, cy: cy, on: on, inSelection: inSelection, dragging: row.instants[i] == dragFrame)
             } else {
                 let lastX = x(Double(row.instants[j]), width: width), pillWidth = max(lastX - px, m.keyPillMinWidth)
                 let rect = CGRect(x: (px + lastX - pillWidth) / 2, y: cy - m.keyPillHeight / 2, width: pillWidth, height: m.keyPillHeight)
-                context.fill(Path(roundedRect: rect, cornerRadius: m.keyPillHeight / 2), with: .color(fill))
+                context.fill(Path(roundedRect: rect, cornerRadius: m.keyPillHeight / 2), with: .color(inSelection ? Color(hex: 0x4DA3FF) : Color.white.opacity(0.9)))
                 let border: Color = inSelection ? Color.white : Color.black.opacity(0.85)
                 let borderWidth: CGFloat = inSelection ? 2 : m.diamondStroke
                 context.stroke(Path(roundedRect: rect.insetBy(dx: m.diamondStroke / 2, dy: m.diamondStroke / 2), cornerRadius: m.keyPillHeight / 2), with: .color(border), lineWidth: borderWidth)
+                // A faixa resume chaves densas; as chaves em foco conservam seu centro temporal.
+                let focus = [timelineFrame(Double(clock.frame)), chosen, dragFrame]
+                for (position, frame) in focus.enumerated() {
+                    guard !focus.prefix(position).contains(frame), Keyframes.groupHas(row.instants, i, j, frame) else { continue }
+                    let index = lowerBound(row.instants, frame)
+                    drawKeyDiamond(&context, frame: frame, px: x(Double(frame), width: width), cy: cy,
+                                   on: frame == chosen, inSelection: picked?[index] == true, dragging: frame == dragFrame)
+                }
             }
+        }
+    }
+
+    private func drawKeyDiamond(_ context: inout GraphicsContext, frame: Int32, px: CGFloat, cy: CGFloat, on: Bool, inSelection: Bool, dragging: Bool) {
+        let fill: Color = on ? AureaTimeline.keyframeOn : (inSelection ? Color(hex: 0x4DA3FF) : Color.white.opacity(0.9))
+        let side = m.diamond * (dragging ? m.keyDragScale : 1)
+        var diamond = context; diamond.translateBy(x: px, y: cy); diamond.rotate(by: .degrees(45))
+        let glow = side / 2 * 1.3
+        diamond.fill(Path(roundedRect: CGRect(x: -glow, y: -glow, width: glow * 2, height: glow * 2), cornerRadius: m.diamondRadius * 1.5), with: .color(on ? AureaTimeline.keyframeOn.opacity(0.35) : .black.opacity(0.3)))
+        diamond.fill(Path(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side), cornerRadius: m.diamondRadius), with: .color(fill))
+        diamond.stroke(Path(roundedRect: CGRect(x: -side / 2, y: -side / 2, width: side, height: side).insetBy(dx: m.diamondStroke / 2, dy: m.diamondStroke / 2), cornerRadius: m.diamondRadius), with: .color(.black.opacity(0.85)), lineWidth: m.diamondStroke)
+        if inSelection {
+            // Anel branco POR FORA do contorno: escolhido se lê em qualquer fundo.
+            let ring: CGFloat = 2
+            let outer: CGFloat = side / 2 + ring / 2 + m.diamondStroke / 2
+            let ringRect = CGRect(x: -outer, y: -outer, width: outer * 2, height: outer * 2)
+            diamond.stroke(Path(roundedRect: ringRect, cornerRadius: m.diamondRadius + ring), with: .color(.white), lineWidth: ring)
+        }
+        if dragging {
+            let text = context.resolve(Text(Timecode.format(frame, fps)).font(.aurea(size: 10, weight: .bold)).monospacedDigit().foregroundColor(.white))
+            let measured = text.measure(in: CGSize(width: 180, height: 20))
+            let rect = CGRect(x: px - measured.width / 2 - m.balloonPadH, y: cy - side * 1.4142135 / 2 - m.balloonGap - measured.height - m.balloonPadV * 2, width: measured.width + m.balloonPadH * 2, height: measured.height + m.balloonPadV * 2)
+            context.fill(Path(roundedRect: rect, cornerRadius: m.balloonRadius), with: .color(.black.opacity(0.82)))
+            context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY))
         }
     }
 
@@ -1035,6 +1047,7 @@ struct TimelineView: View {
             let x0 = x(Double(segment.start), width: width), x1 = max(x(Double(segment.end), width: width), x0 + m.barMinWidth)
             let score: Int
             if handlesOn(segment) && (result.kind == .trimStart || result.kind == .trimEnd || result.kind == .key) { score = 4 }
+            else if result.kind == .back && model.selection.contains(segment.id) { score = 4 }
             else if point.x >= x0 && point.x <= x1 { score = model.selection.contains(segment.id) ? 3 : 2 }
             else { score = 1 }
             let bestScore: Int = best?.score ?? 0
@@ -1164,6 +1177,10 @@ struct TimelineView: View {
                 case 32: model.openPanel(.audio)
                 case 33: model.openPanel(.textAnimation)
                 case 34: model.openPanel(.vector)
+                case 43:
+                    model.openPanel(.mask)
+                    model.selectedMask = track.effect; model.maskDrawing = false; model.selectedMaskPoint = nil
+                    model.timelineFocus = [track]
                 case 35: model.openPanel(.shape)
                 case 36: model.openPanel(.particles)
                 case 37: model.openPanel(.layer3D)
@@ -1647,8 +1664,8 @@ private struct TimelineHit {
     static func contentRight(_ m: TimelineMetrics, _ x0: CGFloat, _ x1: CGFloat, _ width: CGFloat) -> CGFloat {
         min(x1, width) - (x1 - x0 < m.narrowBar ? m.padRNarrow : m.padR)
     }
-    /// Tampa "‹" da fileira compacta: gruda na ponta esquerda VISÍVEL do clipe (depois da pílula).
-    static func capLeft(_ m: TimelineMetrics, _ x0: CGFloat) -> CGFloat { max(x0, m.headerColumn) }
+    /// A tampa fica antes da borda temporal real; o scroll nunca a prende ao cabeçalho.
+    static func capLeft(_ m: TimelineMetrics, _ x0: CGFloat) -> CGFloat { x0 - m.capWidth }
     /// Onde a seta › começa; a ‹ fica logo antes dela (as duas juntas na ponta direita).
     static func nextArrowLeft(_ m: TimelineMetrics, _ x0: CGFloat, _ x1: CGFloat, _ width: CGFloat) -> CGFloat {
         contentRight(m, x0, x1, width) - m.arrowSlot
@@ -1664,7 +1681,8 @@ private struct TimelineHit {
         // abre/fecha as trilhas, segurar trava/reordena).
         if x < header { return TimelineHit(kind: x < eyeRight ? .eye : .header) }
         var key = -1, keyX: CGFloat = 0
-        if y >= m.keyTouchTop && !instants.isEmpty {
+        let keyCy = compact ? m.diamondCyCompact : m.diamondCyNormal
+        if abs(y - keyCy) <= m.keyTouchHalf && !instants.isEmpty {
             let i = Keyframes.nearestIndex(instants, TimeAxis.frameAt(x: x, view: view, pxPerFrame: ppf, centerX: width / 2))
             let px = TimeAxis.xOf(frame: Double(instants[i]), view: view, pxPerFrame: ppf, centerX: width / 2)
             if abs(px - x) <= m.keyTouchHalf { key = i; keyX = px }
@@ -1672,18 +1690,17 @@ private struct TimelineHit {
         let over = y < m.bodyHitBottom, mid = (x0 + x1) / 2
         let start = handles && over && x0 >= header && x >= x0 - m.trimInsetStart - m.trimTouchOut && x < min(x0 - m.trimInsetStart + m.trimWidth, mid)
         let end = handles && over && x1 <= width && x > max(x1 - m.trimInsetEnd, mid) && x <= x1 - m.trimInsetEnd + m.trimWidth + m.trimTouchOut
-        if key >= 0 && ((!start && !end) || (abs(keyX - x) <= m.keyGlyphHalf && x >= x0 && x <= x1)) { return TimelineHit(kind: .key, key: key) }
+        if key >= 0 && ((!start && !end) || (abs(keyX - x) + abs(y - keyCy) <= m.keyGlyphHalf && x >= (compact ? capLeft(m, x0) : x0) && x <= x1)) { return TimelineHit(kind: .key, key: key) }
         if start { return TimelineHit(kind: .trimStart) }
         if end { return TimelineHit(kind: .trimEnd) }
+        if compact && over && x >= capLeft(m, x0) && x < x0 { return TimelineHit(kind: .back) }
         if over && x >= x0 && x <= x1 {
             if compact {
                 // Redesenho 2026-09-29: a tampa branca "‹" na ponta esquerda volta
                 // (sai da seção); as setas de trocar de camada ‹ › moram juntas na
                 // ponta direita (par do TimelineHit.kt).
-                let cap = capLeft(m, x0)
-                if x <= cap + m.capWidth { return TimelineHit(kind: .back) }
                 let next = nextArrowLeft(m, x0, x1, width), prev = next - m.arrowSlot
-                if prev >= cap + m.capWidth {
+                if prev >= max(x0, m.headerColumn) {
                     if x >= next && x <= next + m.arrowSlot + m.arrowTouchPad { return TimelineHit(kind: .next) }
                     if x >= prev - m.arrowTouchPad && x < next { return TimelineHit(kind: .previous) }
                 }

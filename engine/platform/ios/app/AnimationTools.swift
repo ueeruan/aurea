@@ -34,6 +34,31 @@ struct CurveEase: Equatable {
         default: return [x1, y1, x2, y2]
         }
     }
+    var bounceCount: Int { y2 == -10 ? min(8,max(1,Int((x1*8).rounded()))) : 3 }
+    var bounceStrength: Float { y2 == -10 ? min(0.9,max(0.1,y1)) : 0.5 }
+    func bounce(count: Int? = nil, strength: Float? = nil) -> CurveEase {
+        CurveEase(interpolation: 7, x1: Float(count ?? bounceCount)/8, y1: strength ?? bounceStrength, x2: y2 == -10 ? x2 : 1, y2: -10)
+    }
+    private func ballistic(_ t: Float) -> Float {
+        if t <= 0 { return 0 }; if t >= 1 { return 1 }
+        let reverse = x2 < 0.5, time = x2 < 0.5 ? 1-t : t, r = bounceStrength
+        var power = r, total: Float = 1
+        for _ in 0..<bounceCount { total += 2*power; power *= r }
+        let landing = 1/total
+        var result = (time/landing)*(time/landing)
+        if time >= landing {
+            var start = landing; power = r
+            for i in 0..<bounceCount {
+                let span = 2*landing*power
+                if time <= start+span || i == bounceCount-1 {
+                    let u = min(1,max(0,(time-start)/span))
+                    result = 1-4*power*power*u*(1-u); break
+                }
+                start += span; power *= r
+            }
+        }
+        return reverse ? 1-result : result
+    }
     func transform(_ t: Float) -> Float {
         switch interpolation {
         case 0: return t < 1 ? 0 : 1
@@ -42,6 +67,7 @@ struct CurveEase: Equatable {
         case 4: return 1 - (1 - t) * (1 - t)
         case 5: return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
         case 7:
+            if y2 == -10 { return ballistic(t) }
             let u = min(1, max(0,t))
             if u < 0.5 { return 4*u*u }
             let segment: (Float,Float,Float) = u < 0.75 ? (0.5,0.25,0.25) : u < 0.9 ? (0.75,0.15,0.0625) : (0.9,0.1,0.015625)
@@ -82,11 +108,12 @@ struct CurveEase: Equatable {
             return Float(bezier(y1, y2, parameter))
     }
     func same(_ other: CurveEase) -> Bool {
-        interpolation == other.interpolation && (!isBezier || (power == other.power &&
+        interpolation == other.interpolation && ((!isBezier && interpolation != 7) || (power == other.power &&
             abs(x1 - other.x1) < 0.01 && abs(y1 - other.y1) < 0.01 && abs(x2 - other.x2) < 0.01 && abs(y2 - other.y2) < 0.01))
     }
     var inverted: CurveEase? {
         switch interpolation {
+        case 7: var result = bounce(); result.x2 = y2 == -10 && x2 < 0.5 ? 1 : 0; return result
         case 3: var result = self; result.interpolation = 4; return result
         case 4: var result = self; result.interpolation = 3; return result
         case 2, 6:
@@ -344,8 +371,8 @@ private struct NativeCurveGraph: View {
         for y in [Float(0), Float(1)] { line(point(0, y), point(1, y), .white.opacity(0.24), 1, [4.5, 4.5]) }
         let base = point(0, 0).y
         var curve = Path(), area = Path(); area.move(to: CGPoint(x: 0, y: base))
-        for index in 0...72 {
-            let t = Float(index) / 72, p = point(t, ease.transform(t))
+        for index in 0...256 {
+            let t = Float(index) / 256, p = point(t, ease.transform(t))
             if index == 0 { curve.move(to: p) } else { curve.addLine(to: p) }
             area.addLine(to: p)
         }
@@ -457,6 +484,7 @@ struct NativeCurvePanel: View {
                         } else {
                             NativeTrackGraph(layer: layer, keys: track, speed: graphMode == 2)
                         }
+                        if graphMode == 0 && ease.interpolation == 7 { bounceControls(segment) }
                         if graphMode == 0 { presetRow(segment) }
                         segmentNavigation(segment)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -556,8 +584,8 @@ struct NativeCurvePanel: View {
             glyphButton(CupertinoGlyph.ArrowRightArrowLeft, size: 20, target: 44, label: AureaText.t("panel_inverter_curva")) {
                 if let inverted = ease.inverted { set(inverted, to: segment.start, label: "inverter curva") }
                 else { model.toast = AureaText.t("pn_curve_symmetric") }
-            }.disabled(!(1...6).contains(ease.interpolation))
-                .opacity((1...6).contains(ease.interpolation) ? 1 : 0.35)
+            }.disabled(!(1...7).contains(ease.interpolation))
+                .opacity((1...7).contains(ease.interpolation) ? 1 : 0.35)
             Spacer().frame(height: 4)
             RailMoreButton(active: false) { showMenu(segment) }
             Spacer().frame(height: 8)
@@ -586,11 +614,22 @@ struct NativeCurvePanel: View {
     }
     /// O único preset pronto que fica: Bounce (a bézier se faz nas alças).
     /// Tocar de novo volta a uma bézier suave, com alças.
+    private func bounceControls(_ segment: Segment) -> some View {
+        HStack(spacing: 8) {
+            Button(AureaText.t("curve_bounce_count") + " ×\(ease.bounceCount)") {
+                set(ease.bounce(count: ease.bounceCount % 8 + 1), to: segment.start)
+            }.accessibilityIdentifier("curve.bounce.count")
+            Text(AureaText.t("fx_amplitude")).font(.aurea(size: 10))
+            Slider(value: Binding(get: { ease.bounceStrength }, set: { apply(ease.bounce(strength: $0), to: segment.start) }),
+                in: 0.1...0.9, onEditingChanged: { if $0 { model.beginGesture("bounce") } else { model.endGesture() } })
+                .accessibilityLabel(AureaText.t("fx_amplitude")).accessibilityIdentifier("curve.bounce.strength")
+        }.font(.aurea(size: 12)).tint(curveGreen).padding(.horizontal, 8).frame(height: 48)
+    }
     private func bounceButton(_ segment: Segment) -> some View {
         let bouncing = ease.interpolation == 7
         return Button {
             set(bouncing ? CurveEase(interpolation: 2, x1: 0.42, y1: 0, x2: 0.58, y2: 1)
-                         : CurveEase(interpolation: 7, x1: 0, y1: 0, x2: 1, y2: 1), to: segment.start)
+                         : CurveEase(interpolation: 7, x1: 0.375, y1: 0.5, x2: 1, y2: -10), to: segment.start)
         } label: {
             Text(AureaText.t("pn_textpreset_bounce")).font(.aurea(size: 12, weight: .semibold)).lineLimit(1)
                 .foregroundStyle(bouncing ? curveGreen : .white)

@@ -93,15 +93,12 @@ struct TimelineMetrics {
     var iconGap: CGFloat { dp(6) }
     let lockIcon: CGFloat = 10
     var lockGap: CGFloat { dp(5) }
-    let rhombusIcon: CGFloat = 12
-    var rhombusGap: CGFloat { dp(6) }
     var arrowSlot: CGFloat { dp(22) }
     let arrowGlyph: CGFloat = 14
     let menuGlyph: CGFloat = 14
     var iconMinBar: CGFloat { dp(28) }
     var nameMinBar: CGFloat { dp(52) }
     var lockGapMinBar: CGFloat { dp(70) }
-    var rhombusMinBar: CGFloat { dp(120) }
     var menuMinBar: CGFloat { dp(90) }
     var selStroke: CGFloat { dp(AureaTimeline.clipSelStroke) }
     var multiStroke: CGFloat { dp(AureaTimeline.clipSelStroke) }
@@ -110,7 +107,7 @@ struct TimelineMetrics {
     var bodyHitBottom: CGFloat { bar + dp(4) }
     var arrowTouchPad: CGFloat { dp(6) }
     /// Fileira compacta, clipe escolhido (Efeitos.dc.html; par do TimelineMetrics.kt):
-    /// tampa branca "‹" de 34 na ponta esquerda visível (tocar = voltar), contorno
+    /// tampa branca "‹" de 34 antes do início real do clipe (tocar = voltar), contorno
     /// branco de 1,5 e a ponta esquerda arredondada (raio 14, preso à meia barra).
     var capWidth: CGFloat { dp(34) }
     var capStroke: CGFloat { dp(1.5) }
@@ -134,11 +131,11 @@ struct TimelineMetrics {
     var diamondRadius: CGFloat { dp(2) }
     var diamondStroke: CGFloat { dp(1.2) }
     /// Centro do losango: 22 abaixo do topo da barra (pode passar um pouco da base dela).
-    var diamondCyNormal: CGFloat { dp(22) }
-    var diamondCyCompact: CGFloat { dp(22) }
+    var diamondCyNormal: CGFloat { bar / 2 }
+    var diamondCyCompact: CGFloat { bar / 2 }
     var keyTouchHalf: CGFloat { dp(14) }
     var keyGlyphHalf: CGFloat { dp(7) }
-    var keyTouchTop: CGFloat { trackTop - dp(2) }
+    var keyTouchTop: CGFloat { 0 }
     var keyMergeGap: CGFloat { dp(4) }
     var keyPillHeight: CGFloat { dp(10) }
     var keyPillMinWidth: CGFloat { dp(16) }
@@ -748,6 +745,9 @@ private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) 
     case 31: return (effects.first { $0.effectId == track.effect }?.name ?? "Effect") + " · \(UInt64(track.param) + 1)"
     case 32: return "Audio · \(UInt64(track.param) + 1)"
     case 33: return "Text animation \(UInt64(track.effect) &+ 1) · \(UInt64(track.param) + 1)"
+    case 43:
+        let labels = ["Feather", "Expansion", "Opacity"]
+        return "Mask \(UInt64(track.effect) &+ 1) · \(Int(track.param) < labels.count ? labels[Int(track.param)] : String(track.param))"
     case 34: return "Vector · \(UInt64(track.param) + 1)"
     case 35: return "Shape · \(UInt64(track.param) + 1)"
     case 36: return "Particles · \(UInt64(track.param) + 1)"

@@ -74,15 +74,12 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val iconGap = dp(6f)
     val lockIcon = 10f
     val lockGap = dp(5f)
-    val rhombusIcon = 12f
-    val rhombusGap = dp(6f)
     val arrowSlot = dp(22f)
     val arrowGlyph = 14f
     val menuGlyph = 14f
     val iconMinBar = dp(28f)
     val nameMinBar = dp(52f)
     val lockGapMinBar = dp(70f)
-    val rhombusMinBar = dp(120f)
     val menuMinBar = dp(64f)
     val selStroke = dp(AureaTimeline.ClipSelStroke.value)
     val multiStroke = dp(AureaTimeline.ClipSelStroke.value)
@@ -92,7 +89,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val arrowTouchPad = dp(6f)
     /**
      * Fileira compacta, clipe escolhido (Efeitos.dc.html): tampa branca "‹" de
-     * 34 na ponta esquerda visível (tocar = voltar), contorno branco 1,5 e a
+     * 34 antes do início real do clipe (tocar = voltar), contorno branco 1,5 e a
      * ponta esquerda arredondada (raio 14, preso à meia altura da barra).
      */
     val capWidth = dp(34f)
@@ -116,12 +113,12 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val diamond = dp(11f)
     val diamondRadius = dp(2f)
     val diamondStroke = dp(1.2f)
-    /** Centro do losango medido do topo da barra (24): na borda de baixo dela, dentro da fileira de 32. */
-    val diamondCyNormal = dp(21f)
-    val diamondCyCompact = dp(22f)
+    /** O losango inteiro cabe na barra; X continua vindo exclusivamente do tempo. */
+    val diamondCyNormal = bar / 2f
+    val diamondCyCompact = bar / 2f
     val keyTouchHalf = dp(14f)      // alvo de 28 da A.01
     val keyGlyphHalf = dp(7f)       // o próprio desenho (diagonal ≈ 15,5)
-    val keyTouchTop = trackTop - dp(2f)
+    val keyTouchTop = 0f
     val keyMergeGap = dp(4f)        // instantes a menos que isso viram pílula
     val keyPillHeight = dp(10f)
     val keyPillMinWidth = dp(16f)

@@ -187,6 +187,7 @@ bool Engine::set_layer_animator(u64 layerId, u32 index, const f32* v) noexcept {
 
 bool Engine::set_layer_anim_param(u64 layerId, u32 index, u32 param, f32 value) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || index >= l->layerAnimators.size() || !std::isfinite(value)) return false;
@@ -212,6 +213,7 @@ bool Engine::set_layer_anim_param(u64 layerId, u32 index, u32 param, f32 value) 
 
 bool Engine::toggle_layer_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || index >= l->layerAnimators.size()) return false;

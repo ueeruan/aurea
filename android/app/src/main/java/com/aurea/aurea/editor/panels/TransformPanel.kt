@@ -1,5 +1,7 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.compose.ui.platform.testTag
+
 import androidx.annotation.StringRes
 import com.aurea.aurea.engine.TrackKey
 import androidx.compose.foundation.Canvas
@@ -1116,6 +1118,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleTape(
         modifier = Modifier
             .weight(1f)
             .fillMaxWidth()
+            .testTag(if (active) "transform.scale.x" else "transform.scale.y")
             .valueDrag(
                 enabled = true,
                 start = { read() },

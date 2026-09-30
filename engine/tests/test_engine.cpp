@@ -34,6 +34,37 @@ EngineConfig headless_config() {
 
 } // namespace
 
+AUREA_TEST(Engine, DuplicateSelectsOnlyCopiesAndMovingThemPreservesOriginals) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(320, 240, 30.0, nullptr).ok());
+    auto* project = e.project();
+    auto* comp = project->timeline().composition(project->timeline().root());
+    for (const auto kind : {LayerKind::Text, LayerKind::Shape, LayerKind::Model3D}) {
+        const auto original = comp->add_layer(kind, "Original");
+        comp->layer(original)->transform.position = {80, 120, 30};
+        comp->layer(original)->tracks.get_or_create(TrackProperty::PositionY).set(FrameIndex{0}, 120);
+        const u64 selected = original.pack();
+        e.set_selection(&selected, 1);
+        Command duplicate{};
+        duplicate.type = CommandType::LayerDuplicate;
+        duplicate.layer_ref.layer = original;
+        AUREA_CHECK(e.apply_command(duplicate).ok());
+        u64 created = 0;
+        AUREA_CHECK_EQ(e.get_selection(&created, 1), 1u);
+        AUREA_CHECK(created != selected);
+        AUREA_CHECK(!e.is_selected(selected));
+        Command move{};
+        move.type = CommandType::LayerLayoutTransform;
+        move.shape_param = {LayerId::unpack(created), 1, 40};
+        AUREA_CHECK(e.apply_command(move).ok());
+        AUREA_CHECK_NEAR(comp->layer(original)->transform.position.y, 120.f, 0.001f);
+        AUREA_CHECK_NEAR(comp->layer(original)->tracks.sample_or(TrackProperty::PositionY, FrameIndex{0}, 0), 120.f, 0.001f);
+        AUREA_CHECK_NEAR(comp->layer(LayerId::unpack(created))->tracks.sample_or(TrackProperty::PositionY, FrameIndex{0}, 0), 40.f, 0.001f);
+    }
+    e.shutdown();
+}
+
 AUREA_TEST(Engine, InitializeHeadlessSucceeds) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

@@ -605,6 +605,33 @@ AUREA_TEST(Stability, SaveCompletionCannotAdoptAReplacedProject) {
     remove_family(path);
 }
 
+AUREA_TEST(Stability, PendingDeletesCannotEraseReopenedProjectAndLeaveOnlyBeatMarkers) {
+    const std::string path = test_path("reopen_pending_edits");
+    remove_family(path);
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30, "Saved timeline").ok());
+    AUREA_CHECK(e.add_text("Text with animation").ok());
+    AUREA_CHECK(e.add_text("Another layer").ok());
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    Marker beat; beat.frame = FrameIndex{15}; beat.kind = 1; beat.label = "Beat";
+    comp->put_marker(beat);
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    std::vector<Command> pending;
+    for (u32 i = 0; i < comp->order().size(); ++i) {
+        Command c; c.type = CommandType::LayerDelete; c.layer_ref.layer = comp->order().at(i);
+        pending.push_back(c);
+    }
+    AUREA_CHECK_EQ(e.submit_commands(pending.data(), static_cast<u32>(pending.size())), 2u);
+    // No render frame consumed the old session's edits before opening the saved file.
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK(e.save_project().ok()); // Drains the queue just as autosave / the first frame does.
+    AUREA_CHECK_EQ(layer_count(e), 2u);
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(layer_count(e), 2u);
+    e.shutdown(); remove_family(path);
+}
+
 AUREA_TEST(Stability, CorruptJournalHeaderDoesNotAllocateWhatItDeclares) {
     // Bug real (P1): o leitor do journal alocava pelo cabeçalho — um bloco
     // corrompido declarando 4 GB de strings (ou 1M comandos) virava um vector

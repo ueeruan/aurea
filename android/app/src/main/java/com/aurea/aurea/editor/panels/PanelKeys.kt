@@ -75,7 +75,7 @@ internal fun List<KeyframeRow>.particleTrack(param: Int): List<KeyframeRow> =
 
 /** Losango de um parâmetro do Aurea Particular. */
 internal fun particleLook(store: EditorStore, param: Int): KeyframeLook {
-    val t = store.detail?.localPlayhead ?: return KeyframeLook.None
+    val t = store.detail?.localFrame(store.playhead) ?: return KeyframeLook.None
     var animated = false
     val keys = store.primaryKeys()
     for (i in keys.indices) {
@@ -99,7 +99,7 @@ internal fun List<KeyframeRow>.segmentStart(localPlayhead: Int): KeyframeRow? {
 
 /** Losango de um parâmetro de efeito ([component] nulo = qualquer componente). */
 internal fun effectLook(store: EditorStore, effectId: Int, param: Int, component: Int? = null): KeyframeLook {
-    val t = store.detail?.localPlayhead ?: return KeyframeLook.None
+    val t = store.detail?.localFrame(store.playhead) ?: return KeyframeLook.None
     var animated = false
     val keys = store.primaryKeys()
     // Laço por índice: roda a cada quadro da reprodução, sem criar iterador.

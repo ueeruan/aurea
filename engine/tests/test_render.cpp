@@ -797,7 +797,8 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // + o Tremor em trancos do app antigo (1).
     // + o Particular (as partículas do app antigo) (1).
     // + o Shape 3D Layout (o layout por parte das formas 3D) (1).
-    AUREA_CHECK_EQ(before, static_cast<u32>(119));
+    // + Text Transform e Oscillate por ciclos (2).
+    AUREA_CHECK_EQ(before, static_cast<u32>(121));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {
@@ -1739,6 +1740,40 @@ AUREA_TEST(EffectPack, AudioSpectrumResolvesItsSpectrumAtPlanTimeAndCarriesItToB
     EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
     AUREA_CHECK_EQ(plan.evals.size(), static_cast<usize>(1));
     AUREA_CHECK(!plan.evals.empty() && !plan.evals[0].aux.valid() && plan.evals[0].auxInfo.x == 0.0f);
+}
+
+AUREA_TEST(EffectPack, OscillateCyclesAccumulatesFrequencyAndPreservesPhaseThroughSeeks) {
+    EffectRegistry reg; register_builtin_effects(reg);
+    Layer layer; layer.effects.push_back(make_effect(reg,effect_keys::kOscillateCycles,37));
+    auto& fx=layer.effects.back();
+    AUREA_CHECK_EQ(fx.params.size(),usize{6});
+    AUREA_CHECK_NEAR(fx.params[1].constant.v[0],45,1e-6);
+    AUREA_CHECK_NEAR(fx.params[2].constant.v[0],2,1e-6);
+    fx.params[1].constant=ParamValue::scalar(0);
+    auto& frequency=layer.tracks.get_or_create(TrackProperty::EffectParam,37,param_track_key(2,0));
+    for(int fps:{24,30,60}) {
+        frequency.keys.clear();frequency.set(FrameIndex{0},0);frequency.set(FrameIndex{fps},2);
+        for(int frame:{fps/2, fps*2, 0, fps/2, fps}) {
+            EffectPlan plan;EffectGraph::plan(layer,reg,FrameIndex{frame},1,placement(),nullptr,plan,fps);
+            AUREA_CHECK(plan.hasFold);
+            const float expected=frame==fps/2?25.f:0.f;
+            AUREA_CHECK_NEAR(plan.foldMatrix.col[3].x,expected,.002f);
+        }
+    }
+    frequency.keys.clear(); fx.params[2].constant=ParamValue::scalar(0);
+    fx.params[5].constant=ParamValue::scalar(.25f);
+    for(int wave=0;wave<2;++wave) for(int mode=0;mode<3;++mode) {
+        fx.params[4].constant=ParamValue::scalar(float(wave));fx.params[0].constant=ParamValue::scalar(float(mode));
+        EffectPlan plan;EffectGraph::plan(layer,reg,FrameIndex{300},1,placement(),nullptr,plan);
+        AUREA_CHECK_NEAR(plan.foldMatrix.col[3].x,mode==1?0.f:25.f,.001f);
+        AUREA_CHECK_NEAR(plan.foldMatrix.col[3].z,mode==1?25.f:0.f,.001f);
+    }
+    // Trim and placement don't change the effect's local clock.
+    layer.start=FrameIndex{120}; layer.offset=FrameIndex{30};
+    fx.params[0].constant=ParamValue::scalar(0);fx.params[5].constant=ParamValue::scalar(0);
+    fx.params[2].constant=ParamValue::scalar(1);
+    EffectPlan plan;EffectGraph::plan(layer,reg,FrameIndex{15},1,placement(),nullptr,plan,60);
+    AUREA_CHECK_NEAR(plan.foldMatrix.col[3].x,25,.001f);
 }
 
 AUREA_TEST(EffectPack, OscillateTravelsAlongItsDirectionAndDecaysToIdentity) {

@@ -16,6 +16,7 @@
 #include "aurea/core/Types.hpp"
 
 #include <cstdlib>
+#include <limits>
 #include <new>
 #include <utility>
 
@@ -50,11 +51,18 @@ public:
     /// Aloca `size` bytes alinhados. Devolve nullptr em falta de memória — o
     /// motor não lança, então quem chama trata.
     [[nodiscard]] void* alloc(usize size, usize alignment = kDefaultAlignment) noexcept {
-        const usize aligned = align_up(offset_, alignment);
-        if (aligned + size > capacity_) {
-            if (!grow(size + alignment)) return nullptr;
+        if (!size || !alignment || (alignment & (alignment - 1)) != 0
+            || size > std::numeric_limits<usize>::max() - (alignment - 1)) return nullptr;
+        // malloc only guarantees the platform's fundamental alignment (8 on
+        // ARM32), while SceneBlock and SIMD data require 16 or more. Align the
+        // actual address; aligning the offset alone preserves a misaligned base.
+        const uintptr_t address = reinterpret_cast<uintptr_t>(block_) + offset_;
+        const usize padding = (alignment - (address & (alignment - 1))) & (alignment - 1);
+        if (offset_ > capacity_ || padding > capacity_ - offset_ || size > capacity_ - offset_ - padding) {
+            if (!grow(size + alignment - 1)) return nullptr;
             return alloc(size, alignment);
         }
+        const usize aligned = offset_ + padding;
         void* p = block_ + aligned;
         offset_ = aligned + size;
         used_  += size;
@@ -74,7 +82,7 @@ public:
     /// Aloca `count` elementos contíguos de `T`, sem construir.
     template <typename T>
     [[nodiscard]] T* alloc_array(usize count) noexcept {
-        if (count == 0) return nullptr;
+        if (count == 0 || count > std::numeric_limits<usize>::max() / sizeof(T)) return nullptr;
         return static_cast<T*>(alloc(sizeof(T) * count, alignof(T)));
     }
 
@@ -88,7 +96,7 @@ public:
     /// Devolve tudo ao sistema. Usado quando o editor fecha um projeto.
     void release() noexcept {
         if (block_) {
-            // Blocos 16-alinhados vêm de malloc, então free é legítimo.
+            // Keep the original malloc address; individual allocations align within it.
             std::free(block_);
             block_    = nullptr;
             capacity_ = 0;
@@ -133,10 +141,6 @@ private:
             const usize k = cap;    cap   = o.cap;   o.cap   = k;
         }
     };
-
-    [[nodiscard]] static constexpr usize align_up(usize v, usize a) noexcept {
-        return (v + a - 1) & ~(a - 1);
-    }
 
     bool grow(usize need) noexcept {
         const usize ncap = need > blockSize_ ? need : blockSize_;

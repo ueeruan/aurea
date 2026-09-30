@@ -1,0 +1,135 @@
+package com.aurea.aurea.editor
+
+import android.app.Application
+import android.graphics.Bitmap
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.test.platform.app.InstrumentationRegistry
+import com.aurea.aurea.R
+import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.editor.panels.paramOf
+import com.aurea.aurea.editor.panels.primaryKeys
+import com.aurea.aurea.engine.TrackKey
+import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.theme.AureaTheme
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import java.io.File
+
+/** Captures the production editor layout; no replacement panels or preview overlays. */
+class EditorUiCaptureTest {
+    @get:Rule val compose = createComposeRule()
+    private lateinit var store: EditorStore
+    private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
+    private val context get() = instrumentation.targetContext
+    private fun settle() {
+        compose.waitForIdle()
+        // UiAutomation captures SurfaceFlinger, which presents after Compose settles.
+        Thread.sleep(650)
+        instrumentation.waitForIdleSync()
+    }
+    private fun capture(name: String) {
+        settle()
+        val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+        File(context.filesDir, "ui-$name.png").outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        bitmap.recycle()
+    }
+    private fun seek(frame: Int) {
+        compose.runOnIdle { store.seek(frame) }
+        compose.waitUntil(15000) { store.detail?.localPlayhead == frame }
+    }
+    private fun back() {
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        settle()
+    }
+
+    @Test fun captureOscillateAndEditableBounceInTheProductionEditor() {
+        assertTrue(context.packageName.endsWith(".uitest"))
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
+        compose.runOnIdle { store.newProject(720,900,30f,"AUREA · Oscillate") }
+        compose.waitUntil(15000) { store.project.title == "AUREA · Oscillate" }
+        compose.runOnIdle { store.select(store.engineForStress.addText("AUREA")) }
+        compose.waitUntil(10000) { store.textDetail != null && store.layers.size == 1 }
+        compose.runOnIdle { store.setTextSize(100f); store.addEffect(effectTypeId("aurea.motion.oscillate.cycles")) }
+        compose.waitUntil(5000) { store.effects.size == 1 }
+        val effect = store.effects.single().effectId
+        compose.onNodeWithText(context.getString(R.string.sh_dock_effects)).performClick()
+        compose.waitUntil(5000) { store.paramOf(effect,2) != null }
+        capture("oscillate")
+        compose.onNodeWithText(context.getString(R.string.fx_frequencia),useUnmergedTree=true).performScrollTo().performClick()
+        seek(0)
+        compose.onNodeWithContentDescription(context.getString(R.string.panel_marcar_keyframe_aqui)).performClick()
+        seek(30)
+        compose.runOnIdle { store.setEffectParam(effect,store.paramOf(effect,2)!!,4f) }
+        compose.waitUntil(5000) { store.primaryKeys().count { it.property == 31 && it.effectIndex == effect && it.paramIndex == 8 } == 2 }
+        compose.onNodeWithContentDescription(context.getString(R.string.panel_editar_curva_propriedade)).performClick()
+        compose.onNodeWithTag("curve.preset.bounce").performClick()
+        compose.onNodeWithTag("curve.bounce.count").performClick()
+        compose.onNodeWithTag("curve.bounce.strength").performTouchInput {
+            down(center); moveTo(androidx.compose.ui.geometry.Offset(width*.65f,center.y)); up()
+        }
+        compose.onNodeWithTag("curve.power").assertTextEquals(context.getString(R.string.pn_textpreset_bounce))
+        capture("bounce")
+    }
+
+    @Test fun captureCurrentEditorPanels() {
+        assertTrue(context.packageName.endsWith(".uitest"))
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
+        compose.runOnIdle { store.newProject(720, 900, 30f, "AUREA · Motion") }
+        compose.waitUntil(15000) { store.project.title == "AUREA · Motion" }
+        var mask = -1
+        compose.runOnIdle {
+            val id = store.engineForStress.addText("AUREA")
+            assertTrue(id >= 0); store.select(id); store.renameLayer(id, "Título")
+        }
+        compose.waitUntil(15000) { store.primary != null && store.textDetail != null && store.layers.size == 1 }
+        compose.runOnIdle {
+            store.setTextSize(100f)
+            store.addTextAnimator(1 shl 9)
+            store.setTextAnimParam(0, 6, 0.1f); store.setTextAnimParam(0, 7, 0.9f); store.setTextAnimParam(0, 8, 0.75f)
+            store.toggleTextAnimKey(0, 6)
+            store.addMaskPreset(0)
+            mask = checkNotNull(store.maskEdit)
+            store.toggleMaskParamKey(mask, 0); store.toggleMaskParamKey(mask, 2)
+            store.setCompositionDuration(90)
+        }
+        seek(60)
+        compose.runOnIdle { store.setTextAnimParam(0, 6, 0.8f); store.setMaskParam(mask, 0, 40f); store.setMaskParam(mask, 2, 0.6f) }
+        seek(0)
+        capture("editor")
+        compose.onNodeWithText(context.getString(R.string.text_options)).performClick()
+        settle()
+        compose.onNodeWithTag("text.transform.add").performScrollTo().performClick()
+        capture("text-stack")
+        back()
+        compose.onNodeWithText(context.getString(R.string.sh_dock_mask)).performClick()
+        settle()
+        compose.onNodeWithText(context.getString(R.string.panel_3_borda)).performClick()
+        compose.runOnIdle { store.timelineFocus = listOf(TrackKey(43, mask, 2)) }
+        compose.onNodeWithTag("mask.$mask.curve.2").performScrollTo()
+        capture("mask")
+        back()
+        repeat(2) { n ->
+            compose.runOnIdle { store.addShape(1) }
+            compose.waitUntil(5000) { store.layers.size == n + 2 }
+        }
+        compose.runOnIdle {
+            val ids = store.layers.map { it.id }.toLongArray()
+            store.setLayerRanges(ids, intArrayOf(0, 35, 60), intArrayOf(90, 60, 90))
+            store.selectAll(); store.seek(10)
+        }
+        compose.onNodeWithTag("timeline.arrange.4").performScrollTo()
+        capture("layers")
+    }
+}

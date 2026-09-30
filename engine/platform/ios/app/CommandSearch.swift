@@ -158,7 +158,7 @@ struct CommandSearchView: View {
         hits = EditorCommand.catalog.map {
             CommandHit(id: $0.id, title: $0.title, detail: $0.detail, search: fxNormalizeSearch("\($0.title) \($0.detail) \($0.keywords)"), category: "Ações", requires: $0.requires)
         }
-        hits += model.effectCatalog.map {
+        hits += model.effectCatalog.filter { $0.typeId != fxEffectTypeId("aurea.motion.oscillate") }.map {
             CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: AureaText.t("edt_cmd_add_effect", $0.category), search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : $0.typeId == fxEffectTypeId("aurea.shape3d.layout") ? "shape3d" : "selection", effect: $0.typeId)
         }
         hits += PanelPresetEntry.loadAll().map {

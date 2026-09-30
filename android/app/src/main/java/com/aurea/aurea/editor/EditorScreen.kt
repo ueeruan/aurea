@@ -462,13 +462,14 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
         },
         modifier = modifier.clipToBounds(),
         onKeyframeTap = { layer, key -> onKeyframeTapped(store, ui, layer, key) },
-        onTrackTap = { layer, property, _ ->
+        onTrackTap = { layer, property, effect, param ->
             if (store.primary != layer) store.select(layer)
             openPanel(store, ui, when (property) {
                 30 -> EditorPanel.Effects
                 31 -> EditorPanel.Effects
                 32 -> EditorPanel.Audio
                 33 -> EditorPanel.Text
+                43 -> EditorPanel.Mask
                 34 -> EditorPanel.Vector
                 35 -> EditorPanel.Shape
                 36 -> EditorPanel.Particles
@@ -477,6 +478,12 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
                 39 -> EditorPanel.Speed
                 else -> EditorPanel.Transform
             })
+            if (property == TrackProperty.MASK_PARAM) {
+                store.maskEdit = effect
+                store.maskDrawing = false
+                store.maskPoint = -1
+                store.timelineFocus = listOf(com.aurea.aurea.engine.TrackKey(property, effect, param))
+            }
         },
     )
 }

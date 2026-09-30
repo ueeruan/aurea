@@ -38,6 +38,20 @@ void evaluate_path(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out) {
     }
 }
 
+Vec3 evaluate_props(const Layer& l, const Mask& m, f64 localFrame) noexcept {
+    const f64 whole = std::floor(localFrame);
+    const FrameIndex frame{static_cast<i64>(whole)};
+    const f32 fraction = static_cast<f32>(localFrame - whole);
+    auto value = [&](u32 param, f32 fallback, f32 lo, f32 hi) {
+        const Track* tr = l.tracks.find(TrackProperty::MaskParam, m.id, param);
+        if (!tr || !tr->driven()) return std::clamp(fallback, lo, hi);
+        const f32 a = tr->value_or(frame, fallback);
+        const f32 v = fraction > 0 ? a + (tr->value_or(FrameIndex{frame.value + 1}, fallback) - a) * fraction : a;
+        return std::clamp(std::isfinite(v) ? v : fallback, lo, hi);
+    };
+    return Vec3{value(0, m.feather, 0, 2000), value(1, m.expansion, -2000, 2000), value(2, m.opacity, 0, 1)};
+}
+
 void flatten(const std::vector<MaskPoint>& pts, bool closed, f32 tolerance, Vec2 offset, std::vector<Vec4>& edges) {
     const usize n = pts.size();
     if (n < 2) return;
@@ -99,9 +113,10 @@ u32 build_block(const Layer& l, f64 localFrame, Vec2 offset, f32 tolerance, std:
         }
         if (edges.empty()) box = Vec4{0, 0, 0, 0};
         Vec4* h = &out[first + static_cast<usize>(mi) * kHeaderVec4];
+        const Vec3 props = evaluate_props(l, m, localFrame);
         h[0] = Vec4{static_cast<f32>(static_cast<u8>(m.operation)), m.inverted ? 1.0f : 0.0f,
-                    std::clamp(m.opacity, 0.0f, 1.0f), std::max(0.0f, m.feather) * 0.25f};
-        h[1] = Vec4{m.expansion, static_cast<f32>(out.size() - first), static_cast<f32>(edges.size()), 0.0f};
+                    props.z, props.x * 0.25f};
+        h[1] = Vec4{props.y, static_cast<f32>(out.size() - first), static_cast<f32>(edges.size()), 0.0f};
         h[2] = box;
         out.insert(out.end(), edges.begin(), edges.end());
         ++mi;

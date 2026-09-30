@@ -83,6 +83,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         principal = listOf(0, 1, 2, 3, 4)))
     put("aurea.generate.tracery", EffectHuman(keywords = "tracery color detection boxes rastreio cor conexoes",
         principal = listOf(0, 1, 3, 7, 14), params = mapOf(2 to ParamHuman(decimals = 2))))
+    put("aurea.text.transform", EffectHuman(name = R.string.text_transform_name,
+        keywords = "text transform animador texto transformar letras palavras linhas intervalo fase",
+        principal = (0..17).toList()))
     put("aurea.text3d.layout", EffectHuman(keywords = "letter rotation letras rotacao delay atraso cylinder twist random aleatorio",
         principal = listOf(0, 1, 2, 12, 13, 9, 10)))
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
@@ -744,6 +747,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.control.color", EffectHuman(name = R.string.fx_name_color_control, keywords = "expressao cor controle"))
     put("aurea.control.point", EffectHuman(name = R.string.fx_name_point_control, keywords = "expressao ponto controle"))
     // --- Pacote de paridade: movimento, transições por forma e acabamento ---
+    put("aurea.motion.oscillate.cycles", EffectHuman(
+        name = R.string.fx_name_oscillate, keywords = "oscilar oscillate seno triangulo fase orbita",
+        principal = listOf(0, 1, 2, 3, 4, 5),
+        params = mapOf(2 to ParamHuman(suffix = "Hz", decimals = 2), 3 to ParamHuman(suffix = "px", decimals = 0),
+            5 to ParamHuman(decimals = 2))))
     put("aurea.motion.oscillate", EffectHuman(
         name = R.string.fx_name_oscillate,
         keywords = "oscilar oscillate vai e vem pendular onda seno movimento decaimento balanco",

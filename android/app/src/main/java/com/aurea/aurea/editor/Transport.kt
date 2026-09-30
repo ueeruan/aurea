@@ -53,8 +53,8 @@ import kotlin.math.roundToInt
 
 /**
  * ↶ ↷ · ⇤ ▶ ⇥ · duplicar · tela cheia (mockup `Editor.dc.html`). Nada da
- * barra antiga se perdeu: segurar ⇤/⇥ anda de marca/keyframe/quadro, segurar
- * duplicar abre Copiar e colar, e marcador + lupa moram no menu da engrenagem.
+ * barra antiga se perdeu: tocar ⇤/⇥ anda de marca/keyframe/quadro e segurar
+ * vai ao início/fim. Segurar duplicar abre Copiar e colar; o marcador fica junto ao relógio.
  * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
  */
 @Composable
@@ -73,7 +73,7 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
             .fillMaxWidth()
             .height(h)
             .background(AureaColors.EditorCanvas)
-            .padding(horizontal = 6.dp),
+            .padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -92,17 +92,28 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
         ChromeButton(
             CupertinoGlyph.ArrowLeftToLine,
             stringResource(R.string.editor_ir_inicio_segure_anterior),
-            onClick = { store.seek(0) },
+            onClick = { store.stepTransport(-1) },
             size = 24.dp, width = side, height = side,
-            onLongClick = { store.stepTransport(-1) },
+            onLongClick = { store.seek(0) },
+            modifier = Modifier.testTag("transport.previous"),
         )
         PlayButton(store)
+        val marked = store.playhead in store.markers.frames
+        ChromeButton(
+            if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
+            stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
+            onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
+            tint = if (marked) AureaColors.Accent else AureaColors.Text,
+            size = 20.dp, width = side, height = side,
+            modifier = Modifier.testTag("transport.marker"),
+        )
         ChromeButton(
             CupertinoGlyph.ArrowRightToLine,
             stringResource(R.string.editor_ir_fim_segure_proximo),
-            onClick = { store.seek(store.project.durationFrames) },
+            onClick = { store.stepTransport(1) },
             size = 24.dp, width = side, height = side,
-            onLongClick = { store.stepTransport(1) },
+            onLongClick = { store.seek(store.project.durationFrames) },
+            modifier = Modifier.testTag("transport.next"),
         )
         ChromeButton(
             CupertinoGlyph.PlusSquareOnSquare,
@@ -141,7 +152,7 @@ private fun PlayButton(store: EditorStore) {
             },
             onClick = { store.togglePlayback() },
             size = 26.dp,
-            width = 48.dp,
+            width = 44.dp,
             height = 48.dp,
             tint = if (loop) AureaColors.Accent else AureaColors.Text,
             onLongClick = { store.setLoop(!store.looping) },

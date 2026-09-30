@@ -18,6 +18,7 @@
 // =============================================================================
 #include "BuiltinEffects.hpp"
 #include "aurea/effects/ShakeMotion.hpp"
+#include "aurea/timeline/Layer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -35,6 +36,7 @@ f32 finite_or(f32 v, f32 fallback) noexcept { return std::isfinite(v) ? v : fall
 /// A pose que o comportamento pede neste instante, no plano da camada.
 struct Pose {
     Vec2 offset{0.0f, 0.0f};    ///< px da camada
+    f32 depth = 0.0f;
     f32  rotation = 0.0f;       ///< graus
     f32  scale = 1.0f;          ///< fator uniforme
     Vec2 pivot{0.0f, 0.0f};     ///< px da camada
@@ -86,7 +88,7 @@ public:
         const f32 s = std::max(1e-3f, finite_or(p.scale, 1.0f));
         const f32 r = finite_or(p.rotation, 0.0f) * kDeg2Rad;
         const Mat4 t = Mat4::translation(Vec3{p.pivot.x + finite_or(p.offset.x, 0.0f),
-                                              p.pivot.y + finite_or(p.offset.y, 0.0f), 0.0f});
+                                              p.pivot.y + finite_or(p.offset.y, 0.0f), finite_or(p.depth, 0.0f)});
         const Mat4 rot = Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, r));
         const Mat4 sc = Mat4::scale(Vec3{s, s, 1.0f});
         const Mat4 back = Mat4::translation(Vec3{-p.pivot.x, -p.pivot.y, 0.0f});
@@ -180,6 +182,75 @@ protected:
 };
 
 // -----------------------------------------------------------------------------
+// Oscilar atual. O tipo antigo só mantém a leitura dos projetos existentes.
+// Frequência é velocidade de fase: integrar cada trecho evita saltos quando
+// a pessoa acelera o efeito por keyframes. A integral não depende do seek anterior.
+class OscillateCycles final : public MotionBehavior {
+public:
+    enum : u32 { kMode, kAngle, kFrequency, kMagnitude, kWave, kPhase };
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kOscillateCycles, "Oscilar", "Distorcer", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const modes[] = {"Ângulo", "Profundidade", "Órbita"};
+        static const char* const waves[] = {"Seno", "Triângulo"};
+        p.add_enum("direction", "Direção", modes, 3, 0);
+        p.add_angle("angle", "Ângulo", 45.0f, -3600.0f, 3600.0f);
+        p.add_float("frequency", "Frequência", 2.0f, 0.0f, 16.0f, kParamAnimatable, "Hz");
+        p.add_float("magnitude", "Amplitude", 25.0f, 0.0f, 4000.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_enum("wave", "Forma da onda", waves, 2, 0);
+        p.add_float("phase", "Fase", 0.0f, 0.0f, 1000.0f, kParamAnimatable);
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kPhase] = ParamValue::scalar(0.25f); return true;
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.f(kMagnitude) == 0.0f; }
+    void resolve_resources(EffectEval& e) const noexcept override {
+        const double fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
+        const double end = std::max(0.0, double(e.localTime.value));
+        double cycles = end / fps * e.f(kFrequency);
+        const Track* track = e.layer && e.instance
+            ? e.layer->tracks.find(TrackProperty::EffectParam, e.instance->id, param_track_key(kFrequency, 0)) : nullptr;
+        if (track && !track->keys.empty()) {
+            const auto& keys = track->keys;
+            const auto frequency = [](float v) { return double(std::clamp(finite_or(v, 2.0f), 0.0f, 16.0f)); };
+            double area = std::min(end, std::max(0.0, double(keys.front().time.value))) * frequency(keys.front().value);
+            for (usize i = 0; i + 1 < keys.size(); ++i) {
+                const auto& a = keys[i]; const auto& b = keys[i + 1];
+                const double start = std::max(0.0, double(a.time.value));
+                const double stop = std::min(end, double(b.time.value));
+                if (stop <= start) continue;
+                if (a.interp == Interpolation::Hold) { area += (stop-start)*frequency(a.value); continue; }
+                // Midpoint quadrature on each key interval, including a partial
+                // last interval. Linear ramps are exact; curved ramps converge
+                // without sampling a rounded integer frame.
+                constexpr int slices = 128;
+                const double step = (stop-start)/slices;
+                for (int n = 0; n < slices; ++n) {
+                    const float t = float((start+(n+0.5)*step-a.time.value)/(b.time.value-a.time.value));
+                    area += step * frequency(a.value+(b.value-a.value)*keyframe_ease(a,t));
+                }
+            }
+            area += std::max(0.0, end-std::max(0.0,double(keys.back().time.value))) * frequency(keys.back().value);
+            cycles = area / fps;
+        }
+        // Store only the fraction: precision stays useful even in long projects.
+        e.auxInfo.x = float(cycles-std::floor(cycles));
+    }
+protected:
+    Pose pose(const EffectEval& e, f64) const noexcept override {
+        const double turns = double(e.auxInfo.x)+e.f(kPhase);
+        const float wave = Oscillate::wave(e.e(kWave), turns, 0);
+        const float angle = e.f(kAngle)*kDeg2Rad, distance = e.f(kMagnitude)*wave;
+        Pose p;
+        if (e.e(kMode) != 1) p.offset = {std::cos(angle)*distance, std::sin(angle)*distance};
+        if (e.e(kMode) == 1) p.depth = distance;
+        if (e.e(kMode) == 2) p.depth = e.f(kMagnitude)*Oscillate::wave(e.e(kWave),turns+0.25,0);
+        return p;
+    }
+};
+
 // Balançar — pêndulo em volta de um pivô (por padrão, o meio da borda de cima).
 // -----------------------------------------------------------------------------
 class Swing final : public MotionBehavior {
@@ -420,6 +491,7 @@ protected:
 
 void register_motion_behavior_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Oscillate>());
+    (void)r.add(std::make_unique<OscillateCycles>());
     (void)r.add(std::make_unique<Swing>());
     (void)r.add(std::make_unique<Wiggle>());
 }

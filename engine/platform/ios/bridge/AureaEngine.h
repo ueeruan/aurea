@@ -440,6 +440,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setText:(long long)layerId strokeWidth:(float)width;
 - (NSInteger)addTextAnimator:(long long)layerId props:(uint32_t)props;
 - (void)removeTextAnimator:(long long)layerId index:(uint32_t)index;
+- (NSInteger)duplicateTextAnimator:(long long)layerId index:(uint32_t)index;
+- (BOOL)moveTextAnimator:(long long)layerId from:(uint32_t)from to:(uint32_t)to;
 - (void)setTextAnimParam:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value;
 - (void)toggleTextAnimKey:(long long)layerId index:(uint32_t)index param:(uint32_t)param;
 - (BOOL)applyTextPreset:(long long)layerId preset:(uint32_t)preset;
@@ -573,6 +575,8 @@ NS_SWIFT_NAME(AureaEngine)
 /// fica); `keysOnly` = só a animação anda. Um passo de desfazer. Devolve
 /// quantas camadas andaram, ou −Errc.
 - (int)staggerLayers:(NSArray<NSNumber*>*)layerIds stepFrames:(int)stepFrames keysOnly:(BOOL)keysOnly;
+/// Shared timing arrangement (0 starts, 1 sequence, 2 ends, 3/4 distribution, 5/6 playhead).
+- (int)arrangeLayerTimes:(NSArray<NSNumber*>*)layerIds mode:(uint32_t)mode playhead:(int64_t)playhead;
 - (long long)addText3D:(NSString*)content depth:(float)depth alignment:(uint32_t)alignment
                      r:(float)r g:(float)g b:(float)b;
 - (long long)addParticles:(uint32_t)preset;
@@ -600,6 +604,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)setMaskProps:(long long)layerId mask:(uint32_t)mask operation:(uint32_t)operation inverted:(BOOL)inverted feather:(float)feather expansion:(float)expansion opacity:(float)opacity;
 - (BOOL)keyMask:(long long)layerId mask:(uint32_t)mask;
 - (BOOL)toggleMaskKey:(long long)layerId mask:(uint32_t)mask NS_SWIFT_NAME(toggleMaskKey(_:mask:));
+- (BOOL)setMaskParam:(long long)layerId mask:(uint32_t)mask param:(uint32_t)param value:(float)value;
+- (BOOL)toggleMaskParamKey:(long long)layerId mask:(uint32_t)mask param:(uint32_t)param;
 // Rig 2D (camada de imagem; Engine::query_rig e família). Juntas: 5 floats
 // cada (id, pai ou −1, x, y na composição, key no cabeçote).
 - (NSArray<NSNumber*>*)rigJoints:(long long)layerId bind:(BOOL)bind;

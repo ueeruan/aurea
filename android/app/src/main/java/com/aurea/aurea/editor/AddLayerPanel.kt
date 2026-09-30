@@ -420,32 +420,7 @@ private fun DrawScope.drawShapePreset(preset: Int) {
  */
 @Composable
 private fun MediaTab(store: EditorStore, ui: EditorUi, close: () -> Unit) {
-    val context = LocalContext.current
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        if (uri != null) {
-            val mime = context.contentResolver.getType(uri).orEmpty()
-            if (mime.startsWith("video/")) store.importVideo(uri) else store.importImage(uri)
-            close()
-        }
-    }
-    CardGrid(
-        listOf(
-            AddItem(stringResource(R.string.editor_galeria), CupertinoGlyph.PhotoOnRectangle, AureaColors.Accent) {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-            },
-            AddItem(stringResource(R.string.editor_foto), CupertinoGlyph.Photo) {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            },
-            AddItem(stringResource(R.string.editor_video), CupertinoGlyph.Videocam) {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-            },
-            // Aurea AI: o video nao vem do aparelho, vem de um servidor. Entra
-            // aqui porque, para quem usa, e mais um jeito de conseguir um video.
-            AddItem(stringResource(R.string.sh_add_ai_video), CupertinoGlyph.WandStars) {
-                openPanel(store, ui, EditorPanel.AiVideo)
-            },
-        ),
-    )
+    MediaGallery(store, close) { openPanel(store, ui, EditorPanel.AiVideo) }
 }
 
 /**

@@ -1290,11 +1290,12 @@ AUREA_TEST(Serialization, BounceElasticAndStepsSurviveProjectReload) {
     Project original = make_project();
     auto* comp = original.timeline().composition(original.timeline().root());
     const LayerId id = comp->add_layer(LayerKind::Shape, "Easing families");
-    const auto modes = {Interpolation::Bounce, Interpolation::Elastic, Interpolation::Steps};
+    const auto modes = {Interpolation::Bounce, Interpolation::Elastic, Interpolation::Steps, Interpolation::Bounce};
     u32 index = 0;
     for (auto mode : modes) {
         auto& track = comp->layer(id)->tracks.get_or_create(static_cast<TrackProperty>(index++));
         track.set(FrameIndex{0}, -20.f, mode); track.set(FrameIndex{100}, 80.f);
+        if (index==4) track.set_interpolation(FrameIndex{0},mode,6.f/8,.7f,0,-10);
     }
     AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}).ok());
     Project restored;
@@ -1304,12 +1305,13 @@ AUREA_TEST(Serialization, BounceElasticAndStepsSurviveProjectReload) {
     for (u32 i=0; i<loadedComp->order().size(); ++i)
         if (loadedComp->layer(loadedComp->order().at(i))->name == "Easing families") loaded = loadedComp->layer(loadedComp->order().at(i));
     AUREA_CHECK(loaded != nullptr);
-    if (loaded) for (u32 i=0; i<3; ++i) {
+    if (loaded) for (u32 i=0; i<4; ++i) {
         const auto* before = comp->layer(id)->tracks.find(static_cast<TrackProperty>(i));
         const auto* after = loaded->tracks.find(static_cast<TrackProperty>(i));
         AUREA_CHECK(before && after);
         if (!before || !after) continue;
         AUREA_CHECK(before->keys[0].interp == after->keys[0].interp);
+        AUREA_CHECK_NEAR(before->keys[0].by2,after->keys[0].by2,1e-6);
         for (int frame=0; frame<=100; ++frame)
             AUREA_CHECK_NEAR(before->sample(FrameIndex{frame}), after->sample(FrameIndex{frame}), 1e-6);
     }

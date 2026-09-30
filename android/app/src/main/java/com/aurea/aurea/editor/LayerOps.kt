@@ -265,7 +265,10 @@ internal object LayerOps {
             val sx = if (d.scale[0] < 0f) -k else k
             val sy = if (d.scale[1] < 0f) -k else k
             val (px, py) = positionForCenter(d, w, h, sx, sy, cw / 2f, ch / 2f)
-            store.setTransform2(TrackProperty.SCALE_X, sx, TrackProperty.SCALE_Y, sy, id)
+            if (com.aurea.aurea.editor.panels.uses3D(d)) {
+                // Ajustar um volume exige a mesma escala também na profundidade.
+                store.setScale3(floatArrayOf(sx, sy, if (d.scale[2] < 0f) -k else k), id)
+            } else store.setTransform2(TrackProperty.SCALE_X, sx, TrackProperty.SCALE_Y, sy, id)
             store.setTransform2(TrackProperty.POSITION_X, px, TrackProperty.POSITION_Y, py, id)
         }
         store.endGesture()

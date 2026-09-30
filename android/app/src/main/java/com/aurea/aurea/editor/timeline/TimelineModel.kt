@@ -364,6 +364,7 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
         31 -> (effects.firstOrNull { it.first == track.effect }?.second ?: "Effect") + " · ${track.param + 1}"
         32 -> "Audio · ${track.param + 1}"
         33 -> "Text animation ${track.effect + 1} · ${track.param + 1}"
+        43 -> "Mask ${track.effect + 1} · ${listOf("Feather", "Expansion", "Opacity").getOrNull(track.param) ?: track.param}"
         34 -> "Vector · ${track.param + 1}"
         35 -> "Shape · ${track.param + 1}"
         36 -> "Particles · ${track.param + 1}"

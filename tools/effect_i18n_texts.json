@@ -1579,5 +1579,221 @@
  "Bend": {
   "en": "Bend",
   "pt": "Curvar"
+ },
+ "Random": {
+  "pt": "Aleatório",
+  "en": "Random",
+  "es": "Aleatorio",
+  "ru": "Случайно",
+  "hi": "यादृच्छिक",
+  "id": "Acak",
+  "ar": "عشوائي"
+ },
+ "Random Speed": {
+  "pt": "Velocidade aleatória",
+  "en": "Random speed",
+  "es": "Velocidad aleatoria",
+  "ru": "Случайная скорость",
+  "hi": "यादृच्छिक गति",
+  "id": "Kecepatan acak",
+  "ar": "سرعة عشوائية"
+ },
+ "Start": {
+  "pt": "Início",
+  "en": "Start",
+  "es": "Inicio",
+  "ru": "Начало",
+  "hi": "आरंभ",
+  "id": "Awal",
+  "ar": "البداية"
+ },
+ "End": {
+  "pt": "Fim",
+  "en": "End",
+  "es": "Fin",
+  "ru": "Конец",
+  "hi": "अंत",
+  "id": "Akhir",
+  "ar": "النهاية"
+ },
+ "Component": {
+  "pt": "Componente",
+  "en": "Component",
+  "es": "Componente",
+  "ru": "Компонент",
+  "hi": "घटक",
+  "id": "Komponen",
+  "ar": "المكوّن"
+ },
+ "Letter": {
+  "pt": "Letra",
+  "en": "Letter",
+  "es": "Letra",
+  "ru": "Буква",
+  "hi": "अक्षर",
+  "id": "Huruf",
+  "ar": "حرف"
+ },
+ "Word": {
+  "pt": "Palavra",
+  "en": "Word",
+  "es": "Palabra",
+  "ru": "Слово",
+  "hi": "शब्द",
+  "id": "Kata",
+  "ar": "كلمة"
+ },
+ "Line": {
+  "pt": "Linha",
+  "en": "Line",
+  "es": "Línea",
+  "ru": "Строка",
+  "hi": "पंक्ति",
+  "id": "Baris",
+  "ar": "سطر"
+ },
+ "Anchor": {
+  "pt": "Âncora",
+  "en": "Anchor",
+  "es": "Ancla",
+  "ru": "Якорь",
+  "hi": "एंकर",
+  "id": "Jangkar",
+  "ar": "نقطة الارتكاز"
+ },
+ "Layer": {
+  "pt": "Camada",
+  "en": "Layer",
+  "es": "Capa",
+  "ru": "Слой",
+  "hi": "परत",
+  "id": "Lapisan",
+  "ar": "طبقة"
+ },
+ "Offset": {
+  "pt": "Deslocamento",
+  "en": "Offset",
+  "es": "Desplazamiento",
+  "ru": "Смещение",
+  "hi": "विस्थापन",
+  "id": "Pergeseran",
+  "ar": "الإزاحة"
+ },
+ "Scale": {
+  "pt": "Escala",
+  "en": "Scale",
+  "es": "Escala",
+  "ru": "Масштаб",
+  "hi": "स्केल",
+  "id": "Skala",
+  "ar": "المقياس"
+ },
+ "Stretch": {
+  "pt": "Alongamento",
+  "en": "Stretch",
+  "es": "Estiramiento",
+  "ru": "Растяжение",
+  "hi": "खिंचाव",
+  "id": "Peregangan",
+  "ar": "التمدد"
+ },
+ "Opacity change": {
+  "pt": "Variação de opacidade",
+  "en": "Opacity change",
+  "es": "Cambio de opacidad",
+  "ru": "Изменение непрозрачности",
+  "hi": "अपारदर्शिता में बदलाव",
+  "id": "Perubahan opasitas",
+  "ar": "تغيير العتامة"
+ },
+ "Override fill color": {
+  "pt": "Substituir cor do preenchimento",
+  "en": "Override fill color",
+  "es": "Sustituir color de relleno",
+  "ru": "Заменить цвет заливки",
+  "hi": "भराव का रंग बदलें",
+  "id": "Ganti warna isian",
+  "ar": "استبدال لون التعبئة"
+ },
+ "Fill color": {
+  "pt": "Cor do preenchimento",
+  "en": "Fill color",
+  "es": "Color de relleno",
+  "ru": "Цвет заливки",
+  "hi": "भराव का रंग",
+  "id": "Warna isian",
+  "ar": "لون التعبئة"
+ },
+ "Ease in": {
+  "pt": "Suavização de entrada",
+  "en": "Ease in",
+  "es": "Suavizar entrada",
+  "ru": "Плавное начало",
+  "hi": "सहज शुरुआत",
+  "id": "Perhalus awal",
+  "ar": "تنعيم البداية"
+ },
+ "Ease out": {
+  "pt": "Suavização de saída",
+  "en": "Ease out",
+  "es": "Suavizar salida",
+  "ru": "Плавное завершение",
+  "hi": "सहज अंत",
+  "id": "Perhalus akhir",
+  "ar": "تنعيم النهاية"
+ },
+ "Overlap": {
+  "pt": "Sobreposição",
+  "en": "Overlap",
+  "es": "Superposición",
+  "ru": "Перекрытие",
+  "hi": "ओवरलैप",
+  "id": "Tumpang tindih",
+  "ar": "التداخل"
+ },
+ "Square": {
+  "pt": "Quadrada",
+  "en": "Square",
+  "es": "Cuadrada",
+  "ru": "Прямоугольная",
+  "hi": "वर्गाकार",
+  "id": "Persegi",
+  "ar": "مربعة"
+ },
+ "Triangle": {
+  "pt": "Triângulo",
+  "en": "Triangle",
+  "es": "Triángulo",
+  "ru": "Треугольник",
+  "hi": "त्रिकोण",
+  "id": "Segitiga",
+  "ar": "مثلث"
+ },
+ "Random order": {
+  "pt": "Ordem aleatória",
+  "en": "Random order",
+  "es": "Orden aleatorio",
+  "ru": "Случайный порядок",
+  "hi": "यादृच्छिक क्रम",
+  "id": "Urutan acak",
+  "ar": "ترتيب عشوائي"
+ },
+ "Órbita": {
+  "pt": "Órbita",
+  "en": "Orbit",
+  "es": "Órbita",
+  "ru": "Орбита",
+  "hi": "कक्षा",
+  "id": "Orbit",
+  "ar": "مدار"
+ },
+ "Profundidade": {
+  "pt": "Profundidade",
+  "en": "Depth",
+  "es": "Profundidad",
+  "ru": "Глубина",
+  "hi": "गहराई",
+  "id": "Kedalaman",
+  "ar": "العمق"
  }
 }

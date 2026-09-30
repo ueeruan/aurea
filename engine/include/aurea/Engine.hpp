@@ -64,6 +64,13 @@
 
 namespace aurea {
 
+/// Stable bridge values. Timing arrangements move whole layers without trimming.
+enum class LayerTimeArrangement : u32 {
+    AlignStarts = 0, Sequence = 1, AlignEnds = 2,
+    DistributeStarts = 3, DistributeGaps = 4,
+    StartsAtPlayhead = 5, EndsAtPlayhead = 6,
+};
+
 enum class EngineState : u8 {
     Uninitialized = 0,
     Ready,
@@ -473,6 +480,8 @@ public:
     /// Novo animador com `props`; devolve o índice (−1 = falhou).
     i32 add_text_animator(u64 layerId, u32 props) noexcept;
     bool remove_text_animator(u64 layerId, u32 index) noexcept;
+    i32 duplicate_text_animator(u64 layerId, u32 index) noexcept;
+    bool move_text_animator(u64 layerId, u32 from, u32 to) noexcept;
     /// Ajustes não animáveis (0..6 e as cores 28..35) de uma vez.
     bool set_text_animator(u64 layerId, u32 index, const f32* v40) noexcept;
     /// Valor de um parâmetro (TextAnimParam): com keyframes, grava no playhead.
@@ -631,6 +640,12 @@ public:
     /// camada inteira anda (conteúdo e keyframes junto). Um passo de desfazer.
     /// Devolve quantas camadas andaram.
     [[nodiscard]] Result<u32> stagger_layers(const u64* layerIds, u32 count, i64 stepFrames, bool keysOnly) noexcept;
+    /// Atomic timing arrangement; skips locked/missing/duplicate IDs. Sequence
+    /// follows the supplied display order; distributions sort by start time.
+    /// Keeps duration, source offset, local animation, and unselected layers.
+    /// No ripple; invalid bounds/gaps reject the entire plan, without history.
+    [[nodiscard]] Result<u32> arrange_layer_times(const u64* layerIds, u32 count,
+        LayerTimeArrangement mode, i64 playhead = 0) noexcept;
     [[nodiscard]] Result<u64> add_camera() noexcept;
     [[nodiscard]] Result<u64> add_light(u32 kind) noexcept;
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
@@ -708,6 +723,8 @@ public:
     /// Modo (MaskOperation: 0 somar, 1 subtrair, 2 intersectar, 3 diferença,
     /// 4 nenhum), invertida, feather e expansão (px da camada), opacidade 0..1.
     bool set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 feather, f32 expansion, f32 opacity) noexcept;
+    bool set_mask_param(u64 layerId, u32 maskId, u32 param, f32 value) noexcept;
+    bool toggle_mask_param_key(u64 layerId, u32 maskId, u32 param) noexcept;
     /// Liga/desliga o key do caminho no cabeçote (`keyed` = ficou com key).
     bool toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyed = nullptr) noexcept;
     /// Marca o keyframe do caminho da máscara aqui — com keyframe no cabeçote,
@@ -1530,6 +1547,7 @@ private:
     // --- Sincronização --------------------------------------------------------
     /// Protege projeto, timeline, playback, seleção e imagens.
     mutable std::mutex modelMutex_;
+    std::mutex commandSubmitMutex_; ///< publication vs session replacement; never waits for rendering
     /// Protege backend e renderer (GPU). Nunca adquirido com o do modelo já
     /// preso por outra thread que espere o de render — a ordem é sempre
     /// modelo → render, ou render sozinho.

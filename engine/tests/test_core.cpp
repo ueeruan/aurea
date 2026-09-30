@@ -118,6 +118,29 @@ AUREA_TEST(Arena, ResetReusesBlock) {
     AUREA_CHECK_EQ(arena.capacity(), cap);
 }
 
+AUREA_TEST(Arena, AlignsAbsoluteAddressesAcrossGrowthAndReset) {
+    // Also runs in the 32-bit runner, where malloc may return an 8-byte base.
+    for (usize block : {96u, 1024u, 262144u}) {
+        Arena arena(block);
+        for (usize alignment : {16u, 64u, 256u}) {
+            for (int i = 0; i < 100; ++i) {
+                void* p = arena.alloc(864, alignment); // scene uniform-sized allocation
+                AUREA_CHECK(p != nullptr);
+                AUREA_CHECK(reinterpret_cast<uintptr_t>(p) % alignment == 0);
+            }
+            arena.reset();
+        }
+    }
+}
+
+AUREA_TEST(Arena, RejectsOverflowAndInvalidAlignment) {
+    Arena arena;
+    AUREA_CHECK(arena.alloc(100, 0) == nullptr);
+    AUREA_CHECK(arena.alloc(100, 3) == nullptr);
+    AUREA_CHECK(arena.alloc(std::numeric_limits<usize>::max(), 16) == nullptr);
+    AUREA_CHECK(arena.alloc_array<u64>(std::numeric_limits<usize>::max()) == nullptr);
+}
+
 AUREA_TEST(Arena, GrowsWhenFull) {
     Arena arena(1024);
     void* a = arena.alloc(4096);

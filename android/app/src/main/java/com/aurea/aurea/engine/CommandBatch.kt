@@ -446,6 +446,13 @@ class CommandBatch(private val engine: AureaEngine) {
         b.putFloat(Off.GAIN_VALUE + 4, value)
     }
 
+    /** Keep all edited axes and their undo boundaries in the same submitted batch. */
+    fun layoutTransform(layer: Long, property: Int, value: Float) = emit(CommandType.LAYER_LAYOUT_TRANSFORM) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putInt(Off.GAIN_VALUE, property)
+        b.putFloat(Off.GAIN_VALUE + 4, value)
+    }
+
     fun setLayerReversed(layer: Long, reversed: Boolean) = emit(CommandType.LAYER_SET_REVERSED) { b ->
         b.putHandle(Off.LAYER, layer)
         b.put(Off.SECOND_U32, if (reversed) 1 else 0)
@@ -723,4 +730,5 @@ object CommandType {
     const val SHAPE_SET_FILL = 93
     const val SHAPE_SET_STROKE = 94
     const val SHAPE_SET_PARAM = 95
+    const val LAYER_LAYOUT_TRANSFORM = 96
 }

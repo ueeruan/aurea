@@ -124,7 +124,10 @@ internal fun EffectPicker(
 ) {
     val prefs = store.effectPrefs
     val catalog = store.catalog
-    val pickable = remember(catalog, layerHasAudio) { pickableEffects(catalog, layerHasAudio) }
+    val textLayer = store.detail?.kind == 4
+    val pickable = remember(catalog, layerHasAudio, textLayer) {
+        pickableEffects(catalog, layerHasAudio).filter { textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform") }
+    }
     val categories = remember(pickable) { effectCategories(pickable) }
     val sorted = remember(pickable, categories) { arrangeCatalog(pickable, categories) }
     var chosen by rememberSaveable { mutableStateOf<String?>(null) }

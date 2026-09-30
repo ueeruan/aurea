@@ -25,6 +25,42 @@ import XCTest
         app = nil
     }
 
+    func testMaskOpacityOpensItsOwnAnimatedCurve() throws {
+        _ = try launch("mask-animation")
+        let border = app.buttons["3 Border"].firstMatch
+        XCTAssertTrue(border.waitForExistence(timeout: 5)); border.tap()
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "mask\\.[0-9]+\\.param\\.2")).firstMatch
+        let scroll = app.scrollViews["mask.scroll"].firstMatch
+        for _ in 0..<6 {
+            if row.exists && row.isHittable { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(row.isHittable)
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5)).tap()
+        let curve = app.buttons.matching(NSPredicate(format: "identifier MATCHES %@", "mask\\.[0-9]+\\.curve\\.2")).firstMatch
+        XCTAssertTrue(curve.waitForExistence(timeout: 5))
+        if !curve.isHittable { scroll.swipeUp() }
+        XCTAssertTrue(curve.isEnabled); curve.tap()
+        let opened = try awaitSnapshot("Mask opacity has its own editable curve") { $0.curveProperty == 43 && $0.curveParam == 2 }
+        XCTAssertEqual(opened.curveKeys.count, 2)
+        XCTAssertEqual(opened.curveKeys.first?.value ?? -1, 1, accuracy: 0.001)
+        XCTAssertEqual(opened.curveKeys.last?.value ?? -1, 0.25, accuracy: 0.001)
+    }
+
+    func testTextAnimatorMovesToEffectsWithoutDeletingThePreset() throws {
+        let before = try launch("text-animator-editing")
+        XCTAssertEqual(before.textAnimatorCount, 1)
+        XCTAssertFalse(app.buttons["text.anim.0.duplicate"].exists)
+        let add = app.buttons["text.transform.add"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
+        let added = try awaitSnapshot("Text animation opens in the real effect stack") { $0.effectCount == before.effectCount + 1 }
+        XCTAssertEqual(added.textAnimatorCount, before.textAnimatorCount)
+        XCTAssertTrue(app.otherElements["aurea.effects.stack"].firstMatch.waitForExistence(timeout: 5))
+        try undo()
+        let undone = try awaitSnapshot("Undo removes the effect and preserves the existing preset") { $0.effectCount == before.effectCount }
+        XCTAssertEqual(undone.textAnimatorCount, before.textAnimatorCount)
+    }
+
     func testAndroidManualProjectOpensEditsAndPlaysAcrossCuts() throws {
         let before = try launch("manual-android-project")
         XCTAssertEqual(before.layerCount,14)
@@ -147,6 +183,14 @@ import XCTest
 
     private func openCommandSearch(_ query: String) throws {
         var open = app.buttons["commandSearchOpen"].firstMatch
+        // Redesenho 2026-09-29: com uma seção da camada aberta o topo é só `‹` + título
+        // (sem lupa nem engrenagem); o `‹` volta às ferramentas da camada, onde a lupa mora.
+        let section = app.otherElements["editor.sectionBar"].firstMatch
+        if !open.waitForExistence(timeout: 2), section.exists {
+            let back = section.buttons.firstMatch
+            XCTAssertTrue(back.isHittable); back.tap()
+            open = app.buttons["commandSearchOpen"].firstMatch
+        }
         if !open.waitForExistence(timeout: 2) {
             // Redesenho 2026-09-29: sem camada escolhida, a busca mora no menu da engrenagem.
             let gear = app.buttons["editor.projectMenu"].firstMatch
@@ -664,6 +708,12 @@ import XCTest
             XCTAssertEqual(group.count, threeD ? 3 : 1)
             let preset = app.buttons["curve.preset.bounce"].firstMatch
             XCTAssertTrue(preset.waitForExistence(timeout: 5)); XCTAssertTrue(preset.isHittable); preset.tap()
+            let count = app.buttons["curve.bounce.count"].firstMatch
+            XCTAssertTrue(count.waitForExistence(timeout: 5)); count.tap()
+            XCTAssertTrue(count.label.contains("4"))
+            let strength = app.sliders["curve.bounce.strength"].firstMatch
+            XCTAssertTrue(strength.waitForExistence(timeout: 5))
+            strength.adjust(toNormalizedSliderPosition: 0.75)
             // O segmento que SAI do keyframe 0: o componente (ou o grupo XYZ inteiro no 3D).
             let changed = try awaitSnapshot("Preset changes the selected outgoing segment (\(scene))") { state in
                 group.allSatisfy { property in
@@ -945,7 +995,9 @@ import XCTest
         let step = app.staticTexts["stagger.step"].firstMatch
         XCTAssertTrue(step.waitForExistence(timeout: 5))
         let apply = app.buttons["stagger.layers"].firstMatch
-        XCTAssertTrue(apply.waitForExistence(timeout: 5)); XCTAssertTrue(apply.isHittable)
+        XCTAssertTrue(apply.waitForExistence(timeout: 5))
+        if !apply.isHittable { app.scrollViews["timeline.batch.tools"].firstMatch.swipeUp() }
+        XCTAssertTrue(apply.isHittable)
         XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
         apply.tap()
         let staggered = try awaitSnapshot("Layers cascade by 3 frames in timeline order") {
@@ -961,6 +1013,34 @@ import XCTest
         keys.tap()
         _ = try awaitSnapshot("Keys-only stagger keeps every bar in place") {
             ($0.layerStarts ?? []) == starts
+        }
+    }
+
+    func testTimingArrangementDistributesUnequalClipsAndUndoesOnce() throws {
+        let before = try launch("timeline-arrangement")
+        XCTAssertEqual(before.layerStarts, [10, 12, 71])
+        XCTAssertEqual(before.layerEnds, [20, 37, 78])
+        let starts = app.buttons["timeline.arrange.3"].firstMatch
+        XCTAssertTrue(starts.waitForExistence(timeout: 5))
+        XCTAssertTrue(starts.isHittable)
+        XCTAssertGreaterThanOrEqual(starts.frame.height, 44)
+        starts.tap()
+        let distributed = try awaitSnapshot("Starts are evenly spaced; durations are preserved") {
+            $0.layerStarts == [10, 41, 71] && $0.layerEnds == [20, 66, 78]
+        }
+        XCTAssertEqual(distributed.layerOrder, before.layerOrder)
+        try undo()
+        _ = try awaitSnapshot("One undo restores all intervals") {
+            $0.layerStarts == before.layerStarts && $0.layerEnds == before.layerEnds
+        }
+        let gaps = app.buttons["timeline.arrange.4"].firstMatch
+        XCTAssertTrue(gaps.isHittable); gaps.tap()
+        _ = try awaitSnapshot("Equal gaps preserve unequal clip lengths") {
+            $0.layerStarts == [10, 33, 71] && $0.layerEnds == [20, 58, 78]
+        }
+        try undo()
+        _ = try awaitSnapshot("Gap arrangement undoes once") {
+            $0.layerStarts == before.layerStarts && $0.layerEnds == before.layerEnds
         }
     }
 
@@ -1159,9 +1239,9 @@ import XCTest
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
         else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
         else if scene == "parent-new-null" { XCTAssertEqual(state.layerCount, 2) }
-        else if scene == "stagger" { XCTAssertEqual(state.layerCount, 3) }
+        else if scene == "stagger" || scene == "timeline-arrangement" { XCTAssertEqual(state.layerCount, 3) }
         else { XCTAssertEqual(state.layerCount, 1) }
-        let expectedSelection: Int = scene == "parent-new-null" ? 2 : (scene == "stagger" ? 3 : 1)
+        let expectedSelection: Int = scene == "parent-new-null" ? 2 : (["stagger", "timeline-arrangement"].contains(scene) ? 3 : 1)
         XCTAssertEqual(state.selectionCount, expectedSelection)
         XCTAssertGreaterThan(state.primaryID, 0)
         XCTAssertEqual(state.detail.position.count, 3)
@@ -1270,6 +1350,8 @@ import XCTest
         let layerOrder: [Int64]
         let layerParents: [Int64]?
         let layerStarts: [Int64]?
+        let textAnimatorCount: Int?
+        let layerEnds: [Int64]?
         let markerCount: Int
         let missingAssets: Int
         let curveKeys: [CurveKey]

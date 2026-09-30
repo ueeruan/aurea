@@ -456,6 +456,8 @@ class AureaEngine private constructor() {
         nativeSetMaskProps(nativeHandle, layer, mask, op, inverted, feather, expansion, opacity)
     /** 1 = ficou com key no cabeçote, 0 = tirou, −1 = falhou. */
     fun toggleMaskPathKey(layer: Long, mask: Int): Int = nativeToggleMaskPathKey(nativeHandle, layer, mask)
+    fun setMaskParam(layer: Long, mask: Int, param: Int, value: Float): Boolean = nativeSetMaskParam(nativeHandle, layer, mask, param, value)
+    fun toggleMaskParamKey(layer: Long, mask: Int, param: Int): Boolean = nativeToggleMaskParamKey(nativeHandle, layer, mask, param)
     /** Floats necessários (Engine::query_masks); só escreve se couber em [out]. */
     fun queryMasks(layer: Long, out: FloatArray): Int = nativeQueryMasks(nativeHandle, layer, out)
     /** Síncrono (decodifica): fora da UI. Quadros rastreados, ou −Errc. */
@@ -607,6 +609,8 @@ class AureaEngine private constructor() {
     fun isFillerWord(word: String): Boolean = nativeIsFillerWord(word)
     fun addTextAnimator(layer: Long, props: Int): Int = nativeAddTextAnimator(nativeHandle, layer, props)
     fun removeTextAnimator(layer: Long, index: Int): Boolean = nativeRemoveTextAnimator(nativeHandle, layer, index)
+    fun duplicateTextAnimator(layer: Long, index: Int): Int = nativeDuplicateTextAnimator(nativeHandle, layer, index)
+    fun moveTextAnimator(layer: Long, from: Int, to: Int): Boolean = nativeMoveTextAnimator(nativeHandle, layer, from, to)
     fun setTextAnimator(layer: Long, index: Int, v: FloatArray): Boolean = nativeSetTextAnimator(nativeHandle, layer, index, v)
     fun setTextAnimParam(layer: Long, index: Int, param: Int, value: Float): Boolean = nativeSetTextAnimParam(nativeHandle, layer, index, param, value)
     fun toggleTextAnimKey(layer: Long, index: Int, param: Int): Boolean = nativeToggleTextAnimKey(nativeHandle, layer, index, param)
@@ -788,6 +792,7 @@ class AureaEngine private constructor() {
     fun parentToNewNull(ids: LongArray): Long = nativeParentToNewNull(nativeHandle, ids)
     /** "Escalonar": cascata de `stepFrames` na ordem de `ids` (a primeira fica). Camadas que andaram ≥ 0 ou −Errc. */
     fun staggerLayers(ids: LongArray, stepFrames: Int, keysOnly: Boolean): Int = nativeStaggerLayers(nativeHandle, ids, stepFrames, keysOnly)
+    fun arrangeLayerTimes(ids: LongArray, mode: Int, playhead: Long): Int = nativeArrangeLayerTimes(nativeHandle, ids, mode, playhead)
 
     /** Congela o quadro do clipe no `frame` por `holdFrames`; o resto anda. Id ≥ 0 ou −Errc. */
     fun freezeFrame(layer: Long, frame: Int, holdFrames: Int): Long = nativeFreezeFrame(nativeHandle, layer, frame, holdFrames)
@@ -921,6 +926,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeParentToNewNull(handle: Long, ids: LongArray): Long
     private external fun nativeStaggerLayers(handle: Long, ids: LongArray, stepFrames: Int, keysOnly: Boolean): Int
+    private external fun nativeArrangeLayerTimes(handle: Long, ids: LongArray, mode: Int, playhead: Long): Int
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeMarkBeatLive(handle: Long): Long
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
@@ -955,6 +961,8 @@ class AureaEngine private constructor() {
     private external fun nativeIsFillerWord(word: String): Boolean
     private external fun nativeAddTextAnimator(handle: Long, layer: Long, props: Int): Int
     private external fun nativeRemoveTextAnimator(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeDuplicateTextAnimator(handle: Long, layer: Long, index: Int): Int
+    private external fun nativeMoveTextAnimator(handle: Long, layer: Long, from: Int, to: Int): Boolean
     private external fun nativeSetTextAnimator(handle: Long, layer: Long, index: Int, v: FloatArray): Boolean
     private external fun nativeSetTextAnimParam(handle: Long, layer: Long, index: Int, param: Int, value: Float): Boolean
     private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
@@ -1037,6 +1045,8 @@ class AureaEngine private constructor() {
     private external fun nativeSetMaskPath(handle: Long, layer: Long, mask: Int, pts: FloatArray?, count: Int, closed: Boolean, undo: Boolean): Boolean
     private external fun nativeSetMaskProps(handle: Long, layer: Long, mask: Int, op: Int, inverted: Boolean, feather: Float, expansion: Float, opacity: Float): Boolean
     private external fun nativeToggleMaskPathKey(handle: Long, layer: Long, mask: Int): Int
+    private external fun nativeSetMaskParam(handle: Long, layer: Long, mask: Int, param: Int, value: Float): Boolean
+    private external fun nativeToggleMaskParamKey(handle: Long, layer: Long, mask: Int, param: Int): Boolean
     private external fun nativeQueryMasks(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeTrackMask(handle: Long, layer: Long, mask: Int, mode: Int): Int
     private external fun nativeQueryRig(handle: Long, layer: Long, bind: Boolean, out: FloatArray): Int

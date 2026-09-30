@@ -146,6 +146,7 @@ set(AUREA_CORE_SOURCES
     src/text/Text.cpp
     src/text/FontManager.cpp
     src/text/TextAnimator.cpp
+    src/text/TextTransform.cpp
     src/text/Captions.cpp
     src/engine/EngineCaptions.cpp
     src/engine/EngineCaptionPresets.cpp

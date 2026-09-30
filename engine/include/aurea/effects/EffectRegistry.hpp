@@ -131,6 +131,7 @@ namespace effect_keys {
     // --- Pacote de paridade: o que faltava para editar movimento e acabamento ---
     // Comportamentos de movimento (função pura do tempo; ver MotionBehaviorEffects.cpp)
     inline constexpr const char* kOscillate          = "aurea.motion.oscillate";
+    inline constexpr const char* kOscillateCycles    = "aurea.motion.oscillate.cycles";
     inline constexpr const char* kSwing              = "aurea.motion.swing";
     inline constexpr const char* kWiggle             = "aurea.motion.wiggle";
     // Transições por forma (ver TransitionEffects.cpp)

@@ -57,7 +57,7 @@ internal class TimelineController(
     var metrics = TimelineMetrics(1f)
     var onEmptyTap: () -> Unit = {}
     var onKeyframeTap: (Long, KeyframeRow) -> Unit = { _, _ -> }
-    var onTrackTap: (Long, Int, Int) -> Unit = { _, _, _ -> }
+    var onTrackTap: (Long, Int, Int, Int) -> Unit = { _, _, _, _ -> }
     /** Camadas com as trilhas abertas: VÁRIAS de uma vez, cada uma com o seu ▸/▾ na calha. */
     val expandedLayers = mutableStateOf<Set<Long>>(emptySet())
     /** Trilhas de grupo (Posição, Escala...) abertas nos eixos. */
@@ -331,6 +331,7 @@ internal class TimelineController(
             val x1 = max(xOf(s.end), x0 + m.barMinWidth)
             val score = when {
                 handlesOn(s) && (kind == HitKind.TRIM_START || kind == HitKind.TRIM_END || kind == HitKind.KEYFRAME) -> 4
+                kind == HitKind.CAP_BACK && isSelected(s.id) -> 4
                 p.x >= x0 && p.x <= x1 -> if (isSelected(s.id)) 3 else 2
                 else -> 1
             }
@@ -553,7 +554,7 @@ internal class TimelineController(
                 // Escolhendo keyframes, o corpo da camada da seleção não abre
                 // painel nem doca (fecharia as trilhas abertas no meio da escolha).
                 if (store.keySelectMode && store.keySelection?.layer == r.id) return
-                if (r.track != null) onTrackTap(r.id, r.track.property, r.track.effect) else selectTap(r)
+                if (r.track != null) onTrackTap(r.id, r.track.property, r.track.effect, r.track.param) else selectTap(r)
             }
         }
     }

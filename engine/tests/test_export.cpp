@@ -30,6 +30,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/text/TextAnimator.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -422,6 +423,76 @@ bool gpu_ok() {
 // =============================================================================
 // Equivalência: pipeline × serial, bytes idênticos
 // =============================================================================
+AUREA_TEST(Export, TextAnimatorColorsReachExportFramesAndRemainStableAfterReopen) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg; cfg.width = 320; cfg.height = 180;
+    Rig r(cfg, 30, 12, 2); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    auto id = r.e.add_text("AUREA"); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* layer = r.comp()->layer(LayerId::unpack(*id));
+    layer->end = FrameIndex{12};
+    AUREA_CHECK_EQ(r.e.add_text_animator(*id, kTextPropFill), 0);
+    for (u32 p : {text::kFillR, text::kFillG, text::kFillB}) {
+        auto& tr = layer->tracks.get_or_create(TrackProperty::TextAnimParam, 0, p);
+        (void)tr.set(FrameIndex{0}, p == text::kFillR ? 1.f : 0.f, Interpolation::Linear);
+        (void)tr.set(FrameIndex{11}, p == text::kFillB ? 1.f : 0.f, Interpolation::Linear);
+    }
+    Command duration; duration.type = CommandType::CompositionSetDuration;
+    duration.comp_duration.comp = r.e.project()->timeline().current(); duration.comp_duration.duration = FrameIndex{12};
+    AUREA_CHECK(r.e.apply_command(duration).ok());
+    r.cap.keepFrames = true;
+    auto result = run_export(r, 180, 30, false, 30);
+    AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), 12u);
+    if (r.cap.hashes.size() != 12) return;
+    AUREA_CHECK(r.cap.hashes.front() != r.cap.hashes.back());
+    AUREA_CHECK(r.cap.hashes[5] != r.cap.hashes.front());
+    AUREA_CHECK(r.cap.ptsMonotonic);
+    const auto frames = r.cap.frames;
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_text_export_colors.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok()); AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    r.cap = BenchCapture{}; r.cap.keepFrames = true;
+    result = run_export(r, 180, 30, false, 30);
+    AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+    AUREA_CHECK(frames == r.cap.frames);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Export, MaskScalarAnimationSurvivesProjectReopenInExportedFrames) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg; cfg.width = 320; cfg.height = 180;
+    Rig r(cfg, 30, 12, 2); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    auto id = r.e.add_text("AUREA"); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* layer = r.comp()->layer(LayerId::unpack(*id));
+    layer->end = FrameIndex{12};
+    const f32 pts[] = {-1000,-1000,0,0,0,0, 1000,-1000,0,0,0,0, 1000,1000,0,0,0,0, -1000,1000,0,0,0,0};
+    const i32 mask = r.e.add_mask(*id, pts, 4, true); AUREA_CHECK(mask >= 0);
+    if (mask < 0) return;
+    auto& opacity = layer->tracks.get_or_create(TrackProperty::MaskParam, static_cast<u32>(mask), 2);
+    (void)opacity.set(FrameIndex{0}, 1.f, Interpolation::Linear);
+    (void)opacity.set(FrameIndex{11}, 0.f, Interpolation::Linear);
+    Command duration; duration.type = CommandType::CompositionSetDuration;
+    duration.comp_duration.comp = r.e.project()->timeline().current(); duration.comp_duration.duration = FrameIndex{12};
+    AUREA_CHECK(r.e.apply_command(duration).ok());
+    r.cap.keepFrames = true;
+    auto result = run_export(r, 180, 30, false, 30);
+    AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), 12u);
+    if (r.cap.hashes.size() != 12) return;
+    AUREA_CHECK(r.cap.hashes.front() != r.cap.hashes.back());
+    AUREA_CHECK(r.cap.hashes[5] != r.cap.hashes.front());
+    AUREA_CHECK(r.cap.ptsMonotonic);
+    const auto frames = r.cap.frames;
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_mask_export.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok()); AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    r.cap = BenchCapture{}; r.cap.keepFrames = true;
+    result = run_export(r, 180, 30, false, 30);
+    AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+    AUREA_CHECK(frames == r.cap.frames);
+    std::remove(path.c_str());
+}
+
 AUREA_TEST(Export, NeuralUpscaleKeepsOutputTimingAudioAndDimensions) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;

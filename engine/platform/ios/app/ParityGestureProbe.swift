@@ -45,7 +45,9 @@ import UIKit
         var coreStatus = AureaStatus()
         let readCoreStatus = model.engine.readStatus(&coreStatus)
         let keySelectionCount: Int = model.timelineKeySelection?.count ?? -1
+        let textAnimatorCount = primary.map { model.engine.textAnimators($0).count / 40 } ?? 0
         let packet: [String: Any] = [
+            "textAnimatorCount": textAnimatorCount,
             "playbackReport": model.engine.playbackReport(),
             "processFootprintBytes": model.engine.perf()["processFootprintBytes"] ?? 0,
             "playing": readCoreStatus ? coreStatus.playing : 0,
@@ -56,6 +58,7 @@ import UIKit
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
             "layerOrder": model.layers.map { $0.id },
             "layerStarts": model.layers.map { (row: LayerItem) -> Int64 in Int64(row.startFrame) },
+            "layerEnds": model.layers.map { (row: LayerItem) -> Int64 in Int64(row.endFrame) },
             "layerParents": model.layers.map { (row: LayerItem) -> Int64 in
                 (model.engine.layerDetail(row.id)?["parentId"] as? NSNumber)?.int64Value ?? 0
             },

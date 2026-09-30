@@ -100,15 +100,44 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
 
     /** Tem alças arrastáveis (bézier ou reta, que vira bézier ao ser puxada). */
     val hasHandles get() = isBezier || interp == Interp.LINEAR || interp == Interp.EASE_IN || interp == Interp.EASE_OUT || interp == Interp.EASE_IN_OUT
-    val supportsInversion get() = interp in Interp.LINEAR..Interp.CUSTOM
+    val supportsInversion get() = interp in Interp.LINEAR..Interp.CUSTOM || interp == Interp.BOUNCE
 
+    val bounceCount get() = if (y2 == -10f) kotlin.math.round(x1 * 8).toInt().coerceIn(1, 8) else 3
+    val bounceStrength get() = if (y2 == -10f) y1.coerceIn(.1f, .9f) else .5f
+    fun bounce(count: Int = bounceCount, strength: Float = bounceStrength) =
+        Ease(Interp.BOUNCE, count / 8f, strength, if (y2 == -10f) x2 else 1f, -10f)
+
+    private fun ballistic(t: Float): Float {
+        if (t <= 0f) return 0f
+        if (t >= 1f) return 1f
+        val reverse = x2 < .5f
+        val time = if (reverse) 1f-t else t
+        val r = bounceStrength
+        var power = r
+        var total = 1f
+        repeat(bounceCount) { total += 2f*power; power *= r }
+        val landing = 1f/total
+        var result = (time/landing)*(time/landing)
+        if (time >= landing) {
+            var start = landing; power = r
+            for (i in 0 until bounceCount) {
+                val span = 2f*landing*power
+                if (time <= start+span || i == bounceCount-1) {
+                    val u = ((time-start)/span).coerceIn(0f,1f)
+                    result = 1f-4f*power*power*u*(1f-u); break
+                }
+                start += span; power *= r
+            }
+        }
+        return if (reverse) 1f-result else result
+    }
     fun transform(t: Float): Float = when (interp) {
         Interp.HOLD -> if (t < 1f) 0f else 1f
         Interp.LINEAR -> t
         Interp.EASE_IN -> t * t
         Interp.EASE_OUT -> 1f - (1f - t) * (1f - t)
         Interp.EASE_IN_OUT -> if (t < 0.5f) 2f * t * t else 1f - 2f * (1f - t) * (1f - t)
-        Interp.BOUNCE -> {
+        Interp.BOUNCE -> if (y2 == -10f) ballistic(t) else {
             val u = t.coerceIn(0f, 1f)
             if (u < .5f) 4f*u*u else {
                 val (start, span, height) = if (u < .75f) Triple(.5f,.25f,.25f) else if (u < .9f) Triple(.75f,.15f,.0625f) else Triple(.9f,.1f,.015625f)
@@ -141,6 +170,7 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
 
     /** Alças espelhadas; nulo significa simétrica ou família sem inversão disponível. */
     fun inverted(): Ease? = when (interp) {
+        Interp.BOUNCE -> bounce().copy(x2 = if (y2 == -10f && x2 < .5f) 1f else 0f)
         Interp.EASE_IN -> copy(interp = Interp.EASE_OUT)
         Interp.EASE_OUT -> copy(interp = Interp.EASE_IN)
         Interp.BEZIER, Interp.CUSTOM -> {
@@ -152,7 +182,7 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
 
     fun same(o: Ease): Boolean {
         if (interp != o.interp) return false
-        if (!isBezier) return true
+        if (!isBezier && interp != Interp.BOUNCE) return true
         return power == o.power && abs(x1 - o.x1) < 0.01f && abs(y1 - o.y1) < 0.01f && abs(x2 - o.x2) < 0.01f && abs(y2 - o.y2) < 0.01f
     }
 }
@@ -203,7 +233,7 @@ private val Families = listOf(
         ),
     ),
     CurveFamily(R.string.pn_textpreset_bounce, CupertinoGlyph.Scribble,
-        listOf(CurvePreset(R.string.pn_textpreset_bounce, Ease(Interp.BOUNCE,0f,0f,1f,1f)),
+        listOf(CurvePreset(R.string.pn_textpreset_bounce, Ease(Interp.BOUNCE,.375f,.5f,1f,-10f)),
                CurvePreset(R.string.pn_textpreset_elastic, Ease(Interp.ELASTIC,0f,0f,1f,1f)))),
     CurveFamily(R.string.pn_curve_steps4, CupertinoGlyph.ChartBarAltFill,
         listOf(CurvePreset(R.string.pn_curve_steps4, Ease(Interp.STEPS,0f,0f,1f,1f)),
@@ -214,6 +244,7 @@ private val Families = listOf(
 private fun nameOf(e: Ease): Int {
     for (f in Families) for (p in f.presets) if (e.same(p.ease) && p.name != null) return p.name
     return when (e.interp) {
+        Interp.BOUNCE -> R.string.pn_textpreset_bounce
         Interp.EASE_IN -> R.string.pn_ease_in
         Interp.EASE_OUT -> R.string.pn_ease_out
         Interp.EASE_IN_OUT -> R.string.pn_ease_in_out
@@ -435,6 +466,22 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     onEnd = { store.endGesture() },
                 )
             }
+            if (graphMode == 0 && ease.interp == Interp.BOUNCE) {
+                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CurveChip(stringResource(R.string.curve_bounce_count) + " ×${ease.bounceCount}", tag = "curve.bounce.count") {
+                        setCurve("bounce", ease.bounce(count = ease.bounceCount % 8 + 1))
+                    }
+                    Text(stringResource(R.string.fx_amplitude), modifier = Modifier.padding(start = 8.dp),
+                        style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = Color.White)))
+                    var changing by remember { mutableStateOf(false) }
+                    androidx.compose.material3.Slider(value = ease.bounceStrength, valueRange = .1f.. .9f,
+                        onValueChange = { if (!changing) { changing = true; store.beginGesture("bounce") }; applyEase(store, layer, start, ease.bounce(strength = it)) },
+                        onValueChangeFinished = { if (changing) { changing = false; store.endGesture() } },
+                        colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = CurveGreen,
+                            activeTrackColor = CurveGreen, inactiveTrackColor = CurveRailFill),
+                        modifier = Modifier.weight(1f).testTag("curve.bounce.strength").semantics { contentDescription = "Bounce" })
+                }
+            }
             // Presets prontos (menu), salvar a curva e as curvas salvas numa
             // fileira fina que rola: o painel não cresce.
             if (graphMode == 0) {
@@ -494,7 +541,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                             .semantics { contentDescription = bounceName }
                             .tocavel {
                                 store.beginGesture("curva")
-                                applyEase(store, layer, start, if (bouncing) bez(0.42f, 0f, 0.58f, 1f) else Ease(Interp.BOUNCE, 0f, 0f, 1f, 1f))
+                                applyEase(store, layer, start, if (bouncing) bez(0.42f, 0f, 0.58f, 1f) else Ease(Interp.BOUNCE, .375f, .5f, 1f, -10f))
                                 store.endGesture()
                             },
                         contentAlignment = Alignment.Center,
@@ -659,8 +706,8 @@ private fun CurveGraph(
             val base = pt(0f, 0f).y
             val curve = Path()
             val area = Path().apply { moveTo(0f, base) }
-            for (i in 0..72) {
-                val t = i / 72f
+            for (i in 0..256) {
+                val t = i / 256f
                 val q = pt(t, ease.transform(t))
                 if (i == 0) curve.moveTo(q.x, q.y) else curve.lineTo(q.x, q.y)
                 area.lineTo(q.x, q.y)

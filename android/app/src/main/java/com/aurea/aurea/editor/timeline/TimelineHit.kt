@@ -29,8 +29,8 @@ internal object RowHit {
 
     fun endHandleVisible(x1: Float, width: Float): Boolean = x1 <= width
 
-    /** Tampa "‹" da fileira compacta: gruda na ponta esquerda VISÍVEL do clipe (depois da pílula). */
-    fun capLeft(m: TimelineMetrics, x0: Float): Float = max(x0, m.headerColumn)
+    /** A tampa fica antes da borda temporal real; o scroll nunca a prende ao cabeçalho. */
+    fun capLeft(m: TimelineMetrics, x0: Float): Float = x0 - m.capWidth
 
     /** Onde a seta › começa; a ‹ fica logo antes dela (as duas juntas na ponta direita). */
     fun nextArrowLeft(m: TimelineMetrics, x0: Float, x1: Float, width: Float): Float =
@@ -58,10 +58,11 @@ internal object RowHit {
         // tipo (tocar abre/fecha as trilhas, segurar trava/reordena).
         if (x < m.headerColumn) return if (x < m.eyeHitRight) HitKind.HEADER_EYE else HitKind.HEADER
 
-        // Losango mais perto do dedo (faixa de baixo da barra e o respiro abaixo dela).
+        // Alvo de toque centrado no mesmo ponto usado pelo desenho.
         var key = -1
         var keyX = 0f
-        if (keysEnabled && y >= m.keyTouchTop && instants.isNotEmpty()) {
+        val keyCy = if (compact) m.diamondCyCompact else m.diamondCyNormal
+        if (keysEnabled && abs(y - keyCy) <= m.keyTouchHalf && instants.isNotEmpty()) {
             val i = Keyframes.nearestIndex(instants, TimeAxis.frameAt(x, view, pxPerFrame, centerX))
             val kx = TimeAxis.xOf(instants[i].toDouble(), view, pxPerFrame, centerX)
             if (abs(kx - x) <= m.keyTouchHalf) {
@@ -85,7 +86,8 @@ internal object RowHit {
             // Bug 10.2 da spec: o losango em 0 (o caso mais comum) roubava a alça de
             // início. Dentro da zona da alça, o losango só vence se o dedo está NO
             // desenho dele e dentro da barra; o resto da zona é da alça.
-            val onGlyph = abs(keyX - x) <= m.keyGlyphHalf && x >= x0 && x <= x1
+            val onGlyph = abs(keyX - x) + abs(y - keyCy) <= m.keyGlyphHalf &&
+                x >= (if (compact) capLeft(m, x0) else x0) && x <= x1
             if ((!inStart && !inEnd) || onGlyph) {
                 out[0] = key
                 return HitKind.KEYFRAME
@@ -93,16 +95,15 @@ internal object RowHit {
         }
         if (inStart) return HitKind.TRIM_START
         if (inEnd) return HitKind.TRIM_END
+        if (compact && overBar && x >= capLeft(m, x0) && x < x0) return HitKind.CAP_BACK
         if (overBar && x >= x0 && x <= x1) {
             if (compact) {
                 // Redesenho 2026-09-29: a tampa branca "‹" na ponta esquerda
                 // volta (sai da seção); as setas de trocar de camada ‹ › moram
                 // juntas na ponta direita (não disputam com a tampa).
-                val cap = capLeft(m, x0)
-                if (x <= cap + m.capWidth) return HitKind.CAP_BACK
                 val next = nextArrowLeft(m, x0, x1, width)
                 val prev = next - m.arrowSlot
-                if (prev >= cap + m.capWidth) {
+                if (prev >= max(x0, m.headerColumn)) {
                     if (x >= next && x <= next + m.arrowSlot + m.arrowTouchPad) return HitKind.ARROW_NEXT
                     if (x >= prev - m.arrowTouchPad && x < next) return HitKind.ARROW_PREV
                 }

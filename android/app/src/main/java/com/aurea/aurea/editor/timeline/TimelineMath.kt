@@ -16,8 +16,9 @@ import kotlin.math.roundToInt
 // =============================================================================
 
 /**
- * Tempo ↔ px com o cabeçote FIXO no centro da timeline inteira (A e B): quem
- * anda é o conteúdo. `view` é o frame sob o cabeçote.
+ * Tempo da composição ↔ X absoluto da timeline. `view` é o tempo no centro
+ * da janela, inclusive durante scroll/zoom fracionário. O cabeçote também
+ * passa por xOf: seu frame inteiro pode não coincidir com `view` durante um gesto.
  */
 internal object TimeAxis {
     fun safeFps(fps: Float): Float = if (fps > 0f) fps else 30f
@@ -29,7 +30,7 @@ internal object TimeAxis {
         (centerX + (frame - view) * pxPerFrame).toFloat()
 
     fun frameAt(x: Float, view: Double, pxPerFrame: Float, centerX: Float): Double =
-        view + (x - centerX) / pxPerFrame
+        if (pxPerFrame == 0f) view else view + (x.toDouble() - centerX) / pxPerFrame
 
     /**
      * A vista não vai para antes do zero, mas PODE passar do fim da composição
@@ -60,7 +61,7 @@ internal object Zoom {
 
     /** Pinça: a vista que mantém `focusFrame` sob o ponto focal `focusX`. */
     fun anchoredView(focusFrame: Double, focusX: Float, centerX: Float, pxPerFrame: Float): Double =
-        focusFrame - (focusX - centerX) / pxPerFrame
+        focusFrame - TimeAxis.frameAt(focusX, 0.0, pxPerFrame, centerX)
 }
 
 /**

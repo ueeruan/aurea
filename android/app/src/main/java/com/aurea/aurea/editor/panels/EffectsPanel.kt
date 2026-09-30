@@ -380,7 +380,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     {
                         val k = selected
                         val layer = store.primary
-                        val t = store.detail?.localPlayhead
+                        val t = store.detail?.localFrame(store.playhead)
                         if (k != null && layer != null && t != null) {
                             store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
                                 store.selectKeyframe(layer, key)

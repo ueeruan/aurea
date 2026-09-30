@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         com.aurea.aurea.home.HomeViewModel.loadTheme(this)
-        setContent { CreatorWelcome { AureaApp(store, conta) } }
+        setContent { LanguageWelcome { CreatorWelcome { AureaApp(store, conta) } } }
 
         if (savedInstanceState == null) {
             // Número de cadastrados + revalidação da sessão (com rede; offline, segue dentro).
@@ -215,6 +215,29 @@ class MainActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         super.onLowMemory()
         store.onTrimMemory(EditorStore.TRIM_COMPLETE)
+    }
+}
+
+@Composable
+private fun MainActivity.LanguageWelcome(content: @Composable () -> Unit) {
+    if (!AppLanguage.needsChoice(this)) { content(); return }
+    BackHandler { finish() }
+    com.aurea.aurea.ui.theme.AureaTheme {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("AUREA", style = MaterialTheme.typography.headlineMedium)
+                Text("Choose your language · Escolha seu idioma", style = MaterialTheme.typography.titleLarge)
+                AppLanguage.entries.forEach { language ->
+                    OutlinedButton(onClick = {
+                        AppLanguage.select(this@LanguageWelcome, language)
+                        recreate()
+                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text(if (language == AppLanguage.SYSTEM) stringResource(R.string.settings_language_system) else language.display)
+                    }
+                }
+            }
+        }
     }
 }
 

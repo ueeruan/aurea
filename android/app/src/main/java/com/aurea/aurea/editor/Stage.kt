@@ -99,7 +99,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     androidx.compose.runtime.LaunchedEffect(store) {
         androidx.compose.runtime.snapshotFlow { store.project.path }.collect { StageView.reset(store) }
     }
-    Box(modifier.background(AureaColors.EditorTopBar).clipToBounds()) {
+    Box(modifier.testTag("editor.stage").background(AureaColors.EditorTopBar).clipToBounds()) {
         PreviewSurface(store, Modifier.fillMaxSize())
         if (!store.rawPlayback) Spacer(
             Modifier
@@ -166,33 +166,40 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
                 if (store.gizmo != null) {
                     val toolLabel = stringResource(R.string.gizmo_tool_label)
+                    val toolName = stringResource(when (store.gizmoTool) {
+                        GIZMO_ROTATE -> R.string.gizmo_tool_rotate
+                        GIZMO_SCALE -> R.string.gizmo_tool_scale
+                        else -> R.string.gizmo_tool_move
+                    })
                     androidx.compose.material3.TextButton(
                         onClick = store::cycleGizmoTool,
-                        modifier = Modifier.heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
-                            .testTag("gizmo.tool").semantics { contentDescription = toolLabel },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        modifier = Modifier.width(48.dp).heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
+                            .testTag("gizmo.tool").semantics { contentDescription = "$toolLabel: $toolName" },
                     ) {
-                        Text(
-                            stringResource(when (store.gizmoTool) {
-                                GIZMO_ROTATE -> R.string.gizmo_tool_rotate
-                                GIZMO_SCALE -> R.string.gizmo_tool_scale
-                                else -> R.string.gizmo_tool_move
-                            }),
-                            color = AureaColors.Accent,
-                        )
+                        CupertinoIcon(when (store.gizmoTool) {
+                            GIZMO_ROTATE -> CupertinoGlyph.ArrowCounterclockwise
+                            GIZMO_SCALE -> CupertinoGlyph.ArrowDownRightSquare
+                            else -> CupertinoGlyph.ArrowUpDownSquare
+                        }, size = 22.dp, tint = AureaColors.Accent)
                     }
                 }
                 // Mundo/Local vale para mover; girar e escala usam os eixos da camada.
                 if (store.gizmo != null && store.gizmoTool == GIZMO_MOVE) androidx.compose.material3.TextButton(
                     onClick = store::toggleGizmoSpace,
-                    modifier = Modifier.heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp)),
-                ) { Text(if (store.gizmoLocalSpace) "Local XYZ" else "World XYZ", color = AureaColors.Text) }
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                    modifier = Modifier.width(48.dp).heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
+                        .testTag("gizmo.space").semantics { contentDescription = if (store.gizmoLocalSpace) "Local XYZ" else "World XYZ" },
+                ) { CupertinoIcon(if (store.gizmoLocalSpace) CupertinoGlyph.CubeFill else CupertinoGlyph.Cube, size = 22.dp, tint = AureaColors.Text) }
                 if (!store.sceneEditor) androidx.compose.material3.TextButton(
                     onClick = {
                         store.autoKeyTransforms = !store.autoKeyTransforms
                         store.showToast(AppText.get(store.getApplication<Application>(), if (store.autoKeyTransforms) R.string.edt_autokey_on_hint else R.string.edt_autokey_off_hint))
                     },
-                    modifier = Modifier.heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp)),
-                ) { Text(if (store.autoKeyTransforms) "Auto-Key: On" else "Auto-Key: Off", color = if (store.autoKeyTransforms) AureaColors.Accent else AureaColors.Text) }
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                    modifier = Modifier.width(48.dp).heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
+                        .testTag("stage.autokey").semantics { contentDescription = if (store.autoKeyTransforms) "Auto-Key: On" else "Auto-Key: Off" },
+                ) { CupertinoIcon(if (store.autoKeyTransforms) CupertinoGlyph.SuitDiamondFill else CupertinoGlyph.SuitDiamond, size = 22.dp, tint = if (store.autoKeyTransforms) AureaColors.Accent else AureaColors.Text) }
             }
         }
         PerfHud(store, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 6.dp))

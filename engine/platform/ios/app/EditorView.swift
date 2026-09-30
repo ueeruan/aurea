@@ -13,6 +13,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
+import Photos
 import CoreText
 import Combine
 
@@ -71,6 +72,9 @@ struct EditorView: View {
                                 TransportView().frame(height: metrics.transport)
                             }
                             .contentShape(Rectangle())
+                            // `.contain` antes do identificador: sem ele o id da divisa
+                            // sobrescrevia o dos botões do transporte (ex.: `transport.duplicate`).
+                            .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("editor.previewDivider")
                             .simultaneousGesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
                                 .onChanged { value in
@@ -151,6 +155,13 @@ private struct AddLayerPickers: ViewModifier {
             // atende um — o do modelo 3D ficava mudo (as texturas vêm por aqui também).
             .fileImporter(isPresented: $importing, allowedContentTypes: fileTypes,
                           allowsMultipleSelection: fileKind == .model || fileKind == .modelTextures) { result in
+                if case .failure(let error) = result {
+                    let issue = error as NSError
+                    if issue.domain != NSCocoaErrorDomain || issue.code != NSUserCancelledError {
+                        model.toast = AureaText.t("ios_import_copy_failed", error.localizedDescription)
+                    }
+                    return
+                }
                 guard case .success(let urls) = result, let url = urls.first else { return }
                 switch fileKind {
                 // Seleção múltipla/pasta: o FBX/OBJ vem com as texturas e o .mtl.
@@ -172,7 +183,9 @@ private struct AddLayerPickers: ViewModifier {
     private var fileTypes: [UTType] {
         switch fileKind {
         case .svg: return [UTType(filenameExtension: "svg") ?? .data]
-        case .model: return [.data, .folder] // glTF/GLB/OBJ/FBX (+ texturas, ou a pasta): o motor valida a extensão.
+        // Some file providers register FBX/OBJ as content, without public.data.
+        // Accept file-system items; the importer validates supported extensions.
+        case .model: return [.item]
         case .modelTextures: return [.image, .data]
         default: return [.audio]
         }
@@ -246,30 +259,30 @@ private struct ModelTexturesPrompt: ViewModifier {
                     let hasGizmo = !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty
                     if hasGizmo {
                         Button { model.cycleGizmoTool() } label: {
-                            Text(AureaText.t(model.gizmoTool == 1 ? "gizmo_tool_rotate" : model.gizmoTool == 2 ? "gizmo_tool_scale" : "gizmo_tool_move"))
-                                .foregroundStyle(AureaColors.accent)
-                                .padding(.horizontal, 12).frame(minHeight: 48)
+                            CupertinoGlyph.text(model.gizmoTool == 1 ? CupertinoGlyph.ArrowCounterclockwise : model.gizmoTool == 2 ? CupertinoGlyph.ArrowDownRightSquare : CupertinoGlyph.ArrowUpDownSquare, size: 22, color: AureaColors.accent)
+                                .frame(width: 48, height: 48)
                                 .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
-                        }.accessibilityLabel(AureaText.t("gizmo_tool_label")).accessibilityIdentifier("stage.gizmo.tool")
+                        }.accessibilityLabel(AureaText.t("gizmo_tool_label"))
+                            .accessibilityValue(AureaText.t(model.gizmoTool == 1 ? "gizmo_tool_rotate" : model.gizmoTool == 2 ? "gizmo_tool_scale" : "gizmo_tool_move"))
+                            .accessibilityIdentifier("stage.gizmo.tool")
                     }
                     // Mundo/Local vale para mover; girar e escala usam os eixos da camada.
                     if hasGizmo && model.gizmoTool == 0 {
                         Button { model.gizmoLocalSpace.toggle() } label: {
-                            Text(model.gizmoLocalSpace ? "Local XYZ" : "World XYZ")
-                                .padding(.horizontal, 12).frame(minHeight: 48)
+                            CupertinoGlyph.text(model.gizmoLocalSpace ? CupertinoGlyph.CubeFill : CupertinoGlyph.Cube, size: 22, color: AureaColors.text)
+                                .frame(width: 48, height: 48)
                                 .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
-                        }.accessibilityIdentifier("stage.gizmo.space")
+                        }.accessibilityLabel(model.gizmoLocalSpace ? "Local XYZ" : "World XYZ").accessibilityIdentifier("stage.gizmo.space")
                     }
                     if !model.sceneEditor {
                         Button {
                             model.autoKeyTransforms.toggle()
                             model.toast = AureaText.t(model.autoKeyTransforms ? "ios_autokey_on" : "ios_autokey_off")
                         } label: {
-                            Text(model.autoKeyTransforms ? "Auto-Key: On" : "Auto-Key: Off")
-                                .foregroundStyle(model.autoKeyTransforms ? AureaColors.accent : AureaColors.text)
-                                .padding(.horizontal, 12).frame(minHeight: 48)
+                            CupertinoGlyph.text(model.autoKeyTransforms ? CupertinoGlyph.SuitDiamondFill : CupertinoGlyph.SuitDiamond, size: 22, color: model.autoKeyTransforms ? AureaColors.accent : AureaColors.text)
+                                .frame(width: 48, height: 48)
                                 .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
-                        }.accessibilityIdentifier("stage.autokey")
+                        }.accessibilityLabel(model.autoKeyTransforms ? "Auto-Key: On" : "Auto-Key: Off").accessibilityIdentifier("stage.autokey")
                     }
                 }.font(.aurea(size: 14)).foregroundStyle(AureaColors.text).buttonStyle(.plain)
                     .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -638,16 +651,18 @@ private struct BatchToolsView: View {
     @EnvironmentObject private var model: AureaModel
     private var selected: [LayerItem] { model.layers.filter { model.selection.contains($0.id) } }
     var body: some View {
+        ScrollView(.vertical) {
         VStack(spacing: 8) {
             HStack(spacing: 0) {
                 tool(CupertinoGlyph.ArrowRightToLine, "editor_aparar_inicio_cabecote") { trim(start: true) }
                 tool(CupertinoGlyph.Scissors, "editor_dividir_cabecote") { split() }
                 tool(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote") { trim(start: false) }
                 AureaColors.border.frame(width: 1, height: 24)
-                vectorTool("automirrored.rounded.FormatAlignLeft", "editor_alinhar_inicios") { timeAlign(0) }
-                vectorTool("rounded.Stairs", "editor_escada_comeca_quando_cima_termina") { timeAlign(1) }
-                vectorTool("automirrored.rounded.FormatAlignRight", "editor_alinhar_fins") { timeAlign(2) }
+                vectorTool("automirrored.rounded.FormatAlignLeft", "editor_alinhar_inicios") { model.arrangeLayerTimes(0) }
+                vectorTool("rounded.Stairs", "editor_escada_comeca_quando_cima_termina") { model.arrangeLayerTimes(1) }
+                vectorTool("automirrored.rounded.FormatAlignRight", "editor_alinhar_fins") { model.arrangeLayerTimes(2) }
             }.frame(height: 52).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+            timingArrangementRow
             HStack(spacing: 0) {
                 tool(CupertinoGlyph.ArrowLeftToLine, "editor_alinhar_esquerda_tela", size: 18) { align(0) }
                 tool(CupertinoGlyph.ArrowLeftRight, "editor_centralizar_horizontal", size: 18) { align(1) }
@@ -664,6 +679,26 @@ private struct BatchToolsView: View {
             staggerRow
             Spacer(minLength: 0)
         }.padding(.horizontal, 10).padding(.top, 4)
+        }.accessibilityIdentifier("timeline.batch.tools")
+    }
+    private var timingArrangementRow: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            HStack(spacing: 0) {
+                timingAction(3, "timeline_distribute_starts")
+                timingAction(4, "timeline_distribute_gaps")
+                timingAction(5, "timeline_starts_at_playhead")
+                timingAction(6, "timeline_ends_at_playhead")
+            }
+        }.background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityIdentifier("timeline.arrange.scroll")
+    }
+    private func timingAction(_ mode: UInt32, _ key: String) -> some View {
+        let enabled = selected.filter { !$0.locked }.count >= (mode <= 4 ? 3 : 1)
+        return Button { model.arrangeLayerTimes(mode) } label: {
+            Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).lineLimit(1)
+                .foregroundStyle(enabled ? AureaColors.accent : AureaColors.disabled)
+                .padding(.horizontal, 14).frame(minWidth: 44, minHeight: 48).contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(!enabled).accessibilityIdentifier("timeline.arrange.\(mode)")
     }
     /// "Escalonar" (par do StaggerRow do Android): − N + quadros e dois toques
     /// que aplicam — camadas inteiras ou só keyframes — em cascata na ordem da timeline.
@@ -716,19 +751,6 @@ private struct BatchToolsView: View {
     private func split() {
         guard !timeTargets.isEmpty else { model.toast = AureaText.t("editor_leve_cabecote_dentro_camadas"); return }
         pause(); model.splitAtPlayhead(timeTargets.map(\.id))
-    }
-    private func timeAlign(_ mode: Int) {
-        let rows = selected.filter { !$0.locked }
-        guard rows.count >= 2 else { model.toast = AureaText.t("sh_pick_two_unlocked_layers"); return }
-        let start = rows.map(\.startFrame).min() ?? 0, end = rows.map(\.endFrame).max() ?? 0
-        var cursor = Int(rows[0].startFrame)
-        pause(); model.beginGesture(mode == 0 ? "alinhar inícios" : mode == 1 ? "escada" : "alinhar fins")
-        for row in rows {
-            let delta = mode == 0 ? Int(start - row.startFrame) : mode == 2 ? Int(end - row.endFrame) : cursor - Int(row.startFrame)
-            cursor += Int(row.endFrame - row.startFrame)
-            if delta != 0 { model.moveLayers([row.id], deltaFrames: delta) }
-        }
-        model.endGesture()
     }
     private struct Box {
         let id: Int64
@@ -1287,7 +1309,12 @@ private struct AddLayerSheet: View {
                 ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_fechar_adicionar"), action: close)
             }.padding(.leading, 16).frame(height: 48)
             AureaColors.hairline.frame(height: 1)
-            if tab == 0 { shapeGrid } else { cards }
+            if tab == 0 { shapeGrid }
+            else if tab == 1 {
+                EditorMediaGallery(openFiles: { photos($0 ? .video : .photo) }, openAI: { model.openPanel(.aiVideo) }) { url, video in
+                    model.importMedia(url: url, kind: video ? .video : .image); close()
+                }
+            } else { cards }
         }
         .background(AureaColors.editorPanel)
         // Os seletores NÃO moram aqui: ver `AddLayerPickers` (raiz do editor).
@@ -1419,6 +1446,159 @@ private struct AddLayerSheet: View {
 /// Seletor de fotos do sistema, equivalente ao Photo Picker do Android.
 /// `loadFileRepresentation` copia o arquivo temporário sem carregar um vídeo
 /// inteiro em Data no processo da interface.
+private final class EditorPhotoLibrary: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
+    @Published var assets: PHFetchResult<PHAsset>?
+    @Published var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    @Published var loading = false
+    private var video = false
+    private var generation = 0
+    private var requestingAuthorization = false
+    override init() { super.init(); PHPhotoLibrary.shared().register(self) }
+    deinit { PHPhotoLibrary.shared().unregisterChangeObserver(self) }
+    func photoLibraryDidChange(_ changeInstance: PHChange) { DispatchQueue.main.async { [weak self] in self?.reload() } }
+    func show(video: Bool) { self.video = video; reload() }
+    func reload() {
+        generation += 1
+        let request = generation, isVideo = video
+        status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            loading = true
+            guard !requestingAuthorization else { return }
+            requestingAuthorization = true
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] _ in DispatchQueue.main.async {
+                self?.requestingAuthorization = false
+                self?.reload()
+            } }
+            return
+        }
+        assets = nil
+        guard status == .authorized || status == .limited else { loading = false; return }
+        loading = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let options = PHFetchOptions()
+            options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            let result = PHAsset.fetchAssets(with: isVideo ? .video : .image, options: options)
+            DispatchQueue.main.async {
+                guard let self, self.generation == request else { return }
+                self.assets = result; self.loading = false
+            }
+        }
+    }
+    func manage() {
+        if status == .limited {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            guard var presenter = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController else { return }
+            while let next = presenter.presentedViewController { presenter = next }
+            PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter)
+        } else if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+    }
+}
+
+private struct EditorMediaGallery: View {
+    @StateObject private var library = EditorPhotoLibrary()
+    @Environment(\.scenePhase) private var phase
+    @State private var video = false
+    @State private var importing = false
+    @State private var failure = false
+    let openFiles: (Bool) -> Void
+    let openAI: () -> Void
+    let picked: (URL, Bool) -> Void
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach([false, true], id: \.self) { mode in
+                    Button { video = mode } label: {
+                        Text(AureaText.t(mode ? "editor_video" : "editor_foto")).font(.aurea(size: 14, weight: .semibold))
+                            .foregroundStyle(video == mode ? AureaColors.accent : AureaColors.muted)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }.buttonStyle(.plain).accessibilityIdentifier(mode ? "gallery.videos" : "gallery.photos")
+                }
+                ShellBarButton(glyph: CupertinoGlyph.Folder, description: AureaText.t("gallery_files"), size: 20, width: 48, height: 48) { openFiles(video) }
+                ShellBarButton(glyph: CupertinoGlyph.WandStars, description: AureaText.t("sh_add_ai_video"), size: 20, width: 48, height: 48, action: openAI)
+            }
+            if library.status == .limited {
+                HStack {
+                    Text(AureaText.t("gallery_limited")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+                    Spacer()
+                    Button(AureaText.t("gallery_manage")) { library.manage() }.frame(minHeight: 44)
+                }.padding(.horizontal, 12)
+            }
+            Text(AureaText.t("gallery_recent")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 12).padding(.bottom, 6)
+            ZStack {
+                if library.loading || importing { ProgressView().tint(AureaColors.accent) }
+                else if library.status != .authorized && library.status != .limited {
+                    VStack {
+                        Text(AureaText.t("gallery_access")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                        Button(AureaText.t("gallery_allow")) { library.manage() }.frame(minHeight: 44)
+                    }.padding(.horizontal, 16)
+                } else if failure {
+                    Button(AureaText.t("gallery_error")) { failure = false; library.reload() }.frame(minHeight: 44)
+                } else if let assets = library.assets, assets.count > 0 {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 3)], spacing: 3) {
+                            ForEach(0..<assets.count, id: \.self) { index in
+                                let asset = assets.object(at: index)
+                                Button { importAsset(asset) } label: { EditorPhotoThumbnail(asset: asset) }
+                                    .buttonStyle(.plain).id(asset.localIdentifier)
+                                    .accessibilityLabel(AureaText.t(video ? "editor_video" : "editor_foto") + " " + (asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? ""))
+                            }
+                        }.padding(3)
+                    }.accessibilityIdentifier("gallery.grid")
+                } else { Text(AureaText.t("gallery_empty")).foregroundStyle(AureaColors.muted).font(.aurea(size: 13)) }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.tint(AureaColors.accent).accessibilityIdentifier("gallery.panel")
+            .onAppear { library.show(video: video) }
+            .onChange(of: video) { library.show(video: $0) }
+            .onChange(of: phase) { if $0 == .active { library.reload() } }
+            .disabled(importing)
+    }
+    private func importAsset(_ asset: PHAsset) {
+        guard !importing else { return }
+        let isVideo = asset.mediaType == .video
+        let resources = PHAssetResource.assetResources(for: asset)
+        let primary: PHAssetResourceType = isVideo ? .fullSizeVideo : .fullSizePhoto
+        let fallback: PHAssetResourceType = isVideo ? .video : .photo
+        guard let resource = resources.first(where: { $0.type == primary }) ?? resources.first(where: { $0.type == fallback }) else { failure = true; return }
+        importing = true; failure = false
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        catch { importing = false; failure = true; return }
+        let destination = folder.appendingPathComponent(resource.originalFilename)
+        let options = PHAssetResourceRequestOptions(); options.isNetworkAccessAllowed = true
+        PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options) { error in
+            DispatchQueue.main.async {
+                importing = false
+                if error != nil { try? FileManager.default.removeItem(at: folder); failure = true }
+                else { picked(destination, isVideo) }
+            }
+        }
+    }
+}
+
+private struct EditorPhotoThumbnail: View {
+    let asset: PHAsset
+    @State private var image: UIImage?
+    @State private var request = PHInvalidImageRequestID
+    var body: some View {
+        Color.clear.aspectRatio(1, contentMode: .fit).overlay {
+            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else { AureaColors.chip.overlay { ProgressView().tint(AureaColors.muted) } }
+        }.clipped().overlay(alignment: .bottomTrailing) {
+            if asset.mediaType == .video {
+                let seconds = max(0, Int(asset.duration))
+                Text(String(format: "%d:%02d", seconds / 60, seconds % 60)).font(.aurea(size: 11)).foregroundStyle(.white)
+                    .padding(4).background(.black.opacity(0.65))
+            }
+        }.onAppear {
+            let options = PHImageRequestOptions(); options.isNetworkAccessAllowed = true; options.resizeMode = .fast
+            request = PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 256, height: 256), contentMode: .aspectFill, options: options) { result, _ in
+                DispatchQueue.main.async { image = result }
+            }
+        }.onDisappear { PHImageManager.default().cancelImageRequest(request) }
+    }
+}
+
 struct ShellMediaPicker: UIViewControllerRepresentable {
     let filter: PHPickerFilter
     let picked: (URL?, Bool) -> Void

@@ -166,6 +166,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.control.color", EffectMeta(R.string.fx_desc_control_color, AllTargets))
     put("aurea.control.point", EffectMeta(R.string.fx_desc_control_point, AllTargets))
     // --- Pacote de paridade: movimento, transições por forma e acabamento ---
+    put("aurea.motion.oscillate.cycles", EffectMeta(R.string.fx_desc_oscillate_cycles, AllTargets))
     put("aurea.motion.oscillate", EffectMeta(R.string.fx_desc_motion_oscillate, AllTargets))
     put("aurea.motion.swing", EffectMeta(R.string.fx_desc_motion_swing, AllTargets))
     put("aurea.motion.wiggle", EffectMeta(R.string.fx_desc_motion_wiggle, AllTargets))

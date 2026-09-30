@@ -226,6 +226,28 @@ AUREA_TEST(Track, BezierRandomReverseSeekPreservesCurveAndOvershoot) {
     }
 }
 
+AUREA_TEST(Track, ConfigurableBounceHasContinuousLandingsAndReversesExactly) {
+    Track track; track.set(FrameIndex{0},0); track.set(FrameIndex{1000},1);
+    track.set_interpolation(FrameIndex{0},Interpolation::Bounce,3.f/8,.5f,1,-10);
+    AUREA_CHECK_NEAR(track.keys[0].by2,-10,1e-6);
+    const auto value = [](float t,int count,float strength,bool reverse=false) {
+        return apply_easing(Interpolation::Bounce,t,count/8.f,strength,reverse?0.f:1.f,-10);
+    };
+    AUREA_CHECK_NEAR(value(1.f/2.75f,3,.5f),1,1e-5);
+    AUREA_CHECK_NEAR(value(1.5f/2.75f,3,.5f),.75f,1e-5);
+    for (int count=1;count<=8;++count) for(float strength:{.1f,.5f,.9f}) {
+        float prev=0;
+        for(int i=0;i<=10000;++i) {
+            const float t=i/10000.f, v=value(t,count,strength);
+            AUREA_CHECK(v>=0 && v<=1.000001f);
+            AUREA_CHECK_NEAR(v,1-value(1-t,count,strength,true),1e-5);
+            AUREA_CHECK(std::fabs(v-prev)<.02f); prev=v;
+        }
+        AUREA_CHECK_NEAR(value(0,count,strength),0,1e-6);
+        AUREA_CHECK_NEAR(value(1,count,strength),1,1e-6);
+    }
+}
+
 AUREA_TEST(Track, BounceElasticAndFourStepsHaveRealDistinctMotion) {
     static_assert(static_cast<u8>(Interpolation::CustomCurve) == 6);
     static_assert(static_cast<u8>(Interpolation::Bounce) == 7);

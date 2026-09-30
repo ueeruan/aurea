@@ -31,8 +31,10 @@ namespace aurea::text {
 /// Parâmetros animáveis de um animador (effectParamIndex da trilha).
 enum TextAnimParam : u32 {
     kSelStart = 0, kSelEnd, kSelOffset, kSelAmount, kSelEaseHigh, kSelEaseLow,
+    kFillR = 6, kFillG, kFillB,
     kPosX = 10, kPosY, kPosZ, kScaleX, kScaleY, kRotX, kRotY, kRotZ, kOpacity, kTracking, kBlur, kSkew, kStrokeWidth, kCharOffset,
     kFillMix, kWiggleRate, kSkewAxis, kTrackingEm, kAnchorGrouping,
+    kStrokeR = 29, kStrokeG, kStrokeB,
 };
 
 /// Unidade de um glifo para os seletores.

@@ -6,6 +6,7 @@
 
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/text/TextTransform.hpp"
 #include "aurea/timeline/Layer.hpp"
 
 #include <cmath>
@@ -13,6 +14,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <limits>
 
 using namespace aurea;
 
@@ -247,6 +249,129 @@ AUREA_TEST(Text, RichTextSpansColorBoldAndSize) {
     AUREA_CHECK(rich.contentWidth > plain.contentWidth);
 }
 
+namespace {
+struct TextEditRig {
+    Engine e;
+    u64 id = 0;
+    TextEditRig() {
+        EngineConfig cfg; cfg.workerCount = 1; cfg.disableAutosave = true;
+        AUREA_CHECK(e.initialize(cfg).ok());
+        AUREA_CHECK(e.new_project(320, 180, 30, "text editing").ok());
+        auto added = e.add_text("AAAAAA"); AUREA_CHECK(added.ok());
+        if (added.ok()) id = *added;
+    }
+    ~TextEditRig() { e.shutdown(); }
+    Layer* layer() { return e.project()->timeline().composition(e.project()->timeline().current())->layer(LayerId::unpack(id)); }
+    void seek(i64 frame) { Command c; c.type = CommandType::PlaybackSeek; c.seek.time = tick_at(FrameIndex{frame}, 30); AUREA_CHECK(e.apply_command(c).ok()); }
+    void undo() { Command c; c.type = CommandType::Undo; AUREA_CHECK(e.apply_command(c).ok()); }
+};
+}
+
+AUREA_TEST(TextAnimatorEditing, StackOperationsPreserveTracksCurvesUndoAndProject) {
+    TextEditRig r;
+    AUREA_CHECK_EQ(r.e.add_text_animator(r.id, kTextPropPosition), 0);
+    AUREA_CHECK_EQ(r.e.add_text_animator(r.id, kTextPropScale), 1);
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, text::kPosX, 20));
+    AUREA_CHECK(r.e.toggle_text_anim_key(r.id, 0, text::kPosX));
+    r.seek(30);
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, text::kPosX, 80));
+    auto* original = r.layer()->tracks.find(TrackProperty::TextAnimParam, 0, text::kPosX);
+    original->keys[0].interp = Interpolation::Hold;
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 1, text::kScaleX, 150));
+    AUREA_CHECK(r.e.toggle_text_anim_key(r.id, 1, text::kScaleX));
+    AUREA_CHECK_EQ(r.e.duplicate_text_animator(r.id, 0), 1);
+    AUREA_CHECK_EQ(r.layer()->text.animators.size(), 3u);
+    const auto* copied = r.layer()->tracks.find(TrackProperty::TextAnimParam, 1, text::kPosX);
+    AUREA_CHECK(copied && copied->keys.size() == 2);
+    if (copied) AUREA_CHECK(copied->keys[0].interp == Interpolation::Hold);
+    AUREA_CHECK(r.layer()->tracks.find(TrackProperty::TextAnimParam, 2, text::kScaleX) != nullptr);
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 1, text::kPosX, 200));
+    AUREA_CHECK_NEAR(r.layer()->tracks.find(TrackProperty::TextAnimParam, 0, text::kPosX)->keys[1].value, 80, 0.001);
+    AUREA_CHECK(r.e.move_text_animator(r.id, 2, 0));
+    AUREA_CHECK(r.layer()->text.animators[0].props == kTextPropScale);
+    AUREA_CHECK(r.layer()->tracks.find(TrackProperty::TextAnimParam, 0, text::kScaleX) != nullptr);
+    AUREA_CHECK(r.layer()->tracks.find(TrackProperty::TextAnimParam, 1, text::kPosX) != nullptr);
+    AUREA_CHECK(r.layer()->tracks.find(TrackProperty::TextAnimParam, 2, text::kPosX) != nullptr);
+    r.undo();
+    AUREA_CHECK(r.layer()->text.animators[2].props == kTextPropScale);
+    AUREA_CHECK(r.e.move_text_animator(r.id, 0, 2));
+    AUREA_CHECK(r.layer()->text.animators[1].props == kTextPropScale);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_text_stack_edit.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    AUREA_CHECK(r.layer()->text.animators.size() == 3);
+    AUREA_CHECK_NEAR(r.layer()->tracks.find(TrackProperty::TextAnimParam, 2, text::kPosX)->keys[1].value, 80, 0.001);
+    AUREA_CHECK(r.e.remove_text_animator(r.id, 1));
+    AUREA_CHECK(r.layer()->tracks.find(TrackProperty::TextAnimParam, 1, text::kPosX) != nullptr);
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(TextAnimatorEditing, FillAndStrokeKeysEvaluateAndSurviveReopen) {
+    TextEditRig r;
+    AUREA_CHECK_EQ(r.e.add_text_animator(r.id, kTextPropFill | kTextPropStroke), 0);
+    const u32 params[] = {text::kFillR, text::kFillG, text::kFillB, text::kStrokeR, text::kStrokeG, text::kStrokeB};
+    for (u32 p : params) { AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, p, 0)); AUREA_CHECK(r.e.toggle_text_anim_key(r.id, 0, p)); }
+    r.seek(30);
+    for (u32 p : params) {
+        AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, p, 1));
+        r.layer()->tracks.find(TrackProperty::TextAnimParam, 0, p)->keys[0].interp = Interpolation::Linear;
+    }
+    auto verify = [&] {
+        std::vector<text::GlyphAnim> out;
+        text::evaluate_text_animators(r.layer()->text, r.layer()->tracks, 15, 30, {{0, 0, 0}}, 1, 1, 1, out);
+        AUREA_CHECK_NEAR(out[0].fill.x, .5, .001); AUREA_CHECK_NEAR(out[0].fill.y, .5, .001); AUREA_CHECK_NEAR(out[0].fill.z, .5, .001);
+        AUREA_CHECK_NEAR(out[0].stroke.x, .5, .001); AUREA_CHECK_NEAR(out[0].stroke.y, .5, .001); AUREA_CHECK_NEAR(out[0].stroke.z, .5, .001);
+        f32 values[40]{}; AUREA_CHECK_EQ(r.e.query_text_animators(r.id, values, 40), 1u);
+        AUREA_CHECK((static_cast<u32>(values[36]) & (7u << 6)) == (7u << 6));
+        AUREA_CHECK((static_cast<u32>(values[37]) & (7u << 19)) == (7u << 19));
+    };
+    verify();
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_text_colors_edit.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok()); AUREA_CHECK(r.e.load_project(path.c_str()).ok()); verify();
+    std::remove(path.c_str());
+    AUREA_CHECK(!r.e.set_text_anim_param(r.id, 0, text::kFillR, std::numeric_limits<f32>::quiet_NaN()));
+    AUREA_CHECK(!r.e.move_text_animator(r.id, 0, 1));
+    AUREA_CHECK_EQ(r.e.duplicate_text_animator(r.id, 12), -1);
+    r.layer()->locked = true;
+    AUREA_CHECK_EQ(r.e.duplicate_text_animator(r.id, 0), -1);
+    AUREA_CHECK(!r.e.move_text_animator(r.id, 0, 0));
+}
+
+AUREA_TEST(TextAnimatorEditing, RandomCharacterOffsetUsesTheSameSelectorAsTransforms) {
+    TextData t; t.content = "AAAAAAAA";
+    TextAnimator a; a.props = kTextPropCharOffset | kTextPropPosition;
+    a.charOffset = 1; a.position.x = 1;
+    a.selector.end = 50; a.selector.randomOrder = true; a.selector.seed = 17;
+    t.animators.push_back(a);
+    TrackSet tracks;
+    std::vector<text::GlyphUnits> units;
+    for (u32 i = 0; i < 8; ++i) units.push_back({i, 0, 0});
+    std::vector<text::GlyphAnim> out;
+    text::evaluate_text_animators(t, tracks, 0, 30, units, 8, 1, 1, out);
+    const auto changed = text::apply_char_offset(t, tracks, 0, 30);
+    for (u32 i = 0; i < 8; ++i) AUREA_CHECK(changed[i] == (out[i].translate.x > .5f ? 'B' : 'A'));
+    AUREA_CHECK(changed != "BBBBAAAA");
+    AUREA_CHECK(changed == text::apply_char_offset(t, tracks, 0, 30));
+}
+
+AUREA_TEST(TextAnimatorEditing, QueuedSeekIsAppliedBeforeEditingAnimationKeys) {
+    TextEditRig r;
+    AUREA_CHECK_EQ(r.e.add_text_animator(r.id, kTextPropFill), 0);
+    AUREA_CHECK(r.e.toggle_text_anim_key(r.id, 0, text::kFillR));
+    Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{30}, 30);
+    AUREA_CHECK_EQ(r.e.submit_commands(&seek, 1, nullptr, 0), 1u);
+    AUREA_CHECK(r.e.set_text_anim_param(r.id, 0, text::kFillR, .25f));
+    auto* textTrack = r.layer()->tracks.find(TrackProperty::TextAnimParam, 0, text::kFillR);
+    AUREA_CHECK(textTrack && textTrack->keys.size() == 2);
+    AUREA_CHECK(textTrack && textTrack->find_exact(FrameIndex{30}) != kInvalidIndex);
+    AUREA_CHECK_EQ(r.e.add_layer_animator(r.id), 0);
+    seek.seek.time = tick_at(FrameIndex{45}, 30);
+    AUREA_CHECK_EQ(r.e.submit_commands(&seek, 1, nullptr, 0), 1u);
+    AUREA_CHECK(r.e.toggle_layer_anim_key(r.id, 0, 1));
+    auto* layerTrack = r.layer()->tracks.find(TrackProperty::LayerAnimParam, 0, 1);
+    AUREA_CHECK(layerTrack && layerTrack->find_exact(FrameIndex{45}) != kInvalidIndex);
+}
+
 AUREA_TEST(Text, AnimatorSelectorWeights) {
     TextAnimator a;
     a.props = kTextPropOpacity;
@@ -474,5 +599,86 @@ AUREA_TEST(Text, PackPresetsKeepContentAndLocalStart) {
             AUREA_CHECK(track && !track->keys.empty());
             if (track && !track->keys.empty()) AUREA_CHECK_EQ(track->keys.front().time.value, 17);
         }
+    }
+}
+
+using namespace aurea::text;
+namespace {
+struct TransformRig {
+    EffectRegistry registry;
+    Layer layer;
+    TextLayout layout;
+    std::vector<GlyphAnim> styles;
+    std::vector<Mat4> matrices;
+    TransformRig() {
+        register_builtin_effects(registry);
+        layer.kind = LayerKind::Text;
+        EffectInstance effect; effect.id = 17; effect.type = effect_type_id(kTransformEffect);
+        initialize_instance(effect, *registry.params(effect.type)); layer.effects.push_back(effect);
+        layout.chars = 4; layout.words = 2; layout.lines = 1;
+        layout.contentWidth = 80; layout.contentHeight = 20;
+        layer.transform.anchor = {42,12,0}; // natural raster includes its 2 px margin
+        for (u32 i = 0; i < 4; ++i) {
+            GlyphQuad q; q.x0 = i * 20.f; q.x1 = q.x0 + 20; q.y1 = 20;
+            q.charIndex = i; q.wordIndex = i / 2; layout.quads.push_back(q);
+        }
+    }
+    ParamValue& at(u32 p) { return layer.effects[0].params[p].constant; }
+    void evaluate(f64 frame = 0) { styles.assign(4, {}); evaluate_transform_effects(layer, registry, frame, layout, styles, matrices); }
+};
+}
+
+AUREA_TEST(TextTransform, RangePhaseAndWordsSelectExactUnits) {
+    TransformRig r;
+    r.at(kOffset) = ParamValue::vec2(40, 0);
+    r.at(kRangeEnd) = ParamValue::scalar(50);
+    r.evaluate();
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.matrices[i].col[3].x, i < 2 ? 40 : 0, .001);
+    r.at(kPhase) = ParamValue::scalar(50); r.evaluate();
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(r.matrices[i].col[3].x, i >= 2 ? 40 : 0, .001);
+    r.at(kPhase) = ParamValue::scalar(0); r.at(kComponent) = ParamValue::scalar(1); r.evaluate();
+    AUREA_CHECK_NEAR(r.matrices[0].col[3].x, r.matrices[1].col[3].x, .001);
+    AUREA_CHECK_NEAR(r.matrices[2].col[3].x, 0, .001);
+}
+
+AUREA_TEST(TextTransform, LayerAndComponentAnchorsHaveDifferentCenters) {
+    TransformRig r; r.at(kScale) = ParamValue::scalar(100);
+    r.evaluate();
+    AUREA_CHECK_NEAR((r.matrices[0] * Vec4{10, 10, 0, 1}).x, -20, .001);
+    r.layer.transform.anchor.x = 2; r.evaluate();
+    AUREA_CHECK_NEAR((r.matrices[0] * Vec4{10,10,0,1}).x,20,.001);
+    r.at(kAnchor) = ParamValue::scalar(1); r.evaluate();
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR((r.matrices[i] * Vec4{10 + 20.f * i, 10, 0, 1}).x, 10 + 20.f * i, .001);
+}
+
+AUREA_TEST(TextTransform, EffectKeysColorsAndStackOrderUseStableEffectIds) {
+    TransformRig r;
+    r.at(kOverrideFill) = ParamValue::boolean(true); r.at(kFillColor) = ParamValue::color(1, 0, 0, 1);
+    Track t; t.property = TrackProperty::EffectParam; t.effectIndex = 17; t.effectParamIndex = param_track_key(kOffset, 0);
+    Keyframe a; a.time = FrameIndex{0}; a.value = 0; a.interp = Interpolation::Linear;
+    Keyframe b = a; b.time = FrameIndex{30}; b.value = 60;
+    t.keys = {a, b}; r.layer.tracks.add(t);
+    r.evaluate(15.5);
+    AUREA_CHECK_NEAR(r.matrices[0].col[3].x, 31, .001);
+    AUREA_CHECK_NEAR(r.styles[0].fill.x, 1, .001);
+    auto scale = r.layer.effects[0]; scale.id = 42; scale.params[kScale].constant = ParamValue::scalar(100);
+    scale.params[kOverrideFill].constant = ParamValue::boolean(false); r.layer.effects.push_back(scale);
+    r.evaluate(15); const f32 first = r.matrices[0].col[3].x;
+    std::swap(r.layer.effects[0], r.layer.effects[1]); r.evaluate(15);
+    AUREA_CHECK_NEAR(first - r.matrices[0].col[3].x, 30, .001);
+    r.layer.effects[0].enabled = false; r.layer.effects[1].enabled = false; r.evaluate(15);
+    AUREA_CHECK_NEAR(r.matrices[0].col[3].x, 0, .001);
+}
+
+AUREA_TEST(TextTransform, RandomOrderIsStableAcrossSeeksAndOverlapRemainsFinite) {
+    TransformRig r; r.at(kOffset) = ParamValue::vec2(30, 0); r.at(kRangeEnd) = ParamValue::scalar(50);
+    r.at(kRandomOrder) = ParamValue::boolean(true); r.at(kSeed) = ParamValue::scalar(1.25f);
+    r.evaluate(30); const auto before = r.matrices;
+    r.evaluate(0); r.evaluate(30);
+    for (usize i = 0; i < 4; ++i) AUREA_CHECK_NEAR(before[i].col[3].x, r.matrices[i].col[3].x, .001);
+    for (u32 shape = 0; shape < 3; ++shape) for (f32 ease : {-100.f, 0.f, 100.f}) {
+        r.at(kShape) = ParamValue::scalar(static_cast<f32>(shape)); r.at(kEaseIn) = ParamValue::scalar(ease);
+        r.at(kEaseOut) = ParamValue::scalar(ease); r.at(kOverlap) = ParamValue::scalar(1000); r.evaluate();
+        for (const auto& m : r.matrices) AUREA_CHECK(std::isfinite(m.col[3].x) && m.col[3].x >= 0 && m.col[3].x <= 30);
     }
 }

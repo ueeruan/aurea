@@ -233,12 +233,14 @@ struct TransportView: View {
             Spacer(minLength: 0)
             playButton
             Spacer(minLength: 0)
+            markerButton
+            Spacer(minLength: 0)
             endButton
             Spacer(minLength: 0)
             duplicateButton
             Spacer(minLength: 0)
             fullscreenButton
-        }.padding(.horizontal, 6)
+        }.padding(.horizontal, 4)
     }
 
     private var undoButton: some View {
@@ -249,26 +251,36 @@ struct TransportView: View {
         ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 22, width: 44, height: 44,
                        enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
     }
-    /// Tocar vai ao quadro 0; segurar é o passo de antes (marca, keyframe ou quadro anterior).
+    /// Tocar navega por marcas/keyframes; segurar vai ao início.
     private var startButton: some View {
         ShellBarButton(glyph: CupertinoGlyph.ArrowLeftToLine, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 24, width: 44, height: 44,
-                       onLongPress: { model.stepTransport(-1) }, action: { model.seek(toFrame: 0) })
+                       onLongPress: { model.seek(toFrame: 0) }, action: { model.stepTransport(-1) })
+            .accessibilityIdentifier("transport.previous")
     }
-    /// Tocar vai ao fim; segurar é o passo de antes (próxima marca, keyframe ou quadro).
+    /// Tocar navega por marcas/keyframes; segurar vai ao fim.
     private var endButton: some View {
         ShellBarButton(glyph: CupertinoGlyph.ArrowRightToLine, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 24, width: 44, height: 44,
-                       onLongPress: { model.stepTransport(1) }, action: { model.seek(toFrame: model.compositionDuration) })
+                       onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { model.stepTransport(1) })
+            .accessibilityIdentifier("transport.next")
     }
     private var playButton: some View {
         ZStack(alignment: .bottomTrailing) {
             ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
                            description: AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" : (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")),
-                           size: 26, width: 48, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
+                           size: 26, width: 44, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
                            onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
             if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false) }
         }
     }
     /// Tocar duplica as camadas escolhidas (apagado sem nenhuma); segurar abre copiar e colar.
+    private var markerButton: some View {
+        let marked = model.markerFrames.contains(model.status.playhead)
+        return ShellBarButton(glyph: marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
+                              description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 20, width: 44, height: 44,
+                              tint: marked ? AureaColors.accent : AureaColors.text,
+                              onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
+            .accessibilityIdentifier("transport.marker")
+    }
     private var duplicateButton: some View {
         let empty: Bool = model.selection.isEmpty
         return ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada_segure_copiar"), size: 22, width: 44, height: 44,

@@ -73,13 +73,15 @@ fun HomeScreen(store: EditorStore) {
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (vm.tab) {
-                HomeViewModel.HOME_TAB -> CommunityPresetsTab()
+                HomeViewModel.HOME_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, false)
+                HomeViewModel.PROFILE_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, true)
                 HomeViewModel.SETTINGS_TAB -> SettingsTab(store, vm, settings, AureaDims.TabBarHeight)
                 else -> ProjectsTab(store, vm, projects, AureaDims.TabBarHeight)
             }
         }
         HomeDock(selected = vm.tab, onProjects = { vm.selectTab(HomeViewModel.PROJECTS_TAB) },
             onCommunity = { vm.selectTab(HomeViewModel.HOME_TAB) }, onCreate = { newProject = true },
+            onProfile = { vm.selectTab(HomeViewModel.PROFILE_TAB) },
             onMenu = { menu = true }, onImport = {
                 picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             })
@@ -90,6 +92,7 @@ fun HomeScreen(store: EditorStore) {
         message = signedIn?.let { stringResource(R.string.conta_conectado, it) },
         onDismiss = { menu = false }, actions = listOf(
         SheetAction(stringResource(R.string.home_tab_settings)) { vm.selectTab(HomeViewModel.SETTINGS_TAB) },
+        SheetAction(stringResource(R.string.home_import_media)) { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
         SheetAction(stringResource(R.string.project_file_import)) { projectFilePicker.launch(arrayOf("*/*")) },
         SheetAction(stringResource(R.string.report_title)) { reportProblem = true },
         SheetAction(stringResource(R.string.settings_group_about)) { about = true },
@@ -160,7 +163,8 @@ internal fun RegisteredUsersLine(count: Int?) {
 /** Equal side groups keep Create precisely centered at every phone width. */
 @Composable
 internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> Unit,
-                      onCreate: () -> Unit, onMenu: () -> Unit, onImport: () -> Unit) {
+                      onCreate: () -> Unit, onMenu: () -> Unit, onImport: () -> Unit,
+                      onProfile: () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
         .clip(RoundedCornerShape(28.dp)).background(AureaColors.Surface)
         .border(1.dp, AureaColors.Border, RoundedCornerShape(28.dp)).padding(horizontal = 4.dp, vertical = 10.dp),
@@ -174,9 +178,10 @@ internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> 
             .clickable(role = Role.Button, onClick = onCreate), contentAlignment = Alignment.Center) {
             CupertinoIcon(CupertinoGlyph.Plus, 30.dp, AureaColors.OnAccent)
         }
-        DockTab(CupertinoGlyph.Sparkles, stringResource(R.string.home_presets_short), selected == HomeViewModel.HOME_TAB,
+        DockTab(CupertinoGlyph.CaptionsBubble, stringResource(R.string.social_community), selected == HomeViewModel.HOME_TAB,
             Modifier.weight(1f).testTag("home.community"), onCommunity)
-        DockUtility(CupertinoGlyph.PhotoOnRectangle, stringResource(R.string.home_import_media), "home.import", onImport)
+        DockTab(CupertinoGlyph.PersonCropCircle, stringResource(R.string.social_profile), selected == HomeViewModel.PROFILE_TAB,
+            Modifier.weight(1f).testTag("home.profile"), onProfile)
     }
 }
 

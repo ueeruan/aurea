@@ -21,6 +21,7 @@ import { rotaDeContas } from "./contas.js";
 import { rotaDeCrash } from "./crash.js";
 // "Relatar um problema" (/api/report): o texto que a pessoa escreve no app.
 import { rotaDeRelato } from "./relato.js";
+import { communityRoute } from "./community.js";
 
 export { CofreDeVideo } from "./cofre.js";
 
@@ -59,6 +60,8 @@ export default {
     if (captions) return captions;
     const contas = await rotaDeContas(req, env, ctx, url);
     if (contas) return contas;
+    const community = await communityRoute(req, env, ctx, url);
+    if (community) return community;
     const crash = await rotaDeCrash(req, env, ctx, url);
     if (crash) return crash;
     const relato = await rotaDeRelato(req, env, ctx, url);

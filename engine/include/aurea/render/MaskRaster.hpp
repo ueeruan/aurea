@@ -35,6 +35,9 @@ inline constexpr u32 kHeaderVec4 = 3;
 /// Caminho no instante LOCAL fracionário da camada (keys interpolados).
 void evaluate_path(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out);
 
+/// Feather, expansion and opacity, sampled from the same tracks as the graph.
+[[nodiscard]] Vec3 evaluate_props(const Layer& l, const Mask& m, f64 localFrame) noexcept;
+
 /// Bezier → arestas (x0, y0, x1, y1) somadas de `offset`. `tolerance` em px:
 /// distância máxima entre a curva e a corda. Caminho fechado inclui a aresta
 /// de volta ao primeiro ponto.

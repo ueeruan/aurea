@@ -527,8 +527,26 @@ enum EffectI18nTable {
     aurea.text3d.layout|9|letter_delay|fxl_delay_per_letter|
     aurea.text3d.layout|10|rotation_variation|fxl_rotation_variation|
     aurea.text3d.layout|11|seed|fxl_variation_seed|
-    aurea.text3d.layout|12|random|fxl_letters_random|
-    aurea.text3d.layout|13|random_speed|fxl_letters_random_speed|
+    aurea.text3d.layout|12|random|fxl_random|
+    aurea.text3d.layout|13|random_speed|fxl_random_speed|
+    aurea.text.transform|0|start|fxl_start|
+    aurea.text.transform|1|end|fxl_end|
+    aurea.text.transform|2|phase|fxl_phase|
+    aurea.text.transform|3|component|fxl_component|fxo_letter,fxo_word,fxo_line
+    aurea.text.transform|4|anchor|fxl_anchor|fxo_layer,fxl_component
+    aurea.text.transform|5|offset|fxl_offset|
+    aurea.text.transform|6|angle|fxl_angle|
+    aurea.text.transform|7|scale|fxl_scale|
+    aurea.text.transform|8|stretch|fxl_stretch|
+    aurea.text.transform|9|alpha|fxl_opacity_change|
+    aurea.text.transform|10|override_fill|fxl_override_fill_color|
+    aurea.text.transform|11|fill_color|fxl_fill_color|
+    aurea.text.transform|12|ease_in|fxl_ease_in|
+    aurea.text.transform|13|ease_out|fxl_ease_out|
+    aurea.text.transform|14|overlap|fxl_overlap|
+    aurea.text.transform|15|shape|fxl_shape|fxo_square_2,fxo_smooth,fxo_triangle
+    aurea.text.transform|16|random_order|fxl_random_order|
+    aurea.text.transform|17|seed|fxl_seed|
     aurea.pattern.checkerboard|0|width|fx_largura_celula|
     aurea.pattern.checkerboard|1|height|fx_altura_celula|
     aurea.pattern.checkerboard|2|anchor|fx_ancora|
@@ -647,6 +665,12 @@ enum EffectI18nTable {
     aurea.motion.oscillate|7|seed|fx_semente|
     aurea.motion.oscillate|8|decay|fx_decaimento|
     aurea.motion.oscillate|9|pivot|fx_pivo|
+    aurea.motion.oscillate.cycles|0|direction|fxl_direction|fxl_angle,fxo_depth,fxo_orbit
+    aurea.motion.oscillate.cycles|1|angle|fxl_angle|
+    aurea.motion.oscillate.cycles|2|frequency|fx_frequencia|
+    aurea.motion.oscillate.cycles|3|magnitude|fx_amplitude|
+    aurea.motion.oscillate.cycles|4|wave|fx_forma_onda|fxo_sine,fxo_triangle
+    aurea.motion.oscillate.cycles|5|phase|fxl_phase|
     aurea.motion.swing|0|angle|fx_angulo|
     aurea.motion.swing|1|frequency|fx_frequencia|
     aurea.motion.swing|2|pivot|fx_pivo|
@@ -953,7 +977,7 @@ enum EffectI18nTable {
     aurea.shape3d.layout|0|rotation_x|fxl_part_rotation_x|
     aurea.shape3d.layout|1|rotation_y|fxl_part_rotation_y|
     aurea.shape3d.layout|2|rotation_z|fxl_part_rotation_z|
-    aurea.shape3d.layout|3|bend|fxl_shape_bend|
+    aurea.shape3d.layout|3|bend|fxl_bend|
     aurea.shape3d.layout|4|spread|fxl_spread|
     aurea.shape3d.layout|5|twist|fxl_twist|
     aurea.shape3d.layout|6|first|fxl_first_part|
@@ -962,7 +986,7 @@ enum EffectI18nTable {
     aurea.shape3d.layout|9|part_delay|fxl_delay_per_part|
     aurea.shape3d.layout|10|rotation_variation|fxl_rotation_variation|
     aurea.shape3d.layout|11|seed|fxl_variation_seed|
-    aurea.shape3d.layout|12|random|fxl_letters_random|
-    aurea.shape3d.layout|13|random_speed|fxl_letters_random_speed|
+    aurea.shape3d.layout|12|random|fxl_random|
+    aurea.shape3d.layout|13|random_speed|fxl_random_speed|
     """
 }

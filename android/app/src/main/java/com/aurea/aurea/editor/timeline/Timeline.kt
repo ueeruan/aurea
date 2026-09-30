@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.editor.ShellColors
+import com.aurea.aurea.editor.ChromeButton
+import com.aurea.aurea.editor.ShellGlyph
+import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
@@ -72,7 +76,7 @@ fun Timeline(
     onEmptyTap: () -> Unit,
     modifier: Modifier = Modifier,
     compactDock: Boolean = false,
-    onTrackTap: (layer: Long, property: Int, effect: Int) -> Unit = { _, _, _ -> },
+    onTrackTap: (layer: Long, property: Int, effect: Int, param: Int) -> Unit = { _, _, _, _ -> },
     onKeyframeTap: (layer: Long, key: KeyframeRow) -> Unit = { _, _ -> },
     timecodeStyle: TimecodeStyle = TimecodeStyle.Underline,
 ) {

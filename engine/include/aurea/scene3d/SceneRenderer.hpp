@@ -368,7 +368,7 @@ public:
     /// Profundidade de campo: amostras do disco por pixel (o preview usa
     /// poucas, o export muitas). 0 = desligada mesmo com a lente pedindo.
     void set_dof_quality(u32 taps) noexcept { dofTaps_ = std::min(taps, 256u); }
-    [[nodiscard]] PipelineKey plane_key() const noexcept;
+    [[nodiscard]] PipelineKey plane_key(bool translucent = false) const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;

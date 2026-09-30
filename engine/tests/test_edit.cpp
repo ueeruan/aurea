@@ -7,6 +7,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/render/MaskRaster.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -66,6 +67,193 @@ void clip_source(EditRig& r, u64 id, f32 speed = 1, bool reverse = false) {
     auto& x = l->tracks.get_or_create(TrackProperty::PositionX);
     x.set(FrameIndex{0}, 0); x.set(FrameIndex{200}, 500);
 }
+}
+
+AUREA_TEST(MaskAnimation, ScalarsKeepStableMaskIdsUndoAndReopen) {
+    EditRig r;
+    const f32 pts[] = {10,10,0,0,0,0, 80,10,0,0,0,0, 80,80,0,0,0,0, 10,80,0,0,0,0};
+    const i32 first = r.e.add_mask(r.a, pts, 4, true);
+    const i32 second = r.e.add_mask(r.a, pts, 4, true);
+    AUREA_CHECK(first >= 0 && second > first);
+    for (u32 p = 0; p < 3; ++p) AUREA_CHECK(r.e.toggle_mask_param_key(r.a, static_cast<u32>(second), p));
+    Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{20}, 30);
+    AUREA_CHECK_EQ(r.e.submit_commands(&seek, 1, nullptr, 0), 1u);
+    AUREA_CHECK(r.e.set_mask_param(r.a, second, 0, 40));
+    AUREA_CHECK(r.e.set_mask_param(r.a, second, 1, -20));
+    AUREA_CHECK(r.e.set_mask_param(r.a, second, 2, .2f));
+    Layer* layer = r.comp()->layer(LayerId::unpack(r.a));
+    for (u32 p = 0; p < 3; ++p) {
+        Track* tr = layer->tracks.find(TrackProperty::MaskParam, second, p);
+        AUREA_CHECK(tr && tr->keys.size() == 2);
+        if (tr) tr->keys[0].interp = Interpolation::Linear;
+    }
+    const Vec3 mid = mask::evaluate_props(*layer, layer->masks[1], 10);
+    AUREA_CHECK_NEAR(mid.x, 20, .001); AUREA_CHECK_NEAR(mid.y, -10, .001); AUREA_CHECK_NEAR(mid.z, .6, .001);
+    AUREA_CHECK(r.e.remove_mask(r.a, first));
+    AUREA_CHECK(r.L(r.a)->masks[0].id == static_cast<u32>(second));
+    AUREA_CHECK(r.L(r.a)->tracks.find(TrackProperty::MaskParam, second, 2) != nullptr);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_mask_scalars.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok()); AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    const auto* reopened = r.L(r.a);
+    const Vec3 loaded = mask::evaluate_props(*reopened, reopened->masks[0], 10);
+    AUREA_CHECK_NEAR(loaded.x, mid.x, .001); AUREA_CHECK_NEAR(loaded.y, mid.y, .001); AUREA_CHECK_NEAR(loaded.z, mid.z, .001);
+    AUREA_CHECK(r.e.remove_mask(r.a, second));
+    AUREA_CHECK(r.L(r.a)->tracks.find(TrackProperty::MaskParam, second, 2) == nullptr);
+    r.undo();
+    AUREA_CHECK(r.L(r.a)->masks.size() == 1);
+    AUREA_CHECK(r.L(r.a)->tracks.find(TrackProperty::MaskParam, second, 2) != nullptr);
+    AUREA_CHECK(!r.e.set_mask_param(r.a, second, 3, 10));
+    AUREA_CHECK(!r.e.toggle_mask_param_key(r.a, 999, 0));
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(MaskAnimation, TrimmedLocalTimeClipboardAndPathKeysUseTheActualPlayhead) {
+    EditRig r; r.range(r.a, 10, 70, 5);
+    const f32 pts[] = {10,10,0,0,0,0, 80,10,0,0,0,0, 80,80,0,0,0,0, 10,80,0,0,0,0};
+    const i32 mask = r.e.add_mask(r.a, pts, 4, true);
+    AUREA_CHECK_EQ(r.e.add_mask(r.b, pts, 4, true), mask);
+    auto seek = [&](i64 frame) {
+        Command cmd; cmd.type = CommandType::PlaybackSeek; cmd.seek.time = tick_at(FrameIndex{frame}, 30);
+        AUREA_CHECK_EQ(r.e.submit_commands(&cmd, 1, nullptr, 0), 1u);
+    };
+    seek(12); AUREA_CHECK(r.e.toggle_mask_param_key(r.a, mask, 0));
+    AUREA_CHECK(r.e.toggle_mask_path_key(r.a, mask));
+    seek(22); AUREA_CHECK(r.e.set_mask_param(r.a, mask, 0, 20));
+    AUREA_CHECK(r.e.toggle_mask_path_key(r.a, mask));
+    const auto* track = r.L(r.a)->tracks.find(TrackProperty::MaskParam, mask, 0);
+    AUREA_CHECK(track && track->keys.size() == 2);
+    if (!track || track->keys.size() != 2) return;
+    AUREA_CHECK_EQ(track->keys[0].time.value, 7); AUREA_CHECK_EQ(track->keys[1].time.value, 17);
+    AUREA_CHECK_EQ(r.L(r.a)->masks[0].pathKeys[0].frame, 7);
+    AUREA_CHECK_EQ(r.L(r.a)->masks[0].pathKeys[1].frame, 17);
+    const i64 refs[] = {43, mask, 0, 7, 43, mask, 0, 17};
+    AUREA_CHECK_EQ(r.e.copy_keyframe_selection(r.a, refs, 2), 2u);
+    const u64 targets[] = {r.b, r.c};
+    AUREA_CHECK_EQ(r.e.paste_keyframes(targets, 2, 50), 2u);
+    const auto* copied = r.L(r.b)->tracks.find(TrackProperty::MaskParam, mask, 0);
+    AUREA_CHECK(copied && copied->keys.size() == 2);
+    if (copied && copied->keys.size() == 2) {
+        AUREA_CHECK_EQ(copied->keys[0].time.value, 20); AUREA_CHECK_EQ(copied->keys[1].time.value, 30);
+        AUREA_CHECK_NEAR(copied->keys[1].value, 20, .001);
+    }
+    AUREA_CHECK(r.L(r.c)->tracks.find(TrackProperty::MaskParam, mask, 0) == nullptr);
+    r.undo(); AUREA_CHECK(r.L(r.b)->tracks.find(TrackProperty::MaskParam, mask, 0) == nullptr);
+}
+
+AUREA_TEST(TimeArrangement, AlignsAndSequencesWithOneUndo) {
+    for (auto mode : {LayerTimeArrangement::AlignStarts, LayerTimeArrangement::AlignEnds, LayerTimeArrangement::Sequence}) {
+        EditRig r;
+        const u64 ids[] = {r.c, r.a, r.b};
+        const u32 depth = r.e.history().depth();
+        auto result = r.e.arrange_layer_times(ids, 3, mode);
+        AUREA_CHECK(result.ok());
+        AUREA_CHECK_EQ(r.e.history().depth(), depth + 1);
+        if (mode == LayerTimeArrangement::AlignStarts) {
+            AUREA_CHECK(r.at(r.a, 0, 30) && r.at(r.b, 0, 30) && r.at(r.c, 0, 30));
+        } else if (mode == LayerTimeArrangement::AlignEnds) {
+            AUREA_CHECK(r.at(r.a, 60, 90) && r.at(r.b, 60, 90) && r.at(r.c, 60, 90));
+        } else {
+            AUREA_CHECK(r.at(r.c, 60, 90) && r.at(r.a, 90, 120) && r.at(r.b, 120, 150));
+        }
+        r.undo();
+        AUREA_CHECK(r.at(r.a, 0, 30) && r.at(r.b, 30, 60) && r.at(r.c, 60, 90));
+        Command redo; redo.type = CommandType::Redo;
+        AUREA_CHECK(r.e.apply_command(redo).ok());
+        AUREA_CHECK_EQ(r.e.history().depth(), depth + 1);
+    }
+}
+
+AUREA_TEST(TimeArrangement, DistributesStartsByTimeAndRoundsToFrames) {
+    EditRig r;
+    r.range(r.a, 10, 20); r.range(r.b, 12, 37); r.range(r.c, 71, 78);
+    const u64 ids[] = {r.c, r.b, r.a};
+    const auto result = r.e.arrange_layer_times(ids, 3, LayerTimeArrangement::DistributeStarts);
+    AUREA_CHECK(result.ok() && *result == 1);
+    AUREA_CHECK(r.at(r.a, 10, 20) && r.at(r.b, 41, 66) && r.at(r.c, 71, 78));
+    const u32 depth = r.e.history().depth();
+    const auto noop = r.e.arrange_layer_times(ids, 3, LayerTimeArrangement::DistributeStarts);
+    AUREA_CHECK(noop.ok() && *noop == 0);
+    AUREA_CHECK_EQ(r.e.history().depth(), depth);
+    r.undo(); AUREA_CHECK(r.at(r.b, 12, 37));
+}
+
+AUREA_TEST(TimeArrangement, EqualGapsKeepOuterLayersAndRejectOverlapAtomically) {
+    EditRig r;
+    r.range(r.a, 10, 20); r.range(r.b, 12, 37); r.range(r.c, 71, 78);
+    const u64 ids[] = {r.c, r.a, r.b};
+    const auto result = r.e.arrange_layer_times(ids, 3, LayerTimeArrangement::DistributeGaps);
+    AUREA_CHECK(result.ok() && *result == 1);
+    AUREA_CHECK(r.at(r.a, 10, 20) && r.at(r.b, 33, 58) && r.at(r.c, 71, 78));
+    r.undo();
+    r.range(r.a, 10, 60);
+    const u32 depth = r.e.history().depth();
+    AUREA_CHECK(!r.e.arrange_layer_times(ids, 3, LayerTimeArrangement::DistributeGaps).ok());
+    AUREA_CHECK(r.at(r.a, 10, 60) && r.at(r.b, 12, 37) && r.at(r.c, 71, 78));
+    AUREA_CHECK_EQ(r.e.history().depth(), depth);
+}
+
+AUREA_TEST(TimeArrangement, LockedDuplicateAndMissingIdsNeverMoveNeighbours) {
+    EditRig r;
+    r.comp()->set_edit_mode(true);
+    auto* locked = r.comp()->layer(LayerId::unpack(r.b));
+    locked->locked = true; locked->magneticTrack = true;
+    r.comp()->layer(LayerId::unpack(r.a))->magneticTrack = true;
+    const u64 ids[] = {r.a, r.a, 0, r.b, r.c};
+    const auto result = r.e.arrange_layer_times(ids, 5, LayerTimeArrangement::AlignStarts);
+    AUREA_CHECK(result.ok() && *result == 1);
+    AUREA_CHECK(r.at(r.a, 0, 30) && r.at(r.b, 30, 60) && r.at(r.c, 0, 30));
+    AUREA_CHECK(r.L(r.b)->locked && r.L(r.b)->magneticTrack && r.L(r.a)->magneticTrack);
+    r.undo();
+    const u64 pair[] = {r.a, r.c};
+    AUREA_CHECK(r.e.arrange_layer_times(pair, 2, LayerTimeArrangement::StartsAtPlayhead, 20).ok());
+    AUREA_CHECK(r.at(r.b, 30, 60));
+}
+
+AUREA_TEST(TimeArrangement, MovesReversedRemappedMediaAndLocalAnimationTogether) {
+    for (bool reverse : {false, true}) for (bool remap : {false, true}) {
+        EditRig r; clip_source(r, r.b, 2.0f, reverse);
+        if (remap) AUREA_CHECK(r.e.set_time_remap(r.b, true));
+        const Layer before = *r.L(r.b);
+        const u64 ids[] = {r.b};
+        AUREA_CHECK(r.e.arrange_layer_times(ids, 1, LayerTimeArrangement::StartsAtPlayhead, 200).ok());
+        const Layer* after = r.L(r.b);
+        AUREA_CHECK(r.at(r.b, 200, 230));
+        AUREA_CHECK_EQ(after->offset.value, before.offset.value);
+        AUREA_CHECK_EQ(after->tracks.at(0).keys.size(), before.tracks.at(0).keys.size());
+        for (i64 i = 0; i < 30; ++i) {
+            AUREA_CHECK_NEAR(after->source_frame(FrameIndex{200 + i}), before.source_frame(FrameIndex{30 + i}), .0001);
+            AUREA_CHECK_EQ(after->local_time(FrameIndex{200 + i}).value, before.local_time(FrameIndex{30 + i}).value);
+        }
+        r.undo(); AUREA_CHECK(r.at(r.b, 30, 60));
+    }
+}
+
+AUREA_TEST(TimeArrangement, EndAtPlayheadAndBoundsAreAtomic) {
+    EditRig r;
+    r.range(r.b, 30, 80);
+    const u64 ids[] = {r.a, r.b};
+    AUREA_CHECK(r.e.arrange_layer_times(ids, 2, LayerTimeArrangement::EndsAtPlayhead, 100).ok());
+    AUREA_CHECK(r.at(r.a, 70, 100) && r.at(r.b, 50, 100));
+    r.undo();
+    const u32 depth = r.e.history().depth();
+    // A could fit, B cannot. Neither may move.
+    AUREA_CHECK(!r.e.arrange_layer_times(ids, 2, LayerTimeArrangement::EndsAtPlayhead, 40).ok());
+    AUREA_CHECK(!r.e.arrange_layer_times(ids, 2, LayerTimeArrangement::StartsAtPlayhead, (i64{1} << 31) - 20).ok());
+    AUREA_CHECK(!r.e.arrange_layer_times(ids, 2, static_cast<LayerTimeArrangement>(100)).ok());
+    AUREA_CHECK(!r.e.arrange_layer_times(nullptr, 2, LayerTimeArrangement::Sequence).ok());
+    AUREA_CHECK(r.at(r.a, 0, 30) && r.at(r.b, 30, 80));
+    AUREA_CHECK_EQ(r.e.history().depth(), depth);
+}
+
+AUREA_TEST(TimeArrangement, ExtendsProjectAndUndoRestoresDuration) {
+    EditRig r;
+    const i64 duration = r.comp()->duration().value;
+    const u64 ids[] = {r.a, r.b, r.c};
+    AUREA_CHECK(r.e.arrange_layer_times(ids, 3, LayerTimeArrangement::StartsAtPlayhead, duration + 50).ok());
+    AUREA_CHECK_EQ(r.comp()->duration().value, duration + 80);
+    r.undo();
+    AUREA_CHECK_EQ(r.comp()->duration().value, duration);
+    AUREA_CHECK(r.at(r.a, 0, 30) && r.at(r.b, 30, 60) && r.at(r.c, 60, 90));
 }
 
 AUREA_TEST(ClipEdit, TrimPreservesSourceAndAnimationAcrossSpeedsAndReverse) {

@@ -242,10 +242,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         /** Início · Projetos · Ajustes. */
-        const val TAB_COUNT = 3
+        const val TAB_COUNT = 4
         const val HOME_TAB = 0
         const val PROJECTS_TAB = 1
         const val SETTINGS_TAB = 2
+        const val PROFILE_TAB = 3
 
         private const val PREFS = "aurea.home"
         private const val KEY_SORT = "projetos.ordem"

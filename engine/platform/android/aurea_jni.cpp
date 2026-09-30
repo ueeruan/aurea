@@ -1220,6 +1220,16 @@ AUREA_JNI jboolean AUREA_FN(nativeSetMaskProps)(JNIEnv*, jclass, jlong handle, j
                                            feather, expansion, opacity) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetMaskParam)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint param, jfloat value) {
+    NativeContext* c = ctx_of(handle);
+    return c && mask >= 0 && param >= 0 && c->engine.set_mask_param(static_cast<u64>(layer), static_cast<u32>(mask), static_cast<u32>(param), value) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeToggleMaskParamKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint param) {
+    NativeContext* c = ctx_of(handle);
+    return c && mask >= 0 && param >= 0 && c->engine.toggle_mask_param_key(static_cast<u64>(layer), static_cast<u32>(mask), static_cast<u32>(param)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jint AUREA_FN(nativeToggleMaskPathKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask) {
     NativeContext* c = ctx_of(handle);
     bool keyed = false;
@@ -2038,6 +2048,16 @@ AUREA_JNI jboolean AUREA_FN(nativeRemoveTextAnimator)(JNIEnv*, jclass, jlong han
     return c && index >= 0 && c->engine.remove_text_animator(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jint AUREA_FN(nativeDuplicateTextAnimator)(JNIEnv*, jclass, jlong handle, jlong layer, jint index) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 ? c->engine.duplicate_text_animator(static_cast<u64>(layer), static_cast<u32>(index)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMoveTextAnimator)(JNIEnv*, jclass, jlong handle, jlong layer, jint from, jint to) {
+    NativeContext* c = ctx_of(handle);
+    return c && from >= 0 && to >= 0 && c->engine.move_text_animator(static_cast<u64>(layer), static_cast<u32>(from), static_cast<u32>(to)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetTextAnimator)(JNIEnv* env, jclass, jlong handle, jlong layer, jint index, jfloatArray in) {
     NativeContext* c = ctx_of(handle);
     if (!c || !in || index < 0 || env->GetArrayLength(in) < static_cast<jsize>(Engine::kTextAnimFloats)) return JNI_FALSE;
@@ -2804,6 +2824,15 @@ AUREA_JNI jint AUREA_FN(nativeStaggerLayers)(JNIEnv* env, jclass, jlong handle, 
     const Result<u32> r = c->engine.stagger_layers(v.data(), static_cast<u32>(v.size()), static_cast<i64>(stepFrames), keysOnly == JNI_TRUE);
     if (!r.ok()) return -static_cast<jint>(r.status().code());
     return static_cast<jint>(*r);
+}
+
+AUREA_JNI jint AUREA_FN(nativeArrangeLayerTimes)(JNIEnv* env, jclass, jlong handle, jlongArray ids, jint mode, jlong playhead) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jint>(Errc::InvalidState);
+    const auto v = jlongs(env, ids);
+    const auto r = c->engine.arrange_layer_times(v.data(), static_cast<u32>(v.size()),
+        static_cast<LayerTimeArrangement>(mode), static_cast<i64>(playhead));
+    return r.ok() ? static_cast<jint>(*r) : -static_cast<jint>(r.status().code());
 }
 
 AUREA_JNI jlong AUREA_FN(nativeExtractAudio)(JNIEnv*, jclass, jlong handle, jlong layerId) {

@@ -422,7 +422,13 @@ private struct SocialCompose: View {
                                 }
                             } }
                         }
-                    }.navigationTitle(AureaText.t(picker == "preset" ? "social_attach_preset" : "social_attach_project")).toolbar { ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("editor_fechar")) { picker = nil } } } }
+                    }.navigationTitle(AureaText.t(picker == "preset" ? "social_attach_preset" : "social_attach_project")).toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(AureaText.t("editor_fechar")) { picker = nil }
+                        }
+                    }
+                    }
+                }
         }.tint(AureaColors.accent).interactiveDismissDisabled(busy)
             .onDisappear { if !busy { for file in temporary { try? FileManager.default.removeItem(at: file) } } }
     }

@@ -81,6 +81,11 @@ set(AUREA_CORE_SOURCES
     src/project/FileIO.cpp
     src/project/Presets.cpp
     src/project/AlightMotion.cpp
+    src/project/Psd.cpp
+    src/engine/EnginePsd.cpp
+    src/engine/EngineGrid.cpp
+    src/timeline/GridLayout.cpp
+    src/effects/builtin/GridLayoutEffect.cpp
     src/project/ProjectPackage.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
@@ -122,6 +127,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/MatteEffects.cpp
     src/effects/builtin/VhsLookEffect.cpp
     src/effects/builtin/DepthEffects.cpp
+    src/effects/builtin/RotobrushEffect.cpp
     src/effects/builtin/AudioPackEffects.cpp
     src/effects/builtin/ParticularEffect.cpp
     src/expr/Expression.cpp

@@ -11,3 +11,7 @@ presentation intervals. The generation commands are documented in
 `MotionBlurVideoExportTest` imports it through the production decoder and
 exports RSMB, transform motion blur, and both effects together. The test also
 decodes frames from each resulting MP4 to verify that the files are readable.
+
+`animated-character.fbx` is the small synthetic skinned mesh produced by
+`write_skinned_fbx()` in `engine/tests/test_scene3d.cpp`: five vertices, two
+animated takes and an embedded 8 × 8 test texture. It contains no user model.

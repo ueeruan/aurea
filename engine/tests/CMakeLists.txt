@@ -43,6 +43,9 @@ add_executable(aurea_tests
     test_text.cpp
     test_presets.cpp
     test_alight_motion.cpp
+    test_psd.cpp
+    test_grid.cpp
+    test_foreground.cpp
     test_expr.cpp
     test_keyframe_shape.cpp
     test_vector.cpp

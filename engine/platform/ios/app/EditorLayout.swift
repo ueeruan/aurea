@@ -251,8 +251,8 @@ final class ShellPresentation: ObservableObject {
 /// Os seletores do diálogo de adicionar (galeria/foto/vídeo pelo seletor de
 /// fotos; áudio, modelo 3D e SVG pelo de arquivos).
 enum ShellAddPicker: Equatable {
-    case gallery, photo, video, audioFromVideo, audioFile, model, svg, modelTextures
-    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .modelTextures }
+    case gallery, photo, video, audioFromVideo, audioFile, model, svg, psd, modelTextures
+    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures }
 }
 
 enum ShellStageGeometry {

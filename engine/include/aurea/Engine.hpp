@@ -445,6 +445,9 @@ public:
     [[nodiscard]] Result<u64> add_freehand_path(u64 layerId, const f32* xy, usize count, f32 error) noexcept;
     /// SVG → camada vetorial nova (um grupo por forma), centrada na composição.
     [[nodiscard]] Result<u64> import_svg(const std::string& text, const char* name) noexcept;
+    [[nodiscard]] Result<u64> import_psd(const std::string& path, const char* name, bool* approximated = nullptr) noexcept;
+    [[nodiscard]] Result<u64> create_grid(const u64* ids, u32 count) noexcept;
+    [[nodiscard]] std::string foreground_model_directory() const { return config_.documentsDirectory + "/ai/rotobrush"; }
     /// Texto no caminho: camada-guia vetorial (0 = desliga), margem inicial,
     /// perpendicular, invertido.
     bool set_text_path(u64 layerId, u64 pathLayer, f32 offset, bool perpendicular, bool reverse) noexcept;

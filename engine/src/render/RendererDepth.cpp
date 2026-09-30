@@ -54,17 +54,17 @@ f32 depth_range(const ai::DepthMap& map) noexcept {
 /// guarda bem 0..1 e o que passa um pouco das pontas).
 std::vector<u8> depth_texels(const ai::DepthMap& map) {
     const f32 p2 = map.p2, range = depth_range(map);
-    std::vector<u8> data(static_cast<usize>(ai::DepthEstimator::kPixels) * 2);
+    std::vector<u8> data(map.disparity.size() * 2);
     u16* px = reinterpret_cast<u16*>(data.data());
-    for (u32 i = 0; i < ai::DepthEstimator::kPixels; ++i)
+    for (u32 i = 0; i < map.disparity.size(); ++i)
         px[i] = scene3d::float_to_half(std::clamp((map.disparity[i] - p2) / range, -4.0f, 5.0f));
     return data;
 }
 
-TextureDesc depth_texture_desc() noexcept {
+TextureDesc depth_texture_desc(u32 size = ai::DepthEstimator::kSize) noexcept {
     TextureDesc d;
-    d.width = ai::DepthEstimator::kSize;
-    d.height = ai::DepthEstimator::kSize;
+    d.width = size;
+    d.height = size;
     d.format = SurfaceFormat::R16F;
     d.sampled = true;
     d.transferDst = true;
@@ -75,17 +75,23 @@ TextureDesc depth_texture_desc() noexcept {
 } // namespace
 
 DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
-    DepthMapResult none;
+    DepthMapResult none; none.failed = request.foreground && planFinal_;
+    auto& service = request.foreground ? foreground_ : depth_;
+    const u32 mapSize = request.foreground ? ai::ForegroundEstimator::kSize : ai::DepthEstimator::kSize;
     if (!backend_) return none;
-    if (!request.host) return depth_map_preview();
+    if (!request.host) return request.foreground ? none : depth_map_preview();
     if (!planProject_) return none;
     const Layer& l = *request.host;
     if (l.kind != LayerKind::Image && l.kind != LayerKind::Video) return none;
     const Asset* asset = planProject_->asset(l.source);
     if (!asset) return none;
-    if (!depth_) depth_ = std::make_unique<ai::DepthMapService>();
+    if (!service) service = std::make_unique<ai::DepthMapService>(request.foreground ? foregroundModelDirectory_ : std::string{});
+    if (planMedia_) {
+        void (*wake)(void*) = nullptr; void* ctx = nullptr;
+        planMedia_->ready_callback(wake, ctx); service->set_ready_callback(wake, ctx);
+    }
 
-    const u64 assetKey = l.source.pack();
+    const u64 assetKey = l.source.pack() ^ (request.foreground ? 0xDA561CD33ull : 0);
     const u64 sourceKey = mix64(assetKey, text_hash(asset->sourcePath) ^ asset->contentHash);
     u64 frameKey = 0;
     i64 frameIndex = 0;
@@ -96,7 +102,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         if (!px || !px->width || !px->height || px->rgba.size() < static_cast<usize>(px->width) * px->height * 4)
             return none;
         frameKey = mix64(mix64(sourceKey, 0x1D), (static_cast<u64>(px->width) << 32) | px->height);
-        map = depth_->image(frameKey, px->rgba.data(), px->width, px->height, px->width * 4, 4);
+        map = service->image(frameKey, px->rgba.data(), px->width, px->height, px->width * 4, 4, !request.foreground || planFinal_);
     } else {
         if (!asset->has_video() || !planMedia_ || !planMedia_->factory()) return none;
         video = true;
@@ -114,10 +120,10 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         void (*wake)(void*) = nullptr;
         void* wakeCtx = nullptr;
         planMedia_->ready_callback(wake, wakeCtx);
-        depth_->set_ready_callback(wake, wakeCtx);
+        service->set_ready_callback(wake, wakeCtx);
         const i64 targetUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
         const i64 frameUs = static_cast<i64>(std::llround(1e6 / srcFps));
-        map = depth_->video(frameKey, planMedia_->factory(), *asset, sourceKey, targetUs, frameUs, planFinal_);
+        map = service->video(frameKey, planMedia_->factory(), *asset, sourceKey, targetUs, frameUs, planFinal_);
     }
 
     // O estado da suavização: (camada, efeito), export separado do preview.
@@ -132,7 +138,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     DepthState& st = depthState_[stateKey];
     st.lastFrame = frameNumber_;
 
-    if (!map && video && !planFinal_) {
+    if (!map && video && !planFinal_ && !request.foreground) {
         // Preview de vídeo ainda calculando: o render volta quando o worker
         // terminar. No PLAY a rede leva mais que um quadro — quando o mapa do
         // quadro N fica pronto o preview já pede o N+5 —, então vale o mapa
@@ -142,7 +148,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         incomplete_ = true;
         u64 latestKey = 0;
         i64 latestUs = 0, latestFrameUs = 1;
-        if (ai::DepthMapPtr latest = depth_->latest_video(sourceKey, latestKey, latestUs, latestFrameUs);
+        if (ai::DepthMapPtr latest = service->latest_video(sourceKey, latestKey, latestUs, latestFrameUs);
             latest && latestKey != st.frameKey) {
             map = std::move(latest);
             frameKey = latestKey;
@@ -150,6 +156,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         }
     }
     if (!map) {
+        if (request.foreground) { incomplete_ = !planFinal_; return none; }
         // O último mapa pronto desta instância segura o quadro (melhor
         // atrasado que piscando o original).
         if (auto it = depthTex_.find(st.frameKey); st.frameKey && it != depthTex_.end()) {
@@ -179,11 +186,11 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
                 }
             }
         }
-        auto created = backend_->create_texture(depth_texture_desc());
+        auto created = backend_->create_texture(depth_texture_desc(mapSize));
         if (!created.ok()) return none;
         PendingUpload up;
         up.texture = *created;
-        up.bytesPerRow = ai::DepthEstimator::kSize * 2;
+        up.bytesPerRow = mapSize * 2;
         up.data = depth_texels(*map);
         uploads_.push_back(std::move(up));
         depthTex_[frameKey] = LutTexture{*created, frameNumber_};
@@ -278,6 +285,7 @@ void Renderer::release_depth(bool destroyTextures) noexcept {
     depthTex_.clear();
     depthState_.clear();
     if (depth_) depth_->clear();
+    if (foreground_) foreground_->clear();
 }
 
 } // namespace aurea

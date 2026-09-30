@@ -68,7 +68,7 @@ func fxMakesSound(_ entry: EffectCatalogItem) -> Bool {
 
 /// O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som.
 func fxPickableEffects(_ catalog: [EffectCatalogItem], layerHasAudio: Bool) -> [EffectCatalogItem] {
-    catalog.filter { $0.typeId != fxEffectTypeId("aurea.motion.oscillate") && (layerHasAudio || !fxIsAudioCategory($0.category) || fxMakesSound($0)) }
+    catalog.filter { !["aurea.motion.oscillate", "aurea.layout.grid_builder", "aurea.layout.grid_item"].map(fxEffectTypeId).contains($0.typeId) && (layerHasAudio || !fxIsAudioCategory($0.category) || fxMakesSound($0)) }
 }
 
 /// A grade sem busca: tudo (categoria nula) ou só a categoria escolhida.

@@ -3189,6 +3189,23 @@ AUREA_JNI jlong AUREA_FN(nativeImportSvg)(JNIEnv* env, jclass, jlong handle, jby
     return result_id(c->engine.import_svg(text, n.c_str()));
 }
 
+AUREA_JNI jlong AUREA_FN(nativeImportPsd)(JNIEnv* env, jclass, jlong handle, jstring path, jstring name) {
+    NativeContext* c=ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const auto p=to_string(env,path), n=to_string(env,name);
+    return result_id(c->engine.import_psd(p,n.c_str()));
+}
+
+AUREA_JNI jstring AUREA_FN(nativeForegroundModelDirectory)(JNIEnv* env,jclass,jlong handle) {
+    auto* c=ctx_of(handle);return env->NewStringUTF(c?c->engine.foreground_model_directory().c_str():"");
+}
+AUREA_JNI jlong AUREA_FN(nativeCreateGrid)(JNIEnv* env,jclass,jlong handle,jlongArray ids) {
+    auto* c=ctx_of(handle);if(!c||!ids)return -1;
+    const auto n=env->GetArrayLength(ids);if(n<1||n>512)return -1;
+    std::vector<jlong> values(n);env->GetLongArrayRegion(ids,0,n,values.data());
+    std::vector<u64> selected(values.begin(),values.end());return result_id(c->engine.create_grid(selected.data(),static_cast<u32>(n)));
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetTextPath)(JNIEnv*, jclass, jlong handle, jlong layer, jlong pathLayer, jfloat offset, jboolean perpendicular, jboolean reverse) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_text_path(static_cast<u64>(layer), static_cast<u64>(pathLayer), offset, perpendicular == JNI_TRUE, reverse == JNI_TRUE)

@@ -1641,6 +1641,37 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         select(id)
     }
 
+    fun createGrid() {
+        val id = engine.createGrid(selection.toLongArray())
+        if (id < 0) { showToast(appText(R.string.grid_pick_layers)); return }
+        refreshNow(); select(id)
+    }
+
+    fun importPsd(uri: Uri) {
+        if (busyMessage != null) return
+        busyMessage = appText(R.string.psd_importing)
+        viewModelScope.launch {
+            val id = withContext(Dispatchers.IO) {
+                val app = getApplication<Application>()
+                var temp: java.io.File? = null
+                try {
+                    temp = java.io.File.createTempFile("import-", ".psd", app.cacheDir)
+                    app.contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output ->
+                        val buffer = ByteArray(65536); var total = 0L
+                        while (true) { val n = input.read(buffer); if (n < 0) break; total += n
+                            if (total > 128L * 1024 * 1024) throw java.io.IOException("PSD size")
+                            output.write(buffer, 0, n)
+                        }
+                    } } ?: throw java.io.IOException("PSD read")
+                    engine.importPsd(temp.absolutePath, displayName(uri)?.substringBeforeLast('.') ?: "PSD")
+                } catch (_: Exception) { -11L } finally { temp?.delete() }
+            }
+            busyMessage = null
+            if (id < 0) { errorMessage = appText(R.string.psd_failed); return@launch }
+            refreshNow(); select(id); showToast(appText(R.string.psd_imported))
+        }
+    }
+
     /** SVG pelo seletor de documentos do sistema. */
     fun importSvg(uri: Uri) {
         viewModelScope.launch {
@@ -2687,7 +2718,33 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Adiciona o efeito em TODAS as camadas escolhidas. */
     fun addEffect(typeId: Int, ids: Collection<Long> = selection) {
         if (ids.isEmpty()) return
+        if (typeId == com.aurea.aurea.editor.panels.effectTypeId("aurea.key.rotobrush")) {
+            if (busyMessage != null) return
+            val targets = ids.toList()
+            if (targets.any { id -> layers.none { it.id == id && it.kind in 1..2 } }) {
+                showToast(appText(R.string.roto_select_media)); return
+            }
+            prepareRotoModel { group("Rotobrush IA") { targets.forEach { addEffect(it, typeId) } } }
+            return
+        }
         group("adicionar efeito") { ids.forEach { addEffect(it, typeId) } }
+    }
+
+    fun prepareRotoModel(onReady: () -> Unit = {}) {
+        if (busyMessage != null) return
+        busyMessage = appText(R.string.roto_preparing)
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    com.aurea.aurea.effects.LocalRotoModel.prepare(engine.foregroundModelDirectory()) { percent ->
+                        viewModelScope.launch { if (busyMessage != null) busyMessage = appText(R.string.roto_downloading, percent) }
+                    }
+                }
+                onReady(); seek(playhead)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+              catch (_: Exception) { errorMessage = appText(R.string.roto_download_failed) }
+            finally { busyMessage = null }
+        }
     }
 
     fun removeEffect(effectId: Int) {

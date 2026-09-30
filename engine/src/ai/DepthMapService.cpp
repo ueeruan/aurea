@@ -10,7 +10,7 @@
 
 namespace aurea::ai {
 
-DepthMapService::DepthMapService() = default;
+DepthMapService::DepthMapService(std::string model) : foregroundModel_(std::move(model)) {}
 
 DepthMapService::~DepthMapService() {
     clear();
@@ -68,6 +68,7 @@ DepthMapService::Stats DepthMapService::stats() const {
 }
 
 bool DepthMapService::ensure_model_locked() {
+    if (!foregroundModel_.empty()) return foreground_.loaded() || foreground_.load(foregroundModel_).ok();
     if (estimator_.loaded()) return true;
     if (modelFailed_) return false;
     const Status s = estimator_.load(DepthEstimator::Backend::Auto);
@@ -87,16 +88,18 @@ DepthMapPtr DepthMapService::run_pixels_locked(u64 key, const u8* pixels, u32 wi
                                                u32 channels) {
     if (!ensure_model_locked()) return nullptr;
     auto map = std::make_shared<DepthMap>();
-    map->disparity.resize(DepthEstimator::kPixels);
-    const Status s = estimator_.run(pixels, width, height, stride, channels, cancel_, map->disparity.data());
+    const bool fg=!foregroundModel_.empty();
+    map->disparity.resize(fg ? ForegroundEstimator::kPixels : DepthEstimator::kPixels);
+    const Status s = fg ? foreground_.run(pixels,width,height,stride,channels,cancel_,map->disparity.data())
+                        : estimator_.run(pixels, width, height, stride, channels, cancel_, map->disparity.data());
     if (!s.ok()) {
         std::lock_guard<std::mutex> lock(mutex_);
         ++stats_.failures;
         if (s.code() != Errc::Cancelled) AUREA_LOG_WARN("profundidade: inferencia falhou (%s)", s.message().data());
         return nullptr;
     }
-    depth_percentiles(map->disparity.data(), DepthEstimator::kPixels, map->p2, map->p98);
-    map->inferenceMs = estimator_.last_inference_ms();
+    if (!fg) depth_percentiles(map->disparity.data(), DepthEstimator::kPixels, map->p2, map->p98);
+    map->inferenceMs = fg ? foreground_.last_inference_ms() : estimator_.last_inference_ms();
     {
         std::lock_guard<std::mutex> lock(mutex_);
         ++stats_.inferences;
@@ -108,9 +111,20 @@ DepthMapPtr DepthMapService::run_pixels_locked(u64 key, const u8* pixels, u32 wi
     return done;
 }
 
-DepthMapPtr DepthMapService::image(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels) {
+DepthMapPtr DepthMapService::image(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels, bool wait) {
     if (DepthMapPtr hit = find(key)) return hit;
-    if (!pixels || !width || !height) return nullptr;
+    if (!pixels || !width || !height || (channels != 3 && channels != 4) || width > 16384 || height > 16384 || stride < width * channels) return nullptr;
+    if (!wait) {
+        Job job; job.key = key; job.imageSize = foregroundModel_.empty() ? DepthEstimator::kSize : ForegroundEstimator::kSize;
+        const u32 size = job.imageSize;
+        job.pixels.resize(static_cast<usize>(size) * size * 4);
+        for (u32 y=0;y<size;++y) for (u32 x=0;x<size;++x) {
+            const u32 sy=std::min(height-1,static_cast<u32>((y+.5)*height/size)),sx=std::min(width-1,static_cast<u32>((x+.5)*width/size));
+            auto* dest=job.pixels.data()+(y*size+x)*4;
+            std::copy_n(pixels+static_cast<usize>(sy)*stride+sx*channels,3,dest); dest[3]=255;
+        }
+        enqueue(std::move(job)); return nullptr;
+    }
     std::lock_guard<std::mutex> work(work_);
     if (DepthMapPtr hit = cached(key)) return hit;   // outra thread terminou enquanto esperávamos
     return run_pixels_locked(key, pixels, width, height, stride, channels);
@@ -204,9 +218,14 @@ DepthMapPtr DepthMapService::video(u64 key, VideoSourceFactory* factory, const A
         if (DepthMapPtr hit = cached(key)) return hit;
         return run_video_locked(job);
     }
+    enqueue(std::move(job));
+    return nullptr;
+}
+
+void DepthMapService::enqueue(Job job) {
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
-        if (hasPending_ && pending_.key == key) return nullptr;
+        if (hasPending_ && pending_.key == job.key) return;
         pending_ = std::move(job);
         hasPending_ = true;
         cancel_.store(false, std::memory_order_relaxed);
@@ -216,7 +235,6 @@ DepthMapPtr DepthMapService::video(u64 key, VideoSourceFactory* factory, const A
         }
     }
     wake_.notify_one();
-    return nullptr;
 }
 
 void DepthMapService::thread_main() noexcept {
@@ -241,9 +259,9 @@ void DepthMapService::thread_main() noexcept {
         {
             std::lock_guard<std::mutex> work(work_);
             done = cached(job.key);
-            if (!done) done = run_video_locked(job);
+            if (!done) done = job.imageSize ? run_pixels_locked(job.key,job.pixels.data(),job.imageSize,job.imageSize,job.imageSize*4,4) : run_video_locked(job);
         }
-        if (done) {
+        if (done && !job.imageSize) {
             std::lock_guard<std::mutex> lock(mutex_);
             latest_[job.sourceKey] = Latest{job.key, job.targetUs, job.frameUs, done};
         }
@@ -261,6 +279,7 @@ void DepthMapService::thread_main() noexcept {
 void DepthMapService::trim() noexcept {
     std::lock_guard<std::mutex> work(work_);
     estimator_.unload();
+    foreground_.unload();
     decoder_.reset();
     decoderAsset_ = 0;
     decoderFactory_ = nullptr;

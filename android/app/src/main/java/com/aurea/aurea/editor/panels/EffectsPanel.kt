@@ -687,6 +687,11 @@ private fun EffectCardItem(
             PanelNotice(stringResource(R.string.panel_este_efeito_saiu_catalogo_ele_nao))
             return@EffectStackCard
         }
+        if (effect.typeId == effectTypeId("aurea.key.rotobrush")) {
+            PanelNotice(stringResource(R.string.roto_note))
+            LaunchedEffect(id) { store.prepareRotoModel() }
+            androidx.compose.material3.TextButton(onClick = { store.prepareRotoModel() }) { Text(stringResource(R.string.roto_prepare)) }
+        }
         if (effect.typeId == effectTypeId("aurea.time.remap")) {
             TimeRemapEffectEditor(env, id)
             return@EffectStackCard

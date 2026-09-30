@@ -488,6 +488,7 @@ private fun ElementTab(store: EditorStore, close: () -> Unit) {
                 close(); store.addParticles(20)   // 20 = Particular (preset Padrão)
             },
             AddItem(stringResource(R.string.editor_camada_ajuste), CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
+            AddItem(stringResource(R.string.grid_builder), ShellGlyph.CircleGridHex) { store.createGrid(); close() },
             AddItem(stringResource(R.string.sh_add_group_selection), CupertinoGlyph.Folder) {
                 if (store.selection.isEmpty()) {
                     store.showToast(pickToGroup)
@@ -576,6 +577,9 @@ private fun DrawTab(store: EditorStore, ui: EditorUi) {
  */
 @Composable
 private fun VectorTab(store: EditorStore, ui: EditorUi) {
+    val psdPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) { ui.adding = false; store.importPsd(uri) }
+    }
     val svgPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             ui.adding = false
@@ -593,6 +597,7 @@ private fun VectorTab(store: EditorStore, ui: EditorUi) {
             AddItem(stringResource(R.string.editor_poligono), draw = { drawVectorIcon(3) }) { start(3) },
             AddItem(stringResource(R.string.editor_estrela), draw = { drawVectorIcon(4) }) { start(4) },
             AddItem(stringResource(R.string.editor_importar_svg), CupertinoGlyph.DocText) { svgPicker.launch(arrayOf("image/svg+xml")) },
+            AddItem(stringResource(R.string.psd_import), CupertinoGlyph.PhotoOnRectangle) { psdPicker.launch(arrayOf("*/*")) },
         ),
         hint = stringResource(R.string.editor_vetor_contorno_pontos_voce_arrasta_curva),
     )

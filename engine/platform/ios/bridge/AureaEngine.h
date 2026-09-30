@@ -733,6 +733,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)toggleVectorParamKey:(long long)layerId group:(uint32_t)group param:(uint32_t)param NS_SWIFT_NAME(toggleVectorParamKey(_:group:param:));
 - (long long)addFreehand:(long long)layerId points:(NSArray<NSNumber*>*)points error:(float)error;
 - (long long)importSVG:(NSString*)text name:(NSString*)name;
+- (long long)importPSD:(NSString*)path name:(NSString*)name;
+- (NSString*)foregroundModelDirectory;
+- (long long)createGrid:(NSArray<NSNumber*>*)layers;
 - (NSArray<NSNumber*>*)textPath:(long long)layerId;
 - (BOOL)setTextPath:(long long)layerId target:(long long)target offset:(float)offset perpendicular:(BOOL)perpendicular reversed:(BOOL)reversed;
 - (BOOL)setTextSpan:(long long)layerId start:(uint32_t)start end:(uint32_t)end color:(NSArray<NSNumber*>*)color weight:(uint32_t)weight scale:(float)scale;

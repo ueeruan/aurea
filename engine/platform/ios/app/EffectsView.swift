@@ -250,6 +250,10 @@ struct EffectsView: View {
                     if !effect.known { PanelNotice(AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao")) }
                     else if effect.typeId == fxEffectTypeId("aurea.time.remap") { TimeRemapEffectEditor(effectId: effect.effectId) }
                     else {
+                        if effect.typeId == fxEffectTypeId("aurea.key.rotobrush") {
+                            PanelNotice(AureaText.t("roto_note")).onAppear { model.prepareRotoModel() }
+                            Button(AureaText.t("roto_prepare")) { model.prepareRotoModel() }
+                        }
                         let groups = parameterGroups(effect.effectId)
                         if groups.main.isEmpty && groups.rest.isEmpty { PanelNotice(AureaText.t("panel_este_efeito_nao_tem_ajustes")) }
                         // EQ paramétrico: o gráfico da resposta em cima das bandas.
@@ -559,11 +563,7 @@ struct EffectsView: View {
         if let layer = model.primarySelection { model.seenEffectIds[layer] = Set(model.effects.map(\.effectId)) }
         pendingPick = entry.typeId
         prefs.addRecent(entry.typeId)
-        model.mutate { engine in
-            engine.beginUndoGroup()
-            for layer in targets { engine.addEffect(entry.typeId, toLayer: layer.id, at: UInt32.max) }
-            engine.endUndoGroup()
-        }
+        model.addCatalogEffect(entry.typeId, layers: targets.map(\.id))
         model.refreshModel(force: true)
     }
     /// O CABEÇALHO DO CATÁLOGO (`AddEffectHeader`): `‹ Adicionar efeito`. O título

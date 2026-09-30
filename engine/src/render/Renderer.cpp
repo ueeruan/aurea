@@ -1,4 +1,5 @@
 #include "aurea/render/Renderer.hpp"
+#include "aurea/timeline/GridLayout.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/audio/Audio.hpp"
 #include "aurea/audio/Spectrum.hpp"
@@ -313,7 +314,8 @@ Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool th
         const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
         const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
         const Mat4 own = threeD ? layer_matrix_3d_frac(node, local, fps) : layer_matrix_frac(node, local, fps);
-        return node.hasParentBasis ? node.parentBasis * own : own;
+        const Mat4 bound = node.hasParentBasis ? node.parentBasis * own : own;
+        return grid::evaluate(comp,node,&node == &l ? time : parentTime).matrix * bound;
     };
     bool helper = false;
     for (u32 i = 0; i + 1 < count; ++i)
@@ -1290,6 +1292,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         rl.id = rid;
         rl.blend = l->blendMode;
         rl.opacity = layer_opacity(*l, local, fps);
+        rl.opacity *= grid::evaluate(comp,*l,static_cast<f64>(time.value)).opacity;
         if (rl.opacity <= 0.0f) continue;   // invisível: nenhum passe, nenhum decode
 
         if (l->adjustment) {
@@ -2526,7 +2529,15 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 for (scene3d::SceneInstance& in : sf.instances) {
                     if (!in.motionBlur) continue;
                     const Layer* l = comp.layer(LayerId::unpack(in.layerKey));
-                    if (l && in.asset) place_model(comp, *l, *in.asset, ts, in);
+                    if (l && in.asset) {
+                        // The scene camera follows the composition shutter; each
+                        // object's transform and skeletal pose use its own trail
+                        // length, just like the 2D layer sampling above.
+                        const f64 layerTime = static_cast<f64>(time.value)
+                            + (ts - static_cast<f64>(time.value))
+                            * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
+                        place_model(comp, *l, *in.asset, layerTime, in);
+                    }
                 }
                 if (s > 0 && !moves) {
                     const scene3d::SceneFrame& s0 = f.blurFrames[0];
@@ -4982,6 +4993,7 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
     // Mapas de profundidade fora do quadro; a rede (~66 MB) e o decoder dela saem.
     n += collect_depth(frameNumber, 0);
     if (depth_) depth_->trim();
+    if (foreground_) foreground_->trim();
     particleStatics_.collect(frameNumber, 0);
     particleExtraBufs_.collect(*backend_, frameNumber, 1);
     // Entre quadros nada do pool está em uso: tudo volta a nascer sob demanda.

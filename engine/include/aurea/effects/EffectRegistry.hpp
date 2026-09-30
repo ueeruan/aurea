@@ -54,6 +54,7 @@ namespace effect_keys {
     inline constexpr const char* kStripes = "aurea.pattern.stripes";
     inline constexpr const char* kRadialRays = "aurea.pattern.radial_rays";
     inline constexpr const char* kGrid = "aurea.pattern.grid";
+    inline constexpr const char* kRotobrush = "aurea.key.rotobrush";
     inline constexpr const char* kParentingHelper = "aurea.transform.parenting_helper";
     inline constexpr const char* kText3DLayout = "aurea.text3d.layout";
     /// Irmão do Text 3D Layout para as FORMAS 3D: mesmos índices de parâmetro,

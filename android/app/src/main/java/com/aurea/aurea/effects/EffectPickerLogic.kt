@@ -69,7 +69,7 @@ fun makesSound(entry: EffectCatalogEntry): Boolean =
 
 /** O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som. */
 fun pickableEffects(catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean): List<EffectCatalogEntry> =
-    catalog.filter { it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.motion.oscillate") && (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) }
+    catalog.filter { it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item")) && (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) }
 
 // --- Navegar -----------------------------------------------------------------
 

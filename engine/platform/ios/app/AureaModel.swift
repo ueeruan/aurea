@@ -18,11 +18,48 @@
 //  toa (e arrastaria o usuário para uma UI que engasga).
 // =============================================================================
 import Foundation
+import CryptoKit
 import AVFoundation
 import Photos
 import ImageIO
 import Metal
 import UIKit
+
+private enum LocalRotoModel {
+    static let base = "https://raw.githubusercontent.com/ueeruan/aurea/59f95b16a89d3b4c1e41d945507661440e6d36ac/engine/assets/rotobrush/"
+    static let files: [(String, Int, String)] = [
+        ("u2netp.param", 25100, "ab9567c0bfebecf51e8bb1292e2b4ca1bfb09006122a01bbba38a429ca94a4b0"),
+        ("u2netp.bin", 2257156, "e9cbc6a779f02490ac16ef87e6b800d3b8dc29fe8cd65226318c089c5d21fd2e"),
+        ("LICENSE-U2Net.txt", 11357, "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4")
+    ]
+    static func valid(_ url: URL, size: Int, hash: String) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]), values.fileSize == size,
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return false }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() == hash
+    }
+    static func prepare(directory: String) async throws {
+        guard !directory.isEmpty else { throw CocoaError(.fileNoSuchFile) }
+        let folder = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for (name, size, hash) in files {
+            try Task.checkCancellation()
+            let target = folder.appendingPathComponent(name)
+            if valid(target, size: size, hash: hash) { continue }
+            var request = URLRequest(url: URL(string: base + name)!)
+            request.timeoutInterval = 30
+            let (temporary, response) = try await URLSession.shared.download(for: request)
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  valid(temporary, size: size, hash: hash) else { throw CocoaError(.fileReadCorruptFile) }
+            let staging = folder.appendingPathComponent(UUID().uuidString + ".part")
+            try FileManager.default.copyItem(at: temporary, to: staging)
+            defer { try? FileManager.default.removeItem(at: staging) }
+            if FileManager.default.fileExists(atPath: target.path) {
+                _ = try FileManager.default.replaceItemAt(target, withItemAt: staging)
+            } else { try FileManager.default.moveItem(at: staging, to: target) }
+        }
+    }
+}
 
 // =============================================================================
 // Tipos da UI, derivados do que a ponte devolve.
@@ -2264,6 +2301,60 @@ final class AureaModel: ObservableObject {
         guard id >= 0 else { toast = AureaText.t("msg_nao_foi_possivel_importar_svg"); return }
         showAddLayer = false
         syncAfterEdit(); select(layerId: id, additive: false)
+    }
+
+    func importPsd(url: URL) {
+        guard !importingMedia else { return }
+        importingMedia = true; operationMessage = AureaText.t("psd_importing")
+        let native = engine
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let scoped = url.startAccessingSecurityScopedResource()
+            let id = native.importPSD(url.path, name: url.deletingPathExtension().lastPathComponent)
+            if scoped { url.stopAccessingSecurityScopedResource() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                guard id >= 0 else { self.toast = AureaText.t("psd_failed"); return }
+                self.showAddLayer = false; self.syncAfterEdit(); self.select(layerId: id, additive: false)
+                self.toast = AureaText.t("psd_imported")
+                _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    func createGrid() {
+        let id = engine.createGrid(selection.map { NSNumber(value: $0) })
+        guard id >= 0 else { toast = AureaText.t("grid_pick_layers"); return }
+        showAddLayer = false; syncAfterEdit(); select(layerId: id, additive: false)
+        openPanel(.effects)
+    }
+
+    func addCatalogEffect(_ type: UInt32, layers ids: [Int64]) {
+        guard !ids.isEmpty else { return }
+        func add() {
+            mutate { native in
+                native.beginUndoGroup()
+                for id in ids { native.addEffect(type, toLayer: id, at: UInt32.max) }
+                native.endUndoGroup()
+            }
+            refreshModel(force: true)
+        }
+        guard type == fxEffectTypeId("aurea.key.rotobrush") else { add(); return }
+        guard ids.allSatisfy({ id in layers.contains { $0.id == id && ($0.kind == 1 || $0.kind == 2) } }) else { toast = AureaText.t("roto_select_media"); return }
+        prepareRotoModel(onReady: add)
+    }
+
+    func prepareRotoModel(onReady: (() -> Void)? = nil) {
+        guard !importingMedia else { return }
+        importingMedia = true; operationMessage = AureaText.t("roto_preparing")
+        let directory = engine.foregroundModelDirectory()
+        Task { @MainActor in
+            defer { importingMedia = false }
+            do {
+                try await LocalRotoModel.prepare(directory: directory)
+                onReady?(); engine.requestRender()
+            } catch { toast = AureaText.t("roto_download_failed") }
+        }
     }
 
     func detectBeats() {

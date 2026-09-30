@@ -185,11 +185,7 @@ struct CommandSearchView: View {
             // toque no catálogo). Sem isso, numa camada que já tinha efeitos e
             // o painel fechado, o efeito entrava fechado no fim da pilha.
             if let layer = model.primarySelection { model.seenEffectIds[layer] = Set(model.effects.map(\.effectId)) }
-            model.mutate { engine in
-                engine.beginUndoGroup()
-                for layer in targets { engine.addEffect(effect, toLayer: layer.id, at: UInt32.max) }
-                engine.endUndoGroup()
-            }
+            model.addCatalogEffect(effect, layers: targets.map(\.id))
             effectPrefs.addRecent(effect); model.refreshModel(force: true); model.openPanel(.effects)
             return
         }

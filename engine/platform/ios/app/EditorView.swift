@@ -167,6 +167,7 @@ private struct AddLayerPickers: ViewModifier {
                 case .model: model.importModelFiles(urls: urls)
                 case .modelTextures: model.importModelTextures(urls: urls)
                 case .svg: model.importSvg(url: url)
+                case .psd: model.importPsd(url: url)
                 default: model.importMedia(url: url, kind: .audio)
                 }
             }
@@ -182,6 +183,7 @@ private struct AddLayerPickers: ViewModifier {
     private var fileTypes: [UTType] {
         switch fileKind {
         case .svg: return [UTType(filenameExtension: "svg") ?? .data]
+        case .psd: return [.item]
         // Some file providers register FBX/OBJ as content, without public.data.
         // Accept file-system items; the importer validates supported extensions.
         case .model: return [.item]
@@ -1361,6 +1363,7 @@ private struct AddLayerSheet: View {
                         drawnCard("sh_add_null", kind: -1) { model.addNull(threeD: false); close() }
                         card("particular_title", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(20); close() }   // 20 = Particular (preset Padrão)
                         card("editor_camada_ajuste", glyph: CupertinoGlyph.WandStars) { close(); model.addAdjustmentLayer() }
+                        card("grid_builder", glyph: CupertinoGlyph.SquareGrid2x2) { model.createGrid(); close() }
                         card("sh_add_group_selection", glyph: CupertinoGlyph.Folder) {
                             if model.selection.isEmpty { model.toast = AureaText.t("sh_add_pick_layers_to_group") }
                             else { close(); model.groupSelection() }
@@ -1390,6 +1393,7 @@ private struct AddLayerSheet: View {
                         drawnCard("editor_poligono", kind: 3) { model.addVector(3) }
                         drawnCard("editor_estrela", kind: 4) { model.addVector(4) }
                         card("editor_importar_svg", glyph: CupertinoGlyph.DocText) { files(.svg) }
+                        card("psd_import", glyph: CupertinoGlyph.PhotoOnRectangle) { files(.psd) }
                     }
                 }
                 if let hint {

@@ -19,6 +19,7 @@
 // =============================================================================
 
 #include "aurea/ai/DepthEstimator.hpp"
+#include "aurea/ai/ForegroundEstimator.hpp"
 #include "aurea/project/Asset.hpp"
 
 #include <atomic>
@@ -57,13 +58,13 @@ public:
         bool modelLoaded = false;
     };
 
-    DepthMapService();
+    explicit DepthMapService(std::string foregroundModel = {});
     ~DepthMapService();
     DepthMapService(const DepthMapService&) = delete;
     DepthMapService& operator=(const DepthMapService&) = delete;
 
     /// Imagem RGB8/RGBA8 na CPU. Síncrono; nulo se a rede não carregou.
-    [[nodiscard]] DepthMapPtr image(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels);
+    [[nodiscard]] DepthMapPtr image(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels, bool wait = true);
 
     /// Quadro de vídeo no instante `targetUs` DA MÍDIA (já na grade da fonte;
     /// `frameUs` = duração de um quadro). `wait` (export) decodifica e infere
@@ -100,6 +101,8 @@ private:
         i64 targetUs = 0;
         i64 frameUs = 0;
         VideoSourceFactory* factory = nullptr;
+        std::vector<u8> pixels;
+        u32 imageSize = 0;
     };
 
     void thread_main() noexcept;
@@ -107,6 +110,7 @@ private:
     DepthMapPtr run_video_locked(const Job& job);
     DepthMapPtr run_pixels_locked(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels);
     [[nodiscard]] bool ensure_model_locked();
+    void enqueue(Job job);
     void insert(u64 key, DepthMapPtr map);
     [[nodiscard]] DepthMapPtr find(u64 key);
 
@@ -121,6 +125,8 @@ private:
     // Trabalho (work_): a rede e o decoder só são usados sob este lock.
     std::mutex work_;
     DepthEstimator estimator_;
+    std::string foregroundModel_;
+    ForegroundEstimator foreground_;
     bool modelFailed_ = false;
     std::unique_ptr<VideoDecoderBackend> decoder_;
     u64 decoderAsset_ = 0;

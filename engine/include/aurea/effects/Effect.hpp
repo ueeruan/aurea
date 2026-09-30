@@ -183,6 +183,7 @@ struct DepthMapRequest {
     /// Suavização no tempo dos limites (percentis 2º/98º): 0 = cada quadro com
     /// os seus; perto de 1 = os limites andam devagar e o mapa não "respira".
     f32 smoothing = 0.7f;
+    bool foreground = false;
 };
 
 /// A disparidade 256×256 da FONTE da camada (R: normalizada pelos percentis
@@ -192,6 +193,7 @@ struct DepthMapResult {
     TextureHandle texture{};
     f32 lo = 0.0f;
     f32 hi = 1.0f;
+    bool failed = false;
 };
 
 /// O que a Forma de onda e o Espectro de áudio pedem ao renderer: o som de

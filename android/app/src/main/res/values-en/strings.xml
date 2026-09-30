@@ -3406,4 +3406,16 @@ to edit the curve.</string>
     <string name="social_badge_none">Remove verification</string>
     <string name="social_error">Could not complete. Check your connection and try again.</string>
     <string name="social_session_error">Sign in again to use Community.</string>
+    <string name="psd_import">Import layered PSD</string>
+    <string name="psd_importing">Importing PSD layers…</string>
+    <string name="psd_failed">Could not import. Use an RGB or grayscale 8/16-bit PSD, up to 128 MB.</string>
+    <string name="psd_imported">PSD imported. Open the precomposition to animate each layer. Text becomes an image and masks are baked into pixels. Photoshop styles, adjustments and clipping can differ.</string>
+    <string name="grid_builder">Grid Builder</string>
+    <string name="grid_pick_layers">Select unlocked visual layers without a parent to build a grid. Adjust the controller in Effects.</string>
+    <string name="roto_preparing">Preparing local Rotobrush…</string>
+    <string name="roto_downloading">Downloading cutout model: %1$d%%</string>
+    <string name="roto_download_failed">Could not prepare the model. Check connection and free space, then add the effect again.</string>
+    <string name="roto_note">Automatic foreground cutout. A 2.3 MB local model downloads on first use. Adjust the edge and refine with layer masks.</string>
+    <string name="roto_select_media">Select image or video layers for AI Rotobrush.</string>
+    <string name="roto_prepare">Prepare local AI</string>
 </resources>

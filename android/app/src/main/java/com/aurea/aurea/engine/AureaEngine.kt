@@ -1176,6 +1176,12 @@ class AureaEngine private constructor() {
     /** Traço do dedo (x,y em px da composição) → caminho suave. `layer` 0 = camada nova. Id ≥ 0 ou −Errc. */
     fun addFreehandPath(layer: Long, xy: FloatArray, error: Float): Long = nativeAddFreehandPath(nativeHandle, layer, xy, error)
     fun importSvg(bytes: ByteArray, name: String): Long = nativeImportSvg(nativeHandle, bytes, name)
+    fun importPsd(path: String, name: String): Long = nativeImportPsd(nativeHandle, path, name)
+    fun foregroundModelDirectory(): String = nativeForegroundModelDirectory(nativeHandle)
+    fun createGrid(ids: LongArray): Long = nativeCreateGrid(nativeHandle, ids)
+    private external fun nativeForegroundModelDirectory(handle: Long): String
+    private external fun nativeCreateGrid(handle: Long, ids: LongArray): Long
+    private external fun nativeImportPsd(handle: Long, path: String, name: String): Long
     fun setTextPath(layer: Long, pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean): Boolean =
         nativeSetTextPath(nativeHandle, layer, pathLayer, offset, perpendicular, reverse)
     /** [guia, bits da margem, perpendicular, invertido] ou nulo. */

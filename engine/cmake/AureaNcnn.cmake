@@ -49,7 +49,7 @@ if(NOT aurea_ncnn_POPULATED)
     # normalization constants (MemoryData) and the final Squeeze.
     set(ai_layers input split convolution prelu pixelshuffle interp binaryop
         packing cast padding crop flatten reshape innerproduct gemm scale bias
-        relu clip sigmoid mish hardswish tanh convolutiondepthwise memorydata squeeze)
+        relu clip sigmoid mish hardswish tanh convolutiondepthwise memorydata squeeze pooling concat)
     file(STRINGS "${aurea_ncnn_SOURCE_DIR}/src/CMakeLists.txt" ai_layer_lines REGEX "^ncnn_add_layer\\(")
     foreach(line IN LISTS ai_layer_lines)
         string(REGEX REPLACE "^ncnn_add_layer\\(([A-Za-z0-9_]+).*" "\\1" name "${line}")
@@ -108,15 +108,15 @@ else()
     # The compiler's dependency scan does not see .incbin inputs.
     set_source_files_properties("${ai_depth_cpp}" PROPERTIES OBJECT_DEPENDS "${ai_depth_bin};${ai_depth_param}")
 endif()
-target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp
+target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
                "${ai_model_cpp}" "${ai_depth_cpp}")
 target_link_libraries(aurea_core PRIVATE ncnn)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.
 if(MSVC)
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
                                 PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
                                 PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()

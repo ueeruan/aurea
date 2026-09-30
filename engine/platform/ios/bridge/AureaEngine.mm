@@ -2779,6 +2779,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     const auto result = e->add_freehand_path(layerId, v.data(), v.size(), error); return result.ok() ? static_cast<long long>(*result) : -1;
 }
 - (long long)importSVG:(NSString*)text name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r = e->import_svg(to_std(text), name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -1; }
+- (long long)importPSD:(NSString*)path name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r=e->import_psd(to_std(path),name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code()); }
+- (NSString*)foregroundModelDirectory { auto* e=self.engine;return e?to_ns(e->foreground_model_directory()):@""; }
+- (long long)createGrid:(NSArray<NSNumber*>*)layers { auto* e=self.engine;if(!e)return -1;std::vector<aurea::u64> ids;for(NSNumber* v in layers)ids.push_back(v.unsignedLongLongValue);const auto r=e->create_grid(ids.data(),static_cast<aurea::u32>(ids.size()));return r.ok()?static_cast<long long>(*r):-static_cast<long long>(r.status().code()); }
 - (NSArray<NSNumber*>*)textPath:(long long)layerId {
     auto* e = self.engine; u64 target = 0; float offset = 0; bool perpendicular = false, reverse = false;
     if (!e || !e->query_text_path(layerId, target, offset, perpendicular, reverse)) return @[];

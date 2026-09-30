@@ -474,6 +474,7 @@ public:
     }
     /// O serviço dos mapas (testes e HUD); nulo até o primeiro pedido.
     [[nodiscard]] ai::DepthMapService* depth_service() noexcept { return depth_.get(); }
+    void set_foreground_model_directory(std::string path) { foregroundModelDirectory_ = std::move(path); }
 
     // --- Consultas -------------------------------------------------------------
     [[nodiscard]] const FrameGraph::Stats& graph_stats() const noexcept { return graph_.stats(); }
@@ -760,6 +761,8 @@ private:
         u64 lastFrame = 0;
     };
     std::unique_ptr<ai::DepthMapService> depth_;
+    std::unique_ptr<ai::DepthMapService> foreground_;
+    std::string foregroundModelDirectory_;
     std::unordered_map<u64, LutTexture> depthTex_;     ///< por quadro-fonte
     std::unordered_map<u64, DepthState> depthState_;   ///< por (camada, efeito, export?)
     void release_depth(bool destroyTextures) noexcept;

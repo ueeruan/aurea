@@ -1377,12 +1377,16 @@ std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b) {
 
 struct Scene3DRig {
     Engine e;
-    explicit Scene3DRig(u32 w = 256, u32 h = 144) {
+    explicit Scene3DRig(u32 w = 256, u32 h = 144, bool reloadImages = false) {
         EngineConfig ec;
         ec.backend = new vk::Backend();
         ec.backendConfig.enableValidation = false;
         ec.disableAutosave = true;
         ec.workerCount = 2;
+        if(reloadImages) ec.imageLoader=[](const char* path,ImagePixels& out,void*) {
+            Image8 image;if(!read_png(path,image))return false;
+            out.width=image.width;out.height=image.height;out.rgba=std::move(image.rgba);return true;
+        };
         AUREA_CHECK(e.initialize(ec).ok());
         AUREA_CHECK(e.new_project(w, h, 30.0, nullptr).ok());
     }
@@ -4686,6 +4690,15 @@ AUREA_TEST(Gpu, MotionBlurWorksOn3DLayersAndModels) {
         sharpW = lit_box(rig.capture(400)).w();
         AUREA_CHECK(rig.e.set_motion_blur(*id, true));
         blurW = lit_box(rig.capture(400)).w();
+        AUREA_CHECK(rig.e.set_layer_motion_blur_length(*id, 0.0f));
+        const u32 zeroW = lit_box(rig.capture(400)).w();
+        AUREA_CHECK(rig.e.set_layer_motion_blur_length(*id, 4.0f));
+        const u32 longW = lit_box(rig.capture(400)).w();
+        std::printf("    %s trail widths: sharp=%u 0x=%u 1x=%u 4x=%u\n",
+                    model ? "model" : "plane", sharpW, zeroW, blurW, longW);
+        AUREA_CHECK(zeroW <= sharpW + 1);
+        AUREA_CHECK(longW >= blurW + 20);
+        AUREA_CHECK(rig.e.set_layer_motion_blur_length(*id, 1.0f));
         px.clear();                                           // parado: o desfoque não muda nada
         const Image8 still = rig.capture(400);
         AUREA_CHECK(rig.e.set_motion_blur(*id, false));
@@ -11103,3 +11116,53 @@ AUREA_TEST(Gpu, ParticularPerParticleMotionBlurStreaks) {
         (void)write_png(std::string(dir) + "/particular_mb_on.png", fx);
     }
 }
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(Gpu, NewToolsRotobrushRealMaskAndControls) {
+    AUREA_REQUIRE_GPU();
+    Scene s(320,320); s.comp->set_transparent_background(true);
+    auto px=uniform_image(320,320,30,120,70);
+    for(u32 y=0;y<320;++y)for(u32 x=0;x<320;++x)if((int(x)-160)*(int(x)-160)+(int(y)-160)*(int(y)-160)<6400) {
+        auto* p=&px.rgba[(y*320+x)*4];p[0]=220;p[1]=40;p[2]=30;
+    }
+    const auto id=s.image(std::move(px),160,160);
+    gpu().renderer.set_foreground_model_directory("engine/assets/rotobrush");
+    auto& fx=s.add_effect(id,"aurea.key.rotobrush");
+    const auto mask=s.render(FrameIndex{0},1,true);
+    AUREA_CHECK(mask.v(160,160).w>.9f); AUREA_CHECK(mask.v(0,0).w<.01f);
+    fx.params[3].constant=ParamValue::boolean(true);
+    const auto inverted=s.render(FrameIndex{0},1,true);
+    AUREA_CHECK(inverted.v(160,160).w<.01f);AUREA_CHECK(inverted.v(0,0).w>.9f);
+    fx.params[4].constant=ParamValue::scalar(0);
+    const auto original=s.render(FrameIndex{0},1,true);
+    AUREA_CHECK(original.v(0,0).w>.9f);
+    (void)write_png("build/new-tools-roto-original.png",original.encoded());
+    (void)write_png("build/new-tools-roto-cutout.png",mask.encoded());
+}
+AUREA_TEST(Gpu, NewToolsGridVisibleAndMorphChangesFrame) {
+    AUREA_REQUIRE_GPU(); Scene3DRig rig(320,240);
+    std::vector<u64> ids;
+    for(u32 i=0;i<6;++i){auto r=rig.e.add_shape(0);AUREA_CHECK(r.ok());if(!r.ok())return;ids.push_back(*r);}
+    auto r=rig.e.create_grid(ids.data(),6);AUREA_CHECK(r.ok());if(!r.ok())return;
+    auto* comp=current_comp(rig.e);auto* root=comp->layer(LayerId::unpack(*r));auto& fx=root->effects.front();
+    fx.params[2].constant=ParamValue::scalar(80);fx.params[3].constant=ParamValue::scalar(80);fx.params[4].constant=ParamValue::scalar(85);
+    for(auto id:ids){auto* l=comp->layer(LayerId::unpack(id));l->transform.scale={.5f,.5f,.5f};}
+    seek_frame(rig.e,0);const auto rect=rig.capture(320);
+    AUREA_CHECK(coverage(rect)>.015f);
+    fx.params[11].constant=ParamValue::scalar(100);seek_frame(rig.e,0);const auto radial=rig.capture(320);
+    AUREA_CHECK(coverage(radial)>.015f);AUREA_CHECK(radial.rgba!=rect.rgba);
+    (void)write_png("build/new-tools-grid-rect.png",rect);(void)write_png("build/new-tools-grid-radial.png",radial);
+}
+AUREA_TEST(Gpu, NewToolsPsdGroupsAndMasksSurviveRenderingAndReload) {
+    AUREA_REQUIRE_GPU(); Scene3DRig rig(8,4,true);
+    auto r=rig.e.import_psd("engine/tests/fixtures/psd/groups-mask-8-2.psd","PSD");
+    AUREA_CHECK(r.ok());if(!r.ok())return;
+    seek_frame(rig.e,0);const auto before=rig.capture(8);
+    AUREA_CHECK(before.at(1,1)[0]>90);AUREA_CHECK(before.at(1,1)[1]<8);
+    AUREA_CHECK(before.at(2,1)[0]<8); // zero in the embedded layer mask
+    AUREA_CHECK(rig.e.save_project("build/new-tools-psd.aurea").ok());
+    AUREA_CHECK(rig.e.load_project("build/new-tools-psd.aurea").ok());
+    seek_frame(rig.e,0);const auto after=rig.capture(8);
+    AUREA_CHECK(before.rgba==after.rgba);
+}
+#endif

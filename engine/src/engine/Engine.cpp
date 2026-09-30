@@ -329,6 +329,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         return Status{Errc::InvalidState, "motor ja inicializado"};
     }
     config_ = config;
+    renderer_.set_foreground_model_directory(config.documentsDirectory + "/ai/rotobrush");
     startup_ = StartupTimings{};
     const u64 tStart = monotonic_ns();
     auto ms_since = [](u64 t0) noexcept { return static_cast<f32>(static_cast<f64>(monotonic_ns() - t0) * 1e-6); };
@@ -1081,7 +1082,8 @@ Status Engine::load_project(const char* path) noexcept {
         u32 missing = 0;
         for (const auto& [key, src] : pending) {
             ImagePixels px;
-            if (!config_.imageLoader(src.c_str(), px, config_.imageLoaderContext) || px.width == 0 || px.height == 0
+            const auto resolved=resolve_asset_path(src);
+            if (!config_.imageLoader(resolved.c_str(), px, config_.imageLoaderContext) || px.width == 0 || px.height == 0
                 || px.rgba.size() != static_cast<usize>(px.width) * px.height * 4) {
                 ++missing;
                 continue;
@@ -8976,6 +8978,8 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
     static const EffectTypeId kRetired[] = {
         effect_type_id("aurea.audio.reverb"), effect_type_id("aurea.audio.flanger"),
         effect_type_id("aurea.audio.echo"), effect_type_id(effect_keys::kAudioSpectrum),
+        // Created together with their controller/membership by create_grid.
+        effect_type_id("aurea.layout.grid_builder"), effect_type_id("aurea.layout.grid_item"),
     };
     u32 cursor = 0, written = 0;
     for (u32 i = 0; i < effectRegistry_.count() && written < capacity; ++i) {
@@ -9621,7 +9625,16 @@ void Engine::export_thread_main() noexcept {
         {
             std::lock_guard<std::mutex> rl(renderMutex_);
             if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
-            if (const Status s = gpu_->wait_frame(slot.gpuFrame, 5'000'000'000ull); !s.ok()) return s;
+            // A dense 3D frame can legitimately take longer than five seconds
+            // on a mobile/software GPU. Poll in cancellable slices; keep a
+            // finite deadline for a hung driver without dropping this frame.
+            const u64 gpuDeadline = monotonic_ns() + 120'000'000'000ull;
+            for (;;) {
+                if (cancelled()) return Errc::Cancelled;
+                const Status s = gpu_->wait_frame(slot.gpuFrame, 100'000'000ull);
+                if (s.ok()) break;
+                if (s.code() != Errc::Timeout || monotonic_ns() >= gpuDeadline) return s;
+            }
             // Memória não coerente: invalida para a CPU ver o que a GPU
             // escreveu (o ponteiro é o mesmo; coerente = nada a fazer).
             void* p = nullptr;
@@ -10718,6 +10731,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             if (l->effects.size() >= kMaxEffectCount) return Errc::OutOfRange;
             const EffectTypeId type = cmd.effect_add.effectType;
+            if (type == effect_type_id(effect_keys::kRotobrush) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
             if (type == effect_type_id(text::kTransformEffect) && l->kind != LayerKind::Text) return Errc::InvalidArgument;
             const ParameterRegistry* params = effectRegistry_.params(type);
             if (!params) return Errc::NotSupported;

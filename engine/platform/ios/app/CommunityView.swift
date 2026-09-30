@@ -311,7 +311,9 @@ private struct SocialEditProfile: View {
     let profile: SocialProfile
     let api: SocialAPI
     let saved: (SocialProfile) -> Void
-    @State private var username = "", name = "", bio = ""
+    @State private var username = ""
+    @State private var name = ""
+    @State private var bio = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var photo: Data?
     @State private var busy = false

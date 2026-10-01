@@ -54,9 +54,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // versionCode 2131: recorte estável e proteção de contas e dados. Um número maior é
+        // versionCode 2132: arraste de keyframes e animadores de texto. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2131
+        versionCode = 2132
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

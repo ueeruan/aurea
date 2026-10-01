@@ -11304,6 +11304,48 @@ AUREA_TEST(Gpu, Regression2128AnimatorEffectChangesPixelsAndReopens) {
     (void)write_png("build/regression-2128-text-blur.png",blur);
 }
 
+AUREA_TEST(Gpu, Regression2132AnimatorControlsChangePausedFrameViaCommands) {
+    AUREA_REQUIRE_GPU();
+    for (bool extruded : {false, true}) {
+    Scene3DRig rig(640, 360);
+    scene3d::Text3DSpec spec; spec.content = "AUREA";
+    const auto added = extruded ? rig.e.add_text3d(spec) : rig.e.add_text("AUREA");
+    AUREA_CHECK(added.ok()); if (!added.ok()) return;
+    const auto id = LayerId::unpack(*added);
+    Command add; add.type = CommandType::EffectAdd;
+    add.effect_add = {id, effect_type_id(text::kAnimatorEffect), kInvalidIndex};
+    AUREA_CHECK(rig.e.apply_command(add).ok());
+    const auto effect = current_comp(rig.e)->layer(id)->effects.back().id;
+    auto scalar = [&](u32 param, f32 value) {
+        Command c; c.type = CommandType::EffectSetParam;
+        c.effect_param = {id, EffectId{effect, 0}, param, value};
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    auto vector = [&](u32 param, f32 x, f32 y, f32 z) {
+        Command c; c.type = CommandType::EffectSetColorParam;
+        c.effect_color = {id, EffectId{effect, 0}, param, x, y, z, 1};
+        AUREA_CHECK(rig.e.apply_command(c).ok());
+    };
+    const auto base = rig.capture(640); AUREA_CHECK(coverage(base) > .001f);
+    vector(text::aePosition, 100, 30, 0);
+    const auto position = rig.capture(640); AUREA_CHECK(max_diff(base, position) > 50);
+    vector(text::aePosition, 0, 0, 0);
+    vector(text::aeScale, 50, 50, 0);
+    const auto scale = rig.capture(640); AUREA_CHECK(max_diff(base, scale) > 50);
+    AUREA_CHECK(coverage(scale) < coverage(base) * .7f);
+    vector(text::aeScale, 100, 100, 0);
+    scalar(text::aeOpacity, 0);
+    const auto invisible = rig.capture(640); AUREA_CHECK(coverage(invisible) < .00001f);
+    scalar(text::aeOpacity, 100);
+    AUREA_CHECK(max_diff(base, rig.capture(640)) <= 3);
+    std::filesystem::create_directories("build/reference/keyframes-2132");
+    const std::string prefix = extruded ? "build/reference/keyframes-2132/text3d-" : "build/reference/keyframes-2132/text-";
+    (void)write_png(prefix + "base.png", base);
+    (void)write_png(prefix + "position.png", position);
+    (void)write_png(prefix + "scale.png", scale);
+    }
+}
+
 AUREA_TEST(Gpu, Regression2128GradientAndBevelPreserveTransparentEdges) {
     AUREA_REQUIRE_GPU();Scene s(96,64);s.comp->set_transparent_background(true);
     const auto id=s.solid(48,32,{.5f,.5f,.5f,1},48,32);const auto base=s.render();

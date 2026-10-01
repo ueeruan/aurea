@@ -453,6 +453,7 @@ internal class TimelineController(
     private fun endInteraction() {
         stopAutoScroll()
         closeUndo()
+        store.timelineKeyDragActive = false
         state.guideFrame = Snap.NONE
         state.reorderSource = -1
         state.reorderTarget = -1
@@ -688,8 +689,7 @@ internal class TimelineController(
             if (d.getDistance() < metrics.axisSlop) continue
             val time = Press.timeEdit(d.x, d.y)
             when (kind) {
-                HitKind.KEYFRAME -> if (time) keyframeDrag(r, hit.keyIndex, down)
-                    else if (!state.compact) scroll(down.id, ch.position, tracker) else consumeUntilUp()
+                HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
                 HitKind.HEADER -> if (!time && !state.compact) reorderDrag(hit.lane ?: r, hit.rowIndex, down, grabbed = null) else consumeUntilUp()
                 // Segurar de propósito levanta a camada: claramente na pilha reordena
                 // (a fileira inteira — numa linha compartilhada, a linha toda),
@@ -749,7 +749,7 @@ internal class TimelineController(
         val edit = Press.timeEdit(d.x, d.y)
         val r = hit.row
         when {
-            r != null && edit && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
+            r != null && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
             r != null && edit && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
             r != null && edit && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
             // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha
@@ -966,7 +966,7 @@ internal class TimelineController(
     }
 
     // --- Arrastar losango -----------------------------------------------------------------
-    /** Move only the focused property group; the overview chooses one real track. */
+    /** Move the visible diamond's keys atomically, including linked scale axes. */
     private suspend fun AwaitPointerEventScope.keyframeDrag(r: RowModel, index: Int, down: PointerInputChange) {
         if (index !in r.instants.indices) return consumeUntilUp()
         if (r.locked) {
@@ -983,13 +983,15 @@ internal class TimelineController(
         light()
         pauseIfPlaying()
         if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id, openOptions = false)
-        val keys = r.keysForDrag(index, store.timelineFocus != null)
+        val keys = r.keysForDrag(index).flatMap { store.graphKeyGroup(r.id, it) }
+            .distinctBy { Triple(it.property, it.effectIndex, it.paramIndex) }
         val instants = r.dragInstants(keys)
         val limits = IntArray(2)
         Keyframes.dragLimits(instants, instants.indexOf(r.instants[index]), r.start, r.end, limits)
         val targets = snapTargets(longArrayOf(r.id), own = r, ownEdges = true, ownKeys = false)
         var current = r.instants[index]
         val grab = current - frameAt(down.position.x)
+        store.timelineKeyDragActive = true
         store.selectKeyframe(r.id, keys.first())
         state.dragKeyLayer = r.id
         state.dragKeyFrame = current
@@ -1001,13 +1003,13 @@ internal class TimelineController(
                 openUndo("mover keyframe")
                 val from = r.toLocal(current)
                 val to = r.toLocal(t)
-                for (k in keys) store.moveKeyframe(r.id, k.copy(time = from), to)
-                current = t
-                // O keyframe escolhido acompanha a marca.
-                store.selectKeyframe(r.id, keys.first().copy(time = to))
-                state.dragKeyFrame = t
+                if (store.editSelectedKeys(r.id, keys.map { it.copy(time = from) }, to - from)) {
+                    current = t
+                    store.selectKeyframe(r.id, keys.first().copy(time = to))
+                    state.dragKeyFrame = t
+                }
             }
-            setGuide(if (snapped != Snap.NONE && snapped == t) snapped else Snap.NONE)
+            setGuide(if (snapped != Snap.NONE && snapped == current) snapped else Snap.NONE)
         }
     }
 
@@ -1019,7 +1021,7 @@ internal class TimelineController(
      * seleção fica onde estava (o próximo movimento tenta de novo).
      */
     private suspend fun AwaitPointerEventScope.selectionDrag(r: RowModel, index: Int, down: PointerInputChange) {
-        val sel = store.keySelection ?: return consumeUntilUp()
+        val sel = store.prepareTimelineKeyDrag() ?: return consumeUntilUp()
         if (sel.isEmpty()) return consumeUntilUp()
         light()
         pauseIfPlaying()
@@ -1030,6 +1032,7 @@ internal class TimelineController(
         val hi = limits[1]
         val targets = snapTargets(longArrayOf(r.id), own = r, ownEdges = true, ownKeys = false)
         val grab = grabbed - frameAt(down.position.x)
+        store.timelineKeyDragActive = true
         var applied = 0
         state.dragKeyLayer = r.id
         state.dragKeyFrame = grabbed
@@ -1181,6 +1184,13 @@ internal class TimelineController(
         autoHorizontal = horizontal
         autoVertical = vertical
         autoOrigin = origin
+        // The sample that crossed touchSlop already belongs to this edit.
+        // Apply it now, including a drag that pauses immediately afterward.
+        currentEvent.changes.firstOrNull { it.id == id && it.pressed }?.let { change ->
+            lastPointer = change.position
+            apply(change.position)
+            updateAutoScroll(change.position)
+        }
         while (true) {
             val ev = awaitPointerEvent()
             val ch = changeOf(ev, id)

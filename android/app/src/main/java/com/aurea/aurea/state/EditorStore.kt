@@ -452,6 +452,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     var curveGraphMode by mutableIntStateOf(0)
     var scaleAxesLinked by mutableStateOf(true)
+    var timelineKeyDragActive by mutableStateOf(false)
 
     var timelineFocus by mutableStateOf<List<com.aurea.aurea.engine.TrackKey>?>(null)
 
@@ -574,6 +575,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * com keyframe não escolhido). Só atualiza as referências se o motor
      * aceitou — recusado, nada muda e a seleção continua coerente.
      */
+    fun prepareTimelineKeyDrag(): KeySelection? {
+        val original = keySelection ?: return null
+        val expanded = original.plusAll(original.layers().associateWith { layer ->
+            keyframes[layer].orEmpty().filter { key -> original.on(layer).any { it.matches(key) } }
+                .flatMap { graphKeyGroup(layer, it) }
+        })
+        keySelection = expanded
+        return expanded
+    }
+
     fun shiftTimelineKeys(delta: Int): Boolean {
         val sel = keySelection ?: return false
         if (sel.isEmpty() || delta == 0) return false

@@ -229,7 +229,7 @@ struct TimelineView: View {
             .onChange(of: size) { _ in scrollY = min(scrollY, maxScroll(size.height)); mediaNeedsRefresh = true }
             .onChange(of: model.primarySelection) { _ in revealSelection(size: size); mediaNeedsRefresh = true }
             .onChange(of: model.curveSelectedTime) { time in
-                if gesture?.mode != .key, let time, let id = model.primarySelection, let row = segmentRow(id) {
+                if !model.timelineKeyDragActive, let time, let id = model.primarySelection, let row = segmentRow(id) {
                     selectedKey = (id, Keyframes.toTimeline(time, row.start, row.offset),
                         TimelineTrack(property: Int(model.curveProperty), effect: model.curveEffect, param: model.curveParam))
                     // Fora do modo de escolha, a seleção da barra acompanha o keyframe do gráfico.
@@ -1234,8 +1234,15 @@ struct TimelineView: View {
         }
         // Losango ESCOLHIDO (lote de 2+ ou modo de escolha): a seleção inteira anda junta.
         if next.mode == .key, let row, row.instants.indices.contains(touched.key),
-           let keys = model.timelineKeySelection,
-           keys.count >= 2 || model.timelineKeySelectMode, keys.containsAny(on: row.id, row.keysAt[touched.key]) {
+           let original = model.timelineKeySelection,
+           original.count >= 2 || model.timelineKeySelectMode, original.containsAny(on: row.id, row.keysAt[touched.key]) {
+            var peers: [Int64: [KeyframeItem]] = [:]
+            for layer in original.layerIds {
+                peers[layer] = (model.keyframes[layer] ?? []).filter { original.on(layer).contains(TimelineKeyRef($0)) }
+                    .flatMap { model.graphKeyGroup(layer, $0) }
+            }
+            let keys = original.plusAll(peers)
+            model.timelineKeySelection = keys
             next.mode = .keys
             next.keyIndex = touched.key
             next.grabFrame = row.instants[touched.key]
@@ -1248,13 +1255,18 @@ struct TimelineView: View {
         }
         if next.mode == .key, let row, row.instants.indices.contains(touched.key) {
             next.keyIndex = touched.key; next.keyFrame = row.instants[touched.key]
-            next.movingKeys = focusTracks != nil || row.track != nil ? row.keysAt[touched.key] : Array(row.keysAt[touched.key].prefix(1))
+            var refs = Set<TimelineKeyRef>()
+            next.movingKeys = row.keysAt[touched.key].flatMap { model.graphKeyGroup(row.id, $0) }.filter { key in
+                refs.insert(TimelineKeyRef(property: key.property, effect: key.effectIndex, param: key.paramIndex, time: key.time)).inserted
+            }
             let instants = row.instants.enumerated().filter { i, _ in row.keysAt[i].contains { candidate in
                 next.movingKeys.contains { $0.property == candidate.property && $0.effectIndex == candidate.effectIndex && $0.paramIndex == candidate.paramIndex }
             } }.map { $0.element }
             next.keyLimits = Keyframes.dragLimits(instants, instants.firstIndex(of: next.keyFrame) ?? 0, start: row.start, end: row.end)
             if let key = next.movingKeys.first { selectedKey = (row.id, next.keyFrame, TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
-            model.select(layerId: row.id, additive: false, openOptions: false)
+            // Re-selecting the same layer closed its dock and changed the
+            // geometry beneath the active gesture.
+            if model.selection != [row.id] { model.select(layerId: row.id, additive: false, openOptions: false) }
         }
         if next.mode == .reorder, let row {
             reorderSource = rows.indices.contains(touched.index) ? touched.index : (rows.firstIndex(where: { $0.id == row.id }) ?? -1)
@@ -1279,6 +1291,7 @@ struct TimelineView: View {
             let f0 = frame(start.x, width: width), y0 = start.y - m.rowsTop + scrollY
             boxRect = (f0, y0, f0, y0)
         }
+        model.timelineKeyDragActive = next.mode == .key || next.mode == .keys
         gesture = next
     }
 
@@ -1293,7 +1306,7 @@ struct TimelineView: View {
             // Editar (losango, alça, mover) exige eixo claro, 2:1.
             let edit = TimelinePress.timeEdit(dx, dy)
             let mode: Mode
-            if edit && touched.kind == .key { mode = .key }
+            if touched.kind == .key { mode = .key }
             else if edit && touched.kind == .trimStart { mode = .trimStart }
             else if edit && touched.kind == .trimEnd { mode = .trimEnd }
             // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha o
@@ -1326,7 +1339,7 @@ struct TimelineView: View {
                 let mode: Mode
                 if boxStarts(g.row, g.hit) { mode = .box }
                 else if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal ? .scrub : (compact ? .step : .scroll) }
-                else if g.hit.kind == .key { mode = time ? .key : (compact ? .blocked : .scroll) }
+                else if g.hit.kind == .key { mode = .key }
                 else if g.hit.kind == .header { mode = !time && !compact ? .reorder : .blocked }
                 else if time || compact { mode = .move }
                 else { mode = stack ? .reorder : .scroll }
@@ -1445,9 +1458,12 @@ struct TimelineView: View {
             if target != g.keyFrame {
                 openUndo(&g)
                 let source = row.toLocal(g.keyFrame), destination = row.toLocal(target)
-                for key in g.movingKeys {
-                    model.engine.editTrackKey(row.id, property: key.property, effect: key.effectIndex, param: key.paramIndex, time: source, action: 2, value: key.value, targetTime: destination, interpolation: key.interpolation, handles: [])
+                let references = g.movingKeys.flatMap { key in
+                    [NSNumber(value: key.property), NSNumber(value: key.effectIndex), NSNumber(value: key.paramIndex), NSNumber(value: source)]
                 }
+                // Commit all axes together and only advance the drag source
+                // after acceptance. A refused collision must not lose the key.
+                guard model.engine.keyframeSelection(row.id, references: references, action: 1, delta: destination - source) > 0 else { guide = Snap.none; break }
                 g.keyFrame = target
                 if let key = g.movingKeys.first { selectedKey = (row.id, target, TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
                 // Fora do modo de escolha, a seleção da barra acompanha o losango movido.
@@ -1525,6 +1541,7 @@ struct TimelineView: View {
         }
         if g.mode == .scrub { model.engine.run { $0.scrubEnd() } }
         if g.undoOpen { model.engine.run { $0.endUndoGroup() } }
+        model.timelineKeyDragActive = false
         gesture = nil; heldView = nil; guide = Snap.none; reorderSource = -1; reorderTarget = -1; boxRect = nil
     }
 
@@ -1657,17 +1674,17 @@ private struct TimelineHit {
         // Pílula: x < 28 é o olho (mostra/esconde); o resto é o cabeçalho (tocar
         // abre/fecha as trilhas, segurar trava/reordena).
         if x < header { return TimelineHit(kind: x < eyeRight ? .eye : .header) }
-        var key = -1, keyX: CGFloat = 0
+        var key = -1
         let keyCy = compact ? m.diamondCyCompact : m.diamondCyNormal
         if abs(y - keyCy) <= m.keyTouchHalf && !instants.isEmpty {
             let i = Keyframes.nearestIndex(instants, TimeAxis.frameAt(x: x, view: view, pxPerFrame: ppf, centerX: width / 2))
             let px = TimeAxis.xOf(frame: Double(instants[i]), view: view, pxPerFrame: ppf, centerX: width / 2)
-            if abs(px - x) <= m.keyTouchHalf { key = i; keyX = px }
+            if abs(px - x) <= m.keyTouchHalf { key = i }
         }
         let over = y < m.bodyHitBottom, mid = (x0 + x1) / 2
         let start = handles && over && x0 >= header && x >= x0 - m.trimInsetStart - m.trimTouchOut && x < min(x0 - m.trimInsetStart + m.trimWidth, mid)
         let end = handles && over && x1 <= width && x > max(x1 - m.trimInsetEnd, mid) && x <= x1 - m.trimInsetEnd + m.trimWidth + m.trimTouchOut
-        if key >= 0 && ((!start && !end) || (abs(keyX - x) + abs(y - keyCy) <= m.keyGlyphHalf && x >= (compact ? capLeft(m, x0) : x0) && x <= x1)) { return TimelineHit(kind: .key, key: key) }
+        if key >= 0 { return TimelineHit(kind: .key, key: key) }
         if start { return TimelineHit(kind: .trimStart) }
         if end { return TimelineHit(kind: .trimEnd) }
         if compact && over && x >= capLeft(m, x0) && x < x0 { return TimelineHit(kind: .back) }
@@ -1725,6 +1742,7 @@ private struct TimelineGestureSurface: UIViewRepresentable {
         var parent: TimelineGestureSurface
         private var holdStart = CGPoint.zero
         private var tapStart = CGPoint.zero
+        private var panStart = CGPoint.zero
         init(_ parent: TimelineGestureSurface) { self.parent = parent }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             gestureRecognizer is UIPinchGestureRecognizer || otherGestureRecognizer is UIPinchGestureRecognizer
@@ -1732,18 +1750,19 @@ private struct TimelineGestureSurface: UIViewRepresentable {
         /// Onde o dedo pousou: o toque que andou além do slop não é toque.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             if gestureRecognizer is UITapGestureRecognizer { tapStart = touch.location(in: gestureRecognizer.view) }
+            if gestureRecognizer is UIPanGestureRecognizer { panStart = touch.location(in: gestureRecognizer.view) }
+            if gestureRecognizer is UILongPressGestureRecognizer { holdStart = touch.location(in: gestureRecognizer.view) }
             return true
         }
         @objc func tapped(_ sender: UITapGestureRecognizer) {
             if sender.state == .ended { parent.tap(sender.location(in: sender.view), tapStart) }
         }
         @objc func panned(_ sender: UIPanGestureRecognizer) {
-            let point = sender.location(in: sender.view), translation = sender.translation(in: sender.view)
-            parent.pan(sender.state, CGPoint(x: point.x - translation.x, y: point.y - translation.y), point, sender.velocity(in: sender.view))
+            let point = sender.location(in: sender.view)
+            parent.pan(sender.state, panStart, point, sender.velocity(in: sender.view))
         }
         @objc func held(_ sender: UILongPressGestureRecognizer) {
             let point = sender.location(in: sender.view)
-            if sender.state == .began { holdStart = point }
             parent.hold(sender.state, holdStart, point)
         }
         @objc func pinched(_ sender: UIPinchGestureRecognizer) { parent.pinch(sender.state, sender.scale, sender.location(in: sender.view)) }

@@ -59,15 +59,15 @@ class TimelineGroupedLanesTest {
     @Test fun groupLaneDragMovesEveryAxisAtThatInstant() {
         val out = expand(setOf(5L), keys = mapOf(5L to listOf(px, py, pz, px2, py3)))
         val lane = out.single { it.track?.group == true }
-        val keys = lane.keysForDrag(0, focused = false)
+        val keys = lane.keysForDrag(0)
         assertEquals(setOf(px, py, pz), keys.toSet())
-        // Limites de arrasto: nenhum eixo do grupo encosta no próprio vizinho.
+        // Cross neighboring frames; occupied destinations are rejected atomically by the core.
         val instants = lane.dragInstants(keys)
         assertArrayEquals(intArrayOf(90, 120, 140), instants)
         val limits = IntArray(2)
         Keyframes.dragLimits(instants, 0, lane.start, lane.end, limits)
         assertEquals(90, limits[0])
-        assertEquals(119, limits[1])
+        assertEquals(lane.end, limits[1])
         // Tocar escolhe todos os eixos do instante (um passo move todos juntos).
         val sel = KeySelection.all(5L, lane.keysAt[0])
         assertEquals(3, sel.size)

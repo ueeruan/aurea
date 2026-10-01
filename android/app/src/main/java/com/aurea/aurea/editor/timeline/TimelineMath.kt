@@ -358,16 +358,13 @@ internal object Keyframes {
     fun toLocal(timeline: Int, start: Int, offset: Int) = timeline - start + offset
 
     /**
-     * Limites de arrasto do instante `index` (inclusive): nunca encosta no
-     * vizinho (senão duas marcas da mesma trilha se fundem) e não sai da camada
-     * — a não ser que já estivesse fora (não pula para dentro sozinho).
+     * Clip bounds only. Neighbor keys may be crossed; the engine atomically
+     * rejects an occupied destination without deleting or partially moving keys.
      */
     fun dragLimits(instants: IntArray, index: Int, start: Int, end: Int, out: IntArray) {
         val t = instants[index]
-        var lo = minOf(start, t)
-        var hi = maxOf(end, t)
-        if (index > 0) lo = max(lo, instants[index - 1] + 1)
-        if (index < instants.lastIndex) hi = minOf(hi, instants[index + 1] - 1)
+        val lo = minOf(start, t)
+        val hi = maxOf(end, t)
         out[0] = lo
         out[1] = max(lo, hi)
     }

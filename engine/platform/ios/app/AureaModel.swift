@@ -322,6 +322,7 @@ final class AureaModel: ObservableObject {
 
     @Published var curveGraphMode = 0
     @Published var scaleAxesLinked = true
+    @Published var timelineKeyDragActive = false
     @Published var curveSelectedTime: Int32?
     @Published var captionOptions: [String: NSNumber] = [:]
     @Published var vectorGroup: UInt32 = 0
@@ -740,6 +741,19 @@ final class AureaModel: ObservableObject {
                             select(layerId: id, additive: false, openOptions: false)
                             panel = .none
                             seek(toFrame: 30)
+                        }
+                    case "timeline-linked-scale":
+                        addShape(1)
+                        if let id = primarySelection {
+                            engine.run { commands in
+                                for time in [Int32(0), 30, 60] {
+                                    commands.insertKeyframe(forLayer: id, property: 3, time: time, value: time == 30 ? 2 : 1)
+                                    commands.insertKeyframe(forLayer: id, property: 4, time: time, value: time == 30 ? 4 : 2)
+                                }
+                                commands.seek(toFrame: 0)
+                            }
+                            scaleAxesLinked = true; snapping = false; refreshModel(force: true)
+                            openCurve(property: 3, time: 0)
                         }
                     case "timeline-reorder":
                         for _ in 0..<8 { addShape(1) }

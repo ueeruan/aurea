@@ -258,10 +258,10 @@ enum Keyframes {
     static func dragLimits(_ instants: [Int32], _ index: Int, start: Int32, end: Int32) -> (lo: Int32, hi: Int32) {
         guard index >= 0 && index < instants.count else { return (start, end) }
         let t = instants[index]
-        var lo = min(start, t)
-        var hi = max(end, t)
-        if index > 0 { lo = max(lo, instants[index - 1] + 1) }
-        if index < instants.count - 1 { hi = min(hi, instants[index + 1] - 1) }
+        // Crossing a neighbor is allowed. The shared engine rejects an occupied
+        // destination atomically instead of overwriting it or moving half a group.
+        let lo = min(start, t)
+        let hi = max(end, t)
         return (lo, max(lo, hi))
     }
 

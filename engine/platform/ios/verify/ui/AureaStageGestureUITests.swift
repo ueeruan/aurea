@@ -830,6 +830,31 @@ import XCTest
     /// Posição X (0, 30) e Escala X (15, 45), trilhas abertas, modo "Selecionar",
     /// um keyframe de cada trilha; arrastar um move os dois num passo de desfazer;
     /// Excluir e Duplicar agem na seleção inteira.
+    func testDiagonalBoundaryDragMovesLinkedScaleAndPersistsAfterRelease() throws {
+        let before = try launch("timeline-linked-scale")
+        XCTAssertEqual(before.curveKeys.filter { [3, 4].contains($0.property) }.count, 6)
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let f = timeline.frame
+        // Start within the diamond's touch area, on the white cap. The first
+        // motion is deliberately diagonal; it must not trim or scrub instead.
+        let start = CGPoint(x: f.midX - 8, y: f.minY + 61)
+        let end = CGPoint(x: start.x + 16 * 80 / 30, y: start.y + 30)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end))
+        func moved(_ state: Snapshot) -> Bool {
+            [3, 4].allSatisfy { property in state.curveKeys.contains { $0.property == property && $0.time == 16 } }
+        }
+        let after = try awaitSnapshot("Both linked axes remain at the exact release frame", matching: moved)
+        XCTAssertFalse(after.curveKeys.contains { [3, 4].contains($0.property) && $0.time == 0 })
+        XCTAssertEqual(after.playhead, before.playhead)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        XCTAssertTrue(moved(try snapshot()))
+        try undo()
+        _ = try awaitSnapshot("One undo restores both axes") { state in
+            [3, 4].allSatisfy { property in state.curveKeys.contains { $0.property == property && $0.time == 0 } }
+        }
+    }
+
     func testTimelineMultiSelectsKeysAcrossPropertiesMovesDeletesAndDuplicates() throws {
         let before = try launch("timeline-keys")
         XCTAssertEqual(before.curveKeys.count, 4)

@@ -14,14 +14,14 @@ class TimelinePropertyIsolationTest {
     private fun row() = RowModel(1, LayerType.Image, 20, 100, 5, true, false, false, true, "clip", 0,
         intArrayOf(25, 26, 45), arrayOf(listOf(position, rotation), listOf(scale), listOf(key(0, 30))))
 
-    @Test fun overviewDragDoesNotMoveCoincidentRotation() {
+    @Test fun overviewMovesEveryKeyRepresentedByTheDiamond() {
         val row = row()
-        val moving = row.keysForDrag(0, false)
-        assertEquals(listOf(position), moving)
+        val moving = row.keysForDrag(0)
+        assertEquals(listOf(position, rotation), moving)
         assertArrayEquals(intArrayOf(25, 45), row.dragInstants(moving))
         val limits = IntArray(2)
         Keyframes.dragLimits(row.dragInstants(moving), 0, row.start, row.end, limits)
-        assertEquals(44, limits[1]) // scale at frame 26 must not block position
+        assertEquals(100, limits[1]) // crossing another key is allowed; collisions are resolved by the core
         assertEquals(10, row.toLocal(25))
     }
 

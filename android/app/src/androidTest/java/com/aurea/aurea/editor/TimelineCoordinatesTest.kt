@@ -196,6 +196,56 @@ class TimelineCoordinatesTest {
         assertPixels(90, "remap changes media sampling, not property-key time")
     }
 
+    @Test fun diagonalBoundaryDragCommitsLinkedScaleEvenWhenOnlyXAxisIsVisible() {
+        launch(emptyList())
+        for (time in listOf(0, 30, 60)) {
+            compose.runOnIdle { store.seek(time) }
+            compose.waitUntil(5000) { store.playhead == time }
+            compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(3, 4)) }
+            compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property in 3..4 && it.time == time } == 2 }
+        }
+        compose.runOnIdle {
+            store.scaleAxesLinked = true
+            store.timelineFocus = listOf(com.aurea.aurea.engine.TrackKey(3))
+            store.selectKeyframe(id, store.keyframes[id]!!.first { it.property == 3 && it.time == 0 })
+            store.seek(0); state.compact = true; state.heldView = 0.0; state.pps = 120f
+        }
+        compose.waitUntil(5000) { store.playhead == 0 }
+        val ppf = 120f * metrics.density / 30
+        val x = state.width / 2f - 8 * metrics.density
+        val y = metrics.rowsTop + metrics.diamondCyCompact
+        surface().performTouchInput {
+            down(Offset(x, y))
+            moveTo(Offset(x + 5 * ppf, y + 25 * metrics.density), 80)
+            moveTo(Offset(x + 10 * ppf, y + 30 * metrics.density), 80)
+            updatePointerTo(0, Offset(x + 13 * ppf, y + 30 * metrics.density)); up()
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property in 3..4 && it.time == 13 } == 2 }
+        compose.runOnIdle { store.seek(17) }
+        compose.waitUntil(5000) { store.playhead == 17 }
+        assertEquals(2, store.keyframes[id].orEmpty().count { it.property in 3..4 && it.time == 13 })
+        assertEquals(0, store.layers.single().startFrame)
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property in 3..4 && it.time == 0 } == 2 }
+    }
+
+    @Test fun denseKeyCanCrossItsNeighborAndStaysAtTheReleaseFrame() {
+        launch(listOf(0, 1, 2, 30))
+        select(1, 1, 1.0, 300f)
+        val x = state.width / 2f
+        val y = metrics.rowsTop + metrics.diamondCyNormal
+        val ppf = 300f * metrics.density / 30
+        surface().performTouchInput {
+            down(Offset(x, y))
+            moveTo(Offset(x + 4 * ppf, y), 80)
+            updatePointerTo(0, Offset(x + 9 * ppf, y)); up()
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 10 } }
+        compose.runOnIdle { store.seek(15) }
+        compose.waitUntil(5000) { store.playhead == 15 }
+        assertEquals(listOf(0, 2, 10, 30), store.keyframes[id].orEmpty().filter { it.property == 0 }.map { it.time }.sorted())
+    }
+
     @Test fun denseSelectedKeysKeepTheirOwnDiamondAndDragCommitsExactReleaseFrame() {
         launch(listOf(0, 1, 2, 30, 90))
         for (key in 0..2) {

@@ -66,8 +66,9 @@ internal class RowModel(
             it.effectIndex == key.effectIndex && it.paramIndex == key.paramIndex }) frame else Snap.NONE
     }
 
-    fun keysForDrag(index: Int, focused: Boolean): List<KeyframeRow> =
-        if (focused || track != null) keysAt[index] else keysAt[index].take(1)
+    // The overview diamond represents every key at this instant. Focused rows
+    // already contain only their property; never leave invisible peers behind.
+    fun keysForDrag(index: Int): List<KeyframeRow> = keysAt[index]
 
     fun dragInstants(keys: List<KeyframeRow>): IntArray = instants.filterIndexed { i, _ ->
         keysAt[i].any { candidate -> keys.any { it.property == candidate.property &&

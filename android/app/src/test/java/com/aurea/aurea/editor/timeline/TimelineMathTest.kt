@@ -138,15 +138,15 @@ class TimelineMathTest {
 
     // --- Keyframes ---------------------------------------------------------------------------
     @Test
-    fun `losango nunca encosta no vizinho nem sai da camada`() {
+    fun `losango atravessa vizinhos sem sair da camada`() {
         val inst = intArrayOf(10, 20, 40)
         val out = IntArray(2)
         Keyframes.dragLimits(inst, 1, 0, 100, out)
-        assertArrayEquals(intArrayOf(11, 39), out)
+        assertArrayEquals(intArrayOf(0, 100), out)
         Keyframes.dragLimits(inst, 0, 0, 100, out)
-        assertArrayEquals(intArrayOf(0, 19), out)
+        assertArrayEquals(intArrayOf(0, 100), out)
         Keyframes.dragLimits(inst, 2, 0, 100, out)
-        assertArrayEquals(intArrayOf(21, 100), out)
+        assertArrayEquals(intArrayOf(0, 100), out)
         // Já fora da camada (depois de um trim): não pula para dentro sozinho.
         Keyframes.dragLimits(intArrayOf(-5), 0, 0, 50, out)
         assertArrayEquals(intArrayOf(-5, 50), out)

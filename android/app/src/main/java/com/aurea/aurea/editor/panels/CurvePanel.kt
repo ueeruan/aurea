@@ -821,6 +821,7 @@ private fun followGraphLayer(store: EditorStore) {
 
 /** Cabeçote parado noutro trecho da trilha mostrada: o painel mostra esse trecho. */
 private fun followGraphPlayhead(store: EditorStore) {
+    if (store.timelineKeyDragActive) return
     val (layer, sel) = store.selectedKeyframe ?: return
     if (layer != store.primary) return
     val track = store.keyframes[layer].orEmpty().track(sel)

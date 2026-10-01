@@ -550,6 +550,7 @@ struct NativeCurvePanel: View {
         model.curveSelectedTime = next[max(0, graphSegmentIndexAt(next, model.localPlayhead))].time
     }
     private func followPlayhead() {
+        guard !model.timelineKeyDragActive else { return }
         let keys = track
         guard let time = model.curveSelectedTime, keys.count >= 2 else { return }
         let want = graphSegmentIndexAt(keys, model.localPlayhead)

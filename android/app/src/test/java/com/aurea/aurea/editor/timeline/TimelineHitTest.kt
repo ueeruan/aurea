@@ -81,13 +81,14 @@ class TimelineHitTest {
     }
 
     @Test
-    fun `keyframe em 0 nao rouba mais a alca de inicio - bug 10_2`() {
+    fun `keyframe na ponta conserva o alvo inteiro de toque`() {
         val atStart = intArrayOf(100)                        // losango em x = 200, na ponta
         assertEquals(HitKind.KEYFRAME, hit(203f, 12f, instants = atStart))   // no desenho, dentro da barra
         assertEquals(0, out[0])
-        assertEquals(HitKind.TRIM_START, hit(190f, 20f, instants = atStart)) // fora da barra: alça
-        assertEquals(HitKind.TRIM_START, hit(210f, 20f, instants = atStart)) // perto, mas fora do desenho
-        assertEquals(HitKind.TRIM_START, hit(203f, 2f, instants = atStart))  // metade de cima: alça
+        assertEquals(HitKind.KEYFRAME, hit(190f, 20f, instants = atStart))
+        assertEquals(HitKind.KEYFRAME, hit(210f, 20f, instants = atStart))
+        assertEquals(HitKind.KEYFRAME, hit(203f, 2f, instants = atStart))
+        assertEquals(HitKind.TRIM_START, hit(185f, 20f, instants = atStart)) // trim outside the diamond target
         assertEquals(HitKind.KEYFRAME, hit(190f, 20f, instants = atStart, handles = false))
     }
 
@@ -127,7 +128,7 @@ class TimelineHitTest {
     fun `tampa externa preserva trim e as duas metades do keyframe na borda`() {
         val keys = intArrayOf(100)
         assertEquals(HitKind.CAP_BACK, hit(180f, 10f, compact = true, instants = keys))
-        assertEquals(HitKind.TRIM_START, hit(190f, 10f, compact = true, instants = keys))
+        assertEquals(HitKind.KEYFRAME, hit(190f, 10f, compact = true, instants = keys))
         assertEquals(HitKind.KEYFRAME, hit(197f, 12f, compact = true, instants = keys))
         assertEquals(HitKind.KEYFRAME, hit(203f, 12f, compact = true, instants = keys))
         // Mesmo quando somente a tampa entra pela borda direita da janela.

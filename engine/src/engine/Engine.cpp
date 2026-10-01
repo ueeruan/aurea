@@ -1122,8 +1122,17 @@ Status Engine::load_project(const char* path) noexcept {
     // "modelo 3D ausente" para religar.
     {
         std::vector<std::pair<u64, std::string>> pending;
+        std::vector<u64> letterAssets;
         {
             std::lock_guard<std::mutex> lock(modelMutex_);
+            project_->timeline().for_each_composition([&](CompositionId, const Composition& c) {
+                for (u32 i = 0; i < c.order().size(); ++i) {
+                    const Layer* l = c.layer(c.order().at(i));
+                    if (l && l->kind == LayerKind::Model3D && std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
+                        return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(effect_keys::kText3DLayout);
+                    })) letterAssets.push_back(l->model.scene.pack());
+                }
+            });
             project_->for_each_asset([&](AssetId id, const Asset& a) {
                 if (a.kind == AssetKind::Model3D && !a.sourcePath.empty()) pending.emplace_back(id.pack(), a.sourcePath);
             });
@@ -1135,6 +1144,8 @@ Status Engine::load_project(const char* path) noexcept {
             // Texto 3D: a origem é a receita; a malha é gerada de novo.
             scene3d::Text3DSpec spec;
             const auto font = scene3d::decode_text3d(src, spec) ? scene3d::text3d_font(spec) : nullptr;
+            bool repairLetters = font && !spec.separateGlyphs && std::find(letterAssets.begin(), letterAssets.end(), key) != letterAssets.end();
+            if (repairLetters) spec.separateGlyphs = true;
             // Forma 3D: também é receita (forma + cor/imagem por parte).
             scene3d::Shape3DSpec shape;
             const bool isShape = !font && scene3d::decode_shape3d(src, shape);
@@ -1142,6 +1153,12 @@ Status Engine::load_project(const char* path) noexcept {
                                     : isShape ? scene3d::build_shape3d(shape, [this](const std::string& s) { return resolve_asset_path(s); },
                                                                        o.maxTextureSize)
                                               : scene3d::import_scene_file(resolve_asset_path(src), o);
+            if (!r.ok() && repairLetters) {
+                // An older project can exceed the per-letter geometry limit.
+                // Preserve its visible text if the repair cannot be built.
+                repairLetters = false; spec.separateGlyphs = false;
+                r = scene3d::build_text3d(*font, spec);
+            }
             if (!r.ok()) {
                 ++missing;
                 AUREA_LOG_WARN("modelo 3D do projeto nao abriu (%s)", r.detail.c_str());
@@ -1149,6 +1166,12 @@ Status Engine::load_project(const char* path) noexcept {
             }
             std::lock_guard<std::mutex> lock(modelMutex_);
             models_[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(r.asset));
+            if (repairLetters) {
+                // Older paste/preset paths saved the effect with a merged mesh.
+                // Repair the recipe too so the animation survives another save.
+                if (Asset* asset = project_->asset(AssetId::unpack(key))) asset->sourcePath = scene3d::encode_text3d(spec);
+                project_->mark_dirty();
+            }
         }
         if (missing) AUREA_LOG_WARN("%u modelo(s) 3D ausente(s) no projeto", missing);
         missingTotal += missing;
@@ -5414,7 +5437,10 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
         u32 next = 0;
         for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
         for (const EffectInstance& e : clipboard_.effects) {
-            if (e.type == effect_type_id(effect_keys::kText3DLayout) && !ensure_text3d_layout(*d).ok()) continue;
+            if (e.type == effect_type_id(text::kAnimatorEffect) && d->kind != LayerKind::Text && d->kind != LayerKind::Model3D) continue;
+            if ((e.type == effect_type_id(effect_keys::kText3DLayout) ||
+                 (e.type == effect_type_id(text::kAnimatorEffect) && d->kind == LayerKind::Model3D)) &&
+                !ensure_text3d_layout(*d).ok()) continue;
             // O layout das partes só serve em forma 3D (as partes já são nós próprios).
             if (e.type == effect_type_id(effect_keys::kShape3DLayout) && !is_shape3d_layer(*d)) continue;
             EffectInstance c = e;
@@ -5470,6 +5496,14 @@ u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
 
 namespace {
 struct SelectedTrackKey { u32 track; u32 key; };
+// Time remap is stored outside TrackSet. Every selection operation must resolve
+// it through the same identity as single-key commands (including its effect alias).
+const Track& selected_track(const Layer& layer, u32 index) {
+    return index == kInvalidIndex ? layer.timeRemap : layer.tracks.at(index);
+}
+Track& selected_track(Layer& layer, u32 index) {
+    return index == kInvalidIndex ? layer.timeRemap : layer.tracks.at(index);
+}
 bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
                            std::vector<SelectedTrackKey>& out) {
     if (!refs || count == 0 || count > 16384) return false;
@@ -5477,18 +5511,18 @@ bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
         const i64* ref = refs + i * 4;
         if (ref[0] < 0 || ref[0] > 65535 || ref[1] < -1 || ref[1] > UINT32_MAX
             || ref[2] < 0 || ref[2] > UINT32_MAX || ref[3] < INT32_MIN || ref[3] > INT32_MAX) return false;
-        bool found = false;
-        for (u32 t = 0; t < layer.tracks.size(); ++t) {
-            const Track& track = layer.tracks.at(t);
-            if (static_cast<i64>(track.property) != ref[0] || track.effectIndex != static_cast<u32>(ref[1])
-                || track.effectParamIndex != static_cast<u32>(ref[2])) continue;
-            const u32 key = track.find_exact(FrameIndex{ref[3]});
-            if (key == kInvalidIndex) return false;
-            if (std::none_of(out.begin(), out.end(), [=](const auto& item) { return item.track == t && item.key == key; }))
-                out.push_back({t, key});
-            found = true; break;
+        const TrackRef identity{{}, static_cast<TrackProperty>(ref[0]), static_cast<u32>(ref[1]), static_cast<u32>(ref[2])};
+        const Track* track = read_command_track(layer, identity);
+        if (!track) return false;
+        const u32 key = track->find_exact(FrameIndex{ref[3]});
+        if (key == kInvalidIndex) return false;
+        u32 index = kInvalidIndex;
+        if (track != &layer.timeRemap) {
+            for (u32 t = 0; t < layer.tracks.size(); ++t) if (&layer.tracks.at(t) == track) { index = t; break; }
+            if (index == kInvalidIndex) return false;
         }
-        if (!found) return false;
+        if (std::none_of(out.begin(), out.end(), [=](const auto& item) { return item.track == index && item.key == key; }))
+            out.push_back({index, key});
     }
     return !out.empty();
 }
@@ -5504,10 +5538,10 @@ u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noe
     std::vector<SelectedTrackKey> selected;
     if (!layer || !resolve_selected_keys(*layer, refs, count, selected)) return 0;
     i64 anchor = INT64_MAX;
-    for (const auto& item : selected) anchor = std::min(anchor, layer->tracks.at(item.track).keys[item.key].time.value);
+    for (const auto& item : selected) anchor = std::min(anchor, selected_track(*layer, item.track).keys[item.key].time.value);
     std::vector<Clipboard::Key> copied;
     for (const auto& item : selected) {
-        const Track& track = layer->tracks.at(item.track);
+        const Track& track = selected_track(*layer, item.track);
         Keyframe key = track.keys[item.key]; key.time.value -= anchor;
         EffectTypeId type = 0; u32 ordinal = 0;
         if (track.property == TrackProperty::EffectParam) {
@@ -5536,11 +5570,12 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
     if (!layer || layer->locked || (!remove && delta == 0) || delta < INT32_MIN || delta > INT32_MAX
         || !resolve_selected_keys(*layer, refs, count, selected)) return 0;
     std::vector<std::pair<u32, Track>> changed;
-    for (u32 index = 0; index < layer->tracks.size(); ++index) {
+    for (u32 slot = 0; slot <= layer->tracks.size(); ++slot) {
+        const u32 index = slot == layer->tracks.size() ? kInvalidIndex : slot;
         std::vector<u32> keys;
         for (const auto& item : selected) if (item.track == index) keys.push_back(item.key);
         if (keys.empty()) continue;
-        const Track& original = layer->tracks.at(index);
+        const Track& original = selected_track(*layer, index);
         Track next = original;
         next.keys.clear();
         for (u32 k = 0; k < original.keys.size(); ++k) {
@@ -5556,10 +5591,11 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
         }
         std::sort(next.keys.begin(), next.keys.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
         for (usize k = 1; k < next.keys.size(); ++k) if (next.keys[k - 1].time == next.keys[k].time) return 0;
+        next.lastIndex = 0;
         changed.emplace_back(index, std::move(next));
     }
     history_.before_mutation(*comp, project_->timeline().current(), remove ? "remover keyframes" : "mover keyframes");
-    for (auto& entry : changed) layer->tracks.at(entry.first) = std::move(entry.second);
+    for (auto& entry : changed) selected_track(*layer, entry.first) = std::move(entry.second);
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     project_->mark_dirty(); request_render();
     return static_cast<u32>(selected.size());
@@ -5608,7 +5644,9 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
             }
             const FrameIndex target{local.value + ck.key.time.value};
             if (target.value < INT32_MIN || target.value > INT32_MAX) continue;
-            Track& t = d->tracks.get_or_create(ck.property, effectIndex, ck.effectParamIndex);
+            Track& t = ck.property == TrackProperty::TimeRemap ? d->timeRemap
+                : d->tracks.get_or_create(ck.property, effectIndex, ck.effectParamIndex);
+            if (ck.property == TrackProperty::TimeRemap) d->timeRemapEnabled = true;
             const u32 k = t.set(target, ck.key.value, ck.key.interp);
             if (k < t.keys.size()) {
                 // Curva inteira (bezier, tangentes, easing) do keyframe copiado.
@@ -5801,8 +5839,9 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
     // Prepare a copy first: failure must not partially apply the preset or
     // replace the original recipe recorded by undo.
     AssetId preparedScene = l->model.scene;
-    if (std::any_of(p.effects.begin(), p.effects.end(), [](const EffectInstance& effect) {
-        return effect.type == effect_type_id(effect_keys::kText3DLayout);
+    if (std::any_of(p.effects.begin(), p.effects.end(), [&](const EffectInstance& effect) {
+        return effect.type == effect_type_id(effect_keys::kText3DLayout) ||
+               (effect.type == effect_type_id(text::kAnimatorEffect) && l->kind == LayerKind::Model3D);
     })) {
         Layer prepared = *l;
         const Status ready = ensure_text3d_layout(prepared);
@@ -7541,22 +7580,36 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
 }
 
 Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept {
-    const auto font = scene3d::text3d_font(spec);
+    scene3d::Text3DSpec edited = spec;
+    AssetId previousScene;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!l || l->kind != LayerKind::Model3D || l->locked) return Errc::InvalidArgument;
+        previousScene = l->model.scene;
+        // A stale panel snapshot must not merge the letters of a live effect.
+        if (std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
+            return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(effect_keys::kText3DLayout);
+        }) || layeranim::has_units(*l)) edited.separateGlyphs = true;
+    }
+    const auto font = scene3d::text3d_font(edited);
     if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
-    scene3d::ImportResult r = scene3d::build_text3d(*font, spec);
+    scene3d::ImportResult r = scene3d::build_text3d(*font, edited);
     if (!r.ok()) return Status{Errc::InvalidArgument, "texto sem letras visiveis"};
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Model3D) return Errc::InvalidArgument;
+    if (!l || l->kind != LayerKind::Model3D || l->locked || l->model.scene != previousScene) return Errc::InvalidArgument;
     const Asset* old = project_->asset(l->model.scene);
     scene3d::Text3DSpec prev;
     if (!old || !scene3d::decode_text3d(old->sourcePath, prev)) return Errc::InvalidArgument;
     history_.before_mutation(*comp, project_->timeline().current(), "editar texto 3D");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     // Asset novo (o antigo fica para o desfazer religar a malha anterior).
-    const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
+    const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(edited));
     models_[assetId.pack()] = scene;
     l->model.scene = assetId;
     l->model.animationClip = -1; // Text 3D moves only through user-authored layer transforms.

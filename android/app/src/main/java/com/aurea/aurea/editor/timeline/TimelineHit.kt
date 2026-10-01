@@ -60,14 +60,12 @@ internal object RowHit {
 
         // Alvo de toque centrado no mesmo ponto usado pelo desenho.
         var key = -1
-        var keyX = 0f
         val keyCy = if (compact) m.diamondCyCompact else m.diamondCyNormal
         if (keysEnabled && abs(y - keyCy) <= m.keyTouchHalf && instants.isNotEmpty()) {
             val i = Keyframes.nearestIndex(instants, TimeAxis.frameAt(x, view, pxPerFrame, centerX))
             val kx = TimeAxis.xOf(instants[i].toDouble(), view, pxPerFrame, centerX)
             if (abs(kx - x) <= m.keyTouchHalf) {
                 key = i
-                keyX = kx
             }
         }
 
@@ -82,16 +80,11 @@ internal object RowHit {
             x > max(x1 - m.trimInsetEnd, mid) &&
             x <= x1 - m.trimInsetEnd + m.trimWidth + m.trimTouchOut
 
+        // A visible diamond owns its complete touch target, including at the
+        // clip boundary. Trim remains reachable outside that target.
         if (key >= 0) {
-            // Bug 10.2 da spec: o losango em 0 (o caso mais comum) roubava a alça de
-            // início. Dentro da zona da alça, o losango só vence se o dedo está NO
-            // desenho dele e dentro da barra; o resto da zona é da alça.
-            val onGlyph = abs(keyX - x) + abs(y - keyCy) <= m.keyGlyphHalf &&
-                x >= (if (compact) capLeft(m, x0) else x0) && x <= x1
-            if ((!inStart && !inEnd) || onGlyph) {
-                out[0] = key
-                return HitKind.KEYFRAME
-            }
+            out[0] = key
+            return HitKind.KEYFRAME
         }
         if (inStart) return HitKind.TRIM_START
         if (inEnd) return HitKind.TRIM_END

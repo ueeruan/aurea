@@ -12,7 +12,7 @@
 //    D1 (AUREA_DB)  users(id, email UNIQUE, password_hash, created_at, last_login_at)
 //                   counters('users') — somado NA MESMA transação do INSERT, então
 //                   o número de cadastrados é exato mesmo com cadastros simultâneos.
-//    KV (AUREA_KV)  sess:<sha256(token)>  a sessão (TTL 180 dias). O token em si
+//    KV (AUREA_KV)  sess:<sha256(token)>  a sessão (TTL 30 dias). O token em si
 //                   NUNCA é gravado: só o hash dele. Vazou o KV, não vazou sessão.
 //                   rl:<escopo>:<sha256(id)>:<janela>  contadores de limite (TTL).
 //
@@ -24,7 +24,7 @@
 export const PBKDF2_ITERACOES = 100000;
 export const SENHA_MIN = 8;
 export const SENHA_MAX = 128;
-export const SESSAO_TTL_S = 180 * 24 * 3600;
+export const SESSAO_TTL_S = 30 * 24 * 3600;
 const CORPO_MAX = 4096;
 
 // Limites (tentativas por janela). Contam TODAS as tentativas, certas ou não.
@@ -46,6 +46,8 @@ export function json(corpo, status = 200, extra = {}) {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
+      "strict-transport-security": "max-age=31536000",
+      "referrer-policy": "no-referrer",
       ...extra,
     },
   });
@@ -142,9 +144,7 @@ export function erroDaSenha(senha) {
   return null;
 }
 
-/** Limite por janela fixa no D1 (o KV grátis só grava 1 000 vezes por dia na
- *  conta inteira). Falha do armazenamento DEIXA PASSAR: o limite é proteção,
- *  não pode trancar todo mundo para fora como em 28/09/2026. */
+/** A storage failure must never silently disable brute-force protection. */
 export async function dentroDoLimite(env, escopo, id, { max, janela }, agoraMs = Date.now()) {
   const bloco = Math.floor(agoraMs / 1000 / janela);
   const chave = `rl:${escopo}:${await sha256hex("aurea-rl:" + id)}:${bloco}`;
@@ -153,10 +153,11 @@ export async function dentroDoLimite(env, escopo, id, { max, janela }, agoraMs =
       "INSERT INTO rate_limits (key, count, expires_at) VALUES (?, 1, ?) " +
       "ON CONFLICT(key) DO UPDATE SET count = count + 1 RETURNING count")
       .bind(chave, agoraMs + janela * 2000).first();
-    return Number(r?.count ?? 1) <= max;
-  } catch (e) {
-    console.error("contas: limite indisponível", String(e?.message ?? e).slice(0, 200));
-    return true;
+    const count = Number(r?.count);
+    if (!Number.isSafeInteger(count) || count < 1) throw new Error('invalid_limit_state');
+    return count <= max;
+  } catch {
+    throw new Error("security_storage_unavailable");
   }
 }
 
@@ -212,19 +213,25 @@ export async function lerSessao(env, req) {
   const token = tokenDoCabecalho(req);
   if (!token) return null;
   const hash = await sha256hex(token);
-  try {
-    const d = await env.AUREA_DB.prepare("SELECT uid, email FROM sessions WHERE token_hash = ? AND expires_at > ?")
-      .bind(hash, Date.now()).first();
-    if (d) return { uid: d.uid, email: d.email, hash };
-  } catch { /* D1 fora: tenta a sessão antiga do KV */ }
-  // Sessões criadas antes de 28/09/2026 moram no KV (ler não gasta a cota de gravação).
-  try {
-    const chave = "sess:" + hash;
-    const s = env.AUREA_KV ? await env.AUREA_KV.get(chave, "json") : null;
-    return s && typeof s.email === "string" ? { ...s, chave, hash } : null;
-  } catch {
-    return null;
+  const now = Date.now();
+  // Read even expired/revoked rows: they are authoritative tombstones and must
+  // not fall through to an eventually-consistent legacy KV session.
+  let d = await env.AUREA_DB.prepare("SELECT uid, created_at, expires_at FROM sessions WHERE token_hash = ?")
+    .bind(hash).first();
+  if (!d && env.AUREA_KV) {
+    const legacy = await env.AUREA_KV.get("sess:" + hash, "json");
+    if (!legacy || typeof legacy.uid !== 'string' || !Number.isSafeInteger(legacy.criado) ||
+        legacy.criado > now || legacy.criado + SESSAO_TTL_S * 1000 <= now) return null;
+    const account = await env.AUREA_DB.prepare("SELECT email FROM users WHERE id = ?").bind(legacy.uid).first();
+    if (!account) return null;
+    await env.AUREA_DB.prepare("INSERT OR IGNORE INTO sessions (token_hash,uid,email,created_at,expires_at) VALUES (?,?,?,?,?)")
+      .bind(hash, legacy.uid, account.email, legacy.criado, legacy.criado + SESSAO_TTL_S * 1000).run();
+    // A concurrent logout may have written a tombstone while KV was loading.
+    d = await env.AUREA_DB.prepare("SELECT uid, created_at, expires_at FROM sessions WHERE token_hash = ?").bind(hash).first();
   }
+  if (!d || d.expires_at <= now || d.created_at > now || d.created_at + SESSAO_TTL_S * 1000 <= now) return null;
+  const account = await env.AUREA_DB.prepare("SELECT email FROM users WHERE id = ?").bind(d.uid).first();
+  return account ? { uid: d.uid, email: account.email, hash } : null;
 }
 
 async function contarUsuarios(env) {
@@ -265,7 +272,7 @@ async function cadastrar(req, env) {
     ]);
   } catch (e) {
     if (/UNIQUE/i.test(String(e?.message ?? e))) return json({ error: "email_em_uso" }, 409);
-    console.error("contas: cadastro falhou no D1", String(e?.message ?? e).slice(0, 200));
+    console.error("contas: cadastro falhou no D1");
     return json({ error: "contas_indisponiveis" }, 503);
   }
   esquecerMemo();
@@ -292,7 +299,7 @@ async function entrar(req, env, ctx) {
   try {
     linha = await env.AUREA_DB.prepare("SELECT id, email, password_hash FROM users WHERE email = ?").bind(email).first();
   } catch (e) {
-    console.error("contas: login falhou no D1", String(e?.message ?? e).slice(0, 200));
+    console.error("contas: login falhou no D1");
     return json({ error: "contas_indisponiveis" }, 503);
   }
   // Mesma mensagem e o mesmo trabalho para "não existe" e "senha errada".
@@ -309,18 +316,7 @@ async function entrar(req, env, ctx) {
 async function sessao(req, env) {
   const s = await lerSessao(env, req);
   if (!s) return json({ error: "nao_autorizado" }, 401);
-  // O usuário ainda existe? (apagado pelo administrador = sessão morta)
-  try {
-    const linha = await env.AUREA_DB.prepare("SELECT email FROM users WHERE id = ?").bind(s.uid).first();
-    if (!linha) {
-      await apagarSessao(env, s);
-      return json({ error: "nao_autorizado" }, 401);
-    }
-    return json({ email: linha.email });
-  } catch {
-    // D1 fora do ar: a sessão do KV basta para não derrubar quem já entrou.
-    return json({ email: s.email });
-  }
+  return json({ email: s.email });
 }
 
 async function sair(req, env) {
@@ -330,8 +326,8 @@ async function sair(req, env) {
 }
 
 async function apagarSessao(env, s) {
-  await env.AUREA_DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(s.hash).run().catch(() => {});
-  if (s.chave && env.AUREA_KV) await env.AUREA_KV.delete(s.chave).catch(() => {});
+  await env.AUREA_DB.prepare("UPDATE sessions SET expires_at = 0 WHERE token_hash = ?").bind(s.hash).run();
+  if (env.AUREA_KV) await env.AUREA_KV.delete("sess:" + s.hash).catch(() => {});
 }
 
 async function estatisticas(env) {

@@ -65,7 +65,7 @@ test("provedor: auto prefere o binding da Cloudflare; none desliga; sem nada nao
 
 test("Resend: um e-mail por relatorio para o desenvolvedor, com anexo; reenvio nao duplica", async () => {
   esquecerMemo();
-  const env = { AUREA_KV: kvFalso(), RESEND_API_KEY: "re_segredo", CRASH_EMAIL_TO: "ruanpablombl@gmail.com" };
+  const env = { AUREA_KV: kvFalso(), AUREA_DB: d1Falso(), RESEND_API_KEY: "re_segredo", CRASH_EMAIL_TO: "ruanpablombl@gmail.com" };
   const f = fetchFalso();
   try {
     const r = await enviar(env, relatorio());
@@ -100,7 +100,7 @@ test("Resend: um e-mail por relatorio para o desenvolvedor, com anexo; reenvio n
 test("Email Workers: MIME com Message-ID, destino e pilha no corpo", async () => {
   const enviados = [];
   const env = {
-    AUREA_KV: kvFalso(), CRASH_EMAIL_FROM: "crash@aurea.app", RESEND_API_KEY: "nao-deve-ser-usada",
+    AUREA_KV: kvFalso(), AUREA_DB: d1Falso(), CRASH_EMAIL_FROM: "crash@aurea.app", RESEND_API_KEY: "nao-deve-ser-usada",
     CRASH_EMAIL: { send: async (m) => { enviados.push(m); } },
   };
   const f = fetchFalso();
@@ -130,7 +130,7 @@ test("MIME: cabecalho nao aceita quebra de linha injetada no assunto", () => {
 });
 
 test("sem provedor o relatorio fica guardado e o admin lista e le; sem token de admin, nada", async () => {
-  const env = { AUREA_KV: kvFalso(), CRASH_ADMIN_TOKEN: ADMIN };
+  const env = { AUREA_KV: kvFalso(), AUREA_DB: d1Falso(), CRASH_ADMIN_TOKEN: ADMIN };
   const r = await enviar(env, relatorio({ reportId: "java-guardado-01" }));
   assert.equal(r.status, 202);
   assert.equal(r.corpo.emailed, false);
@@ -183,7 +183,7 @@ test("limites: por instalacao, tamanho do corpo e teto diario de e-mails", async
 });
 
 test("falha do provedor nao perde o relatorio", async () => {
-  const env = { AUREA_KV: kvFalso(), RESEND_API_KEY: "k" };
+  const env = { AUREA_KV: kvFalso(), AUREA_DB: d1Falso(), RESEND_API_KEY: "k" };
   const f = fetchFalso(500);
   try {
     const r = await enviar(env, relatorio({ reportId: "rel-falha-01" }));

@@ -53,7 +53,7 @@ private actor SocialAPI {
     func call<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil, as type: T.Type) async throws -> T {
         var r = request(path, method)
         if let body { r.httpBody = try JSONSerialization.data(withJSONObject: body); r.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        let (data, response) = try await URLSession.shared.data(for: r)
+        let (data, response) = try await ContaAPI.boundedData(for: r, limit: 1_048_576)
         return try decode(data, response, as: type)
     }
     func upload(_ url: URL, kind: String) async throws -> SocialAsset {
@@ -62,12 +62,12 @@ private actor SocialAPI {
         guard (1...limit).contains(bytes) else { throw SocialFailure(code: "file_too_large") }
         var r = request("/assets?kind=\(kind)&name=\(Self.query(url.lastPathComponent))", "POST")
         r.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type"); r.setValue(String(bytes), forHTTPHeaderField: "Content-Length")
-        let (data, response) = try await URLSession.shared.upload(for: r, fromFile: url)
+        let (data, response) = try await ContaAPI.session.upload(for: r, fromFile: url)
         return try decode(data, response, as: SocialAsset.self)
     }
     func download(_ asset: SocialAsset) async throws -> URL {
         guard (1...50 * 1024 * 1024).contains(asset.bytes), UUID(uuidString: asset.id) != nil else { throw SocialFailure(code: "invalid_file") }
-        let (file, response) = try await URLSession.shared.download(for: request("/assets/\(asset.id)", "GET"))
+        let (file, response) = try await ContaAPI.session.download(for: request("/assets/\(asset.id)", "GET"))
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               (try file.resourceValues(forKeys: [.fileSizeKey])).fileSize == Int(asset.bytes) else {
             try? FileManager.default.removeItem(at: file); throw SocialFailure(code: "invalid_file")

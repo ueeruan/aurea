@@ -46,7 +46,8 @@ class AureaAiState(
     private val escopo: CoroutineScope,
     /** Chamado quando o vídeo baixado deve entrar na timeline (o importador de sempre). */
     private val aoAdicionarNaTimeline: (arquivo: File, titulo: String) -> Unit,
-    private val provedor: VideoGenerationProvider = AureaBackendVideoProvider({ IdDoAparelho.de(app) }),
+    private val provedor: VideoGenerationProvider = AureaBackendVideoProvider(
+        { IdDoAparelho.de(app) }, sessionToken = { com.aurea.aurea.captions.KeyVault(app).get("conta_token").orEmpty() }),
     private val aoMudar: () -> Unit = {},
 ) {
     // -- o que a tela observa ---------------------------------------------

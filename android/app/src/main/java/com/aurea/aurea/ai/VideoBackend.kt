@@ -118,6 +118,7 @@ class AureaBackendVideoProvider(
     /** Lido na hora do pedido (na thread de rede): o App Set ID chega assíncrono. */
     private val aparelho: () -> String,
     private val base: String = AureaVideoBackend.BASE,
+    private val sessionToken: () -> String = { "" },
 ) : VideoGenerationProvider {
 
     override fun config(): ConfigDeVideo {
@@ -191,9 +192,12 @@ class AureaBackendVideoProvider(
         val conn = abrir("GET", "/jobs/${enc(jobId)}/video", 300_000)
         try {
             val http = conn.responseCode
-            if (http !in 200..299) throw falhaDe(http, conn.errorStream?.use { it.readBytes() } ?: ByteArray(0))
+            if (http !in 200..299) throw falhaDe(http, conn.errorStream?.use { boundedBytes(it) } ?: ByteArray(0))
             val esperado = conn.contentLengthLong
-            conn.inputStream.use { entrada -> parcial.outputStream().use { entrada.copyTo(it, 1 shl 16) } }
+            if (esperado > 300L * 1024 * 1024) throw FalhaDeVideo("resultado_grande")
+            conn.inputStream.use { entrada -> parcial.outputStream().use { output ->
+                copyBounded(entrada, output, 300L * 1024 * 1024)
+            } }
             if (esperado > 0 && parcial.length() != esperado) {
                 parcial.delete()
                 throw FalhaDeVideo("download_interrompido", 0, "${parcial.length()}/$esperado bytes")
@@ -233,6 +237,8 @@ class AureaBackendVideoProvider(
             connectTimeout = 15_000
             readTimeout = timeoutMs
             useCaches = false
+            instanceFollowRedirects = false
+            sessionToken().takeIf { it.isNotBlank() }?.let { setRequestProperty("Authorization", "Bearer $it") }
             setRequestProperty("Accept", "application/json, video/mp4")
             // Sem UA próprio a Cloudflare do Worker devolve 403 (1010).
             setRequestProperty("User-Agent", AureaAiCliente.AGENTE)
@@ -260,7 +266,7 @@ class AureaBackendVideoProvider(
                 conn.outputStream.use { it.write(corpo) }
             }
             val http = conn.responseCode
-            val bruto = (if (http in 200..299) conn.inputStream else conn.errorStream)?.use { it.readBytes() } ?: ByteArray(0)
+            val bruto = (if (http in 200..299) conn.inputStream else conn.errorStream)?.use { boundedBytes(it) } ?: ByteArray(0)
             if (http !in 200..299) throw falhaDe(http, bruto)
             return Resposta(bruto)
         } catch (e: FalhaDeVideo) {
@@ -285,6 +291,21 @@ class AureaBackendVideoProvider(
     }
 
     companion object {
+        internal fun copyBounded(input: java.io.InputStream, output: java.io.OutputStream, limit: Long) {
+            val buffer = ByteArray(65536)
+            var received = 0L
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                received += n
+                if (received > limit) throw IOException("response_size_limit")
+                output.write(buffer, 0, n)
+            }
+        }
+        private fun boundedBytes(input: java.io.InputStream): ByteArray = java.io.ByteArrayOutputStream().use {
+            copyBounded(input, it, 1024L * 1024)
+            it.toByteArray()
+        }
         /** MP4/MOV começam com uma caixa cujo tipo, nos bytes 4..7, é `ftyp`. */
         fun pareceMp4(f: File): Boolean {
             if (!f.isFile || f.length() < 12) return false

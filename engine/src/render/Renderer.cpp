@@ -2249,6 +2249,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 const i64 dur = streamInfo.durationUs;
                 if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, last_source_timestamp(streamInfo,src->frame_duration_us()));
+                if (!settings.finalQuality) {
+                    for (const auto& effect : out.plans[used].evals) {
+                        if (effect.foregroundSourceTimeUs < 0) continue;
+                        // Keep video and matte together while the AI worker catches
+                        // up. An old mask over a newer moving subject cuts off limbs.
+                        mediaUs = effect.foregroundSourceTimeUs;
+                        nextUs = -1;
+                        blendT = 0;
+                        break;
+                    }
+                }
                 DecodeRequest req;
                 i64 requiredTimes[6] = {mediaUs};
                 u32 requiredCount = 1;

@@ -1,4 +1,5 @@
 #include "aurea/ai/DepthMapService.hpp"
+#include "aurea/ai/ForegroundMatte.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
@@ -56,7 +57,7 @@ void DepthMapService::insert(u64 key, DepthMapPtr map) {
     }
     lru_.emplace_front(key, std::move(map));
     index_[key] = lru_.begin();
-    while (lru_.size() > kMaxCached) {
+    while (lru_.size() > (foregroundModel_.empty() ? kMaxCached : 16u)) {
         index_.erase(lru_.back().first);
         lru_.pop_back();
     }
@@ -90,6 +91,7 @@ DepthMapPtr DepthMapService::run_pixels_locked(u64 key, const u8* pixels, u32 wi
     auto map = std::make_shared<DepthMap>();
     const bool fg=!foregroundModel_.empty();
     map->disparity.resize(fg ? ForegroundEstimator::kPixels : DepthEstimator::kPixels);
+    if (fg) foreground_rgb(pixels,width,height,stride,channels,ForegroundEstimator::kSize,map->foregroundRgb);
     const Status s = fg ? foreground_.run(pixels,width,height,stride,channels,cancel_,map->disparity.data())
                         : estimator_.run(pixels, width, height, stride, channels, cancel_, map->disparity.data());
     if (!s.ok()) {
@@ -118,10 +120,12 @@ DepthMapPtr DepthMapService::image(u64 key, const u8* pixels, u32 width, u32 hei
         Job job; job.key = key; job.imageSize = foregroundModel_.empty() ? DepthEstimator::kSize : ForegroundEstimator::kSize;
         const u32 size = job.imageSize;
         job.pixels.resize(static_cast<usize>(size) * size * 4);
+        std::vector<u8> rgb;
+        if (!foregroundModel_.empty()) foreground_rgb(pixels,width,height,stride,channels,size,rgb);
         for (u32 y=0;y<size;++y) for (u32 x=0;x<size;++x) {
             const u32 sy=std::min(height-1,static_cast<u32>((y+.5)*height/size)),sx=std::min(width-1,static_cast<u32>((x+.5)*width/size));
             auto* dest=job.pixels.data()+(y*size+x)*4;
-            std::copy_n(pixels+static_cast<usize>(sy)*stride+sx*channels,3,dest); dest[3]=255;
+            std::copy_n(rgb.empty() ? pixels+static_cast<usize>(sy)*stride+sx*channels : rgb.data()+(y*size+x)*3,3,dest); dest[3]=255;
         }
         enqueue(std::move(job)); return nullptr;
     }
@@ -131,6 +135,37 @@ DepthMapPtr DepthMapService::image(u64 key, const u8* pixels, u32 width, u32 hei
 }
 
 DepthMapPtr DepthMapService::run_video_locked(const Job& job) {
+    if (foregroundModel_.empty()) return run_video_raw_locked(job);
+    const f64 fps = job.asset.video.fps > 0 ? job.asset.video.fps : 1e6 / job.frameUs;
+    const i64 current = std::max<i64>(0, std::llround(job.targetUs * fps / 1e6));
+    const i64 last = job.asset.video.frameCount.value > 0 ? job.asset.video.frameCount.value - 1 : current + 1;
+    auto raw = [&](i64 index) {
+        Job frame = job;
+        index = std::clamp(index, i64{0}, last);
+        frame.targetUs = static_cast<i64>(std::llround(index * 1e6 / fps));
+        // Namespace separate from renderer cache keys, source revision included.
+        u64 key = job.sourceKey ^ (static_cast<u64>(index) + 0x72E46D87FA912BC3ull);
+        key = (key ^ (key >> 30)) * 0xBF58476D1CE4E5B9ull;
+        frame.key = key ^ (key >> 27);
+        if (auto hit = cached(frame.key)) return hit;
+        return run_video_raw_locked(frame);
+    };
+    const auto previous = raw(current - 1);
+    const auto center = raw(current);
+    if (!center) return nullptr;
+    const auto next = raw(current + 1);
+    if (!previous || !next) return nullptr; // never export an order-dependent fallback
+    const auto& a = *previous;
+    const auto& b = *next;
+    auto result = std::make_shared<DepthMap>();
+    stabilize_foreground(center->disparity,center->foregroundRgb,a.disparity,a.foregroundRgb,
+                         b.disparity,b.foregroundRgb,ForegroundEstimator::kSize,result->disparity);
+    result->inferenceMs = center->inferenceMs;
+    insert(job.key,result);
+    return result;
+}
+
+DepthMapPtr DepthMapService::run_video_raw_locked(const Job& job) {
     if (!job.factory) return nullptr;
     if (!ensure_model_locked()) return nullptr;
     // Um decoder por asset, reaproveitado: quadros seguidos (export, playback)

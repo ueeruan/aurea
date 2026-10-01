@@ -260,6 +260,7 @@ object CrashReporter {
         return try {
             val bytes = corpo.toString().toByteArray(Charsets.UTF_8)
             conexao = (URL(URL_CRASH).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
                 requestMethod = "POST"
                 connectTimeout = 12_000
                 readTimeout = 30_000

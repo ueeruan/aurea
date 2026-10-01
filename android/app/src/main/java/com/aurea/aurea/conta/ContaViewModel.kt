@@ -43,6 +43,7 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
     var entrando by mutableStateOf(false)
 
     private var ultimaRevalidacao = 0L
+    private var revogando = false
 
     val logado: Boolean get() = estado is ContaEstado.Dentro
 
@@ -77,12 +78,14 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
      * servidor fora, quem já entrou CONTINUA dentro; só um 401 derruba.
      */
     fun revalidarSeVencido() {
+        revogarPendentes()
         val guardada = sessao() ?: return
         val agora = SystemClock.elapsedRealtime()
         if (!ContaLogica.precisaRevalidar(ultimaRevalidacao, agora)) return
         ultimaRevalidacao = agora
         viewModelScope.launch {
             val resultado = ContaApi.revalidacao(withContext(Dispatchers.IO) { ContaApi.validar(guardada.token) })
+            if (sessao()?.token != guardada.token) return@launch
             if (resultado == Revalidacao.SEM_RESPOSTA) ultimaRevalidacao = 0L   // tenta de novo na próxima volta
             val novo = ContaLogica.aposRevalidar(estado, resultado)
             if (novo is ContaEstado.Fora && estado is ContaEstado.Dentro) {
@@ -130,11 +133,42 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
     /** Sai: apaga o token local na hora; avisa o servidor quando der. */
     fun sair() {
         val guardada = sessao()
+        if (guardada != null) {
+            val fila = pendentes().toMutableSet().apply { add(guardada.token) }
+            if (runCatching { cofre.put(KEY_REVOGAR, fila.joinToString("\n")) }.isFailure) {
+                viewModelScope.launch(Dispatchers.IO) { ContaApi.sair(guardada.token) }
+            }
+        }
         apagarSessao()
         estado = ContaEstado.Fora
         entrando = true
         erro = null
-        if (guardada != null) viewModelScope.launch(Dispatchers.IO) { ContaApi.sair(guardada.token) }
+        revogarPendentes()
+    }
+
+    private fun pendentes(): List<String> = cofre.get(KEY_REVOGAR).orEmpty().lineSequence()
+        .filter { it.matches(Regex("[A-Za-z0-9_-]{43}")) }.distinct().toList()
+
+    /** Offline logout remains queued in the encrypted vault until the server confirms it. */
+    private fun revogarPendentes() {
+        if (revogando) return
+        val fila = pendentes()
+        if (fila.isEmpty()) return
+        revogando = true
+        viewModelScope.launch {
+            try {
+                for (token in fila) {
+                    val r = withContext(Dispatchers.IO) { ContaApi.sair(token) }
+                    if (r.ok || r.status == 401) {
+                        val restam = pendentes().filter { it != token }
+                        runCatching {
+                            if (restam.isEmpty()) cofre.remove(KEY_REVOGAR)
+                            else cofre.put(KEY_REVOGAR, restam.joinToString("\n"))
+                        }
+                    }
+                }
+            } finally { revogando = false }
+        }
     }
 
     private fun apagarSessao() {
@@ -147,5 +181,6 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
         private const val KEY_USUARIOS = "usuarios"
         private const val KEY_TOKEN = "conta_token"
         private const val KEY_EMAIL = "conta_email"
+        private const val KEY_REVOGAR = "conta_revogar"
     }
 }

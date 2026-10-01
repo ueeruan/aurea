@@ -21,6 +21,7 @@ public:
     void resolve_resources(EffectEval& e) const noexcept override {
         if(!e.resources)return;DepthMapRequest req;req.host=e.layer;req.instance=e.instance;req.localTime=e.localTime;req.foreground=true;req.smoothing=0;
         const auto r=e.resources->depth_map(req);e.aux=r.texture;e.auxInfo.w=r.failed?1.f:0.f;
+        e.foregroundSourceTimeUs=r.sourceTimeUs;
     }
     Status build(EffectBuildContext& ctx,const EffectEval& e,const LayerImage& input,f32,LayerImage& out) const override {
         if(e.auxInfo.w>0) return Status{Errc::MediaSourceMissing,"Rotobrush: modelo ou quadro indisponivel"};

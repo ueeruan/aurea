@@ -340,7 +340,7 @@ final class ComfyClient {
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         r.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         r.setValue(AureaAiConfig.agent, forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession.shared.data(for: r) else { return (0, nil) }
+        guard let (data, response) = try? await ContaAPI.boundedData(for: r, limit: 65_536) else { return (0, nil) }
         let http = (response as? HTTPURLResponse)?.statusCode ?? 0
         return (http, (200...299).contains(http) && !data.isEmpty ? AiDiscovery.parse(data) : nil)
     }
@@ -517,7 +517,10 @@ final class AureaBackendVideoProvider: VideoGenerationProvider {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 30
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
-        session = URLSession(configuration: c)
+        c.urlCache = nil
+        c.httpCookieStorage = nil
+        c.httpShouldSetCookies = false
+        session = URLSession(configuration: c, delegate: AureaPrivateSessionDelegate(), delegateQueue: nil)
     }
 
     func config() async throws -> AiVideoConfig {
@@ -620,6 +623,9 @@ final class AureaBackendVideoProvider: VideoGenerationProvider {
         r.setValue(AureaAiConfig.agent, forHTTPHeaderField: "User-Agent")
         r.setValue(device, forHTTPHeaderField: "x-aurea-device")
         r.setValue("ios", forHTTPHeaderField: "x-aurea-platform")
+        if let token = ContaKeychain.ler("token"), !token.isEmpty {
+            r.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        }
     }
 
     private func request(_ method: String, _ path: String, body: Data? = nil,
@@ -631,7 +637,7 @@ final class AureaBackendVideoProvider: VideoGenerationProvider {
         let data: Data
         let resp: URLResponse
         do {
-            (data, resp) = try await session.data(for: req)
+            (data, resp) = try await ContaAPI.boundedData(for: req, limit: 1_048_576)
         } catch {
             let code = (error as? URLError)?.code
             throw VideoFailure(code == .timedOut ? "tempo_esgotado" : "sem_conexao")

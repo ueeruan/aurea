@@ -474,6 +474,7 @@ public:
     }
     /// O serviço dos mapas (testes e HUD); nulo até o primeiro pedido.
     [[nodiscard]] ai::DepthMapService* depth_service() noexcept { return depth_.get(); }
+    [[nodiscard]] ai::DepthMapService* foreground_service() noexcept { return foreground_.get(); }
     void set_foreground_model_directory(std::string path) { foregroundModelDirectory_ = std::move(path); }
 
     // --- Consultas -------------------------------------------------------------
@@ -756,6 +757,7 @@ private:
         u64 frameKey = 0;       ///< quadro-fonte que o estado já absorveu
         u64 asset = 0;
         i64 frame = 0;
+        i64 sourceTimeUs = -1;
         f32 lo = 0.0f, hi = 1.0f;         ///< limites crus, suavizados
         f32 texLo = 0.0f, texHi = 1.0f;   ///< os mesmos, no espaço da textura de `frameKey`
         u64 lastFrame = 0;

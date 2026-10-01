@@ -39,6 +39,7 @@
         android:label="Aurea"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
+        android:usesCleartextTraffic="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:largeHeap="true"

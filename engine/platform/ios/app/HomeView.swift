@@ -630,7 +630,7 @@ private enum HomeCommunityAPI {
         if post { request.httpMethod = "POST"; request.httpBody = Data("{}".utf8); request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         // Enforce the bound while receiving, before a large response can be allocated.
-        let (stream, response) = try await URLSession.shared.bytes(for: request)
+        let (stream, response) = try await ContaAPI.session.bytes(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         var data = Data()
         for try await byte in stream {

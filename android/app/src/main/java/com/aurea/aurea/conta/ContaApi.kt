@@ -54,6 +54,7 @@ object ContaApi {
                 connectTimeout = 12_000
                 readTimeout = 20_000
                 useCaches = false
+                instanceFollowRedirects = false
                 setRequestProperty("Accept", "application/json")
                 if (token != null) setRequestProperty("Authorization", "Bearer $token")
             }

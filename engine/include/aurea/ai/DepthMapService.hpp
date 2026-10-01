@@ -41,6 +41,7 @@ namespace aurea::ai {
 /// A disparidade de UM quadro-fonte, 256×256, crua (maior = mais perto).
 struct DepthMap {
     std::vector<f32> disparity;
+    std::vector<u8> foregroundRgb; ///< source guidance, only on raw foreground maps
     f32 p2 = 0.0f;       ///< percentil 2 do próprio quadro
     f32 p98 = 1.0f;      ///< percentil 98 do próprio quadro
     f32 inferenceMs = 0.0f;
@@ -108,6 +109,7 @@ private:
     void thread_main() noexcept;
     /// Com `work_` travado: decodifica, infere e guarda. Nulo em falha.
     DepthMapPtr run_video_locked(const Job& job);
+    DepthMapPtr run_video_raw_locked(const Job& job);
     DepthMapPtr run_pixels_locked(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels);
     [[nodiscard]] bool ensure_model_locked();
     void enqueue(Job job);

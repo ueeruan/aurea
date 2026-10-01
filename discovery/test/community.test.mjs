@@ -16,7 +16,8 @@ async function fixture() {
   for (let i = 0; i < 3; i++) {
     const uid = crypto.randomUUID(), token = String(i + 1).repeat(43);
     env.AUREA_DB.sqlite.prepare('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)').run(uid, i === 0 ? 'ruanpablombl@gmail.com' : `person${i}@example.com`, 'not-a-password', 1);
-    env.AUREA_DB.sqlite.prepare('INSERT INTO sessions(token_hash,uid,email,created_at,expires_at) VALUES(?,?,?,?,?)').run(await sha256hex(token), uid, i === 2 ? 'ruanpablombl@gmail.com' : 'unused@example.com', 1, Date.now() + 3600000);
+    env.AUREA_DB.sqlite.prepare('INSERT INTO sessions(token_hash,uid,email,created_at,expires_at) VALUES(?,?,?,?,?)').run(await sha256hex(token), uid, i === 2 ? 'ruanpablombl@gmail.com' : 'unused@example.com', Date.now(), Date.now() + 3600000);
+    if (i === 0) env.AUREA_DB.sqlite.prepare("INSERT INTO account_roles(uid,role) VALUES(?,'community_admin')").run(uid);
     users.push({ uid, token });
   }
   const call = async (path, user = 1, method = 'GET', body) => {

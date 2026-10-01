@@ -133,8 +133,41 @@ struct ContaResposta {
 }
 
 /// As rotas de conta do Worker (discovery/contas.js). Só HTTPS, só o endereço fixo.
+final class AureaPrivateSessionDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        // Credentials and account payloads never follow a redirected endpoint.
+        completionHandler(nil)
+    }
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        if max(totalBytesWritten, totalBytesExpectedToWrite) > 300 * 1024 * 1024 { downloadTask.cancel() }
+    }
+}
+
 enum ContaAPI {
     static let base: String = "https://aurea-ai-discovery.aureaapp.workers.dev"
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration, delegate: AureaPrivateSessionDelegate(), delegateQueue: nil)
+    }()
+
+    static func boundedData(for request: URLRequest, limit: Int) async throws -> (Data, URLResponse) {
+        let (stream, response) = try await session.bytes(for: request)
+        guard response.expectedContentLength <= Int64(limit) else { throw URLError(.dataLengthExceedsMaximum) }
+        var data = Data()
+        for try await byte in stream {
+            guard data.count < limit else { throw URLError(.dataLengthExceedsMaximum) }
+            data.append(byte)
+        }
+        return (data, response)
+    }
 
     static func chamar(_ caminho: String, metodo: String, corpo: [String: Any]?, token: String?) async -> ContaResposta {
         guard let url: URL = URL(string: base + caminho) else { return ContaResposta(status: 0, corpo: [:]) }
@@ -147,7 +180,7 @@ enum ContaAPI {
             pedido.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
         do {
-            let resultado: (Data, URLResponse) = try await URLSession.shared.data(for: pedido)
+            let resultado: (Data, URLResponse) = try await boundedData(for: pedido, limit: 16_384)
             let status: Int = (resultado.1 as? HTTPURLResponse)?.statusCode ?? 0
             let dados: Data = resultado.0.count > 16_384 ? Data() : resultado.0
             let objeto: Any? = try? JSONSerialization.jsonObject(with: dados)
@@ -169,6 +202,7 @@ final class ContaModel: ObservableObject {
     /// false = cadastro (a primeira abertura), true = entrar.
     @Published var entrando: Bool = false
     private var ultimaRevalidacao: Date?
+    private var revogando = false
 
     private static let chaveUsuarios: String = "aurea.conta.usuarios"
     private static let chaveInstalada: String = "aurea.conta.instalada"
@@ -218,12 +252,14 @@ final class ContaModel: ObservableObject {
 
     /// No máximo a cada 6 h. Sem rede, quem já entrou continua dentro; só 401 derruba.
     func revalidarSeVencido() {
+        revogarPendentes()
         guard let guardada: ContaSessao = sessao() else { return }
         let agora: Date = Date()
         guard ContaLogica.precisaRevalidar(ultima: ultimaRevalidacao, agora: agora) else { return }
         ultimaRevalidacao = agora
         Task { @MainActor in
             let r: ContaResposta = await ContaAPI.chamar("/api/auth/session", metodo: "GET", corpo: nil, token: guardada.token)
+            guard sessao()?.token == guardada.token else { return }
             if r.status == 401 {
                 apagarSessao()
                 email = nil
@@ -270,12 +306,39 @@ final class ContaModel: ObservableObject {
     /// Sai: apaga o token local na hora; avisa o servidor quando der.
     func sair() {
         let guardada: ContaSessao? = sessao()
+        if let guardada {
+            let fila = Set(pendentes() + [guardada.token])
+            // Keep failed/offline revocations in the device-only Keychain.
+            ContaKeychain.gravar("revogar", fila.sorted().joined(separator: "\n"))
+        }
         apagarSessao()
         email = nil
         entrando = true
         erro = nil
-        if let guardada: ContaSessao = guardada {
-            Task { let _: ContaResposta = await ContaAPI.chamar("/api/auth/logout", metodo: "POST", corpo: [:], token: guardada.token) }
+        revogarPendentes()
+    }
+
+    private func pendentes() -> [String] {
+        (ContaKeychain.ler("revogar") ?? "").components(separatedBy: "\n").filter {
+            $0.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil
+        }
+    }
+
+    private func revogarPendentes() {
+        guard !revogando else { return }
+        let fila = pendentes()
+        guard !fila.isEmpty else { return }
+        revogando = true
+        Task { @MainActor in
+            defer { revogando = false }
+            for token in fila {
+                let r = await ContaAPI.chamar("/api/auth/logout", metodo: "POST", corpo: [:], token: token)
+                if r.ok || r.status == 401 {
+                    let restam = pendentes().filter { $0 != token }
+                    if restam.isEmpty { ContaKeychain.apagar("revogar") }
+                    else { ContaKeychain.gravar("revogar", restam.joined(separator: "\n")) }
+                }
+            }
         }
     }
 

@@ -1,4 +1,5 @@
 #include "aurea/ai/ForegroundEstimator.hpp"
+#include "aurea/ai/ForegroundMatte.hpp"
 #include "aurea/core/Time.hpp"
 #include <net.h>
 #include <algorithm>
@@ -41,11 +42,8 @@ Status ForegroundEstimator::run(const u8* pixels,u32 w,u32 h,u32 stride,u32 chan
     if(!loaded()) return Errc::InvalidState;
     if(!pixels || !out || !w || !h || w>16384 || h>16384 || (channels!=3 && channels!=4) || stride<w*channels) return Errc::InvalidArgument;
     if(cancel.load()) return Errc::Cancelled;
-    std::vector<u8> rgb(kPixels*3);
-    for(u32 y=0;y<kSize;++y) for(u32 x=0;x<kSize;++x) {
-        const u32 sy=std::min(h-1,static_cast<u32>((y+.5)*h/kSize)),sx=std::min(w-1,static_cast<u32>((x+.5)*w/kSize));
-        std::copy_n(pixels+static_cast<usize>(sy)*stride+sx*channels,3,rgb.data()+(y*kSize+x)*3);
-    }
+    std::vector<u8> rgb;
+    foreground_rgb(pixels,w,h,stride,channels,kSize,rgb);
     InferenceAllocator allocator;
     auto input=ncnn::Mat::from_pixels(rgb.data(),ncnn::Mat::PIXEL_RGB,kSize,kSize,&allocator);
     if(input.empty()) return Errc::OutOfMemory;
@@ -63,10 +61,7 @@ Status ForegroundEstimator::run(const u8* pixels,u32 w,u32 h,u32 stride,u32 chan
     if(outputResult || output.empty()) { AUREA_LOG_WARN("Rotobrush inference input=%d output=%d dims=%d,%d,%d",inputResult,outputResult,output.w,output.h,output.c); return Errc::OutOfMemory; }
     if(output.w!=kSize || output.h!=kSize || output.c!=1) return Errc::CorruptData;
     if(cancel.load()) return Errc::Cancelled;
-    float lo=1,hi=0;
-    for(u32 i=0;i<kPixels;++i) {const float v=output.row(i/kSize)[i%kSize];out[i]=std::isfinite(v)?std::clamp(v,0.f,1.f):0;lo=std::min(lo,out[i]);hi=std::max(hi,out[i]);}
-    // A constant map is kept constant; avoid amplifying noise to a full mask.
-    if(hi-lo>1e-5f) for(u32 i=0;i<kPixels;++i) out[i]=(out[i]-lo)/(hi-lo);
+    for(u32 i=0;i<kPixels;++i) out[i]=foreground_probability(output.row(i/kSize)[i%kSize]);
     return OkStatus;
 } catch(const std::bad_alloc&) {return Errc::OutOfMemory;}
 }

@@ -320,7 +320,7 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
         pedido.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         let pronto: DispatchSemaphore = DispatchSemaphore(value: 0)
         var status: Int = 0
-        let tarefa: URLSessionDataTask = URLSession.shared.dataTask(with: pedido) { (_: Data?, resposta: URLResponse?, _: Error?) in
+        let tarefa: URLSessionDataTask = ContaAPI.session.dataTask(with: pedido) { (_: Data?, resposta: URLResponse?, _: Error?) in
             status = (resposta as? HTTPURLResponse)?.statusCode ?? 0
             pronto.signal()
         }

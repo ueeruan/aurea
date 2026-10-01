@@ -194,6 +194,7 @@ struct DepthMapResult {
     f32 lo = 0.0f;
     f32 hi = 1.0f;
     bool failed = false;
+    i64 sourceTimeUs = -1; ///< foreground preview must pair this source frame with its mask
 };
 
 /// O que a Forma de onda e o Espectro de áudio pedem ao renderer: o som de
@@ -278,6 +279,7 @@ struct EffectEval {
     /// da curva no ColorOp. Textura persistente do renderer, fora do grafo.
     TextureHandle         aux{};
     Vec4                  auxInfo{};   ///< o que o efeito quiser anotar junto (nº de faixas...)
+    i64                   foregroundSourceTimeUs = -1;
 
     [[nodiscard]] const ParamValue& value(u32 i) const noexcept { return values[i]; }
     [[nodiscard]] f32  f(u32 i) const noexcept { return values[i].v[0]; }

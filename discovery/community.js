@@ -1,7 +1,6 @@
 // Social profiles use the existing account session. Never trust a client email or badge.
 import { lerSessao, lerJson, json, dentroDoLimite } from './contas.js';
 
-const OWNER_EMAIL = 'ruanpablombl@gmail.com';
 const BADGES = new Set(['', 'blue', 'green', 'gold']);
 const MAX_FILE = 50 * 1024 * 1024;
 const problem = (error, status = 400) => json({ error }, status);
@@ -164,7 +163,7 @@ export async function communityRoute(req, env, ctx, url) {
     // Read the actual account: revoked/deleted accounts and stale session emails cannot become admins.
     const account = await stmt(env, 'SELECT email FROM users WHERE id=?', session.uid).first();
     if (!account) return problem('unauthorized', 401);
-    const admin = account.email.toLowerCase() === OWNER_EMAIL;
+    const admin = !!(await stmt(env, "SELECT uid FROM account_roles WHERE uid=? AND role='community_admin'", session.uid).first());
     await ensureProfile(env, session.uid);
     if (req.method !== 'GET' && !(await dentroDoLimite(env, 'community-write', session.uid, { max: 120, janela: 60 }))) return problem('rate_limited', 429);
     if (path === '/api/community/me' && req.method === 'GET') return json({ profile: await profile(env, session.uid, session.uid), canVerify: admin });
@@ -261,7 +260,7 @@ export async function communityRoute(req, env, ctx, url) {
     }
     return problem('not_found', 404);
   } catch (e) {
-    console.error('community:', String(e?.message ?? e).slice(0, 180));
+    console.error('community: request failed');
     return problem('community_unavailable', 503);
   }
 }

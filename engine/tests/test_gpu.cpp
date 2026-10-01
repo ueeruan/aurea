@@ -11206,6 +11206,54 @@ AUREA_TEST(Gpu, NewToolsRotobrushRealMaskAndControls) {
     (void)write_png("build/new-tools-roto-original.png",original.encoded());
     (void)write_png("build/new-tools-roto-cutout.png",mask.encoded());
 }
+AUREA_TEST(Gpu, Regression2131RotobrushVideoDoesNotFlashOriginalWhileMaskIsPending) {
+    AUREA_REQUIRE_GPU();
+    SyntheticConfig cfg;cfg.width=128;cfg.height=96;cfg.pattern=SyntheticPattern::MovingSquare;
+    Scene s(128,96);s.comp->set_transparent_background(true);
+    const auto id=s.video(cfg,64,48);
+    s.project.asset(s.comp->layer(id)->source)->video.frameCount=FrameIndex{cfg.frameCount};
+    gpu().renderer.set_foreground_model_directory("engine/assets/rotobrush");
+    s.add_effect(id,"aurea.key.rotobrush");
+    (void)s.render(FrameIndex{0},1,false);
+    auto* svc=gpu().renderer.foreground_service();AUREA_CHECK(svc);if(!svc)return;
+    // Finish one exact source frame. Playback then advances faster than inference.
+    const auto ready=s.render(FrameIndex{5},1,true);
+    const auto pending=s.render(FrameIndex{6},1,false);
+    AUREA_CHECK(gpu().renderer.take_incomplete());
+    f32 sum=0;for(u32 y=0;y<96;++y)for(u32 x=0;x<128;++x)sum+=pending.v(x,y).w;
+    AUREA_CHECK(sum<128*96*.8f); // the original was fully opaque on every pending frame
+    // Same-frame redraw/export and reverse seek must agree, even with a cold cache.
+    const auto next=s.render(FrameIndex{6},1,true);
+    const auto preview=s.render(FrameIndex{6},1,false);
+    AUREA_CHECK(depth_max_diff(next,preview)<.002f);
+    (void)s.render(FrameIndex{80},1,true);
+    svc->clear();
+    // Drop GPU map cache too: no previous preview history can conceal a difference.
+    gpu().renderer.release_project_resources();
+    const auto reversed=s.render(FrameIndex{5},1,true);
+    AUREA_CHECK(depth_max_diff(ready,reversed)<.002f);
+    gpu().renderer.release_project_resources();
+}
+
+AUREA_TEST(Gpu, Regression2131RotobrushCoversPortraitSourceAtReducedPreviewSize) {
+    AUREA_REQUIRE_GPU();Scene s(240,480);s.comp->set_transparent_background(true);
+    auto px=uniform_image(240,480,30,120,70);
+    for(u32 y=0;y<480;++y)for(u32 x=0;x<240;++x)
+        if((int(x)-80)*(int(x)-80)*4+(int(y)-310)*(int(y)-310)<10000) {
+            auto* p=&px.rgba[(y*240+x)*4];p[0]=220;p[1]=40;p[2]=30;
+        }
+    const auto id=s.image(std::move(px),120,240);
+    gpu().renderer.set_foreground_model_directory("engine/assets/rotobrush");
+    s.add_effect(id,"aurea.key.rotobrush");
+    const auto full=s.render(FrameIndex{0},1,true),half=s.render(FrameIndex{0},2,false);
+    for(u32 y: {250u,280u,310u,340u,370u}) {
+        AUREA_CHECK(full.v(80,y).w>.9f);
+        AUREA_CHECK(half.v(40,y/2).w>.9f);
+    }
+    AUREA_CHECK(full.v(200,60).w<.01f);AUREA_CHECK(half.v(100,30).w<.01f);
+    gpu().renderer.release_project_resources();
+}
+
 AUREA_TEST(Gpu, NewToolsGridVisibleAndMorphChangesFrame) {
     AUREA_REQUIRE_GPU(); Scene3DRig rig(320,240);
     std::vector<u64> ids;

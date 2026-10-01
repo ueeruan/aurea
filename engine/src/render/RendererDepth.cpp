@@ -95,6 +95,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     const u64 sourceKey = mix64(assetKey, text_hash(asset->sourcePath) ^ asset->contentHash);
     u64 frameKey = 0;
     i64 frameIndex = 0;
+    i64 sourceTimeUs = -1;
     bool video = false;
     ai::DepthMapPtr map;
     if (l.kind == LayerKind::Image) {
@@ -122,6 +123,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         planMedia_->ready_callback(wake, wakeCtx);
         service->set_ready_callback(wake, wakeCtx);
         const i64 targetUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
+        sourceTimeUs = targetUs;
         const i64 frameUs = static_cast<i64>(std::llround(1e6 / srcFps));
         map = service->video(frameKey, planMedia_->factory(), *asset, sourceKey, targetUs, frameUs, planFinal_);
     }
@@ -138,7 +140,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     DepthState& st = depthState_[stateKey];
     st.lastFrame = frameNumber_;
 
-    if (!map && video && !planFinal_ && !request.foreground) {
+    if (!map && video && !planFinal_) {
         // Preview de vídeo ainda calculando: o render volta quando o worker
         // terminar. No PLAY a rede leva mais que um quadro — quando o mapa do
         // quadro N fica pronto o preview já pede o N+5 —, então vale o mapa
@@ -152,16 +154,18 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
             latest && latestKey != st.frameKey) {
             map = std::move(latest);
             frameKey = latestKey;
+            sourceTimeUs = latestUs;
             frameIndex = latestFrameUs > 0 ? (latestUs + latestFrameUs / 2) / latestFrameUs : frameIndex;
         }
     }
     if (!map) {
-        if (request.foreground) { incomplete_ = !planFinal_; return none; }
+        if (request.foreground && planFinal_) return none;
+        if (request.foreground) incomplete_ = true;
         // O último mapa pronto desta instância segura o quadro (melhor
         // atrasado que piscando o original).
-        if (auto it = depthTex_.find(st.frameKey); st.frameKey && it != depthTex_.end()) {
+        if (auto it = depthTex_.find(st.frameKey); st.frameKey && st.asset == sourceKey && it != depthTex_.end()) {
             it->second.lastFrame = frameNumber_;
-            return DepthMapResult{it->second.texture, st.texLo, st.texHi};
+            return DepthMapResult{it->second.texture, st.texLo, st.texHi, false, request.foreground ? st.sourceTimeUs : -1};
         }
         return none;
     }
@@ -213,11 +217,12 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         st.frameKey = frameKey;
         st.asset = sourceKey;
         st.frame = frameIndex;
+        st.sourceTimeUs = sourceTimeUs;
         st.texLo = (st.lo - p2) / range;
         st.texHi = (st.hi - p2) / range;
         if (!(st.texHi > st.texLo + 1e-4f)) { st.texLo = 0.0f; st.texHi = 1.0f; }
     }
-    return DepthMapResult{tex, st.texLo, st.texHi};
+    return DepthMapResult{tex, st.texLo, st.texHi, false, request.foreground ? sourceTimeUs : -1};
 }
 
 DepthMapResult Renderer::depth_map_preview() noexcept {

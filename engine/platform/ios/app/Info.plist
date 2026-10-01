@@ -136,15 +136,15 @@
          configuração de consentimento; é o App ID de TESTE, o mesmo que o
          Android usa hoje (o AdMob direto está desligado). SKAdNetworkItems:
          ironSource (LevelPlay) + a lista oficial da Unity
-         (skan.mz.unity3d.com). NSAllowsArbitraryLoads: exigido pelo LevelPlay
-         para criativos das redes. -->
+         (skan.mz.unity3d.com). A exceção ATS fica restrita ao conteúdo web
+         dos anúncios; chamadas nativas continuam exigindo transporte seguro. -->
     <key>GADApplicationIdentifier</key>
     <string>ca-app-pub-3940256099942544~1458002511</string>
     <key>NSAdvertisingAttributionReportEndpoint</key>
     <string>https://postbacks-is.com/</string>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
         <true/>
     </dict>
     <key>SKAdNetworkItems</key>

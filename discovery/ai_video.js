@@ -12,10 +12,11 @@
 //    5. GET  /jobs/{id}      estado real (IN_QUEUE / IN_PROGRESS / ...)
 //    6. GET  /jobs/{id}/video   o arquivo, passando por aqui
 //
-//  Todas as rotas do app pedem o cabeçalho `x-aurea-device` (id aleatório do
-//  aparelho): é a identidade para os limites e para "só o dono vê o job".
+//  Rotas privadas exigem a sessão da conta. O identificador do aparelho serve
+//  apenas como metadado; conhecer esse identificador não autoriza acesso.
 // =============================================================================
 
+import { lerSessao, lerJson, dentroDoLimite } from "./contas.js";
 import { EightScaleVideoProvider, ErroDoProvedor } from "./provedores.js";
 import { conferirCallback, IPS_DO_LEVELPLAY } from "./levelplay.js";
 
@@ -213,7 +214,7 @@ export async function rotaDeVideo(req, env, ctx, url) {
   if (img && req.method === "GET") {
     const { value, metadata } = await env.AUREA_KV.getWithMetadata(`img:${img[1]}`, "arrayBuffer");
     if (!value) return erro("imagem_expirada", 404);
-    return new Response(value, { headers: { "content-type": metadata?.tipo ?? "application/octet-stream", "cache-control": "private, max-age=600" } });
+    return new Response(value, { headers: { "content-type": metadata?.tipo ?? "application/octet-stream", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" } });
   }
 
   // --- administração ----------------------------------------------------------
@@ -229,7 +230,11 @@ export async function rotaDeVideo(req, env, ctx, url) {
   if (!PLATAFORMAS.has(plataforma)) return erro("plataforma_invalida", 400, "x-aurea-platform");
   // Sem o segredo, nenhuma rota do app anda: não existe identidade sem ele.
   if (!env.AI_DEVICE_HMAC_SECRET) return erro("ia_nao_configurada", 503, "AI_DEVICE_HMAC_SECRET");
-  const aparelho = await chaveDoAparelho(env.AI_DEVICE_HMAC_SECRET, plataforma, idBruto);
+  const session = admin ? null : await lerSessao(env, req);
+  if (!admin && !session) return erro("nao_autorizado", 401);
+  // Account ownership is authenticated. Device identifiers are not secrets.
+  const aparelho = await chaveDoAparelho(env.AI_DEVICE_HMAC_SECRET, "account-v1", admin ? "admin" : session.uid);
+  if (!(await dentroDoLimite(env, 'ai-request', aparelho, { max: 180, janela: 60 }))) return erro('muitas_tentativas', 429);
   const cota = () => cofre.cota({ aparelho, limites: cfg.limites, agora: Date.now() });
 
   // "Gerações de hoje: 3/5" — contado no servidor, nunca no app.
@@ -240,7 +245,15 @@ export async function rotaDeVideo(req, env, ctx, url) {
     if (!cfg.modos.includes("image_to_video")) return erro("modo_invalido", 400);
     const tamanho = Number(req.headers.get("content-length") ?? "0");
     if (tamanho > IMAGEM_MAX) return erro("imagem_grande", 413);
-    const bytes = new Uint8Array(await req.arrayBuffer());
+    const reader = req.body?.getReader();
+    if (!reader) return erro("imagem_invalida", 400);
+    let total = 0; const chunks = [];
+    try {
+      while (true) { const { done, value } = await reader.read(); if (done) break;
+        total += value.length; if (total > IMAGEM_MAX) return erro("imagem_grande", 413); chunks.push(value); }
+    } finally { await reader.cancel().catch(() => {}); }
+    const bytes = new Uint8Array(total); let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     if (bytes.length === 0 || bytes.length > IMAGEM_MAX) return erro("imagem_grande", 413);
     const tipo = tipoDaImagem(bytes);
     if (!tipo) return erro("imagem_invalida", 415, "so png, jpeg ou webp");
@@ -252,8 +265,8 @@ export async function rotaDeVideo(req, env, ctx, url) {
   if (sub === "/tickets" && req.method === "POST") {
     if (!cfg.ligado) return erro("ia_desligada", 503);
     if (!Number.isFinite(cfg.custoPorJobUsd)) return erro("ia_nao_configurada", 503, "AI_VIDEO_COST_PER_JOB_USD");
-    let corpo;
-    try { corpo = await req.json(); } catch { return erro("json_invalido", 400); }
+    const { valor: corpo, erro: bodyError } = await lerJson(req, 8192);
+    if (bodyError) return erro(bodyError, bodyError === 'corpo_grande' ? 413 : 400);
     const v = validarPedido(corpo, cfg);
     if (v.erro) return erro(v.erro, 400);
     if (v.pedido.imageId) {
@@ -271,8 +284,8 @@ export async function rotaDeVideo(req, env, ctx, url) {
     if (!cfg.ligado) return erro("ia_desligada", 503);
     if (!Number.isFinite(cfg.custoPorJobUsd)) return erro("ia_nao_configurada", 503, "AI_VIDEO_COST_PER_JOB_USD");
     if (cfg.exigirRecompensa && chavesDoLevelPlay(env).length === 0 && !admin) return erro("recompensa_nao_configurada", 503);
-    let corpo;
-    try { corpo = await req.json(); } catch { return erro("json_invalido", 400); }
+    const { valor: corpo, erro: bodyError } = await lerJson(req, 8192);
+    if (bodyError) return erro(bodyError, bodyError === 'corpo_grande' ? 413 : 400);
     const ticketId = String(corpo?.ticket ?? "");
     if (!ID_NOSSO.test(ticketId)) return erro("ticket_invalido", 400);
 
@@ -305,7 +318,7 @@ export async function rotaDeVideo(req, env, ctx, url) {
       // Não aceito = não cobrado: a reserva volta e o ticket segue valendo.
       await cofre.liberar({ ticketId, agora: Date.now() });
       const pe = e instanceof ErroDoProvedor ? e : new ErroDoProvedor("provedor_erro", 502, String(e));
-      console.warn(`[ai-video] envio recusado: ${pe.codigo} (${pe.http}) ${pe.detalhe}`);
+      console.warn(`[ai-video] envio recusado: ${pe.codigo} (${pe.http})`);
       const http = pe.codigo === "pedido_recusado" || pe.codigo === "conteudo_bloqueado" ? 422
         : pe.codigo === "provedor_ocupado" ? 429 : 502;
       return erro(pe.codigo, http, "", { quota: await cota() });
@@ -334,7 +347,7 @@ export async function rotaDeVideo(req, env, ctx, url) {
           j = await cofre.atualizarJob({ jobId, estado, saida, execucaoMs: s.executionTimeMs, erro: falha, agora: Date.now() });
         } catch (e) {
           const pe = e instanceof ErroDoProvedor ? e : new ErroDoProvedor("provedor_erro", 502, String(e));
-          console.warn(`[ai-video] status ${jobId}: ${pe.codigo} ${pe.detalhe}`);
+          console.warn(`[ai-video] status recusado: ${pe.codigo}`);
           // Consulta que falhou não muda o job: o app tenta de novo.
           return erro(pe.codigo, pe.http >= 500 || pe.http === 0 ? 502 : pe.http);
         }
@@ -354,12 +367,13 @@ export async function rotaDeVideo(req, env, ctx, url) {
 
     if (rj[2] === "/video" && req.method === "GET") {
       if (j.estado !== "COMPLETED" || !j.saida) return erro("video_indisponivel", 409);
+      if (!saidaAceitavel(j.saida)) return erro("resultado_invalido", 502);
       let resp;
       try {
         // SEM a nossa chave: a URL já vem pré-assinada.
-        resp = await fetch(j.saida, { signal: AbortSignal.timeout(120_000) });
+        resp = await fetch(j.saida, { redirect: "error", signal: AbortSignal.timeout(120_000) });
       } catch (e) {
-        return erro("download_falhou", 502, String(e?.message ?? e));
+        return erro("download_falhou", 502);
       }
       if (resp.status === 403 || resp.status === 404 || resp.status === 410) return erro("resultado_expirado", 410);
       if (!resp.ok || !resp.body) return erro("download_falhou", 502, `HTTP ${resp.status}`);
@@ -371,7 +385,13 @@ export async function rotaDeVideo(req, env, ctx, url) {
       if (tamanho > VIDEO_MAX) return erro("resultado_grande", 502);
       const h = { "content-type": tipo.startsWith("video/") ? tipo : "video/mp4", "cache-control": "no-store" };
       if (tamanho) h["content-length"] = String(tamanho);
-      return new Response(resp.body, { status: 200, headers: h });
+      let received = 0;
+      const limited = new TransformStream({ transform(chunk, controller) {
+        received += chunk.byteLength;
+        if (received > VIDEO_MAX) { controller.error(new Error("resultado_grande")); return; }
+        controller.enqueue(chunk);
+      } });
+      return new Response(resp.body.pipeThrough(limited), { status: 200, headers: h });
     }
   }
 

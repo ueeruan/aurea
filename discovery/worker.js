@@ -17,7 +17,7 @@ import { rotaDeVideo } from "./ai_video.js";
 import { captionRoute } from "./caption_community.js";
 export { CaptionCommunity } from "./caption_community.js";
 // Contas obrigatórias (/api/auth/*, /api/stats/users) e crash (/api/crash).
-import { rotaDeContas } from "./contas.js";
+import { rotaDeContas, lerJson } from "./contas.js";
 import { rotaDeCrash } from "./crash.js";
 // "Relatar um problema" (/api/report): o texto que a pessoa escreve no app.
 import { rotaDeRelato } from "./relato.js";
@@ -40,6 +40,9 @@ function json(corpo, status = 200) {
       "content-type": "application/json; charset=utf-8",
       // O app relê a cada 20 s: cache aqui só atrasaria a troca de endereço.
       "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "strict-transport-security": "max-age=31536000",
+      "referrer-policy": "no-referrer",
     },
   });
 }
@@ -55,7 +58,20 @@ function segredoConfere(recebido, esperado) {
 
 export default {
   async fetch(req, env, ctx) {
-    const url = new URL(req.url);
+    try {
+      const url = new URL(req.url);
+      if (url.protocol !== 'https:' && !['127.0.0.1', 'localhost'].includes(url.hostname))
+        return json({ error: 'https_obrigatorio' }, 403);
+      return await handle(req, env, ctx, url);
+    } catch {
+      // Never expose SQL, credentials, URLs or provider bodies in error responses/logs.
+      console.error('aurea: request failed');
+      return json({ error: 'servico_indisponivel' }, 503);
+    }
+  },
+};
+
+async function handle(req, env, ctx, url) {
     const captions = await captionRoute(req, env, url);
     if (captions) return captions;
     const contas = await rotaDeContas(req, env, ctx, url);
@@ -84,12 +100,8 @@ export default {
         return json({ error: "nao_autorizado" }, 401);
       }
 
-      let corpo;
-      try {
-        corpo = await req.json();
-      } catch {
-        return json({ error: "json_invalido" }, 400);
-      }
+      const { valor: corpo, erro } = await lerJson(req, 8192);
+      if (erro) return json({ error: erro }, erro === 'corpo_grande' ? 413 : 400);
 
       const endpoint = String(corpo.endpoint ?? "").trim().replace(/\/+$/, "");
       const online = corpo.online === true;
@@ -115,5 +127,4 @@ export default {
     }
 
     return json({ error: "nao_encontrado" }, 404);
-  },
-};
+}

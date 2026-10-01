@@ -77,7 +77,7 @@ test("cadastro: 201 com token de 32 bytes; D1 guarda so o hash; KV guarda so o h
   assert.equal(sessoes.length, 1);
   assert.ok(!JSON.stringify(sessoes).includes(r.corpo.token), "token cru nunca e gravado");
   const ttl = (Number(sessoes[0].expires_at) - Date.now()) / 86400_000;
-  assert.ok(ttl > 179 && ttl <= 180, "sessao de 180 dias");
+  assert.ok(ttl > 29 && ttl <= 30, "sessao de 30 dias");
   const limites = JSON.stringify(env.AUREA_DB.sqlite.prepare("SELECT key FROM rate_limits").all());
   assert.ok(!limites.includes("198.51.100.7") && !limites.includes("pessoa@aurea.app"), "IP e e-mail so em hash");
 });

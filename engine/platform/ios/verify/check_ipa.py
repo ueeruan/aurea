@@ -19,6 +19,10 @@ def validate(path):
         info = plistlib.loads(archive.read(prefix + 'Info.plist'))
         assert info['CFBundleIdentifier'] == 'com.aurea.aurea', 'Incorrect bundle ID'
         assert info['CFBundlePackageType'] == 'APPL', 'Not an app bundle'
+        declarations = info.get('UTImportedTypeDeclarations', [])
+        for ext in ('fbx', 'obj', 'glb', 'gltf', 'mtl'):
+            assert any(ext in item.get('UTTypeTagSpecification', {}).get('public.filename-extension', [])
+                       and 'public.data' in item.get('UTTypeConformsTo', []) for item in declarations), 'Missing model file type: ' + ext
         assert info['CFBundleVersion'].isdigit(), 'Invalid build version'
         expected_build = expected_build_version()
         assert info['CFBundleVersion'] == expected_build, 'Stale IPA build: packaged %s, project expects %s' % (info['CFBundleVersion'], expected_build)

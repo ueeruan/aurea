@@ -1967,7 +1967,9 @@ final class AureaModel: ObservableObject {
     /// Copy provider files while their security scope is held. Folder imports retain
     /// relative paths, so glTF buffers and model textures remain beside the model.
     func importModelFiles(urls: [URL]) {
-        guard !importingMedia, !urls.isEmpty else { return }
+        guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
+        guard !urls.isEmpty else { toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo"); return }
+        NSLog("Aurea model import: copying %ld selected item(s)", urls.count)
         let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
         operationMessage = AureaText.t("ios_importing_media")
         importingMedia = true
@@ -2020,6 +2022,7 @@ final class AureaModel: ObservableObject {
             } catch { failure = AureaText.t("ios_import_copy_failed", error.localizedDescription) }
             if result < 0 { try? fm.removeItem(at: folder) }
             let importedId = result, importFailure = failure, stillMissing = missing
+            NSLog("Aurea model import: %@", failure.isEmpty ? "completed" : "failed")
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false

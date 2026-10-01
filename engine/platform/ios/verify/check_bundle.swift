@@ -19,6 +19,14 @@ guard let bundle = Bundle(url: url) else { require(false, "Foundation cannot ope
 require(bundle.bundleIdentifier == "com.aurea.aurea", "Foundation did not resolve the Aurea bundle identifier")
 require(bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL", "Bundle is not an application")
 require(bundle.executableURL.map { fm.isExecutableFile(atPath: $0.path) } == true, "Foundation could not resolve an executable app binary")
+let modelDeclarations = bundle.object(forInfoDictionaryKey: "UTImportedTypeDeclarations") as? [[String: Any]] ?? []
+for ext in ["fbx", "obj", "glb", "gltf", "mtl"] {
+    require(modelDeclarations.contains { declaration in
+        let tags = declaration["UTTypeTagSpecification"] as? [String: Any] ?? [:]
+        return (tags["public.filename-extension"] as? [String] ?? []).contains(ext)
+            && (declaration["UTTypeConformsTo"] as? [String] ?? []).contains("public.data")
+    }, "Files picker has no concrete public.data declaration for \(ext)")
+}
 require((bundle.object(forInfoDictionaryKey: "UIAppFonts") as? [String])?.contains("CupertinoIcons.ttf") == true,
         "Official icon font is not registered in UIAppFonts")
 guard let fontURL = bundle.url(forResource: "CupertinoIcons", withExtension: "ttf"),

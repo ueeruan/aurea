@@ -1172,10 +1172,10 @@ AUREA_TEST(MagneticTrack, NewClipLandsAtTheEndOfTheMagneticRow) {
     AUREA_CHECK_EQ(l->start.value, 90);               // encostado no fim do C
 }
 
-AUREA_TEST(MagneticTrack, QueryLayersCarriesTheRowToTheUi) {
+AUREA_TEST(MagneticTrack, QueryLayersCarriesIndependentSplitRowsToTheUi) {
     MagneticRig m;
-    // A UI junta na MESMA fileira os trechos de uma linha: o número da linha
-    // tem de atravessar a ponte, e o split tem de dar o mesmo aos dois pedaços.
+    // Existing neighbours retain their shared row. Splitting creates an
+    // independent layer row, as requested, and both native bridges receive it.
     Command split;
     split.type = CommandType::LayerSplit;
     split.layer_ref.layer = LayerId::unpack(m.r.a);
@@ -1193,7 +1193,17 @@ AUREA_TEST(MagneticTrack, QueryLayersCarriesTheRowToTheUi) {
         AUREA_CHECK_EQ(rows[i].trackId, l->trackId);
         if (rows[i].trackId == row) ++sameRow;
     }
-    AUREA_CHECK_EQ(sameRow, 4u);                      // os dois pedaços do A, o B e o C
+    AUREA_CHECK_EQ(sameRow, 3u);                      // first part of A, B and C
+    u32 splitRows = 0;
+    for (u32 i = 0; i < n; ++i) {
+        const Layer* l = m.r.comp()->layer(LayerId::unpack(rows[i].id));
+        if (l && l->start.value == 10 && l->end.value == 30) {
+            AUREA_CHECK(rows[i].trackId != row);
+            AUREA_CHECK(rows[i].trackId != m.r.L(m.overlay)->trackId);
+            ++splitRows;
+        }
+    }
+    AUREA_CHECK_EQ(splitRows, 1u);
     AUREA_CHECK(m.r.L(m.overlay)->trackId != row);    // o overlay é outra linha
 }
 

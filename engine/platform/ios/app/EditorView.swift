@@ -16,6 +16,7 @@ import PhotosUI
 import Photos
 import CoreText
 import Combine
+import UIKit
 
 struct EditorView: View {
     @EnvironmentObject private var model: AureaModel
@@ -139,6 +140,7 @@ private struct AddLayerPickers: ViewModifier {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject var shell: ShellPresentation
     @State private var importing = false
+    @State private var importingModel = false
     @State private var fileKind = ShellAddPicker.model
     @State private var choosingPhotos = false
     @State private var photoKind = ShellAddPicker.gallery
@@ -147,8 +149,16 @@ private struct AddLayerPickers: ViewModifier {
             .onChange(of: shell.addPicker) { request in
                 guard let request else { return }
                 shell.addPicker = nil
-                if request.isFile { fileKind = request; importing = true }
+                if request == .model { fileKind = request; importingModel = true }
+                else if request.isFile { fileKind = request; importing = true }
                 else { photoKind = request; choosingPhotos = true }
+            }
+            .fullScreenCover(isPresented: $importingModel) {
+                ModelDocumentPicker { urls in
+                    // Start the owned copy while the picker URLs are still valid.
+                    if let urls { model.importModelFiles(urls: urls) }
+                    importingModel = false
+                }.ignoresSafeArea()
             }
             // O ÚNICO `.fileImporter` da raiz: dois na mesma view e o SwiftUI só
             // atende um — o do modelo 3D ficava mudo (as texturas vêm por aqui também).
@@ -161,7 +171,10 @@ private struct AddLayerPickers: ViewModifier {
                     }
                     return
                 }
-                guard case .success(let urls) = result, let url = urls.first else { return }
+                guard case .success(let urls) = result, let url = urls.first else {
+                    model.toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo")
+                    return
+                }
                 switch fileKind {
                 // Seleção múltipla/pasta: o FBX/OBJ vem com as texturas e o .mtl.
                 case .model: model.importModelFiles(urls: urls)
@@ -190,6 +203,45 @@ private struct AddLayerPickers: ViewModifier {
         case .modelTextures: return [.image, .data]
         default: return [.audio]
         }
+    }
+}
+
+/// A stable UIKit delegate owns the model selection until completion. Present
+/// full screen on iPad too, rather than a provider popover nested in SwiftUI.
+private struct ModelDocumentPicker: UIViewControllerRepresentable {
+    let onSelection: ([URL]?) -> Void
+    static let types: [UTType] = [
+        UTType(importedAs: "com.autodesk.fbx", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.obj", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.glb", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.gltf", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.mtl", conformingTo: .data),
+        .data, .content, .zip, .folder
+    ]
+    func makeCoordinator() -> Coordinator { Coordinator(onSelection) }
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: Self.types, asCopy: true)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = true
+        picker.shouldShowFileExtensions = true
+        picker.modalPresentationStyle = .fullScreen
+        NSLog("Aurea model picker: %ld declared/fallback types, multi-select", Self.types.count)
+        return picker
+    }
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {
+        context.coordinator.onSelection = onSelection
+    }
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        var onSelection: ([URL]?) -> Void
+        private var completed = false
+        init(_ onSelection: @escaping ([URL]?) -> Void) { self.onSelection = onSelection }
+        private func finish(_ urls: [URL]?) {
+            guard !completed else { return }; completed = true
+            NSLog("Aurea model picker: %@, %ld item(s)", urls == nil ? "cancelled" : "selected", urls?.count ?? 0)
+            onSelection(urls)
+        }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
     }
 }
 

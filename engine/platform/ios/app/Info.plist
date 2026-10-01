@@ -95,6 +95,42 @@
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>
 
+    <!-- External formats supported by the shared model importer. Files must
+         see concrete data types even when no other model editor is installed. -->
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.autodesk.fbx</string>
+            <key>UTTypeDescription</key><string>FBX 3D model</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>fbx</string></array><key>public.mime-type</key><string>application/x-fbx</string></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.aurea.import.obj</string>
+            <key>UTTypeDescription</key><string>Wavefront OBJ model</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>obj</string></array><key>public.mime-type</key><string>model/obj</string></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.aurea.import.glb</string>
+            <key>UTTypeDescription</key><string>Binary glTF model</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>glb</string></array><key>public.mime-type</key><string>model/gltf-binary</string></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.aurea.import.gltf</string>
+            <key>UTTypeDescription</key><string>glTF model</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>gltf</string></array><key>public.mime-type</key><string>model/gltf+json</string></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.aurea.import.mtl</string>
+            <key>UTTypeDescription</key><string>Wavefront material</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>mtl</string></array></dict>
+        </dict>
+    </array>
+
     <!-- ANÚNCIOS (Unity LevelPlay + Unity Ads; consentimento pelo UMP do Google).
          GADApplicationIdentifier: o UMP exige um App ID do Google para ler a
          configuração de consentimento; é o App ID de TESTE, o mesmo que o

@@ -10151,7 +10151,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const f32 base[] = {t.position.x, t.position.y, t.position.z,
                 t.scale.x, t.scale.y, t.scale.z, t.rotation.x, t.rotation.y, t.rotation.z,
                 t.anchor.x, t.anchor.y, t.anchor.z, t.opacity, t.skewX, t.skewY};
-            const f32 current = layer->tracks.sample_or(cmd.keyframe.track.property, cmd.keyframe.time, base[property]);
+            const Track* track = layer->tracks.find(cmd.keyframe.track.property);
+            const f32 current = track ? track->value_or(cmd.keyframe.time, base[property]) : base[property];
             const f32 value = cmd.keyframe.value;
             const f32 tolerance = 4.0f * std::numeric_limits<f32>::epsilon() * std::max({1.0f, std::abs(current), std::abs(value)});
             // Check before creating a track, recording undo or invalidating the model.

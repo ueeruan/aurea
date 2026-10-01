@@ -40,6 +40,12 @@ AUREA_TEST(Regression2130, AutoKeySkipsUnchangedAxesAndKeepsManualHoldKeys) {
     AUREA_CHECK(!l->tracks.find(TrackProperty::PositionY));
     AUREA_CHECK(!l->tracks.find(TrackProperty::PositionZ));
     AUREA_CHECK_EQ(e.read_status().undoDepth, before);
+    // Deleting the last key may leave an empty track. Rendering uses the layer
+    // transform again, not that track's default zero.
+    l->tracks.get_or_create(TrackProperty::PositionY);
+    insert(TrackProperty::PositionY, local, 200, true);
+    AUREA_CHECK(l->tracks.find(TrackProperty::PositionY)->keys.empty());
+    AUREA_CHECK_EQ(e.read_status().undoDepth, before);
     insert(TrackProperty::PositionX, local, 175, true);
     auto* track = l->tracks.find(TrackProperty::PositionX);
     AUREA_CHECK_EQ(track->keys.size(), usize{3});

@@ -153,7 +153,9 @@ DepthMapPtr DepthMapService::run_video_locked(const Job& job) {
     const auto previous = raw(current - 1);
     const auto center = raw(current);
     if (!center) return nullptr;
-    const auto next = raw(current + 1);
+    const i64 durationUs = decoder_ ? decoder_->info().durationUs : 0;
+    const i64 nextUs = static_cast<i64>(std::llround((current + 1) * 1e6 / fps));
+    const auto next = durationUs > 0 && nextUs >= durationUs ? center : raw(current + 1);
     if (!previous || !next) return nullptr; // never export an order-dependent fallback
     const auto& a = *previous;
     const auto& b = *next;

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include "aurea/core/Log.hpp"
+#include "SyntheticVideo.hpp"
 using namespace aurea;
 AUREA_TEST(ForegroundAI, Regression2131ResizeFiltersFineDetailAcrossTheWholeImage) {
     std::vector<u8> image(640*960*4,255), rgb;
@@ -65,4 +66,18 @@ AUREA_TEST(ForegroundAI, RealModelProducesDeterministicFiniteMasks) {
     AUREA_CHECK(hi-lo>.8f);AUREA_CHECK(first[160*320+160]>.5f);AUREA_CHECK(first[0]<.5f);
     cancel=true;AUREA_CHECK_EQ(model.run(pixels.data(),320,320,1280,4,cancel,second.data()).code(),Errc::Cancelled);
     model.unload();AUREA_CHECK(!model.loaded());set_log_sink(nullptr,nullptr);
+}
+
+AUREA_TEST(ForegroundAI, Regression2131FinalVideoFrameWorksWithoutContainerFrameCount) {
+    aurea::test::SyntheticConfig cfg;cfg.width=96;cfg.height=64;cfg.frameCount=2;
+    cfg.pattern=aurea::test::SyntheticPattern::MovingSquare;
+    aurea::test::SyntheticFactory factory(cfg);
+    Asset asset;asset.kind=AssetKind::Video;asset.video.width=96;asset.video.height=64;asset.video.fps=30;
+    ai::DepthMapService service("engine/assets/rotobrush");
+    const auto last=service.video(1001,&factory,asset,101,33333,33333,true);
+    AUREA_CHECK(last);if(!last)return;
+    AUREA_CHECK_EQ(last->disparity.size(),ai::ForegroundEstimator::kPixels);
+    service.clear();
+    const auto reversed=service.video(1001,&factory,asset,101,33333,33333,true);
+    AUREA_CHECK(reversed);if(reversed)AUREA_CHECK(reversed->disparity==last->disparity);
 }

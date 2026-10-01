@@ -918,7 +918,7 @@
     <string name="scene_light_failed">Не удалось создать источник света.</string>
     <string name="scene_material">Материал</string>
     <string name="scene_recenter">По центру</string>
-    <string name="scene_hint">Перетащите объект, чтобы сдвинуть · 1 палец вращает вид · 2 пальца — масштаб · двойной тап — по центру</string>
+    <string name="scene_hint">На объекте: 1 палец вращает, 2 перемещают, щипок меняет масштаб · На пустом месте: 1 палец вращает вид · Двойной тап центрирует</string>
     <string name="settings_group_theme">Тема</string>
     <string name="settings_theme_note">Сразу меняет цвета приложения. Экспортированное видео не меняется.</string>
     <string name="theme_aurea">Aurea</string>

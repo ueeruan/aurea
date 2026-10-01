@@ -849,12 +849,10 @@ private object SceneTap { var at = 0L; var x = 0f; var y = 0f }
 
 /**
  * Cena 3D "seca": tudo com o dedo na própria tela, sem sliders nem campos.
- * - 1 dedo NO objeto: escolhe e arrasta (o objeto segue o dedo, no plano
- *   que a vista mostra mais de frente). As setas coloridas continuam para
- *   um eixo só (profundidade, por exemplo).
+ * - 1 dedo NO objeto: escolhe e gira; as setas continuam editando um eixo só.
  * - 1 dedo no vazio: gira a vista em volta da cena. Toque no vazio: solta
  *   a seleção; toque duplo no vazio: vista inicial.
- * - 2 dedos: pinça aproxima/afasta.
+ * - 2 dedos: movem o objeto; a pinça escala e torce. Sem seleção, amplia a vista.
  * Só a vista de navegação muda com a órbita — o export não. Cada arrasto de
  * objeto é UM passo de desfazer.
  */
@@ -1260,8 +1258,9 @@ private suspend fun PointerInputScope.stageGestures(
         }
 
         // Nulls and the active camera have no visible surface to hit.
-        if (target == TARGET_EMPTY && store.selection.size == 1 && store.gizmo != null &&
-            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind)) {
+        if (target == TARGET_EMPTY && store.selection.size == 1 &&
+            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind) &&
+            store.primary?.let { store.previewGestureBasis(it) } != null) {
             target = TARGET_LAYER; targetLayer = store.primary ?: 0L
         }
         var mode = MODE_PENDING
@@ -1303,7 +1302,7 @@ private suspend fun PointerInputScope.stageGestures(
                     // camada escolhida quando os dedos estão sobre ela.
                     if (!StageView.zoomLock && d != null && m.valid && store.selection.size == 1 && !d.locked &&
                         activeAt(d, store.playhead) &&
-                        (store.gizmo != null || LayerGeometry.contains(d, m.cx(a.position.x), m.cy(a.position.y), slack) ||
+                        (store.previewGestureBasis(d.id) != null || LayerGeometry.contains(d, m.cx(a.position.x), m.cy(a.position.y), slack) ||
                             LayerGeometry.contains(d, m.cx(b.position.x), m.cy(b.position.y), slack) ||
                             LayerGeometry.contains(d, m.cx(midX), m.cy(midY), slack))
                     ) {
@@ -1617,6 +1616,7 @@ private class StageEdit(
     fun step(mode: Int, x: Float, y: Float) {
         if (mode == MODE_MOVE) {
             previewBasis?.let { basis ->
+                if (moveDetail?.id != store.primary || store.detail?.locked != false) return
                 begin("rotate 3D")
                 store.gizmoSetComponents(TrackProperty.ROTATION_X,
                     com.aurea.aurea.engine.AureaEngine.previewGestureValue(basis, m.cx(x)-downCx, m.cy(y)-downCy, true))

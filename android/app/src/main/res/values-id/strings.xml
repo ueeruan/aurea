@@ -915,7 +915,7 @@ untuk mengedit kurvanya.</string>
     <string name="scene_light_failed">Tidak dapat membuat cahaya.</string>
     <string name="scene_material">Material</string>
     <string name="scene_recenter">Tengahkan</string>
-    <string name="scene_hint">Seret objek untuk memindahkan · 1 jari memutar tampilan · 2 jari zoom · ketuk dua kali untuk ke tengah</string>
+    <string name="scene_hint">Pada objek: 1 jari memutar, 2 memindahkan, cubit mengubah skala · Di ruang kosong: 1 jari mengorbit · Ketuk dua kali memusatkan</string>
     <string name="settings_group_theme">Tema</string>
     <string name="settings_theme_note">Mengubah warna aplikasi seketika. Video yang diekspor tidak berubah.</string>
     <string name="theme_aurea">Aurea</string>

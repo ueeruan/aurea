@@ -930,7 +930,7 @@
     <string name="scene_light_failed">تعذر إنشاء الضوء.</string>
     <string name="scene_material">الخامة</string>
     <string name="scene_recenter">توسيط</string>
-    <string name="scene_hint">اسحب الكائن لتحريكه · إصبع واحد يدير المنظر · إصبعان للتقريب · نقرتان لإعادة التوسيط</string>
+    <string name="scene_hint">على الكائن: إصبع للدوران، إصبعان للتحريك، والقرص للحجم · في الفراغ: إصبع يدير المنظر · نقرتان للتوسيط</string>
     <string name="settings_group_theme">السمة</string>
     <string name="settings_theme_note">يغيّر ألوان التطبيق فورًا. الفيديو المُصدَّر لا يتغير.</string>
     <string name="theme_aurea">Aurea</string>

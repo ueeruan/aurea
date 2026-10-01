@@ -1779,7 +1779,7 @@
     <string name="pn_curve_steps4">4 patamares</string>
     <string name="scene_material">Material</string>
     <string name="scene_recenter">Recentrar</string>
-    <string name="scene_hint">Arraste o objeto para mover · 1 dedo gira a vista · 2 dedos aproximam · toque duplo recentra</string>
+    <string name="scene_hint">No objeto: 1 dedo gira, 2 movem, pinça escala · No vazio: 1 dedo orbita · Toque duplo recentra</string>
     <string name="settings_group_theme">Tema</string>
     <string name="settings_theme_note">Muda as cores do app na hora. O vídeo exportado não muda.</string>
     <string name="theme_aurea">Aurea</string>

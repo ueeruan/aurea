@@ -570,7 +570,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 }
                 // Lupa ligada: a pinça é SEMPRE da vista. Senão, só é da camada
                 // escolhida quando os dedos estão sobre ela; no vazio amplia a vista.
-                let selected3D = model.primarySelection.map { !model.engine.gizmo($0, length: ShellStageGeometry.gizmoLength).isEmpty } ?? false
+                let selected3D = model.primarySelection.map { !model.engine.previewGestureBasis($0).isEmpty } ?? false
                 if !StageViewZoom.shared.zoomLock && editableSelection() && (over || selected3D) {
                     startLayerPinch(a, b, view: view); stageMode = .pinch
                 } else {
@@ -654,7 +654,7 @@ struct PreviewMetalView: UIViewRepresentable {
             else if model.selection.count >= 2, let hit = hitSelected(c) { targetLayer = hit }
             else { targetLayer = hitLayer(c, slack: 0, includeLocked: true) }
             if targetLayer == nil, let row = model.selectedLayer, model.selection.count == 1,
-               (row.kind == 6 || row.kind == 8), !model.engine.gizmo(row.id, length: ShellStageGeometry.gizmoLength).isEmpty {
+               (row.kind == 6 || row.kind == 8), !model.engine.previewGestureBasis(row.id).isEmpty {
                 targetLayer = row.id
             }
         }
@@ -834,9 +834,9 @@ struct PreviewMetalView: UIViewRepresentable {
             beginEdit("mover"); model.setTransform2(0, local.x, 1, local.y, layer: id)
         }
         /// Cena 3D "seca": tudo com o dedo na tela (par do `sceneGesture` do
-        /// Android). Objeto sob o dedo: escolhe e arrasta no plano mais de
-        /// frente. Vazio: 1 dedo gira a vista; toque solta a seleção; toque
-        /// duplo recentra. 2 dedos: pinça aproxima/afasta. Um arrasto de
+        /// Android). No objeto: 1 dedo gira, 2 movem e a pinça escala/torce.
+        /// Vazio: 1 dedo gira a vista; toque solta a seleção; toque duplo recentra.
+        /// Sem seleção, a pinça aproxima a vista. Um arrasto de
         /// objeto = UM passo de desfazer; a órbita é só da prévia.
         private func sceneEvent(_ pressed: [StageTouchPoint], view: UIView) {
             if pressed.isEmpty {
@@ -886,7 +886,10 @@ struct PreviewMetalView: UIViewRepresentable {
             let dx = first.position.x - sceneLast.x, dy = first.position.y - sceneLast.y
             switch sceneMode {
             case 1: model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.35, pitch: model.scenePitch + Float(dy) * 0.35, distance: model.sceneDistance)
-            case 2: if let id = scenePicked, id == model.primarySelection { stepMove(first.position, view: view, id: id) }
+            case 2: if let id = scenePicked, id == model.primarySelection {
+                if previewBasis.isEmpty { let f = scaleFactor(view); model.sceneDragObject(dx: Float(dx)*f, dy: Float(dy)*f) }
+                else { stepMove(first.position, view: view, id: id) }
+            }
             default: break
             }
             if sceneMode != 0 { sceneLast = first.position }

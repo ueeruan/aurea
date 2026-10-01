@@ -916,7 +916,7 @@ para editar la curva.</string>
     <string name="scene_light_failed">No se pudo crear la luz.</string>
     <string name="scene_material">Material</string>
     <string name="scene_recenter">Recentrar</string>
-    <string name="scene_hint">Arrastra el objeto para moverlo · 1 dedo gira la vista · 2 dedos acercan · doble toque recentra</string>
+    <string name="scene_hint">En el objeto: 1 dedo gira, 2 mueven, pellizca para escalar · En el vacío: 1 dedo orbita · Doble toque recentra</string>
     <string name="settings_group_theme">Tema</string>
     <string name="settings_theme_note">Cambia los colores de la app al instante. El video exportado no cambia.</string>
     <string name="theme_aurea">Aurea</string>

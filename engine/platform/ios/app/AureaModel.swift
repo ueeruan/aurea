@@ -780,7 +780,10 @@ final class AureaModel: ObservableObject {
                             engine.toggleTextAnimKey(id, index: 0, param: 6)
                             engine.run { $0.seek(toFrame: 30) }
                             engine.setTextAnimParam(id, index: 0, param: 6, value: 0)
-                            engine.run { $0.seek(toFrame: 0) }
+                            engine.run {
+                                $0.seek(toFrame: 0)
+                                $0.addEffect(fxEffectTypeId("aurea.text.transform"), toLayer: id, at: UInt32.max)
+                            }
                             refreshModel(force: true)
                             panel = .textAnimation
                         }

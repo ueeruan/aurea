@@ -1745,7 +1745,7 @@ to edit the curve.</string>
     <string name="scene_light_failed">Could not create the light.</string>
     <string name="scene_material">Material</string>
     <string name="scene_recenter">Recenter</string>
-    <string name="scene_hint">Drag an object to move it · 1 finger orbits the view · pinch to zoom · double-tap to recenter</string>
+    <string name="scene_hint">On the object: 1 finger rotates, 2 move, pinch scales · On empty space: 1 finger orbits · Double-tap recenters</string>
     <string name="settings_group_theme">Theme</string>
     <string name="settings_theme_note">Changes the app colors right away. Exported videos are not affected.</string>
     <string name="theme_aurea">Aurea</string>

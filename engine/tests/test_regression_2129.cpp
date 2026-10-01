@@ -66,6 +66,7 @@ AUREA_TEST(Regression2129, GroupedFbxKeepsInstanceMaterialsAndGeometryTransforms
 FBXHeaderExtension: { FBXHeaderVersion: 1003
  FBXVersion: 7400
 }
+
 GlobalSettings: { Version: 1000
  Properties70: {
  P: "UpAxis", "int", "Integer", "",1
@@ -144,14 +145,30 @@ Connections: {
         const auto material=node.material_for(primitive); AUREA_CHECK(material>=0);
         std::printf("\n    instance %s: material=%d, slots=%zu, primitive slot=%d\n",node.name.c_str(),material,node.materials.size(),primitive.materialSlot);
         if(material>=0){const auto& c=asset.materials[material].baseColor;red|=c.x>.9f&&c.z<.1f;blue|=c.z>.9f&&c.x<.1f;}
-        // Match world vertices against both source instances, including geometry-only transforms.
+        // Match the corresponding source instance, including geometry-only transforms.
+        // Comparing against either instance would miss two pieces collapsing together.
+        const ufbx_node* source=nullptr;
+        for(i32 ancestor=static_cast<i32>(i);ancestor>=0;ancestor=asset.nodes[ancestor].parent){
+            auto* candidate=ufbx_find_node(reference,asset.nodes[ancestor].name.c_str());
+            if(candidate&&candidate->mesh){source=candidate;break;}
+        }
+        AUREA_CHECK(source!=nullptr);if(!source)continue;
         for(const auto& vertex:primitive.positions){ const Vec3 actual=world[i].transform_point(vertex); f32 error=1e9f;
-            for(usize n=0;n<reference->nodes.count;++n){const auto* rn=reference->nodes.data[n];if(!rn->mesh)continue;
-                for(usize v=0;v<rn->mesh->vertices.count;++v){const auto q=ufbx_transform_position(&rn->geometry_to_world,rn->mesh->vertices.data[v]);
+                for(usize v=0;v<source->mesh->vertices.count;++v){const auto q=ufbx_transform_position(&source->geometry_to_world,source->mesh->vertices.data[v]);
                     error=std::min(error,(actual-Vec3{static_cast<f32>(q.x),static_cast<f32>(q.y),static_cast<f32>(q.z)}).length());}
-            }
             AUREA_CHECK(error<.0001f);
         }
     }
     AUREA_CHECK_EQ(instances,2u); AUREA_CHECK(red); AUREA_CHECK(blue); ufbx_free_scene(reference);
+}
+
+AUREA_TEST(Regression2129, ActiveCameraCanPanWithoutAVisibleGizmo) {
+    Rig2129 r;
+    const auto camera=r.e.add_camera();AUREA_CHECK(camera.ok());if(!camera.ok())return;
+    f32 basis[13]{};AUREA_CHECK(r.e.query_preview_gesture_basis(*camera,basis));
+    const auto p=preview_gesture_value(basis,40,-20,false);
+    AUREA_CHECK(std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z));
+    AUREA_CHECK(std::abs(p.x-basis[0])>1);AUREA_CHECK(std::abs(p.y-basis[1])>1);
+    const auto rotation=preview_gesture_value(basis,20,20,true);
+    AUREA_CHECK(std::isfinite(rotation.x)&&std::isfinite(rotation.y));
 }

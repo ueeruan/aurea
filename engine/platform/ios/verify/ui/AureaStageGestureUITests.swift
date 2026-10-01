@@ -51,11 +51,14 @@ import XCTest
         let before = try launch("text-animator-editing")
         XCTAssertEqual(before.textAnimatorCount, 1)
         XCTAssertFalse(app.buttons["text.anim.0.duplicate"].exists)
-        let add = app.buttons["text.transform.add"].firstMatch
+        let add = app.buttons["text.animator.add"].firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
         let added = try awaitSnapshot("Text animation opens in the real effect stack") { $0.effectCount == before.effectCount + 1 }
         XCTAssertEqual(added.textAnimatorCount, before.textAnimatorCount)
         XCTAssertTrue(app.otherElements["aurea.effects.stack"].firstMatch.waitForExistence(timeout: 5))
+        // Only the expanded card exposes its menu; the older Text Transform stays closed.
+        XCTAssertTrue(app.buttons["effects.more.\(effectCardId("aurea.text.animator"))"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["effects.more.\(effectCardId("aurea.text.transform"))"].exists)
         try undo()
         let undone = try awaitSnapshot("Undo removes the effect and preserves the existing preset") { $0.effectCount == before.effectCount }
         XCTAssertEqual(undone.textAnimatorCount, before.textAnimatorCount)

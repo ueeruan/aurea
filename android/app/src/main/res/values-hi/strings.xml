@@ -916,7 +916,7 @@
     <string name="scene_light_failed">प्रकाश नहीं बनाया जा सका।</string>
     <string name="scene_material">मटीरियल</string>
     <string name="scene_recenter">केंद्र में लाएँ</string>
-    <string name="scene_hint">ऑब्जेक्ट खिसकाने के लिए खींचें · 1 उंगली से दृश्य घुमाएँ · 2 उंगलियों से ज़ूम · दो बार टैप से केंद्र</string>
+    <string name="scene_hint">ऑब्जेक्ट पर: 1 उंगली से घुमाएँ, 2 से खिसकाएँ, पिंच से आकार बदलें · खाली जगह पर: 1 उंगली से दृश्य घुमाएँ · दो टैप से केंद्र</string>
     <string name="settings_group_theme">थीम</string>
     <string name="settings_theme_note">ऐप के रंग तुरंत बदलता है। एक्सपोर्ट किया गया वीडियो नहीं बदलता।</string>
     <string name="theme_aurea">Aurea</string>

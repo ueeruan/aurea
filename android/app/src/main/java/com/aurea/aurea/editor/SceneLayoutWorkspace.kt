@@ -45,8 +45,8 @@ import com.aurea.aurea.state.EditorStore
 
 /**
  * Cena 3D "seca": a cena ocupa a tela e se mexe com o dedo (ver
- * `sceneGesture` no Stage.kt) — arrastar o objeto move, 1 dedo no vazio gira
- * a vista, pinça aproxima, toque duplo recentra. Sem sliders nem campos XYZ:
+ * `sceneGesture` no Stage.kt) — 1 dedo no objeto gira, 2 movem e a pinça escala;
+ * no vazio, 1 dedo orbita a vista. Toque duplo recentra. Sem campos XYZ:
  * só o que a pessoa procura — voltar, desfazer, adicionar, trocar de objeto
  * e, conforme o escolhido, material ou luz. Layout estático desloca a
  * animação existente; a órbita é só da prévia.
@@ -67,7 +67,8 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     }
     if (lights) Dialog(onDismissRequest = { lights = false }) {
         Surface { Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            store.lightInfo()?.let { values ->
+            val light = remember(store.primary, store.sceneSettingsRevision, store.playhead) { store.lightInfo() }
+            light?.let { values ->
                 for (param in 1..5) {
                     if (param == 5 && values[0] == 0f) continue
                     val label = listOf("", stringResource(R.string.panel_intensidade), "R", "G", "B", stringResource(R.string.scene_light_range))[param]

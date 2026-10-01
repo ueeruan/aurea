@@ -309,7 +309,6 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         if (requested >= 0 || added.isNotEmpty()) {
             val index = if (requested >= 0) requested else effects.indexOfLast { it.effectId in added }
             openId = effects[index].effectId
-            if (requested >= 0) store.consumeEffectFocus()
             // Adicionou (pelo catálogo, pela busca geral, colando): os controles
             // do efeito novo aparecem na pilha. A lista entra nesta mesma
             // recomposição; espera o quadro dela antes de rolar.
@@ -318,6 +317,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 androidx.compose.runtime.withFrameNanos { }
             }
             listState.animateScrollToItem(index)
+            if (requested >= 0) store.consumeEffectFocus()
         }
         else if (openId != null && openId !in ids) openId = null
     }

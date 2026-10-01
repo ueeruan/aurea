@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -852,7 +853,8 @@ private:
         const Status s = bridge_->convert(hb, quad, target);
         AImage_delete(image);
         if (!s.ok()) return s;
-        auto* f = new GlFrame();
+        auto* f = new (std::nothrow) GlFrame();
+        if (!f) return Status{Errc::OutOfMemory, "sem memoria para o quadro"};
         f->target = target;
         f->ptsUs = pts;
         f->rotation = info_.rotation;
@@ -870,7 +872,11 @@ private:
 
     Status wrap(AImage* image, i64 pts, FrameRef& out) {
         if (glPath_ && bridge_) return wrap_driver_gl(image, pts, out);
-        auto* f = new CodecFrame();
+        auto* f = new (std::nothrow) CodecFrame();
+        if (!f) {
+            AImage_delete(image);
+            return Status{Errc::OutOfMemory, "sem memoria para o quadro"};
+        }
         f->image = image;
         f->owner = reader_;
         f->ptsUs = pts;

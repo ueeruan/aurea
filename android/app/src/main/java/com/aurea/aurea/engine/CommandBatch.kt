@@ -211,8 +211,11 @@ class CommandBatch(private val engine: AureaEngine) {
 
     fun insertKeyframe(
         layer: Long, property: Int, effectIndex: Int, effectParam: Int,
-        timeFrame: Int, value: Float,
-    ) = emit(CommandType.KEYFRAME_INSERT) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putLong(Off.KEYFRAME_TIME, timeFrame.toLong()); b.putFloat(Off.KEYFRAME_VALUE, value) }
+        timeFrame: Int, value: Float, onlyIfChanged: Boolean = false,
+    ) = emit(CommandType.KEYFRAME_INSERT) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putLong(Off.KEYFRAME_TIME, timeFrame.toLong()); b.putFloat(Off.KEYFRAME_VALUE, value); b.putInt(Off.KEYFRAME_ONLY_IF_CHANGED, if (onlyIfChanged) 1 else 0) }
+
+    fun autoKeyframe(layer: Long, property: Int, effectIndex: Int, effectParam: Int, timeFrame: Int, value: Float) =
+        insertKeyframe(layer, property, effectIndex, effectParam, timeFrame, value, onlyIfChanged = true)
 
     fun deleteKeyframe(
         layer: Long, property: Int, effectIndex: Int, effectParam: Int, timeFrame: Int,
@@ -594,6 +597,7 @@ class CommandBatch(private val engine: AureaEngine) {
         const val KEYFRAME_TRACK = PodLayout.CMD_OFF_PAYLOAD
         const val KEYFRAME_TIME = PodLayout.CMD_OFF_PAYLOAD + 24
         const val KEYFRAME_VALUE = PodLayout.CMD_OFF_PAYLOAD + 32
+        const val KEYFRAME_ONLY_IF_CHANGED = PodLayout.CMD_OFF_PAYLOAD + 36
 
         const val GAIN_VALUE = PodLayout.CMD_OFF_PAYLOAD + 8
         const val TEXT_SIZE_VALUE = PodLayout.CMD_OFF_PAYLOAD + 8

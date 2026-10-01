@@ -447,7 +447,8 @@ u32 Engine::model_texture_cap() const noexcept {
 void Engine::apply_memory_budgets() noexcept {
     // Uma tabela só (kBudgetShare, em MemoryManager.hpp): cada consumidor com o
     // seu pedaço do orçamento medido do aparelho. Ver PHASE_8_REPORT §8B.
-    const u64 budget = config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes();
+    const u64 budget = DeviceCapabilities::process_budget_limit(
+        config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
     memory_.apply_budget_table(budget);
     // The rendered-frame category also contains flow/LUT/mask caches. Reserve
     // half for reusable intermediate render targets instead of retaining every
@@ -1508,7 +1509,7 @@ Result<u64> Engine::freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcep
 
 void Engine::recenter_text(Layer& l) noexcept {
     if (l.kind != LayerKind::Text) return;
-    const auto font = text::default_font();
+    const auto font = text::FontManager::instance().font_for(l.text);
     if (!font) return;
     // A caixa cresce/encolhe em volta do centro: o texto não "anda" ao editar.
     const text::TextExtent ext = text::measure(*font, l.text);
@@ -6763,6 +6764,7 @@ bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, b
     l->text.fontItalic = italic;
     // Importada: o arquivo vai relativo ao projeto (abre em outro aparelho).
     l->text.fontPath = path.empty() ? std::string{} : store_asset_path(path);
+    recenter_text(*l);
     project_->mark_dirty();
     request_render();
     return true;
@@ -6793,6 +6795,7 @@ bool Engine::set_text_style(u64 layerId, const f32* v, u32 count) noexcept {
         t.lineHeight = std::clamp(v[18], 0.1f, 10.0f);
         t.tracking = std::clamp(v[19], -1000.0f, 1000.0f);
     }
+    recenter_text(*l);
     project_->mark_dirty();
     request_render();
     return true;
@@ -8934,7 +8937,7 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
         return true;
     }
     if (l->kind == LayerKind::Text) {
-        if (const auto font = text::default_font()) {
+        if (const auto font = text::FontManager::instance().font_for(l->text)) {
             const text::TextExtent ext = text::measure(*font, l->text);
             const f32 pad = l->text.strokeWidth > 0.0f ? l->text.strokeWidth + 2.0f : 2.0f;
             out.sourceWidth = static_cast<u32>(std::ceil(ext.width + 2.0f * pad));
@@ -10139,6 +10142,22 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
     const u64 now = monotonic_ns();
 
     auto need_layer = [&](LayerId id) -> Layer* { return comp ? comp->layer(id) : nullptr; };
+    if (cmd.type == CommandType::KeyframeInsert && cmd.keyframe.onlyIfChanged) {
+        const Layer* layer = need_layer(cmd.keyframe.track.layer);
+        if (!layer) return Errc::NotFound;
+        const u32 property = static_cast<u32>(cmd.keyframe.track.property);
+        if (property <= static_cast<u32>(TrackProperty::SkewY)) {
+            const Transform& t = layer->transform;
+            const f32 base[] = {t.position.x, t.position.y, t.position.z,
+                t.scale.x, t.scale.y, t.scale.z, t.rotation.x, t.rotation.y, t.rotation.z,
+                t.anchor.x, t.anchor.y, t.anchor.z, t.opacity, t.skewX, t.skewY};
+            const f32 current = layer->tracks.sample_or(cmd.keyframe.track.property, cmd.keyframe.time, base[property]);
+            const f32 value = cmd.keyframe.value;
+            const f32 tolerance = 4.0f * std::numeric_limits<f32>::epsilon() * std::max({1.0f, std::abs(current), std::abs(value)});
+            // Check before creating a track, recording undo or invalidating the model.
+            if (std::abs(current - value) <= tolerance) return OkStatus;
+        }
+    }
     if (cmd.type == CommandType::EffectAdd && cmd.effect_add.effectType == effect_type_id(effect_keys::kText3DLayout)) {
         const Layer* layer = need_layer(cmd.effect_add.layer);
         const Asset* source = layer ? project_->asset(layer->model.scene) : nullptr;
@@ -11099,7 +11118,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::TextSetAlignment: {
             Layer* l = need_layer(cmd.text_align.layer);
             if (!l) return Errc::NotFound;
-            l->text.alignment = cmd.text_align.alignment;
+            l->text.alignment = std::min(cmd.text_align.alignment, 2u);
+            recenter_text(*l);
             return OkStatus;
         }
         case CommandType::TextSetStrokeWidth: {

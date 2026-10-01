@@ -223,7 +223,7 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
     for (u32 attempt = 0; attempt < 2; ++attempt) {
         for (u32 bi = 0; bi < blocks_.size(); ++bi) {
             Block& b = blocks_[bi];
-            if (b.memoryType != type) continue;
+            if (!b.memory || b.memoryType != type) continue;
             for (usize r = 0; r < b.free.size(); ++r) {
                 Range& fr = b.free[r];
                 const VkDeviceSize start = align_up(fr.offset, align);
@@ -261,7 +261,9 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
         nb.size = blockSize;
         nb.memoryType = type;
         nb.free.push_back(Range{0, blockSize});
-        blocks_.push_back(std::move(nb));
+        auto empty = std::find_if(blocks_.begin(), blocks_.end(), [](const Block& b) { return !b.memory; });
+        if (empty != blocks_.end()) *empty = std::move(nb);
+        else blocks_.push_back(std::move(nb));
         reserved_ += blockSize;
     }
     return out;
@@ -292,6 +294,17 @@ void MemoryAllocator::free(const Allocation& a) noexcept {
     if (it != b.free.begin() && (it - 1)->offset + (it - 1)->size == it->offset) {
         (it - 1)->size += it->size;
         b.free.erase(it);
+    }
+}
+
+void MemoryAllocator::trim_empty_blocks() noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (Block& b : blocks_) {
+        if (!b.memory || b.used) continue;
+        if (b.mapped) vkUnmapMemory(device_, b.memory);
+        vkFreeMemory(device_, b.memory, nullptr);
+        reserved_ -= std::min<u64>(reserved_, b.size);
+        b = Block{};
     }
 }
 

@@ -3,6 +3,9 @@ package com.aurea.aurea.editor
 import android.app.Application
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,6 +39,22 @@ class TextContentEditorTest {
             val fd = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("dumpsys input_method")
             ParcelFileDescriptor.AutoCloseInputStream(fd).bufferedReader().use { it.readText().contains("mInputShown=true") }
         }
+    }
+
+    @Test fun centeredTextEditorUsesCenteredParagraphLayout() {
+        launch()
+        compose.runOnIdle { store.addText(); store.dismissTextContentEditor() }
+        compose.waitUntil(5000) { store.textDetail != null }
+        compose.runOnIdle { store.setTextAlignment(1); store.setTextContent("Wide first line\nShort") }
+        compose.waitUntil(5000) { store.textDetail?.alignment == 1 && store.textDetail?.content == "Wide first line\nShort" }
+        compose.runOnIdle { store.openTextContentEditor() }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("text.content.input").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue(layouts.isNotEmpty())
+        val layout = layouts.first()
+        assertEquals(TextAlign.Center, layout.layoutInput.style.textAlign)
+        assertEquals(layout.size.width / 2f, (layout.getLineLeft(1) + layout.getLineRight(1)) / 2f, 1f)
+        compose.runOnIdle { assertEquals(1, store.textContentRequest!!.alignment) }
     }
 
     @Test fun addingAndReopening2DTextOpensKeyboardAndKeepsSize() {

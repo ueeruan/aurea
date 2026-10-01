@@ -1080,6 +1080,19 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     [self flush];
 }
 
+- (void)autoKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value {
+    if (auto* c = _batch.add(CommandType::KeyframeInsert)) {
+        c->keyframe.track.layer = layer_of(layerId);
+        c->keyframe.track.property = static_cast<aurea::TrackProperty>(property);
+        c->keyframe.track.effectIndex = aurea::kInvalidIndex;
+        c->keyframe.track.effectParamIndex = 0;
+        c->keyframe.time = aurea::FrameIndex{time};
+        c->keyframe.value = value;
+        c->keyframe.onlyIfChanged = 1;
+    }
+    [self flush];
+}
+
 - (void)insertKeyframeForLayer:(long long)layerId effectIndex:(uint32_t)effectIndex
                      paramIndex:(uint32_t)paramIndex time:(int32_t)time value:(float)value {
     if (auto* c = _batch.add(CommandType::KeyframeInsert)) {

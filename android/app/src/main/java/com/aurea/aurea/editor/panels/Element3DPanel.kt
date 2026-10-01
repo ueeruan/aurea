@@ -53,6 +53,7 @@ import com.aurea.aurea.state.Text3DPreset
 import com.aurea.aurea.ui.ds.ColorWell
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.ds.TickRuler
+import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.ValueBox
 import com.aurea.aurea.ui.ds.valueDrag
 import com.aurea.aurea.ui.theme.AureaColors
@@ -120,8 +121,8 @@ internal fun Element3DPanel(env: PanelEnv) {
             }
         }
         Spacer(Modifier.height(10.dp))
-        EnvRuler(store, 1, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, e[1], "${(e[1] * 100).roundToInt()}%") { store.setEnvironment(it, store.environment[2]) }
-        EnvRuler(store, 2, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
+        EnvRuler(env, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, e[1], "${(e[1] * 100).roundToInt()}%") { store.setEnvironment(it, store.environment[2]) }
+        EnvRuler(env, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
         Spacer(Modifier.height(8.dp))
         Text(
             stringResource(R.string.environment_hint),
@@ -131,7 +132,7 @@ internal fun Element3DPanel(env: PanelEnv) {
             Text(stringResource(R.string.environment_background), Modifier.weight(1f), style = AureaType.BodySmall)
             androidx.compose.material3.Switch(checked = (e.getOrNull(3) ?: 0f) > .5f, onCheckedChange = store::setEnvironmentBackground)
         }
-        if (store.detail?.kind != 8) ObjectEnvironmentSection(store)
+        if (store.detail?.kind != 8) ObjectEnvironmentSection(env)
     }
 }
 
@@ -186,39 +187,40 @@ private fun ImportedMaterialSection(store: EditorStore) {
  * outros. Sem ambiente próprio, vale o do projeto — o de cima.
  */
 @Composable
-private fun ObjectEnvironmentSection(store: EditorStore) {
+private fun ObjectEnvironmentSection(env: PanelEnv) {
+    val store = env.store
     val oe by remember(store) { derivedStateOf { store.objectEnvironment } }
     var pick by remember { mutableStateOf(false) }
     val escolher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) store.importObjectHdri(uri)
     }
-    if (oe == null) return
-    val proprio = oe!![0] >= 0.5f
+    val objectEnv = oe?.takeIf { it.size >= 5 } ?: return
+    val proprio = objectEnv[0] >= 0.5f
     Spacer(Modifier.height(16.dp))
     SectionTitle(stringResource(R.string.panel_ambiente_do_objeto))
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Chip(stringResource(R.string.panel_do_projeto), on = !proprio) { store.setObjectEnvironment(0) }
         Chip(stringResource(R.string.panel_proprio), on = proprio) {
             store.setObjectEnvironment(1)
-            if (oe!![1] <= 0f) escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
+            if (objectEnv[1] <= 0f) escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
         }
     }
     if (proprio) {
         Spacer(Modifier.height(10.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Chip(
-                if (oe!![1] > 0f) stringResource(R.string.panel_trocar_imagem) else stringResource(R.string.panel_usar_imagem_ambiente_hdr),
-                on = oe!![1] > 0f,
+                if (objectEnv[1] > 0f) stringResource(R.string.panel_trocar_imagem) else stringResource(R.string.panel_usar_imagem_ambiente_hdr),
+                on = objectEnv[1] > 0f,
             ) { escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*")) }
         }
         Spacer(Modifier.height(10.dp))
-        EnvRuler(store, 2, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, oe!![2], "${(oe!![2] * 100).roundToInt()}%") {
+        EnvRuler(env, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, objectEnv[2], "${(objectEnv[2] * 100).roundToInt()}%") {
             store.setObjectEnvironment(1, intensity = it)
         }
-        EnvRuler(store, 3, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, oe!![3], "${oe!![3].roundToInt()}°") {
+        EnvRuler(env, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, objectEnv[3], "${objectEnv[3].roundToInt()}°") {
             store.setObjectEnvironment(1, rotation = it)
         }
-        EnvRuler(store, 4, stringResource(R.string.panel_exposicao), 0.01f, 0.05f, 20f, oe!![4], "${(oe!![4] * 100).roundToInt()}%") {
+        EnvRuler(env, stringResource(R.string.panel_exposicao), 0.01f, 0.05f, 20f, objectEnv[4], "${(objectEnv[4] * 100).roundToInt()}%") {
             store.setObjectEnvironment(1, exposure = it)
         }
     }
@@ -325,10 +327,10 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
         }
     }
     if (info.bevel) {
-        T3DRuler(store, stringResource(R.string.pn_t3d_bevel_width), 0.0002f, 0f, 0.2f, info.bevelWidth,
-            "${(info.bevelWidth * 1000).roundToInt()}", "chanfro") { v -> store.setText3D(info.copy(bevelWidth = v), lazy = true) }
-        T3DRuler(store, stringResource(R.string.pn_t3d_bevel_depth), 0.0002f, 0f, 0.2f, info.bevelDepth,
-            "${(info.bevelDepth * 1000).roundToInt()}", "chanfro") { v -> store.setText3D(info.copy(bevelDepth = v), lazy = true) }
+        T3DRuler(env, stringResource(R.string.pn_t3d_bevel_width), 0.0002f, 0f, 0.2f, info.bevelWidth,
+            "${(info.bevelWidth * 1000).roundToInt()}", "chanfro", displayScale = 1000f) { v -> store.setText3D(info.copy(bevelWidth = v), lazy = true) }
+        T3DRuler(env, stringResource(R.string.pn_t3d_bevel_depth), 0.0002f, 0f, 0.2f, info.bevelDepth,
+            "${(info.bevelDepth * 1000).roundToInt()}", "chanfro", displayScale = 1000f) { v -> store.setText3D(info.copy(bevelDepth = v), lazy = true) }
         Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.pn_t3d_bevel_segments), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -337,7 +339,7 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
                 }
             }
         }
-        T3DRuler(store, stringResource(R.string.pn_t3d_bevel_roundness), 0.006f, 0f, 1f, info.bevelRoundness,
+        T3DRuler(env, stringResource(R.string.pn_t3d_bevel_roundness), 0.006f, 0f, 1f, info.bevelRoundness,
             "${(info.bevelRoundness * 100).roundToInt()}%", "arredondamento") { v -> store.setText3D(info.copy(bevelRoundness = v), lazy = true) }
     }
 }
@@ -350,11 +352,11 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
 private fun Text3DPbrSection(env: PanelEnv, store: EditorStore) {
     val info by remember(store) { derivedStateOf { store.text3d } }
     val cur = info ?: return
-    T3DRuler(store, stringResource(R.string.pn_t3d_metallic), 0.005f, 0f, 1f, cur.metallic,
+    T3DRuler(env, stringResource(R.string.pn_t3d_metallic), 0.005f, 0f, 1f, cur.metallic,
         "${(cur.metallic * 100).roundToInt()}%", "metalico") { v -> store.setText3D(cur.copy(metallic = v), lazy = true) }
-    T3DRuler(store, stringResource(R.string.pn_t3d_roughness), 0.005f, 0f, 1f, cur.roughness,
+    T3DRuler(env, stringResource(R.string.pn_t3d_roughness), 0.005f, 0f, 1f, cur.roughness,
         "${(cur.roughness * 100).roundToInt()}%", "rugosidade") { v -> store.setText3D(cur.copy(roughness = v), lazy = true) }
-    T3DRuler(store, stringResource(R.string.pn_t3d_specular), 0.005f, 0f, 1f, cur.specular,
+    T3DRuler(env, stringResource(R.string.pn_t3d_specular), 0.005f, 0f, 1f, cur.specular,
         "${(cur.specular * 100).roundToInt()}%", "especular") { v -> store.setText3D(cur.copy(specular = v), lazy = true) }
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(R.string.pn_t3d_emissive), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
@@ -365,7 +367,7 @@ private fun Text3DPbrSection(env: PanelEnv, store: EditorStore) {
             }, onDone = { store.endGesture() }))
         }
     }
-    T3DRuler(store, stringResource(R.string.pn_t3d_emissive_strength), 0.02f, 0f, 8f, cur.emissiveStrength,
+    T3DRuler(env, stringResource(R.string.pn_t3d_emissive_strength), 0.02f, 0f, 8f, cur.emissiveStrength,
         "${(cur.emissiveStrength * 100).roundToInt()}%", "forca da emissao") { v -> store.setText3D(cur.copy(emissiveStrength = v), lazy = true) }
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(R.string.pn_t3d_regions), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
@@ -376,7 +378,7 @@ private fun Text3DPbrSection(env: PanelEnv, store: EditorStore) {
     }
     if (cur.regionMaterials) {
         // Frente = a cor de Material (acima). Aqui vão a lateral e o chanfro.
-        T3DRuler(store, stringResource(R.string.pn_t3d_region_side), 0.005f, 0f, 1f, cur.sideRoughness,
+        T3DRuler(env, stringResource(R.string.pn_t3d_region_side), 0.005f, 0f, 1f, cur.sideRoughness,
             "${(cur.sideRoughness * 100).roundToInt()}%", "rugosidade da lateral") { v ->
             store.setText3D(cur.copy(sideRoughness = v), lazy = true)
         }
@@ -389,7 +391,7 @@ private fun Text3DPbrSection(env: PanelEnv, store: EditorStore) {
                 }, onDone = { store.endGesture() }))
             }
         }
-        T3DRuler(store, stringResource(R.string.pn_t3d_metallic) + " · " + stringResource(R.string.pn_t3d_region_bevel), 0.005f, 0f, 1f, cur.bevelMetallic,
+        T3DRuler(env, stringResource(R.string.pn_t3d_metallic) + " · " + stringResource(R.string.pn_t3d_region_bevel), 0.005f, 0f, 1f, cur.bevelMetallic,
             "${(cur.bevelMetallic * 100).roundToInt()}%", "metalico do chanfro") { v ->
             store.setText3D(cur.copy(bevelMetallic = v), lazy = true)
         }
@@ -422,7 +424,7 @@ private fun LightingSection(store: EditorStore) {
 /** Uma régua de valor do texto 3D: arrasto com passo, rótulo e caixa. */
 @Composable
 private fun T3DRuler(
-    store: EditorStore,
+    env: PanelEnv,
     label: String,
     unitsPerDp: Float,
     min: Float,
@@ -430,8 +432,10 @@ private fun T3DRuler(
     value: Float,
     shown: String,
     gesture: String,
+    displayScale: Float = 100f,
     onValue: (Float) -> Unit,
 ) {
+    val store = env.store
     PropertyCustomRow(label, selected = false, onSelect = {}) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {
@@ -452,7 +456,13 @@ private fun T3DRuler(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            ValueBox(shown, onTap = null)
+            ValueBox(shown, onTap = {
+                env.openKeypad(KeypadRequest(label, value * displayScale,
+                    if (shown.endsWith("%")) "%" else if (shown.endsWith("°")) "°" else "",
+                    min * displayScale, max * displayScale, 1) {
+                    store.beginGesture(label); onValue((it / displayScale).coerceIn(min, max)); store.endGesture()
+                })
+            })
         }
     }
 }
@@ -468,27 +478,28 @@ private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EnvRuler(
-    store: com.aurea.aurea.state.EditorStore,
-    index: Int, // 1 = intensidade, 2 = girar a luz (posição em `environment`)
+internal fun EnvRuler(
+    env: PanelEnv,
     label: String,
     unitsPerDp: Float,
     min: Float,
     max: Float,
     value: Float,
     text: String,
+    displayScale: Float = if (text.endsWith("%")) 100f else 1f,
     onValue: (Float) -> Unit,
 ) {
+    val store = env.store
     PropertyCustomRow(label, selected = false, onSelect = {}) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {
                 TickRuler(
-                    value = { store.environment[index] },
+                    value = { value },
                     unitsPerDp = unitsPerDp,
                     active = true,
-                    modifier = Modifier.fillMaxSize().valueDrag(
+                    modifier = Modifier.fillMaxSize().testTag("environment.ruler.$label").valueDrag(
                         enabled = true,
-                        start = { store.environment[index] },
+                        start = { value },
                         unitsPerDp = { unitsPerDp },
                         min = min,
                         max = max,
@@ -499,7 +510,13 @@ private fun EnvRuler(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            ValueBox(text, onTap = null)
+            ValueBox(text, onTap = {
+                env.openKeypad(KeypadRequest(label, value * displayScale,
+                    if (text.endsWith("%")) "%" else if (text.endsWith("°")) "°" else "",
+                    min * displayScale, max * displayScale, 1) {
+                    store.beginGesture(label); onValue((it / displayScale).coerceIn(min, max)); store.endGesture()
+                })
+            })
         }
     }
 }

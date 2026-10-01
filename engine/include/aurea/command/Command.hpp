@@ -220,7 +220,11 @@ struct AnchorPayload { LayerId layer; f32 ax, ay, az; };
 struct OpacityPayload { LayerId layer; f32 opacity; };
 struct SkewPayload { LayerId layer; f32 skewX, skewY; };
 struct TransformPayload { LayerId layer; f32 x,y,z, sx,sy,sz, rx,ry,rz, ax,ay,az, opacity; };
-struct KeyframePayload { TrackRef track; FrameIndex time; f32 value; };
+struct KeyframePayload {
+    TrackRef track; FrameIndex time; f32 value;
+    // Auto-Key ignores an unchanged transform; explicit keys still allow holds.
+    u32 onlyIfChanged;
+};
 struct KeyframeMovePayload { TrackRef track; FrameIndex fromTime; FrameIndex toTime; };
 /// `power`: força da bézier (1..3); 0 = mantém a do keyframe. Ocupa o byte que
 /// já era preenchimento depois de `interp`: os floats não mudam de lugar.
@@ -464,6 +468,7 @@ namespace cmd_layout {
     inline constexpr usize kKeyframeTrack     = 16;
     inline constexpr usize kKeyframeTime      = 40;
     inline constexpr usize kKeyframeValue     = 48;
+    inline constexpr usize kKeyframeOnlyIfChanged = 52;
     // TrackRef por dentro.
     inline constexpr usize kTrackLayer        = 0;
     inline constexpr usize kTrackProperty     = 8;
@@ -507,6 +512,7 @@ static_assert(offsetof(Command, transform.opacity) == cmd_layout::kTransformOpac
 static_assert(offsetof(Command, keyframe.track) == cmd_layout::kKeyframeTrack);
 static_assert(offsetof(Command, keyframe.time) == cmd_layout::kKeyframeTime);
 static_assert(offsetof(Command, keyframe.value) == cmd_layout::kKeyframeValue);
+static_assert(offsetof(Command, keyframe.onlyIfChanged) == cmd_layout::kKeyframeOnlyIfChanged);
 static_assert(offsetof(Command, keyframe.track.layer) == cmd_layout::kKeyframeTrack + cmd_layout::kTrackLayer);
 static_assert(offsetof(Command, keyframe.track.property) == cmd_layout::kKeyframeTrack + cmd_layout::kTrackProperty);
 static_assert(offsetof(Command, keyframe.track.effectIndex) == cmd_layout::kKeyframeTrack + cmd_layout::kTrackEffectIndex);

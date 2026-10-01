@@ -357,11 +357,11 @@ u64 DeviceCapabilities::memory_budget_bytes() const noexcept {
     if (avail == 0) {
         // Sem medição: 384 MB é o teto que qualquer aparelho que roda o Aurea
         // aguenta. Subir sem medir é como o processo é morto em background.
-        return 384ull * 1024ull * 1024ull;
+        return process_budget_limit(384ull * 1024ull * 1024ull);
     }
     // Um quarto do disponível. O resto é do sistema, da UI nativa (Compose /
     // SwiftUI alocam bastante), do próprio app e das folgas do alocador.
-    return avail / 4;
+    return process_budget_limit(avail / 4);
 }
 
 PreviewScale DeviceCapabilities::recommended_initial_scale(u32 compWidth,

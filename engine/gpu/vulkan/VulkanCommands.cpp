@@ -865,6 +865,7 @@ void Backend::wait_idle() noexcept {
         if (frames_[i].submitted) collect_timings(frames_[i]);
         run_deferred(frames_[i]);
     }
+    allocator_.trim_empty_blocks();
 }
 
 u64 Backend::last_submitted_frame() const noexcept {

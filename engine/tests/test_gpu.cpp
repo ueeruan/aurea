@@ -179,6 +179,38 @@ Gpu& gpu() {
     return g;
 }
 
+#if !defined(AUREA_TEST_GLES)
+AUREA_TEST(Regression2130, VulkanReturnsEmptySlabsAndPreservesLiveAllocations) {
+    auto& g = gpu();
+    AUREA_CHECK(g.ok); if (!g.ok) return;
+    auto& b = g.backend;
+    b.wait_idle();
+    const auto baseUsed = b.allocator().used_bytes();
+    const auto baseReserved = b.allocator().reserved_bytes();
+    for (int round=0; round<4; ++round) {
+        std::vector<TextureHandle> textures;
+        TextureDesc d; d.width=1024; d.height=1024; d.format=SurfaceFormat::RGBA8; d.sampled=true;
+        for (int i=0; i<40; ++i) {
+            auto t=b.create_texture(d); AUREA_CHECK(t.ok());
+            if (t.ok()) textures.push_back(*t);
+        }
+        const auto peak=b.allocator().reserved_bytes();
+        for (usize i=1; i+1<textures.size(); ++i) b.destroy_texture(textures[i]);
+        b.wait_idle();
+        AUREA_CHECK(b.allocator().reserved_bytes()<peak);
+        // Allocate after trimming a middle slab: surviving allocations still
+        // carry the same block indices, and released slots may now be reused.
+        auto replacement=b.create_texture(d); AUREA_CHECK(replacement.ok());
+        if (replacement.ok()) b.destroy_texture(*replacement);
+        if (!textures.empty()) b.destroy_texture(textures.front());
+        if (textures.size()>1) b.destroy_texture(textures.back());
+        b.wait_idle();
+        AUREA_CHECK_EQ(b.allocator().used_bytes(),baseUsed);
+        AUREA_CHECK_EQ(b.allocator().reserved_bytes(),baseReserved);
+    }
+}
+#endif
+
 #define AUREA_REQUIRE_GPU()                                            \
     do {                                                               \
         if (!gpu().ok) {                                               \

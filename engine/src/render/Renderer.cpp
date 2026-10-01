@@ -898,6 +898,9 @@ void Renderer::forget_device() noexcept {
 
 void Renderer::release_project_resources() noexcept {
     if (!backend_) return;
+    // Called between frames under the engine's render mutex. Complete the old
+    // project's submissions before releasing their imported images/buffers.
+    backend_->wait_idle();
     pool_.clear();
     for (auto& [k, p] : planar_) {
         for (TextureHandle& t : p.plane) if (t.valid()) backend_->destroy_texture(t);
@@ -928,6 +931,9 @@ void Renderer::release_project_resources() noexcept {
     particleExtraBufs_.release(*backend_);
     particleStatics_.clear();
     scene3d_.release_all();
+    // Backends may defer destruction even after the first wait. Drain those
+    // releases now, so the next project does not overlap the old one's VRAM.
+    backend_->wait_idle();
 }
 
 PreviewQuality Renderer::effective_quality(const RenderSettings& s) noexcept {

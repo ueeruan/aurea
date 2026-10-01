@@ -1088,7 +1088,8 @@ private struct TextPanelView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ZStack(alignment: .topLeading) {
                             if content.isEmpty { Text(AureaText.t("panel_digite_texto")).font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 12).padding(.vertical, 10).allowsHitTesting(false) }
-                            NativeTextInput(text: $content, selection: $selection, editing: $editing, editable: false) { _ in }
+                            NativeTextInput(text: $content, selection: $selection, editing: $editing, editable: false,
+                                alignment: (model.engine.text(forLayer: layerId)?["alignment"] as? NSNumber)?.intValue ?? 0) { _ in }
                         }.frame(minHeight: 56).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
                         if selection.length > 0 { spanTools.padding(.top, 6) }
                         Button { dismissEditing(); fonts = model.engine.availableFonts(); showingFonts = true } label: {
@@ -1255,7 +1256,7 @@ private struct TextContentEditor: View {
                 }.frame(minHeight: 44).disabled(!valid).accessibilityIdentifier("text.content.done")
             }
             NativeTextInput(text: $content, selection: $selection, editing: $editing,
-                            autoFocus: true, selectAllOnFocus: request.selectAll, scrollable: true) { _ in failed = false }
+                            autoFocus: true, selectAllOnFocus: request.selectAll, scrollable: true, alignment: request.alignment) { _ in failed = false }
                 .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
                 .accessibilityIdentifier("text.content.input")
             if !valid { Text(AureaText.t("text_content_3d_required")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
@@ -1290,12 +1291,14 @@ private struct NativeTextInput: UIViewRepresentable {
     var autoFocus = false
     var selectAllOnFocus = false
     var scrollable = false
+    var alignment = 0
+    private var nativeAlignment: NSTextAlignment { alignment == 1 ? .center : (alignment == 2 ? .right : .left) }
     let onChange: (String) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UITextView {
         let view = FocusedContentTextView(); view.delegate = context.coordinator; view.isScrollEnabled = scrollable
         view.isEditable = editable; view.wantsInitialFocus = autoFocus; view.selectAllInitially = selectAllOnFocus
-        view.text = text; view.selectedRange = selection
+        view.text = text; view.textAlignment = nativeAlignment; view.selectedRange = selection
         view.backgroundColor = .clear; view.font = .systemFont(ofSize: 15); view.textColor = UIColor(AureaColors.text); view.tintColor = UIColor(AureaColors.accent)
         view.textContainerInset = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12); view.textContainer.lineFragmentPadding = 0
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -1303,6 +1306,7 @@ private struct NativeTextInput: UIViewRepresentable {
     }
     func updateUIView(_ view: UITextView, context: Context) {
         context.coordinator.parent = self
+        view.textAlignment = nativeAlignment
         if view.text != text && view.markedTextRange == nil {
             let old = view.selectedRange; view.text = text
             let start = min(old.location, (text as NSString).length)

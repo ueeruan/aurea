@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,7 +60,8 @@ internal fun TextContentDialog(
                 }
             }
             BasicTextField(value = field, onValueChange = { field = it },
-                textStyle = AureaType.Base.merge(TextStyle(fontSize = 20.sp, color = AureaColors.Text)),
+                textStyle = AureaType.Base.merge(TextStyle(fontSize = 20.sp, color = AureaColors.Text,
+                    textAlign = when (request.alignment) { 1 -> TextAlign.Center; 2 -> TextAlign.Right; else -> TextAlign.Left })),
                 cursorBrush = SolidColor(AureaColors.Accent),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp, max = 240.dp)
                     .background(AureaColors.Chip, RoundedCornerShape(10.dp)).padding(12.dp)

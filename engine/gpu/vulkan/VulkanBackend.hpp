@@ -127,6 +127,9 @@ public:
                                       VkMemoryPropertyFlags preferred, bool dedicated,
                                       const char* debugName) noexcept;
     void free(const Allocation& a) noexcept;
+    /// Release unused slabs after deferred resource destruction. Live block
+    /// indices stay stable because Allocation stores them.
+    void trim_empty_blocks() noexcept;
 
     [[nodiscard]] u64 reserved_bytes() const noexcept { return reserved_; }
     [[nodiscard]] u64 used_bytes() const noexcept { return used_; }

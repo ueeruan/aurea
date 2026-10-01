@@ -897,6 +897,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
 /// porque o `@implementation` nao basta para o emissor da mensagem.
 - (void)onEncoded:(CMSampleBufferRef)sample status:(OSStatus)status flags:(VTEncodeInfoFlags)flags;
 - (void)drainInput:(BOOL)video;
+- (void)scheduleDrainRetry;
 - (void)finishInputIfDrained:(BOOL)video;
 - (void)failLocked:(NSError*)error message:(NSString*)message;
 - (BOOL)healthyLocked;
@@ -924,6 +925,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
     BOOL _audioFinished;
     BOOL _startedSession;
     BOOL _sessionTimeSet;
+    BOOL _drainRetryScheduled; // accessed only on _writerQueue
     int64_t _sessionStartUs;
     int64_t _frameDurationUs;
     uint32_t _width;
@@ -1003,6 +1005,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 - (void)drainInput:(BOOL)video {
     if (![self startWriterIfPossible]) return;
     AVAssetWriterInput* input = video ? _videoInput : _audioInput;
+    if (!input || (video ? _videoFinished : _audioFinished)) return;
     while (input.readyForMoreMediaData) {
         [_state lock];
         NSMutableArray* samples = video ? _videoSamples : _audioSamples;
@@ -1026,9 +1029,28 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         if (!appended) return;
     }
     [_state lock];
-    (void)[self healthyLocked];
+    const BOOL retry = [self healthyLocked] && (video ? _videoSamples.count : _audioSamples.count) > 0;
     [_state unlock];
     [self finishInputIfDrained:video];
+    if (retry) [self scheduleDrainRetry];
+}
+
+/// VT pushes compressed samples asynchronously. A permanently registered pull
+/// callback is called continuously while an input is ready but our FIFO is
+/// empty (including every pause between proxy frames). Wake on sample arrival;
+/// only retry while the writer is applying backpressure. One timer serves both
+/// inputs and never blocks audio behind video on the serial writer queue.
+- (void)scheduleDrainRetry {
+    if (_drainRetryScheduled) return;
+    _drainRetryScheduled = YES;
+    __weak AureaExportHost* weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_MSEC), _writerQueue, ^{
+        AureaExportHost* host = weakSelf;
+        if (!host) return;
+        host->_drainRetryScheduled = NO;
+        [host drainInput:YES];
+        [host drainInput:NO];
+    });
 }
 
 /// MP4 passthrough requires the encoder's actual source format (including its
@@ -1063,10 +1085,8 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
     }
     [_writer startSessionAtSourceTime:CMTimeMake(_sessionStartUs, 1'000'000)];
     _startedSession = YES;
-    __weak AureaExportHost* weakSelf = self;
-    [_videoInput requestMediaDataWhenReadyOnQueue:_writerQueue usingBlock:^{ [weakSelf drainInput:YES]; }];
-    if (_audioInput)
-        [_audioInput requestMediaDataWhenReadyOnQueue:_writerQueue usingBlock:^{ [weakSelf drainInput:NO]; }];
+    // Audio can arrive before VT emits the first compressed video frame.
+    if (_audioInput) dispatch_async(_writerQueue, ^{ [self drainInput:NO]; });
     return YES;
 }
 

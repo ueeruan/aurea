@@ -393,6 +393,7 @@ NS_SWIFT_NAME(AureaEngine)
 
 // --- Keyframes --------------------------------------------------------------
 - (void)insertKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value;
+- (void)autoKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value;
 - (void)deleteKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time NS_SWIFT_NAME(deleteKeyframe(forLayer:property:time:));
 - (void)moveKeyframeForLayer:(long long)layerId property:(uint32_t)property from:(int32_t)from to:(int32_t)to;
 - (void)setKeyframeValueForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value NS_SWIFT_NAME(setKeyframeValue(forLayer:property:time:value:));

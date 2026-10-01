@@ -71,23 +71,37 @@ Reservation MemoryManager::try_reserve(MemoryClass cls, usize bytes) noexcept {
     }
 
     const usize budget = budgets_[idx(cls)].load(std::memory_order_relaxed);
-    const usize usedNow = used_[idx(cls)].load(std::memory_order_relaxed);
-    if (usedNow + bytes <= budget) {
-        commit(cls, bytes);
+    // Checking then fetch_add allowed two decoder/render workers to spend the
+    // same remaining bytes. The reservation itself must be atomic and must
+    // not wrap size_t on 32-bit processes.
+    const auto tryCommit = [&]() noexcept {
+        usize used = used_[idx(cls)].load(std::memory_order_relaxed);
+        while (bytes <= budget && used <= budget - bytes) {
+            if (used_[idx(cls)].compare_exchange_weak(used, used + bytes, std::memory_order_relaxed)) {
+                usize peak = peak_[idx(cls)].load(std::memory_order_relaxed);
+                while (used + bytes > peak && !peak_[idx(cls)].compare_exchange_weak(
+                           peak, used + bytes, std::memory_order_relaxed)) {}
+                return true;
+            }
+        }
+        return false;
+    };
+    if (tryCommit()) {
         return Reservation(this, cls, bytes);
     }
 
     // Não cabe. Antes de recusar, pede aos caches da MESMA categoria que
     // liberem. (Antes da Fase 8 o pedido ia a todas as categorias: soltava
     // miniatura para "abrir espaço" num contador de quadros que não mudava.)
-    const usize needed = usedNow + bytes - budget;
+    const usize usedNow = used_[idx(cls)].load(std::memory_order_relaxed);
+    const usize needed = bytes > budget ? kReclaimAll
+        : usedNow > budget - bytes ? usedNow - (budget - bytes) : 0;
     (void)reclaim_class(cls, needed);
 
-    const usize usedAfter = used_[idx(cls)].load(std::memory_order_relaxed);
-    if (usedAfter + bytes <= budget) {
-        commit(cls, bytes);
+    if (tryCommit()) {
         return Reservation(this, cls, bytes);
     }
+    const usize usedAfter = used_[idx(cls)].load(std::memory_order_relaxed);
 
     rejections_.fetch_add(1, std::memory_order_relaxed);
     AUREA_LOG_WARN("orcamento de %s recusou %llu bytes (usado %llu de %llu)",

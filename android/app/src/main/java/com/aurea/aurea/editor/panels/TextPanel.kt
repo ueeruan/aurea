@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.TextFieldValue
 import com.aurea.aurea.ui.ds.AureaToggle
 import androidx.compose.ui.text.font.FontWeight
@@ -42,6 +43,7 @@ import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.ColorWell
 import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.ui.ds.TickRuler
+import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.ValueBox
 import com.aurea.aurea.ui.ds.valueDrag
 import com.aurea.aurea.ui.theme.AureaColors
@@ -81,7 +83,8 @@ internal fun TextPanel(env: PanelEnv) {
                     field = it.copy(text = td.content)
                 },
                 readOnly = true, // selection stays available for rich text styling; no keyboard here
-                textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text)),
+                textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text,
+                    textAlign = when (td.alignment) { 1 -> TextAlign.Center; 2 -> TextAlign.Right; else -> TextAlign.Left })),
                 cursorBrush = SolidColor(AureaColors.Accent),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -117,7 +120,7 @@ internal fun TextPanel(env: PanelEnv) {
             )
             Text("  ›", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
         }
-        TextRuler(store, stringResource(R.string.panel_tamanho), { store.textDetail?.size ?: 72f }, "${td.size.roundToInt()} px", 0.5f, 4f, 1000f, stringResource(R.string.panel_tamanho_texto)) {
+        TextRuler(env, stringResource(R.string.panel_tamanho), { store.textDetail?.size ?: 72f }, "${td.size.roundToInt()} px", 0.5f, 4f, 1000f, stringResource(R.string.panel_tamanho_texto)) {
             store.setTextSize(it)
         }
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -152,7 +155,7 @@ internal fun TextPanel(env: PanelEnv) {
                     onDone = { store.endGesture() }))
             }
         }
-        TextRuler(store, stringResource(R.string.panel_largura_contorno), { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
+        TextRuler(env, stringResource(R.string.panel_largura_contorno), { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
             0.1f, 0f, 60f, stringResource(R.string.panel_contorno_texto)) { store.setTextStrokeWidth(it) }
         TextStyleSections(env)
         TextPathSection(env)
@@ -176,11 +179,11 @@ private fun TextStyleSections(env: PanelEnv) {
     val st by remember(store) { derivedStateOf { store.textStyle } }
     val v = st ?: return
     if (v.size >= 20) {
-        TextRuler(store, stringResource(R.string.text_line_spacing), { (store.textStyle?.get(18) ?: 1.2f) * 100 },
+        TextRuler(env, stringResource(R.string.text_line_spacing), { (store.textStyle?.get(18) ?: 1.2f) * 100 },
             "${(v[18] * 100).roundToInt()}%", 0.5f, 10f, 1000f, stringResource(R.string.text_line_spacing)) {
             store.setTextStyleValue(18, it / 100)
         }
-        TextRuler(store, stringResource(R.string.text_letter_spacing), { store.textStyle?.get(19) ?: 0f },
+        TextRuler(env, stringResource(R.string.text_letter_spacing), { store.textStyle?.get(19) ?: 0f },
             "${v[19].roundToInt()} px", 0.25f, -1000f, 1000f, stringResource(R.string.text_letter_spacing)) {
             store.setTextStyleValue(19, it)
         }
@@ -199,11 +202,11 @@ private fun TextStyleSections(env: PanelEnv) {
         }
     }
     if (v[0] >= 1f) {
-        TextRuler(store, stringResource(R.string.panel_largura_caixa), { store.textStyle?.get(1) ?: 800f }, "${v[1].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_largura_caixa_4a83)) {
+        TextRuler(env, stringResource(R.string.panel_largura_caixa), { store.textStyle?.get(1) ?: 800f }, "${v[1].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_largura_caixa_4a83)) {
             store.setTextStyleValue(1, it)
         }
         if (v[0] >= 2f) {
-            TextRuler(store, stringResource(R.string.panel_altura_caixa), { store.textStyle?.get(2) ?: 200f }, "${v[2].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_altura_caixa_0cec)) {
+            TextRuler(env, stringResource(R.string.panel_altura_caixa), { store.textStyle?.get(2) ?: 200f }, "${v[2].roundToInt()} px", 2f, 10f, 20000f, stringResource(R.string.panel_altura_caixa_0cec)) {
                 store.setTextStyleValue(2, it)
             }
         }
@@ -222,10 +225,10 @@ private fun TextStyleSections(env: PanelEnv) {
         AureaToggle(checked = v[3] > 0.5f, onCheckedChange = { store.setTextStyleValue(3, if (it) 1f else 0f) })
     }
     if (v[3] > 0.5f) {
-        TextRuler(store, stringResource(R.string.panel_margem_fundo), { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_margem_fundo_276c)) {
+        TextRuler(env, stringResource(R.string.panel_margem_fundo), { store.textStyle?.get(8) ?: 14f }, "${v[8].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_margem_fundo_276c)) {
             store.setTextStyleValue(8, it)
         }
-        TextRuler(store, stringResource(R.string.panel_cantos_arredondados), { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_raio_fundo)) {
+        TextRuler(env, stringResource(R.string.panel_cantos_arredondados), { store.textStyle?.get(9) ?: 10f }, "${v[9].roundToInt()} px", 0.2f, 0f, 500f, stringResource(R.string.panel_raio_fundo)) {
             store.setTextStyleValue(9, it)
         }
     }
@@ -242,15 +245,15 @@ private fun TextStyleSections(env: PanelEnv) {
         AureaToggle(checked = v[10] > 0.5f, onCheckedChange = { store.setTextStyleValue(10, if (it) 1f else 0f) })
     }
     if (v[10] > 0.5f) {
-        TextRuler(store, stringResource(R.string.panel_distancia_x), { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_x)) { store.setTextStyleValue(15, it) }
-        TextRuler(store, stringResource(R.string.panel_distancia_y), { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_y)) { store.setTextStyleValue(16, it) }
-        TextRuler(store, stringResource(R.string.panel_desfoque), { store.textStyle?.get(17) ?: 6f }, "${v[17].roundToInt()} px", 0.1f, 0f, 200f, stringResource(R.string.panel_desfoque_sombra)) { store.setTextStyleValue(17, it) }
+        TextRuler(env, stringResource(R.string.panel_distancia_x), { store.textStyle?.get(15) ?: 4f }, "${v[15].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_x)) { store.setTextStyleValue(15, it) }
+        TextRuler(env, stringResource(R.string.panel_distancia_y), { store.textStyle?.get(16) ?: 6f }, "${v[16].roundToInt()} px", 0.2f, -500f, 500f, stringResource(R.string.panel_sombra_y)) { store.setTextStyleValue(16, it) }
+        TextRuler(env, stringResource(R.string.panel_desfoque), { store.textStyle?.get(17) ?: 6f }, "${v[17].roundToInt()} px", 0.1f, 0f, 200f, stringResource(R.string.panel_desfoque_sombra)) { store.setTextStyleValue(17, it) }
     }
 }
 
 @Composable
 private fun TextRuler(
-    store: EditorStore,
+    env: PanelEnv,
     label: String,
     value: () -> Float,
     text: String,
@@ -260,6 +263,7 @@ private fun TextRuler(
     gesture: String,
     onValue: (Float) -> Unit,
 ) {
+    val store = env.store
     PropertyCustomRow(label, selected = false, onSelect = {}) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f).height(40.dp)) {
@@ -280,7 +284,11 @@ private fun TextRuler(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            ValueBox(text, onTap = null)
+            ValueBox(text, onTap = {
+                env.openKeypad(KeypadRequest(label, value(), if (text.endsWith("%")) "%" else "px", min, max, 1) {
+                    store.beginGesture(gesture); onValue(it.coerceIn(min, max)); store.endGesture()
+                })
+            })
         }
     }
 }

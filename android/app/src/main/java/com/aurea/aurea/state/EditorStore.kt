@@ -2488,7 +2488,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (properties.isEmpty() || changes.keys.any { it !in properties }) return false
         val values = properties.map { changes[it] ?: transformValue(d, it) }
         group("keyframe XYZ") { properties.forEachIndexed { axis, property ->
-            insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), values[axis])
+            autoKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), values[axis])
         } }
         return true
     }
@@ -2499,7 +2499,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = (if (id == primary) detail else detailOf(id)) ?: return
         group("scale XYZ") {
             when (transformWrite(sceneEditor, autoKeyTransforms, (3..5).any { d.isAnimated(it) })) {
-                TransformWrite.Keyframe -> (0..2).forEach { insertKeyframe(id, 3 + it, NO_EFFECT, 0, d.localFrame(playhead), values[it]) }
+                TransformWrite.Keyframe -> (0..2).forEach { autoKeyframe(id, 3 + it, NO_EFFECT, 0, d.localFrame(playhead), values[it]) }
                 TransformWrite.Layout -> (0..2).forEach { layoutTransform(id, 3 + it, values[it]) }
                 TransformWrite.Static -> setScale(id, values[0], values[1], values[2])
             }
@@ -2521,7 +2521,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             send {
                 when (transformWrite(sceneEditor, autoKeyTransforms, animated)) {
                     // Como `setScale3`: o vetor inteiro no cabeçote (Z incluso).
-                    TransformWrite.Keyframe -> (0..2).forEach { insertKeyframe(id, base + it, NO_EFFECT, 0, d.localFrame(playhead), values[it]) }
+                    TransformWrite.Keyframe -> (0..2).forEach { autoKeyframe(id, base + it, NO_EFFECT, 0, d.localFrame(playhead), values[it]) }
                     TransformWrite.Layout -> (0..2).forEach { layoutTransform(id, base + it, values[it]) }
                     TransformWrite.Static ->
                         if (base == TrackProperty.ANCHOR_X) setAnchor(id, values[0], values[1], values[2])
@@ -2543,7 +2543,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         d ?: return
         if (d.isAnimated(property)) {
-            send { insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), value) }
+            send { autoKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), value) }
         } else {
             send {
                 when (property) {
@@ -2581,8 +2581,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         d ?: return
         send {
             if (animated) {
-                insertKeyframe(id, pa, NO_EFFECT, 0, d.localFrame(playhead), va)
-                insertKeyframe(id, pb, NO_EFFECT, 0, d.localFrame(playhead), vb)
+                autoKeyframe(id, pa, NO_EFFECT, 0, d.localFrame(playhead), va)
+                autoKeyframe(id, pb, NO_EFFECT, 0, d.localFrame(playhead), vb)
             } else if (pa == TrackProperty.POSITION_X && pb == TrackProperty.POSITION_Y) {
                 setPosition(id, va, vb, d.position[2])
             } else if (pa == TrackProperty.SCALE_X && pb == TrackProperty.SCALE_Y) {
@@ -3067,7 +3067,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return id
     }
 
-    data class TextContentRequest(val layerId: Long, val content: String, val is3D: Boolean, val selectAll: Boolean)
+    data class TextContentRequest(val layerId: Long, val content: String, val is3D: Boolean, val selectAll: Boolean, val alignment: Int = 0)
     var textContentRequest by mutableStateOf<TextContentRequest?>(null)
         private set
 
@@ -3080,7 +3080,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         typingHandler.removeCallbacks(closeTyping)
         closeTyping.run()
         val content = text3d?.content ?: textDetail?.content ?: return
-        textContentRequest = TextContentRequest(id, content, text3d != null, selectAll)
+        textContentRequest = TextContentRequest(id, content, text3d != null, selectAll, textDetail?.alignment ?: 0)
     }
 
     fun dismissTextContentEditor() { textContentRequest = null }
@@ -3315,7 +3315,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val property = base + axis
                 // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote.
                 if (transformWrite(sceneEditor, autoKeyTransforms, d.isAnimated(property)) == TransformWrite.Keyframe) {
-                    insertKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), out[axis])
+                    autoKeyframe(id, property, NO_EFFECT, 0, d.localFrame(playhead), out[axis])
                 } else layoutTransform(id, property, out[axis])
             }
         }

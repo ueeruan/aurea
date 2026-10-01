@@ -22,7 +22,7 @@ struct TextAppearanceControls: View {
     private func components(_ key: String) -> [Float] { let v = (text[key] as? [NSNumber] ?? []).map(\.floatValue); return v.count >= 4 ? v : [1, 1, 1, 1] }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            NativePanelRuler(label: AureaText.t("panel_tamanho"), value: value("size", 72), step: 0.5, range: 4...1000, unit: "px") { model.engine.setText(id, size: $0); refresh() }
+            NativePanelRuler(label: AureaText.t("panel_tamanho"), value: value("size", 72), step: 0.5, range: 4...1000, unit: "px", keypad: true) { model.engine.setText(id, size: $0); refresh() }
             colorRow("panel_cor", values: components("color")) { color("color", "panel_cor") }
             HStack(spacing: 6) {
                 Text(AureaText.t("panel_alinhamento")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
@@ -32,7 +32,7 @@ struct TextAppearanceControls: View {
             }.frame(height: 48)
             section("panel_contorno")
             colorRow("panel_cor_contorno", values: components("strokeColor")) { color("strokeColor", "panel_cor_contorno") }
-            NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px") { model.engine.setText(id, strokeWidth: $0); refresh() }
+            NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px", keypad: true) { model.engine.setText(id, strokeWidth: $0); refresh() }
             if style.count >= 20 { styleSections }
             NativeTextPathSection()
             TextAnimationSection()
@@ -41,7 +41,7 @@ struct TextAppearanceControls: View {
     }
     private var styleSections: some View {
         VStack(alignment: .leading, spacing: 0) {
-            NativePanelRuler(label: AureaText.t("text_line_spacing"), value: style[18] * 100, step: 0.5, range: 10...1000, unit: "%") { set(18, $0 / 100) }
+            NativePanelRuler(label: AureaText.t("text_line_spacing"), value: style[18] * 100, step: 0.5, range: 10...1000, unit: "%", keypad: true) { set(18, $0 / 100) }
             styleRow("text_letter_spacing", 19, 0.25, -1000...1000)
             section("panel_caixa")
             ScrollView(.horizontal, showsIndicators: false) {
@@ -70,7 +70,7 @@ struct TextAppearanceControls: View {
     }
     private func section(_ key: String) -> some View { Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6) }
     private func styleRow(_ key: String, _ slot: Int, _ step: Float, _ range: ClosedRange<Float>) -> some View {
-        NativePanelRuler(label: AureaText.t(key), value: style[slot], step: step, range: range, unit: "px") { set(slot, $0) }
+        NativePanelRuler(label: AureaText.t(key), value: style[slot], step: step, range: range, unit: "px", keypad: true) { set(slot, $0) }
     }
     private func styleToggle(_ key: String, enabled: Int, color: Int) -> some View {
         HStack(spacing: 10) {

@@ -339,6 +339,11 @@ public:
 
     /// Bytes que o MemoryManager pode orçar no total.
     [[nodiscard]] u64 memory_budget_bytes() const noexcept;
+    /// 32-bit processes cannot use all the physical RAM reported by Android.
+    /// Leave address space for the VM/UI, codecs, drivers and fragmentation.
+    [[nodiscard]] static constexpr u64 process_budget_limit(u64 budget, u32 addressBits = sizeof(void*) * 8) noexcept {
+        return addressBits <= 32 && budget > (256ull << 20) ? (256ull << 20) : budget;
+    }
 
     /// Soma de tudo que foi detectado, para o painel de telemetria.
     [[nodiscard]] std::string summary() const;

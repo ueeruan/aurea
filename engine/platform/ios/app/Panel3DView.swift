@@ -355,24 +355,36 @@ struct Panel3DView: View {
     private func textRuler(_ label: String, key: String, step: Float, min: Float, max: Float,
                            shown: String, gesture: String) -> some View {
         ruler(AureaText.t(label), value: number(key), step: step, min: min, max: max,
-              shown: shown, gesture: gesture) { lazyNumber(key, $0) }
+              shown: shown, gesture: gesture, displayScale: key == "bevelWidth" || key == "bevelDepth" ? 1000 : 100) { lazyNumber(key, $0) }
     }
     private func ruler(_ label: String, value: Float, step: Float, min: Float, max: Float,
-                       shown: String, gesture: String, onValue: @escaping (Float) -> Void) -> some View {
+                       shown: String, gesture: String, displayScale: Float? = nil, onValue: @escaping (Float) -> Void) -> some View {
         PropertyCustomRow(label, selected: false, onSelect: {}) {
             HStack(spacing: 8) {
                 TickRuler(value: { value }, unitsPerDp: step, active: true)
                     .frame(maxWidth: .infinity)
                     .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: min, max: max,
                                onStart: { beginContinuous(gesture) }, onValue: onValue, onEnd: finishEditing)
-                // The source explicitly has onTap = null for 3D/environment values.
-                ValueBox(shown)
+                ValueBox(shown, onTap: {
+                    let scale: Float = displayScale ?? (shown.hasSuffix("%") ? 100 : 1)
+                    model.numericKeypad = KeypadRequest(title: label, value: value * scale,
+                        unit: shown.hasSuffix("%") ? "%" : (shown.hasSuffix("°") ? "°" : ""),
+                        min: min * scale, max: max * scale, decimals: 1) { entered in
+                        beginContinuous(gesture)
+                        onValue((entered / scale).clamped(to: min...max))
+                        finishEditing()
+                    }
+                })
             }
         }
     }
 
     private func number(_ key: String) -> Float { (text3D[key] as? NSNumber)?.floatValue ?? 0 }
-    private func objectNumber(_ index: Int) -> Float { objectEnvironment[index].floatValue }
+    private func objectNumber(_ index: Int) -> Float {
+        // A selection refresh may clear the query while a gesture is ending.
+        guard objectEnvironment.indices.contains(index) else { return index == 2 || index == 4 ? 1 : 0 }
+        return objectEnvironment[index].floatValue
+    }
     private func rounded(_ value: Float) -> Int { Int(floor(Double(value) + 0.5)) }
     private func percent(_ value: Float) -> String { "\(rounded(value * 100))%" }
 

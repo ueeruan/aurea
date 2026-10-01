@@ -412,6 +412,7 @@ final class AureaModel: ObservableObject {
         let content: String
         let is3D: Bool
         let selectAll: Bool
+        var alignment: Int = 0
     }
     @Published var textContentRequest: TextContentRequest?
 
@@ -422,7 +423,8 @@ final class AureaModel: ObservableObject {
         let recipe = engine.text3D(forLayer: id) ?? [:]
         let is3D = !recipe.isEmpty
         guard let content = (is3D ? recipe : (engine.text(forLayer: id) ?? [:]))["content"] as? String else { return }
-        textContentRequest = TextContentRequest(id: id, content: content, is3D: is3D, selectAll: selectAll)
+        textContentRequest = TextContentRequest(id: id, content: content, is3D: is3D, selectAll: selectAll,
+            alignment: (engine.text(forLayer: id)?["alignment"] as? NSNumber)?.intValue ?? 0)
     }
 
     func commitTextContent(_ request: TextContentRequest, content: String) -> Bool {
@@ -1666,7 +1668,8 @@ final class AureaModel: ObservableObject {
             refreshModel(force: true); return
         }
         if keyed {
-            keyProperty(property, value: value)
+            mutate { $0.autoKeyframe(forLayer: id, property: property, time: localPlayhead, value: value) }
+            refreshModel(force: true)
             return
         }
         func vector(_ key: String) -> [Float] { (detail[key] as? [NSNumber] ?? []).map(\.floatValue) }
@@ -2554,7 +2557,7 @@ final class AureaModel: ObservableObject {
                 let property = base + UInt32(axis)
                 // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote.
                 if autoKeyTransforms && animated & (UInt32(1) << property) != 0 {
-                    core.insertKeyframe(forLayer: id, property: property, time: local, value: next[axis])
+                    core.autoKeyframe(forLayer: id, property: property, time: local, value: next[axis])
                 } else { core.layoutTransform(id, property: property, value: next[axis]) }
             }
         }
@@ -3264,7 +3267,7 @@ final class AureaModel: ObservableObject {
         let values = (0..<3).map { changes[base + UInt32($0)] ?? current[$0] }
         mutate { core in
             core.beginUndoGroup()
-            for axis in 0..<3 { core.insertKeyframe(forLayer: id, property: base + UInt32(axis), time: local, value: values[axis]) }
+            for axis in 0..<3 { core.autoKeyframe(forLayer: id, property: base + UInt32(axis), time: local, value: values[axis]) }
             core.endUndoGroup()
         }
         refreshSelectedLayer()
@@ -3286,7 +3289,7 @@ final class AureaModel: ObservableObject {
                 if transformLayout(animated: keyed) {
                     for axis in 0..<3 { core.layoutTransform(layer, property: base + UInt32(axis), value: values[axis]) }
                 } else if keyed {
-                    for axis in 0..<3 { core.insertKeyframe(forLayer: layer, property: base + UInt32(axis), time: local, value: values[axis]) }
+                    for axis in 0..<3 { core.autoKeyframe(forLayer: layer, property: base + UInt32(axis), time: local, value: values[axis]) }
                 } else if base == 9 {
                     core.setAnchor(forLayer: layer, x: values[0], y: values[1], z: values[2])
                 } else {
@@ -3312,7 +3315,7 @@ final class AureaModel: ObservableObject {
         let anchor = StageGeom.floats(d["anchor"])
         func component(_ values: [Float], _ index: Int) -> Float { values.count > index ? values[index] : 0 }
         if property < 32 && animated & (1 << property) != 0 {
-            mutate { engine in engine.insertKeyframe(forLayer: layer, property: property, time: local, value: value) }
+            mutate { engine in engine.autoKeyframe(forLayer: layer, property: property, time: local, value: value) }
         } else {
             mutate { engine in
                 switch property {
@@ -3352,8 +3355,8 @@ final class AureaModel: ObservableObject {
         func component(_ values: [Float], _ index: Int) -> Float { values.count > index ? values[index] : 0 }
         mutate { engine in
             if isAnimated {
-                engine.insertKeyframe(forLayer: layer, property: pa, time: local, value: va)
-                engine.insertKeyframe(forLayer: layer, property: pb, time: local, value: vb)
+                engine.autoKeyframe(forLayer: layer, property: pa, time: local, value: va)
+                engine.autoKeyframe(forLayer: layer, property: pb, time: local, value: vb)
             } else if pa == 0 && pb == 1 {
                 engine.setPosition(forLayer: layer, x: va, y: vb, z: component(position, 2))
             } else if pa == 3 && pb == 4 {

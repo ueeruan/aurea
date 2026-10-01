@@ -335,10 +335,12 @@ final class AureaModel: ObservableObject {
     func animatorRailTrack() -> TimelineTrack? {
         guard let id = primarySelection else { return nil }
         let count = engine.layerAnimators(id).count / 32
-        let saved = transformAnimatorLayer == id ? transformAnimatorFocus : nil
-        return [timelineFocus?.first, saved].compactMap { $0 }.first {
-            $0.property == 40 && Int($0.effect) < count && $0.param < 18
-        } ?? (count > 0 ? TimelineTrack(property: 40, effect: 0, param: 0) : nil)
+        if let focused = timelineFocus?.first, focused.property == 40,
+           Int(focused.effect) < count, focused.param < 18 { return focused }
+        if transformAnimatorLayer == id, let saved = transformAnimatorFocus,
+           saved.property == 40, Int(saved.effect) < count, saved.param < 18 { return saved }
+        if count > 0 { return TimelineTrack(property: 40, effect: 0, param: 0) }
+        return nil
     }
     @Published var curveSelectedTime: Int32?
     @Published var captionOptions: [String: NSNumber] = [:]

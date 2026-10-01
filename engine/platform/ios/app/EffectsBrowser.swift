@@ -195,7 +195,9 @@ struct EffectPickerView: View {
 
     private var pickable: [EffectCatalogItem] {
         fxPickableEffects(model.effectCatalog, layerHasAudio: layerHasAudio).filter {
-            model.selectedLayer?.kind == 4 || $0.typeId != fxEffectTypeId("aurea.text.transform")
+            (model.selectedLayer?.kind == 4 || $0.typeId != fxEffectTypeId("aurea.text.transform")) &&
+            (model.selectedLayer?.kind == 4 || $0.typeId != fxEffectTypeId("aurea.text.animator") ||
+                !(model.engine.text3D(forLayer: model.primarySelection ?? 0) ?? [:]).isEmpty)
         }
     }
 

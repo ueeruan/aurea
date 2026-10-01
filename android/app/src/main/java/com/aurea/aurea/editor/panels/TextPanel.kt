@@ -175,6 +175,16 @@ private fun TextStyleSections(env: PanelEnv) {
     val store = env.store
     val st by remember(store) { derivedStateOf { store.textStyle } }
     val v = st ?: return
+    if (v.size >= 20) {
+        TextRuler(store, stringResource(R.string.text_line_spacing), { (store.textStyle?.get(18) ?: 1.2f) * 100 },
+            "${(v[18] * 100).roundToInt()}%", 0.5f, 10f, 1000f, stringResource(R.string.text_line_spacing)) {
+            store.setTextStyleValue(18, it / 100)
+        }
+        TextRuler(store, stringResource(R.string.text_letter_spacing), { store.textStyle?.get(19) ?: 0f },
+            "${v[19].roundToInt()} px", 0.25f, -1000f, 1000f, stringResource(R.string.text_letter_spacing)) {
+            store.setTextStyleValue(19, it)
+        }
+    }
     Spacer(Modifier.height(6.dp))
     Text(stringResource(R.string.panel_caixa), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

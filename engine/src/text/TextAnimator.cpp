@@ -5,11 +5,117 @@
 
 #include "aurea/timeline/Layer.hpp"
 #include "aurea/expr/Expression.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
+#include <array>
 
 #include <algorithm>
 #include <cmath>
 
 namespace aurea::text {
+
+void declare_animator_effect_params(ParameterRegistry& p) {
+    constexpr u16 pct = kParamAnimatable | kParamPercent;
+    p.add_float("start", "Início", 0, -100, 200, pct, "%");
+    p.add_float("end", "Fim", 100, -100, 200, pct, "%");
+    p.add_float("offset", "Deslocamento do seletor", 0, -200, 200, pct, "%");
+    p.add_float("amount", "Intensidade", 100, -100, 100, pct, "%");
+    static const char* units[] = {"Letra", "Palavra", "Linha"};
+    p.add_enum("unit", "Unidade", units, 3, 0);
+    static const char* shapes[] = {"Quadrada", "Rampa crescente", "Rampa decrescente", "Triângulo", "Redonda", "Suave"};
+    p.add_enum("shape", "Forma do seletor", shapes, 6, 0);
+    p.add_float("ease_high", "Suavizar máximo", 0, 0, 100, pct, "%");
+    p.add_float("ease_low", "Suavizar mínimo", 0, 0, 100, pct, "%");
+    p.add_bool("random_order", "Ordem aleatória", false);
+    p.add_int("seed", "Semente", 1, 0, 9999);
+    static const char* selectors[] = {"Alcance", "Oscilação aleatória"};
+    p.add_enum("selector", "Seletor", selectors, 2, 0);
+    p.add_float("wiggle_rate", "Frequência da oscilação", 2, 0, 30, kParamAnimatable, "Hz");
+    p.add_point3("position", "Posição", {}, -2000, 2000);
+    p.add_point2("scale", "Escala", {100, 100}, 0, 1000, pct);
+    p.add_point3("rotation", "Rotação", {}, -1800, 1800);
+    p.add_float("opacity", "Opacidade", 100, 0, 100, pct, "%");
+    p.add_float("blur", "Desfoque", 0, 0, 100, kParamAnimatable | kParamPixels, "px");
+    p.add_float("tracking", "Espaçamento entre letras", 0, -200, 200, kParamAnimatable | kParamPixels, "px");
+    p.add_angle("skew", "Inclinação", 0, -80, 80);
+    p.add_float("stroke_width", "Largura do contorno", 0, 0, 60, kParamAnimatable | kParamPixels, "px");
+    p.add_bool("fill_enabled", "Substituir cor do preenchimento", false);
+    p.add_color("fill_color", "Cor do preenchimento", {1, 1, 1, 1});
+    p.add_bool("stroke_enabled", "Substituir cor do contorno", false);
+    p.add_color("stroke_color", "Cor do contorno", {0, 0, 0, 1});
+}
+
+namespace {
+std::array<ParamValue, aeCount> animator_values(const Layer& layer, const EffectInstance& fx, f64 time) {
+    static const ParameterRegistry specs = [] { ParameterRegistry p; declare_animator_effect_params(p); return p; }();
+    std::array<ParamValue, aeCount> values{};
+    const auto frame = static_cast<i64>(std::floor(time));
+    const f32 blend = static_cast<f32>(time - frame);
+    for (u32 p = 0; p < aeCount; ++p) {
+        values[p] = evaluate_param(layer.tracks, fx, p, specs.at(p), FrameIndex{frame});
+        if (blend > 0 && specs.at(p).animatable()) {
+            const auto next = evaluate_param(layer.tracks, fx, p, specs.at(p), FrameIndex{frame + 1});
+            for (u32 c = 0; c < component_count(specs.at(p).type); ++c) values[p].v[c] += (next.v[c] - values[p].v[c]) * blend;
+        }
+    }
+    return values;
+}
+}
+
+bool has_animator_effect(const Layer& layer) noexcept {
+    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorEffect)) return true;
+    return false;
+}
+
+f32 animator_effect_padding(const Layer& layer, f64 time, f32 size, u32 chars) {
+    f32 pad = 0;
+    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorEffect)) {
+        const auto v = animator_values(layer, fx, time);
+        pad += std::max({std::fabs(v[aePosition].v[0]), std::fabs(v[aePosition].v[1]), std::fabs(v[aePosition].v[2])});
+        pad += size * std::max(0.f, std::max(v[aeScale].v[0], v[aeScale].v[1]) / 100 - 1) + v[aeBlur].v[0] * 2 + v[aeStrokeWidth].v[0];
+        if (v[aeRotation].v[0] || v[aeRotation].v[1] || v[aeRotation].v[2] || v[aeSkew].v[0]) pad += size;
+        pad += std::fabs(v[aeTracking].v[0]) * std::min(chars, 200u);
+    }
+    return std::min(pad, 4000.f);
+}
+
+void evaluate_animator_effects(const Layer& layer, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
+                              u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out) {
+    if (out.size() != units.size()) out.resize(units.size());
+    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorEffect)) {
+        const auto v = animator_values(layer, fx, time);
+        TextData t; t.size = layer.text.size;
+        TextAnimator a;
+        a.selector.start = v[aeStart].v[0]; a.selector.end = v[aeEnd].v[0]; a.selector.offset = v[aeOffset].v[0];
+        a.selector.amount = v[aeAmount].v[0]; a.selector.basedOn = v[aeUnit].as_enum(); a.selector.shape = v[aeShape].as_enum();
+        a.selector.easeHigh = v[aeEaseHigh].v[0]; a.selector.easeLow = v[aeEaseLow].v[0];
+        a.selector.randomOrder = v[aeRandom].as_bool(); a.selector.seed = static_cast<u32>(v[aeSeed].v[0]);
+        a.selector.type = v[aeSelector].as_enum(); a.selector.wiggleRate = v[aeWiggleRate].v[0];
+        a.props = kTextPropPosition | kTextPropScale | kTextPropRotation | kTextPropOpacity | kTextPropBlur |
+                  kTextPropTracking | kTextPropSkew | kTextPropStrokeWidth;
+        a.position = v[aePosition].as_vec3(); a.scale = v[aeScale].as_vec2(); a.rotation = v[aeRotation].as_vec3();
+        a.opacity = v[aeOpacity].v[0]; a.blur = v[aeBlur].v[0]; a.tracking = v[aeTracking].v[0];
+        a.skew = v[aeSkew].v[0]; a.strokeWidth = v[aeStrokeWidth].v[0];
+        a.fill = v[aeFill].as_color(); a.stroke = v[aeStroke].as_color();
+        if (v[aeFillOn].as_bool()) a.props |= kTextPropFill;
+        if (v[aeStrokeOn].as_bool()) a.props |= kTextPropStroke;
+        t.animators.push_back(a);
+        std::vector<GlyphAnim> addition;
+        evaluate_text_animators(t, TrackSet{}, time, fps, units, chars, words, lines, addition);
+        for (usize i = 0; i < out.size(); ++i) {
+            auto& o = out[i]; const auto& b = addition[i];
+            o.translate = o.translate + b.translate; o.rotation = o.rotation + b.rotation;
+            o.scale.x *= b.scale.x; o.scale.y *= b.scale.y; o.opacity *= b.opacity;
+            o.blur += b.blur; o.trackingShift += b.trackingShift; o.strokeAdd += b.strokeAdd;
+            o.skewTransform = o.skewTransform * b.skewTransform;
+            if (b.fill.w > 0) {
+                const f32 w = b.fill.w, prev = o.fill.w * (1-w), total = w + prev;
+                o.fill = {(b.fill.x*w+o.fill.x*prev)/total, (b.fill.y*w+o.fill.y*prev)/total, (b.fill.z*w+o.fill.z*prev)/total, total};
+                o.fillOpacity += (std::clamp(a.fill.w, 0.f, 1.f) - o.fillOpacity) * w;
+            }
+            if (b.stroke.w > 0) o.stroke = b.stroke;
+        }
+    }
+}
 
 namespace {
 

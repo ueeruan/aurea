@@ -94,8 +94,8 @@ struct PostProcessSettings {
 /// Motion blur da composição (o global; cada layer multiplica por seu próprio).
 struct MotionBlurSettings {
     bool enabled = false;
-    u32  samples = 32;        ///< export
-    u32  previewSamples = 8;  ///< preview
+    u32  samples = 64;        ///< export
+    u32  previewSamples = 16; ///< preview (adaptive budget can reduce this)
     f32  shutterAngle = 180.0f;
     bool vectorBlur = false;  ///< blur baseado em vetores de movimento
 };

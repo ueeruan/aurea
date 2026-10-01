@@ -81,7 +81,10 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.light.deep_glow_2", FxEffectHuman(keywords: "deep glow 2 brilho bloom halo", principal: [0, 1, 2, 3, 13])),
     ("aurea.light.shadow_studio_3", FxEffectHuman(keywords: "shadow studio 3 sombra long radial inner", principal: [0, 1, 2, 3, 4])),
     ("aurea.generate.tracery", FxEffectHuman(keywords: "tracery color detection boxes rastreio cor conexoes", principal: [0, 1, 3, 7, 14], params: [2: FxParamHuman(decimals: 2)])),
-    ("aurea.text.transform", FxEffectHuman(name: "text_transform_name", keywords: "text transform animador texto transformar letras palavras linhas intervalo fase", principal: Array(0...17))),
+    ("aurea.text.transform", FxEffectHuman(name: "text_transform_name", keywords: "text transform texto transformar letras palavras linhas intervalo fase", principal: Array(0...17))),
+    ("aurea.text.animator", FxEffectHuman(name: "text_animator_name", keywords: "text animator animador texto letras palavras linhas cor blur desfoque random aleatorio", principal: Array(0...23))),
+    ("aurea.stylize.bevel_alpha", FxEffectHuman(name: "bevel_alpha_name", keywords: "bevel alpha bisel alfa relevo texto borda", principal: Array(0...4))),
+    ("aurea.color.gradient_map", FxEffectHuman(name: "gradient_map_name", keywords: "gradient map mapa degrade gradiente texto cor", principal: Array(0...4))),
     ("aurea.text3d.layout", FxEffectHuman(keywords: "letter rotation letras rotacao delay atraso cylinder twist random aleatorio",
         principal: [0, 1, 2, 12, 13, 9, 10])),
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).

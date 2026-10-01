@@ -1473,10 +1473,11 @@ void apply_shape3d_layout(const SceneAsset& asset, const Layer& layer, f64 local
 // =============================================================================
 
 void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 localTime, f64 fps, std::vector<Mat4>& nodeWorld,
-                            std::vector<f32>& nodeOpacity) {
+                            std::vector<f32>& nodeOpacity, std::vector<Vec4>* nodeFill) {
     nodeOpacity.clear();
+    if (nodeFill) nodeFill->clear();
     // Formas 3D também: cada parte é uma unidade (textUnits = parte, parte, 0).
-    if ((!asset.textGlyphLayout && !asset.shapeParts) || !layeranim::has_units(layer)) return;
+    if ((!asset.textGlyphLayout && !asset.shapeParts) || (!layeranim::has_units(layer) && !text::has_animator_effect(layer))) return;
     const usize n = std::min(asset.nodes.size(), nodeWorld.size());
     if (n == 0 || asset.textUnits.size() < n * 3) return;
     std::vector<text::GlyphUnits> units(n);
@@ -1485,8 +1486,10 @@ void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 loc
     // A MESMA avaliação das letras do texto 2D (progresso, atraso, curva, saída, wiggle).
     layeranim::apply_to_glyphs(layer, localTime, fps > 0.0 ? fps : 30.0, units, static_cast<u32>(n), std::max(1u, asset.textWords),
                                std::max(1u, asset.textLines), 0.5f, anim);
+    text::evaluate_animator_effects(layer, localTime, fps, units, static_cast<u32>(n), std::max(1u, asset.textWords), std::max(1u, asset.textLines), anim);
     constexpr f32 kPx = 0.01f;   // 100 px do animador = 1 altura de letra
     nodeOpacity.assign(n, 1.0f);
+    if (nodeFill) nodeFill->resize(n);
     for (usize i = 0; i < n; ++i) {
         const text::GlyphAnim& g = anim[i];
         const i32 mesh = asset.nodes[i].mesh;
@@ -1497,8 +1500,10 @@ void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 loc
         // Y do 2D aponta para baixo: X e Z giram ao contrário na cena (Y para cima).
         const Mat4 orient = Mat4::from_quat(Quat::from_euler_zyx(-g.rotation.x * kDeg2Rad, g.rotation.y * kDeg2Rad, -g.rotation.z * kDeg2Rad));
         const Mat4 size = Mat4::scale(Vec3{g.scale.x, g.scale.y, (g.scale.x + g.scale.y) * 0.5f});
-        nodeWorld[i] = Mat4::translation(pivot + move) * orient * size * Mat4::translation(-pivot) * nodeWorld[i];
-        nodeOpacity[i] = std::isfinite(g.opacity) ? std::clamp(g.opacity, 0.0f, 1.0f) : 1.0f;
+        const Mat4 flipY = Mat4::scale({1, -1, 1});
+        nodeWorld[i] = Mat4::translation(pivot + move) * orient * flipY * g.skewTransform * flipY * size * Mat4::translation(-pivot) * nodeWorld[i];
+        nodeOpacity[i] = std::isfinite(g.opacity) ? std::clamp(g.opacity * g.fillOpacity, 0.0f, 1.0f) : 1.0f;
+        if (nodeFill) (*nodeFill)[i] = {srgb_to_linear(g.fill.x), srgb_to_linear(g.fill.y), srgb_to_linear(g.fill.z), g.fill.w};
     }
 }
 

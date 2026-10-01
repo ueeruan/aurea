@@ -461,8 +461,8 @@ public:
     bool set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept;
     /// Estilo de parágrafo (18 floats): modo da caixa, largura, altura, fundo
     /// (liga, rgba, margem, raio), sombra (liga, rgba, dx, dy, desfoque).
-    bool set_text_style(u64 layerId, const f32* in18) noexcept;
-    bool query_text_style(u64 layerId, f32* out18) noexcept;
+    bool set_text_style(u64 layerId, const f32* values, u32 count = 18) noexcept;
+    bool query_text_style(u64 layerId, f32* values, u32 capacity = 18) noexcept;
     /// Estilo de um trecho [start, end) em caracteres: cor (opcional), peso
     /// (0 = o do texto), escala. Substitui o que havia no trecho.
     bool set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 color, u32 weight, f32 scale) noexcept;
@@ -675,6 +675,7 @@ public:
     /// Remapeamento de tempo: ligar cria a curva equivalente ao tempo atual
     /// (nada muda até editar); desligar volta à velocidade (a curva fica guardada).
     bool set_time_remap(u64 layerId, bool on) noexcept;
+    bool set_time_remap_value(u64 layerId, i64 localFrame, f32 sourceFrame) noexcept;
     /// Rampa de velocidade pronta sobre o trecho da fonte atual: 0 linear,
     /// 1 suave (entrada e saída), 2 herói (rápido-lento-rápido), 3 acelerar,
     /// 4 desacelerar, 5 congelar o clipe inteiro no cabeçote, 6 de trás para

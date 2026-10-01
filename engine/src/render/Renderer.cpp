@@ -400,7 +400,7 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
     // Formas 3D: cada parte com o transform das trilhas dela (mesmo caminho no export).
     scene3d::apply_shape3d_parts(asset, l, materialTime, pose.nodeWorld);
     // Animação de texto 3D (animadores por letra/palavra/linha): mesmo caminho no export.
-    scene3d::apply_text3d_animators(asset, l, materialTime, comp.fps(), pose.nodeWorld, inst.nodeOpacity);
+    scene3d::apply_text3d_animators(asset, l, materialTime, comp.fps(), pose.nodeWorld, inst.nodeOpacity, &inst.nodeFill);
     inst.nodeWorld = std::move(pose.nodeWorld);
     inst.jointMatrices = std::move(pose.jointMatrices);
     inst.skinJointOffset = std::move(pose.skinJointOffset);
@@ -1552,7 +1552,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // Animadores de CAMADA por letra/palavra/linha entram no mesmo GlyphAnim.
                 const bool unitAnim = layeranim::has_units(*l);
                 const bool textEffect = effects_ && text::has_transform_effect(*l);
-                const bool animated = text::has_animators(T) || unitAnim || textEffect;
+                const bool animatorEffect = text::has_animator_effect(*l);
+                const bool animated = text::has_animators(T) || unitAnim || textEffect || animatorEffect;
                 // O contorno cabe na distância do atlas (16 px da base × escala).
                 const f32 strokeMax = text::kGlyphSpread * std::max(1.0f, T.size) / text::kGlyphBasePx - 1.0f;
                 const f32 stroke = std::clamp(T.strokeWidth, 0.0f, std::max(0.0f, strokeMax));
@@ -1586,6 +1587,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     pad += std::min(extra, 4000.0f);
                 }
                 if (unitAnim) pad += layeranim::glyph_padding(*l, T.size, T.content.size());
+                if (animatorEffect) pad += text::animator_effect_padding(*l, local.value, T.size, static_cast<u32>(T.content.size()));
                 if (textEffect) {
                     const auto extent = text::measure(*font, T);
                     pad += text::transform_padding(*l, *effects_, static_cast<f64>(local.value), std::max(extent.width, extent.height));
@@ -1620,7 +1622,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const MotionBlurSettings& mb = comp.motion_blur();
                     sets = std::clamp<u32>(settings.finalQuality ? mb.samples
                                                                  : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
-                                           2u, 16u);
+                                           2u, settings.finalQuality ? 64u : 16u);
                     open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0
                          * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
                 }
@@ -1666,6 +1668,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 for (u32 si = 0; si < sets; ++si) {
                     const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? ((static_cast<f64>(si) + 0.5) / static_cast<f64>(sets) - 0.5) * open : 0.0);
                     text::evaluate_text_animators(T, *textTracks, lt, fps, units, L.chars, L.words, L.lines, anim);
+                    if (animatorEffect) text::evaluate_animator_effects(*l, lt, fps, units, L.chars, L.words, L.lines, anim);
                     if (unitAnim) {
                         const f32 align = T.alignment == 1 ? 0.5f : T.alignment == 2 ? 1.0f : 0.0f;
                         layeranim::apply_to_glyphs(*l, lt, fps, units, L.chars, L.words, L.lines, align, anim);
@@ -2153,7 +2156,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                                            * std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f);
                 }
             }
-            EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used], fps);
+            EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used], fps, &comp);
         }
         // FORA DA TELA: a caixa da camada (com o Transform dobrado) não toca a
         // composição e nada na pilha dela pode trazer pixel para dentro (só
@@ -3268,9 +3271,9 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 if (layer.source.vectorBlur > 0.0f) {
                     // Borrão ao longo do vetor de cada pixel, obturador centrado no quadro.
                     const FGTexture blurred = graph_.create_texture("layer-video-desfoque-vetorial", d);
-                    // Amostras: 16 no export; o preview segue o bloco de qualidade (8E).
+                    // Export uses 64 samples; preview follows its adaptive budget.
                     const Vec4 vp{layer.source.vectorBlur, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH),
-                                  static_cast<f32>(std::clamp<u32>(heavyQ_.flowBlurSamples, 4u, 16u))};
+                                  static_cast<f32>(std::clamp<u32>(heavyQ_.flowBlurSamples, 8u, 64u))};
                     ctx.fullscreen_pass("desfoque-vetorial", PassStage::Decode, blurred, ShaderId::video_flow_vblur_frag,
                                         {PassTexture{out.texture}, PassTexture{flow}}, &vp, sizeof(vp));
                     out.texture = blurred;

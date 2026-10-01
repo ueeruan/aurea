@@ -84,8 +84,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.generate.tracery", EffectHuman(keywords = "tracery color detection boxes rastreio cor conexoes",
         principal = listOf(0, 1, 3, 7, 14), params = mapOf(2 to ParamHuman(decimals = 2))))
     put("aurea.text.transform", EffectHuman(name = R.string.text_transform_name,
-        keywords = "text transform animador texto transformar letras palavras linhas intervalo fase",
+        keywords = "text transform texto transformar letras palavras linhas intervalo fase",
         principal = (0..17).toList()))
+    put("aurea.text.animator", EffectHuman(name = R.string.text_animator_name,
+        keywords = "text animator animador texto letras palavras linhas cor blur desfoque random aleatorio",
+        principal = (0..23).toList()))
+    put("aurea.stylize.bevel_alpha", EffectHuman(name = R.string.bevel_alpha_name,
+        keywords = "bevel alpha bisel alfa relevo texto borda", principal = (0..4).toList()))
+    put("aurea.color.gradient_map", EffectHuman(name = R.string.gradient_map_name,
+        keywords = "gradient map mapa degrade gradiente texto cor", principal = (0..4).toList()))
     put("aurea.text3d.layout", EffectHuman(keywords = "letter rotation letras rotacao delay atraso cylinder twist random aleatorio",
         principal = listOf(0, 1, 2, 12, 13, 9, 10)))
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).

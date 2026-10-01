@@ -33,6 +33,7 @@
 #include <vector>
 
 namespace aurea {
+class Composition;
 
 /// Uma etapa do plano.
 struct EffectStage {
@@ -76,7 +77,8 @@ public:
     /// efeitos que precisam de LUT ficam sem ela e o passe fundido a ignora.
     static void plan(const Layer& layer, const EffectRegistry& registry, FrameIndex localTime,
                      f32 texelScale, const LayerPlacement& placement,
-                     EffectResources* resources, EffectPlan& out, f64 framesPerSecond = 30.0);
+                     EffectResources* resources, EffectPlan& out, f64 framesPerSecond = 30.0,
+                     const Composition* composition = nullptr);
 
     /// Declara os passes do plano no FrameGraph e devolve a imagem final da
     /// layer. Sem etapas, devolve a própria entrada.

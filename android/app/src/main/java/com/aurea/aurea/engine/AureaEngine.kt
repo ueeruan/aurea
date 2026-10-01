@@ -545,6 +545,7 @@ class AureaEngine private constructor() {
 
     // Remapeamento de tempo / rampas.
     fun setTimeRemap(layer: Long, on: Boolean): Boolean = nativeSetTimeRemap(nativeHandle, layer, on)
+    fun setTimeRemapValue(layer: Long, frame: Long, value: Float): Boolean = nativeSetTimeRemapValue(nativeHandle, layer, frame, value)
     fun applySpeedRamp(layer: Long, preset: Int): Boolean = nativeApplySpeedRamp(nativeHandle, layer, preset)
 
     // Desfoque de movimento.
@@ -1023,6 +1024,7 @@ class AureaEngine private constructor() {
     private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
     private external fun nativeSetKeepPitch(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetTimeRemapValue(handle: Long, layer: Long, frame: Long, value: Float): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
     private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray, fontPath: String): Boolean

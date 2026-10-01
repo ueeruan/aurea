@@ -144,7 +144,7 @@ void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localT
 /// centro de cada letra) e devolve a opacidade por nó (vazio = nada animado).
 /// Chamado no mesmo lugar do layout: preview, sombras e export.
 void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 localTime, f64 fps, std::vector<Mat4>& nodeWorld,
-                            std::vector<f32>& nodeOpacity);
+                            std::vector<f32>& nodeOpacity, std::vector<Vec4>* nodeFill = nullptr);
 
 /// Presets (dados): 0 Fade, 1 Subir, 2 Cair, 3 Pop, 4 Giro Y, 5 Virar X,
 /// 6 Máquina de escrever, 7 Onda, 8 Cascata 3D, 9 Zoom, 10 Balanço.

@@ -1,5 +1,6 @@
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/timeline/Composition.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -212,13 +213,28 @@ void EffectPlan::clear() noexcept {
 // =============================================================================
 void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, FrameIndex localTime,
                        f32 texelScale, const LayerPlacement& placement,
-                       EffectResources* resources, EffectPlan& out, f64 framesPerSecond) {
+                       EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition) {
     out.clear();
     out.placement = placement;
 
+    struct Source { const Layer* owner; const EffectInstance* effect; FrameIndex time; };
+    std::vector<Source> sources;
+    for (const auto& effect : layer.effects) sources.push_back({&layer, &effect, localTime});
+    const FrameIndex global{localTime.value + layer.start.value - layer.offset.value};
+    // A null has no pixels. Its Motion Tile controls the raster of each child;
+    // sample the null's animation clock, not the child's trimmed/remapped clock.
+    const Layer* parent = composition ? composition->layer(layer.parent) : nullptr;
+    for (u32 depth = 0; parent && parent != &layer && depth < 16; ++depth) {
+        if (parent->kind == LayerKind::Null && parent->contains_time(global))
+            for (const auto& effect : parent->effects)
+                if (effect.type == effect_type_id(effect_keys::kMotionTile))
+                    sources.push_back({parent, &effect, parent->local_time(global)});
+        parent = composition->layer(parent->parent);
+    }
     // 1. Resolve os valores no instante e tira quem não contribui.
-    for (u32 i = 0; i < layer.effects.size(); ++i) {
-        const EffectInstance& inst = layer.effects[i];
+    for (u32 i = 0; i < sources.size(); ++i) {
+        const auto& source = sources[i];
+        const EffectInstance& inst = *source.effect;
         if (!inst.enabled) continue;
 
         const Effect* effect = registry.find(inst.type);
@@ -233,7 +249,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
 
         const u32 offset = static_cast<u32>(out.values.size());
         for (u32 p = 0; p < params->count(); ++p) {
-            out.values.push_back(evaluate_param(layer.tracks, inst, p, params->at(p), localTime));
+            out.values.push_back(evaluate_param(source.owner->tracks, inst, p, params->at(p), source.time));
         }
 
         EffectEval e;
@@ -244,7 +260,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         e.valueOffset = offset;
         e.count = params->count();
         e.effectIndex = i;
-        e.localTime = localTime;
+        e.localTime = source.time;
         e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
         e.texelScale = texelScale;
         e.placement = &out.placement;

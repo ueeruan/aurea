@@ -28,6 +28,15 @@ layout(location = 0) out vec4 o_color;
 
 const float kDistScale = 8.0;   // valor 0..255 por px da base (Text.hpp)
 
+vec4 coverageAt(Glyph gl, vec2 uv, float aa) {
+    if (any(lessThan(uv, gl.uv.xy)) || any(greaterThan(uv, gl.uv.zw))) return vec4(0.0);
+    vec2 inset = 0.5 / vec2(textureSize(u_atlas, 0));
+    float sd = (texture(u_atlas, clamp(uv, gl.uv.xy + inset, gl.uv.zw - inset)).r * 255.0 - 128.0) / kDistScale * gl.misc.z;
+    float fillA = smoothstep(-aa, aa, sd) * gl.fill.a;
+    float strokeA = gl.misc.w > 0.0 ? smoothstep(-aa, aa, sd + gl.misc.w) * gl.stroke.a : 0.0;
+    return vec4(gl.fill.rgb * fillA + gl.stroke.rgb * strokeA * (1.0 - fillA), fillA + strokeA * (1.0 - fillA));
+}
+
 void main() {
     const Glyph gl = glyphs.g[v_index];
     if (gl.uv.x < 0.0) {
@@ -39,6 +48,25 @@ void main() {
         const float aw = max(fwidth(d) * 0.5, 1e-4);
         const float a = (1.0 - smoothstep(-aw, aw, d)) * gl.fill.a;
         o_color = vec4(gl.fill.rgb * a, a);
+        return;
+    }
+    // Blur coverage rather than widening the distance threshold: widening
+    // left a visible rectangle wherever the finite atlas SDF saturated.
+    if (gl.extra.x > 0.01) {
+        vec2 uvPerPixel = (gl.uv.zw - gl.uv.xy) / max(gl.rect.zw - gl.rect.xy, vec2(0.001));
+        float aa = max(0.25, length(fwidth(v_uv) / uvPerPixel) * 0.5);
+        float sigma = gl.extra.x * 0.5;
+        // Each kernel sample covers a cell of this size. Prefilter its SDF
+        // coverage so thin strokes do not turn into repeated sharp copies.
+        aa = max(aa, sigma);
+        vec4 sum = vec4(0.0); float total = 0.0;
+        for (int y = -3; y <= 3; ++y) for (int x = -3; x <= 3; ++x) {
+            vec2 d = vec2(x, y);
+            float weight = exp(-0.5 * dot(d, d));
+            sum += coverageAt(gl, v_uv + d * sigma * uvPerPixel, aa) * weight;
+            total += weight;
+        }
+        o_color = sum / total;
         return;
     }
     // Distância assinada em px da layer (positiva dentro do glifo).

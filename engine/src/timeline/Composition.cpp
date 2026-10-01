@@ -155,6 +155,12 @@ LayerId Composition::duplicate_layer(LayerId source, FrameIndex atTime) {
 
     Layer copy = *src;   // cópia profunda: tracks, efeitos, máscaras, texto
     copy.name = src->name + " copia";
+    // A duplicate/split is an independent layer, including its timeline row.
+    // Reusing the source track made adjacent split clips collapse into one row.
+    layers_.for_each([&](LayerId, const Layer& other) {
+        if (other.trackId >= nextTrackId_) nextTrackId_ = other.trackId + 1;
+    });
+    copy.trackId = nextTrackId_++;
 
     // Duplicar posiciona a cópia logo depois do original, na mesma ordem
     // vertical — é o que o usuário espera ao duplicar no lugar.

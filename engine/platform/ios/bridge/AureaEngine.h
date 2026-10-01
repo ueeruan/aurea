@@ -714,6 +714,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSDictionary<NSString*, id>*)checkExpressionSyntax:(NSString*)source NS_SWIFT_NAME(checkExpressionSyntax(_:));
 - (NSArray<NSNumber*>*)timeRemap:(long long)layerId;
 - (int32_t)editTimeRemap:(long long)layerId index:(int32_t)index time:(int64_t)time value:(float)value interpolation:(int32_t)interpolation;
+- (BOOL)setTimeRemapValue:(long long)layerId time:(int64_t)time value:(float)value;
 - (void)removeTimeRemap:(long long)layerId index:(uint32_t)index;
 - (long long)addVector:(uint32_t)preset;
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;

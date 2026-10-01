@@ -16,7 +16,7 @@ struct TextAppearanceControls: View {
     private func refresh() { model.refreshModel(force: true); load() }
     private func value(_ key: String, _ fallback: Float = 0) -> Float { (text[key] as? NSNumber)?.floatValue ?? fallback }
     private func set(_ slot: Int, _ value: Float) {
-        guard style.count == 18 else { return }; var next = style; next[slot] = value
+        guard style.count >= 20 else { return }; var next = style; next[slot] = value
         _ = model.engine.setTextStyle(id, values: next.map { NSNumber(value: $0) }); refresh()
     }
     private func components(_ key: String) -> [Float] { let v = (text[key] as? [NSNumber] ?? []).map(\.floatValue); return v.count >= 4 ? v : [1, 1, 1, 1] }
@@ -33,7 +33,7 @@ struct TextAppearanceControls: View {
             section("panel_contorno")
             colorRow("panel_cor_contorno", values: components("strokeColor")) { color("strokeColor", "panel_cor_contorno") }
             NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px") { model.engine.setText(id, strokeWidth: $0); refresh() }
-            if style.count == 18 { styleSections }
+            if style.count >= 20 { styleSections }
             NativeTextPathSection()
             TextAnimationSection()
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
@@ -41,6 +41,8 @@ struct TextAppearanceControls: View {
     }
     private var styleSections: some View {
         VStack(alignment: .leading, spacing: 0) {
+            NativePanelRuler(label: AureaText.t("text_line_spacing"), value: style[18] * 100, step: 0.5, range: 10...1000, unit: "%") { set(18, $0 / 100) }
+            styleRow("text_letter_spacing", 19, 0.25, -1000...1000)
             section("panel_caixa")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -79,7 +81,7 @@ struct TextAppearanceControls: View {
                     model.beginGesture(AureaText.t(key))
                     model.colorSheet = ColorSheetRequest(title: AureaText.t(key), initial: Array(style[color..<(color + 4)]), onChange: { r, g, b, a in
                         var current = model.engine.textStyle(layer).map(\.floatValue)
-                        guard current.count == 18 else { return }
+                        guard current.count >= 20 else { return }
                         for (n, v) in [r, g, b, a].enumerated() { current[color + n] = v }
                         _ = model.engine.setTextStyle(layer, values: current.map { NSNumber(value: $0) }); refresh()
                     }, onDone: { model.endGesture() })
@@ -1769,11 +1771,15 @@ struct TextAnimationSection: View {
                     }
                 }.frame(height: 44)
             }
+            ForEach(animators.indices, id: \.self) { index in NativeTextAnimatorCard(index: UInt32(index), values: animators[index]).padding(.top, 8) }
+            NativePanelChip(AureaText.t("text_animator_add")) {
+                model.engine.run { engine in engine.addEffect(fxEffectTypeId("aurea.text.animator"), toLayer: id, at: UInt32.max) }
+                refresh(); model.openPanel(.effects)
+            }.accessibilityIdentifier("text.animator.add")
             NativePanelChip(AureaText.t("text_transform_add")) {
                 model.engine.run { engine in engine.addEffect(fxEffectTypeId("aurea.text.transform"), toLayer: id, at: UInt32.max) }
-                refresh()
-                model.openPanel(.effects)
-            }.padding(.top, 4).accessibilityIdentifier("text.transform.add")
+                refresh(); model.openPanel(.effects)
+            }.accessibilityIdentifier("text.transform.add")
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
             .alert(AureaText.t("ios_text_anim_title"), isPresented: $animationError) {
@@ -1781,6 +1787,134 @@ struct TextAnimationSection: View {
             } message: {
                 Text(AureaText.t("ios_text_anim_failed"))
             }
+    }
+}
+
+private struct NativeAnimParam: Identifiable {
+    var id: Int
+    var slot: Int
+    var bit: Int
+    var label: String
+    var unit: String
+    var step: Float
+    var range: ClosedRange<Float>
+    static var selectors: [NativeAnimParam] { [
+        NativeAnimParam(id: 0, slot: 7, bit: 0, label: AureaText.t("panel_inicio"), unit: "%", step: 0.5, range: 0...100),
+        NativeAnimParam(id: 1, slot: 8, bit: 0, label: AureaText.t("panel_fim"), unit: "%", step: 0.5, range: 0...100),
+        NativeAnimParam(id: 2, slot: 9, bit: 0, label: AureaText.t("ios_anim_delay_between"), unit: "%", step: 0.5, range: -1000...1000),
+        NativeAnimParam(id: 3, slot: 10, bit: 0, label: AureaText.t("panel_intensidade"), unit: "%", step: 0.5, range: -100...100)
+    ] }
+    static var properties: [NativeAnimParam] { [
+        NativeAnimParam(id: 10, slot: 14, bit: 0, label: AureaText.t("panel_posicao_x"), unit: "px", step: 1, range: -5000...5000),
+        NativeAnimParam(id: 11, slot: 15, bit: 0, label: AureaText.t("panel_posicao_y"), unit: "px", step: 1, range: -5000...5000),
+        NativeAnimParam(id: 12, slot: 16, bit: 0, label: AureaText.t("pn_depth"), unit: "px", step: 1, range: -5000...5000),
+        NativeAnimParam(id: 13, slot: 17, bit: 1, label: AureaText.t("fx_escala_x"), unit: "%", step: 1, range: -2000...2000),
+        NativeAnimParam(id: 14, slot: 18, bit: 1, label: AureaText.t("fx_escala_y"), unit: "%", step: 1, range: -2000...2000),
+        NativeAnimParam(id: 15, slot: 19, bit: 2, label: AureaText.t("edt_rotation_x"), unit: "°", step: 1, range: -3600...3600),
+        NativeAnimParam(id: 16, slot: 20, bit: 2, label: AureaText.t("edt_rotation_y"), unit: "°", step: 1, range: -3600...3600),
+        NativeAnimParam(id: 17, slot: 21, bit: 2, label: AureaText.t("edt_rotation_z"), unit: "°", step: 1, range: -3600...3600),
+        NativeAnimParam(id: 18, slot: 22, bit: 3, label: AureaText.t("panel_opacidade"), unit: "%", step: 0.5, range: 0...100),
+        NativeAnimParam(id: 19, slot: 23, bit: 4, label: AureaText.t("ios_spacing"), unit: "px", step: 0.5, range: -500...500),
+        NativeAnimParam(id: 20, slot: 24, bit: 5, label: AureaText.t("panel_desfoque"), unit: "px", step: 0.2, range: 0...200),
+        NativeAnimParam(id: 21, slot: 25, bit: 6, label: AureaText.t("ios_skew"), unit: "°", step: 0.5, range: -80...80),
+        NativeAnimParam(id: 22, slot: 26, bit: 7, label: AureaText.t("panel_contorno"), unit: "px", step: 0.1, range: -50...50),
+        NativeAnimParam(id: 23, slot: 27, bit: 8, label: AureaText.t("ios_scramble_letter"), unit: "", step: 0.1, range: -1000...1000)
+    ] }
+}
+
+private struct NativeTextAnimatorCard: View {
+    @EnvironmentObject private var model: AureaModel
+    let index: UInt32
+    let values: [Float]
+    private var id: Int64 { model.primarySelection ?? 0 }
+    // Portuguese names stay as the undo labels sent to the engine; the screen shows `titles`.
+    private let names = ["Posição", "Escala", "Rotação", "Opacidade", "Espaçamento", "Desfoque", "Inclinação", "Contorno", "Embaralhar letra", "Cor", "Cor do contorno"]
+    private var titles: [String] { ["fx_posicao", "panel_escala", "panel_rotacao", "panel_opacidade", "ios_spacing", "panel_desfoque", "ios_skew", "panel_contorno", "ios_scramble_letter", "panel_cor", "panel_cor_contorno"].map { AureaText.t($0) } }
+    private func set(_ updates: [Int: Float]) {
+        let flat = model.engine.textAnimators(id).map(\.floatValue), start = Int(index) * 40
+        guard flat.count >= start + 40 else { return }
+        var next = Array(flat[start..<(start + 40)])
+        for (slot, value) in updates { next[slot] = value }
+        _ = model.engine.setTextAnimator(id, index: index, values: next.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(AureaText.t("ios_animation_n", Int(index) + 1)).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
+                NativePanelChip(AureaText.t("panel_remover")) { model.engine.removeTextAnimator(id, index: index); model.refreshModel(force: true) }
+                AureaToggle(checked: values[0] > 0.5) { set([0: $0 ? 1 : 0]) }
+            }.frame(height: 40)
+            choices("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha"], slot: 2)
+            choices("panel_escolhe", ["panel_ordem", "panel_sorteado", "ios_range_ae"], slot: 3)
+            selectorControls
+            ForEach(NativeAnimParam.properties.filter { Int(values[1]) & (1 << $0.bit) != 0 }) { param in NativeTextAnimRuler(index: index, param: param, values: values) }
+            ForEach([9, 10], id: \.self) { bit in if Int(values[1]) & (1 << bit) != 0 { colorRow(bit) } }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(names.enumerated()), id: \.offset) { bit, name in
+                        NativePanelChip(titles[bit], selected: Int(values[1]) & (1 << bit) != 0) { set([1: Float(Int(values[1]) ^ (1 << bit))]) }
+                    }
+                }.frame(height: 44)
+            }
+        }.padding(8).background(AureaColors.chip.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+    }
+    @ViewBuilder private var selectorControls: some View {
+        if Int(values[3]) != 1 {
+            choices("panel_passagem", ["panel_seco", "panel_sobe", "panel_desce", "panel_triangulo", "panel_redondo", "panel_suave"], slot: 4)
+            HStack {
+                Text(AureaText.t("panel_ordem_aleatoria")).font(.aurea(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
+                AureaToggle(checked: values[5] > 0.5) { set([5: $0 ? 1 : 0]) }
+            }.frame(height: 40)
+            ForEach(NativeAnimParam.selectors) { param in NativeTextAnimRuler(index: index, param: param, values: values) }
+        } else {
+            NativeTextAnimRuler(index: index, param: NativeAnimParam(id: 25, slot: 13, bit: 0, label: AureaText.t("panel_trocas_segundo"), unit: "", step: 0.05, range: 0...60), values: values)
+            NativeTextAnimRuler(index: index, param: NativeAnimParam.selectors[3], values: values)
+        }
+    }
+    private func choices(_ label: String, _ keys: [String], slot: Int) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                ForEach(Array(keys.enumerated()), id: \.offset) { n, key in NativePanelChip(AureaText.t(key), selected: Int(values[slot]) == n) { set([slot: Float(n)]) } }
+            }.frame(height: 40)
+        }
+    }
+    private func colorRow(_ bit: Int) -> some View {
+        let base = bit == 9 ? 28 : 32
+        return HStack {
+            Text(titles[bit]).font(.aurea(size: 12)); Spacer()
+            NativePanelColorWell(values: [values[base], values[base + 1], values[base + 2], 1]) {
+                model.beginGesture(names[bit])
+                model.colorSheet = ColorSheetRequest(title: titles[bit], initial: [values[base], values[base + 1], values[base + 2], 1], onChange: { r, g, b, _ in set([base: r, base + 1: g, base + 2: b]) }, onDone: { model.endGesture() })
+            }
+        }.frame(height: 44)
+    }
+}
+
+private struct NativeTextAnimRuler: View {
+    @EnvironmentObject private var model: AureaModel
+    let index: UInt32
+    let param: NativeAnimParam
+    let values: [Float]
+    private var id: Int64 { model.primarySelection ?? 0 }
+    private var look: KeyframeLook {
+        let bit = 1 << (param.id < 10 ? param.id : param.id - 10)
+        if Int(values[param.id < 10 ? 38 : 39]) & bit != 0 { return .keyHere }
+        return Int(values[param.id < 10 ? 36 : 37]) & bit != 0 ? .animated : .none
+    }
+    private var expression: ExpressionLook {
+        let info = model.engine.expression(id, property: 33, effect: index, param: UInt32(param.id))
+        guard (info["exists"] as? NSNumber)?.boolValue == true else { return .none }
+        guard (info["enabled"] as? NSNumber)?.boolValue ?? true else { return .off }
+        return (info["error"] as? String ?? "").isEmpty ? .ok : .error
+    }
+    var body: some View {
+        NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit, decimals: param.step < 0.5 ? 1 : 0,
+            look: look, toggleKey: {
+                model.engine.toggleTextAnimKey(id, index: index, param: UInt32(param.id)); model.refreshModel(force: true)
+            }, expression: expression, onExpression: {
+                model.expressionSheet = ExpressionRequest(layer: id, label: param.label, tracks: [ExpressionTrack(property: 33, effect: index, param: UInt32(param.id))], unit: param.unit)
+            }, compactUnit: true) { model.engine.setTextAnimParam(id, index: index, param: UInt32(param.id), value: $0); model.refreshModel(force: true) }
     }
 }
 

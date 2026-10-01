@@ -36,14 +36,19 @@ void main() {
     const int idx = int(pc.params.x) + gl_InstanceIndex;
     const Glyph gl = glyphs.g[idx];
     const vec2 c = kCorners[gl_VertexIndex];
-    const vec2 p = mix(gl.rect.xy, gl.rect.zw, c);
+    // A blurred letter extends beyond its atlas rectangle. Keep the original
+    // UV range in the instance so the fragment shader can reject neighbour glyphs.
+    const float margin = gl.uv.x >= 0.0 ? max(0.0, gl.extra.x * 1.5) : 0.0;
+    const vec2 size = max(gl.rect.zw - gl.rect.xy, vec2(0.001));
+    const vec2 expanded = c + (2.0 * c - 1.0) * margin / size;
+    const vec2 p = mix(gl.rect.xy, gl.rect.zw, expanded);
     const vec4 q3 = gl.xform * vec4(p, 0.0, 1.0);
     // Perspectiva em volta do centro da layer: w = (f + z) / f (uv correto na GPU).
     const float w = pc.params.w > 0.0 ? max(0.05, (pc.params.w + q3.z) / pc.params.w) : 1.0;
     const vec2 cxy = pc.params.yz;
     const vec2 q = cxy * w + (q3.xy - cxy);
     // Sólido (fundo): uv = posição local em px, para o retângulo arredondado.
-    v_uv = gl.uv.x < 0.0 ? c * (gl.rect.zw - gl.rect.xy) : mix(gl.uv.xy, gl.uv.zw, c);
+    v_uv = gl.uv.x < 0.0 ? c * size : mix(gl.uv.xy, gl.uv.zw, expanded);
     v_index = idx;
     gl_Position = pc.clipFromLayer * vec4(q, 0.0, w);
 }

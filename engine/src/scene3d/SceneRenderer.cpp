@@ -1113,6 +1113,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         return &mat;
     };
     std::vector<Draw> opaque, blended;
+    auto tinted = [&](const GpuMaterial* source, const Vec4& fill) -> const GpuMaterial* {
+        if (fill.w <= 0) return source;
+        overriddenMaterials->push_back(*source);
+        auto& mat = overriddenMaterials->back();
+        const f32 w = std::clamp(fill.w, 0.f, 1.f);
+        mat.factors.baseColor.x += (fill.x - mat.factors.baseColor.x) * w;
+        mat.factors.baseColor.y += (fill.y - mat.factors.baseColor.y) * w;
+        mat.factors.baseColor.z += (fill.z - mat.factors.baseColor.z) * w;
+        return &mat;
+    };
     // Chave = (material, ambiente): dois objetos com o mesmo material e
     // ambientes diferentes NÃO podem dividir o mesmo bloco.
     std::vector<std::pair<std::pair<const GpuMaterial*, u64>, const SceneBlock*>> blocks;
@@ -1475,6 +1485,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     continue;
                 }
                 const GpuMaterial* mat = faded(material_for(inst, *gm, p.material), nodeAlpha);
+                if (n < inst.nodeFill.size()) mat = tinted(mat, inst.nodeFill[n]);
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:
                 // o que está atrás aparece e o reflexo continua inteiro.

@@ -24,9 +24,21 @@
 namespace aurea {
 struct TextData;
 struct TextAnimator;
+struct Layer;
+class ParameterRegistry;
 }
 
 namespace aurea::text {
+inline constexpr const char* kAnimatorEffect = "aurea.text.animator";
+enum AnimatorEffectParam : u32 {
+    aeStart, aeEnd, aeOffset, aeAmount, aeUnit, aeShape, aeEaseHigh, aeEaseLow,
+    aeRandom, aeSeed, aeSelector, aeWiggleRate, aePosition, aeScale, aeRotation,
+    aeOpacity, aeBlur, aeTracking, aeSkew, aeStrokeWidth, aeFillOn, aeFill,
+    aeStrokeOn, aeStroke, aeCount
+};
+void declare_animator_effect_params(ParameterRegistry& params);
+bool has_animator_effect(const Layer& layer) noexcept;
+f32 animator_effect_padding(const Layer& layer, f64 time, f32 size, u32 chars);
 
 /// Parâmetros animáveis de um animador (effectParamIndex da trilha).
 enum TextAnimParam : u32 {
@@ -59,6 +71,8 @@ struct GlyphAnim {
     f32 fillOpacity = 1.0f;   ///< alpha da cor de preenchimento, separado do peso da mistura
     Vec4 stroke{0, 0, 0, 0};
 };
+void evaluate_animator_effects(const Layer& layer, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
+                              u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out);
 
 /// Valor de um parâmetro no instante (fracionário: sub-quadro do desfoque).
 [[nodiscard]] f32 anim_param(const TrackSet& tracks, u32 animator, u32 param, f64 local, f32 fallback) noexcept;

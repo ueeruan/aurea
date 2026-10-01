@@ -652,7 +652,12 @@
   "en": "Linear"
  },
  "Linha": {
-  "en": "Line"
+  "en": "Line",
+  "es": "Línea",
+  "ru": "Линия",
+  "hi": "लाइन",
+  "id": "Garis",
+  "ar": "خط"
  },
  "Linhas": {
   "en": "Lines"
@@ -848,7 +853,12 @@
   "en": "Pull"
  },
  "Quadrada": {
-  "en": "Square"
+  "en": "Square",
+  "es": "Cuadrada",
+  "ru": "Прямоугольная",
+  "hi": "स्क्वेयर",
+  "id": "Kotak",
+  "ar": "مربعة"
  },
  "Quadrado": {
   "en": "Square"
@@ -1048,7 +1058,12 @@
   "pt": "Estilo"
  },
  "Suave": {
-  "en": "Smooth"
+  "en": "Smooth",
+  "es": "Suave",
+  "ru": "Плавно",
+  "hi": "स्मूद",
+  "id": "Halus",
+  "ar": "ناعم"
  },
  "Suave no fim": {
   "en": "Ease out"
@@ -1176,7 +1191,12 @@
   "en": "Alpha"
  },
  "Triângulo": {
-  "en": "Triangle"
+  "en": "Triangle",
+  "es": "Triángulo",
+  "ru": "Треугольная",
+  "hi": "त्रिकोण",
+  "id": "Segitiga",
+  "ar": "مثلثة"
  },
  "Twist": {
   "en": "Twist",
@@ -1795,5 +1815,813 @@
   "hi": "गहराई",
   "id": "Kedalaman",
   "ar": "العمق"
+ },
+ "Suavizar máximo": {
+  "en": "Ease high",
+  "es": "Suavizar máximo",
+  "ru": "Смягчение максимума",
+  "hi": "अधिकतम नरमी",
+  "id": "Haluskan maksimum",
+  "ar": "تنعيم الحد الأعلى"
+ },
+ "Substituir cor do preenchimento": {
+  "en": "Override fill color",
+  "es": "Sustituir color de relleno",
+  "ru": "Заменить цвет заливки",
+  "hi": "भरण रंग बदलें",
+  "id": "Ganti warna isian",
+  "ar": "استبدال لون التعبئة"
+ },
+ "Suavizar mínimo": {
+  "en": "Ease low",
+  "es": "Suavizar mínimo",
+  "ru": "Смягчение минимума",
+  "hi": "न्यूनतम नरमी",
+  "id": "Haluskan minimum",
+  "ar": "تنعيم الحد الأدنى"
+ },
+ "Semente": {
+  "en": "Seed",
+  "es": "Semilla",
+  "ru": "Сид",
+  "hi": "सीड",
+  "id": "Seed",
+  "ar": "البذرة"
+ },
+ "Espaçamento entre letras": {
+  "en": "Letter spacing",
+  "es": "Espaciado de letras",
+  "ru": "Межбуквенный интервал",
+  "hi": "अक्षर अंतर",
+  "id": "Jarak huruf",
+  "ar": "تباعد الأحرف"
+ },
+ "Forma do seletor": {
+  "en": "Selector shape",
+  "es": "Forma del selector",
+  "ru": "Форма селектора",
+  "hi": "चयनकर्ता आकार",
+  "id": "Bentuk pemilih",
+  "ar": "شكل المحدد"
+ },
+ "Cor do preenchimento": {
+  "en": "Fill color",
+  "es": "Color de relleno",
+  "ru": "Цвет заливки",
+  "hi": "भराव का रंग",
+  "id": "Warna isian",
+  "ar": "لون التعبئة"
+ },
+ "Letra": {
+  "en": "Letter",
+  "es": "Letra",
+  "ru": "Буква",
+  "hi": "अक्षर",
+  "id": "Huruf",
+  "ar": "حرف"
+ },
+ "Escala": {
+  "en": "Scale",
+  "es": "Escala",
+  "ru": "Масштаб",
+  "hi": "स्केल",
+  "id": "Skala",
+  "ar": "المقياس"
+ },
+ "Deslocamento do seletor": {
+  "en": "Selector offset",
+  "es": "Desplazamiento del selector",
+  "ru": "Смещение селектора",
+  "hi": "चयनकर्ता ऑफ़सेट",
+  "id": "Offset pemilih",
+  "ar": "إزاحة المحدد"
+ },
+ "Posição": {
+  "en": "Position",
+  "es": "Posición",
+  "ru": "Положение",
+  "hi": "पोज़िशन",
+  "id": "Posisi",
+  "ar": "الموضع"
+ },
+ "Alcance": {
+  "en": "Range",
+  "es": "Alcance",
+  "ru": "Дальность",
+  "hi": "सीमा",
+  "id": "Jangkauan",
+  "ar": "النطاق"
+ },
+ "Fim": {
+  "en": "End",
+  "es": "Fin",
+  "ru": "Конец",
+  "hi": "अंत",
+  "id": "Akhir",
+  "ar": "النهاية"
+ },
+ "Rotação": {
+  "en": "Rotation",
+  "es": "Rotación",
+  "ru": "Вращение",
+  "hi": "घूर्णन",
+  "id": "Rotasi",
+  "ar": "الدوران"
+ },
+ "Início": {
+  "en": "Start",
+  "es": "Inicio",
+  "ru": "Начало",
+  "hi": "आरंभ",
+  "id": "Awal",
+  "ar": "البداية"
+ },
+ "Unidade": {
+  "en": "Unit",
+  "es": "Unidad",
+  "ru": "Единица",
+  "hi": "यूनिट",
+  "id": "Satuan",
+  "ar": "الوحدة"
+ },
+ "Opacidade": {
+  "en": "Opacity",
+  "es": "Opacidad",
+  "ru": "Непрозрачность",
+  "hi": "ओपेसिटी",
+  "id": "Opasitas",
+  "ar": "العتامة"
+ },
+ "Desfoque": {
+  "en": "Blur",
+  "es": "Desenfoque",
+  "ru": "Размытие",
+  "hi": "ब्लर",
+  "id": "Blur",
+  "ar": "ضباب"
+ },
+ "Substituir cor do contorno": {
+  "en": "Override stroke color",
+  "es": "Sustituir color de borde",
+  "ru": "Заменить цвет обводки",
+  "hi": "स्ट्रोक रंग बदलें",
+  "id": "Ganti warna garis",
+  "ar": "استبدال لون الحد"
+ },
+ "Ordem aleatória": {
+  "en": "Random order",
+  "es": "Orden aleatorio",
+  "ru": "Случайный порядок",
+  "hi": "यादृच्छिक क्रम",
+  "id": "Urutan acak",
+  "ar": "ترتيب عشوائي"
+ },
+ "Palavra": {
+  "en": "Word",
+  "es": "Palabra",
+  "ru": "Слово",
+  "hi": "शब्द",
+  "id": "Kata",
+  "ar": "كلمة"
+ },
+ "Frequência da oscilação": {
+  "en": "Wiggle frequency",
+  "es": "Frecuencia de oscilación",
+  "ru": "Частота колебаний",
+  "hi": "दोलन आवृत्ति",
+  "id": "Frekuensi goyangan",
+  "ar": "تردد التذبذب"
+ },
+ "Wiggle": {
+  "en": "Wiggle",
+  "es": "Wiggle",
+  "ru": "Покачивание",
+  "hi": "विगल",
+  "id": "Wiggle",
+  "ar": "اهتزاز"
+ },
+ "Redonda": {
+  "en": "Round",
+  "es": "Redonda",
+  "ru": "Круглая",
+  "hi": "गोल",
+  "id": "Bulat",
+  "ar": "دائري"
+ },
+ "Inclinação": {
+  "en": "Skew",
+  "es": "Inclinación",
+  "ru": "Наклон",
+  "hi": "तिरछापन",
+  "id": "Kemiringan",
+  "ar": "الإمالة"
+ },
+ "Intensidade": {
+  "en": "Amount",
+  "es": "Cantidad",
+  "ru": "Величина",
+  "hi": "मात्रा",
+  "id": "Jumlah",
+  "ar": "المقدار"
+ },
+ "Destaque": {
+  "en": "Highlight",
+  "es": "Resaltado",
+  "ru": "Выделение",
+  "hi": "हाइलाइट",
+  "id": "Sorotan",
+  "ar": "تمييز"
+ },
+ "Sombras": {
+  "en": "Shadows",
+  "es": "Sombras",
+  "ru": "Тени",
+  "hi": "छायाएँ",
+  "id": "Bayangan",
+  "ar": "الظلال"
+ },
+ "Luzes": {
+  "en": "Highlights",
+  "es": "Luces",
+  "ru": "Света",
+  "hi": "हाइलाइट्स",
+  "id": "Highlight",
+  "ar": "الإضاءات"
+ },
+ "Força": {
+  "en": "Strength",
+  "es": "Fuerza",
+  "ru": "Сила",
+  "hi": "ताकत",
+  "id": "Kekuatan",
+  "ar": "القوة"
+ },
+ "Herdar escala": {
+  "en": "Inherit scale",
+  "es": "Heredar escala",
+  "ru": "Наследовать масштаб",
+  "hi": "स्केल इनहेरिट करें",
+  "id": "Warisi skala",
+  "ar": "وراثة الحجم"
+ },
+ "Tons médios": {
+  "en": "Midtones",
+  "es": "Medios tonos",
+  "ru": "Средние тона",
+  "hi": "मिडटोन",
+  "id": "Midtone",
+  "ar": "الدرجات المتوسطة"
+ },
+ "Última letra": {
+  "en": "Last letter",
+  "es": "Última letra",
+  "ru": "Последняя буква",
+  "hi": "आखिरी अक्षर",
+  "id": "Huruf terakhir",
+  "ar": "الحرف الأخير"
+ },
+ "Ângulo": {
+  "en": "Angle",
+  "es": "Ángulo",
+  "ru": "Угол",
+  "hi": "कोण",
+  "id": "Sudut",
+  "ar": "الزاوية"
+ },
+ "Curvar": {
+  "en": "Bend",
+  "es": "Bend",
+  "ru": "Bend",
+  "hi": "Bend",
+  "id": "Bend",
+  "ar": "Bend"
+ },
+ "Sombra": {
+  "en": "Shadow",
+  "es": "Sombra",
+  "ru": "Тень",
+  "hi": "छाया",
+  "id": "Bayangan",
+  "ar": "ظلّ"
+ },
+ "Aleatório": {
+  "en": "Random",
+  "es": "Aleatorio",
+  "ru": "Случайно",
+  "hi": "यादृच्छिक",
+  "id": "Acak",
+  "ar": "عشوائي"
+ },
+ "Rotação das letras X": {
+  "en": "Letter rotation X",
+  "es": "Rotación de letras X",
+  "ru": "Поворот букв X",
+  "hi": "अक्षर रोटेशन X",
+  "id": "Rotasi huruf X",
+  "ar": "دوران الحروف X"
+ },
+ "Herdar rotação": {
+  "en": "Inherit rotation",
+  "es": "Heredar rotación",
+  "ru": "Наследовать поворот",
+  "hi": "रोटेशन इनहेरिट करें",
+  "id": "Warisi rotasi",
+  "ar": "وراثة الدوران"
+ },
+ "Semente da variação": {
+  "en": "Variation seed",
+  "es": "Semilla de variación",
+  "ru": "Сид разброса",
+  "hi": "बदलाव का सीड",
+  "id": "Seed variasi",
+  "ar": "بذرة التباين"
+ },
+ "Rotação das partes Y": {
+  "en": "Part Rotation Y",
+  "es": "Rotación de las partes Y",
+  "ru": "Вращение частей Y",
+  "hi": "भागों का घुमाव Y",
+  "id": "Rotasi bagian Y",
+  "ar": "دوران الأجزاء Y"
+ },
+ "Rotação das partes X": {
+  "en": "Part Rotation X",
+  "es": "Rotación de las partes X",
+  "ru": "Вращение частей X",
+  "hi": "भागों का घुमाव X",
+  "id": "Rotasi bagian X",
+  "ar": "دوران الأجزاء X"
+ },
+ "Mistura": {
+  "en": "Blend",
+  "es": "Mezcla",
+  "ru": "Смешивание",
+  "hi": "ब्लेंड",
+  "id": "Campuran",
+  "ar": "المزج"
+ },
+ "Curvatura em cilindro": {
+  "en": "Cylinder bend",
+  "es": "Curvatura cilíndrica",
+  "ru": "Изгиб по цилиндру",
+  "hi": "सिलिंडर बेंड",
+  "id": "Lengkung silinder",
+  "ar": "انحناء أسطواني"
+ },
+ "Atraso por parte": {
+  "en": "Delay per Part",
+  "es": "Retraso por parte",
+  "ru": "Задержка на часть",
+  "hi": "प्रति भाग देरी",
+  "id": "Jeda per bagian",
+  "ar": "تأخير لكل جزء"
+ },
+ "Rotação das letras Y": {
+  "en": "Letter rotation Y",
+  "es": "Rotación de letras Y",
+  "ru": "Поворот букв Y",
+  "hi": "अक्षर रोटेशन Y",
+  "id": "Rotasi huruf Y",
+  "ar": "دوران الحروف Y"
+ },
+ "Largura": {
+  "en": "Width",
+  "es": "Ancho",
+  "ru": "Ширина",
+  "hi": "चौड़ाई",
+  "id": "Lebar",
+  "ar": "العرض"
+ },
+ "Suavizar borda": {
+  "en": "Feather",
+  "es": "Difuminar borde",
+  "ru": "Растушёвка",
+  "hi": "फ़ेदर",
+  "id": "Feather",
+  "ar": "تنعيم الحافة"
+ },
+ "Velocidade aleatória": {
+  "en": "Random speed",
+  "es": "Velocidad aleatoria",
+  "ru": "Случайная скорость",
+  "hi": "यादृच्छिक गति",
+  "id": "Kecepatan acak",
+  "ar": "سرعة عشوائية"
+ },
+ "Variação da rotação": {
+  "en": "Rotation variation",
+  "es": "Variación de rotación",
+  "ru": "Разброс поворота",
+  "hi": "रोटेशन में बदलाव",
+  "id": "Variasi rotasi",
+  "ar": "تباين الدوران"
+ },
+ "Primeira letra": {
+  "en": "First letter",
+  "es": "Primera letra",
+  "ru": "Первая буква",
+  "hi": "पहला अक्षर",
+  "id": "Huruf pertama",
+  "ar": "الحرف الأول"
+ },
+ "Rotação das letras Z": {
+  "en": "Letter rotation Z",
+  "es": "Rotación de letras Z",
+  "ru": "Поворот букв Z",
+  "hi": "अक्षर रोटेशन Z",
+  "id": "Rotasi huruf Z",
+  "ar": "دوران الحروف Z"
+ },
+ "Fase": {
+  "en": "Phase",
+  "es": "Fase",
+  "ru": "Фаза",
+  "hi": "फ़ेज़",
+  "id": "Fase",
+  "ar": "الطور"
+ },
+ "Cor": {
+  "en": "Color",
+  "es": "Color",
+  "ru": "Цвет",
+  "hi": "रंग",
+  "id": "Warna",
+  "ar": "اللون"
+ },
+ "Torção": {
+  "en": "Twist",
+  "es": "Torsión",
+  "ru": "Скручивание",
+  "hi": "ट्विस्ट",
+  "id": "Puntiran",
+  "ar": "الالتواء"
+ },
+ "Esticar Y": {
+  "en": "Stretch Y",
+  "es": "Estirar Y",
+  "ru": "Растяжение Y",
+  "hi": "स्ट्रेच Y",
+  "id": "Regangan Y",
+  "ar": "المدّ Y"
+ },
+ "Centro Y": {
+  "en": "Center Y",
+  "es": "Centro Y",
+  "ru": "Центр Y",
+  "hi": "केंद्र Y",
+  "id": "Pusat Y",
+  "ar": "المركز Y"
+ },
+ "Última parte": {
+  "en": "Last Part",
+  "es": "Última parte",
+  "ru": "Последняя часть",
+  "hi": "अंतिम भाग",
+  "id": "Bagian terakhir",
+  "ar": "الجزء الأخير"
+ },
+ "Centro X": {
+  "en": "Center X",
+  "es": "Centro X",
+  "ru": "Центр X",
+  "hi": "केंद्र X",
+  "id": "Pusat X",
+  "ar": "المركز X"
+ },
+ "Primeira parte": {
+  "en": "First Part",
+  "es": "Primera parte",
+  "ru": "Первая часть",
+  "hi": "पहला भाग",
+  "id": "Bagian pertama",
+  "ar": "الجزء الأول"
+ },
+ "Atraso por letra": {
+  "en": "Delay per letter",
+  "es": "Retraso por letra",
+  "ru": "Задержка на букву",
+  "hi": "प्रति अक्षर देरी",
+  "id": "Jeda per huruf",
+  "ar": "التأخير لكل حرف"
+ },
+ "Rotação das partes Z": {
+  "en": "Part Rotation Z",
+  "es": "Rotación de las partes Z",
+  "ru": "Вращение частей Z",
+  "hi": "भागों का घुमाव Z",
+  "id": "Rotasi bagian Z",
+  "ar": "دوران الأجزاء Z"
+ },
+ "Rampa crescente": {
+  "en": "Ramp up",
+  "es": "Rampa ascendente",
+  "ru": "Нарастающий",
+  "hi": "बढ़ती रैम्प",
+  "id": "Ramp naik",
+  "ar": "تدرج تصاعدي"
+ },
+ "Rampa decrescente": {
+  "en": "Ramp down",
+  "es": "Rampa descendente",
+  "ru": "Убывающий",
+  "hi": "घटती रैम्प",
+  "id": "Ramp turun",
+  "ar": "تدرج تنازلي"
+ },
+ "Oscilação aleatória": {
+  "en": "Wiggle",
+  "es": "Oscilación aleatoria",
+  "ru": "Случайные колебания",
+  "hi": "यादृच्छिक दोलन",
+  "id": "Goyangan acak",
+  "ar": "تذبذب عشوائي"
+ },
+ "Seletor": {
+  "en": "Selector",
+  "es": "Selector",
+  "ru": "Селектор",
+  "hi": "चयनकर्ता",
+  "id": "Pemilih",
+  "ar": "المحدد"
+ },
+ "Largura do contorno": {
+  "en": "Stroke width",
+  "es": "Ancho del borde",
+  "ru": "Ширина обводки",
+  "hi": "स्ट्रोक चौड़ाई",
+  "id": "Lebar garis",
+  "ar": "عرض الحد"
+ },
+ "Cor do contorno": {
+  "en": "Stroke color",
+  "es": "Color del borde",
+  "ru": "Цвет обводки",
+  "hi": "स्ट्रोक रंग",
+  "id": "Warna garis",
+  "ar": "لون الحد"
+ },
+ "Ângulo da luz": {
+  "en": "Light angle",
+  "es": "Ángulo de luz",
+  "ru": "Угол света",
+  "hi": "प्रकाश कोण",
+  "id": "Sudut cahaya",
+  "ar": "زاوية الضوء"
+ },
+ "Ponto médio": {
+  "en": "Midpoint",
+  "es": "Punto medio",
+  "ru": "Средняя точка",
+  "hi": "मध्यबिंदु",
+  "id": "Titik tengah",
+  "ar": "نقطة المنتصف"
+ },
+ "Ajuste do recorte": {
+  "en": "Mask adjustment",
+  "es": "Ajuste del recorte",
+  "ru": "Настройка маски",
+  "hi": "मास्क समायोजन",
+  "id": "Penyesuaian mask",
+  "ar": "ضبط القناع"
+ },
+ "Inverter recorte": {
+  "en": "Invert mask",
+  "es": "Invertir máscara",
+  "ru": "Инвертировать маску",
+  "hi": "मास्क उलटें",
+  "id": "Balik mask",
+  "ar": "عكس القناع"
+ },
+ "Layout": {
+  "en": "Layout",
+  "es": "Distribución",
+  "ru": "Расположение",
+  "hi": "लेआउट",
+  "id": "Tata letak",
+  "ar": "التخطيط"
+ },
+ "Retangular": {
+  "en": "Rectangular",
+  "es": "Rectangular",
+  "ru": "Прямоугольный",
+  "hi": "आयताकार",
+  "id": "Persegi panjang",
+  "ar": "مستطيل"
+ },
+ "Caminho": {
+  "en": "Path",
+  "es": "Trazado",
+  "ru": "Путь",
+  "hi": "पथ",
+  "id": "Jalur",
+  "ar": "المسار"
+ },
+ "Colunas": {
+  "en": "Columns",
+  "es": "Columnas",
+  "ru": "Столбцы",
+  "hi": "स्तंभ",
+  "id": "Kolom",
+  "ar": "الأعمدة"
+ },
+ "Espaçamento X": {
+  "en": "X spacing",
+  "es": "Espaciado X",
+  "ru": "Интервал X",
+  "hi": "X अंतर",
+  "id": "Jarak X",
+  "ar": "تباعد X"
+ },
+ "Espaçamento Y": {
+  "en": "Y spacing",
+  "es": "Espaciado Y",
+  "ru": "Интервал Y",
+  "hi": "Y अंतर",
+  "id": "Jarak Y",
+  "ar": "تباعد Y"
+ },
+ "Arco": {
+  "en": "Arc",
+  "es": "Arco",
+  "ru": "Дуга",
+  "hi": "चाप",
+  "id": "Busur",
+  "ar": "قوس"
+ },
+ "Orientação": {
+  "en": "Orientation",
+  "es": "Orientación",
+  "ru": "Ориентация",
+  "hi": "अभिविन्यास",
+  "id": "Orientasi",
+  "ar": "الاتجاه"
+ },
+ "Frente": {
+  "en": "Front",
+  "es": "Frente",
+  "ru": "Спереди",
+  "hi": "सामने",
+  "id": "Depan",
+  "ar": "الأمام"
+ },
+ "Tangente": {
+  "en": "Tangent",
+  "es": "Tangente",
+  "ru": "Касательная",
+  "hi": "स्पर्शरेखा",
+  "id": "Tangen",
+  "ar": "المماس"
+ },
+ "Caminho padrão": {
+  "en": "Default path",
+  "es": "Trazado predeterminado",
+  "ru": "Путь по умолчанию",
+  "hi": "डिफ़ॉल्ट पथ",
+  "id": "Jalur bawaan",
+  "ar": "المسار الافتراضي"
+ },
+ "Espiral": {
+  "en": "Spiral",
+  "es": "Espiral",
+  "ru": "Спираль",
+  "hi": "सर्पिल",
+  "id": "Spiral",
+  "ar": "حلزوني"
+ },
+ "Layout de destino": {
+  "en": "Target layout",
+  "es": "Distribución de destino",
+  "ru": "Целевое расположение",
+  "hi": "लक्ष्य लेआउट",
+  "id": "Tata letak tujuan",
+  "ar": "التخطيط المستهدف"
+ },
+ "Transição": {
+  "en": "Transition",
+  "es": "Transición",
+  "ru": "Переход",
+  "hi": "संक्रमण",
+  "id": "Transisi",
+  "ar": "الانتقال"
+ },
+ "Escala dos elementos": {
+  "en": "Element scale",
+  "es": "Escala de elementos",
+  "ru": "Масштаб элементов",
+  "hi": "तत्वों का आकार",
+  "id": "Skala elemen",
+  "ar": "مقياس العناصر"
+ },
+ "Rotação por elemento": {
+  "en": "Rotation per element",
+  "es": "Rotación por elemento",
+  "ru": "Поворот на элемент",
+  "hi": "प्रति तत्व घुमाव",
+  "id": "Rotasi per elemen",
+  "ar": "الدوران لكل عنصر"
+ },
+ "Atraso por elemento": {
+  "en": "Delay per element",
+  "es": "Retraso por elemento",
+  "ru": "Задержка на элемент",
+  "hi": "प्रति तत्व विलंब",
+  "id": "Jeda per elemen",
+  "ar": "التأخير لكل عنصر"
+ },
+ "Proximidade X": {
+  "en": "Proximity X",
+  "es": "Proximidad X",
+  "ru": "Близость X",
+  "hi": "निकटता X",
+  "id": "Kedekatan X",
+  "ar": "التقارب X"
+ },
+ "Proximidade Y": {
+  "en": "Proximity Y",
+  "es": "Proximidad Y",
+  "ru": "Близость Y",
+  "hi": "निकटता Y",
+  "id": "Kedekatan Y",
+  "ar": "التقارب Y"
+ },
+ "Proximidade Z": {
+  "en": "Proximity Z",
+  "es": "Proximidad Z",
+  "ru": "Близость Z",
+  "hi": "निकटता Z",
+  "id": "Kedekatan Z",
+  "ar": "التقارب Z"
+ },
+ "Raio de proximidade": {
+  "en": "Proximity radius",
+  "es": "Radio de proximidad",
+  "ru": "Радиус близости",
+  "hi": "निकटता त्रिज्या",
+  "id": "Radius kedekatan",
+  "ar": "نصف قطر التقارب"
+ },
+ "Força de proximidade": {
+  "en": "Proximity strength",
+  "es": "Fuerza de proximidad",
+  "ru": "Сила близости",
+  "hi": "निकटता शक्ति",
+  "id": "Kekuatan kedekatan",
+  "ar": "قوة التقارب"
+ },
+ "Escala próxima": {
+  "en": "Nearby scale",
+  "es": "Escala cercana",
+  "ru": "Масштаб вблизи",
+  "hi": "नज़दीकी आकार",
+  "id": "Skala terdekat",
+  "ar": "المقياس القريب"
+ },
+ "Rotação próxima": {
+  "en": "Nearby rotation",
+  "es": "Rotación cercana",
+  "ru": "Поворот вблизи",
+  "hi": "नज़दीकी घुमाव",
+  "id": "Rotasi terdekat",
+  "ar": "الدوران القريب"
+ },
+ "Atrair / repelir": {
+  "en": "Attract / repel",
+  "es": "Atraer / repeler",
+  "ru": "Притягивать / отталкивать",
+  "hi": "आकर्षित / विकर्षित",
+  "id": "Tarik / tolak",
+  "ar": "جذب / تنافر"
+ },
+ "Opacidade próxima": {
+  "en": "Nearby opacity",
+  "es": "Opacidad cercana",
+  "ru": "Непрозрачность вблизи",
+  "hi": "नज़दीकी अपारदर्शिता",
+  "id": "Opasitas terdekat",
+  "ar": "العتامة القريبة"
+ },
+ "Camada de caminho": {
+  "en": "Path layer",
+  "es": "Capa de trazado",
+  "ru": "Слой пути",
+  "hi": "पथ परत",
+  "id": "Lapisan jalur",
+  "ar": "طبقة المسار"
+ },
+ "Deslocamento no caminho": {
+  "en": "Path offset",
+  "es": "Desplazamiento en trazado",
+  "ru": "Смещение по пути",
+  "hi": "पथ ऑफ़सेट",
+  "id": "Offset jalur",
+  "ar": "الإزاحة على المسار"
+ },
+ "Ordem na grade": {
+  "en": "Grid order",
+  "es": "Orden en cuadrícula",
+  "ru": "Порядок в сетке",
+  "hi": "ग्रिड क्रम",
+  "id": "Urutan kisi",
+  "ar": "الترتيب في الشبكة"
  }
 }

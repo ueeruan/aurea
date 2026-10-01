@@ -785,6 +785,7 @@ struct TimeRemapEffectEditor: View {
     @State private var values: [Float] = []
     @State private var drag: Float?
     @State private var dragStart: Float?
+    @State private var dragLocal: Int32?
     @State private var selectedKey: Int32?
     private var id: Int64 { model.primarySelection ?? 0 }
     private var fps: Float { Float(model.compositionFps > 0 ? model.compositionFps : 30) }
@@ -827,10 +828,10 @@ struct TimeRemapEffectEditor: View {
                         ValueBox(Self.timecode(Int(shownFrames.rounded()), fps: fps), enabled: inside, width: 112) { openKeypad() }
                             .highPriorityGesture(DragGesture(minimumDistance: 6).onChanged { value in
                                 guard inside else { return }
-                                if dragStart == nil { dragStart = seconds * fps; model.beginGesture("tempo do vídeo") }
+                                if dragStart == nil { dragStart = seconds * fps; dragLocal = model.localPlayhead; model.beginGesture("tempo do vídeo") }
                                 let frames = min(lastFrame, max(0, (dragStart ?? 0) + Float(value.translation.width) * 0.25))
-                                drag = frames
-                                model.engine.setEffect(effectId, forLayer: id, paramIndex: 0, value: frames.rounded() / fps)
+                                drag = frames.rounded()
+                                _ = model.engine.setTimeRemapValue(id, time: Int64(dragLocal ?? model.localPlayhead), value: frames.rounded())
                             }.onEnded { _ in finishDrag() })
                         Spacer(minLength: 4)
                         Button(action: openCurve) {
@@ -883,7 +884,7 @@ struct TimeRemapEffectEditor: View {
 
     private func finishDrag() {
         guard dragStart != nil else { return }
-        dragStart = nil; drag = nil
+        dragStart = nil; drag = nil; dragLocal = nil
         model.endGesture()
         load()
     }
@@ -893,7 +894,7 @@ struct TimeRemapEffectEditor: View {
         let top = lastFrame / fps
         model.numericKeypad = KeypadRequest(title: AureaText.t("remap_linha_tempo"), value: shownFrames / fps, unit: "s",
                                             min: 0, max: top, decimals: 2) { s in
-            model.engine.setEffect(effectId, forLayer: id, paramIndex: 0, value: min(top, max(0, s)))
+            _ = model.engine.setTimeRemapValue(id, time: Int64(model.localPlayhead), value: (min(top, max(0, s)) * fps).rounded())
             refresh()
         }
     }

@@ -1359,7 +1359,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             refreshTextFont()
-            val st = FloatArray(18)
+            val st = FloatArray(20)
             textStyle = same(textStyle, if (engine.queryTextStyle(id, st)) st else null)
             val anim = engine.queryTextAnimators(id)?.let { a -> List(a.size / 40) { i -> a.copyOfRange(i * 40, i * 40 + 40) } } ?: emptyList()
             val old = textAnimators
@@ -3916,9 +3916,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Remapear tempo: o momento do vídeo (segundos da fonte) na chave do cabeçote. */
-    fun setRemapTime(effectId: Int, seconds: Float) {
+    fun setRemapTime(effectId: Int, seconds: Float, localFrame: Int = detail?.localPlayhead ?: 0) {
         val id = primary ?: return
-        send { setEffectParam(id, effectId, 0, seconds) }
+        if (!engine.setTimeRemapValue(id, localFrame.toLong(), seconds * project.fps.coerceAtLeast(1f))) return
         refreshNow()
     }
 

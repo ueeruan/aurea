@@ -11165,4 +11165,55 @@ AUREA_TEST(Gpu, NewToolsPsdGroupsAndMasksSurviveRenderingAndReload) {
     seek_frame(rig.e,0);const auto after=rig.capture(8);
     AUREA_CHECK(before.rgba==after.rgba);
 }
+
+AUREA_TEST(Gpu, Regression2128AnimatorEffectChangesPixelsAndReopens) {
+    AUREA_REQUIRE_GPU(); Scene3DRig rig(640,360);
+    const auto id=rig.e.add_text("AUREA");AUREA_CHECK(id.ok());if(!id.ok())return;
+    auto* l=current_comp(rig.e)->layer(LayerId::unpack(*id));
+    EffectInstance fx;fx.id=l->alloc_effect_id();fx.type=effect_type_id(text::kAnimatorEffect);
+    ParameterRegistry params;text::declare_animator_effect_params(params);initialize_instance(fx,params);l->effects.push_back(fx);
+    auto capture=[&](i64 f=0){seek_frame(rig.e,f);return rig.capture(640);};
+    const auto base=capture();AUREA_CHECK(coverage(base)>.001f);
+    l->effects[0].params[text::aeFillOn].constant=ParamValue::boolean(true);
+    l->effects[0].params[text::aeFill].constant=ParamValue::color(1,0,0,1);
+    const auto red=capture();AUREA_CHECK(max_diff(base,red)>50);
+    l->effects[0].params[text::aeBlur].constant=ParamValue::scalar(12);
+    const auto blur=capture();AUREA_CHECK(max_diff(red,blur)>30);
+    auto& track=l->tracks.get_or_create(TrackProperty::EffectParam,fx.id,param_track_key(text::aePosition,0));
+    track.set(FrameIndex{0},0);track.set(FrameIndex{30},120);for(auto& k:track.keys)k.interp=Interpolation::Linear;
+    const auto moved=capture(30);AUREA_CHECK(max_diff(blur,moved)>30);
+    AUREA_CHECK(rig.e.save_project("build/regression-2128-animator.aurea").ok());
+    AUREA_CHECK(rig.e.load_project("build/regression-2128-animator.aurea").ok());
+    AUREA_CHECK(max_diff(moved,capture(30))<=3);
+    (void)write_png("build/regression-2128-text-base.png",base);
+    (void)write_png("build/regression-2128-text-blur.png",blur);
+}
+
+AUREA_TEST(Gpu, Regression2128GradientAndBevelPreserveTransparentEdges) {
+    AUREA_REQUIRE_GPU();Scene s(96,64);s.comp->set_transparent_background(true);
+    const auto id=s.solid(48,32,{.5f,.5f,.5f,1},48,32);const auto base=s.render();
+    auto& gradient=s.add_effect(id,"aurea.color.gradient_map");
+    gradient.params[0].constant=gradient.params[1].constant=gradient.params[2].constant=ParamValue::color(1,0,0,1);
+    const auto red=s.render();AUREA_CHECK(red.v(48,32).x>.95f);AUREA_CHECK(red.v(48,32).y<.01f);AUREA_CHECK(red.v(0,0).w<.001f);
+    gradient.params[4].constant=ParamValue::scalar(0);const auto bypass=s.render();
+    for(usize i=0;i<base.px.size();++i)AUREA_CHECK_NEAR(base.px[i],bypass.px[i],.001);
+    s.add_effect(id,"aurea.stylize.bevel_alpha");const auto bevel=s.render();
+    f32 difference=0;
+    for(usize i=0;i<base.px.size();i+=4){AUREA_CHECK_NEAR(base.px[i+3],bevel.px[i+3],.001);difference+=std::fabs(base.px[i]-bevel.px[i]);}
+    AUREA_CHECK(difference>5);
+    (void)write_png("build/regression-2128-bevel.png",bevel.encoded());
+}
+
+AUREA_TEST(Gpu, Regression2128NullMotionTileKeyframesReachChildren) {
+    AUREA_REQUIRE_GPU();Scene s(128,72);
+    const auto id=s.image(uniform_image(32,32,220,50,20),64,36);
+    auto parent=s.comp->add_layer(LayerKind::Null,"null");s.comp->layer(id)->parent=parent;
+    auto& fx=s.add_effect(parent,effect_keys::kMotionTile);
+    fx.params[1].constant=ParamValue::scalar(50);fx.params[2].constant=ParamValue::scalar(50);
+    auto& tr=s.comp->layer(parent)->tracks.get_or_create(TrackProperty::EffectParam,fx.id,param_track_key(4,0));
+    tr.set(FrameIndex{0},25);tr.set(FrameIndex{30},100);for(auto& k:tr.keys)k.interp=Interpolation::Linear;
+    const auto first=s.render(FrameIndex{0}),last=s.render(FrameIndex{30});
+    f32 difference=0;for(usize i=0;i<first.px.size();++i)difference+=std::fabs(first.px[i]-last.px[i]);
+    AUREA_CHECK(difference>100);
+}
 #endif

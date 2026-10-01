@@ -28,8 +28,8 @@ struct HeavyQuality {
     /// Escala da base da pirâmide do optical flow (0,25..1; 1 = 384 px no lado
     /// maior). A deformação continua na resolução do vídeo.
     f32 flow = 1.0f;
-    /// Amostras do desfoque vetorial (pelo fluxo), 4..16.
-    u32 flowBlurSamples = 16;
+    /// Amostras do desfoque vetorial: 64 no export, 8..32 no preview adaptativo.
+    u32 flowBlurSamples = 64;
     /// Mapa de sombra do 3D (lado, 512..4096) e nível da sombra (cada amostra
     /// é um PCF 2×2 do sampler de comparação):
     ///   0 BAIXO   PCF 8, raio fixo              (mapa até 1024)
@@ -66,7 +66,7 @@ struct HeavyQuality {
         const f32 s = std::clamp(heavyScale, 0.05f, 1.0f);
         q.particles = s;
         q.flow = std::clamp(s, 0.25f, 1.0f);
-        q.flowBlurSamples = s >= 0.75f ? 16u : (s >= 0.4f ? 8u : 4u);
+        q.flowBlurSamples = s >= 0.75f ? 32u : (s >= 0.4f ? 16u : 8u);
         u32 shadow = s >= 0.75f ? 2048u : (s >= 0.4f ? 1024u : 512u);
         const u32 den = std::max(1u, previewDen);
         shadow = std::max(512u, std::min(shadow, 2048u / std::min(den, 4u)));
@@ -90,7 +90,7 @@ struct HeavyQuality {
     }
 
     [[nodiscard]] bool is_full() const noexcept {
-        return particles >= 1.0f && flow >= 1.0f && flowBlurSamples >= 16 && shadowMapSize >= 2048 && shadowFilter >= 2
+        return particles >= 1.0f && flow >= 1.0f && flowBlurSamples >= 32 && shadowMapSize >= 2048 && shadowFilter >= 2
             && lodBias >= 1.0f && effects >= 1.0f && msaaSamples >= 4 && bloomLevels >= 6;
     }
 };

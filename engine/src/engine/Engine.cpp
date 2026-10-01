@@ -4067,6 +4067,28 @@ u32 Engine::query_time_remap(u64 layerId, f32* out, u32 maxFloats) noexcept {
     return w;
 }
 
+bool Engine::set_time_remap_value(u64 layerId, i64 localFrame, f32 sourceFrame) noexcept {
+    if (!std::isfinite(sourceFrame)) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    // Apply a queued seek and begin-undo before editing. The gesture supplies
+    // its fixed timeline key, so decoder feedback cannot move the edit target.
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || localFrame < l->local_time(l->start).value || localFrame > l->local_time(l->end).value) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "tempo do vídeo");
+    enable_time_remap_curve(*l);
+    const FrameIndex key{localFrame};
+    const u32 at = l->timeRemap.find_exact(key);
+    const f64 last = source_last_frame(*project_, *l, comp->fps() > 0 ? comp->fps() : 30);
+    const f32 value = last > 0 ? std::clamp(sourceFrame, 0.f, static_cast<f32>(last)) : std::max(0.f, sourceFrame);
+    write_time_remap(*l, key, value, at == kInvalidIndex ? Interpolation::Linear : l->timeRemap.keys[at].interp);
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 i32 Engine::edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sourceFrame, i32 interp) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -6714,11 +6736,12 @@ bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, b
     return true;
 }
 
-bool Engine::set_text_style(u64 layerId, const f32* v) noexcept {
+bool Engine::set_text_style(u64 layerId, const f32* v, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || !v) return false;
+    if (!l || l->kind != LayerKind::Text || !v || count < 18) return false;
+    for (u32 i = 0; i < std::min(count, 20u); ++i) if (!std::isfinite(v[i])) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "estilo do texto");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     TextData& t = l->text;
@@ -6734,21 +6757,26 @@ bool Engine::set_text_style(u64 layerId, const f32* v) noexcept {
     t.shadowColor = Vec4{v[11], v[12], v[13], v[14]};
     t.shadowOffset = Vec2{std::clamp(v[15], -500.0f, 500.0f), std::clamp(v[16], -500.0f, 500.0f)};
     t.shadowBlur = std::clamp(v[17], 0.0f, 200.0f);
+    if (count >= 20) {
+        t.lineHeight = std::clamp(v[18], 0.1f, 10.0f);
+        t.tracking = std::clamp(v[19], -1000.0f, 1000.0f);
+    }
     project_->mark_dirty();
     request_render();
     return true;
 }
 
-bool Engine::query_text_style(u64 layerId, f32* v) noexcept {
+bool Engine::query_text_style(u64 layerId, f32* v, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || !v) return false;
+    if (!l || l->kind != LayerKind::Text || !v || capacity < 18) return false;
     const TextData& t = l->text;
     const f32 o[18] = {static_cast<f32>(t.boxMode), t.box.w, t.box.h, t.background ? 1.0f : 0.0f, t.backgroundColor.x, t.backgroundColor.y,
                        t.backgroundColor.z, t.backgroundColor.w, t.backgroundPadding, t.backgroundRadius, t.shadow ? 1.0f : 0.0f,
                        t.shadowColor.x, t.shadowColor.y, t.shadowColor.z, t.shadowColor.w, t.shadowOffset.x, t.shadowOffset.y, t.shadowBlur};
     std::copy(o, o + 18, v);
+    if (capacity >= 20) { v[18] = t.lineHeight; v[19] = t.tracking; }
     return true;
 }
 
@@ -7253,7 +7281,7 @@ bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
         l->motionBlur = true;
         comp->motion_blur().enabled = true;
         comp->motion_blur().shutterAngle = 180;
-        comp->motion_blur().samples = 5;
+        comp->motion_blur().samples = std::max(32u, comp->motion_blur().samples);
     }
     if (ok && begin > l->start.value) {
         // Applying at the playhead must not retroactively hide or transform
@@ -9037,6 +9065,10 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
     const FrameIndex local = l->local_time(playback_.current());
     u32 cursor = 0, written = 0;
     for (u32 i = 0; i < params->count() && written < capacity; ++i) {
+        // Extruded glyphs support geometry, opacity and fill. Raster-only
+        // blur/stroke controls belong to 2D text and its 3D planes.
+        if (inst->type == effect_type_id(text::kAnimatorEffect) && l->kind == LayerKind::Model3D &&
+            (i == text::aeBlur || i == text::aeStrokeWidth || i == text::aeStrokeOn || i == text::aeStroke)) continue;
         const ParamSpec& spec = params->at(i);
         bridge::EffectParamRow row;
         row.index = i;
@@ -10733,6 +10765,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const EffectTypeId type = cmd.effect_add.effectType;
             if (type == effect_type_id(effect_keys::kRotobrush) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
             if (type == effect_type_id(text::kTransformEffect) && l->kind != LayerKind::Text) return Errc::InvalidArgument;
+            if (type == effect_type_id(text::kAnimatorEffect) && l->kind != LayerKind::Text) {
+                const Asset* source = project_->asset(l->model.scene);
+                scene3d::Text3DSpec spec;
+                if (l->kind != LayerKind::Model3D || !source || !scene3d::decode_text3d(source->sourcePath, spec)) return Errc::InvalidArgument;
+                const Status ready = ensure_text3d_layout(*l);
+                if (!ready.ok()) return ready;
+            }
             const ParameterRegistry* params = effectRegistry_.params(type);
             if (!params) return Errc::NotSupported;
             if (type == effect_type_id(effect_keys::kText3DLayout)) {

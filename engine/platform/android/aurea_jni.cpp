@@ -1789,17 +1789,19 @@ AUREA_JNI jboolean AUREA_FN(nativeSetTextFont)(JNIEnv* env, jclass, jlong handle
 AUREA_JNI jboolean AUREA_FN(nativeSetTextStyle)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray in) {
     NativeContext* c = ctx_of(handle);
     if (!c || !in || env->GetArrayLength(in) < 18) return JNI_FALSE;
-    f32 v[18];
-    env->GetFloatArrayRegion(in, 0, 18, v);
-    return c->engine.set_text_style(static_cast<u64>(layer), v) ? JNI_TRUE : JNI_FALSE;
+    const u32 n = env->GetArrayLength(in) >= 20 ? 20 : 18;
+    f32 v[20]{};
+    env->GetFloatArrayRegion(in, 0, n, v);
+    return c->engine.set_text_style(static_cast<u64>(layer), v, n) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeQueryTextStyle)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out || env->GetArrayLength(out) < 18) return JNI_FALSE;
-    f32 v[18];
-    if (!c->engine.query_text_style(static_cast<u64>(layer), v)) return JNI_FALSE;
-    env->SetFloatArrayRegion(out, 0, 18, v);
+    const u32 n = env->GetArrayLength(out) >= 20 ? 20 : 18;
+    f32 v[20]{};
+    if (!c->engine.query_text_style(static_cast<u64>(layer), v, n)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, n, v);
     return JNI_TRUE;
 }
 
@@ -2577,6 +2579,11 @@ AUREA_JNI jint AUREA_FN(nativeQueryTimeRemap)(JNIEnv* env, jclass, jlong handle,
     const u32 w = c->engine.query_time_remap(static_cast<u64>(layer), v.data(), static_cast<u32>(n));
     if (w) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(w), v.data());
     return static_cast<jint>(w);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetTimeRemapValue)(JNIEnv*, jclass, jlong handle, jlong layer, jlong frame, jfloat value) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_time_remap_value(static_cast<u64>(layer), frame, value) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jint AUREA_FN(nativeEditTimeRemapKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jlong frame,

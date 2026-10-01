@@ -54,9 +54,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // versionCode 2127: Grid Builder, PSD em camadas e recorte local por IA. Um número maior é
+        // versionCode 2128: animador de texto, remapeamento e cortes independentes. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2127
+        versionCode = 2128
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -23,17 +23,17 @@ public:
     }
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("count", mode_ == 1 ? "Rays" : "Count", 12.f, 1.f, 200.f);
-        p.add_float("width", "Width", mode_ == 2 ? 6.f : 50.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_angle("angle", "Angle", mode_ == 0 ? 45.f : 0.f);
-        p.add_float("phase", "Phase", 0.f, -100.f, 100.f);
-        p.add_float("center_x", "Center X", 50.f, -200.f, 300.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("center_y", "Center Y", 50.f, -200.f, 300.f, kParamAnimatable | kParamPercent, "%");
-        p.add_color("color", "Color", {0.05f, .65f, 1.f, 1.f});
-        p.add_float("opacity", "Opacity", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("stretch", "Stretch Y", 100.f, 10.f, 1000.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("feather", "Feather", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("width", "Largura", mode_ == 2 ? 6.f : 50.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_angle("angle", "Ângulo", mode_ == 0 ? 45.f : 0.f);
+        p.add_float("phase", "Fase", 0.f, -100.f, 100.f);
+        p.add_float("center_x", "Centro X", 50.f, -200.f, 300.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("center_y", "Centro Y", 50.f, -200.f, 300.f, kParamAnimatable | kParamPercent, "%");
+        p.add_color("color", "Cor", {0.05f, .65f, 1.f, 1.f});
+        p.add_float("opacity", "Opacidade", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("stretch", "Esticar Y", 100.f, 10.f, 1000.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("feather", "Suavizar borda", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
         static const char* modes[] = {"Normal", "Multiply", "Screen"};
-        p.add_enum("blend", "Blend", modes, 3, 0);
+        p.add_enum("blend", "Mistura", modes, 3, 0);
     }
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(1) <= 0.f || e.f(7) <= 0.f || e.color(6).w <= 0.f; }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
@@ -63,8 +63,8 @@ public:
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_float("rotation", "Inherit Rotation", 100.f, -200.f, 200.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("scale", "Inherit Scale", 100.f, 0.f, 200.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("rotation", "Herdar rotação", 100.f, -200.f, 200.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("scale", "Herdar escala", 100.f, 0.f, 200.f, kParamAnimatable | kParamPercent, "%");
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
@@ -80,6 +80,58 @@ public:
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
 
+class TextAnimatorEffect final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{text::kAnimatorEffect, "Text Animator", "Text", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override { text::declare_animator_effect_params(p); }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
+class TextSurfaceEffect final : public Effect {
+    bool bevel_;
+public:
+    explicit TextSurfaceEffect(bool bevel) : bevel_(bevel) {}
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo bevel{"aurea.stylize.bevel_alpha", "Bevel Alpha", "Stylize", EffectClass::Neighborhood};
+        static const EffectInfo gradient{"aurea.color.gradient_map", "Gradient Map", "Cor", EffectClass::Domain};
+        return bevel_ ? bevel : gradient;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        if (bevel_) {
+            p.add_float("width", "Largura", 6, 0, 100, kParamAnimatable | kParamPixels, "px");
+            p.add_angle("angle", "Ângulo da luz", -45);
+            p.add_float("strength", "Força", 100, 0, 400, kParamAnimatable | kParamPercent, "%");
+            p.add_color("highlight", "Destaque", {1, 1, 1, 1});
+            p.add_color("shadow", "Sombra", {0, 0, 0, 1});
+        } else {
+            p.add_color("shadows", "Sombras", {0.08f, 0.02f, 0.25f, 1});
+            p.add_color("midtones", "Tons médios", {0.8f, 0.1f, 0.3f, 1});
+            p.add_color("highlights", "Luzes", {1, 0.8f, 0.3f, 1});
+            p.add_float("midpoint", "Ponto médio", 50, 1, 99, kParamAnimatable | kParamPercent, "%");
+            p.add_float("mix", "Mistura", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
+        }
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return bevel_ ? e.f(0) <= 0 || e.f(2) <= 0 : e.f(4) <= 0; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(bevel_ ? ShaderId::effects_bevel_alpha_frag : ShaderId::effects_gradient_map_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
+        EffectUniforms u = base_uniforms(input);
+        if (bevel_) {
+            u.p0 = {e.f(0) / std::max(1.f, input.region.w), e.f(0) / std::max(1.f, input.region.h), e.f(1) * kDeg2Rad, e.f(2) * .01f};
+            u.p1 = e.color(3); u.p2 = e.color(4);
+        } else {
+            u.p0 = {e.f(3) * .01f, e.f(4) * .01f, 0, 0};
+            u.p1 = e.color(0); u.p2 = e.color(1); u.color = e.color(2);
+        }
+        return single_pass(ctx, bevel_ ? ShaderId::effects_bevel_alpha_frag : ShaderId::effects_gradient_map_frag, input, u,
+                           bevel_ ? "bevel-alpha" : "gradient-map", out);
+    }
+};
+
 class Text3DLayout final : public Effect {
 public:
     const EffectInfo& info() const noexcept override {
@@ -87,22 +139,22 @@ public:
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_angle("rotation_x", "Letter Rotation X", 0.f);
-        p.add_angle("rotation_y", "Letter Rotation Y", 0.f);
-        p.add_angle("rotation_z", "Letter Rotation Z", 0.f);
-        p.add_angle("bend", "Cylinder Bend", 0.f, -360.f, 360.f);
-        p.add_float("spacing", "Letter Spacing", 100.f, 10.f, 500.f, kParamAnimatable | kParamPercent, "%");
-        p.add_angle("twist", "Twist", 0.f, -720.f, 720.f);
-        p.add_int("first", "First Letter", 1, 1, 256);
-        p.add_int("last", "Last Letter", 256, 1, 256);
-        p.add_float("amount", "Amount", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("letter_delay", "Delay per Letter", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
-        p.add_float("rotation_variation", "Rotation Variation", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_int("seed", "Variation Seed", 1, 0, 9999);
+        p.add_angle("rotation_x", "Rotação das letras X", 0.f);
+        p.add_angle("rotation_y", "Rotação das letras Y", 0.f);
+        p.add_angle("rotation_z", "Rotação das letras Z", 0.f);
+        p.add_angle("bend", "Curvatura em cilindro", 0.f, -360.f, 360.f);
+        p.add_float("spacing", "Espaçamento entre letras", 100.f, 10.f, 500.f, kParamAnimatable | kParamPercent, "%");
+        p.add_angle("twist", "Torção", 0.f, -720.f, 720.f);
+        p.add_int("first", "Primeira letra", 1, 1, 256);
+        p.add_int("last", "Última letra", 256, 1, 256);
+        p.add_float("amount", "Intensidade", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("letter_delay", "Atraso por letra", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
+        p.add_float("rotation_variation", "Variação da rotação", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_int("seed", "Semente da variação", 1, 0, 9999);
         // Anexados (os índices acima são os dos projetos salvos): cada letra
         // gira e anda do SEU jeito, todas ao mesmo tempo; velocidade 0 = parado.
-        p.add_float("random", "Random", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("random_speed", "Random Speed", 1.f, 0.f, 10.f, kParamAnimatable);
+        p.add_float("random", "Aleatório", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("random_speed", "Velocidade aleatória", 1.f, 0.f, 10.f, kParamAnimatable);
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
@@ -117,20 +169,20 @@ public:
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_angle("rotation_x", "Part Rotation X", 0.f);
-        p.add_angle("rotation_y", "Part Rotation Y", 0.f);
-        p.add_angle("rotation_z", "Part Rotation Z", 0.f);
-        p.add_angle("bend", "Bend", 0.f, -360.f, 360.f);
-        p.add_float("spread", "Spread", 100.f, 10.f, 500.f, kParamAnimatable | kParamPercent, "%");
-        p.add_angle("twist", "Twist", 0.f, -720.f, 720.f);
-        p.add_int("first", "First Part", 1, 1, 256);
-        p.add_int("last", "Last Part", 256, 1, 256);
-        p.add_float("amount", "Amount", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("part_delay", "Delay per Part", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
-        p.add_float("rotation_variation", "Rotation Variation", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_int("seed", "Variation Seed", 1, 0, 9999);
-        p.add_float("random", "Random", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("random_speed", "Random Speed", 1.f, 0.f, 10.f, kParamAnimatable);
+        p.add_angle("rotation_x", "Rotação das partes X", 0.f);
+        p.add_angle("rotation_y", "Rotação das partes Y", 0.f);
+        p.add_angle("rotation_z", "Rotação das partes Z", 0.f);
+        p.add_angle("bend", "Curvar", 0.f, -360.f, 360.f);
+        p.add_float("spread", "Abertura", 100.f, 10.f, 500.f, kParamAnimatable | kParamPercent, "%");
+        p.add_angle("twist", "Torção", 0.f, -720.f, 720.f);
+        p.add_int("first", "Primeira parte", 1, 1, 256);
+        p.add_int("last", "Última parte", 256, 1, 256);
+        p.add_float("amount", "Intensidade", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("part_delay", "Atraso por parte", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
+        p.add_float("rotation_variation", "Variação da rotação", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_int("seed", "Semente da variação", 1, 0, 9999);
+        p.add_float("random", "Aleatório", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("random_speed", "Velocidade aleatória", 1.f, 0.f, 10.f, kParamAnimatable);
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
@@ -250,6 +302,9 @@ void register_pattern_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<ParentingHelper>());
     (void)r.add(std::make_unique<Text3DLayout>());
     (void)r.add(std::make_unique<TextTransform>());
+    (void)r.add(std::make_unique<TextAnimatorEffect>());
+    (void)r.add(std::make_unique<TextSurfaceEffect>(true));
+    (void)r.add(std::make_unique<TextSurfaceEffect>(false));
     (void)r.add(std::make_unique<Checkerboard>());
     (void)r.add(std::make_unique<HexagonalArray>());
 }

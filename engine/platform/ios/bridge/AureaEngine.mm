@@ -2673,6 +2673,10 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     std::vector<float> v(capacity); const auto n = e->query_time_remap(layerId, v.data(), capacity);
     return floats_to_array(v.data(), n);
 }
+- (BOOL)setTimeRemapValue:(long long)layerId time:(int64_t)time value:(float)value {
+    auto* e = self.engine;
+    return e && e->set_time_remap_value(layerId, time, value);
+}
 - (int32_t)editTimeRemap:(long long)layerId index:(int32_t)index time:(int64_t)time value:(float)value interpolation:(int32_t)interpolation {
     auto* e = self.engine; return e ? e->edit_time_remap_key(layerId, index, time, value, interpolation) : -1;
 }
@@ -3073,16 +3077,16 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 }
 - (NSArray<NSNumber*>*)textStyle:(long long)layerId {
     auto* e = self.engine;
-    float values[18]{};
-    if (!e || !e->query_text_style(layerId, values)) return @[];
-    return floats_to_array(values, 18);
+    float values[20]{};
+    if (!e || !e->query_text_style(layerId, values, 20)) return @[];
+    return floats_to_array(values, 20);
 }
 - (BOOL)setTextStyle:(long long)layerId values:(NSArray<NSNumber*>*)values {
     auto* e = self.engine;
-    if (!e || values.count != 18) return NO;
-    float raw[18];
-    for (NSUInteger i = 0; i < 18; ++i) raw[i] = values[i].floatValue;
-    return e->set_text_style(layerId, raw);
+    if (!e || (values.count != 18 && values.count != 20)) return NO;
+    float raw[20]{};
+    for (NSUInteger i = 0; i < values.count; ++i) raw[i] = values[i].floatValue;
+    return e->set_text_style(layerId, raw, static_cast<u32>(values.count));
 }
 
 - (void)setLayer:(long long)layerId fadeIn:(int32_t)frames {

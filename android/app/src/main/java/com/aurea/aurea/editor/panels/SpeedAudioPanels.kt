@@ -475,6 +475,7 @@ internal fun TimeRemapEffectEditor(env: PanelEnv, effectId: Int) {
         val inside = local in lo..hi
         // 2) Remapear tempo: ◇ no rótulo, timecode arrastável/digitável e a curva.
         var drag by remember { mutableStateOf<Float?>(null) }
+        var dragLocal by remember(store.primary, effectId) { mutableStateOf<Int?>(null) }
         val shownFrames = drag ?: (seconds * fps)
         val title = stringResource(R.string.remap_linha_tempo)
         val curveDesc = stringResource(R.string.remap_editar_curva)
@@ -496,9 +497,9 @@ internal fun TimeRemapEffectEditor(env: PanelEnv, effectId: Int) {
                         unitsPerDp = { 0.25f },
                         min = 0f,
                         max = lastFrame,
-                        onStart = { store.beginGesture("tempo do vídeo") },
-                        onValue = { f -> drag = f; store.setRemapTime(effectId, f.roundToInt() / fps) },
-                        onEnd = { drag = null; store.endGesture() },
+                        onStart = { dragLocal = local; store.beginGesture("tempo do vídeo") },
+                        onValue = { f -> drag = f.roundToInt().toFloat(); store.setRemapTime(effectId, f.roundToInt() / fps, dragLocal ?: local) },
+                        onEnd = { store.endGesture(); drag = null; dragLocal = null },
                     ),
                     contentAlignment = Alignment.CenterStart,
                 ) {

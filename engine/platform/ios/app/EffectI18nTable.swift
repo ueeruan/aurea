@@ -19,7 +19,7 @@ enum EffectI18nTable {
     private static let table = """
     aurea.transform|0|anchor|fx_pivo|
     aurea.transform|1|position|fx_posicao|
-    aurea.transform|2|scale|fx_escala|
+    aurea.transform|2|scale|fxl_scale|
     aurea.transform|3|rotation|fx_rotacao|
     aurea.transform|4|opacity|fxl_opacity|
     aurea.color.exposure|0|exposure|fxl_exposure|
@@ -182,7 +182,7 @@ enum EffectI18nTable {
     aurea.color.invert|1|invert_alpha|fxl_invert_transparency|
     aurea.stylize.scanlines|0|height|fx_altura_linha|
     aurea.stylize.scanlines|1|intensity|fxl_amount|
-    aurea.stylize.scanlines|2|offset|fx_deslocamento|
+    aurea.stylize.scanlines|2|offset|fxl_offset|
     aurea.stylize.scanlines|3|softness|fx_suavidade|
     aurea.stylize.scanlines|4|contrast|fx_contraste|
     aurea.stylize.scanlines|5|speed|fxl_speed|
@@ -292,7 +292,7 @@ enum EffectI18nTable {
     aurea.color.colorama|5|mix|fx_mistura|
     aurea.color.colorama|6|invert|fx_inverter_arco_iris|
     aurea.color.colorama|7|chroma|fx_peso_croma|
-    aurea.color.colorama|8|offset|fx_deslocamento|
+    aurea.color.colorama|8|offset|fxl_offset|
     aurea.color.colorama|9|gain|fx_ganho|
     aurea.color.colorama|10|tint|fx_name_tint|
     aurea.glitch.glitchify|0|band_height|fx_altura_faixa|
@@ -490,7 +490,7 @@ enum EffectI18nTable {
     aurea.pattern.stripes|7|opacity|fxl_opacity|
     aurea.pattern.stripes|8|stretch|fxl_stretch_y|
     aurea.pattern.stripes|9|feather|fxl_feather|
-    aurea.pattern.stripes|10|blend|fxl_blend|fxo_normal,fxo_multiply,fxo_screen
+    aurea.pattern.stripes|10|blend|fxl_mix|fxo_normal,fxo_multiply,fxo_screen
     aurea.pattern.radial_rays|0|count|fxl_rays|
     aurea.pattern.radial_rays|1|width|fxl_width|
     aurea.pattern.radial_rays|2|angle|fxl_angle|
@@ -501,7 +501,7 @@ enum EffectI18nTable {
     aurea.pattern.radial_rays|7|opacity|fxl_opacity|
     aurea.pattern.radial_rays|8|stretch|fxl_stretch_y|
     aurea.pattern.radial_rays|9|feather|fxl_feather|
-    aurea.pattern.radial_rays|10|blend|fxl_blend|fxo_normal,fxo_multiply,fxo_screen
+    aurea.pattern.radial_rays|10|blend|fxl_mix|fxo_normal,fxo_multiply,fxo_screen
     aurea.pattern.grid|0|count|fxl_count|
     aurea.pattern.grid|1|width|fxl_width|
     aurea.pattern.grid|2|angle|fxl_angle|
@@ -512,14 +512,14 @@ enum EffectI18nTable {
     aurea.pattern.grid|7|opacity|fxl_opacity|
     aurea.pattern.grid|8|stretch|fxl_stretch_y|
     aurea.pattern.grid|9|feather|fxl_feather|
-    aurea.pattern.grid|10|blend|fxl_blend|fxo_normal,fxo_multiply,fxo_screen
+    aurea.pattern.grid|10|blend|fxl_mix|fxo_normal,fxo_multiply,fxo_screen
     aurea.transform.parenting_helper|0|rotation|fxl_inherit_rotation|
     aurea.transform.parenting_helper|1|scale|fxl_inherit_scale|
     aurea.text3d.layout|0|rotation_x|fxl_letter_rotation_x|
     aurea.text3d.layout|1|rotation_y|fxl_letter_rotation_y|
     aurea.text3d.layout|2|rotation_z|fxl_letter_rotation_z|
     aurea.text3d.layout|3|bend|fxl_cylinder_bend|
-    aurea.text3d.layout|4|spacing|fxl_letter_spacing|
+    aurea.text3d.layout|4|spacing|fxl_letter_spacing_2|
     aurea.text3d.layout|5|twist|fxl_twist|
     aurea.text3d.layout|6|first|fxl_first_letter|
     aurea.text3d.layout|7|last|fxl_last_letter|
@@ -547,6 +547,40 @@ enum EffectI18nTable {
     aurea.text.transform|15|shape|fxl_shape|fxo_square_2,fxo_smooth,fxo_triangle
     aurea.text.transform|16|random_order|fxl_random_order|
     aurea.text.transform|17|seed|fxl_seed|
+    aurea.text.animator|0|start|fxl_start|
+    aurea.text.animator|1|end|fxl_end|
+    aurea.text.animator|2|offset|fxl_selector_offset|
+    aurea.text.animator|3|amount|fxl_amount|
+    aurea.text.animator|4|unit|fx_unidade|fxo_letter,fxo_word,fxo_line
+    aurea.text.animator|5|shape|fxl_selector_shape|fxo_square_2,fxo_ramp_up,fxo_ramp_down,fxo_triangle,fxo_round,fxo_smooth
+    aurea.text.animator|6|ease_high|fxl_ease_high|
+    aurea.text.animator|7|ease_low|fxl_ease_low|
+    aurea.text.animator|8|random_order|fxl_random_order|
+    aurea.text.animator|9|seed|fxl_seed|
+    aurea.text.animator|10|selector|fxl_selector|fx_diffusion_reach,fxo_wiggle
+    aurea.text.animator|11|wiggle_rate|fxl_wiggle_frequency|
+    aurea.text.animator|12|position|fx_posicao|
+    aurea.text.animator|13|scale|fxl_scale|
+    aurea.text.animator|14|rotation|fx_rotacao|
+    aurea.text.animator|15|opacity|fxl_opacity|
+    aurea.text.animator|16|blur|fx_name_gaussian_blur|
+    aurea.text.animator|17|tracking|fxl_letter_spacing_2|
+    aurea.text.animator|18|skew|fxl_skew|
+    aurea.text.animator|19|stroke_width|fxl_stroke_width|
+    aurea.text.animator|20|fill_enabled|fxl_override_fill_color|
+    aurea.text.animator|21|fill_color|fxl_fill_color|
+    aurea.text.animator|22|stroke_enabled|fxl_override_stroke_color|
+    aurea.text.animator|23|stroke_color|fxl_stroke_color|
+    aurea.stylize.bevel_alpha|0|width|fxl_width|
+    aurea.stylize.bevel_alpha|1|angle|fxl_light_angle|
+    aurea.stylize.bevel_alpha|2|strength|fxl_strength|
+    aurea.stylize.bevel_alpha|3|highlight|fxl_highlight|
+    aurea.stylize.bevel_alpha|4|shadow|fxl_shadow|
+    aurea.color.gradient_map|0|shadows|fx_sombras|
+    aurea.color.gradient_map|1|midtones|fx_tons_medios|
+    aurea.color.gradient_map|2|highlights|fx_luzes|
+    aurea.color.gradient_map|3|midpoint|fxl_midpoint|
+    aurea.color.gradient_map|4|mix|fxl_mix|
     aurea.pattern.checkerboard|0|width|fx_largura_celula|
     aurea.pattern.checkerboard|1|height|fx_altura_celula|
     aurea.pattern.checkerboard|2|anchor|fx_ancora|
@@ -819,7 +853,7 @@ enum EffectI18nTable {
     aurea.stylize.vhs|7|tone|afx_name_tone|
     aurea.stylize.vhs|8|saturation|fx_saturacao|
     aurea.stylize.vhs|9|vignette|fx_vinheta|
-    aurea.stylize.vhs|10|overlay|fxl_overlay|fxo_none,fxo_play,fxo_rec,fxo_pause
+    aurea.stylize.vhs|10|overlay|fxl_overlap|fxo_none,fxo_play,fxo_rec,fxo_pause
     aurea.stylize.vhs|11|show_time|fxl_show_time|
     aurea.stylize.vhs|12|label|fxl_label|fxo_sp,fxo_lp,fxo_ep
     aurea.stylize.vhs|13|osd_color|fxl_osd_color|
@@ -828,6 +862,39 @@ enum EffectI18nTable {
     aurea.ai.depth_map|0|mix|fx_mistura|
     aurea.ai.depth_map|1|invert|fx_inverter|
     aurea.ai.depth_map|2|smoothing|fx_suavizacao|
+    aurea.key.rotobrush|0|threshold|fxl_threshold|
+    aurea.key.rotobrush|1|feather|fx_suavidade_borda|
+    aurea.key.rotobrush|2|expand|fxl_mask_adjustment|
+    aurea.key.rotobrush|3|invert|fxl_invert_mask|
+    aurea.key.rotobrush|4|mix|fxl_mix|
+    aurea.key.rotobrush|5|matte|fx_mostrar_mascara|
+    aurea.layout.grid_builder|0|mode|fxl_layout|fxo_rectangular,fxo_radial,fxo_path,fxo_sphere
+    aurea.layout.grid_builder|1|columns|fxl_columns|
+    aurea.layout.grid_builder|2|spacing_x|fxl_x_spacing|
+    aurea.layout.grid_builder|3|spacing_y|fxl_y_spacing|
+    aurea.layout.grid_builder|4|radius|fxl_radius|
+    aurea.layout.grid_builder|5|angle|fxl_start_angle|
+    aurea.layout.grid_builder|6|sweep|fxl_arc|
+    aurea.layout.grid_builder|7|depth|fxo_depth|
+    aurea.layout.grid_builder|8|orientation|fxl_orientation|fxo_front,fxl_center,fxo_tangent
+    aurea.layout.grid_builder|9|path|fxl_default_path|fxo_line,fxl_wave,fxo_spiral
+    aurea.layout.grid_builder|10|target|fxl_target_layout|fxo_rectangular,fxo_radial,fxo_path,fxo_sphere
+    aurea.layout.grid_builder|11|morph|fxl_transition|
+    aurea.layout.grid_builder|12|scale|fxl_element_scale|
+    aurea.layout.grid_builder|13|twist|fxl_rotation_per_element|
+    aurea.layout.grid_builder|14|delay|fxl_delay_per_element|
+    aurea.layout.grid_builder|15|effector_x|fxl_proximity_x|
+    aurea.layout.grid_builder|16|effector_y|fxl_proximity_y|
+    aurea.layout.grid_builder|17|effector_z|fxl_proximity_z|
+    aurea.layout.grid_builder|18|range|fxl_proximity_radius|
+    aurea.layout.grid_builder|19|strength|fxl_proximity_strength|
+    aurea.layout.grid_builder|20|proximity_scale|fxl_nearby_scale|
+    aurea.layout.grid_builder|21|proximity_rotation|fxl_nearby_rotation|
+    aurea.layout.grid_builder|22|attract|fxl_attract_repel|
+    aurea.layout.grid_builder|23|proximity_opacity|fxl_nearby_opacity|
+    aurea.layout.grid_builder|24|path_layer|fxl_path_layer|
+    aurea.layout.grid_builder|25|path_offset|fxl_path_offset|
+    aurea.layout.grid_item|0|index|fxl_grid_order|
     aurea.audio.backwards|0|swap_channels|afx_p_swap_channels|
     aurea.audio.delay|0|delay_time|afx_p_delay_time|
     aurea.audio.delay|1|delay_amount|afx_p_delay_amount|
@@ -978,7 +1045,7 @@ enum EffectI18nTable {
     aurea.shape3d.layout|1|rotation_y|fxl_part_rotation_y|
     aurea.shape3d.layout|2|rotation_z|fxl_part_rotation_z|
     aurea.shape3d.layout|3|bend|fxl_bend|
-    aurea.shape3d.layout|4|spread|fxl_spread|
+    aurea.shape3d.layout|4|spread|fxl_spread_2|
     aurea.shape3d.layout|5|twist|fxl_twist|
     aurea.shape3d.layout|6|first|fxl_first_part|
     aurea.shape3d.layout|7|last|fxl_last_part|

@@ -21,9 +21,9 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
 
 void main() {
     vec2 f = texture(u_flow, v_uv).xy * p.blur.yz * p.blur.x;
-    int n = int(p.blur.w);
+    int n = clamp(int(p.blur.w), 1, 64);
     vec4 acc = vec4(0.0);
-    for (int i = 0; i < 32; ++i) {
+    for (int i = 0; i < 64; ++i) {
         if (i >= n) break;
         float s = (float(i) + 0.5) / float(n) - 0.5;
         acc += texture(u_img, v_uv + s * f);

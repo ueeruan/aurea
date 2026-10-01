@@ -149,6 +149,7 @@ struct SceneInstance {
     /// Opacidade por nó (vazio = tudo 1): letras do texto 3D animadas. Abaixo
     /// de 1 o nó mistura como transparente; perto de 0 nem desenha.
     std::vector<f32> nodeOpacity;
+    std::vector<Vec4> nodeFill; ///< Linear RGB override and selector mix weight.
     bool castShadows = true;
     u64  layerKey = 0;                 ///< camada de origem (sub-quadros do desfoque)
     bool motionBlur = false;           ///< a camada pede desfoque de movimento

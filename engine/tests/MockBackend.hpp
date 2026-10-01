@@ -12,6 +12,7 @@
 
 #include <vector>
 #include <functional>
+#include <unordered_map>
 
 namespace aurea::test {
 
@@ -49,6 +50,8 @@ public:
     bool surfaceAttached = false;
     bool frameOpen = false;
     bool failPipelines = false;
+    bool mapBuffers = false;
+    std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
     GPUCapabilities caps;
 
@@ -115,7 +118,11 @@ public:
         ++texturesCreated;
         return TextureHandle{textures.size()};
     }
-    Result<BufferHandle> create_buffer(const BufferDesc&) noexcept override { return BufferHandle{++ids_}; }
+    Result<BufferHandle> create_buffer(const BufferDesc& desc) noexcept override {
+        const BufferHandle handle{++ids_};
+        if (mapBuffers) mappedBuffers[handle.id].resize(desc.bytes);
+        return handle;
+    }
     Result<SamplerHandle> create_sampler(const SamplerDesc&) noexcept override { return SamplerHandle{++ids_}; }
     Result<ShaderHandle> create_shader(const ShaderDesc& d) noexcept override {
         if (!d.spirv || d.spirvBytes < 20) return Status{Errc::InvalidArgument};
@@ -131,7 +138,7 @@ public:
         if (h.id && h.id <= textureAlive.size()) textureAlive[h.id - 1] = false;
         ++texturesDestroyed;
     }
-    void destroy_buffer(BufferHandle) noexcept override {}
+    void destroy_buffer(BufferHandle handle) noexcept override { mappedBuffers.erase(handle.id); }
     void destroy_sampler(SamplerHandle) noexcept override {}
     void destroy_shader(ShaderHandle) noexcept override {}
     void destroy_pipeline(PipelineHandle) noexcept override {}
@@ -140,7 +147,12 @@ public:
     }
     Status upload_texture(TextureHandle, const void*, u32) noexcept override { return OkStatus; }
     Status write_buffer(BufferHandle, usize, const void*, usize) noexcept override { return OkStatus; }
-    Status map_buffer(BufferHandle, void*&) noexcept override { return Errc::NotSupported; }
+    Status map_buffer(BufferHandle handle, void*& out) noexcept override {
+        const auto found = mappedBuffers.find(handle.id);
+        if (found == mappedBuffers.end()) return Errc::NotSupported;
+        out = found->second.data();
+        return OkStatus;
+    }
     void unmap_buffer(BufferHandle) noexcept override {}
     Status read_texture(TextureHandle, void*, u32) noexcept override { return Errc::NotSupported; }
     Status upload_texture_level(TextureHandle, u32, u32, const void*, usize) noexcept override { return OkStatus; }

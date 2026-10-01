@@ -25,6 +25,18 @@ import XCTest
         app = nil
     }
 
+    func testMotionBlurTextExportCompletesAt1080p() throws {
+        let snapshot = try launch("motion-blur-export")
+        XCTAssertEqual(snapshot.compositionWidth, 1920)
+        XCTAssertEqual(snapshot.compositionHeight, 1080)
+        let openExport = app.buttons["Export"].firstMatch
+        XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
+        let start = app.buttons["Export"].firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 10)); start.tap()
+        XCTAssertTrue(app.staticTexts["Video ready"].waitForExistence(timeout: 300))
+        XCTAssertTrue(app.buttons["Open"].isEnabled)
+    }
+
     func testText3DAnimatorRailOpensTheSelectedWiggleCurve() throws {
         _ = try launch("animator-curve-rail")
         let curve = app.buttons["Edit the property curve"].firstMatch

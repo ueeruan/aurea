@@ -601,6 +601,49 @@ AUREA_TEST(Export, MotionBlur3DPipelinedIsByteIdenticalToSerial) {
     AUREA_CHECK_EQ(hashes[0], hashes[1]);
 }
 
+AUREA_TEST(Regression2134Gpu, FullHdMotionBlurExportsVideoAnimatedTextAnd3D) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    for (u32 mode = 0; mode < 3; ++mode) {
+        const i64 frames = mode == 2 ? 12 : 60;
+        SyntheticConfig cfg;
+        cfg.width = 1920; cfg.height = 1080; cfg.frameCount = static_cast<u32>(frames);
+        cfg.pattern = SyntheticPattern::FastSquare;
+        Rig r(cfg, 30, frames, 3);
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        r.comp()->motion_blur().samples = 64;
+        const u64 video = r.video_layer().pack();
+        if (mode == 0) AUREA_CHECK(r.e.set_vector_blur(video, 1));
+        u64 moving = video;
+        if (mode == 1) {
+            const auto text = r.e.add_text("AUREA MOTION BLUR");
+            AUREA_CHECK(text.ok()); if (!text.ok()) return;
+            moving = *text;
+            AUREA_CHECK(r.e.add_text_animator(moving, kTextPropPosition) == 0);
+            auto& tr = r.comp()->layer(LayerId::unpack(moving))->tracks.get_or_create(TrackProperty::TextAnimParam, 0, text::kPosX);
+            tr.set(FrameIndex{0}, -150); tr.set(FrameIndex{frames - 1}, 150);
+        } else if (mode == 2) {
+            const auto shape = r.e.add_shape3d(0);
+            AUREA_CHECK(shape.ok()); if (!shape.ok()) return;
+            moving = *shape;
+        }
+        auto& position = r.comp()->layer(LayerId::unpack(moving))->tracks.get_or_create(TrackProperty::PositionX);
+        position.set(FrameIndex{0}, 700); position.set(FrameIndex{frames - 1}, 1200);
+        AUREA_CHECK(r.e.set_motion_blur(moving, true));
+        AUREA_CHECK(r.e.set_composition_motion_blur(true));
+        const auto result = run_export(r, 1080, 30, false, 180);
+        AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+        if (!result.finished) return;
+        AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(frames));
+        AUREA_CHECK(r.cap.finished && r.cap.ptsMonotonic && !r.cap.aborted);
+        AUREA_CHECK((result.p.flags & Engine::kExportFrameFallback) == 0);
+        AUREA_CHECK_EQ(r.cap.video.width, 1920u);
+        AUREA_CHECK_EQ(r.cap.video.height, 1080u);
+        AUREA_CHECK(r.cap.hashes.front() != r.cap.hashes.back());
+        std::printf("    mode=%u: %lld frames at 1080p/64 samples in %.2fs\n", mode,
+            static_cast<long long>(frames), result.seconds);
+    }
+}
+
 AUREA_TEST(Export, VectorAndTransformMotionBlurFinishEveryFrame) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;

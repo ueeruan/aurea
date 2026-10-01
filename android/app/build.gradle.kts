@@ -56,7 +56,7 @@ android {
         targetSdk = 36
         // versionCode 2132: arraste de keyframes e animadores de texto. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2133
+        versionCode = 2134
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

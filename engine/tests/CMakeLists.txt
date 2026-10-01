@@ -16,6 +16,7 @@ add_executable(aurea_tests
     test_regression_2130.cpp
     test_regression_2132.cpp
     test_regression_2133.cpp
+    test_regression_2134.cpp
     test_math.cpp
     test_animation.cpp
     test_core.cpp

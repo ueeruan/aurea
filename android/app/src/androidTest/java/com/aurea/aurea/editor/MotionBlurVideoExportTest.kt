@@ -39,7 +39,7 @@ class MotionBlurVideoExportTest {
         }
         compose.waitUntil(30000) { ready && store.engineReady }
         for (mode in 1..3) {
-            compose.runOnIdle { store.newProject(320, 180, 30f, "Blur export $mode") }
+            compose.runOnIdle { store.newProject(1920, 1080, 30f, "Blur export $mode") }
             compose.waitUntil(15000) { store.project.title == "Blur export $mode" }
             compose.runOnIdle {
                 val engine = store.engineForStress
@@ -50,8 +50,8 @@ class MotionBlurVideoExportTest {
                 store.setCompositionDuration(30)
                 engine.beginCommandBatch()
                 val commands = CommandBatch(engine)
-                commands.insertKeyframe(layer, TrackProperty.POSITION_X, -1, 0, 0, 100f)
-                commands.insertKeyframe(layer, TrackProperty.POSITION_X, -1, 0, 29, 220f)
+                commands.insertKeyframe(layer, TrackProperty.POSITION_X, -1, 0, 0, 700f)
+                commands.insertKeyframe(layer, TrackProperty.POSITION_X, -1, 0, 29, 1200f)
                 assertEquals(2, engine.submitCommands())
                 assertTrue(engine.setVectorBlur(layer, if (mode and 1 != 0) 1f else 0f))
                 assertTrue(engine.setMotionBlur(layer, mode and 2 != 0))
@@ -63,10 +63,10 @@ class MotionBlurVideoExportTest {
             val progress = ExportProgress()
             val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
             compose.runOnIdle {
-                assertEquals(0, store.engineForStress.startExport(output.absolutePath, 180, 30.0, 0, 4))
+                assertEquals(0, store.engineForStress.startExport(output.absolutePath, 1080, 30.0, 0, 12))
             }
             try {
-                compose.waitUntil(60000) {
+                compose.waitUntil(300000) {
                     store.engineForStress.exportProgress(buffer) && run { progress.readFrom(buffer); progress.finished }
                 }
                 assertEquals("mode=$mode ${progress.message}", 0, progress.result)
@@ -76,8 +76,8 @@ class MotionBlurVideoExportTest {
                 val media = MediaMetadataRetriever()
                 try {
                     media.setDataSource(output.absolutePath)
-                    assertEquals("320", media.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH))
-                    assertEquals("180", media.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT))
+                    assertEquals("1920", media.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH))
+                    assertEquals("1080", media.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT))
                     for (time in listOf(0L, 500000L, 966667L)) {
                         val frame = media.getFrameAtTime(time, MediaMetadataRetriever.OPTION_CLOSEST)
                         assertNotNull("mode=$mode frame=$time", frame)

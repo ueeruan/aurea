@@ -44,6 +44,7 @@ public:
         const usize c = capacity_; capacity_ = o.capacity_; o.capacity_ = c;
         const usize off = offset_; offset_ = o.offset_;    o.offset_ = off;
         const usize u = used_;     used_ = o.used_;        o.used_ = u;
+        const usize r = reserved_; reserved_ = o.reserved_; o.reserved_ = r;
         const usize bs = blockSize_; blockSize_ = o.blockSize_; o.blockSize_ = bs;
         overflow_blocks_.swap(o.overflow_blocks_);
     }
@@ -89,6 +90,10 @@ public:
     /// Recomeça do zero. O bloco atual é reaproveitado — é o caso comum: a
     /// arena de frame é resetada 60 vezes por segundo e nunca cresce.
     void reset() noexcept {
+        // Earlier blocks only keep pointers valid within this frame. Keeping
+        // them until release() leaked another set on every heavy export frame.
+        overflow_blocks_.clear_free();
+        reserved_ = capacity_;
         offset_ = 0;
         used_   = 0;
     }
@@ -104,10 +109,12 @@ public:
             used_     = 0;
         }
         overflow_blocks_.clear_free();
+        reserved_ = 0;
     }
 
     [[nodiscard]] usize used() const noexcept { return used_; }
     [[nodiscard]] usize capacity() const noexcept { return capacity_; }
+    [[nodiscard]] usize reserved_bytes() const noexcept { return reserved_; }
 
 private:
     /// Blocos que cresceram além do bloco base. Guardados soltos para liberar.
@@ -146,7 +153,7 @@ private:
         const usize ncap = need > blockSize_ ? need : blockSize_;
         auto* nb = static_cast<u8*>(std::malloc(ncap));
         if (!nb) return false;
-        // O bloco antigo passa a ser overflow: só é liberado no release().
+        // O bloco antigo passa a ser overflow: liberado no próximo reset/release.
         // Isso mantém ponteiros já entregues válidos até o reset, que é
         // exatamente o contrato que quem usa arena espera.
         if (block_ && !overflow_blocks_.push(block_)) {
@@ -154,6 +161,7 @@ private:
             return false;
         }
         block_    = nb;
+        reserved_ += ncap;
         capacity_ = ncap;
         offset_   = 0;
         return true;
@@ -163,6 +171,7 @@ private:
     usize capacity_ = 0;
     usize offset_   = 0;
     usize used_     = 0;
+    usize reserved_ = 0;
     usize blockSize_ = kDefaultBlockSize;
     OverflowBlocks overflow_blocks_{};
 };

@@ -3137,16 +3137,11 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             // Desfoque: K cenas no obturador, média aditiva (peso 1/K, cor
             // pré-multiplicada) num alvo do tamanho da composição.
             const u32 k = static_cast<u32>(group.blurFrames.size());
-            FGTexture* frames = arena_.alloc_array<FGTexture>(k);
-            u32 built = 0;
-            for (u32 s = 0; s < k; ++s) {
-                const u32 np = scene_particle_draws(group, group.blurFrames[s], parts);
-                if (scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, frames[built], planes,
-                                   parts, np)) ++built;
-            }
             auto pAdd = shaders_.pipeline(PipelineKey::graphics(
                 ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
-            if (built == 0 || !pAdd.ok()) return false;
+            if (!pAdd.ok()) return false;
+            auto* built = arena_.make<u32>(0);
+            if (!built) return false;
             TextureDesc ad;
             ad.width = compTargetW_;
             ad.height = compTargetH_;
@@ -3154,26 +3149,34 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             ad.sampled = true;
             ad.renderTarget = true;
             tex = graph_.create_texture("3d-desfoque", ad);
-            struct Cap {
-                FGTexture* frames; u32 n; PipelineHandle p; u64 sampler; f32 w; f32 h;
-            } cap{frames, built, *pAdd, shaders_.sampler(CommonSampler::LinearClamp).id,
-                  static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
-            const u32 pass = graph_.add_raster_pass("3d-desfoque", PassStage::Composite, tex, LoadOp::Clear, Vec4{0, 0, 0, 0},
-                                                    [cap](PassContext& pc) {
-                const Mat4 clip = clip_from_comp(cap.w, cap.h);
-                pc.cmds.bind_pipeline(cap.p);
-                for (u32 s = 0; s < cap.n; ++s) {
-                    pc.cmds.bind_texture(0, pc.texture(cap.frames[s]), SamplerHandle{cap.sampler});
+            // Consume each sample before building the next one. Keeping all K
+            // outputs alive until a final pass used >1 GB at 1080p/64 samples.
+            for (u32 s = 0; s < k; ++s) {
+                FGTexture sample;
+                const u32 np = scene_particle_draws(group, group.blurFrames[s], parts);
+                if (!scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, sample, planes,
+                                    parts, np)) continue;
+                struct Cap {
+                    FGTexture sample; const u32* count; PipelineHandle p; u64 sampler; f32 w; f32 h;
+                } cap{sample, built, *pAdd, shaders_.sampler(CommonSampler::LinearClamp).id,
+                      static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+                const LoadOp load = *built == 0 ? LoadOp::Clear : LoadOp::Load;
+                ++*built;
+                const u32 pass = graph_.add_raster_pass("3d-desfoque", PassStage::Composite, tex, load, Vec4{0, 0, 0, 0},
+                                                        [cap](PassContext& pc) {
+                    pc.cmds.bind_pipeline(cap.p);
+                    pc.cmds.bind_texture(0, pc.texture(cap.sample), SamplerHandle{cap.sampler});
                     LayerPush push;
-                    push.clipFromLayer = clip;
+                    push.clipFromLayer = clip_from_comp(cap.w, cap.h);
                     push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
                     push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
-                    push.params = Vec4{1.0f / static_cast<f32>(cap.n), 0, 0, 0};
+                    push.params = Vec4{1.0f / static_cast<f32>(*cap.count), 0, 0, 0};
                     pc.cmds.push_constants(&push, sizeof(push));
                     pc.cmds.draw(6);
-                }
-            });
-            for (u32 s = 0; s < built; ++s) graph_.read(pass, frames[s]);
+                });
+                graph_.read(pass, sample);
+            }
+            if (*built == 0) return false;
         }
         out.texture = tex;
         out.region = Rect{0.0f, 0.0f, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
@@ -3327,24 +3330,21 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 drawSet(out.texture, 0);
                 return true;
             }
-            // Desfoque de movimento por letra: cada instante num alvo (letras
-            // por cima umas das outras certinho) e a média (os glifos já têm 1/K).
+            // Keep one sample and the accumulator live. Glyphs already carry
+            // 1/K; preserve their overlap within each sample before adding it.
             auto pAdd = shaders_.pipeline(PipelineKey::graphics(
                 ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
             if (!pAdd.ok()) return false;
-            FGTexture* frames = arena_.alloc_array<FGTexture>(sets);
-            for (u32 si = 0; si < sets; ++si) {
-                frames[si] = graph_.create_texture("texto-instante", d);
-                drawSet(frames[si], si);
-            }
             out.texture = graph_.create_texture("layer-texto", d);
-            struct Acc { FGTexture* frames; u32 n; PipelineHandle p; u64 sampler; f32 w; f32 h; } acc{frames, sets, *pAdd,
-                shaders_.sampler(CommonSampler::LinearClamp).id, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
-            const u32 pass = graph_.add_raster_pass("texto-desfoque", PassStage::Decode, out.texture, LoadOp::Clear, Vec4{0, 0, 0, 0},
-                                                    [acc](PassContext& pc) {
-                pc.cmds.bind_pipeline(acc.p);
-                for (u32 si = 0; si < acc.n; ++si) {
-                    pc.cmds.bind_texture(0, pc.texture(acc.frames[si]), SamplerHandle{acc.sampler});
+            for (u32 si = 0; si < sets; ++si) {
+                const FGTexture sample = graph_.create_texture("texto-instante", d);
+                drawSet(sample, si);
+                struct Acc { FGTexture sample; PipelineHandle p; u64 sampler; f32 w; f32 h; } acc{sample, *pAdd,
+                    shaders_.sampler(CommonSampler::LinearClamp).id, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+                const u32 pass = graph_.add_raster_pass("texto-desfoque", PassStage::Decode, out.texture,
+                    si == 0 ? LoadOp::Clear : LoadOp::Load, Vec4{0, 0, 0, 0}, [acc](PassContext& pc) {
+                    pc.cmds.bind_pipeline(acc.p);
+                    pc.cmds.bind_texture(0, pc.texture(acc.sample), SamplerHandle{acc.sampler});
                     LayerPush push;
                     push.clipFromLayer = clip_from_comp(acc.w, acc.h);
                     push.region = Vec4{0.0f, 0.0f, acc.w, acc.h};
@@ -3352,9 +3352,9 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     push.params = Vec4{1.0f, 0, 0, 0};
                     pc.cmds.push_constants(&push, sizeof(push));
                     pc.cmds.draw(6);
-                }
-            });
-            for (u32 si = 0; si < sets; ++si) graph_.read(pass, frames[si]);
+                });
+                graph_.read(pass, sample);
+            }
             return true;
         }
         case LayerSource::Kind::Image: {
@@ -3921,26 +3921,14 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             if (pAdd.ok()) {
                 const bool temporal = !layer.temporal.empty();
                 const u32 k = static_cast<u32>(temporal ? layer.temporal.size() : layer.blurMatrices.size());
-                Mat4* mats = arena_.alloc_array<Mat4>(k);
-                Vec4* prm = arena_.alloc_array<Vec4>(k);
                 const Mat4 fold = (i < snap.plans.size() && snap.plans[i].hasFold) ? snap.plans[i].foldMatrix : Mat4::identity();
-                for (u32 s = 0; s < k; ++s) {
-                    if (temporal) {
-                        const RenderLayer::TemporalSample& ts = layer.temporal[s];
-                        mats[s] = ts.m * fold;
-                        prm[s] = Vec4{ts.weight, ts.mask.x, ts.mask.y, ts.mask.z};
-                    } else {
-                        mats[s] = layer.blurMatrices[s] * fold;
-                        prm[s] = Vec4{1.0f / static_cast<f32>(k), 0, 0, 0};
-                    }
-                }
                 TextureDesc accDesc = compDesc;
                 accDesc.transferSrc = false;
                 const FGTexture acc = graph_.create_texture("desfoque de movimento", accDesc);
                 struct Cap {
-                    Mat4* mats; Vec4* prm; u32 k; PipelineHandle p; FGTexture src; u64 sampler; Rect region;
+                    const RenderLayer* layer; Mat4 fold; u32 k; PipelineHandle p; FGTexture src; u64 sampler; Rect region;
                     f32 compW; f32 compH;
-                } cap{mats, prm, k, *pAdd, draw.texture, draw.sampler, draw.region, compW, compH};
+                } cap{&layer, fold, k, *pAdd, draw.texture, draw.sampler, draw.region, compW, compH};
                 const u32 pass = graph_.add_raster_pass("desfoque de movimento", PassStage::Composite, acc, LoadOp::Clear,
                                                         Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
                     const Mat4 clip = clip_from_comp(cap.compW, cap.compH);
@@ -3948,10 +3936,18 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                     pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
                     for (u32 s = 0; s < cap.k; ++s) {
                         LayerPush push;
-                        push.clipFromLayer = clip * cap.mats[s];
+                        // The snapshot stays alive through graph execution. Use
+                        // its samples directly, without another per-layer copy.
+                        if (!cap.layer->temporal.empty()) {
+                            const auto& sample = cap.layer->temporal[s];
+                            push.clipFromLayer = clip * (sample.m * cap.fold);
+                            push.params = Vec4{sample.weight, sample.mask.x, sample.mask.y, sample.mask.z};
+                        } else {
+                            push.clipFromLayer = clip * (cap.layer->blurMatrices[s] * cap.fold);
+                            push.params = Vec4{1.0f / static_cast<f32>(cap.k), 0, 0, 0};
+                        }
                         push.region = Vec4{cap.region.x, cap.region.y, cap.region.w, cap.region.h};
                         push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
-                        push.params = cap.prm[s];
                         pc.cmds.push_constants(&push, sizeof(push));
                         pc.cmds.draw(6);
                     }

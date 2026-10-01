@@ -806,6 +806,19 @@ final class AureaModel: ObservableObject {
                             engine.run { $0.seek(toFrame: 0) }
                             panel = .mask; refreshModel(force: true)
                         }
+                    case "motion-blur-export":
+                        let id = engine.addText("AUREA MOTION BLUR")
+                        if id >= 0 {
+                            _ = engine.applyTextPreset(id, preset: 11)
+                            engine.run {
+                                $0.setMotionBlur(true, forLayer: id)
+                                $0.setMotionBlurSettings(true, shutter: 180)
+                                $0.setLayer(id, startFrame: 0, endFrame: 60, offsetFrames: 0, setOffset: false)
+                                $0.seek(toFrame: 0)
+                            }
+                            refreshModel(force: true); select(layerId: id, additive: false)
+                            panel = .none
+                        }
                     case "animator-curve-rail":
                         addText3D(content: "AUREA", depth: 0.25); textContentRequest = nil
                         if let id = primarySelection {

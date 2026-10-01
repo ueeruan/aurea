@@ -3426,4 +3426,5 @@ untuk mengedit kurvanya.</string>
     <string name="fxl_path_layer">Lapisan jalur</string>
     <string name="fxl_path_offset">Offset jalur</string>
     <string name="fxl_grid_order">Urutan kisi</string>
+    <string name="scene_shadow_strength">Kekuatan bayangan</string>
 </resources>

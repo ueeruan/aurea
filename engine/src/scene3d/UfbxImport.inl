@@ -341,6 +341,13 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
         o.rotation = Quat{static_cast<f32>(n->local_transform.rotation.x), static_cast<f32>(n->local_transform.rotation.y),
                           static_cast<f32>(n->local_transform.rotation.z), static_cast<f32>(n->local_transform.rotation.w)};
         o.scale = to_vec3(n->local_transform.scale);
+        // Geometry helpers carry the mesh; the original instance owns its bindings.
+        const ufbx_node* materialNode = n;
+        while (materialNode->is_geometry_transform_helper && materialNode->parent)
+            materialNode = materialNode->parent;
+        if (materialNode->materials.count == 0) materialNode = n;
+        for (usize m = 0; m < materialNode->materials.count; ++m)
+            o.materials.push_back(materialNode->materials.data[m] ? static_cast<i32>(materialNode->materials.data[m]->typed_id) : -1);
         if (!n->parent) A.roots.push_back(static_cast<i32>(i));
     }
 
@@ -475,7 +482,9 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
             const i32 matIndex = part.index < m->materials.count && m->materials.data[part.index]
                                ? static_cast<i32>(m->materials.data[part.index]->typed_id) : -1;
             p.material = matIndex;
-            if (matIndex >= 0 && A.materials[static_cast<usize>(matIndex)].normalTex.valid() && m->vertex_uv.exists) {
+            p.materialSlot = static_cast<i32>(part.index);
+            // Any instance may bind a normal map to this shared geometry.
+            if (m->vertex_uv.exists) {
                 generate_tangents(p, p.uv0);
             }
             mesh.bounds.add(p.bounds.min);

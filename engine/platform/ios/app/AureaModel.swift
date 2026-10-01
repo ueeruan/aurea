@@ -1362,6 +1362,22 @@ final class AureaModel: ObservableObject {
     }
 
     @Published var selectedEffectId: UInt32?
+    struct EffectFocusRequest {
+        let layer: Int64
+        let type: UInt32
+        let previous: Set<UInt32>
+    }
+    var pendingEffectFocus: EffectFocusRequest?
+    var requestedEffectFocusId: UInt32? {
+        guard let request = pendingEffectFocus, request.layer == primarySelection else { return nil }
+        return effects.last { $0.typeId == request.type && !request.previous.contains($0.effectId) }?.effectId
+    }
+    func addEffectAndFocus(_ type: UInt32, layer: Int64) {
+        let previous = Set(effects.map(\.effectId))
+        pendingEffectFocus = EffectFocusRequest(layer: layer, type: type, previous: previous)
+        seenEffectIds[layer] = previous
+        engine.run { $0.addEffect(type, toLayer: layer, at: UInt32.max) }
+    }
 
     var primarySelection: Int64? { selection.first }
 
@@ -2514,7 +2530,7 @@ final class AureaModel: ObservableObject {
     /// Valores ABSOLUTOS de Escala (base 3) ou Rotação (base 6) XYZ vindos do
     /// gizmo/pinça 3D — calculados do início do gesto, sem deriva nem salto.
     func gizmoSetComponents(_ id: Int64, base: UInt32, values: [Float]) {
-        let key = base == 3 ? "scale" : base == 6 ? "rotation" : ""
+        let key = base == 0 ? "position" : base == 3 ? "scale" : base == 6 ? "rotation" : ""
         guard !key.isEmpty else { return }
         guard let current = engine.layerDetail(id) else { return }
         applyGizmoComponents(id, base: base, previous: StageGeom.floats(current[key]), next: values)

@@ -868,6 +868,7 @@ void write_layer(ByteWriter& w, const Layer& l) {
     }
     // v39: manter o tom do áudio (remapeamento/velocidade).
     w.boolv(l.keepPitch);
+    w.f32v(l.light.shadowStrength);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1415,6 +1416,9 @@ void read_layer(ByteReader& r, Layer& l) {
     }
     // Projeto anterior à v39: o tom acompanha a velocidade (reamostra).
     l.keepPitch = g_readingTimelineVersion >= 39 ? r.boolv() : false;
+    l.light.shadowStrength = g_readingTimelineVersion >= 40 ? r.f32v() : 1.0f;
+    if (!std::isfinite(l.light.shadowStrength)) l.light.shadowStrength = 1.0f;
+    l.light.shadowStrength = std::clamp(l.light.shadowStrength, 0.0f, 1.0f);
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap

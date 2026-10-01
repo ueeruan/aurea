@@ -122,10 +122,10 @@ internal fun TextAnimSection(env: PanelEnv) {
     list.forEachIndexed { index, v -> AnimatorCard(env, index, v) }
     Spacer(Modifier.height(4.dp))
     TextButton(modifier = Modifier.testTag("text.animator.add"), onClick = {
-        store.addEffect(effectTypeId("aurea.text.animator")); env.onOpenPanel(EditorPanel.Effects)
+            store.addEffectAndFocus(effectTypeId("aurea.text.animator")); env.onOpenPanel(EditorPanel.Effects)
     }) { Text(stringResource(R.string.text_animator_add)) }
     TextButton(modifier = Modifier.testTag("text.transform.add"), onClick = {
-        store.addEffect(effectTypeId("aurea.text.transform")); env.onOpenPanel(EditorPanel.Effects)
+            store.addEffectAndFocus(effectTypeId("aurea.text.transform")); env.onOpenPanel(EditorPanel.Effects)
     }) { Text(stringResource(R.string.text_transform_add)) }
 }
 

@@ -95,6 +95,7 @@ struct SceneLight {
     /// Viés constante da sombra (LightData::shadowBias): 0,001 = meio texel do
     /// mapa em profundidade de mundo (o normal offset faz o grosso).
     f32  shadowBias = 0.001f;
+    f32  shadowStrength = 1.0f;
     /// Tamanho da fonte (tangente do raio angular): a penumbra do PCSS tem
     /// largura ≈ 2·tan·(distância bloqueador → receptor). 0,04 ≈ 2,3° — uma
     /// caixa de luz de estúdio; o sol real é ~0,0047.

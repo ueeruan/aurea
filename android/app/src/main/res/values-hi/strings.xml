@@ -3428,4 +3428,5 @@
     <string name="fxl_path_layer">पथ परत</string>
     <string name="fxl_path_offset">पथ ऑफ़सेट</string>
     <string name="fxl_grid_order">ग्रिड क्रम</string>
+    <string name="scene_shadow_strength">छाया की तीव्रता</string>
 </resources>

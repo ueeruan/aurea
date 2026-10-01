@@ -296,6 +296,7 @@ void main() {
             ccLobe = vec3(D_GGX(NcdotH, ccA) * V_Kelemen(VdotH) * Fc * NcdotL / max(NdotL, 1e-4));
         }
         float sh = i == int(u.shadowParams.w + 0.5) ? shadow_factor(v_world, Ng, L) : 1.0;
+        sh = mix(1.0, sh, u.lightSpot2[i].y);
         vec3 radiance = u.lightColor[i].rgb * (NdotL * atten * sh);
         colorD += diff * base_ * radiance;
         colorS += (spec * base_ + ccLobe) * radiance;

@@ -8090,6 +8090,41 @@ f32 luma(const u8* p) { return 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2];
 } // namespace
 
 // Parede de frente para a luz (e rasante a 70°): ela mesma projeta e recebe.
+// Strength changes only shadowing; rotating the light must move its footprint.
+AUREA_TEST(Gpu, Scene3DShadowStrengthAndDirection2129) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640,360);
+    current_comp(rig.e)->environment().intensity=.1f;
+    (void)import_quads(rig,"2129_receiver",{{0,0,0,1.6f}},100,false);
+    (void)import_quads(rig,"2129_caster",{{0,0,1,.3f}},100,true);
+    auto* light=add_shadow_light(rig,{0,40,0});
+    auto capture=[&](f32 strength,f32 direction){ light->light.shadowStrength=strength;
+        light->transform.rotation.y=direction;rig.e.request_render();return rig.capture(640); };
+    const auto off=capture(0,40), half=capture(.5f,40), full=capture(1,40);
+    const auto reverseOff=capture(0,-40), reverse=capture(1,-40);
+    AUREA_CHECK(!off.rgba.empty()); if(off.rgba.empty())return;
+    for(const auto* im:{&half,&full,&reverseOff,&reverse}) {
+        AUREA_CHECK_EQ(im->rgba.size(),off.rgba.size());if(im->rgba.size()!=off.rgba.size())return;
+    }
+    double dark=0,mid=0,left=0,right=0,wx=0,rx=0;u32 pixels=0;
+    for(u32 y=0;y<off.height;++y)for(u32 x=0;x<off.width;++x){
+        const f32 a=luma(off.at(x,y)), b=luma(half.at(x,y)),c=luma(full.at(x,y));
+        const f32 delta=std::max(0.f,a-c),rd=std::max(0.f,luma(reverseOff.at(x,y))-luma(reverse.at(x,y)));
+        left+=delta;wx+=delta*x;right+=rd;rx+=rd*x;
+        if(delta>20){++pixels;dark+=delta;mid+=a-b;AUREA_CHECK(b>=c-2&&b<=a+2);}
+    }
+    AUREA_CHECK(pixels>100); AUREA_CHECK(mid>dark*.2&&mid<dark*.8);
+    AUREA_CHECK(left>1000&&right>1000);
+    if(left>0&&right>0)AUREA_CHECK(std::abs(wx/left-rx/right)>40);
+    light->light.castShadows=false;rig.e.request_render();const auto disabled=rig.capture(640);
+    AUREA_CHECK_EQ(disabled.rgba.size(),reverseOff.rgba.size());
+    if(disabled.rgba.size()==reverseOff.rgba.size()){
+        u32 worst=0;for(usize i=0;i<disabled.rgba.size();++i)worst=std::max(worst,static_cast<u32>(std::abs(int(disabled.rgba[i])-int(reverseOff.rgba[i]))));
+        AUREA_CHECK(worst<=2);
+    }
+}
+
+// Parede de frente para a luz (e rasante a 70°): ela mesma projeta e recebe.
 // Sem acne: praticamente nenhum pixel escurece em relação à mesma parede sem
 // projetar sombra.
 AUREA_TEST(Gpu, Scene3DShadowNoAcneOnLitPlane) {

@@ -3446,4 +3446,5 @@
     <string name="fxl_path_layer">طبقة المسار</string>
     <string name="fxl_path_offset">الإزاحة على المسار</string>
     <string name="fxl_grid_order">الترتيب في الشبكة</string>
+    <string name="scene_shadow_strength">قوة الظل</string>
 </resources>

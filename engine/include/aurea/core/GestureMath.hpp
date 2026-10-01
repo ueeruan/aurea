@@ -1,9 +1,18 @@
 #pragma once
-#include "aurea/core/Types.hpp"
+#include "aurea/core/Math.hpp"
 #include <algorithm>
 #include <cmath>
 
 namespace aurea {
+/// Captured once on pointer-count changes. Screen deltas use composition pixels.
+/// Keeping the basis fixed prevents queued transforms from feeding back into drag.
+[[nodiscard]] inline Vec3 preview_gesture_value(const f32* basis, f32 dx, f32 dy, bool rotate) noexcept {
+    if (!basis || !std::isfinite(dx) || !std::isfinite(dy)) return {};
+    if (rotate) return Vec3{basis[9] - dy * basis[12], basis[10] + dx * basis[12], basis[11]};
+    return Vec3{basis[0] + dx * basis[3] + dy * basis[6],
+                basis[1] + dx * basis[4] + dy * basis[7],
+                basis[2] + dx * basis[5] + dy * basis[8]};
+}
 /// Uniform pinch scaling preserves signs, aspect ratio and (for 3D) depth.
 /// Existing scales outside the gesture range must not jump on first contact:
 /// include factor 1 in the interval, and only allow motion toward the range.

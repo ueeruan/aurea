@@ -979,7 +979,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                                                                   : Vec4{l.position, type};
         header.lightColor[i] = Vec4{l.color * l.intensity, l.range};
         header.lightSpot[i] = Vec4{l.direction.normalized(), std::cos(l.outerCone)};
-        header.lightSpot2[i] = Vec4{std::cos(l.innerCone), 0, 0, 0};
+        header.lightSpot2[i] = Vec4{std::cos(l.innerCone), std::clamp(l.shadowStrength, 0.0f, 1.0f), 0, 0};
     }
 
     // --- Lista de desenho ------------------------------------------------------
@@ -1359,7 +1359,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
                     const GpuPrimitive& p = gm->meshes[mi][primIndex];
                     const MorphJob* mj = morph_for(instIndex, n, primIndex);
-                    const GpuMaterial* mat = material_for(inst, *gm, p.material);
+                    const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
+                    const GpuMaterial* mat = material_for(inst, *gm, nodes[n].material_for(primitive));
                     if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
                     const bool sk = skinnedNode && p.skinned;
                     auto pipe = shaders_->pipeline(shadow_key(sk));
@@ -1484,7 +1485,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     ++stats_.culledPrimitives;
                     continue;
                 }
-                const GpuMaterial* mat = faded(material_for(inst, *gm, p.material), nodeAlpha);
+                const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
+                const GpuMaterial* mat = faded(material_for(inst, *gm, nodes[n].material_for(primitive)), nodeAlpha);
                 if (n < inst.nodeFill.size()) mat = tinted(mat, inst.nodeFill[n]);
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:

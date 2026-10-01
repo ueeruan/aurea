@@ -462,6 +462,10 @@ struct PreviewMetalView: UIViewRepresentable {
             startScale = vector(model.detail["scale"])
             startRotation = vector(model.detail["rotation"])
         }
+        private var previewBasis: [NSNumber] = []
+        private var pinchCenter = CGPoint.zero
+        private var pinchPanActive = false
+        private var pinchPointScale: Float = 1
         private func worldPosition(_ position: SIMD3<Float>, affine: [Float]) -> SIMD2<Float> {
             guard affine.count == 6 else { return SIMD2(position.x, position.y) }
             return SIMD2(affine[0] * position.x + affine[2] * position.y + affine[4], affine[1] * position.x + affine[3] * position.y + affine[5])
@@ -496,6 +500,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 else if model.sceneEditor {
                     stageMode = .scene; sceneMode = 0; sceneLast = first.position
                     scenePicked = model.scenePick(compositionPoint(first.position, view: view), radius: 36 * scaleFactor(view))
+                    if scenePicked == nil, let selected = model.selectedLayer, [6,8].contains(selected.kind) { scenePicked = selected.id }
                 }
                 else { recordTarget(first.position, view: view) }
                 if stageMode == .pending && handle < 0, let anchor = model.previewMarkerAnchor {
@@ -565,18 +570,9 @@ struct PreviewMetalView: UIViewRepresentable {
                 }
                 // Lupa ligada: a pinça é SEMPRE da vista. Senão, só é da camada
                 // escolhida quando os dedos estão sobre ela; no vazio amplia a vista.
-                if !StageViewZoom.shared.zoomLock && editableSelection() && over {
-                    keepTransform(); pinchFingers = [a.id, b.id]; pinchLayer = model.primarySelection
-                    pinchTracker.start(a.position, b.position)
-                    // Camada 3D (tem gizmo): a pinça escala X, Y e Z juntos.
-                    if let id = model.primarySelection {
-                        pinchThreeD = !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty
-                    } else { pinchThreeD = false }
-                    pinchRotationActive = false; pinchRotationOffset = 0
-                    // Já parado num encaixe: fica preso sem tique até sair e voltar.
-                    rotationSnap = StageMath.snapStep(startRotation.z, step: StageMath.rotStep, current: nil, enter: StageMath.rotEnter, exit: StageMath.rotExit)
-                    scaleSnap = StageMath.snapTarget(abs(startScale.x), target: 1, current: nil, enter: StageMath.scaleEnter, exit: StageMath.scaleExit)
-                    engage(); stageMode = .pinch
+                let selected3D = model.primarySelection.map { !model.engine.gizmo($0, length: ShellStageGeometry.gizmoLength).isEmpty } ?? false
+                if !StageViewZoom.shared.zoomLock && editableSelection() && (over || selected3D) {
+                    startLayerPinch(a, b, view: view); stageMode = .pinch
                 } else {
                     pinchFingers = [a.id, b.id]; startView(a.position, b.position); stageMode = .view
                 }
@@ -657,6 +653,10 @@ struct PreviewMetalView: UIViewRepresentable {
             // leva o grupo), mesmo com outra por cima.
             else if model.selection.count >= 2, let hit = hitSelected(c) { targetLayer = hit }
             else { targetLayer = hitLayer(c, slack: 0, includeLocked: true) }
+            if targetLayer == nil, let row = model.selectedLayer, model.selection.count == 1,
+               (row.kind == 6 || row.kind == 8), !model.engine.gizmo(row.id, length: ShellStageGeometry.gizmoLength).isEmpty {
+                targetLayer = row.id
+            }
         }
         private func hitSelected(_ point: SIMD2<Float>) -> Int64? {
             for row in model.layers where model.selection.contains(row.id) && row.visible && row.kind != 3 && active(row) {
@@ -690,6 +690,7 @@ struct PreviewMetalView: UIViewRepresentable {
             }
         }
         private func startDrag(view: UIView) {
+            previewBasis = []
             // Seta do eixo: o mesmo mover, travado em X (0) ou Y (1) desde o toque.
             if handle >= 0 {
                 guard editableSelection() else { stageMode = .idle; return }
@@ -718,6 +719,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 guard let row = model.selectedLayer, row.id == id else { stageMode = .idle; return }
                 guard !row.locked else { model.toast = AureaText.t("sh_layer_locked_unlock_to_move"); stageMode = .idle; return }
                 keepTransform(); moveAffine = StageGeom.floats(model.detail["parentAffine"])
+                if handle < 0 { previewBasis = model.engine.previewGestureBasis(id) }
                 moveWorld = worldPosition(startPosition, affine: moveAffine)
                 moveDown = compositionPoint(stageDown, view: view); moveLast = moveDown
                 axisLock = handle >= 0 ? handle + 1 : 0
@@ -735,8 +737,29 @@ struct PreviewMetalView: UIViewRepresentable {
             default: break
             }
         }
+        private func startLayerPinch(_ a: StageTouchPoint, _ b: StageTouchPoint, view: UIView) {
+            keepTransform(); pinchFingers = [a.id, b.id]; pinchLayer = model.primarySelection
+            pinchTracker.start(a.position, b.position)
+            previewBasis = model.primarySelection.map { model.engine.previewGestureBasis($0) } ?? []
+            pinchThreeD = !previewBasis.isEmpty
+            pinchCenter = CGPoint(x: (a.position.x+b.position.x)*0.5, y: (a.position.y+b.position.y)*0.5)
+            pinchPointScale = scaleFactor(view); pinchPanActive = false
+            pinchRotationActive = false; pinchRotationOffset = 0
+            rotationSnap = StageMath.snapStep(startRotation.z, step: StageMath.rotStep, current: nil, enter: StageMath.rotEnter, exit: StageMath.rotExit)
+            scaleSnap = StageMath.snapTarget(abs(startScale.x), target: 1, current: nil, enter: StageMath.scaleEnter, exit: StageMath.scaleExit)
+            engage()
+        }
         private func stepPinch(_ a: CGPoint, _ b: CGPoint) {
             guard let id = pinchLayer, id == model.primarySelection, editableSelection() else { return }
+            if !previewBasis.isEmpty {
+                let dx = (a.x+b.x)*0.5-pinchCenter.x, dy = (a.y+b.y)*0.5-pinchCenter.y
+                if hypot(dx,dy) > 3 { pinchPanActive = true }
+                if pinchPanActive {
+                    beginEdit("pan 3D")
+                    model.gizmoSetComponents(id, base: 0, values: model.engine.previewGestureValue(previewBasis,
+                        dx: Float(dx)*pinchPointScale, dy: Float(dy)*pinchPointScale, rotate: false).map(\.floatValue))
+                }
+            }
             // Capture values outside the mutating tracker call (Swift exclusivity).
             let engine = model.engine, scale = startScale, threeD = pinchThreeD
             guard pinchTracker.update(a, b, clamp: { engine.clampPinchFactor($0, scaleX: scale.x, scaleY: scale.y, scaleZ: scale.z, threeD: threeD) }) else { return }
@@ -785,6 +808,13 @@ struct PreviewMetalView: UIViewRepresentable {
             }
         }
         private func stepMove(_ point: CGPoint, view: UIView, id: Int64) {
+            if !previewBasis.isEmpty {
+                let delta = compositionPoint(point, view: view) - moveDown
+                beginEdit("rotate 3D")
+                model.gizmoSetComponents(id, base: 6, values: model.engine.previewGestureValue(previewBasis,
+                    dx: delta.x, dy: delta.y, rotate: true).map(\.floatValue))
+                return
+            }
             if !groupMove.isEmpty { stepGroupMove(point, view: view); return }
             let c = compositionPoint(point, view: view)
             // Absoluto desde o toque e LIVRE nos dois eixos (app antigo, Stage.kt
@@ -826,19 +856,28 @@ struct PreviewMetalView: UIViewRepresentable {
             if pressed.count >= 2 {
                 let a = pressed[0].position, b = pressed[1].position
                 let span = max(1, hypot(a.x - b.x, a.y - b.y))
-                if sceneMode != 3 {
-                    finishStageEdit(); sceneMode = 3; sceneSpan = span; sceneDistance0 = model.sceneDistance
+                if sceneMode != 3 && sceneMode != 4 {
+                    finishStageEdit()
+                    if model.primarySelection == nil, let picked = scenePicked { model.select(layerId: picked, additive: false) }
+                    if editableSelection(), let id = model.primarySelection, !model.engine.previewGestureBasis(id).isEmpty {
+                        sceneMode = 4; startLayerPinch(pressed[0], pressed[1], view: view)
+                    } else { sceneMode = 3; sceneSpan = span; sceneDistance0 = model.sceneDistance }
+                } else if sceneMode == 4 {
+                    stepPinch(a, b)
                 } else {
                     model.setSceneView(yaw: model.sceneYaw, pitch: model.scenePitch, distance: sceneDistance0 * Float(sceneSpan / span))
                 }
                 return
             }
-            if sceneMode == 3 { return }   // sobrou um dedo da pinça: nada
+            if sceneMode == 3 || sceneMode == 4 { return }   // sobrou um dedo da pinça: nada
             guard let first = pressed.first(where: { $0.id == stageFinger }) else { return }
             if sceneMode == 0 && hypot(first.position.x - stageDown.x, first.position.y - stageDown.y) > 12 {
                 if let picked = scenePicked {
                     if model.primarySelection != picked || model.selection.count != 1 { model.select(layerId: picked, additive: false) }
-                    beginEdit("mover na cena"); sceneMode = 2
+                    guard editableSelection() else { return }
+                    keepTransform(); previewBasis = model.engine.previewGestureBasis(picked)
+                    moveDown = compositionPoint(stageDown, view: view)
+                    beginEdit("rotate 3D"); sceneMode = 2
                 } else {
                     sceneMode = 1
                 }
@@ -847,7 +886,7 @@ struct PreviewMetalView: UIViewRepresentable {
             let dx = first.position.x - sceneLast.x, dy = first.position.y - sceneLast.y
             switch sceneMode {
             case 1: model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.35, pitch: model.scenePitch + Float(dy) * 0.35, distance: model.sceneDistance)
-            case 2: let f = scaleFactor(view); model.sceneDragObject(dx: Float(dx) * f, dy: Float(dy) * f)
+            case 2: if let id = scenePicked, id == model.primarySelection { stepMove(first.position, view: view, id: id) }
             default: break
             }
             if sceneMode != 0 { sceneLast = first.position }

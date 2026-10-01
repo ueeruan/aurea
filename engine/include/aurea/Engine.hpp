@@ -653,7 +653,7 @@ public:
     [[nodiscard]] Result<u64> add_light(u32 kind) noexcept;
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
     [[nodiscard]] Status set_material_param(u64 layer, u32 material, u32 param, f32 value) noexcept;
-    [[nodiscard]] bool query_light(u64 layer, f32* values) noexcept;
+    [[nodiscard]] bool query_light(u64 layer, f32* values, u32 capacity = 10) noexcept;
     /// Lente da câmera 3D no cabeçote (9 valores): [0] distância focal (mm,
     /// a que a projeção usa), [1] FOV vertical (°) calculado dela (sensor full
     /// frame 36×24, altura 24 mm), [2] DOF ligado, [3] distância de foco (px do
@@ -920,6 +920,8 @@ public:
     /// pontas dos eixos X, Y, Z do MUNDO (comprimento `length` no mundo),
     /// projetadas em px da composição: {ox, oy, xx, xy, yx, yy, zx, zy}.
     bool query_gizmo(u64 layerId, f32 length, f32* out8, bool localSpace = false) noexcept;
+    /// Position, screen-to-parent pan basis, rotation and rotation gain (13 floats).
+    bool query_preview_gesture_basis(u64 layerId, f32* out13) noexcept;
     /// Posição LOCAL (espaço do pai) que leva a camada `amount` unidades do
     /// mundo ao longo do eixo `axis` (0 X, 1 Y, 2 Z) a partir de onde está.
     /// axis 0..2 uses world XYZ; 3..5 uses evaluated local XYZ. Output is parent-local position.

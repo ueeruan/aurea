@@ -861,18 +861,20 @@ private object SceneTap { var at = 0L; var x = 0f; var y = 0f }
 private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sceneGesture(
     store: EditorStore,
     m: StageMapper,
+    edit: StageEdit,
     down: androidx.compose.ui.input.pointer.PointerInputChange,
     slop: Float,
     haptic: HapticFeedback,
 ) {
     val degPerPx = 0.35f / 1.dp.toPx()
     val picked = store.scenePick(m.cx(down.position.x), m.cy(down.position.y), 36.dp.toPx() / m.fit)
+        ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind) }
     var mode = 0            // 0 pendente, 1 órbita, 2 objeto, 3 pinça
     var last = down.position
     var span0 = 1f
     var distance0 = store.sceneDistance
     var moved = false
-    var grouped = false
+    edit.reset()
     try {
         while (true) {
             val e = awaitPointerEvent()
@@ -883,23 +885,30 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
                 val a = pressed[0].position
                 val b = pressed[1].position
                 val span = hypot(a.x - b.x, a.y - b.y).coerceAtLeast(1f)
-                if (mode != 3) {
-                    if (grouped) { store.endGesture(); grouped = false }
-                    mode = 3; span0 = span; distance0 = store.sceneDistance
+                if (mode != 3 && mode != 4) {
+                    edit.end()
+                    if (store.primary == null && picked != null) store.select(picked)
+                    val d = store.detail
+                    if (d != null && !d.locked && store.previewGestureBasis(d.id) != null) {
+                        mode = 4; edit.startPinch(d, a.x, a.y, b.x, b.y)
+                    } else { mode = 3; span0 = span; distance0 = store.sceneDistance }
+                } else if (mode == 4) {
+                    edit.pinch(a.x, a.y, b.x, b.y)
                 } else {
                     store.updateSceneView(store.sceneYaw, store.scenePitch, distance0 * span0 / span)
                 }
                 moved = true
                 continue
             }
-            if (mode == 3) continue      // sobrou um dedo da pinça: nada
+            if (mode == 3 || mode == 4) continue      // sobrou um dedo da pinça: nada
             val c = e.changes.firstOrNull { it.id == down.id } ?: break
             if (mode == 0 && hypot(c.position.x - down.position.x, c.position.y - down.position.y) > slop) {
                 moved = true
                 if (picked != null) {
                     if (store.primary != picked || store.selection.size != 1) store.select(picked)
-                    store.beginGesture("mover na cena")
-                    grouped = true
+                    val d = store.detail
+                    if (d == null || d.locked) break
+                    edit.startMove(d, down.position.x, down.position.y)
                     mode = 2
                 } else {
                     mode = 1
@@ -910,12 +919,12 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
             val dy = c.position.y - last.y
             when (mode) {
                 1 -> store.updateSceneView(store.sceneYaw - dx * degPerPx, store.scenePitch + dy * degPerPx, store.sceneDistance)
-                2 -> store.sceneDragObject(dx / m.fit, dy / m.fit)
+                2 -> edit.step(MODE_MOVE, c.position.x, c.position.y)
             }
             if (mode != 0) last = c.position
         }
     } finally {
-        if (grouped) store.endGesture()
+        edit.end()
     }
     if (moved) return
     if (picked != null) {
@@ -1133,7 +1142,7 @@ private suspend fun PointerInputScope.stageGestures(
         }
 
         if (store.sceneEditor) {
-            if (m.valid) sceneGesture(store, m, down, slop, haptic)
+            if (m.valid) sceneGesture(store, m, edit, down, slop, haptic)
             return@awaitEachGesture
         }
 
@@ -1250,6 +1259,11 @@ private suspend fun PointerInputScope.stageGestures(
             }
         }
 
+        // Nulls and the active camera have no visible surface to hit.
+        if (target == TARGET_EMPTY && store.selection.size == 1 && store.gizmo != null &&
+            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind)) {
+            target = TARGET_LAYER; targetLayer = store.primary ?: 0L
+        }
         var mode = MODE_PENDING
         val anchorDistance = hypot(downX - m.markerAnchorX, downY - m.markerAnchorY)
         // A âncora só marca se o dedo não caiu sobre OUTRA camada visível por
@@ -1289,7 +1303,7 @@ private suspend fun PointerInputScope.stageGestures(
                     // camada escolhida quando os dedos estão sobre ela.
                     if (!StageView.zoomLock && d != null && m.valid && store.selection.size == 1 && !d.locked &&
                         activeAt(d, store.playhead) &&
-                        (LayerGeometry.contains(d, m.cx(a.position.x), m.cy(a.position.y), slack) ||
+                        (store.gizmo != null || LayerGeometry.contains(d, m.cx(a.position.x), m.cy(a.position.y), slack) ||
                             LayerGeometry.contains(d, m.cx(b.position.x), m.cy(b.position.y), slack) ||
                             LayerGeometry.contains(d, m.cx(midX), m.cy(midY), slack))
                     ) {
@@ -1467,6 +1481,10 @@ private class StageEdit(
     private val snapTol: Float,
 ) {
     private var began = false
+    private var previewBasis: FloatArray? = null
+    private var pinchCx = 0f
+    private var pinchCy = 0f
+    private var pinchPanActive = false
 
     // Mover
     private var pos0x = 0f
@@ -1496,6 +1514,7 @@ private class StageEdit(
     private var groupCy0 = Float.NaN
 
     fun reset() {
+        previewBasis = null
         began = false
         axisLock = 0
         rotActive = false
@@ -1546,6 +1565,7 @@ private class StageEdit(
 
     /** [axis]: 0 = livre (trava sozinho pelo gesto), 1 = só X, 2 = só Y (seta). */
     fun startMove(d: LayerDetail, x: Float, y: Float, axis: Int = 0) {
+        previewBasis = if (axis == 0) store.previewGestureBasis(d.id) else null
         // Tudo em px da composição (mundo); só no fim volta ao espaço do pai.
         moveDetail = d
         d.parentToComp(d.position[0], d.position[1], pt)
@@ -1581,7 +1601,10 @@ private class StageEdit(
     }
 
     fun startPinch(d: LayerDetail, ax: Float, ay: Float, bx: Float, by: Float) {
+        pinchPanActive = false
         keepTransform(d)
+        previewBasis = if (threeD) store.previewGestureBasis(d.id) else null
+        pinchCx = m.cx((ax + bx) * .5f); pinchCy = m.cy((ay + by) * .5f)
         pinchLayer = d.id
         pinchTracker.start(ax, ay, bx, by, snapTol * (16f / 6f))
         rotActive = false
@@ -1593,6 +1616,12 @@ private class StageEdit(
 
     fun step(mode: Int, x: Float, y: Float) {
         if (mode == MODE_MOVE) {
+            previewBasis?.let { basis ->
+                begin("rotate 3D")
+                store.gizmoSetComponents(TrackProperty.ROTATION_X,
+                    com.aurea.aurea.engine.AureaEngine.previewGestureValue(basis, m.cx(x)-downCx, m.cy(y)-downCy, true))
+                return
+            }
             if (group.isNotEmpty()) moveGroup(x, y) else move(x, y)
         }
     }
@@ -1656,6 +1685,15 @@ private class StageEdit(
 
     fun pinch(ax: Float, ay: Float, bx: Float, by: Float) {
         if (store.primary != pinchLayer || store.detail?.locked != false) return
+        previewBasis?.let { basis ->
+            val dx = m.cx((ax+bx)*.5f)-pinchCx; val dy = m.cy((ay+by)*.5f)-pinchCy
+            if (hypot(dx,dy) * m.fit > 3f) pinchPanActive = true
+            if (pinchPanActive) {
+                begin("pan 3D")
+                store.gizmoSetComponents(TrackProperty.POSITION_X,
+                    com.aurea.aurea.engine.AureaEngine.previewGestureValue(basis, dx, dy, false))
+            }
+        }
         if (!pinchTracker.update(ax, ay, bx, by, ::clampFactor)) return
         var f = pinchTracker.factor
         val deg = pinchTracker.degrees

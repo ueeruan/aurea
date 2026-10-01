@@ -1777,12 +1777,13 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
 
 @MainActor private struct SceneLightControls: View {
     @EnvironmentObject private var model: AureaModel
+    @State private var editingShadow = false
     var body: some View {
         ScrollView { VStack {
             HStack { Button(AureaText.t("scene_light_directional")) { model.addLight(0) }; Button(AureaText.t("scene_light_point")) { model.addLight(1) } }
             if let id = model.primarySelection {
                 let values = model.engine.lightInfo(id).map(\.floatValue)
-                if values.count == 10 {
+                if values.count >= 11 {
                     ForEach(Array(1..<(values[0] == 0 ? 5 : 6)), id: \.self) { param in
                         HStack {
                             Text(["", AureaText.t("panel_intensidade"), "R", "G", "B", AureaText.t("scene_light_range")][param])
@@ -1795,9 +1796,18 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                         }
                     }
                     if values[0] == 0 { Toggle(AureaText.t("scene_light_shadows"), isOn: Binding(get: { values[8] >= 0.5 }, set: { model.setLightParam(8, value: $0 ? 1 : 0) })) }
+                    if values[0] == 0 && values[8] >= 0.5 {
+                        Text("\(AureaText.t("scene_shadow_strength")): \(Int(values[10] * 100))%")
+                        Slider(value: Binding(get: { values[10] }, set: { model.setLightParam(10, value: $0) }),
+                               in: 0...1, onEditingChanged: { active in
+                            if active && !editingShadow { editingShadow = true; model.beginGesture("shadow strength") }
+                            if !active && editingShadow { editingShadow = false; model.endGesture() }
+                        }).frame(minHeight: 44).accessibilityLabel(AureaText.t("scene_shadow_strength"))
+                            .accessibilityIdentifier("scene.shadow.strength")
+                    }
                 }
             }
-        }.padding() }
+        }.padding() }.onDisappear { if editingShadow { editingShadow = false; model.endGesture() } }
     }
 }
 

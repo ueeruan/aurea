@@ -1773,11 +1773,11 @@ struct TextAnimationSection: View {
             }
             ForEach(animators.indices, id: \.self) { index in NativeTextAnimatorCard(index: UInt32(index), values: animators[index]).padding(.top, 8) }
             NativePanelChip(AureaText.t("text_animator_add")) {
-                model.engine.run { engine in engine.addEffect(fxEffectTypeId("aurea.text.animator"), toLayer: id, at: UInt32.max) }
+                model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator"), layer: id)
                 refresh(); model.openPanel(.effects)
             }.accessibilityIdentifier("text.animator.add")
             NativePanelChip(AureaText.t("text_transform_add")) {
-                model.engine.run { engine in engine.addEffect(fxEffectTypeId("aurea.text.transform"), toLayer: id, at: UInt32.max) }
+                model.addEffectAndFocus(fxEffectTypeId("aurea.text.transform"), layer: id)
                 refresh(); model.openPanel(.effects)
             }.accessibilityIdentifier("text.transform.add")
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }

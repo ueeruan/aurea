@@ -389,6 +389,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Efeitos da camada principal, na ordem da pilha. */
     var effects by mutableStateOf<List<LayerEffect>>(emptyList())
         private set
+    data class EffectFocusRequest(val layer: Long, val type: Int, val previous: Set<Int>)
+    var pendingEffectFocus by mutableStateOf<EffectFocusRequest?>(null)
+        private set
+
+    fun addEffectAndFocus(type: Int) {
+        val layer = primary ?: return
+        pendingEffectFocus = EffectFocusRequest(layer, type, effects.map { it.effectId }.toSet())
+        addEffect(type, listOf(layer))
+    }
+
+    fun consumeEffectFocus() { pendingEffectFocus = null }
     /** Parâmetros de cada efeito da camada principal (por effectId). */
     var effectParams by mutableStateOf<Map<Int, List<EffectParam>>>(emptyMap())
         private set
@@ -675,6 +686,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     @Volatile private var ready = false
     private var destroyed = false
     private var pendingSurface: Triple<Surface, Int, Int>? = null
+    private var surfaceOwner: Surface? = null
     private var statusLoop: RenderLoop? = null
     var sceneSettingsRevision by mutableIntStateOf(0)
         private set
@@ -832,6 +844,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** SurfaceHolder.surfaceCreated. */
     fun attachSurface(surface: Surface, width: Int, height: Int) {
         synchronized(lifecycleLock) {
+            surfaceOwner = surface
             if (!ready) {
                 pendingSurface = Triple(surface, width, height)
                 return
@@ -843,8 +856,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** SurfaceHolder.surfaceChanged. */
-    fun resizeSurface(width: Int, height: Int) {
+    fun resizeSurface(surface: Surface, width: Int, height: Int) {
         synchronized(lifecycleLock) {
+            if (surfaceOwner !== surface) return
             val pending = pendingSurface
             if (!ready && pending != null) {
                 pendingSurface = Triple(pending.first, width, height)
@@ -855,8 +869,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** SurfaceHolder.surfaceDestroyed. Bloqueia até a GPU largar a janela. */
-    fun detachSurface() {
+    fun detachSurface(surface: Surface) {
         synchronized(lifecycleLock) {
+            if (surfaceOwner !== surface) return
+            surfaceOwner = null
             pendingSurface = null
             if (ready) engine.detachSurface()
         }
@@ -3277,12 +3293,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (shapePartOf(id) >= 0) { shapeGizmoComponents(base, values); return }
         val d = detail ?: return
         val current = when (base) {
+            TrackProperty.POSITION_X -> d.position
             TrackProperty.SCALE_X -> d.scale
             TrackProperty.ROTATION_X -> d.rotation
             else -> return
         }
         applyGizmoComponents(id, d, base, current, values)
     }
+    fun previewGestureBasis(id: Long): FloatArray? = engine.previewGestureBasis(id)
 
     private fun applyGizmoPosition(id: Long, d: LayerDetail, out: FloatArray) =
         applyGizmoComponents(id, d, TrackProperty.POSITION_X, d.position, out)

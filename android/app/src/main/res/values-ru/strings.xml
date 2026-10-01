@@ -3432,4 +3432,5 @@
     <string name="fxl_path_layer">Слой пути</string>
     <string name="fxl_path_offset">Смещение по пути</string>
     <string name="fxl_grid_order">Порядок в сетке</string>
+    <string name="scene_shadow_strength">Интенсивность тени</string>
 </resources>

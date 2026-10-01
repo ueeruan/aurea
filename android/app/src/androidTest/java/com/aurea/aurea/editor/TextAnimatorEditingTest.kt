@@ -113,5 +113,15 @@ class TextAnimatorEditingTest {
             assertEquals(listOf(0, 30), store.primaryKeys().filter { it.property == TrackProperty.EFFECT_PARAM }.map { it.time })
             assertArrayEquals(bounce, store.engineForStress.queryKeyframeEasing(store.primary!!, 31, effect, 0, 0)!!, .0001f)
         }
+        // Returning from a keyed Text Transform must open the NEW animator card.
+        compose.runOnIdle { opened = null }
+        compose.onNodeWithTag("text.animator.add").performScrollTo().performClick()
+        compose.waitUntil(5000) { store.effects.size == 2 && opened == EditorPanel.Effects }
+        val animator = store.effects.last { it.typeId == effectTypeId("aurea.text.animator") }.effectId
+        compose.waitUntil(5000) { store.timelineFocus?.any { it.effectIndex == animator } == true }
+        compose.runOnIdle {
+            assertNull(store.pendingEffectFocus)
+            assertEquals(presetCount, store.textAnimators.size)
+        }
     }
 }

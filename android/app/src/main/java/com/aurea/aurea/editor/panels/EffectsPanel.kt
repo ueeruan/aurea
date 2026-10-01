@@ -300,13 +300,16 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
 
     // Efeito novo abre sozinho; o aberto que sumiu fecha. Fora da composição
     // (bug B-09: estado mutado durante o build).
-    LaunchedEffect(effects) {
+    LaunchedEffect(effects, store.pendingEffectFocus) {
         val ids = effects.map { it.effectId }.toSet()
         val added = ids - known
         known = ids
-        if (added.isNotEmpty()) {
-            val index = effects.indexOfLast { it.effectId in added }
+        val request = store.pendingEffectFocus?.takeIf { it.layer == layerId }
+        val requested = effects.indexOfLast { request != null && it.typeId == request.type && it.effectId !in request.previous }
+        if (requested >= 0 || added.isNotEmpty()) {
+            val index = if (requested >= 0) requested else effects.indexOfLast { it.effectId in added }
             openId = effects[index].effectId
+            if (requested >= 0) store.consumeEffectFocus()
             // Adicionou (pelo catálogo, pela busca geral, colando): os controles
             // do efeito novo aparecem na pilha. A lista entra nesta mesma
             // recomposição; espera o quadro dela antes de rolar.

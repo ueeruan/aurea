@@ -122,6 +122,7 @@ class AureaEngine private constructor() {
         @JvmStatic external fun nativeCreate(): Long
         /** Shared limits for a proportional 2D/3D pinch; no render/model lock. */
         @JvmStatic external fun clampPinchFactor(factor: Float, x: Float, y: Float, z: Float, threeD: Boolean): Float
+        @JvmStatic external fun previewGestureValue(basis: FloatArray, dx: Float, dy: Float, rotate: Boolean): FloatArray
         @JvmStatic external fun nativeDestroy(handle: Long)
     }
 
@@ -410,6 +411,8 @@ class AureaEngine private constructor() {
     // Gizmo 3D.
     fun queryGizmo(layer: Long, length: Float, out: FloatArray, localSpace: Boolean = false): Boolean = nativeQueryGizmo(nativeHandle, layer, length, out, localSpace)
     fun gizmoMoveLocal(layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean = nativeGizmoMoveLocal(nativeHandle, layer, axis, amount, out)
+    fun previewGestureBasis(layer: Long): FloatArray? = FloatArray(13).takeIf { nativePreviewGestureBasis(nativeHandle, layer, it) }
+    private external fun nativePreviewGestureBasis(handle: Long, layer: Long, out: FloatArray): Boolean
 
     fun sceneSettings(): FloatArray = nativeSceneSettings(nativeHandle)
     fun setSceneSetting(parameter: Int, value: Float): Boolean = nativeSetSceneSetting(nativeHandle, parameter, value)
@@ -781,7 +784,7 @@ class AureaEngine private constructor() {
     fun sceneGuides(output: FloatArray): Int = nativeSceneGuides(nativeHandle, output)
     fun layoutTransform(layer: Long, property: Int, value: Float): Boolean = nativeLayoutTransform(nativeHandle, layer, property, value)
     fun addLight(kind: Int): Long = nativeAddLight(nativeHandle, kind)
-    fun lightInfo(layer: Long): FloatArray? = FloatArray(10).takeIf { nativeLightInfo(nativeHandle, layer, it) }
+    fun lightInfo(layer: Long): FloatArray? = FloatArray(11).takeIf { nativeLightInfo(nativeHandle, layer, it) }
     fun setLightParam(layer: Long, param: Int, value: Float): Boolean = nativeSetLightParam(nativeHandle, layer, param, value)
     fun addCamera(): Long = nativeAddCamera(nativeHandle)
     /** Lente da câmera 3D (9 valores, ver `nativeQueryCameraLens`); null se a camada não é câmera. */

@@ -27,7 +27,7 @@ namespace aurea::scene3d {
 
 /// Versão do formato. Muda sempre que um campo muda de significado ou de
 /// layout serializado no cache: cache de versão diferente é reconstruído.
-inline constexpr u32 kSceneAssetVersion = 1;
+inline constexpr u32 kSceneAssetVersion = 2;
 
 /// Por que um import falhou. Nunca só "falhou": a UI diz o motivo certo.
 enum class ImportError : u8 {
@@ -120,6 +120,7 @@ struct Primitive {
     /// (meshoptimizer), do mais fino para o mais grosso. Vazio = só o nível 0.
     std::vector<std::vector<u32>> lods;
     i32  material = -1;             ///< -1 = material padrão
+    i32  materialSlot = -1;         ///< FBX: slot resolved through the mesh instance's node
     Aabb bounds{};
     bool generatedNormals = false;
     bool generatedTangents = false;
@@ -252,10 +253,15 @@ struct Node {
     i32 skin = -1;
     i32 camera = -1;
     i32 light = -1;
+    std::vector<i32> materials;     ///< Per-instance FBX material bindings; empty for glTF.
     std::vector<f32> morphWeights;    ///< vazio = os da malha
 
     [[nodiscard]] Mat4 local_matrix() const noexcept {
         return Mat4::translation(translation) * Mat4::from_quat(rotation) * Mat4::scale(scale);
+    }
+    [[nodiscard]] i32 material_for(const Primitive& primitive) const noexcept {
+        return primitive.materialSlot >= 0 && static_cast<usize>(primitive.materialSlot) < materials.size()
+            ? materials[static_cast<usize>(primitive.materialSlot)] : primitive.material;
     }
 };
 

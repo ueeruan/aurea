@@ -100,12 +100,13 @@ struct EffectsView: View {
         .onDisappear { model.timelineFocus = nil }
         .onChange(of: model.effects.map(\.effectId)) { ids in
             let added = Set(ids).subtracting(known); known = Set(ids)
-            if let id = ids.last(where: { added.contains($0) }) {
+            if let id = model.requestedEffectFocusId ?? ids.last(where: { added.contains($0) }) {
                 // Adicionou (catálogo, busca geral, colar): os controles do novo
                 // efeito aparecem na pilha.
                 pendingPick = nil
                 if tabbed { tab = .applied }
                 open(id)
+                if model.requestedEffectFocusId == id { model.pendingEffectFocus = nil }
             }
             else if let openId, !ids.contains(openId) { closeCard() }
         }
@@ -166,6 +167,9 @@ struct EffectsView: View {
         loadedLayer = model.primarySelection; known = Set(model.effects.map(\.effectId))
         closeCard(); advanced = []; expressionLooks = [:]; pendingPick = nil
         tab = fxInitialEffectsTab(model.effects.count)
+        if let requested = model.requestedEffectFocusId {
+            tab = .applied; open(requested); model.pendingEffectFocus = nil; return
+        }
         if let type = focusedType, let effect = model.effects.first(where: { $0.typeId == type }) {
             open(effect.effectId); return
         }

@@ -654,11 +654,11 @@ fun PreviewSurface(store: EditorStore, modifier: Modifier = Modifier) {
                     }
 
                     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                        store.resizeSurface(width, height)
+                        store.resizeSurface(holder.surface, width, height)
                     }
 
                     override fun surfaceDestroyed(holder: SurfaceHolder) {
-                        store.detachSurface()
+                        store.detachSurface(holder.surface)
                     }
                 })
             }

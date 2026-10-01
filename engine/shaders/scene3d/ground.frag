@@ -138,6 +138,7 @@ void main() {
         if (i == shadowLight) {
             sh = aurea_shadow(t_shadow, t_shadowDepth, g.shadowMatrix, g.shadowParams, g.shadowParams2,
                               v_world, N, L, gl_FragCoord.xy);
+            sh = mix(1.0, sh, g.lightSpot2[i].y);
             keyLit = sh;
         }
         vec3 radiance = g.lightColor[i].rgb * (NdotL * atten * sh);

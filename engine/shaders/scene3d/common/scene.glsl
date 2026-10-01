@@ -37,7 +37,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform SceneBlock {
     vec4 lightPos[MAX_LIGHTS];    // xyz = posição (ponto/spot) ou direção PARA a luz (direcional); w = tipo (0 dir, 1 ponto, 2 spot)
     vec4 lightColor[MAX_LIGHTS];  // rgb * intensidade; w = alcance (0 = infinito)
     vec4 lightSpot[MAX_LIGHTS];   // xyz = direção do feixe; w = cos do cone externo
-    vec4 lightSpot2[MAX_LIGHTS];  // x = cos do cone interno
+    vec4 lightSpot2[MAX_LIGHTS];  // x = cos do cone interno, y = shadow strength
 
     // Material
     vec4 baseColor;         // linear

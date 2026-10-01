@@ -289,6 +289,7 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 
 // =============================================================================
 @implementation AureaEngine {
+    CAMetalLayer* _surfaceLayer;
     std::unique_ptr<aurea::ios::Host> _host;
     aurea::ios::Batch _batch;
     NSString* _cacheDirectory;
@@ -399,12 +400,24 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     // `SurfaceDesc::nativeWindow` é o CAMetalLayer* no iOS. O layer é da VIEW:
     // o motor só o usa enquanto a view existir, e o `detachSurface` espera a
     // GPU largá-lo antes de a view morrer.
-    return _host->attach_surface((__bridge void*)layer, static_cast<aurea::u32>(width),
-                                 static_cast<aurea::u32>(height)) ? YES : NO;
+    if (!_host->attach_surface((__bridge void*)layer, static_cast<aurea::u32>(width),
+                              static_cast<aurea::u32>(height))) return NO;
+    _surfaceLayer = layer;
+    return YES;
 }
 
 - (void)detachSurface {
     if (_host) _host->detach_surface();
+    _surfaceLayer = nil;
+}
+
+// SwiftUI may mount the replacement preview before dismantling the old one.
+// A stale view must never detach or resize the replacement's surface.
+- (void)detachMetalLayer:(CAMetalLayer*)layer {
+    if (_surfaceLayer == layer) [self detachSurface];
+}
+- (void)resizeMetalLayer:(CAMetalLayer*)layer width:(int)width height:(int)height {
+    if (_surfaceLayer == layer) [self resizeSurfaceWidth:width height:height];
 }
 
 - (void)resizeSurfaceWidth:(int)width height:(int)height {
@@ -1845,9 +1858,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     const auto id = self.engine->add_light(kind); return id.ok() ? static_cast<long long>(*id) : -1;
 }
 - (NSArray<NSNumber*>*)lightInfo:(long long)layer {
-    float values[10]{};
-    if (!self.engine || !self.engine->query_light(static_cast<aurea::u64>(layer), values)) return @[];
-    return floats_to_array(values, 10);
+    float values[11]{};
+    if (!self.engine || !self.engine->query_light(static_cast<aurea::u64>(layer), values, 11)) return @[];
+    return floats_to_array(values, 11);
 }
 - (void)setLightParam:(long long)layer param:(uint32_t)param value:(float)value {
     if (auto* c = _batch.add(CommandType::LayerSetLightParam))
@@ -2425,6 +2438,18 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length {
     float points[8]{}; auto* e = self.engine;
     return e && e->query_gizmo(layerId, length, points) ? floats_to_array(points, 8) : @[];
+}
+- (NSArray<NSNumber*>*)previewGestureBasis:(long long)layer {
+    float values[13]{};
+    if (!self.engine || !self.engine->query_preview_gesture_basis(static_cast<u64>(layer), values)) return @[];
+    return floats_to_array(values, 13);
+}
+- (NSArray<NSNumber*>*)previewGestureValue:(NSArray<NSNumber*>*)basis dx:(float)dx dy:(float)dy rotate:(BOOL)rotate {
+    if (basis.count != 13) return @[];
+    float values[13]{};
+    for (NSUInteger i=0; i<13; ++i) values[i] = basis[i].floatValue;
+    const auto v = aurea::preview_gesture_value(values, dx, dy, rotate);
+    return @[@(v.x), @(v.y), @(v.z)];
 }
 - (NSArray<NSNumber*>*)gizmoMoveLocal:(long long)layerId axis:(uint32_t)axis amount:(float)amount {
     float xyz[3]{}; auto* e = self.engine;

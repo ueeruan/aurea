@@ -321,6 +321,7 @@ struct LightData {
     f32  penumbra   = 0.2f;
     bool castShadows = false;
     f32  shadowBias = 0.001f;
+    f32  shadowStrength = 1.0f;
 };
 
 // Per-layer factors over the immutable imported material. Mask bits select

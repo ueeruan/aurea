@@ -1699,11 +1699,11 @@ Result<u64> Engine::add_light(u32 kind) noexcept {
     project_->mark_dirty(); request_render(); return id.pack();
 }
 
-bool Engine::query_light(u64 layerId, f32* values) noexcept {
+bool Engine::query_light(u64 layerId, f32* values, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     auto* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!layer || layer->kind != LayerKind::Light || !values) return false;
+    if (!layer || layer->kind != LayerKind::Light || !values || capacity < 10) return false;
     const auto local = layer->local_time(playback_.current());
     const auto& light = layer->light;
     values[0] = static_cast<f32>(light.kind);
@@ -1715,6 +1715,7 @@ bool Engine::query_light(u64 layerId, f32* values) noexcept {
     values[6] = layer->tracks.sample_or(TrackProperty::LightConeAngle, local, light.coneAngle);
     values[7] = layer->tracks.sample_or(TrackProperty::LightPenumbra, local, light.penumbra);
     values[8] = light.castShadows ? 1.0f : 0.0f; values[9] = light.shadowBias;
+    if (capacity >= 11) values[10] = light.shadowStrength;
     return true;
 }
 
@@ -4619,6 +4620,37 @@ bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noe
     };
     return proj(o, out) && proj(o + axis(0), out + 2) && proj(o + axis(1), out + 4)
         && proj(o + axis(2), out + 6);
+}
+
+bool Engine::query_preview_gesture_basis(u64 layerId, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out || !lives_in_3d(*l) || l->locked) return false;
+    const auto now = playback_.current(), local = l->local_time(now);
+    if (!l->contains_time(now)) return false;
+    for (u32 i = 0; i < 3; ++i) {
+        out[i] = l->tracks.sample_or(static_cast<TrackProperty>(i), local, (&l->transform.position.x)[i]);
+        out[9+i] = l->tracks.sample_or(static_cast<TrackProperty>(6+i), local, (&l->transform.rotation.x)[i]);
+    }
+    const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
+        : comp_view_projection(*comp, now);
+    const Layer* parent = l->parent.valid() ? comp->layer(l->parent) : nullptr;
+    const Mat4 pw = (parent ? layer_world_3d(*comp, *parent, now) : Mat4::identity()) * l->parentBasis;
+    Vec4 c = vp * pw * Vec4{out[0], out[1], out[2], 1};
+    // A selected active camera is at the eye. Pan it at the composition plane's depth.
+    if (!(c.w > 1e-5f)) c = vp * Vec4{comp->width() * .5f, comp->height() * .5f, 0, 1};
+    if (!(c.w > 1e-5f)) return false;
+    const Mat4 inverse = inverse4(pw) * inverse4(vp);
+    const Vec3 projected{c.x/c.w, c.y/c.w, c.z/c.w};
+    const Vec3 origin = inverse.transform_point(projected);
+    const Vec3 x = inverse.transform_point(projected + Vec3{1,0,0}) - origin;
+    const Vec3 y = inverse.transform_point(projected + Vec3{0,1,0}) - origin;
+    out[3]=x.x; out[4]=x.y; out[5]=x.z;
+    out[6]=y.x; out[7]=y.y; out[8]=y.z;
+    out[12] = 180.f / std::max(1.f, static_cast<f32>(comp->height()));
+    for (u32 i=0; i<13; ++i) if (!std::isfinite(out[i])) return false;
+    return true;
 }
 
 bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexcept {
@@ -10067,7 +10099,13 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::AudioSetFadeOut:      return frame_ok(c.audio_fade.duration);
         case CommandType::ShapeSetParam:        return finite(c.shape_param.value);
         case CommandType::LayerSetMaterialParam: return c.material_param.param < 6 && finite(c.material_param.value) && c.material_param.value >= 0 && c.material_param.value <= 1;
-        case CommandType::LayerSetLightParam: return c.shape_param.param < 10 && finite(c.shape_param.value);
+        case CommandType::LayerSetLightParam: {
+            const u32 p = c.shape_param.param;
+            const f32 v = c.shape_param.value;
+            const f32 maximum = p == 0 ? 2.f : (p >= 2 && p <= 4) || p == 7 || p == 10 ? 1.f
+                              : p == 6 ? 179.f : p == 9 ? .1f : 1000000.f;
+            return p <= 10 && finite(v) && v >= 0 && v <= maximum;
+        }
         case CommandType::LayerSetCameraParam: return c.shape_param.param < 5 && finite(c.shape_param.value);
         case CommandType::LayerLayoutTransform: return c.shape_param.param < 15 && finite(c.shape_param.value);
         case CommandType::ShapeSetFill:
@@ -10480,6 +10518,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (l->locked) return Errc::InvalidState;
             const u32 p = cmd.shape_param.param;
             const f32 v = cmd.shape_param.value;
+            if (p > 10 || !std::isfinite(v)) return Errc::InvalidArgument;
+            if (p == 10) {
+                if (v < 0 || v > 1) return Errc::InvalidArgument;
+                l->light.shadowStrength = v;
+                return OkStatus;
+            }
             if (p == 0) { if (v < 0 || v > 2) return Errc::InvalidArgument; l->light.kind = static_cast<LightKind>(static_cast<u32>(v)); return OkStatus; }
             if (p == 8) { l->light.castShadows = v >= .5f; return OkStatus; }
             f32* field = p == 1 ? &l->light.intensity : p == 2 ? &l->light.color.x : p == 3 ? &l->light.color.y : p == 4 ? &l->light.color.z

@@ -1043,6 +1043,18 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryGizmo)(JNIEnv* env, jclass, jlong handle,
     return JNI_TRUE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativePreviewGestureBasis)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    auto* c = ctx_of(handle); f32 values[13]{};
+    if (!c || !out || env->GetArrayLength(out) < 13 || !c->engine.query_preview_gesture_basis(static_cast<u64>(layer), values)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, 13, values); return JNI_TRUE;
+}
+AUREA_JNI jfloatArray AUREA_FN(previewGestureValue)(JNIEnv* env, jclass, jfloatArray basis, jfloat dx, jfloat dy, jboolean rotate) {
+    if (!basis || env->GetArrayLength(basis) != 13) return env->NewFloatArray(0);
+    f32 values[13]{}; env->GetFloatArrayRegion(basis, 0, 13, values);
+    const auto v = aurea::preview_gesture_value(values, dx, dy, rotate == JNI_TRUE);
+    const f32 out[]{v.x,v.y,v.z}; auto result = env->NewFloatArray(3);
+    if (result) env->SetFloatArrayRegion(result,0,3,out); return result;
+}
 AUREA_JNI jboolean AUREA_FN(nativeGizmoMoveLocal)(JNIEnv* env, jclass, jlong handle, jlong layer, jint axis, jfloat amount, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out || env->GetArrayLength(out) < 3) return JNI_FALSE;
@@ -2772,9 +2784,11 @@ AUREA_JNI jlong AUREA_FN(nativeAddLight)(JNIEnv*, jclass, jlong handle, jint kin
     return id.ok() ? static_cast<jlong>(*id) : -1;
 }
 AUREA_JNI jboolean AUREA_FN(nativeLightInfo)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray output) {
-    auto* c = ctx_of(handle); f32 values[10]{};
-    if (!c || !output || env->GetArrayLength(output) < 10 || !c->engine.query_light(static_cast<u64>(layer), values)) return JNI_FALSE;
-    env->SetFloatArrayRegion(output, 0, 10, values); return JNI_TRUE;
+    auto* c = ctx_of(handle); f32 values[11]{};
+    if (!c || !output || env->GetArrayLength(output) < 10) return JNI_FALSE;
+    const auto count = std::min<jsize>(11, env->GetArrayLength(output));
+    if (!c->engine.query_light(static_cast<u64>(layer), values, static_cast<u32>(count))) return JNI_FALSE;
+    env->SetFloatArrayRegion(output, 0, count, values); return JNI_TRUE;
 }
 AUREA_JNI jboolean AUREA_FN(nativeSetLightParam)(JNIEnv*, jclass, jlong handle, jlong layer, jint param, jfloat value) {
     auto* c = ctx_of(handle); if (!c) return JNI_FALSE;

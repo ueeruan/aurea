@@ -2587,6 +2587,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
             s.innerCone = s.outerCone * (1.0f - std::clamp(l->tracks.sample_or(TrackProperty::LightPenumbra, local, l->light.penumbra), 0.0f, 1.0f));
             s.castShadows = l->light.castShadows;
             s.shadowBias = l->light.shadowBias;
+            s.shadowStrength = l->light.shadowStrength;
             // Ponto/spot: candela (KHR_lights_punctual) → mundo em px. A queda
             // 1/d² do shader é em px; × (px/m)² dá a mesma luz que 1/d² em
             // metros na escala física da cena (altura do quadro = 2 m).

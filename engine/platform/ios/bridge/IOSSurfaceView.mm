@@ -76,7 +76,7 @@
     layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     layer.framebufferOnly = YES;
     layer.opaque = YES;
-    layer.allowsNextDrawableTimeout = NO;
+    layer.allowsNextDrawableTimeout = YES;
     // Sem `presentsWithTransaction`: o motor apresenta pelo commit normal do
     // drawable, que é o caminho de menor latência (o modo de transação é para
     // sincronizar com o CATransaction, e travaria a thread de render).
@@ -101,6 +101,7 @@
         if (self.window && !_attached) [self attachIfNeeded];
         return;
     }
+    [self detach]; // Release the previous engine while its reference is still valid.
     _engine = engine;
     // A view pode ganhar o motor depois de já estar na tela (o SwiftUI monta a
     // view antes de a sessão subir o motor).
@@ -130,7 +131,7 @@
         const CGSize size = self.metalLayer.drawableSize;
         if ((int)size.width != _resizedWidth || (int)size.height != _resizedHeight) {
             _resizedWidth = (int)size.width; _resizedHeight = (int)size.height;
-            [self.engine resizeSurfaceWidth:_resizedWidth height:_resizedHeight];
+            [self.engine resizeMetalLayer:self.metalLayer width:_resizedWidth height:_resizedHeight];
         }
     }
 }
@@ -167,7 +168,7 @@
 - (void)detach {
     if (!_attached) return;
     // Espera a GPU largar o layer: depois desta chamada a view pode morrer.
-    [self.engine detachSurface];
+    [self.engine detachMetalLayer:self.metalLayer];
     _attached = NO;
     [self willChangeValueForKey:@"surfaceAttached"];
     _surfaceAttached = NO;

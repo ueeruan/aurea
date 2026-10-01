@@ -244,6 +244,8 @@ static const uint32_t AureaTrackPropertyInvalidEffectIndex = 0xFFFFFFFFu;
 NS_SWIFT_NAME(AureaEngine)
 @interface AureaEngine : NSObject
 - (float)clampPinchFactor:(float)factor scaleX:(float)x scaleY:(float)y scaleZ:(float)z threeD:(BOOL)threeD;
+- (NSArray<NSNumber*>*)previewGestureBasis:(long long)layer;
+- (NSArray<NSNumber*>*)previewGestureValue:(NSArray<NSNumber*>*)basis dx:(float)dx dy:(float)dy rotate:(BOOL)rotate;
 
 /// `cache` e `documents` são as pastas do app. `documents` é onde o .aurea e a
 /// mídia importada moram — o MESMO formato de arquivo do Android.
@@ -278,6 +280,8 @@ NS_SWIFT_NAME(AureaEngine)
 /// no iOS (ver render/GPUBackend.hpp). O layer é EMPRESTADO — a posse é da view.
 - (BOOL)attachMetalLayer:(CAMetalLayer*)layer width:(int)width height:(int)height;
 - (void)detachSurface;
+- (void)detachMetalLayer:(CAMetalLayer*)layer;
+- (void)resizeMetalLayer:(CAMetalLayer*)layer width:(int)width height:(int)height;
 - (void)resizeSurfaceWidth:(int)width height:(int)height;
 @property (nonatomic, readonly) BOOL hasSurface;
 /// Acorda a thread de render e força um quadro.

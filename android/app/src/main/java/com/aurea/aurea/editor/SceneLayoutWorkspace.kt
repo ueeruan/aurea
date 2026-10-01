@@ -77,6 +77,18 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                     }
                 }
                 if (values[0] == 0f) Row { Text(stringResource(R.string.scene_light_shadows)); Switch(values[8] >= .5f, { store.setLightParam(8, if (it) 1f else 0f) }) }
+                if (values[0] == 0f && values[8] >= .5f) {
+                    val label = stringResource(R.string.scene_shadow_strength)
+                    Text("$label: ${(values[10] * 100).toInt()}%")
+                    var editing by remember { mutableStateOf(false) }
+                    DisposableEffect(store) { onDispose { if (editing) store.endGesture() } }
+                    Slider(value = values[10], onValueChange = {
+                        if (!editing) { editing = true; store.beginGesture("shadow strength") }
+                        store.setLightParam(10, it)
+                    }, onValueChangeFinished = {
+                        if (editing) { editing = false; store.endGesture() }
+                    }, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = label })
+                }
             }
         } }
     }

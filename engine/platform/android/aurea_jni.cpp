@@ -3024,7 +3024,7 @@ AUREA_JNI jint AUREA_FN(nativeRecoverSession)(JNIEnv*, jclass, jlong handle) {
 /// `shortSide` = lado menor do vídeo (720/1080/1440/2160); `fps` 0 = o da
 /// composição; `codec` 0 = H.264, 1 = HEVC; `bitrateMbps` 0 = automático.
 AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint shortSide,
-                                           jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale) {
+                                           jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale, jboolean trimToContent) {
     NativeContext* c = ctx_of(handle);
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, outputPath);
@@ -3035,7 +3035,13 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
     settings.videoCodec = codec == 1 ? ExportCodec::HEVC : ExportCodec::H264;
     settings.videoBitrateMbps = bitrateMbps > 0 ? static_cast<u32>(bitrateMbps) : 0;
     settings.aiUpscale = static_cast<u32>(aiUpscale);
+    settings.trimToContent = trimToContent == JNI_TRUE;
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
+}
+
+AUREA_JNI jlong AUREA_FN(nativeExportDuration)(JNIEnv*, jclass, jlong handle, jboolean trimToContent) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.query_export_duration(trimToContent == JNI_TRUE) : 0;
 }
 
 AUREA_JNI jint AUREA_FN(nativeCancelExport)(JNIEnv*, jclass, jlong handle) {

@@ -9295,6 +9295,13 @@ bool Engine::is_selected(u64 layerId) const noexcept {
 // =============================================================================
 // Export
 // =============================================================================
+i64 Engine::query_export_duration(bool trimToContent) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    const Composition* comp = current_composition();
+    return comp ? comp->export_duration(trimToContent).value : 0;
+}
+
 Status Engine::start_export(const ExportSettings& settings, const char* outputPath) noexcept {
     if (!project_) return Errc::InvalidState;
     if (settings.aiUpscale != 0 && settings.aiUpscale != 2 && settings.aiUpscale != 4)
@@ -9318,6 +9325,7 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     ctx->dither = settings.dither;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
         ctx->compFps = comp->fps();
@@ -9331,7 +9339,7 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         auto even = [](f64 v) { return std::max<u32>(2u, static_cast<u32>(std::llround(v / 2.0)) * 2u); };
         ctx->width = even(cw * k);
         ctx->height = even(ch * k);
-        const f64 seconds = comp->duration_seconds();
+        const f64 seconds = static_cast<f64>(comp->export_duration(settings.trimToContent).value) / comp->fps();
         ctx->frames = std::max<u32>(1u, static_cast<u32>(std::ceil(seconds * ctx->fps - 1e-6)));
         ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
         ctx->audioSnap = audio::build_snapshot(*comp, *project_, ctx->audioCache.get(), &Engine::audio_path_resolver, this);

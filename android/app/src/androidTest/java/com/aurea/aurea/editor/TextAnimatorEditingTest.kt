@@ -28,6 +28,51 @@ import org.junit.Test
 class TextAnimatorEditingTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun transformAnimatorRailOpensTheSelectedWiggleCurve() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        lateinit var store: EditorStore
+        var initialized = false
+        var opened by mutableStateOf<EditorPanel?>(null)
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            initialized = true
+            AureaTheme {
+                Box(Modifier.fillMaxSize()) {
+                    EditorScreen(store)
+                    val env = PanelEnv(store, {}, { opened = it }, {}, {}, {}, { null })
+                    if (opened == EditorPanel.Curve) CurvePanel(env)
+                    else TransformPanel(env, TransformTab.Animadores, {})
+                }
+            }
+        }
+        compose.waitUntil(30000) { initialized && store.engineReady }
+        compose.runOnIdle { store.newProject(640, 360, 30f, "Animator rail") }
+        compose.waitUntil(15000) { store.project.title == "Animator rail" }
+        compose.runOnIdle { store.addText(); store.dismissTextContentEditor() }
+        compose.waitUntil(5000) { store.primary != null }
+        compose.runOnIdle {
+            store.addLayerAnimator(); store.addLayerAnimator()
+            store.toggleLayerAnimKey(1, 13); store.seek(30)
+        }
+        compose.waitUntil(5000) { store.detail?.localPlayhead == 30 }
+        compose.runOnIdle {
+            store.setLayerAnimParam(1, 13, 200f)
+            store.focusLayerAnimator(com.aurea.aurea.engine.TrackKey(40, 1, 13))
+        }
+        compose.onNodeWithContentDescription(context.getString(R.string.panel_editar_curva_propriedade)).assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(EditorPanel.Curve, opened)
+            assertEquals(40, store.selectedKeyframe?.second?.property)
+            assertEquals(1, store.selectedKeyframe?.second?.effectIndex)
+            assertEquals(13, store.selectedKeyframe?.second?.paramIndex)
+        }
+        compose.onNodeWithTag("curve.preset.bounce").performClick()
+        compose.waitUntil(5000) {
+            store.primaryKeys().any { it.property == 40 && it.effectIndex == 1 && it.paramIndex == 13 && it.time == 0 && it.interpolation == 7 }
+        }
+        compose.runOnIdle { assertTrue(store.primaryKeys().filter { it.property == 40 && it.paramIndex == 0 }.none { it.interpolation == 7 }) }
+    }
+
     @Test fun textAnimationIsAnEffectAndPresetsSurviveKeysCopyUndoAndReopen() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))

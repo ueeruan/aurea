@@ -25,6 +25,21 @@ import XCTest
         app = nil
     }
 
+    func testText3DAnimatorRailOpensTheSelectedWiggleCurve() throws {
+        _ = try launch("animator-curve-rail")
+        let curve = app.buttons["Edit the property curve"].firstMatch
+        XCTAssertTrue(curve.waitForExistence(timeout: 5)); XCTAssertTrue(curve.isEnabled)
+        curve.tap()
+        _ = try awaitSnapshot("Animator rail opens Wiggle Y, not the layer transform") {
+            $0.sheet == "curve" && $0.curveProperty == 40 && $0.curveParam == 13
+        }
+        let bounce = app.buttons["curve.preset.bounce"].firstMatch
+        XCTAssertTrue(bounce.waitForExistence(timeout: 5)); bounce.tap()
+        _ = try awaitSnapshot("Animator curve accepts bounce easing") {
+            $0.curveKeys.contains { $0.property == 40 && $0.time == 0 && $0.interpolation == 7 }
+        }
+    }
+
     func testMaskOpacityOpensItsOwnAnimatedCurve() throws {
         _ = try launch("mask-animation")
         let border = app.buttons["3 Border"].firstMatch

@@ -1301,6 +1301,7 @@ public:
 
     /// Composição atual: id empacotado e ajustes (tamanho, fps, duração em
     /// frames, fundo RGBA linear). false = sem projeto.
+    [[nodiscard]] i64 query_export_duration(bool trimToContent = true) noexcept;
     bool query_composition(u64& id, u32& width, u32& height, f64& fps, i64& durationFrames,
                            f32 background[4]) noexcept;
     /// Teto de tamanho de composição do aparelho, como lado maior × lado

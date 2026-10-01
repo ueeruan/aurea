@@ -3509,4 +3509,6 @@
     <string name="fxl_path_offset">Deslocamento no caminho</string>
     <string name="fxl_grid_order">Ordem na grade</string>
     <string name="scene_shadow_strength">Força da sombra</string>
+    <string name="export_range_content">Conteúdo da timeline</string>
+    <string name="export_range_full">Composição inteira</string>
 </resources>

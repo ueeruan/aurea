@@ -4,7 +4,8 @@ import SwiftUI
 /// same rail, keyframe groups and gesture units as the Android editor.
 struct TransformView: View {
     @EnvironmentObject private var model: AureaModel
-    @State private var tab = 0
+    private var tab: Int { get { model.transformTab } nonmutating set { model.transformTab = newValue } }
+    private var animatorTrack: TimelineTrack? { tab == 6 ? model.animatorRailTrack() : nil }
     @State private var axis = 2
     private var linked: Bool { model.scaleAxesLinked }
     @State private var expand3D = false
@@ -45,10 +46,19 @@ struct TransformView: View {
         return props
     }
     private var look: KeyframeLook {
+        if animatorTrack != nil {
+            if curveKeys.contains(where: { $0.time == model.localPlayhead }) { return .keyHere }
+            return curveKeys.isEmpty ? .none : .animated
+        }
         if !keyProps.isEmpty && (keyProps.count == 3 ? keyProps.allSatisfy { keyMask & (1 << $0) != 0 } : keyProps.contains { keyMask & (1 << $0) != 0 }) { return .keyHere }
         return keyProps.contains { animatedMask & (1 << $0) != 0 } ? .animated : .none
     }
     private var curveKeys: [KeyframeItem] {
+        if let track = animatorTrack {
+            return (model.keyframes[id] ?? []).filter {
+                Int($0.property) == track.property && $0.effectIndex == track.effect && $0.paramIndex == track.param
+            }.sorted { $0.time < $1.time }
+        }
         let candidates = props + keyProps.filter { !props.contains($0) }
         return preferredCurveTrack(candidates.map { property in
             (model.keyframes[id] ?? []).filter { $0.property == property }.sorted { $0.time < $1.time }
@@ -90,8 +100,8 @@ struct TransformView: View {
                 EffectsView(focusedType: fxEffectTypeId("aurea.text3d.layout"), embedded: true)
             } else {
             HStack(spacing: 0) {
-                LeftRail(keyframeLook: look, onKeyframe: props.isEmpty ? nil : toggleKey,
-                         curveAnimated: look != .none, onCurve: curveKeys.isEmpty ? nil : openCurve,
+                LeftRail(keyframeLook: look, onKeyframe: props.isEmpty && animatorTrack == nil ? nil : toggleKey,
+                         curveAnimated: look != .none, onCurve: curveKeys.count < (tab == 6 ? 2 : 1) ? nil : openCurve,
                          onMore: openMenu, expression: expressionLook,
                          onExpression: props.isEmpty ? nil : openExpression,
                          onBack: { model.panel = .none })
@@ -118,20 +128,23 @@ struct TransformView: View {
         .foregroundStyle(AureaColors.text)
         .onAppear { text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; updateTimelineFocus(); model.pivotStageEdit = tab == 4 }
         // Face Pivô aberta: o arrasto no palco move o pivô (PreviewMetalView.pivotEvent).
-        .onChange(of: tab) { model.pivotStageEdit = $0 == 4 }
+        .onChange(of: tab) { model.pivotStageEdit = $0 == 4; updateTimelineFocus() }
         .onChange(of: id) { _ in
             text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; wholeText = false
             // A face Lente só existe na câmera 3D: trocou de camada com ela aberta → Posição.
             if tab >= baseNames.count && !isCamera { tab = 0 }
+            updateTimelineFocus()
         }
         .onChange(of: wholeText) { _ in updateTimelineFocus() }
         .onChange(of: keyProps) { _ in updateTimelineFocus() }
+        .onChange(of: model.status.modelRevision) { _ in if tab == 6 { updateTimelineFocus() } }
         .onDisappear { endGesture(); model.timelineFocus = nil; model.pivotStageEdit = false }
     }
 
     private func updateTimelineFocus() {
         if tab == 2 && text3D && !wholeText { return }
-        model.timelineFocus = keyProps.map { TimelineTrack(property: Int($0)) }
+        if let track = animatorTrack { model.focusLayerAnimator(track) }
+        else { model.timelineFocus = keyProps.map { TimelineTrack(property: Int($0)) } }
     }
 
     // Fields are part of the touch pad for Position, above it for Pivot.
@@ -599,8 +612,8 @@ struct TransformView: View {
     private func openCurve() {
         guard let first = curveKeys.first else { return }
         let local = model.localPlayhead
-        let segment = curveKeys.last { $0.time <= local } ?? curveKeys[0]
-        model.openCurve(property: first.property, time: segment.time)
+        let segment = curveKeys.dropLast().last { $0.time <= local } ?? curveKeys[0]
+        model.openCurve(property: first.property, effect: first.effectIndex, param: first.paramIndex, time: segment.time)
     }
     private func openExpression() {
         guard !props.isEmpty else { return }
@@ -611,6 +624,11 @@ struct TransformView: View {
             unit: tab == 1 || tab == 3 ? "%" : tab == 2 ? "°" : "px")
     }
     private func toggleKey() {
+        if let track = animatorTrack {
+            guard !(model.selectedLayer?.locked ?? false) else { return }
+            model.engine.toggleLayerAnimKey(id, index: track.effect, param: track.param)
+            model.refreshModel(force: true); return
+        }
         guard !(model.selectedLayer?.locked ?? false), !keyProps.isEmpty else { return }
         let present = keyProps.filter { property in
             (model.keyframes[id] ?? []).contains { $0.property == property && $0.effectIndex == UInt32.max && $0.time == model.localPlayhead }

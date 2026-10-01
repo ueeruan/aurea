@@ -3447,4 +3447,6 @@
     <string name="fxl_path_offset">الإزاحة على المسار</string>
     <string name="fxl_grid_order">الترتيب في الشبكة</string>
     <string name="scene_shadow_strength">قوة الظل</string>
+    <string name="export_range_content">محتوى الخط الزمني</string>
+    <string name="export_range_full">التكوين بالكامل</string>
 </resources>

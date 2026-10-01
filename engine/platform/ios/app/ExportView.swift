@@ -18,7 +18,7 @@ struct ExportView: View {
         let neural = min(model.compositionWidth, model.compositionHeight) * model.exportOptions.aiUpscale
         return neural > 0 ? Array(Set(standard + [neural])).sorted() : standard
     }
-    private var seconds: Double { Double(model.compositionDuration) / max(1, model.compositionFps) }
+    private var seconds: Double { Double(model.engine.exportDuration(model.exportOptions.trimToContent)) / max(1, model.compositionFps) }
     private var fps: Double { model.exportOptions.fps > 0 ? model.exportOptions.fps : model.compositionFps }
     private var codec: String { model.exportOptions.codec == .hevc ? "HEVC" : "H.264" }
     private var estimatedMbps: Double {
@@ -99,6 +99,11 @@ struct ExportView: View {
     private var options: some View {
         VStack(alignment: .leading, spacing: 0) {
             upscaleOptions
+            section("editor_duracao")
+            chips([AureaText.t("export_range_content"), AureaText.t("export_range_full")],
+                  selected: AureaText.t(model.exportOptions.trimToContent ? "export_range_content" : "export_range_full")) {
+                model.exportOptions.trimToContent = $0 == AureaText.t("export_range_content")
+            }
             resolutionOptions
             frameRateOptions
             codecOptions

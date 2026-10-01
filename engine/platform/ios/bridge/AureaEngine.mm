@@ -3347,6 +3347,19 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale {
+    return [self startExportTo:path codec:codec height:height fps:fps bitrateMbps:bitrateMbps
+             audioBitrateKbps:audioBitrateKbps aiUpscale:aiUpscale trimToContent:NO];
+}
+
+- (long long)exportDuration:(BOOL)trimToContent {
+    auto* e = self.engine;
+    return e ? e->query_export_duration(trimToContent != NO) : 0;
+}
+
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent {
     auto* e = self.engine;
     if (!e) return NO;
     aurea::ExportSettings settings;
@@ -3358,6 +3371,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     settings.videoBitrateMbps = bitrateMbps;
     settings.audioBitrateKbps = audioBitrateKbps;
     settings.aiUpscale = aiUpscale;
+    settings.trimToContent = trimToContent != NO;
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
     return e->start_export(settings, out.c_str()).ok() ? YES : NO;

@@ -3429,4 +3429,6 @@
     <string name="fxl_path_offset">पथ ऑफ़सेट</string>
     <string name="fxl_grid_order">ग्रिड क्रम</string>
     <string name="scene_shadow_strength">छाया की तीव्रता</string>
+    <string name="export_range_content">टाइमलाइन की सामग्री</string>
+    <string name="export_range_full">पूरी कम्पोज़िशन</string>
 </resources>

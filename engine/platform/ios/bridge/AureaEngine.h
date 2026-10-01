@@ -825,6 +825,11 @@ NS_SWIFT_NAME(AureaEngine)
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale;
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent;
+- (long long)exportDuration:(BOOL)trimToContent;
 - (void)cancelExport;
 /// Thumbnail quadrado do frame do playhead não é export: use `captureFrame`.
 @end

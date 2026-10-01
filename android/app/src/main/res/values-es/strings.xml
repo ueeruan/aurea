@@ -3429,4 +3429,6 @@ para editar la curva.</string>
     <string name="fxl_path_offset">Desplazamiento en trazado</string>
     <string name="fxl_grid_order">Orden en cuadrícula</string>
     <string name="scene_shadow_strength">Intensidad de la sombra</string>
+    <string name="export_range_content">Contenido de la línea de tiempo</string>
+    <string name="export_range_full">Composición completa</string>
 </resources>

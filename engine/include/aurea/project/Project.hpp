@@ -76,6 +76,8 @@ struct ExportSettings {
     /// Offline neural super-resolution. 0 = normal, 2/4 = neural output scale.
     /// Session option: output dimensions remain the requested final quality.
     u32 aiUpscale = 0;
+    /// Session export range. Does not shorten the project or its compositions.
+    bool trimToContent = false;
 };
 
 /// Ajustes de interface persistidos com o projeto — zoom da timeline, escala

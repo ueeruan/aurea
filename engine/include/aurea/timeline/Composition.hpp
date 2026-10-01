@@ -153,6 +153,9 @@ public:
 
     /// Duração em frames. Sempre >= 1.
     [[nodiscard]] FrameIndex duration() const noexcept { return duration_; }
+    /// End-exclusive export range starting at frame zero. Content mode keeps
+    /// leading gaps and audio, but drops unused composition tail after clips.
+    [[nodiscard]] FrameIndex export_duration(bool trimToContent) const noexcept;
     void set_duration(FrameIndex d) noexcept {
         duration_ = FrameIndex{d.value > 0 ? d.value : 1};
     }

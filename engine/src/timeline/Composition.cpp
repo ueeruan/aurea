@@ -49,6 +49,24 @@ const char* default_layer_noun(LayerKind kind) noexcept {
 
 } // namespace
 
+FrameIndex Composition::export_duration(bool trimToContent) const noexcept {
+    if (!trimToContent) return duration_;
+    i64 end = 0;
+    for (u32 i = 0; i < order_.size(); ++i) {
+        const Layer* l = layer(order_.at(i));
+        if (!l || l->end.value <= l->start.value) continue;
+        // Control-only layers cannot extend footage. Hidden/muted clips remain
+        // part of the timeline range; toggling preview visibility is not a trim.
+        switch (l->kind) {
+            case LayerKind::Null: case LayerKind::Camera: case LayerKind::Light:
+            case LayerKind::Adjustment: case LayerKind::Unknown: continue;
+            default: end = std::max(end, l->end.value); break;
+        }
+    }
+    // A background-only composition still has its explicitly configured length.
+    return end > 0 ? FrameIndex{std::clamp<i64>(end, 1, duration_.value)} : duration_;
+}
+
 void Composition::resize_content(u32 w, u32 h) noexcept {
     if (!w || !h || (w == width_ && h == height_)) return;
     const f32 k = std::min(static_cast<f32>(w) / width_, static_cast<f32>(h) / height_);

@@ -178,6 +178,7 @@ struct ExportOptions: Equatable {
     var bitrateMbps: UInt32 = 20
     var audioBitrateKbps: UInt32 = 192
     var aiUpscale: UInt32 = 0
+    var trimToContent = true
     var fps: Double = 0   // 0 = o da composição
 }
 
@@ -323,6 +324,22 @@ final class AureaModel: ObservableObject {
     @Published var curveGraphMode = 0
     @Published var scaleAxesLinked = true
     @Published var timelineKeyDragActive = false
+    @Published var transformTab = 0
+    @Published var transformAnimatorFocus: TimelineTrack?
+    private var transformAnimatorLayer: Int64?
+    func focusLayerAnimator(_ track: TimelineTrack) {
+        transformAnimatorLayer = primarySelection
+        if transformAnimatorFocus != track { transformAnimatorFocus = track }
+        if timelineFocus != [track] { timelineFocus = [track] }
+    }
+    func animatorRailTrack() -> TimelineTrack? {
+        guard let id = primarySelection else { return nil }
+        let count = engine.layerAnimators(id).count / 32
+        let saved = transformAnimatorLayer == id ? transformAnimatorFocus : nil
+        return [timelineFocus?.first, saved].compactMap { $0 }.first {
+            $0.property == 40 && Int($0.effect) < count && $0.param < 18
+        } ?? (count > 0 ? TimelineTrack(property: 40, effect: 0, param: 0) : nil)
+    }
     @Published var curveSelectedTime: Int32?
     @Published var captionOptions: [String: NSNumber] = [:]
     @Published var vectorGroup: UInt32 = 0
@@ -786,6 +803,19 @@ final class AureaModel: ObservableObject {
                             _ = engine.setMaskParam(id, mask: mask, param: 2, value: 0.25)
                             engine.run { $0.seek(toFrame: 0) }
                             panel = .mask; refreshModel(force: true)
+                        }
+                    case "animator-curve-rail":
+                        addText3D(content: "AUREA", depth: 0.25); textContentRequest = nil
+                        if let id = primarySelection {
+                            _ = engine.addLayerAnimator(id); _ = engine.addLayerAnimator(id)
+                            engine.run {
+                                $0.keyParameter(id, property: 40, effect: 1, param: 13, time: 0, value: 0)
+                                $0.keyParameter(id, property: 40, effect: 1, param: 13, time: 30, value: 200)
+                                $0.seek(toFrame: 0)
+                            }
+                            refreshModel(force: true); transformTab = 6
+                            focusLayerAnimator(TimelineTrack(property: 40, effect: 1, param: 13))
+                            panel = .transform
                         }
                     case "text-animator-editing":
                         let textId = engine.addText("AUREA")
@@ -2722,7 +2752,7 @@ final class AureaModel: ObservableObject {
                                     fps: exportOptions.fps,
                                     bitrateMbps: exportOptions.bitrateMbps,
                                     audioBitrateKbps: exportOptions.audioBitrateKbps,
-                                    aiUpscale: exportOptions.aiUpscale)
+                                    aiUpscale: exportOptions.aiUpscale, trimToContent: exportOptions.trimToContent)
         guard ok else {
             exportMessage = AureaText.t("ios_export_could_not_start")
             toast = exportMessage

@@ -3433,4 +3433,6 @@
     <string name="fxl_path_offset">Смещение по пути</string>
     <string name="fxl_grid_order">Порядок в сетке</string>
     <string name="scene_shadow_strength">Интенсивность тени</string>
+    <string name="export_range_content">Содержимое таймлайна</string>
+    <string name="export_range_full">Вся композиция</string>
 </resources>

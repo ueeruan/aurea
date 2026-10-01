@@ -147,6 +147,11 @@ internal fun uses3D(d: com.aurea.aurea.engine.LayerDetail?): Boolean {
     return d.isAnimated(TrackProperty.ROTATION_X) || d.isAnimated(TrackProperty.ROTATION_Y) || d.isAnimated(TrackProperty.POSITION_Z)
 }
 
+internal fun animatorRailTrack(count: Int, focused: TrackKey?, saved: TrackKey?): TrackKey? =
+    listOfNotNull(focused, saved).firstOrNull {
+        it.property == TrackProperty.LAYER_ANIM_PARAM && it.effectIndex in 0 until count && it.paramIndex in 0..17
+    } ?: if (count > 0) TrackKey(TrackProperty.LAYER_ANIM_PARAM, 0, 0) else null
+
 @Composable
 internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformTab) -> Unit) {
     val store = env.store
@@ -171,16 +176,32 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
     // Rotation diamond and timeline focus follow the selected axis.
     val keyProps = transformKeyProperties(tab, show3D, axis)
-    androidx.compose.runtime.DisposableEffect(store, tab, show3D, axis) {
-        store.timelineFocus = keyProps.map { TrackKey(it) }
+    val animator = if (tab == TransformTab.Animadores) animatorRailTrack(store.layerAnimators.size,
+        store.timelineFocus?.singleOrNull(), store.transformAnimatorFocus?.takeIf { it.first == store.primary }?.second) else null
+    androidx.compose.runtime.DisposableEffect(store, store.primary, tab, show3D, axis, animator) {
+        if (animator != null) store.focusLayerAnimator(animator)
+        else store.timelineFocus = keyProps.map { TrackKey(it) }
         onDispose { store.timelineFocus = null }
     }
-    val canKey = props.isNotEmpty()
-    val look by remember(store, tab, axis, show3D) {
-        derivedStateOf { if (keyProps.isEmpty()) com.aurea.aurea.ui.ds.KeyframeLook.None else transformLook(store.detail, keyProps) }
-    }
-    val curveKeys by remember(store, tab, axis, show3D) {
+    val canKey = props.isNotEmpty() || animator != null
+    val look by remember(store, tab, axis, show3D, animator) {
         derivedStateOf {
+            if (animator != null) {
+                val values = store.layerAnimators.getOrNull(animator.effectIndex)
+                val bit = 1 shl animator.paramIndex
+                when {
+                    values != null && values[25].toInt() and bit != 0 -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
+                    values != null && values[24].toInt() and bit != 0 -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
+                    else -> com.aurea.aurea.ui.ds.KeyframeLook.None
+                }
+            } else if (keyProps.isEmpty()) com.aurea.aurea.ui.ds.KeyframeLook.None else transformLook(store.detail, keyProps)
+        }
+    }
+    val curveKeys by remember(store, tab, axis, show3D, animator) {
+        derivedStateOf {
+            if (animator != null) return@derivedStateOf store.primaryKeys().filter {
+                it.property == animator.property && it.effectIndex == animator.effectIndex && it.paramIndex == animator.paramIndex
+            }.sortedBy { it.time }
             val candidates = (props.toList() + keyProps.toList()).distinct()
             curveTrack(candidates.map { store.primaryKeys().transformTrack(it) })
         }
@@ -200,9 +221,12 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
         LeftRail(
             onBack = env.onClose,
             keyframeLook = look,
-            onKeyframe = if (canKey) ({ store.toggleTransformKeyframe(keyProps) }) else null,
+            onKeyframe = if (canKey) ({
+                if (animator != null) store.toggleLayerAnimKey(animator.effectIndex, animator.paramIndex)
+                else store.toggleTransformKeyframe(keyProps)
+            }) else null,
             curveAnimated = look != com.aurea.aurea.ui.ds.KeyframeLook.None,
-            onCurve = if (curveKeys.isNotEmpty()) {
+            onCurve = if (curveKeys.size >= (if (animator != null) 2 else 1)) {
                 {
                     val layer = store.primary
                     val t = store.detail?.localPlayhead
@@ -218,7 +242,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             },
             more = { RailMoreButton(active = false) { menu = true } },
             expression = exprLook,
-            onExpression = if (canKey) ({ store.openExpression(exprTitle, exprKeys, exprScale, exprUnit) }) else null,
+            onExpression = if (props.isNotEmpty()) ({ store.openExpression(exprTitle, exprKeys, exprScale, exprUnit) }) else null,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             if (tab == TransformTab.Girar && store.text3d != null) {

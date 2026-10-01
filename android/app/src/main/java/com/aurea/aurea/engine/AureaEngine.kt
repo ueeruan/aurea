@@ -833,8 +833,10 @@ class AureaEngine private constructor() {
      * `fps` 0 = o da composição, `codec` 0 = H.264 / 1 = HEVC, `bitrateMbps` 0 =
      * automático. Devolve o código de erro do motor (0 = começou).
      */
-    fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int = 0): Int =
-        nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale)
+    fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int = 0, trimToContent: Boolean = false): Int =
+        nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent)
+
+    fun exportDuration(trimToContent: Boolean = true): Long = nativeExportDuration(nativeHandle, trimToContent)
     fun cancelExport(): Int = nativeCancelExport(nativeHandle)
 
     /**
@@ -1141,7 +1143,8 @@ class AureaEngine private constructor() {
     private external fun nativeLoadNotice(handle: Long): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int
-    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int): Int
+    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean): Int
+    private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>): Long
     private external fun nativeImportModelProgress(handle: Long): Int

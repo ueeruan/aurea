@@ -79,9 +79,9 @@ internal fun ExportScreen(store: EditorStore, onDismiss: () -> Unit) {
     val compW = comp?.width ?: store.project.width
     val compH = comp?.height ?: store.project.height
     val compFps = comp?.fps ?: store.project.fps.toDouble()
-    val seconds = if (compFps > 0) (comp?.durationFrames ?: store.project.durationFrames) / compFps else 0.0
 
     var options by remember { mutableStateOf(ExportOptions(shortSide = min(1080, max(720, min(compW, compH))))) }
+    val seconds = if (compFps > 0) store.exportDuration(options.trimToContent) / compFps else 0.0
     var preview by remember { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(Unit) {
         exporter.reset()
@@ -219,6 +219,12 @@ private fun Options(
         val factor = options.aiUpscale
         Text(stringResource(R.string.ai_upscale_dimensions, factor, ((w + factor*2-1)/(factor*2))*2,
             ((h + factor*2-1)/(factor*2))*2, w, h), style = AureaType.BodySmall, modifier = Modifier.padding(top = 6.dp))
+    }
+    Section(stringResource(R.string.editor_duracao))
+    val contentRange = stringResource(R.string.export_range_content)
+    val fullRange = stringResource(R.string.export_range_full)
+    Chips(listOf(contentRange, fullRange), if (options.trimToContent) contentRange else fullRange) {
+        onChange(options.copy(trimToContent = it == contentRange))
     }
     Section(stringResource(R.string.editor_resolucao))
     Chips(resolutions.map { it.second }, available.firstOrNull { it.first == options.shortSide }?.second, blocked) { label ->

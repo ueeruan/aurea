@@ -196,7 +196,7 @@ private fun LayerAnimRuler(env: PanelEnv, index: Int, p: LayerAnimParam, v: Floa
     }
     val label = stringResource(p.label)
     val selected = store.timelineFocus == exprKeys
-    val select = { store.timelineFocus = exprKeys }
+    val select = { store.focusLayerAnimator(exprKeys.single()) }
     PropertyCustomRow(
         label, selected = selected, onSelect = select, keyframe = look,
         modifier = Modifier.testTag("layer.anim.$index.param.${p.id}"),

@@ -8,6 +8,15 @@ import com.aurea.aurea.ui.ds.KeyframeLook
 import java.nio.ByteBuffer
 
 class TransformKeyPropertiesTest {
+    @Test fun animatorRailFollowsExactParameterAndRestoresItAfterCurveNavigation() {
+        val focused = com.aurea.aurea.engine.TrackKey(40, 1, 13)
+        val saved = com.aurea.aurea.engine.TrackKey(40, 0, 0)
+        assertEquals(focused, animatorRailTrack(2, focused, saved))
+        assertEquals(focused, animatorRailTrack(2, null, focused))
+        assertEquals(saved, animatorRailTrack(1, focused, saved))
+        assertEquals(saved, animatorRailTrack(1, com.aurea.aurea.engine.TrackKey(0), null))
+        assertEquals(null, animatorRailTrack(0, focused, saved))
+    }
     @Test fun partialXYZKeysAreCompletedBeforeTheyCanBeRemoved() {
         val buffer = ByteBuffer.allocate(LayerDetail.BYTES)
         buffer.putInt(92, 3)

@@ -3476,4 +3476,6 @@ to edit the curve.</string>
     <string name="fxl_path_offset">Path offset</string>
     <string name="fxl_grid_order">Grid order</string>
     <string name="scene_shadow_strength">Shadow strength</string>
+    <string name="export_range_content">Timeline content</string>
+    <string name="export_range_full">Entire composition</string>
 </resources>

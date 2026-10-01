@@ -40,6 +40,7 @@ data class ExportOptions(
     /** Alta = 1,6× a taxa automática do motor. */
     val highQuality: Boolean = false,
     val aiUpscale: Int = 0,
+    val trimToContent: Boolean = true,
 )
 
 enum class ExportPhase { Idle, Running, Publishing, Done, Failed, Cancelled }
@@ -135,7 +136,7 @@ class Exporter internal constructor(
             val code = withContext(Dispatchers.IO) {
                 dir.mkdirs()
                 dir.listFiles()?.forEach { it.delete() }   // sobra de export interrompido
-                engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale)
+                engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale, options.trimToContent)
             }
             if (code != 0) {
                 state = ExportUiState(ExportPhase.Failed, message = startError(code, options))

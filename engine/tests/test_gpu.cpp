@@ -3735,6 +3735,34 @@ struct ExportRig {
 
 } // namespace
 
+AUREA_TEST(Gpu, Regression2133ExportFiveSecondTextDoesNotWriteThirtyFourSeconds) {
+    AUREA_REQUIRE_GPU();
+    for (int mode = 0; mode < 3; ++mode) {
+        SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+        ExportRig rig(cfg, 0);
+        auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        while (comp->order().size()) AUREA_CHECK(comp->remove_layer(comp->order().at(0)));
+        const auto text = rig.e.add_text("AUREA");
+        AUREA_CHECK(text.ok()); if (!text.ok()) return;
+        comp->layer(LayerId::unpack(*text))->end = FrameIndex{150};
+        set_duration(rig.e, 1020);
+        ExportSettings s; s.height = 36; s.dither = false;
+        s.trimToContent = mode != 1; s.fps = mode == 0 ? 30 : mode == 1 ? 6 : 24;
+        const u32 frames = mode == 0 ? 150 : mode == 1 ? 204 : 120;
+        AUREA_CHECK(rig.e.start_export(s, "unused-duration.mp4").ok());
+        AUREA_CHECK(wait_export(rig.e));
+        AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Ok);
+        AUREA_CHECK_EQ(rig.e.export_progress().framesTotal, frames);
+        AUREA_CHECK_EQ(rig.cap.pts.size(), usize{frames});
+        AUREA_CHECK(rig.cap.finished && !rig.cap.aborted);
+        if (!rig.cap.pts.empty()) {
+            AUREA_CHECK_EQ(rig.cap.pts.front(), i64{0});
+            AUREA_CHECK_NEAR(rig.cap.pts.back() / 1e6 + 1 / s.fps, mode == 1 ? 34.0 : 5.0, 1e-5);
+        }
+        AUREA_CHECK_EQ(comp->duration().value, i64{1020});
+    }
+}
+
 AUREA_TEST(Gpu, RepeatedProjectResizeKeepsVideoInsideExport) {
     if (!gpu().ok) return;
     SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;

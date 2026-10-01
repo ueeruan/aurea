@@ -453,8 +453,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var curveGraphMode by mutableIntStateOf(0)
     var scaleAxesLinked by mutableStateOf(true)
     var timelineKeyDragActive by mutableStateOf(false)
+    fun exportDuration(trimToContent: Boolean): Long = engine.exportDuration(trimToContent)
 
     var timelineFocus by mutableStateOf<List<com.aurea.aurea.engine.TrackKey>?>(null)
+    var transformAnimatorFocus by mutableStateOf<Pair<Long, TrackKey>?>(null)
+    fun focusLayerAnimator(track: TrackKey) {
+        primary?.let { transformAnimatorFocus = it to track }
+        timelineFocus = listOf(track)
+    }
 
     /** Aviso curto e não bloqueante (ex.: "Salvo na galeria"). A UI some com ele em ~2 s. */
     var toast by mutableStateOf<String?>(null)

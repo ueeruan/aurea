@@ -2094,12 +2094,12 @@ private struct NativeLayerAnimatorCard: View {
         return VStack(spacing: 0) {
         NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit,
             decimals: param.step < 0.1 ? 2 : param.step < 1 ? 1 : 0, keypad: true, look: look, toggleKey: {
-                model.timelineFocus = [track]
+                model.focusLayerAnimator(track)
                 model.engine.toggleLayerAnimKey(id, index: index, param: UInt32(param.id)); reload()
             }, expression: expression, onExpression: {
                 model.expressionSheet = ExpressionRequest(layer: id, label: param.label, tracks: [ExpressionTrack(property: 40, effect: index, param: UInt32(param.id))], unit: param.unit)
-            }, selected: selected, onSelect: { model.timelineFocus = [track] }, compactUnit: true) {
-                model.timelineFocus = [track]; model.engine.setLayerAnimParam(id, index: index, param: UInt32(param.id), value: $0); reload()
+            }, selected: selected, onSelect: { model.focusLayerAnimator(track) }, compactUnit: true) {
+                model.focusLayerAnimator(track); model.engine.setLayerAnimParam(id, index: index, param: UInt32(param.id), value: $0); reload()
             }.accessibilityIdentifier("layer.anim.\(index).param.\(param.id)")
         if selected { NativeAnimationTrackActions(track: track, curveTag: "layer.anim.\(index).curve.\(param.id)") }
         }

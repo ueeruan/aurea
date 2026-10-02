@@ -4,268 +4,266 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Text
-import androidx.compose.material3.Slider
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
-import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import com.aurea.aurea.R
-import com.aurea.aurea.state.EditorStore
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aurea.aurea.R
+import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.Text3DInfo
 import com.aurea.aurea.state.Text3DPreset
-import com.aurea.aurea.ui.ds.ColorWell
-import com.aurea.aurea.ui.ds.PropertyCustomRow
-import com.aurea.aurea.ui.ds.TickRuler
-import com.aurea.aurea.ui.ds.KeypadRequest
-import com.aurea.aurea.ui.ds.ValueBox
-import com.aurea.aurea.ui.ds.valueDrag
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
-import kotlin.math.roundToInt
 
 /**
- * MATERIAL E AMBIENTE do objeto 3D. Material: só o que o motor muda de verdade
- * — a cor do texto 3D (a malha é gerada de novo); o modelo importado usa o
- * material do próprio arquivo (a cena do motor ainda não aceita troca de
- * material: `SceneSetMaterialParam` responde "não implementado"), então aqui
- * não há régua de Metálico/Rugosidade que não faria nada. Ambiente: a luz que
- * envolve a cena (HDRI ou estúdio neutro), intensidade e giro.
+ * PAINEL 3D (texto 3D, forma 3D, modelo importado e câmera), reorganizado em
+ * poucas ABAS em vez de uma parede de controles:
+ *
+ *  - Material: materiais prontos (amostras), cor, metálico e rugosidade; a
+ *    superfície e o resto (especular, emissão, material por região) ficam em
+ *    "Avançado", fechado. Forma 3D: cor e imagem por parte. Modelo: os
+ *    materiais do arquivo.
+ *  - Forma: fonte, alinhamento, profundidade (extrusão) e chanfro do texto;
+ *    as partes (posição, giro, escala) e o efeito de partes da forma 3D.
+ *  - Luz e cena: sombras do objeto, estúdio, ambiente (HDRI) e, em
+ *    "Avançado", qualidade, tom, exposição, brilho e o ambiente do objeto.
+ *  - Animação: animação por letra (texto) ou por parte (forma).
+ *
+ * Toda linha de valor é a mesma [HumanRow] (rótulo, régua, valor, ↺ ao
+ * padrão); interruptores são [ToggleLine]; cores, [ColorLine]. Nada mudou no
+ * motor: cada controle chama o mesmo comando de antes.
  */
 @Composable
 internal fun Element3DPanel(env: PanelEnv) {
     val store = env.store
-    val e by remember(store) { derivedStateOf { store.environment } }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) { store.importHdri(uri); if (store.detail?.kind == 8) store.setEnvironmentBackground(true) }
-    }
     val t3 by remember(store) { derivedStateOf { store.text3d } }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
-        SceneSettingsSection(store)
-        if (store.detail?.kind != 8) {
-        t3?.let { Text3DSection(env, it); TextAnimSection(env, showAnimatorEffect = false) }
-        // Forma 3D: partes, cor e imagem por parte (Shape3DSection.kt) no lugar do material importado.
-        val shape = store.shape3d
-        shape?.let {
-            Shape3DSection(env, it)
-            // O mesmo sistema das letras do texto 3D, parte a parte: o efeito
-            // Shape 3D Layout e a seção de animação por unidade.
-            Spacer(Modifier.height(10.dp))
-            TextButton(onClick = {
-                val type = effectTypeId("aurea.shape3d.layout")
-                if (store.effects.none { e -> e.typeId == type }) store.addEffect(type)
-                env.onOpenPanel(EditorPanel.Effects)
-            }, modifier = Modifier.testTag("shape3d.layout")) { Text(stringResource(R.string.shape3d_layout_effect)) }
-            Text(stringResource(R.string.shape3d_layout_hint), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)))
-            Text3DAnimSection(env, parts = true)
+    val camera = store.detail?.kind == 8
+    val shape = if (camera) null else store.shape3d
+    val text = if (camera) null else t3
+    val tabs = when {
+        camera -> listOf(Tab3D.Light)
+        text != null || shape != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Anim)
+        else -> listOf(Tab3D.Material, Tab3D.Light)
+    }
+    var chosen by rememberSaveable { mutableIntStateOf(Tab3D.Material.ordinal) }
+    val tab = tabs.firstOrNull { it.ordinal == chosen } ?: tabs.first()
+    Column(Modifier.fillMaxSize()) {
+        if (tabs.size > 1) {
+            Panel3DTabs(tabs, tab, Modifier.padding(start = 18.dp, top = 10.dp, end = 18.dp, bottom = 4.dp)) { chosen = it.ordinal }
         }
-        if (shape == null) SectionTitle(stringResource(R.string.panel_material))
-        val info = t3
-        if (info != null) {
-            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.panel_cor), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-                ColorWell(Color(info.color[0], info.color[1], info.color[2])) {
-                    store.beginGesture("cor do texto 3D")
-                    env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
-                        store.text3d?.let { store.setText3D(it.copy(color = floatArrayOf(r, g, b, 1f)), lazy = true) }
-                    }, onDone = { store.endGesture() }))
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .padding(start = 18.dp, top = 6.dp, end = 18.dp, bottom = 24.dp),
+        ) {
+            when (tab) {
+                Tab3D.Material -> when {
+                    text != null -> Text3DMaterialTab(env, text)
+                    shape != null -> Shape3DSection(env, shape, Shape3DPage.Material)
+                    else -> {
+                        KitTitle(stringResource(R.string.panel_material))
+                        ImportedMaterialSection(store)
+                    }
+                }
+                Tab3D.Shape -> when {
+                    text != null -> Text3DShapeTab(env, text)
+                    shape != null -> {
+                        Shape3DSection(env, shape, Shape3DPage.Shape)
+                        ActionCard(stringResource(R.string.shape3d_layout_effect), stringResource(R.string.shape3d_layout_hint)) {
+                            val type = effectTypeId("aurea.shape3d.layout")
+                            if (store.effects.none { e -> e.typeId == type }) store.addEffect(type)
+                            env.onOpenPanel(EditorPanel.Effects)
+                        }
+                    }
+                }
+                Tab3D.Light -> LightSceneTab(env, objectSettings = !camera)
+                Tab3D.Anim -> when {
+                    text != null -> TextAnimSection(env, showAnimatorEffect = false)
+                    shape != null -> Text3DAnimSection(env, parts = true)
                 }
             }
-            Text3DPbrSection(env, store)
-        } else if (shape == null) ImportedMaterialSection(store)
-        LightingSection(store)
-        Spacer(Modifier.height(16.dp))
-        }
-        SectionTitle(stringResource(R.string.environment_texture))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip(stringResource(R.string.panel_estudio_neutro), on = e[0] < 0.5f) { store.clearHdri() }
-            Chip(if (e[0] >= 0.5f) stringResource(R.string.panel_imagem_ambiente) else stringResource(R.string.panel_usar_imagem_ambiente_hdr), on = e[0] >= 0.5f) {
-                pick.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        EnvRuler(env, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, e[1], "${(e[1] * 100).roundToInt()}%") { store.setEnvironment(it, store.environment[2]) }
-        EnvRuler(env, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, e[2], "${e[2].roundToInt()}°") { store.setEnvironment(store.environment[1], it) }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            stringResource(R.string.environment_hint),
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
-        )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.environment_background), Modifier.weight(1f), style = AureaType.BodySmall)
-            androidx.compose.material3.Switch(checked = (e.getOrNull(3) ?: 0f) > .5f, onCheckedChange = store::setEnvironmentBackground)
-        }
-        if (store.detail?.kind != 8) ObjectEnvironmentSection(env)
-    }
-}
-
-@Composable
-private fun ImportedMaterialSection(store: EditorStore) {
-    // Reading detail/curve revision subscribes to playback, edits and undo.
-    val detail = store.detail
-    val revision = store.curveRevision
-    val materials = remember(detail, revision) { store.queryMaterials() }
-    var selected by remember(store.primary) { mutableStateOf(0) }
-    var dragging by remember(store.primary) { mutableStateOf(false) }
-    // FBX/OBJ com textura/.mtl que não veio junto: o mesmo "Importar texturas" do import.
-    val missingTextures = remember(detail, revision) { store.selectedModelMissingTextures() }
-    if (missingTextures > 0) {
-        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.model_textures_missing, missingTextures), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-            Chip(stringResource(R.string.model_textures_title), on = false) { store.askModelTextures() }
-        }
-    }
-    if (materials.isEmpty()) return
-    val current = materials.firstOrNull { it[0].toInt() == selected } ?: materials.first()
-    val index = current[0].toInt()
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        materials.forEach { material ->
-            val id = material[0].toInt()
-            Chip("Material ${id + 1}", on = id == index) { selected = id }
-        }
-    }
-    val labels = listOf("R", "G", "B", "Alpha", stringResource(R.string.pn_t3d_metallic), stringResource(R.string.pn_t3d_roughness))
-    labels.forEachIndexed { param, label ->
-        val value = current[param + 2].coerceIn(0f, 1f)
-        val here = (store.keyframes[store.primary] ?: emptyList()).any {
-            it.property == 37 && it.effectIndex == index && it.paramIndex == param && it.time == detail?.localPlayhead
-        }
-        val keyLabel = stringResource(if (here) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui) + " · " + label
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, modifier = Modifier.width(78.dp), style = AureaType.BodySmall)
-            Slider(value = value, onValueChange = {
-                if (!dragging) { dragging = true; store.beginGesture("material") }
-                store.setMaterialParameter(index, param, it)
-            }, onValueChangeFinished = { if (dragging) { dragging = false; store.endGesture() } }, modifier = Modifier.weight(1f))
-            TextButton(onClick = { store.toggleMaterialKeyframe(index, param, value) }, modifier = Modifier.semantics { contentDescription = keyLabel }) { Text(if (here) "◆" else "◇") }
-        }
-    }
-    androidx.compose.runtime.DisposableEffect(store.primary) {
-        onDispose { if (dragging) { dragging = false; store.endGesture() } }
-    }
-}
-
-/**
- * AMBIENTE DO OBJETO (v22): este modelo pode ter a luz dele, sem mexer na dos
- * outros. Sem ambiente próprio, vale o do projeto — o de cima.
- */
-@Composable
-private fun ObjectEnvironmentSection(env: PanelEnv) {
-    val store = env.store
-    val oe by remember(store) { derivedStateOf { store.objectEnvironment } }
-    var pick by remember { mutableStateOf(false) }
-    val escolher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) store.importObjectHdri(uri)
-    }
-    val objectEnv = oe?.takeIf { it.size >= 5 } ?: return
-    val proprio = objectEnv[0] >= 0.5f
-    Spacer(Modifier.height(16.dp))
-    SectionTitle(stringResource(R.string.panel_ambiente_do_objeto))
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Chip(stringResource(R.string.panel_do_projeto), on = !proprio) { store.setObjectEnvironment(0) }
-        Chip(stringResource(R.string.panel_proprio), on = proprio) {
-            store.setObjectEnvironment(1)
-            if (objectEnv[1] <= 0f) escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
-        }
-    }
-    if (proprio) {
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip(
-                if (objectEnv[1] > 0f) stringResource(R.string.panel_trocar_imagem) else stringResource(R.string.panel_usar_imagem_ambiente_hdr),
-                on = objectEnv[1] > 0f,
-            ) { escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*")) }
-        }
-        Spacer(Modifier.height(10.dp))
-        EnvRuler(env, stringResource(R.string.panel_intensidade), 0.01f, 0f, 20f, objectEnv[2], "${(objectEnv[2] * 100).roundToInt()}%") {
-            store.setObjectEnvironment(1, intensity = it)
-        }
-        EnvRuler(env, stringResource(R.string.pn_env_rotate_light), 1f, -360f, 360f, objectEnv[3], "${objectEnv[3].roundToInt()}°") {
-            store.setObjectEnvironment(1, rotation = it)
-        }
-        EnvRuler(env, stringResource(R.string.panel_exposicao), 0.01f, 0.05f, 20f, objectEnv[4], "${(objectEnv[4] * 100).roundToInt()}%") {
-            store.setObjectEnvironment(1, exposure = it)
         }
     }
 }
 
-@Composable
-private fun SectionTitle(t: String) {
-    Text(t, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
-    Spacer(Modifier.height(6.dp))
+/** As abas do painel 3D (a ordem é a da tela). */
+internal enum class Tab3D(val label: Int) {
+    Material(R.string.ui3d_tab_material),
+    Shape(R.string.ui3d_tab_shape),
+    Light(R.string.ui3d_tab_light),
+    Anim(R.string.ui3d_tab_anim),
 }
 
-/** Texto 3D: texto, profundidade e alinhamento (a cor mora em Material) (a malha é gerada de novo a cada mudança). */
+/** Controle segmentado: cada aba divide a largura; a acesa usa o destaque. */
 @Composable
-private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
-    val store = env.store
-    SectionTitle(stringResource(R.string.pn_text3d_title))
-    Spacer(Modifier.height(14.dp))
-    SectionTitle(stringResource(R.string.pn_t3d_presets))
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf("Smooth", "Brushed", "Scratched", "Hammered", "Weathered Metal").forEachIndexed { index, label ->
-            Chip(label, on = info.surfaceFinish == index) {
-                store.text3d?.let { store.setText3D(it.copy(surfaceFinish = index)) }
+private fun Panel3DTabs(tabs: List<Tab3D>, selected: Tab3D, modifier: Modifier, onSelect: (Tab3D) -> Unit) {
+    val group = stringResource(R.string.ui3d_tabs)
+    Row(
+        modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
+            .semantics { contentDescription = group }.padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        tabs.forEach { t ->
+            val on = t == selected
+            Box(
+                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(8.dp))
+                    .background(if (on) AureaColors.AccentDim else Color.Transparent)
+                    .semantics { role = Role.Tab; this.selected = on }
+                    .testTag("panel3d.tab.${t.name.lowercase()}")
+                    .tocavel(shrink = 1f) { onSelect(t) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(t.label), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp,
+                        fontWeight = if (on) FontWeight.W700 else FontWeight.W500,
+                        color = if (on) AureaColors.Accent else AureaColors.Text)),
+                )
             }
         }
     }
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+}
+
+// --- Texto 3D -----------------------------------------------------------------
+
+/** Cor da amostra de cada material pronto (a mesma ordem do motor). */
+private val PresetSwatch = mapOf(
+    Text3DPreset.Chrome to Color(0xFFF2F4F9),
+    Text3DPreset.Gold to Color(0xFFFFC457),
+    Text3DPreset.Brushed to Color(0xFFC7C9CC),
+    Text3DPreset.Glossy to Color(0xFFE61A1F),
+    Text3DPreset.Matte to Color(0xFFD9D9DB),
+    Text3DPreset.Neon to Color(0xFF1AFFD9),
+    Text3DPreset.CinematicMetal to Color(0xFFA8ADB8),
+)
+
+private val FinishLabels = listOf(
+    R.string.ui3d_finish_smooth, R.string.ui3d_finish_brushed, R.string.ui3d_finish_scratched,
+    R.string.ui3d_finish_hammered, R.string.ui3d_finish_weathered,
+)
+
+@Composable
+private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
+    val store = env.store
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    KitTitle(stringResource(R.string.ui3d_ready_materials))
+    ChipRow {
         (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
-            Chip(stringResource(preset.labelRes), on = false) {
+            SwatchChip(stringResource(preset.labelRes), PresetSwatch[preset] ?: Color.White, Modifier.testTag("text3d.materialPreset.${preset.ordinal}")) {
                 store.applyText3DPreset(preset)
             }
         }
     }
-    Spacer(Modifier.height(14.dp))
-    TextButton(onClick = {
-        val type = effectTypeId("aurea.text3d.layout")
-        if (store.effects.none { it.typeId == type }) store.addEffect(type)
-        env.onOpenPanel(EditorPanel.Effects)
-    }) { Text("Letter rotation · Cylinder · Twist") }
+    ColorLine(stringResource(R.string.panel_cor), Color(info.color[0], info.color[1], info.color[2])) {
+        store.beginGesture("cor do texto 3D")
+        env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
+            store.text3d?.let { store.setText3D(it.copy(color = floatArrayOf(r, g, b, 1f)), lazy = true) }
+        }, onDone = { store.endGesture() }))
+    }
+    T3DRow(env, stringResource(R.string.pn_t3d_metallic), info.metallic, 1f, 0f, "metalico") { t, v -> t.copy(metallic = v) }
+    T3DRow(env, stringResource(R.string.pn_t3d_roughness), info.roughness, 1f, 0.35f, "rugosidade") { t, v -> t.copy(roughness = v) }
+    AdvancedSection(advanced, { advanced = !advanced }) {
+        KitTitle(stringResource(R.string.ui3d_finish))
+        ChipRow {
+            FinishLabels.forEachIndexed { index, res ->
+                KitChip(stringResource(res), on = info.surfaceFinish == index) {
+                    store.text3d?.let { store.setText3D(it.copy(surfaceFinish = index)) }
+                }
+            }
+        }
+        T3DRow(env, stringResource(R.string.pn_t3d_specular), info.specular, 1f, 1f, "especular") { t, v -> t.copy(specular = v) }
+        ColorLine(stringResource(R.string.pn_t3d_emissive), Color(info.emissive[0], info.emissive[1], info.emissive[2])) {
+            store.beginGesture("emissao do texto 3D")
+            env.openColor(ColorRequest(info.emissive.copyOf(), onChange = { r, g, b, _ ->
+                store.text3d?.let { store.setText3D(it.copy(emissive = floatArrayOf(r, g, b)), lazy = true) }
+            }, onDone = { store.endGesture() }))
+        }
+        T3DRow(env, stringResource(R.string.pn_t3d_emissive_strength), info.emissiveStrength, 8f, 1f, "forca da emissao", step = 2f) { t, v ->
+            t.copy(emissiveStrength = v)
+        }
+        ToggleLine(stringResource(R.string.pn_t3d_regions), info.regionMaterials) { on ->
+            store.text3d?.let { store.setText3D(it.copy(regionMaterials = on)) }
+        }
+        if (info.regionMaterials) {
+            // Frente = a cor acima. Aqui vão a lateral e o chanfro.
+            T3DRow(env, stringResource(R.string.pn_t3d_region_side), info.sideRoughness, 1f, 0.35f, "rugosidade da lateral") { t, v ->
+                t.copy(sideRoughness = v)
+            }
+            ColorLine(stringResource(R.string.pn_t3d_region_bevel), Color(info.bevelColor[0], info.bevelColor[1], info.bevelColor[2])) {
+                store.beginGesture("cor do chanfro")
+                env.openColor(ColorRequest(info.bevelColor.copyOf(), onChange = { r, g, b, _ ->
+                    store.text3d?.let { store.setText3D(it.copy(bevelColor = floatArrayOf(r, g, b, 1f)), lazy = true) }
+                }, onDone = { store.endGesture() }))
+            }
+            T3DRow(env, stringResource(R.string.pn_t3d_metallic) + " · " + stringResource(R.string.pn_t3d_region_bevel), info.bevelMetallic, 1f, 0f,
+                "metalico do chanfro") { t, v -> t.copy(bevelMetallic = v) }
+        }
+    }
+}
+
+@Composable
+private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
+    val store = env.store
     var fontsOpen by remember { mutableStateOf(false) }
     val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) store.importFont(uri, forText3d = true)
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Chip(stringResource(R.string.t3d_font), on = false) { store.loadFonts(); fontsOpen = true }
-        Chip(stringResource(R.string.t3d_import_font), on = false) { importFont.launch(arrayOf("font/*", "application/octet-stream", "*/*")) }
+    KitTitle(stringResource(R.string.ui3d_text))
+    ChipRow {
+        KitChip(stringResource(R.string.t3d_font), on = false) { store.loadFonts(); fontsOpen = true }
+        KitChip(stringResource(R.string.t3d_import_font), on = false) { importFont.launch(arrayOf("font/*", "application/octet-stream", "*/*")) }
+    }
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp)))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0 to R.string.panel_esquerda, 1 to R.string.panel_centro, 2 to R.string.panel_direita).forEach { (a, label) ->
+                KitChip(stringResource(label), on = info.alignment == a) { store.text3d?.let { store.setText3D(it.copy(alignment = a)) } }
+            }
+        }
     }
     if (fontsOpen) AlertDialog(
         onDismissRequest = { fontsOpen = false },
@@ -282,277 +280,270 @@ private fun Text3DSection(env: PanelEnv, info: Text3DInfo) {
         },
         confirmButton = { TextButton(onClick = { fontsOpen = false }) { Text(stringResource(R.string.t3d_close)) } },
     )
-    Spacer(Modifier.height(12.dp))
+    KitTitle(stringResource(R.string.ui3d_extrusion))
+    // 100 % = a altura da letra (a malha é gerada de novo a cada passo).
+    T3DRow(env, stringResource(R.string.pn_depth), info.depth, 3f, 0.25f, "profundidade do texto 3D", step = 0.5f) { t, v -> t.copy(depth = v) }
+    KitHint(stringResource(R.string.ui3d_depth_hint))
     Spacer(Modifier.height(6.dp))
-    PropertyCustomRow(stringResource(R.string.pn_depth), selected = false, onSelect = {}) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).height(40.dp)) {
-                TickRuler(
-                    value = { store.text3d?.depth ?: 0f },
-                    unitsPerDp = 0.005f,
-                    active = true,
-                    modifier = Modifier.fillMaxSize().valueDrag(
-                        enabled = true,
-                        start = { store.text3d?.depth ?: 0f },
-                        unitsPerDp = { 0.005f },
-                        min = 0f,
-                        max = 3f,
-                        onStart = { store.beginGesture("profundidade do texto 3D") },
-                        onValue = { v -> store.text3d?.let { store.setText3D(it.copy(depth = v), lazy = true) } },
-                        onEnd = { store.endGesture() },
-                    ),
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            ValueBox("${(info.depth * 100).roundToInt()}%", onTap = null)
-        }
-    }
-    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(0 to stringResource(R.string.panel_esquerda), 1 to stringResource(R.string.panel_centro), 2 to stringResource(R.string.panel_direita)).forEach { (a, label) ->
-                Chip(label, on = info.alignment == a) { store.text3d?.let { store.setText3D(it.copy(alignment = a)) } }
-            }
-        }
-    }
-    Spacer(Modifier.height(14.dp))
-    SectionTitle(stringResource(R.string.pn_t3d_geometry))
-    // O chanfro e GEOMETRIA: ligado, a malha ganha frente/fundo recuados e o
-    // anel de chanfro (mais triângulos, não um brilho no shader).
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.pn_t3d_bevel), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip(stringResource(R.string.pn_t3d_off), on = !info.bevel) { store.text3d?.let { store.setText3D(it.copy(bevel = false)) } }
-            Chip(stringResource(R.string.pn_t3d_on), on = info.bevel) { store.text3d?.let { store.setText3D(it.copy(bevel = true)) } }
-        }
-    }
+    // O chanfro é GEOMETRIA: frente/fundo recuados e o anel do chanfro.
+    ToggleLine(stringResource(R.string.pn_t3d_bevel), info.bevel) { on -> store.text3d?.let { store.setText3D(it.copy(bevel = on)) } }
     if (info.bevel) {
-        T3DRuler(env, stringResource(R.string.pn_t3d_bevel_width), 0.0002f, 0f, 0.2f, info.bevelWidth,
-            "${(info.bevelWidth * 1000).roundToInt()}", "chanfro", displayScale = 1000f) { v -> store.setText3D(info.copy(bevelWidth = v), lazy = true) }
-        T3DRuler(env, stringResource(R.string.pn_t3d_bevel_depth), 0.0002f, 0f, 0.2f, info.bevelDepth,
-            "${(info.bevelDepth * 1000).roundToInt()}", "chanfro", displayScale = 1000f) { v -> store.setText3D(info.copy(bevelDepth = v), lazy = true) }
-        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.pn_t3d_bevel_segments), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        T3DRow(env, stringResource(R.string.pn_t3d_bevel_width), info.bevelWidth, 0.2f, 0.02f, "chanfro", step = 0.05f, decimals = 1) { t, v ->
+            t.copy(bevelWidth = v)
+        }
+        T3DRow(env, stringResource(R.string.pn_t3d_bevel_depth), info.bevelDepth, 0.2f, 0.02f, "chanfro", step = 0.05f, decimals = 1) { t, v ->
+            t.copy(bevelDepth = v)
+        }
+        T3DRow(env, stringResource(R.string.pn_t3d_bevel_roundness), info.bevelRoundness, 1f, 1f, "arredondamento") { t, v -> t.copy(bevelRoundness = v) }
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.pn_t3d_bevel_segments), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp)))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(1, 2, 3, 5, 8).forEach { n ->
-                    Chip("$n", on = info.bevelSegments == n) { store.text3d?.let { store.setText3D(it.copy(bevelSegments = n)) } }
+                    KitChip("$n", on = info.bevelSegments == n) { store.text3d?.let { store.setText3D(it.copy(bevelSegments = n)) } }
                 }
             }
         }
-        T3DRuler(env, stringResource(R.string.pn_t3d_bevel_roundness), 0.006f, 0f, 1f, info.bevelRoundness,
-            "${(info.bevelRoundness * 100).roundToInt()}%", "arredondamento") { v -> store.setText3D(info.copy(bevelRoundness = v), lazy = true) }
+    }
+    Spacer(Modifier.height(10.dp))
+    ActionCard(stringResource(R.string.ui3d_deform_letters), null) {
+        val type = effectTypeId("aurea.text3d.layout")
+        if (store.effects.none { it.typeId == type }) store.addEffect(type)
+        env.onOpenPanel(EditorPanel.Effects)
     }
 }
 
 /**
- * MATERIAL do texto 3D: o MESMO PBR dos modelos importados (metal, rugosidade,
- * especular, emissão). Nada de caminho especial de texto.
+ * Uma linha de valor do texto 3D em % (1 = 100 %): arrasto em passos leves
+ * (`lazy`, a malha acompanha) e um passo de desfazer por gesto; teclado e ↺
+ * gravam o valor inteiro.
  */
 @Composable
-private fun Text3DPbrSection(env: PanelEnv, store: EditorStore) {
-    val info by remember(store) { derivedStateOf { store.text3d } }
-    val cur = info ?: return
-    T3DRuler(env, stringResource(R.string.pn_t3d_metallic), 0.005f, 0f, 1f, cur.metallic,
-        "${(cur.metallic * 100).roundToInt()}%", "metalico") { v -> store.setText3D(cur.copy(metallic = v), lazy = true) }
-    T3DRuler(env, stringResource(R.string.pn_t3d_roughness), 0.005f, 0f, 1f, cur.roughness,
-        "${(cur.roughness * 100).roundToInt()}%", "rugosidade") { v -> store.setText3D(cur.copy(roughness = v), lazy = true) }
-    T3DRuler(env, stringResource(R.string.pn_t3d_specular), 0.005f, 0f, 1f, cur.specular,
-        "${(cur.specular * 100).roundToInt()}%", "especular") { v -> store.setText3D(cur.copy(specular = v), lazy = true) }
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.pn_t3d_emissive), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        ColorWell(Color(cur.emissive[0], cur.emissive[1], cur.emissive[2])) {
-            store.beginGesture("emissao do texto 3D")
-            env.openColor(ColorRequest(cur.emissive.copyOf(), onChange = { r, g, b, _ ->
-                store.text3d?.let { store.setText3D(it.copy(emissive = floatArrayOf(r, g, b)), lazy = true) }
-            }, onDone = { store.endGesture() }))
-        }
-    }
-    T3DRuler(env, stringResource(R.string.pn_t3d_emissive_strength), 0.02f, 0f, 8f, cur.emissiveStrength,
-        "${(cur.emissiveStrength * 100).roundToInt()}%", "forca da emissao") { v -> store.setText3D(cur.copy(emissiveStrength = v), lazy = true) }
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.pn_t3d_regions), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip(stringResource(R.string.pn_t3d_off), on = !cur.regionMaterials) { store.text3d?.let { store.setText3D(it.copy(regionMaterials = false)) } }
-            Chip(stringResource(R.string.pn_t3d_on), on = cur.regionMaterials) { store.text3d?.let { store.setText3D(it.copy(regionMaterials = true)) } }
-        }
-    }
-    if (cur.regionMaterials) {
-        // Frente = a cor de Material (acima). Aqui vão a lateral e o chanfro.
-        T3DRuler(env, stringResource(R.string.pn_t3d_region_side), 0.005f, 0f, 1f, cur.sideRoughness,
-            "${(cur.sideRoughness * 100).roundToInt()}%", "rugosidade da lateral") { v ->
-            store.setText3D(cur.copy(sideRoughness = v), lazy = true)
-        }
-        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.pn_t3d_region_bevel), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-            ColorWell(Color(cur.bevelColor[0], cur.bevelColor[1], cur.bevelColor[2])) {
-                store.beginGesture("cor do chanfro")
-                env.openColor(ColorRequest(cur.bevelColor.copyOf(), onChange = { r, g, b, _ ->
-                    store.text3d?.let { store.setText3D(it.copy(bevelColor = floatArrayOf(r, g, b, 1f)), lazy = true) }
-                }, onDone = { store.endGesture() }))
-            }
-        }
-        T3DRuler(env, stringResource(R.string.pn_t3d_metallic) + " · " + stringResource(R.string.pn_t3d_region_bevel), 0.005f, 0f, 1f, cur.bevelMetallic,
-            "${(cur.bevelMetallic * 100).roundToInt()}%", "metalico do chanfro") { v ->
-            store.setText3D(cur.copy(bevelMetallic = v), lazy = true)
-        }
-    }
-}
-
-/** ILUMINAÇÃO: o objeto projeta e recebe a sombra dos outros. */
-@Composable
-private fun LightingSection(store: EditorStore) {
-    val sh by remember(store) { derivedStateOf { store.modelShadows } }
-    val cur = sh ?: return
-    Spacer(Modifier.height(16.dp))
-    SectionTitle(stringResource(R.string.pn_t3d_lighting))
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.pn_t3d_cast_shadow), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip(stringResource(R.string.pn_t3d_off), on = !cur.first) { store.setModelShadows(false, cur.second) }
-            Chip(stringResource(R.string.pn_t3d_on), on = cur.first) { store.setModelShadows(true, cur.second) }
-        }
-    }
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.pn_t3d_receive_shadow), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip(stringResource(R.string.pn_t3d_off), on = !cur.second) { store.setModelShadows(cur.first, false) }
-            Chip(stringResource(R.string.pn_t3d_on), on = cur.second) { store.setModelShadows(cur.first, true) }
-        }
-    }
-}
-
-/** Uma régua de valor do texto 3D: arrasto com passo, rótulo e caixa. */
-@Composable
-private fun T3DRuler(
+private fun T3DRow(
     env: PanelEnv,
     label: String,
-    unitsPerDp: Float,
-    min: Float,
-    max: Float,
     value: Float,
-    shown: String,
+    max: Float,
+    default: Float,
     gesture: String,
-    displayScale: Float = 100f,
-    onValue: (Float) -> Unit,
+    step: Float = 0.5f,
+    decimals: Int = 0,
+    apply: (Text3DInfo, Float) -> Text3DInfo,
 ) {
     val store = env.store
-    PropertyCustomRow(label, selected = false, onSelect = {}) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).height(40.dp)) {
-                TickRuler(
-                    value = { value },
-                    unitsPerDp = unitsPerDp,
-                    active = true,
-                    modifier = Modifier.fillMaxSize().valueDrag(
-                        enabled = true,
-                        start = { value },
-                        unitsPerDp = { unitsPerDp },
-                        min = min,
-                        max = max,
-                        onStart = { store.beginGesture(gesture) },
-                        onValue = onValue,
-                        onEnd = { store.endGesture() },
-                    ),
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            ValueBox(shown, onTap = {
-                env.openKeypad(KeypadRequest(label, value * displayScale,
-                    if (shown.endsWith("%")) "%" else if (shown.endsWith("°")) "°" else "",
-                    min * displayScale, max * displayScale, 1) {
-                    store.beginGesture(label); onValue((it / displayScale).coerceIn(min, max)); store.endGesture()
-                })
-            })
-        }
-    }
+    HumanRow(
+        env, label, value * 100f, step, 0f, max * 100f, "%", decimals, default * 100f,
+        onStart = { store.beginGesture(gesture) },
+        onValue = { v -> store.text3d?.let { store.setText3D(apply(it, v / 100f), lazy = true) } },
+        onEnd = { store.endGesture() },
+        onCommit = { v ->
+            store.beginGesture(gesture)
+            store.text3d?.let { store.setText3D(apply(it, v / 100f)) }
+            store.endGesture()
+        },
+    )
 }
 
+/** Chip com a amostra redonda da cor do material. */
 @Composable
-private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-            .tocavel(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp),
+private fun SwatchChip(label: String, swatch: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.height(36.dp).clip(RoundedCornerShape(9.dp)).background(AureaColors.Chip)
+            .tocavel(shrink = 1f, onClick = onClick).padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+        Box(Modifier.size(16.dp).clip(CircleShape).background(swatch))
+        Spacer(Modifier.width(7.dp))
+        Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, color = AureaColors.Text)))
     }
 }
 
+// --- Modelo importado -----------------------------------------------------------
+
 @Composable
-internal fun EnvRuler(
-    env: PanelEnv,
-    label: String,
-    unitsPerDp: Float,
-    min: Float,
-    max: Float,
-    value: Float,
-    text: String,
-    displayScale: Float = if (text.endsWith("%")) 100f else 1f,
-    onValue: (Float) -> Unit,
-) {
-    val store = env.store
-    PropertyCustomRow(label, selected = false, onSelect = {}) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).height(40.dp)) {
-                TickRuler(
-                    value = { value },
-                    unitsPerDp = unitsPerDp,
-                    active = true,
-                    modifier = Modifier.fillMaxSize().testTag("environment.ruler.$label").valueDrag(
-                        enabled = true,
-                        start = { value },
-                        unitsPerDp = { unitsPerDp },
-                        min = min,
-                        max = max,
-                        onStart = { store.beginGesture("ambiente") },
-                        onValue = onValue,
-                        onEnd = { store.endGesture() },
-                    ),
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            ValueBox(text, onTap = {
-                env.openKeypad(KeypadRequest(label, value * displayScale,
-                    if (text.endsWith("%")) "%" else if (text.endsWith("°")) "°" else "",
-                    min * displayScale, max * displayScale, 1) {
-                    store.beginGesture(label); onValue((it / displayScale).coerceIn(min, max)); store.endGesture()
-                })
-            })
+private fun ImportedMaterialSection(store: EditorStore) {
+    // Reading detail/curve revision subscribes to playback, edits and undo.
+    val detail = store.detail
+    val revision = store.curveRevision
+    val materials = remember(detail, revision) { store.queryMaterials() }
+    var selected by remember(store.primary) { mutableStateOf(0) }
+    var dragging by remember(store.primary) { mutableStateOf(false) }
+    // FBX/OBJ com textura/.mtl que não veio junto: o mesmo "Importar texturas" do import.
+    val missingTextures = remember(detail, revision) { store.selectedModelMissingTextures() }
+    if (missingTextures > 0) {
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.model_textures_missing, missingTextures), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            KitChip(stringResource(R.string.model_textures_title), on = false) { store.askModelTextures() }
         }
     }
+    if (materials.isEmpty()) return
+    val current = materials.firstOrNull { it[0].toInt() == selected } ?: materials.first()
+    val index = current[0].toInt()
+    ChipRow {
+        materials.forEach { material ->
+            val id = material[0].toInt()
+            KitChip("Material ${id + 1}", on = id == index) { selected = id }
+        }
+    }
+    val labels = listOf("R", "G", "B", "Alpha", stringResource(R.string.pn_t3d_metallic), stringResource(R.string.pn_t3d_roughness))
+    labels.forEachIndexed { param, label ->
+        val value = current[param + 2].coerceIn(0f, 1f)
+        val here = (store.keyframes[store.primary] ?: emptyList()).any {
+            it.property == 37 && it.effectIndex == index && it.paramIndex == param && it.time == detail?.localPlayhead
+        }
+        val keyLabel = stringResource(if (here) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui) + " · " + label
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, modifier = Modifier.width(78.dp), style = AureaType.BodySmall)
+            Slider(value = value, onValueChange = {
+                if (!dragging) { dragging = true; store.beginGesture("material") }
+                store.setMaterialParameter(index, param, it)
+            }, onValueChangeFinished = { if (dragging) { dragging = false; store.endGesture() } }, modifier = Modifier.weight(1f))
+            TextButton(onClick = { store.toggleMaterialKeyframe(index, param, value) }, modifier = Modifier.semantics { contentDescription = keyLabel }) { Text(if (here) "◆" else "◇") }
+        }
+    }
+    DisposableEffect(store.primary) {
+        onDispose { if (dragging) { dragging = false; store.endGesture() } }
+    }
 }
 
+// --- Luz e cena -----------------------------------------------------------------
+
+/**
+ * LUZ E CENA: sombras do objeto, estúdio e ambiente na frente; o acabamento
+ * da imagem (qualidade, tom, exposição, brilho) e o ambiente próprio do objeto
+ * em "Avançado". [objectSettings] = falso na câmera (só a cena).
+ */
 @Composable
-private fun SceneSettingsSection(store: EditorStore) {
+private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
+    val store = env.store
+    val e by remember(store) { derivedStateOf { store.environment } }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) { store.importHdri(uri); if (store.detail?.kind == 8) store.setEnvironmentBackground(true) }
+    }
     val revision = store.sceneSettingsRevision
     var settings by remember(revision) { mutableStateOf(store.sceneSettings()) }
-    if (settings.size < 8) return
     fun change(index: Int, value: Float) { store.setSceneSetting(index, value); settings = store.sceneSettings() }
-    SectionTitle(stringResource(R.string.scene_studio))
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(R.string.scene_none, R.string.scene_dark, R.string.scene_product, R.string.scene_sky).forEachIndexed { i, label ->
-            Chip(stringResource(label), on = settings[0].toInt() == i) { change(0, i.toFloat()) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
+
+    if (objectSettings) {
+        val sh by remember(store) { derivedStateOf { store.modelShadows } }
+        sh?.let { cur ->
+            KitTitle(stringResource(R.string.ui3d_shadows))
+            ToggleLine(stringResource(R.string.pn_t3d_cast_shadow), cur.first) { store.setModelShadows(it, cur.second) }
+            ToggleLine(stringResource(R.string.pn_t3d_receive_shadow), cur.second) { store.setModelShadows(cur.first, it) }
         }
     }
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.scene_floor), Modifier.weight(1f))
-        androidx.compose.material3.Switch(checked = settings[1] > 0, onCheckedChange = { change(1, if (it) 1f else 0f) })
+    if (settings.size >= 8) {
+        KitTitle(stringResource(R.string.scene_studio))
+        ChipRow {
+            listOf(R.string.scene_none, R.string.scene_dark, R.string.scene_product, R.string.scene_sky).forEachIndexed { i, label ->
+                KitChip(stringResource(label), on = settings[0].toInt() == i) { change(0, i.toFloat()) }
+            }
+        }
+        ToggleLine(stringResource(R.string.scene_floor), settings[1] > 0) { change(1, if (it) 1f else 0f) }
     }
-    SectionTitle(stringResource(R.string.scene_quality))
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(R.string.scene_auto, R.string.scene_low, R.string.scene_medium, R.string.scene_high, R.string.scene_ultra).forEachIndexed { i, label ->
-            Chip(stringResource(label), on = settings[2].toInt() == i) { change(2, i.toFloat()) }
+    KitTitle(stringResource(R.string.environment_texture))
+    ChipRow {
+        KitChip(stringResource(R.string.panel_estudio_neutro), on = e[0] < 0.5f) { store.clearHdri() }
+        KitChip(if (e[0] >= 0.5f) stringResource(R.string.panel_imagem_ambiente) else stringResource(R.string.panel_usar_imagem_ambiente_hdr), on = e[0] >= 0.5f) {
+            pick.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
         }
     }
-    SectionTitle(stringResource(R.string.scene_tonemap))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Chip("PBR Neutral", on = settings[3] == 0f) { change(3, 0f) }
-        Chip("AgX", on = settings[3] == 1f) { change(3, 1f) }
+    SceneRow(env, stringResource(R.string.panel_intensidade), e[1] * 100f, 1f, 0f, 2000f, "%", 100f, "ambiente") {
+        store.setEnvironment(it / 100f, store.environment[2])
     }
-    Text(stringResource(R.string.scene_exposure))
-    Slider(value = settings[4].coerceIn(.01f, 4f), onValueChange = { change(4, it) }, valueRange = .01f..4f)
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.scene_bloom), Modifier.weight(1f))
-        androidx.compose.material3.Switch(checked = settings[5] > 0, onCheckedChange = { change(5, if (it) 1f else 0f) })
+    SceneRow(env, stringResource(R.string.pn_env_rotate_light), e[2], 1f, -360f, 360f, "°", 0f, "ambiente") {
+        store.setEnvironment(store.environment[1], it)
     }
-    if (settings[5] > 0) Slider(value = settings[6].coerceIn(0f, 4f), onValueChange = { change(6, it) }, valueRange = 0f..4f)
+    ToggleLine(stringResource(R.string.environment_background), (e.getOrNull(3) ?: 0f) > .5f, store::setEnvironmentBackground)
+    KitHint(stringResource(R.string.environment_hint))
+    Spacer(Modifier.height(4.dp))
+    AdvancedSection(advanced, { advanced = !advanced }) {
+        if (settings.size >= 8) {
+            KitTitle(stringResource(R.string.scene_quality))
+            ChipRow {
+                listOf(R.string.scene_auto, R.string.scene_low, R.string.scene_medium, R.string.scene_high, R.string.scene_ultra).forEachIndexed { i, label ->
+                    KitChip(stringResource(label), on = settings[2].toInt() == i) { change(2, i.toFloat()) }
+                }
+            }
+            KitTitle(stringResource(R.string.scene_tonemap))
+            ChipRow {
+                KitChip("PBR Neutral", on = settings[3] == 0f) { change(3, 0f) }
+                KitChip("AgX", on = settings[3] == 1f) { change(3, 1f) }
+            }
+            SceneRow(env, stringResource(R.string.scene_exposure), settings[4].coerceIn(.01f, 4f) * 100f, 1f, 1f, 400f, "%", 100f, null) {
+                change(4, it / 100f)
+            }
+            ToggleLine(stringResource(R.string.scene_bloom), settings[5] > 0) { change(5, if (it) 1f else 0f) }
+            if (settings[5] > 0) {
+                SceneRow(env, stringResource(R.string.ui3d_bloom_strength), settings[6].coerceIn(0f, 4f) * 100f, 1f, 0f, 400f, "%", 100f, null) {
+                    change(6, it / 100f)
+                }
+            }
+        }
+        if (objectSettings) ObjectEnvironmentSection(env)
+    }
+}
+
+/** Linha de valor da cena/ambiente: um passo de desfazer por arrasto (quando [gesture] existe). */
+@Composable
+private fun SceneRow(
+    env: PanelEnv,
+    label: String,
+    value: Float,
+    step: Float,
+    min: Float,
+    max: Float,
+    unit: String,
+    default: Float,
+    gesture: String?,
+    onValue: (Float) -> Unit,
+) {
+    val store = env.store
+    HumanRow(
+        env, label, value, step, min, max, unit, 0, default,
+        onStart = { if (gesture != null) store.beginGesture(gesture) },
+        onValue = onValue,
+        onEnd = { if (gesture != null) store.endGesture() },
+        onCommit = { v -> if (gesture != null) store.beginGesture(gesture); onValue(v); if (gesture != null) store.endGesture() },
+    )
+}
+
+/**
+ * AMBIENTE DO OBJETO (v22): este modelo pode ter a luz dele, sem mexer na dos
+ * outros. Sem ambiente próprio, vale o do projeto — o de cima.
+ */
+@Composable
+private fun ObjectEnvironmentSection(env: PanelEnv) {
+    val store = env.store
+    val oe by remember(store) { derivedStateOf { store.objectEnvironment } }
+    val escolher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) store.importObjectHdri(uri)
+    }
+    val objectEnv = oe?.takeIf { it.size >= 5 } ?: return
+    val proprio = objectEnv[0] >= 0.5f
+    KitTitle(stringResource(R.string.panel_ambiente_do_objeto))
+    ChipRow {
+        KitChip(stringResource(R.string.panel_do_projeto), on = !proprio) { store.setObjectEnvironment(0) }
+        KitChip(stringResource(R.string.panel_proprio), on = proprio) {
+            store.setObjectEnvironment(1)
+            if (objectEnv[1] <= 0f) escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
+        }
+        if (proprio) {
+            KitChip(
+                if (objectEnv[1] > 0f) stringResource(R.string.panel_trocar_imagem) else stringResource(R.string.panel_usar_imagem_ambiente_hdr),
+                on = objectEnv[1] > 0f,
+            ) { escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*")) }
+        }
+    }
+    if (proprio) {
+        SceneRow(env, stringResource(R.string.panel_intensidade), objectEnv[2] * 100f, 1f, 0f, 2000f, "%", 100f, "ambiente") {
+            store.setObjectEnvironment(1, intensity = it / 100f)
+        }
+        SceneRow(env, stringResource(R.string.pn_env_rotate_light), objectEnv[3], 1f, -360f, 360f, "°", 0f, "ambiente") {
+            store.setObjectEnvironment(1, rotation = it)
+        }
+        SceneRow(env, stringResource(R.string.panel_exposicao), objectEnv[4] * 100f, 1f, 5f, 2000f, "%", 100f, "ambiente") {
+            store.setObjectEnvironment(1, exposure = it / 100f)
+        }
+    }
 }

@@ -372,6 +372,60 @@ AUREA_TEST(TextAnimatorEditing, QueuedSeekIsAppliedBeforeEditingAnimationKeys) {
     AUREA_CHECK(layerTrack && layerTrack->find_exact(FrameIndex{45}) != kInvalidIndex);
 }
 
+// O painel de efeitos (iOS e Android) escreve pela FILA de comandos e relê
+// na hora: a leitura tem de ver a escrita. Antes, o Text Transform no iOS
+// relia o valor antigo, o controle voltava e a cor de preenchimento escrita
+// por componente se perdia ("Text Transform não funciona").
+AUREA_TEST(TextTransform, QueuedPanelWritesAreVisibleToTheNextRead) {
+    TextEditRig r;
+    Command add; add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(r.id);
+    add.effect_add.effectType = effect_type_id(text::kTransformEffect);
+    add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK_EQ(r.e.submit_commands(&add, 1, nullptr, 0), 1u);
+    bridge::LayerEffectRow fx[4]{};
+    char names[512]{};
+    AUREA_CHECK_EQ(r.e.query_layer_effects(r.id, fx, 4, names, sizeof names), 1u);
+    const u32 effect = fx[0].effectId;
+    // Deslocamento (ponto) e cor de preenchimento: o mesmo comando de vetor
+    // do painel; nenhum quadro é desenhado entre escrever e ler.
+    Command offset; offset.type = CommandType::EffectSetColorParam;
+    offset.effect_color = EffectColorPayload{LayerId::unpack(r.id), EffectId{effect, 0}, text::kOffset, 40.0f, -12.0f, 0.0f, 1.0f};
+    Command over; over.type = CommandType::EffectSetParam;
+    over.effect_param = EffectParamPayload{LayerId::unpack(r.id), EffectId{effect, 0}, text::kOverrideFill, 1.0f};
+    Command fill; fill.type = CommandType::EffectSetColorParam;
+    fill.effect_color = EffectColorPayload{LayerId::unpack(r.id), EffectId{effect, 0}, text::kFillColor, 1.0f, 0.0f, 0.0f, 1.0f};
+    const Command writes[] = {offset, over, fill};
+    AUREA_CHECK_EQ(r.e.submit_commands(writes, 3, nullptr, 0), 3u);
+    bridge::EffectParamRow rows[text::kTransformParamCount]{};
+    char blob[2048]{};
+    AUREA_CHECK(r.e.query_effect_params(r.id, effect, rows, text::kTransformParamCount, blob, sizeof blob) >= text::kFillColor + 1);
+    AUREA_CHECK_NEAR(rows[text::kOffset].value[0], 40.0f, 1e-4);
+    AUREA_CHECK_NEAR(rows[text::kOffset].value[1], -12.0f, 1e-4);
+    AUREA_CHECK_NEAR(rows[text::kOverrideFill].value[0], 1.0f, 1e-4);
+    AUREA_CHECK_NEAR(rows[text::kFillColor].value[0], 1.0f, 1e-4);
+    AUREA_CHECK_NEAR(rows[text::kFillColor].value[1], 0.0f, 1e-4);
+    // E o motor aplica: cada letra anda 40 px e fica vermelha.
+    Layer* l = r.layer();
+    AUREA_CHECK(l != nullptr);
+    if (!l) return;
+    EffectRegistry registry;
+    register_builtin_effects(registry);
+    text::TextLayout layout;
+    layout.chars = 3; layout.words = 1; layout.lines = 1; layout.contentWidth = 60; layout.contentHeight = 20;
+    for (u32 i = 0; i < 3; ++i) {
+        text::GlyphQuad q; q.x0 = i * 20.f; q.x1 = q.x0 + 20; q.y1 = 20; q.charIndex = i; layout.quads.push_back(q);
+    }
+    std::vector<text::GlyphAnim> styles(layout.quads.size());
+    std::vector<Mat4> matrices;
+    text::evaluate_transform_effects(*l, registry, 0.0, layout, styles, matrices);
+    AUREA_CHECK_EQ(matrices.size(), layout.quads.size());
+    for (usize g = 0; g < matrices.size(); ++g) {
+        AUREA_CHECK_NEAR(matrices[g].col[3].x, 40.0f, 1e-3);
+        AUREA_CHECK_NEAR(styles[g].fill.x, 1.0f, 1e-3);
+    }
+}
+
 AUREA_TEST(Text, AnimatorSelectorWeights) {
     TextAnimator a;
     a.props = kTextPropOpacity;

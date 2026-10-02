@@ -78,6 +78,17 @@ struct Layer;
                                     std::shared_ptr<const scene3d::SceneAsset> (*lookup)(void* ctx, AssetId id),
                                     void* ctx, Vec3& outWorld) noexcept;
 
+/// A câmera ativa da composição no instante (a mesma do render/export).
+[[nodiscard]] scene3d::SceneCamera comp_camera(const Composition& comp, FrameIndex time, u32 w, u32 h) noexcept;
+/// Raio do mundo sob o ponto (px da composição) visto por `cam` — a MESMA
+/// conta da projeção do render (enquadramento da fonte rastreada incluído).
+[[nodiscard]] bool scene_ray(const scene3d::SceneCamera& cam, u32 width, u32 height, f32 compX, f32 compY,
+                             Vec3& origin, Vec3& dir) noexcept;
+/// Raio × triângulos do modelo da camada na pose do quadro. `best` (distância
+/// ao longo do raio) só diminui; verdadeiro = acertou antes de `best`.
+[[nodiscard]] bool ray_hits_model_layer(const Composition& comp, const Layer& l, FrameIndex time,
+                                        const scene3d::SceneAsset& asset, Vec3 origin, Vec3 dir, f32& best) noexcept;
+
 /// Um glifo na GPU (std430, espelho de shaders/text/glyph.vert).
 struct GlyphInstance {
     Vec4 rect;     ///< x0 y0 x1 y1, px da layer
@@ -118,6 +129,9 @@ struct LayerSource {
     FrameRef frame;
     bool     frameExact = false;
     /// Mistura de quadros: o quadro seguinte da fonte e o peso dele (0..1).
+    /// Detectar movimento: a MESMA fonte no instante t − atraso (quadros da
+    /// timeline). Vazio = sem o efeito, ou a camada não tem passado.
+    FrameRef historyFrame;
     FrameRef frameB;
     f32      blendT = 0.0f;
     u8       blendMode = 0;   ///< 1 mistura, 2 optical flow
@@ -260,6 +274,7 @@ struct FrameSnapshot {
         for (RenderLayer& layer : layers) {
             layer.source.frame.reset();
             layer.source.frameB.reset();
+            layer.source.historyFrame.reset();
             for (auto& channel : layer.source.channel) channel.frame.reset();
         }
         for (auto& child : nested) if (child) child->release_video_frames();
@@ -601,6 +616,7 @@ private:
     GPUBackend* backend_ = nullptr;
     const EffectRegistry* effects_ = nullptr;
     EffectTypeId posterizeType_ = 0, echoType_ = 0, rgbTimeType_ = 0;
+    EffectTypeId motionDetectType_ = 0;   ///< Detectar movimento: a fonte em t − atraso
     ShaderLibrary shaders_;
     scene3d::SceneRenderer scene3d_;
     ModelLookup modelLookup_ = nullptr;

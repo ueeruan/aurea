@@ -196,6 +196,19 @@ namespace effect_keys {
     // Motor das camadas de partículas novas (ParticleEmitter::Particular) e
     // também um efeito comum de Gerar. Ver ParticularEffect.cpp.
     inline constexpr const char* kParticular            = "aurea.generate.particular";
+
+    // --- Detectar movimento (Tempo): a diferença entre o quadro e um anterior ---
+    inline constexpr const char* kMotionDetect          = "aurea.time.motion_detect";
+
+    // --- Emulador CRT, Tremor dissolvente e Mapa de deslocamento (RetroDisplaceEffects.cpp) ---
+    inline constexpr const char* kCrtEmulator           = "aurea.stylize.crt_emulator";
+    inline constexpr const char* kDissolveShake         = "aurea.glitch.dissolve_shake";
+    /// Lê OUTRA camada como mapa (Effect::input_layer_param / layer_input).
+    inline constexpr const char* kDisplacementMap       = "aurea.distort.displacement_map";
 }
+
+/// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a
+/// fonte nesse instante; o parâmetro 0 do efeito é o atraso.
+inline constexpr i32 kMotionDetectMaxDelay = 30;
 
 } // namespace aurea

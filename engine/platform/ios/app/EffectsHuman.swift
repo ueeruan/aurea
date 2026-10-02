@@ -577,6 +577,73 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             4: FxParamHuman(label: "fx_intensidade", decimals: 0),
             5: FxParamHuman(label: "fx_prender_nas_pontas"),
         ])),
+    ("aurea.time.motion_detect", FxEffectHuman(
+        name: "fx_name_time_motion_detect",
+        keywords: "motion detect detectar movimento diferenca quadro anterior mudou mexeu",
+        principal: [0, 1, 2, 3, 4, 5],
+        params: [
+            0: FxParamHuman(label: "core2_fx_motion_delay", decimals: 0),
+            1: FxParamHuman(label: "fx_brilho", decimals: 2),
+            2: FxParamHuman(label: "core2_fx_offset_darks", decimals: 2),
+            3: FxParamHuman(label: "fx_saturacao", decimals: 2),
+            4: FxParamHuman(label: "core2_fx_motion_mode"),
+            5: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    ("aurea.stylize.crt_emulator", FxEffectHuman(
+        name: "fx_name_crt_emulator",
+        keywords: "crt emulator emulador tv tubo televisao retro scanline varredura fosforo curvatura tela antiga",
+        principal: [0, 1, 3, 4, 8, 11, 16],
+        params: [
+            0: FxParamHuman(label: "fx3_curvatura", decimals: 0),
+            1: FxParamHuman(label: "fx3_linhas_intensidade", decimals: 0),
+            2: FxParamHuman(label: "fx3_linhas_densidade", decimals: 0),
+            3: FxParamHuman(label: "fx3_mascara"),
+            4: FxParamHuman(label: "fx3_mascara_intensidade", decimals: 0),
+            5: FxParamHuman(label: "fx3_mascara_tamanho", suffix: "px", decimals: 1),
+            6: FxParamHuman(label: "fx_vinheta", decimals: 0),
+            7: FxParamHuman(label: "fx3_convergencia", suffix: "px", decimals: 1),
+            8: FxParamHuman(label: "fx3_brilho_bloom", decimals: 0),
+            9: FxParamHuman(label: "fx3_raio_brilho", suffix: "px", decimals: 1),
+            10: FxParamHuman(label: "fx3_cintilacao", decimals: 0),
+            11: FxParamHuman(label: "fx3_faixa_rolando", decimals: 0),
+            12: FxParamHuman(label: "fx3_velocidade_faixa", decimals: 2),
+            13: FxParamHuman(label: "fx_ruido", decimals: 0),
+            14: FxParamHuman(label: "fx3_brilho_geral", decimals: 0),
+            15: FxParamHuman(label: "fx_contraste", decimals: 0),
+            16: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    ("aurea.glitch.dissolve_shake", FxEffectHuman(
+        name: "fx_name_dissolve_shake",
+        keywords: "dissolve shake tremor dissolvente tremer quebrar fragmentos glitch desintegrar ruido",
+        principal: [0, 1, 2, 3, 4, 10],
+        params: [
+            0: FxParamHuman(label: "fx_amplitude", suffix: "px", decimals: 0),
+            1: FxParamHuman(label: "fx_frequencia", suffix: "Hz", decimals: 1),
+            2: FxParamHuman(label: "fx3_dissolucao", decimals: 0),
+            3: FxParamHuman(label: "fx3_tamanho_fragmento", suffix: "px", decimals: 0),
+            4: FxParamHuman(label: "fx_dispersao", suffix: "px", decimals: 0),
+            5: FxParamHuman(label: "fx_aleatoriedade", decimals: 0),
+            6: FxParamHuman(label: "fx3_transparencia_fragmentos", decimals: 0),
+            7: FxParamHuman(label: "fx3_velocidade_evolucao", decimals: 1),
+            8: FxParamHuman(label: "fx3_eixos"),
+            9: FxParamHuman(label: "fx_semente", decimals: 0),
+            10: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    ("aurea.distort.displacement_map", FxEffectHuman(
+        name: "fx_name_displacement_map",
+        keywords: "displacement map mapa de deslocamento deslocar camada mapa distorcer canal",
+        principal: [0, 1, 2, 3, 4, 8],
+        params: [
+            0: FxParamHuman(label: "fx3_camada_mapa"),
+            1: FxParamHuman(label: "fx3_canal_horizontal"),
+            2: FxParamHuman(label: "fx3_canal_vertical"),
+            3: FxParamHuman(label: "fx3_desloc_h_max", suffix: "px", decimals: 1),
+            4: FxParamHuman(label: "fx3_desloc_v_max", suffix: "px", decimals: 1),
+            5: FxParamHuman(label: "fx3_comportamento_mapa"),
+            6: FxParamHuman(label: "fx_bordas"),
+            7: FxParamHuman(label: "fx3_expandir_saida"),
+            8: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
     ("aurea.time.remap", FxEffectHuman(
         name: "fx_name_time_remap",
         // O parâmetro Tempo É a curva de remapeamento da camada. O "Manter o tom
@@ -1449,6 +1516,10 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.glitch.cross", "fx_desc_glitch_cross")
     put("aurea.time.posterize", "fx_desc_time_posterize", FxTimeTargets, "stop motion quadros taxa travada")
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
+    put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")
+    put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")
+    put("aurea.glitch.dissolve_shake", "fx_desc_glitch_dissolve_shake", FxAllTargets, "tremor dissolver fragmentos quebrar")
+    put("aurea.distort.displacement_map", "fx_desc_distort_displacement_map", FxAllTargets, "mapa deslocamento camada distorcer")
     put("aurea.control.slider", "fx_desc_control_slider")
     put("aurea.control.angle", "fx_desc_control_angle")
     put("aurea.control.checkbox", "fx_desc_control_checkbox")

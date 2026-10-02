@@ -9,7 +9,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.editor.panels.PanelEnv
-import com.aurea.aurea.editor.panels.EnvRuler
+import com.aurea.aurea.editor.panels.HumanRow
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -30,7 +33,11 @@ class ObjectEnvironmentCrashTest {
             AureaTheme {
                 Column {
                     values.forEachIndexed { index, value ->
-                        EnvRuler(env, "object-$index", .01f, -360f, 360f, value, value.toString()) { values[index] = it }
+                        // As linhas de ambiente do objeto usam a linha padrão dos painéis (HumanRow).
+                        Box(Modifier.testTag("environment.ruler.object-$index")) {
+                            HumanRow(env, "object-$index", value, .01f, -360f, 360f, "", 2, 0f,
+                                onStart = {}, onValue = { values[index] = it }, onEnd = {}, onCommit = { values[index] = it })
+                        }
                     }
                 }
             }

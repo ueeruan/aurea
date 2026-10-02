@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela Exportar (refeita 2026-10-01): qualidade, avancado, render com animador. Chaves exp2_*. -->
+<resources>
+    <string name="exp2_quality_low">Baja</string>
+    <string name="exp2_quality_normal">Normal</string>
+    <string name="exp2_quality_high">Alta</string>
+    <string name="exp2_estimated_line">Tamaño estimado ≈ %1$s (%2$s Mbps)</string>
+    <string name="exp2_format_note">MP4 se abre en cualquier dispositivo, reproductor y red social.</string>
+    <string name="exp2_advanced">Avanzado</string>
+    <string name="exp2_codec">Códec</string>
+    <string name="exp2_bitrate">Tasa de bits (Mbps)</string>
+    <string name="exp2_bitrate_auto">Auto</string>
+    <string name="exp2_range">Tramo</string>
+    <string name="exp2_rendering">Renderizando tu video</string>
+    <string name="exp2_eta">Faltan unos %1$s</string>
+    <string name="exp2_animator_a11y">Animador en pixel art dibujando los fotogramas de tu video</string>
+    <string name="exp2_summary">Resumen</string>
+    <string name="exp2_fun_1">Alineando los píxeles…</string>
+    <string name="exp2_fun_2">Enseñando a bailar a los fotogramas…</string>
+    <string name="exp2_fun_3">Preparando café para la GPU…</string>
+    <string name="exp2_fun_4">Puliendo cada keyframe…</string>
+    <string name="exp2_fun_5">Casi listo, aguanta la emoción…</string>
+    <string name="exp2_fun_6">Dibujando fotograma a fotograma…</string>
+    <string name="exp2_fun_7">Afinando los colores…</string>
+    <string name="exp2_fun_8">Preparando la claqueta…</string>
+    <string name="exp2_fun_9">Mezclando el sonido con cariño…</string>
+    <string name="exp2_fun_10">Contando fotogramas con los dedos…</string>
+    <string name="exp2_frames">Fotograma %1$s de %2$s · %3$s fps</string>
+    <!-- Export como imagem (PNG, sequência .zip, GIF) - 2026-10-02 -->
+    <string name="exp2_format_video">Video (MP4)</string>
+    <string name="exp2_format_frame">Fotograma actual (PNG)</string>
+    <string name="exp2_format_sequence">Secuencia PNG (.zip)</string>
+    <string name="exp2_format_gif">GIF</string>
+    <string name="exp2_format_note_frame">El fotograma bajo el cursor, en PNG. Con fondo transparente, la imagen sale transparente.</string>
+    <string name="exp2_format_note_sequence">Un PNG por fotograma del tramo, todos en un archivo .zip.</string>
+    <string name="exp2_format_note_gif">Se repite sin parar, hasta 256 colores por fotograma. Ideal para tramos cortos.</string>
+    <string name="exp2_resolution_original">Original</string>
+    <string name="exp2_gif_width">Ancho del GIF</string>
+    <string name="exp2_estimated_size">Tamaño estimado ≈ %1$s</string>
+    <string name="exp2_frames_count">%1$d fotogramas</string>
+    <string name="exp2_rendering_frame">Creando tu imagen</string>
+    <string name="exp2_rendering_sequence">Creando la secuencia de imágenes</string>
+    <string name="exp2_rendering_gif">Creando tu GIF</string>
+    <string name="exp2_done_frame">Imagen lista</string>
+    <string name="exp2_done_sequence">Secuencia lista</string>
+    <string name="exp2_done_gif">GIF listo</string>
+    <string name="exp2_saved_pictures">Guardado en Imágenes/Aurea</string>
+    <string name="exp2_saved_downloads">Guardado en Descargas/Aurea</string>
+    <string name="exp2_saved_files">Guardado en la app Archivos, en la carpeta de Aurea</string>
+    <string name="exp2_share_file">Compartir</string>
+    <string name="exp2_too_long">Tramo demasiado largo para este formato: elige menos fotogramas por segundo o un tramo más corto.</string>
+</resources>

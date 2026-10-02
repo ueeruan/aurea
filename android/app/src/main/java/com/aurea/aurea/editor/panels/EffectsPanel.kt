@@ -31,9 +31,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronLeft
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -42,6 +43,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,11 +64,19 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.selected
+import com.aurea.aurea.effects.EffectAddSheet
 import com.aurea.aurea.effects.EffectDetailSheet
-import com.aurea.aurea.effects.EffectPicker
-import com.aurea.aurea.effects.EffectsTab
-import com.aurea.aurea.effects.initialEffectsTab
+import com.aurea.aurea.effects.EffectTool
+import com.aurea.aurea.effects.GenericPlate
+import com.aurea.aurea.effects.categoryGlyph
+import com.aurea.aurea.effects.effectGroupLabelRes
+import com.aurea.aurea.effects.effectGroupOf
+import com.aurea.aurea.effects.rememberEffectPreview
+import com.aurea.aurea.effects.toolGlyph
+import com.aurea.aurea.effects.toolLabelRes
 import com.aurea.aurea.engine.EffectCatalogEntry
 import com.aurea.aurea.engine.EffectParam
 import com.aurea.aurea.engine.LayerEffect
@@ -78,7 +88,6 @@ import com.aurea.aurea.ui.ds.AureaActionSheet
 import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.ds.ChoiceChips
 import com.aurea.aurea.ui.ds.ColorWell
-import com.aurea.aurea.ui.ds.EffectStackCard
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.ParamRowColors
@@ -219,15 +228,16 @@ private class ReorderState {
 }
 
 /**
- * O PAINEL "EFEITOS" (ref16/ref17, Fase 7.2; abas em 2026-09-28).
+ * O PAINEL "EFEITOS" (ref16/ref17, Fase 7.2; catálogo em tela cheia em 2026-10-01).
  *
- * - CABEÇALHO: `‹ · [Na camada N | Adicionar] · ⋯` — as duas abas no lugar do
- *   título. Camada com efeito abre em "Na camada"; sem efeito, em "Adicionar".
- * - ADICIONAR: busca no topo, fichas de categoria, Recentes/Favoritos e a grade
- *   ([EffectPicker]). UM toque adiciona e volta para "Na camada" com o efeito aberto.
- * - NA CAMADA (nenhum aberto): cada efeito um cartão `▶ Nome · 👁 · ≡` (≡ arrasta
+ * - A PILHA da camada, limpa: no topo as FERRAMENTAS-EFEITO que a camada usa
+ *   (máscaras, rastreio de câmera, legendas geradas — tocar reabre, 🗑 tira);
+ *   depois um cartão compacto por efeito `≡ · prévia · Nome · 👁 · ⌄` (≡ arrasta
  *   para reordenar) e "+ Adicionar efeito".
- * - EFEITO ABERTO: cartão `▼ Nome · ⋯ · 🗑`; os PRINCIPAIS primeiro e
+ * - ADICIONAR: a tela cheia "Adicionar efeito" ([EffectAddSheet]): destaques,
+ *   recentes, ladrilhos de categoria e busca. UM toque adiciona, fecha e abre os
+ *   controles do efeito novo. Camada sem nada abre direto nela.
+ * - EFEITO ABERTO: cartão `≡ · prévia · Nome · ⋯ · 🗑 · ⌃`; os PRINCIPAIS primeiro e
  *   "Avançado ▾" com o resto; trilho `‹ · ◇ · curva · =` mirando a linha escolhida.
  * - Acordeão: UM cartão aberto; efeito recém-adicionado abre sozinho; entrar pelo
  *   losango de um parâmetro de efeito na timeline abre aquele efeito naquela linha.
@@ -250,8 +260,38 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         store.selectedKeyframe?.takeIf { it.first == layerId && it.second.property == TrackProperty.EFFECT_PARAM }?.second
             ?.takeIf { k -> effects.any { it.effectId == k.effectIndex } }
     }
-    // Entrar pelo losango de um parâmetro é editar: abre na pilha mesmo assim.
-    var tab by remember(layerId) { mutableStateOf(if (entry != null) EffectsTab.Applied else initialEffectsTab(effects.size)) }
+    // As ferramentas-efeito que a camada usa (cartões no topo da pilha).
+    val maskCount by remember(store) { derivedStateOf { store.masks?.takeIf { it.layer == store.primary }?.masks?.size ?: 0 } }
+    var captionCount by remember(layerId) {
+        mutableIntStateOf(if (tabbed && layerId != null) store.engineForStress.captionCount(layerId) else 0)
+    }
+    LaunchedEffect(layerId, store.layers) {
+        // As legendas geradas viram camadas: a lista de camadas muda junto.
+        captionCount = if (tabbed && layerId != null) store.engineForStress.captionCount(layerId) else 0
+    }
+    LaunchedEffect(layerId, kind, store.layers) {
+        // Restaura o rastreio guardado NA CAMADA pelo caminho do store (que sabe de
+        // qual camada é a análise aberta) e apaga os pontos do palco em seguida.
+        if (tabbed && kind == LayerType.Video.kind) {
+            store.refreshCameraFeatures(true)
+            store.refreshCameraFeatures(false)
+        }
+    }
+    val hasCameraTrack by remember(store) {
+        derivedStateOf { store.detail?.kind == LayerType.Video.kind && (store.cameraTrack?.state == 2 || store.cameraTrack?.state == 3) }
+    }
+    val tools = buildList {
+        if (!tabbed) return@buildList
+        if (maskCount > 0) add(EffectTool.Mask)
+        if (hasCameraTrack) add(EffectTool.CameraTrack)
+        if (captionCount > 0) add(EffectTool.Captions)
+    }
+    // Camada sem nada abre direto na tela "Adicionar efeito"; entrar pelo losango
+    // de um parâmetro é editar: abre na pilha.
+    var adding by remember(layerId) {
+        mutableStateOf(tabbed && layerId != null && entry == null && effects.isEmpty() && maskCount == 0 && captionCount == 0)
+    }
+    var toolToRemove by remember { mutableStateOf<EffectTool?>(null) }
     val hasAudio by remember(store) { derivedStateOf { store.detail?.hasAudio == true } }
     var aboutEntry by remember { mutableStateOf<EffectCatalogEntry?>(null) }
     // A pilha já abre com o primeiro cartão à vista (um toque a menos); os outros recolhidos.
@@ -278,7 +318,6 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     var menuFor by remember { mutableStateOf<LayerEffect?>(null) }
     var paramMenu by remember { mutableStateOf<ParamMenuTarget?>(null) }
     var railMenu by remember { mutableStateOf(false) }
-    var savingPreset by remember { mutableStateOf<LayerEffect?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val importScope = rememberCoroutineScope()
     // Alight Motion: qualquer arquivo (o .amproj/.xml não tem MIME padrão); o
@@ -311,14 +350,12 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         if (requested >= 0 || added.isNotEmpty()) {
             val index = if (requested >= 0) requested else effects.indexOfLast { it.effectId in added }
             openId = effects[index].effectId
-            // Adicionou (pelo catálogo, pela busca geral, colando): os controles
-            // do efeito novo aparecem na pilha. A lista entra nesta mesma
-            // recomposição; espera o quadro dela antes de rolar.
-            if (tab != EffectsTab.Applied) {
-                tab = EffectsTab.Applied
-                androidx.compose.runtime.withFrameNanos { }
-            }
-            listState.animateScrollToItem(index)
+            // Adicionou (pelo catálogo, pela busca geral, colando): a tela de
+            // adicionar fecha e os controles do efeito novo aparecem na pilha
+            // (os cartões de ferramenta vêm antes dos efeitos na lista).
+            adding = false
+            androidx.compose.runtime.withFrameNanos { }
+            listState.animateScrollToItem(index + tools.size)
             if (requested >= 0) store.consumeEffectFocus()
         }
         else if (openId != null && openId !in ids) openId = null
@@ -351,22 +388,26 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
 
     val byId = effects.associateBy { it.effectId }
     val order = (reorder.order ?: effects.map { it.effectId }).mapNotNull { byId[it] }
-    val openAdd: () -> Unit = { if (tabbed) tab = EffectsTab.Add else env.onOpenEffectsBrowser() }
+    val openAdd: () -> Unit = { if (tabbed) adding = true else env.onOpenEffectsBrowser() }
+
+    if (adding) {
+        EffectAddSheet(
+            store = store,
+            layerHasAudio = hasAudio,
+            onPick = { e ->
+                adding = false
+                store.addEffect(e.typeId)
+            },
+            onTool = { tool ->
+                adding = false
+                openEffectTool(env, tool)
+            },
+            onDismiss = { adding = false },
+        )
+    }
 
     Column(Modifier.fillMaxSize().background(ParamRowColors.Panel)) {
-        if (tabbed && tab == EffectsTab.Add) {
-            // O catálogo: "‹ Adicionar efeito" volta para a pilha da camada.
-            AddEffectHeader(onBack = { tab = EffectsTab.Applied })
-            EffectPicker(
-                store = store,
-                layerHasAudio = hasAudio,
-                onPick = { e ->
-                    store.addEffect(e.typeId)
-                    store.effectPrefs.addRecent(e.typeId)
-                },
-                modifier = Modifier.weight(1f),
-            )
-        } else Row(Modifier.fillMaxWidth().weight(1f)) {
+        Row(Modifier.fillMaxWidth().weight(1f)) {
             // O TRILHO (redesenho 2026-09-29): ‹ volta às seções da camada; ◇+ e a
             // curva miram o parâmetro escolhido; ⋯ no pé = ações da pilha inteira.
             LeftRail(
@@ -403,8 +444,21 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 state = listState,
                 contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 6.dp, bottom = 16.dp),
             ) {
-                if (tabbed && effects.isEmpty()) {
+                if (tabbed && effects.isEmpty() && tools.isEmpty()) {
                     item(key = "vazio") { PanelNotice(stringResource(R.string.effects_applied_empty)) }
+                }
+                items(tools, key = { "tool." + it.key }) { tool ->
+                    ToolStackCard(
+                        tool = tool,
+                        subtitle = when (tool) {
+                            EffectTool.Mask -> stringResource(R.string.fxui_tool_masks_n, maskCount)
+                            EffectTool.Captions -> stringResource(R.string.fxui_tool_captions_n, captionCount)
+                            EffectTool.CameraTrack -> stringResource(R.string.fxui_tool_camera_ready)
+                        },
+                        onOpen = { openEffectTool(env, tool) },
+                        onRemove = if (tool == EffectTool.CameraTrack) null else ({ toolToRemove = tool }),
+                        modifier = Modifier.animateItem(),
+                    )
                 }
                 items(order, key = { it.effectId }) { e ->
                     val dragged = reorder.dragging == e.effectId
@@ -446,11 +500,9 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         AureaActionSheet(
             title = stringResource(R.string.panel_efeitos_camada),
             actions = buildList {
+                // "Meus presets" saiu (pedido de 2026-10-01: ninguém usa); o motor
+                // continua lendo os presets dos projetos antigos.
                 add(SheetAction(stringResource(R.string.panel_adicionar_efeito)) { openAdd() })
-                add(SheetAction(stringResource(R.string.fx_my_presets)) {
-                    store.presetsOpenKind = com.aurea.aurea.presets.PresetKind.Effects
-                    env.onOpenPanel(EditorPanel.Presets)
-                })
                 add(SheetAction(stringResource(R.string.am_import_action)) { amPicker.launch(arrayOf("*/*")) })
                 if (effects.isNotEmpty()) add(SheetAction(stringResource(R.string.panel_copiar_efeitos)) { store.copyEffects() })
                 if (store.clipboard and 4 != 0) add(SheetAction(stringResource(R.string.panel_colar_efeitos)) { store.pasteEffects() })
@@ -468,6 +520,17 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 }
             },
             onDismiss = { railMenu = false },
+        )
+    }
+
+    toolToRemove?.let { tool ->
+        AureaActionSheet(
+            title = stringResource(toolLabelRes(tool)),
+            message = stringResource(if (tool == EffectTool.Mask) R.string.fxui_tool_remove_masks_q else R.string.fxui_tool_remove_captions_q),
+            actions = listOf(
+                SheetAction(stringResource(R.string.panel_remover), destructive = true) { removeEffectTool(store, tool) },
+            ),
+            onDismiss = { toolToRemove = null },
         )
     }
 
@@ -490,7 +553,6 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     add(SheetAction(stringResource(R.string.effects_about)) { aboutEntry = entry })
                 }
                 add(SheetAction(stringResource(R.string.fx_copy_this_effect)) { store.copyEffects(e.effectId) })
-                add(SheetAction(stringResource(R.string.fx_save_as_preset)) { savingPreset = e })
                 if (index > 0) add(SheetAction(stringResource(R.string.panel_mover_cima)) { store.reorderEffect(e.effectId, index - 1) })
                 if (index in 0 until effects.lastIndex) add(SheetAction(stringResource(R.string.panel_mover_baixo)) { store.reorderEffect(e.effectId, index + 1) })
                 add(SheetAction(stringResource(R.string.panel_remover_efeito), destructive = true) { store.removeEffect(e.effectId) })
@@ -502,15 +564,6 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             actions = actions,
             cancelLabel = if (e.known) stringResource(R.string.panel_cancelar) else stringResource(R.string.panel_manter),
             onDismiss = { menuFor = null },
-        )
-    }
-
-    savingPreset?.let { e ->
-        com.aurea.aurea.ui.ds.AureaNamePrompt(
-            title = stringResource(R.string.fx_save_as_preset),
-            initial = effectDisplayName(e.typeId, e.name),
-            onConfirm = { name -> store.saveEffectPreset(e.effectId, name.take(60)) },
-            onDismiss = { savingPreset = null },
         )
     }
 
@@ -611,28 +664,191 @@ private fun Modifier.reorderHandle(id: Int, state: ReorderState, list: LazyListS
     )
 
 /**
- * O CABEÇALHO DO CATÁLOGO (aba Adicionar): `‹ Adicionar efeito`. O título da
- * seção ("Efeitos") mora na barra de cima; o ‹ daqui volta para a pilha.
+ * TIRA uma ferramenta-efeito da camada, num passo de desfazer: todas as
+ * máscaras, ou as legendas geradas (pelo fluxo das legendas). O rastreio de
+ * câmera não tem "tirar": o motor guarda a análise no vídeo e a câmera criada é
+ * uma camada comum.
+ */
+private fun removeEffectTool(store: EditorStore, tool: EffectTool) {
+    val layer = store.primary ?: return
+    when (tool) {
+        EffectTool.Mask -> {
+            val ids = store.masks?.takeIf { it.layer == layer }?.masks?.map { it.id }.orEmpty()
+            if (ids.isEmpty()) return
+            store.beginGesture("remover máscaras")
+            try {
+                ids.forEach { store.deleteMask(it) }
+            } finally {
+                store.endGesture()
+            }
+        }
+        EffectTool.Captions -> {
+            store.captions.open(layer)
+            store.captions.removeAll()
+        }
+        EffectTool.CameraTrack -> Unit
+    }
+}
+
+/** Miniatura do cartão da pilha (40 dp): a prévia do efeito, ou a cartela. */
+@Composable
+private fun StackThumb(typeId: Int, category: String, store: EditorStore) {
+    Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))) {
+        val preview = rememberEffectPreview(store.effectPreviews, typeId, 320, 200)
+        if (preview != null) {
+            Image(preview, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
+        } else {
+            GenericPlate(categoryGlyph(category))
+        }
+    }
+}
+
+/**
+ * O CARTÃO DE UMA FERRAMENTA-EFEITO na pilha: `glifo · Nome / quantos · 🗑 · ›`.
+ * Tocar reabre a ferramenta; a lixeira (quando existe) pede confirmação.
+ * testTag `effects.tool.<chave>`.
  */
 @Composable
-private fun AddEffectHeader(onBack: () -> Unit) {
-    val backDesc = stringResource(R.string.fx_back_to_effects)
+private fun ToolStackCard(tool: EffectTool, subtitle: String, onOpen: () -> Unit, onRemove: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val name = stringResource(toolLabelRes(tool))
+    val openLabel = stringResource(R.string.fxui_a11y_open, name)
+    val removeLabel = stringResource(R.string.fxui_a11y_remove, name)
     Row(
-        Modifier.fillMaxWidth().height(44.dp).testTag("effects.tab.add"),
+        modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(ParamRowColors.Card)
+            .height(56.dp)
+            .testTag("effects.tool." + tool.key.substringAfterLast('.'))
+            .semantics { contentDescription = openLabel; role = Role.Button }
+            .tocavel(shrink = 1f, onClick = onOpen)
+            .padding(start = 10.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(48.dp, 44.dp).semantics { contentDescription = backDesc }.tocavel(onClick = onBack),
+            Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
+                .background(Brush.verticalGradient(listOf(AureaColors.ActionDim, AureaColors.SurfaceHigh))),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp))
+            CupertinoIcon(toolGlyph(tool), 20.dp, AureaColors.Accent)
         }
-        Text(
-            stringResource(R.string.panel_adicionar_efeito),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
-        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600)))
+            Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
+        }
+        if (onRemove != null) StackButton(CupertinoGlyph.Trash, removeLabel, AureaColors.Text, Modifier, onRemove)
+        CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.Muted, Modifier.padding(horizontal = 12.dp))
+    }
+}
+
+/** Botão de 40 dp do cabeçalho do cartão, com o rótulo de acessibilidade traduzido. */
+@Composable
+private fun StackButton(glyph: Char, label: String, tint: androidx.compose.ui.graphics.Color, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier.size(40.dp).semantics { contentDescription = label; role = Role.Button }.tocavel(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        CupertinoIcon(glyph, 19.dp, tint)
+    }
+}
+
+/**
+ * O CARTÃO COMPACTO de um efeito aplicado (redesenho 2026-10-01).
+ * Recolhido: `≡ · prévia · Nome / grupo · 👁 · ⌄`. Aberto: `≡ · prévia · Nome ·
+ * ⋯ · 🗑 · ⌃` e o corpo. O ≡ arrasta para reordenar; tocar no nome abre/fecha.
+ * Recolhido não compõe o corpo. Desligado, nome e corpo ficam a 45 %.
+ * testTags `effects.expand|eye|more|remove.<id>` (iguais no iOS).
+ */
+@Composable
+private fun FxStackCard(
+    store: EditorStore,
+    effect: LayerEffect,
+    name: String,
+    expanded: Boolean,
+    lifted: Boolean,
+    onToggleExpanded: () -> Unit,
+    onToggleEnabled: () -> Unit,
+    onMenu: () -> Unit,
+    onRemove: () -> Unit,
+    dragHandle: Modifier,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(10.dp)
+    val entry = remember(store.catalog, effect.typeId) { store.catalog.firstOrNull { it.typeId == effect.typeId } }
+    val id = com.aurea.aurea.effects.effectCardId(effect.typeId)
+    val subtitle = when {
+        !effect.enabled -> stringResource(R.string.fxui_effect_off)
+        entry != null -> stringResource(effectGroupLabelRes(effectGroupOf(entry)))
+        else -> ""
+    }
+    val toggleLabel = stringResource(if (expanded) R.string.fxui_a11y_collapse else R.string.fxui_a11y_expand, name)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(shape)
+            .background(if (lifted) AureaColors.SurfaceHigh else ParamRowColors.Card)
+            .then(if (lifted) Modifier.border(1.dp, AureaColors.Accent, shape) else Modifier)
+            .padding(bottom = if (expanded) 6.dp else 0.dp),
+    ) {
+        Row(Modifier.fillMaxWidth().height(56.dp).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            val dragLabel = stringResource(R.string.fxui_a11y_drag, name)
+            Box(
+                dragHandle.size(32.dp, 56.dp).semantics { contentDescription = dragLabel },
+                contentAlignment = Alignment.Center,
+            ) {
+                CupertinoIcon(CupertinoGlyph.LineHorizontal3, 16.dp, if (lifted) AureaColors.Accent else AureaColors.Muted)
+            }
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(56.dp)
+                    .testTag("effects.expand.$id")
+                    .semantics { contentDescription = toggleLabel; role = Role.Button }
+                    .tocavel(shrink = 1f, onClick = onToggleExpanded),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.alpha(if (effect.enabled) 1f else 0.45f)) {
+                    StackThumb(effect.typeId, entry?.category.orEmpty(), store)
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        name,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.alpha(if (effect.enabled) 1f else 0.45f),
+                        style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600)),
+                    )
+                    if (subtitle.isNotEmpty()) {
+                        Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
+                    }
+                }
+            }
+            if (expanded) {
+                StackButton(CupertinoGlyph.Ellipsis, stringResource(R.string.app_a11y_more_options, name), AureaColors.Text, Modifier.testTag("effects.more.$id"), onMenu)
+                StackButton(CupertinoGlyph.Trash, stringResource(R.string.fxui_a11y_remove, name), AureaColors.Text, Modifier.testTag("effects.remove.$id"), onRemove)
+            } else {
+                StackButton(
+                    if (effect.enabled) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash,
+                    stringResource(if (effect.enabled) R.string.fxui_a11y_disable else R.string.fxui_a11y_enable, name),
+                    if (effect.enabled) AureaColors.Text else AureaColors.Muted,
+                    Modifier.testTag("effects.eye.$id"),
+                    onToggleEnabled,
+                )
+            }
+            StackButton(if (expanded) CupertinoGlyph.ChevronUp else CupertinoGlyph.ChevronDown, toggleLabel, AureaColors.Muted, Modifier, onToggleExpanded)
+        }
+        if (expanded) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 6.dp).alpha(if (effect.enabled) 1f else 0.45f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                content = content,
+            )
+        }
     }
 }
 
@@ -672,16 +888,17 @@ private fun EffectCardItem(
     modifier: Modifier = Modifier,
 ) {
     val store = env.store
-    EffectStackCard(
+    FxStackCard(
+        store = store,
+        effect = effect,
         name = effectDisplayName(effect.typeId, effect.name),
-        enabled = effect.enabled,
         expanded = expanded,
+        lifted = lifted,
         onToggleExpanded = onToggle,
         onToggleEnabled = { store.setEffectEnabled(effect.effectId, !effect.enabled) },
         onMenu = onMenu,
         onRemove = onRemove,
         dragHandle = dragHandle,
-        lifted = lifted,
         modifier = modifier,
     ) {
         val id = effect.effectId
@@ -690,7 +907,7 @@ private fun EffectCardItem(
         }
         if (!effect.known) {
             PanelNotice(stringResource(R.string.panel_este_efeito_saiu_catalogo_ele_nao))
-            return@EffectStackCard
+            return@FxStackCard
         }
         if (effect.typeId == effectTypeId("aurea.key.rotobrush")) {
             PanelNotice(stringResource(R.string.roto_note))
@@ -699,12 +916,12 @@ private fun EffectCardItem(
         }
         if (effect.typeId == effectTypeId("aurea.time.remap")) {
             TimeRemapEffectEditor(env, id)
-            return@EffectStackCard
+            return@FxStackCard
         }
         val visible = slots.filter { !it.hidden }
         if (visible.isEmpty()) {
             PanelNotice(stringResource(R.string.panel_este_efeito_nao_tem_ajustes))
-            return@EffectStackCard
+            return@FxStackCard
         }
         // Presets do efeito (o do app antigo: Impacto/Na mão/Glitch do Tremor):
         // uma fileira de fichas no topo do cartão; tocar = um passo de desfazer.

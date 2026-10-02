@@ -158,8 +158,8 @@ fun PanelContent(
 
 /** Galeria de efeitos (folha modal). Adiciona o efeito às camadas escolhidas. */
 @Composable
-fun EffectsBrowserSheet(store: EditorStore, onDismiss: () -> Unit) {
-    EffectsBrowser(store, onDismiss)
+fun EffectsBrowserSheet(store: EditorStore, onOpenPanel: (EditorPanel) -> Unit = {}, onDismiss: () -> Unit) {
+    EffectsBrowser(store, onOpenPanel, onDismiss)
 }
 
 /** O título da seção aberta (a barra de cima e o cabeçalho do painel sem camada). */

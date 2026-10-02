@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeitos: Emulador CRT, Tremor dissolvente e Mapa de deslocamento (nomes, descrições, rótulos). -->
+<resources>
+    <string name="fx_name_crt_emulator">Эмулятор ЭЛТ</string>
+    <string name="fx_desc_stylize_crt_emulator">Изображение на ламповом телевизоре: изогнутый экран, строки развёртки, RGB-маска люминофора, несведение цветов, свечение, мерцание и бегущая полоса.</string>
+    <string name="fx_name_dissolve_shake">Распадающаяся тряска</string>
+    <string name="fx_desc_glitch_dissolve_shake">Слой трясётся и распадается на шумные фрагменты, которые разлетаются и исчезают — анимируется сам, без ключевых кадров.</string>
+    <string name="fx_name_displacement_map">Карта смещения</string>
+    <string name="fx_desc_distort_displacement_map">Сдвигает пиксели по значениям другого слоя (карты): выберите канал для каждой оси и максимальное смещение. Без слоя используется само изображение.</string>
+    <string name="fx3_curvatura">Кривизна</string>
+    <string name="fx3_linhas_intensidade">Интенсивность строк</string>
+    <string name="fx3_linhas_densidade">Плотность строк</string>
+    <string name="fx3_mascara">Маска люминофора</string>
+    <string name="fx3_mascara_intensidade">Интенсивность маски</string>
+    <string name="fx3_mascara_tamanho">Размер маски</string>
+    <string name="fx3_convergencia">Сведение лучей</string>
+    <string name="fx3_brilho_bloom">Свечение</string>
+    <string name="fx3_raio_brilho">Радиус свечения</string>
+    <string name="fx3_cintilacao">Мерцание</string>
+    <string name="fx3_faixa_rolando">Бегущая полоса</string>
+    <string name="fx3_velocidade_faixa">Скорость полосы</string>
+    <string name="fx3_brilho_geral">Общая яркость</string>
+    <string name="fx3o_grade_abertura">Апертурная решётка</string>
+    <string name="fx3o_mascara_sombra">Теневая маска</string>
+    <string name="fx3o_fenda">Щелевая маска</string>
+    <string name="fx3_dissolucao">Растворение</string>
+    <string name="fx3_tamanho_fragmento">Размер фрагмента</string>
+    <string name="fx3_transparencia_fragmentos">Прозрачность фрагментов</string>
+    <string name="fx3_velocidade_evolucao">Скорость эволюции</string>
+    <string name="fx3_eixos">Оси</string>
+    <string name="fx3_camada_mapa">Слой карты</string>
+    <string name="fx3_canal_horizontal">Горизонтальный канал</string>
+    <string name="fx3_canal_vertical">Вертикальный канал</string>
+    <string name="fx3o_desligado">Выкл.</string>
+    <string name="fx3_desloc_h_max">Макс. смещение по горизонтали</string>
+    <string name="fx3_desloc_v_max">Макс. смещение по вертикали</string>
+    <string name="fx3_comportamento_mapa">Поведение карты</string>
+    <string name="fx3o_centralizar">По центру</string>
+    <string name="fx3o_esticar">Растянуть</string>
+    <string name="fx3o_repetir">Мозаикой</string>
+    <string name="fx3o_repetir_pixels">Повторять края</string>
+    <string name="fx3o_envolver">Заворачивать</string>
+    <string name="fx3_expandir_saida">Расширить вывод</string>
+</resources>

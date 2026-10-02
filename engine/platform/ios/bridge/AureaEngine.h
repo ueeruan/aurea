@@ -244,6 +244,10 @@ static const uint32_t AureaTrackPropertyInvalidEffectIndex = 0xFFFFFFFFu;
 NS_SWIFT_NAME(AureaEngine)
 @interface AureaEngine : NSObject
 - (float)clampPinchFactor:(float)factor scaleX:(float)x scaleY:(float)y scaleZ:(float)z threeD:(BOOL)threeD;
+/// Pinça 3D com a regra de profundidade do motor (Z de conteúdo acompanha X).
+- (float)clampPinchFactor3D:(float)factor kind:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z NS_SWIFT_NAME(clampPinchFactor3D(_:kind:scaleX:scaleY:scaleZ:));
+/// Escala 3D de gesto já no formato gravado: axis 0..2 eixo, 3 uniforme, 4 ajustar (GestureMath.hpp).
+- (NSArray<NSNumber*>*)gestureScale3D:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z axis:(int)axis factor:(float)factor NS_SWIFT_NAME(gestureScale3D(_:scaleX:scaleY:scaleZ:axis:factor:));
 - (NSArray<NSNumber*>*)previewGestureBasis:(long long)layer;
 - (NSArray<NSNumber*>*)previewGestureValue:(NSArray<NSNumber*>*)basis dx:(float)dx dy:(float)dy rotate:(BOOL)rotate;
 
@@ -376,6 +380,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)layerMagneticTrack:(long long)layerId;
 /// Arrasta o trecho para outro ponto da mesma linha, reordenando a fita.
 - (BOOL)reorderClip:(long long)layerId toFrame:(int64_t)targetFrame;
+/// Arrasto vertical de UM trecho (só ele anda). mode 0 = fileira própria logo
+/// acima da fileira de anchorId (0 = no fundo); 1 = entrar na linha de anchorId
+/// se couber no tempo (senão fileira própria ali). Um passo de desfazer.
+- (BOOL)moveLayer:(long long)layerId toRowOf:(long long)anchorId mode:(int)mode NS_SWIFT_NAME(moveLayer(_:toRowOf:mode:));
 
 // --- Transform --------------------------------------------------------------
 - (void)setTransformForLayer:(long long)layerId
@@ -560,6 +568,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)setRawPlayback:(BOOL)enabled;
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance;
 - (NSArray<NSNumber*>*)sceneGuides;
+/// Cena 3D: camada 3D sob o ponto (px da composição) pelo corpo real; 0 = nada.
+- (long long)scenePickX:(float)x y:(float)y radius:(float)radius NS_SWIFT_NAME(scenePick(x:y:radius:));
 - (void)layoutTransform:(long long)layer property:(uint32_t)property value:(float)value;
 - (long long)addLight:(uint32_t)kind;
 - (NSArray<NSNumber*>*)lightInfo:(long long)layer;
@@ -831,8 +841,32 @@ NS_SWIFT_NAME(AureaEngine)
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent;
+/// `quality` 0 Baixa / 1 Normal / 2 Alta: a taxa automática do motor
+/// (BitratePolicy.hpp) quando `bitrateMbps` é 0.
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+              quality:(uint32_t)quality;
+/// A taxa de vídeo (bps) que o export usaria — a mesma regra do encoder, para a
+/// tela mostrar o tamanho estimado sem conta própria.
+- (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps
+                       codec:(AureaExportCodec)codec quality:(uint32_t)quality
+                  customMbps:(uint32_t)customMbps;
 - (long long)exportDuration:(BOOL)trimToContent;
 - (void)cancelExport;
+/// Export como imagem (motor: export/ImageEncode.hpp). `format` 0 = quadro do
+/// playhead em PNG, 1 = sequência PNG num .zip, 2 = GIF. `shortSide` 0 = a
+/// resolução da composição; `maxWidth` = largura máxima do GIF; `fps` 0 =
+/// padrão do formato. Progresso e cancelamento são os do vídeo
+/// (`-exportProgress`, `-cancelExport`). Devolve o código de erro (0 = começou).
+- (int32_t)startImageExportTo:(NSString*)path format:(uint32_t)format shortSide:(uint32_t)shortSide
+                     maxWidth:(uint32_t)maxWidth fps:(double)fps trimToContent:(BOOL)trimToContent;
+/// O plano pela regra do motor: "width", "height", "frames", "alpha", "bytes", "fps".
+/// Nulo sem composição.
+- (nullable NSDictionary<NSString*, NSNumber*>*)imageExportPlan:(uint32_t)format shortSide:(uint32_t)shortSide
+                                                        maxWidth:(uint32_t)maxWidth fps:(double)fps
+                                                   trimToContent:(BOOL)trimToContent;
 /// Thumbnail quadrado do frame do playhead não é export: use `captureFrame`.
 @end
 

@@ -266,6 +266,7 @@ public:
         u.p1 = Vec4{static_cast<f32>(e.e(kDirection)), e.b(kSquare) ? 1.0f : 0.0f,
                     static_cast<f32>(e.e(kEdges)), e.b(kPin) ? 1.0f : 0.0f};
         u.p3 = Vec4{static_cast<f32>(e.localTime.value), 0.0f, 0.0f, 0.0f};
+        u.p2 = Vec4{0.0f, 0.0f, input.region.x, input.region.y};   // origem da entrada (px da camada)
 
         out = LayerImage{ctx.texture("onda", w, hh), region, w, hh};
         if (ctx.fullscreen_pass("onda", PassStage::Transform, out.texture, ShaderId::effects_wave_warp_frag,

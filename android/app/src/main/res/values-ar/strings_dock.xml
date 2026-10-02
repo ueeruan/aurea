@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Doca/menus da camada (limpeza 2026-10-01). Chaves dock2_*. -->
+<resources>
+    <string name="dock2_tracking_tools">أدوات التتبع</string>
+    <string name="dock2_tracking_tools_detail">نقطة ومستوٍ وزوايا ومثبّت</string>
+    <string name="dock2_media_only">السرعة والصوت للفيديو والصوت فقط</string>
+</resources>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela Exportar (refeita 2026-10-01): qualidade, avancado, render com animador. Chaves exp2_*. -->
+<resources>
+    <string name="exp2_quality_low">Низкое</string>
+    <string name="exp2_quality_normal">Обычное</string>
+    <string name="exp2_quality_high">Высокое</string>
+    <string name="exp2_estimated_line">Примерный размер ≈ %1$s (%2$s Мбит/с)</string>
+    <string name="exp2_format_note">MP4 открывается на любом устройстве, в плеере и соцсети.</string>
+    <string name="exp2_advanced">Дополнительно</string>
+    <string name="exp2_codec">Кодек</string>
+    <string name="exp2_bitrate">Битрейт (Мбит/с)</string>
+    <string name="exp2_bitrate_auto">Авто</string>
+    <string name="exp2_range">Фрагмент</string>
+    <string name="exp2_rendering">Рендерим ваше видео</string>
+    <string name="exp2_eta">Осталось около %1$s</string>
+    <string name="exp2_animator_a11y">Пиксельный аниматор рисует кадры вашего видео</string>
+    <string name="exp2_summary">Сводка</string>
+    <string name="exp2_fun_1">Выравниваем пиксели…</string>
+    <string name="exp2_fun_2">Учим кадры танцевать…</string>
+    <string name="exp2_fun_3">Варим кофе для GPU…</string>
+    <string name="exp2_fun_4">Полируем каждый ключевой кадр…</string>
+    <string name="exp2_fun_5">Почти готово, держитесь…</string>
+    <string name="exp2_fun_6">Рисуем кадр за кадром…</string>
+    <string name="exp2_fun_7">Настраиваем цвета…</string>
+    <string name="exp2_fun_8">Готовим хлопушку…</string>
+    <string name="exp2_fun_9">Сводим звук с любовью…</string>
+    <string name="exp2_fun_10">Считаем кадры на пальцах…</string>
+    <string name="exp2_frames">Кадр %1$s из %2$s · %3$s fps</string>
+    <!-- Export como imagem (PNG, sequência .zip, GIF) - 2026-10-02 -->
+    <string name="exp2_format_video">Видео (MP4)</string>
+    <string name="exp2_format_frame">Текущий кадр (PNG)</string>
+    <string name="exp2_format_sequence">Последовательность PNG (.zip)</string>
+    <string name="exp2_format_gif">GIF</string>
+    <string name="exp2_format_note_frame">Кадр под курсором в формате PNG. При прозрачном фоне изображение останется прозрачным.</string>
+    <string name="exp2_format_note_sequence">По одному PNG на каждый кадр фрагмента, всё в одном файле .zip.</string>
+    <string name="exp2_format_note_gif">Повторяется бесконечно, до 256 цветов на кадр. Лучше всего для коротких фрагментов.</string>
+    <string name="exp2_resolution_original">Исходное</string>
+    <string name="exp2_gif_width">Ширина GIF</string>
+    <string name="exp2_estimated_size">Примерный размер ≈ %1$s</string>
+    <string name="exp2_frames_count">Кадров: %1$d</string>
+    <string name="exp2_rendering_frame">Создаём изображение</string>
+    <string name="exp2_rendering_sequence">Создаём последовательность изображений</string>
+    <string name="exp2_rendering_gif">Создаём GIF</string>
+    <string name="exp2_done_frame">Изображение готово</string>
+    <string name="exp2_done_sequence">Последовательность готова</string>
+    <string name="exp2_done_gif">GIF готов</string>
+    <string name="exp2_saved_pictures">Сохранено в «Изображения/Aurea»</string>
+    <string name="exp2_saved_downloads">Сохранено в «Загрузки/Aurea»</string>
+    <string name="exp2_saved_files">Сохранено в приложении «Файлы», в папке Aurea</string>
+    <string name="exp2_share_file">Поделиться</string>
+    <string name="exp2_too_long">Фрагмент слишком длинный для этого формата: выберите меньше кадров в секунду или более короткий фрагмент.</string>
+</resources>

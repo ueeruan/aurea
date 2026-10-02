@@ -121,7 +121,7 @@ public:
     /// Um halo a partir da imagem clara: o gaussiano segue a PIRÂMIDE a partir
     /// dela (build_gaussian reduz por 2 enquanto σ passar de 8 texels).
     static Status blur_halo(EffectBuildContext& ctx, const LayerImage& brightImage, const Rect& region, f32 radius,
-                            LayerImage& out) {
+                            LayerImage& out, f32 maxSigmaTexels = 8.0f) {
         out = brightImage;
         if (radius <= 0.5f) return OkStatus;
         BlurRequest req;
@@ -132,6 +132,7 @@ public:
         req.repeatEdges = false;
         req.outRegion = region;
         req.label = "brilho-profundo";
+        req.maxSigmaTexels = maxSigmaTexels;
         return build_gaussian(ctx, brightImage, req, out);
     }
 
@@ -142,10 +143,16 @@ public:
     static Status optical_halo(EffectBuildContext& ctx, const LayerImage& source,
                                const Rect& region, f32 radius, LayerImage& out) {
         constexpr u32 levels = 6;
+        // Custo (relato beta "trava com deep glow"): 22 passes, o lóbulo de
+        // σ ≈ 6 texels sozinho era 1/5 do efeito. Lóbulos largos descem a
+        // pirâmide até σ ≈ 2 texels (borrão igual, passes de 1/4 a 1/16 da
+        // área); os mais finos que meio texel já SÃO a imagem clara.
+        const f32 k = source.texel_scale_x();
         for (u32 level = 0; level < levels; ++level) {
             LayerImage lobe;
-            if (const Status s = blur_halo(ctx, source, region,
-                    radius / static_cast<f32>(1u << level), lobe); !s.ok()) return s;
+            const f32 r = radius / static_cast<f32>(1u << level);
+            if (r / 3.0f * k < 0.5f) lobe = source;
+            else if (const Status s = blur_halo(ctx, source, region, r, lobe, 2.0f); !s.ok()) return s;
             if (level == 0) { out = lobe; continue; }
             EffectUniforms u;
             u.p3 = Vec4{1, static_cast<f32>(level) / (level + 1), 1.0f / (level + 1), 0};

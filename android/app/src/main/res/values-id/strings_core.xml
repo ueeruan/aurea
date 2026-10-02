@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_name_time_motion_detect">Deteksi gerakan</string>
+    <string name="fx_desc_time_motion_detect">Hanya menampilkan yang bergerak: membandingkan frame dengan frame sebelumnya dan menyalakan perbedaannya.</string>
+    <string name="core2_fx_motion_delay">Jeda (frame)</string>
+    <string name="core2_fx_offset_darks">Angkat bagian gelap</string>
+    <string name="core2_fx_motion_mode">Gerakan</string>
+    <string name="core2_fxo_motion_all">Semua</string>
+    <string name="core2_fxo_motion_brighter">Lebih terang</string>
+    <string name="core2_fxo_motion_darker">Lebih gelap</string>
+    <string name="core2_fx_cube_file">File .cube</string>
+    <string name="core2_fx_flare_ghosts">Pantulan internal</string>
+</resources>

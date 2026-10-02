@@ -87,6 +87,7 @@ set(AUREA_CORE_SOURCES
     src/timeline/GridLayout.cpp
     src/effects/builtin/GridLayoutEffect.cpp
     src/project/ProjectPackage.cpp
+    src/export/ImageEncode.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
@@ -105,6 +106,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/GlowEffect.cpp
     src/effects/builtin/TransformEffect.cpp
     src/effects/builtin/MotionTileEffect.cpp
+    src/effects/builtin/MotionDetectEffect.cpp
+    src/effects/builtin/RetroDisplaceEffects.cpp
     src/effects/builtin/KeyingEffects.cpp
     src/effects/builtin/ExpressionControls.cpp
     src/effects/builtin/EchoEffect.cpp

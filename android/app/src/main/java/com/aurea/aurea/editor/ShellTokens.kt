@@ -16,9 +16,12 @@ import com.aurea.aurea.ui.theme.AureaColors
 internal object ShellColors {
     /** `CromoEditor.apagado`: o tempo da barra do projeto (branco 40 %). */
     val White40 = Color(0x66FFFFFF)
-    val DockRow = Color(0xFF1E222D)
-    val DockTile = Color(0xFF222634)
-    val DockTileContent = Color(0xFFD4D8E2)
+    val DockRow = Color(0xFF272D40)      // quadrados/bloco da fileira rápida (cor do AM)
+    val DockTile = Color(0xFF272D40)     // fichas (cor do AM)
+    val DockTileContent = Color(0xFF8E93A6)   // nome da ficha: cinza, como no AM
+    val DockTileIcon = Color(0xFFE6E9F0)
+    val DockSheet = Color(0xFF1F2432)        // folha da doca, cantos arredondados em cima
+    val DockDisabled = Color(0xFF4A5164)
     val BadgeNew = Color(0xFFFFD600)
     val Fab = Color(0xFF1E2130)
     val FabShadow = Color(0x73000000)          // Colors.black45

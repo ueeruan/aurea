@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela Exportar (refeita 2026-10-01): qualidade, avancado, render com animador. Chaves exp2_*. -->
+<resources>
+    <string name="exp2_quality_low">कम</string>
+    <string name="exp2_quality_normal">सामान्य</string>
+    <string name="exp2_quality_high">उच्च</string>
+    <string name="exp2_estimated_line">अनुमानित आकार ≈ %1$s (%2$s Mbps)</string>
+    <string name="exp2_format_note">MP4 हर डिवाइस, प्लेयर और सोशल नेटवर्क पर चलता है।</string>
+    <string name="exp2_advanced">उन्नत</string>
+    <string name="exp2_codec">कोडेक</string>
+    <string name="exp2_bitrate">बिटरेट (Mbps)</string>
+    <string name="exp2_bitrate_auto">ऑटो</string>
+    <string name="exp2_range">हिस्सा</string>
+    <string name="exp2_rendering">आपका वीडियो रेंडर हो रहा है</string>
+    <string name="exp2_eta">लगभग %1$s बाकी</string>
+    <string name="exp2_animator_a11y">पिक्सेल-आर्ट एनिमेटर आपके वीडियो के फ़्रेम बना रहा है</string>
+    <string name="exp2_summary">सारांश</string>
+    <string name="exp2_fun_1">पिक्सेल सीधे किए जा रहे हैं…</string>
+    <string name="exp2_fun_2">फ़्रेम को नाचना सिखा रहे हैं…</string>
+    <string name="exp2_fun_3">GPU के लिए कॉफ़ी बना रहे हैं…</string>
+    <string name="exp2_fun_4">हर कीफ़्रेम चमका रहे हैं…</string>
+    <string name="exp2_fun_5">बस थोड़ा और, धैर्य रखें…</string>
+    <string name="exp2_fun_6">फ़्रेम दर फ़्रेम बना रहे हैं…</string>
+    <string name="exp2_fun_7">रंग ठीक कर रहे हैं…</string>
+    <string name="exp2_fun_8">क्लैपरबोर्ड तैयार कर रहे हैं…</string>
+    <string name="exp2_fun_9">आवाज़ को प्यार से मिला रहे हैं…</string>
+    <string name="exp2_fun_10">उंगलियों पर फ़्रेम गिन रहे हैं…</string>
+    <string name="exp2_frames">फ़्रेम %1$s / %2$s · %3$s fps</string>
+    <!-- Export como imagem (PNG, sequência .zip, GIF) - 2026-10-02 -->
+    <string name="exp2_format_video">वीडियो (MP4)</string>
+    <string name="exp2_format_frame">मौजूदा फ़्रेम (PNG)</string>
+    <string name="exp2_format_sequence">PNG सीक्वेंस (.zip)</string>
+    <string name="exp2_format_gif">GIF</string>
+    <string name="exp2_format_note_frame">प्लेहेड वाला फ़्रेम, PNG में। पारदर्शी बैकग्राउंड हो तो इमेज भी पारदर्शी रहेगी।</string>
+    <string name="exp2_format_note_sequence">हिस्से के हर फ़्रेम की एक PNG, सब एक .zip फ़ाइल में।</string>
+    <string name="exp2_format_note_gif">लगातार दोहराता है, हर फ़्रेम में 256 रंग तक। छोटे हिस्सों के लिए सबसे अच्छा।</string>
+    <string name="exp2_resolution_original">मूल</string>
+    <string name="exp2_gif_width">GIF की चौड़ाई</string>
+    <string name="exp2_estimated_size">अनुमानित साइज़ ≈ %1$s</string>
+    <string name="exp2_frames_count">%1$d फ़्रेम</string>
+    <string name="exp2_rendering_frame">आपकी इमेज बन रही है</string>
+    <string name="exp2_rendering_sequence">इमेज सीक्वेंस बन रहा है</string>
+    <string name="exp2_rendering_gif">आपका GIF बन रहा है</string>
+    <string name="exp2_done_frame">इमेज तैयार है</string>
+    <string name="exp2_done_sequence">सीक्वेंस तैयार है</string>
+    <string name="exp2_done_gif">GIF तैयार है</string>
+    <string name="exp2_saved_pictures">Pictures/Aurea में सेव किया गया</string>
+    <string name="exp2_saved_downloads">Downloads/Aurea में सेव किया गया</string>
+    <string name="exp2_saved_files">Files ऐप में, Aurea फ़ोल्डर में सेव किया गया</string>
+    <string name="exp2_share_file">शेयर करें</string>
+    <string name="exp2_too_long">इस फ़ॉर्मेट के लिए हिस्सा बहुत लंबा है: कम फ़्रेम प्रति सेकंड या छोटा हिस्सा चुनें।</string>
+</resources>

@@ -348,6 +348,13 @@ void Composition::shift_from(FrameIndex from, i64 delta, LayerId except) noexcep
     touch();
 }
 
+u32 Composition::new_track_id() noexcept {
+    layers_.for_each([&](LayerId, const Layer& other) {
+        if (other.trackId >= nextTrackId_) nextTrackId_ = other.trackId + 1;
+    });
+    return nextTrackId_++;
+}
+
 u32 Composition::track_of(LayerId id) const noexcept {
     const Layer* l = layer(id);
     return l ? l->trackId : kInvalidIndex;

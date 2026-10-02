@@ -122,8 +122,14 @@ class AureaEngine private constructor() {
         @JvmStatic external fun nativeCreate(): Long
         /** Shared limits for a proportional 2D/3D pinch; no render/model lock. */
         @JvmStatic external fun clampPinchFactor(factor: Float, x: Float, y: Float, z: Float, threeD: Boolean): Float
+        /** Pinça 3D: limite com a regra de profundidade do motor (Z de conteúdo acompanha X). */
+        @JvmStatic external fun clampPinchFactor3D(kind: Int, factor: Float, x: Float, y: Float, z: Float): Float
+        /** Escala 3D de gesto já no formato gravado; [axis] 0..2 eixo, 3 uniforme, 4 ajustar (GestureMath.hpp). */
+        @JvmStatic external fun gestureScale3D(kind: Int, x: Float, y: Float, z: Float, axis: Int, factor: Float): FloatArray
         @JvmStatic external fun previewGestureValue(basis: FloatArray, dx: Float, dy: Float, rotate: Boolean): FloatArray
         @JvmStatic external fun nativeDestroy(handle: Long)
+        /** Taxa de vídeo (bps) que o export usaria: a regra do motor (BitratePolicy). `quality` 0/1/2. */
+        @JvmStatic external fun nativeExportBitrateBps(width: Int, height: Int, fps: Double, codec: Int, quality: Int, customMbps: Int): Long
     }
 
     /** Ponteiro para o contexto nativo. 0 = destruído. */
@@ -762,6 +768,12 @@ class AureaEngine private constructor() {
     fun layerMagneticTrack(layer: Long): Boolean = nativeLayerMagneticTrack(nativeHandle, layer)
     /** Arrasta o trecho para outro ponto da mesma linha, com reordenação. */
     fun reorderClip(layer: Long, targetFrame: Long): Boolean = nativeReorderClip(nativeHandle, layer, targetFrame)
+    /**
+     * Arrasto vertical de UM trecho (só ele anda). [mode] 0 = fileira própria logo
+     * acima da fileira de [anchor] (0 = no fundo); 1 = entrar na linha de [anchor]
+     * se couber no tempo (senão fileira própria ali). Um passo de desfazer.
+     */
+    fun moveLayerToRow(layer: Long, anchor: Long, mode: Int): Boolean = nativeMoveLayerToRow(nativeHandle, layer, anchor, mode)
 
     /** Liga/desliga a marca no frame. true = ficou marcada. */
     fun toggleMarker(frame: Long): Boolean = nativeToggleMarker(nativeHandle, frame)
@@ -784,6 +796,8 @@ class AureaEngine private constructor() {
     private external fun nativeSetRawPlayback(handle: Long, enabled: Boolean): Boolean
     fun setSceneEditor(enabled: Boolean, yaw: Float, pitch: Float, distance: Float) = nativeSetSceneEditor(nativeHandle, enabled, yaw, pitch, distance)
     fun sceneGuides(output: FloatArray): Int = nativeSceneGuides(nativeHandle, output)
+    /** Cena 3D: camada 3D sob o ponto (px da composição) pelo corpo real; 0 = nada. */
+    fun scenePick(x: Float, y: Float, radius: Float): Long = nativeScenePick(nativeHandle, x, y, radius)
     fun layoutTransform(layer: Long, property: Int, value: Float): Boolean = nativeLayoutTransform(nativeHandle, layer, property, value)
     fun addLight(kind: Int): Long = nativeAddLight(nativeHandle, kind)
     fun lightInfo(layer: Long): FloatArray? = FloatArray(11).takeIf { nativeLightInfo(nativeHandle, layer, it) }
@@ -835,10 +849,24 @@ class AureaEngine private constructor() {
      * `fps` 0 = o da composição, `codec` 0 = H.264 / 1 = HEVC, `bitrateMbps` 0 =
      * automático. Devolve o código de erro do motor (0 = começou).
      */
-    fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int = 0, trimToContent: Boolean = false): Int =
-        nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent)
+    fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int = 0, trimToContent: Boolean = false,
+                    quality: Int = 1, rateMode: Int = 1): Int =
+        nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent, quality, rateMode)
 
     fun exportDuration(trimToContent: Boolean = true): Long = nativeExportDuration(nativeHandle, trimToContent)
+
+    /**
+     * Export como imagem (motor: export/ImageEncode.hpp). `format` 0 = quadro do
+     * playhead em PNG, 1 = sequência PNG num .zip, 2 = GIF. `shortSide` 0 = a
+     * resolução da composição; `maxWidth` = largura máxima do GIF; `fps` 0 =
+     * padrão do formato. Progresso e cancelamento são os do vídeo.
+     */
+    fun startImageExport(outputPath: String, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): Int =
+        nativeStartImageExport(nativeHandle, outputPath, format, shortSide, maxWidth, fps, trimToContent)
+
+    /** [largura, altura, quadros, alfa, bytes estimados, fps × 1000] pela regra do motor; nulo sem composição. */
+    fun imageExportPlan(format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): LongArray? =
+        nativeImageExportPlan(nativeHandle, format, shortSide, maxWidth, fps, trimToContent)
     fun cancelExport(): Int = nativeCancelExport(nativeHandle)
 
     /**
@@ -925,6 +953,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddShape(handle: Long, preset: Int): Long
     private external fun nativeSetSceneEditor(handle: Long, enabled: Boolean, yaw: Float, pitch: Float, distance: Float)
     private external fun nativeSceneGuides(handle: Long, output: FloatArray): Int
+    private external fun nativeScenePick(handle: Long, x: Float, y: Float, radius: Float): Long
     private external fun nativeLayoutTransform(handle: Long, layer: Long, property: Int, value: Float): Boolean
     private external fun nativeAddLight(handle: Long, kind: Int): Long
     private external fun nativeLightInfo(handle: Long, layer: Long, output: FloatArray): Boolean
@@ -1125,6 +1154,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetLayerMagneticTrack(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeLayerMagneticTrack(handle: Long, layer: Long): Boolean
     private external fun nativeReorderClip(handle: Long, layer: Long, targetFrame: Long): Boolean
+    private external fun nativeMoveLayerToRow(handle: Long, layer: Long, anchor: Long, mode: Int): Boolean
     private external fun nativeMoveMarker(handle: Long, from: Long, to: Long): Boolean
     private external fun nativeEditMarker(handle: Long, from: Long, to: Long, color: Int, label: ByteArray): Boolean
     private external fun nativeDeleteMarker(handle: Long, frame: Long): Boolean
@@ -1147,9 +1177,11 @@ class AureaEngine private constructor() {
     private external fun nativeLoadNotice(handle: Long): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int
-    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean): Int
+    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int): Int
     private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
     private external fun nativeCancelExport(handle: Long): Int
+    private external fun nativeStartImageExport(handle: Long, outputPath: String, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): Int
+    private external fun nativeImageExportPlan(handle: Long, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): LongArray?
     private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>): Long
     private external fun nativeImportModelProgress(handle: Long): Int
     private external fun nativeModelMissingTextures(handle: Long, layer: Long): String

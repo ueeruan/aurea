@@ -417,13 +417,17 @@ fun PropertyLabelChip(
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
+        // Palavra longa ("Profundidade") encolhe até caber em vez de virar
+        // "Profundida…" (até 70% do tamanho; depois disso, reticências).
+        var shrink by remember(label) { mutableFloatStateOf(1f) }
         Text(
             label,
             maxLines = ParamRowMath.labelMaxLines(label),
             overflow = TextOverflow.Ellipsis,
+            onTextLayout = { if (it.hasVisualOverflow && shrink > 0.72f) shrink -= 0.06f },
             style = AureaType.Base.merge(
                 TextStyle(
-                    fontSize = ParamRowMath.labelFontSp(label).sp,
+                    fontSize = (ParamRowMath.labelFontSp(label) * shrink).sp,
                     lineHeight = 1.1.em,
                     fontWeight = if (selected) FontWeight.W700 else FontWeight.W400,
                     textAlign = TextAlign.Center,

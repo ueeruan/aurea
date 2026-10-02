@@ -733,6 +733,89 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         ),
     )
     put(
+        "aurea.time.motion_detect",
+        EffectHuman(
+            name = R.string.fx_name_time_motion_detect,
+            keywords = "motion detect detectar movimento diferenca quadro anterior mudou mexeu",
+            principal = listOf(0, 1, 2, 3, 4, 5),
+            params = mapOf(
+                0 to ParamHuman(label = R.string.core2_fx_motion_delay, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_brilho, decimals = 2),
+                2 to ParamHuman(label = R.string.core2_fx_offset_darks, decimals = 2),
+                3 to ParamHuman(label = R.string.fx_saturacao, decimals = 2),
+                4 to ParamHuman(label = R.string.core2_fx_motion_mode),
+                5 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.stylize.crt_emulator",
+        EffectHuman(
+            name = R.string.fx_name_crt_emulator,
+            keywords = "crt emulator emulador tv tubo televisao retro scanline varredura fosforo curvatura tela antiga",
+            principal = listOf(0, 1, 3, 4, 8, 11, 16),
+            params = mapOf(
+                0 to ParamHuman(label = R.string.fx3_curvatura, decimals = 0),
+                1 to ParamHuman(label = R.string.fx3_linhas_intensidade, decimals = 0),
+                2 to ParamHuman(label = R.string.fx3_linhas_densidade, decimals = 0),
+                3 to ParamHuman(label = R.string.fx3_mascara),
+                4 to ParamHuman(label = R.string.fx3_mascara_intensidade, decimals = 0),
+                5 to ParamHuman(label = R.string.fx3_mascara_tamanho, suffix = "px", decimals = 1),
+                6 to ParamHuman(label = R.string.fx_vinheta, decimals = 0),
+                7 to ParamHuman(label = R.string.fx3_convergencia, suffix = "px", decimals = 1),
+                8 to ParamHuman(label = R.string.fx3_brilho_bloom, decimals = 0),
+                9 to ParamHuman(label = R.string.fx3_raio_brilho, suffix = "px", decimals = 1),
+                10 to ParamHuman(label = R.string.fx3_cintilacao, decimals = 0),
+                11 to ParamHuman(label = R.string.fx3_faixa_rolando, decimals = 0),
+                12 to ParamHuman(label = R.string.fx3_velocidade_faixa, decimals = 2),
+                13 to ParamHuman(label = R.string.fx_ruido, decimals = 0),
+                14 to ParamHuman(label = R.string.fx3_brilho_geral, decimals = 0),
+                15 to ParamHuman(label = R.string.fx_contraste, decimals = 0),
+                16 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.glitch.dissolve_shake",
+        EffectHuman(
+            name = R.string.fx_name_dissolve_shake,
+            keywords = "dissolve shake tremor dissolvente tremer quebrar fragmentos glitch desintegrar ruido",
+            principal = listOf(0, 1, 2, 3, 4, 10),
+            params = mapOf(
+                0 to ParamHuman(label = R.string.fx_amplitude, suffix = "px", decimals = 0),
+                1 to ParamHuman(label = R.string.fx_frequencia, suffix = "Hz", decimals = 1),
+                2 to ParamHuman(label = R.string.fx3_dissolucao, decimals = 0),
+                3 to ParamHuman(label = R.string.fx3_tamanho_fragmento, suffix = "px", decimals = 0),
+                4 to ParamHuman(label = R.string.fx_dispersao, suffix = "px", decimals = 0),
+                5 to ParamHuman(label = R.string.fx_aleatoriedade, decimals = 0),
+                6 to ParamHuman(label = R.string.fx3_transparencia_fragmentos, decimals = 0),
+                7 to ParamHuman(label = R.string.fx3_velocidade_evolucao, decimals = 1),
+                8 to ParamHuman(label = R.string.fx3_eixos),
+                9 to ParamHuman(label = R.string.fx_semente, decimals = 0),
+                10 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.distort.displacement_map",
+        EffectHuman(
+            name = R.string.fx_name_displacement_map,
+            keywords = "displacement map mapa de deslocamento deslocar camada mapa distorcer canal",
+            principal = listOf(0, 1, 2, 3, 4, 8),
+            params = mapOf(
+                0 to ParamHuman(label = R.string.fx3_camada_mapa),
+                1 to ParamHuman(label = R.string.fx3_canal_horizontal),
+                2 to ParamHuman(label = R.string.fx3_canal_vertical),
+                3 to ParamHuman(label = R.string.fx3_desloc_h_max, suffix = "px", decimals = 1),
+                4 to ParamHuman(label = R.string.fx3_desloc_v_max, suffix = "px", decimals = 1),
+                5 to ParamHuman(label = R.string.fx3_comportamento_mapa),
+                6 to ParamHuman(label = R.string.fx_bordas),
+                7 to ParamHuman(label = R.string.fx3_expandir_saida),
+                8 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+            ),
+        ),
+    )
+    put(
         "aurea.time.remap",
         EffectHuman(
             name = R.string.fx_name_time_remap,

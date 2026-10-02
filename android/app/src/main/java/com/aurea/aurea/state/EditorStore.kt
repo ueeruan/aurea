@@ -1262,6 +1262,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 autosaveRetryAfterNs = 0L
                 unsavedSinceNs = System.nanoTime()
                 homeCardStale = true   // o autosave não refaz capa/sidecar; sair do editor refaz
+                // Projeto novo ainda sem ficha: o app morto antes de sair do editor
+                // deixava o cartão da Home sem medida nem capa ("16:9 · 30 fps").
+                if (!File(path + META_SUFFIX).exists()) {
+                    withContext(Dispatchers.IO) { writeHomeCard(path, withThumbnail = false) }
+                    homeCardStale = true
+                }
             }
             lastAutosaveError = code
         }
@@ -2262,6 +2268,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         selection = emptySet()
         engine.clearSelection()
         detail = null
+        gizmo = null   // sem isso as setas do objeto solto ficavam na Cena 3D
         effects = emptyList()
         effectParams = emptyMap()
     }
@@ -2341,6 +2348,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun reorderClip(layer: Long, targetFrame: Long): Boolean {
         val ok = engine.reorderClip(layer, targetFrame)
+        if (ok) refreshNow()
+        return ok
+    }
+
+    /**
+     * Arrasto vertical de UM trecho na timeline (como no Alight Motion: só ele
+     * anda, nunca a linha inteira). [mode] 0 = fileira própria logo acima da
+     * fileira de [anchor] (0 = no fundo); 1 = entrar na linha de [anchor] se
+     * couber. Um passo de desfazer; false = o motor recusou (nada mudou).
+     */
+    fun moveLayerToRow(layer: Long, anchor: Long, mode: Int): Boolean {
+        val ok = engine.moveLayerToRow(layer, anchor, mode)
         if (ok) refreshNow()
         return ok
     }
@@ -3211,25 +3230,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun resetSceneView() = updateSceneView(-30f, 20f, 3f)
 
     /**
-     * Objeto 3D sob o dedo (px da composição): o corpo (cantos vistos pela
-     * câmera de navegação) ou, sem corpo (modelo, câmera, luz, nulo), a
-     * origem a até [radius]. O de cima ganha no corpo; na origem, o mais perto.
+     * Objeto 3D sob o dedo (px da composição), decidido pelo motor
+     * (`Engine::scene_pick`): o raio da câmera de navegação contra o corpo real
+     * — plano do texto/forma, triângulos do texto 3D/forma 3D/modelo — em
+     * qualquer Z e órbita; ganha o mais perto. Sem corpo ali (câmera, luz,
+     * nulo), a origem mais perto até [radius].
      */
-    fun scenePick(cx: Float, cy: Float, radius: Float): Long? {
-        val t = playhead
-        var best: Long? = null
-        var bestDistance = radius
-        val g = FloatArray(8)
-        for (row in layers) {
-            if (!row.isThreeD || !row.visible || row.locked || !com.aurea.aurea.editor.LayerGeometry.activeAt(row, t)) continue
-            val d = detailOf(row.id)
-            if (d != null && com.aurea.aurea.editor.LayerGeometry.contains(d, cx, cy, 0f)) return row.id
-            if (!engine.queryGizmo(row.id, GIZMO_LENGTH, g)) continue
-            val dist = kotlin.math.hypot(g[0] - cx, g[1] - cy)
-            if (dist < bestDistance) { bestDistance = dist; best = row.id }
-        }
-        return best
-    }
+    fun scenePick(cx: Float, cy: Float, radius: Float): Long? =
+        engine.scenePick(cx, cy, radius).takeIf { it != 0L }
 
     /**
      * Arrasto livre do objeto 3D com o dedo: anda no plano dos dois eixos do

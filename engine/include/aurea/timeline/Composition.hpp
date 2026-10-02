@@ -247,8 +247,14 @@ public:
     /// depois (menos `except`). Não toca em marcas nem em outras linhas.
     void shift_track(FrameIndex from, i64 delta, u32 track, LayerId except = LayerId{}) noexcept;
 
-    /// A linha de um trecho: o `zOrder` dele. `kInvalidIndex` se ele não existe.
+    /// A linha de um trecho (`Layer::trackId`). `kInvalidIndex` se ele não existe.
     [[nodiscard]] u32 track_of(LayerId id) const noexcept;
+
+    /// Um número de LINHA que nenhuma camada desta composição usa. Quem traz
+    /// camadas de outra composição (colar, desagrupar, tirar do grupo) troca a
+    /// linha delas por uma destas — senão o número de lá cairia numa linha que
+    /// já existe aqui e camadas sem relação passariam a andar juntas.
+    [[nodiscard]] u32 new_track_id() noexcept;
 
     /// Fecha os buracos DENTRO DE UMA LINHA em [from, to). Os vizinhos de
     /// faixa andam para trás; o resto da composição não. Devolve os frames

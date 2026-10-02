@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Doca/menus da camada (limpeza 2026-10-01). Chaves dock2_*. -->
+<resources>
+    <string name="dock2_tracking_tools">Alat pelacakan</string>
+    <string name="dock2_tracking_tools_detail">Titik, planar, sudut, dan stabilisator</string>
+    <string name="dock2_media_only">Kecepatan dan suara hanya untuk video dan audio</string>
+</resources>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel de efeitos: catalogo "Adicionar efeito", pilha compacta e ferramentas-efeito. -->
+<resources>
+    <string name="fxui_featured">Unggulan</string>
+    <string name="fxui_categories">Kategori</string>
+    <string name="fxui_group_color_light">Warna dan cahaya</string>
+    <string name="fxui_group_blur">Buram dan tajam</string>
+    <string name="fxui_group_distort">Distorsi</string>
+    <string name="fxui_group_motion">Gerak dan transformasi</string>
+    <string name="fxui_group_stylize">Gaya</string>
+    <string name="fxui_group_glitch">Glitch</string>
+    <string name="fxui_group_draw_edge">Gambar dan tepi</string>
+    <string name="fxui_group_procedural">Prosedural</string>
+    <string name="fxui_group_matte">Matte, masker, dan kunci</string>
+    <string name="fxui_group_time">Waktu dan transisi</string>
+    <string name="fxui_group_text">Teks</string>
+    <string name="fxui_group_3d">3D</string>
+    <string name="fxui_group_audio">Audio</string>
+    <string name="fxui_group_utility">Utilitas dan ekspresi</string>
+    <string name="fxui_group_other">Lainnya</string>
+    <string name="fxui_tool_captions">Teks otomatis</string>
+    <string name="fxui_tool_camera_track">Pelacakan kamera</string>
+    <string name="fxui_tool_mask">Masker</string>
+    <string name="fxui_tool_captions_desc">Menyalin ucapan layer dan membuat teks sesuai waktunya.</string>
+    <string name="fxui_tool_camera_track_desc">Menganalisis gerakan kamera video untuk menempatkan objek 3D di adegan.</string>
+    <string name="fxui_tool_mask_desc">Menggambar bentuk yang menampilkan atau menyembunyikan bagian layer.</string>
+    <string name="fxui_tool_badge">Alat</string>
+    <string name="fxui_tool_masks_n">Masker: %1$d</string>
+    <string name="fxui_tool_captions_n">Teks: %1$d</string>
+    <string name="fxui_tool_camera_ready">Kamera dianalisis</string>
+    <string name="fxui_tool_remove_masks_q">Hapus semua masker dari layer ini?</string>
+    <string name="fxui_tool_remove_captions_q">Hapus teks yang dibuat dari layer ini?</string>
+    <string name="fxui_a11y_expand">Tampilkan pengaturan %1$s</string>
+    <string name="fxui_a11y_collapse">Sembunyikan pengaturan %1$s</string>
+    <string name="fxui_a11y_enable">Aktifkan %1$s</string>
+    <string name="fxui_a11y_disable">Nonaktifkan %1$s</string>
+    <string name="fxui_a11y_drag">Seret %1$s untuk mengurutkan</string>
+    <string name="fxui_a11y_remove">Hapus %1$s</string>
+    <string name="fxui_a11y_open">Buka %1$s</string>
+    <string name="fxui_a11y_category">Kategori %1$s</string>
+    <string name="fxui_back_categories">Kembali ke kategori</string>
+    <string name="fxui_search_effects">Cari efek</string>
+    <string name="fxui_effect_off">Nonaktif</string>
+</resources>

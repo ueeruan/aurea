@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela Exportar (refeita 2026-10-01): qualidade, avancado, render com animador. Chaves exp2_*. -->
+<resources>
+    <string name="exp2_quality_low">Rendah</string>
+    <string name="exp2_quality_normal">Normal</string>
+    <string name="exp2_quality_high">Tinggi</string>
+    <string name="exp2_estimated_line">Perkiraan ukuran ≈ %1$s (%2$s Mbps)</string>
+    <string name="exp2_format_note">MP4 bisa diputar di perangkat, pemutar, dan media sosial apa pun.</string>
+    <string name="exp2_advanced">Lanjutan</string>
+    <string name="exp2_codec">Kodek</string>
+    <string name="exp2_bitrate">Bitrate (Mbps)</string>
+    <string name="exp2_bitrate_auto">Otomatis</string>
+    <string name="exp2_range">Rentang</string>
+    <string name="exp2_rendering">Merender videomu</string>
+    <string name="exp2_eta">Sekitar %1$s lagi</string>
+    <string name="exp2_animator_a11y">Animator pixel art sedang menggambar frame videomu</string>
+    <string name="exp2_summary">Ringkasan</string>
+    <string name="exp2_fun_1">Merapikan piksel…</string>
+    <string name="exp2_fun_2">Mengajari frame berdansa…</string>
+    <string name="exp2_fun_3">Menyeduh kopi untuk GPU…</string>
+    <string name="exp2_fun_4">Memoles setiap keyframe…</string>
+    <string name="exp2_fun_5">Hampir selesai, tahan dulu…</string>
+    <string name="exp2_fun_6">Menggambar frame demi frame…</string>
+    <string name="exp2_fun_7">Menyetel warna…</string>
+    <string name="exp2_fun_8">Menyiapkan papan klep…</string>
+    <string name="exp2_fun_9">Mencampur suara dengan sepenuh hati…</string>
+    <string name="exp2_fun_10">Menghitung frame pakai jari…</string>
+    <string name="exp2_frames">Frame %1$s dari %2$s · %3$s fps</string>
+    <!-- Export como imagem (PNG, sequência .zip, GIF) - 2026-10-02 -->
+    <string name="exp2_format_video">Video (MP4)</string>
+    <string name="exp2_format_frame">Frame saat ini (PNG)</string>
+    <string name="exp2_format_sequence">Urutan PNG (.zip)</string>
+    <string name="exp2_format_gif">GIF</string>
+    <string name="exp2_format_note_frame">Frame di bawah playhead, dalam PNG. Dengan latar transparan, gambarnya tetap transparan.</string>
+    <string name="exp2_format_note_sequence">Satu PNG per frame dari rentang, semuanya dalam satu file .zip.</string>
+    <string name="exp2_format_note_gif">Berulang terus, hingga 256 warna per frame. Cocok untuk klip pendek.</string>
+    <string name="exp2_resolution_original">Asli</string>
+    <string name="exp2_gif_width">Lebar GIF</string>
+    <string name="exp2_estimated_size">Perkiraan ukuran ≈ %1$s</string>
+    <string name="exp2_frames_count">%1$d frame</string>
+    <string name="exp2_rendering_frame">Membuat gambar Anda</string>
+    <string name="exp2_rendering_sequence">Membuat urutan gambar</string>
+    <string name="exp2_rendering_gif">Membuat GIF Anda</string>
+    <string name="exp2_done_frame">Gambar siap</string>
+    <string name="exp2_done_sequence">Urutan siap</string>
+    <string name="exp2_done_gif">GIF siap</string>
+    <string name="exp2_saved_pictures">Disimpan di Pictures/Aurea</string>
+    <string name="exp2_saved_downloads">Disimpan di Download/Aurea</string>
+    <string name="exp2_saved_files">Disimpan di app File, di folder Aurea</string>
+    <string name="exp2_share_file">Bagikan</string>
+    <string name="exp2_too_long">Rentang terlalu panjang untuk format ini: pilih lebih sedikit frame per detik atau rentang yang lebih pendek.</string>
+</resources>

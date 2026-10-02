@@ -322,6 +322,99 @@ internal object RowOrder {
 }
 
 /**
+ * Arrasto VERTICAL de UM trecho (como no Alight Motion: só ele anda, nunca a
+ * linha inteira). Diz onde o trecho cai com o dedo em [y] (conteúdo: a partir
+ * do topo da 1ª fileira, com a rolagem): ENTRE duas fileiras (fileira própria
+ * ali — o traço de inserção) ou DENTRO de uma linha magnética/compartilhada
+ * (faixa do meio da fileira, só se o trecho couber no tempo sem sobrepor).
+ * O motor (`move_layer_to_row`) decide a pilha; aqui sai só o pedido dele:
+ * âncora + modo (0 = acima da fileira da âncora, âncora 0 = no fundo; 1 = entrar
+ * na linha da âncora). O iOS tem o mesmo cálculo em `TimelineRowDrop`.
+ */
+internal object RowDrop {
+    const val NONE = 0
+    const val INSERT = 1
+    const val JOIN = 2
+
+    /** [lineY] = y (conteúdo) do traço de inserção; [row] = fileira acesa ao entrar numa linha. */
+    data class Target(val kind: Int, val anchor: Long, val mode: Int, val lineY: Float, val row: Int) {
+        companion object { val NONE = Target(RowDrop.NONE, 0L, 0, Float.NaN, -1) }
+    }
+
+    /** Faixa do meio da fileira que conta como "dentro da linha" (o resto é entre fileiras). */
+    private const val JOIN_EDGE = 0.25f
+
+    fun target(rows: List<RowModel>, tops: FloatArray, y: Float, moving: RowModel, source: Int): Target {
+        val n = rows.size
+        if (n == 0 || tops.size != n + 1 || source !in 0 until n || !y.isFinite()) return Target.NONE
+        val keys = timelineGroupKeys(rows)
+        val t = when {
+            y < tops[0] -> 0
+            y >= tops[n] -> n - 1
+            else -> {
+                var i = 0
+                while (i < n - 1 && y >= tops[i + 1]) i++
+                i
+            }
+        }
+        var gs = t
+        while (gs > 0 && keys[gs - 1] == keys[t]) gs--
+        var ge = t + 1
+        while (ge < n && keys[ge] == keys[t]) ge++
+        var ss = source
+        while (ss > 0 && keys[ss - 1] == keys[source]) ss--
+        var se = source + 1
+        while (se < n && keys[se] == keys[source]) se++
+        val line = moving.line
+        // Quem mais mora na linha do trecho (em qualquer fileira dela).
+        var sharesLine = false
+        if (line != 0) for (r in rows) if (r.track == null && r.line == line) for (s in r.segments) if (s.id != moving.id) sharesLine = true
+
+        // DENTRO de uma linha: faixa do meio de uma fileira de camada cuja linha
+        // é magnética ou dividida, que não seja a do próprio trecho.
+        val row = rows[t]
+        val h = tops[t + 1] - tops[t]
+        val frac = if (h > 0f) (y - tops[t]) / h else 0.5f
+        val middle = frac >= JOIN_EDGE && frac <= 1f - JOIN_EDGE
+        // No meio da própria fileira (ou de outra fileira da mesma linha): fica onde está.
+        if (middle && (t == source || (line != 0 && row.track == null && row.line == line))) return Target.NONE
+        if (row.track == null && row.line != 0 && row.line != line && middle) {
+            var magnetic = false
+            var count = 0
+            var fits = true
+            var anchor = 0L
+            for (r in rows) {
+                if (r.track != null || r.line != row.line) continue
+                for (s in r.segments) {
+                    if (s.id == moving.id) continue
+                    count++
+                    if (anchor == 0L) anchor = s.id
+                    if (s.magnetic) magnetic = true
+                    if (s.start < moving.end && moving.start < s.end) fits = false
+                }
+            }
+            if ((magnetic || count >= 2) && fits && anchor != 0L) return Target(JOIN, anchor, 1, Float.NaN, t)
+        }
+        // ENTRE fileiras: metade de cima do grupo = acima dele; de baixo = abaixo.
+        val mid = (tops[gs] + tops[ge]) / 2f
+        val gap = if (y < mid) gs else ge
+        // Soltar colado no próprio grupo, sozinho na linha: nada muda.
+        if (!sharesLine && (gap == ss || gap == se)) return Target.NONE
+        var anchor = 0L
+        if (gap < n) {
+            var e = gap + 1
+            while (e < n && keys[e] == keys[gap]) e++
+            loop@ for (k in gap until e) {
+                if (rows[k].track != null) continue
+                for (s in rows[k].segments) if (s.id != moving.id) { anchor = s.id; break@loop }
+            }
+            if (anchor == 0L) return Target.NONE
+        }
+        return Target(INSERT, anchor, 0, tops[gap], -1)
+    }
+}
+
+/**
  * Uma trilha real do motor, uma seção (property -1) sem keyframes sintéticos,
  * ou — com [group] — a TRILHA DE GRUPO de uma propriedade de vários eixos
  * (Posição X/Y/Z, Escala, Rotação, Âncora...): property/param são os do 1º

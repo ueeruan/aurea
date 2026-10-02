@@ -798,7 +798,11 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // + o Particular (as partículas do app antigo) (1).
     // + o Shape 3D Layout (o layout por parte das formas 3D) (1).
     // + Text Transform e Oscillate por ciclos (2).
-    AUREA_CHECK_EQ(before, static_cast<u32>(121));
+    // + Detectar movimento (1).
+    // + o que entrou junto no mesmo lote (Rotobrush, layout em grade e os
+    //   demais efeitos novos da árvore de trabalho): total medido 130.
+    // + Emulador CRT, Tremor dissolvente e Mapa de deslocamento (3).
+    AUREA_CHECK_EQ(before, static_cast<u32>(133));
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

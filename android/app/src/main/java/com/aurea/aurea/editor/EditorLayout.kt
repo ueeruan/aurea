@@ -45,11 +45,14 @@ internal object EditorLayout {
     private const val HINT_BODY = 30f
     /** A barra fixa de adicionar (sem camada escolhida): 6 + categorias de 64 (ícone 23 + nome 11). */
     const val ADD_BAR = 70f
-    /** Doca da camada, compacta: fileira rápida de ícones e fichas baixas. */
+    /** Doca da camada no jeito do AM: fileira rápida e fichas grandes numa folha arredondada. */
     const val DOCK_QUICK = 44f
-    const val DOCK_TILE = 64f
-    /** Altura inteira da doca: 8 + rápida + 2 × (8 + ficha) + 10 de respiro. */
-    const val DOCK = 8f + DOCK_QUICK + 2f * (8f + DOCK_TILE) + 10f
+    const val DOCK_TILE = 72f
+    /** Altura inteira da doca: 4 + 10 + rápida + 2 × (10 + ficha) + 12 de respiro. */
+    const val DOCK = 14f + DOCK_QUICK + 2f * (10f + DOCK_TILE) + 12f
+
+    /** A doca com [rows] fileiras de fichas (1 ou 2): a altura é a do conteúdo. */
+    fun dock(rows: Int): Float = 14f + DOCK_QUICK + rows.coerceIn(1, 2) * (10f + DOCK_TILE) + 12f
 
     /** Folga do palco em volta do quadro ajustado (as fichas ficam por cima do quadro). */
     const val PREVIEW_FIT_MARGIN = 16f
@@ -65,6 +68,7 @@ internal object EditorLayout {
      * vazias acima e abaixo do quadro roubavam a timeline. Em pé (o quadro já
      * passa da fração) fica como sempre. [preferred] > 0: a altura que a pessoa
      * escolheu arrastando a divisa palco/transporte (vale sobre as duas).
+     * [dockRows]: fileiras de fichas da doca da camada (a doca tem a altura dela).
      */
     fun solve(
         totalHeight: Float,
@@ -73,6 +77,7 @@ internal object EditorLayout {
         width: Float = 0f,
         aspect: Float = 0f,
         preferred: Float = 0f,
+        dockRows: Int = 2,
     ): EditorMetrics {
         if (fullscreen) {
             return EditorMetrics(0f, max(0f, totalHeight - TRANSPORT), 0f, TRANSPORT, 0f, 0f)
@@ -119,11 +124,23 @@ internal object EditorLayout {
             sheet += timeline
             timeline = 0f
         }
+        // Doca de uma fileira: o palco fica onde a de duas o deixaria (trocar de
+        // camada nunca mexe no palco); a sobra vai inteira para a timeline.
+        if (content == SheetContent.Dock && dockRows < 2) {
+            val spare = max(0f, sheet - dock(dockRows))
+            sheet -= spare
+            timeline += spare
+        }
         return EditorMetrics(TOP_BAR, preview, STRIP, TRANSPORT, max(0f, timeline), max(0f, sheet))
     }
 
-    /** Layout largo A.01: largura ≥ 600 em paisagem, ou ≥ 900. */
-    fun isWide(width: Float, height: Float) = (width >= 600f && width > height) || width >= 900f
+    /**
+     * Layout largo A.01: SÓ em paisagem com largura ≥ 600. Tablet EM PÉ usa o
+     * layout do celular (palco, transporte, timeline e doca empilhados): o
+     * "≥ 900 mesmo em pé" mandava tablet grande para o largo, com a coluna da
+     * direita só com a dica — "a UI inteira sumiu" no tablet (par do iOS).
+     */
+    fun isWide(width: Float, height: Float) = width >= 600f && width > height
 
     fun wideTimeline(totalHeight: Float) = ((totalHeight - TOP_BAR - TRANSPORT - STRIP) * 0.34f).coerceIn(88f, 280f)
 

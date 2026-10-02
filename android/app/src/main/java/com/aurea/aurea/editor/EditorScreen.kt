@@ -141,6 +141,11 @@ internal fun openPanel(store: EditorStore, ui: EditorUi, panel: EditorPanel) {
 internal fun openAdd(store: EditorStore, ui: EditorUi, tab: AddTab = AddTab.Shape) {
     if (store.playing) store.pause()
     ui.panel = null
+    // Texto tem uma peça só (legendas viraram efeito): o toque já cria o texto.
+    if (tab == AddTab.Text) {
+        if (store.addText() >= 0) ui.adding = false
+        return
+    }
     ui.addTab = tab
     ui.adding = true
 }
@@ -265,7 +270,8 @@ fun EditorScreen(store: EditorStore) {
                 val wide = !ui.fullscreen && ui.panel != EditorPanel.Curve && EditorLayout.isWide(w, h)
                 val sheetWidth = EditorLayout.wideSheetWidth(w)
                 val aspect = if (store.project.width > 0 && store.project.height > 0) store.project.width.toFloat() / store.project.height else 0f
-                val m = EditorLayout.solve(h, content, ui.fullscreen, w, aspect, previewPreference.floatValue)
+                val m = EditorLayout.solve(h, content, ui.fullscreen, w, aspect, previewPreference.floatValue,
+                    dockRows = if (content == SheetContent.Dock) dockTileRowCount(store) else 2)
                 if (store.sceneEditor) {
                     SceneLayoutWorkspace(store, ui, stage)
                 } else if (wide) {
@@ -308,7 +314,7 @@ fun EditorScreen(store: EditorStore) {
     store.textContentRequest?.let { request ->
         TextContentDialog(request, onSave = { store.commitTextContent(request, it) }, onDismiss = store::dismissTextContentEditor)
     }
-    if (ui.effectsBrowser) EffectsBrowserSheet(store) { ui.effectsBrowser = false }
+    if (ui.effectsBrowser) EffectsBrowserSheet(store, onOpenPanel = { openPanel(store, ui, it) }) { ui.effectsBrowser = false }
     store.expressionTarget?.let { com.aurea.aurea.editor.panels.ExpressionSheet(store, it) }
     if (ui.exporting) ExportScreen(store) { ui.exporting = false }
 }

@@ -63,6 +63,8 @@ internal class TimelineController(
     /** Trilhas de grupo (Posição, Escala...) abertas nos eixos. */
     val openGroups = mutableStateOf<Set<LaneGroupKey>>(emptySet())
     var haptics: HapticFeedback? = null
+    /** Anúncio para o leitor de tela (TalkBack) depois de uma edição feita só com gesto. */
+    var announce: ((String) -> Unit)? = null
 
     /** A fileira tem um trecho com as trilhas abertas? */
     fun isExpanded(r: RowModel): Boolean {
@@ -457,6 +459,8 @@ internal class TimelineController(
         state.guideFrame = Snap.NONE
         state.reorderSource = -1
         state.reorderTarget = -1
+        state.liftId = 0L
+        state.liftKind = RowDrop.NONE
         state.dragKeyLayer = 0L
         state.dragKeyFrame = Snap.NONE
         if (flingJob == null) releaseView()
@@ -691,12 +695,13 @@ internal class TimelineController(
             when (kind) {
                 HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
                 HitKind.HEADER -> if (!time && !state.compact) reorderDrag(hit.lane ?: r, hit.rowIndex, down, grabbed = null) else consumeUntilUp()
-                // Segurar de propósito levanta a camada: claramente na pilha reordena
-                // (a fileira inteira — numa linha compartilhada, a linha toda),
-                // claramente no tempo move o trecho; o resto rola.
+                // Segurar de propósito levanta o TRECHO: claramente na pilha ele sobe
+                // ou desce SOZINHO (como no Alight Motion — a linha não vai junto;
+                // a linha inteira anda pela pílula), claramente no tempo move o
+                // trecho; o resto rola.
                 else -> when {
                     time || state.compact -> longPressMove(r, down)
-                    Press.stackEdit(d.x, d.y) -> reorderDrag(hit.lane ?: r, hit.rowIndex, down, grabbed = r)
+                    Press.stackEdit(d.x, d.y) -> liftDrag(r, hit.rowIndex, down)
                     else -> scroll(down.id, ch.position, tracker)
                 }
             }
@@ -1131,6 +1136,57 @@ internal class TimelineController(
             }
         }
         if (released && commitReorder(rows.value, index, state.reorderTarget)) light()
+    }
+
+    /**
+     * Arrasto vertical de UM trecho (beta: "os textos andam todos juntos"): o
+     * trecho sai da fileira e segue o dedo; o traço mostra entre quais fileiras
+     * ele cai, ou a fileira acende quando ele entra numa linha magnética onde
+     * cabe. Soltar fora da timeline (ou um 2º dedo) cancela. Um passo de desfazer
+     * no motor (`move_layer_to_row`); a linha dele e os vizinhos não andam.
+     */
+    private suspend fun AwaitPointerEventScope.liftDrag(seg: RowModel, index: Int, down: PointerInputChange) {
+        if (seg.locked) {
+            light()
+            store.showToast(AppText.get(store.getApplication<Application>(), R.string.editor_camada_bloqueada_desbloqueie_editar))
+            return consumeUntilUp()
+        }
+        heavy()
+        pauseIfPlaying()
+        if (!isSelected(seg.id)) store.select(seg.id, openOptions = false)
+        val source = rowIndexOf(rows.value, seg.id).takeIf { it >= 0 } ?: index
+        if (source < 0) return consumeUntilUp()
+        state.liftId = seg.id
+        state.liftTop = metrics.rowsTop + rowTop(source) - clampedScroll(rowCount(rows.value))
+        state.liftKind = RowDrop.NONE
+        val grabOffset = down.position.y - state.liftTop
+        var drop = RowDrop.Target.NONE
+        val released = try {
+            dragLoop(down.id, down.position, horizontal = false) { p ->
+                state.liftTop = p.y - grabOffset
+                val list = rows.value
+                val n = list.size
+                val outside = p.x < 0f || p.x > state.width || p.y < 0f || p.y > state.height
+                val next = if (outside) RowDrop.Target.NONE else RowDrop.target(
+                    list, FloatArray(n + 1) { rowTop(it) }, p.y - metrics.rowsTop + clampedScroll(n), seg, source,
+                )
+                if (next != drop) {
+                    if (next.kind != RowDrop.NONE) tick()
+                    drop = next
+                    state.liftKind = next.kind
+                    state.liftLineY = next.lineY
+                    state.liftRow = next.row
+                }
+            }
+        } finally {
+            state.liftId = 0L
+            state.liftKind = RowDrop.NONE
+        }
+        if (released && drop.kind != RowDrop.NONE && store.moveLayerToRow(seg.id, drop.anchor, drop.mode)) {
+            light()
+            announce?.invoke(AppText.get(store.getApplication<Application>(),
+                if (drop.kind == RowDrop.JOIN) R.string.track2_row_joined else R.string.track2_row_moved))
+        }
     }
 
     /**

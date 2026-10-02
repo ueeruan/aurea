@@ -90,10 +90,6 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
         onDismiss()
         block()
     }
-    val lockedMsg = stringResource(R.string.editor_camada_bloqueada_desbloqueie_editar)
-    fun timeAct(block: () -> Unit): () -> Unit = act {
-        if (row.locked) store.showToast(lockedMsg) else block()
-    }
     // "Substituir mídia" abre o seletor SEM fechar a folha (o retorno do
     // seletor precisa deste lançador vivo); o retorno troca e fecha.
     val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
@@ -108,8 +104,9 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
 
     ShellMenuSheet(onDismiss) {
         MenuSection(stringResource(R.string.editor_camada))
-        // Bloqueada não se renomeia: o cadeado fecha a edição inteira.
-        MenuItemRow(CupertinoGlyph.Pencil, stringResource(R.string.editor_renomear), if (row.locked) null else act { ui.sheet = ShellSheet.RenameLayer })
+        // Sem o que já está à vista (nada duas vezes): renomear é o nome no
+        // topo, excluir é a lixeira do topo, aparar/dividir/velocidade/volume
+        // moram na doca, entrar/desagrupar grupo na fileira rápida.
         // O cadeado não fecha a folha: o rótulo troca na hora.
         MenuItemRow(
             if (row.locked) ShellGlyph.LockOpenFill else CupertinoGlyph.LockFill,
@@ -190,6 +187,12 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             )
         }
         MenuItemRow(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar), act { store.duplicateLayers(listOf(id)) })
+        // Puxar para o cabeçote saiu da fileira rápida (que ficou igual à do AM:
+        // aparar início | dividir | aparar fim) e mora aqui.
+        MenuItemRow(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_puxar_cabecote), if (row.locked) null else act {
+            if (store.playing) store.pause()
+            store.moveToPlayhead(id)
+        })
         MenuItemRow(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_camada), act { store.copyLayers(listOf(id)) })
         MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_camada_cabecote), if (store.clipboard and 1 != 0) act { store.pasteLayers() } else null)
         MenuItemRow(CupertinoGlyph.Paintbrush, stringResource(R.string.editor_copiar_estilo), act { store.select(id); store.copyStyle() })
@@ -206,18 +209,9 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
 
         if (visual) {
             MenuSection(stringResource(R.string.editor_grupo))
-            // Alternar grupo (app antigo): agrupa as escolhidas; num grupo, desagrupa.
-            MenuItemRow(
-                ShellGlyph.SquareSplit2x2,
-                stringResource(R.string.la_toggle_group),
-                act { store.toggleGroup(if (id in store.selection) store.selection.toList() else listOf(id)) },
-                detail = stringResource(R.string.la_toggle_group_hint),
-            )
             if (type != LayerType.Group) {
                 MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_converter_grupo), act { store.precompose(listOf(id)) })
             } else {
-                MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_editar_grupo), act { store.openPrecomp(id) })
-                MenuItemRow(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), act { store.ungroupPrecomp(id) })
                 MenuItemRow(
                     CupertinoGlyph.Camera,
                     stringResource(R.string.la_group_camera),
@@ -254,9 +248,6 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
                     detail = stringResource(R.string.editor_som_vira_camada_propria_video_fica),
                 )
             }
-            if (type == LayerType.Audio || type == LayerType.Video) {
-                MenuItemRow(CupertinoGlyph.Speaker2, stringResource(R.string.sh_menu_volume), act { openPanel(store, ui, EditorPanel.Audio) })
-            }
         }
 
         MenuSection(stringResource(R.string.editor_movimento))
@@ -277,25 +268,22 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             )
         }
 
-        MenuSection(stringResource(R.string.editor_tempo))
-        MenuItemRow(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote), if (inside) timeAct { store.trimStart(id, t) } else null)
-        MenuItemRow(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), if (inside) timeAct { store.splitAtPlayhead(listOf(id)) } else null)
-        MenuItemRow(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), if (inside) timeAct { store.trimEnd(id, t) } else null)
         if (type == LayerType.Video || type == LayerType.Audio) {
-            MenuItemRow(CupertinoGlyph.Speedometer, stringResource(R.string.sh_menu_speed_remap), act { openPanel(store, ui, EditorPanel.Speed) })
+            MenuSection(stringResource(R.string.editor_tempo))
             MenuItemRow(CupertinoGlyph.Scissors, "Slip · Roll · Slide", act { openPanel(store, ui, EditorPanel.ClipEdit) })
         }
         if (type == LayerType.Video) {
             MenuItemRow(ShellGlyph.Snow, stringResource(R.string.sh_menu_freeze_frame), if (inside) act { store.freezeFrame(id) } else null)
+            // Rastreio de PONTO e estabilização (o rastreio de câmera virou efeito).
             MenuSection(stringResource(R.string.editor_rastreio))
+            // O painel inteiro (ponto, planar, cantos, estabilizador) sem já pedir o ponto.
+            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.dock2_tracking_tools), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking) },
+                detail = stringResource(R.string.dock2_tracking_tools_detail))
             MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_rastrear_ponto), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking); store.beginPointPick(false) },
                 detail = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras))
             MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_estabilizar_pelo_ponto), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking); store.beginPointPick(true) },
                 detail = stringResource(R.string.editor_move_video_ponto_ficar_parado_tela))
         }
-
-        MenuSection(stringResource(R.string.editor_mais))
-        MenuItemRow(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), act { LayerOps.delete(store, listOf(id)) }, danger = true)
     }
 }
 

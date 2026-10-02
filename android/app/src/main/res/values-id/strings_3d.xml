@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel 3D reorganizado em abas (2026-10-01). Chaves ui3d_*. -->
+<resources>
+    <string name="ui3d_tabs">Grup opsi 3D</string>
+    <string name="ui3d_tab_material">Material</string>
+    <string name="ui3d_tab_shape">Bentuk</string>
+    <string name="ui3d_tab_light">Cahaya &amp; adegan</string>
+    <string name="ui3d_tab_anim">Animasi</string>
+    <string name="ui3d_ready_materials">Material siap pakai</string>
+    <string name="ui3d_finish">Permukaan</string>
+    <string name="ui3d_finish_smooth">Halus</string>
+    <string name="ui3d_finish_brushed">Disikat</string>
+    <string name="ui3d_finish_scratched">Tergores</string>
+    <string name="ui3d_finish_hammered">Ditempa</string>
+    <string name="ui3d_finish_weathered">Logam usang</string>
+    <string name="ui3d_text">Teks</string>
+    <string name="ui3d_extrusion">Ekstrusi</string>
+    <string name="ui3d_depth_hint">100% = tinggi huruf. Untuk menganimasikan kedalaman, beri keyframe pada Skala Z (Transformasi).</string>
+    <string name="ui3d_deform_letters">Ubah bentuk huruf (putar, silinder, pilin)</string>
+    <string name="ui3d_shadows">Bayangan</string>
+    <string name="ui3d_bloom_strength">Kekuatan cahaya</string>
+</resources>

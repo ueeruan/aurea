@@ -1,6 +1,17 @@
-// Element3DPanel.kt: text geometry, material, shadows and both environments.
+// Element3DPanel.kt: o painel 3D em ABAS — Material, Forma, Luz e cena e
+// Animação (texto 3D e forma 3D); modelo importado: Material e Luz e cena;
+// câmera: só a cena. Cada linha de valor é a mesma T3DRow (rótulo, régua,
+// valor, ↺ ao padrão), interruptores são AureaToggle e o raro fica em
+// "Avançado", fechado. Os comandos do motor são os mesmos de antes.
 import SwiftUI
 import UniformTypeIdentifiers
+
+/// As abas do painel 3D (a ordem é a da tela; o rawValue é o mesmo do Android).
+enum Panel3DTab: Int, CaseIterable {
+    case material, shape, light, anim
+    var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "ui3d_tab_light", "ui3d_tab_anim"][rawValue] }
+    var id: String { ["material", "shape", "light", "anim"][rawValue] }
+}
 
 struct Panel3DView: View {
     @EnvironmentObject private var model: AureaModel
@@ -21,43 +32,53 @@ struct Panel3DView: View {
     @State private var closeTyping: DispatchWorkItem?
     @State private var typingActive = false
     @State private var gestureOpen = false
+    @State private var tab: Panel3DTab = .material
+    @State private var materialAdvanced = false
+    @State private var sceneAdvanced = false
     @FocusState private var editingText: Bool
 
     private var layerId: Int64 { model.primarySelection ?? 0 }
     private let presetKeys = ["pn_t3d_preset_chrome", "pn_t3d_preset_gold", "pn_t3d_preset_brushed",
                               "pn_t3d_preset_glossy", "pn_t3d_preset_matte", "pn_t3d_preset_neon", "pn_t3d_preset_cinematic"]
+    /// Cor da amostra de cada material pronto (a mesma ordem do motor).
+    private let presetSwatches: [[Float]] = [[0.95, 0.96, 0.98], [1, 0.77, 0.34], [0.78, 0.79, 0.8], [0.9, 0.1, 0.12],
+                                             [0.85, 0.85, 0.86], [0.1, 1, 0.85], [0.66, 0.68, 0.72]]
+    private let finishKeys = ["ui3d_finish_smooth", "ui3d_finish_brushed", "ui3d_finish_scratched",
+                              "ui3d_finish_hammered", "ui3d_finish_weathered"]
+
+    private var isCamera: Bool { model.selectedLayer?.kind == 8 }
+    private var isShape: Bool { !isCamera && !model.engine.shape3D(layerId).isEmpty }
+    private var isText: Bool { !isCamera && !text3D.isEmpty }
+    private var tabs: [Panel3DTab] {
+        if isCamera { return [.light] }
+        return isText || isShape ? [.material, .shape, .light, .anim] : [.material, .light]
+    }
+    private var currentTab: Panel3DTab { tabs.contains(tab) ? tab : tabs[0] }
 
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t(text3D.isEmpty ? "panel_material_ambiente" : "text_options"), onBack: {
                 finishEditing(); model.panel = .none
             })
+            if tabs.count > 1 { tabBar.padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 4) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if model.selectedLayer?.kind != 8 {
-                    if !text3D.isEmpty { textSection; TextAnimationSection(showAnimatorEffect: false, beforeAnimation: finishEditing) }
-                    // Forma 3D: partes, cor e imagem por parte (Shape3DViews.swift) no lugar do material importado.
-                    let isShape = !model.engine.shape3D(layerId).isEmpty
-                    if isShape {
-                        Shape3DPanelSection(layerId: layerId)
-                        // O mesmo sistema das letras do texto 3D, parte a parte:
-                        // o efeito Shape 3D Layout e a animação por unidade.
-                        shapeLayoutButton
-                        Text3DAnimSection(layerId: layerId, parts: true)
+                    switch currentTab {
+                    case .material:
+                        if isText { textMaterialTab }
+                        else if isShape { Shape3DPanelSection(layerId: layerId, page: .material) }
+                        else { section("panel_material"); importedMaterialSection }
+                    case .shape:
+                        if isText { textShapeTab }
+                        else if isShape { Shape3DPanelSection(layerId: layerId, page: .shape); shapeLayoutButton }
+                    case .light:
+                        lightSceneTab
+                    case .anim:
+                        if isText { TextAnimationSection(showAnimatorEffect: false, beforeAnimation: finishEditing) }
+                        else if isShape { Text3DAnimSection(layerId: layerId, parts: true) }
                     }
-                    if !isShape { section("panel_material") }
-                    if !text3D.isEmpty {
-                        colorRow("panel_cor", key: "color", region: 0, height: 48)
-                        materialSection
-                    } else if !isShape { importedMaterialSection }
-                    lightingSection
-                    gap(16)
-                    }
-                    sceneSettingsSection
-                    environmentSection
-                    if model.selectedLayer?.kind != 8 { objectEnvironmentSection }
                 }
-                .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 24)
+                .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .accessibilityIdentifier("text3d.materialScroll")
@@ -78,63 +99,45 @@ struct Panel3DView: View {
         .onChange(of: model.localPlayhead) { _ in loadMaterials() }
         .onChange(of: layerId) { _ in finishEditing(); editingText = false; load() }
         .onChange(of: editingText) { focused in if !focused && typingActive { finishEditing() } }
+        .onChange(of: tab) { _ in finishEditing() }
         .onDisappear {
             finishEditing()
             model.text3DFontSheet = nil
         }
     }
 
-    private func setScene(_ index: UInt32, _ value: Float) {
-        _ = model.engine.setSceneSetting(index, value: value)
-        sceneSettings = model.engine.sceneSettings().map(\.floatValue)
-        model.refreshModel(force: true)
-    }
-    @ViewBuilder private var sceneSettingsSection: some View {
-        if sceneSettings.count >= 8 {
-            section("scene_studio")
-            horizontal {
-                ForEach(Array(["scene_none", "scene_dark", "scene_product", "scene_sky"].enumerated()), id: \.offset) { i, key in
-                    T3DChip(label: AureaText.t(key), on: Int(sceneSettings[0]) == i) { setScene(0, Float(i)) }
+    /// Controle segmentado: cada aba divide a largura; a acesa usa o destaque.
+    private var tabBar: some View {
+        HStack(spacing: 3) {
+            ForEach(tabs, id: \.self) { item in
+                let on = item == currentTab
+                Button { tab = item } label: {
+                    Text(AureaText.t(item.key)).font(.aurea(size: 12.5, weight: on ? .bold : .medium))
+                        .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(on ? AureaColors.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityIdentifier("panel3d.tab.\(item.id)")
+                .accessibilityAddTraits(on ? [.isSelected] : [])
             }
-            Toggle(AureaText.t("scene_floor"), isOn: Binding(get: { sceneSettings[1] > 0 }, set: { setScene(1, $0 ? 1 : 0) })).frame(minHeight: 44)
-            section("scene_quality")
-            horizontal {
-                ForEach(Array(["scene_auto", "scene_low", "scene_medium", "scene_high", "scene_ultra"].enumerated()), id: \.offset) { i, key in
-                    T3DChip(label: AureaText.t(key), on: Int(sceneSettings[2]) == i) { setScene(2, Float(i)) }
-                }
-            }
-            section("scene_tonemap")
-            horizontal {
-                T3DChip(label: "PBR Neutral", on: sceneSettings[3] == 0) { setScene(3, 0) }
-                T3DChip(label: "AgX", on: sceneSettings[3] == 1) { setScene(3, 1) }
-            }
-            Text(AureaText.t("scene_exposure"))
-            Slider(value: Binding(get: { min(4, max(0.01, sceneSettings[4])) }, set: { setScene(4, $0) }), in: 0.01...4)
-            Toggle(AureaText.t("scene_bloom"), isOn: Binding(get: { sceneSettings[5] > 0 }, set: { setScene(5, $0 ? 1 : 0) })).frame(minHeight: 44)
-            if sceneSettings[5] > 0 {
-                Slider(value: Binding(get: { min(4, max(0, sceneSettings[6])) }, set: { setScene(6, $0) }), in: 0...4)
-            }
-            gap(16)
         }
+        .padding(3).frame(height: 40)
+        .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(AureaText.t("ui3d_tabs"))
     }
 
-    // The entire column has a single 18 dp inset; its controls add no inset.
-    private var textSection: some View {
+    // --- Texto 3D -------------------------------------------------------------
+
+    private var textMaterialTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            section("pn_text3d_title")
-            gap(14)
-            section("pn_t3d_presets")
-            horizontal {
-                ForEach(Array(["Smooth", "Brushed", "Scratched", "Hammered", "Weathered Metal"].enumerated()), id: \.offset) { item in
-                    T3DChip(label: item.element, on: Int(number("surfaceFinish")) == item.offset) {
-                        set3D("surfaceFinish", value: Float(item.offset))
-                    }
-                }
-            }
+            section("ui3d_ready_materials")
             horizontal {
                 ForEach([6, 0, 1, 2, 3, 4, 5], id: \.self) { index in
-                    chip(presetKeys[index]) {
+                    swatchChip(presetKeys[index], swatch: presetSwatches[index]) {
                         finishEditing()
                         _ = model.engine.applyText3DPreset(layerId, preset: UInt32(index))
                         refresh()
@@ -142,27 +145,42 @@ struct Panel3DView: View {
                     .accessibilityIdentifier("text3d.materialPreset.\(index)")
                 }
             }
-            gap(14)
-            Button("Letter rotation · Cylinder · Twist") {
-                finishEditing()
-                let type = fxEffectTypeId("aurea.text3d.layout")
-                let target = layerId
-                if !model.effects.contains(where: { $0.typeId == type }) {
-                    model.mutate { $0.addEffect(type, toLayer: target, at: UInt32.max) }
+            gap(6)
+            colorRow("panel_cor", key: "color", region: 0, height: 48)
+            textRow("pn_t3d_metallic", key: "metallic", max: 1, reset: 0, gesture: "metalico")
+            textRow("pn_t3d_roughness", key: "roughness", max: 1, reset: 0.35, gesture: "rugosidade")
+            advancedHeader(open: materialAdvanced) { materialAdvanced.toggle() }
+            if materialAdvanced {
+                section("ui3d_finish")
+                horizontal {
+                    ForEach(Array(finishKeys.enumerated()), id: \.offset) { item in
+                        chip(item.element, on: Int(number("surfaceFinish")) == item.offset) {
+                            set3D("surfaceFinish", value: Float(item.offset))
+                        }
+                    }
                 }
-                model.openPanel(.effects)
+                textRow("pn_t3d_specular", key: "specular", max: 1, reset: 1, gesture: "especular")
+                colorRow("pn_t3d_emissive", key: "emissive", region: 3)
+                textRow("pn_t3d_emissive_strength", key: "emissiveStrength", max: 8, reset: 1, gesture: "forca da emissao", step: 2)
+                toggleRow("pn_t3d_regions", on: number("regionMaterials") > 0.5) { set3D("regionMaterials", value: $0 ? 1 : 0) }
+                if number("regionMaterials") > 0.5 {
+                    // Frente = a cor acima. Aqui vão a lateral e o chanfro.
+                    textRow("pn_t3d_region_side", key: "sideRoughness", max: 1, reset: 0.35, gesture: "rugosidade da lateral")
+                    colorRow("pn_t3d_region_bevel", key: "bevelColor", region: 2)
+                    textRow(AureaText.t("pn_t3d_metallic") + " · " + AureaText.t("pn_t3d_region_bevel"), key: "bevelMetallic",
+                            max: 1, reset: 0, gesture: "metalico do chanfro", localized: true)
+                }
             }
-            .font(.aurea(size: 14)).frame(minHeight: 44)
+        }
+    }
+
+    private var textShapeTab: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            section("ui3d_text")
             HStack(spacing: 6) {
                 chip("t3d_font") { openFonts() }
-                chip("t3d_import_font") {
-                    finishEditing(); fontTarget = layerId; pickingFont = true
-                }
+                chip("t3d_import_font") { finishEditing(); fontTarget = layerId; pickingFont = true }
             }
-            gap(12)
-            gap(6)
-            textRuler("pn_depth", key: "depth", step: 0.005, min: 0, max: 3,
-                      shown: percent(number("depth")), gesture: "profundidade do texto 3D")
             row("panel_alinhamento", height: 48) {
                 HStack(spacing: 6) {
                     ForEach(Array(["panel_esquerda", "panel_centro", "panel_direita"].enumerated()), id: \.offset) { item in
@@ -172,15 +190,18 @@ struct Panel3DView: View {
                     }
                 }
             }
-            gap(14)
-            section("pn_t3d_geometry")
-            onOffRow("pn_t3d_bevel", on: number("bevel") > 0.5) { set3D("bevel", value: $0 ? 1 : 0) }
+            section("ui3d_extrusion")
+            // 100 % = a altura da letra (a malha é gerada de novo a cada passo).
+            textRow("pn_depth", key: "depth", max: 3, reset: 0.25, gesture: "profundidade do texto 3D")
+            note("ui3d_depth_hint")
+            gap(6)
+            // O chanfro é GEOMETRIA: frente/fundo recuados e o anel do chanfro.
+            toggleRow("pn_t3d_bevel", on: number("bevel") > 0.5) { set3D("bevel", value: $0 ? 1 : 0) }
             if number("bevel") > 0.5 {
-                textRuler("pn_t3d_bevel_width", key: "bevelWidth", step: 0.0002, min: 0, max: 0.2,
-                          shown: "\(rounded(number("bevelWidth") * 1000))", gesture: "chanfro")
-                textRuler("pn_t3d_bevel_depth", key: "bevelDepth", step: 0.0002, min: 0, max: 0.2,
-                          shown: "\(rounded(number("bevelDepth") * 1000))", gesture: "chanfro")
-                row("pn_t3d_bevel_segments") {
+                textRow("pn_t3d_bevel_width", key: "bevelWidth", max: 0.2, reset: 0.02, gesture: "chanfro", step: 0.05, decimals: 1)
+                textRow("pn_t3d_bevel_depth", key: "bevelDepth", max: 0.2, reset: 0.02, gesture: "chanfro", step: 0.05, decimals: 1)
+                textRow("pn_t3d_bevel_roundness", key: "bevelRoundness", max: 1, reset: 1, gesture: "arredondamento")
+                row("pn_t3d_bevel_segments", height: 48) {
                     HStack(spacing: 6) {
                         ForEach([1, 2, 3, 5, 8], id: \.self) { count in
                             T3DChip(label: "\(count)", on: Int(number("bevelSegments")) == count) {
@@ -189,58 +210,64 @@ struct Panel3DView: View {
                         }
                     }
                 }
-                textRuler("pn_t3d_bevel_roundness", key: "bevelRoundness", step: 0.006, min: 0, max: 1,
-                          shown: percent(number("bevelRoundness")), gesture: "arredondamento")
+            }
+            gap(10)
+            actionCard("ui3d_deform_letters") {
+                finishEditing()
+                let type = fxEffectTypeId("aurea.text3d.layout")
+                let target = layerId
+                if !model.effects.contains(where: { $0.typeId == type }) {
+                    model.mutate { $0.addEffect(type, toLayer: target, at: UInt32.max) }
+                }
+                model.openPanel(.effects)
             }
         }
     }
 
-    private var materialSection: some View {
+    /// Linha de valor do texto 3D em % (1 = 100 %): arrasto em passos leves (a
+    /// malha acompanha), um passo de desfazer por gesto; teclado e ↺ gravam.
+    private func textRow(_ label: String, key: String, max: Float, reset: Float, gesture: String,
+                         step: Float = 0.5, decimals: Int = 0, localized: Bool = false) -> some View {
+        T3DRow(label: localized ? label : AureaText.t(label), value: number(key) * 100, step: step, range: 0...(max * 100),
+               unit: "%", decimals: decimals, reset: reset * 100,
+               onStart: { beginContinuous(gesture) }, onValue: { lazyNumber(key, $0 / 100) }, onEnd: finishEditing,
+               onCommit: { value in beginContinuous(gesture); lazyNumber(key, value / 100); finishEditing() })
+    }
+
+    // --- Luz e cena -----------------------------------------------------------
+
+    private func setScene(_ index: UInt32, _ value: Float) {
+        _ = model.engine.setSceneSetting(index, value: value)
+        sceneSettings = model.engine.sceneSettings().map(\.floatValue)
+        model.refreshModel(force: true)
+    }
+
+    /// LUZ E CENA: sombras do objeto, estúdio e ambiente na frente; qualidade,
+    /// tom, exposição, brilho e o ambiente do objeto em "Avançado".
+    private var lightSceneTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            textRuler("pn_t3d_metallic", key: "metallic", step: 0.005, min: 0, max: 1,
-                      shown: percent(number("metallic")), gesture: "metalico")
-            textRuler("pn_t3d_roughness", key: "roughness", step: 0.005, min: 0, max: 1,
-                      shown: percent(number("roughness")), gesture: "rugosidade")
-            textRuler("pn_t3d_specular", key: "specular", step: 0.005, min: 0, max: 1,
-                      shown: percent(number("specular")), gesture: "especular")
-            colorRow("pn_t3d_emissive", key: "emissive", region: 3)
-            textRuler("pn_t3d_emissive_strength", key: "emissiveStrength", step: 0.02, min: 0, max: 8,
-                      shown: percent(number("emissiveStrength")), gesture: "forca da emissao")
-            onOffRow("pn_t3d_regions", on: number("regionMaterials") > 0.5) {
-                set3D("regionMaterials", value: $0 ? 1 : 0)
-            }
-            if number("regionMaterials") > 0.5 {
-                textRuler("pn_t3d_region_side", key: "sideRoughness", step: 0.005, min: 0, max: 1,
-                          shown: percent(number("sideRoughness")), gesture: "rugosidade da lateral")
-                colorRow("pn_t3d_region_bevel", key: "bevelColor", region: 2)
-                ruler(AureaText.t("pn_t3d_metallic") + " · " + AureaText.t("pn_t3d_region_bevel"),
-                      value: number("bevelMetallic"), step: 0.005, min: 0, max: 1,
-                      shown: percent(number("bevelMetallic")), gesture: "metalico do chanfro") {
-                    lazyNumber("bevelMetallic", $0)
+            if !isCamera && shadows.count == 2 {
+                section("ui3d_shadows")
+                toggleRow("pn_t3d_cast_shadow", on: shadows[0] > 0.5) { value in
+                    finishEditing()
+                    _ = model.engine.setModelShadows(layerId, cast: value, receive: shadows[1] > 0.5)
+                    refresh()
+                }
+                toggleRow("pn_t3d_receive_shadow", on: shadows[1] > 0.5) { value in
+                    finishEditing()
+                    _ = model.engine.setModelShadows(layerId, cast: shadows[0] > 0.5, receive: value)
+                    refresh()
                 }
             }
-        }
-    }
-
-    @ViewBuilder private var lightingSection: some View {
-        if shadows.count == 2 {
-            gap(16)
-            section("pn_t3d_lighting")
-            onOffRow("pn_t3d_cast_shadow", on: shadows[0] > 0.5) { value in
-                finishEditing()
-                _ = model.engine.setModelShadows(layerId, cast: value, receive: shadows[1] > 0.5)
-                refresh()
+            if sceneSettings.count >= 8 {
+                section("scene_studio")
+                horizontal {
+                    ForEach(Array(["scene_none", "scene_dark", "scene_product", "scene_sky"].enumerated()), id: \.offset) { i, key in
+                        T3DChip(label: AureaText.t(key), on: Int(sceneSettings[0]) == i) { setScene(0, Float(i)) }
+                    }
+                }
+                toggleRow("scene_floor", on: sceneSettings[1] > 0) { setScene(1, $0 ? 1 : 0) }
             }
-            onOffRow("pn_t3d_receive_shadow", on: shadows[1] > 0.5) { value in
-                finishEditing()
-                _ = model.engine.setModelShadows(layerId, cast: shadows[0] > 0.5, receive: value)
-                refresh()
-            }
-        }
-    }
-
-    private var environmentSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
             section("environment_texture")
             horizontal {
                 chip("panel_estudio_neutro", on: environment[0] < 0.5) {
@@ -249,27 +276,58 @@ struct Panel3DView: View {
                 chip(environment[0] >= 0.5 ? "panel_imagem_ambiente" : "panel_usar_imagem_ambiente_hdr",
                      on: environment[0] >= 0.5) { pickHdri(object: false) }
             }
-            gap(10)
-            ruler(AureaText.t("panel_intensidade"), value: environment[1], step: 0.01, min: 0, max: 20,
-                  shown: percent(environment[1]), gesture: "ambiente") { value in
-                _ = model.engine.setEnvironmentIntensity(value, rotation: environment[2]); refresh()
+            sceneRow("panel_intensidade", value: environment[1] * 100, range: 0...2000, unit: "%", reset: 100, gesture: "ambiente") { value in
+                _ = model.engine.setEnvironmentIntensity(value / 100, rotation: environment[2]); refresh()
             }
-            ruler(AureaText.t("pn_env_rotate_light"), value: environment[2], step: 1, min: -360, max: 360,
-                  shown: degrees(environment[2]), gesture: "ambiente") { value in
+            sceneRow("pn_env_rotate_light", value: environment[2], range: -360...360, unit: "°", reset: 0, gesture: "ambiente") { value in
                 _ = model.engine.setEnvironmentIntensity(environment[1], rotation: value); refresh()
             }
-            gap(8)
-            Toggle(AureaText.t("environment_background"), isOn: Binding(
-                get: { environment.count > 3 && environment[3] > 0.5 },
-                set: { _ = model.engine.setEnvironmentBackground($0); refresh() })).padding(.vertical, 10)
+            toggleRow("environment_background", on: environment.count > 3 && environment[3] > 0.5) {
+                _ = model.engine.setEnvironmentBackground($0); refresh()
+            }
             note("environment_hint")
+            gap(4)
+            advancedHeader(open: sceneAdvanced) { sceneAdvanced.toggle() }
+            if sceneAdvanced {
+                if sceneSettings.count >= 8 {
+                    section("scene_quality")
+                    horizontal {
+                        ForEach(Array(["scene_auto", "scene_low", "scene_medium", "scene_high", "scene_ultra"].enumerated()), id: \.offset) { i, key in
+                            T3DChip(label: AureaText.t(key), on: Int(sceneSettings[2]) == i) { setScene(2, Float(i)) }
+                        }
+                    }
+                    section("scene_tonemap")
+                    horizontal {
+                        T3DChip(label: "PBR Neutral", on: sceneSettings[3] == 0) { setScene(3, 0) }
+                        T3DChip(label: "AgX", on: sceneSettings[3] == 1) { setScene(3, 1) }
+                    }
+                    sceneRow("scene_exposure", value: Swift.min(4, Swift.max(0.01, sceneSettings[4])) * 100, range: 1...400, unit: "%", reset: 100, gesture: nil) {
+                        setScene(4, $0 / 100)
+                    }
+                    toggleRow("scene_bloom", on: sceneSettings[5] > 0) { setScene(5, $0 ? 1 : 0) }
+                    if sceneSettings[5] > 0 {
+                        sceneRow("ui3d_bloom_strength", value: Swift.min(4, Swift.max(0, sceneSettings[6])) * 100, range: 0...400, unit: "%", reset: 100, gesture: nil) {
+                            setScene(6, $0 / 100)
+                        }
+                    }
+                }
+                if !isCamera { objectEnvironmentSection }
+            }
         }
+    }
+
+    /// Linha de valor da cena/ambiente: um passo de desfazer por arrasto (quando há `gesture`).
+    private func sceneRow(_ key: String, value: Float, range: ClosedRange<Float>, unit: String, reset: Float,
+                          gesture: String?, onValue: @escaping (Float) -> Void) -> some View {
+        T3DRow(label: AureaText.t(key), value: value, step: 1, range: range, unit: unit, decimals: 0, reset: reset,
+               onStart: { if let gesture { beginContinuous(gesture) } }, onValue: onValue,
+               onEnd: { if gesture != nil { finishEditing() } },
+               onCommit: { v in if let gesture { beginContinuous(gesture) }; onValue(v); if gesture != nil { finishEditing() } })
     }
 
     @ViewBuilder private var objectEnvironmentSection: some View {
         if objectEnvironment.count >= 5 {
             let own = objectNumber(0) >= 0.5
-            gap(16)
             section("panel_ambiente_do_objeto")
             horizontal {
                 chip("panel_do_projeto", on: !own) { finishEditing(); setObjectEnvironment(0) }
@@ -277,33 +335,78 @@ struct Panel3DView: View {
                     finishEditing(); setObjectEnvironment(1)
                     if objectEnvironment[1].int64Value <= 0 { pickHdri(object: true) }
                 }
-            }
-            if own {
-                gap(10)
-                horizontal {
+                if own {
                     chip(objectEnvironment[1].int64Value > 0 ? "panel_trocar_imagem" : "panel_usar_imagem_ambiente_hdr",
                          on: objectEnvironment[1].int64Value > 0) { pickHdri(object: true) }
                 }
-                gap(10)
-                ruler(AureaText.t("panel_intensidade"), value: objectNumber(2), step: 0.01, min: 0, max: 20,
-                      shown: percent(objectNumber(2)), gesture: "ambiente") { setObjectEnvironment(1, intensity: $0) }
-                ruler(AureaText.t("pn_env_rotate_light"), value: objectNumber(3), step: 1, min: -360, max: 360,
-                      shown: degrees(objectNumber(3)), gesture: "ambiente") { setObjectEnvironment(1, rotation: $0) }
-                ruler(AureaText.t("panel_exposicao"), value: objectNumber(4), step: 0.01, min: 0.05, max: 20,
-                      shown: percent(objectNumber(4)), gesture: "ambiente") { setObjectEnvironment(1, exposure: $0) }
+            }
+            if own {
+                sceneRow("panel_intensidade", value: objectNumber(2) * 100, range: 0...2000, unit: "%", reset: 100, gesture: "ambiente") {
+                    setObjectEnvironment(1, intensity: $0 / 100)
+                }
+                sceneRow("pn_env_rotate_light", value: objectNumber(3), range: -360...360, unit: "°", reset: 0, gesture: "ambiente") {
+                    setObjectEnvironment(1, rotation: $0)
+                }
+                sceneRow("panel_exposicao", value: objectNumber(4) * 100, range: 5...2000, unit: "%", reset: 100, gesture: "ambiente") {
+                    setObjectEnvironment(1, exposure: $0 / 100)
+                }
             }
         }
     }
 
+    // --- Peças comuns ---------------------------------------------------------
+
     private func section(_ key: String) -> some View {
         Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold))
-            .foregroundStyle(AureaColors.muted).padding(.bottom, 6)
+            .foregroundStyle(AureaColors.muted).padding(.top, 8).padding(.bottom, 4)
     }
     private func note(_ key: String) -> some View {
         Text(AureaText.t(key)).font(.aurea(size: 12)).lineSpacing(2)
             .foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
     }
     private func gap(_ height: CGFloat) -> some View { Spacer().frame(height: height) }
+    /// "Avançado ▾": o resto, fechado por padrão; a linha inteira é o alvo.
+    private func advancedHeader(open: Bool, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
+            HStack(spacing: 6) {
+                Text(AureaText.t("panel_avancado")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.muted)
+                CupertinoGlyph.text(open ? CupertinoGlyph.ChevronUp : CupertinoGlyph.ChevronDown, size: 12, color: AureaColors.muted)
+                Rectangle().fill(AureaColors.border).frame(height: 1).padding(.leading, 8)
+            }.frame(height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityAddTraits(open ? [.isSelected] : [])
+    }
+    private func actionCard(_ key: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(AureaText.t(key)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14).padding(.vertical, 11).frame(minHeight: 44)
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+                .contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle())
+    }
+    private func swatchChip(_ key: String, swatch: [Float], action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Circle().fill(AureaColorSpace.color(swatch + [1])).frame(width: 16, height: 16)
+                Text(AureaText.t(key)).font(.aurea(size: 12.5)).foregroundStyle(AureaColors.text)
+            }
+            .padding(.horizontal, 10).frame(minHeight: 44)
+            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
+            .contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle())
+    }
+    private func toggleRow(_ key: String, on: Bool, onChange: @escaping (Bool) -> Void) -> some View {
+        HStack(spacing: 0) {
+            Text(AureaText.t(key)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            AureaToggle(checked: on, onCheckedChange: onChange)
+        }
+        .frame(height: 48).contentShape(Rectangle())
+        .onTapGesture { onChange(!on) }
+        .accessibilityElement(children: .combine)
+    }
     /// "Efeito das partes" (forma 3D): põe o Shape 3D Layout (uma vez) e abre os efeitos.
     private var shapeLayoutButton: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -335,47 +438,13 @@ struct Panel3DView: View {
             content().fixedSize(horizontal: true, vertical: false)
         }.frame(height: height)
     }
-    private func onOffRow(_ key: String, on: Bool, onChange: @escaping (Bool) -> Void) -> some View {
-        row(key) {
-            HStack(spacing: 6) {
-                chip("pn_t3d_off", on: !on) { onChange(false) }
-                chip("pn_t3d_on", on: on) { onChange(true) }
-            }
-        }
-    }
-    private func colorRow(_ title: String, key: String, region: UInt32, height: CGFloat = 44) -> some View {
+    private func colorRow(_ title: String, key: String, region: UInt32, height: CGFloat = 48) -> some View {
         row(title, height: height) {
             // Element3DPanel passes these material channels directly as sRGB.
             Button { openColor(key, region: region) } label: {
                 AureaColorSwatch(color: AureaColorSpace.color(colorValues(key)))
                     .frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6))
             }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t(title))
-        }
-    }
-    private func textRuler(_ label: String, key: String, step: Float, min: Float, max: Float,
-                           shown: String, gesture: String) -> some View {
-        ruler(AureaText.t(label), value: number(key), step: step, min: min, max: max,
-              shown: shown, gesture: gesture, displayScale: key == "bevelWidth" || key == "bevelDepth" ? 1000 : 100) { lazyNumber(key, $0) }
-    }
-    private func ruler(_ label: String, value: Float, step: Float, min: Float, max: Float,
-                       shown: String, gesture: String, displayScale: Float? = nil, onValue: @escaping (Float) -> Void) -> some View {
-        PropertyCustomRow(label, selected: false, onSelect: {}) {
-            HStack(spacing: 8) {
-                TickRuler(value: { value }, unitsPerDp: step, active: true)
-                    .frame(maxWidth: .infinity)
-                    .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: min, max: max,
-                               onStart: { beginContinuous(gesture) }, onValue: onValue, onEnd: finishEditing)
-                ValueBox(shown, onTap: {
-                    let scale: Float = displayScale ?? (shown.hasSuffix("%") ? 100 : 1)
-                    model.numericKeypad = KeypadRequest(title: label, value: value * scale,
-                        unit: shown.hasSuffix("%") ? "%" : (shown.hasSuffix("°") ? "°" : ""),
-                        min: min * scale, max: max * scale, decimals: 1) { entered in
-                        beginContinuous(gesture)
-                        onValue((entered / scale).clamped(to: min...max))
-                        finishEditing()
-                    }
-                })
-            }
         }
     }
 
@@ -562,6 +631,46 @@ struct Panel3DView: View {
             }
             model.toast = AureaText.t("msg_fonte_importada", font["family"] as? String ?? "")
         } catch { model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte") }
+    }
+}
+
+/// FormaKit.HumanRow do painel 3D: rótulo, régua, valor (teclado) e ↺ ao padrão.
+private struct T3DRow: View {
+    @EnvironmentObject private var model: AureaModel
+    let label: String
+    let value: Float
+    let step: Float
+    let range: ClosedRange<Float>
+    var unit = ""
+    var decimals = 0
+    let reset: Float
+    let onStart: () -> Void
+    let onValue: (Float) -> Void
+    let onEnd: () -> Void
+    let onCommit: (Float) -> Void
+    @State private var dragging = false
+    @State private var live: Float = 0
+    private var shown: Float { dragging ? live : value }
+    private var resetVisible: Bool { abs(shown - reset) > 0.001 * max(1, abs(reset)) }
+    var body: some View {
+        HStack(spacing: 0) {
+            PropertyLabelChip(label, expression: .none, keyframe: .none, onTap: nil)
+            Color.clear.frame(width: 6)
+            TickRuler(value: { shown }, unitsPerDp: step, active: true, height: 40, verticalPadding: 8)
+                .frame(maxWidth: .infinity).padding(.vertical, 4)
+                .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
+                           onStart: { live = value; dragging = true; onStart() }, onValue: { live = $0; onValue($0) },
+                           onEnd: { dragging = false; onEnd() })
+            Color.clear.frame(width: 6)
+            ValueBox(comUnidade(numeroPtBr(shown, casas: decimals), unit), onTap: {
+                model.numericKeypad = KeypadRequest(title: label, value: value, unit: unit, min: range.lowerBound, max: range.upperBound,
+                                                    decimals: decimals) { onCommit($0.clamped(to: range)) }
+            })
+            Button { onCommit(reset) } label: {
+                CupertinoGlyph.text(CupertinoGlyph.ArrowCounterclockwise, size: 16, color: AureaColors.muted).frame(width: 34, height: 44)
+            }.buttonStyle(AureaPressStyle(shrink: 1)).opacity(resetVisible ? 1 : 0).disabled(!resetVisible)
+                .accessibilityLabel(AureaText.t("panel_voltar_padrao") + " · " + label)
+        }.frame(height: 48).onDisappear { if dragging { dragging = false; onEnd() } }
     }
 }
 

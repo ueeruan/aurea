@@ -151,15 +151,11 @@ internal fun AppearancePanel(env: PanelEnv) {
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ParamTabs(
-                labels = listOf(stringResource(R.string.panel_opacidade), stringResource(R.string.panel_mistura), stringResource(R.string.panel_mascara_recorte)),
+                // A máscara virou efeito (seletor de efeitos): sem aba própria aqui.
+                labels = listOf(stringResource(R.string.panel_opacidade), stringResource(R.string.panel_mistura)),
                 selected = tab,
                 animated = { it == 0 && look != KeyframeLook.None },
-                onSelect = { i ->
-                    when (i) {
-                        2 -> env.onOpenPanel(EditorPanel.Mask)
-                        else -> tab = i
-                    }
-                },
+                onSelect = { i -> tab = i },
             )
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (tab == 0) OpacityTab(env, look) else BlendTab(env)

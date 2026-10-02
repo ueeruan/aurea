@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel 3D reorganizado em abas (2026-10-01). Chaves ui3d_*. -->
+<resources>
+    <string name="ui3d_tabs">Grupos de opciones 3D</string>
+    <string name="ui3d_tab_material">Material</string>
+    <string name="ui3d_tab_shape">Forma</string>
+    <string name="ui3d_tab_light">Luz y escena</string>
+    <string name="ui3d_tab_anim">Animación</string>
+    <string name="ui3d_ready_materials">Materiales listos</string>
+    <string name="ui3d_finish">Superficie</string>
+    <string name="ui3d_finish_smooth">Lisa</string>
+    <string name="ui3d_finish_brushed">Cepillada</string>
+    <string name="ui3d_finish_scratched">Rayada</string>
+    <string name="ui3d_finish_hammered">Martillada</string>
+    <string name="ui3d_finish_weathered">Metal desgastado</string>
+    <string name="ui3d_text">Texto</string>
+    <string name="ui3d_extrusion">Extrusión</string>
+    <string name="ui3d_depth_hint">100% = la altura de la letra. Para animar la profundidad, usa keyframes en Escala Z (Transformar).</string>
+    <string name="ui3d_deform_letters">Deformar letras (giro, cilindro, torsión)</string>
+    <string name="ui3d_shadows">Sombras</string>
+    <string name="ui3d_bloom_strength">Intensidad del brillo</string>
+</resources>

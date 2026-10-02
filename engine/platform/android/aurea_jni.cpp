@@ -32,6 +32,7 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
 #include "aurea/core/GestureMath.hpp"
+#include "aurea/export/BitratePolicy.hpp"
 
 #include <cstdio>
 #include <algorithm>
@@ -216,6 +217,20 @@ void release_window_locked(NativeContext& c) noexcept {
 
 AUREA_JNI jfloat AUREA_FN(clampPinchFactor)(JNIEnv*, jclass, jfloat factor, jfloat x, jfloat y, jfloat z, jboolean threeD) {
     return aurea::clamp_pinch_factor(factor, x, y, z, threeD == JNI_TRUE);
+}
+
+// Escala 3D de gesto no formato gravado (GestureMath.hpp): o volume nunca estica.
+AUREA_JNI jfloatArray AUREA_FN(gestureScale3D)(JNIEnv* env, jclass, jint kind, jfloat x, jfloat y, jfloat z, jint axis, jfloat factor) {
+    const bool follows = aurea::scale_z_follows_x(static_cast<aurea::LayerKind>(kind));
+    const aurea::Vec3 s = aurea::gesture_scale_3d(aurea::Vec3{x, y, z}, axis, factor, follows);
+    const jfloat out[3]{s.x, s.y, s.z};
+    jfloatArray arr = env->NewFloatArray(3);
+    if (arr) env->SetFloatArrayRegion(arr, 0, 3, out);
+    return arr;
+}
+
+AUREA_JNI jfloat AUREA_FN(clampPinchFactor3D)(JNIEnv*, jclass, jint kind, jfloat factor, jfloat x, jfloat y, jfloat z) {
+    return aurea::clamp_pinch_factor_3d(factor, aurea::Vec3{x, y, z}, aurea::scale_z_follows_x(static_cast<aurea::LayerKind>(kind)));
 }
 
 AUREA_JNI jint JNI_OnLoad(JavaVM* vm, void*) {
@@ -2699,6 +2714,11 @@ AUREA_JNI jboolean AUREA_FN(nativeReorderClip)(JNIEnv*, jclass, jlong handle, jl
     return c && c->engine.reorder_clip(static_cast<u64>(layer), targetFrame) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeMoveLayerToRow)(JNIEnv*, jclass, jlong handle, jlong layer, jlong anchor, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.move_layer_to_row(static_cast<u64>(layer), static_cast<u64>(anchor), mode) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeTrimComposition)(JNIEnv*, jclass, jlong handle, jlong frame) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.trim_composition(frame) ? JNI_TRUE : JNI_FALSE;
@@ -2772,6 +2792,10 @@ AUREA_JNI jboolean AUREA_FN(nativeSetRawPlayback)(JNIEnv*, jclass, jlong handle,
 }
 AUREA_JNI void AUREA_FN(nativeSetSceneEditor)(JNIEnv*, jclass, jlong handle, jboolean enabled, jfloat yaw, jfloat pitch, jfloat distance) {
     if (auto* c = ctx_of(handle)) c->engine.set_scene_editor(enabled == JNI_TRUE, yaw, pitch, distance);
+}
+AUREA_JNI jlong AUREA_FN(nativeScenePick)(JNIEnv*, jclass, jlong handle, jfloat x, jfloat y, jfloat radius) {
+    auto* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.scene_pick(x, y, radius)) : 0;
 }
 AUREA_JNI jint AUREA_FN(nativeSceneGuides)(JNIEnv* env, jclass, jlong handle, jfloatArray output) {
     auto* c = ctx_of(handle);
@@ -3037,9 +3061,11 @@ AUREA_JNI jint AUREA_FN(nativeRecoverSession)(JNIEnv*, jclass, jlong handle) {
 // Export (próxima fase: reusa o mesmo renderer)
 // =============================================================================
 /// `shortSide` = lado menor do vídeo (720/1080/1440/2160); `fps` 0 = o da
-/// composição; `codec` 0 = H.264, 1 = HEVC; `bitrateMbps` 0 = automático.
+/// composição; `codec` 0 = H.264, 1 = HEVC; `bitrateMbps` 0 = automático;
+/// `quality` 0 Baixa / 1 Normal / 2 Alta; `rateMode` 0 CBR / 1 VBR.
 AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint shortSide,
-                                           jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale, jboolean trimToContent) {
+                                           jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale, jboolean trimToContent,
+                                           jint quality, jint rateMode) {
     NativeContext* c = ctx_of(handle);
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, outputPath);
@@ -3051,12 +3077,66 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
     settings.videoBitrateMbps = bitrateMbps > 0 ? static_cast<u32>(bitrateMbps) : 0;
     settings.aiUpscale = static_cast<u32>(aiUpscale);
     settings.trimToContent = trimToContent == JNI_TRUE;
+    settings.quality = static_cast<u32>(std::clamp<jint>(quality, 0, 2));
+    settings.rateMode = rateMode == 0 ? 0u : 1u;
+    settings.audioBitrateKbps = kExportAudioKbps;
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
+}
+
+/// A taxa de vídeo (bps) que o export usaria — a mesma regra do motor, para a
+/// tela mostrar o tamanho estimado sem conta própria.
+AUREA_JNI jlong AUREA_FN(nativeExportBitrateBps)(JNIEnv*, jclass, jint width, jint height, jdouble fps, jint codec,
+                                                jint quality, jint customMbps) {
+    return static_cast<jlong>(export_video_bitrate_bps(static_cast<u32>(std::max(0, width)), static_cast<u32>(std::max(0, height)), fps,
+        codec == 1 ? ExportCodec::HEVC : ExportCodec::H264, static_cast<ExportQuality>(std::clamp<jint>(quality, 0, 2)),
+        static_cast<u32>(std::max(0, customMbps))));
 }
 
 AUREA_JNI jlong AUREA_FN(nativeExportDuration)(JNIEnv*, jclass, jlong handle, jboolean trimToContent) {
     NativeContext* c = ctx_of(handle);
     return c ? c->engine.query_export_duration(trimToContent == JNI_TRUE) : 0;
+}
+
+/// Export como imagem (export/ImageEncode.hpp). `format` 0 PNG do playhead,
+/// 1 sequência PNG (.zip), 2 GIF; `shortSide` 0 = resolução da composição;
+/// `maxWidth` largura máxima do GIF; `fps` 0 = padrão do formato.
+namespace {
+ImageExportSettings image_settings(jint format, jint shortSide, jint maxWidth, jdouble fps, jboolean trimToContent) {
+    ImageExportSettings s;
+    s.format = static_cast<ImageExportFormat>(std::clamp<jint>(format, 0, 2));
+    s.shortSide = shortSide > 0 ? static_cast<u32>(shortSide) : 0u;
+    s.maxWidth = maxWidth > 0 ? static_cast<u32>(maxWidth) : 0u;
+    s.fps = fps > 0.0 ? fps : 0.0;
+    s.trimToContent = trimToContent == JNI_TRUE;
+    return s;
+}
+} // namespace
+
+AUREA_JNI jint AUREA_FN(nativeStartImageExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint format,
+                                                jint shortSide, jint maxWidth, jdouble fps, jboolean trimToContent) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
+    const std::string p = to_string(env, outputPath);
+    return static_cast<jint>(c->engine.start_image_export(image_settings(format, shortSide, maxWidth, fps, trimToContent),
+                                                          p.c_str()).raw());
+}
+
+/// O plano do export como imagem: [largura, altura, quadros, alfa (0/1),
+/// bytes estimados, fps × 1000]. Nulo sem composição.
+AUREA_JNI jlongArray AUREA_FN(nativeImageExportPlan)(JNIEnv* env, jclass, jlong handle, jint format, jint shortSide,
+                                                     jint maxWidth, jdouble fps, jboolean trimToContent) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const ImageExportSettings s = image_settings(format, shortSide, maxWidth, fps, trimToContent);
+    const ImageExportPlan plan = c->engine.query_image_export_plan(s);
+    if (plan.width == 0) return nullptr;
+    const jlong v[6] = {static_cast<jlong>(plan.width), static_cast<jlong>(plan.height), static_cast<jlong>(plan.frames),
+                        plan.alpha ? 1 : 0,
+                        static_cast<jlong>(estimate_image_export_bytes(s.format, plan.width, plan.height, plan.frames, plan.alpha)),
+                        static_cast<jlong>(std::llround(plan.fps * 1000.0))};
+    jlongArray out = env->NewLongArray(6);
+    if (out) env->SetLongArrayRegion(out, 0, 6, v);
+    return out;
 }
 
 AUREA_JNI jint AUREA_FN(nativeCancelExport)(JNIEnv*, jclass, jlong handle) {

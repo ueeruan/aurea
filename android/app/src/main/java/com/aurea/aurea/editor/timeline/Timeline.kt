@@ -84,6 +84,7 @@ fun Timeline(
     val metrics = remember(density.density, density.fontScale) { TimelineMetrics(density.density, density.fontScale) }
     val measurer = rememberTextMeasurer(cacheSize = 16)
     val haptics = LocalHapticFeedback.current
+    val view = androidx.compose.ui.platform.LocalView.current
     val scope = rememberCoroutineScope()
     val state = remember { TimelineState() }
     val controller = remember(store) { TimelineController(store, state, scope) }
@@ -105,6 +106,7 @@ fun Timeline(
         controller.onKeyframeTap = onKeyframeTap
         controller.onTrackTap = onTrackTap
         controller.haptics = haptics
+        controller.announce = { view.announceForAccessibility(it) }
         state.compact = shownCompact
         state.compactByDock = shownCompact && !compact
         state.timecodeBox = timecodeStyle == TimecodeStyle.Box

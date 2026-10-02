@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel 3D reorganizado em abas (2026-10-01). Chaves ui3d_*. -->
+<resources>
+    <string name="ui3d_tabs">Группы 3D-настроек</string>
+    <string name="ui3d_tab_material">Материал</string>
+    <string name="ui3d_tab_shape">Форма</string>
+    <string name="ui3d_tab_light">Свет и сцена</string>
+    <string name="ui3d_tab_anim">Анимация</string>
+    <string name="ui3d_ready_materials">Готовые материалы</string>
+    <string name="ui3d_finish">Поверхность</string>
+    <string name="ui3d_finish_smooth">Гладкая</string>
+    <string name="ui3d_finish_brushed">Шлифованная</string>
+    <string name="ui3d_finish_scratched">Поцарапанная</string>
+    <string name="ui3d_finish_hammered">Кованая</string>
+    <string name="ui3d_finish_weathered">Состаренный металл</string>
+    <string name="ui3d_text">Текст</string>
+    <string name="ui3d_extrusion">Выдавливание</string>
+    <string name="ui3d_depth_hint">100% = высота буквы. Чтобы анимировать глубину, ставьте ключи на «Масштаб Z» (Трансформация).</string>
+    <string name="ui3d_deform_letters">Деформировать буквы (поворот, цилиндр, скручивание)</string>
+    <string name="ui3d_shadows">Тени</string>
+    <string name="ui3d_bloom_strength">Сила свечения</string>
+</resources>

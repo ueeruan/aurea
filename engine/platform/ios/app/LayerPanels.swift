@@ -882,8 +882,9 @@ struct AppearancePanel: View {
                 LeftRail(keyframeLook: look, onKeyframe: tab == 0 ? key : nil, curveAnimated: look != .none,
                     onCurve: tab == 0 && keys.count >= 2 ? curve : nil, expression: expr, onExpression: tab == 0 ? expression : nil, onBack: { model.panel = .none })
                 VStack(spacing: 0) {
-                    ParamTabs([AureaText.t("panel_opacidade"), AureaText.t("panel_mistura"), AureaText.t("panel_mascara_recorte")], selected: tab, onSelect: { value in
-                        if value == 2 { model.openPanel(.mask) } else { tab = value }
+                    // A máscara virou efeito (seletor de efeitos): sem aba própria aqui.
+                    ParamTabs([AureaText.t("panel_opacidade"), AureaText.t("panel_mistura")], selected: tab, onSelect: { value in
+                        tab = value
                     }, animated: { $0 == 0 && look != .none })
                     if tab == 0 { opacityBody } else { blendBody }
                 }

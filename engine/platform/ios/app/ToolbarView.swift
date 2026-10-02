@@ -568,7 +568,9 @@ private struct ShellMenuRow: View {
             let index = model.layers.firstIndex(where: { $0.id == row.id }) ?? 0
             let inside = model.status.playhead > Int64(row.startFrame) && model.status.playhead < Int64(row.endFrame)
             ShellMenuSection("editor_camada")
-            ShellMenuRow(CupertinoGlyph.Pencil, "editor_renomear", enabled: !row.locked) { shell.sheet = .renameLayer }
+            // Sem o que já está à vista (nada duas vezes): renomear é o nome no
+            // topo, excluir é a lixeira do topo, aparar/dividir/velocidade/volume
+            // moram na doca, entrar/desagrupar grupo na fileira rápida.
             ShellMenuRow(row.locked ? ShellGlyph.LockOpenFill : CupertinoGlyph.LockFill, row.locked ? "editor_desbloquear_camada" : "editor_bloquear_camada",
                          detail: row.locked ? "editor_volta_aceitar_movimento_edicao" : "editor_nao_aceita_movimento_corte_nem_edicao") { model.mutate { $0.setLayer(row.id, locked: !row.locked) }; model.refreshModel(force: true) }
             ShellMenuRow(row.visible ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, row.visible ? "editor_ocultar_camada" : "editor_mostrar_camada") { model.mutate { $0.setLayer(row.id, visible: !row.visible) }; model.refreshModel(force: true) }
@@ -603,6 +605,10 @@ private struct ShellMenuRow: View {
                 ShellMenuRow(CupertinoGlyph.Grid, "editor_guia_nao_exporta", checked: row.guide, detail: "editor_aparece_aqui_editor_fica_fora_video") { model.mutate { $0.setLayer(row.id, guide: !row.guide) }; model.refreshModel(force: true) }
             }
             ShellMenuRow(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar") { act { model.engine.duplicateLayers(ids); model.refreshModel(force: true) } }
+            // Puxar para o cabeçote saiu da fileira rápida (igual à do AM) e mora aqui.
+            ShellMenuRow(CupertinoGlyph.ArrowDownToLine, "editor_puxar_cabecote", enabled: !row.locked) {
+                act { if model.status.playing != 0 { model.playPause() }; model.moveToPlayhead(row.id) }
+            }
             ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_camada") { act { model.engine.copyLayers(ids) } }
             ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_camada_cabecote", enabled: model.engine.clipboardState & 1 != 0) { act { model.engine.pasteLayers(model.status.playhead); model.refreshModel(force: true) } }
             ShellMenuRow(CupertinoGlyph.Paintbrush, "editor_copiar_estilo") { act { model.engine.copyStyle(row.id) } }
@@ -623,11 +629,7 @@ private struct ShellMenuRow: View {
             }.padding(.horizontal, 14).padding(.vertical, 4)
             if row.kind != 3 {
                 ShellMenuSection("editor_grupo")
-                // Alternar grupo (app antigo): agrupa as escolhidas; num grupo, desagrupa.
-                ShellMenuRow(ShellGlyph.SquareSplit2x2, "la_toggle_group", detail: "la_toggle_group_hint") { act { model.toggleGroup() } }
                 if row.kind == 12 {
-                    ShellMenuRow(CupertinoGlyph.ArrowDownRightSquare, "editor_editar_grupo") { act { model.openGroup(row.id) } }
-                    ShellMenuRow(ShellGlyph.SquareSplit2x2, "editor_desagrupar") { act { model.ungroup(row.id) } }
                     let through = model.engine.groupCameraPassThrough(row.id) == 1
                     ShellMenuRow(CupertinoGlyph.Camera, "la_group_camera", checked: through, detail: "la_group_camera_hint") {
                         if model.engine.setGroupCameraPassThrough(!through, forLayer: row.id) {
@@ -666,7 +668,6 @@ private struct ShellMenuRow: View {
                 if row.kind == 1 {
                     ShellMenuRow(CupertinoGlyph.MusicNote2, "editor_extrair_audio", detail: "editor_som_vira_camada_propria_video_fica") { act { _ = model.engine.extractAudio(fromLayer: row.id); model.refreshModel(force: true) } }
                 }
-                if row.kind == 1 || row.kind == 3 { ShellMenuRow(CupertinoGlyph.Speaker2, "sh_menu_volume") { act { model.openPanel(.audio) } } }
             }
             ShellMenuSection("editor_movimento")
             let timeFlags = (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0
@@ -680,20 +681,19 @@ private struct ShellMenuRow: View {
                     act { model.mutate { $0.setVectorBlur(forLayer: row.id, amount: timeFlags & 32 == 0 ? 1 : 0) }; model.refreshModel(force: true) }
                 }
             }
-            ShellMenuSection("editor_tempo")
-            ShellMenuRow(CupertinoGlyph.ArrowRightToLine, "editor_aparar_inicio_cabecote", enabled: inside && !row.locked) { act { model.trimStart(row.id, at: model.status.playhead) } }
-            ShellMenuRow(CupertinoGlyph.Scissors, "editor_dividir_cabecote", enabled: inside && !row.locked) { act { model.splitAtPlayhead([row.id]) } }
-            ShellMenuRow(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote", enabled: inside && !row.locked) { act { model.trimEnd(row.id, at: model.status.playhead) } }
-            if row.kind == 1 || row.kind == 3 { ShellMenuRow(CupertinoGlyph.Speedometer, "sh_menu_speed_remap") { act { model.openPanel(.speed) } } }
-            if row.kind == 1 || row.kind == 3 { ShellMenuRow(CupertinoGlyph.Scissors, "Slip · Roll · Slide") { act { model.openPanel(.clipEdit) } } }
+            if row.kind == 1 || row.kind == 3 {
+                ShellMenuSection("editor_tempo")
+                ShellMenuRow(CupertinoGlyph.Scissors, "Slip · Roll · Slide") { act { model.openPanel(.clipEdit) } }
+            }
             if row.kind == 1 {
                 ShellMenuRow(ShellGlyph.Snow, "sh_menu_freeze_frame", enabled: inside) { act { let created = model.engine.freezeFrame(forLayer: row.id, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3))); model.refreshModel(force: true); if created >= 0 { model.select(layerId: created) } } }
+                // Rastreio de PONTO e estabilização (o rastreio de câmera virou efeito).
                 ShellMenuSection("editor_rastreio")
+                // O painel inteiro (ponto, planar, cantos, estabilizador) sem já pedir o ponto.
+                ShellMenuRow(ShellGlyph.Viewfinder, "dock2_tracking_tools", detail: "dock2_tracking_tools_detail") { act { model.select(layerId: row.id); model.openPanel(.tracking) } }
                 ShellMenuRow(ShellGlyph.Viewfinder, "editor_rastrear_ponto", detail: "editor_cria_nulo_segue_ponto_ligue_outras") { act { model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: false) } }
                 ShellMenuRow(ShellGlyph.Viewfinder, "editor_estabilizar_pelo_ponto", detail: "editor_move_video_ponto_ficar_parado_tela") { act { model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: true) } }
             }
-            ShellMenuSection("editor_mais")
-            ShellMenuRow(CupertinoGlyph.Trash, "editor_excluir_camada", danger: true) { act { removeSelection() } }
         }
     }
     /// Menu da ENGRENAGEM da barra do projeto: a seção "Projeto" nova primeiro

@@ -77,7 +77,7 @@ import kotlin.math.sin
 /**
  * Categorias do adicionar (7.2): ícone grande + nome curto, cada recurso num
  * lugar só. O antigo "Mais" e o trilho da direita (mão livre, vetorial, texto)
- * foram distribuídos aqui: SVG em Vetor, legendas em Texto, ajuste/agrupar em
+ * foram distribuídos aqui: SVG em Vetor, ajuste/agrupar em
  * Elemento, marca e batidas em Áudio. `Shape` continua o 1º (padrão do `openAdd`).
  */
 internal enum class AddTab(@StringRes val label: Int, val glyph: Char) {
@@ -462,14 +462,11 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
 
 @Composable
 private fun TextTab(store: EditorStore, ui: EditorUi) {
-    val needsSpeech = stringResource(R.string.sh_add_captions_need_speech)
+    // Legendas automáticas viraram efeito (seletor de efeitos da camada de fala).
     CardGrid(
         listOf(
             AddItem(stringResource(R.string.sh_add_tab_text), CupertinoGlyph.Textformat, AureaColors.Accent) {
                 if (store.addText() >= 0) { ui.adding = false; ui.panel = null }
-            },
-            AddItem(stringResource(R.string.sh_add_speech_captions), CupertinoGlyph.CaptionsBubble) {
-                openPanel(store, ui, EditorPanel.Captions)
             },
         ),
     )

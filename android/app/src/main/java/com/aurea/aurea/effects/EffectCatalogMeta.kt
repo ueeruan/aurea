@@ -160,6 +160,14 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem),
         "rgb no tempo canais separados atraso de cor",
     ))
+    put("aurea.time.motion_detect", EffectMeta(
+        R.string.fx_desc_time_motion_detect,
+        listOf(EffectTarget.Video),
+        "detectar movimento diferenca quadro anterior",
+    ))
+    put("aurea.stylize.crt_emulator", EffectMeta(R.string.fx_desc_stylize_crt_emulator, AllTargets, "crt tv tubo retro varredura fosforo"))
+    put("aurea.glitch.dissolve_shake", EffectMeta(R.string.fx_desc_glitch_dissolve_shake, AllTargets, "tremor dissolver fragmentos quebrar"))
+    put("aurea.distort.displacement_map", EffectMeta(R.string.fx_desc_distort_displacement_map, AllTargets, "mapa deslocamento camada distorcer"))
     put("aurea.control.slider", EffectMeta(R.string.fx_desc_control_slider, AllTargets))
     put("aurea.control.angle", EffectMeta(R.string.fx_desc_control_angle, AllTargets))
     put("aurea.control.checkbox", EffectMeta(R.string.fx_desc_control_checkbox, AllTargets))
@@ -242,6 +250,13 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh"))
     put("aurea.shape3d.layout", EffectMeta(R.string.fx_desc_shape3d_layout, listOf(EffectTarget.Cena3D),
         "forma 3d shape partes parts girar espalhar explodir atraso aleatorio"))
+    // --- Ferramentas que moram no catálogo (EffectTool): a ficha e os sinônimos ---
+    put(EffectTool.Captions.key, EffectMeta(R.string.fxui_tool_captions_desc, AllTargets,
+        "legenda legendas automaticas captions subtitles subtitulos transcrever transcribe fala voz speech субтитры कैप्शन ترجمة teks"))
+    put(EffectTool.CameraTrack.key, EffectMeta(R.string.fxui_tool_camera_track_desc, listOf(EffectTarget.Video),
+        "rastreio rastrear camera tracking track 3d cena match move seguimiento трекинг ट्रैकिंग تتبع pelacakan"))
+    put(EffectTool.Mask.key, EffectMeta(R.string.fxui_tool_mask_desc, AllTargets,
+        "mascara mask roto recorte desenhar forma esconder mostrar mascara маска मास्क قناع masker"))
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", EffectMeta(R.string.fx_desc_ai_depth_map, listOf(EffectTarget.Imagem, EffectTarget.Video),
         "profundidade depth mapa ia ai midas distancia perto longe z matte fundo"))
@@ -443,4 +458,63 @@ fun catalogHaystack(catalog: List<EffectCatalogEntry>): Map<Int, String> {
         ).joinToString(" ")
     }
     return remember(catalog, locale) { parts.mapValues { (_, text) -> normalizeSearch(text) } }
+}
+
+// --- A tela "Adicionar efeito": grupos e ferramentas --------------------------
+
+/** O rótulo de uma ferramenta-efeito, no idioma do app. */
+@StringRes
+fun toolLabelRes(tool: EffectTool): Int = when (tool) {
+    EffectTool.Captions -> R.string.fxui_tool_captions
+    EffectTool.CameraTrack -> R.string.fxui_tool_camera_track
+    EffectTool.Mask -> R.string.fxui_tool_mask
+}
+
+/** O desenho da ferramenta no cartão (ela não tem prévia renderizada). */
+fun toolGlyph(tool: EffectTool): Char = when (tool) {
+    EffectTool.Captions -> CupertinoGlyph.CaptionsBubble
+    EffectTool.CameraTrack -> com.aurea.aurea.editor.ShellGlyph.Viewfinder
+    EffectTool.Mask -> CupertinoGlyph.PencilOutline
+}
+
+/** O nome que o cartão mostra: o da ferramenta traduzido, ou o do efeito. */
+@Composable
+fun pickerEntryName(entry: EffectCatalogEntry): String =
+    effectToolOf(entry.typeId)?.let { stringResource(toolLabelRes(it)) } ?: effectDisplayName(entry.typeId, entry.name)
+
+/** O rótulo do ladrilho de um grupo. */
+@StringRes
+fun effectGroupLabelRes(group: EffectGroup): Int = when (group) {
+    EffectGroup.ColorLight -> R.string.fxui_group_color_light
+    EffectGroup.Blur -> R.string.fxui_group_blur
+    EffectGroup.Distort -> R.string.fxui_group_distort
+    EffectGroup.Motion -> R.string.fxui_group_motion
+    EffectGroup.Stylize -> R.string.fxui_group_stylize
+    EffectGroup.Glitch -> R.string.fxui_group_glitch
+    EffectGroup.DrawEdge -> R.string.fxui_group_draw_edge
+    EffectGroup.Procedural -> R.string.fxui_group_procedural
+    EffectGroup.Matte -> R.string.fxui_group_matte
+    EffectGroup.Time -> R.string.fxui_group_time
+    EffectGroup.Text -> R.string.fxui_group_text
+    EffectGroup.ThreeD -> R.string.fxui_group_3d
+    EffectGroup.Audio -> R.string.fxui_group_audio
+    EffectGroup.Utility -> R.string.fxui_group_utility
+    EffectGroup.Other -> R.string.fxui_group_other
+}
+
+/** O glifo do ladrilho quando o grupo não tem prévia (Texto, 3D, Áudio). */
+fun effectGroupGlyph(group: EffectGroup): Char = when (group) {
+    EffectGroup.ColorLight -> CupertinoGlyph.Sparkles
+    EffectGroup.Blur -> CupertinoGlyph.DropFill
+    EffectGroup.Distort, EffectGroup.Motion -> CupertinoGlyph.Move
+    EffectGroup.Stylize -> CupertinoGlyph.SquareGrid2x2
+    EffectGroup.Glitch -> CupertinoGlyph.Bolt
+    EffectGroup.DrawEdge -> CupertinoGlyph.PencilOutline
+    EffectGroup.Procedural -> CupertinoGlyph.WandStars
+    EffectGroup.Matte -> CupertinoGlyph.Scissors
+    EffectGroup.Time -> CupertinoGlyph.Timer
+    EffectGroup.Text -> CupertinoGlyph.CaptionsBubble
+    EffectGroup.Audio -> CupertinoGlyph.MusicNote
+    EffectGroup.Utility -> CupertinoGlyph.SliderHorizontal3
+    EffectGroup.ThreeD, EffectGroup.Other -> CupertinoGlyph.WandStars
 }

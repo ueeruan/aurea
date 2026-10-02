@@ -41,6 +41,9 @@ struct VideoStreamConfig {
     ExportCodec codec = ExportCodec::H264;
     u32 bitrateBps = 0;
     u32 keyframeIntervalFrames = 0;   ///< 0 = 2 s
+    /// Controle de taxa pedido: 0 = CBR, 1 = VBR (com pico limitado). Nunca
+    /// qualidade constante: CQ ignora `bitrateBps` e o arquivo explode.
+    u32 rateMode = 1;
     ExportColorTags color{};
 };
 

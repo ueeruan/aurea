@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeitos: Emulador CRT, Tremor dissolvente e Mapa de deslocamento (nomes, descrições, rótulos). -->
+<resources>
+    <string name="fx_name_crt_emulator">محاكي CRT</string>
+    <string name="fx_desc_stylize_crt_emulator">الصورة على تلفاز بأنبوب: شاشة منحنية وخطوط مسح وقناع فوسفور RGB وألوان غير متقاربة وتوهج ووميض وشريط متدحرج.</string>
+    <string name="fx_name_dissolve_shake">اهتزاز متحلل</string>
+    <string name="fx_desc_glitch_dissolve_shake">تهتز الطبقة وتتفتت إلى أجزاء مشوشة تتطاير وتتلاشى — تتحرك تلقائيًا دون إطارات مفتاحية.</string>
+    <string name="fx_name_displacement_map">خريطة الإزاحة</string>
+    <string name="fx_desc_distort_displacement_map">يحرّك البكسلات وفق قيم طبقة أخرى (الخريطة): اختر قناة لكل محور وأقصى إزاحة. دون طبقة، تُستخدم الصورة نفسها.</string>
+    <string name="fx3_curvatura">الانحناء</string>
+    <string name="fx3_linhas_intensidade">شدة خطوط المسح</string>
+    <string name="fx3_linhas_densidade">كثافة خطوط المسح</string>
+    <string name="fx3_mascara">قناع الفوسفور</string>
+    <string name="fx3_mascara_intensidade">شدة القناع</string>
+    <string name="fx3_mascara_tamanho">حجم القناع</string>
+    <string name="fx3_convergencia">التقارب</string>
+    <string name="fx3_brilho_bloom">التوهج</string>
+    <string name="fx3_raio_brilho">نصف قطر التوهج</string>
+    <string name="fx3_cintilacao">الوميض</string>
+    <string name="fx3_faixa_rolando">شريط متدحرج</string>
+    <string name="fx3_velocidade_faixa">سرعة الشريط</string>
+    <string name="fx3_brilho_geral">السطوع العام</string>
+    <string name="fx3o_grade_abertura">شبكة الفتحات</string>
+    <string name="fx3o_mascara_sombra">قناع الظل</string>
+    <string name="fx3o_fenda">قناع الشقوق</string>
+    <string name="fx3_dissolucao">التحلل</string>
+    <string name="fx3_tamanho_fragmento">حجم الجزء</string>
+    <string name="fx3_transparencia_fragmentos">شفافية الأجزاء</string>
+    <string name="fx3_velocidade_evolucao">سرعة التطور</string>
+    <string name="fx3_eixos">المحاور</string>
+    <string name="fx3_camada_mapa">طبقة الخريطة</string>
+    <string name="fx3_canal_horizontal">القناة الأفقية</string>
+    <string name="fx3_canal_vertical">القناة العمودية</string>
+    <string name="fx3o_desligado">إيقاف</string>
+    <string name="fx3_desloc_h_max">أقصى إزاحة أفقية</string>
+    <string name="fx3_desloc_v_max">أقصى إزاحة عمودية</string>
+    <string name="fx3_comportamento_mapa">سلوك الخريطة</string>
+    <string name="fx3o_centralizar">توسيط</string>
+    <string name="fx3o_esticar">تمديد</string>
+    <string name="fx3o_repetir">تكرار</string>
+    <string name="fx3o_repetir_pixels">تكرار بكسلات الحافة</string>
+    <string name="fx3o_envolver">التفاف</string>
+    <string name="fx3_expandir_saida">توسيع الإخراج</string>
+</resources>

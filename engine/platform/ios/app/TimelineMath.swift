@@ -376,6 +376,92 @@ enum WaveGrid {
     }
 }
 
+/// Arrasto VERTICAL de UM trecho (como no Alight Motion: só ele anda, nunca a
+/// linha inteira) — porte de `RowDrop` (TimelineModel.kt). Diz onde o trecho
+/// cai com o dedo em `y` (conteúdo: do topo da 1ª fileira, com a rolagem):
+/// ENTRE fileiras (fileira própria ali — o traço de inserção) ou DENTRO de uma
+/// linha magnética/compartilhada (faixa do meio da fileira, só se couber no
+/// tempo). O motor (`move_layer_to_row`) decide a pilha; aqui sai o pedido:
+/// âncora + modo (0 = acima da fileira da âncora, âncora 0 = no fundo; 1 =
+/// entrar na linha da âncora).
+enum TimelineRowDrop {
+    enum Kind: Equatable { case none, insert, join }
+    struct Target: Equatable {
+        var kind: Kind
+        var anchor: Int64
+        var mode: Int
+        /// y (conteúdo) do traço de inserção; NaN fora de `.insert`.
+        var lineY: CGFloat
+        /// Fileira acesa ao entrar numa linha; −1 fora de `.join`.
+        var row: Int
+        static let none = Target(kind: .none, anchor: 0, mode: 0, lineY: .nan, row: -1)
+        static func == (a: Target, b: Target) -> Bool {
+            a.kind == b.kind && a.anchor == b.anchor && a.mode == b.mode && a.row == b.row
+                && (a.lineY == b.lineY || (a.lineY.isNaN && b.lineY.isNaN))
+        }
+    }
+
+    /// Faixa do meio da fileira que conta como "dentro da linha".
+    static let joinEdge: CGFloat = 0.25
+
+    static func target(rows: [TimelineRow], tops: [CGFloat], y: CGFloat, moving: TimelineRow, source: Int) -> Target {
+        let n = rows.count
+        guard n > 0, tops.count == n + 1, rows.indices.contains(source), y.isFinite else { return .none }
+        let keys = timelineGroupKeys(rows)
+        var t = 0
+        if y >= tops[n] { t = n - 1 }
+        else if y >= tops[0] { while t < n - 1 && y >= tops[t + 1] { t += 1 } }
+        var gs = t, ge = t + 1
+        while gs > 0 && keys[gs - 1] == keys[t] { gs -= 1 }
+        while ge < n && keys[ge] == keys[t] { ge += 1 }
+        var ss = source, se = source + 1
+        while ss > 0 && keys[ss - 1] == keys[source] { ss -= 1 }
+        while se < n && keys[se] == keys[source] { se += 1 }
+        let line = moving.line
+        var sharesLine = false
+        if line != 0 {
+            for r in rows where r.track == nil && r.line == line {
+                if r.segments.contains(where: { $0.id != moving.id }) { sharesLine = true }
+            }
+        }
+        let row = rows[t]
+        let h = tops[t + 1] - tops[t]
+        let frac = h > 0 ? (y - tops[t]) / h : 0.5
+        let middle = frac >= joinEdge && frac <= 1 - joinEdge
+        // No meio da própria fileira (ou de outra fileira da mesma linha): fica onde está.
+        if middle && (t == source || (line != 0 && row.track == nil && row.line == line)) { return .none }
+        if row.track == nil && row.line != 0 && row.line != line && middle {
+            var magnetic = false, count = 0, fits = true
+            var anchor: Int64 = 0
+            for r in rows where r.track == nil && r.line == row.line {
+                for s in r.segments where s.id != moving.id {
+                    count += 1
+                    if anchor == 0 { anchor = s.id }
+                    if s.magnetic { magnetic = true }
+                    if s.start < moving.end && moving.start < s.end { fits = false }
+                }
+            }
+            if (magnetic || count >= 2) && fits && anchor != 0 {
+                return Target(kind: .join, anchor: anchor, mode: 1, lineY: .nan, row: t)
+            }
+        }
+        // ENTRE fileiras: metade de cima do grupo = acima dele; de baixo = abaixo.
+        let mid = (tops[gs] + tops[ge]) / 2
+        let gap = y < mid ? gs : ge
+        if !sharesLine && (gap == ss || gap == se) { return .none }
+        var anchor: Int64 = 0
+        if gap < n {
+            var e = gap + 1
+            while e < n && keys[e] == keys[gap] { e += 1 }
+            search: for k in gap..<e where rows[k].track == nil {
+                for s in rows[k].segments where s.id != moving.id { anchor = s.id; break search }
+            }
+            if anchor == 0 { return .none }
+        }
+        return Target(kind: .insert, anchor: anchor, mode: 0, lineY: tops[gap], row: -1)
+    }
+}
+
 /// Reordenar: linha de destino sob o dedo (0 = topo = camada da frente).
 enum Reorder {
     struct Preview {

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Doca/menus da camada (limpeza 2026-10-01). Chaves dock2_*. -->
+<resources>
+    <string name="dock2_tracking_tools">Инструменты трекинга</string>
+    <string name="dock2_tracking_tools_detail">Точка, плоскость, углы и стабилизатор</string>
+    <string name="dock2_media_only">Скорость и звук — только для видео и аудио</string>
+</resources>

@@ -81,6 +81,17 @@ class EditorLayoutTest {
             assertEquals(height, batch.topBar + batch.preview + batch.strip + batch.transport + batch.timeline + batch.sheet, 0.01f)
         }
     }
+    @Test fun oneRowDockGivesTheFreedHeightToTheTimeline() {
+        // Doca enxuta (≤ 4 fichas): uma fileira só, sem faixa vazia; o palco não mexe.
+        for (height in listOf(640f, 720f, 780f, 840f, 960f)) {
+            val two = EditorLayout.solve(height, SheetContent.Dock, false)
+            val one = EditorLayout.solve(height, SheetContent.Dock, false, dockRows = 1)
+            assertEquals("one row at $height", EditorLayout.dock(1), one.sheet, 0.01f)
+            assertEquals(EditorLayout.DOCK, EditorLayout.dock(2), 0.01f)
+            assertEquals(two.preview, one.preview, 0.01f)
+            assertEquals(two.timeline + (two.sheet - one.sheet), one.timeline, 0.01f)
+        }
+    }
     @Test fun dockRowsPutTheLargerHalfBelow() {
         assertEquals(listOf(4), dockRows(4))
         assertEquals(listOf(2, 3), dockRows(5))
@@ -96,6 +107,50 @@ class EditorLayoutTest {
             assertEquals(overview.preview, bar.preview, 0.01f)
             assertTrue(bar.timeline >= 110f)
             assertEquals(height, bar.topBar + bar.preview + bar.strip + bar.transport + bar.timeline + bar.sheet, 0.01f)
+        }
+    }
+    // "A UI inteira sumiu" no tablet: em pé (iPad 11"/13", tablets Android de
+    // 800–1032 dp) o editor usa o layout do celular; o largo é só paisagem.
+    private val portraitTablets = listOf(744f to 1089f, 820f to 1136f, 834f to 1150f, 800f to 1208f,
+        1024f to 1322f, 1032f to 1332f, 1280f to 1700f)
+
+    @Test fun portraitTabletsUseThePhoneLayoutAndLandscapeUsesTheWideOne() {
+        for ((w, h) in portraitTablets) {
+            assertTrue("$w x $h is portrait: phone layout", !EditorLayout.isWide(w, h))
+            assertTrue("$h x $w is landscape: wide layout", EditorLayout.isWide(h, w))
+        }
+        // Celular em pé nunca é largo; deitado (≥ 600) é.
+        assertTrue(!EditorLayout.isWide(390f, 780f))
+        assertTrue(EditorLayout.isWide(844f, 390f))
+        assertTrue(!EditorLayout.isWide(560f, 320f))
+        // Janela quadrada (Stage Manager / multitarefa): empilhado.
+        assertTrue(!EditorLayout.isWide(1000f, 1000f))
+    }
+
+    @Test fun portraitTabletZonesAreAllVisibleAndFillTheScreen() {
+        val contents = listOf(SheetContent.None, SheetContent.AddBar, SheetContent.Dock, SheetContent.Panel,
+            SheetContent.Curve, SheetContent.Batch, SheetContent.Adding)
+        for ((w, h) in portraitTablets) for (content in contents) for (aspect in listOf(0f, 9f / 16f, 16f / 9f, 1f)) {
+            val m = EditorLayout.solve(h, content, false, w - 16f, aspect)
+            val label = "$w x $h $content aspect $aspect"
+            assertEquals(label, EditorLayout.TOP_BAR, m.topBar, 0.01f)
+            assertEquals(label, EditorLayout.TRANSPORT, m.transport, 0.01f)
+            assertTrue("$label preview ${m.preview}", m.preview >= EditorLayout.PREVIEW_MIN)
+            assertTrue("$label timeline ${m.timeline}", m.timeline >= 110f)
+            if (content != SheetContent.None) assertTrue("$label sheet ${m.sheet}", m.sheet > 0f)
+            assertEquals(label, h, m.topBar + m.preview + m.strip + m.transport + m.timeline + m.sheet, 0.01f)
+        }
+    }
+
+    @Test fun landscapeTabletWideZonesStayPositive() {
+        for ((w, h) in portraitTablets) {
+            // Deitado: largura = h, altura = w.
+            val timeline = EditorLayout.wideTimeline(w)
+            val preview = w - EditorLayout.TOP_BAR - EditorLayout.TRANSPORT - EditorLayout.STRIP - timeline - EditorLayout.ADD_BAR
+            assertTrue("timeline $timeline", timeline in 88f..280f)
+            assertTrue("preview $preview at $h x $w", preview >= EditorLayout.PREVIEW_MIN)
+            val sheet = EditorLayout.wideSheetWidth(h)
+            assertTrue("sheet $sheet", sheet in 280f..380f && h - sheet > 400f)
         }
     }
 }

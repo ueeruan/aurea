@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel de efeitos: catalogo "Adicionar efeito", pilha compacta e ferramentas-efeito. -->
+<resources>
+    <string name="fxui_featured">Featured</string>
+    <string name="fxui_categories">Categories</string>
+    <string name="fxui_group_color_light">Colour and light</string>
+    <string name="fxui_group_blur">Blur and sharpen</string>
+    <string name="fxui_group_distort">Distortion</string>
+    <string name="fxui_group_motion">Move and transform</string>
+    <string name="fxui_group_stylize">Stylise</string>
+    <string name="fxui_group_glitch">Glitch</string>
+    <string name="fxui_group_draw_edge">Drawing and edges</string>
+    <string name="fxui_group_procedural">Procedural</string>
+    <string name="fxui_group_matte">Matte, mask and key</string>
+    <string name="fxui_group_time">Time and transition</string>
+    <string name="fxui_group_text">Text</string>
+    <string name="fxui_group_3d">3D</string>
+    <string name="fxui_group_audio">Audio</string>
+    <string name="fxui_group_utility">Utility and expression</string>
+    <string name="fxui_group_other">Other</string>
+    <string name="fxui_tool_captions">Auto captions</string>
+    <string name="fxui_tool_camera_track">Camera tracking</string>
+    <string name="fxui_tool_mask">Mask</string>
+    <string name="fxui_tool_captions_desc">Transcribes the layer\'s speech and creates timed captions.</string>
+    <string name="fxui_tool_camera_track_desc">Analyses the video\'s camera motion to place 3D objects in the scene.</string>
+    <string name="fxui_tool_mask_desc">Draws shapes that reveal or hide parts of the layer.</string>
+    <string name="fxui_tool_badge">Tool</string>
+    <string name="fxui_tool_masks_n">Masks: %1$d</string>
+    <string name="fxui_tool_captions_n">Captions: %1$d</string>
+    <string name="fxui_tool_camera_ready">Camera analysed</string>
+    <string name="fxui_tool_remove_masks_q">Remove all masks from this layer?</string>
+    <string name="fxui_tool_remove_captions_q">Remove the generated captions from this layer?</string>
+    <string name="fxui_a11y_expand">Show %1$s settings</string>
+    <string name="fxui_a11y_collapse">Hide %1$s settings</string>
+    <string name="fxui_a11y_enable">Turn on %1$s</string>
+    <string name="fxui_a11y_disable">Turn off %1$s</string>
+    <string name="fxui_a11y_drag">Drag %1$s to reorder</string>
+    <string name="fxui_a11y_remove">Remove %1$s</string>
+    <string name="fxui_a11y_open">Open %1$s</string>
+    <string name="fxui_a11y_category">%1$s category</string>
+    <string name="fxui_back_categories">Back to categories</string>
+    <string name="fxui_search_effects">Search effects</string>
+    <string name="fxui_effect_off">Off</string>
+</resources>

@@ -175,11 +175,43 @@ struct ProjectFile: Identifiable, Equatable {
 struct ExportOptions: Equatable {
     var codec: AureaExportCodec = .h264
     var shortSide: UInt32 = 1080
-    var bitrateMbps: UInt32 = 20
+    var bitrateMbps: UInt32 = 0   // 0 = automático pela qualidade (BitratePolicy do motor)
+    /// 0 Baixa, 1 Normal, 2 Alta.
+    var quality: UInt32 = 1
     var audioBitrateKbps: UInt32 = 192
     var aiUpscale: UInt32 = 0
     var trimToContent = true
     var fps: Double = 0   // 0 = o da composição
+    /// Vídeo, quadro atual (PNG), sequência PNG (.zip) ou GIF (Exporter.kt: ExportFormat).
+    var kind: ExportKind = .video
+    /// PNG e sequência: lado menor; 0 = a resolução da composição.
+    var imageShortSide: UInt32 = 0
+    /// GIF: largura máxima (px) e quadros por segundo. A sequência usa `fps`.
+    var gifWidth: UInt32 = 480
+    var gifFps: Double = 15
+}
+
+/// Formato do export. `engineCode` = ImageExportFormat do motor
+/// (export/ImageEncode.hpp); o vídeo usa o encoder da plataforma.
+enum ExportKind: Int, CaseIterable {
+    case video = -1, frame = 0, sequence = 1, gif = 2
+    var engineCode: UInt32 { UInt32(max(0, rawValue)) }
+    var fileExtension: String {
+        switch self {
+        case .video: return "mp4"
+        case .frame: return "png"
+        case .sequence: return "zip"
+        case .gif: return "gif"
+        }
+    }
+    /// Limites do motor (kGifMaxFrames / kSequenceMaxFrames).
+    func tooLong(_ frames: Int) -> Bool {
+        switch self {
+        case .gif: return frames > 1800
+        case .sequence: return frames > 18000
+        default: return false
+        }
+    }
 }
 
 /// Pastas do app. O `.aurea` e a mídia importada moram em Documents; o cache de
@@ -499,6 +531,8 @@ final class AureaModel: ObservableObject {
     @Published private(set) var exportCancelled = false
     @Published private(set) var exportPublishing = false
     @Published private(set) var exportSavedToPhotos = false
+    /// Formato do export em andamento ou do último pronto (título e "Abrir").
+    @Published private(set) var exportedKind: ExportKind = .video
     func openExport() {
         if !exporting { exportedURL = nil; exportMessage = nil; exportCancelled = false; exportProgress = [:] }
         showExport = true
@@ -848,6 +882,27 @@ final class AureaModel: ObservableObject {
                             refreshModel(force: true)
                             panel = .textAnimation
                         }
+                    case "text-transform":
+                        // Texto sozinho com Animação aberta: o teste põe o Text Transform
+                        // pela ficha e arrasta Deslocamento X e depois Y (o "não funciona").
+                        let textId = engine.addText("AUREA")
+                        if textId >= 0 { refreshModel(force: true); select(layerId: textId, additive: false) }
+                        panel = .textAnimation
+                    case "null-link":
+                        // Pedido 2026-10-02: "vincula mas não mexe". Texto ligado ao
+                        // 4º nulo pela MESMA função do seletor de pai; o 4º fica escolhido.
+                        let text = engine.addText("ABC")
+                        for _ in 0..<4 { addNull(threeD: false) }
+                        refreshModel(force: true)
+                        if let fourth = primarySelection, text >= 0 {
+                            setParent(text, parent: fourth)
+                            refreshModel(force: true)
+                            select(layerId: fourth, openOptions: false)
+                        }
+                    case "null-add":
+                        // Um nulo já criado: o teste cria mais pela barra de adicionar.
+                        addNull(threeD: false)
+                        refreshModel(force: true)
                     case "timeline-arrangement":
                         addShape(1); addShape(1); addShape(1)
                         refreshModel(force: true)
@@ -1255,6 +1310,11 @@ final class AureaModel: ObservableObject {
                 guard self.projectURL == url else { return }
                 if saved {
                     self.homeCardStale = true
+                    // Projeto novo ainda sem ficha: o app morto antes de sair do
+                    // editor deixava o cartão da Home sem medida nem capa.
+                    if !FileManager.default.fileExists(atPath: homeMetaURL(url).path) {
+                        self.writeProjectThumbnail(name: url.deletingPathExtension().lastPathComponent)
+                    }
                     self.autosaveRetryAfter = 0
                     self.unsavedSince = ProcessInfo.processInfo.systemUptime
                     self.autosaveFailureShown = false
@@ -1526,6 +1586,17 @@ final class AureaModel: ObservableObject {
     /// O playhead enquanto o dedo arrasta a régua. É otimismo LOCAL e curto: o
     /// valor do MOTOR volta no próximo `fill_status` e o substitui. Sem isto, o
     /// playhead só andaria a cada 200 ms e o scrub pareceria travado.
+    /// Scrub LEVE da timeline (pinça parada, auto-rolagem na borda): o motor e o
+    /// relógio do cabeçote andam a cada passo, mas o `status` publicado e a
+    /// releitura dos painéis ficam para o fim do gesto (`optimisticPlayhead`).
+    /// Publicar 60 vezes por segundo redesenhava o app inteiro e a pinça
+    /// engasgava. Exige `scrubBegin` aberto.
+    func timelineScrub(_ frame: Int64) {
+        pendingPlayhead = frame
+        pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
+        engine.run { $0.scrub(toFrame: frame) }
+        if playheadClock.frame != frame { playheadClock.frame = frame }
+    }
     func optimisticPlayhead(_ frame: Int64) {
         pendingPlayhead = frame
         pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
@@ -1583,6 +1654,7 @@ final class AureaModel: ObservableObject {
     @Published private(set) var timelineOnlySelection: Set<Int64> = []
 
     func select(layerId: Int64, additive: Bool = false, openOptions: Bool = true) {
+        let previousPrimary = primarySelection
         // A seleção de keyframes é de UMA camada: trocar a principal a descarta.
         if let keys = timelineKeySelection, additive || keys.layer != layerId { clearTimelineKeySelection() }
         if primarySelection != layerId { selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false; pointPick = nil; focusPick = false; freehandPoints = []; panel = .none }
@@ -1595,7 +1667,10 @@ final class AureaModel: ObservableObject {
             engine.run { $0.selectLayers([NSNumber(value: layerId)]) }
             selection = [layerId]
         }
-        selectedEffectId = nil
+        // Tocar de novo na MESMA camada (no palco, na timeline) não fecha o
+        // efeito aberto: o cartão continuava na tela mas parava de reler os
+        // valores, e mexer nele parecia não fazer nada (Text Transform no iOS).
+        if previousPrimary != layerId || selection.count != 1 { selectedEffectId = nil }
         timelineOnlySelection = openOptions ? [] : selection
         if selection.count != 1 { panel = .none }
         refreshSelectedLayer()
@@ -2545,21 +2620,14 @@ final class AureaModel: ObservableObject {
     /// Toque duplo no vazio da cena: a vista volta ao ângulo inicial.
     func resetSceneView() { setSceneView(yaw: -30, pitch: 20, distance: 3) }
 
-    /// Objeto 3D sob o dedo (px da composição): o corpo (cantos vistos pela
-    /// câmera de navegação) ou, sem corpo (modelo, câmera, luz, nulo), a
-    /// origem a até `radius`. O de cima ganha no corpo; na origem, o mais perto.
+    /// Objeto 3D sob o dedo (px da composição), decidido pelo motor
+    /// (`Engine::scene_pick`): o raio da câmera de navegação contra o corpo real
+    /// — plano do texto/forma, triângulos do texto 3D/forma 3D/modelo — em
+    /// qualquer Z e órbita; ganha o mais perto. Sem corpo ali (câmera, luz,
+    /// nulo), a origem mais perto até `radius`.
     func scenePick(_ point: SIMD2<Float>, radius: Float) -> Int64? {
-        let t = status.playhead
-        var best: Int64?
-        var bestDistance = radius
-        for row in layers where row.threeD && row.visible && !row.locked && t >= Int64(row.startFrame) && t < Int64(row.endFrame) {
-            if let detail = engine.layerDetail(row.id), StageGeom.contains(detail, point.x, point.y, slack: 0) { return row.id }
-            let g = engine.gizmo(row.id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
-            guard g.count == 8 else { continue }
-            let d = hypot(g[0] - point.x, g[1] - point.y)
-            if d < bestDistance { bestDistance = d; best = row.id }
-        }
-        return best
+        let id = engine.scenePick(x: point.x, y: point.y, radius: radius)
+        return id != 0 ? Int64(id) : nil
     }
 
     /// Arrasto livre do objeto 3D com o dedo: anda no plano dos dois eixos do
@@ -2728,6 +2796,8 @@ final class AureaModel: ObservableObject {
     func addNull(threeD: Bool) {
         let id = engine.addNull(threeD)
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
+        // Par do Android: o nulo que não nasce DIZ por quê (antes sumia calado).
+        else { toast = AureaText.t("msg_nao_foi_possivel_criar_o_nulo", String(-id)) }
         showAddLayer = false
         syncAfterEdit()
     }
@@ -2754,6 +2824,8 @@ final class AureaModel: ObservableObject {
         guard !exporting else { return }
         exportedURL = nil
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
+        exportedKind = exportOptions.kind
+        if exportOptions.kind != .video { startImageExport(); return }
         let name = (projectName.isEmpty ? "Aurea" : projectName) + ".mp4"
         var url = AureaPaths.documents.appendingPathComponent(name)
         var counter = 1
@@ -2767,9 +2839,48 @@ final class AureaModel: ObservableObject {
                                     fps: exportOptions.fps,
                                     bitrateMbps: exportOptions.bitrateMbps,
                                     audioBitrateKbps: exportOptions.audioBitrateKbps,
-                                    aiUpscale: exportOptions.aiUpscale, trimToContent: exportOptions.trimToContent)
+                                    aiUpscale: exportOptions.aiUpscale, trimToContent: exportOptions.trimToContent,
+                                    quality: exportOptions.quality)
         guard ok else {
             exportMessage = AureaText.t("ios_export_could_not_start")
+            toast = exportMessage
+            return
+        }
+        exporting = true
+        pendingExportURL = url
+        startExportPolling()
+    }
+
+    /// O plano do export como imagem pela regra do motor (dimensões, quadros, bytes).
+    func imageExportPlan() -> [String: NSNumber]? {
+        let options = exportOptions
+        return engine.imageExportPlan(options.kind.engineCode, shortSide: options.imageShortSide, maxWidth: options.gifWidth,
+                                      fps: imageExportFps(options), trimToContent: options.trimToContent)
+    }
+
+    private func imageExportFps(_ options: ExportOptions) -> Double {
+        switch options.kind {
+        case .gif: return options.gifFps
+        case .sequence: return options.fps
+        default: return 0
+        }
+    }
+
+    /// PNG, sequência .zip ou GIF: o motor renderiza e codifica; o progresso e
+    /// o cancelamento são os do vídeo.
+    private func startImageExport() {
+        let options = exportOptions
+        let base = projectName.isEmpty ? "Aurea" : projectName
+        var url = AureaPaths.documents.appendingPathComponent("\(base).\(options.kind.fileExtension)")
+        var counter = 1
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = AureaPaths.documents.appendingPathComponent("\(base) \(counter).\(options.kind.fileExtension)")
+            counter += 1
+        }
+        let code = engine.startImageExport(to: url.path, format: options.kind.engineCode, shortSide: options.imageShortSide,
+                                           maxWidth: options.gifWidth, fps: imageExportFps(options), trimToContent: options.trimToContent)
+        guard code == 0 else {
+            exportMessage = code == 6 && options.kind != .frame ? AureaText.t("exp2_too_long") : AureaText.t("ios_export_could_not_start")
             toast = exportMessage
             return
         }
@@ -2823,23 +2934,38 @@ final class AureaModel: ObservableObject {
     /// The Documents copy remains available for share/open even when Photos is denied.
     private func publishExportToPhotos(_ url: URL) {
         exportPublishing = true
+        // A sequência .zip não vai para Fotos: fica em Arquivos (Documents) e
+        // sai pela folha de compartilhamento.
+        if exportedKind == .sequence {
+            exportPublishing = false; exporting = false
+            exportMessage = AureaText.t("exp2_saved_files")
+            toast = AureaText.t("exp2_done_sequence")
+            AureaAdsManager.shared.showExportInterstitialIfAvailable {}
+            return
+        }
+        let kind = exportedKind
+        let readyKey = kind == .video ? "editor_video_pronto" : kind == .gif ? "exp2_done_gif" : "exp2_done_frame"
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
             guard status == .authorized || status == .limited else {
                 Task { @MainActor in
                     self?.exportPublishing = false; self?.exporting = false
                     self?.exportMessage = AureaText.t("ios_export_saved_allow_photos")
-                    self?.toast = AureaText.t("editor_video_pronto")
+                    self?.toast = AureaText.t(readyKey)
                     // Ponto seguro: o render acabou e o vídeo já está salvo. Não segura nada.
                     AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }
                 return
             }
-            PHPhotoLibrary.shared().performChanges({ PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url) }) { saved, error in
+            PHPhotoLibrary.shared().performChanges({
+                // PNG e GIF entram pelo arquivo (o GIF continua animado em Fotos).
+                if kind == .video { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url) }
+                else { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url) }
+            }) { saved, error in
                 Task { @MainActor in
                     self?.exportSavedToPhotos = saved
                     self?.exportPublishing = false; self?.exporting = false
                     self?.exportMessage = saved ? nil : (error?.localizedDescription ?? AureaText.t("ios_export_photos_failed"))
-                    self?.toast = AureaText.t("editor_video_pronto")
+                    self?.toast = AureaText.t(readyKey)
                     AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }
             }
@@ -3051,6 +3177,18 @@ final class AureaModel: ObservableObject {
     func reorderClip(_ id: Int64, toFrame frame: Int64) -> Bool {
         var ok = false
         mutate { engine in ok = engine.reorderClip(id, toFrame: frame) }
+        if ok { refreshModel(force: true) }
+        return ok
+    }
+
+    /// Arrasto vertical de UM trecho na timeline (como no Alight Motion: só ele
+    /// anda, nunca a linha inteira). mode 0 = fileira própria logo acima da
+    /// fileira de `anchor` (0 = no fundo); 1 = entrar na linha de `anchor` se
+    /// couber. Um passo de desfazer; false = o motor recusou (nada mudou).
+    @discardableResult
+    func moveLayerToRow(_ id: Int64, anchor: Int64, mode: Int) -> Bool {
+        var ok = false
+        mutate { engine in ok = engine.moveLayer(id, toRowOf: anchor, mode: Int32(mode)) }
         if ok { refreshModel(force: true) }
         return ok
     }
@@ -3793,7 +3931,7 @@ extension AureaModel {
 // (ferramentas do app antigo — LayerOps.kt no Android, mesma conta)
 // =============================================================================
 extension AureaModel {
-    private struct FitGeom { let w: Float; let h: Float; let anchor: [Float]; let position: [Float]; let scale: [Float]; let rad: Float; let centered: Bool; let threeD: Bool }
+    private struct FitGeom { let w: Float; let h: Float; let anchor: [Float]; let position: [Float]; let scale: [Float]; let rad: Float; let centered: Bool; let threeD: Bool; var kind: Int32 = 0 }
 
     private func fitGeom(_ id: Int64) -> FitGeom? {
         guard let d = queryDetail(id) else { return nil }
@@ -3806,7 +3944,8 @@ extension AureaModel {
             abs(position[2]) > 0.01 || (rotation.count >= 2 && (abs(rotation[0]) > 0.01 || abs(rotation[1]) > 0.01)) ||
             mask & ((1 << 2) | (1 << 6) | (1 << 7)) != 0
         return FitGeom(w: w, h: h, anchor: anchor, position: position, scale: scale,
-                       rad: (rotation.count > 2 ? rotation[2] : 0) * .pi / 180, centered: StageGeom.layerKind(d) == 10, threeD: threeD)
+                       rad: (rotation.count > 2 ? rotation[2] : 0) * .pi / 180, centered: StageGeom.layerKind(d) == 10, threeD: threeD,
+                       kind: Int32(StageGeom.layerKind(d)))
     }
 
     /// Posição que põe o CENTRO da mídia em (cx, cy) com a escala (sx, sy) e o giro atual.
@@ -3829,7 +3968,9 @@ extension AureaModel {
             let sx = g.scale[0] < 0 ? -k : k, sy = g.scale[1] < 0 ? -k : k
             let p = positionForCenter(g, sx: sx, sy: sy, cx: cw / 2, cy: ch / 2)
             if g.threeD {
-                gizmoSetComponents(id, base: 3, values: [sx, sy, g.scale.count > 2 && g.scale[2] < 0 ? -k : k])
+                // A regra do motor: Z de conteúdo é relativo a X (o volume não estica).
+                gizmoSetComponents(id, base: 3, values: engine.gestureScale3D(g.kind, scaleX: g.scale[0], scaleY: g.scale[1],
+                                                                              scaleZ: g.scale.count > 2 ? g.scale[2] : 1, axis: 4, factor: k).map(\.floatValue))
             } else { setTransform2(3, sx, 4, sy, layer: id) }
             setTransform2(0, p.0, 1, p.1, layer: id)
         }

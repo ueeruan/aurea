@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_name_time_motion_detect">Detectar movimento</string>
+    <string name="fx_desc_time_motion_detect">Mostra só o que se mexeu: compara o quadro com um quadro anterior e acende as diferenças.</string>
+    <string name="core2_fx_motion_delay">Atraso (quadros)</string>
+    <string name="core2_fx_offset_darks">Levantar escuros</string>
+    <string name="core2_fx_motion_mode">Movimento</string>
+    <string name="core2_fxo_motion_all">Todos</string>
+    <string name="core2_fxo_motion_brighter">Mais claro</string>
+    <string name="core2_fxo_motion_darker">Mais escuro</string>
+    <string name="core2_fx_cube_file">Arquivo .cube</string>
+    <string name="core2_fx_flare_ghosts">Reflexos internos</string>
+</resources>

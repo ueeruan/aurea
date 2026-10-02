@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela Exportar (refeita 2026-10-01): qualidade, avancado, render com animador. Chaves exp2_*. -->
+<resources>
+    <string name="exp2_quality_low">Baixa</string>
+    <string name="exp2_quality_normal">Normal</string>
+    <string name="exp2_quality_high">Alta</string>
+    <string name="exp2_estimated_line">Tamanho estimado ≈ %1$s (%2$s Mbps)</string>
+    <string name="exp2_format_note">MP4 abre em qualquer aparelho, player e rede social.</string>
+    <string name="exp2_advanced">Avançado</string>
+    <string name="exp2_codec">Codec</string>
+    <string name="exp2_bitrate">Taxa de bits (Mbps)</string>
+    <string name="exp2_bitrate_auto">Auto</string>
+    <string name="exp2_range">Trecho</string>
+    <string name="exp2_rendering">Renderizando seu vídeo</string>
+    <string name="exp2_eta">Faltam cerca de %1$s</string>
+    <string name="exp2_animator_a11y">Animador em pixel art desenhando os quadros do seu vídeo</string>
+    <string name="exp2_summary">Resumo</string>
+    <string name="exp2_fun_1">Alinhando os pixels…</string>
+    <string name="exp2_fun_2">Ensinando os quadros a dançar…</string>
+    <string name="exp2_fun_3">Passando café para a GPU…</string>
+    <string name="exp2_fun_4">Polindo cada keyframe…</string>
+    <string name="exp2_fun_5">Quase lá, segura a emoção…</string>
+    <string name="exp2_fun_6">Desenhando quadro por quadro…</string>
+    <string name="exp2_fun_7">Afinando as cores…</string>
+    <string name="exp2_fun_8">Arrumando a claquete…</string>
+    <string name="exp2_fun_9">Misturando o som com carinho…</string>
+    <string name="exp2_fun_10">Contando os quadros nos dedos…</string>
+    <string name="exp2_frames">Quadro %1$s de %2$s · %3$s q/s</string>
+    <!-- Export como imagem (PNG, sequência .zip, GIF) - 2026-10-02 -->
+    <string name="exp2_format_video">Vídeo (MP4)</string>
+    <string name="exp2_format_frame">Quadro atual (PNG)</string>
+    <string name="exp2_format_sequence">Sequência PNG (.zip)</string>
+    <string name="exp2_format_gif">GIF</string>
+    <string name="exp2_format_note_frame">O quadro onde está o cursor, em PNG. Com fundo transparente, a imagem sai transparente.</string>
+    <string name="exp2_format_note_sequence">Um PNG por quadro do trecho, todos num arquivo .zip.</string>
+    <string name="exp2_format_note_gif">Repete sem parar, até 256 cores por quadro. Ideal para trechos curtos.</string>
+    <string name="exp2_resolution_original">Original</string>
+    <string name="exp2_gif_width">Largura do GIF</string>
+    <string name="exp2_estimated_size">Tamanho estimado ≈ %1$s</string>
+    <string name="exp2_frames_count">%1$d quadros</string>
+    <string name="exp2_rendering_frame">Gerando sua imagem</string>
+    <string name="exp2_rendering_sequence">Gerando a sequência de imagens</string>
+    <string name="exp2_rendering_gif">Gerando seu GIF</string>
+    <string name="exp2_done_frame">Imagem pronta</string>
+    <string name="exp2_done_sequence">Sequência pronta</string>
+    <string name="exp2_done_gif">GIF pronto</string>
+    <string name="exp2_saved_pictures">Salvo em Imagens/Aurea</string>
+    <string name="exp2_saved_downloads">Salvo em Downloads/Aurea</string>
+    <string name="exp2_saved_files">Salvo no app Arquivos, na pasta do Aurea</string>
+    <string name="exp2_share_file">Compartilhar</string>
+    <string name="exp2_too_long">Trecho longo demais para este formato: escolha menos quadros por segundo ou um trecho menor.</string>
+</resources>

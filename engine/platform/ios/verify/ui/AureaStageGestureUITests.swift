@@ -91,6 +91,90 @@ import XCTest
         XCTAssertEqual(undone.textAnimatorCount, before.textAnimatorCount)
     }
 
+    /// "Text Transform não funciona" (iOS): a ficha da Animação põe o efeito, o
+    /// cartão abre com os controles e arrastar Deslocamento X e depois Y muda o
+    /// valor NO MOTOR — e o Y não desfaz o X (a releitura velha logo depois de
+    /// escrever mandava o ponto antigo de volta).
+    func testTextTransformChipAddsEffectAndOffsetDragsReachTheCore() throws {
+        let before = try launch("text-transform")
+        XCTAssertEqual(before.effectCount, 0)
+        let add = app.buttons["text.transform.add"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
+        let added = try awaitSnapshot("Text Transform enters the stack") { $0.effectCount == 1 && ($0.textTransformOffset?.count ?? 0) == 2 }
+        XCTAssertEqual(added.textTransformOffset ?? [], [0, 0])
+        let stack = app.scrollViews["aurea.effects.stack"].firstMatch
+        func ruler(_ component: Int) throws -> XCUIElement {
+            let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "effects\\.param\\.[0-9]+\\.5\\.\(component)")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "Offset row \(component) of the open Text Transform card")
+            for _ in 0..<8 where !row.isHittable { stack.swipeUp() }
+            XCTAssertTrue(row.isHittable)
+            return row
+        }
+        let x = try ruler(0)
+        x.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: x.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)))
+        let movedX = try awaitSnapshot("Offset X reaches the core") { abs($0.textTransformOffset?.first ?? 0) > 1 }
+        let xValue = movedX.textTransformOffset?.first ?? 0
+        let y = try ruler(1)
+        y.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: y.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
+        let movedY = try awaitSnapshot("Offset Y reaches the core") { abs(($0.textTransformOffset ?? [0, 0]).last ?? 0) > 1 }
+        XCTAssertEqual(movedY.textTransformOffset?.first ?? 0, xValue, accuracy: 0.01, "Writing Y must keep the X already written")
+        try undo()
+        _ = try awaitSnapshot("Undo restores Offset Y") { abs(($0.textTransformOffset ?? [1, 1]).last ?? 1) < 0.01 }
+    }
+
+    /// "Só dá pra usar 3 objetos nulos": quatro nulos a mais pela barra de
+    /// adicionar, todos na lista, cada um com nome próprio.
+    func testManyNullsFromTheAddBarAreAllCreatedWithDistinctNames() throws {
+        let before = try launch("null-add")
+        var count = before.layerCount
+        for _ in 0..<4 {
+            let back = app.buttons["Back (clear the selection)"].firstMatch
+            if back.waitForExistence(timeout: 3) && back.isHittable { back.tap() }
+            let element = app.buttons["aurea.add.category.4"].firstMatch
+            XCTAssertTrue(element.waitForExistence(timeout: 5)); element.tap()
+            let null = app.buttons["Null"].firstMatch
+            XCTAssertTrue(null.waitForExistence(timeout: 5)); null.tap()
+            let expected = count + 1
+            _ = try awaitSnapshot("Null \(expected) is created") { $0.layerCount == expected }
+            count = expected
+        }
+        let after = try awaitSnapshot("Five nulls listed") { $0.layerCount == 5 && ($0.layerNames?.count ?? 0) == 5 }
+        XCTAssertEqual(Set(after.layerNames ?? []).count, 5, "Each null has its own name: \(after.layerNames ?? [])")
+        XCTAssertEqual(Set(after.layerOrder).count, 5)
+    }
+
+    /// "Vincula mas não mexe" / "o nulo normal faz o objeto sair da cena":
+    /// o texto ligado ao 4º nulo não pula ao ganhar o pai e segue o arrasto do nulo no palco.
+    func testTextLinkedToFourthNullStaysPutAndFollowsTheNullDrag() throws {
+        let before = try launch("null-link")
+        XCTAssertEqual(before.layerCount, 5)
+        let parents = before.layerParents ?? []
+        guard let child = parents.firstIndex(where: { $0 != 0 }), let centers = before.layerCenters,
+              centers.indices.contains(child), centers[child].count == 2 else {
+            XCTFail("Text is linked to a null: \(parents)"); throw ProbeError.missing
+        }
+        XCTAssertEqual(parents[child], before.primaryID, "Linked to the selected (4th) null")
+        // Não pulou: o texto nasceu no centro da composição e continua lá.
+        XCTAssertEqual(centers[child][0], before.compositionWidth / 2, accuracy: 2)
+        XCTAssertEqual(centers[child][1], before.compositionHeight / 2, accuracy: 2)
+        let start = bodyCenter(before)
+        let end = CGPoint(x: start.x + 50, y: start.y + 24)
+        try requireInsideStage(start, end)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try awaitSnapshot("Dragging the null moves it") {
+            !$0.isManipulating && self.distance($0.detail.position, before.detail.position) > 1
+        }
+        let dx = moved.detail.position[0] - before.detail.position[0]
+        let dy = moved.detail.position[1] - before.detail.position[1]
+        guard let after = moved.layerCenters, after.indices.contains(child), after[child].count == 2 else {
+            XCTFail("Child center missing"); throw ProbeError.missing
+        }
+        XCTAssertEqual(after[child][0] - centers[child][0], dx, accuracy: 1, "Child follows the null in X")
+        XCTAssertEqual(after[child][1] - centers[child][1], dy, accuracy: 1, "Child follows the null in Y")
+    }
+
     func testAndroidManualProjectOpensEditsAndPlaysAcrossCuts() throws {
         let before = try launch("manual-android-project")
         XCTAssertEqual(before.layerCount,14)
@@ -350,9 +434,9 @@ import XCTest
 
     func testEffectsPanelAddsWithOneTapAndKeepsTheStackAtHand() throws {
         _ = try launch("effects")
-        // Camada sem efeito: o painel abre direto no catálogo ("‹ Adicionar efeito"),
-        // com a busca no topo e as fichas de categoria — nada de navegador em outra tela.
-        let addTab = app.buttons["effects.tab.add"].firstMatch
+        // Camada sem efeito: o painel abre direto na tela cheia "Adicionar efeito"
+        // (✕ · título · 🔍, destaques, recentes e ladrilhos de categoria).
+        let addTab = app.buttons["effects.close"].firstMatch
         XCTAssertTrue(addTab.waitForExistence(timeout: 5))
         let search = app.buttons["effects.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
@@ -373,8 +457,8 @@ import XCTest
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
         _ = try awaitSnapshot("One tap on a search result adds the effect") { $0.effectCount == 1 }
 
-        // O efeito novo aparece aberto na pilha (redesenho 2026-09-29: sem abas;
-        // o catálogo some e a pilha com o trilho toma o painel).
+        // O efeito novo aparece aberto na pilha (redesenho 2026-10-01: a tela de
+        // adicionar fecha e a pilha com o trilho fica com o efeito aberto).
         let leftCatalog = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: addTab)
         XCTAssertEqual(XCTWaiter.wait(for: [leftCatalog], timeout: 5), .completed)
         XCTAssertTrue(app.staticTexts["Deep Glow"].firstMatch.waitForExistence(timeout: 5))
@@ -394,7 +478,7 @@ import XCTest
         XCTAssertTrue(addTab.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["effects.recent.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
 
-        // Categoria de um toque e cartão de um toque, sem ficha no meio.
+        // Ladrilho de categoria abre o grupo; cartão de um toque, sem ficha no meio.
         let glitch = app.buttons["effects.category.glitch"].firstMatch
         XCTAssertTrue(glitch.waitForExistence(timeout: 5)); glitch.tap()
         let vhs = app.buttons["effects.card.\(effectCardId("aurea.glitch.vhs"))"].firstMatch
@@ -453,21 +537,6 @@ import XCTest
         }, object: stage)
         XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 6), .completed)
         attach("After undo added shape", stage.value as? String ?? "missing")
-    }
-
-    func testCaptionsOpenFromAddMenuWithNonAudioSelection() throws {
-        let before = try launch("layer-dock")
-        // Sem o "+", adicionar mora na barra fixa, que aparece ao desmarcar.
-        app.buttons["Back (clear the selection)"].firstMatch.tap()
-        let text = app.buttons["aurea.add.category.3"].firstMatch
-        XCTAssertTrue(text.waitForExistence(timeout: 5)); text.tap()
-        let captions = app.buttons["Captions from speech"].firstMatch
-        XCTAssertTrue(captions.waitForExistence(timeout: 5)); captions.tap()
-        let choose = app.staticTexts["Pick a video or audio layer to take the captions from speech."].firstMatch
-        XCTAssertTrue(choose.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Captions"].firstMatch.exists)
-        XCTAssertFalse(text.exists)
-        XCTAssertEqual(try snapshot().layerCount, before.layerCount)
     }
 
     func testShortTapDoesNotMoveScaleOrRotateLayer() throws {
@@ -1406,6 +1475,9 @@ import XCTest
         let layerParents: [Int64]?
         let layerStarts: [Int64]?
         let textAnimatorCount: Int?
+        let textTransformOffset: [Double]?
+        let layerNames: [String]?
+        let layerCenters: [[Double]]?
         let layerEnds: [Int64]?
         let markerCount: Int
         let missingAssets: Int

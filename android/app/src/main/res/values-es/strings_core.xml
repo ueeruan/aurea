@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_name_time_motion_detect">Detectar movimiento</string>
+    <string name="fx_desc_time_motion_detect">Muestra solo lo que se movió: compara el fotograma con uno anterior e ilumina las diferencias.</string>
+    <string name="core2_fx_motion_delay">Retraso (fotogramas)</string>
+    <string name="core2_fx_offset_darks">Elevar oscuros</string>
+    <string name="core2_fx_motion_mode">Movimiento</string>
+    <string name="core2_fxo_motion_all">Todo</string>
+    <string name="core2_fxo_motion_brighter">Más claro</string>
+    <string name="core2_fxo_motion_darker">Más oscuro</string>
+    <string name="core2_fx_cube_file">Archivo .cube</string>
+    <string name="core2_fx_flare_ghosts">Reflejos internos</string>
+</resources>

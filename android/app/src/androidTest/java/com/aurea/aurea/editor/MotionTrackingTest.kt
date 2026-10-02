@@ -37,7 +37,9 @@ class MotionTrackingTest {
         compose.waitUntil(30000) { store.busyMessage == null }
         compose.runOnIdle { assertNull(store.errorMessage) }
         compose.waitUntil(10000) { store.detail != null && store.layers.isNotEmpty() }
-        compose.onNodeWithContentDescription(context.getString(R.string.editor_rastreio)).performClick()
+        // O rastreio saiu da doca: o painel abre pelo ⋯ do topo da camada.
+        compose.onNodeWithContentDescription(context.getString(R.string.editor_mais_acoes_camada)).performClick()
+        compose.onNodeWithText(context.getString(R.string.dock2_tracking_tools)).performScrollTo().performClick()
         compose.onNodeWithText("Stabilizer").performScrollTo().performClick()
         compose.waitUntil(90000) { store.motionStatus[0].toInt() != 1 }
         compose.runOnIdle {

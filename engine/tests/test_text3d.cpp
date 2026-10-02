@@ -11,6 +11,8 @@
 #include "aurea/text/FontManager.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/scene3d/Animation.hpp"
+#include "aurea/core/GestureMath.hpp"
+#include "aurea/render/Renderer.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -977,4 +979,196 @@ AUREA_TEST(Text3DMaterial, CinematicMetalPreservesContentAndProducesBoundedPbrMa
     AUREA_CHECK(read.content == spec.content && read.separateGlyphs);
     const auto before = encode_text3d(read); AUREA_CHECK(!apply_text3d_material_preset(read, 100));
     AUREA_CHECK(before == encode_text3d(read));
+}
+
+// -----------------------------------------------------------------------------
+// Profundidade (extrusão) e zoom de objetos 3D
+// -----------------------------------------------------------------------------
+
+AUREA_TEST(Text3D, DepthExtrudesExactlyFromFlatToVeryDeep) {
+    const auto font = text::default_font();
+    AUREA_CHECK(font != nullptr);
+    if (!font) return;
+    // Frente igual em toda profundidade; parede = perímetro × profundidade.
+    f64 frente0 = -1.0, perimetro = -1.0;
+    for (f32 d : {0.0f, 0.01f, 0.25f, 1.0f, 3.0f}) {
+        Text3DSpec spec = receita("HOB");
+        spec.depth = d;
+        const auto r = build_text3d(*font, spec);
+        AUREA_CHECK_MSG(r.ok(), "texto 3D nao gerou malha");
+        if (!r.ok()) continue;
+        const MalhaInfo m = medir_tudo(*r.asset);
+        std::printf("\n    profundidade %.2f: z %.4f..%.4f frente %.4f lateral %.4f degeneradas %u invertidas %u",
+                    static_cast<double>(d), static_cast<double>(m.minZ), static_cast<double>(m.maxZ), m.areaFrente,
+                    m.areaLateral, m.degeneradas, m.invertidas);
+        AUREA_CHECK_NEAR(m.maxZ - m.minZ, d, 1e-4f);
+        AUREA_CHECK_NEAR(m.maxZ, d * 0.5f, 1e-4f);          // centrada: o pivô fica no meio do volume
+        AUREA_CHECK_EQ(m.invertidas, 0u);
+        AUREA_CHECK_EQ(m.degeneradas, 0u);                    // chapado: nenhuma parede de área nula
+        if (frente0 < 0) frente0 = m.areaFrente;
+        AUREA_CHECK(std::fabs(m.areaFrente - frente0) < frente0 * 1e-3);
+        AUREA_CHECK(std::fabs(m.areaFundo - frente0) < frente0 * 1e-3);
+        if (d == 0.0f) { AUREA_CHECK(m.areaLateral == 0.0); continue; }
+        const f64 p = m.areaLateral / d;
+        if (perimetro < 0) perimetro = p;
+        AUREA_CHECK(std::fabs(p - perimetro) < perimetro * 1e-3);
+    }
+}
+
+AUREA_TEST(Text3D, BevelStaysInsideTheDepthAtEverySize) {
+    const auto font = text::default_font();
+    AUREA_CHECK(font != nullptr);
+    if (!font) return;
+    for (f32 d : {0.02f, 0.1f, 0.5f, 2.0f}) {
+        Text3DSpec spec = receita("Aurea");
+        spec.depth = d;
+        spec.bevel = true;
+        spec.bevelWidth = 0.02f;
+        spec.bevelDepth = 0.05f;   // maior que 45 % das profundidades finas: precisa ser limitado
+        spec.bevelSegments = 4;
+        const auto r = build_text3d(*font, spec);
+        AUREA_CHECK(r.ok());
+        if (!r.ok()) continue;
+        const MalhaInfo m = medir_tudo(*r.asset);
+        AUREA_CHECK_NEAR(m.maxZ - m.minZ, d, 1e-4f);
+        AUREA_CHECK(m.areaChanfro > 0.0);
+        AUREA_CHECK(m.areaLateral > 0.0);                     // as pontas nunca se cruzam: sobra parede
+        AUREA_CHECK_EQ(m.invertidas, 0u);
+    }
+}
+
+namespace {
+// Caixa (px da composição) de um cubo de lado 100 px no espaço da camada.
+struct Caixa { f32 w = 0, h = 0; };
+Caixa projetar_cubo(const Composition& c, const Layer& l) {
+    const Mat4 m = layer_comp_matrix(c, l, FrameIndex{0});
+    f32 x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
+    for (int i = 0; i < 8; ++i) {
+        const Vec4 p = m * Vec4{(i & 1) ? 50.f : -50.f, (i & 2) ? 50.f : -50.f, (i & 4) ? 50.f : -50.f, 1.f};
+        const f32 x = p.x / p.w, y = p.y / p.w;
+        x0 = std::min(x0, x); x1 = std::max(x1, x); y0 = std::min(y0, y); y1 = std::max(y1, y);
+    }
+    return Caixa{x1 - x0, y1 - y0};
+}
+} // namespace
+
+// "O zoom dos 3D estica eles": a pinça (e o gizmo uniforme, o Ajustar e a
+// escala travada) multiplicava também o Z gravado, mas o Z de conteúdo já
+// acompanha X no motor — a profundidade crescia com fator². Aqui o cubo tem de
+// ficar cubo em qualquer proporção de composição e depois de qualquer zoom.
+AUREA_TEST(Scene3DZoom, CubeStaysACubeAcrossAspectAndPinchZoom) {
+    for (auto size : {std::pair<u32, u32>{1920, 1080}, {1080, 1920}, {1000, 1000}, {640, 360}}) {
+        Engine e;
+        EngineConfig ec;
+        ec.workerCount = 1;
+        ec.disableAutosave = true;
+        AUREA_CHECK(e.initialize(ec).ok() && e.new_project(size.first, size.second, 30.0, nullptr).ok());
+        Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        AUREA_CHECK(c != nullptr);
+        if (!c) { e.shutdown(); continue; }
+        Layer* l = c->layer(c->add_layer(LayerKind::Null, "cubo"));
+        AUREA_CHECK(l != nullptr);
+        if (!l) { e.shutdown(); continue; }
+        l->threeD = true;
+        l->transform.position = Vec3{size.first * 0.5f, size.second * 0.5f, 0.0f};
+        l->transform.anchor = Vec3{0, 0, 0};
+        const Caixa base = projetar_cubo(*c, *l);
+        AUREA_CHECK_NEAR(base.w / base.h, 1.0f, 1e-3f);       // a projeção não depende da proporção
+
+        // Pinça 2,5× e depois 0,8× (dois gestos), como as duas UIs gravam.
+        const bool segue = scale_z_follows_x(l->kind);
+        AUREA_CHECK(segue);
+        Vec3 s = gesture_scale_3d(l->transform.scale, kGestureScaleUniform, 2.5f, segue);
+        s = gesture_scale_3d(s, kGestureScaleUniform, 0.8f, segue);
+        l->transform.scale = s;
+        const Caixa frente = projetar_cubo(*c, *l);
+        AUREA_CHECK_NEAR(frente.w / frente.h, 1.0f, 1e-3f);
+        // De lado (giro Y 90°) o cubo mostra a PROFUNDIDADE: a silhueta de um
+        // cubo é a mesma. Com Z multiplicado ela saía 2× mais funda.
+        l->transform.rotation = Vec3{0, 90, 0};
+        const Caixa lado = projetar_cubo(*c, *l);
+        std::printf("\n    %ux%u: frente %.2fx%.2f, lado %.2fx%.2f", size.first, size.second, static_cast<double>(frente.w),
+                    static_cast<double>(frente.h), static_cast<double>(lado.w), static_cast<double>(lado.h));
+        AUREA_CHECK_NEAR(lado.w / frente.w, 1.0f, 2e-3f);
+        AUREA_CHECK_NEAR(lado.h / frente.h, 1.0f, 2e-3f);
+        // Mundo uniforme: as três colunas com o mesmo comprimento (2,0).
+        const Mat4 w = layer_world_3d(*c, *l, FrameIndex{0});
+        const f32 cx = Vec3{w.col[0].x, w.col[0].y, w.col[0].z}.length();
+        const f32 cz = Vec3{w.col[2].x, w.col[2].y, w.col[2].z}.length();
+        AUREA_CHECK_NEAR(cx, 2.0f, 1e-4f);
+        AUREA_CHECK_NEAR(cz, 2.0f, 1e-4f);
+        e.shutdown();
+    }
+}
+
+AUREA_TEST(Scene3DZoom, AxisScaleAndFitKeepTheEffectiveDepth) {
+    // Conteúdo: esticar só X (alça do gizmo) não leva a profundidade junto.
+    const Vec3 a = gesture_scale_3d(Vec3{1, 1, 1}, 0, 3.0f, true);
+    AUREA_CHECK_NEAR(a.x, 3.0f, 1e-6f);
+    AUREA_CHECK_NEAR(a.x * a.z, 1.0f, 1e-6f);                 // profundidade efetiva (z × x) intacta
+    // Alça Z: só a profundidade.
+    const Vec3 z = gesture_scale_3d(Vec3{2, 2, 1}, 2, 1.5f, true);
+    AUREA_CHECK_NEAR(z.x * z.z, 3.0f, 1e-6f);
+    // Ajustar à tela: X/Y = ±k, a profundidade efetiva vale k × a relativa.
+    const Vec3 f = gesture_scale_3d(Vec3{-0.5f, 0.7f, 1.2f}, kGestureScaleFit, 2.0f, true);
+    AUREA_CHECK_NEAR(f.x, -2.0f, 1e-6f);
+    AUREA_CHECK_NEAR(f.y, 2.0f, 1e-6f);
+    AUREA_CHECK_NEAR(f.z, 1.2f, 1e-6f);
+    // Câmera e luz gravam Z absoluto: a pinça multiplica os três.
+    AUREA_CHECK(!scale_z_follows_x(LayerKind::Camera) && !scale_z_follows_x(LayerKind::Light));
+    const Vec3 cam = gesture_scale_3d(Vec3{1, 1, 1}, kGestureScaleUniform, 2.0f, false);
+    AUREA_CHECK_NEAR(cam.z, 2.0f, 1e-6f);
+    // Régua travada que passa do zero: espelha X/Y, a profundidade efetiva segue o sinal de X.
+    const Vec3 m = gesture_scale_3d(Vec3{1, 1, 1}, kGestureScaleUniform, -1.0f, true);
+    AUREA_CHECK_NEAR(m.x, -1.0f, 1e-6f);
+    AUREA_CHECK_NEAR(m.z, 1.0f, 1e-6f);
+    // Fator inválido não mexe.
+    const Vec3 same = gesture_scale_3d(Vec3{1, 2, 3}, kGestureScaleUniform, 0.0f, true);
+    AUREA_CHECK_NEAR(same.y, 2.0f, 0.0f);
+    // O limite da pinça em conteúdo ignora o Z relativo (ele não muda).
+    AUREA_CHECK_NEAR(clamp_pinch_factor_3d(10.f, Vec3{1, 1, 50}, true), 10.f, 1e-6f);
+    AUREA_CHECK_NEAR(clamp_pinch_factor_3d(10.f, Vec3{1, 1, 50}, false), 2.f, 1e-6f);
+}
+
+// Profundidade animada: o Z de escala do texto 3D multiplica a extrusão (a
+// trilha de escala Z com keyframes), sem mexer na largura nem na altura.
+AUREA_TEST(Text3D, ScaleZKeyframesAnimateTheExtrusion) {
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok() && e.new_project(640, 360, 30.0, nullptr).ok());
+    Text3DSpec spec = receita("AB");
+    spec.depth = 0.4f;
+    const Result<u64> id = e.add_text3d(spec);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    for (auto [frame, value] : {std::pair<i64, f32>{0, 1.0f}, {30, 3.0f}}) {
+        Command k;
+        k.type = CommandType::KeyframeInsert;
+        k.keyframe.track.layer = LayerId::unpack(*id);
+        k.keyframe.track.property = TrackProperty::ScaleZ;
+        k.keyframe.track.effectIndex = kInvalidIndex;
+        k.keyframe.track.effectParamIndex = 0;
+        k.keyframe.time = FrameIndex{frame};
+        k.keyframe.value = value;
+        AUREA_CHECK(e.apply_command(k).ok());
+    }
+    Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* l = c ? c->layer(LayerId::unpack(*id)) : nullptr;
+    AUREA_CHECK(l != nullptr);
+    if (!l) { e.shutdown(); return; }
+    auto depthAt = [&](i64 f) {
+        const Mat4 w = layer_world_3d(*c, *l, FrameIndex{f});
+        return Vec3{w.col[2].x, w.col[2].y, w.col[2].z}.length() * l->model.unitScale * spec.depth;
+    };
+    auto widthAt = [&](i64 f) {
+        const Mat4 w = layer_world_3d(*c, *l, FrameIndex{f});
+        return Vec3{w.col[0].x, w.col[0].y, w.col[0].z}.length();
+    };
+    AUREA_CHECK(depthAt(0) > 1.0f);
+    AUREA_CHECK_NEAR(depthAt(30) / depthAt(0), 3.0f, 1e-3f);
+    AUREA_CHECK_NEAR(depthAt(15) / depthAt(0), 2.0f, 0.15f);
+    AUREA_CHECK_NEAR(widthAt(30), widthAt(0), 1e-5f);
+    e.shutdown();
 }

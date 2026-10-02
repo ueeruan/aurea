@@ -171,4 +171,65 @@ class EffectPickerLogicTest {
         assertTrue(categorySynonyms("Áudio").contains("sound"))
         assertEquals("", categorySynonyms("Categoria que o motor inventou"))
     }
+
+    // --- Tela "Adicionar efeito": grupos, destaques e ferramentas-efeito ---------
+
+    @Test
+    fun groupsJoinPortugueseAndEnglishEngineCategories() {
+        assertEquals(EffectGroup.ColorLight, effectGroupOf(fx("a", "x", "Cor")))
+        assertEquals(EffectGroup.ColorLight, effectGroupOf(fx("b", "x", "Color")))
+        assertEquals(EffectGroup.ColorLight, effectGroupOf(glow))
+        assertEquals(EffectGroup.Distort, effectGroupOf(fx("c", "x", "Distort")))
+        assertEquals(EffectGroup.Matte, effectGroupOf(fx("d", "x", "Keying")))
+        assertEquals(EffectGroup.Text, effectGroupOf(fx("e", "x", "Text")))
+        assertEquals(EffectGroup.Audio, effectGroupOf(reverb))
+        assertEquals(EffectGroup.Other, effectGroupOf(fx("f", "x", "Categoria que o motor inventou")))
+    }
+
+    @Test
+    fun whatTheEffectDoesBeatsItsEngineCategory() {
+        assertEquals(EffectGroup.DrawEdge, effectGroupOf(fx("aurea.stylize.stroke_outline", "Contorno", "Estilizar")))
+        assertEquals(EffectGroup.Motion, effectGroupOf(fx("aurea.motion.wiggle", "Agitar", "Distorcer")))
+        assertEquals(EffectGroup.Stylize, effectGroupOf(fx("aurea.stylize.halftone", "Meio-tom", "Estilizar")))
+    }
+
+    @Test
+    fun groupEntriesKeepFixedGroupOrderAndSkipEmptyGroups() {
+        val groups = groupEntries(listOf(vhs, gaussian, glow, lens))
+        assertEquals(listOf(EffectGroup.ColorLight, EffectGroup.Blur, EffectGroup.Glitch), groups.map { it.first })
+        assertEquals(listOf(gaussian, lens), groups.first { it.first == EffectGroup.Blur }.second)
+    }
+
+    @Test
+    fun toolsLiveInTheirGroupsAndAreRecognisedByTypeId() {
+        val captions = toolCatalogEntry(EffectTool.Captions, "Legendas automáticas")
+        val camera = toolCatalogEntry(EffectTool.CameraTrack, "Rastreio de câmera")
+        val mask = toolCatalogEntry(EffectTool.Mask, "Máscara")
+        assertEquals(EffectGroup.Text, effectGroupOf(captions))
+        assertEquals(EffectGroup.Motion, effectGroupOf(camera))
+        assertEquals(EffectGroup.Matte, effectGroupOf(mask))
+        assertEquals(EffectTool.Mask, effectToolOf(mask.typeId))
+        assertEquals(null, effectToolOf(gaussian.typeId))
+        // Rastreio de câmera só para vídeo (tipo 1).
+        assertTrue(EffectTool.CameraTrack in pickableTools(1))
+        assertFalse(EffectTool.CameraTrack in pickableTools(4))
+        assertTrue(EffectTool.Captions in pickableTools(4) && EffectTool.Mask in pickableTools(4))
+    }
+
+    @Test
+    fun bannerPrefersTheChosenEffectAndNeverATool() {
+        val captions = toolCatalogEntry(EffectTool.Captions, "Legendas")
+        val title = fx("aurea.text.animator", "Animador", "Text")
+        assertEquals(title, groupBannerEntry(EffectGroup.Text, listOf(captions, title)))
+        assertEquals(null, groupBannerEntry(EffectGroup.Text, listOf(captions)))
+        val radial = fx("aurea.blur.radial", "Radial", "Desfoque")
+        assertEquals(radial, groupBannerEntry(EffectGroup.Blur, listOf(gaussian, radial)))
+    }
+
+    @Test
+    fun featuredFollowsTheCuratedOrderAndOnlyWhatExists() {
+        val deep = fx("aurea.light.deep_glow", "Deep Glow", "Luz")
+        val captions = toolCatalogEntry(EffectTool.Captions, "Legendas")
+        assertEquals(listOf(captions, deep, vhs), featuredEntries(listOf(gaussian, vhs, deep, captions)))
+    }
 }

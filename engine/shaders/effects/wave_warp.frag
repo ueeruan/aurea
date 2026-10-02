@@ -37,8 +37,15 @@ float wave_at(float along, float wavelength, float travel, float phase, bool squ
 }
 
 void main() {
-    const vec2 uvPerLayer = max(vec2(p.texel.x * p.texel.z, p.texel.y * p.texel.w), vec2(1e-9));
-    const vec2 layerPx = v_uv / uvPerLayer;
+    // A saída (região espalhada pela altura da onda) e a entrada NÃO cobrem a
+    // mesma área: o ponto de saída vai à entrada pelo uvMap. Ler a entrada no
+    // uv da SAÍDA esticava a camada até a região espalhada e, depois de um
+    // Motion Tile (entrada maior que o quadro), deslocava a parede e abria
+    // faixa preta na borda.
+    const vec2 inSize = 1.0 / max(p.texel.xy * p.uvMap.xy, vec2(1e-9));    // px da camada da entrada
+    const vec2 uvPerLayer = 1.0 / inSize;
+    const vec2 uvIn = v_uv * p.uvMap.xy + p.uvMap.zw;
+    const vec2 layerPx = p.p2.zw + uvIn * inSize;                          // px ABSOLUTOS da camada
     const vec2 uvn = v_uv;
 
     const float wavelength = max(p.p0.y, 1.0);
@@ -67,7 +74,7 @@ void main() {
     }
     d *= uvPerLayer;
 
-    const vec2 uv = uvn + d;
+    const vec2 uv = uvIn + d;
     vec4 outc;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         const int mode = int(p.p1.z + 0.5);

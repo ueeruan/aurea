@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel de efeitos: catalogo "Adicionar efeito", pilha compacta e ferramentas-efeito. -->
+<resources>
+    <string name="fxui_featured">Destaques</string>
+    <string name="fxui_categories">Categorias</string>
+    <string name="fxui_group_color_light">Cor e luz</string>
+    <string name="fxui_group_blur">Desfoque e nitidez</string>
+    <string name="fxui_group_distort">Distorção</string>
+    <string name="fxui_group_motion">Movimentar e transformar</string>
+    <string name="fxui_group_stylize">Estilizar</string>
+    <string name="fxui_group_glitch">Glitch</string>
+    <string name="fxui_group_draw_edge">Desenho e borda</string>
+    <string name="fxui_group_procedural">Procedimental</string>
+    <string name="fxui_group_matte">Fosco, máscara e chave</string>
+    <string name="fxui_group_time">Tempo e transição</string>
+    <string name="fxui_group_text">Texto</string>
+    <string name="fxui_group_3d">3D</string>
+    <string name="fxui_group_audio">Áudio</string>
+    <string name="fxui_group_utility">Utilitário e expressão</string>
+    <string name="fxui_group_other">Outros</string>
+    <string name="fxui_tool_captions">Legendas automáticas</string>
+    <string name="fxui_tool_camera_track">Rastreio de câmera</string>
+    <string name="fxui_tool_mask">Máscara</string>
+    <string name="fxui_tool_captions_desc">Transcreve a fala da camada e cria as legendas no tempo certo.</string>
+    <string name="fxui_tool_camera_track_desc">Analisa o movimento da câmera do vídeo para encaixar objetos 3D na cena.</string>
+    <string name="fxui_tool_mask_desc">Desenha formas que mostram ou escondem partes da camada.</string>
+    <string name="fxui_tool_badge">Ferramenta</string>
+    <string name="fxui_tool_masks_n">Máscaras: %1$d</string>
+    <string name="fxui_tool_captions_n">Legendas: %1$d</string>
+    <string name="fxui_tool_camera_ready">Câmera analisada</string>
+    <string name="fxui_tool_remove_masks_q">Remover todas as máscaras desta camada?</string>
+    <string name="fxui_tool_remove_captions_q">Remover as legendas geradas desta camada?</string>
+    <string name="fxui_a11y_expand">Mostrar ajustes de %1$s</string>
+    <string name="fxui_a11y_collapse">Ocultar ajustes de %1$s</string>
+    <string name="fxui_a11y_enable">Ligar %1$s</string>
+    <string name="fxui_a11y_disable">Desligar %1$s</string>
+    <string name="fxui_a11y_drag">Arrastar %1$s para reordenar</string>
+    <string name="fxui_a11y_remove">Remover %1$s</string>
+    <string name="fxui_a11y_open">Abrir %1$s</string>
+    <string name="fxui_a11y_category">Categoria %1$s</string>
+    <string name="fxui_back_categories">Voltar às categorias</string>
+    <string name="fxui_search_effects">Buscar efeitos</string>
+    <string name="fxui_effect_off">Desligado</string>
+</resources>

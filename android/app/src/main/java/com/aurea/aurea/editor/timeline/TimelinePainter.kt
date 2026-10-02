@@ -240,8 +240,13 @@ internal class TimelinePainter(
                 drawRect(AureaColors.Accent.copy(alpha = 0.14f), Offset(0f, top), Size(w, c.rowHeight(r)))
             }
             val segs = r.segments
+            if (st.liftRow == i && st.liftKind == RowDrop.JOIN) {
+                // A linha que recebe o trecho no ar acende inteira.
+                drawRect(AureaColors.Accent.copy(alpha = 0.18f), Offset(m.headerColumn, top), Size(w - m.headerColumn, c.rowHeight(r)))
+            }
             if (segs.size == 1) {
-                drawSegment(c, segs[0], top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = true)
+                // O trecho no ar sai da fileira dele (é desenhado sob o dedo).
+                if (segs[0].id != st.liftId) drawSegment(c, segs[0], top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = true)
                 continue
             }
             // FILEIRA COMPARTILHADA: cada trecho da linha no seu tempo, lado a
@@ -260,7 +265,7 @@ internal class TimelinePainter(
                 }
             }
             for (pass in 0..1) for (s in segs) {
-                if (c.isSelected(s.id) != (pass == 1)) continue
+                if (c.isSelected(s.id) != (pass == 1) || s.id == st.liftId) continue
                 drawSegment(c, s, top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = false)
             }
             // Linha inteira fora da janela: UMA seta por lado (não uma por trecho).
@@ -289,6 +294,25 @@ internal class TimelinePainter(
             var inBatch = false
             if (multi) for (s in r.segments) if (c.isSelected(s.id)) inBatch = true
             drawGutter(c, r, rowTop, inBatch, c.isExpanded(r), fps)
+        }
+
+        // Trecho no ar (arrasto vertical de UM trecho): o traço de inserção entre
+        // as fileiras e o trecho sob o dedo, por cima de tudo.
+        if (st.liftId != 0L && !compact) {
+            if (st.liftKind == RowDrop.INSERT && st.liftLineY.isFinite()) {
+                val y = m.rowsTop + st.liftLineY - scroll
+                drawRect(AureaColors.Accent, Offset(0f, y - m.reorderLine / 2f), Size(w, m.reorderLine))
+                drawCircle(AureaColors.Accent, m.reorderDot, Offset(m.headerColumn, y))
+            }
+            var lifted: RowModel? = null
+            for (r in rows) { lifted = r.segment(st.liftId); if (lifted != null) break }
+            if (lifted != null) {
+                val x0 = TimeAxis.xOf(lifted.start.toDouble(), view, ppf, cx)
+                val x1 = max(TimeAxis.xOf(lifted.end.toDouble(), view, ppf, cx), x0 + m.barMinWidth)
+                val hh = c.rowHeight(lifted)
+                drawRect(AureaColors.Accent.copy(alpha = 0.22f), Offset(x0, st.liftTop), Size(x1 - x0, hh))
+                drawSegment(c, lifted, st.liftTop, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = false)
+            }
         }
 
         // Retângulo da seleção de losangos (cantos presos ao conteúdo).

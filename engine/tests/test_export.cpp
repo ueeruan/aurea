@@ -1350,3 +1350,48 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 }
 
 #endif // AUREA_TEST_VULKAN
+
+// =============================================================================
+//  Taxa de bits do export (BitratePolicy) — sem GPU. "1 minuto = 1 GB" foi o
+//  bug: a regra antiga (0,2 bit/pixel·s, ×1,6 na Alta, sem teto) pedia até
+//  160 Mbps. Aqui ficam os números que um editor comum usa.
+// =============================================================================
+#include "aurea/export/BitratePolicy.hpp"
+
+AUREA_TEST(ExportBitrate, OneMinute1080p30NormalStaysSmall) {
+    using namespace aurea;
+    const u32 v = export_video_bitrate_bps(1920, 1080, 30.0, ExportCodec::H264, ExportQuality::Normal);
+    AUREA_CHECK(v >= 12'000'000u && v <= 16'000'000u);
+    const u64 bytes = export_estimated_bytes(v, kExportAudioKbps * 1000u, 60.0);
+    AUREA_CHECK_MSG(bytes < 150ull * 1000 * 1000, "1 min 1080p30 Normal deve ficar abaixo de ~150 MB");
+    AUREA_CHECK(bytes > 60ull * 1000 * 1000);
+}
+
+AUREA_TEST(ExportBitrate, ResolutionFpsQualityAndCodecScaleSanely) {
+    using namespace aurea;
+    const auto bps = [](u32 w, u32 h, f64 fps, ExportQuality q = ExportQuality::Normal, ExportCodec c = ExportCodec::H264) {
+        return export_video_bitrate_bps(w, h, fps, c, q);
+    };
+    const u32 p720 = bps(1280, 720, 30), p1080 = bps(1920, 1080, 30), p4k = bps(3840, 2160, 30);
+    AUREA_CHECK(p720 >= 6'000'000u && p720 <= 8'000'000u);
+    AUREA_CHECK(p4k >= 35'000'000u && p4k <= 45'000'000u);
+    AUREA_CHECK(bps(854, 480, 30) < p720 && p720 < p1080 && p1080 < bps(2560, 1440, 30) && bps(2560, 1440, 30) < p4k);
+    // Vertical = mesma quantidade de pixels, mesma taxa.
+    AUREA_CHECK_EQ(bps(1080, 1920, 30), p1080);
+    // 60 fps custa mais, mas não o dobro; 24 fps custa menos.
+    const u32 p1080_60 = bps(1920, 1080, 60);
+    AUREA_CHECK(p1080_60 > p1080 && p1080_60 < p1080 * 2);
+    AUREA_CHECK(bps(1920, 1080, 24) < p1080);
+    // Qualidade e codec.
+    AUREA_CHECK(bps(1920, 1080, 30, ExportQuality::Low) < p1080);
+    AUREA_CHECK(bps(1920, 1080, 30, ExportQuality::High) > p1080);
+    AUREA_CHECK(bps(1920, 1080, 30, ExportQuality::Normal, ExportCodec::HEVC) < p1080);
+    // Nada passa do teto, nem 4K60 Alta nem Mbps manual absurdo; 1 min nunca 1 GB.
+    const u32 worst = bps(3840, 2160, 60, ExportQuality::High);
+    AUREA_CHECK(worst <= static_cast<u32>(kExportMaxVideoBps));
+    AUREA_CHECK(export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Normal, 900) <= 100'000'000u);
+    AUREA_CHECK(export_estimated_bytes(worst, 192'000u, 60.0) < 800ull * 1000 * 1000);
+    // Mbps manual é respeitado.
+    AUREA_CHECK_EQ(export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Low, 10), 10'000'000u);
+    AUREA_CHECK_EQ(export_estimated_bytes(10'000'000u, 0u, 0.0), 0ull);
+}

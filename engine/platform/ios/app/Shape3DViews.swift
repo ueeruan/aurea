@@ -286,11 +286,16 @@ struct Shape3DGlyph: View {
     }
 }
 
-/// Seção "Partes" do painel 3D (Shape3DSection.kt).
+/// Qual aba do painel 3D mostra a forma: Material (cor e imagem) ou Forma (partes).
+enum Shape3DPanelPage { case material, shape }
+
+/// Seção "Partes" do painel 3D (Shape3DSection.kt): as fichas das partes nas
+/// duas abas — Material com a cor e a imagem; Forma com losango, reset e réguas.
 struct Shape3DPanelSection: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var state = Shape3DState.shared
     let layerId: Int64
+    var page: Shape3DPanelPage = .material
     @State private var picking = false
     @State private var pendingColor: DispatchWorkItem?
     @State private var gestureOpen = false
@@ -314,29 +319,31 @@ struct Shape3DPanelSection: View {
                         }
                     }
                 }
-                let shown = part >= 0 && part < info.colors.count ? info.colors[part] : (info.colors.first ?? [1, 1, 1, 1])
-                HStack {
-                    Text(AureaText.t("panel_cor")).font(.aurea(size: 13))
-                    Spacer()
-                    Button { openColor(part, shown) } label: {
-                        AureaColorSwatch(color: AureaColorSpace.color(shown)).frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6))
-                    }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_cor"))
-                }.frame(height: 44)
-                let hasImage = part >= 0 ? (part < info.images.count && info.images[part]) : info.images.contains(true)
-                HStack(spacing: 6) {
-                    Text(AureaText.t("shape3d_image")).font(.aurea(size: 13))
-                    Spacer()
-                    chip(AureaText.t(hasImage ? "shape3d_image_change" : "shape3d_image_pick"), on: hasImage) { picking = true }
-                        .accessibilityIdentifier("shape3d.image")
-                    if hasImage {
-                        chip(AureaText.t("shape3d_image_clear"), on: false) {
-                            _ = model.engine.setShape3DPartStyle(layerId, part: Int32(part), color: nil, image: "")
-                            state.revision += 1
-                            model.refreshModel(force: true)
+                if page == .material {
+                    let shown = part >= 0 && part < info.colors.count ? info.colors[part] : (info.colors.first ?? [1, 1, 1, 1])
+                    HStack {
+                        Text(AureaText.t("panel_cor")).font(.aurea(size: 13))
+                        Spacer()
+                        Button { openColor(part, shown) } label: {
+                            AureaColorSwatch(color: AureaColorSpace.color(shown)).frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6))
+                        }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_cor"))
+                    }.frame(height: 44)
+                    let hasImage = part >= 0 ? (part < info.images.count && info.images[part]) : info.images.contains(true)
+                    HStack(spacing: 6) {
+                        Text(AureaText.t("shape3d_image")).font(.aurea(size: 13))
+                        Spacer()
+                        chip(AureaText.t(hasImage ? "shape3d_image_change" : "shape3d_image_pick"), on: hasImage) { picking = true }
+                            .accessibilityIdentifier("shape3d.image")
+                        if hasImage {
+                            chip(AureaText.t("shape3d_image_clear"), on: false) {
+                                _ = model.engine.setShape3DPartStyle(layerId, part: Int32(part), color: nil, image: "")
+                                state.revision += 1
+                                model.refreshModel(force: true)
+                            }
                         }
-                    }
-                }.frame(height: 44)
-                if part >= 0, let v = model.shapePartValues(layerId, part: part) {
+                    }.frame(height: 44)
+                    if part < 0 { hint("shape3d_whole_hint") }
+                } else if part >= 0, let v = model.shapePartValues(layerId, part: part) {
                     partControls(part, v)
                 } else {
                     hint("shape3d_whole_hint")

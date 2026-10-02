@@ -117,55 +117,77 @@ private enum class DockSection(val glyph: Char, @StringRes val label: Int, val p
     Move(CupertinoGlyph.Move, R.string.sh_dock_transform, EditorPanel.Transform),
     Blend(CupertinoGlyph.CircleLefthalfFill, R.string.sh_dock_opacity_blend, EditorPanel.Appearance),
     Environment(CupertinoGlyph.Lightbulb, R.string.sh_dock_environment, EditorPanel.Element3D),
-    Mask(CupertinoGlyph.PencilOutline, R.string.sh_dock_mask, EditorPanel.Mask),
-    Track(ShellGlyph.Viewfinder, R.string.editor_rastreio, EditorPanel.Tracking),
-    Captions(CupertinoGlyph.CaptionsBubble, R.string.sh_dock_captions, EditorPanel.Captions),
-    Presets(CupertinoGlyph.WandStars, R.string.sh_dock_presets, EditorPanel.Presets),
+    // Máscara, rastreio de câmera e legendas automáticas viraram EFEITOS (moram
+    // no seletor de efeitos); os presets saíram (ninguém usava). Nada disso tem
+    // ficha própria na doca.
     Effects(CupertinoGlyph.Sparkles, R.string.sh_dock_effects, EditorPanel.Effects),
     // Rig 2D: não abre painel — o palco vira o esqueleto (RigStage.kt).
     Rig(CupertinoGlyph.PersonCropCircle, R.string.rig_dock, EditorPanel.Transform),
 }
 
 /**
- * As fichas do TIPO, na ordem de uso (o que é próprio do tipo primeiro,
- * Presets e Efeitos no fim, como na ref15). O que não se aplica não existe:
- * um som não tem posição na tela, um nulo não tem cor, uma luz não tem
- * máscara. Velocidade, aparar e mudo moram na fileira rápida.
+ * As fichas do TIPO, enxutas e na ordem de uso: o que é próprio do tipo
+ * (editar o texto, a forma, as partículas) primeiro, depois Transformar,
+ * Efeitos e Opacidade/mesclagem. O que não se aplica não existe: um som não
+ * tem posição na tela, um nulo não tem cor. Velocidade, aparar, dividir e mudo
+ * moram na fileira rápida; o raro (duplicar, estilo, grupo, rastrear ponto…)
+ * mora no ⋯ do topo — nada aparece duas vezes.
  */
 private fun sectionsFor(l: DockLayer): List<DockSection> {
     val type = LayerType.of(l.kind)
     if (l.adjustment || type == LayerType.Adjustment) {
-        // Camada de ajuste não tem conteúdo: só a mistura e os efeitos que ela aplica abaixo.
-        return listOf(DockSection.Blend, DockSection.Presets, DockSection.Effects)
+        // Camada de ajuste não tem conteúdo: só os efeitos que ela aplica abaixo e a mistura.
+        return listOf(DockSection.Effects, DockSection.Blend)
     }
+    // Ordem do AM: o que é do tipo e a mistura na fileira de cima; mover,
+    // editar e efeitos na de baixo (7 → 3 + 4; 5 → 2 + 3).
+    val common = listOf(DockSection.Blend, DockSection.Move, DockSection.Effects)
     return when (type) {
-        LayerType.Shape -> if (l.vector) {
-            listOf(DockSection.EditVector, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
-        } else {
-            listOf(DockSection.ColorFill, DockSection.EditShape, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
-        }
-        LayerType.Text -> listOf(DockSection.EditText, DockSection.TextOptions, DockSection.Captions, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
-        LayerType.Video -> buildList {
-            add(DockSection.Move)
-            if (l.hasAudio) add(DockSection.Audio)
-            add(DockSection.Mask)
-            add(DockSection.Blend)
-            add(DockSection.Track)
-            if (l.hasAudio) add(DockSection.Captions)
-            add(DockSection.Presets)
-            add(DockSection.Effects)
-        }
-        LayerType.Image -> listOf(DockSection.Move, DockSection.Rig, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
-        LayerType.Audio -> listOf(DockSection.Audio, DockSection.Captions, DockSection.Presets, DockSection.Effects)
-        LayerType.Model3D -> if (l.text3D) listOf(DockSection.EditText, DockSection.TextOptions, DockSection.Move, DockSection.Blend, DockSection.Presets, DockSection.Effects)
-            else listOf(DockSection.Move, DockSection.Environment, DockSection.Blend, DockSection.Presets, DockSection.Effects)
-        LayerType.Particles -> listOf(DockSection.Particles, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
-        LayerType.Group -> listOf(DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
-        LayerType.Camera -> listOf(DockSection.Move, DockSection.Environment, DockSection.Presets)
-        LayerType.Light -> if (l.effectCount > 0) listOf(DockSection.Move, DockSection.Blend, DockSection.Effects) else listOf(DockSection.Move, DockSection.Presets)
-        LayerType.Null -> listOf(DockSection.Move, DockSection.Presets)
+        LayerType.Shape -> if (l.vector) listOf(DockSection.Blend, DockSection.Move, DockSection.EditVector, DockSection.Effects)
+            else listOf(DockSection.ColorFill, DockSection.Blend, DockSection.Move, DockSection.EditShape, DockSection.Effects)
+        LayerType.Text -> listOf(DockSection.EditText, DockSection.TextOptions) + common
+        LayerType.Video -> if (l.hasAudio) listOf(DockSection.Blend, DockSection.Move, DockSection.Audio, DockSection.Effects) else common
+        LayerType.Image -> common + DockSection.Rig
+        LayerType.Audio -> listOf(DockSection.Audio, DockSection.Effects)
+        LayerType.Model3D -> if (l.text3D) listOf(DockSection.EditText, DockSection.TextOptions) + common
+            else listOf(DockSection.Move, DockSection.Environment, DockSection.Effects, DockSection.Blend)
+        LayerType.Particles -> listOf(DockSection.Particles) + common
+        LayerType.Group -> common
+        LayerType.Camera -> listOf(DockSection.Move, DockSection.Environment)
+        LayerType.Light -> if (l.effectCount > 0) common else listOf(DockSection.Move)
+        LayerType.Null -> listOf(DockSection.Move)
         LayerType.Adjustment -> emptyList()
     }
+}
+
+/** A camada como a doca a vê (ou nula, se ela sumiu). */
+private fun dockLayerOf(store: EditorStore, layerId: Long): DockLayer? {
+    val d = store.detail?.takeIf { it.id == layerId }
+    return store.layers.firstOrNull { it.id == layerId }?.let {
+        DockLayer(
+            id = it.id,
+            kind = it.kind,
+            locked = it.locked,
+            start = it.startFrame,
+            end = it.endFrame,
+            adjustment = it.adjustment,
+            vector = d != null && store.isVectorLayer,
+            hasAudio = d?.hasAudio == true,
+            muted = d?.audioMuted == true,
+            text3D = store.text3d != null,
+            effectCount = it.effectCount,
+        )
+    }
+}
+
+/**
+ * Quantas fileiras de fichas a doca da camada escolhida usa (1 ou 2): a
+ * altura da doca é a do conteúdo (`EditorLayout.dock`), não sobra faixa vazia.
+ */
+internal fun dockTileRowCount(store: EditorStore): Int {
+    val id = store.primary ?: return 1
+    val l = dockLayerOf(store, id) ?: return 1
+    return dockRows(sectionsFor(l).size).size.coerceIn(1, 2)
 }
 
 /**
@@ -180,31 +202,12 @@ internal fun dockRows(count: Int): List<Int> =
  * Doca da camada sem painel, compacta: a fileira rápida só de ícones
  * (velocidade · aparar início | dividir | aparar fim | puxar · mudo, só o que
  * se aplica ao tipo) e as fichas do tipo em até duas fileiras baixas.
- * A altura é a do conteúdo (`EditorLayout.DOCK`), não uma fração da tela:
+ * A altura é a do conteúdo (`EditorLayout.dock`), não uma fração da tela:
  * o que sobra fica para a timeline.
  */
 @Composable
 internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
-    val layer by remember(layerId) {
-        derivedStateOf {
-            val d = store.detail?.takeIf { it.id == layerId }
-            store.layers.firstOrNull { it.id == layerId }?.let {
-                DockLayer(
-                    id = it.id,
-                    kind = it.kind,
-                    locked = it.locked,
-                    start = it.startFrame,
-                    end = it.endFrame,
-                    adjustment = it.adjustment,
-                    vector = d != null && store.isVectorLayer,
-                    hasAudio = d?.hasAudio == true,
-                    muted = d?.audioMuted == true,
-                    text3D = store.text3d != null,
-                    effectCount = it.effectCount,
-                )
-            }
-        }
-    }
+    val layer by remember(layerId) { derivedStateOf { dockLayerOf(store, layerId) } }
     val l = layer ?: return
     val type = LayerType.of(l.kind)
     val sections = sectionsFor(l)
@@ -212,29 +215,44 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
         var at = 0
         for (n in dockRows(sections.size)) { add(sections.subList(at, at + n)); at += n }
     }
-    Column(Modifier.fillMaxSize().background(AureaColors.EditorPanel).padding(horizontal = 10.dp)) {
-        Spacer(Modifier.height(8.dp))
+    // Igual ao Alight Motion: folha de cantos arredondados em cima; fileira
+    // rápida com a velocidade e o som em quadrados nas pontas e o bloco
+    // aparar início | dividir | aparar fim no meio; fichas grandes embaixo.
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(top = 4.dp)
+            .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+            .background(ShellColors.DockSheet)
+            .padding(horizontal = 12.dp),
+    ) {
+        Spacer(Modifier.height(10.dp))
         Row(
             Modifier.fillMaxWidth().height(EditorLayout.DOCK_QUICK.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Velocidade: só quem tem tempo de mídia (o painel é de vídeo e áudio).
-            if (type == LayerType.Video || type == LayerType.Audio) {
-                DockSquare {
-                    DockTool(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 21) { openPanel(store, ui, EditorPanel.Speed) }
-                }
-            }
-            // As portas do grupo: entrar e desagrupar.
             if (type == LayerType.Group) {
+                // As portas do grupo no lugar da velocidade: entrar e desagrupar.
                 DockSquare {
                     DockTool(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), 20) { store.openPrecomp(l.id) }
                 }
                 DockSquare {
                     DockTool(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), 20) { store.ungroupPrecomp(l.id) }
                 }
+            } else {
+                // Velocidade sempre no mesmo lugar (como no AM); apagada quando o tipo não tem tempo de mídia.
+                val speedOk = type == LayerType.Video || type == LayerType.Audio
+                DockSquare {
+                    DockTool(
+                        CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 22,
+                        tint = if (speedOk) AureaColors.Text else ShellColors.DockDisabled,
+                    ) {
+                        if (speedOk) openPanel(store, ui, EditorPanel.Speed) else store.toastRes(R.string.dock2_media_only)
+                    }
+                }
             }
-            // O tempo num bloco só: aparar início | dividir | aparar fim | puxar.
+            // O tempo num bloco só, com os colchetes do AM: a parte tracejada é a que sai.
             Row(
                 Modifier
                     .weight(1f)
@@ -243,51 +261,86 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                     .background(ShellColors.DockRow),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                DockTool(CupertinoGlyph.ArrowRightToLine, stringResource(R.string.editor_aparar_inicio_cabecote), 19) {
+                DockTrimTool(TrimGlyph.Start, stringResource(R.string.editor_aparar_inicio_cabecote)) {
                     timeEdit(store, l) { store.trimStart(l.id, store.playhead) }
                 }
                 DockDivider()
-                DockTool(CupertinoGlyph.Scissors, stringResource(R.string.editor_dividir_cabecote), 19) {
+                DockTrimTool(TrimGlyph.Split, stringResource(R.string.editor_dividir_cabecote)) {
                     timeEdit(store, l) { store.splitAtPlayhead(listOf(l.id)) }
                 }
                 DockDivider()
-                DockTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote), 19) {
+                DockTrimTool(TrimGlyph.End, stringResource(R.string.editor_aparar_fim_cabecote)) {
                     timeEdit(store, l) { store.trimEnd(l.id, store.playhead) }
                 }
-                DockDivider()
-                // Puxar para o cabeçote: o clipe inteiro anda até o cabeçote, a
-                // duração não muda. Não usa o `timeEdit` (que exige o cabeçote
-                // DENTRO da camada) — é justamente para quem está fora dele.
-                DockTool(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_puxar_cabecote), 19) {
-                    if (l.locked) store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar)
-                    else {
-                        if (store.playing) store.pause()
-                        store.moveToPlayhead(l.id)
-                    }
-                }
             }
-            // Mudo: toque liga/desliga; segurar abre o volume.
-            if (l.hasAudio) {
-                DockSquare {
-                    DockTool(
-                        if (l.muted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2,
-                        if (l.muted) stringResource(R.string.editor_som_desligado_toque_ligar_segure_volume) else stringResource(R.string.editor_desligar_som_segure_volume),
-                        20,
-                        tint = if (l.muted) AureaColors.Accent else AureaColors.Text,
-                        onLongClick = { openPanel(store, ui, EditorPanel.Audio) },
-                    ) { store.setAudioMuted(!l.muted) }
+            // Som: sempre no canto direito; apagado sem áudio. Toque liga/desliga; segurar abre o volume.
+            DockSquare {
+                DockTool(
+                    if (l.muted || !l.hasAudio) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2,
+                    if (l.muted) stringResource(R.string.editor_som_desligado_toque_ligar_segure_volume) else stringResource(R.string.editor_desligar_som_segure_volume),
+                    22,
+                    tint = when {
+                        !l.hasAudio -> ShellColors.DockDisabled
+                        l.muted -> AureaColors.Accent
+                        else -> AureaColors.Text
+                    },
+                    onLongClick = if (l.hasAudio) ({ openPanel(store, ui, EditorPanel.Audio) }) else null,
+                ) {
+                    if (l.hasAudio) store.setAudioMuted(!l.muted) else store.toastRes(R.string.dock2_media_only)
                 }
             }
         }
         rows.forEach { row ->
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { s -> DockTile(s, EditorLayout.DOCK_TILE) {
                     if (s == DockSection.EditText) store.openTextContentEditor()
                     else if (s == DockSection.Rig) RigStage.open(store)
                     else openPanel(store, ui, panelFor(store, s))
                 } }
             }
+        }
+    }
+}
+
+/** Os três colchetes da fileira de tempo (desenho próprio, no jeito do AM). */
+internal enum class TrimGlyph { Start, Split, End }
+
+@Composable
+private fun RowScope.DockTrimTool(kind: TrimGlyph, description: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .semantics { contentDescription = description }
+            .tocavel(haptic = true, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        val color = AureaColors.Text
+        androidx.compose.foundation.Canvas(Modifier.size(26.dp)) {
+            val u = size.width / 24f
+            val stroke = 1.8f * u
+            val dashed = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * u, 2.0f * u))
+            fun bracket(xOuter: Float, xInner: Float, dash: Boolean) {
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(xOuter * u, 6f * u); lineTo(xInner * u, 6f * u); lineTo(xInner * u, 18f * u); lineTo(xOuter * u, 18f * u)
+                }
+                drawPath(
+                    path, color,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = stroke,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                        join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                        pathEffect = if (dash) dashed else null,
+                    ),
+                )
+            }
+            bracket(3f, 9f, kind == TrimGlyph.Start)
+            bracket(21f, 15f, kind == TrimGlyph.End)
+            drawLine(
+                color, androidx.compose.ui.geometry.Offset(12f * u, 3.5f * u), androidx.compose.ui.geometry.Offset(12f * u, 20.5f * u),
+                strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
         }
     }
 }
@@ -363,7 +416,6 @@ private fun RowScope.DockTool(
 
 @Composable
 private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -> Unit) {
-    val small = height < 72f
     val label = stringResource(section.label)
     Column(
         Modifier
@@ -373,15 +425,16 @@ private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -
             .background(ShellColors.DockTile)
             .semantics { contentDescription = label }
             .tocavel(haptic = true, onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+            .padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        val iconSize = if (small) 22.dp else 27.dp
-        // "Transformar" usa o Material `open_with_rounded` (as quatro setas).
+        // Como no AM: ícone claro em cima e o nome cinza, em até duas linhas
+        // (4 + 26 + 6 + 2 × 13 + 4 cabe nos 72 da ficha).
+        val iconSize = 26.dp
         if (section == DockSection.Move) DockVector(Icons.Rounded.OpenWith, iconSize)
-        else CupertinoIcon(section.glyph, iconSize, ShellColors.DockTileContent)
-        Spacer(Modifier.height(if (small) 4.dp else 7.dp))
+        else CupertinoIcon(section.glyph, iconSize, ShellColors.DockTileIcon)
+        Spacer(Modifier.height(6.dp))
         Text(
             label,
             textAlign = TextAlign.Center,
@@ -389,9 +442,9 @@ private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(
                 TextStyle(
-                    fontSize = if (small) 10.sp else 11.sp,
+                    fontSize = 11.5.sp,
                     lineHeight = 1.15.em,
-                    fontWeight = FontWeight.W500,
+                    fontWeight = FontWeight.W400,
                     color = ShellColors.DockTileContent,
                 ),
             ),
@@ -401,7 +454,7 @@ private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -
 
 @Composable
 private fun DockVector(icon: ImageVector, size: androidx.compose.ui.unit.Dp) {
-    Icon(icon, contentDescription = null, tint = ShellColors.DockTileContent, modifier = Modifier.size(size))
+    Icon(icon, contentDescription = null, tint = ShellColors.DockTileIcon, modifier = Modifier.size(size))
 }
 
 // =============================================================================

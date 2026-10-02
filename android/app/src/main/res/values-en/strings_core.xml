@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_name_time_motion_detect">Motion Detect</string>
+    <string name="fx_desc_time_motion_detect">Shows only what moved: compares the frame with an earlier frame and lights up the differences.</string>
+    <string name="core2_fx_motion_delay">Delay (frames)</string>
+    <string name="core2_fx_offset_darks">Offset darks</string>
+    <string name="core2_fx_motion_mode">Motion</string>
+    <string name="core2_fxo_motion_all">All</string>
+    <string name="core2_fxo_motion_brighter">Brighter</string>
+    <string name="core2_fxo_motion_darker">Darker</string>
+    <string name="core2_fx_cube_file">.cube file</string>
+    <string name="core2_fx_flare_ghosts">Lens ghosts</string>
+</resources>

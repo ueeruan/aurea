@@ -41,6 +41,16 @@ internal class TimelineState {
     var reorderTarget by mutableIntStateOf(-1)
     /** Floating layer top in viewport pixels; independent of vertical auto-scroll. */
     var reorderTop by mutableFloatStateOf(0f)
+    /**
+     * Arrasto vertical de UM trecho (Alight Motion): o trecho no ar (0 = nenhum),
+     * o topo dele na janela (px, segue o dedo), e onde ele cai — [RowDrop] kind,
+     * y do traço de inserção (conteúdo) ou a fileira acesa ao entrar numa linha.
+     */
+    var liftId by mutableLongStateOf(0L)
+    var liftTop by mutableFloatStateOf(0f)
+    var liftKind by mutableIntStateOf(RowDrop.NONE)
+    var liftLineY by mutableFloatStateOf(Float.NaN)
+    var liftRow by mutableIntStateOf(-1)
     /** Losango na mão (cresce e mostra o tempo). */
     var dragKeyLayer by mutableLongStateOf(0L)
     var dragKeyFrame by mutableIntStateOf(Snap.NONE)

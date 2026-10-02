@@ -999,8 +999,10 @@ enum EditorLayout {
     /// Doca da camada, compacta (EditorLayout.kt `DOCK`): fileira rápida de
     /// ícones e fichas baixas; a altura é a do conteúdo.
     static let dockQuick: CGFloat = 44
-    static let dockTile: CGFloat = 64
-    static let dock: CGFloat = 8 + dockQuick + 2 * (8 + dockTile) + 10
+    static let dockTile: CGFloat = 72
+    static let dock: CGFloat = 14 + dockQuick + 2 * (10 + dockTile) + 12
+    /// A doca com `rows` fileiras de fichas (1 ou 2): a altura é a do conteúdo.
+    static func dockHeight(rows: Int) -> CGFloat { 14 + dockQuick + CGFloat(min(max(rows, 1), 2)) * (10 + dockTile) + 12 }
 
     /// Folga do palco em volta do quadro ajustado (as fichas ficam por cima do quadro).
     static let previewFitMargin: CGFloat = 16
@@ -1022,7 +1024,7 @@ enum EditorLayout {
     /// altura escolhida arrastando a divisa palco/transporte (vale sobre as duas).
     /// Par do `EditorLayout.solve` do Android.
     static func solve(total: CGFloat, content: SheetContent, fullscreen: Bool,
-                      width: CGFloat = 0, aspect: CGFloat = 0, preferred: CGFloat = 0) -> EditorMetrics {
+                      width: CGFloat = 0, aspect: CGFloat = 0, preferred: CGFloat = 0, dockRows: Int = 2) -> EditorMetrics {
         if fullscreen {
             return EditorMetrics(topBar: 0, preview: max(0, total - transport), strip: 0,
                                  transport: transport, timeline: 0, sheet: 0)
@@ -1061,13 +1063,24 @@ enum EditorLayout {
             sheet = max(0, sheet - (floor - timeline))
             timeline = ws - preview - sheet
         }
+        // Doca de uma fileira: o palco fica onde a de duas o deixaria (trocar de
+        // camada nunca mexe no palco); a sobra vai inteira para a timeline.
+        if content == .dock && dockRows < 2 {
+            let spare = max(0, sheet - dockHeight(rows: dockRows))
+            sheet -= spare
+            timeline += spare
+        }
         return EditorMetrics(topBar: topBar, preview: preview, strip: strip,
                              transport: transport, timeline: max(0, timeline), sheet: max(0, sheet))
     }
 
-    /// Layout largo: largura ≥ 600 em paisagem, ou ≥ 900 (o mesmo do Android).
+    /// Layout largo: SÓ em paisagem com largura ≥ 600 (o mesmo do Android).
+    /// Tablet EM PÉ usa o layout do celular (palco, transporte, timeline e
+    /// doca empilhados): o "≥ 900 mesmo em pé" mandava o iPad 13" para o largo,
+    /// com a coluna da direita só com a dica, a timeline baixa e o palco
+    /// recriado a cada troca — "a UI inteira sumiu" no tablet.
     static func isWide(_ width: CGFloat, _ height: CGFloat) -> Bool {
-        (width >= 600 && width > height) || width >= 900
+        width >= 600 && width > height
     }
 
     static func wideTimeline(_ totalHeight: CGFloat) -> CGFloat {

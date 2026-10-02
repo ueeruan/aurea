@@ -145,6 +145,11 @@ struct LayerImage {
     Rect      region{};
     u32       width = 0;    ///< texels
     u32       height = 0;
+    /// A FONTE da camada num instante anterior (Detectar movimento), na mesma
+    /// região e densidade da entrada. Só a imagem que sai da fonte traz isto;
+    /// o EffectGraph passa pelas etapas anteriores ao efeito que pede e a
+    /// entrega pelo contexto (`EffectBuildContext::history`).
+    FGTexture history{};
 
     [[nodiscard]] bool valid() const noexcept { return texture.valid() && width && height; }
     /// Texels por pixel de layer.
@@ -351,6 +356,29 @@ public:
     /// regiões diferem: uv_in = uv_out * xy + zw.
     [[nodiscard]] static Vec4 uv_map(const Rect& outRegion, const Rect& inRegion) noexcept;
 
+    /// A camada num instante anterior, já pelas etapas que vêm antes do efeito
+    /// (só durante o `build` de um efeito com `Effect::wants_history`). Inválida
+    /// quando a fonte não tem passado (imagem, texto, forma: parados no tempo).
+    [[nodiscard]] const LayerImage& history() const noexcept { return history_; }
+    void set_history(const LayerImage& image) noexcept { history_ = image; }
+
+    /// Outra camada da composição desenhada como ENTRADA de um efeito (o mapa
+    /// do Mapa de deslocamento): a imagem dela no quadro da composição
+    /// (região 0,0..largura,altura da composição, em px da composição), com
+    /// transform, máscaras e efeitos dela, no MESMO instante. O renderer
+    /// desenha as camadas pedidas por `Effect::input_layer_param` antes das
+    /// outras e as publica aqui.
+    struct LayerInput {
+        u64 layer = 0;          ///< LayerId empacotado (com o sal da pré-composição)
+        LayerImage image{};
+    };
+    void set_layer_inputs(std::span<const LayerInput> inputs) noexcept { layerInputs_ = inputs; }
+    /// A camada `layer` (LayerId empacotado, como no parâmetro de referência)
+    /// desenhada neste quadro; nula se ela não aparece agora (fora do tempo,
+    /// apagada, sem GPU). Dentro de uma pré-composição os ids do renderer
+    /// levam o sal dela: a comparação usa índice baixo + geração.
+    [[nodiscard]] const LayerImage* layer_input(u64 layer) const noexcept;
+
 private:
     FrameGraph&      graph_;
     ShaderLibrary&   shaders_;
@@ -358,6 +386,8 @@ private:
     EffectResources& resources_;
     SurfaceFormat    workFormat_;
     u32              maxTexture_;
+    LayerImage       history_{};
+    std::span<const LayerInput> layerInputs_{};
 };
 
 // -----------------------------------------------------------------------------
@@ -416,6 +446,17 @@ public:
     /// em `eval.aux`/`eval.auxInfo` para a montagem. `eval.resources` pode
     /// ser nulo (teste sem GPU): aí o efeito monta sem o recurso.
     virtual void resolve_resources(EffectEval& eval) const noexcept { (void)eval; }
+
+    /// O efeito compara a camada com ela mesma num instante ANTERIOR (Detectar
+    /// movimento): o renderer decodifica a fonte nesse instante e o EffectGraph
+    /// a leva pelas etapas anteriores até ele (`EffectBuildContext::history`).
+    [[nodiscard]] virtual bool wants_history() const noexcept { return false; }
+
+    /// Índice do parâmetro (referência a camada) cuja camada o efeito LÊ como
+    /// imagem (Mapa de deslocamento); −1 = nenhum. O renderer inclui essa
+    /// camada no quadro mesmo com o olho desligado, desenha-a na composição
+    /// e a entrega por `EffectBuildContext::layer_input`.
+    [[nodiscard]] virtual i32 input_layer_param() const noexcept { return -1; }
 
     /// Margem (px da layer) que o efeito lê em volta de cada pixel. É o que o
     /// EffectGraph soma para recortar a região visível de um efeito anterior

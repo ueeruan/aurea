@@ -1188,6 +1188,8 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                 (id)kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: @YES,
             };
         }
+        const uint32_t averageBps = video.bitrateBps > 0 ? video.bitrateBps : 14'000'000u;
+        const long long peakBytesPerSecond = (long long)(averageBps / 8.0 * (video.rateMode == 0 ? 1.1 : 1.5));
         NSDictionary* compressionProps = @{
             (id)kVTCompressionPropertyKey_RealTime: @NO,
             (id)kVTCompressionPropertyKey_AllowFrameReordering: @YES,
@@ -1195,7 +1197,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                 @(video.keyframeIntervalFrames > 0 ? (int)video.keyframeIntervalFrames
                                                    : (int)llround(video.fps * 2.0)),
             (id)kVTCompressionPropertyKey_ExpectedFrameRate: @(video.fps > 0.0 ? video.fps : 30.0),
-            (id)kVTCompressionPropertyKey_AverageBitRate: @(video.bitrateBps > 0 ? video.bitrateBps : 12'000'000),
+            (id)kVTCompressionPropertyKey_AverageBitRate: @(averageBps),
         };
         VTCompressionSessionRef session = nullptr;
         const OSStatus status = VTCompressionSessionCreate(
@@ -1212,6 +1214,23 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         if (propertyStatus != noErr) {
             if (error) *error = [NSError errorWithDomain:@"aurea.export" code:(NSInteger)propertyStatus userInfo:nil];
             return NO;
+        }
+        // Opcionais (um encoder que não conhece a chave não derruba o export):
+        // teto de pico — sem ele a média é só um alvo e cena difícil estoura
+        // (o "1 minuto = 1 GB"); bytes por janela de 1 s, 1,5× a média em VBR
+        // e 1,1× em CBR —, GOP de no máximo 2 s e perfil High/Main (mais
+        // qualidade pelos mesmos bits que o Baseline).
+        {
+            NSArray* limits = @[@(peakBytesPerSecond), @1.0];
+            if (VTSessionSetProperty(session, kVTCompressionPropertyKey_DataRateLimits,
+                                     (__bridge CFArrayRef)limits) != noErr) {
+                AUREA_LOG_WARN("export: encoder sem DataRateLimits; so a taxa media vale");
+            }
+            (void)VTSessionSetProperty(session, kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
+                                       (__bridge CFNumberRef)@2.0);
+            (void)VTSessionSetProperty(session, kVTCompressionPropertyKey_ProfileLevel,
+                                       video.codec == ExportCodec::HEVC ? kVTProfileLevel_HEVC_Main_AutoLevel
+                                                                        : kVTProfileLevel_H264_High_AutoLevel);
         }
         _hardwareEncoder = NO;
         _encoderName = @"VideoToolbox";

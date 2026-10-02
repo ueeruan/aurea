@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel 3D reorganizado em abas (2026-10-01). Chaves ui3d_*. -->
+<resources>
+    <string name="ui3d_tabs">مجموعات خيارات ثلاثية الأبعاد</string>
+    <string name="ui3d_tab_material">المادة</string>
+    <string name="ui3d_tab_shape">الشكل</string>
+    <string name="ui3d_tab_light">الإضاءة والمشهد</string>
+    <string name="ui3d_tab_anim">الحركة</string>
+    <string name="ui3d_ready_materials">مواد جاهزة</string>
+    <string name="ui3d_finish">السطح</string>
+    <string name="ui3d_finish_smooth">ناعم</string>
+    <string name="ui3d_finish_brushed">مصقول بالفرشاة</string>
+    <string name="ui3d_finish_scratched">مخدوش</string>
+    <string name="ui3d_finish_hammered">مطروق</string>
+    <string name="ui3d_finish_weathered">معدن متآكل</string>
+    <string name="ui3d_text">النص</string>
+    <string name="ui3d_extrusion">البثق</string>
+    <string name="ui3d_depth_hint">‏100% = ارتفاع الحرف. لتحريك العمق، أضف إطارات مفتاحية إلى المقياس Z (التحويل).</string>
+    <string name="ui3d_deform_letters">تشويه الحروف (دوران، أسطوانة، التواء)</string>
+    <string name="ui3d_shadows">الظلال</string>
+    <string name="ui3d_bloom_strength">قوة التوهج</string>
+</resources>

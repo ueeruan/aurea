@@ -38,10 +38,12 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/render/Renderer.hpp"
 #include "aurea/audio/AudioEffects.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/text/TextTransform.hpp"
 #include "aurea/render/ParticleExtras.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -3443,6 +3445,110 @@ AUREA_TEST(Gpu, MotionTileLeavesNoHoleInAnyCombination) {
     }
     AUREA_CHECK_EQ(cases, 36u);
     AUREA_CHECK_EQ(holes, 0u);
+}
+
+namespace {
+/// Pixels do quadro (de 2 em 2) sem cobertura plena ou fora do cinza
+/// uniforme: com uma parede de ladrilhos de uma cor só, qualquer borda
+/// transparente que um efeito puxe aparece aqui.
+struct WallHoles { u32 holes = 0; f32 minAlpha = 1.0f; f32 worst = 0.0f; f32 darkest = 1e9f; };
+WallHoles wall_holes(const FloatImage& img, f32 want) {
+    WallHoles r;
+    for (u32 y = 0; y < img.height; y += 2) {
+        for (u32 x = 0; x < img.width; x += 2) {
+            const f32* v = img.at(x, y);
+            r.minAlpha = std::fmin(r.minAlpha, v[3]);
+            r.darkest = std::fmin(r.darkest, v[0]);
+            r.worst = std::fmax(r.worst, std::fabs(v[0] - want));
+            if (v[3] < 0.99f || std::fabs(v[0] - want) > 0.02f) {
+                ++r.holes;
+            }
+        }
+    }
+    return r;
+}
+} // namespace
+
+AUREA_TEST(Gpu, MotionTileFeedsLaterEffectsWithoutBlackEdges) {
+    // "Os efeitos depois do Motion Tile passam da borda e deixam preto": a
+    // parede é infinita — desfoque, brilho, Transform, Oscilar e distorção
+    // depois dela leem ladrilho, nunca transparente, nem na borda do quadro.
+    AUREA_REQUIRE_GPU();
+    const f32 want = srgb_decode(200.0f / 255.0f);
+    struct Case { const char* name; int kind; };
+    const Case cases[] = {
+        {"desfoque", 0}, {"transform dobrado", 1}, {"transform + desfoque", 2},
+        {"oscilar", 3}, {"onda", 4}, {"desfoque antes", 5}, {"brilho", 6},
+    };
+    for (const Case& c : cases) {
+        for (int mirror = 0; mirror < 2; ++mirror) {
+            Scene s(160, 90);
+            const LayerId id = s.image(uniform_image(64, 36, 200, 200, 200), 80, 45, 0.5f);
+            s.comp->layer(id)->transform.rotation.z = 20.0f;
+            if (c.kind == 5) {
+                EffectInstance& b = s.add_effect(id, effect_keys::kGaussianBlur);
+                b.params[0].constant.v[0] = 6.0f;
+            }
+            EffectInstance& mt = s.add_effect(id, effect_keys::kMotionTile);
+            mt.params[motion_tile::kMirror].constant.v[0] = static_cast<f32>(mirror);
+            if (c.kind == 0 || c.kind == 2) {
+                // O Transform (não dobrado, seguido de desfoque) empurra a parede.
+                if (c.kind == 2) {
+                    EffectInstance& t = s.add_effect(id, effect_keys::kTransform);
+                    t.params[1].constant = ParamValue::vec2(0.9f, 0.1f);      // posição
+                    t.params[2].constant = ParamValue::vec2(60.0f, 60.0f);    // escala
+                    t.params[3].constant.v[0] = 25.0f;                        // giro
+                }
+                EffectInstance& b = s.add_effect(id, effect_keys::kGaussianBlur);
+                b.params[0].constant.v[0] = 25.0f;
+            } else if (c.kind == 1) {
+                EffectInstance& t = s.add_effect(id, effect_keys::kTransform);
+                t.params[1].constant = ParamValue::vec2(1.2f, -0.3f);
+                t.params[2].constant = ParamValue::vec2(40.0f, 40.0f);
+                t.params[3].constant.v[0] = -35.0f;
+            } else if (c.kind == 3) {
+                EffectInstance& o = s.add_effect(id, effect_keys::kOscillate);
+                o.params[1].constant.v[0] = 120.0f;   // amplitude
+                o.params[3].constant.v[0] = 90.0f;    // no pico já no quadro 0
+                o.params[4].constant.v[0] = 30.0f;    // giro
+            } else if (c.kind == 4) {
+                EffectInstance& w = s.add_effect(id, effect_keys::kWaveWarp);
+                w.params[0].constant.v[0] = 40.0f;   // altura da onda
+            } else if (c.kind == 6) {
+                s.add_effect(id, effect_keys::kGlow);
+            }
+            const FloatImage img = s.render();
+            const WallHoles h = wall_holes(img, want);
+            if (c.kind == 5) {
+                // Desfoque ANTES: a emenda fica macia (a borda da layer foi
+                // desfocada contra o vazio), mas nunca um vão transparente.
+                std::printf("    motion tile + %s (espelho %d): mais escuro %.3f (cheio %.3f)\n", c.name, mirror, h.darkest, want);
+                // (A cena compõe sobre preto opaco: falta de cobertura aparece
+                // como cor escura, não como alfa.)
+                AUREA_CHECK_MSG(h.darkest > 0.3f * want, c.name);
+            } else if (c.kind == 6) {
+                // O brilho clareia a cor (é o efeito); escurecer seria o vazio.
+                AUREA_CHECK_MSG(h.darkest > want - 0.02f, c.name);
+            } else {
+                if (h.holes) std::printf("    motion tile + %s (espelho %d): %u furos, alfa minimo %.3f, pior %.3f\n",
+                                         c.name, mirror, h.holes, h.minAlpha, h.worst);
+                AUREA_CHECK_MSG(h.holes == 0u, c.name);
+            }
+        }
+    }
+}
+
+AUREA_TEST(Gpu, MotionTileUnderAShrinkingTransformIsNotIdentity) {
+    // A layer cobre o quadro (Motion Tile a 100% seria neutro), mas o
+    // Transform DEPOIS dele a reduz a 30%: a parede tem de cobrir o quadro.
+    AUREA_REQUIRE_GPU();
+    Scene s(160, 90);
+    const LayerId id = s.image(uniform_image(160, 90, 200, 200, 200), 80, 45);
+    s.add_effect(id, effect_keys::kMotionTile);
+    EffectInstance& t = s.add_effect(id, effect_keys::kTransform);
+    t.params[2].constant = ParamValue::vec2(30.0f, 30.0f);
+    const WallHoles h = wall_holes(s.render(), srgb_decode(200.0f / 255.0f));
+    AUREA_CHECK_EQ(h.holes, 0u);
 }
 
 // -----------------------------------------------------------------------------
@@ -7343,6 +7449,89 @@ AUREA_TEST(Gpu, TimeWarpRgbReadsEachChannelFromItsOwnInstant) {
     AUREA_CHECK_MSG(bErr < 0.02f, "o azul devia ficar no quadro 20");
 }
 
+// -----------------------------------------------------------------------------
+// Detectar movimento: a diferença entre o quadro e a MESMA fonte N quadros
+// antes. Referência calculada dos próprios quadros sem efeito (mesma
+// decodificação), na conta do shader: |agora − antes| em valores de tela.
+// -----------------------------------------------------------------------------
+namespace {
+struct MotionRef { f32 worst = 0.0f; f32 brightMoved = 0.0f; f32 brightStill = 0.0f; };
+MotionRef compare_motion(const FloatImage& got, const FloatImage& now, const FloatImage& before, int mode, f32 gain) {
+    MotionRef r;
+    for (u32 y = 0; y < got.height; ++y) {
+        for (u32 x = 0; x < got.width; ++x) {
+            f32 moved = 0.0f;
+            for (int c = 0; c < 3; ++c) {
+                const f32 d = srgb_encode(std::clamp(now.at(x, y)[c], 0.0f, 1.0f)) - srgb_encode(std::clamp(before.at(x, y)[c], 0.0f, 1.0f));
+                const f32 m = mode == 1 ? std::fmax(d, 0.0f) : mode == 2 ? std::fmax(-d, 0.0f) : std::fabs(d);
+                const f32 want = srgb_decode(std::clamp(m * gain, 0.0f, 1.0f));
+                r.worst = std::fmax(r.worst, std::fabs(got.at(x, y)[c] - want));
+                moved = std::fmax(moved, std::fabs(d));
+            }
+            const f32 v = std::fmax(got.at(x, y)[0], std::fmax(got.at(x, y)[1], got.at(x, y)[2]));
+            if (moved > 0.2f) r.brightMoved = std::fmax(r.brightMoved, v);
+            if (moved < 0.002f) r.brightStill = std::fmax(r.brightStill, v);
+        }
+    }
+    return r;
+}
+} // namespace
+
+AUREA_TEST(Gpu, MotionDetectShowsOnlyWhatMovedSinceTheDelayedFrame) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 72, 30.0);
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 72;
+    cfg.pattern = SyntheticPattern::MovingSquare;   // quadrado xadrez andando 1 px/quadro sobre degradê parado
+    cfg.frameCount = 120;
+    const LayerId id = s.video(cfg, 48, 36);
+    const FloatImage f20 = s.render(FrameIndex{20});
+    const FloatImage f19 = s.render(FrameIndex{19});
+    const FloatImage f15 = s.render(FrameIndex{15});
+
+    EffectInstance& e = s.add_effect(id, effect_keys::kMotionDetect);
+    e.params[0].constant = ParamValue::scalar(5.0f);    // 5 quadros atrás
+    const FloatImage all5 = s.render(FrameIndex{20});
+    const MotionRef r5 = compare_motion(all5, f20, f15, 0, 1.0f);
+    std::printf("    detectar movimento (5 quadros): erro %.4f, movido %.3f, parado %.4f\n", r5.worst, r5.brightMoved, r5.brightStill);
+    AUREA_CHECK_MSG(r5.worst < 0.03f, "a diferenca devia ser a do quadro 15");
+    AUREA_CHECK_MSG(r5.brightMoved > 0.3f, "onde o quadrado andou devia acender");
+    AUREA_CHECK_MSG(r5.brightStill < 0.01f, "o fundo parado devia ficar preto");
+
+    // Atraso de 1: a comparação é com o quadro 19, não com o 15.
+    e.params[0].constant = ParamValue::scalar(1.0f);
+    const FloatImage all1 = s.render(FrameIndex{20});
+    AUREA_CHECK_MSG(compare_motion(all1, f20, f19, 0, 1.0f).worst < 0.03f, "atraso 1 devia comparar com o quadro 19");
+    AUREA_CHECK_MSG(compare_motion(all1, f20, f15, 0, 1.0f).worst > 0.1f, "atraso 1 nao pode ser o quadro 15");
+
+    // Só o que CLAREOU / só o que ESCURECEU, com brilho 2.
+    e.params[0].constant = ParamValue::scalar(5.0f);
+    e.params[1].constant = ParamValue::scalar(2.0f);
+    e.params[4].constant = ParamValue::scalar(1.0f);
+    const FloatImage brighter = s.render(FrameIndex{20});
+    AUREA_CHECK_MSG(compare_motion(brighter, f20, f15, 1, 2.0f).worst < 0.03f, "mais claro: so onde clareou");
+    e.params[4].constant = ParamValue::scalar(2.0f);
+    const FloatImage darker = s.render(FrameIndex{20});
+    AUREA_CHECK_MSG(compare_motion(darker, f20, f15, 2, 2.0f).worst < 0.03f, "mais escuro: so onde escureceu");
+    f32 overlap = 0.0f;   // nenhum pixel acende nos dois modos
+    for (usize k = 0; k < brighter.px.size(); k += 4)
+        overlap = std::fmax(overlap, std::fmin(brighter.px[k] + brighter.px[k + 1] + brighter.px[k + 2], darker.px[k] + darker.px[k + 1] + darker.px[k + 2]));
+    AUREA_CHECK_MSG(overlap < 0.01f, "clareou e escureceu no mesmo pixel");
+
+    // Saturação 0 = cinza; mistura 0 = o quadro original; e o export (qualidade
+    // final) espera o quadro de trás e dá o mesmo resultado do preview.
+    e.params[4].constant = ParamValue::scalar(0.0f);
+    e.params[1].constant = ParamValue::scalar(1.0f);
+    const FloatImage exported = s.render(FrameIndex{20}, 1, true);
+    AUREA_CHECK_MSG(compare_motion(exported, f20, f15, 0, 1.0f).worst < 0.03f, "o export devia ver o mesmo movimento");
+    e.params[5].constant = ParamValue::scalar(0.0f);
+    const FloatImage untouched = s.render(FrameIndex{20});
+    f32 diff = 0.0f;
+    for (usize k = 0; k < untouched.px.size(); ++k) diff = std::fmax(diff, std::fabs(untouched.px[k] - f20.px[k]));
+    AUREA_CHECK_MSG(diff < 0.01f, "mistura 0 devia ser o quadro original");
+}
+
 // =============================================================================
 // O catálogo INTEIRO: todo efeito monta, compila e desenha
 //
@@ -7462,6 +7651,10 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         if (fx.type_id() == effect_type_id(effect_keys::kText3DLayout)) continue;
         // Shape 3D Layout idem (só em forma 3D): coberto por Shape3DLayout.* em test_shape3d.cpp.
         if (fx.type_id() == effect_type_id(effect_keys::kShape3DLayout)) continue;
+        // Text Transform / Text Animator só existem em camada de texto (o motor recusa
+        // pô-los numa foto); o efeito deles no quadro é coberto por TextTransform.* e
+        // TextAnimatorEditing.* / Regression2135Gpu.
+        if (fx.type_id() == effect_type_id(text::kTransformEffect) || fx.type_id() == effect_type_id(text::kAnimatorEffect)) continue;
         const bool parenting = fx.type_id() == effect_type_id(effect_keys::kParentingHelper);
         const bool shadow = fx.type_id() == effect_type_id(effect_keys::kShadowStudio3);
         // Sombra projetada e Borda desenham FORA da caixa da camada: com a
@@ -11497,4 +11690,197 @@ AUREA_TEST(Regression2135Gpu, ParticularBlurIncludesMovingLayerParentAndCamera) 
         AUREA_CHECK(off.w()>0);AUREA_CHECK(on.w()>=off.w()+5);AUREA_CHECK(on.h()<=off.h()+2);
     }
 }
+// "Text Transform não funciona" (iOS): a MESMA sequência que a ponte do iOS
+// emite (AureaEngine.mm addEffect → EffectAdd com índice UInt32.max; o painel
+// escreve o ponto Deslocamento com EffectSetColorParam, EffectId{id, 0}, o
+// vetor inteiro com o 4º componente 0) tem de mover as letras no quadro.
+AUREA_TEST(Regression2136Gpu, TextTransformOffsetFromTheIosBridgeSequenceMovesTheGlyphs) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    const auto id = rig.e.add_text("AUREA");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto centroid = [](const Image8& img) {
+        f64 sx = 0, sy = 0, w = 0;
+        for (u32 y = 0; y < img.height; ++y)
+            for (u32 x = 0; x < img.width; ++x) {
+                const u8* p = img.at(x, y);
+                const f64 v = (p[0] + p[1] + p[2]) / 765.0;
+                if (v < 0.1) continue;
+                sx += (x + 0.5) * v; sy += (y + 0.5) * v; w += v;
+            }
+        return std::array<f64, 3>{w > 0 ? sx / w : -1, w > 0 ? sy / w : -1, w};
+    };
+    const auto before = centroid(rig.capture(320));
+    AUREA_CHECK(before[2] > 50);
+    Command add; add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(*id);
+    add.effect_add.effectType = effect_type_id(text::kTransformEffect);
+    add.effect_add.index = 0xFFFFFFFFu;
+    AUREA_CHECK_EQ(rig.e.submit_commands(&add, 1, nullptr, 0), 1u);
+    bridge::LayerEffectRow fx[4]{};
+    char names[512]{};
+    AUREA_CHECK_EQ(rig.e.query_layer_effects(*id, fx, 4, names, sizeof names), 1u);
+    const u32 effect = fx[0].effectId;
+    const auto added = centroid(rig.capture(320));
+    AUREA_CHECK_NEAR(added[0], before[0], 1.0);
+    AUREA_CHECK_NEAR(added[1], before[1], 1.0);
+    Command offset; offset.type = CommandType::EffectSetColorParam;
+    offset.effect_color = EffectColorPayload{LayerId::unpack(*id), EffectId{effect, 0}, text::kOffset, 30.0f, 12.0f, 0.0f, 0.0f};
+    AUREA_CHECK_EQ(rig.e.submit_commands(&offset, 1, nullptr, 0), 1u);
+    const auto moved = centroid(rig.capture(320));
+    std::printf(" text transform centroid %.1f,%.1f -> %.1f,%.1f\n", before[0], before[1], moved[0], moved[1]);
+    AUREA_CHECK_NEAR(moved[0] - before[0], 30.0, 2.0);
+    AUREA_CHECK_NEAR(moved[1] - before[1], 12.0, 2.0);
+}
 #endif
+
+// =============================================================================
+// Emulador CRT · Tremor dissolvente · Mapa de deslocamento
+// =============================================================================
+namespace {
+f32 image_diff(const FloatImage& a, const FloatImage& b) {
+    f32 d = 0.0f;
+    for (usize k = 0; k < a.px.size() && k < b.px.size(); ++k) d = std::fmax(d, std::fabs(a.px[k] - b.px[k]));
+    return d;
+}
+u32 changed_pixels(const FloatImage& a, const FloatImage& b, f32 tol = 0.02f) {
+    u32 n = 0;
+    for (usize k = 0; k + 3 < a.px.size() && k + 3 < b.px.size(); k += 4) {
+        f32 d = 0.0f;
+        for (int c = 0; c < 4; ++c) d = std::fmax(d, std::fabs(a.px[k + c] - b.px[k + c]));
+        n += d > tol ? 1u : 0u;
+    }
+    return n;
+}
+/// Rampa horizontal no vermelho (codificado: x·255/(w−1)), verde e azul fixos.
+ImagePixels red_ramp(u32 w, u32 h) {
+    ImagePixels px = uniform_image(w, h, 0, 40, 40);
+    for (u32 y = 0; y < h; ++y)
+        for (u32 x = 0; x < w; ++x) px.rgba[(static_cast<usize>(y) * w + x) * 4] = static_cast<u8>(x * 255 / (w - 1));
+    return px;
+}
+} // namespace
+
+AUREA_TEST(Gpu, CrtEmulatorCurvesTheScreenAndAnimatesByTime) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 96);
+    const LayerId id = s.image(reference_image(96, 96), 48, 48);
+    const FloatImage plain = s.render(FrameIndex{10});
+    EffectInstance& e = s.add_effect(id, effect_keys::kCrtEmulator);
+    e.params[0].constant = ParamValue::scalar(80.0f);   // curvatura forte: cantos fora da tela
+    const FloatImage a = s.render(FrameIndex{10});
+    const FloatImage again = s.render(FrameIndex{10});
+    const FloatImage later = s.render(FrameIndex{11});
+    const Image8 enc = a.encoded();
+    const u8* corner = enc.at(1, 1);
+    const u8* middle = enc.at(30, 48);
+    std::printf("    crt: mudou %u px; canto (%u,%u,%u); mesmo quadro %.5f; quadro seguinte %.4f\n", changed_pixels(a, plain),
+                corner[0], corner[1], corner[2], image_diff(a, again), image_diff(a, later));
+    AUREA_CHECK(changed_pixels(a, plain) > 96u * 96u / 4u);
+    AUREA_CHECK_MSG(corner[0] < 6 && corner[1] < 6 && corner[2] < 6, "o canto da tela curva devia ser preto");
+    AUREA_CHECK_MSG(middle[0] + middle[1] + middle[2] > 30, "o meio da tela devia ter imagem");
+    AUREA_CHECK_MSG(image_diff(a, again) < 1e-4f, "o mesmo instante devia dar o mesmo quadro");
+    AUREA_CHECK_MSG(image_diff(a, later) > 0.004f, "cintilação/ruído deviam andar com o tempo");
+    e.params[16].constant = ParamValue::scalar(0.0f);   // mistura 0 = a camada intacta
+    AUREA_CHECK(image_diff(s.render(FrameIndex{10}), plain) < 0.004f);
+}
+
+AUREA_TEST(Gpu, DissolveShakeBreaksTheLayerAndAnimatesByTime) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 96);
+    const LayerId id = s.image(reference_image(64, 64), 48, 48);
+    const FloatImage plain = s.render(FrameIndex{0});
+    EffectInstance& e = s.add_effect(id, effect_keys::kDissolveShake);
+    const FloatImage a = s.render(FrameIndex{12});
+    const FloatImage again = s.render(FrameIndex{12});
+    const FloatImage later = s.render(FrameIndex{20});
+    std::printf("    tremor dissolvente: mudou %u px; mesmo quadro %.5f; outro quadro %u px\n", changed_pixels(a, plain),
+                image_diff(a, again), changed_pixels(a, later));
+    AUREA_CHECK(changed_pixels(a, plain) > 600u);
+    AUREA_CHECK_MSG(image_diff(a, again) < 1e-4f, "o mesmo instante devia dar o mesmo quadro");
+    AUREA_CHECK_MSG(changed_pixels(a, later) > 300u, "o tremor devia andar sozinho com o tempo");
+    // Dissolução total, sem tremor: a camada some quase toda (fragmentos
+    // soltos somem ou ficam meio transparentes), mas não vira outra coisa.
+    e.params[0].constant = ParamValue::scalar(0.0f);
+    e.params[2].constant = ParamValue::scalar(100.0f);
+    e.params[6].constant = ParamValue::scalar(100.0f);
+    const FloatImage gone = s.render(FrameIndex{12});
+    const Vec4 mg = gone.mean(), mp = plain.mean();
+    std::printf("    dissolucao total: brilho medio %.4f (antes %.4f)\n", mg.x + mg.y + mg.z, mp.x + mp.y + mp.z);
+    AUREA_CHECK_MSG(mg.x + mg.y + mg.z < (mp.x + mp.y + mp.z) * 0.5f, "dissolução 100% devia apagar a maior parte");
+    // Sem tremor e sem dissolução, é a camada intacta (identidade).
+    e.params[2].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK(image_diff(s.render(FrameIndex{12}), plain) < 0.004f);
+}
+
+AUREA_TEST(Gpu, DisplacementMapUsesAnotherLayerWithSignAndMagnitude) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 32);
+    const LayerId target = s.image(red_ramp(128, 32), 64, 16);
+    // A camada-mapa fica ESCONDIDA (olho desligado): só serve de mapa.
+    const LayerId map = s.image(uniform_image(128, 32, 255, 128, 128), 64, 16);
+    s.comp->layer(map)->visible = false;
+    // A camada-alvo por cima de tudo.
+    s.comp->reorder_layer(target, s.comp->order().size() - 1);
+    EffectInstance& e = s.add_effect(target, effect_keys::kDisplacementMap);
+    e.params[0].constant.ref = map.pack();
+    e.params[0].constant.v[0] = static_cast<f32>(map.index);
+    e.params[2].constant = ParamValue::scalar(5.0f);    // vertical desligado
+    e.params[3].constant = ParamValue::scalar(10.0f);
+    auto shift_at = [](const FloatImage& img, u32 x) {
+        const Image8 enc = img.encoded();
+        const f32 src = static_cast<f32>(enc.at(x, 16)[0]) * 127.0f / 255.0f;
+        return static_cast<f32>(x) - src;   // saída em x mostra a entrada em x − d
+    };
+    // Branco com máximo +10: a imagem anda 10 px para a direita.
+    const FloatImage white = s.render();
+    const f32 dWhite = shift_at(white, 64);
+    // Máximo −10: para a esquerda.
+    e.params[3].constant = ParamValue::scalar(-10.0f);
+    const f32 dNeg = shift_at(s.render(), 64);
+    // Mapa cinza 75% (191) com +10: metade, 5 px.
+    s.images[s.comp->layer(map)->source.pack()] = uniform_image(128, 32, 191, 128, 128);
+    gpu().renderer.release_project_resources();
+    e.params[3].constant = ParamValue::scalar(10.0f);
+    const f32 dHalf = shift_at(s.render(), 64);
+    std::printf("    mapa de deslocamento: branco %+.2f, maximo negativo %+.2f, cinza 75%% %+.2f px\n", dWhite, dNeg, dHalf);
+    AUREA_CHECK_NEAR(dWhite, 10.0, 1.0);
+    AUREA_CHECK_NEAR(dNeg, -10.0, 1.0);
+    AUREA_CHECK_NEAR(dHalf, 5.0, 1.0);
+
+    // Mapa em DEGRADÊ (a mesma rampa): o deslocamento vai de −máx a +máx
+    // ao longo de x — d(x) = (x/127 − 0,5)·2·16.
+    s.images[s.comp->layer(map)->source.pack()] = red_ramp(128, 32);
+    gpu().renderer.release_project_resources();
+    e.params[3].constant = ParamValue::scalar(16.0f);
+    const FloatImage ramp = s.render();
+    for (u32 x : {24u, 64u, 104u}) {
+        const f32 want = (static_cast<f32>(x) / 127.0f - 0.5f) * 32.0f;
+        const f32 got = shift_at(ramp, x);
+        std::printf("    degradê x=%u: esperado %+.2f, medido %+.2f\n", x, want, got);
+        AUREA_CHECK_NEAR(got, want, 1.2);
+    }
+    // O mapa visível desloca igual (e aparece por baixo, coberto pela alvo).
+    s.comp->layer(map)->visible = true;
+    AUREA_CHECK(image_diff(s.render(), ramp) < 0.01f);
+    s.comp->layer(map)->visible = false;
+
+    // O mapa no MESMO instante: fora do tempo da camada-mapa, nada anda.
+    s.comp->layer(map)->start = FrameIndex{10};
+    const f32 before = shift_at(s.render(FrameIndex{0}), 104);
+    const f32 during = shift_at(s.render(FrameIndex{20}), 104);
+    std::printf("    mapa ausente %+.2f, presente %+.2f px\n", before, during);
+    AUREA_CHECK_NEAR(before, 0.0, 1.0);
+    AUREA_CHECK_NEAR(during, (104.0f / 127.0f - 0.5f) * 32.0f, 1.2);
+    s.comp->layer(map)->start = FrameIndex{0};
+
+    // Export (qualidade final) dá o mesmo do preview.
+    AUREA_CHECK(image_diff(s.render(FrameIndex{0}, 1, true), ramp) < 0.01f);
+
+    // Sem camada: o mapa é a própria camada (vermelho da rampa → o mesmo d(x)).
+    e.params[0].constant = ParamValue::scalar(-1.0f);
+    e.params[0].constant.ref = 0;
+    const FloatImage own = s.render();
+    AUREA_CHECK(changed_pixels(own, ramp) < 128u * 32u / 8u);
+}

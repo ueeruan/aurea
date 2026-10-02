@@ -1071,7 +1071,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
             val k = if (from != 0f) v / from else 1f
             val nx = if (axisY) (if (from != 0f) fromX * k else v) else v
             val ny = if (axisY) v else (if (from != 0f) fromY * k else v)
-            if (depth) store.setScale3(com.aurea.aurea.state.linkedScale(floatArrayOf(fromX, fromY, fromZ), if (axisY) 1 else 0, v).map { it / 100f }.toFloatArray())
+            // Volume: zoom uniforme sem esticar (regra do motor: Z de conteúdo acompanha X).
+            if (depth) store.setScale3(if (from != 0f) com.aurea.aurea.engine.AureaEngine.gestureScale3D(kind, fromX / 100f, fromY / 100f, fromZ / 100f, 3, k)
+                else com.aurea.aurea.state.linkedScale(floatArrayOf(fromX, fromY, fromZ), if (axisY) 1 else 0, v).map { it / 100f }.toFloatArray())
             else store.setTransform2(TrackProperty.SCALE_X, nx / 100f, TrackProperty.SCALE_Y, ny / 100f)
         } else {
             store.setTransform(if (axisY) TrackProperty.SCALE_Y else TrackProperty.SCALE_X, v / 100f)
@@ -1101,7 +1103,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelE
         Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
             ValueBox("${numeroPtBr(sz, 1)}%", width = 80.dp, label = "z", onTap = {
                 env.openKeypad(KeypadRequest(scaleZLabel, sz, "%", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
-                    if (lockNow) store.setScale3(com.aurea.aurea.state.linkedScale(floatArrayOf(sx, sy, sz), 2, it).map { v -> v / 100f }.toFloatArray())
+                    if (lockNow) store.setScale3(if (sz != 0f) com.aurea.aurea.engine.AureaEngine.gestureScale3D(kind, sx / 100f, sy / 100f, sz / 100f, 3, it / sz)
+                        else com.aurea.aurea.state.linkedScale(floatArrayOf(sx, sy, sz), 2, it).map { v -> v / 100f }.toFloatArray())
                     else store.setTransform(TrackProperty.SCALE_Z, it / 100f)
                 })
             })

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel de efeitos: catalogo "Adicionar efeito", pilha compacta e ferramentas-efeito. -->
+<resources>
+    <string name="fxui_featured">Избранное</string>
+    <string name="fxui_categories">Категории</string>
+    <string name="fxui_group_color_light">Цвет и свет</string>
+    <string name="fxui_group_blur">Размытие и резкость</string>
+    <string name="fxui_group_distort">Искажение</string>
+    <string name="fxui_group_motion">Движение и трансформация</string>
+    <string name="fxui_group_stylize">Стилизация</string>
+    <string name="fxui_group_glitch">Глитч</string>
+    <string name="fxui_group_draw_edge">Рисунок и контуры</string>
+    <string name="fxui_group_procedural">Процедурные</string>
+    <string name="fxui_group_matte">Маска, матте и ключ</string>
+    <string name="fxui_group_time">Время и переходы</string>
+    <string name="fxui_group_text">Текст</string>
+    <string name="fxui_group_3d">3D</string>
+    <string name="fxui_group_audio">Аудио</string>
+    <string name="fxui_group_utility">Утилиты и выражения</string>
+    <string name="fxui_group_other">Другое</string>
+    <string name="fxui_tool_captions">Автосубтитры</string>
+    <string name="fxui_tool_camera_track">Трекинг камеры</string>
+    <string name="fxui_tool_mask">Маска</string>
+    <string name="fxui_tool_captions_desc">Распознаёт речь слоя и создаёт субтитры по времени.</string>
+    <string name="fxui_tool_camera_track_desc">Анализирует движение камеры в видео, чтобы встроить 3D-объекты в сцену.</string>
+    <string name="fxui_tool_mask_desc">Рисует фигуры, которые показывают или скрывают части слоя.</string>
+    <string name="fxui_tool_badge">Инструмент</string>
+    <string name="fxui_tool_masks_n">Масок: %1$d</string>
+    <string name="fxui_tool_captions_n">Субтитров: %1$d</string>
+    <string name="fxui_tool_camera_ready">Камера проанализирована</string>
+    <string name="fxui_tool_remove_masks_q">Удалить все маски этого слоя?</string>
+    <string name="fxui_tool_remove_captions_q">Удалить созданные субтитры этого слоя?</string>
+    <string name="fxui_a11y_expand">Показать настройки: %1$s</string>
+    <string name="fxui_a11y_collapse">Скрыть настройки: %1$s</string>
+    <string name="fxui_a11y_enable">Включить: %1$s</string>
+    <string name="fxui_a11y_disable">Выключить: %1$s</string>
+    <string name="fxui_a11y_drag">Перетащите, чтобы переместить: %1$s</string>
+    <string name="fxui_a11y_remove">Удалить: %1$s</string>
+    <string name="fxui_a11y_open">Открыть: %1$s</string>
+    <string name="fxui_a11y_category">Категория: %1$s</string>
+    <string name="fxui_back_categories">Назад к категориям</string>
+    <string name="fxui_search_effects">Поиск эффектов</string>
+    <string name="fxui_effect_off">Выключен</string>
+</resources>

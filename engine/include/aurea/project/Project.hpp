@@ -78,6 +78,9 @@ struct ExportSettings {
     u32 aiUpscale = 0;
     /// Session export range. Does not shorten the project or its compositions.
     bool trimToContent = false;
+    /// Qualidade da sessão (0 Baixa, 1 Normal, 2 Alta) para a taxa automática
+    /// (export/BitratePolicy.hpp). Só vale com videoBitrateMbps == 0. Não persiste.
+    u32 quality = 1;
 };
 
 /// Ajustes de interface persistidos com o projeto — zoom da timeline, escala

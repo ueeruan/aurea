@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_name_time_motion_detect">Обнаружение движения</string>
+    <string name="fx_desc_time_motion_detect">Показывает только то, что сдвинулось: сравнивает кадр с более ранним и подсвечивает различия.</string>
+    <string name="core2_fx_motion_delay">Задержка (кадры)</string>
+    <string name="core2_fx_offset_darks">Подъём теней</string>
+    <string name="core2_fx_motion_mode">Движение</string>
+    <string name="core2_fxo_motion_all">Всё</string>
+    <string name="core2_fxo_motion_brighter">Светлее</string>
+    <string name="core2_fxo_motion_darker">Темнее</string>
+    <string name="core2_fx_cube_file">Файл .cube</string>
+    <string name="core2_fx_flare_ghosts">Внутренние блики</string>
+</resources>

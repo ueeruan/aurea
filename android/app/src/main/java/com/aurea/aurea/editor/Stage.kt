@@ -433,7 +433,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         store.sceneYaw; store.scenePitch; store.sceneDistance
         val lines = store.sceneGuideLines()
         for (i in lines.indices step 5) {
-            val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .35f) }
+            val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .22f) }
             drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), 1.dp.toPx())
         }
         store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
@@ -799,12 +799,17 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.giz
                         facing -> -dy
                         else -> (dx * hx + dy * hy) / hLen
                     }
-                    val out = base.copyOf()
-                    if (axis == 3) {
-                        val f = kotlin.math.exp(along / uniformPx)
-                        for (i in 0..2) out[i] = gizmoScale(base[i] * f)
+                    var out = base.copyOf()
+                    val f = if (axis == 3) kotlin.math.exp(along / uniformPx) else max(0.01f, 1f + along / hLen)
+                    if (partBase != null) {
+                        // Parte da forma 3D: escala própria, Z absoluto.
+                        if (axis == 3) for (i in 0..2) out[i] = gizmoScale(base[i] * f)
+                        else out[axis] = gizmoScale(base[axis] * f)
                     } else {
-                        out[axis] = gizmoScale(base[axis] * max(0.01f, 1f + along / hLen))
+                        // Camada: a regra de profundidade do motor (Z de conteúdo
+                        // acompanha X) — o volume não estica (GestureMath.hpp).
+                        out = com.aurea.aurea.engine.AureaEngine.gestureScale3D(d.kind, base[0], base[1], base[2], axis, f)
+                        for (i in 0..2) out[i] = gizmoScale(out[i])
                     }
                     store.gizmoSetComponents(TrackProperty.SCALE_X, out)
                 }
@@ -1497,6 +1502,7 @@ private class StageEdit(
     private var sy0 = 1f
     private var sz0 = 1f
     private var threeD = false
+    private var kind0 = 0
     private var rot0 = 0f
     private val pinchTracker = StagePinchTracker()
     private var pinchLayer = 0L
@@ -1552,14 +1558,17 @@ private class StageEdit(
         sx0 = d.scale[0]
         sy0 = d.scale[1]
         sz0 = d.scale.getOrElse(2) { 1f }
-        // Camada 3D (tem gizmo): a pinça escala X, Y e Z juntos, sem achatar a profundidade.
+        // Camada 3D (tem gizmo): a pinça escala o volume inteiro (X, Y e a profundidade
+        // efetiva) pela regra do motor, sem achatar nem esticar.
         threeD = d.kind in 8..10 || d.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D != 0
+        kind0 = d.kind
         rot0 = d.rotation[2]
     }
 
     /** Mesmo fator para todos os eixos, com os limites definidos no motor. */
     private fun clampFactor(f: Float): Float {
-        return com.aurea.aurea.engine.AureaEngine.clampPinchFactor(f, sx0, sy0, sz0, threeD)
+        return if (threeD) com.aurea.aurea.engine.AureaEngine.clampPinchFactor3D(kind0, f, sx0, sy0, sz0)
+        else com.aurea.aurea.engine.AureaEngine.clampPinchFactor(f, sx0, sy0, sz0, false)
     }
 
     /** [axis]: 0 = livre (trava sozinho pelo gesto), 1 = só X, 2 = só Y (seta). */
@@ -1711,7 +1720,10 @@ private class StageEdit(
             if (!s.isNaN()) f = clampFactor(1f / ref)
         }
         begin("pinça")
-        if (threeD) store.gizmoSetComponents(TrackProperty.SCALE_X, floatArrayOf(sx0 * f, sy0 * f, sz0 * f))
+        // 3D: a profundidade efetiva acompanha (Z gravado é relativo a X no
+        // conteúdo) — multiplicar Z aqui também esticava o volume (fator²).
+        if (threeD) store.gizmoSetComponents(TrackProperty.SCALE_X,
+            com.aurea.aurea.engine.AureaEngine.gestureScale3D(kind0, sx0, sy0, sz0, 3, f))
         else store.setTransform2(TrackProperty.SCALE_X, sx0 * f, TrackProperty.SCALE_Y, sy0 * f)
         if (rotActive) {
             // Giro: prende nos múltiplos de 45° (0, 45, 90…) com um tique.

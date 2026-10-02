@@ -20,15 +20,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.editor.panels.*
 import com.aurea.aurea.R
-import com.aurea.aurea.presets.PresetEntry
-import com.aurea.aurea.presets.PresetKind
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import org.json.JSONArray
 
 internal data class EditorCommand(val id: String, val title: String, val detail: String, val keywords: String, val requires: String)
 private data class CommandHit(val id: String, val title: String, val detail: String, val search: String,
-                              val category: String, val requires: String, val effect: Int? = null, val preset: PresetEntry? = null)
+                              val category: String, val requires: String, val effect: Int? = null)
 
 // Stable IDs and capabilities come from the same resource on both platforms.
 internal fun readEditorCommands(context: Context): List<EditorCommand> {
@@ -76,10 +74,10 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
     var favorites by remember { mutableStateOf(preferences.getStringSet("favorites", emptySet()).orEmpty().toSet()) }
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf("Tudo") }
-    val presets = store.presets.all()
     val addEffectDetail = stringResource(R.string.edt_cmd_add_effect)
-    val openPresetDetail = stringResource(R.string.edt_cmd_open_preset)
-    // Reuse existing catalogs and preference stores; no duplicate effect/preset system.
+    // Reuse existing catalogs and preference stores; no duplicate effect system.
+    // Os presets saíram da busca (o navegador de presets não tem mais entrada);
+    // máscara, legendas e rastreio de câmera chegam como efeitos do catálogo.
     val hits = commands.map { CommandHit(it.id, it.title, it.detail, normalizeSearch("${it.title} ${it.keywords} ${it.detail}"), "Ações", it.requires) } +
         store.catalog.filter { it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.motion.oscillate") }.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(it.category),
             effectSearchText(it.typeId, it.name, it.category), "Efeitos", when (it.typeId) {
@@ -87,10 +85,13 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
                 effectTypeId("aurea.shape3d.layout") -> "shape3d"
                 else -> "selection"
             }, effect = it.typeId) } +
-        presets.map { CommandHit("preset:${it.key}", it.name, openPresetDetail.format(it.kind.dir), normalizeSearch("${it.name} ${it.kind.dir} preset"),
-            "Presets", if (it.kind == PresetKind.Text) "text" else "single", preset = it) }
-    fun isFavorite(hit: CommandHit) = hit.effect?.let { store.effectPrefs.isFavorite(it) }
-        ?: hit.preset?.let { it.key in store.presets.favorites } ?: (hit.id in favorites)
+        // Ferramentas-efeito (legendas, rastreio de câmera, máscara): o toque abre a ferramenta.
+        com.aurea.aurea.effects.EffectTool.entries.map { t ->
+            val label = stringResource(com.aurea.aurea.effects.toolLabelRes(t))
+            val group = stringResource(com.aurea.aurea.effects.effectGroupLabelRes(com.aurea.aurea.effects.effectGroupOf(com.aurea.aurea.effects.toolCatalogEntry(t, label))))
+            CommandHit("tool:${t.key}", label, addEffectDetail.format(group), normalizeSearch("$label $group ${t.key}"), "Efeitos", "selection")
+        }
+    fun isFavorite(hit: CommandHit) = hit.effect?.let { store.effectPrefs.isFavorite(it) } ?: (hit.id in favorites)
     val terms = normalizeSearch(query).split(Regex("\\s+")).filter { it.isNotBlank() }
     val filtered = hits.filter { hit ->
         (category == "Tudo" || category == hit.category || category == "Favoritos" && isFavorite(hit)) &&
@@ -109,7 +110,7 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
                 singleLine = true, placeholder = { Text(stringResource(R.string.edt_cmd_search_hint)) })
             androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(listOf("Tudo" to R.string.edt_cmd_all, "Favoritos" to R.string.edt_cmd_favorites, "Ações" to R.string.edt_cmd_actions,
-                    "Efeitos" to R.string.panel_efeitos, "Presets" to R.string.panel_presets)) { (name, label) ->
+                    "Efeitos" to R.string.panel_efeitos)) { (name, label) ->
                     FilterChip(selected = category == name, onClick = { category = name }, label = { Text(stringResource(label)) }) }
             }
             if (filtered.isEmpty()) Text(stringResource(if (category == "Favoritos") R.string.edt_cmd_fav_empty else R.string.edt_cmd_none), color = AureaColors.Muted, modifier = Modifier.padding(vertical = 20.dp))
@@ -124,7 +125,8 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
                                 onDismiss()
                                 when {
                                     hit.effect != null -> { store.addEffect(hit.effect); store.effectPrefs.addRecent(hit.effect); openPanel(store, ui, EditorPanel.Effects) }
-                                    hit.preset != null -> { store.presetsOpenKind = hit.preset.kind; store.presetsOpenSearch = hit.preset.name; openPanel(store, ui, EditorPanel.Presets) }
+                                    hit.id.startsWith("tool:") -> com.aurea.aurea.effects.EffectTool.entries.firstOrNull { "tool:${it.key}" == hit.id }
+                                        ?.let { tool -> com.aurea.aurea.editor.panels.openEffectTool({ p -> openPanel(store, ui, p) }, tool) }
                                     else -> executeEditorCommand(hit.id, store, ui)
                                 }
                             }
@@ -135,7 +137,6 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
                         TextButton(onClick = {
                             when {
                                 hit.effect != null -> store.effectPrefs.toggleFavorite(hit.effect)
-                                hit.preset != null -> store.presets.toggleFavorite(hit.preset)
                                 else -> { favorites = if (hit.id in favorites) favorites - hit.id else favorites + hit.id; preferences.edit().putStringSet("favorites", favorites).apply() }
                             }
                         }, modifier = Modifier.size(48.dp).semantics { contentDescription = favoriteDescription }) {
@@ -164,14 +165,12 @@ private fun executeEditorCommand(id: String, store: EditorStore, ui: EditorUi) {
         "audio" -> panel(EditorPanel.Audio)
         "transform" -> panel(EditorPanel.Transform)
         "text" -> store.openTextContentEditor()
-        "mask" -> panel(EditorPanel.Mask)
         "effects" -> panel(EditorPanel.Effects)
         "appearance" -> panel(EditorPanel.Appearance)
         "tracking" -> panel(EditorPanel.Tracking)
         "environment" -> panel(EditorPanel.Element3D)
         "particles" -> panel(EditorPanel.Particles)
         "vector" -> panel(EditorPanel.Vector)
-        "presets" -> panel(EditorPanel.Presets)
         "precompose" -> store.precompose()
         "enter_precomp" -> layer?.let { store.openPrecomp(it) }
         "marker" -> store.toggleMarker()
@@ -183,7 +182,6 @@ private fun executeEditorCommand(id: String, store: EditorStore, ui: EditorUi) {
         "add_null" -> store.addNull(false)
         "add_null3d" -> store.addNull(true)
         "add_camera" -> store.addCamera()
-        "captions" -> panel(EditorPanel.Captions)
         "project_settings" -> openSheet(store, ui, ShellSheet.ProjectSettings)
         "search_layers" -> openSheet(store, ui, ShellSheet.SearchLayers)
         "undo" -> store.undo()

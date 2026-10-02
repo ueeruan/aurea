@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel de efeitos: catalogo "Adicionar efeito", pilha compacta e ferramentas-efeito. -->
+<resources>
+    <string name="fxui_featured">Destacados</string>
+    <string name="fxui_categories">Categorías</string>
+    <string name="fxui_group_color_light">Color y luz</string>
+    <string name="fxui_group_blur">Desenfoque y nitidez</string>
+    <string name="fxui_group_distort">Distorsión</string>
+    <string name="fxui_group_motion">Mover y transformar</string>
+    <string name="fxui_group_stylize">Estilizar</string>
+    <string name="fxui_group_glitch">Glitch</string>
+    <string name="fxui_group_draw_edge">Dibujo y bordes</string>
+    <string name="fxui_group_procedural">Procedural</string>
+    <string name="fxui_group_matte">Mate, máscara y clave</string>
+    <string name="fxui_group_time">Tiempo y transición</string>
+    <string name="fxui_group_text">Texto</string>
+    <string name="fxui_group_3d">3D</string>
+    <string name="fxui_group_audio">Audio</string>
+    <string name="fxui_group_utility">Utilidad y expresión</string>
+    <string name="fxui_group_other">Otros</string>
+    <string name="fxui_tool_captions">Subtítulos automáticos</string>
+    <string name="fxui_tool_camera_track">Seguimiento de cámara</string>
+    <string name="fxui_tool_mask">Máscara</string>
+    <string name="fxui_tool_captions_desc">Transcribe el habla de la capa y crea subtítulos sincronizados.</string>
+    <string name="fxui_tool_camera_track_desc">Analiza el movimiento de cámara del vídeo para colocar objetos 3D en la escena.</string>
+    <string name="fxui_tool_mask_desc">Dibuja formas que muestran u ocultan partes de la capa.</string>
+    <string name="fxui_tool_badge">Herramienta</string>
+    <string name="fxui_tool_masks_n">Máscaras: %1$d</string>
+    <string name="fxui_tool_captions_n">Subtítulos: %1$d</string>
+    <string name="fxui_tool_camera_ready">Cámara analizada</string>
+    <string name="fxui_tool_remove_masks_q">¿Quitar todas las máscaras de esta capa?</string>
+    <string name="fxui_tool_remove_captions_q">¿Quitar los subtítulos generados de esta capa?</string>
+    <string name="fxui_a11y_expand">Mostrar ajustes de %1$s</string>
+    <string name="fxui_a11y_collapse">Ocultar ajustes de %1$s</string>
+    <string name="fxui_a11y_enable">Activar %1$s</string>
+    <string name="fxui_a11y_disable">Desactivar %1$s</string>
+    <string name="fxui_a11y_drag">Arrastra %1$s para reordenar</string>
+    <string name="fxui_a11y_remove">Quitar %1$s</string>
+    <string name="fxui_a11y_open">Abrir %1$s</string>
+    <string name="fxui_a11y_category">Categoría %1$s</string>
+    <string name="fxui_back_categories">Volver a las categorías</string>
+    <string name="fxui_search_effects">Buscar efectos</string>
+    <string name="fxui_effect_off">Desactivado</string>
+</resources>

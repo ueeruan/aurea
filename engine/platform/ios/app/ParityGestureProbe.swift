@@ -46,8 +46,23 @@ import UIKit
         let readCoreStatus = model.engine.readStatus(&coreStatus)
         let keySelectionCount: Int = model.timelineKeySelection?.count ?? -1
         let textAnimatorCount = primary.map { model.engine.textAnimators($0).count / 40 } ?? 0
+        // Deslocamento (parâmetro 5) do primeiro Text Transform da escolhida, lido no motor.
+        var textTransformOffset: [Float] = []
+        if let primary, let effect = model.engine.effects(forLayer: primary).first(where: {
+            ($0["typeId"] as? NSNumber)?.uint32Value == fxEffectTypeId("aurea.text.transform")
+        }), let effectId = (effect["effectId"] as? NSNumber)?.uint32Value,
+           let offset = model.engine.effectParams(forLayer: primary, effectId: effectId).first(where: { ($0["index"] as? NSNumber)?.uint32Value == 5 }) {
+            textTransformOffset = Array(((offset["value"] as? [NSNumber]) ?? []).prefix(2).map(\.floatValue))
+        }
         let packet: [String: Any] = [
             "textAnimatorCount": textAnimatorCount,
+            "textTransformOffset": textTransformOffset,
+            "layerNames": model.layers.map(\.name),
+            "layerCenters": model.layers.map { (row: LayerItem) -> [Float] in
+                var c: [Float] = []
+                guard let d = model.engine.layerDetail(row.id), StageGeom.corners(d, &c), c.count == 8 else { return [] }
+                return [(c[0] + c[2] + c[4] + c[6]) / 4, (c[1] + c[3] + c[5] + c[7]) / 4]
+            },
             "playbackReport": model.engine.playbackReport(),
             "processFootprintBytes": model.engine.perf()["processFootprintBytes"] ?? 0,
             "playing": readCoreStatus ? coreStatus.playing : 0,

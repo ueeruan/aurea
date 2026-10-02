@@ -1,8 +1,9 @@
-// Port of EffectsPanel.kt and EffectStackCard. Project data stays in the core.
-// Redesenho 2026-09-29 (docs/design/redesenho-2026-09-29/Efeitos.dc.html): sem
-// cabeçalho de abas. A pilha é `[trilho ‹ ◇ curva … ⋯] [cartões]`; o catálogo
-// (EffectPickerView, EffectsBrowser.swift) abre com "‹ Adicionar efeito" no topo.
-// Camada sem efeito abre no catálogo; com efeito, na pilha com o 1º cartão aberto.
+// Port of EffectsPanel.kt. Project data stays in the core.
+// Redesenho 2026-10-01: a pilha é `[trilho ‹ ◇ curva … ⋯] [cartões]` — no topo as
+// FERRAMENTAS-EFEITO que a camada usa (máscaras, rastreio de câmera, legendas),
+// depois um cartão compacto por efeito (`≡ · prévia · Nome · 👁 · ⌄`). O catálogo
+// é a tela cheia "Adicionar efeito" (EffectAddSheet, EffectsBrowser.swift).
+// Camada sem nada abre direto nela; com efeito, na pilha com o 1º cartão aberto.
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -13,7 +14,9 @@ struct EffectsView: View {
     var embedded = false
     @EnvironmentObject private var model: AureaModel
     @StateObject private var prefs = FxEffectPrefs()
-    @State private var tab: FxEffectsTab = .add
+    @State private var maskCount = 0
+    @State private var captionCount = 0
+    @State private var cameraTracked = false
     @State private var about: EffectCatalogItem?
     @State private var pendingPick: UInt32?
     @State private var importingAM = false
@@ -57,16 +60,13 @@ struct EffectsView: View {
             if !embedded && !tabbed {
                 PanelHeader(title: AureaText.t("panel_efeitos"), onBack: { model.panel = .none })
             }
-            if tabbed && tab == .add {
-                addHeader
-                EffectPickerView(prefs: prefs, layerHasAudio: hasAudio, onPick: pick).frame(maxHeight: .infinity)
-            } else {
             HStack(spacing: 0) {
                 rail
                 ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        if tabbed && ordered.isEmpty { PanelNotice(AureaText.t("effects_applied_empty")) }
+                        if tabbed && ordered.isEmpty && tools.isEmpty { PanelNotice(AureaText.t("effects_applied_empty")) }
+                        ForEach(tools, id: \.key) { tool in toolCard(tool).padding(.bottom, 8) }
                         ForEach(ordered) { effect in
                             card(effect).padding(.bottom, 8).id(effect.effectId)
                                 .background(GeometryReader { geometry in
@@ -90,11 +90,10 @@ struct EffectsView: View {
                     .onChange(of: ordered.map(\.effectId)) { ids in revealAdded(ids, proxy: proxy) }
                 }
             }.frame(maxHeight: .infinity)
-            }
         }
         .background(ParamRowColors.panel)
-        .onAppear { enterLayer(); model.refreshSelectedLayer(); refreshExpressions() }
-        .onChange(of: model.primarySelection) { _ in enterLayer() }
+        .onAppear { refreshTools(); enterLayer(); model.refreshSelectedLayer(); refreshExpressions() }
+        .onChange(of: model.primarySelection) { _ in refreshTools(); enterLayer() }
         .onChange(of: selected) { _ in updateTimelineFocus() }
         .onAppear { updateTimelineFocus() }
         .onDisappear { model.timelineFocus = nil }
@@ -104,7 +103,6 @@ struct EffectsView: View {
                 // Adicionou (catálogo, busca geral, colar): os controles do novo
                 // efeito aparecem na pilha.
                 pendingPick = nil
-                if tabbed { tab = .applied }
                 open(id)
                 if model.requestedEffectFocusId == id { model.pendingEffectFocus = nil }
             }
@@ -119,7 +117,7 @@ struct EffectsView: View {
             pendingPick = nil
         }
         .sheet(item: $about) { entry in EffectAboutSheet(prefs: prefs, entry: entry).environmentObject(model) }
-        .onChange(of: model.status.modelRevision) { _ in refreshExpressions() }
+        .onChange(of: model.status.modelRevision) { _ in refreshExpressions(); refreshTools() }
         .onChange(of: model.status.playhead) { _ in refreshExpressions() }
         // Alight Motion: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
         .fileImporter(isPresented: $importingAM, allowedContentTypes: [.data, .xml, .zip]) { result in
@@ -166,9 +164,8 @@ struct EffectsView: View {
         guard loadedLayer != model.primarySelection else { return }
         loadedLayer = model.primarySelection; known = Set(model.effects.map(\.effectId))
         closeCard(); advanced = []; expressionLooks = [:]; pendingPick = nil
-        tab = fxInitialEffectsTab(model.effects.count)
         if let requested = model.requestedEffectFocusId {
-            tab = .applied; open(requested); model.pendingEffectFocus = nil; return
+            open(requested); model.pendingEffectFocus = nil; return
         }
         if let type = focusedType, let effect = model.effects.first(where: { $0.typeId == type }) {
             open(effect.effectId); return
@@ -176,12 +173,13 @@ struct EffectsView: View {
         guard model.curveProperty == 31, model.curveSelectedTime != nil,
               model.effects.contains(where: { $0.effectId == model.curveEffect }) else {
             // A pilha já abre com o primeiro cartão à vista (um toque a menos);
-            // os outros recolhidos (acordeão: um aberto por vez).
+            // os outros recolhidos (acordeão: um aberto por vez). Camada sem
+            // nada: direto na tela "Adicionar efeito".
             if tabbed, let first = model.effects.first { open(first.effectId) }
+            else if tabbed && tools.isEmpty && model.primarySelection != nil { DispatchQueue.main.async { showAdd() } }
             return
         }
         // Entrar pelo losango de um parâmetro é editar: abre na pilha.
-        tab = .applied
         let entry = EffectParamSelection(effect: model.curveEffect, param: model.curveParam / 4, component: Int(model.curveParam % 4))
         selected = entry; open(entry.effect)
         if parameterGroups(entry.effect).rest.contains(where: { $0.index == entry.param }) { advanced.insert(entry.effect) }
@@ -222,33 +220,58 @@ struct EffectsView: View {
     private func display(_ param: EffectParamItem, effectId: UInt32) -> FxParamDisplay {
         fxParamDisplay(model.effects.first { $0.effectId == effectId }?.typeId ?? 0, slot(param))
     }
-    /// O CARTÃO DA PILHA (`EffectStackCard`, redesenho 2026-09-29): raio 10, fundo
-    /// #252F43. Aberto: cabeçalho de 50 `▾ Nome · ••• · 🗑` e o corpo (linhas de 40
-    /// com vão de 4). Recolhido: `▸ Nome · 👁 · ≡` (o ≡ arrasta para reordenar).
+    /// O CARTÃO COMPACTO (EffectsPanel.kt `FxStackCard`, redesenho 2026-10-01): raio
+    /// 10. Recolhido: `≡ · prévia · Nome / grupo · 👁 · ⌄`; aberto: `≡ · prévia ·
+    /// Nome · ••• · 🗑 · ⌃` e o corpo (linhas de 40 com vão de 4). O ≡ arrasta para
+    /// reordenar; tocar no nome abre/fecha. Ids `effects.expand|eye|more|remove.<id>`.
     private func card(_ effect: EffectItem) -> some View {
         let expanded = openId == effect.effectId, lifted = dragId == effect.effectId
+        let name = fxEffectDisplayName(effect.typeId, effect.name)
+        let id = fxEffectCardId(effect.typeId)
+        let entry = model.effectCatalog.first { $0.typeId == effect.typeId }
+        let subtitle = !effect.enabled ? AureaText.t("fxui_effect_off") : entry.map { fxEffectGroupOf($0).label } ?? ""
+        let toggleLabel = AureaText.t(expanded ? "fxui_a11y_collapse" : "fxui_a11y_expand", name)
+        let toggle = { expanded ? closeCard() : open(effect.effectId) }
         return VStack(spacing: 0) {
             HStack(spacing: 0) {
-                Button { expanded ? closeCard() : open(effect.effectId) } label: {
-                    HStack(spacing: 8) {
-                        CupertinoGlyph.text(expanded ? CupertinoGlyph.ArrowtriangleDownFill : CupertinoGlyph.ArrowtriangleRightFill, size: 13, color: AureaColors.text)
-                        Text(fxEffectDisplayName(effect.typeId, effect.name)).font(.aurea(size: 16, weight: .semibold)).foregroundStyle(AureaColors.text)
+                CupertinoGlyph.text(CupertinoGlyph.LineHorizontal3, size: 16, color: lifted ? AureaColors.accent : AureaColors.muted)
+                    .frame(width: 32, height: 56).contentShape(Rectangle())
+                    .highPriorityGesture(DragGesture(minimumDistance: 4).onChanged { reorder(effect, value: $0) }.onEnded { _ in finishReorder() })
+                    .accessibilityLabel(AureaText.t("fxui_a11y_drag", name))
+                HStack(spacing: 10) {
+                    EffectStackThumb(typeId: effect.typeId, category: entry?.category ?? "", store: model.effectPreviews)
+                        .opacity(effect.enabled ? 1 : 0.45)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(name).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.text)
                             .lineLimit(1).truncationMode(.tail).opacity(effect.enabled ? 1 : 0.45)
-                        Spacer(minLength: 0)
-                    }.padding(.leading, 12).frame(maxWidth: .infinity).frame(height: 50).contentShape(Rectangle())
-                }.buttonStyle(AureaPressStyle(shrink: 1))
+                        if !subtitle.isEmpty {
+                            Text(subtitle).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity).frame(height: 56).contentShape(Rectangle())
+                .onTapGesture { toggle() }
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint(toggleLabel)
+                .accessibilityAction { toggle() }
+                .accessibilityIdentifier("effects.expand." + id)
                 if expanded {
                     cardButton(CupertinoGlyph.Ellipsis) { effectMenu(effect) }
-                        .accessibilityLabel(AureaText.t("app_a11y_more_options", fxEffectDisplayName(effect.typeId,effect.name)))
-                        .accessibilityIdentifier("effects.more." + fxEffectCardId(effect.typeId))
+                        .accessibilityLabel(AureaText.t("app_a11y_more_options", name))
+                        .accessibilityIdentifier("effects.more." + id)
                     cardButton(CupertinoGlyph.Trash) { remove(effect) }
+                        .accessibilityLabel(AureaText.t("fxui_a11y_remove", name))
+                        .accessibilityIdentifier("effects.remove." + id)
                 } else {
                     cardButton(effect.enabled ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, tint: effect.enabled ? AureaColors.text : AureaColors.muted) { enable(effect, !effect.enabled) }
-                    CupertinoGlyph.text(CupertinoGlyph.LineHorizontal3, size: 20, color: lifted ? AureaColors.accent : AureaColors.muted)
-                        .frame(width: 40, height: 40).contentShape(Rectangle())
-                        .highPriorityGesture(DragGesture(minimumDistance: 4).onChanged { reorder(effect, value: $0) }.onEnded { _ in finishReorder() })
+                        .accessibilityLabel(AureaText.t(effect.enabled ? "fxui_a11y_disable" : "fxui_a11y_enable", name))
+                        .accessibilityIdentifier("effects.eye." + id)
                 }
-            }.padding(.trailing, 6).frame(height: 50)
+                cardButton(expanded ? CupertinoGlyph.ChevronUp : CupertinoGlyph.ChevronDown, tint: AureaColors.muted) { toggle() }
+                    .accessibilityLabel(toggleLabel)
+            }.padding(.trailing, 4).frame(height: 56)
             if expanded {
                 VStack(spacing: 4) {
                     if !effect.known { PanelNotice(AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao")) }
@@ -288,7 +311,83 @@ struct EffectsView: View {
             .overlay { if lifted { RoundedRectangle(cornerRadius: 10).stroke(AureaColors.accent, lineWidth: 1) } }
     }
     private func cardButton(_ glyph: Character, tint: Color = AureaColors.text, action: @escaping () -> Void) -> some View {
-        Button(action: action) { CupertinoGlyph.text(glyph, size: 20, color: tint).frame(width: 40, height: 40).contentShape(Rectangle()) }.buttonStyle(AureaPressStyle())
+        Button(action: action) { CupertinoGlyph.text(glyph, size: 19, color: tint).frame(width: 40, height: 40).contentShape(Rectangle()) }.buttonStyle(AureaPressStyle())
+    }
+    // --- Ferramentas-efeito na pilha (máscaras, rastreio de câmera, legendas) ---
+    /// As ferramentas que a camada usa, na ordem dos cartões.
+    private var tools: [FxEffectTool] {
+        guard tabbed else { return [] }
+        var out: [FxEffectTool] = []
+        if maskCount > 0 { out.append(.mask) }
+        if cameraTracked { out.append(.cameraTrack) }
+        if captionCount > 0 { out.append(.captions) }
+        return out
+    }
+    /// Relê no motor o que a camada tem de cada ferramenta. O rastreio guardado
+    /// é restaurado como o painel de rastreio faz ao aparecer.
+    private func refreshTools() {
+        guard tabbed, let id = model.primarySelection else { maskCount = 0; captionCount = 0; cameraTracked = false; return }
+        maskCount = fxMaskIds(model.engine.maskData(id)).count
+        captionCount = Int(model.engine.captionCount(id))
+        cameraTracked = model.selectedLayer?.kind == 1 && model.engine.restoreCameraTrack(forLayer: id)
+    }
+    /// O CARTÃO DE UMA FERRAMENTA: `glifo · Nome / quantos · 🗑 · ›`. Tocar reabre a
+    /// ferramenta; a lixeira pede confirmação. Id `effects.tool.<chave>`.
+    private func toolCard(_ tool: FxEffectTool) -> some View {
+        let subtitle: String
+        switch tool {
+        case .mask: subtitle = AureaText.t("fxui_tool_masks_n", maskCount)
+        case .captions: subtitle = AureaText.t("fxui_tool_captions_n", captionCount)
+        case .cameraTrack: subtitle = AureaText.t("fxui_tool_camera_ready")
+        }
+        return HStack(spacing: 0) {
+            HStack(spacing: 10) {
+                FxToolPlate(glyph: tool.glyph, glyphSize: 20).frame(width: 40, height: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(tool.label).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.text).lineLimit(1)
+                    Text(subtitle).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 10).frame(maxWidth: .infinity).frame(height: 56).contentShape(Rectangle())
+            .onTapGesture { fxOpenEffectTool(tool, in: model) }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(AureaText.t("fxui_a11y_open", tool.label))
+            .accessibilityAction { fxOpenEffectTool(tool, in: model) }
+            .accessibilityIdentifier("effects.tool." + (tool.key.split(separator: ".").last.map(String.init) ?? ""))
+            if tool != .cameraTrack {
+                cardButton(CupertinoGlyph.Trash) { confirmRemoveTool(tool) }
+                    .accessibilityLabel(AureaText.t("fxui_a11y_remove", tool.label))
+            }
+            CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.muted).frame(width: 36, height: 40)
+                .accessibilityHidden(true)
+        }.padding(.trailing, 4).frame(height: 56)
+            .background(ParamRowColors.card, in: RoundedRectangle(cornerRadius: 10))
+    }
+    private func confirmRemoveTool(_ tool: FxEffectTool) {
+        let question = AureaText.t(tool == .mask ? "fxui_tool_remove_masks_q" : "fxui_tool_remove_captions_q")
+        model.actionSheet = ActionSheetRequest(title: question, items: [(AureaText.t("panel_remover"), { removeTool(tool) })])
+    }
+    /// TIRA a ferramenta da camada: todas as máscaras (um passo de desfazer) ou as
+    /// legendas geradas. O rastreio de câmera não tem "tirar" (paridade Android).
+    private func removeTool(_ tool: FxEffectTool) {
+        guard let id = model.primarySelection, model.selectedLayer?.locked != true else { return }
+        switch tool {
+        case .mask:
+            let ids = fxMaskIds(model.engine.maskData(id))
+            guard !ids.isEmpty else { return }
+            model.beginGesture("remover máscaras")
+            for mask in ids { _ = model.engine.removeMask(id, mask: mask) }
+            model.endGesture()
+            model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false
+        case .captions:
+            model.engine.removeCaptions(id)
+        case .cameraTrack:
+            return
+        }
+        model.refreshModel(force: true); refreshTools()
     }
     @ViewBuilder private func parameter(_ param: EffectParamItem, effect: UInt32) -> some View {
         switch Int(param.type) {
@@ -437,6 +536,7 @@ struct EffectsView: View {
             writeComponent(param.index, effect: effect, component: component, value: Int(param.type) == fxParamInt ? coreValue.rounded() : coreValue)
         }
         return EffectNumberRow(label: label, value: shown, unitsPerPoint: step * d.scale, minimum: min(lo, hi), maximum: max(lo, hi), suffix: d.suffix, decimals: d.decimals,
+                               identifier: "effects.param.\(effect).\(param.index).\(component)",
                                selected: selected == key, look: look(effect: effect, param: param.index, component: component), expression: expressionLooks[param.index] ?? .none,
                                onSelect: { selected = key }, onMenu: { paramMenu(param, effect: effect) },
                                onBegin: { model.beginGesture("ajustar " + label) }, onValue: send, onEnd: { model.endGesture() }, onKeypad: {
@@ -527,9 +627,29 @@ struct EffectsView: View {
         }
         model.commitPendingCommands(); model.refreshSelectedLayer()
     }
+    /// O vetor INTEIRO num comando só (cor, ponto, reset). Um `writeComponent`
+    /// por componente relia o parâmetro entre um e outro — e a leitura logo
+    /// depois de escrever ainda vinha com o valor antigo, então o último
+    /// comando (velho R, G, B + novo A) desfazia a cor escolhida. Era o
+    /// "Text Transform não funciona" da cor de preenchimento no iOS.
     private func writeVector(_ index: UInt32, effect: UInt32, values: [Float]) {
-        guard let param = currentParam(index), model.selectedLayer?.locked != true, values.allSatisfy(\.isFinite) else { return }
-        for component in 0..<min(fxComponentCount(Int(param.type)), values.count) { writeComponent(index, effect: effect, component: component, value: values[component]) }
+        guard let layer = model.primarySelection, let param = currentParam(index), model.selectedLayer?.locked != true,
+              param.flags & 16 == 0, values.allSatisfy(\.isFinite) else { return }
+        let count = min(fxComponentCount(Int(param.type)), values.count)
+        guard count > 1 else {
+            if let first = values.first { writeComponent(index, effect: effect, component: 0, value: first) }
+            return
+        }
+        var vector = Array((param.value + [0, 0, 0, 1]).prefix(4))
+        for component in 0..<count { vector[component] = values[component] }
+        if param.animated {
+            for component in 0..<count {
+                model.engine.keyParameter(layer, property: 31, effect: effect, param: index * 4 + UInt32(component), time: model.localPlayhead, value: vector[component])
+            }
+        } else {
+            model.engine.setEffectColor(effect, forLayer: layer, paramIndex: index, r: vector[0], g: vector[1], b: vector[2], a: vector[3])
+        }
+        model.commitPendingCommands(); model.refreshSelectedLayer()
     }
     private func color(_ values: [Float]) -> Color {
         let v = Array((values + [0, 0, 0, 1]).prefix(4))
@@ -557,9 +677,15 @@ struct EffectsView: View {
         for param in params where param.flags & 16 == 0 { writeVector(param.index, effect: effect.effectId, values: param.defaultValue) }
         model.endGesture(); model.refreshSelectedLayer()
     }
-    /// Mostra o catálogo: a aba Adicionar; no editor embutido, o painel Efeitos.
+    /// Mostra a tela cheia "Adicionar efeito" (apresentada pela raiz do editor);
+    /// no editor embutido, o painel Efeitos.
     private func showAdd() {
-        if tabbed { tab = .add } else { model.openPanel(.effects) }
+        guard tabbed else { model.openPanel(.effects); return }
+        guard model.primarySelection != nil, model.effectSearch == nil else { return }
+        model.effectSearch = EffectSearchRequest(
+            prefs: prefs, sorted: fxPickerEntries(model, layerHasAudio: hasAudio), onPick: pick,
+            onFavorite: { entry in _ = prefs.toggleFavorite(entry.typeId) }, browse: true,
+            onTool: { tool in fxOpenEffectTool(tool, in: model) })
     }
     /// UM toque no cartão: adiciona às camadas escolhidas; a mudança na pilha
     /// (onChange acima) leva à aba "Na camada" com o efeito aberto.
@@ -572,27 +698,10 @@ struct EffectsView: View {
         model.addCatalogEffect(entry.typeId, layers: targets.map(\.id))
         model.refreshModel(force: true)
     }
-    /// O CABEÇALHO DO CATÁLOGO (`AddEffectHeader`): `‹ Adicionar efeito`. O título
-    /// da seção ("Efeitos") mora na barra de cima; o ‹ daqui volta para a pilha.
-    private var addHeader: some View {
-        HStack(spacing: 0) {
-            Button { tab = .applied } label: {
-                MaterialGlyph("rounded.ChevronLeft", size: AureaDims.iconLg)
-                    .frame(width: 48, height: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityLabel(AureaText.t("fx_back_to_effects"))
-            .accessibilityIdentifier("effects.tab.add")
-            Text(AureaText.t("panel_adicionar_efeito"))
-                .font(.aurea(size: 15, weight: .semibold))
-                .foregroundStyle(AureaColors.text)
-                .lineLimit(1).truncationMode(.tail)
-            Spacer(minLength: 0)
-        }.frame(height: 44)
-    }
     private func listMenu() {
+        // "Meus presets" saiu (pedido de 2026-10-01: ninguém usa); o motor
+        // continua lendo os presets dos projetos antigos.
         var actions: [(String, () -> Void)] = [(AureaText.t("panel_adicionar_efeito"), { showAdd() })]
-        actions.append((AureaText.t("fx_my_presets"), { model.presetsOpenKind = "efeitos"; model.openPanel(.presets) }))
         actions.append((AureaText.t("am_import_action"), { importingAM = true }))
         if !model.effects.isEmpty { actions.append((AureaText.t("panel_copiar_efeitos"), { if let layer = model.primarySelection { model.engine.copyEffects(layer) } })) }
         if model.engine.clipboardState & 4 != 0 {
@@ -639,11 +748,6 @@ struct EffectsView: View {
             }
             actions.append((AureaText.t("fx_copy_this_effect"), {
                 if let layer = model.primarySelection { model.engine.copyEffect(effect.effectId, fromLayer:layer) }
-            }))
-            actions.append((AureaText.t("fx_save_as_preset"), {
-                model.namePrompt = NamePromptRequest(title: AureaText.t("fx_save_as_preset"), initial: fxEffectDisplayName(effect.typeId, effect.name)) {
-                    model.saveEffectPreset(effectId: effect.effectId, name: $0)
-                }
             }))
             if let index = model.effects.firstIndex(where: { $0.effectId == effect.effectId }) {
                 if index > 0 { actions.append((AureaText.t("panel_mover_cima"), { move(effect, to: index - 1) })) }
@@ -811,6 +915,8 @@ private struct EffectNumberRow: View {
     let maximum: Float
     let suffix: String
     let decimals: Int
+    /// `effects.param.<efeito>.<parâmetro>.<componente>` (o testTag do Android).
+    var identifier: String = ""
     let selected: Bool
     let look: KeyframeLook
     let expression: ExpressionLook
@@ -834,6 +940,17 @@ private struct EffectNumberRow: View {
                            onStart: { live = value; dragging = true; onSelect(); onBegin() },
                            onValue: { next in live = next; onValue(next) },
                            onEnd: { dragging = false; onEnd() })
+                // A régua é o controle: rótulo, valor e ajuste por gesto do
+                // VoiceOver (um passo = 10 pontos de arrasto).
+                .accessibilityElement()
+                .accessibilityLabel(label)
+                .accessibilityValue(comUnidade(numeroPtBr(dragging ? live : value, casas: decimals), suffix))
+                .accessibilityAdjustableAction { direction in
+                    let delta = unitsPerPoint * 10 * (direction == .increment ? 1 : direction == .decrement ? -1 : 0)
+                    guard delta != 0 else { return }
+                    onSelect(); onBegin(); onValue(Swift.min(Swift.max(value + delta, minimum), maximum)); onEnd()
+                }
+                .accessibilityIdentifier(identifier)
             ParamValueBox(comUnidade(numeroPtBr(dragging ? live : value, casas: decimals), suffix), onTap: onKeypad)
         }.frame(height: ParamRowDims.row)
     }
@@ -931,5 +1048,43 @@ struct FxPresetRow: View {
                 }
             }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 6)
+    }
+}
+
+/// Os ids das máscaras no pacote do motor (`maskData`: 6 da afim, a contagem e,
+/// por máscara, 12 de cabeçalho com o id no 1º e o nº de pontos no 8º, + 6 por ponto).
+func fxMaskIds(_ raw: [NSNumber]) -> [UInt32] {
+    let data = raw.map(\.floatValue)
+    guard data.count >= 7 else { return [] }
+    var ids: [UInt32] = [], offset = 7
+    for _ in 0..<max(0, Int(data[6])) {
+        guard offset + 12 <= data.count else { break }
+        let points = Int(data[offset + 7]) * 6
+        ids.append(UInt32(max(0, data[offset])))
+        offset += 12 + max(0, points)
+    }
+    return ids
+}
+
+/// Miniatura de 40 do cartão da pilha: a prévia do efeito, ou a cartela.
+private struct EffectStackThumb: View {
+    let typeId: UInt32
+    let category: String
+    let store: EffectPreviewStore
+    @State private var image: UIImage?
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().interpolation(.low).scaledToFill()
+            } else {
+                FxToolPlate(glyph: fxCategoryGlyph(category), glyphSize: 16, opacity: 0.8)
+            }
+        }
+        .frame(width: 40, height: 40).clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityHidden(true)
+        .task(id: typeId) {
+            let loaded = await store.image(for: typeId)
+            if !Task.isCancelled { image = loaded }
+        }
     }
 }

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeitos: Emulador CRT, Tremor dissolvente e Mapa de deslocamento (nomes, descrições, rótulos). -->
+<resources>
+    <string name="fx_name_crt_emulator">Emulator CRT</string>
+    <string name="fx_desc_stylize_crt_emulator">Gambar di TV tabung: layar melengkung, garis pindai, masker fosfor RGB, warna yang meleset, pendar, kedipan, dan bilah bergulir.</string>
+    <string name="fx_name_dissolve_shake">Guncangan Larut</string>
+    <string name="fx_desc_glitch_dissolve_shake">Lapisan berguncang dan pecah menjadi fragmen berderau yang terlempar dan memudar — beranimasi sendiri tanpa keyframe.</string>
+    <string name="fx_name_displacement_map">Peta Perpindahan</string>
+    <string name="fx_desc_distort_displacement_map">Menggeser piksel berdasarkan nilai lapisan lain (peta): pilih kanal tiap sumbu dan perpindahan maksimum. Tanpa lapisan, gambar itu sendiri yang dipakai.</string>
+    <string name="fx3_curvatura">Kelengkungan</string>
+    <string name="fx3_linhas_intensidade">Intensitas garis</string>
+    <string name="fx3_linhas_densidade">Kepadatan garis</string>
+    <string name="fx3_mascara">Masker fosfor</string>
+    <string name="fx3_mascara_intensidade">Intensitas masker</string>
+    <string name="fx3_mascara_tamanho">Ukuran masker</string>
+    <string name="fx3_convergencia">Konvergensi</string>
+    <string name="fx3_brilho_bloom">Pendar</string>
+    <string name="fx3_raio_brilho">Radius pendar</string>
+    <string name="fx3_cintilacao">Kedipan</string>
+    <string name="fx3_faixa_rolando">Bilah bergulir</string>
+    <string name="fx3_velocidade_faixa">Kecepatan bilah</string>
+    <string name="fx3_brilho_geral">Kecerahan</string>
+    <string name="fx3o_grade_abertura">Kisi apertur</string>
+    <string name="fx3o_mascara_sombra">Masker bayangan</string>
+    <string name="fx3o_fenda">Masker celah</string>
+    <string name="fx3_dissolucao">Larut</string>
+    <string name="fx3_tamanho_fragmento">Ukuran fragmen</string>
+    <string name="fx3_transparencia_fragmentos">Transparansi fragmen</string>
+    <string name="fx3_velocidade_evolucao">Kecepatan evolusi</string>
+    <string name="fx3_eixos">Sumbu</string>
+    <string name="fx3_camada_mapa">Lapisan peta</string>
+    <string name="fx3_canal_horizontal">Kanal horizontal</string>
+    <string name="fx3_canal_vertical">Kanal vertikal</string>
+    <string name="fx3o_desligado">Mati</string>
+    <string name="fx3_desloc_h_max">Perpindahan horizontal maks.</string>
+    <string name="fx3_desloc_v_max">Perpindahan vertikal maks.</string>
+    <string name="fx3_comportamento_mapa">Perilaku peta</string>
+    <string name="fx3o_centralizar">Tengahkan</string>
+    <string name="fx3o_esticar">Regangkan</string>
+    <string name="fx3o_repetir">Ubin</string>
+    <string name="fx3o_repetir_pixels">Ulangi piksel tepi</string>
+    <string name="fx3o_envolver">Bungkus</string>
+    <string name="fx3_expandir_saida">Perluas keluaran</string>
+</resources>

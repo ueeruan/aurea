@@ -408,6 +408,15 @@ AUREA_TEST(I18n, EveryEffectTextHasEnglish) {
     if (!tsv.good() || !xml.good()) return;
     std::stringstream en;
     en << xml.rdbuf();
+    // O Android junta strings.xml e os strings_<area>.xml da mesma pasta (o
+    // gerador do iOS também): o texto em inglês pode estar em qualquer um.
+    std::error_code dirError;
+    for (const auto& entry : std::filesystem::directory_iterator(root + "/android/app/src/main/res/values-en", dirError)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind("strings_", 0) != 0 || entry.path().extension() != ".xml") continue;
+        std::ifstream extra(entry.path());
+        if (extra.good()) en << extra.rdbuf();
+    }
     const std::string english = en.str();
     // (chave, índice, opção) → (id, recurso); opção -1 = rótulo.
     std::map<std::string, std::pair<std::string, std::string>> table;

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel 3D reorganizado em abas (2026-10-01). Chaves ui3d_*. -->
+<resources>
+    <string name="ui3d_tabs">3D विकल्पों के समूह</string>
+    <string name="ui3d_tab_material">सामग्री</string>
+    <string name="ui3d_tab_shape">आकार</string>
+    <string name="ui3d_tab_light">रोशनी और दृश्य</string>
+    <string name="ui3d_tab_anim">एनिमेशन</string>
+    <string name="ui3d_ready_materials">तैयार सामग्री</string>
+    <string name="ui3d_finish">सतह</string>
+    <string name="ui3d_finish_smooth">चिकनी</string>
+    <string name="ui3d_finish_brushed">ब्रश्ड</string>
+    <string name="ui3d_finish_scratched">खरोंच वाली</string>
+    <string name="ui3d_finish_hammered">हथौड़े से गढ़ी</string>
+    <string name="ui3d_finish_weathered">पुरानी धातु</string>
+    <string name="ui3d_text">टेक्स्ट</string>
+    <string name="ui3d_extrusion">एक्सट्रूज़न</string>
+    <string name="ui3d_depth_hint">100% = अक्षर की ऊँचाई। गहराई एनिमेट करने के लिए स्केल Z (ट्रांसफ़ॉर्म) पर कीफ़्रेम लगाएँ।</string>
+    <string name="ui3d_deform_letters">अक्षर मोड़ें (घुमाव, सिलेंडर, ऐंठन)</string>
+    <string name="ui3d_shadows">छायाएँ</string>
+    <string name="ui3d_bloom_strength">चमक की तीव्रता</string>
+</resources>

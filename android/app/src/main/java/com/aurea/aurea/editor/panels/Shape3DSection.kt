@@ -45,15 +45,20 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.roundToInt
 
+/** Qual aba do painel 3D mostra a forma: Material (cor e imagem) ou Forma (partes). */
+internal enum class Shape3DPage { Material, Shape }
+
 /**
- * FORMA 3D no painel 3D: as PARTES em fichas ("Tudo" = a forma inteira).
+ * FORMA 3D no painel 3D: as PARTES em fichas ("Tudo" = a forma inteira),
+ * nas duas abas — Material mostra a cor e a imagem da parte; Forma, o
+ * losango, o reset e as réguas dela.
  * Escolher uma parte leva o gizmo e o dedo do palco para ela; aqui ficam a
  * cor, a imagem da galeria, o losango de keyframe (as 9 trilhas da parte no
  * cabeçote), o reset e as réguas de posição/giro/escala — o mesmo motor de
  * keyframes das outras propriedades (preview = export).
  */
 @Composable
-internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo) {
+internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage = Shape3DPage.Material) {
     val store = env.store
     val part = store.shapePartOf(store.primary)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
@@ -72,30 +77,35 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo) {
         }
     }
     Spacer(Modifier.height(10.dp))
-    // Cor: da parte, ou de todas (a ficha mostra a da 1ª).
-    val shown = info.colors.getOrNull(part.coerceAtLeast(0)) ?: floatArrayOf(1f, 1f, 1f, 1f)
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.panel_cor), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        ColorWell(Color(shown[0], shown[1], shown[2])) {
-            val target = part
-            store.beginGesture("cor da parte")
-            env.openColor(ColorRequest(shown.copyOf(), onChange = { r, g, b, _ ->
-                store.setShapePartColor(target, floatArrayOf(r, g, b, 1f))
-            }, onDone = { store.endGesture() }))
+    if (page == Shape3DPage.Material) {
+        // Cor: da parte, ou de todas (a ficha mostra a da 1ª).
+        val shown = info.colors.getOrNull(part.coerceAtLeast(0)) ?: floatArrayOf(1f, 1f, 1f, 1f)
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.panel_cor), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            ColorWell(Color(shown[0], shown[1], shown[2])) {
+                val target = part
+                store.beginGesture("cor da parte")
+                env.openColor(ColorRequest(shown.copyOf(), onChange = { r, g, b, _ ->
+                    store.setShapePartColor(target, floatArrayOf(r, g, b, 1f))
+                }, onDone = { store.endGesture() }))
+            }
         }
-    }
-    // Imagem da galeria (no mapa de cor): na parte, ou em todas.
-    val hasImage = if (part >= 0) info.images.getOrElse(part) { false } else info.images.any { it }
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.shape3d_image), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-        ShapeChip(stringResource(if (hasImage) R.string.shape3d_image_change else R.string.shape3d_image_pick), on = hasImage,
-            modifier = Modifier.testTag("shape3d.image")) {
-            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        // Imagem da galeria (no mapa de cor): na parte, ou em todas.
+        val hasImage = if (part >= 0) info.images.getOrElse(part) { false } else info.images.any { it }
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.shape3d_image), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            ShapeChip(stringResource(if (hasImage) R.string.shape3d_image_change else R.string.shape3d_image_pick), on = hasImage,
+                modifier = Modifier.testTag("shape3d.image")) {
+                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            }
+            if (hasImage) {
+                Spacer(Modifier.width(6.dp))
+                ShapeChip(stringResource(R.string.shape3d_image_clear), on = false) { store.clearShapePartImage(part) }
+            }
         }
-        if (hasImage) {
-            Spacer(Modifier.width(6.dp))
-            ShapeChip(stringResource(R.string.shape3d_image_clear), on = false) { store.clearShapePartImage(part) }
-        }
+        if (part < 0) ShapeHint(stringResource(R.string.shape3d_whole_hint))
+        Spacer(Modifier.height(14.dp))
+        return
     }
     if (part < 0) {
         ShapeHint(stringResource(R.string.shape3d_whole_hint))

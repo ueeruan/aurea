@@ -570,6 +570,15 @@ Result<u32> Engine::add_layers_to_group(const u64* ids, u32 count, u64 groupLaye
     NC->restore_from(*C);
     NC->set_name(childName);
     std::vector<std::pair<LayerId, LayerId>> map;
+    // Linhas de FORA não valem dentro do grupo (lá os números são outros): as
+    // que entram ganham linhas novas, e as que dividiam linha seguem juntas.
+    std::vector<std::pair<u32, u32>> tracks;
+    const auto innerTrack = [&](u32 from) -> u32 {
+        if (from == 0) return 0;
+        for (const auto& [was, now] : tracks) if (was == from) return now;
+        tracks.emplace_back(from, NC->new_track_id());
+        return tracks.back().second;
+    };
     i64 lo = std::numeric_limits<i64>::max(), hi = std::numeric_limits<i64>::min();
     for (LayerId id : moving) {
         const Layer* src = comp->layer(id);
@@ -578,6 +587,7 @@ Result<u32> Engine::add_layers_to_group(const u64* ids, u32 count, u64 groupLaye
         Layer* dst = NC->layer(inner);
         if (!dst) continue;
         *dst = *src;
+        dst->trackId = innerTrack(src->trackId);
         dst->start = FrameIndex{src->start.value - shift};
         dst->end = FrameIndex{src->end.value - shift};
         if (dst->matteSource.valid() && !moves(dst->matteSource)) { dst->matteSource = LayerId{}; dst->matteMode = MatteMode::None; }
@@ -679,6 +689,9 @@ Result<u64> Engine::remove_layer_from_group(u64 layerId, std::string* why) noexc
     Layer* dst = P->layer(out);
     if (!dst) return refuse(Errc::OutOfMemory, "camada nao criada");
     *dst = moved;
+    // A linha de dentro do grupo é um número de outra composição: fora, a
+    // camada ganha uma linha só dela (não cai na linha de um vizinho).
+    if (moved.trackId != 0) dst->trackId = P->new_track_id();
     dst->start = FrameIndex{moved.start.value + shift};
     dst->end = FrameIndex{moved.end.value + shift};
     dst->parent = identity ? LayerId{} : gid;

@@ -52,6 +52,21 @@ FGTexture EffectBuildContext::texture(const char* name, u32 width, u32 height) n
     return graph_.create_texture(name, d);
 }
 
+const LayerImage* EffectBuildContext::layer_input(u64 layer) const noexcept {
+    if (!layer) return nullptr;
+    const LayerId want = LayerId::unpack(layer);
+    for (const LayerInput& in : layerInputs_) {
+        if (!in.image.valid()) continue;
+        if (in.layer == layer) return &in.image;
+        // Pré-composição: o renderer troca a parte alta do índice pelo sal
+        // (0x40000000 | sal << 16 | índice & 0xFFFF); a geração fica.
+        const LayerId got = LayerId::unpack(in.layer);
+        if ((got.index & 0x40000000u) && got.generation == want.generation
+            && (got.index & 0xFFFFu) == (want.index & 0xFFFFu)) return &in.image;
+    }
+    return nullptr;
+}
+
 void EffectBuildContext::region_size(const Rect& region, f32 texelScale, u32& outW, u32& outH) const noexcept {
     f32 w = std::max(1.0f, std::ceil(region.w * texelScale - 1e-3f));
     f32 h = std::max(1.0f, std::ceil(region.h * texelScale - 1e-3f));
@@ -218,7 +233,13 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
     out.placement = placement;
 
     struct Source { const Layer* owner; const EffectInstance* effect; FrameIndex time; };
-    std::vector<Source> sources;
+    // Memória de trabalho do planejamento, reaproveitada entre quadros (o
+    // caminho quente não aloca: Perf8C.SteadyPlaybackOf50Layers...).
+    static thread_local std::vector<Source> sources;
+    static thread_local std::vector<Mat4> downstream;
+    static thread_local std::vector<u8> hasDownstream;
+    static thread_local std::vector<ParamValue> scratch;
+    sources.clear();
     for (const auto& effect : layer.effects) sources.push_back({&layer, &effect, localTime});
     const FrameIndex global{localTime.value + layer.start.value - layer.offset.value};
     // A null has no pixels. Its Motion Tile controls the raster of each child;
@@ -231,6 +252,48 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
                     sources.push_back({parent, &effect, parent->local_time(global)});
         parent = composition->layer(parent->parent);
     }
+    // 0. A geometria afim DEPOIS de cada efeito (de trás para a frente): o
+    //    produto dos Transform/Oscilar/Agitar seguintes, dobráveis ou não. Um
+    //    efeito que mede o quadro visível (Motion Tile, os recortes pela área
+    //    visível) precisa da matriz que leva a saída DELE ao quadro:
+    //    camada · geometria seguinte. Só avalia os efeitos que dobram.
+    downstream.assign(sources.size(), Mat4::identity());
+    hasDownstream.assign(sources.size(), 0);
+    {
+        Mat4 acc = Mat4::identity();
+        bool any = false;
+        for (usize i = sources.size(); i-- > 0;) {
+            downstream[i] = acc;
+            hasDownstream[i] = any ? 1 : 0;
+            const auto& source = sources[i];
+            const EffectInstance& inst = *source.effect;
+            if (!inst.enabled) continue;
+            const Effect* effect = registry.find(inst.type);
+            const ParameterRegistry* params = registry.params(inst.type);
+            if (!effect || !params || effect->effect_class() != EffectClass::Domain) continue;
+            scratch.clear();
+            for (u32 p = 0; p < params->count(); ++p)
+                scratch.push_back(evaluate_param(source.owner->tracks, inst, p, params->at(p), source.time));
+            EffectEval e;
+            e.effect = effect;
+            e.instance = &inst;
+            e.values = scratch.data();
+            e.count = params->count();
+            e.effectIndex = static_cast<u32>(i);
+            e.localTime = source.time;
+            e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
+            e.texelScale = texelScale;
+            e.placement = &out.placement;
+            e.layer = &layer;
+            Mat4 m = Mat4::identity();
+            f32 opacity = 1.0f;
+            if (effect->fold_into_composite(e, m, opacity)) {
+                acc = acc * m;   // T_n · … · T_i: o mais tardio fica à esquerda
+                any = true;
+            }
+        }
+    }
+    LayerPlacement stepPlacement = placement;
     // 1. Resolve os valores no instante e tira quem não contribui.
     for (u32 i = 0; i < sources.size(); ++i) {
         const auto& source = sources[i];
@@ -263,8 +326,12 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         e.localTime = source.time;
         e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
         e.texelScale = texelScale;
-        e.placement = &out.placement;
         e.layer = &layer;
+        // Identidade e recursos medem o quadro com a geometria SEGUINTE: um
+        // Motion Tile a 100% numa camada que cobre o quadro deixa de ser
+        // neutro quando um Transform depois dele a encolhe.
+        stepPlacement.compFromLayer = hasDownstream[i] ? placement.compFromLayer * downstream[i] : placement.compFromLayer;
+        e.placement = &stepPlacement;
 
         if (effect->is_identity(e)) {
             ++out.droppedIdentity;
@@ -282,6 +349,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         }
         // O que só existe sob o lock (espectro do som) entra no eval agora.
         effect->resolve_resources(e);
+        e.placement = &out.placement;
         out.evals.push_back(e);
         out.colorOps.push_back(op);
     }
@@ -348,6 +416,17 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         ++i;
     }
 
+    // 3b. A geometria seguinte de cada etapa (ver EffectStage::after). Por
+    //     pixel não mede o quadro: só as etapas de um efeito levam a matriz.
+    for (EffectStage& st : out.stages) {
+        if (st.kind != EffectStage::Kind::Single) continue;
+        const u32 src = out.evals[st.begin].effectIndex;
+        if (src < downstream.size() && hasDownstream[src]) {
+            st.after = downstream[src];
+            st.hasAfter = true;
+        }
+    }
+
     // 4. Margens: quanto de vizinhança as etapas SEGUINTES leem. Uma etapa
     //    que recorta a própria saída ao quadro visível precisa deixar isto.
     f32 margin = 0.0f;
@@ -403,16 +482,31 @@ static_assert(sizeof(ColorStackUniforms) <= binding::kMaxUniformBytes);
 Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
                           const LayerImage& input, LayerImage& out) {
     LayerImage cur = input;
+    cur.history = FGTexture{};
 
-    for (const EffectStage& st : plan.stages) {
+    // DETECTAR MOVIMENTO: a fonte num instante anterior (quando o renderer a
+    // trouxe) passa pelas MESMAS etapas que vêm antes do efeito que a pede —
+    // senão uma cor ou um desfoque antes dele virariam "movimento" em todo
+    // pixel. Depois da última etapa que pede, a imagem do passado sai de cena.
+    usize lastHistory = plan.stages.size();
+    for (usize i = 0; i < plan.stages.size(); ++i) {
+        const EffectStage& st = plan.stages[i];
+        if (st.kind == EffectStage::Kind::Single && plan.evals[st.begin].effect->wants_history()) lastHistory = i;
+    }
+    LayerImage hist;
+    const bool carryHistory = input.history.valid() && lastHistory < plan.stages.size();
+    if (carryHistory) hist = LayerImage{input.history, input.region, input.width, input.height};
+
+    // Uma etapa sobre `img`. false = bypass (a imagem segue a mesma).
+    auto run = [&](const EffectStage& st, LayerImage& img, bool past) -> bool {
         if (st.kind == EffectStage::Kind::FusedColor) {
             ColorStackUniforms u{};
             u.header[0] = static_cast<f32>(st.count);
             // Tamanho do texel e densidade: a chave de croma com pré-desfoque
             // lê um anel de vizinhos medido em px da camada.
-            u.header[1] = cur.width > 0 ? 1.0f / static_cast<f32>(cur.width) : 0.0f;
-            u.header[2] = cur.height > 0 ? 1.0f / static_cast<f32>(cur.height) : 0.0f;
-            u.header[3] = cur.texel_scale_x();
+            u.header[1] = img.width > 0 ? 1.0f / static_cast<f32>(img.width) : 0.0f;
+            u.header[2] = img.height > 0 ? 1.0f / static_cast<f32>(img.height) : 0.0f;
+            u.header[3] = img.texel_scale_x();
             TextureHandle lut{};
             for (u32 k = 0; k < st.count; ++k) {
                 const ColorOp& op = plan.colorOps[st.begin + k];
@@ -421,36 +515,59 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
                 dst[0] = static_cast<f32>(static_cast<u32>(op.code));
                 if (op.code == ColorOpCode::Curves) lut = op.lut;
             }
-            LayerImage next = cur;
-            next.texture = ctx.texture("cor-fundida", cur.width, cur.height);
+            LayerImage next = img;
+            next.texture = ctx.texture("cor-fundida", img.width, img.height);
             // O bloco vai inteiro: o intervalo amarrado cobre o bloco declarado
             // no shader, e o laço lê só as `count` operações válidas.
             const u32 pass = ctx.fullscreen_pass(
                 "cor-fundida", PassStage::Effects, next.texture, ShaderId::effects_color_stack_frag,
-                {PassTexture{cur.texture, {}, CommonSampler::NearestClamp},
+                {PassTexture{img.texture, {}, CommonSampler::NearestClamp},
                  PassTexture{{}, lut, CommonSampler::LinearClamp}},
                 &u, sizeof(u));
             if (pass == kInvalidIndex) {
                 // Sem pipeline o passe não existe: a layer segue sem os efeitos
                 // de cor em vez de desenhar com estado inválido.
                 note_bypass(1u, "cor fundida");
-                continue;
+                return false;
             }
-            cur = next;
-            continue;
+            img = next;
+            return true;
         }
 
         EffectEval e = plan.evals[st.begin];
+        // O passado não se compara com o passado dele: o efeito que pede a
+        // história só age na imagem do instante.
+        if (past && e.effect->wants_history()) return false;
         e.values = plan.values.data() + e.valueOffset;
         e.placement = &plan.placement;
-        LayerImage next;
-        const Status s = e.effect->build(ctx, e, cur, st.margin, next);
-        if (!s.ok() || !next.valid()) {
-            // Bypass: `cur` segue sendo a entrada; o quadro não cai por um efeito.
-            note_bypass(e.effect->type_id(), e.effect->info().name);
-            continue;
+        LayerPlacement seen;
+        if (st.hasAfter) {
+            // A imagem desta etapa chega ao quadro pela camada E pela
+            // geometria dos efeitos seguintes (dobrados ou não).
+            seen = plan.placement;
+            seen.compFromLayer = plan.placement.compFromLayer * st.after;
+            e.placement = &seen;
         }
-        cur = next;
+        const bool wants = !past && e.effect->wants_history();
+        if (wants) ctx.set_history(carryHistory ? hist : LayerImage{});
+        LayerImage next;
+        const Status s = e.effect->build(ctx, e, img, st.margin, next);
+        if (wants) ctx.set_history(LayerImage{});
+        if (!s.ok() || !next.valid()) {
+            // Bypass: `img` segue sendo a entrada; o quadro não cai por um efeito.
+            note_bypass(e.effect->type_id(), e.effect->info().name);
+            return false;
+        }
+        next.history = FGTexture{};
+        img = next;
+        return true;
+    };
+
+    for (usize i = 0; i < plan.stages.size(); ++i) {
+        const EffectStage& st = plan.stages[i];
+        (void)run(st, cur, false);
+        // A imagem do passado anda junto até a última etapa que a lê.
+        if (carryHistory && i < lastHistory) (void)run(st, hist, true);
     }
 
     out = cur;

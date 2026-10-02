@@ -36,6 +36,8 @@ add_executable(aurea_tests
     test_text3d_shared.cpp
     test_cube_lut.cpp
     test_transform3d_keys.cpp
+    test_scene_pick.cpp
+    test_beta_heavy.cpp
     test_camera_lens.cpp
     test_scene_param_keys.cpp
     test_effect3d_sweep.cpp
@@ -60,6 +62,7 @@ add_executable(aurea_tests
     test_vector_gpu.cpp
     test_editing_tools.cpp
     test_export.cpp
+    test_image_export.cpp
     test_perf.cpp
     test_timeline_scale.cpp
     test_stability.cpp

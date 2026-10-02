@@ -22,6 +22,7 @@
 #include "aurea/project/FileIO.hpp"
 #include "aurea/ai/Upscaler.hpp"
 #include "aurea/ai/TemporalStabilizer.hpp"
+#include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
@@ -256,6 +257,12 @@ struct Engine::ExportContext {
     /// Tamanho estimado do arquivo e a pasta dele (conferência de espaço).
     u64 estimatedBytes = 0;
     std::filesystem::path outputDir;
+    /// Export como imagem (start_image_export): sem sink nem planos NV12; o
+    /// alvo `comp` é lido em RGBA16F e vira PNG/GIF/ZIP no motor.
+    bool imageMode = false;
+    ImageExportSettings image{};
+    FrameIndex imageFrame{};   ///< PNG: o quadro do playhead no início
+    bool imageAlpha = false;   ///< fundo transparente: PNG RGBA, GIF com transparência
 
     void set_message(const char* m) {
         std::snprintf(progress.message, sizeof(progress.message), "%s", m);
@@ -1832,14 +1839,38 @@ Result<u64> Engine::add_camera() noexcept {
     return id.pack();
 }
 
+namespace {
+/// "Nulo", "Nulo 2", "Nulo 3"…: o menor número livre entre as camadas da
+/// composição. Nulos com o MESMO nome eram indistinguíveis na timeline, no
+/// vínculo (pai) e nas fichas da cena — parecia que só os primeiros existiam.
+std::string numbered_layer_name(const Composition& comp, const std::string& base) {
+    std::vector<u32> used;
+    for (u32 i = 0; i < comp.order().size(); ++i) {
+        const Layer* l = comp.layer(comp.order().at(i));
+        if (!l) continue;
+        if (l->name == base) { used.push_back(1); continue; }
+        if (l->name.size() <= base.size() + 1 || l->name.compare(0, base.size(), base) != 0 || l->name[base.size()] != ' ') continue;
+        const std::string tail = l->name.substr(base.size() + 1);
+        if (tail.empty() || tail.size() > 6 || !std::all_of(tail.begin(), tail.end(), [](char c) { return c >= '0' && c <= '9'; })) continue;
+        used.push_back(static_cast<u32>(std::stoul(tail)));
+    }
+    for (u32 n = 1;; ++n) {
+        if (std::find(used.begin(), used.end(), n) == used.end()) return n == 1 ? base : base + " " + std::to_string(n);
+    }
+}
+} // namespace
+
 Result<u64> Engine::add_null(bool threeD) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    // A fila vem ANTES (como em parent_to_new_null): um desfazer ainda na fila
+    // rodaria DEPOIS deste passo síncrono e apagaria o nulo recém-criado.
+    drain_commands_locked();
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     history_.before_mutation(*comp, project_->timeline().current(), threeD ? "adicionar nulo 3D" : "adicionar nulo");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    const LayerId lid = comp->add_layer(LayerKind::Null, threeD ? "Nulo 3D" : "Nulo");
+    const LayerId lid = comp->add_layer(LayerKind::Null, numbered_layer_name(*comp, threeD ? "Nulo 3D" : "Nulo"));
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     l->threeD = threeD;
@@ -1854,7 +1885,22 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
         playback_.configure(comp->fps(), comp->duration());
     }
     l->transform.anchor = Vec3{50.0f, 50.0f, 0.0f};   // caixa virtual de 100 px (alças no palco)
-    l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
+    // No centro — e, se outro nulo já está parado ali, um degrau na diagonal:
+    // nulos empilhados no mesmo ponto só deixavam tocar o de cima no palco.
+    const Vec3 center{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
+    const f32 step = std::max(8.0f, static_cast<f32>(std::min(comp->width(), comp->height())) * 0.05f);
+    auto occupied = [&](const Vec3& p) {
+        for (u32 i = 0; i < comp->order().size(); ++i) {
+            const Layer* other = comp->layer(comp->order().at(i));
+            if (!other || other == l || other->kind != LayerKind::Null || other->parent.valid()) continue;
+            if (other->tracks.find(TrackProperty::PositionX) || other->tracks.find(TrackProperty::PositionY)) continue;
+            if (std::fabs(other->transform.position.x - p.x) < 0.5f && std::fabs(other->transform.position.y - p.y) < 0.5f) return true;
+        }
+        return false;
+    };
+    Vec3 at = center;
+    for (u32 k = 1; k < 64 && occupied(at); ++k) at = Vec3{center.x + step * static_cast<f32>(k), center.y + step * static_cast<f32>(k), 0.0f};
+    l->transform.position = at;
     project_->mark_dirty();
     request_render();
     return lid.pack();
@@ -1897,7 +1943,7 @@ Result<u64> Engine::parent_to_new_null(const u64* layerIds, u32 count) noexcept 
     history_.begin_group("vincular a novo nulo");
     history_.before_mutation(*comp, project_->timeline().current(), "vincular a novo nulo");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    const LayerId nullId = comp->add_layer(LayerKind::Null, threeD ? "Nulo 3D" : "Nulo");
+    const LayerId nullId = comp->add_layer(LayerKind::Null, numbered_layer_name(*comp, threeD ? "Nulo 3D" : "Nulo"));
     Layer* nl = comp->layer(nullId);
     if (!nl) {
         history_.end_group();
@@ -4594,8 +4640,10 @@ u32 Engine::query_scene_guides(f32* lines, u32 capacity) noexcept {
         p[0] = x.x / x.w; p[1] = x.y / x.w; p[2] = y.x / y.w; p[3] = y.y / y.w; p[4] = kind;
     };
     const f32 width = static_cast<f32>(comp->width()), height = static_cast<f32>(comp->height());
-    for (u32 i = 0; i <= 10; ++i) {
-        const f32 t = static_cast<f32>(i) / 10;
+    // Quadro da composição (z = 0) em quartos: grade densa por cima do objeto
+    // 3D parecia "o texto virou uma grade" (relato beta).
+    for (u32 i = 0; i <= 4; ++i) {
+        const f32 t = static_cast<f32>(i) / 4;
         line(Vec3{width * t, 0, 0}, Vec3{width * t, height, 0}, 0);
         line(Vec3{0, height * t, 0}, Vec3{width, height * t, 0}, 0);
     }
@@ -4659,6 +4707,79 @@ bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noe
     };
     return proj(o, out) && proj(o + axis(0), out + 2) && proj(o + axis(1), out + 4)
         && proj(o + axis(2), out + 6);
+}
+
+namespace { Rect vector_content_box(const Layer& l, FrameIndex local); }
+
+// Seleção na Cena 3D pelo MESMO mundo/câmera do render: o raio da câmera
+// de navegação (ou da ativa) contra o corpo de cada camada 3D visível —
+// plano da caixa (texto, forma, mídia) ou triângulos (modelo, texto 3D,
+// forma 3D) — e ganha o acerto mais perto. Sem corpo sob o dedo, a origem
+// mais perto na tela até `radius` (câmera, luz, nulo, objeto miúdo).
+u64 Engine::scene_pick(f32 compX, f32 compY, f32 radius) noexcept {
+    if (!std::isfinite(compX) || !std::isfinite(compY)) return 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return 0;
+    const FrameIndex now = playback_.current();
+    const u32 w = std::max(1u, comp->width()), h = std::max(1u, comp->height());
+    const scene3d::SceneCamera cam = sceneEditor_.enabled ? scene_editor_camera(w, h, sceneEditor_) : comp_camera(*comp, now, w, h);
+    const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(w, h, sceneEditor_) : comp_view_projection(*comp, now);
+    Vec3 origin, dir;
+    if (!scene_ray(cam, w, h, compX, compY, origin, dir)) return 0;
+    u64 bodyId = 0, originId = 0;
+    f32 bodyBest = std::numeric_limits<f32>::max();
+    f32 originBest = std::isfinite(radius) && radius > 0.0f ? radius : 0.0f;
+    const OrderedIds<LayerId>& order = comp->order();
+    for (u32 i = 0; i < order.size(); ++i) {
+        const LayerId id = order.at(i);
+        const Layer* l = comp->layer(id);
+        if (!l || !l->visible || l->locked || !l->contains_time(now) || l->kind == LayerKind::Audio) continue;
+        if (!wants_layer_3d(*comp, *l, now) && !lives_in_3d(*l)) continue;
+        const Mat4 world = layer_world_3d(*comp, *l, now);
+        if (l->kind == LayerKind::Model3D) {
+            if (auto asset = model_lookup(this, l->model.scene))
+                if (ray_hits_model_layer(*comp, *l, now, *asset, origin, dir, bodyBest)) bodyId = id.pack();
+        } else if (l->kind != LayerKind::Camera && l->kind != LayerKind::Light && l->kind != LayerKind::Null) {
+            bridge::LayerDetailPOD pod{};
+            if (fill_layer_detail_locked(id.pack(), pod) && pod.sourceWidth > 0 && pod.sourceHeight > 0) {
+                Vec2 o{0.0f, 0.0f};
+                if (l->kind == LayerKind::Shape && l->shape.shapeType == kShapeVector) {
+                    const Rect b = vector_content_box(*l, l->local_time(now));
+                    o = Vec2{b.x, b.y};
+                }
+                // Raio × plano z = 0 da camada, no espaço do mundo.
+                const Vec3 p0 = world.transform_point(Vec3{o.x, o.y, 0});
+                const Vec3 ex = world.transform_point(Vec3{o.x + 1, o.y, 0}) - p0;
+                const Vec3 ey = world.transform_point(Vec3{o.x, o.y + 1, 0}) - p0;
+                const Vec3 n = ex.cross(ey);
+                const f32 denom = n.dot(dir);
+                if (std::fabs(denom) > 1e-12f) {
+                    const f32 t = n.dot(p0 - origin) / denom;
+                    if (t > 0.0f && t < bodyBest) {
+                        // Ponto → coordenadas da camada (base ex/ey, não ortogonal).
+                        const Vec3 r = origin + dir * t - p0;
+                        const f32 a = ex.dot(ex), b = ex.dot(ey), c = ey.dot(ey), d = r.dot(ex), e = r.dot(ey);
+                        const f32 det = a * c - b * b;
+                        if (std::fabs(det) > 1e-20f) {
+                            const f32 u = (d * c - b * e) / det, v = (a * e - b * d) / det;
+                            if (u >= 0.0f && v >= 0.0f && u <= static_cast<f32>(pod.sourceWidth) && v <= static_cast<f32>(pod.sourceHeight)) {
+                                bodyBest = t; bodyId = id.pack();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Origem (o pivô que o gizmo mostra): o alvo de quem não tem corpo.
+        const Vec3 a = l->kind == LayerKind::Model3D || l->kind == LayerKind::Camera ? Vec3{} : l->transform.anchor;
+        const Vec4 c = vp * world * Vec4{a.x, a.y, a.z, 1};
+        if (c.w > 1e-6f) {
+            const f32 dist = std::hypot(c.x / c.w - compX, c.y / c.w - compY);
+            if (dist < originBest) { originBest = dist; originId = id.pack(); }
+        }
+    }
+    return bodyId ? bodyId : originId;
 }
 
 bool Engine::query_preview_gesture_basis(u64 layerId, f32* out) noexcept {
@@ -5184,6 +5305,13 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
     // Cópias na ordem vertical da filha (de baixo para cima), pais remapeados.
     std::vector<std::pair<LayerId, LayerId>> map;
     std::vector<LayerId> added;
+    std::vector<std::pair<u32, u32>> tracks;   // (linha no grupo, linha nova aqui)
+    const auto ungroupedTrack = [&](u32 from) -> u32 {
+        if (from == 0) return 0;
+        for (const auto& [was, now] : tracks) if (was == from) return now;
+        tracks.emplace_back(from, comp->new_track_id());
+        return tracks.back().second;
+    };
     for (u32 i = 0; i < C->order().size(); ++i) {
         const LayerId cid = C->order().at(i);
         const Layer* src = C->layer(cid);
@@ -5197,6 +5325,9 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
         Layer* dst = comp->layer(nid);
         if (!dst) continue;
         *dst = *src;
+        // As linhas de dentro do grupo são números de OUTRA composição: aqui
+        // viram linhas novas (as que dividiam linha lá continuam juntas).
+        dst->trackId = ungroupedTrack(src->trackId);
         dst->start = FrameIndex{s};
         dst->end = FrameIndex{e};
         // Aparar a entrada: o conteúdo continua no mesmo lugar do tempo.
@@ -5311,6 +5442,13 @@ u32 Engine::paste_layers(i64 frame) noexcept {
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const i64 delta = std::max<i64>(0, frame) - clipboard_.layersAnchor;
     std::vector<std::pair<u64, LayerId>> made;
+    std::vector<std::pair<u32, u32>> tracks;   // (linha no recorte, linha nova aqui)
+    const auto pastedTrack = [&](u32 from) -> u32 {
+        if (from == 0) return 0;
+        for (const auto& [was, now] : tracks) if (was == from) return now;
+        tracks.emplace_back(from, comp->new_track_id());
+        return tracks.back().second;
+    };
     for (const auto& [oldPack, src] : clipboard_.layers) {
         // Mídia de outro projeto não existe aqui: essa camada não entra.
         if (src.source.valid() && !project_->asset(src.source)) continue;
@@ -5319,6 +5457,9 @@ u32 Engine::paste_layers(i64 frame) noexcept {
         Layer* dst = comp->layer(lid);
         if (!dst) continue;
         *dst = src;
+        // A cópia nunca cai na LINHA do original (senão as duas andariam juntas
+        // na timeline); copiadas da mesma linha continuam juntas numa linha nova.
+        dst->trackId = pastedTrack(src.trackId);
         dst->start = FrameIndex{std::max<i64>(0, src.start.value + delta)};
         dst->end = FrameIndex{std::max<i64>(dst->start.value + 1, src.end.value + delta)};
         made.emplace_back(oldPack, lid);
@@ -6208,6 +6349,95 @@ bool Engine::reorder_clip(u64 layerId, i64 targetFrame) noexcept {
     i64 duration = comp->duration().value;
     comp->layers().for_each([&](LayerId, const Layer& item) { duration = std::max(duration, item.end.value); });
     if (duration != comp->duration().value) { comp->set_duration(FrameIndex{duration}); playback_.configure(comp->fps(), comp->duration()); }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::move_layer_to_row(u64 layerId, u64 anchorId, i32 mode) noexcept {
+    if (mode != 0 && mode != 1) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    const LayerId id = LayerId::unpack(layerId);
+    Layer* layer = comp->layer(id);
+    if (!layer || layer->locked) return false;
+    const LayerId anchor = anchorId ? LayerId::unpack(anchorId) : LayerId{};
+    const Layer* a = anchorId ? comp->layer(anchor) : nullptr;
+    if ((anchorId && (!a || anchor == id)) || (mode == 1 && (!a || a->trackId == 0))) return false;
+
+    // A ordem SEM a camada que anda (0 = fundo). `move_to` põe a camada num
+    // índice desta lista, então todo cálculo de lugar é feito nela.
+    std::vector<LayerId> rest;
+    rest.reserve(comp->order().size());
+    for (u32 i = 0; i < comp->order().size(); ++i)
+        if (comp->order().at(i) != id) rest.push_back(comp->order().at(i));
+    // A fileira de uma linha fica onde está o trecho MAIS ALTO dela (é assim
+    // que as duas timelines montam as fileiras); linha 0 (projeto antigo) é
+    // a camada sozinha.
+    const auto lineTop = [&](const Layer& of, LayerId self) -> i32 {
+        i32 top = -1;
+        for (u32 i = 0; i < rest.size(); ++i) {
+            const Layer* l = comp->layer(rest[i]);
+            if (!l) continue;
+            if (of.trackId == 0 ? rest[i] == self : l->trackId == of.trackId) top = static_cast<i32>(i);
+        }
+        return top;
+    };
+    // Uma linha só dela: quem dividia a linha com outros ganha um número novo;
+    // quem já era sozinho (ou é de projeto antigo, linha 0) fica como está.
+    const auto ownTrack = [&]() -> u32 {
+        if (layer->trackId == 0) return 0;
+        bool shared = false;
+        comp->layers().for_each([&](LayerId other, const Layer& l) {
+            if (other != id && l.trackId == layer->trackId) shared = true;
+        });
+        return shared ? comp->new_track_id() : layer->trackId;
+    };
+
+    u32 insertAt = 0;
+    u32 track = layer->trackId;
+    if (mode == 1) {
+        const u32 join = a->trackId;
+        if (join == layer->trackId) return false;   // já mora nessa linha
+        const i32 top = lineTop(*a, anchor);
+        if (top < 0) return false;
+        // Entra logo ABAIXO do trecho mais alto: a fileira da linha não muda de lugar.
+        insertAt = static_cast<u32>(top);
+        bool fits = true;
+        comp->layers().for_each([&](LayerId other, const Layer& l) {
+            if (other != id && l.trackId == join && l.start.value < layer->end.value && layer->start.value < l.end.value)
+                fits = false;
+        });
+        track = fits ? join : ownTrack();
+    } else {
+        if (a) {
+            const i32 top = lineTop(*a, anchor);
+            if (top < 0) return false;
+            insertAt = static_cast<u32>(top) + 1;
+        }
+        track = ownTrack();
+    }
+    const i32 current = comp->order().index_of(id);
+    if (current < 0) return false;
+    if (static_cast<u32>(current) == insertAt && track == layer->trackId) return false;   // nada muda
+
+    history_.before_mutation(*comp, project_->timeline().current(), "mover para outra fileira");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    layer = comp->layer(id);
+    if (!layer) return false;
+    const u32 oldTrack = layer->trackId;
+    const i64 start = layer->start.value, end = layer->end.value;
+    const bool magnetic = layer->magneticTrack;
+    layer->trackId = track;
+    (void)comp->order().move_to(id, insertAt);
+    comp->rebuild_draw_order();
+    // Saiu de uma LINHA MAGNÉTICA: a fita dela fica encostada, como no ripple
+    // (o trecho que saiu fica no tempo dele; só os vizinhos daquela linha andam).
+    if (magnetic && oldTrack != 0 && oldTrack != track)
+        comp->close_gaps_in_track(FrameIndex{start}, FrameIndex{end}, oldTrack);
+    comp->touch();
     project_->mark_dirty();
     request_render();
     return true;
@@ -9161,7 +9391,9 @@ u32 Engine::query_layer_effects(u64 layerId, bridge::LayerEffectRow* out, u32 ca
                                 u32 blobCapacity) noexcept {
     if (!out) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
-    Composition* comp = current_composition();
+    // O efeito que o painel acabou de pôr (ainda na fila) já aparece na pilha.
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return 0;
     const Layer* l = comp->layer(LayerId::unpack(layerId));
     if (!l) return 0;
@@ -9186,7 +9418,12 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
                                 char* blob, u32 blobCapacity) noexcept {
     if (!out) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
-    Composition* comp = current_composition();
+    // Escritas ainda na fila (o painel acabou de mexer num valor) entram
+    // ANTES da leitura: sem isto o painel relia o valor antigo logo depois de
+    // escrever, o controle voltava e um vetor (cor, ponto) escrito por
+    // componente perdia o que já tinha mudado.
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return 0;
     Layer* l = comp->layer(LayerId::unpack(layerId));
     if (!l) return 0;
@@ -9428,12 +9665,13 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     vc.height = ctx->outputHeight;
     vc.fps = ctx->fps;
     vc.codec = settings.videoCodec;
-    // Mbps do projeto, ou proporcional aos pixels (0,2 bit por pixel·s:
-    // 1080p30 ≈ 12 Mbps, 4K30 ≈ 50 Mbps) — generoso, é arquivo de edição.
-    const f64 pixelsPerSecond = static_cast<f64>(ctx->outputWidth) * ctx->outputHeight * ctx->fps;
-    vc.bitrateBps = settings.videoBitrateMbps > 0
-                  ? settings.videoBitrateMbps * 1000000u
-                  : static_cast<u32>(std::clamp(pixelsPerSecond * 0.2, 2.0e6, 120.0e6));
+    // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
+    // 1080p30 Normal ≈ 14 Mbps, 4K30 ≈ 40 Mbps; Mbps manual só com teto.
+    vc.bitrateBps = export_video_bitrate_bps(ctx->outputWidth, ctx->outputHeight, ctx->fps, settings.videoCodec,
+                                             static_cast<ExportQuality>(std::min<u32>(settings.quality, 2u)),
+                                             settings.videoBitrateMbps);
+    // CBR só quando pedido; o padrão é VBR com pico limitado no encoder.
+    vc.rateMode = settings.rateMode == 0 ? 0u : 1u;
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
     // Com som na timeline, o arquivo leva AAC; sem, só vídeo (uma trilha de
     // silêncio não serve para nada e alguns players a mostram como "com som").
@@ -10095,6 +10333,242 @@ Engine::ExportProgress Engine::export_progress() const noexcept {
     if (!exportCtx_) return ExportProgress{};
     std::lock_guard<std::mutex> pl(exportCtx_->mutex);
     return exportCtx_->progress;
+}
+
+// =============================================================================
+// Export como imagem (export/ImageEncode.hpp): PNG do playhead, sequência PNG
+// num .zip e GIF animado. O MESMO renderer, os mesmos quadros exatos e o mesmo
+// progresso/cancelamento do vídeo — só a saída muda: a composição é lida em
+// RGBA16F, convertida para sRGB de 8 bits e codificada aqui no motor.
+// =============================================================================
+ImageExportPlan Engine::query_image_export_plan(const ImageExportSettings& settings) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    const Composition* comp = current_composition();
+    if (!comp) return ImageExportPlan{};
+    return plan_image_export(settings, comp->width(), comp->height(), comp->fps(),
+                             comp->export_duration(settings.trimToContent).value, comp->transparent_background());
+}
+
+Status Engine::start_image_export(const ImageExportSettings& settings, const char* outputPath) noexcept {
+    if (!project_) return Errc::InvalidState;
+    if (!outputPath || !*outputPath) return Errc::InvalidArgument;
+    if (static_cast<u32>(settings.format) > static_cast<u32>(ImageExportFormat::Gif)) return Errc::InvalidArgument;
+    if (!gpu_ || !renderer_.ready()) return Status{Errc::NotSupported, "export precisa de GPU"};
+    if (exportCtx_ && exportCtx_->thread.joinable()) {
+        bool running = false;
+        {
+            std::lock_guard<std::mutex> pl(exportCtx_->mutex);
+            running = exportCtx_->progress.running;
+        }
+        if (running) return Status{Errc::InvalidState, "ja existe um export em andamento"};
+        exportCtx_->thread.join();
+    }
+
+    auto ctx = std::make_unique<ExportContext>();
+    ctx->imageMode = true;
+    ctx->image = settings;
+    ctx->outputPath = outputPath;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        Composition* comp = current_composition();
+        if (!comp) return Errc::NotFound;
+        const ImageExportPlan plan = plan_image_export(settings, comp->width(), comp->height(), comp->fps(),
+                                                       comp->export_duration(settings.trimToContent).value,
+                                                       comp->transparent_background());
+        if (plan.width == 0 || plan.height == 0 || plan.frames == 0) return Errc::InvalidState;
+        ctx->compFps = comp->fps();
+        ctx->fps = plan.fps;
+        ctx->width = ctx->outputWidth = plan.width;
+        ctx->height = ctx->outputHeight = plan.height;
+        ctx->frames = plan.frames;
+        ctx->imageAlpha = plan.alpha;
+        ctx->imageFrame = project_->timeline().playhead();
+    }
+    if (settings.format == ImageExportFormat::Gif && ctx->frames > kGifMaxFrames)
+        return Status{Errc::NotSupported, "GIF longo demais: use um trecho menor ou menos quadros por segundo"};
+    if (settings.format == ImageExportFormat::PngSequence && ctx->frames > kSequenceMaxFrames)
+        return Status{Errc::NotSupported, "sequencia longa demais: use um trecho menor ou menos quadros por segundo"};
+    const u32 maxTex = gpu_->capabilities().maxTexture2D;
+    if (maxTex > 0 && std::max(ctx->width, ctx->height) > maxTex)
+        return Status{Errc::NotSupported, "resolucao acima do limite de textura da GPU"};
+    // Memória da CPU: leitura em meia-precisão + RGBA8 + o PNG/GIF do quadro.
+    const u64 working = static_cast<u64>(ctx->width) * ctx->height * 16 + (16ull << 20);
+    if (working > std::max<u64>(64ull << 20, caps_.memory_budget_bytes() / 2))
+        return Status{Errc::OutOfMemory, "memoria insuficiente para esta resolucao"};
+    // Espaço em disco antes de começar (a mesma regra do vídeo: recusa só
+    // quando nem metade da estimativa cabe).
+    {
+        const u64 estimate = estimate_image_export_bytes(settings.format, ctx->width, ctx->height, ctx->frames, ctx->imageAlpha);
+        std::error_code ec;
+        std::filesystem::path dir = std::filesystem::u8path(outputPath).parent_path();
+        if (dir.empty()) dir = std::filesystem::current_path(ec);
+        const std::filesystem::space_info sp = std::filesystem::space(dir, ec);
+        ctx->estimatedBytes = estimate;
+        if (!ec && sp.available != static_cast<std::uintmax_t>(-1) && sp.available < estimate / 2 + (16ull << 20)) {
+            static thread_local char detail[160];   // Status guarda o ponteiro
+            std::snprintf(detail, sizeof(detail), "espaco livre insuficiente: a imagem precisa de ~%llu MB e ha %llu MB livres",
+                          static_cast<unsigned long long>(estimate >> 20), static_cast<unsigned long long>(sp.available >> 20));
+            return Status{Errc::StorageFull, detail};
+        }
+        ctx->outputDir = dir;
+    }
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        TextureDesc cd;
+        cd.width = ctx->width;
+        cd.height = ctx->height;
+        cd.format = SurfaceFormat::RGBA16F;
+        cd.sampled = true;
+        cd.renderTarget = true;
+        cd.transferSrc = true;
+        cd.debugName = "export-imagem";
+        auto c = gpu_->create_texture(cd);
+        if (!c.ok()) return Status{Errc::OutOfMemory, "sem memoria de GPU para o export"};
+        ctx->comp = *c;
+    }
+    struct ProxyExportPause {
+        PreviewProxyService& service;
+        bool started = false;
+        ~ProxyExportPause() { if (!started) service.set_pause_reason(PreviewProxyService::Export, false); }
+    } proxyPause{media_.proxies()};
+    media_.proxies().set_pause_reason(PreviewProxyService::Export, true);
+
+    ctx->progress.running = true;
+    ctx->progress.framesTotal = ctx->frames;
+    ctx->progress.pipelineDepth = 1;
+    ctx->depth = 1;
+    ctx->set_message("exportando");
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        playback_.pause(monotonic_ns());
+        playingHint_ = false;
+        audio_.stop();
+    }
+    exportCtx_ = std::move(ctx);
+    exportActive_.store(true, std::memory_order_release);
+    media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
+    proxyPause.started = true;
+    exportCtx_->thread = std::thread([this] { image_export_thread_main(); });
+    return OkStatus;
+}
+
+void Engine::image_export_thread_main() noexcept {
+    set_current_thread_name("aurea-export-img");
+    ExportContext& ctx = *exportCtx_;
+    const ImageExportFormat format = ctx.image.format;
+    OffscreenTarget target;
+    target.texture = ctx.comp;
+    target.width = ctx.width;
+    target.height = ctx.height;
+    ctx.startNs = monotonic_ns();
+    const usize pixels = static_cast<usize>(ctx.width) * ctx.height;
+    std::vector<u16> half(pixels * 4);
+    std::vector<u8> rgba(pixels * 4);
+    std::vector<u8> png;
+    GifWriter gif;
+    StoredZipWriter zip;
+    auto cancelled = [&] { return ctx.cancelRequested.load(std::memory_order_acquire); };
+
+    Status result = OkStatus;
+    if (format == ImageExportFormat::Gif) {
+        result = gif.open(ctx.outputPath.c_str(), ctx.width, ctx.height, ctx.imageAlpha, ctx.image.dither);
+    } else if (format == ImageExportFormat::PngSequence) {
+        result = zip.open(ctx.outputPath.c_str());
+    }
+    for (u32 i = 0; i < ctx.frames && result.ok(); ++i) {
+        if (cancelled()) { result = Errc::Cancelled; break; }
+        // Tempo de SAÍDA → quadro da composição (como no vídeo). O PNG é o
+        // quadro do playhead.
+        const FrameIndex t = format == ImageExportFormat::Png
+            ? ctx.imageFrame
+            : FrameIndex{static_cast<i64>(std::floor(static_cast<f64>(i) / ctx.fps * ctx.compFps + 1e-6))};
+        u64 gpuFrame = 0;
+        result = render_export_frame(t, target, gpuFrame);
+        if (!result.ok()) break;
+        const u64 r0 = monotonic_ns();
+        {
+            std::lock_guard<std::mutex> rl(renderMutex_);
+            if (!gpu_) { result = Status{Errc::InvalidState, "sem GPU"}; break; }
+            result = wait_export_gpu(gpuFrame);
+            if (result.ok()) result = gpu_->read_texture(ctx.comp, half.data(), ctx.width * 8);
+        }
+        if (!result.ok()) break;
+        linear_half_to_srgb8(half.data(), pixels, rgba.data());
+        const u64 w0 = monotonic_ns();
+        ctx.readNs.fetch_add(w0 - r0, std::memory_order_relaxed);
+        switch (format) {
+            case ImageExportFormat::Png: {
+                result = encode_png(rgba.data(), ctx.width, ctx.height, ctx.imageAlpha, png);
+                if (!result.ok()) break;
+                std::FILE* f = std::fopen(ctx.outputPath.c_str(), "wb");
+                if (!f) { result = Status{Errc::IoError, "nao foi possivel criar o PNG"}; break; }
+                const bool ok = std::fwrite(png.data(), 1, png.size(), f) == png.size() && std::fflush(f) == 0;
+                std::fclose(f);
+                if (!ok) result = Status{Errc::StorageFull, "falha ao gravar o PNG (armazenamento cheio?)"};
+                break;
+            }
+            case ImageExportFormat::PngSequence: {
+                result = encode_png(rgba.data(), ctx.width, ctx.height, ctx.imageAlpha, png);
+                char name[32];
+                std::snprintf(name, sizeof(name), "frame_%05u.png", i + 1);
+                if (result.ok()) result = zip.add(name, png.data(), png.size());
+                break;
+            }
+            case ImageExportFormat::Gif:
+                result = gif.add_frame(rgba.data(), gif_frame_delay_cs(i, ctx.fps));
+                break;
+        }
+        ctx.writeNs.fetch_add(monotonic_ns() - w0, std::memory_order_relaxed);
+        if (!result.ok()) break;
+        const u32 done = i + 1;
+        const f64 elapsed = static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9;
+        const f64 k = 1e-6 / static_cast<f64>(done);
+        std::lock_guard<std::mutex> pl(ctx.mutex);
+        ctx.progress.framesDone = done;
+        ctx.progress.decodeWaitMs = static_cast<f32>(ctx.decodeNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.renderMs = static_cast<f32>(ctx.renderNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.readbackMs = static_cast<f32>(ctx.readNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.encodeMs = static_cast<f32>(ctx.writeNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.fps = elapsed > 0.0 ? static_cast<f32>(done / elapsed) : 0.0f;
+        ctx.progress.etaSeconds = ctx.progress.fps > 0.0f ? static_cast<u32>((ctx.frames - done) / ctx.progress.fps) : 0;
+    }
+    if (result.ok() && cancelled()) result = Errc::Cancelled;
+    if (format == ImageExportFormat::Gif) {
+        if (result.ok()) result = gif.finish();
+        else gif.abort();
+    } else if (format == ImageExportFormat::PngSequence) {
+        if (result.ok()) result = zip.finish();
+        else zip.abort();
+    } else if (!result.ok()) {
+        std::error_code ec;
+        std::filesystem::remove(std::filesystem::u8path(ctx.outputPath), ec);
+    }
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (gpu_) gpu_->destroy_texture(ctx.comp);
+    }
+    {
+        std::lock_guard<std::mutex> pl(ctx.mutex);
+        ctx.progress.running = false;
+        ctx.progress.finished = true;
+        ctx.progress.result = result.code();
+        if (result.ok()) ctx.set_message("concluido");
+        else if (result.code() == Errc::Cancelled) ctx.set_message("cancelado");
+        else ctx.set_message(result.detail().empty() ? result.message().data() : result.detail().data());
+    }
+    if (!result.ok() && result.code() != Errc::Cancelled) {
+        AUREA_LOG_ERROR("export de imagem falhou [%d]: %s; %s", result.raw(), result.message().data(),
+                        result.detail().empty() ? "" : result.detail().data());
+    } else if (result.ok()) {
+        AUREA_LOG_INFO("export de imagem: formato %u, %u quadro(s) %ux%u em %.2f s", static_cast<u32>(format), ctx.frames,
+                       ctx.width, ctx.height, static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9);
+    }
+    exportActive_.store(false, std::memory_order_release);
+    media_.proxies().set_pause_reason(PreviewProxyService::Export, false);
+    forceRender_ = true;
+    request_render();
 }
 
 // =============================================================================

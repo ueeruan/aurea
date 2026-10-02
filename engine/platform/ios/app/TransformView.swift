@@ -333,8 +333,12 @@ struct TransformView: View {
                     keypad(AureaText.t("edt_scale_z"), value(5) * 100, unit: "%", decimals: 1) { amount in
                         if linked {
                             let from = value(5) * 100, factor = from != 0 ? amount / from : 1
-                            write([3: from != 0 ? value(3) * factor : amount / 100,
-                                   4: from != 0 ? value(4) * factor : amount / 100, 5: amount / 100])
+                            if from != 0 {
+                                // Travado = zoom uniforme do volume (regra do motor: Z de conteúdo acompanha X).
+                                let s = model.engine.gestureScale3D(Int32(model.selectedLayer?.kind ?? 0), scaleX: value(3), scaleY: value(4),
+                                                                    scaleZ: value(5), axis: 3, factor: factor).map(\.floatValue)
+                                write([3: s[0], 4: s[1], 5: s[2]])
+                            } else { write([3: amount / 100, 4: amount / 100, 5: amount / 100]) }
                         } else { write([5: amount / 100]) }
                     }
                 }.frame(height: 44)
@@ -362,7 +366,11 @@ struct TransformView: View {
             let x = axisY ? (from != 0 ? original[0] * multiplier : amount) : amount
             let y = axisY ? amount : (from != 0 ? original[1] * multiplier : amount)
             var changes: [UInt32: Float] = [3: x / 100, 4: y / 100]
-            if threeD { changes[5] = (from != 0 ? original[2] * multiplier : amount) / 100 }
+            // Volume: a profundidade efetiva acompanha sem esticar (Z de conteúdo é relativo a X no motor).
+            if threeD {
+                changes[5] = from != 0 ? model.engine.gestureScale3D(Int32(model.selectedLayer?.kind ?? 0), scaleX: original[0] / 100,
+                    scaleY: original[1] / 100, scaleZ: original[2] / 100, axis: 3, factor: multiplier)[2].floatValue : amount / 100
+            }
             write(changes)
         } else { write([(axisY ? 4 : 3): amount / 100]) }
     }

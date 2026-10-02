@@ -102,22 +102,48 @@ Status build_gaussian(EffectBuildContext& ctx, const LayerImage& input, const Bl
     const Rect region = req.outRegion.w > 0.0f ? req.outRegion : input.region;
     const CommonSampler sampler = req.repeatEdges ? CommonSampler::LinearClamp : CommonSampler::LinearBorder;
 
+    // ÁREA DE TRABALHO: a saída pode ter sido RECORTADA ao quadro visível, mas
+    // o passe vertical lê 3σ acima e abaixo de cada pixel da saída (e o
+    // horizontal, 3σ dos lados). Se a redução e o passe horizontal cobrissem só
+    // a saída, a borda do recorte lia transparente — uma faixa escura no topo
+    // do quadro quando a camada (ou a parede do Motion Tile) passa dele.
+    // Trabalha-se na saída + 3σ; só o ÚLTIMO passe
+    // escreve exatamente a região pedida.
+    Rect work = region;
     u32 w = 0, h = 0;
     ctx.region_size(region, kx, w, h);
+    u32 outW = w, outH = h;
+    if (req.clippedRegion && !req.repeatEdges && w > 0 && h > 0) {
+        // A área extra é um número INTEIRO de texels da saída: a grade da
+        // saída continua a mesma (nada de refiltrar meio texel).
+        const f32 tx = region.w / static_cast<f32>(w), ty = region.h / static_cast<f32>(h);
+        const f32 padX = req.sigmaX > 0.0f ? std::ceil(3.0f * req.sigmaX) + 1.0f : 0.0f;
+        const f32 padY = req.sigmaY > 0.0f ? std::ceil(3.0f * req.sigmaY) + 1.0f : 0.0f;
+        const u32 nx = tx > 0.0f ? static_cast<u32>(std::ceil(padX / tx)) : 0u;
+        const u32 ny = ty > 0.0f ? static_cast<u32>(std::ceil(padY / ty)) : 0u;
+        const u32 limit = ctx.max_texture_size();
+        if (w + 2 * nx <= limit && h + 2 * ny <= limit) {
+            work = Rect{region.x - static_cast<f32>(nx) * tx, region.y - static_cast<f32>(ny) * ty,
+                        region.w + static_cast<f32>(2 * nx) * tx, region.h + static_cast<f32>(2 * ny) * ty};
+            w += 2 * nx;
+            h += 2 * ny;
+        }
+    }
 
     FGTexture src = input.texture;
     Rect srcRegion = input.region;
     u32 srcW = input.width, srcH = input.height;
 
+    const f32 maxSigma = std::clamp(req.maxSigmaTexels, 1.5f, kMaxSigmaTexels);
     for (u32 level = 0; level < kMaxReductions; ++level) {
-        const bool redX = sx > kMaxSigmaTexels && w > 1;
-        const bool redY = sy > kMaxSigmaTexels && h > 1;
+        const bool redX = sx > maxSigma && w > 1;
+        const bool redY = sy > maxSigma && h > 1;
         if (!redX && !redY) break;
         const u32 nw = redX ? std::max(1u, (w + 1) / 2) : w;
         const u32 nh = redY ? std::max(1u, (h + 1) / 2) : h;
         const FGTexture dst = ctx.texture(nameReduce, nw, nh);
         DownsampleUniforms u{};
-        u.uvMap = EffectBuildContext::uv_map(region, srcRegion);
+        u.uvMap = EffectBuildContext::uv_map(work, srcRegion);
         u.texel = Vec4{redX ? 1.0f / static_cast<f32>(srcW) : 0.0f,
                        redY ? 1.0f / static_cast<f32>(srcH) : 0.0f, 0.0f, 0.0f};
         if (ctx.fullscreen_pass(nameReduce, PassStage::Effects, dst, ShaderId::effects_downsample_frag,
@@ -128,14 +154,25 @@ Status build_gaussian(EffectBuildContext& ctx, const LayerImage& input, const Bl
         // região é a mesma, com menos texels).
         sx *= static_cast<f32>(nw) / static_cast<f32>(w);
         sy *= static_cast<f32>(nh) / static_cast<f32>(h);
-        src = dst; srcRegion = region; srcW = nw; srcH = nh;
+        src = dst; srcRegion = work; srcW = nw; srcH = nh;
         w = nw; h = nh;
     }
 
-    auto separable = [&](bool horizontal, f32 sigma) -> bool {
-        const FGTexture dst = ctx.texture(horizontal ? nameH : nameV, w, h);
+    // Texels da região pedida na densidade atual (depois das reduções).
+    if (work.w != region.w || work.h != region.h) {
+        outW = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(w) * region.w / std::max(work.w, 1e-6f))));
+        outH = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(h) * region.h / std::max(work.h, 1e-6f))));
+    } else {
+        outW = w;
+        outH = h;
+    }
+
+    auto separable = [&](bool horizontal, f32 sigma, bool last) -> bool {
+        const Rect dstRegion = last ? region : work;
+        const u32 dw = last ? outW : w, dh = last ? outH : h;
+        const FGTexture dst = ctx.texture(horizontal ? nameH : nameV, dw, dh);
         BlurUniforms u{};
-        u.uvMap = EffectBuildContext::uv_map(region, srcRegion);
+        u.uvMap = EffectBuildContext::uv_map(dstRegion, srcRegion);
         u.dir = horizontal ? Vec4{1.0f / static_cast<f32>(srcW), 0.0f, 0.0f, 0.0f}
                            : Vec4{0.0f, 1.0f / static_cast<f32>(srcH), 0.0f, 0.0f};
         gaussian_pairs(sigma, u);
@@ -146,15 +183,29 @@ Status build_gaussian(EffectBuildContext& ctx, const LayerImage& input, const Bl
                                 {PassTexture{src, {}, sampler}}, &u, sizeof(u)) == kInvalidIndex) {
             return false;
         }
-        src = dst; srcRegion = region; srcW = w; srcH = h;
+        src = dst; srcRegion = dstRegion; srcW = dw; srcH = dh;
         return true;
     };
 
-    if (sx >= 0.05f && !separable(true, sx)) return Errc::PipelineCompileFailed;
-    if (sy >= 0.05f && !separable(false, sy)) return Errc::PipelineCompileFailed;
+    const bool doX = sx >= 0.05f, doY = sy >= 0.05f;
+    if (doX && !separable(true, sx, !doY)) return Errc::PipelineCompileFailed;
+    if (doY && !separable(false, sy, true)) return Errc::PipelineCompileFailed;
+    if (!doX && !doY) {
+        // Só reduções (σ minúsculo depois de reduzir): a região pedida, sem filtro extra.
+        BlurUniforms u{};
+        u.uvMap = EffectBuildContext::uv_map(region, srcRegion);
+        u.dir = Vec4{1.0f / static_cast<f32>(srcW), 0.0f, 0.0f, 0.0f};
+        gaussian_pairs(0.05f, u);
+        const FGTexture dst = ctx.texture(nameH, outW, outH);
+        if (ctx.fullscreen_pass(nameH, PassStage::Effects, dst, ShaderId::effects_gaussian_blur_frag,
+                                {PassTexture{src, {}, sampler}}, &u, sizeof(u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        src = dst; srcRegion = region; srcW = outW; srcH = outH;
+    }
 
     out.texture = src;
-    out.region = region;
+    out.region = srcRegion;
     out.width = srcW;
     out.height = srcH;
     return OkStatus;
@@ -212,6 +263,10 @@ public:
         // Repetindo a borda, a imagem não "vaza" para fora da caixa; sem
         // repetir, a luz se espalha e a região cresce junto.
         req.outRegion = repeat ? input.region : spread_region(input.region, ex, ey, e.placement, margin);
+        // O recorte ao quadro cortou a região espalhada: o desfoque trabalha
+        // além dela (ver BlurRequest::clippedRegion).
+        req.clippedRegion = !repeat && (req.outRegion.x > input.region.x - ex + 0.5f || req.outRegion.y > input.region.y - ey + 0.5f
+            || req.outRegion.right() < input.region.right() + ex - 0.5f || req.outRegion.bottom() < input.region.bottom() + ey - 0.5f);
         req.label = "blur";
         return build_gaussian(ctx, input, req, out);
     }

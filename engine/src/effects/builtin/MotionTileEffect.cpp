@@ -231,19 +231,54 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         using motion_tile::kNoWindowHalf;
+        using motion_tile::kMaxCoverage;
         const motion_tile::Params p = motion_tile::params_from(e);
 
         Rect region = input.region;
+        // O LADRILHO é a caixa da layer, não a região da entrada: um desfoque
+        // (ou brilho, sombra...) ANTES do Motion Tile alarga a entrada com uma
+        // borda transparente, e ladrilhar a entrada inteira punha essa borda
+        // entre as cópias — faixas pretas em toda emenda.
+        Rect box = input.region;
+        if (e.placement && e.placement->layerWidth > 0 && e.placement->layerHeight > 0) {
+            const Rect layerBox{0.0f, 0.0f, static_cast<f32>(e.placement->layerWidth),
+                                static_cast<f32>(e.placement->layerHeight)};
+            const Rect inside = Rect::intersect(layerBox, input.region);
+            if (inside.w > 0.5f && inside.h > 0.5f) box = inside;
+        }
         if (e.placement) {
             region = motion_tile::tiled_region(p, *e.placement);
-            // Só a parte que o quadro mostra (mais a margem dos efeitos
-            // seguintes) vira textura.
+            // A parte que o quadro mostra MAIS a margem que os efeitos
+            // seguintes leem (desfoque, brilho, distorções). A parede é
+            // infinita: a região cresce até cobrir isso tudo (até o teto de
+            // cobertura), em vez de parar no quadro — senão o desfoque depois
+            // do Motion Tile puxava transparente da borda e escurecia o quadro.
             Rect vis = visible_layer_rect(*e.placement);
             if (vis.w > 0.0f && vis.h > 0.0f) {
-                vis = Rect{vis.x - margin - 1.0f, vis.y - margin - 1.0f,
-                           vis.w + 2.0f * margin + 2.0f, vis.h + 2.0f * margin + 2.0f};
-                const Rect clipped = Rect::intersect(region, vis);
+                // + folga: o canto do quadro cai na borda da caixa visível e o
+                // filtro bilinear da composição leria transparente ali.
+                const f32 slack = margin + 2.0f + 0.01f * std::max(vis.w, vis.h);
+                vis = Rect{vis.x - slack, vis.y - slack, vis.w + 2.0f * slack, vis.h + 2.0f * slack};
+                const f32 lw = static_cast<f32>(std::max(e.placement->layerWidth, 1u));
+                const f32 lh = static_cast<f32>(std::max(e.placement->layerHeight, 1u));
+                const Rect cap{lw * 0.5f - lw * kMaxCoverage * 0.5f - margin, lh * 0.5f - lh * kMaxCoverage * 0.5f - margin,
+                               lw * kMaxCoverage + 2.0f * margin, lh * kMaxCoverage + 2.0f * margin};
+                const Rect clipped = Rect::intersect(cap, vis);
                 region = (clipped.w > 0.5f && clipped.h > 0.5f) ? clipped : Rect{0, 0, 1, 1};
+            }
+        }
+
+        // A região cai na GRADE de texels da entrada: com a origem fora dela,
+        // cada texel de saída ficava entre dois da entrada e a cópia central
+        // saía refiltrada (mais mole) em vez de idêntica à layer.
+        {
+            const f32 kx = input.texel_scale_x(), ky = input.texel_scale_y();
+            if (kx > 0.0f && ky > 0.0f && std::isfinite(kx) && std::isfinite(ky)) {
+                const f32 x0 = input.region.x + std::floor((region.x - input.region.x) * kx + 1e-3f) / kx;
+                const f32 y0 = input.region.y + std::floor((region.y - input.region.y) * ky + 1e-3f) / ky;
+                const f32 x1 = input.region.x + std::ceil((region.x + region.w - input.region.x) * kx - 1e-3f) / kx;
+                const f32 y1 = input.region.y + std::ceil((region.y + region.h - input.region.y) * ky - 1e-3f) / ky;
+                if (x1 > x0 && y1 > y0) region = Rect{x0, y0, x1 - x0, y1 - y0};
             }
         }
 
@@ -257,17 +292,22 @@ public:
             Vec4 inset;
             Vec4 windowX;
             Vec4 windowY;
+            Vec4 box;
         } u{};
-        // p = coordenada normalizada NA ENTRADA do pixel de saída.
-        u.uvMap = EffectBuildContext::uv_map(region, input.region);
+        // p = coordenada normalizada NO LADRILHO (a caixa da layer) do pixel
+        // de saída; `box` leva o ponto do ladrilho ao uv da entrada.
+        u.uvMap = EffectBuildContext::uv_map(region, box);
+        u.box = EffectBuildContext::uv_map(box, input.region);
         u.tile = Vec4{std::max(p.tileX, 1e-4f), std::max(p.tileY, 1e-4f), p.centerX, p.centerY};
         u.flags = Vec4{p.mirror ? 1.0f : 0.0f, p.phaseTurns, p.horizontalPhase ? 1.0f : 0.0f,
                        p.legacyClamp ? 1.0f : 0.0f};
         // Meio texel DA TEXTURA DE ENTRADA para dentro da borda: uma emenda
         // amostra exatamente a borda, e o filtro linear ali traria a margem
         // transparente — um fio claro em toda emenda.
-        u.inset = Vec4{0.5f / static_cast<f32>(std::max(input.width, 1u)),
-                       0.5f / static_cast<f32>(std::max(input.height, 1u)), 0, 0};
+        // Medido no ladrilho: meio texel da entrada dividido pela fração da
+        // entrada que a caixa ocupa.
+        u.inset = Vec4{0.5f / (static_cast<f32>(std::max(input.width, 1u)) * std::max(u.box.x, 1e-6f)),
+                       0.5f / (static_cast<f32>(std::max(input.height, 1u)) * std::max(u.box.y, 1e-6f)), 0, 0};
 
         // A JANELA DE SAÍDA, medida no QUADRO: o uv da textura de saída vai ao
         // uv da composição por um afim (região → px da layer → px do quadro).
@@ -353,6 +393,10 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_particular_effect(registry);
     // Sempre no FIM (a ordem é a do catálogo salvo): o layout das partes das formas 3D.
     builtin::register_shape3d_layout_effect(registry);
+    // Detectar movimento (Tempo). Sempre no FIM.
+    builtin::register_motion_detect_effect(registry);
+    // Emulador CRT, Tremor dissolvente e Mapa de deslocamento. Sempre no FIM.
+    builtin::register_retro_displace_effects(registry);
 }
 
 } // namespace aurea

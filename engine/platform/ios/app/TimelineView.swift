@@ -82,12 +82,21 @@ struct TimelineView: View {
     @State private var pinchPPS = Zoom.defaultPPS
     @State private var pinchFrame = 0.0
     @State private var pinching = false
+    /// A pinça começou com o play rodando: zoom em volta do cabeçote, sem scrub.
+    @State private var pinchPlaying = false
     @State private var guide = Snap.none
     @State private var selectedKey: (layer: Int64, frame: Int32, track: TimelineTrack?)?
     @State private var reorderSource = -1
     @State private var reorderTarget = -1
     @State private var reorderTop: CGFloat = 0
     @State private var reorderGrabOffset: CGFloat = 0
+    /// Arrasto vertical de UM trecho (Alight Motion): o trecho no ar (0 = nenhum),
+    /// o topo dele na janela (segue o dedo), a fileira de onde saiu e onde cai.
+    @State private var liftId: Int64 = 0
+    @State private var liftTop: CGFloat = 0
+    @State private var liftGrabOffset: CGFloat = 0
+    @State private var liftSource = -1
+    @State private var liftDrop = TimelineRowDrop.Target.none
     @State private var scrollVelocity: CGFloat = 0
     @State private var lastPointer = CGPoint.zero
     @State private var pendingPointer = false
@@ -109,7 +118,11 @@ struct TimelineView: View {
     @State private var rowCache = TimelineRowCache()
     @State private var thumbCache = TimelineThumbStrip()
     @State private var waveCache = TimelineWaveStrip(capacity: 2048)
+    /// Auto-rolagem nas bordas virou scrub do motor (par do Android `holdView`):
+    /// abre um scrub só na primeira volta e fecha no `finish`.
+    @State private var autoScrubbing = false
     private let m = TimelineMetrics()
+    private var haptics: TimelineHaptics { TimelineHaptics.shared }
     private let pulse = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 
     private struct MediaTile { var localFrame: Double; var width: CGFloat; var image: UIImage }
@@ -117,7 +130,8 @@ struct TimelineView: View {
     /// `.keys`: arrasto de um losango ESCOLHIDO — a seleção de keyframes inteira anda junta.
     /// `.step`: fileira compacta — o arrasto vertical passa pelas camadas (roda).
     /// `.box`: modo "Selecionar" — arrastar no vazio desenha o retângulo de seleção dos losangos.
-    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked, box }
+    /// `.lift`: toque longo + vertical num trecho — só ELE sobe/desce (a linha não vai junto).
+    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked, box, lift }
     private struct Interaction {
         var mode: Mode
         var start: CGPoint
@@ -158,6 +172,8 @@ struct TimelineView: View {
         return model.layers.contains { expandedLayers.contains($0.id) }
     }
     private var fps: Float { TimeAxis.safeFps(Float(model.compositionFps)) }
+    /// Chave do zoom/rolagem guardados: o projeto aberto.
+    private var memoryKey: String { model.projectURL?.path ?? model.projectName }
     private var ppf: CGFloat { TimeAxis.pxPerFrame(pps: pps, density: 1, fps: fps) }
     private var viewFrame: Double { heldView ?? Double(clock.frame) }
     private var focusTracks: [TimelineTrack]? {
@@ -216,10 +232,22 @@ struct TimelineView: View {
             .overlay(alignment: keyBarAlignment) { keyActionBar }
             .overlay(alignment: .bottom) { layerPickBar }
             .onAppear {
-                let seconds = CGFloat(model.compositionDuration) / CGFloat(fps)
-                if seconds >= Zoom.autoFitMinSeconds { pps = Zoom.autoFit(availableDp: size.width - 32, seconds: seconds) }
+                // A timeline some e volta (painel, doca, rotação): o zoom e a
+                // rolagem do projeto voltam como estavam. Ajustar à duração só
+                // na PRIMEIRA vez de cada projeto (par do Android).
+                if let saved = TimelineViewMemory.state[memoryKey] {
+                    pps = saved.pps; scrollY = min(saved.scrollY, maxScroll(size.height))
+                } else {
+                    let seconds = CGFloat(model.compositionDuration) / CGFloat(fps)
+                    if seconds >= Zoom.autoFitMinSeconds { pps = Zoom.autoFit(availableDp: size.width - 32, seconds: seconds) }
+                    TimelineViewMemory.state[memoryKey] = (pps, scrollY)
+                }
+                haptics.prepare()
                 refreshMedia(size: size)
             }
+            .onChange(of: guide) { snap in if snap != Snap.none { haptics.snap() } }
+            .onChange(of: pps) { value in TimelineViewMemory.state[memoryKey] = (value, scrollY) }
+            .onChange(of: scrollY) { value in TimelineViewMemory.state[memoryKey] = (pps, value) }
             .onChange(of: model.status.thumbnailGeneration) { _ in mediaNeedsRefresh = true }
             .onChange(of: model.status.playhead) { _ in mediaNeedsRefresh = true }
             .onChange(of: model.status.modelRevision) { _ in mediaNeedsRefresh = true }
@@ -464,8 +492,14 @@ struct TimelineView: View {
                 c.fill(rect, with: .color(AureaTimeline.background))
                 c.fill(rect, with: .color(AureaColors.accent.opacity(0.14)))
             }
+            if liftDrop.kind == .join && liftDrop.row == index {
+                // A linha que recebe o trecho no ar acende inteira.
+                c.fill(Path(CGRect(x: m.headerColumn, y: top, width: size.width - m.headerColumn, height: rowHeight(row))),
+                       with: .color(AureaColors.accent.opacity(0.18)))
+            }
             guard let shared = row.shared else {
-                drawRow(&c, row: row, top: top, width: size.width)
+                // O trecho no ar sai da fileira dele (é desenhado sob o dedo).
+                if row.id != liftId { drawRow(&c, row: row, top: top, width: size.width) }
                 continue
             }
             // FILEIRA COMPARTILHADA: cada trecho da linha no seu tempo, lado a
@@ -478,8 +512,8 @@ struct TimelineView: View {
                 else if x0 > size.width { offRight = true }
                 else { offLeft = true }
             }
-            for segment in shared where !model.selection.contains(segment.id) { drawRow(&c, row: segment, top: top, width: size.width, arrows: false) }
-            for segment in shared where model.selection.contains(segment.id) { drawRow(&c, row: segment, top: top, width: size.width, arrows: false) }
+            for segment in shared where !model.selection.contains(segment.id) && segment.id != liftId { drawRow(&c, row: segment, top: top, width: size.width, arrows: false) }
+            for segment in shared where model.selection.contains(segment.id) && segment.id != liftId { drawRow(&c, row: segment, top: top, width: size.width, arrows: false) }
             // Linha inteira fora da janela: UMA seta por lado (legenda nunca teve seta).
             if !onScreen && !model.captionTracks.contains(where: { $0.layer == shared[0].id }) {
                 let tint = AureaTimeline.tone(row.type).stripe.opacity(row.visible ? 0.9 : 0.45)
@@ -512,6 +546,22 @@ struct TimelineView: View {
             let gx = x(Double(guide), width: size.width)
             if gx >= m.headerColumn && gx <= size.width {
                 c.fill(Path(CGRect(x: gx - m.guide / 2, y: m.rowsTop, width: m.guide, height: size.height - m.rowsTop)), with: .color(AureaColors.accent))
+            }
+        }
+        // Trecho no ar (arrasto vertical de UM trecho): o traço de inserção entre
+        // as fileiras e o trecho sob o dedo, por cima de tudo.
+        if liftId != 0 && !compact {
+            if liftDrop.kind == .insert && liftDrop.lineY.isFinite {
+                let y = m.rowsTop + liftDrop.lineY - scrollY
+                c.fill(Path(CGRect(x: 0, y: y - m.reorderLine / 2, width: size.width, height: m.reorderLine)), with: .color(AureaColors.accent))
+                c.fill(Path(ellipseIn: CGRect(x: m.headerColumn - m.reorderDot, y: y - m.reorderDot, width: m.reorderDot * 2, height: m.reorderDot * 2)),
+                       with: .color(AureaColors.accent))
+            }
+            if let lifted = visibleRows.lazy.compactMap({ $0.segment(liftId) }).first {
+                let x0 = x(Double(lifted.start), width: size.width)
+                let x1 = max(x(Double(lifted.end), width: size.width), x0 + m.barMinWidth)
+                c.fill(Path(CGRect(x: x0, y: liftTop, width: x1 - x0, height: rowHeight(lifted))), with: .color(AureaColors.accent.opacity(0.22)))
+                drawRow(&c, row: lifted, top: liftTop, width: size.width, arrows: false)
             }
         }
         // Retângulo da seleção de losangos (cantos presos ao conteúdo).
@@ -983,7 +1033,11 @@ struct TimelineView: View {
     /// Hit-test de UM trecho na fileira (a mesma geometria do pintor).
     private func hitSegment(_ row: TimelineRow, x px: CGFloat, y: CGFloat, width: CGFloat) -> TimelineHit {
         let x0 = x(Double(row.start), width: width), x1 = max(x(Double(row.end), width: width), x0 + m.barMinWidth)
-        let keysShown: Bool = KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: row.track != nil, selected: model.selection.contains(row.id))
+        // Com 2+ camadas escolhidas o arrasto move o LOTE: o losango não pega o
+        // dedo (par do Android `keysEnabled = !multi()`), exceto no modo de
+        // escolher keyframes.
+        let multi = model.selection.count >= 2 && !model.timelineKeySelectMode
+        let keysShown: Bool = !multi && KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: row.track != nil, selected: model.selection.contains(row.id))
         let touchable: [Int32] = keysShown ? row.instants : []
         // Trilha: só a coluna do ▸/▾ (28) é cabeçalho; fileira: a pílula (70), com o olho em x < 28.
         let lane: Bool = row.track != nil
@@ -1228,9 +1282,9 @@ struct TimelineView: View {
         // todos os trechos): basta um trecho travado para recusar.
         let lane: TimelineRow? = rows.indices.contains(touched.index) ? rows[touched.index] : row
         let laneLocked = lane?.segments.contains(where: \.locked) ?? false
-        if mode == .move && selected.contains(where: \.locked) || (mode == .key || mode == .trimStart || mode == .trimEnd) && row?.locked == true || mode == .reorder && laneLocked {
+        if mode == .move && selected.contains(where: \.locked) || (mode == .key || mode == .trimStart || mode == .trimEnd || mode == .lift) && row?.locked == true || mode == .reorder && laneLocked {
             next.mode = .blocked
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            haptics.warning()
         }
         // Losango ESCOLHIDO (lote de 2+ ou modo de escolha): a seleção inteira anda junta.
         if next.mode == .key, let row, row.instants.indices.contains(touched.key),
@@ -1282,7 +1336,22 @@ struct TimelineView: View {
                 model.select(layerId: row.id, additive: false, openOptions: false)
             }
         }
+        if next.mode == .lift, let row {
+            // O trecho sai da fileira e segue o dedo; a linha dele fica.
+            liftSource = rows.lastIndex(where: { $0.segment(row.id) != nil }) ?? touched.index
+            liftId = row.id
+            liftTop = m.rowsTop + rowTop(max(0, liftSource)) - scrollY
+            liftGrabOffset = start.y - liftTop
+            liftDrop = .none
+            if !model.selection.contains(row.id) { model.select(layerId: row.id, additive: false, openOptions: false) }
+        }
         if next.mode != .hold && next.mode != .blocked && next.mode != .scroll && next.mode != .step { pause() }
+        // O dedo pegou algo para editar: um toque leve (par do Android `light()`).
+        switch next.mode {
+        case .move, .trimStart, .trimEnd, .key, .keys: haptics.light()
+        case .reorder, .lift: haptics.heavy()
+        default: break
+        }
         if next.mode == .scrub {
             heldView = next.view; model.engine.run { $0.scrubBegin() }
         }
@@ -1328,7 +1397,9 @@ struct TimelineView: View {
         guard !pinching else { return }
         if state == .began {
             begin(.hold, start: start, width: size.width)
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            // Só quando o dedo está sobre algo que o toque longo pega (clipe,
+            // pílula, losango); no vazio e na régua não vibra (par do Android).
+            if let g = gesture, g.row != nil, g.hit.kind != .none, g.hit.kind != .ruler { haptics.medium() }
         }
         if state == .changed, let g = gesture, g.mode == .hold {
             let dx = point.x - start.x, dy = point.y - start.y
@@ -1342,7 +1413,9 @@ struct TimelineView: View {
                 else if g.hit.kind == .key { mode = .key }
                 else if g.hit.kind == .header { mode = !time && !compact ? .reorder : .blocked }
                 else if time || compact { mode = .move }
-                else { mode = stack ? .reorder : .scroll }
+                // Na pilha, o TRECHO sobe/desce sozinho (como no Alight Motion);
+                // a linha inteira anda pela pílula.
+                else { mode = stack ? .lift : .scroll }
                 if mode == .move, let row = g.row, !model.selection.contains(row.id) {
                     model.select(layerId: row.id, additive: model.selection.count >= 2, openOptions: false)
                 }
@@ -1397,11 +1470,29 @@ struct TimelineView: View {
             let neighbor = index + (steps > 0 ? 1 : -1)
             if model.layers.indices.contains(neighbor) {
                 model.select(layerId: model.layers[neighbor].id, additive: false)
-                UISelectionFeedbackGenerator().selectionChanged()
+                haptics.tick()
+            }
+        case .lift:
+            liftTop = point.y - liftGrabOffset
+            guard let row = g.row else { return }
+            let list = rows
+            var tops: [CGFloat] = []
+            tops.reserveCapacity(list.count + 1)
+            var acc: CGFloat = 0
+            for r in list { tops.append(acc); acc += rowHeight(r) }
+            tops.append(acc)
+            // Fora da timeline: soltar ali cancela.
+            let outside = point.x < 0 || point.x > size.width || point.y < 0 || point.y > size.height
+            let next = outside ? TimelineRowDrop.Target.none
+                : TimelineRowDrop.target(rows: list, tops: tops, y: point.y - m.rowsTop + scrollY, moving: row, source: liftSource)
+            if next != liftDrop {
+                if next.kind != .none { haptics.tick() }
+                liftDrop = next
             }
         case .reorder:
             reorderTop = point.y - reorderGrabOffset
-            reorderTarget = min(max(0, rowIndex(point.y - m.rowsTop + scrollY)), max(0, rows.count - 1))
+            let target = min(max(0, rowIndex(point.y - m.rowsTop + scrollY)), max(0, rows.count - 1))
+            if target != reorderTarget { reorderTarget = target; haptics.tick() }
         case .move:
             guard let row = g.row, let earliest = g.selection.map(\.startFrame).min(), let latest = g.selection.map(\.endFrame).max() else { return }
             // LINHA MAGNÉTICA: arrastar na horizontal REORDENA a fita em vez de
@@ -1539,10 +1630,22 @@ struct TimelineView: View {
         if g.mode == .reorder && !cancelled, g.row != nil, rows.indices.contains(reorderTarget), reorderTarget != reorderSource {
             commitReorder(source: reorderSource, target: reorderTarget)
         }
+        if g.mode == .lift && !cancelled, let row = g.row, liftDrop.kind != .none,
+           model.moveLayerToRow(row.id, anchor: liftDrop.anchor, mode: liftDrop.mode) {
+            haptics.light()
+            UIAccessibility.post(notification: .announcement,
+                                 argument: AureaText.t(liftDrop.kind == .join ? "track2_row_joined" : "track2_row_moved"))
+        }
         if g.mode == .scrub { model.engine.run { $0.scrubEnd() } }
+        if autoScrubbing {
+            model.engine.run { $0.scrubEnd() }
+            if let held = heldView { model.optimisticPlayhead(Int64(timelineFrame(held))) }
+            autoScrubbing = false
+        }
         if g.undoOpen { model.engine.run { $0.endUndoGroup() } }
         model.timelineKeyDragActive = false
         gesture = nil; heldView = nil; guide = Snap.none; reorderSource = -1; reorderTarget = -1; boxRect = nil
+        liftId = 0; liftSource = -1; liftDrop = .none
     }
 
     /// Solta a fileira `source` sobre a fileira `target` (o mesmo do Android):
@@ -1569,23 +1672,41 @@ struct TimelineView: View {
             model.engine.run { $0.setLayerOrder(move.id, newIndex: UInt32(count - 1 - move.index)) }
         }
         model.engine.run { $0.endUndoGroup() }
+        haptics.light()
         model.refreshModel(force: true)
     }
 
+    /// PINÇA (par do Android): âncora no ponto entre os dedos. TOCANDO, não
+    /// pausa e não fala com o motor — o zoom fica em volta do cabeçote e o play
+    /// segue. Parado, a âncora move a janela e o motor faz scrub LEVE (sem
+    /// republicar o status a cada passo; só no fim).
     private func pinch(_ state: UIGestureRecognizer.State, scale: CGFloat, focus: CGPoint, width: CGFloat) {
         if state == .began {
-            finish(cancelled: true); scrollVelocity = 0; pause(); pinching = true
+            finish(cancelled: true); scrollVelocity = 0; pinching = true
+            pinchPlaying = model.status.playing != 0
             pinchPPS = pps; pinchFrame = frame(focus.x, width: width)
-            model.engine.run { $0.scrubBegin() }
+            if !pinchPlaying { model.engine.run { $0.scrubBegin() } }
+            haptics.tick()
         }
         if state == .began || state == .changed {
-            pps = Zoom.clamp(pinchPPS * scale)
-            holdView(Zoom.anchoredView(focusFrame: pinchFrame, focusX: focus.x, centerX: width / 2, pxPerFrame: ppf))
+            let next = Zoom.clamp(pinchPPS * scale)
+            if abs(next - pps) > 0.001 { pps = next }
+            if !pinchPlaying {
+                let target = TimeAxis.clampView(Zoom.anchoredView(focusFrame: pinchFrame, focusX: focus.x, centerX: width / 2, pxPerFrame: ppf),
+                                                durationFrames: Int32(clamping: model.compositionDuration))
+                heldView = target
+                model.timelineScrub(Int64(timelineFrame(target)))
+            }
         }
         if state == .ended || state == .cancelled || state == .failed { finishPinch() }
     }
     private func finishPinch() {
-        if pinching { model.engine.run { $0.scrubEnd() }; pinching = false; heldView = nil }
+        guard pinching else { return }
+        if !pinchPlaying {
+            model.engine.run { $0.scrubEnd() }
+            if let held = heldView { model.optimisticPlayhead(Int64(timelineFrame(held))) }
+        }
+        pinching = false; pinchPlaying = false; heldView = nil
     }
     private func tick(size: CGSize) {
         let now = ProcessInfo.processInfo.systemUptime
@@ -1608,11 +1729,14 @@ struct TimelineView: View {
                     // Auto-scroll moves the presentation window; the editing gesture
                     // reapplies its absolute target and the core remains authoritative.
                     let target = TimeAxis.clampView(viewFrame + Double(AutoScroll.step(factor: factor, maxSpeed: m.autoSpeed, dt: dt) / ppf), durationFrames: Int32(clamping: model.compositionDuration))
-                    heldView = target; model.seek(toFrame: Int64(timelineFrame(target)))
+                    // Scrub, não seek: o seek republicava o status e relia os
+                    // painéis 60 vezes por segundo (a borda engasgava).
+                    if !autoScrubbing { model.engine.run { $0.scrubBegin() }; autoScrubbing = true }
+                    heldView = target; model.timelineScrub(Int64(timelineFrame(target)))
                     moved = true
                 }
             }
-            if (g.mode == .reorder || g.mode == .box) && !compact {
+            if (g.mode == .reorder || g.mode == .box || g.mode == .lift) && !compact {
                 let zone = AutoScroll.zone(maxZone: m.autoEdge, viewport: size.height - m.rowsTop)
                 let factor = AutoScroll.speed(pos: lastPointer.y, from: g.start.y, start: m.rowsTop, end: size.height, zone: zone, intent: m.autoIntent)
                 if factor != 0 {
@@ -1703,6 +1827,34 @@ private struct TimelineHit {
         }
         return TimelineHit(kind: .none)
     }
+}
+
+/// Vibrações da timeline com os geradores PREPARADOS uma vez (criar um por
+/// toque atrasava a primeira vibração e às vezes a perdia). `snap` = o encaixe
+/// num alvo (borda, cabeçote, keyframe, marca) ao mover, aparar ou arrastar
+/// losango — o tique do Android `setGuide`.
+@MainActor
+final class TimelineHaptics {
+    static let shared = TimelineHaptics()
+    private let selection = UISelectionFeedbackGenerator()
+    private let lightImpact = UIImpactFeedbackGenerator(style: .light)
+    private let mediumImpact = UIImpactFeedbackGenerator(style: .medium)
+    private let heavyImpact = UIImpactFeedbackGenerator(style: .heavy)
+    private let notice = UINotificationFeedbackGenerator()
+    func prepare() { selection.prepare(); lightImpact.prepare() }
+    func snap() { selection.selectionChanged(); selection.prepare() }
+    func tick() { selection.selectionChanged(); selection.prepare() }
+    func light() { lightImpact.impactOccurred(); lightImpact.prepare() }
+    func medium() { mediumImpact.impactOccurred() }
+    func heavy() { heavyImpact.impactOccurred() }
+    func warning() { notice.notificationOccurred(.warning) }
+}
+
+/// Zoom e rolagem da timeline por projeto: sobrevivem à timeline sumir e
+/// voltar (o layout de celular recria a vista quando a doca/painel abre).
+@MainActor
+enum TimelineViewMemory {
+    static var state: [String: (pps: CGFloat, scrollY: CGFloat)] = [:]
 }
 
 /// UIKit only arbitrates touch ownership. All coordinates remain in the same

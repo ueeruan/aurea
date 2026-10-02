@@ -11,7 +11,6 @@ import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.editor.panels.paramOf
 import com.aurea.aurea.editor.panels.primaryKeys
-import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -77,7 +76,7 @@ class EditorUiCaptureTest {
         compose.onNodeWithTag("timeline.add").assertDoesNotExist()
         compose.onNodeWithTag("editor.addBar").assertIsDisplayed()
         capture("timeline-reference")
-        compose.onNodeWithTag("addBar.Text").performScrollTo().performClick()
+        compose.onNodeWithTag("addBar.Media").performScrollTo().performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.editor_fechar_adicionar)).assertIsDisplayed()
         back()
         compose.onNodeWithTag("editor.addBar").assertIsDisplayed()
@@ -151,13 +150,7 @@ class EditorUiCaptureTest {
         compose.onNodeWithTag("text.transform.add").performScrollTo().performClick()
         capture("text-stack")
         back()
-        compose.onNodeWithText(context.getString(R.string.sh_dock_mask)).performClick()
-        settle()
-        compose.onNodeWithText(context.getString(R.string.panel_3_borda)).performClick()
-        compose.runOnIdle { store.timelineFocus = listOf(TrackKey(43, mask, 2)) }
-        compose.onNodeWithTag("mask.$mask.curve.2").performScrollTo()
-        capture("mask")
-        back()
+        // A máscara não tem mais ficha na doca (virou efeito): sem a captura dela aqui.
         repeat(2) { n ->
             compose.runOnIdle { store.addShape(1) }
             compose.waitUntil(5000) { store.layers.size == n + 2 }

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel de efeitos: catalogo "Adicionar efeito", pilha compacta e ferramentas-efeito. -->
+<resources>
+    <string name="fxui_featured">विशेष</string>
+    <string name="fxui_categories">श्रेणियाँ</string>
+    <string name="fxui_group_color_light">रंग और रोशनी</string>
+    <string name="fxui_group_blur">धुंधलापन और तीक्ष्णता</string>
+    <string name="fxui_group_distort">विकृति</string>
+    <string name="fxui_group_motion">हिलाना और बदलना</string>
+    <string name="fxui_group_stylize">शैली</string>
+    <string name="fxui_group_glitch">ग्लिच</string>
+    <string name="fxui_group_draw_edge">ड्रॉइंग और किनारे</string>
+    <string name="fxui_group_procedural">प्रक्रियात्मक</string>
+    <string name="fxui_group_matte">मैट, मास्क और की</string>
+    <string name="fxui_group_time">समय और ट्रांज़िशन</string>
+    <string name="fxui_group_text">टेक्स्ट</string>
+    <string name="fxui_group_3d">3D</string>
+    <string name="fxui_group_audio">ऑडियो</string>
+    <string name="fxui_group_utility">उपयोगिता और एक्सप्रेशन</string>
+    <string name="fxui_group_other">अन्य</string>
+    <string name="fxui_tool_captions">स्वचालित कैप्शन</string>
+    <string name="fxui_tool_camera_track">कैमरा ट्रैकिंग</string>
+    <string name="fxui_tool_mask">मास्क</string>
+    <string name="fxui_tool_captions_desc">लेयर की बोली लिखकर सही समय पर कैप्शन बनाता है।</string>
+    <string name="fxui_tool_camera_track_desc">वीडियो के कैमरा मूवमेंट का विश्लेषण करके 3D ऑब्जेक्ट को दृश्य में बैठाता है।</string>
+    <string name="fxui_tool_mask_desc">ऐसी आकृतियाँ बनाता है जो लेयर के हिस्से दिखाती या छिपाती हैं।</string>
+    <string name="fxui_tool_badge">टूल</string>
+    <string name="fxui_tool_masks_n">मास्क: %1$d</string>
+    <string name="fxui_tool_captions_n">कैप्शन: %1$d</string>
+    <string name="fxui_tool_camera_ready">कैमरा विश्लेषित</string>
+    <string name="fxui_tool_remove_masks_q">इस लेयर के सभी मास्क हटाएँ?</string>
+    <string name="fxui_tool_remove_captions_q">इस लेयर के बनाए गए कैप्शन हटाएँ?</string>
+    <string name="fxui_a11y_expand">%1$s की सेटिंग दिखाएँ</string>
+    <string name="fxui_a11y_collapse">%1$s की सेटिंग छिपाएँ</string>
+    <string name="fxui_a11y_enable">%1$s चालू करें</string>
+    <string name="fxui_a11y_disable">%1$s बंद करें</string>
+    <string name="fxui_a11y_drag">क्रम बदलने के लिए %1$s खींचें</string>
+    <string name="fxui_a11y_remove">%1$s हटाएँ</string>
+    <string name="fxui_a11y_open">%1$s खोलें</string>
+    <string name="fxui_a11y_category">%1$s श्रेणी</string>
+    <string name="fxui_back_categories">श्रेणियों पर वापस जाएँ</string>
+    <string name="fxui_search_effects">इफ़ेक्ट खोजें</string>
+    <string name="fxui_effect_off">बंद</string>
+</resources>

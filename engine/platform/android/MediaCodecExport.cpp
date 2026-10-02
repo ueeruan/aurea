@@ -343,7 +343,10 @@ private:
             const f64 gopSeconds = video_.keyframeIntervalFrames > 0 ? video_.keyframeIntervalFrames / video_.fps : 2.0;
             AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, std::max(1, static_cast<i32>(gopSeconds + 0.5)));
             AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_COLOR_FORMAT, cf);
-            AMediaFormat_setInt32(f, "bitrate-mode", 1);   // VBR
+            // MediaCodecInfo.EncoderCapabilities: 0 = CQ, 1 = VBR, 2 = CBR. CQ nunca:
+            // ignora a taxa (era o "1 minuto = 1 GB"). CBR quando o encoder do
+            // aparelho não anuncia VBR (o app confere no MediaCodecList).
+            AMediaFormat_setInt32(f, "bitrate-mode", video_.rateMode == 0 ? 2 : 1);
             // Etiqueta de cor: BT.709, faixa limitada, SDR (MediaFormat.COLOR_*).
             AMediaFormat_setInt32(f, "color-standard", video_.color.matrix == 9 ? 6 : video_.color.matrix == 6 ? 4 : 1);
             AMediaFormat_setInt32(f, "color-range", video_.color.fullRange ? 1 : 2);
@@ -412,11 +415,11 @@ private:
         // buffer tem o tamanho de verdade, e o passo nunca e suposto igual a
         // largura.
         if (AMediaCodec_start(video__.codec) != AMEDIA_OK) return fail(Errc::IoError, "encoder de video nao iniciou");
-        AUREA_LOG_INFO("export: %s %s (%s) %ux%u @%.2f %u bps, formato pedido %s", mime,
+        AUREA_LOG_INFO("export: %s %s (%s) %ux%u @%.2f %u bps %s, formato pedido %s", mime,
                        info_.name[0] ? info_.name : "?",
                        info_.acceleration == Acceleration::Hardware ? "hardware"
                        : info_.acceleration == Acceleration::Software ? "SOFTWARE" : "aceleracao desconhecida",
-                       video_.width, video_.height, video_.fps, video_.bitrateBps,
+                       video_.width, video_.height, video_.fps, video_.bitrateBps, video_.rateMode == 0 ? "CBR" : "VBR",
                        colorFormat_ == kColorFormatNv12 ? "NV12" : "I420");
         return OkStatus;
     }

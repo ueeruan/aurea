@@ -22,7 +22,6 @@ private struct CommandHit: Identifiable {
     let category: String
     let requires: String
     var effect: UInt32?
-    var preset: PanelPresetEntry?
 }
 
 @MainActor
@@ -32,7 +31,6 @@ struct CommandSearchView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var effectPrefs = FxEffectPrefs()
     @State private var favorites = Set(UserDefaults.standard.stringArray(forKey: "aurea.commands.favorites") ?? [])
-    @State private var presetFavorites = Set(UserDefaults.standard.stringArray(forKey: "presetFavorites") ?? [])
     @State private var query = ""
     @State private var category = "Tudo"
     @State private var hits: [CommandHit] = []
@@ -75,14 +73,12 @@ struct CommandSearchView: View {
         case "Favoritos": return AureaText.t("edt_cmd_favorites")
         case "Ações": return AureaText.t("edt_cmd_actions")
         case "Efeitos": return AureaText.t("panel_efeitos")
-        case "Presets": return AureaText.t("panel_presets")
         default: return id
         }
     }
 
     private func favorite(_ hit: CommandHit) -> Bool {
         if let effect = hit.effect { return effectPrefs.isFavorite(effect) }
-        if let preset = hit.preset { return presetFavorites.contains(preset.id) }
         return favorites.contains(hit.id)
     }
     private var results: [CommandHit] {
@@ -111,7 +107,7 @@ struct CommandSearchView: View {
                 .accessibilityIdentifier("commandSearchField")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(["Tudo", "Favoritos", "Ações", "Efeitos", "Presets"], id: \.self) { name in
+                    ForEach(["Tudo", "Favoritos", "Ações", "Efeitos"], id: \.self) { name in
                         Button { category = name } label: {
                             Text(categoryLabel(name)).font(.aurea(size: 13)).padding(.horizontal, 12).frame(minHeight: 44)
                                 .background(category == name ? AureaColors.accentDim : AureaColors.chip, in: Capsule())
@@ -161,20 +157,20 @@ struct CommandSearchView: View {
         hits += model.effectCatalog.filter { $0.typeId != fxEffectTypeId("aurea.motion.oscillate") }.map {
             CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: AureaText.t("edt_cmd_add_effect", $0.category), search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : $0.typeId == fxEffectTypeId("aurea.shape3d.layout") ? "shape3d" : "selection", effect: $0.typeId)
         }
-        hits += PanelPresetEntry.loadAll().map {
-            CommandHit(id: "preset:\($0.id)", title: $0.name, detail: AureaText.t("edt_cmd_open_preset", $0.kind.label), search: fxNormalizeSearch("\($0.name) \($0.kind.rawValue) preset"), category: "Presets", requires: $0.kind == .text ? "text" : "single", preset: $0)
+        // Os presets saíram da busca (o navegador de presets não tem mais entrada);
+        // máscara, legendas e rastreio de câmera chegam como FERRAMENTAS-EFEITO
+        // (EffectsBrowser.swift): o toque abre a ferramenta.
+        hits += FxEffectTool.allCases.map { tool in
+            CommandHit(id: "tool:" + tool.key, title: tool.label,
+                       detail: AureaText.t("edt_cmd_add_effect", fxEffectGroupOf(fxToolCatalogItem(tool)).label),
+                       search: fxNormalizeSearch(tool.label + " " + tool.keywords), category: "Efeitos", requires: "selection")
         }
     }
 
     private func toggleFavorite(_ hit: CommandHit) {
         if let effect = hit.effect { effectPrefs.toggleFavorite(effect); return }
-        if let preset = hit.preset {
-            if presetFavorites.contains(preset.id) { presetFavorites.remove(preset.id) } else { presetFavorites.insert(preset.id) }
-            UserDefaults.standard.set(Array(presetFavorites), forKey: "presetFavorites")
-        } else {
-            if favorites.contains(hit.id) { favorites.remove(hit.id) } else { favorites.insert(hit.id) }
-            UserDefaults.standard.set(Array(favorites), forKey: "aurea.commands.favorites")
-        }
+        if favorites.contains(hit.id) { favorites.remove(hit.id) } else { favorites.insert(hit.id) }
+        UserDefaults.standard.set(Array(favorites), forKey: "aurea.commands.favorites")
     }
 
     private func execute(_ hit: CommandHit) {
@@ -189,9 +185,8 @@ struct CommandSearchView: View {
             effectPrefs.addRecent(effect); model.refreshModel(force: true); model.openPanel(.effects)
             return
         }
-        if let preset = hit.preset {
-            model.presetsOpenKind = preset.kind.rawValue; model.presetsOpenSearch = preset.name; model.openPanel(.presets)
-            return
+        if let tool = FxEffectTool.allCases.first(where: { "tool:" + $0.key == hit.id }) {
+            fxOpenEffectTool(tool, in: model); return
         }
         let layer = model.primarySelection
         switch hit.id {
@@ -211,14 +206,12 @@ struct CommandSearchView: View {
         case "audio": model.openPanel(.audio)
         case "transform": model.openPanel(.transform)
         case "text": model.openTextContentEditor()
-        case "mask": model.openPanel(.mask)
         case "effects": model.openPanel(.effects)
         case "appearance": model.openPanel(.appearance)
         case "tracking": model.openPanel(.tracking)
         case "environment": model.openPanel(.layer3D)
         case "particles": model.openPanel(.particles)
         case "vector": model.openPanel(.vector)
-        case "presets": model.openPanel(.presets)
         case "precompose": model.groupSelection()
         case "enter_precomp": if let layer { model.openGroup(layer) }
         case "marker": model.toggleMarker()
@@ -230,7 +223,6 @@ struct CommandSearchView: View {
         case "add_null": model.addNull(threeD: false)
         case "add_null3d": model.addNull(threeD: true)
         case "add_camera": model.addCamera()
-        case "captions": model.openPanel(.captions)
         case "project_settings": model.showProjectSettings = true
         case "search_layers": shell.sheet = .searchLayers
         case "undo": model.undo()

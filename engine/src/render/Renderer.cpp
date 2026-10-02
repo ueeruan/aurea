@@ -543,6 +543,7 @@ Mat4 comp_view_projection_frac(const Composition& comp, f64 time, u32 w, u32 h) 
 } // namespace
 
 f32 camera_fov_deg_at(const Layer& camera, f64 localFrame) noexcept { return camera_fov_frac(camera, localFrame); }
+scene3d::SceneCamera comp_camera(const Composition& comp, FrameIndex time, u32 w, u32 h) noexcept { return camera_for(comp, time, w, h); }
 
 namespace {
 /// Raio × caixa (slab): entra antes de `limit`?
@@ -582,12 +583,10 @@ bool ray_hits_triangle(Vec3 o, Vec3 d, Vec3 a, Vec3 b, Vec3 c, f32& t) noexcept 
 }
 } // namespace
 
-bool pick_scene_point(const Composition& comp, FrameIndex time, f32 compX, f32 compY,
-                      std::shared_ptr<const scene3d::SceneAsset> (*lookup)(void* ctx, AssetId id), void* ctx,
-                      Vec3& outWorld) noexcept {
-    if (!lookup || !std::isfinite(compX) || !std::isfinite(compY)) return false;
-    const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
-    const scene3d::SceneCamera cam = camera_for(comp, time, w, h);
+bool scene_ray(const scene3d::SceneCamera& cam, u32 width, u32 height, f32 compX, f32 compY,
+               Vec3& origin, Vec3& dir) noexcept {
+    if (!std::isfinite(compX) || !std::isfinite(compY)) return false;
+    const u32 w = std::max(1u, width), h = std::max(1u, height);
     // px da composição → clip, desfazendo o enquadramento da fonte rastreada
     // (afim no plano x/y do clip; identidade numa câmera comum).
     f32 nx = 2.0f * compX / static_cast<f32>(w) - 1.0f, ny = 2.0f * compY / static_cast<f32>(h) - 1.0f;
@@ -605,53 +604,69 @@ bool pick_scene_point(const Composition& comp, FrameIndex time, f32 compX, f32 c
     const Mat4& v = cam.view;
     const Vec3 ax{v.col[0].x, v.col[1].x, v.col[2].x}, ay{v.col[0].y, v.col[1].y, v.col[2].y},
                az{v.col[0].z, v.col[1].z, v.col[2].z};
-    const Vec3 dir = (ax * (nx * aspect * t) + ay * (ny * t) + az).normalized();
-    const Vec3 origin = cam.position;
+    dir = (ax * (nx * aspect * t) + ay * (ny * t) + az).normalized();
+    origin = cam.position;
+    return std::isfinite(dir.x) && std::isfinite(dir.y) && std::isfinite(dir.z);
+}
+
+bool ray_hits_model_layer(const Composition& comp, const Layer& l, FrameIndex time, const scene3d::SceneAsset& asset,
+                          Vec3 origin, Vec3 dir, f32& best) noexcept {
+    scene3d::SceneInstance inst;
+    place_model(comp, l, asset, static_cast<f64>(time.value), inst);
+    bool any = false;
+    std::vector<Vec3> pts;
+    for (usize n = 0; n < asset.nodes.size(); ++n) {
+        const scene3d::Node& node = asset.nodes[n];
+        if (node.mesh < 0 || static_cast<usize>(node.mesh) >= asset.meshes.size()) continue;
+        const Mat4 m = inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
+        const bool skinNode = node.skin >= 0 && static_cast<usize>(node.skin) < inst.skinJointOffset.size();
+        for (const scene3d::Primitive& prim : asset.meshes[static_cast<usize>(node.mesh)].primitives) {
+            const bool sk = skinNode && prim.skinned() && prim.joints.size() >= prim.positions.size() * 4
+                         && prim.weights.size() >= prim.positions.size();
+            if (!sk && !ray_hits_box(origin, dir, prim.bounds.transformed(m), best)) continue;
+            // Pose do quadro: skin na CPU (as mesmas matrizes do render);
+            // morph fica na forma base (aproximação do foco).
+            pts.resize(prim.positions.size());
+            const usize first = sk ? inst.skinJointOffset[static_cast<usize>(node.skin)] : 0;
+            for (usize k = 0; k < prim.positions.size(); ++k) {
+                const Vec3 pos = prim.positions[k];
+                if (!sk) { pts[k] = m.transform_point(pos); continue; }
+                const Vec4 wt = prim.weights[k];
+                const f32 ws[4]{wt.x, wt.y, wt.z, wt.w};
+                Vec3 acc{0, 0, 0};
+                for (usize j = 0; j < 4; ++j) {
+                    const usize joint = first + prim.joints[k * 4 + j];
+                    if (ws[j] <= 0.0f || joint >= inst.jointMatrices.size()) continue;
+                    acc = acc + inst.jointMatrices[joint].transform_point(pos) * ws[j];
+                }
+                pts[k] = inst.world.transform_point(acc);
+            }
+            const usize tris = prim.indices.size() / 3;
+            for (usize k = 0; k < tris; ++k) {
+                const u32 i0 = prim.indices[k * 3], i1 = prim.indices[k * 3 + 1], i2 = prim.indices[k * 3 + 2];
+                if (i0 >= pts.size() || i1 >= pts.size() || i2 >= pts.size()) continue;
+                f32 hit = 0.0f;
+                if (ray_hits_triangle(origin, dir, pts[i0], pts[i1], pts[i2], hit) && hit < best) { best = hit; any = true; }
+            }
+        }
+    }
+    return any;
+}
+
+bool pick_scene_point(const Composition& comp, FrameIndex time, f32 compX, f32 compY,
+                      std::shared_ptr<const scene3d::SceneAsset> (*lookup)(void* ctx, AssetId id), void* ctx,
+                      Vec3& outWorld) noexcept {
+    if (!lookup) return false;
+    const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
+    Vec3 origin, dir;
+    if (!scene_ray(camera_for(comp, time, w, h), w, h, compX, compY, origin, dir)) return false;
     f32 best = std::numeric_limits<f32>::max();
     const OrderedIds<LayerId>& order = comp.order();
-    std::vector<Vec3> pts;
     for (u32 i = 0; i < order.size(); ++i) {
         const Layer* l = comp.layer(order.at(i));
         if (!l || !l->visible || !l->contains_time(time) || l->kind != LayerKind::Model3D) continue;
         const std::shared_ptr<const scene3d::SceneAsset> asset = lookup(ctx, l->model.scene);
-        if (!asset) continue;
-        scene3d::SceneInstance inst;
-        place_model(comp, *l, *asset, static_cast<f64>(time.value), inst);
-        for (usize n = 0; n < asset->nodes.size(); ++n) {
-            const scene3d::Node& node = asset->nodes[n];
-            if (node.mesh < 0 || static_cast<usize>(node.mesh) >= asset->meshes.size()) continue;
-            const Mat4 m = inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
-            const bool skinNode = node.skin >= 0 && static_cast<usize>(node.skin) < inst.skinJointOffset.size();
-            for (const scene3d::Primitive& prim : asset->meshes[static_cast<usize>(node.mesh)].primitives) {
-                const bool sk = skinNode && prim.skinned() && prim.joints.size() >= prim.positions.size() * 4
-                             && prim.weights.size() >= prim.positions.size();
-                if (!sk && !ray_hits_box(origin, dir, prim.bounds.transformed(m), best)) continue;
-                // Pose do quadro: skin na CPU (as mesmas matrizes do render);
-                // morph fica na forma base (aproximação do foco).
-                pts.resize(prim.positions.size());
-                const usize first = sk ? inst.skinJointOffset[static_cast<usize>(node.skin)] : 0;
-                for (usize k = 0; k < prim.positions.size(); ++k) {
-                    const Vec3 pos = prim.positions[k];
-                    if (!sk) { pts[k] = m.transform_point(pos); continue; }
-                    const Vec4 wt = prim.weights[k];
-                    const f32 ws[4]{wt.x, wt.y, wt.z, wt.w};
-                    Vec3 acc{0, 0, 0};
-                    for (usize j = 0; j < 4; ++j) {
-                        const usize joint = first + prim.joints[k * 4 + j];
-                        if (ws[j] <= 0.0f || joint >= inst.jointMatrices.size()) continue;
-                        acc = acc + inst.jointMatrices[joint].transform_point(pos) * ws[j];
-                    }
-                    pts[k] = inst.world.transform_point(acc);
-                }
-                const usize tris = prim.indices.size() / 3;
-                for (usize k = 0; k < tris; ++k) {
-                    const u32 i0 = prim.indices[k * 3], i1 = prim.indices[k * 3 + 1], i2 = prim.indices[k * 3 + 2];
-                    if (i0 >= pts.size() || i1 >= pts.size() || i2 >= pts.size()) continue;
-                    f32 hit = 0.0f;
-                    if (ray_hits_triangle(origin, dir, pts[i0], pts[i1], pts[i2], hit) && hit < best) best = hit;
-                }
-            }
-        }
+        if (asset) (void)ray_hits_model_layer(comp, *l, time, *asset, origin, dir, best);
     }
     if (!(best < std::numeric_limits<f32>::max())) return false;
     outWorld = origin + dir * best;
@@ -752,6 +767,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     posterizeType_ = effects.find_key(effect_keys::kPosterizeTime);
     echoType_ = effects.find_key(effect_keys::kEchoTrail);
     rgbTimeType_ = effects.find_key(effect_keys::kTimeWarpRgb);
+    motionDetectType_ = effects.find_key(effect_keys::kMotionDetect);
     if (const Status s = shaders_.initialize(backend); !s.ok()) {
         shaders_.shutdown();
         backend_ = nullptr;
@@ -1277,15 +1293,34 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             mattes.push_back(l->matteSource.pack());
         }
     }
+    // Camadas lidas como IMAGEM por um efeito de outra (o mapa do Mapa de
+    // deslocamento): entram no quadro mesmo com o olho desligado; aí só
+    // servem de entrada (como a matte), não desenham por conta própria.
+    std::vector<u64> inputLayers;
+    if (effects_) {
+        for (u32 i = 0; i < n; ++i) {
+            const Layer* l = comp.layer(order.at(i));
+            if (!l || !l->contains_time(time)) continue;
+            for (const EffectInstance& inst : l->effects) {
+                const Effect* fx = inst.enabled ? effects_->find(inst.type) : nullptr;
+                const i32 k = fx ? fx->input_layer_param() : -1;
+                if (k < 0 || static_cast<u32>(k) >= inst.params.size()) continue;
+                const u64 ref = inst.params[static_cast<u32>(k)].constant.ref;
+                if (ref && ref != order.at(i).pack()) inputLayers.push_back(ref);
+            }
+        }
+    }
     for (u32 i = 0; i < n; ++i) {
         const LayerId id = order.at(i);
         const Layer* l = comp.layer(id);
         if (!l || !l->contains_time(time)) continue;
         const bool isMatte = std::find(mattes.begin(), mattes.end(), id.pack()) != mattes.end();
-        if (!l->visible && !isMatte) continue;
+        const bool isInput = std::find(inputLayers.begin(), inputLayers.end(), id.pack()) != inputLayers.end();
+        if (!l->visible && !isMatte && !isInput) continue;
         // Guia: referência de trabalho no editor, nunca no arquivo final.
         if (l->guide && settings.finalQuality) continue;
-        if (anySolo && !l->solo && !isMatte) continue;
+        if (anySolo && !l->solo && !isMatte && !isInput) continue;
+        const bool inputOnly = isInput && (!l->visible || (anySolo && !l->solo));
         // POSTERIZAR TEMPO (Fase 7.3 §26): o tempo da camada é travado numa
         // taxa menor ANTES de tudo. Trava o TEMPO DA TIMELINE, não o "tempo
         // local": quem decide o quadro do vídeo é `source_frame(timelineTime)`,
@@ -1313,7 +1348,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
 
         const LayerId rid = render_id(id);
         RenderLayer rl;
-        rl.matteOnly = isMatte;
+        rl.matteOnly = isMatte || inputOnly;
         if (l->matteMode != MatteMode::None && l->matteSource.valid() && l->matteSource.pack() != id.pack()) {
             rl.matteMode = l->matteMode;
             rl.matteId = render_id(l->matteSource).pack();
@@ -2176,6 +2211,19 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // camada não precisa de amostras de matriz.
             rl.temporal.clear();
         }
+        // DETECTAR MOVIMENTO: o atraso (quadros) do primeiro efeito ligado. A
+        // fonte nesse instante é buscada no bloco de vídeo (o decoder); a
+        // comparação acontece na cadeia de efeitos (EffectGraph::build).
+        i64 motionDelay = 0;
+        if (effects_ && motionDetectType_ && l->kind == LayerKind::Video) {
+            const ParameterRegistry* mp = effects_->params(motionDetectType_);
+            for (const EffectInstance& inst : l->effects) {
+                if (!inst.enabled || inst.type != motionDetectType_ || !mp || mp->count() < 1) continue;
+                const f32 d = evaluate_param(l->tracks, inst, 0, mp->at(0), local).v[0];
+                motionDelay = std::isfinite(d) ? std::clamp<i64>(std::llround(d), 1, kMotionDetectMaxDelay) : 1;
+                break;
+            }
+        }
 
         // Partículas (8.2, ParticleScene.cpp): cena 3D, espaço mundo, emissão no
         // nascimento e desfoque por tempo. No espaço da composição a textura
@@ -2321,7 +2369,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                 }
                 DecodeRequest req;
-                i64 requiredTimes[6] = {mediaUs};
+                i64 requiredTimes[8] = {mediaUs};
                 u32 requiredCount = 1;
                 if (nextUs >= 0) requiredTimes[requiredCount++] = nextUs;
                 // Com mistura: primeiro o quadro atual; com ele no cache, o
@@ -2418,6 +2466,42 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (!rl.source.channel[c].frame || !ex) ++out.missingVideoFrames;
                     }
                     rl.source.channelCount = 3;
+                }
+                // DETECTAR MOVIMENTO: a mesma fonte `motionDelay` quadros da
+                // timeline ANTES (no começo do clipe, presa ao primeiro quadro:
+                // sem passado, sem movimento). O cache guarda os dois juntos;
+                // tocando, o quadro de trás acabou de passar pelo decoder.
+                if (motionDelay > 0) {
+                    f64 us = l->source_frame(FrameIndex{layerTime.value - motionDelay}) * 1e6 / fps;
+                    if (const f64 srcFps = streamInfo.fps; srcFps > 0.0 && !streamInfo.preciseFrameTiming) {
+                        us = std::llround(std::floor(us * srcFps / 1e6 + 1e-3) * 1e6 / srcFps);
+                    }
+                    us = std::max(us, 0.0);
+                    if (streamInfo.durationUs > 0)
+                        us = std::min(us, static_cast<f64>(last_source_timestamp(streamInfo, src->frame_duration_us())));
+                    const i64 histUs = static_cast<i64>(std::llround(us));
+                    if (requiredCount < 8) requiredTimes[requiredCount++] = histUs;
+                    // O de trás do PRÓXIMO quadro (um quadro da fonte adiante):
+                    // sem a reserva o cache o despejava e o export voltava ao
+                    // keyframe a cada quadro (o mesmo cuidado do RGB no tempo).
+                    if (requiredCount < 8) requiredTimes[requiredCount++] = histUs + src->frame_duration_us();
+                    bool histExact = false;
+                    rl.source.historyFrame = src->frame_for(histUs, &histExact);
+                    // Preview tocando: não interrompe o decoder para buscar o
+                    // passado (um quadro aproximado serve). Parado, no scrub e
+                    // no export, o decoder vai buscá-lo — depois do atual.
+                    if (!histExact && exact && rl.source.channelCount == 0
+                        && (settings.finalQuality || decodeMode != DecodeMode::Playback)) {
+                        req.targetUs = histUs;
+                        req.mode = DecodeMode::Still;
+                        req.direction = 0;
+                        req.retainPreroll = true;
+                    }
+                    // O export (e o quadro parado) ESPERA o quadro exato:
+                    // comparar com o quadro errado inventaria (ou apagaria)
+                    // movimento. Tocando, o aproximado passa (sem engasgo).
+                    if ((!rl.source.historyFrame || !histExact)
+                        && (settings.finalQuality || decodeMode != DecodeMode::Playback)) ++out.missingVideoFrames;
                 }
                 src->cache().set_required_times(requiredTimes, requiredCount, src->frame_duration_us() / 2);
                 src->request(req);
@@ -2953,6 +3037,8 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
     u64 salt = 0;
     if (f == layer.source.frameB.get()) {
         salt = 0x8000000000000000ull;
+    } else if (f == layer.source.historyFrame.get() && f != layer.source.frame.get()) {
+        salt = 0x4000000000000000ull;   // Detectar movimento: o quadro anterior, textura própria
     } else if (f != layer.source.frame.get()) {
         for (u32 c = 0; c < layer.source.channelCount; ++c) {
             if (f == layer.source.channel[c].frame.get()) { salt = 0x00C0FFEE00ull + c; break; }
@@ -3297,6 +3383,15 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 }
                 // Sem os três quadros (decoder atrasado), a camada sai da fonte
                 // principal: melhor mostrar o quadro atual do que um buraco.
+            }
+            // DETECTAR MOVIMENTO: a fonte no instante anterior, na mesma área e
+            // densidade; a cadeia de efeitos a leva até o efeito.
+            if (layer.source.historyFrame) {
+                const FGTexture past = graph_.create_texture("layer-video-anterior", d);
+                if (build_video_source(layer, layerIndex, w, h, past, frameNumber, layer.source.historyFrame.get())) {
+                    out.history = past;
+                    if (layer.source.historyFrame->hardwareBuffer) framesUsed.push_back(layer.source.historyFrame);
+                }
             }
             // Quadro seguinte da fonte: mistura, movimento de pixels e/ou
             // desfoque vetorial (os dois últimos pelo optical flow, em cache).
@@ -4021,6 +4116,41 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         }
         return true;
     };
+    // Camadas lidas como IMAGEM por efeitos (o mapa do Mapa de deslocamento):
+    // antes de tudo, cada uma sozinha num alvo do tamanho da composição, no
+    // mesmo instante. Só depois de todas desenhadas elas viram entrada — um
+    // mapa que aponta de volta para quem o lê (A↔B) não entra em laço: lá
+    // dentro a outra ainda não existe e o efeito devolve a imagem intacta.
+    std::vector<EffectBuildContext::LayerInput> layerInputs;
+    {
+        std::vector<u64> wanted;
+        for (u32 i = 0; i < snap.plans.size() && i < snap.layers.size(); ++i) {
+            for (const EffectEval& ev : snap.plans[i].evals) {
+                const i32 k = ev.effect ? ev.effect->input_layer_param() : -1;
+                if (k >= 0 && static_cast<u32>(k) < ev.count && ev.values[k].ref) wanted.push_back(ev.values[k].ref);
+            }
+        }
+        for (u32 i = 0; i < snap.layers.size() && !wanted.empty(); ++i) {
+            const RenderLayer& layer = snap.layers[i];
+            if (layer.planeGroup >= 0 || layer.particle.inScene || layer.source.kind == LayerSource::Kind::Adjustment) continue;
+            EffectBuildContext::LayerInput probe;
+            probe.layer = layer.id.pack();
+            bool want = false;
+            for (u64 w : wanted) {
+                const LayerId a = LayerId::unpack(w), b = layer.id;
+                want |= w == probe.layer || ((b.index & 0x40000000u) && a.generation == b.generation
+                                             && (a.index & 0xFFFFu) == (b.index & 0xFFFFu));
+            }
+            if (!want) continue;
+            CompositeDraw d;
+            if (!make_draw(i, d)) continue;
+            const FGTexture t = draw_to_comp(d, compDesc, compW, compH, "camada-de-entrada");
+            if (!t.valid()) continue;
+            probe.image = LayerImage{t, Rect{0.0f, 0.0f, compW, compH}, compDesc.width, compDesc.height};
+            layerInputs.push_back(probe);
+        }
+    }
+    ctx.set_layer_inputs(layerInputs);
     // Track matte: as mattes primeiro, cada uma sozinha num alvo do tamanho
     // da composição (transform, opacidade, máscaras e efeitos dela). Elas não
     // entram na composição por conta própria.

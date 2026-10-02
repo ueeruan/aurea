@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela Exportar (refeita 2026-10-01): qualidade, avancado, render com animador. Chaves exp2_*. -->
+<resources>
+    <string name="exp2_quality_low">منخفضة</string>
+    <string name="exp2_quality_normal">عادية</string>
+    <string name="exp2_quality_high">عالية</string>
+    <string name="exp2_estimated_line">الحجم التقديري ≈ %1$s (%2$s ميغابت/ث)</string>
+    <string name="exp2_format_note">يعمل MP4 على أي جهاز ومشغل وشبكة اجتماعية.</string>
+    <string name="exp2_advanced">متقدم</string>
+    <string name="exp2_codec">الترميز</string>
+    <string name="exp2_bitrate">معدل البت (ميغابت/ث)</string>
+    <string name="exp2_bitrate_auto">تلقائي</string>
+    <string name="exp2_range">المقطع</string>
+    <string name="exp2_rendering">جارٍ تصيير الفيديو</string>
+    <string name="exp2_eta">يتبقى نحو %1$s</string>
+    <string name="exp2_animator_a11y">رسام متحرك بفن البكسل يرسم إطارات الفيديو</string>
+    <string name="exp2_summary">الملخص</string>
+    <string name="exp2_fun_1">نرتب البكسلات…</string>
+    <string name="exp2_fun_2">نعلّم الإطارات الرقص…</string>
+    <string name="exp2_fun_3">نحضّر القهوة لوحدة الرسوميات…</string>
+    <string name="exp2_fun_4">نلمّع كل إطار مفتاحي…</string>
+    <string name="exp2_fun_5">اقتربنا، تماسك قليلًا…</string>
+    <string name="exp2_fun_6">نرسم إطارًا تلو الآخر…</string>
+    <string name="exp2_fun_7">نضبط الألوان…</string>
+    <string name="exp2_fun_8">نجهّز لوح التصوير…</string>
+    <string name="exp2_fun_9">نمزج الصوت بعناية…</string>
+    <string name="exp2_fun_10">نعدّ الإطارات على أصابعنا…</string>
+    <string name="exp2_frames">الإطار %1$s من %2$s · %3$s إطار/ث</string>
+    <!-- Export como imagem (PNG, sequência .zip, GIF) - 2026-10-02 -->
+    <string name="exp2_format_video">فيديو (MP4)</string>
+    <string name="exp2_format_frame">الإطار الحالي (PNG)</string>
+    <string name="exp2_format_sequence">تسلسل PNG ‏(.zip)</string>
+    <string name="exp2_format_gif">GIF</string>
+    <string name="exp2_format_note_frame">الإطار الموجود تحت المؤشر بصيغة PNG. مع خلفية شفافة تبقى الصورة شفافة.</string>
+    <string name="exp2_format_note_sequence">صورة PNG لكل إطار من المقطع، وكلها في ملف ‎.zip واحد.</string>
+    <string name="exp2_format_note_gif">يتكرر بلا توقف، حتى 256 لونًا لكل إطار. مثالي للمقاطع القصيرة.</string>
+    <string name="exp2_resolution_original">الأصلي</string>
+    <string name="exp2_gif_width">عرض GIF</string>
+    <string name="exp2_estimated_size">الحجم التقديري ≈ %1$s</string>
+    <string name="exp2_frames_count">%1$d إطارًا</string>
+    <string name="exp2_rendering_frame">جارٍ إنشاء صورتك</string>
+    <string name="exp2_rendering_sequence">جارٍ إنشاء تسلسل الصور</string>
+    <string name="exp2_rendering_gif">جارٍ إنشاء ملف GIF</string>
+    <string name="exp2_done_frame">الصورة جاهزة</string>
+    <string name="exp2_done_sequence">التسلسل جاهز</string>
+    <string name="exp2_done_gif">ملف GIF جاهز</string>
+    <string name="exp2_saved_pictures">تم الحفظ في الصور/Aurea</string>
+    <string name="exp2_saved_downloads">تم الحفظ في التنزيلات/Aurea</string>
+    <string name="exp2_saved_files">تم الحفظ في تطبيق الملفات، في مجلد Aurea</string>
+    <string name="exp2_share_file">مشاركة</string>
+    <string name="exp2_too_long">المقطع طويل جدًا لهذه الصيغة: اختر عددًا أقل من الإطارات في الثانية أو مقطعًا أقصر.</string>
+</resources>

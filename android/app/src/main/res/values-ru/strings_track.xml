@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="track2_row_moved">Слой перемещён в другую строку</string>
+    <string name="track2_row_joined">Слой добавлен на дорожку</string>
+</resources>

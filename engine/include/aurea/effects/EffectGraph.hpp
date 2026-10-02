@@ -45,6 +45,14 @@ struct EffectStage {
     u32  begin = 0;       ///< faixa em `EffectPlan::evals`
     u32  count = 0;
     f32  margin = 0.0f;   ///< vizinhança que as etapas SEGUINTES leem
+    /// A geometria afim das etapas SEGUINTES (Transform, Oscilar, Agitar... —
+    /// inclusive o que foi dobrado na composição), no plano da saída desta
+    /// etapa. Na montagem a etapa vê `placement.compFromLayer * after`: é
+    /// assim que a imagem DELA chega ao quadro. Sem isto o Motion Tile cobria
+    /// o quadro com a matriz da camada e um Transform depois dele empurrava a
+    /// parede para fora, deixando faixas pretas.
+    Mat4 after = Mat4::identity();
+    bool hasAfter = false;
 };
 
 /// Máximo de operações num passe de cor fundido (casa com MAX_OPS do shader).

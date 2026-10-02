@@ -30,6 +30,7 @@
 #include "aurea/project/Presets.hpp"
 #include "aurea/project/ProjectPackage.hpp"
 #include "aurea/export/ExportSink.hpp"
+#include "aurea/export/ImageEncode.hpp"
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
@@ -675,6 +676,11 @@ public:
     std::string playback_report() noexcept;
     void set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) noexcept;
     [[nodiscard]] u32 query_scene_guides(f32* lines, u32 capacity) noexcept;
+    /// Cena 3D: a camada 3D visível sob o ponto (px da composição), pelo raio da
+    /// câmera de navegação contra o corpo real (plano da caixa ou triângulos do
+    /// modelo), a mais perto ganha; sem corpo ali, a origem mais perto na tela
+    /// até `radius` px. 0 = nada.
+    [[nodiscard]] u64 scene_pick(f32 compX, f32 compY, f32 radius) noexcept;
 
     /// Remapeamento de tempo: ligar cria a curva equivalente ao tempo atual
     /// (nada muda até editar); desligar volta à velocidade (a curva fica guardada).
@@ -1087,6 +1093,16 @@ public:
     /// abrindo espaço e a fita fechando em seguida — reordenar os cortes
     /// arrastando. Só vale em linha magnética, em trecho com fonte e destravado.
     bool reorder_clip(u64 layerId, i64 targetFrame) noexcept;
+    /// Arrasto VERTICAL de UM trecho (como no Alight Motion: cada fileira é
+    /// uma camada) — só ele anda, nunca a linha inteira. Um passo de desfazer.
+    /// `mode` 0 = fileira própria logo ACIMA da fileira de `anchorId` (acima do
+    /// trecho mais alto da linha dele); `anchorId` 0 = no fundo da pilha.
+    /// `mode` 1 = ENTRAR na linha de `anchorId` (logo abaixo do trecho mais
+    /// alto dela) se couber no tempo sem sobrepor ninguém; não cabendo, vira
+    /// uma fileira própria nesse mesmo lugar. Sair de uma linha compartilhada
+    /// dá à camada uma linha só dela; numa linha MAGNÉTICA, o buraco que ela
+    /// deixou fecha (como no ripple). false = recusado ou nada mudou.
+    bool move_layer_to_row(u64 layerId, u64 anchorId, i32 mode) noexcept;
     /// Exclui as camadas e fecha só os buracos que a exclusão criou (um passo
     /// de desfazer). Vale em qualquer modo.
     bool ripple_delete(const u64* ids, u32 count) noexcept;
@@ -1399,6 +1415,16 @@ public:
     };
     [[nodiscard]] ExportProgress export_progress() const noexcept;
 
+    /// Export como IMAGEM (export/ImageEncode.hpp): o quadro do playhead em PNG,
+    /// a sequência de PNGs do trecho num .zip ou o GIF animado. O MESMO
+    /// renderer e os mesmos quadros exatos do vídeo; progresso e cancelamento
+    /// são os do vídeo (`export_progress`, `cancel_export`). Não precisa de
+    /// encoder da plataforma.
+    [[nodiscard]] Status start_image_export(const ImageExportSettings& settings, const char* outputPath) noexcept;
+    /// O plano do export como imagem (dimensões, fps, quadros, alfa) com a
+    /// regra do motor — o que a tela Exportar mostra é o que sai.
+    [[nodiscard]] ImageExportPlan query_image_export_plan(const ImageExportSettings& settings) noexcept;
+
     // =========================================================================
     // Acesso de baixo nível (testes e painel de debug)
     // =========================================================================
@@ -1640,6 +1666,7 @@ private:
     std::atomic<bool> thermalDegrade_{false};
     void export_thread_main() noexcept;
     void export_encoder_main() noexcept;
+    void image_export_thread_main() noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status wait_export_gpu(u64 gpuFrame) noexcept; // renderMutex_ held by caller
     [[nodiscard]] Status write_export_audio(i64 untilSample) noexcept;

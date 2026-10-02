@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="track2_row_moved">लेयर दूसरी पंक्ति में ले जाई गई</string>
+    <string name="track2_row_joined">लेयर ट्रैक में जुड़ गई</string>
+</resources>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeitos: Emulador CRT, Tremor dissolvente e Mapa de deslocamento (nomes, descrições, rótulos). -->
+<resources>
+    <string name="fx_name_crt_emulator">CRT एमुलेटर</string>
+    <string name="fx_desc_stylize_crt_emulator">ट्यूब टीवी जैसी छवि: घुमावदार स्क्रीन, स्कैनलाइन, RGB फ़ॉस्फ़र मास्क, खिसके हुए रंग, ब्लूम, झिलमिलाहट और रोलिंग बार।</string>
+    <string name="fx_name_dissolve_shake">डिज़ॉल्व शेक</string>
+    <string name="fx_desc_glitch_dissolve_shake">लेयर हिलती है और शोर-भरे टुकड़ों में बिखरकर उड़ती और गायब होती है — बिना कीफ़्रेम के अपने आप एनिमेट होता है।</string>
+    <string name="fx_name_displacement_map">डिस्प्लेसमेंट मैप</string>
+    <string name="fx_desc_distort_displacement_map">किसी दूसरी लेयर (मैप) के मानों से पिक्सेल खिसकाता है: हर अक्ष का चैनल और अधिकतम विस्थापन चुनें। लेयर न हो तो छवि खुद मैप बनती है।</string>
+    <string name="fx3_curvatura">वक्रता</string>
+    <string name="fx3_linhas_intensidade">स्कैनलाइन तीव्रता</string>
+    <string name="fx3_linhas_densidade">स्कैनलाइन घनत्व</string>
+    <string name="fx3_mascara">फ़ॉस्फ़र मास्क</string>
+    <string name="fx3_mascara_intensidade">मास्क तीव्रता</string>
+    <string name="fx3_mascara_tamanho">मास्क आकार</string>
+    <string name="fx3_convergencia">अभिसरण</string>
+    <string name="fx3_brilho_bloom">ब्लूम</string>
+    <string name="fx3_raio_brilho">ब्लूम त्रिज्या</string>
+    <string name="fx3_cintilacao">झिलमिलाहट</string>
+    <string name="fx3_faixa_rolando">रोलिंग बार</string>
+    <string name="fx3_velocidade_faixa">बार की गति</string>
+    <string name="fx3_brilho_geral">कुल चमक</string>
+    <string name="fx3o_grade_abertura">एपर्चर ग्रिल</string>
+    <string name="fx3o_mascara_sombra">शैडो मास्क</string>
+    <string name="fx3o_fenda">स्लॉट मास्क</string>
+    <string name="fx3_dissolucao">विलयन</string>
+    <string name="fx3_tamanho_fragmento">टुकड़े का आकार</string>
+    <string name="fx3_transparencia_fragmentos">टुकड़ों की पारदर्शिता</string>
+    <string name="fx3_velocidade_evolucao">विकास की गति</string>
+    <string name="fx3_eixos">अक्ष</string>
+    <string name="fx3_camada_mapa">मैप लेयर</string>
+    <string name="fx3_canal_horizontal">क्षैतिज चैनल</string>
+    <string name="fx3_canal_vertical">ऊर्ध्वाधर चैनल</string>
+    <string name="fx3o_desligado">बंद</string>
+    <string name="fx3_desloc_h_max">अधिकतम क्षैतिज विस्थापन</string>
+    <string name="fx3_desloc_v_max">अधिकतम ऊर्ध्वाधर विस्थापन</string>
+    <string name="fx3_comportamento_mapa">मैप व्यवहार</string>
+    <string name="fx3o_centralizar">केंद्र में</string>
+    <string name="fx3o_esticar">फैलाएँ</string>
+    <string name="fx3o_repetir">टाइल करें</string>
+    <string name="fx3o_repetir_pixels">किनारे के पिक्सेल दोहराएँ</string>
+    <string name="fx3o_envolver">लपेटें</string>
+    <string name="fx3_expandir_saida">आउटपुट बढ़ाएँ</string>
+</resources>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel de efeitos: catalogo "Adicionar efeito", pilha compacta e ferramentas-efeito. -->
+<resources>
+    <string name="fxui_featured">مميزة</string>
+    <string name="fxui_categories">الفئات</string>
+    <string name="fxui_group_color_light">اللون والضوء</string>
+    <string name="fxui_group_blur">التمويه والحدة</string>
+    <string name="fxui_group_distort">التشويه</string>
+    <string name="fxui_group_motion">التحريك والتحويل</string>
+    <string name="fxui_group_stylize">الأسلوب</string>
+    <string name="fxui_group_glitch">خلل رقمي</string>
+    <string name="fxui_group_draw_edge">الرسم والحواف</string>
+    <string name="fxui_group_procedural">إجرائي</string>
+    <string name="fxui_group_matte">القناع والمفتاح</string>
+    <string name="fxui_group_time">الوقت والانتقال</string>
+    <string name="fxui_group_text">النص</string>
+    <string name="fxui_group_3d">ثلاثي الأبعاد</string>
+    <string name="fxui_group_audio">الصوت</string>
+    <string name="fxui_group_utility">أدوات وتعابير</string>
+    <string name="fxui_group_other">أخرى</string>
+    <string name="fxui_tool_captions">ترجمة تلقائية</string>
+    <string name="fxui_tool_camera_track">تتبع الكاميرا</string>
+    <string name="fxui_tool_mask">قناع</string>
+    <string name="fxui_tool_captions_desc">يحوّل كلام الطبقة إلى نص وينشئ ترجمة متزامنة.</string>
+    <string name="fxui_tool_camera_track_desc">يحلل حركة كاميرا الفيديو لوضع عناصر ثلاثية الأبعاد في المشهد.</string>
+    <string name="fxui_tool_mask_desc">يرسم أشكالًا تُظهر أجزاء من الطبقة أو تخفيها.</string>
+    <string name="fxui_tool_badge">أداة</string>
+    <string name="fxui_tool_masks_n">الأقنعة: %1$d</string>
+    <string name="fxui_tool_captions_n">الترجمات: %1$d</string>
+    <string name="fxui_tool_camera_ready">تم تحليل الكاميرا</string>
+    <string name="fxui_tool_remove_masks_q">إزالة كل الأقنعة من هذه الطبقة؟</string>
+    <string name="fxui_tool_remove_captions_q">إزالة الترجمات المُنشأة من هذه الطبقة؟</string>
+    <string name="fxui_a11y_expand">إظهار إعدادات %1$s</string>
+    <string name="fxui_a11y_collapse">إخفاء إعدادات %1$s</string>
+    <string name="fxui_a11y_enable">تشغيل %1$s</string>
+    <string name="fxui_a11y_disable">إيقاف %1$s</string>
+    <string name="fxui_a11y_drag">اسحب %1$s لإعادة الترتيب</string>
+    <string name="fxui_a11y_remove">إزالة %1$s</string>
+    <string name="fxui_a11y_open">فتح %1$s</string>
+    <string name="fxui_a11y_category">فئة %1$s</string>
+    <string name="fxui_back_categories">العودة إلى الفئات</string>
+    <string name="fxui_search_effects">البحث عن تأثيرات</string>
+    <string name="fxui_effect_off">متوقف</string>
+</resources>

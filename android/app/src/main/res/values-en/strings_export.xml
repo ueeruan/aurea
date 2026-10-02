@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela Exportar (refeita 2026-10-01): qualidade, avancado, render com animador. Chaves exp2_*. -->
+<resources>
+    <string name="exp2_quality_low">Low</string>
+    <string name="exp2_quality_normal">Normal</string>
+    <string name="exp2_quality_high">High</string>
+    <string name="exp2_estimated_line">Estimated size ≈ %1$s (%2$s Mbps)</string>
+    <string name="exp2_format_note">MP4 plays on any device, player and social network.</string>
+    <string name="exp2_advanced">Advanced</string>
+    <string name="exp2_codec">Codec</string>
+    <string name="exp2_bitrate">Bitrate (Mbps)</string>
+    <string name="exp2_bitrate_auto">Auto</string>
+    <string name="exp2_range">Range</string>
+    <string name="exp2_rendering">Rendering your video</string>
+    <string name="exp2_eta">About %1$s left</string>
+    <string name="exp2_animator_a11y">Pixel-art animator drawing the frames of your video</string>
+    <string name="exp2_summary">Summary</string>
+    <string name="exp2_fun_1">Lining up the pixels…</string>
+    <string name="exp2_fun_2">Teaching the frames to dance…</string>
+    <string name="exp2_fun_3">Brewing coffee for the GPU…</string>
+    <string name="exp2_fun_4">Polishing every keyframe…</string>
+    <string name="exp2_fun_5">Almost there, hold on tight…</string>
+    <string name="exp2_fun_6">Drawing frame by frame…</string>
+    <string name="exp2_fun_7">Tuning the colors…</string>
+    <string name="exp2_fun_8">Setting up the clapperboard…</string>
+    <string name="exp2_fun_9">Mixing the sound with love…</string>
+    <string name="exp2_fun_10">Counting frames on my fingers…</string>
+    <string name="exp2_frames">Frame %1$s of %2$s · %3$s fps</string>
+    <!-- Export como imagem (PNG, sequência .zip, GIF) - 2026-10-02 -->
+    <string name="exp2_format_video">Video (MP4)</string>
+    <string name="exp2_format_frame">Current frame (PNG)</string>
+    <string name="exp2_format_sequence">PNG sequence (.zip)</string>
+    <string name="exp2_format_gif">GIF</string>
+    <string name="exp2_format_note_frame">The frame under the playhead, as a PNG. With a transparent background, the image stays transparent.</string>
+    <string name="exp2_format_note_sequence">One PNG per frame of the range, all in a single .zip file.</string>
+    <string name="exp2_format_note_gif">Loops forever, up to 256 colors per frame. Best for short clips.</string>
+    <string name="exp2_resolution_original">Original</string>
+    <string name="exp2_gif_width">GIF width</string>
+    <string name="exp2_estimated_size">Estimated size ≈ %1$s</string>
+    <string name="exp2_frames_count">%1$d frames</string>
+    <string name="exp2_rendering_frame">Creating your image</string>
+    <string name="exp2_rendering_sequence">Creating the image sequence</string>
+    <string name="exp2_rendering_gif">Creating your GIF</string>
+    <string name="exp2_done_frame">Image ready</string>
+    <string name="exp2_done_sequence">Sequence ready</string>
+    <string name="exp2_done_gif">GIF ready</string>
+    <string name="exp2_saved_pictures">Saved to Pictures/Aurea</string>
+    <string name="exp2_saved_downloads">Saved to Downloads/Aurea</string>
+    <string name="exp2_saved_files">Saved in the Files app, in the Aurea folder</string>
+    <string name="exp2_share_file">Share</string>
+    <string name="exp2_too_long">Range too long for this format: pick fewer frames per second or a shorter range.</string>
+</resources>

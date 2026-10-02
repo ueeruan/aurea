@@ -18,6 +18,7 @@
 #include "aurea/project/FileIO.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/text/Captions.hpp"
+#include "aurea/text/TextTransform.hpp"
 
 #if defined(AUREA_TEST_VULKAN)
 #include "VulkanBackend.hpp"
@@ -746,6 +747,59 @@ AUREA_TEST(Stability, LayerReferencesSurviveReopenAfterReorderAndDelete) {
     remove_family(path);
 }
 
+// O Mapa de deslocamento guarda a camada-mapa como REFERÊNCIA: depois de
+// apagar uma camada no meio e reabrir (ids refeitos), continua apontando
+// para a mesma camada — e o índice que a UI mostra acompanha.
+AUREA_TEST(Stability, DisplacementMapLayerSurvivesReopen) {
+    const std::string path = test_path("mapa_deslocamento");
+    remove_family(path);
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, "mapa").ok());
+    Project* p = e.project();
+    Composition* comp = p->timeline().composition(p->timeline().current());
+    const LayerId gone = comp->add_layer(LayerKind::Shape, "apagada");
+    const LayerId map = comp->add_layer(LayerKind::Shape, "mapa");
+    const LayerId host = comp->add_layer(LayerKind::Shape, "alvo");
+    comp->remove_layer(gone);   // buraco nos índices: reabrir remapeia
+    Layer* h = comp->layer(host);
+    EffectInstance fx;
+    fx.id = h->alloc_effect_id();
+    fx.type = effect_type_id(effect_keys::kDisplacementMap);
+    initialize_instance(fx, *e.effects().params(fx.type));
+    AUREA_CHECK_NEAR(fx.params[0].constant.v[0], -1.0, 1e-6);   // nenhuma camada = a própria
+    h->effects.push_back(std::move(fx));
+    Command cmd;
+    cmd.type = CommandType::EffectSetParam;
+    cmd.effect_param.layer = host;
+    cmd.effect_param.effect = EffectId{h->effects.back().id, 0};
+    cmd.effect_param.paramIndex = 0;
+    cmd.effect_param.value = static_cast<f32>(map.index);
+    AUREA_CHECK(e.apply_command(cmd).ok());
+    AUREA_CHECK_EQ(comp->layer(host)->effects.back().params[0].constant.ref, map.pack());
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    e.shutdown();
+
+    Engine f;
+    AUREA_CHECK(f.initialize(headless()).ok());
+    AUREA_CHECK(f.load_project(path.c_str()).ok());
+    const Project* q = f.project();
+    const Composition* c = q->timeline().composition(q->timeline().current());
+    const Layer* alvo = nullptr;
+    LayerId mapId{};
+    c->layers().for_each([&](LayerId id, const Layer& l) {
+        if (l.name == "alvo") alvo = &l;
+        if (l.name == "mapa") mapId = id;
+    });
+    AUREA_CHECK(alvo && mapId.valid());
+    if (alvo && mapId.valid() && !alvo->effects.empty()) {
+        AUREA_CHECK_EQ(alvo->effects[0].params[0].constant.ref, mapId.pack());
+        AUREA_CHECK_NEAR(alvo->effects[0].params[0].constant.v[0], static_cast<f32>(mapId.index), 1e-6);
+    }
+    f.shutdown();
+    remove_family(path);
+}
+
 AUREA_TEST(Stability, AutosaveInsideNestedPrecompReopensTheWholeProject) {
     const std::string path = test_path("precomp_interrupted");
     remove_family(path);
@@ -1364,6 +1418,12 @@ AUREA_TEST(Fuzz, EffectParametersWithWildValuesRenderOnGpu) {
             AUREA_CHECK(!e.apply_command(effect_add(*layer,reg.at(t).type_id())).ok());
             scene3d::Text3DSpec text;text.content="F";
             auto added=e.add_text3d(text);AUREA_CHECK(added.ok());if(!added.ok())continue;
+            targetLayer=*added;
+        }
+        if(reg.at(t).type_id()==effect_type_id(text::kTransformEffect)||reg.at(t).type_id()==effect_type_id(text::kAnimatorEffect)){
+            // Text Transform / Text Animator só valem em texto: recusados no vídeo, testados numa camada de texto.
+            AUREA_CHECK(!e.apply_command(effect_add(*layer,reg.at(t).type_id())).ok());
+            auto added=e.add_text("Aurea");AUREA_CHECK(added.ok());if(!added.ok())continue;
             targetLayer=*added;
         }
         if(reg.at(t).type_id()==effect_type_id(effect_keys::kShape3DLayout)){

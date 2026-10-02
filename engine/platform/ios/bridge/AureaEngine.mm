@@ -28,6 +28,7 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
+#include "aurea/export/BitratePolicy.hpp"
 #include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
@@ -302,6 +303,16 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 
 - (float)clampPinchFactor:(float)factor scaleX:(float)x scaleY:(float)y scaleZ:(float)z threeD:(BOOL)threeD {
     return aurea::clamp_pinch_factor(factor, x, y, z, threeD);
+}
+
+- (float)clampPinchFactor3D:(float)factor kind:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z {
+    return aurea::clamp_pinch_factor_3d(factor, aurea::Vec3{x, y, z}, aurea::scale_z_follows_x(static_cast<aurea::LayerKind>(kind)));
+}
+
+- (NSArray<NSNumber*>*)gestureScale3D:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z axis:(int)axis factor:(float)factor {
+    const aurea::Vec3 s = aurea::gesture_scale_3d(aurea::Vec3{x, y, z}, axis, factor,
+                                                  aurea::scale_z_follows_x(static_cast<aurea::LayerKind>(kind)));
+    return @[@(s.x), @(s.y), @(s.z)];
 }
 
 - (instancetype)initWithCacheDirectory:(NSString*)cacheDirectory
@@ -1001,6 +1012,11 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 - (BOOL)reorderClip:(long long)layerId toFrame:(int64_t)targetFrame {
     auto* e = self.engine;
     return e && e->reorder_clip(static_cast<aurea::u64>(layerId), static_cast<aurea::i64>(targetFrame));
+}
+
+- (BOOL)moveLayer:(long long)layerId toRowOf:(long long)anchorId mode:(int)mode {
+    auto* e = self.engine;
+    return e && e->move_layer_to_row(static_cast<aurea::u64>(layerId), static_cast<aurea::u64>(anchorId), static_cast<aurea::i32>(mode));
 }
 
 // =============================================================================
@@ -1862,6 +1878,10 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 }
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance {
     if (auto* e = self.engine) e->set_scene_editor(enabled != NO, yaw, pitch, distance);
+}
+- (long long)scenePickX:(float)x y:(float)y radius:(float)radius {
+    auto* e = self.engine;
+    return e ? static_cast<long long>(e->scene_pick(x, y, radius)) : 0;
 }
 - (NSArray<NSNumber*>*)sceneGuides {
     float lines[256 * 5]{};
@@ -3367,6 +3387,22 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent {
+    return [self startExportTo:path codec:codec height:height fps:fps bitrateMbps:bitrateMbps
+             audioBitrateKbps:audioBitrateKbps aiUpscale:aiUpscale trimToContent:trimToContent quality:1];
+}
+
+- (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps
+                       codec:(AureaExportCodec)codec quality:(uint32_t)quality
+                  customMbps:(uint32_t)customMbps {
+    return aurea::export_video_bitrate_bps(width, height, fps, static_cast<aurea::ExportCodec>(codec),
+                                           static_cast<aurea::ExportQuality>(std::min<uint32_t>(quality, 2u)), customMbps);
+}
+
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+              quality:(uint32_t)quality {
     auto* e = self.engine;
     if (!e) return NO;
     aurea::ExportSettings settings;
@@ -3379,6 +3415,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     settings.audioBitrateKbps = audioBitrateKbps;
     settings.aiUpscale = aiUpscale;
     settings.trimToContent = trimToContent != NO;
+    settings.quality = std::min<uint32_t>(quality, 2u);
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
     return e->start_export(settings, out.c_str()).ok() ? YES : NO;
@@ -3386,6 +3423,40 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 
 - (void)cancelExport {
     if (auto* e = self.engine) (void)e->cancel_export();
+}
+
+static aurea::ImageExportSettings AureaImageSettings(uint32_t format, uint32_t shortSide, uint32_t maxWidth, double fps,
+                                                     BOOL trimToContent) {
+    aurea::ImageExportSettings s;
+    s.format = static_cast<aurea::ImageExportFormat>(std::min<uint32_t>(format, 2u));
+    s.shortSide = shortSide;
+    s.maxWidth = maxWidth;
+    s.fps = fps > 0.0 ? fps : 0.0;
+    s.trimToContent = trimToContent != NO;
+    return s;
+}
+
+- (int32_t)startImageExportTo:(NSString*)path format:(uint32_t)format shortSide:(uint32_t)shortSide
+                     maxWidth:(uint32_t)maxWidth fps:(double)fps trimToContent:(BOOL)trimToContent {
+    auto* e = self.engine;
+    if (!e) return static_cast<int32_t>(aurea::Errc::InvalidState);
+    const std::string out = to_std(path);
+    return e->start_image_export(AureaImageSettings(format, shortSide, maxWidth, fps, trimToContent), out.c_str()).raw();
+}
+
+- (nullable NSDictionary<NSString*, NSNumber*>*)imageExportPlan:(uint32_t)format shortSide:(uint32_t)shortSide
+                                                        maxWidth:(uint32_t)maxWidth fps:(double)fps
+                                                   trimToContent:(BOOL)trimToContent {
+    auto* e = self.engine;
+    if (!e) return nil;
+    const aurea::ImageExportSettings s = AureaImageSettings(format, shortSide, maxWidth, fps, trimToContent);
+    const aurea::ImageExportPlan plan = e->query_image_export_plan(s);
+    if (plan.width == 0) return nil;
+    return @{
+        @"width": @(plan.width), @"height": @(plan.height), @"frames": @(plan.frames), @"alpha": @(plan.alpha),
+        @"bytes": @(aurea::estimate_image_export_bytes(s.format, plan.width, plan.height, plan.frames, plan.alpha)),
+        @"fps": @(plan.fps),
+    };
 }
 
 @end

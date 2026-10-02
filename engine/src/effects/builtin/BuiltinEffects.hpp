@@ -52,6 +52,10 @@ void register_particular_effect(EffectRegistry& r);
 void register_twitch_effect(EffectRegistry& r);
 /// Shape 3D Layout (PatternEffects.cpp): o Text 3D Layout das formas 3D.
 void register_shape3d_layout_effect(EffectRegistry& r);
+/// Detectar movimento (MotionDetectEffect.cpp). Sempre no fim.
+void register_motion_detect_effect(EffectRegistry& r);
+/// Emulador CRT, Tremor dissolvente e Mapa de deslocamento (RetroDisplaceEffects.cpp).
+void register_retro_displace_effects(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///
@@ -96,7 +100,15 @@ struct BlurRequest {
     f32  sigmaY = 0.0f;
     bool repeatEdges = false;
     Rect outRegion{};
+    /// `outRegion` foi RECORTADA ao quadro visível (spread_region cortou): a
+    /// redução e o passe horizontal trabalham numa área maior (saída + 3σ),
+    /// senão a borda do recorte lê transparente e escurece.
+    bool clippedRegion = false;
     const char* label = "blur";
+    /// Reduz a imagem por 2 enquanto o sigma passar disto (texels). 8 é o
+    /// padrão; halos largos e suaves (lóbulos do Deep Glow) aceitam menos —
+    /// o borrão sai igual e cada passe custa uma fração.
+    f32 maxSigmaTexels = 8.0f;
 };
 
 [[nodiscard]] Status build_gaussian(EffectBuildContext& ctx, const LayerImage& input,

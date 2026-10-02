@@ -461,7 +461,10 @@ struct PreviewMetalView: UIViewRepresentable {
             startPosition = vector(model.detail["position"])
             startScale = vector(model.detail["scale"])
             startRotation = vector(model.detail["rotation"])
+            startKind = Int32(StageGeom.layerKind(model.detail))
         }
+        /// Tipo da camada no toque: a regra de profundidade do motor (Z de conteúdo acompanha X).
+        private var startKind: Int32 = 0
         private var previewBasis: [NSNumber] = []
         private var pinchCenter = CGPoint.zero
         private var pinchPanActive = false
@@ -728,7 +731,8 @@ struct PreviewMetalView: UIViewRepresentable {
             } else { stageMode = .idle }
         }
         private func clampScale(_ value: Float) -> Float {
-            model.engine.clampPinchFactor(value, scaleX: startScale.x, scaleY: startScale.y, scaleZ: startScale.z, threeD: pinchThreeD)
+            pinchThreeD ? model.engine.clampPinchFactor3D(value, kind: startKind, scaleX: startScale.x, scaleY: startScale.y, scaleZ: startScale.z)
+                : model.engine.clampPinchFactor(value, scaleX: startScale.x, scaleY: startScale.y, scaleZ: startScale.z, threeD: false)
         }
         private func stepEdit(_ point: CGPoint, view: UIView) {
             guard let id = model.primarySelection else { return }
@@ -761,8 +765,11 @@ struct PreviewMetalView: UIViewRepresentable {
                 }
             }
             // Capture values outside the mutating tracker call (Swift exclusivity).
-            let engine = model.engine, scale = startScale, threeD = pinchThreeD
-            guard pinchTracker.update(a, b, clamp: { engine.clampPinchFactor($0, scaleX: scale.x, scaleY: scale.y, scaleZ: scale.z, threeD: threeD) }) else { return }
+            let engine = model.engine, scale = startScale, threeD = pinchThreeD, kind = startKind
+            guard pinchTracker.update(a, b, clamp: {
+                threeD ? engine.clampPinchFactor3D($0, kind: kind, scaleX: scale.x, scaleY: scale.y, scaleZ: scale.z)
+                    : engine.clampPinchFactor($0, scaleX: scale.x, scaleY: scale.y, scaleZ: scale.z, threeD: false)
+            }) else { return }
             var f = pinchTracker.factor
             let degrees = pinchTracker.degrees
             if !pinchRotationActive && abs(degrees) > 4 { pinchRotationActive = true; pinchRotationOffset = degrees < 0 ? -4 : 4 }
@@ -775,7 +782,12 @@ struct PreviewMetalView: UIViewRepresentable {
                 if s != nil { f = clampScale(1 / ref) }
             }
             beginEdit("pinça")
-            if pinchThreeD { model.gizmoSetComponents(id, base: 3, values: [startScale.x * f, startScale.y * f, startScale.z * f]) }
+            // 3D: a profundidade efetiva acompanha (Z gravado é relativo a X no
+            // conteúdo) — multiplicar Z aqui também esticava o volume (fator²).
+            if pinchThreeD {
+                model.gizmoSetComponents(id, base: 3, values: model.engine.gestureScale3D(startKind, scaleX: startScale.x, scaleY: startScale.y,
+                                                                                         scaleZ: startScale.z, axis: 3, factor: f).map(\.floatValue))
+            }
             else { model.setTransform2(3, startScale.x * f, 4, startScale.y * f, layer: id) }
             if pinchRotationActive {
                 // Giro: prende nos múltiplos de 45° (0, 45, 90…) com um tique.
@@ -965,13 +977,11 @@ struct PreviewMetalView: UIViewRepresentable {
                 if gizmoAxis == 3 { gizmoAlong += dx - dy }
                 else if gizmoFacing { gizmoAlong += -dy }
                 else { gizmoAlong += (dx * gizmoHandle.x + dy * gizmoHandle.y) / handleLength }
-                if gizmoAxis == 3 {
-                    let factor = Float(exp(Double(gizmoAlong) / 120))
-                    for i in 0..<3 { out[i] = gizmoScale(out[i] * factor) }
-                } else {
-                    let factor: Float = max(0.01, 1 + Float(gizmoAlong / handleLength))
-                    out[gizmoAxis] = gizmoScale(gizmoBase[gizmoAxis] * factor)
-                }
+                // A regra de profundidade do motor (Z de conteúdo acompanha X):
+                // o volume não estica (GestureMath.hpp).
+                let factor: Float = gizmoAxis == 3 ? Float(exp(Double(gizmoAlong) / 120)) : max(0.01, 1 + Float(gizmoAlong / handleLength))
+                out = model.engine.gestureScale3D(Int32(StageGeom.layerKind(model.detail)), scaleX: gizmoBase.x, scaleY: gizmoBase.y,
+                                                  scaleZ: gizmoBase.z, axis: Int32(gizmoAxis), factor: factor).map { gizmoScale($0.floatValue) }
                 beginEdit(gizmoAxis == 3 ? "escala uniforme" : "escala no eixo \(axisName)")
                 model.gizmoSetComponents(id, base: 3, values: out)
             default:

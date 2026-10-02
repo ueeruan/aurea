@@ -34,6 +34,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 inset;    // xy = meio texel da textura de ENTRADA
     vec4 windowX;  // uv do quadro - 0.5: x = dot(xy, v_uv) + z;  w = meia janela
     vec4 windowY;  // idem em y
+    vec4 box;      // ponto do ladrilho (0..1 = a caixa da layer) → uv da entrada: * xy + zw
 } p;
 
 void main() {
@@ -44,7 +45,7 @@ void main() {
         return;
     }
 
-    vec2 src = v_uv * p.uvMap.xy + p.uvMap.zw;
+    vec2 src = v_uv * p.uvMap.xy + p.uvMap.zw;      // 0..1 = a caixa da layer
     vec2 cellPos = (src - p.tile.zw) / p.tile.xy;   // unidades de ladrilho
 
     vec2 local;
@@ -63,5 +64,7 @@ void main() {
     }
 
     vec2 edge = min(p.inset.xy, vec2(0.5));
-    o_color = texture(u_tex0, clamp(local, edge, 1.0 - edge));
+    // O ladrilho é a CAIXA da layer: a borda transparente que um desfoque
+    // anterior acrescentou à entrada fica fora dele (nada de faixa nas emendas).
+    o_color = texture(u_tex0, clamp(local, edge, 1.0 - edge) * p.box.xy + p.box.zw);
 }

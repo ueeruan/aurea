@@ -2031,3 +2031,104 @@ AUREA_TEST(Engine, MarkersNeverMoveOrRestartPlayback) {
     AUREA_CHECK_EQ(e.read_status().playhead.value, status.playhead.value);
     e.shutdown();
 }
+// "Só dá pra usar 3 objetos nulos" (iOS): cada nulo novo nasce com nome
+// próprio (Nulo, Nulo 2…), fora do ponto de um nulo parado já ali (o palco só
+// pega o de cima de uma pilha) e a fila de comandos entra antes — um desfazer
+// ainda na fila não pode apagar o nulo que acabou de nascer.
+AUREA_TEST(Engine, ManyNullsAreDistinctTappableAndSurviveAQueuedUndo) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1080, 1920, 30.0, nullptr).ok());
+    std::vector<u64> ids;
+    for (int i = 0; i < 6; ++i) {
+        const auto id = e.add_null(i >= 4);
+        AUREA_CHECK(id.ok());
+        if (id.ok()) ids.push_back(*id);
+    }
+    AUREA_CHECK_EQ(ids.size(), static_cast<usize>(6));
+    Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+    std::vector<std::string> names;
+    std::vector<Vec3> spots;
+    for (u64 id : ids) {
+        const Layer* l = c->layer(LayerId::unpack(id));
+        AUREA_CHECK(l && l->kind == LayerKind::Null);
+        if (!l) continue;
+        names.push_back(l->name);
+        spots.push_back(l->transform.position);
+    }
+    AUREA_CHECK(names.size() == 6 && names[0] == "Nulo" && names[1] == "Nulo 2" && names[3] == "Nulo 4");
+    AUREA_CHECK(names.size() == 6 && names[4] == "Nulo 3D" && names[5] == "Nulo 3D 2");
+    AUREA_CHECK(!spots.empty() && std::fabs(spots[0].x - 540.0f) < 0.01f && std::fabs(spots[0].y - 960.0f) < 0.01f);
+    for (usize a = 0; a < spots.size(); ++a)
+        for (usize b = a + 1; b < spots.size(); ++b)
+            AUREA_CHECK(std::fabs(spots[a].x - spots[b].x) >= 8.0f || std::fabs(spots[a].y - spots[b].y) >= 8.0f);
+    // Todas na lista que a UI lê, cada uma na SUA linha da timeline.
+    bridge::LayerRow rows[16]{};
+    char blob[1024]{};
+    AUREA_CHECK_EQ(e.query_layers(rows, 16, blob, sizeof blob), 6u);
+    for (u32 a = 0; a < 6; ++a)
+        for (u32 b = a + 1; b < 6; ++b) AUREA_CHECK(rows[a].trackId != rows[b].trackId);
+    // Desfazer na fila (o botão do iOS só enfileira) e, logo depois, mais um nulo.
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK_EQ(e.submit_commands(&undo, 1, nullptr, 0), 1u);
+    const auto seventh = e.add_null(false);
+    AUREA_CHECK(seventh.ok());
+    // Uma consulta que aplica a fila (a pilha de efeitos) — sem o dreno em
+    // add_null, o desfazer rodaria AQUI e levaria o nulo novo.
+    bridge::LayerEffectRow fx[2]{};
+    char fxNames[128]{};
+    (void)e.query_layer_effects(ids[0], fx, 2, fxNames, sizeof fxNames);
+    AUREA_CHECK_EQ(e.query_layers(rows, 16, blob, sizeof blob), 6u);   // 6 − 1 (desfeito) + 1 (novo)
+    AUREA_CHECK(seventh.ok() && c->layer(LayerId::unpack(*seventh)) != nullptr);
+    e.shutdown();
+}
+
+// Pedido 2026-10-02 (iOS): "vincula mas não mexe" e "o nulo normal faz o objeto
+// vinculado sair da cena". Mesmos comandos das telas
+// (LayerSetParent + LayerSetPosition), com o texto ligado ao 1º e ao 4º nulo,
+// 2D e 3D. O filho não pode pular ao ganhar o pai e tem de seguir o pai.
+AUREA_TEST(Engine, NullParentKeepsChildInPlaceAndDragsItForEveryNull) {
+    // childMode: 0 = texto 2D, 1 = texto feito 3D (o caso da cena 3D).
+    for (int childMode = 0; childMode < 2; ++childMode)
+    for (int threeD = 0; threeD < 2; ++threeD) {
+        for (int which : {0, 3}) {
+            Engine e;
+            AUREA_CHECK(e.initialize(headless_config()).ok());
+            AUREA_CHECK(e.new_project(1080, 1920, 30.0, nullptr).ok());
+            const auto text = e.add_text("ABC");
+            AUREA_CHECK(text.ok());
+            std::vector<u64> nulls;
+            for (int i = 0; i < 4; ++i) { const auto n = e.add_null(threeD != 0); AUREA_CHECK(n.ok()); if (n.ok()) nulls.push_back(*n); }
+            if (!text.ok() || nulls.size() != 4) { e.shutdown(); continue; }
+            Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+            Layer* child = c->layer(LayerId::unpack(*text));
+            AUREA_CHECK(child != nullptr);
+            if (!child) { e.shutdown(); continue; }
+            child->threeD = childMode == 1;
+            const FrameIndex t0{0};
+            auto origin = [&](const Layer& l) {
+                const Mat4 m = (child->threeD || l.threeD || threeD) ? layer_world_3d(*c, l, t0) : layer_world_matrix(*c, l, t0);
+                return m * Vec4{l.transform.anchor.x, l.transform.anchor.y, 0, 1};
+            };
+            const Vec4 before = origin(*child);
+            Command link; link.type = CommandType::LayerSetParent;
+            link.layer_parent.layer = LayerId::unpack(*text);
+            link.layer_parent.parent = LayerId::unpack(nulls[which]);
+            AUREA_CHECK(e.apply_command(link).ok());
+            AUREA_CHECK(child->parent == LayerId::unpack(nulls[which]));
+            const Vec4 linked = origin(*child);
+            const f32 jump = std::max(std::fabs(linked.x - before.x), std::fabs(linked.y - before.y));
+            // Mover o nulo +120 px em X (o arrasto do palco grava a posição).
+            const Layer* n = c->layer(LayerId::unpack(nulls[which]));
+            Command mv; mv.type = CommandType::LayerSetPosition;
+            mv.position.layer = LayerId::unpack(nulls[which]);
+            mv.position.x = n->transform.position.x + 120.0f; mv.position.y = n->transform.position.y; mv.position.z = n->transform.position.z;
+            AUREA_CHECK(e.apply_command(mv).ok());
+            const Vec4 moved = origin(*child);
+            std::printf("    filho %s, nulo %s #%d: pulo %.2f px, seguiu %.2f px\n", childMode ? "3D" : "2D", threeD ? "3D" : "2D", which + 1, jump, moved.x - linked.x);
+            AUREA_CHECK(jump < 0.5f);
+            AUREA_CHECK(std::fabs((moved.x - linked.x) - 120.0f) < 0.5f && std::fabs(moved.y - linked.y) < 0.5f);
+            e.shutdown();
+        }
+    }
+}

@@ -31,4 +31,57 @@ namespace aurea {
     }
     return nonzero ? static_cast<f32>(std::clamp(static_cast<f64>(desired), low, high)) : 1.f;
 }
+
+/// Conteúdo 3D (tudo que não é câmera/luz) GRAVA a escala Z relativa à X: o
+/// mundo usa z × x (Renderer.cpp, layer_matrix_3d_frac). Câmera e luz gravam Z
+/// absoluto.
+[[nodiscard]] inline bool scale_z_follows_x(LayerKind kind) noexcept {
+    return kind != LayerKind::Camera && kind != LayerKind::Light;
+}
+
+/// Modos de `gesture_scale_3d`.
+inline constexpr i32 kGestureScaleUniform = 3;   ///< pinça / gizmo uniforme: tudo × fator
+inline constexpr i32 kGestureScaleFit = 4;       ///< ajustar/preencher: |fator| em X/Y (sinal mantido)
+
+/// Escala 3D de um gesto já no formato GRAVADO, para o volume nunca esticar:
+///  - eixo 0..2: só aquele eixo × `factor`. Em conteúdo, mexer em X deixaria
+///    a profundidade ir junto (z × x), então Z gravado é dividido pelo mesmo
+///    fator — a profundidade efetiva fica onde estava;
+///  - kGestureScaleUniform: X, Y e a profundidade EFETIVA × `factor` (em
+///    conteúdo o Z gravado fica: ele já acompanha X). Antes as UIs também
+///    multiplicavam Z, e a profundidade crescia com fator² — "o zoom estica";
+///  - kGestureScaleFit: X/Y = ±|factor|; a profundidade efetiva segue X.
+/// Fator negativo espelha (régua de escala que passa do zero); zero ou NaN
+/// devolve a escala de partida.
+[[nodiscard]] inline Vec3 gesture_scale_3d(Vec3 start, i32 axis, f32 factor, bool depthFollowsWidth) noexcept {
+    if (!std::isfinite(factor) || factor == 0.0f) return start;
+    auto sgn = [](f32 v) { return v < 0.0f ? -1.0f : 1.0f; };
+    Vec3 s = start;
+    switch (axis) {
+        case 0:
+            s.x = start.x * factor;
+            if (depthFollowsWidth) s.z = start.z / factor;
+            break;
+        case 1: s.y = start.y * factor; break;
+        case 2: s.z = start.z * factor; break;
+        case kGestureScaleUniform:
+            s.x = start.x * factor;
+            s.y = start.y * factor;
+            if (!depthFollowsWidth) s.z = start.z * factor;
+            break;
+        case kGestureScaleFit:
+            s.x = sgn(start.x) * std::fabs(factor);
+            s.y = sgn(start.y) * std::fabs(factor);
+            if (!depthFollowsWidth) s.z = sgn(start.z) * std::fabs(factor);
+            break;
+        default: break;
+    }
+    return s;
+}
+
+/// A mesma pinça, com o limite certo: em conteúdo 3D o Z gravado não muda,
+/// então só X/Y (e o Z de câmera/luz) entram no limite de `clamp_pinch_factor`.
+[[nodiscard]] inline f32 clamp_pinch_factor_3d(f32 desired, Vec3 start, bool depthFollowsWidth) noexcept {
+    return clamp_pinch_factor(desired, start.x, start.y, start.z, !depthFollowsWidth);
+}
 }

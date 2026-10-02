@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="track2_row_moved">Camada movida para outra fileira</string>
+    <string name="track2_row_joined">Camada entrou na linha</string>
+</resources>

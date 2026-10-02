@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fx_name_time_motion_detect">गति पहचान</string>
+    <string name="fx_desc_time_motion_detect">सिर्फ़ वही दिखाता है जो हिला: फ़्रेम की तुलना पिछले फ़्रेम से करके अंतर को चमकाता है।</string>
+    <string name="core2_fx_motion_delay">देरी (फ़्रेम)</string>
+    <string name="core2_fx_offset_darks">गहरे हिस्से उठाएँ</string>
+    <string name="core2_fx_motion_mode">गति</string>
+    <string name="core2_fxo_motion_all">सभी</string>
+    <string name="core2_fxo_motion_brighter">अधिक चमकीला</string>
+    <string name="core2_fxo_motion_darker">अधिक गहरा</string>
+    <string name="core2_fx_cube_file">.cube फ़ाइल</string>
+    <string name="core2_fx_flare_ghosts">आंतरिक प्रतिबिंब</string>
+</resources>

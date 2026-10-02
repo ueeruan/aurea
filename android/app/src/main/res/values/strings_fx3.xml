@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeitos: Emulador CRT, Tremor dissolvente e Mapa de deslocamento (nomes, descrições, rótulos). -->
+<resources>
+    <string name="fx_name_crt_emulator">Emulador CRT</string>
+    <string name="fx_desc_stylize_crt_emulator">A imagem numa TV de tubo: tela curva, linhas de varredura, máscara de fósforo RGB, cores fora de convergência, brilho, cintilação e faixa rolando.</string>
+    <string name="fx_name_dissolve_shake">Tremor dissolvente</string>
+    <string name="fx_desc_glitch_dissolve_shake">A camada treme e se desfaz em fragmentos de ruído que voam e somem — anima sozinho, sem keyframes.</string>
+    <string name="fx_name_displacement_map">Mapa de deslocamento</string>
+    <string name="fx_desc_distort_displacement_map">Desloca os pixels pelo valor de outra camada (o mapa): escolha o canal de cada eixo e o deslocamento máximo. Sem camada, usa a própria imagem.</string>
+    <string name="fx3_curvatura">Curvatura</string>
+    <string name="fx3_linhas_intensidade">Intensidade das linhas</string>
+    <string name="fx3_linhas_densidade">Densidade das linhas</string>
+    <string name="fx3_mascara">Máscara de fósforo</string>
+    <string name="fx3_mascara_intensidade">Intensidade da máscara</string>
+    <string name="fx3_mascara_tamanho">Tamanho da máscara</string>
+    <string name="fx3_convergencia">Convergência</string>
+    <string name="fx3_brilho_bloom">Brilho</string>
+    <string name="fx3_raio_brilho">Raio do brilho</string>
+    <string name="fx3_cintilacao">Cintilação</string>
+    <string name="fx3_faixa_rolando">Faixa rolando</string>
+    <string name="fx3_velocidade_faixa">Velocidade da faixa</string>
+    <string name="fx3_brilho_geral">Brilho geral</string>
+    <string name="fx3o_grade_abertura">Grade de abertura</string>
+    <string name="fx3o_mascara_sombra">Máscara de sombra</string>
+    <string name="fx3o_fenda">Fenda</string>
+    <string name="fx3_dissolucao">Dissolução</string>
+    <string name="fx3_tamanho_fragmento">Tamanho do fragmento</string>
+    <string name="fx3_transparencia_fragmentos">Transparência dos fragmentos</string>
+    <string name="fx3_velocidade_evolucao">Velocidade da evolução</string>
+    <string name="fx3_eixos">Eixos</string>
+    <string name="fx3_camada_mapa">Camada do mapa</string>
+    <string name="fx3_canal_horizontal">Canal horizontal</string>
+    <string name="fx3_canal_vertical">Canal vertical</string>
+    <string name="fx3o_desligado">Desligado</string>
+    <string name="fx3_desloc_h_max">Deslocamento horizontal máx.</string>
+    <string name="fx3_desloc_v_max">Deslocamento vertical máx.</string>
+    <string name="fx3_comportamento_mapa">Comportamento do mapa</string>
+    <string name="fx3o_centralizar">Centralizar</string>
+    <string name="fx3o_esticar">Esticar</string>
+    <string name="fx3o_repetir">Repetir</string>
+    <string name="fx3o_repetir_pixels">Repetir pixels</string>
+    <string name="fx3o_envolver">Envolver</string>
+    <string name="fx3_expandir_saida">Expandir saída</string>
+</resources>

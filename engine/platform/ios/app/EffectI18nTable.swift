@@ -1055,5 +1055,54 @@ enum EffectI18nTable {
     aurea.shape3d.layout|11|seed|fxl_variation_seed|
     aurea.shape3d.layout|12|random|fxl_random|
     aurea.shape3d.layout|13|random_speed|fxl_random_speed|
+    aurea.color.cube_lut|0|file|core2_fx_cube_file|
+    aurea.color.cube_lut|1|mix|fx_intensidade|
+    aurea.light.scene_flare|2|brightness|fx_brilho|
+    aurea.light.scene_flare|3|size|fx_tamanho|
+    aurea.light.scene_flare|4|ghosts|core2_fx_flare_ghosts|
+    aurea.light.scene_flare|5|tint|fx_cor|
+    aurea.time.motion_detect|0|delay_frames|core2_fx_motion_delay|
+    aurea.time.motion_detect|1|brightness|fx_brilho|
+    aurea.time.motion_detect|2|offset_darks|core2_fx_offset_darks|
+    aurea.time.motion_detect|3|saturation|fx_saturacao|
+    aurea.time.motion_detect|4|motion|core2_fx_motion_mode|core2_fxo_motion_all,core2_fxo_motion_brighter,core2_fxo_motion_darker
+    aurea.time.motion_detect|5|mix|fx_mistura|
+    aurea.stylize.crt_emulator|0|curvature|fx3_curvatura|
+    aurea.stylize.crt_emulator|1|scanline_intensity|fx3_linhas_intensidade|
+    aurea.stylize.crt_emulator|2|scanline_density|fx3_linhas_densidade|
+    aurea.stylize.crt_emulator|3|mask_type|fx3_mascara|fxo_none,fx3o_grade_abertura,fx3o_mascara_sombra,fx3o_fenda
+    aurea.stylize.crt_emulator|4|mask_intensity|fx3_mascara_intensidade|
+    aurea.stylize.crt_emulator|5|mask_size|fx3_mascara_tamanho|
+    aurea.stylize.crt_emulator|6|vignette|fx_vinheta|
+    aurea.stylize.crt_emulator|7|convergence|fx3_convergencia|
+    aurea.stylize.crt_emulator|8|bloom|fx3_brilho_bloom|
+    aurea.stylize.crt_emulator|9|bloom_radius|fx3_raio_brilho|
+    aurea.stylize.crt_emulator|10|flicker|fx3_cintilacao|
+    aurea.stylize.crt_emulator|11|rolling_bar|fx3_faixa_rolando|
+    aurea.stylize.crt_emulator|12|roll_speed|fx3_velocidade_faixa|
+    aurea.stylize.crt_emulator|13|noise|fx_ruido|
+    aurea.stylize.crt_emulator|14|brightness|fx3_brilho_geral|
+    aurea.stylize.crt_emulator|15|contrast|fx_contraste|
+    aurea.stylize.crt_emulator|16|mix|fx_mistura|
+    aurea.glitch.dissolve_shake|0|amplitude|fx_amplitude|
+    aurea.glitch.dissolve_shake|1|frequency|fx_frequencia|
+    aurea.glitch.dissolve_shake|2|dissolve|fx3_dissolucao|
+    aurea.glitch.dissolve_shake|3|grain_size|fx3_tamanho_fragmento|
+    aurea.glitch.dissolve_shake|4|scatter|fx_dispersao|
+    aurea.glitch.dissolve_shake|5|randomness|fx_aleatoriedade|
+    aurea.glitch.dissolve_shake|6|fragment_opacity|fx3_transparencia_fragmentos|
+    aurea.glitch.dissolve_shake|7|evolution|fx3_velocidade_evolucao|
+    aurea.glitch.dissolve_shake|8|axes|fx3_eixos|fxo_both,fxo_horizontal,fxo_vertical
+    aurea.glitch.dissolve_shake|9|seed|fx_semente|
+    aurea.glitch.dissolve_shake|10|mix|fx_mistura|
+    aurea.distort.displacement_map|0|map_layer|fx3_camada_mapa|
+    aurea.distort.displacement_map|1|horizontal_channel|fx3_canal_horizontal|fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fxo_alpha,fx3o_desligado
+    aurea.distort.displacement_map|2|vertical_channel|fx3_canal_vertical|fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fxo_luminance,fxo_alpha,fx3o_desligado
+    aurea.distort.displacement_map|3|max_horizontal|fx3_desloc_h_max|
+    aurea.distort.displacement_map|4|max_vertical|fx3_desloc_v_max|
+    aurea.distort.displacement_map|5|map_behavior|fx3_comportamento_mapa|fx3o_centralizar,fx3o_esticar,fx3o_repetir
+    aurea.distort.displacement_map|6|edge_behavior|fx_bordas|fx3o_repetir_pixels,fx3o_envolver
+    aurea.distort.displacement_map|7|expand_output|fx3_expandir_saida|
+    aurea.distort.displacement_map|8|mix|fx_mistura|
     """
 }

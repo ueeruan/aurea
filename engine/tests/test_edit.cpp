@@ -1218,3 +1218,125 @@ AUREA_TEST(MagneticTrack, TheFlagSurvivesSaveAndLoad) {
     AUREA_CHECK(!m.r.e.layer_magnetic_track(m.overlay));
     std::remove(path);
 }
+
+// =============================================================================
+//  Arrasto VERTICAL de um trecho só (beta: "os textos andam todos juntos").
+//  Como no Alight Motion, cada trecho sobe/desce sozinho; a linha não vai junto.
+// =============================================================================
+namespace {
+struct RowRig {
+    EditRig r;
+    u64 t1 = 0, t2 = 0, t3 = 0;
+    RowRig() {
+        t1 = r.comp()->add_layer(LayerKind::Text, "T1").pack();
+        t2 = r.comp()->add_layer(LayerKind::Text, "T2").pack();
+        t3 = r.comp()->add_layer(LayerKind::Text, "T3").pack();
+        for (u64 id : {t1, t2, t3}) r.range(id, 0, 90);
+    }
+    i32 z(u64 id) { return r.comp()->z_index_of(LayerId::unpack(id)); }
+    u32 line(u64 id) { return r.L(id)->trackId; }
+    bool move(u64 id, u64 anchor, i32 mode) { return r.e.move_layer_to_row(id, anchor, mode); }
+};
+} // namespace
+
+AUREA_TEST(MoveToRow, NewLayersEachGetTheirOwnLine) {
+    RowRig g;
+    AUREA_CHECK(g.line(g.t1) != 0u);
+    AUREA_CHECK(g.line(g.t1) != g.line(g.t2));
+    AUREA_CHECK(g.line(g.t2) != g.line(g.t3));
+    AUREA_CHECK(g.line(g.t1) != g.line(g.t3));
+}
+
+AUREA_TEST(MoveToRow, OneOfThreeTextsMovesAloneAndUndoRestores) {
+    RowRig g;
+    // Os três na MESMA linha (o que o duplicar antigo deixava): antes, arrastar
+    // um levava os três.
+    const u32 shared = g.line(g.t1);
+    g.r.comp()->layer(LayerId::unpack(g.t2))->trackId = shared;
+    g.r.comp()->layer(LayerId::unpack(g.t3))->trackId = shared;
+    const i32 z1 = g.z(g.t1), z2 = g.z(g.t2), z3 = g.z(g.t3);
+    AUREA_CHECK(z1 < z2 && z2 < z3);
+    // T3 (o de cima) vai para logo acima da fileira do A (o fundo é o A).
+    AUREA_CHECK(g.move(g.t3, g.r.a, 0));
+    AUREA_CHECK_EQ(g.z(g.t3), g.z(g.r.a) + 1);
+    AUREA_CHECK(g.line(g.t3) != shared);               // linha só dela
+    AUREA_CHECK(g.line(g.t3) != 0u);
+    AUREA_CHECK_EQ(g.line(g.t1), shared);              // os outros não andam
+    AUREA_CHECK_EQ(g.line(g.t2), shared);
+    AUREA_CHECK(g.z(g.t1) < g.z(g.t2));
+    AUREA_CHECK(g.r.at(g.t1, 0, 90) && g.r.at(g.t2, 0, 90) && g.r.at(g.t3, 0, 90));
+    g.r.undo();
+    AUREA_CHECK_EQ(g.z(g.t1), z1);
+    AUREA_CHECK_EQ(g.z(g.t2), z2);
+    AUREA_CHECK_EQ(g.z(g.t3), z3);
+    AUREA_CHECK_EQ(g.line(g.t3), shared);
+}
+
+AUREA_TEST(MoveToRow, IndependentLayerKeepsItsLineAndBottomAnchorWorks) {
+    RowRig g;
+    const u32 own = g.line(g.t3);
+    AUREA_CHECK(g.move(g.t3, 0, 0));                   // 0 = fundo da pilha
+    AUREA_CHECK_EQ(g.z(g.t3), 0);
+    AUREA_CHECK_EQ(g.line(g.t3), own);                 // já era sozinho: mesma linha
+    // Acima do T2, onde ele já está logo acima? Não: agora o T3 é o fundo.
+    AUREA_CHECK(g.move(g.t1, g.t2, 0));                // T1 sobe para cima do T2
+    AUREA_CHECK_EQ(g.z(g.t1), g.z(g.t2) + 1);
+    // Soltar no mesmo lugar não vira passo de desfazer.
+    AUREA_CHECK(!g.move(g.t1, g.t2, 0));
+}
+
+AUREA_TEST(MoveToRow, JoinsAMagneticLineWhenItFitsOtherwiseOwnRow) {
+    RowRig g;
+    // Linha do A com A [0,30) e C [60,90); o B (30..60) sai dela para outra.
+    const u32 lineA = g.line(g.r.a);
+    g.r.comp()->layer(LayerId::unpack(g.r.c))->trackId = lineA;
+    g.r.range(g.t1, 30, 60);
+    AUREA_CHECK(g.move(g.t1, g.r.c, 1));               // cabe no buraco do B
+    AUREA_CHECK_EQ(g.line(g.t1), lineA);
+    // Fica logo abaixo do trecho mais alto da linha (o C).
+    AUREA_CHECK_EQ(g.z(g.t1) + 1, g.z(g.r.c));
+    // Já na linha: entrar de novo não muda nada.
+    AUREA_CHECK(!g.move(g.t1, g.r.a, 1));
+    // T2 [0,90) não cabe: fileira própria, a linha do A fica como estava.
+    const u32 before = g.line(g.t2);
+    AUREA_CHECK(g.move(g.t2, g.r.a, 1));
+    AUREA_CHECK(g.line(g.t2) != lineA);
+    AUREA_CHECK_EQ(g.line(g.t2), before);
+    AUREA_CHECK_EQ(g.z(g.t2) + 1, g.z(g.r.c));
+}
+
+AUREA_TEST(MoveToRow, LeavingAMagneticLineClosesItsHole) {
+    MagneticRig m;
+    m.magnetic(true);
+    const u32 row = m.r.L(m.r.a)->trackId;
+    AUREA_CHECK(m.r.e.move_layer_to_row(m.r.b, m.overlay, 0));
+    AUREA_CHECK(m.r.L(m.r.b)->trackId != row);
+    AUREA_CHECK_EQ(m.start_of(m.r.b), 30);             // o trecho fica no tempo dele
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 30);             // a fita fecha
+    AUREA_CHECK_EQ(m.start_of(m.overlay), 40);         // outra linha não anda
+    m.r.undo();
+    AUREA_CHECK_EQ(m.r.L(m.r.b)->trackId, row);
+    AUREA_CHECK_EQ(m.start_of(m.r.c), 60);
+}
+
+AUREA_TEST(MoveToRow, OldProjectLineZeroAndRefusals) {
+    RowRig g;
+    for (u64 id : {g.r.a, g.r.b, g.r.c, g.t1, g.t2, g.t3}) g.r.comp()->layer(LayerId::unpack(id))->trackId = 0;
+    AUREA_CHECK(g.move(g.t3, g.r.a, 0));
+    AUREA_CHECK_EQ(g.line(g.t3), 0u);                  // projeto antigo: segue sem linha
+    AUREA_CHECK_EQ(g.z(g.t3), g.z(g.r.a) + 1);
+    AUREA_CHECK(!g.move(g.t1, g.r.b, 1));              // linha 0 não recebe ninguém
+    AUREA_CHECK(!g.move(g.t1, g.t1, 0));               // âncora = ela mesma
+    AUREA_CHECK(!g.move(g.t1, 0, 7));                  // modo desconhecido
+    g.r.comp()->layer(LayerId::unpack(g.t2))->locked = true;
+    AUREA_CHECK(!g.move(g.t2, 0, 0));                  // travada não anda
+}
+
+AUREA_TEST(MoveToRow, PastedLayerNeverLandsOnTheOriginalsLine) {
+    RowRig g;
+    AUREA_CHECK_EQ(g.r.e.copy_layers(&g.t1, 1), 1u);
+    AUREA_CHECK_EQ(g.r.e.paste_layers(0), 1u);
+    u32 lines = 0;
+    g.r.comp()->layers().for_each([&](LayerId, const Layer& l) { if (l.trackId == g.line(g.t1)) ++lines; });
+    AUREA_CHECK_EQ(lines, 1u);
+}

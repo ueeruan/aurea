@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Doca/menus da camada (limpeza 2026-10-01). Chaves dock2_*. -->
+<resources>
+    <string name="dock2_tracking_tools">ट्रैकिंग टूल</string>
+    <string name="dock2_tracking_tools_detail">पॉइंट, प्लेनर, कॉर्नर पिन और स्टेबलाइज़र</string>
+    <string name="dock2_media_only">स्पीड और साउंड सिर्फ़ वीडियो और ऑडियो में</string>
+</resources>

@@ -814,8 +814,10 @@ bool emit_group(TextMesh& out, const GroupInput& in, usize outer, f32 zf, f32 zb
             arc += (c[(i + 1) % m] - c[i]).length();
         }
 
-        // Parede: a silhueta original, de −z0 a +z0, normal horizontal.
-        for (usize i = 0; i < m; ++i) {
+        // Parede: a silhueta original, de −z0 a +z0, normal horizontal. Com
+        // profundidade 0 (texto chapado) ela teria área nula: nenhum triângulo
+        // degenerado vai para a GPU — só as duas tampas.
+        for (usize i = 0; z0 > 1e-7f && i < m; ++i) {
             if (en[i].length_sq() == 0.0f) continue;
             const usize j = (i + 1) % m;
             if (en[j].length_sq() == 0.0f) continue;

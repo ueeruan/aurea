@@ -536,6 +536,7 @@ struct ParamRowLabel: View {
             .font(.aurea(size: FxParamRowMath.labelFontSize(label), weight: selected ? .bold : .regular))
             .multilineTextAlignment(.center)
             .lineLimit(FxParamRowMath.labelMaxLines(label))
+            .minimumScaleFactor(0.7)   // palavra longa ("Profundidade") encolhe em vez de virar "Profundida…"
             .truncationMode(.tail)
             .foregroundStyle(selected ? AureaColors.accent : ParamRowColors.labelOffText)
             .underline(true)

@@ -109,6 +109,15 @@ KEYS = list(dict.fromkeys(KEYS))
 
 
 def load(path):
+    # strings.xml + strings_<area>.xml da mesma pasta (cada area com chaves proprias).
+    path = Path(path)
+    out = {}
+    for extra in [path] + sorted(path.parent.glob("strings_*.xml")):
+        out.update(load_one(extra))
+    return out
+
+
+def load_one(path):
     tree = ET.parse(path)
     out = {}
     for node in tree.getroot().findall("string"):

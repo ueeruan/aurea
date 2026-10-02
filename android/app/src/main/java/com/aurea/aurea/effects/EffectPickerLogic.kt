@@ -7,12 +7,15 @@ import com.aurea.aurea.engine.EffectCatalogEntry
 // =============================================================================
 //  O ESCOLHEDOR DE EFEITOS — a LÓGICA pura (sem Compose, testada na JVM).
 //
-//  O painel "Efeitos" tem duas abas: "Na camada" (a pilha) e "Adicionar" (o
-//  catálogo). Tudo aqui é montado a partir do CATÁLOGO que o motor publica —
-//  nenhuma lista fixa de efeitos: efeito ou categoria novos aparecem sozinhos.
+//  O painel "Efeitos" mostra a pilha da camada; "+ Adicionar efeito" abre a tela
+//  cheia "Adicionar efeito" (destaques, recentes, ladrilhos de GRUPO e busca).
+//  Tudo aqui é montado a partir do CATÁLOGO que o motor publica — nenhuma lista
+//  fixa de efeitos: efeito ou categoria novos aparecem sozinhos (categoria que a
+//  tabela de grupos não conhece cai em "Outros"). As FERRAMENTAS-EFEITO
+//  (legendas, rastreio de câmera, máscara) entram como entradas do catálogo.
 //
 //  Regras:
-//   · abre em "Na camada" se a camada já tem efeito; senão direto em "Adicionar";
+//   · camada com efeito abre na pilha; sem nada, direto em "Adicionar efeito";
 //   · efeito de ÁUDIO (categoria "Áudio") só aparece para camada com som — a não
 //     ser o que GERA som (o Tom), que serve para qualquer camada;
 //   · a busca não liga para acento nem caixa, e acha pelo nome em qualquer um
@@ -70,6 +73,140 @@ fun makesSound(entry: EffectCatalogEntry): Boolean =
 /** O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som. */
 fun pickableEffects(catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean): List<EffectCatalogEntry> =
     catalog.filter { it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare")) && (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) }
+
+// --- Ferramentas que moram no catálogo de efeitos ------------------------------
+
+/**
+ * Ferramentas que o usuário procura como EFEITO (pedido de 2026-10-01): as
+ * legendas automáticas (categoria Texto), o rastreio de câmera (Movimentar e
+ * transformar) e a máscara (Fosco, máscara e chave). No catálogo elas são uma
+ * entrada como outra qualquer — busca, recentes e favoritos valem —, mas o toque
+ * ABRE a ferramenta existente em vez de pôr um efeito na pilha do motor.
+ *
+ * [key] é uma chave falsa e estável (o `typeId` é o FNV dela, como o de um
+ * efeito); [category] é a categoria que manda a entrada para o grupo certo.
+ */
+enum class EffectTool(val key: String, val category: String) {
+    Captions("aurea.tool.auto_captions", "Texto"),
+    CameraTrack("aurea.tool.camera_track", "Rastreio"),
+    Mask("aurea.tool.mask", "Máscara"),
+    ;
+
+    val typeId: Int get() = effectTypeId(key)
+}
+
+/** A ferramenta por trás de um `typeId` do catálogo (nulo = efeito de verdade). */
+fun effectToolOf(typeId: Int): EffectTool? = EffectTool.entries.firstOrNull { it.typeId == typeId }
+
+/** Rastreio de câmera só tem o que analisar num VÍDEO (tipo 1); o resto serve para qualquer camada. */
+fun pickableTools(layerKind: Int): List<EffectTool> =
+    EffectTool.entries.filter { it != EffectTool.CameraTrack || layerKind == 1 }
+
+/** A ferramenta como entrada do catálogo; [name] é o rótulo no idioma do app. */
+fun toolCatalogEntry(tool: EffectTool, name: String): EffectCatalogEntry =
+    EffectCatalogEntry(typeId = tool.typeId, effectClass = 0, paramCount = 0, name = name, category = tool.category)
+
+// --- Grupos da tela "Adicionar efeito" -----------------------------------------
+
+/**
+ * Os GRUPOS (os ladrilhos de categoria da tela "Adicionar efeito"). O motor
+ * publica categorias em português e em inglês, misturadas ("Cor" e "Color",
+ * "Distorcer" e "Distort"); a tela junta tudo em grupos de gente, na ordem
+ * abaixo. [id] é o testTag/identificador (`effects.category.<id>`), igual no iOS.
+ */
+enum class EffectGroup(val id: String) {
+    ColorLight("color_light"),
+    Blur("blur"),
+    Distort("distort"),
+    Motion("motion"),
+    Stylize("stylize"),
+    Glitch("glitch"),
+    DrawEdge("draw_edge"),
+    Procedural("procedural"),
+    Matte("matte"),
+    Time("time"),
+    Text("text"),
+    ThreeD("3d"),
+    Audio("audio"),
+    Utility("utility"),
+    Other("other"),
+}
+
+/** Categoria do motor (normalizada) → grupo. Categoria nova sem entrada cai em "Outros". */
+private val GroupByCategory: Map<String, EffectGroup> = buildMap {
+    listOf("cor", "color", "colour", "luz", "light", "glow e luz").forEach { put(it, EffectGroup.ColorLight) }
+    listOf("desfoque", "blur", "nitidez", "sharpen").forEach { put(it, EffectGroup.Blur) }
+    listOf("distorcer", "distort", "distorcao").forEach { put(it, EffectGroup.Distort) }
+    listOf("transform", "transformar", "movimento", "motion", "rastreio", "tracking").forEach { put(it, EffectGroup.Motion) }
+    listOf("estilizar", "stylize", "stylise").forEach { put(it, EffectGroup.Stylize) }
+    put("glitch", EffectGroup.Glitch)
+    listOf("gerar", "generate", "pattern", "ruido", "noise").forEach { put(it, EffectGroup.Procedural) }
+    listOf("recorte", "keying", "key", "mascara", "matte").forEach { put(it, EffectGroup.Matte) }
+    listOf("tempo", "time", "transicao", "transition").forEach { put(it, EffectGroup.Time) }
+    listOf("texto", "text").forEach { put(it, EffectGroup.Text) }
+    put("3d", EffectGroup.ThreeD)
+    listOf("audio", "som", "sound").forEach { put(it, EffectGroup.Audio) }
+    listOf("utilitario", "utility", "controles de expressao", "expression controls").forEach { put(it, EffectGroup.Utility) }
+}
+
+/** Efeitos que moram num grupo diferente do da categoria do motor (o que eles FAZEM manda). */
+private val GroupByKey: Map<Int, EffectGroup> by lazy {
+    buildMap {
+        listOf(
+            "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow",
+            "aurea.stylize.find_edges", "aurea.stylize.bevel_alpha",
+        ).forEach { put(effectTypeId(it), EffectGroup.DrawEdge) }
+        listOf(
+            "aurea.transform", "aurea.motion.oscillate.cycles", "aurea.motion.swing", "aurea.motion.wiggle",
+            "aurea.motion.twitch", "aurea.distort.shake", "aurea.distort.corner_pin", "aurea.transform.parenting_helper",
+        ).forEach { put(effectTypeId(it), EffectGroup.Motion) }
+    }
+}
+
+/** O grupo de uma entrada do catálogo (efeito ou ferramenta). */
+fun effectGroupOf(entry: EffectCatalogEntry): EffectGroup =
+    GroupByKey[entry.typeId] ?: GroupByCategory[normalizeSearch(entry.category)] ?: EffectGroup.Other
+
+/** Os grupos que têm alguma entrada, na ordem fixa, cada um com as entradas na ordem recebida. */
+fun groupEntries(sorted: List<EffectCatalogEntry>): List<Pair<EffectGroup, List<EffectCatalogEntry>>> {
+    val byGroup = sorted.groupBy(::effectGroupOf)
+    return EffectGroup.entries.mapNotNull { g -> byGroup[g]?.takeIf { it.isNotEmpty() }?.let { g to it } }
+}
+
+/** O efeito cuja prévia (escurecida) vira o fundo do ladrilho do grupo. */
+private val GroupBannerKeys: Map<EffectGroup, String> = mapOf(
+    EffectGroup.ColorLight to "aurea.color.colorama",
+    EffectGroup.Blur to "aurea.blur.radial",
+    EffectGroup.Distort to "aurea.distort.wave_warp",
+    EffectGroup.Motion to "aurea.distort.corner_pin",
+    EffectGroup.Stylize to "aurea.stylize.halftone",
+    EffectGroup.Glitch to "aurea.glitch.glitchify",
+    EffectGroup.DrawEdge to "aurea.stylize.find_edges",
+    EffectGroup.Procedural to "aurea.generate.fractal_noise",
+    EffectGroup.Matte to "aurea.key.chroma",
+    EffectGroup.Time to "aurea.time.warp_rgb",
+)
+
+/**
+ * A entrada que dá a prévia do ladrilho: a escolhida para o grupo se ela está
+ * no catálogo; senão o primeiro EFEITO do grupo (ferramenta não tem prévia).
+ */
+fun groupBannerEntry(group: EffectGroup, entries: List<EffectCatalogEntry>): EffectCatalogEntry? {
+    val preferred = GroupBannerKeys[group]?.let(::effectTypeId)
+    return entries.firstOrNull { it.typeId == preferred } ?: entries.firstOrNull { effectToolOf(it.typeId) == null }
+}
+
+/** A faixa de DESTAQUES: estes, na ordem, os que existirem para esta camada. */
+private val FeaturedKeys = listOf(
+    EffectTool.Captions.key, "aurea.light.deep_glow", "aurea.glitch.vhs", "aurea.stylize.halftone",
+    "aurea.distort.wave_warp", "aurea.light.rays", "aurea.color.colorama", "aurea.blur.radial",
+    "aurea.stylize.pixel_sort", "aurea.generate.fractal_noise",
+)
+
+fun featuredEntries(sorted: List<EffectCatalogEntry>): List<EffectCatalogEntry> {
+    val byId = sorted.associateBy { it.typeId }
+    return FeaturedKeys.mapNotNull { byId[effectTypeId(it)] }
+}
 
 // --- Navegar -----------------------------------------------------------------
 

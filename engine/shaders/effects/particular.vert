@@ -40,6 +40,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     mat4 compFromWorld;    // mundo -> px da composição (homogêneo)
     vec4 camRight;         // xyz = eixo da câmera no mundo; w = 1 liga este modo
     vec4 camUp;
+    mat4 previousParticleProjection;
 } p;
 
 layout(location = 0) out vec2 v_corner;   // -1..1 no quadrado da partícula
@@ -216,7 +217,13 @@ void main() {
             const vec4 cp = p.compFromWorld * vec4((p.worldFromLayer * vec4(posPrev, 1.0)).xyz, 1.0);
             if (cp.w >= max(p.frame.y, 1.0) * 1e-3) {
                 const vec2 nNow = cc.xy / cc.w;
-                const vec2 dScr = (nNow - cp.xy / cp.w) * 2.0;   // meia janela -> janela inteira
+                vec2 previousScreen = cp.xy / cp.w;
+                // Layer/parent/camera movement is measured too, even for a stationary particle.
+                // The one-frame screen velocity is scaled to the half shutter interval.
+                const vec4 pp = p.previousParticleProjection * vec4(posPrev, 1.0);
+                if (pp.w >= max(p.frame.y, 1.0) * 1e-3)
+                    previousScreen += (pp.xy / pp.w - previousScreen) * shutter * p.camUp.w;
+                const vec2 dScr = (nNow - previousScreen) * 2.0;
                 const vec4 cu = p.compFromWorld * vec4(center + R, 1.0);
                 const vec4 cv = p.compFromWorld * vec4(center + U, 1.0);
                 const float perU = cu.x / max(cu.w, 1e-6) - nNow.x;

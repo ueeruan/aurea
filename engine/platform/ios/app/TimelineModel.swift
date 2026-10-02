@@ -29,9 +29,9 @@ struct TimelineMetrics {
     private func dp(_ v: CGFloat) -> CGFloat { v * density }
 
     // --- Régua e linhas (redesenho 2026-09-29) -----------------------------------
-    /// Riscos em 0..18; relógio e sublinhado logo abaixo.
+    /// Riscos em 0..14; relógio e sublinhado logo abaixo.
     var rulerTicks: CGFloat { dp(AureaTimeline.rulerTicks) }
-    /// Primeira linha em 46; pílula em 50 e barra em 52, como no Android.
+    /// Primeira linha em 44; pílula em 48 e barra em 50, como no Android.
     var rowsTop: CGFloat { dp(AureaTimeline.rulerTicks + AureaTimeline.rulerGap) }
     /// Passo da fileira: pílula 28 + 4 de vão.
     var row: CGFloat { dp(AureaTimeline.row) }
@@ -74,10 +74,10 @@ struct TimelineMetrics {
     var laneLabelX: CGFloat { dp(30) }
 
     // --- Régua ------------------------------------------------------------------
-    /// Riscos de 1 pt: fortes de 16, finos de 6.
+    /// Riscos de 1 pt: fortes de 12, finos de 6.
     var tickMajorTop: CGFloat { 0 }
     var tickMinorTop: CGFloat { 0 }
-    var tickBottom: CGFloat { dp(16) }
+    var tickBottom: CGFloat { dp(12) }
     var tickMinorBottom: CGFloat { dp(6) }
     var tickMajorWidth: CGFloat { dp(1) }
     var tickMinorWidth: CGFloat { dp(1) }
@@ -147,9 +147,9 @@ struct TimelineMetrics {
     var balloonGap: CGFloat { dp(3) }
 
     // --- Cabeçote e relógio ----------------------------------------------------------
-    /// Cabeçote branco de 1 pt, de y 40 (abaixo do relógio) até o fim.
+    /// Cabeçote branco de 1 pt, de y 36 (abaixo do relógio) até o fim.
     var playhead: CGFloat { dp(AureaTimeline.playhead) }
-    var playheadTop: CGFloat { dp(40) }
+    var playheadTop: CGFloat { dp(36) }
     /// Compacto (painel aberto): o cabeçote vermelho de antes, de cima a baixo.
     var compactPlayhead: CGFloat { dp(1.6) }
     var knob: CGFloat { dp(8) }
@@ -158,11 +158,11 @@ struct TimelineMetrics {
     var markerWidth: CGFloat { dp(10) }
     var markerHeight: CGFloat { dp(8) }
     /// Faixa do relógio (MM:SS:FF), centrado no cabeçote.
-    var timecodeTop: CGFloat { dp(18) }
-    var timecodeBottom: CGFloat { dp(40) }
-    /// Relógio de 16 pt, sublinhado de 1,5 pt da largura do texto em y 34.
+    var timecodeTop: CGFloat { dp(14) }
+    var timecodeBottom: CGFloat { dp(36) }
+    /// Relógio de 16 pt, sublinhado de 1,5 pt da largura do texto em y 30.
     let timecodeFont: CGFloat = 16
-    var underlineTop: CGFloat { dp(34) }
+    var underlineTop: CGFloat { dp(30) }
     var underlineHeight: CGFloat { dp(1.5) }
     /// Estilo caixa: 26 de alto, borda de 1,5 no destaque, raio 4, 6 de lado, 15 pt.
     let timecodeBoxFont: CGFloat = 15

@@ -1335,6 +1335,13 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return result.ok() ? font_dictionary(*result) : nil;
 }
 
+- (int)importColorLut:(long long)layer effect:(uint32_t)effect path:(NSString*)path {
+    return self.engine ? self.engine->import_color_lut(layer, effect, path.UTF8String).raw() : -1;
+}
+- (NSString*)colorLutName:(long long)layer effect:(uint32_t)effect {
+    return self.engine ? ([NSString stringWithUTF8String:self.engine->color_lut_name(layer, effect).c_str()] ?: @"") : @"";
+}
+
 - (NSDictionary<NSString*, id>*)text3DForLayer:(long long)layerId {
     auto* e = self.engine;
     if (!e) return nil;

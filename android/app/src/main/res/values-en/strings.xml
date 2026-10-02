@@ -3478,4 +3478,9 @@ to edit the curve.</string>
     <string name="scene_shadow_strength">Shadow strength</string>
     <string name="export_range_content">Timeline content</string>
     <string name="export_range_full">Entire composition</string>
+    <string name="lut_import">Import / replace LUT (.cube)</string>
+    <string name="lut_importing">Importing LUT…</string>
+    <string name="lut_imported">LUT imported</string>
+    <string name="lut_invalid">Could not import. Use a .cube up to 32 MB, with a 1D LUT or a 3D LUT up to 65 points per axis.</string>
+    <string name="scene_flare3d">3D Flare</string>
 </resources>

@@ -3429,4 +3429,9 @@ untuk mengedit kurvanya.</string>
     <string name="scene_shadow_strength">Kekuatan bayangan</string>
     <string name="export_range_content">Konten linimasa</string>
     <string name="export_range_full">Seluruh komposisi</string>
+    <string name="lut_import">Impor / ganti LUT (.cube)</string>
+    <string name="lut_importing">Mengimpor LUT…</string>
+    <string name="lut_imported">LUT diimpor</string>
+    <string name="lut_invalid">Tidak dapat mengimpor. Gunakan .cube hingga 32 MB, dengan LUT 1D atau LUT 3D hingga 65 titik per sumbu.</string>
+    <string name="scene_flare3d">Flare 3D</string>
 </resources>

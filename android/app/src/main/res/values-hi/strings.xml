@@ -3431,4 +3431,9 @@
     <string name="scene_shadow_strength">छाया की तीव्रता</string>
     <string name="export_range_content">टाइमलाइन की सामग्री</string>
     <string name="export_range_full">पूरी कम्पोज़िशन</string>
+    <string name="lut_import">LUT (.cube) आयात / बदलें</string>
+    <string name="lut_importing">LUT आयात हो रहा है…</string>
+    <string name="lut_imported">LUT आयात हो गया</string>
+    <string name="lut_invalid">आयात नहीं हुआ। 32 MB तक की .cube फ़ाइल में 1D LUT या हर अक्ष पर 65 बिंदुओं तक का 3D LUT उपयोग करें।</string>
+    <string name="scene_flare3d">3D फ़्लेयर</string>
 </resources>

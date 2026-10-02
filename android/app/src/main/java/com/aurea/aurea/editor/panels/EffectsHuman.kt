@@ -1311,6 +1311,7 @@ internal fun englishEffectName(typeId: Int, engineName: String, english: android
     Table[typeId]?.name?.let { english.getString(it) } ?: EnglishEffectNames[typeId] ?: engineName
 
 private val EnglishEffectNames = mapOf(
+    "aurea.light.scene_flare" to "3D Flare", "aurea.color.cube_lut" to "LUT (.cube)",
     "aurea.light.halation" to "Halation", "aurea.light.lens_flare" to "Lens Flare",
     "aurea.distort.ripple" to "Ripple", "aurea.distort.optics_compensation" to "Optics Compensation",
     "aurea.blur.box" to "Box Blur", "aurea.blur.directional" to "Directional Blur",

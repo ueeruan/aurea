@@ -99,6 +99,7 @@ private data class DockLayer(
     val hasAudio: Boolean,
     val muted: Boolean,
     val text3D: Boolean,
+    val effectCount: Int,
 )
 
 /**
@@ -161,7 +162,8 @@ private fun sectionsFor(l: DockLayer): List<DockSection> {
         LayerType.Particles -> listOf(DockSection.Particles, DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         LayerType.Group -> listOf(DockSection.Move, DockSection.Blend, DockSection.Mask, DockSection.Presets, DockSection.Effects)
         LayerType.Camera -> listOf(DockSection.Move, DockSection.Environment, DockSection.Presets)
-        LayerType.Null, LayerType.Light -> listOf(DockSection.Move, DockSection.Presets)
+        LayerType.Light -> if (l.effectCount > 0) listOf(DockSection.Move, DockSection.Blend, DockSection.Effects) else listOf(DockSection.Move, DockSection.Presets)
+        LayerType.Null -> listOf(DockSection.Move, DockSection.Presets)
         LayerType.Adjustment -> emptyList()
     }
 }
@@ -198,6 +200,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                     hasAudio = d?.hasAudio == true,
                     muted = d?.audioMuted == true,
                     text3D = store.text3d != null,
+                    effectCount = it.effectCount,
                 )
             }
         }

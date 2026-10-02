@@ -307,6 +307,8 @@ struct EffectsView: View {
             customRow(param, effect: effect) { choiceBox(param, effect: effect) }
         case fxParamColor:
             customRow(param, effect: effect) { colorControl(param, effect: effect) }
+        case fxParamTextureRef:
+            if let layer = model.primarySelection { CubeLutImportRow(layer: layer, effect: effect) }
         case fxParamLayerRef:
             // Outra camada ("Camada de áudio"): o menu lista as camadas da
             // composição; o motor recebe o ÍNDICE da camada (−1 = nenhuma).
@@ -726,6 +728,66 @@ struct EffectsView: View {
         if let here { model.engine.editTrackKey(layer, property: 12, effect: UInt32.max, param: 0, time: here.time, action: 1, value: here.value, targetTime: here.time, interpolation: here.interpolation, handles: []) }
         else { model.engine.keyParameter(layer, property: 12, effect: UInt32.max, param: 0, time: model.localPlayhead, value: (model.detail["opacity"] as? NSNumber)?.floatValue ?? 1) }
         model.commitPendingCommands(); model.refreshModel(force: true)
+    }
+}
+
+@MainActor
+private struct CubeLutImportRow: View {
+    let layer: Int64
+    let effect: UInt32
+    @EnvironmentObject private var model: AureaModel
+    @State private var picking = false
+    @State private var busy = false
+    @State private var filename = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !filename.isEmpty {
+                Text(filename).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
+            }
+            Button(AureaText.t(busy ? "lut_importing" : "lut_import")) { picking = true }
+                .frame(maxWidth: .infinity, minHeight: 44).disabled(busy)
+                .accessibilityIdentifier("effect.lut.import")
+        }
+        .onAppear { filename = model.engine.colorLutName(layer, effect: effect) }
+        .onChange(of: model.effects) { _ in filename = model.engine.colorLutName(layer, effect: effect) }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            guard url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t("lut_invalid"); return }
+            busy = true
+            let engine = model.engine
+            let targetLayer = layer, targetEffect = effect
+            let root = AureaPaths.documents.appendingPathComponent("LUTs", isDirectory: true)
+            DispatchQueue.global(qos: .userInitiated).async {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let folder = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                let copy = folder.appendingPathComponent(url.lastPathComponent)
+                var success = false
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    guard FileManager.default.createFile(atPath: copy.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+                    let input = try FileHandle(forReadingFrom: url)
+                    defer { try? input.close() }
+                    let output = try FileHandle(forWritingTo: copy)
+                    defer { try? output.close() }
+                    var total = 0
+                    while let chunk = try input.read(upToCount: 65536), !chunk.isEmpty {
+                        total += chunk.count
+                        guard total <= 32 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+                        try output.write(contentsOf: chunk)
+                    }
+                    success = engine.importColorLut(targetLayer, effect: targetEffect, path: copy.path) == 0
+                } catch { success = false }
+                if !success { try? FileManager.default.removeItem(at: folder) }
+                let imported = success
+                DispatchQueue.main.async {
+                    busy = false
+                    filename = engine.colorLutName(targetLayer, effect: targetEffect)
+                    model.refreshModel(force: true)
+                    model.toast = AureaText.t(imported ? "lut_imported" : "lut_invalid")
+                }
+            }
+        }
     }
 }
 private struct EffectParamSelection: Identifiable, Equatable {

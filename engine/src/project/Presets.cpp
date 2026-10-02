@@ -1078,7 +1078,7 @@ bool parse_value(const json::Value& root, Preset& out, const EffectRegistry* reg
     return true;
 }
 
-bool capture(const Layer& l, PresetKind kind, std::string name, f64 fps, u32 parts, const EffectRegistry* registry, Preset& out) {
+bool capture(const Layer& l, PresetKind kind, std::string name, f64 fps, u32 parts, const EffectRegistry* registry, Preset& out, bool meshText) {
     Preset p;
     p.kind = kind;
     p.name = std::move(name);
@@ -1092,8 +1092,8 @@ bool capture(const Layer& l, PresetKind kind, std::string name, f64 fps, u32 par
             break;
         }
         case PresetKind::Text: {
-            if (l.kind != LayerKind::Text) return false;
-            p.textParts = parts & kTextAll;
+            if (l.kind != LayerKind::Text && !meshText) return false;
+            p.textParts = parts & (meshText ? kTextAnimators : kTextAll);
             if (p.textParts == 0) return false;
             if (p.textParts & kTextStyle) {
                 p.style = l.text;
@@ -1160,17 +1160,17 @@ bool capture_effect(const Layer& l, u32 effectId, std::string name, f64 fps, con
     return false;
 }
 
-bool applicable(const Preset& p, const Layer& l) noexcept {
+bool applicable(const Preset& p, const Layer& l, bool meshText) noexcept {
     switch (p.kind) {
         case PresetKind::Effects: return !p.effects.empty() && l.effects.size() + p.effects.size() <= kMaxEffectCount;
-        case PresetKind::Text: return l.kind == LayerKind::Text && p.textParts != 0;
+        case PresetKind::Text: return (l.kind == LayerKind::Text && p.textParts != 0) || (meshText && (p.textParts & kTextAnimators));
         case PresetKind::Animation: return !p.animTracks.empty() && l.kind != LayerKind::Audio;
         default: return false;
     }
 }
 
-bool apply(const Preset& p, Layer& l, i64 anchorLocal, i64 durationFrames, f64 fps, const EffectRegistry* registry) {
-    if (!applicable(p, l)) return false;
+bool apply(const Preset& p, Layer& l, i64 anchorLocal, i64 durationFrames, f64 fps, const EffectRegistry* registry, bool meshText) {
+    if (!applicable(p, l, meshText)) return false;
     const f64 scale = fps_scale(p, fps);
     const i64 start = l.offset.value;   // instante local do início da camada
     switch (p.kind) {
@@ -1204,7 +1204,7 @@ bool apply(const Preset& p, Layer& l, i64 anchorLocal, i64 durationFrames, f64 f
             return true;
         }
         case PresetKind::Text: {
-            if (p.textParts & kTextStyle) {
+            if ((p.textParts & kTextStyle) && !meshText) {
                 TextData& t = l.text;
                 const TextData& s = p.style;
                 t.fontFamily = s.fontFamily;

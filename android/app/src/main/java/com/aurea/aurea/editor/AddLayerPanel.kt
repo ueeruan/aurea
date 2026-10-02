@@ -488,6 +488,7 @@ private fun ElementTab(store: EditorStore, close: () -> Unit) {
                 close(); store.addParticles(20)   // 20 = Particular (preset Padrão)
             },
             AddItem(stringResource(R.string.editor_camada_ajuste), CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
+            AddItem(stringResource(R.string.scene_flare3d), CupertinoGlyph.Sparkles, ShellColors.Text3D) { store.addLight(3); close() },
             AddItem(stringResource(R.string.grid_builder), ShellGlyph.CircleGridHex) { store.createGrid(); close() },
             AddItem(stringResource(R.string.sh_add_group_selection), CupertinoGlyph.Folder) {
                 if (store.selection.isEmpty()) {

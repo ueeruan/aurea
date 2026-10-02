@@ -221,7 +221,7 @@ struct Preset {
 /// não há o que salvar (sem efeitos, camada não é texto, sem keyframe de
 /// transform). `parts` = TextPresetParts (só Text).
 [[nodiscard]] bool capture(const Layer& layer, PresetKind kind, std::string name, f64 fps, u32 parts,
-                           const EffectRegistry* registry, Preset& out);
+                           const EffectRegistry* registry, Preset& out, bool meshText = false);
 
 /// Preset de efeitos com UM efeito só: a instância `effectId` (o id estável
 /// do efeito na camada, não a posição na pilha) com os keyframes dela — o
@@ -236,10 +236,10 @@ struct Preset {
 /// duração. `fps` = da composição de destino. Falso = tipo não se aplica a
 /// esta camada (nada muda).
 bool apply(const Preset& p, Layer& layer, i64 anchorLocal, i64 durationFrames, f64 fps,
-           const EffectRegistry* registry = nullptr);
+           const EffectRegistry* registry = nullptr, bool meshText = false);
 
 /// O preset se aplica a esta camada? (mesma regra de `apply`, sem mudar nada)
-[[nodiscard]] bool applicable(const Preset& p, const Layer& layer) noexcept;
+[[nodiscard]] bool applicable(const Preset& p, const Layer& layer, bool meshText = false) noexcept;
 
 /// Atalhos para os tipos que não moram na camada.
 [[nodiscard]] std::string make_caption_preset(const std::string& name, const text::CaptionOptions& o, bool removeFillers);

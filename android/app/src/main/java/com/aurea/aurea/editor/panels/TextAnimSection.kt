@@ -107,7 +107,7 @@ private val SelectorParams = listOf(
  * propriedades que ele mexe, com losango de keyframe por valor.
  */
 @Composable
-internal fun TextAnimSection(env: PanelEnv) {
+internal fun TextAnimSection(env: PanelEnv, showAnimatorEffect: Boolean = true) {
     val store = env.store
     val list by remember(store) { derivedStateOf { store.textAnimators } }
     Spacer(Modifier.height(10.dp))
@@ -121,7 +121,7 @@ internal fun TextAnimSection(env: PanelEnv) {
     }
     list.forEachIndexed { index, v -> AnimatorCard(env, index, v) }
     Spacer(Modifier.height(4.dp))
-    TextButton(modifier = Modifier.testTag("text.animator.add"), onClick = {
+    if (showAnimatorEffect) TextButton(modifier = Modifier.testTag("text.animator.add"), onClick = {
             store.addEffectAndFocus(effectTypeId("aurea.text.animator")); env.onOpenPanel(EditorPanel.Effects)
     }) { Text(stringResource(R.string.text_animator_add)) }
     TextButton(modifier = Modifier.testTag("text.transform.add"), onClick = {

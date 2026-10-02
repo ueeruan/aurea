@@ -68,7 +68,7 @@ f32 influence(const Values& v, u32 rank, u32 count) {
 }
 
 bool has_transform_effect(const Layer& layer) noexcept {
-    if (layer.kind != LayerKind::Text) return false;
+    if (layer.kind != LayerKind::Text && layer.kind != LayerKind::Model3D) return false;
     for (const auto& effect : layer.effects) if (effect.enabled && effect.type == effect_type_id(kTransformEffect)) return true;
     return false;
 }
@@ -89,12 +89,18 @@ f32 transform_padding(const Layer& layer, const EffectRegistry& registry, f64 ti
 void evaluate_transform_effects(const Layer& layer, const EffectRegistry& registry, f64 time,
                                 const TextLayout& layout, std::vector<GlyphAnim>& styles,
                                 std::vector<Mat4>& matrices) {
+    const auto* specs = registry.params(effect_type_id(kTransformEffect));
+    if (!specs) { matrices.assign(layout.quads.size(), Mat4::identity()); return; }
+    evaluate_transform_effects(layer, *specs, time, layout, styles, matrices, nullptr);
+}
+
+void evaluate_transform_effects(const Layer& layer, const ParameterRegistry& specs, f64 time,
+                                const TextLayout& layout, std::vector<GlyphAnim>& styles,
+                                std::vector<Mat4>& matrices, const Vec3* layerPivot) {
     matrices.assign(layout.quads.size(), Mat4::identity());
     if (styles.size() != layout.quads.size()) styles.resize(layout.quads.size());
-    const auto* specs = registry.params(effect_type_id(kTransformEffect));
-    if (!specs) return;
     for (const auto& effect : layer.effects) if (effect.enabled && effect.type == effect_type_id(kTransformEffect)) {
-        const auto v = sample(layer, effect, *specs, time);
+        const auto v = sample(layer, effect, specs, time);
         const u32 component = v[kComponent].as_enum();
         const u32 count = component == 1 ? layout.words : component == 2 ? layout.lines : layout.chars;
         if (!count) continue;
@@ -122,9 +128,10 @@ void evaluate_transform_effects(const Layer& layer, const EffectRegistry& regist
                 }
             }
             layerAnchor.x += layout.pad-margin; layerAnchor.y += layout.pad-margin;
-            const Vec3 pivot = v[kAnchor].as_enum() == 1 ? Vec3{(b.x + b.z) / 2, (b.y + b.w) / 2, 0} : layerAnchor;
+            if (layerPivot) layerAnchor = *layerPivot;
+            const Vec3 pivot = v[kAnchor].as_enum() == 1 ? Vec3{(b.x + b.z) / 2, (b.y + b.w) / 2, layerPivot ? layerPivot->z : 0} : layerAnchor;
             const f32 scale = std::max(0.f, 1.f + v[kScale].v[0] * .01f * weight);
-            const Vec3 stretch{scale, scale * std::max(0.f, 1.f + v[kStretch].v[0] * .01f * weight), 1};
+            const Vec3 stretch{scale, scale * std::max(0.f, 1.f + v[kStretch].v[0] * .01f * weight), layerPivot ? scale : 1};
             const auto offset = v[kOffset].as_vec2();
             const auto transform = Mat4::translation(pivot + Vec3{offset.x * weight, offset.y * weight, 0})
                 * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, v[kAngle].v[0] * kDeg2Rad * weight))

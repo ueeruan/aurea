@@ -13,6 +13,7 @@
 #include <vector>
 #include <functional>
 #include <unordered_map>
+#include <atomic>
 
 namespace aurea::test {
 
@@ -53,6 +54,8 @@ public:
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
+    std::function<Status(u64, u64)> beforeWaitFrame;
+    std::atomic<u32> idleWaits{0};
     GPUCapabilities caps;
 
     MockBackend() {
@@ -165,7 +168,11 @@ public:
         if (frameOpen) deferred_.push_back({fn, ctx});
         else fn(ctx);
     }
-    void wait_idle() noexcept override {}
+    void wait_idle() noexcept override { ++idleWaits; }
+    u64 last_submitted_frame() const noexcept override { return framesSubmitted ? frame_ : 0; }
+    Status wait_frame(u64 frame, u64 timeout) noexcept override {
+        return beforeWaitFrame ? beforeWaitFrame(frame, timeout) : OkStatus;
+    }
     u32 read_gpu_timings(GpuTiming*, u32, f32*) noexcept override { return 0; }
     bool is_device_lost() const noexcept override { return false; }
     u32 frames_in_flight() const noexcept override { return 2; }

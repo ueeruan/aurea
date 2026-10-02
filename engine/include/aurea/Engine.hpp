@@ -25,6 +25,7 @@
 #pragma once
 
 #include "aurea/text/Captions.hpp"
+#include "aurea/effects/CubeLut.hpp"
 #include "aurea/project/AlightMotion.hpp"
 #include "aurea/project/Presets.hpp"
 #include "aurea/project/ProjectPackage.hpp"
@@ -457,6 +458,8 @@ public:
     [[nodiscard]] std::vector<text::FontEntry> list_fonts() noexcept;
     /// Registra um TTF/OTF já copiado para a pasta do app. Nulo se não for fonte.
     [[nodiscard]] Result<text::FontEntry> import_font(const char* path) noexcept;
+    [[nodiscard]] Status import_color_lut(u64 layer, u32 effect, const char* path) noexcept;
+    [[nodiscard]] std::string color_lut_name(u64 layer, u32 effect) const noexcept;
     /// Fonte da camada de texto: família/peso/itálico e, se importada, o arquivo.
     bool set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept;
     /// Estilo de parágrafo (18 floats): modo da caixa, largura, altura, fundo
@@ -650,6 +653,7 @@ public:
     [[nodiscard]] Result<u32> arrange_layer_times(const u64* layerIds, u32 count,
         LayerTimeArrangement mode, i64 playhead = 0) noexcept;
     [[nodiscard]] Result<u64> add_camera() noexcept;
+    /// 0 directional, 1 point, 2 spot, 3 point light with a camera-projected flare.
     [[nodiscard]] Result<u64> add_light(u32 kind) noexcept;
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
     [[nodiscard]] Status set_material_param(u64 layer, u32 material, u32 param, f32 value) noexcept;
@@ -1312,6 +1316,7 @@ public:
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
 private:
     Status ensure_text3d_layout(Layer& layer) noexcept; // modelMutex_ held; caller owns undo.
+    [[nodiscard]] bool supports_text_animation(const Layer& layer) const noexcept;
     /// Camada de forma 3D (receita aurea-shape3d:). As partes já são nós
     /// próprios: não há preparo como o ensure_text3d_layout. modelMutex_ held.
     [[nodiscard]] bool is_shape3d_layer(const Layer& layer) const noexcept;
@@ -1512,6 +1517,7 @@ private:
     std::unique_ptr<Project>      project_;
     std::vector<CompositionId>    compStack_;   ///< caminho da principal até a aberta
     std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris_;
+    std::unordered_map<u64, std::shared_ptr<const CubeLut>> cubeLuts_;
     struct CameraTrackJob;
     std::unique_ptr<CameraTrackJob> cameraTrack_;
     void join_camera_track() noexcept;
@@ -1519,6 +1525,7 @@ private:
     std::shared_ptr<MotionTrackJob> motionTrack_;
     void join_motion_track() noexcept;
     static std::shared_ptr<const scene3d::HdriPixels> hdri_lookup(void* self, AssetId id);
+    static std::shared_ptr<const CubeLut> cube_lookup(void* self, AssetId id);
     struct Clipboard {
         std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia
         i64 layersAnchor = 0;
@@ -1634,6 +1641,7 @@ private:
     void export_thread_main() noexcept;
     void export_encoder_main() noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
+    [[nodiscard]] Status wait_export_gpu(u64 gpuFrame) noexcept; // renderMutex_ held by caller
     [[nodiscard]] Status write_export_audio(i64 untilSample) noexcept;
     /// Uma linha no log com o custo do export (telemetria): CPU do 1º quadro e
     /// dos demais, GPU por quadro e os passes mais caros.

@@ -107,8 +107,8 @@ internal fun PresetsPanel(env: PanelEnv) {
     val store = env.store
     val lib = store.presets
     val kind = store.detail?.kind
-    val isText = kind == LayerType.Text.kind
-    val speaks = kind == LayerType.Video.kind || kind == LayerType.Audio.kind || isText
+    val isText = kind == LayerType.Text.kind || store.text3d != null
+    val speaks = kind == LayerType.Video.kind || kind == LayerType.Audio.kind || kind == LayerType.Text.kind
     val tabs = PresetTab.entries.filter { t ->
         when (t.kind) {
             PresetKind.Text -> isText

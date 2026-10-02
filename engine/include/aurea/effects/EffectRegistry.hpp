@@ -63,6 +63,8 @@ namespace effect_keys {
     inline constexpr const char* kBoxBlur = "aurea.blur.box";
     inline constexpr const char* kDirectionalBlur = "aurea.blur.directional";
     inline constexpr const char* kLensFlare = "aurea.light.lens_flare";
+    inline constexpr const char* kSceneFlare = "aurea.light.scene_flare";
+    inline constexpr const char* kCubeLut = "aurea.color.cube_lut";
     inline constexpr const char* kRipple = "aurea.distort.ripple";
     inline constexpr const char* kOpticsCompensation = "aurea.distort.optics_compensation";
     inline constexpr const char* kCornerPin = "aurea.distort.corner_pin";

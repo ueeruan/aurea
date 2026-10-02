@@ -103,7 +103,8 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
     const ParticleData pd = sampled_particles(l, local);
     const bool world = pd.emitterSpace == 1;
     const MotionBlurSettings& mb = comp.motion_blur();
-    const bool blur = l.motionBlur && mb.enabled && mb.shutterAngle > 0.0f;
+    ps.blurAmount = std::clamp(l.transform.motionBlurAmount, 0.f, 4.f);
+    const bool blur = l.motionBlur && mb.enabled && mb.shutterAngle > 0.0f && ps.blurAmount > 0;
     // Emissão animada: taxa, velocidade, direção, espalhamento, offset do
     // emissor — e a posição da camada quando a partícula herda o movimento.
     auto posAnimated = [&](TrackProperty p) {
@@ -151,7 +152,7 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
 
     // --- Janela do histórico ---------------------------------------------------
     const f64 tl = static_cast<f64>(local.value);
-    const f64 open = blur ? std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0 : 0.0;   // quadros
+    const f64 open = blur ? std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0 * ps.blurAmount : 0.0;
     const f64 life = static_cast<f64>(std::clamp(pd.lifetime, 0.05f, 60.0f)) * (1.0 + std::clamp(static_cast<f64>(pd.lifeRandom), 0.0, 1.0));
     const f64 auxLife = pd.auxCount > 0 ? std::max(0.0, static_cast<f64>(pd.auxLife)) : 0.0;
     const f64 span = (life + auxLife) * fps + open * 0.5 + 2.0;
@@ -377,7 +378,7 @@ u32 Renderer::scene_particle_draws(const scene3d::SceneFrame& group, const scene
         push.clip = clip;
         // Subquadro do desfoque da cena: a partícula anda no tempo só com o
         // desfoque DELA ligado (a câmera do subquadro vale para todos).
-        const f64 shift = ps.blur ? frame.subFrame / std::max(1.0, static_cast<f64>(ps.fps)) : 0.0;
+        const f64 shift = ps.blur ? frame.subFrame * ps.blurAmount / std::max(1.0, static_cast<f64>(ps.fps)) : 0.0;
         push.mode = Vec4{static_cast<f32>(ps.flags), static_cast<f32>(shift),
                          static_cast<f32>(currentSnap_->particleBase + ps.dataFirst), 1.0f};
         push.camRight = right;

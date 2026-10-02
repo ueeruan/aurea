@@ -567,6 +567,8 @@ class AureaEngine private constructor() {
     // Fontes.
     fun listFonts(): String? = nativeListFonts(nativeHandle)
     fun importFont(path: String): String? = nativeImportFont(nativeHandle, path)
+    fun importColorLut(layer: Long, effect: Int, path: String): Int = nativeImportColorLut(nativeHandle, layer, effect, path)
+    fun colorLutName(layer: Long, effect: Int): String = nativeColorLutName(nativeHandle, layer, effect)
     fun setTextFont(layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean =
         nativeSetTextFont(nativeHandle, layer, family, weight, italic, path)
     fun textFont(layer: Long): String? = nativeTextFont(nativeHandle, layer)
@@ -947,6 +949,8 @@ class AureaEngine private constructor() {
     private external fun nativeSetThermal(handle: Long, status: Int)
     private external fun nativeListFonts(handle: Long): String?
     private external fun nativeImportFont(handle: Long, path: String): String?
+    private external fun nativeImportColorLut(handle: Long, layer: Long, effect: Int, path: String): Int
+    private external fun nativeColorLutName(handle: Long, layer: Long, effect: Int): String
     private external fun nativeSetTextFont(handle: Long, layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean
     private external fun nativeSetTextStyle(handle: Long, layer: Long, v: FloatArray): Boolean
     private external fun nativeQueryTextStyle(handle: Long, layer: Long, out: FloatArray): Boolean

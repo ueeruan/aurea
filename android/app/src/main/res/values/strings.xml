@@ -3511,4 +3511,9 @@
     <string name="scene_shadow_strength">Força da sombra</string>
     <string name="export_range_content">Conteúdo da timeline</string>
     <string name="export_range_full">Composição inteira</string>
+    <string name="lut_import">Importar / trocar LUT (.cube)</string>
+    <string name="lut_importing">Importando LUT…</string>
+    <string name="lut_imported">LUT importado</string>
+    <string name="lut_invalid">Não foi possível importar. Use um .cube até 32 MB, com LUT 1D ou 3D de até 65 pontos por eixo.</string>
+    <string name="scene_flare3d">Flare 3D</string>
 </resources>

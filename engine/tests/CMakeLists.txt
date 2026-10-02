@@ -33,6 +33,8 @@ add_executable(aurea_tests
     test_scene3d.cpp
     test_text3d.cpp
     test_text3d_anim.cpp
+    test_text3d_shared.cpp
+    test_cube_lut.cpp
     test_transform3d_keys.cpp
     test_camera_lens.cpp
     test_scene_param_keys.cpp

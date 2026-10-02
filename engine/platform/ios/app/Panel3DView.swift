@@ -35,7 +35,7 @@ struct Panel3DView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if model.selectedLayer?.kind != 8 {
-                    if !text3D.isEmpty { textSection; Text3DAnimSection(layerId: layerId) }
+                    if !text3D.isEmpty { textSection; TextAnimationSection(showAnimatorEffect: false, beforeAnimation: finishEditing) }
                     // Forma 3D: partes, cor e imagem por parte (Shape3DViews.swift) no lugar do material importado.
                     let isShape = !model.engine.shape3D(layerId).isEmpty
                     if isShape {

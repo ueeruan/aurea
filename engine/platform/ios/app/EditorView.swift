@@ -936,7 +936,8 @@ private struct DockView: View {
             : [.editText, .text3DOptions, .move, .blend, .presets, .effects]
         case 8: return [.move, .environment, .presets]
         case 11: return [.particles, .move, .blend, .mask, .presets, .effects]
-        case 6, 9: return [.move, .presets]
+        case 9: return layer.effectCount > 0 ? [.move, .blend, .effects] : [.move, .presets]
+        case 6: return [.move, .presets]
         default: return []
         }
     }
@@ -1419,6 +1420,7 @@ private struct AddLayerSheet: View {
                         drawnCard("sh_add_null", kind: -1) { model.addNull(threeD: false); close() }
                         card("particular_title", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(20); close() }   // 20 = Particular (preset Padrão)
                         card("editor_camada_ajuste", glyph: CupertinoGlyph.WandStars) { close(); model.addAdjustmentLayer() }
+                        card("scene_flare3d", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addLight(3); close() }
                         card("grid_builder", glyph: CupertinoGlyph.SquareGrid2x2) { model.createGrid(); close() }
                         card("sh_add_group_selection", glyph: CupertinoGlyph.Folder) {
                             if model.selection.isEmpty { model.toast = AureaText.t("sh_add_pick_layers_to_group") }

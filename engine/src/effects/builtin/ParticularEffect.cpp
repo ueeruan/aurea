@@ -50,8 +50,9 @@ struct ParticularUniforms {
     Vec4 region, view, clock, frame, emitPos, emitSize, launch, cone, forces, motion, lifeSize, look, color0, color1;
     Mat4 worldFromLayer, compFromWorld;   // camada do Particular (LayerPlacement::particleSpace)
     Vec4 camRight, camUp;                 // camRight.w = 1 liga o espaço 3D
+    Mat4 previousParticleProjection;
 };
-static_assert(sizeof(ParticularUniforms) == 384, "layout std140 do particular.vert");
+static_assert(sizeof(ParticularUniforms) == 448, "layout std140 do particular.vert");
 
 Vec4 linear(Vec4 c) noexcept {
     return Vec4{Color::srgb_to_linear(std::clamp(c.x, 0.0f, 1.0f)), Color::srgb_to_linear(std::clamp(c.y, 0.0f, 1.0f)),
@@ -204,7 +205,7 @@ public:
         // a chave de desfoque de movimento ligada. Meia janela, em segundos.
         f32 shutterDeg = 0.0f;
         if (e.b(kMotionBlur)) shutterDeg = std::clamp(finite_or(e.f(kShutterAngle), 0.0f), 0.0f, 720.0f);
-        else if (e.placement) shutterDeg = std::clamp(finite_or(e.placement->shutterAngle, 0.0f), 0.0f, 720.0f);
+        else if (e.placement) shutterDeg = std::clamp(finite_or(e.placement->shutterAngle, 0.0f), 0.0f, 2880.0f);
         const f32 halfShutter = shutterDeg / 360.0f / static_cast<f32>(fps) * 0.5f;
         u.motion = Vec4{pct(e, kAirDrag, 0.0f, 800.0f), std::clamp(finite_or(e.f(kTurbulence), 0.0f), 0.0f, 40000.0f),
                         pct(e, kTurbulenceSpeed, 0.0f, 1000.0f), halfShutter};
@@ -222,7 +223,8 @@ public:
             u.worldFromLayer = e.placement->worldFromLayer;
             u.compFromWorld = e.placement->compFromWorld;
             u.camRight = Vec4{e.placement->camRight.x, e.placement->camRight.y, e.placement->camRight.z, 1.0f};
-            u.camUp = Vec4{e.placement->camUp.x, e.placement->camUp.y, e.placement->camUp.z, 0.0f};
+            u.camUp = Vec4{e.placement->camUp.x, e.placement->camUp.y, e.placement->camUp.z, static_cast<f32>(fps)};
+            u.previousParticleProjection = e.placement->previousParticleProjection;
         }
 
         const bool additive = e.b(kAddMode);

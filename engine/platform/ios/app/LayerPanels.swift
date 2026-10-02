@@ -337,7 +337,7 @@ struct PresetsPanel: View {
     private var layerId: Int64 { model.primarySelection ?? 0 }
     private var tabs: [String] {
         (["favoritos", "recentes", "animacao", "efeitos", "texto", "legenda", "curva"])
-            .filter { $0 != "texto" || model.selectedLayer?.kind == 4 }
+            .filter { $0 != "texto" || model.selectedLayer?.kind == 4 || model.engine.text3D(forLayer: layerId) != nil }
             .filter { $0 != "legenda" || [1, 3, 4].contains(model.selectedLayer?.kind ?? 0) }
     }
     private var tab: String { tabs.contains(picked) ? picked : "animacao" }
@@ -414,7 +414,7 @@ struct PresetsPanel: View {
         }
         .foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
         .onAppear {
-            if model.selectedLayer?.kind == 4 { picked = "texto" }
+            if model.selectedLayer?.kind == 4 || model.engine.text3D(forLayer: layerId) != nil { picked = "texto" }
             // "Meus presets" (vindo dos efeitos) abre direto na aba pedida.
             if let kind = model.presetsOpenKind { picked = kind; model.presetsOpenKind = nil }
             if let query = model.presetsOpenSearch { search = query; model.presetsOpenSearch = nil }
@@ -495,8 +495,9 @@ struct PresetsPanel: View {
         }
         guard let layer = model.selectedLayer else { return }
         if let native = entry.textPreset {
-            guard layer.kind == 4 else { model.toast = AureaText.t("msg_animacao_de_texto_so_vale_para"); return }
-            model.engine.applyTextPreset(layerId, preset: native)
+            guard model.engine.applyTextPreset(layerId, preset: native) else {
+                model.toast = AureaText.t("msg_animacao_de_texto_so_vale_para"); return
+            }
         } else {
             guard let source = entry.source else { model.toast = AureaText.t("msg_arquivo_do_preset_nao_encontrado"); return }
             var duration: Int64 = 0
@@ -1748,6 +1749,8 @@ struct TextAnimationPanel: View {
 }
 
 struct TextAnimationSection: View {
+    var showAnimatorEffect = true
+    var beforeAnimation: () -> Void = {}
     @EnvironmentObject private var model: AureaModel
     @State private var animators: [[Float]] = []
     @State private var animationError = false
@@ -1765,6 +1768,7 @@ struct TextAnimationSection: View {
                 HStack(spacing: 6) {
                     ForEach(Array(presets.enumerated()), id: \.offset) { n, title in
                         NativePanelChip(title) {
+                            beforeAnimation()
                             animationError = !model.engine.applyTextPreset(id, preset: UInt32(n))
                             refresh()
                         }
@@ -1772,11 +1776,13 @@ struct TextAnimationSection: View {
                 }.frame(height: 44)
             }
             ForEach(animators.indices, id: \.self) { index in NativeTextAnimatorCard(index: UInt32(index), values: animators[index]).padding(.top, 8) }
-            NativePanelChip(AureaText.t("text_animator_add")) {
+            if showAnimatorEffect { NativePanelChip(AureaText.t("text_animator_add")) {
+                beforeAnimation()
                 model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator"), layer: id)
                 refresh(); model.openPanel(.effects)
-            }.accessibilityIdentifier("text.animator.add")
+            }.accessibilityIdentifier("text.animator.add") }
             NativePanelChip(AureaText.t("text_transform_add")) {
+                beforeAnimation()
                 model.addEffectAndFocus(fxEffectTypeId("aurea.text.transform"), layer: id)
                 refresh(); model.openPanel(.effects)
             }.accessibilityIdentifier("text.transform.add")

@@ -78,6 +78,7 @@ struct ParticleSpace {
     /// Desfoque de movimento por subamostras de tempo (`subs` > 1).
     bool blur = false;
     f32  fps = 30.0f;
+    f32  blurAmount = 1.0f;
     std::vector<ParticleSub> subs;  ///< ≥ 1 quando flags != 0
 };
 

@@ -16,7 +16,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
 
     // --- Régua e linhas -------------------------------------------------------
     val rulerTicks = dp(AureaTimeline.RulerTicks.value)
-    /** Topo da primeira barra em 52 dp; a pílula começa 2 dp acima. */
+    /** Topo da primeira barra em 44 dp; a pílula começa 2 dp acima. */
     val rowsTop = dp(AureaTimeline.RulerTicks.value + AureaTimeline.RulerGap.value)
     val row = dp(AureaTimeline.Row.value)
     val bar = dp(AureaTimeline.Bar.value)
@@ -58,7 +58,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     // --- Régua ------------------------------------------------------------------
     val tickMajorTop = 0f
     val tickMinorTop = 0f
-    val tickBottom = dp(16f)
+    val tickBottom = dp(12f)
     val tickMinorBottom = dp(6f)
     val tickMajorWidth = dp(1f)
     val tickMinorWidth = dp(1f)
@@ -136,13 +136,13 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     /** Triângulo do cabeçote no alto da régua (camada escolhida): 10 × 8, em destaque. */
     val markerWidth = dp(10f)
     val markerHeight = dp(8f)
-    /** Relógio 16 sp bold abaixo dos riscos; sublinhado branco em y 34. */
-    val timecodeTop = dp(18f)
-    val timecodeBaseline = dp(32f)
-    val underlineTop = dp(34f)
+    /** Relógio 16 sp bold abaixo dos riscos; sublinhado branco em y 30. */
+    val timecodeTop = dp(14f)
+    val timecodeBaseline = dp(28f)
+    val underlineTop = dp(30f)
     val underlineHeight = dp(1.5f)
     /** Estilo caixa (camada escolhida / efeitos): 26 de altura, borda 1,5 em destaque, raio 4. */
-    val timecodeBoxTop = dp(17f)
+    val timecodeBoxTop = dp(13f)
     val timecodeBoxHeight = dp(26f)
     val timecodeBoxPad = dp(6f)
     val timecodeBoxStroke = dp(1.5f)
@@ -150,7 +150,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     /** Rótulo da régua perto do relógio some (não disputa leitura com ele). */
     val timecodeZoneHalf = dp(44f)
     /** O fio começa abaixo do relógio e atravessa toda a área livre da timeline. */
-    val playheadTop = dp(40f)
+    val playheadTop = dp(36f)
 
     // --- Gestos -------------------------------------------------------------------------
     val snapClip = dp(12f)          // ímã de clipe e alça

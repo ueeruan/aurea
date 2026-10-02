@@ -23,6 +23,7 @@
 
 #include "aurea/ai/DepthMapService.hpp"
 #include "aurea/effects/EffectGraph.hpp"
+#include "aurea/effects/CubeLut.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/memory/Arena.hpp"
 #include "aurea/render/FrameGraph.hpp"
@@ -428,6 +429,8 @@ public:
     [[nodiscard]] bool take_incomplete() noexcept { const bool b = incomplete_; incomplete_ = false; return b; }
     void set_model_lookup(ModelLookup fn, void* ctx) noexcept { modelLookup_ = fn; modelCtx_ = ctx; }
     using HdriLookup = std::shared_ptr<const scene3d::HdriPixels> (*)(void* ctx, AssetId id);
+    using CubeLookup = std::shared_ptr<const CubeLut> (*)(void* ctx, AssetId id);
+    void set_cube_lookup(CubeLookup fn, void* ctx) noexcept { cubeLookup_ = fn; cubeCtx_ = ctx; }
     void set_hdri_lookup(HdriLookup fn, void* ctx) noexcept { hdriLookup_ = fn; hdriCtx_ = ctx; }
     /// Resolve o ambiente PRÓPRIO de uma camada 3D para a instância (v22):
     /// sem `Custom`, a instância fica com o ambiente do grupo.
@@ -451,6 +454,7 @@ public:
 
     // --- EffectResources -----------------------------------------------------
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
+    [[nodiscard]] TextureHandle cube_lut(AssetId id) noexcept override;
     /// Espectro do som de uma camada no instante do `prepare` em curso (ver
     /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
@@ -601,6 +605,8 @@ private:
     scene3d::SceneRenderer scene3d_;
     ModelLookup modelLookup_ = nullptr;
     HdriLookup hdriLookup_ = nullptr;
+    CubeLookup cubeLookup_ = nullptr;
+    void* cubeCtx_ = nullptr;
     void* hdriCtx_ = nullptr;
     void* modelCtx_ = nullptr;
     FrameGraph graph_;

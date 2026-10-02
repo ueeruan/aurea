@@ -48,7 +48,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // =============================================================================
-// Transporte de 60 dp, com marcador ao lado do play.
+// Transporte de 48 dp, com marcador ao lado do play.
 // =============================================================================
 
 /**
@@ -97,7 +97,6 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
             onLongClick = { store.seek(0) },
             modifier = Modifier.testTag("transport.previous"),
         )
-        PlayButton(store)
         val marked = store.playhead in store.markers.frames
         ChromeButton(
             if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
@@ -107,6 +106,7 @@ internal fun TransportBar(store: EditorStore, ui: EditorUi) {
             size = 20.dp, width = side, height = side,
             modifier = Modifier.testTag("transport.marker"),
         )
+        PlayButton(store)
         ChromeButton(
             CupertinoGlyph.ArrowRightToLine,
             stringResource(R.string.editor_ir_fim_segure_proximo),

@@ -926,8 +926,8 @@ enum AureaTimeline {
 
     // --- Medidas (dp) --------------------------------------------------------
     /// Régua 30; `rulerGap` = faixa do relógio (30) + 4 até a 1ª fileira.
-    static let rulerTicks: CGFloat = 18
-    static let rulerGap: CGFloat = 28
+    static let rulerTicks: CGFloat = 14
+    static let rulerGap: CGFloat = 30
     static let row: CGFloat = 32
     static let bar: CGFloat = 26
     static let barRadius: CGFloat = 0
@@ -981,7 +981,7 @@ enum EditorLayout {
     /// Redesenho 2026-09-29: topo 64, transporte 60 e SEM a faixa de 8 entre
     /// o palco e o transporte (arrastar a divisa continua no transporte).
     static let topBar: CGFloat = 64
-    static let transport: CGFloat = 60
+    static let transport: CGFloat = 48
     static let strip: CGFloat = 0
     static let timelineMin: CGFloat = 110
     static let previewMin: CGFloat = 96

@@ -30,7 +30,7 @@ internal object EditorLayout {
     // topo 64, transporte 60, sem a faixa entre prévia e transporte (a divisa
     // arrastável mora no fundo do transporte).
     const val TOP_BAR = 64f
-    const val TRANSPORT = 60f
+    const val TRANSPORT = 48f
     const val STRIP = 0f
     /** Prévia natural: 360 de 844 no mockup (fração da altura útil). */
     const val PREVIEW_NATURAL_FRACTION = 0.45f

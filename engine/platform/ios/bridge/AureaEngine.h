@@ -436,6 +436,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)setTextFontForLayer:(long long)layerId family:(NSString*)family weight:(uint32_t)weight italic:(BOOL)italic path:(NSString*)path NS_SWIFT_NAME(setTextFont(forLayer:family:weight:italic:path:));
 - (NSArray<NSDictionary<NSString*, id>*>*)availableFonts;
 - (nullable NSDictionary<NSString*, id>*)importFontAtPath:(NSString*)path;
+- (int)importColorLut:(long long)layer effect:(uint32_t)effect path:(NSString*)path;
+- (NSString*)colorLutName:(long long)layer effect:(uint32_t)effect;
 - (nullable NSDictionary<NSString*, id>*)text3DForLayer:(long long)layerId NS_SWIFT_NAME(text3D(forLayer:));
 - (BOOL)setText3DForLayer:(long long)layerId property:(NSString*)property stringValue:(nullable NSString*)stringValue numberValue:(float)numberValue NS_SWIFT_NAME(setText3D(forLayer:property:stringValue:numberValue:));
 - (void)setText:(long long)layerId content:(NSString*)content;

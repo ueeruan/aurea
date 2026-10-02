@@ -75,18 +75,20 @@ public:
         static const EffectInfo infos[] = {
             {effect_keys::kLensFlare, "Reflexo de lente", "Luz", EffectClass::Domain},
             {effect_keys::kRipple, "Ondulação radial", "Distorcer", EffectClass::Domain},
-            {effect_keys::kOpticsCompensation, "Compensação óptica", "Distorcer", EffectClass::Domain}
+            {effect_keys::kOpticsCompensation, "Compensação óptica", "Distorcer", EffectClass::Domain},
+            {effect_keys::kSceneFlare, "Flare 3D", "Luz", EffectClass::Domain}
         };
         return infos[mode_];
     }
     void declare_parameters(ParameterRegistry& p) const override {
         // Faixas digitadas: o passe é uma amostra por pixel (o laço de 6 do
         // shader é fixo), então os valores alargam ~5-10x o slider.
-        p.add_float("center_x", "Centro X", 50.f, -100.f, 200.f, kParamAnimatable | kParamPercent, "%");
+        const u32 centerFlags = mode_ == 3 ? kParamHidden : kParamAnimatable | kParamPercent;
+        p.add_float("center_x", "Centro X", 50.f, -100.f, 200.f, centerFlags, "%");
         p.typed_range(-1000.f, 1000.f);
-        p.add_float("center_y", "Centro Y", 50.f, -100.f, 200.f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("center_y", "Centro Y", 50.f, -100.f, 200.f, centerFlags, "%");
         p.typed_range(-1000.f, 1000.f);
-        if (mode_ == 0) {
+        if (mode_ == 0 || mode_ == 3) {
             p.add_float("brightness", "Brilho", 100.f, 0.f, 500.f, kParamAnimatable | kParamPercent, "%");
             p.typed_range(0.f, 2000.f);
             p.add_float("size", "Tamanho", 100.f, 1.f, 400.f, kParamAnimatable | kParamPercent, "%");
@@ -107,7 +109,9 @@ public:
             p.add_bool("reverse", "Inverter distorção", false);
         }
     }
-    bool is_identity(const EffectEval& e) const noexcept override { return e.f(2) < .0001f; }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.f(2) < .0001f || (mode_ == 3 && (!e.placement || !e.placement->sceneFlare));
+    }
     f32 input_margin(const EffectEval& e) const noexcept override { return mode_ == 1 ? e.f(2) : 0.f; }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_optical_frag, work));
@@ -120,7 +124,12 @@ public:
         u.p1 = {static_cast<f32>(mode_), mode_ == 2 ? 0.f : e.f(4), mode_ == 1 ? e.f(5) : 0.f, 0.f};
         u.p2 = {input.region.x, input.region.y, input.region.w, input.region.h};
         u.p3 = {w, h, 0.f, 0.f};
-        if (mode_ == 0) u.color = e.color(5);
+        if (mode_ == 0 || mode_ == 3) u.color = e.color(5);
+        if (mode_ == 3 && e.placement) {
+            u.p0.x = e.placement->flarePosition.x;
+            u.p0.y = e.placement->flarePosition.y;
+            u.p1.x = 0;
+        }
         return single_pass(ctx, ShaderId::effects_optical_frag, input, u, "optical", out);
     }
 private:
@@ -128,7 +137,7 @@ private:
 };
 }
 void register_optical_effects(EffectRegistry& r) {
-    for (u32 mode = 0; mode < 3; ++mode) (void)r.add(std::make_unique<Optical>(mode));
+    for (u32 mode = 0; mode < 4; ++mode) (void)r.add(std::make_unique<Optical>(mode));
     (void)r.add(std::make_unique<ChannelSplit>(false));
     (void)r.add(std::make_unique<ChannelSplit>(true));
 }

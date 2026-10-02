@@ -1144,6 +1144,7 @@ func fxEffectDisplayName(_ typeId: UInt32, _ engineName: String) -> String {
 }
 
 private let FxEnglishEffectNames: [UInt32: String] = Dictionary(uniqueKeysWithValues: [
+    "aurea.light.scene_flare": "3D Flare", "aurea.color.cube_lut": "LUT (.cube)",
     "aurea.light.halation": "Halation", "aurea.light.lens_flare": "Lens Flare",
     "aurea.distort.ripple": "Ripple", "aurea.distort.optics_compensation": "Optics Compensation",
     "aurea.blur.box": "Box Blur", "aurea.blur.directional": "Directional Blur",
@@ -1222,6 +1223,7 @@ let fxParamEnum = 7
 /// Outra camada da composição ("Camada de áudio"). O valor é o ÍNDICE da
 /// camada (parte baixa do id); −1 = nenhuma.
 let fxParamLayerRef = 10
+let fxParamTextureRef = 11
 
 // -----------------------------------------------------------------------------
 // EQ paramétrico: a resposta do gráfico, com a MESMA conta do filtro que toca

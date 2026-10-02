@@ -505,9 +505,14 @@ Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
     for (u32 i = 0; i < d.framesInFlight; ++i) {
         FrameContext& f = d.frames[i];
         if (&f == d.current || !f.submitted || f.frameNumber != frameNumber) continue;
-        // Só espera: coletar tempos e rodar a fila adiada continua com o
-        // begin_frame que reciclar este contexto (uma thread só mexe nisso).
-        return wait_command_buffer(f.cmd, f.completion, timeoutNs, "aguardar frame");
+        const Status status = wait_command_buffer(f.cmd, f.completion, timeoutNs, "aguardar frame");
+        if (!status.ok()) return status;
+        for (u32 j = 0; j < d.framesInFlight; ++j) {
+            FrameContext& done = d.frames[j];
+            if (&done != d.current && done.submitted && done.frameNumber <= frameNumber)
+                d.run_deferred(done);
+        }
+        return OkStatus;
     }
     // Frame já reciclado = concluído (o begin_frame esperou seu command buffer).
     return OkStatus;

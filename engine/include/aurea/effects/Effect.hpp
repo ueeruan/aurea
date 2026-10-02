@@ -97,6 +97,9 @@ struct LayerPlacement {
     /// região que o efeito devolve — o brilho (que depende dela) saía 1x1 e a
     /// camada 3D sumia.
     bool inScene3d = false;
+    /// Lens flare is generated in camera pixels at the projected light origin.
+    bool sceneFlare = false;
+    Vec2 flarePosition{};
     /// Camada do Particular (ParticleEmitter::Particular): a folha é desenhada
     /// SEM a rotação da camada e as partículas vivem no espaço 3D dela.
     /// `worldFromLayer` leva px da camada (z para longe) ao mundo, com a
@@ -107,6 +110,7 @@ struct LayerPlacement {
     bool particleSpace = false;
     Mat4 worldFromLayer = Mat4::identity();
     Mat4 compFromWorld = Mat4::identity();
+    Mat4 previousParticleProjection = Mat4::identity(); ///< layer -> camera pixels one frame earlier
     Vec3 camRight{1.0f, 0.0f, 0.0f};
     Vec3 camUp{0.0f, 1.0f, 0.0f};
     /// Obturador (graus) do desfoque de movimento da camada: > 0 só com a
@@ -225,6 +229,7 @@ public:
     virtual ~EffectResources() = default;
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
+    [[nodiscard]] virtual TextureHandle cube_lut(AssetId) noexcept { return {}; }
     /// Fração das amostras que os efeitos caros usam neste quadro (0,25..1).
     /// Preview adaptativo/calor < 1; export e prévia do catálogo = 1 sempre.
     [[nodiscard]] virtual f32 effect_quality() const noexcept { return 1.0f; }

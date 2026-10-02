@@ -314,6 +314,10 @@ struct SceneAsset {
     /// — as unidades dos animadores de letra/palavra/linha (Text3D.hpp).
     std::vector<u32> textUnits;
     u32 textWords = 0, textLines = 0;
+    // Logical code-point indices, including spaces, for shared 2D/3D presets.
+    // textUnits above retains visible-letter indices for saved legacy animators.
+    std::vector<u32> textLogicalUnits;
+    u32 textChars = 0;
 
     std::vector<Node> nodes;
     std::vector<i32> roots;            ///< cena padrão

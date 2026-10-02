@@ -80,7 +80,7 @@ internal fun Element3DPanel(env: PanelEnv) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
         SceneSettingsSection(store)
         if (store.detail?.kind != 8) {
-        t3?.let { Text3DSection(env, it); Text3DAnimSection(env) }
+        t3?.let { Text3DSection(env, it); TextAnimSection(env, showAnimatorEffect = false) }
         // Forma 3D: partes, cor e imagem por parte (Shape3DSection.kt) no lugar do material importado.
         val shape = store.shape3d
         shape?.let {

@@ -3449,4 +3449,9 @@
     <string name="scene_shadow_strength">قوة الظل</string>
     <string name="export_range_content">محتوى الخط الزمني</string>
     <string name="export_range_full">التكوين بالكامل</string>
+    <string name="lut_import">استيراد / استبدال LUT (.cube)</string>
+    <string name="lut_importing">جارٍ استيراد LUT…</string>
+    <string name="lut_imported">تم استيراد LUT</string>
+    <string name="lut_invalid">تعذر الاستيراد. استخدم ملف .cube حتى 32 ميغابايت مع LUT أحادي البعد أو ثلاثي الأبعاد حتى 65 نقطة لكل محور.</string>
+    <string name="scene_flare3d">وهج ثلاثي الأبعاد</string>
 </resources>

@@ -19,6 +19,7 @@
 #if defined(AUREA_TEST_VULKAN)
 
 #include "SyntheticVideo.hpp"
+#include "MockBackend.hpp"
 #if defined(AUREA_TEST_GLES)
 #include "GlesBackend.hpp"
 namespace aurea { namespace vk = gles; }
@@ -31,6 +32,8 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/text/TextTransform.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -174,9 +177,9 @@ struct Rig {
     Engine e;
     bool ok = false;
     Rig(const SyntheticConfig& cfg, f64 compFps, i64 frames, u32 depth,
-        VideoSourceFactory* mediaFactory = nullptr) : factory(cfg) {
+        VideoSourceFactory* mediaFactory = nullptr, GPUBackend* backend = nullptr) : factory(cfg) {
         EngineConfig ec;
-        ec.backend = new vk::Backend();
+        ec.backend = backend ? backend : new vk::Backend();
         ec.backendConfig.enableValidation = false;
         ec.mediaFactory = mediaFactory ? mediaFactory : &factory;
         ec.exportSinkFactory = &make_bench_sink;
@@ -1257,6 +1260,93 @@ AUREA_TEST(ExportBench, LongExports) {
         AUREA_CHECK(peakAfter10 < at10 + (64ull << 20));
     }
     std::printf("\n");
+}
+
+AUREA_TEST(Regression2135Gpu, CompletedFramesReturnDecoderLeasesBeforeAnotherSubmission) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    vk::Backend backend;
+    BackendConfig cfg; cfg.framesInFlight = 3;
+    AUREA_CHECK(backend.initialize(cfg).ok());
+    u32 released[2]{};
+    for (u32 i = 0; i < 2; ++i) {
+        FrameBegin frame;
+        AUREA_CHECK(backend.begin_offscreen_frame(frame).ok());
+        AUREA_CHECK(backend.end_frame().ok());
+        backend.defer_until_gpu_done([](void* count) { ++*static_cast<u32*>(count); }, &released[i]);
+    }
+    AUREA_CHECK_EQ(released[0] + released[1], 0u);
+    const u64 last = backend.last_submitted_frame();
+    AUREA_CHECK(backend.wait_frame(last, 5'000'000'000ull).ok());
+    AUREA_CHECK_EQ(released[0], 1u);
+    AUREA_CHECK_EQ(released[1], 1u);
+    AUREA_CHECK(backend.wait_frame(last, 0).ok());
+    backend.wait_idle();
+    AUREA_CHECK_EQ(released[0] + released[1], 2u);
+    backend.shutdown();
+}
+
+AUREA_TEST(Regression2135Gpu, CancelWhileDecodeNeedsGpuDoesNotWaitIdle) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72;
+    cfg.frameCount = 30; cfg.decodeCostUs = 500000;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> waiting{false};
+    std::atomic<u64> waitingFrame{~u64{0}};
+    backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
+        waitingFrame.store(frame);
+        waiting.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return Status{Errc::Timeout};
+    };
+    Rig r(cfg, 30, 30, 2, nullptr, backend);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    AUREA_CHECK(r.e.set_vector_blur(r.video_layer().pack(), 1));
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK(r.e.start_export(settings, "test-cancel-gpu.mp4").ok());
+    const u32 idleBefore = backend->idleWaits.load();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!waiting.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    AUREA_CHECK(waiting.load());
+    AUREA_CHECK_EQ(waitingFrame.load(), 0u); // Still preparing the very first video frame.
+    r.e.cancel_export();
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), idleBefore);
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+}
+
+AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviveReopen) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg; cfg.width = 320; cfg.height = 180;
+    Rig r(cfg, 30, 12, 2); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    scene3d::Text3DSpec spec; spec.content = "AUREA";
+    const auto id = r.e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    AUREA_CHECK(r.e.apply_text_preset(*id, 2));
+    auto* effect = r.add_effect(LayerId::unpack(*id), text::kTransformEffect);
+    AUREA_CHECK(effect != nullptr); if (!effect) return;
+    auto* layer = r.comp()->layer(LayerId::unpack(*id)); layer->end = FrameIndex{12};
+    auto& track = layer->tracks.get_or_create(TrackProperty::EffectParam, effect->id, param_track_key(text::kOffset, 0));
+    track.set(FrameIndex{0}, -20, Interpolation::Linear); track.set(FrameIndex{11}, 20, Interpolation::Linear);
+    Command duration; duration.type = CommandType::CompositionSetDuration;
+    duration.comp_duration.comp = r.e.project()->timeline().current(); duration.comp_duration.duration = FrameIndex{12};
+    AUREA_CHECK(r.e.apply_command(duration).ok());
+    r.cap.keepFrames = true;
+    auto result = run_export(r, 180, 30, false, 60);
+    AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), 12u);
+    if (r.cap.hashes.size() != 12) return;
+    AUREA_CHECK(r.cap.hashes.front() != r.cap.hashes.back());
+    const auto frames = r.cap.frames;
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_shared_text3d_export.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok()); AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    r.cap = BenchCapture{}; r.cap.keepFrames = true;
+    result = run_export(r, 180, 30, false, 60);
+    AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+    AUREA_CHECK(frames == r.cap.frames);
+    std::remove(path.c_str());
 }
 
 #endif // AUREA_TEST_VULKAN

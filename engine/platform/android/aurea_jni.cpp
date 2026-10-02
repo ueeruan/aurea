@@ -1786,6 +1786,21 @@ AUREA_JNI jstring AUREA_FN(nativeImportFont)(JNIEnv* env, jclass, jlong handle, 
     return r.ok() ? env->NewStringUTF(font_line(*r).c_str()) : nullptr;
 }
 
+AUREA_JNI jint AUREA_FN(nativeImportColorLut)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !path) return static_cast<jint>(Errc::InvalidArgument);
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    if (!p) return static_cast<jint>(Errc::OutOfMemory);
+    const Status result = c->engine.import_color_lut(static_cast<u64>(layer), static_cast<u32>(effect), p);
+    env->ReleaseStringUTFChars(path, p);
+    return result.raw();
+}
+AUREA_JNI jstring AUREA_FN(nativeColorLutName)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect) {
+    NativeContext* c = ctx_of(handle);
+    const auto name = c ? c->engine.color_lut_name(layer, effect) : std::string{};
+    return env->NewStringUTF(name.c_str());
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetTextFont)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring family, jint weight,
                                               jboolean italic, jstring path) {
     NativeContext* c = ctx_of(handle);

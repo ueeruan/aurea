@@ -11401,4 +11401,100 @@ AUREA_TEST(Gpu, Regression2128NullMotionTileKeyframesReachChildren) {
     f32 difference=0;for(usize i=0;i<first.px.size();++i)difference+=std::fabs(first.px[i]-last.px[i]);
     AUREA_CHECK(difference>100);
 }
+
+AUREA_TEST(Regression2135Gpu, CubeLutTrilinearMixAndPreviewMatchExport) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64,64);
+    const auto id=s.solid(64,64,{.2f,.4f,.6f,.5f},32,32);
+    s.comp->set_transparent_background(true);
+    auto cube=std::make_shared<CubeLut>(); cube->size=2; cube->dimensions=3;
+    for(int b=0;b<2;++b) for(int g=0;g<2;++g) for(int r=0;r<2;++r)
+        cube->values.push_back({static_cast<f32>(b),static_cast<f32>(g),static_cast<f32>(r),1}); // swap R/B
+    gpu().renderer.set_cube_lookup([](void* p,AssetId)->std::shared_ptr<const CubeLut>{return *static_cast<std::shared_ptr<CubeLut>*>(p);},&cube);
+    auto& fx=s.add_effect(id,effect_keys::kCubeLut);
+    fx.params[0].constant.ref=AssetId{12,1}.pack(); fx.params[2].constant=ParamValue::scalar(2);
+    fx.params[1].constant=ParamValue::scalar(0); const auto original=s.render();
+    fx.params[1].constant=ParamValue::scalar(100); const auto graded=s.render();
+    fx.params[1].constant=ParamValue::scalar(50); const auto half=s.render();
+    const auto exported=s.render(FrameIndex{0},1,true);
+    const auto a=original.at(32,32),b=graded.at(32,32),c=half.at(32,32);
+    AUREA_CHECK_NEAR(b[0],a[2],.003); AUREA_CHECK_NEAR(b[2],a[0],.003);
+    AUREA_CHECK_NEAR(b[1],a[1],.003); AUREA_CHECK_NEAR(b[3],a[3],.001);
+    AUREA_CHECK_NEAR(c[0],(a[0]+b[0])*.5f,.003);
+    for(usize i=0;i<half.px.size();++i) AUREA_CHECK_NEAR(half.px[i],exported.px[i],.001);
+    gpu().renderer.set_cube_lookup(nullptr,nullptr);
+}
+
+AUREA_TEST(Regression2135Gpu, SceneFlareFollowsParentCameraAndCullsBehindLens) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320,180); const auto result=rig.e.add_light(3);
+    AUREA_CHECK(result.ok()); if(!result.ok())return;
+    auto* comp=current_comp(rig.e); const auto id=LayerId::unpack(*result);
+    auto layer=[&](){return current_comp(rig.e)->layer(id);};
+    layer()->effects[0].params[3].constant=ParamValue::scalar(15);
+    layer()->effects[0].params[4].constant=ParamValue::scalar(0);
+    const auto first=rig.capture(320); AUREA_CHECK(first.at(160,90)[0]>150);
+    const auto parent=comp->add_layer(LayerKind::Null,"parent");
+    comp->layer(parent)->threeD=true; comp->layer(parent)->transform.position={50,0,0};
+    layer()->parent=parent;
+    const auto moved=rig.capture(320); AUREA_CHECK(moved.at(210,90)[0]>150);
+    AUREA_CHECK(moved.at(160,90)[0]<first.at(160,90)[0]/2);
+    const auto camera=add_test_camera(rig.e,{210,90,-216},kDefaultFov180);
+    const auto viewed=rig.capture(320); AUREA_CHECK(viewed.at(160,90)[0]>150);
+    (void)write_png("build/reference/flare-2135.png",viewed);
+    const char* path="build/reference/flare-2135.aurea";
+    AUREA_CHECK(rig.e.save_project(path).ok()); AUREA_CHECK(rig.e.load_project(path).ok());
+    AUREA_CHECK(rig.capture(320).rgba==viewed.rgba);
+    layer()->transform.position.z=-1000;
+    AUREA_CHECK(coverage(rig.capture(320))<.001f);
+}
+
+AUREA_TEST(Regression2135Gpu, ParticleBlurAmountChangesTrailIn2DAnd3D) {
+    AUREA_REQUIRE_GPU();
+    auto shot=[](bool threeD,f32 amount){
+        Scene3DRig rig(320,180); const auto id=measuring_particles(rig.e,4,.1f,5);
+        auto* l=current_comp(rig.e)->layer(LayerId::unpack(id)); l->threeD=threeD;
+        l->particles.speed=600; l->particles.emitterOffset={-140,0};
+        AUREA_CHECK(rig.e.set_motion_blur(id,true)); l->transform.motionBlurAmount=amount;
+        seek_frame(rig.e,10); return lit_box(rig.capture(320));
+    };
+    for(bool threeD:{false,true}) {
+        const auto off=shot(threeD,0),normal=shot(threeD,1),strong=shot(threeD,4);
+        std::printf(" particle blur amount: %d, widths %u/%u/%u\n",threeD,off.w(),normal.w(),strong.w());
+        AUREA_CHECK(normal.w()>off.w()+4); AUREA_CHECK(strong.w()>normal.w()+10);
+        AUREA_CHECK(strong.h()<=off.h()+2);
+    }
+}
+
+AUREA_TEST(Regression2135Gpu, ParticularBlurIncludesMovingLayerParentAndCamera) {
+    AUREA_REQUIRE_GPU();
+    auto shot=[](int moving,bool blur){
+        Scene3DRig rig(320,180); const auto id=rig.e.add_particles(particular::kPresetBase);
+        AUREA_CHECK(id.ok()); if(!id.ok())return Box8{};
+        auto* comp=current_comp(rig.e); auto* l=comp->layer(LayerId::unpack(*id));
+        auto& fx=l->effects[0]; auto set=[&](u32 p,f32 v){fx.params[p].constant=ParamValue::scalar(v);};
+        for(u32 p:{particular::kVelocity,particular::kGravity,particular::kWindX,particular::kWindY,particular::kWindZ,
+                   particular::kTurbulence,particular::kEmitterW,particular::kEmitterH,particular::kEmitterD,
+                   particular::kFadeIn,particular::kFadeOut,particular::kSizeRandom,particular::kStretch})set(p,0);
+        set(particular::kSize,5);set(particular::kSizeEnd,100);set(particular::kPreRoll,1000);set(particular::kRate,30);
+        l->motionBlur=blur; comp->motion_blur().enabled=true; comp->motion_blur().shutterAngle=360;
+        Layer* animated=l;
+        if(moving==1) {
+            auto parent=comp->add_layer(LayerKind::Null,"moving parent");
+            comp->layer(LayerId::unpack(*id))->parent=parent; animated=comp->layer(parent); animated->threeD=true;
+        } else if(moving==2) {
+            const auto camera=add_test_camera(rig.e,{160,90,-216},kDefaultFov180);
+            animated=comp->layer(LayerId::unpack(camera));
+        }
+        const f32 at=animated->transform.position.x;
+        auto& track=animated->tracks.get_or_create(TrackProperty::PositionX);
+        track.set(FrameIndex{0},at-100,Interpolation::Linear);track.set(FrameIndex{20},at+100,Interpolation::Linear);
+        seek_frame(rig.e,10);return lit_box(rig.capture(320));
+    };
+    for(int moving:{0,1,2}) {
+        const auto off=shot(moving,false),on=shot(moving,true);
+        std::printf(" particular moving %d widths %u -> %u\n",moving,off.w(),on.w());
+        AUREA_CHECK(off.w()>0);AUREA_CHECK(on.w()>=off.w()+5);AUREA_CHECK(on.h()<=off.h()+2);
+    }
+}
 #endif

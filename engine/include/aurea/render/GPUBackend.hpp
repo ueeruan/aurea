@@ -689,7 +689,10 @@ public:
     /// Espera a GPU concluir UM frame já submetido — o fence dele, não a fila
     /// inteira. É o que deixa o export ler os planos do quadro N enquanto a
     /// GPU já trabalha no N+1. Frame já reciclado = concluído (o begin_frame
-    /// esperou o fence dele). O padrão, para backend sem fence por frame, é
+    /// esperou o fence dele). Ao concluir, libera as referências adiadas dos
+    /// frames concluídos até ele; o decoder não precisa de uma nova submissão
+    /// para recuperar seus buffers. Chamar sob a mesma exclusão do render.
+    /// O padrão, para backend sem fence por frame, é
     /// esperar tudo.
     [[nodiscard]] virtual Status wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
         (void)frameNumber;

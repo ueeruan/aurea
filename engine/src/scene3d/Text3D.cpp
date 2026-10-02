@@ -14,6 +14,7 @@
 #include "aurea/timeline/LayerAnimator.hpp"
 
 #include "aurea/text/Text.hpp"
+#include "aurea/text/TextTransform.hpp"
 #include "aurea/text/FontManager.hpp"
 #include <algorithm>
 #include <cmath>
@@ -1000,6 +1001,8 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
 struct GeomAsset {
     std::vector<Mesh> glyphMeshes;
     std::vector<u32> glyphUnits;   ///< 3 por letra visível: letra, palavra, linha
+    std::vector<u32> logicalUnits;
+    u32 chars = 0;
     u32 words = 0, lines = 0;
     std::vector<Primitive> primitives;
     Aabb bounds;        ///< caixa da malha (o `Engine` usa para enquadrar a layer)
@@ -1050,6 +1053,19 @@ std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3D
         text::shaped_glyphs(font, text, glyphs);
         if (glyphs.size() > 256) { detail = "Letter controls support up to 256 glyphs"; return nullptr; }
         auto result = std::make_shared<GeomAsset>();
+        std::vector<u32> wordOf;
+        u32 logicalWord = 0;
+        bool inWord = false;
+        for (usize byte = 0; byte < spec.content.size(); ++byte) {
+            const u8 c = static_cast<u8>(spec.content[byte]);
+            if ((c & 0xc0) == 0x80) continue;
+            const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+                (c == 0xc2 && byte + 1 < spec.content.size() && static_cast<u8>(spec.content[byte + 1]) == 0xa0);
+            if (!space && !inWord) inWord = true;
+            if (space && inWord) { ++logicalWord; inWord = false; }
+            wordOf.push_back(logicalWord);
+        }
+        result->chars = static_cast<u32>(wordOf.size());
         // Unidades dos animadores: a letra conta só as visíveis (a máquina de
         // escrever não para nos espaços); palavra nova depois de espaço ou de
         // troca de linha.
@@ -1067,6 +1083,8 @@ std::shared_ptr<const GeomAsset> build_geom(const text::Font& font, const Text3D
             if (!result->glyphMeshes.empty() && (gap || line != lastLine)) ++word;
             gap = false; lastLine = line;
             result->glyphUnits.insert(result->glyphUnits.end(), {static_cast<u32>(result->glyphMeshes.size()), word, line});
+            const u32 cluster = glyphs[i].cluster;
+            result->logicalUnits.insert(result->logicalUnits.end(), {cluster, cluster < wordOf.size() ? wordOf[cluster] : 0, line});
             result->words = word + 1;
             result->lines = std::max(result->lines, line + 1);
             Mesh mesh; mesh.name = "Letter " + std::to_string(result->glyphMeshes.size() + 1);
@@ -1340,6 +1358,8 @@ ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
         asset->textUnits = geom->glyphUnits;
         asset->textWords = geom->words;
         asset->textLines = geom->lines;
+        asset->textLogicalUnits = geom->logicalUnits;
+        asset->textChars = geom->chars;
         for (u32 i = 0; i < asset->meshes.size(); ++i) {
             scene3d::Node node; node.name = asset->meshes[i].name; node.mesh = static_cast<i32>(i);
             asset->nodes.push_back(node); asset->roots.push_back(static_cast<i32>(i));
@@ -1477,31 +1497,87 @@ void apply_text3d_animators(const SceneAsset& asset, const Layer& layer, f64 loc
     nodeOpacity.clear();
     if (nodeFill) nodeFill->clear();
     // Formas 3D também: cada parte é uma unidade (textUnits = parte, parte, 0).
-    if ((!asset.textGlyphLayout && !asset.shapeParts) || (!layeranim::has_units(layer) && !text::has_animator_effect(layer))) return;
+    const bool transform = asset.textGlyphLayout && text::has_transform_effect(layer);
+    const bool presets = asset.textGlyphLayout && text::has_animators(layer.text);
+    if ((!asset.textGlyphLayout && !asset.shapeParts) ||
+        (!layeranim::has_units(layer) && !text::has_animator_effect(layer) && !transform && !presets)) return;
     const usize n = std::min(asset.nodes.size(), nodeWorld.size());
     if (n == 0 || asset.textUnits.size() < n * 3) return;
     std::vector<text::GlyphUnits> units(n);
     for (usize i = 0; i < n; ++i) units[i] = text::GlyphUnits{asset.textUnits[i * 3], asset.textUnits[i * 3 + 1], asset.textUnits[i * 3 + 2]};
+    std::vector<text::GlyphUnits> logical = units;
+    if (asset.textLogicalUnits.size() >= n * 3)
+        for (usize i = 0; i < n; ++i) logical[i] = {asset.textLogicalUnits[i * 3], asset.textLogicalUnits[i * 3 + 1], asset.textLogicalUnits[i * 3 + 2]};
+    const u32 chars = asset.textChars ? asset.textChars : static_cast<u32>(n);
     std::vector<text::GlyphAnim> anim(n);
+    if (presets) text::evaluate_text_animators(layer.text, layer.tracks, localTime, fps, logical,
+        chars, std::max(1u, asset.textWords), std::max(1u, asset.textLines), anim);
     // A MESMA avaliação das letras do texto 2D (progresso, atraso, curva, saída, wiggle).
     layeranim::apply_to_glyphs(layer, localTime, fps > 0.0 ? fps : 30.0, units, static_cast<u32>(n), std::max(1u, asset.textWords),
                                std::max(1u, asset.textLines), 0.5f, anim);
     text::evaluate_animator_effects(layer, localTime, fps, units, static_cast<u32>(n), std::max(1u, asset.textWords), std::max(1u, asset.textLines), anim);
     constexpr f32 kPx = 0.01f;   // 100 px do animador = 1 altura de letra
+    std::vector<Mat4> transforms;
+    if (transform) {
+        text::TextLayout layout;
+        layout.chars = chars; layout.words = std::max(1u, asset.textWords); layout.lines = std::max(1u, asset.textLines);
+        layout.quads.resize(n);
+        for (usize i = 0; i < n; ++i) {
+            const i32 mesh = asset.nodes[i].mesh;
+            if (mesh < 0 || static_cast<usize>(mesh) >= asset.meshes.size()) continue;
+            const auto& bounds = asset.meshes[static_cast<usize>(mesh)].bounds;
+            auto& q = layout.quads[i];
+            q.x0 = bounds.min.x / kPx; q.x1 = bounds.max.x / kPx;
+            q.y0 = -bounds.max.y / kPx; q.y1 = -bounds.min.y / kPx;
+            q.charIndex = logical[i].charIndex; q.wordIndex = logical[i].wordIndex; q.lineIndex = logical[i].lineIndex;
+        }
+        static const ParameterRegistry specs = [] { ParameterRegistry p; text::declare_transform_params(p); return p; }();
+        const f32 unitScale = std::max(1e-6f, layer.model.unitScale);
+        Vec3 anchor = layer.transform.anchor;
+        for (u32 axis = 0; axis < 3; ++axis) {
+            const auto* tr = layer.tracks.find(static_cast<TrackProperty>(static_cast<u16>(TrackProperty::AnchorX) + axis));
+            if (!tr) continue;
+            f32& value = axis == 0 ? anchor.x : axis == 1 ? anchor.y : anchor.z;
+            value = tr->value_or(FrameIndex{static_cast<i64>(std::floor(localTime))}, value);
+        }
+        const Vec3 pivot{(layer.model.pivot.x + anchor.x / unitScale) / kPx,
+                         (-layer.model.pivot.y + anchor.y / unitScale) / kPx,
+                         (layer.model.pivot.z - anchor.z / unitScale) / kPx};
+        text::evaluate_transform_effects(layer, specs, localTime, layout, anim, transforms, &pivot);
+    }
     nodeOpacity.assign(n, 1.0f);
     if (nodeFill) nodeFill->resize(n);
+    // Presets can group the pivot by word/line, exactly like normal text.
+    // Compute these before mutating any node so seeking is order-independent.
+    std::vector<Aabb> wordBounds(std::max(1u, asset.textWords)), lineBounds(std::max(1u, asset.textLines));
+    for (usize i = 0; i < n; ++i) {
+        const i32 mesh = asset.nodes[i].mesh;
+        if (mesh < 0 || static_cast<usize>(mesh) >= asset.meshes.size()) continue;
+        const Aabb& b = asset.meshes[static_cast<usize>(mesh)].bounds;
+        for (u32 corner = 0; corner < 8; ++corner) {
+            const Vec3 p = nodeWorld[i].transform_point({corner & 1 ? b.max.x : b.min.x,
+                corner & 2 ? b.max.y : b.min.y, corner & 4 ? b.max.z : b.min.z});
+            if (logical[i].wordIndex < wordBounds.size()) wordBounds[logical[i].wordIndex].add(p);
+            if (logical[i].lineIndex < lineBounds.size()) lineBounds[logical[i].lineIndex].add(p);
+        }
+    }
     for (usize i = 0; i < n; ++i) {
         const text::GlyphAnim& g = anim[i];
         const i32 mesh = asset.nodes[i].mesh;
         if (mesh < 0 || static_cast<usize>(mesh) >= asset.meshes.size()) continue;
         // Pivô = centro da letra onde o layout a pôs.
-        const Vec3 pivot = nodeWorld[i].transform_point(asset.meshes[static_cast<usize>(mesh)].bounds.center());
+        const Aabb* group = g.anchorGrouping == 1 && logical[i].wordIndex < wordBounds.size() ? &wordBounds[logical[i].wordIndex]
+            : g.anchorGrouping == 2 && logical[i].lineIndex < lineBounds.size() ? &lineBounds[logical[i].lineIndex] : nullptr;
+        const Vec3 pivot = group && group->valid() ? group->center()
+            : nodeWorld[i].transform_point(asset.meshes[static_cast<usize>(mesh)].bounds.center());
         const Vec3 move{(g.translate.x + g.trackingShift) * kPx, -g.translate.y * kPx, g.translate.z * kPx};
         // Y do 2D aponta para baixo: X e Z giram ao contrário na cena (Y para cima).
         const Mat4 orient = Mat4::from_quat(Quat::from_euler_zyx(-g.rotation.x * kDeg2Rad, g.rotation.y * kDeg2Rad, -g.rotation.z * kDeg2Rad));
         const Mat4 size = Mat4::scale(Vec3{g.scale.x, g.scale.y, (g.scale.x + g.scale.y) * 0.5f});
         const Mat4 flipY = Mat4::scale({1, -1, 1});
         nodeWorld[i] = Mat4::translation(pivot + move) * orient * flipY * g.skewTransform * flipY * size * Mat4::translation(-pivot) * nodeWorld[i];
+        if (transform) nodeWorld[i] = Mat4::scale({kPx, -kPx, kPx}) * transforms[i]
+            * Mat4::scale({1 / kPx, -1 / kPx, 1 / kPx}) * nodeWorld[i];
         nodeOpacity[i] = std::isfinite(g.opacity) ? std::clamp(g.opacity * g.fillOpacity, 0.0f, 1.0f) : 1.0f;
         if (nodeFill) (*nodeFill)[i] = {srgb_to_linear(g.fill.x), srgb_to_linear(g.fill.y), srgb_to_linear(g.fill.z), g.fill.w};
     }

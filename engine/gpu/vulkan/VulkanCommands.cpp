@@ -878,12 +878,19 @@ Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
     for (u32 i = 0; i < framesInFlight_; ++i) {
         FrameContext& f = frames_[i];
         if (&f == current_ || !f.submitted || f.frameNumber != frameNumber) continue;
-        // Só espera: coletar tempos e rodar a fila adiada continua com o
-        // begin_frame que reciclar este contexto (uma thread só mexe nisso).
         const VkResult w = vkWaitForFences(device_, 1, &f.fence, VK_TRUE, timeoutNs);
         if (note_device_lost(w)) return Status{Errc::DeviceLost, "fence"};
         if (w == VK_TIMEOUT) return Status{Errc::Timeout, "GPU atrasada"};
-        return check(w, "vkWaitForFences");
+        const Status status = check(w, "vkWaitForFences");
+        if (!status.ok()) return status;
+        // One queue: this fence also covers earlier submissions. Release
+        // decoder image leases now, even if export cannot submit another frame.
+        for (u32 j = 0; j < framesInFlight_; ++j) {
+            FrameContext& done = frames_[j];
+            if (&done != current_ && done.submitted && done.frameNumber <= frameNumber)
+                run_deferred(done);
+        }
+        return OkStatus;
     }
     return OkStatus;
 }

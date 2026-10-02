@@ -88,6 +88,12 @@ std::vector<AssetId> Project::unreferenced_assets() const {
             if (l.source.valid()) used.push_back(l.source);
             if (l.nested.composition.valid()) { /* é composição, não asset */ }
             if (l.model.scene.valid()) used.push_back(l.model.scene);
+            for (const auto& effect : l.effects) {
+                if (effect.type == effect_type_id("aurea.color.cube_lut") && !effect.params.empty()) {
+                    const auto id = AssetId::unpack(effect.params[0].constant.ref);
+                    if (id.valid()) used.push_back(id);
+                }
+            }
             if (l.text.font.valid()) { /* fonte é asset também */ }
         });
         if (comp.environment().hdri.valid()) used.push_back(comp.environment().hdri);

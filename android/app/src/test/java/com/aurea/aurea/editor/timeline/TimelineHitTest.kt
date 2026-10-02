@@ -29,8 +29,8 @@ class TimelineHitTest {
 
     @Test
     fun `a geometria do redesenho`() {
-        // Mockup 2026-09-29: riscos 30 + relógio 30 + respiro 8, e a barra 2 dp abaixo do topo da pílula.
-        assertEquals(52f, m.rowsTop, 0f)
+        // Régua compacta: 14 de riscos + 30 de relógio e respiro.
+        assertEquals(44f, m.rowsTop, 0f)
         // Fileira 32 (pílula 28 + vão 4) / barra 24: as camadas eram grandes demais.
         assertEquals(32f, m.row, 0f)
         assertEquals(26f, m.bar, 0f)
@@ -47,7 +47,7 @@ class TimelineHitTest {
         assertEquals(20f, m.glyphBox, 0f)
         assertEquals(3f, m.stripe, 0f)
         assertEquals(0f, m.barRadius, 0f)
-        assertEquals(40f, m.playheadTop, 0f)
+        assertEquals(36f, m.playheadTop, 0f)
     }
 
     @Test

@@ -3435,4 +3435,9 @@
     <string name="scene_shadow_strength">Интенсивность тени</string>
     <string name="export_range_content">Содержимое таймлайна</string>
     <string name="export_range_full">Вся композиция</string>
+    <string name="lut_import">Импорт / замена LUT (.cube)</string>
+    <string name="lut_importing">Импорт LUT…</string>
+    <string name="lut_imported">LUT импортирован</string>
+    <string name="lut_invalid">Не удалось импортировать. Используйте .cube до 32 МБ с 1D LUT или 3D LUT до 65 точек на ось.</string>
+    <string name="scene_flare3d">3D блик</string>
 </resources>

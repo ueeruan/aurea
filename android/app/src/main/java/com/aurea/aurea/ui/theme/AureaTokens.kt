@@ -691,8 +691,8 @@ object AureaTimeline {
     }
 
     // --- Medidas (dp) --------------------------------------------------------
-    val RulerTicks = 18.dp                 // faixa dos riscos (fortes 16, finos 6)
-    val RulerGap = 34.dp                   // relógio + respiro até a primeira barra em 52
+    val RulerTicks = 14.dp                 // faixa dos riscos (fortes 12, finos 6)
+    val RulerGap = 30.dp                   // relógio + respiro até a primeira barra em 44
     val Row = 32.dp                        // pílula 28 + 4 de vão (antes 36: camadas grandes demais)
     val Bar = 26.dp                        // barra do clipe
     val BarRadius = 0.dp

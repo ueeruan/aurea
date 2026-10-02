@@ -128,7 +128,7 @@ internal fun EffectPicker(
     val text3dLayer = store.text3d != null
     val pickable = remember(catalog, layerHasAudio, textLayer, text3dLayer) {
         pickableEffects(catalog, layerHasAudio).filter {
-            (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform")) &&
+            (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform")) &&
                 (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator"))
         }
     }

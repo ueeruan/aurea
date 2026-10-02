@@ -19,4 +19,9 @@ f32 transform_padding(const Layer& layer, const EffectRegistry& registry, f64 ti
 void evaluate_transform_effects(const Layer& layer, const EffectRegistry& registry, f64 time,
                                 const TextLayout& layout, std::vector<GlyphAnim>& styles,
                                 std::vector<Mat4>& matrices);
+// Mesh text uses the same selectors and transforms in a 100 px/em coordinate
+// system, with an explicit layer pivot instead of a raster padding offset.
+void evaluate_transform_effects(const Layer& layer, const ParameterRegistry& specs, f64 time,
+                                const TextLayout& layout, std::vector<GlyphAnim>& styles,
+                                std::vector<Mat4>& matrices, const Vec3* layerPivot);
 }

@@ -368,9 +368,48 @@ public:
     }
 };
 
+class ImportedCubeLut final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo info{effect_keys::kCubeLut, "LUT (.cube)", "Cor", EffectClass::Neighborhood};
+        return info;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_texture_ref("file", "Arquivo .cube");
+        p.add_float("mix", "Intensidade", 100, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("size", "Size", 2, 2, 65536, kParamHidden);
+        p.add_float("dimensions", "Dimensions", 3, 1, 3, kParamHidden);
+        ParamSpec domain;
+        domain.type = ParamType::Point3D; domain.flags = kParamHidden;
+        domain.minValue = -65504; domain.maxValue = 65504;
+        domain.id = "domain_min"; domain.label = "Domain min"; domain.defaultValue = ParamValue::vec3(0,0,0); p.add(domain);
+        domain.id = "domain_max"; domain.label = "Domain max"; domain.defaultValue = ParamValue::vec3(1,1,1); p.add(domain);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override { return e.f(1) <= 0 || !e.value(0).ref; }
+    void resolve_resources(EffectEval& e) const noexcept override {
+        if (e.resources && e.value(0).ref) e.aux = e.resources->cube_lut(AssetId::unpack(e.value(0).ref));
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_cube_lut_frag, work));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
+        if (!e.aux.valid()) return Status{Errc::MediaSourceMissing, "arquivo LUT indisponivel"};
+        auto u = base_uniforms(input);
+        u.p0 = {e.f(1) * .01f, e.f(2), e.f(3), 0};
+        const Vec3 lo = e.value(4).as_vec3(), hi = e.value(5).as_vec3();
+        u.p1 = {lo.x, lo.y, lo.z, 0}; u.p2 = {hi.x, hi.y, hi.z, 0};
+        out = input; out.texture = ctx.texture("LUT", input.width, input.height);
+        if (ctx.fullscreen_pass("LUT", PassStage::Effects, out.texture, ShaderId::effects_cube_lut_frag,
+            {PassTexture{input.texture}, PassTexture{{}, e.aux, CommonSampler::LinearClamp}}, &u, sizeof(u)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        return OkStatus;
+    }
+};
+
 } // namespace
 
 void register_color_effects(EffectRegistry& r) {
+    (void)r.add(std::make_unique<ImportedCubeLut>());
     (void)r.add(std::make_unique<Exposure>());
     (void)r.add(std::make_unique<BrightnessContrast>());
     (void)r.add(std::make_unique<Saturation>());

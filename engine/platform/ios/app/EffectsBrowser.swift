@@ -68,7 +68,7 @@ func fxMakesSound(_ entry: EffectCatalogItem) -> Bool {
 
 /// O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som.
 func fxPickableEffects(_ catalog: [EffectCatalogItem], layerHasAudio: Bool) -> [EffectCatalogItem] {
-    catalog.filter { !["aurea.motion.oscillate", "aurea.layout.grid_builder", "aurea.layout.grid_item"].map(fxEffectTypeId).contains($0.typeId) && (layerHasAudio || !fxIsAudioCategory($0.category) || fxMakesSound($0)) }
+    catalog.filter { !["aurea.motion.oscillate", "aurea.layout.grid_builder", "aurea.layout.grid_item", "aurea.light.scene_flare"].map(fxEffectTypeId).contains($0.typeId) && (layerHasAudio || !fxIsAudioCategory($0.category) || fxMakesSound($0)) }
 }
 
 /// A grade sem busca: tudo (categoria nula) ou só a categoria escolhida.
@@ -195,7 +195,8 @@ struct EffectPickerView: View {
 
     private var pickable: [EffectCatalogItem] {
         fxPickableEffects(model.effectCatalog, layerHasAudio: layerHasAudio).filter {
-            (model.selectedLayer?.kind == 4 || $0.typeId != fxEffectTypeId("aurea.text.transform")) &&
+            (model.selectedLayer?.kind == 4 || $0.typeId != fxEffectTypeId("aurea.text.transform") ||
+                !(model.engine.text3D(forLayer: model.primarySelection ?? 0) ?? [:]).isEmpty) &&
             (model.selectedLayer?.kind == 4 || $0.typeId != fxEffectTypeId("aurea.text.animator") ||
                 !(model.engine.text3D(forLayer: model.primarySelection ?? 0) ?? [:]).isEmpty)
         }

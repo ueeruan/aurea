@@ -98,6 +98,7 @@ set(AUREA_CORE_SOURCES
     src/render/RendererDepth.cpp
     src/render/RendererAudio.cpp
     src/effects/Parameter.cpp
+    src/effects/CubeLut.cpp
     src/effects/EffectGraph.cpp
     src/effects/builtin/ColorEffects.cpp
     src/effects/builtin/BlurEffects.cpp

@@ -395,6 +395,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun addEffectAndFocus(type: Int) {
         val layer = primary ?: return
+        typingHandler.removeCallbacks(applyText3d)
+        if (text3dPending) text3d?.let { pushText3D(layer, it) }
         pendingEffectFocus = EffectFocusRequest(layer, type, effects.map { it.effectId }.toSet())
         addEffect(type, listOf(layer))
     }
@@ -1394,14 +1396,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshTextFont()
             val st = FloatArray(20)
             textStyle = same(textStyle, if (engine.queryTextStyle(id, st)) st else null)
-            val anim = engine.queryTextAnimators(id)?.let { a -> List(a.size / 40) { i -> a.copyOfRange(i * 40, i * 40 + 40) } } ?: emptyList()
-            val old = textAnimators
-            if (anim.size != old.size || anim.indices.any { !anim[it].contentEquals(old[it]) }) textAnimators = anim
         } else {
             textFont = null
             textStyle = null
-            textAnimators = emptyList()
         }
+        val anim = if (id != null && (detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind || text3d != null)) {
+            engine.queryTextAnimators(id)?.let { a -> List(a.size / 40) { i -> a.copyOfRange(i * 40, i * 40 + 40) } } ?: emptyList()
+        } else emptyList()
+        val oldAnimators = textAnimators
+        if (anim.size != oldAnimators.size || anim.indices.any { !anim[it].contentEquals(oldAnimators[it]) }) textAnimators = anim
         // Animadores de camada (qualquer tipo), comprimento do desfoque e escopo.
         if (id != null) {
             val la = engine.queryLayerAnimators(id)?.let { a -> List(a.size / 32) { i -> a.copyOfRange(i * 32, i * 32 + 32) } } ?: emptyList()
@@ -4243,6 +4246,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun applyTextPreset(preset: Int) {
         val id = primary ?: return
+        typingHandler.removeCallbacks(applyText3d)
+        if (text3dPending) text3d?.let { pushText3D(id, it) }
         if (!engine.applyTextPreset(id, preset)) {
             showToast(appText(R.string.msg_animacao_de_texto_so_vale_para))
             return
@@ -4759,6 +4764,45 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 else applyTextFont(item)
             }
             showToast(appText(R.string.msg_fonte_importada, item.family))
+        }
+    }
+
+    fun colorLutName(layer: Long, effect: Int): String = engine.colorLutName(layer, effect)
+
+    fun importColorLut(uri: Uri, layer: Long, effect: Int) {
+        val name = displayName(uri)?.substringAfterLast('/')?.substringAfterLast('\\') ?: "look.cube"
+        if (!name.endsWith(".cube", ignoreCase = true)) {
+            errorMessage = appText(R.string.lut_invalid)
+            return
+        }
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                val directory = File(getApplication<Application>().filesDir, "projetos/luts/${java.util.UUID.randomUUID()}")
+                val file = File(directory, name.takeLast(160).replace(Regex("[^\\p{L}\\p{N}._ -]"), "_"))
+                try {
+                    check(directory.mkdirs())
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                        file.outputStream().use { output ->
+                            val buffer = ByteArray(65536)
+                            var total = 0L
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                check(total <= 32L * 1024 * 1024)
+                                output.write(buffer, 0, count)
+                            }
+                        }
+                    } ?: error("No stream")
+                    check(engine.importColorLut(layer, effect, file.absolutePath) == 0)
+                    true
+                } catch (_: Exception) {
+                    file.delete(); directory.delete(); false
+                }
+            }
+            refreshNow()
+            if (ok) showToast(appText(R.string.lut_imported))
+            else errorMessage = appText(R.string.lut_invalid)
         }
     }
 

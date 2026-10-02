@@ -210,7 +210,7 @@ private struct ShellInlineName: View {
     }
 }
 
-/// Transporte de 60 pt, com marcador ao lado do play.
+/// Transporte de 48 pt, com marcador ao lado do play.
 /// Segurar duplicar também abre copiar e colar.
 struct TransportView: View {
     @EnvironmentObject private var model: AureaModel
@@ -229,9 +229,9 @@ struct TransportView: View {
             Spacer(minLength: 0)
             startButton
             Spacer(minLength: 0)
-            playButton
-            Spacer(minLength: 0)
             markerButton
+            Spacer(minLength: 0)
+            playButton
             Spacer(minLength: 0)
             endButton
             Spacer(minLength: 0)

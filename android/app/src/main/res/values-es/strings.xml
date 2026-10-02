@@ -3431,4 +3431,9 @@ para editar la curva.</string>
     <string name="scene_shadow_strength">Intensidad de la sombra</string>
     <string name="export_range_content">Contenido de la línea de tiempo</string>
     <string name="export_range_full">Composición completa</string>
+    <string name="lut_import">Importar / cambiar LUT (.cube)</string>
+    <string name="lut_importing">Importando LUT…</string>
+    <string name="lut_imported">LUT importado</string>
+    <string name="lut_invalid">No se pudo importar. Usa un .cube de hasta 32 MB, con LUT 1D o 3D de hasta 65 puntos por eje.</string>
+    <string name="scene_flare3d">Destello 3D</string>
 </resources>

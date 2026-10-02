@@ -1,5 +1,7 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.presets.readPreset
 import androidx.compose.runtime.rememberCoroutineScope
@@ -771,12 +773,35 @@ private fun ParamRows(
         ParamType.COLOR -> EffectColorRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         // Outra camada ("Camada de áudio"): escolhe na lista das camadas.
         ParamType.LAYER_REFERENCE -> EffectLayerRow(env, id, s, label, menu)
+        ParamType.TEXTURE_REFERENCE -> CubeLutImportRow(env, id)
         // Curva/degradê/textura: o motor tem, o app ainda não edita — sem botão falso.
         else -> PropertyCustomRow(label = label, selected = false, onSelect = {}) {
             Text(
                 stringResource(R.string.panel_ainda_nao_editavel_app),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
+        }
+    }
+}
+
+@Composable
+private fun CubeLutImportRow(env: PanelEnv, effect: Int) {
+    val store = env.store
+    val layer = store.primary ?: return
+    var target by remember { mutableStateOf<Pair<Long, Int>?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        target?.let { (id, fx) -> if (uri != null) store.importColorLut(uri, id, fx) }
+        target = null
+    }
+    val name = store.colorLutName(layer, effect)
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        if (name.isNotBlank()) Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        Box(Modifier.fillMaxWidth().height(48.dp).testTag("effect.lut.import")
+            .clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
+            .tocavel(onClick = { target = layer to effect; picker.launch(arrayOf("*/*")) }),
+            contentAlignment = Alignment.Center) {
+            Text(stringResource(R.string.lut_import), color = AureaColors.Text)
         }
     }
 }

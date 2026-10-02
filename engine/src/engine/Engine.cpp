@@ -354,6 +354,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     gpu_.reset(config.backend);
     renderer_.set_model_lookup(&Engine::model_lookup, this);
     renderer_.set_hdri_lookup(&Engine::hdri_lookup, this);
+    renderer_.set_cube_lookup(&Engine::cube_lookup, this);
     if (gpu_) {
         // O backend guarda o caminho do cache de pipeline: por padrão, o mesmo
         // diretório de cache do motor (que vive em config_, não no chamador).
@@ -511,6 +512,7 @@ void Engine::shutdown() noexcept {
         images_.clear();
         models_.clear();
         hdris_.clear();
+    cubeLuts_.clear();
     }
     state_ = EngineState::Uninitialized;
 }
@@ -774,6 +776,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) no
     images_.clear();
     models_.clear();
     hdris_.clear();
+    cubeLuts_.clear();
     history_.clear();
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     selection_.clear();
@@ -1058,6 +1061,7 @@ Status Engine::load_project(const char* path) noexcept {
         images_.clear();
         models_.clear();
         hdris_.clear();
+    cubeLuts_.clear();
         history_.clear();
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
         selection_.clear();
@@ -1129,7 +1133,7 @@ Status Engine::load_project(const char* path) noexcept {
                 for (u32 i = 0; i < c.order().size(); ++i) {
                     const Layer* l = c.layer(c.order().at(i));
                     if (l && l->kind == LayerKind::Model3D && std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
-                        return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(effect_keys::kText3DLayout);
+                        return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(text::kTransformEffect) || effect.type == effect_type_id(effect_keys::kText3DLayout);
                     })) letterAssets.push_back(l->model.scene.pack());
                 }
             });
@@ -1705,20 +1709,31 @@ Status Engine::set_material_param(u64 layer, u32 material, u32 param, f32 value)
 }
 
 Result<u64> Engine::add_light(u32 kind) noexcept {
-    if (kind > 2) return Status{Errc::InvalidArgument};
+    if (kind > 3) return Status{Errc::InvalidArgument};
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState};
+    const bool flare = kind == 3;
+    const auto* flareParams = flare ? effectRegistry_.params(effect_type_id(effect_keys::kSceneFlare)) : nullptr;
+    if (flare && !flareParams) return Status{Errc::NotSupported};
     history_.before_mutation(*comp, project_->timeline().current(), "adicionar luz 3D");
-    const LayerId id = comp->add_layer(LayerKind::Light, kind == 0 ? "Directional light" : kind == 1 ? "Point light" : "Spot light");
+    const LayerId id = comp->add_layer(LayerKind::Light, flare ? "Flare 3D" : kind == 0 ? "Directional light" : kind == 1 ? "Point light" : "Spot light");
     Layer* layer = comp->layer(id);
     if (!layer) return Status{Errc::OutOfMemory};
     layer->threeD = true; layer->end = comp->duration();
     layer->transform.position = Vec3{comp->width() * .5f, comp->height() * .25f, -static_cast<f32>(comp->height())};
-    layer->light.kind = static_cast<LightKind>(kind);
+    layer->light.kind = static_cast<LightKind>(flare ? 1 : kind);
     layer->light.intensity = kind == 0 ? 3.0f : 8.0f;
     layer->light.range = comp->height() * 5.0f;
     layer->light.castShadows = kind == 0;
+    if (flare) {
+        layer->transform.position = Vec3{comp->width() * .5f, comp->height() * .5f, 0};
+        layer->blendMode = BlendMode::Add;
+        EffectInstance effect; effect.id = layer->alloc_effect_id();
+        effect.type = effect_type_id(effect_keys::kSceneFlare);
+        initialize_instance(effect, *flareParams);
+        layer->effects.push_back(std::move(effect));
+    }
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     project_->mark_dirty(); request_render(); return id.pack();
 }
@@ -5437,9 +5452,9 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
         u32 next = 0;
         for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
         for (const EffectInstance& e : clipboard_.effects) {
-            if (e.type == effect_type_id(text::kAnimatorEffect) && d->kind != LayerKind::Text && d->kind != LayerKind::Model3D) continue;
+            if ((e.type == effect_type_id(text::kAnimatorEffect) || e.type == effect_type_id(text::kTransformEffect)) && !supports_text_animation(*d)) continue;
             if ((e.type == effect_type_id(effect_keys::kText3DLayout) ||
-                 (e.type == effect_type_id(text::kAnimatorEffect) && d->kind == LayerKind::Model3D)) &&
+                 ((e.type == effect_type_id(text::kAnimatorEffect) || e.type == effect_type_id(text::kTransformEffect)) && d->kind == LayerKind::Model3D)) &&
                 !ensure_text3d_layout(*d).ok()) continue;
             // O layout das partes só serve em forma 3D (as partes já são nós próprios).
             if (e.type == effect_type_id(effect_keys::kShape3DLayout) && !is_shape3d_layer(*d)) continue;
@@ -5784,7 +5799,8 @@ std::string Engine::save_preset(u64 layerId, presets::PresetKind kind, const std
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return {};
     presets::Preset p;
-    if (!presets::capture(*l, kind, name, comp->fps(), parts, &effectRegistry_, p)) return {};
+    if (!presets::capture(*l, kind, name, comp->fps(), parts, &effectRegistry_, p,
+                         l->kind == LayerKind::Model3D && supports_text_animation(*l))) return {};
     return presets::write(p, &effectRegistry_);
 }
 
@@ -5820,7 +5836,8 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
         if (error) *error = "camada nao encontrada";
         return false;
     }
-    if (!presets::applicable(p, *l)) {
+    const bool meshText = l->kind == LayerKind::Model3D && supports_text_animation(*l);
+    if (!presets::applicable(p, *l, meshText)) {
         if (error) *error = "este preset nao serve para esta camada";
         return false;
     }
@@ -5838,27 +5855,31 @@ bool Engine::apply_preset(u64 layerId, const std::string& json, i64 durationFram
     // A saved letter effect needs the same geometry preparation as EffectAdd.
     // Prepare a copy first: failure must not partially apply the preset or
     // replace the original recipe recorded by undo.
-    AssetId preparedScene = l->model.scene;
-    if (std::any_of(p.effects.begin(), p.effects.end(), [&](const EffectInstance& effect) {
-        return effect.type == effect_type_id(effect_keys::kText3DLayout) ||
-               (effect.type == effect_type_id(text::kAnimatorEffect) && l->kind == LayerKind::Model3D);
+    if (!supports_text_animation(*l) && std::any_of(p.effects.begin(), p.effects.end(), [](const EffectInstance& effect) {
+        return effect.type == effect_type_id(text::kTransformEffect) || effect.type == effect_type_id(text::kAnimatorEffect);
     })) {
-        Layer prepared = *l;
+        if (error) *error = "este preset precisa de texto";
+        return false;
+    }
+    Layer prepared = *l;
+    if ((meshText && p.kind == presets::PresetKind::Text) || std::any_of(p.effects.begin(), p.effects.end(), [&](const EffectInstance& effect) {
+        return effect.type == effect_type_id(effect_keys::kText3DLayout) ||
+               ((effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(text::kTransformEffect)) && l->kind == LayerKind::Model3D);
+    })) {
         const Status ready = ensure_text3d_layout(prepared);
         if (!ready.ok()) {
             if (error) *error = "este preset precisa de texto 3D com ate 256 glifos";
             return false;
         }
-        preparedScene = prepared.model.scene;
     }
     history_.before_mutation(*comp, project_->timeline().current(), "aplicar preset");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    l->model.scene = preparedScene;
+    *l = std::move(prepared);
     // Animação: começa no cabeçote; fora da camada, no início dela.
     const FrameIndex ph = playback_.current();
     const i64 anchor = l->contains_time(ph) ? l->local_time(ph).value : l->local_time(l->start).value;
-    const bool ok = presets::apply(p, *l, anchor, durationFrames, comp->fps(), &effectRegistry_);
-    if (ok && p.kind == presets::PresetKind::Text) recenter_text(*l);
+    const bool ok = presets::apply(p, *l, anchor, durationFrames, comp->fps(), &effectRegistry_, meshText);
+    if (ok && p.kind == presets::PresetKind::Text && !meshText) recenter_text(*l);
     project_->mark_dirty();
     request_render();
     return ok;
@@ -6971,7 +6992,7 @@ u32 Engine::query_text_animators(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text) return 0;
+    if (!l || !supports_text_animation(*l)) return 0;
     const FrameIndex local = l->local_time(playback_.current());
     const u32 n = static_cast<u32>(l->text.animators.size());
     for (u32 i = 0; i < n && out && (i + 1) * kTextAnimFloats <= capacity; ++i) {
@@ -7006,8 +7027,11 @@ i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || l->text.animators.size() >= 64) return -1;
+    if (!l || l->locked || !supports_text_animation(*l) || l->text.animators.size() >= 64) return -1;
+    Layer prepared = *l;
+    if (prepared.kind == LayerKind::Model3D && !ensure_text3d_layout(prepared).ok()) return -1;
     history_.before_mutation(*comp, project_->timeline().current(), "novo animador de texto");
+    *l = std::move(prepared);
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     TextAnimator a;
     a.name = "Animador " + std::to_string(l->text.animators.size() + 1);
@@ -7039,7 +7063,7 @@ bool Engine::remove_text_animator(u64 layerId, u32 index) noexcept {
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
+    if (!l || l->locked || !supports_text_animation(*l) || index >= l->text.animators.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "remover animador de texto");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     l->text.animators.erase(l->text.animators.begin() + index);
@@ -7059,7 +7083,7 @@ i32 Engine::duplicate_text_animator(u64 layerId, u32 index) noexcept {
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->locked || l->kind != LayerKind::Text || index >= l->text.animators.size() || l->text.animators.size() >= 64) return -1;
+    if (!l || l->locked || !supports_text_animation(*l) || index >= l->text.animators.size() || l->text.animators.size() >= 64) return -1;
     const u32 target = index + 1;
     TextAnimator copy = l->text.animators[index];
     std::vector<Track> tracks;
@@ -7088,7 +7112,7 @@ bool Engine::move_text_animator(u64 layerId, u32 from, u32 to) noexcept {
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->locked || l->kind != LayerKind::Text || from >= l->text.animators.size() || to >= l->text.animators.size()) return false;
+    if (!l || l->locked || !supports_text_animation(*l) || from >= l->text.animators.size() || to >= l->text.animators.size()) return false;
     if (from == to) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "ordenar animadores de texto");
     auto& animators = l->text.animators;
@@ -7112,7 +7136,7 @@ bool Engine::set_text_animator(u64 layerId, u32 index, const f32* v) noexcept {
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || !v || index >= l->text.animators.size()) return false;
+    if (!l || l->locked || !supports_text_animation(*l) || !v || index >= l->text.animators.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "animador de texto");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     TextAnimator& a = l->text.animators[index];
@@ -7136,7 +7160,7 @@ bool Engine::set_text_anim_param(u64 layerId, u32 index, u32 param, f32 value) n
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
+    if (!l || l->locked || !supports_text_animation(*l) || index >= l->text.animators.size()) return false;
     f32* r = text_param_ref(l->text.animators[index], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "valor do animador de texto");
@@ -7162,7 +7186,7 @@ bool Engine::toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || index >= l->text.animators.size()) return false;
+    if (!l || l->locked || !supports_text_animation(*l) || index >= l->text.animators.size()) return false;
     f32* r = text_param_ref(l->text.animators[index], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe do animador de texto");
@@ -7333,10 +7357,14 @@ u32 Engine::query_expressions(u64 layerId, u32* out, u32 capacityRows) noexcept 
 
 bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || preset >= text::kTextPresetCount) return false;
+    if (!l || l->locked || !supports_text_animation(*l) || preset >= text::kTextPresetCount) return false;
+    Layer prepared = *l;
+    if (prepared.kind == LayerKind::Model3D && !ensure_text3d_layout(prepared).ok()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "preset de texto");
+    *l = std::move(prepared);
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const f64 fps = comp->fps();
     const i64 at = l->contains_time(playback_.current()) ? playback_.current().value : l->start.value;
@@ -7528,12 +7556,23 @@ bool Engine::is_shape3d_layer(const Layer& layer) const noexcept {
     return a && scene3d::is_shape3d_source(a->sourcePath);
 }
 
+bool Engine::supports_text_animation(const Layer& layer) const noexcept {
+    if (layer.kind == LayerKind::Text) return true;
+    if (layer.kind != LayerKind::Model3D || !project_) return false;
+    const Asset* asset = project_->asset(layer.model.scene);
+    return asset && asset->sourcePath.rfind(scene3d::kText3DScheme, 0) == 0;
+}
+
 Status Engine::ensure_text3d_layout(Layer& layer) noexcept {
     if (layer.locked) return Status{Errc::InvalidState, "camada bloqueada"};
     const Asset* old = project_->asset(layer.model.scene);
     scene3d::Text3DSpec spec;
     if (layer.kind != LayerKind::Model3D || !old || !scene3d::decode_text3d(old->sourcePath, spec))
         return Status{Errc::InvalidArgument, "selecione texto 3D"};
+    // TextData owns shared presets and their tracks; the recipe owns geometry.
+    layer.text.content = spec.content;
+    layer.text.size = 100.f;
+    layer.text.alignment = spec.alignment;
     if (spec.separateGlyphs) return OkStatus;
     spec.separateGlyphs = true;
     const auto font = scene3d::text3d_font(spec);
@@ -7566,6 +7605,9 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
     l->threeD = true;
     l->model.scene = assetId;
     l->model.animationClip = -1; // Text 3D moves only through user-authored layer transforms.
+    l->text.content = spec.content;
+    l->text.size = 100.f;
+    l->text.alignment = spec.alignment;
     // Letra com ~25 % da altura da composição; texto longo encolhe para caber
     // em 80 % da largura.
     const Vec3 ext = scene->bounds.extent();
@@ -7591,8 +7633,8 @@ Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept
         previousScene = l->model.scene;
         // A stale panel snapshot must not merge the letters of a live effect.
         if (std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
-            return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(effect_keys::kText3DLayout);
-        }) || layeranim::has_units(*l)) edited.separateGlyphs = true;
+            return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(text::kTransformEffect) || effect.type == effect_type_id(effect_keys::kText3DLayout);
+        }) || !l->text.animators.empty() || layeranim::has_units(*l)) edited.separateGlyphs = true;
     }
     const auto font = scene3d::text3d_font(edited);
     if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
@@ -7614,6 +7656,9 @@ Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept
     l->model.scene = assetId;
     l->model.animationClip = -1; // Text 3D moves only through user-authored layer transforms.
     l->model.pivot = scene->bounds.center();
+    l->text.content = edited.content;
+    l->text.size = 100.f;
+    l->text.alignment = edited.alignment;
     project_->mark_dirty();
     request_render();
     return OkStatus;
@@ -9539,6 +9584,16 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     return OkStatus;
 }
 
+Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
+    if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
+    const u64 deadline = monotonic_ns() + 120'000'000'000ull;
+    for (;;) {
+        if (exportCtx_->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+        const Status s = gpu_->wait_frame(gpuFrame, 100'000'000ull);
+        if (s.ok() || s.code() != Errc::Timeout || monotonic_ns() >= deadline) return s;
+    }
+}
+
 Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept {
     ExportContext& c = *exportCtx_;
     gpuFrame = 0;
@@ -9564,7 +9619,7 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // para 1 s até um quadro exato voltar (fonte quebrada ≠ 4 s por quadro).
     const u64 patience = c.sourceDegraded ? 1'000'000'000ull : 4'000'000'000ull;
     u64 deadline = t0 + patience;
-    const u64 hardDeadline = t0 + 60'000'000'000ull;
+    u64 hardDeadline = t0 + 60'000'000'000ull;
     u64 lastGen = mediaReadyGen_.load(std::memory_order_acquire);
     bool drainedGpu = false;
     std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
@@ -9603,7 +9658,16 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         snapshot_.release_video_frames();
         // Waiting for decode must not pin completed external images behind GPU
         // retirement callbacks that would otherwise run only on a new submission.
-        if (!drainedGpu) { gpu_->wait_idle(); drainedGpu = true; }
+        if (!drainedGpu) {
+            const u64 waitStart = monotonic_ns();
+            const Status ready = wait_export_gpu(gpu_->last_submitted_frame());
+            if (!ready.ok()) return ready;
+            // GPU work from the previous blurred frame is not decoder latency.
+            const u64 waited = monotonic_ns() - waitStart;
+            deadline += waited;
+            hardDeadline += waited;
+            drainedGpu = true;
+        }
         rl.unlock();
         if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
         std::unique_lock<std::mutex> wl(exportWakeMutex_);
@@ -9756,13 +9820,7 @@ void Engine::export_thread_main() noexcept {
             // A dense 3D frame can legitimately take longer than five seconds
             // on a mobile/software GPU. Poll in cancellable slices; keep a
             // finite deadline for a hung driver without dropping this frame.
-            const u64 gpuDeadline = monotonic_ns() + 120'000'000'000ull;
-            for (;;) {
-                if (cancelled()) return Errc::Cancelled;
-                const Status s = gpu_->wait_frame(slot.gpuFrame, 100'000'000ull);
-                if (s.ok()) break;
-                if (s.code() != Errc::Timeout || monotonic_ns() >= gpuDeadline) return s;
-            }
+            if (const Status s = wait_export_gpu(slot.gpuFrame); !s.ok()) return s;
             // Memória não coerente: invalida para a CPU ver o que a GPU
             // escreveu (o ponteiro é o mesmo; coerente = nada a fazer).
             void* p = nullptr;
@@ -10889,8 +10947,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (l->effects.size() >= kMaxEffectCount) return Errc::OutOfRange;
             const EffectTypeId type = cmd.effect_add.effectType;
             if (type == effect_type_id(effect_keys::kRotobrush) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
-            if (type == effect_type_id(text::kTransformEffect) && l->kind != LayerKind::Text) return Errc::InvalidArgument;
-            if (type == effect_type_id(text::kAnimatorEffect) && l->kind != LayerKind::Text) {
+            if ((type == effect_type_id(text::kTransformEffect) || type == effect_type_id(text::kAnimatorEffect)) && l->kind != LayerKind::Text) {
                 const Asset* source = project_->asset(l->model.scene);
                 scene3d::Text3DSpec spec;
                 if (l->kind != LayerKind::Model3D || !source || !scene3d::decode_text3d(source->sourcePath, spec)) return Errc::InvalidArgument;

@@ -988,6 +988,33 @@ TextureHandle Renderer::curve_lut(const CurveData& curve) noexcept {
     return *tex;
 }
 
+TextureHandle Renderer::cube_lut(AssetId id) noexcept {
+    if (!backend_ || !cubeLookup_) return {};
+    const u64 key = id.pack() ^ 0x435542455f4c5554ull;
+    if (auto it = luts_.find(key); it != luts_.end()) {
+        it->second.lastFrame = frameNumber_;
+        return it->second.texture;
+    }
+    const auto cube = cubeLookup_(cubeCtx_, id);
+    if (!cube || cube->values.empty()) return {};
+    TextureDesc desc;
+    desc.width = std::min<u32>(1024u, static_cast<u32>(cube->values.size()));
+    desc.height = static_cast<u32>((cube->values.size() + desc.width - 1) / desc.width);
+    desc.format = SurfaceFormat::RGBA16F; desc.sampled = true; desc.transferDst = true;
+    desc.debugName = "cube-lut";
+    auto tex = backend_->create_texture(desc); if (!tex.ok()) return {};
+    PendingUpload up; up.texture = *tex; up.bytesPerRow = desc.width * 8;
+    up.data.resize(usize(desc.width) * desc.height * 8);
+    auto* target = reinterpret_cast<u16*>(up.data.data());
+    for (usize i = 0; i < cube->values.size(); ++i) {
+        const Vec4 v = cube->values[i];
+        target[i*4] = to_half(v.x); target[i*4+1] = to_half(v.y);
+        target[i*4+2] = to_half(v.z); target[i*4+3] = to_half(1);
+    }
+    uploads_.push_back(std::move(up)); luts_[key] = LutTexture{*tex, frameNumber_};
+    return *tex;
+}
+
 namespace {
 
 /// A camada tem som que toca no instante `t`? (vídeo com trilha ou áudio,
@@ -1300,6 +1327,34 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         rl.opacity = layer_opacity(*l, local, fps);
         rl.opacity *= grid::evaluate(comp,*l,static_cast<f64>(time.value)).opacity;
         if (rl.opacity <= 0.0f) continue;   // invisível: nenhum passe, nenhum decode
+
+        if (l->kind == LayerKind::Light && effects_) {
+            const auto type = effect_type_id(effect_keys::kSceneFlare);
+            const bool flare = std::any_of(l->effects.begin(), l->effects.end(), [type](const EffectInstance& fx) {
+                return fx.enabled && fx.type == type;
+            });
+            if (!flare) continue;
+            const Vec4 clip = viewProj3d * world_3d(comp, *l, time) * Vec4{0, 0, 0, 1};
+            // A source behind the camera or inside its near plane has no visible flare.
+            if (!(clip.w > 1e-4f && clip.z >= 0 && clip.z <= clip.w)) continue;
+            const Vec4 screen = compFromClip * clip;
+            if (!std::isfinite(screen.x / screen.w) || !std::isfinite(screen.y / screen.w)) continue;
+            rl.source.kind = LayerSource::Kind::Solid;
+            rl.source.solid = {0, 0, 0, 0};
+            rl.source.width = out.compWidth; rl.source.height = out.compHeight;
+            rl.compFromLayer = Mat4::identity(); rl.texelScale = previewFactor;
+            LayerPlacement placement;
+            placement.compWidth = placement.layerWidth = out.compWidth;
+            placement.compHeight = placement.layerHeight = out.compHeight;
+            placement.sceneFlare = true;
+            placement.flarePosition = {screen.x / screen.w, screen.y / screen.w};
+            if (out.plans.size() <= used) out.plans.emplace_back();
+            EffectGraph::plan(*l, *effects_, local, previewFactor, placement, this, out.plans[used], fps, &comp);
+            if (out.plans[used].empty()) continue;
+            groupOpen = false;
+            out.layers.push_back(std::move(rl)); ++used;
+            continue;
+        }
 
         if (l->adjustment) {
             // Camada de ajuste: o "conteúdo" é a composição acumulada abaixo
@@ -2151,6 +2206,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 placement.particleSpace = true;
                 placement.worldFromLayer = particularWorld;
                 placement.compFromWorld = compFromClip * viewProj3d;
+                const f64 previousTime = static_cast<f64>(time.value) - 1.0;
+                const Mat4 previousCamera = settings.sceneEditor.enabled && !settings.finalQuality
+                    ? compFromClip * viewProj3d
+                    : comp_view_projection_frac(comp, previousTime, out.compWidth, out.compHeight);
+                placement.previousParticleProjection = previousCamera * world_3d_frac(comp, *l, previousTime);
                 // Linhas da vista = eixos da câmera no mundo.
                 const Mat4& v = cam3d.view;
                 placement.camRight = Vec3{v.col[0].x, v.col[1].x, v.col[2].x};

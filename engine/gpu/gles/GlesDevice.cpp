@@ -218,7 +218,13 @@ void Backend::wait_idle() noexcept {
 u64 Backend::last_submitted_frame() const noexcept { return impl_->last ? impl_->last->number : 0; }
 Status Backend::wait_frame(u64 number, u64 timeout) noexcept {
     auto& d = *impl_; Impl::Scope scope(d); if (!scope.valid) return Errc::InvalidState;
-    for (auto& f : d.frames) if (f.number == number) return d.wait(f, timeout);
+    for (auto& f : d.frames) if (&f != d.current && f.number == number) {
+        const Status status = d.wait(f, timeout);
+        if (!status.ok()) return status;
+        for (auto& done : d.frames)
+            if (&done != d.current && done.number <= number && done.fence) d.retire(done);
+        return OkStatus;
+    }
     return OkStatus; // A recycled frame was already waited by begin_frame.
 }
 u32 Backend::read_gpu_timings(GpuTiming* output, u32 capacity, f32* total) noexcept {

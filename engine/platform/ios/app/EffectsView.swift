@@ -86,7 +86,10 @@ struct EffectsView: View {
                 }.coordinateSpace(name: "effect-stack")
                     .accessibilityIdentifier("aurea.effects.stack")
                     .onPreferenceChange(EffectCardFrames.self) { cardFrames = $0 }
-                    .onAppear { revealAdded(ordered.map(\.effectId), proxy: proxy) }
+                    // Depois do enterLayer (onAppear do painel): a pilha agora está
+                    // sempre montada e o onAppear dela pode vir ANTES — aí o
+                    // enterLayer fechava o cartão novo e abria o 1º (busca de comandos).
+                    .onAppear { DispatchQueue.main.async { revealAdded(ordered.map(\.effectId), proxy: proxy) } }
                     .onChange(of: ordered.map(\.effectId)) { ids in revealAdded(ids, proxy: proxy) }
                 }
             }.frame(maxHeight: .infinity)

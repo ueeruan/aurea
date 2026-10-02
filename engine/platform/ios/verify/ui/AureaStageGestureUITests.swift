@@ -29,6 +29,10 @@ import XCTest
         let snapshot = try launch("motion-blur-export")
         XCTAssertEqual(snapshot.compositionWidth, 1920)
         XCTAssertEqual(snapshot.compositionHeight, 1080)
+        // Barra de cima (redesenho 2026-09-29): exportar mora na barra do PROJETO,
+        // que aparece ao tirar a seleção.
+        let back = app.buttons["Back (clear the selection)"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
         let openExport = app.buttons["Export"].firstMatch
         XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
         let start = app.buttons["Export"].firstMatch
@@ -82,7 +86,7 @@ import XCTest
         XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
         let added = try awaitSnapshot("Text animation opens in the real effect stack") { $0.effectCount == before.effectCount + 1 }
         XCTAssertEqual(added.textAnimatorCount, before.textAnimatorCount)
-        XCTAssertTrue(app.otherElements["aurea.effects.stack"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["aurea.effects.stack"].firstMatch.waitForExistence(timeout: 5))
         // Only the expanded card exposes its menu; the older Text Transform stays closed.
         XCTAssertTrue(app.buttons["effects.more.\(effectCardId("aurea.text.animator"))"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["effects.more.\(effectCardId("aurea.text.transform"))"].exists)
@@ -415,8 +419,13 @@ import XCTest
         XCTAssertEqual(before.detail.startFrame, 0)
         let duration = before.detail.endFrame - before.detail.startFrame
         XCTAssertGreaterThan(duration, 0)
-        let move = app.descendants(matching: .any).matching(identifier: "Pull the layer to the playhead").firstMatch
+        // "Puxar para o cabeçote" saiu da doca (igual à do AM) e mora no menu ⋯ da camada.
+        let more = app.buttons["More layer actions"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        let move = app.buttons["Pull the layer to the playhead"].firstMatch
         XCTAssertTrue(move.waitForExistence(timeout: 5))
+        let menu = app.scrollViews.containing(.button, identifier: "Pull the layer to the playhead").firstMatch
+        for _ in 0..<6 where !move.isHittable && menu.exists { menu.swipeUp() }
         XCTAssertTrue(move.isHittable)
         move.tap()
         let after = try awaitSnapshot("Video moved to the two-second playhead", timeout: 10) {
@@ -441,7 +450,10 @@ import XCTest
         let search = app.buttons["effects.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
         XCTAssertGreaterThanOrEqual(search.frame.height, 44)
+        // Os ladrilhos de categoria ficam embaixo dos destaques (grade preguiçosa).
+        let home = app.scrollViews["effects.home"].firstMatch
         let all = app.buttons["effects.category.all"].firstMatch
+        for _ in 0..<6 where !(all.exists && all.isHittable) && home.exists { home.swipeUp() }
         XCTAssertTrue(all.exists); XCTAssertGreaterThanOrEqual(all.frame.height, 44)
 
         // Busca: o campo abre focado acima do teclado; um toque no resultado adiciona.
@@ -480,8 +492,12 @@ import XCTest
 
         // Ladrilho de categoria abre o grupo; cartão de um toque, sem ficha no meio.
         let glitch = app.buttons["effects.category.glitch"].firstMatch
+        for _ in 0..<6 where !(glitch.exists && glitch.isHittable) && home.exists { home.swipeUp() }
         XCTAssertTrue(glitch.waitForExistence(timeout: 5)); glitch.tap()
         let vhs = app.buttons["effects.card.\(effectCardId("aurea.glitch.vhs"))"].firstMatch
+        let grid = app.scrollViews["effects.grid"].firstMatch
+        XCTAssertTrue(grid.waitForExistence(timeout: 5))
+        for _ in 0..<8 where !(vhs.exists && vhs.isHittable) { grid.swipeUp() }
         XCTAssertTrue(vhs.waitForExistence(timeout: 5))
         vhs.tap()
         _ = try awaitSnapshot("One tap on a grid card adds the effect") { $0.effectCount == 2 }
@@ -690,8 +706,8 @@ import XCTest
         let cleared = try awaitSnapshot("Selection cleared") { $0.selectionCount == 0 }
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
-        // Meio da 1ª barra: régua 30 + relógio 30 + 4, pílula em 68, barra 70..94.
-        let start = CGPoint(x: timeline.frame.midX + 40, y: timeline.frame.minY + 82)
+        // Meio da 1ª barra: fileiras a partir de 44 (riscos 14 + relógio 30), pílula 48..76, barra 50..76.
+        let start = CGPoint(x: timeline.frame.midX + 40, y: timeline.frame.minY + 62)
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x - 60, y: start.y)), withVelocity: .slow, thenHoldForDuration: 0.1)
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         let after = try snapshot()
@@ -709,8 +725,8 @@ import XCTest
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let frame = timeline.frame
-        // A barra compacta (fileiras a partir de 64; barra de 24 em 70..94), longe das alças e das setas.
-        let start = CGPoint(x: frame.midX + 60, y: frame.minY + 82)
+        // A barra compacta (fileiras a partir de 44; barra em 50..76), longe das alças e das setas.
+        let start = CGPoint(x: frame.midX + 60, y: frame.minY + 62)
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x - 60, y: start.y)),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
@@ -720,7 +736,7 @@ import XCTest
         XCTAssertEqual(swiped.primaryID, before.primaryID)
         XCTAssertEqual(swiped.layerStarts, before.layerStarts, "A plain drag only scrolls; it does not move the clip")
         // O quadradinho do tipo na pílula (x 32..54; o olho é x < 28): abre as trilhas, não sai.
-        coordinate(CGPoint(x: frame.minX + 43, y: frame.minY + 82)).tap()
+        coordinate(CGPoint(x: frame.minX + 43, y: frame.minY + 62)).tap()
         let deadline = Date().addingTimeInterval(0.8)
         repeat {
             let state = try snapshot()
@@ -736,8 +752,8 @@ import XCTest
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let frame = timeline.frame
-        // First row, inside the clip body (bar at 70..94), away from its trim handles.
-        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 82)
+        // First row, inside the clip body (bar at 50..76), away from its trim handles.
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 62)
         let end = CGPoint(x: start.x + 45, y: start.y)
         coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(end),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
@@ -824,8 +840,20 @@ import XCTest
             XCTAssertEqual(before.curveKeys.filter(untouched), changed.curveKeys.filter(untouched))
             XCTAssertEqual(before.curveKeys.map(\.time), changed.curveKeys.map(\.time))
             XCTAssertEqual(before.curveKeys.map(\.value), changed.curveKeys.map(\.value))
-            try undo()
-            _ = try awaitSnapshot("One undo restores all original curves (\(scene))") { $0.curveKeys == before.curveKeys }
+            // Preset, saltos e amplitude são passos próprios (igual ao Android):
+            // cada desfazer volta um, nunca metade do grupo XYZ, e o último
+            // devolve TODAS as curvas originais.
+            for _ in 0..<5 {
+                if (try? snapshot())?.curveKeys == before.curveKeys { break }
+                try undo()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+                let state = try snapshot()
+                let bouncing = group.filter { property in
+                    state.curveKeys.contains { $0.property == property && $0.time == 0 && $0.interpolation == 7 }
+                }
+                XCTAssertTrue(bouncing.isEmpty || bouncing.count == group.count, "Undo never splits the XYZ easing (\(scene))")
+            }
+            _ = try awaitSnapshot("Undo restores all original curves (\(scene))") { $0.curveKeys == before.curveKeys }
             app.terminate()
         }
     }
@@ -957,11 +985,11 @@ import XCTest
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let frame = timeline.frame
-        // Geometria (pt): fileiras a partir de 64, fileira 32, trilhas de 16 com o losango no meio.
-        // Abertas: Transform (96), Position X (112), Scale X (128). Cabeçote no frame 30
+        // Geometria (pt): fileiras a partir de 44, fileira 32, trilhas de 16 com o losango no meio.
+        // Abertas: Transform (76), Position X (92), Scale X (108). Cabeçote no frame 30
         // (a vista É o cabeçote): 80 pt/s = 8/3 pt por frame a partir do centro.
-        let positionY: CGFloat = frame.minY + 120
-        let scaleY: CGFloat = frame.minY + 136
+        let positionY: CGFloat = frame.minY + 100
+        let scaleY: CGFloat = frame.minY + 116
         // A vista é o cabeçote: lê o quadro REAL (a fixture pode não estar no 30).
         func keyX(_ f: Int) -> CGFloat {
             let playhead: Int64 = (try? snapshot())?.playhead ?? 30
@@ -972,7 +1000,7 @@ import XCTest
         }
         // Abrir as trilhas pelo quadradinho do tipo na pílula (x 32..54; o olho é
         // x < 28; a pílula vai até 78, depois é o corpo do clipe).
-        coordinate(CGPoint(x: frame.minX + 43, y: frame.minY + 82)).tap()
+        coordinate(CGPoint(x: frame.minX + 43, y: frame.minY + 62)).tap()
         func selectPositionAndScale() throws {
             // Toque simples: só a Posição X @30 (abre a curva; timeline compacta).
             coordinate(CGPoint(x: keyX(30), y: positionY)).tap()
@@ -1032,7 +1060,7 @@ import XCTest
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let frame = timeline.frame
         // Meio da 1ª barra; 96 = 3 fileiras de 32.
-        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 82)
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 62)
         let end = CGPoint(x: start.x, y: start.y + 96)
         coordinate(start).press(forDuration: 0.7, thenDragTo: coordinate(end),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
@@ -1059,8 +1087,8 @@ import XCTest
         XCTAssertTrue(timeline.waitForExistence(timeout: 5))
         let cleared = try awaitSnapshot("Selection is cleared before the swipe") { $0.selectionCount == 0 }
         let frame = timeline.frame
-        // First row, inside the clip body (bar at 70..94), away from its trim handles; ≈ 40° below horizontal.
-        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 82)
+        // First row, inside the clip body (bar at 50..76), away from its trim handles; ≈ 40° below horizontal.
+        let start = CGPoint(x: frame.midX + 40, y: frame.minY + 62)
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(CGPoint(x: start.x + 48, y: start.y + 40)),
                                 withVelocity: .slow, thenHoldForDuration: 0.1)
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
@@ -1247,12 +1275,14 @@ import XCTest
         let centerEnd = CGPoint(x: origin.x + 60, y: origin.y)   // dx − dy > 0 cresce; fica dentro do preview
         try requireInsideStage(origin, centerEnd)
         coordinate(origin).press(forDuration: 0.05, thenDragTo: coordinate(centerEnd), withVelocity: .slow, thenHoldForDuration: 0.1)
-        let uniform = try awaitSnapshot("Center square scales XYZ together") {
+        let uniform = try awaitSnapshot("Center square scales XY together (Z follows X)") {
             !$0.isManipulating && $0.detail.scale[0] > scaledY.detail.scale[0] + 0.05
         }
         let factor = uniform.detail.scale[0] / scaledY.detail.scale[0]
         XCTAssertEqual(uniform.detail.scale[1] / scaledY.detail.scale[1], factor, accuracy: 0.001)
-        XCTAssertEqual(uniform.detail.scale[2] / scaledY.detail.scale[2], factor, accuracy: 0.001)
+        // Regra 3D (GestureMath.hpp): a escala Z é relativa ao X, então a escala
+        // uniforme NÃO multiplica o Z guardado — a profundidade visível já cresce com o X.
+        XCTAssertEqual(uniform.detail.scale[2], scaledY.detail.scale[2], accuracy: 0.0001)
         XCTAssertEqual(uniform.detail.position, before.detail.position)
         try undo()
         _ = try awaitSnapshot("Undo uniform scale") { $0.detail.scale == scaledY.detail.scale }
@@ -1269,12 +1299,17 @@ import XCTest
         let first = before.curveKeys.filter { $0.time == 0 }
         XCTAssertEqual(first.count, 3, "Position X/Y/Z are keyed at frame 0 by the fixture")
         XCTAssertEqual(before.stageGizmo.count, 8)
-        // The null's gizmo origin, projected by the scene observer camera.
-        let origin = screenPoint(x: before.stageGizmo[0], y: before.stageGizmo[1], snapshot: before)
-        let end = CGPoint(x: origin.x + 40, y: origin.y)
-        try requireInsideStage(origin, end)
-        coordinate(origin).press(forDuration: 0.05, thenDragTo: coordinate(end),
-                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        // Cena 3D (build 2129, as duas plataformas): 1 dedo NO objeto gira; a seta
+        // do gizmo continua movendo um eixo só. Arrasta a ponta da seta X, como
+        // o usuário move o nulo com um dedo (projetada pela câmera da cena).
+        let raw = stride(from: 0, to: 8, by: 2).map { screenPoint(x: before.stageGizmo[$0], y: before.stageGizmo[$0 + 1], snapshot: before) }
+        let extent = max((1...3).map { hypot(raw[$0].x - raw[0].x, raw[$0].y - raw[0].y) }.max() ?? 0, 0.001)
+        let direction = CGPoint(x: (raw[1].x - raw[0].x) / extent, y: (raw[1].y - raw[0].y) / extent)
+        let tip = CGPoint(x: raw[0].x + direction.x * 80, y: raw[0].y + direction.y * 80)
+        let end = CGPoint(x: tip.x + direction.x * 40, y: tip.y + direction.y * 40)
+        try requireInsideStage(tip, end)
+        coordinate(tip).press(forDuration: 0.05, thenDragTo: coordinate(end),
+                             withVelocity: .slow, thenHoldForDuration: 0.1)
         let keyed = try awaitSnapshot("Dragging the animated null in the scene keys frame 30") {
             !$0.isManipulating && $0.curveKeys.filter { $0.property <= 2 && $0.time == 30 }.count == 3
         }
@@ -1363,6 +1398,7 @@ import XCTest
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
         else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
         else if scene == "parent-new-null" { XCTAssertEqual(state.layerCount, 2) }
+        else if scene == "null-link" { XCTAssertEqual(state.layerCount, 5) }
         else if scene == "stagger" || scene == "timeline-arrangement" { XCTAssertEqual(state.layerCount, 3) }
         else { XCTAssertEqual(state.layerCount, 1) }
         let expectedSelection: Int = scene == "parent-new-null" ? 2 : (["stagger", "timeline-arrangement"].contains(scene) ? 3 : 1)
@@ -1373,7 +1409,9 @@ import XCTest
         XCTAssertEqual(state.detail.rotation.count, 3)
         XCTAssertEqual(state.detail.corners.count, 8)
         XCTAssertEqual(state.detail.sourceSize.count, 2)
-        XCTAssertTrue(stage.isHittable)
+        // "effects": camada sem efeito abre direto na tela cheia "Adicionar efeito",
+        // que cobre o palco de propósito.
+        if scene != "effects" { XCTAssertTrue(stage.isHittable) }
         attach("Initial core probe", stage.value as? String ?? "missing")
         return state
     }

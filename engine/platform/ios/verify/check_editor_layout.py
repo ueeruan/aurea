@@ -59,7 +59,8 @@ check(!EditorLayout.isWide(1000, 1000), "janela quadrada fica empilhada")
 let contents: [SheetContent] = [.none, .addBar, .dock, .panel, .curve, .batch, .adding]
 for (w, h) in portraitTablets {
     for content in contents {
-        for aspect in [CGFloat(0), 9.0 / 16.0, 16.0 / 9.0, 1] {
+        let aspects: [CGFloat] = [0, 9.0 / 16.0, 16.0 / 9.0, 1]
+        for aspect in aspects {
             let m = EditorLayout.solve(total: h, content: content, fullscreen: false,
                                        width: w - 2 * EditorLayout.previewSideMargin, aspect: aspect)
             let label = "\(w)x\(h) \(content) aspecto \(aspect)"
@@ -68,13 +69,16 @@ for (w, h) in portraitTablets {
             check(m.preview >= EditorLayout.previewMin, "\(label): palco \(m.preview)")
             check(m.timeline >= EditorLayout.timelineMin, "\(label): timeline \(m.timeline)")
             if content != .none { check(m.sheet > 0, "\(label): folha \(m.sheet)") }
-            let sum = m.topBar + m.preview + m.strip + m.transport + m.timeline + m.sheet
+            var sum: CGFloat = m.topBar + m.preview
+            sum += m.strip + m.transport
+            sum += m.timeline + m.sheet
             check(near(sum, h), "\(label): zonas somam \(sum), tela \(h)")
         }
     }
     // Deitado: a coluna do palco e a folha lateral cabem.
     let timeline = EditorLayout.wideTimeline(w)
-    let preview = w - EditorLayout.topBar - EditorLayout.transport - EditorLayout.strip - timeline - EditorLayout.addBar
+    var preview: CGFloat = w - EditorLayout.topBar - EditorLayout.transport
+    preview -= EditorLayout.strip + timeline + EditorLayout.addBar
     check(timeline >= 88 && timeline <= 280, "\(h)x\(w) deitado: timeline \(timeline)")
     check(preview >= EditorLayout.previewMin, "\(h)x\(w) deitado: palco \(preview)")
     let sheet = EditorLayout.wideSheetWidth(h)
